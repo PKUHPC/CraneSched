@@ -1,0 +1,415 @@
+syntax = "proto3";
+
+package crane.grpc;
+option go_package = "/protos";
+
+import "PublicDefs.proto";
+
+message Negotiation {
+  uint32 version = 1;
+}
+
+message StreamRequestNegotiation {
+  uint32 version = 1;
+}
+
+message StreamReplyResult {
+  bool ok = 1;
+  string reason = 2; // Set when failed
+}
+
+message InteractiveTaskAllocRequest {
+  Resources required_resources = 1;
+  string partition_name = 2;
+  uint64 time_limit_sec = 3;
+}
+
+message InteractiveTaskAllocReply {
+  bool ok = 1;
+  oneof payload {
+    uint32 task_id = 2;
+    string reason = 3;
+  }
+}
+
+message InteractiveTaskAllocationDetail {
+  /* Used to connect the Craned */
+  uint32 craned_index = 1;
+  string ipv4_addr = 2;
+  uint32 port = 3;
+  bytes resource_uuid = 4;
+}
+
+message QueryInteractiveTaskAllocDetailRequest {
+  uint32 task_id = 1;
+}
+
+message QueryInteractiveTaskAllocDetailReply {
+  bool ok = 1;
+  InteractiveTaskAllocationDetail detail = 2;
+}
+
+message StreamRequestCheckResource {
+  bytes resource_uuid = 1;
+  uint32 task_id = 2;
+}
+
+message StreamRequestExecutiveInfo {
+  string executive_path = 1;
+  repeated string arguments = 2;
+}
+
+message StreamReplyIo {
+  string buf = 1;
+}
+
+message StreamReplyExitStatus {
+  enum ExitReason {
+    Normal = 0;
+    Signal = 1;
+  }
+
+  ExitReason reason = 1;
+  uint32 value = 2;
+}
+
+message SrunXStreamRequest{
+  enum Type {
+    NegotiationType = 0;
+    CheckResourceType = 1;
+    ExecutiveInfoType = 2;
+    SignalType = 3;
+  }
+  Type type = 1;
+
+  oneof payload {
+    StreamRequestNegotiation negotiation = 2;
+    StreamRequestExecutiveInfo exec_info = 3;
+    int32 signum = 4;
+    StreamRequestCheckResource check_resource = 5;
+  }
+}
+
+message SrunXStreamReply {
+  enum Type {
+    IoRedirectionType = 0;
+    ExitStatusType = 1;
+    ResultType = 2;
+  }
+  Type type = 1;
+
+  oneof payload {
+    StreamReplyIo io = 2 ;
+    StreamReplyExitStatus exit_status = 3;
+    StreamReplyResult result = 4;
+  }
+}
+
+message CranedRegisterRequest {
+  Negotiation header = 1;
+
+  uint32 port = 2;
+
+  /* Todo: Add fields describing what tasks the Craned is still running and the current usage of this craned in case that
+      from Ctld's view, this node is down due to network problem and however this node is still running.
+  */
+}
+
+message CranedRegisterResult {
+  bool ok = 1;
+  oneof payload {
+    // If ok is true
+    CranedId craned_id = 2;
+
+    // If ok is false, reason is set.
+    string reason = 3;
+  }
+}
+
+message TaskStatusChangeRequest {
+  uint32 task_id = 1;
+  uint32 craned_index = 2;
+  TaskStatus new_status = 3;
+  string reason = 4;
+}
+
+message TaskStatusChangeReply {
+  bool ok = 1;
+}
+
+message QueryCranedListFromTaskIdRequest {
+  uint32 task_id = 1;
+}
+
+message QueryCranedListFromTaskIdReply {
+  bool ok = 1;
+  string craned_list = 2;
+}
+
+message SubmitBatchTaskRequest {
+  TaskToCtld task = 1;
+}
+
+message SubmitBatchTaskReply {
+  bool ok = 1;
+  oneof payload{
+    uint32 task_id = 2;
+    string reason = 3;
+  }
+}
+
+message ExecuteTaskRequest {
+  TaskToD task = 1;
+}
+
+message ExecuteTaskReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message CreateCgroupForTaskRequest {
+  uint32 task_id = 1;
+  uint32 uid = 2;
+}
+
+message CreateCgroupForTaskReply{
+  bool ok = 1;
+}
+
+message ReleaseCgroupForTaskRequest{
+  uint32 task_id = 1;
+  uint32 uid = 2;
+}
+
+message ReleaseCgroupForTaskReply{
+  uint32 ok = 1;
+}
+
+message TerminateTaskRequest {
+  uint32 task_id = 1;
+}
+
+message TerminateTaskReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message CancelTaskRequest {
+  uint32 task_id = 1;
+}
+
+message CancelTaskReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message QueryTaskIdFromPortRequest{
+  uint32 port = 1;
+}
+
+message QueryTaskIdFromPortReply{
+  bool ok = 1;
+  uint32 task_id = 2;
+}
+
+message QueryTaskIdFromPortForwardRequest{
+  uint32 ssh_remote_port = 1;
+  string target_craned_address = 2;
+  string target_craned_port = 3;
+  uint32 uid = 4;
+}
+
+message QueryTaskIdFromPortForwardReply{
+  bool ok = 1;
+  bool from_user = 2;
+  uint32 task_id = 3;
+  string cgroup_path = 4;
+}
+
+message QueryJobsInPartitionRequest {
+  string partition = 1;
+}
+
+message QueryJobsInPartitionReply {
+  repeated TaskToCtld task_metas = 1;
+  repeated TaskStatus task_status = 2;
+  repeated string allocated_craneds = 3;
+  repeated uint32 task_ids = 4;
+}
+
+message QueryJobsInfoRequest {
+  bool find_all = 1;
+  uint32 job_id = 2;
+}
+
+message QueryJobsInfoReply {
+  repeated TaskInfo task_info_list = 1;
+}
+
+message QueryCranedInfoRequest {
+  string craned_name = 1;
+}
+
+message QueryCranedInfoReply {
+  repeated CranedInfo craned_info_list = 1;
+}
+
+message QueryPartitionInfoRequest {
+  string partition_name = 1;
+}
+
+message QueryPartitionInfoReply {
+  repeated PartitionInfo partition_info = 1;
+}
+
+message AddAccountRequest {
+  AccountInfo account = 1;
+}
+
+message AddAccountReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message AddUserRequest {
+  UserInfo user = 1;
+}
+
+message AddUserReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message DeleteEntityRequest {
+  EntityType entity_type = 1;
+  string name = 2;
+}
+
+message DeleteEntityReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message ModifyEntityRequest {
+  enum Type {
+    Overwrite = 0;
+    Add = 1;
+    Delete = 2;
+  }
+  oneof NewEntity{
+    AccountInfo new_account = 1;
+    UserInfo new_user = 2;
+  }
+  Type type = 3;
+}
+
+message ModifyEntityReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message QueryEntityInfoRequest {
+  EntityType entity_type = 1;
+  string name = 2;
+}
+
+message QueryEntityInfoReply {
+  bool ok = 1;
+  repeated UserInfo user_list = 2;
+  repeated AccountInfo account_list = 3;
+}
+
+message MigrateSshProcToCgroupRequest {
+  int32 pid = 1;
+  string cgroup_path = 2;
+}
+
+message MigrateSshProcToCgroupReply {
+  bool ok = 1;
+}
+
+message QueryClusterInfoRequest {
+
+}
+
+message QueryClusterInfoReply {
+  bool ok = 1;
+  repeated PartitionCranedInfo partition_craned = 2;
+}
+
+// Todo: Divide service into two parts: one for Craned and one for Crun
+//  We need to distinguish the message sender
+//  and have some kind of authentication
+service CraneCtld {
+  /* RPCs called from Craned */
+  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
+
+  rpc QueryCranedListFromTaskId(QueryCranedListFromTaskIdRequest) returns(QueryCranedListFromTaskIdReply);
+
+
+  /* RPCs called from SrunX */
+  /* When SrunX request an interactive job, it will first request SrunX to allocate
+     an interactive task and get the related meta information. */
+  rpc AllocateInteractiveTask(InteractiveTaskAllocRequest) returns (InteractiveTaskAllocReply);
+  rpc QueryInteractiveTaskAllocDetail(QueryInteractiveTaskAllocDetailRequest) returns (QueryInteractiveTaskAllocDetailReply);
+
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
+
+
+  /* RPCs called from sbatch */
+  rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
+
+
+  /* RPCs called from cqueue */
+  rpc QueryJobsInPartition(QueryJobsInPartitionRequest) returns (QueryJobsInPartitionReply);
+
+  /* PRCs called from ccontrol */
+  rpc QueryJobsInfo(QueryJobsInfoRequest) returns (QueryJobsInfoReply);
+  rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
+  rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+
+  /* RPCs called from cacctmgr */
+  rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
+  rpc AddUser(AddUserRequest) returns (AddUserReply);
+
+  rpc DeleteEntity(DeleteEntityRequest) returns (DeleteEntityReply);
+
+  rpc QueryEntityInfo(QueryEntityInfoRequest) returns (QueryEntityInfoReply);
+  rpc ModifyEntity(ModifyEntityRequest) returns (ModifyEntityReply);
+
+  /* RPCs called from cinfo */
+  rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
+}
+
+service Craned {
+  /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
+  // Todo: Granting and revoking Resource UUID can be merged into ExecuteTask and TerminateTask. Remove this two RPC.
+
+  /* If the task is a batch task, it will run immediately.
+     If the task is an interactive task, craned will just allocate the resource and waiting for
+     further SrunXStream to execute a real task.
+   */
+  rpc ExecuteTask(ExecuteTaskRequest) returns(ExecuteTaskReply);
+
+  rpc CreateCgroupForTask(CreateCgroupForTaskRequest) returns(CreateCgroupForTaskReply);
+  rpc ReleaseCgroupForTask(ReleaseCgroupForTaskRequest) returns(ReleaseCgroupForTaskReply);
+
+  /*
+  If the task is an interactive task, the resource uuid is also revoked.
+   If there's no process in this interactive task, just deallocate all the resources.
+   If there are processes in this interactive task, kill all the processes and deallocate resources.
+  If the task is a batch task, just kill it.
+  */
+  rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
+
+
+  /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
+  rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
+
+  /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
+  rpc QueryTaskIdFromPortForward(QueryTaskIdFromPortForwardRequest) returns (QueryTaskIdFromPortForwardReply);
+  rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
+
+  /* ----------------------------------- Called from SrunX --------------------------------------------------------- */
+  rpc SrunXStream(stream SrunXStreamRequest) returns (stream SrunXStreamReply);
+}

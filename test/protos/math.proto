@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package grpc_example;
+
+service Math {
+  rpc Max (stream MaxRequest) returns (stream MaxResponse);
+}
+
+message MaxRequest {
+  int32 a = 1;
+  int32 b = 2;
+}
+
+message MaxResponse {
+  int32 result = 1;
+}

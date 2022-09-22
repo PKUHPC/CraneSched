@@ -1,0 +1,200 @@
+syntax = "proto3";
+
+package crane.grpc;
+option go_package = "/protos";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// All the definitions in this proto file can be found in PublicHeader.h
+// They are just protobuf version definitions.
+
+message CranedId {
+  uint32 partition_id = 1;
+  uint32 craned_index = 2;
+}
+
+message AllocatableResource {
+  uint64 cpu_core_limit = 1;
+  uint64 memory_limit_bytes = 2;
+  uint64 memory_sw_limit_bytes = 3;
+}
+
+message DedicatedResource {}
+
+message Resources {
+  AllocatableResource allocatable_resource = 1;
+}
+
+enum TaskStatus {
+  Pending = 0;
+  Running = 1;
+  Finished = 2;
+  Failed = 3;
+  Completing = 4;
+  Cancelled = 5;
+}
+
+enum TaskType {
+  Interactive = 0;
+  Batch = 1;
+}
+
+message TaskToCtld {
+  /* -------- Fields that are set at the submission time. ------- */
+  google.protobuf.Duration time_limit = 1;
+
+  string partition_name = 2;
+  Resources resources = 3;
+
+  TaskType type = 4;
+
+  uint32 uid = 5;
+
+  string name = 7;
+
+  uint32 node_num = 8;
+  uint32 ntasks_per_node = 9;
+  uint32 cpus_per_task = 10;
+
+  oneof payload {
+    BatchTaskAdditionalMeta batch_meta = 21;
+    InteractiveTaskAdditionalMeta interactive_meta = 22;
+  }
+
+  string cmd_line = 31;
+  string cwd = 32; // Current working directory
+  string env = 33;
+}
+
+message TaskToD {
+  uint32 task_id = 1;
+  TaskType type = 2;
+  uint32 partition_id = 3;
+
+  Resources resources = 4;
+
+  // If this task is PENDING, start_time is either not set (default constructed)
+  // or an estimated start time.
+  // If this task is RUNNING, start_time is the actual starting time.
+  google.protobuf.Timestamp start_time = 5; // Currently Only used in CraneCtld
+  google.protobuf.Duration time_limit = 6;
+
+  uint32 uid = 9;
+
+  oneof payload {
+    BatchTaskAdditionalMeta batch_meta = 10;
+    InteractiveTaskAdditionalMeta interactive_meta = 11;
+  }
+
+  string env = 12;
+  string cwd = 13;
+
+  repeated string allocated_nodes = 14;
+
+  uint32 node_num = 21;
+  uint32 ntasks_per_node = 22;
+  uint32 cpus_per_task = 23;
+}
+
+message BatchTaskAdditionalMeta {
+  string sh_script = 1;
+  string output_file_pattern = 3;
+}
+
+message InteractiveTaskAdditionalMeta{
+  bytes resource_uuid = 1;
+}
+
+message TaskInfo {
+  TaskToCtld submit_info = 1;
+  uint32 task_id = 2;
+  uint32 gid = 3;
+  //  uint32 priority = 4;
+  string account = 5;
+  TaskStatus status = 6;
+  string craned_list = 7;
+
+  google.protobuf.Timestamp start_time = 8;
+  google.protobuf.Timestamp end_time = 9;
+}
+
+message PartitionInfo {
+  enum PartitionState {
+    UP = 0;
+    DOWN = 1;
+  }
+
+  string hostlist = 1;
+  PartitionState state = 2;
+  string name = 3;
+
+  uint32 total_nodes = 4;
+  uint32 alive_nodes = 5;
+  uint32 total_cpus = 6;
+  uint32 avail_cpus = 7;
+  uint32 alloc_cpus = 8;
+  uint32 free_cpus = 9;
+  uint64 total_mem = 10;
+  uint64 avail_mem = 11;
+  uint64 alloc_mem = 12;
+  uint64 free_mem = 13;
+}
+
+message CranedInfo {
+  enum CranedState {
+    IDLE = 0;
+    DOWN = 1;
+  }
+
+  string hostname = 1;
+  CranedState state = 2;
+  uint32 cpus = 3;
+  uint32 alloc_cpus = 4;
+  uint32 free_cpus = 5;
+  uint64 real_mem = 6;
+  uint64 alloc_mem = 7;
+  uint64 free_mem = 8;
+  string partition_name = 9;
+  uint32 running_task_num = 10;
+}
+
+message PartitionCranedInfo {
+  message CommonCranedState {
+    string state = 1;
+    uint32 craned_num = 2;
+    string craned_list = 3;
+  }
+  string name = 1;
+  PartitionInfo.PartitionState state = 2;
+  repeated CommonCranedState common_craned_state_list = 3;
+}
+
+enum EntityType {
+  Account = 0;
+  User = 1;
+  Qos = 2;
+}
+
+message AccountInfo {
+  string name = 1;
+  string description = 2;
+  repeated string users = 3;
+  repeated string child_account = 4;
+  string parent_account = 5;
+  repeated string allowed_partition = 6;
+  string qos = 7;
+}
+
+message UserInfo {
+  enum AdminLevel{
+    None = 0;
+    Operator = 1;
+    Admin = 2;
+  };
+  uint32 uid = 1;
+  string name = 2;
+  string account = 3;
+  repeated string allowed_partition = 4;
+  AdminLevel admin_level = 5;
+}

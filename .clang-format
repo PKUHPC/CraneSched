@@ -1,0 +1,3 @@
+BasedOnStyle: Google
+
+AllowAllArgumentsOnNextLine: false

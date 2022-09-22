@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package grpc_example;
+
+// The greeting service definition.
+service Greeter {
+  // Sends a greeting
+  rpc SayHello (HelloRequest) returns (HelloReply) {}
+
+  rpc SleepSeconds(SleepRequest) returns (SleepReply) {}
+}
+
+// The request message containing the user's name.
+message HelloRequest {
+  string name = 1;
+}
+
+// The response message containing the greetings
+message HelloReply {
+  string message = 1;
+}
+
+message SleepRequest {
+  uint32 seconds = 1;
+}
+
+message SleepReply {
+  bool ok = 1;
+}

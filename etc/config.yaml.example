@@ -1,0 +1,37 @@
+# the ip address of control machine
+CraneCtldListenAddr: 0.0.0.0
+# the port of control machine to listen
+CraneCtldListenPort: 10011
+# debug level of cranectld
+CraneCtldDebugLevel: trace
+# file path of cranectld log file
+CraneCtldLogFile: /tmp/cranectld/cranectld.log
+# Determines whether the cranectld is running in the background
+CraneCtldForeground: true
+
+# username and password of mysql
+DbUser: root
+DbPassword: "123456"
+
+# username and password of mongodb
+MongodbUser: crane
+MongodbPassword: 123456!!
+
+# debug level of craned
+CranedDebugLevel: trace
+# file path of craned log file
+CranedLogFile: /tmp/craned/craned.log
+# Determines whether the craned is running in the background
+CranedForeground: true
+
+# list of configuration information of the computing machine
+Nodes:
+  - name: "cn[15-18]"
+    cpu: 2
+    memory: 2G
+
+# partition information list
+Partitions:
+  - name: CPU
+    nodes: "cn[15-18]"
+    AllowUsers: root

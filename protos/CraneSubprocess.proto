@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package crane.grpc.subprocess;
+option go_package = "/protos/subprocess";
+
+message CanStartMessage {
+  bool ok = 1;
+}
+
+message ChildProcessReady {
+  bool ok = 1;
+}
