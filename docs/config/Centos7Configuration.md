@@ -23,11 +23,9 @@ firewall-cmd --add-port=873/tcp --permanent --zone=public
 # 重启防火墙(修改配置后要重启防火墙)
 firewall-cmd --reload
 ```
-
 ## 2.安装工具链
 
 安装C++11
-
 ```shell
 # Install CentOS SCLo RH repository:
 yum install centos-release-scl-rh
@@ -76,12 +74,12 @@ wget https://github.com/Kitware/CMake/releases/download/v3.21.3/cmake-3.21.3.tar
 解压编译安装
 ```shell
 unzip ninja-linux.zip
-cp ninja /usr/local/bin/
+cp ninja /usr/bin/
 
 yum install openssl-devel
 
 tar -zxvf cmake-3.21.3.tar.gz
-cd cmake-3.21.3
+cd cmake-3.12.4
 ./bootstrap
 gmake
 gmake install
@@ -97,15 +95,28 @@ cmake --version
 
 ## 3.安装C++库
 
-复制相关源码压缩包到一个目录，解压所有源码压缩包
+下载相关源码压缩包到一个目录，解压所有源码压缩包
 
 ```shell
+wget https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.gz
 tar xzf boost_1_78_0.tar.gz
+
+wget https://github.com/fmtlib/fmt/archive/refs/tags/8.0.1.tar.gz
 tar xzf fmt-8.0.1.tar.gz
-tar xzf libevent-2.1.12.tar.gz
+
+wget https://github.com/libevent/libevent/releases/download/release-2.1.12-stable/libevent-2.1.12-stable.tar.gz
+tar xzf libevent-2.1.12-stable.tar.gz
+
+wget https://github.com/jarro2783/cxxopts/archive/refs/tags/v2.2.1.tar.gz
 tar xzf cxxopts-2.2.1.tar.gz
-tar xzf googletest-1.10.0.tar.gz
+
+wget https://github.com/google/googletest/archive/refs/tags/release-1.11.0.tar.gz
+tar xzf googletest-release-1.11.0.tar.gz
+
+wget https://dist.libuv.org/dist/v1.42.0/libuv-v1.42.0.tar.gz
 tar xzf libuv-1.42.0.tar.gz
+
+wget https://github.com/gabime/spdlog/archive/refs/tags/v1.8.5.tar.gz
 tar xzf spdlog-1.8.5.tar.gz
 ```
 
@@ -123,6 +134,7 @@ cd ..
 cd libuv-1.42.0
 mkdir build
 cd build/
+cmake -DCMAKE_INSTALL_PREFIX=/nfs/home/testCrane/Crane/dependencies/online/libuv -DCMAKE_CXX_STANDARD=17 -G Ninja ..
 ninja install
 
 # 运行安装脚本
@@ -205,7 +217,7 @@ exit;
 systemctl restart mariadb
 ```
 
-## 4.安装mongodb
+## 5.安装MongoDB
 
 ```shell
 # 下载并解压安装包
@@ -217,7 +229,7 @@ mv mongodb-linux-x86_64-rhel70-5.0.9  /opt/mongodb
 vim /etc/profile
 ```
 
-在配置文件中添加如下内容（路径应对应mongodb安装路径）
+在配置文件中添加如下内容（路径应对应MongoDB安装路径）
 ```shell
 export MONGODB_HOME=/opt/mongodb
 export PATH=$PATH:${MONGODB_HOME}/bin
@@ -277,7 +289,7 @@ db.createUser({
 db.shutdownServer() //重启前先关闭服务器
 ```
 
-重新启动mongodb数据库
+重新启动MongoDB数据库
 ```shell
 mongod --config /opt/mongodb/mongodb.conf
 ```
@@ -289,7 +301,7 @@ vi /etc/rc.local
 mongod --config /opt/mongodb/mongodb.conf
 ```
 
-## 5.安装mongodb C++驱动
+## 6.安装MongoDB C++驱动
 
 参考 http://mongocxx.org/mongocxx-v3/installation/linux/
 
@@ -300,27 +312,21 @@ tar xzf mongo-c-driver-1.21.1.tar.gz
 cd mongo-c-driver-1.21.1
 mkdir cmake-build
 cd cmake-build
-cmake -G Ninja -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF \
-  -DCMAKE_INSTALL_PREFIX=../../../online/mongo-c-driver ..
-ninja install
+cmake -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF -DCMAKE_INSTALL_PREFIX=/nfs/home/liulinxing/Crane/dependencies/online/mongo-c-driver ..
+sudo make && make install
 ```
 
 安装mongo-cxx-driver
-
 ```shell
-wget -O mongo-cxx-driver-r3.6.5.tar.gz https://github.com/mongodb/mongo-cxx-driver/archive/r3.6.5.tar.gz
-tar xzf mongo-cxx-driver-r3.6.5.tar.gz
+curl -OL https://github.com/mongodb/mongo-cxx-driver/archive/r3.6.5.tar.gz
 cd mongo-cxx-driver-r3.6.5/build/
-cmake -G Ninja -DCMAKE_PREFIX_PATH=<absolute path prefix>/online/mongo-c-driver/ \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_CXX_STANDARD=17 \
-  -DBUILD_SHARED_AND_STATIC_LIBS=ON \
-  -DBUILD_SHARED_LIBS_WITH_STATIC_MONGOC=ON \
-  -DCMAKE_INSTALL_PREFIX=../../../online/mongo-cxx-driver ..
-ninja install
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/nfs/home/liulinxing/Crane/dependencies/online/mongo-driver ..
+sudo make EP_mnmlstc_core
+make
+sudo make install
 ```
 
-## 6.编译程序
+## 7.编译程序
 
 首先进入到项目目录下
 ```shell
@@ -328,10 +334,10 @@ mkdir build
 cd build/
 
 cmake -DCMAKE_CXX_STANDARD=17 -G Ninja ..
-ninja
+cmake --build .
 ```
 
-## 7.Pam模块
+## 8.Pam模块
 
 首次编译完成后需要将pam模块动态链接库放入系统指定位置
 ```shell
@@ -342,7 +348,7 @@ cp Crane/build/src/Misc/Pam/pam_Crane.so /usr/lib64/security/
 
 Required pam_access.so
 
-## 8.配置前端go语言环境
+## 9.配置前端go语言环境
 
 安装go语言
 ```shell
@@ -381,7 +387,6 @@ protoc --version
 ```
 
 拉取项目
-
 ```shell
 git clone https://github.com/RileyWen/Crane-FrontEnd.git # 克隆项目代码
 
@@ -390,7 +395,6 @@ mkdir Crane-FrontEnd/generated/protos
 ```
 
 编译项目
-
 ```shell
 # 在Crane-FrontEnd/protos目录下
 protoc --go_out=../generated --go-grpc_out=../generated ./*
@@ -400,14 +404,13 @@ go build Crane-FrontEnd/cmd/sbatchx/sbatchx.go
 ```
 
 部署前端命令
-
 ```shell
 ln -s /nfs/home/testCrane/Crane-FrontEnd/out/sbatchx /usr/local/bin/sbatchx
 ln -s /nfs/home/testCrane/Crane-FrontEnd/out/scontrol /usr/local/bin/scontrol
 ln -s /nfs/home/testCrane/Crane-FrontEnd/out/sacctmgr /usr/local/bin/sacctmgr
 ```
 
-### 9.部署文件同步
+## 10.部署文件同步
 
 在所有节点安装rsync
 ```shell
