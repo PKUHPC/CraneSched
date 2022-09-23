@@ -15,3 +15,6 @@ add_subdirectory(libuv)
 
 # Slowest. Place it at last.
 add_subdirectory(mongodb-cxx-driver)
+
+include(${CMAKE_SOURCE_DIR}/CMakeModule/SuppressHeaderWarning.cmake)
+suppress_header_warning()
