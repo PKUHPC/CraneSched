@@ -1,3 +1,6 @@
+# Suppress all warning on all third party libraries
+add_compile_options(-w)
+
 add_subdirectory(BSThreadPool)
 add_subdirectory(mariadb-connector-c)
 add_subdirectory(nlohmann_json)
