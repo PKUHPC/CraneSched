@@ -48,6 +48,7 @@ else ()
     message(STATUS "IPO / LTO not supported: <${error}>")
 endif ()
 
+# If Clang is used, select lld as the linker.
 set(CLANG_LLD_LINKER_FLAGS "-fuse-ld=lld")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     # Linker flags passed to manually built third party libraries
@@ -59,7 +60,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++ ${CLANG_LLD_LINKER_FLAGS}")
 else ()
     # Linker flags passed to manually built third party libraries
-    set(CRANE_LINKER_FLAGS_INIT "\"\"")
+    set(CRANE_LINKER_FLAGS_INIT)
 
     # static link on c++ libs
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
@@ -74,6 +75,11 @@ if (${FORCE_COLORED_OUTPUT})
     elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
         add_compile_options(-fcolor-diagnostics)
     endif ()
+endif ()
+
+if (CMAKE_SIZEOF_VOID_P EQUAL 8)
+    # search lib64 directory
+    set(FIND_LIBRARY_USE_LIB64_PATHS TRUE)
 endif ()
 
 # The following two variables are used in dependency/cmake files.

@@ -1,3 +1,6 @@
+# Suppress all warning on all third party libraries
+add_compile_options(-w)
+
 add_subdirectory(BSThreadPool)
 add_subdirectory(mariadb-connector-c)
 add_subdirectory(nlohmann_json)
@@ -12,3 +15,6 @@ add_subdirectory(libuv)
 
 # Slowest. Place it at last.
 add_subdirectory(mongodb-cxx-driver)
+
+include(${CMAKE_SOURCE_DIR}/CMakeModule/SuppressHeaderWarning.cmake)
+suppress_header_warning()
