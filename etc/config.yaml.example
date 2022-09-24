@@ -1,3 +1,7 @@
+# the hostname of node which is running cranectld
+ControlMachine: cn15
+# the name of this cluster
+ClusterName: pkuhpc_test
 # the ip address of control machine
 CraneCtldListenAddr: 0.0.0.0
 # the port of control machine to listen
@@ -9,13 +13,12 @@ CraneCtldLogFile: /tmp/cranectld/cranectld.log
 # Determines whether the cranectld is running in the background
 CraneCtldForeground: true
 
-# username and password of mysql
-DbUser: root
+# information of mongodb
+DbUser: admin
 DbPassword: "123456"
-
-# username and password of mongodb
-MongodbUser: crane
-MongodbPassword: 123456!!
+DbHost: localhost
+DbPort: 27017
+DbName: crane_db
 
 # debug level of craned
 CranedDebugLevel: trace
@@ -34,4 +37,3 @@ Nodes:
 Partitions:
   - name: CPU
     nodes: "cn[15-18]"
-    AllowUsers: root

@@ -13,36 +13,45 @@ class MariadbClient {
   MariadbClient() = default;
 
   ~MariadbClient() {
-    if (conn) {
-      mysql_close(conn);
+    if (m_conn) {
+      mysql_close(m_conn);
     }
   }
 
   bool Init() {
-    conn = mysql_init(nullptr);
-    return conn != nullptr;
+    m_conn = mysql_init(nullptr);
+    if (m_conn == nullptr) return false;
+
+    // Reconnect when Mariadb closes connection after a long idle time (8
+    // hours).
+    my_bool reconnect = 1;
+    mysql_options(m_conn, MYSQL_OPT_RECONNECT, &reconnect);
+
+    return true;
   }
 
   bool Connect(const std::string& username, const std::string& password) {
-    if (mysql_real_connect(conn, "127.0.0.1", username.c_str(),
+    if (mysql_real_connect(m_conn, "127.0.0.1", username.c_str(),
                            password.c_str(), nullptr, 3306, nullptr,
                            0) == nullptr) {
       PrintError_("Cannot connect to database");
       return false;
     }
 
-    if (mysql_query(conn, "CREATE DATABASE IF NOT EXISTS crane_db;")) {
-      PrintError_("Cannot check the existence of crane_db");
+    if (mysql_query(m_conn,
+                    fmt::format("CREATE DATABASE IF NOT EXISTS {};", m_db_name)
+                        .c_str())) {
+      PrintError_(fmt::format("Cannot check the existence of {}", m_db_name));
       return false;
     }
 
-    if (mysql_select_db(conn, m_db_name.c_str()) != 0) {
-      PrintError_("Cannot select crane_db");
+    if (mysql_select_db(m_conn, m_db_name.c_str()) != 0) {
+      PrintError_(fmt::format("Cannot select {}", m_db_name));
       return false;
     }
 
     if (mysql_query(
-            conn,
+            m_conn,
             "CREATE TABLE IF NOT EXISTS job_table("
             "job_db_inx    bigint unsigned not null auto_increment primary key,"
             "mod_time        bigint unsigned default 0 not null,"
@@ -70,7 +79,7 @@ class MariadbClient {
             "time_submit     bigint unsigned default 0 not null,"
             "work_dir        text                      not null default '',"
             "submit_line     text,"
-            "task_to_ctld   blob                      not null"
+            "task_to_ctld    blob                      not null"
             ");")) {
       PrintError_("Cannot check the existence of job_table");
       return false;
@@ -80,13 +89,13 @@ class MariadbClient {
   }
 
   bool GetMaxExistingJobId(uint64_t* job_id) {
-    if (mysql_query(conn,
+    if (mysql_query(m_conn,
                     "SELECT COALESCE(MAX(job_db_inx), 0) FROM job_table;")) {
       PrintError_("Cannot get the max id");
       return false;
     }
 
-    MYSQL_RES* result = mysql_store_result(conn);
+    MYSQL_RES* result = mysql_store_result(m_conn);
     if (result == nullptr) {
       PrintError_("Error in getting the max job id result");
       return false;
@@ -108,12 +117,12 @@ class MariadbClient {
   }
 
   bool GetLastInsertId(uint64_t* id) {
-    if (mysql_query(conn, "SELECT LAST_INSERT_ID();")) {
+    if (mysql_query(m_conn, "SELECT LAST_INSERT_ID();")) {
       PrintError_("Cannot get last insert id");
       return false;
     }
 
-    MYSQL_RES* result = mysql_store_result(conn);
+    MYSQL_RES* result = mysql_store_result(m_conn);
     if (result == nullptr) {
       PrintError_("Error in getting the max job id result");
       return false;
@@ -146,11 +155,11 @@ class MariadbClient {
                  const std::string& work_dir,
                  const crane::grpc::TaskToCtld& task_to_ctld) {
     size_t blob_size = task_to_ctld.ByteSizeLong();
-    char blob[1024];
-    char query[2048];
-    task_to_ctld.SerializeToArray(blob, 1024);
+    constexpr size_t blob_max_size = 8192;
 
-    GTEST_LOG_(INFO) << "blob size: " << blob_size << "\n";
+    static char blob[blob_max_size];
+    static char query[blob_max_size * 2];
+    task_to_ctld.SerializeToArray(blob, blob_max_size);
 
     std::string query_head = fmt::format(
         "INSERT INTO job_table("
@@ -167,14 +176,14 @@ class MariadbClient {
     char* query_ptr = std::copy(query_head.c_str(),
                                 query_head.c_str() + query_head.size(), query);
     size_t escaped_size =
-        mysql_real_escape_string(conn, query_ptr, blob, blob_size);
+        mysql_real_escape_string(m_conn, query_ptr, blob, blob_size);
     query_ptr += escaped_size;
 
     const char query_end[] = "')";
     query_ptr =
         std::copy(query_end, query_end + sizeof(query_end) - 1, query_ptr);
 
-    if (mysql_real_query(conn, query, query_ptr - query)) {
+    if (mysql_real_query(m_conn, query, query_ptr - query)) {
       PrintError_("Failed to insert job record");
       return false;
     }
@@ -191,11 +200,12 @@ class MariadbClient {
 
   bool UpdateJobRecordField(uint64_t job_db_inx, const std::string& field_name,
                             const std::string& val) {
-    std::string query =
-        fmt::format("UPDATE job_table SET {} = '{}' WHERE job_db_inx = {};",
-                    field_name, val, job_db_inx);
+    std::string query = fmt::format(
+        "UPDATE job_table SET {} = '{}', mod_time = UNIX_TIMESTAMP() WHERE "
+        "job_db_inx = {};",
+        field_name, val, job_db_inx);
 
-    if (mysql_query(conn, query.c_str())) {
+    if (mysql_query(m_conn, query.c_str())) {
       PrintError_("Failed to update job record");
       return false;
     }
@@ -215,32 +225,32 @@ class MariadbClient {
     std::string query =
         fmt::format("SELECT * FROM job_table WHERE {};", state_str);
 
-    if (mysql_query(conn, query.c_str())) {
+    if (mysql_query(m_conn, query.c_str())) {
       PrintError_("Failed to fetch job record");
       return false;
     }
 
-    MYSQL_RES* result = mysql_store_result(conn);
+    MYSQL_RES* result = mysql_store_result(m_conn);
     if (result == nullptr) {
       PrintError_("Error in getting `fetch job` result");
       return false;
     }
 
     uint32_t num_fields = mysql_num_fields(result);
-    GTEST_LOG_(INFO) << "num_fields: " << num_fields;
 
     MYSQL_ROW row;
-    // 0  job_db_inx     mod_time       deleted       account     cpus_req
-    // 5  mem_req        job_name       env           id_job      id_user
-    // 10 id_group       nodelist       nodes_alloc   node_inx    partition_name
-    // 15 priority       time_submit    time_eligible time_start  time_end
-    // 20 time_suspended script         state         timelimit   work_dir
-    // 25 submit_line    task_to_ctld
+    // 0  job_db_inx    mod_time       deleted       account     cpus_req
+    // 5  mem_req       job_name       env           id_job      id_user
+    // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
+    // 15 priority      time_eligible  time_start    time_end    time_suspended
+    // 20 script        state          timelimit     time_submit work_dir
+    // 25 submit_line   task_to_ctld
 
     while ((row = mysql_fetch_row(result))) {
       size_t* lengths = mysql_fetch_lengths(result);
 
       Ctld::TaskInCtld task;
+      task.job_db_inx = std::strtoul(row[0], nullptr, 10);
       task.resources.allocatable_resource.cpu_count =
           std::strtoul(row[4], nullptr, 10);
       task.resources.allocatable_resource.memory_bytes =
@@ -251,21 +261,22 @@ class MariadbClient {
       task.task_id = std::strtoul(row[8], nullptr, 10);
       task.uid = std::strtoul(row[9], nullptr, 10);
       task.gid = std::strtoul(row[10], nullptr, 10);
+      if (row[11]) task.allocated_craneds_regex = row[11];
       task.partition_name = row[14];
+      task.start_time =
+          absl::FromUnixSeconds(std::strtol(row[17], nullptr, 10));
+      task.end_time = absl::FromUnixSeconds(std::strtol(row[18], nullptr, 10));
 
       task.meta = Ctld::BatchMetaInTask{};
       auto& batch_meta = std::get<Ctld::BatchMetaInTask>(task.meta);
-      batch_meta.sh_script = row[21];
-      task.status = crane::grpc::Pending;
-      task.time_limit = absl::Seconds(std::strtol(row[23], nullptr, 10));
+      batch_meta.sh_script = row[20];
+      task.status = crane::grpc::TaskStatus(std::stoi(row[21]));
+      task.time_limit = absl::Seconds(std::strtol(row[22], nullptr, 10));
       task.cwd = row[24];
 
       if (row[25]) task.cmd_line = row[25];
 
-      GTEST_LOG_(INFO) << "row[26] length: " << lengths[26];
       bool ok = task.task_to_ctld.ParseFromArray(row[26], lengths[26]);
-      GTEST_LOG_(INFO) << "Parse result: " << ok;
-      GTEST_LOG_(INFO) << "task_to_ctld.name " << task.task_to_ctld.name();
 
       task_list->emplace_back(std::move(task));
     }
@@ -276,14 +287,14 @@ class MariadbClient {
 
  private:
   void PrintError_(const std::string& msg) {
-    fmt::print("{}: {}\n", msg, mysql_error(conn));
+    CRANE_ERROR("{}: {}\n", msg, mysql_error(m_conn));
   }
 
   void PrintError_(const char* msg) {
-    fmt::print("{}: {}\n", msg, mysql_error(conn));
+    CRANE_ERROR("{}: {}\n", msg, mysql_error(m_conn));
   }
 
-  MYSQL* conn{nullptr};
+  MYSQL* m_conn{nullptr};
   const std::string m_db_name{"crane_db"};
 };
 
