@@ -3,17 +3,19 @@
 #include <spdlog/async.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
 #include <boost/filesystem/string_file.hpp>
+#include <cerrno>
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <regex>
 
+#include "CranedPublicDefs.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
-#include "CranedPublicDefs.h"
 #include "crane/FdFunctions.h"
 #include "crane/Network.h"
 #include "crane/PublicHeader.h"
@@ -468,8 +470,33 @@ void StartDaemon() {
   exit(EXIT_SUCCESS);
 }
 
+void CheckSingleton() {
+  std::filesystem::path lock_path{kDefaultCranedMutexFile};
+  try {
+    auto lock_dir = lock_path.parent_path();
+    if (!std::filesystem::exists(lock_dir))
+      std::filesystem::create_directories(lock_dir);
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Invalid CranedMutexFile path {}: {}", kDefaultCranedMutexFile,
+                e.what());
+  }
+
+  int pid_file = open(lock_path.c_str(), O_CREAT | O_RDWR, 0666);
+  int rc = flock(pid_file, LOCK_EX | LOCK_NB);
+  if (rc) {
+    if (EWOULDBLOCK == errno) {
+      CRANE_CRITICAL("There is another Craned instance running. Exiting...");
+      std::exit(1);
+    } else {
+      CRANE_CRITICAL("Failed to lock {}: {}. Exiting...", lock_path.string(),
+                     strerror(errno));
+      std::exit(1);
+    }
+  }
+}
+
 int main(int argc, char** argv) {
-  // Todo: Add single program instance checking.
+  CheckSingleton();
 
   // If config parsing fails, this function will not return and will call
   // std::exit(1) instead.
