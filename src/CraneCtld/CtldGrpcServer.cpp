@@ -81,7 +81,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
 
   if (task->uid) {
     std::list<std::string> allowed_partition =
-        g_mongodb_client->GetUserAllowedPartition(getpwuid(task->uid)->pw_name);
+        g_db_client->GetUserAllowedPartition(getpwuid(task->uid)->pw_name);
     auto it = std::find(allowed_partition.begin(), allowed_partition.end(),
                         task->partition_name);
     if (it == allowed_partition.end()) {
@@ -323,7 +323,7 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
     account.allowed_partition.emplace_back(p);
   }
 
-  MongodbClient::MongodbResult result = g_mongodb_client->AddAccount(account);
+  MongodbClient::MongodbResult result = g_db_client->AddAccount(account);
   if (result.ok) {
     response->set_ok(true);
   } else {
@@ -344,7 +344,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   user.account = user_info->account();
   user.admin_level = User::AdminLevel(user_info->admin_level());
 
-  MongodbClient::MongodbResult result = g_mongodb_client->AddUser(user);
+  MongodbClient::MongodbResult result = g_db_client->AddUser(user);
   if (result.ok) {
     response->set_ok(true);
   } else {
@@ -368,7 +368,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
       for (auto &p : new_account->allowed_partition()) {
         partitions.emplace_back(p);
       }
-      if (!g_mongodb_client->SetAccountAllowedPartition(
+      if (!g_db_client->SetAccountAllowedPartition(
               new_account->name(), partitions, request->type())) {
         response->set_ok(false);
         response->set_reason("can't update the allowed partitions");
@@ -380,7 +380,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
     account.parent_account = new_account->parent_account();
     account.description = new_account->description();
     account.qos = new_account->qos();
-    res = g_mongodb_client->SetAccount(account);
+    res = g_db_client->SetAccount(account);
     if (!res.ok) {
       response->set_ok(false);
       response->set_reason(res.reason.value());
@@ -393,8 +393,8 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
       for (auto &p : new_user->allowed_partition()) {
         partitions.emplace_back(p);
       }
-      if (!g_mongodb_client->SetUserAllowedPartition(
-              new_user->name(), partitions, request->type())) {
+      if (!g_db_client->SetUserAllowedPartition(new_user->name(), partitions,
+                                                request->type())) {
         response->set_ok(false);
         response->set_reason("can't update the allowed partitions");
         return grpc::Status::OK;
@@ -405,7 +405,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
     user.uid = new_user->uid();
     user.account = new_user->account();
     user.admin_level = User::AdminLevel(new_user->admin_level());
-    res = g_mongodb_client->SetUser(user);
+    res = g_db_client->SetUser(user);
     if (!res.ok) {
       response->set_ok(false);
       response->set_reason(res.reason.value());
@@ -424,7 +424,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
     case crane::grpc::Account:
       if (request->name() == "All") {
         std::list<Account> account_list;
-        g_mongodb_client->GetAllAccountInfo(account_list);
+        g_db_client->GetAllAccountInfo(account_list);
 
         auto *list = response->mutable_account_list();
         for (auto &&account : account_list) {
@@ -452,7 +452,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         response->set_ok(true);
       } else {
         Account account;
-        if (g_mongodb_client->GetAccountInfo(request->name(), &account)) {
+        if (g_db_client->GetAccountInfo(request->name(), &account)) {
           auto *account_info = response->mutable_account_list()->Add();
           account_info->set_name(account.name);
           account_info->set_description(account.description);
@@ -479,7 +479,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
     case crane::grpc::User:
       if (request->name() == "All") {
         std::list<User> user_list;
-        g_mongodb_client->GetAllUserInfo(user_list);
+        g_db_client->GetAllUserInfo(user_list);
 
         auto *list = response->mutable_user_list();
         for (auto &&user : user_list) {
@@ -500,7 +500,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         response->set_ok(true);
       } else {
         User user;
-        if (g_mongodb_client->GetUserInfo(request->name(), &user)) {
+        if (g_db_client->GetUserInfo(request->name(), &user)) {
           auto *user_info = response->mutable_user_list()->Add();
           user_info->set_name(user.name);
           user_info->set_uid(user.uid);
@@ -529,7 +529,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
     grpc::ServerContext *context,
     const crane::grpc::DeleteEntityRequest *request,
     crane::grpc::DeleteEntityReply *response) {
-  MongodbClient::MongodbResult res = g_mongodb_client->DeleteEntity(
+  MongodbClient::MongodbResult res = g_db_client->DeleteEntity(
       (MongodbClient::EntityType)request->entity_type(), request->name());
   if (res.ok) {
     response->set_ok(true);

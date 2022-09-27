@@ -6,376 +6,92 @@
 
 namespace Ctld {
 
-MariadbClient::~MariadbClient() {
-  if (m_conn) {
-    mysql_close(m_conn);
-  }
-}
-
-bool MariadbClient::Init() {
-  m_conn = mysql_init(nullptr);
-  if (m_conn == nullptr) return false;
-
-  // Reconnect when Mariadb closes connection after a long idle time (8 hours).
-  my_bool reconnect = 1;
-  mysql_options(m_conn, MYSQL_OPT_RECONNECT, &reconnect);
-
-  return true;
-}
-
-void MariadbClient::SetUserAndPwd(const std::string& username,
-                                  const std::string& password) {
-  m_user = username;
-  m_psw = password;
-}
-
-bool MariadbClient::Connect() {
-  if (mysql_real_connect(m_conn, "127.0.0.1", m_user.c_str(), m_psw.c_str(),
-                         nullptr, 3306, nullptr, 0) == nullptr) {
-    PrintError_("Cannot connect to database");
-    return false;
-  }
-
-  if (mysql_query(m_conn,
-                  fmt::format("CREATE DATABASE IF NOT EXISTS {};", m_db_name)
-                      .c_str())) {
-    PrintError_(fmt::format("Cannot check the existence of {}", m_db_name));
-    return false;
-  }
-
-  if (mysql_select_db(m_conn, m_db_name.c_str()) != 0) {
-    PrintError_(fmt::format("Cannot select {}", m_db_name));
-    return false;
-  }
-
-  if (mysql_query(
-          m_conn,
-          "CREATE TABLE IF NOT EXISTS job_table("
-          "job_db_inx    bigint unsigned not null auto_increment primary key,"
-          "mod_time        bigint unsigned default 0 not null,"
-          "deleted         tinyint         default 0 not null,"
-          "account         tinytext,"
-          "cpus_req        int unsigned              not null,"
-          "mem_req         bigint unsigned default 0 not null,"
-          "job_name        tinytext                  not null,"
-          "env             text,"
-          "id_job          int unsigned              not null,"
-          "id_user         int unsigned              not null,"
-          "id_group        int unsigned              not null,"
-          "nodelist        text,"
-          "nodes_alloc     int unsigned              not null,"
-          "node_inx        text,"
-          "partition_name  tinytext                  not null,"
-          "priority        int unsigned              not null,"
-          "time_eligible   bigint unsigned default 0 not null,"
-          "time_start      bigint unsigned default 0 not null,"
-          "time_end        bigint unsigned default 0 not null,"
-          "time_suspended  bigint unsigned default 0 not null,"
-          "script          text                      not null default '',"
-          "state           int unsigned              not null,"
-          "timelimit       int unsigned    default 0 not null,"
-          "time_submit     bigint unsigned default 0 not null,"
-          "work_dir        text                      not null default '',"
-          "submit_line     text,"
-          "task_to_ctld    blob                      not null"
-          ");")) {
-    PrintError_("Cannot check the existence of job_table");
-    return false;
-  }
-
-  return true;
-}
-
-bool MariadbClient::GetMaxExistingJobId(uint64_t* job_id) {
-  if (mysql_query(m_conn,
-                  "SELECT COALESCE(MAX(job_db_inx), 0) FROM job_table;")) {
-    PrintError_("Cannot get the max id");
-    return false;
-  }
-
-  MYSQL_RES* result = mysql_store_result(m_conn);
-  if (result == nullptr) {
-    PrintError_("Error in getting the max job id result");
-    return false;
-  }
-
-  MYSQL_ROW row = mysql_fetch_row(result);
-  unsigned long* lengths = mysql_fetch_lengths(result);
-
-  if (lengths == nullptr) {
-    PrintError_("Error in fetching rows of max id result");
-    mysql_free_result(result);
-    return false;
-  }
-
-  *job_id = strtoul(row[0], nullptr, 10);
-
-  mysql_free_result(result);
-  return true;
-}
-
-bool MariadbClient::GetLastInsertId(uint64_t* id) {
-  if (mysql_query(m_conn, "SELECT LAST_INSERT_ID();")) {
-    PrintError_("Cannot get last insert id");
-    return false;
-  }
-
-  MYSQL_RES* result = mysql_store_result(m_conn);
-  if (result == nullptr) {
-    PrintError_("Error in getting the max job id result");
-    return false;
-  }
-
-  MYSQL_ROW row = mysql_fetch_row(result);
-  unsigned long* lengths = mysql_fetch_lengths(result);
-
-  if (lengths == nullptr) {
-    PrintError_("Error in fetching rows of max id result");
-    mysql_free_result(result);
-    return false;
-  }
-
-  *id = strtoul(row[0], nullptr, 10);
-
-  mysql_free_result(result);
-  return true;
-}
-
-bool MariadbClient::UpdateJobRecordField(uint64_t job_db_inx,
-                                         const std::string& field_name,
-                                         const std::string& val) {
-  std::string query = fmt::format(
-      "UPDATE job_table SET {} = '{}', mod_time = UNIX_TIMESTAMP() WHERE "
-      "job_db_inx = {};",
-      field_name, val, job_db_inx);
-
-  if (mysql_query(m_conn, query.c_str())) {
-    PrintError_("Failed to update job record");
-    return false;
-  }
-
-  return true;
-}
-
-bool MariadbClient::UpdateJobRecordFields(
-    uint64_t job_db_inx, const std::list<std::string>& field_names,
-    const std::list<std::string>& values) {
-  CRANE_ASSERT(field_names.size() == values.size() && !field_names.empty());
-
-  std::vector<std::string> kvs;
-  for (auto it_k = field_names.begin(), it_v = values.begin();
-       it_k != field_names.end() && it_v != values.end(); ++it_k, ++it_v) {
-    std::string piece = fmt::format("{} = '{}'", *it_k, *it_v);
-    kvs.emplace_back(std::move(piece));
-  }
-
-  std::string formatter = absl::StrJoin(kvs, ", ");
-
-  std::string query = fmt::format(
-      "UPDATE job_table SET {}, mod_time = UNIX_TIMESTAMP() "
-      "WHERE job_db_inx = {};",
-      formatter, job_db_inx);
-
-  if (mysql_query(m_conn, query.c_str())) {
-    PrintError_("Failed to update job record");
-    return false;
-  }
-
-  return true;
-}
-
-bool MariadbClient::FetchJobRecordsWithStates(
-    std::list<TaskInCtld>* task_list,
-    const std::list<crane::grpc::TaskStatus>& states) {
-  std::vector<std::string> state_piece;
-  for (auto state : states) {
-    state_piece.emplace_back(fmt::format("state = {}", state));
-  }
-  std::string state_str = absl::StrJoin(state_piece, " or ");
-
-  std::string query =
-      fmt::format("SELECT * FROM job_table WHERE {};", state_str);
-
-  if (mysql_query(m_conn, query.c_str())) {
-    PrintError_("Failed to fetch job record");
-    return false;
-  }
-
-  MYSQL_RES* result = mysql_store_result(m_conn);
-  if (result == nullptr) {
-    PrintError_("Error in getting `fetch job` result");
-    return false;
-  }
-
-  uint32_t num_fields = mysql_num_fields(result);
-
-  MYSQL_ROW row;
-  // 0  job_db_inx    mod_time       deleted       account     cpus_req
-  // 5  mem_req       job_name       env           id_job      id_user
-  // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
-  // 15 priority      time_eligible  time_start    time_end    time_suspended
-  // 20 script        state          timelimit     time_submit work_dir
-  // 25 submit_line   task_to_ctld
-
-  while ((row = mysql_fetch_row(result))) {
-    size_t* lengths = mysql_fetch_lengths(result);
-
-    Ctld::TaskInCtld task;
-    task.job_db_inx = std::strtoul(row[0], nullptr, 10);
-    task.resources.allocatable_resource.cpu_count =
-        std::strtoul(row[4], nullptr, 10);
-    task.resources.allocatable_resource.memory_bytes =
-        task.resources.allocatable_resource.memory_sw_bytes =
-            std::strtoul(row[5], nullptr, 10);
-    task.name = row[6];
-    task.env = row[7];
-    task.task_id = std::strtoul(row[8], nullptr, 10);
-    task.uid = std::strtoul(row[9], nullptr, 10);
-    task.gid = std::strtoul(row[10], nullptr, 10);
-    if (row[11]) task.allocated_craneds_regex = row[11];
-    task.partition_name = row[14];
-    task.start_time = absl::FromUnixSeconds(std::strtol(row[17], nullptr, 10));
-    task.end_time = absl::FromUnixSeconds(std::strtol(row[18], nullptr, 10));
-
-    task.meta = Ctld::BatchMetaInTask{};
-    auto& batch_meta = std::get<Ctld::BatchMetaInTask>(task.meta);
-    batch_meta.sh_script = row[20];
-    task.status = crane::grpc::TaskStatus(std::stoi(row[21]));
-    task.time_limit = absl::Seconds(std::strtol(row[22], nullptr, 10));
-    task.cwd = row[24];
-
-    if (row[25]) task.cmd_line = row[25];
-
-    bool ok = task.task_to_ctld.ParseFromArray(row[26], lengths[26]);
-
-    task_list->emplace_back(std::move(task));
-  }
-
-  mysql_free_result(result);
-  return true;
-}
-
-bool MariadbClient::InsertJob(
-    uint64_t* job_db_inx, uint64_t mod_timestamp, const std::string& account,
-    uint32_t cpu, uint64_t memory_bytes, const std::string& job_name,
-    const std::string& env, uint32_t id_job, uid_t id_user, uid_t id_group,
-    const std::string& nodelist, uint32_t nodes_alloc,
-    const std::string& node_inx, const std::string& partition_name,
-    uint32_t priority, uint64_t submit_timestamp, const std::string& script,
-    uint32_t state, uint32_t timelimit, const std::string& work_dir,
-    const crane::grpc::TaskToCtld& task_to_ctld) {
-  size_t blob_size = task_to_ctld.ByteSizeLong();
-  constexpr size_t blob_max_size = 8192;
-
-  static char blob[blob_max_size];
-  static char query[blob_max_size * 2];
-  task_to_ctld.SerializeToArray(blob, blob_max_size);
-
-  std::string query_head = fmt::format(
-      "INSERT INTO job_table("
-      "mod_time, deleted, account, cpus_req, mem_req, job_name, env, "
-      "id_job, id_user, id_group, nodelist, nodes_alloc, node_inx, "
-      "partition_name, priority, time_submit, script, state, timelimit, "
-      " work_dir, task_to_ctld) "
-      " VALUES({}, 0, '{}', {}, {}, '{}', '{}', {}, {}, {}, "
-      "'{}', {}, '{}', '{}', {}, {}, '{}', {}, {}, "
-      "'{}', '",
-      mod_timestamp, account, cpu, memory_bytes, job_name, env, id_job, id_user,
-      id_group, nodelist, nodes_alloc, node_inx, partition_name, priority,
-      submit_timestamp, script, state, timelimit, work_dir);
-  char* query_ptr = std::copy(query_head.c_str(),
-                              query_head.c_str() + query_head.size(), query);
-  size_t escaped_size =
-      mysql_real_escape_string(m_conn, query_ptr, blob, blob_size);
-  query_ptr += escaped_size;
-
-  const char query_end[] = "')";
-  query_ptr =
-      std::copy(query_end, query_end + sizeof(query_end) - 1, query_ptr);
-
-  if (mysql_real_query(m_conn, query, query_ptr - query)) {
-    PrintError_("Failed to insert job record");
-    return false;
-  }
-
-  uint64_t last_id;
-  if (!GetLastInsertId(&last_id)) {
-    PrintError_("Failed to GetLastInsertId");
-    return false;
-  }
-  *job_db_inx = last_id;
-
-  return true;
-}
-
-MongodbClient::~MongodbClient() {
-  delete m_dbInstance;
-  delete m_client;
-}
-
 bool MongodbClient::Connect() {
-  // default port 27017
-  mongocxx::uri uri{fmt::format("mongodb://{}:{}@{}:{}/{}",
-                                g_config.MongodbUser, g_config.MongodbPassword,
-                                g_config.MongodbHost, g_config.MongodbPort,
-                                m_db_name)};
-  m_dbInstance = new (std::nothrow) mongocxx::instance();
-  m_client = new (std::nothrow) mongocxx::client(uri);
+  m_dbInstance = std::make_unique<mongocxx::instance>();
+  m_db_name = g_config.DbName;
+  std::string uri_str;
+
+  if (!g_config.DbUser.empty()) {
+    uri_str =
+        fmt::format("mongodb://{}:{}@{}:{}", g_config.DbUser,
+                    g_config.DbPassword, g_config.DbHost, g_config.DbPort);
+  } else {
+    uri_str = fmt::format("mongodb://{}:{}", g_config.DbHost, g_config.DbPort);
+  }
+
+  m_client = std::make_unique<mongocxx::client>(mongocxx::uri{uri_str});
+  std::vector<std::string> database_name = m_client->list_database_names();
+  if (std::find(database_name.begin(), database_name.end(), m_db_name) ==
+      database_name.end()) {
+    CRANE_INFO(
+        "Mongodb: database {} is not existed, crane will create the new "
+        "database.",
+        m_db_name);
+  }
 
   if (!m_client) {
-    CRANE_ERROR("Mongodb error: can't connect to localhost:27017");
+    PrintError_("can't connect to localhost:27017");
     return false;
   }
   return true;
 }
 
 void MongodbClient::Init() {
-  m_database = new mongocxx::database(m_client->database(m_db_name));
+  m_database =
+      std::make_unique<mongocxx::database>(m_client->database(m_db_name));
 
   if (!m_database->has_collection(m_job_collection_name)) {
     m_database->create_collection(m_job_collection_name);
   }
-  m_job_collection =
-      new mongocxx::collection(m_database->collection(m_job_collection_name));
+  m_job_collection = std::make_unique<mongocxx::collection>(
+      m_database->collection(m_job_collection_name));
 
   if (!m_database->has_collection(m_account_collection_name)) {
     m_database->create_collection(m_account_collection_name);
   }
-  m_account_collection = new mongocxx::collection(
+  m_account_collection = std::make_unique<mongocxx::collection>(
       m_database->collection(m_account_collection_name));
 
   if (!m_database->has_collection(m_user_collection_name)) {
     m_database->create_collection(m_user_collection_name);
   }
-  m_user_collection =
-      new mongocxx::collection(m_database->collection(m_user_collection_name));
+  m_user_collection = std::make_unique<mongocxx::collection>(
+      m_database->collection(m_user_collection_name));
 
   if (!m_database->has_collection(m_qos_collection_name)) {
     m_database->create_collection(m_qos_collection_name);
   }
-  m_qos_collection =
-      new mongocxx::collection(m_database->collection(m_qos_collection_name));
+  m_qos_collection = std::make_unique<mongocxx::collection>(
+      m_database->collection(m_qos_collection_name));
 
   if (!m_account_collection || !m_user_collection || !m_qos_collection ||
       !m_job_collection) {
-    CRANE_ERROR("Mongodb Error: can't get instance of {} tables", m_db_name);
+    PrintError_(
+        fmt::format("can't get instance of {} tables", m_db_name).c_str());
     std::exit(1);
   }
 }
 
 bool MongodbClient::GetMaxExistingJobId(uint64_t* job_id) {
+  //  *job_id = m_job_collection->count_documents({});
   mongocxx::cursor cursor = m_job_collection->find({});
   *job_id = 0;
-  if (cursor.begin() == cursor.end()) return false;
   for (auto view : cursor) {
-    int id = view["id_job"].get_int32().value;
+    uint64_t id =
+        std::strtoul(view["job_db_inx"].get_string().value.data(), nullptr, 10);
     if (id > *job_id) *job_id = id;
   }
   return true;
 }
 
 bool MongodbClient::GetLastInsertId(uint64_t* id) {
-  *id = m_job_collection->count_documents({});
+  //  *id = m_job_collection->count_documents({});
+  mongocxx::cursor cursor = m_job_collection->find({});
+  *id = 0;
+  for (auto view : cursor) {
+    *id =
+        std::strtoul(view["job_db_inx"].get_string().value.data(), nullptr, 10);
+  }
   return true;
 }
 
@@ -395,12 +111,8 @@ bool MongodbClient::InsertJob(
   }
   *job_db_inx = last_id + 1;
 
-  //  size_t blob_size = task_to_ctld.ByteSizeLong();
-  //  constexpr size_t blob_max_size = 8192;
-  //
-  //  static char blob[blob_max_size];
-  //  static char query[blob_max_size * 2];
-  //  task_to_ctld.SerializeToArray(blob, blob_max_size);
+  auto* task_to_ctld_str = new std::string();
+  task_to_ctld.SerializeToString(task_to_ctld_str);
 
   auto builder = bsoncxx::builder::stream::document{};
   bsoncxx::document::value doc_value =
@@ -418,6 +130,7 @@ bool MongodbClient::InsertJob(
               << "script" << script << "state" << std::to_string(state)
               << "timelimit" << std::to_string(timelimit) << "time_submit"
               << std::to_string(submit_timestamp) << "work_dir" << work_dir
+              << "task_to_ctld" << *task_to_ctld_str
               << bsoncxx::builder::stream::finalize;
 
   if (m_dbInstance && m_client) {
@@ -438,17 +151,21 @@ bool MongodbClient::InsertJob(
 bool MongodbClient::FetchJobRecordsWithStates(
     std::list<Ctld::TaskInCtld>* task_list,
     const std::list<crane::grpc::TaskStatus>& states) {
-  auto array_context = document{} << "state"
-                                  << bsoncxx::builder::stream::open_array;
+  auto builder = bsoncxx::builder::stream::document{};
+  auto array_context =
+      builder << "$or"  // 'document {} << ' will lead to precondition failed
+              << bsoncxx::builder::stream::open_array;
 
   for (auto state : states) {
-    array_context << state;
+    array_context << bsoncxx::builder::stream::open_document << "state"
+                  << fmt::format("{}", state)
+                  << bsoncxx::builder::stream::close_document;
   }
   bsoncxx::document::value doc_value = array_context
                                        << bsoncxx::builder::stream::close_array
                                        << bsoncxx::builder::stream::finalize;
 
-  mongocxx::cursor cursor = m_job_collection->find({doc_value.view()});
+  mongocxx::cursor cursor = m_job_collection->find(doc_value.view());
 
   // 0  job_db_inx    mod_time       deleted       account     cpus_req
   // 5  mem_req       job_name       env           id_job      id_user
@@ -460,33 +177,38 @@ bool MongodbClient::FetchJobRecordsWithStates(
   for (auto view : cursor) {
     Ctld::TaskInCtld task;
     task.job_db_inx =
-        std::stoi(std::string(view["job_db_inx"].get_utf8().value));
+        std::strtoul(view["job_db_inx"].get_string().value.data(), nullptr, 10);
     task.resources.allocatable_resource.cpu_count =
-        std::stoi(std::string(view["cpus_req"].get_utf8().value));
+        std::strtol(view["cpus_req"].get_string().value.data(), nullptr, 10);
 
     task.resources.allocatable_resource.memory_bytes =
-        task.resources.allocatable_resource.memory_sw_bytes =
-            std::stoi(std::string(view["mem_req"].get_utf8().value));
-    task.name = view["job_name"].get_utf8().value;
-    task.env = view["env"].get_utf8().value;
-    task.task_id = std::stoi(std::string(view["id_job"].get_utf8().value));
-    task.uid = std::stoi(std::string(view["id_user"].get_utf8().value));
-    task.gid = std::stoi(std::string(view["id_group"].get_utf8().value));
-    task.partition_name = view["partition_name"].get_utf8().value;
-    task.start_time = absl::FromUnixSeconds(
-        std::stoi(std::string(view["time_start"].get_utf8().value)));
-    task.end_time = absl::FromUnixSeconds(
-        std::stoi(std::string(view["time_end"].get_utf8().value)));
+        task.resources.allocatable_resource.memory_sw_bytes = std::strtoul(
+            view["mem_req"].get_string().value.data(), nullptr, 10);
+    task.name = view["job_name"].get_string().value;
+    task.env = view["env"].get_string().value;
+    task.task_id =
+        std::strtol(view["id_job"].get_string().value.data(), nullptr, 10);
+    task.uid =
+        std::strtol(view["id_user"].get_string().value.data(), nullptr, 10);
+    task.gid =
+        std::strtol(view["id_group"].get_string().value.data(), nullptr, 10);
+    task.partition_name = view["partition_name"].get_string().value;
+    task.start_time =
+        absl::FromUnixSeconds(view["time_start"].get_int32().value);
+    task.end_time = absl::FromUnixSeconds(view["time_end"].get_int32().value);
 
     task.meta = Ctld::BatchMetaInTask{};
     auto& batch_meta = std::get<Ctld::BatchMetaInTask>(task.meta);
-    batch_meta.sh_script = view["script"].get_utf8().value;
+    batch_meta.sh_script = view["script"].get_string().value;
     task.status = crane::grpc::TaskStatus(
-        std::stoi(std::string(view["state"].get_utf8().value)));
+        std::strtol(view["state"].get_string().value.data(), nullptr, 10));
     task.time_limit = absl::Seconds(
-        std::stoi(std::string(view["timelimit"].get_utf8().value)));
-    task.cwd = view["work_dir"].get_utf8().value;
-    task.cmd_line = view["submit_line"].get_utf8().value;
+        std::strtoul(view["timelimit"].get_string().value.data(), nullptr, 10));
+    task.cwd = view["work_dir"].get_string().value;
+    if (view["submit_line"])
+      task.cmd_line = view["submit_line"].get_string().value;
+    task.task_to_ctld.ParseFromString(
+        view["task_to_ctld"].get_string().value.data());
 
     task_list->emplace_back(std::move(task));
   }
@@ -503,7 +225,7 @@ bool MongodbClient::UpdateJobRecordField(uint64_t job_db_inx,
       m_job_collection->update_one(
           document{} << "job_db_inx" << std::to_string(job_db_inx)
                      << bsoncxx::builder::stream::finalize,
-          document{} << "set" << bsoncxx::builder::stream::open_document
+          document{} << "$set" << bsoncxx::builder::stream::open_document
                      << "mod_time" << std::to_string(timestamp) << field_name
                      << val << bsoncxx::builder::stream::close_document
                      << bsoncxx::builder::stream::finalize);
@@ -515,17 +237,18 @@ bool MongodbClient::UpdateJobRecordFields(
     const std::list<std::string>& values) {
   CRANE_ASSERT(field_names.size() == values.size() && !field_names.empty());
 
-  auto array_context = document{} << "set"
-                                  << bsoncxx::builder::stream::open_array;
+  auto builder = bsoncxx::builder::stream::document{};
+  auto array_context = builder << "$set"
+                               << bsoncxx::builder::stream::open_document;
 
   for (auto it_k = field_names.begin(), it_v = values.begin();
        it_k != field_names.end() && it_v != values.end(); ++it_k, ++it_v) {
     array_context << *it_k << *it_v;
   }
 
-  bsoncxx::document::value doc_value = array_context
-                                       << bsoncxx::builder::stream::close_array
-                                       << bsoncxx::builder::stream::finalize;
+  bsoncxx::document::value doc_value =
+      array_context << bsoncxx::builder::stream::close_document
+                    << bsoncxx::builder::stream::finalize;
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
       m_job_collection->update_one(
           document{} << "job_db_inx" << std::to_string(job_db_inx)
@@ -719,7 +442,7 @@ MongodbClient::MongodbResult MongodbClient::AddQos(const Ctld::Qos& new_qos) {
 
 MongodbClient::MongodbResult MongodbClient::DeleteEntity(
     MongodbClient::EntityType type, const std::string& name) {
-  mongocxx::collection* coll;
+  std::shared_ptr<mongocxx::collection> coll;
   Ctld::Account account;
   Ctld::User user;
   std::string parent_name, child_attribute_name;
@@ -797,15 +520,15 @@ bool MongodbClient::GetUserInfo(const std::string& name, Ctld::User* user) {
     bsoncxx::document::view user_view = result->view();
     user->deleted = user_view["deleted"].get_bool();
 
-#warning Fix This!
-    user->uid = std::stoi(std::string(user_view["uid"].get_utf8().value));
+    user->uid =
+        std::strtol(user_view["uid"].get_string().value.data(), nullptr, 10);
 
-    user->name = user_view["name"].get_utf8().value;
-    user->account = user_view["account"].get_utf8().value;
+    user->name = user_view["name"].get_string().value;
+    user->account = user_view["account"].get_string().value;
     user->admin_level =
         (Ctld::User::AdminLevel)user_view["admin_level"].get_int32().value;
     for (auto&& partition : user_view["allowed_partition"].get_array().value) {
-      user->allowed_partition.emplace_back(partition.get_utf8().value);
+      user->allowed_partition.emplace_back(partition.get_string().value);
     }
     return true;
   }
@@ -830,15 +553,14 @@ bool MongodbClient::GetAllUserInfo(std::list<Ctld::User>& user_list) {
     Ctld::User user;
     user.deleted = view["deleted"].get_bool();
 
-#warning Fix This!
-    user.uid = std::stoi(std::string(view["uid"].get_utf8().value));
+    user.uid = std::strtol(view["uid"].get_string().value.data(), nullptr, 10);
 
-    user.name = view["name"].get_utf8().value;
-    user.account = view["account"].get_utf8().value;
+    user.name = view["name"].get_string().value;
+    user.account = view["account"].get_string().value;
     user.admin_level =
         (Ctld::User::AdminLevel)view["admin_level"].get_int32().value;
     for (auto&& partition : view["allowed_partition"].get_array().value) {
-      user.allowed_partition.emplace_back(partition.get_utf8().value);
+      user.allowed_partition.emplace_back(partition.get_string().value);
     }
     user_list.emplace_back(user);
   }
@@ -854,20 +576,20 @@ bool MongodbClient::GetAccountInfo(const std::string& name,
     bsoncxx::document::view account_view = result->view();
     account->deleted = account_view["deleted"].get_bool().value;
     if (account->deleted) return false;
-    account->name = account_view["name"].get_utf8().value;
-    account->description = account_view["description"].get_utf8().value;
+    account->name = account_view["name"].get_string().value;
+    account->description = account_view["description"].get_string().value;
     for (auto&& user : account_view["users"].get_array().value) {
-      account->users.emplace_back(user.get_utf8().value);
+      account->users.emplace_back(user.get_string().value);
     }
     for (auto&& acct : account_view["child_account"].get_array().value) {
-      account->child_account.emplace_back(acct.get_utf8().value);
+      account->child_account.emplace_back(acct.get_string().value);
     }
     for (auto&& partition :
          account_view["allowed_partition"].get_array().value) {
-      account->allowed_partition.emplace_back(partition.get_utf8().value);
+      account->allowed_partition.emplace_back(partition.get_string().value);
     }
-    account->parent_account = account_view["parent_account"].get_utf8().value;
-    account->qos = account_view["qos"].get_utf8().value;
+    account->parent_account = account_view["parent_account"].get_string().value;
+    account->qos = account_view["qos"].get_string().value;
     return true;
   }
   return false;
@@ -887,19 +609,19 @@ bool MongodbClient::GetAllAccountInfo(std::list<Ctld::Account>& account_list) {
   for (auto view : cursor) {
     Ctld::Account account;
     account.deleted = view["deleted"].get_bool().value;
-    account.name = view["name"].get_utf8().value;
-    account.description = view["description"].get_utf8().value;
+    account.name = view["name"].get_string().value;
+    account.description = view["description"].get_string().value;
     for (auto&& user : view["users"].get_array().value) {
-      account.users.emplace_back(user.get_utf8().value);
+      account.users.emplace_back(user.get_string().value);
     }
     for (auto&& acct : view["child_account"].get_array().value) {
-      account.child_account.emplace_back(acct.get_utf8().value);
+      account.child_account.emplace_back(acct.get_string().value);
     }
     for (auto&& partition : view["allowed_partition"].get_array().value) {
-      account.allowed_partition.emplace_back(partition.get_utf8().value);
+      account.allowed_partition.emplace_back(partition.get_string().value);
     }
-    account.parent_account = view["parent_account"].get_utf8().value;
-    account.qos = view["qos"].get_utf8().value;
+    account.parent_account = view["parent_account"].get_string().value;
+    account.qos = view["qos"].get_string().value;
     account_list.emplace_back(account);
   }
   return true;
@@ -911,8 +633,8 @@ bool MongodbClient::GetQosInfo(const std::string& name, Ctld::Qos* qos) {
           document{} << "name" << name << bsoncxx::builder::stream::finalize);
   if (result) {
     bsoncxx::document::view user_view = result->view();
-    qos->name = user_view["name"].get_utf8().value;
-    qos->description = user_view["description"].get_utf8().value;
+    qos->name = user_view["name"].get_string().value;
+    qos->description = user_view["description"].get_string().value;
     qos->priority = user_view["priority"].get_int32();
     qos->max_jobs_per_user = user_view["max_jobs_per_user"].get_int32();
     std::cout << bsoncxx::to_json(*result) << "\n";
@@ -1083,10 +805,10 @@ std::list<std::string> MongodbClient::GetUserAllowedPartition(
   if (result && !result->view()["deleted"].get_bool()) {
     bsoncxx::document::view user_view = result->view();
     for (auto&& partition : user_view["allowed_partition"].get_array().value) {
-      allowed_partition.emplace_back(partition.get_utf8().value);
+      allowed_partition.emplace_back(partition.get_string().value);
     }
     if (allowed_partition.empty()) {
-      std::string parent{user_view["account"].get_utf8().value};
+      std::string parent{user_view["account"].get_string().value};
       if (!parent.empty()) {
         allowed_partition = GetAccountAllowedPartition(parent);
       }

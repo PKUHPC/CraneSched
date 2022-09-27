@@ -30,7 +30,7 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["CranedListen"])
         g_config.ListenConf.CranedListenAddr =
-            config["listen"].as<std::string>();
+            config["CranedListen"].as<std::string>();
       else
         g_config.ListenConf.CranedListenAddr = "0.0.0.0";
 

@@ -77,28 +77,16 @@ void InitializeCtldGlobalVariables() {
   g_config.Hostname.assign(hostname);
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
-  g_db_client = std::make_unique<MariadbClient>();
-  if (!g_db_client->Init()) {
-    CRANE_ERROR("Error: Db client init");
-    std::exit(1);
-  }
-
-  g_db_client->SetUserAndPwd(g_config.DbUser, g_config.DbPassword);
-  if (!g_db_client->Connect()) {
-    CRANE_ERROR("Error: Db client connect");
-    std::exit(1);
-  }
-
-  g_mongodb_client = std::make_unique<MongodbClient>();
-  if (!g_mongodb_client) {
+  g_db_client = std::make_unique<MongodbClient>();
+  if (!g_db_client) {
     CRANE_ERROR("Error: MongoDb client Init failed");
     std::exit(1);
   }
-  if (!g_mongodb_client->Connect()) {
+  if (!g_db_client->Connect()) {
     CRANE_ERROR("Error: MongoDb client connect fail");
     std::exit(1);
   }
-  g_mongodb_client->Init();
+  g_db_client->Init();
 
   g_meta_container = std::make_unique<CranedMetaContainerSimpleImpl>();
   g_meta_container->InitFromConfig(g_config);
@@ -279,35 +267,26 @@ int main(int argc, char** argv) {
       else
         g_config.CraneCtldLogFile = "/tmp/cranectld/cranectld.log";
 
-      if (config["DbUser"])
+      if (config["DbUser"]) {
         g_config.DbUser = config["DbUser"].as<std::string>();
-      else
-        std::exit(1);
+        if (config["DbPassword"])
+          g_config.DbPassword = config["DbPassword"].as<std::string>();
+      }
 
-      if (config["DbPassword"])
-        g_config.DbPassword = config["DbPassword"].as<std::string>();
+      if (config["DbHost"])
+        g_config.DbHost = config["DbHost"].as<std::string>();
       else
-        std::exit(1);
+        g_config.DbHost = "localhost";
 
-      if (config["MongodbHost"])
-        g_config.MongodbHost = config["MongodbHost"].as<std::string>();
+      if (config["DbPort"])
+        g_config.DbPort = config["DbPort"].as<std::string>();
       else
-        std::exit(1);
+        g_config.DbPort = "27017";  // default port 27017
 
-      if (config["MongodbPort"])
-        g_config.MongodbPort = config["MongodbPort"].as<std::string>();
+      if (config["DbName"])
+        g_config.DbName = config["DbName"].as<std::string>();
       else
-        std::exit(1);
-
-      if (config["MongodbUser"])
-        g_config.MongodbUser = config["MongodbUser"].as<std::string>();
-      else
-        std::exit(1);
-
-      if (config["MongodbPassword"])
-        g_config.MongodbPassword = config["MongodbPassword"].as<std::string>();
-      else
-        std::exit(1);
+        g_config.DbName = "crane_db";
 
       if (config["CraneCtldForeground"]) {
         auto val = config["CraneCtldForeground"].as<std::string>();
