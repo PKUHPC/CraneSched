@@ -343,13 +343,16 @@ CraneErr TaskScheduler::TerminateRunningTaskNoLock_(uint32_t task_id) {
     return CraneErr::kNonExistent;
 }
 
-CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t task_id) {
+CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t operator_uid, uint32_t task_id) {
   LockGuard pending_guard(m_pending_task_map_mtx_);
   LockGuard running_guard(m_running_task_map_mtx_);
   LockGuard ended_guard(m_ended_task_map_mtx_);
 
   auto pending_iter = m_pending_task_map_.find(task_id);
   if (pending_iter != m_pending_task_map_.end()) {
+    if(operator_uid && pending_iter->second->uid != operator_uid){
+      return CraneErr::kPermissionDenied;
+    }
     auto node = m_pending_task_map_.extract(task_id);
     auto task = std::move(node.mapped());
 
@@ -364,8 +367,15 @@ CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t task_id) {
 
     return CraneErr::kOk;
   }
-
-  return TerminateRunningTaskNoLock_(task_id);
+  auto running_iter = m_running_task_map_.find(task_id);
+  if (running_iter != m_running_task_map_.end()) {
+    if (operator_uid && running_iter->second->uid != operator_uid) {
+      return CraneErr::kPermissionDenied;
+    } else {
+      return TerminateRunningTaskNoLock_(task_id);
+    }
+  }
+  return CraneErr::kNonExistent;
 }
 
 void TaskScheduler::QueryTaskBriefMetaInPartition(
@@ -426,20 +436,20 @@ void TaskScheduler::QueryTaskBriefMetaInPartition(
   }
 }
 
-std::string TaskScheduler::QueryCranedListFromTaskId(uint32_t task_id) {
-  LockGuard running_guard(m_running_task_map_mtx_);
-#warning Check the correctness of the function
-
-  auto iter = m_running_task_map_.find(task_id);
-  std::string craned_list;
-  if (iter != m_running_task_map_.end()) {
-    int task_per_node = iter->second->ntasks_per_node;
-    for (auto& node : iter->second->nodes) {
-      craned_list += node + ":" + std::to_string(task_per_node) + "/n";
-    }
-  }
-  return craned_list;
-}
+//std::string TaskScheduler::QueryCranedListFromTaskId(uint32_t task_id) {
+//  LockGuard running_guard(m_running_task_map_mtx_);
+//#warning Check the correctness of the function
+//
+//  auto iter = m_running_task_map_.find(task_id);
+//  std::string craned_list;
+//  if (iter != m_running_task_map_.end()) {
+//    int task_per_node = iter->second->ntasks_per_node;
+//    for (auto& node : iter->second->nodes) {
+//      craned_list += node + ":" + std::to_string(task_per_node) + "/n";
+//    }
+//  }
+//  return craned_list;
+//}
 
 void MinLoadFirst::CalculateNodeSelectionInfo_(
     const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&

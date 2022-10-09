@@ -65,6 +65,7 @@ enum class CraneErr : uint16_t {
   kExistingTask,
   kInvalidParam,
   kStop,
+  kPermissionDenied,
   kConnectionTimeout,
   kConnectionAborted,
 

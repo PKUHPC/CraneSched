@@ -170,8 +170,9 @@ grpc::Status CraneCtldServiceImpl::CancelTask(
     grpc::ServerContext *context, const crane::grpc::CancelTaskRequest *request,
     crane::grpc::CancelTaskReply *response) {
   uint32_t task_id = request->task_id();
+  uint32_t operator_uid = request->operator_uid();
 
-  CraneErr err = g_task_scheduler->CancelPendingOrRunningTask(task_id);
+  CraneErr err = g_task_scheduler->CancelPendingOrRunningTask(operator_uid, task_id);
   // Todo: make the reason be set here!
   if (err == CraneErr::kOk)
     response->set_ok(true);
@@ -227,13 +228,48 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
     grpc::ServerContext *context,
     const crane::grpc::QueryJobsInPartitionRequest *request,
     crane::grpc::QueryJobsInPartitionReply *response) {
-  uint32_t partition_id;
+  std::list<TaskInCtld> task_list;
 
-  if (!g_meta_container->GetPartitionId(request->partition(), &partition_id))
-    return grpc::Status::OK;
-  g_task_scheduler->QueryTaskBriefMetaInPartition(
-      partition_id, QueryBriefTaskMetaFieldControl{true, true, true, true},
-      response);
+  g_db_client->FetchJobRecordsWithStates(
+      &task_list,
+      {crane::grpc::Running,crane::grpc::Pending, crane::grpc::Cancelled, crane::grpc::Completing});
+
+  auto* meta_list = response->mutable_task_metas();
+  auto* state_list = response->mutable_task_status();
+  auto* allocated_craned_list = response->mutable_allocated_craneds();
+  auto* id_list = response->mutable_task_ids();
+
+  if(request->find_all()){
+    for (auto& task : task_list) {
+      auto* meta_it = meta_list->Add();
+      meta_it->CopyFrom(task.task_to_ctld);
+
+      auto* state_it = state_list->Add();
+      *state_it = task.status;
+
+      auto* node_list_it = allocated_craned_list->Add();
+      *node_list_it = task.allocated_craneds_regex;
+
+      auto* id_it = id_list->Add();
+      *id_it = task.task_id;
+    }
+  } else {
+    for (auto& task : task_list) {
+      if(task.partition_name != request->partition())
+        continue ;
+      auto* meta_it = meta_list->Add();
+      meta_it->CopyFrom(task.task_to_ctld);
+
+      auto* state_it = state_list->Add();
+      *state_it = task.status;
+
+      auto* node_list_it = allocated_craned_list->Add();
+      *node_list_it = task.allocated_craneds_regex;
+
+      auto* id_it = id_list->Add();
+      *id_it = task.task_id;
+    }
+  }
 
   return grpc::Status::OK;
 }
@@ -299,14 +335,14 @@ grpc::Status CraneCtldServiceImpl::QueryCranedListFromTaskId(
     grpc::ServerContext *context,
     const crane::grpc::QueryCranedListFromTaskIdRequest *request,
     crane::grpc::QueryCranedListFromTaskIdReply *response) {
-  auto craned_list =
-      g_task_scheduler->QueryCranedListFromTaskId(request->task_id());
-  if (!craned_list.empty()) {
-    response->set_ok(true);
-    response->set_craned_list(craned_list);
-  } else {
-    response->set_ok(false);
-  }
+//  auto craned_list =
+//      g_task_scheduler->QueryCranedListFromTaskId(request->task_id());
+//  if (!craned_list.empty()) {
+//    response->set_ok(true);
+//    response->set_craned_list(craned_list);
+//  } else {
+//    response->set_ok(false);
+//  }
   return grpc::Status::OK;
 }
 
@@ -422,7 +458,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
     crane::grpc::QueryEntityInfoReply *response) {
   switch (request->entity_type()) {
     case crane::grpc::Account:
-      if (request->name() == "All") {
+      if (request->name().empty()) {
         std::list<Account> account_list;
         g_db_client->GetAllAccountInfo(account_list);
 
@@ -477,7 +513,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
       }
       break;
     case crane::grpc::User:
-      if (request->name() == "All") {
+      if (request->name().empty()) {
         std::list<User> user_list;
         g_db_client->GetAllUserInfo(user_list);
 

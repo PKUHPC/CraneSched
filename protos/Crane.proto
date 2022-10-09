@@ -196,6 +196,7 @@ message TerminateTaskReply {
 
 message CancelTaskRequest {
   uint32 task_id = 1;
+  uint32 operator_uid = 2;
 }
 
 message CancelTaskReply {
@@ -228,6 +229,7 @@ message QueryTaskIdFromPortForwardReply{
 
 message QueryJobsInPartitionRequest {
   string partition = 1;
+  bool find_all = 2;
 }
 
 message QueryJobsInPartitionReply {

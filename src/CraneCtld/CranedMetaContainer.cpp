@@ -355,11 +355,9 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
         part_meta.partition_global_meta.m_resource_total_inc_dead_
             .allocatable_resource;
     auto& alloc_res_avail =
-        part_meta.partition_global_meta.m_resource_total_.allocatable_resource;
+        part_meta.partition_global_meta.m_resource_avail_.allocatable_resource;
     auto& alloc_res_in_use =
         part_meta.partition_global_meta.m_resource_in_use_.allocatable_resource;
-    auto& alloc_res_free =
-        part_meta.partition_global_meta.m_resource_avail_.allocatable_resource;
     part_info->set_name(part_meta.partition_global_meta.name);
     part_info->set_total_nodes(part_meta.partition_global_meta.node_cnt);
     part_info->set_alive_nodes(
@@ -367,11 +365,9 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
     part_info->set_total_cpus(alloc_res_total.cpu_count);
     part_info->set_avail_cpus(alloc_res_avail.cpu_count);
     part_info->set_alloc_cpus(alloc_res_in_use.cpu_count);
-    part_info->set_free_cpus(alloc_res_free.cpu_count);
     part_info->set_total_mem(alloc_res_total.memory_bytes);
     part_info->set_avail_mem(alloc_res_avail.memory_bytes);
     part_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
-    part_info->set_free_mem(alloc_res_free.memory_bytes);
 
     if (part_meta.partition_global_meta.alive_craned_cnt > 0)
       part_info->set_state(crane::grpc::PartitionInfo_PartitionState_UP);
@@ -401,22 +397,18 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
   auto& alloc_res_total = part_meta.partition_global_meta
                               .m_resource_total_inc_dead_.allocatable_resource;
   auto& alloc_res_avail =
-      part_meta.partition_global_meta.m_resource_total_.allocatable_resource;
+      part_meta.partition_global_meta.m_resource_avail_.allocatable_resource;
   auto& alloc_res_in_use =
       part_meta.partition_global_meta.m_resource_in_use_.allocatable_resource;
-  auto& alloc_res_free =
-      part_meta.partition_global_meta.m_resource_avail_.allocatable_resource;
   part_info->set_name(part_meta.partition_global_meta.name);
   part_info->set_total_nodes(part_meta.partition_global_meta.node_cnt);
   part_info->set_alive_nodes(part_meta.partition_global_meta.alive_craned_cnt);
   part_info->set_total_cpus(alloc_res_total.cpu_count);
   part_info->set_avail_cpus(alloc_res_avail.cpu_count);
   part_info->set_alloc_cpus(alloc_res_in_use.cpu_count);
-  part_info->set_free_cpus(alloc_res_free.cpu_count);
   part_info->set_total_mem(alloc_res_total.memory_bytes);
   part_info->set_avail_mem(alloc_res_avail.memory_bytes);
   part_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
-  part_info->set_free_mem(alloc_res_free.memory_bytes);
 
   if (part_meta.partition_global_meta.alive_craned_cnt > 0)
     part_info->set_state(crane::grpc::PartitionInfo_PartitionState_UP);

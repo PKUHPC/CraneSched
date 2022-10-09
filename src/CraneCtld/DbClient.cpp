@@ -115,9 +115,14 @@ bool MongodbClient::InsertJob(
   task_to_ctld.SerializeToString(task_to_ctld_str);
 
   auto builder = bsoncxx::builder::stream::document{};
+  // Different from mariadb, the data type of each attribute column in mongodb
+  // depends on the data type at the time of insertion. Since the function
+  // UpdateJobRecordFields  treats all attributes indiscriminately, you need to
+  // use the string data type for all attributes
   bsoncxx::document::value doc_value =
       builder << "job_db_inx" << std::to_string(last_id + 1) << "mod_time"
-              << std::to_string(mod_timestamp) << "deleted" << false
+              << std::to_string(mod_timestamp) << "deleted"
+              << "0"
               << "account" << account << "cpus_req" << std::to_string(cpu)
               << "mem_req" << std::to_string(memory_bytes) << "job_name"
               << job_name << "env" << env << "id_job" << std::to_string(id_job)
@@ -125,8 +130,14 @@ bool MongodbClient::InsertJob(
               << std::to_string(id_group) << "nodelist" << nodelist
               << "nodes_alloc" << std::to_string(nodes_alloc) << "node_inx"
               << node_inx << "partition_name" << partition_name << "priority"
-              << std::to_string(priority) << "time_eligible" << 0
-              << "time_start" << 0 << "time_end" << 0 << "time_suspended" << 0
+              << std::to_string(priority) << "time_eligible"
+              << "0"
+              << "time_start"
+              << "0"
+              << "time_end"
+              << "0"
+              << "time_suspended"
+              << "0"
               << "script" << script << "state" << std::to_string(state)
               << "timelimit" << std::to_string(timelimit) << "time_submit"
               << std::to_string(submit_timestamp) << "work_dir" << work_dir
@@ -192,10 +203,12 @@ bool MongodbClient::FetchJobRecordsWithStates(
         std::strtol(view["id_user"].get_string().value.data(), nullptr, 10);
     task.gid =
         std::strtol(view["id_group"].get_string().value.data(), nullptr, 10);
+    task.allocated_craneds_regex = view["nodelist"].get_string().value.data();
     task.partition_name = view["partition_name"].get_string().value;
-    task.start_time =
-        absl::FromUnixSeconds(view["time_start"].get_int32().value);
-    task.end_time = absl::FromUnixSeconds(view["time_end"].get_int32().value);
+    task.start_time = absl::FromUnixSeconds(
+        std::strtol(view["time_start"].get_string().value.data(), nullptr, 10));
+    task.end_time = absl::FromUnixSeconds(
+        std::strtol(view["time_end"].get_string().value.data(), nullptr, 10));
 
     task.meta = Ctld::BatchMetaInTask{};
     auto& batch_meta = std::get<Ctld::BatchMetaInTask>(task.meta);
