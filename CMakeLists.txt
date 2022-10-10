@@ -135,6 +135,8 @@ pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
 add_library(concurrentqueue INTERFACE)
 target_include_directories(concurrentqueue INTERFACE ${DEPENDENCIES_PRE_INSTALLED_DIR}/concurrentqueue/include)
 
+add_definitions(-DCRANE_BUILD_DIRECTORY=\("${CMAKE_BINARY_DIR}"\))
+
 # Proto
 add_subdirectory(protos)
 

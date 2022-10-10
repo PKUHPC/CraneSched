@@ -12,6 +12,7 @@ add_subdirectory(LibEvent)
 add_subdirectory(cxxopts)
 add_subdirectory(grpc)
 add_subdirectory(libuv)
+add_subdirectory(unqlite)
 
 # Slowest. Place it at last.
 add_subdirectory(mongodb-cxx-driver)
