@@ -2,11 +2,10 @@ add_executable(misc_test
         grpc_example_test.cpp
         libevent_example_test.cpp
         libuv_test.cpp
-        mariadb_connector_c_test.cpp
         Misc_test.cpp
         mongodb_test.cpp
         yaml_cpp_test.cpp
-        )
+        unqlite_test.cpp)
 
 target_include_directories(misc_test PRIVATE ${CMAKE_SOURCE_DIR}/src/CraneCtld)
 
@@ -29,8 +28,9 @@ target_link_libraries(misc_test
 
         Threads::Threads
 
-        mariadbclient
         mongo::mongocxx_static
+        unqlite
+
         yaml-cpp
         )
 

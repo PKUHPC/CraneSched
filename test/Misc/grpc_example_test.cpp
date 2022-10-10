@@ -233,7 +233,7 @@ class AsyncBidiMathServer {
             m_next_client_index_++;
           } else {
             SPDLOG_ERROR("[ServerCq] Unexpected status {} of Client {}!",
-                         status, index);
+                         (uint8_t)status, index);
           }
         }
       } else {
@@ -457,7 +457,7 @@ class AsyncBidiMathServer {
             m_conn_cq_.Shutdown();
           } else {
             SPDLOG_ERROR("[Server | Client {}] Unexpected status {}!", index,
-                         status);
+                         (uint8_t)status);
           }
 
         } else {

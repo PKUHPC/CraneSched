@@ -90,6 +90,10 @@ inline const char* kDefaultCranedScriptDir =
     DEFAULT_CRANE_TEMP_DIR "/craned/scripts";
 inline const char* kDefaultCranedUnixSockPath =
     DEFAULT_CRANE_TEMP_DIR "/craned.sock";
+inline const char* kDefaultCraneCtldMutexFile =
+    DEFAULT_CRANE_TEMP_DIR "/cranectld.lock";
+inline const char* kDefaultCranedMutexFile =
+    DEFAULT_CRANE_TEMP_DIR "/craned.lock";
 
 #undef DEFAULT_CRANE_TEMP_DIR
 
