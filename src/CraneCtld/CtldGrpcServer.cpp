@@ -331,21 +331,6 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryCranedListFromTaskId(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryCranedListFromTaskIdRequest *request,
-    crane::grpc::QueryCranedListFromTaskIdReply *response) {
-//  auto craned_list =
-//      g_task_scheduler->QueryCranedListFromTaskId(request->task_id());
-//  if (!craned_list.empty()) {
-//    response->set_ok(true);
-//    response->set_craned_list(craned_list);
-//  } else {
-//    response->set_ok(false);
-//  }
-  return grpc::Status::OK;
-}
-
 grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {

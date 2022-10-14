@@ -346,8 +346,6 @@ service CraneCtld {
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
 
-  rpc QueryCranedListFromTaskId(QueryCranedListFromTaskIdRequest) returns(QueryCranedListFromTaskIdReply);
-
 
   /* RPCs called from SrunX */
   /* When SrunX request an interactive job, it will first request SrunX to allocate

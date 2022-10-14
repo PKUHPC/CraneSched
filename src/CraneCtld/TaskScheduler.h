@@ -156,8 +156,6 @@ class TaskScheduler {
     return QueryCranedIdOfRunningTaskNoLock_(task_id, craned_id);
   }
 
-//  std::string QueryCranedListFromTaskId(uint32_t task_id);
-
   CraneErr CancelPendingOrRunningTask(uint32_t operator_uid, uint32_t task_id);
 
   CraneErr TerminateRunningTask(uint32_t task_id) {

@@ -56,11 +56,6 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::TaskStatusChangeRequest *request,
       crane::grpc::TaskStatusChangeReply *response) override;
 
-  grpc::Status QueryCranedListFromTaskId(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryCranedListFromTaskIdRequest *request,
-      crane::grpc::QueryCranedListFromTaskIdReply *response) override;
-
   grpc::Status CancelTask(grpc::ServerContext *context,
                           const crane::grpc::CancelTaskRequest *request,
                           crane::grpc::CancelTaskReply *response) override;

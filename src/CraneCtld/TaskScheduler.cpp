@@ -436,21 +436,6 @@ void TaskScheduler::QueryTaskBriefMetaInPartition(
   }
 }
 
-//std::string TaskScheduler::QueryCranedListFromTaskId(uint32_t task_id) {
-//  LockGuard running_guard(m_running_task_map_mtx_);
-//#warning Check the correctness of the function
-//
-//  auto iter = m_running_task_map_.find(task_id);
-//  std::string craned_list;
-//  if (iter != m_running_task_map_.end()) {
-//    int task_per_node = iter->second->ntasks_per_node;
-//    for (auto& node : iter->second->nodes) {
-//      craned_list += node + ":" + std::to_string(task_per_node) + "/n";
-//    }
-//  }
-//  return craned_list;
-//}
-
 void MinLoadFirst::CalculateNodeSelectionInfo_(
     const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
         running_tasks,
