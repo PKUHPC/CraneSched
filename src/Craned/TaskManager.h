@@ -186,7 +186,7 @@ class TaskManager {
   void Wait();
 
   // Ask TaskManager to stop its event loop.
-  void Shutdown();
+  void ShutdownAsync();
 
   /***
    * Set the callback function will be called when SIGINT is triggered.
@@ -368,6 +368,7 @@ class TaskManager {
 
   static void EvSigchldCb_(evutil_socket_t sig, short events, void* user_data);
 
+  // Callback function to handle SIGINT sent by Ctrl+C
   static void EvSigintCb_(evutil_socket_t sig, short events, void* user_data);
 
   static void EvGrpcExecuteTaskCb_(evutil_socket_t efd, short events,
@@ -446,10 +447,6 @@ class TaskManager {
 
   // When this event is triggered, the event loop will exit.
   struct event* m_ev_exit_event_;
-  // Use eventfd here because the user-defined event sometimes can't be
-  // triggered by event_activate(). We have no interest in finding out why
-  // event_activate() can't work and just use eventfd as a reliable solution.
-  int m_ev_exit_fd_;
 
   struct event* m_ev_task_status_change_;
   ConcurrentQueue<TaskStatusChange> m_task_status_change_queue_;

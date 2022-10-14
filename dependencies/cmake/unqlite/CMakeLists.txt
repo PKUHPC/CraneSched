@@ -5,7 +5,7 @@ FetchContent_Declare(unqlite_repo
         URL_HASH SHA256=2918635c5e14156f7f7b836427f964d2a34809c71f36b29cce974287f39f41ca
         )
 
-SET(ENABLE_THREADS ON)
+SET(ENABLE_THREADS ON CACHE BOOL "unqlite multi-threading support" FORCE)
 FetchContent_MakeAvailable(unqlite_repo)
 
 target_include_directories(unqlite PUBLIC ${unqlite_repo_SOURCE_DIR})

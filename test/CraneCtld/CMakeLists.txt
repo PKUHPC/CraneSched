@@ -51,7 +51,6 @@ target_link_libraries(cranectld_test
         cxxopts
         Boost::boost
         Boost::thread
-        Boost::fiber
 
         mariadbclient
         mongo::mongocxx_static

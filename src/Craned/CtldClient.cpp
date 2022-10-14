@@ -38,10 +38,13 @@ void CtldClient::AsyncSendThread_() {
 
   while (true) {
     bool has_msg = m_task_status_change_mtx_.LockWhenWithTimeout(
-        cond, absl::Milliseconds(300));
+        cond, absl::Milliseconds(50));
     if (!has_msg) {
       m_task_status_change_mtx_.Unlock();
-      continue;
+      if (m_thread_stop_)
+        break;
+      else
+        continue;
     }
 
     bool connected = m_ctld_channel_->WaitForConnected(
