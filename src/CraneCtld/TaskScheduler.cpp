@@ -350,9 +350,11 @@ CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t operator_uid, uint32
 
   auto pending_iter = m_pending_task_map_.find(task_id);
   if (pending_iter != m_pending_task_map_.end()) {
+#warning fix here!
     if(operator_uid && pending_iter->second->uid != operator_uid){
       return CraneErr::kPermissionDenied;
     }
+
     auto node = m_pending_task_map_.extract(task_id);
     auto task = std::move(node.mapped());
 
@@ -367,8 +369,10 @@ CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t operator_uid, uint32
 
     return CraneErr::kOk;
   }
+
   auto running_iter = m_running_task_map_.find(task_id);
   if (running_iter != m_running_task_map_.end()) {
+#warning fix here!
     if (operator_uid && running_iter->second->uid != operator_uid) {
       return CraneErr::kPermissionDenied;
     } else {
