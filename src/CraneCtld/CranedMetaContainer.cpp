@@ -265,12 +265,12 @@ bool CranedMetaContainerSimpleImpl::GetCraneId(const std::string& hostname,
   return true;
 }
 
-crane::grpc::QueryCranedInfoReply*
+crane::grpc::QueryCranedInfoReply
 CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
   LockGuard guard(mtx_);
 
-  auto* reply = new crane::grpc::QueryCranedInfoReply;
-  auto* list = reply->mutable_craned_info_list();
+  crane::grpc::QueryCranedInfoReply reply;
+  auto* list = reply.mutable_craned_info_list();
 
   for (auto&& [part_name, part_meta] : partition_metas_map_) {
     for (auto&& [craned_index, craned_meta] : part_meta.craned_meta_map) {
@@ -299,12 +299,12 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
   return reply;
 }
 
-crane::grpc::QueryCranedInfoReply*
+crane::grpc::QueryCranedInfoReply
 CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   LockGuard guard(mtx_);
 
-  auto* reply = new crane::grpc::QueryCranedInfoReply;
-  auto* list = reply->mutable_craned_info_list();
+  crane::grpc::QueryCranedInfoReply reply;
+  auto* list = reply.mutable_craned_info_list();
 
   auto it1 = node_hostname_part_id_map_.find(node_name);
   if (it1 == node_hostname_part_id_map_.end()) {
@@ -342,12 +342,12 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   return reply;
 }
 
-crane::grpc::QueryPartitionInfoReply*
+crane::grpc::QueryPartitionInfoReply
 CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
   LockGuard guard(mtx_);
 
-  auto* reply = new crane::grpc::QueryPartitionInfoReply;
-  auto* list = reply->mutable_partition_info();
+  crane::grpc::QueryPartitionInfoReply reply;
+  auto* list = reply.mutable_partition_info();
 
   for (auto&& [part_name, part_meta] : partition_metas_map_) {
     auto* part_info = list->Add();
@@ -380,13 +380,13 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
   return reply;
 }
 
-crane::grpc::QueryPartitionInfoReply*
+crane::grpc::QueryPartitionInfoReply
 CranedMetaContainerSimpleImpl::QueryPartitionInfo(
     const std::string& partition_name) {
   LockGuard guard(mtx_);
 
-  auto* reply = new crane::grpc::QueryPartitionInfoReply;
-  auto* list = reply->mutable_partition_info();
+  crane::grpc::QueryPartitionInfoReply reply;
+  auto* list = reply.mutable_partition_info();
 
   auto it = partition_name_id_map_.find(partition_name);
   if (it == partition_name_id_map_.end()) return reply;

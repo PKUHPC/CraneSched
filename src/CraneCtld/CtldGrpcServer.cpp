@@ -191,16 +191,11 @@ grpc::Status CraneCtldServiceImpl::QueryCranedInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryCranedInfoRequest *request,
     crane::grpc::QueryCranedInfoReply *response) {
-  crane::grpc::QueryCranedInfoReply *reply;
 
   if (request->craned_name().empty()) {
-    reply = g_meta_container->QueryAllCranedInfo();
-    response->Swap(reply);
-    delete reply;
+    *response = g_meta_container->QueryAllCranedInfo();
   } else {
-    reply = g_meta_container->QueryCranedInfo(request->craned_name());
-    response->Swap(reply);
-    delete reply;
+    *response = g_meta_container->QueryCranedInfo(request->craned_name());
   }
 
   return grpc::Status::OK;
@@ -210,16 +205,11 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryPartitionInfoRequest *request,
     crane::grpc::QueryPartitionInfoReply *response) {
-  crane::grpc::QueryPartitionInfoReply *reply;
 
   if (request->partition_name().empty()) {
-    reply = g_meta_container->QueryAllPartitionInfo();
-    response->Swap(reply);
-    delete reply;
+    *response = g_meta_container->QueryAllPartitionInfo();
   } else {
-    reply = g_meta_container->QueryPartitionInfo(request->partition_name());
-    response->Swap(reply);
-    delete reply;
+    *response = g_meta_container->QueryPartitionInfo(request->partition_name());
   }
 
   return grpc::Status::OK;

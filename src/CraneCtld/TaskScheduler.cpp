@@ -343,15 +343,15 @@ CraneErr TaskScheduler::TerminateRunningTaskNoLock_(uint32_t task_id) {
     return CraneErr::kNonExistent;
 }
 
-CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t operator_uid, uint32_t task_id) {
+CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t operator_uid,
+                                                   uint32_t task_id) {
   LockGuard pending_guard(m_pending_task_map_mtx_);
   LockGuard running_guard(m_running_task_map_mtx_);
   LockGuard ended_guard(m_ended_task_map_mtx_);
 
   auto pending_iter = m_pending_task_map_.find(task_id);
   if (pending_iter != m_pending_task_map_.end()) {
-#warning fix here!
-    if(operator_uid && pending_iter->second->uid != operator_uid){
+    if (operator_uid != 0 && pending_iter->second->uid != operator_uid) {
       return CraneErr::kPermissionDenied;
     }
 
@@ -372,8 +372,7 @@ CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t operator_uid, uint32
 
   auto running_iter = m_running_task_map_.find(task_id);
   if (running_iter != m_running_task_map_.end()) {
-#warning fix here!
-    if (operator_uid && running_iter->second->uid != operator_uid) {
+    if (operator_uid != 0 && running_iter->second->uid != operator_uid) {
       return CraneErr::kPermissionDenied;
     } else {
       return TerminateRunningTaskNoLock_(task_id);
@@ -841,33 +840,33 @@ void MinLoadFirst::NodeSelect(
 
       absl::Time task_end_time_plus_1s =
           expected_start_time + task->time_limit + absl::Seconds(1);
-      //#ifndef NDEBUG
-      //      CRANE_TRACE("\t task #{} end time + 1s = {}, ", task_id,
-      //                   absl::ToInt64Seconds(task_end_time_plus_1s - now));
-      //#endif
-      //#ifndef NDEBUG
-      //        if (task_duration_end_it == time_avail_res_map.end())
-      //          CRANE_TRACE(
-      //              "\t Insert duration [ now+{}s , inf ) : cpu: {} for task
-      //              #{}", absl::ToInt64Seconds(task_end_time_plus_1s - now),
-      //              task_duration_end_it->second.allocatable_resource.cpu_count,
-      //              task_id);
-      //        else
-      //          CRANE_TRACE(
-      //              "\t Insert duration [ now+{}s , now+{}s ) : cpu: {} for
-      //              task #{}", absl::ToInt64Seconds(task_end_time_plus_1s -
-      //              now), absl::ToInt64Seconds(task_duration_end_it->first -
-      //              now),
-      //              task_duration_end_it->second.allocatable_resource.cpu_count,
-      //              task_id);
-      //#endif
+      // #ifndef NDEBUG
+      //       CRANE_TRACE("\t task #{} end time + 1s = {}, ", task_id,
+      //                    absl::ToInt64Seconds(task_end_time_plus_1s - now));
+      // #endif
+      // #ifndef NDEBUG
+      //         if (task_duration_end_it == time_avail_res_map.end())
+      //           CRANE_TRACE(
+      //               "\t Insert duration [ now+{}s , inf ) : cpu: {} for task
+      //               #{}", absl::ToInt64Seconds(task_end_time_plus_1s - now),
+      //               task_duration_end_it->second.allocatable_resource.cpu_count,
+      //               task_id);
+      //         else
+      //           CRANE_TRACE(
+      //               "\t Insert duration [ now+{}s , now+{}s ) : cpu: {} for
+      //               task #{}", absl::ToInt64Seconds(task_end_time_plus_1s -
+      //               now), absl::ToInt64Seconds(task_duration_end_it->first -
+      //               now),
+      //               task_duration_end_it->second.allocatable_resource.cpu_count,
+      //               task_id);
+      // #endif
       //
-      //        task_duration_end_it
-      //                        v
-      // *-----------*----------*-------------- time_avail_res_map (Time Point)
-      //                  ^^
-      //   task_end_time--||-----time_end_time_plus_1s
-      //  time_avail_res_map.count(task_end_time_plus_1s) == 0 holds.
+      //         task_duration_end_it
+      //                         v
+      //  *-----------*----------*-------------- time_avail_res_map (Time Point)
+      //                   ^^
+      //    task_end_time--||-----time_end_time_plus_1s
+      //   time_avail_res_map.count(task_end_time_plus_1s) == 0 holds.
 
       auto task_duration_begin_it =
           time_avail_res_map.upper_bound(expected_start_time);
@@ -958,32 +957,33 @@ void MinLoadFirst::NodeSelect(
         }
       }
 
-      //#ifndef NDEBUG
-      //      {
-      //        std::string str{"\n"};
-      //        str.append(fmt::format("Node ({}, {}): \n", task->partition_id,
-      //                               task->node_index));
-      //        auto prev_iter = time_avail_res_map.begin();
-      //        auto iter = std::next(prev_iter);
-      //        for (; iter != time_avail_res_map.end(); prev_iter++, iter++) {
-      //          str.append(
-      //              fmt::format("\t[ now+{}s , now+{}s ) Available allocatable
-      //              "
-      //                          "res: cpu core {}, mem {}\n",
-      //                          absl::ToInt64Seconds(prev_iter->first - now),
-      //                          absl::ToInt64Seconds(iter->first - now),
-      //                          prev_iter->second.allocatable_resource.cpu_count,
-      //                          prev_iter->second.allocatable_resource.memory_bytes));
-      //        }
-      //        str.append(
-      //            fmt::format("\t[ now+{}s , inf ) Available allocatable "
-      //                        "res: cpu core {}, mem {}\n",
-      //                        absl::ToInt64Seconds(prev_iter->first - now),
-      //                        prev_iter->second.allocatable_resource.cpu_count,
-      //                        prev_iter->second.allocatable_resource.memory_bytes));
-      //        CRANE_TRACE("{}", str);
-      //      }
-      //#endif
+      // #ifndef NDEBUG
+      //       {
+      //         std::string str{"\n"};
+      //         str.append(fmt::format("Node ({}, {}): \n", task->partition_id,
+      //                                task->node_index));
+      //         auto prev_iter = time_avail_res_map.begin();
+      //         auto iter = std::next(prev_iter);
+      //         for (; iter != time_avail_res_map.end(); prev_iter++, iter++) {
+      //           str.append(
+      //               fmt::format("\t[ now+{}s , now+{}s ) Available
+      //               allocatable
+      //               "
+      //                           "res: cpu core {}, mem {}\n",
+      //                           absl::ToInt64Seconds(prev_iter->first - now),
+      //                           absl::ToInt64Seconds(iter->first - now),
+      //                           prev_iter->second.allocatable_resource.cpu_count,
+      //                           prev_iter->second.allocatable_resource.memory_bytes));
+      //         }
+      //         str.append(
+      //             fmt::format("\t[ now+{}s , inf ) Available allocatable "
+      //                         "res: cpu core {}, mem {}\n",
+      //                         absl::ToInt64Seconds(prev_iter->first - now),
+      //                         prev_iter->second.allocatable_resource.cpu_count,
+      //                         prev_iter->second.allocatable_resource.memory_bytes));
+      //         CRANE_TRACE("{}", str);
+      //       }
+      // #endif
     }
 
     if (expected_start_time == now) {

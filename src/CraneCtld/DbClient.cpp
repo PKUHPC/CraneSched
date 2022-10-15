@@ -111,8 +111,8 @@ bool MongodbClient::InsertJob(
   }
   *job_db_inx = last_id + 1;
 
-  auto* task_to_ctld_str = new std::string();
-  task_to_ctld.SerializeToString(task_to_ctld_str);
+  auto task_to_ctld_str = std::make_unique<std::string>();
+  task_to_ctld.SerializeToString(task_to_ctld_str.get());
 
   auto builder = bsoncxx::builder::stream::document{};
   // Different from mariadb, the data type of each attribute column in mongodb
@@ -846,7 +846,8 @@ std::list<std::string> MongodbClient::GetAccountAllowedPartition(
 bool MongodbClient::SetUserAllowedPartition(
     const std::string& name, const std::list<std::string>& partitions,
     crane::grpc::ModifyEntityRequest::Type type) {
-  if (!GetExistedUserInfo(name, new Ctld::User)) {
+  Ctld::User user;
+  if (!GetExistedUserInfo(name, &user)) {
     return false;
   }
 
@@ -906,7 +907,8 @@ bool MongodbClient::SetUserAllowedPartition(
 bool MongodbClient::SetAccountAllowedPartition(
     const std::string& name, const std::list<std::string>& partitions,
     crane::grpc::ModifyEntityRequest::Type type) {
-  if (!GetExistedAccountInfo(name, new Ctld::Account)) {
+  Ctld::Account account;
+  if (!GetExistedAccountInfo(name, &account)) {
     return false;
   }
 
