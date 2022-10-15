@@ -172,7 +172,8 @@ grpc::Status CraneCtldServiceImpl::CancelTask(
   uint32_t task_id = request->task_id();
   uint32_t operator_uid = request->operator_uid();
 
-  CraneErr err = g_task_scheduler->CancelPendingOrRunningTask(operator_uid, task_id);
+  CraneErr err =
+      g_task_scheduler->CancelPendingOrRunningTask(operator_uid, task_id);
   // Todo: make the reason be set here!
   if (err == CraneErr::kOk)
     response->set_ok(true);
@@ -231,42 +232,41 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
   std::list<TaskInCtld> task_list;
 
   g_db_client->FetchJobRecordsWithStates(
-      &task_list,
-      {crane::grpc::Running,crane::grpc::Pending, crane::grpc::Cancelled, crane::grpc::Completing});
+      &task_list, {crane::grpc::Running, crane::grpc::Pending,
+                   crane::grpc::Cancelled, crane::grpc::Completing});
 
-  auto* meta_list = response->mutable_task_metas();
-  auto* state_list = response->mutable_task_status();
-  auto* allocated_craned_list = response->mutable_allocated_craneds();
-  auto* id_list = response->mutable_task_ids();
+  auto *meta_list = response->mutable_task_metas();
+  auto *state_list = response->mutable_task_status();
+  auto *allocated_craned_list = response->mutable_allocated_craneds();
+  auto *id_list = response->mutable_task_ids();
 
-  if(request->find_all()){
-    for (auto& task : task_list) {
-      auto* meta_it = meta_list->Add();
+  if (request->find_all()) {
+    for (auto &task : task_list) {
+      auto *meta_it = meta_list->Add();
       meta_it->CopyFrom(task.task_to_ctld);
 
-      auto* state_it = state_list->Add();
+      auto *state_it = state_list->Add();
       *state_it = task.status;
 
-      auto* node_list_it = allocated_craned_list->Add();
+      auto *node_list_it = allocated_craned_list->Add();
       *node_list_it = task.allocated_craneds_regex;
 
-      auto* id_it = id_list->Add();
+      auto *id_it = id_list->Add();
       *id_it = task.task_id;
     }
   } else {
-    for (auto& task : task_list) {
-      if(task.partition_name != request->partition())
-        continue ;
-      auto* meta_it = meta_list->Add();
+    for (auto &task : task_list) {
+      if (task.partition_name != request->partition()) continue;
+      auto *meta_it = meta_list->Add();
       meta_it->CopyFrom(task.task_to_ctld);
 
-      auto* state_it = state_list->Add();
+      auto *state_it = state_list->Add();
       *state_it = task.status;
 
-      auto* node_list_it = allocated_craned_list->Add();
+      auto *node_list_it = allocated_craned_list->Add();
       *node_list_it = task.allocated_craneds_regex;
 
-      auto* id_it = id_list->Add();
+      auto *id_it = id_list->Add();
       *id_it = task.task_id;
     }
   }
@@ -539,7 +539,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
       }
       break;
     case crane::grpc::Qos:
-      break;
+      [[fallthrough]];
     default:
       break;
   }
@@ -565,11 +565,7 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryClusterInfoRequest *request,
     crane::grpc::QueryClusterInfoReply *response) {
-  crane::grpc::QueryClusterInfoReply *reply;
-  reply = g_meta_container->QueryClusterInfo();
-  response->Swap(reply);
-  delete reply;
-
+  *response = g_meta_container->QueryClusterInfo();
   return grpc::Status::OK;
 }
 

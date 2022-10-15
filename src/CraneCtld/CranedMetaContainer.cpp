@@ -420,11 +420,11 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
   return reply;
 }
 
-crane::grpc::QueryClusterInfoReply*
+crane::grpc::QueryClusterInfoReply
 CranedMetaContainerSimpleImpl::QueryClusterInfo() {
   LockGuard guard(mtx_);
-  auto* reply = new crane::grpc::QueryClusterInfoReply;
-  auto* partition_craned_list = reply->mutable_partition_craned();
+  crane::grpc::QueryClusterInfoReply reply;
+  auto* partition_craned_list = reply.mutable_partition_craned();
 
   for (auto&& [part_name, part_meta] : partition_metas_map_) {
     auto* part_craned_info = partition_craned_list->Add();
