@@ -1,40 +1,85 @@
-add_executable(misc_test
-        grpc_example_test.cpp
-        libevent_example_test.cpp
-        libuv_test.cpp
-        Misc_test.cpp
-        mongodb_test.cpp
-        yaml_cpp_test.cpp
-        unqlite_test.cpp)
+# Add Linker flag for c++ 17 filesystem library in this folder.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    link_libraries(stdc++fs)
+endif ()
 
-target_include_directories(misc_test PRIVATE ${CMAKE_SOURCE_DIR}/src/CraneCtld)
+include(GoogleTest)
 
-target_link_libraries(misc_test
-        GTest::gtest
-        GTest::gmock
-        GTest::gmock_main
-
-        shared_test_impl_lib
-
-        Utility_PublicHeader
-        Utility_AnonymousPipe
-
+add_executable(misc_grpc_example_test grpc_example_test.cpp)
+target_link_libraries(misc_grpc_example_test
+        GTest::gtest GTest::gtest_main
         concurrentqueue
-        absl::btree
+        shared_test_impl_lib)
+gtest_discover_tests(misc_grpc_example_test)
+
+add_executable(misc_libevent_example_test libevent_example_test.cpp)
+target_link_libraries(misc_libevent_example_test
+        GTest::gtest GTest::gtest_main
+        Utility_AnonymousPipe
         libevent::core
         libevent::pthreads
-
-        uv::uv-static
-
         Threads::Threads
+        spdlog::spdlog
+        )
+gtest_discover_tests(misc_libevent_example_test)
 
+add_executable(misc_libuv_test libuv_test.cpp)
+target_link_libraries(misc_libuv_test
+        GTest::gtest GTest::gtest_main
+        uv::uv-static
+        Threads::Threads
+        )
+gtest_discover_tests(misc_libuv_test)
+
+add_executable(misc_Misc_test Misc_test.cpp)
+target_link_libraries(misc_Misc_test
+        GTest::gtest GTest::gtest_main
+        Threads::Threads
+        absl::btree
+        absl::synchronization
+        spdlog::spdlog
+        )
+gtest_discover_tests(misc_Misc_test)
+
+
+add_executable(mariadb_connector_c_test mariadb_connector_c_test.cpp)
+target_link_libraries(mariadb_connector_c_test
+        GTest::gtest GTest::gtest_main
+        Threads::Threads
+        absl::strings
+        mariadbclient
+        Utility_PublicHeader
+        spdlog::spdlog
+        )
+target_include_directories(mariadb_connector_c_test PRIVATE ${CMAKE_SOURCE_DIR}/src/CraneCtld)
+gtest_discover_tests(mariadb_connector_c_test)
+
+add_executable(misc_mongodb_test mongodb_test.cpp)
+target_link_libraries(misc_mongodb_test
+        GTest::gtest GTest::gtest_main
+        Threads::Threads
         mongo::mongocxx_static
-        unqlite
+        spdlog::spdlog
+        absl::btree
+        Utility_PublicHeader
+        )
+target_include_directories(misc_mongodb_test PRIVATE ${CMAKE_SOURCE_DIR}/src/CraneCtld)
+gtest_discover_tests(misc_mongodb_test)
 
+add_executable(misc_yaml_test yaml_cpp_test.cpp)
+target_link_libraries(misc_yaml_test
+        GTest::gtest GTest::gtest_main
+        Threads::Threads
+        spdlog::spdlog
         yaml-cpp
         )
+gtest_discover_tests(misc_yaml_test)
 
-# Linker flag for c++ 17 filesystem library
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_link_libraries(misc_test stdc++fs)
-endif ()
+add_executable(misc_unqlite_test unqlite_test.cpp)
+target_link_libraries(misc_unqlite_test
+        GTest::gtest GTest::gtest_main
+        Threads::Threads
+        spdlog::spdlog
+        unqlite
+        )
+gtest_discover_tests(misc_unqlite_test)

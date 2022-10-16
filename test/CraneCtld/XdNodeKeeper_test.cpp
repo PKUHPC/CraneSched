@@ -4,7 +4,6 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
-#include <boost/fiber/barrier.hpp>
 #include <boost/interprocess/anonymous_shared_memory.hpp>
 #include <boost/interprocess/mapped_region.hpp>
 #include <chrono>

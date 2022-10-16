@@ -23,3 +23,6 @@ target_link_libraries(craned_test
         test_proto
         shared_test_impl_lib
         )
+
+include(GoogleTest)
+gtest_discover_tests(craned_test)

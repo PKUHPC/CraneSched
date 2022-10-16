@@ -192,7 +192,7 @@ TEST_F(LibEventTest, IoRedirectAndDynamicTaskAdding) {
 static void CustomEventCb(int sock, short which, void *arg) {
   static int times = 0;
   std::this_thread::sleep_for(std::chrono::seconds(3));
-  CRANE_INFO("CustomEventCb Called");
+  SPDLOG_INFO("CustomEventCb Called");
   times++;
   if (times == 2) {
     timeval val{0, 0};
@@ -215,14 +215,14 @@ TEST_F(LibEventTest, CustomEvent) {
 
   event_base_dispatch(m_ev_base_);
 
-  CRANE_INFO("Loop Exit");
+  SPDLOG_INFO("Loop Exit");
 
   t.join();
   std::this_thread::sleep_for(std::chrono::seconds(1));
   event_free(ev);
 }
 
-static void onTimer(int, short, void *arg) { CRANE_INFO("onTimer!"); }
+static void onTimer(int, short, void *arg) { SPDLOG_INFO("onTimer!"); }
 
 TEST_F(LibEventTest, TimerEvent) {
   struct event *timer_event;
@@ -234,7 +234,7 @@ TEST_F(LibEventTest, TimerEvent) {
   evtimer_add(timer_event, &tv);
 
   event_base_dispatch(m_ev_base_);
-  CRANE_INFO("Loop Exit");
+  SPDLOG_INFO("Loop Exit");
 
   event_free(timer_event);
 }
