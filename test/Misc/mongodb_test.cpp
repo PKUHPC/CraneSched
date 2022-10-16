@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <spdlog/spdlog.h>
 
 #include <bsoncxx/builder/stream/document.hpp>
 #include <bsoncxx/json.hpp>
@@ -88,7 +89,7 @@ bool MongodbClient::Connect() {
   m_client = new (std::nothrow) mongocxx::client(uri);
 
   if (!m_client) {
-    CRANE_ERROR("Mongodb error: can't connect to localhost:27017");
+    SPDLOG_ERROR("Mongodb error: can't connect to localhost:27017");
     return false;
   }
   return true;
@@ -116,7 +117,7 @@ void MongodbClient::Init() {
       new mongocxx::collection(m_database->collection(m_qos_collection_name));
 
   if (!m_account_collection || !m_user_collection || !m_qos_collection) {
-    CRANE_ERROR("Mongodb Error: can't get instance of crane_db tables");
+    SPDLOG_ERROR("Mongodb Error: can't get instance of crane_db tables");
     std::exit(1);
   }
 }

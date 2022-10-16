@@ -76,7 +76,7 @@ baseurl=https://mirrors.tuna.tsinghua.edu.cn/centos/$releasever/centosplus/$base
 #mirrorlist=http://mirrorlist.centos.org/?release=$releasever&arch=$basearch&repo=centosplus
 gpgcheck=1
 enabled=0
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
 ```
 
 ```shell

@@ -51,18 +51,18 @@ target_link_libraries(cranectld_test
         cxxopts
         Boost::boost
         Boost::thread
-        Boost::fiber
 
-        mariadbclient
         mongo::mongocxx_static
         bs_thread_pool
         yaml-cpp
 
         Utility_cgroup
         Utility_PublicHeader
-        Utility_AnonymousPipe
         crane_proto_lib
 
         test_proto
         shared_test_impl_lib
         )
+
+include(GoogleTest)
+gtest_discover_tests(cranectld_test)

@@ -3,6 +3,11 @@ cmake_minimum_required(VERSION 3.16)
 # Let cmake apply IPO flags for all compilers and do not output warnings.
 set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 
+# When the option() command sees a normal variable of the given name,
+# the NEW behavior for this policy is to do nothing when a normal variable of the same name exists.
+# The normal variable is not removed. The cache entry is not created or updated and is ignored if it exists.
+set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+
 # Set a default build type if none was specified
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "Setting build type to 'Debug' as none was specified.")
@@ -32,8 +37,29 @@ endif ()
 
 project(Crane C CXX)
 
+# Options start here ----------------------------------------------------------------------------
+
+option(CRANE_ENABLE_TESTS "Enable test targets" OFF)
+
+option(CRANE_FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." TRUE)
+
+# Options end here -------------------------------------------------------------------------------
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+if (CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(CRANE_ENABLE_TESTS ON)
+endif ()
+
+# Set colorized output when ninja build system is used.
+if (${CRANE_FORCE_COLORED_OUTPUT})
+    if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+        add_compile_options(-fdiagnostics-color=always)
+    elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+        add_compile_options(-fcolor-diagnostics)
+    endif ()
+endif ()
 
 # Check LTO support
 include(CheckIPOSupported)
@@ -65,16 +91,6 @@ else ()
     # static link on c++ libs
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
-endif ()
-
-# Set colorized output when ninja build system is used.
-option(FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." TRUE)
-if (${FORCE_COLORED_OUTPUT})
-    if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-        add_compile_options(-fdiagnostics-color=always)
-    elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-        add_compile_options(-fcolor-diagnostics)
-    endif ()
 endif ()
 
 if (CMAKE_SIZEOF_VOID_P EQUAL 8)
@@ -118,7 +134,7 @@ endif ()
 
 # Find third-party libraries
 set(Boost_USE_STATIC_LIBS ON)
-find_package(Boost 1.67 REQUIRED COMPONENTS thread fiber system filesystem)
+find_package(Boost 1.67 REQUIRED COMPONENTS thread system filesystem)
 add_definitions(-DBoost_MINOR_VERSION=${Boost_MINOR_VERSION})
 
 # Needed by grpc
@@ -144,7 +160,10 @@ add_subdirectory(protos)
 add_subdirectory(src)
 
 # Tests
-add_subdirectory(test)
+if (CRANE_ENABLE_TESTS)
+    enable_testing()
+    add_subdirectory(test)
+endif ()
 
 # install script
 install(TARGETS cranectld craned

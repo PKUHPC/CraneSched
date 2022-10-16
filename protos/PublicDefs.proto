@@ -134,11 +134,9 @@ message PartitionInfo {
   uint32 total_cpus = 6;
   uint32 avail_cpus = 7;
   uint32 alloc_cpus = 8;
-  uint32 free_cpus = 9;
-  uint64 total_mem = 10;
-  uint64 avail_mem = 11;
-  uint64 alloc_mem = 12;
-  uint64 free_mem = 13;
+  uint64 total_mem = 9;
+  uint64 avail_mem = 10;
+  uint64 alloc_mem = 11;
 }
 
 message CranedInfo {

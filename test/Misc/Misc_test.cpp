@@ -1,7 +1,6 @@
 #include <absl/container/btree_map.h>
 #include <absl/synchronization/blocking_counter.h>
 #include <absl/synchronization/mutex.h>
-#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <spdlog/fmt/fmt.h>
 

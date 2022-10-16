@@ -17,10 +17,8 @@ target_link_libraries(cranectld
         spdlog::spdlog
         concurrentqueue
 
-        Utility_AnonymousPipe
         Utility_cgroup
         Utility_PublicHeader
-        Utility_TimerSet
 
         Boost::boost
         Boost::thread
@@ -39,7 +37,6 @@ target_link_libraries(cranectld
         crane_proto_lib
 
         yaml-cpp
-        mariadbclient
         mongo::mongocxx_static
         )
 

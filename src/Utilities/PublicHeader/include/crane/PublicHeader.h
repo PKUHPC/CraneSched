@@ -61,16 +61,19 @@ enum class CraneErr : uint16_t {
   kNoResource,
   kNonExistent,
   kInvalidNodeNum,
+
   kSystemErr,  // represent the error which sets errno
   kExistingTask,
   kInvalidParam,
   kStop,
+  kPermissionDenied,
+
   kConnectionTimeout,
   kConnectionAborted,
-
   kRpcFailure,
   kTokenRequestFailure,
   KStreamBroken,
+
   kInvalidStub,
   kCgroupError,
   kProtobufError,
@@ -105,16 +108,20 @@ constexpr std::array<std::string_view, uint16_t(CraneErr::__ERR_SIZE)>
         "Generic failure",
         "Resource not enough",
         "The object doesn't exist",
+        "Invalid --node-num is passed",
+
         "Linux Error",
         "Task already exists",
         "Invalid Parameter",
         "The owner object of the function is stopping",
+        "Permission denied",
+
         "Connection timeout",
         "Connection aborted",
-
         "RPC call failed",
         "Failed to request required token",
         "Stream is broken",
+
         "Craned stub is invalid",
         "Error when manipulating cgroup",
         "Error when using protobuf",

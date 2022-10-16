@@ -30,7 +30,7 @@ TaskManager::TaskManager()
   m_instance_ptr_ = this;
 
   m_ev_base_ = event_base_new();
-  if (!m_ev_base_) {
+  if (m_ev_base_ == nullptr) {
     CRANE_ERROR("Could not initialize libevent!");
     std::terminate();
   }
@@ -140,13 +140,8 @@ TaskManager::TaskManager()
     }
   }
   {  // Exit Event
-    if ((m_ev_exit_fd_ = eventfd(0, EFD_CLOEXEC)) < 0) {
-      CRANE_ERROR("Failed to init the eventfd!");
-      std::terminate();
-    }
-
-    m_ev_exit_event_ = event_new(m_ev_base_, m_ev_exit_fd_,
-                                 EV_PERSIST | EV_READ, EvExitEventCb_, this);
+    m_ev_exit_event_ =
+        event_new(m_ev_base_, -1, EV_PERSIST | EV_READ, EvExitEventCb_, this);
     if (!m_ev_exit_event_) {
       CRANE_ERROR("Failed to create the exit event!");
       std::terminate();
@@ -210,13 +205,10 @@ TaskManager::~TaskManager() {
   if (m_ev_grpc_create_cg_) event_free(m_ev_grpc_create_cg_);
   if (m_ev_grpc_release_cg_) event_free(m_ev_grpc_release_cg_);
   if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
+  if (m_ev_grpc_execute_task_) event_free(m_ev_grpc_execute_task_);
+  if (m_ev_task_status_change_) event_free(m_ev_task_status_change_);
 
   if (m_ev_exit_event_) event_free(m_ev_exit_event_);
-  close(m_ev_exit_fd_);
-
-  if (m_ev_grpc_execute_task_) event_free(m_ev_grpc_execute_task_);
-
-  if (m_ev_task_status_change_) event_free(m_ev_task_status_change_);
 
   if (m_ev_base_) event_base_free(m_ev_base_);
 }
@@ -321,9 +313,17 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
           }
         }
       }
-    } else if (pid == 0)  // There's no child that needs reaping.
+    } else if (pid == 0) {
+      // There's no child that needs reaping.
+      // If Craned is exiting, check if there's any task remaining.
+      // If there's no task running, just stop the loop of TaskManager.
+      if (this_->m_is_ending_now_) {
+        if (this_->m_task_map_.empty()) {
+          this_->ShutdownAsync();
+        }
+      }
       break;
-    else if (pid < 0) {
+    } else if (pid < 0) {
       if (errno != ECHILD)
         CRANE_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
       break;
@@ -350,6 +350,10 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
   if (!this_->m_is_ending_now_) {
+    // SIGINT has been sent once. If SIGINT are captured twice, it indicates
+    // the signal sender can't wait to stop Craned and Craned just send SIGTERM
+    // to all tasks to kill them immediately.
+
     CRANE_INFO("Caught SIGINT. Send SIGTERM to all running tasks...");
 
     this_->m_is_ending_now_ = true;
@@ -358,7 +362,7 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
 
     if (this_->m_task_map_.empty()) {
       // If there is no task to kill, stop the loop directly.
-      this_->Shutdown();
+      this_->ShutdownAsync();
     } else {
       // Send SIGINT to all tasks and the event loop will stop
       // when the ev_sigchld_cb_ of the last task is called.
@@ -375,7 +379,7 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
   } else {
     if (this_->m_task_map_.empty()) {
       // If there is no task to kill, stop the loop directly.
-      this_->Shutdown();
+      this_->ShutdownAsync();
     } else {
       CRANE_INFO(
           "SIGINT has been triggered already. Sending SIGKILL to all process "
@@ -398,29 +402,14 @@ void TaskManager::EvExitEventCb_(int efd, short events, void* user_data) {
 
   CRANE_TRACE("Exit event triggered. Stop event loop.");
 
-  uint64_t u;
-  ssize_t s;
-  s = read(efd, &u, sizeof(uint64_t));
-  if (s != sizeof(uint64_t)) {
-    if (errno != EAGAIN) {
-      CRANE_ERROR("Failed to read exit_fd: errno {}, {}", errno,
-                  strerror(errno));
-    }
-    return;
-  }
-
   struct timeval delay = {0, 0};
   event_base_loopexit(this_->m_ev_base_, &delay);
 }
 
-void TaskManager::Shutdown() {
+void TaskManager::ShutdownAsync() {
   CRANE_TRACE("Triggering exit event...");
   m_is_ending_now_ = true;
-  eventfd_t u = 1;
-  ssize_t s = eventfd_write(m_ev_exit_fd_, u);
-  if (s < 0) {
-    CRANE_ERROR("Failed to write to grpc event fd: {}", strerror(errno));
-  }
+  event_active(m_ev_exit_event_, 0, 0);
 }
 
 void TaskManager::Wait() {
@@ -865,7 +854,7 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
     CRANE_TRACE(
         "Craned is ending and all tasks have been reaped. "
         "Stop event loop.");
-    this_->Shutdown();
+    this_->ShutdownAsync();
   }
 }
 

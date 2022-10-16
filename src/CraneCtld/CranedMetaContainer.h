@@ -41,17 +41,17 @@ class CranedMetaContainerInterface {
 
   virtual bool CheckCranedAllowed(const std::string& hostname) = 0;
 
-  virtual crane::grpc::QueryCranedInfoReply* QueryAllCranedInfo() = 0;
+  virtual crane::grpc::QueryCranedInfoReply QueryAllCranedInfo() = 0;
 
-  virtual crane::grpc::QueryCranedInfoReply* QueryCranedInfo(
+  virtual crane::grpc::QueryCranedInfoReply QueryCranedInfo(
       const std::string& craned_name) = 0;
 
-  virtual crane::grpc::QueryPartitionInfoReply* QueryAllPartitionInfo() = 0;
+  virtual crane::grpc::QueryPartitionInfoReply QueryAllPartitionInfo() = 0;
 
-  virtual crane::grpc::QueryPartitionInfoReply* QueryPartitionInfo(
+  virtual crane::grpc::QueryPartitionInfoReply QueryPartitionInfo(
       const std::string& partition_name) = 0;
 
-  virtual crane::grpc::QueryClusterInfoReply* QueryClusterInfo() = 0;
+  virtual crane::grpc::QueryClusterInfoReply QueryClusterInfo() = 0;
 
   virtual bool GetCraneId(const std::string& hostname, CranedId* node_id) = 0;
 
@@ -91,17 +91,17 @@ class CranedMetaContainerSimpleImpl final
 
   void InitFromConfig(const Config& config) override;
 
-  crane::grpc::QueryCranedInfoReply* QueryAllCranedInfo() override;
+  crane::grpc::QueryCranedInfoReply QueryAllCranedInfo() override;
 
-  crane::grpc::QueryCranedInfoReply* QueryCranedInfo(
+  crane::grpc::QueryCranedInfoReply QueryCranedInfo(
       const std::string& node_name) override;
 
-  crane::grpc::QueryPartitionInfoReply* QueryAllPartitionInfo() override;
+  crane::grpc::QueryPartitionInfoReply QueryAllPartitionInfo() override;
 
-  crane::grpc::QueryPartitionInfoReply* QueryPartitionInfo(
+  crane::grpc::QueryPartitionInfoReply QueryPartitionInfo(
       const std::string& partition_name) override;
 
-  crane::grpc::QueryClusterInfoReply* QueryClusterInfo() override;
+  crane::grpc::QueryClusterInfoReply QueryClusterInfo() override;
 
   bool GetCraneId(const std::string& hostname, CranedId* craned_id) override;
 

@@ -1,6 +1,5 @@
 #pragma once
 
-#include <mysql.h>
 #include <spdlog/fmt/fmt.h>
 
 #include <algorithm>
@@ -28,10 +27,12 @@ class MongodbClient {
     User = 1,
     Qos = 2,
   };
+
   struct MongodbResult {
     bool ok{false};
     std::optional<std::string> reason;
   };
+
   struct MongodbFilter {
     enum RelationalOperator {
       Equal,
@@ -40,10 +41,12 @@ class MongodbClient {
       GreaterOrEqual,
       LessOrEqual
     };
+
     std::string object;
     RelationalOperator relateOperator;
     std::string value;
   };
+
   MongodbClient() = default;  // Mongodb-c++ don't need to close the connection
 
   bool Connect();
