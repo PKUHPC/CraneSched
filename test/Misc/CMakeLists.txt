@@ -42,8 +42,8 @@ target_link_libraries(misc_Misc_test
 gtest_discover_tests(misc_Misc_test)
 
 
-add_executable(mariadb_connector_c_test mariadb_connector_c_test.cpp)
-target_link_libraries(mariadb_connector_c_test
+add_executable(misc_mariadb_c_test mariadb_connector_c_test.cpp)
+target_link_libraries(misc_mariadb_c_test
         GTest::gtest GTest::gtest_main
         Threads::Threads
         absl::strings
@@ -51,8 +51,8 @@ target_link_libraries(mariadb_connector_c_test
         Utility_PublicHeader
         spdlog::spdlog
         )
-target_include_directories(mariadb_connector_c_test PRIVATE ${CMAKE_SOURCE_DIR}/src/CraneCtld)
-gtest_discover_tests(mariadb_connector_c_test)
+target_include_directories(misc_mariadb_c_test PRIVATE ${CMAKE_SOURCE_DIR}/src/CraneCtld)
+gtest_discover_tests(misc_mariadb_c_test)
 
 add_executable(misc_mongodb_test mongodb_test.cpp)
 target_link_libraries(misc_mongodb_test

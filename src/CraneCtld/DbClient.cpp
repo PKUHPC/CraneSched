@@ -111,8 +111,8 @@ bool MongodbClient::InsertJob(
   }
   *job_db_inx = last_id + 1;
 
-  auto task_to_ctld_str = std::make_unique<std::string>();
-  task_to_ctld.SerializeToString(task_to_ctld_str.get());
+  std::string task_to_ctld_str;
+  task_to_ctld.SerializeToString(&task_to_ctld_str);
 
   auto builder = bsoncxx::builder::stream::document{};
   // Different from mariadb, the data type of each attribute column in mongodb
@@ -141,7 +141,7 @@ bool MongodbClient::InsertJob(
               << "script" << script << "state" << std::to_string(state)
               << "timelimit" << std::to_string(timelimit) << "time_submit"
               << std::to_string(submit_timestamp) << "work_dir" << work_dir
-              << "task_to_ctld" << *task_to_ctld_str
+              << "task_to_ctld" << task_to_ctld_str
               << bsoncxx::builder::stream::finalize;
 
   if (m_dbInstance && m_client) {
