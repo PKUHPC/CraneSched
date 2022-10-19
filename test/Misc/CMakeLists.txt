@@ -59,7 +59,7 @@ add_executable(misc_mongodb_test mongodb_test.cpp)
 target_link_libraries(misc_mongodb_test
         GTest::gtest GTest::gtest_main
         Threads::Threads
-        mongo::mongocxx_static
+        mongocxx_static
         spdlog::spdlog
         absl::btree
         Utility_PublicHeader
