@@ -52,7 +52,7 @@ target_link_libraries(cranectld_test
         Boost::boost
         Boost::thread
 
-        mongo::mongocxx_static
+        mongocxx_static
         bs_thread_pool
         yaml-cpp
 

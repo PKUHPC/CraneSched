@@ -37,7 +37,7 @@ target_link_libraries(cranectld
         crane_proto_lib
 
         yaml-cpp
-        mongo::mongocxx_static
+        mongocxx_static
         )
 
 # Linker flag for c++ 17 filesystem library

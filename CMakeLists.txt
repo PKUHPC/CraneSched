@@ -107,6 +107,12 @@ set(DEPENDENCIES_ONLINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/online)
 
 find_package(Threads REQUIRED)
 
+# New in version cmake3.24:
+# Set ZLIB_USE_STATIC_LIBS to ON to look for static libraries. Default is OFF.
+# We set this directory variable here to ON to make all find_package(ZLIB) in
+# in this project to use static zlib library file.
+set(ZLIB_USE_STATIC_LIBS ON)
+
 # Some content are downloaded and built inside cmake folder.
 # This line must be place before any find_package() command.
 # Independently built projects are installed to ${DEPENDENCIES_ONLINE_DIR}
@@ -115,9 +121,7 @@ find_package(Threads REQUIRED)
 # projects at top-level CMakeLists.txt
 add_subdirectory(dependencies/cmake)
 
-list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/mongo-c-driver")
-list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/mongo-cxx-driver")
-find_package(mongocxx REQUIRED)
+find_package(mongocxx REQUIRED CONFIG)
 
 # Link libevent as a static lib
 set(LIBEVENT_STATIC_LINK ON)
