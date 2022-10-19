@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.24)
 
 # Let cmake apply IPO flags for all compilers and do not output warnings.
 set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
