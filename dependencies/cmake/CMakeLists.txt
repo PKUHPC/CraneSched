@@ -1,3 +1,5 @@
+set(FETCHCONTENT_QUIET OFF)
+
 # Suppress all warning on all third party libraries
 add_compile_options(-w)
 

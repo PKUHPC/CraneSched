@@ -5,11 +5,11 @@ file(MAKE_DIRECTORY ${GENERATED_FILE_PATH})
 
 include(${CMAKE_SOURCE_DIR}/CMakeModule/ProtobufGenerate.cmake)
 PROTOBUF_GENERATE_GRPC_CPP(ProtoCxxSources ProtoCxxHeaders ${GENERATED_FILE_PATH}/protos
-        ${grpc_SOURCE_DIR}/third_party/protobuf/src ${proto_src})
+        ${protobuf_SOURCE_DIR}/src ${proto_src})
 
-get_property(grpc_SOURCE_DIR GLOBAL PROPERTY grpc_SOURCE_DIR)
+get_property(protobuf_SOURCE_DIR GLOBAL PROPERTY protobuf_SOURCE_DIR)
 message(STATUS "Generated proto: ${ProtoCxxSources} ${ProtoCxxHeaders}")
-message(STATUS "_PROTOBUF_PROTOC: ${_PROTOBUF_PROTOC} ${grpc_SOURCE_DIR}")
+message(STATUS "_PROTOBUF_PROTOC: ${_PROTOBUF_PROTOC};protobuf_SOURCE_DIR: ${protobuf_SOURCE_DIR}")
 
 add_library(crane_proto_lib STATIC
         ${ProtoCxxSources} ${ProtoCxxHeaders})

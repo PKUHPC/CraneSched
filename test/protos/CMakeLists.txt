@@ -13,7 +13,7 @@ set_property(DIRECTORY PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
 include(${CMAKE_SOURCE_DIR}/CMakeModule/ProtobufGenerate.cmake)
 PROTOBUF_GENERATE_GRPC_CPP(TestProtoCxxSources TestProtoCxxHeaders
         ${GENERATED_TEST_PROTO_PATH}
-        ${grpc_SOURCE_DIR}/third_party/protobuf/src
+        ${protobuf_SOURCE_DIR}/src
         ${test_proto_src})
 
 add_library(test_proto STATIC
