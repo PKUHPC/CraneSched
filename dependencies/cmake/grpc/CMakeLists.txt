@@ -15,7 +15,6 @@ find_package(absl REQUIRED CONFIG)
 
 set(CARES_SHARED OFF)
 set(CARES_STATIC ON)
-set(CARES_STATIC_PIC ON)
 FetchContent_Declare(c-ares
         OVERRIDE_FIND_PACKAGE
 
@@ -53,15 +52,18 @@ FetchContent_MakeAvailable(re2)
 FetchContent_GetProperties(re2)
 find_package(re2 REQUIRED CONFIG)
 
-FetchContent_Declare(zlib
-        OVERRIDE_FIND_PACKAGE
-
-        URL https://github.com/madler/zlib/releases/download/v1.2.13/zlib-1.2.13.tar.gz
-        URL_HASH SHA256=b3a24de97a8fdbc835b9833169501030b8977031bcb54b3b3ac13740f846ab30
-        )
-FetchContent_MakeAvailable(zlib)
-FetchContent_GetProperties(zlib)
-find_package(zlib REQUIRED CONFIG)
+#FetchContent_Declare(ZLIB
+#        OVERRIDE_FIND_PACKAGE
+#
+#        URL https://github.com/madler/zlib/releases/download/v1.2.13/zlib-1.2.13.tar.gz
+#        URL_HASH SHA256=b3a24de97a8fdbc835b9833169501030b8977031bcb54b3b3ac13740f846ab30
+#        )
+#FetchContent_MakeAvailable(ZLIB)
+#FetchContent_GetProperties(ZLIB)
+find_package(ZLIB REQUIRED)
+if (ZLIB_FOUND)
+    message(STATUS "${ZLIB_LIBRARIES}")
+endif ()
 
 
 set(gRPC_INSTALL ON CACHE BOOL "" FORCE)
