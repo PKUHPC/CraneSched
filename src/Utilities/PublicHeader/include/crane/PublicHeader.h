@@ -3,7 +3,6 @@
 #include <absl/time/time.h>  // NOLINT(modernize-deprecated-headers)
 #include <spdlog/spdlog.h>
 
-#include <boost/uuid/uuid.hpp>
 #include <list>
 
 #include "protos/Crane.pb.h"

@@ -9,4 +9,4 @@ add_library(Utility_PublicHeader
         include/crane/Pointer.h
         )
 target_include_directories(Utility_PublicHeader PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} include)
-target_link_libraries(Utility_PublicHeader PUBLIC spdlog::spdlog crane_proto_lib)
+target_link_libraries(Utility_PublicHeader PUBLIC Boost::boost spdlog::spdlog crane_proto_lib)

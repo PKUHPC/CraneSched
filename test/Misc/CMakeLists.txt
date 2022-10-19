@@ -45,6 +45,7 @@ gtest_discover_tests(misc_Misc_test)
 add_executable(misc_mariadb_c_test mariadb_connector_c_test.cpp)
 target_link_libraries(misc_mariadb_c_test
         GTest::gtest GTest::gtest_main
+        Boost::boost
         Threads::Threads
         absl::strings
         mariadbclient

@@ -4,6 +4,7 @@
 #include <security/pam_ext.h>
 #include <security/pam_modules.h>
 #include <syslog.h>
+#include <unistd.h>
 
 #include <cstdint>
 #include <string>

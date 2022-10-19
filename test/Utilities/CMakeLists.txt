@@ -3,7 +3,8 @@ target_link_libraries(utility_test
         GTest::gtest
         GTest::gtest_main
         concurrentqueue
-        Threads::Threads
+		Boost::boost
+		Threads::Threads
         libevent::core
         cxxopts
         absl::synchronization

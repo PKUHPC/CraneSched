@@ -4,7 +4,6 @@
 #include <pwd.h>
 #include <fmt/format.h>
 #include <sys/stat.h>
-#include <unistd.h>
 
 #include <boost/algorithm/string.hpp>
 #include <cerrno>
