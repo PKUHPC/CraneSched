@@ -1,52 +1,31 @@
 include(FetchContent)
 
+set(ENABLE_STATIC ON)
+set(ENABLE_TESTS OFF)
+set(ENABLE_MONGODB_AWS_AUTH OFF)
+set(BUILD_TESTING OFF)
+set(ENABLE_UNINSTALL OFF)
+set(ENABLE_HTML_DOCS OFF)
+set(ENABLE_EXAMPLES OFF)
+set(ENABLE_AUTOMATIC_INIT_AND_CLEANUP OFF)
+
 FetchContent_Declare(mongo_c_driver_repo
-        GIT_REPOSITORY https://github.com/mongodb/mongo-c-driver
-        GIT_TAG 1.21.1)
+        URL https://github.com/mongodb/mongo-c-driver/releases/download/1.23.0/mongo-c-driver-1.23.0.tar.gz
+        URL_HASH SHA256=2b91d6a9c1a80ec82c5643676e44f1a9edf3849c7f25d490e1b5587eb408ad93
+        PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/mongo-c-driver.diff
 
+        FIND_PACKAGE_ARGS NAMES mongoc-1.0
+        )
+FetchContent_MakeAvailable(mongo_c_driver_repo)
+
+set(BUILD_SHARED_LIBS OFF)
+set(BUILD_SHARED_AND_STATIC_LIBS OFF)
+set(BUILD_SHARED_LIBS_WITH_STATIC_MONGOC OFF)
+set(ENABLE_TESTS OFF)
 FetchContent_Declare(mongo_cxx_driver_repo
-        GIT_REPOSITORY https://github.com/mongodb/mongo-cxx-driver
-        GIT_TAG r3.7.0-beta1)
+        URL https://github.com/mongodb/mongo-cxx-driver/releases/download/r3.7.0/mongo-cxx-driver-r3.7.0.tar.gz
+        URL_HASH SHA256=fb2da11178db728f63147fe4b0c7509eb49b1b02c5cb55f9bee5f927e451a0c7
 
-message(STATUS "DEPENDENCIES_ONLINE_DIR: ${DEPENDENCIES_ONLINE_DIR}")
-
-FetchContent_GetProperties(mongo_c_driver_repo)
-if (NOT mongo_c_driver_repo_POPULATED)
-    FetchContent_Populate(mongo_c_driver_repo)
-    message(STATUS "Mongodb c driver source dir: ${mongo_c_driver_repo_SOURCE_DIR}")
-
-    if (NOT EXISTS ${mongo_c_driver_repo_SOURCE_DIR}/cmake-build/build.ninja
-            OR NOT EXISTS ${mongo_c_driver_repo_SOURCE_DIR}/cmake-build/CMakeCache.txt
-            OR RECONFIGURATION_NEEDED)
-        execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory "${mongo_c_driver_repo_SOURCE_DIR}/cmake-build")
-        execute_process(
-                COMMAND ${CMAKE_COMMAND} -Wno-dev -G Ninja -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} ${CRANE_LINKER_FLAGS_INIT} -DENABLE_STATIC=ON -DENABLE_TESTS=OFF -DENABLE_MONGODB_AWS_AUTH=OFF -DBUILD_TESTING=OFF -DENABLE_UNINSTALL=OFF -DENABLE_HTML_DOCS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_INSTALL_PREFIX=${DEPENDENCIES_ONLINE_DIR}/mongo-c-driver ..
-                WORKING_DIRECTORY ${mongo_c_driver_repo_SOURCE_DIR}/cmake-build
+        FIND_PACKAGE_ARGS NAMES mongocxx
         )
-    endif ()
-    execute_process(
-            COMMAND ninja install
-            WORKING_DIRECTORY ${mongo_c_driver_repo_SOURCE_DIR}/cmake-build
-    )
-endif ()
-
-
-FetchContent_GetProperties(mongo_cxx_driver_repo)
-if (NOT mongo_cxx_driver_repo_POPULATED)
-    FetchContent_Populate(mongo_cxx_driver_repo)
-    message(STATUS "Mongodb cxx driver source dir: ${mongo_cxx_driver_repo_SOURCE_DIR}")
-
-    if (NOT EXISTS ${mongo_cxx_driver_repo_SOURCE_DIR}/cmake-build/build.ninja
-            OR NOT EXISTS ${mongo_cxx_driver_repo_SOURCE_DIR}/cmake-build/CMakeCache.txt
-            OR RECONFIGURATION_NEEDED)
-        execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${mongo_cxx_driver_repo_SOURCE_DIR}/cmake-build)
-        execute_process(
-                COMMAND ${CMAKE_COMMAND} -Wno-dev -G Ninja -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} ${CRANE_LINKER_FLAGS_INIT} -DCMAKE_PREFIX_PATH=${DEPENDENCIES_ONLINE_DIR}/mongo-c-driver -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 -DBUILD_SHARED_AND_STATIC_LIBS=ON -DBUILD_SHARED_LIBS_WITH_STATIC_MONGOC=ON -DENABLE_TESTS=OFF -DCMAKE_INSTALL_PREFIX=${DEPENDENCIES_ONLINE_DIR}/mongo-cxx-driver ..
-                WORKING_DIRECTORY ${mongo_cxx_driver_repo_SOURCE_DIR}/cmake-build
-        )
-    endif ()
-    execute_process(
-            COMMAND ninja install
-            WORKING_DIRECTORY ${mongo_cxx_driver_repo_SOURCE_DIR}/cmake-build
-    )
-endif ()
+FetchContent_MakeAvailable(mongo_cxx_driver_repo)

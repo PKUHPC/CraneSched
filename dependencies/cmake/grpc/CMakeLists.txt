@@ -64,14 +64,14 @@ FetchContent_GetProperties(zlib)
 find_package(zlib REQUIRED CONFIG)
 
 
-set(gRPC_INSTALL ON)
-set(gRPC_BUILD_TESTS OFF)
-set(gRPC_PROTOBUF_PROVIDER package)
-set(gRPC_RE2_PROVIDER package)
-set(gRPC_ZLIB_PROVIDER package)
-set(gRPC_ABSL_PROVIDER package)
-set(gRPC_CARES_PROVIDER package)
-set(gRPC_SSL_PROVIDER package)
+set(gRPC_INSTALL ON CACHE BOOL "" FORCE)
+set(gRPC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(gRPC_PROTOBUF_PROVIDER package CACHE STRING "" FORCE)
+set(gRPC_RE2_PROVIDER package CACHE STRING "" FORCE)
+set(gRPC_ZLIB_PROVIDER package CACHE STRING "" FORCE)
+set(gRPC_ABSL_PROVIDER package CACHE STRING "" FORCE)
+set(gRPC_CARES_PROVIDER package CACHE STRING "" FORCE)
+set(gRPC_SSL_PROVIDER package CACHE STRING "" FORCE)
 
 FetchContent_Declare(grpc
         OVERRIDE_FIND_PACKAGE
@@ -79,7 +79,6 @@ FetchContent_Declare(grpc
         URL https://github.com/grpc/grpc/archive/refs/tags/v1.50.0.tar.gz
         URL_HASH SHA256=76900ab068da86378395a8e125b5cc43dfae671e09ff6462ddfef18676e2165a
         )
-set(FETCHCONTENT_QUIET OFF)
 FetchContent_MakeAvailable(grpc)
 FetchContent_GetProperties(grpc)
 

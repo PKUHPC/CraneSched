@@ -1,0 +1,19 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index caaf53499..ab2f63bcd 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -464,14 +464,6 @@ if (ENABLE_MONGOC)
+          "ENABLE_MAN_PAGES=ON, ENABLE_HTML_DOCS=ON, and generate VERSION_CURRENT "
+          "to enable."
+       )
+-
+-      add_custom_target (dist
+-         COMMAND ${CMAKE_COMMAND} -E echo "${DISTERRMSG}"
+-      )
+-
+-      add_custom_target (distcheck
+-         COMMAND ${CMAKE_COMMAND} -E echo "${DISTERRMSG}"
+-      )
+    endif ()
+ 
+ endif ()
