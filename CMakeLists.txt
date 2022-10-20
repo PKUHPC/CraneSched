@@ -116,9 +116,9 @@ find_package(Threads REQUIRED)
 
 # New in version cmake3.24:
 # Set ZLIB_USE_STATIC_LIBS to ON to look for static libraries. Default is OFF.
-# We set this directory variable here to ON to make all find_package(ZLIB) in
-# in this project to use static zlib library file.
-set(ZLIB_USE_STATIC_LIBS ON)
+# We set this directory variable here to OFF to make all find_package(ZLIB) in
+# in this project to use dynamic zlib library file.
+set(ZLIB_USE_STATIC_LIBS OFF)
 
 # Some content are downloaded and built inside cmake folder.
 # This line must be place before any find_package() command.
