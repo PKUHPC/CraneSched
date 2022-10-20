@@ -8,6 +8,7 @@ FetchContent_Declare(absl
 
         URL https://github.com/abseil/abseil-cpp/archive/refs/tags/20220623.1.tar.gz
         URL_HASH SHA256=91ac87d30cc6d79f9ab974c51874a704de9c2647c40f6932597329a282217ba8
+        INACTIVITY_TIMEOUT 5
         )
 FetchContent_MakeAvailable(absl)
 FetchContent_GetProperties(absl)
@@ -20,6 +21,7 @@ FetchContent_Declare(c-ares
 
         URL https://github.com/c-ares/c-ares/releases/download/cares-1_18_1/c-ares-1.18.1.tar.gz
         URL_HASH SHA256=1a7d52a8a84a9fbffb1be9133c0f6e17217d91ea5a6fa61f6b4729cda78ebbcf
+        INACTIVITY_TIMEOUT 5
         )
 FetchContent_MakeAvailable(c-ares)
 FetchContent_GetProperties(c-ares)
@@ -34,6 +36,7 @@ FetchContent_Declare(protobuf
 
         URL https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protobuf-cpp-3.21.8.tar.gz
         URL_HASH SHA256=f6251f2d00aad41b34c1dfa3d752713cb1bb1b7020108168a4deaa206ba8ed42
+        INACTIVITY_TIMEOUT 5
         )
 FetchContent_MakeAvailable(protobuf)
 FetchContent_GetProperties(protobuf)
@@ -45,18 +48,21 @@ FetchContent_Declare(re2
 
         URL https://github.com/google/re2/archive/refs/tags/2022-06-01.tar.gz
         URL_HASH SHA256=f89c61410a072e5cbcf8c27e3a778da7d6fd2f2b5b1445cd4f4508bee946ab0f
-
-        CMAKE_ARGS
+        INACTIVITY_TIMEOUT 5
         )
 FetchContent_MakeAvailable(re2)
 FetchContent_GetProperties(re2)
 find_package(re2 REQUIRED CONFIG)
 
+# This version of zlib is kind of new.
+# Disable it and use dynamic system version of zlib instead.
+#
 #FetchContent_Declare(ZLIB
 #        OVERRIDE_FIND_PACKAGE
 #
 #        URL https://github.com/madler/zlib/releases/download/v1.2.13/zlib-1.2.13.tar.gz
 #        URL_HASH SHA256=b3a24de97a8fdbc835b9833169501030b8977031bcb54b3b3ac13740f846ab30
+#        INACTIVITY_TIMEOUT 5
 #        )
 #FetchContent_MakeAvailable(ZLIB)
 #FetchContent_GetProperties(ZLIB)
@@ -80,6 +86,7 @@ FetchContent_Declare(grpc
 
         URL https://github.com/grpc/grpc/archive/refs/tags/v1.50.0.tar.gz
         URL_HASH SHA256=76900ab068da86378395a8e125b5cc43dfae671e09ff6462ddfef18676e2165a
+        INACTIVITY_TIMEOUT 5
         )
 FetchContent_MakeAvailable(grpc)
 FetchContent_GetProperties(grpc)

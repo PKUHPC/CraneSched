@@ -76,6 +76,13 @@ else ()
     message(STATUS "IPO / LTO not supported: <${error}>")
 endif ()
 
+find_program(CCACHE_PROGRAM ccache)
+if (CCACHE_PROGRAM)
+    message(STATUS "ccache found. Use ccache to launch compilers.")
+    set_property(GLOBAL PROPERTY CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set_property(GLOBAL PROPERTY CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+endif ()
+
 # If Clang is used, select lld as the linker.
 set(CLANG_LLD_LINKER_FLAGS "-fuse-ld=lld")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")

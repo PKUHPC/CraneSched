@@ -1,11 +1,10 @@
 include(FetchContent)
 
-FetchContent_Declare(
-        libuv
-        GIT_REPOSITORY https://github.com/libuv/libuv.git
-        GIT_TAG v1.44.2
-        GIT_SHALLOW 1
-)
+FetchContent_Declare(libuv
+        URL https://github.com/libuv/libuv/archive/refs/tags/v1.44.2.tar.gz
+        URL_HASH SHA256=e6e2ba8b4c349a4182a33370bb9be5e23c51b32efb9b9e209d0e8556b73a48da
+        INACTIVITY_TIMEOUT 5
+        )
 
 FetchContent_GetProperties(libuv)
 
