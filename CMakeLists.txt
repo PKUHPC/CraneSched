@@ -76,6 +76,13 @@ else ()
     message(STATUS "IPO / LTO not supported: <${error}>")
 endif ()
 
+find_program(CCACHE_PROGRAM ccache)
+if (CCACHE_PROGRAM)
+    message(STATUS "ccache found. Use ccache to launch compilers.")
+    set_property(GLOBAL PROPERTY CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set_property(GLOBAL PROPERTY CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+endif ()
+
 # If Clang is used, select lld as the linker.
 set(CLANG_LLD_LINKER_FLAGS "-fuse-ld=lld")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -109,9 +116,9 @@ find_package(Threads REQUIRED)
 
 # New in version cmake3.24:
 # Set ZLIB_USE_STATIC_LIBS to ON to look for static libraries. Default is OFF.
-# We set this directory variable here to ON to make all find_package(ZLIB) in
-# in this project to use static zlib library file.
-set(ZLIB_USE_STATIC_LIBS ON)
+# We set this directory variable here to OFF to make all find_package(ZLIB) in
+# in this project to use dynamic zlib library file.
+set(ZLIB_USE_STATIC_LIBS OFF)
 
 # Some content are downloaded and built inside cmake folder.
 # This line must be place before any find_package() command.

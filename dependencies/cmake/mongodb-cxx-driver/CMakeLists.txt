@@ -14,6 +14,8 @@ FetchContent_Declare(mongo_c_driver_repo
 
         URL https://github.com/mongodb/mongo-c-driver/releases/download/1.23.0/mongo-c-driver-1.23.0.tar.gz
         URL_HASH SHA256=2b91d6a9c1a80ec82c5643676e44f1a9edf3849c7f25d490e1b5587eb408ad93
+        INACTIVITY_TIMEOUT 5
+
         PATCH_COMMAND patch -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/mongo-c-driver.diff
         )
 FetchContent_MakeAvailable(mongo_c_driver_repo)
@@ -27,6 +29,7 @@ FetchContent_Declare(mongocxx
 
         URL https://github.com/mongodb/mongo-cxx-driver/releases/download/r3.7.0/mongo-cxx-driver-r3.7.0.tar.gz
         URL_HASH SHA256=fb2da11178db728f63147fe4b0c7509eb49b1b02c5cb55f9bee5f927e451a0c7
+        INACTIVITY_TIMEOUT 5
         )
 FetchContent_MakeAvailable(mongocxx)
 
