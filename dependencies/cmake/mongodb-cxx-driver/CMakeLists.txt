@@ -14,7 +14,7 @@ FetchContent_Declare(mongo_c_driver_repo
 
         URL https://github.com/mongodb/mongo-c-driver/releases/download/1.23.0/mongo-c-driver-1.23.0.tar.gz
         URL_HASH SHA256=2b91d6a9c1a80ec82c5643676e44f1a9edf3849c7f25d490e1b5587eb408ad93
-        PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/mongo-c-driver.diff
+        PATCH_COMMAND patch -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/mongo-c-driver.diff
         )
 FetchContent_MakeAvailable(mongo_c_driver_repo)
 
