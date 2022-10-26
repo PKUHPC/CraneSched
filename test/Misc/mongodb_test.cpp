@@ -6,6 +6,7 @@
 #include <mongocxx/client.hpp>
 #include <mongocxx/cursor.hpp>
 #include <mongocxx/instance.hpp>
+#include <utility>
 
 #include "CtldPublicDefs.h"
 
@@ -568,4 +569,37 @@ TEST(MongodbConnector, Simple) {
     ASSERT_FALSE(client.AddUser(user));
   else
     ASSERT_TRUE(client.AddUser(user));
+}
+
+template <typename V>
+void FuncImpl2(document& doc, std::string const& key, V const& value) {
+  doc << key << value;
+}
+
+template <>
+void FuncImpl2<std::list<std::string>>(document& doc, std::string const& key,
+                                       std::list<std::string> const& value) {
+  // .....
+}
+
+template <typename... Ts, std::size_t... Is>
+void FuncImpl(std::string const& doc_name,
+              std::array<std::string, sizeof...(Ts)> const& fields,
+              std::tuple<Ts...> const& values, std::index_sequence<Is...>) {
+  document doc;
+  (FuncImpl2(doc, std::get<Is>(fields), std::get<Is>(values)), ...);
+}
+
+template <typename... Ts>
+void Func(std::string const& doc_name,
+          std::array<std::string, sizeof...(Ts)> const& fields,
+          std::tuple<Ts...> const& values) {
+  GTEST_LOG_(INFO) << "Open " << doc_name << std::endl;
+  FuncImpl(doc_name, fields, values, std::make_index_sequence<sizeof...(Ts)>{});
+}
+
+TEST(MongodbConnector, ParameterExpasion) {
+  std::array<std::string, 2> fields{"name", "level"};
+  std::tuple<std::string, int64_t> values{"riley", 5};
+  Func(std::string("UserTable"), fields, values);
 }

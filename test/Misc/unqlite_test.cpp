@@ -1,10 +1,14 @@
+#include <google/protobuf/io/coded_stream.h>
 #include <gtest/gtest.h>
 #include <spdlog/fmt/fmt.h>
 #include <unqlite.h>
 
+#include "protos/math.pb.h"
+
+std::string db_dir{CRANE_BUILD_DIRECTORY};
+std::string db_file = fmt::format("{}/unqlite.db", db_dir);
+
 TEST(Unqlite, Simple) {
-  std::string db_dir{CRANE_BUILD_DIRECTORY};
-  std::string db_file = fmt::format("{}/unqlite.db", db_dir);
   int i, rc;
   unqlite *pDb;
 
@@ -75,6 +79,108 @@ TEST(Unqlite, Simple) {
       unqlite_rollback(pDb);
     }
   }
+
+  // Auto-commit the transaction and close our handle.
+  unqlite_close(pDb);
+}
+
+TEST(Unqlite, Protobuf) {
+  int i, rc;
+  unqlite *pDb;
+
+  using google::protobuf::io::CodedOutputStream;
+  using google::protobuf::io::StringOutputStream;
+  using grpc_example::MaxRequest;
+
+  std::string buf;
+  StringOutputStream stringOutputStream(&buf);
+  CodedOutputStream codedOutputStream(&stringOutputStream);
+
+  MaxRequest request1;
+  request1.set_a(1);
+  request1.set_b(2);
+
+  MaxRequest request2;
+  request2.set_a(3);
+  request2.set_b(4);
+
+  std::size_t TotalSize{0};
+
+  codedOutputStream.WriteLittleEndian32(request1.ByteSizeLong());
+  request1.SerializeToCodedStream(&codedOutputStream);
+  GTEST_LOG_(INFO) << "request1 size: " << request1.GetCachedSize();
+  codedOutputStream.WriteLittleEndian32(request2.ByteSizeLong());
+  request2.SerializeToCodedStream(&codedOutputStream);
+  GTEST_LOG_(INFO) << "request2 size: " << request2.GetCachedSize();
+
+  TotalSize += 2 * sizeof(int32_t);
+  TotalSize += request1.GetCachedSize();
+  TotalSize += request2.GetCachedSize();
+  GTEST_LOG_(INFO) << "Total size: " << TotalSize;
+
+  // Open our database;
+  rc = unqlite_open(&pDb, db_file.c_str(), UNQLITE_OPEN_CREATE);
+  if (rc != UNQLITE_OK) {
+    GTEST_FAIL();
+  }
+
+  // Store some records
+  rc = unqlite_kv_store(pDb, "protobuf", -1, buf.data(),
+                        static_cast<unqlite_int64>(TotalSize));
+  if (rc != UNQLITE_OK) {
+    // Insertion fail, Hande error (See below)
+    GTEST_FAIL();
+  }
+
+  unqlite_int64 nBytes;
+
+  // Extract data size first
+  rc = unqlite_kv_fetch(pDb, "protobuf", -1, nullptr, &nBytes);
+  if (rc != UNQLITE_OK) {
+    return;
+  }
+  GTEST_LOG_(INFO) << "Total size in DB: " << nBytes;
+
+  std::string r_buf;
+  r_buf.resize(nBytes);
+
+  // Copy record content in our buffer
+  unqlite_kv_fetch(pDb, "protobuf", -1, r_buf.data(), &nBytes);
+
+  using google::protobuf::io::ArrayInputStream;
+  using google::protobuf::io::CodedInputStream;
+
+  ArrayInputStream arrayInputStream(r_buf.data(), nBytes);
+  CodedInputStream codedInputStream(&arrayInputStream);
+  uint32_t usz;
+  int sz;
+  const void *p;
+
+  GTEST_LOG_(INFO) << "Current Pos: " << codedInputStream.CurrentPosition();
+  codedInputStream.ReadLittleEndian32(&usz);
+  GTEST_LOG_(INFO) << "Current Pos: " << codedInputStream.CurrentPosition();
+  GTEST_LOG_(INFO) << "usz: " << usz;
+  sz = static_cast<int>(usz);
+  ASSERT_TRUE(codedInputStream.GetDirectBufferPointer(&p, &sz));
+  GTEST_LOG_(INFO) << "Sz: " << sz;
+  MaxRequest request1_r;
+  EXPECT_TRUE(request1_r.ParseFromArray(p, usz));
+  codedInputStream.Skip(usz);
+  GTEST_LOG_(INFO) << "Current Pos: " << codedInputStream.CurrentPosition();
+
+  codedInputStream.ReadLittleEndian32(&usz);
+  sz = static_cast<int>(usz);
+  ASSERT_TRUE(codedInputStream.GetDirectBufferPointer(&p, &sz));
+  MaxRequest request2_r;
+  EXPECT_TRUE(request2_r.ParseFromArray(p, usz));
+  codedInputStream.Skip(usz);
+  GTEST_LOG_(INFO) << "Current Pos: " << codedInputStream.CurrentPosition();
+
+  // Reverse order
+  EXPECT_EQ(request1_r.a(), 1);
+  EXPECT_EQ(request1_r.b(), 2);
+  EXPECT_EQ(request2_r.a(), 3);
+  EXPECT_EQ(request2_r.b(), 4);
 
   // Auto-commit the transaction and close our handle.
   unqlite_close(pDb);
