@@ -167,7 +167,8 @@ struct Account {
   std::list<std::string> child_account;
   std::string parent_account;
   std::list<std::string> allowed_partition;
-  std::string qos;
+  std::string default_qos;
+  std::list<std::string> allowed_qos_list;
 };
 
 struct User {
@@ -177,7 +178,10 @@ struct User {
   uid_t uid;
   std::string name;
   std::string account;
-  std::list<std::string> allowed_partition;
+  std::unordered_map<std::string /*partition name*/,
+                     std::pair<std::string /*default qos*/,
+                               std::list<std::string> /*allowed qos list*/>>
+      allowed_partition_qos_map;
   AdminLevel admin_level;
 };
 

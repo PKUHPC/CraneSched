@@ -15,6 +15,76 @@ using bsoncxx::builder::basic::kvp;
 using bsoncxx::builder::basic::make_document;
 using bsoncxx::builder::stream::document;
 
+using PartitionQos =
+    std::unordered_map<std::string,
+                       std::pair<std::string, std::list<std::string>>>;
+
+template <typename V>
+inline auto KVPConstructor(std::string const& key, V const* value) {
+  auto kvpair = kvp(key, *value);
+  return kvpair;
+}
+
+template <>
+inline auto KVPConstructor<std::list<std::string>>(
+    std::string const& key, std::list<std::string> const* value) {
+  using bsoncxx::builder::basic::sub_array;
+  using bsoncxx::builder::basic::sub_document;
+  using namespace bsoncxx;
+
+  return kvp(key, [value](sub_array subarr) {
+    for (auto&& v2 : *value) {
+      subarr.append(v2);
+    }
+  });
+}
+
+template <>
+inline auto KVPConstructor<std::unordered_map<
+    std::string, std::pair<std::string, std::list<std::string>>>>(
+    std::string const& key, PartitionQos const* value) {
+  using bsoncxx::builder::basic::sub_array;
+  using bsoncxx::builder::basic::sub_document;
+  using namespace bsoncxx;
+
+  return kvp(key, [value](sub_document subdoc2) {
+    GTEST_LOG_(INFO) << value;
+    for (auto it : *value) {
+      auto k2 = it.first;
+      auto v2 = it.second;
+
+      subdoc2.append(kvp(k2, [&v2](sub_array arr3) {
+        arr3.append(v2.first);
+
+        builder::basic::array arr4;
+        for (auto qos : v2.second) arr4.append(qos);
+        arr3.append(arr4);
+      }));
+    }
+  });
+}
+
+template <typename... Ts, std::size_t... Is>
+bsoncxx::builder::basic::document DocumentConstructor(
+    std::array<std::string, sizeof...(Ts)> const& fields,
+    std::tuple<Ts...> const& values, std::index_sequence<Is...>) {
+  bsoncxx::builder::basic::document b_document;
+
+  b_document.append(
+      KVPConstructor(std::get<Is>(fields), &std::get<Is>(values))...);
+  return b_document;
+}
+
+template <typename... Ts>
+bsoncxx::document::value Func(
+    std::string const& doc_name,
+    std::array<std::string, sizeof...(Ts)> const& fields,
+    std::tuple<Ts...> const& values) {
+  GTEST_LOG_(INFO) << "Open " << doc_name << std::endl;
+  DocumentConstructor(fields, values,
+                      std::make_index_sequence<sizeof...(Ts)>{});
+}
+
 class MongodbClient {
  public:
   MongodbClient() = default;
@@ -35,6 +105,8 @@ class MongodbClient {
   bool GetAccountInfo(const std::string& name, Ctld::Account* account);
   bool GetQosInfo(const std::string& name, Ctld::Qos* qos);
 
+  mongocxx::collection* m_account_collection{nullptr};
+
  private:
   const std::string m_db_name{"crane_db"};
   const std::string m_account_collection_name{"acct_table"};
@@ -44,8 +116,7 @@ class MongodbClient {
   mongocxx::instance* m_dbInstance{nullptr};
   mongocxx::client* m_client = {nullptr};
   mongocxx::database* m_database = {nullptr};
-  mongocxx::collection *m_account_collection{nullptr},
-      *m_user_collection{nullptr}, *m_qos_collection{nullptr};
+  mongocxx::collection *m_user_collection{nullptr}, *m_qos_collection{nullptr};
 
   stdx::optional<bsoncxx::document::value> find_One(
       mongocxx::collection* coll, document& filter,
@@ -84,7 +155,7 @@ MongodbClient::~MongodbClient() {
 
 bool MongodbClient::Connect() {
   // default port 27017
-  mongocxx::uri uri{"mongodb://crane:123456!!@localhost:27017"};
+  mongocxx::uri uri{"mongodb://admin:123456@localhost:27017"};
   m_dbInstance = new (std::nothrow) mongocxx::instance();
   m_client = new (std::nothrow) mongocxx::client(uri);
 
@@ -210,53 +281,74 @@ std::int64_t MongodbClient::countDocument(mongocxx::collection* coll,
 
 bool MongodbClient::AddUser(const Ctld::User& new_user) {
   // Avoid duplicate insertion
-  bsoncxx::stdx::optional<bsoncxx::document::value> find_result =
-      m_user_collection->find_one(document{}
-                                  << "uid" << std::to_string(new_user.uid)
-                                  << bsoncxx::builder::stream::finalize);
-  if (find_result) {
-    return false;
-  }
+  //  bsoncxx::stdx::optional<bsoncxx::document::value> find_result =
+  //      m_user_collection->find_one(document{}
+  //                                  << "uid" << std::to_string(new_user.uid)
+  //                                  << bsoncxx::builder::stream::finalize);
+  //  if (find_result) {
+  //    return false;
+  //  }
+  //
+  //  if (!new_user.account.empty()) {
+  //    // update the user's account's users_list
+  //    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+  //        m_account_collection->update_one(
+  //            document{} << "name" << new_user.account
+  //                       << bsoncxx::builder::stream::finalize,
+  //            document{} << "$addToSet" <<
+  //            bsoncxx::builder::stream::open_document
+  //                       << "users" << std::to_string(new_user.uid)
+  //                       << bsoncxx::builder::stream::close_document
+  //                       << bsoncxx::builder::stream::finalize);
+  //
+  //    if (!update_result || !update_result->modified_count()) {
+  //      return false;
+  //    }
+  //  }
+  //
+  //  // When there is no indefinite list of objects in the class, the flow
+  //  based
+  //  // method can be used, which is the most efficient More methods are shown
+  //  on
+  //  // the web https://www.nuomiphp.com/eplan/2742.html
+  //  auto builder = bsoncxx::builder::stream::document{};
+  //  auto array_context =
+  //      builder << "deleted" << false << "uid" << (int32_t)new_user.uid
+  //              << "account" << new_user.account << "name" << new_user.name
+  //              << "admin_level" << new_user.admin_level <<
+  //              "allowed_partition"
+  //              << bsoncxx::builder::stream::open_array;
+  //
+  //  for (const auto& partition : new_user.allowed_partition) {
+  //    array_context << partition;
+  //  }
+  //  bsoncxx::document::value doc_value =
+  //      array_context
+  //      << bsoncxx::builder::stream::close_array
+  //      << bsoncxx::builder::stream::
+  //             finalize;  // Use bsoncxx::builder::stream::finalize to
+  //                        // obtain a bsoncxx::document::value instance.
 
-  if (!new_user.account.empty()) {
-    // update the user's account's users_list
-    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-        m_account_collection->update_one(
-            document{} << "name" << new_user.account
-                       << bsoncxx::builder::stream::finalize,
-            document{} << "$addToSet" << bsoncxx::builder::stream::open_document
-                       << "users" << std::to_string(new_user.uid)
-                       << bsoncxx::builder::stream::close_document
-                       << bsoncxx::builder::stream::finalize);
-
-    if (!update_result || !update_result->modified_count()) {
-      return false;
-    }
-  }
-
-  // When there is no indefinite list of objects in the class, the flow based
-  // method can be used, which is the most efficient More methods are shown on
-  // the web https://www.nuomiphp.com/eplan/2742.html
-  auto builder = bsoncxx::builder::stream::document{};
-  auto array_context =
-      builder << "deleted" << false << "uid" << std::to_string(new_user.uid)
-              << "account" << new_user.account << "name" << new_user.name
-              << "admin_level" << new_user.admin_level << "allowed_partition"
-              << bsoncxx::builder::stream::open_array;
-
-  for (const auto& partition : new_user.allowed_partition) {
-    array_context << partition;
-  }
-  bsoncxx::document::value doc_value =
-      array_context
-      << bsoncxx::builder::stream::close_array
-      << bsoncxx::builder::stream::
-             finalize;  // Use bsoncxx::builder::stream::finalize to
-                        // obtain a bsoncxx::document::value instance.
+  std::array<std::string, 6> fields{"deleted",     "uid",
+                                    "account",     "name",
+                                    "admin_level", "allowed_partition_qos_map"};
+  std::tuple<bool, int64_t, std::string, std::string, int32_t,
+             std::unordered_map<
+                 std::string /*partition name*/,
+                 std::pair<std::string /*default qos*/,
+                           std::list<std::string> /*allowed qos list*/>>>
+      values{false,
+             new_user.uid,
+             new_user.account,
+             new_user.name,
+             new_user.admin_level,
+             new_user.allowed_partition_qos_map};
+  bsoncxx::builder::basic::document doc =
+      DocumentConstructor(fields, values, std::make_index_sequence<6>{});
 
   stdx::optional<result::insert_one> ret;
   if (m_dbInstance && m_client) {
-    ret = m_user_collection->insert_one(doc_value.view());
+    // ret = m_user_collection->insert_one(doc.view());
   }
   return true;
 }
@@ -298,7 +390,8 @@ bool MongodbClient::AddAccount(const Ctld::Account& new_account) {
       // Use Empty list to seize a seat, not support to initial this member
       << "child_account" << bsoncxx::builder::stream::open_array
       << bsoncxx::builder::stream::close_array << "parent_account"
-      << new_account.parent_account << "qos" << new_account.qos
+      << new_account.parent_account << "qos"
+      << ""
       << "allowed_partition" << bsoncxx::builder::stream::open_array;
 
   for (const auto& partition : new_account.allowed_partition) {
@@ -346,9 +439,10 @@ bool MongodbClient::GetUserInfo(uid_t uid, Ctld::User* user) {
     user->account = user_view["account"].get_utf8().value;
     user->admin_level =
         (Ctld::User::AdminLevel)user_view["admin_level"].get_int32().value;
-    for (auto&& partition : user_view["allowed_partition"].get_array().value) {
-      user->allowed_partition.emplace_back(partition.get_utf8().value);
-    }
+    //    for (auto&& partition :
+    //    user_view["allowed_partition"].get_array().value) {
+    //      user->allowed_partition.emplace_back(partition.get_utf8().value);
+    //    }
     std::cout << bsoncxx::to_json(*result) << "\n";
     return true;
   }
@@ -376,7 +470,7 @@ bool MongodbClient::GetAccountInfo(const std::string& name,
       account->allowed_partition.emplace_back(partition.get_utf8().value);
     }
     account->parent_account = account_view["parent_account"].get_utf8().value;
-    account->qos = account_view["qos"].get_utf8().value;
+    //    account->qos = account_view["qos"].get_utf8().value;
     return true;
   }
   return false;
@@ -414,40 +508,58 @@ bool MongodbClient::DeleteUser(uid_t uid) {
   return true;
 }
 
+// TEST(MongodbConnector, ParameterExpasion) {
+//   std::array<std::string, 2> fields{"name", "level"};
+//   std::tuple<std::string, int64_t> values{"riley", 5};
+//   bsoncxx::document::value res = Func(std::string("UserTable"), fields,
+//   values);
+// }
+
 TEST(MongodbConnector, Simple) {
   MongodbClient client;
   ASSERT_TRUE(client.Connect());
   client.Init();
 
-  Ctld::Account root_account;
-  root_account.name = "China";
-  root_account.description = "motherland";
-  root_account.qos = "normal";
-  root_account.allowed_partition.emplace_back("CPU");
-  root_account.allowed_partition.emplace_back("MEM");
-  root_account.allowed_partition.emplace_back("GPU");
-  client.AddAccount(root_account);
-
-  Ctld::Account child_account1, child_account2;
-  child_account1.name = "Hunan";
-  child_account1.parent_account = "China";
-  child_account2.name = "CSU";
-  child_account2.parent_account = "Hunan";
-  client.AddAccount(child_account1);
-  client.AddAccount(child_account2);
-
-  Ctld::Account res_account;
-  ASSERT_TRUE(client.GetAccountInfo("China", &res_account));
-  ASSERT_TRUE(std::find(res_account.child_account.begin(),
-                        res_account.child_account.end(), child_account1.name) !=
-              res_account.child_account.end());
+  //  Ctld::Account root_account;
+  //  root_account.name = "China";
+  //  root_account.description = "motherland";
+  //  root_account.default_qos = "normal";
+  //  root_account.allowed_qos_list = {"normal", "simple", "high"};
+  //  root_account.allowed_partition.emplace_back("CPU");
+  //  root_account.allowed_partition.emplace_back("MEM");
+  //  root_account.allowed_partition.emplace_back("GPU");
+  //  client.AddAccount(root_account);
+  //
+  //  Ctld::Account child_account1, child_account2;
+  //  child_account1.name = "Hunan";
+  //  child_account1.parent_account = "China";
+  //  child_account2.name = "CSU";
+  //  child_account2.parent_account = "Hunan";
+  //  client.AddAccount(child_account1);
+  //  client.AddAccount(child_account2);
+  //
+  //  Ctld::Account res_account;
+  //  ASSERT_TRUE(client.GetAccountInfo("China", &res_account));
+  //  ASSERT_TRUE(std::find(res_account.child_account.begin(),
+  //                        res_account.child_account.end(),
+  //                        child_account1.name) !=
+  //              res_account.child_account.end());
 
   Ctld::User user;
   user.uid = 888;
   user.account = "CSU";
   user.name = "test";
   user.admin_level = Ctld::User::Admin;
-  user.allowed_partition.emplace_back("CPU");
+  std::list<std::string> list;
+  list.emplace_back("normal");
+  list.emplace_back("simple");
+  auto pair = std::make_pair("normal", list);
+  user.allowed_partition_qos_map["par1"] = pair;
+  user.allowed_partition_qos_map["par2"] = pair;
+  // user.allowed_partition_qos_map =
+  // std::unordered_map<std::string,std::pair<std::string,
+  // std::list<std::string>>>{{"par1", pair}};
+  //  user.allowed_partition.emplace_back("CPU");
 
   if (client.GetUserInfo(user.uid, &user))
     ASSERT_FALSE(client.AddUser(user));
