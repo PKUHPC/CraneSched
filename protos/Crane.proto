@@ -293,16 +293,18 @@ message DeleteEntityReply {
 }
 
 message ModifyEntityRequest {
-  enum Type {
+  enum OperatorType {
     Overwrite = 0;
     Add = 1;
     Delete = 2;
   }
-  oneof NewEntity{
-    AccountInfo new_account = 1;
-    UserInfo new_user = 2;
-  }
-  Type type = 3;
+
+  string item_left = 1;
+  string item_right = 2;
+  string name = 3;
+  string partition = 4;
+  OperatorType type = 5;
+  EntityType entity_type = 6;
 }
 
 message ModifyEntityReply {

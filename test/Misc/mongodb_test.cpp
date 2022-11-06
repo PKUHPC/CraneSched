@@ -20,36 +20,40 @@ using PartitionQos =
                        std::pair<std::string, std::list<std::string>>>;
 
 template <typename V>
-inline auto KVPConstructor(std::string const& key, V const* value) {
-  auto kvpair = kvp(key, *value);
-  return kvpair;
+inline void KVPConstructor(bsoncxx::builder::basic::document& doc,
+                           std::string const& key, V const& value) {
+  // auto kvpair = kvp(key, value);
+  doc.append(kvp(key, value));
+  //  return kvpair;
 }
 
 template <>
-inline auto KVPConstructor<std::list<std::string>>(
-    std::string const& key, std::list<std::string> const* value) {
+inline void KVPConstructor<std::list<std::string>>(
+    bsoncxx::builder::basic::document& doc, std::string const& key,
+    std::list<std::string> const& value) {
   using bsoncxx::builder::basic::sub_array;
   using bsoncxx::builder::basic::sub_document;
   using namespace bsoncxx;
 
-  return kvp(key, [value](sub_array subarr) {
-    for (auto&& v2 : *value) {
+  doc.append(kvp(key, [value](sub_array subarr) {
+    for (auto&& v2 : value) {
       subarr.append(v2);
     }
-  });
+  }));
 }
 
 template <>
-inline auto KVPConstructor<std::unordered_map<
+inline void KVPConstructor<std::unordered_map<
     std::string, std::pair<std::string, std::list<std::string>>>>(
-    std::string const& key, PartitionQos const* value) {
+    bsoncxx::builder::basic::document& doc, std::string const& key,
+    PartitionQos const& value) {
   using bsoncxx::builder::basic::sub_array;
   using bsoncxx::builder::basic::sub_document;
   using namespace bsoncxx;
 
-  return kvp(key, [value](sub_document subdoc2) {
-    GTEST_LOG_(INFO) << value;
-    for (auto it : *value) {
+  doc.append(kvp(key, [value](sub_document subdoc2) {
+    GTEST_LOG_(INFO) << value.size();
+    for (auto it : value) {
       auto k2 = it.first;
       auto v2 = it.second;
 
@@ -57,11 +61,11 @@ inline auto KVPConstructor<std::unordered_map<
         arr3.append(v2.first);
 
         builder::basic::array arr4;
-        for (auto qos : v2.second) arr4.append(qos);
+        for (const auto& qos : v2.second) arr4.append(qos);
         arr3.append(arr4);
       }));
     }
-  });
+  }));
 }
 
 template <typename... Ts, std::size_t... Is>
@@ -70,8 +74,7 @@ bsoncxx::builder::basic::document DocumentConstructor(
     std::tuple<Ts...> const& values, std::index_sequence<Is...>) {
   bsoncxx::builder::basic::document b_document;
 
-  b_document.append(
-      KVPConstructor(std::get<Is>(fields), &std::get<Is>(values))...);
+  (KVPConstructor(b_document, std::get<Is>(fields), std::get<Is>(values)), ...);
   return b_document;
 }
 
@@ -348,7 +351,7 @@ bool MongodbClient::AddUser(const Ctld::User& new_user) {
 
   stdx::optional<result::insert_one> ret;
   if (m_dbInstance && m_client) {
-    // ret = m_user_collection->insert_one(doc.view());
+    ret = m_user_collection->insert_one(doc.view());
   }
   return true;
 }

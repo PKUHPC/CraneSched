@@ -11,7 +11,8 @@ add_executable(cranectld
         CranedMetaContainer.h
         CranedMetaContainer.cpp
         CraneCtld.cpp
-        )
+        AccountManager.h
+        AccountManager.cpp)
 
 target_link_libraries(cranectld
         spdlog::spdlog

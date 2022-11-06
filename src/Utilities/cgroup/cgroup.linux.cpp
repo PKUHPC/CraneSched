@@ -569,13 +569,14 @@ bool Cgroup::SetCpuShares(uint64_t share) {
   return SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER,
                             CgroupConstant::ControllerFile::CPU_SHARES, share);
 }
-bool Cgroup::SetCpuCoreLimit(uint64_t core_num) {
+
+bool Cgroup::SetCpuCoreLimit(double core_num) {
   constexpr uint32_t base = 1000'000;
 
   bool ret;
   ret = SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER,
                            CgroupConstant::ControllerFile::CPU_CFS_QUOTA_US,
-                           base * core_num);
+                           uint64_t(base * core_num));
   ret &= SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER,
                             CgroupConstant::ControllerFile::CPU_CFS_PERIOD_US,
                             base);

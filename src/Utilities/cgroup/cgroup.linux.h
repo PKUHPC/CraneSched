@@ -192,16 +192,14 @@ class Cgroup {
       : m_cgroup_path_(path), m_cgroup_(handle) {}
   ~Cgroup();
 
-  struct cgroup *NativeHandle() {
-    return m_cgroup_;
-  }
+  struct cgroup *NativeHandle() { return m_cgroup_; }
 
   const std::string &GetCgroupString() const { return m_cgroup_path_; };
 
   // Using the zombie object pattern as exceptions are not available.
   bool Valid() const { return m_cgroup_ != nullptr; }
 
-  bool SetCpuCoreLimit(uint64_t core_num);
+  bool SetCpuCoreLimit(double core_num);
   bool SetCpuShares(uint64_t share);
   bool SetMemoryLimitBytes(uint64_t memory_bytes);
   bool SetMemorySwLimitBytes(uint64_t mem_bytes);

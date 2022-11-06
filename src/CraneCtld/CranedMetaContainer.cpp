@@ -426,9 +426,12 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo() {
   crane::grpc::QueryClusterInfoReply reply;
   auto* partition_craned_list = reply.mutable_partition_craned();
 
-  for (auto&& [part_name, part_meta] : partition_metas_map_) {
+  for (auto&& [part_id, part_meta] : partition_metas_map_) {
     auto* part_craned_info = partition_craned_list->Add();
     part_craned_info->set_name(part_meta.partition_global_meta.name);
+    if (part_craned_info->name() == g_config.DefaultPartition) {
+      part_craned_info->set_name(part_craned_info->name() + '*');
+    }
     if (part_meta.partition_global_meta.alive_craned_cnt > 0)
       part_craned_info->set_state(crane::grpc::PartitionInfo_PartitionState_UP);
     else

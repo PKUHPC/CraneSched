@@ -15,7 +15,7 @@ message CranedId {
 }
 
 message AllocatableResource {
-  uint64 cpu_core_limit = 1;
+  double cpu_core_limit = 1;
   uint64 memory_limit_bytes = 2;
   uint64 memory_sw_limit_bytes = 3;
 }
@@ -55,7 +55,7 @@ message TaskToCtld {
 
   uint32 node_num = 8;
   uint32 ntasks_per_node = 9;
-  uint32 cpus_per_task = 10;
+  double cpus_per_task = 10;
 
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
@@ -181,7 +181,8 @@ message AccountInfo {
   repeated string child_account = 4;
   string parent_account = 5;
   repeated string allowed_partition = 6;
-  string qos = 7;
+  string default_qos = 7;
+  repeated string allowed_qos = 8;
 }
 
 message UserInfo {
@@ -190,9 +191,14 @@ message UserInfo {
     Operator = 1;
     Admin = 2;
   };
+  message allowed_partition_qos{
+    string name = 1;
+    repeated string qos_list = 2;
+    string default_qos = 3;
+  }
   uint32 uid = 1;
   string name = 2;
   string account = 3;
-  repeated string allowed_partition = 4;
+  repeated allowed_partition_qos allowed_partition_qos_list = 4;
   AdminLevel admin_level = 5;
 }

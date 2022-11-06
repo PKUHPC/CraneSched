@@ -1,5 +1,4 @@
 #include <absl/strings/ascii.h>
-#include <absl/strings/str_split.h>
 #include <event2/thread.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/rotating_file_sink.h>
@@ -16,6 +15,7 @@
 #include <mutex>
 #include <unordered_set>
 
+#include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
@@ -215,6 +215,20 @@ void ParseConfig(int argc, char** argv) {
           g_config.Partitions.emplace(std::move(name), std::move(part));
         }
       }
+
+      if (config["DefaultPartition"]) {
+        std::vector<std::string> default_partition_vec;
+        boost::split(default_partition_vec,
+                     config["DefaultPartition"].as<std::string>(),
+                     boost::is_any_of(","));
+        if (default_partition_vec.size() > 1) {
+          CRANE_ERROR(
+              "Default partition contains multiple values, latest value used");
+        }
+        g_config.DefaultPartition =
+            default_partition_vec[default_partition_vec.size() - 1];
+      }
+
     } catch (YAML::BadFile& e) {
       CRANE_ERROR("Can't open config file {}: {}", kDefaultConfigPath,
                   e.what());
@@ -311,15 +325,14 @@ void InitializeCtldGlobalVariables() {
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
   g_db_client = std::make_unique<MongodbClient>();
-  if (!g_db_client) {
-    CRANE_ERROR("Error: MongoDb client Init failed");
-    std::exit(1);
-  }
+
   if (!g_db_client->Connect()) {
     CRANE_ERROR("Error: MongoDb client connect fail");
     std::exit(1);
   }
   g_db_client->Init();
+
+  g_account_manager = std::make_unique<AccountManager>();
 
   g_meta_container = std::make_unique<CranedMetaContainerSimpleImpl>();
   g_meta_container->InitFromConfig(g_config);

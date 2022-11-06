@@ -114,7 +114,7 @@ struct TaskInCtld {
 
   uint32_t node_num{0};
   uint32_t ntasks_per_node{0};
-  uint32_t cpus_per_task{0};
+  double cpus_per_task{0.0};
 
   std::string account;
   std::string name;
@@ -153,6 +153,7 @@ struct TaskInCtld {
 };
 
 struct Qos {
+  bool deleted = false;
   std::string name;
   std::string description;
   int priority;
@@ -160,13 +161,15 @@ struct Qos {
 };
 
 struct Account {
-  bool deleted;
+  bool deleted = false;
   std::string name;
   std::string description;
   std::list<std::string> users;
   std::list<std::string> child_account;
   std::string parent_account;
   std::list<std::string> allowed_partition;
+  //  std::unordered_map<std::string, bool> allowed_partition;  /*partition
+  //  name, enable*/
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
 };
@@ -174,7 +177,7 @@ struct Account {
 struct User {
   enum AdminLevel { None, Operator, Admin };
 
-  bool deleted;
+  bool deleted = false;
   uid_t uid;
   std::string name;
   std::string account;
@@ -219,6 +222,7 @@ struct Config {
   std::string Hostname;
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
   std::unordered_map<std::string, Partition> Partitions;
+  std::string DefaultPartition;
 
   std::string DbUser;
   std::string DbPassword;
