@@ -282,6 +282,15 @@ message AddUserReply {
   string reason = 2;
 }
 
+message AddQosRequest {
+  QosInfo qos = 1;
+}
+
+message AddQosReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 message DeleteEntityRequest {
   EntityType entity_type = 1;
   string name = 2;
@@ -321,6 +330,7 @@ message QueryEntityInfoReply {
   bool ok = 1;
   repeated UserInfo user_list = 2;
   repeated AccountInfo account_list = 3;
+  repeated QosInfo qos_list = 4;
 }
 
 message MigrateSshProcToCgroupRequest {
@@ -373,6 +383,7 @@ service CraneCtld {
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
   rpc AddUser(AddUserRequest) returns (AddUserReply);
+  rpc AddQos(AddQosRequest) returns (AddQosReply);
 
   rpc DeleteEntity(DeleteEntityRequest) returns (DeleteEntityReply);
 

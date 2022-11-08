@@ -156,8 +156,8 @@ struct Qos {
   bool deleted = false;
   std::string name;
   std::string description;
-  int priority;
-  int max_jobs_per_user;
+  uint32_t priority;
+  uint32_t max_jobs_per_user;
 };
 
 struct Account {

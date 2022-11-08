@@ -202,3 +202,10 @@ message UserInfo {
   repeated allowed_partition_qos allowed_partition_qos_list = 4;
   AdminLevel admin_level = 5;
 }
+
+message QosInfo {
+  string name = 1;
+  string description = 2;
+  uint32 priority = 3;
+  uint32 max_jobs_per_user = 4;
+}

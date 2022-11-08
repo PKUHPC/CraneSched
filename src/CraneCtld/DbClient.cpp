@@ -2,6 +2,7 @@
 
 #include <absl/strings/str_join.h>
 
+#include <mongocxx/exception/exception.hpp>
 #include <utility>
 
 namespace Ctld {
@@ -13,20 +14,27 @@ bool MongodbClient::Connect() {
 
   if (!g_config.DbUser.empty()) {
     uri_str =
-        fmt::format("mongodb://{}:{}@{}:{}", g_config.DbUser,
+        fmt::format("mongodb://{}:{}@{}:{}&replicaSet=rs0", g_config.DbUser,
                     g_config.DbPassword, g_config.DbHost, g_config.DbPort);
   } else {
-    uri_str = fmt::format("mongodb://{}:{}", g_config.DbHost, g_config.DbPort);
+    uri_str = fmt::format("mongodb://{}:{}&replicaSet=rs0", g_config.DbHost,
+                          g_config.DbPort);
   }
-
   m_client = std::make_unique<mongocxx::client>(mongocxx::uri{uri_str});
-  std::vector<std::string> database_name = m_client->list_database_names();
-  if (std::find(database_name.begin(), database_name.end(), m_db_name) ==
-      database_name.end()) {
-    CRANE_INFO(
-        "Mongodb: database {} is not existed, crane will create the new "
-        "database.",
-        m_db_name);
+
+  try {
+    std::vector<std::string> database_name = m_client->list_database_names();
+
+    if (std::find(database_name.begin(), database_name.end(), m_db_name) ==
+        database_name.end()) {
+      CRANE_INFO(
+          "Mongodb: database {} is not existed, crane will create the new "
+          "database.",
+          m_db_name);
+    }
+  } catch (const mongocxx::exception& e) {
+    PrintError_(e.what());
+    return false;
   }
 
   if (!m_client) {
@@ -67,9 +75,17 @@ void MongodbClient::Init() {
   if (!m_account_collection || !m_user_collection || !m_qos_collection ||
       !m_job_collection) {
     PrintError_(
-        fmt::format("can't get instance of {} tables", m_db_name).c_str());
+        fmt::format("Can't get instance of {} tables", m_db_name).c_str());
     std::exit(1);
   }
+
+  wc_majority.acknowledge_level(mongocxx::write_concern::level::k_majority);
+  rc_local.acknowledge_level(mongocxx::read_concern::level::k_local);
+  rp_primary.mode(mongocxx::read_preference::read_mode::k_primary);
+
+  // Start a client session for transaction
+  m_client_session =
+      std::make_unique<mongocxx::client_session>(m_client->start_session());
 }
 
 bool MongodbClient::GetMaxExistingJobId(uint64_t* job_id) {
@@ -275,28 +291,10 @@ bool MongodbClient::UpdateJobRecordFields(
 }
 
 bool MongodbClient::InsertUser(const Ctld::User& new_user) {
-  std::array<std::string, 7> fields{"mod_time",
-                                    "deleted",
-                                    "uid",
-                                    "account",
-                                    "name",
-                                    "admin_level",
-                                    "allowed_partition_qos_map"};
-  std::tuple<int64_t, bool, int64_t, std::string, std::string, int32_t,
-             PartitionQosMap>
-      values{ToUnixSeconds(absl::Now()),
-             false,
-             new_user.uid,
-             new_user.account,
-             new_user.name,
-             new_user.admin_level,
-             new_user.allowed_partition_qos_map};
-  document doc = DocumentConstructor(fields, values);
-
-  doc.view()[""].type() == bsoncxx::type::k_array;
+  document doc = UserToDocument(new_user);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      m_user_collection->insert_one(doc.view());
+      m_user_collection->insert_one(*m_client_session, doc.view());
 
   if (ret != bsoncxx::stdx::nullopt)
     return true;
@@ -305,24 +303,7 @@ bool MongodbClient::InsertUser(const Ctld::User& new_user) {
 }
 
 bool MongodbClient::InsertAccount(const Ctld::Account& new_account) {
-  std::array<std::string, 9> fields{
-      "deleted",         "name",           "description",       "users",
-      "child_account",   "parent_account", "allowed_partition", "default_qos",
-      "allowed_qos_list"};
-  std::tuple<bool, std::string, std::string, std::list<std::string>,
-             std::list<std::string>, std::string, std::list<std::string>,
-             std::string, std::list<std::string>>
-      values{false,
-             new_account.name,
-             new_account.description,
-             new_account.users,
-             new_account.child_account,
-             new_account.parent_account,
-             new_account.allowed_partition,
-             new_account.default_qos,
-             new_account.allowed_qos_list};
-
-  document doc = DocumentConstructor(fields, values);
+  document doc = AccountToDocument(new_account);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
       m_account_collection->insert_one(doc.view());
@@ -334,30 +315,15 @@ bool MongodbClient::InsertAccount(const Ctld::Account& new_account) {
 }
 
 bool MongodbClient::InsertQos(const Ctld::Qos& new_qos) {
-  //  std::array<std::string, 8> fields{"deleted",     "name",
-  //                                    "description",     "users",
-  //                                    "child_account", "parent_account",
-  //                                    "default_qos", "allowed_qos_list"};
-  //  std::tuple<bool, std::string, std::string, std::list<std::string>,
-  //  std::list<std::string>, std::string , std::string, std::list<std::string>>
-  //      values{false,
-  //             new_qos.,
-  //             new_account.description,
-  //             new_account.users,
-  //             new_account.child_account,
-  //             new_account.parent_account,
-  //             new_account.default_qos,
-  //             new_account.allowed_qos_list};
-  //
-  //  document doc =DocumentConstructor(fields, values);
-  //
-  //  stdx::optional<result::insert_one> ret =
-  //  m_account_collection->insert_one(doc.view());
-  //
-  //  if (ret != stdx::nullopt)
-  //    return true;
-  //  else
-  //    return false;
+  document doc = QosToDocument(new_qos);
+
+  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+      m_qos_collection->insert_one(doc.view());
+
+  if (ret != bsoncxx::stdx::nullopt)
+    return true;
+  else
+    return false;
 }
 
 bool MongodbClient::DeleteEntity(MongodbClient::EntityType type,
@@ -441,22 +407,24 @@ void MongodbClient::SelectAllAccount(std::list<Ctld::Account>& account_list) {
   }
 }
 
-void MongodbClient::SelectAllQos(std::list<Ctld::Qos>& qos_list) {}
+void MongodbClient::SelectAllQos(std::list<Ctld::Qos>& qos_list) {
+  mongocxx::cursor cursor = m_qos_collection->find({});
+  for (auto view : cursor) {
+    Ctld::Qos qos;
+    ViewToQos(view, &qos);
+    qos_list.emplace_back(qos);
+  }
+}
 
 bool MongodbClient::UpdateUser(Ctld::User& user) {
-  std::array<std::string, 6> fields{"deleted",     "uid",
-                                    "account",     "name",
-                                    "admin_level", "allowed_partition_qos_map"};
-  std::tuple<bool, int64_t, std::string, std::string, int32_t, PartitionQosMap>
-      values{false,     user.uid,         user.account,
-             user.name, user.admin_level, user.allowed_partition_qos_map};
-  document doc = DocumentConstructor(fields, values), setDocument, filter;
+  document doc = UserToDocument(user), setDocument, filter;
 
   filter.append(kvp("name", user.name));
   setDocument.append(kvp("$set", doc));
 
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      m_user_collection->update_one(filter.view(), setDocument.view());
+      m_user_collection->update_one(*m_client_session, filter.view(),
+                                    setDocument.view());
 
   if (!update_result || !update_result->modified_count()) {
     return false;
@@ -465,24 +433,7 @@ bool MongodbClient::UpdateUser(Ctld::User& user) {
 }
 
 bool MongodbClient::UpdateAccount(Ctld::Account& account) {
-  std::array<std::string, 9> fields{
-      "deleted",         "name",           "description",       "users",
-      "child_account",   "parent_account", "allowed_partition", "default_qos",
-      "allowed_qos_list"};
-  std::tuple<bool, std::string, std::string, std::list<std::string>,
-             std::list<std::string>, std::string, std::list<std::string>,
-             std::string, std::list<std::string>>
-      values{false,
-             account.name,
-             account.description,
-             account.users,
-             account.child_account,
-             account.parent_account,
-             account.allowed_partition,
-             account.default_qos,
-             account.allowed_qos_list};
-
-  document doc = DocumentConstructor(fields, values), setDocument, filter;
+  document doc = AccountToDocument(account), setDocument, filter;
 
   setDocument.append(kvp("$set", doc));
   filter.append(kvp("name", account.name));
@@ -496,8 +447,36 @@ bool MongodbClient::UpdateAccount(Ctld::Account& account) {
   return true;
 }
 
-bool MongodbClient::UpdateQos(const std::string& name, Ctld::Qos& qos) {
-  return false;
+bool MongodbClient::UpdateQos(Ctld::Qos& qos) {
+  document doc = QosToDocument(qos), setDocument, filter;
+
+  setDocument.append(kvp("$set", doc));
+  filter.append(kvp("name", qos.name));
+
+  bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+      m_qos_collection->update_one(filter.view(), setDocument.view());
+
+  if (!update_result || !update_result->modified_count()) {
+    return false;
+  }
+  return true;
+}
+
+bool MongodbClient::CommitTransaction(
+    mongocxx::client_session::with_transaction_cb& callback) {
+  // Use with_transaction to start a transaction, execute the callback,
+  // and commit (or abort on error).
+  try {
+    mongocxx::options::transaction opts;
+    opts.write_concern(wc_majority);
+    opts.read_concern(rc_local);
+    opts.read_preference(rp_primary);
+    m_client_session->with_transaction(callback, opts);
+  } catch (const mongocxx::exception& e) {
+    CRANE_ERROR("Database transaction failed: {}", e.what());
+    return false;
+  }
+  return true;
 }
 
 template <typename V>
@@ -511,7 +490,7 @@ void MongodbClient::DocumentAppendItem<std::list<std::string>>(
     document& doc, const std::string& key,
     const std::list<std::string>& value) {
   doc.append(kvp(key, [&value](sub_array array) {
-    for (auto&& v : value) {
+    for (const auto& v : value) {
       array.append(v);
     }
   }));
@@ -640,6 +619,24 @@ document MongodbClient::AccountToDocument(const Ctld::Account& account) {
              account.allowed_partition,
              account.default_qos,
              account.allowed_qos_list};
+
+  return DocumentConstructor(fields, values);
+}
+
+void MongodbClient::ViewToQos(const bsoncxx::document::view& qos_view,
+                              Ctld::Qos* qos) {
+  qos->deleted = qos_view["deleted"].get_bool().value;
+  qos->name = qos_view["name"].get_string().value;
+  qos->description = qos_view["description"].get_string().value;
+  qos->priority = qos_view["priority"].get_int32().value;
+  qos->max_jobs_per_user = qos_view["max_jobs_per_user"].get_int32().value;
+}
+
+document MongodbClient::QosToDocument(const Ctld::Qos& qos) {
+  std::array<std::string, 5> fields{"deleted", "name", "description",
+                                    "priority", "max_jobs_per_user"};
+  std::tuple<bool, std::string, std::string, int, int> values{
+      false, qos.name, qos.description, qos.priority, qos.max_jobs_per_user};
 
   return DocumentConstructor(fields, values);
 }

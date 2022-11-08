@@ -5,6 +5,7 @@
 
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
+#include "crane/Lock.h"
 
 namespace Ctld {
 
@@ -33,14 +34,15 @@ class AccountManager {
 
   Ctld::User* GetUserInfo(const std::string& name);
   Ctld::User* GetExistedUserInfo(const std::string& name);
-  void GetAllUserInfo(std::list<Ctld::User>& user_list);
+  void GetAllUserInfo(std::list<Ctld::User>* user_list);
 
   Ctld::Account* GetAccountInfo(const std::string& name);
   Ctld::Account* GetExistedAccountInfo(const std::string& name);
-  void GetAllAccountInfo(std::list<Ctld::Account>& account_list);
+  void GetAllAccountInfo(std::list<Ctld::Account>* account_list);
 
-  bool GetQosInfo(const std::string& name, Ctld::Qos* qos);
-  std::unordered_map<std::string, std::unique_ptr<Ctld::Qos>>& GetAllQosInfo();
+  Ctld::Qos* GetQosInfo(const std::string& name);
+  Ctld::Qos* GetExistedQosInfo(const std::string& name);
+  void GetAllQosInfo(std::list<Ctld::Qos>* qos_list);
 
   Result ModifyUser(
       const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
@@ -50,6 +52,9 @@ class AccountManager {
       const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
       const std::string& name, const std::string& itemLeft,
       const std::string& itemRight);
+
+  Result ModifyQos(const std::string& name, const std::string& itemLeft,
+                   const std::string& itemRight);
 
   std::list<std::string> GetUserAllowedPartition(const std::string& name);
   //  std::list<std::string> GetAccountAllowedPartition(const std::string&
@@ -79,10 +84,13 @@ class AccountManager {
   std::unordered_map<std::string /*account name*/,
                      std::unique_ptr<Ctld::Account>>
       m_account_map_;
+  util::rw_mutex rw_account_mutex;
   std::unordered_map<std::string /*user name*/, std::unique_ptr<Ctld::User>>
       m_user_map_;
+  util::rw_mutex rw_user_mutex;
   std::unordered_map<std::string /*Qos name*/, std::unique_ptr<Ctld::Qos>>
       m_qos_map_;
+  util::rw_mutex rw_qos_mutex;
 };
 
 }  // namespace Ctld

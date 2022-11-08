@@ -377,6 +377,27 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::AddQos(
+    grpc::ServerContext *context, const crane::grpc::AddQosRequest *request,
+    crane::grpc::AddQosReply *response) {
+  Qos qos;
+  const crane::grpc::QosInfo *qos_info = &request->qos();
+  qos.name = qos_info->name();
+  qos.description = qos_info->description();
+  qos.priority = qos_info->priority();
+  qos.max_jobs_per_user = qos_info->max_jobs_per_user();
+
+  AccountManager::Result result = g_account_manager->AddQos(qos);
+  if (result.ok) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason(result.reason.value());
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::ModifyEntity(
     grpc::ServerContext *context,
     const crane::grpc::ModifyEntityRequest *request,
@@ -396,6 +417,8 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
           request->item_left(), request->item_right());
       break;
     case crane::grpc::Qos:
+      res = g_account_manager->ModifyQos(request->name(), request->item_left(),
+                                         request->item_right());
       break;
     default:
       break;
@@ -417,10 +440,10 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
     case crane::grpc::Account:
       if (request->name().empty()) {
         std::list<Account> account_list;
-        g_account_manager->GetAllAccountInfo(account_list);
+        g_account_manager->GetAllAccountInfo(&account_list);
 
         auto *list = response->mutable_account_list();
-        for (auto &&account : account_list) {
+        for (const auto &account : account_list) {
           if (account.deleted) {
             continue;
           }
@@ -482,10 +505,10 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
     case crane::grpc::User:
       if (request->name().empty()) {
         std::list<User> user_list;
-        g_account_manager->GetAllUserInfo(user_list);
+        g_account_manager->GetAllUserInfo(&user_list);
 
         auto *list = response->mutable_user_list();
-        for (auto &&user : user_list) {
+        for (const auto &user : user_list) {
           if (user.deleted) {
             continue;
           }
@@ -536,7 +559,48 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
       }
       break;
     case crane::grpc::Qos:
-      [[fallthrough]];
+      if (request->name().empty()) {
+        std::list<Qos> qos_list;
+        g_account_manager->GetAllQosInfo(&qos_list);
+
+        auto *list = response->mutable_qos_list();
+        for (const auto &qos : qos_list) {
+          if (qos.deleted) {
+            continue;
+          }
+          auto *qos_info = list->Add();
+          qos_info->set_name(qos.name);
+          qos_info->set_description(qos.description);
+          qos_info->set_priority(qos.priority);
+          qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
+        }
+        response->set_ok(true);
+      } else {
+        User *user;
+        if ((user = g_account_manager->GetExistedUserInfo(request->name())) !=
+            nullptr) {
+          auto *user_info = response->mutable_user_list()->Add();
+          user_info->set_name(user->name);
+          user_info->set_uid(user->uid);
+          user_info->set_account(user->account);
+          user_info->set_admin_level(
+              (crane::grpc::UserInfo_AdminLevel)user->admin_level);
+          auto *partition_qos_list =
+              user_info->mutable_allowed_partition_qos_list();
+          for (const auto &[name, pair] : user->allowed_partition_qos_map) {
+            auto *partition_qos = partition_qos_list->Add();
+            partition_qos->set_name(name);
+            partition_qos->set_default_qos(pair.first);
+            auto *qos_list = partition_qos->mutable_qos_list();
+            for (const auto &qos : pair.second) {
+              qos_list->Add()->assign(qos);
+            }
+          }
+          response->set_ok(true);
+        } else {
+          response->set_ok(false);
+        }
+      }
     default:
       break;
   }

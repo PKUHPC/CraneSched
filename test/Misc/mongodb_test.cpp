@@ -53,7 +53,7 @@ inline void KVPConstructor<std::unordered_map<
 
   doc.append(kvp(key, [value](sub_document subdoc2) {
     GTEST_LOG_(INFO) << value.size();
-    for (auto it : value) {
+    for (const auto& it : value) {
       auto k2 = it.first;
       auto v2 = it.second;
 

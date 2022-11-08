@@ -36,11 +36,6 @@ class MongodbClient {
     Qos = 2,
   };
 
-  //  struct MongodbResult {
-  //    bool ok{false};
-  //    std::optional<std::string> reason;
-  //  };
-
   struct MongodbFilter {
     enum RelationalOperator {
       Equal,
@@ -133,7 +128,7 @@ class MongodbClient {
     }
 
     bsoncxx::stdx::optional<mongocxx::result::update> result =
-        coll->update_one(filter.view(), updateItem.view());
+        coll->update_one(*m_client_session, filter.view(), updateItem.view());
 
     if (!result || !result->modified_count()) {
       return false;
@@ -141,38 +136,16 @@ class MongodbClient {
     return true;
   };
 
-  //  template <typename T>
-  //  bool UpdatePartitionQosMap(const std::string& opt, const std::string&
-  //  name,
-  //                             const std::string& partition_name,
-  //                             const std::string& key, const T& value) {
-  //    document filter, updateItem;
-  //
-  //    Ctld::User user;
-  ////    user.allowed_partition_qos_map,partition_name
-  //    filter.append(kvp("name", name),
-  //                  kvp("allowed_partition_qos_map."));
-  //    updateItem.append(kvp(opt, [&](sub_document subDocument) {
-  //      subDocument.append(kvp(key, value));
-  //    }));
-  //  }
-
   bool UpdateUser(Ctld::User& user);
   bool UpdateAccount(Ctld::Account& account);
-  bool UpdateQos(const std::string& name, Ctld::Qos& qos);
+  bool UpdateQos(Ctld::Qos& qos);
 
-  void ViewToUser(const bsoncxx::document::view& user_view, Ctld::User* user);
-
-  document UserToDocument(const Ctld::User& user);
-
-  void ViewToAccount(const bsoncxx::document::view& account_view,
-                     Ctld::Account* account);
-
-  document AccountToDocument(const Ctld::Account& account);
+  bool CommitTransaction(
+      mongocxx::client_session::with_transaction_cb& callback);
 
  private:
   static void PrintError_(const char* msg) {
-    CRANE_ERROR("MongodbError: {}\n", msg);
+    CRANE_ERROR("MongodbError: {}", msg);
   }
 
   template <typename V>
@@ -189,6 +162,19 @@ class MongodbClient {
       const std::array<std::string, sizeof...(Ts)>& fields,
       const std::tuple<Ts...>& values);
 
+  void ViewToUser(const bsoncxx::document::view& user_view, Ctld::User* user);
+
+  document UserToDocument(const Ctld::User& user);
+
+  void ViewToAccount(const bsoncxx::document::view& account_view,
+                     Ctld::Account* account);
+
+  document AccountToDocument(const Ctld::Account& account);
+
+  void ViewToQos(const bsoncxx::document::view& qos_view, Ctld::Qos* qos);
+
+  document QosToDocument(const Ctld::Qos& qos);
+
   std::string m_db_name;
   const std::string m_job_collection_name{"job_table"};
   const std::string m_account_collection_name{"acct_table"};
@@ -198,11 +184,15 @@ class MongodbClient {
   std::unique_ptr<mongocxx::instance> m_dbInstance;
   std::unique_ptr<mongocxx::client> m_client;
   std::unique_ptr<mongocxx::database> m_database;
+  std::unique_ptr<mongocxx::client_session> m_client_session;
   std::shared_ptr<mongocxx::collection> m_job_collection, m_account_collection,
       m_user_collection, m_qos_collection;
+
+  mongocxx::write_concern wc_majority{};
+  mongocxx::read_concern rc_local{};
+  mongocxx::read_preference rp_primary{};
 };
 
-#warning class outside
 template <>
 void MongodbClient::DocumentAppendItem<std::list<std::string>>(
     document& doc, const std::string& key, const std::list<std::string>& value);
