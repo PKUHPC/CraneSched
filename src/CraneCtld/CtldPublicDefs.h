@@ -165,7 +165,7 @@ struct Account {
   std::string name;
   std::string description;
   std::list<std::string> users;
-  std::list<std::string> child_account;
+  std::list<std::string> child_accounts;
   std::string parent_account;
   std::list<std::string> allowed_partition;
   //  std::unordered_map<std::string, bool> allowed_partition;  /*partition

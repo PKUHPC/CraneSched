@@ -2,6 +2,7 @@
 
 #include <absl/strings/str_join.h>
 
+#include <bsoncxx/exception/exception.hpp>
 #include <mongocxx/exception/exception.hpp>
 #include <utility>
 
@@ -20,10 +21,12 @@ bool MongodbClient::Connect() {
     uri_str = fmt::format("mongodb://{}:{}&replicaSet=rs0", g_config.DbHost,
                           g_config.DbPort);
   }
+  m_connect_pool = std::make_unique<mongocxx::pool>(mongocxx::uri{uri_str});
+  mongocxx::pool::entry client = m_connect_pool->acquire();
   m_client = std::make_unique<mongocxx::client>(mongocxx::uri{uri_str});
 
   try {
-    std::vector<std::string> database_name = m_client->list_database_names();
+    std::vector<std::string> database_name = client->list_database_names();
 
     if (std::find(database_name.begin(), database_name.end(), m_db_name) ==
         database_name.end()) {
@@ -33,14 +36,14 @@ bool MongodbClient::Connect() {
           m_db_name);
     }
   } catch (const mongocxx::exception& e) {
-    PrintError_(e.what());
+    CRANE_CRITICAL(e.what());
     return false;
   }
 
-  if (!m_client) {
-    PrintError_("can't connect to localhost:27017");
-    return false;
-  }
+  //  if (!client) {
+  //    PrintError_("can't connect to localhost:27017");
+  //    return false;
+  //  }
   return true;
 }
 
@@ -290,11 +293,13 @@ bool MongodbClient::UpdateJobRecordFields(
   return true;
 }
 
-bool MongodbClient::InsertUser(const Ctld::User& new_user) {
+bool MongodbClient::InsertUser(const Ctld::User& new_user,
+                               mongocxx::client_session* session) {
   document doc = UserToDocument(new_user);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      m_user_collection->insert_one(*m_client_session, doc.view());
+      session->client()[m_db_name][m_user_collection_name].insert_one(
+          *session, doc.view());
 
   if (ret != bsoncxx::stdx::nullopt)
     return true;
@@ -302,11 +307,13 @@ bool MongodbClient::InsertUser(const Ctld::User& new_user) {
     return false;
 }
 
-bool MongodbClient::InsertAccount(const Ctld::Account& new_account) {
+bool MongodbClient::InsertAccount(const Ctld::Account& new_account,
+                                  mongocxx::client_session* session) {
   document doc = AccountToDocument(new_account);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      m_account_collection->insert_one(doc.view());
+      session->client()[m_db_name][m_account_collection_name].insert_one(
+          *session, doc.view());
 
   if (ret != bsoncxx::stdx::nullopt)
     return true;
@@ -317,8 +324,12 @@ bool MongodbClient::InsertAccount(const Ctld::Account& new_account) {
 bool MongodbClient::InsertQos(const Ctld::Qos& new_qos) {
   document doc = QosToDocument(new_qos);
 
+  mongocxx::pool::entry client = m_connect_pool->acquire();
+  //  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+  //      session.client()[m_db_name][m_qos_collection_name].insert_one(session,
+  //      doc.view());
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      m_qos_collection->insert_one(doc.view());
+      (*client)[m_db_name][m_qos_collection_name].insert_one(doc.view());
 
   if (ret != bsoncxx::stdx::nullopt)
     return true;
@@ -392,7 +403,6 @@ void MongodbClient::SelectAllUser(std::list<Ctld::User>& user_list) {
   mongocxx::cursor cursor = m_user_collection->find({});
   for (auto view : cursor) {
     Ctld::User user;
-    int i;
     ViewToUser(view, &user);
     user_list.emplace_back(user);
   }
@@ -416,15 +426,24 @@ void MongodbClient::SelectAllQos(std::list<Ctld::Qos>& qos_list) {
   }
 }
 
-bool MongodbClient::UpdateUser(Ctld::User& user) {
+bool MongodbClient::UpdateUser(
+    Ctld::User& user, std::optional<mongocxx::client_session*> opt_session) {
   document doc = UserToDocument(user), setDocument, filter;
 
   filter.append(kvp("name", user.name));
   setDocument.append(kvp("$set", doc));
 
-  bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      m_user_collection->update_one(*m_client_session, filter.view(),
-                                    setDocument.view());
+  bsoncxx::stdx::optional<mongocxx::result::update> update_result;
+  if (opt_session) {
+    mongocxx::client_session* session = opt_session.value();
+    update_result =
+        session->client()[m_db_name][m_user_collection_name].update_one(
+            *session, filter.view(), setDocument.view());
+  } else {
+    mongocxx::pool::entry client = m_connect_pool->acquire();
+    update_result = (*client)[m_db_name][m_user_collection_name].update_one(
+        filter.view(), setDocument.view());
+  }
 
   if (!update_result || !update_result->modified_count()) {
     return false;
@@ -432,14 +451,16 @@ bool MongodbClient::UpdateUser(Ctld::User& user) {
   return true;
 }
 
-bool MongodbClient::UpdateAccount(Ctld::Account& account) {
+bool MongodbClient::UpdateAccount(Ctld::Account& account,
+                                  mongocxx::client_session* session) {
   document doc = AccountToDocument(account), setDocument, filter;
 
   setDocument.append(kvp("$set", doc));
   filter.append(kvp("name", account.name));
 
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      m_account_collection->update_one(filter.view(), setDocument.view());
+      session->client()[m_db_name][m_account_collection_name].update_one(
+          *session, filter.view(), setDocument.view());
 
   if (!update_result || !update_result->modified_count()) {
     return false;
@@ -453,8 +474,13 @@ bool MongodbClient::UpdateQos(Ctld::Qos& qos) {
   setDocument.append(kvp("$set", doc));
   filter.append(kvp("name", qos.name));
 
+  mongocxx::pool::entry client = m_connect_pool->acquire();
+  //  bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+  //      session.client()[m_db_name][m_qos_collection_name].update_one(session,
+  //      filter.view(), setDocument.view());
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      m_qos_collection->update_one(filter.view(), setDocument.view());
+      (*client)[m_db_name][m_qos_collection_name].update_one(
+          filter.view(), setDocument.view());
 
   if (!update_result || !update_result->modified_count()) {
     return false;
@@ -466,12 +492,16 @@ bool MongodbClient::CommitTransaction(
     mongocxx::client_session::with_transaction_cb& callback) {
   // Use with_transaction to start a transaction, execute the callback,
   // and commit (or abort on error).
+
+  auto client = m_connect_pool->acquire();
+  auto session = client->start_session();
+
   try {
     mongocxx::options::transaction opts;
     opts.write_concern(wc_majority);
     opts.read_concern(rc_local);
     opts.read_preference(rp_primary);
-    m_client_session->with_transaction(callback, opts);
+    session.with_transaction(callback, opts);
   } catch (const mongocxx::exception& e) {
     CRANE_ERROR("Database transaction failed: {}", e.what());
     return false;
@@ -539,25 +569,29 @@ document MongodbClient::DocumentConstructor(
 
 void MongodbClient::ViewToUser(const bsoncxx::document::view& user_view,
                                Ctld::User* user) {
-  user->deleted = user_view["deleted"].get_bool();
-  user->uid = user_view["uid"].get_int64().value;
-  user->name = user_view["name"].get_string().value;
-  user->account = user_view["account"].get_string().value;
-  user->admin_level =
-      (Ctld::User::AdminLevel)user_view["admin_level"].get_int32().value;
+  try {
+    user->deleted = user_view["deleted"].get_bool();
+    user->uid = user_view["uid"].get_int64().value;
+    user->name = user_view["name"].get_string().value;
+    user->account = user_view["account"].get_string().value;
+    user->admin_level =
+        (Ctld::User::AdminLevel)user_view["admin_level"].get_int32().value;
 
-  for (auto&& partition :
-       user_view["allowed_partition_qos_map"].get_document().view()) {
-    std::string default_qos;
-    std::list<std::string> allowed_qos_list;
-    auto partition_array = partition.get_array().value;
-    default_qos = partition_array[0].get_string().value.data();
-    for (auto&& allowed_qos : partition_array[1].get_array().value) {
-      allowed_qos_list.emplace_back(allowed_qos.get_string().value);
+    for (auto&& partition :
+         user_view["allowed_partition_qos_map"].get_document().view()) {
+      std::string default_qos;
+      std::list<std::string> allowed_qos_list;
+      auto partition_array = partition.get_array().value;
+      default_qos = partition_array[0].get_string().value.data();
+      for (auto&& allowed_qos : partition_array[1].get_array().value) {
+        allowed_qos_list.emplace_back(allowed_qos.get_string().value);
+      }
+      user->allowed_partition_qos_map[std::string(partition.key())] =
+          std::pair<std::string, std::list<std::string>>{default_qos,
+                                                         allowed_qos_list};
     }
-    user->allowed_partition_qos_map[std::string(partition.key())] =
-        std::pair<std::string, std::list<std::string>>{default_qos,
-                                                       allowed_qos_list};
+  } catch (const bsoncxx::exception& e) {
+    PrintError_(e.what());
   }
 }
 
@@ -583,29 +617,35 @@ document MongodbClient::UserToDocument(const Ctld::User& user) {
 
 void MongodbClient::ViewToAccount(const bsoncxx::document::view& account_view,
                                   Ctld::Account* account) {
-  account->deleted = account_view["deleted"].get_bool().value;
-  account->name = account_view["name"].get_string().value;
-  account->description = account_view["description"].get_string().value;
-  for (auto&& user : account_view["users"].get_array().value) {
-    account->users.emplace_back(user.get_string().value);
-  }
-  for (auto&& acct : account_view["child_account"].get_array().value) {
-    account->child_account.emplace_back(acct.get_string().value);
-  }
-  for (auto&& partition : account_view["allowed_partition"].get_array().value) {
-    account->allowed_partition.emplace_back(partition.get_string().value);
-  }
-  account->parent_account = account_view["parent_account"].get_string().value;
-  account->default_qos = account_view["default_qos"].get_string().value;
-  for (auto& allowed_qos : account_view["allowed_qos_list"].get_array().value) {
-    account->allowed_qos_list.emplace_back(allowed_qos.get_string());
+  try {
+    account->deleted = account_view["deleted"].get_bool().value;
+    account->name = account_view["name"].get_string().value;
+    account->description = account_view["description"].get_string().value;
+    for (auto&& user : account_view["users"].get_array().value) {
+      account->users.emplace_back(user.get_string().value);
+    }
+    for (auto&& acct : account_view["child_accounts"].get_array().value) {
+      account->child_accounts.emplace_back(acct.get_string().value);
+    }
+    for (auto&& partition :
+         account_view["allowed_partition"].get_array().value) {
+      account->allowed_partition.emplace_back(partition.get_string().value);
+    }
+    account->parent_account = account_view["parent_account"].get_string().value;
+    account->default_qos = account_view["default_qos"].get_string().value;
+    for (auto& allowed_qos :
+         account_view["allowed_qos_list"].get_array().value) {
+      account->allowed_qos_list.emplace_back(allowed_qos.get_string());
+    }
+  } catch (const bsoncxx::exception& e) {
+    PrintError_(e.what());
   }
 }
 
 document MongodbClient::AccountToDocument(const Ctld::Account& account) {
   std::array<std::string, 9> fields{
       "deleted",         "name",           "description",       "users",
-      "child_account",   "parent_account", "allowed_partition", "default_qos",
+      "child_accounts",  "parent_account", "allowed_partition", "default_qos",
       "allowed_qos_list"};
   std::tuple<bool, std::string, std::string, std::list<std::string>,
              std::list<std::string>, std::string, std::list<std::string>,
@@ -614,7 +654,7 @@ document MongodbClient::AccountToDocument(const Ctld::Account& account) {
              account.name,
              account.description,
              account.users,
-             account.child_account,
+             account.child_accounts,
              account.parent_account,
              account.allowed_partition,
              account.default_qos,
@@ -625,11 +665,15 @@ document MongodbClient::AccountToDocument(const Ctld::Account& account) {
 
 void MongodbClient::ViewToQos(const bsoncxx::document::view& qos_view,
                               Ctld::Qos* qos) {
-  qos->deleted = qos_view["deleted"].get_bool().value;
-  qos->name = qos_view["name"].get_string().value;
-  qos->description = qos_view["description"].get_string().value;
-  qos->priority = qos_view["priority"].get_int32().value;
-  qos->max_jobs_per_user = qos_view["max_jobs_per_user"].get_int32().value;
+  try {
+    qos->deleted = qos_view["deleted"].get_bool().value;
+    qos->name = qos_view["name"].get_string().value;
+    qos->description = qos_view["description"].get_string().value;
+    qos->priority = qos_view["priority"].get_int32().value;
+    qos->max_jobs_per_user = qos_view["max_jobs_per_user"].get_int32().value;
+  } catch (const bsoncxx::exception& e) {
+    PrintError_(e.what());
+  }
 }
 
 document MongodbClient::QosToDocument(const Ctld::Qos& qos) {

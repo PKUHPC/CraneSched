@@ -466,7 +466,7 @@ bool MongodbClient::GetAccountInfo(const std::string& name,
       account->users.emplace_back(user.get_utf8().value);
     }
     for (auto&& acct : account_view["child_account"].get_array().value) {
-      account->child_account.emplace_back(acct.get_utf8().value);
+      account->child_accounts.emplace_back(acct.get_utf8().value);
     }
     for (auto&& partition :
          account_view["allowed_partition"].get_array().value) {

@@ -10,6 +10,7 @@
 #include <mongocxx/client.hpp>
 #include <mongocxx/cursor.hpp>
 #include <mongocxx/instance.hpp>
+#include <mongocxx/pool.hpp>
 #include <string>
 
 #include "CtldPublicDefs.h"
@@ -85,8 +86,10 @@ class MongodbClient {
                              const std::list<std::string>& val);
 
   /* ----- Method of operating the account table ----------- */
-  bool InsertUser(const Ctld::User& new_user);
-  bool InsertAccount(const Ctld::Account& new_account);
+  bool InsertUser(const Ctld::User& new_user,
+                  mongocxx::client_session* session);
+  bool InsertAccount(const Ctld::Account& new_account,
+                     mongocxx::client_session* session);
   bool InsertQos(const Ctld::Qos& new_qos);
 
   bool DeleteEntity(EntityType type, const std::string& name);
@@ -103,10 +106,11 @@ class MongodbClient {
   void SelectAllQos(std::list<Ctld::Qos>& qos_list);
 
   template <typename T>
-  bool UpdateEntityOne(EntityType type, const std::string& opt,
-                       const std::string& name, const std::string& key,
-                       const T& value) {
-    std::shared_ptr<mongocxx::collection> coll;
+  bool UpdateEntityOne(
+      EntityType type, const std::string& opt, const std::string& name,
+      const std::string& key, const T& value,
+      std::optional<mongocxx::client_session*> opt_session = std::nullopt) {
+    std::string coll_name;
     document filter, updateItem;
 
     filter.append(kvp("name", name));
@@ -117,18 +121,26 @@ class MongodbClient {
 
     switch (type) {
       case MongodbClient::Account:
-        coll = m_account_collection;
+        coll_name = m_account_collection_name;
         break;
       case User:
-        coll = m_user_collection;
+        coll_name = m_user_collection_name;
         break;
       case Qos:
-        coll = m_qos_collection;
+        coll_name = m_qos_collection_name;
         break;
     }
 
-    bsoncxx::stdx::optional<mongocxx::result::update> result =
-        coll->update_one(*m_client_session, filter.view(), updateItem.view());
+    bsoncxx::stdx::optional<mongocxx::result::update> result;
+    if (opt_session) {
+      mongocxx::client_session* session = opt_session.value();
+      result = session->client()[m_db_name][coll_name].update_one(
+          *session, filter.view(), updateItem.view());
+    } else {
+      mongocxx::pool::entry client = m_connect_pool->acquire();
+      result = (*client)[m_db_name][coll_name].update_one(filter.view(),
+                                                          updateItem.view());
+    }
 
     if (!result || !result->modified_count()) {
       return false;
@@ -136,12 +148,16 @@ class MongodbClient {
     return true;
   };
 
-  bool UpdateUser(Ctld::User& user);
-  bool UpdateAccount(Ctld::Account& account);
+  bool UpdateUser(
+      Ctld::User& user,
+      std::optional<mongocxx::client_session*> opt_session = std::nullopt);
+  bool UpdateAccount(Ctld::Account& account, mongocxx::client_session* session);
   bool UpdateQos(Ctld::Qos& qos);
 
   bool CommitTransaction(
       mongocxx::client_session::with_transaction_cb& callback);
+
+  std::unique_ptr<mongocxx::pool> m_connect_pool;
 
  private:
   static void PrintError_(const char* msg) {
@@ -182,6 +198,7 @@ class MongodbClient {
   const std::string m_qos_collection_name{"qos_table"};
 
   std::unique_ptr<mongocxx::instance> m_dbInstance;
+
   std::unique_ptr<mongocxx::client> m_client;
   std::unique_ptr<mongocxx::database> m_database;
   std::unique_ptr<mongocxx::client_session> m_client_session;
@@ -205,3 +222,5 @@ void MongodbClient::DocumentAppendItem<MongodbClient::PartitionQosMap>(
 }  // namespace Ctld
 
 inline std::unique_ptr<Ctld::MongodbClient> g_db_client;
+// thread_local mongocxx::pool::entry client =
+// g_db_client->m_connect_pool->acquire();

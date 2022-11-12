@@ -20,11 +20,11 @@ class AccountManager {
 
   ~AccountManager() = default;
 
-  Result AddUser(Ctld::User& new_user);
+  Result AddUser(User& new_user);
 
-  Result AddAccount(Ctld::Account& new_account);
+  Result AddAccount(Account& new_account);
 
-  Result AddQos(Ctld::Qos& new_qos);
+  Result AddQos(Qos& new_qos);
 
   Result DeleteUser(const std::string& name);
 
@@ -32,17 +32,14 @@ class AccountManager {
 
   Result DeleteQos(const std::string& name);
 
-  Ctld::User* GetUserInfo(const std::string& name);
-  Ctld::User* GetExistedUserInfo(const std::string& name);
-  void GetAllUserInfo(std::list<Ctld::User>* user_list);
+  bool GetExistedUserInfo(const std::string& name, User* user);
+  void GetAllUserInfo(std::list<User>* user_list);
 
-  Ctld::Account* GetAccountInfo(const std::string& name);
-  Ctld::Account* GetExistedAccountInfo(const std::string& name);
-  void GetAllAccountInfo(std::list<Ctld::Account>* account_list);
+  bool GetExistedAccountInfo(const std::string& name, Account* account);
+  void GetAllAccountInfo(std::list<Account>* account_list);
 
-  Ctld::Qos* GetQosInfo(const std::string& name);
-  Ctld::Qos* GetExistedQosInfo(const std::string& name);
-  void GetAllQosInfo(std::list<Ctld::Qos>* qos_list);
+  bool GetExistedQosInfo(const std::string& name, Qos* qos);
+  void GetAllQosInfo(std::list<Qos>* qos_list);
 
   Result ModifyUser(
       const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
@@ -56,40 +53,54 @@ class AccountManager {
   Result ModifyQos(const std::string& name, const std::string& itemLeft,
                    const std::string& itemRight);
 
-  std::list<std::string> GetUserAllowedPartition(const std::string& name);
-  //  std::list<std::string> GetAccountAllowedPartition(const std::string&
-  //  name);
+  bool CheckUserPermissionToPartition(const std::string& name,
+                                      const std::string& partition);
 
  private:
-  void InitDataMap();
+  void InitDataMap_();
 
-  bool IsDefaultQosOfAnyPartition(Ctld::User* user, const std::string& qos);
+  bool GetUserInfoNoLock_(const std::string& name, User* user);
+  bool GetExistedUserInfoNoLock_(const std::string& name, User* user);
 
-  bool DeleteUserAllowedQosOfAllPartition(Ctld::User* user,
-                                          const std::string& qos, bool force);
+  bool GetAccountInfoNoLock_(const std::string& name, Account* account);
+  bool GetExistedAccountInfoNoLock_(const std::string& name, Account* account);
 
-  bool DeleteUserAllowedPartition(Ctld::User* user,
-                                  const std::string& partition);
+  bool GetQosInfoNoLock_(const std::string& name, Qos* qos);
+  bool GetExistedQosInfoNoLock_(const std::string& name, Qos* qos);
 
-  bool IsDefaultQosOfAnyNode(Ctld::Account* account, const std::string& qos);
+  bool IsDefaultQosOfAnyNode(Account& account, const std::string& qos);
+  bool IsDefaultQosOfAnyPartition(User& user, const std::string& qos);
 
-  bool DeleteAccountAllowedQos(Ctld::Account* account, const std::string& qos,
-                               bool force);
+  bool DeleteAccountAllowedQosFromDB_(Account& account, const std::string& qos,
+                                      mongocxx::client_session* session);
+  bool DeleteAccountAllowedQosFromMap_(Account& account,
+                                       const std::string& qos);
+  bool DeleteUserAllowedQosOfAllPartitionFromDB(
+      User& user, const std::string& qos, bool force,
+      mongocxx::client_session* session);
+  bool DeleteUserAllowedQosOfAllPartitionFromMap(User& user,
+                                                 const std::string& qos,
+                                                 bool force);
 
-  bool DeleteAccountAllowedQos_(Ctld::Account* account, const std::string& qos);
+  bool DeleteAccountAllowedPartitionFromDB(Account& account,
+                                           const std::string& partition,
+                                           mongocxx::client_session* session);
+  bool DeleteAccountAllowedPartitionFromMap(Account& account,
+                                            const std::string& partition);
 
-  bool DeleteAccountAllowedPartition(Ctld::Account* account,
-                                     const std::string& partition);
+  bool DeleteUserAllowedPartitionFromDB(User& user,
+                                        const std::string& partition,
+                                        mongocxx::client_session* session);
+  bool DeleteUserAllowedPartitionFromMap(User& user,
+                                         const std::string& partition);
 
-  std::unordered_map<std::string /*account name*/,
-                     std::unique_ptr<Ctld::Account>>
+  std::unordered_map<std::string /*account name*/, std::unique_ptr<Account>>
       m_account_map_;
   util::rw_mutex rw_account_mutex;
-  std::unordered_map<std::string /*user name*/, std::unique_ptr<Ctld::User>>
+  std::unordered_map<std::string /*user name*/, std::unique_ptr<User>>
       m_user_map_;
   util::rw_mutex rw_user_mutex;
-  std::unordered_map<std::string /*Qos name*/, std::unique_ptr<Ctld::Qos>>
-      m_qos_map_;
+  std::unordered_map<std::string /*Qos name*/, std::unique_ptr<Qos>> m_qos_map_;
   util::rw_mutex rw_qos_mutex;
 };
 

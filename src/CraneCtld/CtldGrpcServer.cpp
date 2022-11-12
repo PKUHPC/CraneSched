@@ -85,12 +85,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   task->task_to_ctld = request->task();
 
   if (task->uid) {
-    std::list<std::string> allowed_partition =
-        g_account_manager->GetUserAllowedPartition(
-            getpwuid(task->uid)->pw_name);
-    auto it = std::find(allowed_partition.begin(), allowed_partition.end(),
-                        task->partition_name);
-    if (it == allowed_partition.end()) {
+    if (!g_account_manager->CheckUserPermissionToPartition(
+            getpwuid(task->uid)->pw_name, task->partition_name)) {
       response->set_ok(false);
       response->set_reason(fmt::format(
           "The user:{} don't have access to submit task in partition:{}",
@@ -455,7 +451,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
             user_list->Add()->assign(user);
           }
           auto *child_list = account_info->mutable_child_account();
-          for (auto &&child : account.child_account) {
+          for (auto &&child : account.child_accounts) {
             child_list->Add()->assign(child);
           }
           account_info->set_parent_account(account.parent_account);
@@ -472,28 +468,28 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         response->set_ok(true);
       } else {
         // Query an account
-        Account *account;
-        if ((account = g_account_manager->GetExistedAccountInfo(
-                 request->name())) != nullptr) {
+        Account account;
+        if (g_account_manager->GetExistedAccountInfo(request->name(),
+                                                     &account)) {
           auto *account_info = response->mutable_account_list()->Add();
-          account_info->set_name(account->name);
-          account_info->set_description(account->description);
+          account_info->set_name(account.name);
+          account_info->set_description(account.description);
           auto *user_list = account_info->mutable_users();
-          for (auto &&user : account->users) {
+          for (auto &&user : account.users) {
             user_list->Add()->assign(user);
           }
           auto *child_list = account_info->mutable_child_account();
-          for (auto &&child : account->child_account) {
+          for (auto &&child : account.child_accounts) {
             child_list->Add()->assign(child);
           }
-          account_info->set_parent_account(account->parent_account);
+          account_info->set_parent_account(account.parent_account);
           auto *partition_list = account_info->mutable_allowed_partition();
-          for (auto &&partition : account->allowed_partition) {
+          for (auto &&partition : account.allowed_partition) {
             partition_list->Add()->assign(partition);
           }
-          account_info->set_default_qos(account->default_qos);
+          account_info->set_default_qos(account.default_qos);
           auto *allowed_qos_list = account_info->mutable_allowed_qos();
-          for (const auto &qos : account->allowed_qos_list) {
+          for (const auto &qos : account.allowed_qos_list) {
             allowed_qos_list->Add()->assign(qos);
           }
           response->set_ok(true);
@@ -532,18 +528,17 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         }
         response->set_ok(true);
       } else {
-        User *user;
-        if ((user = g_account_manager->GetExistedUserInfo(request->name())) !=
-            nullptr) {
+        User user;
+        if (g_account_manager->GetExistedUserInfo(request->name(), &user)) {
           auto *user_info = response->mutable_user_list()->Add();
-          user_info->set_name(user->name);
-          user_info->set_uid(user->uid);
-          user_info->set_account(user->account);
+          user_info->set_name(user.name);
+          user_info->set_uid(user.uid);
+          user_info->set_account(user.account);
           user_info->set_admin_level(
-              (crane::grpc::UserInfo_AdminLevel)user->admin_level);
+              (crane::grpc::UserInfo_AdminLevel)user.admin_level);
           auto *partition_qos_list =
               user_info->mutable_allowed_partition_qos_list();
-          for (const auto &[name, pair] : user->allowed_partition_qos_map) {
+          for (const auto &[name, pair] : user.allowed_partition_qos_map) {
             auto *partition_qos = partition_qos_list->Add();
             partition_qos->set_name(name);
             partition_qos->set_default_qos(pair.first);
@@ -576,26 +571,13 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         }
         response->set_ok(true);
       } else {
-        User *user;
-        if ((user = g_account_manager->GetExistedUserInfo(request->name())) !=
-            nullptr) {
-          auto *user_info = response->mutable_user_list()->Add();
-          user_info->set_name(user->name);
-          user_info->set_uid(user->uid);
-          user_info->set_account(user->account);
-          user_info->set_admin_level(
-              (crane::grpc::UserInfo_AdminLevel)user->admin_level);
-          auto *partition_qos_list =
-              user_info->mutable_allowed_partition_qos_list();
-          for (const auto &[name, pair] : user->allowed_partition_qos_map) {
-            auto *partition_qos = partition_qos_list->Add();
-            partition_qos->set_name(name);
-            partition_qos->set_default_qos(pair.first);
-            auto *qos_list = partition_qos->mutable_qos_list();
-            for (const auto &qos : pair.second) {
-              qos_list->Add()->assign(qos);
-            }
-          }
+        Qos qos;
+        if (g_account_manager->GetExistedQosInfo(request->name(), &qos)) {
+          auto *qos_info = response->mutable_qos_list()->Add();
+          qos_info->set_name(qos.name);
+          qos_info->set_description(qos.description);
+          qos_info->set_priority(qos.priority);
+          qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
           response->set_ok(true);
         } else {
           response->set_ok(false);
