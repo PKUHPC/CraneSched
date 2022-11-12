@@ -157,8 +157,6 @@ class MongodbClient {
   bool CommitTransaction(
       mongocxx::client_session::with_transaction_cb& callback);
 
-  std::unique_ptr<mongocxx::pool> m_connect_pool;
-
  private:
   static void PrintError_(const char* msg) {
     CRANE_ERROR("MongodbError: {}", msg);
@@ -198,7 +196,7 @@ class MongodbClient {
   const std::string m_qos_collection_name{"qos_table"};
 
   std::unique_ptr<mongocxx::instance> m_dbInstance;
-
+  std::unique_ptr<mongocxx::pool> m_connect_pool;
   std::unique_ptr<mongocxx::client> m_client;
   std::unique_ptr<mongocxx::database> m_database;
   std::unique_ptr<mongocxx::client_session> m_client_session;
@@ -222,5 +220,3 @@ void MongodbClient::DocumentAppendItem<MongodbClient::PartitionQosMap>(
 }  // namespace Ctld
 
 inline std::unique_ptr<Ctld::MongodbClient> g_db_client;
-// thread_local mongocxx::pool::entry client =
-// g_db_client->m_connect_pool->acquire();

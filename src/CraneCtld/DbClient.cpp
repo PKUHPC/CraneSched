@@ -493,8 +493,8 @@ bool MongodbClient::CommitTransaction(
   // Use with_transaction to start a transaction, execute the callback,
   // and commit (or abort on error).
 
-  auto client = m_connect_pool->acquire();
-  auto session = client->start_session();
+  thread_local mongocxx::pool::entry client = m_connect_pool->acquire();
+  thread_local mongocxx::client_session session = client->start_session();
 
   try {
     mongocxx::options::transaction opts;
