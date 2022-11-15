@@ -116,6 +116,13 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.DbPort = "27017";  // default port 27017
 
+      if (config["DbReplSetName"])
+        g_config.DbRSName = config["DbReplSetName"].as<std::string>();
+      else {
+        CRANE_ERROR("Unknown Replica Set name");
+        std::exit(1);
+      }
+
       if (config["DbName"])
         g_config.DbName = config["DbName"].as<std::string>();
       else

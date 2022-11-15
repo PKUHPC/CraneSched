@@ -341,7 +341,8 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
     account.allowed_qos_list.emplace_back(qos);
   }
 
-  AccountManager::Result result = g_account_manager->AddAccount(account);
+  AccountManager::Result result =
+      g_account_manager->AddAccount(std::move(account));
   if (result.ok) {
     response->set_ok(true);
   } else {
@@ -362,7 +363,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   user.account = user_info->account();
   user.admin_level = User::AdminLevel(user_info->admin_level());
 
-  AccountManager::Result result = g_account_manager->AddUser(user);
+  AccountManager::Result result = g_account_manager->AddUser(std::move(user));
   if (result.ok) {
     response->set_ok(true);
   } else {

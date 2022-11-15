@@ -14,12 +14,12 @@ bool MongodbClient::Connect() {
   std::string uri_str;
 
   if (!g_config.DbUser.empty()) {
-    uri_str =
-        fmt::format("mongodb://{}:{}@{}:{}&replicaSet=rs0", g_config.DbUser,
-                    g_config.DbPassword, g_config.DbHost, g_config.DbPort);
+    uri_str = fmt::format("mongodb://{}:{}@{}:{}&replicaSet={}",
+                          g_config.DbUser, g_config.DbPassword, g_config.DbHost,
+                          g_config.DbPort, g_config.DbRSName);
   } else {
-    uri_str = fmt::format("mongodb://{}:{}&replicaSet=rs0", g_config.DbHost,
-                          g_config.DbPort);
+    uri_str = fmt::format("mongodb://{}:{}&replicaSet={}", g_config.DbHost,
+                          g_config.DbPort, g_config.DbRSName);
   }
   m_connect_pool = std::make_unique<mongocxx::pool>(mongocxx::uri{uri_str});
   mongocxx::pool::entry client = m_connect_pool->acquire();
@@ -337,7 +337,7 @@ bool MongodbClient::InsertQos(const Ctld::Qos& new_qos) {
     return false;
 }
 
-bool MongodbClient::DeleteEntity(MongodbClient::EntityType type,
+bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
                                  const std::string& name) {
   std::shared_ptr<mongocxx::collection> coll;
 
@@ -399,51 +399,56 @@ bool MongodbClient::SelectQosByName(const std::string& name, Ctld::Qos* qos) {
   return false;
 }
 
-void MongodbClient::SelectAllUser(std::list<Ctld::User>& user_list) {
+void MongodbClient::SelectAllUser(std::list<Ctld::User>* user_list) {
   mongocxx::cursor cursor = m_user_collection->find({});
   for (auto view : cursor) {
     Ctld::User user;
     ViewToUser(view, &user);
-    user_list.emplace_back(user);
+    user_list->emplace_back(user);
   }
 }
 
-void MongodbClient::SelectAllAccount(std::list<Ctld::Account>& account_list) {
+void MongodbClient::SelectAllAccount(std::list<Ctld::Account>* account_list) {
   mongocxx::cursor cursor = m_account_collection->find({});
   for (auto view : cursor) {
     Ctld::Account account;
     ViewToAccount(view, &account);
-    account_list.emplace_back(account);
+    account_list->emplace_back(account);
   }
 }
 
-void MongodbClient::SelectAllQos(std::list<Ctld::Qos>& qos_list) {
+void MongodbClient::SelectAllQos(std::list<Ctld::Qos>* qos_list) {
   mongocxx::cursor cursor = m_qos_collection->find({});
   for (auto view : cursor) {
     Ctld::Qos qos;
     ViewToQos(view, &qos);
-    qos_list.emplace_back(qos);
+    qos_list->emplace_back(qos);
   }
 }
 
 bool MongodbClient::UpdateUser(
-    Ctld::User& user, std::optional<mongocxx::client_session*> opt_session) {
+    const Ctld::User& user,
+    std::optional<mongocxx::client_session*> opt_session) {
   document doc = UserToDocument(user), setDocument, filter;
 
   filter.append(kvp("name", user.name));
   setDocument.append(kvp("$set", doc));
 
-  bsoncxx::stdx::optional<mongocxx::result::update> update_result;
-  if (opt_session) {
-    mongocxx::client_session* session = opt_session.value();
-    update_result =
-        session->client()[m_db_name][m_user_collection_name].update_one(
-            *session, filter.view(), setDocument.view());
-  } else {
-    mongocxx::pool::entry client = m_connect_pool->acquire();
-    update_result = (*client)[m_db_name][m_user_collection_name].update_one(
-        filter.view(), setDocument.view());
-  }
+  bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+      (*connect_client)[m_db_name][m_user_collection_name].update_one(
+          connect_session, filter.view(), setDocument.view());
+
+  //  bsoncxx::stdx::optional<mongocxx::result::update> update_result;
+  //  if (opt_session) {
+  //    mongocxx::client_session* session = opt_session.value();
+  //    update_result =
+  //        session->client()[m_db_name][m_user_collection_name].update_one(
+  //            *session, filter.view(), setDocument.view());
+  //  } else {
+  //    mongocxx::pool::entry client = m_connect_pool->acquire();
+  //    update_result = (*client)[m_db_name][m_user_collection_name].update_one(
+  //        filter.view(), setDocument.view());
+  //  }
 
   if (!update_result || !update_result->modified_count()) {
     return false;
@@ -451,7 +456,7 @@ bool MongodbClient::UpdateUser(
   return true;
 }
 
-bool MongodbClient::UpdateAccount(Ctld::Account& account,
+bool MongodbClient::UpdateAccount(const Ctld::Account& account,
                                   mongocxx::client_session* session) {
   document doc = AccountToDocument(account), setDocument, filter;
 
@@ -468,7 +473,7 @@ bool MongodbClient::UpdateAccount(Ctld::Account& account,
   return true;
 }
 
-bool MongodbClient::UpdateQos(Ctld::Qos& qos) {
+bool MongodbClient::UpdateQos(const Ctld::Qos& qos) {
   document doc = QosToDocument(qos), setDocument, filter;
 
   setDocument.append(kvp("$set", doc));
@@ -489,19 +494,19 @@ bool MongodbClient::UpdateQos(Ctld::Qos& qos) {
 }
 
 bool MongodbClient::CommitTransaction(
-    mongocxx::client_session::with_transaction_cb& callback) {
+    const mongocxx::client_session::with_transaction_cb& callback) {
   // Use with_transaction to start a transaction, execute the callback,
   // and commit (or abort on error).
 
-  thread_local mongocxx::pool::entry client = m_connect_pool->acquire();
-  thread_local mongocxx::client_session session = client->start_session();
+  //  thread_local mongocxx::pool::entry client = m_connect_pool->acquire();
+  //  thread_local mongocxx::client_session session = client->start_session();
 
   try {
     mongocxx::options::transaction opts;
     opts.write_concern(wc_majority);
     opts.read_concern(rc_local);
     opts.read_preference(rp_primary);
-    session.with_transaction(callback, opts);
+    connect_session.with_transaction(callback, opts);
   } catch (const mongocxx::exception& e) {
     CRANE_ERROR("Database transaction failed: {}", e.what());
     return false;
@@ -510,16 +515,16 @@ bool MongodbClient::CommitTransaction(
 }
 
 template <typename V>
-void MongodbClient::DocumentAppendItem(document& doc, const std::string& key,
+void MongodbClient::DocumentAppendItem(document* doc, const std::string& key,
                                        const V& value) {
-  doc.append(kvp(key, value));
+  doc->append(kvp(key, value));
 }
 
 template <>
 void MongodbClient::DocumentAppendItem<std::list<std::string>>(
-    document& doc, const std::string& key,
+    document* doc, const std::string& key,
     const std::list<std::string>& value) {
-  doc.append(kvp(key, [&value](sub_array array) {
+  doc->append(kvp(key, [&value](sub_array array) {
     for (const auto& v : value) {
       array.append(v);
     }
@@ -528,9 +533,9 @@ void MongodbClient::DocumentAppendItem<std::list<std::string>>(
 
 template <>
 void MongodbClient::DocumentAppendItem<MongodbClient::PartitionQosMap>(
-    document& doc, const std::string& key,
+    document* doc, const std::string& key,
     const MongodbClient::PartitionQosMap& value) {
-  doc.append(kvp(key, [&value](sub_document mapValueDocument) {
+  doc->append(kvp(key, [&value](sub_document mapValueDocument) {
     for (const auto& mapItem : value) {
       auto mapKey = mapItem.first;
       auto mapValue = mapItem.second;
@@ -554,7 +559,7 @@ document MongodbClient::DocumentConstructor_(
   // Here we use the basic builder instead of stream builder
   // The efficiency of different construction methods is shown on the web
   // https://www.nuomiphp.com/eplan/2742.html
-  (DocumentAppendItem(document, std::get<Is>(fields), std::get<Is>(values)),
+  (DocumentAppendItem(&document, std::get<Is>(fields), std::get<Is>(values)),
    ...);
   return document;
 }
@@ -683,6 +688,11 @@ document MongodbClient::QosToDocument(const Ctld::Qos& qos) {
       false, qos.name, qos.description, qos.priority, qos.max_jobs_per_user};
 
   return DocumentConstructor(fields, values);
+}
+mongocxx::pool::entry MongodbClient::GetClient() {
+  if (m_connect_pool) {
+    return m_connect_pool->acquire();
+  }
 }
 
 }  // namespace Ctld

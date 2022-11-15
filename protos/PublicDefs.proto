@@ -191,7 +191,7 @@ message UserInfo {
     Operator = 1;
     Admin = 2;
   };
-  message allowed_partition_qos{
+  message AllowedPartitionQos{
     string name = 1;
     repeated string qos_list = 2;
     string default_qos = 3;
@@ -199,7 +199,7 @@ message UserInfo {
   uint32 uid = 1;
   string name = 2;
   string account = 3;
-  repeated allowed_partition_qos allowed_partition_qos_list = 4;
+  repeated AllowedPartitionQos allowed_partition_qos_list = 4;
   AdminLevel admin_level = 5;
 }
 
