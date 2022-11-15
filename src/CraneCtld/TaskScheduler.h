@@ -122,11 +122,16 @@ class MinLoadFirst : public INodeSelectionAlgo {
 };
 
 class TaskScheduler {
+  using TaskInEmbeddedDb = crane::grpc::TaskInEmbeddedDb;
+
   using Mutex = absl::Mutex;
   using LockGuard = util::AbslMutexLockGuard;
 
   template <typename K, typename V>
   using HashMap = absl::flat_hash_map<K, V>;
+
+  template <typename K, typename V>
+  using TreeMap = absl::btree_map<K, V>;
 
   template <typename K>
   using HashSet = absl::flat_hash_set<K>;
@@ -180,17 +185,21 @@ class TaskScheduler {
 
   // Ordered by task id. Those who comes earlier are in the head,
   // Because they have smaller task id.
-  absl::btree_map<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>>
-      m_pending_task_map_ GUARDED_BY(m_pending_task_map_mtx_);
+  TreeMap<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>> m_pending_task_map_
+      GUARDED_BY(m_pending_task_map_mtx_);
   Mutex m_pending_task_map_mtx_;
 
-  absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>> m_running_task_map_
+  HashMap<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>> m_running_task_map_
       GUARDED_BY(m_running_task_map_mtx_);
   Mutex m_running_task_map_mtx_;
 
-  absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>> m_ended_task_map_
+  HashMap<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>> m_ended_task_map_
       GUARDED_BY(m_ended_task_map_mtx_);
   Mutex m_ended_task_map_mtx_;
+
+  HashMap<uint32_t /*Task Db Id*/, std::unique_ptr<TaskInEmbeddedDb>>
+      m_persisted_task_map_ GUARDED_BY(m_persisted_task_map_mtx_);
+  Mutex m_persisted_task_map_mtx_;
 
   // Task Indexes
   HashMap<uint32_t /* Node Index */, HashSet<uint32_t /* Task ID*/>>

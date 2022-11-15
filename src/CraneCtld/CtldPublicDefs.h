@@ -20,6 +20,9 @@
 
 namespace Ctld {
 
+using task_id_t = uint32_t;
+using task_db_id_t = int64_t;
+
 constexpr uint64_t kTaskScheduleIntervalMs = 1000;       // Todo: Add comment
 constexpr uint64_t kEndedTaskCleanIntervalSeconds = 1;   // Todo: Add comment
 constexpr uint64_t kEndedTaskKeepingTimeSeconds = 3600;  // Todo: Add comment
@@ -112,27 +115,46 @@ struct TaskInCtld {
 
   crane::grpc::TaskType type;
 
+  uid_t uid;
+
+  std::string name;
+
   uint32_t node_num{0};
   uint32_t ntasks_per_node{0};
   double cpus_per_task{0.0};
 
-  std::string account;
-  std::string name;
-  std::string env;
+  bool requeue_if_failed;
+
   std::string cmd_line;
+  std::string env;
   std::string cwd;
 
-  uid_t uid;
-  gid_t gid;
+  std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
   crane::grpc::TaskToCtld task_to_ctld;
 
-  /* ------- Fields that won't change after this task is accepted. -------- */
+  /* ------ currently useless fields -------- */
+  std::string account;
+
+  /* --------
+   * Fields that won't change after this task is accepted.
+   * Also, these fields are persisted on the disk.
+   * -------- */
   uint32_t task_id;
   uint32_t partition_id;
-  uint64_t job_db_inx;
+  int64_t task_db_id;
+  gid_t gid;
 
-  /* ----- Fields that may change at run time. ----------- */
+  /* -----------
+   * Fields that may change at run time.
+   * Also, these fields are persisted on the disk.
+   * ----------- */
+  int32_t requeue_count{0};
+
+  /* -----------
+   * Fields that may change at run time.
+   * However, these fields are NOT persisted on the disk.
+   * ----------- */
   crane::grpc::TaskStatus status;
 
   uint32_t nodes_alloc;
@@ -148,8 +170,6 @@ struct TaskInCtld {
   absl::Time start_time;
 
   absl::Time end_time;
-
-  std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 };
 
 struct Qos {

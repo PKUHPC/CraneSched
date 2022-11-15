@@ -69,6 +69,8 @@ message TaskToCtld {
   uint32 ntasks_per_node = 9;
   double cpus_per_task = 10;
 
+  bool requeue_if_failed = 11;
+
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
     InteractiveTaskAdditionalMeta interactive_meta = 22;
@@ -77,6 +79,22 @@ message TaskToCtld {
   string cmd_line = 31;
   string cwd = 32; // Current working directory
   string env = 33;
+}
+
+message TaskInEmbeddedDb {
+  PersistedPartOfTaskInCtld persisted_part = 1;
+  TaskToCtld task_to_ctld = 2;
+}
+
+message PersistedPartOfTaskInCtld {
+  // Fields that won't change after this task is accepted.
+  uint32 task_id = 1;
+  uint32 partition_id = 2;
+  int64 task_db_id = 3;
+  int32 gid = 4;
+
+  // Fields that will change after this task is accepted.
+  int32 requeue_count = 11;
 }
 
 message TaskToD {

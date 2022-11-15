@@ -29,7 +29,7 @@ TaskScheduler::TaskScheduler(std::unique_ptr<INodeSelectionAlgo> algo)
   for (auto& task : task_list) {
     std::string field_name = "state";
     if (!g_db_client->UpdateJobRecordField(
-            task.job_db_inx, field_name, std::to_string(crane::grpc::Failed))) {
+            task.task_db_id, field_name, std::to_string(crane::grpc::Failed))) {
       CRANE_ERROR("FetchJobRecordsWithStates failed.");
       std::exit(1);
     }
@@ -108,7 +108,7 @@ void TaskScheduler::ScheduleThread_() {
         task->allocated_craneds_regex = util::HostNameListToStr(task->nodes);
 
         auto* task_ptr = task.get();
-        auto job_db_inx = task->job_db_inx;
+        auto job_db_inx = task->task_db_id;
         auto nodes_alloc = task->nodes_alloc;
         auto allocated_nodes_regex = task->allocated_craneds_regex;
 
@@ -247,7 +247,7 @@ CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
                     // table.
     uint64_t timestamp = ToUnixSeconds(absl::Now());
     if (!g_db_client->InsertJob(
-            &task->job_db_inx, timestamp, task->account,
+            &task->task_db_id, timestamp, task->account,
             task->resources.allocatable_resource.cpu_count,
             task->resources.allocatable_resource.memory_bytes, task->name,
             task->env, task->task_id, task->uid, task->gid, empty_string,
@@ -314,7 +314,7 @@ void TaskScheduler::TaskStatusChange(uint32_t task_id, uint32_t craned_index,
 
   uint64_t timestamp = ToUnixSeconds(absl::Now());
   g_db_client->UpdateJobRecordFields(
-      task->job_db_inx, {"time_end", "state"},
+      task->task_db_id, {"time_end", "state"},
       {std::to_string(timestamp), std::to_string(task->status)});
 
   LockGuard ended_guard(m_ended_task_map_mtx_);
@@ -362,7 +362,7 @@ CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t operator_uid,
 
     uint64_t timestamp = ToUnixSeconds(absl::Now());
     g_db_client->UpdateJobRecordFields(
-        task->job_db_inx, {"time_end", "state"},
+        task->task_db_id, {"time_end", "state"},
         {std::to_string(timestamp), std::to_string(task->status)});
 
     m_ended_task_map_.emplace(task_id, std::move(task));

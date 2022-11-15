@@ -168,7 +168,7 @@ bool MongodbClient::FetchJobRecordsWithStates(
 
   for (auto view : cursor) {
     Ctld::TaskInCtld task;
-    task.job_db_inx =
+    task.task_db_id =
         std::strtoul(view["job_db_inx"].get_string().value.data(), nullptr, 10);
     task.resources.allocatable_resource.cpu_count =
         std::strtol(view["cpus_req"].get_string().value.data(), nullptr, 10);

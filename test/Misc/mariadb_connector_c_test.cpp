@@ -250,7 +250,7 @@ class MariadbClient {
       size_t* lengths = mysql_fetch_lengths(result);
 
       Ctld::TaskInCtld task;
-      task.job_db_inx = std::strtoul(row[0], nullptr, 10);
+      task.task_db_id = std::strtoul(row[0], nullptr, 10);
       task.resources.allocatable_resource.cpu_count =
           std::strtoul(row[4], nullptr, 10);
       task.resources.allocatable_resource.memory_bytes =
