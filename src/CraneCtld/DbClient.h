@@ -37,20 +37,6 @@ class MongodbClient {
     Qos = 2,
   };
 
-  struct MongodbFilter {
-    enum RelationalOperator {
-      Equal,
-      Greater,
-      Less,
-      GreaterOrEqual,
-      LessOrEqual
-    };
-
-    std::string object;
-    RelationalOperator relateOperator;
-    std::string value;
-  };
-
   MongodbClient() = default;  // Mongodb-c++ don't need to close the connection
 
   bool Connect();
@@ -92,7 +78,7 @@ class MongodbClient {
                      mongocxx::client_session* session);
   bool InsertQos(const Ctld::Qos& new_qos);
 
-  bool DeleteEntity(const EntityType type, const std::string& name);
+  bool DeleteEntity(EntityType type, const std::string& name);
 
   template <typename T>
   bool SelectUser(const std::string& key, const T& value, Ctld::User* user);
@@ -121,19 +107,19 @@ class MongodbClient {
 
     switch (type) {
       case MongodbClient::Account:
-        coll_name = m_account_collection_name;
+        coll_name = m_account_collection_name_;
         break;
       case User:
-        coll_name = m_user_collection_name;
+        coll_name = m_user_collection_name_;
         break;
       case Qos:
-        coll_name = m_qos_collection_name;
+        coll_name = m_qos_collection_name_;
         break;
     }
 
     bsoncxx::stdx::optional<mongocxx::result::update> result =
-        (*connect_client)[m_db_name][coll_name].update_one(
-            connect_session, filter.view(), updateItem.view());
+        (*GetClient())[m_db_name_][coll_name].update_one(
+            *GetSession(), filter.view(), updateItem.view());
 
     //      CRANE_INFO("thread_local id : {}",
     //      bsoncxx::to_json(g_db_connect_session.id()));
@@ -165,7 +151,8 @@ class MongodbClient {
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
 
-  mongocxx::pool::entry GetClient();
+  mongocxx::client* GetClient();
+  mongocxx::client_session* GetSession();
 
  private:
   static void PrintError_(const char* msg) {
@@ -173,8 +160,8 @@ class MongodbClient {
   }
 
   template <typename V>
-  void DocumentAppendItem(document* doc, const std::string& key,
-                          const V& value);
+  void DocumentAppendItem_(document* doc, const std::string& key,
+                           const V& value);
 
   template <typename... Ts, std::size_t... Is>
   document DocumentConstructor_(
@@ -186,60 +173,47 @@ class MongodbClient {
       const std::array<std::string, sizeof...(Ts)>& fields,
       const std::tuple<Ts...>& values);
 
-  void ViewToUser(const bsoncxx::document::view& user_view, Ctld::User* user);
+  void ViewToUser_(const bsoncxx::document::view& user_view, Ctld::User* user);
 
-  document UserToDocument(const Ctld::User& user);
+  document UserToDocument_(const Ctld::User& user);
 
-  void ViewToAccount(const bsoncxx::document::view& account_view,
-                     Ctld::Account* account);
+  void ViewToAccount_(const bsoncxx::document::view& account_view,
+                      Ctld::Account* account);
 
-  document AccountToDocument(const Ctld::Account& account);
+  document AccountToDocument_(const Ctld::Account& account);
 
-  void ViewToQos(const bsoncxx::document::view& qos_view, Ctld::Qos* qos);
+  void ViewToQos_(const bsoncxx::document::view& qos_view, Ctld::Qos* qos);
 
-  document QosToDocument(const Ctld::Qos& qos);
+  document QosToDocument_(const Ctld::Qos& qos);
 
-  std::string m_db_name;
-  const std::string m_job_collection_name{"job_table"};
-  const std::string m_account_collection_name{"acct_table"};
-  const std::string m_user_collection_name{"user_table"};
-  const std::string m_qos_collection_name{"qos_table"};
+  std::string m_db_name_;
+  const std::string m_job_collection_name_{"job_table"};
+  const std::string m_account_collection_name_{"acct_table"};
+  const std::string m_user_collection_name_{"user_table"};
+  const std::string m_qos_collection_name_{"qos_table"};
 
-  std::unique_ptr<mongocxx::instance> m_dbInstance;
-  std::unique_ptr<mongocxx::pool> m_connect_pool;
-  std::unique_ptr<mongocxx::client> m_client;
-  std::unique_ptr<mongocxx::database> m_database;
-  std::unique_ptr<mongocxx::client_session> m_client_session;
-  std::shared_ptr<mongocxx::collection> m_job_collection, m_account_collection,
-      m_user_collection, m_qos_collection;
+  std::unique_ptr<mongocxx::instance> m_dbInstance_;
+  std::unique_ptr<mongocxx::pool> m_connect_pool_;
+  std::unique_ptr<mongocxx::client> m_client_;
+  std::unique_ptr<mongocxx::database> m_database_;
+  std::unique_ptr<mongocxx::client_session> m_client_session_;
+  std::shared_ptr<mongocxx::collection> m_job_collection_,
+      m_account_collection_, m_user_collection_, m_qos_collection_;
 
-  thread_local static mongocxx::pool::entry connect_client;
-  thread_local static mongocxx::client_session connect_session;
-
-  mongocxx::write_concern wc_majority{};
-  mongocxx::read_concern rc_local{};
-  mongocxx::read_preference rp_primary{};
+  mongocxx::write_concern wc_majority_{};
+  mongocxx::read_concern rc_local_{};
+  mongocxx::read_preference rp_primary_{};
 };
 
 template <>
-void MongodbClient::DocumentAppendItem<std::list<std::string>>(
+void MongodbClient::DocumentAppendItem_<std::list<std::string>>(
     document* doc, const std::string& key, const std::list<std::string>& value);
 
 template <>
-void MongodbClient::DocumentAppendItem<MongodbClient::PartitionQosMap>(
+void MongodbClient::DocumentAppendItem_<MongodbClient::PartitionQosMap>(
     document* doc, const std::string& key,
     const MongodbClient::PartitionQosMap& value);
-
-// template <>
-// bool MongodbClient::UpdateEntityOne<std::string>(
-//     EntityType type, const std::string& opt, const std::string& name,
-//     const std::string& key, const std::string& value,
-//     std::optional<mongocxx::client_session*> opt_session);
 
 }  // namespace Ctld
 
 inline std::unique_ptr<Ctld::MongodbClient> g_db_client;
-inline thread_local mongocxx::pool::entry Ctld::MongodbClient::connect_client =
-    g_db_client->GetClient();
-inline thread_local mongocxx::client_session
-    Ctld::MongodbClient::connect_session = connect_client->start_session();

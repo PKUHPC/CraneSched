@@ -330,6 +330,7 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
     crane::grpc::AddAccountReply *response) {
   Account account;
   const crane::grpc::AccountInfo *account_info = &request->account();
+
   account.name = account_info->name();
   account.parent_account = account_info->parent_account();
   account.description = account_info->description();
@@ -358,6 +359,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
     crane::grpc::AddUserReply *response) {
   User user;
   const crane::grpc::UserInfo *user_info = &request->user();
+
   user.name = user_info->name();
   user.uid = user_info->uid();
   user.account = user_info->account();
@@ -379,6 +381,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
     crane::grpc::AddQosReply *response) {
   Qos qos;
   const crane::grpc::QosInfo *qos_info = &request->qos();
+
   qos.name = qos_info->name();
   qos.description = qos_info->description();
   qos.priority = qos_info->priority();
@@ -404,18 +407,17 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
   switch (request->entity_type()) {
     case crane::grpc::Account:
       res = g_account_manager->ModifyAccount(request->type(), request->name(),
-                                             request->item_left(),
-                                             request->item_right());
+                                             request->lhs(), request->rhs());
 
       break;
     case crane::grpc::User:
-      res = g_account_manager->ModifyUser(
-          request->type(), request->name(), request->partition(),
-          request->item_left(), request->item_right());
+      res = g_account_manager->ModifyUser(request->type(), request->name(),
+                                          request->partition(), request->lhs(),
+                                          request->rhs());
       break;
     case crane::grpc::Qos:
-      res = g_account_manager->ModifyQos(request->name(), request->item_left(),
-                                         request->item_right());
+      res = g_account_manager->ModifyQos(request->name(), request->lhs(),
+                                         request->rhs());
       break;
     default:
       break;
@@ -440,27 +442,33 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         g_account_manager->GetAllAccountInfo(&account_list);
 
         auto *list = response->mutable_account_list();
+
         for (const auto &account : account_list) {
           if (account.deleted) {
             continue;
           }
+
           auto *account_info = list->Add();
           account_info->set_name(account.name);
           account_info->set_description(account.description);
+
           auto *user_list = account_info->mutable_users();
           for (auto &&user : account.users) {
             user_list->Add()->assign(user);
           }
+
           auto *child_list = account_info->mutable_child_account();
           for (auto &&child : account.child_accounts) {
             child_list->Add()->assign(child);
           }
           account_info->set_parent_account(account.parent_account);
+
           auto *partition_list = account_info->mutable_allowed_partition();
           for (auto &&partition : account.allowed_partition) {
             partition_list->Add()->assign(partition);
           }
           account_info->set_default_qos(account.default_qos);
+
           auto *allowed_qos_list = account_info->mutable_allowed_qos();
           for (const auto &qos : account.allowed_qos_list) {
             allowed_qos_list->Add()->assign(qos);
@@ -475,20 +483,24 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           auto *account_info = response->mutable_account_list()->Add();
           account_info->set_name(account.name);
           account_info->set_description(account.description);
+
           auto *user_list = account_info->mutable_users();
           for (auto &&user : account.users) {
             user_list->Add()->assign(user);
           }
+
           auto *child_list = account_info->mutable_child_account();
           for (auto &&child : account.child_accounts) {
             child_list->Add()->assign(child);
           }
           account_info->set_parent_account(account.parent_account);
+
           auto *partition_list = account_info->mutable_allowed_partition();
           for (auto &&partition : account.allowed_partition) {
             partition_list->Add()->assign(partition);
           }
           account_info->set_default_qos(account.default_qos);
+
           auto *allowed_qos_list = account_info->mutable_allowed_qos();
           for (const auto &qos : account.allowed_qos_list) {
             allowed_qos_list->Add()->assign(qos);
@@ -509,18 +521,21 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           if (user.deleted) {
             continue;
           }
+
           auto *user_info = list->Add();
           user_info->set_name(user.name);
           user_info->set_uid(user.uid);
           user_info->set_account(user.account);
           user_info->set_admin_level(
               (crane::grpc::UserInfo_AdminLevel)user.admin_level);
+
           auto *partition_qos_list =
               user_info->mutable_allowed_partition_qos_list();
           for (const auto &[name, pair] : user.allowed_partition_qos_map) {
             auto *partition_qos = partition_qos_list->Add();
             partition_qos->set_name(name);
             partition_qos->set_default_qos(pair.first);
+
             auto *qos_list = partition_qos->mutable_qos_list();
             for (const auto &qos : pair.second) {
               qos_list->Add()->assign(qos);
@@ -537,12 +552,14 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           user_info->set_account(user.account);
           user_info->set_admin_level(
               (crane::grpc::UserInfo_AdminLevel)user.admin_level);
+
           auto *partition_qos_list =
               user_info->mutable_allowed_partition_qos_list();
           for (const auto &[name, pair] : user.allowed_partition_qos_map) {
             auto *partition_qos = partition_qos_list->Add();
             partition_qos->set_name(name);
             partition_qos->set_default_qos(pair.first);
+
             auto *qos_list = partition_qos->mutable_qos_list();
             for (const auto &qos : pair.second) {
               qos_list->Add()->assign(qos);
@@ -564,6 +581,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           if (qos.deleted) {
             continue;
           }
+
           auto *qos_info = list->Add();
           qos_info->set_name(qos.name);
           qos_info->set_description(qos.description);
@@ -595,6 +613,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
     const crane::grpc::DeleteEntityRequest *request,
     crane::grpc::DeleteEntityReply *response) {
   AccountManager::Result res;
+
   switch (request->entity_type()) {
     case crane::grpc::User:
       res = g_account_manager->DeleteUser(request->name());

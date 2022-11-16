@@ -308,8 +308,8 @@ message ModifyEntityRequest {
     Delete = 2;
   }
 
-  string item_left = 1;
-  string item_right = 2;
+  string lhs = 1;
+  string rhs = 2;
   string name = 3;
   string partition = 4;
   OperatorType type = 5;

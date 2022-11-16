@@ -44,14 +44,13 @@ class AccountManager {
   Result ModifyUser(
       const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
       const std::string& name, const std::string& partition,
-      const std::string& itemLeft, const std::string& itemRight);
+      const std::string& lhs, const std::string& rhs);
   Result ModifyAccount(
       const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
-      const std::string& name, const std::string& itemLeft,
-      const std::string& itemRight);
+      const std::string& name, const std::string& lhs, const std::string& rhs);
 
-  Result ModifyQos(const std::string& name, const std::string& itemLeft,
-                   const std::string& itemRight);
+  Result ModifyQos(const std::string& name, const std::string& lhs,
+                   const std::string& rhs);
 
   bool CheckUserPermissionToPartition(const std::string& name,
                                       const std::string& partition);
@@ -97,12 +96,12 @@ class AccountManager {
 
   std::unordered_map<std::string /*account name*/, std::unique_ptr<Account>>
       m_account_map_;
-  util::rw_mutex rw_account_mutex_;
+  util::rw_mutex m_rw_account_mutex_;
   std::unordered_map<std::string /*user name*/, std::unique_ptr<User>>
       m_user_map_;
-  util::rw_mutex rw_user_mutex_;
+  util::rw_mutex m_rw_user_mutex_;
   std::unordered_map<std::string /*Qos name*/, std::unique_ptr<Qos>> m_qos_map_;
-  util::rw_mutex rw_qos_mutex_;
+  util::rw_mutex m_rw_qos_mutex_;
 };
 
 }  // namespace Ctld

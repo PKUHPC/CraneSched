@@ -163,6 +163,7 @@ message PartitionCranedInfo {
     uint32 craned_num = 2;
     string craned_list = 3;
   }
+
   string name = 1;
   PartitionInfo.PartitionState state = 2;
   repeated CommonCranedState common_craned_state_list = 3;
@@ -196,6 +197,7 @@ message UserInfo {
     repeated string qos_list = 2;
     string default_qos = 3;
   }
+
   uint32 uid = 1;
   string name = 2;
   string account = 3;
