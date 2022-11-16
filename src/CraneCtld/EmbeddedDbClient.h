@@ -3,6 +3,7 @@
 #include <absl/synchronization/mutex.h>
 #include <unqlite.h>
 
+#include <concepts>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -199,7 +200,7 @@ class EmbeddedDbClient {
     }
   }
 
-  template <typename T, std::enable_if_t<std::is_arithmetic_v<T>, bool> = true>
+  template <std::integral T>
   int FetchTypeFromDb_(std::string const& key, T* buf) {
     int rc;
     unqlite_int64 n_bytes{sizeof(T)};
@@ -222,10 +223,10 @@ class EmbeddedDbClient {
     }
   }
 
-  template <typename T, std::enable_if_t<
-                            std::is_base_of_v<google::protobuf::MessageLite, T>,
-                            bool> = true>
-  int StoreTypeIntoDb_(std::string const& key, const T* value) {
+  template <typename T>
+  int StoreTypeIntoDb_(std::string const& key, const T* value)
+    requires std::derived_from<T, google::protobuf::MessageLite>
+  {
     using google::protobuf::io::CodedOutputStream;
     using google::protobuf::io::StringOutputStream;
 
@@ -253,7 +254,7 @@ class EmbeddedDbClient {
     }
   }
 
-  template <typename T, std::enable_if_t<std::is_arithmetic_v<T>, bool> = true>
+  template <std::integral T>
   int StoreTypeIntoDb_(std::string const& key, const T* value) {
     int rc;
     while (true) {
