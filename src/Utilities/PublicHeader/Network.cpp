@@ -3,6 +3,7 @@
 #include <cstring>
 #include <regex>
 
+#include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 
 namespace crane {

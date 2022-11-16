@@ -4,6 +4,7 @@
 
 #include <queue>
 
+#include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 
 namespace util {

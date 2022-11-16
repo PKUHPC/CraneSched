@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "cgroup.linux.h"
+#include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 
 namespace Craned {

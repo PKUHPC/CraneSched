@@ -22,6 +22,7 @@
 #include <string_view>
 
 #include "crane/Lock.h"
+#include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 
 namespace util {

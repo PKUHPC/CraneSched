@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <variant>
 
+#include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 
 #if Boost_MINOR_VERSION >= 71

@@ -7,6 +7,14 @@ add_library(Utility_PublicHeader
         include/crane/BoostInterprocessBarrier.h
         include/crane/Lock.h
         include/crane/Pointer.h
+        include/crane/Logger.h
         )
-target_include_directories(Utility_PublicHeader PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} include)
-target_link_libraries(Utility_PublicHeader PUBLIC Boost::boost spdlog::spdlog crane_proto_lib)
+target_include_directories(Utility_PublicHeader PUBLIC include)
+target_link_libraries(Utility_PublicHeader PUBLIC spdlog::spdlog crane_proto_lib)
+
+add_library(Utility_PublicHeaderNoLogger
+        include/crane/PublicHeader.h
+        PublicHeader.cpp
+        )
+target_include_directories(Utility_PublicHeaderNoLogger PUBLIC include)
+target_link_libraries(Utility_PublicHeaderNoLogger PUBLIC crane_proto_lib)
