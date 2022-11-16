@@ -79,7 +79,7 @@ bool MongodbClient::GetLastInsertId(uint64_t* id) {
 }
 
 bool MongodbClient::InsertJob(
-    uint64_t* job_db_inx, uint64_t mod_timestamp, const std::string& account,
+    int64_t* job_db_inx, uint64_t mod_timestamp, const std::string& account,
     uint32_t cpu, uint64_t memory_bytes, const std::string& job_name,
     const std::string& env, uint32_t id_job, uid_t id_user, uid_t id_group,
     const std::string& nodelist, uint32_t nodes_alloc,
@@ -87,7 +87,7 @@ bool MongodbClient::InsertJob(
     uint32_t priority, uint64_t submit_timestamp, const std::string& script,
     uint32_t state, uint32_t timelimit, const std::string& work_dir,
     const crane::grpc::TaskToCtld& task_to_ctld) {
-  uint64_t last_id;
+  int64_t last_id;
   if (!GetLastInsertId(&last_id)) {
     PrintError_("Failed to GetLastInsertId");
     return false;

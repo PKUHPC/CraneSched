@@ -40,9 +40,9 @@ class MongodbClient {
   /* ----- Method of operating the job table ----------- */
   bool GetMaxExistingJobId(uint64_t* job_id);
 
-  bool GetLastInsertId(uint64_t* id);
+  bool GetLastInsertId(int64_t* id);
 
-  bool InsertJob(uint64_t* job_db_inx, uint64_t mod_timestamp,
+  bool InsertJob(int64_t* job_db_inx, uint64_t mod_timestamp,
                  const std::string& account, uint32_t cpu,
                  uint64_t memory_bytes, const std::string& job_name,
                  const std::string& env, uint32_t id_job, uid_t id_user,

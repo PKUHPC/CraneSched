@@ -140,9 +140,9 @@ struct TaskInCtld {
    * Fields that won't change after this task is accepted.
    * Also, these fields are persisted on the disk.
    * -------- */
-  uint32_t task_id;
+  task_id_t task_id;
+  task_db_id_t task_db_id;
   uint32_t partition_id;
-  int64_t task_db_id;
   gid_t gid;
 
   /* -----------
