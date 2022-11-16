@@ -33,9 +33,9 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
         CRANE_ERROR("Failed to init {} in db: {}", s_next_task_id_str_,
                     GetInternalErrorStr_());
       }
-    }
-    CRANE_ERROR("Failed to fetch {} from db: {}", s_next_task_id_str_,
-                GetInternalErrorStr_());
+    } else
+      CRANE_ERROR("Failed to fetch {} from db: {}", s_next_task_id_str_,
+                  GetInternalErrorStr_());
   }
 
   rc = FetchTypeFromDb_(s_next_task_db_id_str_, &s_next_task_db_id_);
@@ -47,9 +47,9 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
         CRANE_ERROR("Failed to init {} in db: {}", s_next_task_db_id_str_,
                     GetInternalErrorStr_());
       }
-    }
-    CRANE_ERROR("Failed to fetch {} from db: {}", s_next_task_db_id_str_,
-                GetInternalErrorStr_());
+    } else
+      CRANE_ERROR("Failed to fetch {} from db: {}", s_next_task_db_id_str_,
+                  GetInternalErrorStr_());
   }
 
   std::string pd_head_next_name =
@@ -116,37 +116,23 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
     }
   }
 
-  auto reconstruct_queue = [this](DbQueueDummyHead head, DbQueueDummyTail tail,
-                                  std::unordered_map<db_id_t, DbQueueNode>& q) {
-    db_id_t prev_db_id{head.db_id};
-    db_id_t db_id{head.next_db_id};
-    int rc;
-
-    while (true) {
-      if (db_id == tail.db_id) break;
-
-      db_id_t next_db_id;
-      rc = FetchTypeFromDb_(GetDbQueueNodeNextName_(db_id), &next_db_id);
-      if (rc != UNQLITE_OK) return false;
-
-      q.emplace(db_id, DbQueueNode{db_id, prev_db_id, next_db_id});
-
-      prev_db_id = db_id;
-      db_id = next_db_id;
-    }
-
-    return true;
-  };
-
   // Reconstruct the running queue and the pending queue.
-  if (!reconstruct_queue(m_pending_queue_head_, m_pending_queue_tail_,
-                         m_pending_queue_)) {
+  rc = ForEachInDbQueueNoLockAndTxn_(
+      m_pending_queue_head_, m_pending_queue_tail_,
+      [this](DbQueueNode const& node) {
+        m_pending_queue_.emplace(node.db_id, node);
+      });
+  if (rc != UNQLITE_OK) {
     CRANE_ERROR("Failed to reconstruct pending queue.");
     return false;
   }
 
-  if (!reconstruct_queue(m_running_queue_head_, m_running_queue_tail_,
-                         m_running_queue_)) {
+  rc = ForEachInDbQueueNoLockAndTxn_(
+      m_pending_queue_head_, m_pending_queue_tail_,
+      [this](DbQueueNode const& node) {
+        m_running_queue_.emplace(node.db_id, node);
+      });
+  if (rc != UNQLITE_OK) {
     CRANE_ERROR("Failed to reconstruct running queue.");
     return false;
   }
@@ -483,6 +469,76 @@ int EmbeddedDbClient::GetQueueCopyNoLock_(
   }
 
   return rc;
+}
+
+int EmbeddedDbClient::ForEachInDbQueueNoLockAndTxn_(
+    EmbeddedDbClient::DbQueueDummyHead dummy_head,
+    EmbeddedDbClient::DbQueueDummyTail dummy_tail,
+    const EmbeddedDbClient::ForEachInQueueFunc& func) {
+  int rc;
+
+  db_id_t prev_pos = dummy_head.db_id;
+  db_id_t pos = dummy_head.next_db_id;
+  while (pos != dummy_tail.db_id) {
+    db_id_t next_pos;
+
+    // Assert "<db_id>Next" exists in DB. If not so, the callback should not
+    // be called.
+    rc = FetchTypeFromDb_(GetDbQueueNodeNextName_(pos), &next_pos);
+    if (rc != UNQLITE_OK) return rc;
+
+    func(DbQueueNode{pos, prev_pos, next_pos});
+
+    prev_pos = pos;
+    pos = next_pos;
+  }
+
+  return UNQLITE_OK;
+}
+
+bool EmbeddedDbClient::GetMarkedDbId(EmbeddedDbClient::db_id_t* db_id) {
+  absl::MutexLock l(&m_marked_db_id_mtx_);
+  if (m_marked_db_id_ < 0) return false;
+
+  *db_id = m_marked_db_id_;
+  return true;
+}
+
+bool EmbeddedDbClient::SetMarkedDbId(EmbeddedDbClient::db_id_t db_id) {
+  absl::MutexLock l(&m_marked_db_id_mtx_);
+  m_marked_db_id_ = db_id;
+
+  if (m_marked_db_id_ < 0) {
+    int rc;
+    rc = StoreTypeIntoDb_(s_marked_db_id_str_, &m_marked_db_id_);
+    if (rc != UNQLITE_OK) return false;
+  } else
+    return false;
+
+  return true;
+}
+
+bool EmbeddedDbClient::UnsetMarkedDbId() {
+  absl::MutexLock l(&m_marked_db_id_mtx_);
+
+  m_marked_db_id_ = -1;
+
+  if (m_marked_db_id_ < 0) {
+    int rc;
+    rc = StoreTypeIntoDb_(s_marked_db_id_str_, &m_marked_db_id_);
+    if (rc != UNQLITE_OK) return false;
+  } else
+    return false;
+
+  return true;
+}
+
+bool EmbeddedDbClient::FetchTaskDataInDb(
+    EmbeddedDbClient::db_id_t db_id,
+    EmbeddedDbClient::TaskInEmbeddedDb* task_in_db) {
+  int rc;
+  rc = FetchTaskDataInDbAtomic_(db_id, task_in_db);
+  return rc == UNQLITE_OK;
 }
 
 }  // namespace Ctld
