@@ -72,10 +72,8 @@ class MongodbClient {
                              const std::list<std::string>& val);
 
   /* ----- Method of operating the account table ----------- */
-  bool InsertUser(const Ctld::User& new_user,
-                  mongocxx::client_session* session);
-  bool InsertAccount(const Ctld::Account& new_account,
-                     mongocxx::client_session* session);
+  bool InsertUser(const Ctld::User& new_user);
+  bool InsertAccount(const Ctld::Account& new_account);
   bool InsertQos(const Ctld::Qos& new_qos);
 
   bool DeleteEntity(EntityType type, const std::string& name);
@@ -92,10 +90,9 @@ class MongodbClient {
   void SelectAllQos(std::list<Ctld::Qos>* qos_list);
 
   template <typename T>
-  bool UpdateEntityOne(
-      const EntityType type, const std::string& opt, const std::string& name,
-      const std::string& key, const T& value,
-      std::optional<mongocxx::client_session*> opt_session = std::nullopt) {
+  bool UpdateEntityOne(const EntityType type, const std::string& opt,
+                       const std::string& name, const std::string& key,
+                       const T& value) {
     std::string coll_name;
     document filter, updateItem;
 
@@ -121,31 +118,14 @@ class MongodbClient {
         (*GetClient_())[m_db_name_][coll_name].update_one(
             *GetSession_(), filter.view(), updateItem.view());
 
-    //      CRANE_INFO("thread_local id : {}",
-    //      bsoncxx::to_json(g_db_connect_session.id()));
-
-    //    bsoncxx::stdx::optional<mongocxx::result::update> result;
-    //    if (opt_session) {
-    //      mongocxx::client_session* session = opt_session.value();
-    //      result = session->client()[m_db_name][coll_name].update_one(
-    //          *session, filter.view(), updateItem.view());
-    //    } else {
-    //      mongocxx::pool::entry client = m_connect_pool->acquire();
-    //      result = (*client)[m_db_name][coll_name].update_one(filter.view(),
-    //                                                          updateItem.view());
-    //    }
-
     if (!result || !result->modified_count()) {
       return false;
     }
     return true;
   };
 
-  bool UpdateUser(
-      const Ctld::User& user,
-      std::optional<mongocxx::client_session*> opt_session = std::nullopt);
-  bool UpdateAccount(const Ctld::Account& account,
-                     mongocxx::client_session* session);
+  bool UpdateUser(const Ctld::User& user);
+  bool UpdateAccount(const Ctld::Account& account);
   bool UpdateQos(const Ctld::Qos& qos);
 
   bool CommitTransaction(
@@ -186,7 +166,7 @@ class MongodbClient {
 
   document QosToDocument_(const Ctld::Qos& qos);
 
-  std::string m_db_name_;
+  std::string m_db_name_, m_connect_uri_;
   const std::string m_job_collection_name_{"job_table"};
   const std::string m_account_collection_name_{"acct_table"};
   const std::string m_user_collection_name_{"user_table"};
@@ -194,11 +174,6 @@ class MongodbClient {
 
   std::unique_ptr<mongocxx::instance> m_dbInstance_;
   std::unique_ptr<mongocxx::pool> m_connect_pool_;
-  std::unique_ptr<mongocxx::client> m_client_;
-  std::unique_ptr<mongocxx::database> m_database_;
-  std::unique_ptr<mongocxx::client_session> m_client_session_;
-  std::shared_ptr<mongocxx::collection> m_job_collection_,
-      m_account_collection_, m_user_collection_, m_qos_collection_;
 
   mongocxx::write_concern m_wc_majority_{};
   mongocxx::read_concern m_rc_local_{};

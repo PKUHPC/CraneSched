@@ -9,23 +9,10 @@
 namespace Ctld {
 
 bool MongodbClient::Connect() {
-  m_dbInstance_ = std::make_unique<mongocxx::instance>();
-  m_db_name_ = g_config.DbName;
-  std::string uri_str, authentication;
-
-  if (!g_config.DbUser.empty()) {
-    authentication =
-        fmt::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
-  }
-
-  uri_str = fmt::format("mongodb://{}{}:{}/?replicaSet={}&maxPoolSize=1000",
-                        authentication, g_config.DbHost, g_config.DbPort,
-                        g_config.DbRSName);
-
   try {
-    m_connect_pool_ = std::make_unique<mongocxx::pool>(mongocxx::uri{uri_str});
+    m_connect_pool_ =
+        std::make_unique<mongocxx::pool>(mongocxx::uri{m_connect_uri_});
     mongocxx::pool::entry client = m_connect_pool_->acquire();
-    m_client_ = std::make_unique<mongocxx::client>(mongocxx::uri{uri_str});
 
     std::vector<std::string> database_name = client->list_database_names();
 
@@ -45,53 +32,28 @@ bool MongodbClient::Connect() {
 }
 
 void MongodbClient::Init() {
-  m_database_ =
-      std::make_unique<mongocxx::database>(m_client_->database(m_db_name_));
+  m_dbInstance_ = std::make_unique<mongocxx::instance>();
+  m_db_name_ = g_config.DbName;
+  std::string authentication;
 
-  if (!m_database_->has_collection(m_job_collection_name_)) {
-    m_database_->create_collection(m_job_collection_name_);
-  }
-  m_job_collection_ = std::make_unique<mongocxx::collection>(
-      m_database_->collection(m_job_collection_name_));
-
-  if (!m_database_->has_collection(m_account_collection_name_)) {
-    m_database_->create_collection(m_account_collection_name_);
-  }
-  m_account_collection_ = std::make_unique<mongocxx::collection>(
-      m_database_->collection(m_account_collection_name_));
-
-  if (!m_database_->has_collection(m_user_collection_name_)) {
-    m_database_->create_collection(m_user_collection_name_);
-  }
-  m_user_collection_ = std::make_unique<mongocxx::collection>(
-      m_database_->collection(m_user_collection_name_));
-
-  if (!m_database_->has_collection(m_qos_collection_name_)) {
-    m_database_->create_collection(m_qos_collection_name_);
-  }
-  m_qos_collection_ = std::make_unique<mongocxx::collection>(
-      m_database_->collection(m_qos_collection_name_));
-
-  if (!m_account_collection_ || !m_user_collection_ || !m_qos_collection_ ||
-      !m_job_collection_) {
-    PrintError_(
-        fmt::format("Can't get instance of {} tables", m_db_name_).c_str());
-    std::exit(1);
+  if (!g_config.DbUser.empty()) {
+    authentication =
+        fmt::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
   }
 
+  m_connect_uri_ = fmt::format(
+      "mongodb://{}{}:{}/?replicaSet={}&maxPoolSize=1000", authentication,
+      g_config.DbHost, g_config.DbPort, g_config.DbRSName);
   m_wc_majority_.acknowledge_level(mongocxx::write_concern::level::k_majority);
   m_rc_local_.acknowledge_level(mongocxx::read_concern::level::k_local);
   m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
-
-  // Start a client session for transaction
-  m_client_session_ =
-      std::make_unique<mongocxx::client_session>(m_client_->start_session());
 }
 
 bool MongodbClient::GetMaxExistingJobId(uint64_t* job_id) {
 #warning O(1)
   //  *job_id = m_job_collection->count_documents({});
-  mongocxx::cursor cursor = m_job_collection_->find({});
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_job_collection_name_].find({});
   *job_id = 0;
   for (auto view : cursor) {
     uint64_t id =
@@ -104,7 +66,8 @@ bool MongodbClient::GetMaxExistingJobId(uint64_t* job_id) {
 bool MongodbClient::GetLastInsertId(uint64_t* id) {
 #warning O(1)
   //  *id = m_job_collection->count_documents({});
-  mongocxx::cursor cursor = m_job_collection_->find({});
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_job_collection_name_].find({});
   *id = 0;
   for (auto view : cursor) {
     *id =
@@ -162,18 +125,14 @@ bool MongodbClient::InsertJob(
               << "task_to_ctld" << task_to_ctld_str
               << bsoncxx::builder::stream::finalize;
 
-  if (m_dbInstance_ && m_client_) {
     bsoncxx::stdx::optional<mongocxx::result::insert_one> ret;
-    ret = m_job_collection_->insert_one(doc_value.view());
+    ret = (*GetClient_())[m_db_name_][m_job_collection_name_].insert_one(
+        doc_value.view());
 
     if (ret == bsoncxx::stdx::nullopt) {
       PrintError_("Failed to insert job record");
       return false;
     }
-  } else {
-    PrintError_("Database init failed");
-    return false;
-  }
   return true;
 }
 
@@ -194,7 +153,9 @@ bool MongodbClient::FetchJobRecordsWithStates(
                                        << bsoncxx::builder::stream::close_array
                                        << bsoncxx::builder::stream::finalize;
 
-  mongocxx::cursor cursor = m_job_collection_->find(doc_value.view());
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_job_collection_name_].find(
+          doc_value.view());
 
   // 0  job_db_inx    mod_time       deleted       account     cpus_req
   // 5  mem_req       job_name       env           id_job      id_user
@@ -261,7 +222,8 @@ bool MongodbClient::UpdateJobRecordField(uint64_t job_db_inx,
       }));
 
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      m_job_collection_->update_one(filter.view(), update.view());
+      (*GetClient_())[m_db_name_][m_job_collection_name_].update_one(
+          filter.view(), update.view());
   return true;
 }
 
@@ -286,17 +248,17 @@ bool MongodbClient::UpdateJobRecordFields(
   document filter;
   filter.append(kvp("job_db_inx", std::to_string(job_db_inx)));
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      m_job_collection_->update_one(filter.view(), doc_value.view());
+      (*GetClient_())[m_db_name_][m_job_collection_name_].update_one(
+          filter.view(), doc_value.view());
   return true;
 }
 
-bool MongodbClient::InsertUser(const Ctld::User& new_user,
-                               mongocxx::client_session* session) {
+bool MongodbClient::InsertUser(const Ctld::User& new_user) {
   document doc = UserToDocument_(new_user);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      session->client()[m_db_name_][m_user_collection_name_].insert_one(
-          *session, doc.view());
+      (*GetClient_())[m_db_name_][m_user_collection_name_].insert_one(
+          *GetSession_(), doc.view());
 
   if (ret != bsoncxx::stdx::nullopt)
     return true;
@@ -304,13 +266,12 @@ bool MongodbClient::InsertUser(const Ctld::User& new_user,
     return false;
 }
 
-bool MongodbClient::InsertAccount(const Ctld::Account& new_account,
-                                  mongocxx::client_session* session) {
+bool MongodbClient::InsertAccount(const Ctld::Account& new_account) {
   document doc = AccountToDocument_(new_account);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      session->client()[m_db_name_][m_account_collection_name_].insert_one(
-          *session, doc.view());
+      (*GetClient_())[m_db_name_][m_account_collection_name_].insert_one(
+          *GetSession_(), doc.view());
 
   if (ret != bsoncxx::stdx::nullopt)
     return true;
@@ -321,12 +282,9 @@ bool MongodbClient::InsertAccount(const Ctld::Account& new_account,
 bool MongodbClient::InsertQos(const Ctld::Qos& new_qos) {
   document doc = QosToDocument_(new_qos);
 
-  mongocxx::pool::entry client = m_connect_pool_->acquire();
-  //  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-  //      session.client()[m_db_name][m_qos_collection_name].insert_one(session,
-  //      doc.view());
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      (*client)[m_db_name_][m_qos_collection_name_].insert_one(doc.view());
+      (*GetClient_())[m_db_name_][m_qos_collection_name_].insert_one(
+          doc.view());
 
   if (ret != bsoncxx::stdx::nullopt)
     return true;
@@ -336,23 +294,23 @@ bool MongodbClient::InsertQos(const Ctld::Qos& new_qos) {
 
 bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
                                  const std::string& name) {
-  std::shared_ptr<mongocxx::collection> coll;
+  std::string coll;
 
   switch (type) {
     case MongodbClient::Account:
-      coll = m_account_collection_;
+      coll = m_account_collection_name_;
       break;
     case MongodbClient::User:
-      coll = m_user_collection_;
+      coll = m_user_collection_name_;
       break;
     case MongodbClient::Qos:
-      coll = m_qos_collection_;
+      coll = m_qos_collection_name_;
       break;
   }
   document filter;
   filter.append(kvp("name", name));
   bsoncxx::stdx::optional<mongocxx::result::delete_result> result =
-      coll->delete_one(filter.view());
+      (*GetClient_())[m_db_name_][coll].delete_one(filter.view());
 
   if (result && result.value().deleted_count() == 1)
     return true;
@@ -366,7 +324,7 @@ bool MongodbClient::SelectUser(const std::string& key, const T& value,
   document doc;
   doc.append(kvp(key, value));
   bsoncxx::stdx::optional<bsoncxx::document::value> result =
-      m_user_collection_->find_one(doc.view());
+      (*GetClient_())[m_db_name_][m_user_collection_name_].find_one(doc.view());
 
   if (result) {
     bsoncxx::document::view user_view = result->view();
@@ -382,7 +340,8 @@ bool MongodbClient::SelectAccount(const std::string& key, const T& value,
   document filter;
   filter.append(kvp(key, value));
   bsoncxx::stdx::optional<bsoncxx::document::value> result =
-      m_account_collection_->find_one(filter.view());
+      (*GetClient_())[m_db_name_][m_account_collection_name_].find_one(
+          filter.view());
 
   if (result) {
     bsoncxx::document::view account_view = result->view();
@@ -397,7 +356,8 @@ bool MongodbClient::SelectQosByName(const std::string& name, Ctld::Qos* qos) {
 }
 
 void MongodbClient::SelectAllUser(std::list<Ctld::User>* user_list) {
-  mongocxx::cursor cursor = m_user_collection_->find({});
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_user_collection_name_].find({});
   for (auto view : cursor) {
     Ctld::User user;
     ViewToUser_(view, &user);
@@ -406,7 +366,8 @@ void MongodbClient::SelectAllUser(std::list<Ctld::User>* user_list) {
 }
 
 void MongodbClient::SelectAllAccount(std::list<Ctld::Account>* account_list) {
-  mongocxx::cursor cursor = m_account_collection_->find({});
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_account_collection_name_].find({});
   for (auto view : cursor) {
     Ctld::Account account;
     ViewToAccount_(view, &account);
@@ -415,7 +376,8 @@ void MongodbClient::SelectAllAccount(std::list<Ctld::Account>* account_list) {
 }
 
 void MongodbClient::SelectAllQos(std::list<Ctld::Qos>* qos_list) {
-  mongocxx::cursor cursor = m_qos_collection_->find({});
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_qos_collection_name_].find({});
   for (auto view : cursor) {
     Ctld::Qos qos;
     ViewToQos_(view, &qos);
@@ -423,9 +385,7 @@ void MongodbClient::SelectAllQos(std::list<Ctld::Qos>* qos_list) {
   }
 }
 
-bool MongodbClient::UpdateUser(
-    const Ctld::User& user,
-    std::optional<mongocxx::client_session*> opt_session) {
+bool MongodbClient::UpdateUser(const Ctld::User& user) {
   document doc = UserToDocument_(user), setDocument, filter;
 
   filter.append(kvp("name", user.name));
@@ -435,34 +395,21 @@ bool MongodbClient::UpdateUser(
       (*GetClient_())[m_db_name_][m_user_collection_name_].update_one(
           *GetSession_(), filter.view(), setDocument.view());
 
-  //  bsoncxx::stdx::optional<mongocxx::result::update> update_result;
-  //  if (opt_session) {
-  //    mongocxx::client_session* session = opt_session.value();
-  //    update_result =
-  //        session->client()[m_db_name][m_user_collection_name].update_one(
-  //            *session, filter.view(), setDocument.view());
-  //  } else {
-  //    mongocxx::pool::entry client = m_connect_pool->acquire();
-  //    update_result = (*client)[m_db_name][m_user_collection_name].update_one(
-  //        filter.view(), setDocument.view());
-  //  }
-
   if (!update_result || !update_result->modified_count()) {
     return false;
   }
   return true;
 }
 
-bool MongodbClient::UpdateAccount(const Ctld::Account& account,
-                                  mongocxx::client_session* session) {
+bool MongodbClient::UpdateAccount(const Ctld::Account& account) {
   document doc = AccountToDocument_(account), setDocument, filter;
 
   setDocument.append(kvp("$set", doc));
   filter.append(kvp("name", account.name));
 
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      session->client()[m_db_name_][m_account_collection_name_].update_one(
-          *session, filter.view(), setDocument.view());
+      (*GetClient_())[m_db_name_][m_account_collection_name_].update_one(
+          *GetSession_(), filter.view(), setDocument.view());
 
   if (!update_result || !update_result->modified_count()) {
     return false;
@@ -476,12 +423,8 @@ bool MongodbClient::UpdateQos(const Ctld::Qos& qos) {
   setDocument.append(kvp("$set", doc));
   filter.append(kvp("name", qos.name));
 
-  mongocxx::pool::entry client = m_connect_pool_->acquire();
-  //  bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-  //      session.client()[m_db_name][m_qos_collection_name].update_one(session,
-  //      filter.view(), setDocument.view());
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      (*client)[m_db_name_][m_qos_collection_name_].update_one(
+      (*GetClient_())[m_db_name_][m_qos_collection_name_].update_one(
           filter.view(), setDocument.view());
 
   if (!update_result || !update_result->modified_count()) {
@@ -494,10 +437,6 @@ bool MongodbClient::CommitTransaction(
     const mongocxx::client_session::with_transaction_cb& callback) {
   // Use with_transaction to start a transaction, execute the callback,
   // and commit (or abort on error).
-
-  //  thread_local mongocxx::pool::entry client = m_connect_pool->acquire();
-  //  thread_local mongocxx::client_session session = client->start_session();
-
   try {
     mongocxx::options::transaction opts;
     opts.write_concern(m_wc_majority_);

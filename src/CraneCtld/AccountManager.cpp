@@ -68,18 +68,18 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
         // Update the user's account's users_list
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account,
                                      "$addToSet", new_user.account, "users",
-                                     new_user.name, session);
+                                     new_user.name);
 
         //                int kkkk =100/0;
 
         if (find_user_res) {
           // There is a same user but was deleted,here will delete the original
           // user and overwrite it with the same name
-          g_db_client->UpdateUser(new_user, session);
+          g_db_client->UpdateUser(new_user);
 
         } else {
           // Insert the new user
-          g_db_client->InsertUser(new_user, session);
+          g_db_client->InsertUser(new_user);
         }
       };
 
@@ -181,17 +181,16 @@ AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
           // update the parent account's child_account_list
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account,
                                        "$addToSet", new_account.parent_account,
-                                       "child_accounts", new_account.name,
-                                       session);
+                                       "child_accounts", new_account.name);
         }
 
         if (find_account_res) {
           // There is a same account but was deleted,here will delete the
           // original account and overwrite it with the same name
-          g_db_client->UpdateAccount(new_account, session);
+          g_db_client->UpdateAccount(new_account);
         } else {
           // Insert the new account
-          g_db_client->InsertAccount(new_account, session);
+          g_db_client->InsertAccount(new_account);
         }
       };
 
@@ -257,12 +256,11 @@ AccountManager::Result AccountManager::DeleteUser(const std::string& name) {
       [&](mongocxx::client_session* session) {
         // delete form the parent account's users list
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account,
-                                     "$pull", user.account, "users", name,
-                                     session);
+                                     "$pull", user.account, "users", name);
 
         // Delete the user
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::User, "$set",
-                                     name, "deleted", true, session);
+                                     name, "deleted", true);
       };
 
   m_rw_account_mutex_.lock();
@@ -302,11 +300,11 @@ AccountManager::Result AccountManager::DeleteAccount(const std::string& name) {
           // delete form the parent account's child account list
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account,
                                        "$pull", account.parent_account,
-                                       "child_accounts", name, session);
+                                       "child_accounts", name);
         }
         // Delete the account
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account, "$set",
-                                     name, "deleted", true, session);
+                                     name, "deleted", true);
       };
 
   m_rw_account_mutex_.unlock_upgrade_and_lock();
@@ -834,7 +832,7 @@ AccountManager::Result AccountManager::ModifyAccount(
 
         mongocxx::client_session::with_transaction_cb callback =
             [&](mongocxx::client_session* session) {
-              DeleteAccountAllowedPartitionFromDB_(account.name, rhs, session);
+              DeleteAccountAllowedPartitionFromDB_(account.name, rhs);
             };
 
         if (!g_db_client->CommitTransaction(callback)) {
@@ -874,7 +872,7 @@ AccountManager::Result AccountManager::ModifyAccount(
 
         mongocxx::client_session::with_transaction_cb callback =
             [&](mongocxx::client_session* session) {
-              DeleteAccountAllowedQosFromDB_(account.name, rhs, session);
+              DeleteAccountAllowedQosFromDB_(account.name, rhs);
             };
 
         if (!g_db_client->CommitTransaction(callback)) {
@@ -1061,9 +1059,8 @@ bool AccountManager::IsDefaultQosOfAnyPartition(const User& user,
                      [&qos](const auto& p) { return p.second.first == qos; });
 }
 
-bool AccountManager::DeleteAccountAllowedQosFromDB_(
-    const std::string& name, const std::string& qos,
-    mongocxx::client_session* session) {
+bool AccountManager::DeleteAccountAllowedQosFromDB_(const std::string& name,
+                                                    const std::string& qos) {
   Account account;
   GetExistedAccountInfoNoLock_(name, &account);
 
@@ -1074,13 +1071,13 @@ bool AccountManager::DeleteAccountAllowedQosFromDB_(
   }
 
   for (const auto& child : account.child_accounts) {
-    DeleteAccountAllowedQosFromDB_(child, qos, session);
+    DeleteAccountAllowedQosFromDB_(child, qos);
   }
   for (const auto& user : account.users) {
-    DeleteUserAllowedQosOfAllPartitionFromDB_(user, qos, true, session);
+    DeleteUserAllowedQosOfAllPartitionFromDB_(user, qos, true);
   }
   g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account, "$pull",
-                               account.name, "allowed_qos_list", qos, session);
+                               account.name, "allowed_qos_list", qos);
   return true;
 }
 
@@ -1106,8 +1103,7 @@ bool AccountManager::DeleteAccountAllowedQosFromMap_(const std::string& name,
 }
 
 bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromDB_(
-    const std::string& name, const std::string& qos, bool force,
-    mongocxx::client_session* session) {
+    const std::string& name, const std::string& qos, bool force) {
   User user;
   GetExistedUserInfoNoLock_(name, &user);
 
@@ -1126,7 +1122,7 @@ bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromDB_(
       }
     }
   }
-  g_db_client->UpdateUser(user, session);
+  g_db_client->UpdateUser(user);
   return true;
 }
 
@@ -1154,8 +1150,7 @@ bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromMap_(
 }
 
 bool AccountManager::DeleteAccountAllowedPartitionFromDB_(
-    const std::string& name, const std::string& partition,
-    mongocxx::client_session* session) {
+    const std::string& name, const std::string& partition) {
   Account account;
   GetExistedAccountInfoNoLock_(name, &account);
 
@@ -1166,15 +1161,14 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDB_(
   }
 
   for (const auto& child : account.child_accounts) {
-    DeleteAccountAllowedPartitionFromDB_(child, partition, session);
+    DeleteAccountAllowedPartitionFromDB_(child, partition);
   }
   for (const auto& user : account.users) {
-    DeleteUserAllowedPartitionFromDB_(user, partition, session);
+    DeleteUserAllowedPartitionFromDB_(user, partition);
   }
 
   g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account, "$pull",
-                               account.name, "allowed_partition", partition,
-                               session);
+                               account.name, "allowed_partition", partition);
   return true;
 }
 
@@ -1201,8 +1195,7 @@ bool AccountManager::DeleteAccountAllowedPartitionFromMap_(
 }
 
 bool AccountManager::DeleteUserAllowedPartitionFromDB_(
-    const std::string& name, const std::string& partition,
-    mongocxx::client_session* session) {
+    const std::string& name, const std::string& partition) {
   User user;
   GetExistedUserInfoNoLock_(name, &user);
 
@@ -1211,7 +1204,7 @@ bool AccountManager::DeleteUserAllowedPartitionFromDB_(
     return false;
   }
   user.allowed_partition_qos_map.erase(iter);
-  g_db_client->UpdateUser(user, session);
+  g_db_client->UpdateUser(user);
   return true;
 }
 

@@ -71,26 +71,23 @@ class AccountManager {
   bool IsDefaultQosOfAnyPartition(const User& user, const std::string& qos);
 
   bool DeleteAccountAllowedQosFromDB_(const std::string& name,
-                                      const std::string& qos,
-                                      mongocxx::client_session* session);
+                                      const std::string& qos);
   bool DeleteAccountAllowedQosFromMap_(const std::string& name,
                                        const std::string& qos);
-  bool DeleteUserAllowedQosOfAllPartitionFromDB_(
-      const std::string& name, const std::string& qos, bool force,
-      mongocxx::client_session* session);
+  bool DeleteUserAllowedQosOfAllPartitionFromDB_(const std::string& name,
+                                                 const std::string& qos,
+                                                 bool force);
   bool DeleteUserAllowedQosOfAllPartitionFromMap_(const std::string& name,
                                                   const std::string& qos,
                                                   bool force);
 
   bool DeleteAccountAllowedPartitionFromDB_(const std::string& name,
-                                            const std::string& partition,
-                                            mongocxx::client_session* session);
+                                            const std::string& partition);
   bool DeleteAccountAllowedPartitionFromMap_(const std::string& name,
                                              const std::string& partition);
 
   bool DeleteUserAllowedPartitionFromDB_(const std::string& name,
-                                         const std::string& partition,
-                                         mongocxx::client_session* session);
+                                         const std::string& partition);
   bool DeleteUserAllowedPartitionFromMap_(const std::string& name,
                                           const std::string& partition);
 

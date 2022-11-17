@@ -340,12 +340,11 @@ void InitializeCtldGlobalVariables() {
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
   g_db_client = std::make_unique<MongodbClient>();
-
+  g_db_client->Init();
   if (!g_db_client->Connect()) {
     CRANE_ERROR("Error: MongoDb client connect fail");
     std::exit(1);
   }
-  g_db_client->Init();
 
   g_account_manager = std::make_unique<AccountManager>();
 
