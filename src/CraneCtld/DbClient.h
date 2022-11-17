@@ -118,8 +118,8 @@ class MongodbClient {
     }
 
     bsoncxx::stdx::optional<mongocxx::result::update> result =
-        (*GetClient())[m_db_name_][coll_name].update_one(
-            *GetSession(), filter.view(), updateItem.view());
+        (*GetClient_())[m_db_name_][coll_name].update_one(
+            *GetSession_(), filter.view(), updateItem.view());
 
     //      CRANE_INFO("thread_local id : {}",
     //      bsoncxx::to_json(g_db_connect_session.id()));
@@ -151,9 +151,6 @@ class MongodbClient {
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
 
-  mongocxx::client* GetClient();
-  mongocxx::client_session* GetSession();
-
  private:
   static void PrintError_(const char* msg) {
     CRANE_ERROR("MongodbError: {}", msg);
@@ -164,14 +161,17 @@ class MongodbClient {
                            const V& value);
 
   template <typename... Ts, std::size_t... Is>
-  document DocumentConstructor_(
+  document documentConstructor_(
       const std::array<std::string, sizeof...(Ts)>& fields,
       const std::tuple<Ts...>& values, std::index_sequence<Is...>);
 
   template <typename... Ts>
-  document DocumentConstructor(
+  document DocumentConstructor_(
       const std::array<std::string, sizeof...(Ts)>& fields,
       const std::tuple<Ts...>& values);
+
+  mongocxx::client* GetClient_();
+  mongocxx::client_session* GetSession_();
 
   void ViewToUser_(const bsoncxx::document::view& user_view, Ctld::User* user);
 
@@ -200,9 +200,9 @@ class MongodbClient {
   std::shared_ptr<mongocxx::collection> m_job_collection_,
       m_account_collection_, m_user_collection_, m_qos_collection_;
 
-  mongocxx::write_concern wc_majority_{};
-  mongocxx::read_concern rc_local_{};
-  mongocxx::read_preference rp_primary_{};
+  mongocxx::write_concern m_wc_majority_{};
+  mongocxx::read_concern m_rc_local_{};
+  mongocxx::read_preference m_rp_primary_{};
 };
 
 template <>

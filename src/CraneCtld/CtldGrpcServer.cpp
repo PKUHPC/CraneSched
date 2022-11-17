@@ -283,8 +283,6 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
       auto *task_it = task_info_list->Add();
 
       task_it->mutable_submit_info()->CopyFrom(task.task_to_ctld);
-      task_it->mutable_submit_info()->set_partition_name(
-          fmt::format("{}(DEFAULT)", g_config.DefaultPartition));
       task_it->set_task_id(task.task_id);
       task_it->set_gid(task.gid);
       task_it->set_account(task.account);
@@ -305,8 +303,6 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
       if (task.task_id == request->job_id()) {
         auto *task_it = task_info_list->Add();
         task_it->mutable_submit_info()->CopyFrom(task.task_to_ctld);
-        task_it->mutable_submit_info()->set_partition_name(
-            fmt::format("DEFAULT({})", g_config.DefaultPartition));
         task_it->set_task_id(task.task_id);
         task_it->set_gid(task.gid);
         task_it->set_account(task.account);

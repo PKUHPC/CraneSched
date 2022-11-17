@@ -11,21 +11,22 @@ namespace Ctld {
 bool MongodbClient::Connect() {
   m_dbInstance_ = std::make_unique<mongocxx::instance>();
   m_db_name_ = g_config.DbName;
-  std::string uri_str;
+  std::string uri_str, authentication;
 
   if (!g_config.DbUser.empty()) {
-    uri_str = fmt::format("mongodb://{}:{}@{}:{}&replicaSet={}",
-                          g_config.DbUser, g_config.DbPassword, g_config.DbHost,
-                          g_config.DbPort, g_config.DbRSName);
-  } else {
-    uri_str = fmt::format("mongodb://{}:{}&replicaSet={}", g_config.DbHost,
-                          g_config.DbPort, g_config.DbRSName);
+    authentication =
+        fmt::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
   }
-  m_connect_pool_ = std::make_unique<mongocxx::pool>(mongocxx::uri{uri_str});
-  mongocxx::pool::entry client = m_connect_pool_->acquire();
-  m_client_ = std::make_unique<mongocxx::client>(mongocxx::uri{uri_str});
+
+  uri_str = fmt::format("mongodb://{}{}:{}/?replicaSet={}&maxPoolSize=1000",
+                        authentication, g_config.DbHost, g_config.DbPort,
+                        g_config.DbRSName);
 
   try {
+    m_connect_pool_ = std::make_unique<mongocxx::pool>(mongocxx::uri{uri_str});
+    mongocxx::pool::entry client = m_connect_pool_->acquire();
+    m_client_ = std::make_unique<mongocxx::client>(mongocxx::uri{uri_str});
+
     std::vector<std::string> database_name = client->list_database_names();
 
     if (std::find(database_name.begin(), database_name.end(), m_db_name_) ==
@@ -78,9 +79,9 @@ void MongodbClient::Init() {
     std::exit(1);
   }
 
-  wc_majority_.acknowledge_level(mongocxx::write_concern::level::k_majority);
-  rc_local_.acknowledge_level(mongocxx::read_concern::level::k_local);
-  rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
+  m_wc_majority_.acknowledge_level(mongocxx::write_concern::level::k_majority);
+  m_rc_local_.acknowledge_level(mongocxx::read_concern::level::k_local);
+  m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
 
   // Start a client session for transaction
   m_client_session_ =
@@ -431,8 +432,8 @@ bool MongodbClient::UpdateUser(
   setDocument.append(kvp("$set", doc));
 
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      (*GetClient())[m_db_name_][m_user_collection_name_].update_one(
-          *GetSession(), filter.view(), setDocument.view());
+      (*GetClient_())[m_db_name_][m_user_collection_name_].update_one(
+          *GetSession_(), filter.view(), setDocument.view());
 
   //  bsoncxx::stdx::optional<mongocxx::result::update> update_result;
   //  if (opt_session) {
@@ -499,35 +500,15 @@ bool MongodbClient::CommitTransaction(
 
   try {
     mongocxx::options::transaction opts;
-    opts.write_concern(wc_majority_);
-    opts.read_concern(rc_local_);
-    opts.read_preference(rp_primary_);
-    GetSession()->with_transaction(callback, opts);
+    opts.write_concern(m_wc_majority_);
+    opts.read_concern(m_rc_local_);
+    opts.read_preference(m_rp_primary_);
+    GetSession_()->with_transaction(callback, opts);
   } catch (const mongocxx::exception& e) {
     CRANE_ERROR("Database transaction failed: {}", e.what());
     return false;
   }
   return true;
-}
-
-mongocxx::client* MongodbClient::GetClient() {
-  if (m_connect_pool_) {
-    thread_local mongocxx::pool::entry entry{m_connect_pool_->acquire()};
-    CRANE_INFO("client address {}", (void*)&(*entry));
-    return &(*entry);
-  }
-  return nullptr;
-}
-
-mongocxx::client_session* MongodbClient::GetSession() {
-  if (m_connect_pool_) {
-    thread_local mongocxx::client_session session =
-        GetClient()->start_session();
-    CRANE_INFO("session address {}", (void*)&(session));
-    return &session;
-  }
-
-  return nullptr;
 }
 
 template <typename V>
@@ -568,7 +549,7 @@ void MongodbClient::DocumentAppendItem_<MongodbClient::PartitionQosMap>(
 }
 
 template <typename... Ts, std::size_t... Is>
-document MongodbClient::DocumentConstructor_(
+document MongodbClient::documentConstructor_(
     const std::array<std::string, sizeof...(Ts)>& fields,
     const std::tuple<Ts...>& values, std::index_sequence<Is...>) {
   bsoncxx::builder::basic::document document;
@@ -581,11 +562,31 @@ document MongodbClient::DocumentConstructor_(
 }
 
 template <typename... Ts>
-document MongodbClient::DocumentConstructor(
+document MongodbClient::DocumentConstructor_(
     std::array<std::string, sizeof...(Ts)> const& fields,
     std::tuple<Ts...> const& values) {
-  return DocumentConstructor_(fields, values,
+  return documentConstructor_(fields, values,
                               std::make_index_sequence<sizeof...(Ts)>{});
+}
+
+mongocxx::client* MongodbClient::GetClient_() {
+  if (m_connect_pool_) {
+    thread_local mongocxx::pool::entry entry{m_connect_pool_->acquire()};
+    CRANE_TRACE("client address {}", (void*)&(*entry));
+    return &(*entry);
+  }
+  return nullptr;
+}
+
+mongocxx::client_session* MongodbClient::GetSession_() {
+  if (m_connect_pool_) {
+    thread_local mongocxx::client_session session =
+        GetClient_()->start_session();
+    CRANE_TRACE("session address {}", (void*)&(session));
+    return &session;
+  }
+
+  return nullptr;
 }
 
 void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
@@ -633,7 +634,7 @@ document MongodbClient::UserToDocument_(const Ctld::User& user) {
              user.name,
              user.admin_level,
              user.allowed_partition_qos_map};
-  return DocumentConstructor(fields, values);
+  return DocumentConstructor_(fields, values);
 }
 
 void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
@@ -681,7 +682,7 @@ document MongodbClient::AccountToDocument_(const Ctld::Account& account) {
              account.default_qos,
              account.allowed_qos_list};
 
-  return DocumentConstructor(fields, values);
+  return DocumentConstructor_(fields, values);
 }
 
 void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
@@ -703,7 +704,7 @@ document MongodbClient::QosToDocument_(const Ctld::Qos& qos) {
   std::tuple<bool, std::string, std::string, int, int> values{
       false, qos.name, qos.description, qos.priority, qos.max_jobs_per_user};
 
-  return DocumentConstructor(fields, values);
+  return DocumentConstructor_(fields, values);
 }
 
 }  // namespace Ctld

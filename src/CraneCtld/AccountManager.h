@@ -75,24 +75,24 @@ class AccountManager {
                                       mongocxx::client_session* session);
   bool DeleteAccountAllowedQosFromMap_(const std::string& name,
                                        const std::string& qos);
-  bool DeleteUserAllowedQosOfAllPartitionFromDB(
+  bool DeleteUserAllowedQosOfAllPartitionFromDB_(
       const std::string& name, const std::string& qos, bool force,
       mongocxx::client_session* session);
-  bool DeleteUserAllowedQosOfAllPartitionFromMap(const std::string& name,
-                                                 const std::string& qos,
-                                                 bool force);
+  bool DeleteUserAllowedQosOfAllPartitionFromMap_(const std::string& name,
+                                                  const std::string& qos,
+                                                  bool force);
 
-  bool DeleteAccountAllowedPartitionFromDB(const std::string& name,
-                                           const std::string& partition,
-                                           mongocxx::client_session* session);
-  bool DeleteAccountAllowedPartitionFromMap(const std::string& name,
-                                            const std::string& partition);
+  bool DeleteAccountAllowedPartitionFromDB_(const std::string& name,
+                                            const std::string& partition,
+                                            mongocxx::client_session* session);
+  bool DeleteAccountAllowedPartitionFromMap_(const std::string& name,
+                                             const std::string& partition);
 
-  bool DeleteUserAllowedPartitionFromDB(const std::string& name,
-                                        const std::string& partition,
-                                        mongocxx::client_session* session);
-  bool DeleteUserAllowedPartitionFromMap(const std::string& name,
-                                         const std::string& partition);
+  bool DeleteUserAllowedPartitionFromDB_(const std::string& name,
+                                         const std::string& partition,
+                                         mongocxx::client_session* session);
+  bool DeleteUserAllowedPartitionFromMap_(const std::string& name,
+                                          const std::string& partition);
 
   std::unordered_map<std::string /*account name*/, std::unique_ptr<Account>>
       m_account_map_;

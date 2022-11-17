@@ -834,7 +834,7 @@ AccountManager::Result AccountManager::ModifyAccount(
 
         mongocxx::client_session::with_transaction_cb callback =
             [&](mongocxx::client_session* session) {
-              DeleteAccountAllowedPartitionFromDB(account.name, rhs, session);
+              DeleteAccountAllowedPartitionFromDB_(account.name, rhs, session);
             };
 
         if (!g_db_client->CommitTransaction(callback)) {
@@ -842,7 +842,7 @@ AccountManager::Result AccountManager::ModifyAccount(
           m_rw_account_mutex_.unlock();
           return Result{false, "Fail to update data in database"};
         }
-        DeleteAccountAllowedPartitionFromMap(account.name, rhs);
+        DeleteAccountAllowedPartitionFromMap_(account.name, rhs);
 
         m_rw_user_mutex_.unlock();
         m_rw_account_mutex_.unlock();
@@ -1077,7 +1077,7 @@ bool AccountManager::DeleteAccountAllowedQosFromDB_(
     DeleteAccountAllowedQosFromDB_(child, qos, session);
   }
   for (const auto& user : account.users) {
-    DeleteUserAllowedQosOfAllPartitionFromDB(user, qos, true, session);
+    DeleteUserAllowedQosOfAllPartitionFromDB_(user, qos, true, session);
   }
   g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account, "$pull",
                                account.name, "allowed_qos_list", qos, session);
@@ -1099,13 +1099,13 @@ bool AccountManager::DeleteAccountAllowedQosFromMap_(const std::string& name,
     DeleteAccountAllowedQosFromMap_(child, qos);
   }
   for (const auto& user : account.users) {
-    DeleteUserAllowedQosOfAllPartitionFromMap(user, qos, true);
+    DeleteUserAllowedQosOfAllPartitionFromMap_(user, qos, true);
   }
   m_account_map_[account.name]->allowed_qos_list.remove(qos);
   return true;
 }
 
-bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromDB(
+bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromDB_(
     const std::string& name, const std::string& qos, bool force,
     mongocxx::client_session* session) {
   User user;
@@ -1130,7 +1130,7 @@ bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromDB(
   return true;
 }
 
-bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromMap(
+bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromMap_(
     const std::string& name, const std::string& qos, bool force) {
   User user;
   GetExistedUserInfoNoLock_(name, &user);
@@ -1153,7 +1153,7 @@ bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromMap(
   return true;
 }
 
-bool AccountManager::DeleteAccountAllowedPartitionFromDB(
+bool AccountManager::DeleteAccountAllowedPartitionFromDB_(
     const std::string& name, const std::string& partition,
     mongocxx::client_session* session) {
   Account account;
@@ -1166,10 +1166,10 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDB(
   }
 
   for (const auto& child : account.child_accounts) {
-    DeleteAccountAllowedPartitionFromDB(child, partition, session);
+    DeleteAccountAllowedPartitionFromDB_(child, partition, session);
   }
   for (const auto& user : account.users) {
-    DeleteUserAllowedPartitionFromDB(user, partition, session);
+    DeleteUserAllowedPartitionFromDB_(user, partition, session);
   }
 
   g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account, "$pull",
@@ -1178,7 +1178,7 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDB(
   return true;
 }
 
-bool AccountManager::DeleteAccountAllowedPartitionFromMap(
+bool AccountManager::DeleteAccountAllowedPartitionFromMap_(
     const std::string& name, const std::string& partition) {
   Account account;
   GetExistedAccountInfoNoLock_(name, &account);
@@ -1190,17 +1190,17 @@ bool AccountManager::DeleteAccountAllowedPartitionFromMap(
   }
 
   for (const auto& child : account.child_accounts) {
-    DeleteAccountAllowedPartitionFromMap(child, partition);
+    DeleteAccountAllowedPartitionFromMap_(child, partition);
   }
   for (const auto& user : account.users) {
-    DeleteUserAllowedPartitionFromMap(user, partition);
+    DeleteUserAllowedPartitionFromMap_(user, partition);
   }
   m_account_map_[account.name]->allowed_partition.remove(partition);
 
   return true;
 }
 
-bool AccountManager::DeleteUserAllowedPartitionFromDB(
+bool AccountManager::DeleteUserAllowedPartitionFromDB_(
     const std::string& name, const std::string& partition,
     mongocxx::client_session* session) {
   User user;
@@ -1215,7 +1215,7 @@ bool AccountManager::DeleteUserAllowedPartitionFromDB(
   return true;
 }
 
-bool AccountManager::DeleteUserAllowedPartitionFromMap(
+bool AccountManager::DeleteUserAllowedPartitionFromMap_(
     const std::string& name, const std::string& partition) {
   User user;
   GetExistedUserInfoNoLock_(name, &user);
