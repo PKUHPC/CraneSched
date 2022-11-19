@@ -51,6 +51,7 @@ set(CMAKE_CXX_STANDARD 20)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CRANE_ENABLE_TESTS ON)
+    add_compile_definitions(CRANE_LOG_LEVEL=CRANE_LOG_LEVEL_TRACE)
 endif ()
 
 # Set colorized output when ninja build system is used.

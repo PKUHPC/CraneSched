@@ -5,6 +5,7 @@
 #define private public
 
 #include "EmbeddedDbClient.h"
+#include "crane/Logger.h"
 
 namespace fs = std::filesystem;
 using Ctld::EmbeddedDbClient;

@@ -11,6 +11,7 @@
 #include <mongocxx/cursor.hpp>
 #include <mongocxx/instance.hpp>
 #include <mongocxx/pool.hpp>
+#include <source_location>
 #include <string>
 
 #include "CtldPublicDefs.h"
@@ -143,9 +144,10 @@ class MongodbClient {
   using sub_array = bsoncxx::builder::basic::sub_array;
   using sub_document = bsoncxx::builder::basic::sub_document;
 
-  static void PrintError_(const char* msg) {
-    CRANE_ERROR("MongodbError: {}", msg);
-  }
+  static void PrintError_(
+      const char* msg,
+      const std::source_location loc = std::source_location::current()) {
+    CRANE_ERROR_LOC(loc, "MongodbError: {}\n", msg);
 
   template <typename V>
   void DocumentAppendItem_(document* doc, const std::string& key,
