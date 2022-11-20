@@ -344,7 +344,7 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(result.reason.value());
+    response->set_reason(result.reason);
   }
 
   return grpc::Status::OK;
@@ -366,7 +366,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(result.reason.value());
+    response->set_reason(result.reason);
   }
 
   return grpc::Status::OK;
@@ -388,7 +388,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(result.reason.value());
+    response->set_reason(result.reason);
   }
 
   return grpc::Status::OK;
@@ -422,7 +422,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(res.reason.value());
+    response->set_reason(res.reason);
   }
   return grpc::Status::OK;
 }
@@ -628,7 +628,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(res.reason.value());
+    response->set_reason(res.reason);
   }
   return grpc::Status::OK;
 }

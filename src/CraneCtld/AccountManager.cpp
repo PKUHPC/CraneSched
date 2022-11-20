@@ -70,8 +70,6 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
                                      "$addToSet", new_user.account, "users",
                                      new_user.name);
 
-        //                int kkkk =100/0;
-
         if (find_user_res) {
           // There is a same user but was deleted,here will delete the original
           // user and overwrite it with the same name
@@ -114,7 +112,7 @@ AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
                               new_account.name)};
   }
 
-  util::read_lock_guard readQosLockGuard(m_rw_qos_mutex_);
+  util::read_lock_guard read_qos_lock_guard(m_rw_qos_mutex_);
   for (const auto& qos : new_account.allowed_qos_list) {
     Qos find_qos;
     if (!GetExistedQosInfoNoLock_(qos, &find_qos)) {
@@ -345,12 +343,12 @@ AccountManager::Result AccountManager::DeleteQos(const std::string& name) {
 }
 
 bool AccountManager::GetExistedUserInfo(const std::string& name, User* user) {
-  util::read_lock_guard readLockGuard(m_rw_user_mutex_);
+  util::read_lock_guard guard(m_rw_user_mutex_);
   return GetExistedUserInfoNoLock_(name, user);
 }
 
 void AccountManager::GetAllUserInfo(std::list<User>* user_list) {
-  util::read_lock_guard readLockGuard(m_rw_user_mutex_);
+  util::read_lock_guard guard(m_rw_user_mutex_);
   for (const auto& [name, user] : m_user_map_) {
     user_list->push_back(*user);
   }
@@ -358,24 +356,24 @@ void AccountManager::GetAllUserInfo(std::list<User>* user_list) {
 
 bool AccountManager::GetExistedAccountInfo(const std::string& name,
                                            Account* account) {
-  util::read_lock_guard readLockGuard(m_rw_account_mutex_);
+  util::read_lock_guard guard(m_rw_account_mutex_);
   return GetExistedAccountInfoNoLock_(name, account);
 }
 
 void AccountManager::GetAllAccountInfo(std::list<Account>* account_list) {
-  util::read_lock_guard readLockGuard(m_rw_account_mutex_);
+  util::read_lock_guard guard(m_rw_account_mutex_);
   for (const auto& [name, account] : m_account_map_) {
     account_list->push_back(*account);
   }
 }
 
 bool AccountManager::GetExistedQosInfo(const std::string& name, Qos* qos) {
-  util::read_lock_guard readLockGuard(m_rw_qos_mutex_);
+  util::read_lock_guard guard(m_rw_qos_mutex_);
   return GetExistedQosInfoNoLock_(name, qos);
 }
 
 void AccountManager::GetAllQosInfo(std::list<Qos>* qos_list) {
-  util::read_lock_guard readLockGuard(m_rw_qos_mutex_);
+  util::read_lock_guard guard(m_rw_qos_mutex_);
   for (const auto& [name, qos] : m_qos_map_) {
     qos_list->push_back(*qos);
   }
@@ -394,7 +392,7 @@ AccountManager::Result AccountManager::ModifyUser(
   }
 
   Account account;
-  util::read_lock_guard readAccountLockGuard(m_rw_account_mutex_);
+  util::read_lock_guard read_account_lock_guard(m_rw_account_mutex_);
 
   GetExistedAccountInfoNoLock_(user.account, &account);
   switch (operatorType) {

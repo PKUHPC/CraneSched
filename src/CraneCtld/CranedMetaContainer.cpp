@@ -442,13 +442,17 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo() {
         part_craned_info->mutable_common_craned_state_list();
 
     auto* idle_craned_list = common_craned_state_list->Add();
-    idle_craned_list->set_state("idle");
+    idle_craned_list->set_state(
+        crane::grpc::PartitionCranedInfo_CommonCranedState_State_IDLE);
     auto* mix_craned_list = common_craned_state_list->Add();
-    mix_craned_list->set_state("mix");
+    mix_craned_list->set_state(
+        crane::grpc::PartitionCranedInfo_CommonCranedState_State_MIX);
     auto* alloc_craned_list = common_craned_state_list->Add();
-    alloc_craned_list->set_state("alloc");
+    alloc_craned_list->set_state(
+        crane::grpc::PartitionCranedInfo_CommonCranedState_State_ALLOC);
     auto* down_craned_list = common_craned_state_list->Add();
-    down_craned_list->set_state("down");
+    down_craned_list->set_state(
+        crane::grpc::PartitionCranedInfo_CommonCranedState_State_DOWN);
 
     std::list<std::string> idle_craned_name_list, mix_craned_name_list,
         alloc_craned_name_list, down_craned_name_list;

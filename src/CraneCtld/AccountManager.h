@@ -13,7 +13,7 @@ class AccountManager {
  public:
   struct Result {
     bool ok{false};
-    std::optional<std::string> reason;
+    std::string reason;
   };
 
   AccountManager();

@@ -16,13 +16,9 @@
 #include "CtldPublicDefs.h"
 #include "crane/PublicHeader.h"
 
-using bsoncxx::builder::basic::array;
-using bsoncxx::builder::basic::document;
-using bsoncxx::builder::basic::kvp;
-using bsoncxx::builder::basic::sub_array;
-using bsoncxx::builder::basic::sub_document;
-
 namespace Ctld {
+
+using bsoncxx::builder::basic::kvp;
 
 class MongodbClient {
  public:
@@ -100,6 +96,7 @@ class MongodbClient {
     updateItem.append(kvp(opt, [&](sub_document subDocument) {
       // DocumentAppendItem(subDocument, key, value);
       subDocument.append(kvp(key, value));
+      subDocument.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
     }));
 
     switch (type) {
@@ -132,6 +129,11 @@ class MongodbClient {
       const mongocxx::client_session::with_transaction_cb& callback);
 
  private:
+  using array = bsoncxx::builder::basic::array;
+  using document = bsoncxx::builder::basic::document;
+  using sub_array = bsoncxx::builder::basic::sub_array;
+  using sub_document = bsoncxx::builder::basic::sub_document;
+
   static void PrintError_(const char* msg) {
     CRANE_ERROR("MongodbError: {}", msg);
   }
@@ -172,7 +174,7 @@ class MongodbClient {
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};
 
-  std::unique_ptr<mongocxx::instance> m_dbInstance_;
+  std::unique_ptr<mongocxx::instance> m_instance_;
   std::unique_ptr<mongocxx::pool> m_connect_pool_;
 
   mongocxx::write_concern m_wc_majority_{};

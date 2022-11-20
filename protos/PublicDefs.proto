@@ -159,7 +159,13 @@ message CranedInfo {
 
 message PartitionCranedInfo {
   message CommonCranedState {
-    string state = 1;
+    enum State{
+      IDLE = 0;
+      MIX = 1;
+      ALLOC = 2;
+      DOWN = 3;
+    }
+    State state = 1;
     uint32 craned_num = 2;
     string craned_list = 3;
   }

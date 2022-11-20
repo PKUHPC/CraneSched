@@ -32,7 +32,7 @@ bool MongodbClient::Connect() {
 }
 
 void MongodbClient::Init() {
-  m_dbInstance_ = std::make_unique<mongocxx::instance>();
+  m_instance_ = std::make_unique<mongocxx::instance>();
   m_db_name_ = g_config.DbName;
   std::string authentication;
 
@@ -255,6 +255,7 @@ bool MongodbClient::UpdateJobRecordFields(
 
 bool MongodbClient::InsertUser(const Ctld::User& new_user) {
   document doc = UserToDocument_(new_user);
+  doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
       (*GetClient_())[m_db_name_][m_user_collection_name_].insert_one(
@@ -268,6 +269,7 @@ bool MongodbClient::InsertUser(const Ctld::User& new_user) {
 
 bool MongodbClient::InsertAccount(const Ctld::Account& new_account) {
   document doc = AccountToDocument_(new_account);
+  doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
       (*GetClient_())[m_db_name_][m_account_collection_name_].insert_one(
@@ -281,6 +283,7 @@ bool MongodbClient::InsertAccount(const Ctld::Account& new_account) {
 
 bool MongodbClient::InsertQos(const Ctld::Qos& new_qos) {
   document doc = QosToDocument_(new_qos);
+  doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
       (*GetClient_())[m_db_name_][m_qos_collection_name_].insert_one(
@@ -488,7 +491,7 @@ void MongodbClient::DocumentAppendItem_<MongodbClient::PartitionQosMap>(
 }
 
 template <typename... Ts, std::size_t... Is>
-document MongodbClient::documentConstructor_(
+bsoncxx::builder::basic::document MongodbClient::documentConstructor_(
     const std::array<std::string, sizeof...(Ts)>& fields,
     const std::tuple<Ts...>& values, std::index_sequence<Is...>) {
   bsoncxx::builder::basic::document document;
@@ -501,7 +504,7 @@ document MongodbClient::documentConstructor_(
 }
 
 template <typename... Ts>
-document MongodbClient::DocumentConstructor_(
+bsoncxx::builder::basic::document MongodbClient::DocumentConstructor_(
     std::array<std::string, sizeof...(Ts)> const& fields,
     std::tuple<Ts...> const& values) {
   return documentConstructor_(fields, values,
@@ -511,7 +514,7 @@ document MongodbClient::DocumentConstructor_(
 mongocxx::client* MongodbClient::GetClient_() {
   if (m_connect_pool_) {
     thread_local mongocxx::pool::entry entry{m_connect_pool_->acquire()};
-    CRANE_TRACE("client address {}", (void*)&(*entry));
+    CRANE_DEBUG("client address {}", (void*)&(*entry));
     return &(*entry);
   }
   return nullptr;
@@ -521,7 +524,7 @@ mongocxx::client_session* MongodbClient::GetSession_() {
   if (m_connect_pool_) {
     thread_local mongocxx::client_session session =
         GetClient_()->start_session();
-    CRANE_TRACE("session address {}", (void*)&(session));
+    CRANE_DEBUG("session address {}", (void*)&(session));
     return &session;
   }
 
@@ -556,7 +559,8 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
   }
 }
 
-document MongodbClient::UserToDocument_(const Ctld::User& user) {
+bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
+    const Ctld::User& user) {
   std::array<std::string, 7> fields{"mod_time",
                                     "deleted",
                                     "uid",
@@ -603,15 +607,17 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
   }
 }
 
-document MongodbClient::AccountToDocument_(const Ctld::Account& account) {
-  std::array<std::string, 9> fields{
-      "deleted",         "name",           "description",       "users",
-      "child_accounts",  "parent_account", "allowed_partition", "default_qos",
-      "allowed_qos_list"};
-  std::tuple<bool, std::string, std::string, std::list<std::string>,
+bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
+    const Ctld::Account& account) {
+  std::array<std::string, 10> fields{
+      "mod_time",    "deleted",         "name",           "description",
+      "users",       "child_accounts",  "parent_account", "allowed_partition",
+      "default_qos", "allowed_qos_list"};
+  std::tuple<int64_t, bool, std::string, std::string, std::list<std::string>,
              std::list<std::string>, std::string, std::list<std::string>,
              std::string, std::list<std::string>>
-      values{false,
+      values{ToUnixSeconds(absl::Now()),
+             false,
              account.name,
              account.description,
              account.users,
@@ -637,11 +643,18 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
   }
 }
 
-document MongodbClient::QosToDocument_(const Ctld::Qos& qos) {
-  std::array<std::string, 5> fields{"deleted", "name", "description",
+bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
+    const Ctld::Qos& qos) {
+  std::array<std::string, 6> fields{"mod_time", "deleted",
+                                    "name",     "description",
                                     "priority", "max_jobs_per_user"};
-  std::tuple<bool, std::string, std::string, int, int> values{
-      false, qos.name, qos.description, qos.priority, qos.max_jobs_per_user};
+  std::tuple<int64_t, bool, std::string, std::string, int, int> values{
+      ToUnixSeconds(absl::Now()),
+      false,
+      qos.name,
+      qos.description,
+      qos.priority,
+      qos.max_jobs_per_user};
 
   return DocumentConstructor_(fields, values);
 }
