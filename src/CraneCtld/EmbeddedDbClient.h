@@ -19,15 +19,6 @@ class EmbeddedDbClient {
   using db_id_t = task_db_id_t;
   using TaskInEmbeddedDb = crane::grpc::TaskInEmbeddedDb;
 
-  inline static constexpr db_id_t s_pending_head_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 0;
-  inline static constexpr db_id_t s_pending_tail_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 1;
-  inline static constexpr db_id_t s_running_head_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 2;
-  inline static constexpr db_id_t s_running_tail_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 3;
-
   struct DbQueueDummyHead {
     db_id_t db_id;
     db_id_t next_db_id;
@@ -45,6 +36,25 @@ class EmbeddedDbClient {
   };
 
   using ForEachInQueueFunc = std::function<void(DbQueueNode const&)>;
+
+  inline static constexpr db_id_t s_pending_head_db_id_ =
+      std::numeric_limits<db_id_t>::max() - 0;
+  inline static constexpr db_id_t s_pending_tail_db_id_ =
+      std::numeric_limits<db_id_t>::max() - 1;
+  inline static constexpr db_id_t s_running_head_db_id_ =
+      std::numeric_limits<db_id_t>::max() - 2;
+  inline static constexpr db_id_t s_running_tail_db_id_ =
+      std::numeric_limits<db_id_t>::max() - 3;
+
+  inline static DbQueueDummyHead s_pending_queue_head_{
+      .db_id = s_pending_head_db_id_};
+  inline static DbQueueDummyTail s_pending_queue_tail_{
+      .db_id = s_pending_tail_db_id_};
+
+  inline static DbQueueDummyHead s_running_queue_head_{
+      .db_id = s_running_head_db_id_};
+  inline static DbQueueDummyTail s_running_queue_tail_{
+      .db_id = s_running_tail_db_id_};
 
  public:
   EmbeddedDbClient() = default;
@@ -172,8 +182,8 @@ class EmbeddedDbClient {
         continue;
       }
 
-      CRANE_ERROR("Failed to get value size for key {}: {}", key,
-                  GetInternalErrorStr_());
+      CRANE_ERROR("Failed to get value size for key `{}`. Code: {}. Msg: {}",
+                  key, rc, GetInternalErrorStr_());
       return rc;
     }
 
@@ -283,12 +293,6 @@ class EmbeddedDbClient {
   inline static uint32_t s_next_task_id_;
   inline static db_id_t s_next_task_db_id_;
   inline static absl::Mutex s_task_id_and_db_id_mtx_;
-
-  DbQueueDummyHead m_pending_queue_head_{.db_id = s_pending_head_db_id_};
-  DbQueueDummyTail m_pending_queue_tail_{.db_id = s_pending_tail_db_id_};
-
-  DbQueueDummyHead m_running_queue_head_{.db_id = s_running_head_db_id_};
-  DbQueueDummyTail m_running_queue_tail_{.db_id = s_running_tail_db_id_};
 
   std::unordered_map<db_id_t, DbQueueNode> m_pending_queue_;
   std::unordered_map<db_id_t, DbQueueNode> m_running_queue_;

@@ -53,13 +53,13 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   }
 
   std::string pd_head_next_name =
-      GetDbQueueNodeNextName_(m_pending_queue_head_.db_id);
-  rc = FetchTypeFromDb_(pd_head_next_name, &m_pending_queue_head_.next_db_id);
+      GetDbQueueNodeNextName_(s_pending_queue_head_.db_id);
+  rc = FetchTypeFromDb_(pd_head_next_name, &s_pending_queue_head_.next_db_id);
   if (rc != UNQLITE_OK) {
     if (rc == UNQLITE_NOTFOUND) {
-      m_pending_queue_head_.next_db_id = s_pending_tail_db_id_;
+      s_pending_queue_head_.next_db_id = s_pending_tail_db_id_;
       rc = StoreTypeIntoDb_(pd_head_next_name,
-                            &m_pending_queue_head_.next_db_id);
+                            &s_pending_queue_head_.next_db_id);
       if (rc != UNQLITE_OK) {
         CRANE_ERROR("Failed to init pending_queue_head_.next_db_id: {}",
                     GetInternalErrorStr_());
@@ -69,13 +69,13 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   }
 
   std::string pd_tail_priv_name =
-      GetDbQueueNodePrevName_(m_pending_queue_tail_.db_id);
-  rc = FetchTypeFromDb_(pd_tail_priv_name, &m_pending_queue_tail_.prev_db_id);
+      GetDbQueueNodePrevName_(s_pending_queue_tail_.db_id);
+  rc = FetchTypeFromDb_(pd_tail_priv_name, &s_pending_queue_tail_.prev_db_id);
   if (rc != UNQLITE_OK) {
     if (rc == UNQLITE_NOTFOUND) {
-      m_pending_queue_tail_.prev_db_id = s_pending_head_db_id_;
+      s_pending_queue_tail_.prev_db_id = s_pending_head_db_id_;
       rc = StoreTypeIntoDb_(pd_tail_priv_name,
-                            &m_pending_queue_tail_.prev_db_id);
+                            &s_pending_queue_tail_.prev_db_id);
       if (rc != UNQLITE_OK) {
         CRANE_ERROR("Failed to init pending_queue_tail_.priv_db_id: {}",
                     GetInternalErrorStr_());
@@ -85,13 +85,13 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   }
 
   std::string r_head_next_name =
-      GetDbQueueNodeNextName_(m_running_queue_head_.db_id);
-  rc = FetchTypeFromDb_(r_head_next_name, &m_running_queue_head_.next_db_id);
+      GetDbQueueNodeNextName_(s_running_queue_head_.db_id);
+  rc = FetchTypeFromDb_(r_head_next_name, &s_running_queue_head_.next_db_id);
   if (rc != UNQLITE_OK) {
     if (rc == UNQLITE_NOTFOUND) {
-      m_running_queue_head_.next_db_id = s_running_tail_db_id_;
+      s_running_queue_head_.next_db_id = s_running_tail_db_id_;
       rc =
-          StoreTypeIntoDb_(r_head_next_name, &m_running_queue_head_.next_db_id);
+          StoreTypeIntoDb_(r_head_next_name, &s_running_queue_head_.next_db_id);
       if (rc != UNQLITE_OK) {
         CRANE_ERROR("Failed to init running_queue_head_.next_db_id: {}",
                     GetInternalErrorStr_());
@@ -101,13 +101,13 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   }
 
   std::string r_tail_priv_name =
-      GetDbQueueNodePrevName_(m_running_queue_tail_.db_id);
-  rc = FetchTypeFromDb_(r_tail_priv_name, &m_running_queue_tail_.prev_db_id);
+      GetDbQueueNodePrevName_(s_running_queue_tail_.db_id);
+  rc = FetchTypeFromDb_(r_tail_priv_name, &s_running_queue_tail_.prev_db_id);
   if (rc != UNQLITE_OK) {
     if (rc == UNQLITE_NOTFOUND) {
-      m_running_queue_tail_.prev_db_id = s_running_head_db_id_;
+      s_running_queue_tail_.prev_db_id = s_running_head_db_id_;
       rc =
-          StoreTypeIntoDb_(r_tail_priv_name, &m_running_queue_tail_.prev_db_id);
+          StoreTypeIntoDb_(r_tail_priv_name, &s_running_queue_tail_.prev_db_id);
       if (rc != UNQLITE_OK) {
         CRANE_ERROR("Failed to init running_queue_tail_.priv_db_id: {}",
                     GetInternalErrorStr_());
@@ -118,7 +118,7 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
 
   // Reconstruct the running queue and the pending queue.
   rc = ForEachInDbQueueNoLockAndTxn_(
-      m_pending_queue_head_, m_pending_queue_tail_,
+      s_pending_queue_head_, s_pending_queue_tail_,
       [this](DbQueueNode const& node) {
         m_pending_queue_.emplace(node.db_id, node);
       });
@@ -128,7 +128,7 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   }
 
   rc = ForEachInDbQueueNoLockAndTxn_(
-      m_pending_queue_head_, m_pending_queue_tail_,
+      s_pending_queue_head_, s_pending_queue_tail_,
       [this](DbQueueNode const& node) {
         m_running_queue_.emplace(node.db_id, node);
       });
@@ -166,7 +166,7 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(
   rc = BeginTransaction_();
   if (rc != UNQLITE_OK) return rc;
 
-  db_id_t pos = m_pending_queue_head_.next_db_id;
+  db_id_t pos = s_pending_queue_head_.next_db_id;
   rc = InsertBeforeDbQueueNodeNoLockAndTxn_(task_db_id, pos);
   if (rc != UNQLITE_OK) return rc;
 
@@ -260,12 +260,12 @@ int EmbeddedDbClient::DeleteDbQueueNodeNoLockAndTxn_(
 
   if (found_pending) {
     if (prev_db_id == s_pending_head_db_id_)
-      m_pending_queue_head_.next_db_id = next_db_id;
+      s_pending_queue_head_.next_db_id = next_db_id;
     else
       m_pending_queue_.at(prev_db_id).next_db_id = next_db_id;
 
     if (next_db_id == s_pending_tail_db_id_)
-      m_pending_queue_tail_.prev_db_id = prev_db_id;
+      s_pending_queue_tail_.prev_db_id = prev_db_id;
     else
       m_pending_queue_.at(next_db_id).prev_db_id = prev_db_id;
 
@@ -274,12 +274,12 @@ int EmbeddedDbClient::DeleteDbQueueNodeNoLockAndTxn_(
 
   if (found_running) {
     if (prev_db_id == s_running_head_db_id_)
-      m_running_queue_head_.next_db_id = next_db_id;
+      s_running_queue_head_.next_db_id = next_db_id;
     else
       m_running_queue_.at(prev_db_id).next_db_id = next_db_id;
 
     if (next_db_id == s_running_tail_db_id_)
-      m_running_queue_tail_.prev_db_id = prev_db_id;
+      s_running_queue_tail_.prev_db_id = prev_db_id;
     else
       m_running_queue_.at(next_db_id).prev_db_id = prev_db_id;
 
@@ -365,10 +365,9 @@ int EmbeddedDbClient::InsertBeforeDbQueueNodeNoLockAndTxn_(
     return UNQLITE_INVALID;
 
   if (pos != s_pending_tail_db_id_ && pos != s_running_tail_db_id_) {
-    auto pending_it = FindDbQueueNodeInRamQueueNoLock_(db_id, m_pending_queue_);
+    auto pending_it = FindDbQueueNodeInRamQueueNoLock_(pos, m_pending_queue_);
     if (pending_it == m_pending_queue_.end()) {
-      auto running_it =
-          FindDbQueueNodeInRamQueueNoLock_(db_id, m_running_queue_);
+      auto running_it = FindDbQueueNodeInRamQueueNoLock_(pos, m_running_queue_);
       if (running_it == m_running_queue_.end())
         return UNQLITE_NOTFOUND;
       else {
@@ -380,10 +379,13 @@ int EmbeddedDbClient::InsertBeforeDbQueueNodeNoLockAndTxn_(
       prev_db_id = pending_it->second.prev_db_id;
     }
   } else {
-    if (pos == s_pending_tail_db_id_)
-      prev_db_id = m_pending_queue_tail_.prev_db_id;
-    else
-      prev_db_id = m_running_queue_tail_.prev_db_id;
+    if (pos == s_pending_tail_db_id_) {
+      found_pending = true;
+      prev_db_id = s_pending_queue_tail_.prev_db_id;
+    } else {
+      found_running = true;
+      prev_db_id = s_running_queue_tail_.prev_db_id;
+    }
   }
 
   rc = StoreTypeIntoDb_(GetDbQueueNodeNextName_(db_id), &next_db_id);
@@ -401,9 +403,9 @@ int EmbeddedDbClient::InsertBeforeDbQueueNodeNoLockAndTxn_(
   if (prev_db_id == s_pending_head_db_id_ ||
       prev_db_id == s_running_head_db_id_) {
     if (prev_db_id == s_pending_head_db_id_)
-      m_pending_queue_head_.next_db_id = db_id;
+      s_pending_queue_head_.next_db_id = db_id;
     else
-      m_running_queue_head_.next_db_id = db_id;
+      s_running_queue_head_.next_db_id = db_id;
   } else {
     if (found_pending)
       m_pending_queue_.at(prev_db_id).next_db_id = db_id;
@@ -414,9 +416,9 @@ int EmbeddedDbClient::InsertBeforeDbQueueNodeNoLockAndTxn_(
   if (next_db_id == s_pending_tail_db_id_ ||
       next_db_id == s_running_tail_db_id_) {
     if (next_db_id == s_pending_tail_db_id_)
-      m_pending_queue_tail_.prev_db_id = db_id;
+      s_pending_queue_tail_.prev_db_id = db_id;
     else
-      m_running_queue_tail_.prev_db_id = db_id;
+      s_running_queue_tail_.prev_db_id = db_id;
   } else {
     if (found_pending)
       m_pending_queue_.at(next_db_id).prev_db_id = db_id;
@@ -443,7 +445,8 @@ bool EmbeddedDbClient::MoveTaskFromPendingToRunning(
   rc = DeleteDbQueueNodeNoLockAndTxn_(task_db_id);
   if (rc != UNQLITE_OK) return false;
 
-  rc = InsertBeforeDbQueueNodeNoLockAndTxn_(task_db_id, s_running_tail_db_id_);
+  rc = InsertBeforeDbQueueNodeNoLockAndTxn_(task_db_id,
+                                            s_running_queue_head_.next_db_id);
   if (rc != UNQLITE_OK) return false;
 
   rc = Commit_();
@@ -506,11 +509,10 @@ bool EmbeddedDbClient::GetMarkedDbId(EmbeddedDbClient::db_id_t* db_id) {
 
 bool EmbeddedDbClient::SetMarkedDbId(EmbeddedDbClient::db_id_t db_id) {
   absl::MutexLock l(&m_marked_db_id_mtx_);
-  m_marked_db_id_ = db_id;
-
   if (m_marked_db_id_ < 0) {
-    int rc;
-    rc = StoreTypeIntoDb_(s_marked_db_id_str_, &m_marked_db_id_);
+    m_marked_db_id_ = db_id;
+
+    int rc = StoreTypeIntoDb_(s_marked_db_id_str_, &m_marked_db_id_);
     if (rc != UNQLITE_OK) return false;
   } else
     return false;
@@ -523,12 +525,9 @@ bool EmbeddedDbClient::UnsetMarkedDbId() {
 
   m_marked_db_id_ = -1;
 
-  if (m_marked_db_id_ < 0) {
-    int rc;
-    rc = StoreTypeIntoDb_(s_marked_db_id_str_, &m_marked_db_id_);
-    if (rc != UNQLITE_OK) return false;
-  } else
-    return false;
+  int rc;
+  rc = StoreTypeIntoDb_(s_marked_db_id_str_, &m_marked_db_id_);
+  if (rc != UNQLITE_OK) return false;
 
   return true;
 }
