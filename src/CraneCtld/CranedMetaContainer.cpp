@@ -421,12 +421,31 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
 }
 
 crane::grpc::QueryClusterInfoReply
-CranedMetaContainerSimpleImpl::QueryClusterInfo() {
+CranedMetaContainerSimpleImpl::QueryClusterInfo(
+    const google::protobuf::RepeatedPtrField<std::string> set_query_partitions,
+    const google::protobuf::RepeatedPtrField<std::string> set_query_nodes,
+    google::protobuf::RepeatedPtrField<std::string> set_query_states,
+    bool query_down_nodes, bool query_responding_nodes) {
   LockGuard guard(mtx_);
   crane::grpc::QueryClusterInfoReply reply;
   auto* partition_craned_list = reply.mutable_partition_craned();
 
   for (auto&& [part_id, part_meta] : partition_metas_map_) {
+
+    if (!set_query_partitions.empty()) {
+      bool found = false;
+      for (const auto& name : set_query_partitions) {
+        if (part_meta.partition_global_meta.name == name) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) continue;
+    }
+
+    if (query_down_nodes && part_meta.partition_global_meta.alive_craned_cnt > 0) continue;
+    if (query_responding_nodes && part_meta.partition_global_meta.alive_craned_cnt <= 0) continue;
+
     auto* part_craned_info = partition_craned_list->Add();
     part_craned_info->set_name(part_meta.partition_global_meta.name);
     if (part_craned_info->name() == g_config.DefaultPartition) {
@@ -453,27 +472,62 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo() {
         alloc_craned_name_list, down_craned_name_list;
 
     for (auto&& [craned_index, craned_meta] : part_meta.craned_meta_map) {
+      if (!set_query_nodes.empty()) {
+        bool found = false;
+        for (const auto& node_name : set_query_nodes) {
+          if (node_name == craned_meta.static_meta.hostname) {
+            found = true;
+            break;
+          }
+        }
+        if (!found) continue;
+      }
+
       auto& alloc_res_total = craned_meta.res_total.allocatable_resource;
       auto& alloc_res_in_use = craned_meta.res_in_use.allocatable_resource;
       auto& alloc_res_avail = craned_meta.res_avail.allocatable_resource;
 
-      if (craned_meta.alive) {
-        if (alloc_res_in_use.cpu_count == 0 &&
-            alloc_res_in_use.memory_bytes == 0) {
-          idle_craned_list->set_craned_num(idle_craned_list->craned_num() + 1);
-          idle_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
-        } else if (alloc_res_avail.cpu_count == 0 &&
-                   alloc_res_avail.memory_bytes == 0) {
-          alloc_craned_list->set_craned_num(alloc_craned_list->craned_num() +
-                                            1);
-          alloc_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+      if(!set_query_states.empty()){
+          if (craned_meta.alive) {
+            if (query_down_nodes) continue;
+            if (alloc_res_in_use.cpu_count == 0 && alloc_res_in_use.memory_bytes == 0) {
+              if (std::find(set_query_states.begin(), set_query_states.end(), "idle") == set_query_states.end()) continue;
+              idle_craned_list->set_craned_num(idle_craned_list->craned_num() + 1);
+              idle_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+            } else if (alloc_res_avail.cpu_count == 0 && alloc_res_avail.memory_bytes == 0) {
+              if (std::find(set_query_states.begin(), set_query_states.end(), "alloc") == set_query_states.end()) continue;
+              alloc_craned_list->set_craned_num(alloc_craned_list->craned_num() + 1);
+              alloc_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+            } else {
+              if (std::find(set_query_states.begin(), set_query_states.end(), "mix") == set_query_states.end()) continue;
+              mix_craned_list->set_craned_num(mix_craned_list->craned_num() + 1);
+              mix_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+            }
+          } else {
+            if(query_responding_nodes) continue;
+            if (std::find(set_query_states.begin(), set_query_states.end(), "down") == set_query_states.end()) continue;
+            down_craned_list->set_craned_num(down_craned_list->craned_num() + 1);
+            down_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+          }
+      }else{
+        if (craned_meta.alive) {
+          if (query_down_nodes) continue;
+          if (alloc_res_in_use.cpu_count == 0 && alloc_res_in_use.memory_bytes == 0) {
+
+            idle_craned_list->set_craned_num(idle_craned_list->craned_num() + 1);
+            idle_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+          } else if (alloc_res_avail.cpu_count == 0 && alloc_res_avail.memory_bytes == 0) {
+            alloc_craned_list->set_craned_num(alloc_craned_list->craned_num() + 1);
+            alloc_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+          } else {
+            mix_craned_list->set_craned_num(mix_craned_list->craned_num() + 1);
+            mix_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+          }
         } else {
-          mix_craned_list->set_craned_num(mix_craned_list->craned_num() + 1);
-          mix_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+          if(query_responding_nodes) continue;
+          down_craned_list->set_craned_num(down_craned_list->craned_num() + 1);
+          down_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
         }
-      } else {
-        down_craned_list->set_craned_num(down_craned_list->craned_num() + 1);
-        down_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
       }
     }
 
