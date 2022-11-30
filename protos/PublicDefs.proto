@@ -15,7 +15,7 @@ message CranedId {
 }
 
 message AllocatableResource {
-  uint64 cpu_core_limit = 1;
+  double cpu_core_limit = 1;
   uint64 memory_limit_bytes = 2;
   uint64 memory_sw_limit_bytes = 3;
 }
@@ -24,6 +24,18 @@ message DedicatedResource {}
 
 message Resources {
   AllocatableResource allocatable_resource = 1;
+}
+
+enum PartitionState {
+  PARTITION_UP = 0;
+  PARTITION_DOWN = 1;
+}
+
+enum CranedState{
+  CRANE_IDLE = 0;
+  CRANE_MIX = 1;
+  CRANE_ALLOC = 2;
+  CRANE_DOWN = 3;
 }
 
 enum TaskStatus {
@@ -55,7 +67,7 @@ message TaskToCtld {
 
   uint32 node_num = 8;
   uint32 ntasks_per_node = 9;
-  uint32 cpus_per_task = 10;
+  double cpus_per_task = 10;
 
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
@@ -120,36 +132,26 @@ message TaskInfo {
 }
 
 message PartitionInfo {
-  enum PartitionState {
-    UP = 0;
-    DOWN = 1;
-  }
-
   string hostlist = 1;
   PartitionState state = 2;
   string name = 3;
 
   uint32 total_nodes = 4;
   uint32 alive_nodes = 5;
-  uint32 total_cpus = 6;
-  uint32 avail_cpus = 7;
-  uint32 alloc_cpus = 8;
+  double total_cpus = 6;
+  double avail_cpus = 7;
+  double alloc_cpus = 8;
   uint64 total_mem = 9;
   uint64 avail_mem = 10;
   uint64 alloc_mem = 11;
 }
 
 message CranedInfo {
-  enum CranedState {
-    IDLE = 0;
-    DOWN = 1;
-  }
-
   string hostname = 1;
   CranedState state = 2;
-  uint32 cpus = 3;
-  uint32 alloc_cpus = 4;
-  uint32 free_cpus = 5;
+  double cpus = 3;
+  double alloc_cpus = 4;
+  double free_cpus = 5;
   uint64 real_mem = 6;
   uint64 alloc_mem = 7;
   uint64 free_mem = 8;
@@ -158,14 +160,15 @@ message CranedInfo {
 }
 
 message PartitionCranedInfo {
-  message CommonCranedState {
-    string state = 1;
+  message CranedListRegexOfState {
+    CranedState state = 1;
     uint32 craned_num = 2;
-    string craned_list = 3;
+    string craned_list_regex = 3;
   }
+
   string name = 1;
-  PartitionInfo.PartitionState state = 2;
-  repeated CommonCranedState common_craned_state_list = 3;
+  PartitionState state = 2;
+  repeated CranedListRegexOfState common_craned_state_list = 3;
 }
 
 enum EntityType {
@@ -178,10 +181,11 @@ message AccountInfo {
   string name = 1;
   string description = 2;
   repeated string users = 3;
-  repeated string child_account = 4;
+  repeated string child_accounts = 4;
   string parent_account = 5;
-  repeated string allowed_partition = 6;
-  string qos = 7;
+  repeated string allowed_partitions = 6;
+  string default_qos = 7;
+  repeated string allowed_qos_list = 8;
 }
 
 message UserInfo {
@@ -190,9 +194,22 @@ message UserInfo {
     Operator = 1;
     Admin = 2;
   };
+  message AllowedPartitionQos{
+    string partition_name = 1;
+    repeated string qos_list = 2;
+    string default_qos = 3;
+  }
+
   uint32 uid = 1;
   string name = 2;
   string account = 3;
-  repeated string allowed_partition = 4;
+  repeated AllowedPartitionQos allowed_partition_qos_list = 4;
   AdminLevel admin_level = 5;
+}
+
+message QosInfo {
+  string name = 1;
+  string description = 2;
+  uint32 priority = 3;
+  uint32 max_jobs_per_user = 4;
 }

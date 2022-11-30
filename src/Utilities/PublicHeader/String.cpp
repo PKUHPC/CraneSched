@@ -42,10 +42,10 @@ bool ParseNodeList(const std::string &node_str,
       } else if (std::regex_match(node_num[i], std::regex(R"(^\d+-\d+$)"))) {
         std::vector<std::string> loc_index;
         boost::split(loc_index, node_num[i], boost::is_any_of("-"));
-        size_t len = loc_index[0].length();
+        size_t l = loc_index[0].length();
         for (size_t j = std::stoi(loc_index[0]); j <= std::stoi(loc_index[1]);
              j++) {
-          std::string s_num = fmt::format("{:0>{}}", std::to_string(j), len);
+          std::string s_num = fmt::format("{:0>{}}", std::to_string(j), l);
           if (!ParseNodeList(head_str, nodelist,
                              fmt::format("{}{}{}", s_num, end_, end_str))) {
             nodelist->push_back(

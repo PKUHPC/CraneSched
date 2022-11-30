@@ -12,9 +12,9 @@
 #include <thread>
 #include <tuple>
 
+#include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
-#include "CranedMetaContainer.h"
 #include "crane/Lock.h"
 #include "crane/PublicHeader.h"
 #include "protos/Crane.pb.h"

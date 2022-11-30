@@ -88,6 +88,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                        const crane::grpc::AddUserRequest *request,
                        crane::grpc::AddUserReply *response) override;
 
+  grpc::Status AddQos(grpc::ServerContext *context,
+                      const crane::grpc::AddQosRequest *request,
+                      crane::grpc::AddQosReply *response) override;
+
   grpc::Status ModifyEntity(grpc::ServerContext *context,
                             const crane::grpc::ModifyEntityRequest *request,
                             crane::grpc::ModifyEntityReply *response) override;

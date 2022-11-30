@@ -173,7 +173,7 @@ struct fmt::formatter<CranedId> {
 // Model the allocatable resources on a craned node.
 // It contains CPU and memory by now.
 struct AllocatableResource {
-  uint32_t cpu_count = 0;
+  double cpu_count = 0.0;
 
   // See documentation of cgroup memory.
   // https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt

@@ -1,5 +1,4 @@
 #include <absl/strings/ascii.h>
-#include <absl/strings/str_split.h>
 #include <event2/thread.h>
 #include <spdlog/async.h>
 #include <spdlog/sinks/rotating_file_sink.h>
@@ -16,6 +15,7 @@
 #include <mutex>
 #include <unordered_set>
 
+#include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
@@ -100,33 +100,36 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.CraneCtldLogFile = "/tmp/cranectld/cranectld.log";
 
-      if (config["DbUser"]) {
+      if (config["DbUser"] && !config["DbUser"].IsNull()) {
         g_config.DbUser = config["DbUser"].as<std::string>();
-        if (config["DbPassword"])
+        if (config["DbPassword"] && !config["DbPassword"].IsNull())
           g_config.DbPassword = config["DbPassword"].as<std::string>();
       }
 
-      if (config["DbHost"])
+      if (config["DbHost"] && !config["DbHost"].IsNull())
         g_config.DbHost = config["DbHost"].as<std::string>();
       else
         g_config.DbHost = "localhost";
 
-      if (config["DbPort"])
+      if (config["DbPort"] && !config["DbPort"].IsNull())
         g_config.DbPort = config["DbPort"].as<std::string>();
       else
         g_config.DbPort = "27017";  // default port 27017
 
-      if (config["DbName"])
+      if (config["DbReplSetName"] && !config["DbReplSetName"].IsNull())
+        g_config.DbRSName = config["DbReplSetName"].as<std::string>();
+      else {
+        CRANE_ERROR("Unknown Replica Set name");
+        std::exit(1);
+      }
+
+      if (config["DbName"] && !config["DbName"].IsNull())
         g_config.DbName = config["DbName"].as<std::string>();
       else
         g_config.DbName = "crane_db";
 
       if (config["CraneCtldForeground"]) {
-        auto val = config["CraneCtldForeground"].as<std::string>();
-        if (val == "true")
-          g_config.CraneCtldForeground = true;
-        else
-          g_config.CraneCtldForeground = false;
+        g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
       }
 
       if (config["Nodes"]) {
@@ -184,12 +187,12 @@ void ParseConfig(int argc, char** argv) {
           std::string nodes;
           Ctld::Config::Partition part;
 
-          if (partition["name"]) {
+          if (partition["name"] && !partition["name"].IsNull()) {
             name.append(partition["name"].Scalar());
           } else
             std::exit(1);
 
-          if (partition["nodes"]) {
+          if (partition["nodes"] && !partition["nodes"].IsNull()) {
             nodes = partition["nodes"].as<std::string>();
           } else
             std::exit(1);
@@ -215,6 +218,32 @@ void ParseConfig(int argc, char** argv) {
           g_config.Partitions.emplace(std::move(name), std::move(part));
         }
       }
+
+      if (config["DefaultPartition"] && !config["DefaultPartition"].IsNull()) {
+        std::vector<std::string> default_partition_vec;
+        boost::split(default_partition_vec,
+                     config["DefaultPartition"].as<std::string>(),
+                     boost::is_any_of(","));
+        g_config.DefaultPartition =
+            default_partition_vec[default_partition_vec.size() - 1];
+        boost::trim(g_config.DefaultPartition);
+        if (default_partition_vec.size() > 1) {
+          CRANE_ERROR(
+              "Default partition contains multiple values, latest value '{}' "
+              "used",
+              g_config.DefaultPartition);
+        }
+
+        if (!std::any_of(g_config.Partitions.begin(), g_config.Partitions.end(),
+                         [&](const auto& p) {
+                           return p.first == g_config.DefaultPartition;
+                         })) {
+          CRANE_ERROR("Unknown default partition {}",
+                      g_config.DefaultPartition);
+          std::exit(1);
+        }
+      }
+
     } catch (YAML::BadFile& e) {
       CRANE_ERROR("Can't open config file {}: {}", kDefaultConfigPath,
                   e.what());
@@ -311,15 +340,13 @@ void InitializeCtldGlobalVariables() {
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
   g_db_client = std::make_unique<MongodbClient>();
-  if (!g_db_client) {
-    CRANE_ERROR("Error: MongoDb client Init failed");
-    std::exit(1);
-  }
+  g_db_client->Init();
   if (!g_db_client->Connect()) {
     CRANE_ERROR("Error: MongoDb client connect fail");
     std::exit(1);
   }
-  g_db_client->Init();
+
+  g_account_manager = std::make_unique<AccountManager>();
 
   g_meta_container = std::make_unique<CranedMetaContainerSimpleImpl>();
   g_meta_container->InitFromConfig(g_config);
