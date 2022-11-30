@@ -45,13 +45,12 @@ class ScopeExclusivePtr {
  * @tparam Lockable must have lock_shared() and unlock_shared()
  */
 template <typename T, typename Lockable>
-class ScopeExclusiveSharedPtr {
+class ScopeSharedPtr {
  public:
-  explicit ScopeExclusiveSharedPtr(const T* data,
-                                   Lockable* lock = nullptr) noexcept
+  explicit ScopeSharedPtr(const T* data, Lockable* lock = nullptr) noexcept
       : data_(data), lock_(lock) {}
 
-  ~ScopeExclusiveSharedPtr() noexcept {
+  ~ScopeSharedPtr() noexcept {
     if (lock_) {
       lock_->unlock_shared();
     }
@@ -63,10 +62,10 @@ class ScopeExclusiveSharedPtr {
 
   explicit operator bool() { return data_ != nullptr; }
 
-  ScopeExclusiveSharedPtr(ScopeExclusiveSharedPtr const&) = delete;
-  ScopeExclusiveSharedPtr& operator=(ScopeExclusiveSharedPtr const&) = delete;
+  ScopeSharedPtr(ScopeSharedPtr const&) = delete;
+  ScopeSharedPtr& operator=(ScopeSharedPtr const&) = delete;
 
-  ScopeExclusiveSharedPtr(ScopeExclusiveSharedPtr&& val) noexcept {
+  ScopeSharedPtr(ScopeSharedPtr&& val) noexcept {
     data_ = val.data_;
     lock_ = val.lock_;
     val.lock_ = nullptr;

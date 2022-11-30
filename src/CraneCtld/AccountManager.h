@@ -12,17 +12,15 @@ namespace Ctld {
 
 class AccountManager {
  public:
-  using AccountMutexSharedPtr =
-      util::ScopeExclusiveSharedPtr<Account, util::rw_mutex>;
-  using AccountMapMutexSharedPtr = util::ScopeExclusiveSharedPtr<
+  using AccountMutexSharedPtr = util::ScopeSharedPtr<Account, util::rw_mutex>;
+  using AccountMapMutexSharedPtr = util::ScopeSharedPtr<
       std::unordered_map<std::string, std::unique_ptr<Account>>,
       util::rw_mutex>;
-  using UserMutexSharedPtr =
-      util::ScopeExclusiveSharedPtr<User, util::rw_mutex>;
-  using UserMapMutexSharedPtr = util::ScopeExclusiveSharedPtr<
+  using UserMutexSharedPtr = util::ScopeSharedPtr<User, util::rw_mutex>;
+  using UserMapMutexSharedPtr = util::ScopeSharedPtr<
       std::unordered_map<std::string, std::unique_ptr<User>>, util::rw_mutex>;
-  using QosMutexSharedPtr = util::ScopeExclusiveSharedPtr<Qos, util::rw_mutex>;
-  using QosMapMutexSharedPtr = util::ScopeExclusiveSharedPtr<
+  using QosMutexSharedPtr = util::ScopeSharedPtr<Qos, util::rw_mutex>;
+  using QosMapMutexSharedPtr = util::ScopeSharedPtr<
       std::unordered_map<std::string, std::unique_ptr<Qos>>, util::rw_mutex>;
 
   struct Result {

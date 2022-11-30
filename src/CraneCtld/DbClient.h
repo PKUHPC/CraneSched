@@ -95,13 +95,15 @@ class MongodbClient {
     document filter, updateItem;
 
     filter.append(kvp("name", name));
-    updateItem.append(kvp(opt, [&](sub_document subDocument) {
-      // DocumentAppendItem(subDocument, key, value);
-      subDocument.append(kvp(key, value));
-    }));
-    updateItem.append(kvp("$set", [](sub_document subDocument) {
-      subDocument.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
-    }));
+    updateItem.append(
+        kvp(opt,
+            [&](sub_document subDocument) {
+              // DocumentAppendItem(subDocument, key, value);
+              subDocument.append(kvp(key, value));
+            }),
+        kvp("$set", [](sub_document subDocument) {
+          subDocument.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
+        }));
 
     switch (type) {
       case EntityType::ACCOUNT:

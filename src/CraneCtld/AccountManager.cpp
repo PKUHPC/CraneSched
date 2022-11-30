@@ -67,7 +67,9 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
           // There is a same user but was deleted,here will delete the original
           // user and overwrite it with the same name
           g_db_client->UpdateUser(new_user);
-
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
+                                       name, "creation_time",
+                                       ToUnixSeconds(absl::Now()));
         } else {
           // Insert the new user
           g_db_client->InsertUser(new_user);
@@ -167,6 +169,9 @@ AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
           // There is a same account but was deleted,here will delete the
           // original account and overwrite it with the same name
           g_db_client->UpdateAccount(new_account);
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                       "$set", name, "creation_time",
+                                       ToUnixSeconds(absl::Now()));
         } else {
           // Insert the new account
           g_db_client->InsertAccount(new_account);
@@ -197,7 +202,15 @@ AccountManager::Result AccountManager::AddQos(const Qos& new_qos) {
   if (find_qos) {
     // There is a same qos but was deleted,here will delete the original
     // qos and overwrite it with the same name
-    if (!g_db_client->UpdateQos(new_qos)) {
+    mongocxx::client_session::with_transaction_cb callback =
+        [&](mongocxx::client_session* session) {
+          g_db_client->UpdateQos(new_qos);
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                       new_qos.name, "creation_time",
+                                       ToUnixSeconds(absl::Now()));
+        };
+
+    if (!g_db_client->CommitTransaction(callback)) {
       return Result{false, "Can't update the deleted qos to database"};
     }
   } else {

@@ -127,14 +127,14 @@ bool MongodbClient::InsertJob(
               << "task_to_ctld" << task_to_ctld_str
               << bsoncxx::builder::stream::finalize;
 
-    bsoncxx::stdx::optional<mongocxx::result::insert_one> ret;
-    ret = (*GetClient_())[m_db_name_][m_job_collection_name_].insert_one(
-        doc_value.view());
+  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret;
+  ret = (*GetClient_())[m_db_name_][m_job_collection_name_].insert_one(
+      doc_value.view());
 
-    if (ret == bsoncxx::stdx::nullopt) {
-      PrintError_("Failed to insert job record");
-      return false;
-    }
+  if (ret == bsoncxx::stdx::nullopt) {
+    PrintError_("Failed to insert job record");
+    return false;
+  }
   return true;
 }
 
@@ -312,7 +312,7 @@ bool MongodbClient::InsertQos(const Ctld::Qos& new_qos) {
 
 bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
                                  const std::string& name) {
-  std::string coll;
+  std::string_view coll;
 
   switch (type) {
     case EntityType::ACCOUNT:
@@ -418,9 +418,10 @@ void MongodbClient::SelectAllQos(std::list<Ctld::Qos>* qos_list) {
 
 bool MongodbClient::UpdateUser(const Ctld::User& user) {
   document doc = UserToDocument_(user), setDocument, filter;
+  doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
+  setDocument.append(kvp("$set", doc));
 
   filter.append(kvp("name", user.name));
-  setDocument.append(kvp("$set", doc));
 
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
       (*GetClient_())[m_db_name_][m_user_collection_name_].update_one(
@@ -434,8 +435,9 @@ bool MongodbClient::UpdateUser(const Ctld::User& user) {
 
 bool MongodbClient::UpdateAccount(const Ctld::Account& account) {
   document doc = AccountToDocument_(account), setDocument, filter;
-
+  doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
   setDocument.append(kvp("$set", doc));
+
   filter.append(kvp("name", account.name));
 
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
@@ -450,8 +452,9 @@ bool MongodbClient::UpdateAccount(const Ctld::Account& account) {
 
 bool MongodbClient::UpdateQos(const Ctld::Qos& qos) {
   document doc = QosToDocument_(qos), setDocument, filter;
-
+  doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
   setDocument.append(kvp("$set", doc));
+
   filter.append(kvp("name", qos.name));
 
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
@@ -542,7 +545,6 @@ bsoncxx::builder::basic::document MongodbClient::DocumentConstructor_(
 mongocxx::client* MongodbClient::GetClient_() {
   if (m_connect_pool_) {
     thread_local mongocxx::pool::entry entry{m_connect_pool_->acquire()};
-    CRANE_DEBUG("client address {}", (void*)&(*entry));
     return &(*entry);
   }
   return nullptr;
@@ -552,7 +554,6 @@ mongocxx::client_session* MongodbClient::GetSession_() {
   if (m_connect_pool_) {
     thread_local mongocxx::client_session session =
         GetClient_()->start_session();
-    CRANE_DEBUG("session address {}", (void*)&(session));
     return &session;
   }
 
@@ -589,22 +590,12 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 7> fields{"mod_time",
-                                    "deleted",
-                                    "uid",
-                                    "account",
-                                    "name",
-                                    "admin_level",
-                                    "allowed_partition_qos_map"};
-  std::tuple<int64_t, bool, int64_t, std::string, std::string, int32_t,
-             PartitionQosMap>
-      values{ToUnixSeconds(absl::Now()),
-             false,
-             user.uid,
-             user.account,
-             user.name,
-             user.admin_level,
-             user.allowed_partition_qos_map};
+  std::array<std::string, 6> fields{"deleted",     "uid",
+                                    "account",     "name",
+                                    "admin_level", "allowed_partition_qos_map"};
+  std::tuple<bool, int64_t, std::string, std::string, int32_t, PartitionQosMap>
+      values{false,     user.uid,         user.account,
+             user.name, user.admin_level, user.allowed_partition_qos_map};
   return DocumentConstructor_(fields, values);
 }
 
@@ -637,15 +628,14 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
 
 bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
     const Ctld::Account& account) {
-  std::array<std::string, 10> fields{
-      "mod_time",    "deleted",         "name",           "description",
-      "users",       "child_accounts",  "parent_account", "allowed_partition",
-      "default_qos", "allowed_qos_list"};
-  std::tuple<int64_t, bool, std::string, std::string, std::list<std::string>,
+  std::array<std::string, 9> fields{
+      "deleted",         "name",           "description",       "users",
+      "child_accounts",  "parent_account", "allowed_partition", "default_qos",
+      "allowed_qos_list"};
+  std::tuple<bool, std::string, std::string, std::list<std::string>,
              std::list<std::string>, std::string, std::list<std::string>,
              std::string, std::list<std::string>>
-      values{ToUnixSeconds(absl::Now()),
-             false,
+      values{false,
              account.name,
              account.description,
              account.users,
@@ -673,16 +663,10 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 6> fields{"mod_time", "deleted",
-                                    "name",     "description",
+  std::array<std::string, 5> fields{"deleted", "name", "description",
                                     "priority", "max_jobs_per_user"};
-  std::tuple<int64_t, bool, std::string, std::string, int, int> values{
-      ToUnixSeconds(absl::Now()),
-      false,
-      qos.name,
-      qos.description,
-      qos.priority,
-      qos.max_jobs_per_user};
+  std::tuple<bool, std::string, std::string, int, int> values{
+      false, qos.name, qos.description, qos.priority, qos.max_jobs_per_user};
 
   return DocumentConstructor_(fields, values);
 }
