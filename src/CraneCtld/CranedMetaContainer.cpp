@@ -487,16 +487,26 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       auto& alloc_res_in_use = craned_meta.res_in_use.allocatable_resource;
       auto& alloc_res_avail = craned_meta.res_avail.allocatable_resource;
 
-      if(!set_query_states.empty()){
-          if (craned_meta.alive) {
-            if (query_down_nodes) continue;
-            if (alloc_res_in_use.cpu_count == 0 && alloc_res_in_use.memory_bytes == 0) {
-              if (std::find(set_query_states.begin(), set_query_states.end(), "idle") == set_query_states.end()) continue;
-              idle_craned_list->set_craned_num(idle_craned_list->craned_num() + 1);
-              idle_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
-            } else if (alloc_res_avail.cpu_count == 0 && alloc_res_avail.memory_bytes == 0) {
-              if (std::find(set_query_states.begin(), set_query_states.end(), "alloc") == set_query_states.end()) continue;
-              alloc_craned_list->set_craned_num(alloc_craned_list->craned_num() + 1);
+      //
+
+      if (!set_query_states.empty()) {
+        if (craned_meta.alive) {
+          if (query_down_nodes) continue;
+          if (alloc_res_in_use.cpu_count == 0 &&
+              alloc_res_in_use.memory_bytes == 0) {
+            if (std::find(set_query_states.begin(), set_query_states.end(),
+                          "idle") == set_query_states.end())
+              continue;
+            idle_craned_list->set_craned_num(idle_craned_list->craned_num() +
+                                             1);
+            idle_craned_name_list.emplace_back(
+                craned_meta.static_meta.hostname);
+          } else if (alloc_res_avail.cpu_count == 0 &&
+                     alloc_res_avail.memory_bytes == 0) {
+            if (std::find(set_query_states.begin(), set_query_states.end(),
+                          "alloc") == set_query_states.end())
+              continue;
+            alloc_craned_list->set_craned_num(alloc_craned_list->craned_num() + 1);
               alloc_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
             } else {
               if (std::find(set_query_states.begin(), set_query_states.end(), "mix") == set_query_states.end()) continue;
