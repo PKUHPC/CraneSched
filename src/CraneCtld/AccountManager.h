@@ -6,11 +6,25 @@
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "crane/Lock.h"
+#include "crane/Pointer.h"
 
 namespace Ctld {
 
 class AccountManager {
  public:
+  using AccountMutexSharedPtr =
+      util::ScopeExclusiveSharedPtr<Account, util::rw_mutex>;
+  using AccountMapMutexSharedPtr = util::ScopeExclusiveSharedPtr<
+      std::unordered_map<std::string, std::unique_ptr<Account>>,
+      util::rw_mutex>;
+  using UserMutexSharedPtr =
+      util::ScopeExclusiveSharedPtr<User, util::rw_mutex>;
+  using UserMapMutexSharedPtr = util::ScopeExclusiveSharedPtr<
+      std::unordered_map<std::string, std::unique_ptr<User>>, util::rw_mutex>;
+  using QosMutexSharedPtr = util::ScopeExclusiveSharedPtr<Qos, util::rw_mutex>;
+  using QosMapMutexSharedPtr = util::ScopeExclusiveSharedPtr<
+      std::unordered_map<std::string, std::unique_ptr<Qos>>, util::rw_mutex>;
+
   struct Result {
     bool ok{false};
     std::string reason;
@@ -32,14 +46,14 @@ class AccountManager {
 
   Result DeleteQos(const std::string& name);
 
-  bool GetExistedUserInfo(const std::string& name, User* user);
-  void GetAllUserInfo(std::list<User>* user_list);
+  UserMutexSharedPtr GetExistedUserInfo(const std::string& name);
+  UserMapMutexSharedPtr GetAllUserInfo();
 
-  bool GetExistedAccountInfo(const std::string& name, Account* account);
-  void GetAllAccountInfo(std::list<Account>* account_list);
+  AccountMutexSharedPtr GetExistedAccountInfo(const std::string& name);
+  AccountMapMutexSharedPtr GetAllAccountInfo();
 
-  bool GetExistedQosInfo(const std::string& name, Qos* qos);
-  void GetAllQosInfo(std::list<Qos>* qos_list);
+  QosMutexSharedPtr GetExistedQosInfo(const std::string& name);
+  QosMapMutexSharedPtr GetAllQosInfo();
 
   Result ModifyUser(
       const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
@@ -58,14 +72,14 @@ class AccountManager {
  private:
   void InitDataMap_();
 
-  bool GetUserInfoNoLock_(const std::string& name, User* user);
-  bool GetExistedUserInfoNoLock_(const std::string& name, User* user);
+  const User* GetUserInfoNoLock_(const std::string& name);
+  const User* GetExistedUserInfoNoLock_(const std::string& name);
 
-  bool GetAccountInfoNoLock_(const std::string& name, Account* account);
-  bool GetExistedAccountInfoNoLock_(const std::string& name, Account* account);
+  const Account* GetAccountInfoNoLock_(const std::string& name);
+  const Account* GetExistedAccountInfoNoLock_(const std::string& name);
 
-  bool GetQosInfoNoLock_(const std::string& name, Qos* qos);
-  bool GetExistedQosInfoNoLock_(const std::string& name, Qos* qos);
+  const Qos* GetQosInfoNoLock_(const std::string& name);
+  const Qos* GetExistedQosInfoNoLock_(const std::string& name);
 
   bool IsDefaultQosOfAnyNode(const Account& account, const std::string& qos);
   bool IsDefaultQosOfAnyPartition(const User& user, const std::string& qos);
@@ -88,8 +102,6 @@ class AccountManager {
 
   bool DeleteUserAllowedPartitionFromDB_(const std::string& name,
                                          const std::string& partition);
-  bool DeleteUserAllowedPartitionFromMap_(const std::string& name,
-                                          const std::string& partition);
 
   std::unordered_map<std::string /*account name*/, std::unique_ptr<Account>>
       m_account_map_;

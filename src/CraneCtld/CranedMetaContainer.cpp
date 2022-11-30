@@ -290,9 +290,9 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
       craned_info->set_running_task_num(
           craned_meta.running_task_resource_map.size());
       if (craned_meta.alive)
-        craned_info->set_state(crane::grpc::CranedInfo_CranedState_IDLE);
+        craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
       else
-        craned_info->set_state(crane::grpc::CranedInfo_CranedState_DOWN);
+        craned_info->set_state(crane::grpc::CranedState::CRANE_DOWN);
     }
   }
 
@@ -335,9 +335,9 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   node_info->set_partition_name(node_meta.static_meta.partition_name);
   node_info->set_running_task_num(node_meta.running_task_resource_map.size());
   if (node_meta.alive)
-    node_info->set_state(crane::grpc::CranedInfo_CranedState_IDLE);
+    node_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
   else
-    node_info->set_state(crane::grpc::CranedInfo_CranedState_DOWN);
+    node_info->set_state(crane::grpc::CranedState::CRANE_DOWN);
 
   return reply;
 }
@@ -370,9 +370,9 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
     part_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
 
     if (part_meta.partition_global_meta.alive_craned_cnt > 0)
-      part_info->set_state(crane::grpc::PartitionInfo_PartitionState_UP);
+      part_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
     else
-      part_info->set_state(crane::grpc::PartitionInfo_PartitionState_DOWN);
+      part_info->set_state(crane::grpc::PartitionState::PARTITION_DOWN);
 
     part_info->set_hostlist(part_meta.partition_global_meta.nodelist_str);
   }
@@ -411,9 +411,9 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
   part_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
 
   if (part_meta.partition_global_meta.alive_craned_cnt > 0)
-    part_info->set_state(crane::grpc::PartitionInfo_PartitionState_UP);
+    part_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
   else
-    part_info->set_state(crane::grpc::PartitionInfo_PartitionState_DOWN);
+    part_info->set_state(crane::grpc::PartitionState::PARTITION_DOWN);
 
   part_info->set_hostlist(part_meta.partition_global_meta.nodelist_str);
 
@@ -433,26 +433,21 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo() {
       part_craned_info->set_name(part_craned_info->name() + '*');
     }
     if (part_meta.partition_global_meta.alive_craned_cnt > 0)
-      part_craned_info->set_state(crane::grpc::PartitionInfo_PartitionState_UP);
+      part_craned_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
     else
-      part_craned_info->set_state(
-          crane::grpc::PartitionInfo_PartitionState_DOWN);
+      part_craned_info->set_state(crane::grpc::PartitionState::PARTITION_DOWN);
 
     auto* common_craned_state_list =
         part_craned_info->mutable_common_craned_state_list();
 
     auto* idle_craned_list = common_craned_state_list->Add();
-    idle_craned_list->set_state(
-        crane::grpc::PartitionCranedInfo_CommonCranedState_State_IDLE);
+    idle_craned_list->set_state(crane::grpc::CranedState::CRANE_IDLE);
     auto* mix_craned_list = common_craned_state_list->Add();
-    mix_craned_list->set_state(
-        crane::grpc::PartitionCranedInfo_CommonCranedState_State_MIX);
+    mix_craned_list->set_state(crane::grpc::CranedState::CRANE_MIX);
     auto* alloc_craned_list = common_craned_state_list->Add();
-    alloc_craned_list->set_state(
-        crane::grpc::PartitionCranedInfo_CommonCranedState_State_ALLOC);
+    alloc_craned_list->set_state(crane::grpc::CranedState::CRANE_ALLOC);
     auto* down_craned_list = common_craned_state_list->Add();
-    down_craned_list->set_state(
-        crane::grpc::PartitionCranedInfo_CommonCranedState_State_DOWN);
+    down_craned_list->set_state(crane::grpc::CranedState::CRANE_DOWN);
 
     std::list<std::string> idle_craned_name_list, mix_craned_name_list,
         alloc_craned_name_list, down_craned_name_list;
@@ -482,13 +477,13 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo() {
       }
     }
 
-    idle_craned_list->set_craned_list(
+    idle_craned_list->set_craned_list_regex(
         util::HostNameListToStr(idle_craned_name_list));
-    mix_craned_list->set_craned_list(
+    mix_craned_list->set_craned_list_regex(
         util::HostNameListToStr(mix_craned_name_list));
-    alloc_craned_list->set_craned_list(
+    alloc_craned_list->set_craned_list_regex(
         util::HostNameListToStr(alloc_craned_name_list));
-    down_craned_list->set_craned_list(
+    down_craned_list->set_craned_list_regex(
         util::HostNameListToStr(down_craned_name_list));
   }
 

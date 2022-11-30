@@ -5,7 +5,6 @@
 #include <pwd.h>
 
 #include <csignal>
-#include <limits>
 #include <utility>
 
 #include "AccountManager.h"
@@ -331,10 +330,10 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
   account.parent_account = account_info->parent_account();
   account.description = account_info->description();
   account.default_qos = account_info->default_qos();
-  for (const auto &p : account_info->allowed_partition()) {
+  for (const auto &p : account_info->allowed_partitions()) {
     account.allowed_partition.emplace_back(p);
   }
-  for (const auto &qos : account_info->allowed_qos()) {
+  for (const auto &qos : account_info->allowed_qos_list()) {
     account.allowed_qos_list.emplace_back(qos);
   }
 
@@ -434,71 +433,73 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
   switch (request->entity_type()) {
     case crane::grpc::Account:
       if (request->name().empty()) {
-        std::list<Account> account_list;
-        g_account_manager->GetAllAccountInfo(&account_list);
+        AccountManager::AccountMapMutexSharedPtr account_map_shared_ptr =
+            g_account_manager->GetAllAccountInfo();
 
         auto *list = response->mutable_account_list();
 
-        for (const auto &account : account_list) {
-          if (account.deleted) {
-            continue;
-          }
+        if (account_map_shared_ptr) {
+          for (const auto &[name, account] : *account_map_shared_ptr) {
+            if (account->deleted) {
+              continue;
+            }
 
-          auto *account_info = list->Add();
-          account_info->set_name(account.name);
-          account_info->set_description(account.description);
+            auto *account_info = list->Add();
+            account_info->set_name(account->name);
+            account_info->set_description(account->description);
 
-          auto *user_list = account_info->mutable_users();
-          for (auto &&user : account.users) {
-            user_list->Add()->assign(user);
-          }
+            auto *user_list = account_info->mutable_users();
+            for (auto &&user : account->users) {
+              user_list->Add()->assign(user);
+            }
 
-          auto *child_list = account_info->mutable_child_account();
-          for (auto &&child : account.child_accounts) {
-            child_list->Add()->assign(child);
-          }
-          account_info->set_parent_account(account.parent_account);
+            auto *child_list = account_info->mutable_child_accounts();
+            for (auto &&child : account->child_accounts) {
+              child_list->Add()->assign(child);
+            }
+            account_info->set_parent_account(account->parent_account);
 
-          auto *partition_list = account_info->mutable_allowed_partition();
-          for (auto &&partition : account.allowed_partition) {
-            partition_list->Add()->assign(partition);
-          }
-          account_info->set_default_qos(account.default_qos);
+            auto *partition_list = account_info->mutable_allowed_partitions();
+            for (auto &&partition : account->allowed_partition) {
+              partition_list->Add()->assign(partition);
+            }
+            account_info->set_default_qos(account->default_qos);
 
-          auto *allowed_qos_list = account_info->mutable_allowed_qos();
-          for (const auto &qos : account.allowed_qos_list) {
-            allowed_qos_list->Add()->assign(qos);
+            auto *allowed_qos_list = account_info->mutable_allowed_qos_list();
+            for (const auto &qos : account->allowed_qos_list) {
+              allowed_qos_list->Add()->assign(qos);
+            }
           }
         }
         response->set_ok(true);
       } else {
         // Query an account
-        Account account;
-        if (g_account_manager->GetExistedAccountInfo(request->name(),
-                                                     &account)) {
+        AccountManager::AccountMutexSharedPtr account_shared_ptr =
+            g_account_manager->GetExistedAccountInfo(request->name());
+        if (account_shared_ptr) {
           auto *account_info = response->mutable_account_list()->Add();
-          account_info->set_name(account.name);
-          account_info->set_description(account.description);
+          account_info->set_name(account_shared_ptr->name);
+          account_info->set_description(account_shared_ptr->description);
 
           auto *user_list = account_info->mutable_users();
-          for (auto &&user : account.users) {
+          for (auto &&user : account_shared_ptr->users) {
             user_list->Add()->assign(user);
           }
 
-          auto *child_list = account_info->mutable_child_account();
-          for (auto &&child : account.child_accounts) {
+          auto *child_list = account_info->mutable_child_accounts();
+          for (auto &&child : account_shared_ptr->child_accounts) {
             child_list->Add()->assign(child);
           }
-          account_info->set_parent_account(account.parent_account);
+          account_info->set_parent_account(account_shared_ptr->parent_account);
 
-          auto *partition_list = account_info->mutable_allowed_partition();
-          for (auto &&partition : account.allowed_partition) {
+          auto *partition_list = account_info->mutable_allowed_partitions();
+          for (auto &&partition : account_shared_ptr->allowed_partition) {
             partition_list->Add()->assign(partition);
           }
-          account_info->set_default_qos(account.default_qos);
+          account_info->set_default_qos(account_shared_ptr->default_qos);
 
-          auto *allowed_qos_list = account_info->mutable_allowed_qos();
-          for (const auto &qos : account.allowed_qos_list) {
+          auto *allowed_qos_list = account_info->mutable_allowed_qos_list();
+          for (const auto &qos : account_shared_ptr->allowed_qos_list) {
             allowed_qos_list->Add()->assign(qos);
           }
           response->set_ok(true);
@@ -509,51 +510,56 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
       break;
     case crane::grpc::User:
       if (request->name().empty()) {
-        std::list<User> user_list;
-        g_account_manager->GetAllUserInfo(&user_list);
+        AccountManager::UserMapMutexSharedPtr user_map_shared_ptr =
+            g_account_manager->GetAllUserInfo();
 
-        auto *list = response->mutable_user_list();
-        for (const auto &user : user_list) {
-          if (user.deleted) {
-            continue;
-          }
+        if (user_map_shared_ptr) {
+          auto *list = response->mutable_user_list();
+          for (const auto &[user_name, user] : *user_map_shared_ptr) {
+            if (user->deleted) {
+              continue;
+            }
 
-          auto *user_info = list->Add();
-          user_info->set_name(user.name);
-          user_info->set_uid(user.uid);
-          user_info->set_account(user.account);
-          user_info->set_admin_level(
-              (crane::grpc::UserInfo_AdminLevel)user.admin_level);
+            auto *user_info = list->Add();
+            user_info->set_name(user->name);
+            user_info->set_uid(user->uid);
+            user_info->set_account(user->account);
+            user_info->set_admin_level(
+                (crane::grpc::UserInfo_AdminLevel)user->admin_level);
 
-          auto *partition_qos_list =
-              user_info->mutable_allowed_partition_qos_list();
-          for (const auto &[name, pair] : user.allowed_partition_qos_map) {
-            auto *partition_qos = partition_qos_list->Add();
-            partition_qos->set_name(name);
-            partition_qos->set_default_qos(pair.first);
+            auto *partition_qos_list =
+                user_info->mutable_allowed_partition_qos_list();
+            for (const auto &[par_name, pair] :
+                 user->allowed_partition_qos_map) {
+              auto *partition_qos = partition_qos_list->Add();
+              partition_qos->set_partition_name(par_name);
+              partition_qos->set_default_qos(pair.first);
 
-            auto *qos_list = partition_qos->mutable_qos_list();
-            for (const auto &qos : pair.second) {
-              qos_list->Add()->assign(qos);
+              auto *qos_list = partition_qos->mutable_qos_list();
+              for (const auto &qos : pair.second) {
+                qos_list->Add()->assign(qos);
+              }
             }
           }
         }
         response->set_ok(true);
       } else {
-        User user;
-        if (g_account_manager->GetExistedUserInfo(request->name(), &user)) {
+        AccountManager::UserMutexSharedPtr user_shared_ptr =
+            g_account_manager->GetExistedUserInfo(request->name());
+        if (user_shared_ptr) {
           auto *user_info = response->mutable_user_list()->Add();
-          user_info->set_name(user.name);
-          user_info->set_uid(user.uid);
-          user_info->set_account(user.account);
+          user_info->set_name(user_shared_ptr->name);
+          user_info->set_uid(user_shared_ptr->uid);
+          user_info->set_account(user_shared_ptr->account);
           user_info->set_admin_level(
-              (crane::grpc::UserInfo_AdminLevel)user.admin_level);
+              (crane::grpc::UserInfo_AdminLevel)user_shared_ptr->admin_level);
 
           auto *partition_qos_list =
               user_info->mutable_allowed_partition_qos_list();
-          for (const auto &[name, pair] : user.allowed_partition_qos_map) {
+          for (const auto &[name, pair] :
+               user_shared_ptr->allowed_partition_qos_map) {
             auto *partition_qos = partition_qos_list->Add();
-            partition_qos->set_name(name);
+            partition_qos->set_partition_name(name);
             partition_qos->set_default_qos(pair.first);
 
             auto *qos_list = partition_qos->mutable_qos_list();
@@ -569,30 +575,33 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
       break;
     case crane::grpc::Qos:
       if (request->name().empty()) {
-        std::list<Qos> qos_list;
-        g_account_manager->GetAllQosInfo(&qos_list);
+        AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
+            g_account_manager->GetAllQosInfo();
 
-        auto *list = response->mutable_qos_list();
-        for (const auto &qos : qos_list) {
-          if (qos.deleted) {
-            continue;
+        if (qos_map_shared_ptr) {
+          auto *list = response->mutable_qos_list();
+          for (const auto &[name, qos] : *qos_map_shared_ptr) {
+            if (qos->deleted) {
+              continue;
+            }
+
+            auto *qos_info = list->Add();
+            qos_info->set_name(qos->name);
+            qos_info->set_description(qos->description);
+            qos_info->set_priority(qos->priority);
+            qos_info->set_max_jobs_per_user(qos->max_jobs_per_user);
           }
-
-          auto *qos_info = list->Add();
-          qos_info->set_name(qos.name);
-          qos_info->set_description(qos.description);
-          qos_info->set_priority(qos.priority);
-          qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
         }
         response->set_ok(true);
       } else {
-        Qos qos;
-        if (g_account_manager->GetExistedQosInfo(request->name(), &qos)) {
+        AccountManager::QosMutexSharedPtr qos_shared_ptr =
+            g_account_manager->GetExistedQosInfo(request->name());
+        if (qos_shared_ptr) {
           auto *qos_info = response->mutable_qos_list()->Add();
-          qos_info->set_name(qos.name);
-          qos_info->set_description(qos.description);
-          qos_info->set_priority(qos.priority);
-          qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
+          qos_info->set_name(qos_shared_ptr->name);
+          qos_info->set_description(qos_shared_ptr->description);
+          qos_info->set_priority(qos_shared_ptr->priority);
+          qos_info->set_max_jobs_per_user(qos_shared_ptr->max_jobs_per_user);
           response->set_ok(true);
         } else {
           response->set_ok(false);

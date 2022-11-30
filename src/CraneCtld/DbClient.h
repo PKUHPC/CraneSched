@@ -18,8 +18,6 @@
 
 namespace Ctld {
 
-using bsoncxx::builder::basic::kvp;
-
 class MongodbClient {
  public:
   using PartitionQosMap = std::unordered_map<
@@ -27,10 +25,10 @@ class MongodbClient {
       std::pair<std::string /*default qos*/,
                 std::list<std::string> /*allowed qos list*/>>;
 
-  enum EntityType {
-    Account = 0,
-    User = 1,
-    Qos = 2,
+  enum class EntityType {
+    ACCOUNT = 0,
+    USER = 1,
+    QOS = 2,
   };
 
   MongodbClient() = default;  // Mongodb-c++ don't need to close the connection
@@ -57,7 +55,7 @@ class MongodbClient {
                  const crane::grpc::TaskToCtld& task_to_ctld);
 
   bool FetchJobRecordsWithStates(
-      std::list<Ctld::TaskInCtld>* task_list,
+      std::list<TaskInCtld>* task_list,
       const std::list<crane::grpc::TaskStatus>& states);
 
   bool UpdateJobRecordField(uint64_t job_db_inx, const std::string& field_name,
@@ -67,28 +65,32 @@ class MongodbClient {
                              const std::list<std::string>& field_name,
                              const std::list<std::string>& val);
 
+  bool CheckTaskDbIdExisted(int64_t task_db_id);
+
   /* ----- Method of operating the account table ----------- */
-  bool InsertUser(const Ctld::User& new_user);
-  bool InsertAccount(const Ctld::Account& new_account);
-  bool InsertQos(const Ctld::Qos& new_qos);
+  bool InsertUser(const User& new_user);
+  bool InsertAccount(const Account& new_account);
+  bool InsertQos(const Qos& new_qos);
 
   bool DeleteEntity(EntityType type, const std::string& name);
 
   template <typename T>
-  bool SelectUser(const std::string& key, const T& value, Ctld::User* user);
+  bool SelectUser(const std::string& key, const T& value, User* user);
   template <typename T>
-  bool SelectAccount(const std::string& key, const T& value,
-                     Ctld::Account* account);
-  bool SelectQosByName(const std::string& name, Ctld::Qos* qos);
+  bool SelectAccount(const std::string& key, const T& value, Account* account);
+  template <typename T>
+  bool SelectQos(const std::string& key, const T& value, Qos* qos);
 
-  void SelectAllUser(std::list<Ctld::User>* user_list);
-  void SelectAllAccount(std::list<Ctld::Account>* account_list);
-  void SelectAllQos(std::list<Ctld::Qos>* qos_list);
+  void SelectAllUser(std::list<User>* user_list);
+  void SelectAllAccount(std::list<Account>* account_list);
+  void SelectAllQos(std::list<Qos>* qos_list);
 
   template <typename T>
   bool UpdateEntityOne(const EntityType type, const std::string& opt,
                        const std::string& name, const std::string& key,
                        const T& value) {
+    using bsoncxx::builder::basic::kvp;
+
     std::string coll_name;
     document filter, updateItem;
 
@@ -96,17 +98,19 @@ class MongodbClient {
     updateItem.append(kvp(opt, [&](sub_document subDocument) {
       // DocumentAppendItem(subDocument, key, value);
       subDocument.append(kvp(key, value));
+    }));
+    updateItem.append(kvp("$set", [](sub_document subDocument) {
       subDocument.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
     }));
 
     switch (type) {
-      case MongodbClient::Account:
+      case EntityType::ACCOUNT:
         coll_name = m_account_collection_name_;
         break;
-      case User:
+      case EntityType::USER:
         coll_name = m_user_collection_name_;
         break;
-      case Qos:
+      case EntityType::QOS:
         coll_name = m_qos_collection_name_;
         break;
     }
@@ -116,14 +120,17 @@ class MongodbClient {
             *GetSession_(), filter.view(), updateItem.view());
 
     if (!result || !result->modified_count()) {
+      CRANE_ERROR(
+          "Update date in database fail(name:{},opt:{},key:{},value:{})", name,
+          opt, key, value);
       return false;
     }
     return true;
   };
 
-  bool UpdateUser(const Ctld::User& user);
-  bool UpdateAccount(const Ctld::Account& account);
-  bool UpdateQos(const Ctld::Qos& qos);
+  bool UpdateUser(const User& user);
+  bool UpdateAccount(const Account& account);
+  bool UpdateQos(const Qos& qos);
 
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
@@ -155,18 +162,18 @@ class MongodbClient {
   mongocxx::client* GetClient_();
   mongocxx::client_session* GetSession_();
 
-  void ViewToUser_(const bsoncxx::document::view& user_view, Ctld::User* user);
+  void ViewToUser_(const bsoncxx::document::view& user_view, User* user);
 
-  document UserToDocument_(const Ctld::User& user);
+  document UserToDocument_(const User& user);
 
   void ViewToAccount_(const bsoncxx::document::view& account_view,
-                      Ctld::Account* account);
+                      Account* account);
 
-  document AccountToDocument_(const Ctld::Account& account);
+  document AccountToDocument_(const Account& account);
 
-  void ViewToQos_(const bsoncxx::document::view& qos_view, Ctld::Qos* qos);
+  void ViewToQos_(const bsoncxx::document::view& qos_view, Qos* qos);
 
-  document QosToDocument_(const Ctld::Qos& qos);
+  document QosToDocument_(const Qos& qos);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_job_collection_name_{"job_table"};

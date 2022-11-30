@@ -5,37 +5,32 @@ namespace Ctld {
 AccountManager::AccountManager() { InitDataMap_(); }
 
 AccountManager::Result AccountManager::AddUser(User&& new_user) {
-  // Avoid duplicate insertion
-  User find_user;
-  m_rw_user_mutex_.lock_upgrade();
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
+  const std::string name = new_user.name;
 
-  bool find_user_res = GetUserInfoNoLock_(new_user.name, &find_user);
-  if (find_user_res && !find_user.deleted) {
-    m_rw_user_mutex_.unlock_upgrade();
-    return Result{false,
-                  fmt::format("The user {} already exists in the database",
-                              new_user.name)};
+  // Avoid duplicate insertion
+  const User* find_user = GetUserInfoNoLock_(name);
+  if (find_user && !find_user->deleted) {
+    return Result{
+        false, fmt::format("The user {} already exists in the database", name)};
   }
 
   if (new_user.account.empty()) {
     // User must specify an account
-    m_rw_user_mutex_.unlock_upgrade();
     return Result{false, fmt::format("Please specify the user's account")};
   }
 
   // Check whether the user's account exists
-  Account find_account;
-  m_rw_account_mutex_.lock_upgrade();
-  if (!GetExistedAccountInfoNoLock_(new_user.account, &find_account)) {
-    m_rw_account_mutex_.unlock_upgrade();
-    m_rw_user_mutex_.unlock_upgrade();
+  util::write_lock_guard account_guard(m_rw_account_mutex_);
+  const Account* find_account = GetExistedAccountInfoNoLock_(new_user.account);
+  if (!find_account) {
     return Result{false,
                   fmt::format("The account {} doesn't exist in the database",
                               new_user.account)};
   }
 
-  std::list<std::string>& parent_allowed_partition =
-      find_account.allowed_partition;
+  const std::list<std::string>& parent_allowed_partition =
+      find_account->allowed_partition;
   if (!new_user.allowed_partition_qos_map.empty()) {
     // Check if user's allowed partition is a subset of parent's allowed
     // partition
@@ -43,14 +38,12 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
       if (std::find(parent_allowed_partition.begin(),
                     parent_allowed_partition.end(),
                     partition) != parent_allowed_partition.end()) {
-        qos.first = find_account.default_qos;
-        qos.second = std::list<std::string>{find_account.allowed_qos_list};
+        qos.first = find_account->default_qos;
+        qos.second = find_account->allowed_qos_list;
       } else {
-        m_rw_account_mutex_.unlock_upgrade();
-        m_rw_user_mutex_.unlock_upgrade();
         return Result{false,
                       fmt::format("Partition {} is not allowed in account {}",
-                                  partition, find_account.name)};
+                                  partition, find_account->name)};
       }
     }
   } else {
@@ -58,19 +51,19 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
     for (const auto& partition : parent_allowed_partition) {
       new_user.allowed_partition_qos_map[partition] =
           std::pair<std::string, std::list<std::string>>{
-              find_account.default_qos,
-              std::list<std::string>{find_account.allowed_qos_list}};
+              find_account->default_qos,
+              std::list<std::string>{find_account->allowed_qos_list}};
     }
   }
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         // Update the user's account's users_list
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account,
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                      "$addToSet", new_user.account, "users",
-                                     new_user.name);
+                                     name);
 
-        if (find_user_res) {
+        if (find_user) {
           // There is a same user but was deleted,here will delete the original
           // user and overwrite it with the same name
           g_db_client->UpdateUser(new_user);
@@ -81,52 +74,41 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
         }
       };
 
-  m_rw_account_mutex_.unlock_upgrade_and_lock();
-  m_rw_user_mutex_.unlock_upgrade_and_lock();
-
   if (!g_db_client->CommitTransaction(callback)) {
-    m_rw_account_mutex_.unlock();
-    m_rw_user_mutex_.unlock();
     return Result{false, "Fail to update data in database"};
   }
 
-  m_account_map_[new_user.account]->users.emplace_back(new_user.name);
-  m_user_map_[new_user.name] = std::make_unique<User>(new_user);
+  m_account_map_[new_user.account]->users.emplace_back(name);
+  m_user_map_[name] = std::make_unique<User>(std::move(new_user));
 
-  m_rw_account_mutex_.unlock();
-  m_rw_user_mutex_.unlock();
   return Result{true};
 }
 
 AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
-  // Avoid duplicate insertion
-  Account find_account;
-  m_rw_account_mutex_.lock_upgrade();
+  util::write_lock_guard account_guard(m_rw_account_mutex_);
+  const std::string name = new_account.name;
 
-  bool find_account_res =
-      GetAccountInfoNoLock_(new_account.name, &find_account);
-  if (find_account_res && !find_account.deleted) {
-    m_rw_account_mutex_.unlock_upgrade();
-    return Result{false,
-                  fmt::format("The account {} already exists in the database",
-                              new_account.name)};
+  // Avoid duplicate insertion
+  const Account* find_account = GetAccountInfoNoLock_(name);
+  if (find_account && !find_account->deleted) {
+    return Result{
+        false,
+        fmt::format("The account {} already exists in the database", name)};
   }
 
   util::read_lock_guard read_qos_lock_guard(m_rw_qos_mutex_);
   for (const auto& qos : new_account.allowed_qos_list) {
-    Qos find_qos;
-    if (!GetExistedQosInfoNoLock_(qos, &find_qos)) {
-      m_rw_account_mutex_.unlock_upgrade();
+    const Qos* find_qos = GetExistedQosInfoNoLock_(qos);
+    if (!find_qos) {
       return Result{false, fmt::format("Qos {} not existed", qos)};
     }
   }
 
   if (!new_account.parent_account.empty()) {
     // Check whether the account's parent account exists
-    Account find_parent;
-    if (!GetExistedAccountInfoNoLock_(new_account.parent_account,
-                                      &find_parent)) {
-      m_rw_account_mutex_.unlock_upgrade();
+    const Account* find_parent =
+        GetExistedAccountInfoNoLock_(new_account.parent_account);
+    if (!find_parent) {
       return Result{
           false,
           fmt::format("The parent account {} doesn't exist in the database",
@@ -136,14 +118,13 @@ AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
     if (new_account.allowed_partition.empty()) {
       // Inherit
       new_account.allowed_partition =
-          std::list<std::string>{find_parent.allowed_partition};
+          std::list<std::string>{find_parent->allowed_partition};
     } else {
       // check allowed partition authority
       for (const auto& par : new_account.allowed_partition) {
-        if (std::find(find_parent.allowed_partition.begin(),
-                      find_parent.allowed_partition.end(), par) ==
-            find_parent.allowed_partition.end()) {  // not find
-          m_rw_account_mutex_.unlock_upgrade();
+        if (std::find(find_parent->allowed_partition.begin(),
+                      find_parent->allowed_partition.end(), par) ==
+            find_parent->allowed_partition.end()) {  // not find
           return Result{
               false,
               fmt::format(
@@ -156,14 +137,14 @@ AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
     if (new_account.allowed_qos_list.empty()) {
       // Inherit
       new_account.allowed_qos_list =
-          std::list<std::string>{find_parent.allowed_qos_list};
+          std::list<std::string>{find_parent->allowed_qos_list};
     } else {
       // check allowed qos list authority
       for (const auto& qos : new_account.allowed_qos_list) {
-        if (std::find(find_parent.allowed_qos_list.begin(),
-                      find_parent.allowed_qos_list.end(),
-                      qos) == find_parent.allowed_qos_list.end()) {  // not find
-          m_rw_account_mutex_.unlock_upgrade();
+        if (std::find(find_parent->allowed_qos_list.begin(),
+                      find_parent->allowed_qos_list.end(),
+                      qos) ==
+            find_parent->allowed_qos_list.end()) {  // not find
           return Result{
               false,
               fmt::format("Parent account {} does not have access to qos {}",
@@ -177,12 +158,12 @@ AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
       [&](mongocxx::client_session* session) {
         if (!new_account.parent_account.empty()) {
           // update the parent account's child_account_list
-          g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account,
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                        "$addToSet", new_account.parent_account,
-                                       "child_accounts", new_account.name);
+                                       "child_accounts", name);
         }
 
-        if (find_account_res) {
+        if (find_account) {
           // There is a same account but was deleted,here will delete the
           // original account and overwrite it with the same name
           g_db_client->UpdateAccount(new_account);
@@ -192,60 +173,50 @@ AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
         }
       };
 
-  m_rw_account_mutex_.unlock_upgrade_and_lock();
-
   if (!g_db_client->CommitTransaction(callback)) {
-    m_rw_account_mutex_.unlock();
     return Result{false, "Fail to update data in database"};
   }
   if (!new_account.parent_account.empty()) {
     m_account_map_[new_account.parent_account]->child_accounts.emplace_back(
-        new_account.name);
+        name);
   }
-  m_account_map_[new_account.name] = std::make_unique<Account>(new_account);
+  m_account_map_[name] = std::make_unique<Account>(std::move(new_account));
 
-  m_rw_account_mutex_.unlock();
   return Result{true};
 }
 
 AccountManager::Result AccountManager::AddQos(const Qos& new_qos) {
-  Qos find_qos;
-  m_rw_qos_mutex_.lock_upgrade();
+  util::write_lock_guard guard(m_rw_qos_mutex_);
 
-  bool find_qos_res = GetQosInfoNoLock_(new_qos.name, &find_qos);
-  if (find_qos_res && !find_qos.deleted) {
-    m_rw_qos_mutex_.unlock_upgrade();
+  const Qos* find_qos = GetQosInfoNoLock_(new_qos.name);
+  if (find_qos && !find_qos->deleted) {
     return Result{false, fmt::format("Qos {} already exists in the database",
                                      new_qos.name)};
   }
 
-  m_rw_qos_mutex_.unlock_upgrade_and_lock();
-  if (find_qos_res) {
+  if (find_qos) {
     // There is a same qos but was deleted,here will delete the original
     // qos and overwrite it with the same name
     if (!g_db_client->UpdateQos(new_qos)) {
-      m_rw_qos_mutex_.unlock();
       return Result{false, "Can't update the deleted qos to database"};
     }
   } else {
     // Insert the new qos
     if (!g_db_client->InsertQos(new_qos)) {
-      m_rw_qos_mutex_.unlock();
       return Result{false, "Can't insert the new qos to database"};
     }
   }
 
   m_qos_map_[new_qos.name] = std::make_unique<Qos>(new_qos);
-  m_rw_qos_mutex_.unlock();
+
   return Result{true};
 }
 
 AccountManager::Result AccountManager::DeleteUser(const std::string& name) {
-  User user;
-  m_rw_user_mutex_.lock_upgrade();
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
 
-  if (!GetExistedUserInfoNoLock_(name, &user)) {
-    m_rw_user_mutex_.unlock_upgrade();
+  const User* user = GetExistedUserInfoNoLock_(name);
+  if (!user) {
     return Result{false,
                   fmt::format("User {} doesn't exist in the database", name)};
   }
@@ -253,129 +224,149 @@ AccountManager::Result AccountManager::DeleteUser(const std::string& name) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         // delete form the parent account's users list
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account,
-                                     "$pull", user.account, "users", name);
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                     "$pull", user->account, "users", name);
 
         // Delete the user
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::User, "$set",
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
                                      name, "deleted", true);
       };
 
-  m_rw_account_mutex_.lock();
-  m_rw_user_mutex_.unlock_upgrade_and_lock();
+  util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   if (!g_db_client->CommitTransaction(callback)) {
-    m_rw_account_mutex_.unlock();
-    m_rw_user_mutex_.unlock();
     return Result{false, "Fail to update data in database"};
   }
-  m_account_map_[user.account]->users.remove(name);
+  m_account_map_[user->account]->users.remove(name);
   m_user_map_[name]->deleted = true;
 
-  m_rw_account_mutex_.unlock();
-  m_rw_user_mutex_.unlock();
   return Result{true};
 }
 
 AccountManager::Result AccountManager::DeleteAccount(const std::string& name) {
-  Account account;
-  m_rw_account_mutex_.lock_upgrade();
+  util::write_lock_guard guard(m_rw_account_mutex_);
+  const Account* account = GetExistedAccountInfoNoLock_(name);
 
-  if (!GetExistedAccountInfoNoLock_(name, &account)) {
-    m_rw_account_mutex_.unlock_upgrade();
+  if (!account) {
     return Result{
         false, fmt::format("Account {} doesn't exist in the database", name)};
   }
 
-  if (!account.child_accounts.empty() || !account.users.empty()) {
-    m_rw_account_mutex_.unlock_upgrade();
+  if (!account->child_accounts.empty() || !account->users.empty()) {
     return Result{false, "This account has child account or users"};
   }
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        if (!account.parent_account.empty()) {
+        if (!account->parent_account.empty()) {
           // delete form the parent account's child account list
-          g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account,
-                                       "$pull", account.parent_account,
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                       "$pull", account->parent_account,
                                        "child_accounts", name);
         }
         // Delete the account
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account, "$set",
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
                                      name, "deleted", true);
       };
 
-  m_rw_account_mutex_.unlock_upgrade_and_lock();
-
   if (!g_db_client->CommitTransaction(callback)) {
-    m_rw_account_mutex_.unlock();
     return Result{false, "Fail to update data in database"};
   }
 
-  if (!account.parent_account.empty()) {
-    m_account_map_[account.parent_account]->child_accounts.remove(name);
+  if (!account->parent_account.empty()) {
+    m_account_map_[account->parent_account]->child_accounts.remove(name);
   }
   m_account_map_[name]->deleted = true;
 
-  m_rw_account_mutex_.unlock();
   return Result{true};
 }
 
 AccountManager::Result AccountManager::DeleteQos(const std::string& name) {
-  Qos qos;
-  m_rw_qos_mutex_.lock_upgrade();
+  util::write_lock_guard guard(m_rw_qos_mutex_);
+  const Qos* qos = GetExistedQosInfoNoLock_(name);
 
-  if (!GetExistedQosInfoNoLock_(name, &qos)) {
-    m_rw_qos_mutex_.unlock_upgrade();
+  if (!qos) {
     return Result{false, fmt::format("Qos {} not exists in database", name)};
   }
 
-  m_rw_qos_mutex_.unlock_upgrade_and_lock();
-  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::Qos, "$set",
+  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
                                     name, "deleted", true)) {
-    m_rw_qos_mutex_.unlock();
     return Result{false, fmt::format("Delete qos {} failed", name)};
   }
   m_qos_map_[name]->deleted = true;
 
-  m_rw_qos_mutex_.unlock();
   return Result{true};
 }
 
-bool AccountManager::GetExistedUserInfo(const std::string& name, User* user) {
-  util::read_lock_guard guard(m_rw_user_mutex_);
-  return GetExistedUserInfoNoLock_(name, user);
-}
+AccountManager::UserMutexSharedPtr AccountManager::GetExistedUserInfo(
+    const std::string& name) {
+  m_rw_user_mutex_.lock_shared();
 
-void AccountManager::GetAllUserInfo(std::list<User>* user_list) {
-  util::read_lock_guard guard(m_rw_user_mutex_);
-  for (const auto& [name, user] : m_user_map_) {
-    user_list->push_back(*user);
+  const User* user = GetExistedUserInfoNoLock_(name);
+  if (!user) {
+    m_rw_user_mutex_.unlock_shared();
+    return UserMutexSharedPtr{nullptr};
+  } else {
+    return UserMutexSharedPtr{user, &m_rw_user_mutex_};
   }
 }
 
-bool AccountManager::GetExistedAccountInfo(const std::string& name,
-                                           Account* account) {
-  util::read_lock_guard guard(m_rw_account_mutex_);
-  return GetExistedAccountInfoNoLock_(name, account);
-}
+AccountManager::UserMapMutexSharedPtr AccountManager::GetAllUserInfo() {
+  m_rw_user_mutex_.lock_shared();
 
-void AccountManager::GetAllAccountInfo(std::list<Account>* account_list) {
-  util::read_lock_guard guard(m_rw_account_mutex_);
-  for (const auto& [name, account] : m_account_map_) {
-    account_list->push_back(*account);
+  if (m_user_map_.empty()) {
+    m_rw_user_mutex_.unlock_shared();
+    return UserMapMutexSharedPtr{nullptr};
+  } else {
+    return UserMapMutexSharedPtr{&m_user_map_, &m_rw_user_mutex_};
   }
 }
 
-bool AccountManager::GetExistedQosInfo(const std::string& name, Qos* qos) {
-  util::read_lock_guard guard(m_rw_qos_mutex_);
-  return GetExistedQosInfoNoLock_(name, qos);
+AccountManager::AccountMutexSharedPtr AccountManager::GetExistedAccountInfo(
+    const std::string& name) {
+  m_rw_account_mutex_.lock_shared();
+
+  const Account* account = GetExistedAccountInfoNoLock_(name);
+  if (!account) {
+    m_rw_account_mutex_.unlock_shared();
+    return AccountMutexSharedPtr{nullptr};
+  } else {
+    return AccountMutexSharedPtr{account, &m_rw_account_mutex_};
+  }
 }
 
-void AccountManager::GetAllQosInfo(std::list<Qos>* qos_list) {
-  util::read_lock_guard guard(m_rw_qos_mutex_);
-  for (const auto& [name, qos] : m_qos_map_) {
-    qos_list->push_back(*qos);
+AccountManager::AccountMapMutexSharedPtr AccountManager::GetAllAccountInfo() {
+  m_rw_account_mutex_.lock_shared();
+
+  if (m_account_map_.empty()) {
+    m_rw_account_mutex_.unlock_shared();
+    return AccountMapMutexSharedPtr{nullptr};
+  } else {
+    return AccountMapMutexSharedPtr{&m_account_map_, &m_rw_account_mutex_};
+  }
+}
+
+AccountManager::QosMutexSharedPtr AccountManager::GetExistedQosInfo(
+    const std::string& name) {
+  m_rw_qos_mutex_.lock_shared();
+
+  const Qos* qos = GetExistedQosInfoNoLock_(name);
+  if (!qos) {
+    m_rw_qos_mutex_.unlock_shared();
+    return QosMutexSharedPtr{nullptr};
+  } else {
+    return QosMutexSharedPtr{qos, &m_rw_qos_mutex_};
+  }
+}
+
+AccountManager::QosMapMutexSharedPtr AccountManager::GetAllQosInfo() {
+  m_rw_qos_mutex_.lock_shared();
+
+  if (m_qos_map_.empty()) {
+    m_rw_qos_mutex_.unlock_shared();
+    return QosMapMutexSharedPtr{nullptr};
+  } else {
+    return QosMapMutexSharedPtr{&m_qos_map_, &m_rw_qos_mutex_};
   }
 }
 
@@ -383,28 +374,26 @@ AccountManager::Result AccountManager::ModifyUser(
     const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
     const std::string& name, const std::string& partition,
     const std::string& lhs, const std::string& rhs) {
-  User user;
-  m_rw_user_mutex_.lock_upgrade();
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
 
-  if (!GetExistedUserInfoNoLock_(name, &user)) {
-    m_rw_user_mutex_.unlock_upgrade();
+  const User* p = GetExistedUserInfoNoLock_(name);
+  if (!p) {
     return Result{false, fmt::format("Unknown user {}", name)};
   }
+  User user(*p);
 
-  Account account;
-  util::read_lock_guard read_account_lock_guard(m_rw_account_mutex_);
+  util::read_lock_guard account_guard(m_rw_account_mutex_);
 
-  GetExistedAccountInfoNoLock_(user.account, &account);
+  const Account* account = GetExistedAccountInfoNoLock_(user.account);
   switch (operatorType) {
     case crane::grpc::ModifyEntityRequest_OperatorType_Add:
       if (lhs == "allowed_partition") {
         // TODO: check if new partition existed
 
         // check if account has access to new partition
-        if (std::find(account.allowed_partition.begin(),
-                      account.allowed_partition.end(),
-                      rhs) == account.allowed_partition.end()) {
-          m_rw_user_mutex_.unlock_upgrade();
+        if (std::find(account->allowed_partition.begin(),
+                      account->allowed_partition.end(),
+                      rhs) == account->allowed_partition.end()) {
           return Result{
               false,
               fmt::format(
@@ -415,7 +404,6 @@ AccountManager::Result AccountManager::ModifyUser(
         // check if add item already the user's allowed partition
         for (const auto& par : user.allowed_partition_qos_map) {
           if (rhs == par.first) {
-            m_rw_user_mutex_.unlock_upgrade();
             return Result{false, fmt::format("The partition {} is already in "
                                              "user {}'s allowed partition",
                                              rhs, name)};
@@ -425,26 +413,20 @@ AccountManager::Result AccountManager::ModifyUser(
         // Update the map
         user.allowed_partition_qos_map[rhs] =
             std::pair<std::string, std::list<std::string>>{
-                account.default_qos,
-                std::list<std::string>{account.allowed_qos_list}};
+                account->default_qos,
+                std::list<std::string>{account->allowed_qos_list}};
 
       } else if (lhs == "allowed_qos_list") {
         // check if qos existed
-        Qos find_qos;
-        m_rw_qos_mutex_.lock_shared();
-
-        if (!GetExistedQosInfoNoLock_(rhs, &find_qos)) {
-          m_rw_qos_mutex_.unlock_shared();
-          m_rw_user_mutex_.unlock_upgrade();
+        util::read_lock_guard qos_guard(m_rw_qos_mutex_);
+        if (!GetExistedQosInfoNoLock_(rhs)) {
           return Result{false, fmt::format("Qos {} not existed", rhs)};
         }
 
-        m_rw_qos_mutex_.unlock_shared();
         // check if account has access to new qos
-        if (std::find(account.allowed_qos_list.begin(),
-                      account.allowed_qos_list.end(),
-                      rhs) == account.allowed_qos_list.end()) {
-          m_rw_user_mutex_.unlock_upgrade();
+        if (std::find(account->allowed_qos_list.begin(),
+                      account->allowed_qos_list.end(),
+                      rhs) == account->allowed_qos_list.end()) {
           return Result{
               false,
               fmt::format("Sorry, your account not allow to use the qos {}",
@@ -464,7 +446,6 @@ AccountManager::Result AccountManager::ModifyUser(
           }
 
           if (!is_changed) {
-            m_rw_user_mutex_.unlock_upgrade();
             return Result{false, fmt::format("Qos {} is already in user {}'s "
                                              "allowed qos of all partition",
                                              rhs, name)};
@@ -473,7 +454,6 @@ AccountManager::Result AccountManager::ModifyUser(
           // add to exacted partition
           auto iter = user.allowed_partition_qos_map.find(partition);
           if (iter == user.allowed_partition_qos_map.end()) {
-            m_rw_user_mutex_.unlock_upgrade();
             return Result{
                 false, fmt::format(
                            "Partition {} is not in user {}'s allowed partition",
@@ -482,7 +462,6 @@ AccountManager::Result AccountManager::ModifyUser(
 
           std::list<std::string>& list = iter->second.second;
           if (std::find(list.begin(), list.end(), rhs) != list.end()) {
-            m_rw_user_mutex_.unlock_upgrade();
             return Result{false, fmt::format("Qos {} is already in user {}'s "
                                              "allowed qos of partition {}",
                                              rhs, name, partition)};
@@ -490,7 +469,6 @@ AccountManager::Result AccountManager::ModifyUser(
           list.push_back(rhs);
         }
       } else {
-        m_rw_user_mutex_.unlock_upgrade();
         return Result{false, fmt::format("Field {} can't be added", lhs)};
       }
       break;
@@ -507,7 +485,6 @@ AccountManager::Result AccountManager::ModifyUser(
         }
 
         if (new_level == user.admin_level) {
-          m_rw_user_mutex_.unlock_upgrade();
           return Result{false,
                         fmt::format("User {} is already a {} role", name, rhs)};
         }
@@ -535,7 +512,6 @@ AccountManager::Result AccountManager::ModifyUser(
           }
 
           if (!is_changed) {
-            m_rw_user_mutex_.unlock_upgrade();
             return Result{false, fmt::format("Qos {} not in allowed qos list "
                                              "or is already the default qos",
                                              rhs)};
@@ -545,20 +521,17 @@ AccountManager::Result AccountManager::ModifyUser(
 
           if (std::find(iter->second.second.begin(), iter->second.second.end(),
                         rhs) == iter->second.second.end()) {
-            m_rw_user_mutex_.unlock_upgrade();
             return Result{false,
                           fmt::format("Qos {} not in allowed qos list", rhs)};
           }
 
           if (iter->second.first == rhs) {
-            m_rw_user_mutex_.unlock_upgrade();
             return Result{
                 false, fmt::format("Qos {} is already the default qos", rhs)};
           }
           iter->second.first = rhs;
         }
       } else {
-        m_rw_user_mutex_.unlock_upgrade();
         return Result{false, fmt::format("Field {} can't be set", lhs)};
       }
       break;
@@ -567,7 +540,6 @@ AccountManager::Result AccountManager::ModifyUser(
       if (lhs == "allowed_partition") {
         auto iter = user.allowed_partition_qos_map.find(rhs);
         if (iter == user.allowed_partition_qos_map.end()) {
-          m_rw_user_mutex_.unlock_upgrade();
           return Result{
               false,
               fmt::format(
@@ -589,7 +561,6 @@ AccountManager::Result AccountManager::ModifyUser(
           }
 
           if (!is_changed) {
-            m_rw_user_mutex_.unlock_upgrade();
             return Result{
                 false,
                 fmt::format("Qos {} not in allowed qos list or is default qos",
@@ -599,7 +570,6 @@ AccountManager::Result AccountManager::ModifyUser(
           auto iter = user.allowed_partition_qos_map.find(partition);
 
           if (iter == user.allowed_partition_qos_map.end()) {
-            m_rw_user_mutex_.unlock_upgrade();
             return Result{
                 false, fmt::format("Partition {} not in allowed partition list",
                                    partition)};
@@ -607,7 +577,6 @@ AccountManager::Result AccountManager::ModifyUser(
 
           if (std::find(iter->second.second.begin(), iter->second.second.end(),
                         rhs) == iter->second.second.end()) {
-            m_rw_user_mutex_.unlock_upgrade();
             return Result{
                 false,
                 fmt::format("Qos {} not in allowed qos list of partition {}",
@@ -615,7 +584,6 @@ AccountManager::Result AccountManager::ModifyUser(
           }
 
           if (rhs == iter->second.first) {
-            m_rw_user_mutex_.unlock_upgrade();
             return Result{
                 false,
                 fmt::format(
@@ -625,26 +593,20 @@ AccountManager::Result AccountManager::ModifyUser(
           iter->second.second.remove(rhs);
         }
       } else {
-        m_rw_user_mutex_.unlock_upgrade();
         return Result{false, fmt::format("Field {} can't be deleted", lhs)};
       }
       break;
     default:
-      m_rw_user_mutex_.unlock_upgrade();
       return Result{false, fmt::format("Unknown field {}", lhs)};
       break;
   }
 
   // Update to database
-  m_rw_user_mutex_.unlock_upgrade_and_lock();
-
   if (!g_db_client->UpdateUser(user)) {
-    m_rw_user_mutex_.unlock();
     return Result{false, "Fail to update data in database"};
   }
   *m_user_map_[name] = user;
 
-  m_rw_user_mutex_.unlock();
   return Result{true};
 }
 
@@ -652,11 +614,10 @@ AccountManager::Result AccountManager::ModifyAccount(
     const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
     const std::string& name, const std::string& lhs, const std::string& rhs) {
   std::string opt;
-  Account account;
-  m_rw_account_mutex_.lock_upgrade();
+  util::write_lock_guard account_guard(m_rw_account_mutex_);
 
-  if (!GetExistedAccountInfoNoLock_(name, &account)) {
-    m_rw_account_mutex_.unlock_upgrade();
+  const Account* account = GetExistedAccountInfoNoLock_(name);
+  if (!account) {
     return Result{false, fmt::format("Unknown account {}", name)};
   }
 
@@ -667,94 +628,75 @@ AccountManager::Result AccountManager::ModifyAccount(
         // TODO: check if the partition existed
 
         // Check if parent account has access to the partition
-        if (!account.parent_account.empty()) {
-          Account parent;
-          GetExistedAccountInfoNoLock_(account.parent_account, &parent);
-          if (std::find(parent.allowed_partition.begin(),
-                        parent.allowed_partition.end(),
-                        rhs) == parent.allowed_partition.end()) {
-            m_rw_account_mutex_.unlock_upgrade();
-
+        if (!account->parent_account.empty()) {
+          const Account* parent =
+              GetExistedAccountInfoNoLock_(account->parent_account);
+          if (std::find(parent->allowed_partition.begin(),
+                        parent->allowed_partition.end(),
+                        rhs) == parent->allowed_partition.end()) {
             return Result{
                 false,
                 fmt::format(
                     "Parent account {} does not have access to partition {}",
-                    account.parent_account, rhs)};
+                    account->parent_account, rhs)};
           }
         }
 
-        if (std::find(account.allowed_partition.begin(),
-                      account.allowed_partition.end(),
-                      rhs) != account.allowed_partition.end()) {
-          m_rw_account_mutex_.unlock_upgrade();
-
+        if (std::find(account->allowed_partition.begin(),
+                      account->allowed_partition.end(),
+                      rhs) != account->allowed_partition.end()) {
           return Result{
               false,
               fmt::format("Partition {} is already in allowed partition list",
                           rhs)};
         }
 
-        m_rw_account_mutex_.unlock_upgrade_and_lock();
-
-        if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account,
+        if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                           opt, name, lhs, rhs)) {
-          m_rw_account_mutex_.unlock();
           return Result{false, "Can't update the  database"};
         }
         m_account_map_[name]->allowed_partition.emplace_back(rhs);
 
-        m_rw_account_mutex_.unlock();
         return Result{true};
 
       } else if (lhs == "allowed_qos_list") {
         // check if the qos existed
-        Qos qos;
-        m_rw_qos_mutex_.lock_shared();
-
-        if (!GetExistedQosInfoNoLock_(rhs, &qos)) {
-          m_rw_qos_mutex_.unlock_shared();
-          m_rw_account_mutex_.unlock_upgrade();
+        util::read_lock_guard qos_guard(m_rw_qos_mutex_);
+        if (!GetExistedQosInfoNoLock_(rhs)) {
           return Result{false, fmt::format("Qos {} not existed", rhs)};
         }
-        m_rw_qos_mutex_.unlock_shared();
 
         // Check if parent account has access to the qos
-        if (!account.parent_account.empty()) {
-          Account parent;
-          GetExistedAccountInfoNoLock_(account.parent_account, &parent);
+        if (!account->parent_account.empty()) {
+          const Account* parent =
+              GetExistedAccountInfoNoLock_(account->parent_account);
 
-          if (std::find(parent.allowed_qos_list.begin(),
-                        parent.allowed_qos_list.end(),
-                        rhs) == parent.allowed_qos_list.end()) {
-            m_rw_account_mutex_.unlock_upgrade();
+          if (std::find(parent->allowed_qos_list.begin(),
+                        parent->allowed_qos_list.end(),
+                        rhs) == parent->allowed_qos_list.end()) {
             return Result{
                 false,
                 fmt::format("Parent account {} does not have access to qos {}",
-                            account.parent_account, rhs)};
+                            account->parent_account, rhs)};
           }
         }
 
-        if (std::find(account.allowed_qos_list.begin(),
-                      account.allowed_qos_list.end(),
-                      rhs) != account.allowed_qos_list.end()) {
-          m_rw_account_mutex_.unlock_upgrade();
+        if (std::find(account->allowed_qos_list.begin(),
+                      account->allowed_qos_list.end(),
+                      rhs) != account->allowed_qos_list.end()) {
           return Result{
               false, fmt::format("Qos {} is already in allowed qos list", rhs)};
         }
 
-        m_rw_account_mutex_.unlock_upgrade_and_lock();
-        if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account,
+        if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                           opt, name, lhs, rhs)) {
-          m_rw_account_mutex_.unlock();
           return Result{false, "Can't update the  database"};
         }
         m_account_map_[name]->allowed_qos_list.emplace_back(rhs);
 
-        m_rw_account_mutex_.unlock();
         return Result{true};
 
       } else {
-        m_rw_account_mutex_.unlock_upgrade();
         return Result{false, fmt::format("Field {} can't be added", lhs)};
       }
       break;
@@ -762,21 +704,16 @@ AccountManager::Result AccountManager::ModifyAccount(
     case crane::grpc::ModifyEntityRequest_OperatorType_Overwrite:
       opt = "$set";
       if (lhs == "description") {
-        if (rhs == account.description) {
-          m_rw_account_mutex_.unlock_upgrade();
+        if (rhs == account->description) {
           return Result{false, "Description content not change"};
         }
 
-        m_rw_account_mutex_.unlock_upgrade_and_lock();
-
-        if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account,
+        if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                           opt, name, lhs, rhs)) {
-          m_rw_account_mutex_.unlock();
           return Result{false, "Can't update the  database"};
         }
         m_account_map_[name]->description = rhs;
 
-        m_rw_account_mutex_.unlock();
         return Result{true};
       }
       //      else if (lhs == "parent_account") {
@@ -791,78 +728,57 @@ AccountManager::Result AccountManager::ModifyAccount(
       //        }
       //      }
       else if (lhs == "default_qos") {
-        if (account.default_qos == rhs) {
-          m_rw_account_mutex_.unlock_upgrade();
+        if (account->default_qos == rhs) {
           return Result{false,
                         fmt::format("Qos {} is already the default qos", rhs)};
         }
 
-        if (std::find(account.allowed_qos_list.begin(),
-                      account.allowed_qos_list.end(),
-                      rhs) == account.allowed_qos_list.end()) {
-          m_rw_account_mutex_.unlock_upgrade();
+        if (std::find(account->allowed_qos_list.begin(),
+                      account->allowed_qos_list.end(),
+                      rhs) == account->allowed_qos_list.end()) {
           return Result{false,
                         fmt::format("Qos {} not in allowed qos list", rhs)};
         }
 
-        m_rw_account_mutex_.unlock_upgrade_and_lock();
-
-        if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account,
+        if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                           opt, name, lhs, rhs)) {
-          m_rw_account_mutex_.unlock();
           return Result{false, "Can't update the  database"};
         }
         m_account_map_[name]->default_qos = rhs;
 
-        m_rw_account_mutex_.unlock();
         return Result{true};
 
       } else {
-        m_rw_account_mutex_.unlock_upgrade();
         return Result{false, fmt::format("Field {} can't be set", lhs)};
       }
       break;
 
     case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
       if (lhs == "allowed_partition") {
-        m_rw_account_mutex_.unlock_upgrade_and_lock();
-        m_rw_user_mutex_.lock();
+        util::write_lock_guard user_guard(m_rw_user_mutex_);
 
         mongocxx::client_session::with_transaction_cb callback =
             [&](mongocxx::client_session* session) {
-              DeleteAccountAllowedPartitionFromDB_(account.name, rhs);
+              DeleteAccountAllowedPartitionFromDB_(account->name, rhs);
             };
 
         if (!g_db_client->CommitTransaction(callback)) {
-          m_rw_user_mutex_.unlock();
-          m_rw_account_mutex_.unlock();
           return Result{false, "Fail to update data in database"};
         }
-        DeleteAccountAllowedPartitionFromMap_(account.name, rhs);
-
-        m_rw_user_mutex_.unlock();
-        m_rw_account_mutex_.unlock();
+        DeleteAccountAllowedPartitionFromMap_(account->name, rhs);
 
       } else if (lhs == "allowed_qos_list") {
-        m_rw_account_mutex_.unlock_upgrade_and_lock();
-        m_rw_user_mutex_.lock();
+        auto iter = std::find(account->allowed_qos_list.begin(),
+                              account->allowed_qos_list.end(), rhs);
 
-        auto iter = std::find(account.allowed_qos_list.begin(),
-                              account.allowed_qos_list.end(), rhs);
-
-        if (iter == account.allowed_qos_list.end()) {
-          m_rw_user_mutex_.unlock();
-          m_rw_account_mutex_.unlock();
+        if (iter == account->allowed_qos_list.end()) {
           return Result{
               false,
               fmt::format("Qos {} is not in account {}'s allowed qos list", rhs,
                           name)};
         }
-        if (IsDefaultQosOfAnyNode(account, rhs) &&
+        if (IsDefaultQosOfAnyNode(*account, rhs) &&
             true) {  // true replace !force
-          m_rw_user_mutex_.unlock();
-          m_rw_account_mutex_.unlock();
-
           return Result{
               false,
               fmt::format("Someone is using qos {} as default qos", rhs)};
@@ -870,26 +786,20 @@ AccountManager::Result AccountManager::ModifyAccount(
 
         mongocxx::client_session::with_transaction_cb callback =
             [&](mongocxx::client_session* session) {
-              DeleteAccountAllowedQosFromDB_(account.name, rhs);
+              DeleteAccountAllowedQosFromDB_(account->name, rhs);
             };
 
         if (!g_db_client->CommitTransaction(callback)) {
-          m_rw_user_mutex_.unlock();
-          m_rw_account_mutex_.unlock();
           return Result{false, "Fail to update data in database"};
         }
-        DeleteAccountAllowedQosFromMap_(account.name, rhs);
+        DeleteAccountAllowedQosFromMap_(account->name, rhs);
 
-        m_rw_user_mutex_.unlock();
-        m_rw_account_mutex_.unlock();
         return Result{true};
       } else {
-        m_rw_account_mutex_.unlock_upgrade();
         return Result{false, fmt::format("Field {} can't be deleted", lhs)};
       }
       break;
     default:
-      m_rw_account_mutex_.unlock_upgrade();
       return Result{true};
       break;
   }
@@ -899,46 +809,41 @@ AccountManager::Result AccountManager::ModifyAccount(
 AccountManager::Result AccountManager::ModifyQos(const std::string& name,
                                                  const std::string& lhs,
                                                  const std::string& rhs) {
-  Qos qos;
-  m_rw_qos_mutex_.lock_upgrade();
+  util::write_lock_guard guard(m_rw_qos_mutex_);
 
-  if (!GetExistedQosInfoNoLock_(name, &qos)) {
-    m_rw_qos_mutex_.unlock_upgrade();
+  const Qos* p = GetExistedQosInfoNoLock_(name);
+  if (!p) {
     return Result{false, fmt::format("Qos {} not existed in database", name)};
   }
-
-  m_rw_qos_mutex_.unlock_upgrade_and_lock();
+  Qos qos(*p);
 
   if (lhs == "description") {
     qos.description = rhs;
-    if (!g_db_client->UpdateEntityOne(MongodbClient::Qos, "$set", name, lhs,
-                                      rhs)) {
-      m_rw_qos_mutex_.unlock();
+    if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                      name, lhs, rhs)) {
       return Result{false, "Fail to update the database"};
     }
   } else {
     qos.priority = std::stoi(rhs);
-    if (!g_db_client->UpdateEntityOne(MongodbClient::Qos, "$set", name, lhs,
-                                      std::stoi(rhs))) {
-      m_rw_qos_mutex_.unlock();
+    if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                      name, lhs, std::stoi(rhs))) {
       return Result{false, "Fail to update the database"};
     }
   }
   *m_qos_map_[name] = qos;
 
-  m_rw_qos_mutex_.unlock();
   return Result{true};
 }
 
 bool AccountManager::CheckUserPermissionToPartition(
     const std::string& name, const std::string& partition) {
-  User user;
-  if (!GetExistedUserInfo(name, &user)) {
+  UserMutexSharedPtr user_share_ptr = GetExistedUserInfo(name);
+  if (!user_share_ptr) {
     return false;
   }
 
-  if (user.allowed_partition_qos_map.find(partition) !=
-      user.allowed_partition_qos_map.end()) {
+  if (user_share_ptr->allowed_partition_qos_map.find(partition) !=
+      user_share_ptr->allowed_partition_qos_map.end()) {
     return true;
   }
   return false;
@@ -970,84 +875,80 @@ void AccountManager::InitDataMap_() {
  * @note copy user info from m_user_map_
  * @return bool
  */
-bool AccountManager::GetUserInfoNoLock_(const std::string& name, User* user) {
+const User* AccountManager::GetUserInfoNoLock_(const std::string& name) {
   auto find_res = m_user_map_.find(name);
-  if (find_res == m_user_map_.end() || user == nullptr) {
-    return false;
+  if (find_res == m_user_map_.end()) {
+    return nullptr;
   } else {
-    *user = *find_res->second;
-    return true;
+    return find_res->second.get();
   }
 }
 
 /*
  * Get the user info form mongodb and deletion flag marked false
  */
-bool AccountManager::GetExistedUserInfoNoLock_(const std::string& name,
-                                               User* user) {
-  if (GetUserInfoNoLock_(name, user) && !user->deleted) {
-    return true;
+const User* AccountManager::GetExistedUserInfoNoLock_(const std::string& name) {
+  const User* user = GetUserInfoNoLock_(name);
+  if (user && !user->deleted) {
+    return user;
   } else {
-    return false;
+    return nullptr;
   }
 }
 
-bool AccountManager::GetAccountInfoNoLock_(const std::string& name,
-                                           Account* account) {
+const Account* AccountManager::GetAccountInfoNoLock_(const std::string& name) {
   auto find_res = m_account_map_.find(name);
-  if (find_res == m_account_map_.end() || account == nullptr) {
-    return false;
+  if (find_res == m_account_map_.end()) {
+    return nullptr;
   } else {
-    *account = *find_res->second;
-    return true;
+    return find_res->second.get();
   }
 }
 
-bool AccountManager::GetExistedAccountInfoNoLock_(const std::string& name,
-                                                  Account* account) {
-  if (GetAccountInfoNoLock_(name, account) && !account->deleted) {
-    return true;
+const Account* AccountManager::GetExistedAccountInfoNoLock_(
+    const std::string& name) {
+  const Account* account = GetAccountInfoNoLock_(name);
+  if (account && !account->deleted) {
+    return account;
   } else {
-    return false;
+    return nullptr;
   }
 }
 
-bool AccountManager::GetQosInfoNoLock_(const std::string& name, Qos* qos) {
+const Qos* AccountManager::GetQosInfoNoLock_(const std::string& name) {
   auto find_res = m_qos_map_.find(name);
-  if (find_res == m_qos_map_.end() || qos == nullptr) {
-    return false;
+  if (find_res == m_qos_map_.end()) {
+    return nullptr;
   } else {
-    *qos = *find_res->second;
-    return true;
+    return find_res->second.get();
   }
 }
 
-bool AccountManager::GetExistedQosInfoNoLock_(const std::string& name,
-                                              Qos* qos) {
-  if (GetQosInfoNoLock_(name, qos) && !qos->deleted) {
-    return true;
+const Qos* AccountManager::GetExistedQosInfoNoLock_(const std::string& name) {
+  const Qos* qos = GetQosInfoNoLock_(name);
+  if (qos && !qos->deleted) {
+    return qos;
   } else {
-    return false;
+    return nullptr;
   }
 }
 
 bool AccountManager::IsDefaultQosOfAnyNode(const Account& account,
                                            const std::string& qos) {
-  bool res = false;
   if (account.default_qos == qos) {
     return true;
   }
   for (const auto& child : account.child_accounts) {
-    Account child_account;
-    GetExistedAccountInfoNoLock_(child, &child_account);
-    res |= IsDefaultQosOfAnyNode(child_account, qos);
+    if (IsDefaultQosOfAnyNode(*GetExistedAccountInfoNoLock_(child), qos)) {
+      return true;
+    }
   }
   for (const auto& user : account.users) {
-    User child_user;
-    GetExistedUserInfoNoLock_(user, &child_user);
-    res |= IsDefaultQosOfAnyPartition(child_user, qos);
+    if (IsDefaultQosOfAnyPartition(*GetExistedUserInfoNoLock_(user), qos)) {
+      return true;
+    }
   }
-  return res;
+  return false;
 }
 
 bool AccountManager::IsDefaultQosOfAnyPartition(const User& user,
@@ -1059,51 +960,70 @@ bool AccountManager::IsDefaultQosOfAnyPartition(const User& user,
 
 bool AccountManager::DeleteAccountAllowedQosFromDB_(const std::string& name,
                                                     const std::string& qos) {
-  Account account;
-  GetExistedAccountInfoNoLock_(name, &account);
-
-  auto iter = std::find(account.allowed_qos_list.begin(),
-                        account.allowed_qos_list.end(), qos);
-  if (iter == account.allowed_qos_list.end()) {
+  const Account* account = GetExistedAccountInfoNoLock_(name);
+  if (!account) {
+    CRANE_ERROR(
+        "Operating on a non-existent account '{}', please check this item in "
+        "database and restart cranectld",
+        name);
     return false;
   }
 
-  for (const auto& child : account.child_accounts) {
+  auto iter = std::find(account->allowed_qos_list.begin(),
+                        account->allowed_qos_list.end(), qos);
+  if (iter == account->allowed_qos_list.end()) {
+    return false;
+  }
+
+  for (const auto& child : account->child_accounts) {
     DeleteAccountAllowedQosFromDB_(child, qos);
   }
-  for (const auto& user : account.users) {
+  for (const auto& user : account->users) {
     DeleteUserAllowedQosOfAllPartitionFromDB_(user, qos, true);
   }
-  g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account, "$pull",
-                               account.name, "allowed_qos_list", qos);
+  g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$pull",
+                               name, "allowed_qos_list", qos);
   return true;
 }
 
 bool AccountManager::DeleteAccountAllowedQosFromMap_(const std::string& name,
                                                      const std::string& qos) {
-  Account account;
-  GetExistedAccountInfoNoLock_(name, &account);
-
-  if (std::find(account.allowed_qos_list.begin(),
-                account.allowed_qos_list.end(),
-                qos) == account.allowed_qos_list.end()) {
+  const Account* account = GetExistedAccountInfoNoLock_(name);
+  if (!account) {
+    CRANE_ERROR(
+        "Operating on a non-existent account '{}', please check this item in "
+        "database and restart cranectld",
+        name);
     return false;
   }
 
-  for (const auto& child : account.child_accounts) {
+  if (std::find(account->allowed_qos_list.begin(),
+                account->allowed_qos_list.end(),
+                qos) == account->allowed_qos_list.end()) {
+    return false;
+  }
+
+  for (const auto& child : account->child_accounts) {
     DeleteAccountAllowedQosFromMap_(child, qos);
   }
-  for (const auto& user : account.users) {
+  for (const auto& user : account->users) {
     DeleteUserAllowedQosOfAllPartitionFromMap_(user, qos, true);
   }
-  m_account_map_[account.name]->allowed_qos_list.remove(qos);
+  m_account_map_[name]->allowed_qos_list.remove(qos);
   return true;
 }
 
 bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromDB_(
     const std::string& name, const std::string& qos, bool force) {
-  User user;
-  GetExistedUserInfoNoLock_(name, &user);
+  const User* p = GetExistedUserInfoNoLock_(name);
+  if (!p) {
+    CRANE_ERROR(
+        "Operating on a non-existent user '{}', please check this item in "
+        "database and restart cranectld",
+        name);
+    return false;
+  }
+  User user(*p);
 
   bool isDefault = IsDefaultQosOfAnyPartition(user, qos);
   if (isDefault && !force) {
@@ -1126,8 +1046,15 @@ bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromDB_(
 
 bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromMap_(
     const std::string& name, const std::string& qos, bool force) {
-  User user;
-  GetExistedUserInfoNoLock_(name, &user);
+  const User* p = GetExistedUserInfoNoLock_(name);
+  if (!p) {
+    CRANE_ERROR(
+        "Operating on a non-existent user '{}', please check this item in "
+        "database and restart cranectld",
+        name);
+    return false;
+  }
+  User user(*p);
 
   bool isDefault = IsDefaultQosOfAnyPartition(user, qos);
   if (isDefault && !force) {
@@ -1143,79 +1070,86 @@ bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromMap_(
       }
     }
   }
-  *m_user_map_[user.name] = user;
+  m_user_map_[user.name]->allowed_partition_qos_map =
+      user.allowed_partition_qos_map;
   return true;
 }
 
 bool AccountManager::DeleteAccountAllowedPartitionFromDB_(
     const std::string& name, const std::string& partition) {
-  Account account;
-  GetExistedAccountInfoNoLock_(name, &account);
-
-  auto iter = std::find(account.allowed_partition.begin(),
-                        account.allowed_partition.end(), partition);
-  if (iter == account.allowed_partition.end()) {
+  const Account* account = GetExistedAccountInfoNoLock_(name);
+  if (!account) {
+    CRANE_ERROR(
+        "Operating on a non-existent account '{}', please check this item in "
+        "database and restart cranectld",
+        name);
     return false;
   }
 
-  for (const auto& child : account.child_accounts) {
+  auto iter = std::find(account->allowed_partition.begin(),
+                        account->allowed_partition.end(), partition);
+  if (iter == account->allowed_partition.end()) {
+    return false;
+  }
+
+  for (const auto& child : account->child_accounts) {
     DeleteAccountAllowedPartitionFromDB_(child, partition);
   }
-  for (const auto& user : account.users) {
+  for (const auto& user : account->users) {
     DeleteUserAllowedPartitionFromDB_(user, partition);
   }
 
-  g_db_client->UpdateEntityOne(MongodbClient::EntityType::Account, "$pull",
-                               account.name, "allowed_partition", partition);
+  g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$pull",
+                               account->name, "allowed_partition", partition);
   return true;
 }
 
 bool AccountManager::DeleteAccountAllowedPartitionFromMap_(
     const std::string& name, const std::string& partition) {
-  Account account;
-  GetExistedAccountInfoNoLock_(name, &account);
-
-  if (std::find(account.allowed_partition.begin(),
-                account.allowed_partition.end(),
-                partition) == account.allowed_partition.end()) {
+  const Account* account = GetExistedAccountInfoNoLock_(name);
+  if (!account) {
+    CRANE_ERROR(
+        "Operating on a non-existent account '{}', please check this item in "
+        "database and restart cranectld",
+        name);
     return false;
   }
 
-  for (const auto& child : account.child_accounts) {
+  if (std::find(account->allowed_partition.begin(),
+                account->allowed_partition.end(),
+                partition) == account->allowed_partition.end()) {
+    return false;
+  }
+
+  for (const auto& child : account->child_accounts) {
     DeleteAccountAllowedPartitionFromMap_(child, partition);
   }
-  for (const auto& user : account.users) {
-    DeleteUserAllowedPartitionFromMap_(user, partition);
+  for (const auto& user : account->users) {
+    m_user_map_[user]->allowed_partition_qos_map.erase(partition);
   }
-  m_account_map_[account.name]->allowed_partition.remove(partition);
+  m_account_map_[account->name]->allowed_partition.remove(partition);
 
   return true;
 }
 
 bool AccountManager::DeleteUserAllowedPartitionFromDB_(
     const std::string& name, const std::string& partition) {
-  User user;
-  GetExistedUserInfoNoLock_(name, &user);
-
-  auto iter = user.allowed_partition_qos_map.find(partition);
-  if (iter == user.allowed_partition_qos_map.end()) {
+  const User* user = GetExistedUserInfoNoLock_(name);
+  if (!user) {
+    CRANE_ERROR(
+        "Operating on a non-existent user '{}', please check this item in "
+        "database and restart cranectld",
+        name);
     return false;
   }
-  user.allowed_partition_qos_map.erase(iter);
-  g_db_client->UpdateUser(user);
-  return true;
-}
 
-bool AccountManager::DeleteUserAllowedPartitionFromMap_(
-    const std::string& name, const std::string& partition) {
-  User user;
-  GetExistedUserInfoNoLock_(name, &user);
-
-  if (user.allowed_partition_qos_map.find(partition) ==
-      user.allowed_partition_qos_map.end()) {
+  auto iter = user->allowed_partition_qos_map.find(partition);
+  if (iter == user->allowed_partition_qos_map.end()) {
     return false;
   }
-  m_user_map_[user.name]->allowed_partition_qos_map.erase(partition);
+  g_db_client->UpdateEntityOne(Ctld::MongodbClient::EntityType::USER, "$unset",
+                               name, "allowed_partition_qos_map." + partition,
+                               "");
   return true;
 }
 

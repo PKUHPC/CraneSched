@@ -8,6 +8,8 @@
 
 namespace Ctld {
 
+using bsoncxx::builder::basic::kvp;
+
 bool MongodbClient::Connect() {
   try {
     m_connect_pool_ =
@@ -253,6 +255,19 @@ bool MongodbClient::UpdateJobRecordFields(
   return true;
 }
 
+bool MongodbClient::CheckTaskDbIdExisted(int64_t task_db_id) {
+  document doc;
+  doc.append(kvp("job_db_inx", task_db_id));
+
+  bsoncxx::stdx::optional<bsoncxx::document::value> result =
+      (*GetClient_())[m_db_name_][m_job_collection_name_].find_one(doc.view());
+
+  if (result) {
+    return true;
+  }
+  return false;
+}
+
 bool MongodbClient::InsertUser(const Ctld::User& new_user) {
   document doc = UserToDocument_(new_user);
   doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
@@ -300,13 +315,13 @@ bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
   std::string coll;
 
   switch (type) {
-    case MongodbClient::Account:
+    case EntityType::ACCOUNT:
       coll = m_account_collection_name_;
       break;
-    case MongodbClient::User:
+    case EntityType::USER:
       coll = m_user_collection_name_;
       break;
-    case MongodbClient::Qos:
+    case EntityType::QOS:
       coll = m_qos_collection_name_;
       break;
   }
@@ -354,7 +369,20 @@ bool MongodbClient::SelectAccount(const std::string& key, const T& value,
   return false;
 }
 
-bool MongodbClient::SelectQosByName(const std::string& name, Ctld::Qos* qos) {
+template <typename T>
+bool MongodbClient::SelectQos(const std::string& key, const T& value,
+                              Ctld::Qos* qos) {
+  document filter;
+  filter.append(kvp(key, value));
+  bsoncxx::stdx::optional<bsoncxx::document::value> result =
+      (*GetClient_())[m_db_name_][m_qos_collection_name_].find_one(
+          filter.view());
+
+  if (result) {
+    bsoncxx::document::view qos_view = result->view();
+    ViewToQos_(qos_view, qos);
+    return true;
+  }
   return false;
 }
 

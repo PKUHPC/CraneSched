@@ -39,4 +39,42 @@ class ScopeExclusivePtr {
   Lockable* lock_;
 };
 
+/**
+ *
+ * @tparam T is the type of the stored pointer.
+ * @tparam Lockable must have lock_shared() and unlock_shared()
+ */
+template <typename T, typename Lockable>
+class ScopeExclusiveSharedPtr {
+ public:
+  explicit ScopeExclusiveSharedPtr(const T* data,
+                                   Lockable* lock = nullptr) noexcept
+      : data_(data), lock_(lock) {}
+
+  ~ScopeExclusiveSharedPtr() noexcept {
+    if (lock_) {
+      lock_->unlock_shared();
+    }
+  }
+
+  const T* get() { return data_; }
+  const T& operator*() { return *data_; }
+  const T* operator->() { return data_; }
+
+  explicit operator bool() { return data_ != nullptr; }
+
+  ScopeExclusiveSharedPtr(ScopeExclusiveSharedPtr const&) = delete;
+  ScopeExclusiveSharedPtr& operator=(ScopeExclusiveSharedPtr const&) = delete;
+
+  ScopeExclusiveSharedPtr(ScopeExclusiveSharedPtr&& val) noexcept {
+    data_ = val.data_;
+    lock_ = val.lock_;
+    val.lock_ = nullptr;
+  }
+
+ private:
+  const T* data_;
+  Lockable* lock_;
+};
+
 }  // namespace util
