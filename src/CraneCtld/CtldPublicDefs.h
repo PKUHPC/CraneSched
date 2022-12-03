@@ -341,6 +341,7 @@ struct Qos {
   bool deleted = false;
   std::string name;
   std::string description;
+  uint32_t reference_count = 0;
   uint32_t priority;
   uint32_t max_jobs_per_user;
   uint32_t max_running_tasks_per_user;
@@ -351,6 +352,7 @@ struct Qos {
 
 struct Account {
   bool deleted = false;
+  bool enable = true;
   std::string name;
   std::string description;
   std::list<std::string> users;

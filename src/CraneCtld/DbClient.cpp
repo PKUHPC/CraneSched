@@ -421,16 +421,16 @@ bool MongodbClient::CommitTransaction(
 }
 
 template <typename V>
-void MongodbClient::DocumentAppendItem_(document* doc, const std::string& key,
+void MongodbClient::DocumentAppendItem_(document& doc, const std::string& key,
                                         const V& value) {
-  doc->append(kvp(key, value));
+  doc.append(kvp(key, value));
 }
 
 template <>
 void MongodbClient::DocumentAppendItem_<std::list<std::string>>(
-    document* doc, const std::string& key,
+    document& doc, const std::string& key,
     const std::list<std::string>& value) {
-  doc->append(kvp(key, [&value](sub_array array) {
+  doc.append(kvp(key, [&value](sub_array array) {
     for (const auto& v : value) {
       array.append(v);
     }
@@ -439,9 +439,9 @@ void MongodbClient::DocumentAppendItem_<std::list<std::string>>(
 
 template <>
 void MongodbClient::DocumentAppendItem_<MongodbClient::PartitionQosMap>(
-    document* doc, const std::string& key,
+    document& doc, const std::string& key,
     const MongodbClient::PartitionQosMap& value) {
-  doc->append(kvp(key, [&value](sub_document mapValueDocument) {
+  doc.append(kvp(key, [&value](sub_document mapValueDocument) {
     for (const auto& mapItem : value) {
       auto mapKey = mapItem.first;
       auto mapValue = mapItem.second;
@@ -465,7 +465,7 @@ bsoncxx::builder::basic::document MongodbClient::documentConstructor_(
   // Here we use the basic builder instead of stream builder
   // The efficiency of different construction methods is shown on the web
   // https://www.nuomiphp.com/eplan/2742.html
-  (DocumentAppendItem_(&document, std::get<Is>(fields), std::get<Is>(values)),
+  (DocumentAppendItem_(document, std::get<Is>(fields), std::get<Is>(values)),
    ...);
   return document;
 }
@@ -539,6 +539,7 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
                                    Ctld::Account* account) {
   try {
     account->deleted = account_view["deleted"].get_bool().value;
+    account->enable = account_view["enable"].get_bool().value;
     account->name = account_view["name"].get_string().value;
     account->description = account_view["description"].get_string().value;
     for (auto&& user : account_view["users"].get_array().value) {
@@ -564,14 +565,15 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
 
 bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
     const Ctld::Account& account) {
-  std::array<std::string, 9> fields{
-      "deleted",         "name",           "description",       "users",
-      "child_accounts",  "parent_account", "allowed_partition", "default_qos",
-      "allowed_qos_list"};
-  std::tuple<bool, std::string, std::string, std::list<std::string>,
+  std::array<std::string, 10> fields{
+      "deleted",     "enable",          "name",           "description",
+      "users",       "child_accounts",  "parent_account", "allowed_partition",
+      "default_qos", "allowed_qos_list"};
+  std::tuple<bool, bool, std::string, std::string, std::list<std::string>,
              std::list<std::string>, std::string, std::list<std::string>,
              std::string, std::list<std::string>>
       values{false,
+             account.enable,
              account.name,
              account.description,
              account.users,
@@ -590,6 +592,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->deleted = qos_view["deleted"].get_bool().value;
     qos->name = qos_view["name"].get_string().value;
     qos->description = qos_view["description"].get_string().value;
+    qos->reference_count = qos_view["reference_count"].get_int32().value;
     qos->priority = qos_view["priority"].get_int32().value;
     qos->max_jobs_per_user = qos_view["max_jobs_per_user"].get_int64().value;
     qos->max_cpus_per_user = qos_view["max_cpus_per_user"].get_int64().value;
@@ -602,21 +605,23 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 7> fields{"deleted",
+  std::array<std::string, 8> fields{"deleted",
                                     "name",
                                     "description",
+                                    "reference_count",
                                     "priority",
                                     "max_jobs_per_user",
                                     "max_cpus_per_user",
                                     "max_time_limit_per_task"};
-  std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t>
-      values{false,
-             qos.name,
-             qos.description,
-             qos.priority,
-             qos.max_jobs_per_user,
-             qos.max_cpus_per_user,
-             absl::ToInt64Seconds(qos.max_time_limit_per_task)};
+  std::tuple<bool, std::string, std::string, int, int, int64_t , int64_t , int64_t> values{
+      false,
+      qos.name,
+      qos.description,
+      qos.reference_count,
+      qos.priority,
+      qos.max_jobs_per_user,
+      qos.max_cpus_per_user,
+      absl::ToInt64Seconds(qos.max_time_limit_per_task)};
 
   return DocumentConstructor_(fields, values);
 }

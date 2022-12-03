@@ -126,7 +126,7 @@ class MongodbClient {
   bool CheckDefaultRootAccountUserAndInit_();
 
   template <typename V>
-  void DocumentAppendItem_(document* doc, const std::string& key,
+  void DocumentAppendItem_(document& doc, const std::string& key,
                            const V& value);
 
   template <typename... Ts, std::size_t... Is>
@@ -175,11 +175,11 @@ class MongodbClient {
 
 template <>
 void MongodbClient::DocumentAppendItem_<std::list<std::string>>(
-    document* doc, const std::string& key, const std::list<std::string>& value);
+    document& doc, const std::string& key, const std::list<std::string>& value);
 
 template <>
 void MongodbClient::DocumentAppendItem_<MongodbClient::PartitionQosMap>(
-    document* doc, const std::string& key,
+    document& doc, const std::string& key,
     const MongodbClient::PartitionQosMap& value);
 
 }  // namespace Ctld

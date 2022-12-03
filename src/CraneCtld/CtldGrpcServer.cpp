@@ -75,8 +75,16 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
                                                          task->partition_id)) {
     response->set_ok(false);
     response->set_reason(fmt::format(
-        "The user:{} don't have access to submit task in partition:{}",
+        "The user '{}' don't have access to submit task in partition '{}'",
         task->uid, task->partition_id));
+    return grpc::Status::OK;
+  }
+
+  if (!g_account_manager->CheckAccountEnableState(task->Account())) {
+    response->set_ok(false);
+    response->set_reason(
+        fmt::format("The account '{}' or the Ancestor account is disabled",
+                    task->Account()));
     return grpc::Status::OK;
   }
 
