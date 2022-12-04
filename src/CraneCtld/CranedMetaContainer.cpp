@@ -443,13 +443,6 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       if (!found) continue;
     }
 
-    if (query_down_nodes &&
-        part_meta.partition_global_meta.alive_craned_cnt > 0)
-      continue;
-    if (query_responding_nodes &&
-        part_meta.partition_global_meta.alive_craned_cnt <= 0)
-      continue;
-
     auto* part_craned_info = partition_craned_list->Add();
     part_craned_info->set_name(part_meta.partition_global_meta.name);
     if (part_craned_info->name() == g_config.DefaultPartition) {
@@ -491,11 +484,11 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       auto& alloc_res_in_use = craned_meta.res_in_use.allocatable_resource;
       auto& alloc_res_avail = craned_meta.res_avail.allocatable_resource;
 
-      //
-
       if (!set_query_states.empty()) {
         if (craned_meta.alive) {
-          if (query_down_nodes) continue;
+          if (query_down_nodes &&
+              part_meta.partition_global_meta.alive_craned_cnt > 0)
+            continue;
           if (alloc_res_in_use.cpu_count == 0 &&
               alloc_res_in_use.memory_bytes == 0) {
             if (std::find(set_query_states.begin(), set_query_states.end(),
@@ -531,7 +524,9 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
         }
       } else {
         if (craned_meta.alive) {
-          if (query_down_nodes) continue;
+          if (query_down_nodes &&
+              part_meta.partition_global_meta.alive_craned_cnt > 0)
+            continue;
           if (alloc_res_in_use.cpu_count == 0 &&
               alloc_res_in_use.memory_bytes == 0) {
             idle_craned_list->set_craned_num(idle_craned_list->craned_num() +
@@ -549,7 +544,9 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
             mix_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
           }
         } else {
-          if (query_responding_nodes) continue;
+          if (query_responding_nodes &&
+              part_meta.partition_global_meta.alive_craned_cnt <= 0)
+            continue;
           down_craned_list->set_craned_num(down_craned_list->craned_num() + 1);
           down_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
         }
