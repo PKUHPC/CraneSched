@@ -39,32 +39,28 @@ class MongodbClient {
   void Init();
 
   /* ----- Method of operating the job table ----------- */
-  bool GetMaxExistingJobId(uint64_t* job_id);
-
-  bool GetLastInsertId(int64_t* id);
-
-  bool InsertJob(int64_t* job_db_inx, uint64_t mod_timestamp,
-                 const std::string& account, uint32_t cpu,
-                 uint64_t memory_bytes, const std::string& job_name,
-                 const std::string& env, uint32_t id_job, uid_t id_user,
-                 uid_t id_group, const std::string& nodelist,
+  bool InsertJob(task_id_t task_id, task_db_id_t task_db_id,
+                 uint64_t mod_timestamp, const std::string& account,
+                 uint32_t cpu, uint64_t memory_bytes,
+                 const std::string& job_name, const std::string& env,
+                 uid_t id_user, uid_t id_group, const std::string& nodelist,
                  uint32_t nodes_alloc, const std::string& node_inx,
                  const std::string& partition_name, uint32_t priority,
                  uint64_t submit_timestamp, const std::string& script,
                  uint32_t state, uint32_t timelimit,
-                 const std::string& work_dir,
-                 const crane::grpc::TaskToCtld& task_to_ctld);
+                 const std::string& work_dir);
 
   bool FetchJobRecordsWithStates(
       std::list<TaskInCtld>* task_list,
       const std::list<crane::grpc::TaskStatus>& states);
 
-  bool UpdateJobRecordField(uint64_t job_db_inx, const std::string& field_name,
-                            const std::string& val);
+  [[deprecated]] bool UpdateJobRecordField(uint64_t job_db_inx,
+                                           const std::string& field_name,
+                                           const std::string& val);
 
-  bool UpdateJobRecordFields(uint64_t job_db_inx,
-                             const std::list<std::string>& field_name,
-                             const std::list<std::string>& val);
+  [[deprecated]] bool UpdateJobRecordFields(
+      uint64_t job_db_inx, const std::list<std::string>& field_name,
+      const std::list<std::string>& val);
 
   bool CheckTaskDbIdExisted(int64_t task_db_id);
 
@@ -148,6 +144,7 @@ class MongodbClient {
       const char* msg,
       const std::source_location loc = std::source_location::current()) {
     CRANE_ERROR_LOC(loc, "MongodbError: {}\n", msg);
+  }
 
   template <typename V>
   void DocumentAppendItem_(document* doc, const std::string& key,

@@ -32,7 +32,7 @@ grpc::Status CraneCtldServiceImpl::AllocateInteractiveTask(
 
   // Todo: Eliminate useless allocation here when err!=kOk.
   uint32_t task_id;
-  err = g_task_scheduler->SubmitTask(std::move(task), false, &task_id);
+  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
 
   if (err == CraneErr::kOk) {
     response->set_ok(true);
@@ -95,7 +95,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   }
 
   uint32_t task_id;
-  err = g_task_scheduler->SubmitTask(std::move(task), false, &task_id);
+  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
   if (err == CraneErr::kOk) {
     response->set_ok(true);
     response->set_task_id(task_id);

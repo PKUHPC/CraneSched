@@ -9,7 +9,6 @@
 #include <evrpc.h>
 #include <grp.h>
 #include <grpc++/grpc++.h>
-#include <spdlog/spdlog.h>
 #include <sys/eventfd.h>
 #include <sys/wait.h>
 

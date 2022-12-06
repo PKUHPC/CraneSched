@@ -2,6 +2,10 @@
 
 #include <source_location>
 
+#define SPDLOG_ACTIVE_LEVEL CRANE_LOG_LEVEL
+
+#include <spdlog/spdlog.h>
+
 #include "PublicHeader.h"
 
 #define CRANE_LOG_LEVEL_TRACE SPDLOG_LEVEL_TRACE

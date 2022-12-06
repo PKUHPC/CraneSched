@@ -41,10 +41,16 @@ class EmbeddedDbClient {
       std::numeric_limits<db_id_t>::max() - 0;
   inline static constexpr db_id_t s_pending_tail_db_id_ =
       std::numeric_limits<db_id_t>::max() - 1;
+
   inline static constexpr db_id_t s_running_head_db_id_ =
       std::numeric_limits<db_id_t>::max() - 2;
   inline static constexpr db_id_t s_running_tail_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 3;
+      std::numeric_limits<db_id_t>::max() - 4;
+
+  inline static constexpr db_id_t s_ended_head_db_id_ =
+      std::numeric_limits<db_id_t>::max() - 5;
+  inline static constexpr db_id_t s_ended_tail_db_id_ =
+      std::numeric_limits<db_id_t>::max() - 6;
 
   inline static DbQueueDummyHead s_pending_queue_head_{
       .db_id = s_pending_head_db_id_};
@@ -56,6 +62,11 @@ class EmbeddedDbClient {
   inline static DbQueueDummyTail s_running_queue_tail_{
       .db_id = s_running_tail_db_id_};
 
+  inline static DbQueueDummyHead s_ended_queue_head_{.db_id =
+                                                         s_running_head_db_id_};
+  inline static DbQueueDummyTail s_ended_queue_tail_{.db_id =
+                                                         s_running_tail_db_id_};
+
  public:
   EmbeddedDbClient() = default;
   ~EmbeddedDbClient();
@@ -66,9 +77,11 @@ class EmbeddedDbClient {
       const crane::grpc::TaskToCtld& task_to_ctld,
       crane::grpc::PersistedPartOfTaskInCtld* persisted_part);
 
-  bool DeleteTaskByDbId(db_id_t db_id);
+  bool MovePendingOrRunningTaskToEnded(db_id_t db_id);
 
-  bool MoveTaskFromPendingToRunning(db_id_t task_db_id);
+  bool MoveTaskFromPendingToRunning(db_id_t db_id);
+
+  bool PurgeTaskFromEnded(db_id_t db_id);
 
   bool GetPendingQueueCopy(std::list<crane::grpc::TaskInEmbeddedDb>* list) {
     absl::MutexLock l(&m_queue_mtx_);
@@ -80,11 +93,10 @@ class EmbeddedDbClient {
     return GetQueueCopyNoLock_(m_running_queue_, list) == UNQLITE_OK;
   }
 
-  bool GetMarkedDbId(db_id_t* db_id);
-
-  bool SetMarkedDbId(db_id_t db_id);
-
-  bool UnsetMarkedDbId();
+  bool GetEndedQueueCopy(std::list<crane::grpc::TaskInEmbeddedDb>* list) {
+    absl::MutexLock l(&m_queue_mtx_);
+    return GetQueueCopyNoLock_(m_ended_queue_, list) == UNQLITE_OK;
+  }
 
   bool FetchTaskDataInDb(db_id_t db_id, TaskInEmbeddedDb* task_in_db);
 
@@ -109,17 +121,21 @@ class EmbeddedDbClient {
 
   // Helper functions for the queue structure in the embedded db.
 
-  static std::unordered_map<db_id_t, DbQueueNode>::iterator
-  FindDbQueueNodeInRamQueueNoLock_(db_id_t db_id,
-                                   std::unordered_map<db_id_t, DbQueueNode>& q);
+  static std::unordered_map<db_id_t, DbQueueNode>::const_iterator
+  FindDbQueueNodeInRamQueueNoLock_(
+      db_id_t db_id, std::unordered_map<db_id_t, DbQueueNode> const& q);
 
   // -----------
 
   // Helper functions for the queue structure in the embedded db.
 
-  int InsertBeforeDbQueueNodeNoLockAndTxn_(db_id_t db_id, db_id_t pos);
+  int InsertBeforeDbQueueNodeNoLockAndTxn_(
+      db_id_t db_id, db_id_t pos, std::unordered_map<db_id_t, DbQueueNode>* q,
+      DbQueueDummyHead* q_head, DbQueueDummyTail* q_tail);
 
-  int DeleteDbQueueNodeNoLockAndTxn_(db_id_t db_id);
+  int DeleteDbQueueNodeInRamQueueNoLockAndTxn_(
+      db_id_t db_id, std::unordered_map<db_id_t, DbQueueNode>* q,
+      DbQueueDummyHead* q_head, DbQueueDummyTail* q_tail);
 
   int ForEachInDbQueueNoLockAndTxn_(DbQueueDummyHead dummy_head,
                                     DbQueueDummyTail dummy_tail,
@@ -135,6 +151,32 @@ class EmbeddedDbClient {
   inline int FetchTaskDataInDbAtomic_(db_id_t db_id,
                                       TaskInEmbeddedDb* task_in_db) {
     return FetchTypeFromDb_(GetDbQueueNodeDataName_(db_id), task_in_db);
+  }
+
+  template <std::integral T>
+  int FetchTypeFromDbOrInitWithValueNoLockAndTxn_(std::string const& key,
+                                                  T* buf, T value) {
+    int rc;
+
+    rc = FetchTypeFromDb_(key, buf);
+    if (rc != UNQLITE_OK) {
+      if (rc == UNQLITE_NOTFOUND) {
+        CRANE_TRACE(
+            "Key {} not found in embedded db. Initialize it with value {}", key,
+            value);
+
+        rc = StoreTypeIntoDb_(key, &value);
+        if (rc != UNQLITE_OK) {
+          CRANE_ERROR("Failed to init {} in db. Code: {}. Msg: {}", key, rc,
+                      GetInternalErrorStr_());
+          return rc;
+        }
+        *buf = value;
+      } else
+        CRANE_ERROR("Failed to fetch {} from db. Code: {}. Msg: {}", key, rc,
+                    GetInternalErrorStr_());
+    }
+    return rc;
   }
 
   int FetchTypeFromDb_(std::string const& key, std::string* buf) {
@@ -296,10 +338,8 @@ class EmbeddedDbClient {
 
   std::unordered_map<db_id_t, DbQueueNode> m_pending_queue_;
   std::unordered_map<db_id_t, DbQueueNode> m_running_queue_;
+  std::unordered_map<db_id_t, DbQueueNode> m_ended_queue_;
   absl::Mutex m_queue_mtx_;
-
-  task_db_id_t m_marked_db_id_{-1};
-  absl::Mutex m_marked_db_id_mtx_;
 
   std::string m_db_path_;
   unqlite* m_db_{nullptr};

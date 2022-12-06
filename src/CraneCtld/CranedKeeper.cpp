@@ -188,7 +188,7 @@ CranedKeeper::~CranedKeeper() {
   // Tag pool's destructor will free all trailing tags in cq.
 }
 
-void CranedKeeper::RegisterCraneds(
+void CranedKeeper::InitAndRegisterCraneds(
     std::list<CranedAddrAndId> node_addr_id_list) {
   util::lock_guard guard(m_unavail_craned_list_mtx_);
 

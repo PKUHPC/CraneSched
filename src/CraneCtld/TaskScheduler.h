@@ -137,14 +137,16 @@ class TaskScheduler {
   using HashSet = absl::flat_hash_set<K>;
 
  public:
-  explicit TaskScheduler(std::unique_ptr<INodeSelectionAlgo> algo);
+  explicit TaskScheduler(std::unique_ptr<INodeSelectionAlgo> algo)
+      : m_node_selection_algo_(std::move(algo)) {}
 
   ~TaskScheduler();
 
+  bool Init();
+
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
-  CraneErr SubmitTask(std::unique_ptr<TaskInCtld> task, bool resubmit,
-                      uint32_t* task_id);
+  CraneErr SubmitTask(std::unique_ptr<TaskInCtld> task, uint32_t* task_id);
 
   void TaskStatusChange(uint32_t task_id, uint32_t craned_index,
                         crane::grpc::TaskStatus new_status,
@@ -165,23 +167,32 @@ class TaskScheduler {
 
   CraneErr TerminateRunningTask(uint32_t task_id) {
     LockGuard running_guard(m_running_task_map_mtx_);
-    LockGuard ended_guard(m_ended_task_map_mtx_);
     return TerminateRunningTaskNoLock_(task_id);
   }
 
  private:
   void ScheduleThread_();
 
-  void CleanEndedTaskThread_();
+  CraneErr RequeueRecoveredTask_(std::unique_ptr<TaskInCtld> task);
 
   bool QueryCranedIdOfRunningTaskNoLock_(uint32_t task_id, CranedId* node_id);
+
+  /**
+   * @brief task->partition will be set if kOk is returned.
+   * @return kOk if the task can be scheduled.
+   */
+  static CraneErr CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task);
+
+  static void TransferTaskToMongodb_(TaskInCtld* task);
+
+  static void RestoreTaskInCtldFromTaskInEmbeddedDb_(
+      TaskInEmbeddedDb const& task_in_embedded_db, TaskInCtld* task_in_ctld);
 
   CraneErr TerminateRunningTaskNoLock_(uint32_t task_id);
 
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 
   boost::uuids::random_generator_mt19937 m_uuid_gen_;
-  uint32_t m_next_task_id_;
 
   // Ordered by task id. Those who comes earlier are in the head,
   // Because they have smaller task id.
@@ -192,10 +203,6 @@ class TaskScheduler {
   HashMap<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>> m_running_task_map_
       GUARDED_BY(m_running_task_map_mtx_);
   Mutex m_running_task_map_mtx_;
-
-  HashMap<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>> m_ended_task_map_
-      GUARDED_BY(m_ended_task_map_mtx_);
-  Mutex m_ended_task_map_mtx_;
 
   HashMap<uint32_t /*Task Db Id*/, std::unique_ptr<TaskInEmbeddedDb>>
       m_persisted_task_map_ GUARDED_BY(m_persisted_task_map_mtx_);
@@ -209,7 +216,6 @@ class TaskScheduler {
   Mutex m_task_indexes_mtx_;
 
   std::thread m_schedule_thread_;
-  std::thread m_clean_ended_thread_;
   std::atomic_bool m_thread_stop_{};
 };
 

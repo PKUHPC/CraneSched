@@ -16,7 +16,7 @@
 #include "crane/PublicHeader.h"
 
 #if Boost_MINOR_VERSION >= 71
-#include <boost/uuid/uuid_hash.hpp>
+#  include <boost/uuid/uuid_hash.hpp>
 #endif
 
 namespace Ctld {
@@ -24,9 +24,7 @@ namespace Ctld {
 using task_id_t = uint32_t;
 using task_db_id_t = int64_t;
 
-constexpr uint64_t kTaskScheduleIntervalMs = 1000;       // Todo: Add comment
-constexpr uint64_t kEndedTaskCleanIntervalSeconds = 1;   // Todo: Add comment
-constexpr uint64_t kEndedTaskKeepingTimeSeconds = 3600;  // Todo: Add comment
+constexpr uint64_t kTaskScheduleIntervalMs = 1000;
 
 struct InteractiveTaskAllocationDetail {
   uint32_t craned_index;
@@ -108,7 +106,7 @@ struct BatchMetaInTask {
 };
 
 struct TaskInCtld {
-  /* -------- Fields that are set at the submission time. ------- */
+  /* -------- [1] Fields that are set at the submission time. ------- */
   absl::Duration time_limit;
 
   std::string partition_name;
@@ -124,7 +122,7 @@ struct TaskInCtld {
   uint32_t ntasks_per_node{0};
   double cpus_per_task{0.0};
 
-  bool requeue_if_failed;
+  bool requeue_if_failed{false};
 
   std::string cmd_line;
   std::string env;
@@ -132,24 +130,25 @@ struct TaskInCtld {
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
+  /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::TaskToCtld task_to_ctld;
 
   /* ------ currently useless fields -------- */
   std::string account;
 
-  /* --------
+  /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
    * Also, these fields are persisted on the disk.
-   * -------- */
+   * ------------------------------- */
   task_id_t task_id;
   task_db_id_t task_db_id;
   uint32_t partition_id;
   gid_t gid;
 
-  /* -----------
+  /* ----------- [3] ----------------
    * Fields that may change at run time.
    * Also, these fields are persisted on the disk.
-   * ----------- */
+   * -------------------------------- */
   int32_t requeue_count{0};
 
   /* -----------
@@ -238,6 +237,9 @@ struct Config {
 
   std::string CraneCtldDebugLevel;
   std::string CraneCtldLogFile;
+
+  std::string CraneCtldDbPath;
+
   bool CraneCtldForeground{};
 
   std::string Hostname;

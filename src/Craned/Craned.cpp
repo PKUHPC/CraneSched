@@ -1,8 +1,5 @@
 #include <absl/strings/str_split.h>
 #include <event2/thread.h>
-#include <spdlog/async.h>
-#include <spdlog/sinks/rotating_file_sink.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
@@ -20,6 +17,14 @@
 #include "crane/Network.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
+
+// Include the header which defines the static log level
+#include "crane/Logger.h"
+
+// Must be after crane/Logger.h which defines the static log level
+#include <spdlog/async.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 using Craned::g_config;
 using Craned::Node;

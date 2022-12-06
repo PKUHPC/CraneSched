@@ -1,5 +1,6 @@
 #pragma once
 
+#include <absl/synchronization/blocking_counter.h>
 #include <grpc++/alarm.h>
 #include <grpc++/completion_queue.h>
 #include <grpc++/grpc++.h>
@@ -75,7 +76,7 @@ class CranedKeeper {
 
   ~CranedKeeper();
 
-  void RegisterCraneds(std::list<CranedAddrAndId> node_addr_id_list);
+  void InitAndRegisterCraneds(std::list<CranedAddrAndId> node_addr_id_list);
 
   uint32_t AvailableCranedCount();
 

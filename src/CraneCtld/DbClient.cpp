@@ -51,65 +51,27 @@ void MongodbClient::Init() {
   m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
 }
 
-bool MongodbClient::GetMaxExistingJobId(uint64_t* job_id) {
-#warning O(1)
-  //  *job_id = m_job_collection->count_documents({});
-  mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].find({});
-  *job_id = 0;
-  for (auto view : cursor) {
-    uint64_t id =
-        std::strtoul(view["job_db_inx"].get_string().value.data(), nullptr, 10);
-    if (id > *job_id) *job_id = id;
-  }
-  return true;
-}
-
-bool MongodbClient::GetLastInsertId(uint64_t* id) {
-#warning O(1)
-  //  *id = m_job_collection->count_documents({});
-  mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].find({});
-  *id = 0;
-  for (auto view : cursor) {
-    *id =
-        std::strtoul(view["job_db_inx"].get_string().value.data(), nullptr, 10);
-  }
-  return true;
-}
-
 bool MongodbClient::InsertJob(
-    int64_t* job_db_inx, uint64_t mod_timestamp, const std::string& account,
-    uint32_t cpu, uint64_t memory_bytes, const std::string& job_name,
-    const std::string& env, uint32_t id_job, uid_t id_user, uid_t id_group,
-    const std::string& nodelist, uint32_t nodes_alloc,
+    task_id_t task_id, task_db_id_t task_db_id, uint64_t mod_timestamp,
+    const std::string& account, uint32_t cpu, uint64_t memory_bytes,
+    const std::string& job_name, const std::string& env, uid_t id_user,
+    uid_t id_group, const std::string& nodelist, uint32_t nodes_alloc,
     const std::string& node_inx, const std::string& partition_name,
     uint32_t priority, uint64_t submit_timestamp, const std::string& script,
-    uint32_t state, uint32_t timelimit, const std::string& work_dir,
-    const crane::grpc::TaskToCtld& task_to_ctld) {
-  int64_t last_id;
-  if (!GetLastInsertId(&last_id)) {
-    PrintError_("Failed to GetLastInsertId");
-    return false;
-  }
-  *job_db_inx = last_id + 1;
-
-  std::string task_to_ctld_str;
-  task_to_ctld.SerializeToString(&task_to_ctld_str);
-
+    uint32_t state, uint32_t timelimit, const std::string& work_dir) {
   auto builder = bsoncxx::builder::stream::document{};
   // Different from mariadb, the data type of each attribute column in mongodb
   // depends on the data type at the time of insertion. Since the function
   // UpdateJobRecordFields  treats all attributes indiscriminately, you need to
   // use the string data type for all attributes
   bsoncxx::document::value doc_value =
-      builder << "job_db_inx" << std::to_string(last_id + 1) << "mod_time"
+      builder << "task_db_id" << task_db_id << "mod_time"
               << std::to_string(mod_timestamp) << "deleted"
               << "0"
               << "account" << account << "cpus_req" << std::to_string(cpu)
               << "mem_req" << std::to_string(memory_bytes) << "job_name"
-              << job_name << "env" << env << "id_job" << std::to_string(id_job)
-              << "id_user" << std::to_string(id_user) << "id_group"
+              << job_name << "env" << env << "id_user"
+              << std::to_string(id_user) << "id_group"
               << std::to_string(id_group) << "nodelist" << nodelist
               << "nodes_alloc" << std::to_string(nodes_alloc) << "node_inx"
               << node_inx << "partition_name" << partition_name << "priority"
@@ -124,7 +86,6 @@ bool MongodbClient::InsertJob(
               << "script" << script << "state" << std::to_string(state)
               << "timelimit" << std::to_string(timelimit) << "time_submit"
               << std::to_string(submit_timestamp) << "work_dir" << work_dir
-              << "task_to_ctld" << task_to_ctld_str
               << bsoncxx::builder::stream::finalize;
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret;
@@ -159,8 +120,8 @@ bool MongodbClient::FetchJobRecordsWithStates(
       (*GetClient_())[m_db_name_][m_job_collection_name_].find(
           doc_value.view());
 
-  // 0  job_db_inx    mod_time       deleted       account     cpus_req
-  // 5  mem_req       job_name       env           id_job      id_user
+  // 0  task_id       task_id        mod_time       deleted       account
+  // 5  cpus_req      mem_req        job_name       env           id_user
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
@@ -169,7 +130,7 @@ bool MongodbClient::FetchJobRecordsWithStates(
   for (auto view : cursor) {
     Ctld::TaskInCtld task;
     task.task_db_id =
-        std::strtoul(view["job_db_inx"].get_string().value.data(), nullptr, 10);
+        std::strtoul(view["task_db_id"].get_string().value.data(), nullptr, 10);
     task.resources.allocatable_resource.cpu_count =
         std::strtol(view["cpus_req"].get_string().value.data(), nullptr, 10);
 
@@ -179,7 +140,7 @@ bool MongodbClient::FetchJobRecordsWithStates(
     task.name = view["job_name"].get_string().value;
     task.env = view["env"].get_string().value;
     task.task_id =
-        std::strtol(view["id_job"].get_string().value.data(), nullptr, 10);
+        std::strtol(view["task_id"].get_string().value.data(), nullptr, 10);
     task.uid =
         std::strtol(view["id_user"].get_string().value.data(), nullptr, 10);
     task.gid =
@@ -201,8 +162,6 @@ bool MongodbClient::FetchJobRecordsWithStates(
     task.cwd = view["work_dir"].get_string().value;
     if (view["submit_line"])
       task.cmd_line = view["submit_line"].get_string().value;
-    task.task_to_ctld.ParseFromString(
-        view["task_to_ctld"].get_string().value.data());
 
     task_list->emplace_back(std::move(task));
   }
@@ -248,7 +207,7 @@ bool MongodbClient::UpdateJobRecordFields(
                     << bsoncxx::builder::stream::finalize;
 
   document filter;
-  filter.append(kvp("job_db_inx", std::to_string(job_db_inx)));
+  filter.append(kvp("task_db_id", std::to_string(job_db_inx)));
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
       (*GetClient_())[m_db_name_][m_job_collection_name_].update_one(
           filter.view(), doc_value.view());

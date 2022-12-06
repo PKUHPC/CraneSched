@@ -1,8 +1,5 @@
 #include <absl/strings/ascii.h>
 #include <event2/thread.h>
-#include <spdlog/async.h>
-#include <spdlog/sinks/rotating_file_sink.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
@@ -20,9 +17,18 @@
 #include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
 #include "DbClient.h"
+#include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
+
+// Include the header which defines the static log level
+#include "crane/Logger.h"
+
+// Must be after crane/Logger.h which defines the static log level
+#include <spdlog/async.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 void ParseConfig(int argc, char** argv) {
   if (std::filesystem::exists(kDefaultConfigPath)) {
@@ -99,6 +105,12 @@ void ParseConfig(int argc, char** argv) {
             config["CraneCtldLogFile"].as<std::string>();
       else
         g_config.CraneCtldLogFile = "/tmp/cranectld/cranectld.log";
+
+      if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
+        g_config.CraneCtldDbPath = g_config.CraneCtldLogFile =
+            config["CraneCtldDbPath"].as<std::string>();
+      else
+        g_config.CraneCtldDbPath = "/tmp/cranectld/unqlite.db";
 
       if (config["DbUser"] && !config["DbUser"].IsNull()) {
         g_config.DbUser = config["DbUser"].as<std::string>();
@@ -351,6 +363,14 @@ void InitializeCtldGlobalVariables() {
   g_meta_container = std::make_unique<CranedMetaContainerSimpleImpl>();
   g_meta_container->InitFromConfig(g_config);
 
+  bool ok;
+  g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
+  ok = g_embedded_db_client->Init(g_config.CraneCtldDbPath);
+  if (!ok) {
+    CRANE_ERROR("Failed to initialize g_embedded_db_client.");
+    std::exit(1);
+  }
+
   g_craned_keeper = std::make_unique<CranedKeeper>();
   std::list<CranedAddrAndId> addr_and_id_list;
   for (auto& kv : g_config.Nodes) {
@@ -365,32 +385,67 @@ void InitializeCtldGlobalVariables() {
           kv.first);
     }
   }
-  g_craned_keeper->RegisterCraneds(std::move(addr_and_id_list));
+
+  using namespace std::chrono_literals;
+
+  // TaskScheduler will always recovery pending or running tasks since last
+  // failure, it might be reasonable to wait some time (1s) for all healthy
+  // craned nodes (most of the time all the craned nodes are healthy) to be
+  // online or to wait for the connections to some offline craned nodes to time
+  // out. Otherwise, recovered pending or running tasks may always fail to be
+  // re-queued.
+  std::chrono::time_point<std::chrono::system_clock> wait_end_point =
+      std::chrono::system_clock::now() + 1s;
+  size_t to_registered_craneds_cnt = g_config.Nodes.size();
+
+  g_craned_keeper->InitAndRegisterCraneds(std::move(addr_and_id_list));
+  while (true) {
+    auto online_cnt = g_craned_keeper->AvailableCranedCount();
+    if (online_cnt >= to_registered_craneds_cnt) break;
+
+    std::this_thread::sleep_for(20ms);
+    if (std::chrono::system_clock::now() > wait_end_point) {
+      CRANE_INFO(
+          "Waiting all craned node to be online timed out. Continuing. "
+          "{} craned is online. Total: {}.",
+          online_cnt, to_registered_craneds_cnt);
+      break;
+    }
+  }
 
   g_task_scheduler =
       std::make_unique<TaskScheduler>(std::make_unique<MinLoadFirst>());
+
+  g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
 }
 
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
   g_craned_keeper.reset();
+  g_embedded_db_client.reset();
+}
+
+void CreateFolders() {
+  auto create_folders_for_path = [](std::string const& p) {
+    try {
+      std::filesystem::path log_path{p};
+      auto log_dir = log_path.parent_path();
+      if (!std::filesystem::exists(log_dir))
+        std::filesystem::create_directories(log_dir);
+    } catch (const std::exception& e) {
+      CRANE_ERROR("Failed to create folder for {}: {}", p, e.what());
+      std::exit(1);
+    }
+  };
+
+  create_folders_for_path(g_config.CraneCtldLogFile);
+  create_folders_for_path(g_config.CraneCtldDbPath);
 }
 
 int StartServer() {
-  // Create log directory recursively.
-  try {
-    std::filesystem::path log_path{g_config.CraneCtldLogFile};
-    auto log_dir = log_path.parent_path();
-    if (!std::filesystem::exists(log_dir))
-      std::filesystem::create_directories(log_dir);
-  } catch (const std::exception& e) {
-    CRANE_ERROR("Invalid CraneCtldLogFile path {}: {}",
-                g_config.CraneCtldLogFile, e.what());
-  }
+  CreateFolders();
 
   InitializeCtldGlobalVariables();
-
-  g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
 
   g_ctld_server->Wait();
 

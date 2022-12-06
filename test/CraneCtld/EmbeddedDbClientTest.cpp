@@ -106,6 +106,7 @@ TEST_F(EmbeddedDbClientTest, LinkList) {
                   constexpr std::array<Ctld::task_db_id_t, 2> arr{2, 0};
                   EXPECT_EQ(kv.second.db_id, arr[i++]);
                 });
+  ASSERT_EQ(i, 2);
 
   i = 0;
   std::list<TaskInEmbeddedDb> running_list;
@@ -120,6 +121,7 @@ TEST_F(EmbeddedDbClientTest, LinkList) {
                   constexpr std::array<Ctld::task_db_id_t, 2> arr{3, 1};
                   EXPECT_EQ(kv.second.db_id, arr[i++]);
                 });
+  ASSERT_EQ(i, 2);
 
   i = 0;
   rc = g_embedded_db_client->ForEachInDbQueueNoLockAndTxn_(
@@ -131,6 +133,7 @@ TEST_F(EmbeddedDbClientTest, LinkList) {
         EXPECT_EQ(node.db_id, arr[i++]);
       });
   ASSERT_EQ(rc, UNQLITE_OK);
+  ASSERT_EQ(i, 2);
 
   i = 0;
   rc = g_embedded_db_client->ForEachInDbQueueNoLockAndTxn_(
@@ -142,23 +145,7 @@ TEST_F(EmbeddedDbClientTest, LinkList) {
         EXPECT_EQ(node.db_id, arr[i++]);
       });
   ASSERT_EQ(rc, UNQLITE_OK);
-
-  task_db_id_t db_id;
-  ok = g_embedded_db_client->GetMarkedDbId(&db_id);
-  ASSERT_FALSE(ok);
-
-  ok = g_embedded_db_client->SetMarkedDbId(1);
-  ASSERT_TRUE(ok);
-
-  ok = g_embedded_db_client->GetMarkedDbId(&db_id);
-  ASSERT_TRUE(ok);
-  ASSERT_EQ(db_id, 1);
-
-  ok = g_embedded_db_client->UnsetMarkedDbId();
-  ASSERT_TRUE(ok);
-
-  ok = g_embedded_db_client->GetMarkedDbId(&db_id);
-  ASSERT_FALSE(ok);
+  ASSERT_EQ(i, 2);
 
   TaskInEmbeddedDb task_in_embedded_db;
   rc = g_embedded_db_client->FetchTaskDataInDbAtomic_(3, &task_in_embedded_db);
@@ -168,16 +155,31 @@ TEST_F(EmbeddedDbClientTest, LinkList) {
   ASSERT_EQ(task_in_embedded_db.task_to_ctld().name(), "Task3");
 
   task_in_embedded_db.Clear();
-  ok = g_embedded_db_client->DeleteTaskByDbId(3);
+  ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(3);
   ASSERT_TRUE(ok);
   rc = g_embedded_db_client->FetchTaskDataInDbAtomic_(3, &task_in_embedded_db);
-  ASSERT_EQ(rc, UNQLITE_NOTFOUND);
+  ASSERT_EQ(rc, UNQLITE_OK);
+  ASSERT_EQ(task_in_embedded_db.persisted_part().task_id(), 3);
+  ASSERT_EQ(task_in_embedded_db.persisted_part().task_db_id(), 3);
+  ASSERT_EQ(task_in_embedded_db.task_to_ctld().name(), "Task3");
 
   task_in_embedded_db.Clear();
-  ok = g_embedded_db_client->DeleteTaskByDbId(1);
+  ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(1);
   ASSERT_TRUE(ok);
   ok = g_embedded_db_client->FetchTaskDataInDb(1, &task_in_embedded_db);
-  ASSERT_FALSE(ok);
+  ASSERT_TRUE(ok);
+  ASSERT_EQ(task_in_embedded_db.persisted_part().task_id(), 1);
+  ASSERT_EQ(task_in_embedded_db.persisted_part().task_db_id(), 1);
+  ASSERT_EQ(task_in_embedded_db.task_to_ctld().name(), "Task1");
+
+  task_in_embedded_db.Clear();
+  ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(2);
+  ASSERT_TRUE(ok);
+  ok = g_embedded_db_client->FetchTaskDataInDb(2, &task_in_embedded_db);
+  ASSERT_TRUE(ok);
+  ASSERT_EQ(task_in_embedded_db.persisted_part().task_id(), 2);
+  ASSERT_EQ(task_in_embedded_db.persisted_part().task_db_id(), 2);
+  ASSERT_EQ(task_in_embedded_db.task_to_ctld().name(), "Task2");
 
   rc = g_embedded_db_client->ForEachInDbQueueNoLockAndTxn_(
       g_embedded_db_client->s_running_queue_head_,
@@ -187,4 +189,51 @@ TEST_F(EmbeddedDbClientTest, LinkList) {
         FAIL() << "No element should exist in Pending Queue.";
       });
   ASSERT_EQ(rc, UNQLITE_OK);
+
+  std::list<TaskInEmbeddedDb> ended_list;
+
+  i = 0;
+  rc = g_embedded_db_client->ForEachInDbQueueNoLockAndTxn_(
+      g_embedded_db_client->s_ended_queue_head_,
+      g_embedded_db_client->s_ended_queue_tail_,
+      [&i](EmbeddedDbClient::DbQueueNode const& node) {
+        // Ended Queue: head -> 2 -> 1 -> 3 -> tail
+        constexpr std::array<Ctld::task_db_id_t, 3> arr{2, 1, 3};
+        EXPECT_EQ(node.db_id, arr[i++]);
+      });
+  ASSERT_EQ(rc, UNQLITE_OK);
+  ASSERT_EQ(i, 3);
+
+  ok = g_embedded_db_client->PurgeTaskFromEnded(1);
+  ASSERT_TRUE(ok);
+
+  i = 0;
+  rc = g_embedded_db_client->ForEachInDbQueueNoLockAndTxn_(
+      g_embedded_db_client->s_ended_queue_head_,
+      g_embedded_db_client->s_ended_queue_tail_,
+      [&i](EmbeddedDbClient::DbQueueNode const& node) {
+        // Ended Queue: head -> 2 -> 3 -> tail
+        constexpr std::array<Ctld::task_db_id_t, 2> arr{2, 3};
+        EXPECT_EQ(node.db_id, arr[i++]);
+      });
+  ASSERT_EQ(rc, UNQLITE_OK);
+  ASSERT_EQ(i, 2);
+
+  i = 0;
+  ok = g_embedded_db_client->GetEndedQueueCopy(&ended_list);
+  ASSERT_TRUE(ok);
+  ASSERT_EQ(ended_list.size(), 2);
+  std::for_each(g_embedded_db_client->m_ended_queue_.begin(),
+                g_embedded_db_client->m_ended_queue_.end(),
+                [&i](decltype(g_embedded_db_client
+                                  ->m_ended_queue_)::value_type const& kv) {
+                  // Ended Queue: head -> 2 -> 3 -> tail
+                  constexpr std::array<Ctld::task_db_id_t, 2> arr{2, 3};
+                  EXPECT_EQ(kv.second.db_id, arr[i++]);
+                });
+  ASSERT_EQ(i, 2);
+
+  task_in_embedded_db.Clear();
+  ok = g_embedded_db_client->FetchTaskDataInDb(1, &task_in_embedded_db);
+  ASSERT_FALSE(ok);
 }
