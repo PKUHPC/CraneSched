@@ -51,52 +51,31 @@ void MongodbClient::Init() {
   m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
 }
 
-bool MongodbClient::InsertJob(
-    task_id_t task_id, task_db_id_t task_db_id, uint64_t mod_timestamp,
-    const std::string& account, uint32_t cpu, uint64_t memory_bytes,
-    const std::string& job_name, const std::string& env, uid_t id_user,
-    uid_t id_group, const std::string& nodelist, uint32_t nodes_alloc,
-    const std::string& node_inx, const std::string& partition_name,
-    uint32_t priority, uint64_t submit_timestamp, const std::string& script,
-    uint32_t state, uint32_t timelimit, const std::string& work_dir) {
-  auto builder = bsoncxx::builder::stream::document{};
-  // Different from mariadb, the data type of each attribute column in mongodb
-  // depends on the data type at the time of insertion. Since the function
-  // UpdateJobRecordFields  treats all attributes indiscriminately, you need to
-  // use the string data type for all attributes
-  bsoncxx::document::value doc_value =
-      builder << "task_db_id" << task_db_id << "mod_time"
-              << std::to_string(mod_timestamp) << "deleted"
-              << "0"
-              << "account" << account << "cpus_req" << std::to_string(cpu)
-              << "mem_req" << std::to_string(memory_bytes) << "job_name"
-              << job_name << "env" << env << "id_user"
-              << std::to_string(id_user) << "id_group"
-              << std::to_string(id_group) << "nodelist" << nodelist
-              << "nodes_alloc" << std::to_string(nodes_alloc) << "node_inx"
-              << node_inx << "partition_name" << partition_name << "priority"
-              << std::to_string(priority) << "time_eligible"
-              << "0"
-              << "time_start"
-              << "0"
-              << "time_end"
-              << "0"
-              << "time_suspended"
-              << "0"
-              << "script" << script << "state" << std::to_string(state)
-              << "timelimit" << std::to_string(timelimit) << "time_submit"
-              << std::to_string(submit_timestamp) << "work_dir" << work_dir
-              << bsoncxx::builder::stream::finalize;
+bool MongodbClient::InsertRecoveredJob(
+    const crane::grpc::TaskInEmbeddedDb& task_in_embedded_db) {
+  document doc = TaskInEmbeddedDbToDocument_(task_in_embedded_db);
 
-  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret;
-  ret = (*GetClient_())[m_db_name_][m_job_collection_name_].insert_one(
-      doc_value.view());
+  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+      (*GetClient_())[m_db_name_][m_job_collection_name_].insert_one(
+          *GetSession_(), doc.view());
 
-  if (ret == bsoncxx::stdx::nullopt) {
-    PrintError_("Failed to insert job record");
-    return false;
-  }
-  return true;
+  if (ret != bsoncxx::stdx::nullopt) return true;
+
+  PrintError_("Failed to insert in-memory TaskInCtld.");
+  return false;
+}
+
+bool MongodbClient::InsertJob(TaskInCtld* task) {
+  document doc = TaskInCtldToDocument_(task);
+
+  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+      (*GetClient_())[m_db_name_][m_job_collection_name_].insert_one(
+          *GetSession_(), doc.view());
+
+  if (ret != bsoncxx::stdx::nullopt) return true;
+
+  PrintError_("Failed to insert in-memory TaskInCtld.");
+  return false;
 }
 
 bool MongodbClient::FetchJobRecordsWithStates(
@@ -125,7 +104,7 @@ bool MongodbClient::FetchJobRecordsWithStates(
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
-  // 25 submit_line   task_to_ctld
+  // 25 submit_line
 
   for (auto view : cursor) {
     Ctld::TaskInCtld task;
@@ -626,6 +605,127 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
                                     "priority", "max_jobs_per_user"};
   std::tuple<bool, std::string, std::string, int, int> values{
       false, qos.name, qos.description, qos.priority, qos.max_jobs_per_user};
+
+  return DocumentConstructor_(fields, values);
+}
+
+MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
+    const crane::grpc::TaskInEmbeddedDb& task) {
+  auto const& task_to_ctld = task.task_to_ctld();
+  auto const& persisted_part = task.persisted_part();
+
+  // 0  task_id       task_id        mod_time       deleted       account
+  // 5  cpus_req      mem_req        task_name      env           id_user
+  // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
+  // 15 priority      time_eligible  time_start    time_end    time_suspended
+  // 20 script        state          timelimit     time_submit work_dir
+  // 25 submit_line
+
+  std::array<std::string, 26> fields{
+      "task_id",        "task_id",       "mod_time",    "deleted",
+      "account",  // 0 - 4
+      "cpus_req",       "mem_req",       "task_name",   "env",
+      "id_user",  // 5 - 9
+      "id_group",       "nodelist",      "nodes_alloc", "node_inx",
+      "partition_name",  // 10 - 14
+      "priority",       "time_eligible", "time_start",  "time_end",
+      "time_suspended",  // 15 - 19
+      "script",         "state",         "timelimit",   "time_submit",
+      "work_dir",     // 20 - 24
+      "submit_line",  // 25
+  };
+
+  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,   /*0-4*/
+             double, int64_t, std::string, std::string, int32_t,  /*5-9*/
+             int32_t, std::string, int32_t, int32_t, std::string, /*10-14*/
+             std::string, int64_t, int64_t, int64_t, int64_t,     /*15-19*/
+             std::string, int32_t, int64_t, int64_t, std::string, /*20-24*/
+             std::string>
+      values{
+          persisted_part.task_id(),
+          persisted_part.task_db_id(),
+          absl::ToUnixSeconds(absl::Now()),
+          false,
+          persisted_part.account(),
+          task_to_ctld.resources().allocatable_resource().cpu_core_limit(),
+          task_to_ctld.resources().allocatable_resource().memory_limit_bytes(),
+          task_to_ctld.name(),
+          task_to_ctld.env(),
+          task_to_ctld.uid(),
+          persisted_part.gid(),
+          "",
+          0,
+          0,
+          task_to_ctld.partition_name(),
+          0,
+          0,
+          0,
+          0,
+          0,
+          task_to_ctld.batch_meta().sh_script(),
+          crane::grpc::TaskStatus::Failed,
+          task_to_ctld.time_limit().seconds(),
+          0,
+          task_to_ctld.cwd(),
+          task_to_ctld.cmd_line()};
+
+  return DocumentConstructor_(fields, values);
+}
+
+MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
+  // 0  task_id       task_id        mod_time       deleted       account
+  // 5  cpus_req      mem_req        task_name      env           id_user
+  // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
+  // 15 priority      time_eligible  time_start    time_end    time_suspended
+  // 20 script        state          timelimit     time_submit work_dir
+  // 25 submit_line
+
+  std::array<std::string, 26> fields{
+      "task_id",        "task_id",       "mod_time",    "deleted",
+      "account",  // 0 - 4
+      "cpus_req",       "mem_req",       "task_name",   "env",
+      "id_user",  // 5 - 9
+      "id_group",       "nodelist",      "nodes_alloc", "node_inx",
+      "partition_name",  // 10 - 14
+      "priority",       "time_eligible", "time_start",  "time_end",
+      "time_suspended",  // 15 - 19
+      "script",         "state",         "timelimit",   "time_submit",
+      "work_dir",     // 20 - 24
+      "submit_line",  // 25
+  };
+
+  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,   /*0-4*/
+             double, int64_t, std::string, std::string, int32_t,  /*5-9*/
+             int32_t, std::string, int32_t, int32_t, std::string, /*10-14*/
+             std::string, int64_t, int64_t, int64_t, int64_t,     /*15-19*/
+             std::string, int32_t, int64_t, int64_t, std::string, /*20-24*/
+             std::string>
+      values{task->task_id,
+             task->task_db_id,
+             absl::ToUnixSeconds(absl::Now()),
+             false,
+             task->account,
+             task->resources.allocatable_resource.cpu_count,
+             task->resources.allocatable_resource.memory_bytes,
+             task->name,
+             task->env,
+             task->uid,
+             task->gid,
+             task->allocated_craneds_regex,
+             task->nodes_alloc,
+             0,
+             task->partition_name,
+             0,
+             0,
+             ToUnixSeconds(task->start_time),
+             ToUnixSeconds(task->end_time),
+             0,
+             std::get<BatchMetaInTask>(task->meta).sh_script,
+             task->status,
+             absl::ToInt64Seconds(task->time_limit),
+             0,
+             task->cwd,
+             task->cmd_line};
 
   return DocumentConstructor_(fields, values);
 }

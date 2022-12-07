@@ -37,6 +37,18 @@ bool TaskScheduler::Init() {
        * Todo: Check whether this task has been put into mongodb. If not, put it
        *  into mongodb.
        */
+      task_id_t task_id = task_in_embedded_db.persisted_part().task_id();
+      task_db_id_t db_id = task_in_embedded_db.persisted_part().task_db_id();
+      ok = g_db_client->CheckTaskDbIdExisted(db_id);
+      if (!ok) {
+        if (!g_db_client->InsertRecoveredJob(task_in_embedded_db)) {
+          CRANE_ERROR(
+              "Failed to call g_db_client->InsertRecoveredJob() "
+              "for task #{}",
+              task_id);
+        }
+      }
+
       g_embedded_db_client->PurgeTaskFromEnded(
           task_in_embedded_db.persisted_part().task_db_id());
     }
@@ -236,6 +248,8 @@ CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
 
   crane::grpc::PersistedPartOfTaskInCtld persisted_part;
   persisted_part.set_partition_id(task->partition_id);
+  persisted_part.set_gid(task->gid);
+  persisted_part.set_account(task->account);
 
   bool ok;
   ok = g_embedded_db_client->AppendTaskToPendingAndAdvanceTaskIds(
@@ -999,14 +1013,7 @@ void TaskScheduler::TransferTaskToMongodb_(TaskInCtld* task) {
   if (task->type == crane::grpc::Batch)
     script = std::get<BatchMetaInTask>(task->meta).sh_script;
 
-  uint64_t timestamp = ToUnixSeconds(absl::Now());
-  if (!g_db_client->InsertJob(
-          task->task_id, task->task_db_id, timestamp, task->account,
-          task->resources.allocatable_resource.cpu_count,
-          task->resources.allocatable_resource.memory_bytes, task->name,
-          task->env, task->uid, task->gid, empty_string, task->node_num,
-          empty_string, task->partition_name, zero, timestamp, script,
-          task->status, ToInt64Seconds(task->time_limit), task->cwd)) {
+  if (!g_db_client->InsertJob(task)) {
     CRANE_ERROR("Failed to call g_db_client->InsertJob() for task #{}",
                 task->task_id);
   }

@@ -39,16 +39,9 @@ class MongodbClient {
   void Init();
 
   /* ----- Method of operating the job table ----------- */
-  bool InsertJob(task_id_t task_id, task_db_id_t task_db_id,
-                 uint64_t mod_timestamp, const std::string& account,
-                 uint32_t cpu, uint64_t memory_bytes,
-                 const std::string& job_name, const std::string& env,
-                 uid_t id_user, uid_t id_group, const std::string& nodelist,
-                 uint32_t nodes_alloc, const std::string& node_inx,
-                 const std::string& partition_name, uint32_t priority,
-                 uint64_t submit_timestamp, const std::string& script,
-                 uint32_t state, uint32_t timelimit,
-                 const std::string& work_dir);
+  bool InsertRecoveredJob(
+      crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
+  bool InsertJob(TaskInCtld* task);
 
   bool FetchJobRecordsWithStates(
       std::list<TaskInCtld>* task_list,
@@ -175,6 +168,10 @@ class MongodbClient {
   void ViewToQos_(const bsoncxx::document::view& qos_view, Qos* qos);
 
   document QosToDocument_(const Qos& qos);
+
+  document TaskInCtldToDocument_(TaskInCtld* task);
+  document TaskInEmbeddedDbToDocument_(
+      crane::grpc::TaskInEmbeddedDb const& task);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_job_collection_name_{"job_table"};

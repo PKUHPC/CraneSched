@@ -133,8 +133,6 @@ struct TaskInCtld {
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::TaskToCtld task_to_ctld;
 
-  /* ------ currently useless fields -------- */
-  std::string account;
 
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
@@ -144,6 +142,7 @@ struct TaskInCtld {
   task_db_id_t task_db_id;
   uint32_t partition_id;
   gid_t gid;
+  std::string account;
 
   /* ----------- [3] ----------------
    * Fields that may change at run time.
