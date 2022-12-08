@@ -641,33 +641,34 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int64_t, int64_t, int64_t, int64_t,     /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string, /*20-24*/
              std::string>
-      values{
-          persisted_part.task_id(),
-          persisted_part.task_db_id(),
-          absl::ToUnixSeconds(absl::Now()),
-          false,
-          persisted_part.account(),
-          task_to_ctld.resources().allocatable_resource().cpu_core_limit(),
-          task_to_ctld.resources().allocatable_resource().memory_limit_bytes(),
-          task_to_ctld.name(),
-          task_to_ctld.env(),
-          task_to_ctld.uid(),
-          persisted_part.gid(),
-          "",
-          0,
-          0,
-          task_to_ctld.partition_name(),
-          0,
-          0,
-          0,
-          0,
-          0,
-          task_to_ctld.batch_meta().sh_script(),
-          crane::grpc::TaskStatus::Failed,
-          task_to_ctld.time_limit().seconds(),
-          0,
-          task_to_ctld.cwd(),
-          task_to_ctld.cmd_line()};
+      values{static_cast<int32_t>(persisted_part.task_id()),
+             persisted_part.task_db_id(),
+             absl::ToUnixSeconds(absl::Now()),
+             false,
+             persisted_part.account(),
+             task_to_ctld.resources().allocatable_resource().cpu_core_limit(),
+             static_cast<int64_t>(task_to_ctld.resources()
+                                      .allocatable_resource()
+                                      .memory_limit_bytes()),
+             task_to_ctld.name(),
+             task_to_ctld.env(),
+             static_cast<int32_t>(task_to_ctld.uid()),
+             static_cast<int32_t>(persisted_part.gid()),
+             "",
+             0,
+             0,
+             task_to_ctld.partition_name(),
+             0,
+             0,
+             0,
+             0,
+             0,
+             task_to_ctld.batch_meta().sh_script(),
+             crane::grpc::TaskStatus::Failed,
+             task_to_ctld.time_limit().seconds(),
+             0,
+             task_to_ctld.cwd(),
+             task_to_ctld.cmd_line()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -700,19 +701,20 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int64_t, int64_t, int64_t, int64_t,     /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string, /*20-24*/
              std::string>
-      values{task->task_id,
+      values{static_cast<int32_t>(task->task_id),
              task->task_db_id,
              absl::ToUnixSeconds(absl::Now()),
              false,
              task->account,
              task->resources.allocatable_resource.cpu_count,
-             task->resources.allocatable_resource.memory_bytes,
+             static_cast<int64_t>(
+                 task->resources.allocatable_resource.memory_bytes),
              task->name,
              task->env,
-             task->uid,
-             task->gid,
+             static_cast<int32_t>(task->uid),
+             static_cast<int32_t>(task->gid),
              task->allocated_craneds_regex,
-             task->nodes_alloc,
+             static_cast<int32_t>(task->nodes_alloc),
              0,
              task->partition_name,
              0,
