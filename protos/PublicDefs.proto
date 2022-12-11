@@ -169,6 +169,7 @@ message PartitionCranedInfo {
   string name = 1;
   PartitionState state = 2;
   repeated CranedListRegexOfState common_craned_state_list = 3;
+    string partition_craned_list_regex =4;
 }
 
 enum EntityType {

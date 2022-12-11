@@ -462,7 +462,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     down_craned_list->set_state(crane::grpc::CranedState::CRANE_DOWN);
 
     std::list<std::string> idle_craned_name_list, mix_craned_name_list,
-        alloc_craned_name_list, down_craned_name_list;
+        alloc_craned_name_list, down_craned_name_list, total_name_list;
 
     for (auto&& [craned_index, craned_meta] : part_meta.craned_meta_map) {
       if (!request->nodes().empty()) {
@@ -557,6 +557,14 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
         util::HostNameListToStr(alloc_craned_name_list));
     down_craned_list->set_craned_list_regex(
         util::HostNameListToStr(down_craned_name_list));
+
+    total_name_list.splice(total_name_list.begin(), down_craned_name_list);
+    total_name_list.splice(total_name_list.begin(), idle_craned_name_list);
+    total_name_list.splice(total_name_list.begin(), mix_craned_name_list);
+    total_name_list.splice(total_name_list.begin(), alloc_craned_name_list);
+    total_name_list.unique();
+    part_craned_info->set_partition_craned_list_regex(
+        util::HostNameListToStr(total_name_list));
   }
 
   return reply;
