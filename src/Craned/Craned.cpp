@@ -25,7 +25,28 @@ using Craned::Node;
 using Craned::Partition;
 
 void ParseConfig(int argc, char** argv) {
-  if (std::filesystem::exists(kDefaultConfigPath)) {
+  cxxopts::Options options("craned");
+
+  // clang-format off
+    options.add_options()
+        ("C,config", "Path to configuration file",
+        cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
+        ("l,listen", "Listen address format: <IP>:<port>",
+         cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
+        ("s,server-address", "CraneCtld address format: <IP>:<port>",
+         cxxopts::value<std::string>())
+        ("c,cpu", "# of total cpu core", cxxopts::value<std::string>())
+        ("m,memory", R"(# of total memory. Format: \d+[BKMG])", cxxopts::value<std::string>())
+        ("p,partition", "Name of the partition", cxxopts::value<std::string>())
+        ("D,debug-level", "[trace|debug|info|warn|error]", cxxopts::value<std::string>()->default_value("info"))
+        ("h,help", "Show help")
+        ;
+  // clang-format on
+
+  auto parsed_args = options.parse(argc, argv);
+  std::string config_path = parsed_args["config"].as<std::string>();
+
+  if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(kDefaultConfigPath);
 
@@ -236,24 +257,6 @@ void ParseConfig(int argc, char** argv) {
       std::exit(1);
     }
   } else {
-    cxxopts::Options options("craned");
-
-    // clang-format off
-    options.add_options()
-        ("l,listen", "Listen address format: <IP>:<port>",
-         cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
-        ("s,server-address", "CraneCtld address format: <IP>:<port>",
-         cxxopts::value<std::string>())
-        ("c,cpu", "# of total cpu core", cxxopts::value<std::string>())
-        ("m,memory", R"(# of total memory. Format: \d+[BKMG])", cxxopts::value<std::string>())
-        ("p,partition", "Name of the partition", cxxopts::value<std::string>())
-        ("D,debug-level", "[trace|debug|info|warn|error]", cxxopts::value<std::string>()->default_value("info"))
-        ("h,help", "Show help")
-        ;
-    // clang-format on
-
-    auto parsed_args = options.parse(argc, argv);
-
     // Todo: Check static level setting.
     g_config.CranedDebugLevel = parsed_args["debug-level"].as<std::string>();
 

@@ -22,7 +22,23 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 void ParseConfig(int argc, char** argv) {
-  if (std::filesystem::exists(kDefaultConfigPath)) {
+  cxxopts::Options options("craned");
+
+  // clang-format off
+  options.add_options()
+      ("C,config", "Path to configuration file",
+      cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
+      ("l,listen", "listening address",
+      cxxopts::value<std::string>()->default_value("0.0.0.0"))
+      ("p,port", "listening port",
+      cxxopts::value<std::string>()->default_value(kCtldDefaultPort))
+      ;
+  // clang-format on
+
+  auto parsed_args = options.parse(argc, argv);
+
+  std::string config_path = parsed_args["config"].as<std::string>();
+  if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(kDefaultConfigPath);
 
@@ -255,19 +271,6 @@ void ParseConfig(int argc, char** argv) {
       std::exit(1);
     }
   } else {
-    cxxopts::Options options("craned");
-
-    // clang-format off
-    options.add_options()
-        ("l,listen", "listening address",
-         cxxopts::value<std::string>()->default_value("0.0.0.0"))
-        ("p,port", "listening port",
-         cxxopts::value<std::string>()->default_value(kCtldDefaultPort))
-        ;
-    // clang-format on
-
-    auto parsed_args = options.parse(argc, argv);
-
     g_config.ListenConf.CraneCtldListenAddr =
         parsed_args["listen"].as<std::string>();
     g_config.ListenConf.CraneCtldListenPort =
