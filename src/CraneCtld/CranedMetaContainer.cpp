@@ -540,9 +540,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
             mix_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
           }
         } else {
-          if (request->query_responding_nodes() &&
-              part_meta.partition_global_meta.alive_craned_cnt <= 0)
-            continue;
+          if (request->query_responding_nodes()) continue;
           down_craned_list->set_craned_num(down_craned_list->craned_num() + 1);
           down_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
         }
