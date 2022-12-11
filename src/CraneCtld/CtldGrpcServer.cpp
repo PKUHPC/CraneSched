@@ -228,7 +228,9 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
   auto *state_list = response->mutable_task_status();
   auto *allocated_craned_list = response->mutable_allocated_craneds();
   auto *id_list = response->mutable_task_ids();
-
+  auto *partition_list = response->mutable_task_partitions();
+  auto *name_list = response->mutable_task_names();
+  bool found;
   if (request->find_all()) {
     for (auto &task : task_list) {
       auto *meta_it = meta_list->Add();
@@ -237,29 +239,139 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
       auto *state_it = state_list->Add();
       *state_it = task.status;
 
+      auto *partition_it = partition_list->Add();
+      *partition_it = task.partition_name;
+
       auto *node_list_it = allocated_craned_list->Add();
       *node_list_it = task.allocated_craneds_regex;
 
       auto *id_it = id_list->Add();
       *id_it = task.task_id;
+
+      auto *name_it = name_list->Add();
+      *name_it = task.name;
     }
-  } else {
+  } else if (!request->task_ids().empty()) {
+    for (const auto req : request->task_ids()) {
+      response->set_ok(true);
+      found = false;
+      for (auto &task : task_list) {
+        if (req == task.task_id) {
+          found = true;
+          auto *meta_it = meta_list->Add();
+          meta_it->CopyFrom(task.task_to_ctld);
+
+          auto *state_it = state_list->Add();
+          *state_it = task.status;
+
+          auto *partition_it = partition_list->Add();
+          *partition_it = task.partition_name;
+
+          auto *node_list_it = allocated_craned_list->Add();
+          *node_list_it = task.allocated_craneds_regex;
+
+          auto *id_it = id_list->Add();
+          *id_it = task.task_id;
+
+          auto *name_it = name_list->Add();
+          *name_it = task.name;
+
+          break;
+        }
+      }
+      if (!found) {
+        response->set_ok(false);
+        response->set_reason("Task id " + std::to_string(req) +
+                             " does not exist.");
+      }
+    }
+  } else if (!request->partitions().empty()) {
+    for (const auto &req : request->partitions()) {
+      response->set_ok(true);
+      found = false;
+      for (auto &task : task_list) {
+        if (req == task.partition_name) {
+          found = true;
+          auto *meta_it = meta_list->Add();
+          meta_it->CopyFrom(task.task_to_ctld);
+
+          auto *state_it = state_list->Add();
+          *state_it = task.status;
+
+          auto *partition_it = partition_list->Add();
+          *partition_it = task.partition_name;
+
+          auto *node_list_it = allocated_craned_list->Add();
+          *node_list_it = task.allocated_craneds_regex;
+
+          auto *id_it = id_list->Add();
+          *id_it = task.task_id;
+
+          auto *name_it = name_list->Add();
+          *name_it = task.name;
+        }
+      }
+      if (!found) {
+        response->set_reason("Partition not found.");
+        response->set_ok(false);
+      }
+    }
+  } else if (!request->task_names().empty()) {
+    for (const auto &req : request->task_names()) {
+      response->set_ok(true);
+      found = false;
+      for (auto &task : task_list) {
+        if (req == task.name) {
+          found = true;
+          auto *meta_it = meta_list->Add();
+          meta_it->CopyFrom(task.task_to_ctld);
+
+          auto *state_it = state_list->Add();
+          *state_it = task.status;
+
+          auto *partition_it = partition_list->Add();
+          *partition_it = task.partition_name;
+
+          auto *node_list_it = allocated_craned_list->Add();
+          *node_list_it = task.allocated_craneds_regex;
+
+          auto *id_it = id_list->Add();
+          *id_it = task.task_id;
+
+          auto *name_it = name_list->Add();
+          *name_it = task.name;
+        }
+      }
+      if (!found) {
+        response->set_ok(false);
+        response->set_reason("task name not found.");
+      }
+    }
+  } else if (TaskStatus_IsValid(request->task_status())) {
+    response->set_ok(true);
     for (auto &task : task_list) {
-      if (task.partition_name != request->partition()) continue;
+      if (request->task_status() != task.status) {
+        continue;
+      }
       auto *meta_it = meta_list->Add();
       meta_it->CopyFrom(task.task_to_ctld);
 
       auto *state_it = state_list->Add();
       *state_it = task.status;
 
+      auto *partition_it = partition_list->Add();
+      *partition_it = task.partition_name;
+
       auto *node_list_it = allocated_craned_list->Add();
       *node_list_it = task.allocated_craneds_regex;
 
       auto *id_it = id_list->Add();
       *id_it = task.task_id;
+
+      auto *name_it = name_list->Add();
+      *name_it = task.name;
     }
   }
-
   return grpc::Status::OK;
 }
 
@@ -646,7 +758,7 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryClusterInfoRequest *request,
     crane::grpc::QueryClusterInfoReply *response) {
-  *response = g_meta_container->QueryClusterInfo();
+  *response = g_meta_container->QueryClusterInfo(request);
   return grpc::Status::OK;
 }
 
