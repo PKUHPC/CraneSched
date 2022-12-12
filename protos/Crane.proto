@@ -231,7 +231,7 @@ message QueryJobsInPartitionRequest {
   repeated string partitions = 1;
   bool find_all = 2;
   repeated uint32 task_ids = 3;
-  TaskStatus task_status = 4;
+  repeated TaskStatus task_status = 4;
   repeated string task_names =5;
 }
 

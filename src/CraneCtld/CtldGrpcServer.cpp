@@ -230,147 +230,60 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
   auto *id_list = response->mutable_task_ids();
   auto *partition_list = response->mutable_task_partitions();
   auto *name_list = response->mutable_task_names();
-  bool found;
-  if (request->find_all()) {
-    for (auto &task : task_list) {
-      auto *meta_it = meta_list->Add();
-      meta_it->CopyFrom(task.task_to_ctld);
 
-      auto *state_it = state_list->Add();
-      *state_it = task.status;
+  std::unordered_set<uint32_t> req_task_id;
+  std::unordered_set<std::string> req_task_names;
+  std::unordered_set<int> req_task_status;
+  std::unordered_set<std::string> req_partitions;
 
-      auto *partition_it = partition_list->Add();
-      *partition_it = task.partition_name;
+  if (!request->task_ids().empty()) {
+    std::copy(request->task_ids().begin(), request->task_ids().end(),
+              std::inserter(req_task_id, req_task_id.begin()));
+  }
+  if (!request->task_names().empty()) {
+    std::copy(request->task_names().begin(), request->task_names().end(),
+              std::inserter(req_task_names, req_task_names.begin()));
+  }
+  if (!request->task_status().empty()) {
+    std::copy(request->task_status().begin(), request->task_status().end(),
+              std::inserter(req_task_status, req_task_status.begin()));
+  }
+  if (!request->partitions().empty()) {
+    std::copy(request->partitions().begin(), request->partitions().end(),
+              std::inserter(req_partitions, req_partitions.begin()));
+  }
 
-      auto *node_list_it = allocated_craned_list->Add();
-      *node_list_it = task.allocated_craneds_regex;
+  for (auto &task : task_list) {
+    if (!request->task_ids().empty() &&
+        req_task_id.find(task.task_id) == req_task_id.end())
+      continue;
+    if (!request->task_names().empty() &&
+        req_task_names.find(task.name) == req_task_names.end())
+      continue;
+    if (!request->task_status().empty() &&
+        req_task_status.find(task.status) == req_task_status.end())
+      continue;
+    if (!request->partitions().empty() &&
+        req_partitions.find(task.partition_name) == req_partitions.end())
+      continue;
 
-      auto *id_it = id_list->Add();
-      *id_it = task.task_id;
+    auto *meta_it = meta_list->Add();
+    meta_it->CopyFrom(task.task_to_ctld);
 
-      auto *name_it = name_list->Add();
-      *name_it = task.name;
-    }
-  } else if (!request->task_ids().empty()) {
-    for (const auto req : request->task_ids()) {
-      response->set_ok(true);
-      found = false;
-      for (auto &task : task_list) {
-        if (req == task.task_id) {
-          found = true;
-          auto *meta_it = meta_list->Add();
-          meta_it->CopyFrom(task.task_to_ctld);
+    auto *state_it = state_list->Add();
+    *state_it = task.status;
 
-          auto *state_it = state_list->Add();
-          *state_it = task.status;
+    auto *partition_it = partition_list->Add();
+    *partition_it = task.partition_name;
 
-          auto *partition_it = partition_list->Add();
-          *partition_it = task.partition_name;
+    auto *node_list_it = allocated_craned_list->Add();
+    *node_list_it = task.allocated_craneds_regex;
 
-          auto *node_list_it = allocated_craned_list->Add();
-          *node_list_it = task.allocated_craneds_regex;
+    auto *id_it = id_list->Add();
+    *id_it = task.task_id;
 
-          auto *id_it = id_list->Add();
-          *id_it = task.task_id;
-
-          auto *name_it = name_list->Add();
-          *name_it = task.name;
-
-          break;
-        }
-      }
-      if (!found) {
-        response->set_ok(false);
-        response->set_reason("Task id " + std::to_string(req) +
-                             " does not exist.");
-      }
-    }
-  } else if (!request->partitions().empty()) {
-    for (const auto &req : request->partitions()) {
-      response->set_ok(true);
-      found = false;
-      for (auto &task : task_list) {
-        if (req == task.partition_name) {
-          found = true;
-          auto *meta_it = meta_list->Add();
-          meta_it->CopyFrom(task.task_to_ctld);
-
-          auto *state_it = state_list->Add();
-          *state_it = task.status;
-
-          auto *partition_it = partition_list->Add();
-          *partition_it = task.partition_name;
-
-          auto *node_list_it = allocated_craned_list->Add();
-          *node_list_it = task.allocated_craneds_regex;
-
-          auto *id_it = id_list->Add();
-          *id_it = task.task_id;
-
-          auto *name_it = name_list->Add();
-          *name_it = task.name;
-        }
-      }
-      if (!found) {
-        response->set_reason("Partition not found.");
-        response->set_ok(false);
-      }
-    }
-  } else if (!request->task_names().empty()) {
-    for (const auto &req : request->task_names()) {
-      response->set_ok(true);
-      found = false;
-      for (auto &task : task_list) {
-        if (req == task.name) {
-          found = true;
-          auto *meta_it = meta_list->Add();
-          meta_it->CopyFrom(task.task_to_ctld);
-
-          auto *state_it = state_list->Add();
-          *state_it = task.status;
-
-          auto *partition_it = partition_list->Add();
-          *partition_it = task.partition_name;
-
-          auto *node_list_it = allocated_craned_list->Add();
-          *node_list_it = task.allocated_craneds_regex;
-
-          auto *id_it = id_list->Add();
-          *id_it = task.task_id;
-
-          auto *name_it = name_list->Add();
-          *name_it = task.name;
-        }
-      }
-      if (!found) {
-        response->set_ok(false);
-        response->set_reason("task name not found.");
-      }
-    }
-  } else if (TaskStatus_IsValid(request->task_status())) {
-    response->set_ok(true);
-    for (auto &task : task_list) {
-      if (request->task_status() != task.status) {
-        continue;
-      }
-      auto *meta_it = meta_list->Add();
-      meta_it->CopyFrom(task.task_to_ctld);
-
-      auto *state_it = state_list->Add();
-      *state_it = task.status;
-
-      auto *partition_it = partition_list->Add();
-      *partition_it = task.partition_name;
-
-      auto *node_list_it = allocated_craned_list->Add();
-      *node_list_it = task.allocated_craneds_regex;
-
-      auto *id_it = id_list->Add();
-      *id_it = task.task_id;
-
-      auto *name_it = name_list->Add();
-      *name_it = task.name;
-    }
+    auto *name_it = name_list->Add();
+    *name_it = task.name;
   }
   return grpc::Status::OK;
 }
