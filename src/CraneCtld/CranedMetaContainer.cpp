@@ -422,15 +422,15 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
 
 crane::grpc::QueryClusterInfoReply
 CranedMetaContainerSimpleImpl::QueryClusterInfo(
-    const crane::grpc::QueryClusterInfoRequest* request) {
+    const crane::grpc::QueryClusterInfoRequest& request) {
   LockGuard guard(mtx_);
   crane::grpc::QueryClusterInfoReply reply;
   auto* partition_craned_list = reply.mutable_partition_craned();
 
   for (auto&& [part_id, part_meta] : partition_metas_map_) {
-    if (!request->partitions().empty()) {
+    if (!request.partitions().empty()) {
       bool found = false;
-      for (const auto& name : request->partitions()) {
+      for (const auto& name : request.partitions()) {
         if (part_meta.partition_global_meta.name == name) {
           found = true;
           break;
@@ -465,9 +465,9 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
         alloc_craned_name_list, down_craned_name_list, total_name_list;
 
     for (auto&& [craned_index, craned_meta] : part_meta.craned_meta_map) {
-      if (!request->nodes().empty()) {
+      if (!request.nodes().empty()) {
         bool found = false;
-        for (const auto& node : request->nodes()) {
+        for (const auto& node : request.nodes()) {
           if (node == craned_meta.static_meta.hostname) {
             found = true;
             break;
@@ -480,15 +480,15 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       auto& alloc_res_in_use = craned_meta.res_in_use.allocatable_resource;
       auto& alloc_res_avail = craned_meta.res_avail.allocatable_resource;
 
-      if (!request->states().empty()) {
+      if (!request.states().empty()) {
         if (craned_meta.alive) {
-          if (request->query_down_nodes() &&
+          if (request.query_down_nodes() &&
               part_meta.partition_global_meta.alive_craned_cnt > 0)
             continue;
           if (alloc_res_in_use.cpu_count == 0 &&
               alloc_res_in_use.memory_bytes == 0) {
-            if (std::find(request->states().begin(), request->states().end(),
-                          0) == request->states().end())
+            if (std::find(request.states().begin(), request.states().end(),
+                          0) == request.states().end())
               continue;
             idle_craned_list->set_craned_num(idle_craned_list->craned_num() +
                                              1);
@@ -496,31 +496,31 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
                 craned_meta.static_meta.hostname);
           } else if (alloc_res_avail.cpu_count == 0 &&
                      alloc_res_avail.memory_bytes == 0) {
-            if (std::find(request->states().begin(), request->states().end(),
-                          2) == request->states().end())
+            if (std::find(request.states().begin(), request.states().end(),
+                          2) == request.states().end())
               continue;
             alloc_craned_list->set_craned_num(alloc_craned_list->craned_num() +
                                               1);
             alloc_craned_name_list.emplace_back(
                 craned_meta.static_meta.hostname);
           } else {
-            if (std::find(request->states().begin(), request->states().end(),
-                          1) == request->states().end())
+            if (std::find(request.states().begin(), request.states().end(),
+                          1) == request.states().end())
               continue;
             mix_craned_list->set_craned_num(mix_craned_list->craned_num() + 1);
             mix_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
           }
         } else {
-          if (request->query_responding_nodes()) continue;
-          if (std::find(request->states().begin(), request->states().end(),
-                        3) == request->states().end())
+          if (request.query_responding_nodes()) continue;
+          if (std::find(request.states().begin(), request.states().end(), 3) ==
+              request.states().end())
             continue;
           down_craned_list->set_craned_num(down_craned_list->craned_num() + 1);
           down_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
         }
       } else {
         if (craned_meta.alive) {
-          if (request->query_down_nodes() &&
+          if (request.query_down_nodes() &&
               part_meta.partition_global_meta.alive_craned_cnt > 0)
             continue;
           if (alloc_res_in_use.cpu_count == 0 &&
@@ -540,7 +540,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
             mix_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
           }
         } else {
-          if (request->query_responding_nodes()) continue;
+          if (request.query_responding_nodes()) continue;
           down_craned_list->set_craned_num(down_craned_list->craned_num() + 1);
           down_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
         }

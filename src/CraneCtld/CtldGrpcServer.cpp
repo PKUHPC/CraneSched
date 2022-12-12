@@ -758,7 +758,7 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryClusterInfoRequest *request,
     crane::grpc::QueryClusterInfoReply *response) {
-  *response = g_meta_container->QueryClusterInfo(request);
+  *response = g_meta_container->QueryClusterInfo(*request);
   return grpc::Status::OK;
 }
 
