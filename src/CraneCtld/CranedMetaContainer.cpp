@@ -488,7 +488,8 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
           if (alloc_res_in_use.cpu_count == 0 &&
               alloc_res_in_use.memory_bytes == 0) {
             if (std::find(request.states().begin(), request.states().end(),
-                          0) == request.states().end())
+                          crane::grpc::CranedState::CRANE_IDLE) ==
+                request.states().end())
               continue;
             idle_craned_list->set_craned_num(idle_craned_list->craned_num() +
                                              1);
@@ -497,7 +498,8 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
           } else if (alloc_res_avail.cpu_count == 0 &&
                      alloc_res_avail.memory_bytes == 0) {
             if (std::find(request.states().begin(), request.states().end(),
-                          2) == request.states().end())
+                          crane::grpc::CranedState::CRANE_ALLOC) ==
+                request.states().end())
               continue;
             alloc_craned_list->set_craned_num(alloc_craned_list->craned_num() +
                                               1);
@@ -505,14 +507,16 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
                 craned_meta.static_meta.hostname);
           } else {
             if (std::find(request.states().begin(), request.states().end(),
-                          1) == request.states().end())
+                          crane::grpc::CranedState::CRANE_MIX) ==
+                request.states().end())
               continue;
             mix_craned_list->set_craned_num(mix_craned_list->craned_num() + 1);
             mix_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
           }
         } else {
           if (request.query_responding_nodes()) continue;
-          if (std::find(request.states().begin(), request.states().end(), 3) ==
+          if (std::find(request.states().begin(), request.states().end(),
+                        crane::grpc::CranedState::CRANE_DOWN) ==
               request.states().end())
             continue;
           down_craned_list->set_craned_num(down_craned_list->craned_num() + 1);
