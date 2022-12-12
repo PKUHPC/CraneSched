@@ -229,10 +229,9 @@ message QueryTaskIdFromPortForwardReply{
 
 message QueryJobsInPartitionRequest {
   repeated string partitions = 1;
-  bool find_all = 2;
-  repeated uint32 task_ids = 3;
-  repeated TaskStatus task_status = 4;
-  repeated string task_names =5;
+  repeated uint32 task_ids = 2;
+  repeated TaskStatus task_status = 3;
+  repeated string task_names =4;
 }
 
 message QueryJobsInPartitionReply {
@@ -240,10 +239,8 @@ message QueryJobsInPartitionReply {
   repeated TaskStatus task_status = 2;
   repeated string allocated_craneds = 3;
   repeated uint32 task_ids = 4;
-  bool ok = 5;
-  string reason = 6;
-  repeated string task_partitions=7;
-  repeated string task_names=8;
+  repeated string task_partitions=5;
+  repeated string task_names=6;
 }
 
 message QueryJobsInfoRequest {
