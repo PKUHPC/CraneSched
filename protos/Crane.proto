@@ -194,6 +194,24 @@ message TerminateTaskReply {
   string reason = 2;
 }
 
+message TerminateOrphanedTaskRequest {
+  uint32 task_id = 1;
+}
+
+message TerminateOrphanedTaskReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message CheckTaskStatusRequest {
+  uint32 task_id = 1;
+}
+
+message CheckTaskStatusReply {
+  bool ok = 1;
+  TaskStatus status = 2;
+}
+
 message CancelTaskRequest {
   uint32 task_id = 1;
   uint32 operator_uid = 2;
@@ -404,6 +422,8 @@ service Craned {
    */
   rpc ExecuteTask(ExecuteTaskRequest) returns(ExecuteTaskReply);
 
+  rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
+
   rpc CreateCgroupForTask(CreateCgroupForTaskRequest) returns(CreateCgroupForTaskReply);
   rpc ReleaseCgroupForTask(ReleaseCgroupForTaskRequest) returns(ReleaseCgroupForTaskReply);
 
@@ -414,6 +434,7 @@ service Craned {
   If the task is a batch task, just kill it.
   */
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
+  rpc TerminateOrphanedTask(TerminateOrphanedTaskRequest) returns (TerminateOrphanedTaskReply);
 
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */

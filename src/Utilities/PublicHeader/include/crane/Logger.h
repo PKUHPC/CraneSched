@@ -2,6 +2,11 @@
 
 #include <source_location>
 
+// For better logging inside lambda functions
+#if defined(__clang__) || defined(__GNUC__) || defined(__GNUG__)
+#  define __FUNCTION__ __PRETTY_FUNCTION__
+#endif
+
 #define SPDLOG_ACTIVE_LEVEL CRANE_LOG_LEVEL
 
 #include <spdlog/spdlog.h>

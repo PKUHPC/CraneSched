@@ -45,6 +45,12 @@ class CranedStub {
 
   CraneErr TerminateTask(uint32_t task_id);
 
+  CraneErr TerminateOrphanedTask(task_id_t task_id);
+
+  CraneErr CheckTaskStatus(task_id_t task_id, crane::grpc::TaskStatus *status);
+
+  bool Invalid() { return m_invalid_; }
+
  private:
   CranedKeeper *m_craned_keeper_;
 
@@ -100,9 +106,9 @@ class CranedKeeper {
 
   void SetCranedIsDownCb(std::function<void(CranedId)> cb);
 
-  void SetCranedTempDownCb(std::function<void(CranedId)> cb);
+  void SetCranedIsTempDownCb(std::function<void(CranedId)> cb);
 
-  void SetCranedRecFromTempFailureCb(std::function<void(CranedId)> cb);
+  void SetCranedIsTempUpCb(std::function<void(CranedId)> cb);
 
  private:
   struct InitializingCranedTagData {

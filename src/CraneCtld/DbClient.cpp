@@ -108,8 +108,8 @@ bool MongodbClient::FetchJobRecordsWithStates(
 
   for (auto view : cursor) {
     Ctld::TaskInCtld task;
-    task.task_db_id =
-        std::strtoul(view["task_db_id"].get_string().value.data(), nullptr, 10);
+    task.SetTaskDbId(std::strtoul(view["task_db_id"].get_string().value.data(),
+                                  nullptr, 10));
     task.resources.allocatable_resource.cpu_count =
         std::strtol(view["cpus_req"].get_string().value.data(), nullptr, 10);
 
@@ -118,24 +118,24 @@ bool MongodbClient::FetchJobRecordsWithStates(
             view["mem_req"].get_string().value.data(), nullptr, 10);
     task.name = view["job_name"].get_string().value;
     task.env = view["env"].get_string().value;
-    task.task_id =
-        std::strtol(view["task_id"].get_string().value.data(), nullptr, 10);
+    task.SetTaskId(
+        std::strtol(view["task_id"].get_string().value.data(), nullptr, 10));
     task.uid =
         std::strtol(view["id_user"].get_string().value.data(), nullptr, 10);
-    task.gid =
-        std::strtol(view["id_group"].get_string().value.data(), nullptr, 10);
+    task.SetGid(
+        std::strtol(view["id_group"].get_string().value.data(), nullptr, 10));
     task.allocated_craneds_regex = view["nodelist"].get_string().value.data();
     task.partition_name = view["partition_name"].get_string().value;
-    task.start_time = absl::FromUnixSeconds(
+    task.SetStartTimeByUnixSecond(
         std::strtol(view["time_start"].get_string().value.data(), nullptr, 10));
-    task.end_time = absl::FromUnixSeconds(
+    task.SetEndTimeByUnixSecond(
         std::strtol(view["time_end"].get_string().value.data(), nullptr, 10));
 
     task.meta = Ctld::BatchMetaInTask{};
     auto& batch_meta = std::get<Ctld::BatchMetaInTask>(task.meta);
     batch_meta.sh_script = view["script"].get_string().value;
-    task.status = crane::grpc::TaskStatus(
-        std::strtol(view["state"].get_string().value.data(), nullptr, 10));
+    task.SetStatus(static_cast<crane::grpc::TaskStatus>(
+        std::strtol(view["state"].get_string().value.data(), nullptr, 10)));
     task.time_limit = absl::Seconds(
         std::strtoul(view["timelimit"].get_string().value.data(), nullptr, 10));
     task.cwd = view["work_dir"].get_string().value;
@@ -664,7 +664,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              0,
              0,
              task_to_ctld.batch_meta().sh_script(),
-             crane::grpc::TaskStatus::Failed,
+             persisted_part.status(),
              task_to_ctld.time_limit().seconds(),
              0,
              task_to_ctld.cwd(),
@@ -701,29 +701,29 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int64_t, int64_t, int64_t, int64_t,     /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string, /*20-24*/
              std::string>
-      values{static_cast<int32_t>(task->task_id),
-             task->task_db_id,
+      values{static_cast<int32_t>(task->TaskId()),
+             task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()),
              false,
-             task->account,
+             task->Account(),
              task->resources.allocatable_resource.cpu_count,
              static_cast<int64_t>(
                  task->resources.allocatable_resource.memory_bytes),
              task->name,
              task->env,
              static_cast<int32_t>(task->uid),
-             static_cast<int32_t>(task->gid),
+             static_cast<int32_t>(task->Gid()),
              task->allocated_craneds_regex,
              static_cast<int32_t>(task->nodes_alloc),
              0,
              task->partition_name,
              0,
              0,
-             ToUnixSeconds(task->start_time),
-             ToUnixSeconds(task->end_time),
+             static_cast<int64_t>(task->StartTimeInUnixSecond()),
+             static_cast<int64_t>(task->EndTimeInUnixSecond()),
              0,
              std::get<BatchMetaInTask>(task->meta).sh_script,
-             task->status,
+             task->Status(),
              absl::ToInt64Seconds(task->time_limit),
              0,
              task->cwd,

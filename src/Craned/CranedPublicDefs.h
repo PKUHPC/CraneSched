@@ -12,7 +12,7 @@
 namespace Craned {
 
 struct TaskStatusChange {
-  uint32_t task_id{};
+  task_id_t task_id{};
   crane::grpc::TaskStatus new_status{};
   std::optional<std::string> reason;
 };

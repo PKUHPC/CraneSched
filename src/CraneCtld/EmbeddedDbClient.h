@@ -73,13 +73,13 @@ class EmbeddedDbClient {
 
   bool Init(std::string const& db_path);
 
-  bool AppendTaskToPendingAndAdvanceTaskIds(
-      const crane::grpc::TaskToCtld& task_to_ctld,
-      crane::grpc::PersistedPartOfTaskInCtld* persisted_part);
+  bool AppendTaskToPendingAndAdvanceTaskIds(TaskInCtld* task);
 
   bool MovePendingOrRunningTaskToEnded(db_id_t db_id);
 
   bool MoveTaskFromPendingToRunning(db_id_t db_id);
+
+  bool MoveTaskFromRunningToPending(db_id_t db_id);
 
   bool PurgeTaskFromEnded(db_id_t db_id);
 
@@ -98,13 +98,24 @@ class EmbeddedDbClient {
     return GetQueueCopyNoLock_(m_ended_queue_, list) == UNQLITE_OK;
   }
 
+  bool UpdatePersistedPartOfTask(
+      db_id_t db_id,
+      crane::grpc::PersistedPartOfTaskInCtld const& persisted_part) {
+    return StoreTypeIntoDb_(GetDbQueueNodePersistedPartName_(db_id),
+                            &persisted_part) == UNQLITE_OK;
+  }
+
   bool FetchTaskDataInDb(db_id_t db_id, TaskInEmbeddedDb* task_in_db);
 
  private:
   std::string GetInternalErrorStr_();
 
-  inline static std::string GetDbQueueNodeDataName_(db_id_t db_id) {
-    return fmt::format("{}Data", db_id);
+  inline static std::string GetDbQueueNodeTaskToCtldName_(db_id_t db_id) {
+    return fmt::format("{}TaskToCtld", db_id);
+  }
+
+  inline static std::string GetDbQueueNodePersistedPartName_(db_id_t db_id) {
+    return fmt::format("{}Persisted", db_id);
   }
 
   inline static std::string GetDbQueueNodeNextName_(db_id_t db_id) {
@@ -150,7 +161,13 @@ class EmbeddedDbClient {
 
   inline int FetchTaskDataInDbAtomic_(db_id_t db_id,
                                       TaskInEmbeddedDb* task_in_db) {
-    return FetchTypeFromDb_(GetDbQueueNodeDataName_(db_id), task_in_db);
+    int rc;
+    rc = FetchTypeFromDb_(GetDbQueueNodeTaskToCtldName_(db_id),
+                          task_in_db->mutable_task_to_ctld());
+    if (rc != UNQLITE_OK) return rc;
+
+    return FetchTypeFromDb_(GetDbQueueNodePersistedPartName_(db_id),
+                            task_in_db->mutable_persisted_part());
   }
 
   template <std::integral T>
@@ -169,12 +186,14 @@ class EmbeddedDbClient {
         if (rc != UNQLITE_OK) {
           CRANE_ERROR("Failed to init {} in db. Code: {}. Msg: {}", key, rc,
                       GetInternalErrorStr_());
+          if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
           return rc;
         }
         *buf = value;
       } else
         CRANE_ERROR("Failed to fetch {} from db. Code: {}. Msg: {}", key, rc,
                     GetInternalErrorStr_());
+      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
     }
     return rc;
   }
@@ -192,6 +211,7 @@ class EmbeddedDbClient {
 
       CRANE_ERROR("Failed to get value size for key {}: {}", key,
                   GetInternalErrorStr_());
+      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
       return rc;
     }
 
@@ -207,6 +227,7 @@ class EmbeddedDbClient {
 
       CRANE_ERROR("Failed to fetch value for key {}: {}", key,
                   GetInternalErrorStr_());
+      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
       return rc;
     }
   }
@@ -226,6 +247,7 @@ class EmbeddedDbClient {
 
       CRANE_ERROR("Failed to get value size for key `{}`. Code: {}. Msg: {}",
                   key, rc, GetInternalErrorStr_());
+      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
       return rc;
     }
 
@@ -248,6 +270,7 @@ class EmbeddedDbClient {
 
       CRANE_ERROR("Failed to fetch value for key {}: {}", key,
                   GetInternalErrorStr_());
+      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
       return rc;
     }
   }
@@ -270,7 +293,7 @@ class EmbeddedDbClient {
         std::this_thread::yield();
         continue;
       }
-
+      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
       return rc;
     }
   }
@@ -302,6 +325,7 @@ class EmbeddedDbClient {
 
       CRANE_ERROR("Failed to store protobuf for key {}: {}", key,
                   GetInternalErrorStr_());
+      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
       return rc;
     }
   }

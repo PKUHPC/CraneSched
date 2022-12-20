@@ -14,6 +14,7 @@
 
 #include "crane/Logger.h"
 #include "crane/PublicHeader.h"
+#include "crane/String.h"
 
 #if Boost_MINOR_VERSION >= 71
 #  include <boost/uuid/uuid_hash.hpp>
@@ -21,11 +22,62 @@
 
 namespace Ctld {
 
-using task_id_t = uint32_t;
 using task_db_id_t = int64_t;
 
 constexpr uint64_t kTaskScheduleIntervalMs = 1000;
 
+struct Config {
+  struct Node {
+    uint32_t cpu;
+    uint64_t memory_bytes;
+
+    std::string partition_name;
+  };
+
+  struct Partition {
+    std::string nodelist_str;
+    std::unordered_set<std::string> nodes;
+    std::unordered_set<std::string> AllowAccounts;
+  };
+
+  struct CraneCtldListenConf {
+    std::string CraneCtldListenAddr;
+    std::string CraneCtldListenPort;
+
+    bool UseTls{false};
+    std::string CertFilePath;
+    std::string CertContent;
+    std::string KeyFilePath;
+    std::string KeyContent;
+  };
+
+  CraneCtldListenConf ListenConf;
+
+  std::string CraneCtldDebugLevel;
+  std::string CraneCtldLogFile;
+
+  std::string CraneCtldDbPath;
+
+  bool CraneCtldForeground{};
+
+  std::string Hostname;
+  std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
+  std::unordered_map<std::string, Partition> Partitions;
+  std::string DefaultPartition;
+
+  std::string DbUser;
+  std::string DbPassword;
+  std::string DbHost;
+  std::string DbPort;
+  std::string DbRSName;
+  std::string DbName;
+};
+
+}  // namespace Ctld
+
+inline Ctld::Config g_config;
+
+namespace Ctld {
 struct InteractiveTaskAllocationDetail {
   uint32_t craned_index;
   std::string ipv4_addr;
@@ -130,17 +182,13 @@ struct TaskInCtld {
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
-  /* ------ duplicate of the fields [1] above just for convenience ----- */
-  crane::grpc::TaskToCtld task_to_ctld;
-
-
+ private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
    * Also, these fields are persisted on the disk.
    * ------------------------------- */
   task_id_t task_id;
   task_db_id_t task_db_id;
-  uint32_t partition_id;
   gid_t gid;
   std::string account;
 
@@ -149,26 +197,167 @@ struct TaskInCtld {
    * Also, these fields are persisted on the disk.
    * -------------------------------- */
   int32_t requeue_count{0};
-
-  /* -----------
-   * Fields that may change at run time.
-   * However, these fields are NOT persisted on the disk.
-   * ----------- */
-  crane::grpc::TaskStatus status;
-
-  uint32_t nodes_alloc;
-  std::list<std::string> nodes;
+  uint32_t partition_id;
   std::list<uint32_t> node_indexes;
-  CranedId executing_node_id;  // The root process of the task started on this
-                               // node id.
-  std::string allocated_craneds_regex;
+  std::list<std::string> nodes;
+  crane::grpc::TaskStatus status;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
   absl::Time start_time;
-
   absl::Time end_time;
+
+  /* ------ duplicate of the fields [1] above just for convenience ----- */
+  crane::grpc::TaskToCtld task_to_ctld;
+
+  /* ------ duplicate of the fields [2][3] above just for convenience ----- */
+  crane::grpc::PersistedPartOfTaskInCtld persisted_part;
+
+ public:
+  /* -----------
+   * Fields that may change at run time.
+   * However, these fields are NOT persisted on the disk.
+   * ----------- */
+  uint32_t nodes_alloc;
+  CranedId executing_node_id;  // The root process of the task started on this
+                               // node id.
+  std::string allocated_craneds_regex;
+
+  // Helper function
+ public:
+  crane::grpc::TaskToCtld const& TaskToCtld() { return task_to_ctld; }
+  crane::grpc::PersistedPartOfTaskInCtld const& PersistedPart() {
+    return persisted_part;
+  }
+
+  void SetTaskId(task_id_t id) {
+    task_id = id;
+    persisted_part.set_task_id(id);
+  }
+  task_id_t TaskId() const { return task_id; }
+
+  void SetTaskDbId(task_db_id_t id) {
+    task_db_id = id;
+    persisted_part.set_task_db_id(id);
+  }
+  task_id_t TaskDbId() const { return task_db_id; }
+
+  void SetPartitionId(uint32_t id) {
+    partition_id = id;
+    persisted_part.set_partition_id(id);
+  }
+  uint32_t PartitionId() const { return partition_id; }
+
+  void SetGid(gid_t id) {
+    gid = id;
+    persisted_part.set_gid(id);
+  }
+  uid_t Gid() const { return gid; }
+
+  void SetAccount(std::string const& val) {
+    account = std::move(val);
+    persisted_part.set_account(val);
+  }
+  std::string const& Account() const { return account; }
+
+  void SetNodeIndexes(std::list<uint32_t>&& val) {
+    persisted_part.mutable_node_indexes()->Assign(val.begin(), val.end());
+    node_indexes = val;
+  }
+  std::list<uint32_t> const& NodeIndexes() { return node_indexes; }
+
+  void NodeIndexesAdd(uint32_t i) {
+    node_indexes.emplace_back(i);
+    *persisted_part.mutable_node_indexes()->Add() = i;
+  }
+
+  void SetNodes(std::list<std::string>&& val) {
+    persisted_part.mutable_nodes()->Assign(val.begin(), val.end());
+    nodes = std::move(val);
+  }
+  std::list<std::string> const& Nodes() const { return nodes; }
+  void NodesAdd(std::string const& val) {
+    persisted_part.mutable_nodes()->Add()->assign(val);
+  }
+
+  void SetStatus(crane::grpc::TaskStatus val) {
+    status = val;
+    persisted_part.set_status(val);
+  }
+  crane::grpc::TaskStatus Status() const { return status; }
+
+  void SetStartTime(absl::Time const& val) {
+    start_time = val;
+    persisted_part.mutable_start_time()->set_seconds(ToUnixSeconds(start_time));
+  }
+  void SetStartTimeByUnixSecond(uint64_t val) {
+    start_time = absl::FromUnixSeconds(val);
+    persisted_part.mutable_start_time()->set_seconds(val);
+  }
+  absl::Time const& StartTime() const { return start_time; }
+  uint64_t StartTimeInUnixSecond() const { return ToUnixSeconds(start_time); }
+
+  void SetEndTime(absl::Time const& val) {
+    end_time = val;
+    persisted_part.mutable_end_time()->set_seconds(ToUnixSeconds(end_time));
+  }
+  void SetEndTimeByUnixSecond(uint64_t val) {
+    end_time = absl::FromUnixSeconds(val);
+    persisted_part.mutable_end_time()->set_seconds(val);
+  }
+  absl::Time const& EndTime() const { return end_time; }
+  uint64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
+
+  void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
+    task_to_ctld = val;
+
+    partition_name = (val.partition_name().empty()) ? g_config.DefaultPartition
+                                                    : val.partition_name();
+    resources.allocatable_resource = val.resources().allocatable_resource();
+    time_limit = absl::Seconds(val.time_limit().seconds());
+
+    type = val.type();
+
+    if (type == crane::grpc::Batch) {
+      meta = BatchMetaInTask{};
+      auto& batch_meta = std::get<BatchMetaInTask>(meta);
+      batch_meta.sh_script = val.batch_meta().sh_script();
+      batch_meta.output_file_pattern = val.batch_meta().output_file_pattern();
+    }
+
+    node_num = val.node_num();
+    ntasks_per_node = val.ntasks_per_node();
+    cpus_per_task = val.cpus_per_task();
+
+    uid = val.uid();
+    name = val.name();
+    cmd_line = val.cmd_line();
+    env = val.env();
+    cwd = val.cwd();
+  }
+
+  void SetFieldsByPersistedPart(
+      crane::grpc::PersistedPartOfTaskInCtld const& val) {
+    persisted_part = val;
+
+    task_id = persisted_part.task_id();
+    task_db_id = persisted_part.task_db_id();
+    partition_id = persisted_part.partition_id();
+    gid = persisted_part.gid();
+
+    node_indexes.assign(persisted_part.node_indexes().begin(),
+                        persisted_part.node_indexes().end());
+    executing_node_id = {partition_id, node_indexes.front()};
+    nodes_alloc = node_indexes.size();
+    allocated_craneds_regex = util::HostNameListToStr(nodes);
+
+    nodes.assign(persisted_part.nodes().begin(), persisted_part.nodes().end());
+    status = persisted_part.status();
+
+    start_time = absl::FromUnixSeconds(persisted_part.start_time().seconds());
+    end_time = absl::FromUnixSeconds(persisted_part.end_time().seconds());
+  }
 };
 
 struct Qos {
@@ -207,53 +396,4 @@ struct User {
   AdminLevel admin_level;
 };
 
-struct Config {
-  struct Node {
-    uint32_t cpu;
-    uint64_t memory_bytes;
-
-    std::string partition_name;
-  };
-
-  struct Partition {
-    std::string nodelist_str;
-    std::unordered_set<std::string> nodes;
-    std::unordered_set<std::string> AllowAccounts;
-  };
-
-  struct CraneCtldListenConf {
-    std::string CraneCtldListenAddr;
-    std::string CraneCtldListenPort;
-
-    bool UseTls{false};
-    std::string CertFilePath;
-    std::string CertContent;
-    std::string KeyFilePath;
-    std::string KeyContent;
-  };
-
-  CraneCtldListenConf ListenConf;
-
-  std::string CraneCtldDebugLevel;
-  std::string CraneCtldLogFile;
-
-  std::string CraneCtldDbPath;
-
-  bool CraneCtldForeground{};
-
-  std::string Hostname;
-  std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
-  std::unordered_map<std::string, Partition> Partitions;
-  std::string DefaultPartition;
-
-  std::string DbUser;
-  std::string DbPassword;
-  std::string DbHost;
-  std::string DbPort;
-  std::string DbRSName;
-  std::string DbName;
-};
-
 }  // namespace Ctld
-
-inline Ctld::Config g_config;

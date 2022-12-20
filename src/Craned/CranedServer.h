@@ -16,7 +16,7 @@
 #include "crane/Lock.h"
 
 #if Boost_MINOR_VERSION >= 69
-#include <boost/uuid/uuid_hash.hpp>
+#  include <boost/uuid/uuid_hash.hpp>
 #endif
 
 #include "TaskManager.h"
@@ -54,6 +54,16 @@ class CranedServiceImpl : public Craned::Service {
       grpc::ServerContext *context,
       const crane::grpc::TerminateTaskRequest *request,
       crane::grpc::TerminateTaskReply *response) override;
+
+  grpc::Status TerminateOrphanedTask(
+      grpc::ServerContext *context,
+      const crane::grpc::TerminateOrphanedTaskRequest *request,
+      crane::grpc::TerminateOrphanedTaskReply *response) override;
+
+  grpc::Status CheckTaskStatus(
+      grpc::ServerContext *context,
+      const crane::grpc::CheckTaskStatusRequest *request,
+      crane::grpc::CheckTaskStatusReply *response) override;
 
   grpc::Status QueryTaskIdFromPort(
       grpc::ServerContext *context,
@@ -107,7 +117,8 @@ class CranedServer {
   // who have the permission to execute interactive tasks in Craned.
   // If someone holds a valid resource uuid on a task id, we assume that he
   // has allocated required resource from CraneCtld.
-  std::unordered_map<uuid, uint32_t /*task id*/> m_resource_uuid_map_ GUARDED_BY(m_mtx_);
+  std::unordered_map<uuid, uint32_t /*task id*/> m_resource_uuid_map_
+      GUARDED_BY(m_mtx_);
 
   Mutex m_mtx_;
 

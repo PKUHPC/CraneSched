@@ -24,9 +24,30 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
 }
 
 void CtldClient::TaskStatusChangeAsync(TaskStatusChange&& task_status_change) {
-  m_task_status_change_mtx_.Lock();
+  absl::MutexLock lock(&m_task_status_change_mtx_);
   m_task_status_change_list_.emplace_back(std::move(task_status_change));
-  m_task_status_change_mtx_.Unlock();
+}
+
+bool CtldClient::CancelTaskStatusChangeByTaskId(
+    task_id_t task_id, crane::grpc::TaskStatus* new_status) {
+  absl::MutexLock lock(&m_task_status_change_mtx_);
+
+  size_t num_removed{0};
+
+  for (auto it = m_task_status_change_list_.begin();
+       it != m_task_status_change_list_.end();)
+    if (it->task_id == task_id) {
+      num_removed++;
+      *new_status = it->new_status;
+      it = m_task_status_change_list_.erase(it);
+    } else
+      ++it;
+
+  CRANE_ASSERT_MSG(num_removed == 1,
+                   "TaskStatusChange should happen only once "
+                   "for a single running task!");
+
+  return num_removed >= 1;
 }
 
 void CtldClient::AsyncSendThread_() {

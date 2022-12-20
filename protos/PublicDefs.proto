@@ -96,6 +96,12 @@ message PersistedPartOfTaskInCtld {
 
   // Fields that will change after this task is accepted.
   int32 requeue_count = 11;
+  repeated uint32 node_indexes = 12;
+  repeated string nodes = 13;
+  TaskStatus status = 14;
+
+  google.protobuf.Timestamp start_time = 15;
+  google.protobuf.Timestamp end_time = 16;
 }
 
 message TaskToD {

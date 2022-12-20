@@ -2,10 +2,7 @@
 
 #include "protos/Crane.pb.h"
 
-// For better logging inside lambda functions
-#if defined(__clang__) || defined(__GNUC__) || defined(__GNUG__)
-#define __FUNCTION__ __PRETTY_FUNCTION__
-#endif
+using task_id_t = uint32_t;
 
 enum class CraneErr : uint16_t {
   kOk = 0,

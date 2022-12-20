@@ -401,7 +401,10 @@ void InitializeCtldGlobalVariables() {
   g_craned_keeper->InitAndRegisterCraneds(std::move(addr_and_id_list));
   while (true) {
     auto online_cnt = g_craned_keeper->AvailableCranedCount();
-    if (online_cnt >= to_registered_craneds_cnt) break;
+    if (online_cnt >= to_registered_craneds_cnt) {
+      CRANE_INFO("All craned nodes are up.");
+      break;
+    }
 
     std::this_thread::sleep_for(20ms);
     if (std::chrono::system_clock::now() > wait_end_point) {

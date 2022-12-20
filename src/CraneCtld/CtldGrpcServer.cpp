@@ -54,34 +54,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   CraneErr err;
 
   auto task = std::make_unique<TaskInCtld>();
-  if (request->task().partition_name().empty()) {
-    task->partition_name = g_config.DefaultPartition;
-  } else {
-    task->partition_name = request->task().partition_name();
-  }
-  task->resources.allocatable_resource =
-      request->task().resources().allocatable_resource();
-  task->time_limit = absl::Seconds(request->task().time_limit().seconds());
-
-  task->meta = BatchMetaInTask{};
-  auto &batch_meta = std::get<BatchMetaInTask>(task->meta);
-  batch_meta.sh_script = request->task().batch_meta().sh_script();
-  batch_meta.output_file_pattern =
-      request->task().batch_meta().output_file_pattern();
-
-  task->type = crane::grpc::Batch;
-
-  task->node_num = request->task().node_num();
-  task->ntasks_per_node = request->task().ntasks_per_node();
-  task->cpus_per_task = request->task().cpus_per_task();
-
-  task->uid = request->task().uid();
-  task->name = request->task().name();
-  task->cmd_line = request->task().cmd_line();
-  task->env = request->task().env();
-  task->cwd = request->task().cwd();
-
-  task->task_to_ctld = request->task();
+  task->SetFieldsByTaskToCtld(request->task());
 
   if (task->uid) {
     if (!g_account_manager->CheckUserPermissionToPartition(
@@ -232,31 +205,31 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
   if (request->find_all()) {
     for (auto &task : task_list) {
       auto *meta_it = meta_list->Add();
-      meta_it->CopyFrom(task.task_to_ctld);
+      meta_it->CopyFrom(task.TaskToCtld());
 
       auto *state_it = state_list->Add();
-      *state_it = task.status;
+      *state_it = task.Status();
 
       auto *node_list_it = allocated_craned_list->Add();
       *node_list_it = task.allocated_craneds_regex;
 
       auto *id_it = id_list->Add();
-      *id_it = task.task_id;
+      *id_it = task.TaskId();
     }
   } else {
     for (auto &task : task_list) {
       if (task.partition_name != request->partition()) continue;
       auto *meta_it = meta_list->Add();
-      meta_it->CopyFrom(task.task_to_ctld);
+      meta_it->CopyFrom(task.TaskToCtld());
 
       auto *state_it = state_list->Add();
-      *state_it = task.status;
+      *state_it = task.Status();
 
       auto *node_list_it = allocated_craned_list->Add();
       *node_list_it = task.allocated_craneds_regex;
 
       auto *id_it = id_list->Add();
-      *id_it = task.task_id;
+      *id_it = task.TaskId();
     }
   }
 
@@ -276,44 +249,44 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
     auto *task_info_list = response->mutable_task_info_list();
 
     for (auto &&task : task_list) {
-      if (task.status == crane::grpc::Finished &&
-          absl::ToInt64Seconds(absl::Now() - task.end_time) > 300)
+      if (task.Status() == crane::grpc::Finished &&
+          absl::ToInt64Seconds(absl::Now() - task.EndTime()) > 300)
         continue;
       auto *task_it = task_info_list->Add();
 
-      task_it->mutable_submit_info()->CopyFrom(task.task_to_ctld);
-      task_it->set_task_id(task.task_id);
-      task_it->set_gid(task.gid);
-      task_it->set_account(task.account);
-      task_it->set_status(task.status);
+      task_it->mutable_submit_info()->CopyFrom(task.TaskToCtld());
+      task_it->set_task_id(task.TaskId());
+      task_it->set_gid(task.Gid());
+      task_it->set_account(task.Account());
+      task_it->set_status(task.Status());
       task_it->set_craned_list(task.allocated_craneds_regex);
 
       task_it->mutable_start_time()->CopyFrom(
           google::protobuf::util::TimeUtil::SecondsToTimestamp(
-              ToUnixSeconds(task.start_time)));
+              task.StartTimeInUnixSecond()));
       task_it->mutable_end_time()->CopyFrom(
           google::protobuf::util::TimeUtil::SecondsToTimestamp(
-              ToUnixSeconds(task.end_time)));
+              task.EndTimeInUnixSecond()));
     }
   } else {
     auto *task_info_list = response->mutable_task_info_list();
 
     for (auto &&task : task_list) {
-      if (task.task_id == request->job_id()) {
+      if (task.TaskId() == request->job_id()) {
         auto *task_it = task_info_list->Add();
-        task_it->mutable_submit_info()->CopyFrom(task.task_to_ctld);
-        task_it->set_task_id(task.task_id);
-        task_it->set_gid(task.gid);
-        task_it->set_account(task.account);
-        task_it->set_status(task.status);
+        task_it->mutable_submit_info()->CopyFrom(task.TaskToCtld());
+        task_it->set_task_id(task.TaskId());
+        task_it->set_gid(task.Gid());
+        task_it->set_account(task.Account());
+        task_it->set_status(task.Status());
         task_it->set_craned_list(task.allocated_craneds_regex);
 
         task_it->mutable_start_time()->CopyFrom(
             google::protobuf::util::TimeUtil::SecondsToTimestamp(
-                ToUnixSeconds(task.start_time)));
+                ToUnixSeconds(task.StartTime())));
         task_it->mutable_end_time()->CopyFrom(
             google::protobuf::util::TimeUtil::SecondsToTimestamp(
-                ToUnixSeconds(task.end_time)));
+                ToUnixSeconds(task.EndTime())));
       }
     }
   }
@@ -705,20 +678,19 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
   g_craned_keeper->SetCranedIsDownCb(
       std::bind(&CtldServer::CranedIsDownCb_, this, std::placeholders::_1));
+
+  g_craned_keeper->SetCranedIsTempUpCb(
+      std::bind(&CtldServer::CranedIsTempUpCb_, this, std::placeholders::_1));
+
+  g_craned_keeper->SetCranedIsTempDownCb(
+      std::bind(&CtldServer::CranedIsTempDownCb_, this, std::placeholders::_1));
 }
 
 void CtldServer::CranedIsUpCb_(CranedId craned_id) {
   CRANE_TRACE(
       "A new node #{} is up now. Add its resource to the global resource pool.",
       craned_id);
-
-  CranedStub *craned_stub = g_craned_keeper->GetCranedStub(craned_id);
-  CRANE_ASSERT_MSG(craned_stub != nullptr,
-                   "Got nullptr of CranedStub in NodeIsUp() callback!");
-
   g_meta_container->CranedUp(craned_id);
-
-  CRANE_INFO("Node {} is up.", craned_id);
 }
 
 void CtldServer::CranedIsDownCb_(CranedId craned_id) {
@@ -726,8 +698,15 @@ void CtldServer::CranedIsDownCb_(CranedId craned_id) {
       "CranedNode #{} is down now. Remove its resource from the global "
       "resource pool.",
       craned_id);
-
   g_meta_container->CranedDown(craned_id);
+}
+
+void CtldServer::CranedIsTempUpCb_(CranedId craned_id) {
+  CRANE_TRACE("CranedNode #{} is temporarily up now.", craned_id);
+}
+
+void CtldServer::CranedIsTempDownCb_(CranedId craned_id) {
+  CRANE_TRACE("CranedNode #{} is temporarily down now.", craned_id);
 }
 
 void CtldServer::AddAllocDetailToIaTask(

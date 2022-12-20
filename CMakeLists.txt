@@ -45,6 +45,8 @@ option(CRANE_ENABLE_TESTS "Enable test targets" OFF)
 
 option(CRANE_FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." TRUE)
 
+option(CRANE_NATIVE_ARCH_OPT "Enable -march=native compile option" ON)
+
 # Options end here -------------------------------------------------------------------------------
 
 set(CMAKE_CXX_STANDARD 20)
@@ -61,6 +63,10 @@ if (${CRANE_FORCE_COLORED_OUTPUT})
     elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
         add_compile_options(-fcolor-diagnostics)
     endif ()
+endif ()
+
+if (${CRANE_NATIVE_ARCH_OPT})
+    add_compile_options(-march=native)
 endif ()
 
 # Check LTO support
@@ -164,7 +170,9 @@ pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
 add_library(concurrentqueue INTERFACE)
 target_include_directories(concurrentqueue INTERFACE ${DEPENDENCIES_PRE_INSTALLED_DIR}/concurrentqueue/include)
 
+# @formatter:off
 add_definitions(-DCRANE_BUILD_DIRECTORY=\("${CMAKE_BINARY_DIR}"\))
+# @formatter:on
 
 # Proto
 add_subdirectory(protos)

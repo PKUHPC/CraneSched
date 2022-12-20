@@ -127,8 +127,9 @@ class TaskScheduler {
   using Mutex = absl::Mutex;
   using LockGuard = util::AbslMutexLockGuard;
 
-  template <typename K, typename V>
-  using HashMap = absl::flat_hash_map<K, V>;
+  template <typename K, typename V,
+            typename Hash = absl::container_internal::hash_default_hash<K>>
+  using HashMap = absl::flat_hash_map<K, V, Hash>;
 
   template <typename K, typename V>
   using TreeMap = absl::btree_map<K, V>;
@@ -173,7 +174,9 @@ class TaskScheduler {
  private:
   void ScheduleThread_();
 
-  CraneErr RequeueRecoveredTask_(std::unique_ptr<TaskInCtld> task);
+  CraneErr RequeueRecoveredTaskIntoPendingQueue_(
+      std::unique_ptr<TaskInCtld> task);
+  void PutRecoveredTaskIntoRunningQueue_(std::unique_ptr<TaskInCtld> task);
 
   bool QueryCranedIdOfRunningTaskNoLock_(uint32_t task_id, CranedId* node_id);
 
@@ -184,9 +187,6 @@ class TaskScheduler {
   static CraneErr CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task);
 
   static void TransferTaskToMongodb_(TaskInCtld* task);
-
-  static void RestoreTaskInCtldFromTaskInEmbeddedDb_(
-      TaskInEmbeddedDb const& task_in_embedded_db, TaskInCtld* task_in_ctld);
 
   CraneErr TerminateRunningTaskNoLock_(uint32_t task_id);
 

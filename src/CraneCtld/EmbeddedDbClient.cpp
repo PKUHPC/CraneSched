@@ -115,9 +115,7 @@ std::string EmbeddedDbClient::GetInternalErrorStr_() {
   return {};
 }
 
-bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(
-    crane::grpc::TaskToCtld const& task_to_ctld,
-    crane::grpc::PersistedPartOfTaskInCtld* persisted_part) {
+bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(TaskInCtld* task) {
   int rc;
 
   absl::MutexLock lock_queue(&m_queue_mtx_);
@@ -127,21 +125,23 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(
   db_id_t task_db_id{s_next_task_db_id_};
 
   rc = BeginTransaction_();
-  if (rc != UNQLITE_OK) return rc;
+  if (rc != UNQLITE_OK) return false;
 
   db_id_t pos = s_pending_queue_head_.next_db_id;
   rc = InsertBeforeDbQueueNodeNoLockAndTxn_(task_db_id, pos, &m_pending_queue_,
                                             &s_pending_queue_head_,
                                             &s_pending_queue_tail_);
-  if (rc != UNQLITE_OK) return rc;
+  if (rc != UNQLITE_OK) return false;
 
-  crane::grpc::TaskInEmbeddedDb task_in_embedded_db;
-  *task_in_embedded_db.mutable_task_to_ctld() = task_to_ctld;
-  *task_in_embedded_db.mutable_persisted_part() = *persisted_part;
-  task_in_embedded_db.mutable_persisted_part()->set_task_id(task_id);
-  task_in_embedded_db.mutable_persisted_part()->set_task_db_id(task_db_id);
-  rc = StoreTypeIntoDb_(GetDbQueueNodeDataName_(task_db_id),
-                        &task_in_embedded_db);
+  rc = StoreTypeIntoDb_(GetDbQueueNodeTaskToCtldName_(task_db_id),
+                        &task->TaskToCtld());
+  if (rc != UNQLITE_OK) return false;
+
+  task->SetTaskId(task_id);
+  task->SetTaskDbId(task_db_id);
+
+  rc = StoreTypeIntoDb_(GetDbQueueNodePersistedPartName_(task_db_id),
+                        &task->PersistedPart());
   if (rc != UNQLITE_OK) {
     CRANE_ERROR("Failed to store the data of task id: {} / task db id: {}. {}",
                 task_id, task_db_id, GetInternalErrorStr_());
@@ -168,9 +168,6 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(
     CRANE_ERROR("Commit error: {}", GetInternalErrorStr_());
     return false;
   }
-
-  persisted_part->set_task_id(task_id);
-  persisted_part->set_task_db_id(task_db_id);
 
   s_next_task_id_++;
   s_next_task_db_id_++;
@@ -370,6 +367,29 @@ bool EmbeddedDbClient::MoveTaskFromPendingToRunning(
   return true;
 }
 
+bool EmbeddedDbClient::MoveTaskFromRunningToPending(
+    EmbeddedDbClient::db_id_t db_id) {
+  absl::MutexLock l(&m_queue_mtx_);
+  int rc;
+
+  rc = BeginTransaction_();
+  if (rc != UNQLITE_OK) return false;
+
+  rc = DeleteDbQueueNodeInRamQueueNoLockAndTxn_(
+      db_id, &m_pending_queue_, &s_pending_queue_head_, &s_pending_queue_tail_);
+  if (rc != UNQLITE_OK) return false;
+
+  rc = InsertBeforeDbQueueNodeNoLockAndTxn_(
+      db_id, s_running_queue_head_.next_db_id, &m_running_queue_,
+      &s_running_queue_head_, &s_running_queue_tail_);
+  if (rc != UNQLITE_OK) return false;
+
+  rc = Commit_();
+  if (rc != UNQLITE_OK) return false;
+
+  return true;
+}
+
 int EmbeddedDbClient::GetQueueCopyNoLock_(
     const std::unordered_map<db_id_t, DbQueueNode>& q,
     std::list<crane::grpc::TaskInEmbeddedDb>* list) {
@@ -377,9 +397,17 @@ int EmbeddedDbClient::GetQueueCopyNoLock_(
 
   for (const auto& [key, value] : q) {
     crane::grpc::TaskInEmbeddedDb task_proto;
-    rc = FetchTypeFromDb_(GetDbQueueNodeDataName_(key), &task_proto);
+    rc = FetchTypeFromDb_(GetDbQueueNodeTaskToCtldName_(key),
+                          task_proto.mutable_task_to_ctld());
     if (rc != UNQLITE_OK) {
-      CRANE_ERROR("Failed to fetch data for task id {}: {}", key,
+      CRANE_ERROR("Failed to fetch task_to_ctld for task id {}: {}", key,
+                  GetInternalErrorStr_());
+      return rc;
+    }
+    rc = FetchTypeFromDb_(GetDbQueueNodePersistedPartName_(key),
+                          task_proto.mutable_persisted_part());
+    if (rc != UNQLITE_OK) {
+      CRANE_ERROR("Failed to fetch persisted_part for task id {}: {}", key,
                   GetInternalErrorStr_());
       return rc;
     }
@@ -433,8 +461,11 @@ bool EmbeddedDbClient::PurgeTaskFromEnded(EmbeddedDbClient::db_id_t db_id) {
       db_id, &m_ended_queue_, &s_ended_queue_head_, &s_ended_queue_tail_);
   if (rc != UNQLITE_OK) return false;
 
-  rc = DeleteKeyFromDbAtomic_(GetDbQueueNodeDataName_(db_id));
-  if (rc != UNQLITE_OK) return rc;
+  rc = DeleteKeyFromDbAtomic_(GetDbQueueNodeTaskToCtldName_(db_id));
+  if (rc != UNQLITE_OK) return false;
+
+  rc = DeleteKeyFromDbAtomic_(GetDbQueueNodePersistedPartName_(db_id));
+  if (rc != UNQLITE_OK) return false;
 
   rc = Commit_();
   if (rc != UNQLITE_OK) return false;

@@ -45,6 +45,9 @@ class CtldClient {
 
   void TaskStatusChangeAsync(TaskStatusChange&& task_status_change);
 
+  bool CancelTaskStatusChangeByTaskId(task_id_t task_id,
+                                      crane::grpc::TaskStatus* new_status);
+
   [[nodiscard]] CranedId GetNodeId() const { return m_craned_id_; };
 
  private:
