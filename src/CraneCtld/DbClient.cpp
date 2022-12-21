@@ -622,7 +622,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 25 submit_line
 
   std::array<std::string, 26> fields{
-      "task_id",        "task_id",       "mod_time",    "deleted",
+      "task_id",        "task_db_id",    "mod_time",    "deleted",
       "account",  // 0 - 4
       "cpus_req",       "mem_req",       "task_name",   "env",
       "id_user",  // 5 - 9
@@ -682,7 +682,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 25 submit_line
 
   std::array<std::string, 26> fields{
-      "task_id",        "task_id",       "mod_time",    "deleted",
+      "task_id",        "task_db_id",    "mod_time",    "deleted",
       "account",  // 0 - 4
       "cpus_req",       "mem_req",       "task_name",   "env",
       "id_user",  // 5 - 9
