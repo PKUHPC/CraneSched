@@ -35,18 +35,31 @@ void ParseConfig(int argc, char** argv) {
          cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
         ("s,server-address", "CraneCtld address format: <IP>:<port>",
          cxxopts::value<std::string>())
-        ("c,cpu", "# of total cpu core", cxxopts::value<std::string>())
-        ("m,memory", R"(# of total memory. Format: \d+[BKMG])", cxxopts::value<std::string>())
-        ("p,partition", "Name of the partition", cxxopts::value<std::string>())
+//        ("c,cpu", "# of total cpu core", cxxopts::value<std::string>())
+//        ("m,memory", R"(# of total memory. Format: \d+[BKMG])", cxxopts::value<std::string>())
+//        ("p,partition", "Name of the partition", cxxopts::value<std::string>())
+        ("L,log-file", "File path of craned log file", cxxopts::value<std::string>()->default_value("/tmp/craned/craned.log"))
         ("D,debug-level", "[trace|debug|info|warn|error]", cxxopts::value<std::string>()->default_value("info"))
         ("h,help", "Show help")
         ;
   // clang-format on
+  cxxopts::ParseResult parsed_args;
+  try {
+    parsed_args = options.parse(argc, argv);
+  } catch (cxxopts::OptionException& e) {
+    CRANE_ERROR("{}\n{}", e.what(), options.help());
+    std::exit(1);
+  }
 
-  auto parsed_args = options.parse(argc, argv);
+  if (parsed_args.count("help") > 0) {
+    fmt::print("{}\n", options.help());
+    std::exit(1);
+  }
+
   std::string config_path = parsed_args["config"].as<std::string>();
-
+  bool config_file_exist = false;
   if (std::filesystem::exists(config_path)) {
+    config_file_exist = true;
     try {
       YAML::Node config = YAML::LoadFile(kDefaultConfigPath);
 
@@ -117,8 +130,7 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["ControlMachine"]) {
         g_config.ControlMachine = config["ControlMachine"].as<std::string>();
-      } else
-        std::exit(1);
+      }
 
       if (config["CraneCtldListenPort"])
         g_config.CraneCtldListenPort =
@@ -141,7 +153,7 @@ void ParseConfig(int argc, char** argv) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {
           auto node = it->as<YAML::Node>();
-          auto node_ptr = std::make_shared<Node>();
+          Node node_tmp;
           std::list<std::string> name_list;
 
           if (node["name"]) {
@@ -155,7 +167,7 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
 
           if (node["cpu"])
-            node_ptr->cpu = std::stoul(node["cpu"].as<std::string>());
+            node_tmp.cpu = std::stoul(node["cpu"].as<std::string>());
           else
             std::exit(1);
 
@@ -176,11 +188,12 @@ void ParseConfig(int argc, char** argv) {
             else if (mem_group[2] == "G")
               memory_bytes *= 1024 * 1024 * 1024;
 
-            node_ptr->memory_bytes = memory_bytes;
+            node_tmp.memory_bytes = memory_bytes;
           } else
             std::exit(1);
 
           for (auto&& name : name_list) {
+            std::shared_ptr<Node> node_ptr(new Node(node_tmp));
             if (crane::IsAValidIpv4Address(name)) {
               CRANE_INFO(
                   "Node name `{}` is a valid ipv4 address and doesn't "
@@ -257,23 +270,40 @@ void ParseConfig(int argc, char** argv) {
       std::exit(1);
     }
   } else {
-    // Todo: Check static level setting.
+    CRANE_WARN(
+        "Config file '{}' not existed,configuration content will use command "
+        "line parameters or set to default values",
+        config_path);
+  }
+  // Todo: Check static level setting.
+  if (parsed_args.count("debug-level") || !config_file_exist) {
     g_config.CranedDebugLevel = parsed_args["debug-level"].as<std::string>();
+  }
 
-    if (parsed_args.count("help") > 0) {
-      fmt::print("{}\n", options.help());
-      std::exit(1);
-    }
-
+  if (parsed_args.count("listen") || !config_file_exist) {
     g_config.ListenConf.CranedListenAddr =
         parsed_args["listen"].as<std::string>();
     g_config.ListenConf.CranedListenPort = kCranedDefaultPort;
+  }
 
-    if (parsed_args.count("server-address") == 0) {
-      fmt::print("CraneCtld address must be specified.\n{}\n", options.help());
+  if (parsed_args.count("server-address") == 0) {
+    if (g_config.ControlMachine.empty()) {
+      CRANE_CRITICAL(
+          "CraneCtld address must be specified in command line or config "
+          "file.\n{}",
+          options.help());
       std::exit(1);
     }
+  } else {
     g_config.ControlMachine = parsed_args["server-address"].as<std::string>();
+  }
+
+  if (parsed_args.count("debug-level") || !config_file_exist) {
+    g_config.CranedDebugLevel = parsed_args["debug-level"].as<std::string>();
+  }
+
+  if (parsed_args.count("log-file") || !config_file_exist) {
+    g_config.CranedLogFile = parsed_args["log-file"].as<std::string>();
   }
 
   // Check the format of CranedListen

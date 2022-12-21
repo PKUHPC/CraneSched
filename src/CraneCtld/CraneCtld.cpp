@@ -38,7 +38,9 @@ void ParseConfig(int argc, char** argv) {
   auto parsed_args = options.parse(argc, argv);
 
   std::string config_path = parsed_args["config"].as<std::string>();
+  bool config_file_exist = false;
   if (std::filesystem::exists(config_path)) {
+    config_file_exist = true;
     try {
       YAML::Node config = YAML::LoadFile(kDefaultConfigPath);
 
@@ -270,9 +272,12 @@ void ParseConfig(int argc, char** argv) {
                   e.what());
       std::exit(1);
     }
-  } else {
+  }
+  if (parsed_args.count("listen") || !config_file_exist) {
     g_config.ListenConf.CraneCtldListenAddr =
         parsed_args["listen"].as<std::string>();
+  }
+  if (parsed_args.count("port") || !config_file_exist) {
     g_config.ListenConf.CraneCtldListenPort =
         parsed_args["port"].as<std::string>();
   }
