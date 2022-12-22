@@ -107,8 +107,7 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldLogFile = "/tmp/cranectld/cranectld.log";
 
       if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
-        g_config.CraneCtldDbPath = g_config.CraneCtldLogFile =
-            config["CraneCtldDbPath"].as<std::string>();
+        g_config.CraneCtldDbPath = config["CraneCtldDbPath"].as<std::string>();
       else
         g_config.CraneCtldDbPath = "/tmp/cranectld/unqlite.db";
 
@@ -372,6 +371,31 @@ void InitializeCtldGlobalVariables() {
   }
 
   g_craned_keeper = std::make_unique<CranedKeeper>();
+
+  g_craned_keeper->SetCranedIsUpCb([](CranedId craned_id) {
+    CRANE_TRACE(
+        "A new node #{} is up now. Add its resource to the global resource "
+        "pool.",
+        craned_id);
+    g_meta_container->CranedUp(craned_id);
+  });
+
+  g_craned_keeper->SetCranedIsDownCb([](CranedId craned_id) {
+    CRANE_TRACE(
+        "CranedNode #{} is down now. Remove its resource from the global "
+        "resource pool.",
+        craned_id);
+    g_meta_container->CranedDown(craned_id);
+  });
+
+  g_craned_keeper->SetCranedIsTempUpCb([](CranedId craned_id) {
+    CRANE_TRACE("CranedNode #{} is temporarily up now.", craned_id);
+  });
+
+  g_craned_keeper->SetCranedIsTempDownCb([](CranedId craned_id) {
+    CRANE_TRACE("CranedNode #{} is temporarily down now.", craned_id);
+  });
+
   std::list<CranedAddrAndId> addr_and_id_list;
   for (auto& kv : g_config.Nodes) {
     CranedAddrAndId addr_and_id;
@@ -418,6 +442,11 @@ void InitializeCtldGlobalVariables() {
 
   g_task_scheduler =
       std::make_unique<TaskScheduler>(std::make_unique<MinLoadFirst>());
+  ok = g_task_scheduler->Init();
+  if (!ok) {
+    CRANE_ERROR("The initialization of TaskScheduler failed. Exiting...");
+    std::exit(1);
+  }
 
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
 }

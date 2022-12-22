@@ -638,36 +638,29 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,   /*0-4*/
              double, int64_t, std::string, std::string, int32_t,  /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string, /*10-14*/
-             std::string, int64_t, int64_t, int64_t, int64_t,     /*15-19*/
+             int64_t, int64_t, int64_t, int64_t, int64_t,         /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string, /*20-24*/
              std::string>
-      values{static_cast<int32_t>(persisted_part.task_id()),
-             persisted_part.task_db_id(),
-             absl::ToUnixSeconds(absl::Now()),
-             false,
-             persisted_part.account(),
+      values{// 0-4
+             static_cast<int32_t>(persisted_part.task_id()),
+             persisted_part.task_db_id(), absl::ToUnixSeconds(absl::Now()),
+             false, persisted_part.account(),
+             // 5-9
              task_to_ctld.resources().allocatable_resource().cpu_core_limit(),
              static_cast<int64_t>(task_to_ctld.resources()
                                       .allocatable_resource()
                                       .memory_limit_bytes()),
-             task_to_ctld.name(),
-             task_to_ctld.env(),
+             task_to_ctld.name(), task_to_ctld.env(),
              static_cast<int32_t>(task_to_ctld.uid()),
-             static_cast<int32_t>(persisted_part.gid()),
-             "",
-             0,
-             0,
+             // 10-14
+             static_cast<int32_t>(persisted_part.gid()), "", 0, 0,
              task_to_ctld.partition_name(),
-             0,
-             0,
-             0,
-             0,
-             0,
-             task_to_ctld.batch_meta().sh_script(),
-             persisted_part.status(),
-             task_to_ctld.time_limit().seconds(),
-             0,
-             task_to_ctld.cwd(),
+             // 15-19
+             0, 0, 0, 0, 0,
+             // 20-24
+             task_to_ctld.batch_meta().sh_script(), persisted_part.status(),
+             task_to_ctld.time_limit().seconds(), 0, task_to_ctld.cwd(),
+             // 25
              task_to_ctld.cmd_line()};
 
   return DocumentConstructor_(fields, values);
@@ -698,35 +691,27 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,   /*0-4*/
              double, int64_t, std::string, std::string, int32_t,  /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string, /*10-14*/
-             std::string, int64_t, int64_t, int64_t, int64_t,     /*15-19*/
+             int64_t, int64_t, int64_t, int64_t, int64_t,         /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string, /*20-24*/
              std::string>
-      values{static_cast<int32_t>(task->TaskId()),
-             task->TaskDbId(),
-             absl::ToUnixSeconds(absl::Now()),
-             false,
-             task->Account(),
+      values{// 0-4
+             static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
+             absl::ToUnixSeconds(absl::Now()), false, task->Account(),
+             // 5-9
              task->resources.allocatable_resource.cpu_count,
              static_cast<int64_t>(
                  task->resources.allocatable_resource.memory_bytes),
-             task->name,
-             task->env,
-             static_cast<int32_t>(task->uid),
-             static_cast<int32_t>(task->Gid()),
-             task->allocated_craneds_regex,
-             static_cast<int32_t>(task->nodes_alloc),
-             0,
-             task->partition_name,
-             0,
-             0,
-             static_cast<int64_t>(task->StartTimeInUnixSecond()),
-             static_cast<int64_t>(task->EndTimeInUnixSecond()),
-             0,
-             std::get<BatchMetaInTask>(task->meta).sh_script,
-             task->Status(),
-             absl::ToInt64Seconds(task->time_limit),
-             0,
-             task->cwd,
+             task->name, task->env, static_cast<int32_t>(task->uid),
+             // 10-14
+             static_cast<int32_t>(task->Gid()), task->allocated_craneds_regex,
+             static_cast<int32_t>(task->nodes_alloc), 0, task->partition_name,
+             // 15-19
+             0, 0, static_cast<int64_t>(task->StartTimeInUnixSecond()),
+             static_cast<int64_t>(task->EndTimeInUnixSecond()), 0,
+             // 20-24
+             std::get<BatchMetaInTask>(task->meta).sh_script, task->Status(),
+             absl::ToInt64Seconds(task->time_limit), 0, task->cwd,
+             // 25
              task->cmd_line};
 
   return DocumentConstructor_(fields, values);

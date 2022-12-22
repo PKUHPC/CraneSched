@@ -672,41 +672,6 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   sigint_waiting_thread.detach();
 
   signal(SIGINT, &CtldServer::signal_handler_func);
-
-  g_craned_keeper->SetCranedIsUpCb(
-      std::bind(&CtldServer::CranedIsUpCb_, this, std::placeholders::_1));
-
-  g_craned_keeper->SetCranedIsDownCb(
-      std::bind(&CtldServer::CranedIsDownCb_, this, std::placeholders::_1));
-
-  g_craned_keeper->SetCranedIsTempUpCb(
-      std::bind(&CtldServer::CranedIsTempUpCb_, this, std::placeholders::_1));
-
-  g_craned_keeper->SetCranedIsTempDownCb(
-      std::bind(&CtldServer::CranedIsTempDownCb_, this, std::placeholders::_1));
-}
-
-void CtldServer::CranedIsUpCb_(CranedId craned_id) {
-  CRANE_TRACE(
-      "A new node #{} is up now. Add its resource to the global resource pool.",
-      craned_id);
-  g_meta_container->CranedUp(craned_id);
-}
-
-void CtldServer::CranedIsDownCb_(CranedId craned_id) {
-  CRANE_TRACE(
-      "CranedNode #{} is down now. Remove its resource from the global "
-      "resource pool.",
-      craned_id);
-  g_meta_container->CranedDown(craned_id);
-}
-
-void CtldServer::CranedIsTempUpCb_(CranedId craned_id) {
-  CRANE_TRACE("CranedNode #{} is temporarily up now.", craned_id);
-}
-
-void CtldServer::CranedIsTempDownCb_(CranedId craned_id) {
-  CRANE_TRACE("CranedNode #{} is temporarily down now.", craned_id);
 }
 
 void CtldServer::AddAllocDetailToIaTask(

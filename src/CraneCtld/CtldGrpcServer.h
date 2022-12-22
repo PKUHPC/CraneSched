@@ -140,11 +140,6 @@ class CtldServer {
   using Mutex = util::mutex;
   using LockGuard = util::AbslMutexLockGuard;
 
-  void CranedIsUpCb_(CranedId craned_id);
-  void CranedIsDownCb_(CranedId craned_id);
-  void CranedIsTempUpCb_(CranedId craned_id);
-  void CranedIsTempDownCb_(CranedId craned_id);
-
   std::unique_ptr<CraneCtldServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
 

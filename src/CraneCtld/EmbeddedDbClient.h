@@ -45,12 +45,12 @@ class EmbeddedDbClient {
   inline static constexpr db_id_t s_running_head_db_id_ =
       std::numeric_limits<db_id_t>::max() - 2;
   inline static constexpr db_id_t s_running_tail_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 4;
+      std::numeric_limits<db_id_t>::max() - 3;
 
   inline static constexpr db_id_t s_ended_head_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 5;
+      std::numeric_limits<db_id_t>::max() - 4;
   inline static constexpr db_id_t s_ended_tail_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 6;
+      std::numeric_limits<db_id_t>::max() - 5;
 
   inline static DbQueueDummyHead s_pending_queue_head_{
       .db_id = s_pending_head_db_id_};
@@ -63,9 +63,9 @@ class EmbeddedDbClient {
       .db_id = s_running_tail_db_id_};
 
   inline static DbQueueDummyHead s_ended_queue_head_{.db_id =
-                                                         s_running_head_db_id_};
+                                                         s_ended_head_db_id_};
   inline static DbQueueDummyTail s_ended_queue_tail_{.db_id =
-                                                         s_running_tail_db_id_};
+                                                         s_ended_tail_db_id_};
 
  public:
   EmbeddedDbClient() = default;
@@ -186,14 +186,12 @@ class EmbeddedDbClient {
         if (rc != UNQLITE_OK) {
           CRANE_ERROR("Failed to init {} in db. Code: {}. Msg: {}", key, rc,
                       GetInternalErrorStr_());
-          if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
           return rc;
         }
         *buf = value;
       } else
         CRANE_ERROR("Failed to fetch {} from db. Code: {}. Msg: {}", key, rc,
                     GetInternalErrorStr_());
-      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
     }
     return rc;
   }
@@ -211,7 +209,6 @@ class EmbeddedDbClient {
 
       CRANE_ERROR("Failed to get value size for key {}: {}", key,
                   GetInternalErrorStr_());
-      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
       return rc;
     }
 
@@ -225,9 +222,11 @@ class EmbeddedDbClient {
         continue;
       }
 
-      CRANE_ERROR("Failed to fetch value for key {}: {}", key,
-                  GetInternalErrorStr_());
-      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
+      if (rc != UNQLITE_NOTFOUND) {
+        CRANE_ERROR("Failed to fetch value for key {}: {}", key,
+                    GetInternalErrorStr_());
+        if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
+      }
       return rc;
     }
   }
@@ -245,9 +244,11 @@ class EmbeddedDbClient {
         continue;
       }
 
-      CRANE_ERROR("Failed to get value size for key `{}`. Code: {}. Msg: {}",
-                  key, rc, GetInternalErrorStr_());
-      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
+      if (rc != UNQLITE_NOTFOUND) {
+        CRANE_ERROR("Failed to fetch value for key {}: {}", key,
+                    GetInternalErrorStr_());
+        if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
+      }
       return rc;
     }
 
@@ -268,9 +269,11 @@ class EmbeddedDbClient {
         continue;
       }
 
-      CRANE_ERROR("Failed to fetch value for key {}: {}", key,
-                  GetInternalErrorStr_());
-      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
+      if (rc != UNQLITE_NOTFOUND) {
+        CRANE_ERROR("Failed to fetch value for key {}: {}", key,
+                    GetInternalErrorStr_());
+        if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
+      }
       return rc;
     }
   }
@@ -293,7 +296,11 @@ class EmbeddedDbClient {
         std::this_thread::yield();
         continue;
       }
-      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
+      if (rc != UNQLITE_NOTFOUND) {
+        CRANE_ERROR("Failed to fetch value for key {}: {}", key,
+                    GetInternalErrorStr_());
+        if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
+      }
       return rc;
     }
   }

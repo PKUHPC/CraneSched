@@ -5,6 +5,7 @@ namespace Ctld {
 EmbeddedDbClient::~EmbeddedDbClient() {
   int rc;
   if (m_db_ != nullptr) {
+    CRANE_TRACE("Closing unqlite...");
     rc = unqlite_close(m_db_);
     if (rc != UNQLITE_OK) {
       CRANE_ERROR("Failed to close unqlite: {}", GetInternalErrorStr_());
@@ -14,6 +15,9 @@ EmbeddedDbClient::~EmbeddedDbClient() {
 
 bool EmbeddedDbClient::Init(const std::string& db_path) {
   int rc;
+
+  m_db_path_ = db_path;
+
   rc = unqlite_open(&m_db_, m_db_path_.c_str(), UNQLITE_OPEN_CREATE);
   if (rc != UNQLITE_OK) {
     m_db_ = nullptr;
@@ -82,7 +86,7 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   }
 
   rc = ForEachInDbQueueNoLockAndTxn_(
-      s_pending_queue_head_, s_pending_queue_tail_,
+      s_running_queue_head_, s_running_queue_tail_,
       [this](DbQueueNode const& node) {
         m_running_queue_.emplace(node.db_id, node);
       });

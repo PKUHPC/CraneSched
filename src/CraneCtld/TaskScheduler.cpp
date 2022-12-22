@@ -12,7 +12,7 @@ namespace Ctld {
 
 TaskScheduler::~TaskScheduler() {
   m_thread_stop_ = true;
-  m_schedule_thread_.join();
+  if (m_schedule_thread_.joinable()) m_schedule_thread_.join();
 }
 
 bool TaskScheduler::Init() {
@@ -62,6 +62,7 @@ bool TaskScheduler::Init() {
 
     for (auto&& task_in_embedded_db : running_list) {
       auto task = std::make_unique<TaskInCtld>();
+      task_id_t task_id = task->TaskId();
       task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
       task->SetFieldsByPersistedPart(task_in_embedded_db.persisted_part());
 
@@ -72,11 +73,13 @@ bool TaskScheduler::Init() {
       if (stub == nullptr || stub->Invalid()) {
         CRANE_INFO(
             "The execution node of the restore task #{} is down. "
-            "Requeue it to the pending queue.");
+            "Requeue it to the pending queue.",
+            task_id);
         task->SetStatus(crane::grpc::Running);
+        g_embedded_db_client->MoveTaskFromRunningToPending(task->TaskDbId());
         err = RequeueRecoveredTaskIntoPendingQueue_(std::move(task));
         if (err != CraneErr::kOk)
-          CRANE_ERROR("Failed to requeue task #{}", task->TaskId());
+          CRANE_ERROR("Failed to requeue task #{}", task_id);
       } else {
         crane::grpc::TaskStatus status;
         err = stub->CheckTaskStatus(task->TaskId(), &status);
@@ -131,9 +134,10 @@ bool TaskScheduler::Init() {
           // Exec node is up but task id does not exist.
           // It means that the result of task is lost.
           // Requeue the task.
+          g_embedded_db_client->MoveTaskFromRunningToPending(task->TaskDbId());
           err = RequeueRecoveredTaskIntoPendingQueue_(std::move(task));
           if (err != CraneErr::kOk)
-            CRANE_ERROR("Failed to requeue task #{}", task->TaskId());
+            CRANE_ERROR("Failed to requeue task #{}", task_id);
         }
       }
     }
@@ -151,6 +155,7 @@ bool TaskScheduler::Init() {
 
     for (auto&& task_in_embedded_db : pending_list) {
       auto task = std::make_unique<TaskInCtld>();
+      task_id_t task_id = task->TaskId();
       task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
       task->SetFieldsByPersistedPart(task_in_embedded_db.persisted_part());
 
@@ -159,7 +164,7 @@ bool TaskScheduler::Init() {
 
       err = RequeueRecoveredTaskIntoPendingQueue_(std::move(task));
       if (err != CraneErr::kOk)
-        CRANE_ERROR("Failed to requeue task #{}", task->TaskId());
+        CRANE_ERROR("Failed to requeue task #{}", task_id);
     }
   }
 
@@ -289,8 +294,8 @@ void TaskScheduler::ScheduleThread_() {
         m_running_task_map_.emplace(task->TaskId(), std::move(task));
         m_running_task_map_mtx_.Unlock();
 
-        g_embedded_db_client->UpdatePersistedPartOfTask(task->TaskDbId(),
-                                                        task->PersistedPart());
+        g_embedded_db_client->UpdatePersistedPartOfTask(
+            task_ptr->TaskDbId(), task_ptr->PersistedPart());
 
         // RPC is time-consuming.
         CranedStub* node_stub = g_craned_keeper->GetCranedStub(first_node_id);

@@ -97,6 +97,7 @@ struct Config {
   CranedListenConf ListenConf;
 
   std::string ControlMachine;
+  std::string CraneCtldListenPort;
   std::string CranedDebugLevel;
   std::string CranedLogFile;
 

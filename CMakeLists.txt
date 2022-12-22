@@ -59,13 +59,16 @@ endif ()
 # Set colorized output when ninja build system is used.
 if (${CRANE_FORCE_COLORED_OUTPUT})
     if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+        message(STATUS "colorized output for gcc is enabled")
         add_compile_options(-fdiagnostics-color=always)
     elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+        message(STATUS "colorized output for clang is enabled")
         add_compile_options(-fcolor-diagnostics)
     endif ()
 endif ()
 
 if (${CRANE_NATIVE_ARCH_OPT})
+    message(STATUS "-march=native enabled")
     add_compile_options(-march=native)
 endif ()
 
