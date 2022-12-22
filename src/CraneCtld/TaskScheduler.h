@@ -174,9 +174,10 @@ class TaskScheduler {
  private:
   void ScheduleThread_();
 
-  CraneErr RequeueRecoveredTaskIntoPendingQueue_(
+  CraneErr RequeueRecoveredTaskIntoPendingQueueNoLock_(
       std::unique_ptr<TaskInCtld> task);
-  void PutRecoveredTaskIntoRunningQueue_(std::unique_ptr<TaskInCtld> task);
+  void PutRecoveredTaskIntoRunningQueueNoLock_(
+      std::unique_ptr<TaskInCtld> task);
 
   bool QueryCranedIdOfRunningTaskNoLock_(uint32_t task_id, CranedId* node_id);
 

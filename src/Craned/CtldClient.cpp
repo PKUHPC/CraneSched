@@ -4,10 +4,6 @@
 
 namespace Craned {
 
-CtldClient::CtldClient() {
-  m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
-}
-
 CtldClient::~CtldClient() {
   m_thread_stop_ = true;
 
@@ -21,6 +17,8 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
 
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = CraneCtld::NewStub(m_ctld_channel_);
+
+  m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
 
 void CtldClient::TaskStatusChangeAsync(TaskStatusChange&& task_status_change) {
@@ -58,6 +56,9 @@ void CtldClient::AsyncSendThread_() {
       &m_task_status_change_list_);
 
   while (true) {
+    bool connected = m_ctld_channel_->WaitForConnected(
+        std::chrono::system_clock::now() + std::chrono::seconds(3));
+
     bool has_msg = m_task_status_change_mtx_.LockWhenWithTimeout(
         cond, absl::Milliseconds(50));
     if (!has_msg) {
@@ -68,8 +69,6 @@ void CtldClient::AsyncSendThread_() {
         continue;
     }
 
-    bool connected = m_ctld_channel_->WaitForConnected(
-        std::chrono::system_clock::now() + std::chrono::seconds(3));
     if (connected) {
       std::list<TaskStatusChange> changes;
       changes.splice(changes.begin(), std::move(m_task_status_change_list_));

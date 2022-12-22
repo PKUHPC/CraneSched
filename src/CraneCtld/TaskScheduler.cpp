@@ -77,7 +77,7 @@ bool TaskScheduler::Init() {
             task_id);
         task->SetStatus(crane::grpc::Running);
         g_embedded_db_client->MoveTaskFromRunningToPending(task->TaskDbId());
-        err = RequeueRecoveredTaskIntoPendingQueue_(std::move(task));
+        err = RequeueRecoveredTaskIntoPendingQueueNoLock_(std::move(task));
         if (err != CraneErr::kOk)
           CRANE_ERROR("Failed to requeue task #{}", task_id);
       } else {
@@ -89,7 +89,7 @@ bool TaskScheduler::Init() {
             // Exec node is up and the task is running.
             // Just allocate resource from allocated nodes and
             // put it back into the running queue.
-            PutRecoveredTaskIntoRunningQueue_(std::move(task));
+            PutRecoveredTaskIntoRunningQueueNoLock_(std::move(task));
           } else {
             // Exec node is up and the task ended.
             if (status != crane::grpc::Finished) {
@@ -135,7 +135,7 @@ bool TaskScheduler::Init() {
           // It means that the result of task is lost.
           // Requeue the task.
           g_embedded_db_client->MoveTaskFromRunningToPending(task->TaskDbId());
-          err = RequeueRecoveredTaskIntoPendingQueue_(std::move(task));
+          err = RequeueRecoveredTaskIntoPendingQueueNoLock_(std::move(task));
           if (err != CraneErr::kOk)
             CRANE_ERROR("Failed to requeue task #{}", task_id);
         }
@@ -162,7 +162,7 @@ bool TaskScheduler::Init() {
       CRANE_TRACE("Restore task #{} from embedded pending queue.",
                   task->TaskId());
 
-      err = RequeueRecoveredTaskIntoPendingQueue_(std::move(task));
+      err = RequeueRecoveredTaskIntoPendingQueueNoLock_(std::move(task));
       if (err != CraneErr::kOk)
         CRANE_ERROR("Failed to requeue task #{}", task_id);
     }
@@ -174,7 +174,7 @@ bool TaskScheduler::Init() {
   return true;
 }
 
-CraneErr TaskScheduler::RequeueRecoveredTaskIntoPendingQueue_(
+CraneErr TaskScheduler::RequeueRecoveredTaskIntoPendingQueueNoLock_(
     std::unique_ptr<TaskInCtld> task) {
   CraneErr err;
 
@@ -182,23 +182,14 @@ CraneErr TaskScheduler::RequeueRecoveredTaskIntoPendingQueue_(
   err = CheckTaskValidityAndAcquireAttrs_(task.get());
   if (err != CraneErr::kOk) return err;
 
-  m_task_indexes_mtx_.Lock();
-  m_pending_task_map_mtx_.Lock();
-
   m_partition_to_tasks_map_[task->PartitionId()].emplace(task->TaskId());
   m_pending_task_map_.emplace(task->TaskId(), std::move(task));
-
-  m_pending_task_map_mtx_.Unlock();
-  m_task_indexes_mtx_.Unlock();
 
   return CraneErr::kOk;
 }
 
-void TaskScheduler::PutRecoveredTaskIntoRunningQueue_(
+void TaskScheduler::PutRecoveredTaskIntoRunningQueueNoLock_(
     std::unique_ptr<TaskInCtld> task) {
-  m_task_indexes_mtx_.Lock();
-  m_running_task_map_mtx_.Lock();
-
   for (uint32_t index : task->NodeIndexes()) {
     CranedId node_id{task->PartitionId(), index};
     g_meta_container->MallocResourceFromNode(node_id, task->TaskId(),
@@ -206,12 +197,9 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueue_(
   }
 
   m_partition_to_tasks_map_[task->PartitionId()].emplace(task->TaskId());
-  m_running_task_map_.emplace(task->TaskId(), std::move(task));
   m_node_to_tasks_map_[task->executing_node_id.craned_index].emplace(
       task->TaskId());
-
-  m_running_task_map_mtx_.Unlock();
-  m_task_indexes_mtx_.Unlock();
+  m_running_task_map_.emplace(task->TaskId(), std::move(task));
 }
 
 void TaskScheduler::ScheduleThread_() {

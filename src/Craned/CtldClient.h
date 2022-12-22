@@ -27,7 +27,7 @@ using grpc::Status;
 
 class CtldClient {
  public:
-  CtldClient();
+  CtldClient() = default;
 
   ~CtldClient();
 
