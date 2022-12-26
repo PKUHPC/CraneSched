@@ -6,14 +6,16 @@ ClusterName: pkuhpc_test
 CraneCtldListenAddr: 0.0.0.0
 # the port of control machine to listen
 CraneCtldListenPort: 10011
-# debug level of cranectld
-CraneCtldDebugLevel: trace
-# file path of cranectld log file
-CraneCtldLogFile: /tmp/cranectld/cranectld.log
-# Determines whether the cranectld is running in the background
-CraneCtldForeground: true
 
-# information of mongodb
+# Tls settings
+UseTls: false
+CertFilePath: /etc/crane/xx.cert
+KeyFilePath: /etc/crane/xx.key
+
+# Unqlite settings
+CraneCtldDbPath: /tmp/cranectld/unqlite.db
+
+# Mongodb settings
 DbUser: admin
 DbPassword: "123456"
 DbHost: localhost
@@ -21,12 +23,22 @@ DbPort: 27017
 DbReplSetName: rs0
 DbName: crane_db
 
+
+# Craned Options
+
+# debug level of cranectld
+CraneCtldDebugLevel: trace
+# file path of cranectld log file
+CraneCtldLogFile: /tmp/cranectld/cranectld.log
+# Determines whether the cranectld is running in the background
+CraneCtldForeground: true
 # debug level of craned
 CranedDebugLevel: trace
 # file path of craned log file
 CranedLogFile: /tmp/craned/craned.log
 # Determines whether the craned is running in the background
 CranedForeground: true
+
 
 # list of configuration information of the computing machine
 Nodes:
@@ -38,3 +50,5 @@ Nodes:
 Partitions:
   - name: CPU
     nodes: "cn[15-18]"
+
+DefaultPartition: CPU

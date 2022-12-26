@@ -235,13 +235,11 @@ void ParseConfig(int argc, char** argv) {
         std::vector<std::string> default_partition_vec;
         boost::split(default_partition_vec, default_partition,
                      boost::is_any_of(","));
-        g_config.DefaultPartition =
-            default_partition_vec[default_partition_vec.size() - 1];
+        g_config.DefaultPartition = default_partition_vec[0];
         boost::trim(g_config.DefaultPartition);
         if (default_partition_vec.size() > 1) {
           CRANE_ERROR(
-              "Default partition contains multiple values, latest value '{}' "
-              "used",
+              "Default partition contains multiple values. '{}' is used",
               g_config.DefaultPartition);
         }
 
