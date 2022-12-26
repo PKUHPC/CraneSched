@@ -191,47 +191,10 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
     grpc::ServerContext *context,
     const crane::grpc::QueryJobsInPartitionRequest *request,
     crane::grpc::QueryJobsInPartitionReply *response) {
-  std::list<TaskInCtld> task_list;
+  std::optional<std::string> partition_opt;
+  if (!request->find_all()) partition_opt = request->partition();
 
-  g_db_client->FetchJobRecordsWithStates(
-      &task_list, {crane::grpc::Running, crane::grpc::Pending,
-                   crane::grpc::Cancelled, crane::grpc::Completing});
-
-  auto *meta_list = response->mutable_task_metas();
-  auto *state_list = response->mutable_task_status();
-  auto *allocated_craned_list = response->mutable_allocated_craneds();
-  auto *id_list = response->mutable_task_ids();
-
-  if (request->find_all()) {
-    for (auto &task : task_list) {
-      auto *meta_it = meta_list->Add();
-      meta_it->CopyFrom(task.TaskToCtld());
-
-      auto *state_it = state_list->Add();
-      *state_it = task.Status();
-
-      auto *node_list_it = allocated_craned_list->Add();
-      *node_list_it = task.allocated_craneds_regex;
-
-      auto *id_it = id_list->Add();
-      *id_it = task.TaskId();
-    }
-  } else {
-    for (auto &task : task_list) {
-      if (task.partition_name != request->partition()) continue;
-      auto *meta_it = meta_list->Add();
-      meta_it->CopyFrom(task.TaskToCtld());
-
-      auto *state_it = state_list->Add();
-      *state_it = task.Status();
-
-      auto *node_list_it = allocated_craned_list->Add();
-      *node_list_it = task.allocated_craneds_regex;
-
-      auto *id_it = id_list->Add();
-      *id_it = task.TaskId();
-    }
-  }
+  g_task_scheduler->QueryTasksInPartition(partition_opt, response);
 
   return grpc::Status::OK;
 }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <map>
+#include <range/v3/all.hpp>
 
 #include "CranedKeeper.h"
 #include "CtldGrpcServer.h"
@@ -458,45 +459,47 @@ CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t operator_uid,
   return CraneErr::kNonExistent;
 }
 
-void TaskScheduler::QueryTaskBriefMetaInPartition(
-    uint32_t partition_id, const QueryBriefTaskMetaFieldControl& field_control,
+void TaskScheduler::QueryTasksInPartition(
+    std::optional<std::string> const& partition_opt,
     crane::grpc::QueryJobsInPartitionReply* response) {
   auto* task_list = response->mutable_task_metas();
   auto* state_list = response->mutable_task_status();
   auto* allocated_craned_list = response->mutable_allocated_craneds();
   auto* id_list = response->mutable_task_ids();
 
-  {
-    LockGuard pending_guard(m_pending_task_map_mtx_);
-    for (auto& [task_id, task] : m_pending_task_map_) {
-      auto* task_it = task_list->Add();
-      task_it->CopyFrom(task->TaskToCtld());
+  LockGuard pending_guard(m_pending_task_map_mtx_);
+  LockGuard running_guard(m_running_task_map_mtx_);
 
-      auto* state_it = state_list->Add();
-      *state_it = task->Status();
+  auto append_fn = [&](auto& it) {
+    task_id_t task_id = it.first;
+    std::unique_ptr<TaskInCtld>& task = it.second;
 
-      auto* node_list_it = allocated_craned_list->Add();
-      *node_list_it = task->allocated_craneds_regex;
+    auto* task_it = task_list->Add();
+    task_it->CopyFrom(task->TaskToCtld());
 
-      auto* id_it = id_list->Add();
-      *id_it = task->TaskId();
-    }
-  }
-  {
-    LockGuard running_guard(m_running_task_map_mtx_);
-    for (auto& [task_id, task] : m_running_task_map_) {
-      auto* task_it = task_list->Add();
-      task_it->CopyFrom(task->TaskToCtld());
+    auto* state_it = state_list->Add();
+    *state_it = task->Status();
 
-      auto* state_it = state_list->Add();
-      *state_it = task->Status();
+    auto* node_list_it = allocated_craned_list->Add();
+    *node_list_it = task->allocated_craneds_regex;
 
-      auto* node_list_it = allocated_craned_list->Add();
-      *node_list_it = task->allocated_craneds_regex;
+    auto* id_it = id_list->Add();
+    *id_it = task->TaskId();
+  };
 
-      auto* id_it = id_list->Add();
-      *id_it = task->TaskId();
-    }
+  auto pending_rng = m_pending_task_map_ | ranges::view::all;
+  auto running_rng = m_running_task_map_ | ranges::view::all;
+  auto pd_r_rng = ranges::view::concat(pending_rng, running_rng);
+
+  if (partition_opt.has_value()) {
+    auto pd_r_filtered_rng =
+        pd_r_rng | ranges::view::filter([&](auto& it) -> bool {
+          std::unique_ptr<TaskInCtld>& task = it.second;
+          return task->TaskToCtld().partition_name() == partition_opt.value();
+        });
+    ranges::for_each(pd_r_filtered_rng, append_fn);
+  } else {
+    ranges::for_each(pd_r_rng, append_fn);
   }
 }
 

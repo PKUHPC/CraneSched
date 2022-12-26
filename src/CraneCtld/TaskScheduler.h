@@ -21,16 +21,6 @@
 
 namespace Ctld {
 
-// Task ID is used for querying this structure.
-// The node index has also been recorded in CranedMetaContainer, so there's no
-// need to query it here.
-struct QueryBriefTaskMetaFieldControl {
-  bool type;
-  bool status;
-  bool start_time;
-  bool node_index;
-};
-
 class INodeSelectionAlgo {
  public:
   // Pair content: <The task which is going to be run,
@@ -154,10 +144,8 @@ class TaskScheduler {
                         std::optional<std::string> reason);
 
   // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
-  void QueryTaskBriefMetaInPartition(
-      uint32_t partition_id,
-      const QueryBriefTaskMetaFieldControl& field_control,
-      crane::grpc::QueryJobsInPartitionReply* response);
+  void QueryTasksInPartition(std::optional<std::string> const& partition_opt,
+                             crane::grpc::QueryJobsInPartitionReply* response);
 
   bool QueryCranedIdOfRunningTask(uint32_t task_id, CranedId* craned_id) {
     LockGuard running_guard(m_running_task_map_mtx_);

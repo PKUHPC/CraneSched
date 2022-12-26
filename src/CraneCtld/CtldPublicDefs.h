@@ -278,6 +278,7 @@ struct TaskInCtld {
   }
   std::list<std::string> const& Nodes() const { return nodes; }
   void NodesAdd(std::string const& val) {
+    nodes.emplace_back(val);
     persisted_part.mutable_nodes()->Add()->assign(val);
   }
 

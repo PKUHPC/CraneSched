@@ -42,6 +42,8 @@ target_link_libraries(cranectld
         yaml-cpp
         mongocxx_static
         unqlite
+
+        range-v3::range-v3
         )
 
 # Linker flag for c++ 17 filesystem library

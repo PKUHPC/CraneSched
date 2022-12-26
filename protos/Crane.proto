@@ -247,6 +247,9 @@ message QueryTaskIdFromPortForwardReply{
 
 message QueryJobsInPartitionRequest {
   string partition = 1;
+
+  // If find_all is true, Jobs in all partition will be found
+  //  and partition is empty.
   bool find_all = 2;
 }
 

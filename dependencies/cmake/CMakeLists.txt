@@ -16,6 +16,7 @@ add_subdirectory(grpc)
 add_subdirectory(libuv)
 add_subdirectory(unqlite)
 add_subdirectory(mongodb-cxx-driver)
+add_subdirectory(ranges-v3)
 
 include(${CMAKE_SOURCE_DIR}/CMakeModule/SuppressHeaderWarning.cmake)
 suppress_header_warning()
