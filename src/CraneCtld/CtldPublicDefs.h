@@ -351,9 +351,10 @@ struct TaskInCtld {
                         persisted_part.node_indexes().end());
     executing_node_id = {partition_id, node_indexes.front()};
     nodes_alloc = node_indexes.size();
-    allocated_craneds_regex = util::HostNameListToStr(nodes);
 
     nodes.assign(persisted_part.nodes().begin(), persisted_part.nodes().end());
+    allocated_craneds_regex = util::HostNameListToStr(nodes);
+
     status = persisted_part.status();
 
     start_time = absl::FromUnixSeconds(persisted_part.start_time().seconds());

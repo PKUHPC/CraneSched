@@ -381,19 +381,24 @@ void InitializeCtldGlobalVariables() {
   });
 
   g_craned_keeper->SetCranedIsDownCb([](CranedId craned_id) {
-    CRANE_TRACE(
-        "CranedNode #{} is down now. Remove its resource from the global "
-        "resource pool.",
-        craned_id);
-    g_meta_container->CranedDown(craned_id);
+    CRANE_TRACE("CranedNode #{} is down now.", craned_id);
   });
 
   g_craned_keeper->SetCranedIsTempUpCb([](CranedId craned_id) {
-    CRANE_TRACE("CranedNode #{} is temporarily up now.", craned_id);
+    CRANE_TRACE(
+        "CranedNode #{} is temporarily up now. "
+        "Add its resource to the global resource pool.",
+        craned_id);
+    g_meta_container->CranedUp(craned_id);
   });
 
   g_craned_keeper->SetCranedIsTempDownCb([](CranedId craned_id) {
-    CRANE_TRACE("CranedNode #{} is temporarily down now.", craned_id);
+    CRANE_TRACE(
+        "CranedNode #{} lost connection and is temporarily down now. "
+        "Remove its resource from the global resource pool.",
+        craned_id);
+    g_meta_container->CranedDown(craned_id);
+    g_task_scheduler->TerminateTasksOnCraned(craned_id);
   });
 
   std::list<CranedAddrAndId> addr_and_id_list;

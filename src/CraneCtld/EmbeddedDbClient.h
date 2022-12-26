@@ -144,7 +144,7 @@ class EmbeddedDbClient {
       db_id_t db_id, db_id_t pos, std::unordered_map<db_id_t, DbQueueNode>* q,
       DbQueueDummyHead* q_head, DbQueueDummyTail* q_tail);
 
-  int DeleteDbQueueNodeInRamQueueNoLockAndTxn_(
+  int DeleteDbQueueNodeNoLockAndTxn_(
       db_id_t db_id, std::unordered_map<db_id_t, DbQueueNode>* q,
       DbQueueDummyHead* q_head, DbQueueDummyTail* q_tail);
 

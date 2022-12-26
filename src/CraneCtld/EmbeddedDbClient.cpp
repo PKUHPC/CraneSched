@@ -192,7 +192,7 @@ EmbeddedDbClient::FindDbQueueNodeInRamQueueNoLock_(
   return std::find_if(q.cbegin(), q.cend(), db_queue_eq);
 }
 
-int EmbeddedDbClient::DeleteDbQueueNodeInRamQueueNoLockAndTxn_(
+int EmbeddedDbClient::DeleteDbQueueNodeNoLockAndTxn_(
     EmbeddedDbClient::db_id_t db_id,
     std::unordered_map<db_id_t, DbQueueNode>* q, DbQueueDummyHead* q_head,
     DbQueueDummyTail* q_tail) {
@@ -281,12 +281,12 @@ bool EmbeddedDbClient::MovePendingOrRunningTaskToEnded(
   rc = BeginTransaction_();
   if (rc != UNQLITE_OK) return false;
 
-  rc = DeleteDbQueueNodeInRamQueueNoLockAndTxn_(
+  rc = DeleteDbQueueNodeNoLockAndTxn_(
       db_id, &m_pending_queue_, &s_pending_queue_head_, &s_pending_queue_tail_);
   if (rc != UNQLITE_OK) {
-    rc = DeleteDbQueueNodeInRamQueueNoLockAndTxn_(db_id, &m_running_queue_,
-                                                  &s_running_queue_head_,
-                                                  &s_running_queue_tail_);
+    rc = DeleteDbQueueNodeNoLockAndTxn_(db_id, &m_running_queue_,
+                                        &s_running_queue_head_,
+                                        &s_running_queue_tail_);
     if (rc != UNQLITE_OK) return false;
   }
 
@@ -356,7 +356,7 @@ bool EmbeddedDbClient::MoveTaskFromPendingToRunning(
   rc = BeginTransaction_();
   if (rc != UNQLITE_OK) return false;
 
-  rc = DeleteDbQueueNodeInRamQueueNoLockAndTxn_(
+  rc = DeleteDbQueueNodeNoLockAndTxn_(
       db_id, &m_pending_queue_, &s_pending_queue_head_, &s_pending_queue_tail_);
   if (rc != UNQLITE_OK) return false;
 
@@ -379,13 +379,13 @@ bool EmbeddedDbClient::MoveTaskFromRunningToPending(
   rc = BeginTransaction_();
   if (rc != UNQLITE_OK) return false;
 
-  rc = DeleteDbQueueNodeInRamQueueNoLockAndTxn_(
-      db_id, &m_pending_queue_, &s_pending_queue_head_, &s_pending_queue_tail_);
+  rc = DeleteDbQueueNodeNoLockAndTxn_(
+      db_id, &m_running_queue_, &s_running_queue_head_, &s_running_queue_tail_);
   if (rc != UNQLITE_OK) return false;
 
   rc = InsertBeforeDbQueueNodeNoLockAndTxn_(
-      db_id, s_running_queue_head_.next_db_id, &m_running_queue_,
-      &s_running_queue_head_, &s_running_queue_tail_);
+      db_id, s_pending_queue_head_.next_db_id, &m_pending_queue_,
+      &s_pending_queue_head_, &s_pending_queue_tail_);
   if (rc != UNQLITE_OK) return false;
 
   rc = Commit_();
@@ -461,7 +461,7 @@ bool EmbeddedDbClient::PurgeTaskFromEnded(EmbeddedDbClient::db_id_t db_id) {
   rc = BeginTransaction_();
   if (rc != UNQLITE_OK) return false;
 
-  rc = DeleteDbQueueNodeInRamQueueNoLockAndTxn_(
+  rc = DeleteDbQueueNodeNoLockAndTxn_(
       db_id, &m_ended_queue_, &s_ended_queue_head_, &s_ended_queue_tail_);
   if (rc != UNQLITE_OK) return false;
 

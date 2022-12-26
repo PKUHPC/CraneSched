@@ -141,7 +141,14 @@ class TaskScheduler {
 
   void TaskStatusChange(uint32_t task_id, uint32_t craned_index,
                         crane::grpc::TaskStatus new_status,
-                        std::optional<std::string> reason);
+                        std::optional<std::string> reason) {
+    // The order of LockGuards matters.
+    LockGuard running_guard(m_running_task_map_mtx_);
+    LockGuard indexes_guard(m_task_indexes_mtx_);
+    TaskStatusChangeNoLock_(task_id, craned_index, new_status);
+  }
+
+  void TerminateTasksOnCraned(CranedId craned_id);
 
   // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
   void QueryTasksInPartition(std::optional<std::string> const& partition_opt,
@@ -162,10 +169,13 @@ class TaskScheduler {
  private:
   void ScheduleThread_();
 
-  CraneErr RequeueRecoveredTaskIntoPendingQueueNoLock_(
+  void TaskStatusChangeNoLock_(uint32_t task_id, uint32_t craned_index,
+                               crane::grpc::TaskStatus new_status);
+
+  CraneErr TryRequeueRecoveredTaskIntoPendingQueueLock_(
       std::unique_ptr<TaskInCtld> task);
-  void PutRecoveredTaskIntoRunningQueueNoLock_(
-      std::unique_ptr<TaskInCtld> task);
+
+  void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
 
   bool QueryCranedIdOfRunningTaskNoLock_(uint32_t task_id, CranedId* node_id);
 
@@ -198,7 +208,7 @@ class TaskScheduler {
   Mutex m_persisted_task_map_mtx_;
 
   // Task Indexes
-  HashMap<uint32_t /* Node Index */, HashSet<uint32_t /* Task ID*/>>
+  HashMap<CranedId, HashSet<uint32_t /* Task ID*/>, CranedId::Hash>
       m_node_to_tasks_map_ GUARDED_BY(m_task_indexes_mtx_);
   HashMap<uint32_t /* Partition ID */, HashSet<uint32_t /* Task ID */>>
       m_partition_to_tasks_map_ GUARDED_BY(m_task_indexes_mtx_);

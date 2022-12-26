@@ -592,6 +592,9 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
           CRANE_TRACE("TRANSIENT_FAILURE -> TRANSIENT_FAILURE -> END");
           next_tag_type = std::nullopt;
         }
+      } else if (craned->m_prev_channel_state_ == GRPC_CHANNEL_IDLE) {
+        CRANE_TRACE("IDLE -> TRANSIENT_FAILURE");
+        next_tag_type = CqTag::kEstablishedCraned;
       } else {
         CRANE_ERROR("Unknown State: {} -> TRANSIENT_FAILURE",
                     craned->m_prev_channel_state_);

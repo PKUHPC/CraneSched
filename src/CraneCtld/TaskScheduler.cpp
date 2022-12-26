@@ -22,35 +22,6 @@ bool TaskScheduler::Init() {
   bool ok;
   CraneErr err;
 
-  std::list<TaskInEmbeddedDb> ended_list;
-  ok = g_embedded_db_client->GetEndedQueueCopy(&ended_list);
-  if (!ok) {
-    CRANE_ERROR("Failed to call g_embedded_db_client->GetEndedQueueCopy()");
-    return false;
-  }
-
-  if (!ended_list.empty()) {
-    CRANE_INFO("{} ended task(s) might not have been put to mongodb: ",
-               ended_list.size());
-
-    for (auto& task_in_embedded_db : ended_list) {
-      task_id_t task_id = task_in_embedded_db.persisted_part().task_id();
-      task_db_id_t db_id = task_in_embedded_db.persisted_part().task_db_id();
-      ok = g_db_client->CheckTaskDbIdExisted(db_id);
-      if (!ok) {
-        if (!g_db_client->InsertRecoveredJob(task_in_embedded_db)) {
-          CRANE_ERROR(
-              "Failed to call g_db_client->InsertRecoveredJob() "
-              "for task #{}",
-              task_id);
-        }
-      }
-
-      g_embedded_db_client->PurgeTaskFromEnded(
-          task_in_embedded_db.persisted_part().task_db_id());
-    }
-  }
-
   std::list<TaskInEmbeddedDb> running_list;
   ok = g_embedded_db_client->GetRunningQueueCopy(&running_list);
   if (!ok) {
@@ -63,9 +34,9 @@ bool TaskScheduler::Init() {
 
     for (auto&& task_in_embedded_db : running_list) {
       auto task = std::make_unique<TaskInCtld>();
-      task_id_t task_id = task->TaskId();
       task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
       task->SetFieldsByPersistedPart(task_in_embedded_db.persisted_part());
+      task_id_t task_id = task->TaskId();
 
       CRANE_TRACE("Restore task #{} from embedded running queue.",
                   task->TaskId());
@@ -77,10 +48,16 @@ bool TaskScheduler::Init() {
             "Requeue it to the pending queue.",
             task_id);
         task->SetStatus(crane::grpc::Running);
-        g_embedded_db_client->MoveTaskFromRunningToPending(task->TaskDbId());
-        err = RequeueRecoveredTaskIntoPendingQueueNoLock_(std::move(task));
-        if (err != CraneErr::kOk)
-          CRANE_ERROR("Failed to requeue task #{}", task_id);
+        ok = g_embedded_db_client->MoveTaskFromRunningToPending(
+            task->TaskDbId());
+        if (!ok) {
+          CRANE_ERROR(
+              "Failed to call "
+              "g_embedded_db_client->MoveTaskFromRunningToPending()");
+        }
+
+        // Now the task is moved to the embedded pending queue.
+        // The embedded pending queue will be processed in the following code.
       } else {
         crane::grpc::TaskStatus status;
         err = stub->CheckTaskStatus(task->TaskId(), &status);
@@ -90,7 +67,7 @@ bool TaskScheduler::Init() {
             // Exec node is up and the task is running.
             // Just allocate resource from allocated nodes and
             // put it back into the running queue.
-            PutRecoveredTaskIntoRunningQueueNoLock_(std::move(task));
+            PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
           } else {
             // Exec node is up and the task ended.
             if (status != crane::grpc::Finished) {
@@ -135,14 +112,27 @@ bool TaskScheduler::Init() {
           // Exec node is up but task id does not exist.
           // It means that the result of task is lost.
           // Requeue the task.
-          g_embedded_db_client->MoveTaskFromRunningToPending(task->TaskDbId());
-          err = RequeueRecoveredTaskIntoPendingQueueNoLock_(std::move(task));
-          if (err != CraneErr::kOk)
-            CRANE_ERROR("Failed to requeue task #{}", task_id);
+          CRANE_TRACE(
+              "Task id #{} can't be found cannot be found in its exec craned. "
+              "Move it to pending queue and re-run it.",
+              task_id);
+          ok = g_embedded_db_client->MoveTaskFromRunningToPending(
+              task->TaskDbId());
+          if (!ok) {
+            CRANE_ERROR(
+                "Failed to call "
+                "g_embedded_db_client->MoveTaskFromRunningToPending()");
+          }
+
+          // Now the task is moved to the embedded pending queue.
+          // The embedded pending queue will be processed in the following code.
         }
       }
     }
   }
+
+  // Process the pending tasks in the embedded pending queue. The task may
+  //  come from the embedded running queue due to requeue failure.
 
   std::list<TaskInEmbeddedDb> pending_list;
   ok = g_embedded_db_client->GetPendingQueueCopy(&pending_list);
@@ -156,16 +146,65 @@ bool TaskScheduler::Init() {
 
     for (auto&& task_in_embedded_db : pending_list) {
       auto task = std::make_unique<TaskInCtld>();
-      task_id_t task_id = task->TaskId();
       task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
       task->SetFieldsByPersistedPart(task_in_embedded_db.persisted_part());
+
+      task_id_t task_id = task->TaskId();
+      task_db_id_t task_db_id = task->TaskDbId();
 
       CRANE_TRACE("Restore task #{} from embedded pending queue.",
                   task->TaskId());
 
-      err = RequeueRecoveredTaskIntoPendingQueueNoLock_(std::move(task));
-      if (err != CraneErr::kOk)
-        CRANE_ERROR("Failed to requeue task #{}", task_id);
+      err = TryRequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
+      if (err != CraneErr::kOk) {
+        // Failed to requeue the task into pending queue due to
+        // insufficient resource or other reasons. Mark it as FAILED and move
+        // it to
+        CRANE_INFO(
+            "Failed to requeue task #{}. Mark it as FAILED and "
+            "move it to the ended queue.",
+            task_id);
+        ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(task_db_id);
+        if (!ok) {
+          CRANE_ERROR(
+              "MovePendingOrRunningTaskToEnded failed for task #{} when "
+              "requeue-ing this pending task in the embedded queue..",
+              task_id);
+        }
+      }
+    }
+  }
+
+  std::list<TaskInEmbeddedDb> ended_list;
+  ok = g_embedded_db_client->GetEndedQueueCopy(&ended_list);
+  if (!ok) {
+    CRANE_ERROR("Failed to call g_embedded_db_client->GetEndedQueueCopy()");
+    return false;
+  }
+
+  if (!ended_list.empty()) {
+    CRANE_INFO("{} ended task(s) might not have been put to mongodb: ",
+               ended_list.size());
+
+    for (auto& task_in_embedded_db : ended_list) {
+      task_id_t task_id = task_in_embedded_db.persisted_part().task_id();
+      task_db_id_t db_id = task_in_embedded_db.persisted_part().task_db_id();
+      ok = g_db_client->CheckTaskDbIdExisted(db_id);
+      if (!ok) {
+        if (!g_db_client->InsertRecoveredJob(task_in_embedded_db)) {
+          CRANE_ERROR(
+              "Failed to call g_db_client->InsertRecoveredJob() "
+              "for task #{}",
+              task_id);
+        }
+      }
+
+      ok = g_embedded_db_client->PurgeTaskFromEnded(
+          task_in_embedded_db.persisted_part().task_db_id());
+      if (!ok) {
+        CRANE_ERROR(
+            "Failed to call g_embedded_db_client->PurgeTaskFromEnded()");
+      }
     }
   }
 
@@ -175,8 +214,12 @@ bool TaskScheduler::Init() {
   return true;
 }
 
-CraneErr TaskScheduler::RequeueRecoveredTaskIntoPendingQueueNoLock_(
+CraneErr TaskScheduler::TryRequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
+  // The order of LockGuards matters.
+  LockGuard pending_guard(m_pending_task_map_mtx_);
+  LockGuard indexes_guard(m_task_indexes_mtx_);
+
   CraneErr err;
 
   // task->partition_id will be set in this call.
@@ -189,17 +232,20 @@ CraneErr TaskScheduler::RequeueRecoveredTaskIntoPendingQueueNoLock_(
   return CraneErr::kOk;
 }
 
-void TaskScheduler::PutRecoveredTaskIntoRunningQueueNoLock_(
+void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
+  // The order of LockGuards matters.
+  LockGuard running_guard(m_running_task_map_mtx_);
+  LockGuard indexes_guard(m_task_indexes_mtx_);
+
   for (uint32_t index : task->NodeIndexes()) {
     CranedId node_id{task->PartitionId(), index};
     g_meta_container->MallocResourceFromNode(node_id, task->TaskId(),
                                              task->resources);
+    m_node_to_tasks_map_[node_id].emplace(task->TaskId());
   }
 
   m_partition_to_tasks_map_[task->PartitionId()].emplace(task->TaskId());
-  m_node_to_tasks_map_[task->executing_node_id.craned_index].emplace(
-      task->TaskId());
   m_running_task_map_.emplace(task->TaskId(), std::move(task));
 }
 
@@ -256,7 +302,7 @@ void TaskScheduler::ScheduleThread_() {
           }
 
           m_task_indexes_mtx_.Lock();
-          m_node_to_tasks_map_[node_id.craned_index].emplace(task->TaskId());
+          m_node_to_tasks_map_[node_id].emplace(task->TaskId());
           m_task_indexes_mtx_.Unlock();
         }
 
@@ -345,13 +391,9 @@ CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
   return CraneErr::kOk;
 }
 
-void TaskScheduler::TaskStatusChange(uint32_t task_id, uint32_t craned_index,
-                                     crane::grpc::TaskStatus new_status,
-                                     std::optional<std::string> reason) {
-  // The order of LockGuards matters.
-  LockGuard running_guard(m_running_task_map_mtx_);
-  LockGuard indexes_guard(m_task_indexes_mtx_);
-
+void TaskScheduler::TaskStatusChangeNoLock_(
+    uint32_t task_id, uint32_t craned_index,
+    crane::grpc::TaskStatus new_status) {
   auto iter = m_running_task_map_.find(task_id);
   if (iter == m_running_task_map_.end()) {
     CRANE_WARN("Ignoring unknown task id {} in TaskStatusChange.", task_id);
@@ -383,14 +425,26 @@ void TaskScheduler::TaskStatusChange(uint32_t task_id, uint32_t craned_index,
   for (auto&& task_node_index : task->NodeIndexes()) {
     CranedId task_node_id{task->PartitionId(), task_node_index};
     g_meta_container->FreeResourceFromNode(task_node_id, task_id);
+
     auto* stub = g_craned_keeper->GetCranedStub(task_node_id);
-    CraneErr err = stub->ReleaseCgroupForTask(task_id, task->uid);
-    if (err != CraneErr::kOk) {
-      CRANE_ERROR("Failed to Release cgroup RPC for task#{} on Node {}",
-                  task_id, task_node_id);
+    if (!stub->Invalid()) {
+      CraneErr err = stub->ReleaseCgroupForTask(task_id, task->uid);
+      if (err != CraneErr::kOk) {
+        CRANE_ERROR("Failed to Release cgroup RPC for task#{} on Node {}",
+                    task_id, task_node_id);
+      }
     }
 
-    m_node_to_tasks_map_[task_node_index].erase(task_id);
+    auto node_to_task_map_it = m_node_to_tasks_map_.find(task_node_id);
+    if (node_to_task_map_it == m_node_to_tasks_map_.end()) [[unlikely]] {
+      CRANE_ERROR("Failed to find craned_id {} in m_node_to_tasks_map_",
+                  task_node_id);
+    } else {
+      node_to_task_map_it->second.erase(task_id);
+      if (node_to_task_map_it->second.empty()) {
+        m_node_to_tasks_map_.erase(node_to_task_map_it);
+      }
+    }
   }
 
   // As for now, task status change includes only
@@ -1083,13 +1137,6 @@ void TaskScheduler::TransferTaskToMongodb_(TaskInCtld* task) {
         task->TaskId());
   }
 
-  std::string empty_string;
-  uint32_t zero = 0;
-
-  std::reference_wrapper<std::string> script{empty_string};
-  if (task->type == crane::grpc::Batch)
-    script = std::get<BatchMetaInTask>(task->meta).sh_script;
-
   if (!g_db_client->InsertJob(task)) {
     CRANE_ERROR("Failed to call g_db_client->InsertJob() for task #{}",
                 task->TaskId());
@@ -1149,6 +1196,29 @@ CraneErr TaskScheduler::CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task) {
   task->SetPartitionId(partition_id);
 
   return CraneErr::kOk;
+}
+
+void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
+  CRANE_TRACE("Terminate tasks on craned {}", craned_id);
+
+  // The order of LockGuards matters.
+  LockGuard running_guard(m_running_task_map_mtx_);
+  LockGuard indexes_guard(m_task_indexes_mtx_);
+
+  auto it = m_node_to_tasks_map_.find(craned_id);
+  if (it != m_node_to_tasks_map_.end()) {
+    // m_node_to_tasks_map_[craned_id] will be cleaned in
+    // TaskStatusChangeNoLock_. Do not clean it here and make a copy of
+    // it->second.
+    std::vector<task_id_t> task_ids(it->second.begin(), it->second.end());
+
+    for (task_id_t task_id : task_ids)
+      TaskStatusChangeNoLock_(task_id, craned_id.craned_index,
+                              crane::grpc::TaskStatus::Failed);
+  } else {
+    CRANE_TRACE("No task is executed by craned {}. Ignore cleaning step...",
+                craned_id);
+  }
 }
 
 }  // namespace Ctld
