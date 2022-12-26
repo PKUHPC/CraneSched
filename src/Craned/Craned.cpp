@@ -1,8 +1,5 @@
 #include <absl/strings/str_split.h>
 #include <event2/thread.h>
-#include <spdlog/async.h>
-#include <spdlog/sinks/rotating_file_sink.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
@@ -20,6 +17,14 @@
 #include "crane/Network.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
+
+// Include the header which defines the static log level
+#include "crane/Logger.h"
+
+// Must be after crane/Logger.h which defines the static log level
+#include <spdlog/async.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 using Craned::g_config;
 using Craned::Node;
@@ -92,11 +97,15 @@ void ParseConfig(int argc, char** argv) {
       }
 
       if (config["ControlMachine"]) {
-        std::string addr;
-        addr = config["ControlMachine"].as<std::string>();
-        g_config.ControlMachine = fmt::format("{}:{}", addr, kCtldDefaultPort);
+        g_config.ControlMachine = config["ControlMachine"].as<std::string>();
       } else
         std::exit(1);
+
+      if (config["CraneCtldListenPort"])
+        g_config.CraneCtldListenPort =
+            config["CraneCtldListenPort"].as<std::string>();
+      else
+        g_config.CraneCtldListenPort = kCtldDefaultPort;
 
       if (config["CranedDebugLevel"])
         g_config.CranedDebugLevel =
@@ -402,7 +411,10 @@ void GlobalVariableInit() {
 
   g_ctld_client = std::make_unique<Craned::CtldClient>();
   g_ctld_client->SetNodeId(g_config.NodeId);
-  g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
+
+  std::string ctld_address = fmt::format("{}:{}", g_config.ControlMachine,
+                                         g_config.CraneCtldListenPort);
+  g_ctld_client->InitChannelAndStub(ctld_address);
 }
 
 void StartServer() {

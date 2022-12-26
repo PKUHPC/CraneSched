@@ -21,16 +21,6 @@
 
 namespace Ctld {
 
-// Task ID is used for querying this structure.
-// The node index has also been recorded in CranedMetaContainer, so there's no
-// need to query it here.
-struct QueryBriefTaskMetaFieldControl {
-  bool type;
-  bool status;
-  bool start_time;
-  bool node_index;
-};
-
 class INodeSelectionAlgo {
  public:
   // Pair content: <The task which is going to be run,
@@ -122,34 +112,47 @@ class MinLoadFirst : public INodeSelectionAlgo {
 };
 
 class TaskScheduler {
+  using TaskInEmbeddedDb = crane::grpc::TaskInEmbeddedDb;
+
   using Mutex = absl::Mutex;
   using LockGuard = util::AbslMutexLockGuard;
 
+  template <typename K, typename V,
+            typename Hash = absl::container_internal::hash_default_hash<K>>
+  using HashMap = absl::flat_hash_map<K, V, Hash>;
+
   template <typename K, typename V>
-  using HashMap = absl::flat_hash_map<K, V>;
+  using TreeMap = absl::btree_map<K, V>;
 
   template <typename K>
   using HashSet = absl::flat_hash_set<K>;
 
  public:
-  explicit TaskScheduler(std::unique_ptr<INodeSelectionAlgo> algo);
+  explicit TaskScheduler(std::unique_ptr<INodeSelectionAlgo> algo)
+      : m_node_selection_algo_(std::move(algo)) {}
 
   ~TaskScheduler();
 
+  bool Init();
+
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
-  CraneErr SubmitTask(std::unique_ptr<TaskInCtld> task, bool resubmit,
-                      uint32_t* task_id);
+  CraneErr SubmitTask(std::unique_ptr<TaskInCtld> task, uint32_t* task_id);
 
   void TaskStatusChange(uint32_t task_id, uint32_t craned_index,
                         crane::grpc::TaskStatus new_status,
-                        std::optional<std::string> reason);
+                        std::optional<std::string> reason) {
+    // The order of LockGuards matters.
+    LockGuard running_guard(m_running_task_map_mtx_);
+    LockGuard indexes_guard(m_task_indexes_mtx_);
+    TaskStatusChangeNoLock_(task_id, craned_index, new_status);
+  }
+
+  void TerminateTasksOnCraned(CranedId craned_id);
 
   // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
-  void QueryTaskBriefMetaInPartition(
-      uint32_t partition_id,
-      const QueryBriefTaskMetaFieldControl& field_control,
-      crane::grpc::QueryJobsInPartitionReply* response);
+  void QueryTasksInPartition(std::optional<std::string> const& partition_opt,
+                             crane::grpc::QueryJobsInPartitionReply* response);
 
   bool QueryCranedIdOfRunningTask(uint32_t task_id, CranedId* craned_id) {
     LockGuard running_guard(m_running_task_map_mtx_);
@@ -160,47 +163,58 @@ class TaskScheduler {
 
   CraneErr TerminateRunningTask(uint32_t task_id) {
     LockGuard running_guard(m_running_task_map_mtx_);
-    LockGuard ended_guard(m_ended_task_map_mtx_);
     return TerminateRunningTaskNoLock_(task_id);
   }
 
  private:
   void ScheduleThread_();
 
-  void CleanEndedTaskThread_();
+  void TaskStatusChangeNoLock_(uint32_t task_id, uint32_t craned_index,
+                               crane::grpc::TaskStatus new_status);
+
+  CraneErr TryRequeueRecoveredTaskIntoPendingQueueLock_(
+      std::unique_ptr<TaskInCtld> task);
+
+  void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
 
   bool QueryCranedIdOfRunningTaskNoLock_(uint32_t task_id, CranedId* node_id);
+
+  /**
+   * @brief task->partition will be set if kOk is returned.
+   * @return kOk if the task can be scheduled.
+   */
+  static CraneErr CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task);
+
+  static void TransferTaskToMongodb_(TaskInCtld* task);
 
   CraneErr TerminateRunningTaskNoLock_(uint32_t task_id);
 
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 
   boost::uuids::random_generator_mt19937 m_uuid_gen_;
-  uint32_t m_next_task_id_;
 
   // Ordered by task id. Those who comes earlier are in the head,
   // Because they have smaller task id.
-  absl::btree_map<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>>
-      m_pending_task_map_ GUARDED_BY(m_pending_task_map_mtx_);
+  TreeMap<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>> m_pending_task_map_
+      GUARDED_BY(m_pending_task_map_mtx_);
   Mutex m_pending_task_map_mtx_;
 
-  absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>> m_running_task_map_
+  HashMap<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>> m_running_task_map_
       GUARDED_BY(m_running_task_map_mtx_);
   Mutex m_running_task_map_mtx_;
 
-  absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>> m_ended_task_map_
-      GUARDED_BY(m_ended_task_map_mtx_);
-  Mutex m_ended_task_map_mtx_;
+  HashMap<uint32_t /*Task Db Id*/, std::unique_ptr<TaskInEmbeddedDb>>
+      m_persisted_task_map_ GUARDED_BY(m_persisted_task_map_mtx_);
+  Mutex m_persisted_task_map_mtx_;
 
   // Task Indexes
-  HashMap<uint32_t /* Node Index */, HashSet<uint32_t /* Task ID*/>>
+  HashMap<CranedId, HashSet<uint32_t /* Task ID*/>, CranedId::Hash>
       m_node_to_tasks_map_ GUARDED_BY(m_task_indexes_mtx_);
   HashMap<uint32_t /* Partition ID */, HashSet<uint32_t /* Task ID */>>
       m_partition_to_tasks_map_ GUARDED_BY(m_task_indexes_mtx_);
   Mutex m_task_indexes_mtx_;
 
   std::thread m_schedule_thread_;
-  std::thread m_clean_ended_thread_;
   std::atomic_bool m_thread_stop_{};
 };
 

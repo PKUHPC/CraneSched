@@ -1,3 +1,4 @@
 BasedOnStyle: Google
 
 AllowAllArgumentsOnNextLine: false
+IndentPPDirectives: AfterHash

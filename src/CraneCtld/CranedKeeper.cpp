@@ -50,8 +50,8 @@ CraneErr CranedStub::ExecuteTask(const TaskInCtld *task) {
   // Set type
   mutable_task->set_type(task->type);
 
-  mutable_task->set_task_id(task->task_id);
-  mutable_task->set_partition_id(task->partition_id);
+  mutable_task->set_task_id(task->TaskId());
+  mutable_task->set_partition_id(task->PartitionId());
 
   mutable_task->set_node_num(task->node_num);
   mutable_task->set_ntasks_per_node(task->ntasks_per_node);
@@ -61,11 +61,11 @@ CraneErr CranedStub::ExecuteTask(const TaskInCtld *task) {
   mutable_task->set_env(task->env);
   mutable_task->set_cwd(task->cwd);
 
-  for (auto &&hostname : task->nodes)
+  for (auto &&hostname : task->Nodes())
     mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
 
   mutable_task->mutable_start_time()->set_seconds(
-      ToUnixSeconds(task->start_time));
+      task->StartTimeInUnixSecond());
   mutable_task->mutable_time_limit()->set_seconds(
       ToInt64Seconds(task->time_limit));
 
@@ -107,6 +107,31 @@ CraneErr CranedStub::TerminateTask(uint32_t task_id) {
   if (!status.ok()) {
     CRANE_DEBUG(
         "TerminateRunningTask RPC for Node {} returned with status not ok: {}",
+        m_addr_and_id_.node_id, status.error_message());
+    return CraneErr::kRpcFailure;
+  }
+
+  if (reply.ok())
+    return CraneErr::kOk;
+  else
+    return CraneErr::kGenericFailure;
+}
+
+CraneErr CranedStub::TerminateOrphanedTask(task_id_t task_id) {
+  using crane::grpc::TerminateOrphanedTaskReply;
+  using crane::grpc::TerminateOrphanedTaskRequest;
+
+  ClientContext context;
+  Status status;
+  TerminateOrphanedTaskRequest request;
+  TerminateOrphanedTaskReply reply;
+
+  request.set_task_id(task_id);
+
+  status = m_stub_->TerminateOrphanedTask(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_DEBUG(
+        "TerminateOrphanedTask RPC for Node {} returned with status not ok: {}",
         m_addr_and_id_.node_id, status.error_message());
     return CraneErr::kRpcFailure;
   }
@@ -167,6 +192,34 @@ CraneErr CranedStub::ReleaseCgroupForTask(uint32_t task_id, uid_t uid) {
     return CraneErr::kGenericFailure;
 }
 
+CraneErr CranedStub::CheckTaskStatus(task_id_t task_id,
+                                     crane::grpc::TaskStatus *status) {
+  using crane::grpc::CheckTaskStatusReply;
+  using crane::grpc::CheckTaskStatusRequest;
+
+  ClientContext context;
+  Status grpc_status;
+  CheckTaskStatusRequest request;
+  CheckTaskStatusReply reply;
+
+  request.set_task_id(task_id);
+  grpc_status = m_stub_->CheckTaskStatus(&context, request, &reply);
+
+  if (!grpc_status.ok()) {
+    CRANE_DEBUG(
+        "CheckIfTaskIsRunningOrFinished gRPC for Node {} returned with status "
+        "not ok: {}",
+        m_addr_and_id_.node_id, grpc_status.error_message());
+    return CraneErr::kRpcFailure;
+  }
+
+  if (reply.ok()) {
+    *status = reply.status();
+    return CraneErr::kOk;
+  } else
+    return CraneErr::kNonExistent;
+}
+
 CranedKeeper::CranedKeeper() : m_cq_closed_(false), m_tag_pool_(32, 0) {
   m_cq_thread_ = std::thread(&CranedKeeper::StateMonitorThreadFunc_, this);
   m_period_connect_thread_ =
@@ -188,7 +241,7 @@ CranedKeeper::~CranedKeeper() {
   // Tag pool's destructor will free all trailing tags in cq.
 }
 
-void CranedKeeper::RegisterCraneds(
+void CranedKeeper::InitAndRegisterCraneds(
     std::list<CranedAddrAndId> node_addr_id_list) {
   util::lock_guard guard(m_unavail_craned_list_mtx_);
 
@@ -539,6 +592,9 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
           CRANE_TRACE("TRANSIENT_FAILURE -> TRANSIENT_FAILURE -> END");
           next_tag_type = std::nullopt;
         }
+      } else if (craned->m_prev_channel_state_ == GRPC_CHANNEL_IDLE) {
+        CRANE_TRACE("IDLE -> TRANSIENT_FAILURE");
+        next_tag_type = CqTag::kEstablishedCraned;
       } else {
         CRANE_ERROR("Unknown State: {} -> TRANSIENT_FAILURE",
                     craned->m_prev_channel_state_);
@@ -597,12 +653,11 @@ void CranedKeeper::SetCranedIsDownCb(std::function<void(CranedId)> cb) {
   m_craned_is_down_cb_ = std::move(cb);
 }
 
-void CranedKeeper::SetCranedTempDownCb(std::function<void(CranedId)> cb) {
+void CranedKeeper::SetCranedIsTempDownCb(std::function<void(CranedId)> cb) {
   m_craned_is_temp_down_cb_ = std::move(cb);
 }
 
-void CranedKeeper::SetCranedRecFromTempFailureCb(
-    std::function<void(CranedId)> cb) {
+void CranedKeeper::SetCranedIsTempUpCb(std::function<void(CranedId)> cb) {
   m_craned_rec_from_temp_failure_cb_ = std::move(cb);
 }
 

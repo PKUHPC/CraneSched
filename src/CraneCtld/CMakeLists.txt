@@ -10,9 +10,11 @@ add_executable(cranectld
         CranedKeeper.cpp
         CranedMetaContainer.h
         CranedMetaContainer.cpp
-        CraneCtld.cpp
         AccountManager.h
-        AccountManager.cpp)
+        AccountManager.cpp
+        EmbeddedDbClient.cpp
+        EmbeddedDbClient.h
+        CraneCtld.cpp)
 
 target_link_libraries(cranectld
         spdlog::spdlog
@@ -39,6 +41,9 @@ target_link_libraries(cranectld
 
         yaml-cpp
         mongocxx_static
+        unqlite
+
+        range-v3::range-v3
         )
 
 # Linker flag for c++ 17 filesystem library

@@ -14,7 +14,7 @@ target_link_libraries(pam_crane PUBLIC
         crane_proto_lib
         Boost::boost
         fmt::fmt
-        Utility_PublicHeader
+        Utility_PublicHeaderNoLogger
         )
 
 # Linker flag for c++ 17 filesystem library

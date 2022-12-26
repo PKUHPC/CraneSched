@@ -9,7 +9,6 @@
 #include <evrpc.h>
 #include <grp.h>
 #include <grpc++/grpc++.h>
-#include <spdlog/spdlog.h>
 #include <sys/eventfd.h>
 #include <sys/wait.h>
 
@@ -25,8 +24,8 @@
 #include <thread>
 #include <unordered_map>
 
-#include "CtldClient.h"
 #include "CranedPublicDefs.h"
+#include "CtldClient.h"
 #include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
@@ -143,6 +142,8 @@ struct TaskInstance {
 
   bool cancelled_by_user{false};
 
+  bool orphaned{false};
+
   // The cgroup name that restrains the TaskInstance.
   std::string cg_path;
   struct event* termination_timer{nullptr};
@@ -181,6 +182,10 @@ class TaskManager {
   bool ReleaseCgroupAsync(uint32_t task_id, uid_t uid);
 
   void TerminateTaskAsync(uint32_t task_id);
+
+  void MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id);
+
+  bool CheckTaskStatusAsync(task_id_t task_id, crane::grpc::TaskStatus* status);
 
   // Wait internal libevent base loop to exit...
   void Wait();
@@ -239,8 +244,9 @@ class TaskManager {
 
   struct EvQueueTaskTerminate {
     uint32_t task_id{0};
-    // If it comes from a grpc, task->status=Cancelled
-    bool comes_from_grpc{false};
+    bool terminated_by_user{false};  // If the task is canceled by user,
+                                     // task->status=Cancelled
+    bool mark_as_orphaned{false};
   };
 
   struct EvQueueQueryTaskInfoOfUid {
@@ -252,6 +258,11 @@ class TaskManager {
   struct EvQueueQueryCgOfTaskId {
     uint32_t task_id;
     std::promise<util::Cgroup*> cg_prom;
+  };
+
+  struct EvQueueCheckTaskStatus {
+    task_id_t task_id;
+    std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
   struct EvTimerCbArg {
@@ -316,7 +327,6 @@ class TaskManager {
     arg->task_instance->termination_timer = ev;
   }
 
-  //  template <>
   void EvAddTerminationTimer_(TaskInstance* instance, int64_t secs) {
     auto* arg = new EvTimerCbArg;
     arg->task_manager = this;
@@ -400,6 +410,9 @@ class TaskManager {
   static void EvTerminateTaskCb_(evutil_socket_t efd, short events,
                                  void* user_data);
 
+  static void EvCheckTaskStatusCb_(evutil_socket_t, short events,
+                                   void* user_data);
+
   static void EvExitEventCb_(evutil_socket_t, short events, void* user_data);
 
   static void EvOnTimerCb_(evutil_socket_t, short, void* arg);
@@ -453,6 +466,9 @@ class TaskManager {
 
   struct event* m_ev_task_terminate_;
   ConcurrentQueue<EvQueueTaskTerminate> m_task_terminate_queue_;
+
+  struct event* m_ev_check_task_status_;
+  ConcurrentQueue<EvQueueCheckTaskStatus> m_check_task_status_queue_;
 
   std::thread m_ev_loop_thread_;
 

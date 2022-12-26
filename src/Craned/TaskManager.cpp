@@ -188,6 +188,18 @@ TaskManager::TaskManager()
       std::terminate();
     }
   }
+  {
+    m_ev_check_task_status_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
+                                        EvCheckTaskStatusCb_, this);
+    if (!m_ev_check_task_status_) {
+      CRANE_ERROR("Failed to create the check_task_status event!");
+      std::terminate();
+    }
+    if (event_add(m_ev_check_task_status_, nullptr) < 0) {
+      CRANE_ERROR("Could not add the m_ev_check_task_status_ to base!");
+      std::terminate();
+    }
+  }
 
   m_ev_loop_thread_ =
       std::thread([this]() { event_base_dispatch(m_ev_base_); });
@@ -207,6 +219,7 @@ TaskManager::~TaskManager() {
   if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
   if (m_ev_grpc_execute_task_) event_free(m_ev_grpc_execute_task_);
   if (m_ev_task_status_change_) event_free(m_ev_task_status_change_);
+  if (m_ev_check_task_status_) event_free(m_ev_check_task_status_);
 
   if (m_ev_exit_event_) event_free(m_ev_exit_event_);
 
@@ -286,10 +299,14 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
           if (!instance->processes.empty()) {
             if (sigchld_info.is_terminated_by_signal &&
                 !instance->already_failed) {
+              // If a task is terminated by a signal and there are other
+              //  running processes belonging to this task, kill them.
               instance->already_failed = true;
               this_->TerminateTaskAsync(task_id);
             }
-          } else {  // ProcessInstance has no process left.
+          } else if (!instance->orphaned) {
+            // If the ProcessInstance has no process left and the task was not
+            // marked as an orphaned task, send TaskStatusChange for this task.
             // See the comment of EvActivateTaskStatusChange_.
             if (instance->task.type() == crane::grpc::Batch) {
               // For a Batch task, the end of the process means it is done.
@@ -983,13 +1000,14 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
 
     auto iter = this_->m_task_map_.find(elem.task_id);
     if (iter == this_->m_task_map_.end()) {
-      CRANE_ERROR("Trying terminating unknown task #{}", elem.task_id);
+      CRANE_DEBUG("Trying terminating unknown task #{}", elem.task_id);
       return;
     }
 
     const auto& task_instance = iter->second;
 
-    if (elem.comes_from_grpc) task_instance->cancelled_by_user = true;
+    if (elem.terminated_by_user) task_instance->cancelled_by_user = true;
+    if (elem.mark_as_orphaned) task_instance->orphaned = true;
 
     int sig = SIGTERM;  // For BatchTask
     if (task_instance->task.type() == crane::grpc::Interactive) sig = SIGHUP;
@@ -1008,7 +1026,13 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
 }
 
 void TaskManager::TerminateTaskAsync(uint32_t task_id) {
-  EvQueueTaskTerminate elem{.task_id = task_id, .comes_from_grpc = true};
+  EvQueueTaskTerminate elem{.task_id = task_id, .terminated_by_user = true};
+  m_task_terminate_queue_.enqueue(elem);
+  event_active(m_ev_task_terminate_, 0, 0);
+}
+
+void TaskManager::MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id) {
+  EvQueueTaskTerminate elem{.task_id = task_id, .mark_as_orphaned = true};
   m_task_terminate_queue_.enqueue(elem);
   event_active(m_ev_task_terminate_, 0, 0);
 }
@@ -1184,6 +1208,52 @@ void TaskManager::EvGrpcQueryCgOfTaskIdCb_(int efd, short events,
     } else {
       query.cg_prom.set_value(nullptr);
     }
+  }
+}
+
+bool TaskManager::CheckTaskStatusAsync(task_id_t task_id,
+                                       crane::grpc::TaskStatus* status) {
+  EvQueueCheckTaskStatus elem{.task_id = task_id};
+
+  std::future<std::pair<bool, crane::grpc::TaskStatus>> res{
+      elem.status_prom.get_future()};
+
+  m_check_task_status_queue_.enqueue(std::move(elem));
+  event_active(m_ev_check_task_status_, 0, 0);
+
+  auto [ok, task_status] = res.get();
+  if (!ok) return false;
+
+  *status = task_status;
+  return true;
+}
+
+void TaskManager::EvCheckTaskStatusCb_(int, short events, void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueCheckTaskStatus elem;
+  while (this_->m_check_task_status_queue_.try_dequeue(elem)) {
+    task_id_t task_id = elem.task_id;
+    auto it = this_->m_task_map_.find(task_id);
+    if (it != this_->m_task_map_.end()) {
+      // Found in task map. The task must be running.
+      elem.status_prom.set_value({true, crane::grpc::TaskStatus::Running});
+      continue;
+    }
+
+    // If a task id can be found in g_ctld_client, the task has ended.
+    //  Now if CraneCtld check the status of these tasks, there is no need to
+    //  send to TaskStatusChange again. Just cancel them.
+    crane::grpc::TaskStatus status;
+    bool exist =
+        g_ctld_client->CancelTaskStatusChangeByTaskId(task_id, &status);
+    if (exist) {
+      elem.status_prom.set_value({true, status});
+      continue;
+    }
+
+    elem.status_prom.set_value(
+        {false, /* Invalid Value*/ crane::grpc::Pending});
   }
 }
 

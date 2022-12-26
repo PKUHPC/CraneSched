@@ -6,12 +6,13 @@
 #include <optional>
 
 #include "cgroup.linux.h"
+#include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 
 namespace Craned {
 
 struct TaskStatusChange {
-  uint32_t task_id{};
+  task_id_t task_id{};
   crane::grpc::TaskStatus new_status{};
   std::optional<std::string> reason;
 };
@@ -96,6 +97,7 @@ struct Config {
   CranedListenConf ListenConf;
 
   std::string ControlMachine;
+  std::string CraneCtldListenPort;
   std::string CranedDebugLevel;
   std::string CranedLogFile;
 

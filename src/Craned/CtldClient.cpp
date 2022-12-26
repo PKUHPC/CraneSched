@@ -4,10 +4,6 @@
 
 namespace Craned {
 
-CtldClient::CtldClient() {
-  m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
-}
-
 CtldClient::~CtldClient() {
   m_thread_stop_ = true;
 
@@ -21,12 +17,35 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
 
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = CraneCtld::NewStub(m_ctld_channel_);
+
+  m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
 
 void CtldClient::TaskStatusChangeAsync(TaskStatusChange&& task_status_change) {
-  m_task_status_change_mtx_.Lock();
+  absl::MutexLock lock(&m_task_status_change_mtx_);
   m_task_status_change_list_.emplace_back(std::move(task_status_change));
-  m_task_status_change_mtx_.Unlock();
+}
+
+bool CtldClient::CancelTaskStatusChangeByTaskId(
+    task_id_t task_id, crane::grpc::TaskStatus* new_status) {
+  absl::MutexLock lock(&m_task_status_change_mtx_);
+
+  size_t num_removed{0};
+
+  for (auto it = m_task_status_change_list_.begin();
+       it != m_task_status_change_list_.end();)
+    if (it->task_id == task_id) {
+      num_removed++;
+      *new_status = it->new_status;
+      it = m_task_status_change_list_.erase(it);
+    } else
+      ++it;
+
+  CRANE_ASSERT_MSG(num_removed <= 1,
+                   "TaskStatusChange should happen at most once "
+                   "for a single running task!");
+
+  return num_removed >= 1;
 }
 
 void CtldClient::AsyncSendThread_() {
@@ -37,6 +56,9 @@ void CtldClient::AsyncSendThread_() {
       &m_task_status_change_list_);
 
   while (true) {
+    bool connected = m_ctld_channel_->WaitForConnected(
+        std::chrono::system_clock::now() + std::chrono::seconds(3));
+
     bool has_msg = m_task_status_change_mtx_.LockWhenWithTimeout(
         cond, absl::Milliseconds(50));
     if (!has_msg) {
@@ -47,8 +69,6 @@ void CtldClient::AsyncSendThread_() {
         continue;
     }
 
-    bool connected = m_ctld_channel_->WaitForConnected(
-        std::chrono::system_clock::now() + std::chrono::seconds(3));
     if (connected) {
       std::list<TaskStatusChange> changes;
       changes.splice(changes.begin(), std::move(m_task_status_change_list_));
@@ -75,9 +95,10 @@ void CtldClient::AsyncSendThread_() {
         if (!status.ok()) {
           CRANE_ERROR(
               "Failed to send TaskStatusChange: "
-              "{{TaskId: {}, NewStatus: {}}}, reason: {}, code: {}",
+              "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
               status_change.task_id, status_change.new_status,
-              status.error_message(), status.error_code());
+              status.error_message(), context.debug_error_string(),
+              status.error_code());
 
           if (status.error_code() == grpc::UNAVAILABLE) {
             // If some messages are not sent due to channel failure,
@@ -89,7 +110,8 @@ void CtldClient::AsyncSendThread_() {
               m_task_status_change_mtx_.Unlock();
             }
             break;
-          }
+          } else
+            changes.pop_front();
         } else {
           CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
                       status_change.task_id, reply.ok());

@@ -132,7 +132,8 @@ int CgroupManager::initialize_controller(
                  CgroupConstant::GetControllerStringView(controller));
       return 1;
     } else {
-      fmt::print("cgroup controller {} is already mounted");
+      fmt::print("cgroup controller {} is already mounted",
+                 CgroupConstant::GetControllerStringView(controller));
       return 0;
     }
   }

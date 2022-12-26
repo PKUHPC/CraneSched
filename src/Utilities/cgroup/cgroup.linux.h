@@ -12,7 +12,6 @@
 #include <absl/synchronization/mutex.h>
 #include <libcgroup.h>
 #include <pthread.h>
-#include <spdlog/spdlog.h>
 
 #include <array>
 #include <boost/move/move.hpp>
@@ -22,6 +21,7 @@
 #include <string_view>
 
 #include "crane/Lock.h"
+#include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 
 namespace util {

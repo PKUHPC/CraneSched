@@ -27,7 +27,7 @@ using grpc::Status;
 
 class CtldClient {
  public:
-  CtldClient();
+  CtldClient() = default;
 
   ~CtldClient();
 
@@ -44,6 +44,9 @@ class CtldClient {
   void InitChannelAndStub(const std::string& server_address);
 
   void TaskStatusChangeAsync(TaskStatusChange&& task_status_change);
+
+  bool CancelTaskStatusChangeByTaskId(task_id_t task_id,
+                                      crane::grpc::TaskStatus* new_status);
 
   [[nodiscard]] CranedId GetNodeId() const { return m_craned_id_; };
 

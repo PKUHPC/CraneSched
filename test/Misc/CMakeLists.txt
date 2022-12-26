@@ -82,5 +82,6 @@ target_link_libraries(misc_unqlite_test
         Threads::Threads
         spdlog::spdlog
         unqlite
+        test_proto
         )
 gtest_discover_tests(misc_unqlite_test)

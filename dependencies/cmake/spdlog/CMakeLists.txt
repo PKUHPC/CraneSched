@@ -6,7 +6,3 @@ FetchContent_Declare(spdlog
         INACTIVITY_TIMEOUT 5
         )
 FetchContent_MakeAvailable(spdlog)
-
-if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-    target_compile_definitions(spdlog PUBLIC -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
-endif ()

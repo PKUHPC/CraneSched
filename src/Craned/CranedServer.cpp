@@ -351,6 +351,16 @@ grpc::Status CranedServiceImpl::TerminateTask(
   return Status::OK;
 }
 
+grpc::Status CranedServiceImpl::TerminateOrphanedTask(
+    grpc::ServerContext *context,
+    const crane::grpc::TerminateOrphanedTaskRequest *request,
+    crane::grpc::TerminateOrphanedTaskReply *response) {
+  g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(request->task_id());
+  response->set_ok(true);
+
+  return Status::OK;
+}
+
 grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
     grpc::ServerContext *context,
     const crane::grpc::QueryTaskIdFromPortRequest *request,
@@ -621,6 +631,19 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
   } else {
     response->set_ok(true);
   }
+
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::CheckTaskStatus(
+    grpc::ServerContext *context,
+    const crane::grpc::CheckTaskStatusRequest *request,
+    crane::grpc::CheckTaskStatusReply *response) {
+  crane::grpc::TaskStatus status{};
+
+  bool exist = g_task_mgr->CheckTaskStatusAsync(request->task_id(), &status);
+  response->set_ok(exist);
+  response->set_status(status);
 
   return Status::OK;
 }

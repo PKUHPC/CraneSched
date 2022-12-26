@@ -84,8 +84,8 @@ set(gRPC_SSL_PROVIDER package CACHE STRING "" FORCE)
 FetchContent_Declare(grpc
         OVERRIDE_FIND_PACKAGE
 
-        URL https://github.com/grpc/grpc/archive/refs/tags/v1.50.0.tar.gz
-        URL_HASH SHA256=76900ab068da86378395a8e125b5cc43dfae671e09ff6462ddfef18676e2165a
+        URL https://github.com/grpc/grpc/archive/refs/tags/v1.51.0.tar.gz
+        URL_HASH SHA256=7f42363711eb483a0501239fd5522467b31d8fe98d70d7867c6ca7b52440d828
         INACTIVITY_TIMEOUT 5
         )
 FetchContent_MakeAvailable(grpc)

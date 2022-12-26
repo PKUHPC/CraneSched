@@ -14,7 +14,7 @@
 #include <vector>
 
 #if Boost_MINOR_VERSION >= 71
-#include <boost/uuid/uuid_hash.hpp>
+#  include <boost/uuid/uuid_hash.hpp>
 #endif
 
 #include "CtldPublicDefs.h"
@@ -139,9 +139,6 @@ class CtldServer {
  private:
   using Mutex = util::mutex;
   using LockGuard = util::AbslMutexLockGuard;
-
-  void CranedIsUpCb_(CranedId craned_id);
-  void CranedIsDownCb_(CranedId craned_id);
 
   std::unique_ptr<CraneCtldServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;

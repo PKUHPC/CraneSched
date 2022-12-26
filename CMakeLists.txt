@@ -45,22 +45,31 @@ option(CRANE_ENABLE_TESTS "Enable test targets" OFF)
 
 option(CRANE_FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." TRUE)
 
+option(CRANE_NATIVE_ARCH_OPT "Enable -march=native compile option" ON)
+
 # Options end here -------------------------------------------------------------------------------
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CXX_STANDARD 20)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CRANE_ENABLE_TESTS ON)
+    add_compile_definitions(CRANE_LOG_LEVEL=CRANE_LOG_LEVEL_TRACE)
 endif ()
 
 # Set colorized output when ninja build system is used.
 if (${CRANE_FORCE_COLORED_OUTPUT})
     if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+        message(STATUS "colorized output for gcc is enabled")
         add_compile_options(-fdiagnostics-color=always)
     elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+        message(STATUS "colorized output for clang is enabled")
         add_compile_options(-fcolor-diagnostics)
     endif ()
+endif ()
+
+if (${CRANE_NATIVE_ARCH_OPT})
+    message(STATUS "-march=native enabled")
+    add_compile_options(-march=native)
 endif ()
 
 # Check LTO support
@@ -164,7 +173,9 @@ pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
 add_library(concurrentqueue INTERFACE)
 target_include_directories(concurrentqueue INTERFACE ${DEPENDENCIES_PRE_INSTALLED_DIR}/concurrentqueue/include)
 
+# @formatter:off
 add_definitions(-DCRANE_BUILD_DIRECTORY=\("${CMAKE_BINARY_DIR}"\))
+# @formatter:on
 
 # Proto
 add_subdirectory(protos)
