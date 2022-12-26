@@ -41,8 +41,8 @@ bool CtldClient::CancelTaskStatusChangeByTaskId(
     } else
       ++it;
 
-  CRANE_ASSERT_MSG(num_removed == 1,
-                   "TaskStatusChange should happen only once "
+  CRANE_ASSERT_MSG(num_removed <= 1,
+                   "TaskStatusChange should happen at most once "
                    "for a single running task!");
 
   return num_removed >= 1;
