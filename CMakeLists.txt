@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.24)
 
+# Remove dependency of "install" target to "all" target
+set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY true)
+
 set(CMAKE_POLICY_DEFAULT_CMP0075 NEW)
 
 # Let cmake apply IPO flags for all compilers and do not output warnings.
@@ -135,7 +138,9 @@ set(ZLIB_USE_STATIC_LIBS OFF)
 #
 # Since find_package needs to be in the top scope, we append the paths of installed
 # projects at top-level CMakeLists.txt
-add_subdirectory(dependencies/cmake)
+#
+# EXCLUDE_FROM_ALL excludes all dependencies from being installed
+add_subdirectory(dependencies/cmake EXCLUDE_FROM_ALL)
 
 find_package(mongocxx REQUIRED CONFIG)
 
@@ -189,18 +194,24 @@ if (CRANE_ENABLE_TESTS)
     add_subdirectory(test)
 endif ()
 
-# install script
+# install binaries
 install(TARGETS cranectld craned
-        EXPORT ${PROJECT_NAME}Targets
+        EXPORT crane
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib
         RUNTIME DESTINATION bin
         PUBLIC_HEADER DESTINATION include)
 
-set(bindir ${CMAKE_INSTALL_PREFIX}/bin)
+
+# Install configuration files
+
+set(BINDIR_VAR ${CMAKE_INSTALL_PREFIX}/bin) # This variable will replace @BINDIR_VAR@ in *.in file
 configure_file(./etc/cranectld.service.in ${PROJECT_BINARY_DIR}/etc/cranectld.service)
 configure_file(./etc/craned.service.in ${PROJECT_BINARY_DIR}/etc/craned.service)
 
-install(FILES ${PROJECT_BINARY_DIR}/etc/cranectld.service ${PROJECT_BINARY_DIR}/etc/craned.service DESTINATION /etc/systemd/system/)
-install(FILES ./etc/config.yaml.example DESTINATION /etc/crane/)
-install(FILES README.md DESTINATION share/doc/crane/)
+install(FILES
+        ${PROJECT_BINARY_DIR}/etc/cranectld.service
+        ${PROJECT_BINARY_DIR}/etc/craned.service
+        DESTINATION /etc/systemd/system/)
+
+install(FILES etc/config.yaml DESTINATION /etc/crane/config_example.yaml)
