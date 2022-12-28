@@ -48,7 +48,12 @@ bool TaskScheduler::Init() {
             "Requeue it to the pending queue.",
             task_id);
         task->SetStatus(crane::grpc::Pending);
+
+        task->nodes_alloc = 0;
+        task->allocated_craneds_regex.clear();
+        task->NodeIndexesClear();
         task->NodesClear();
+
         ok = g_embedded_db_client->UpdatePersistedPartOfTask(
             task->TaskDbId(), task->PersistedPart());
         if (!ok) {

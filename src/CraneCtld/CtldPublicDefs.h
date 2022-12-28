@@ -266,6 +266,10 @@ struct TaskInCtld {
     node_indexes = val;
   }
   std::list<uint32_t> const& NodeIndexes() { return node_indexes; }
+  void NodeIndexesClear() {
+    node_indexes.clear();
+    persisted_part.mutable_node_indexes()->Clear();
+  }
 
   void NodeIndexesAdd(uint32_t i) {
     node_indexes.emplace_back(i);
