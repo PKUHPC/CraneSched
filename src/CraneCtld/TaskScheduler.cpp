@@ -47,7 +47,16 @@ bool TaskScheduler::Init() {
             "The execution node of the restore task #{} is down. "
             "Requeue it to the pending queue.",
             task_id);
-        task->SetStatus(crane::grpc::Running);
+        task->SetStatus(crane::grpc::Pending);
+        task->NodesClear();
+        ok = g_embedded_db_client->UpdatePersistedPartOfTask(
+            task->TaskDbId(), task->PersistedPart());
+        if (!ok) {
+          CRANE_ERROR(
+              "Failed to call "
+              "g_embedded_db_client->UpdatePersistedPartOfTask()");
+        }
+
         ok = g_embedded_db_client->MoveTaskFromRunningToPending(
             task->TaskDbId());
         if (!ok) {

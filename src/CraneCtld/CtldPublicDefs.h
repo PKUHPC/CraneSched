@@ -281,6 +281,10 @@ struct TaskInCtld {
     nodes.emplace_back(val);
     persisted_part.mutable_nodes()->Add()->assign(val);
   }
+  void NodesClear() {
+    nodes.clear();
+    persisted_part.mutable_nodes()->Clear();
+  }
 
   void SetStatus(crane::grpc::TaskStatus val) {
     status = val;
