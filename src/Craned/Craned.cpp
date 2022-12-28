@@ -57,9 +57,7 @@ void ParseConfig(int argc, char** argv) {
   }
 
   std::string config_path = parsed_args["config"].as<std::string>();
-  bool config_file_exist = false;
   if (std::filesystem::exists(config_path)) {
-    config_file_exist = true;
     try {
       YAML::Node config = YAML::LoadFile(kDefaultConfigPath);
 
@@ -153,7 +151,7 @@ void ParseConfig(int argc, char** argv) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {
           auto node = it->as<YAML::Node>();
-          Node node_tmp;
+          auto node_ptr = std::make_shared<Node>();
           std::list<std::string> name_list;
 
           if (node["name"]) {
@@ -167,7 +165,7 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
 
           if (node["cpu"])
-            node_tmp.cpu = std::stoul(node["cpu"].as<std::string>());
+            node_ptr->cpu = std::stoul(node["cpu"].as<std::string>());
           else
             std::exit(1);
 
@@ -188,12 +186,11 @@ void ParseConfig(int argc, char** argv) {
             else if (mem_group[2] == "G")
               memory_bytes *= 1024 * 1024 * 1024;
 
-            node_tmp.memory_bytes = memory_bytes;
+            node_ptr->memory_bytes = memory_bytes;
           } else
             std::exit(1);
 
           for (auto&& name : name_list) {
-            std::shared_ptr<Node> node_ptr(new Node(node_tmp));
             if (crane::IsAValidIpv4Address(name)) {
               CRANE_INFO(
                   "Node name `{}` is a valid ipv4 address and doesn't "
@@ -246,10 +243,13 @@ void ParseConfig(int argc, char** argv) {
 
             auto node_it = g_config.Nodes.find(node_s);
             if (node_it != g_config.Nodes.end()) {
-              node_it->second->partition_name = name;
               part.nodes.emplace(node_it->first);
-              CRANE_INFO("Set the partition of node {} to {}", node_it->first,
-                         name);
+              CRANE_INFO("Find node {} in partition {}", node_it->first, name);
+            } else {
+              CRANE_ERROR(
+                  "Find unknown node '{}' in partition '{}',pass it,please "
+                  "specify it in config file!",
+                  node, name);
             }
           }
 
@@ -265,22 +265,20 @@ void ParseConfig(int argc, char** argv) {
         }
       }
     } catch (YAML::BadFile& e) {
-      CRANE_ERROR("Can't open config file {}: {}", kDefaultConfigPath,
-                  e.what());
+      CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
+                     e.what());
       std::exit(1);
     }
   } else {
-    CRANE_WARN(
-        "Config file '{}' not existed,configuration content will use command "
-        "line parameters or set to default values",
-        config_path);
+    CRANE_CRITICAL("Config file '{}' not existed", config_path);
+    std::exit(1);
   }
   // Todo: Check static level setting.
-  if (parsed_args.count("debug-level") || !config_file_exist) {
+  if (parsed_args.count("debug-level")) {
     g_config.CranedDebugLevel = parsed_args["debug-level"].as<std::string>();
   }
 
-  if (parsed_args.count("listen") || !config_file_exist) {
+  if (parsed_args.count("listen")) {
     g_config.ListenConf.CranedListenAddr =
         parsed_args["listen"].as<std::string>();
     g_config.ListenConf.CranedListenPort = kCranedDefaultPort;
@@ -298,11 +296,11 @@ void ParseConfig(int argc, char** argv) {
     g_config.ControlMachine = parsed_args["server-address"].as<std::string>();
   }
 
-  if (parsed_args.count("debug-level") || !config_file_exist) {
+  if (parsed_args.count("debug-level")) {
     g_config.CranedDebugLevel = parsed_args["debug-level"].as<std::string>();
   }
 
-  if (parsed_args.count("log-file") || !config_file_exist) {
+  if (parsed_args.count("log-file")) {
     g_config.CranedLogFile = parsed_args["log-file"].as<std::string>();
   }
 
@@ -333,15 +331,21 @@ void ParseConfig(int argc, char** argv) {
   CRANE_INFO("Found this machine {} in Nodes", g_config.Hostname);
 
   uint32_t part_id, node_index;
-  const std::string& part_name = node_it->second->partition_name;
-  auto part_it = g_config.Partitions.find(part_name);
-  if (part_it == g_config.Partitions.end()) {
-    CRANE_ERROR(
-        "This machine {} belongs to {} partition, but the partition "
-        "doesn't exist.",
-        g_config.Hostname, part_name);
+  std::string part_name;
+  for (const auto& par : g_config.Partitions) {
+    if (par.second.nodes.find(g_config.Hostname) != par.second.nodes.end()) {
+      part_name = par.first;
+      CRANE_INFO("Found this machine {} in partition {}", g_config.Hostname,
+                 par.first);
+      break;
+    }
+  }
+  if (part_name.empty()) {
+    CRANE_ERROR("This machine {} doesn't belong to any partition",
+                g_config.Hostname);
     std::exit(1);
   }
+  auto part_it = g_config.Partitions.find(part_name);
   part_id = std::distance(g_config.Partitions.begin(), part_it);
 
   auto node_it_in_part = part_it->second.nodes.find(g_config.Hostname);

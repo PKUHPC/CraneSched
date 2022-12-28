@@ -38,9 +38,7 @@ void ParseConfig(int argc, char** argv) {
   auto parsed_args = options.parse(argc, argv);
 
   std::string config_path = parsed_args["config"].as<std::string>();
-  bool config_file_exist = false;
   if (std::filesystem::exists(config_path)) {
-    config_file_exist = true;
     try {
       YAML::Node config = YAML::LoadFile(kDefaultConfigPath);
 
@@ -233,10 +231,14 @@ void ParseConfig(int argc, char** argv) {
           for (auto&& node : name_list) {
             auto node_it = g_config.Nodes.find(node);
             if (node_it != g_config.Nodes.end()) {
-              node_it->second->partition_name = name;
               part.nodes.emplace(node_it->first);
               CRANE_TRACE("Set the partition of node {} to {}", node_it->first,
                           name);
+            } else {
+              CRANE_ERROR(
+                  "Find unknown node '{}' in partition '{}',pass it,please "
+                  "specify it in config file!",
+                  node, name);
             }
           }
 
@@ -268,16 +270,19 @@ void ParseConfig(int argc, char** argv) {
       }
 
     } catch (YAML::BadFile& e) {
-      CRANE_ERROR("Can't open config file {}: {}", kDefaultConfigPath,
-                  e.what());
+      CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
+                     e.what());
       std::exit(1);
     }
+  } else {
+    CRANE_CRITICAL("Config file '{}' not existed", config_path);
+    std::exit(1);
   }
-  if (parsed_args.count("listen") || !config_file_exist) {
+  if (parsed_args.count("listen")) {
     g_config.ListenConf.CraneCtldListenAddr =
         parsed_args["listen"].as<std::string>();
   }
-  if (parsed_args.count("port") || !config_file_exist) {
+  if (parsed_args.count("port")) {
     g_config.ListenConf.CraneCtldListenPort =
         parsed_args["port"].as<std::string>();
   }

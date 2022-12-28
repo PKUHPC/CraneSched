@@ -70,8 +70,6 @@ struct TaskInfoOfUid {
 struct Node {
   uint32_t cpu;
   uint64_t memory_bytes;
-
-  std::string partition_name;
 };
 
 struct Partition {
