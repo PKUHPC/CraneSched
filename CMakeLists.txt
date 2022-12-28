@@ -1,8 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
 
-# Remove dependency of "install" target to "all" target
-set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY true)
-
 set(CMAKE_POLICY_DEFAULT_CMP0075 NEW)
 
 # Let cmake apply IPO flags for all compilers and do not output warnings.
@@ -191,7 +188,9 @@ add_subdirectory(src)
 # Tests
 if (CRANE_ENABLE_TESTS)
     enable_testing()
-    add_subdirectory(test)
+    # Test source files may include lots of warnings and errors.
+    # Exclude it from 'all' target
+    add_subdirectory(test EXCLUDE_FROM_ALL)
 endif ()
 
 # install binaries
@@ -214,4 +213,6 @@ install(FILES
         ${PROJECT_BINARY_DIR}/etc/craned.service
         DESTINATION /etc/systemd/system/)
 
-install(FILES etc/config.yaml DESTINATION /etc/crane/config_example.yaml)
+install(FILES etc/config.yaml
+        DESTINATION /etc/crane
+        RENAME config_example.yaml)
