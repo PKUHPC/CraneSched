@@ -28,21 +28,19 @@ void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("craned");
 
   // clang-format off
-    options.add_options()
-        ("C,config", "Path to configuration file",
-        cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
-        ("l,listen", "Listen address format: <IP>:<port>",
-         cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
-        ("s,server-address", "CraneCtld address format: <IP>:<port>",
-         cxxopts::value<std::string>())
-//        ("c,cpu", "# of total cpu core", cxxopts::value<std::string>())
-//        ("m,memory", R"(# of total memory. Format: \d+[BKMG])", cxxopts::value<std::string>())
-//        ("p,partition", "Name of the partition", cxxopts::value<std::string>())
-        ("L,log-file", "File path of craned log file", cxxopts::value<std::string>()->default_value("/tmp/craned/craned.log"))
-        ("D,debug-level", "[trace|debug|info|warn|error]", cxxopts::value<std::string>()->default_value("info"))
-        ("h,help", "Show help")
-        ;
+  options.add_options()
+      ("C,config", "Path to configuration file",
+      cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
+      ("l,listen", "Listen address format: <IP>:<port>",
+       cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
+      ("s,server-address", "CraneCtld address format: <IP>:<port>",
+       cxxopts::value<std::string>())
+      ("L,log-file", "File path of craned log file", cxxopts::value<std::string>()->default_value("/tmp/craned/craned.log"))
+      ("D,debug-level", "[trace|debug|info|warn|error]", cxxopts::value<std::string>()->default_value("info"))
+      ("h,help", "Show help")
+      ;
   // clang-format on
+
   cxxopts::ParseResult parsed_args;
   try {
     parsed_args = options.parse(argc, argv);
@@ -247,8 +245,8 @@ void ParseConfig(int argc, char** argv) {
               CRANE_INFO("Find node {} in partition {}", node_it->first, name);
             } else {
               CRANE_ERROR(
-                  "Find unknown node '{}' in partition '{}',pass it,please "
-                  "specify it in config file!",
+                  "Unknown node '{}' found in partition '{}'. It is ignored "
+                  "and should be contained in the configuration file.",
                   node, name);
             }
           }
