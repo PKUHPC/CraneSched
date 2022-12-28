@@ -1,5 +1,7 @@
 #include "crane/TimerSet.h"
 
+#include "crane/Logger.h"
+
 namespace crane {
 
 TimerSet::TimerSet() {
