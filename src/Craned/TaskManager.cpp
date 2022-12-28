@@ -1094,7 +1094,10 @@ void TaskManager::EvGrpcReleaseCgroupCb_(int efd, short events,
 
     auto iter = this_->m_task_id_to_cg_map_.find(release_cg.task_id);
     if (iter == this_->m_task_id_to_cg_map_.end()) {
-      CRANE_ERROR("Failed to find cgroup for task #{}", release_cg.task_id);
+      CRANE_DEBUG(
+          "Trying to release a non-existent cgroup for task #{}. "
+          "Ignoring it...",
+          release_cg.task_id);
       release_cg.ok_prom.set_value(false);
       return;
     } else {

@@ -115,7 +115,7 @@ class TaskScheduler {
   using TaskInEmbeddedDb = crane::grpc::TaskInEmbeddedDb;
 
   using Mutex = absl::Mutex;
-  using LockGuard = util::AbslMutexLockGuard;
+  using LockGuard = absl::MutexLock;
 
   template <typename K, typename V,
             typename Hash = absl::container_internal::hash_default_hash<K>>
@@ -143,8 +143,8 @@ class TaskScheduler {
                         crane::grpc::TaskStatus new_status,
                         std::optional<std::string> reason) {
     // The order of LockGuards matters.
-    LockGuard running_guard(m_running_task_map_mtx_);
-    LockGuard indexes_guard(m_task_indexes_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
+    LockGuard indexes_guard(&m_task_indexes_mtx_);
     TaskStatusChangeNoLock_(task_id, craned_index, new_status);
   }
 
@@ -155,14 +155,14 @@ class TaskScheduler {
                              crane::grpc::QueryJobsInPartitionReply* response);
 
   bool QueryCranedIdOfRunningTask(uint32_t task_id, CranedId* craned_id) {
-    LockGuard running_guard(m_running_task_map_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
     return QueryCranedIdOfRunningTaskNoLock_(task_id, craned_id);
   }
 
   CraneErr CancelPendingOrRunningTask(uint32_t operator_uid, uint32_t task_id);
 
   CraneErr TerminateRunningTask(uint32_t task_id) {
-    LockGuard running_guard(m_running_task_map_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
     return TerminateRunningTaskNoLock_(task_id);
   }
 

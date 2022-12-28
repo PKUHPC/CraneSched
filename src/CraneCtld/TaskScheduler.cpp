@@ -68,8 +68,18 @@ bool TaskScheduler::Init() {
             // Just allocate resource from allocated nodes and
             // put it back into the running queue.
             PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
+
+            CRANE_INFO(
+                "Task #{} is still RUNNING. Put it into memory running queue.",
+                task_id);
           } else {
             // Exec node is up and the task ended.
+
+            CRANE_INFO(
+                "Task #{} has ended with status {}. Put it into embedded ended "
+                "queue.",
+                task_id, crane::grpc::TaskStatus_Name(status));
+
             if (status != crane::grpc::Finished) {
               // Check whether the task is orphaned on the allocated nodes
               // in case that when processing TaskStatusChange CraneCtld
@@ -81,6 +91,17 @@ bool TaskScheduler::Init() {
                 if (stub != nullptr && !stub->Invalid())
                   stub->TerminateOrphanedTask(task->TaskId());
               }
+            }
+
+            // For both succeeded and failed tasks, cgroup for them should be
+            // released. Though some craned nodes might have released the
+            // cgroup, just resend the gRPC again to guarantee that the cgroup
+            // is always released.
+            for (uint32_t index : task->NodeIndexes()) {
+              CranedId node_id{task->PartitionId(), index};
+              stub = g_craned_keeper->GetCranedStub(node_id);
+              if (stub != nullptr && !stub->Invalid())
+                stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
             }
 
             ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(
@@ -217,8 +238,8 @@ bool TaskScheduler::Init() {
 CraneErr TaskScheduler::TryRequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   // The order of LockGuards matters.
-  LockGuard pending_guard(m_pending_task_map_mtx_);
-  LockGuard indexes_guard(m_task_indexes_mtx_);
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard indexes_guard(&m_task_indexes_mtx_);
 
   CraneErr err;
 
@@ -235,8 +256,8 @@ CraneErr TaskScheduler::TryRequeueRecoveredTaskIntoPendingQueueLock_(
 void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   // The order of LockGuards matters.
-  LockGuard running_guard(m_running_task_map_mtx_);
-  LockGuard indexes_guard(m_task_indexes_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
+  LockGuard indexes_guard(&m_task_indexes_mtx_);
 
   for (uint32_t index : task->NodeIndexes()) {
     CranedId node_id{task->PartitionId(), index};
@@ -257,11 +278,14 @@ void TaskScheduler::ScheduleThread_() {
     // such a situation.
     m_pending_task_map_mtx_.Lock();
     if (!m_pending_task_map_.empty()) {  // all_part_metas is locked here.
+      // Running map must be locked before g_meta_container's lock.
+      // Otherwise, DEADLOCK may happen because TaskStatusChange() locks running
+      // map first and then locks g_meta_container.
+      m_running_task_map_mtx_.Lock();
+
       auto all_part_metas = g_meta_container->GetAllPartitionsMetaMapPtr();
       std::list<INodeSelectionAlgo::NodeSelectionResult> selection_result_list;
 
-      // Both read and write need a lock.
-      m_running_task_map_mtx_.Lock();
       m_node_selection_algo_->NodeSelect(*all_part_metas, m_running_task_map_,
                                          &m_pending_task_map_,
                                          &selection_result_list);
@@ -480,8 +504,8 @@ CraneErr TaskScheduler::TerminateRunningTaskNoLock_(uint32_t task_id) {
 
 CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t operator_uid,
                                                    uint32_t task_id) {
-  LockGuard pending_guard(m_pending_task_map_mtx_);
-  LockGuard running_guard(m_running_task_map_mtx_);
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
 
   auto pending_iter = m_pending_task_map_.find(task_id);
   if (pending_iter != m_pending_task_map_.end()) {
@@ -521,8 +545,8 @@ void TaskScheduler::QueryTasksInPartition(
   auto* allocated_craned_list = response->mutable_allocated_craneds();
   auto* id_list = response->mutable_task_ids();
 
-  LockGuard pending_guard(m_pending_task_map_mtx_);
-  LockGuard running_guard(m_running_task_map_mtx_);
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
 
   auto append_fn = [&](auto& it) {
     task_id_t task_id = it.first;
@@ -1202,8 +1226,8 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
   CRANE_TRACE("Terminate tasks on craned {}", craned_id);
 
   // The order of LockGuards matters.
-  LockGuard running_guard(m_running_task_map_mtx_);
-  LockGuard indexes_guard(m_task_indexes_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
+  LockGuard indexes_guard(&m_task_indexes_mtx_);
 
   auto it = m_node_to_tasks_map_.find(craned_id);
   if (it != m_node_to_tasks_map_.end()) {
