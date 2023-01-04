@@ -5,11 +5,13 @@
 #include <pwd.h>
 
 #include <csignal>
+#include <range/v3/all.hpp>
 #include <utility>
 
 #include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
+#include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/String.h"
@@ -195,6 +197,72 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
   if (!request->find_all()) partition_opt = request->partition();
 
   g_task_scheduler->QueryTasksInPartition(partition_opt, response);
+
+  auto *task_list = response->mutable_task_metas();
+  auto *state_list = response->mutable_task_status();
+  auto *allocated_craned_list = response->mutable_allocated_craneds();
+  auto *id_list = response->mutable_task_ids();
+
+  bool ok;
+
+  std::list<crane::grpc::TaskInEmbeddedDb> ended_list;
+  ok = g_embedded_db_client->GetEndedQueueCopy(&ended_list);
+  if (!ok) {
+    CRANE_ERROR(
+        "Failed to call "
+        "g_embedded_db_client->GetEndedQueueCopy(&ended_list)");
+    return grpc::Status::OK;
+  }
+
+  auto ended_append_fn = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    task_list->Add()->CopyFrom(task.task_to_ctld());
+    *state_list->Add() = task.persisted_part().status();
+    *allocated_craned_list->Add() =
+        util::HostNameListToStr(task.persisted_part().nodes());
+    *id_list->Add() = task.persisted_part().task_id();
+  };
+
+  auto ended_rng = ended_list | ranges::view::all;
+  if (partition_opt.has_value()) {
+    auto partition_filtered_rng =
+        ended_rng |
+        ranges::view::filter([&](crane::grpc::TaskInEmbeddedDb &task) {
+          return task.task_to_ctld().partition_name() == partition_opt.value();
+        });
+    ranges::for_each(partition_filtered_rng, ended_append_fn);
+  } else {
+    ranges::for_each(ended_rng, ended_append_fn);
+  }
+
+  std::list<TaskInCtld> db_ended_list;
+  ok = g_db_client->FetchJobRecordsWithStates(
+      &db_ended_list,
+      {crane::grpc::TaskStatus::Finished, crane::grpc::TaskStatus::Failed,
+       crane::grpc::TaskStatus::Cancelled});
+  if (!ok) {
+    CRANE_ERROR(
+        "Failed to call "
+        "g_db_client->FetchJobRecordsWithStates");
+    return grpc::Status::OK;
+  }
+
+  auto db_ended_append_fn = [&](TaskInCtld &task) {
+    task_list->Add()->CopyFrom(task.TaskToCtld());
+    *state_list->Add() = task.Status();
+    *allocated_craned_list->Add() = task.allocated_craneds_regex;
+    *id_list->Add() = task.TaskId();
+  };
+
+  auto db_ended_rng = db_ended_list | ranges::view::all;
+  if (partition_opt.has_value()) {
+    auto partition_filtered_rng =
+        db_ended_rng | ranges::view::filter([&](TaskInCtld &task) {
+          return task.TaskToCtld().partition_name() == partition_opt.value();
+        });
+    ranges::for_each(partition_filtered_rng, db_ended_append_fn);
+  } else {
+    ranges::for_each(db_ended_rng, db_ended_append_fn);
+  }
 
   return grpc::Status::OK;
 }
