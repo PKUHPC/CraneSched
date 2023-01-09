@@ -222,11 +222,11 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
     *id_list->Add() = task.persisted_part().task_id();
   };
 
-  auto ended_rng = ended_list | ranges::view::all;
+  auto ended_rng = ended_list | ranges::views::all;
   if (partition_opt.has_value()) {
     auto partition_filtered_rng =
         ended_rng |
-        ranges::view::filter([&](crane::grpc::TaskInEmbeddedDb &task) {
+        ranges::views::filter([&](crane::grpc::TaskInEmbeddedDb &task) {
           return task.task_to_ctld().partition_name() == partition_opt.value();
         });
     ranges::for_each(partition_filtered_rng, ended_append_fn);
@@ -235,14 +235,11 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
   }
 
   std::list<TaskInCtld> db_ended_list;
-  ok = g_db_client->FetchJobRecordsWithStates(
-      &db_ended_list,
-      {crane::grpc::TaskStatus::Finished, crane::grpc::TaskStatus::Failed,
-       crane::grpc::TaskStatus::Cancelled});
+  ok = g_db_client->FetchAllJobRecords(&db_ended_list);
   if (!ok) {
     CRANE_ERROR(
         "Failed to call "
-        "g_db_client->FetchJobRecordsWithStates");
+        "g_db_client->FetchAllJobRecords");
     return grpc::Status::OK;
   }
 
@@ -253,10 +250,10 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
     *id_list->Add() = task.TaskId();
   };
 
-  auto db_ended_rng = db_ended_list | ranges::view::all;
+  auto db_ended_rng = db_ended_list | ranges::views::all;
   if (partition_opt.has_value()) {
     auto partition_filtered_rng =
-        db_ended_rng | ranges::view::filter([&](TaskInCtld &task) {
+        db_ended_rng | ranges::views::filter([&](TaskInCtld &task) {
           return task.TaskToCtld().partition_name() == partition_opt.value();
         });
     ranges::for_each(partition_filtered_rng, db_ended_append_fn);
@@ -272,9 +269,7 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
     const crane::grpc::QueryJobsInfoRequest *request,
     crane::grpc::QueryJobsInfoReply *response) {
   std::list<TaskInCtld> task_list;
-  g_db_client->FetchJobRecordsWithStates(
-      &task_list,
-      {crane::grpc::Pending, crane::grpc::Running, crane::grpc::Finished});
+  g_db_client->FetchAllJobRecords(&task_list);
 
   if (request->find_all()) {
     auto *task_info_list = response->mutable_task_info_list();

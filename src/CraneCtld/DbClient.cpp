@@ -78,26 +78,9 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
   return false;
 }
 
-bool MongodbClient::FetchJobRecordsWithStates(
-    std::list<Ctld::TaskInCtld>* task_list,
-    const std::list<crane::grpc::TaskStatus>& states) {
-  auto builder = bsoncxx::builder::stream::document{};
-  auto array_context =
-      builder << "$or"  // 'document {} << ' will lead to precondition failed
-              << bsoncxx::builder::stream::open_array;
-
-  for (auto state : states) {
-    array_context << bsoncxx::builder::stream::open_document << "state"
-                  << fmt::format("{}", state)
-                  << bsoncxx::builder::stream::close_document;
-  }
-  bsoncxx::document::value doc_value = array_context
-                                       << bsoncxx::builder::stream::close_array
-                                       << bsoncxx::builder::stream::finalize;
-
+bool MongodbClient::FetchAllJobRecords(std::list<Ctld::TaskInCtld>* task_list) {
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].find(
-          doc_value.view());
+      (*GetClient_())[m_db_name_][m_job_collection_name_].find({});
 
   // 0  task_id       task_id        mod_time       deleted       account
   // 5  cpus_req      mem_req        job_name       env           id_user
@@ -105,7 +88,6 @@ bool MongodbClient::FetchJobRecordsWithStates(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line
-
   for (auto view : cursor) {
     Ctld::TaskInCtld task;
     task.SetTaskDbId(std::strtoul(view["task_db_id"].get_string().value.data(),
