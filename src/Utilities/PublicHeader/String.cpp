@@ -63,7 +63,7 @@ bool ParseNodeList(const std::string &node_str,
 }
 
 bool ParseHostList(const std::string &host_str,
-                   std::list<std::string> *hostlist) {
+                   std::list<std::string> *host_list) {
   std::string name_str(host_str);
   name_str += ',';  // uniform end format
   std::string name_meta;
@@ -109,9 +109,9 @@ bool ParseHostList(const std::string &host_str,
     std::string str_s{absl::StripAsciiWhitespace(str)};
     std::regex regex(R"(.*\[(.*)\](\..*)*$)");
     if (!std::regex_match(str_s, regex)) {
-      hostlist->emplace_back(str_s);
+      host_list->emplace_back(str_s);
     } else {
-      if (!ParseNodeList(str_s, hostlist, "")) return false;
+      if (!ParseNodeList(str_s, host_list, "")) return false;
     }
   }
   return true;

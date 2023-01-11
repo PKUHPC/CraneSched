@@ -18,20 +18,20 @@ namespace util {
 std::string ReadableMemory(uint64_t memory_bytes);
 
 bool ParseHostList(const std::string &host_str,
-                   std::list<std::string> *hostlist);
+                   std::list<std::string> *host_list);
 
 template <std::ranges::range T>
-std::string HostNameListToStr(T const &hostlist) {
+std::string HostNameListToStr(T const &host_list) {
   std::map<std::string, std::list<std::string>> host_map;
   std::string host_name_str;
 
-  size_t sz = std::ranges::size(hostlist);
+  size_t sz = std::ranges::size(host_list);
   if (sz == 0)
     return host_name_str;
   else if (sz == 1)
-    return *std::ranges::begin(hostlist);
+    return *std::ranges::begin(host_list);
 
-  for (const auto &host : hostlist) {
+  for (const auto &host : host_list) {
     if (host.empty()) continue;
     std::regex regex(R"(\d+$)");
     std::smatch match;

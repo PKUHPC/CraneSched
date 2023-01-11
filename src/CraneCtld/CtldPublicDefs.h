@@ -256,7 +256,7 @@ struct TaskInCtld {
   uid_t Gid() const { return gid; }
 
   void SetAccount(std::string const& val) {
-    account = std::move(val);
+    account = val;
     persisted_part.set_account(val);
   }
   std::string const& Account() const { return account; }
