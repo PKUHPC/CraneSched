@@ -189,19 +189,18 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
+grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     grpc::ServerContext *context,
-    const crane::grpc::QueryJobsInPartitionRequest *request,
-    crane::grpc::QueryJobsInPartitionReply *response) {
-  std::optional<std::string> partition_opt;
-  if (!request->find_all()) partition_opt = request->partition();
+    const crane::grpc::QueryTasksInfoRequest *request,
+    crane::grpc::QueryTasksInfoReply *response) {
+  //  std::optional<std::uint32_t> task_id_opt;
+  //  if (request->task_id() != -1) task_id_opt = request->task_id();
+  //  std::optional<std::string> partition_opt;
+  //  if (!request->partition().empty()) partition_opt = request->partition();
 
-  g_task_scheduler->QueryTasksInPartition(partition_opt, response);
+  g_task_scheduler->QueryTasksInRAM(request, response);
 
-  auto *task_list = response->mutable_task_metas();
-  auto *state_list = response->mutable_task_status();
-  auto *allocated_craned_list = response->mutable_allocated_craneds();
-  auto *id_list = response->mutable_task_ids();
+  auto *task_list = response->mutable_task_info_list();
 
   bool ok;
 
@@ -215,19 +214,32 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
   }
 
   auto ended_append_fn = [&](crane::grpc::TaskInEmbeddedDb &task) {
-    task_list->Add()->CopyFrom(task.task_to_ctld());
-    *state_list->Add() = task.persisted_part().status();
-    *allocated_craned_list->Add() =
-        util::HostNameListToStr(task.persisted_part().nodes());
-    *id_list->Add() = task.persisted_part().task_id();
+    auto *task_it = task_list->Add();
+    task_it->mutable_submit_info()->CopyFrom(task.task_to_ctld());
+    task_it->set_status(task.persisted_part().status());
+    task_it->set_craned_list(
+        util::HostNameListToStr(task.persisted_part().nodes()));
+    task_it->set_task_id(task.persisted_part().task_id());
+    task_it->set_gid(task.persisted_part().gid());
+    task_it->set_account(task.persisted_part().account());
+
+    task_it->mutable_start_time()->CopyFrom(task.persisted_part().start_time());
+    task_it->mutable_end_time()->CopyFrom(task.persisted_part().end_time());
   };
 
   auto ended_rng = ended_list | ranges::views::all;
-  if (partition_opt.has_value()) {
+  if (!request->partition().empty() || request->task_id() != -1) {
     auto partition_filtered_rng =
         ended_rng |
-        ranges::views::filter([&](crane::grpc::TaskInEmbeddedDb &task) {
-          return task.task_to_ctld().partition_name() == partition_opt.value();
+        ranges::view::filter([&](crane::grpc::TaskInEmbeddedDb &task) -> bool {
+          bool res = true;
+          if (!request->partition().empty()) {
+            res &= task.task_to_ctld().partition_name() == request->partition();
+          }
+          if (request->task_id() != -1) {
+            res &= task.persisted_part().task_id() == request->task_id();
+          }
+          return res;
         });
     ranges::for_each(partition_filtered_rng, ended_append_fn);
   } else {
@@ -244,17 +256,34 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
   }
 
   auto db_ended_append_fn = [&](TaskInCtld &task) {
-    task_list->Add()->CopyFrom(task.TaskToCtld());
-    *state_list->Add() = task.Status();
-    *allocated_craned_list->Add() = task.allocated_craneds_regex;
-    *id_list->Add() = task.TaskId();
+    auto *task_it = task_list->Add();
+    task_it->mutable_submit_info()->CopyFrom(task.TaskToCtld());
+    task_it->set_status(task.Status());
+    task_it->set_craned_list(task.allocated_craneds_regex);
+    task_it->set_task_id(task.TaskId());
+    task_it->set_gid(task.Gid());
+    task_it->set_account(task.Account());
+
+    task_it->mutable_start_time()->CopyFrom(
+        google::protobuf::util::TimeUtil::SecondsToTimestamp(
+            task.StartTimeInUnixSecond()));
+    task_it->mutable_end_time()->CopyFrom(
+        google::protobuf::util::TimeUtil::SecondsToTimestamp(
+            task.EndTimeInUnixSecond()));
   };
 
   auto db_ended_rng = db_ended_list | ranges::views::all;
-  if (partition_opt.has_value()) {
+  if (!request->partition().empty() || request->task_id() != -1) {
     auto partition_filtered_rng =
-        db_ended_rng | ranges::views::filter([&](TaskInCtld &task) {
-          return task.TaskToCtld().partition_name() == partition_opt.value();
+        db_ended_rng | ranges::view::filter([&](TaskInCtld &task) -> bool {
+          bool res = true;
+          if (!request->partition().empty()) {
+            res &= task.partition_name == request->partition();
+          }
+          if (request->task_id() != -1) {
+            res &= task.TaskId() == request->task_id();
+          }
+          return res;
         });
     ranges::for_each(partition_filtered_rng, db_ended_append_fn);
   } else {
@@ -264,60 +293,60 @@ grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryJobsInfoRequest *request,
-    crane::grpc::QueryJobsInfoReply *response) {
-  std::list<TaskInCtld> task_list;
-  g_db_client->FetchAllJobRecords(&task_list);
-
-  if (request->find_all()) {
-    auto *task_info_list = response->mutable_task_info_list();
-
-    for (auto &&task : task_list) {
-      if (task.Status() == crane::grpc::Finished &&
-          absl::ToInt64Seconds(absl::Now() - task.EndTime()) > 300)
-        continue;
-      auto *task_it = task_info_list->Add();
-
-      task_it->mutable_submit_info()->CopyFrom(task.TaskToCtld());
-      task_it->set_task_id(task.TaskId());
-      task_it->set_gid(task.Gid());
-      task_it->set_account(task.Account());
-      task_it->set_status(task.Status());
-      task_it->set_craned_list(task.allocated_craneds_regex);
-
-      task_it->mutable_start_time()->CopyFrom(
-          google::protobuf::util::TimeUtil::SecondsToTimestamp(
-              task.StartTimeInUnixSecond()));
-      task_it->mutable_end_time()->CopyFrom(
-          google::protobuf::util::TimeUtil::SecondsToTimestamp(
-              task.EndTimeInUnixSecond()));
-    }
-  } else {
-    auto *task_info_list = response->mutable_task_info_list();
-
-    for (auto &&task : task_list) {
-      if (task.TaskId() == request->job_id()) {
-        auto *task_it = task_info_list->Add();
-        task_it->mutable_submit_info()->CopyFrom(task.TaskToCtld());
-        task_it->set_task_id(task.TaskId());
-        task_it->set_gid(task.Gid());
-        task_it->set_account(task.Account());
-        task_it->set_status(task.Status());
-        task_it->set_craned_list(task.allocated_craneds_regex);
-
-        task_it->mutable_start_time()->CopyFrom(
-            google::protobuf::util::TimeUtil::SecondsToTimestamp(
-                ToUnixSeconds(task.StartTime())));
-        task_it->mutable_end_time()->CopyFrom(
-            google::protobuf::util::TimeUtil::SecondsToTimestamp(
-                ToUnixSeconds(task.EndTime())));
-      }
-    }
-  }
-  return grpc::Status::OK;
-}
+// grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
+//     grpc::ServerContext *context,
+//     const crane::grpc::QueryJobsInfoRequest *request,
+//     crane::grpc::QueryJobsInfoReply *response) {
+//   std::list<TaskInCtld> task_list;
+//   g_db_client->FetchAllJobRecords(&task_list);
+//
+//   if (request->find_all()) {
+//     auto *task_info_list = response->mutable_task_info_list();
+//
+//     for (auto &&task : task_list) {
+//       if (task.Status() == crane::grpc::Finished &&
+//           absl::ToInt64Seconds(absl::Now() - task.EndTime()) > 300)
+//         continue;
+//       auto *task_it = task_info_list->Add();
+//
+//       task_it->mutable_submit_info()->CopyFrom(task.TaskToCtld());
+//       task_it->set_task_id(task.TaskId());
+//       task_it->set_gid(task.Gid());
+//       task_it->set_account(task.Account());
+//       task_it->set_status(task.Status());
+//       task_it->set_craned_list(task.allocated_craneds_regex);
+//
+//       task_it->mutable_start_time()->CopyFrom(
+//           google::protobuf::util::TimeUtil::SecondsToTimestamp(
+//               task.StartTimeInUnixSecond()));
+//       task_it->mutable_end_time()->CopyFrom(
+//           google::protobuf::util::TimeUtil::SecondsToTimestamp(
+//               task.EndTimeInUnixSecond()));
+//     }
+//   } else {
+//     auto *task_info_list = response->mutable_task_info_list();
+//
+//     for (auto &&task : task_list) {
+//       if (task.TaskId() == request->job_id()) {
+//         auto *task_it = task_info_list->Add();
+//         task_it->mutable_submit_info()->CopyFrom(task.TaskToCtld());
+//         task_it->set_task_id(task.TaskId());
+//         task_it->set_gid(task.Gid());
+//         task_it->set_account(task.Account());
+//         task_it->set_status(task.Status());
+//         task_it->set_craned_list(task.allocated_craneds_regex);
+//
+//         task_it->mutable_start_time()->CopyFrom(
+//             google::protobuf::util::TimeUtil::SecondsToTimestamp(
+//                 ToUnixSeconds(task.StartTime())));
+//         task_it->mutable_end_time()->CopyFrom(
+//             google::protobuf::util::TimeUtil::SecondsToTimestamp(
+//                 ToUnixSeconds(task.EndTime())));
+//       }
+//     }
+//   }
+//   return grpc::Status::OK;
+// }
 
 grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,

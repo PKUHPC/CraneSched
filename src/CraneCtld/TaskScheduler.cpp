@@ -1,5 +1,7 @@
 #include "TaskScheduler.h"
 
+#include <google/protobuf/util/time_util.h>
+
 #include <algorithm>
 #include <map>
 #include <range/v3/all.hpp>
@@ -551,43 +553,48 @@ CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t operator_uid,
   return CraneErr::kNonExistent;
 }
 
-void TaskScheduler::QueryTasksInPartition(
-    std::optional<std::string> const& partition_opt,
-    crane::grpc::QueryJobsInPartitionReply* response) {
-  auto* task_list = response->mutable_task_metas();
-  auto* state_list = response->mutable_task_status();
-  auto* allocated_craned_list = response->mutable_allocated_craneds();
-  auto* id_list = response->mutable_task_ids();
+void TaskScheduler::QueryTasksInRAM(
+    const crane::grpc::QueryTasksInfoRequest* request,
+    crane::grpc::QueryTasksInfoReply* response) {
+  auto* task_list = response->mutable_task_info_list();
 
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   LockGuard running_guard(&m_running_task_map_mtx_);
 
   auto append_fn = [&](auto& it) {
-    task_id_t task_id = it.first;
     std::unique_ptr<TaskInCtld>& task = it.second;
-
     auto* task_it = task_list->Add();
-    task_it->CopyFrom(task->TaskToCtld());
+    task_it->mutable_submit_info()->CopyFrom(task->TaskToCtld());
+    task_it->set_status(task->Status());
+    task_it->set_craned_list(task->allocated_craneds_regex);
+    task_it->set_task_id(task->TaskId());
+    task_it->set_gid(task->Gid());
+    task_it->set_account(task->Account());
 
-    auto* state_it = state_list->Add();
-    *state_it = task->Status();
-
-    auto* node_list_it = allocated_craned_list->Add();
-    *node_list_it = task->allocated_craneds_regex;
-
-    auto* id_it = id_list->Add();
-    *id_it = task->TaskId();
+    task_it->mutable_start_time()->CopyFrom(
+        google::protobuf::util::TimeUtil::SecondsToTimestamp(
+            task->StartTimeInUnixSecond()));
+    task_it->mutable_end_time()->CopyFrom(
+        google::protobuf::util::TimeUtil::SecondsToTimestamp(
+            task->EndTimeInUnixSecond()));
   };
 
   auto pending_rng = m_pending_task_map_ | ranges::view::all;
   auto running_rng = m_running_task_map_ | ranges::view::all;
   auto pd_r_rng = ranges::view::concat(pending_rng, running_rng);
 
-  if (partition_opt.has_value()) {
+  if (!request->partition().empty() || request->task_id() != -1) {
     auto pd_r_filtered_rng =
         pd_r_rng | ranges::view::filter([&](auto& it) -> bool {
           std::unique_ptr<TaskInCtld>& task = it.second;
-          return task->TaskToCtld().partition_name() == partition_opt.value();
+          bool res = true;
+          if (!request->partition().empty()) {
+            res &= task->partition_name == request->partition();
+          }
+          if (request->task_id() != -1) {
+            res &= task->TaskId() == request->task_id();
+          }
+          return res;
         });
     ranges::for_each(pd_r_filtered_rng, append_fn);
   } else {
