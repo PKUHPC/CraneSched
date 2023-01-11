@@ -61,6 +61,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
           task->uid, task->partition_name));
       return grpc::Status::OK;
     }
+
+    AccountManager::Result check_qos_result =
+        g_account_manager->CheckQosLimit(getpwuid(task->uid)->pw_name, task);
+    if (!check_qos_result.ok) {
+      response->set_ok(false);
+      response->set_reason(check_qos_result.reason);
+      return grpc::Status::OK;
+    }
   }
 
   uint32_t task_id;

@@ -862,6 +862,36 @@ bool AccountManager::CheckUserPermissionToPartition(
   return false;
 }
 
+AccountManager::Result AccountManager::CheckQosLimit(
+    const std::string& name, std::unique_ptr<TaskInCtld>& task) {
+  UserMutexSharedPtr user_share_ptr = GetExistedUserInfo(name);
+  if (!user_share_ptr) {
+    return Result{false, fmt::format("Unknown user '{}'", name)};
+  }
+
+  AccountMutexSharedPtr account_share_ptr =
+      GetExistedAccountInfo(user_share_ptr->account);
+  std::string qos =
+      user_share_ptr->allowed_partition_qos_map.find(task->partition_name)
+          ->second.first;
+  if (qos.empty()) {
+    return Result{true};
+  }
+  QosMutexSharedPtr qos_share_ptr = GetExistedQosInfo(qos);
+
+  if (ToInt64Seconds(task->time_limit) == 0) {
+    task->time_limit = qos_share_ptr->grace_time;
+  } else if (task->time_limit > qos_share_ptr->grace_time) {
+    return Result{false, "QOSTimeLimit"};
+  }
+
+  if (task->cpus_per_task > qos_share_ptr->max_cpus_per_user) {
+    return Result{false, "QOSResourceLimit"};
+  }
+
+  return Result{true};
+}
+
 void AccountManager::InitDataMap_() {
   std::list<User> user_list;
   g_db_client->SelectAllUser(&user_list);
