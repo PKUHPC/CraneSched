@@ -245,30 +245,6 @@ message QueryTaskIdFromPortForwardReply{
   string cgroup_path = 4;
 }
 
-message QueryJobsInPartitionRequest {
-  string partition = 1;
-
-  // If find_all is true, Jobs in all partition will be found
-  //  and partition is empty.
-  bool find_all = 2;
-}
-
-message QueryJobsInPartitionReply {
-  repeated TaskToCtld task_metas = 1;
-  repeated TaskStatus task_status = 2;
-  repeated string allocated_craneds = 3;
-  repeated uint32 task_ids = 4;
-}
-
-message QueryJobsInfoRequest {
-  bool find_all = 1;
-  uint32 job_id = 2;
-}
-
-message QueryJobsInfoReply {
-  repeated TaskInfo task_info_list = 1;
-}
-
 message QueryCranedInfoRequest {
   string craned_name = 1;
 }
@@ -372,6 +348,17 @@ message QueryClusterInfoReply {
   repeated PartitionCranedInfo partition_craned = 2;
 }
 
+message QueryTasksInfoRequest{
+  int32 task_id = 1;
+  string partition = 2;
+  //  string status = 3;
+}
+
+message QueryTasksInfoReply{
+  bool ok = 1;
+  repeated TaskInfo task_info_list = 2;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -389,15 +376,10 @@ service CraneCtld {
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
 
 
-  /* RPCs called from sbatch */
+  /* RPCs called from cbatch */
   rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
 
-
-  /* RPCs called from cqueue */
-  rpc QueryJobsInPartition(QueryJobsInPartitionRequest) returns (QueryJobsInPartitionReply);
-
   /* PRCs called from ccontrol */
-  rpc QueryJobsInfo(QueryJobsInfoRequest) returns (QueryJobsInfoReply);
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
 
@@ -413,6 +395,9 @@ service CraneCtld {
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
+
+  /* common RPCs */
+  rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
 }
 
 service Craned {

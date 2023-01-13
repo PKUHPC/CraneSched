@@ -56,7 +56,7 @@ bool MongodbClient::InsertRecoveredJob(
   document doc = TaskInEmbeddedDbToDocument_(task_in_embedded_db);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].insert_one(
+      (*GetClient_())[m_db_name_][m_task_collection_name_].insert_one(
           *GetSession_(), doc.view());
 
   if (ret != bsoncxx::stdx::nullopt) return true;
@@ -69,7 +69,7 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
   document doc = TaskInCtldToDocument_(task);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].insert_one(
+      (*GetClient_())[m_db_name_][m_task_collection_name_].insert_one(
           *GetSession_(), doc.view());
 
   if (ret != bsoncxx::stdx::nullopt) return true;
@@ -78,69 +78,53 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
   return false;
 }
 
-bool MongodbClient::FetchJobRecordsWithStates(
-    std::list<Ctld::TaskInCtld>* task_list,
-    const std::list<crane::grpc::TaskStatus>& states) {
-  auto builder = bsoncxx::builder::stream::document{};
-  auto array_context =
-      builder << "$or"  // 'document {} << ' will lead to precondition failed
-              << bsoncxx::builder::stream::open_array;
-
-  for (auto state : states) {
-    array_context << bsoncxx::builder::stream::open_document << "state"
-                  << fmt::format("{}", state)
-                  << bsoncxx::builder::stream::close_document;
-  }
-  bsoncxx::document::value doc_value = array_context
-                                       << bsoncxx::builder::stream::close_array
-                                       << bsoncxx::builder::stream::finalize;
-
+bool MongodbClient::FetchAllJobRecords(std::list<Ctld::TaskInCtld>* task_list) {
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].find(
-          doc_value.view());
+      (*GetClient_())[m_db_name_][m_task_collection_name_].find({});
 
-  // 0  task_id       task_id        mod_time       deleted       account
-  // 5  cpus_req      mem_req        job_name       env           id_user
+  // 0  task_id       task_db_id     mod_time       deleted       account
+  // 5  cpus_req      mem_req        task_name      env           id_user
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line
-
   for (auto view : cursor) {
     Ctld::TaskInCtld task;
-    task.SetTaskDbId(std::strtoul(view["task_db_id"].get_string().value.data(),
-                                  nullptr, 10));
-    task.resources.allocatable_resource.cpu_count =
-        std::strtol(view["cpus_req"].get_string().value.data(), nullptr, 10);
 
+    task.SetTaskId(view["task_id"].get_int32().value);
+    task.SetTaskDbId(view["task_db_id"].get_int64().value);
+
+    task.nodes_alloc = view["nodes_alloc"].get_int32().value;
+    task.node_num = 0;
+
+    task.resources.allocatable_resource.cpu_count =
+        view["cpus_req"].get_double().value;
     task.resources.allocatable_resource.memory_bytes =
-        task.resources.allocatable_resource.memory_sw_bytes = std::strtoul(
-            view["mem_req"].get_string().value.data(), nullptr, 10);
-    task.name = view["job_name"].get_string().value;
+        task.resources.allocatable_resource.memory_sw_bytes =
+            view["mem_req"].get_int64().value;
+    task.name = view["task_name"].get_string().value;
     task.env = view["env"].get_string().value;
-    task.SetTaskId(
-        std::strtol(view["task_id"].get_string().value.data(), nullptr, 10));
-    task.uid =
-        std::strtol(view["id_user"].get_string().value.data(), nullptr, 10);
-    task.SetGid(
-        std::strtol(view["id_group"].get_string().value.data(), nullptr, 10));
+    task.uid = view["id_user"].get_int32().value;
+    task.SetGid(view["id_group"].get_int32().value);
     task.allocated_craneds_regex = view["nodelist"].get_string().value.data();
     task.partition_name = view["partition_name"].get_string().value;
-    task.SetStartTimeByUnixSecond(
-        std::strtol(view["time_start"].get_string().value.data(), nullptr, 10));
-    task.SetEndTimeByUnixSecond(
-        std::strtol(view["time_end"].get_string().value.data(), nullptr, 10));
+    task.SetStartTimeByUnixSecond(view["time_start"].get_int64().value);
+    task.SetEndTimeByUnixSecond(view["time_end"].get_int64().value);
 
     task.meta = Ctld::BatchMetaInTask{};
     auto& batch_meta = std::get<Ctld::BatchMetaInTask>(task.meta);
     batch_meta.sh_script = view["script"].get_string().value;
-    task.SetStatus(static_cast<crane::grpc::TaskStatus>(
-        std::strtol(view["state"].get_string().value.data(), nullptr, 10)));
-    task.time_limit = absl::Seconds(
-        std::strtoul(view["timelimit"].get_string().value.data(), nullptr, 10));
+    task.SetStatus(
+        static_cast<crane::grpc::TaskStatus>(view["state"].get_int32().value));
+    task.time_limit = absl::Seconds(view["timelimit"].get_int64().value);
     task.cwd = view["work_dir"].get_string().value;
     if (view["submit_line"])
       task.cmd_line = view["submit_line"].get_string().value;
+
+    // Todo: As for now, only Batch type is implemented and some data resolving
+    //  is hardcoded. Hard-coding for Batch task will be resolved when
+    //  Interactive task is implemented.
+    task.type = crane::grpc::Batch;
 
     task_list->emplace_back(std::move(task));
   }
@@ -162,7 +146,7 @@ bool MongodbClient::UpdateJobRecordField(uint64_t job_db_inx,
       }));
 
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].update_one(
+      (*GetClient_())[m_db_name_][m_task_collection_name_].update_one(
           filter.view(), update.view());
   return true;
 }
@@ -188,7 +172,7 @@ bool MongodbClient::UpdateJobRecordFields(
   document filter;
   filter.append(kvp("task_db_id", std::to_string(job_db_inx)));
   bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].update_one(
+      (*GetClient_())[m_db_name_][m_task_collection_name_].update_one(
           filter.view(), doc_value.view());
   return true;
 }
@@ -198,7 +182,7 @@ bool MongodbClient::CheckTaskDbIdExisted(int64_t task_db_id) {
   doc.append(kvp("job_db_inx", task_db_id));
 
   bsoncxx::stdx::optional<bsoncxx::document::value> result =
-      (*GetClient_())[m_db_name_][m_job_collection_name_].find_one(doc.view());
+      (*GetClient_())[m_db_name_][m_task_collection_name_].find_one(doc.view());
 
   if (result) {
     return true;
@@ -653,7 +637,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              task_to_ctld.name(), task_to_ctld.env(),
              static_cast<int32_t>(task_to_ctld.uid()),
              // 10-14
-             static_cast<int32_t>(persisted_part.gid()), "", 0, 0,
+             static_cast<int32_t>(persisted_part.gid()),
+             util::HostNameListToStr(persisted_part.nodes()), 0, 0,
              task_to_ctld.partition_name(),
              // 15-19
              0, 0, 0, 0, 0,

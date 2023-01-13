@@ -256,7 +256,7 @@ struct TaskInCtld {
   uid_t Gid() const { return gid; }
 
   void SetAccount(std::string const& val) {
-    account = std::move(val);
+    account = val;
     persisted_part.set_account(val);
   }
   std::string const& Account() const { return account; }
@@ -305,7 +305,7 @@ struct TaskInCtld {
     persisted_part.mutable_start_time()->set_seconds(val);
   }
   absl::Time const& StartTime() const { return start_time; }
-  uint64_t StartTimeInUnixSecond() const { return ToUnixSeconds(start_time); }
+  int64_t StartTimeInUnixSecond() const { return ToUnixSeconds(start_time); }
 
   void SetEndTime(absl::Time const& val) {
     end_time = val;
@@ -316,7 +316,7 @@ struct TaskInCtld {
     persisted_part.mutable_end_time()->set_seconds(val);
   }
   absl::Time const& EndTime() const { return end_time; }
-  uint64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
+  int64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
 
   void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
     task_to_ctld = val;
@@ -376,6 +376,10 @@ struct Qos {
   std::string description;
   uint32_t priority;
   uint32_t max_jobs_per_user;
+  uint32_t max_running_tasks_per_user;
+  absl::Duration grace_time;
+  uint32_t max_cpus_per_user;
+  uint32_t max_cpus_per_account;
 };
 
 struct Account {
@@ -390,6 +394,8 @@ struct Account {
   //  name, enable*/
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
+  //
+  //  uint32_t cur_cpus_use;
 };
 
 struct User {
@@ -404,6 +410,10 @@ struct User {
                                std::list<std::string> /*allowed qos list*/>>
       allowed_partition_qos_map;
   AdminLevel admin_level;
+  //
+  //  uint32_t cur_cpus_use;
+  //  uint32_t cur_submit_tasks;
+  //  uint32_t cur_running_tasks;
 };
 
 }  // namespace Ctld

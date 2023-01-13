@@ -60,15 +60,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                           const crane::grpc::CancelTaskRequest *request,
                           crane::grpc::CancelTaskReply *response) override;
 
-  grpc::Status QueryJobsInPartition(
+  grpc::Status QueryTasksInfo(
       grpc::ServerContext *context,
-      const crane::grpc::QueryJobsInPartitionRequest *request,
-      crane::grpc::QueryJobsInPartitionReply *response) override;
-
-  grpc::Status QueryJobsInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryJobsInfoRequest *request,
-      crane::grpc::QueryJobsInfoReply *response) override;
+      const crane::grpc::QueryTasksInfoRequest *request,
+      crane::grpc::QueryTasksInfoReply *response) override;
 
   grpc::Status QueryCranedInfo(
       grpc::ServerContext *context,

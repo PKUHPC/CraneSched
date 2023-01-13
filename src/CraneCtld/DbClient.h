@@ -43,9 +43,7 @@ class MongodbClient {
       crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
   bool InsertJob(TaskInCtld* task);
 
-  bool FetchJobRecordsWithStates(
-      std::list<TaskInCtld>* task_list,
-      const std::list<crane::grpc::TaskStatus>& states);
+  bool FetchAllJobRecords(std::list<TaskInCtld>* task_list);
 
   [[deprecated]] bool UpdateJobRecordField(uint64_t job_db_inx,
                                            const std::string& field_name,
@@ -174,7 +172,7 @@ class MongodbClient {
       crane::grpc::TaskInEmbeddedDb const& task);
 
   std::string m_db_name_, m_connect_uri_;
-  const std::string m_job_collection_name_{"job_table"};
+  const std::string m_task_collection_name_{"task_table"};
   const std::string m_account_collection_name_{"acct_table"};
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};

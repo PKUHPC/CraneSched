@@ -5,11 +5,13 @@
 #include <pwd.h>
 
 #include <csignal>
+#include <range/v3/all.hpp>
 #include <utility>
 
 #include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
+#include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/String.h"
@@ -187,72 +189,118 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryJobsInPartition(
+grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     grpc::ServerContext *context,
-    const crane::grpc::QueryJobsInPartitionRequest *request,
-    crane::grpc::QueryJobsInPartitionReply *response) {
-  std::optional<std::string> partition_opt;
-  if (!request->find_all()) partition_opt = request->partition();
+    const crane::grpc::QueryTasksInfoRequest *request,
+    crane::grpc::QueryTasksInfoReply *response) {
+  g_task_scheduler->QueryTasksInRam(request, response);
 
-  g_task_scheduler->QueryTasksInPartition(partition_opt, response);
+  auto *task_list = response->mutable_task_info_list();
 
-  return grpc::Status::OK;
-}
+  bool ok;
 
-grpc::Status CraneCtldServiceImpl::QueryJobsInfo(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryJobsInfoRequest *request,
-    crane::grpc::QueryJobsInfoReply *response) {
-  std::list<TaskInCtld> task_list;
-  g_db_client->FetchJobRecordsWithStates(
-      &task_list,
-      {crane::grpc::Pending, crane::grpc::Running, crane::grpc::Finished});
-
-  if (request->find_all()) {
-    auto *task_info_list = response->mutable_task_info_list();
-
-    for (auto &&task : task_list) {
-      if (task.Status() == crane::grpc::Finished &&
-          absl::ToInt64Seconds(absl::Now() - task.EndTime()) > 300)
-        continue;
-      auto *task_it = task_info_list->Add();
-
-      task_it->mutable_submit_info()->CopyFrom(task.TaskToCtld());
-      task_it->set_task_id(task.TaskId());
-      task_it->set_gid(task.Gid());
-      task_it->set_account(task.Account());
-      task_it->set_status(task.Status());
-      task_it->set_craned_list(task.allocated_craneds_regex);
-
-      task_it->mutable_start_time()->CopyFrom(
-          google::protobuf::util::TimeUtil::SecondsToTimestamp(
-              task.StartTimeInUnixSecond()));
-      task_it->mutable_end_time()->CopyFrom(
-          google::protobuf::util::TimeUtil::SecondsToTimestamp(
-              task.EndTimeInUnixSecond()));
-    }
-  } else {
-    auto *task_info_list = response->mutable_task_info_list();
-
-    for (auto &&task : task_list) {
-      if (task.TaskId() == request->job_id()) {
-        auto *task_it = task_info_list->Add();
-        task_it->mutable_submit_info()->CopyFrom(task.TaskToCtld());
-        task_it->set_task_id(task.TaskId());
-        task_it->set_gid(task.Gid());
-        task_it->set_account(task.Account());
-        task_it->set_status(task.Status());
-        task_it->set_craned_list(task.allocated_craneds_regex);
-
-        task_it->mutable_start_time()->CopyFrom(
-            google::protobuf::util::TimeUtil::SecondsToTimestamp(
-                ToUnixSeconds(task.StartTime())));
-        task_it->mutable_end_time()->CopyFrom(
-            google::protobuf::util::TimeUtil::SecondsToTimestamp(
-                ToUnixSeconds(task.EndTime())));
-      }
-    }
+  std::list<crane::grpc::TaskInEmbeddedDb> ended_list;
+  ok = g_embedded_db_client->GetEndedQueueCopy(&ended_list);
+  if (!ok) {
+    CRANE_ERROR(
+        "Failed to call "
+        "g_embedded_db_client->GetEndedQueueCopy(&ended_list)");
+    return grpc::Status::OK;
   }
+
+  auto ended_append_fn = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    auto *task_it = task_list->Add();
+
+    task_it->set_type(task.task_to_ctld().type());
+    task_it->set_task_id(task.persisted_part().task_id());
+    task_it->set_name(task.task_to_ctld().name());
+    task_it->set_partition(task.task_to_ctld().partition_name());
+    task_it->set_uid(task.task_to_ctld().uid());
+
+    task_it->set_gid(task.persisted_part().gid());
+    task_it->mutable_time_limit()->CopyFrom(task.task_to_ctld().time_limit());
+    task_it->mutable_start_time()->CopyFrom(task.persisted_part().start_time());
+    task_it->mutable_end_time()->CopyFrom(task.persisted_part().end_time());
+    task_it->set_account(task.persisted_part().account());
+
+    task_it->set_node_num(task.task_to_ctld().node_num());
+    task_it->set_cmd_line(task.task_to_ctld().cmd_line());
+    task_it->set_cwd(task.task_to_ctld().cwd());
+
+    task_it->set_status(task.persisted_part().status());
+    task_it->set_craned_list(
+        util::HostNameListToStr(task.persisted_part().nodes()));
+  };
+
+  auto ended_rng = ended_list | ranges::views::all;
+  if (!request->partition().empty() || request->task_id() != -1) {
+    auto partition_filtered_rng =
+        ended_rng |
+        ranges::views::filter([&](crane::grpc::TaskInEmbeddedDb &task) -> bool {
+          bool res = true;
+          if (!request->partition().empty()) {
+            res &= task.task_to_ctld().partition_name() == request->partition();
+          }
+          if (request->task_id() != -1) {
+            res &= task.persisted_part().task_id() == request->task_id();
+          }
+          return res;
+        });
+    ranges::for_each(partition_filtered_rng, ended_append_fn);
+  } else {
+    ranges::for_each(ended_rng, ended_append_fn);
+  }
+
+  std::list<TaskInCtld> db_ended_list;
+  ok = g_db_client->FetchAllJobRecords(&db_ended_list);
+  if (!ok) {
+    CRANE_ERROR(
+        "Failed to call "
+        "g_db_client->FetchAllJobRecords");
+    return grpc::Status::OK;
+  }
+
+  auto db_ended_append_fn = [&](TaskInCtld &task) {
+    auto *task_it = task_list->Add();
+
+    task_it->set_type(task.type);
+    task_it->set_task_id(task.TaskId());
+    task_it->set_name(task.name);
+    task_it->set_partition(task.partition_name);
+    task_it->set_uid(task.uid);
+
+    task_it->set_gid(task.Gid());
+    task_it->mutable_time_limit()->set_seconds(ToInt64Seconds(task.time_limit));
+    task_it->mutable_start_time()->CopyFrom(task.PersistedPart().start_time());
+    task_it->mutable_end_time()->CopyFrom(task.PersistedPart().end_time());
+    task_it->set_account(task.Account());
+
+    task_it->set_node_num(task.node_num);
+    task_it->set_cmd_line(task.cmd_line);
+    task_it->set_cwd(task.cwd);
+
+    task_it->set_status(task.Status());
+    task_it->set_craned_list(task.allocated_craneds_regex);
+  };
+
+  auto db_ended_rng = db_ended_list | ranges::views::all;
+  if (!request->partition().empty() || request->task_id() != -1) {
+    auto partition_filtered_rng =
+        db_ended_rng | ranges::views::filter([&](TaskInCtld &task) -> bool {
+          bool res = true;
+          if (!request->partition().empty()) {
+            res &= task.partition_name == request->partition();
+          }
+          if (request->task_id() != -1) {
+            res &= task.TaskId() == request->task_id();
+          }
+          return res;
+        });
+    ranges::for_each(partition_filtered_rng, db_ended_append_fn);
+  } else {
+    ranges::for_each(db_ended_rng, db_ended_append_fn);
+  }
+
   return grpc::Status::OK;
 }
 
