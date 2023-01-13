@@ -21,7 +21,9 @@ bool ParseHostList(const std::string &host_str,
                    std::list<std::string> *host_list);
 
 template <std::ranges::range T>
-std::string HostNameListToStr(T const &host_list) {
+std::string HostNameListToStr(T const &host_list)
+  requires std::same_as<std::ranges::range_value_t<T>, std::string>
+{
   std::map<std::string, std::list<std::string>> host_map;
   std::string host_name_str;
 
