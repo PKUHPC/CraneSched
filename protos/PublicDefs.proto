@@ -144,20 +144,26 @@ message InteractiveTaskAdditionalMeta{
 }
 
 message TaskInfo {
-  TaskToCtld submit_info = 1;
+  // Static task information
+  TaskType type = 1;
   uint32 task_id = 2;
-  uint32 gid = 3;
-  string account = 4;
-  TaskStatus status = 5;
-  string craned_list = 6;
+  string name = 3;
+  string partition = 4;
+  uint32 uid = 5;
 
-  google.protobuf.Timestamp start_time = 7;
-  google.protobuf.Timestamp end_time = 8;
+  uint32 gid = 6;
+  google.protobuf.Duration time_limit = 7;
+  google.protobuf.Timestamp start_time = 8;
+  google.protobuf.Timestamp end_time = 9;
+  string account = 10;
 
-  uint32 allowed_cpus = 9;
-  int32 exit_code = 10;
-  uint32 task_ids = 11;
-  //  uint32 priority = 4;
+  uint32 node_num = 11;
+  string cmd_line = 12;
+  string cwd = 13;
+
+  // Dynamic task information
+  TaskStatus status = 31;
+  string craned_list = 32;
 }
 
 message PartitionInfo {

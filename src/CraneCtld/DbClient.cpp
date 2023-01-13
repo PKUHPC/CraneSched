@@ -90,16 +90,20 @@ bool MongodbClient::FetchAllJobRecords(std::list<Ctld::TaskInCtld>* task_list) {
   // 25 submit_line
   for (auto view : cursor) {
     Ctld::TaskInCtld task;
+
+    task.SetTaskId(view["task_id"].get_int32().value);
     task.SetTaskDbId(view["task_db_id"].get_int64().value);
+
+    task.nodes_alloc = view["nodes_alloc"].get_int32().value;
+    task.node_num = 0;
+
     task.resources.allocatable_resource.cpu_count =
         view["cpus_req"].get_double().value;
-
     task.resources.allocatable_resource.memory_bytes =
         task.resources.allocatable_resource.memory_sw_bytes =
             view["mem_req"].get_int64().value;
     task.name = view["task_name"].get_string().value;
     task.env = view["env"].get_string().value;
-    task.SetTaskId(view["task_id"].get_int32().value);
     task.uid = view["id_user"].get_int32().value;
     task.SetGid(view["id_group"].get_int32().value);
     task.allocated_craneds_regex = view["nodelist"].get_string().value.data();
@@ -116,6 +120,11 @@ bool MongodbClient::FetchAllJobRecords(std::list<Ctld::TaskInCtld>* task_list) {
     task.cwd = view["work_dir"].get_string().value;
     if (view["submit_line"])
       task.cmd_line = view["submit_line"].get_string().value;
+
+    // Todo: As for now, only Batch type is implemented and some data resolving
+    //  is hardcoded. Hard-coding for Batch task will be resolved when
+    //  Interactive task is implemented.
+    task.type = crane::grpc::Batch;
 
     task_list->emplace_back(std::move(task));
   }
@@ -628,7 +637,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              task_to_ctld.name(), task_to_ctld.env(),
              static_cast<int32_t>(task_to_ctld.uid()),
              // 10-14
-             static_cast<int32_t>(persisted_part.gid()), "", 0, 0,
+             static_cast<int32_t>(persisted_part.gid()),
+             util::HostNameListToStr(persisted_part.nodes()), 0, 0,
              task_to_ctld.partition_name(),
              // 15-19
              0, 0, 0, 0, 0,

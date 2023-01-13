@@ -151,7 +151,7 @@ class TaskScheduler {
   void TerminateTasksOnCraned(CranedId craned_id);
 
   // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
-  void QueryTasksInRAM(const crane::grpc::QueryTasksInfoRequest* request,
+  void QueryTasksInRam(const crane::grpc::QueryTasksInfoRequest* request,
                        crane::grpc::QueryTasksInfoReply* response);
 
   bool QueryCranedIdOfRunningTask(uint32_t task_id, CranedId* craned_id) {

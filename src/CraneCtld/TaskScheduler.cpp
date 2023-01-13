@@ -553,7 +553,7 @@ CraneErr TaskScheduler::CancelPendingOrRunningTask(uint32_t operator_uid,
   return CraneErr::kNonExistent;
 }
 
-void TaskScheduler::QueryTasksInRAM(
+void TaskScheduler::QueryTasksInRam(
     const crane::grpc::QueryTasksInfoRequest* request,
     crane::grpc::QueryTasksInfoReply* response) {
   auto* task_list = response->mutable_task_info_list();
@@ -562,21 +562,28 @@ void TaskScheduler::QueryTasksInRAM(
   LockGuard running_guard(&m_running_task_map_mtx_);
 
   auto append_fn = [&](auto& it) {
-    std::unique_ptr<TaskInCtld>& task = it.second;
+    TaskInCtld& task = *it.second;
     auto* task_it = task_list->Add();
-    task_it->mutable_submit_info()->CopyFrom(task->TaskToCtld());
-    task_it->set_status(task->Status());
-    task_it->set_craned_list(task->allocated_craneds_regex);
-    task_it->set_task_id(task->TaskId());
-    task_it->set_gid(task->Gid());
-    task_it->set_account(task->Account());
 
-    task_it->mutable_start_time()->CopyFrom(
-        google::protobuf::util::TimeUtil::SecondsToTimestamp(
-            task->StartTimeInUnixSecond()));
-    task_it->mutable_end_time()->CopyFrom(
-        google::protobuf::util::TimeUtil::SecondsToTimestamp(
-            task->EndTimeInUnixSecond()));
+    task_it->set_type(task.TaskToCtld().type());
+    task_it->set_task_id(task.PersistedPart().task_id());
+    task_it->set_name(task.TaskToCtld().name());
+    task_it->set_partition(task.TaskToCtld().partition_name());
+    task_it->set_uid(task.TaskToCtld().uid());
+
+    task_it->set_gid(task.PersistedPart().gid());
+    task_it->mutable_time_limit()->CopyFrom(task.TaskToCtld().time_limit());
+    task_it->mutable_start_time()->CopyFrom(task.PersistedPart().start_time());
+    task_it->mutable_end_time()->CopyFrom(task.PersistedPart().end_time());
+    task_it->set_account(task.PersistedPart().account());
+
+    task_it->set_node_num(task.TaskToCtld().node_num());
+    task_it->set_cmd_line(task.TaskToCtld().cmd_line());
+    task_it->set_cwd(task.TaskToCtld().cwd());
+
+    task_it->set_status(task.PersistedPart().status());
+    task_it->set_craned_list(
+        util::HostNameListToStr(task.PersistedPart().nodes()));
   };
 
   auto pending_rng = m_pending_task_map_ | ranges::view::all;
