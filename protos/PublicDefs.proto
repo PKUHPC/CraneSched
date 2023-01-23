@@ -45,6 +45,8 @@ enum TaskStatus {
   Failed = 3;
   Completing = 4;
   Cancelled = 5;
+
+  Invalid = 15;
 }
 
 enum TaskType {

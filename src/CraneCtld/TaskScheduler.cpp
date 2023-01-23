@@ -521,118 +521,125 @@ CraneErr TaskScheduler::TerminateRunningTaskNoLock_(uint32_t task_id) {
 crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     const crane::grpc::CancelTaskRequest& request) {
   crane::grpc::CancelTaskReply reply;
-  reply.set_ok(true);
-  LockGuard pending_guard(&m_pending_task_map_mtx_);
-  LockGuard running_guard(&m_running_task_map_mtx_);
 
   uint32_t operator_uid = request.operator_uid();
-  std::unordered_set<std::string> req_nodes(std::begin(request.nodes()),
-                                            std::end(request.nodes()));
-  std::unordered_set<uint32_t> req_task_ids(std::begin(request.task_id()),
-                                            std::end(request.task_id()));
 
-  auto state_filter = [&](auto& it) {
+  auto rng_filter_state = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
-    return request.state() == 10 || task->Status() == request.state();
+    return request.filter_state() == crane::grpc::Invalid ||
+           task->Status() == request.filter_state();
   };
-  auto part_name_filter = [&](auto& it) {
+
+  auto rng_filter_partition = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
-    return request.partition().empty() ||
-           task->partition_name == request.partition();
+    return request.filter_partition().empty() ||
+           task->partition_name == request.filter_partition();
   };
-  auto account_filter = [&](auto& it) {
+
+  auto rng_filter_account = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
-    return request.account().empty() || task->Account() == request.account();
+    return request.filter_account().empty() ||
+           task->Account() == request.filter_account();
   };
-  auto task_name_filter = [&](auto& it) {
+
+  auto rng_filter_task_name = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
-    return request.task_name().empty() || task->name == request.task_name();
+    return request.filter_task_name().empty() ||
+           task->name == request.filter_task_name();
   };
-  auto task_ids_filter = [&](auto& it) {
+
+  std::unordered_set<uint32_t> filter_task_ids_set(
+      request.filter_task_ids().begin(), request.filter_task_ids().end());
+  auto rng_filer_task_ids = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
-    return request.task_id().empty() || req_task_ids.count(task->TaskId()) == 1;
+    return request.filter_task_ids().empty() ||
+           filter_task_ids_set.contains(task->TaskId());
   };
-  auto nodes_filter = [&](auto& it) {
+
+  std::unordered_set<std::string> filter_nodes_set(
+      std::begin(request.filter_nodes()), std::end(request.filter_nodes()));
+  auto rng_filter_nodes = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
-    if (request.nodes().empty()) {
-      return true;
-    } else {
-      for (const auto& node : task->Nodes()) {
-        if (req_nodes.count(node) == 1) return true;
-      }
-    }
+    if (request.filter_nodes().empty()) return true;
+
+    for (const auto& node : task->Nodes())
+      if (filter_nodes_set.contains(node)) return true;
+
     return false;
   };
 
-  auto cancel_pending_task = [&](auto& it) {
-    auto task_id = it.first;
-    std::unique_ptr<TaskInCtld>& task_meta = it.second;
-    if (operator_uid != 0 && task_meta->uid != operator_uid) {
-      reply.set_ok(false);
-      reply.set_not_cancelled_id(task_id);
-      reply.set_reason("Permission Denied.");
-    }
-
-    auto node = m_pending_task_map_.extract(task_id);
-    auto task = std::move(node.mapped());
-
-    task->SetStatus(crane::grpc::Cancelled);
-    task->SetEndTime(absl::Now());
-    g_embedded_db_client->UpdatePersistedPartOfTask(task->TaskDbId(),
-                                                    task->PersistedPart());
-    TransferTaskToMongodb_(task.get());
-    reply.add_cancelled_tasks(task_id);
+  auto fn_transform_pending_task_to_id = [&](auto& it) -> task_id_t {
+    task_id_t task_id = it.first;
+    return task_id;
   };
 
-  auto cancel_running_task = [&](auto& it) {
+  auto fn_cancel_pending_task = [&](task_id_t task_id) {
+    CRANE_TRACE("Cancelling pending task #{}", task_id);
+
+    auto task_it = m_pending_task_map_.find(task_id);
+    CRANE_ASSERT(task_it != m_pending_task_map_.end());
+
+    auto& task = task_it->second;
+
+    if (operator_uid != 0 && task->uid != operator_uid) {
+      reply.add_not_cancelled_tasks(task_id);
+      reply.add_not_cancelled_reasons("Permission Denied.");
+    } else {
+      task->SetStatus(crane::grpc::Cancelled);
+      task->SetEndTime(absl::Now());
+      g_embedded_db_client->UpdatePersistedPartOfTask(task->TaskDbId(),
+                                                      task->PersistedPart());
+      TransferTaskToMongodb_(task.get());
+
+      m_pending_task_map_.erase(task_it);
+
+      reply.add_cancelled_tasks(task_id);
+    }
+  };
+
+  auto fn_cancel_running_task = [&](auto& it) {
     auto task_id = it.first;
     std::unique_ptr<TaskInCtld>& task = it.second;
+
+    CRANE_TRACE("Cancelling running task #{}", task_id);
+
     if (operator_uid != 0 && task->uid != operator_uid) {
-      reply.set_ok(false);
-      reply.set_not_cancelled_id(task_id);
-      reply.set_reason("Permission Denied.");
+      reply.add_not_cancelled_tasks(task_id);
+      reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
       CraneErr err = TerminateRunningTaskNoLock_(task_id);
       if (err == CraneErr::kOk) {
         reply.add_cancelled_tasks(task_id);
       } else {
-        reply.set_ok(false);
-        reply.set_not_cancelled_id(task_id);
+        reply.add_not_cancelled_tasks(task_id);
         if (err == CraneErr::kNonExistent)
-          reply.set_reason("Task id doesn't exist!");
+          reply.add_not_cancelled_reasons("Task id doesn't exist!");
         else
-          reply.set_reason(CraneErrStr(err).data());
+          reply.add_not_cancelled_reasons(CraneErrStr(err).data());
       }
     }
   };
 
-  auto pending_rng = m_pending_task_map_ | ranges::view::all;
-  auto pd_s_filtered_rng = pending_rng | ranges::view::filter(state_filter);
-  auto pd_sp_filtered_rng =
-      pd_s_filtered_rng | ranges::view::filter(part_name_filter);
-  auto pd_spa_filtered_rng =
-      pd_sp_filtered_rng | ranges::view::filter(account_filter);
-  auto pd_spam_filtered_rng =
-      pd_spa_filtered_rng | ranges::view::filter(task_name_filter);
-  auto pd_spami_filtered_rng =
-      pd_spam_filtered_rng | ranges::view::filter(task_ids_filter);
-  auto pd_spamin_filtered_rng =
-      pd_spami_filtered_rng | ranges::view::filter(nodes_filter);
-  ranges::for_each(pd_spamin_filtered_rng, cancel_pending_task);
+  auto joined_filters = ranges::views::filter(rng_filter_state) |
+                        ranges::views::filter(rng_filter_partition) |
+                        ranges::views::filter(rng_filter_account) |
+                        ranges::views::filter(rng_filter_task_name) |
+                        ranges::views::filter(rng_filer_task_ids) |
+                        ranges::views::filter(rng_filter_nodes);
 
-  auto running_rng = m_running_task_map_ | ranges::view::all;
-  auto r_s_filtered_rng = running_rng | ranges::view::filter(state_filter);
-  auto r_sp_filtered_rng =
-      r_s_filtered_rng | ranges::view::filter(part_name_filter);
-  auto r_spa_filtered_rng =
-      r_sp_filtered_rng | ranges::view::filter(account_filter);
-  auto r_spam_filtered_rng =
-      r_spa_filtered_rng | ranges::view::filter(task_name_filter);
-  auto r_spami_filtered_rng =
-      r_spam_filtered_rng | ranges::view::filter(task_ids_filter);
-  auto r_spamin_filtered_rng =
-      r_spami_filtered_rng | ranges::view::filter(nodes_filter);
-  ranges::for_each(r_spamin_filtered_rng, cancel_running_task);
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
+
+  auto pending_task_id_rng =
+      m_pending_task_map_ | joined_filters |
+      ranges::views::transform(fn_transform_pending_task_to_id);
+  // Evaluate immediately. fn_cancel_pending_task will change the contents
+  // of m_pending_task_map_ and invalidate the end() of pending_task_id_rng.
+  auto pending_task_id_vec = ranges::to_vector(pending_task_id_rng);
+  ranges::for_each(pending_task_id_vec, fn_cancel_pending_task);
+
+  auto running_task_rng = m_running_task_map_ | joined_filters;
+  ranges::for_each(running_task_rng, fn_cancel_running_task);
 
   return reply;
 }
