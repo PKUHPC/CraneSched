@@ -213,14 +213,22 @@ message CheckTaskStatusReply {
 }
 
 message CancelTaskRequest {
-  uint32 task_id = 1;
+  repeated uint32 task_id = 1;
   uint32 operator_uid = 2;
+  string partition = 3;
+  string account = 4;
+  TaskStatus state = 5;
+  string task_name = 6;
+  repeated string nodes = 7;
 }
 
 message CancelTaskReply {
   bool ok = 1;
   string reason = 2;
+  repeated uint32 cancelled_tasks = 3;
+  uint32 not_cancelled_id = 4;
 }
+
 
 message QueryTaskIdFromPortRequest{
   uint32 port = 1;
