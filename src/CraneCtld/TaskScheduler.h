@@ -159,10 +159,10 @@ class TaskScheduler {
     return QueryCranedIdOfRunningTaskNoLock_(task_id, craned_id);
   }
 
-  crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
-      const crane::grpc::CancelTaskRequest& request)
+  crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
+      const crane::grpc::CancelTaskRequest& request);
 
-      CraneErr TerminateRunningTask(uint32_t task_id) {
+  CraneErr TerminateRunningTask(uint32_t task_id) {
     LockGuard running_guard(&m_running_task_map_mtx_);
     return TerminateRunningTaskNoLock_(task_id);
   }
