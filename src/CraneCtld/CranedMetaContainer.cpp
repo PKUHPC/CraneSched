@@ -421,12 +421,74 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
 }
 
 crane::grpc::QueryClusterInfoReply
-CranedMetaContainerSimpleImpl::QueryClusterInfo() {
+CranedMetaContainerSimpleImpl::QueryClusterInfo(
+    const crane::grpc::QueryClusterInfoRequest& request) {
   LockGuard guard(mtx_);
   crane::grpc::QueryClusterInfoReply reply;
   auto* partition_craned_list = reply.mutable_partition_craned();
 
-  for (auto&& [part_id, part_meta] : partition_metas_map_) {
+  std::unordered_set<std::string> req_partitions(
+      std::begin(request.partitions()), std::end(request.partitions()));
+  std::unordered_set<std::string> req_nodes(std::begin(request.nodes()),
+                                            std::end(request.nodes()));
+  std::unordered_set<int> req_states(std::begin(request.states()),
+                                     std::end(request.states()));
+
+  auto part_name_filter = [&](auto& it) {
+    auto part_meta = it.second;
+    return request.partitions().empty() ||
+           req_partitions.count(part_meta.partition_global_meta.name) == 1;
+  };
+
+  auto node_name_filter = [&](auto& it) {
+    auto& craned_meta = it.second;
+    return request.nodes().empty() ||
+           req_nodes.count(craned_meta.static_meta.hostname) == 1;
+  };
+
+  auto node_state_filter = [&](auto& it) {
+    auto& craned_meta = it.second;
+    auto& alloc_res_total = craned_meta.res_total.allocatable_resource;
+    auto& alloc_res_in_use = craned_meta.res_in_use.allocatable_resource;
+    auto& alloc_res_avail = craned_meta.res_avail.allocatable_resource;
+    if (request.states().empty()) return true;
+    if (craned_meta.alive) {
+      if (alloc_res_in_use.cpu_count == 0 &&
+          alloc_res_in_use.memory_bytes == 0) {
+        return req_states.count(crane::grpc::CranedState::CRANE_IDLE) == 1;
+      } else if (alloc_res_avail.cpu_count == 0 &&
+                 alloc_res_avail.memory_bytes == 0)
+        return req_states.count(crane::grpc::CranedState::CRANE_ALLOC) == 1;
+      else
+        return req_states.count(crane::grpc::CranedState::CRANE_MIX) == 1;
+    } else {
+      return req_states.count(crane::grpc::CranedState::CRANE_DOWN) == 1;
+    }
+  };
+
+  auto partition_down_filter = [&](auto& it) {
+    auto& part_meta = it.second;
+    return !request.query_down_nodes() ||
+           part_meta.partition_global_meta.alive_craned_cnt <= 0;
+  };
+  auto partition_responding_filter = [&](auto& it) {
+    auto& part_meta = it.second;
+    return !request.query_responding_nodes() ||
+           part_meta.partition_global_meta.alive_craned_cnt > 0;
+  };
+
+  auto node_down_filter = [&](auto& it) {
+    auto& craned_meta = it.second;
+    return !request.query_down_nodes() || !craned_meta.alive;
+  };
+  auto node_responding_filter = [&](auto& it) {
+    auto& craned_meta = it.second;
+    return !request.query_responding_nodes() || craned_meta.alive;
+  };
+
+  auto part_append_fn = [&](auto& it) {
+    auto part_id = it.first;
+    auto part_meta = it.second;
     auto* part_craned_info = partition_craned_list->Add();
     part_craned_info->set_name(part_meta.partition_global_meta.name);
     if (part_craned_info->name() == g_config.DefaultPartition) {
@@ -452,11 +514,11 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo() {
     std::list<std::string> idle_craned_name_list, mix_craned_name_list,
         alloc_craned_name_list, down_craned_name_list;
 
-    for (auto&& [craned_index, craned_meta] : part_meta.craned_meta_map) {
+    auto append_craned_fn = [&](auto& it) {
+      auto craned_meta = it.second;
       auto& alloc_res_total = craned_meta.res_total.allocatable_resource;
       auto& alloc_res_in_use = craned_meta.res_in_use.allocatable_resource;
       auto& alloc_res_avail = craned_meta.res_avail.allocatable_resource;
-
       if (craned_meta.alive) {
         if (alloc_res_in_use.cpu_count == 0 &&
             alloc_res_in_use.memory_bytes == 0) {
@@ -475,7 +537,17 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo() {
         down_craned_list->set_craned_num(down_craned_list->craned_num() + 1);
         down_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
       }
-    }
+    };
+
+    auto craned_rng = part_meta.craned_meta_map | ranges::view::all;
+    auto n_filtered_rng = craned_rng | ranges::view::filter(node_name_filter);
+    auto ns_filtered_rng =
+        n_filtered_rng | ranges::view::filter(node_state_filter);
+    auto nsd_filtered_rng =
+        ns_filtered_rng | ranges::view::filter(node_down_filter);
+    auto nsdr_filtered_rng =
+        nsd_filtered_rng | ranges::view::filter(node_responding_filter);
+    ranges::for_each(nsdr_filtered_rng, append_craned_fn);
 
     idle_craned_list->set_craned_list_regex(
         util::HostNameListToStr(idle_craned_name_list));
@@ -485,7 +557,15 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo() {
         util::HostNameListToStr(alloc_craned_name_list));
     down_craned_list->set_craned_list_regex(
         util::HostNameListToStr(down_craned_name_list));
-  }
+  };
+
+  auto partition_rng = partition_metas_map_ | ranges::view::all;
+  auto p_filtered_rng = partition_rng | ranges::view::filter(part_name_filter);
+  auto pd_filtered_rng =
+      p_filtered_rng | ranges::view::filter(partition_down_filter);
+  auto pdr_filtered_rng =
+      pd_filtered_rng | ranges::view::filter(partition_responding_filter);
+  ranges::for_each(pdr_filtered_rng, part_append_fn);
 
   return reply;
 }
