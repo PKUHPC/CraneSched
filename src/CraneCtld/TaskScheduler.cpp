@@ -522,8 +522,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     const crane::grpc::CancelTaskRequest& request) {
   crane::grpc::CancelTaskReply reply;
   reply.set_ok(true);
-  LockGuard pending_guard(m_pending_task_map_mtx_);
-  LockGuard running_guard(m_running_task_map_mtx_);
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
 
   uint32_t operator_uid = request.operator_uid();
   std::unordered_set<std::string> req_nodes(std::begin(request.nodes()),
