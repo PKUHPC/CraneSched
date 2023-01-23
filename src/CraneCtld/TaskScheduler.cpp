@@ -533,7 +533,6 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
   auto state_filter = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
-    reply.set_test(request.state());
     return request.state() == 10 || task->Status() == request.state();
   };
   auto part_name_filter = [&](auto& it) {
