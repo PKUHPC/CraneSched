@@ -145,21 +145,7 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
 grpc::Status CraneCtldServiceImpl::CancelTask(
     grpc::ServerContext *context, const crane::grpc::CancelTaskRequest *request,
     crane::grpc::CancelTaskReply *response) {
-  uint32_t task_id = request->task_id();
-  uint32_t operator_uid = request->operator_uid();
-
-  CraneErr err =
-      g_task_scheduler->CancelPendingOrRunningTask(operator_uid, task_id);
-  // Todo: make the reason be set here!
-  if (err == CraneErr::kOk)
-    response->set_ok(true);
-  else {
-    response->set_ok(false);
-    if (err == CraneErr::kNonExistent)
-      response->set_reason("Task id doesn't exist!");
-    else
-      response->set_reason(CraneErrStr(err).data());
-  }
+  *response = g_task_scheduler->CancelPendingOrRunningTask(*request);
   return grpc::Status::OK;
 }
 
