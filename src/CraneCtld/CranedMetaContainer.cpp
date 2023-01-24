@@ -394,21 +394,21 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
   auto& part_meta = partition_metas_map_.at(it->second);
 
   auto* part_info = list->Add();
-  auto& alloc_res_total = part_meta.partition_global_meta
-                              .m_resource_total_inc_dead_.allocatable_resource;
-  auto& alloc_res_avail =
+  auto& res_total = part_meta.partition_global_meta.m_resource_total_inc_dead_
+                        .allocatable_resource;
+  auto& res_avail =
       part_meta.partition_global_meta.m_resource_avail_.allocatable_resource;
-  auto& alloc_res_in_use =
+  auto& res_in_use =
       part_meta.partition_global_meta.m_resource_in_use_.allocatable_resource;
   part_info->set_name(part_meta.partition_global_meta.name);
   part_info->set_total_nodes(part_meta.partition_global_meta.node_cnt);
   part_info->set_alive_nodes(part_meta.partition_global_meta.alive_craned_cnt);
-  part_info->set_total_cpus(alloc_res_total.cpu_count);
-  part_info->set_avail_cpus(alloc_res_avail.cpu_count);
-  part_info->set_alloc_cpus(alloc_res_in_use.cpu_count);
-  part_info->set_total_mem(alloc_res_total.memory_bytes);
-  part_info->set_avail_mem(alloc_res_avail.memory_bytes);
-  part_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
+  part_info->set_total_cpus(res_total.cpu_count);
+  part_info->set_avail_cpus(res_avail.cpu_count);
+  part_info->set_alloc_cpus(res_in_use.cpu_count);
+  part_info->set_total_mem(res_total.memory_bytes);
+  part_info->set_avail_mem(res_avail.memory_bytes);
+  part_info->set_alloc_mem(res_in_use.memory_bytes);
 
   if (part_meta.partition_global_meta.alive_craned_cnt > 0)
     part_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
@@ -448,16 +448,14 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     if (no_craned_state_constraint) return true;
 
     CranedMeta& craned_meta = it.second;
-    auto& alloc_res_total = craned_meta.res_total.allocatable_resource;
-    auto& alloc_res_in_use = craned_meta.res_in_use.allocatable_resource;
-    auto& alloc_res_avail = craned_meta.res_avail.allocatable_resource;
+    auto& res_total = craned_meta.res_total.allocatable_resource;
+    auto& res_in_use = craned_meta.res_in_use.allocatable_resource;
+    auto& res_avail = craned_meta.res_avail.allocatable_resource;
     if (craned_meta.alive) {
-      if (alloc_res_in_use.cpu_count == 0 &&
-          alloc_res_in_use.memory_bytes == 0) {
+      if (res_in_use.cpu_count == 0 && res_in_use.memory_bytes == 0) {
         return filter_craned_states_set.contains(
             crane::grpc::CranedState::CRANE_IDLE);
-      } else if (alloc_res_avail.cpu_count == 0 &&
-                 alloc_res_avail.memory_bytes == 0)
+      } else if (res_avail.cpu_count == 0 && res_avail.memory_bytes == 0)
         return filter_craned_states_set.contains(
             crane::grpc::CranedState::CRANE_ALLOC);
       else
