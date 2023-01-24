@@ -50,46 +50,52 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["UseTls"] && config["UseTls"].as<bool>()) {
         g_config.ListenConf.UseTls = true;
-        if (config["CertFilePath"]) {
-          g_config.ListenConf.CertFilePath =
-              config["CertFilePath"].as<std::string>();
+
+        if (config["DomainSuffix"])
+          g_config.ListenConf.DomainSuffix =
+              config["DomainSuffix"].as<std::string>();
+
+        if (config["ServerCertFilePath"]) {
+          g_config.ListenConf.ServerCertFilePath =
+              config["ServerCertFilePath"].as<std::string>();
 
           try {
             boost::filesystem::load_string_file(
-                g_config.ListenConf.CertFilePath,
-                g_config.ListenConf.CertContent);
+                g_config.ListenConf.ServerCertFilePath,
+                g_config.ListenConf.ServerCertContent);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (g_config.ListenConf.CertContent.empty()) {
+          if (g_config.ListenConf.ServerCertContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by CertFilePath is "
-                "empty");
+                "UseTls is true, but the file specified by ServerCertFilePath "
+                "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but CertFilePath is empty");
+          CRANE_ERROR("UseTls is true, but ServerCertFilePath is empty");
           std::exit(1);
         }
-        if (config["KeyFilePath"]) {
-          g_config.ListenConf.KeyFilePath =
-              config["KeyFilePath"].as<std::string>();
+
+        if (config["ServerKeyFilePath"]) {
+          g_config.ListenConf.ServerKeyFilePath =
+              config["ServerKeyFilePath"].as<std::string>();
 
           try {
-            boost::filesystem::load_string_file(g_config.ListenConf.KeyFilePath,
-                                                g_config.ListenConf.KeyContent);
+            boost::filesystem::load_string_file(
+                g_config.ListenConf.ServerKeyFilePath,
+                g_config.ListenConf.ServerKeyContent);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Read key file error: {}", e.what());
+            CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (g_config.ListenConf.KeyContent.empty()) {
+          if (g_config.ListenConf.ServerKeyContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by KeyFilePath is "
-                "empty");
-            std::exit(1);
+                "UseTls is true, but the file specified by ServerKeyFilePath "
+                "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but KeyFilePath is empty");
+          CRANE_ERROR("UseTls is true, but ServerKeyFilePath is empty");
           std::exit(1);
         }
       } else {
@@ -412,9 +418,7 @@ void GlobalVariableInit() {
   g_ctld_client = std::make_unique<Craned::CtldClient>();
   g_ctld_client->SetNodeId(g_config.NodeId);
 
-  std::string ctld_address = fmt::format("{}:{}", g_config.ControlMachine,
-                                         g_config.CraneCtldListenPort);
-  g_ctld_client->InitChannelAndStub(ctld_address);
+  g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
 }
 
 void StartServer() {

@@ -45,10 +45,11 @@ struct Config {
     std::string CraneCtldListenPort;
 
     bool UseTls{false};
-    std::string CertFilePath;
-    std::string CertContent;
-    std::string KeyFilePath;
-    std::string KeyContent;
+    std::string DomainSuffix;
+    std::string ServerCertFilePath;
+    std::string ServerCertContent;
+    std::string ServerKeyFilePath;
+    std::string ServerKeyContent;
   };
 
   CraneCtldListenConf ListenConf;

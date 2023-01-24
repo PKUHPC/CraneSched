@@ -12,8 +12,28 @@ CtldClient::~CtldClient() {
 }
 
 void CtldClient::InitChannelAndStub(const std::string& server_address) {
-  m_ctld_channel_ =
-      grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials());
+  if (g_config.ListenConf.UseTls) {
+    std::string ctld_address = fmt::format("{}.{}:{}", server_address,
+                                           g_config.ListenConf.DomainSuffix,
+                                           g_config.CraneCtldListenPort);
+
+    grpc::SslCredentialsOptions ssl_opts;
+    // pem_root_certs is actually the certificate of server side rather than
+    // CA certificate. CA certificate is not needed.
+    // Since we use the same cert/key pair for both cranectld/craned,
+    // pem_root_certs is set to the same certificate.
+    ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
+    ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
+    ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
+
+    m_ctld_channel_ =
+        grpc::CreateChannel(ctld_address, grpc::SslCredentials(ssl_opts));
+  } else {
+    std::string ctld_address =
+        fmt::format("{}:{}", server_address, g_config.CraneCtldListenPort);
+    m_ctld_channel_ =
+        grpc::CreateChannel(ctld_address, grpc::InsecureChannelCredentials());
+  }
 
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = CraneCtld::NewStub(m_ctld_channel_);
