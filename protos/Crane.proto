@@ -349,12 +349,16 @@ message MigrateSshProcToCgroupReply {
 }
 
 message QueryClusterInfoRequest {
-
+  repeated string filter_partitions = 1;
+  repeated string filter_nodes = 2;
+  repeated CranedState filter_craned_states = 3;
+  bool filter_only_down_nodes = 4;
+  bool filter_only_responding_nodes = 5;
 }
 
 message QueryClusterInfoReply {
   bool ok = 1;
-  repeated PartitionCranedInfo partition_craned = 2;
+  repeated TrimmedPartitionInfo partitions = 2;
 }
 
 message QueryTasksInfoRequest{

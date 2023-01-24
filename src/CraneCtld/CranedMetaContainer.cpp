@@ -394,21 +394,21 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
   auto& part_meta = partition_metas_map_.at(it->second);
 
   auto* part_info = list->Add();
-  auto& alloc_res_total = part_meta.partition_global_meta
-                              .m_resource_total_inc_dead_.allocatable_resource;
-  auto& alloc_res_avail =
+  auto& res_total = part_meta.partition_global_meta.m_resource_total_inc_dead_
+                        .allocatable_resource;
+  auto& res_avail =
       part_meta.partition_global_meta.m_resource_avail_.allocatable_resource;
-  auto& alloc_res_in_use =
+  auto& res_in_use =
       part_meta.partition_global_meta.m_resource_in_use_.allocatable_resource;
   part_info->set_name(part_meta.partition_global_meta.name);
   part_info->set_total_nodes(part_meta.partition_global_meta.node_cnt);
   part_info->set_alive_nodes(part_meta.partition_global_meta.alive_craned_cnt);
-  part_info->set_total_cpus(alloc_res_total.cpu_count);
-  part_info->set_avail_cpus(alloc_res_avail.cpu_count);
-  part_info->set_alloc_cpus(alloc_res_in_use.cpu_count);
-  part_info->set_total_mem(alloc_res_total.memory_bytes);
-  part_info->set_avail_mem(alloc_res_avail.memory_bytes);
-  part_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
+  part_info->set_total_cpus(res_total.cpu_count);
+  part_info->set_avail_cpus(res_avail.cpu_count);
+  part_info->set_alloc_cpus(res_in_use.cpu_count);
+  part_info->set_total_mem(res_total.memory_bytes);
+  part_info->set_avail_mem(res_avail.memory_bytes);
+  part_info->set_alloc_mem(res_in_use.memory_bytes);
 
   if (part_meta.partition_global_meta.alive_craned_cnt > 0)
     part_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
@@ -421,61 +421,128 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
 }
 
 crane::grpc::QueryClusterInfoReply
-CranedMetaContainerSimpleImpl::QueryClusterInfo() {
+CranedMetaContainerSimpleImpl::QueryClusterInfo(
+    const crane::grpc::QueryClusterInfoRequest& request) {
   LockGuard guard(mtx_);
   crane::grpc::QueryClusterInfoReply reply;
-  auto* partition_craned_list = reply.mutable_partition_craned();
+  auto* partition_list = reply.mutable_partitions();
 
-  for (auto&& [part_id, part_meta] : partition_metas_map_) {
-    auto* part_craned_info = partition_craned_list->Add();
-    part_craned_info->set_name(part_meta.partition_global_meta.name);
-    if (part_craned_info->name() == g_config.DefaultPartition) {
-      part_craned_info->set_name(part_craned_info->name() + '*');
+  std::unordered_set<std::string> filter_partitions_set(
+      request.filter_partitions().begin(), request.filter_partitions().end());
+  bool no_partition_constraint = request.filter_partitions().empty();
+  auto partition_rng_filter_name = [no_partition_constraint,
+                                    &filter_partitions_set](auto& it) {
+    auto part_meta = it.second;
+    return no_partition_constraint ||
+           filter_partitions_set.contains(part_meta.partition_global_meta.name);
+  };
+
+  std::unordered_set<std::string> req_nodes(request.filter_nodes().begin(),
+                                            request.filter_nodes().end());
+
+  std::unordered_set<int> filter_craned_states_set(
+      request.filter_craned_states().begin(),
+      request.filter_craned_states().end());
+  bool no_craned_state_constraint = request.filter_craned_states().empty();
+  auto craned_rng_filter_state = [&](auto& it) {
+    if (no_craned_state_constraint) return true;
+
+    CranedMeta& craned_meta = it.second;
+    auto& res_total = craned_meta.res_total.allocatable_resource;
+    auto& res_in_use = craned_meta.res_in_use.allocatable_resource;
+    auto& res_avail = craned_meta.res_avail.allocatable_resource;
+    if (craned_meta.alive) {
+      if (res_in_use.cpu_count == 0 && res_in_use.memory_bytes == 0) {
+        return filter_craned_states_set.contains(
+            crane::grpc::CranedState::CRANE_IDLE);
+      } else if (res_avail.cpu_count == 0 && res_avail.memory_bytes == 0)
+        return filter_craned_states_set.contains(
+            crane::grpc::CranedState::CRANE_ALLOC);
+      else
+        return filter_craned_states_set.contains(
+            crane::grpc::CranedState::CRANE_MIX);
+    } else {
+      return filter_craned_states_set.contains(
+          crane::grpc::CranedState::CRANE_DOWN);
     }
-    if (part_meta.partition_global_meta.alive_craned_cnt > 0)
-      part_craned_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
-    else
-      part_craned_info->set_state(crane::grpc::PartitionState::PARTITION_DOWN);
+  };
 
-    auto* common_craned_state_list =
-        part_craned_info->mutable_common_craned_state_list();
+  bool no_craned_hostname_constraint = request.filter_nodes().empty();
+  auto craned_rng_filter_hostname = [&](auto& it) {
+    auto& craned_meta = it.second;
+    return no_craned_hostname_constraint ||
+           req_nodes.contains(craned_meta.static_meta.hostname);
+  };
 
-    auto* idle_craned_list = common_craned_state_list->Add();
+  auto craned_rng_filter_only_responding = [&](auto& it) {
+    CranedMeta& craned_meta = it.second;
+    return !request.filter_only_responding_nodes() || craned_meta.alive;
+  };
+
+  auto craned_rng_filter_only_down = [&](auto& it) {
+    CranedMeta& craned_meta = it.second;
+    return !request.filter_only_down_nodes() || !craned_meta.alive;
+  };
+
+  auto partition_rng =
+      partition_metas_map_ | ranges::views::filter(partition_rng_filter_name);
+  ranges::for_each(partition_rng, [&](auto& it) {
+    uint32_t part_id = it.first;
+    PartitionMetas& part_meta = it.second;
+
+    auto* part_info = partition_list->Add();
+
+    std::string partition_name = part_meta.partition_global_meta.name;
+    if (part_info->name() == g_config.DefaultPartition) {
+      partition_name.append("*");
+    }
+    part_info->set_name(std::move(partition_name));
+
+    part_info->set_state(part_meta.partition_global_meta.alive_craned_cnt > 0
+                             ? crane::grpc::PartitionState::PARTITION_UP
+                             : crane::grpc::PartitionState::PARTITION_DOWN);
+
+    auto* craned_lists = part_info->mutable_craned_lists();
+
+    auto* idle_craned_list = craned_lists->Add();
+    auto* mix_craned_list = craned_lists->Add();
+    auto* alloc_craned_list = craned_lists->Add();
+    auto* down_craned_list = craned_lists->Add();
+
     idle_craned_list->set_state(crane::grpc::CranedState::CRANE_IDLE);
-    auto* mix_craned_list = common_craned_state_list->Add();
     mix_craned_list->set_state(crane::grpc::CranedState::CRANE_MIX);
-    auto* alloc_craned_list = common_craned_state_list->Add();
     alloc_craned_list->set_state(crane::grpc::CranedState::CRANE_ALLOC);
-    auto* down_craned_list = common_craned_state_list->Add();
     down_craned_list->set_state(crane::grpc::CranedState::CRANE_DOWN);
 
     std::list<std::string> idle_craned_name_list, mix_craned_name_list,
         alloc_craned_name_list, down_craned_name_list;
 
-    for (auto&& [craned_index, craned_meta] : part_meta.craned_meta_map) {
-      auto& alloc_res_total = craned_meta.res_total.allocatable_resource;
-      auto& alloc_res_in_use = craned_meta.res_in_use.allocatable_resource;
-      auto& alloc_res_avail = craned_meta.res_avail.allocatable_resource;
-
+    auto craned_rng = part_meta.craned_meta_map |
+                      ranges::views::filter(craned_rng_filter_hostname) |
+                      ranges::views::filter(craned_rng_filter_state) |
+                      ranges::views::filter(craned_rng_filter_only_down) |
+                      ranges::views::filter(craned_rng_filter_only_responding);
+    ranges::for_each(craned_rng, [&](auto& it) {
+      CranedMeta& craned_meta = it.second;
+      auto& res_total = craned_meta.res_total.allocatable_resource;
+      auto& res_in_use = craned_meta.res_in_use.allocatable_resource;
+      auto& res_avail = craned_meta.res_avail.allocatable_resource;
       if (craned_meta.alive) {
-        if (alloc_res_in_use.cpu_count == 0 &&
-            alloc_res_in_use.memory_bytes == 0) {
-          idle_craned_list->set_craned_num(idle_craned_list->craned_num() + 1);
+        if (res_in_use.cpu_count == 0 && res_in_use.memory_bytes == 0) {
           idle_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
-        } else if (alloc_res_avail.cpu_count == 0 &&
-                   alloc_res_avail.memory_bytes == 0) {
-          alloc_craned_list->set_craned_num(alloc_craned_list->craned_num() +
-                                            1);
+          idle_craned_list->set_count(idle_craned_name_list.size());
+        } else if (res_avail.cpu_count == 0 && res_avail.memory_bytes == 0) {
           alloc_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+          alloc_craned_list->set_count(alloc_craned_name_list.size());
         } else {
-          mix_craned_list->set_craned_num(mix_craned_list->craned_num() + 1);
           mix_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+          mix_craned_list->set_count(mix_craned_name_list.size());
         }
       } else {
-        down_craned_list->set_craned_num(down_craned_list->craned_num() + 1);
         down_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+        down_craned_list->set_count(down_craned_name_list.size());
       }
-    }
+    });
 
     idle_craned_list->set_craned_list_regex(
         util::HostNameListToStr(idle_craned_name_list));
@@ -485,7 +552,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo() {
         util::HostNameListToStr(alloc_craned_name_list));
     down_craned_list->set_craned_list_regex(
         util::HostNameListToStr(down_craned_name_list));
-  }
+  });
 
   return reply;
 }

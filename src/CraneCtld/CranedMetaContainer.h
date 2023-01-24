@@ -2,6 +2,7 @@
 
 #include <absl/container/flat_hash_map.h>
 
+#include <range/v3/all.hpp>
 #include <unordered_map>
 
 #include "CtldPublicDefs.h"
@@ -51,7 +52,8 @@ class CranedMetaContainerInterface {
   virtual crane::grpc::QueryPartitionInfoReply QueryPartitionInfo(
       const std::string& partition_name) = 0;
 
-  virtual crane::grpc::QueryClusterInfoReply QueryClusterInfo() = 0;
+  virtual crane::grpc::QueryClusterInfoReply QueryClusterInfo(
+      const crane::grpc::QueryClusterInfoRequest& request) = 0;
 
   virtual bool GetCraneId(const std::string& hostname, CranedId* node_id) = 0;
 
@@ -101,7 +103,8 @@ class CranedMetaContainerSimpleImpl final
   crane::grpc::QueryPartitionInfoReply QueryPartitionInfo(
       const std::string& partition_name) override;
 
-  crane::grpc::QueryClusterInfoReply QueryClusterInfo() override;
+  virtual crane::grpc::QueryClusterInfoReply QueryClusterInfo(
+      const crane::grpc::QueryClusterInfoRequest& request) override;
 
   bool GetCraneId(const std::string& hostname, CranedId* craned_id) override;
 
