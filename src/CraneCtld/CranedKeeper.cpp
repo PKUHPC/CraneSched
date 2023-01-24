@@ -684,18 +684,30 @@ void CranedKeeper::ConnectCranedNode_(CranedAddrAndId addr_info) {
   //  /*ms*/); channel_args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1
   //  /*true*/);
 
-  std::string addr_port =
-      fmt::format("{}:{}", addr_info.node_addr, kCranedDefaultPort);
-
   if (g_config.ListenConf.UseTls) {
+    std::string addr_port =
+        fmt::format("{}.{}:{}", addr_info.node_addr,
+                    g_config.ListenConf.DomainSuffix, kCranedDefaultPort);
+
+    CRANE_TRACE("Creating a channel to {}", addr_port);
+
     grpc::SslCredentialsOptions ssl_opts;
-    ssl_opts.pem_root_certs = g_config.ListenConf.CertContent;
-    ssl_opts.pem_cert_chain = g_config.ListenConf.CertContent;
-    ssl_opts.pem_private_key = g_config.ListenConf.KeyContent;
+    // pem_root_certs is actually the certificate of server side rather than
+    // CA certificate. CA certificate is not needed.
+    // Since we use the same cert/key pair for both cranectld/craned,
+    // pem_root_certs is set to the same certificate.
+    ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
+    ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
+    ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
 
     cq_tag_data->craned->m_channel_ = grpc::CreateCustomChannel(
         addr_port, grpc::SslCredentials(ssl_opts), channel_args);
   } else {
+    std::string addr_port =
+        fmt::format("{}:{}", addr_info.node_addr, kCranedDefaultPort);
+
+    CRANE_TRACE("Creating a channel to {}", addr_port);
+
     cq_tag_data->craned->m_channel_ = grpc::CreateCustomChannel(
         addr_port, grpc::InsecureChannelCredentials(), channel_args);
   }

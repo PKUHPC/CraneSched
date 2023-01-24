@@ -630,13 +630,16 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   grpc::ServerBuilder builder;
   if (listen_conf.UseTls) {
     grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
-    pem_key_cert_pair.cert_chain = listen_conf.CertContent;
-    pem_key_cert_pair.private_key = listen_conf.KeyContent;
+    pem_key_cert_pair.cert_chain = listen_conf.ServerCertContent;
+    pem_key_cert_pair.private_key = listen_conf.ServerKeyContent;
 
     grpc::SslServerCredentialsOptions ssl_opts;
-    ssl_opts.pem_root_certs = listen_conf.CertContent;
+    // pem_root_certs is actually the certificate of server side rather than
+    // CA certificate. CA certificate is not needed.
+    // Since we use the same cert/key pair for both cranectld/craned,
+    // pem_root_certs is set to the same certificate.
+    ssl_opts.pem_root_certs = listen_conf.ServerCertContent;
     ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
-    ssl_opts.force_client_auth = true;
     ssl_opts.client_certificate_request =
         GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
 
