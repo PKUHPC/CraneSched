@@ -196,16 +196,16 @@ message CranedInfo {
   uint32 running_task_num = 10;
 }
 
-message PartitionCranedInfo {
-  message CranedListRegexOfState {
+message TrimmedPartitionInfo {
+  message TrimmedCranedInfo {
     CranedState state = 1;
-    uint32 craned_num = 2;
+    uint32 count = 2;
     string craned_list_regex = 3;
   }
 
   string name = 1;
   PartitionState state = 2;
-  repeated CranedListRegexOfState common_craned_state_list = 3;
+  repeated TrimmedCranedInfo craned_lists = 3;
 }
 
 enum EntityType {
