@@ -1,21 +1,16 @@
 #pragma once
 
+#include "CtldPublicDefs.h"
+// Precompiled header comes first!
+
 #include <spdlog/fmt/fmt.h>
 
-#include <algorithm>
 #include <bsoncxx/builder/stream/document.hpp>
 #include <bsoncxx/json.hpp>
-#include <list>
-#include <memory>
 #include <mongocxx/client.hpp>
 #include <mongocxx/cursor.hpp>
 #include <mongocxx/instance.hpp>
 #include <mongocxx/pool.hpp>
-#include <source_location>
-#include <string>
-
-#include "CtldPublicDefs.h"
-#include "crane/PublicHeader.h"
 
 namespace Ctld {
 

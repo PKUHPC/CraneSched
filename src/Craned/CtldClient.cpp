@@ -1,7 +1,5 @@
 #include "CtldClient.h"
 
-#include <boost/uuid/uuid_io.hpp>
-
 namespace Craned {
 
 CtldClient::~CtldClient() {

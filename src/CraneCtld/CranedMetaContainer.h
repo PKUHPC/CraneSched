@@ -1,11 +1,8 @@
 #pragma once
 
-#include <absl/container/flat_hash_map.h>
-
-#include <range/v3/all.hpp>
-#include <unordered_map>
-
 #include "CtldPublicDefs.h"
+// Precompiled header comes first!
+
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
 

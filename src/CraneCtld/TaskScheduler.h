@@ -1,22 +1,13 @@
 #pragma once
 
-#include <absl/container/flat_hash_map.h>
-#include <absl/container/flat_hash_set.h>
+#include "CtldPublicDefs.h"
+// Precompiled header comes first!
+
 #include <event2/event.h>
 
-#include <atomic>
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <memory>
-#include <optional>
-#include <thread>
-#include <tuple>
-
 #include "CranedMetaContainer.h"
-#include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "crane/Lock.h"
-#include "crane/PublicHeader.h"
 #include "protos/Crane.pb.h"
 
 namespace Ctld {

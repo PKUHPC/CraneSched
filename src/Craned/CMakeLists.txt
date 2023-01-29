@@ -9,7 +9,10 @@ add_executable(craned
         CranedServer.cpp
         CranedPublicDefs.h
         Craned.cpp
-        )
+
+        CranedPreCompiledHeader.h)
+
+target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
 
 target_link_libraries(craned
         spdlog::spdlog

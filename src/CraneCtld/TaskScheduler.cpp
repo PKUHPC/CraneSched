@@ -2,14 +2,9 @@
 
 #include <google/protobuf/util/time_util.h>
 
-#include <algorithm>
-#include <map>
-#include <range/v3/all.hpp>
-
 #include "CranedKeeper.h"
 #include "CtldGrpcServer.h"
 #include "EmbeddedDbClient.h"
-#include "crane/String.h"
 
 namespace Ctld {
 
@@ -677,13 +672,13 @@ void TaskScheduler::QueryTasksInRam(
         util::HostNameListToStr(task.PersistedPart().nodes()));
   };
 
-  auto pending_rng = m_pending_task_map_ | ranges::view::all;
-  auto running_rng = m_running_task_map_ | ranges::view::all;
-  auto pd_r_rng = ranges::view::concat(pending_rng, running_rng);
+  auto pending_rng = m_pending_task_map_ | ranges::views::all;
+  auto running_rng = m_running_task_map_ | ranges::views::all;
+  auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
 
   if (!request->partition().empty() || request->task_id() != -1) {
     auto pd_r_filtered_rng =
-        pd_r_rng | ranges::view::filter([&](auto& it) -> bool {
+        pd_r_rng | ranges::views::filter([&](auto& it) -> bool {
           std::unique_ptr<TaskInCtld>& task = it.second;
           bool res = true;
           if (!request->partition().empty()) {

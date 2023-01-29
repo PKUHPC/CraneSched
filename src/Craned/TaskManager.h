@@ -1,30 +1,16 @@
 #pragma once
 
-#include <absl/container/flat_hash_map.h>
-#include <absl/container/flat_hash_set.h>
-#include <concurrentqueue/concurrentqueue.h>
+#include "CranedPublicDefs.h"
+// Precompiled header comes first.
+
 #include <event2/bufferevent.h>
 #include <event2/event.h>
 #include <event2/util.h>
 #include <evrpc.h>
 #include <grp.h>
-#include <grpc++/grpc++.h>
 #include <sys/eventfd.h>
 #include <sys/wait.h>
 
-#include <any>
-#include <atomic>
-#include <boost/algorithm/string.hpp>
-#include <csignal>
-#include <forward_list>
-#include <functional>
-#include <future>
-#include <optional>
-#include <string>
-#include <thread>
-#include <unordered_map>
-
-#include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"

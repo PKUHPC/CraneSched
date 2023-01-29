@@ -1,5 +1,8 @@
 #pragma once
 
+#include "CranedPublicDefs.h"
+// Precompiled header comes first.
+
 #include "cgroup.linux.h"
 #include "crane/PublicHeader.h"
 

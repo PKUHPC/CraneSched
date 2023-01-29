@@ -1,9 +1,8 @@
 #pragma once
 
-#include <string>
-#include <unordered_map>
-
 #include "CtldPublicDefs.h"
+// Precompiled header comes first!
+
 #include "DbClient.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"

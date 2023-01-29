@@ -14,7 +14,11 @@ add_executable(cranectld
         AccountManager.cpp
         EmbeddedDbClient.cpp
         EmbeddedDbClient.h
-        CraneCtld.cpp)
+        CraneCtld.cpp
+
+        CtldPreCompiledHeader.h)
+
+target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 
 target_link_libraries(cranectld
         spdlog::spdlog

@@ -1,17 +1,8 @@
 #pragma once
 
-#include <absl/base/thread_annotations.h>
-#include <absl/synchronization/mutex.h>
-#include <grpc++/grpc++.h>
-
-#include <atomic>
-#include <boost/uuid/uuid.hpp>
-#include <chrono>
-#include <memory>
-#include <queue>
-#include <thread>
-
 #include "CranedPublicDefs.h"
+// Precompiled header comes first.
+
 #include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"

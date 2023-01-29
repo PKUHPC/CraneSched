@@ -1,25 +1,9 @@
 #pragma once
 
-#include <absl/container/node_hash_map.h>
-#include <grpc++/grpc++.h>
-
-#include <boost/algorithm/string.hpp>
-#include <boost/thread/shared_mutex.hpp>
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/uuid_io.hpp>
-#include <condition_variable>
-#include <mutex>
-#include <thread>
-#include <vector>
-
-#if Boost_MINOR_VERSION >= 71
-#  include <boost/uuid/uuid_hash.hpp>
-#endif
-
 #include "CtldPublicDefs.h"
+// Precompiled header comes first!
+
 #include "crane/Lock.h"
-#include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 
