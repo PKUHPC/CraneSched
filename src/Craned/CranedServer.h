@@ -1,25 +1,12 @@
 #pragma once
 
+#include "CranedPublicDefs.h"
+// Precompiled header comes first.
+
 #include <google/protobuf/util/time_util.h>
-#include <grpc++/grpc++.h>
-
-#include <atomic>
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_io.hpp>
-#include <list>
-#include <memory>
-#include <mutex>
-#include <optional>
-#include <thread>
-#include <unordered_map>
-
-#include "crane/Lock.h"
-
-#if Boost_MINOR_VERSION >= 69
-#  include <boost/uuid/uuid_hash.hpp>
-#endif
 
 #include "TaskManager.h"
+#include "crane/Lock.h"
 #include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"

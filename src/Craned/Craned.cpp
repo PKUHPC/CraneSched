@@ -1,25 +1,20 @@
-#include <absl/strings/str_split.h>
+#include "CranedPublicDefs.h"
+// Precompiled header comes first.
+
 #include <event2/thread.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
 #include <boost/filesystem/string_file.hpp>
-#include <cerrno>
 #include <cxxopts.hpp>
-#include <filesystem>
-#include <regex>
 
-#include "CranedPublicDefs.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "crane/FdFunctions.h"
 #include "crane/Network.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
-
-// Include the header which defines the static log level
-#include "crane/Logger.h"
 
 // Must be after crane/Logger.h which defines the static log level
 #include <spdlog/async.h>

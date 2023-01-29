@@ -1,12 +1,11 @@
 #pragma once
 
+#include "CranedPreCompiledHeader.h"
+// Precompiled header comes first
+
 #include <pwd.h>
 
-#include <BS_thread_pool.hpp>
-#include <optional>
-
 #include "cgroup.linux.h"
-#include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 
 namespace Craned {
