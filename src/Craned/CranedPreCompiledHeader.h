@@ -4,7 +4,6 @@
 #include <any>
 #include <array>
 #include <atomic>
-#include <boost/uuid/uuid.hpp>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
