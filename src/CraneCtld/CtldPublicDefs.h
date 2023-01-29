@@ -1,24 +1,7 @@
 #pragma once
 
-#include <absl/container/btree_map.h>
-#include <absl/container/flat_hash_map.h>
-#include <absl/container/flat_hash_set.h>
-#include <absl/time/time.h>  // NOLINT(modernize-deprecated-headers)
-
-#include <boost/container_hash/hash.hpp>
-#include <boost/uuid/uuid.hpp>
-#include <chrono>
-#include <string>
-#include <unordered_map>
-#include <variant>
-
-#include "crane/Logger.h"
-#include "crane/PublicHeader.h"
-#include "crane/String.h"
-
-#if Boost_MINOR_VERSION >= 71
-#  include <boost/uuid/uuid_hash.hpp>
-#endif
+#include "CtldPreCompiledHeader.h"
+// Precompiled header come first!
 
 namespace Ctld {
 

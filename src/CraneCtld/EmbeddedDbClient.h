@@ -1,15 +1,10 @@
 #pragma once
 
-#include <absl/synchronization/mutex.h>
+#include "CtldPublicDefs.h"
+// Precompiled header comes first!
+
 #include <unqlite.h>
 
-#include <concepts>
-#include <string>
-#include <thread>
-#include <unordered_map>
-
-#include "CtldPublicDefs.h"
-#include "crane/PublicHeader.h"
 #include "protos/Crane.pb.h"
 
 namespace Ctld {

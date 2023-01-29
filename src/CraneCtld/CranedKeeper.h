@@ -1,21 +1,15 @@
 #pragma once
 
-#include <absl/synchronization/blocking_counter.h>
+#include "CtldPublicDefs.h"
+// Precompiled header comes first!
+
 #include <grpc++/alarm.h>
 #include <grpc++/completion_queue.h>
-#include <grpc++/grpc++.h>
 
 #include <boost/dynamic_bitset.hpp>
 #include <boost/pool/object_pool.hpp>
-#include <boost/uuid/uuid.hpp>
-#include <functional>
-#include <future>
-#include <memory>
-#include <thread>
 
-#include "CtldPublicDefs.h"
 #include "crane/Lock.h"
-#include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 

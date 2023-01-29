@@ -1,16 +1,13 @@
-#include <absl/strings/ascii.h>
+#include "CtldPreCompiledHeader.h"
+// Precompiled header comes first!
+
 #include <event2/thread.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
 #include <boost/filesystem/string_file.hpp>
-#include <cerrno>
 #include <cxxopts.hpp>
-#include <filesystem>
-#include <memory>
-#include <mutex>
-#include <unordered_set>
 
 #include "AccountManager.h"
 #include "CranedKeeper.h"
@@ -19,11 +16,6 @@
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
-#include "crane/PublicHeader.h"
-#include "crane/String.h"
-
-// Include the header which defines the static log level
-#include "crane/Logger.h"
 
 // Must be after crane/Logger.h which defines the static log level
 #include <spdlog/async.h>

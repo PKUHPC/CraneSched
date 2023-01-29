@@ -1,10 +1,7 @@
 #include "DbClient.h"
 
-#include <absl/strings/str_join.h>
-
 #include <bsoncxx/exception/exception.hpp>
 #include <mongocxx/exception/exception.hpp>
-#include <utility>
 
 namespace Ctld {
 

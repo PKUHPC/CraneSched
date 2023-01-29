@@ -1,7 +1,5 @@
 #include "CranedMetaContainer.h"
 
-#include "crane/String.h"
-
 namespace Ctld {
 
 void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
