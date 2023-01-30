@@ -139,13 +139,6 @@ set(ZLIB_USE_STATIC_LIBS OFF)
 # EXCLUDE_FROM_ALL excludes all dependencies from being installed
 add_subdirectory(dependencies/cmake EXCLUDE_FROM_ALL)
 
-find_package(mongocxx REQUIRED CONFIG)
-
-# Link libevent as a static lib
-set(LIBEVENT_STATIC_LINK ON)
-list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/libevent")
-find_package(Libevent REQUIRED)
-
 # Notify CMake that we have module files to find packages/libs.
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
 

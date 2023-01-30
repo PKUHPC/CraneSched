@@ -4,6 +4,8 @@
 #include <spdlog/fmt/fmt.h>
 
 #include <boost/algorithm/string.hpp>
+#include <filesystem>
+#include <fstream>
 #include <list>
 #include <queue>
 #include <ranges>
@@ -14,6 +16,8 @@
 #include "crane/PublicHeader.h"
 
 namespace util {
+
+std::string ReadFileIntoString(std::filesystem::path const &p);
 
 std::string ReadableMemory(uint64_t memory_bytes);
 

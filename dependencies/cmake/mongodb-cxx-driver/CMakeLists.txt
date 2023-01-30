@@ -16,7 +16,7 @@ FetchContent_Declare(mongo_c_driver_repo
         URL_HASH SHA256=2b91d6a9c1a80ec82c5643676e44f1a9edf3849c7f25d490e1b5587eb408ad93
         INACTIVITY_TIMEOUT 5
 
-        PATCH_COMMAND patch -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/mongo-c-driver.diff
+        PATCH_COMMAND patch --forward -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/mongo-c-driver.diff || true
         )
 FetchContent_MakeAvailable(mongo_c_driver_repo)
 
@@ -31,7 +31,7 @@ FetchContent_Declare(mongocxx
         URL_HASH SHA256=fb2da11178db728f63147fe4b0c7509eb49b1b02c5cb55f9bee5f927e451a0c7
         INACTIVITY_TIMEOUT 5
 
-        PATCH_COMMAND patch -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/mongo-cxx-driver.diff
+        PATCH_COMMAND patch --forward -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/mongo-cxx-driver.diff || true
         )
 FetchContent_MakeAvailable(mongocxx)
 

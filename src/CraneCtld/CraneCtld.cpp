@@ -6,7 +6,6 @@
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
-#include <boost/filesystem/string_file.hpp>
 #include <cxxopts.hpp>
 
 #include "AccountManager.h"
@@ -51,9 +50,8 @@ void ParseConfig(int argc, char** argv) {
               config["ServerCertFilePath"].as<std::string>();
 
           try {
-            boost::filesystem::load_string_file(
-                g_config.ListenConf.ServerCertFilePath,
-                g_config.ListenConf.ServerCertContent);
+            g_config.ListenConf.ServerCertContent = util::ReadFileIntoString(
+                g_config.ListenConf.ServerCertFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
@@ -73,9 +71,8 @@ void ParseConfig(int argc, char** argv) {
               config["ServerKeyFilePath"].as<std::string>();
 
           try {
-            boost::filesystem::load_string_file(
-                g_config.ListenConf.ServerKeyFilePath,
-                g_config.ListenConf.ServerKeyContent);
+            g_config.ListenConf.ServerKeyContent =
+                util::ReadFileIntoString(g_config.ListenConf.ServerKeyFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);

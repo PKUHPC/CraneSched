@@ -16,8 +16,8 @@ add_executable(misc_libevent_example_test libevent_example_test.cpp)
 target_link_libraries(misc_libevent_example_test
         GTest::gtest GTest::gtest_main
         Utility_AnonymousPipe
-        libevent::core
-        libevent::pthreads
+        event_core
+        event_pthreads
         Threads::Threads
         spdlog::spdlog
         )
