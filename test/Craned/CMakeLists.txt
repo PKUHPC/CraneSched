@@ -8,8 +8,8 @@ target_link_libraries(craned_test
         GTest::gtest_main
         concurrentqueue
         spdlog::spdlog
-        libevent::core
-        libevent::pthreads
+        event_core
+        event_pthreads
         cxxopts
         bs_thread_pool
 

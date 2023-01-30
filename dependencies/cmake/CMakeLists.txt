@@ -4,7 +4,6 @@ set(FETCHCONTENT_QUIET OFF)
 add_compile_options(-w)
 
 add_subdirectory(BSThreadPool)
-add_subdirectory(mariadb-connector-c)
 add_subdirectory(nlohmann_json)
 add_subdirectory(yaml-cpp)
 add_subdirectory(fmt)
@@ -17,6 +16,8 @@ add_subdirectory(libuv)
 add_subdirectory(unqlite)
 add_subdirectory(mongodb-cxx-driver)
 add_subdirectory(ranges-v3)
+
+#add_subdirectory(mariadb-connector-c)
 
 include(${CMAKE_SOURCE_DIR}/CMakeModule/SuppressHeaderWarning.cmake)
 suppress_header_warning()

@@ -5,8 +5,8 @@ target_link_libraries(utility_test
         concurrentqueue
 		Boost::boost
 		Threads::Threads
-        libevent::core
-        cxxopts
+		event_core
+		cxxopts
         absl::synchronization
 
         Utility_cgroup

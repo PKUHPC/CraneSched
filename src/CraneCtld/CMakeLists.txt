@@ -28,10 +28,9 @@ target_link_libraries(cranectld
         Utility_PublicHeader
 
         Boost::boost
-        Boost::thread
 
-        libevent::core
-        libevent::pthreads
+        event_core
+        event_pthreads
 
         cxxopts
         Threads::Threads
