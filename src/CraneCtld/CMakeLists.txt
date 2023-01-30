@@ -29,7 +29,6 @@ target_link_libraries(cranectld
 
         Boost::boost
         Boost::thread
-        Boost::filesystem
 
         libevent::core
         libevent::pthreads

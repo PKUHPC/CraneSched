@@ -5,9 +5,16 @@
 #include <queue>
 
 #include "crane/Logger.h"
-#include "crane/PublicHeader.h"
 
 namespace util {
+
+std::string ReadFileIntoString(std::filesystem::path const &p) {
+  std::ifstream file(p, std::ios::in | std::ios::binary);
+  size_t sz = std::filesystem::file_size(p);
+  std::string str(sz, '\0');
+  file.read(&str[0], sz);
+  return str;
+}
 
 std::string ReadableMemory(uint64_t memory_bytes) {
   if (memory_bytes < 1024)

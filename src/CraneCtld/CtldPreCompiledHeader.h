@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <csignal>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <future>
 #include <list>
@@ -16,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <queue>
 #include <source_location>
 #include <string>
 #include <thread>
