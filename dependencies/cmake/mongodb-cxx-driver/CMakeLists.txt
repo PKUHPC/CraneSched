@@ -30,6 +30,8 @@ FetchContent_Declare(mongocxx
         URL https://github.com/mongodb/mongo-cxx-driver/releases/download/r3.7.0/mongo-cxx-driver-r3.7.0.tar.gz
         URL_HASH SHA256=fb2da11178db728f63147fe4b0c7509eb49b1b02c5cb55f9bee5f927e451a0c7
         INACTIVITY_TIMEOUT 5
+
+        PATCH_COMMAND patch -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/mongo-cxx-driver.diff
         )
 FetchContent_MakeAvailable(mongocxx)
 
