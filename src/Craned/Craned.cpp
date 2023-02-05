@@ -331,7 +331,7 @@ void ParseConfig(int argc, char** argv) {
   uint32_t part_id, node_index;
   std::string part_name;
   for (const auto& par : g_config.Partitions) {
-    if (par.second.nodes.find(g_config.Hostname) != par.second.nodes.end()) {
+    if (par.second.nodes.contains(g_config.Hostname)) {
       part_name = par.first;
       CRANE_INFO("Found this machine {} in partition {}", g_config.Hostname,
                  par.first);
