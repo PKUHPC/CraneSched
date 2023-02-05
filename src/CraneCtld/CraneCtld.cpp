@@ -22,7 +22,23 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 void ParseConfig(int argc, char** argv) {
-  if (std::filesystem::exists(kDefaultConfigPath)) {
+  cxxopts::Options options("cranectld");
+
+  // clang-format off
+  options.add_options()
+      ("C,config", "Path to configuration file",
+      cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
+      ("l,listen", "listening address",
+      cxxopts::value<std::string>()->default_value("0.0.0.0"))
+      ("p,port", "listening port",
+      cxxopts::value<std::string>()->default_value(kCtldDefaultPort))
+      ;
+  // clang-format on
+
+  auto parsed_args = options.parse(argc, argv);
+
+  std::string config_path = parsed_args["config"].as<std::string>();
+  if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(kDefaultConfigPath);
 
@@ -215,10 +231,14 @@ void ParseConfig(int argc, char** argv) {
           for (auto&& node : name_list) {
             auto node_it = g_config.Nodes.find(node);
             if (node_it != g_config.Nodes.end()) {
-              node_it->second->partition_name = name;
               part.nodes.emplace(node_it->first);
               CRANE_TRACE("Set the partition of node {} to {}", node_it->first,
                           name);
+            } else {
+              CRANE_ERROR(
+                  "Unknown node '{}' found in partition '{}'. It is ignored "
+                  "and should be contained in the configuration file.",
+                  node, name);
             }
           }
 
@@ -250,26 +270,19 @@ void ParseConfig(int argc, char** argv) {
       }
 
     } catch (YAML::BadFile& e) {
-      CRANE_ERROR("Can't open config file {}: {}", kDefaultConfigPath,
-                  e.what());
+      CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
+                     e.what());
       std::exit(1);
     }
   } else {
-    cxxopts::Options options("craned");
-
-    // clang-format off
-    options.add_options()
-        ("l,listen", "listening address",
-         cxxopts::value<std::string>()->default_value("0.0.0.0"))
-        ("p,port", "listening port",
-         cxxopts::value<std::string>()->default_value(kCtldDefaultPort))
-        ;
-    // clang-format on
-
-    auto parsed_args = options.parse(argc, argv);
-
+    CRANE_CRITICAL("Config file '{}' not existed", config_path);
+    std::exit(1);
+  }
+  if (parsed_args.count("listen")) {
     g_config.ListenConf.CraneCtldListenAddr =
         parsed_args["listen"].as<std::string>();
+  }
+  if (parsed_args.count("port")) {
     g_config.ListenConf.CraneCtldListenPort =
         parsed_args["port"].as<std::string>();
   }
