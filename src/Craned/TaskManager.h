@@ -12,6 +12,7 @@
 #include <sys/wait.h>
 
 #include "CtldClient.h"
+#include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"

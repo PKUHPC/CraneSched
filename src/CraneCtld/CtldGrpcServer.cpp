@@ -7,7 +7,7 @@
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
-#include "crane/Network.h"
+#include "crane/PasswordEntry.h"
 #include "crane/String.h"
 
 namespace Ctld {
@@ -52,9 +52,18 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
-  if (task->uid) {
+  // If not root user, check if the user has sufficient permission.
+  if (task->uid != 0) {
+    PasswordEntry entry(task->uid);
+    if (!entry.Valid()) {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Uid {} not found on the controller node", task->uid));
+      return grpc::Status::OK;
+    }
+
     if (!g_account_manager->CheckUserPermissionToPartition(
-            getpwuid(task->uid)->pw_name, task->partition_name)) {
+            entry.Username(), task->partition_name)) {
       response->set_ok(false);
       response->set_reason(fmt::format(
           "The user:{} don't have access to submit task in partition:{}",
@@ -63,7 +72,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     }
 
     AccountManager::Result check_qos_result =
-        g_account_manager->CheckQosLimit(getpwuid(task->uid)->pw_name, task);
+        g_account_manager->CheckAndApplyQosLimitOnTask(entry.Username(),
+                                                       task.get());
     if (!check_qos_result.ok) {
       response->set_ok(false);
       response->set_reason(check_qos_result.reason);

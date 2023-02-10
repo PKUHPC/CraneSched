@@ -862,11 +862,11 @@ bool AccountManager::CheckUserPermissionToPartition(
   return false;
 }
 
-AccountManager::Result AccountManager::CheckQosLimit(
-    const std::string& name, std::unique_ptr<TaskInCtld>& task) {
-  UserMutexSharedPtr user_share_ptr = GetExistedUserInfo(name);
+AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
+    const std::string& user, TaskInCtld* task) {
+  UserMutexSharedPtr user_share_ptr = GetExistedUserInfo(user);
   if (!user_share_ptr) {
-    return Result{false, fmt::format("Unknown user '{}'", name)};
+    return Result{false, fmt::format("Unknown user '{}'", user)};
   }
 
   AccountMutexSharedPtr account_share_ptr =
