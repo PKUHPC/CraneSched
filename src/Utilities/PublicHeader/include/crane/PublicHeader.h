@@ -31,6 +31,7 @@ enum class CraneErr : uint16_t {
   __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
 };
 
+inline const uint8_t kDefaultQueryTaskNumLimit = 100;
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kDefaultConfigPath = "/etc/crane/config.yaml";

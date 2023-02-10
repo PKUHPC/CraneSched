@@ -79,6 +79,9 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
       response->set_reason(check_qos_result.reason);
       return grpc::Status::OK;
     }
+    task->SetAccount(
+        g_account_manager->GetExistedUserInfo(getpwuid(task->uid)->pw_name)
+            ->account);
   }
 
   uint32_t task_id;
@@ -193,7 +196,17 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     crane::grpc::QueryTasksInfoReply *response) {
   g_task_scheduler->QueryTasksInRam(request, response);
 
+  int num_limit = request->num_limit() <= 0 ? kDefaultQueryTaskNumLimit
+                                            : request->num_limit();
   auto *task_list = response->mutable_task_info_list();
+  std::sort(task_list->begin(), task_list->end(),
+            [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
+              return a.end_time() > b.end_time();
+            });
+  if (task_list->size() >= num_limit) {
+    task_list->DeleteSubrange(num_limit, task_list->size() - num_limit);
+    return grpc::Status::OK;
+  }
 
   bool ok;
 
@@ -225,12 +238,16 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_cmd_line(task.task_to_ctld().cmd_line());
     task_it->set_cwd(task.task_to_ctld().cwd());
 
+    task_it->set_alloc_cpus(task.task_to_ctld().cpus_per_task());
+    task_it->set_exit_code("0:0");
+
     task_it->set_status(task.persisted_part().status());
     task_it->set_craned_list(
         util::HostNameListToStr(task.persisted_part().nodes()));
   };
 
-  auto ended_rng = ended_list | ranges::views::all;
+  auto ended_rng = ended_list | ranges::views::reverse |
+                   ranges::views::take(num_limit - task_list->size());
   if (!request->partition().empty() || request->task_id() != -1) {
     auto partition_filtered_rng =
         ended_rng |
@@ -249,12 +266,17 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     ranges::for_each(ended_rng, ended_append_fn);
   }
 
+  if (task_list->size() >= num_limit) {
+    return grpc::Status::OK;
+  }
+
   std::list<TaskInCtld> db_ended_list;
-  ok = g_db_client->FetchAllJobRecords(&db_ended_list);
+  ok = g_db_client->FetchConsecutiveJobRecords(
+      &db_ended_list, num_limit - task_list->size(), true);
   if (!ok) {
     CRANE_ERROR(
         "Failed to call "
-        "g_db_client->FetchAllJobRecords");
+        "g_db_client->FetchConsecutiveJobRecords");
     return grpc::Status::OK;
   }
 
@@ -276,6 +298,9 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_node_num(task.node_num);
     task_it->set_cmd_line(task.cmd_line);
     task_it->set_cwd(task.cwd);
+
+    task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
+    task_it->set_exit_code("0:0");
 
     task_it->set_status(task.Status());
     task_it->set_craned_list(task.allocated_craneds_regex);

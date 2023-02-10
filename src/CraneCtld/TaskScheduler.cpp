@@ -667,6 +667,9 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_cmd_line(task.TaskToCtld().cmd_line());
     task_it->set_cwd(task.TaskToCtld().cwd());
 
+    task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
+    task_it->set_exit_code("0:0");
+
     task_it->set_status(task.PersistedPart().status());
     task_it->set_craned_list(
         util::HostNameListToStr(task.PersistedPart().nodes()));

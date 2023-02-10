@@ -75,9 +75,21 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
   return false;
 }
 
-bool MongodbClient::FetchAllJobRecords(std::list<Ctld::TaskInCtld>* task_list) {
+bool MongodbClient::FetchConsecutiveJobRecords(
+    std::list<Ctld::TaskInCtld>* task_list, int limit, bool rend) {
+  mongocxx::options::find option;
+  if (limit > 0) {
+    option = option.limit(limit);
+  }
+
+  document doc;
+  if (rend) {
+    doc.append(kvp("task_db_id", -1));
+    option = option.sort(doc.view());
+  }
+
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_task_collection_name_].find({});
+      (*GetClient_())[m_db_name_][m_task_collection_name_].find({}, option);
 
   // 0  task_id       task_db_id     mod_time       deleted       account
   // 5  cpus_req      mem_req        task_name      env           id_user
@@ -94,6 +106,7 @@ bool MongodbClient::FetchAllJobRecords(std::list<Ctld::TaskInCtld>* task_list) {
     task.nodes_alloc = view["nodes_alloc"].get_int32().value;
     task.node_num = 0;
 
+    task.SetAccount(view["account"].get_string().value.data());
     task.resources.allocatable_resource.cpu_count =
         view["cpus_req"].get_double().value;
     task.resources.allocatable_resource.memory_bytes =
