@@ -340,6 +340,11 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   user.name = user_info->name();
   user.uid = user_info->uid();
   user.account = user_info->account();
+  for (const auto &apq : user_info->allowed_partition_qos_list()) {
+    user.allowed_partition_qos_map[apq.partition_name()] =
+        std::pair<std::string, std::list<std::string>>{
+            std::string{}, std::list<std::string>{}};
+  }
   user.admin_level = User::AdminLevel(user_info->admin_level());
 
   AccountManager::Result result = g_account_manager->AddUser(std::move(user));
