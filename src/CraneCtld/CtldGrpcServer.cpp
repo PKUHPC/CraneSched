@@ -375,6 +375,9 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   qos.description = qos_info->description();
   qos.priority = qos_info->priority();
   qos.max_jobs_per_user = qos_info->max_jobs_per_user();
+  qos.max_cpus_per_user = qos_info->max_cpus_per_user();
+  qos.max_time_limit_per_task =
+      absl::Seconds(qos_info->max_time_limit_per_task());
 
   AccountManager::Result result = g_account_manager->AddQos(qos);
   if (result.ok) {
@@ -584,6 +587,9 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
             qos_info->set_description(qos->description);
             qos_info->set_priority(qos->priority);
             qos_info->set_max_jobs_per_user(qos->max_jobs_per_user);
+            qos_info->set_max_cpus_per_user(qos->max_cpus_per_user);
+            qos_info->set_max_time_limit_per_task(
+                absl::ToInt64Seconds(qos->max_time_limit_per_task));
           }
         }
         response->set_ok(true);
@@ -596,6 +602,9 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           qos_info->set_description(qos_shared_ptr->description);
           qos_info->set_priority(qos_shared_ptr->priority);
           qos_info->set_max_jobs_per_user(qos_shared_ptr->max_jobs_per_user);
+          qos_info->set_max_cpus_per_user(qos_shared_ptr->max_cpus_per_user);
+          qos_info->set_max_time_limit_per_task(
+              absl::ToInt64Seconds(qos_shared_ptr->max_time_limit_per_task));
           response->set_ok(true);
         } else {
           response->set_ok(false);

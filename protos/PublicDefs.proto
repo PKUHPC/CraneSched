@@ -249,4 +249,6 @@ message QosInfo {
   string description = 2;
   uint32 priority = 3;
   uint32 max_jobs_per_user = 4;
+  uint32 max_cpus_per_user = 5;
+  uint64 max_time_limit_per_task = 6;
 }

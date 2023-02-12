@@ -575,6 +575,9 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->description = qos_view["description"].get_string().value;
     qos->priority = qos_view["priority"].get_int32().value;
     qos->max_jobs_per_user = qos_view["max_jobs_per_user"].get_int32().value;
+    qos->max_cpus_per_user = qos_view["max_cpus_per_user"].get_int32().value;
+    qos->max_time_limit_per_task =
+        absl::Seconds(qos_view["max_time_limit_per_task"].get_int64().value);
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
   }
@@ -582,10 +585,21 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 5> fields{"deleted", "name", "description",
-                                    "priority", "max_jobs_per_user"};
-  std::tuple<bool, std::string, std::string, int, int> values{
-      false, qos.name, qos.description, qos.priority, qos.max_jobs_per_user};
+  std::array<std::string, 7> fields{"deleted",
+                                    "name",
+                                    "description",
+                                    "priority",
+                                    "max_jobs_per_user",
+                                    "max_cpus_per_user",
+                                    "max_time_limit_per_task"};
+  std::tuple<bool, std::string, std::string, int, int, int, int64_t> values{
+      false,
+      qos.name,
+      qos.description,
+      qos.priority,
+      qos.max_jobs_per_user,
+      qos.max_cpus_per_user,
+      absl::ToInt64Seconds(qos.max_time_limit_per_task)};
 
   return DocumentConstructor_(fields, values);
 }
