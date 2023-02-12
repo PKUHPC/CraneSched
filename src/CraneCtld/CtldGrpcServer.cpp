@@ -340,11 +340,18 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   user.name = user_info->name();
   user.uid = user_info->uid();
   user.account = user_info->account();
-  for (const auto &apq : user_info->allowed_partition_qos_list()) {
-    user.allowed_partition_qos_map[apq.partition_name()] =
-        std::pair<std::string, std::list<std::string>>{
-            std::string{}, std::list<std::string>{}};
-  }
+
+  // For user adding operation, the front end allows user only to set
+  // 'Allowed Partition'. 'Qos Lists' of the 'Allowed Partitions' can't be
+  // set by user. It's inherited from the parent account.
+  // However, we use UserInfo message defined in gRPC here. The `qos_list` field
+  // for any `allowed_partition_qos_list` is empty as just mentioned. Only
+  // `partition_name` field is set.
+  // Moreover, if `allowed_partition_qos_list` is empty, both allowed partitions
+  // and qos_list for allowed partitions are inherited from the parent.
+  for (const auto &apq : user_info->allowed_partition_qos_list())
+    user.allowed_partition_qos_map[apq.partition_name()];
+
   user.admin_level = User::AdminLevel(user_info->admin_level());
 
   AccountManager::Result result = g_account_manager->AddUser(std::move(user));

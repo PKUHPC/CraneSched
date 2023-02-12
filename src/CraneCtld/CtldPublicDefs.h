@@ -359,7 +359,7 @@ struct Qos {
   uint32_t priority;
   uint32_t max_jobs_per_user;
   uint32_t max_running_tasks_per_user;
-  absl::Duration grace_time;
+  absl::Duration max_time_limit_per_task;
   uint32_t max_cpus_per_user;
   uint32_t max_cpus_per_account;
 };

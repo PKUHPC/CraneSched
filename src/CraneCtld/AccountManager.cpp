@@ -879,9 +879,9 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
   }
   QosMutexSharedPtr qos_share_ptr = GetExistedQosInfo(qos);
 
-  if (ToInt64Seconds(task->time_limit) == 0) {
-    task->time_limit = qos_share_ptr->grace_time;
-  } else if (task->time_limit > qos_share_ptr->grace_time) {
+  if (task->time_limit == absl::ZeroDuration()) {
+    task->time_limit = qos_share_ptr->max_time_limit_per_task;
+  } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task) {
     return Result{false, "QOSTimeLimit"};
   }
 
