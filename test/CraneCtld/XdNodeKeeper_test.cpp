@@ -15,7 +15,6 @@
 
 #include "SharedTestImpl/GlobalDefs.h"
 #include "CranedServer.h"
-#include "crane/BoostInterprocessBarrier.h"
 #include "crane/FdFunctions.h"
 
 using testing::_;

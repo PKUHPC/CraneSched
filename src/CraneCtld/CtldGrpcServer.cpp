@@ -7,7 +7,7 @@
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
-#include "crane/Network.h"
+#include "crane/PasswordEntry.h"
 #include "crane/String.h"
 
 namespace Ctld {
@@ -52,13 +52,31 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
-  if (task->uid) {
+  // If not root user, check if the user has sufficient permission.
+  if (task->uid != 0) {
+    PasswordEntry entry(task->uid);
+    if (!entry.Valid()) {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Uid {} not found on the controller node", task->uid));
+      return grpc::Status::OK;
+    }
+
     if (!g_account_manager->CheckUserPermissionToPartition(
-            getpwuid(task->uid)->pw_name, task->partition_name)) {
+            entry.Username(), task->partition_name)) {
       response->set_ok(false);
       response->set_reason(fmt::format(
           "The user:{} don't have access to submit task in partition:{}",
           task->uid, task->partition_name));
+      return grpc::Status::OK;
+    }
+
+    AccountManager::Result check_qos_result =
+        g_account_manager->CheckAndApplyQosLimitOnTask(entry.Username(),
+                                                       task.get());
+    if (!check_qos_result.ok) {
+      response->set_ok(false);
+      response->set_reason(check_qos_result.reason);
       return grpc::Status::OK;
     }
   }
@@ -322,6 +340,18 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   user.name = user_info->name();
   user.uid = user_info->uid();
   user.account = user_info->account();
+
+  // For user adding operation, the front end allows user only to set
+  // 'Allowed Partition'. 'Qos Lists' of the 'Allowed Partitions' can't be
+  // set by user. It's inherited from the parent account.
+  // However, we use UserInfo message defined in gRPC here. The `qos_list` field
+  // for any `allowed_partition_qos_list` is empty as just mentioned. Only
+  // `partition_name` field is set.
+  // Moreover, if `allowed_partition_qos_list` is empty, both allowed partitions
+  // and qos_list for allowed partitions are inherited from the parent.
+  for (const auto &apq : user_info->allowed_partition_qos_list())
+    user.allowed_partition_qos_map[apq.partition_name()];
+
   user.admin_level = User::AdminLevel(user_info->admin_level());
 
   AccountManager::Result result = g_account_manager->AddUser(std::move(user));
@@ -345,6 +375,9 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   qos.description = qos_info->description();
   qos.priority = qos_info->priority();
   qos.max_jobs_per_user = qos_info->max_jobs_per_user();
+  qos.max_cpus_per_user = qos_info->max_cpus_per_user();
+  qos.max_time_limit_per_task =
+      absl::Seconds(qos_info->max_time_limit_per_task());
 
   AccountManager::Result result = g_account_manager->AddQos(qos);
   if (result.ok) {
@@ -554,6 +587,9 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
             qos_info->set_description(qos->description);
             qos_info->set_priority(qos->priority);
             qos_info->set_max_jobs_per_user(qos->max_jobs_per_user);
+            qos_info->set_max_cpus_per_user(qos->max_cpus_per_user);
+            qos_info->set_max_time_limit_per_task(
+                absl::ToInt64Seconds(qos->max_time_limit_per_task));
           }
         }
         response->set_ok(true);
@@ -566,6 +602,9 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           qos_info->set_description(qos_shared_ptr->description);
           qos_info->set_priority(qos_shared_ptr->priority);
           qos_info->set_max_jobs_per_user(qos_shared_ptr->max_jobs_per_user);
+          qos_info->set_max_cpus_per_user(qos_shared_ptr->max_cpus_per_user);
+          qos_info->set_max_time_limit_per_task(
+              absl::ToInt64Seconds(qos_shared_ptr->max_time_limit_per_task));
           response->set_ok(true);
         } else {
           response->set_ok(false);

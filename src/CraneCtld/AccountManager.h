@@ -66,6 +66,8 @@ class AccountManager {
   bool CheckUserPermissionToPartition(const std::string& name,
                                       const std::string& partition);
 
+  Result CheckAndApplyQosLimitOnTask(const std::string& user, TaskInCtld* task);
+
  private:
   void InitDataMap_();
 

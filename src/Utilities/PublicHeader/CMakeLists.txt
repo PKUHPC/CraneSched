@@ -4,11 +4,10 @@ add_library(Utility_PublicHeader
         include/crane/Network.h
         include/crane/FdFunctions.h
         include/crane/PublicHeader.h
-        include/crane/BoostInterprocessBarrier.h
         include/crane/Lock.h
         include/crane/Pointer.h
         include/crane/Logger.h
-        )
+        include/crane/PasswordEntry.h)
 target_include_directories(Utility_PublicHeader PUBLIC include)
 target_link_libraries(Utility_PublicHeader PUBLIC
         Boost::boost # Boost added here for String.cpp
