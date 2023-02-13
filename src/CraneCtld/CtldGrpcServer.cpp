@@ -62,6 +62,19 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
       return grpc::Status::OK;
     }
 
+    {
+      auto user_scoped_ptr =
+          g_account_manager->GetExistedUserInfo(entry.Username());
+      if (!user_scoped_ptr) {
+        response->set_ok(false);
+        response->set_reason(fmt::format(
+            "User '{}' not found in the account database", entry.Username()));
+        return grpc::Status::OK;
+      }
+
+      task->SetAccount(user_scoped_ptr->account);
+    }
+
     if (!g_account_manager->CheckUserPermissionToPartition(
             entry.Username(), task->partition_name)) {
       response->set_ok(false);
@@ -79,9 +92,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
       response->set_reason(check_qos_result.reason);
       return grpc::Status::OK;
     }
-    task->SetAccount(
-        g_account_manager->GetExistedUserInfo(getpwuid(task->uid)->pw_name)
-            ->account);
   }
 
   uint32_t task_id;

@@ -365,7 +365,6 @@ message QueryTasksInfoRequest{
   int32 task_id = 1;
   string partition = 2;
   int32 num_limit = 3;
-  //  string status = 3;
 }
 
 message QueryTasksInfoReply{
