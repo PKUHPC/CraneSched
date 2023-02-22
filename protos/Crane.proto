@@ -130,7 +130,8 @@ message TaskStatusChangeRequest {
   uint32 task_id = 1;
   uint32 craned_index = 2;
   TaskStatus new_status = 3;
-  string reason = 4;
+  int32 exit_code = 4;
+  string reason = 5;
 }
 
 message TaskStatusChangeReply {

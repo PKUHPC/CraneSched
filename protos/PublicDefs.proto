@@ -101,9 +101,10 @@ message PersistedPartOfTaskInCtld {
   repeated uint32 node_indexes = 12;
   repeated string nodes = 13;
   TaskStatus status = 14;
+  int32 exit_code = 15;
 
-  google.protobuf.Timestamp start_time = 15;
-  google.protobuf.Timestamp end_time = 16;
+  google.protobuf.Timestamp start_time = 16;
+  google.protobuf.Timestamp end_time = 17;
 }
 
 message TaskToD {
@@ -166,7 +167,7 @@ message TaskInfo {
   // Dynamic task information
   TaskStatus status = 31;
   string craned_list = 32;
-  double alloc_CPUs = 33;
+  double alloc_cpus = 33;
   string exit_code = 34;
 }
 

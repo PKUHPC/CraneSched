@@ -426,9 +426,10 @@ CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
   return CraneErr::kOk;
 }
 
-void TaskScheduler::TaskStatusChangeNoLock_(
-    uint32_t task_id, uint32_t craned_index,
-    crane::grpc::TaskStatus new_status) {
+void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
+                                            uint32_t craned_index,
+                                            crane::grpc::TaskStatus new_status,
+                                            int exit_code) {
   auto iter = m_running_task_map_.find(task_id);
   if (iter == m_running_task_map_.end()) {
     CRANE_WARN("Ignoring unknown task id {} in TaskStatusChange.", task_id);
@@ -452,6 +453,7 @@ void TaskScheduler::TaskStatusChangeNoLock_(
     task->SetStatus(crane::grpc::Failed);
   }
 
+  task->SetExitCode(exit_code);
   task->SetEndTime(absl::Now());
 
   g_embedded_db_client->UpdatePersistedPartOfTask(task->TaskDbId(),
@@ -1355,7 +1357,7 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
 
     for (task_id_t task_id : task_ids)
       TaskStatusChangeNoLock_(task_id, craned_id.craned_index,
-                              crane::grpc::TaskStatus::Failed);
+                              crane::grpc::TaskStatus::Failed, -1);
   } else {
     CRANE_TRACE("No task is executed by craned {}. Ignore cleaning step...",
                 craned_id);
