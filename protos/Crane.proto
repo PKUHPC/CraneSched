@@ -272,7 +272,8 @@ message QueryPartitionInfoReply {
 }
 
 message AddAccountRequest {
-  AccountInfo account = 1;
+  uint32 uid = 1;
+  AccountInfo account = 2;
 }
 
 message AddAccountReply {
@@ -281,7 +282,8 @@ message AddAccountReply {
 }
 
 message AddUserRequest {
-  UserInfo user = 1;
+  uint32 uid = 1;
+  UserInfo user = 2;
 }
 
 message AddUserReply {
@@ -290,7 +292,8 @@ message AddUserReply {
 }
 
 message AddQosRequest {
-  QosInfo qos = 1;
+  uint32 uid = 1;
+  QosInfo qos = 2;
 }
 
 message AddQosReply {
@@ -299,8 +302,9 @@ message AddQosReply {
 }
 
 message DeleteEntityRequest {
-  EntityType entity_type = 1;
-  string name = 2;
+  uint32 uid = 1;
+  EntityType entity_type = 2;
+  string name = 3;
 }
 
 message DeleteEntityReply {
@@ -309,18 +313,20 @@ message DeleteEntityReply {
 }
 
 message ModifyEntityRequest {
+  uint32 uid = 1;
+
   enum OperatorType {
     Overwrite = 0;
     Add = 1;
     Delete = 2;
   }
 
-  string lhs = 1;   //modify item field
-  string rhs = 2;   //new value
-  string name = 3;
-  string partition = 4;
-  OperatorType type = 5;
-  EntityType entity_type = 6;
+  string lhs = 2;   //modify item field
+  string rhs = 3;   //new value
+  string name = 4;
+  string partition = 5;
+  OperatorType type = 6;
+  EntityType entity_type = 7;
 }
 
 message ModifyEntityReply {
@@ -329,15 +335,17 @@ message ModifyEntityReply {
 }
 
 message QueryEntityInfoRequest {
-  EntityType entity_type = 1;
-  string name = 2;
+  uint32 uid = 1;
+  EntityType entity_type = 2;
+  string name = 3;
 }
 
 message QueryEntityInfoReply {
   bool ok = 1;
-  repeated UserInfo user_list = 2;
-  repeated AccountInfo account_list = 3;
-  repeated QosInfo qos_list = 4;
+  string reason = 2;
+  repeated UserInfo user_list = 3;
+  repeated AccountInfo account_list = 4;
+  repeated QosInfo qos_list = 5;
 }
 
 message MigrateSshProcToCgroupRequest {

@@ -892,6 +892,16 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
   return Result{true};
 }
 
+bool AccountManager::PaternityTest(const std::string& parent,
+                                   const std::string& child) {
+  util::read_lock_guard account_guard(m_rw_account_mutex_);
+  if (parent == child || GetExistedAccountInfoNoLock_(parent) == nullptr ||
+      GetExistedAccountInfoNoLock_(child) == nullptr) {
+    return false;
+  }
+  return PaternityTestNoLock_(parent, child);
+}
+
 void AccountManager::InitDataMap_() {
   std::list<User> user_list;
   g_db_client->SelectAllUser(&user_list);
@@ -1194,6 +1204,17 @@ bool AccountManager::DeleteUserAllowedPartitionFromDB_(
                                name, "allowed_partition_qos_map." + partition,
                                "");
   return true;
+}
+
+bool AccountManager::PaternityTestNoLock_(const std::string& parent,
+                                          const std::string& child) {
+  for (const auto& child_of_account : m_account_map_[parent]->child_accounts) {
+    if (child_of_account == child ||
+        PaternityTestNoLock_(child_of_account, child)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace Ctld
