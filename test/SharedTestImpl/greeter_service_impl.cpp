@@ -2,7 +2,7 @@
 
 #include <thread>
 
-#include "crane/PublicHeader.h"
+#include "crane/Logger.h"
 
 grpc::Status GreeterServiceImpl::SayHello(
     grpc::ServerContext* context, const grpc_example::HelloRequest* request,
