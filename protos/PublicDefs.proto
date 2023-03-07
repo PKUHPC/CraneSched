@@ -205,10 +205,11 @@ message TrimmedPartitionInfo {
     uint32 count = 2;
     string craned_list_regex = 3;
   }
-
   string name = 1;
   PartitionState state = 2;
   repeated TrimmedCranedInfo craned_lists = 3;
+  string abstract_info = 4;
+  string craned_abstract_nodes_regex = 5;
 }
 
 enum EntityType {
