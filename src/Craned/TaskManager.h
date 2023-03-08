@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CranedPublicDefs.h"
+#include "sysexits.h"
 // Precompiled header comes first.
 
 #include <event2/bufferevent.h>
@@ -290,7 +291,7 @@ class TaskManager {
    */
   void EvActivateTaskStatusChange_(uint32_t task_id,
                                    crane::grpc::TaskStatus new_status,
-                                   int exit_code,
+                                   uint32_t exit_code,
                                    std::optional<std::string> reason);
 
   template <typename Duration>

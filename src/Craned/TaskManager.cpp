@@ -310,11 +310,13 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
                 if (instance->cancelled_by_user)
                   this_->EvActivateTaskStatusChange_(
                       task_id, crane::grpc::TaskStatus::Cancelled,
-                      sigchld_info.value, std::nullopt);
+                      sigchld_info.value + kTerminationSignalStart,
+                      std::nullopt);
                 else
                   this_->EvActivateTaskStatusChange_(
                       task_id, crane::grpc::TaskStatus::Failed,
-                      sigchld_info.value, std::nullopt);
+                      sigchld_info.value + kTerminationSignalStart,
+                      std::nullopt);
               } else
                 this_->EvActivateTaskStatusChange_(
                     task_id, crane::grpc::TaskStatus::Finished,
@@ -322,8 +324,15 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
             } else {
               // For a COMPLETING Interactive task with a process running, the
               // end of this process means that this task is done.
-              this_->EvActivateTaskStatusChange_(
-                  task_id, crane::grpc::TaskStatus::Finished, 0, std::nullopt);
+              if (sigchld_info.is_terminated_by_signal) {
+                this_->EvActivateTaskStatusChange_(
+                    task_id, crane::grpc::TaskStatus::Finished,
+                    sigchld_info.value + kTerminationSignalStart, std::nullopt);
+              } else {
+                this_->EvActivateTaskStatusChange_(
+                    task_id, crane::grpc::TaskStatus::Finished,
+                    sigchld_info.value, std::nullopt);
+              }
             }
           }
         }
@@ -709,7 +718,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       CRANE_DEBUG("Failed to look up password entry for uid {} of task #{}",
                   instance->task.uid(), instance->task.task_id());
       this_->EvActivateTaskStatusChange_(
-          instance->task.task_id(), crane::grpc::TaskStatus::Failed, -2,
+          instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+          exPermissionDenied,
           fmt::format("Failed to look up password entry for uid {} of task #{}",
                       instance->task.uid(), instance->task.task_id()));
       return;
@@ -725,7 +735,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
             "Failed to allocate allocatable resource in cgroup for task #{}",
             instance->task.task_id());
         this_->EvActivateTaskStatusChange_(
-            instance->task.task_id(), crane::grpc::TaskStatus::Failed, -3,
+            instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+            exCgroupError,
             fmt::format(
                 "Cannot allocate resources for the instance of task #{}",
                 instance->task.task_id()));
@@ -735,7 +746,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       CRANE_ERROR("Failed to find created cgroup for task #{}",
                   instance->task.task_id());
       this_->EvActivateTaskStatusChange_(
-          instance->task.task_id(), crane::grpc::TaskStatus::Failed, -4,
+          instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+          exCgroupError,
           fmt::format("Failed to find created cgroup for task #{}",
                       instance->task.task_id()));
       return;
@@ -752,7 +764,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         CRANE_ERROR("Cannot write shell script for batch task #{}",
                     instance->task.task_id());
         this_->EvActivateTaskStatusChange_(
-            instance->task.task_id(), crane::grpc::TaskStatus::Failed, -5,
+            instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+            exFileNotFound,
             fmt::format("Cannot write shell script for batch task #{}",
                         instance->task.task_id()));
         return;
@@ -812,7 +825,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
       if (err != CraneErr::kOk) {
         this_->EvActivateTaskStatusChange_(
-            instance->task.task_id(), crane::grpc::TaskStatus::Failed, -6,
+            instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+            exSpawnProcessFail,
             fmt::format(
                 "Cannot spawn a new process inside the instance of task #{}",
                 instance->task.task_id()));
@@ -874,7 +888,7 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
 }
 
 void TaskManager::EvActivateTaskStatusChange_(
-    uint32_t task_id, crane::grpc::TaskStatus new_status, int exit_code,
+    uint32_t task_id, crane::grpc::TaskStatus new_status, uint32_t exit_code,
     std::optional<std::string> reason) {
   TaskStatusChange status_change{task_id, new_status, exit_code};
   if (reason.has_value()) status_change.reason = std::move(reason);
@@ -948,7 +962,8 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
     elem.err_promise.set_value(err);
 
     if (err != CraneErr::kOk)
-      this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Failed, 0,
+      this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Failed,
+                                         exSpawnProcessFail,
                                          std::string(CraneErrStr(err)));
   }
 }
@@ -1017,8 +1032,8 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
         KillProcessInstance_(pr_instance.get(), sig);
     } else if (task_instance->task.type() == crane::grpc::Interactive) {
       // For an Interactive task with no process running, it ends immediately.
-      this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Finished, 0,
-                                         std::nullopt);
+      this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Finished,
+                                         exTerminal, std::nullopt);
     }
   }
 }

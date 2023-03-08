@@ -183,7 +183,7 @@ struct TaskInCtld {
   std::list<uint32_t> node_indexes;
   std::list<std::string> nodes;
   crane::grpc::TaskStatus status;
-  int32_t exit_code;
+  uint32_t exit_code;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -279,11 +279,11 @@ struct TaskInCtld {
   }
   crane::grpc::TaskStatus Status() const { return status; }
 
-  void SetExitCode(int32_t exitCode) {
+  void SetExitCode(uint32_t exitCode) {
     exit_code = exitCode;
     persisted_part.set_exit_code(exitCode);
   }
-  int32_t ExitCode() const { return exit_code; }
+  uint32_t ExitCode() const { return exit_code; }
 
   void SetStartTime(absl::Time const& val) {
     start_time = val;

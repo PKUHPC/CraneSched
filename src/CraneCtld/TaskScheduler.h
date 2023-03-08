@@ -131,7 +131,7 @@ class TaskScheduler {
   CraneErr SubmitTask(std::unique_ptr<TaskInCtld> task, uint32_t* task_id);
 
   void TaskStatusChange(uint32_t task_id, uint32_t craned_index,
-                        crane::grpc::TaskStatus new_status, int exit_code,
+                        crane::grpc::TaskStatus new_status, uint32_t exit_code,
                         std::optional<std::string> reason) {
     // The order of LockGuards matters.
     LockGuard running_guard(&m_running_task_map_mtx_);
@@ -163,7 +163,7 @@ class TaskScheduler {
 
   void TaskStatusChangeNoLock_(uint32_t task_id, uint32_t craned_index,
                                crane::grpc::TaskStatus new_status,
-                               int exit_code);
+                               uint32_t exit_code);
 
   CraneErr TryRequeueRecoveredTaskIntoPendingQueueLock_(
       std::unique_ptr<TaskInCtld> task);

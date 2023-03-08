@@ -250,13 +250,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_cwd(task.task_to_ctld().cwd());
 
     task_it->set_alloc_cpus(task.task_to_ctld().cpus_per_task());
-    if (task.persisted_part().status() == crane::grpc::Finished) {
-      task_it->set_exit_code(
-          fmt::format("{}:0", task.persisted_part().exit_code()));
-    } else {
-      task_it->set_exit_code(
-          fmt::format("0:{}", task.persisted_part().exit_code()));
-    }
+    task_it->set_exit_code(task.persisted_part().exit_code());
 
     task_it->set_status(task.persisted_part().status());
     task_it->set_craned_list(
@@ -317,11 +311,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_cwd(task.cwd);
 
     task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
-    if (task.Status() == crane::grpc::Finished) {
-      task_it->set_exit_code(fmt::format("{}:0", task.ExitCode()));
-    } else {
-      task_it->set_exit_code(fmt::format("0:{}", task.ExitCode()));
-    }
+    task_it->set_exit_code(task.ExitCode());
 
     task_it->set_status(task.Status());
     task_it->set_craned_list(task.allocated_craneds_regex);

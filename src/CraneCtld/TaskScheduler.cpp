@@ -429,7 +429,7 @@ CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
 void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
                                             uint32_t craned_index,
                                             crane::grpc::TaskStatus new_status,
-                                            int exit_code) {
+                                            uint32_t exit_code) {
   auto iter = m_running_task_map_.find(task_id);
   if (iter == m_running_task_map_.end()) {
     CRANE_WARN("Ignoring unknown task id {} in TaskStatusChange.", task_id);
@@ -670,7 +670,7 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_cwd(task.TaskToCtld().cwd());
 
     task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
-    task_it->set_exit_code("0:0");
+    task_it->set_exit_code(0);
 
     task_it->set_status(task.PersistedPart().status());
     task_it->set_craned_list(
@@ -1357,7 +1357,7 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
 
     for (task_id_t task_id : task_ids)
       TaskStatusChangeNoLock_(task_id, craned_id.craned_index,
-                              crane::grpc::TaskStatus::Failed, -1);
+                              crane::grpc::TaskStatus::Failed, exTerminal);
   } else {
     CRANE_TRACE("No task is executed by craned {}. Ignore cleaning step...",
                 craned_id);

@@ -31,6 +31,22 @@ enum class CraneErr : uint16_t {
   __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
 };
 
+inline const size_t kExitStatusNum = 256;
+inline const size_t& kTerminationSignalStart = kExitStatusNum;
+inline const size_t kTerminationSignalNum = 64;
+inline const size_t kSystemExitCodeNum = kExitStatusNum + kTerminationSignalNum;
+inline const size_t& kCraneExitCodeStart = kSystemExitCodeNum;
+
+enum ExitCode : uint16_t {
+  exTerminal = kCraneExitCodeStart,
+  exPermissionDenied,
+  exCgroupError,
+  exFileNotFound,
+  exSpawnProcessFail,
+
+  __Exit_CODE_SIZE  // NOLINT(bugprone-reserved-identifier)
+};
+
 inline const size_t kDefaultQueryTaskNumLimit = 100;
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
