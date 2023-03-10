@@ -24,8 +24,8 @@ std::string ReadableMemory(uint64_t memory_bytes);
 bool ParseHostList(const std::string &host_str,
                    std::list<std::string> *host_list);
 
-std::string RegexReplaceWithIsometricSpaceString(const std::regex &pattern,
-                                                 const std::string &input);
+bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
+                                     int *end);
 
 bool HostNameListToStr_(std::list<std::string> &host_list,
                         std::list<std::string> *res_list);
@@ -38,7 +38,8 @@ std::string HostNameListToStr(T const &host_list)
   while (true) {
     std::list<std::string> res_list;
     if (HostNameListToStr_(source_list, &res_list)) {
-      std::string host_name_str{boost::join(source_list, ",")};
+      res_list.sort();
+      std::string host_name_str{boost::join(res_list, ",")};
       // Remove brackets containing single numbers
       std::regex fix_regex(R"(\[([^-,]*?)\])");
       host_name_str = std::regex_replace(host_name_str, fix_regex, "$1");

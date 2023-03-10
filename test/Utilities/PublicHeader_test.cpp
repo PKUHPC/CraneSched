@@ -26,23 +26,26 @@ TEST(String, HostNameListToStr) {
   clock_t start, end;
   start = clock();
   std::string host_list{
-      "a[30-40,501]s[03-07]c[201-300],a[01-99]s[01-05]c[001-100]"};
+      "a[01-99]s[01-05]c[001-100],a[30-40,501-600]s[03-07]c[201-300]"};
   std::list<std::string> parsed_list;
 
   bool ok = util::ParseHostList(host_list, &parsed_list);
   EXPECT_TRUE(ok);
+  GTEST_LOG_(INFO) << "n: " << parsed_list.size();
 
   end = clock();
   double elapsedTime = static_cast<double>(end - start) / CLOCKS_PER_SEC;
-  printf("ParseHostList time: %f s\n", elapsedTime);
+  GTEST_LOG_(INFO) << "ParseHostList time: " << elapsedTime << "s";
 
-  start = end;
-  std::string res = util::HostNameListToStr(parsed_list);
-  GTEST_LOG_(INFO) << "Parsing result: " << res;
+  if (ok) {
+    start = end;
+    std::string res = util::HostNameListToStr(parsed_list);
 
-  end = clock();
-  elapsedTime = static_cast<double>(end - start) / CLOCKS_PER_SEC;
-  printf("HostNameListToStr TIME: %f s\n", elapsedTime);
+    end = clock();
+    elapsedTime = static_cast<double>(end - start) / CLOCKS_PER_SEC;
+    GTEST_LOG_(INFO) << "HostNameListToStr time: " << elapsedTime << "s";
 
-  EXPECT_EQ(res, host_list);
+    EXPECT_EQ(res, host_list);
+    GTEST_LOG_(INFO) << "Parsing result: " << res;
+  }
 }

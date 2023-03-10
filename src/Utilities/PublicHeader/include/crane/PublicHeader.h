@@ -31,23 +31,7 @@ enum class CraneErr : uint16_t {
   __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
 };
 
-inline const size_t kExitStatusNum = 256;
-inline const size_t& kTerminationSignalStart = kExitStatusNum;
-inline const size_t kTerminationSignalNum = 64;
-inline const size_t kSystemExitCodeNum = kExitStatusNum + kTerminationSignalNum;
-inline const size_t& kCraneExitCodeStart = kSystemExitCodeNum;
-
-enum ExitCode : uint16_t {
-  exTerminal = kCraneExitCodeStart,
-  exPermissionDenied,
-  exCgroupError,
-  exFileNotFound,
-  exSpawnProcessFail,
-
-  __Exit_CODE_SIZE  // NOLINT(bugprone-reserved-identifier)
-};
-
-inline const size_t kDefaultQueryTaskNumLimit = 100;
+inline constexpr size_t kDefaultQueryTaskNumLimit = 100;
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kDefaultConfigPath = "/etc/crane/config.yaml";
@@ -65,6 +49,27 @@ inline const char* kDefaultCranedMutexFile =
     DEFAULT_CRANE_TEMP_DIR "/craned.lock";
 
 #undef DEFAULT_CRANE_TEMP_DIR
+
+namespace ExitCode {
+
+inline constexpr size_t kExitStatusNum = 256;
+inline constexpr size_t kTerminationSignalBase = kExitStatusNum;
+inline constexpr size_t kTerminationSignalNum = 64;
+inline constexpr size_t kSystemExitCodeNum =
+    kExitStatusNum + kTerminationSignalNum;
+inline constexpr size_t kCraneExitCodeBase = kSystemExitCodeNum;
+
+enum ExitCodeEnum : uint16_t {
+  kExitCodeTerminal = kCraneExitCodeBase,
+  kExitCodePermissionDenied,
+  kExitCodeCgroupError,
+  kExitCodeFileNotFound,
+  kExitCodeSpawnProcessFail,
+
+  __MAX_EXIT_CODE  // NOLINT(bugprone-reserved-identifier)
+};
+
+}  // namespace ExitCode
 
 namespace Internal {
 
@@ -120,7 +125,6 @@ inline bool operator==(const CranedId& lhs, const CranedId& rhs) {
   return (lhs.craned_index == rhs.craned_index) &&
          (lhs.partition_id == rhs.partition_id);
 }
-
 
 // Model the allocatable resources on a craned node.
 // It contains CPU and memory by now.

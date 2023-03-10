@@ -279,9 +279,9 @@ struct TaskInCtld {
   }
   crane::grpc::TaskStatus Status() const { return status; }
 
-  void SetExitCode(uint32_t exitCode) {
-    exit_code = exitCode;
-    persisted_part.set_exit_code(exitCode);
+  void SetExitCode(uint32_t val) {
+    exit_code = val;
+    persisted_part.set_exit_code(val);
   }
   uint32_t ExitCode() const { return exit_code; }
 

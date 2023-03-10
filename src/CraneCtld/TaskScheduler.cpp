@@ -1357,7 +1357,8 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
 
     for (task_id_t task_id : task_ids)
       TaskStatusChangeNoLock_(task_id, craned_id.craned_index,
-                              crane::grpc::TaskStatus::Failed, exTerminal);
+                              crane::grpc::TaskStatus::Failed,
+                              ExitCode::kExitCodeTerminal);
   } else {
     CRANE_TRACE("No task is executed by craned {}. Ignore cleaning step...",
                 craned_id);

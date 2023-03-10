@@ -28,46 +28,62 @@ std::string ReadableMemory(uint64_t memory_bytes) {
 }
 
 bool ParseNodeList(const std::string &node_str,
-                   std::list<std::string> *nodelist,
-                   const std::string &end_str) {
+                   std::list<std::string> *nodelist) {
   std::regex brackets_regex(R"(.*\[(.*)\])");
   std::smatch match;
-  if (std::regex_search(node_str, match, brackets_regex)) {
-    std::vector<std::string> node_num;
-    std::string match_str = match[1],
-                head_str = node_str.substr(0, match.position(1) - 1),
-                end_ =
-                    node_str.substr(match.position(1) + match_str.size() + 1);
+  if (!std::regex_search(node_str, match, brackets_regex)) {
+    return false;
+  }
 
-    boost::split(node_num, match_str, boost::is_any_of(","));
+  std::vector<std::string> unit_str_list;
+  boost::split(unit_str_list, node_str, boost::is_any_of("]"));
+  std::string end_str = unit_str_list[unit_str_list.size() - 1];
+  unit_str_list.pop_back();
+  std::list<std::string> res_list{""};
+  std::regex num_regex(R"(\d+)"), scope_regex(R"(\d+-\d+)");
+
+  for (const auto &str : unit_str_list) {
+    std::vector<std::string> node_num;
+    boost::split(node_num, str, boost::is_any_of("[,"));
+    std::list<std::string> unit_list;
+    std::string head_str = node_num.front();
     size_t len = node_num.size();
-    std::regex num_regex(R"(\d+)"), scope_regex(R"(\d+-\d+)");
-    for (size_t i = 0; i < len; i++) {
+
+    for (size_t i = 1; i < len; i++) {
       if (std::regex_match(node_num[i], num_regex)) {
-        if (!ParseNodeList(head_str, nodelist,
-                           fmt::format("{}{}{}", node_num[i], end_, end_str)))
-          nodelist->emplace_back(
-              fmt::format("{}{}{}{}", head_str, node_num[i], end_, end_str));
+        unit_list.emplace_back(fmt::format("{}{}", head_str, node_num[i]));
       } else if (std::regex_match(node_num[i], scope_regex)) {
         std::vector<std::string> loc_index;
         boost::split(loc_index, node_num[i], boost::is_any_of("-"));
-        size_t l = loc_index[0].length();
-        for (size_t j = std::stoi(loc_index[0]); j <= std::stoi(loc_index[1]);
-             j++) {
+
+        size_t l = loc_index[0].length(), end = std::stoi(loc_index[1]);
+        for (size_t j = std::stoi(loc_index[0]); j <= end; j++) {
           std::string s_num = fmt::format("{:0>{}}", std::to_string(j), l);
-          if (!ParseNodeList(head_str, nodelist,
-                             fmt::format("{}{}{}", s_num, end_, end_str))) {
-            nodelist->emplace_back(
-                fmt::format("{}{}{}{}", head_str, s_num, end_, end_str));
-          }
+          unit_list.emplace_back(fmt::format("{}{}", head_str, s_num));
         }
       } else {
+        // Format error
         return false;
       }
     }
-    return true;
+
+    std::list<std::string> temp_list;
+    for (const auto &left : res_list) {
+      for (const auto &right : unit_list) {
+        temp_list.emplace_back(fmt::format("{}{}", left, right));
+      }
+    }
+    res_list.assign(temp_list.begin(), temp_list.end());
   }
-  return false;
+
+  if (!end_str.empty()) {
+    for (auto &str : res_list) {
+      str += end_str;
+    }
+  }
+  nodelist->insert(nodelist->end(), res_list.begin(), res_list.end());
+
+  return true;
 }
 
 bool ParseHostList(const std::string &host_str,
@@ -78,7 +94,7 @@ bool ParseHostList(const std::string &host_str,
   std::list<std::string> str_list;
 
   std::queue<char> char_queue;
-  for (auto c : name_str) {
+  for (const auto &c : name_str) {
     if (c == '[') {
       if (char_queue.empty()) {
         char_queue.push(c);
@@ -119,24 +135,10 @@ bool ParseHostList(const std::string &host_str,
     if (!std::regex_match(str_s, regex)) {
       host_list->emplace_back(str_s);
     } else {
-      if (!ParseNodeList(str_s, host_list, "")) return false;
+      if (!ParseNodeList(str_s, host_list)) return false;
     }
   }
   return true;
-}
-
-std::string RegexReplaceWithIsometricSpaceString(const std::regex &pattern,
-                                                 const std::string &input) {
-  std::string output{input};
-  std::smatch matches;
-
-  std::string::const_iterator iterStart = input.begin();
-  while (regex_search(iterStart, input.end(), matches, pattern)) {
-    output.replace(matches.position(0) + iterStart - input.begin(),
-                   matches[0].length(), std::string(matches[0].length(), ' '));
-    iterStart = matches[0].second;
-  }
-  return output;
 }
 
 bool HostNameListToStr_(std::list<std::string> &host_list,
@@ -152,22 +154,16 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
     return true;
   }
 
-  std::regex regex(R"(\d+)");
-  std::regex pattern(R"(\[.*?\])");
-
   for (const auto &host : host_list) {
     if (host.empty()) continue;
 
-    std::string host_raw = RegexReplaceWithIsometricSpaceString(pattern, host);
-
-    std::smatch match;
-    if (std::regex_search(host_raw, match, regex)) {
+    int start, end;
+    if (FoundFirstNumberWithoutBrackets(host, &start, &end)) {
       res = false;
-      std::string num_str = match[0],
-                  head_str = host.substr(0, match.position()),
-                  tail_str = host.substr(match.position() + match[0].length(),
-                                         host.size());
-      std::string key_str = fmt::format("{}<=!>{}", head_str, tail_str);
+      std::string num_str = host.substr(start, end - start),
+                  head_str = host.substr(0, start),
+                  tail_str = host.substr(end, host.size());
+      std::string key_str = fmt::format("{}<{}", head_str, tail_str);
       auto iter = host_map.find(key_str);
       if (iter == host_map.end()) {
         std::list<std::string> list;
@@ -183,11 +179,16 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
 
   for (auto &&iter : host_map) {
     std::string host_name_str;
-    std::regex body_regex(R"(<=!>)");
-    std::smatch match;
-    std::regex_search(iter.first, match, body_regex);
 
-    host_name_str += match.prefix();
+    int delimiter_pos = 0;
+    for (const auto &c : iter.first) {
+      if (c == '<') {
+        break;
+      }
+      delimiter_pos++;
+    }
+
+    host_name_str += iter.first.substr(0, delimiter_pos);
     host_name_str += "[";
     iter.second.sort();
     iter.second.unique();
@@ -223,11 +224,44 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
       host_name_str += "-";
       host_name_str += last_str;
     }
-    host_name_str += fmt::format("]{}", std::string(match.suffix()));
+    host_name_str += fmt::format(
+        "]{}", iter.first.substr(delimiter_pos + 1, iter.first.size()));
     res_list->emplace_back(host_name_str);
   }
 
   return res;
+}
+
+bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
+                                     int *end) {
+  *start = *end = 0;
+  size_t opens = 0;
+  int i = 0;
+
+  for (const auto &c : input) {
+    if (c == '[') {
+      opens++;
+    } else if (c == ']') {
+      opens--;
+    } else {
+      if (!opens) {
+        if (!(*start) && c >= '0' && c <= '9') {
+          *start = i;
+        } else if (*start && (c < '0' || c > '9')) {
+          *end = i;
+          return true;
+        }
+      }
+    }
+    i++;
+  }
+
+  if (*start) {
+    *end = i;
+    return true;
+  } else {
+    return false;
+  }
 }
 
 }  // namespace util

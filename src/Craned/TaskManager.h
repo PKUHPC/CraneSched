@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CranedPublicDefs.h"
-#include "sysexits.h"
 // Precompiled header comes first.
 
 #include <event2/bufferevent.h>
