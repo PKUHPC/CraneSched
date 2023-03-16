@@ -4,6 +4,8 @@
 #include <event2/thread.h>
 #include <gtest/gtest.h>
 
+#include "crane/Logger.h"
+
 TEST(TimerSet, simple) {
   evthread_use_pthreads();
 
