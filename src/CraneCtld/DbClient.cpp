@@ -26,6 +26,41 @@ bool MongodbClient::Connect() {
     CRANE_CRITICAL(e.what());
     return false;
   }
+  Qos qos;
+  if (!SelectQos("name", kUnlimitedQosName, &qos)) {
+    qos.name = kUnlimitedQosName;
+    qos.description = "Crane default qos for unlimited resource";
+    qos.priority = 0;
+    qos.max_jobs_per_user = std::numeric_limits<
+        std::remove_reference<decltype(qos.max_jobs_per_user)>::type>::max();
+    qos.max_running_tasks_per_user = std::numeric_limits<std::remove_reference<
+        decltype(qos.max_running_tasks_per_user)>::type>::max();
+    qos.max_time_limit_per_task = absl::Seconds(INT64_MAX);
+    qos.max_cpus_per_user = std::numeric_limits<
+        std::remove_reference<decltype(qos.max_cpus_per_user)>::type>::max();
+    qos.max_cpus_per_account = std::numeric_limits<
+        std::remove_reference<decltype(qos.max_cpus_per_account)>::type>::max();
+    InsertQos(qos);
+  }
+
+  Account root_account;
+  if (!SelectAccount("name", "ROOT", &root_account)) {
+    root_account.name = "ROOT";
+    root_account.description = "Crane default account for root user";
+    root_account.default_qos = kUnlimitedQosName;
+    root_account.allowed_qos_list.emplace_back(root_account.default_qos);
+    root_account.users.emplace_back("root");
+    InsertAccount(root_account);
+  }
+
+  User root_user;
+  if (!SelectUser("uid", 0, &root_user)) {
+    root_user.name = "root";
+    root_user.account = "ROOT";
+    root_user.admin_level = User::Admin;
+    root_user.uid = 0;
+    InsertUser(root_user);
+  }
 
   return true;
 }
@@ -593,8 +628,8 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->name = qos_view["name"].get_string().value;
     qos->description = qos_view["description"].get_string().value;
     qos->priority = qos_view["priority"].get_int32().value;
-    qos->max_jobs_per_user = qos_view["max_jobs_per_user"].get_int32().value;
-    qos->max_cpus_per_user = qos_view["max_cpus_per_user"].get_int32().value;
+    qos->max_jobs_per_user = qos_view["max_jobs_per_user"].get_int64().value;
+    qos->max_cpus_per_user = qos_view["max_cpus_per_user"].get_int64().value;
     qos->max_time_limit_per_task =
         absl::Seconds(qos_view["max_time_limit_per_task"].get_int64().value);
   } catch (const bsoncxx::exception& e) {
@@ -611,14 +646,14 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
                                     "max_jobs_per_user",
                                     "max_cpus_per_user",
                                     "max_time_limit_per_task"};
-  std::tuple<bool, std::string, std::string, int, int, int, int64_t> values{
-      false,
-      qos.name,
-      qos.description,
-      qos.priority,
-      qos.max_jobs_per_user,
-      qos.max_cpus_per_user,
-      absl::ToInt64Seconds(qos.max_time_limit_per_task)};
+  std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t>
+      values{false,
+             qos.name,
+             qos.description,
+             qos.priority,
+             qos.max_jobs_per_user,
+             qos.max_cpus_per_user,
+             absl::ToInt64Seconds(qos.max_time_limit_per_task)};
 
   return DocumentConstructor_(fields, values);
 }

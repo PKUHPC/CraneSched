@@ -855,8 +855,9 @@ bool AccountManager::CheckUserPermissionToPartition(
     return false;
   }
 
-  if (user_share_ptr->allowed_partition_qos_map.find(partition) !=
-      user_share_ptr->allowed_partition_qos_map.end()) {
+  if (user_share_ptr->uid == 0 ||
+      user_share_ptr->allowed_partition_qos_map.find(partition) !=
+          user_share_ptr->allowed_partition_qos_map.end()) {
     return true;
   }
   return false;
@@ -869,8 +870,6 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
     return Result{false, fmt::format("Unknown user '{}'", user)};
   }
 
-  AccountMutexSharedPtr account_share_ptr =
-      GetExistedAccountInfo(user_share_ptr->account);
   auto partition_it =
       user_share_ptr->allowed_partition_qos_map.find(task->partition_name);
   if (partition_it == user_share_ptr->allowed_partition_qos_map.end())
