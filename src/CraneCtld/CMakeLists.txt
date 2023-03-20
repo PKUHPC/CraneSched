@@ -41,6 +41,8 @@ target_link_libraries(cranectld
 
         crane_proto_lib
 
+        bs_thread_pool
+
         yaml-cpp
         mongocxx_static
         unqlite

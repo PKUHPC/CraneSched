@@ -390,3 +390,5 @@ struct User {
 };
 
 }  // namespace Ctld
+
+inline std::unique_ptr<BS::thread_pool> g_thread_pool;

@@ -51,6 +51,9 @@
 #  include <boost/uuid/uuid_hash.hpp>
 #endif
 
+// Thread pool
+#include <BS_thread_pool.hpp>
+
 // gRPC
 #include <grpc++/grpc++.h>
 

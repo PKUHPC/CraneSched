@@ -326,7 +326,8 @@ void CranedKeeper::StateMonitorThreadFunc_() {
             delete tag_data;
           } else if (tag->type == CqTag::kEstablishedCraned) {
             if (m_craned_is_down_cb_)
-              m_craned_is_down_cb_(craned->m_craned_id_);
+              g_thread_pool->push_task(m_craned_is_down_cb_,
+                                       craned->m_craned_id_);
 
             util::lock_guard node_lock(m_craned_mtx_);
             util::write_lock_guard craned_lock(m_alive_craned_rw_mtx_);
@@ -413,7 +414,8 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
         raw_craned->m_failure_retry_times_ = 0;
         raw_craned->m_invalid_ = false;
       }
-      if (m_craned_is_up_cb_) m_craned_is_up_cb_(raw_craned->m_craned_id_);
+      if (m_craned_is_up_cb_)
+        g_thread_pool->push_task(m_craned_is_up_cb_, raw_craned->m_craned_id_);
 
       // free tag_data
       delete tag_data;
@@ -533,7 +535,8 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
         m_alive_craned_bitset_[craned->m_slot_offset_] = false;
       }
       if (m_craned_is_temp_down_cb_)
-        m_craned_is_temp_down_cb_(craned->m_craned_id_);
+        g_thread_pool->push_task(m_craned_is_temp_down_cb_,
+                                 craned->m_craned_id_);
 
       next_tag_type = CqTag::kEstablishedCraned;
       break;
@@ -557,7 +560,8 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
         }
 
         if (m_craned_rec_from_temp_failure_cb_)
-          m_craned_rec_from_temp_failure_cb_(craned->m_craned_id_);
+          g_thread_pool->push_task(m_craned_rec_from_temp_failure_cb_,
+                                   craned->m_craned_id_);
 
         next_tag_type = CqTag::kEstablishedCraned;
       }
@@ -576,7 +580,8 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
           m_alive_craned_bitset_[craned->m_slot_offset_] = false;
         }
         if (m_craned_is_temp_down_cb_)
-          m_craned_is_temp_down_cb_(craned->m_craned_id_);
+          g_thread_pool->push_task(m_craned_is_temp_down_cb_,
+                                   craned->m_craned_id_);
 
         next_tag_type = CqTag::kEstablishedCraned;
       } else if (craned->m_prev_channel_state_ == GRPC_CHANNEL_CONNECTING) {
