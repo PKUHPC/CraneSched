@@ -155,6 +155,90 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
       }
 
+      uint64_t default_max_age = 7 * 24 * 3600;
+      g_config.PriorityConfig.MaxAge = default_max_age;
+      if (config["PriorityMaxAge"]) {
+        std::string max_age_str = config["PriorityMaxAge"].as<std::string>();
+        std::regex pattern_hour_min_sec("(\\d+):(\\d+):(\\d+)");
+        std::regex pattern_day_hour("(\\d+)-(\\d+)");
+        std::regex pattern_min("(\\d+)");
+        std::regex pattern_day_hour_min_sec("(\\d+)-(\\d+):(\\d+):(\\d+)");
+        std::smatch matches;
+        uint64_t days, hours, mins, secs;
+        if (std::regex_match(max_age_str, matches, pattern_hour_min_sec)) {
+          hours = std::stoi(matches[1]);
+          mins = std::stoi(matches[2]);
+          secs = std::stoi(matches[3]);
+          g_config.PriorityConfig.MaxAge = hours * 3600 + mins * 60 + secs;
+        } else if (std::regex_match(max_age_str, matches, pattern_day_hour)) {
+          days = std::stoi(matches[1]);
+          hours = std::stoi(matches[2]);
+          g_config.PriorityConfig.MaxAge = days * 24 * 3600 + hours * 3600;
+        } else if (std::regex_match(max_age_str, pattern_min)) {
+          mins = std::stoi(max_age_str);
+          g_config.PriorityConfig.MaxAge = mins * 60;
+        } else if (std::regex_match(max_age_str, pattern_day_hour_min_sec)) {
+          days = std::stoi(matches[1]);
+          hours = std::stoi(matches[2]);
+          mins = std::stoi(matches[3]);
+          secs = std::stoi(matches[4]);
+          g_config.PriorityConfig.MaxAge =
+              days * 24 * 3600 + hours * 3600 + mins * 60 + secs;
+        }
+        g_config.PriorityConfig.MaxAge =
+            g_config.PriorityConfig.MaxAge > default_max_age
+                ? default_max_age
+                : g_config.PriorityConfig.MaxAge;
+      }
+
+      if (config["PriorityType"] &&
+          config["PriorityType"].as<std::string>() == "priority/multifactor")
+        g_config.PriorityConfig.Type = config["PriorityType"].as<std::string>();
+      else
+        g_config.PriorityConfig.Type = "priority/basic";
+
+      if (config["PriorityFavorSmall"] &&
+          config["PriorityFavorSmall"].as<std::string>() == "NO")
+        g_config.PriorityConfig.FavorSmall = false;
+      else
+        g_config.PriorityConfig.FavorSmall = true;
+
+      if (config["PriorityWeightAge"])
+        g_config.PriorityConfig.WeightAge =
+            config["PriorityWeightAge"].as<uint32_t>();
+      else
+        g_config.PriorityConfig.WeightAge = 1000;
+
+      if (config["PriorityWeightFairshare"])
+        g_config.PriorityConfig.WeightFairShare =
+            config["PriorityWeightFairshare"].as<uint32_t>();
+      else
+        g_config.PriorityConfig.WeightFairShare = 0;
+
+      if (config["PriorityWeightJobSize"])
+        g_config.PriorityConfig.WeightJobSize =
+            config["PriorityWeightJobSize"].as<uint32_t>();
+      else
+        g_config.PriorityConfig.WeightJobSize = 0;
+
+      if (config["PriorityWeightPartition"])
+        g_config.PriorityConfig.WeightPartition =
+            config["PriorityWeightPartition"].as<uint32_t>();
+      else
+        g_config.PriorityConfig.WeightPartition = 0;
+
+      if (config["PriorityWeightQ0S"])
+        g_config.PriorityConfig.WeightQOS =
+            config["PriorityWeightQ0S"].as<uint32_t>();
+      else
+        g_config.PriorityConfig.WeightQOS = 0;
+
+      if (config["PriorityWeightAssoc"])
+        g_config.PriorityConfig.WeightAssoc =
+            config["PriorityWeightAssoc"].as<uint32_t>();
+      else
+        g_config.PriorityConfig.WeightAssoc = 0;
+
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {
@@ -224,6 +308,11 @@ void ParseConfig(int argc, char** argv) {
                         partition["name"].Scalar());
             std::exit(1);
           }
+
+          if (partition["priority"] && !partition["priority"].IsNull()) {
+            part.priority = partition["priority"].as<uint32_t>();
+          } else
+            part.priority = 0;
 
           part.nodelist_str = nodes;
           std::list<std::string> name_list;
@@ -376,6 +465,7 @@ void InitializeCtldGlobalVariables() {
   g_meta_container = std::make_unique<CranedMetaContainerSimpleImpl>();
   g_meta_container->InitFromConfig(g_config);
 
+  g_priority = std::make_unique<Priority>();
   bool ok;
   g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
   ok = g_embedded_db_client->Init(g_config.CraneCtldDbPath);

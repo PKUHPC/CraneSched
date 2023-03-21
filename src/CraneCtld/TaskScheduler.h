@@ -5,6 +5,9 @@
 
 #include <event2/event.h>
 
+#include <cfloat>
+#include <vector>
+
 #include "CranedMetaContainer.h"
 #include "DbClient.h"
 #include "crane/Lock.h"
@@ -227,3 +230,33 @@ class TaskScheduler {
 }  // namespace Ctld
 
 inline std::unique_ptr<Ctld::TaskScheduler> g_task_scheduler;
+
+
+class Priority {
+  uint64_t age_max, age_min;
+  uint32_t qos_priority_max, qos_priority_min;
+  uint32_t part_priority_max, part_priority_min;
+  uint32_t nodes_alloc_max, nodes_alloc_min;
+  uint64_t mem_alloc_max, mem_alloc_min;
+  double cpus_alloc_max, cpus_alloc_min;
+  uint32_t service_val_max, service_val_min;
+  std::map<std::string, uint32_t> acc_service_val_map;
+
+  double age_factor, partition_factor, job_size_factor, fair_share_factor,
+      assoc_factor, qos_factor;
+
+ public:
+  std::list<task_id_t> GetTaskIdList(
+      const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
+          pending_task_map,
+      const absl::flat_hash_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>&
+          running_task_map_);
+  void MaxMinInit(
+      const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
+          pending_task_map,
+      const absl::flat_hash_map<uint32_t, std::unique_ptr<Ctld::TaskInCtld>>*
+          m_running_task_map_);
+  uint32_t CalculatePriority(Ctld::TaskInCtld* task);
+};
+
+inline std::unique_ptr<Priority> g_priority;
