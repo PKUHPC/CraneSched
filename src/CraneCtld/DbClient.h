@@ -27,11 +27,11 @@ class MongodbClient {
     QOS = 2,
   };
 
-  MongodbClient() = default;  // Mongodb-c++ don't need to close the connection
+  MongodbClient();  // Mongodb-c++ don't need to close the connection
 
   bool Connect();
 
-  void Init();
+  void CheckAndInit();
 
   /* ----- Method of operating the job table ----------- */
   bool InsertRecoveredJob(
@@ -40,14 +40,6 @@ class MongodbClient {
 
   bool FetchJobRecords(std::list<TaskInCtld>* task_list, size_t limit,
                        bool reverse);
-
-  [[deprecated]] bool UpdateJobRecordField(uint64_t job_db_inx,
-                                           const std::string& field_name,
-                                           const std::string& val);
-
-  [[deprecated]] bool UpdateJobRecordFields(
-      uint64_t job_db_inx, const std::list<std::string>& field_name,
-      const std::list<std::string>& val);
 
   bool CheckTaskDbIdExisted(int64_t task_db_id);
 

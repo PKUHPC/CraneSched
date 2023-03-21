@@ -164,8 +164,7 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
                   head_str = host.substr(0, start),
                   tail_str = host.substr(end, host.size());
       std::string key_str = fmt::format("{}<{}", head_str, tail_str);
-      auto iter = host_map.find(key_str);
-      if (iter == host_map.end()) {
+      if (!host_map.contains(key_str)) {
         std::list<std::string> list;
         host_map[key_str] = list;
       }

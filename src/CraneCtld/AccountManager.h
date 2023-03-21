@@ -70,6 +70,9 @@ class AccountManager {
 
   bool PaternityTest(const std::string& parent, const std::string& child);
 
+  Result FindUserLevelAccountOfUid(const uint32_t uid, User::AdminLevel* level,
+                                   std::string* account);
+
  private:
   void InitDataMap_();
 

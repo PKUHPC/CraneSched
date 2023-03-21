@@ -337,28 +337,22 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
-  PasswordEntry entry(request->uid());
-  if (!entry.Valid()) {
+  User::AdminLevel user_level;
+  AccountManager::Result find_res =
+      g_account_manager->FindUserLevelAccountOfUid(request->uid(), &user_level,
+                                                   nullptr);
+
+  if (!find_res.ok) {
     response->set_ok(false);
-    response->set_reason(
-        fmt::format("Uid {} not found on the controller node", request->uid()));
+    response->set_reason(find_res.reason);
     return grpc::Status::OK;
   }
-  {  // Limit the lifecycle of user_shared_ptr
-    AccountManager::UserMutexSharedPtr user_shared_ptr =
-        g_account_manager->GetExistedUserInfo(entry.Username());
 
-    if (!user_shared_ptr) {
-      response->set_ok(false);
-      response->set_reason("Permission error : You are not a crane user");
-      return grpc::Status::OK;
-    }
-    if (user_shared_ptr->admin_level != User::Admin) {
-      response->set_ok(false);
-      response->set_reason(
-          "Permission error : You do not have permission to add account");
-      return grpc::Status::OK;
-    }
+  if (user_level != User::Admin) {
+    response->set_ok(false);
+    response->set_reason(
+        "Permission error : You do not have permission to add account");
+    return grpc::Status::OK;
   }
 
   Account account;
@@ -390,43 +384,38 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
 grpc::Status CraneCtldServiceImpl::AddUser(
     grpc::ServerContext *context, const crane::grpc::AddUserRequest *request,
     crane::grpc::AddUserReply *response) {
-  PasswordEntry entry(request->uid());
-  if (!entry.Valid()) {
+  User::AdminLevel user_level;
+  std::string user_account;
+  AccountManager::Result find_res =
+      g_account_manager->FindUserLevelAccountOfUid(request->uid(), &user_level,
+                                                   &user_account);
+
+  if (!find_res.ok) {
     response->set_ok(false);
-    response->set_reason(
-        fmt::format("Uid {} not found on the controller node", request->uid()));
+    response->set_reason(find_res.reason);
     return grpc::Status::OK;
   }
-  {  // Limit the lifecycle of user_shared_ptr
-    AccountManager::UserMutexSharedPtr user_shared_ptr =
-        g_account_manager->GetExistedUserInfo(entry.Username());
 
-    if (!user_shared_ptr) {
-      response->set_ok(false);
-      response->set_reason("Permission error : You are not a crane user");
-      return grpc::Status::OK;
-    }
-    if (user_shared_ptr->admin_level == User::None) {
+  if (user_level == User::None) {
+    response->set_ok(false);
+    response->set_reason(
+        "Permission error : You do not have permission to add user");
+    return grpc::Status::OK;
+  } else if (user_level == User::Operator) {
+    if (user_account != request->user().account() &&
+        !g_account_manager->PaternityTest(user_account,
+                                          request->user().account())) {
       response->set_ok(false);
       response->set_reason(
-          "Permission error : You do not have permission to add user");
+          "Permission error : You can't add user to the account which not in "
+          "subtree of your account");
       return grpc::Status::OK;
-    } else if (user_shared_ptr->admin_level == User::Operator) {
-      if (user_shared_ptr->account != request->user().account() &&
-          !g_account_manager->PaternityTest(user_shared_ptr->account,
-                                            request->user().account())) {
-        response->set_ok(false);
-        response->set_reason(
-            "Permission error : You can't add user to the account which not in "
-            "subtree of your account");
-        return grpc::Status::OK;
-      }
-      if (request->user().admin_level() != crane::grpc::UserInfo::None) {
-        response->set_ok(false);
-        response->set_reason(
-            "Permission error : You cannot add users with permissions");
-        return grpc::Status::OK;
-      }
+    }
+    if (request->user().admin_level() != crane::grpc::UserInfo::None) {
+      response->set_ok(false);
+      response->set_reason(
+          "Permission error : You cannot add users with permissions");
+      return grpc::Status::OK;
     }
   }
 
@@ -464,28 +453,22 @@ grpc::Status CraneCtldServiceImpl::AddUser(
 grpc::Status CraneCtldServiceImpl::AddQos(
     grpc::ServerContext *context, const crane::grpc::AddQosRequest *request,
     crane::grpc::AddQosReply *response) {
-  PasswordEntry entry(request->uid());
-  if (!entry.Valid()) {
+  User::AdminLevel user_level;
+  AccountManager::Result find_res =
+      g_account_manager->FindUserLevelAccountOfUid(request->uid(), &user_level,
+                                                   nullptr);
+
+  if (!find_res.ok) {
     response->set_ok(false);
-    response->set_reason(
-        fmt::format("Uid {} not found on the controller node", request->uid()));
+    response->set_reason(find_res.reason);
     return grpc::Status::OK;
   }
-  {
-    AccountManager::UserMutexSharedPtr user_shared_ptr =
-        g_account_manager->GetExistedUserInfo(entry.Username());
 
-    if (!user_shared_ptr) {
-      response->set_ok(false);
-      response->set_reason("Permission error : You are not a crane user");
-      return grpc::Status::OK;
-    }
-    if (user_shared_ptr->admin_level != User::Admin) {
-      response->set_ok(false);
-      response->set_reason(
-          "Permission error : You do not have permission to add qos");
-      return grpc::Status::OK;
-    }
+  if (user_level != User::Admin) {
+    response->set_ok(false);
+    response->set_reason(
+        "Permission error : You do not have permission to add qos");
+    return grpc::Status::OK;
   }
 
   Qos qos;
@@ -514,29 +497,17 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
     grpc::ServerContext *context,
     const crane::grpc::ModifyEntityRequest *request,
     crane::grpc::ModifyEntityReply *response) {
-  PasswordEntry entry(request->uid());
-  if (!entry.Valid()) {
-    response->set_ok(false);
-    response->set_reason(
-        fmt::format("Uid {} not found on the controller node", request->uid()));
-    return grpc::Status::OK;
-  }
-
   // Variable user_account won't be used when user_level equals User::Admin
   User::AdminLevel user_level;
   std::string user_account;
-  {  // Limit the lifecycle of user_shared_ptr
-    AccountManager::UserMutexSharedPtr user_shared_ptr =
-        g_account_manager->GetExistedUserInfo(entry.Username());
+  AccountManager::Result find_res =
+      g_account_manager->FindUserLevelAccountOfUid(request->uid(), &user_level,
+                                                   &user_account);
 
-    if (user_shared_ptr) {
-      user_level = user_shared_ptr->admin_level;
-      user_account = user_shared_ptr->account;
-    } else {
-      response->set_ok(false);
-      response->set_reason("Permission error : You are not a crane user");
-      return grpc::Status::OK;
-    }
+  if (!find_res.ok) {
+    response->set_ok(false);
+    response->set_reason(find_res.reason);
+    return grpc::Status::OK;
   }
 
   if (user_level == User::None) {
@@ -633,23 +604,13 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
   std::list<Account> res_account_list;
   std::list<User> res_user_list;
 
-  PasswordEntry entry(request->uid());
-  if (!entry.Valid()) {
+  AccountManager::Result find_res =
+      g_account_manager->FindUserLevelAccountOfUid(request->uid(), &user_level,
+                                                   &user_account);
+  if (!find_res.ok) {
     response->set_ok(false);
-    response->set_reason(
-        fmt::format("Uid {} not found on the controller node", request->uid()));
+    response->set_reason(find_res.reason);
     return grpc::Status::OK;
-  }
-  {  // Limit the lifecycle of ptr
-    AccountManager::UserMutexSharedPtr ptr =
-        g_account_manager->GetExistedUserInfo(entry.Username());
-    if (!ptr) {
-      response->set_ok(false);
-      response->set_reason("Permission error : You are not a crane user");
-      return grpc::Status::OK;
-    }
-    user_level = ptr->admin_level;
-    user_account = ptr->account;
   }
 
   switch (request->entity_type()) {
@@ -717,6 +678,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
       }
 
       for (const auto &account : res_account_list) {
+        // put the account info into grpc element
         auto *account_info = response->mutable_account_list()->Add();
         account_info->set_name(account.name);
         account_info->set_description(account.description);
@@ -882,27 +844,15 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
     grpc::ServerContext *context,
     const crane::grpc::DeleteEntityRequest *request,
     crane::grpc::DeleteEntityReply *response) {
-  PasswordEntry entry(request->uid());
-  if (!entry.Valid()) {
-    response->set_ok(false);
-    response->set_reason(
-        fmt::format("Uid {} not found on the controller node", request->uid()));
-    return grpc::Status::OK;
-  }
   User::AdminLevel user_level;
   std::string user_account;
-  {  // Limit the lifecycle of user_shared_ptr
-    AccountManager::UserMutexSharedPtr user_shared_ptr =
-        g_account_manager->GetExistedUserInfo(entry.Username());
+  AccountManager::Result res = g_account_manager->FindUserLevelAccountOfUid(
+      request->uid(), &user_level, &user_account);
 
-    if (user_shared_ptr) {
-      user_level = user_shared_ptr->admin_level;
-      user_account = user_shared_ptr->account;
-    } else {
-      response->set_ok(false);
-      response->set_reason("Permission error : You are not a crane user");
-      return grpc::Status::OK;
-    }
+  if (!res.ok) {
+    response->set_ok(false);
+    response->set_reason(res.reason);
+    return grpc::Status::OK;
   }
 
   if (user_level == User::None) {
@@ -912,8 +862,6 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
         crane::grpc::EntityType_Name(request->entity_type())));
     return grpc::Status::OK;
   }
-
-  AccountManager::Result res;
 
   switch (request->entity_type()) {
     case crane::grpc::User: {
@@ -929,8 +877,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
         response->set_ok(false);
         response->set_reason(
             "Permission error : You can't delete a user who has a larger or "
-            "same"
-            "permission than yours");
+            "same permission than yours");
         return grpc::Status::OK;
       }
       if (user_level == User::Operator) {
@@ -953,8 +900,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
           response->set_ok(false);
           response->set_reason(
               "Permission error : You do not have permission to delete a "
-              "account "
-              "who not in subtree of you account");
+              "account who not in subtree of you account");
           return grpc::Status::OK;
         }
       }

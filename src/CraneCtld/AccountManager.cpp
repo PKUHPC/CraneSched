@@ -1,5 +1,7 @@
 #include "AccountManager.h"
 
+#include "crane/PasswordEntry.h"
+
 namespace Ctld {
 
 AccountManager::AccountManager() { InitDataMap_(); }
@@ -856,8 +858,7 @@ bool AccountManager::CheckUserPermissionToPartition(
   }
 
   if (user_share_ptr->uid == 0 ||
-      user_share_ptr->allowed_partition_qos_map.find(partition) !=
-          user_share_ptr->allowed_partition_qos_map.end()) {
+      user_share_ptr->allowed_partition_qos_map.contains(partition)) {
     return true;
   }
   return false;
@@ -899,6 +900,28 @@ bool AccountManager::PaternityTest(const std::string& parent,
     return false;
   }
   return PaternityTestNoLock_(parent, child);
+}
+
+AccountManager::Result AccountManager::FindUserLevelAccountOfUid(
+    const uint32_t uid, User::AdminLevel* level, std::string* account) {
+  PasswordEntry entry(uid);
+  if (!entry.Valid()) {
+    return Result{false,
+                  fmt::format("Uid {} not found on the controller node", uid)};
+  }
+
+  UserMutexSharedPtr ptr = GetExistedUserInfo(entry.Username());
+  if (!ptr) {
+    return Result{
+        false,
+        fmt::format(
+            "Permission error: User '{}' not found in the account database",
+            entry.Username())};
+  }
+  if (level != nullptr) *level = ptr->admin_level;
+  if (account != nullptr) *account = ptr->account;
+
+  return Result{true};
 }
 
 void AccountManager::InitDataMap_() {
@@ -1195,8 +1218,7 @@ bool AccountManager::DeleteUserAllowedPartitionFromDB_(
     return false;
   }
 
-  auto iter = user->allowed_partition_qos_map.find(partition);
-  if (iter == user->allowed_partition_qos_map.end()) {
+  if (!user->allowed_partition_qos_map.contains(partition)) {
     return false;
   }
   g_db_client->UpdateEntityOne(Ctld::MongodbClient::EntityType::USER, "$unset",

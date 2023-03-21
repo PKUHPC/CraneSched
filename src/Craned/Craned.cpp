@@ -319,8 +319,7 @@ void ParseConfig(int argc, char** argv) {
   }
   g_config.Hostname.assign(hostname);
 
-  auto node_it = g_config.Nodes.find(g_config.Hostname);
-  if (node_it == g_config.Nodes.end()) {
+  if (!g_config.Nodes.contains(g_config.Hostname)) {
     CRANE_ERROR("This machine {} is not contained in Nodes!",
                 g_config.Hostname);
     std::exit(1);
