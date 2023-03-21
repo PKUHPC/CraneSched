@@ -2,7 +2,9 @@
 
 #include <google/protobuf/util/time_util.h>
 
+#include "AccountManager.h"
 #include "CranedKeeper.h"
+#include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
 #include "EmbeddedDbClient.h"
 
@@ -1748,6 +1750,169 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
     CRANE_TRACE("No task is executed by craned {}. Ignore cleaning step...",
                 craned_id);
   }
+}
+
+// 输入：pending task map
+// 输出：作业号队列
+std::vector<uint32_t> TaskScheduler::TaskSort(
+    TreeMap<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>>& pending_tasks) {
+  for (auto iter = m_pending_task_map_.begin();
+       iter != m_pending_task_map_.end(); iter++) {
+    uint64_t age =
+        ToUnixSeconds(absl::Now()) - iter->second->SubmitTimeInUnixSecond();
+    if (age < age_min) age_min = age;
+    if (age > age_max) age_max = age;
+
+    uint32_t nodes_alloc = iter->second->nodes_alloc;
+    if (nodes_alloc < nodes_alloc_min) nodes_alloc_min = nodes_alloc;
+    if (nodes_alloc > nodes_alloc_max) nodes_alloc_max = nodes_alloc;
+
+    uint64_t mem_alloc =
+        iter->second->resources.allocatable_resource.memory_bytes;
+    if (mem_alloc < mem_alloc_min) mem_alloc_min = mem_alloc;
+    if (mem_alloc > mem_alloc_max) mem_alloc_max = mem_alloc;
+
+    double cpus_alloc = iter->second->resources.allocatable_resource.cpu_count;
+    if (cpus_alloc < cpus_alloc_min) cpus_alloc_min = cpus_alloc;
+    if (cpus_alloc > cpus_alloc_max) cpus_alloc_max = cpus_alloc;
+
+  }  // 待排各个max和min
+
+  AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
+      g_account_manager->GetAllQosInfo();
+  for (const auto& [name, qos] : *qos_map_shared_ptr) {
+    if (!qos->deleted) {
+      if (qos->priority < qos_priority_min) qos_priority_min = qos->priority;
+      if (qos->priority > qos_priority_max) qos_priority_max = qos->priority;
+    }
+  }  // 遍历计算qos_priority_min和qos_priority_max
+
+  for (const auto& [part_id, part] : g_config.Partitions) {
+    if (part.priority < part_priority_min) part_priority_min = part.priority;
+    if (part.priority > part_priority_max) part_priority_max = part.priority;
+  }  // 计算partition max和min
+}
+
+uint32_t TaskScheduler::CalculatePriority(TaskInCtld* task) {
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
+  double age_factor, partition_factor, job_size_factor, fair_share_factor,
+      assoc_factor, qos_factor;
+
+  uint64_t task_age = ToUnixSeconds(absl::Now()) -
+                      task->SubmitTimeInUnixSecond();  // 该作业的age
+
+  // 查出作业的qos的priority：通过作业结构体找到它的账户，然后从账户表里查到账户的qos再去qos表查qos优先级：
+  AccountManager::AccountMapMutexSharedPtr account_map_shared_ptr =
+      g_account_manager->GetAllAccountInfo();
+
+  auto it_account = account_map_shared_ptr->find(task->Account());
+  auto it_qos = qos_map_shared_ptr->find(it_account->second->default_qos);
+  uint32_t task_qos_priority =
+      it_qos->second->priority;  // 该作业的qos的priority
+
+  // 查作业的partition的priority:通过作业找分区名，在config的par里通过分区名找到分区优先级
+  auto it_partition = g_config.Partitions.find(task->partition_name);
+  uint32_t task_part_priority = it_partition->second.priority;
+
+  uint32_t task_nodes_alloc = task->nodes_alloc;  // 该作业的alloc nodes
+  uint64_t task_mem_alloc =
+      task->resources.allocatable_resource.memory_bytes;  // 该作业的alloc mem
+  double task_cpus_alloc =
+      task->resources.allocatable_resource.cpu_count;  // 该作业的alloc cpu
+
+  // 计算service_val_max & service_val_min
+  std::map<std::string, uint32_t> acc_service_val_map;
+  for (const auto& [task_id, r_task] : m_running_task_map_) {
+    uint32_t service_val = 0;
+    if (cpus_alloc_max != cpus_alloc_min) {
+      service_val += (double)(r_task->resources.allocatable_resource.cpu_count -
+                              cpus_alloc_min) /
+                     (cpus_alloc_max - cpus_alloc_min);
+    }
+    if (nodes_alloc_max != nodes_alloc_min) {
+      service_val += (double)(r_task->nodes_alloc - nodes_alloc_min) /
+                     (nodes_alloc_max - nodes_alloc_min);
+    }
+    if (mem_alloc_max != mem_alloc_min) {
+      service_val +=
+          (double)(r_task->resources.allocatable_resource.memory_bytes -
+                   mem_alloc_min) /
+          (mem_alloc_max - mem_alloc_min);
+    }
+    auto run_time =
+        ToUnixSeconds(absl::Now()) - r_task->StartTimeInUnixSecond();
+    service_val *= run_time;
+    if (acc_service_val_map.find(r_task->Account()) ==
+        acc_service_val_map.end()) {
+      acc_service_val_map.emplace(r_task->Account(), 0);
+    }
+    auto iter = acc_service_val_map.find(r_task->Account());
+    iter->second += service_val;
+  }
+  for (const auto& [acc_name, ser_val] : acc_service_val_map) {
+    if (ser_val < service_val_min) service_val_min = ser_val;
+    if (ser_val > service_val_max) service_val_max = ser_val;
+  }
+
+  // 计算该作业的service_val:
+  uint32_t task_service_val = acc_service_val_map.find(task->Account())->second;
+
+  // 计算age_factor:
+  if (age_max != age_min)
+    age_factor = (double)(task_age - age_min) / (age_max - age_min);
+  else
+    age_factor = 0;
+
+  // 计算qos_factor：
+  if (qos_priority_min != qos_priority_max)
+    qos_factor = (double)(task_qos_priority - qos_priority_min) /
+                 (qos_priority_max - qos_priority_min);
+  else
+    qos_factor = 0;
+
+  // 计算partition_factor:
+  if (part_priority_max != part_priority_min)
+    partition_factor = (double)(task_part_priority - part_priority_min) /
+                       (part_priority_max - part_priority_min);
+  else
+    partition_factor = 0;
+
+  // 计算job_size_factor：
+  job_size_factor = 0;
+  if (cpus_alloc_max != cpus_alloc_min)
+    job_size_factor += (double)(task_cpus_alloc - cpus_alloc_min) /
+                       (cpus_alloc_max - cpus_alloc_min);
+  if (nodes_alloc_max != nodes_alloc_min)
+    job_size_factor += (double)(task_nodes_alloc - nodes_alloc_min) /
+                       (nodes_alloc_max - nodes_alloc_min);
+  if (mem_alloc_max != mem_alloc_min)
+    job_size_factor += (double)(task_mem_alloc - mem_alloc_min) /
+                       (mem_alloc_max - mem_alloc_min);
+  if (g_config.PriorityWeight.FavorSmall)
+    job_size_factor = 1 - job_size_factor / 3;
+  else
+    job_size_factor /= 3;
+
+  // 计算fair_share_factor;
+  if (service_val_max != service_val_min) {
+    fair_share_factor = 1 - (double)(task_service_val - service_val_min) /
+                                (service_val_max - service_val_min);
+  } else {
+    fair_share_factor = 0;
+  }
+
+  // 计算assoc_factor:
+  assoc_factor = 0;
+
+  uint32_t priority =
+      g_config.PriorityWeight.WeightAge * age_factor +
+      g_config.PriorityWeight.WeightPartition * partition_factor +
+      g_config.PriorityWeight.WeightJobSize * job_size_factor +
+      g_config.PriorityWeight.WeightFairShare * fair_share_factor +
+      g_config.PriorityWeight.WeightAssoc * assoc_factor +
+      g_config.PriorityWeight.WeightQOS * qos_factor;
+  return priority;
 }
 
 }  // namespace Ctld

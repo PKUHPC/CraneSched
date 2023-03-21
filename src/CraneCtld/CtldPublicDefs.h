@@ -19,6 +19,7 @@ struct Config {
 
   struct Partition {
     std::string nodelist_str;
+    uint32_t priority;
     std::unordered_set<std::string> nodes;
     std::unordered_set<std::string> AllowAccounts;
   };
@@ -34,6 +35,19 @@ struct Config {
     std::string ServerKeyFilePath;
     std::string ServerKeyContent;
   };
+
+  struct Priority {
+    std::string Type;
+    bool FavorSmall;
+    absl::Duration MaxAge;
+    uint32_t WeightAge;
+    uint32_t WeightFairShare;
+    uint32_t WeightJobSize;
+    uint32_t WeightPartition;
+    uint32_t WeightQOS;
+    uint32_t WeightAssoc;
+  };
+  Priority PriorityWeight;
 
   CraneCtldListenConf ListenConf;
 

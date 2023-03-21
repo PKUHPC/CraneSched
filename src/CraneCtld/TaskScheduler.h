@@ -5,6 +5,9 @@
 
 #include <event2/event.h>
 
+#include <cfloat>
+#include <vector>
+
 #include "CranedMetaContainer.h"
 #include "DbClient.h"
 #include "crane/Lock.h"
@@ -222,6 +225,21 @@ class TaskScheduler {
 
   std::thread m_schedule_thread_;
   std::atomic_bool m_thread_stop_{};
+
+  uint64_t age_max = 0;
+  uint64_t age_min = UINT64_MAX;
+  uint32_t qos_priority_max = 0;
+  uint32_t qos_priority_min = UINT32_MAX;
+  uint32_t part_priority_max = 0;
+  uint32_t part_priority_min = UINT32_MAX;
+  uint32_t nodes_alloc_max = 0;
+  uint32_t nodes_alloc_min = UINT32_MAX;
+  uint64_t mem_alloc_max = 0;
+  uint64_t mem_alloc_min = UINT64_MAX;
+  double cpus_alloc_max = 0;
+  double cpus_alloc_min = DBL_MAX;
+  uint32_t service_val_max = 0;
+  uint32_t service_val_min = UINT32_MAX;
 };
 
 }  // namespace Ctld

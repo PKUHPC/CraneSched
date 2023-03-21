@@ -155,6 +155,54 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
       }
 
+      if (config["PriorityType"] &&
+          config["PriorityType"].as<std::string>() == "priority/multifactor")
+        g_config.PriorityWeight.Type = config["PriorityType"].as<std::string>();
+      else
+        g_config.PriorityWeight.Type = "priority/basic";
+
+      if (config["PriorityFavorSmall"] &&
+          config["PriorityFavorSmall"].as<std::string>() == "NO")
+        g_config.PriorityWeight.FavorSmall = false;
+      else
+        g_config.PriorityWeight.FavorSmall = true;
+
+      if (config["PriorityWeightAge"])
+        g_config.PriorityWeight.WeightAge =
+            config["PriorityWeightAge"].as<uint32_t>();
+      else
+        g_config.PriorityWeight.WeightAge = 1000;
+
+      if (config["PriorityWeightFairshare"])
+        g_config.PriorityWeight.WeightFairShare =
+            config["PriorityWeightFairshare"].as<uint32_t>();
+      else
+        g_config.PriorityWeight.WeightFairShare = 0;
+
+      if (config["PriorityWeightJobSize"])
+        g_config.PriorityWeight.WeightJobSize =
+            config["PriorityWeightJobSize"].as<uint32_t>();
+      else
+        g_config.PriorityWeight.WeightJobSize = 0;
+
+      if (config["PriorityWeightPartition"])
+        g_config.PriorityWeight.WeightPartition =
+            config["PriorityWeightPartition"].as<uint32_t>();
+      else
+        g_config.PriorityWeight.WeightPartition = 0;
+
+      if (config["PriorityWeightQ0S"])
+        g_config.PriorityWeight.WeightQOS =
+            config["PriorityWeightQ0S"].as<uint32_t>();
+      else
+        g_config.PriorityWeight.WeightQOS = 0;
+
+      if (config["PriorityWeightAssoc"])
+        g_config.PriorityWeight.WeightAssoc =
+            config["PriorityWeightAssoc"].as<uint32_t>();
+      else
+        g_config.PriorityWeight.WeightAssoc = 0;
+
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {
@@ -208,6 +256,7 @@ void ParseConfig(int argc, char** argv) {
           auto partition = it->as<YAML::Node>();
           std::string name;
           std::string nodes;
+          uint32_t priority;
           Ctld::Config::Partition part;
 
           if (partition["name"] && !partition["name"].IsNull()) {
@@ -225,7 +274,13 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
           }
 
+          if (partition["priority"] && !partition["priority"].IsNull()) {
+            priority = partition["priority"].as<uint32_t>();
+          } else
+            priority = 0;
+
           part.nodelist_str = nodes;
+          part.priority = priority;
           std::list<std::string> name_list;
           if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
                                    &name_list)) {
