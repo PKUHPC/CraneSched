@@ -27,16 +27,15 @@ bool MongodbClient::Connect() {
     return false;
   }
 
-  CheckAndInit();
-
-  return true;
+  return CheckDefaultRootAccountUserAndInit_();
 }
 
-void MongodbClient::CheckAndInit() {
+bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
   Qos qos;
   if (!SelectQos("name", kUnlimitedQosName, &qos)) {
     CRANE_TRACE("Default Qos {} not found, crane will create it",
                 kUnlimitedQosName);
+
     qos.name = kUnlimitedQosName;
     qos.description = "Crane default qos for unlimited resource";
     qos.priority = 0;
@@ -49,35 +48,45 @@ void MongodbClient::CheckAndInit() {
         std::remove_reference<decltype(qos.max_cpus_per_user)>::type>::max();
     qos.max_cpus_per_account = std::numeric_limits<
         std::remove_reference<decltype(qos.max_cpus_per_account)>::type>::max();
+
     if (!InsertQos(qos)) {
-      CRANE_ERROR("Insert default qos {} failed!", kUnlimitedQosName);
+      CRANE_ERROR("Failed to insert default qos {}!", kUnlimitedQosName);
+      return false;
     }
   }
 
   Account root_account;
   if (!SelectAccount("name", "ROOT", &root_account)) {
-    CRANE_TRACE("Default account ROOT not found, crane will create it");
+    CRANE_TRACE("Default account ROOT not found. insert ROOT account into DB.");
+
     root_account.name = "ROOT";
     root_account.description = "Crane default account for root user";
     root_account.default_qos = kUnlimitedQosName;
     root_account.allowed_qos_list.emplace_back(root_account.default_qos);
     root_account.users.emplace_back("root");
+
     if (!InsertAccount(root_account)) {
-      CRANE_ERROR("Insert default account ROOT failed!");
+      CRANE_ERROR("Failed to insert default ROOT account!");
+      return false;
     }
   }
 
   User root_user;
   if (!SelectUser("uid", 0, &root_user)) {
-    CRANE_TRACE("Default user root not found, crane will create it");
+    CRANE_TRACE("Default user ROOT not found. Insert it into DB.");
+
     root_user.name = "root";
     root_user.account = "ROOT";
     root_user.admin_level = User::Admin;
     root_user.uid = 0;
+
     if (!InsertUser(root_user)) {
-      CRANE_ERROR("Insert default user root failed!");
+      CRANE_ERROR("Failed to insert default user ROOT!");
+      return false;
     }
   }
+
+  return true;
 }
 
 bool MongodbClient::InsertRecoveredJob(

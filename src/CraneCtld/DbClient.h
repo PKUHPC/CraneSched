@@ -31,8 +31,6 @@ class MongodbClient {
 
   bool Connect();
 
-  void CheckAndInit();
-
   /* ----- Method of operating the job table ----------- */
   bool InsertRecoveredJob(
       crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
@@ -124,6 +122,8 @@ class MongodbClient {
       const std::source_location loc = std::source_location::current()) {
     CRANE_ERROR_LOC(loc, "MongodbError: {}\n", msg);
   }
+
+  bool CheckDefaultRootAccountUserAndInit_();
 
   template <typename V>
   void DocumentAppendItem_(document* doc, const std::string& key,
