@@ -27,25 +27,66 @@ bool MongodbClient::Connect() {
     return false;
   }
 
-  return true;
+  return CheckDefaultRootAccountUserAndInit_();
 }
 
-void MongodbClient::Init() {
-  m_instance_ = std::make_unique<mongocxx::instance>();
-  m_db_name_ = g_config.DbName;
-  std::string authentication;
+bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
+  Qos qos;
+  if (!SelectQos("name", kUnlimitedQosName, &qos)) {
+    CRANE_TRACE("Default Qos {} not found, crane will create it",
+                kUnlimitedQosName);
 
-  if (!g_config.DbUser.empty()) {
-    authentication =
-        fmt::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
+    qos.name = kUnlimitedQosName;
+    qos.description = "Crane default qos for unlimited resource";
+    qos.priority = 0;
+    qos.max_jobs_per_user = std::numeric_limits<
+        std::remove_reference<decltype(qos.max_jobs_per_user)>::type>::max();
+    qos.max_running_tasks_per_user = std::numeric_limits<std::remove_reference<
+        decltype(qos.max_running_tasks_per_user)>::type>::max();
+    qos.max_time_limit_per_task = absl::Seconds(INT64_MAX);
+    qos.max_cpus_per_user = std::numeric_limits<
+        std::remove_reference<decltype(qos.max_cpus_per_user)>::type>::max();
+    qos.max_cpus_per_account = std::numeric_limits<
+        std::remove_reference<decltype(qos.max_cpus_per_account)>::type>::max();
+
+    if (!InsertQos(qos)) {
+      CRANE_ERROR("Failed to insert default qos {}!", kUnlimitedQosName);
+      return false;
+    }
   }
 
-  m_connect_uri_ = fmt::format(
-      "mongodb://{}{}:{}/?replicaSet={}&maxPoolSize=1000", authentication,
-      g_config.DbHost, g_config.DbPort, g_config.DbRSName);
-  m_wc_majority_.acknowledge_level(mongocxx::write_concern::level::k_majority);
-  m_rc_local_.acknowledge_level(mongocxx::read_concern::level::k_local);
-  m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
+  Account root_account;
+  if (!SelectAccount("name", "ROOT", &root_account)) {
+    CRANE_TRACE("Default account ROOT not found. insert ROOT account into DB.");
+
+    root_account.name = "ROOT";
+    root_account.description = "Crane default account for root user";
+    root_account.default_qos = kUnlimitedQosName;
+    root_account.allowed_qos_list.emplace_back(root_account.default_qos);
+    root_account.users.emplace_back("root");
+
+    if (!InsertAccount(root_account)) {
+      CRANE_ERROR("Failed to insert default ROOT account!");
+      return false;
+    }
+  }
+
+  User root_user;
+  if (!SelectUser("uid", 0, &root_user)) {
+    CRANE_TRACE("Default user ROOT not found. Insert it into DB.");
+
+    root_user.name = "root";
+    root_user.account = "ROOT";
+    root_user.admin_level = User::Admin;
+    root_user.uid = 0;
+
+    if (!InsertUser(root_user)) {
+      CRANE_ERROR("Failed to insert default user ROOT!");
+      return false;
+    }
+  }
+
+  return true;
 }
 
 bool MongodbClient::InsertRecoveredJob(
@@ -145,51 +186,6 @@ bool MongodbClient::FetchJobRecords(std::list<Ctld::TaskInCtld>* task_list,
     PrintError_(e.what());
   }
 
-  return true;
-}
-
-bool MongodbClient::UpdateJobRecordField(uint64_t job_db_inx,
-                                         const std::string& field_name,
-                                         const std::string& val) {
-  uint64_t timestamp = ToUnixSeconds(absl::Now());
-
-  document filter, update;
-
-  filter.append(kvp("job_db_inx", (int64_t)job_db_inx)),
-      update.append(kvp("$set", [&](sub_document subDocument) {
-        subDocument.append(kvp("mod_time", std::to_string(timestamp)),
-                           kvp(field_name, val));
-      }));
-
-  bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      (*GetClient_())[m_db_name_][m_task_collection_name_].update_one(
-          filter.view(), update.view());
-  return true;
-}
-
-bool MongodbClient::UpdateJobRecordFields(
-    uint64_t job_db_inx, const std::list<std::string>& field_names,
-    const std::list<std::string>& values) {
-  CRANE_ASSERT(field_names.size() == values.size() && !field_names.empty());
-
-  auto builder = bsoncxx::builder::stream::document{};
-  auto array_context = builder << "$set"
-                               << bsoncxx::builder::stream::open_document;
-
-  for (auto it_k = field_names.begin(), it_v = values.begin();
-       it_k != field_names.end() && it_v != values.end(); ++it_k, ++it_v) {
-    array_context << *it_k << *it_v;
-  }
-
-  bsoncxx::document::value doc_value =
-      array_context << bsoncxx::builder::stream::close_document
-                    << bsoncxx::builder::stream::finalize;
-
-  document filter;
-  filter.append(kvp("task_db_id", std::to_string(job_db_inx)));
-  bsoncxx::stdx::optional<mongocxx::result::update> update_result =
-      (*GetClient_())[m_db_name_][m_task_collection_name_].update_one(
-          filter.view(), doc_value.view());
   return true;
 }
 
@@ -593,8 +589,8 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->name = qos_view["name"].get_string().value;
     qos->description = qos_view["description"].get_string().value;
     qos->priority = qos_view["priority"].get_int32().value;
-    qos->max_jobs_per_user = qos_view["max_jobs_per_user"].get_int32().value;
-    qos->max_cpus_per_user = qos_view["max_cpus_per_user"].get_int32().value;
+    qos->max_jobs_per_user = qos_view["max_jobs_per_user"].get_int64().value;
+    qos->max_cpus_per_user = qos_view["max_cpus_per_user"].get_int64().value;
     qos->max_time_limit_per_task =
         absl::Seconds(qos_view["max_time_limit_per_task"].get_int64().value);
   } catch (const bsoncxx::exception& e) {
@@ -611,14 +607,14 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
                                     "max_jobs_per_user",
                                     "max_cpus_per_user",
                                     "max_time_limit_per_task"};
-  std::tuple<bool, std::string, std::string, int, int, int, int64_t> values{
-      false,
-      qos.name,
-      qos.description,
-      qos.priority,
-      qos.max_jobs_per_user,
-      qos.max_cpus_per_user,
-      absl::ToInt64Seconds(qos.max_time_limit_per_task)};
+  std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t>
+      values{false,
+             qos.name,
+             qos.description,
+             qos.priority,
+             qos.max_jobs_per_user,
+             qos.max_cpus_per_user,
+             absl::ToInt64Seconds(qos.max_time_limit_per_task)};
 
   return DocumentConstructor_(fields, values);
 }
@@ -730,6 +726,25 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->cmd_line, task->ExitCode()};
 
   return DocumentConstructor_(fields, values);
+}
+
+MongodbClient::MongodbClient() {
+  m_instance_ = std::make_unique<mongocxx::instance>();
+  m_db_name_ = g_config.DbName;
+  std::string authentication;
+
+  if (!g_config.DbUser.empty()) {
+    authentication =
+        fmt::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
+  }
+
+  m_connect_uri_ = fmt::format(
+      "mongodb://{}{}:{}/?replicaSet={}&maxPoolSize=1000", authentication,
+      g_config.DbHost, g_config.DbPort, g_config.DbRSName);
+  CRANE_TRACE("Mongodb connect uri: {}", m_connect_uri_);
+  m_wc_majority_.acknowledge_level(mongocxx::write_concern::level::k_majority);
+  m_rc_local_.acknowledge_level(mongocxx::read_concern::level::k_local);
+  m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
 }
 
 }  // namespace Ctld

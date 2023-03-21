@@ -68,6 +68,11 @@ class AccountManager {
 
   Result CheckAndApplyQosLimitOnTask(const std::string& user, TaskInCtld* task);
 
+  bool PaternityTest(const std::string& parent, const std::string& child);
+
+  Result FindUserLevelAccountOfUid(const uint32_t uid, User::AdminLevel* level,
+                                   std::string* account);
+
  private:
   void InitDataMap_();
 
@@ -101,6 +106,9 @@ class AccountManager {
 
   bool DeleteUserAllowedPartitionFromDB_(const std::string& name,
                                          const std::string& partition);
+
+  bool PaternityTestNoLock_(const std::string& parent,
+                            const std::string& child);
 
   std::unordered_map<std::string /*account name*/, std::unique_ptr<Account>>
       m_account_map_;

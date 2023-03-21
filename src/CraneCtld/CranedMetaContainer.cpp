@@ -491,7 +491,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     auto* part_info = partition_list->Add();
 
     std::string partition_name = part_meta.partition_global_meta.name;
-    if (part_info->name() == g_config.DefaultPartition) {
+    if (partition_name == g_config.DefaultPartition) {
       partition_name.append("*");
     }
     part_info->set_name(std::move(partition_name));

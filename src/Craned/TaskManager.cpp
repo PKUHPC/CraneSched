@@ -1252,8 +1252,7 @@ void TaskManager::EvCheckTaskStatusCb_(int, short events, void* user_data) {
   EvQueueCheckTaskStatus elem;
   while (this_->m_check_task_status_queue_.try_dequeue(elem)) {
     task_id_t task_id = elem.task_id;
-    auto it = this_->m_task_map_.find(task_id);
-    if (it != this_->m_task_map_.end()) {
+    if (this_->m_task_map_.contains(task_id)) {
       // Found in task map. The task must be running.
       elem.status_prom.set_value({true, crane::grpc::TaskStatus::Running});
       continue;

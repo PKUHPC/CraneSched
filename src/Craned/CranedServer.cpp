@@ -492,9 +492,8 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     const crane::grpc::QueryTaskIdFromPortForwardRequest *request,
     crane::grpc::QueryTaskIdFromPortForwardReply *response) {
   // Check whether the remote address is in the addresses of CraneD nodes.
-  auto ip_iter =
-      g_config.Ipv4ToNodesHostname.find(request->target_craned_address());
-  if (ip_iter == g_config.Ipv4ToNodesHostname.end()) {
+  if (!g_config.Ipv4ToNodesHostname.contains(
+          request->target_craned_address())) {
     // Not in the addresses of CraneD nodes. This ssh request comes from a user.
     // Check if the user's uid is running a task. If so, move it in to the
     // cgroup of his first task. If not so, reject this ssh request.

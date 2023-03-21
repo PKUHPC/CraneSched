@@ -35,6 +35,7 @@ inline constexpr size_t kDefaultQueryTaskNumLimit = 100;
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kDefaultConfigPath = "/etc/crane/config.yaml";
+inline const char* kUnlimitedQosName = "UNLIMITED";
 
 #define DEFAULT_CRANE_TEMP_DIR "/tmp/crane"
 

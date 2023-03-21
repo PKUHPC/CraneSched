@@ -40,7 +40,8 @@ class ScopeExclusivePtr {
 };
 
 /**
- *
+ * @note remember to limit the lifetime of this variable to prevent the lock
+ * from not being released in time
  * @tparam T is the type of the stored pointer.
  * @tparam Lockable must have lock_shared() and unlock_shared()
  */

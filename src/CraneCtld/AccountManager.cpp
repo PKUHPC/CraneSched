@@ -1,5 +1,7 @@
 #include "AccountManager.h"
 
+#include "crane/PasswordEntry.h"
+
 namespace Ctld {
 
 AccountManager::AccountManager() { InitDataMap_(); }
@@ -855,8 +857,8 @@ bool AccountManager::CheckUserPermissionToPartition(
     return false;
   }
 
-  if (user_share_ptr->allowed_partition_qos_map.find(partition) !=
-      user_share_ptr->allowed_partition_qos_map.end()) {
+  if (user_share_ptr->uid == 0 ||
+      user_share_ptr->allowed_partition_qos_map.contains(partition)) {
     return true;
   }
   return false;
@@ -869,8 +871,6 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
     return Result{false, fmt::format("Unknown user '{}'", user)};
   }
 
-  AccountMutexSharedPtr account_share_ptr =
-      GetExistedAccountInfo(user_share_ptr->account);
   auto partition_it =
       user_share_ptr->allowed_partition_qos_map.find(task->partition_name);
   if (partition_it == user_share_ptr->allowed_partition_qos_map.end())
@@ -888,6 +888,38 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
 
   if (task->cpus_per_task > qos_share_ptr->max_cpus_per_user)
     return Result{false, "QOSResourceLimit"};
+
+  return Result{true};
+}
+
+bool AccountManager::PaternityTest(const std::string& parent,
+                                   const std::string& child) {
+  util::read_lock_guard account_guard(m_rw_account_mutex_);
+  if (parent == child || GetExistedAccountInfoNoLock_(parent) == nullptr ||
+      GetExistedAccountInfoNoLock_(child) == nullptr) {
+    return false;
+  }
+  return PaternityTestNoLock_(parent, child);
+}
+
+AccountManager::Result AccountManager::FindUserLevelAccountOfUid(
+    const uint32_t uid, User::AdminLevel* level, std::string* account) {
+  PasswordEntry entry(uid);
+  if (!entry.Valid()) {
+    return Result{false,
+                  fmt::format("Uid {} not found on the controller node", uid)};
+  }
+
+  UserMutexSharedPtr ptr = GetExistedUserInfo(entry.Username());
+  if (!ptr) {
+    return Result{
+        false,
+        fmt::format(
+            "Permission error: User '{}' not found in the account database",
+            entry.Username())};
+  }
+  if (level != nullptr) *level = ptr->admin_level;
+  if (account != nullptr) *account = ptr->account;
 
   return Result{true};
 }
@@ -1186,14 +1218,24 @@ bool AccountManager::DeleteUserAllowedPartitionFromDB_(
     return false;
   }
 
-  auto iter = user->allowed_partition_qos_map.find(partition);
-  if (iter == user->allowed_partition_qos_map.end()) {
+  if (!user->allowed_partition_qos_map.contains(partition)) {
     return false;
   }
   g_db_client->UpdateEntityOne(Ctld::MongodbClient::EntityType::USER, "$unset",
                                name, "allowed_partition_qos_map." + partition,
                                "");
   return true;
+}
+
+bool AccountManager::PaternityTestNoLock_(const std::string& parent,
+                                          const std::string& child) {
+  for (const auto& child_of_account : m_account_map_[parent]->child_accounts) {
+    if (child_of_account == child ||
+        PaternityTestNoLock_(child_of_account, child)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace Ctld
