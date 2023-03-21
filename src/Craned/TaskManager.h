@@ -200,7 +200,6 @@ class TaskManager {
   struct savedPrivilege {
     uid_t uid;
     gid_t gid;
-    std::string cwd;
   };
 
   struct EvQueueGrpcInteractiveTask {

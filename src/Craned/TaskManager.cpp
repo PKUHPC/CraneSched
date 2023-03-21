@@ -485,7 +485,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(
   savedPrivilege saved_priv;
   saved_priv.uid = getuid();
   saved_priv.gid = getgid();
-  saved_priv.cwd = get_current_dir_name();
 
   int rc = setegid(instance->pwd_entry.Gid());
   if (rc == -1) {
@@ -499,12 +498,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     CRANE_ERROR("error: seteuid. {}", strerror(errno));
     return CraneErr::kSystemErr;
   }
-  const std::string& cwd = instance->task.cwd();
-  rc = chdir(cwd.c_str());
-  if (rc == -1) {
-    CRANE_ERROR("error: chdir to {}. {}", cwd.c_str(), strerror(errno));
-    return CraneErr::kSystemErr;
-  }
 
   pid_t child_pid = fork();
   if (child_pid > 0) {  // Parent proc
@@ -516,7 +509,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     setegid(saved_priv.gid);
     seteuid(saved_priv.uid);
     setgroups(0, nullptr);
-    chdir(saved_priv.cwd.c_str());
 
     FileInputStream istream(fd);
     FileOutputStream ostream(fd);
@@ -579,6 +571,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(
       return CraneErr::kProtobufError;
     }
 
+    // Child process may finish or abort before we put its pid into maps.
+    // However, it doesn't matter because SIGCHLD will be handled after this
+    // function or event ends.
+
     // Add indexes from pid to TaskInstance*, ProcessInstance*
     m_pid_task_map_.emplace(child_pid, instance);
     m_pid_proc_map_.emplace(child_pid, process.get());
@@ -599,8 +595,14 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     }
     return err;
   } else {  // Child proc
-    // CRANE_TRACE("Set reuid to {}, regid to {}", instance->pwd_entry.Uid(),
-    //              instance->pwd_entry.Gid());
+    const std::string& cwd = instance->task.cwd();
+    rc = chdir(cwd.c_str());
+    if (rc == -1) {
+      CRANE_ERROR("[Child Process] Error: chdir to {}. {}", cwd.c_str(),
+                  strerror(errno));
+      std::abort();
+    }
+
     setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid());
     setregid(instance->pwd_entry.Gid(), instance->pwd_entry.Gid());
 
