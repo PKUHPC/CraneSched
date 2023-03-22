@@ -161,6 +161,7 @@ message TaskInfo {
   uint32 node_num = 11;
   string cmd_line = 12;
   string cwd = 13;
+  string user_name = 14;
 
   // Dynamic task information
   TaskStatus status = 31;
