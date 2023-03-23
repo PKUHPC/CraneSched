@@ -349,6 +349,19 @@ message QueryEntityInfoReply {
   repeated QosInfo qos_list = 5;
 }
 
+message BlockEntityRequest {
+  uint32 uid = 1;
+  bool block = 2;
+  EntityType entity_type = 3;
+  string name = 4;
+  string account = 5;
+}
+
+message BlockEntityReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 message MigrateSshProcToCgroupRequest {
   int32 pid = 1;
   string cgroup_path = 2;
@@ -425,6 +438,7 @@ service CraneCtld {
 
   rpc QueryEntityInfo(QueryEntityInfoRequest) returns (QueryEntityInfoReply);
   rpc ModifyEntity(ModifyEntityRequest) returns (ModifyEntityReply);
+  rpc BlockEntity(BlockEntityRequest) returns (BlockEntityReply);
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);

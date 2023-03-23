@@ -1002,8 +1002,8 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
         if (!g_account_manager->PaternityTest(user_account, request->name())) {
           response->set_ok(false);
           response->set_reason(
-              "Permission error : You do not have permission to delete a "
-              "account who not in subtree of you account");
+              "Permission error : You do not have permission to delete an "
+              "account which not in subtree of you account");
           return grpc::Status::OK;
         }
       }
@@ -1027,6 +1027,44 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
   } else {
     response->set_ok(false);
     response->set_reason(res.reason);
+  }
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::BlockEntity(
+    grpc::ServerContext *context,
+    const crane::grpc::BlockEntityRequest *request,
+    crane::grpc::BlockEntityReply *response) {
+  User::AdminLevel user_level;
+  std::string user_account;
+  AccountManager::Result res = g_account_manager->FindUserLevelAccountOfUid(
+      request->uid(), &user_level, &user_account);
+
+  switch (request->entity_type()) {
+    case crane::grpc::Account:
+      if (user_level == User::None) {
+        response->set_ok(false);
+        response->set_reason(
+            "Permission error : You do not have permission to block an "
+            "account");
+        return grpc::Status::OK;
+      } else if (user_level == User::Operator) {
+        if (!g_account_manager->PaternityTest(user_account, request->name())) {
+          response->set_ok(false);
+          response->set_reason(
+              "Permission error : You do not have permission to block an "
+              "account which not in subtree of you account");
+          return grpc::Status::OK;
+        }
+      }
+      res = g_account_manager->BlockAccount(request->name(), request->block());
+      response->set_ok(res.ok);
+      response->set_reason(res.reason);
+      break;
+    case crane::grpc::User:
+      break;
+    default:
+      break;
   }
   return grpc::Status::OK;
 }

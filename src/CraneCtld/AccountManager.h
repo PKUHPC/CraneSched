@@ -63,6 +63,8 @@ class AccountManager {
   Result ModifyQos(const std::string& name, const std::string& lhs,
                    const std::string& rhs);
 
+  Result BlockAccount(const std::string& name, const bool block);
+
   bool CheckUserPermissionToPartition(const std::string& name,
                                       const std::string& partition);
 

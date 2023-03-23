@@ -152,6 +152,7 @@ struct TaskInCtld {
   std::string cmd_line;
   std::string env;
   std::string cwd;
+  std::string qos;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
@@ -313,6 +314,7 @@ struct TaskInCtld {
     cmd_line = val.cmd_line();
     env = val.env();
     cwd = val.cwd();
+    qos = val.qos();
   }
 
   void SetFieldsByPersistedPart(

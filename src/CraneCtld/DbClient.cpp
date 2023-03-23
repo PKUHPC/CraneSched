@@ -605,23 +605,21 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
 
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
-  std::array<std::string, 8> fields{"deleted",
-                                    "name",
-                                    "description",
-                                    "reference_count",
-                                    "priority",
-                                    "max_jobs_per_user",
-                                    "max_cpus_per_user",
-                                    "max_time_limit_per_task"};
-  std::tuple<bool, std::string, std::string, int, int, int64_t , int64_t , int64_t> values{
-      false,
-      qos.name,
-      qos.description,
-      qos.reference_count,
-      qos.priority,
-      qos.max_jobs_per_user,
-      qos.max_cpus_per_user,
-      absl::ToInt64Seconds(qos.max_time_limit_per_task)};
+  std::array<std::string, 8> fields{
+      "deleted",           "name",
+      "description",       "reference_count",
+      "priority",          "max_jobs_per_user",
+      "max_cpus_per_user", "max_time_limit_per_task"};
+  std::tuple<bool, std::string, std::string, int, int, int64_t, int64_t,
+             int64_t>
+      values{false,
+             qos.name,
+             qos.description,
+             qos.reference_count,
+             qos.priority,
+             qos.max_jobs_per_user,
+             qos.max_cpus_per_user,
+             absl::ToInt64Seconds(qos.max_time_limit_per_task)};
 
   return DocumentConstructor_(fields, values);
 }

@@ -81,6 +81,7 @@ message TaskToCtld {
   string cmd_line = 31;
   string cwd = 32; // Current working directory
   string env = 33;
+  string qos = 34;
 }
 
 message TaskInEmbeddedDb {

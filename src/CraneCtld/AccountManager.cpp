@@ -468,7 +468,6 @@ AccountManager::Result AccountManager::ModifyUser(
 AccountManager::Result AccountManager::ModifyAccount(
     const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
     const std::string& name, const std::string& lhs, const std::string& rhs) {
-
   switch (operatorType) {
     case crane::grpc::ModifyEntityRequest_OperatorType_Add:
       if (lhs == "allowed_partition") {
@@ -543,6 +542,28 @@ AccountManager::Result AccountManager::ModifyQos(const std::string& name,
   return Result{true};
 }
 
+AccountManager::Result AccountManager::BlockAccount(const std::string& name,
+                                                    const bool block) {
+  util::write_lock_guard account_guard(m_rw_account_mutex_);
+
+  const Account* account = GetExistedAccountInfoNoLock_(name);
+  if (!account) {
+    return Result{false, fmt::format("Unknown account '{}'", name)};
+  }
+
+  if (account->enable != block) {
+    return Result{false, fmt::format("Account '{}' is already blocked", name)};
+  }
+
+  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
+                                    name, "enable", !block)) {
+    return Result{false, "Can't update the database"};
+  }
+  m_account_map_[name]->enable = !block;
+
+  return Result{true};
+}
+
 bool AccountManager::CheckUserPermissionToPartition(
     const std::string& name, const std::string& partition) {
   UserMutexSharedPtr user_share_ptr = GetExistedUserInfo(name);
@@ -584,13 +605,30 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
         user_share_ptr->allowed_partition_qos_map.find(task->partition_id);
     if (partition_it == user_share_ptr->allowed_partition_qos_map.end())
       return Result{false, "Partition is not allowed for this user."};
-    qos = partition_it->second.first;
-    if (qos.empty()) return Result{true};
+
+    if (task->qos.empty()) {
+      // Default qos
+      task->qos = partition_it->second.first;
+    } else {
+      // Check whether task.qos in the qos list
+      if (std::find(partition_it->second.second.begin(),
+                    partition_it->second.second.end(),
+                    task->qos) == partition_it->second.second.end()) {
+        return Result{
+            false,
+            fmt::format(
+                "The qos '{}' you set is not in partition's allowed qos list",
+                task->qos)};
+      }
+    }
+    if (task->qos.empty()) return Result{true};
   } else {
-    qos = kUnlimitedQosName;
+    if (task->qos.empty()) {
+      task->qos = kUnlimitedQosName;
+    }
   }
 
-  QosMutexSharedPtr qos_share_ptr = GetExistedQosInfo(qos);
+  QosMutexSharedPtr qos_share_ptr = GetExistedQosInfo(task->qos);
 
   if (task->time_limit == absl::ZeroDuration())
     task->time_limit = qos_share_ptr->max_time_limit_per_task;
@@ -1196,7 +1234,7 @@ AccountManager::Result AccountManager::SetAccountDefaultQos(
 
   if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
                                     name, "default_qos", qos)) {
-    return Result{false, "Can't update the  database"};
+    return Result{false, "Can't update the database"};
   }
   m_account_map_[name]->default_qos = qos;
 
