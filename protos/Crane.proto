@@ -363,7 +363,7 @@ message QueryClusterInfoRequest {
   repeated CranedState filter_craned_states = 3;
   bool filter_only_down_nodes = 4;
   bool filter_only_responding_nodes = 5;
-  bool filter_nodes_on_centric_format = 6;
+  bool option_joined_format = 6;
   bool filter_abstract_info = 7;
 }
 

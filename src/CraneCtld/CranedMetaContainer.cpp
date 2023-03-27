@@ -495,7 +495,6 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       partition_name.append("*");
     }
     part_info->set_name(std::move(partition_name));
-
     part_info->set_state(part_meta.partition_global_meta.alive_craned_cnt > 0
                              ? crane::grpc::PartitionState::PARTITION_UP
                              : crane::grpc::PartitionState::PARTITION_DOWN);
@@ -546,7 +545,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     abstract_info_count_list.emplace_back(std::to_string(down_craned_list->count()));
     abstract_info_count_list.emplace_back(std::to_string(down_craned_list->count()+mix_craned_list->count()+alloc_craned_list->count()+idle_craned_list->count()));
     part_info->set_abstract_info(boost::join(abstract_info_count_list,"/"));
-    if ( request.filter_nodes_on_centric_format() ) {
+    if ( request.option_joined_format() ) {
       idle_craned_list->set_craned_list_regex(
           boost::join(idle_craned_name_list,","));
       mix_craned_list->set_craned_list_regex(
