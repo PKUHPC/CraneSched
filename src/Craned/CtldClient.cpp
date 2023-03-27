@@ -103,7 +103,7 @@ void CtldClient::AsyncSendThread_() {
         CRANE_TRACE("Sending TaskStatusChange for task #{}",
                     status_change.task_id);
 
-        request.set_craned_index(m_craned_id_.craned_index);
+        request.set_craned_id(m_craned_id_);
         request.set_task_id(status_change.task_id);
         request.set_new_status(status_change.new_status);
         request.set_exit_code(status_change.exit_code);

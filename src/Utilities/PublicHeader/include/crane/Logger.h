@@ -119,22 +119,6 @@
     } while (false)
 #endif
 
-/**
- * Custom formatter for CranedId in fmt.
- */
-template <>
-struct fmt::formatter<CranedId> {
-  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
-    return ctx.begin();
-  }
-
-  template <typename FormatContext>
-  auto format(const CranedId& id, FormatContext& ctx) -> decltype(ctx.out()) {
-    // ctx.out() is an output iterator to write to.
-    return format_to(ctx.out(), "({}, {})", id.partition_id, id.craned_index);
-  }
-};
-
 namespace Internal {
 
 struct StaticLogFormatSetter {

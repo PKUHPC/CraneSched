@@ -872,7 +872,7 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
   }
 
   auto partition_it =
-      user_share_ptr->allowed_partition_qos_map.find(task->partition_name);
+      user_share_ptr->allowed_partition_qos_map.find(task->partition_id);
   if (partition_it == user_share_ptr->allowed_partition_qos_map.end())
     return Result{false, "Partition is not allowed for this user."};
 

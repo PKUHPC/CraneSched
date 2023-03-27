@@ -342,22 +342,9 @@ void ParseConfig(int argc, char** argv) {
                 g_config.Hostname);
     std::exit(1);
   }
-  auto part_it = g_config.Partitions.find(part_name);
-  part_id = std::distance(g_config.Partitions.begin(), part_it);
 
-  auto node_it_in_part = part_it->second.nodes.find(g_config.Hostname);
-  if (node_it_in_part == part_it->second.nodes.end()) {
-    CRANE_ERROR(
-        "This machine {} can't be found in "
-        "g_config.Partition[\"{}\"].nodes . Exit.",
-        g_config.Hostname, part_name);
-    std::exit(1);
-  }
-  node_index = std::distance(part_it->second.nodes.begin(), node_it_in_part);
-  CranedId node_id{part_id, node_index};
-  CRANE_INFO("NodeId of this machine: {}", node_id);
-
-  g_config.NodeId = node_id;
+  g_config.CranedId = g_config.Hostname;
+  CRANE_INFO("CranedId of this machine: {}", g_config.CranedId);
 }
 
 void InitSpdlog() {
@@ -442,7 +429,7 @@ void GlobalVariableInit() {
   g_task_mgr = std::make_unique<Craned::TaskManager>();
 
   g_ctld_client = std::make_unique<Craned::CtldClient>();
-  g_ctld_client->SetNodeId(g_config.NodeId);
+  g_ctld_client->SetCranedId(g_config.CranedId);
 
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
 }

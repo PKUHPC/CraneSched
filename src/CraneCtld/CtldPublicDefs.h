@@ -61,7 +61,7 @@ inline Ctld::Config g_config;
 
 namespace Ctld {
 struct InteractiveTaskAllocationDetail {
-  uint32_t craned_index;
+  CranedId craned_id;
   std::string ipv4_addr;
   uint32_t port;
   boost::uuids::uuid resource_uuid;
@@ -73,14 +73,11 @@ struct InteractiveTaskAllocationDetail {
  * CranedMetaContainer.
  */
 struct CranedStaticMeta {
-  uint32_t craned_index;  // Allocated when this node is up.
-
   std::string hostname;  // the hostname corresponds to the node index
   uint32_t port;
 
-  uint32_t partition_id;  // Allocated if partition_name is new or
-                          // use existing partition id of the partition_name.
-  std::string partition_name;  // a partition_name corresponds to partition id.
+  std::list<std::string> partition_ids;  // Partitions to which
+                                         // this craned belongs to
   Resources res;
 };
 
@@ -101,14 +98,8 @@ struct CranedMeta {
 
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
-  absl::flat_hash_map<uint32_t /*task id*/, Resources>
-      running_task_resource_map;
+  absl::flat_hash_map<task_id_t, Resources> running_task_resource_map;
 };
-
-/**
- * A map from index to craned information within a partition.
- */
-using CranedMetaMap = std::unordered_map<uint32_t, CranedMeta>;
 
 struct PartitionGlobalMeta {
   // total = avail + in-use
@@ -125,9 +116,9 @@ struct PartitionGlobalMeta {
   uint32_t alive_craned_cnt;
 };
 
-struct PartitionMetas {
+struct PartitionMeta {
   PartitionGlobalMeta partition_global_meta;
-  CranedMetaMap craned_meta_map;
+  std::unordered_set<CranedId> craned_ids;
 };
 
 struct InteractiveMetaInTask {
@@ -143,7 +134,7 @@ struct TaskInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */
   absl::Duration time_limit;
 
-  std::string partition_name;
+  PartitionId partition_id;
   Resources resources;
 
   crane::grpc::TaskType type;
@@ -179,9 +170,7 @@ struct TaskInCtld {
    * Also, these fields are persisted on the disk.
    * -------------------------------- */
   int32_t requeue_count{0};
-  uint32_t partition_id;
-  std::list<uint32_t> node_indexes;
-  std::list<std::string> nodes;
+  std::list<CranedId> craned_ids;
   crane::grpc::TaskStatus status;
   uint32_t exit_code;
 
@@ -203,8 +192,8 @@ struct TaskInCtld {
    * However, these fields are NOT persisted on the disk.
    * ----------- */
   uint32_t nodes_alloc;
-  CranedId executing_node_id;  // The root process of the task started on this
-                               // node id.
+  CranedId executing_craned_id;  // The root process of the task started on this
+                                 // node id.
   std::string allocated_craneds_regex;
 
   // Helper function
@@ -226,12 +215,6 @@ struct TaskInCtld {
   }
   task_id_t TaskDbId() const { return task_db_id; }
 
-  void SetPartitionId(uint32_t id) {
-    partition_id = id;
-    persisted_part.set_partition_id(id);
-  }
-  uint32_t PartitionId() const { return partition_id; }
-
   void SetGid(gid_t id) {
     gid = id;
     persisted_part.set_gid(id);
@@ -244,33 +227,19 @@ struct TaskInCtld {
   }
   std::string const& Account() const { return account; }
 
-  void SetNodeIndexes(std::list<uint32_t>&& val) {
-    persisted_part.mutable_node_indexes()->Assign(val.begin(), val.end());
-    node_indexes = val;
+  void SetCranedIds(std::list<CranedId>&& val) {
+    persisted_part.mutable_craned_ids()->Assign(val.begin(), val.end());
+    craned_ids = val;
   }
-  std::list<uint32_t> const& NodeIndexes() { return node_indexes; }
-  void NodeIndexesClear() {
-    node_indexes.clear();
-    persisted_part.mutable_node_indexes()->Clear();
-  }
-
-  void NodeIndexesAdd(uint32_t i) {
-    node_indexes.emplace_back(i);
-    *persisted_part.mutable_node_indexes()->Add() = i;
+  std::list<CranedId> const& CranedIds() const { return craned_ids; }
+  void CranedIdsClear() {
+    craned_ids.clear();
+    persisted_part.mutable_craned_ids()->Clear();
   }
 
-  void SetNodes(std::list<std::string>&& val) {
-    persisted_part.mutable_nodes()->Assign(val.begin(), val.end());
-    nodes = std::move(val);
-  }
-  std::list<std::string> const& Nodes() const { return nodes; }
-  void NodesAdd(std::string const& val) {
-    nodes.emplace_back(val);
-    persisted_part.mutable_nodes()->Add()->assign(val);
-  }
-  void NodesClear() {
-    nodes.clear();
-    persisted_part.mutable_nodes()->Clear();
+  void CranedIdsAdd(CranedId const& i) {
+    craned_ids.emplace_back(i);
+    *persisted_part.mutable_craned_ids()->Add() = i;
   }
 
   void SetStatus(crane::grpc::TaskStatus val) {
@@ -310,8 +279,8 @@ struct TaskInCtld {
   void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
     task_to_ctld = val;
 
-    partition_name = (val.partition_name().empty()) ? g_config.DefaultPartition
-                                                    : val.partition_name();
+    partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
+                                                  : val.partition_name();
     resources.allocatable_resource = val.resources().allocatable_resource();
     time_limit = absl::Seconds(val.time_limit().seconds());
 
@@ -341,16 +310,12 @@ struct TaskInCtld {
 
     task_id = persisted_part.task_id();
     task_db_id = persisted_part.task_db_id();
-    partition_id = persisted_part.partition_id();
     gid = persisted_part.gid();
 
-    node_indexes.assign(persisted_part.node_indexes().begin(),
-                        persisted_part.node_indexes().end());
-    executing_node_id = {partition_id, node_indexes.front()};
-    nodes_alloc = node_indexes.size();
-
-    nodes.assign(persisted_part.nodes().begin(), persisted_part.nodes().end());
-    allocated_craneds_regex = util::HostNameListToStr(nodes);
+    craned_ids.assign(persisted_part.craned_ids().begin(),
+                      persisted_part.craned_ids().end());
+    executing_craned_id = craned_ids.front();
+    nodes_alloc = craned_ids.size();
 
     status = persisted_part.status();
 

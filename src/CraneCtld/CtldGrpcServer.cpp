@@ -18,7 +18,7 @@ grpc::Status CraneCtldServiceImpl::AllocateInteractiveTask(
   CraneErr err;
   auto task = std::make_unique<TaskInCtld>();
 
-  task->partition_name = request->partition_name();
+  task->partition_id = request->partition_name();
   task->resources.allocatable_resource =
       request->required_resources().allocatable_resource();
   task->time_limit = absl::Seconds(request->time_limit_sec());
@@ -72,12 +72,12 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     task->SetAccount(user_scoped_ptr->account);
   }
 
-  if (!g_account_manager->CheckUserPermissionToPartition(
-          entry.Username(), task->partition_name)) {
+  if (!g_account_manager->CheckUserPermissionToPartition(entry.Username(),
+                                                         task->partition_id)) {
     response->set_ok(false);
     response->set_reason(fmt::format(
         "The user:{} don't have access to submit task in partition:{}",
-        task->uid, task->partition_name));
+        task->uid, task->partition_id));
     return grpc::Status::OK;
   }
 
@@ -127,7 +127,7 @@ grpc::Status CraneCtldServiceImpl::QueryInteractiveTaskAllocDetail(
     response->set_ok(true);
     response->mutable_detail()->set_ipv4_addr(detail->ipv4_addr);
     response->mutable_detail()->set_port(detail->port);
-    response->mutable_detail()->set_craned_index(detail->craned_index);
+    response->mutable_detail()->set_craned_id(detail->craned_id);
     response->mutable_detail()->set_resource_uuid(detail->resource_uuid.data,
                                                   detail->resource_uuid.size());
   } else {
@@ -157,9 +157,8 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
 
-  g_task_scheduler->TaskStatusChange(request->task_id(),
-                                     request->craned_index(), status,
-                                     request->exit_code(), reason);
+  g_task_scheduler->TaskStatusChange(request->task_id(), request->craned_id(),
+                                     status, request->exit_code(), reason);
   response->set_ok(true);
   return grpc::Status::OK;
 }
@@ -250,7 +249,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 
     task_it->set_status(task.persisted_part().status());
     task_it->set_craned_list(
-        util::HostNameListToStr(task.persisted_part().nodes()));
+        util::HostNameListToStr(task.persisted_part().craned_ids()));
   };
 
   auto ended_rng = ended_list | ranges::views::reverse |
@@ -293,7 +292,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_type(task.type);
     task_it->set_task_id(task.TaskId());
     task_it->set_name(task.name);
-    task_it->set_partition(task.partition_name);
+    task_it->set_partition(task.partition_id);
     task_it->set_uid(task.uid);
 
     task_it->set_gid(task.Gid());
@@ -319,7 +318,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
         db_ended_rng | ranges::views::filter([&](TaskInCtld &task) -> bool {
           bool res = true;
           if (!request->partition().empty()) {
-            res &= task.partition_name == request->partition();
+            res &= task.partition_id == request->partition();
           }
           if (request->task_id() != -1) {
             res &= task.TaskId() == request->task_id();

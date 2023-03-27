@@ -22,7 +22,7 @@ class CtldClient {
 
   ~CtldClient();
 
-  void SetNodeId(CranedId node_id) { m_craned_id_ = node_id; }
+  void SetCranedId(CranedId const& craned_id) { m_craned_id_ = craned_id; }
 
   /***
    * InitChannelAndStub the CtldClient to CraneCtld.
@@ -39,7 +39,7 @@ class CtldClient {
   bool CancelTaskStatusChangeByTaskId(task_id_t task_id,
                                       crane::grpc::TaskStatus* new_status);
 
-  [[nodiscard]] CranedId GetNodeId() const { return m_craned_id_; };
+  [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
 
  private:
   void AsyncSendThread_();

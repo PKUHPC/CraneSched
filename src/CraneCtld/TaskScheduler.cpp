@@ -38,7 +38,7 @@ bool TaskScheduler::Init() {
       CRANE_TRACE("Restore task #{} from embedded running queue.",
                   task->TaskId());
 
-      auto* stub = g_craned_keeper->GetCranedStub(task->executing_node_id);
+      auto* stub = g_craned_keeper->GetCranedStub(task->executing_craned_id);
       if (stub == nullptr || stub->Invalid()) {
         CRANE_INFO(
             "The execution node of the restore task #{} is down. "
@@ -48,8 +48,7 @@ bool TaskScheduler::Init() {
 
         task->nodes_alloc = 0;
         task->allocated_craneds_regex.clear();
-        task->NodeIndexesClear();
-        task->NodesClear();
+        task->CranedIdsClear();
 
         ok = g_embedded_db_client->UpdatePersistedPartOfTask(
             task->TaskDbId(), task->PersistedPart());
@@ -96,9 +95,8 @@ bool TaskScheduler::Init() {
               // in case that when processing TaskStatusChange CraneCtld
               // crashed, only part of Craned nodes executed TerminateTask gRPC.
               // Not needed for succeeded tasks.
-              for (uint32_t index : task->NodeIndexes()) {
-                CranedId node_id{task->PartitionId(), index};
-                stub = g_craned_keeper->GetCranedStub(node_id);
+              for (CranedId craned_id : task->CranedIds()) {
+                stub = g_craned_keeper->GetCranedStub(craned_id);
                 if (stub != nullptr && !stub->Invalid())
                   stub->TerminateOrphanedTask(task->TaskId());
               }
@@ -108,9 +106,8 @@ bool TaskScheduler::Init() {
             // released. Though some craned nodes might have released the
             // cgroup, just resend the gRPC again to guarantee that the cgroup
             // is always released.
-            for (uint32_t index : task->NodeIndexes()) {
-              CranedId node_id{task->PartitionId(), index};
-              stub = g_craned_keeper->GetCranedStub(node_id);
+            for (CranedId craned_id : task->CranedIds()) {
+              stub = g_craned_keeper->GetCranedStub(craned_id);
               if (stub != nullptr && !stub->Invalid())
                 stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
             }
@@ -258,7 +255,7 @@ CraneErr TaskScheduler::TryRequeueRecoveredTaskIntoPendingQueueLock_(
   err = CheckTaskValidityAndAcquireAttrs_(task.get());
   if (err != CraneErr::kOk) return err;
 
-  m_partition_to_tasks_map_[task->PartitionId()].emplace(task->TaskId());
+  m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_pending_task_map_.emplace(task->TaskId(), std::move(task));
 
   return CraneErr::kOk;
@@ -270,14 +267,13 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
-  for (uint32_t index : task->NodeIndexes()) {
-    CranedId node_id{task->PartitionId(), index};
-    g_meta_container->MallocResourceFromNode(node_id, task->TaskId(),
+  for (CranedId craned_id : task->CranedIds()) {
+    g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                              task->resources);
-    m_node_to_tasks_map_[node_id].emplace(task->TaskId());
+    m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
   }
 
-  m_partition_to_tasks_map_[task->PartitionId()].emplace(task->TaskId());
+  m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_running_task_map_.emplace(task->TaskId(), std::move(task));
 }
 
@@ -295,37 +291,36 @@ void TaskScheduler::ScheduleThread_() {
       m_running_task_map_mtx_.Lock();
 
       auto all_part_metas = g_meta_container->GetAllPartitionsMetaMapPtr();
+      auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
       std::list<INodeSelectionAlgo::NodeSelectionResult> selection_result_list;
 
-      m_node_selection_algo_->NodeSelect(*all_part_metas, m_running_task_map_,
-                                         &m_pending_task_map_,
-                                         &selection_result_list);
+      m_node_selection_algo_->NodeSelect(
+          *all_part_metas, *craned_meta_map, m_running_task_map_,
+          &m_pending_task_map_, &selection_result_list);
       m_running_task_map_mtx_.Unlock();
       m_pending_task_map_mtx_.Unlock();
 
       for (auto& it : selection_result_list) {
         auto& task = it.first;
-        uint32_t partition_id = task->PartitionId();
+        PartitionId const& partition_id = task->partition_id;
 
         task->SetStatus(crane::grpc::TaskStatus::Running);
-        task->SetNodeIndexes(std::move(it.second));
-        task->nodes_alloc = task->NodeIndexes().size();
+        task->SetCranedIds(std::move(it.second));
+        task->nodes_alloc = task->CranedIds().size();
 
-        for (uint32_t node_index : task->NodeIndexes()) {
-          CranedMeta node_meta =
-              all_part_metas->at(partition_id).craned_meta_map.at(node_index);
+        for (CranedId craned_id : task->CranedIds()) {
+          auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
 
-          CranedId node_id{partition_id, node_index};
-          g_meta_container->MallocResourceFromNode(node_id, task->TaskId(),
+          g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                                    task->resources);
 
-          task->NodesAdd(node_meta.static_meta.hostname);
+          task->CranedIdsAdd(craned_meta->static_meta.hostname);
 
           if (task->type == crane::grpc::Interactive) {
             InteractiveTaskAllocationDetail detail{
-                .craned_index = node_index,
-                .ipv4_addr = node_meta.static_meta.hostname,
-                .port = node_meta.static_meta.port,
+                .craned_id = craned_id,
+                .ipv4_addr = craned_meta->static_meta.hostname,
+                .port = craned_meta->static_meta.port,
                 .resource_uuid = m_uuid_gen_(),
             };
 
@@ -337,21 +332,21 @@ void TaskScheduler::ScheduleThread_() {
           }
 
           m_task_indexes_mtx_.Lock();
-          m_node_to_tasks_map_[node_id].emplace(task->TaskId());
+          m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
           m_task_indexes_mtx_.Unlock();
         }
 
-        task->allocated_craneds_regex = util::HostNameListToStr(task->Nodes());
+        task->allocated_craneds_regex =
+            util::HostNameListToStr(task->CranedIds());
 
         // For the task whose --node > 1, only execute the command at the first
         // allocated node.
-        CranedId first_node_id{partition_id, task->NodeIndexes().front()};
-        task->executing_node_id = first_node_id;
+        CranedId const& first_node_id = task->CranedIds().front();
+        task->executing_craned_id = first_node_id;
 
-        for (auto iter : task->NodeIndexes()) {
-          CranedId node_id{partition_id, iter};
-          CranedStub* stub = g_craned_keeper->GetCranedStub(node_id);
-          CRANE_TRACE("Send CreateCgroupForTask to {}: ", node_id);
+        for (CranedId const& craned_id : task->CranedIds()) {
+          CranedStub* stub = g_craned_keeper->GetCranedStub(craned_id);
+          CRANE_TRACE("Send CreateCgroupForTask to {}: ", craned_id);
           stub->CreateCgroupForTask(task->TaskId(), task->uid);
         }
 
@@ -416,7 +411,7 @@ CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
   *task_id = task->TaskId();
 
   m_task_indexes_mtx_.Lock();
-  m_partition_to_tasks_map_[task->PartitionId()].emplace(task->TaskId());
+  m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_task_indexes_mtx_.Unlock();
 
   m_pending_task_map_mtx_.Lock();
@@ -427,7 +422,7 @@ CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
 }
 
 void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
-                                            uint32_t craned_index,
+                                            const CranedId& craned_index,
                                             crane::grpc::TaskStatus new_status,
                                             uint32_t exit_code) {
   auto iter = m_running_task_map_.find(task_id);
@@ -442,7 +437,7 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
     g_ctld_server->RemoveAllocDetailOfIaTask(task_id);
   }
 
-  CRANE_DEBUG("TaskStatusChange: Task #{} {}->{} In Node #{}", task_id,
+  CRANE_DEBUG("TaskStatusChange: Task #{} {}->{} In Node {}", task_id,
               task->Status(), new_status, craned_index);
 
   if (new_status == crane::grpc::Finished) {
@@ -459,23 +454,22 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
   g_embedded_db_client->UpdatePersistedPartOfTask(task->TaskDbId(),
                                                   task->PersistedPart());
 
-  for (auto&& task_node_index : task->NodeIndexes()) {
-    CranedId task_node_id{task->PartitionId(), task_node_index};
-    g_meta_container->FreeResourceFromNode(task_node_id, task_id);
+  for (CranedId const& craned_id : task->CranedIds()) {
+    g_meta_container->FreeResourceFromNode(craned_id, task_id);
 
-    auto* stub = g_craned_keeper->GetCranedStub(task_node_id);
+    auto* stub = g_craned_keeper->GetCranedStub(craned_id);
     if (!stub->Invalid()) {
       CraneErr err = stub->ReleaseCgroupForTask(task_id, task->uid);
       if (err != CraneErr::kOk) {
         CRANE_ERROR("Failed to Release cgroup RPC for task#{} on Node {}",
-                    task_id, task_node_id);
+                    task_id, craned_id);
       }
     }
 
-    auto node_to_task_map_it = m_node_to_tasks_map_.find(task_node_id);
+    auto node_to_task_map_it = m_node_to_tasks_map_.find(craned_id);
     if (node_to_task_map_it == m_node_to_tasks_map_.end()) [[unlikely]] {
       CRANE_ERROR("Failed to find craned_id {} in m_node_to_tasks_map_",
-                  task_node_id);
+                  craned_id);
     } else {
       node_to_task_map_it->second.erase(task_id);
       if (node_to_task_map_it->second.empty()) {
@@ -499,7 +493,7 @@ bool TaskScheduler::QueryCranedIdOfRunningTaskNoLock_(uint32_t task_id,
   auto iter = m_running_task_map_.find(task_id);
   if (iter == m_running_task_map_.end()) return false;
 
-  *node_id = iter->second->executing_node_id;
+  *node_id = iter->second->executing_craned_id;
 
   return true;
 }
@@ -530,7 +524,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   auto rng_filter_partition = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
     return request.filter_partition().empty() ||
-           task->partition_name == request.filter_partition();
+           task->partition_id == request.filter_partition();
   };
 
   auto rng_filter_account = [&](auto& it) {
@@ -559,7 +553,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     std::unique_ptr<TaskInCtld>& task = it.second;
     if (request.filter_nodes().empty()) return true;
 
-    for (const auto& node : task->Nodes())
+    for (const auto& node : task->CranedIds())
       if (filter_nodes_set.contains(node)) return true;
 
     return false;
@@ -674,7 +668,7 @@ void TaskScheduler::QueryTasksInRam(
 
     task_it->set_status(task.PersistedPart().status());
     task_it->set_craned_list(
-        util::HostNameListToStr(task.PersistedPart().nodes()));
+        util::HostNameListToStr(task.PersistedPart().craned_ids()));
   };
 
   auto pending_rng = m_pending_task_map_ | ranges::views::all;
@@ -687,7 +681,7 @@ void TaskScheduler::QueryTasksInRam(
           std::unique_ptr<TaskInCtld>& task = it.second;
           bool res = true;
           if (!request->partition().empty()) {
-            res &= task->partition_name == request->partition();
+            res &= task->partition_id == request->partition();
           }
           if (request->task_id() != -1) {
             res &= task->TaskId() == request->task_id();
@@ -703,20 +697,22 @@ void TaskScheduler::QueryTasksInRam(
 void MinLoadFirst::CalculateNodeSelectionInfo_(
     const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
         running_tasks,
-    absl::Time now, uint32_t partition_id,
-    const PartitionMetas& partition_metas, uint32_t node_id,
-    const CranedMeta& node_meta, NodeSelectionInfo* node_selection_info) {
+    absl::Time now, const PartitionId& partition_id,
+    const PartitionMeta& partition_metas,
+    const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
+    const CranedId& craned_id, const CranedMeta& node_meta,
+    NodeSelectionInfo* node_selection_info) {
   NodeSelectionInfo& node_selection_info_ref = *node_selection_info;
 
   node_selection_info_ref.task_num_node_id_map.emplace(
-      node_meta.running_task_resource_map.size(), node_id);
+      node_meta.running_task_resource_map.size(), craned_id);
 
   // Sort all running task in this node by ending time.
   std::vector<std::pair<absl::Time, uint32_t>> end_time_task_id_vec;
   for (const auto& [task_id, running_task] : running_tasks) {
-    if (running_task->PartitionId() == partition_id &&
-        std::count(running_task->NodeIndexes().begin(),
-                   running_task->NodeIndexes().end(), node_id) > 0)
+    if (running_task->partition_id == partition_id &&
+        std::count(running_task->CranedIds().begin(),
+                   running_task->CranedIds().end(), craned_id) > 0)
       end_time_task_id_vec.emplace_back(
           running_task->StartTime() + running_task->time_limit, task_id);
   }
@@ -728,7 +724,7 @@ void MinLoadFirst::CalculateNodeSelectionInfo_(
   {
     if (!end_time_task_id_vec.empty()) {
       std::string str;
-      str.append(fmt::format("Node ({}, {}): ", partition_id, node_id));
+      str.append(fmt::format("Node ({}, {}): ", partition_id, craned_id));
       for (auto [end_time, task_id] : end_time_task_id_vec) {
         str.append(fmt::format("Task #{} ends after {}s ", task_id,
                                absl::ToInt64Seconds(end_time - now)));
@@ -741,7 +737,7 @@ void MinLoadFirst::CalculateNodeSelectionInfo_(
   // Calculate how many resources are available at [now, first task end,
   //  second task end, ...] in this node.
   auto& time_avail_res_map =
-      node_selection_info_ref.node_time_avail_res_map[node_id];
+      node_selection_info_ref.node_time_avail_res_map[craned_id];
 
   // Insert [now, inf) interval and thus guarantee time_avail_res_map is not
   // null.
@@ -771,7 +767,7 @@ void MinLoadFirst::CalculateNodeSelectionInfo_(
 #ifndef NDEBUG
     {
       std::string str;
-      str.append(fmt::format("Node ({}, {}): ", partition_id, node_id));
+      str.append(fmt::format("Node ({}, {}): ", partition_id, craned_id));
       auto prev_iter = time_avail_res_map.begin();
       auto iter = std::next(prev_iter);
       for (; iter != time_avail_res_map.end(); prev_iter++, iter++) {
@@ -797,21 +793,23 @@ void MinLoadFirst::CalculateNodeSelectionInfo_(
 
 bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     const NodeSelectionInfo& node_selection_info,
-    const PartitionMetas& partition_metas, const TaskInCtld* task,
-    absl::Time now, std::list<uint32_t>* node_ids, absl::Time* start_time) {
+    const PartitionMeta& partition_metas,
+    const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
+    const TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
+    absl::Time* start_time) {
   uint32_t selected_node_cnt = 0;
   auto task_num_node_id_it = node_selection_info.task_num_node_id_map.begin();
   std::vector<TimeSegment> intersected_time_segments;
   bool first_pass{true};
 
-  std::list<uint32_t> craned_indexes_;
+  std::list<CranedId> craned_indexes_;
   while (selected_node_cnt < task->node_num &&
          task_num_node_id_it !=
              node_selection_info.task_num_node_id_map.end()) {
     auto craned_index = task_num_node_id_it->second;
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_index);
-    auto& craned_meta = partition_metas.craned_meta_map.at(craned_index);
+    auto& craned_meta = craned_meta_map.at(craned_index);
 
     if (!(task->resources <= craned_meta.res_total)) {
       CRANE_TRACE(
@@ -829,10 +827,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   CRANE_ASSERT_MSG(selected_node_cnt == task->node_num,
                    "selected_node_cnt != task->node_num");
 
-  for (uint32_t craned_id : craned_indexes_) {
+  for (CranedId craned_id : craned_indexes_) {
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_id);
-    auto& node_meta = partition_metas.craned_meta_map.at(craned_id);
+    auto& node_meta = craned_meta_map.at(craned_id);
 
     // Find all valid time segments in this node for this task.
     // The expected start time must exist because all tasks in pending_task_map
@@ -1017,7 +1015,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     }
   }
 
-  *node_ids = std::move(craned_indexes_);
+  *craned_ids = std::move(craned_indexes_);
 
   // Calculate the earliest start time
   for (auto&& seg : intersected_time_segments) {
@@ -1033,12 +1031,12 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 void MinLoadFirst::NodeSelect(
     const CranedMetaContainerInterface::AllPartitionsMetaMap&
         all_partitions_meta_map,
-    const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
+    const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
+    const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>&
         running_tasks,
-    absl::btree_map<uint32_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
+    absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
     std::list<NodeSelectionResult>* selection_result_list) {
-  std::unordered_map<uint32_t /* Partition ID */, NodeSelectionInfo>
-      part_id_node_info_map;
+  std::unordered_map<PartitionId, NodeSelectionInfo> part_id_node_info_map;
 
   // Truncated by 1s.
   // We use
@@ -1046,13 +1044,14 @@ void MinLoadFirst::NodeSelect(
 
   // Calculate NodeSelectionInfo for all partitions
   for (auto& [partition_id, partition_metas] : all_partitions_meta_map) {
-    for (auto& [node_index, node_meta] : partition_metas.craned_meta_map) {
-      if (node_meta.alive) {
+    for (auto& craned_id : partition_metas.craned_ids) {
+      CranedMeta const& craned_meta = craned_meta_map.at(craned_id);
+      if (craned_meta.alive) {
         NodeSelectionInfo& node_info_in_a_partition =
             part_id_node_info_map[partition_id];
         CalculateNodeSelectionInfo_(running_tasks, now, partition_id,
-                                    partition_metas, node_index, node_meta,
-                                    &node_info_in_a_partition);
+                                    partition_metas, craned_meta_map, craned_id,
+                                    craned_meta, &node_info_in_a_partition);
       }
     }
   }
@@ -1065,16 +1064,17 @@ void MinLoadFirst::NodeSelect(
   //  task to run in its partition.
   for (auto pending_task_it = pending_task_map->begin();
        pending_task_it != pending_task_map->end();) {
-    uint32_t part_id = pending_task_it->second->PartitionId();
+    PartitionId const& part_id = pending_task_it->second->partition_id;
     auto& task = pending_task_it->second;
 
     NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
     auto& part_meta = all_partitions_meta_map.at(part_id);
 
-    std::list<uint32_t> node_ids;
+    std::list<CranedId> node_ids;
     absl::Time expected_start_time;
     bool ok = CalculateRunningNodesAndStartTime_(
-        node_info, part_meta, task.get(), now, &node_ids, &expected_start_time);
+        node_info, part_meta, craned_meta_map, task.get(), now, &node_ids,
+        &expected_start_time);
     if (!ok) {
       ++pending_task_it;
       continue;
@@ -1083,7 +1083,7 @@ void MinLoadFirst::NodeSelect(
     // The start time and node ids have been determined.
     // Modify the corresponding NodeSelectionInfo now.
 
-    for (uint32_t node_id : node_ids) {
+    for (CranedId const& node_id : node_ids) {
       // Increase the running task num in the local variable.
 
       for (auto it = node_info.task_num_node_id_map.begin();
@@ -1295,12 +1295,8 @@ void TaskScheduler::TransferTaskToMongodb_(TaskInCtld* task) {
 }
 
 CraneErr TaskScheduler::CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task) {
-  uint32_t partition_id;
-  if (!g_meta_container->GetPartitionId(task->partition_name, &partition_id))
-    return CraneErr::kNonExistent;
-
   // Check whether the selected partition is able to run this task.
-  auto metas_ptr = g_meta_container->GetPartitionMetasPtr(partition_id);
+  auto metas_ptr = g_meta_container->GetPartitionMetasPtr(task->partition_id);
   if (task->node_num > metas_ptr->partition_global_meta.alive_craned_cnt) {
     CRANE_TRACE(
         "Task #{}'s node-num {} is greater than the number of "
@@ -1325,9 +1321,14 @@ CraneErr TaskScheduler::CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task) {
     return CraneErr::kNoResource;
   }
 
+  auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
+
   bool fit_in_a_node = false;
-  for (auto&& [node_index, node_meta] : metas_ptr->craned_meta_map) {
-    if (!(task->resources <= node_meta.res_total)) continue;
+  for (CranedId const& craned_id : metas_ptr->craned_ids) {
+    // Todo: Bug! Not applicable to a task with the num of required nodes > 0
+    CranedMeta const& craned_meta = craned_meta_map->at(craned_id);
+
+    if (!(task->resources <= craned_meta.res_total)) continue;
     fit_in_a_node = true;
     break;
   }
@@ -1335,8 +1336,6 @@ CraneErr TaskScheduler::CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task) {
     CRANE_TRACE("Resource not enough. Task cannot fit in any node.");
     return CraneErr::kNoResource;
   }
-
-  task->SetPartitionId(partition_id);
 
   return CraneErr::kOk;
 }
@@ -1356,7 +1355,7 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
     std::vector<task_id_t> task_ids(it->second.begin(), it->second.end());
 
     for (task_id_t task_id : task_ids)
-      TaskStatusChangeNoLock_(task_id, craned_id.craned_index,
+      TaskStatusChangeNoLock_(task_id, craned_id,
                               crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeTerminal);
   } else {

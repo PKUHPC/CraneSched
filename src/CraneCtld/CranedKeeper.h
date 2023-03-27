@@ -17,11 +17,6 @@ namespace Ctld {
 
 class CranedKeeper;
 
-struct CranedAddrAndId {
-  std::string node_addr;
-  CranedId node_id;
-};
-
 /**
  * A class that encapsulate the detail of the underlying gRPC stub.
  */
@@ -61,7 +56,7 @@ class CranedStub {
   uint32_t m_maximum_retry_times_;
   uint32_t m_failure_retry_times_;
 
-  CranedAddrAndId m_addr_and_id_;
+  CranedId m_craned_id_;
 
   // void* parameter is m_data_. Used to free m_data_ when CranedStub is being
   // destructed.
@@ -76,7 +71,7 @@ class CranedKeeper {
 
   ~CranedKeeper();
 
-  void InitAndRegisterCraneds(std::list<CranedAddrAndId> node_addr_id_list);
+  void InitAndRegisterCraneds(std::list<CranedId> craned_id_list);
 
   uint32_t AvailableCranedCount();
 
@@ -117,7 +112,7 @@ class CranedKeeper {
 
   static void PutBackNodeIntoUnavailList_(CranedStub *stub);
 
-  void ConnectCranedNode_(CranedAddrAndId addr_info);
+  void ConnectCranedNode_(CranedId const &craned_id);
 
   CqTag *InitCranedStateMachine_(InitializingCranedTagData *tag_data,
                                  grpc_connectivity_state new_state);
@@ -156,11 +151,10 @@ class CranedKeeper {
   // locate the first empty slot.
   boost::dynamic_bitset<> m_empty_slot_bitset_;
 
-  std::unordered_map<CranedId, uint32_t, CranedId::Hash>
-      m_craned_id_slot_offset_map_;
+  std::unordered_map<CranedId, uint32_t> m_craned_id_slot_offset_map_;
 
   util::mutex m_unavail_craned_list_mtx_;
-  std::list<CranedAddrAndId> m_unavail_craned_list_;
+  std::list<CranedId> m_unavail_craned_list_;
 
   // Protect m_alive_craned_bitset_
   util::rw_mutex m_alive_craned_rw_mtx_;

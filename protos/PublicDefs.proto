@@ -91,17 +91,15 @@ message TaskInEmbeddedDb {
 message PersistedPartOfTaskInCtld {
   // Fields that won't change after this task is accepted.
   uint32 task_id = 1;
-  uint32 partition_id = 2;
   int64 task_db_id = 3;
   int32 gid = 4;
   string account = 5;
 
   // Fields that will change after this task is accepted.
   int32 requeue_count = 11;
-  repeated uint32 node_indexes = 12;
-  repeated string nodes = 13;
-  TaskStatus status = 14;
-  uint32 exit_code = 15;
+  repeated string craned_ids = 12;
+  TaskStatus status = 13;
+  uint32 exit_code = 14;
 
   google.protobuf.Timestamp start_time = 16;
   google.protobuf.Timestamp end_time = 17;
@@ -195,7 +193,7 @@ message CranedInfo {
   uint64 real_mem = 6;
   uint64 alloc_mem = 7;
   uint64 free_mem = 8;
-  string partition_name = 9;
+  repeated string partition_names = 9;
   uint32 running_task_num = 10;
 }
 
