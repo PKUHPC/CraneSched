@@ -387,10 +387,10 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       request.filter_craned_states().begin(),
       request.filter_craned_states().end());
   bool no_craned_state_constraint = request.filter_craned_states().empty();
-  auto craned_rng_filter_state = [&](auto& it) {
+  auto craned_rng_filter_state = [&](CranedMetaMap::iterator it) {
     if (no_craned_state_constraint) return true;
 
-    CranedMeta& craned_meta = it.second;
+    CranedMeta& craned_meta = it->second;
     auto& res_total = craned_meta.res_total.allocatable_resource;
     auto& res_in_use = craned_meta.res_in_use.allocatable_resource;
     auto& res_avail = craned_meta.res_avail.allocatable_resource;
@@ -411,19 +411,19 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   };
 
   bool no_craned_hostname_constraint = request.filter_nodes().empty();
-  auto craned_rng_filter_hostname = [&](auto& it) {
-    auto& craned_meta = it.second;
+  auto craned_rng_filter_hostname = [&](CranedMetaMap::iterator it) {
+    auto& craned_meta = it->second;
     return no_craned_hostname_constraint ||
            req_nodes.contains(craned_meta.static_meta.hostname);
   };
 
-  auto craned_rng_filter_only_responding = [&](auto& it) {
-    CranedMeta& craned_meta = it.second;
+  auto craned_rng_filter_only_responding = [&](CranedMetaMap::iterator it) {
+    CranedMeta& craned_meta = it->second;
     return !request.filter_only_responding_nodes() || craned_meta.alive;
   };
 
-  auto craned_rng_filter_only_down = [&](auto& it) {
-    CranedMeta& craned_meta = it.second;
+  auto craned_rng_filter_only_down = [&](CranedMetaMap::iterator it) {
+    CranedMeta& craned_meta = it->second;
     return !request.filter_only_down_nodes() || !craned_meta.alive;
   };
 
@@ -460,13 +460,18 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     std::list<std::string> idle_craned_name_list, mix_craned_name_list,
         alloc_craned_name_list, down_craned_name_list;
 
-    auto craned_rng = craned_meta_map_ |
-                      ranges::views::filter(craned_rng_filter_hostname) |
-                      ranges::views::filter(craned_rng_filter_state) |
-                      ranges::views::filter(craned_rng_filter_only_down) |
-                      ranges::views::filter(craned_rng_filter_only_responding);
-    ranges::for_each(craned_rng, [&](auto& it) {
-      CranedMeta& craned_meta = it.second;
+    auto craned_rng =
+        part_meta.craned_ids |
+        ranges::views::transform(
+            [&](CranedId const& craned_id) -> CranedMetaMap::iterator {
+              return craned_meta_map_.find(craned_id);
+            }) |
+        ranges::views::filter(craned_rng_filter_hostname) |
+        ranges::views::filter(craned_rng_filter_state) |
+        ranges::views::filter(craned_rng_filter_only_down) |
+        ranges::views::filter(craned_rng_filter_only_responding);
+    ranges::for_each(craned_rng, [&](CranedMetaMap::iterator it) {
+      CranedMeta& craned_meta = it->second;
       auto& res_total = craned_meta.res_total.allocatable_resource;
       auto& res_in_use = craned_meta.res_in_use.allocatable_resource;
       auto& res_avail = craned_meta.res_avail.allocatable_resource;
@@ -474,7 +479,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
         if (res_in_use.cpu_count == 0 && res_in_use.memory_bytes == 0) {
           idle_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
           idle_craned_list->set_count(idle_craned_name_list.size());
-        } else if (res_avail.cpu_count == 0 && res_avail.memory_bytes == 0) {
+        } else if (res_avail.cpu_count == 0 || res_avail.memory_bytes == 0) {
           alloc_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
           alloc_craned_list->set_count(alloc_craned_name_list.size());
         } else {

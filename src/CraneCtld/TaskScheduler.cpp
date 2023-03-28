@@ -311,9 +311,6 @@ void TaskScheduler::ScheduleThread_() {
         for (CranedId craned_id : task->CranedIds()) {
           auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
 
-          g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
-                                                   task->resources);
-
           if (task->type == crane::grpc::Interactive) {
             InteractiveTaskAllocationDetail detail{
                 .craned_id = craned_id,
@@ -749,17 +746,22 @@ void MinLoadFirst::CalculateNodeSelectionInfo_(
       const auto& running_task = running_tasks.at(task_id);
       if (time_avail_res_map.count(end_time + absl::Seconds(1)) == 0) {
         /**
-         * For the situation in which multiple tasks may end at the same
-         * time:
-         * end_time__task_id_vec: [{now+1, 1}, {now+1, 2}, ...]
-         * But we want only 1 time point in time__avail_res__map:
-         * {{now+1+1: available_res(now) + available_res(1) +
-         *  available_res(2)}, ...}
+         * If there isn't any task that ends at the `end_time`,
+         * insert an interval [end_time + 1, inf) with the resource of
+         * the previous interval.
          */
         std::tie(prev_time_iter, ok) = time_avail_res_map.emplace(
             end_time + absl::Seconds(1), prev_time_iter->second);
       }
 
+      /**
+       * For the situation in which multiple tasks may end at the same
+       * time:
+       * end_time__task_id_vec: [{now+1, 1}, {now+1, 2}, ...]
+       * But we want only 1 time point in time__avail_res__map:
+       * {{now+1+1: available_res(now) + available_res(1) +
+       *  available_res(2)}, ...}
+       */
       time_avail_res_map[end_time + absl::Seconds(1)] +=
           running_task->resources;
     }
@@ -797,15 +799,22 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     const TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
     absl::Time* start_time) {
   uint32_t selected_node_cnt = 0;
-  auto task_num_node_id_it = node_selection_info.task_num_node_id_map.begin();
   std::vector<TimeSegment> intersected_time_segments;
   bool first_pass{true};
 
   std::list<CranedId> craned_indexes_;
+
+  auto task_num_node_id_it = node_selection_info.task_num_node_id_map.begin();
   while (selected_node_cnt < task->node_num &&
          task_num_node_id_it !=
              node_selection_info.task_num_node_id_map.end()) {
     auto craned_index = task_num_node_id_it->second;
+    if (!partition_metas.craned_ids.contains(craned_index)) {
+      // Todo: Performance issue! Fix it.
+      ++task_num_node_id_it;
+      continue;
+    }
+
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_index);
     auto& craned_meta = craned_meta_map.at(craned_index);
@@ -835,7 +844,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     // The expected start time must exist because all tasks in pending_task_map
     // can be run under the amount of all resources in this node. At some future
     // time point, all tasks will end and this pending task can eventually be
-    // run.
+    // run because the total resource of all the nodes in `craned_indexes` >=
+    // the resource required by the task.
     auto task_duration_it = time_avail_res_map.begin();
 
     absl::Time end_time = task_duration_it->first + task->time_limit;
@@ -1037,8 +1047,17 @@ void MinLoadFirst::NodeSelect(
     std::list<NodeSelectionResult>* selection_result_list) {
   std::unordered_map<PartitionId, NodeSelectionInfo> part_id_node_info_map;
 
+  // Because a Craned node may belong to multiple partitions, tasks must be
+  // grouped according to their respective partitions. Subsequently,
+  // scheduling is done by groups, one group at a time.
+  HashMap<PartitionId, HashMap<task_id_t, TaskInCtld*>> part_pending_tasks_map;
+  for (const auto& [task_id, task_unique_ptr] : *pending_task_map) {
+    part_pending_tasks_map[task_unique_ptr->partition_id].emplace(
+        task_id, task_unique_ptr.get());
+  }
+
   // Truncated by 1s.
-  // We use
+  // We use the time now as the base time across the whole algorithm.
   absl::Time now = absl::FromUnixSeconds(ToUnixSeconds(absl::Now()));
 
   // Calculate NodeSelectionInfo for all partitions
@@ -1055,216 +1074,240 @@ void MinLoadFirst::NodeSelect(
     }
   }
 
-  // Now we know, on each node in all partitions, the # of running tasks (which
+  // Now we know, on every node, the # of running tasks (which
   //  doesn't include those we select as the incoming running tasks in the
   //  following code) and how many resources are available at the end of each
   //  task.
   // Iterate over all the pending tasks and select the available node for the
   //  task to run in its partition.
-  for (auto pending_task_it = pending_task_map->begin();
-       pending_task_it != pending_task_map->end();) {
-    PartitionId const& part_id = pending_task_it->second->partition_id;
-    auto& task = pending_task_it->second;
+  for (auto& [part_id, part_pending_tasks] : part_pending_tasks_map) {
+    for (auto pending_task_it = part_pending_tasks.begin();
+         pending_task_it != part_pending_tasks.end();) {
+      auto& task = pending_task_it->second;
 
-    NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
-    auto& part_meta = all_partitions_meta_map.at(part_id);
+      NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
+      auto& part_meta = all_partitions_meta_map.at(part_id);
 
-    std::list<CranedId> node_ids;
-    absl::Time expected_start_time;
-    bool ok = CalculateRunningNodesAndStartTime_(
-        node_info, part_meta, craned_meta_map, task.get(), now, &node_ids,
-        &expected_start_time);
-    if (!ok) {
-      ++pending_task_it;
-      continue;
-    }
-
-    // The start time and node ids have been determined.
-    // Modify the corresponding NodeSelectionInfo now.
-
-    for (CranedId const& node_id : node_ids) {
-      // Increase the running task num in the local variable.
-
-      for (auto it = node_info.task_num_node_id_map.begin();
-           it != node_info.task_num_node_id_map.end(); ++it) {
-        if (it->second == node_id) {
-          uint32_t num_task = it->first + 1;
-          node_info.task_num_node_id_map.erase(it);
-          node_info.task_num_node_id_map.emplace(num_task, node_id);
-        }
+      std::list<CranedId> node_ids;
+      absl::Time expected_start_time;
+      bool ok = CalculateRunningNodesAndStartTime_(
+          node_info, part_meta, craned_meta_map, task, now, &node_ids,
+          &expected_start_time);
+      if (!ok) {
+        ++pending_task_it;
+        continue;
       }
 
-      TimeAvailResMap& time_avail_res_map =
-          node_info.node_time_avail_res_map[node_id];
+      // The start time and node ids have been determined.
+      // Modify the corresponding NodeSelectionInfo now.
 
-      absl::Time task_end_time_plus_1s =
-          expected_start_time + task->time_limit + absl::Seconds(1);
-      // #ifndef NDEBUG
-      //       CRANE_TRACE("\t task #{} end time + 1s = {}, ", task_id,
-      //                    absl::ToInt64Seconds(task_end_time_plus_1s - now));
-      // #endif
-      // #ifndef NDEBUG
-      //         if (task_duration_end_it == time_avail_res_map.end())
-      //           CRANE_TRACE(
-      //               "\t Insert duration [ now+{}s , inf ) : cpu: {} for task
-      //               #{}", absl::ToInt64Seconds(task_end_time_plus_1s - now),
-      //               task_duration_end_it->second.allocatable_resource.cpu_count,
-      //               task_id);
-      //         else
-      //           CRANE_TRACE(
-      //               "\t Insert duration [ now+{}s , now+{}s ) : cpu: {} for
-      //               task #{}", absl::ToInt64Seconds(task_end_time_plus_1s -
-      //               now), absl::ToInt64Seconds(task_duration_end_it->first -
-      //               now),
-      //               task_duration_end_it->second.allocatable_resource.cpu_count,
-      //               task_id);
-      // #endif
-      //
-      //         task_duration_end_it
-      //                         v
-      //  *-----------*----------*-------------- time_avail_res_map (Time Point)
-      //                   ^^
-      //    task_end_time--||-----time_end_time_plus_1s
-      //   time_avail_res_map.count(task_end_time_plus_1s) == 0 holds.
+      for (CranedId const& node_id : node_ids) {
+        // Increase the running task num in the local variable.
 
-      auto task_duration_begin_it =
-          time_avail_res_map.upper_bound(expected_start_time);
-      if (task_duration_begin_it == time_avail_res_map.end()) {
-        --task_duration_begin_it;
-        // Situation #1
-        //                     task duration
-        //                   |<-------------->|
-        // *-----------------*--------------------
-        // OR Situation #2
-        //                      |<-------------->|
-        // *-----------------*----------------------
-        //                   ^
-        //        task_duration_begin_it
+        for (auto it = node_info.task_num_node_id_map.begin();
+             it != node_info.task_num_node_id_map.end(); ++it) {
+          if (it->second == node_id) {
+            uint32_t num_task = it->first + 1;
+            node_info.task_num_node_id_map.erase(it);
+            node_info.task_num_node_id_map.emplace(num_task, node_id);
+          }
+        }
 
-        TimeAvailResMap::iterator inserted_it;
-        std::tie(inserted_it, ok) = time_avail_res_map.emplace(
-            task_end_time_plus_1s, task_duration_begin_it->second);
-        CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
+        TimeAvailResMap& time_avail_res_map =
+            node_info.node_time_avail_res_map[node_id];
 
-        if (task_duration_begin_it->first == expected_start_time) {
+        absl::Time task_end_time_plus_1s =
+            expected_start_time + task->time_limit + absl::Seconds(1);
+        // #ifndef NDEBUG
+        //       CRANE_TRACE("\t task #{} end time + 1s = {}, ", task_id,
+        //                    absl::ToInt64Seconds(task_end_time_plus_1s -
+        //                    now));
+        // #endif
+        // #ifndef NDEBUG
+        //         if (task_duration_end_it == time_avail_res_map.end())
+        //           CRANE_TRACE(
+        //               "\t Insert duration [ now+{}s , inf ) : cpu: {} for
+        //               task
+        //               #{}", absl::ToInt64Seconds(task_end_time_plus_1s -
+        //               now),
+        //               task_duration_end_it->second.allocatable_resource.cpu_count,
+        //               task_id);
+        //         else
+        //           CRANE_TRACE(
+        //               "\t Insert duration [ now+{}s , now+{}s ) : cpu: {} for
+        //               task #{}", absl::ToInt64Seconds(task_end_time_plus_1s -
+        //               now), absl::ToInt64Seconds(task_duration_end_it->first
+        //               - now),
+        //               task_duration_end_it->second.allocatable_resource.cpu_count,
+        //               task_id);
+        // #endif
+        //
+        //         task_duration_end_it
+        //                         v
+        //  *-----------*----------*-------------- time_avail_res_map (Time
+        //  Point)
+        //                   ^^
+        //    task_end_time--||-----time_end_time_plus_1s
+        //   time_avail_res_map.count(task_end_time_plus_1s) == 0 holds.
+
+        auto task_duration_begin_it =
+            time_avail_res_map.upper_bound(expected_start_time);
+        if (task_duration_begin_it == time_avail_res_map.end()) {
+          --task_duration_begin_it;
           // Situation #1
-          task_duration_begin_it->second -= task->resources;
+          //                     task duration
+          //                   |<-------------->|
+          // *-----------------*--------------------
+          // OR Situation #2
+          //                      |<-------------->|
+          // *-----------------*----------------------
+          //                   ^
+          //        task_duration_begin_it
+
+          TimeAvailResMap::iterator inserted_it;
+          std::tie(inserted_it, ok) = time_avail_res_map.emplace(
+              task_end_time_plus_1s, task_duration_begin_it->second);
+          CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
+
+          if (task_duration_begin_it->first == expected_start_time) {
+            // Situation #1
+            task_duration_begin_it->second -= task->resources;
+          } else {
+            // Situation #2
+            std::tie(inserted_it, ok) = time_avail_res_map.emplace(
+                expected_start_time, task_duration_begin_it->second);
+            CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
+
+            inserted_it->second -= task->resources;
+          }
         } else {
-          // Situation #2
-          std::tie(inserted_it, ok) = time_avail_res_map.emplace(
-              expected_start_time, task_duration_begin_it->second);
-          CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
+          // Situation #3
+          //                    task duration
+          //                |<-------------->|
+          // *-------*----------*---------*------------
+          //         ^                    ^
+          //  task_duration_begin_it     end_it
+          // OR
+          // Situation #4
+          //               task duration
+          //         |<----------------->|
+          // *-------*----------*--------*------------
+          //         ^
+          //  task_duration_begin_it
+          --task_duration_begin_it;
 
-          inserted_it->second -= task->resources;
+          // std::prev can be used without any check here.
+          // There will always be one time point (now) before
+          // task_end_time_plus_1s.
+          auto task_duration_end_it =
+              std::prev(time_avail_res_map.upper_bound(task_end_time_plus_1s));
+
+          if (task_duration_begin_it->first != expected_start_time) {
+            // Situation #3 (begin)
+            TimeAvailResMap::iterator inserted_it;
+            std::tie(inserted_it, ok) = time_avail_res_map.emplace(
+                expected_start_time, task_duration_begin_it->second);
+            CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
+
+            inserted_it->second -= task->resources;
+            task_duration_begin_it = std::next(inserted_it);
+          }
+
+          // Subtract the required resources within the interval.
+          for (auto in_duration_it = task_duration_begin_it;
+               in_duration_it != task_duration_end_it; in_duration_it++) {
+            in_duration_it->second -= task->resources;
+          }
+
+          // Assume one task end at time x-2,
+          // If "x-2" lies in the interval [x, y-1) in time__avail_res__map,
+          //  for example, x+2 in [x, y-1) with the available resources amount
+          //  a, we need to divide this interval into to two intervals: [x,
+          //  x+2]: a-k, where k is the resource amount that task requires,
+          //  [x+3, y-1]: a
+          // Therefore, we need to insert a key-value at x+3 to preserve this.
+          // However, if the length of [x+3, y-1] is 0, or more simply, the
+          // point
+          //  x+3 exists, there's no need to save the interval [x+3, y-1].
+          if (task_duration_end_it->first != task_end_time_plus_1s) {
+            // Situation #3 (end)
+            TimeAvailResMap::iterator inserted_it;
+            std::tie(inserted_it, ok) = time_avail_res_map.emplace(
+                task_end_time_plus_1s, task_duration_end_it->second);
+            CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
+
+            task_duration_end_it->second -= task->resources;
+          }
         }
-      } else {
-        // Situation #3
-        //                    task duration
-        //                |<-------------->|
-        // *-------*----------*---------*------------
-        //         ^                    ^
-        //  task_duration_begin_it     end_it
-        // OR
-        // Situation #4
-        //               task duration
-        //         |<----------------->|
-        // *-------*----------*--------*------------
-        //         ^
-        //  task_duration_begin_it
-        --task_duration_begin_it;
 
-        // std::prev can be used without any check here.
-        // There will always be one time point (now) before
-        // task_end_time_plus_1s.
-        auto task_duration_end_it =
-            std::prev(time_avail_res_map.upper_bound(task_end_time_plus_1s));
-
-        if (task_duration_begin_it->first != expected_start_time) {
-          // Situation #3 (begin)
-          TimeAvailResMap::iterator inserted_it;
-          std::tie(inserted_it, ok) = time_avail_res_map.emplace(
-              expected_start_time, task_duration_begin_it->second);
-          CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
-
-          inserted_it->second -= task->resources;
-          task_duration_begin_it = std::next(inserted_it);
-        }
-
-        // Subtract the required resources within the interval.
-        for (auto in_duration_it = task_duration_begin_it;
-             in_duration_it != task_duration_end_it; in_duration_it++) {
-          in_duration_it->second -= task->resources;
-        }
-
-        // Assume one task end at time x-2,
-        // If "x-2" lies in the interval [x, y-1) in time__avail_res__map,
-        //  for example, x+2 in [x, y-1) with the available resources amount a,
-        //  we need to divide this interval into to two intervals:
-        //  [x, x+2]: a-k, where k is the resource amount that task requires,
-        //  [x+3, y-1]: a
-        // Therefore, we need to insert a key-value at x+3 to preserve this.
-        // However, if the length of [x+3, y-1] is 0, or more simply, the point
-        //  x+3 exists, there's no need to save the interval [x+3, y-1].
-        if (task_duration_end_it->first != task_end_time_plus_1s) {
-          // Situation #3 (end)
-          TimeAvailResMap::iterator inserted_it;
-          std::tie(inserted_it, ok) = time_avail_res_map.emplace(
-              task_end_time_plus_1s, task_duration_end_it->second);
-          CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
-
-          task_duration_end_it->second -= task->resources;
-        }
+        // #ifndef NDEBUG
+        //       {
+        //         std::string str{"\n"};
+        //         str.append(fmt::format("Node ({}, {}): \n",
+        //         task->partition_id,
+        //                                task->node_index));
+        //         auto prev_iter = time_avail_res_map.begin();
+        //         auto iter = std::next(prev_iter);
+        //         for (; iter != time_avail_res_map.end(); prev_iter++, iter++)
+        //         {
+        //           str.append(
+        //               fmt::format("\t[ now+{}s , now+{}s ) Available
+        //               allocatable
+        //               "
+        //                           "res: cpu core {}, mem {}\n",
+        //                           absl::ToInt64Seconds(prev_iter->first -
+        //                           now), absl::ToInt64Seconds(iter->first -
+        //                           now),
+        //                           prev_iter->second.allocatable_resource.cpu_count,
+        //                           prev_iter->second.allocatable_resource.memory_bytes));
+        //         }
+        //         str.append(
+        //             fmt::format("\t[ now+{}s , inf ) Available allocatable "
+        //                         "res: cpu core {}, mem {}\n",
+        //                         absl::ToInt64Seconds(prev_iter->first - now),
+        //                         prev_iter->second.allocatable_resource.cpu_count,
+        //                         prev_iter->second.allocatable_resource.memory_bytes));
+        //         CRANE_TRACE("{}", str);
+        //       }
+        // #endif
       }
 
-      // #ifndef NDEBUG
-      //       {
-      //         std::string str{"\n"};
-      //         str.append(fmt::format("Node ({}, {}): \n", task->partition_id,
-      //                                task->node_index));
-      //         auto prev_iter = time_avail_res_map.begin();
-      //         auto iter = std::next(prev_iter);
-      //         for (; iter != time_avail_res_map.end(); prev_iter++, iter++) {
-      //           str.append(
-      //               fmt::format("\t[ now+{}s , now+{}s ) Available
-      //               allocatable
-      //               "
-      //                           "res: cpu core {}, mem {}\n",
-      //                           absl::ToInt64Seconds(prev_iter->first - now),
-      //                           absl::ToInt64Seconds(iter->first - now),
-      //                           prev_iter->second.allocatable_resource.cpu_count,
-      //                           prev_iter->second.allocatable_resource.memory_bytes));
-      //         }
-      //         str.append(
-      //             fmt::format("\t[ now+{}s , inf ) Available allocatable "
-      //                         "res: cpu core {}, mem {}\n",
-      //                         absl::ToInt64Seconds(prev_iter->first - now),
-      //                         prev_iter->second.allocatable_resource.cpu_count,
-      //                         prev_iter->second.allocatable_resource.memory_bytes));
-      //         CRANE_TRACE("{}", str);
-      //       }
-      // #endif
-    }
+      if (expected_start_time == now) {
+        // The task can be started now.
+        task->SetStartTime(expected_start_time);
 
-    if (expected_start_time == now) {
-      // The task can be started now.
-      task->SetStartTime(expected_start_time);
+        // We leave the change in running_tasks to the scheduling thread caller
+        // for the simplicity of selection algorithm.
+        // However, the resource used by the task MUST be subtracted now
+        // because a craned node may belong to multiple partitions. The resource
+        // usage MUST takes effect right now. Otherwise, during the scheduling
+        // for the next partition, the algorithm may use the resource which is
+        // already allocated.
+        for (CranedId const& craned_id : node_ids)
+          g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
+                                                   task->resources);
 
-      std::unique_ptr<TaskInCtld> moved_task;
+        std::unique_ptr<TaskInCtld> moved_task;
 
-      // Move task out of pending_task_map and insert it to the
-      // scheduling_result_list.
-      moved_task.swap(task);
-      selection_result_list->emplace_back(std::move(moved_task),
-                                          std::move(node_ids));
+        // Move task out of pending_task_map and insert it to the
+        // scheduling_result_list.
+        auto it = pending_task_map->find(task->TaskId());
+        moved_task.swap(it->second);
+        pending_task_map->erase(it);
 
-      // We leave the change in all_partitions_meta_map and running_tasks to
-      // the scheduling thread caller to avoid lock maintenance and deadlock.
+        selection_result_list->emplace_back(std::move(moved_task),
+                                            std::move(node_ids));
 
-      // Erase the empty task unique_ptr from map and move to the next element
-      pending_task_it = pending_task_map->erase(pending_task_it);
-    } else {
-      // The task can't be started now. Move to the next pending task.
-      pending_task_it++;
+        // Erase the task ready to run from temporary partition_pending_task_map
+        // and move to the next element
+        auto it_to_erase = pending_task_it;
+        pending_task_it++;
+
+        part_pending_tasks.erase(it_to_erase);
+      } else {
+        // The task can't be started now. Move to the next pending task.
+        pending_task_it++;
+      }
     }
   }
 }

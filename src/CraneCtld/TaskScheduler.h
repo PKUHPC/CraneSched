@@ -21,6 +21,13 @@ class INodeSelectionAlgo {
   using NodeSelectionResult =
       std::pair<std::unique_ptr<TaskInCtld>, std::list<CranedId>>;
 
+  template <typename K, typename V,
+            typename Hash = absl::container_internal::hash_default_hash<K>>
+  using HashMap = absl::flat_hash_map<K, V, Hash>;
+
+  template <typename K, typename V>
+  using TreeMap = absl::btree_map<K, V>;
+
   virtual ~INodeSelectionAlgo() = default;
 
   /**
@@ -50,6 +57,9 @@ class INodeSelectionAlgo {
 
 class MinLoadFirst : public INodeSelectionAlgo {
   /**
+   * This map stores how much resource is available
+   * over time on each Craned node.
+   *
    * In this map, the time is discretized by 1s and starts from absl::Now().
    * {x: a, y: b, z: c, ...} means that
    * In time interval [x, y-1], the amount of available resources is a.
