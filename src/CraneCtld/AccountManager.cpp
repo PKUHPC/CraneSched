@@ -871,13 +871,17 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
     return Result{false, fmt::format("Unknown user '{}'", user)};
   }
 
-  auto partition_it =
-      user_share_ptr->allowed_partition_qos_map.find(task->partition_id);
-  if (partition_it == user_share_ptr->allowed_partition_qos_map.end())
-    return Result{false, "Partition is not allowed for this user."};
-
-  std::string qos = partition_it->second.first;
-  if (qos.empty()) return Result{true};
+  std::string qos;
+  if (task->uid != 0) {
+    auto partition_it =
+        user_share_ptr->allowed_partition_qos_map.find(task->partition_id);
+    if (partition_it == user_share_ptr->allowed_partition_qos_map.end())
+      return Result{false, "Partition is not allowed for this user."};
+    qos = partition_it->second.first;
+    if (qos.empty()) return Result{true};
+  } else {
+    qos = kUnlimitedQosName;
+  }
 
   QosMutexSharedPtr qos_share_ptr = GetExistedQosInfo(qos);
 

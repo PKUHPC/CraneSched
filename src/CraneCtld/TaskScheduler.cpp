@@ -314,8 +314,6 @@ void TaskScheduler::ScheduleThread_() {
           g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                                    task->resources);
 
-          task->CranedIdsAdd(craned_meta->static_meta.hostname);
-
           if (task->type == crane::grpc::Interactive) {
             InteractiveTaskAllocationDetail detail{
                 .craned_id = craned_id,
@@ -346,7 +344,8 @@ void TaskScheduler::ScheduleThread_() {
 
         for (CranedId const& craned_id : task->CranedIds()) {
           CranedStub* stub = g_craned_keeper->GetCranedStub(craned_id);
-          CRANE_TRACE("Send CreateCgroupForTask to {}: ", craned_id);
+          CRANE_TRACE("Send CreateCgroupForTask for task #{} to {}",
+                      task->TaskId(), craned_id);
           stub->CreateCgroupForTask(task->TaskId(), task->uid);
         }
 
