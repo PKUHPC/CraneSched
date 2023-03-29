@@ -108,24 +108,8 @@ inline std::string_view CraneErrStr(CraneErr err) {
 
 /* ----------- Public definitions for all components */
 
-// (partition id, node index), by which a Craned is uniquely identified.
-struct CranedId {
-  uint32_t partition_id{0x3f3f3f3f};
-  uint32_t craned_index{0x3f3f3f3f};
-
-  struct Hash {
-    std::size_t operator()(const CranedId& val) const {
-      return std::hash<uint64_t>()(
-          (static_cast<uint64_t>(val.partition_id) << 32) |
-          static_cast<uint64_t>(val.craned_index));
-    }
-  };
-};
-
-inline bool operator==(const CranedId& lhs, const CranedId& rhs) {
-  return (lhs.craned_index == rhs.craned_index) &&
-         (lhs.partition_id == rhs.partition_id);
-}
+using PartitionId = std::string;
+using CranedId = std::string;
 
 // Model the allocatable resources on a craned node.
 // It contains CPU and memory by now.

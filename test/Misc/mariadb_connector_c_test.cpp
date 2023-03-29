@@ -262,7 +262,7 @@ class MariadbClient {
       task.uid = std::strtoul(row[9], nullptr, 10);
       task.gid = std::strtoul(row[10], nullptr, 10);
       if (row[11]) task.allocated_craneds_regex = row[11];
-      task.partition_name = row[14];
+      task.partition_id = row[14];
       task.start_time =
           absl::FromUnixSeconds(std::strtol(row[17], nullptr, 10));
       task.end_time = absl::FromUnixSeconds(std::strtol(row[18], nullptr, 10));

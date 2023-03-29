@@ -34,7 +34,7 @@ message InteractiveTaskAllocReply {
 
 message InteractiveTaskAllocationDetail {
   /* Used to connect the Craned */
-  uint32 craned_index = 1;
+  string craned_id = 1;
   string ipv4_addr = 2;
   uint32 port = 3;
   bytes resource_uuid = 4;
@@ -128,7 +128,7 @@ message CranedRegisterResult {
 
 message TaskStatusChangeRequest {
   uint32 task_id = 1;
-  uint32 craned_index = 2;
+  string craned_id = 2;
   TaskStatus new_status = 3;
   uint32 exit_code = 4;
   string reason = 5;
