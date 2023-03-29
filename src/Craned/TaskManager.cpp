@@ -804,8 +804,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
       if (boost::ends_with(process->batch_meta.parsed_output_file_pattern,
                            "/")) {
-        process->batch_meta.parsed_output_file_pattern += fmt::format(
-            "Crane-{}.out", g_ctld_client->GetNodeId().craned_index);
+        process->batch_meta.parsed_output_file_pattern +=
+            fmt::format("Crane-{}.out", g_ctld_client->GetCranedId());
       }
 
       boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%j",

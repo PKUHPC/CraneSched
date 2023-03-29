@@ -15,11 +15,18 @@ namespace Ctld {
 class INodeSelectionAlgo {
  public:
   // Pair content: <The task which is going to be run,
-  //                The node index on which it will be run>
+  //                The craned id on which it will be run>
   // Partition information is not needed because scheduling is carried out in
   // one partition to which the task belongs.
   using NodeSelectionResult =
-      std::pair<std::unique_ptr<TaskInCtld>, std::list<uint32_t>>;
+      std::pair<std::unique_ptr<TaskInCtld>, std::list<CranedId>>;
+
+  template <typename K, typename V,
+            typename Hash = absl::container_internal::hash_default_hash<K>>
+  using HashMap = absl::flat_hash_map<K, V, Hash>;
+
+  template <typename K, typename V>
+  using TreeMap = absl::btree_map<K, V>;
 
   virtual ~INodeSelectionAlgo() = default;
 
@@ -41,14 +48,20 @@ class INodeSelectionAlgo {
   virtual void NodeSelect(
       const CranedMetaContainerInterface::AllPartitionsMetaMap&
           all_partitions_meta_map,
-      const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
+      const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
+      const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>&
           running_tasks,
-      absl::btree_map<uint32_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
+      absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
       std::list<NodeSelectionResult>* selection_result_list) = 0;
 };
 
 class MinLoadFirst : public INodeSelectionAlgo {
+  static constexpr bool kAlgoTraceOutput = false;
+
   /**
+   * This map stores how much resource is available
+   * over time on each Craned node.
+   *
    * In this map, the time is discretized by 1s and starts from absl::Now().
    * {x: a, y: b, z: c, ...} means that
    * In time interval [x, y-1], the amount of available resources is a.
@@ -69,36 +82,43 @@ class MinLoadFirst : public INodeSelectionAlgo {
       return lhs < rhs.start;
     }
   };
-  using ValidTimeSegmentsVec = std::vector<TimeSegment>;
 
   struct NodeSelectionInfo {
-    std::multimap<uint32_t /* # of running tasks */, uint32_t /* node index */>
+    std::multimap<uint32_t /* # of running tasks */, CranedId>
         task_num_node_id_map;
-    std::unordered_map<uint32_t /* Node Index*/, TimeAvailResMap>
-        node_time_avail_res_map;
+    std::unordered_map<CranedId, TimeAvailResMap> node_time_avail_res_map;
   };
 
-  static void CalculateNodeSelectionInfo_(
+  static void CalculateNodeSelectionInfoOfPartition_(
       const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
           running_tasks,
-      absl::Time now, uint32_t partition_id,
-      const PartitionMetas& partition_metas, uint32_t node_id,
-      const CranedMeta& node_meta, NodeSelectionInfo* node_selection_info);
+      absl::Time now, const PartitionId& partition_id,
+      const PartitionMeta& partition_metas,
+      const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
+      NodeSelectionInfo* node_selection_info);
 
   // Input should guarantee that provided nodes in `node_selection_info` has
   // enough nodes whose resource is >= task->resource.
   static bool CalculateRunningNodesAndStartTime_(
       const NodeSelectionInfo& node_selection_info,
-      const PartitionMetas& partition_metas, const TaskInCtld* task,
-      absl::Time now, std::list<uint32_t>* node_ids, absl::Time* start_time);
+      const PartitionMeta& partition_metas,
+      const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
+      const TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
+      absl::Time* start_time);
+
+  static void SubtractTaskResourceNodeSelectionInfo_(
+      absl::Time const& expected_start_time, absl::Duration const& duration,
+      Resources const& resources, std::list<CranedId> const& craned_ids,
+      NodeSelectionInfo* node_selection_info);
 
  public:
   void NodeSelect(
       const CranedMetaContainerInterface::AllPartitionsMetaMap&
           all_partitions_meta_map,
-      const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
+      const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
+      const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>&
           running_tasks,
-      absl::btree_map<uint32_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
+      absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
       std::list<NodeSelectionResult>* selection_result_list) override;
 };
 
@@ -130,7 +150,7 @@ class TaskScheduler {
 
   CraneErr SubmitTask(std::unique_ptr<TaskInCtld> task, uint32_t* task_id);
 
-  void TaskStatusChange(uint32_t task_id, uint32_t craned_index,
+  void TaskStatusChange(uint32_t task_id, const CranedId& craned_index,
                         crane::grpc::TaskStatus new_status, uint32_t exit_code,
                         std::optional<std::string> reason) {
     // The order of LockGuards matters.
@@ -161,7 +181,7 @@ class TaskScheduler {
  private:
   void ScheduleThread_();
 
-  void TaskStatusChangeNoLock_(uint32_t task_id, uint32_t craned_index,
+  void TaskStatusChangeNoLock_(uint32_t task_id, const CranedId& craned_index,
                                crane::grpc::TaskStatus new_status,
                                uint32_t exit_code);
 
@@ -201,9 +221,9 @@ class TaskScheduler {
   Mutex m_persisted_task_map_mtx_;
 
   // Task Indexes
-  HashMap<CranedId, HashSet<uint32_t /* Task ID*/>, CranedId::Hash>
-      m_node_to_tasks_map_ GUARDED_BY(m_task_indexes_mtx_);
-  HashMap<uint32_t /* Partition ID */, HashSet<uint32_t /* Task ID */>>
+  HashMap<CranedId, HashSet<uint32_t /* Task ID*/>> m_node_to_tasks_map_
+      GUARDED_BY(m_task_indexes_mtx_);
+  HashMap<PartitionId /* Partition ID */, HashSet<uint32_t /* Task ID */>>
       m_partition_to_tasks_map_ GUARDED_BY(m_task_indexes_mtx_);
   Mutex m_task_indexes_mtx_;
 

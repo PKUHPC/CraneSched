@@ -48,7 +48,6 @@ CraneErr CranedStub::ExecuteTask(const TaskInCtld *task) {
   mutable_task->set_type(task->type);
 
   mutable_task->set_task_id(task->TaskId());
-  mutable_task->set_partition_id(task->PartitionId());
 
   mutable_task->set_node_num(task->node_num);
   mutable_task->set_ntasks_per_node(task->ntasks_per_node);
@@ -58,7 +57,7 @@ CraneErr CranedStub::ExecuteTask(const TaskInCtld *task) {
   mutable_task->set_env(task->env);
   mutable_task->set_cwd(task->cwd);
 
-  for (auto &&hostname : task->Nodes())
+  for (const auto &hostname : task->CranedIds())
     mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
 
   mutable_task->mutable_start_time()->set_seconds(
@@ -82,7 +81,7 @@ CraneErr CranedStub::ExecuteTask(const TaskInCtld *task) {
   status = m_stub_->ExecuteTask(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG("Execute RPC for Node {} returned with status not ok: {}",
-                m_addr_and_id_.node_id, status.error_message());
+                m_craned_id_, status.error_message());
     return CraneErr::kRpcFailure;
   }
 
@@ -104,7 +103,7 @@ CraneErr CranedStub::TerminateTask(uint32_t task_id) {
   if (!status.ok()) {
     CRANE_DEBUG(
         "TerminateRunningTask RPC for Node {} returned with status not ok: {}",
-        m_addr_and_id_.node_id, status.error_message());
+        m_craned_id_, status.error_message());
     return CraneErr::kRpcFailure;
   }
 
@@ -129,7 +128,7 @@ CraneErr CranedStub::TerminateOrphanedTask(task_id_t task_id) {
   if (!status.ok()) {
     CRANE_DEBUG(
         "TerminateOrphanedTask RPC for Node {} returned with status not ok: {}",
-        m_addr_and_id_.node_id, status.error_message());
+        m_craned_id_, status.error_message());
     return CraneErr::kRpcFailure;
   }
 
@@ -154,7 +153,7 @@ CraneErr CranedStub::CreateCgroupForTask(uint32_t task_id, uid_t uid) {
   if (!status.ok()) {
     CRANE_ERROR(
         "CreateCgroupForTask RPC for Node {} returned with status not ok: {}",
-        m_addr_and_id_.node_id, status.error_message());
+        m_craned_id_, status.error_message());
     return CraneErr::kRpcFailure;
   }
 
@@ -179,7 +178,7 @@ CraneErr CranedStub::ReleaseCgroupForTask(uint32_t task_id, uid_t uid) {
   if (!status.ok()) {
     CRANE_DEBUG(
         "ReleaseCgroupForTask gRPC for Node {} returned with status not ok: {}",
-        m_addr_and_id_.node_id, status.error_message());
+        m_craned_id_, status.error_message());
     return CraneErr::kRpcFailure;
   }
 
@@ -206,7 +205,7 @@ CraneErr CranedStub::CheckTaskStatus(task_id_t task_id,
     CRANE_DEBUG(
         "CheckIfTaskIsRunningOrFinished gRPC for Node {} returned with status "
         "not ok: {}",
-        m_addr_and_id_.node_id, grpc_status.error_message());
+        m_craned_id_, grpc_status.error_message());
     return CraneErr::kRpcFailure;
   }
 
@@ -238,12 +237,11 @@ CranedKeeper::~CranedKeeper() {
   // Tag pool's destructor will free all trailing tags in cq.
 }
 
-void CranedKeeper::InitAndRegisterCraneds(
-    std::list<CranedAddrAndId> node_addr_id_list) {
+void CranedKeeper::InitAndRegisterCraneds(std::list<CranedId> craned_id_list) {
   util::lock_guard guard(m_unavail_craned_list_mtx_);
 
   m_unavail_craned_list_.splice(m_unavail_craned_list_.end(),
-                                std::move(node_addr_id_list));
+                                std::move(craned_id_list));
   CRANE_TRACE("Trying register all craneds...");
 }
 
@@ -299,11 +297,11 @@ void CranedKeeper::StateMonitorThreadFunc_() {
             auto *tag_data =
                 reinterpret_cast<InitializingCranedTagData *>(tag->data);
             CRANE_TRACE("Failed connect to {}. Re-connect it later..",
-                        tag_data->craned->m_addr_and_id_.node_addr);
+                        tag_data->craned->m_craned_id_);
             delete tag_data;
           } else if (tag->type == CqTag::kEstablishedCraned) {
             if (m_craned_is_down_cb_)
-              m_craned_is_down_cb_(craned->m_addr_and_id_.node_id);
+              m_craned_is_down_cb_(craned->m_craned_id_);
 
             util::lock_guard node_lock(m_craned_mtx_);
             util::write_lock_guard craned_lock(m_alive_craned_rw_mtx_);
@@ -311,7 +309,7 @@ void CranedKeeper::StateMonitorThreadFunc_() {
             m_empty_slot_bitset_[craned->m_slot_offset_] = true;
             m_alive_craned_bitset_[craned->m_slot_offset_] = false;
 
-            m_craned_id_slot_offset_map_.erase(craned->m_addr_and_id_.node_id);
+            m_craned_id_slot_offset_map_.erase(craned->m_craned_id_);
 
             m_craned_vec_[craned->m_slot_offset_].reset();
           } else {
@@ -384,14 +382,13 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
           m_alive_craned_bitset_[pos] = true;
         }
 
-        m_craned_id_slot_offset_map_.emplace(raw_craned->m_addr_and_id_.node_id,
+        m_craned_id_slot_offset_map_.emplace(raw_craned->m_craned_id_,
                                              raw_craned->m_slot_offset_);
 
         raw_craned->m_failure_retry_times_ = 0;
         raw_craned->m_invalid_ = false;
       }
-      if (m_craned_is_up_cb_)
-        m_craned_is_up_cb_(raw_craned->m_addr_and_id_.node_id);
+      if (m_craned_is_up_cb_) m_craned_is_up_cb_(raw_craned->m_craned_id_);
 
       // free tag_data
       delete tag_data;
@@ -511,7 +508,7 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
         m_alive_craned_bitset_[craned->m_slot_offset_] = false;
       }
       if (m_craned_is_temp_down_cb_)
-        m_craned_is_temp_down_cb_(craned->m_addr_and_id_.node_id);
+        m_craned_is_temp_down_cb_(craned->m_craned_id_);
 
       next_tag_type = CqTag::kEstablishedCraned;
       break;
@@ -535,7 +532,7 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
         }
 
         if (m_craned_rec_from_temp_failure_cb_)
-          m_craned_rec_from_temp_failure_cb_(craned->m_addr_and_id_.node_id);
+          m_craned_rec_from_temp_failure_cb_(craned->m_craned_id_);
 
         next_tag_type = CqTag::kEstablishedCraned;
       }
@@ -554,7 +551,7 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
           m_alive_craned_bitset_[craned->m_slot_offset_] = false;
         }
         if (m_craned_is_temp_down_cb_)
-          m_craned_is_temp_down_cb_(craned->m_addr_and_id_.node_id);
+          m_craned_is_temp_down_cb_(craned->m_craned_id_);
 
         next_tag_type = CqTag::kEstablishedCraned;
       } else if (craned->m_prev_channel_state_ == GRPC_CHANNEL_CONNECTING) {
@@ -658,7 +655,7 @@ void CranedKeeper::SetCranedIsTempUpCb(std::function<void(CranedId)> cb) {
   m_craned_rec_from_temp_failure_cb_ = std::move(cb);
 }
 
-void CranedKeeper::ConnectCranedNode_(CranedAddrAndId addr_info) {
+void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   using namespace std::chrono_literals;
 
   auto *cq_tag_data = new InitializingCranedTagData{};
@@ -683,8 +680,8 @@ void CranedKeeper::ConnectCranedNode_(CranedAddrAndId addr_info) {
 
   if (g_config.ListenConf.UseTls) {
     std::string addr_port =
-        fmt::format("{}.{}:{}", addr_info.node_addr,
-                    g_config.ListenConf.DomainSuffix, kCranedDefaultPort);
+        fmt::format("{}.{}:{}", craned_id, g_config.ListenConf.DomainSuffix,
+                    kCranedDefaultPort);
 
     CRANE_TRACE("Creating a channel to {}", addr_port);
 
@@ -700,8 +697,7 @@ void CranedKeeper::ConnectCranedNode_(CranedAddrAndId addr_info) {
     cq_tag_data->craned->m_channel_ = grpc::CreateCustomChannel(
         addr_port, grpc::SslCredentials(ssl_opts), channel_args);
   } else {
-    std::string addr_port =
-        fmt::format("{}:{}", addr_info.node_addr, kCranedDefaultPort);
+    std::string addr_port = fmt::format("{}:{}", craned_id, kCranedDefaultPort);
 
     CRANE_TRACE("Creating a channel to {}", addr_port);
 
@@ -714,7 +710,7 @@ void CranedKeeper::ConnectCranedNode_(CranedAddrAndId addr_info) {
   cq_tag_data->craned->m_stub_ =
       crane::grpc::Craned::NewStub(cq_tag_data->craned->m_channel_);
 
-  cq_tag_data->craned->m_addr_and_id_ = std::move(addr_info);
+  cq_tag_data->craned->m_craned_id_ = craned_id;
   cq_tag_data->craned->m_clean_up_cb_ = PutBackNodeIntoUnavailList_;
 
   cq_tag_data->craned->m_maximum_retry_times_ = 2;
@@ -734,8 +730,7 @@ void CranedKeeper::PutBackNodeIntoUnavailList_(CranedStub *stub) {
   CranedKeeper *node_keeper = stub->m_craned_keeper_;
   util::lock_guard guard(node_keeper->m_unavail_craned_list_mtx_);
 
-  node_keeper->m_unavail_craned_list_.emplace_back(
-      std::move(stub->m_addr_and_id_));
+  node_keeper->m_unavail_craned_list_.emplace_back(stub->m_craned_id_);
 }
 
 void CranedKeeper::PeriodConnectCranedThreadFunc_() {
@@ -745,8 +740,7 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
     {
       util::lock_guard guard(m_unavail_craned_list_mtx_);
       while (!m_unavail_craned_list_.empty()) {
-        auto &addr_id = m_unavail_craned_list_.front();
-        ConnectCranedNode_(std::move(addr_id));
+        ConnectCranedNode_(m_unavail_craned_list_.front());
         m_unavail_craned_list_.pop_front();
       }
     }

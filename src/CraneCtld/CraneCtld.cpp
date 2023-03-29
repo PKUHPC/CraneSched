@@ -407,18 +407,9 @@ void InitializeCtldGlobalVariables() {
     g_task_scheduler->TerminateTasksOnCraned(craned_id);
   });
 
-  std::list<CranedAddrAndId> addr_and_id_list;
-  for (auto& kv : g_config.Nodes) {
-    CranedAddrAndId addr_and_id;
-    addr_and_id.node_addr = kv.first;
-    if (g_meta_container->GetCraneId(kv.first, &addr_and_id.node_id))
-      addr_and_id_list.emplace_back(std::move(addr_and_id));
-    else {
-      CRANE_TRACE(
-          "Node {} doesn't belong to any partition. It will not be "
-          "registered.",
-          kv.first);
-    }
+  std::list<CranedId> to_register_craned_list;
+  for (auto&& kv : g_config.Nodes) {
+    to_register_craned_list.emplace_back(kv.first);
   }
 
   using namespace std::chrono_literals;
@@ -433,7 +424,7 @@ void InitializeCtldGlobalVariables() {
       std::chrono::system_clock::now() + 1s;
   size_t to_registered_craneds_cnt = g_config.Nodes.size();
 
-  g_craned_keeper->InitAndRegisterCraneds(std::move(addr_and_id_list));
+  g_craned_keeper->InitAndRegisterCraneds(std::move(to_register_craned_list));
   while (true) {
     auto online_cnt = g_craned_keeper->AvailableCranedCount();
     if (online_cnt >= to_registered_craneds_cnt) {

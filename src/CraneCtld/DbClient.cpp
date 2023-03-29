@@ -159,7 +159,7 @@ bool MongodbClient::FetchJobRecords(std::list<Ctld::TaskInCtld>* task_list,
       task.uid = view["id_user"].get_int32().value;
       task.SetGid(view["id_group"].get_int32().value);
       task.allocated_craneds_regex = view["nodelist"].get_string().value.data();
-      task.partition_name = view["partition_name"].get_string().value;
+      task.partition_id = view["partition_name"].get_string().value;
       task.SetStartTimeByUnixSecond(view["time_start"].get_int64().value);
       task.SetEndTimeByUnixSecond(view["time_end"].get_int64().value);
 
@@ -664,7 +664,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              static_cast<int32_t>(task_to_ctld.uid()),
              // 10-14
              static_cast<int32_t>(persisted_part.gid()),
-             util::HostNameListToStr(persisted_part.nodes()), 0, 0,
+             util::HostNameListToStr(persisted_part.craned_ids()), 0, 0,
              task_to_ctld.partition_name(),
              // 15-19
              0, 0, 0, 0, 0,
@@ -715,7 +715,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->name, task->env, static_cast<int32_t>(task->uid),
              // 10-14
              static_cast<int32_t>(task->Gid()), task->allocated_craneds_regex,
-             static_cast<int32_t>(task->nodes_alloc), 0, task->partition_name,
+             static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
              // 15-19
              0, 0, static_cast<int64_t>(task->StartTimeInUnixSecond()),
              static_cast<int64_t>(task->EndTimeInUnixSecond()), 0,
