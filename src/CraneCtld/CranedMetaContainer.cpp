@@ -93,8 +93,6 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
   node_meta.res_avail -= resources;
   node_meta.res_in_use += resources;
 
-  node_meta.running_task_resource_map.emplace(task_id, resources);
-
   for (PartitionId const& part_id : craned_id_part_ids_map_.at(node_id)) {
     PartitionGlobalMeta& part_global_meta =
         partition_metas_map_.at(part_id).partition_global_meta;

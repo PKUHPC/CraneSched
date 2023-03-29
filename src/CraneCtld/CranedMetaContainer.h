@@ -19,7 +19,7 @@ class CranedMetaContainerInterface {
   using AllPartitionsMetaMap = absl::flat_hash_map<PartitionId, PartitionMeta>;
 
   /**
-   * A map from CranedId to craned information within a partition.
+   * A map from CranedId to global craned information
    */
   using CranedMetaMap = std::unordered_map<CranedId, CranedMeta>;
 

@@ -88,13 +88,12 @@ class MinLoadFirst : public INodeSelectionAlgo {
     std::unordered_map<CranedId, TimeAvailResMap> node_time_avail_res_map;
   };
 
-  static void CalculateNodeSelectionInfo_(
+  static void CalculateNodeSelectionInfoOfPartition_(
       const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
           running_tasks,
       absl::Time now, const PartitionId& partition_id,
       const PartitionMeta& partition_metas,
       const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
-      const CranedId& craned_id, const CranedMeta& node_meta,
       NodeSelectionInfo* node_selection_info);
 
   // Input should guarantee that provided nodes in `node_selection_info` has
@@ -105,6 +104,11 @@ class MinLoadFirst : public INodeSelectionAlgo {
       const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
       const TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
       absl::Time* start_time);
+
+  static void SubtractTaskResourceNodeSelectionInfo_(
+      absl::Time const& expected_start_time, absl::Duration const& duration,
+      Resources const& resources, std::list<CranedId> const& craned_ids,
+      NodeSelectionInfo* node_selection_info);
 
  public:
   void NodeSelect(
