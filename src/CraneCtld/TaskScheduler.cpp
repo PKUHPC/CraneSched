@@ -308,6 +308,10 @@ void TaskScheduler::ScheduleThread_() {
         task->SetCranedIds(std::move(it.second));
         task->nodes_alloc = task->CranedIds().size();
 
+        CRANE_DEBUG(
+            "Task #{} is allocated to partition {} and craned nodes: {}",
+            task->TaskId(), partition_id, fmt::join(task->CranedIds(), ", "));
+
         for (CranedId craned_id : task->CranedIds()) {
           auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
 
@@ -721,14 +725,17 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
 
       running_task_ids_str.emplace_back(std::to_string(task_id));
     }
-    CRANE_TRACE("Craned node {} has running tasks: {}", craned_id,
-                absl::StrJoin(running_task_ids_str, ", "));
+
+    if constexpr (kAlgoTraceOutput) {
+      CRANE_TRACE("Craned node {} has running tasks: {}", craned_id,
+                  absl::StrJoin(running_task_ids_str, ", "));
+    }
 
     std::sort(
         end_time_task_id_vec.begin(), end_time_task_id_vec.end(),
         [](const auto& lhs, const auto& rhs) { return lhs.first < rhs.first; });
-#ifndef NDEBUG
-    {
+
+    if constexpr (kAlgoTraceOutput) {
       if (!end_time_task_id_vec.empty()) {
         std::string str;
         str.append(
@@ -740,7 +747,6 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         CRANE_TRACE("{}", str);
       }
     }
-#endif
 
     // Calculate how many resources are available at [now, first task end,
     //  second task end, ...] in this node.
@@ -750,9 +756,13 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     // Insert [now, inf) interval and thus guarantee time_avail_res_map is not
     // null.
     time_avail_res_map[now] = craned_meta.res_avail;
-    CRANE_TRACE("Craned {} initial res_avail now: cpu: {}, mem: {}", craned_id,
-                craned_meta.res_avail.allocatable_resource.cpu_count,
-                craned_meta.res_avail.allocatable_resource.memory_bytes);
+
+    if constexpr (kAlgoTraceOutput) {
+      CRANE_TRACE("Craned {} initial res_avail now: cpu: {}, mem: {}",
+                  craned_id,
+                  craned_meta.res_avail.allocatable_resource.cpu_count,
+                  craned_meta.res_avail.allocatable_resource.memory_bytes);
+    }
 
     {  // Limit the scope of `iter`
       auto cur_time_iter = time_avail_res_map.find(now);
@@ -770,12 +780,15 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
            */
           std::tie(cur_time_iter, ok) =
               time_avail_res_map.emplace(end_time, cur_time_iter->second);
-          CRANE_TRACE(
-              "Insert duration [now+{}s, inf) with resource: "
-              "cpu: {}, mem: {}",
-              absl::ToInt64Seconds(end_time - now),
-              craned_meta.res_avail.allocatable_resource.cpu_count,
-              craned_meta.res_avail.allocatable_resource.memory_bytes);
+
+          if constexpr (kAlgoTraceOutput) {
+            CRANE_TRACE(
+                "Insert duration [now+{}s, inf) with resource: "
+                "cpu: {}, mem: {}",
+                absl::ToInt64Seconds(end_time - now),
+                craned_meta.res_avail.allocatable_resource.cpu_count,
+                craned_meta.res_avail.allocatable_resource.memory_bytes);
+          }
         }
 
         /**
@@ -787,13 +800,17 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
          *  available_res(2)}, ...}
          */
         cur_time_iter->second += running_task->resources;
-        CRANE_TRACE("Craned {} res_avail at now + {}s: cpu: {}, mem: {}; ",
-                    craned_id, absl::ToInt64Seconds(cur_time_iter->first - now),
-                    cur_time_iter->second.allocatable_resource.cpu_count,
-                    cur_time_iter->second.allocatable_resource.memory_bytes);
+
+        if constexpr (kAlgoTraceOutput) {
+          CRANE_TRACE("Craned {} res_avail at now + {}s: cpu: {}, mem: {}; ",
+                      craned_id,
+                      absl::ToInt64Seconds(cur_time_iter->first - now),
+                      cur_time_iter->second.allocatable_resource.cpu_count,
+                      cur_time_iter->second.allocatable_resource.memory_bytes);
+        }
       }
-#ifndef NDEBUG
-      {
+
+      if constexpr (kAlgoTraceOutput) {
         std::string str;
         str.append(fmt::format("Node ({}, {}): ", partition_id, craned_id));
         auto prev_iter = time_avail_res_map.begin();
@@ -815,7 +832,6 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
                         prev_iter->second.allocatable_resource.memory_bytes));
         CRANE_TRACE("{}", str);
       }
-#endif
     }
   }
 }
@@ -848,10 +864,12 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     auto& craned_meta = craned_meta_map.at(craned_index);
 
     if (!(task->resources <= craned_meta.res_total)) {
-      CRANE_TRACE(
-          "Task #{} needs more resource than that of craned {}. "
-          "Skipping this craned.",
-          task->TaskId(), craned_index);
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Task #{} needs more resource than that of craned {}. "
+            "Skipping this craned.",
+            task->TaskId(), craned_index);
+      }
     } else {
       craned_indexes_.emplace_back(craned_index);
       ++selected_node_cnt;
@@ -864,8 +882,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
                    "selected_node_cnt != task->node_num");
 
   for (CranedId craned_id : craned_indexes_) {
-    CRANE_TRACE("Find valid time segments for task #{} on craned {}",
-                task->TaskId(), craned_id);
+    if constexpr (kAlgoTraceOutput) {
+      CRANE_TRACE("Find valid time segments for task #{} on craned {}",
+                  task->TaskId(), craned_id);
+    }
 
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_id);
@@ -934,16 +954,18 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     if (first_pass) {
       intersected_time_segments = std::move(time_segments);
       first_pass = false;
-#ifndef NDEBUG
-      std::vector<std::string> valid_seg_str;
-      for (auto& seg : intersected_time_segments) {
-        valid_seg_str.emplace_back(fmt::format(
-            "[start: {}, duration: {}]", absl::ToInt64Seconds(seg.start - now),
-            absl::ToInt64Seconds(seg.duration)));
+
+      if constexpr (kAlgoTraceOutput) {
+        std::vector<std::string> valid_seg_str;
+        for (auto& seg : intersected_time_segments) {
+          valid_seg_str.emplace_back(
+              fmt::format("[start: {}, duration: {}]",
+                          absl::ToInt64Seconds(seg.start - now),
+                          absl::ToInt64Seconds(seg.duration)));
+        }
+        CRANE_TRACE("After looping craned {}, valid time segments: {}",
+                    craned_id, absl::StrJoin(valid_seg_str, ", "));
       }
-      CRANE_TRACE("After looping craned {}, valid time segments: {}", craned_id,
-                  absl::StrJoin(valid_seg_str, ", "));
-#endif
     } else {
       std::vector<TimeSegment> new_intersected_time_segments;
 
@@ -1065,16 +1087,18 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       }
 
       intersected_time_segments = std::move(new_intersected_time_segments);
-#ifndef NDEBUG
-      std::vector<std::string> valid_seg_str;
-      for (auto& seg : intersected_time_segments) {
-        valid_seg_str.emplace_back(fmt::format(
-            "[start: {}, duration: {}]", absl::ToInt64Seconds(seg.start - now),
-            absl::ToInt64Seconds(seg.duration)));
+
+      if constexpr (kAlgoTraceOutput) {
+        std::vector<std::string> valid_seg_str;
+        for (auto& seg : intersected_time_segments) {
+          valid_seg_str.emplace_back(
+              fmt::format("[start: {}, duration: {}]",
+                          absl::ToInt64Seconds(seg.start - now),
+                          absl::ToInt64Seconds(seg.duration)));
+        }
+        CRANE_TRACE("After looping craned {}, valid time segments: {}",
+                    craned_id, absl::StrJoin(valid_seg_str, ", "));
       }
-      CRANE_TRACE("After looping craned {}, valid time segments: {}", craned_id,
-                  absl::StrJoin(valid_seg_str, ", "));
-#endif
     }
   }
 
@@ -1140,12 +1164,12 @@ void MinLoadFirst::NodeSelect(
       continue;
     }
 
-#ifndef NDEBUG
-    CRANE_TRACE(
-        "\t task #{} ExpectedStartTime=now+{}s, EndTime=now+{}s",
-        task->TaskId(), absl::ToInt64Seconds(expected_start_time - now),
-        absl::ToInt64Seconds(expected_start_time + task->time_limit - now));
-#endif
+    if constexpr (kAlgoTraceOutput) {
+      CRANE_TRACE(
+          "\t task #{} ExpectedStartTime=now+{}s, EndTime=now+{}s",
+          task->TaskId(), absl::ToInt64Seconds(expected_start_time - now),
+          absl::ToInt64Seconds(expected_start_time + task->time_limit - now));
+    }
 
     // The start time and craned ids have been determined.
     // Modify the corresponding NodeSelectionInfo now.

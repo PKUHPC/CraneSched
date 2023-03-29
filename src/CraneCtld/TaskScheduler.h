@@ -56,6 +56,8 @@ class INodeSelectionAlgo {
 };
 
 class MinLoadFirst : public INodeSelectionAlgo {
+  static constexpr bool kAlgoTraceOutput = false;
+
   /**
    * This map stores how much resource is available
    * over time on each Craned node.
@@ -80,7 +82,6 @@ class MinLoadFirst : public INodeSelectionAlgo {
       return lhs < rhs.start;
     }
   };
-  using ValidTimeSegmentsVec = std::vector<TimeSegment>;
 
   struct NodeSelectionInfo {
     std::multimap<uint32_t /* # of running tasks */, CranedId>
