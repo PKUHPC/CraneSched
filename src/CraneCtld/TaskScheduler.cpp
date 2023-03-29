@@ -1101,15 +1101,6 @@ void MinLoadFirst::NodeSelect(
     std::list<NodeSelectionResult>* selection_result_list) {
   std::unordered_map<PartitionId, NodeSelectionInfo> part_id_node_info_map;
 
-  // Because a Craned node may belong to multiple partitions, tasks must be
-  // grouped according to their respective partitions. Subsequently,
-  // scheduling is done by groups, one group at a time.
-  HashMap<PartitionId, HashMap<task_id_t, TaskInCtld*>> part_pending_tasks_map;
-  for (const auto& [task_id, task_unique_ptr] : *pending_task_map) {
-    part_pending_tasks_map[task_unique_ptr->partition_id].emplace(
-        task_id, task_unique_ptr.get());
-  }
-
   // Truncated by 1s.
   // We use the time now as the base time across the whole algorithm.
   absl::Time now = absl::FromUnixSeconds(ToUnixSeconds(absl::Now()));
@@ -1129,90 +1120,84 @@ void MinLoadFirst::NodeSelect(
   //  task.
   // Iterate over all the pending tasks and select the available node for the
   //  task to run in its partition.
-  for (auto& [part_id, part_pending_tasks] : part_pending_tasks_map) {
-    for (auto pending_task_it = part_pending_tasks.begin();
-         pending_task_it != part_pending_tasks.end();) {
-      auto& task = pending_task_it->second;
+  for (auto pending_task_it = pending_task_map->begin();
+       pending_task_it != pending_task_map->end();) {
+    auto& task = pending_task_it->second;
+    PartitionId part_id = task->partition_id;
 
-      NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
-      auto& part_meta = all_partitions_meta_map.at(part_id);
+    NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
+    auto& part_meta = all_partitions_meta_map.at(part_id);
 
-      std::list<CranedId> craned_ids;
-      absl::Time expected_start_time;
+    std::list<CranedId> craned_ids;
+    absl::Time expected_start_time;
 
-      // Note! ok should always be true.
-      bool ok = CalculateRunningNodesAndStartTime_(
-          node_info, part_meta, craned_meta_map, task, now, &craned_ids,
-          &expected_start_time);
-      if (!ok) {
-        ++pending_task_it;
-        continue;
-      }
+    // Note! ok should always be true.
+    bool ok = CalculateRunningNodesAndStartTime_(
+        node_info, part_meta, craned_meta_map, task.get(), now, &craned_ids,
+        &expected_start_time);
+    if (!ok) {
+      ++pending_task_it;
+      continue;
+    }
 
 #ifndef NDEBUG
-      CRANE_TRACE(
-          "\t task #{} ExpectedStartTime=now+{}s, EndTime=now+{}s",
-          task->TaskId(), absl::ToInt64Seconds(expected_start_time - now),
-          absl::ToInt64Seconds(expected_start_time + task->time_limit - now));
+    CRANE_TRACE(
+        "\t task #{} ExpectedStartTime=now+{}s, EndTime=now+{}s",
+        task->TaskId(), absl::ToInt64Seconds(expected_start_time - now),
+        absl::ToInt64Seconds(expected_start_time + task->time_limit - now));
 #endif
 
-      // The start time and craned ids have been determined.
-      // Modify the corresponding NodeSelectionInfo now.
-      // Note: Since a craned node may belong to multiple partition,
-      //       the NodeSelectionInfo of all the partitions the craned node
-      //       belongs to should be modified!
+    // The start time and craned ids have been determined.
+    // Modify the corresponding NodeSelectionInfo now.
+    // Note: Since a craned node may belong to multiple partition,
+    //       the NodeSelectionInfo of all the partitions the craned node
+    //       belongs to should be modified!
 
-      std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
-      for (CranedId const& craned_id : craned_ids) {
-        CranedMeta const& craned_meta = craned_meta_map.at(craned_id);
-        for (PartitionId const& partition_id :
-             craned_meta.static_meta.partition_ids) {
-          involved_part_craned[partition_id].emplace_back(craned_id);
-        }
+    std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
+    for (CranedId const& craned_id : craned_ids) {
+      CranedMeta const& craned_meta = craned_meta_map.at(craned_id);
+      for (PartitionId const& partition_id :
+           craned_meta.static_meta.partition_ids) {
+        involved_part_craned[partition_id].emplace_back(craned_id);
       }
+    }
 
-      for (const auto& [partition_id, part_craned_ids] : involved_part_craned) {
-        SubtractTaskResourceNodeSelectionInfo_(
-            expected_start_time, task->time_limit, task->resources,
-            part_craned_ids, &part_id_node_info_map.at(partition_id));
-      }
+    for (const auto& [partition_id, part_craned_ids] : involved_part_craned) {
+      SubtractTaskResourceNodeSelectionInfo_(
+          expected_start_time, task->time_limit, task->resources,
+          part_craned_ids, &part_id_node_info_map.at(partition_id));
+    }
 
-      if (expected_start_time == now) {
-        // The task can be started now.
-        task->SetStartTime(expected_start_time);
+    if (expected_start_time == now) {
+      // The task can be started now.
+      task->SetStartTime(expected_start_time);
 
-        // We leave the change in running_tasks to the scheduling thread
-        // caller for the simplicity of selection algorithm. However, the
-        // resource used by the task MUST be subtracted now because a craned
-        // node may belong to multiple partitions. The resource usage MUST
-        // takes effect right now. Otherwise, during the scheduling for the
-        // next partition, the algorithm may use the resource which is already
-        // allocated.
-        for (CranedId const& craned_id : craned_ids)
-          g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
-                                                   task->resources);
+      // We leave the change in running_tasks to the scheduling thread
+      // caller for the simplicity of selection algorithm. However, the
+      // resource used by the task MUST be subtracted now because a craned
+      // node may belong to multiple partitions. The resource usage MUST
+      // takes effect right now. Otherwise, during the scheduling for the
+      // next partition, the algorithm may use the resource which is already
+      // allocated.
+      for (CranedId const& craned_id : craned_ids)
+        g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
+                                                 task->resources);
 
-        std::unique_ptr<TaskInCtld> moved_task;
+      std::unique_ptr<TaskInCtld> moved_task;
 
-        // Move task out of pending_task_map and insert it to the
-        // scheduling_result_list.
-        auto it = pending_task_map->find(task->TaskId());
-        moved_task.swap(it->second);
-        pending_task_map->erase(it);
+      // Move task out of pending_task_map and insert it to the
+      // scheduling_result_list.
+      moved_task.swap(pending_task_it->second);
 
-        selection_result_list->emplace_back(std::move(moved_task),
-                                            std::move(craned_ids));
+      selection_result_list->emplace_back(std::move(moved_task),
+                                          std::move(craned_ids));
 
-        // Erase the task ready to run from temporary
-        // partition_pending_task_map and move to the next element
-        auto it_to_erase = pending_task_it;
-        pending_task_it++;
-
-        part_pending_tasks.erase(it_to_erase);
-      } else {
-        // The task can't be started now. Move to the next pending task.
-        pending_task_it++;
-      }
+      // Erase the task ready to run from temporary
+      // partition_pending_task_map and move to the next element
+      pending_task_it = pending_task_map->erase(pending_task_it);
+    } else {
+      // The task can't be started now. Move to the next pending task.
+      pending_task_it++;
     }
   }
 }
