@@ -1,6 +1,7 @@
 #include "TaskScheduler.h"
 
 #include <google/protobuf/util/time_util.h>
+#include <pwd.h>
 
 #include "CranedKeeper.h"
 #include "CtldGrpcServer.h"
@@ -648,7 +649,6 @@ void TaskScheduler::QueryTasksInRam(
   auto append_fn = [&](auto& it) {
     TaskInCtld& task = *it.second;
     auto* task_it = task_list->Add();
-
     task_it->set_type(task.TaskToCtld().type());
     task_it->set_task_id(task.PersistedPart().task_id());
     task_it->set_name(task.TaskToCtld().name());
@@ -664,6 +664,8 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_node_num(task.TaskToCtld().node_num());
     task_it->set_cmd_line(task.TaskToCtld().cmd_line());
     task_it->set_cwd(task.TaskToCtld().cwd());
+    struct passwd* pw = getpwuid(task.TaskToCtld().uid());
+    task_it->set_user_name(pw->pw_name);
 
     task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
     task_it->set_exit_code(0);
@@ -673,27 +675,75 @@ void TaskScheduler::QueryTasksInRam(
         util::HostNameListToStr(task.PersistedPart().craned_ids()));
   };
 
+  bool no_accounts_constraint = request->filter_accounts().empty();
+  std::unordered_set<std::string> req_accounts(
+      request->filter_accounts().begin(), request->filter_accounts().end());
+  auto task_rng_filter_account = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_accounts_constraint || req_accounts.contains(task.Account());
+  };
+
+  bool no_users_constraint = request->filter_users().empty();
+  std::unordered_set<std::string> req_users(request->filter_users().begin(),
+                                            request->filter_users().end());
+  auto task_rng_filter_user = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    struct passwd* pw = getpwuid(task.uid);
+    return no_users_constraint || req_users.contains(pw->pw_name);
+  };
+
+  bool no_task_names_constraint = request->filter_task_names().empty();
+  std::unordered_set<std::string> req_task_names(
+      request->filter_task_names().begin(), request->filter_task_names().end());
+  auto task_rng_filter_name = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_task_names_constraint ||
+           req_task_names.contains(task.TaskToCtld().name());
+  };
+
+  bool no_partitions_constraint = request->filter_partitions().empty();
+  std::unordered_set<std::string> req_partitions(
+      request->filter_partitions().begin(), request->filter_partitions().end());
+  auto task_rng_filter_partition = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_partitions_constraint ||
+           req_partitions.contains(task.TaskToCtld().partition_name());
+  };
+
+  bool no_task_ids_constraint = request->filter_task_ids().empty();
+  std::unordered_set<uint32_t> req_task_ids(request->filter_task_ids().begin(),
+                                            request->filter_task_ids().end());
+  auto task_rng_filter_id = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_task_ids_constraint || req_task_ids.contains(task.TaskId());
+  };
+
+  bool no_task_states_constraint = request->filter_task_states().empty();
+  std::unordered_set<int> req_task_states(request->filter_task_states().begin(),
+                                          request->filter_task_states().end());
+  auto task_rng_filter_state = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_task_states_constraint ||
+           req_task_states.contains(task.PersistedPart().status());
+  };
+
   auto pending_rng = m_pending_task_map_ | ranges::views::all;
   auto running_rng = m_running_task_map_ | ranges::views::all;
   auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
 
-  if (!request->partition().empty() || request->task_id() != -1) {
-    auto pd_r_filtered_rng =
-        pd_r_rng | ranges::views::filter([&](auto& it) -> bool {
-          std::unique_ptr<TaskInCtld>& task = it.second;
-          bool res = true;
-          if (!request->partition().empty()) {
-            res &= task->partition_id == request->partition();
-          }
-          if (request->task_id() != -1) {
-            res &= task->TaskId() == request->task_id();
-          }
-          return res;
-        });
-    ranges::for_each(pd_r_filtered_rng, append_fn);
-  } else {
-    ranges::for_each(pd_r_rng, append_fn);
-  }
+  int num_limit = request->num_limit() <= 0 ? kDefaultQueryTaskNumLimit
+                                            : request->num_limit();
+
+  auto filtered_rng = pd_r_rng |
+                      ranges::views::filter(task_rng_filter_account) |
+                      ranges::views::filter(task_rng_filter_name) |
+                      ranges::views::filter(task_rng_filter_partition) |
+                      ranges::views::filter(task_rng_filter_id) |
+                      ranges::views::filter(task_rng_filter_state) |
+                      ranges::views::filter(task_rng_filter_user) |
+                      ranges::views::take(num_limit);
+
+  ranges::for_each(filtered_rng, append_fn);
 }
 
 void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(

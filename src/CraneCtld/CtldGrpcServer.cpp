@@ -200,20 +200,22 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryTasksInfoRequest *request,
     crane::grpc::QueryTasksInfoReply *response) {
+  // Query tasks in RAM
   g_task_scheduler->QueryTasksInRam(request, response);
 
   int num_limit = request->num_limit() <= 0 ? kDefaultQueryTaskNumLimit
                                             : request->num_limit();
   auto *task_list = response->mutable_task_info_list();
-  std::sort(task_list->begin(), task_list->end(),
-            [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
-              return a.end_time() > b.end_time();
-            });
   if (task_list->size() >= num_limit) {
-    task_list->DeleteSubrange(num_limit, task_list->size() - num_limit);
+    std::sort(
+        task_list->begin(), task_list->end(),
+        [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
+          return a.end_time() > b.end_time();
+        });
     return grpc::Status::OK;
   }
 
+  // Query finished tasks in Embedded database
   bool ok;
 
   std::list<crane::grpc::TaskInEmbeddedDb> ended_list;
@@ -243,6 +245,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_node_num(task.task_to_ctld().node_num());
     task_it->set_cmd_line(task.task_to_ctld().cmd_line());
     task_it->set_cwd(task.task_to_ctld().cwd());
+    struct passwd *pw = getpwuid(task.task_to_ctld().uid());
+    task_it->set_user_name(pw->pw_name);
 
     task_it->set_alloc_cpus(task.task_to_ctld().cpus_per_task());
     task_it->set_exit_code(task.persisted_part().exit_code());
@@ -252,30 +256,78 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
         util::HostNameListToStr(task.persisted_part().craned_ids()));
   };
 
-  auto ended_rng = ended_list | ranges::views::reverse |
-                   ranges::views::take(num_limit - task_list->size());
-  if (!request->partition().empty() || request->task_id() != -1) {
-    auto partition_filtered_rng =
-        ended_rng |
-        ranges::views::filter([&](crane::grpc::TaskInEmbeddedDb &task) -> bool {
-          bool res = true;
-          if (!request->partition().empty()) {
-            res &= task.task_to_ctld().partition_name() == request->partition();
-          }
-          if (request->task_id() != -1) {
-            res &= task.persisted_part().task_id() == request->task_id();
-          }
-          return res;
-        });
-    ranges::for_each(partition_filtered_rng, ended_append_fn);
-  } else {
-    ranges::for_each(ended_rng, ended_append_fn);
-  }
+  bool no_accounts_constraint = request->filter_accounts().empty();
+  std::unordered_set<std::string> req_accounts(
+      request->filter_accounts().begin(), request->filter_accounts().end());
+  auto task_rng_filter_account = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_accounts_constraint ||
+           req_accounts.contains(task.persisted_part().account());
+  };
 
-  if (task_list->size() >= num_limit) {
+  bool no_users_constraint = request->filter_users().empty();
+  std::unordered_set<std::string> req_users(request->filter_users().begin(),
+                                            request->filter_users().end());
+  auto task_rng_filter_user = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    struct passwd *pw = getpwuid(task.task_to_ctld().uid());
+    return no_users_constraint || req_users.contains(pw->pw_name);
+  };
+
+  bool no_task_names_constraint = request->filter_task_names().empty();
+  std::unordered_set<std::string> req_task_names(
+      request->filter_task_names().begin(), request->filter_task_names().end());
+  auto task_rng_filter_name = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_task_names_constraint ||
+           req_task_names.contains(task.task_to_ctld().name());
+  };
+
+  bool no_partitions_constraint = request->filter_partitions().empty();
+  std::unordered_set<std::string> req_partitions(
+      request->filter_partitions().begin(), request->filter_partitions().end());
+  auto task_rng_filter_partition = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_partitions_constraint ||
+           req_partitions.contains(task.task_to_ctld().partition_name());
+  };
+
+  bool no_task_ids_constraint = request->filter_task_ids().empty();
+  std::unordered_set<uint32_t> req_task_ids(request->filter_task_ids().begin(),
+                                            request->filter_task_ids().end());
+  auto task_rng_filter_id = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_task_ids_constraint ||
+           req_task_ids.contains(task.persisted_part().task_id());
+  };
+
+  bool no_task_states_constraint = request->filter_task_states().empty();
+  std::unordered_set<int> req_task_states(request->filter_task_states().begin(),
+                                          request->filter_task_states().end());
+  auto task_rng_filter_state = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_task_states_constraint ||
+           req_task_states.contains(task.persisted_part().status());
+  };
+
+  auto ended_rng =
+      ended_list |
+      ranges::views::filter([&](crane::grpc::TaskInEmbeddedDb &task) -> bool {
+        return task.persisted_part().status() == crane::grpc::Cancelled;
+      });
+  auto filtered_ended_rng =
+      ended_rng | ranges::views::filter(task_rng_filter_account) |
+      ranges::views::filter(task_rng_filter_name) |
+      ranges::views::filter(task_rng_filter_partition) |
+      ranges::views::filter(task_rng_filter_id) |
+      ranges::views::filter(task_rng_filter_state) | ranges::views::reverse |
+      ranges::views::take(num_limit - task_list->size());
+  ranges::for_each(filtered_ended_rng, ended_append_fn);
+
+  if (task_list->size() >= num_limit || !request->query_all()) {
+    std::sort(
+        task_list->begin(), task_list->end(),
+        [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
+          return a.end_time() > b.end_time();
+        });
     return grpc::Status::OK;
   }
 
+  // Query all tasks in mongodb (only for cacct)
   std::list<TaskInCtld> db_ended_list;
   ok = g_db_client->FetchJobRecords(&db_ended_list,
                                     num_limit - task_list->size(), true);
@@ -304,6 +356,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_node_num(task.node_num);
     task_it->set_cmd_line(task.cmd_line);
     task_it->set_cwd(task.cwd);
+    struct passwd *pw = getpwuid(task.TaskToCtld().uid());
+    task_it->set_user_name(pw->pw_name);
 
     task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
     task_it->set_exit_code(task.ExitCode());
@@ -312,24 +366,47 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_craned_list(task.allocated_craneds_regex);
   };
 
-  auto db_ended_rng = db_ended_list | ranges::views::all;
-  if (!request->partition().empty() || request->task_id() != -1) {
-    auto partition_filtered_rng =
-        db_ended_rng | ranges::views::filter([&](TaskInCtld &task) -> bool {
-          bool res = true;
-          if (!request->partition().empty()) {
-            res &= task.partition_id == request->partition();
-          }
-          if (request->task_id() != -1) {
-            res &= task.TaskId() == request->task_id();
-          }
-          return res;
-        });
-    ranges::for_each(partition_filtered_rng, db_ended_append_fn);
-  } else {
-    ranges::for_each(db_ended_rng, db_ended_append_fn);
-  }
+  auto db_task_rng_filter_account = [&](TaskInCtld &task) {
+    return no_accounts_constraint || req_accounts.contains(task.Account());
+  };
 
+  auto db_task_rng_filter_user = [&](TaskInCtld &task) {
+    struct passwd *pw = getpwuid(task.uid);
+    return no_users_constraint || req_users.contains(pw->pw_name);
+  };
+
+  auto db_task_rng_filter_name = [&](TaskInCtld &task) {
+    return no_task_names_constraint ||
+           req_task_names.contains(task.TaskToCtld().name());
+  };
+
+  auto db_task_rng_filter_partition = [&](TaskInCtld &task) {
+    return no_partitions_constraint ||
+           req_partitions.contains(task.TaskToCtld().partition_name());
+  };
+
+  auto db_task_rng_filter_id = [&](TaskInCtld &task) {
+    return no_task_ids_constraint || req_task_ids.contains(task.TaskId());
+  };
+
+  auto db_task_rng_filter_state = [&](TaskInCtld &task) {
+    return no_task_states_constraint ||
+           req_task_states.contains(task.PersistedPart().status());
+  };
+
+  auto db_ended_rng = db_ended_list |
+                      ranges::views::filter(db_task_rng_filter_account) |
+                      ranges::views::filter(db_task_rng_filter_name) |
+                      ranges::views::filter(db_task_rng_filter_partition) |
+                      ranges::views::filter(db_task_rng_filter_id) |
+                      ranges::views::filter(db_task_rng_filter_state) |
+                      ranges::views::filter(db_task_rng_filter_user) |
+                      ranges::views::take(num_limit - task_list->size());
+  ranges::for_each(db_ended_rng, db_ended_append_fn);
+  std::sort(task_list->begin(), task_list->end(),
+            [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
+              return a.end_time() > b.end_time();
+            });
   return grpc::Status::OK;
 }
 
