@@ -438,7 +438,6 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       partition_name.append("*");
     }
     part_info->set_name(std::move(partition_name));
-
     part_info->set_state(part_meta.partition_global_meta.alive_craned_cnt > 0
                              ? crane::grpc::PartitionState::PARTITION_UP
                              : crane::grpc::PartitionState::PARTITION_DOWN);
@@ -456,7 +455,8 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     down_craned_list->set_state(crane::grpc::CranedState::CRANE_DOWN);
 
     std::list<std::string> idle_craned_name_list, mix_craned_name_list,
-        alloc_craned_name_list, down_craned_name_list;
+        alloc_craned_name_list, down_craned_name_list, abstract_info_count_list,
+        summarize_craned_name_list;
 
     auto craned_rng =
         part_meta.craned_ids |
@@ -489,15 +489,45 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
         down_craned_list->set_count(down_craned_name_list.size());
       }
     });
-
-    idle_craned_list->set_craned_list_regex(
-        util::HostNameListToStr(idle_craned_name_list));
-    mix_craned_list->set_craned_list_regex(
-        util::HostNameListToStr(mix_craned_name_list));
-    alloc_craned_list->set_craned_list_regex(
-        util::HostNameListToStr(alloc_craned_name_list));
-    down_craned_list->set_craned_list_regex(
-        util::HostNameListToStr(down_craned_name_list));
+    abstract_info_count_list.emplace_back(
+        std::to_string(alloc_craned_list->count() + mix_craned_list->count()));
+    abstract_info_count_list.emplace_back(
+        std::to_string(idle_craned_list->count()));
+    abstract_info_count_list.emplace_back(
+        std::to_string(down_craned_list->count()));
+    abstract_info_count_list.emplace_back(
+        std::to_string(down_craned_list->count() + mix_craned_list->count() +
+                       alloc_craned_list->count() + idle_craned_list->count()));
+    part_info->set_abstract_info(boost::join(abstract_info_count_list, "/"));
+    if (request.option_nodes_on_centric_format()) {
+      idle_craned_list->set_craned_list_regex(
+          boost::join(idle_craned_name_list, ","));
+      mix_craned_list->set_craned_list_regex(
+          boost::join(mix_craned_name_list, ","));
+      alloc_craned_list->set_craned_list_regex(
+          boost::join(alloc_craned_name_list, ","));
+      down_craned_list->set_craned_list_regex(
+          boost::join(down_craned_name_list, ","));
+    } else {
+      idle_craned_list->set_craned_list_regex(
+          util::HostNameListToStr(idle_craned_name_list));
+      mix_craned_list->set_craned_list_regex(
+          util::HostNameListToStr(mix_craned_name_list));
+      alloc_craned_list->set_craned_list_regex(
+          util::HostNameListToStr(alloc_craned_name_list));
+      down_craned_list->set_craned_list_regex(
+          util::HostNameListToStr(down_craned_name_list));
+      summarize_craned_name_list.splice(summarize_craned_name_list.end(),
+                                        idle_craned_name_list);
+      summarize_craned_name_list.splice(summarize_craned_name_list.end(),
+                                        mix_craned_name_list);
+      summarize_craned_name_list.splice(summarize_craned_name_list.end(),
+                                        alloc_craned_name_list);
+      summarize_craned_name_list.splice(summarize_craned_name_list.end(),
+                                        down_craned_name_list);
+      part_info->set_craned_abstract_nodes_regex(
+          util::HostNameListToStr(summarize_craned_name_list));
+    }
   });
 
   return reply;

@@ -379,6 +379,7 @@ message QueryClusterInfoRequest {
   repeated CranedState filter_craned_states = 3;
   bool filter_only_down_nodes = 4;
   bool filter_only_responding_nodes = 5;
+  bool option_nodes_on_centric_format = 6;
 }
 
 message QueryClusterInfoReply {
