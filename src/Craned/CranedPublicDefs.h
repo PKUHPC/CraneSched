@@ -57,7 +57,7 @@ struct Config {
   bool CranedForeground{};
 
   std::string Hostname;
-  CranedId CranedId;
+  CranedId CranedIdOfThisNode;
 
   std::unordered_map<std::string, std::string> Ipv4ToNodesHostname;
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
