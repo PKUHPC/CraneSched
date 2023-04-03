@@ -675,6 +675,19 @@ void TaskScheduler::QueryTasksInRam(
         util::HostNameListToStr(task.PersistedPart().craned_ids()));
   };
 
+  bool no_start_time_constraint = !request->has_filter_start_time();
+  bool no_end_time_constraint = !request->has_filter_end_time();
+  auto task_rng_filter_time = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    bool filter_start_time =
+        no_start_time_constraint ||
+        task.PersistedPart().start_time() >= request->filter_start_time();
+    bool filter_end_time =
+        no_end_time_constraint ||
+        task.PersistedPart().end_time() <= request->filter_end_time();
+    return filter_start_time || filter_end_time;
+  };
+
   bool no_accounts_constraint = request->filter_accounts().empty();
   std::unordered_set<std::string> req_accounts(
       request->filter_accounts().begin(), request->filter_accounts().end());
@@ -741,6 +754,7 @@ void TaskScheduler::QueryTasksInRam(
                       ranges::views::filter(task_rng_filter_id) |
                       ranges::views::filter(task_rng_filter_state) |
                       ranges::views::filter(task_rng_filter_user) |
+                      ranges::views::filter(task_rng_filter_time) |
                       ranges::views::take(num_limit);
 
   ranges::for_each(filtered_rng, append_fn);

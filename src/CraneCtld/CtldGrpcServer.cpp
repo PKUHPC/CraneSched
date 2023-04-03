@@ -255,6 +255,17 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_craned_list(
         util::HostNameListToStr(task.persisted_part().craned_ids()));
   };
+  bool no_start_time_constraint = !request->has_filter_start_time();
+  bool no_end_time_constraint = !request->has_filter_end_time();
+  auto task_rng_filter_time = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    bool filter_start_time =
+        no_start_time_constraint ||
+        task.persisted_part().start_time() >= request->filter_start_time();
+    bool filter_end_time =
+        no_end_time_constraint ||
+        task.persisted_part().end_time() <= request->filter_end_time();
+    return filter_start_time || filter_end_time;
+  };
 
   bool no_accounts_constraint = request->filter_accounts().empty();
   std::unordered_set<std::string> req_accounts(
@@ -314,7 +325,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
       ranges::views::filter(task_rng_filter_name) |
       ranges::views::filter(task_rng_filter_partition) |
       ranges::views::filter(task_rng_filter_id) |
-      ranges::views::filter(task_rng_filter_state) | ranges::views::reverse |
+      ranges::views::filter(task_rng_filter_state) |
+      ranges::views::filter(task_rng_filter_time) | ranges::views::reverse |
       ranges::views::take(num_limit - task_list->size());
   ranges::for_each(filtered_ended_rng, ended_append_fn);
 
@@ -366,6 +378,15 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_craned_list(task.allocated_craneds_regex);
   };
 
+  auto db_task_rng_filter_time = [&](TaskInCtld &task) {
+    bool filter_start_time =
+        no_start_time_constraint ||
+        task.PersistedPart().start_time() >= request->filter_start_time();
+    bool filter_end_time =
+        no_end_time_constraint ||
+        task.PersistedPart().end_time() <= request->filter_end_time();
+    return filter_start_time || filter_end_time;
+  };
   auto db_task_rng_filter_account = [&](TaskInCtld &task) {
     return no_accounts_constraint || req_accounts.contains(task.Account());
   };
@@ -401,6 +422,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
                       ranges::views::filter(db_task_rng_filter_id) |
                       ranges::views::filter(db_task_rng_filter_state) |
                       ranges::views::filter(db_task_rng_filter_user) |
+                      ranges::views::filter(db_task_rng_filter_time) |
                       ranges::views::take(num_limit - task_list->size());
   ranges::for_each(db_ended_rng, db_ended_append_fn);
   std::sort(task_list->begin(), task_list->end(),
