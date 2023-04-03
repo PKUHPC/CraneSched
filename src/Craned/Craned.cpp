@@ -343,8 +343,8 @@ void ParseConfig(int argc, char** argv) {
     std::exit(1);
   }
 
-  g_config.CranedId = g_config.Hostname;
-  CRANE_INFO("CranedId of this machine: {}", g_config.CranedId);
+  g_config.CranedIdOfThisNode = g_config.Hostname;
+  CRANE_INFO("CranedId of this machine: {}", g_config.CranedIdOfThisNode);
 }
 
 void InitSpdlog() {
@@ -429,7 +429,7 @@ void GlobalVariableInit() {
   g_task_mgr = std::make_unique<Craned::TaskManager>();
 
   g_ctld_client = std::make_unique<Craned::CtldClient>();
-  g_ctld_client->SetCranedId(g_config.CranedId);
+  g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
 }
