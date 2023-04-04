@@ -244,7 +244,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_node_num(task.task_to_ctld().node_num());
     task_it->set_cmd_line(task.task_to_ctld().cmd_line());
     task_it->set_cwd(task.task_to_ctld().cwd());
-    task_it->set_user_name(task.persisted_part().username());
+    task_it->set_username(task.persisted_part().username());
 
     task_it->set_alloc_cpus(task.task_to_ctld().cpus_per_task());
     task_it->set_exit_code(task.persisted_part().exit_code());
@@ -329,7 +329,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
       ranges::views::take(num_limit - task_list->size());
   ranges::for_each(filtered_ended_rng, ended_append_fn);
 
-  if (task_list->size() >= num_limit || !request->query_all()) {
+  if (task_list->size() >= num_limit ||
+      !request->option_include_completed_tasks()) {
     std::sort(
         task_list->begin(), task_list->end(),
         [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
@@ -338,14 +339,13 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     return grpc::Status::OK;
   }
 
-  // Query all tasks in mongodb (only for cacct)
+  // Query completed tasks in Mongodb
+  // (only for cacct, which sets `option_include_completed_tasks` to true)
   std::list<TaskInCtld> db_ended_list;
   ok = g_db_client->FetchJobRecords(&db_ended_list,
                                     num_limit - task_list->size(), true);
   if (!ok) {
-    CRANE_ERROR(
-        "Failed to call "
-        "g_db_client->FetchJobRecords");
+    CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
     return grpc::Status::OK;
   }
 
@@ -367,7 +367,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_node_num(task.node_num);
     task_it->set_cmd_line(task.cmd_line);
     task_it->set_cwd(task.cwd);
-    task_it->set_user_name(task.PersistedPart().username());
+    task_it->set_username(task.PersistedPart().username());
 
     task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
     task_it->set_exit_code(task.ExitCode());
