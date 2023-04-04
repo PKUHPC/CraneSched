@@ -66,12 +66,12 @@ message TaskToCtld {
   uint32 uid = 5;
   string account = 6;
   string name = 7;
+  string qos = 8;
+  uint32 node_num = 9;
+  uint32 ntasks_per_node = 10;
+  double cpus_per_task = 11;
 
-  uint32 node_num = 8;
-  uint32 ntasks_per_node = 9;
-  double cpus_per_task = 10;
-
-  bool requeue_if_failed = 11;
+  bool requeue_if_failed = 12;
 
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
@@ -163,6 +163,7 @@ message TaskInfo {
   string cmd_line = 12;
   string cwd = 13;
   string username = 14;
+  string qos = 15;
 
   // Dynamic task information
   TaskStatus status = 31;

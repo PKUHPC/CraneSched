@@ -142,6 +142,7 @@ struct TaskInCtld {
   uid_t uid;
   std::string account;
   std::string name;
+  std::string qos;
 
   uint32_t node_num{0};
   uint32_t ntasks_per_node{0};
@@ -306,6 +307,7 @@ struct TaskInCtld {
     password_entry = std::make_unique<PasswordEntry>(uid);
     account = val.account();
     name = val.name();
+    qos = val.qos();
     cmd_line = val.cmd_line();
     env = val.env();
     cwd = val.cwd();

@@ -706,6 +706,7 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_cmd_line(task.TaskToCtld().cmd_line());
     task_it->set_cwd(task.TaskToCtld().cwd());
     task_it->set_username(task.Username());
+    task_it->set_qos(task.qos);
 
     task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
     task_it->set_exit_code(0);
@@ -742,6 +743,14 @@ void TaskScheduler::QueryTasksInRam(
   auto task_rng_filter_username = [&](auto& it) {
     TaskInCtld& task = *it.second;
     return no_username_constraint || req_users.contains(task.Username());
+  };
+
+  bool no_qos_constraint = request->filter_qos().empty();
+  std::unordered_set<std::string> req_qos(request->filter_qos().begin(),
+                                          request->filter_qos().end());
+  auto task_rng_filter_qos = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_qos_constraint || req_qos.contains(task.qos);
   };
 
   bool no_task_names_constraint = request->filter_task_names().empty();
@@ -794,6 +803,7 @@ void TaskScheduler::QueryTasksInRam(
                       ranges::views::filter(task_rng_filter_state) |
                       ranges::views::filter(task_rng_filter_username) |
                       ranges::views::filter(task_rng_filter_time) |
+                      ranges::views::filter(task_rng_filter_qos) |
                       ranges::views::take(num_limit);
 
   ranges::for_each(filtered_rng, append_fn);

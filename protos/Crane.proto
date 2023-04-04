@@ -422,7 +422,7 @@ message QueryTasksInfoRequest{
   repeated string filter_partitions = 2;
   int32 num_limit = 3;
   repeated string filter_task_names = 4;
-  //repeated string filter_qos = 5;
+  repeated string filter_qos = 5;
 
   repeated TaskStatus filter_task_states = 6;
   repeated string filter_users = 7;
