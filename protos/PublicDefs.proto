@@ -94,6 +94,7 @@ message PersistedPartOfTaskInCtld {
   int64 task_db_id = 3;
   int32 gid = 4;
   string account = 5;
+  string username = 6;
 
   // Fields that will change after this task is accepted.
   int32 requeue_count = 11;

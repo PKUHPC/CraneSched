@@ -664,8 +664,7 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_node_num(task.TaskToCtld().node_num());
     task_it->set_cmd_line(task.TaskToCtld().cmd_line());
     task_it->set_cwd(task.TaskToCtld().cwd());
-    struct passwd* pw = getpwuid(task.TaskToCtld().uid());
-    task_it->set_user_name(pw->pw_name);
+    task_it->set_user_name(task.Username());
 
     task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
     task_it->set_exit_code(0);
@@ -696,13 +695,12 @@ void TaskScheduler::QueryTasksInRam(
     return no_accounts_constraint || req_accounts.contains(task.Account());
   };
 
-  bool no_users_constraint = request->filter_users().empty();
+  bool no_username_constraint = request->filter_users().empty();
   std::unordered_set<std::string> req_users(request->filter_users().begin(),
                                             request->filter_users().end());
-  auto task_rng_filter_user = [&](auto& it) {
+  auto task_rng_filter_username = [&](auto& it) {
     TaskInCtld& task = *it.second;
-    struct passwd* pw = getpwuid(task.uid);
-    return no_users_constraint || req_users.contains(pw->pw_name);
+    return no_username_constraint || req_users.contains(task.Username());
   };
 
   bool no_task_names_constraint = request->filter_task_names().empty();
@@ -753,7 +751,7 @@ void TaskScheduler::QueryTasksInRam(
                       ranges::views::filter(task_rng_filter_partition) |
                       ranges::views::filter(task_rng_filter_id) |
                       ranges::views::filter(task_rng_filter_state) |
-                      ranges::views::filter(task_rng_filter_user) |
+                      ranges::views::filter(task_rng_filter_username) |
                       ranges::views::filter(task_rng_filter_time) |
                       ranges::views::take(num_limit);
 

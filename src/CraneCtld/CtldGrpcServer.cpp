@@ -6,7 +6,6 @@
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
-#include "crane/PasswordEntry.h"
 #include "crane/String.h"
 
 namespace Ctld {
@@ -51,29 +50,30 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
-  PasswordEntry entry(task->uid);
-  if (!entry.Valid()) {
+  if (!task->password_entry->Valid()) {
     response->set_ok(false);
     response->set_reason(
         fmt::format("Uid {} not found on the controller node", task->uid));
     return grpc::Status::OK;
   }
+  task->SetUsername(task->password_entry->Username());
 
   {  // Limit the lifecycle of user_scoped_ptr
     auto user_scoped_ptr =
-        g_account_manager->GetExistedUserInfo(entry.Username());
+        g_account_manager->GetExistedUserInfo(task->password_entry->Username());
     if (!user_scoped_ptr) {
       response->set_ok(false);
-      response->set_reason(fmt::format(
-          "User '{}' not found in the account database", entry.Username()));
+      response->set_reason(
+          fmt::format("User '{}' not found in the account database",
+                      task->password_entry->Username()));
       return grpc::Status::OK;
     }
 
     task->SetAccount(user_scoped_ptr->account);
   }
 
-  if (!g_account_manager->CheckUserPermissionToPartition(entry.Username(),
-                                                         task->partition_id)) {
+  if (!g_account_manager->CheckUserPermissionToPartition(
+          task->password_entry->Username(), task->partition_id)) {
     response->set_ok(false);
     response->set_reason(fmt::format(
         "The user:{} don't have access to submit task in partition:{}",
@@ -82,8 +82,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   }
 
   AccountManager::Result check_qos_result =
-      g_account_manager->CheckAndApplyQosLimitOnTask(entry.Username(),
-                                                     task.get());
+      g_account_manager->CheckAndApplyQosLimitOnTask(
+          task->password_entry->Username(), task.get());
   if (!check_qos_result.ok) {
     response->set_ok(false);
     response->set_reason(check_qos_result.reason);
@@ -245,8 +245,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_node_num(task.task_to_ctld().node_num());
     task_it->set_cmd_line(task.task_to_ctld().cmd_line());
     task_it->set_cwd(task.task_to_ctld().cwd());
-    struct passwd *pw = getpwuid(task.task_to_ctld().uid());
-    task_it->set_user_name(pw->pw_name);
+    task_it->set_user_name(task.persisted_part().username());
 
     task_it->set_alloc_cpus(task.task_to_ctld().cpus_per_task());
     task_it->set_exit_code(task.persisted_part().exit_code());
@@ -275,18 +274,18 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
            req_accounts.contains(task.persisted_part().account());
   };
 
-  bool no_users_constraint = request->filter_users().empty();
+  bool no_username_constraint = request->filter_users().empty();
   std::unordered_set<std::string> req_users(request->filter_users().begin(),
                                             request->filter_users().end());
-  auto task_rng_filter_user = [&](crane::grpc::TaskInEmbeddedDb &task) {
-    struct passwd *pw = getpwuid(task.task_to_ctld().uid());
-    return no_users_constraint || req_users.contains(pw->pw_name);
+  auto task_rng_filter_username = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_username_constraint ||
+           req_users.contains(task.persisted_part().username());
   };
 
   bool no_task_names_constraint = request->filter_task_names().empty();
   std::unordered_set<std::string> req_task_names(
       request->filter_task_names().begin(), request->filter_task_names().end());
-  auto task_rng_filter_name = [&](crane::grpc::TaskInEmbeddedDb &task) {
+  auto task_rng_filter_task_name = [&](crane::grpc::TaskInEmbeddedDb &task) {
     return no_task_names_constraint ||
            req_task_names.contains(task.task_to_ctld().name());
   };
@@ -322,7 +321,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
       });
   auto filtered_ended_rng =
       ended_rng | ranges::views::filter(task_rng_filter_account) |
-      ranges::views::filter(task_rng_filter_name) |
+      ranges::views::filter(task_rng_filter_task_name) |
+      ranges::views::filter(task_rng_filter_username) |
       ranges::views::filter(task_rng_filter_partition) |
       ranges::views::filter(task_rng_filter_id) |
       ranges::views::filter(task_rng_filter_state) |
@@ -368,8 +368,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_node_num(task.node_num);
     task_it->set_cmd_line(task.cmd_line);
     task_it->set_cwd(task.cwd);
-    struct passwd *pw = getpwuid(task.TaskToCtld().uid());
-    task_it->set_user_name(pw->pw_name);
+    task_it->set_user_name(task.PersistedPart().username());
 
     task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
     task_it->set_exit_code(task.ExitCode());
@@ -392,8 +391,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   };
 
   auto db_task_rng_filter_user = [&](TaskInCtld &task) {
-    struct passwd *pw = getpwuid(task.uid);
-    return no_users_constraint || req_users.contains(pw->pw_name);
+    return no_username_constraint || req_users.contains(task.Username());
   };
 
   auto db_task_rng_filter_name = [&](TaskInCtld &task) {
