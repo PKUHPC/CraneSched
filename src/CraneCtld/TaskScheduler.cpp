@@ -685,7 +685,7 @@ void TaskScheduler::QueryTasksInRam(
     bool filter_end_time =
         no_end_time_constraint ||
         task.PersistedPart().end_time() <= request->filter_end_time();
-    return filter_start_time || filter_end_time;
+    return filter_start_time && filter_end_time;
   };
 
   bool no_accounts_constraint = request->filter_accounts().empty();
