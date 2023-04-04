@@ -60,20 +60,19 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
 
   {  // Limit the lifecycle of user_scoped_ptr
     auto user_scoped_ptr =
-        g_account_manager->GetExistedUserInfo(task->password_entry->Username());
+        g_account_manager->GetExistedUserInfo(task->Username());
     if (!user_scoped_ptr) {
       response->set_ok(false);
-      response->set_reason(
-          fmt::format("User '{}' not found in the account database",
-                      task->password_entry->Username()));
+      response->set_reason(fmt::format(
+          "User '{}' not found in the account database", task->Username()));
       return grpc::Status::OK;
     }
 
     task->SetAccount(user_scoped_ptr->account);
   }
 
-  if (!g_account_manager->CheckUserPermissionToPartition(
-          task->password_entry->Username(), task->partition_id)) {
+  if (!g_account_manager->CheckUserPermissionToPartition(task->Username(),
+                                                         task->partition_id)) {
     response->set_ok(false);
     response->set_reason(fmt::format(
         "The user:{} don't have access to submit task in partition:{}",
@@ -82,8 +81,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   }
 
   AccountManager::Result check_qos_result =
-      g_account_manager->CheckAndApplyQosLimitOnTask(
-          task->password_entry->Username(), task.get());
+      g_account_manager->CheckAndApplyQosLimitOnTask(task->Username(),
+                                                     task.get());
   if (!check_qos_result.ok) {
     response->set_ok(false);
     response->set_reason(check_qos_result.reason);
