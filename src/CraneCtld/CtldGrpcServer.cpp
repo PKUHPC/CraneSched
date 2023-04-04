@@ -318,15 +318,15 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
       ranges::views::filter([&](crane::grpc::TaskInEmbeddedDb &task) -> bool {
         return task.persisted_part().status() == crane::grpc::Cancelled;
       });
-  auto filtered_ended_rng =
-      ended_rng | ranges::views::filter(task_rng_filter_account) |
-      ranges::views::filter(task_rng_filter_task_name) |
-      ranges::views::filter(task_rng_filter_username) |
-      ranges::views::filter(task_rng_filter_partition) |
-      ranges::views::filter(task_rng_filter_id) |
-      ranges::views::filter(task_rng_filter_state) |
-      ranges::views::filter(task_rng_filter_time) | ranges::views::reverse |
-      ranges::views::take(num_limit - task_list->size());
+  auto filtered_ended_rng = ended_rng |
+                            ranges::views::filter(task_rng_filter_account) |
+                            ranges::views::filter(task_rng_filter_task_name) |
+                            ranges::views::filter(task_rng_filter_username) |
+                            ranges::views::filter(task_rng_filter_partition) |
+                            ranges::views::filter(task_rng_filter_id) |
+                            ranges::views::filter(task_rng_filter_state) |
+                            ranges::views::filter(task_rng_filter_time) |
+                            ranges::views::take(num_limit - task_list->size());
   ranges::for_each(filtered_ended_rng, ended_append_fn);
 
   if (task_list->size() >= num_limit ||
