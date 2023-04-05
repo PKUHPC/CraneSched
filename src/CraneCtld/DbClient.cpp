@@ -137,7 +137,7 @@ bool MongodbClient::FetchJobRecords(std::list<Ctld::TaskInCtld>* task_list,
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
-  // 25 submit_line   exit_code
+  // 25 submit_line   exit_code      username
   try {
     for (auto view : cursor) {
       Ctld::TaskInCtld task;
@@ -149,6 +149,8 @@ bool MongodbClient::FetchJobRecords(std::list<Ctld::TaskInCtld>* task_list,
       task.node_num = 0;
 
       task.SetAccount(view["account"].get_string().value.data());
+      task.SetUsername(view["username"].get_string().value.data());
+
       task.resources.allocatable_resource.cpu_count =
           view["cpus_req"].get_double().value;
       task.resources.allocatable_resource.memory_bytes =
@@ -629,9 +631,9 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
-  // 25 submit_line   exit_code
+  // 25 submit_line   exit_code      username
 
-  std::array<std::string, 27> fields{
+  std::array<std::string, 28> fields{
       "task_id",        "task_db_id",    "mod_time",    "deleted",
       "account",  // 0 - 4
       "cpus_req",       "mem_req",       "task_name",   "env",
@@ -641,8 +643,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
       "priority",       "time_eligible", "time_start",  "time_end",
       "time_suspended",  // 15 - 19
       "script",         "state",         "timelimit",   "time_submit",
-      "work_dir",                     // 20 - 24
-      "submit_line",    "exit_code",  // 25
+      "work_dir",                                     // 20 - 24
+      "submit_line",    "exit_code",     "username",  // 25
   };
 
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,   /*0-4*/
@@ -650,7 +652,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              int32_t, std::string, int32_t, int32_t, std::string, /*10-14*/
              int64_t, int64_t, int64_t, int64_t, int64_t,         /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string, /*20-24*/
-             std::string, int32_t>
+             std::string, int32_t, std::string>
       values{// 0-4
              static_cast<int32_t>(persisted_part.task_id()),
              persisted_part.task_db_id(), absl::ToUnixSeconds(absl::Now()),
@@ -672,7 +674,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              task_to_ctld.batch_meta().sh_script(), persisted_part.status(),
              task_to_ctld.time_limit().seconds(), 0, task_to_ctld.cwd(),
              // 25
-             task_to_ctld.cmd_line(), persisted_part.exit_code()};
+             task_to_ctld.cmd_line(), persisted_part.exit_code(),
+             persisted_part.username()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -683,9 +686,9 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
-  // 25 submit_line   exit_code
+  // 25 submit_line   exit_code      username
 
-  std::array<std::string, 27> fields{
+  std::array<std::string, 28> fields{
       "task_id",        "task_db_id",    "mod_time",    "deleted",
       "account",  // 0 - 4
       "cpus_req",       "mem_req",       "task_name",   "env",
@@ -695,8 +698,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       "priority",       "time_eligible", "time_start",  "time_end",
       "time_suspended",  // 15 - 19
       "script",         "state",         "timelimit",   "time_submit",
-      "work_dir",                     // 20 - 24
-      "submit_line",    "exit_code",  // 25
+      "work_dir",                                     // 20 - 24
+      "submit_line",    "exit_code",     "username",  // 25
   };
 
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,   /*0-4*/
@@ -704,7 +707,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              int32_t, std::string, int32_t, int32_t, std::string, /*10-14*/
              int64_t, int64_t, int64_t, int64_t, int64_t,         /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string, /*20-24*/
-             std::string, int32_t>
+             std::string, int32_t, std::string>
       values{// 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->Account(),
@@ -723,7 +726,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::get<BatchMetaInTask>(task->meta).sh_script, task->Status(),
              absl::ToInt64Seconds(task->time_limit), 0, task->cwd,
              // 25
-             task->cmd_line, task->ExitCode()};
+             task->cmd_line, task->ExitCode(), task->Username()};
 
   return DocumentConstructor_(fields, values);
 }

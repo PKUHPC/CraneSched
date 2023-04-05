@@ -164,6 +164,7 @@ struct TaskInCtld {
   task_db_id_t task_db_id;
   gid_t gid;
   std::string account;
+  std::string username;
 
   /* ----------- [3] ----------------
    * Fields that may change at run time.
@@ -196,6 +197,8 @@ struct TaskInCtld {
                                  // node id.
   std::string allocated_craneds_regex;
 
+  std::unique_ptr<PasswordEntry> password_entry;
+
   // Helper function
  public:
   crane::grpc::TaskToCtld const& TaskToCtld() { return task_to_ctld; }
@@ -226,6 +229,12 @@ struct TaskInCtld {
     persisted_part.set_account(val);
   }
   std::string const& Account() const { return account; }
+
+  void SetUsername(std::string const& val) {
+    username = val;
+    persisted_part.set_username(val);
+  }
+  std::string const& Username() const { return username; }
 
   void SetCranedIds(std::list<CranedId>&& val) {
     persisted_part.mutable_craned_ids()->Assign(val.begin(), val.end());
@@ -298,6 +307,8 @@ struct TaskInCtld {
     cpus_per_task = val.cpus_per_task();
 
     uid = val.uid();
+    password_entry = std::make_unique<PasswordEntry>(uid);
+
     name = val.name();
     cmd_line = val.cmd_line();
     env = val.env();
@@ -311,6 +322,8 @@ struct TaskInCtld {
     task_id = persisted_part.task_id();
     task_db_id = persisted_part.task_db_id();
     gid = persisted_part.gid();
+    account = persisted_part.account();
+    username = persisted_part.username();
 
     craned_ids.assign(persisted_part.craned_ids().begin(),
                       persisted_part.craned_ids().end());

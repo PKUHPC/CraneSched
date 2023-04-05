@@ -648,7 +648,6 @@ void TaskScheduler::QueryTasksInRam(
   auto append_fn = [&](auto& it) {
     TaskInCtld& task = *it.second;
     auto* task_it = task_list->Add();
-
     task_it->set_type(task.TaskToCtld().type());
     task_it->set_task_id(task.PersistedPart().task_id());
     task_it->set_name(task.TaskToCtld().name());
@@ -664,6 +663,7 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_node_num(task.TaskToCtld().node_num());
     task_it->set_cmd_line(task.TaskToCtld().cmd_line());
     task_it->set_cwd(task.TaskToCtld().cwd());
+    task_it->set_username(task.Username());
 
     task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
     task_it->set_exit_code(0);
@@ -673,27 +673,88 @@ void TaskScheduler::QueryTasksInRam(
         util::HostNameListToStr(task.PersistedPart().craned_ids()));
   };
 
+  bool no_start_time_constraint = !request->has_filter_start_time();
+  bool no_end_time_constraint = !request->has_filter_end_time();
+  auto task_rng_filter_time = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    bool filter_start_time =
+        no_start_time_constraint ||
+        task.PersistedPart().start_time() >= request->filter_start_time();
+    bool filter_end_time =
+        no_end_time_constraint ||
+        task.PersistedPart().end_time() <= request->filter_end_time();
+    return filter_start_time && filter_end_time;
+  };
+
+  bool no_accounts_constraint = request->filter_accounts().empty();
+  std::unordered_set<std::string> req_accounts(
+      request->filter_accounts().begin(), request->filter_accounts().end());
+  auto task_rng_filter_account = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_accounts_constraint || req_accounts.contains(task.Account());
+  };
+
+  bool no_username_constraint = request->filter_users().empty();
+  std::unordered_set<std::string> req_users(request->filter_users().begin(),
+                                            request->filter_users().end());
+  auto task_rng_filter_username = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_username_constraint || req_users.contains(task.Username());
+  };
+
+  bool no_task_names_constraint = request->filter_task_names().empty();
+  std::unordered_set<std::string> req_task_names(
+      request->filter_task_names().begin(), request->filter_task_names().end());
+  auto task_rng_filter_name = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_task_names_constraint ||
+           req_task_names.contains(task.TaskToCtld().name());
+  };
+
+  bool no_partitions_constraint = request->filter_partitions().empty();
+  std::unordered_set<std::string> req_partitions(
+      request->filter_partitions().begin(), request->filter_partitions().end());
+  auto task_rng_filter_partition = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_partitions_constraint ||
+           req_partitions.contains(task.TaskToCtld().partition_name());
+  };
+
+  bool no_task_ids_constraint = request->filter_task_ids().empty();
+  std::unordered_set<uint32_t> req_task_ids(request->filter_task_ids().begin(),
+                                            request->filter_task_ids().end());
+  auto task_rng_filter_id = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_task_ids_constraint || req_task_ids.contains(task.TaskId());
+  };
+
+  bool no_task_states_constraint = request->filter_task_states().empty();
+  std::unordered_set<int> req_task_states(request->filter_task_states().begin(),
+                                          request->filter_task_states().end());
+  auto task_rng_filter_state = [&](auto& it) {
+    TaskInCtld& task = *it.second;
+    return no_task_states_constraint ||
+           req_task_states.contains(task.PersistedPart().status());
+  };
+
   auto pending_rng = m_pending_task_map_ | ranges::views::all;
   auto running_rng = m_running_task_map_ | ranges::views::all;
   auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
 
-  if (!request->partition().empty() || request->task_id() != -1) {
-    auto pd_r_filtered_rng =
-        pd_r_rng | ranges::views::filter([&](auto& it) -> bool {
-          std::unique_ptr<TaskInCtld>& task = it.second;
-          bool res = true;
-          if (!request->partition().empty()) {
-            res &= task->partition_id == request->partition();
-          }
-          if (request->task_id() != -1) {
-            res &= task->TaskId() == request->task_id();
-          }
-          return res;
-        });
-    ranges::for_each(pd_r_filtered_rng, append_fn);
-  } else {
-    ranges::for_each(pd_r_rng, append_fn);
-  }
+  int num_limit = request->num_limit() <= 0 ? kDefaultQueryTaskNumLimit
+                                            : request->num_limit();
+
+  auto filtered_rng = pd_r_rng |
+                      ranges::views::filter(task_rng_filter_account) |
+                      ranges::views::filter(task_rng_filter_name) |
+                      ranges::views::filter(task_rng_filter_partition) |
+                      ranges::views::filter(task_rng_filter_id) |
+                      ranges::views::filter(task_rng_filter_state) |
+                      ranges::views::filter(task_rng_filter_username) |
+                      ranges::views::filter(task_rng_filter_time) |
+                      ranges::views::take(num_limit);
+
+  ranges::for_each(filtered_rng, append_fn);
 }
 
 void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
@@ -708,7 +769,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
   for (const auto& craned_id : partition_metas.craned_ids) {
     CranedMeta const& craned_meta = craned_meta_map.at(craned_id);
 
-    // A offline craned shouldn't be scheduled.
+    // An offline craned shouldn't be scheduled.
     if (!craned_meta.alive) continue;
 
     // Sort all running task in this node by ending time.
@@ -1344,7 +1405,7 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
       // end at time x-2, If "x+2" lies in the interval [x, y-1) in
       // time__avail_res__map,
       //  for example, x+2 in [x, y-1) with the available resources amount
-      //  a, we need to divide this interval into to two intervals: [x,
+      //  `a`, we need to divide this interval into to two intervals: [x,
       //  x+2]: a-k, where k is the resource amount that task requires,
       //  [x+3, y-1]: a
       // Therefore, we need to insert a key-value at x+3 to preserve this.

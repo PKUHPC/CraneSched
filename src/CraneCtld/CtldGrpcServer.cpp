@@ -6,7 +6,6 @@
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
-#include "crane/PasswordEntry.h"
 #include "crane/String.h"
 
 namespace Ctld {
@@ -51,28 +50,28 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
-  PasswordEntry entry(task->uid);
-  if (!entry.Valid()) {
+  if (!task->password_entry->Valid()) {
     response->set_ok(false);
     response->set_reason(
         fmt::format("Uid {} not found on the controller node", task->uid));
     return grpc::Status::OK;
   }
+  task->SetUsername(task->password_entry->Username());
 
   {  // Limit the lifecycle of user_scoped_ptr
     auto user_scoped_ptr =
-        g_account_manager->GetExistedUserInfo(entry.Username());
+        g_account_manager->GetExistedUserInfo(task->Username());
     if (!user_scoped_ptr) {
       response->set_ok(false);
       response->set_reason(fmt::format(
-          "User '{}' not found in the account database", entry.Username()));
+          "User '{}' not found in the account database", task->Username()));
       return grpc::Status::OK;
     }
 
     task->SetAccount(user_scoped_ptr->account);
   }
 
-  if (!g_account_manager->CheckUserPermissionToPartition(entry.Username(),
+  if (!g_account_manager->CheckUserPermissionToPartition(task->Username(),
                                                          task->partition_id)) {
     response->set_ok(false);
     response->set_reason(fmt::format(
@@ -82,7 +81,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   }
 
   AccountManager::Result check_qos_result =
-      g_account_manager->CheckAndApplyQosLimitOnTask(entry.Username(),
+      g_account_manager->CheckAndApplyQosLimitOnTask(task->Username(),
                                                      task.get());
   if (!check_qos_result.ok) {
     response->set_ok(false);
@@ -200,20 +199,22 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryTasksInfoRequest *request,
     crane::grpc::QueryTasksInfoReply *response) {
+  // Query tasks in RAM
   g_task_scheduler->QueryTasksInRam(request, response);
 
   int num_limit = request->num_limit() <= 0 ? kDefaultQueryTaskNumLimit
                                             : request->num_limit();
   auto *task_list = response->mutable_task_info_list();
-  std::sort(task_list->begin(), task_list->end(),
-            [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
-              return a.end_time() > b.end_time();
-            });
   if (task_list->size() >= num_limit) {
-    task_list->DeleteSubrange(num_limit, task_list->size() - num_limit);
+    std::sort(
+        task_list->begin(), task_list->end(),
+        [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
+          return a.end_time() > b.end_time();
+        });
     return grpc::Status::OK;
   }
 
+  // Query finished tasks in Embedded database
   bool ok;
 
   std::list<crane::grpc::TaskInEmbeddedDb> ended_list;
@@ -243,6 +244,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_node_num(task.task_to_ctld().node_num());
     task_it->set_cmd_line(task.task_to_ctld().cmd_line());
     task_it->set_cwd(task.task_to_ctld().cwd());
+    task_it->set_username(task.persisted_part().username());
 
     task_it->set_alloc_cpus(task.task_to_ctld().cpus_per_task());
     task_it->set_exit_code(task.persisted_part().exit_code());
@@ -251,38 +253,99 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_craned_list(
         util::HostNameListToStr(task.persisted_part().craned_ids()));
   };
+  bool no_start_time_constraint = !request->has_filter_start_time();
+  bool no_end_time_constraint = !request->has_filter_end_time();
+  auto task_rng_filter_time = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    bool filter_start_time =
+        no_start_time_constraint ||
+        task.persisted_part().start_time() >= request->filter_start_time();
+    bool filter_end_time =
+        no_end_time_constraint ||
+        task.persisted_part().end_time() <= request->filter_end_time();
+    return filter_start_time && filter_end_time;
+  };
 
-  auto ended_rng = ended_list | ranges::views::reverse |
-                   ranges::views::take(num_limit - task_list->size());
-  if (!request->partition().empty() || request->task_id() != -1) {
-    auto partition_filtered_rng =
-        ended_rng |
-        ranges::views::filter([&](crane::grpc::TaskInEmbeddedDb &task) -> bool {
-          bool res = true;
-          if (!request->partition().empty()) {
-            res &= task.task_to_ctld().partition_name() == request->partition();
-          }
-          if (request->task_id() != -1) {
-            res &= task.persisted_part().task_id() == request->task_id();
-          }
-          return res;
+  bool no_accounts_constraint = request->filter_accounts().empty();
+  std::unordered_set<std::string> req_accounts(
+      request->filter_accounts().begin(), request->filter_accounts().end());
+  auto task_rng_filter_account = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_accounts_constraint ||
+           req_accounts.contains(task.persisted_part().account());
+  };
+
+  bool no_username_constraint = request->filter_users().empty();
+  std::unordered_set<std::string> req_users(request->filter_users().begin(),
+                                            request->filter_users().end());
+  auto task_rng_filter_username = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_username_constraint ||
+           req_users.contains(task.persisted_part().username());
+  };
+
+  bool no_task_names_constraint = request->filter_task_names().empty();
+  std::unordered_set<std::string> req_task_names(
+      request->filter_task_names().begin(), request->filter_task_names().end());
+  auto task_rng_filter_task_name = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_task_names_constraint ||
+           req_task_names.contains(task.task_to_ctld().name());
+  };
+
+  bool no_partitions_constraint = request->filter_partitions().empty();
+  std::unordered_set<std::string> req_partitions(
+      request->filter_partitions().begin(), request->filter_partitions().end());
+  auto task_rng_filter_partition = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_partitions_constraint ||
+           req_partitions.contains(task.task_to_ctld().partition_name());
+  };
+
+  bool no_task_ids_constraint = request->filter_task_ids().empty();
+  std::unordered_set<uint32_t> req_task_ids(request->filter_task_ids().begin(),
+                                            request->filter_task_ids().end());
+  auto task_rng_filter_id = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_task_ids_constraint ||
+           req_task_ids.contains(task.persisted_part().task_id());
+  };
+
+  bool no_task_states_constraint = request->filter_task_states().empty();
+  std::unordered_set<int> req_task_states(request->filter_task_states().begin(),
+                                          request->filter_task_states().end());
+  auto task_rng_filter_state = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_task_states_constraint ||
+           req_task_states.contains(task.persisted_part().status());
+  };
+
+  auto ended_rng =
+      ended_list |
+      ranges::views::filter([&](crane::grpc::TaskInEmbeddedDb &task) -> bool {
+        return task.persisted_part().status() == crane::grpc::Cancelled;
+      });
+  auto filtered_ended_rng = ended_rng |
+                            ranges::views::filter(task_rng_filter_account) |
+                            ranges::views::filter(task_rng_filter_task_name) |
+                            ranges::views::filter(task_rng_filter_username) |
+                            ranges::views::filter(task_rng_filter_partition) |
+                            ranges::views::filter(task_rng_filter_id) |
+                            ranges::views::filter(task_rng_filter_state) |
+                            ranges::views::filter(task_rng_filter_time) |
+                            ranges::views::take(num_limit - task_list->size());
+  ranges::for_each(filtered_ended_rng, ended_append_fn);
+
+  if (task_list->size() >= num_limit ||
+      !request->option_include_completed_tasks()) {
+    std::sort(
+        task_list->begin(), task_list->end(),
+        [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
+          return a.end_time() > b.end_time();
         });
-    ranges::for_each(partition_filtered_rng, ended_append_fn);
-  } else {
-    ranges::for_each(ended_rng, ended_append_fn);
-  }
-
-  if (task_list->size() >= num_limit) {
     return grpc::Status::OK;
   }
 
+  // Query completed tasks in Mongodb
+  // (only for cacct, which sets `option_include_completed_tasks` to true)
   std::list<TaskInCtld> db_ended_list;
   ok = g_db_client->FetchJobRecords(&db_ended_list,
                                     num_limit - task_list->size(), true);
   if (!ok) {
-    CRANE_ERROR(
-        "Failed to call "
-        "g_db_client->FetchJobRecords");
+    CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
     return grpc::Status::OK;
   }
 
@@ -304,6 +367,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_node_num(task.node_num);
     task_it->set_cmd_line(task.cmd_line);
     task_it->set_cwd(task.cwd);
+    task_it->set_username(task.PersistedPart().username());
 
     task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
     task_it->set_exit_code(task.ExitCode());
@@ -312,24 +376,56 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_craned_list(task.allocated_craneds_regex);
   };
 
-  auto db_ended_rng = db_ended_list | ranges::views::all;
-  if (!request->partition().empty() || request->task_id() != -1) {
-    auto partition_filtered_rng =
-        db_ended_rng | ranges::views::filter([&](TaskInCtld &task) -> bool {
-          bool res = true;
-          if (!request->partition().empty()) {
-            res &= task.partition_id == request->partition();
-          }
-          if (request->task_id() != -1) {
-            res &= task.TaskId() == request->task_id();
-          }
-          return res;
-        });
-    ranges::for_each(partition_filtered_rng, db_ended_append_fn);
-  } else {
-    ranges::for_each(db_ended_rng, db_ended_append_fn);
-  }
+  auto db_task_rng_filter_time = [&](TaskInCtld &task) {
+    bool filter_start_time =
+        no_start_time_constraint ||
+        task.PersistedPart().start_time() >= request->filter_start_time();
+    bool filter_end_time =
+        no_end_time_constraint ||
+        task.PersistedPart().end_time() <= request->filter_end_time();
+    return filter_start_time && filter_end_time;
+  };
+  auto db_task_rng_filter_account = [&](TaskInCtld &task) {
+    return no_accounts_constraint || req_accounts.contains(task.Account());
+  };
 
+  auto db_task_rng_filter_user = [&](TaskInCtld &task) {
+    return no_username_constraint || req_users.contains(task.Username());
+  };
+
+  auto db_task_rng_filter_name = [&](TaskInCtld &task) {
+    return no_task_names_constraint ||
+           req_task_names.contains(task.TaskToCtld().name());
+  };
+
+  auto db_task_rng_filter_partition = [&](TaskInCtld &task) {
+    return no_partitions_constraint ||
+           req_partitions.contains(task.TaskToCtld().partition_name());
+  };
+
+  auto db_task_rng_filter_id = [&](TaskInCtld &task) {
+    return no_task_ids_constraint || req_task_ids.contains(task.TaskId());
+  };
+
+  auto db_task_rng_filter_state = [&](TaskInCtld &task) {
+    return no_task_states_constraint ||
+           req_task_states.contains(task.PersistedPart().status());
+  };
+
+  auto db_ended_rng = db_ended_list |
+                      ranges::views::filter(db_task_rng_filter_account) |
+                      ranges::views::filter(db_task_rng_filter_name) |
+                      ranges::views::filter(db_task_rng_filter_partition) |
+                      ranges::views::filter(db_task_rng_filter_id) |
+                      ranges::views::filter(db_task_rng_filter_state) |
+                      ranges::views::filter(db_task_rng_filter_user) |
+                      ranges::views::filter(db_task_rng_filter_time) |
+                      ranges::views::take(num_limit - task_list->size());
+  ranges::for_each(db_ended_rng, db_ended_append_fn);
+  std::sort(task_list->begin(), task_list->end(),
+            [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
+              return a.end_time() > b.end_time();
+            });
   return grpc::Status::OK;
 }
 
