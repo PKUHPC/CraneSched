@@ -1,7 +1,6 @@
 #include "TaskScheduler.h"
 
 #include <google/protobuf/util/time_util.h>
-#include <pwd.h>
 
 #include "CranedKeeper.h"
 #include "CtldGrpcServer.h"
@@ -770,7 +769,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
   for (const auto& craned_id : partition_metas.craned_ids) {
     CranedMeta const& craned_meta = craned_meta_map.at(craned_id);
 
-    // A offline craned shouldn't be scheduled.
+    // An offline craned shouldn't be scheduled.
     if (!craned_meta.alive) continue;
 
     // Sort all running task in this node by ending time.
@@ -1406,7 +1405,7 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
       // end at time x-2, If "x+2" lies in the interval [x, y-1) in
       // time__avail_res__map,
       //  for example, x+2 in [x, y-1) with the available resources amount
-      //  a, we need to divide this interval into to two intervals: [x,
+      //  `a`, we need to divide this interval into to two intervals: [x,
       //  x+2]: a-k, where k is the resource amount that task requires,
       //  [x+3, y-1]: a
       // Therefore, we need to insert a key-value at x+3 to preserve this.
