@@ -691,7 +691,7 @@ void TaskScheduler::QueryTasksInRam(
       request->filter_accounts().begin(), request->filter_accounts().end());
   auto task_rng_filter_account = [&](auto& it) {
     TaskInCtld& task = *it.second;
-    return no_accounts_constraint || req_accounts.contains(task.Account());
+    return no_accounts_constraint || req_accounts.contains(task.account);
   };
 
   bool no_username_constraint = request->filter_users().empty();

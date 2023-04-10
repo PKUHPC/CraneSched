@@ -317,7 +317,6 @@ struct TaskInCtld {
     task_id = persisted_part.task_id();
     task_db_id = persisted_part.task_db_id();
     gid = persisted_part.gid();
-    account = persisted_part.account();
     username = persisted_part.username();
 
     craned_ids.assign(persisted_part.craned_ids().begin(),

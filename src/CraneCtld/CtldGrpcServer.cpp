@@ -80,8 +80,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     }
   }
 
-  if (!g_account_manager->CheckUserPermissionToPartition(task->Username(),task->account,
-                                                         task->partition_id)) {
+  if (!g_account_manager->CheckUserPermissionToPartition(
+          task->Username(), task->account, task->partition_id)) {
     response->set_ok(false);
     response->set_reason(fmt::format(
         "The user '{}' don't have access to submit task in partition '{}'",
@@ -91,15 +91,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
 
   if (!g_account_manager->CheckAccountEnableState(task->account)) {
     response->set_ok(false);
-    response->set_reason(
-        fmt::format("The account '{}' or the Ancestor account is disabled",
-                    task->account));
+    response->set_reason(fmt::format(
+        "The account '{}' or the Ancestor account is disabled", task->account));
     return grpc::Status::OK;
   }
 
   AccountManager::Result check_qos_result =
-      g_account_manager->CheckAndApplyQosLimitOnTask(task->Username(),task->account,
-                                                     task.get());
+      g_account_manager->CheckAndApplyQosLimitOnTask(task->Username(),
+                                                     task->account, task.get());
   if (!check_qos_result.ok) {
     response->set_ok(false);
     response->set_reason(check_qos_result.reason);
@@ -118,8 +117,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     response->set_reason("Partition doesn't exist!");
     CRANE_DEBUG(
         "Received an batch task request "
-        "but the allocation failed. Reason: Resource "
-        "not enough!");
+        "but the allocation failed. Reason: Partition doesn't exist!");
   } else if (err == CraneErr::kInvalidNodeNum) {
     response->set_ok(false);
     response->set_reason(
@@ -129,6 +127,13 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
         "Received an batch task request "
         "but the allocation failed. Reason: --node is either invalid or "
         "greater than the number of alive nodes in its partition.");
+  } else if (err == CraneErr::kNoResource) {
+    response->set_ok(false);
+    response->set_reason("The resources of the partition are insufficient");
+    CRANE_DEBUG(
+        "Received an batch task request "
+        "but the allocation failed. Reason: The resources of the partition are "
+        "insufficient.");
   }
 
   return grpc::Status::OK;
@@ -287,7 +292,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
       request->filter_accounts().begin(), request->filter_accounts().end());
   auto task_rng_filter_account = [&](crane::grpc::TaskInEmbeddedDb &task) {
     return no_accounts_constraint ||
-           req_accounts.contains(task.persisted_part().account());
+           req_accounts.contains(task.task_to_ctld().account());
   };
 
   bool no_username_constraint = request->filter_users().empty();
@@ -403,7 +408,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     return filter_start_time && filter_end_time;
   };
   auto db_task_rng_filter_account = [&](TaskInCtld &task) {
-    return no_accounts_constraint || req_accounts.contains(task.Account());
+    return no_accounts_constraint || req_accounts.contains(task.account);
   };
 
   auto db_task_rng_filter_user = [&](TaskInCtld &task) {
