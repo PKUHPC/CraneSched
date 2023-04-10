@@ -83,9 +83,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
   grpc::Status DeleteEntity(grpc::ServerContext *context,
                             const crane::grpc::DeleteEntityRequest *request,
                             crane::grpc::DeleteEntityReply *response) override;
-  grpc::Status BlockEntity(grpc::ServerContext *context,
-                           const crane::grpc::BlockEntityRequest *request,
-                           crane::grpc::BlockEntityReply *response) override;
+  grpc::Status BlockAccountOrUser(
+      grpc::ServerContext *context,
+      const crane::grpc::BlockAccountOrUserRequest *request,
+      crane::grpc::BlockAccountOrUserReply *response) override;
 
   grpc::Status QueryClusterInfo(
       grpc::ServerContext *context,

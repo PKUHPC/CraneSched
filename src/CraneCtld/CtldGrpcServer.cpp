@@ -68,10 +68,19 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
       return grpc::Status::OK;
     }
 
-    task->SetAccount(user_scoped_ptr->account);
+    if (task->account.empty()) {
+      task->account = user_scoped_ptr->default_account;
+    } else {
+      if (!user_scoped_ptr->account_map.contains(task->account)) {
+        response->set_ok(false);
+        response->set_reason(fmt::format(
+            "Account '{}' is not in your account list", task->account));
+        return grpc::Status::OK;
+      }
+    }
   }
 
-  if (!g_account_manager->CheckUserPermissionToPartition(task->Username(),
+  if (!g_account_manager->CheckUserPermissionToPartition(task->Username(),task->account,
                                                          task->partition_id)) {
     response->set_ok(false);
     response->set_reason(fmt::format(
@@ -80,16 +89,16 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     return grpc::Status::OK;
   }
 
-  if (!g_account_manager->CheckAccountEnableState(task->Account())) {
+  if (!g_account_manager->CheckAccountEnableState(task->account)) {
     response->set_ok(false);
     response->set_reason(
         fmt::format("The account '{}' or the Ancestor account is disabled",
-                    task->Account()));
+                    task->account));
     return grpc::Status::OK;
   }
 
   AccountManager::Result check_qos_result =
-      g_account_manager->CheckAndApplyQosLimitOnTask(task->Username(),
+      g_account_manager->CheckAndApplyQosLimitOnTask(task->Username(),task->account,
                                                      task.get());
   if (!check_qos_result.ok) {
     response->set_ok(false);
@@ -247,7 +256,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->mutable_time_limit()->CopyFrom(task.task_to_ctld().time_limit());
     task_it->mutable_start_time()->CopyFrom(task.persisted_part().start_time());
     task_it->mutable_end_time()->CopyFrom(task.persisted_part().end_time());
-    task_it->set_account(task.persisted_part().account());
+    task_it->set_account(task.task_to_ctld().account());
 
     task_it->set_node_num(task.task_to_ctld().node_num());
     task_it->set_cmd_line(task.task_to_ctld().cmd_line());
@@ -370,7 +379,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->mutable_time_limit()->set_seconds(ToInt64Seconds(task.time_limit));
     task_it->mutable_start_time()->CopyFrom(task.PersistedPart().start_time());
     task_it->mutable_end_time()->CopyFrom(task.PersistedPart().end_time());
-    task_it->set_account(task.Account());
+    task_it->set_account(task.account);
 
     task_it->set_node_num(task.node_num);
     task_it->set_cmd_line(task.cmd_line);
@@ -527,7 +536,8 @@ grpc::Status CraneCtldServiceImpl::AddUser(
 
   user.name = user_info->name();
   user.uid = user_info->uid();
-  user.account = user_info->account();
+  user.default_account = user_info->account();
+  user.admin_level = User::AdminLevel(user_info->admin_level());
 
   // For user adding operation, the front end allows user only to set
   // 'Allowed Partition'. 'Qos Lists' of the 'Allowed Partitions' can't be
@@ -537,10 +547,12 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   // `partition_name` field is set.
   // Moreover, if `allowed_partition_qos_list` is empty, both allowed partitions
   // and qos_list for allowed partitions are inherited from the parent.
-  for (const auto &apq : user_info->allowed_partition_qos_list())
-    user.allowed_partition_qos_map[apq.partition_name()];
-
-  user.admin_level = User::AdminLevel(user_info->admin_level());
+  if (!user.default_account.empty()) {
+    user.account_map[user.default_account];
+    for (const auto &apq : user_info->allowed_partition_qos_list())
+      user.account_map[user.default_account]
+          .allowed_partition_qos_map[apq.partition_name()];
+  }
 
   AccountManager::Result result = g_account_manager->AddUser(std::move(user));
   if (result.ok) {
@@ -640,16 +652,17 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
         }
       }
       res = g_account_manager->ModifyAccount(request->type(), request->name(),
-                                             request->lhs(), request->rhs());
+                                             request->lhs(), request->rhs(),
+                                             request->force());
 
       break;
     case crane::grpc::User:
       if (user_level == User::Operator) {
         AccountManager::UserMutexSharedPtr modifier_shared_ptr =
             g_account_manager->GetExistedUserInfo(request->name());
-        if (user_account != modifier_shared_ptr->account &&
-            !g_account_manager->PaternityTest(user_account,
-                                              modifier_shared_ptr->account)) {
+        if (user_account != modifier_shared_ptr->default_account &&
+            !g_account_manager->PaternityTest(
+                user_account, modifier_shared_ptr->default_account)) {
           response->set_ok(false);
           response->set_reason(
               "Permission error : You do not have permission to modify a user "
@@ -672,9 +685,9 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
         }
       }
 
-      res = g_account_manager->ModifyUser(request->type(), request->name(),
-                                          request->partition(), request->lhs(),
-                                          request->rhs());
+      res = g_account_manager->ModifyUser(
+          request->type(), request->name(), request->partition(),
+          request->account(), request->lhs(), request->rhs(), request->force());
       break;
     case crane::grpc::Qos:
       if (user_level != User::Admin) {
@@ -684,7 +697,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
         return grpc::Status::OK;
       }
       res = g_account_manager->ModifyQos(request->name(), request->lhs(),
-                                         request->rhs());
+                                         request->rhs(), request->force());
       break;
     default:
       break;
@@ -855,9 +868,9 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
             g_account_manager->GetExistedUserInfo(request->name());
         if (user_shared_ptr) {
           if (user_level != User::Admin) {
-            if (!g_account_manager->PaternityTest(user_account,
-                                                  user_shared_ptr->account) &&
-                user_account != user_shared_ptr->account) {
+            if (!g_account_manager->PaternityTest(
+                    user_account, user_shared_ptr->default_account) &&
+                user_account != user_shared_ptr->default_account) {
               response->set_ok(false);
               response->set_reason(
                   "Permission error : You cannot query user information that "
@@ -876,23 +889,30 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
       }
 
       for (const auto &user : res_user_list) {
-        auto *user_info = response->mutable_user_list()->Add();
-        user_info->set_name(user.name);
-        user_info->set_uid(user.uid);
-        user_info->set_account(user.account);
-        user_info->set_admin_level(
-            (crane::grpc::UserInfo_AdminLevel)user.admin_level);
+        for (const auto &[account, item] : user.account_map) {
+          auto *user_info = response->mutable_user_list()->Add();
+          user_info->set_name(user.name);
+          user_info->set_uid(user.uid);
+          if (account == user.default_account) {
+            user_info->set_account(account + '*');
+          } else {
+            user_info->set_account(account);
+          }
+          user_info->set_admin_level(
+              (crane::grpc::UserInfo_AdminLevel)user.admin_level);
+          user_info->set_enable(item.enable);
 
-        auto *partition_qos_list =
-            user_info->mutable_allowed_partition_qos_list();
-        for (const auto &[par_name, pair] : user.allowed_partition_qos_map) {
-          auto *partition_qos = partition_qos_list->Add();
-          partition_qos->set_partition_name(par_name);
-          partition_qos->set_default_qos(pair.first);
+          auto *partition_qos_list =
+              user_info->mutable_allowed_partition_qos_list();
+          for (const auto &[par_name, pair] : item.allowed_partition_qos_map) {
+            auto *partition_qos = partition_qos_list->Add();
+            partition_qos->set_partition_name(par_name);
+            partition_qos->set_default_qos(pair.first);
 
-          auto *qos_list = partition_qos->mutable_qos_list();
-          for (const auto &qos : pair.second) {
-            qos_list->Add()->assign(qos);
+            auto *qos_list = partition_qos->mutable_qos_list();
+            for (const auto &qos : pair.second) {
+              qos_list->Add()->assign(qos);
+            }
           }
         }
       }
@@ -984,18 +1004,42 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
         return grpc::Status::OK;
       }
       if (user_level == User::Operator) {
-        if (deleter_shared_ptr->account != user_account &&
-            !g_account_manager->PaternityTest(user_account,
-                                              deleter_shared_ptr->account)) {
-          response->set_ok(false);
-          response->set_reason(
-              "Permission error : You do not have permission to delete a user "
-              "who is not in the subtree of your account");
-          return grpc::Status::OK;
+        if (request->account().empty()) {
+          // Remove user from all of it's accounts
+          if (deleter_shared_ptr->account_map.size() == 1) {
+            if (deleter_shared_ptr->default_account != user_account &&
+                !g_account_manager->PaternityTest(
+                    user_account, deleter_shared_ptr->default_account)) {
+              response->set_ok(false);
+              response->set_reason(
+                  "Permission error : You do not have permission to delete a "
+                  "user "
+                  "who is not in the subtree of your account");
+              return grpc::Status::OK;
+            }
+          } else {
+            response->set_ok(false);
+            response->set_reason(
+                "Permission error : You can't remove user form more than one "
+                "account at a time");
+            return grpc::Status::OK;
+          }
+        } else {
+          // Remove user from specific account
+          if (request->account() != user_account &&
+              !g_account_manager->PaternityTest(user_account,
+                                                request->account())) {
+            response->set_ok(false);
+            response->set_reason(
+                "Permission error : You do not have permission to delete a "
+                "user "
+                "who is not in the subtree of your account");
+            return grpc::Status::OK;
+          }
         }
       }
     }
-      res = g_account_manager->DeleteUser(request->name());
+      res = g_account_manager->DeleteUser(request->name(), request->account());
       break;
     case crane::grpc::Account:
       if (user_level == User::Operator) {
@@ -1003,7 +1047,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
           response->set_ok(false);
           response->set_reason(
               "Permission error : You do not have permission to delete an "
-              "account which not in subtree of you account");
+              "account which is not in subtree of you account");
           return grpc::Status::OK;
         }
       }
@@ -1031,37 +1075,47 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::BlockEntity(
+grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
     grpc::ServerContext *context,
-    const crane::grpc::BlockEntityRequest *request,
-    crane::grpc::BlockEntityReply *response) {
+    const crane::grpc::BlockAccountOrUserRequest *request,
+    crane::grpc::BlockAccountOrUserReply *response) {
   User::AdminLevel user_level;
   std::string user_account;
   AccountManager::Result res = g_account_manager->FindUserLevelAccountOfUid(
       request->uid(), &user_level, &user_account);
 
+  // Admin can block any account and Operator can block accounts only within
+  // its account subtree.
+  if (user_level == User::None) {
+    response->set_ok(false);
+    response->set_reason(
+        "Permission error : You do not have permission to block an "
+        "account or user");
+    return grpc::Status::OK;
+  } else if (user_level == User::Operator) {
+    if (!g_account_manager->PaternityTest(
+            user_account, request->entity_type() == crane::grpc::Account
+                              ? request->name()
+                              : request->account())) {
+      response->set_ok(false);
+      response->set_reason(
+          "Permission error : You do not have permission to block an "
+          "account or user which not in subtree of you account");
+      return grpc::Status::OK;
+    }
+  }
+
   switch (request->entity_type()) {
     case crane::grpc::Account:
-      if (user_level == User::None) {
-        response->set_ok(false);
-        response->set_reason(
-            "Permission error : You do not have permission to block an "
-            "account");
-        return grpc::Status::OK;
-      } else if (user_level == User::Operator) {
-        if (!g_account_manager->PaternityTest(user_account, request->name())) {
-          response->set_ok(false);
-          response->set_reason(
-              "Permission error : You do not have permission to block an "
-              "account which not in subtree of you account");
-          return grpc::Status::OK;
-        }
-      }
       res = g_account_manager->BlockAccount(request->name(), request->block());
       response->set_ok(res.ok);
       response->set_reason(res.reason);
       break;
     case crane::grpc::User:
+      res = g_account_manager->BlockUser(request->name(), request->account(),
+                                         request->block());
+      response->set_ok(res.ok);
+      response->set_reason(res.reason);
       break;
     default:
       break;

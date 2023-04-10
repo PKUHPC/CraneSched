@@ -48,6 +48,7 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
         std::remove_reference<decltype(qos.max_cpus_per_user)>::type>::max();
     qos.max_cpus_per_account = std::numeric_limits<
         std::remove_reference<decltype(qos.max_cpus_per_account)>::type>::max();
+    qos.reference_count = 1;
 
     if (!InsertQos(qos)) {
       CRANE_ERROR("Failed to insert default qos {}!", kUnlimitedQosName);
@@ -76,9 +77,11 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     CRANE_TRACE("Default user ROOT not found. Insert it into DB.");
 
     root_user.name = "root";
-    root_user.account = "ROOT";
+    root_user.default_account = "ROOT";
     root_user.admin_level = User::Admin;
     root_user.uid = 0;
+    root_user.account_map[root_user.default_account] =
+        User::account_partition_qos_item{PartitionQosMap{}, true};
 
     if (!InsertUser(root_user)) {
       CRANE_ERROR("Failed to insert default user ROOT!");
@@ -148,7 +151,7 @@ bool MongodbClient::FetchJobRecords(std::list<Ctld::TaskInCtld>* task_list,
       task.nodes_alloc = view["nodes_alloc"].get_int32().value;
       task.node_num = 0;
 
-      task.SetAccount(view["account"].get_string().value.data());
+      task.account = view["account"].get_string().value.data();
       task.SetUsername(view["username"].get_string().value.data());
 
       task.resources.allocatable_resource.cpu_count =
@@ -305,23 +308,6 @@ bool MongodbClient::SelectAccount(const std::string& key, const T& value,
   return false;
 }
 
-template <typename T>
-bool MongodbClient::SelectQos(const std::string& key, const T& value,
-                              Ctld::Qos* qos) {
-  document filter;
-  filter.append(kvp(key, value));
-  bsoncxx::stdx::optional<bsoncxx::document::value> result =
-      (*GetClient_())[m_db_name_][m_qos_collection_name_].find_one(
-          filter.view());
-
-  if (result) {
-    bsoncxx::document::view qos_view = result->view();
-    ViewToQos_(qos_view, qos);
-    return true;
-  }
-  return false;
-}
-
 void MongodbClient::SelectAllUser(std::list<Ctld::User>* user_list) {
   mongocxx::cursor cursor =
       (*GetClient_())[m_db_name_][m_user_collection_name_].find({});
@@ -438,8 +424,35 @@ void MongodbClient::DocumentAppendItem_<std::list<std::string>>(
 }
 
 template <>
-void MongodbClient::DocumentAppendItem_<MongodbClient::PartitionQosMap>(
+void MongodbClient::DocumentAppendItem_<
+    std::unordered_map<std::string, User::account_partition_qos_item>>(
     document& doc, const std::string& key,
+    const std::unordered_map<std::string, User::account_partition_qos_item>&
+        value) {
+  doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
+    for (const auto& mapItem : value) {
+      mapValueDocument.append(
+          kvp(mapItem.first, [&mapItem, this](sub_document itemDoc) {
+            itemDoc.append(kvp("enable", mapItem.second.enable));
+            SubDocumentAppendItem_(itemDoc, "allowed_partition_qos_map",
+                                   mapItem.second.allowed_partition_qos_map);
+          }));
+    }
+  }));
+}
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<std::list<std::string>>(
+    sub_document& doc, const std::string& key,
+    const std::list<std::string>& value) {
+  doc.append(kvp(key, [&value](sub_array array) {
+    for (const std::string& v : value) array.append(v);
+  }));
+}
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<MongodbClient::PartitionQosMap>(
+    sub_document& doc, const std::string& key,
     const MongodbClient::PartitionQosMap& value) {
   doc.append(kvp(key, [&value](sub_document mapValueDocument) {
     for (const auto& mapItem : value) {
@@ -502,23 +515,30 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
     user->deleted = user_view["deleted"].get_bool();
     user->uid = user_view["uid"].get_int64().value;
     user->name = user_view["name"].get_string().value;
-    user->account = user_view["account"].get_string().value;
+    user->default_account = user_view["default_account"].get_string().value;
     user->admin_level =
         (Ctld::User::AdminLevel)user_view["admin_level"].get_int32().value;
 
-    for (auto&& partition :
-         user_view["allowed_partition_qos_map"].get_document().view()) {
-      std::string default_qos;
-      std::list<std::string> allowed_qos_list;
-      auto partition_array = partition.get_array().value;
-      default_qos = partition_array[0].get_string().value.data();
-      for (auto&& allowed_qos : partition_array[1].get_array().value) {
-        allowed_qos_list.emplace_back(allowed_qos.get_string().value);
+    for (auto&& account_view : user_view["account_map"].get_document().view()) {
+      PartitionQosMap temp;
+      for (auto&& partition :
+           account_view["allowed_partition_qos_map"].get_document().view()) {
+        std::string default_qos;
+        std::list<std::string> allowed_qos_list;
+        auto partition_array = partition.get_array().value;
+        default_qos = partition_array[0].get_string().value.data();
+        for (auto&& allowed_qos : partition_array[1].get_array().value) {
+          allowed_qos_list.emplace_back(allowed_qos.get_string().value);
+        }
+        temp[std::string(partition.key())] =
+            std::pair<std::string, std::list<std::string>>{
+                default_qos, std::move(allowed_qos_list)};
       }
-      user->allowed_partition_qos_map[std::string(partition.key())] =
-          std::pair<std::string, std::list<std::string>>{default_qos,
-                                                         allowed_qos_list};
+      user->account_map[std::string(account_view.key())] =
+          User::account_partition_qos_item{std::move(temp),
+                                           account_view["enable"].get_bool()};
     }
+
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
   }
@@ -526,12 +546,12 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 6> fields{"deleted",     "uid",
-                                    "account",     "name",
-                                    "admin_level", "allowed_partition_qos_map"};
-  std::tuple<bool, int64_t, std::string, std::string, int32_t, PartitionQosMap>
-      values{false,     user.uid,         user.account,
-             user.name, user.admin_level, user.allowed_partition_qos_map};
+  std::array<std::string, 6> fields{"deleted", "uid",         "default_account",
+                                    "name",    "admin_level", "account_map"};
+  std::tuple<bool, int64_t, std::string, std::string, int32_t,
+             AccountPartitionQosMap>
+      values{false,     user.uid,         user.default_account,
+             user.name, user.admin_level, user.account_map};
   return DocumentConstructor_(fields, values);
 }
 
@@ -593,7 +613,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->name = qos_view["name"].get_string().value;
     qos->description = qos_view["description"].get_string().value;
     qos->reference_count = qos_view["reference_count"].get_int32().value;
-    qos->priority = qos_view["priority"].get_int32().value;
+    qos->priority = qos_view["priority"].get_int64().value;
     qos->max_jobs_per_user = qos_view["max_jobs_per_user"].get_int64().value;
     qos->max_cpus_per_user = qos_view["max_cpus_per_user"].get_int64().value;
     qos->max_time_limit_per_task =
@@ -610,7 +630,7 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
       "description",       "reference_count",
       "priority",          "max_jobs_per_user",
       "max_cpus_per_user", "max_time_limit_per_task"};
-  std::tuple<bool, std::string, std::string, int, int, int64_t, int64_t,
+  std::tuple<bool, std::string, std::string, int, int64_t, int64_t, int64_t,
              int64_t>
       values{false,
              qos.name,
@@ -659,7 +679,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
       values{// 0-4
              static_cast<int32_t>(persisted_part.task_id()),
              persisted_part.task_db_id(), absl::ToUnixSeconds(absl::Now()),
-             false, persisted_part.account(),
+             false, task_to_ctld.account(),
              // 5-9
              task_to_ctld.resources().allocatable_resource().cpu_core_limit(),
              static_cast<int64_t>(task_to_ctld.resources()
@@ -713,7 +733,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, std::string>
       values{// 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
-             absl::ToUnixSeconds(absl::Now()), false, task->Account(),
+             absl::ToUnixSeconds(absl::Now()), false, task->account,
              // 5-9
              task->resources.allocatable_resource.cpu_count,
              static_cast<int64_t>(

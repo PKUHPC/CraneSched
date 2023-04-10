@@ -64,7 +64,7 @@ message TaskToCtld {
   TaskType type = 4;
 
   uint32 uid = 5;
-
+  string account = 6;
   string name = 7;
 
   uint32 node_num = 8;
@@ -94,8 +94,7 @@ message PersistedPartOfTaskInCtld {
   uint32 task_id = 1;
   int64 task_db_id = 3;
   int32 gid = 4;
-  string account = 5;
-  string username = 6;
+  string username = 5;
 
   // Fields that will change after this task is accepted.
   int32 requeue_count = 11;
@@ -244,8 +243,9 @@ message UserInfo {
   uint32 uid = 1;
   string name = 2;
   string account = 3;
-  repeated AllowedPartitionQos allowed_partition_qos_list = 4;
-  AdminLevel admin_level = 5;
+  bool enable = 4;
+  repeated AllowedPartitionQos allowed_partition_qos_list = 5;
+  AdminLevel admin_level = 6;
 }
 
 message QosInfo {

@@ -140,7 +140,7 @@ struct TaskInCtld {
   crane::grpc::TaskType type;
 
   uid_t uid;
-
+  std::string account;
   std::string name;
 
   uint32_t node_num{0};
@@ -164,7 +164,6 @@ struct TaskInCtld {
   task_id_t task_id;
   task_db_id_t task_db_id;
   gid_t gid;
-  std::string account;
   std::string username;
 
   /* ----------- [3] ----------------
@@ -224,12 +223,6 @@ struct TaskInCtld {
     persisted_part.set_gid(id);
   }
   uid_t Gid() const { return gid; }
-
-  void SetAccount(std::string const& val) {
-    account = val;
-    persisted_part.set_account(val);
-  }
-  std::string const& Account() const { return account; }
 
   void SetUsername(std::string const& val) {
     username = val;
@@ -309,7 +302,7 @@ struct TaskInCtld {
 
     uid = val.uid();
     password_entry = std::make_unique<PasswordEntry>(uid);
-
+    account = val.account();
     name = val.name();
     cmd_line = val.cmd_line();
     env = val.env();
@@ -361,8 +354,6 @@ struct Account {
   std::list<std::string> child_accounts;
   std::string parent_account;
   std::list<std::string> allowed_partition;
-  //  std::unordered_map<std::string, bool> allowed_partition;  /*partition
-  //  name, enable*/
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
   //
@@ -372,14 +363,21 @@ struct Account {
 struct User {
   enum AdminLevel { None, Operator, Admin };
 
+  struct account_partition_qos_item {
+    std::unordered_map<std::string /*partition name*/,
+                       std::pair<std::string /*default qos*/,
+                                 std::list<std::string> /*allowed qos list*/>>
+        allowed_partition_qos_map;
+    bool enable;
+  };
+
   bool deleted = false;
   uid_t uid;
   std::string name;
-  std::string account;
-  std::unordered_map<std::string /*partition name*/,
-                     std::pair<std::string /*default qos*/,
-                               std::list<std::string> /*allowed qos list*/>>
-      allowed_partition_qos_map;
+  std::string default_account;
+  std::unordered_map<std::string, account_partition_qos_item>
+      account_map; /*account name, item*/
+
   AdminLevel admin_level;
   //
   //  uint32_t cur_cpus_use;

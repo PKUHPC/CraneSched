@@ -306,6 +306,7 @@ message DeleteEntityRequest {
   uint32 uid = 1;
   EntityType entity_type = 2;
   string name = 3;
+  string account = 4;
 }
 
 message DeleteEntityReply {
@@ -328,6 +329,8 @@ message ModifyEntityRequest {
   string partition = 5;
   OperatorType type = 6;
   EntityType entity_type = 7;
+  string account = 8;
+  bool force = 9;
 }
 
 message ModifyEntityReply {
@@ -349,7 +352,7 @@ message QueryEntityInfoReply {
   repeated QosInfo qos_list = 5;
 }
 
-message BlockEntityRequest {
+message BlockAccountOrUserRequest {
   uint32 uid = 1;
   bool block = 2;
   EntityType entity_type = 3;
@@ -357,7 +360,7 @@ message BlockEntityRequest {
   string account = 5;
 }
 
-message BlockEntityReply {
+message BlockAccountOrUserReply {
   bool ok = 1;
   string reason = 2;
 }
@@ -438,7 +441,7 @@ service CraneCtld {
 
   rpc QueryEntityInfo(QueryEntityInfoRequest) returns (QueryEntityInfoReply);
   rpc ModifyEntity(ModifyEntityRequest) returns (ModifyEntityReply);
-  rpc BlockEntity(BlockEntityRequest) returns (BlockEntityReply);
+  rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);

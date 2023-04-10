@@ -212,13 +212,18 @@ void ParseConfig(int argc, char** argv) {
 
           if (partition["name"] && !partition["name"].IsNull()) {
             name.append(partition["name"].Scalar());
-          } else
+          } else {
+            CRANE_ERROR("Partition name not found");
             std::exit(1);
+          }
 
           if (partition["nodes"] && !partition["nodes"].IsNull()) {
             nodes = partition["nodes"].as<std::string>();
-          } else
+          } else {
+            CRANE_ERROR("The node of the partition {} was not found",
+                        partition["name"].Scalar());
             std::exit(1);
+          }
 
           part.nodelist_str = nodes;
           std::list<std::string> name_list;

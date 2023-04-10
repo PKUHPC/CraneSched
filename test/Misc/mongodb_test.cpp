@@ -343,7 +343,7 @@ bool MongodbClient::AddUser(const Ctld::User& new_user) {
                            std::list<std::string> /*allowed qos list*/>>>
       values{false,
              new_user.uid,
-             new_user.account,
+             new_user.default_account,
              new_user.name,
              new_user.admin_level,
              new_user.allowed_partition_qos_map};
@@ -440,7 +440,7 @@ bool MongodbClient::GetUserInfo(uid_t uid, Ctld::User* user) {
     user->deleted = user_view["deleted"].get_bool();
     user->uid = std::stoi(std::string(user_view["uid"].get_utf8().value));
     user->name = user_view["name"].get_utf8().value;
-    user->account = user_view["account"].get_utf8().value;
+    user->default_account = user_view["account"].get_utf8().value;
     user->admin_level =
         (Ctld::User::AdminLevel)user_view["admin_level"].get_int32().value;
     //    for (auto&& partition :
@@ -551,7 +551,7 @@ TEST(MongodbConnector, Simple) {
 
   Ctld::User user;
   user.uid = 888;
-  user.account = "CSU";
+  user.default_account = "CSU";
   user.name = "test";
   user.admin_level = Ctld::User::Admin;
   std::list<std::string> list;
