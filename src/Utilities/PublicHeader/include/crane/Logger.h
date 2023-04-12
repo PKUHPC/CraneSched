@@ -27,6 +27,8 @@
 
 #define SPDLOG_ACTIVE_LEVEL CRANE_LOG_LEVEL
 
+#include <spdlog/fmt/fmt.h>
+#include <spdlog/fmt/ranges.h>
 #include <spdlog/spdlog.h>
 
 #define CRANE_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)

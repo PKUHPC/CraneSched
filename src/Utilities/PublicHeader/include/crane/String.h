@@ -6,13 +6,11 @@
 #include <boost/algorithm/string.hpp>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <list>
 #include <queue>
 #include <ranges>
 #include <regex>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #include "crane/PublicHeader.h"
@@ -49,31 +47,6 @@ std::string HostNameListToStr(T const &host_list)
     }
     source_list = res_list;
   }
-}
-
-template <typename T>
-concept Iterable = requires(T obj) {
-  { std::begin(obj) } -> std::input_or_output_iterator;
-  { std::end(obj) } -> std::input_or_output_iterator;
-};
-
-// Generic print function template for basic types
-template <typename T>
-  requires(!Iterable<T>)
-std::string Format(const T &value) {
-  return fmt::format("{}", value);
-}
-
-// Generic print function template for iterable types,such as std::list
-template <Iterable T>
-std::string Format(const T &container) {
-  std::string res = "[";
-  for (const auto &value : container) {
-    res += fmt::format("{},", value);
-  }
-  if (std::distance(container.begin(), container.end()) > 0) res.pop_back();
-  res += "]";
-  return res;
 }
 
 }  // namespace util

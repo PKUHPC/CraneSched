@@ -122,7 +122,7 @@ class MongodbClient {
     if (!result || !result->modified_count()) {
       CRANE_ERROR(
           "Update date in database fail(name:{},opt:{},key:{},value:{})", name,
-          opt, key, util::Format(value));
+          opt, key, value);
       return false;
     }
     return true;
