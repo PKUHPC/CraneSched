@@ -54,7 +54,21 @@ class MongodbClient {
   template <typename T>
   bool SelectUser(const std::string& key, const T& value, User* user);
   template <typename T>
-  bool SelectAccount(const std::string& key, const T& value, Account* account);
+  bool SelectAccount(const std::string& key, const T& value, Account* account) {
+    using bsoncxx::builder::basic::kvp;
+    document filter;
+    filter.append(kvp(key, value));
+    bsoncxx::stdx::optional<bsoncxx::document::value> result =
+        (*GetClient_())[m_db_name_][m_account_collection_name_].find_one(
+            filter.view());
+
+    if (result) {
+      bsoncxx::document::view account_view = result->view();
+      ViewToAccount_(account_view, account);
+      return true;
+    }
+    return false;
+  };
   template <typename T>
   bool SelectQos(const std::string& key, const T& value, Qos* qos) {
     using bsoncxx::builder::basic::kvp;

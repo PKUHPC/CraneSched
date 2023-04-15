@@ -291,23 +291,6 @@ bool MongodbClient::SelectUser(const std::string& key, const T& value,
   return false;
 }
 
-template <typename T>
-bool MongodbClient::SelectAccount(const std::string& key, const T& value,
-                                  Ctld::Account* account) {
-  document filter;
-  filter.append(kvp(key, value));
-  bsoncxx::stdx::optional<bsoncxx::document::value> result =
-      (*GetClient_())[m_db_name_][m_account_collection_name_].find_one(
-          filter.view());
-
-  if (result) {
-    bsoncxx::document::view account_view = result->view();
-    ViewToAccount_(account_view, account);
-    return true;
-  }
-  return false;
-}
-
 void MongodbClient::SelectAllUser(std::list<Ctld::User>* user_list) {
   mongocxx::cursor cursor =
       (*GetClient_())[m_db_name_][m_user_collection_name_].find({});

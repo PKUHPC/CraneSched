@@ -342,6 +342,7 @@ message QueryEntityInfoRequest {
   uint32 uid = 1;
   EntityType entity_type = 2;
   string name = 3;
+  string account = 4;
 }
 
 message QueryEntityInfoReply {

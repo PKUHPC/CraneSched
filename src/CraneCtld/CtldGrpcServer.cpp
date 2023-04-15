@@ -820,6 +820,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           partition_list->Add()->assign(partition);
         }
         account_info->set_default_qos(account.default_qos);
+        account_info->set_enable(account.enable);
 
         auto *allowed_qos_list = account_info->mutable_allowed_qos_list();
         for (const auto &qos : account.allowed_qos_list) {
@@ -895,6 +896,9 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
 
       for (const auto &user : res_user_list) {
         for (const auto &[account, item] : user.account_map) {
+          if (!request->account().empty() && account != request->account()) {
+            continue;
+          }
           auto *user_info = response->mutable_user_list()->Add();
           user_info->set_name(user.name);
           user_info->set_uid(user.uid);

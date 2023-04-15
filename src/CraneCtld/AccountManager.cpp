@@ -724,8 +724,10 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
 
   if (task->uid != 0) {
     auto partition_it =
-        user_share_ptr->account_map.at(account).allowed_partition_qos_map.find(task->partition_id);
-    if (partition_it == user_share_ptr->account_map.at(account).allowed_partition_qos_map.end())
+        user_share_ptr->account_map.at(account).allowed_partition_qos_map.find(
+            task->partition_id);
+    if (partition_it ==
+        user_share_ptr->account_map.at(account).allowed_partition_qos_map.end())
       return Result{false, "Partition is not allowed for this user."};
 
     if (task->qos.empty()) {
@@ -1001,6 +1003,9 @@ AccountManager::Result AccountManager::AddUserAllowedQos(
          user.account_map[account].allowed_partition_qos_map) {
       std::list<std::string>& list = pair.second;
       if (std::find(list.begin(), list.end(), qos) == list.end()) {
+        if (pair.first.empty()) {
+          pair.first = qos;
+        }
         list.emplace_back(qos);
         change_num++;
       }
@@ -1027,6 +1032,9 @@ AccountManager::Result AccountManager::AddUserAllowedQos(
       return Result{false, fmt::format("Qos '{}' is already in user '{}''s "
                                        "allowed qos of partition '{}'",
                                        qos, name, partition)};
+    }
+    if (iter->second.first.empty()) {
+      iter->second.first = qos;
     }
     list.push_back(qos);
     change_num = 1;
@@ -1277,7 +1285,7 @@ AccountManager::Result AccountManager::SetUserAllowedQos(
          user.account_map[account].allowed_partition_qos_map) {
       if (std::find(qos_list.begin(), qos_list.end(), pair.first) ==
           qos_list.end()) {
-        if (!force) {
+        if (!force && !pair.first.empty()) {
           return Result{
               false,
               fmt::format("Qos '{}' is default qos of partition '{}',but not "
@@ -1303,7 +1311,7 @@ AccountManager::Result AccountManager::SetUserAllowedQos(
 
     if (std::find(qos_list.begin(), qos_list.end(), iter->second.first) ==
         qos_list.end()) {
-      if (!force) {
+      if (!force && !iter->second.first.empty()) {
         return Result{
             false,
             fmt::format("Qos '{}' is default qos of partition '{}',but not "
@@ -1603,6 +1611,10 @@ AccountManager::Result AccountManager::AddAccountAllowedQos(
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
+        if (account->default_qos.empty()) {
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                       "$set", name, "default_qos", qos);
+        }
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                      "$addToSet", name, "allowed_qos_list",
                                      qos);
@@ -1614,6 +1626,9 @@ AccountManager::Result AccountManager::AddAccountAllowedQos(
     return Result{false, "Fail to update data in database"};
   }
 
+  if (account->default_qos.empty()) {
+    m_account_map_[name]->default_qos = qos;
+  }
   m_account_map_[name]->allowed_qos_list.emplace_back(qos);
   m_qos_map_[qos]->reference_count++;
 
@@ -1801,8 +1816,8 @@ AccountManager::Result AccountManager::SetAccountAllowedQos(
         return Result{
             false,
             fmt::format("partition '{}' in allowed partition list before is "
-                        "used by some descendant node of the account "
-                        "'{}'.Ignoring this constraint with forced operation",
+                        "used by some descendant node of the account '{}' or "
+                        "itself.Ignoring this constraint with forced operation",
                         qos, name)};
       }
       deleted_qos.emplace_back(qos);
@@ -1828,6 +1843,14 @@ AccountManager::Result AccountManager::SetAccountAllowedQos(
         }
 
         if (!add_qos.empty()) {
+          Account temp;
+          g_db_client->SelectAccount("name", name, &temp);
+          if (temp.default_qos.empty()) {
+            g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                         "$set", name, "default_qos",
+                                         qos_list.front());
+          }
+
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                        "$set", name, "allowed_qos_list",
                                        qos_list);
@@ -1848,10 +1871,15 @@ AccountManager::Result AccountManager::SetAccountAllowedQos(
     change_num.pop_front();
   }
 
-  m_account_map_[name]->allowed_qos_list.assign(qos_list.begin(),
-                                                qos_list.end());
-  for (const auto& qos : add_qos) {
-    m_qos_map_[qos]->reference_count++;
+  if (!add_qos.empty()) {
+    if (account->default_qos.empty()) {
+      m_account_map_[name]->default_qos = qos_list.front();
+    }
+    m_account_map_[name]->allowed_qos_list.assign(qos_list.begin(),
+                                                  qos_list.end());
+    for (const auto& qos : add_qos) {
+      m_qos_map_[qos]->reference_count++;
+    }
   }
 
   return Result{true};

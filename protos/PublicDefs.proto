@@ -226,6 +226,7 @@ message AccountInfo {
   repeated string allowed_partitions = 6;
   string default_qos = 7;
   repeated string allowed_qos_list = 8;
+  bool enable = 9;
 }
 
 message UserInfo {
