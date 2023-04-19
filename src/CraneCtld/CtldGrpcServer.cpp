@@ -657,7 +657,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
         }
       }
       res = g_account_manager->ModifyAccount(request->type(), request->name(),
-                                             request->lhs(), request->rhs(),
+                                             request->item(), request->value(),
                                              request->force());
 
       break;
@@ -681,7 +681,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
               "who has a larger permission than yours");
           return grpc::Status::OK;
         }
-        if (request->lhs() == "admin_level") {
+        if (request->item() == "admin_level") {
           response->set_ok(false);
           response->set_reason(
               "Permission error : You do not have sufficient permission to "
@@ -690,9 +690,10 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
         }
       }
 
-      res = g_account_manager->ModifyUser(
-          request->type(), request->name(), request->partition(),
-          request->account(), request->lhs(), request->rhs(), request->force());
+      res = g_account_manager->ModifyUser(request->type(), request->name(),
+                                          request->partition(),
+                                          request->account(), request->item(),
+                                          request->value(), request->force());
       break;
     case crane::grpc::Qos:
       if (user_level != User::Admin) {
@@ -701,8 +702,8 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
             "Permission error : You do not have permission to modify qos");
         return grpc::Status::OK;
       }
-      res = g_account_manager->ModifyQos(request->name(), request->lhs(),
-                                         request->rhs(), request->force());
+      res = g_account_manager->ModifyQos(request->name(), request->item(),
+                                         request->value(), request->force());
       break;
     default:
       break;
@@ -820,7 +821,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           partition_list->Add()->assign(partition);
         }
         account_info->set_default_qos(account.default_qos);
-        account_info->set_enable(account.enable);
+        account_info->set_blocked(account.blocked);
 
         auto *allowed_qos_list = account_info->mutable_allowed_qos_list();
         for (const auto &qos : account.allowed_qos_list) {
@@ -909,7 +910,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           }
           user_info->set_admin_level(
               (crane::grpc::UserInfo_AdminLevel)user.admin_level);
-          user_info->set_enable(item.enable);
+          user_info->set_blocked(item.blocked);
 
           auto *partition_qos_list =
               user_info->mutable_allowed_partition_qos_list();

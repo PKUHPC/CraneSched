@@ -323,8 +323,8 @@ message ModifyEntityRequest {
     Delete = 2;
   }
 
-  string lhs = 2;   //modify item field
-  string rhs = 3;   //new value
+  string item = 2;   //modify item field
+  string value = 3;   //new value
   string name = 4;
   string partition = 5;
   OperatorType type = 6;

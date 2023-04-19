@@ -416,7 +416,7 @@ void MongodbClient::DocumentAppendItem_<
     for (const auto& mapItem : value) {
       mapValueDocument.append(
           kvp(mapItem.first, [&mapItem, this](sub_document itemDoc) {
-            itemDoc.append(kvp("enable", mapItem.second.enable));
+            itemDoc.append(kvp("blocked", mapItem.second.blocked));
             SubDocumentAppendItem_(itemDoc, "allowed_partition_qos_map",
                                    mapItem.second.allowed_partition_qos_map);
           }));
@@ -519,7 +519,7 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
       }
       user->account_map[std::string(account_view.key())] =
           User::account_partition_qos_item{std::move(temp),
-                                           account_view["enable"].get_bool()};
+                                           account_view["blocked"].get_bool()};
     }
 
   } catch (const bsoncxx::exception& e) {
@@ -542,7 +542,7 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
                                    Ctld::Account* account) {
   try {
     account->deleted = account_view["deleted"].get_bool().value;
-    account->enable = account_view["enable"].get_bool().value;
+    account->blocked = account_view["blocked"].get_bool().value;
     account->name = account_view["name"].get_string().value;
     account->description = account_view["description"].get_string().value;
     for (auto&& user : account_view["users"].get_array().value) {
@@ -569,14 +569,14 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
 bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
     const Ctld::Account& account) {
   std::array<std::string, 10> fields{
-      "deleted",     "enable",          "name",           "description",
+      "deleted",     "blocked",         "name",           "description",
       "users",       "child_accounts",  "parent_account", "allowed_partition",
       "default_qos", "allowed_qos_list"};
   std::tuple<bool, bool, std::string, std::string, std::list<std::string>,
              std::list<std::string>, std::string, std::list<std::string>,
              std::string, std::list<std::string>>
       values{false,
-             account.enable,
+             account.blocked,
              account.name,
              account.description,
              account.users,

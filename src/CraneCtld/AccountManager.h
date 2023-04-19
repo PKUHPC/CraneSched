@@ -58,15 +58,15 @@ class AccountManager {
   Result ModifyUser(
       const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
       const std::string& name, const std::string& partition,
-      std::string account, const std::string& lhs, const std::string& rhs,
+      std::string account, const std::string& item, const std::string& value,
       bool force);
   Result ModifyAccount(
       const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
-      const std::string& name, const std::string& lhs, const std::string& rhs,
-      bool force);
+      const std::string& name, const std::string& item,
+      const std::string& value, bool force);
 
-  Result ModifyQos(const std::string& name, const std::string& lhs,
-                   const std::string& rhs, bool force);
+  Result ModifyQos(const std::string& name, const std::string& item,
+                   const std::string& value, bool force);
 
   Result BlockAccount(const std::string& name, bool block);
 

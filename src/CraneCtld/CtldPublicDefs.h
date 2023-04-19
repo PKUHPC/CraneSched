@@ -346,7 +346,7 @@ struct Qos {
 
 struct Account {
   bool deleted = false;
-  bool enable = true;
+  bool blocked = false;
   std::string name;
   std::string description;
   std::list<std::string> users;
@@ -367,7 +367,7 @@ struct User {
                        std::pair<std::string /*default qos*/,
                                  std::list<std::string> /*allowed qos list*/>>
         allowed_partition_qos_map;
-    bool enable;
+    bool blocked;
   };
 
   bool deleted = false;

@@ -73,7 +73,7 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
               std::list<std::string>{find_account->allowed_qos_list}};
     }
   }
-  new_user.account_map[object_account].enable = true;
+  new_user.account_map[object_account].blocked = false;
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -513,7 +513,7 @@ AccountManager::QosMapMutexSharedPtr AccountManager::GetAllQosInfo() {
 AccountManager::Result AccountManager::ModifyUser(
     const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
     const std::string& name, const std::string& partition, std::string account,
-    const std::string& lhs, const std::string& rhs, bool force) {
+    const std::string& item, const std::string& value, bool force) {
   if (account.empty()) {
     auto p = GetExistedUserInfo(name);
     if (!p) {
@@ -524,75 +524,75 @@ AccountManager::Result AccountManager::ModifyUser(
 
   switch (operatorType) {
     case crane::grpc::ModifyEntityRequest_OperatorType_Add:
-      if (lhs == "allowed_partition") {
-        return AddUserAllowedPartition(name, account, rhs);
-      } else if (lhs == "allowed_qos_list") {
-        return AddUserAllowedQos(name, rhs, account, partition);
+      if (item == "allowed_partition") {
+        return AddUserAllowedPartition(name, account, value);
+      } else if (item == "allowed_qos_list") {
+        return AddUserAllowedQos(name, value, account, partition);
       } else {
-        return Result{false, fmt::format("Field '{}' can't be added", lhs)};
+        return Result{false, fmt::format("Field '{}' can't be added", item)};
       }
 
     case crane::grpc::ModifyEntityRequest_OperatorType_Overwrite:
-      if (lhs == "admin_level") {
-        return SetUserAdminLevel(name, rhs);
-      } else if (lhs == "default_qos") {
-        return SetUserDefaultQos(name, rhs, account, partition);
-      } else if (lhs == "allowed_partition") {
-        return SetUserAllowedPartition(name, account, rhs);
-      } else if (lhs == "allowed_qos_list") {
-        return SetUserAllowedQos(name, account, partition, rhs, force);
+      if (item == "admin_level") {
+        return SetUserAdminLevel(name, value);
+      } else if (item == "default_qos") {
+        return SetUserDefaultQos(name, value, account, partition);
+      } else if (item == "allowed_partition") {
+        return SetUserAllowedPartition(name, account, value);
+      } else if (item == "allowed_qos_list") {
+        return SetUserAllowedQos(name, account, partition, value, force);
       } else {
-        return Result{false, fmt::format("Field '{}' can't be set", lhs)};
+        return Result{false, fmt::format("Field '{}' can't be set", item)};
       }
 
     case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
-      if (lhs == "allowed_partition") {
-        return DeleteUserAllowedPartition(name, account, rhs);
-      } else if (lhs == "allowed_qos_list") {
-        return DeleteUserAllowedQos(name, rhs, account, partition, force);
+      if (item == "allowed_partition") {
+        return DeleteUserAllowedPartition(name, account, value);
+      } else if (item == "allowed_qos_list") {
+        return DeleteUserAllowedQos(name, value, account, partition, force);
       } else {
-        return Result{false, fmt::format("Field '{}' can't be deleted", lhs)};
+        return Result{false, fmt::format("Field '{}' can't be deleted", item)};
       }
 
     default:
-      return Result{false, fmt::format("Unknown field '{}'", lhs)};
+      return Result{false, fmt::format("Unknown field '{}'", item)};
   }
 }
 
 AccountManager::Result AccountManager::ModifyAccount(
     const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
-    const std::string& name, const std::string& lhs, const std::string& rhs,
+    const std::string& name, const std::string& item, const std::string& value,
     bool force) {
   switch (operatorType) {
     case crane::grpc::ModifyEntityRequest_OperatorType_Add:
-      if (lhs == "allowed_partition") {
-        return AddAccountAllowedPartition(name, rhs);
-      } else if (lhs == "allowed_qos_list") {
-        return AddAccountAllowedQos(name, rhs);
+      if (item == "allowed_partition") {
+        return AddAccountAllowedPartition(name, value);
+      } else if (item == "allowed_qos_list") {
+        return AddAccountAllowedQos(name, value);
       } else {
-        return Result{false, fmt::format("Field '{}' can't be added", lhs)};
+        return Result{false, fmt::format("Field '{}' can't be added", item)};
       }
 
     case crane::grpc::ModifyEntityRequest_OperatorType_Overwrite:
-      if (lhs == "description") {
-        return SetAccountDescription(name, rhs);
-      } else if (lhs == "allowed_partition") {
-        return SetAccountAllowedPartition(name, rhs, force);
-      } else if (lhs == "allowed_qos_list") {
-        return SetAccountAllowedQos(name, rhs, force);
-      } else if (lhs == "default_qos") {
-        return SetAccountDefaultQos(name, rhs);
+      if (item == "description") {
+        return SetAccountDescription(name, value);
+      } else if (item == "allowed_partition") {
+        return SetAccountAllowedPartition(name, value, force);
+      } else if (item == "allowed_qos_list") {
+        return SetAccountAllowedQos(name, value, force);
+      } else if (item == "default_qos") {
+        return SetAccountDefaultQos(name, value);
       } else {
-        return Result{false, fmt::format("Field '{}' can't be set", lhs)};
+        return Result{false, fmt::format("Field '{}' can't be set", item)};
       }
 
     case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
-      if (lhs == "allowed_partition") {
-        return DeleteAccountAllowedPartition(name, rhs, force);
-      } else if (lhs == "allowed_qos_list") {
-        return DeleteAccountAllowedQos(name, rhs, force);
+      if (item == "allowed_partition") {
+        return DeleteAccountAllowedPartition(name, value, force);
+      } else if (item == "allowed_qos_list") {
+        return DeleteAccountAllowedQos(name, value, force);
       } else {
-        return Result{false, fmt::format("Field '{}' can't be deleted", lhs)};
+        return Result{false, fmt::format("Field '{}' can't be deleted", item)};
       }
 
     default:
@@ -601,8 +601,8 @@ AccountManager::Result AccountManager::ModifyAccount(
 }
 
 AccountManager::Result AccountManager::ModifyQos(const std::string& name,
-                                                 const std::string& lhs,
-                                                 const std::string& rhs,
+                                                 const std::string& item,
+                                                 const std::string& value,
                                                  bool force) {
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
@@ -611,21 +611,21 @@ AccountManager::Result AccountManager::ModifyQos(const std::string& name,
     return Result{false, fmt::format("Qos '{}' not existed in database", name)};
   }
 
-  if (lhs == "description") {
+  if (item == "description") {
     if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
-                                      name, lhs, rhs)) {
+                                      name, item, value)) {
       return Result{false, "Fail to update the database"};
     }
   } else {
     if (!g_db_client->UpdateEntityOne(
-            MongodbClient::EntityType::QOS, "$set", name, lhs,
+            MongodbClient::EntityType::QOS, "$set", name, item,
             std::stol(
-                rhs) /*uint32 Type Stores data based on long(int64_t)*/)) {
+                value) /*uint32 Type Stores data based on long(int64_t)*/)) {
       return Result{false, "Fail to update the database"};
     }
   }
 
-  // To avoid frequently judging lhs, obtain the modified qos of the Mongodb
+  // To avoid frequently judging item, obtain the modified qos of the Mongodb
   Qos qos;
   g_db_client->SelectQos("name", name, &qos);
   *m_qos_map_[name] = std::move(qos);
@@ -642,15 +642,16 @@ AccountManager::Result AccountManager::BlockAccount(const std::string& name,
     return Result{false, fmt::format("Unknown account '{}'", name)};
   }
 
-  if (account->enable != block) {
-    return Result{false, fmt::format("Account '{}' is already blocked", name)};
+  if (account->blocked == block) {
+    return Result{false, fmt::format("Account '{}' is already {}", name,
+                                     block ? "blocked" : "unblocked")};
   }
 
   if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
-                                    name, "enable", !block)) {
+                                    name, "blocked", !block)) {
     return Result{false, "Can't update the database"};
   }
-  m_account_map_[name]->enable = !block;
+  m_account_map_[name]->blocked = block;
 
   return Result{true};
 }
@@ -669,18 +670,18 @@ AccountManager::Result AccountManager::BlockUser(const std::string& name,
                                      name, account)};
   }
 
-  if (user->account_map.at(account).enable != block) {
-    return Result{false,
-                  fmt::format("User '{}' is already blocked under account '{}'",
-                              name, account)};
+  if (user->account_map.at(account).blocked == block) {
+    return Result{
+        false, fmt::format("User '{}' is already {} under account '{}'", name,
+                           block ? "blocked" : "unblocked", account)};
   }
 
   if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
-                                    name, "account_map." + account + ".enable",
+                                    name, "account_map." + account + ".blocked",
                                     !block)) {
     return Result{false, "Can't update the database"};
   }
-  m_user_map_[name]->account_map[account].enable = !block;
+  m_user_map_[name]->account_map[account].blocked = block;
 
   return Result{true};
 }
@@ -707,7 +708,7 @@ bool AccountManager::CheckAccountEnableState(const std::string& name) {
   const Account* account;
   do {
     account = GetExistedAccountInfoNoLock_(p_str);
-    if (!account->enable) {
+    if (account->blocked) {
       return false;
     }
     p_str = account->parent_account;

@@ -226,7 +226,7 @@ message AccountInfo {
   repeated string allowed_partitions = 6;
   string default_qos = 7;
   repeated string allowed_qos_list = 8;
-  bool enable = 9;
+  bool blocked = 9;
 }
 
 message UserInfo {
@@ -244,7 +244,7 @@ message UserInfo {
   uint32 uid = 1;
   string name = 2;
   string account = 3;
-  bool enable = 4;
+  bool blocked = 4;
   repeated AllowedPartitionQos allowed_partition_qos_list = 5;
   AdminLevel admin_level = 6;
 }
