@@ -418,6 +418,47 @@ CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
   return CraneErr::kOk;
 }
 
+CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
+
+  auto pd_iter = m_pending_task_map_.find(task_id);
+  if (pd_iter != m_pending_task_map_.end()) {
+    pd_iter->second->time_limit = absl::Seconds(secs);
+    crane::grpc::TaskToCtld task_to_ctld{pd_iter->second->TaskToCtld()};
+    task_to_ctld.mutable_time_limit()->set_seconds(secs);
+    g_embedded_db_client->UpdateTaskToCtld(pd_iter->second->TaskDbId(),
+                                           task_to_ctld);
+    return CraneErr::kOk;
+  }
+
+  auto rn_iter = m_running_task_map_.find(task_id);
+  if (rn_iter == m_running_task_map_.end()) {
+    CRANE_ERROR("Task #{} was not found in running or pending queue", task_id);
+    return CraneErr::kNonExistent;
+  }
+
+  rn_iter->second->time_limit = absl::Seconds(secs);
+  crane::grpc::TaskToCtld task_to_ctld{rn_iter->second->TaskToCtld()};
+  task_to_ctld.mutable_time_limit()->set_seconds(secs);
+  g_embedded_db_client->UpdateTaskToCtld(rn_iter->second->TaskDbId(),
+                                         task_to_ctld);
+
+  for (CranedId const& craned_id : rn_iter->second->CranedIds()) {
+    auto* stub = g_craned_keeper->GetCranedStub(craned_id);
+    if (!stub->Invalid()) {
+      CraneErr err = stub->ChangeTaskTimeLimit(task_id, secs);
+      if (err != CraneErr::kOk) {
+        CRANE_ERROR("Failed to change time limit of task #{} on Node {}",
+                    task_id, craned_id);
+        return err;
+      }
+    }
+  }
+
+  return CraneErr::kOk;
+}
+
 void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
                                             const CranedId& craned_index,
                                             crane::grpc::TaskStatus new_status,
@@ -658,7 +699,7 @@ void TaskScheduler::QueryTasksInRam(
     task_it->mutable_time_limit()->CopyFrom(task.TaskToCtld().time_limit());
     task_it->mutable_start_time()->CopyFrom(task.PersistedPart().start_time());
     task_it->mutable_end_time()->CopyFrom(task.PersistedPart().end_time());
-    task_it->set_account(task.TaskToCtld().account());
+    task_it->set_account(task.account);
 
     task_it->set_node_num(task.TaskToCtld().node_num());
     task_it->set_cmd_line(task.TaskToCtld().cmd_line());

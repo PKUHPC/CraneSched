@@ -59,6 +59,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryPartitionInfoRequest *request,
       crane::grpc::QueryPartitionInfoReply *response) override;
 
+  grpc::Status ModifyTask(grpc::ServerContext *context,
+                          const crane::grpc::ModifyTaskRequest *request,
+                          crane::grpc::ModifyTaskReply *response) override;
+
   grpc::Status AddAccount(grpc::ServerContext *context,
                           const crane::grpc::AddAccountRequest *request,
                           crane::grpc::AddAccountReply *response) override;

@@ -642,6 +642,17 @@ grpc::Status CranedServiceImpl::CheckTaskStatus(
   return Status::OK;
 }
 
+grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
+    grpc::ServerContext *context,
+    const crane::grpc::ChangeTaskTimeLimitRequest *request,
+    crane::grpc::ChangeTaskTimeLimitReply *response) {
+  bool ok = g_task_mgr->ChangeTaskTimeLimitAsync(
+      request->task_id(), absl::Seconds(request->time_limit().seconds()));
+  response->set_ok(ok);
+
+  return Status::OK;
+}
+
 CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
