@@ -174,6 +174,8 @@ class TaskManager {
 
   bool CheckTaskStatusAsync(task_id_t task_id, crane::grpc::TaskStatus* status);
 
+  bool ChangeTaskTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
+
   // Wait internal libevent base loop to exit...
   void Wait();
 
@@ -225,6 +227,12 @@ class TaskManager {
   struct EvQueueReleaseCg {
     uint32_t task_id;
     uid_t uid;
+    std::promise<bool> ok_prom;
+  };
+
+  struct EvQueueChangeTaskTimeLimit {
+    uint32_t task_id;
+    absl::Duration time_limit;
     std::promise<bool> ok_prom;
   };
 
@@ -329,6 +337,12 @@ class TaskManager {
     arg->task_instance->termination_timer = ev;
   }
 
+  void EvDelTerminationTimer_(TaskInstance* instance) {
+    event_del(instance->termination_timer);
+    event_free(instance->termination_timer);
+    instance->termination_timer = nullptr;
+  }
+
   /**
    * Send a signal to the process group to which the processes in
    *  ProcessInstance belongs.
@@ -400,6 +414,9 @@ class TaskManager {
   static void EvCheckTaskStatusCb_(evutil_socket_t, short events,
                                    void* user_data);
 
+  static void EvChangeTaskTimeLimitCb_(evutil_socket_t, short events,
+                                       void* user_data);
+
   static void EvExitEventCb_(evutil_socket_t, short events, void* user_data);
 
   static void EvOnTimerCb_(evutil_socket_t, short, void* arg);
@@ -450,6 +467,9 @@ class TaskManager {
 
   struct event* m_ev_task_status_change_;
   ConcurrentQueue<TaskStatusChange> m_task_status_change_queue_;
+
+  struct event* m_ev_task_time_limit_change_;
+  ConcurrentQueue<EvQueueChangeTaskTimeLimit> m_task_time_limit_change_queue_;
 
   struct event* m_ev_task_terminate_;
   ConcurrentQueue<EvQueueTaskTerminate> m_task_terminate_queue_;

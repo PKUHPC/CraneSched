@@ -5,6 +5,7 @@ option go_package = "/protos";
 
 import "PublicDefs.proto";
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
 
 message Negotiation {
   uint32 version = 1;
@@ -205,6 +206,15 @@ message TerminateOrphanedTaskReply {
   string reason = 2;
 }
 
+message ChangeTaskTimeLimitRequest {
+  uint32 task_id = 1;
+  google.protobuf.Duration time_limit = 2;
+}
+
+message ChangeTaskTimeLimitReply {
+  bool ok = 1;
+}
+
 message CheckTaskStatusRequest {
   uint32 task_id = 1;
 }
@@ -270,6 +280,19 @@ message QueryPartitionInfoRequest {
 
 message QueryPartitionInfoReply {
   repeated PartitionInfo partition_info = 1;
+}
+
+message ModifyTaskRequest {
+  uint32 uid = 1;
+
+  string item = 2;   //modify item field
+  string value = 3;   //new value
+  uint32 task_id = 4;
+}
+
+message ModifyTaskReply {
+  bool ok = 1;
+  string reason = 2;
 }
 
 message AddAccountRequest {
@@ -432,6 +455,7 @@ service CraneCtld {
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+  rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
@@ -474,6 +498,7 @@ service Craned {
   */
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
   rpc TerminateOrphanedTask(TerminateOrphanedTaskRequest) returns (TerminateOrphanedTaskReply);
+  rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
 
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
