@@ -1752,10 +1752,28 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
   }
 }
 
-// 输入：pending task map
-// 输出：作业号队列
-std::vector<uint32_t> TaskScheduler::TaskSort(
-    TreeMap<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>>& pending_tasks) {
+// input：pending task map
+// output：作业号及其对应priority的list,排序根据priority从大到小。
+std::list<std::pair<task_id_t, uint32_t>> TaskScheduler::GetAllPriorities() {
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
+
+  // 初始化各个max和min
+  age_max = 0;
+  age_min = UINT64_MAX;
+  qos_priority_max = 0;
+  qos_priority_min = UINT32_MAX;
+  part_priority_max = 0;
+  part_priority_min = UINT32_MAX;
+  nodes_alloc_max = 0;
+  nodes_alloc_min = UINT32_MAX;
+  mem_alloc_max = 0;
+  mem_alloc_min = UINT64_MAX;
+  cpus_alloc_max = 0;
+  cpus_alloc_min = DBL_MAX;
+  service_val_max = 0;
+  service_val_min = UINT32_MAX;
+
   for (auto iter = m_pending_task_map_.begin();
        iter != m_pending_task_map_.end(); iter++) {
     uint64_t age =
@@ -1775,8 +1793,7 @@ std::vector<uint32_t> TaskScheduler::TaskSort(
     double cpus_alloc = iter->second->resources.allocatable_resource.cpu_count;
     if (cpus_alloc < cpus_alloc_min) cpus_alloc_min = cpus_alloc;
     if (cpus_alloc > cpus_alloc_max) cpus_alloc_max = cpus_alloc;
-
-  }  // 待排各个max和min
+  }
 
   AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
       g_account_manager->GetAllQosInfo();
@@ -1785,44 +1802,14 @@ std::vector<uint32_t> TaskScheduler::TaskSort(
       if (qos->priority < qos_priority_min) qos_priority_min = qos->priority;
       if (qos->priority > qos_priority_max) qos_priority_max = qos->priority;
     }
-  }  // 遍历计算qos_priority_min和qos_priority_max
+  }
 
   for (const auto& [part_id, part] : g_config.Partitions) {
     if (part.priority < part_priority_min) part_priority_min = part.priority;
     if (part.priority > part_priority_max) part_priority_max = part.priority;
-  }  // 计算partition max和min
-}
+  }
 
-uint32_t TaskScheduler::CalculatePriority(TaskInCtld* task) {
-  LockGuard pending_guard(&m_pending_task_map_mtx_);
-  LockGuard running_guard(&m_running_task_map_mtx_);
-  double age_factor, partition_factor, job_size_factor, fair_share_factor,
-      assoc_factor, qos_factor;
-
-  uint64_t task_age = ToUnixSeconds(absl::Now()) -
-                      task->SubmitTimeInUnixSecond();  // 该作业的age
-
-  // 查出作业的qos的priority：通过作业结构体找到它的账户，然后从账户表里查到账户的qos再去qos表查qos优先级：
-  AccountManager::AccountMapMutexSharedPtr account_map_shared_ptr =
-      g_account_manager->GetAllAccountInfo();
-
-  auto it_account = account_map_shared_ptr->find(task->Account());
-  auto it_qos = qos_map_shared_ptr->find(it_account->second->default_qos);
-  uint32_t task_qos_priority =
-      it_qos->second->priority;  // 该作业的qos的priority
-
-  // 查作业的partition的priority:通过作业找分区名，在config的par里通过分区名找到分区优先级
-  auto it_partition = g_config.Partitions.find(task->partition_name);
-  uint32_t task_part_priority = it_partition->second.priority;
-
-  uint32_t task_nodes_alloc = task->nodes_alloc;  // 该作业的alloc nodes
-  uint64_t task_mem_alloc =
-      task->resources.allocatable_resource.memory_bytes;  // 该作业的alloc mem
-  double task_cpus_alloc =
-      task->resources.allocatable_resource.cpu_count;  // 该作业的alloc cpu
-
-  // 计算service_val_max & service_val_min
-  std::map<std::string, uint32_t> acc_service_val_map;
+  acc_service_val_map.clear();
   for (const auto& [task_id, r_task] : m_running_task_map_) {
     uint32_t service_val = 0;
     if (cpus_alloc_max != cpus_alloc_min) {
@@ -1850,13 +1837,53 @@ uint32_t TaskScheduler::CalculatePriority(TaskInCtld* task) {
     auto iter = acc_service_val_map.find(r_task->Account());
     iter->second += service_val;
   }
+
   for (const auto& [acc_name, ser_val] : acc_service_val_map) {
     if (ser_val < service_val_min) service_val_min = ser_val;
     if (ser_val > service_val_max) service_val_max = ser_val;
   }
 
-  // 计算该作业的service_val:
-  uint32_t task_service_val = acc_service_val_map.find(task->Account())->second;
+  // 创建list,存task ID及其对应的priority
+  std::list<std::pair<task_id_t /* Task ID */, uint32_t /* Priority */>>
+      task_priority_list;
+  for (const auto& [task_id, task] : m_pending_task_map_) {
+    uint32_t priority = CalculatePriority(*task);
+    task_priority_list.push_back({task->TaskId(), priority});
+  }
+  task_priority_list.sort([](const std::pair<task_id_t, uint32_t>& a,
+                             const std::pair<task_id_t, uint32_t>& b) {
+    return a.second > b.second;
+  });
+  return task_priority_list;
+}
+
+// input：taskInCtld的引用
+// output：优先级
+uint32_t TaskScheduler::CalculatePriority(TaskInCtld& task) {
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
+  double age_factor, partition_factor, job_size_factor, fair_share_factor,
+      assoc_factor, qos_factor;
+
+  // 获取该作业的age
+  uint64_t task_age =
+      ToUnixSeconds(absl::Now()) - task.SubmitTimeInUnixSecond();
+  // 获取该作业qos的priority：通过作业结构体找到它的账户，然后从账户表里查到账户的qos再去qos表查qos优先级。
+  AccountManager::AccountMapMutexSharedPtr account_map_shared_ptr =
+      g_account_manager->GetAllAccountInfo();
+  AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
+      g_account_manager->GetAllQosInfo();
+  const auto it_account = account_map_shared_ptr->find(task.Account());
+  const auto it_qos = qos_map_shared_ptr->find(it_account->second->default_qos);
+  uint32_t task_qos_priority = it_qos->second->priority;
+  // 获取该作业所属partition的priority
+  const auto it_partition = g_config.Partitions.find(task.partition_id);
+  uint32_t task_part_priority = it_partition->second.priority;
+  // 获取该作业的alloc nodes、alloc mem、alloc cpu、service_val
+  uint32_t task_nodes_alloc = task.nodes_alloc;
+  uint64_t task_mem_alloc = task.resources.allocatable_resource.memory_bytes;
+  double task_cpus_alloc = task.resources.allocatable_resource.cpu_count;
+  uint32_t task_service_val = acc_service_val_map.find(task.Account())->second;
 
   // 计算age_factor:
   if (age_max != age_min)
@@ -1894,7 +1921,7 @@ uint32_t TaskScheduler::CalculatePriority(TaskInCtld* task) {
   else
     job_size_factor /= 3;
 
-  // 计算fair_share_factor;
+  // 计算fair_share_factor：
   if (service_val_max != service_val_min) {
     fair_share_factor = 1 - (double)(task_service_val - service_val_min) /
                                 (service_val_max - service_val_min);
@@ -1905,6 +1932,7 @@ uint32_t TaskScheduler::CalculatePriority(TaskInCtld* task) {
   // 计算assoc_factor:
   assoc_factor = 0;
 
+  // 计算priority：
   uint32_t priority =
       g_config.PriorityWeight.WeightAge * age_factor +
       g_config.PriorityWeight.WeightPartition * partition_factor +
