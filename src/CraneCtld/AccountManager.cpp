@@ -34,7 +34,6 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
       // Add user to account
       new_user = *find_user;
       new_user.account_map[object_account];
-      // return AddUserToAccount(find_user, new_user.default_account);
     }
   }
 
@@ -93,10 +92,6 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
           // Insert the new user
           g_db_client->InsertUser(new_user);
         }
-        for (const auto& qos : find_account->allowed_qos_list) {
-          IncQosReferenceCountInDb(
-              qos, static_cast<int>(find_account->allowed_partition.size()));
-        }
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -105,10 +100,6 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
 
   m_account_map_[object_account]->users.emplace_back(name);
   m_user_map_[name] = std::make_unique<User>(std::move(new_user));
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
-  for (const auto& qos : find_account->allowed_qos_list) {
-    m_qos_map_[qos]->reference_count += find_account->allowed_partition.size();
-  }
 
   return Result{true};
 }
@@ -223,7 +214,7 @@ AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
         name);
   }
   for (const auto& qos : new_account.allowed_qos_list) {
-    m_qos_map_[qos]->reference_count += new_account.allowed_partition.size();
+    m_qos_map_[qos]->reference_count++;
   }
   m_account_map_[name] = std::make_unique<Account>(std::move(new_account));
 
@@ -291,13 +282,6 @@ AccountManager::Result AccountManager::DeleteUser(const std::string& name,
         // Delete the user
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
                                      name, "deleted", true);
-        for (const auto& [acc_name, item] : user->account_map) {
-          for (const auto& [par_name, pair] : item.allowed_partition_qos_map) {
-            for (const auto& qos : pair.second) {
-              IncQosReferenceCountInDb(qos, -1);
-            }
-          }
-        }
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -305,18 +289,10 @@ AccountManager::Result AccountManager::DeleteUser(const std::string& name,
   }
 
   util::write_lock_guard account_guard(m_rw_account_mutex_);
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
   for (const auto& kv : user->account_map) {
     m_account_map_[kv.first]->users.remove(name);
   }
   m_user_map_[name]->deleted = true;
-  for (const auto& [acc_name, item] : user->account_map) {
-    for (const auto& [par_name, pair] : item.allowed_partition_qos_map) {
-      for (const auto& qos : pair.second) {
-        m_qos_map_[qos]->reference_count--;
-      }
-    }
-  }
 
   return Result{true};
 }
@@ -345,13 +321,6 @@ AccountManager::Result AccountManager::RemoveUserFromAccount(
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$unset",
                                      name, "account_map." + account,
                                      std::string(""));
-
-        for (const auto& [par_name, pair] :
-             user->account_map.at(account).allowed_partition_qos_map) {
-          for (const auto& qos : pair.second) {
-            IncQosReferenceCountInDb(qos, -1);
-          }
-        }
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -359,14 +328,7 @@ AccountManager::Result AccountManager::RemoveUserFromAccount(
   }
 
   util::write_lock_guard account_guard(m_rw_account_mutex_);
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
   m_account_map_[account]->users.remove(name);
-  for (const auto& [par_name, pair] :
-       user->account_map.at(account).allowed_partition_qos_map) {
-    for (const auto& qos : pair.second) {
-      m_qos_map_[qos]->reference_count--;
-    }
-  }
   m_user_map_[name]->account_map.erase(account);
 
   return Result{true};
@@ -602,8 +564,7 @@ AccountManager::Result AccountManager::ModifyAccount(
 
 AccountManager::Result AccountManager::ModifyQos(const std::string& name,
                                                  const std::string& item,
-                                                 const std::string& value,
-                                                 bool force) {
+                                                 const std::string& value) {
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const Qos* p = GetExistedQosInfoNoLock_(name);
@@ -935,28 +896,13 @@ AccountManager::Result AccountManager::AddUserAllowedPartition(
           account_ptr->default_qos,
           std::list<std::string>{account_ptr->allowed_qos_list}};
 
-  mongocxx::client_session::with_transaction_cb callback =
-      [&](mongocxx::client_session* session) {
-        g_db_client->UpdateUser(user);
-        for (const auto& qos : user.account_map[account]
-                                   .allowed_partition_qos_map[partition]
-                                   .second) {
-          IncQosReferenceCountInDb(qos, 1);
-        }
-      };
-
   // Update to database
-  if (!g_db_client->CommitTransaction(callback)) {
+  if (!g_db_client->UpdateUser(user)) {
     return Result{false, "Fail to update data in database"};
   }
 
   m_user_map_[name]->account_map[account].allowed_partition_qos_map =
       user.account_map[account].allowed_partition_qos_map;
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
-  for (const auto& qos :
-       user.account_map[account].allowed_partition_qos_map[partition].second) {
-    m_qos_map_[qos]->reference_count += 1;
-  }
 
   return Result{true};
 }
@@ -981,7 +927,7 @@ AccountManager::Result AccountManager::AddUserAllowedQos(
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
 
   // check if qos existed
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
+  util::read_lock_guard qos_guard(m_rw_qos_mutex_);
   if (!GetExistedQosInfoNoLock_(qos)) {
     return Result{false, fmt::format("Qos '{}' not existed", qos)};
   }
@@ -997,9 +943,9 @@ AccountManager::Result AccountManager::AddUserAllowedQos(
   }
 
   // check if add item already the user's allowed qos
-  int change_num = 0;
   if (partition.empty()) {
     // add to all partition
+    int change_num = 0;
     for (auto& [par, pair] :
          user.account_map[account].allowed_partition_qos_map) {
       std::list<std::string>& list = pair.second;
@@ -1038,23 +984,15 @@ AccountManager::Result AccountManager::AddUserAllowedQos(
       iter->second.first = qos;
     }
     list.push_back(qos);
-    change_num = 1;
   }
 
-  mongocxx::client_session::with_transaction_cb callback =
-      [&](mongocxx::client_session* session) {
-        g_db_client->UpdateUser(user);
-        IncQosReferenceCountInDb(qos, change_num);
-      };
-
   // Update to database
-  if (!g_db_client->CommitTransaction(callback)) {
+  if (!g_db_client->UpdateUser(user)) {
     return Result{false, "Fail to update data in database"};
   }
 
   m_user_map_[name]->account_map[account].allowed_partition_qos_map =
       user.account_map[account].allowed_partition_qos_map;
-  m_qos_map_[qos]->reference_count += change_num;
 
   return Result{true};
 }
@@ -1205,40 +1143,13 @@ AccountManager::Result AccountManager::SetUserAllowedPartition(
             std::list<std::string>{account_ptr->allowed_qos_list}};
   }
 
-  mongocxx::client_session::with_transaction_cb callback =
-      [&](mongocxx::client_session* session) {
-        g_db_client->UpdateUser(user);
-
-        for (const auto& [par, pair] :
-             p->account_map.at(account).allowed_partition_qos_map) {
-          for (const auto& qos : pair.second) {
-            IncQosReferenceCountInDb(qos, -1);
-          }
-        }
-
-        for (const auto& qos : account_ptr->allowed_qos_list) {
-          IncQosReferenceCountInDb(qos, partition_list.size());
-        }
-      };
-
   // Update to database
-  if (!g_db_client->CommitTransaction(callback)) {
+  if (!g_db_client->UpdateUser(user)) {
     return Result{false, "Fail to update data in database"};
   }
 
   m_user_map_[name]->account_map[account].allowed_partition_qos_map =
       user.account_map[account].allowed_partition_qos_map;
-
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
-  for (const auto& [par, pair] :
-       p->account_map.at(account).allowed_partition_qos_map) {
-    for (const auto& qos : pair.second) {
-      m_qos_map_[qos]->reference_count -= 1;
-    }
-  }
-  for (const auto& qos : account_ptr->allowed_qos_list) {
-    m_qos_map_[qos]->reference_count += partition_list.size();
-  }
 
   return Result{true};
 }
@@ -1263,7 +1174,7 @@ AccountManager::Result AccountManager::SetUserAllowedQos(
 
   util::read_lock_guard account_guard(m_rw_account_mutex_);
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
+  util::read_lock_guard qos_guard(m_rw_qos_mutex_);
   for (const auto& qos : qos_list) {
     // check if qos existed
     if (!GetExistedQosInfoNoLock_(qos)) {
@@ -1327,58 +1238,13 @@ AccountManager::Result AccountManager::SetUserAllowedQos(
     iter->second.second.assign(qos_list.begin(), qos_list.end());
   }
 
-  mongocxx::client_session::with_transaction_cb callback =
-      [&](mongocxx::client_session* session) {
-        g_db_client->UpdateUser(user);
-        // Reduce the previous reference count
-        if (partition.empty()) {
-          for (const auto& [par, pair] :
-               p->account_map.at(account).allowed_partition_qos_map) {
-            for (const auto& qos : pair.second) {
-              IncQosReferenceCountInDb(qos, -1);
-            }
-          }
-        } else {
-          for (const auto& qos : p->account_map.at(account)
-                                     .allowed_partition_qos_map.at(partition)
-                                     .second) {
-            IncQosReferenceCountInDb(qos, -1);
-          }
-        }
-        // Increase the current reference count
-        for (const auto& qos : qos_list) {
-          IncQosReferenceCountInDb(
-              qos, user.account_map[account].allowed_partition_qos_map.size());
-        }
-      };
-
   // Update to database
-  if (!g_db_client->CommitTransaction(callback)) {
+  if (!g_db_client->UpdateUser(user)) {
     return Result{false, "Fail to update data in database"};
   }
 
   m_user_map_[name]->account_map[account].allowed_partition_qos_map =
       user.account_map[account].allowed_partition_qos_map;
-  // Reduce the previous reference count
-  if (partition.empty()) {
-    for (const auto& [par, pair] :
-         p->account_map.at(account).allowed_partition_qos_map) {
-      for (const auto& qos : pair.second) {
-        m_qos_map_[qos]->reference_count -= 1;
-      }
-    }
-  } else {
-    for (const auto& qos : p->account_map.at(account)
-                               .allowed_partition_qos_map.at(partition)
-                               .second) {
-      m_qos_map_[qos]->reference_count -= 1;
-    }
-  }
-  // Increase the current reference count
-  for (const auto& qos : qos_list) {
-    m_qos_map_[qos]->reference_count -=
-        user.account_map[account].allowed_partition_qos_map.size();
-  }
 
   return Result{true};
 }
@@ -1407,20 +1273,13 @@ AccountManager::Result AccountManager::DeleteUserAllowedPartition(
   }
 
   // Update to database
-  mongocxx::client_session::with_transaction_cb callback =
-      [&](mongocxx::client_session* session) {
-        DeleteUserAllowedPartitionFromDB_(name, account, partition);
-      };
-
-  if (!g_db_client->CommitTransaction(callback)) {
+  if (!g_db_client->UpdateEntityOne(
+          Ctld::MongodbClient::EntityType::USER, "$unset", name,
+          "account_map." + account + ".allowed_partition_qos_map." + partition,
+          std::string(""))) {
     return Result{false, "Fail to update data in database"};
   }
 
-  for (const auto& qos : user->account_map.at(account)
-                             .allowed_partition_qos_map.at(partition)
-                             .second) {
-    m_qos_map_[qos]->reference_count -= 1;
-  }
   m_user_map_[name]->account_map[account].allowed_partition_qos_map.erase(
       partition);
 
@@ -1442,9 +1301,9 @@ AccountManager::Result AccountManager::DeleteUserAllowedQos(
   }
   User user(*p);
 
-  int change_num = 0;
   if (partition.empty()) {
     // Delete the qos of all partition
+    int change_num = 0;
     for (auto& [par, pair] :
          user.account_map[account].allowed_partition_qos_map) {
       if (std::find(pair.second.begin(), pair.second.end(), qos) !=
@@ -1492,7 +1351,6 @@ AccountManager::Result AccountManager::DeleteUserAllowedQos(
                       partition)};
     }
     iter->second.second.remove(qos);
-    change_num = 1;
 
     if (qos == iter->second.first) {
       if (!force)
@@ -1509,21 +1367,13 @@ AccountManager::Result AccountManager::DeleteUserAllowedQos(
     }
   }
 
-  mongocxx::client_session::with_transaction_cb callback =
-      [&](mongocxx::client_session* session) {
-        g_db_client->UpdateUser(user);
-        IncQosReferenceCountInDb(qos, -change_num);
-      };
-
   // Update to database
-  if (!g_db_client->CommitTransaction(callback)) {
+  if (!g_db_client->UpdateUser(user)) {
     return Result{false, "Fail to update data in database"};
   }
 
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
   m_user_map_[name]->account_map[account].allowed_partition_qos_map =
       user.account_map[account].allowed_partition_qos_map;
-  m_qos_map_[qos]->reference_count -= change_num;
 
   return Result{true};
 }
@@ -2041,7 +1891,7 @@ int AccountManager::DeleteAccountAllowedQosFromDB_(const std::string& name,
   }
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   for (const auto& user : account->users) {
-    change_num += DeleteUserAllowedQosOfAllPartitionFromDB_(user, name, qos);
+    DeleteUserAllowedQosOfAllPartitionFromDB_(user, name, qos);
   }
   g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$pull",
                                name, "allowed_qos_list", qos);
@@ -2089,7 +1939,7 @@ bool AccountManager::DeleteAccountAllowedQosFromMap_(const std::string& name,
   return true;
 }
 
-int AccountManager::DeleteUserAllowedQosOfAllPartitionFromDB_(
+bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromDB_(
     const std::string& name, const std::string& account,
     const std::string& qos) {
   const User* p = GetExistedUserInfoNoLock_(name);
@@ -2106,13 +1956,11 @@ int AccountManager::DeleteUserAllowedQosOfAllPartitionFromDB_(
   }
   User user(*p);
 
-  int change_num = 0;
   for (auto& [par, pair] :
        user.account_map[account].allowed_partition_qos_map) {
     auto iter = std::find(pair.second.begin(), pair.second.end(), qos);
     if (iter != pair.second.end()) {
       pair.second.remove(qos);
-      change_num++;
     }
 
     if (pair.first == qos) {
@@ -2120,7 +1968,7 @@ int AccountManager::DeleteUserAllowedQosOfAllPartitionFromDB_(
     }
   }
   g_db_client->UpdateUser(user);
-  return change_num;
+  return true;
 }
 
 bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromMap_(
@@ -2174,7 +2022,10 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDB_(
   }
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   for (const auto& user : account->users) {
-    DeleteUserAllowedPartitionFromDB_(user, name, partition);
+    g_db_client->UpdateEntityOne(
+        Ctld::MongodbClient::EntityType::USER, "$unset", user,
+        "account_map." + name + ".allowed_partition_qos_map." + partition,
+        std::string(""));
   }
 
   g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$pull",
@@ -2203,63 +2054,13 @@ bool AccountManager::DeleteAccountAllowedPartitionFromMap_(
     DeleteAccountAllowedPartitionFromMap_(child, partition);
   }
   util::write_lock_guard user_guard(m_rw_user_mutex_);
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
   for (const auto& user : account->users) {
-    for (const auto& qos : m_user_map_[user]
-                               ->account_map[name]
-                               .allowed_partition_qos_map[partition]
-                               .second) {
-      m_qos_map_[qos]->reference_count -= 1;
-    }
     m_user_map_[user]->account_map[name].allowed_partition_qos_map.erase(
         partition);
   }
   m_account_map_[account->name]->allowed_partition.remove(partition);
 
   return true;
-}
-
-/**
- * @param name
- * @param account
- * @param partition
- * @note Recursive functions that operate on the Mongodb should be called
- * externally as a whole transaction, and should not use transactions internally
- * @return
- */
-bool AccountManager::DeleteUserAllowedPartitionFromDB_(
-    const std::string& name, const std::string& account,
-    const std::string& partition) {
-  const User* user = GetExistedUserInfoNoLock_(name);
-  if (!user) {
-    CRANE_ERROR(
-        "Operating on a non-existent user '{}', please check this item in "
-        "database and restart cranectld",
-        name);
-    return false;
-  }
-  if (!user->account_map.contains(account)) {
-    CRANE_ERROR("User '{}' doesn't belong to account '{}'", name, account);
-    return false;
-  }
-
-  if (!user->account_map.at(account).allowed_partition_qos_map.contains(
-          partition)) {
-    return false;
-  }
-
-  bool res = true;
-  res &= g_db_client->UpdateEntityOne(
-      Ctld::MongodbClient::EntityType::USER, "$unset", name,
-      "account_map." + account + ".allowed_partition_qos_map." + partition,
-      std::string(""));
-  for (const auto& qos : user->account_map.at(account)
-                             .allowed_partition_qos_map.at(partition)
-                             .second) {
-    res &= IncQosReferenceCountInDb(qos, -1);
-  }
-
-  return res;
 }
 
 bool AccountManager::PaternityTestNoLock_(const std::string& parent,

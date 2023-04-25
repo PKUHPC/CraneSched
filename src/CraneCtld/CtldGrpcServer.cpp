@@ -703,7 +703,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
         return grpc::Status::OK;
       }
       res = g_account_manager->ModifyQos(request->name(), request->item(),
-                                         request->value(), request->force());
+                                         request->value());
       break;
     default:
       break;

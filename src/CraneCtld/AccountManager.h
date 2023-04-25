@@ -66,7 +66,7 @@ class AccountManager {
       const std::string& value, bool force);
 
   Result ModifyQos(const std::string& name, const std::string& item,
-                   const std::string& value, bool force);
+                   const std::string& value);
 
   Result BlockAccount(const std::string& name, bool block);
 
@@ -156,9 +156,9 @@ class AccountManager {
                                      const std::string& qos);
   bool DeleteAccountAllowedQosFromMap_(const std::string& name,
                                        const std::string& qos);
-  int DeleteUserAllowedQosOfAllPartitionFromDB_(const std::string& name,
-                                                const std::string& account,
-                                                const std::string& qos);
+  bool DeleteUserAllowedQosOfAllPartitionFromDB_(const std::string& name,
+                                                 const std::string& account,
+                                                 const std::string& qos);
   bool DeleteUserAllowedQosOfAllPartitionFromMap_(const std::string& name,
                                                   const std::string& account,
                                                   const std::string& qos);
@@ -167,10 +167,6 @@ class AccountManager {
                                             const std::string& partition);
   bool DeleteAccountAllowedPartitionFromMap_(const std::string& name,
                                              const std::string& partition);
-
-  bool DeleteUserAllowedPartitionFromDB_(const std::string& name,
-                                         const std::string& account,
-                                         const std::string& partition);
 
   bool PaternityTestNoLock_(const std::string& parent,
                             const std::string& child);
