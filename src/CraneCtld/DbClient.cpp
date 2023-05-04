@@ -81,7 +81,7 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     root_user.admin_level = User::Admin;
     root_user.uid = 0;
     root_user.account_map[root_user.default_account] =
-        User::account_partition_qos_item{PartitionQosMap{}, true};
+        User::account_partition_qos_item{PartitionQosMap{}, false};
 
     if (!InsertUser(root_user)) {
       CRANE_ERROR("Failed to insert default user ROOT!");
@@ -501,6 +501,9 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
     user->default_account = user_view["default_account"].get_string().value;
     user->admin_level =
         (Ctld::User::AdminLevel)user_view["admin_level"].get_int32().value;
+    for (auto&& acc : user_view["coordinator_accounts"].get_array().value) {
+      user->coordinator_accounts.emplace_back(acc.get_string().value);
+    }
 
     for (auto&& account_view : user_view["account_map"].get_document().view()) {
       PartitionQosMap temp;
@@ -529,12 +532,18 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 6> fields{"deleted", "uid",         "default_account",
-                                    "name",    "admin_level", "account_map"};
+  std::array<std::string, 7> fields{
+      "deleted",     "uid",         "default_account",     "name",
+      "admin_level", "account_map", "coordinator_accounts"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
-             AccountPartitionQosMap>
-      values{false,     user.uid,         user.default_account,
-             user.name, user.admin_level, user.account_map};
+             AccountPartitionQosMap, std::list<std::string>>
+      values{false,
+             user.uid,
+             user.default_account,
+             user.name,
+             user.admin_level,
+             user.account_map,
+             user.coordinator_accounts};
   return DocumentConstructor_(fields, values);
 }
 
@@ -557,9 +566,12 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
     }
     account->parent_account = account_view["parent_account"].get_string().value;
     account->default_qos = account_view["default_qos"].get_string().value;
-    for (auto& allowed_qos :
+    for (auto&& allowed_qos :
          account_view["allowed_qos_list"].get_array().value) {
       account->allowed_qos_list.emplace_back(allowed_qos.get_string());
+    }
+    for (auto&& user : account_view["coordinators"].get_array().value) {
+      account->coordinators.emplace_back(user.get_string().value);
     }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
@@ -568,13 +580,13 @@ void MongodbClient::ViewToAccount_(const bsoncxx::document::view& account_view,
 
 bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
     const Ctld::Account& account) {
-  std::array<std::string, 10> fields{
-      "deleted",     "blocked",         "name",           "description",
-      "users",       "child_accounts",  "parent_account", "allowed_partition",
-      "default_qos", "allowed_qos_list"};
+  std::array<std::string, 11> fields{
+      "deleted",     "blocked",          "name",           "description",
+      "users",       "child_accounts",   "parent_account", "allowed_partition",
+      "default_qos", "allowed_qos_list", "coordinators"};
   std::tuple<bool, bool, std::string, std::string, std::list<std::string>,
              std::list<std::string>, std::string, std::list<std::string>,
-             std::string, std::list<std::string>>
+             std::string, std::list<std::string>, std::list<std::string>>
       values{false,
              account.blocked,
              account.name,
@@ -584,7 +596,8 @@ bsoncxx::builder::basic::document MongodbClient::AccountToDocument_(
              account.parent_account,
              account.allowed_partition,
              account.default_qos,
-             account.allowed_qos_list};
+             account.allowed_qos_list,
+             account.coordinators};
 
   return DocumentConstructor_(fields, values);
 }

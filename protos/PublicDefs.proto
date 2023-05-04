@@ -226,7 +226,8 @@ message AccountInfo {
   repeated string allowed_partitions = 6;
   string default_qos = 7;
   repeated string allowed_qos_list = 8;
-  bool blocked = 9;
+  repeated string coordinators = 9;
+  bool blocked = 10;
 }
 
 message UserInfo {
@@ -246,7 +247,8 @@ message UserInfo {
   string account = 3;
   bool blocked = 4;
   repeated AllowedPartitionQos allowed_partition_qos_list = 5;
-  AdminLevel admin_level = 6;
+  repeated string coordinator_accounts = 6;
+  AdminLevel admin_level = 7;
 }
 
 message QosInfo {

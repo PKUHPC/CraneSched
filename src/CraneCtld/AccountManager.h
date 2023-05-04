@@ -88,6 +88,14 @@ class AccountManager {
   Result FindUserLevelAccountOfUid(uint32_t uid, User::AdminLevel* level,
                                    std::string* account);
 
+  AccountManager::Result HasPermissionToAccount(uint32_t uid,
+                                                const std::string& account,
+                                                User::AdminLevel* level_of_uid);
+
+  AccountManager::Result HasPermissionToUser(uint32_t uid,
+                                             const std::string& user,
+                                             User::AdminLevel* level_of_uid);
+
  private:
   void InitDataMap_();
 
@@ -100,57 +108,57 @@ class AccountManager {
   const Qos* GetQosInfoNoLock_(const std::string& name);
   const Qos* GetExistedQosInfoNoLock_(const std::string& name);
 
-  bool IncQosReferenceCountInDb(const std::string& name, int num);
+  bool IncQosReferenceCountInDb_(const std::string& name, int num);
 
-  Result AddUserAllowedPartition(const std::string& name,
-                                 const std::string& account,
-                                 const std::string& partition);
-  Result AddUserAllowedQos(const std::string& name, const std::string& qos,
-                           const std::string& account,
-                           const ::std::string& partition);
+  Result AddUserAllowedPartition_(const std::string& name,
+                                  const std::string& account,
+                                  const std::string& partition);
+  Result AddUserAllowedQos_(const std::string& name, const std::string& qos,
+                            const std::string& account,
+                            const ::std::string& partition);
 
-  Result SetUserAdminLevel(const std::string& name, const std::string& level);
-  Result SetUserDefaultQos(const std::string& name, const std::string& qos,
-                           const std::string& account,
-                           const std::string& partition);
-  Result SetUserAllowedPartition(const std::string& name,
-                                 const std::string& account,
-                                 const std::string& rhs);
-  Result SetUserAllowedQos(const std::string& name, const std::string& account,
-                           const std::string& partition, const std::string& rhs,
-                           bool force);
+  Result SetUserAdminLevel_(const std::string& name, const std::string& level);
+  Result SetUserDefaultQos_(const std::string& name, const std::string& qos,
+                            const std::string& account,
+                            const std::string& partition);
+  Result SetUserAllowedPartition_(const std::string& name,
+                                  const std::string& account,
+                                  const std::string& rhs);
+  Result SetUserAllowedQos_(const std::string& name, const std::string& account,
+                            const std::string& partition,
+                            const std::string& rhs, bool force);
 
-  Result DeleteUserAllowedPartition(const std::string& name,
-                                    const std::string& account,
+  Result DeleteUserAllowedPartition_(const std::string& name,
+                                     const std::string& account,
+                                     const std::string& partition);
+  Result DeleteUserAllowedQos_(const std::string& name, const std::string& qos,
+                               const std::string& account,
+                               const ::std::string& partition, bool force);
+
+  Result AddAccountAllowedPartition_(const std::string& name,
+                                     const std::string& rhs);
+  AccountManager::Result AddAccountAllowedQos_(const std::string& name,
+                                               const std::string& qos);
+
+  Result SetAccountDescription_(const std::string& name,
+                                const std::string& description);
+  Result SetAccountDefaultQos_(const std::string& name, const std::string& qos);
+  Result SetAccountAllowedPartition_(const std::string& name,
+                                     const std::string& rhs, bool force);
+  Result SetAccountAllowedQos_(const std::string& name, const std::string& rhs,
+                               bool force);
+
+  Result DeleteAccountAllowedPartition_(const std::string& name,
+                                        const std::string& partition,
+                                        bool force);
+  Result DeleteAccountAllowedQos_(const std::string& name,
+                                  const std::string& qos, bool force);
+
+  bool IsAllowedPartitionOfAnyNode_(const Account* account,
                                     const std::string& partition);
-  Result DeleteUserAllowedQos(const std::string& name, const std::string& qos,
-                              const std::string& account,
-                              const ::std::string& partition, bool force);
 
-  Result AddAccountAllowedPartition(const std::string& name,
-                                    const std::string& rhs);
-  AccountManager::Result AddAccountAllowedQos(const std::string& name,
-                                              const std::string& qos);
-
-  Result SetAccountDescription(const std::string& name,
-                               const std::string& description);
-  Result SetAccountDefaultQos(const std::string& name, const std::string& qos);
-  Result SetAccountAllowedPartition(const std::string& name,
-                                    const std::string& rhs, bool force);
-  Result SetAccountAllowedQos(const std::string& name, const std::string& rhs,
-                              bool force);
-
-  Result DeleteAccountAllowedPartition(const std::string& name,
-                                       const std::string& partition,
-                                       bool force);
-  Result DeleteAccountAllowedQos(const std::string& name,
-                                 const std::string& qos, bool force);
-
-  bool IsAllowedPartitionOfAnyNode(const Account* account,
-                                   const std::string& partition);
-
-  bool IsDefaultQosOfAnyNode(const Account* account, const std::string& qos);
-  bool IsDefaultQosOfAnyPartition(const User* user, const std::string& qos);
+  bool IsDefaultQosOfAnyNode_(const Account* account, const std::string& qos);
+  bool IsDefaultQosOfAnyPartition_(const User* user, const std::string& qos);
 
   int DeleteAccountAllowedQosFromDB_(const std::string& name,
                                      const std::string& qos);

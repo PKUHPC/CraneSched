@@ -355,6 +355,7 @@ struct Account {
   std::list<std::string> allowed_partition;
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
+  std::list<std::string> coordinators;
   //
   //  uint32_t cur_cpus_use;
 };
@@ -376,7 +377,7 @@ struct User {
   std::string default_account;
   std::unordered_map<std::string, account_partition_qos_item>
       account_map; /*account name, item*/
-
+  std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
   //
   //  uint32_t cur_cpus_use;
