@@ -176,6 +176,11 @@ class TaskScheduler {
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
 
+  void MaxMinInit(absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>*
+                      pending_task_map);
+
+  uint32_t CalculatePriority(TaskInCtld& task);
+
  private:
   void ScheduleThread_();
 
@@ -197,10 +202,6 @@ class TaskScheduler {
   static void TransferTaskToMongodb_(TaskInCtld* task);
 
   CraneErr TerminateRunningTaskNoLock_(TaskInCtld* task);
-
-  std::list<std::pair<task_id_t, uint32_t>> TaskScheduler::GetAllPriorities();
-
-  uint32_t CalculatePriority(TaskInCtld& task);
 
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 
@@ -230,20 +231,13 @@ class TaskScheduler {
   std::thread m_schedule_thread_;
   std::atomic_bool m_thread_stop_{};
 
-  uint64_t age_max;
-  uint64_t age_min;
-  uint32_t qos_priority_max;
-  uint32_t qos_priority_min;
-  uint32_t part_priority_max;
-  uint32_t part_priority_min;
-  uint32_t nodes_alloc_max;
-  uint32_t nodes_alloc_min;
-  uint64_t mem_alloc_max;
-  uint64_t mem_alloc_min;
-  double cpus_alloc_max;
-  double cpus_alloc_min;
-  uint32_t service_val_max;
-  uint32_t service_val_min;
+  uint64_t age_max, age_min;
+  uint32_t qos_priority_max, qos_priority_min;
+  uint32_t part_priority_max, part_priority_min;
+  uint32_t nodes_alloc_max, nodes_alloc_min;
+  uint64_t mem_alloc_max, mem_alloc_min;
+  double cpus_alloc_max, cpus_alloc_min;
+  uint32_t service_val_max, service_val_min;
   std::map<std::string, uint32_t> acc_service_val_map;
 };
 

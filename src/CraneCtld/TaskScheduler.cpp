@@ -1426,14 +1426,26 @@ void MinLoadFirst::NodeSelect(
                                            &node_info_in_a_partition);
   }
 
+  g_task_scheduler->MaxMinInit(pending_task_map);
+  std::list<std::pair<task_id_t /* Task ID */, uint32_t /* Priority */>>
+      task_priority_list;
+  for (const auto& [task_id, task] : *pending_task_map) {
+    uint32_t priority = g_task_scheduler->CalculatePriority(*task);
+    task_priority_list.push_back({task->TaskId(), priority});
+  }
+  task_priority_list.sort([](const std::pair<task_id_t, uint32_t>& a,
+                             const std::pair<task_id_t, uint32_t>& b) {
+    return a.second > b.second;
+  });
+
   // Now we know, on every node, the # of running tasks (which
   //  doesn't include those we select as the incoming running tasks in the
   //  following code) and how many resources are available at the end of each
   //  task.
   // Iterate over all the pending tasks and select the available node for the
   //  task to run in its partition.
-  for (auto pending_task_it = pending_task_map->begin();
-       pending_task_it != pending_task_map->end();) {
+  for (auto it = task_priority_list.begin(); it != task_priority_list.end();) {
+    auto pending_task_it = pending_task_map->find(it->first);
     auto& task = pending_task_it->second;
     PartitionId part_id = task->partition_id;
 
@@ -1448,7 +1460,7 @@ void MinLoadFirst::NodeSelect(
         node_info, part_meta, *craned_meta_map, task.get(), now, &craned_ids,
         &expected_start_time);
     if (!ok) {
-      ++pending_task_it;
+      ++it;
       continue;
     }
 
@@ -1509,7 +1521,7 @@ void MinLoadFirst::NodeSelect(
       pending_task_it = pending_task_map->erase(pending_task_it);
     } else {
       // The task can't be started now. Move to the next pending task.
-      pending_task_it++;
+      it++;
     }
   }
 }
@@ -1752,30 +1764,19 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
   }
 }
 
-// input：pending task map
-// output：作业号及其对应priority的list,排序根据priority从大到小。
-std::list<std::pair<task_id_t, uint32_t>> TaskScheduler::GetAllPriorities() {
-  LockGuard pending_guard(&m_pending_task_map_mtx_);
-  LockGuard running_guard(&m_running_task_map_mtx_);
+void TaskScheduler::MaxMinInit(
+    absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map) {
+  // Initialize the values of each max and min
+  age_max = 0, age_min = UINT64_MAX;
+  qos_priority_max = 0, qos_priority_min = UINT32_MAX;
+  part_priority_max = 0, part_priority_min = UINT32_MAX;
+  nodes_alloc_max = 0, nodes_alloc_min = UINT32_MAX;
+  mem_alloc_max = 0, mem_alloc_min = UINT64_MAX;
+  cpus_alloc_max = 0, cpus_alloc_min = DBL_MAX;
+  service_val_max = 0, service_val_min = UINT32_MAX;
 
-  // 初始化各个max和min
-  age_max = 0;
-  age_min = UINT64_MAX;
-  qos_priority_max = 0;
-  qos_priority_min = UINT32_MAX;
-  part_priority_max = 0;
-  part_priority_min = UINT32_MAX;
-  nodes_alloc_max = 0;
-  nodes_alloc_min = UINT32_MAX;
-  mem_alloc_max = 0;
-  mem_alloc_min = UINT64_MAX;
-  cpus_alloc_max = 0;
-  cpus_alloc_min = DBL_MAX;
-  service_val_max = 0;
-  service_val_min = UINT32_MAX;
-
-  for (auto iter = m_pending_task_map_.begin();
-       iter != m_pending_task_map_.end(); iter++) {
+  for (auto iter = pending_task_map->begin(); iter != pending_task_map->end();
+       iter++) {
     uint64_t age =
         ToUnixSeconds(absl::Now()) - iter->second->SubmitTimeInUnixSecond();
     if (age < age_min) age_min = age;
@@ -1842,26 +1843,9 @@ std::list<std::pair<task_id_t, uint32_t>> TaskScheduler::GetAllPriorities() {
     if (ser_val < service_val_min) service_val_min = ser_val;
     if (ser_val > service_val_max) service_val_max = ser_val;
   }
-
-  // 创建list,存task ID及其对应的priority
-  std::list<std::pair<task_id_t /* Task ID */, uint32_t /* Priority */>>
-      task_priority_list;
-  for (const auto& [task_id, task] : m_pending_task_map_) {
-    uint32_t priority = CalculatePriority(*task);
-    task_priority_list.push_back({task->TaskId(), priority});
-  }
-  task_priority_list.sort([](const std::pair<task_id_t, uint32_t>& a,
-                             const std::pair<task_id_t, uint32_t>& b) {
-    return a.second > b.second;
-  });
-  return task_priority_list;
 }
 
-// input：taskInCtld的引用
-// output：优先级
 uint32_t TaskScheduler::CalculatePriority(TaskInCtld& task) {
-  LockGuard pending_guard(&m_pending_task_map_mtx_);
-  LockGuard running_guard(&m_running_task_map_mtx_);
   double age_factor, partition_factor, job_size_factor, fair_share_factor,
       assoc_factor, qos_factor;
 
@@ -1885,27 +1869,27 @@ uint32_t TaskScheduler::CalculatePriority(TaskInCtld& task) {
   double task_cpus_alloc = task.resources.allocatable_resource.cpu_count;
   uint32_t task_service_val = acc_service_val_map.find(task.Account())->second;
 
-  // 计算age_factor:
+  // age_factor
   if (age_max != age_min)
     age_factor = (double)(task_age - age_min) / (age_max - age_min);
   else
     age_factor = 0;
 
-  // 计算qos_factor：
+  // qos_factor
   if (qos_priority_min != qos_priority_max)
     qos_factor = (double)(task_qos_priority - qos_priority_min) /
                  (qos_priority_max - qos_priority_min);
   else
     qos_factor = 0;
 
-  // 计算partition_factor:
+  // partition_factor
   if (part_priority_max != part_priority_min)
     partition_factor = (double)(task_part_priority - part_priority_min) /
                        (part_priority_max - part_priority_min);
   else
     partition_factor = 0;
 
-  // 计算job_size_factor：
+  // job_size_factor
   job_size_factor = 0;
   if (cpus_alloc_max != cpus_alloc_min)
     job_size_factor += (double)(task_cpus_alloc - cpus_alloc_min) /
@@ -1921,7 +1905,7 @@ uint32_t TaskScheduler::CalculatePriority(TaskInCtld& task) {
   else
     job_size_factor /= 3;
 
-  // 计算fair_share_factor：
+  // fair_share_factor
   if (service_val_max != service_val_min) {
     fair_share_factor = 1 - (double)(task_service_val - service_val_min) /
                                 (service_val_max - service_val_min);
@@ -1929,10 +1913,10 @@ uint32_t TaskScheduler::CalculatePriority(TaskInCtld& task) {
     fair_share_factor = 0;
   }
 
-  // 计算assoc_factor:
+  // assoc_factor
   assoc_factor = 0;
 
-  // 计算priority：
+  // priority
   uint32_t priority =
       g_config.PriorityWeight.WeightAge * age_factor +
       g_config.PriorityWeight.WeightPartition * partition_factor +
