@@ -20,15 +20,21 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
  public:
   explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
 
-  grpc::Status AllocateInteractiveTask(
+  [[deprecated]] grpc::Status AllocateInteractiveTask(
       grpc::ServerContext *context,
       const crane::grpc::InteractiveTaskAllocRequest *request,
       crane::grpc::InteractiveTaskAllocReply *response) override;
 
-  grpc::Status QueryInteractiveTaskAllocDetail(
+  [[deprecated]] grpc::Status QueryInteractiveTaskAllocDetail(
       grpc::ServerContext *context,
       const crane::grpc::QueryInteractiveTaskAllocDetailRequest *request,
       crane::grpc::QueryInteractiveTaskAllocDetailReply *response) override;
+
+  grpc::Status CforedStream(
+      grpc::ServerContext *context,
+      grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
+                               crane::grpc::StreamCforedRequest> *stream)
+      override;
 
   grpc::Status SubmitBatchTask(
       grpc::ServerContext *context,
@@ -114,14 +120,15 @@ class CtldServer {
 
   inline void Wait() { m_server_->Wait(); }
 
-  void AddAllocDetailToIaTask(uint32_t task_id,
-                              InteractiveTaskAllocationDetail detail)
+  [[deprecated]] void AddAllocDetailToIaTask(
+      uint32_t task_id, InteractiveTaskAllocationDetail detail)
       LOCKS_EXCLUDED(m_mtx_);
 
-  const InteractiveTaskAllocationDetail *QueryAllocDetailOfIaTask(
-      uint32_t task_id) LOCKS_EXCLUDED(m_mtx_);
+  [[deprecated]] const InteractiveTaskAllocationDetail *
+  QueryAllocDetailOfIaTask(uint32_t task_id) LOCKS_EXCLUDED(m_mtx_);
 
-  void RemoveAllocDetailOfIaTask(uint32_t task_id) LOCKS_EXCLUDED(m_mtx_);
+  [[deprecated]] void RemoveAllocDetailOfIaTask(uint32_t task_id)
+      LOCKS_EXCLUDED(m_mtx_);
 
  private:
   using Mutex = util::mutex;

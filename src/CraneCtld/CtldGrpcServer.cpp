@@ -1133,6 +1133,13 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::CforedStream(
+    grpc::ServerContext *context,
+    grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
+                             crane::grpc::StreamCforedRequest> *stream) {
+  return grpc::Status::OK;
+}
+
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CraneCtldServiceImpl>(this);
 

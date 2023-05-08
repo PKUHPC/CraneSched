@@ -438,6 +438,142 @@ message QueryTasksInfoReply{
   repeated TaskInfo task_info_list = 2;
 }
 
+message StreamCallocRequest {
+  enum CallocRequestType {
+    TASK_REQUEST = 0;
+    TASK_COMPLETION_REQUEST = 1;
+  }
+
+  message TaskReq {
+    int32 calloc_pid = 1;
+    TaskToCtld task = 2;
+  }
+
+  message TaskCompleteReq {
+    uint32 task_id = 1;
+    TaskStatus status = 2;
+  }
+
+  CallocRequestType type = 1;
+
+  oneof payload {
+    TaskReq payload_task_req = 2;
+    TaskCompleteReq payload_task_complete_req = 3;
+  }
+}
+
+message StreamCforedReply {
+  enum CforedReplyType {
+    TASK_ID_REPLY = 0;
+    TASK_RES_ALLOC_REPLY = 1;
+    TASK_CANCEL_REQUEST = 2;
+    TASK_COMPLETION_ACK_REPLY = 3;
+  }
+
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  message TaskResAllocatedReply {
+    bool ok = 1;
+  }
+
+  message TaskCancelRequest {
+    uint32 task_id = 1;
+  }
+
+  message TaskCompletionAckReply {
+    bool ok = 1;
+  }
+
+  CforedReplyType type = 1 ;
+
+  oneof payload {
+    TaskIdReply payload_task_id_reply = 2;
+    TaskResAllocatedReply payload_task_alloc_reply = 3;
+    TaskCancelRequest payload_task_cancel_request = 4;
+    TaskCompletionAckReply payload_task_completion_ack_reply = 5;
+  }
+}
+
+message StreamCforedRequest {
+  enum CforedRequestType {
+    CFORED_REGISTRATION = 0;
+    TASK_REQUEST = 1;
+    TASK_COMPLETION_REQUEST = 2;
+  }
+  CforedRequestType type = 1;
+
+  message CforedReg {
+    string cfored_name = 1;
+  }
+
+  message TaskReq {
+    string cfored_name = 1;
+    int32 pid = 2;
+    TaskToCtld task = 3;
+  }
+
+  message TaskCompleteReq {
+    string cfored_name = 1;
+    uint32 task_id = 2;
+    TaskStatus status = 3;
+  }
+
+  oneof payload {
+    CforedReg payload_cfored_reg = 2;
+    TaskReq payload_task_req = 3;
+    TaskCompleteReq payload_task_complete_req = 4;
+  }
+}
+
+message StreamCtldReply {
+  enum CtldReplyType {
+    TASK_ID_REPLY = 0;
+    TASK_RES_ALLOC_REPLY = 1;
+    TASK_CANCEL_REQUEST = 2;
+    TASK_COMPLETION_ACK_REPLY = 3;
+    CFORED_REGISTRATION_ACK = 4;
+  }
+
+  message TaskIdReply {
+    int32 pid = 1;
+    bool ok = 2;
+    uint32 task_id = 3;
+    string failure_reason = 4;
+  }
+
+  message TaskResAllocatedReply {
+    uint32 task_id = 1;
+    bool ok = 2;
+  }
+
+  message TaskCancelRequest {
+    uint32 task_id = 1;
+  }
+
+  message TaskCompletionAckReply {
+    uint32 task_id = 1;
+  }
+
+  message CforedRegistrationAck {
+    bool ok = 1;
+    string failure_reason = 2;
+  }
+
+  CtldReplyType type = 1;
+
+  oneof payload {
+    CforedRegistrationAck payload_cfored_reg_ack = 2;
+    TaskResAllocatedReply payload_task_res_alloc_reply = 3;
+    TaskCancelRequest payload_task_cancel_request = 4;
+    TaskCompletionAckReply payload_task_completion_ack = 5;
+    TaskIdReply payload_task_id_reply = 6;
+  }
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -445,15 +581,17 @@ service CraneCtld {
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
 
-
   /* RPCs called from SrunX */
   /* When SrunX request an interactive job, it will first request SrunX to allocate
      an interactive task and get the related meta information. */
   rpc AllocateInteractiveTask(InteractiveTaskAllocRequest) returns (InteractiveTaskAllocReply);
   rpc QueryInteractiveTaskAllocDetail(QueryInteractiveTaskAllocDetailRequest) returns (QueryInteractiveTaskAllocDetailReply);
 
-  rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
+  /* ----------------------------------- Called from Cfored --------------------------------------------------------- */
+  rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
 
+  /* RPCs called from ccancel */
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
 
   /* RPCs called from cbatch */
   rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
@@ -516,4 +654,8 @@ service Craned {
 
   /* ----------------------------------- Called from SrunX --------------------------------------------------------- */
   rpc SrunXStream(stream SrunXStreamRequest) returns (stream SrunXStreamReply);
+}
+
+service CraneForeD {
+  rpc CallocStream(stream StreamCallocRequest) returns(stream StreamCforedReply);
 }

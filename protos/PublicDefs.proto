@@ -162,7 +162,6 @@ message TaskInfo {
   string cmd_line = 12;
   string cwd = 13;
   string username = 14;
-  string qos = 15;
 
   // Dynamic task information
   TaskStatus status = 31;
