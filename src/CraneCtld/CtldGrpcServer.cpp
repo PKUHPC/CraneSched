@@ -1137,6 +1137,145 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
     grpc::ServerContext *context,
     grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
                              crane::grpc::StreamCforedRequest> *stream) {
+  using crane::grpc::StreamCforedRequest;
+  using crane::grpc::StreamCtldReply;
+  using grpc::Status;
+
+  enum class StreamState {
+    kWaitRegReq = 0,
+    kWaitMsg,
+    kCleanData,
+  };
+
+  CraneErr err;
+  bool ok;
+
+  StreamCforedRequest cfored_request;
+  StreamCtldReply ctld_reply;
+
+  task_id_t task_id = pseudo_cfored_task_id_.fetch_add(1);
+  std::string cfored_name;
+
+  CRANE_TRACE("CforedStream from {} created.", context->peer());
+
+  StreamState state = StreamState::kWaitRegReq;
+  while (true) {
+    switch (state) {
+      case StreamState::kWaitRegReq:
+        ok = stream->Read(&cfored_request);
+        if (ok) {
+          if (cfored_request.type() !=
+              StreamCforedRequest::CFORED_REGISTRATION) {
+            CRANE_ERROR("Expect type CFORED_REGISTRATION from peer {}.",
+                        context->peer());
+            return Status::CANCELLED;
+          } else {
+            cfored_name = cfored_request.payload_cfored_reg().cfored_name();
+
+            ctld_reply.set_type(StreamCtldReply::CFORED_REGISTRATION_ACK);
+            ctld_reply.mutable_payload_cfored_reg_ack()->set_ok(true);
+
+            ok = stream->Write(ctld_reply);
+            ctld_reply.Clear();
+            if (ok) {
+              state = StreamState::kWaitMsg;
+            } else {
+              CRANE_ERROR(
+                  "Failed to send msg to cfored {}. Connection is broken. "
+                  "Exiting...",
+                  cfored_name);
+              state = StreamState::kCleanData;
+            }
+          }
+        } else {
+          state = StreamState::kCleanData;
+        }
+
+        break;
+
+      case StreamState::kWaitMsg:
+        ok = stream->Read(&cfored_request);
+        if (ok) {
+          switch (cfored_request.type()) {
+            case StreamCforedRequest::TASK_REQUEST:
+              ctld_reply.set_type(StreamCtldReply::TASK_ID_REPLY);
+              ctld_reply.mutable_payload_task_id_reply()->set_ok(true);
+              ctld_reply.mutable_payload_task_id_reply()->set_pid(
+                  cfored_request.release_payload_task_req()->pid());
+              ctld_reply.mutable_payload_task_id_reply()->set_task_id(task_id);
+
+              ok = stream->Write(ctld_reply);
+              ctld_reply.Clear();
+              if (!ok) {
+                CRANE_ERROR(
+                    "Failed to send msg to cfored {}. Connection is broken. "
+                    "Exiting...",
+                    cfored_name);
+                state = StreamState::kCleanData;
+                break;
+              }
+
+              std::this_thread::sleep_for(std::chrono::milliseconds(500));
+              ctld_reply.set_type(StreamCtldReply::TASK_RES_ALLOC_REPLY);
+              ctld_reply.mutable_payload_task_res_alloc_reply()->set_ok(true);
+              ctld_reply.mutable_payload_task_res_alloc_reply()->set_task_id(
+                  task_id);
+
+              ok = stream->Write(ctld_reply);
+              ctld_reply.Clear();
+              if (!ok) {
+                CRANE_ERROR(
+                    "Failed to send msg to cfored {}. Connection is broken. "
+                    "Exiting...",
+                    cfored_name);
+                state = StreamState::kCleanData;
+                break;
+              }
+
+              break;
+
+            case StreamCforedRequest::TASK_COMPLETION_REQUEST:
+              ctld_reply.set_type(StreamCtldReply::TASK_COMPLETION_ACK_REPLY);
+              ctld_reply.mutable_payload_task_completion_ack()->set_task_id(
+                  task_id);
+
+              ok = stream->Write(ctld_reply);
+              ctld_reply.Clear();
+              if (!ok) {
+                state = StreamState::kCleanData;
+              }
+
+              break;
+
+            case StreamCforedRequest::CFORED_GRACEFUL_EXIT:
+              ctld_reply.set_type(StreamCtldReply::CFORED_GRACEFUL_EXIT_ACK);
+              ctld_reply.mutable_payload_graceful_exit_ack()->set_ok(true);
+
+              stream->Write(ctld_reply);
+              ctld_reply.Clear();
+
+              state = StreamState::kCleanData;
+
+              break;
+
+            default:
+              CRANE_ERROR("Not expected cfored request type: {}",
+                          StreamCforedRequest_CforedRequestType_Name(
+                              cfored_request.type()));
+              return Status::CANCELLED;
+          }
+        } else {
+          state = StreamState::kCleanData;
+        }
+
+        break;
+      case StreamState::kCleanData:
+        CRANE_INFO("Cfored {} disconnected. Cleaning its data...", cfored_name);
+
+        return Status::OK;
+    }
+  }
+
   return grpc::Status::OK;
 }
 

@@ -503,6 +503,7 @@ message StreamCforedRequest {
     CFORED_REGISTRATION = 0;
     TASK_REQUEST = 1;
     TASK_COMPLETION_REQUEST = 2;
+    CFORED_GRACEFUL_EXIT = 3;
   }
   CforedRequestType type = 1;
 
@@ -522,10 +523,15 @@ message StreamCforedRequest {
     TaskStatus status = 3;
   }
 
+  message GracefulExitReq {
+    string cfored_name = 1;
+  }
+
   oneof payload {
     CforedReg payload_cfored_reg = 2;
     TaskReq payload_task_req = 3;
     TaskCompleteReq payload_task_complete_req = 4;
+    GracefulExitReq payload_graceful_exit_req = 5;
   }
 }
 
@@ -536,6 +542,7 @@ message StreamCtldReply {
     TASK_CANCEL_REQUEST = 2;
     TASK_COMPLETION_ACK_REPLY = 3;
     CFORED_REGISTRATION_ACK = 4;
+    CFORED_GRACEFUL_EXIT_ACK = 5;
   }
 
   message TaskIdReply {
@@ -563,6 +570,10 @@ message StreamCtldReply {
     string failure_reason = 2;
   }
 
+  message CforedGracefulExitAck {
+    bool ok = 1;
+  }
+
   CtldReplyType type = 1;
 
   oneof payload {
@@ -571,6 +582,7 @@ message StreamCtldReply {
     TaskCancelRequest payload_task_cancel_request = 4;
     TaskCompletionAckReply payload_task_completion_ack = 5;
     TaskIdReply payload_task_id_reply = 6;
+    CforedGracefulExitAck payload_graceful_exit_ack = 7;
   }
 }
 

@@ -105,6 +105,8 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
 
  private:
   CtldServer *m_ctld_server_;
+
+  std::atomic<task_id_t> pseudo_cfored_task_id_{0};
 };
 
 /***
