@@ -356,8 +356,6 @@ struct Account {
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
   std::list<std::string> coordinators;
-  //
-  //  uint32_t cur_cpus_use;
 };
 
 struct User {
@@ -383,10 +381,6 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
-  //
-  //  uint32_t cur_cpus_use;
-  //  uint32_t cur_submit_tasks;
-  //  uint32_t cur_running_tasks;
 };
 
 }  // namespace Ctld

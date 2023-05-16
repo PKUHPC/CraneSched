@@ -230,6 +230,15 @@ message AccountInfo {
   bool blocked = 10;
 }
 
+// Note: UserInfo DIFFERS from the `User` struct in C++ code and database representation
+//       and is ONLY used for communication between CraneCtld and cacctmgr command.
+//       If an user belongs to multiple accounts, There will be multiple `UserInfo`
+//       messages with `account` pointing to each account.
+//       For example, if a user (uid=1) belongs to accounts `1,2,3`,
+//       there will be three `UserInfo` messages: (uid=1, account=1), (uid=1, account=2),
+//       (uid=1, account=3).
+//       The c++ code and database representation use a Map<account name, AttrsInAccount> to contain
+//       in ONE UserInfo message all the information belonging to different accounts.
 message UserInfo {
   enum AdminLevel{
     None = 0;
