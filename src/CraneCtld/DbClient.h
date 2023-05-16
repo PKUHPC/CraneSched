@@ -17,13 +17,6 @@ namespace Ctld {
 
 class MongodbClient {
  public:
-  using PartitionQosMap = std::unordered_map<
-      std::string /*partition name*/,
-      std::pair<std::string /*default qos*/,
-                std::list<std::string> /*allowed qos list*/>>;
-  using AccountPartitionQosMap = std::unordered_map<
-      std::string, User::account_partition_qos_item>; /*account name, item*/
-
   enum class EntityType {
     ACCOUNT = 0,
     USER = 1,
@@ -216,11 +209,9 @@ void MongodbClient::DocumentAppendItem_<std::list<std::string>>(
     document& doc, const std::string& key, const std::list<std::string>& value);
 
 template <>
-void MongodbClient::DocumentAppendItem_<
-    std::unordered_map<std::string, User::account_partition_qos_item>>(
+void MongodbClient::DocumentAppendItem_<User::AccountToAttrsMap>(
     document& doc, const std::string& key,
-    const std::unordered_map<std::string, User::account_partition_qos_item>&
-        value);
+    const std::unordered_map<std::string, User::AttrsInAccount>& value);
 
 template <>
 void MongodbClient::SubDocumentAppendItem_<std::list<std::string>>(
@@ -228,9 +219,9 @@ void MongodbClient::SubDocumentAppendItem_<std::list<std::string>>(
     const std::list<std::string>& value);
 
 template <>
-void MongodbClient::SubDocumentAppendItem_<MongodbClient::PartitionQosMap>(
+void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
     sub_document& doc, const std::string& key,
-    const MongodbClient::PartitionQosMap& value);
+    const User::PartToAllowedQosMap& value);
 
 }  // namespace Ctld
 

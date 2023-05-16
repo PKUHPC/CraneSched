@@ -80,8 +80,8 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     root_user.default_account = "ROOT";
     root_user.admin_level = User::Admin;
     root_user.uid = 0;
-    root_user.account_map[root_user.default_account] =
-        User::account_partition_qos_item{PartitionQosMap{}, false};
+    root_user.account_to_attrs_map[root_user.default_account] =
+        User::AttrsInAccount{User::PartToAllowedQosMap{}, false};
 
     if (!InsertUser(root_user)) {
       CRANE_ERROR("Failed to insert default user ROOT!");
@@ -407,11 +407,9 @@ void MongodbClient::DocumentAppendItem_<std::list<std::string>>(
 }
 
 template <>
-void MongodbClient::DocumentAppendItem_<
-    std::unordered_map<std::string, User::account_partition_qos_item>>(
+void MongodbClient::DocumentAppendItem_<User::AccountToAttrsMap>(
     document& doc, const std::string& key,
-    const std::unordered_map<std::string, User::account_partition_qos_item>&
-        value) {
+    const User::AccountToAttrsMap& value) {
   doc.append(kvp(key, [&value, this](sub_document mapValueDocument) {
     for (const auto& mapItem : value) {
       mapValueDocument.append(
@@ -434,9 +432,9 @@ void MongodbClient::SubDocumentAppendItem_<std::list<std::string>>(
 }
 
 template <>
-void MongodbClient::SubDocumentAppendItem_<MongodbClient::PartitionQosMap>(
+void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
     sub_document& doc, const std::string& key,
-    const MongodbClient::PartitionQosMap& value) {
+    const User::PartToAllowedQosMap& value) {
   doc.append(kvp(key, [&value](sub_document mapValueDocument) {
     for (const auto& mapItem : value) {
       auto mapKey = mapItem.first;
@@ -505,10 +503,13 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
       user->coordinator_accounts.emplace_back(acc.get_string().value);
     }
 
-    for (auto&& account_view : user_view["account_map"].get_document().view()) {
-      PartitionQosMap temp;
+    for (auto&& account_to_attrs_map_item :
+         user_view["account_to_attrs_map"].get_document().view()) {
+      User::PartToAllowedQosMap temp;
       for (auto&& partition :
-           account_view["allowed_partition_qos_map"].get_document().view()) {
+           account_to_attrs_map_item["allowed_partition_qos_map"]
+               .get_document()
+               .view()) {
         std::string default_qos;
         std::list<std::string> allowed_qos_list;
         auto partition_array = partition.get_array().value;
@@ -520,9 +521,9 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
             std::pair<std::string, std::list<std::string>>{
                 default_qos, std::move(allowed_qos_list)};
       }
-      user->account_map[std::string(account_view.key())] =
-          User::account_partition_qos_item{std::move(temp),
-                                           account_view["blocked"].get_bool()};
+      user->account_to_attrs_map[std::string(account_to_attrs_map_item.key())] =
+          User::AttrsInAccount{std::move(temp),
+                               account_to_attrs_map_item["blocked"].get_bool()};
     }
 
   } catch (const bsoncxx::exception& e) {
@@ -532,17 +533,21 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 7> fields{
-      "deleted",     "uid",         "default_account",     "name",
-      "admin_level", "account_map", "coordinator_accounts"};
+  std::array<std::string, 7> fields{"deleted",
+                                    "uid",
+                                    "default_account",
+                                    "name",
+                                    "admin_level",
+                                    "account_to_attrs_map",
+                                    "coordinator_accounts"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
-             AccountPartitionQosMap, std::list<std::string>>
+             User::AccountToAttrsMap, std::list<std::string>>
       values{false,
              user.uid,
              user.default_account,
              user.name,
              user.admin_level,
-             user.account_map,
+             user.account_to_attrs_map,
              user.coordinator_accounts};
   return DocumentConstructor_(fields, values);
 }

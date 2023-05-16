@@ -71,7 +71,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     if (task->account.empty()) {
       task->account = user_scoped_ptr->default_account;
     } else {
-      if (!user_scoped_ptr->account_map.contains(task->account)) {
+      if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
         response->set_ok(false);
         response->set_reason(fmt::format(
             "Account '{}' is not in your account list", task->account));
@@ -531,9 +531,9 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   // Moreover, if `allowed_partition_qos_list` is empty, both allowed partitions
   // and qos_list for allowed partitions are inherited from the parent.
   if (!user.default_account.empty()) {
-    user.account_map[user.default_account];
+    user.account_to_attrs_map[user.default_account];
     for (const auto &apq : user_info->allowed_partition_qos_list())
-      user.account_map[user.default_account]
+      user.account_to_attrs_map[user.default_account]
           .allowed_partition_qos_map[apq.partition_name()];
   }
 
@@ -852,7 +852,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
       }
 
       for (const auto &user : res_user_list) {
-        for (const auto &[account, item] : user.account_map) {
+        for (const auto &[account, item] : user.account_to_attrs_map) {
           if (!request->account().empty() && account != request->account()) {
             continue;
           }
@@ -954,7 +954,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
                 request->uid(), deleter_shared_ptr->default_account,
                 &user_level);
         if (user_level == User::None) {
-          if (deleter_shared_ptr->account_map.size() != 1) {
+          if (deleter_shared_ptr->account_to_attrs_map.size() != 1) {
             response->set_ok(false);
             response->set_reason(
                 "Permission error : You can't remove user form more than one "

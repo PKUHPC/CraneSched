@@ -363,20 +363,24 @@ struct Account {
 struct User {
   enum AdminLevel { None, Operator, Admin };
 
-  struct account_partition_qos_item {
-    std::unordered_map<std::string /*partition name*/,
-                       std::pair<std::string /*default qos*/,
-                                 std::list<std::string> /*allowed qos list*/>>
-        allowed_partition_qos_map;
+  using PartToAllowedQosMap = std::unordered_map<
+      std::string /*partition name*/,
+      std::pair<std::string /*default qos*/,
+                std::list<std::string> /*allowed qos list*/>>;
+
+  struct AttrsInAccount {
+    PartToAllowedQosMap allowed_partition_qos_map;
     bool blocked;
   };
+
+  /* Map<account name, item> */
+  using AccountToAttrsMap = std::unordered_map<std::string, AttrsInAccount>;
 
   bool deleted = false;
   uid_t uid;
   std::string name;
   std::string default_account;
-  std::unordered_map<std::string, account_partition_qos_item>
-      account_map; /*account name, item*/
+  AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
   //

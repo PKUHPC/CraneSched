@@ -123,10 +123,10 @@ class AccountManager {
                             const std::string& partition);
   Result SetUserAllowedPartition_(const std::string& name,
                                   const std::string& account,
-                                  const std::string& rhs);
+                                  const std::string& partitions);
   Result SetUserAllowedQos_(const std::string& name, const std::string& account,
                             const std::string& partition,
-                            const std::string& rhs, bool force);
+                            const std::string& qos_list_str, bool force);
 
   Result DeleteUserAllowedPartition_(const std::string& name,
                                      const std::string& account,
@@ -136,7 +136,7 @@ class AccountManager {
                                const ::std::string& partition, bool force);
 
   Result AddAccountAllowedPartition_(const std::string& name,
-                                     const std::string& rhs);
+                                     const std::string& partition);
   AccountManager::Result AddAccountAllowedQos_(const std::string& name,
                                                const std::string& qos);
 
@@ -144,9 +144,9 @@ class AccountManager {
                                 const std::string& description);
   Result SetAccountDefaultQos_(const std::string& name, const std::string& qos);
   Result SetAccountAllowedPartition_(const std::string& name,
-                                     const std::string& rhs, bool force);
-  Result SetAccountAllowedQos_(const std::string& name, const std::string& rhs,
-                               bool force);
+                                     const std::string& partitions, bool force);
+  Result SetAccountAllowedQos_(const std::string& name,
+                               const std::string& qos_list_str, bool force);
 
   Result DeleteAccountAllowedPartition_(const std::string& name,
                                         const std::string& partition,
