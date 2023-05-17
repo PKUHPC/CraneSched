@@ -1519,6 +1519,7 @@ void MinLoadFirst::NodeSelect(
       // Erase the task ready to run from temporary
       // partition_pending_task_map and move to the next element
       pending_task_it = pending_task_map->erase(pending_task_it);
+      it = task_priority_list.erase(it);
     } else {
       // The task can't be started now. Move to the next pending task.
       it++;
