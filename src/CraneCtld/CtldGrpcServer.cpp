@@ -733,27 +733,31 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         }
       } else {
         // Query an account
-        AccountManager::AccountMutexSharedPtr account_shared_ptr =
-            g_account_manager->GetExistedAccountInfo(request->name());
-        if (account_shared_ptr) {
-          AccountManager::Result judge_res =
-              g_account_manager->HasPermissionToAccount(
-                  request->uid(), request->name(), nullptr);
-
-          if (!judge_res.ok) {
+        Account temp;
+        {
+          AccountManager::AccountMutexSharedPtr account_shared_ptr =
+              g_account_manager->GetExistedAccountInfo(request->name());
+          if (!account_shared_ptr) {
             response->set_ok(false);
-            response->set_reason(judge_res.reason);
+            response->set_reason(
+                fmt::format("Can't find account {}!", request->name()));
             return grpc::Status::OK;
           }
+          temp = *account_shared_ptr;
+        }
 
-          res_account_list.emplace_back(*account_shared_ptr);
-          response->set_ok(true);
-        } else {
+        AccountManager::Result judge_res =
+            g_account_manager->HasPermissionToAccount(request->uid(),
+                                                      request->name(), nullptr);
+
+        if (!judge_res.ok) {
           response->set_ok(false);
-          response->set_reason(
-              fmt::format("Can't find account {}!", request->name()));
+          response->set_reason(judge_res.reason);
           return grpc::Status::OK;
         }
+
+        res_account_list.emplace_back(std::move(temp));
+        response->set_ok(true);
       }
 
       for (const auto &account : res_account_list) {
