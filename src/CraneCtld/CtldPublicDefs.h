@@ -140,7 +140,7 @@ struct TaskInCtld {
   crane::grpc::TaskType type;
 
   uid_t uid;
-
+  std::string account;
   std::string name;
 
   uint32_t node_num{0};
@@ -152,6 +152,7 @@ struct TaskInCtld {
   std::string cmd_line;
   std::string env;
   std::string cwd;
+  std::string qos;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
@@ -163,7 +164,6 @@ struct TaskInCtld {
   task_id_t task_id;
   task_db_id_t task_db_id;
   gid_t gid;
-  std::string account;
   std::string username;
 
   /* ----------- [3] ----------------
@@ -223,12 +223,6 @@ struct TaskInCtld {
     persisted_part.set_gid(id);
   }
   uid_t Gid() const { return gid; }
-
-  void SetAccount(std::string const& val) {
-    account = val;
-    persisted_part.set_account(val);
-  }
-  std::string const& Account() const { return account; }
 
   void SetUsername(std::string const& val) {
     username = val;
@@ -308,11 +302,12 @@ struct TaskInCtld {
 
     uid = val.uid();
     password_entry = std::make_unique<PasswordEntry>(uid);
-
+    account = val.account();
     name = val.name();
     cmd_line = val.cmd_line();
     env = val.env();
     cwd = val.cwd();
+    qos = val.qos();
   }
 
   void SetFieldsByPersistedPart(
@@ -322,7 +317,6 @@ struct TaskInCtld {
     task_id = persisted_part.task_id();
     task_db_id = persisted_part.task_db_id();
     gid = persisted_part.gid();
-    account = persisted_part.account();
     username = persisted_part.username();
 
     craned_ids.assign(persisted_part.craned_ids().begin(),
@@ -341,6 +335,7 @@ struct Qos {
   bool deleted = false;
   std::string name;
   std::string description;
+  uint32_t reference_count = 0;
   uint32_t priority;
   uint32_t max_jobs_per_user;
   uint32_t max_running_tasks_per_user;
@@ -351,36 +346,41 @@ struct Qos {
 
 struct Account {
   bool deleted = false;
+  bool blocked = false;
   std::string name;
   std::string description;
   std::list<std::string> users;
   std::list<std::string> child_accounts;
   std::string parent_account;
   std::list<std::string> allowed_partition;
-  //  std::unordered_map<std::string, bool> allowed_partition;  /*partition
-  //  name, enable*/
   std::string default_qos;
   std::list<std::string> allowed_qos_list;
-  //
-  //  uint32_t cur_cpus_use;
+  std::list<std::string> coordinators;
 };
 
 struct User {
   enum AdminLevel { None, Operator, Admin };
 
+  using PartToAllowedQosMap = std::unordered_map<
+      std::string /*partition name*/,
+      std::pair<std::string /*default qos*/,
+                std::list<std::string> /*allowed qos list*/>>;
+
+  struct AttrsInAccount {
+    PartToAllowedQosMap allowed_partition_qos_map;
+    bool blocked;
+  };
+
+  /* Map<account name, item> */
+  using AccountToAttrsMap = std::unordered_map<std::string, AttrsInAccount>;
+
   bool deleted = false;
   uid_t uid;
   std::string name;
-  std::string account;
-  std::unordered_map<std::string /*partition name*/,
-                     std::pair<std::string /*default qos*/,
-                               std::list<std::string> /*allowed qos list*/>>
-      allowed_partition_qos_map;
+  std::string default_account;
+  AccountToAttrsMap account_to_attrs_map;
+  std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
-  //
-  //  uint32_t cur_cpus_use;
-  //  uint32_t cur_submit_tasks;
-  //  uint32_t cur_running_tasks;
 };
 
 }  // namespace Ctld

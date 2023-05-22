@@ -306,6 +306,7 @@ message DeleteEntityRequest {
   uint32 uid = 1;
   EntityType entity_type = 2;
   string name = 3;
+  string account = 4;
 }
 
 message DeleteEntityReply {
@@ -322,12 +323,14 @@ message ModifyEntityRequest {
     Delete = 2;
   }
 
-  string lhs = 2;   //modify item field
-  string rhs = 3;   //new value
+  string item = 2;   //modify item field
+  string value = 3;   //new value
   string name = 4;
   string partition = 5;
   OperatorType type = 6;
   EntityType entity_type = 7;
+  string account = 8;
+  bool force = 9;
 }
 
 message ModifyEntityReply {
@@ -339,6 +342,7 @@ message QueryEntityInfoRequest {
   uint32 uid = 1;
   EntityType entity_type = 2;
   string name = 3;
+  string account = 4;
 }
 
 message QueryEntityInfoReply {
@@ -347,6 +351,19 @@ message QueryEntityInfoReply {
   repeated UserInfo user_list = 3;
   repeated AccountInfo account_list = 4;
   repeated QosInfo qos_list = 5;
+}
+
+message BlockAccountOrUserRequest {
+  uint32 uid = 1;
+  bool block = 2;
+  EntityType entity_type = 3;
+  string name = 4;
+  string account = 5;
+}
+
+message BlockAccountOrUserReply {
+  bool ok = 1;
+  string reason = 2;
 }
 
 message MigrateSshProcToCgroupRequest {
@@ -425,6 +442,7 @@ service CraneCtld {
 
   rpc QueryEntityInfo(QueryEntityInfoRequest) returns (QueryEntityInfoReply);
   rpc ModifyEntity(ModifyEntityRequest) returns (ModifyEntityReply);
+  rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);

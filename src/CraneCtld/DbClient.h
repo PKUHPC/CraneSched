@@ -7,6 +7,7 @@
 
 #include <bsoncxx/builder/stream/document.hpp>
 #include <bsoncxx/json.hpp>
+#include <concepts>
 #include <mongocxx/client.hpp>
 #include <mongocxx/cursor.hpp>
 #include <mongocxx/instance.hpp>
@@ -16,11 +17,6 @@ namespace Ctld {
 
 class MongodbClient {
  public:
-  using PartitionQosMap = std::unordered_map<
-      std::string /*partition name*/,
-      std::pair<std::string /*default qos*/,
-                std::list<std::string> /*allowed qos list*/>>;
-
   enum class EntityType {
     ACCOUNT = 0,
     USER = 1,
@@ -51,16 +47,51 @@ class MongodbClient {
   template <typename T>
   bool SelectUser(const std::string& key, const T& value, User* user);
   template <typename T>
-  bool SelectAccount(const std::string& key, const T& value, Account* account);
+  bool SelectAccount(const std::string& key, const T& value, Account* account) {
+    using bsoncxx::builder::basic::kvp;
+    document filter;
+    filter.append(kvp(key, value));
+    bsoncxx::stdx::optional<bsoncxx::document::value> result =
+        (*GetClient_())[m_db_name_][m_account_collection_name_].find_one(
+            filter.view());
+
+    if (result) {
+      bsoncxx::document::view account_view = result->view();
+      ViewToAccount_(account_view, account);
+      return true;
+    }
+    return false;
+  };
   template <typename T>
-  bool SelectQos(const std::string& key, const T& value, Qos* qos);
+  bool SelectQos(const std::string& key, const T& value, Qos* qos) {
+    using bsoncxx::builder::basic::kvp;
+    document filter;
+    filter.append(kvp(key, value));
+    bsoncxx::stdx::optional<bsoncxx::document::value> result =
+        (*GetClient_())[m_db_name_][m_qos_collection_name_].find_one(
+            filter.view());
+
+    if (result) {
+      bsoncxx::document::view qos_view = result->view();
+      ViewToQos_(qos_view, qos);
+      return true;
+    }
+    return false;
+  };
 
   void SelectAllUser(std::list<User>* user_list);
   void SelectAllAccount(std::list<Account>* account_list);
   void SelectAllQos(std::list<Qos>* qos_list);
 
   template <typename T>
-  bool UpdateEntityOne(const EntityType type, const std::string& opt,
+  void SubDocumentAppendItem_(bsoncxx::builder::basic::sub_document& doc,
+                              const std::string& key, const T& value) {
+    using bsoncxx::builder::basic::kvp;
+    doc.append(kvp(key, value));
+  };
+
+  template <typename T>
+  bool UpdateEntityOne(EntityType type, const std::string& opt,
                        const std::string& name, const std::string& key,
                        const T& value) {
     using bsoncxx::builder::basic::kvp;
@@ -72,8 +103,8 @@ class MongodbClient {
     updateItem.append(
         kvp(opt,
             [&](sub_document subDocument) {
-              // DocumentAppendItem(subDocument, key, value);
-              subDocument.append(kvp(key, value));
+              SubDocumentAppendItem_(subDocument, key, value);
+              // subDocument.append(kvp(key, value));
             }),
         kvp("$set", [](sub_document subDocument) {
           subDocument.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
@@ -102,7 +133,7 @@ class MongodbClient {
       return false;
     }
     return true;
-  };
+  }
 
   bool UpdateUser(const User& user);
   bool UpdateAccount(const Account& account);
@@ -126,7 +157,7 @@ class MongodbClient {
   bool CheckDefaultRootAccountUserAndInit_();
 
   template <typename V>
-  void DocumentAppendItem_(document* doc, const std::string& key,
+  void DocumentAppendItem_(document& doc, const std::string& key,
                            const V& value);
 
   template <typename... Ts, std::size_t... Is>
@@ -175,12 +206,22 @@ class MongodbClient {
 
 template <>
 void MongodbClient::DocumentAppendItem_<std::list<std::string>>(
-    document* doc, const std::string& key, const std::list<std::string>& value);
+    document& doc, const std::string& key, const std::list<std::string>& value);
 
 template <>
-void MongodbClient::DocumentAppendItem_<MongodbClient::PartitionQosMap>(
-    document* doc, const std::string& key,
-    const MongodbClient::PartitionQosMap& value);
+void MongodbClient::DocumentAppendItem_<User::AccountToAttrsMap>(
+    document& doc, const std::string& key,
+    const std::unordered_map<std::string, User::AttrsInAccount>& value);
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<std::list<std::string>>(
+    sub_document& doc, const std::string& key,
+    const std::list<std::string>& value);
+
+template <>
+void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
+    sub_document& doc, const std::string& key,
+    const User::PartToAllowedQosMap& value);
 
 }  // namespace Ctld
 

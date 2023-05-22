@@ -482,9 +482,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
   }
 
   // save the current uid/gid
-  savedPrivilege saved_priv;
-  saved_priv.uid = getuid();
-  saved_priv.gid = getgid();
+  savedPrivilege saved_priv{getuid(), getgid()};
 
   int rc = setegid(instance->pwd_entry.Gid());
   if (rc == -1) {

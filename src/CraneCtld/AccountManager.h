@@ -37,7 +37,10 @@ class AccountManager {
 
   Result AddQos(const Qos& new_qos);
 
-  Result DeleteUser(const std::string& name);
+  Result DeleteUser(const std::string& name, const std::string& account);
+
+  Result RemoveUserFromAccount(const std::string& name,
+                               const std::string& account);
 
   Result DeleteAccount(const std::string& name);
 
@@ -55,23 +58,42 @@ class AccountManager {
   Result ModifyUser(
       const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
       const std::string& name, const std::string& partition,
-      const std::string& lhs, const std::string& rhs);
+      std::string account, const std::string& item, const std::string& value,
+      bool force);
   Result ModifyAccount(
       const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
-      const std::string& name, const std::string& lhs, const std::string& rhs);
+      const std::string& name, const std::string& item,
+      const std::string& value, bool force);
 
-  Result ModifyQos(const std::string& name, const std::string& lhs,
-                   const std::string& rhs);
+  Result ModifyQos(const std::string& name, const std::string& item,
+                   const std::string& value);
+
+  Result BlockAccount(const std::string& name, bool block);
+
+  Result BlockUser(const std::string& name, const std::string& account,
+                   bool block);
 
   bool CheckUserPermissionToPartition(const std::string& name,
+                                      const std::string& account,
                                       const std::string& partition);
 
-  Result CheckAndApplyQosLimitOnTask(const std::string& user, TaskInCtld* task);
+  bool CheckAccountEnableState(const std::string& name);
 
-  bool PaternityTest(const std::string& parent, const std::string& child);
+  Result CheckAndApplyQosLimitOnTask(const std::string& user,
+                                     const std::string& account,
+                                     TaskInCtld* task);
 
-  Result FindUserLevelAccountOfUid(const uint32_t uid, User::AdminLevel* level,
+
+  Result FindUserLevelAccountOfUid(uint32_t uid, User::AdminLevel* level,
                                    std::string* account);
+
+  AccountManager::Result HasPermissionToAccount(uint32_t uid,
+                                                const std::string& account,
+                                                User::AdminLevel* level_of_uid);
+
+  AccountManager::Result HasPermissionToUser(uint32_t uid,
+                                             const std::string& user,
+                                             User::AdminLevel* level_of_uid);
 
  private:
   void InitDataMap_();
@@ -85,30 +107,80 @@ class AccountManager {
   const Qos* GetQosInfoNoLock_(const std::string& name);
   const Qos* GetExistedQosInfoNoLock_(const std::string& name);
 
-  bool IsDefaultQosOfAnyNode(const Account& account, const std::string& qos);
-  bool IsDefaultQosOfAnyPartition(const User& user, const std::string& qos);
+  bool IncQosReferenceCountInDb_(const std::string& name, int num);
 
-  bool DeleteAccountAllowedQosFromDB_(const std::string& name,
-                                      const std::string& qos);
-  bool DeleteAccountAllowedQosFromMap_(const std::string& name,
-                                       const std::string& qos);
-  bool DeleteUserAllowedQosOfAllPartitionFromDB_(const std::string& name,
-                                                 const std::string& qos,
-                                                 bool force);
-  bool DeleteUserAllowedQosOfAllPartitionFromMap_(const std::string& name,
-                                                  const std::string& qos,
-                                                  bool force);
+  Result AddUserAllowedPartition_(const std::string& name,
+                                  const std::string& account,
+                                  const std::string& partition);
+  Result AddUserAllowedQos_(const std::string& name, const std::string& qos,
+                            const std::string& account,
+                            const std::string& partition);
 
-  bool DeleteAccountAllowedPartitionFromDB_(const std::string& name,
-                                            const std::string& partition);
-  bool DeleteAccountAllowedPartitionFromMap_(const std::string& name,
-                                             const std::string& partition);
+  Result SetUserAdminLevel_(const std::string& name, const std::string& level);
+  Result SetUserDefaultQos_(const std::string& name, const std::string& qos,
+                            const std::string& account,
+                            const std::string& partition);
+  Result SetUserAllowedPartition_(const std::string& name,
+                                  const std::string& account,
+                                  const std::string& partitions);
+  Result SetUserAllowedQos_(const std::string& name, const std::string& account,
+                            const std::string& partition,
+                            const std::string& qos_list_str, bool force);
 
-  bool DeleteUserAllowedPartitionFromDB_(const std::string& name,
-                                         const std::string& partition);
+  Result DeleteUserAllowedPartition_(const std::string& name,
+                                     const std::string& account,
+                                     const std::string& partition);
+  Result DeleteUserAllowedQos_(const std::string& name, const std::string& qos,
+                               const std::string& account,
+                               const std::string& partition, bool force);
+
+  Result AddAccountAllowedPartition_(const std::string& name,
+                                     const std::string& partition);
+  AccountManager::Result AddAccountAllowedQos_(const std::string& name,
+                                               const std::string& qos);
+
+  Result SetAccountDescription_(const std::string& name,
+                                const std::string& description);
+  Result SetAccountDefaultQos_(const std::string& name, const std::string& qos);
+  Result SetAccountAllowedPartition_(const std::string& name,
+                                     const std::string& partitions, bool force);
+  Result SetAccountAllowedQos_(const std::string& name,
+                               const std::string& qos_list_str, bool force);
+
+  Result DeleteAccountAllowedPartition_(const std::string& name,
+                                        const std::string& partition,
+                                        bool force);
+  Result DeleteAccountAllowedQos_(const std::string& name,
+                                  const std::string& qos, bool force);
+
+  bool IsAllowedPartitionOfAnyNodeNoLock_(const Account* account,
+                                          const std::string& partition);
+
+  bool IsDefaultQosOfAnyNodeNoLock_(const Account* account,
+                                    const std::string& qos);
+  bool IsDefaultQosOfAnyPartitionNoLock_(const User* user,
+                                         const std::string& qos);
+
+  int DeleteAccountAllowedQosFromDBNoLock_(const std::string& name,
+                                           const std::string& qos);
+  bool DeleteAccountAllowedQosFromMapNoLock_(const std::string& name,
+                                             const std::string& qos);
+  bool DeleteUserAllowedQosOfAllPartitionFromDBNoLock_(
+      const std::string& name, const std::string& account,
+      const std::string& qos);
+  bool DeleteUserAllowedQosOfAllPartitionFromMapNoLock_(
+      const std::string& name, const std::string& account,
+      const std::string& qos);
+
+  bool DeleteAccountAllowedPartitionFromDBNoLock_(const std::string& name,
+                                                  const std::string& partition);
+  bool DeleteAccountAllowedPartitionFromMapNoLock_(
+      const std::string& name, const std::string& partition);
 
   bool PaternityTestNoLock_(const std::string& parent,
                             const std::string& child);
+  bool PaternityTestNoLockDFS_(const std::string& parent,
+                               const std::string& child);
 
   std::unordered_map<std::string /*account name*/, std::unique_ptr<Account>>
       m_account_map_;

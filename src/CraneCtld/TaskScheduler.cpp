@@ -532,7 +532,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   auto rng_filter_account = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
     return request.filter_account().empty() ||
-           task->Account() == request.filter_account();
+           task->account == request.filter_account();
   };
 
   auto rng_filter_task_name = [&](auto& it) {
@@ -658,7 +658,7 @@ void TaskScheduler::QueryTasksInRam(
     task_it->mutable_time_limit()->CopyFrom(task.TaskToCtld().time_limit());
     task_it->mutable_start_time()->CopyFrom(task.PersistedPart().start_time());
     task_it->mutable_end_time()->CopyFrom(task.PersistedPart().end_time());
-    task_it->set_account(task.PersistedPart().account());
+    task_it->set_account(task.TaskToCtld().account());
 
     task_it->set_node_num(task.TaskToCtld().node_num());
     task_it->set_cmd_line(task.TaskToCtld().cmd_line());
@@ -691,7 +691,7 @@ void TaskScheduler::QueryTasksInRam(
       request->filter_accounts().begin(), request->filter_accounts().end());
   auto task_rng_filter_account = [&](auto& it) {
     TaskInCtld& task = *it.second;
-    return no_accounts_constraint || req_accounts.contains(task.Account());
+    return no_accounts_constraint || req_accounts.contains(task.account);
   };
 
   bool no_username_constraint = request->filter_users().empty();
