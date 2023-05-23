@@ -425,10 +425,11 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
   auto pd_iter = m_pending_task_map_.find(task_id);
   if (pd_iter != m_pending_task_map_.end()) {
     pd_iter->second->time_limit = absl::Seconds(secs);
-    crane::grpc::TaskToCtld task_to_ctld{pd_iter->second->TaskToCtld()};
-    task_to_ctld.mutable_time_limit()->set_seconds(secs);
+    crane::grpc::TaskToCtld* task_to_ctld =
+        pd_iter->second->MutableTaskToCtld();
+    task_to_ctld->mutable_time_limit()->set_seconds(secs);
     g_embedded_db_client->UpdateTaskToCtld(pd_iter->second->TaskDbId(),
-                                           task_to_ctld);
+                                           *task_to_ctld);
     return CraneErr::kOk;
   }
 
@@ -439,10 +440,10 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
   }
 
   rn_iter->second->time_limit = absl::Seconds(secs);
-  crane::grpc::TaskToCtld task_to_ctld{rn_iter->second->TaskToCtld()};
-  task_to_ctld.mutable_time_limit()->set_seconds(secs);
+  crane::grpc::TaskToCtld* task_to_ctld = rn_iter->second->MutableTaskToCtld();
+  task_to_ctld->mutable_time_limit()->set_seconds(secs);
   g_embedded_db_client->UpdateTaskToCtld(rn_iter->second->TaskDbId(),
-                                         task_to_ctld);
+                                         *task_to_ctld);
 
   for (CranedId const& craned_id : rn_iter->second->CranedIds()) {
     auto* stub = g_craned_keeper->GetCranedStub(craned_id);

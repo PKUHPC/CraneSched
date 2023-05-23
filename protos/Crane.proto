@@ -5,7 +5,6 @@ option go_package = "/protos";
 
 import "PublicDefs.proto";
 import "google/protobuf/timestamp.proto";
-import "google/protobuf/duration.proto";
 
 message Negotiation {
   uint32 version = 1;
@@ -208,7 +207,7 @@ message TerminateOrphanedTaskReply {
 
 message ChangeTaskTimeLimitRequest {
   uint32 task_id = 1;
-  google.protobuf.Duration time_limit = 2;
+  int64 time_limit_seconds = 2;
 }
 
 message ChangeTaskTimeLimitReply {
@@ -283,11 +282,18 @@ message QueryPartitionInfoReply {
 }
 
 message ModifyTaskRequest {
-  uint32 uid = 1;
+  enum TargetAttributes {
+    TimeLimit = 0;
+  }
 
-  string item = 2;   //modify item field
-  string value = 3;   //new value
-  uint32 task_id = 4;
+  uint32 uid = 1;
+  uint32 task_id = 2;
+
+  TargetAttributes attribute = 3;
+
+  oneof value {
+    int64 time_limit_seconds = 4;
+  }
 }
 
 message ModifyTaskReply {

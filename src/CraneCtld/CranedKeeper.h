@@ -38,7 +38,7 @@ class CranedStub {
 
   CraneErr CheckTaskStatus(task_id_t task_id, crane::grpc::TaskStatus *status);
 
-  CraneErr ChangeTaskTimeLimit(uint32_t task_id, int64_t seconds);
+  CraneErr ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
   bool Invalid() { return m_invalid_; }
 

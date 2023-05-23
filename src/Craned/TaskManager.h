@@ -338,7 +338,7 @@ class TaskManager {
   }
 
   void EvDelTerminationTimer_(TaskInstance* instance) {
-    event_del(instance->termination_timer);
+    evtimer_del(instance->termination_timer);
     event_free(instance->termination_timer);
     instance->termination_timer = nullptr;
   }

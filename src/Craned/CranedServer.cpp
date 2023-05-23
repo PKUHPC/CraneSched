@@ -647,7 +647,7 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
     const crane::grpc::ChangeTaskTimeLimitRequest *request,
     crane::grpc::ChangeTaskTimeLimitReply *response) {
   bool ok = g_task_mgr->ChangeTaskTimeLimitAsync(
-      request->task_id(), absl::Seconds(request->time_limit().seconds()));
+      request->task_id(), absl::Seconds(request->time_limit_seconds()));
   response->set_ok(ok);
 
   return Status::OK;

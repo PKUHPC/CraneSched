@@ -1303,26 +1303,28 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
 
     auto iter = this_->m_task_map_.find(elem.task_id);
     if (iter != this_->m_task_map_.end()) {
-      const auto& task_instance = iter->second;
+      TaskInstance* task_instance = iter->second.get();
+      this_->EvDelTerminationTimer_(task_instance);
       if (absl::ToUnixSeconds(absl::Now()) -
               task_instance->task.start_time().seconds() >=
-          seconds) {  // Job timeout
+          seconds) {
+        // If the task times out, terminate it.
         EvQueueTaskTerminate ev_task_terminate{elem.task_id};
         this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
         event_active(this_->m_ev_task_terminate_, 0, 0);
 
-        event_del(iter->second->termination_timer);
-        this_->EvDelTerminationTimer_(iter->second.get());
-      } else {  // set a new timer
-        this_->EvDelTerminationTimer_(iter->second.get());
+      } else {
+        // If the task haven't timed out, set up a new timer.
+        this_->EvDelTerminationTimer_(task_instance);
         this_->EvAddTerminationTimer_(
-            iter->second.get(),
+            task_instance,
             seconds - (absl::ToUnixSeconds(absl::Now()) -
                        task_instance->task.start_time().seconds()));
       }
       elem.ok_prom.set_value(true);
     } else {
-      CRANE_INFO("task #{} not found, update time limit failed!", elem.task_id);
+      CRANE_ERROR("Try to update the time limit of a non-existent task #{}.",
+                  elem.task_id);
       elem.ok_prom.set_value(false);
     }
   }

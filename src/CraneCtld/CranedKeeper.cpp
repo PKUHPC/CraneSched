@@ -216,7 +216,7 @@ CraneErr CranedStub::CheckTaskStatus(task_id_t task_id,
     return CraneErr::kNonExistent;
 }
 
-CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, int64_t seconds) {
+CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
   using crane::grpc::ChangeTaskTimeLimitReply;
   using crane::grpc::ChangeTaskTimeLimitRequest;
 
@@ -226,14 +226,12 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, int64_t seconds) {
   ChangeTaskTimeLimitReply reply;
 
   request.set_task_id(task_id);
-  request.mutable_time_limit()->set_seconds(seconds);
+  request.set_time_limit_seconds(seconds);
   grpc_status = m_stub_->ChangeTaskTimeLimit(&context, request, &reply);
 
   if (!grpc_status.ok()) {
-    CRANE_DEBUG(
-        "ChangeTaskTimeLimitAsync gRPC for Node {} returned with status not "
-        "ok: {}",
-        m_craned_id_, grpc_status.error_message());
+    CRANE_ERROR("ChangeTaskTimeLimitAsync to Craned {} failed: {} ",
+                m_craned_id_, grpc_status.error_message());
     return CraneErr::kRpcFailure;
   }
 
