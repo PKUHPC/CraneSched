@@ -421,12 +421,12 @@ class TaskManager {
 
   static void EvOnTimerCb_(evutil_socket_t, short, void* arg);
 
-  struct event_base* m_ev_base_;
-  struct event* m_ev_sigchld_;
+  struct event_base* m_ev_base_{};
+  struct event* m_ev_sigchld_{};
 
   // When this event is triggered, the TaskManager will not accept
   // any more new tasks and quit as soon as all existing task end.
-  struct event* m_ev_sigint_;
+  struct event* m_ev_sigint_{};
 
   // The function which will be called when SIGINT is triggered.
   std::function<void()> m_sigint_cb_;
@@ -434,47 +434,47 @@ class TaskManager {
   // When SIGINT is triggered or Shutdown() gets called, this variable is set to
   // true. Then, AddTaskAsyncMethod will not accept any more new tasks and
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
-  std::atomic_bool m_is_ending_now_;
+  std::atomic_bool m_is_ending_now_{false};
 
   // When a new task grpc message arrives, the grpc function (which
   //  runs in parallel) uses m_grpc_event_fd_ to inform the event
   //  loop thread and the event loop thread retrieves the message
   //  from m_grpc_reqs_. We use this to keep thread-safety.
-  struct event* m_ev_grpc_interactive_task_;
+  struct event* m_ev_grpc_interactive_task_{};
   ConcurrentQueue<EvQueueGrpcInteractiveTask> m_grpc_interactive_task_queue_;
 
-  struct event* m_ev_query_task_id_from_pid_;
+  struct event* m_ev_query_task_id_from_pid_{};
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
 
-  struct event* m_ev_query_task_info_of_uid_;
+  struct event* m_ev_query_task_info_of_uid_{};
   ConcurrentQueue<EvQueueQueryTaskInfoOfUid> m_query_task_info_of_uid_queue_;
 
-  struct event* m_ev_query_cg_of_task_id_;
+  struct event* m_ev_query_cg_of_task_id_{};
   ConcurrentQueue<EvQueueQueryCgOfTaskId> m_query_cg_of_task_id_queue_;
 
-  struct event* m_ev_grpc_create_cg_;
+  struct event* m_ev_grpc_create_cg_{};
   ConcurrentQueue<EvQueueCreateCg> m_grpc_create_cg_queue_;
 
-  struct event* m_ev_grpc_release_cg_;
+  struct event* m_ev_grpc_release_cg_{};
   ConcurrentQueue<EvQueueReleaseCg> m_grpc_release_cg_queue_;
 
   // A custom event that handles the ExecuteTask RPC.
-  struct event* m_ev_grpc_execute_task_;
+  struct event* m_ev_grpc_execute_task_{};
   ConcurrentQueue<std::unique_ptr<TaskInstance>> m_grpc_execute_task_queue_;
 
   // When this event is triggered, the event loop will exit.
-  struct event* m_ev_exit_event_;
+  struct event* m_ev_exit_event_{};
 
-  struct event* m_ev_task_status_change_;
+  struct event* m_ev_task_status_change_{};
   ConcurrentQueue<TaskStatusChange> m_task_status_change_queue_;
 
-  struct event* m_ev_task_time_limit_change_;
+  struct event* m_ev_task_time_limit_change_{};
   ConcurrentQueue<EvQueueChangeTaskTimeLimit> m_task_time_limit_change_queue_;
 
-  struct event* m_ev_task_terminate_;
+  struct event* m_ev_task_terminate_{};
   ConcurrentQueue<EvQueueTaskTerminate> m_task_terminate_queue_;
 
-  struct event* m_ev_check_task_status_;
+  struct event* m_ev_check_task_status_{};
   ConcurrentQueue<EvQueueCheckTaskStatus> m_check_task_status_queue_;
 
   std::thread m_ev_loop_thread_;

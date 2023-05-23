@@ -11,17 +11,7 @@
 
 namespace Craned {
 
-TaskManager::TaskManager()
-    : m_cg_mgr_(util::CgroupManager::Instance()),
-      m_ev_sigchld_(nullptr),
-      m_ev_base_(nullptr),
-      m_ev_grpc_interactive_task_(nullptr),
-      m_ev_grpc_create_cg_(nullptr),
-      m_ev_grpc_release_cg_(nullptr),
-      m_ev_query_task_id_from_pid_(nullptr),
-      m_ev_exit_event_(nullptr),
-      m_ev_task_status_change_(nullptr),
-      m_is_ending_now_(false) {
+TaskManager::TaskManager() : m_cg_mgr_(util::CgroupManager::Instance()) {
   // Only called once. Guaranteed by singleton pattern.
   m_instance_ptr_ = this;
 
@@ -220,16 +210,17 @@ TaskManager::~TaskManager() {
   if (m_ev_sigint_) event_free(m_ev_sigint_);
 
   if (m_ev_grpc_interactive_task_) event_free(m_ev_grpc_interactive_task_);
+  if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
   if (m_ev_query_task_info_of_uid_) event_free(m_ev_query_task_info_of_uid_);
   if (m_ev_query_cg_of_task_id_) event_free(m_ev_query_cg_of_task_id_);
   if (m_ev_grpc_create_cg_) event_free(m_ev_grpc_create_cg_);
   if (m_ev_grpc_release_cg_) event_free(m_ev_grpc_release_cg_);
-  if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
   if (m_ev_grpc_execute_task_) event_free(m_ev_grpc_execute_task_);
-  if (m_ev_task_status_change_) event_free(m_ev_task_status_change_);
-  if (m_ev_check_task_status_) event_free(m_ev_check_task_status_);
-
   if (m_ev_exit_event_) event_free(m_ev_exit_event_);
+  if (m_ev_task_status_change_) event_free(m_ev_task_status_change_);
+  if (m_ev_task_time_limit_change_) event_free(m_ev_task_time_limit_change_);
+  if (m_ev_task_terminate_) event_free(m_ev_task_terminate_);
+  if (m_ev_check_task_status_) event_free(m_ev_check_task_status_);
 
   if (m_ev_base_) event_base_free(m_ev_base_);
 }
