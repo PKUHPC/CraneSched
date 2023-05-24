@@ -1306,7 +1306,6 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
 
       } else {
         // If the task haven't timed out, set up a new timer.
-        this_->EvDelTerminationTimer_(task_instance);
         this_->EvAddTerminationTimer_(
             task_instance,
             seconds - (absl::ToUnixSeconds(absl::Now()) -
