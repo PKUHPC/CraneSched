@@ -445,15 +445,15 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
   g_embedded_db_client->UpdateTaskToCtld(rn_iter->second->TaskDbId(),
                                          *task_to_ctld);
 
-  for (CranedId const& craned_id : rn_iter->second->CranedIds()) {
-    auto* stub = g_craned_keeper->GetCranedStub(craned_id);
-    if (!stub->Invalid()) {
-      CraneErr err = stub->ChangeTaskTimeLimit(task_id, secs);
-      if (err != CraneErr::kOk) {
-        CRANE_ERROR("Failed to change time limit of task #{} on Node {}",
-                    task_id, craned_id);
-        return err;
-      }
+  // only send request to the first node
+  CranedId const& craned_id = rn_iter->second->CranedIds().front();
+  auto* stub = g_craned_keeper->GetCranedStub(craned_id);
+  if (!stub->Invalid()) {
+    CraneErr err = stub->ChangeTaskTimeLimit(task_id, secs);
+    if (err != CraneErr::kOk) {
+      CRANE_ERROR("Failed to change time limit of task #{} on Node {}", task_id,
+                  craned_id);
+      return err;
     }
   }
 
