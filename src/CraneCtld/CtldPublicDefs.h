@@ -153,7 +153,6 @@ struct TaskInCtld {
   std::string cmd_line;
   std::string env;
   std::string cwd;
-  std::string qos;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
