@@ -205,6 +205,15 @@ message TerminateOrphanedTaskReply {
   string reason = 2;
 }
 
+message ChangeTaskTimeLimitRequest {
+  uint32 task_id = 1;
+  int64 time_limit_seconds = 2;
+}
+
+message ChangeTaskTimeLimitReply {
+  bool ok = 1;
+}
+
 message CheckTaskStatusRequest {
   uint32 task_id = 1;
 }
@@ -270,6 +279,26 @@ message QueryPartitionInfoRequest {
 
 message QueryPartitionInfoReply {
   repeated PartitionInfo partition_info = 1;
+}
+
+message ModifyTaskRequest {
+  enum TargetAttributes {
+    TimeLimit = 0;
+  }
+
+  uint32 uid = 1;
+  uint32 task_id = 2;
+
+  TargetAttributes attribute = 3;
+
+  oneof value {
+    int64 time_limit_seconds = 4;
+  }
+}
+
+message ModifyTaskReply {
+  bool ok = 1;
+  string reason = 2;
 }
 
 message AddAccountRequest {
@@ -432,6 +461,7 @@ service CraneCtld {
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+  rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
@@ -474,6 +504,7 @@ service Craned {
   */
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
   rpc TerminateOrphanedTask(TerminateOrphanedTaskRequest) returns (TerminateOrphanedTaskReply);
+  rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
 
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */

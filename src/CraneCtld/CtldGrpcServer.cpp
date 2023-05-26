@@ -70,6 +70,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
 
     if (task->account.empty()) {
       task->account = user_scoped_ptr->default_account;
+      task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
     } else {
       if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
         response->set_ok(false);
@@ -212,6 +213,37 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
     *response = g_meta_container->QueryAllPartitionInfo();
   } else {
     *response = g_meta_container->QueryPartitionInfo(request->partition_name());
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::ModifyTask(
+    grpc::ServerContext *context, const crane::grpc::ModifyTaskRequest *request,
+    crane::grpc::ModifyTaskReply *response) {
+  using TargetAttributes = crane::grpc::ModifyTaskRequest::TargetAttributes;
+
+  CraneErr err;
+  if (request->attribute() ==
+      TargetAttributes::ModifyTaskRequest_TargetAttributes_TimeLimit) {
+    err = g_task_scheduler->ChangeTaskTimeLimit(request->task_id(),
+                                                request->time_limit_seconds());
+    if (err == CraneErr::kOk) {
+      response->set_ok(true);
+    } else if (err == CraneErr::kNonExistent) {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Task #{} was not found in running or pending queue",
+                      request->task_id()));
+    } else if (err == CraneErr::kGenericFailure) {
+      response->set_ok(false);
+      response->set_reason(fmt::format(
+          "The compute node failed to change the time limit of task#{}.",
+          request->task_id()));
+    }
+  } else {
+    response->set_ok(false);
+    response->set_reason(fmt::format("Invalid request parameters."));
   }
 
   return grpc::Status::OK;

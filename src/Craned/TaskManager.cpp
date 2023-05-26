@@ -11,17 +11,7 @@
 
 namespace Craned {
 
-TaskManager::TaskManager()
-    : m_cg_mgr_(util::CgroupManager::Instance()),
-      m_ev_sigchld_(nullptr),
-      m_ev_base_(nullptr),
-      m_ev_grpc_interactive_task_(nullptr),
-      m_ev_grpc_create_cg_(nullptr),
-      m_ev_grpc_release_cg_(nullptr),
-      m_ev_query_task_id_from_pid_(nullptr),
-      m_ev_exit_event_(nullptr),
-      m_ev_task_status_change_(nullptr),
-      m_is_ending_now_(false) {
+TaskManager::TaskManager() : m_cg_mgr_(util::CgroupManager::Instance()) {
   // Only called once. Guaranteed by singleton pattern.
   m_instance_ptr_ = this;
 
@@ -173,6 +163,18 @@ TaskManager::TaskManager()
     }
   }
   {
+    m_ev_task_time_limit_change_ = event_new(
+        m_ev_base_, -1, EV_READ | EV_PERSIST, EvChangeTaskTimeLimitCb_, this);
+    if (!m_ev_task_time_limit_change_) {
+      CRANE_ERROR("Failed to create the task_time_limit_change event!");
+      std::terminate();
+    }
+    if (event_add(m_ev_task_time_limit_change_, nullptr) < 0) {
+      CRANE_ERROR("Could not add the m_ev_task_time_limit_change_ to base!");
+      std::terminate();
+    }
+  }
+  {
     m_ev_task_terminate_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
                                      EvTerminateTaskCb_, this);
     if (!m_ev_task_terminate_) {
@@ -208,16 +210,17 @@ TaskManager::~TaskManager() {
   if (m_ev_sigint_) event_free(m_ev_sigint_);
 
   if (m_ev_grpc_interactive_task_) event_free(m_ev_grpc_interactive_task_);
+  if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
   if (m_ev_query_task_info_of_uid_) event_free(m_ev_query_task_info_of_uid_);
   if (m_ev_query_cg_of_task_id_) event_free(m_ev_query_cg_of_task_id_);
   if (m_ev_grpc_create_cg_) event_free(m_ev_grpc_create_cg_);
   if (m_ev_grpc_release_cg_) event_free(m_ev_grpc_release_cg_);
-  if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
   if (m_ev_grpc_execute_task_) event_free(m_ev_grpc_execute_task_);
-  if (m_ev_task_status_change_) event_free(m_ev_task_status_change_);
-  if (m_ev_check_task_status_) event_free(m_ev_check_task_status_);
-
   if (m_ev_exit_event_) event_free(m_ev_exit_event_);
+  if (m_ev_task_status_change_) event_free(m_ev_task_status_change_);
+  if (m_ev_task_time_limit_change_) event_free(m_ev_task_time_limit_change_);
+  if (m_ev_task_terminate_) event_free(m_ev_task_terminate_);
+  if (m_ev_check_task_status_) event_free(m_ev_check_task_status_);
 
   if (m_ev_base_) event_base_free(m_ev_base_);
 }
@@ -997,9 +1000,7 @@ void TaskManager::EvOnTimerCb_(int, short, void* arg_) {
   this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
   event_active(this_->m_ev_task_terminate_, 0, 0);
 
-  event_del(arg->timer_ev);
-  event_free(arg->timer_ev);
-  arg->task_instance->termination_timer = nullptr;
+  this_->EvDelTerminationTimer_(arg->task_instance);
 }
 
 void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
@@ -1271,6 +1272,51 @@ void TaskManager::EvCheckTaskStatusCb_(int, short events, void* user_data) {
 
     elem.status_prom.set_value(
         {false, /* Invalid Value*/ crane::grpc::Pending});
+  }
+}
+
+bool TaskManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
+                                           absl::Duration time_limit) {
+  EvQueueChangeTaskTimeLimit elem{.task_id = task_id, .time_limit = time_limit};
+
+  std::future<bool> ok_fut = elem.ok_prom.get_future();
+  m_task_time_limit_change_queue_.enqueue(std::move(elem));
+  event_active(m_ev_task_time_limit_change_, 0, 0);
+  return ok_fut.get();
+}
+
+void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueChangeTaskTimeLimit elem;
+  while (this_->m_task_time_limit_change_queue_.try_dequeue(elem)) {
+    auto iter = this_->m_task_map_.find(elem.task_id);
+    if (iter != this_->m_task_map_.end()) {
+      TaskInstance* task_instance = iter->second.get();
+      this_->EvDelTerminationTimer_(task_instance);
+
+      absl::Time start_time =
+          absl::FromUnixSeconds(task_instance->task.start_time().seconds());
+      absl::Duration const& new_time_limit = elem.time_limit;
+
+      if (absl::Now() - start_time >= new_time_limit) {
+        // If the task times out, terminate it.
+        EvQueueTaskTerminate ev_task_terminate{elem.task_id};
+        this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
+        event_active(this_->m_ev_task_terminate_, 0, 0);
+
+      } else {
+        // If the task haven't timed out, set up a new timer.
+        this_->EvAddTerminationTimer_(
+            task_instance,
+            ToInt64Seconds((new_time_limit - (absl::Now() - start_time))));
+      }
+      elem.ok_prom.set_value(true);
+    } else {
+      CRANE_ERROR("Try to update the time limit of a non-existent task #{}.",
+                  elem.task_id);
+      elem.ok_prom.set_value(false);
+    }
   }
 }
 

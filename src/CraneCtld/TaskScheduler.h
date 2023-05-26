@@ -150,6 +150,8 @@ class TaskScheduler {
 
   CraneErr SubmitTask(std::unique_ptr<TaskInCtld> task, uint32_t* task_id);
 
+  CraneErr ChangeTaskTimeLimit(uint32_t task_id, int64_t secs);
+
   void TaskStatusChange(uint32_t task_id, const CranedId& craned_index,
                         crane::grpc::TaskStatus new_status, uint32_t exit_code,
                         std::optional<std::string> reason) {

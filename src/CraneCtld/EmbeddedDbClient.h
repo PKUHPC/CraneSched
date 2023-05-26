@@ -100,6 +100,12 @@ class EmbeddedDbClient {
                             &persisted_part) == UNQLITE_OK;
   }
 
+  bool UpdateTaskToCtld(db_id_t db_id,
+                        crane::grpc::TaskToCtld const& task_to_ctld) {
+    return StoreTypeIntoDb_(GetDbQueueNodeTaskToCtldName_(db_id),
+                            &task_to_ctld) == UNQLITE_OK;
+  }
+
   bool FetchTaskDataInDb(db_id_t db_id, TaskInEmbeddedDb* task_in_db);
 
  private:

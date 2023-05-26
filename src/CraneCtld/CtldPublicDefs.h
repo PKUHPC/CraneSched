@@ -202,6 +202,8 @@ struct TaskInCtld {
   // Helper function
  public:
   crane::grpc::TaskToCtld const& TaskToCtld() { return task_to_ctld; }
+  crane::grpc::TaskToCtld* MutableTaskToCtld() { return &task_to_ctld; }
+
   crane::grpc::PersistedPartOfTaskInCtld const& PersistedPart() {
     return persisted_part;
   }
