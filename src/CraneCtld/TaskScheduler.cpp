@@ -446,7 +446,7 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
                                          *task_to_ctld);
 
   // only send request to the first node
-  CranedId const& craned_id = rn_iter->second->CranedIds().front();
+  CranedId const& craned_id = rn_iter->second->executing_craned_id;
   auto* stub = g_craned_keeper->GetCranedStub(craned_id);
   if (!stub->Invalid()) {
     CraneErr err = stub->ChangeTaskTimeLimit(task_id, secs);

@@ -1290,15 +1290,16 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
 
   EvQueueChangeTaskTimeLimit elem;
   while (this_->m_task_time_limit_change_queue_.try_dequeue(elem)) {
-    int64_t seconds = absl::ToInt64Seconds(elem.time_limit);
-
     auto iter = this_->m_task_map_.find(elem.task_id);
     if (iter != this_->m_task_map_.end()) {
       TaskInstance* task_instance = iter->second.get();
       this_->EvDelTerminationTimer_(task_instance);
-      if (absl::ToUnixSeconds(absl::Now()) -
-              task_instance->task.start_time().seconds() >=
-          seconds) {
+
+      absl::Time start_time =
+          absl::FromUnixSeconds(task_instance->task.start_time().seconds());
+      absl::Duration const& new_time_limit = elem.time_limit;
+
+      if (absl::Now() - start_time >= new_time_limit) {
         // If the task times out, terminate it.
         EvQueueTaskTerminate ev_task_terminate{elem.task_id};
         this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
@@ -1308,8 +1309,7 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
         // If the task haven't timed out, set up a new timer.
         this_->EvAddTerminationTimer_(
             task_instance,
-            seconds - (absl::ToUnixSeconds(absl::Now()) -
-                       task_instance->task.start_time().seconds()));
+            ToInt64Seconds((new_time_limit - (absl::Now() - start_time))));
       }
       elem.ok_prom.set_value(true);
     } else {
