@@ -322,12 +322,15 @@ struct TaskInCtld {
     gid = persisted_part.gid();
     username = persisted_part.username();
 
-    craned_ids.assign(persisted_part.craned_ids().begin(),
-                      persisted_part.craned_ids().end());
-    executing_craned_id = craned_ids.front();
     nodes_alloc = craned_ids.size();
 
     status = persisted_part.status();
+
+    if (status != crane::grpc::TaskStatus::Pending) {
+      craned_ids.assign(persisted_part.craned_ids().begin(),
+                        persisted_part.craned_ids().end());
+      executing_craned_id = craned_ids.front();
+    }
 
     start_time = absl::FromUnixSeconds(persisted_part.start_time().seconds());
     end_time = absl::FromUnixSeconds(persisted_part.end_time().seconds());

@@ -22,7 +22,7 @@ port="27017"
 # 使用mongo shell连接到MongoDB服务器并清空指定的集合
 
 function wipe_collection() {
-    mongo --username $username --password $password --host $host --port $port <<EOF
+    mongosh --username $username --password $password --host $host --port $port <<EOF
     use crane_db
     db.$1.deleteMany({})
 EOF
