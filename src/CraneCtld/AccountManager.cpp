@@ -729,6 +729,10 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
     if (task->qos.empty()) {
       // Default qos
       task->qos = partition_it->second.first;
+      if (task->qos.empty())
+        return Result{false, fmt::format("The user '{}' has no QoS available "
+                                         "for this partition '{}' to be used",
+                                         task->Username(), task->partition_id)};
     } else {
       // Check whether task.qos in the qos list
       if (std::find(partition_it->second.second.begin(),
@@ -741,7 +745,7 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
                 task->qos)};
       }
     }
-    if (task->qos.empty()) return Result{true};
+    // if (task->qos.empty()) return Result{true};
   } else {
     if (task->qos.empty()) {
       task->qos = kUnlimitedQosName;
@@ -749,6 +753,9 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
   }
 
   const Qos* qos_share_ptr = GetExistedQosInfoNoLock_(task->qos);
+  if (!qos_share_ptr) {
+    return Result{false, fmt::format("Unknown QOS '{}'", task->qos)};
+  }
 
   if (task->time_limit == absl::ZeroDuration())
     task->time_limit = qos_share_ptr->max_time_limit_per_task;
