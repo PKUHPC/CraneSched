@@ -299,6 +299,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_cmd_line(task.task_to_ctld().cmd_line());
     task_it->set_cwd(task.task_to_ctld().cwd());
     task_it->set_username(task.persisted_part().username());
+    task_it->set_qos(task.task_to_ctld().qos());
 
     task_it->set_alloc_cpus(task.task_to_ctld().cpus_per_task());
     task_it->set_exit_code(task.persisted_part().exit_code());
@@ -333,6 +334,13 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   auto task_rng_filter_username = [&](crane::grpc::TaskInEmbeddedDb &task) {
     return no_username_constraint ||
            req_users.contains(task.persisted_part().username());
+  };
+
+  bool no_qos_constraint = request->filter_qos().empty();
+  std::unordered_set<std::string> req_qos(request->filter_qos().begin(),
+                                          request->filter_qos().end());
+  auto task_rng_filter_qos = [&](crane::grpc::TaskInEmbeddedDb &task) {
+    return no_qos_constraint || req_users.contains(task.task_to_ctld().qos());
   };
 
   bool no_task_names_constraint = request->filter_task_names().empty();
@@ -380,6 +388,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
                             ranges::views::filter(task_rng_filter_id) |
                             ranges::views::filter(task_rng_filter_state) |
                             ranges::views::filter(task_rng_filter_time) |
+                            ranges::views::filter(task_rng_filter_qos) |
                             ranges::views::take(num_limit - task_list->size());
   ranges::for_each(filtered_ended_rng, ended_append_fn);
 
@@ -422,6 +431,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_cmd_line(task.cmd_line);
     task_it->set_cwd(task.cwd);
     task_it->set_username(task.PersistedPart().username());
+    task_it->set_qos(task.qos);
 
     task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
     task_it->set_exit_code(task.ExitCode());
@@ -452,6 +462,10 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
            req_task_names.contains(task.TaskToCtld().name());
   };
 
+  auto db_task_rng_filter_qos = [&](TaskInCtld &task) {
+    return no_qos_constraint || req_qos.contains(task.qos);
+  };
+
   auto db_task_rng_filter_partition = [&](TaskInCtld &task) {
     return no_partitions_constraint ||
            req_partitions.contains(task.TaskToCtld().partition_name());
@@ -474,6 +488,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
                       ranges::views::filter(db_task_rng_filter_state) |
                       ranges::views::filter(db_task_rng_filter_user) |
                       ranges::views::filter(db_task_rng_filter_time) |
+                      ranges::views::filter(db_task_rng_filter_qos) |
                       ranges::views::take(num_limit - task_list->size());
   ranges::for_each(db_ended_rng, db_ended_append_fn);
   std::sort(task_list->begin(), task_list->end(),

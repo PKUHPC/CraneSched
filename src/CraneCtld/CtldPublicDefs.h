@@ -142,6 +142,7 @@ struct TaskInCtld {
   uid_t uid;
   std::string account;
   std::string name;
+  std::string qos;
 
   uint32_t node_num{0};
   uint32_t ntasks_per_node{0};
@@ -152,7 +153,6 @@ struct TaskInCtld {
   std::string cmd_line;
   std::string env;
   std::string cwd;
-  std::string qos;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
@@ -306,6 +306,7 @@ struct TaskInCtld {
     password_entry = std::make_unique<PasswordEntry>(uid);
     account = val.account();
     name = val.name();
+    qos = val.qos();
     cmd_line = val.cmd_line();
     env = val.env();
     cwd = val.cwd();
@@ -321,12 +322,15 @@ struct TaskInCtld {
     gid = persisted_part.gid();
     username = persisted_part.username();
 
-    craned_ids.assign(persisted_part.craned_ids().begin(),
-                      persisted_part.craned_ids().end());
-    executing_craned_id = craned_ids.front();
     nodes_alloc = craned_ids.size();
 
     status = persisted_part.status();
+
+    if (status != crane::grpc::TaskStatus::Pending) {
+      craned_ids.assign(persisted_part.craned_ids().begin(),
+                        persisted_part.craned_ids().end());
+      executing_craned_id = craned_ids.front();
+    }
 
     start_time = absl::FromUnixSeconds(persisted_part.start_time().seconds());
     end_time = absl::FromUnixSeconds(persisted_part.end_time().seconds());
