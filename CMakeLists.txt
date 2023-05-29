@@ -19,24 +19,6 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
             "MinSizeRel" "RelWithDebInfo")
 endif ()
 
-set(PREVIOUS_BUILD_TYPE_FILE ${CMAKE_BINARY_DIR}/PreviousBuildType.txt)
-if (NOT EXISTS ${PREVIOUS_BUILD_TYPE_FILE})
-    message(STATUS "No previous build found. Write build type to ${PREVIOUS_BUILD_TYPE_FILE}")
-    file(WRITE ${PREVIOUS_BUILD_TYPE_FILE} "${CMAKE_BUILD_TYPE}")
-    set(RECONFIGURATION_NEEDED TRUE)
-else ()
-    file(READ ${PREVIOUS_BUILD_TYPE_FILE} PREVIOUS_BUILD_TYPE)
-    if (CMAKE_BUILD_TYPE STREQUAL PREVIOUS_BUILD_TYPE)
-        message(STATUS "Previous build type found: ${PREVIOUS_BUILD_TYPE}. Build type is not changed. No reconfiguration for third-party libraries is needed.")
-        set(RECONFIGURATION_NEEDED FALSE)
-    else ()
-        message(STATUS "Previous build type found: ${PREVIOUS_BUILD_TYPE}. Build type is changed to ${CMAKE_BUILD_TYPE}. Reconfiguration for third-party libraries is needed.")
-        set(RECONFIGURATION_NEEDED TRUE)
-        file(WRITE ${PREVIOUS_BUILD_TYPE_FILE} "${CMAKE_BUILD_TYPE}")
-    endif ()
-endif ()
-
-
 project(Crane C CXX)
 
 # Options start here ----------------------------------------------------------------------------
@@ -116,9 +98,9 @@ if (CMAKE_SIZEOF_VOID_P EQUAL 8)
     set(FIND_LIBRARY_USE_LIB64_PATHS TRUE)
 endif ()
 
-# The following two variables are used in dependency/cmake files.
+# Add pre-included libraries files.
 set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_installed)
-set(DEPENDENCIES_ONLINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/online)
+add_subdirectory(${DEPENDENCIES_PRE_INSTALLED_DIR})
 
 
 find_package(Threads REQUIRED)
@@ -163,10 +145,6 @@ set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
-
-# concurrent queue has no cmake config files. Add it manually as a header-only library.
-add_library(concurrentqueue INTERFACE)
-target_include_directories(concurrentqueue INTERFACE ${DEPENDENCIES_PRE_INSTALLED_DIR}/concurrentqueue/include)
 
 # @formatter:off
 add_definitions(-DCRANE_BUILD_DIRECTORY=\("${CMAKE_BINARY_DIR}"\))
