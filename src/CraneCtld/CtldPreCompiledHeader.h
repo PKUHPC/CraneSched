@@ -60,6 +60,12 @@
 // Ranges-v3
 #include <range/v3/all.hpp>
 
+// Concurrent queue
+#include <concurrentqueue/concurrentqueue.h>
+
+// pevents
+#include <pevents/pevents.h>
+
 #include "crane/Logger.h"
 // Logger.h must be the first
 
