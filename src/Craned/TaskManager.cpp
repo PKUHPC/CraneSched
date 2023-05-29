@@ -275,7 +275,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
       auto proc_iter = this_->m_pid_proc_map_.find(pid);
       if (task_iter == this_->m_pid_task_map_.end() ||
           proc_iter == this_->m_pid_proc_map_.end())
-        CRANE_ERROR("Failed to find task id for pid {}.", pid);
+        CRANE_WARN("Failed to find task id for pid {}.", pid);
       else {
         instance = task_iter->second;
         proc = proc_iter->second;
@@ -560,7 +560,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
     ok &= ostream.Flush();
     if (!ok) {
-      CRANE_ERROR("Failed to ask subprocess {} to suicide for task #{}",
+      CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}",
                   child_pid, instance->task.task_id());
       return CraneErr::kProtobufError;
     }
@@ -622,9 +622,12 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
-    int out_fd = open(process->batch_meta.parsed_output_file_pattern.c_str(),
-                      O_RDWR | O_CREAT | O_APPEND, 0644);
+    const std::string& out_file_path =
+        process->batch_meta.parsed_output_file_pattern;
+    int out_fd = open(out_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
     if (out_fd == -1) {
+      CRANE_ERROR("[Child Process] Error: open {}. {}", out_file_path,
+                  strerror(errno));
       std::abort();
     }
 
@@ -632,6 +635,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
     ok &= ostream.Flush();
     if (!ok) {
+      CRANE_ERROR("[Child Process] Error: Failed to flush.");
       std::abort();
     }
 
@@ -834,12 +838,12 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
             fmt::format(
                 "Cannot spawn a new process inside the instance of task #{}",
                 instance->task.task_id()));
+      } else {
+        // Add a timer to limit the execution time of a task.
+        this_->EvAddTerminationTimer_(instance,
+                                      instance->task.time_limit().seconds());
       }
     }
-
-    // Add a timer to limit the execution time of a task.
-    this_->EvAddTerminationTimer_(instance,
-                                  instance->task.time_limit().seconds());
   }
 }
 

@@ -420,6 +420,10 @@ void GlobalVariableInit() {
   CreateRequiredDirectories();
   InitSpdlog();
 
+  // Mask SIGPIPE to prevent Craned from crushing due to
+  // SIGPIPE while communicating with spawned task processes.
+  signal(SIGPIPE, SIG_IGN);
+
   // Enable inter-thread custom event notification.
   evthread_use_pthreads();
 
