@@ -745,7 +745,6 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
                 task->qos)};
       }
     }
-    // if (task->qos.empty()) return Result{true};
   } else {
     if (task->qos.empty()) {
       task->qos = kUnlimitedQosName;
