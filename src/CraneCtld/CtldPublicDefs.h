@@ -5,6 +5,13 @@
 
 namespace Ctld {
 
+namespace pevents {
+using namespace neosmart;
+using event_t = neosmart_event_t;
+}  // namespace pevents
+
+using moodycamel::ConcurrentQueue;
+
 using task_db_id_t = int64_t;
 
 constexpr uint64_t kTaskScheduleIntervalMs = 1000;
@@ -129,6 +136,8 @@ struct BatchMetaInTask {
   std::string sh_script;
   std::string output_file_pattern;
 };
+
+struct TaskSchedStateCallbacks {};
 
 struct TaskInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */

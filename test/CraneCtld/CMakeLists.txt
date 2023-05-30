@@ -40,3 +40,9 @@ target_link_libraries(embedded_db_client_test
         )
 target_include_directories(embedded_db_client_test PUBLIC ${PROJECT_SOURCE_DIR}/src/CraneCtld)
 gtest_discover_tests(embedded_db_client_test)
+
+add_executable(pevents_test PeventsTest.cpp)
+target_link_libraries(pevents_test
+        GTest::gtest GTest::gtest_main
+        Utility_PublicHeader
+        pevents)
