@@ -854,20 +854,16 @@ AccountManager::Result AccountManager::HasPermissionToUser(
         false,
         fmt::format("Parameter error: User '{}' is not a crane user", user)};
   }
-  if (level_of_uid != nullptr) *level_of_uid = ptr->admin_level;
 
-  if (ptr->admin_level == User::None) {
-    for (const auto& [user_acc, item] : user_ptr->account_to_attrs_map)
-      for (const auto& uid_acc : ptr->coordinator_accounts) {
-        if (uid_acc == user_acc || PaternityTestNoLock_(uid_acc, user_acc)) {
-          return Result{true};
-        }
+  if (level_of_uid != nullptr) *level_of_uid = ptr->admin_level;
+  if (ptr->admin_level != User::None) return Result{true};
+
+  for (const auto& [user_acc, item] : user_ptr->account_to_attrs_map)
+    for (const auto& uid_acc : ptr->coordinator_accounts) {
+      if (uid_acc == user_acc || PaternityTestNoLock_(uid_acc, user_acc)) {
+        return Result{true};
       }
-  } else {
-    return Result{false, fmt::format("Permission error: User '{}' don't have "
-                                     "the permission to manager user '{}'",
-                                     entry.Username(), user)};
-  }
+    }
 
   return Result{
       false,
