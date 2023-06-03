@@ -77,7 +77,7 @@ class AccountManager {
                                       const std::string& account,
                                       const std::string& partition);
 
-  bool CheckAccountEnableState(const std::string& name);
+  bool CheckEnableState(const std::string& account, const std::string& user);
 
   Result CheckAndApplyQosLimitOnTask(const std::string& user,
                                      const std::string& account,

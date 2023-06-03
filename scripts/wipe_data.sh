@@ -10,10 +10,11 @@ fi
 mode=$1
 
 # 读取配置文件中的账号密码以及unqlite文件路径
-username=$(cat /etc/crane/config.yaml | grep 'DbUser' | awk '{print $2}')
-password=$(cat /etc/crane/config.yaml | grep 'DbPassword' | awk '{print $2}')
+confFile=/etc/crane/config.yaml
+username=$(grep 'DbUser' "$confFile" | awk '{print $2}')
+password=$(grep 'DbPassword' "$confFile" | awk '{print $2}')
 password=${password//\"/}
-unqpath=$(cat /etc/crane/config.yaml | grep 'CraneCtldDbPath' | awk '{print $2}')
+unqpath=$(grep 'CraneCtldDbPath' "$confFile" | awk '{print $2}')
 
 # MongoDB服务器的地址和端口
 host="localhost"
@@ -42,7 +43,3 @@ fi
 if [ "$mode" -eq 4 ] || [ "$mode" -eq 5 ] || [ "$mode" -eq 6 ]; then
   wipe_collection user_table
 fi
-
-
-
-

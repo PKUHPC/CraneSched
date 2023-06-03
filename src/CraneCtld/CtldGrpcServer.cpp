@@ -90,10 +90,10 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     return grpc::Status::OK;
   }
 
-  if (!g_account_manager->CheckAccountEnableState(task->account)) {
+  if (!g_account_manager->CheckEnableState(task->account, task->Username())) {
     response->set_ok(false);
     response->set_reason(fmt::format(
-        "The account '{}' or the Ancestor account is disabled", task->account));
+        "The user '{}' or the Ancestor account is disabled", task->Username()));
     return grpc::Status::OK;
   }
 
@@ -265,6 +265,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
         [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
           return a.end_time() > b.end_time();
         });
+    response->set_ok(true);
     return grpc::Status::OK;
   }
 
@@ -399,6 +400,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
         [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
           return a.end_time() > b.end_time();
         });
+    response->set_ok(true);
     return grpc::Status::OK;
   }
 
@@ -495,6 +497,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
             [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
               return a.end_time() > b.end_time();
             });
+  response->set_ok(true);
   return grpc::Status::OK;
 }
 
