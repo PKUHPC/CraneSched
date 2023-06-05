@@ -104,7 +104,6 @@ class MongodbClient {
         kvp(opt,
             [&](sub_document subDocument) {
               SubDocumentAppendItem_(subDocument, key, value);
-              // subDocument.append(kvp(key, value));
             }),
         kvp("$set", [](sub_document subDocument) {
           subDocument.append(kvp("mod_time", ToUnixSeconds(absl::Now())));

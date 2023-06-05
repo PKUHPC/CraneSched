@@ -349,7 +349,7 @@ AccountManager::Result AccountManager::RemoveUserFromAccount(
 
         // Delete the account from user account_map
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$unset",
-                                     name, "account_map." + account,
+                                     name, "account_to_attrs_map." + account,
                                      std::string(""));
       };
 
@@ -641,7 +641,7 @@ AccountManager::Result AccountManager::BlockAccount(const std::string& name,
   }
 
   if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
-                                    name, "blocked", !block)) {
+                                    name, "blocked", block)) {
     return Result{false, "Can't update the database"};
   }
   m_account_map_[name]->blocked = block;
@@ -669,9 +669,9 @@ AccountManager::Result AccountManager::BlockUser(const std::string& name,
                            block ? "blocked" : "unblocked", account)};
   }
 
-  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
-                                    name, "account_map." + account + ".blocked",
-                                    !block)) {
+  if (!g_db_client->UpdateEntityOne(
+          MongodbClient::EntityType::USER, "$set", name,
+          "account_to_attrs_map." + account + ".blocked", block)) {
     return Result{false, "Can't update the database"};
   }
   m_user_map_[name]->account_to_attrs_map[account].blocked = block;
@@ -695,18 +695,22 @@ bool AccountManager::CheckUserPermissionToPartition(
   return false;
 }
 
-bool AccountManager::CheckAccountEnableState(const std::string& name) {
+bool AccountManager::CheckEnableState(const std::string& account,
+                                      const std::string& user) {
+  util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
-  std::string p_str = name;
-  const Account* account;
+  std::string p_str = account;
+  const Account* p_account;
   do {
-    account = GetExistedAccountInfoNoLock_(p_str);
-    if (account->blocked) {
+    p_account = GetExistedAccountInfoNoLock_(p_str);
+    if (p_account->blocked) {
       return false;
     }
-    p_str = account->parent_account;
+    p_str = p_account->parent_account;
   } while (!p_str.empty());
-  return true;
+
+  const User* p_user = GetExistedUserInfoNoLock_(user);
+  return !p_user->account_to_attrs_map.at(account).blocked;
 }
 
 AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
@@ -730,7 +734,7 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
       // Default qos
       task->qos = partition_it->second.first;
       if (task->qos.empty())
-        return Result{false, fmt::format("The user '{}' has no QoS available "
+        return Result{false, fmt::format("The user '{}' has no QOS available "
                                          "for this partition '{}' to be used",
                                          task->Username(), task->partition_id)};
     } else {
@@ -1393,7 +1397,8 @@ AccountManager::Result AccountManager::DeleteUserAllowedPartition_(
   // Update to database
   if (!g_db_client->UpdateEntityOne(
           Ctld::MongodbClient::EntityType::USER, "$unset", name,
-          "account_map." + account + ".allowed_partition_qos_map." + partition,
+          "account_to_attrs_map." + account + ".allowed_partition_qos_map." +
+              partition,
           std::string(""))) {
     return Result{false, "Fail to update data in database"};
   }
@@ -2197,10 +2202,11 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDBNoLock_(
   }
 
   for (const auto& user : account->users) {
-    g_db_client->UpdateEntityOne(
-        Ctld::MongodbClient::EntityType::USER, "$unset", user,
-        "account_map." + name + ".allowed_partition_qos_map." + partition,
-        std::string(""));
+    g_db_client->UpdateEntityOne(Ctld::MongodbClient::EntityType::USER,
+                                 "$unset", user,
+                                 "account_to_attrs_map." + name +
+                                     ".allowed_partition_qos_map." + partition,
+                                 std::string(""));
   }
 
   g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$pull",
