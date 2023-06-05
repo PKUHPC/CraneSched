@@ -700,17 +700,17 @@ bool AccountManager::CheckEnableState(const std::string& account,
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
   std::string p_str = account;
-  const Account* account_p;
+  const Account* p_account;
   do {
-    account_p = GetExistedAccountInfoNoLock_(p_str);
-    if (account_p->blocked) {
+    p_account = GetExistedAccountInfoNoLock_(p_str);
+    if (p_account->blocked) {
       return false;
     }
-    p_str = account_p->parent_account;
+    p_str = p_account->parent_account;
   } while (!p_str.empty());
 
-  const User* user_p = GetExistedUserInfoNoLock_(user);
-  return !user_p->account_to_attrs_map.at(account).blocked;
+  const User* p_user = GetExistedUserInfoNoLock_(user);
+  return !p_user->account_to_attrs_map.at(account).blocked;
 }
 
 AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
