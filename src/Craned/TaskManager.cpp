@@ -794,34 +794,33 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
        * %x - Job name
        */
       if (instance->task.batch_meta().output_file_pattern().empty()) {
+        // If output file path is not specified, first set it to cwd.
         process->batch_meta.parsed_output_file_pattern =
             fmt::format("{}/", instance->task.cwd());
       } else {
         if (instance->task.batch_meta().output_file_pattern()[0] == '/') {
+          // If output file path is an absolute path, do nothing.
           process->batch_meta.parsed_output_file_pattern =
               instance->task.batch_meta().output_file_pattern();
         } else {
+          // If output file path is a relative path, prepend cwd to the path.
           process->batch_meta.parsed_output_file_pattern =
               fmt::format("{}/{}", instance->task.cwd(),
                           instance->task.batch_meta().output_file_pattern());
         }
       }
 
-      if (boost::ends_with(process->batch_meta.parsed_output_file_pattern,
-                           "/")) {
+      // Path ends with a directory, append default output file name
+      // `Crane-<Job ID>.out` to the path.
+      if (absl::EndsWith(process->batch_meta.parsed_output_file_pattern, "/")) {
         process->batch_meta.parsed_output_file_pattern +=
             fmt::format("Crane-{}.out", g_ctld_client->GetCranedId());
       }
 
-      boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%j",
-                         std::to_string(instance->task.task_id()));
-      boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%u",
-                         instance->pwd_entry.Username());
-
-      if (!boost::ends_with(process->batch_meta.parsed_output_file_pattern,
-                            ".out")) {
-        process->batch_meta.parsed_output_file_pattern += ".out";
-      }
+      // Replace the format strings.
+      absl::StrReplaceAll({{"%j", std::to_string(instance->task.task_id())},
+                           {"%u", instance->pwd_entry.Username()}},
+                          &process->batch_meta.parsed_output_file_pattern);
 
       auto output_cb = [](std::string&& buf, void* data) {
         CRANE_TRACE("Read output from subprocess: {}", buf);
