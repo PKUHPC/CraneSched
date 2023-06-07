@@ -555,6 +555,7 @@ message StreamCtldReply {
   message TaskResAllocatedReply {
     uint32 task_id = 1;
     bool ok = 2;
+    string failure_reason = 3;
   }
 
   message TaskCancelRequest {
@@ -633,7 +634,6 @@ service CraneCtld {
 
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
-  // Todo: Granting and revoking Resource UUID can be merged into ExecuteTask and TerminateTask. Remove this two RPC.
 
   /* If the task is a batch task, it will run immediately.
      If the task is an interactive task, craned will just allocate the resource and waiting for

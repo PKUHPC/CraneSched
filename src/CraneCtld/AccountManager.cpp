@@ -734,14 +734,14 @@ bool AccountManager::CheckEnableState(const std::string& account,
   return !p_user->account_to_attrs_map.at(account).blocked;
 }
 
-AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
+result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
     const std::string& user, const std::string& account, TaskInCtld* task) {
   util::read_lock_guard user_guard(m_rw_account_mutex_);
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
-    return Result{false, fmt::format("Unknown user '{}'", user)};
+    return result::failure(fmt::format("Unknown user '{}'", user));
   }
 
   if (task->uid != 0) {
@@ -749,25 +749,24 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
                             .allowed_partition_qos_map.find(task->partition_id);
     if (partition_it == user_share_ptr->account_to_attrs_map.at(account)
                             .allowed_partition_qos_map.end())
-      return Result{false, "Partition is not allowed for this user."};
+      return result::failure("Partition is not allowed for this user.");
 
     if (task->qos.empty()) {
       // Default qos
       task->qos = partition_it->second.first;
       if (task->qos.empty())
-        return Result{false, fmt::format("The user '{}' has no QOS available "
-                                         "for this partition '{}' to be used",
-                                         task->Username(), task->partition_id)};
+        return result::failure(
+            fmt::format("The user '{}' has no QOS available for this partition "
+                        "'{}' to be used",
+                        task->Username(), task->partition_id));
     } else {
       // Check whether task.qos in the qos list
       if (std::find(partition_it->second.second.begin(),
                     partition_it->second.second.end(),
                     task->qos) == partition_it->second.second.end()) {
-        return Result{
-            false,
-            fmt::format(
-                "The qos '{}' you set is not in partition's allowed qos list",
-                task->qos)};
+        return result::failure(fmt::format(
+            "The qos '{}' you set is not in partition's allowed qos list",
+            task->qos));
       }
     }
   } else {
@@ -778,18 +777,18 @@ AccountManager::Result AccountManager::CheckAndApplyQosLimitOnTask(
 
   const Qos* qos_share_ptr = GetExistedQosInfoNoLock_(task->qos);
   if (!qos_share_ptr) {
-    return Result{false, fmt::format("Unknown QOS '{}'", task->qos)};
+    return result::failure(fmt::format("Unknown QOS '{}'", task->qos));
   }
 
   if (task->time_limit == absl::ZeroDuration())
     task->time_limit = qos_share_ptr->max_time_limit_per_task;
   else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
-    return Result{false, "QOSTimeLimit"};
+    return result::failure("time-limit reached the user's limit.");
 
   if (task->cpus_per_task > qos_share_ptr->max_cpus_per_user)
-    return Result{false, "QOSResourceLimit"};
+    return result::failure("cpus-per-task reached the user's limit.");
 
-  return Result{true};
+  return {};
 }
 
 AccountManager::Result AccountManager::FindUserLevelAccountOfUid(

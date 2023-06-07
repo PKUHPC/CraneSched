@@ -314,22 +314,6 @@ void TaskScheduler::ScheduleThread_() {
 
         for (CranedId craned_id : task->CranedIds()) {
           auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
-
-          if (task->type == crane::grpc::Interactive) {
-            InteractiveTaskAllocationDetail detail{
-                .craned_id = craned_id,
-                .ipv4_addr = craned_meta->static_meta.hostname,
-                .port = craned_meta->static_meta.port,
-                .resource_uuid = m_uuid_gen_(),
-            };
-
-            std::get<InteractiveMetaInTask>(task->meta).resource_uuid =
-                detail.resource_uuid;
-
-            g_ctld_server->AddAllocDetailToIaTask(task->TaskId(),
-                                                  std::move(detail));
-          }
-
           m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
         }
 
@@ -346,6 +330,10 @@ void TaskScheduler::ScheduleThread_() {
           CRANE_TRACE("Send CreateCgroupForTask for task #{} to {}",
                       task->TaskId(), craned_id);
           stub->CreateCgroupForTask(task->TaskId(), task->uid);
+        }
+
+        if (task->type == crane::grpc::Interactive) {
+          std::get<InteractiveMetaInTask>(task->meta).cb_task_res_allocated();
         }
 
         auto* task_ptr = task.get();
@@ -473,7 +461,7 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
   const std::unique_ptr<TaskInCtld>& task = iter->second;
 
   if (task->type == crane::grpc::Interactive) {
-    g_ctld_server->RemoveAllocDetailOfIaTask(task_id);
+    std::get<InteractiveMetaInTask>(task->meta).cb_task_completed();
   }
 
   CRANE_DEBUG("TaskStatusChange: Task #{} {}->{} In Node {}", task_id,

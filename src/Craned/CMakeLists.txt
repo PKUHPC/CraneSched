@@ -38,6 +38,7 @@ target_link_libraries(craned
         absl::synchronization
 
         yaml-cpp
+        result
         )
 
 # Linker flag for c++ 17 filesystem library

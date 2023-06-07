@@ -120,6 +120,7 @@ set(ZLIB_USE_STATIC_LIBS OFF)
 #
 # EXCLUDE_FROM_ALL excludes all dependencies from being installed
 add_subdirectory(dependencies/cmake EXCLUDE_FROM_ALL)
+add_subdirectory(dependencies/CPM EXCLUDE_FROM_ALL)
 
 # Notify CMake that we have module files to find packages/libs.
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")

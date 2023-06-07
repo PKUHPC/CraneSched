@@ -66,6 +66,9 @@
 // pevents
 #include <pevents/pevents.h>
 
+// result
+#include <result/result.hpp>
+
 #include "crane/Logger.h"
 // Logger.h must be the first
 

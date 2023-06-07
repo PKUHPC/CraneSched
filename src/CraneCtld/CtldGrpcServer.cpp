@@ -45,96 +45,16 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTaskRequest *request,
     crane::grpc::SubmitBatchTaskReply *response) {
-  CraneErr err;
-
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
-  if (!task->password_entry->Valid()) {
-    response->set_ok(false);
-    response->set_reason(
-        fmt::format("Uid {} not found on the controller node", task->uid));
-    return grpc::Status::OK;
-  }
-  task->SetUsername(task->password_entry->Username());
-
-  {  // Limit the lifecycle of user_scoped_ptr
-    auto user_scoped_ptr =
-        g_account_manager->GetExistedUserInfo(task->Username());
-    if (!user_scoped_ptr) {
-      response->set_ok(false);
-      response->set_reason(fmt::format(
-          "User '{}' not found in the account database", task->Username()));
-      return grpc::Status::OK;
-    }
-
-    if (task->account.empty()) {
-      task->account = user_scoped_ptr->default_account;
-      task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
-    } else {
-      if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
-        response->set_ok(false);
-        response->set_reason(fmt::format(
-            "Account '{}' is not in your account list", task->account));
-        return grpc::Status::OK;
-      }
-    }
-  }
-
-  if (!g_account_manager->CheckUserPermissionToPartition(
-          task->Username(), task->account, task->partition_id)) {
-    response->set_ok(false);
-    response->set_reason(fmt::format(
-        "The user '{}' don't have access to submit task in partition '{}'",
-        task->uid, task->partition_id));
-    return grpc::Status::OK;
-  }
-
-  if (!g_account_manager->CheckEnableState(task->account, task->Username())) {
-    response->set_ok(false);
-    response->set_reason(fmt::format(
-        "The user '{}' or the Ancestor account is disabled", task->Username()));
-    return grpc::Status::OK;
-  }
-
-  AccountManager::Result check_qos_result =
-      g_account_manager->CheckAndApplyQosLimitOnTask(task->Username(),
-                                                     task->account, task.get());
-  if (!check_qos_result.ok) {
-    response->set_ok(false);
-    response->set_reason(check_qos_result.reason);
-    return grpc::Status::OK;
-  }
-
-  uint32_t task_id;
-  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
-  if (err == CraneErr::kOk) {
+  auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
+  if (result.has_value()) {
     response->set_ok(true);
-    response->set_task_id(task_id);
-    CRANE_DEBUG("Received an batch task request. Task id allocated: {}",
-                task_id);
-  } else if (err == CraneErr::kNonExistent) {
+    response->set_task_id(result.value());
+  } else {
     response->set_ok(false);
-    response->set_reason("Partition doesn't exist!");
-    CRANE_DEBUG(
-        "Received an batch task request "
-        "but the allocation failed. Reason: Partition doesn't exist!");
-  } else if (err == CraneErr::kInvalidNodeNum) {
-    response->set_ok(false);
-    response->set_reason(
-        "--node is either invalid or greater than "
-        "the number of alive nodes in its partition.");
-    CRANE_DEBUG(
-        "Received an batch task request "
-        "but the allocation failed. Reason: --node is either invalid or "
-        "greater than the number of alive nodes in its partition.");
-  } else if (err == CraneErr::kNoResource) {
-    response->set_ok(false);
-    response->set_reason("The resources of the partition are insufficient");
-    CRANE_DEBUG(
-        "Received an batch task request "
-        "but the allocation failed. Reason: The resources of the partition are "
-        "insufficient.");
+    response->set_reason(result.error());
   }
 
   return grpc::Status::OK;
@@ -1153,6 +1073,8 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
   StreamCforedRequest cfored_request;
   StreamCtldReply ctld_reply;
 
+  CforedStreamWriter stream_writer(stream);
+
   task_id_t task_id = pseudo_cfored_task_id_.fetch_add(1);
   std::string cfored_name;
 
@@ -1193,46 +1115,35 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
         break;
 
-      case StreamState::kWaitMsg:
+      case StreamState::kWaitMsg: {
         ok = stream->Read(&cfored_request);
         if (ok) {
           switch (cfored_request.type()) {
-            case StreamCforedRequest::TASK_REQUEST:
-              ctld_reply.set_type(StreamCtldReply::TASK_ID_REPLY);
-              ctld_reply.mutable_payload_task_id_reply()->set_ok(true);
-              ctld_reply.mutable_payload_task_id_reply()->set_pid(
-                  cfored_request.release_payload_task_req()->pid());
-              ctld_reply.mutable_payload_task_id_reply()->set_task_id(task_id);
+            case StreamCforedRequest::TASK_REQUEST: {
+              auto const &payload = cfored_request.payload_task_req();
+              auto task = std::make_unique<TaskInCtld>();
+              task->SetFieldsByTaskToCtld(payload.task());
 
-              ok = stream->Write(ctld_reply);
-              ctld_reply.Clear();
+              // Todo: Set callbacks here.
+
+              auto result =
+                  m_ctld_server_->SubmitTaskToScheduler(std::move(task));
+
+              bool submission_success = result.has_value();
+              ok = stream_writer.WriteTaskIdReply(payload.pid(),
+                                                  std::move(result));
               if (!ok) {
                 CRANE_ERROR(
                     "Failed to send msg to cfored {}. Connection is broken. "
                     "Exiting...",
                     cfored_name);
                 state = StreamState::kCleanData;
-                break;
+              } else {
+                if (submission_success) {
+                  // Todo: Add task id to running task list of this cfored.
+                }
               }
-
-              std::this_thread::sleep_for(std::chrono::milliseconds(500));
-              ctld_reply.set_type(StreamCtldReply::TASK_RES_ALLOC_REPLY);
-              ctld_reply.mutable_payload_task_res_alloc_reply()->set_ok(true);
-              ctld_reply.mutable_payload_task_res_alloc_reply()->set_task_id(
-                  task_id);
-
-              ok = stream->Write(ctld_reply);
-              ctld_reply.Clear();
-              if (!ok) {
-                CRANE_ERROR(
-                    "Failed to send msg to cfored {}. Connection is broken. "
-                    "Exiting...",
-                    cfored_name);
-                state = StreamState::kCleanData;
-                break;
-              }
-
-              break;
+            } break;
 
             case StreamCforedRequest::TASK_COMPLETION_REQUEST:
               ctld_reply.set_type(StreamCtldReply::TASK_COMPLETION_ACK_REPLY);
@@ -1244,7 +1155,6 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
               if (!ok) {
                 state = StreamState::kCleanData;
               }
-
               break;
 
             case StreamCforedRequest::CFORED_GRACEFUL_EXIT:
@@ -1267,8 +1177,8 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
         } else {
           state = StreamState::kCleanData;
         }
+      } break;
 
-        break;
       case StreamState::kCleanData:
         CRANE_INFO("Cfored {} disconnected. Cleaning its data...", cfored_name);
 
@@ -1351,6 +1261,78 @@ const InteractiveTaskAllocationDetail *CtldServer::QueryAllocDetailOfIaTask(
 void CtldServer::RemoveAllocDetailOfIaTask(uint32_t task_id) {
   LockGuard guard(m_mtx_);
   m_task_alloc_detail_map_.erase(task_id);
+}
+
+result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
+    std::unique_ptr<TaskInCtld> task) {
+  CraneErr err;
+
+  if (!task->password_entry->Valid()) {
+    return result::failure(
+        fmt::format("Uid {} not found on the controller node", task->uid));
+  }
+  task->SetUsername(task->password_entry->Username());
+
+  {  // Limit the lifecycle of user_scoped_ptr
+    auto user_scoped_ptr =
+        g_account_manager->GetExistedUserInfo(task->Username());
+    if (!user_scoped_ptr) {
+      return result::failure(fmt::format(
+          "User '{}' not found in the account database", task->Username()));
+    }
+
+    if (task->account.empty()) {
+      task->account = user_scoped_ptr->default_account;
+      task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
+    } else {
+      if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
+        return result::failure(fmt::format(
+            "Account '{}' is not in your account list", task->account));
+      }
+    }
+  }
+
+  if (!g_account_manager->CheckUserPermissionToPartition(
+          task->Username(), task->account, task->partition_id)) {
+    return result::failure(fmt::format(
+        "The user '{}' don't have access to submit task in partition '{}'",
+        task->uid, task->partition_id));
+  }
+
+  if (!g_account_manager->CheckEnableState(task->account, task->Username())) {
+    return result::failure(fmt::format(
+        "The user '{}' or the Ancestor account is disabled", task->Username()));
+  }
+
+  auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
+      task->Username(), task->account, task.get());
+  if (check_qos_result.has_error()) {
+    return result::failure(check_qos_result.error());
+  }
+
+  uint32_t task_id;
+  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
+  if (err == CraneErr::kOk) {
+    return {task_id};
+    CRANE_DEBUG("Received an task request. Task id allocated: {}", task_id);
+  } else if (err == CraneErr::kNonExistent) {
+    CRANE_DEBUG("Task submission failed. Reason: Partition doesn't exist!");
+    return result::failure("Partition doesn't exist!");
+  } else if (err == CraneErr::kInvalidNodeNum) {
+    CRANE_DEBUG(
+        "Task submission failed. Reason: --node is either invalid or "
+        "greater than the number of alive nodes in its partition.");
+    return result::failure(
+        "--node is either invalid or greater than "
+        "the number of alive nodes in its partition.");
+  } else if (err == CraneErr::kNoResource) {
+    CRANE_DEBUG(
+        "Task submission failed. "
+        "Reason: The resources of the partition are insufficient.");
+    return result::failure("The resources of the partition are insufficient");
+  }
+
+  return {task_id};
 }
 
 }  // namespace Ctld

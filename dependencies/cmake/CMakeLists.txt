@@ -1,3 +1,4 @@
+# Raw fetch_content managed packages
 set(FETCHCONTENT_QUIET OFF)
 
 # Suppress all warning on all third party libraries

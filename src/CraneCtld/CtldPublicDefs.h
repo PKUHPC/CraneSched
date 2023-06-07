@@ -67,6 +67,19 @@ struct Config {
 inline Ctld::Config g_config;
 
 namespace Ctld {
+
+namespace result = cpp_result;
+
+struct InteractiveTaskDetail {
+  pevents::event_t event_task_id_allocated;
+  pevents::event_t event_task_res_allocated;
+  pevents::event_t event_task_cancelled;
+};
+
+struct CforedMeta {
+  std::string cfored_name;
+};
+
 struct InteractiveTaskAllocationDetail {
   CranedId craned_id;
   std::string ipv4_addr;
@@ -129,15 +142,14 @@ struct PartitionMeta {
 };
 
 struct InteractiveMetaInTask {
-  boost::uuids::uuid resource_uuid;
+  std::function<void()> cb_task_res_allocated;
+  std::function<void()> cb_task_completed;
 };
 
 struct BatchMetaInTask {
   std::string sh_script;
   std::string output_file_pattern;
 };
-
-struct TaskSchedStateCallbacks {};
 
 struct TaskInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */

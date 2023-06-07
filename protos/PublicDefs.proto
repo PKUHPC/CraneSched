@@ -141,7 +141,6 @@ message BatchTaskAdditionalMeta {
 }
 
 message InteractiveTaskAdditionalMeta{
-  bytes resource_uuid = 1;
 }
 
 message TaskInfo {

@@ -49,6 +49,7 @@ target_link_libraries(cranectld
         unqlite
 
         range-v3::range-v3
+        result
         )
 
 # Linker flag for c++ 17 filesystem library

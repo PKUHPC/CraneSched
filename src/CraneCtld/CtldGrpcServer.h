@@ -14,6 +14,118 @@ using crane::grpc::Craned;
 using grpc::Channel;
 using grpc::Server;
 
+class CforedStreamWriter {
+ private:
+  using Mutex = absl::Mutex;
+  using LockGuard = absl::MutexLock;
+
+  using StreamCtldReply = crane::grpc::StreamCtldReply;
+
+ public:
+  explicit CforedStreamWriter(
+      grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
+                               crane::grpc::StreamCforedRequest> *stream)
+      : m_stream_(stream), m_valid_(true) {}
+
+  bool WriteTaskIdReply(pid_t calloc_pid,
+                        result::result<task_id_t, std::string> res) {
+    LockGuard guard(&m_stream_mtx_);
+    if (!m_valid_) return false;
+
+    StreamCtldReply reply;
+    reply.set_type(StreamCtldReply::TASK_ID_REPLY);
+    auto *task_id_reply = reply.mutable_payload_task_id_reply();
+    if (res.has_value()) {
+      task_id_reply->set_ok(true);
+      task_id_reply->set_pid(calloc_pid);
+      task_id_reply->set_task_id(res.value());
+    } else {
+      task_id_reply->set_ok(true);
+      task_id_reply->set_failure_reason(std::move(res.error()));
+    }
+
+    return m_stream_->Write(reply);
+  }
+
+  bool WriteTaskResAllocReply(task_id_t task_id,
+                              result::result<bool, std::string> res) {
+    LockGuard guard(&m_stream_mtx_);
+    if (!m_valid_) return false;
+
+    StreamCtldReply reply;
+    reply.set_type(StreamCtldReply::TASK_RES_ALLOC_REPLY);
+    auto *task_res_alloc_reply = reply.mutable_payload_task_res_alloc_reply();
+    task_res_alloc_reply->set_task_id(res.value());
+
+    if (res.has_value()) {
+      task_res_alloc_reply->set_ok(true);
+    } else {
+      task_res_alloc_reply->set_ok(false);
+      task_res_alloc_reply->set_failure_reason(std::move(res.error()));
+    }
+
+    return m_stream_->Write(reply);
+  }
+
+  bool WriteTaskCompletionAckReply(task_id_t task_id) {
+    LockGuard guard(&m_stream_mtx_);
+    if (!m_valid_) return false;
+
+    StreamCtldReply reply;
+    reply.set_type(StreamCtldReply::TASK_COMPLETION_ACK_REPLY);
+
+    auto *task_completion_ack = reply.mutable_payload_task_completion_ack();
+    task_completion_ack->set_task_id(task_id);
+
+    return m_stream_->Write(reply);
+  }
+
+  bool WriteCforedRegistrationAck(result::result<bool, std::string> res) {
+    LockGuard guard(&m_stream_mtx_);
+    if (!m_valid_) return false;
+
+    StreamCtldReply reply;
+    reply.set_type(StreamCtldReply::CFORED_REGISTRATION_ACK);
+
+    auto *cfored_reg_ack = reply.mutable_payload_cfored_reg_ack();
+    if (res.has_value()) {
+      cfored_reg_ack->set_ok(true);
+    } else {
+      cfored_reg_ack->set_ok(false);
+      cfored_reg_ack->set_failure_reason(std::move(res.error()));
+    }
+
+    return m_stream_->Write(reply);
+  }
+
+  bool WriteCforedGracefulExitAck() {
+    LockGuard guard(&m_stream_mtx_);
+    if (!m_valid_) return false;
+
+    StreamCtldReply reply;
+    reply.set_type(StreamCtldReply::CFORED_GRACEFUL_EXIT_ACK);
+
+    auto *cfored_graceful_exit_ack = reply.mutable_payload_graceful_exit_ack();
+    cfored_graceful_exit_ack->set_ok(true);
+
+    return m_stream_->Write(reply);
+  }
+
+  void Invalidate() {
+    LockGuard guard(&m_stream_mtx_);
+    m_valid_ = false;
+  }
+
+ private:
+  Mutex m_stream_mtx_;
+
+  bool m_valid_;
+
+  grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
+                           crane::grpc::StreamCforedRequest> *m_stream_
+      GUARDED_BY(m_stream_mtx_);
+};
+
 class CtldServer;
 
 class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
@@ -121,6 +233,9 @@ class CtldServer {
   explicit CtldServer(const Config::CraneCtldListenConf &listen_conf);
 
   inline void Wait() { m_server_->Wait(); }
+
+  result::result<task_id_t, std::string> SubmitTaskToScheduler(
+      std::unique_ptr<TaskInCtld> task);
 
   [[deprecated]] void AddAllocDetailToIaTask(
       uint32_t task_id, InteractiveTaskAllocationDetail detail)

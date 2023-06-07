@@ -65,13 +65,7 @@ CraneErr CranedStub::ExecuteTask(const TaskInCtld *task) {
   mutable_task->mutable_time_limit()->set_seconds(
       ToInt64Seconds(task->time_limit));
 
-  if (task->type == crane::grpc::Interactive) {
-    auto *mutable_meta = request.mutable_task()->mutable_interactive_meta();
-
-    auto &meta_in_ctld = std::get<InteractiveMetaInTask>(task->meta);
-    mutable_meta->set_resource_uuid(meta_in_ctld.resource_uuid.data,
-                                    meta_in_ctld.resource_uuid.size());
-  } else if (task->type == crane::grpc::Batch) {
+  if (task->type == crane::grpc::Batch) {
     auto &meta_in_ctld = std::get<BatchMetaInTask>(task->meta);
     auto *mutable_meta = request.mutable_task()->mutable_batch_meta();
     mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
