@@ -10,37 +10,6 @@
 
 namespace Ctld {
 
-grpc::Status CraneCtldServiceImpl::AllocateInteractiveTask(
-    grpc::ServerContext *context,
-    const crane::grpc::InteractiveTaskAllocRequest *request,
-    crane::grpc::InteractiveTaskAllocReply *response) {
-  CraneErr err;
-  auto task = std::make_unique<TaskInCtld>();
-
-  task->partition_id = request->partition_name();
-  task->resources.allocatable_resource =
-      request->required_resources().allocatable_resource();
-  task->time_limit = absl::Seconds(request->time_limit_sec());
-  task->type = crane::grpc::Interactive;
-  task->meta = InteractiveMetaInTask{};
-
-  // Todo: Eliminate useless allocation here when err!=kOk.
-  uint32_t task_id;
-  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
-
-  if (err == CraneErr::kOk) {
-    response->set_ok(true);
-    response->set_task_id(task_id);
-  } else {
-    response->set_ok(false);
-    response->set_reason(err == CraneErr::kNonExistent
-                             ? "Partition doesn't exist!"
-                             : "Resource not enough!");
-  }
-
-  return grpc::Status::OK;
-}
-
 grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTaskRequest *request,
@@ -55,25 +24,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   } else {
     response->set_ok(false);
     response->set_reason(result.error());
-  }
-
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::QueryInteractiveTaskAllocDetail(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryInteractiveTaskAllocDetailRequest *request,
-    crane::grpc::QueryInteractiveTaskAllocDetailReply *response) {
-  auto *detail = g_ctld_server->QueryAllocDetailOfIaTask(request->task_id());
-  if (detail) {
-    response->set_ok(true);
-    response->mutable_detail()->set_ipv4_addr(detail->ipv4_addr);
-    response->mutable_detail()->set_port(detail->port);
-    response->mutable_detail()->set_craned_id(detail->craned_id);
-    response->mutable_detail()->set_resource_uuid(detail->resource_uuid.data,
-                                                  detail->resource_uuid.size());
-  } else {
-    response->set_ok(false);
   }
 
   return grpc::Status::OK;
@@ -1074,8 +1024,6 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
   StreamCtldReply ctld_reply;
 
   CforedStreamWriter stream_writer(stream);
-
-  task_id_t task_id = pseudo_cfored_task_id_.fetch_add(1);
   std::string cfored_name;
 
   CRANE_TRACE("CforedStream from {} created.", context->peer());
@@ -1093,6 +1041,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
             return Status::CANCELLED;
           } else {
             cfored_name = cfored_request.payload_cfored_reg().cfored_name();
+            CRANE_INFO("Cfored {} registered.", cfored_name);
 
             ctld_reply.set_type(StreamCtldReply::CFORED_REGISTRATION_ACK);
             ctld_reply.mutable_payload_cfored_reg_ack()->set_ok(true);
@@ -1124,14 +1073,30 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
               auto task = std::make_unique<TaskInCtld>();
               task->SetFieldsByTaskToCtld(payload.task());
 
-              // Todo: Set callbacks here.
+              auto &meta = std::get<InteractiveMetaInTask>(task->meta);
+              meta.cb_task_res_allocated =
+                  [writer = &stream_writer](task_id_t task_id) {
+                    writer->WriteTaskResAllocReply(task_id, {});
+                  };
+              meta.cb_task_completed = [&, cfored_name](task_id_t task_id) {
+                m_ctld_server_->m_mtx_.Lock();
+
+                // If cfored disconnected, the cfored_name should have be
+                // removed from the map and the task completion callback is
+                // generated from cleaning the remaining tasks by calling
+                // g_task_scheduler->TerminateTask(), we should ignore this
+                // callback since the task id has already been cleaned.
+                auto iter =
+                    m_ctld_server_->m_cfored_running_tasks_.find(cfored_name);
+                if (iter != m_ctld_server_->m_cfored_running_tasks_.end())
+                  iter->second.erase(task_id);
+                m_ctld_server_->m_mtx_.Unlock();
+              };
 
               auto result =
                   m_ctld_server_->SubmitTaskToScheduler(std::move(task));
 
-              bool submission_success = result.has_value();
-              ok = stream_writer.WriteTaskIdReply(payload.pid(),
-                                                  std::move(result));
+              ok = stream_writer.WriteTaskIdReply(payload.pid(), result);
               if (!ok) {
                 CRANE_ERROR(
                     "Failed to send msg to cfored {}. Connection is broken. "
@@ -1139,34 +1104,31 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
                     cfored_name);
                 state = StreamState::kCleanData;
               } else {
-                if (submission_success) {
-                  // Todo: Add task id to running task list of this cfored.
+                if (result.has_value()) {
+                  m_ctld_server_->m_mtx_.Lock();
+                  m_ctld_server_->m_cfored_running_tasks_[cfored_name].emplace(
+                      result.value());
+                  m_ctld_server_->m_mtx_.Unlock();
                 }
               }
             } break;
 
-            case StreamCforedRequest::TASK_COMPLETION_REQUEST:
-              ctld_reply.set_type(StreamCtldReply::TASK_COMPLETION_ACK_REPLY);
-              ctld_reply.mutable_payload_task_completion_ack()->set_task_id(
-                  task_id);
+            case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
+              auto const &payload = cfored_request.payload_task_complete_req();
 
-              ok = stream->Write(ctld_reply);
-              ctld_reply.Clear();
+              g_task_scheduler->TerminateRunningTask(payload.task_id());
+
+              ok = stream_writer.WriteTaskCompletionAckReply(payload.task_id());
               if (!ok) {
                 state = StreamState::kCleanData;
               }
-              break;
+            } break;
 
-            case StreamCforedRequest::CFORED_GRACEFUL_EXIT:
-              ctld_reply.set_type(StreamCtldReply::CFORED_GRACEFUL_EXIT_ACK);
-              ctld_reply.mutable_payload_graceful_exit_ack()->set_ok(true);
-
-              stream->Write(ctld_reply);
-              ctld_reply.Clear();
-
+            case StreamCforedRequest::CFORED_GRACEFUL_EXIT: {
+              stream_writer.WriteCforedGracefulExitAck();
+              stream_writer.Invalidate();
               state = StreamState::kCleanData;
-
-              break;
+            } break;
 
             default:
               CRANE_ERROR("Not expected cfored request type: {}",
@@ -1179,10 +1141,25 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
         }
       } break;
 
-      case StreamState::kCleanData:
+      case StreamState::kCleanData: {
         CRANE_INFO("Cfored {} disconnected. Cleaning its data...", cfored_name);
 
+        m_ctld_server_->m_mtx_.Lock();
+
+        auto const &running_task_set =
+            m_ctld_server_->m_cfored_running_tasks_[cfored_name];
+        std::vector<task_id_t> running_tasks(running_task_set.begin(),
+                                             running_task_set.end());
+        m_ctld_server_->m_cfored_running_tasks_.erase(cfored_name);
+
+        m_ctld_server_->m_mtx_.Unlock();
+
+        for (task_id_t task_id : running_tasks) {
+          g_task_scheduler->TerminateRunningTask(task_id);
+        }
+
         return Status::OK;
+      }
     }
   }
 
@@ -1241,26 +1218,6 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   sigint_waiting_thread.detach();
 
   signal(SIGINT, &CtldServer::signal_handler_func);
-}
-
-void CtldServer::AddAllocDetailToIaTask(
-    uint32_t task_id, InteractiveTaskAllocationDetail detail) {
-  LockGuard guard(m_mtx_);
-  m_task_alloc_detail_map_.emplace(task_id, std::move(detail));
-}
-
-const InteractiveTaskAllocationDetail *CtldServer::QueryAllocDetailOfIaTask(
-    uint32_t task_id) {
-  LockGuard guard(m_mtx_);
-  auto iter = m_task_alloc_detail_map_.find(task_id);
-  if (iter == m_task_alloc_detail_map_.end()) return nullptr;
-
-  return &iter->second;
-}
-
-void CtldServer::RemoveAllocDetailOfIaTask(uint32_t task_id) {
-  LockGuard guard(m_mtx_);
-  m_task_alloc_detail_map_.erase(task_id);
 }
 
 result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(

@@ -48,14 +48,14 @@ class CforedStreamWriter {
   }
 
   bool WriteTaskResAllocReply(task_id_t task_id,
-                              result::result<bool, std::string> res) {
+                              result::result<void, std::string> res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::TASK_RES_ALLOC_REPLY);
     auto *task_res_alloc_reply = reply.mutable_payload_task_res_alloc_reply();
-    task_res_alloc_reply->set_task_id(res.value());
+    task_res_alloc_reply->set_task_id(task_id);
 
     if (res.has_value()) {
       task_res_alloc_reply->set_ok(true);
@@ -132,16 +132,6 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
  public:
   explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
 
-  [[deprecated]] grpc::Status AllocateInteractiveTask(
-      grpc::ServerContext *context,
-      const crane::grpc::InteractiveTaskAllocRequest *request,
-      crane::grpc::InteractiveTaskAllocReply *response) override;
-
-  [[deprecated]] grpc::Status QueryInteractiveTaskAllocDetail(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryInteractiveTaskAllocDetailRequest *request,
-      crane::grpc::QueryInteractiveTaskAllocDetailReply *response) override;
-
   grpc::Status CforedStream(
       grpc::ServerContext *context,
       grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
@@ -217,8 +207,6 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
 
  private:
   CtldServer *m_ctld_server_;
-
-  std::atomic<task_id_t> pseudo_cfored_task_id_{0};
 };
 
 /***
@@ -237,17 +225,15 @@ class CtldServer {
   result::result<task_id_t, std::string> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 
-  [[deprecated]] void AddAllocDetailToIaTask(
-      uint32_t task_id, InteractiveTaskAllocationDetail detail)
-      LOCKS_EXCLUDED(m_mtx_);
-
-  [[deprecated]] const InteractiveTaskAllocationDetail *
-  QueryAllocDetailOfIaTask(uint32_t task_id) LOCKS_EXCLUDED(m_mtx_);
-
-  [[deprecated]] void RemoveAllocDetailOfIaTask(uint32_t task_id)
-      LOCKS_EXCLUDED(m_mtx_);
-
  private:
+  template <typename K, typename V,
+            typename Hash = absl::container_internal::hash_default_hash<K>>
+  using HashMap = absl::flat_hash_map<K, V, Hash>;
+
+  template <typename K,
+            typename Hash = absl::container_internal::hash_default_hash<K>>
+  using HashSet = absl::flat_hash_set<K, Hash>;
+
   using Mutex = util::mutex;
   using LockGuard = util::AbslMutexLockGuard;
 
@@ -255,11 +241,8 @@ class CtldServer {
   std::unique_ptr<Server> m_server_;
 
   Mutex m_mtx_;
-  // Use absl::hash_node_map because QueryAllocDetailOfIaTask returns a
-  // pointer. Pointer stability is needed here. The return type is a const
-  // pointer, and it guarantees that the thread safety is not broken.
-  absl::node_hash_map<uint32_t /*task id*/, InteractiveTaskAllocationDetail>
-      m_task_alloc_detail_map_ GUARDED_BY(m_mtx_);
+  HashMap<std::string /* cfored_name */, HashSet<task_id_t>>
+      m_cfored_running_tasks_ GUARDED_BY(m_mtx_);
 
   inline static std::mutex s_sigint_mtx;
   inline static std::condition_variable s_sigint_cv;

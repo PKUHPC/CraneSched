@@ -19,37 +19,6 @@ message StreamReplyResult {
   string reason = 2; // Set when failed
 }
 
-message InteractiveTaskAllocRequest {
-  Resources required_resources = 1;
-  string partition_name = 2;
-  uint64 time_limit_sec = 3;
-}
-
-message InteractiveTaskAllocReply {
-  bool ok = 1;
-  oneof payload {
-    uint32 task_id = 2;
-    string reason = 3;
-  }
-}
-
-message InteractiveTaskAllocationDetail {
-  /* Used to connect the Craned */
-  string craned_id = 1;
-  string ipv4_addr = 2;
-  uint32 port = 3;
-  bytes resource_uuid = 4;
-}
-
-message QueryInteractiveTaskAllocDetailRequest {
-  uint32 task_id = 1;
-}
-
-message QueryInteractiveTaskAllocDetailReply {
-  bool ok = 1;
-  InteractiveTaskAllocationDetail detail = 2;
-}
-
 message StreamRequestCheckResource {
   bytes resource_uuid = 1;
   uint32 task_id = 2;
@@ -594,13 +563,7 @@ service CraneCtld {
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
 
-  /* RPCs called from SrunX */
-  /* When SrunX request an interactive job, it will first request SrunX to allocate
-     an interactive task and get the related meta information. */
-  rpc AllocateInteractiveTask(InteractiveTaskAllocRequest) returns (InteractiveTaskAllocReply);
-  rpc QueryInteractiveTaskAllocDetail(QueryInteractiveTaskAllocDetailRequest) returns (QueryInteractiveTaskAllocDetailReply);
-
-  /* ----------------------------------- Called from Cfored --------------------------------------------------------- */
+  /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
 
   /* RPCs called from ccancel */

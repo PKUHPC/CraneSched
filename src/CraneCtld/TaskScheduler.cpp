@@ -184,15 +184,28 @@ bool TaskScheduler::Init() {
       CRANE_TRACE("Restore task #{} from embedded pending queue.",
                   task->TaskId());
 
-      err = TryRequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
-      if (err != CraneErr::kOk) {
-        // Failed to requeue the task into pending queue due to
-        // insufficient resource or other reasons. Mark it as FAILED and move
-        // it to
+      if (task->type == crane::grpc::Batch) {
+        err = TryRequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
+      }
+
+      if (task->type == crane::grpc::Interactive || err != CraneErr::kOk) {
+        // If a batch task failed to requeue the task into pending queue due to
+        // insufficient resource or other reasons or the task is an interactive
+        // task, Mark it as FAILED and move it to the ended queue.
         CRANE_INFO(
             "Failed to requeue task #{}. Mark it as FAILED and "
             "move it to the ended queue.",
             task_id);
+        task->SetStatus(crane::grpc::Failed);
+        ok = g_embedded_db_client->UpdatePersistedPartOfTask(
+            task_db_id, task->PersistedPart());
+        if (!ok) {
+          CRANE_ERROR(
+              "UpdatePersistedPartOfTask failed for task #{} when "
+              "mark the task as FAILED.",
+              task_id);
+        }
+
         ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(task_db_id);
         if (!ok) {
           CRANE_ERROR(
@@ -333,7 +346,8 @@ void TaskScheduler::ScheduleThread_() {
         }
 
         if (task->type == crane::grpc::Interactive) {
-          std::get<InteractiveMetaInTask>(task->meta).cb_task_res_allocated();
+          std::get<InteractiveMetaInTask>(task->meta)
+              .cb_task_res_allocated(task->TaskId());
         }
 
         auto* task_ptr = task.get();
@@ -460,19 +474,21 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
 
   const std::unique_ptr<TaskInCtld>& task = iter->second;
 
-  if (task->type == crane::grpc::Interactive) {
-    std::get<InteractiveMetaInTask>(task->meta).cb_task_completed();
-  }
-
   CRANE_DEBUG("TaskStatusChange: Task #{} {}->{} In Node {}", task_id,
               task->Status(), new_status, craned_index);
 
-  if (new_status == crane::grpc::Finished) {
+  if (task->type == crane::grpc::Interactive) {
+    std::get<InteractiveMetaInTask>(task->meta)
+        .cb_task_completed(task->TaskId());
     task->SetStatus(crane::grpc::Finished);
-  } else if (new_status == crane::grpc::Cancelled) {
-    task->SetStatus(crane::grpc::Cancelled);
   } else {
-    task->SetStatus(crane::grpc::Failed);
+    if (new_status == crane::grpc::Finished) {
+      task->SetStatus(crane::grpc::Finished);
+    } else if (new_status == crane::grpc::Cancelled) {
+      task->SetStatus(crane::grpc::Cancelled);
+    } else {
+      task->SetStatus(crane::grpc::Failed);
+    }
   }
 
   task->SetExitCode(exit_code);

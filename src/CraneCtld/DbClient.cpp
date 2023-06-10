@@ -169,9 +169,12 @@ bool MongodbClient::FetchJobRecords(std::list<Ctld::TaskInCtld>* task_list,
       task.SetStartTimeByUnixSecond(view["time_start"].get_int64().value);
       task.SetEndTimeByUnixSecond(view["time_end"].get_int64().value);
 
-      task.meta = Ctld::BatchMetaInTask{};
-      auto& batch_meta = std::get<Ctld::BatchMetaInTask>(task.meta);
-      batch_meta.sh_script = view["script"].get_string().value;
+      if (task.type == crane::grpc::Batch) {
+        task.meta = Ctld::BatchMetaInTask{};
+        auto& batch_meta = std::get<Ctld::BatchMetaInTask>(task.meta);
+        batch_meta.sh_script = view["script"].get_string().value;
+      }
+
       task.SetStatus(static_cast<crane::grpc::TaskStatus>(
           view["state"].get_int32().value));
       task.time_limit = absl::Seconds(view["timelimit"].get_int64().value);
@@ -706,6 +709,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 }
 
 MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
+  std::string script;
+  if (task->type == crane::grpc::Batch)
+    script = std::get<BatchMetaInTask>(task->meta).sh_script;
+
   // 0  task_id       task_id        mod_time       deleted       account
   // 5  cpus_req      mem_req        task_name      env           id_user
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
@@ -748,8 +755,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              0, 0, static_cast<int64_t>(task->StartTimeInUnixSecond()),
              static_cast<int64_t>(task->EndTimeInUnixSecond()), 0,
              // 20-24
-             std::get<BatchMetaInTask>(task->meta).sh_script, task->Status(),
-             absl::ToInt64Seconds(task->time_limit), 0, task->cwd,
+             script, task->Status(), absl::ToInt64Seconds(task->time_limit), 0,
+             task->cwd,
              // 25
              task->cmd_line, task->ExitCode(), task->Username(), task->qos};
 

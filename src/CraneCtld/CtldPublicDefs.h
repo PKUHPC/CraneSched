@@ -142,8 +142,8 @@ struct PartitionMeta {
 };
 
 struct InteractiveMetaInTask {
-  std::function<void()> cb_task_res_allocated;
-  std::function<void()> cb_task_completed;
+  std::function<void(task_id_t)> cb_task_res_allocated;
+  std::function<void(task_id_t)> cb_task_completed;
 };
 
 struct BatchMetaInTask {
@@ -313,7 +313,6 @@ struct TaskInCtld {
     type = val.type();
 
     if (type == crane::grpc::Batch) {
-      meta = BatchMetaInTask{};
       auto& batch_meta = std::get<BatchMetaInTask>(meta);
       batch_meta.sh_script = val.batch_meta().sh_script();
       batch_meta.output_file_pattern = val.batch_meta().output_file_pattern();
