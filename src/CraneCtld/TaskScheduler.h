@@ -175,11 +175,9 @@ class TaskScheduler {
 
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
-
-  void MaxMinInit(absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>*
-                      pending_task_map);
-
-  uint32_t CalculatePriority(TaskInCtld& task);
+  HashMap<uint32_t, std::unique_ptr<TaskInCtld>> getRunningTaskMap() {
+    return m_running_task_map_;
+  }
 
  private:
   void ScheduleThread_();
@@ -230,7 +228,13 @@ class TaskScheduler {
 
   std::thread m_schedule_thread_;
   std::atomic_bool m_thread_stop_{};
+};
 
+}  // namespace Ctld
+
+inline std::unique_ptr<Ctld::TaskScheduler> g_task_scheduler;
+
+class Priority {
   uint64_t age_max, age_min;
   uint32_t qos_priority_max, qos_priority_min;
   uint32_t part_priority_max, part_priority_min;
@@ -239,8 +243,14 @@ class TaskScheduler {
   double cpus_alloc_max, cpus_alloc_min;
   uint32_t service_val_max, service_val_min;
   std::map<std::string, uint32_t> acc_service_val_map;
+
+ public:
+  std::list<task_id_t> GetTaskIdList(
+      absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
+          pending_task_map);
+  void MaxMinInit(
+      const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
+          pending_task_map);
+  uint32_t CalculatePriority(const Ctld::TaskInCtld& task);
 };
-
-}  // namespace Ctld
-
-inline std::unique_ptr<Ctld::TaskScheduler> g_task_scheduler;
+std::unique_ptr<Priority> g_priority;

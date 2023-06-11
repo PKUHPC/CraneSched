@@ -1426,17 +1426,7 @@ void MinLoadFirst::NodeSelect(
                                            &node_info_in_a_partition);
   }
 
-  g_task_scheduler->MaxMinInit(pending_task_map);
-  std::list<std::pair<task_id_t /* Task ID */, uint32_t /* Priority */>>
-      task_priority_list;
-  for (const auto& [task_id, task] : *pending_task_map) {
-    uint32_t priority = g_task_scheduler->CalculatePriority(*task);
-    task_priority_list.push_back({task->TaskId(), priority});
-  }
-  task_priority_list.sort([](const std::pair<task_id_t, uint32_t>& a,
-                             const std::pair<task_id_t, uint32_t>& b) {
-    return a.second > b.second;
-  });
+  auto task_id_list = g_priority->GetTaskIdList(pending_task_map);
 
   // Now we know, on every node, the # of running tasks (which
   //  doesn't include those we select as the incoming running tasks in the
@@ -1444,8 +1434,8 @@ void MinLoadFirst::NodeSelect(
   //  task.
   // Iterate over all the pending tasks and select the available node for the
   //  task to run in its partition.
-  for (auto it = task_priority_list.begin(); it != task_priority_list.end();) {
-    auto pending_task_it = pending_task_map->find(it->first);
+  for (auto it = task_id_list.begin(); it != task_id_list.end();) {
+    auto pending_task_it = pending_task_map->find(*it);
     auto& task = pending_task_it->second;
     PartitionId part_id = task->partition_id;
 
@@ -1519,7 +1509,7 @@ void MinLoadFirst::NodeSelect(
       // Erase the task ready to run from temporary
       // partition_pending_task_map and move to the next element
       pending_task_it = pending_task_map->erase(pending_task_it);
-      it = task_priority_list.erase(it);
+      it = task_id_list.erase(it);
     } else {
       // The task can't be started now. Move to the next pending task.
       it++;
@@ -1765,8 +1755,32 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
   }
 }
 
-void TaskScheduler::MaxMinInit(
-    absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map) {
+}  // namespace Ctld
+
+std::list<task_id_t> Priority::GetTaskIdList(
+    absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
+        pending_task_map) {
+  std::list<task_id_t> task_id_list;
+  g_priority->MaxMinInit(pending_task_map);
+  std::list<std::pair<task_id_t /* Task ID */, uint32_t /* Priority */>>
+      task_priority_list;
+  for (const auto& [task_id, task] : *pending_task_map) {
+    uint32_t priority = g_priority->CalculatePriority(*task);
+    task_priority_list.push_back({task->TaskId(), priority});
+  }
+  task_priority_list.sort([](const std::pair<task_id_t, uint32_t>& a,
+                             const std::pair<task_id_t, uint32_t>& b) {
+    return a.second > b.second;
+  });
+  for (auto& pair : task_priority_list) {
+    task_id_list.push_back(pair.first);
+  }
+  return task_id_list;
+}
+
+void Priority::MaxMinInit(
+    const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
+        pending_task_map) {
   // Initialize the values of each max and min
   age_max = 0, age_min = UINT64_MAX;
   qos_priority_max = 0, qos_priority_min = UINT32_MAX;
@@ -1797,7 +1811,7 @@ void TaskScheduler::MaxMinInit(
     if (cpus_alloc > cpus_alloc_max) cpus_alloc_max = cpus_alloc;
   }
 
-  AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
+  Ctld::AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
       g_account_manager->GetAllQosInfo();
   for (const auto& [name, qos] : *qos_map_shared_ptr) {
     if (!qos->deleted) {
@@ -1810,7 +1824,7 @@ void TaskScheduler::MaxMinInit(
     if (part.priority < part_priority_min) part_priority_min = part.priority;
     if (part.priority > part_priority_max) part_priority_max = part.priority;
   }
-
+  auto m_running_task_map_ = g_task_scheduler->getRunningTaskMap();
   acc_service_val_map.clear();
   for (const auto& [task_id, r_task] : m_running_task_map_) {
     uint32_t service_val = 0;
@@ -1846,29 +1860,33 @@ void TaskScheduler::MaxMinInit(
   }
 }
 
-uint32_t TaskScheduler::CalculatePriority(TaskInCtld& task) {
+uint32_t Priority::CalculatePriority(const Ctld::TaskInCtld& task) {
   double age_factor, partition_factor, job_size_factor, fair_share_factor,
       assoc_factor, qos_factor;
 
-  // 获取该作业的age
   uint64_t task_age =
       ToUnixSeconds(absl::Now()) - task.SubmitTimeInUnixSecond();
-  // 获取该作业qos的priority：通过作业结构体找到它的账户，然后从账户表里查到账户的qos再去qos表查qos优先级。
-  AccountManager::AccountMapMutexSharedPtr account_map_shared_ptr =
-      g_account_manager->GetAllAccountInfo();
-  AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
+
+  Ctld::AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
       g_account_manager->GetAllQosInfo();
-  const auto it_account = account_map_shared_ptr->find(task.account);
-  const auto it_qos = qos_map_shared_ptr->find(it_account->second->default_qos);
+  const auto it_qos = qos_map_shared_ptr->find(task.qos);
   uint32_t task_qos_priority = it_qos->second->priority;
-  // 获取该作业所属partition的priority
+
   const auto it_partition = g_config.Partitions.find(task.partition_id);
   uint32_t task_part_priority = it_partition->second.priority;
-  // 获取该作业的alloc nodes、alloc mem、alloc cpu、service_val
+
   uint32_t task_nodes_alloc = task.nodes_alloc;
   uint64_t task_mem_alloc = task.resources.allocatable_resource.memory_bytes;
   double task_cpus_alloc = task.resources.allocatable_resource.cpu_count;
   uint32_t task_service_val = acc_service_val_map.find(task.account)->second;
+
+  //  std::cout<<"作业"<<task.TaskId()<<"的age是"<<task_age;
+  //  std::cout<<"作业"<<task.TaskId()<<"的qos_priority是"<<task_qos_priority;
+  //  std::cout<<"作业"<<task.TaskId()<<"的partition_priority是"<<task_part_priority;
+  //  std::cout<<"作业"<<task.TaskId()<<"的alloc nodes是"<<task_nodes_alloc;
+  //  std::cout<<"作业"<<task.TaskId()<<"的alloc mem是"<<task_mem_alloc;
+  //  std::cout<<"作业"<<task.TaskId()<<"的alloc cpus是"<<task_cpus_alloc;
+  //  std::cout<<"作业"<<task.TaskId()<<"的service val是"<<task_service_val;
 
   // age_factor
   if (age_max != age_min)
@@ -1925,7 +1943,6 @@ uint32_t TaskScheduler::CalculatePriority(TaskInCtld& task) {
       g_config.PriorityWeight.WeightFairShare * fair_share_factor +
       g_config.PriorityWeight.WeightAssoc * assoc_factor +
       g_config.PriorityWeight.WeightQOS * qos_factor;
+  // std::cout<<"作业"<<task.TaskId()<<"的priority是"<<priority;
   return priority;
 }
-
-}  // namespace Ctld
