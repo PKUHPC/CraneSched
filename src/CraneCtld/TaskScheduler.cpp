@@ -478,9 +478,23 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
               task->Status(), new_status, craned_index);
 
   if (task->type == crane::grpc::Interactive) {
-    std::get<InteractiveMetaInTask>(task->meta)
-        .cb_task_completed(task->TaskId());
-    task->SetStatus(crane::grpc::Finished);
+    auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+
+    // TaskStatusChange may indicate the time limit has been reached and
+    // the task has been terminated. No more TerminateTask RPC should be sent to
+    // the craned node if any further CancelTask or TaskCompletionRequest RPC is
+    // received.
+    meta.has_been_terminated_on_craned = true;
+
+    if (new_status == crane::grpc::Timeout) {
+      meta.has_been_cancelled_on_front_end = true;
+      meta.cb_task_cancel(task->TaskId());
+      task->SetStatus(crane::grpc::Timeout);
+    } else {
+      task->SetStatus(crane::grpc::Finished);
+    }
+
+    meta.cb_task_completed(task->TaskId());
   } else {
     if (new_status == crane::grpc::Finished) {
       task->SetStatus(crane::grpc::Finished);
@@ -536,25 +550,25 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
   m_running_task_map_.erase(iter);
 }
 
-bool TaskScheduler::QueryCranedIdOfRunningTaskNoLock_(uint32_t task_id,
-                                                      CranedId* node_id) {
-  auto iter = m_running_task_map_.find(task_id);
-  if (iter == m_running_task_map_.end()) return false;
+CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
+  task_id_t task_id = task->TaskId();
 
-  *node_id = iter->second->executing_craned_id;
-
-  return true;
-}
-
-CraneErr TaskScheduler::TerminateRunningTaskNoLock_(uint32_t task_id) {
-  CranedId node_id;
-  bool ok = QueryCranedIdOfRunningTaskNoLock_(task_id, &node_id);
-
-  if (ok) {
-    auto stub = g_craned_keeper->GetCranedStub(node_id);
-    return stub->TerminateTask(task_id);
+  bool need_to_be_terminated = false;
+  if (task->type == crane::grpc::Interactive) {
+    auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+    if (!meta.has_been_terminated_on_craned) {
+      meta.has_been_terminated_on_craned = true;
+      need_to_be_terminated = true;
+    }
   } else
-    return CraneErr::kNonExistent;
+    need_to_be_terminated = true;
+
+  if (need_to_be_terminated) {
+    auto stub = g_craned_keeper->GetCranedStub(task->executing_craned_id);
+    return stub->TerminateTask(task_id);
+  }
+
+  return CraneErr::kOk;
 }
 
 crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
@@ -638,7 +652,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
   auto fn_cancel_running_task = [&](auto& it) {
     auto task_id = it.first;
-    std::unique_ptr<TaskInCtld>& task = it.second;
+    TaskInCtld* task = it.second.get();
 
     CRANE_TRACE("Cancelling running task #{}", task_id);
 
@@ -646,15 +660,23 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
-      CraneErr err = TerminateRunningTaskNoLock_(task_id);
-      if (err == CraneErr::kOk) {
-        reply.add_cancelled_tasks(task_id);
-      } else {
-        reply.add_not_cancelled_tasks(task_id);
-        if (err == CraneErr::kNonExistent)
-          reply.add_not_cancelled_reasons("Task id doesn't exist!");
-        else
+      if (task->type == crane::grpc::Batch) {
+        CraneErr err = TerminateRunningTaskNoLock_(task);
+        if (err == CraneErr::kOk) {
+          reply.add_cancelled_tasks(task_id);
+        } else {
+          reply.add_not_cancelled_tasks(task_id);
           reply.add_not_cancelled_reasons(CraneErrStr(err).data());
+        }
+      } else {
+        auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+
+        if (!meta.has_been_cancelled_on_front_end) {
+          meta.has_been_cancelled_on_front_end = true;
+          meta.cb_task_cancel(task_id);
+        }
+
+        reply.add_cancelled_tasks(task_id);
       }
     }
   };
@@ -1536,17 +1558,20 @@ CraneErr TaskScheduler::CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task) {
 
   auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
 
-  bool fit_in_a_node = false;
+  size_t satisfied_node_cnt = 0;
   for (CranedId const& craned_id : metas_ptr->craned_ids) {
-    // Todo: Bug! Not applicable to a task with the num of required nodes > 0
     CranedMeta const& craned_meta = craned_meta_map->at(craned_id);
 
-    if (!(task->resources <= craned_meta.res_total)) continue;
-    fit_in_a_node = true;
-    break;
+    if (craned_meta.alive && task->resources <= craned_meta.res_total)
+      satisfied_node_cnt++;
+
+    if (satisfied_node_cnt >= task->node_num) break;
   }
-  if (!fit_in_a_node) {
-    CRANE_TRACE("Resource not enough. Task cannot fit in any node.");
+
+  if (satisfied_node_cnt < task->node_num) {
+    CRANE_TRACE(
+        "Resource not enough. Task #{} needs {} nodes, while only {} "
+        "nodes satisfy its requirement.");
     return CraneErr::kNoResource;
   }
 

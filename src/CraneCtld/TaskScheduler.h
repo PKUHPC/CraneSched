@@ -167,17 +167,16 @@ class TaskScheduler {
   void QueryTasksInRam(const crane::grpc::QueryTasksInfoRequest* request,
                        crane::grpc::QueryTasksInfoReply* response);
 
-  bool QueryCranedIdOfRunningTask(uint32_t task_id, CranedId* craned_id) {
-    LockGuard running_guard(&m_running_task_map_mtx_);
-    return QueryCranedIdOfRunningTaskNoLock_(task_id, craned_id);
-  }
-
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
 
   CraneErr TerminateRunningTask(uint32_t task_id) {
     LockGuard running_guard(&m_running_task_map_mtx_);
-    return TerminateRunningTaskNoLock_(task_id);
+
+    auto iter = m_running_task_map_.find(task_id);
+    if (iter == m_running_task_map_.end()) return CraneErr::kNonExistent;
+
+    return TerminateRunningTaskNoLock_(iter->second.get());
   }
 
  private:
@@ -192,8 +191,6 @@ class TaskScheduler {
 
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
 
-  bool QueryCranedIdOfRunningTaskNoLock_(uint32_t task_id, CranedId* node_id);
-
   /**
    * @brief task->partition will be set if kOk is returned.
    * @return kOk if the task can be scheduled.
@@ -202,7 +199,7 @@ class TaskScheduler {
 
   static void TransferTaskToMongodb_(TaskInCtld* task);
 
-  CraneErr TerminateRunningTaskNoLock_(uint32_t task_id);
+  CraneErr TerminateRunningTaskNoLock_(TaskInCtld* task);
 
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 

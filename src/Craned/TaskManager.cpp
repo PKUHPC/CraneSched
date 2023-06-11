@@ -296,11 +296,9 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
           this_->m_pid_proc_map_.erase(proc_iter);
 
           if (!instance->processes.empty()) {
-            if (sigchld_info.is_terminated_by_signal &&
-                !instance->already_failed) {
+            if (sigchld_info.is_terminated_by_signal) {
               // If a task is terminated by a signal and there are other
               //  running processes belonging to this task, kill them.
-              instance->already_failed = true;
               this_->TerminateTaskAsync(task_id);
             }
           } else if (!instance->orphaned) {
@@ -313,6 +311,11 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
                 if (instance->cancelled_by_user)
                   this_->EvActivateTaskStatusChange_(
                       task_id, crane::grpc::TaskStatus::Cancelled,
+                      sigchld_info.value + ExitCode::kTerminationSignalBase,
+                      std::nullopt);
+                else if (instance->terminated_by_timeout)
+                  this_->EvActivateTaskStatusChange_(
+                      task_id, crane::grpc::TaskStatus::Timeout,
                       sigchld_info.value + ExitCode::kTerminationSignalBase,
                       std::nullopt);
                 else
@@ -837,12 +840,12 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
             fmt::format(
                 "Cannot spawn a new process inside the instance of task #{}",
                 instance->task.task_id()));
-      } else {
-        // Add a timer to limit the execution time of a task.
-        this_->EvAddTerminationTimer_(instance,
-                                      instance->task.time_limit().seconds());
       }
     }
+
+    // Add a timer to limit the execution time of a task.
+    this_->EvAddTerminationTimer_(instance,
+                                  instance->task.time_limit().seconds());
   }
 }
 
@@ -852,14 +855,6 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
 
   TaskStatusChange status_change;
   while (this_->m_task_status_change_queue_.try_dequeue(status_change)) {
-    CRANE_ASSERT_MSG_VA(
-        status_change.new_status == crane::grpc::TaskStatus::Finished ||
-            status_change.new_status == crane::grpc::TaskStatus::Failed ||
-            status_change.new_status == crane::grpc::TaskStatus::Cancelled,
-        "Task #{}: When TaskStatusChange event is triggered, the task should "
-        "either be Finished, Failed or Cancelled. new_status = {}",
-        status_change.task_id, status_change.new_status);
-
     CRANE_DEBUG(R"(Destroying Task structure for "{}".)"
                 R"(Task new status: {})",
                 status_change.task_id, status_change.new_status);
@@ -995,15 +990,25 @@ void TaskManager::EvGrpcQueryTaskIdFromPidCb_(int efd, short events,
 void TaskManager::EvOnTimerCb_(int, short, void* arg_) {
   auto* arg = reinterpret_cast<EvTimerCbArg*>(arg_);
   TaskManager* this_ = arg->task_manager;
+  task_id_t task_id = arg->task_instance->task.task_id();
 
   CRANE_TRACE("Task #{} exceeded its time limit. Terminating it...",
               arg->task_instance->task.task_id());
 
-  EvQueueTaskTerminate ev_task_terminate{arg->task_instance->task.task_id()};
-  this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
-  event_active(this_->m_ev_task_terminate_, 0, 0);
-
   this_->EvDelTerminationTimer_(arg->task_instance);
+
+  if (arg->task_instance->task.type() == crane::grpc::Batch) {
+    EvQueueTaskTerminate ev_task_terminate{
+        .task_id = arg->task_instance->task.task_id(),
+        .terminated_by_timeout = true,
+    };
+    this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
+    event_active(this_->m_ev_task_terminate_, 0, 0);
+  } else {
+    this_->EvActivateTaskStatusChange_(
+        task_id, crane::grpc::TaskStatus::Timeout, ExitCode::kExitCodeTimeout,
+        std::nullopt);
+  }
 }
 
 void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
@@ -1026,6 +1031,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
 
     if (elem.terminated_by_user) task_instance->cancelled_by_user = true;
     if (elem.mark_as_orphaned) task_instance->orphaned = true;
+    if (elem.terminated_by_timeout) task_instance->terminated_by_timeout = true;
 
     int sig = SIGTERM;  // For BatchTask
     if (task_instance->task.type() == crane::grpc::Interactive) sig = SIGHUP;

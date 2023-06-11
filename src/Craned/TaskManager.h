@@ -123,11 +123,8 @@ struct TaskInstance {
   PasswordEntry pwd_entry;
   BatchMetaInTaskInstance batch_meta;
 
-  // Todo: If batch task runs only on first allocated node, this field is
-  //  useless.
-  bool already_failed{false};
-
   bool cancelled_by_user{false};
+  bool terminated_by_timeout{false};
 
   bool orphaned{false};
 
@@ -152,7 +149,7 @@ class TaskManager {
 
   CraneErr ExecuteTaskAsync(crane::grpc::TaskToD task);
 
-  CraneErr SpawnInteractiveTaskAsync(
+  [[deprecated]] CraneErr SpawnInteractiveTaskAsync(
       uint32_t task_id, std::string executive_path,
       std::list<std::string> arguments,
       std::function<void(std::string&&, void*)> output_cb,
@@ -238,8 +235,10 @@ class TaskManager {
 
   struct EvQueueTaskTerminate {
     uint32_t task_id{0};
-    bool terminated_by_user{false};  // If the task is canceled by user,
-                                     // task->status=Cancelled
+    bool terminated_by_user{false};     // If the task is canceled by user,
+                                        // task->status=Cancelled
+    bool terminated_by_timeout{false};  // If the task is canceled by user,
+                                        // task->status=Timeout
     bool mark_as_orphaned{false};
   };
 

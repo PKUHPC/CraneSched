@@ -33,24 +33,12 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
     grpc::ServerContext *context,
     const crane::grpc::TaskStatusChangeRequest *request,
     crane::grpc::TaskStatusChangeReply *response) {
-  crane::grpc::TaskStatus status{};
-  if (request->new_status() == crane::grpc::Finished)
-    status = crane::grpc::Finished;
-  else if (request->new_status() == crane::grpc::Failed)
-    status = crane::grpc::Failed;
-  else if (request->new_status() == crane::grpc::Cancelled)
-    status = crane::grpc::Cancelled;
-  else
-    CRANE_ERROR(
-        "Task #{}: When TaskStatusChange RPC is called, the task should either "
-        "be Finished, Failed or Cancelled. new_status = {}",
-        request->task_id(), request->new_status());
-
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
 
   g_task_scheduler->TaskStatusChange(request->task_id(), request->craned_id(),
-                                     status, request->exit_code(), reason);
+                                     request->new_status(),
+                                     request->exit_code(), reason);
   response->set_ok(true);
   return grpc::Status::OK;
 }
@@ -276,7 +264,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 
   // Query completed tasks in Mongodb
   // (only for cacct, which sets `option_include_completed_tasks` to true)
-  std::list<TaskInCtld> db_ended_list;
+  std::vector<std::unique_ptr<TaskInCtld>> db_ended_list;
   ok = g_db_client->FetchJobRecords(&db_ended_list,
                                     num_limit - task_list->size(), true);
   if (!ok) {
@@ -284,72 +272,75 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     return grpc::Status::OK;
   }
 
-  auto db_ended_append_fn = [&](TaskInCtld &task) {
+  auto db_ended_append_fn = [&](std::unique_ptr<TaskInCtld> const &task) {
     auto *task_it = task_list->Add();
 
-    task_it->set_type(task.type);
-    task_it->set_task_id(task.TaskId());
-    task_it->set_name(task.name);
-    task_it->set_partition(task.partition_id);
-    task_it->set_uid(task.uid);
+    task_it->set_type(task->type);
+    task_it->set_task_id(task->TaskId());
+    task_it->set_name(task->name);
+    task_it->set_partition(task->partition_id);
+    task_it->set_uid(task->uid);
 
-    task_it->set_gid(task.Gid());
-    task_it->mutable_time_limit()->set_seconds(ToInt64Seconds(task.time_limit));
-    task_it->mutable_start_time()->CopyFrom(task.PersistedPart().start_time());
-    task_it->mutable_end_time()->CopyFrom(task.PersistedPart().end_time());
-    task_it->set_account(task.account);
+    task_it->set_gid(task->Gid());
+    task_it->mutable_time_limit()->set_seconds(
+        ToInt64Seconds(task->time_limit));
+    task_it->mutable_start_time()->CopyFrom(task->PersistedPart().start_time());
+    task_it->mutable_end_time()->CopyFrom(task->PersistedPart().end_time());
+    task_it->set_account(task->account);
 
-    task_it->set_node_num(task.node_num);
-    task_it->set_cmd_line(task.cmd_line);
-    task_it->set_cwd(task.cwd);
-    task_it->set_username(task.PersistedPart().username());
-    task_it->set_qos(task.qos);
+    task_it->set_node_num(task->node_num);
+    task_it->set_cmd_line(task->cmd_line);
+    task_it->set_cwd(task->cwd);
+    task_it->set_username(task->PersistedPart().username());
+    task_it->set_qos(task->qos);
 
-    task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
-    task_it->set_exit_code(task.ExitCode());
+    task_it->set_alloc_cpus(task->resources.allocatable_resource.cpu_count);
+    task_it->set_exit_code(task->ExitCode());
 
-    task_it->set_status(task.Status());
-    task_it->set_craned_list(task.allocated_craneds_regex);
+    task_it->set_status(task->Status());
+    task_it->set_craned_list(task->allocated_craneds_regex);
   };
 
-  auto db_task_rng_filter_time = [&](TaskInCtld &task) {
+  auto db_task_rng_filter_time = [&](std::unique_ptr<TaskInCtld> const &task) {
     bool filter_start_time =
         no_start_time_constraint ||
-        task.PersistedPart().start_time() >= request->filter_start_time();
+        task->PersistedPart().start_time() >= request->filter_start_time();
     bool filter_end_time =
         no_end_time_constraint ||
-        task.PersistedPart().end_time() <= request->filter_end_time();
+        task->PersistedPart().end_time() <= request->filter_end_time();
     return filter_start_time && filter_end_time;
   };
-  auto db_task_rng_filter_account = [&](TaskInCtld &task) {
-    return no_accounts_constraint || req_accounts.contains(task.account);
+  auto db_task_rng_filter_account =
+      [&](std::unique_ptr<TaskInCtld> const &task) {
+        return no_accounts_constraint || req_accounts.contains(task->account);
+      };
+
+  auto db_task_rng_filter_user = [&](std::unique_ptr<TaskInCtld> const &task) {
+    return no_username_constraint || req_users.contains(task->Username());
   };
 
-  auto db_task_rng_filter_user = [&](TaskInCtld &task) {
-    return no_username_constraint || req_users.contains(task.Username());
-  };
-
-  auto db_task_rng_filter_name = [&](TaskInCtld &task) {
+  auto db_task_rng_filter_name = [&](std::unique_ptr<TaskInCtld> const &task) {
     return no_task_names_constraint ||
-           req_task_names.contains(task.TaskToCtld().name());
+           req_task_names.contains(task->TaskToCtld().name());
   };
 
-  auto db_task_rng_filter_qos = [&](TaskInCtld &task) {
-    return no_qos_constraint || req_qos.contains(task.qos);
+  auto db_task_rng_filter_qos = [&](std::unique_ptr<TaskInCtld> const &task) {
+    return no_qos_constraint || req_qos.contains(task->qos);
   };
 
-  auto db_task_rng_filter_partition = [&](TaskInCtld &task) {
-    return no_partitions_constraint ||
-           req_partitions.contains(task.TaskToCtld().partition_name());
+  auto db_task_rng_filter_partition =
+      [&](std::unique_ptr<TaskInCtld> const &task) {
+        return no_partitions_constraint ||
+               req_partitions.contains(task->TaskToCtld().partition_name());
+      };
+
+  auto db_task_rng_filter_id = [&](std::unique_ptr<TaskInCtld> const &task) {
+    return no_task_ids_constraint || req_task_ids.contains(task->TaskId());
   };
 
-  auto db_task_rng_filter_id = [&](TaskInCtld &task) {
-    return no_task_ids_constraint || req_task_ids.contains(task.TaskId());
-  };
-
-  auto db_task_rng_filter_state = [&](TaskInCtld &task) {
+  auto db_task_rng_filter_state = [&](std::unique_ptr<TaskInCtld> const &task) {
     return no_task_states_constraint ||
-           req_task_states.contains(task.PersistedPart().status());
+           req_task_states.contains(task->PersistedPart().status());
   };
 
   auto db_ended_rng = db_ended_list |
@@ -1021,7 +1012,6 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
   bool ok;
 
   StreamCforedRequest cfored_request;
-  StreamCtldReply ctld_reply;
 
   CforedStreamWriter stream_writer(stream);
   std::string cfored_name;
@@ -1043,11 +1033,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
             cfored_name = cfored_request.payload_cfored_reg().cfored_name();
             CRANE_INFO("Cfored {} registered.", cfored_name);
 
-            ctld_reply.set_type(StreamCtldReply::CFORED_REGISTRATION_ACK);
-            ctld_reply.mutable_payload_cfored_reg_ack()->set_ok(true);
-
-            ok = stream->Write(ctld_reply);
-            ctld_reply.Clear();
+            ok = stream_writer.WriteCforedRegistrationAck({});
             if (ok) {
               state = StreamState::kWaitMsg;
             } else {
@@ -1078,6 +1064,12 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
                   [writer = &stream_writer](task_id_t task_id) {
                     writer->WriteTaskResAllocReply(task_id, {});
                   };
+
+              meta.cb_task_cancel = [writer =
+                                         &stream_writer](task_id_t task_id) {
+                writer->WriteTaskCancelRequest(task_id);
+              };
+
               meta.cb_task_completed = [&, cfored_name](task_id_t task_id) {
                 m_ctld_server_->m_mtx_.Lock();
 
@@ -1213,7 +1205,8 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     s_sigint_cv.wait(lk);
 
     CRANE_TRACE("SIGINT captured. Calling Shutdown() on grpc server...");
-    p_server->Shutdown();
+    p_server->Shutdown(std::chrono::system_clock::now() +
+                       std::chrono::seconds(1));
   });
   sigint_waiting_thread.detach();
 

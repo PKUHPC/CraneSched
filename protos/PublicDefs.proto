@@ -43,7 +43,7 @@ enum TaskStatus {
   Running = 1;
   Finished = 2;
   Failed = 3;
-  Completing = 4;
+  Timeout = 4;
   Cancelled = 5;
 
   Invalid = 15;

@@ -80,7 +80,20 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
-  bool WriteCforedRegistrationAck(result::result<bool, std::string> res) {
+  bool WriteTaskCancelRequest(task_id_t task_id) {
+    LockGuard guard(&m_stream_mtx_);
+    if (!m_valid_) return false;
+
+    StreamCtldReply reply;
+    reply.set_type(StreamCtldReply::TASK_CANCEL_REQUEST);
+
+    auto *task_cancel_req = reply.mutable_payload_task_cancel_request();
+    task_cancel_req->set_task_id(task_id);
+
+    return m_stream_->Write(reply);
+  }
+
+  bool WriteCforedRegistrationAck(result::result<void, std::string> res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 

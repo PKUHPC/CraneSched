@@ -144,6 +144,28 @@ struct PartitionMeta {
 struct InteractiveMetaInTask {
   std::function<void(task_id_t)> cb_task_res_allocated;
   std::function<void(task_id_t)> cb_task_completed;
+  std::function<void(task_id_t)> cb_task_cancel;
+
+  // ccancel for an interactive task should call the front end to kill the
+  // user's shell, let Cfored to inform CraneCtld of task completion rather than
+  // directly sending TerminateTask to its craned node.
+  // However, when TIMEOUT event on its craned node happens, Cranectld should
+  // also send TaskCancelRequest to the front end. So we need a flag
+  // ` has_been_cancelled_on_front_end` to record whether the front end for the
+  // task has been sent a TaskCancelRequest and a flag
+  // `has_been_terminated_on_craned` to record whether the task resource
+  // (cgroup) has been destroyed on its craned node.
+  //
+  // If `has_been_cancelled` is true, no more TaskCancelRequest should be sent
+  // to the front end. It is set when the user runs ccancel command or the
+  // timeout event has been triggered on the craned node.
+  //
+  // If `has_been_terminated_on_craned` is true, no more TerminateTask RPC
+  // should be sent to its craned node. It is set when the timeout event is
+  // triggered on the craned node or a TaskTerminate RPC has been sent
+  // (triggered by either normal shell exit or ccancel).
+  std::atomic<bool> has_been_cancelled_on_front_end{false};
+  std::atomic<bool> has_been_terminated_on_craned{false};
 };
 
 struct BatchMetaInTask {
