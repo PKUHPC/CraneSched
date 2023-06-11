@@ -1832,11 +1832,11 @@ void TaskScheduler::MaxMinInit(
     auto run_time =
         ToUnixSeconds(absl::Now()) - r_task->StartTimeInUnixSecond();
     service_val *= run_time;
-    if (acc_service_val_map.find(r_task->Account()) ==
+    if (acc_service_val_map.find(r_task->account) ==
         acc_service_val_map.end()) {
-      acc_service_val_map.emplace(r_task->Account(), 0);
+      acc_service_val_map.emplace(r_task->account, 0);
     }
-    auto iter = acc_service_val_map.find(r_task->Account());
+    auto iter = acc_service_val_map.find(r_task->account);
     iter->second += service_val;
   }
 
@@ -1858,7 +1858,7 @@ uint32_t TaskScheduler::CalculatePriority(TaskInCtld& task) {
       g_account_manager->GetAllAccountInfo();
   AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
       g_account_manager->GetAllQosInfo();
-  const auto it_account = account_map_shared_ptr->find(task.Account());
+  const auto it_account = account_map_shared_ptr->find(task.account);
   const auto it_qos = qos_map_shared_ptr->find(it_account->second->default_qos);
   uint32_t task_qos_priority = it_qos->second->priority;
   // 获取该作业所属partition的priority
@@ -1868,7 +1868,7 @@ uint32_t TaskScheduler::CalculatePriority(TaskInCtld& task) {
   uint32_t task_nodes_alloc = task.nodes_alloc;
   uint64_t task_mem_alloc = task.resources.allocatable_resource.memory_bytes;
   double task_cpus_alloc = task.resources.allocatable_resource.cpu_count;
-  uint32_t task_service_val = acc_service_val_map.find(task.Account())->second;
+  uint32_t task_service_val = acc_service_val_map.find(task.account)->second;
 
   // age_factor
   if (age_max != age_min)
