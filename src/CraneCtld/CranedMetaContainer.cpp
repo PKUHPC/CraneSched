@@ -466,7 +466,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
             }) |
         ranges::views::filter(craned_rng_filter_hostname) |
         ranges::views::filter(craned_rng_filter_state) |
-        ranges::views::filter(craned_rng_filter_only_down) |
+        //ranges::views::filter(craned_rng_filter_only_down) |
         ranges::views::filter(craned_rng_filter_only_responding);
     ranges::for_each(craned_rng, [&](CranedMetaMap::iterator it) {
       CranedMeta& craned_meta = it->second;
