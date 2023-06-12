@@ -188,7 +188,7 @@ void ParseConfig(int argc, char** argv) {
         g_config.PriorityWeight.MaxAge =
             g_config.PriorityWeight.MaxAge > default_max_age
                 ? default_max_age
-                : g_config.PriorityWeight.MaxAge
+                : g_config.PriorityWeight.MaxAge;
       }
 
       if (config["PriorityType"] &&
