@@ -39,7 +39,7 @@ struct Config {
   struct Priority {
     std::string Type;
     bool FavorSmall;
-    absl::Duration MaxAge;
+    uint64_t MaxAge;
     uint32_t WeightAge;
     uint32_t WeightFairShare;
     uint32_t WeightJobSize;

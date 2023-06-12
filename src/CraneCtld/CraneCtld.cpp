@@ -155,6 +155,42 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
       }
 
+      uint64_t default_max_age = 7 * 24 * 3600;
+      g_config.PriorityWeight.MaxAge = default_max_age;
+      if (config["PriorityMaxAge"]) {
+        std::string max_age_str = config["PriorityMaxAge"].as<std::string>();
+        std::regex pattern_a("(\\d+):(\\d+):(\\d+)");
+        std::regex pattern_b("(\\d+)-(\\d+)");
+        std::regex pattern_c("(\\d+)");
+        std::regex pattern_d("(\\d+)-(\\d+):(\\d+):(\\d+)");
+        std::smatch matches;
+        uint64_t days, hours, mins, secs;
+        if (std::regex_match(max_age_str, matches, pattern_a)) {
+          hours = std::stoi(matches[1]);
+          mins = std::stoi(matches[2]);
+          secs = std::stoi(matches[3]);
+          g_config.PriorityWeight.MaxAge = hours * 3600 + mins * 60 + secs;
+        } else if (std::regex_match(max_age_str, matches, pattern_b)) {
+          days = std::stoi(matches[1]);
+          hours = std::stoi(matches[2]);
+          g_config.PriorityWeight.MaxAge = days * 24 * 3600 + hours * 3600;
+        } else if (std::regex_match(max_age_str, pattern_c)) {
+          mins = std::stoi(max_age_str);
+          g_config.PriorityWeight.MaxAge = mins * 60;
+        } else if (std::regex_match(max_age_str, pattern_d)) {
+          days = std::stoi(matches[1]);
+          hours = std::stoi(matches[2]);
+          mins = std::stoi(matches[3]);
+          secs = std::stoi(matches[4]);
+          g_config.PriorityWeight.MaxAge =
+              days * 24 * 3600 + hours * 3600 + mins * 60 + secs;
+        }
+        g_config.PriorityWeight.MaxAge =
+            g_config.PriorityWeight.MaxAge > default_max_age
+                ? default_max_age
+                : g_config.PriorityWeight.MaxAge
+      }
+
       if (config["PriorityType"] &&
           config["PriorityType"].as<std::string>() == "priority/multifactor")
         g_config.PriorityWeight.Type = config["PriorityType"].as<std::string>();

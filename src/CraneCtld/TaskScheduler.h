@@ -235,14 +235,22 @@ class TaskScheduler {
 inline std::unique_ptr<Ctld::TaskScheduler> g_task_scheduler;
 
 class Priority {
-  uint64_t age_max, age_min;
-  uint32_t qos_priority_max, qos_priority_min;
-  uint32_t part_priority_max, part_priority_min;
-  uint32_t nodes_alloc_max, nodes_alloc_min;
-  uint64_t mem_alloc_max, mem_alloc_min;
-  double cpus_alloc_max, cpus_alloc_min;
-  uint32_t service_val_max, service_val_min;
-  std::map<std::string, uint32_t> acc_service_val_map;
+  struct PriorityInitval {
+    uint64_t age_max, age_min;
+    uint32_t qos_priority_max, qos_priority_min;
+    uint32_t part_priority_max, part_priority_min;
+    uint32_t nodes_alloc_max, nodes_alloc_min;
+    uint64_t mem_alloc_max, mem_alloc_min;
+    double cpus_alloc_max, cpus_alloc_min;
+    uint32_t service_val_max, service_val_min;
+    std::map<std::string, uint32_t> acc_service_val_map;
+  };
+  PriorityInitval init_val;
+  struct PriorityFactors {
+    double age_factor, partition_factor, job_size_factor, fair_share_factor,
+        assoc_factor, qos_factor;
+  };
+  PriorityFactors factors;
 
  public:
   std::list<task_id_t> GetTaskIdList(
