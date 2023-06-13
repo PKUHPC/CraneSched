@@ -1426,7 +1426,8 @@ void MinLoadFirst::NodeSelect(
                                            &node_info_in_a_partition);
   }
 
-  auto task_id_list = g_priority->GetTaskIdList(pending_task_map);
+  auto task_id_list =
+      g_priority->GetTaskIdList(pending_task_map, running_tasks);
 
   // Now we know, on every node, the # of running tasks (which
   //  doesn't include those we select as the incoming running tasks in the
@@ -1758,14 +1759,16 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
 }  // namespace Ctld
 
 std::list<task_id_t> Priority::GetTaskIdList(
-    absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
-        pending_task_map) {
+    const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
+        pending_task_map,
+    absl::flat_hash_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>&
+        running_task_map_) {
   std::list<task_id_t> task_id_list;
-  g_priority->MaxMinInit(pending_task_map);
+  g_priority->MaxMinInit(pending_task_map, &running_task_map_);
   std::list<std::pair<task_id_t /* Task ID */, uint32_t /* Priority */>>
       task_priority_list;
   for (const auto& [task_id, task] : *pending_task_map) {
-    uint32_t priority = g_priority->CalculatePriority(*task);
+    uint32_t priority = g_priority->CalculatePriority(task.get());
     task_priority_list.push_back({task->TaskId(), priority});
   }
   task_priority_list.sort([](const std::pair<task_id_t, uint32_t>& a,
@@ -1780,7 +1783,9 @@ std::list<task_id_t> Priority::GetTaskIdList(
 
 void Priority::MaxMinInit(
     const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
-        pending_task_map) {
+        pending_task_map,
+    const absl::flat_hash_map<uint32_t, std::unique_ptr<Ctld::TaskInCtld>>*
+        m_running_task_map_) {
   // Initialize the values of each max and min
   init_val.age_max = 0, init_val.age_min = UINT64_MAX;
   init_val.qos_priority_max = 0, init_val.qos_priority_min = UINT32_MAX;
@@ -1834,9 +1839,9 @@ void Priority::MaxMinInit(
     if (part.priority > init_val.part_priority_max)
       init_val.part_priority_max = part.priority;
   }
-  auto m_running_task_map_ = g_task_scheduler->getRunningTaskMap();
+  // auto m_running_task_map_ = g_task_scheduler->getRunningTaskMap();
   init_val.acc_service_val_map.clear();
-  for (const auto& [task_id, r_task] : m_running_task_map_) {
+  for (const auto& [task_id, r_task] : *m_running_task_map_) {
     uint32_t service_val = 0;
     if (init_val.cpus_alloc_max != init_val.cpus_alloc_min) {
       service_val += (double)(r_task->resources.allocatable_resource.cpu_count -
@@ -1870,26 +1875,26 @@ void Priority::MaxMinInit(
   }
 }
 
-uint32_t Priority::CalculatePriority(const Ctld::TaskInCtld& task) {
+uint32_t Priority::CalculatePriority(Ctld::TaskInCtld* task) {
   uint64_t task_age =
-      ToUnixSeconds(absl::Now()) - task.SubmitTimeInUnixSecond();
+      ToUnixSeconds(absl::Now()) - task->SubmitTimeInUnixSecond();
   task_age = task_age > g_config.PriorityWeight.MaxAge
                  ? g_config.PriorityWeight.MaxAge
                  : task_age;
 
   Ctld::AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
       g_account_manager->GetAllQosInfo();
-  const auto it_qos = qos_map_shared_ptr->find(task.qos);
+  const auto it_qos = qos_map_shared_ptr->find(task->qos);
   uint32_t task_qos_priority = it_qos->second->priority;
 
-  const auto it_partition = g_config.Partitions.find(task.partition_id);
+  const auto it_partition = g_config.Partitions.find(task->partition_id);
   uint32_t task_part_priority = it_partition->second.priority;
 
-  uint32_t task_nodes_alloc = task.nodes_alloc;
-  uint64_t task_mem_alloc = task.resources.allocatable_resource.memory_bytes;
-  double task_cpus_alloc = task.resources.allocatable_resource.cpu_count;
+  uint32_t task_nodes_alloc = task->nodes_alloc;
+  uint64_t task_mem_alloc = task->resources.allocatable_resource.memory_bytes;
+  double task_cpus_alloc = task->resources.allocatable_resource.cpu_count;
   uint32_t task_service_val =
-      init_val.acc_service_val_map.find(task.account)->second;
+      init_val.acc_service_val_map.find(task->account)->second;
 
   // age_factor
   if (init_val.age_max != init_val.age_min)
