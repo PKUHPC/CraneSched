@@ -1761,7 +1761,7 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
 std::list<task_id_t> Priority::GetTaskIdList(
     const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
         pending_task_map,
-    absl::flat_hash_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>&
+    const absl::flat_hash_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>&
         running_task_map_) {
   std::list<task_id_t> task_id_list;
   g_priority->MaxMinInit(pending_task_map, &running_task_map_);

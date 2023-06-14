@@ -253,7 +253,7 @@ class Priority {
   std::list<task_id_t> GetTaskIdList(
       const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
           pending_task_map,
-      absl::flat_hash_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>&
+      const absl::flat_hash_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>&
           running_task_map_);
   void MaxMinInit(
       const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
