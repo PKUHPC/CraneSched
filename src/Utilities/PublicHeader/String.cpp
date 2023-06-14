@@ -143,7 +143,7 @@ bool ParseHostList(const std::string &host_str,
 
 bool HostNameListToStr_(std::list<std::string> &host_list,
                         std::list<std::string> *res_list) {
-  std::unordered_map<std::string, std::list<std::string>> host_map;
+  std::unordered_map<std::string, std::vector<std::string>> host_map;
   bool res = true;
 
   size_t sz = host_list.size();
@@ -165,7 +165,7 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
                   tail_str = host.substr(end, host.size());
       std::string key_str = fmt::format("{}<{}", head_str, tail_str);
       if (!host_map.contains(key_str)) {
-        std::list<std::string> list;
+        std::vector<std::string> list;
         host_map[key_str] = list;
       }
       host_map[key_str].emplace_back(num_str);
@@ -189,8 +189,19 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
 
     host_name_str += iter.first.substr(0, delimiter_pos);
     host_name_str += "[";
-    iter.second.sort();
-    iter.second.unique();
+
+    std::sort(iter.second.begin(), iter.second.end(),
+              [](std::string &a, std::string &b) {
+                if (a.length() != b.length()) {
+                  return a.length() < b.length();
+                } else {
+                  return stoi(a) < stoi(b);
+                }
+              });
+    // delete duplicate elements
+    auto new_end = std::unique(iter.second.begin(), iter.second.end());
+    iter.second.erase(new_end, iter.second.end());
+
     int first = -1, last = -1, num;
     std::string first_str, last_str;
     for (const auto &num_str : iter.second) {

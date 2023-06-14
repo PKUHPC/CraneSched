@@ -202,6 +202,19 @@ AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
     }
   }
 
+  if (new_account.default_qos.empty()) {
+    new_account.default_qos = new_account.allowed_qos_list.front();
+  } else {
+    if (std::find(new_account.allowed_qos_list.begin(),
+                  new_account.allowed_qos_list.end(),
+                  new_account.default_qos) ==
+        new_account.allowed_qos_list.end())
+      return Result{
+          false,
+          fmt::format("default qos '{}' not included in allowed qos list",
+                      new_account.default_qos)};
+  }
+
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         if (!new_account.parent_account.empty()) {
@@ -299,8 +312,11 @@ AccountManager::Result AccountManager::DeleteUser(const std::string& name,
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                        "$pull", kv.first,
                                        /*account name*/ "users", name);
+        }
+        for (const std::string& coordinatorAccount :
+             user->coordinator_accounts) {
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                       "$pull", kv.first,
+                                       "$pull", coordinatorAccount,
                                        /*account name*/ "coordinators", name);
         }
 
@@ -316,7 +332,8 @@ AccountManager::Result AccountManager::DeleteUser(const std::string& name,
   util::write_lock_guard account_guard(m_rw_account_mutex_);
   for (const auto& kv : user->account_to_attrs_map) {
     m_account_map_[kv.first]->users.remove(name);
-    m_account_map_[kv.first]->coordinators.remove(name);
+    m_account_map_[kv.first]->coordinators.remove(
+        name);  // No inspection required
   }
   m_user_map_[name]->deleted = true;
 
@@ -343,9 +360,13 @@ AccountManager::Result AccountManager::RemoveUserFromAccount(
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                      "$pull", account, /*account name*/ "users",
                                      name);
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                     "$pull", account,
-                                     /*account name*/ "coordinators", name);
+        if (std::find(user->coordinator_accounts.begin(),
+                      user->coordinator_accounts.end(),
+                      account) != user->coordinator_accounts.end()) {
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                       "$pull", account,
+                                       /*account name*/ "coordinators", name);
+        }
 
         // Delete the account from user account_map
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$unset",
@@ -359,7 +380,7 @@ AccountManager::Result AccountManager::RemoveUserFromAccount(
 
   util::write_lock_guard account_guard(m_rw_account_mutex_);
   m_account_map_[account]->users.remove(name);
-  m_account_map_[account]->coordinators.remove(name);
+  m_account_map_[account]->coordinators.remove(name);  // No inspection required
   m_user_map_[name]->account_to_attrs_map.erase(account);
 
   return Result{true};

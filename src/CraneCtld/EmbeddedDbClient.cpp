@@ -29,11 +29,11 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   // There is no race during Init stage.
   // No lock is needed.
   rc = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(s_next_task_id_str_,
-                                                   &s_next_task_id_, 0u);
+                                                   &s_next_task_id_, 1u);
   if (rc != UNQLITE_OK) return false;
 
   rc = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(s_next_task_db_id_str_,
-                                                   &s_next_task_db_id_, 0l);
+                                                   &s_next_task_db_id_, 1l);
   if (rc != UNQLITE_OK) return false;
 
   std::string pd_head_next_name =
