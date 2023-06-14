@@ -262,4 +262,5 @@ class Priority {
           m_running_task_map_);
   uint32_t CalculatePriority(Ctld::TaskInCtld* task);
 };
-std::unique_ptr<Priority> g_priority;
+
+inline std::unique_ptr<Priority> g_priority;
