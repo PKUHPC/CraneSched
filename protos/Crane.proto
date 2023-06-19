@@ -222,9 +222,8 @@ message QueryTaskIdFromPortReply{
 
 message QueryTaskIdFromPortForwardRequest{
   uint32 ssh_remote_port = 1;
-  string target_craned_address = 2;
-  string target_craned_port = 3;
-  uint32 uid = 4;
+  string ssh_remote_address = 2;
+  uint32 uid = 3;
 }
 
 message QueryTaskIdFromPortForwardReply{
@@ -447,6 +446,7 @@ message StreamCforedReply {
 
   message TaskResAllocatedReply {
     bool ok = 1;
+    string allocated_craned_regex = 2;
   }
 
   message TaskCancelRequest {
@@ -524,7 +524,8 @@ message StreamCtldReply {
   message TaskResAllocatedReply {
     uint32 task_id = 1;
     bool ok = 2;
-    string failure_reason = 3;
+    string allocated_craned_regex = 3;
+    string failure_reason = 4;
   }
 
   message TaskCancelRequest {
@@ -633,4 +634,5 @@ service Craned {
 
 service CraneForeD {
   rpc CallocStream(stream StreamCallocRequest) returns(stream StreamCforedReply);
+  rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
 }

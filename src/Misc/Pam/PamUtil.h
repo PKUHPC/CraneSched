@@ -19,8 +19,7 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, uint8_t addr[4],
                              uint16_t *port);
 
 bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
-                             const std::string &craned_address,
-                             const std::string &craned_port,
+                             const std::string &remote_address,
                              uint16_t port_to_query, uint32_t *task_id,
                              std::string *cgroup_path);
 

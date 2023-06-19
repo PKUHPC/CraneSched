@@ -347,7 +347,8 @@ void TaskScheduler::ScheduleThread_() {
 
         if (task->type == crane::grpc::Interactive) {
           std::get<InteractiveMetaInTask>(task->meta)
-              .cb_task_res_allocated(task->TaskId());
+              .cb_task_res_allocated(task->TaskId(),
+                                     task->allocated_craneds_regex);
         }
 
         auto* task_ptr = task.get();

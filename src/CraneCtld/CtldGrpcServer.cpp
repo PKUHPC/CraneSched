@@ -1061,8 +1061,11 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
               auto &meta = std::get<InteractiveMetaInTask>(task->meta);
               meta.cb_task_res_allocated =
-                  [writer = &stream_writer](task_id_t task_id) {
-                    writer->WriteTaskResAllocReply(task_id, {});
+                  [writer = &stream_writer](
+                      task_id_t task_id,
+                      std::string const &allocated_craned_regex) {
+                    writer->WriteTaskResAllocReply(task_id,
+                                                   {allocated_craned_regex});
                   };
 
               meta.cb_task_cancel = [writer =

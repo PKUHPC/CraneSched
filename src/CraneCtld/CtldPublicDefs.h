@@ -5,11 +5,6 @@
 
 namespace Ctld {
 
-namespace pevents {
-using namespace neosmart;
-using event_t = neosmart_event_t;
-}  // namespace pevents
-
 using moodycamel::ConcurrentQueue;
 
 using task_db_id_t = int64_t;
@@ -70,23 +65,6 @@ namespace Ctld {
 
 namespace result = cpp_result;
 
-struct InteractiveTaskDetail {
-  pevents::event_t event_task_id_allocated;
-  pevents::event_t event_task_res_allocated;
-  pevents::event_t event_task_cancelled;
-};
-
-struct CforedMeta {
-  std::string cfored_name;
-};
-
-struct InteractiveTaskAllocationDetail {
-  CranedId craned_id;
-  std::string ipv4_addr;
-  uint32_t port;
-  boost::uuids::uuid resource_uuid;
-};
-
 /**
  * The static information on a Craned (the static part of CranedMeta). This
  * structure is provided when a new Craned node is to be registered in
@@ -142,7 +120,7 @@ struct PartitionMeta {
 };
 
 struct InteractiveMetaInTask {
-  std::function<void(task_id_t)> cb_task_res_allocated;
+  std::function<void(task_id_t, std::string const&)> cb_task_res_allocated;
   std::function<void(task_id_t)> cb_task_completed;
   std::function<void(task_id_t)> cb_task_cancel;
 
@@ -335,9 +313,10 @@ struct TaskInCtld {
     type = val.type();
 
     if (type == crane::grpc::Batch) {
-      auto& batch_meta = std::get<BatchMetaInTask>(meta);
-      batch_meta.sh_script = val.batch_meta().sh_script();
-      batch_meta.output_file_pattern = val.batch_meta().output_file_pattern();
+      meta.emplace<BatchMetaInTask>(BatchMetaInTask{
+          .sh_script = val.batch_meta().sh_script(),
+          .output_file_pattern = val.batch_meta().output_file_pattern(),
+      });
     }
 
     node_num = val.node_num();

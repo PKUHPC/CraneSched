@@ -48,6 +48,7 @@ CraneErr CranedStub::ExecuteTask(const TaskInCtld *task) {
   mutable_task->set_type(task->type);
 
   mutable_task->set_task_id(task->TaskId());
+  mutable_task->set_name(task->name);
 
   mutable_task->set_node_num(task->node_num);
   mutable_task->set_ntasks_per_node(task->ntasks_per_node);

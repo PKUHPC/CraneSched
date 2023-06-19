@@ -54,14 +54,14 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
   uint32_t task_id;
   std::string cgroup_path;
 
-  std::string server_address =
+  std::string remote_address =
       fmt::format("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3]);
 
   pam_syslog(pamh, LOG_ERR, "[Crane] Try to query %s for remote port %hu",
-             server_address.c_str(), port);
+             remote_address.c_str(), port);
 
-  ok = GrpcQueryPortFromCraned(pamh, uid, server_address, kCranedDefaultPort,
-                               port, &task_id, &cgroup_path);
+  ok = GrpcQueryPortFromCraned(pamh, uid, remote_address, port, &task_id,
+                               &cgroup_path);
 
   if (ok) {
     pam_syslog(pamh, LOG_ERR,

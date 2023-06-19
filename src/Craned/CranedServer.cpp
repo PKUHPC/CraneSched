@@ -491,103 +491,136 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     grpc::ServerContext *context,
     const crane::grpc::QueryTaskIdFromPortForwardRequest *request,
     crane::grpc::QueryTaskIdFromPortForwardReply *response) {
+  bool ok;
+  bool task_id_found = false;
+  bool remote_is_craned = false;
+
+  // May be craned or cfored
+  std::string_view crane_service_port;
+
   // Check whether the remote address is in the addresses of CraneD nodes.
-  if (!g_config.Ipv4ToNodesHostname.contains(
-          request->target_craned_address())) {
+  if (g_config.Ipv4ToCranedHostname.contains(request->ssh_remote_address())) {
+    CRANE_TRACE(
+        "Receive QueryTaskIdFromPortForward from Pam module: "
+        "ssh_remote_port: {}, ssh_remote_address: {}. "
+        "This ssh comes from a CraneD node. uid: {}",
+        request->ssh_remote_port(), request->ssh_remote_address(),
+        request->uid());
+    // In the addresses of CraneD nodes. This ssh request comes from a CraneD
+    // node. Check if the remote port belongs to a task. If so, move it in to
+    // the cgroup of this task.
+    crane_service_port = kCranedDefaultPort;
+    remote_is_craned = true;
+  } else {
     // Not in the addresses of CraneD nodes. This ssh request comes from a user.
     // Check if the user's uid is running a task. If so, move it in to the
     // cgroup of his first task. If not so, reject this ssh request.
     CRANE_TRACE(
         "Receive QueryTaskIdFromPortForward from Pam module: "
-        "ssh_remote_port: {}, craned_address: {}, craned_port: {}. "
+        "ssh_remote_port: {}, ssh_remote_address: {}. "
         "This ssh comes from a user machine. uid: {}",
-        request->ssh_remote_port(), request->target_craned_address(),
-        request->target_craned_port(), request->uid());
+        request->ssh_remote_port(), request->ssh_remote_address(),
+        request->uid());
 
     response->set_from_user(true);
-
-    TaskInfoOfUid info{};
-    bool ok = g_task_mgr->QueryTaskInfoOfUidAsync(request->uid(), &info);
-    if (ok) {
-      CRANE_TRACE(
-          "Found a task #{} belonging to uid {}. "
-          "This ssh session process is going to be moved into the task's "
-          "cgroup {}.",
-          info.first_task_id, request->uid(), info.cgroup_path);
-      response->set_task_id(info.first_task_id);
-      response->set_cgroup_path(info.cgroup_path);
-      response->set_ok(true);
-    } else {
-      CRANE_TRACE(
-          "This ssh session can't be moved into uid {}'s tasks. "
-          "This uid has {} task(s) and cgroup found: {}. "
-          "Reject this ssh request.",
-          request->uid(), info.job_cnt, info.cgroup_exists);
-      response->set_ok(false);
-    }
-    return Status::OK;
+    crane_service_port = kCforedDefaultPort;
   }
 
-  CRANE_TRACE(
-      "Receive QueryTaskIdFromPortForward from Pam module: "
-      "ssh_remote_port: {}, craned_address: {}, craned_port: {}. "
-      "This ssh comes from a CraneD node. uid: {}",
-      request->ssh_remote_port(), request->target_craned_address(),
-      request->target_craned_port(), request->uid());
-  // In the addresses of CraneD nodes. This ssh request comes from a CraneD
-  // node. Check if the remote port belongs to a task. If so, move it in to the
-  // cgroup of this task. If not so, check uid again or reject this ssh request.
+  std::shared_ptr<Channel> channel_of_remote_service;
+  if (g_config.ListenConf.UseTls) {
+    std::string remote_hostname;
+    ok = crane::ResolveHostnameFromIpv4(request->ssh_remote_address(),
+                                        &remote_hostname);
+    if (ok) {
+      CRANE_TRACE("Remote address {} was resolved as {}",
+                  request->ssh_remote_address(), remote_hostname);
 
-  std::string target_craned = fmt::format(
-      "{}:{}", request->target_craned_address(), request->target_craned_port());
-  std::shared_ptr<Channel> channel_of_remote_craned =
-      grpc::CreateChannel(target_craned, grpc::InsecureChannelCredentials());
+      std::string target_service =
+          fmt::format("{}.{}:{}", remote_hostname,
+                      g_config.ListenConf.DomainSuffix, crane_service_port);
 
-  std::unique_ptr<crane::grpc::Craned::Stub> stub_of_remote_craned =
-      crane::grpc::Craned::NewStub(channel_of_remote_craned);
+      grpc::SslCredentialsOptions ssl_opts;
+      // pem_root_certs is actually the certificate of server side rather than
+      // CA certificate. CA certificate is not needed.
+      // Since we use the same cert/key pair for both cranectld/craned,
+      // pem_root_certs is set to the same certificate.
+      ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
+      ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
+      ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
 
-  crane::grpc::QueryTaskIdFromPortRequest request_to_remote_craned;
-  crane::grpc::QueryTaskIdFromPortReply reply_from_remote_craned;
-  ClientContext context_of_remote_craned;
-  Status status_remote_craned;
+      channel_of_remote_service =
+          grpc::CreateChannel(target_service, grpc::SslCredentials(ssl_opts));
+    } else {
+      CRANE_ERROR("Failed to resolve remote address {}.",
+                  request->ssh_remote_address());
+    }
+  } else {
+    std::string target_service =
+        fmt::format("{}:{}", request->ssh_remote_address(), crane_service_port);
+    channel_of_remote_service =
+        grpc::CreateChannel(target_service, grpc::InsecureChannelCredentials());
+  }
 
-  request_to_remote_craned.set_port(request->ssh_remote_port());
-
-  status_remote_craned = stub_of_remote_craned->QueryTaskIdFromPort(
-      &context_of_remote_craned, request_to_remote_craned,
-      &reply_from_remote_craned);
-  if (!status_remote_craned.ok()) {
-    CRANE_ERROR("QueryTaskIdFromPort gRPC call failed: {} | {}",
-                status_remote_craned.error_message(),
-                status_remote_craned.error_details());
+  if (!channel_of_remote_service) {
+    CRANE_ERROR("Failed to create channel to {}.",
+                request->ssh_remote_address());
     response->set_ok(false);
     return Status::OK;
   }
 
-  if (reply_from_remote_craned.ok()) {
+  crane::grpc::QueryTaskIdFromPortRequest request_to_remote_service;
+  crane::grpc::QueryTaskIdFromPortReply reply_from_remote_service;
+  ClientContext context_of_remote_service;
+  Status status_remote_service;
+
+  request_to_remote_service.set_port(request->ssh_remote_port());
+
+  if (remote_is_craned) {
+    std::unique_ptr<crane::grpc::Craned::Stub> stub_of_remote_craned =
+        crane::grpc::Craned::NewStub(channel_of_remote_service);
+    status_remote_service = stub_of_remote_craned->QueryTaskIdFromPort(
+        &context_of_remote_service, request_to_remote_service,
+        &reply_from_remote_service);
+  } else {
+    std::unique_ptr<crane::grpc::CraneForeD::Stub> stub_of_remote_cfored =
+        crane::grpc::CraneForeD::NewStub(channel_of_remote_service);
+    status_remote_service = stub_of_remote_cfored->QueryTaskIdFromPort(
+        &context_of_remote_service, request_to_remote_service,
+        &reply_from_remote_service);
+  }
+
+  if (!status_remote_service.ok()) {
+    CRANE_WARN("QueryTaskIdFromPort gRPC call failed: {}. Remote is craned: {}",
+               status_remote_service.error_message(), remote_is_craned);
+  }
+
+  if (status_remote_service.ok() && reply_from_remote_service.ok()) {
+    response->set_ok(true);
+    response->set_task_id(reply_from_remote_service.task_id());
+
     util::Cgroup *cg;
-    if (g_task_mgr->QueryCgOfTaskIdAsync(reply_from_remote_craned.task_id(),
+    if (g_task_mgr->QueryCgOfTaskIdAsync(reply_from_remote_service.task_id(),
                                          &cg)) {
       CRANE_TRACE(
           "ssh client with remote port {} belongs to task #{}. "
           "Moving this ssh session process into the task's cgroup",
-          request->ssh_remote_port(), reply_from_remote_craned.task_id());
+          request->ssh_remote_port(), reply_from_remote_service.task_id());
 
       response->set_ok(true);
-      response->set_task_id(reply_from_remote_craned.task_id());
+      response->set_task_id(reply_from_remote_service.task_id());
       response->set_cgroup_path(cg->GetCgroupString());
     } else {
       CRANE_TRACE(
           "ssh client with remote port {} belongs to task #{}. "
           "But the task's cgroup is not found. Reject this ssh request",
-          request->ssh_remote_port(), reply_from_remote_craned.task_id());
+          request->ssh_remote_port(), reply_from_remote_service.task_id());
       response->set_ok(false);
     }
 
     return Status::OK;
   } else {
     TaskInfoOfUid info{};
-    bool ok = g_task_mgr->QueryTaskInfoOfUidAsync(request->uid(), &info);
+    ok = g_task_mgr->QueryTaskInfoOfUidAsync(request->uid(), &info);
     if (ok) {
       CRANE_TRACE(
           "Found a task #{} belonging to uid {}. "

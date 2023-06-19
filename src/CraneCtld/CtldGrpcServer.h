@@ -48,7 +48,7 @@ class CforedStreamWriter {
   }
 
   bool WriteTaskResAllocReply(task_id_t task_id,
-                              result::result<void, std::string> res) {
+                              result::result<std::string, std::string> res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -59,6 +59,7 @@ class CforedStreamWriter {
 
     if (res.has_value()) {
       task_res_alloc_reply->set_ok(true);
+      task_res_alloc_reply->set_allocated_craned_regex(std::move(res.value()));
     } else {
       task_res_alloc_reply->set_ok(false);
       task_res_alloc_reply->set_failure_reason(std::move(res.error()));

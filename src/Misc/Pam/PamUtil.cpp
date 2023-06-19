@@ -186,8 +186,7 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, uint8_t addr[4],
 }
 
 bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
-                             const std::string &craned_address,
-                             const std::string &craned_port,
+                             const std::string &remote_address,
                              uint16_t port_to_query, uint32_t *task_id,
                              std::string *cgroup_path) {
   using grpc::Channel;
@@ -226,8 +225,7 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
   ClientContext context;
   Status status;
 
-  request.set_target_craned_address(craned_address);
-  request.set_target_craned_port(craned_port);
+  request.set_ssh_remote_address(remote_address);
   request.set_ssh_remote_port(port_to_query);
   request.set_uid(uid);
 

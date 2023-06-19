@@ -56,3 +56,4 @@
 
 // Include the header which defines the static log level
 #include "crane/Logger.h"
+#include "crane/Network.h"

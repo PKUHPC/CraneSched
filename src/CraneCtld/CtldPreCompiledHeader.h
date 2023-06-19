@@ -63,9 +63,6 @@
 // Concurrent queue
 #include <concurrentqueue/concurrentqueue.h>
 
-// pevents
-#include <pevents/pevents.h>
-
 // result
 #include <result/result.hpp>
 

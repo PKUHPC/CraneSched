@@ -130,6 +130,8 @@ message TaskToD {
 
   repeated string allocated_nodes = 14;
 
+  string name = 15;
+
   uint32 node_num = 21;
   uint32 ntasks_per_node = 22;
   uint32 cpus_per_task = 23;

@@ -791,7 +791,6 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
           std::make_unique<ProcessInstance>(sh_path, std::list<std::string>());
 
       /* Perform file name substitutions
-       * %A - Job array's master job allocation number.
        * %j - Job ID
        * %u - User name
        * %x - Job name
@@ -822,7 +821,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
       // Replace the format strings.
       absl::StrReplaceAll({{"%j", std::to_string(instance->task.task_id())},
-                           {"%u", instance->pwd_entry.Username()}},
+                           {"%u", instance->pwd_entry.Username()},
+                           {"%x", instance->task.name()}},
                           &process->batch_meta.parsed_output_file_pattern);
 
       auto output_cb = [](std::string&& buf, void* data) {
