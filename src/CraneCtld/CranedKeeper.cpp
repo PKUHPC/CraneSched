@@ -198,8 +198,7 @@ CraneErr CranedStub::CheckTaskStatus(task_id_t task_id,
 
   if (!grpc_status.ok()) {
     CRANE_DEBUG(
-        "CheckIfTaskIsRunningOrFinished gRPC for Node {} returned with status "
-        "not ok: {}",
+        "CheckTaskStatus gRPC for Node {} returned with status not ok: {}",
         m_craned_id_, grpc_status.error_message());
     return CraneErr::kRpcFailure;
   }

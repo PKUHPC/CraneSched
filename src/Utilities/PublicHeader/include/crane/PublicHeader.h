@@ -67,7 +67,7 @@ enum ExitCodeEnum : uint16_t {
   kExitCodeCgroupError,
   kExitCodeFileNotFound,
   kExitCodeSpawnProcessFail,
-  kExitCodeTimeout,
+  kExitCodeExceedTimeLimit,
 
   __MAX_EXIT_CODE  // NOLINT(bugprone-reserved-identifier)
 };

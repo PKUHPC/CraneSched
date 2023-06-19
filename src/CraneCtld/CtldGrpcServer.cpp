@@ -127,7 +127,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     return grpc::Status::OK;
   }
 
-  // Query finished tasks in Embedded database
+  // Query completed tasks in Embedded database
   bool ok;
 
   std::list<crane::grpc::TaskInEmbeddedDb> ended_list;

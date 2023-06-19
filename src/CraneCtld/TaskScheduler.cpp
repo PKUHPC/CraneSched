@@ -90,7 +90,7 @@ bool TaskScheduler::Init() {
                 "queue.",
                 task_id, crane::grpc::TaskStatus_Name(status));
 
-            if (status != crane::grpc::Finished) {
+            if (status != crane::grpc::Completed) {
               // Check whether the task is orphaned on the allocated nodes
               // in case that when processing TaskStatusChange CraneCtld
               // crashed, only part of Craned nodes executed TerminateTask gRPC.
@@ -487,18 +487,18 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
     // received.
     meta.has_been_terminated_on_craned = true;
 
-    if (new_status == crane::grpc::Timeout) {
+    if (new_status == crane::grpc::ExceedTimeLimit) {
       meta.has_been_cancelled_on_front_end = true;
       meta.cb_task_cancel(task->TaskId());
-      task->SetStatus(crane::grpc::Timeout);
+      task->SetStatus(crane::grpc::ExceedTimeLimit);
     } else {
-      task->SetStatus(crane::grpc::Finished);
+      task->SetStatus(crane::grpc::Completed);
     }
 
     meta.cb_task_completed(task->TaskId());
   } else {
-    if (new_status == crane::grpc::Finished) {
-      task->SetStatus(crane::grpc::Finished);
+    if (new_status == crane::grpc::Completed) {
+      task->SetStatus(crane::grpc::Completed);
     } else if (new_status == crane::grpc::Cancelled) {
       task->SetStatus(crane::grpc::Cancelled);
     } else {
@@ -542,7 +542,7 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
   }
 
   // As for now, task status change includes only
-  // Pending / Running -> Finished / Failed / Cancelled.
+  // Pending / Running -> Completed / Failed / Cancelled.
   // It means all task status changes will put the task into mongodb,
   // so we don't have any branch code here and just put it into mongodb.
 

@@ -315,7 +315,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
                       std::nullopt);
                 else if (instance->terminated_by_timeout)
                   this_->EvActivateTaskStatusChange_(
-                      task_id, crane::grpc::TaskStatus::Timeout,
+                      task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
                       sigchld_info.value + ExitCode::kTerminationSignalBase,
                       std::nullopt);
                 else
@@ -325,19 +325,19 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
                       std::nullopt);
               } else
                 this_->EvActivateTaskStatusChange_(
-                    task_id, crane::grpc::TaskStatus::Finished,
+                    task_id, crane::grpc::TaskStatus::Completed,
                     sigchld_info.value, std::nullopt);
             } else {
               // For a COMPLETING Interactive task with a process running, the
               // end of this process means that this task is done.
               if (sigchld_info.is_terminated_by_signal) {
                 this_->EvActivateTaskStatusChange_(
-                    task_id, crane::grpc::TaskStatus::Finished,
+                    task_id, crane::grpc::TaskStatus::Completed,
                     sigchld_info.value + ExitCode::kTerminationSignalBase,
                     std::nullopt);
               } else {
                 this_->EvActivateTaskStatusChange_(
-                    task_id, crane::grpc::TaskStatus::Finished,
+                    task_id, crane::grpc::TaskStatus::Completed,
                     sigchld_info.value, std::nullopt);
               }
             }
@@ -1006,8 +1006,8 @@ void TaskManager::EvOnTimerCb_(int, short, void* arg_) {
     event_active(this_->m_ev_task_terminate_, 0, 0);
   } else {
     this_->EvActivateTaskStatusChange_(
-        task_id, crane::grpc::TaskStatus::Timeout, ExitCode::kExitCodeTimeout,
-        std::nullopt);
+        task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+        ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
   }
 }
 
@@ -1043,7 +1043,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
         KillProcessInstance_(pr_instance.get(), sig);
     } else if (task_instance->task.type() == crane::grpc::Interactive) {
       // For an Interactive task with no process running, it ends immediately.
-      this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Finished,
+      this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Completed,
                                          ExitCode::kExitCodeTerminal,
                                          std::nullopt);
     }

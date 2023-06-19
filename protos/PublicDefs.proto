@@ -41,9 +41,9 @@ enum CranedState{
 enum TaskStatus {
   Pending = 0;
   Running = 1;
-  Finished = 2;
+  Completed = 2;
   Failed = 3;
-  Timeout = 4;
+  ExceedTimeLimit = 4;
   Cancelled = 5;
 
   Invalid = 15;

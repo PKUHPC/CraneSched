@@ -285,7 +285,7 @@ class TaskManager {
   /**
    * Inform CraneCtld of the status change of a task.
    * This method is called when the status of a task is changed:
-   * 1. A task is finished successfully. It means that this task returns
+   * 1. A task is completed successfully. It means that this task returns
    *  normally with 0 or a non-zero code. (EvSigchldCb_)
    * 2. A task is killed by a signal. In this case, the task is considered
    *  failed. (EvSigchldCb_)
