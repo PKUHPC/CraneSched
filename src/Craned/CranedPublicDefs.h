@@ -22,7 +22,7 @@ struct TaskInfoOfUid {
   std::string cgroup_path;
 };
 
-struct Node {
+struct CranedNode {
   uint32_t cpu;
   uint64_t memory_bytes;
 };
@@ -59,8 +59,8 @@ struct Config {
   std::string Hostname;
   CranedId CranedIdOfThisNode;
 
-  std::unordered_map<std::string, std::string> Ipv4ToNodesHostname;
-  std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
+  std::unordered_map<std::string, std::string> Ipv4ToCranedHostname;
+  std::unordered_map<std::string, std::shared_ptr<CranedNode>> CranedNodes;
   std::unordered_map<std::string, Partition> Partitions;
 };
 

@@ -123,11 +123,8 @@ struct TaskInstance {
   PasswordEntry pwd_entry;
   BatchMetaInTaskInstance batch_meta;
 
-  // Todo: If batch task runs only on first allocated node, this field is
-  //  useless.
-  bool already_failed{false};
-
   bool cancelled_by_user{false};
+  bool terminated_by_timeout{false};
 
   bool orphaned{false};
 
@@ -152,7 +149,7 @@ class TaskManager {
 
   CraneErr ExecuteTaskAsync(crane::grpc::TaskToD task);
 
-  CraneErr SpawnInteractiveTaskAsync(
+  [[deprecated]] CraneErr SpawnInteractiveTaskAsync(
       uint32_t task_id, std::string executive_path,
       std::list<std::string> arguments,
       std::function<void(std::string&&, void*)> output_cb,
@@ -238,8 +235,10 @@ class TaskManager {
 
   struct EvQueueTaskTerminate {
     uint32_t task_id{0};
-    bool terminated_by_user{false};  // If the task is canceled by user,
-                                     // task->status=Cancelled
+    bool terminated_by_user{false};     // If the task is canceled by user,
+                                        // task->status=Cancelled
+    bool terminated_by_timeout{false};  // If the task is canceled by user,
+                                        // task->status=Timeout
     bool mark_as_orphaned{false};
   };
 
@@ -286,7 +285,7 @@ class TaskManager {
   /**
    * Inform CraneCtld of the status change of a task.
    * This method is called when the status of a task is changed:
-   * 1. A task is finished successfully. It means that this task returns
+   * 1. A task is completed successfully. It means that this task returns
    *  normally with 0 or a non-zero code. (EvSigchldCb_)
    * 2. A task is killed by a signal. In this case, the task is considered
    *  failed. (EvSigchldCb_)

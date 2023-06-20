@@ -79,10 +79,8 @@ class AccountManager {
 
   bool CheckEnableState(const std::string& account, const std::string& user);
 
-  Result CheckAndApplyQosLimitOnTask(const std::string& user,
-                                     const std::string& account,
-                                     TaskInCtld* task);
-
+  result::result<void, std::string> CheckAndApplyQosLimitOnTask(
+      const std::string& user, const std::string& account, TaskInCtld* task);
 
   Result FindUserLevelAccountOfUid(uint32_t uid, User::AdminLevel* level,
                                    std::string* account);

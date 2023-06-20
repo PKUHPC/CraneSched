@@ -296,11 +296,9 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
           this_->m_pid_proc_map_.erase(proc_iter);
 
           if (!instance->processes.empty()) {
-            if (sigchld_info.is_terminated_by_signal &&
-                !instance->already_failed) {
+            if (sigchld_info.is_terminated_by_signal) {
               // If a task is terminated by a signal and there are other
               //  running processes belonging to this task, kill them.
-              instance->already_failed = true;
               this_->TerminateTaskAsync(task_id);
             }
           } else if (!instance->orphaned) {
@@ -315,6 +313,11 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
                       task_id, crane::grpc::TaskStatus::Cancelled,
                       sigchld_info.value + ExitCode::kTerminationSignalBase,
                       std::nullopt);
+                else if (instance->terminated_by_timeout)
+                  this_->EvActivateTaskStatusChange_(
+                      task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+                      sigchld_info.value + ExitCode::kTerminationSignalBase,
+                      std::nullopt);
                 else
                   this_->EvActivateTaskStatusChange_(
                       task_id, crane::grpc::TaskStatus::Failed,
@@ -322,19 +325,19 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
                       std::nullopt);
               } else
                 this_->EvActivateTaskStatusChange_(
-                    task_id, crane::grpc::TaskStatus::Finished,
+                    task_id, crane::grpc::TaskStatus::Completed,
                     sigchld_info.value, std::nullopt);
             } else {
               // For a COMPLETING Interactive task with a process running, the
               // end of this process means that this task is done.
               if (sigchld_info.is_terminated_by_signal) {
                 this_->EvActivateTaskStatusChange_(
-                    task_id, crane::grpc::TaskStatus::Finished,
+                    task_id, crane::grpc::TaskStatus::Completed,
                     sigchld_info.value + ExitCode::kTerminationSignalBase,
                     std::nullopt);
               } else {
                 this_->EvActivateTaskStatusChange_(
-                    task_id, crane::grpc::TaskStatus::Finished,
+                    task_id, crane::grpc::TaskStatus::Completed,
                     sigchld_info.value, std::nullopt);
               }
             }
@@ -631,6 +634,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(
       std::abort();
     }
 
+    dup2(out_fd, 1);  // stdout -> output file
+    dup2(out_fd, 2);  // stderr -> output file
+    close(out_fd);
+
     child_process_ready.set_ok(true);
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
     ok &= ostream.Flush();
@@ -641,22 +648,23 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 
     close(fd);
 
-    dup2(out_fd, 1);  // stdout -> output file
-    dup2(out_fd, 2);  // stderr -> output file
-    close(out_fd);
-
     // If these file descriptors are not closed, a program like mpirun may
     // keep waiting for the input from stdin or other fds and will never end.
     close(0);  // close stdin
     util::CloseFdFrom(3);
 
-    std::vector<std::string> env_vec =
-        absl::StrSplit(instance->task.env(), "||");
+    // std::vector<std::string> env_vec =
+    //     absl::StrSplit(instance->task.env(), "||");
+    std::vector<std::string> env_vec;
 
     std::string nodelist = absl::StrJoin(instance->task.allocated_nodes(), ";");
     std::string nodelist_env = fmt::format("CRANE_JOB_NODELIST={}", nodelist);
 
     env_vec.emplace_back(nodelist_env);
+
+    if (clearenv()) {
+      fmt::print("clearenv() failed!\n");
+    }
 
     for (const auto& str : env_vec) {
       auto pos = str.find_first_of('=');
@@ -664,21 +672,21 @@ CraneErr TaskManager::SpawnProcessInInstance_(
         std::string name = str.substr(0, pos);
         std::string value = str.substr(pos + 1);
         if (setenv(name.c_str(), value.c_str(), 1)) {
-          // fmt::print("set environ failed!\n");
+          fmt::print("setenv for {}={} failed!\n", name, value);
         }
       }
     }
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
-    argv.push_back(process->GetExecPath().c_str());
+    argv.emplace_back("--login");
+    argv.emplace_back(process->GetExecPath().c_str());
     for (auto&& arg : process->GetArgList()) {
       argv.push_back(arg.c_str());
     }
     argv.push_back(nullptr);
 
-    execv(process->GetExecPath().c_str(),
-          const_cast<char* const*>(argv.data()));
+    execv("/bin/bash", const_cast<char* const*>(argv.data()));
 
     // Error occurred since execv returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.
@@ -788,7 +796,6 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
           std::make_unique<ProcessInstance>(sh_path, std::list<std::string>());
 
       /* Perform file name substitutions
-       * %A - Job array's master job allocation number.
        * %j - Job ID
        * %u - User name
        * %x - Job name
@@ -819,7 +826,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
       // Replace the format strings.
       absl::StrReplaceAll({{"%j", std::to_string(instance->task.task_id())},
-                           {"%u", instance->pwd_entry.Username()}},
+                           {"%u", instance->pwd_entry.Username()},
+                           {"%x", instance->task.name()}},
                           &process->batch_meta.parsed_output_file_pattern);
 
       auto output_cb = [](std::string&& buf, void* data) {
@@ -837,12 +845,12 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
             fmt::format(
                 "Cannot spawn a new process inside the instance of task #{}",
                 instance->task.task_id()));
-      } else {
-        // Add a timer to limit the execution time of a task.
-        this_->EvAddTerminationTimer_(instance,
-                                      instance->task.time_limit().seconds());
       }
     }
+
+    // Add a timer to limit the execution time of a task.
+    this_->EvAddTerminationTimer_(instance,
+                                  instance->task.time_limit().seconds());
   }
 }
 
@@ -852,14 +860,6 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
 
   TaskStatusChange status_change;
   while (this_->m_task_status_change_queue_.try_dequeue(status_change)) {
-    CRANE_ASSERT_MSG_VA(
-        status_change.new_status == crane::grpc::TaskStatus::Finished ||
-            status_change.new_status == crane::grpc::TaskStatus::Failed ||
-            status_change.new_status == crane::grpc::TaskStatus::Cancelled,
-        "Task #{}: When TaskStatusChange event is triggered, the task should "
-        "either be Finished, Failed or Cancelled. new_status = {}",
-        status_change.task_id, status_change.new_status);
-
     CRANE_DEBUG(R"(Destroying Task structure for "{}".)"
                 R"(Task new status: {})",
                 status_change.task_id, status_change.new_status);
@@ -995,15 +995,25 @@ void TaskManager::EvGrpcQueryTaskIdFromPidCb_(int efd, short events,
 void TaskManager::EvOnTimerCb_(int, short, void* arg_) {
   auto* arg = reinterpret_cast<EvTimerCbArg*>(arg_);
   TaskManager* this_ = arg->task_manager;
+  task_id_t task_id = arg->task_instance->task.task_id();
 
   CRANE_TRACE("Task #{} exceeded its time limit. Terminating it...",
               arg->task_instance->task.task_id());
 
-  EvQueueTaskTerminate ev_task_terminate{arg->task_instance->task.task_id()};
-  this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
-  event_active(this_->m_ev_task_terminate_, 0, 0);
-
   this_->EvDelTerminationTimer_(arg->task_instance);
+
+  if (arg->task_instance->task.type() == crane::grpc::Batch) {
+    EvQueueTaskTerminate ev_task_terminate{
+        .task_id = arg->task_instance->task.task_id(),
+        .terminated_by_timeout = true,
+    };
+    this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
+    event_active(this_->m_ev_task_terminate_, 0, 0);
+  } else {
+    this_->EvActivateTaskStatusChange_(
+        task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+        ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
+  }
 }
 
 void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
@@ -1026,6 +1036,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
 
     if (elem.terminated_by_user) task_instance->cancelled_by_user = true;
     if (elem.mark_as_orphaned) task_instance->orphaned = true;
+    if (elem.terminated_by_timeout) task_instance->terminated_by_timeout = true;
 
     int sig = SIGTERM;  // For BatchTask
     if (task_instance->task.type() == crane::grpc::Interactive) sig = SIGHUP;
@@ -1037,7 +1048,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
         KillProcessInstance_(pr_instance.get(), sig);
     } else if (task_instance->task.type() == crane::grpc::Interactive) {
       // For an Interactive task with no process running, it ends immediately.
-      this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Finished,
+      this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Completed,
                                          ExitCode::kExitCodeTerminal,
                                          std::nullopt);
     }

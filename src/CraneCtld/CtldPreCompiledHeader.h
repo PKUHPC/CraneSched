@@ -51,11 +51,20 @@
 #  include <boost/uuid/uuid_hash.hpp>
 #endif
 
+// Thread pool
+#include <BS_thread_pool.hpp>
+
 // gRPC
 #include <grpc++/grpc++.h>
 
 // Ranges-v3
 #include <range/v3/all.hpp>
+
+// Concurrent queue
+#include <concurrentqueue/concurrentqueue.h>
+
+// result
+#include <result/result.hpp>
 
 #include "crane/Logger.h"
 // Logger.h must be the first

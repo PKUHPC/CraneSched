@@ -5,6 +5,8 @@
 
 namespace Ctld {
 
+using moodycamel::ConcurrentQueue;
+
 using task_db_id_t = int64_t;
 
 constexpr uint64_t kTaskScheduleIntervalMs = 1000;
@@ -60,12 +62,8 @@ struct Config {
 inline Ctld::Config g_config;
 
 namespace Ctld {
-struct InteractiveTaskAllocationDetail {
-  CranedId craned_id;
-  std::string ipv4_addr;
-  uint32_t port;
-  boost::uuids::uuid resource_uuid;
-};
+
+namespace result = cpp_result;
 
 /**
  * The static information on a Craned (the static part of CranedMeta). This
@@ -122,7 +120,30 @@ struct PartitionMeta {
 };
 
 struct InteractiveMetaInTask {
-  boost::uuids::uuid resource_uuid;
+  std::function<void(task_id_t, std::string const&)> cb_task_res_allocated;
+  std::function<void(task_id_t)> cb_task_completed;
+  std::function<void(task_id_t)> cb_task_cancel;
+
+  // ccancel for an interactive task should call the front end to kill the
+  // user's shell, let Cfored to inform CraneCtld of task completion rather than
+  // directly sending TerminateTask to its craned node.
+  // However, when TIMEOUT event on its craned node happens, Cranectld should
+  // also send TaskCancelRequest to the front end. So we need a flag
+  // ` has_been_cancelled_on_front_end` to record whether the front end for the
+  // task has been sent a TaskCancelRequest and a flag
+  // `has_been_terminated_on_craned` to record whether the task resource
+  // (cgroup) has been destroyed on its craned node.
+  //
+  // If `has_been_cancelled` is true, no more TaskCancelRequest should be sent
+  // to the front end. It is set when the user runs ccancel command or the
+  // timeout event has been triggered on the craned node.
+  //
+  // If `has_been_terminated_on_craned` is true, no more TerminateTask RPC
+  // should be sent to its craned node. It is set when the timeout event is
+  // triggered on the craned node or a TaskTerminate RPC has been sent
+  // (triggered by either normal shell exit or ccancel).
+  std::atomic<bool> has_been_cancelled_on_front_end{false};
+  std::atomic<bool> has_been_terminated_on_craned{false};
 };
 
 struct BatchMetaInTask {
@@ -292,10 +313,10 @@ struct TaskInCtld {
     type = val.type();
 
     if (type == crane::grpc::Batch) {
-      meta = BatchMetaInTask{};
-      auto& batch_meta = std::get<BatchMetaInTask>(meta);
-      batch_meta.sh_script = val.batch_meta().sh_script();
-      batch_meta.output_file_pattern = val.batch_meta().output_file_pattern();
+      meta.emplace<BatchMetaInTask>(BatchMetaInTask{
+          .sh_script = val.batch_meta().sh_script(),
+          .output_file_pattern = val.batch_meta().output_file_pattern(),
+      });
     }
 
     node_num = val.node_num();
@@ -390,3 +411,5 @@ struct User {
 };
 
 }  // namespace Ctld
+
+inline std::unique_ptr<BS::thread_pool> g_thread_pool;

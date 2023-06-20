@@ -19,37 +19,6 @@ message StreamReplyResult {
   string reason = 2; // Set when failed
 }
 
-message InteractiveTaskAllocRequest {
-  Resources required_resources = 1;
-  string partition_name = 2;
-  uint64 time_limit_sec = 3;
-}
-
-message InteractiveTaskAllocReply {
-  bool ok = 1;
-  oneof payload {
-    uint32 task_id = 2;
-    string reason = 3;
-  }
-}
-
-message InteractiveTaskAllocationDetail {
-  /* Used to connect the Craned */
-  string craned_id = 1;
-  string ipv4_addr = 2;
-  uint32 port = 3;
-  bytes resource_uuid = 4;
-}
-
-message QueryInteractiveTaskAllocDetailRequest {
-  uint32 task_id = 1;
-}
-
-message QueryInteractiveTaskAllocDetailReply {
-  bool ok = 1;
-  InteractiveTaskAllocationDetail detail = 2;
-}
-
 message StreamRequestCheckResource {
   bytes resource_uuid = 1;
   uint32 task_id = 2;
@@ -253,9 +222,8 @@ message QueryTaskIdFromPortReply{
 
 message QueryTaskIdFromPortForwardRequest{
   uint32 ssh_remote_port = 1;
-  string target_craned_address = 2;
-  string target_craned_port = 3;
-  uint32 uid = 4;
+  string ssh_remote_address = 2;
+  uint32 uid = 3;
 }
 
 message QueryTaskIdFromPortForwardReply{
@@ -438,6 +406,157 @@ message QueryTasksInfoReply{
   repeated TaskInfo task_info_list = 2;
 }
 
+message StreamCallocRequest {
+  enum CallocRequestType {
+    TASK_REQUEST = 0;
+    TASK_COMPLETION_REQUEST = 1;
+  }
+
+  message TaskReq {
+    int32 calloc_pid = 1;
+    TaskToCtld task = 2;
+  }
+
+  message TaskCompleteReq {
+    uint32 task_id = 1;
+    TaskStatus status = 2;
+  }
+
+  CallocRequestType type = 1;
+
+  oneof payload {
+    TaskReq payload_task_req = 2;
+    TaskCompleteReq payload_task_complete_req = 3;
+  }
+}
+
+message StreamCforedReply {
+  enum CforedReplyType {
+    TASK_ID_REPLY = 0;
+    TASK_RES_ALLOC_REPLY = 1;
+    TASK_CANCEL_REQUEST = 2;
+    TASK_COMPLETION_ACK_REPLY = 3;
+  }
+
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  message TaskResAllocatedReply {
+    bool ok = 1;
+    string allocated_craned_regex = 2;
+  }
+
+  message TaskCancelRequest {
+    uint32 task_id = 1;
+  }
+
+  message TaskCompletionAckReply {
+    bool ok = 1;
+  }
+
+  CforedReplyType type = 1 ;
+
+  oneof payload {
+    TaskIdReply payload_task_id_reply = 2;
+    TaskResAllocatedReply payload_task_alloc_reply = 3;
+    TaskCancelRequest payload_task_cancel_request = 4;
+    TaskCompletionAckReply payload_task_completion_ack_reply = 5;
+  }
+}
+
+message StreamCforedRequest {
+  enum CforedRequestType {
+    CFORED_REGISTRATION = 0;
+    TASK_REQUEST = 1;
+    TASK_COMPLETION_REQUEST = 2;
+    CFORED_GRACEFUL_EXIT = 3;
+  }
+  CforedRequestType type = 1;
+
+  message CforedReg {
+    string cfored_name = 1;
+  }
+
+  message TaskReq {
+    string cfored_name = 1;
+    int32 pid = 2;
+    TaskToCtld task = 3;
+  }
+
+  message TaskCompleteReq {
+    string cfored_name = 1;
+    uint32 task_id = 2;
+    TaskStatus status = 3;
+  }
+
+  message GracefulExitReq {
+    string cfored_name = 1;
+  }
+
+  oneof payload {
+    CforedReg payload_cfored_reg = 2;
+    TaskReq payload_task_req = 3;
+    TaskCompleteReq payload_task_complete_req = 4;
+    GracefulExitReq payload_graceful_exit_req = 5;
+  }
+}
+
+message StreamCtldReply {
+  enum CtldReplyType {
+    TASK_ID_REPLY = 0;
+    TASK_RES_ALLOC_REPLY = 1;
+    TASK_CANCEL_REQUEST = 2;
+    TASK_COMPLETION_ACK_REPLY = 3;
+    CFORED_REGISTRATION_ACK = 4;
+    CFORED_GRACEFUL_EXIT_ACK = 5;
+  }
+
+  message TaskIdReply {
+    int32 pid = 1;
+    bool ok = 2;
+    uint32 task_id = 3;
+    string failure_reason = 4;
+  }
+
+  message TaskResAllocatedReply {
+    uint32 task_id = 1;
+    bool ok = 2;
+    string allocated_craned_regex = 3;
+    string failure_reason = 4;
+  }
+
+  message TaskCancelRequest {
+    uint32 task_id = 1;
+  }
+
+  message TaskCompletionAckReply {
+    uint32 task_id = 1;
+  }
+
+  message CforedRegistrationAck {
+    bool ok = 1;
+    string failure_reason = 2;
+  }
+
+  message CforedGracefulExitAck {
+    bool ok = 1;
+  }
+
+  CtldReplyType type = 1;
+
+  oneof payload {
+    CforedRegistrationAck payload_cfored_reg_ack = 2;
+    TaskResAllocatedReply payload_task_res_alloc_reply = 3;
+    TaskCancelRequest payload_task_cancel_request = 4;
+    TaskCompletionAckReply payload_task_completion_ack = 5;
+    TaskIdReply payload_task_id_reply = 6;
+    CforedGracefulExitAck payload_graceful_exit_ack = 7;
+  }
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -445,15 +564,11 @@ service CraneCtld {
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
 
+  /* RPCs called from Cfored */
+  rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
 
-  /* RPCs called from SrunX */
-  /* When SrunX request an interactive job, it will first request SrunX to allocate
-     an interactive task and get the related meta information. */
-  rpc AllocateInteractiveTask(InteractiveTaskAllocRequest) returns (InteractiveTaskAllocReply);
-  rpc QueryInteractiveTaskAllocDetail(QueryInteractiveTaskAllocDetailRequest) returns (QueryInteractiveTaskAllocDetailReply);
-
+  /* RPCs called from ccancel */
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
-
 
   /* RPCs called from cbatch */
   rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
@@ -483,7 +598,6 @@ service CraneCtld {
 
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
-  // Todo: Granting and revoking Resource UUID can be merged into ExecuteTask and TerminateTask. Remove this two RPC.
 
   /* If the task is a batch task, it will run immediately.
      If the task is an interactive task, craned will just allocate the resource and waiting for
@@ -516,4 +630,9 @@ service Craned {
 
   /* ----------------------------------- Called from SrunX --------------------------------------------------------- */
   rpc SrunXStream(stream SrunXStreamRequest) returns (stream SrunXStreamReply);
+}
+
+service CraneForeD {
+  rpc CallocStream(stream StreamCallocRequest) returns(stream StreamCforedReply);
+  rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
 }

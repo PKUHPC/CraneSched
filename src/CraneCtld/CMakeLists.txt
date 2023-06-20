@@ -23,6 +23,7 @@ target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 target_link_libraries(cranectld
         spdlog::spdlog
         concurrentqueue
+        pevents
 
         Utility_cgroup
         Utility_PublicHeader
@@ -41,11 +42,14 @@ target_link_libraries(cranectld
 
         crane_proto_lib
 
+        bs_thread_pool
+
         yaml-cpp
         mongocxx_static
         unqlite
 
         range-v3::range-v3
+        result
         )
 
 # Linker flag for c++ 17 filesystem library

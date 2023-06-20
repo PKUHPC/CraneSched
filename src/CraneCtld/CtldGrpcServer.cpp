@@ -10,150 +10,20 @@
 
 namespace Ctld {
 
-grpc::Status CraneCtldServiceImpl::AllocateInteractiveTask(
-    grpc::ServerContext *context,
-    const crane::grpc::InteractiveTaskAllocRequest *request,
-    crane::grpc::InteractiveTaskAllocReply *response) {
-  CraneErr err;
-  auto task = std::make_unique<TaskInCtld>();
-
-  task->partition_id = request->partition_name();
-  task->resources.allocatable_resource =
-      request->required_resources().allocatable_resource();
-  task->time_limit = absl::Seconds(request->time_limit_sec());
-  task->type = crane::grpc::Interactive;
-  task->meta = InteractiveMetaInTask{};
-
-  // Todo: Eliminate useless allocation here when err!=kOk.
-  uint32_t task_id;
-  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
-
-  if (err == CraneErr::kOk) {
-    response->set_ok(true);
-    response->set_task_id(task_id);
-  } else {
-    response->set_ok(false);
-    response->set_reason(err == CraneErr::kNonExistent
-                             ? "Partition doesn't exist!"
-                             : "Resource not enough!");
-  }
-
-  return grpc::Status::OK;
-}
-
 grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTaskRequest *request,
     crane::grpc::SubmitBatchTaskReply *response) {
-  CraneErr err;
-
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
-  if (!task->password_entry->Valid()) {
-    response->set_ok(false);
-    response->set_reason(
-        fmt::format("Uid {} not found on the controller node", task->uid));
-    return grpc::Status::OK;
-  }
-  task->SetUsername(task->password_entry->Username());
-
-  {  // Limit the lifecycle of user_scoped_ptr
-    auto user_scoped_ptr =
-        g_account_manager->GetExistedUserInfo(task->Username());
-    if (!user_scoped_ptr) {
-      response->set_ok(false);
-      response->set_reason(fmt::format(
-          "User '{}' not found in the account database", task->Username()));
-      return grpc::Status::OK;
-    }
-
-    if (task->account.empty()) {
-      task->account = user_scoped_ptr->default_account;
-      task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
-    } else {
-      if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
-        response->set_ok(false);
-        response->set_reason(fmt::format(
-            "Account '{}' is not in your account list", task->account));
-        return grpc::Status::OK;
-      }
-    }
-  }
-
-  if (!g_account_manager->CheckUserPermissionToPartition(
-          task->Username(), task->account, task->partition_id)) {
-    response->set_ok(false);
-    response->set_reason(fmt::format(
-        "The user '{}' don't have access to submit task in partition '{}'",
-        task->uid, task->partition_id));
-    return grpc::Status::OK;
-  }
-
-  if (!g_account_manager->CheckEnableState(task->account, task->Username())) {
-    response->set_ok(false);
-    response->set_reason(fmt::format(
-        "The user '{}' or the Ancestor account is disabled", task->Username()));
-    return grpc::Status::OK;
-  }
-
-  AccountManager::Result check_qos_result =
-      g_account_manager->CheckAndApplyQosLimitOnTask(task->Username(),
-                                                     task->account, task.get());
-  if (!check_qos_result.ok) {
-    response->set_ok(false);
-    response->set_reason(check_qos_result.reason);
-    return grpc::Status::OK;
-  }
-
-  uint32_t task_id;
-  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
-  if (err == CraneErr::kOk) {
+  auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
+  if (result.has_value()) {
     response->set_ok(true);
-    response->set_task_id(task_id);
-    CRANE_DEBUG("Received an batch task request. Task id allocated: {}",
-                task_id);
-  } else if (err == CraneErr::kNonExistent) {
-    response->set_ok(false);
-    response->set_reason("Partition doesn't exist!");
-    CRANE_DEBUG(
-        "Received an batch task request "
-        "but the allocation failed. Reason: Partition doesn't exist!");
-  } else if (err == CraneErr::kInvalidNodeNum) {
-    response->set_ok(false);
-    response->set_reason(
-        "--node is either invalid or greater than "
-        "the number of alive nodes in its partition.");
-    CRANE_DEBUG(
-        "Received an batch task request "
-        "but the allocation failed. Reason: --node is either invalid or "
-        "greater than the number of alive nodes in its partition.");
-  } else if (err == CraneErr::kNoResource) {
-    response->set_ok(false);
-    response->set_reason("The resources of the partition are insufficient");
-    CRANE_DEBUG(
-        "Received an batch task request "
-        "but the allocation failed. Reason: The resources of the partition are "
-        "insufficient.");
-  }
-
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::QueryInteractiveTaskAllocDetail(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryInteractiveTaskAllocDetailRequest *request,
-    crane::grpc::QueryInteractiveTaskAllocDetailReply *response) {
-  auto *detail = g_ctld_server->QueryAllocDetailOfIaTask(request->task_id());
-  if (detail) {
-    response->set_ok(true);
-    response->mutable_detail()->set_ipv4_addr(detail->ipv4_addr);
-    response->mutable_detail()->set_port(detail->port);
-    response->mutable_detail()->set_craned_id(detail->craned_id);
-    response->mutable_detail()->set_resource_uuid(detail->resource_uuid.data,
-                                                  detail->resource_uuid.size());
+    response->set_task_id(result.value());
   } else {
     response->set_ok(false);
+    response->set_reason(result.error());
   }
 
   return grpc::Status::OK;
@@ -163,24 +33,12 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
     grpc::ServerContext *context,
     const crane::grpc::TaskStatusChangeRequest *request,
     crane::grpc::TaskStatusChangeReply *response) {
-  crane::grpc::TaskStatus status{};
-  if (request->new_status() == crane::grpc::Finished)
-    status = crane::grpc::Finished;
-  else if (request->new_status() == crane::grpc::Failed)
-    status = crane::grpc::Failed;
-  else if (request->new_status() == crane::grpc::Cancelled)
-    status = crane::grpc::Cancelled;
-  else
-    CRANE_ERROR(
-        "Task #{}: When TaskStatusChange RPC is called, the task should either "
-        "be Finished, Failed or Cancelled. new_status = {}",
-        request->task_id(), request->new_status());
-
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
 
   g_task_scheduler->TaskStatusChange(request->task_id(), request->craned_id(),
-                                     status, request->exit_code(), reason);
+                                     request->new_status(),
+                                     request->exit_code(), reason);
   response->set_ok(true);
   return grpc::Status::OK;
 }
@@ -269,7 +127,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     return grpc::Status::OK;
   }
 
-  // Query finished tasks in Embedded database
+  // Query completed tasks in Embedded database
   bool ok;
 
   std::list<crane::grpc::TaskInEmbeddedDb> ended_list;
@@ -406,7 +264,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 
   // Query completed tasks in Mongodb
   // (only for cacct, which sets `option_include_completed_tasks` to true)
-  std::list<TaskInCtld> db_ended_list;
+  std::vector<std::unique_ptr<TaskInCtld>> db_ended_list;
   ok = g_db_client->FetchJobRecords(&db_ended_list,
                                     num_limit - task_list->size(), true);
   if (!ok) {
@@ -414,72 +272,75 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     return grpc::Status::OK;
   }
 
-  auto db_ended_append_fn = [&](TaskInCtld &task) {
+  auto db_ended_append_fn = [&](std::unique_ptr<TaskInCtld> const &task) {
     auto *task_it = task_list->Add();
 
-    task_it->set_type(task.type);
-    task_it->set_task_id(task.TaskId());
-    task_it->set_name(task.name);
-    task_it->set_partition(task.partition_id);
-    task_it->set_uid(task.uid);
+    task_it->set_type(task->type);
+    task_it->set_task_id(task->TaskId());
+    task_it->set_name(task->name);
+    task_it->set_partition(task->partition_id);
+    task_it->set_uid(task->uid);
 
-    task_it->set_gid(task.Gid());
-    task_it->mutable_time_limit()->set_seconds(ToInt64Seconds(task.time_limit));
-    task_it->mutable_start_time()->CopyFrom(task.PersistedPart().start_time());
-    task_it->mutable_end_time()->CopyFrom(task.PersistedPart().end_time());
-    task_it->set_account(task.account);
+    task_it->set_gid(task->Gid());
+    task_it->mutable_time_limit()->set_seconds(
+        ToInt64Seconds(task->time_limit));
+    task_it->mutable_start_time()->CopyFrom(task->PersistedPart().start_time());
+    task_it->mutable_end_time()->CopyFrom(task->PersistedPart().end_time());
+    task_it->set_account(task->account);
 
-    task_it->set_node_num(task.node_num);
-    task_it->set_cmd_line(task.cmd_line);
-    task_it->set_cwd(task.cwd);
-    task_it->set_username(task.PersistedPart().username());
-    task_it->set_qos(task.qos);
+    task_it->set_node_num(task->node_num);
+    task_it->set_cmd_line(task->cmd_line);
+    task_it->set_cwd(task->cwd);
+    task_it->set_username(task->PersistedPart().username());
+    task_it->set_qos(task->qos);
 
-    task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
-    task_it->set_exit_code(task.ExitCode());
+    task_it->set_alloc_cpus(task->resources.allocatable_resource.cpu_count);
+    task_it->set_exit_code(task->ExitCode());
 
-    task_it->set_status(task.Status());
-    task_it->set_craned_list(task.allocated_craneds_regex);
+    task_it->set_status(task->Status());
+    task_it->set_craned_list(task->allocated_craneds_regex);
   };
 
-  auto db_task_rng_filter_time = [&](TaskInCtld &task) {
+  auto db_task_rng_filter_time = [&](std::unique_ptr<TaskInCtld> const &task) {
     bool filter_start_time =
         no_start_time_constraint ||
-        task.PersistedPart().start_time() >= request->filter_start_time();
+        task->PersistedPart().start_time() >= request->filter_start_time();
     bool filter_end_time =
         no_end_time_constraint ||
-        task.PersistedPart().end_time() <= request->filter_end_time();
+        task->PersistedPart().end_time() <= request->filter_end_time();
     return filter_start_time && filter_end_time;
   };
-  auto db_task_rng_filter_account = [&](TaskInCtld &task) {
-    return no_accounts_constraint || req_accounts.contains(task.account);
+  auto db_task_rng_filter_account =
+      [&](std::unique_ptr<TaskInCtld> const &task) {
+        return no_accounts_constraint || req_accounts.contains(task->account);
+      };
+
+  auto db_task_rng_filter_user = [&](std::unique_ptr<TaskInCtld> const &task) {
+    return no_username_constraint || req_users.contains(task->Username());
   };
 
-  auto db_task_rng_filter_user = [&](TaskInCtld &task) {
-    return no_username_constraint || req_users.contains(task.Username());
-  };
-
-  auto db_task_rng_filter_name = [&](TaskInCtld &task) {
+  auto db_task_rng_filter_name = [&](std::unique_ptr<TaskInCtld> const &task) {
     return no_task_names_constraint ||
-           req_task_names.contains(task.TaskToCtld().name());
+           req_task_names.contains(task->TaskToCtld().name());
   };
 
-  auto db_task_rng_filter_qos = [&](TaskInCtld &task) {
-    return no_qos_constraint || req_qos.contains(task.qos);
+  auto db_task_rng_filter_qos = [&](std::unique_ptr<TaskInCtld> const &task) {
+    return no_qos_constraint || req_qos.contains(task->qos);
   };
 
-  auto db_task_rng_filter_partition = [&](TaskInCtld &task) {
-    return no_partitions_constraint ||
-           req_partitions.contains(task.TaskToCtld().partition_name());
+  auto db_task_rng_filter_partition =
+      [&](std::unique_ptr<TaskInCtld> const &task) {
+        return no_partitions_constraint ||
+               req_partitions.contains(task->TaskToCtld().partition_name());
+      };
+
+  auto db_task_rng_filter_id = [&](std::unique_ptr<TaskInCtld> const &task) {
+    return no_task_ids_constraint || req_task_ids.contains(task->TaskId());
   };
 
-  auto db_task_rng_filter_id = [&](TaskInCtld &task) {
-    return no_task_ids_constraint || req_task_ids.contains(task.TaskId());
-  };
-
-  auto db_task_rng_filter_state = [&](TaskInCtld &task) {
+  auto db_task_rng_filter_state = [&](std::unique_ptr<TaskInCtld> const &task) {
     return no_task_states_constraint ||
-           req_task_states.contains(task.PersistedPart().status());
+           req_task_states.contains(task->PersistedPart().status());
   };
 
   auto db_ended_rng = db_ended_list |
@@ -1133,6 +994,173 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::CforedStream(
+    grpc::ServerContext *context,
+    grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
+                             crane::grpc::StreamCforedRequest> *stream) {
+  using crane::grpc::StreamCforedRequest;
+  using crane::grpc::StreamCtldReply;
+  using grpc::Status;
+
+  enum class StreamState {
+    kWaitRegReq = 0,
+    kWaitMsg,
+    kCleanData,
+  };
+
+  CraneErr err;
+  bool ok;
+
+  StreamCforedRequest cfored_request;
+
+  CforedStreamWriter stream_writer(stream);
+  std::string cfored_name;
+
+  CRANE_TRACE("CforedStream from {} created.", context->peer());
+
+  StreamState state = StreamState::kWaitRegReq;
+  while (true) {
+    switch (state) {
+      case StreamState::kWaitRegReq:
+        ok = stream->Read(&cfored_request);
+        if (ok) {
+          if (cfored_request.type() !=
+              StreamCforedRequest::CFORED_REGISTRATION) {
+            CRANE_ERROR("Expect type CFORED_REGISTRATION from peer {}.",
+                        context->peer());
+            return Status::CANCELLED;
+          } else {
+            cfored_name = cfored_request.payload_cfored_reg().cfored_name();
+            CRANE_INFO("Cfored {} registered.", cfored_name);
+
+            ok = stream_writer.WriteCforedRegistrationAck({});
+            if (ok) {
+              state = StreamState::kWaitMsg;
+            } else {
+              CRANE_ERROR(
+                  "Failed to send msg to cfored {}. Connection is broken. "
+                  "Exiting...",
+                  cfored_name);
+              state = StreamState::kCleanData;
+            }
+          }
+        } else {
+          state = StreamState::kCleanData;
+        }
+
+        break;
+
+      case StreamState::kWaitMsg: {
+        ok = stream->Read(&cfored_request);
+        if (ok) {
+          switch (cfored_request.type()) {
+            case StreamCforedRequest::TASK_REQUEST: {
+              auto const &payload = cfored_request.payload_task_req();
+              auto task = std::make_unique<TaskInCtld>();
+              task->SetFieldsByTaskToCtld(payload.task());
+
+              auto &meta = std::get<InteractiveMetaInTask>(task->meta);
+              meta.cb_task_res_allocated =
+                  [writer = &stream_writer](
+                      task_id_t task_id,
+                      std::string const &allocated_craned_regex) {
+                    writer->WriteTaskResAllocReply(task_id,
+                                                   {allocated_craned_regex});
+                  };
+
+              meta.cb_task_cancel = [writer =
+                                         &stream_writer](task_id_t task_id) {
+                writer->WriteTaskCancelRequest(task_id);
+              };
+
+              meta.cb_task_completed = [&, cfored_name](task_id_t task_id) {
+                m_ctld_server_->m_mtx_.Lock();
+
+                // If cfored disconnected, the cfored_name should have be
+                // removed from the map and the task completion callback is
+                // generated from cleaning the remaining tasks by calling
+                // g_task_scheduler->TerminateTask(), we should ignore this
+                // callback since the task id has already been cleaned.
+                auto iter =
+                    m_ctld_server_->m_cfored_running_tasks_.find(cfored_name);
+                if (iter != m_ctld_server_->m_cfored_running_tasks_.end())
+                  iter->second.erase(task_id);
+                m_ctld_server_->m_mtx_.Unlock();
+              };
+
+              auto result =
+                  m_ctld_server_->SubmitTaskToScheduler(std::move(task));
+
+              ok = stream_writer.WriteTaskIdReply(payload.pid(), result);
+              if (!ok) {
+                CRANE_ERROR(
+                    "Failed to send msg to cfored {}. Connection is broken. "
+                    "Exiting...",
+                    cfored_name);
+                state = StreamState::kCleanData;
+              } else {
+                if (result.has_value()) {
+                  m_ctld_server_->m_mtx_.Lock();
+                  m_ctld_server_->m_cfored_running_tasks_[cfored_name].emplace(
+                      result.value());
+                  m_ctld_server_->m_mtx_.Unlock();
+                }
+              }
+            } break;
+
+            case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
+              auto const &payload = cfored_request.payload_task_complete_req();
+
+              g_task_scheduler->TerminateRunningTask(payload.task_id());
+
+              ok = stream_writer.WriteTaskCompletionAckReply(payload.task_id());
+              if (!ok) {
+                state = StreamState::kCleanData;
+              }
+            } break;
+
+            case StreamCforedRequest::CFORED_GRACEFUL_EXIT: {
+              stream_writer.WriteCforedGracefulExitAck();
+              stream_writer.Invalidate();
+              state = StreamState::kCleanData;
+            } break;
+
+            default:
+              CRANE_ERROR("Not expected cfored request type: {}",
+                          StreamCforedRequest_CforedRequestType_Name(
+                              cfored_request.type()));
+              return Status::CANCELLED;
+          }
+        } else {
+          state = StreamState::kCleanData;
+        }
+      } break;
+
+      case StreamState::kCleanData: {
+        CRANE_INFO("Cfored {} disconnected. Cleaning its data...", cfored_name);
+
+        m_ctld_server_->m_mtx_.Lock();
+
+        auto const &running_task_set =
+            m_ctld_server_->m_cfored_running_tasks_[cfored_name];
+        std::vector<task_id_t> running_tasks(running_task_set.begin(),
+                                             running_task_set.end());
+        m_ctld_server_->m_cfored_running_tasks_.erase(cfored_name);
+
+        m_ctld_server_->m_mtx_.Unlock();
+
+        for (task_id_t task_id : running_tasks) {
+          g_task_scheduler->TerminateRunningTask(task_id);
+        }
+
+        return Status::OK;
+      }
+    }
+  }
+
+  return grpc::Status::OK;
+}
+
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CraneCtldServiceImpl>(this);
 
@@ -1180,31 +1208,84 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     s_sigint_cv.wait(lk);
 
     CRANE_TRACE("SIGINT captured. Calling Shutdown() on grpc server...");
-    p_server->Shutdown();
+    p_server->Shutdown(std::chrono::system_clock::now() +
+                       std::chrono::seconds(1));
   });
   sigint_waiting_thread.detach();
 
   signal(SIGINT, &CtldServer::signal_handler_func);
 }
 
-void CtldServer::AddAllocDetailToIaTask(
-    uint32_t task_id, InteractiveTaskAllocationDetail detail) {
-  LockGuard guard(m_mtx_);
-  m_task_alloc_detail_map_.emplace(task_id, std::move(detail));
-}
+result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
+    std::unique_ptr<TaskInCtld> task) {
+  CraneErr err;
 
-const InteractiveTaskAllocationDetail *CtldServer::QueryAllocDetailOfIaTask(
-    uint32_t task_id) {
-  LockGuard guard(m_mtx_);
-  auto iter = m_task_alloc_detail_map_.find(task_id);
-  if (iter == m_task_alloc_detail_map_.end()) return nullptr;
+  if (!task->password_entry->Valid()) {
+    return result::failure(
+        fmt::format("Uid {} not found on the controller node", task->uid));
+  }
+  task->SetUsername(task->password_entry->Username());
 
-  return &iter->second;
-}
+  {  // Limit the lifecycle of user_scoped_ptr
+    auto user_scoped_ptr =
+        g_account_manager->GetExistedUserInfo(task->Username());
+    if (!user_scoped_ptr) {
+      return result::failure(fmt::format(
+          "User '{}' not found in the account database", task->Username()));
+    }
 
-void CtldServer::RemoveAllocDetailOfIaTask(uint32_t task_id) {
-  LockGuard guard(m_mtx_);
-  m_task_alloc_detail_map_.erase(task_id);
+    if (task->account.empty()) {
+      task->account = user_scoped_ptr->default_account;
+      task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
+    } else {
+      if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
+        return result::failure(fmt::format(
+            "Account '{}' is not in your account list", task->account));
+      }
+    }
+  }
+
+  if (!g_account_manager->CheckUserPermissionToPartition(
+          task->Username(), task->account, task->partition_id)) {
+    return result::failure(fmt::format(
+        "The user '{}' don't have access to submit task in partition '{}'",
+        task->uid, task->partition_id));
+  }
+
+  if (!g_account_manager->CheckEnableState(task->account, task->Username())) {
+    return result::failure(fmt::format(
+        "The user '{}' or the Ancestor account is disabled", task->Username()));
+  }
+
+  auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
+      task->Username(), task->account, task.get());
+  if (check_qos_result.has_error()) {
+    return result::failure(check_qos_result.error());
+  }
+
+  uint32_t task_id;
+  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
+  if (err == CraneErr::kOk) {
+    return {task_id};
+    CRANE_DEBUG("Received an task request. Task id allocated: {}", task_id);
+  } else if (err == CraneErr::kNonExistent) {
+    CRANE_DEBUG("Task submission failed. Reason: Partition doesn't exist!");
+    return result::failure("Partition doesn't exist!");
+  } else if (err == CraneErr::kInvalidNodeNum) {
+    CRANE_DEBUG(
+        "Task submission failed. Reason: --node is either invalid or "
+        "greater than the number of alive nodes in its partition.");
+    return result::failure(
+        "--node is either invalid or greater than "
+        "the number of alive nodes in its partition.");
+  } else if (err == CraneErr::kNoResource) {
+    CRANE_DEBUG(
+        "Task submission failed. "
+        "Reason: The resources of the partition are insufficient.");
+    return result::failure("The resources of the partition are insufficient");
+  }
+
+  return {task_id};
 }
 
 }  // namespace Ctld

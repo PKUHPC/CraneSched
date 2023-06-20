@@ -41,9 +41,9 @@ enum CranedState{
 enum TaskStatus {
   Pending = 0;
   Running = 1;
-  Finished = 2;
+  Completed = 2;
   Failed = 3;
-  Completing = 4;
+  ExceedTimeLimit = 4;
   Cancelled = 5;
 
   Invalid = 15;
@@ -130,6 +130,8 @@ message TaskToD {
 
   repeated string allocated_nodes = 14;
 
+  string name = 15;
+
   uint32 node_num = 21;
   uint32 ntasks_per_node = 22;
   uint32 cpus_per_task = 23;
@@ -141,7 +143,6 @@ message BatchTaskAdditionalMeta {
 }
 
 message InteractiveTaskAdditionalMeta{
-  bytes resource_uuid = 1;
 }
 
 message TaskInfo {

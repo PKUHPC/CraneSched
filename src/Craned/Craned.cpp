@@ -20,8 +20,8 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+using Craned::CranedNode;
 using Craned::g_config;
-using Craned::Node;
 using Craned::Partition;
 
 void ParseConfig(int argc, char** argv) {
@@ -149,7 +149,7 @@ void ParseConfig(int argc, char** argv) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {
           auto node = it->as<YAML::Node>();
-          auto node_ptr = std::make_shared<Node>();
+          auto node_ptr = std::make_shared<CranedNode>();
           std::list<std::string> name_list;
 
           if (node["name"]) {
@@ -194,8 +194,8 @@ void ParseConfig(int argc, char** argv) {
                   "Node name `{}` is a valid ipv4 address and doesn't "
                   "need resolving.",
                   name);
-              g_config.Ipv4ToNodesHostname[name] = name;
-              g_config.Nodes[name] = node_ptr;
+              g_config.Ipv4ToCranedHostname[name] = name;
+              g_config.CranedNodes[name] = node_ptr;
             } else {
               std::string ipv4;
               if (!crane::ResolveIpv4FromHostname(name, &ipv4)) {
@@ -204,9 +204,9 @@ void ParseConfig(int argc, char** argv) {
                 std::exit(1);
               }
               CRANE_INFO("Resolve hostname `{}` to `{}`", name, ipv4);
-              g_config.Ipv4ToNodesHostname[ipv4] = name;
+              g_config.Ipv4ToCranedHostname[ipv4] = name;
 
-              g_config.Nodes[name] = node_ptr;
+              g_config.CranedNodes[name] = node_ptr;
             }
           }
         }
@@ -239,8 +239,8 @@ void ParseConfig(int argc, char** argv) {
           for (auto&& node : name_list) {
             std::string node_s{node};
 
-            auto node_it = g_config.Nodes.find(node_s);
-            if (node_it != g_config.Nodes.end()) {
+            auto node_it = g_config.CranedNodes.find(node_s);
+            if (node_it != g_config.CranedNodes.end()) {
               part.nodes.emplace(node_it->first);
               CRANE_INFO("Find node {} in partition {}", node_it->first, name);
             } else {
@@ -319,7 +319,7 @@ void ParseConfig(int argc, char** argv) {
   }
   g_config.Hostname.assign(hostname);
 
-  if (!g_config.Nodes.contains(g_config.Hostname)) {
+  if (!g_config.CranedNodes.contains(g_config.Hostname)) {
     CRANE_ERROR("This machine {} is not contained in Nodes!",
                 g_config.Hostname);
     std::exit(1);

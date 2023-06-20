@@ -32,8 +32,10 @@ class MongodbClient {
       crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
   bool InsertJob(TaskInCtld* task);
 
-  bool FetchJobRecords(std::list<TaskInCtld>* task_list, size_t limit,
-                       bool reverse);
+  // Todo: Ugly interface! Since the task is fetch from DB, TaskInCtld is
+  //  not a good type choice here!
+  bool FetchJobRecords(std::vector<std::unique_ptr<TaskInCtld>>* task_list,
+                       size_t limit, bool reverse);
 
   bool CheckTaskDbIdExisted(int64_t task_db_id);
 
