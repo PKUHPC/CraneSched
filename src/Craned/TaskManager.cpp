@@ -634,6 +634,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(
       std::abort();
     }
 
+    dup2(out_fd, 1);  // stdout -> output file
+    dup2(out_fd, 2);  // stderr -> output file
+    close(out_fd);
+
     child_process_ready.set_ok(true);
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
     ok &= ostream.Flush();
@@ -644,22 +648,23 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 
     close(fd);
 
-    dup2(out_fd, 1);  // stdout -> output file
-    dup2(out_fd, 2);  // stderr -> output file
-    close(out_fd);
-
     // If these file descriptors are not closed, a program like mpirun may
     // keep waiting for the input from stdin or other fds and will never end.
     close(0);  // close stdin
     util::CloseFdFrom(3);
 
-    std::vector<std::string> env_vec =
-        absl::StrSplit(instance->task.env(), "||");
+    // std::vector<std::string> env_vec =
+    //     absl::StrSplit(instance->task.env(), "||");
+    std::vector<std::string> env_vec;
 
     std::string nodelist = absl::StrJoin(instance->task.allocated_nodes(), ";");
     std::string nodelist_env = fmt::format("CRANE_JOB_NODELIST={}", nodelist);
 
     env_vec.emplace_back(nodelist_env);
+
+    if (clearenv()) {
+      fmt::print("clearenv() failed!\n");
+    }
 
     for (const auto& str : env_vec) {
       auto pos = str.find_first_of('=');
@@ -667,21 +672,21 @@ CraneErr TaskManager::SpawnProcessInInstance_(
         std::string name = str.substr(0, pos);
         std::string value = str.substr(pos + 1);
         if (setenv(name.c_str(), value.c_str(), 1)) {
-          // fmt::print("set environ failed!\n");
+          fmt::print("setenv for {}={} failed!\n", name, value);
         }
       }
     }
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
-    argv.push_back(process->GetExecPath().c_str());
+    argv.emplace_back("--login");
+    argv.emplace_back(process->GetExecPath().c_str());
     for (auto&& arg : process->GetArgList()) {
       argv.push_back(arg.c_str());
     }
     argv.push_back(nullptr);
 
-    execv(process->GetExecPath().c_str(),
-          const_cast<char* const*>(argv.data()));
+    execv("/bin/bash", const_cast<char* const*>(argv.data()));
 
     // Error occurred since execv returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.
