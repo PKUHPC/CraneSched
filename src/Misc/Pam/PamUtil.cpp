@@ -1,8 +1,8 @@
 #include "PamUtil.h"
 
+#include <fmt/format.h>
 #include <grpc++/grpc++.h>
 #include <pwd.h>
-#include <fmt/format.h>
 #include <sys/stat.h>
 
 #include <boost/algorithm/string.hpp>
@@ -82,11 +82,11 @@ bool PamGetRemoteUid(pam_handle_t *pamh, const char *user_name, uid_t *uid) {
       pam_syslog(pamh, LOG_ERR, "[Crane] getpwnam_r: %s", strerror(errno));
     }
 
-    delete buf;
+    delete[] buf;
     return false;
   }
   *uid = pwd.pw_uid;
-  delete buf;
+  delete[] buf;
 
   return true;
 }

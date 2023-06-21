@@ -741,7 +741,7 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
-    return result::failure(fmt::format("Unknown user '{}'", user));
+    return result::fail(fmt::format("Unknown user '{}'", user));
   }
 
   if (task->uid != 0) {
@@ -749,13 +749,13 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
                             .allowed_partition_qos_map.find(task->partition_id);
     if (partition_it == user_share_ptr->account_to_attrs_map.at(account)
                             .allowed_partition_qos_map.end())
-      return result::failure("Partition is not allowed for this user.");
+      return result::fail("Partition is not allowed for this user.");
 
     if (task->qos.empty()) {
       // Default qos
       task->qos = partition_it->second.first;
       if (task->qos.empty())
-        return result::failure(
+        return result::fail(
             fmt::format("The user '{}' has no QOS available for this partition "
                         "'{}' to be used",
                         task->Username(), task->partition_id));
@@ -764,7 +764,7 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
       if (std::find(partition_it->second.second.begin(),
                     partition_it->second.second.end(),
                     task->qos) == partition_it->second.second.end()) {
-        return result::failure(fmt::format(
+        return result::fail(fmt::format(
             "The qos '{}' you set is not in partition's allowed qos list",
             task->qos));
       }
@@ -777,16 +777,16 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
 
   const Qos* qos_share_ptr = GetExistedQosInfoNoLock_(task->qos);
   if (!qos_share_ptr) {
-    return result::failure(fmt::format("Unknown QOS '{}'", task->qos));
+    return result::fail(fmt::format("Unknown QOS '{}'", task->qos));
   }
 
   if (task->time_limit == absl::ZeroDuration())
     task->time_limit = qos_share_ptr->max_time_limit_per_task;
   else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
-    return result::failure("time-limit reached the user's limit.");
+    return result::fail("time-limit reached the user's limit.");
 
   if (task->cpus_per_task > qos_share_ptr->max_cpus_per_user)
-    return result::failure("cpus-per-task reached the user's limit.");
+    return result::fail("cpus-per-task reached the user's limit.");
 
   return {};
 }

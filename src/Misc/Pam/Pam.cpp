@@ -1,9 +1,6 @@
 #include <fmt/format.h>
 
-#include <cstdint>
-
 #include "PamUtil.h"
-#include "crane/PublicHeader.h"
 
 #define PAM_STR_TRUE ("T")
 #define PAM_STR_FALSE ("F")
@@ -17,8 +14,8 @@ void clean_up_cb(pam_handle_t *pamh, void *data, int error_status) {
 
 extern "C" {
 
-int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
-                     const char **argv) {
+[[maybe_unused]] int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
+                                      const char **argv) {
   int rc;
   bool ok;
   uid_t uid;
@@ -87,8 +84,8 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
   }
 }
 
-int pam_sm_open_session(pam_handle_t *pamh, int flags, int argc,
-                        const char **argv) {
+[[maybe_unused]] int pam_sm_open_session(pam_handle_t *pamh, int flags,
+                                         int argc, const char **argv) {
   int task_id;
   char *auth_result;
   char *task_id_str;
@@ -135,8 +132,8 @@ int pam_sm_open_session(pam_handle_t *pamh, int flags, int argc,
 }
 
 // This function is required once pam_sm_open_session is written.
-int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc,
-                         const char **argv) {
+[[maybe_unused]] int pam_sm_close_session(pam_handle_t *pamh, int flags,
+                                          int argc, const char **argv) {
   return PAM_IGNORE;
 }
 }

@@ -1221,7 +1221,7 @@ result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
   CraneErr err;
 
   if (!task->password_entry->Valid()) {
-    return result::failure(
+    return result::fail(
         fmt::format("Uid {} not found on the controller node", task->uid));
   }
   task->SetUsername(task->password_entry->Username());
@@ -1230,7 +1230,7 @@ result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
     auto user_scoped_ptr =
         g_account_manager->GetExistedUserInfo(task->Username());
     if (!user_scoped_ptr) {
-      return result::failure(fmt::format(
+      return result::fail(fmt::format(
           "User '{}' not found in the account database", task->Username()));
     }
 
@@ -1239,7 +1239,7 @@ result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
       task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
     } else {
       if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
-        return result::failure(fmt::format(
+        return result::fail(fmt::format(
             "Account '{}' is not in your account list", task->account));
       }
     }
@@ -1247,20 +1247,20 @@ result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
 
   if (!g_account_manager->CheckUserPermissionToPartition(
           task->Username(), task->account, task->partition_id)) {
-    return result::failure(fmt::format(
+    return result::fail(fmt::format(
         "The user '{}' don't have access to submit task in partition '{}'",
         task->uid, task->partition_id));
   }
 
   if (!g_account_manager->CheckEnableState(task->account, task->Username())) {
-    return result::failure(fmt::format(
+    return result::fail(fmt::format(
         "The user '{}' or the Ancestor account is disabled", task->Username()));
   }
 
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
       task->Username(), task->account, task.get());
   if (check_qos_result.has_error()) {
-    return result::failure(check_qos_result.error());
+    return result::fail(check_qos_result.error());
   }
 
   uint32_t task_id;
@@ -1270,19 +1270,19 @@ result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
     CRANE_DEBUG("Received an task request. Task id allocated: {}", task_id);
   } else if (err == CraneErr::kNonExistent) {
     CRANE_DEBUG("Task submission failed. Reason: Partition doesn't exist!");
-    return result::failure("Partition doesn't exist!");
+    return result::fail("Partition doesn't exist!");
   } else if (err == CraneErr::kInvalidNodeNum) {
     CRANE_DEBUG(
         "Task submission failed. Reason: --node is either invalid or "
         "greater than the number of alive nodes in its partition.");
-    return result::failure(
+    return result::fail(
         "--node is either invalid or greater than "
         "the number of alive nodes in its partition.");
   } else if (err == CraneErr::kNoResource) {
     CRANE_DEBUG(
         "Task submission failed. "
         "Reason: The resources of the partition are insufficient.");
-    return result::failure("The resources of the partition are insufficient");
+    return result::fail("The resources of the partition are insufficient");
   }
 
   return {task_id};
