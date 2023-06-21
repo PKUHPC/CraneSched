@@ -655,25 +655,28 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 
     // std::vector<std::string> env_vec =
     //     absl::StrSplit(instance->task.env(), "||");
-    std::vector<std::string> env_vec;
+    std::vector<std::pair<std::string, std::string>> env_vec;
 
-    std::string nodelist = absl::StrJoin(instance->task.allocated_nodes(), ";");
-    std::string nodelist_env = fmt::format("CRANE_JOB_NODELIST={}", nodelist);
+    // Since we want to reinitialize the environment variables of the user,
+    // we are actually performing two steps: login -> start shell.
+    // Shell starting is done by calling "bash --login".
+    // During shell starting step, /etc/profile, ~/.bash_profile, ... are
+    // loaded.
+    // During login step, "HOME" and "SHELL" are set. Here we are just
+    // performing the role of login module.
+    env_vec.emplace_back("HOME", instance->pwd_entry.HomeDir());
+    env_vec.emplace_back("SHELL", instance->pwd_entry.Shell());
 
-    env_vec.emplace_back(nodelist_env);
+    env_vec.emplace_back("CRANE_JOB_NODELIST",
+                         absl::StrJoin(instance->task.allocated_nodes(), ";"));
 
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
     }
 
-    for (const auto& str : env_vec) {
-      auto pos = str.find_first_of('=');
-      if (std::string::npos != pos) {
-        std::string name = str.substr(0, pos);
-        std::string value = str.substr(pos + 1);
-        if (setenv(name.c_str(), value.c_str(), 1)) {
-          fmt::print("setenv for {}={} failed!\n", name, value);
-        }
+    for (const auto& [name, value] : env_vec) {
+      if (setenv(name.c_str(), value.c_str(), 1)) {
+        fmt::print("setenv for {}={} failed!\n", name, value);
       }
     }
 
