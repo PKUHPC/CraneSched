@@ -40,7 +40,8 @@ class CforedStreamWriter {
       task_id_reply->set_pid(calloc_pid);
       task_id_reply->set_task_id(res.value());
     } else {
-      task_id_reply->set_ok(true);
+      task_id_reply->set_ok(false);
+      task_id_reply->set_pid(calloc_pid);
       task_id_reply->set_failure_reason(std::move(res.error()));
     }
 
