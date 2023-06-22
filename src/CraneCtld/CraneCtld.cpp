@@ -40,7 +40,7 @@ void ParseConfig(int argc, char** argv) {
   std::string config_path = parsed_args["config"].as<std::string>();
   if (std::filesystem::exists(config_path)) {
     try {
-      YAML::Node config = YAML::LoadFile(kDefaultConfigPath);
+      YAML::Node config = YAML::LoadFile(config_path);
 
       if (config["CraneCtldListenAddr"])
         g_config.ListenConf.CraneCtldListenAddr =

@@ -297,7 +297,7 @@ AccountManager::Result AccountManager::DeleteUser(const std::string& name,
   }
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
-  // account_guard
+  util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   const User* user = GetExistedUserInfoNoLock_(name);
   if (!user) {
@@ -329,7 +329,6 @@ AccountManager::Result AccountManager::DeleteUser(const std::string& name,
     return Result{false, "Fail to update data in database"};
   }
 
-  util::write_lock_guard account_guard(m_rw_account_mutex_);
   for (const auto& kv : user->account_to_attrs_map) {
     m_account_map_[kv.first]->users.remove(name);
     m_account_map_[kv.first]->coordinators.remove(
@@ -343,7 +342,7 @@ AccountManager::Result AccountManager::DeleteUser(const std::string& name,
 AccountManager::Result AccountManager::RemoveUserFromAccount(
     const std::string& name, const std::string& account) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
-  // account_guard
+  util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   const User* user = GetExistedUserInfoNoLock_(name);
   if (!user) {
@@ -378,7 +377,6 @@ AccountManager::Result AccountManager::RemoveUserFromAccount(
     return Result{false, "Fail to update data in database"};
   }
 
-  util::write_lock_guard account_guard(m_rw_account_mutex_);
   m_account_map_[account]->users.remove(name);
   m_account_map_[account]->coordinators.remove(name);  // No inspection required
   m_user_map_[name]->account_to_attrs_map.erase(account);
@@ -388,7 +386,7 @@ AccountManager::Result AccountManager::RemoveUserFromAccount(
 
 AccountManager::Result AccountManager::DeleteAccount(const std::string& name) {
   util::write_lock_guard account_guard(m_rw_account_mutex_);
-  // qos_guard
+  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
   const Account* account = GetExistedAccountInfoNoLock_(name);
 
   if (!account) {
@@ -424,7 +422,7 @@ AccountManager::Result AccountManager::DeleteAccount(const std::string& name) {
     m_account_map_[account->parent_account]->child_accounts.remove(name);
   }
   m_account_map_[name]->deleted = true;
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
+
   for (const auto& qos : account->allowed_qos_list) {
     m_qos_map_[qos]->reference_count--;
   }
@@ -736,7 +734,7 @@ bool AccountManager::CheckEnableState(const std::string& account,
 
 result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
     const std::string& user, const std::string& account, TaskInCtld* task) {
-  util::read_lock_guard user_guard(m_rw_account_mutex_);
+  util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
@@ -897,6 +895,10 @@ AccountManager::Result AccountManager::HasPermissionToUser(
 }
 
 void AccountManager::InitDataMap_() {
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
+  util::write_lock_guard account_guard(m_rw_account_mutex_);
+  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
+
   std::list<User> user_list;
   g_db_client->SelectAllUser(&user_list);
   for (auto& user : user_list) {
@@ -1690,7 +1692,7 @@ AccountManager::Result AccountManager::SetAccountAllowedPartition_(
   boost::split(partition_list, partitions, boost::is_any_of(","));
   partition_list.remove_if([](const std::string& v) { return v.empty(); });
 
-  util::write_lock_guard read_guard(m_rw_user_mutex_);
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   const Account* account = GetExistedAccountInfoNoLock_(name);
@@ -1778,20 +1780,18 @@ AccountManager::Result AccountManager::SetAccountAllowedQos_(
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
-  // qos_guard
+  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const Account* account = GetExistedAccountInfoNoLock_(name);
   if (!account) {
     return Result{false, fmt::format("Unknown account '{}'", name)};
   }
   // check if the qos existed
-  m_rw_qos_mutex_.lock_shared();
   for (const auto& qos : qos_list) {
     if (!GetExistedQosInfoNoLock_(qos)) {
       return Result{false, fmt::format("Qos '{}' not existed", qos)};
     }
   }
-  m_rw_qos_mutex_.unlock_shared();
 
   // Check if parent account has access to the qos
   if (!account->parent_account.empty()) {
@@ -1864,7 +1864,6 @@ AccountManager::Result AccountManager::SetAccountAllowedQos_(
     return Result{false, "Fail to update data in database"};
   }
 
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
   for (const auto& qos : deleted_qos) {
     DeleteAccountAllowedQosFromMapNoLock_(account->name, qos);
     m_qos_map_[qos]->reference_count -= change_num.front();
@@ -1887,7 +1886,7 @@ AccountManager::Result AccountManager::SetAccountAllowedQos_(
 
 AccountManager::Result AccountManager::DeleteAccountAllowedPartition_(
     const std::string& name, const std::string& partition, bool force) {
-  util::write_lock_guard read_guard(m_rw_user_mutex_);
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   const Account* account = GetExistedAccountInfoNoLock_(name);
@@ -1921,7 +1920,7 @@ AccountManager::Result AccountManager::DeleteAccountAllowedQos_(
     const std::string& name, const std::string& qos, bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
-  // qos_guard
+  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const Account* account = GetExistedAccountInfoNoLock_(name);
   if (!account) {
@@ -1959,7 +1958,6 @@ AccountManager::Result AccountManager::DeleteAccountAllowedQos_(
   }
 
   DeleteAccountAllowedQosFromMapNoLock_(account->name, qos);
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
   m_qos_map_[qos]->reference_count -= change_num;
 
   return Result{true};
@@ -1972,15 +1970,15 @@ AccountManager::Result AccountManager::DeleteAccountAllowedQos_(
  * @return
  */
 bool AccountManager::IsAllowedPartitionOfAnyNodeNoLock_(
-    const Account* account, const std::string& partition) {
-  if (std::find(account->allowed_partition.begin(),
-                account->allowed_partition.end(),
-                partition) != account->allowed_partition.end()) {
+    const Account* account, const std::string& partition, int depth) {
+  if (depth > 0 && std::find(account->allowed_partition.begin(),
+                             account->allowed_partition.end(),
+                             partition) != account->allowed_partition.end()) {
     return true;
   }
   for (const auto& child : account->child_accounts) {
     if (IsAllowedPartitionOfAnyNodeNoLock_(GetExistedAccountInfoNoLock_(child),
-                                           partition)) {
+                                           partition, depth + 1)) {
       return true;
     }
   }
@@ -2079,7 +2077,7 @@ int AccountManager::DeleteAccountAllowedQosFromDBNoLock_(
 }
 
 /**
- * @note need read lock(m_rw_account_mutex_) and write lock(m_rw_user_mutex_)
+ * @note need write lock(m_rw_account_mutex_) and write lock(m_rw_user_mutex_)
  * @param name
  * @param qos
  * @return
@@ -2157,7 +2155,7 @@ bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromDBNoLock_(
 }
 
 /**
- * @note need read lock(m_rw_user_mutex_)
+ * @note need write lock(m_rw_user_mutex_)
  * @param name
  * @param account
  * @param qos
@@ -2235,7 +2233,7 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDBNoLock_(
 }
 
 /**
- * @note need read lock(m_rw_account_mutex_) and write lock(m_rw_user_mutex_)
+ * @note need write lock(m_rw_account_mutex_) and write lock(m_rw_user_mutex_)
  * @param name
  * @param partition
  * @return

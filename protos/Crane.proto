@@ -395,10 +395,14 @@ message QueryTasksInfoRequest{
   repeated TaskStatus filter_task_states = 6;
   repeated string filter_users = 7;
   repeated string filter_accounts = 8;
-  google.protobuf.Timestamp filter_start_time = 9;
-  google.protobuf.Timestamp filter_end_time = 10;
+  google.protobuf.Timestamp filter_submit_time_left = 9;
+  google.protobuf.Timestamp filter_submit_time_right = 10;
+  google.protobuf.Timestamp filter_start_time_left = 11;
+  google.protobuf.Timestamp filter_start_time_right = 12;
+  google.protobuf.Timestamp filter_end_time_left = 13;
+  google.protobuf.Timestamp filter_end_time_right = 14;
 
-  bool option_include_completed_tasks = 11;
+  bool option_include_completed_tasks = 15;
 }
 
 message QueryTasksInfoReply{

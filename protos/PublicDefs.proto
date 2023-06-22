@@ -101,6 +101,7 @@ message PersistedPartOfTaskInCtld {
   TaskStatus status = 13;
   uint32 exit_code = 14;
 
+  google.protobuf.Timestamp submit_time = 15;
   google.protobuf.Timestamp start_time = 16;
   google.protobuf.Timestamp end_time = 17;
 }
@@ -157,18 +158,19 @@ message TaskInfo {
   google.protobuf.Duration time_limit = 7;
   google.protobuf.Timestamp start_time = 8;
   google.protobuf.Timestamp end_time = 9;
-  string account = 10;
+  google.protobuf.Timestamp submit_time = 10;
+  string account = 11;
 
-  uint32 node_num = 11;
-  string cmd_line = 12;
-  string cwd = 13;
-  string username = 14;
-  string qos = 15;
+  uint32 node_num = 12;
+  string cmd_line = 13;
+  string cwd = 14;
+  string username = 15;
+  string qos = 16;
 
   // Dynamic task information
   TaskStatus status = 31;
   string craned_list = 32;
-  double alloc_cpus = 33;
+  double alloc_CPU = 33;
   uint32 exit_code = 34;
 }
 
@@ -179,9 +181,9 @@ message PartitionInfo {
 
   uint32 total_nodes = 4;
   uint32 alive_nodes = 5;
-  double total_cpus = 6;
-  double avail_cpus = 7;
-  double alloc_cpus = 8;
+  double total_CPU = 6;
+  double avail_CPU = 7;
+  double alloc_CPU = 8;
   uint64 total_mem = 9;
   uint64 avail_mem = 10;
   uint64 alloc_mem = 11;
@@ -190,9 +192,9 @@ message PartitionInfo {
 message CranedInfo {
   string hostname = 1;
   CranedState state = 2;
-  double cpus = 3;
-  double alloc_cpus = 4;
-  double free_cpus = 5;
+  double CPU = 3;
+  double alloc_CPU = 4;
+  double free_CPU = 5;
   uint64 real_mem = 6;
   uint64 alloc_mem = 7;
   uint64 free_mem = 8;

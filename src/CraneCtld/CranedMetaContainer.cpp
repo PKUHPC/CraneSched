@@ -222,9 +222,9 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     auto& alloc_res_avail = craned_meta.res_avail.allocatable_resource;
 
     craned_info->set_hostname(craned_meta.static_meta.hostname);
-    craned_info->set_cpus(alloc_res_total.cpu_count);
-    craned_info->set_alloc_cpus(alloc_res_in_use.cpu_count);
-    craned_info->set_free_cpus(alloc_res_avail.cpu_count);
+    craned_info->set_cpu(alloc_res_total.cpu_count);
+    craned_info->set_alloc_cpu(alloc_res_in_use.cpu_count);
+    craned_info->set_free_cpu(alloc_res_avail.cpu_count);
     craned_info->set_real_mem(alloc_res_total.memory_bytes);
     craned_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
     craned_info->set_free_mem(alloc_res_avail.memory_bytes);
@@ -263,9 +263,9 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   auto& alloc_res_avail = craned_meta.res_avail.allocatable_resource;
 
   craned_info->set_hostname(craned_meta.static_meta.hostname);
-  craned_info->set_cpus(alloc_res_total.cpu_count);
-  craned_info->set_alloc_cpus(alloc_res_in_use.cpu_count);
-  craned_info->set_free_cpus(alloc_res_avail.cpu_count);
+  craned_info->set_cpu(alloc_res_total.cpu_count);
+  craned_info->set_alloc_cpu(alloc_res_in_use.cpu_count);
+  craned_info->set_free_cpu(alloc_res_avail.cpu_count);
   craned_info->set_real_mem(alloc_res_total.memory_bytes);
   craned_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
   craned_info->set_free_mem(alloc_res_avail.memory_bytes);
@@ -303,9 +303,9 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
     part_info->set_total_nodes(part_meta.partition_global_meta.node_cnt);
     part_info->set_alive_nodes(
         part_meta.partition_global_meta.alive_craned_cnt);
-    part_info->set_total_cpus(alloc_res_total.cpu_count);
-    part_info->set_avail_cpus(alloc_res_avail.cpu_count);
-    part_info->set_alloc_cpus(alloc_res_in_use.cpu_count);
+    part_info->set_total_cpu(alloc_res_total.cpu_count);
+    part_info->set_avail_cpu(alloc_res_avail.cpu_count);
+    part_info->set_alloc_cpu(alloc_res_in_use.cpu_count);
     part_info->set_total_mem(alloc_res_total.memory_bytes);
     part_info->set_avail_mem(alloc_res_avail.memory_bytes);
     part_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
@@ -344,9 +344,9 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
   part_info->set_name(part_meta.partition_global_meta.name);
   part_info->set_total_nodes(part_meta.partition_global_meta.node_cnt);
   part_info->set_alive_nodes(part_meta.partition_global_meta.alive_craned_cnt);
-  part_info->set_total_cpus(res_total.cpu_count);
-  part_info->set_avail_cpus(res_avail.cpu_count);
-  part_info->set_alloc_cpus(res_in_use.cpu_count);
+  part_info->set_total_cpu(res_total.cpu_count);
+  part_info->set_avail_cpu(res_avail.cpu_count);
+  part_info->set_alloc_cpu(res_in_use.cpu_count);
   part_info->set_total_mem(res_total.memory_bytes);
   part_info->set_avail_mem(res_avail.memory_bytes);
   part_info->set_alloc_mem(res_in_use.memory_bytes);

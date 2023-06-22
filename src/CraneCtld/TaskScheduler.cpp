@@ -400,6 +400,7 @@ CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
 
   // Add the task to the pending task queue.
   task->SetStatus(crane::grpc::Pending);
+  task->SetSubmitTime(absl::Now());
 
   bool ok;
   ok = g_embedded_db_client->AppendTaskToPendingAndAdvanceTaskIds(task.get());
@@ -724,18 +725,21 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_uid(task.TaskToCtld().uid());
 
     task_it->set_gid(task.PersistedPart().gid());
-    task_it->mutable_time_limit()->CopyFrom(task.TaskToCtld().time_limit());
+    task_it->mutable_time_limit()->set_seconds(ToInt64Seconds(task.time_limit));
+    task_it->mutable_submit_time()->CopyFrom(
+        task.PersistedPart().submit_time());
     task_it->mutable_start_time()->CopyFrom(task.PersistedPart().start_time());
     task_it->mutable_end_time()->CopyFrom(task.PersistedPart().end_time());
     task_it->set_account(task.account);
 
-    task_it->set_node_num(task.TaskToCtld().node_num());
+    task_it->set_node_num(task.node_num);
     task_it->set_cmd_line(task.TaskToCtld().cmd_line());
     task_it->set_cwd(task.TaskToCtld().cwd());
     task_it->set_username(task.Username());
-    task_it->set_qos(task.TaskToCtld().qos());
+    task_it->set_qos(task.qos);
 
-    task_it->set_alloc_cpus(task.resources.allocatable_resource.cpu_count);
+    task_it->set_alloc_cpu(task.resources.allocatable_resource.cpu_count *
+                           task.node_num);
     task_it->set_exit_code(0);
 
     task_it->set_status(task.PersistedPart().status());
@@ -743,17 +747,36 @@ void TaskScheduler::QueryTasksInRam(
         util::HostNameListToStr(task.PersistedPart().craned_ids()));
   };
 
-  bool no_start_time_constraint = !request->has_filter_start_time();
-  bool no_end_time_constraint = !request->has_filter_end_time();
+  bool no_submit_time_left_constraint = !request->has_filter_submit_time_left();
+  bool no_submit_time_right_constraint =
+      !request->has_filter_submit_time_right();
+  bool no_start_time_left_constraint = !request->has_filter_start_time_left();
+  bool no_start_time_right_constraint = !request->has_filter_start_time_right();
+  bool no_end_time_left_constraint = !request->has_filter_end_time_left();
+  bool no_end_time_right_constraint = !request->has_filter_end_time_right();
   auto task_rng_filter_time = [&](auto& it) {
     TaskInCtld& task = *it.second;
-    bool filter_start_time =
-        no_start_time_constraint ||
-        task.PersistedPart().start_time() >= request->filter_start_time();
-    bool filter_end_time =
-        no_end_time_constraint ||
-        task.PersistedPart().end_time() <= request->filter_end_time();
-    return filter_start_time && filter_end_time;
+    bool filter_submit_time_left = no_submit_time_left_constraint ||
+                                   task.PersistedPart().submit_time() >=
+                                       request->filter_submit_time_left();
+    bool filter_submit_time_right = no_submit_time_right_constraint ||
+                                    task.PersistedPart().submit_time() <=
+                                        request->filter_submit_time_right();
+    bool filter_start_time_left =
+        no_start_time_left_constraint ||
+        task.PersistedPart().start_time() >= request->filter_start_time_left();
+    bool filter_start_time_right =
+        no_start_time_right_constraint ||
+        task.PersistedPart().start_time() <= request->filter_start_time_right();
+    bool filter_end_time_left =
+        no_end_time_left_constraint ||
+        task.PersistedPart().end_time() >= request->filter_end_time_left();
+    bool filter_end_time_right =
+        no_end_time_right_constraint ||
+        task.PersistedPart().end_time() <= request->filter_end_time_right();
+    return filter_submit_time_left && filter_submit_time_right &&
+           filter_start_time_left && filter_start_time_right &&
+           filter_end_time_left && filter_end_time_right;
   };
 
   bool no_accounts_constraint = request->filter_accounts().empty();

@@ -152,7 +152,8 @@ class AccountManager {
                                   const std::string& qos, bool force);
 
   bool IsAllowedPartitionOfAnyNodeNoLock_(const Account* account,
-                                          const std::string& partition);
+                                          const std::string& partition,
+                                          int depth = 0);
 
   bool IsDefaultQosOfAnyNodeNoLock_(const Account* account,
                                     const std::string& qos);
