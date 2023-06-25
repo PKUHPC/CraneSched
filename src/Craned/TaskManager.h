@@ -132,7 +132,7 @@ struct TaskInstance {
   std::string cg_path;
   struct event* termination_timer{nullptr};
 
-  std::unordered_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
+  absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
 };
 
 /**

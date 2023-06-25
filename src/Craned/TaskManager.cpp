@@ -301,46 +301,49 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
               //  running processes belonging to this task, kill them.
               this_->TerminateTaskAsync(task_id);
             }
-          } else if (!instance->orphaned) {
-            // If the ProcessInstance has no process left and the task was not
-            // marked as an orphaned task, send TaskStatusChange for this task.
-            // See the comment of EvActivateTaskStatusChange_.
-            if (instance->task.type() == crane::grpc::Batch) {
-              // For a Batch task, the end of the process means it is done.
-              if (sigchld_info.is_terminated_by_signal) {
-                if (instance->cancelled_by_user)
+          } else {
+            if (!instance->orphaned) {
+              // If the ProcessInstance has no process left and the task was not
+              // marked as an orphaned task, send TaskStatusChange for this
+              // task. See the comment of EvActivateTaskStatusChange_.
+              if (instance->task.type() == crane::grpc::Batch) {
+                // For a Batch task, the end of the process means it is done.
+                if (sigchld_info.is_terminated_by_signal) {
+                  if (instance->cancelled_by_user)
+                    this_->EvActivateTaskStatusChange_(
+                        task_id, crane::grpc::TaskStatus::Cancelled,
+                        sigchld_info.value + ExitCode::kTerminationSignalBase,
+                        std::nullopt);
+                  else if (instance->terminated_by_timeout)
+                    this_->EvActivateTaskStatusChange_(
+                        task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+                        sigchld_info.value + ExitCode::kTerminationSignalBase,
+                        std::nullopt);
+                  else
+                    this_->EvActivateTaskStatusChange_(
+                        task_id, crane::grpc::TaskStatus::Failed,
+                        sigchld_info.value + ExitCode::kTerminationSignalBase,
+                        std::nullopt);
+                } else
                   this_->EvActivateTaskStatusChange_(
-                      task_id, crane::grpc::TaskStatus::Cancelled,
-                      sigchld_info.value + ExitCode::kTerminationSignalBase,
-                      std::nullopt);
-                else if (instance->terminated_by_timeout)
-                  this_->EvActivateTaskStatusChange_(
-                      task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-                      sigchld_info.value + ExitCode::kTerminationSignalBase,
-                      std::nullopt);
-                else
-                  this_->EvActivateTaskStatusChange_(
-                      task_id, crane::grpc::TaskStatus::Failed,
-                      sigchld_info.value + ExitCode::kTerminationSignalBase,
-                      std::nullopt);
-              } else
-                this_->EvActivateTaskStatusChange_(
-                    task_id, crane::grpc::TaskStatus::Completed,
-                    sigchld_info.value, std::nullopt);
-            } else {
-              // For a COMPLETING Interactive task with a process running, the
-              // end of this process means that this task is done.
-              if (sigchld_info.is_terminated_by_signal) {
-                this_->EvActivateTaskStatusChange_(
-                    task_id, crane::grpc::TaskStatus::Completed,
-                    sigchld_info.value + ExitCode::kTerminationSignalBase,
-                    std::nullopt);
+                      task_id, crane::grpc::TaskStatus::Completed,
+                      sigchld_info.value, std::nullopt);
               } else {
-                this_->EvActivateTaskStatusChange_(
-                    task_id, crane::grpc::TaskStatus::Completed,
-                    sigchld_info.value, std::nullopt);
+                // For a COMPLETING Interactive task with a process running, the
+                // end of this process means that this task is done.
+                if (sigchld_info.is_terminated_by_signal) {
+                  this_->EvActivateTaskStatusChange_(
+                      task_id, crane::grpc::TaskStatus::Completed,
+                      sigchld_info.value + ExitCode::kTerminationSignalBase,
+                      std::nullopt);
+                } else {
+                  this_->EvActivateTaskStatusChange_(
+                      task_id, crane::grpc::TaskStatus::Completed,
+                      sigchld_info.value, std::nullopt);
+                }
               }
             }
+            this_->m_pid_task_map_.erase(task_iter);
           }
         }
       }

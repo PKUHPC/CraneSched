@@ -297,21 +297,18 @@ void TaskScheduler::ScheduleThread_() {
     // m_pending_task_map_mtx_ needs to be acquired. Deadlock may happen under
     // such a situation.
     m_pending_task_map_mtx_.Lock();
-    m_running_task_map_mtx_.Lock();
-    m_task_indexes_mtx_.Lock();
-
     if (!m_pending_task_map_.empty()) {  // all_part_metas is locked here.
       // Running map must be locked before g_meta_container's lock.
       // Otherwise, DEADLOCK may happen because TaskStatusChange() locks running
       // map first and then locks g_meta_container.
+      m_running_task_map_mtx_.Lock();
 
       std::list<INodeSelectionAlgo::NodeSelectionResult> selection_result_list;
-      auto all_part_metas = g_meta_container->GetAllPartitionsMetaMapPtr();
-      auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
-
       m_node_selection_algo_->NodeSelect(
-          *all_part_metas, *craned_meta_map, m_running_task_map_,
-          &m_pending_task_map_, &selection_result_list);
+          m_running_task_map_, &m_pending_task_map_, &selection_result_list);
+
+      m_running_task_map_mtx_.Unlock();
+      m_pending_task_map_mtx_.Unlock();
 
       for (auto& it : selection_result_list) {
         auto& task = it.first;
@@ -324,11 +321,6 @@ void TaskScheduler::ScheduleThread_() {
         CRANE_DEBUG(
             "Task #{} is allocated to partition {} and craned nodes: {}",
             task->TaskId(), partition_id, fmt::join(task->CranedIds(), ", "));
-
-        for (CranedId craned_id : task->CranedIds()) {
-          auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
-          m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
-        }
 
         task->allocated_craneds_regex =
             util::HostNameListToStr(task->CranedIds());
@@ -356,7 +348,16 @@ void TaskScheduler::ScheduleThread_() {
         // IMPORTANT: task must be put into running_task_map before any
         //  time-consuming operation, otherwise TaskStatusChange RPC will come
         //  earlier before task is put into running_task_map.
+        m_running_task_map_mtx_.Lock();
+        m_task_indexes_mtx_.Lock();
+
+        for (CranedId craned_id : task->CranedIds()) {
+          m_node_to_tasks_map_[craned_id].emplace(task_ptr->TaskId());
+        }
         m_running_task_map_.emplace(task->TaskId(), std::move(task));
+
+        m_running_task_map_mtx_.Unlock();
+        m_task_indexes_mtx_.Unlock();
 
         g_embedded_db_client->UpdatePersistedPartOfTask(
             task_ptr->TaskDbId(), task_ptr->PersistedPart());
@@ -374,11 +375,9 @@ void TaskScheduler::ScheduleThread_() {
               task_ptr->TaskDbId());
         }
       }
+    } else {
+      m_pending_task_map_mtx_.Unlock();
     }
-
-    m_task_indexes_mtx_.Unlock();
-    m_running_task_map_mtx_.Unlock();
-    m_pending_task_map_mtx_.Unlock();
 
     std::this_thread::sleep_for(
         std::chrono::milliseconds(kTaskScheduleIntervalMs));
@@ -535,11 +534,8 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
     }
   }
 
-  {
-    auto lock = g_meta_container->GetAllPartitionsMetaMapPtr();
-    for (CranedId const& craned_id : task->CranedIds()) {
-      g_meta_container->FreeResourceFromNode(craned_id, task_id);
-    }
+  for (CranedId const& craned_id : task->CranedIds()) {
+    g_meta_container->FreeResourceFromNode(craned_id, task_id);
   }
 
   // As for now, task status change includes only
@@ -1279,13 +1275,13 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 }
 
 void MinLoadFirst::NodeSelect(
-    const CranedMetaContainerInterface::AllPartitionsMetaMap&
-        all_partitions_meta_map,
-    const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
     const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>&
         running_tasks,
     absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
     std::list<NodeSelectionResult>* selection_result_list) {
+  auto all_partitions_meta_map = g_meta_container->GetAllPartitionsMetaMapPtr();
+  auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
+
   std::unordered_map<PartitionId, NodeSelectionInfo> part_id_node_info_map;
 
   // Truncated by 1s.
@@ -1293,11 +1289,11 @@ void MinLoadFirst::NodeSelect(
   absl::Time now = absl::FromUnixSeconds(ToUnixSeconds(absl::Now()));
 
   // Calculate NodeSelectionInfo for all partitions
-  for (auto& [partition_id, partition_metas] : all_partitions_meta_map) {
+  for (auto& [partition_id, partition_metas] : *all_partitions_meta_map) {
     NodeSelectionInfo& node_info_in_a_partition =
         part_id_node_info_map[partition_id];
     CalculateNodeSelectionInfoOfPartition_(running_tasks, now, partition_id,
-                                           partition_metas, craned_meta_map,
+                                           partition_metas, *craned_meta_map,
                                            &node_info_in_a_partition);
   }
 
@@ -1313,14 +1309,14 @@ void MinLoadFirst::NodeSelect(
     PartitionId part_id = task->partition_id;
 
     NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
-    auto& part_meta = all_partitions_meta_map.at(part_id);
+    auto& part_meta = all_partitions_meta_map->at(part_id);
 
     std::list<CranedId> craned_ids;
     absl::Time expected_start_time;
 
     // Note! ok should always be true.
     bool ok = CalculateRunningNodesAndStartTime_(
-        node_info, part_meta, craned_meta_map, task.get(), now, &craned_ids,
+        node_info, part_meta, *craned_meta_map, task.get(), now, &craned_ids,
         &expected_start_time);
     if (!ok) {
       ++pending_task_it;
@@ -1342,7 +1338,7 @@ void MinLoadFirst::NodeSelect(
 
     std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
     for (CranedId const& craned_id : craned_ids) {
-      CranedMeta const& craned_meta = craned_meta_map.at(craned_id);
+      CranedMeta const& craned_meta = craned_meta_map->at(craned_id);
       for (PartitionId const& partition_id :
            craned_meta.static_meta.partition_ids) {
         involved_part_craned[partition_id].emplace_back(craned_id);
