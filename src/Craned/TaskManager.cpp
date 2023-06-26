@@ -704,7 +704,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(
   }
 }
 
-CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD task) {
+CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
+  CRANE_INFO("Executing task #{}", task.task_id());
+
   auto instance = std::make_unique<TaskInstance>();
 
   // Simply wrap the Task structure within a TaskInstance structure and

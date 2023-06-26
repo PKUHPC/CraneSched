@@ -326,13 +326,15 @@ CraneErr CranedServer::RevokeResourceToken(const uuid &resource_uuid) {
 
 grpc::Status CranedServiceImpl::ExecuteTask(
     grpc::ServerContext *context,
-    const crane::grpc::ExecuteTaskRequest *request,
-    crane::grpc::ExecuteTaskReply *response) {
-  CRANE_TRACE("Received a task with id {}", request->task().task_id());
+    const crane::grpc::ExecuteTasksRequest *request,
+    crane::grpc::ExecuteTasksReply *response) {
+  CRANE_TRACE("Requested from CraneCtld to execute {} tasks.",
+              request->tasks_size());
 
-  g_task_mgr->ExecuteTaskAsync(request->task());
+  for (auto const &task_to_d : request->tasks()) {
+    g_task_mgr->ExecuteTaskAsync(task_to_d);
+  }
 
-  response->set_ok(true);
   return Status::OK;
 }
 
@@ -469,12 +471,19 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
 
 grpc::Status CranedServiceImpl::CreateCgroupForTask(
     grpc::ServerContext *context,
-    const crane::grpc::CreateCgroupForTaskRequest *request,
-    crane::grpc::CreateCgroupForTaskReply *response) {
-  CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", request->task_id(),
-              request->uid());
-  bool ok = g_task_mgr->CreateCgroupAsync(request->task_id(), request->uid());
-  response->set_ok(ok);
+    const crane::grpc::CreateCgroupForTasksRequest *request,
+    crane::grpc::CreateCgroupForTasksReply *response) {
+  for (int i = 0; i < request->task_id_list_size(); i++) {
+    task_id_t task_id = request->task_id_list(i);
+    uid_t uid = request->uid_list(i);
+
+    CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", task_id, uid);
+    bool ok = g_task_mgr->CreateCgroupAsync(task_id, uid);
+    if (!ok) {
+      CRANE_ERROR("Failed to create cgroup for task #{}, uid {}", task_id, uid);
+    }
+  }
+
   return Status::OK;
 }
 
@@ -482,8 +491,14 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTask(
     grpc::ServerContext *context,
     const crane::grpc::ReleaseCgroupForTaskRequest *request,
     crane::grpc::ReleaseCgroupForTaskReply *response) {
-  bool ok = g_task_mgr->ReleaseCgroupAsync(request->task_id(), request->uid());
-  response->set_ok(ok);
+  task_id_t task_id = request->task_id();
+  uid_t uid = request->uid();
+
+  bool ok = g_task_mgr->ReleaseCgroupAsync(task_id, uid);
+  if (!ok) {
+    CRANE_ERROR("Failed to release cgroup for task #{}, uid {}", task_id, uid);
+  }
+
   return Status::OK;
 }
 

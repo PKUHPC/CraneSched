@@ -26,9 +26,10 @@ class CranedStub {
 
   ~CranedStub();
 
-  CraneErr ExecuteTask(const TaskInCtld *task);
+  CraneErr ExecuteTasks(std::vector<TaskInCtld const *> const &tasks);
 
-  CraneErr CreateCgroupForTask(uint32_t task_id, uid_t uid);
+  CraneErr CreateCgroupForTasks(
+      std::vector<std::pair<task_id_t, uid_t>> const &task_uid_pairs);
 
   CraneErr ReleaseCgroupForTask(uint32_t task_id, uid_t uid);
 

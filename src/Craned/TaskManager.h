@@ -147,7 +147,7 @@ class TaskManager {
 
   ~TaskManager();
 
-  CraneErr ExecuteTaskAsync(crane::grpc::TaskToD task);
+  CraneErr ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
   [[deprecated]] CraneErr SpawnInteractiveTaskAsync(
       uint32_t task_id, std::string executive_path,

@@ -327,16 +327,36 @@ void TaskScheduler::ScheduleThread_() {
 
         // For the task whose --node > 1, only execute the command at the first
         // allocated node.
-        CranedId const& first_node_id = task->CranedIds().front();
-        task->executing_craned_id = first_node_id;
+        task->executing_craned_id = task->CranedIds().front();
+      }
+
+      // RPC is time-consuming. Clustering rpc to one craned for performance.
+
+      absl::flat_hash_map<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
+          craned_cgroup_map;
+      absl::flat_hash_map<CranedId, std::vector<TaskInCtld const*>>
+          craned_tasks_map;
+
+      for (auto& it : selection_result_list) {
+        auto& task = it.first;
 
         for (CranedId const& craned_id : task->CranedIds()) {
-          CranedStub* stub = g_craned_keeper->GetCranedStub(craned_id);
-          CRANE_TRACE("Send CreateCgroupForTask for task #{} to {}",
-                      task->TaskId(), craned_id);
-          stub->CreateCgroupForTask(task->TaskId(), task->uid);
+          craned_cgroup_map[craned_id].emplace_back(task->TaskId(), task->uid);
         }
 
+        craned_tasks_map[task->executing_craned_id].emplace_back(task.get());
+      }
+
+      for (auto const& [craned_id, task_uid_pairs] : craned_cgroup_map) {
+        CranedStub* stub = g_craned_keeper->GetCranedStub(craned_id);
+        CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
+                    task_uid_pairs.size(), craned_id);
+        stub->CreateCgroupForTasks(task_uid_pairs);
+      }
+
+      // Move tasks into running queue.
+      for (auto& it : selection_result_list) {
+        auto& task = it.first;
         if (task->type == crane::grpc::Interactive) {
           std::get<InteractiveMetaInTask>(task->meta)
               .cb_task_res_allocated(task->TaskId(),
@@ -362,10 +382,6 @@ void TaskScheduler::ScheduleThread_() {
         g_embedded_db_client->UpdatePersistedPartOfTask(
             task_ptr->TaskDbId(), task_ptr->PersistedPart());
 
-        // RPC is time-consuming.
-        CranedStub* node_stub = g_craned_keeper->GetCranedStub(first_node_id);
-        node_stub->ExecuteTask(task_ptr);
-
         bool ok = g_embedded_db_client->MoveTaskFromPendingToRunning(
             task_ptr->TaskDbId());
         if (!ok) {
@@ -374,6 +390,13 @@ void TaskScheduler::ScheduleThread_() {
               "g_embedded_db_client->MoveTaskFromPendingToRunning({})",
               task_ptr->TaskDbId());
         }
+      }
+
+      for (auto const& [craned_id, tasks] : craned_tasks_map) {
+        CranedStub* stub = g_craned_keeper->GetCranedStub(craned_id);
+        CRANE_TRACE("Send ExecuteTasks for {} tasks to {}", tasks.size(),
+                    craned_id);
+        stub->ExecuteTasks(tasks);
       }
     } else {
       m_pending_task_map_mtx_.Unlock();

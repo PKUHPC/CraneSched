@@ -18,59 +18,62 @@ CranedStub::~CranedStub() {
   if (m_clean_up_cb_) m_clean_up_cb_(this);
 }
 
-CraneErr CranedStub::ExecuteTask(const TaskInCtld *task) {
-  using crane::grpc::ExecuteTaskReply;
-  using crane::grpc::ExecuteTaskRequest;
+CraneErr CranedStub::ExecuteTasks(
+    std::vector<TaskInCtld const *> const &tasks) {
+  using crane::grpc::ExecuteTasksReply;
+  using crane::grpc::ExecuteTasksRequest;
 
-  ExecuteTaskRequest request;
-  ExecuteTaskReply reply;
+  ExecuteTasksRequest request;
+  ExecuteTasksReply reply;
   ClientContext context;
   Status status;
 
-  auto *mutable_task = request.mutable_task();
+  for (TaskInCtld const *task : tasks) {
+    auto *mutable_task = request.mutable_tasks()->Add();
 
-  // Set time_limit
-  mutable_task->mutable_time_limit()->CopyFrom(
-      google::protobuf::util::TimeUtil::MillisecondsToDuration(
-          ToInt64Milliseconds(task->time_limit)));
+    // Set time_limit
+    mutable_task->mutable_time_limit()->CopyFrom(
+        google::protobuf::util::TimeUtil::MillisecondsToDuration(
+            ToInt64Milliseconds(task->time_limit)));
 
-  // Set resources
-  auto *mutable_allocatable_resource =
-      mutable_task->mutable_resources()->mutable_allocatable_resource();
-  mutable_allocatable_resource->set_cpu_core_limit(
-      task->resources.allocatable_resource.cpu_count);
-  mutable_allocatable_resource->set_memory_limit_bytes(
-      task->resources.allocatable_resource.memory_bytes);
-  mutable_allocatable_resource->set_memory_sw_limit_bytes(
-      task->resources.allocatable_resource.memory_sw_bytes);
+    // Set resources
+    auto *mutable_allocatable_resource =
+        mutable_task->mutable_resources()->mutable_allocatable_resource();
+    mutable_allocatable_resource->set_cpu_core_limit(
+        task->resources.allocatable_resource.cpu_count);
+    mutable_allocatable_resource->set_memory_limit_bytes(
+        task->resources.allocatable_resource.memory_bytes);
+    mutable_allocatable_resource->set_memory_sw_limit_bytes(
+        task->resources.allocatable_resource.memory_sw_bytes);
 
-  // Set type
-  mutable_task->set_type(task->type);
+    // Set type
+    mutable_task->set_type(task->type);
 
-  mutable_task->set_task_id(task->TaskId());
-  mutable_task->set_name(task->name);
+    mutable_task->set_task_id(task->TaskId());
+    mutable_task->set_name(task->name);
 
-  mutable_task->set_node_num(task->node_num);
-  mutable_task->set_ntasks_per_node(task->ntasks_per_node);
-  mutable_task->set_cpus_per_task(task->cpus_per_task);
+    mutable_task->set_node_num(task->node_num);
+    mutable_task->set_ntasks_per_node(task->ntasks_per_node);
+    mutable_task->set_cpus_per_task(task->cpus_per_task);
 
-  mutable_task->set_uid(task->uid);
-  mutable_task->set_env(task->env);
-  mutable_task->set_cwd(task->cwd);
+    mutable_task->set_uid(task->uid);
+    mutable_task->set_env(task->env);
+    mutable_task->set_cwd(task->cwd);
 
-  for (const auto &hostname : task->CranedIds())
-    mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
+    for (const auto &hostname : task->CranedIds())
+      mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
 
-  mutable_task->mutable_start_time()->set_seconds(
-      task->StartTimeInUnixSecond());
-  mutable_task->mutable_time_limit()->set_seconds(
-      ToInt64Seconds(task->time_limit));
+    mutable_task->mutable_start_time()->set_seconds(
+        task->StartTimeInUnixSecond());
+    mutable_task->mutable_time_limit()->set_seconds(
+        ToInt64Seconds(task->time_limit));
 
-  if (task->type == crane::grpc::Batch) {
-    auto &meta_in_ctld = std::get<BatchMetaInTask>(task->meta);
-    auto *mutable_meta = request.mutable_task()->mutable_batch_meta();
-    mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
-    mutable_meta->set_sh_script(meta_in_ctld.sh_script);
+    if (task->type == crane::grpc::Batch) {
+      auto &meta_in_ctld = std::get<BatchMetaInTask>(task->meta);
+      auto *mutable_meta = mutable_task->mutable_batch_meta();
+      mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
+      mutable_meta->set_sh_script(meta_in_ctld.sh_script);
+    }
   }
 
   status = m_stub_->ExecuteTask(&context, request, &reply);
@@ -133,29 +136,30 @@ CraneErr CranedStub::TerminateOrphanedTask(task_id_t task_id) {
     return CraneErr::kGenericFailure;
 }
 
-CraneErr CranedStub::CreateCgroupForTask(uint32_t task_id, uid_t uid) {
-  using crane::grpc::CreateCgroupForTaskReply;
-  using crane::grpc::CreateCgroupForTaskRequest;
+CraneErr CranedStub::CreateCgroupForTasks(
+    std::vector<std::pair<task_id_t, uid_t>> const &task_uid_pairs) {
+  using crane::grpc::CreateCgroupForTasksReply;
+  using crane::grpc::CreateCgroupForTasksRequest;
 
   ClientContext context;
   Status status;
-  CreateCgroupForTaskRequest request;
-  CreateCgroupForTaskReply reply;
+  CreateCgroupForTasksRequest request;
+  CreateCgroupForTasksReply reply;
 
-  request.set_task_id(task_id);
-  request.set_uid(uid);
+  for (auto &&[task_id, uid] : task_uid_pairs) {
+    request.mutable_task_id_list()->Add(task_id);
+    request.mutable_uid_list()->Add(uid);
+  }
+
   status = m_stub_->CreateCgroupForTask(&context, request, &reply);
   if (!status.ok()) {
     CRANE_ERROR(
-        "CreateCgroupForTask RPC for Node {} returned with status not ok: {}",
+        "CreateCgroupForTasks RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
     return CraneErr::kRpcFailure;
   }
 
-  if (reply.ok())
-    return CraneErr::kOk;
-  else
-    return CraneErr::kGenericFailure;
+  return CraneErr::kOk;
 }
 
 CraneErr CranedStub::ReleaseCgroupForTask(uint32_t task_id, uid_t uid) {
@@ -177,10 +181,7 @@ CraneErr CranedStub::ReleaseCgroupForTask(uint32_t task_id, uid_t uid) {
     return CraneErr::kRpcFailure;
   }
 
-  if (reply.ok())
-    return CraneErr::kOk;
-  else
-    return CraneErr::kGenericFailure;
+  return CraneErr::kOk;
 }
 
 CraneErr CranedStub::CheckTaskStatus(task_id_t task_id,

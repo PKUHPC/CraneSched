@@ -129,32 +129,25 @@ message SubmitBatchTaskReply {
   }
 }
 
-message ExecuteTaskRequest {
-  TaskToD task = 1;
+message ExecuteTasksRequest {
+  repeated TaskToD tasks = 1;
 }
 
-message ExecuteTaskReply {
-  bool ok = 1;
-  string reason = 2;
+message ExecuteTasksReply {}
+
+message CreateCgroupForTasksRequest {
+  repeated uint32 task_id_list = 1;
+  repeated uint32 uid_list = 2;
 }
 
-message CreateCgroupForTaskRequest {
-  uint32 task_id = 1;
-  uint32 uid = 2;
-}
-
-message CreateCgroupForTaskReply{
-  bool ok = 1;
-}
+message CreateCgroupForTasksReply{}
 
 message ReleaseCgroupForTaskRequest{
   uint32 task_id = 1;
   uint32 uid = 2;
 }
 
-message ReleaseCgroupForTaskReply{
-  uint32 ok = 1;
-}
+message ReleaseCgroupForTaskReply{}
 
 message TerminateTaskRequest {
   uint32 task_id = 1;
@@ -607,11 +600,11 @@ service Craned {
      If the task is an interactive task, craned will just allocate the resource and waiting for
      further SrunXStream to execute a real task.
    */
-  rpc ExecuteTask(ExecuteTaskRequest) returns(ExecuteTaskReply);
+  rpc ExecuteTask(ExecuteTasksRequest) returns(ExecuteTasksReply);
 
   rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
 
-  rpc CreateCgroupForTask(CreateCgroupForTaskRequest) returns(CreateCgroupForTaskReply);
+  rpc CreateCgroupForTask(CreateCgroupForTasksRequest) returns(CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTask(ReleaseCgroupForTaskRequest) returns(ReleaseCgroupForTaskReply);
 
   /*

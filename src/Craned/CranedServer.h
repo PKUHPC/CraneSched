@@ -35,8 +35,8 @@ class CranedServiceImpl : public Craned::Service {
       override;
 
   grpc::Status ExecuteTask(grpc::ServerContext *context,
-                           const crane::grpc::ExecuteTaskRequest *request,
-                           crane::grpc::ExecuteTaskReply *response) override;
+                           const crane::grpc::ExecuteTasksRequest *request,
+                           crane::grpc::ExecuteTasksReply *response) override;
 
   grpc::Status TerminateTask(
       grpc::ServerContext *context,
@@ -70,8 +70,8 @@ class CranedServiceImpl : public Craned::Service {
 
   grpc::Status CreateCgroupForTask(
       grpc::ServerContext *context,
-      const crane::grpc::CreateCgroupForTaskRequest *request,
-      crane::grpc::CreateCgroupForTaskReply *response) override;
+      const crane::grpc::CreateCgroupForTasksRequest *request,
+      crane::grpc::CreateCgroupForTasksReply *response) override;
 
   grpc::Status ReleaseCgroupForTask(
       grpc::ServerContext *context,
