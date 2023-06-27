@@ -46,9 +46,6 @@ class INodeSelectionAlgo {
    * scheduling. See the annotation of \b SchedulingResult
    */
   virtual void NodeSelect(
-      const CranedMetaContainerInterface::AllPartitionsMetaMap&
-          all_partitions_meta_map,
-      const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
       const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>&
           running_tasks,
       absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
@@ -113,9 +110,6 @@ class MinLoadFirst : public INodeSelectionAlgo {
 
  public:
   void NodeSelect(
-      const CranedMetaContainerInterface::AllPartitionsMetaMap&
-          all_partitions_meta_map,
-      const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
       const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>&
           running_tasks,
       absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,

@@ -199,6 +199,7 @@ struct TaskInCtld {
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
+  absl::Time submit_time;
   absl::Time start_time;
   absl::Time end_time;
 
@@ -279,6 +280,18 @@ struct TaskInCtld {
     persisted_part.set_exit_code(val);
   }
   uint32_t ExitCode() const { return exit_code; }
+
+  void SetSubmitTime(absl::Time const& val) {
+    submit_time = val;
+    persisted_part.mutable_submit_time()->set_seconds(
+        ToUnixSeconds(submit_time));
+  }
+  void SetSubmitTimeByUnixSecond(uint64_t val) {
+    submit_time = absl::FromUnixSeconds(val);
+    persisted_part.mutable_submit_time()->set_seconds(val);
+  }
+  absl::Time const& SubmitTime() const { return submit_time; }
+  int64_t SubmitTimeInUnixSecond() const { return ToUnixSeconds(submit_time); }
 
   void SetStartTime(absl::Time const& val) {
     start_time = val;

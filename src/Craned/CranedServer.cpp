@@ -326,13 +326,15 @@ CraneErr CranedServer::RevokeResourceToken(const uuid &resource_uuid) {
 
 grpc::Status CranedServiceImpl::ExecuteTask(
     grpc::ServerContext *context,
-    const crane::grpc::ExecuteTaskRequest *request,
-    crane::grpc::ExecuteTaskReply *response) {
-  CRANE_TRACE("Received a task with id {}", request->task().task_id());
+    const crane::grpc::ExecuteTasksRequest *request,
+    crane::grpc::ExecuteTasksReply *response) {
+  CRANE_TRACE("Requested from CraneCtld to execute {} tasks.",
+              request->tasks_size());
 
-  g_task_mgr->ExecuteTaskAsync(request->task());
+  for (auto const &task_to_d : request->tasks()) {
+    g_task_mgr->ExecuteTaskAsync(task_to_d);
+  }
 
-  response->set_ok(true);
   return Status::OK;
 }
 
@@ -467,14 +469,24 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::CreateCgroupForTask(
+grpc::Status CranedServiceImpl::CreateCgroupForTasks(
     grpc::ServerContext *context,
-    const crane::grpc::CreateCgroupForTaskRequest *request,
-    crane::grpc::CreateCgroupForTaskReply *response) {
-  CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", request->task_id(),
-              request->uid());
-  bool ok = g_task_mgr->CreateCgroupAsync(request->task_id(), request->uid());
-  response->set_ok(ok);
+    const crane::grpc::CreateCgroupForTasksRequest *request,
+    crane::grpc::CreateCgroupForTasksReply *response) {
+  std::vector<std::pair<task_id_t, uid_t>> task_id_uid_pairs;
+  for (int i = 0; i < request->task_id_list_size(); i++) {
+    task_id_t task_id = request->task_id_list(i);
+    uid_t uid = request->uid_list(i);
+
+    CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", task_id, uid);
+    task_id_uid_pairs.emplace_back(task_id, uid);
+  }
+
+  bool ok = g_task_mgr->CreateCgroupsAsync(std::move(task_id_uid_pairs));
+  if (!ok) {
+    CRANE_ERROR("Failed to create cgroups for some tasks.");
+  }
+
   return Status::OK;
 }
 
@@ -482,8 +494,16 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTask(
     grpc::ServerContext *context,
     const crane::grpc::ReleaseCgroupForTaskRequest *request,
     crane::grpc::ReleaseCgroupForTaskReply *response) {
-  bool ok = g_task_mgr->ReleaseCgroupAsync(request->task_id(), request->uid());
-  response->set_ok(ok);
+  task_id_t task_id = request->task_id();
+  uid_t uid = request->uid();
+
+  CRANE_DEBUG("Release Cgroup for task #{}", task_id);
+
+  bool ok = g_task_mgr->ReleaseCgroupAsync(task_id, uid);
+  if (!ok) {
+    CRANE_ERROR("Failed to release cgroup for task #{}, uid {}", task_id, uid);
+  }
+
   return Status::OK;
 }
 

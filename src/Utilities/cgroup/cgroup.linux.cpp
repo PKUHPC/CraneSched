@@ -126,6 +126,8 @@ int CgroupManager::initialize_controller(
   std::string_view controller_str =
       CgroupConstant::GetControllerStringView(controller);
 
+  int err;
+
   if (!Mounted(controller)) {
     if (required) {
       CRANE_WARN("Error - cgroup controller {} not mounted, but required.\n",
@@ -138,13 +140,24 @@ int CgroupManager::initialize_controller(
     }
   }
 
+  struct cgroup_controller *p_raw_controller;
   if (!has_cgroup ||
-      (cgroup_get_controller(&cgroup, controller_str.data()) == nullptr)) {
+      cgroup_get_controller(&cgroup, controller_str.data()) == nullptr) {
     changed_cgroup = true;
-    if (cgroup_add_controller(&cgroup, controller_str.data()) == nullptr) {
+    if ((p_raw_controller = cgroup_add_controller(
+             &cgroup, controller_str.data())) == nullptr) {
       CRANE_WARN("Unable to initialize cgroup {} controller.\n",
                  controller_str);
       return required ? 1 : 0;
+    } else {
+      // Try to turn on hierarchical memory accounting.
+      if (controller == CgroupConstant::Controller::MEMORY_CONTROLLER) {
+        if ((err = cgroup_add_value_bool(p_raw_controller,
+                                         "memory.use_hierarchy", true))) {
+          CRANE_WARN("Unable to set hierarchical memory settings: {} {}\n", err,
+                     cgroup_strerror(err));
+        }
+      }
     }
   }
 
@@ -174,15 +187,17 @@ Cgroup *CgroupManager::CreateOrOpen(const std::string &cgroup_string,
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;
 
-  LockGuard guard(m_mtx_);
+  {
+    LockGuard guard(m_mtx_);
 
-  auto iter = m_cgroup_ref_count_map_.find(cgroup_string);
-  if (iter != m_cgroup_ref_count_map_.end()) {
-    iter->second.second++;
-    return iter->second.first.get();
+    auto iter = m_cgroup_ref_count_map_.find(cgroup_string);
+    if (iter != m_cgroup_ref_count_map_.end()) {
+      iter->second.second++;
+      return iter->second.first.get();
+    }
   }
 
-  bool created_cgroup = false, changed_cgroup = false;
+  bool changed_cgroup = false;
   struct cgroup *native_cgroup = cgroup_new_cgroup(cgroup_string.c_str());
   if (native_cgroup == NULL) {
     CRANE_WARN("Unable to construct new cgroup object.\n");
@@ -199,13 +214,13 @@ Cgroup *CgroupManager::CreateOrOpen(const std::string &cgroup_string,
   }
 
   // Work through the various controllers.
-  if ((preferred_controllers & Controller::CPUACCT_CONTROLLER) &&
-      initialize_controller(
-          *native_cgroup, Controller::CPUACCT_CONTROLLER,
-          required_controllers & Controller::CPUACCT_CONTROLLER, has_cgroup,
-          changed_cgroup)) {
-    return nullptr;
-  }
+  //  if ((preferred_controllers & Controller::CPUACCT_CONTROLLER) &&
+  //      initialize_controller(
+  //          *native_cgroup, Controller::CPUACCT_CONTROLLER,
+  //          required_controllers & Controller::CPUACCT_CONTROLLER, has_cgroup,
+  //          changed_cgroup)) {
+  //    return nullptr;
+  //  }
   if ((preferred_controllers & Controller::MEMORY_CONTROLLER) &&
       initialize_controller(
           *native_cgroup, Controller::MEMORY_CONTROLLER,
@@ -220,70 +235,47 @@ Cgroup *CgroupManager::CreateOrOpen(const std::string &cgroup_string,
           changed_cgroup)) {
     return nullptr;
   }
-  if ((preferred_controllers & Controller::BLOCK_CONTROLLER) &&
-      initialize_controller(*native_cgroup, Controller::BLOCK_CONTROLLER,
-                            required_controllers & Controller::BLOCK_CONTROLLER,
-                            has_cgroup, changed_cgroup)) {
-    return nullptr;
-  }
+  //  if ((preferred_controllers & Controller::BLOCK_CONTROLLER) &&
+  //      initialize_controller(*native_cgroup, Controller::BLOCK_CONTROLLER,
+  //                            required_controllers &
+  //                            Controller::BLOCK_CONTROLLER, has_cgroup,
+  //                            changed_cgroup)) {
+  //    return nullptr;
+  //  }
   if ((preferred_controllers & Controller::CPU_CONTROLLER) &&
       initialize_controller(*native_cgroup, Controller::CPU_CONTROLLER,
                             required_controllers & Controller::CPU_CONTROLLER,
                             has_cgroup, changed_cgroup)) {
     return nullptr;
   }
-  if ((preferred_controllers & Controller::DEVICES_CONTROLLER) &&
-      initialize_controller(
-          *native_cgroup, Controller::DEVICES_CONTROLLER,
-          required_controllers & Controller::DEVICES_CONTROLLER, has_cgroup,
-          changed_cgroup)) {
-    return nullptr;
-  }
+  //  if ((preferred_controllers & Controller::DEVICES_CONTROLLER) &&
+  //      initialize_controller(
+  //          *native_cgroup, Controller::DEVICES_CONTROLLER,
+  //          required_controllers & Controller::DEVICES_CONTROLLER, has_cgroup,
+  //          changed_cgroup)) {
+  //    return nullptr;
+  //  }
 
   int err;
   if (!has_cgroup) {
     if ((err = cgroup_create_cgroup(native_cgroup, 0))) {
       // Only record at D_ALWAYS if any cgroup mounts are available.
       CRANE_WARN(
-          "Unable to create cgroup {}."
-          " Cgroup functionality will not work: {}\n",
+          "Unable to create cgroup {}. Cgroup functionality will not work: {}",
           cgroup_string.c_str(), cgroup_strerror(err));
       return nullptr;
-    } else {
-      created_cgroup = true;
     }
-  } else if (has_cgroup && changed_cgroup &&
-             (err = cgroup_modify_cgroup(native_cgroup))) {
+  } else if (changed_cgroup && (err = cgroup_modify_cgroup(native_cgroup))) {
     CRANE_WARN(
-        "Unable to modify cgroup {}."
-        "  Some cgroup functionality may not work: {} {}\n",
+        "Unable to modify cgroup {}. Some cgroup functionality may not work: "
+        "{} {}",
         cgroup_string.c_str(), err, cgroup_strerror(err));
-  }
-
-  // Try to turn on hierarchical memory accounting.
-  struct cgroup_controller *mem_controller = cgroup_get_controller(
-      native_cgroup,
-      GetControllerStringView(Controller::MEMORY_CONTROLLER).data());
-  if (retrieve && Mounted(Controller::MEMORY_CONTROLLER) && created_cgroup &&
-      (mem_controller != NULL)) {
-    // Todo: What's memory.use_hierarchy? Try to eliminate `retrieve`.
-    if ((err = cgroup_add_value_bool(mem_controller, "memory.use_hierarchy",
-                                     true))) {
-      CRANE_WARN("Unable to set hierarchical memory settings for {}: {} {}\n",
-                 cgroup_string.c_str(), err, cgroup_strerror(err));
-    } else {
-      if ((err = cgroup_modify_cgroup(native_cgroup))) {
-        CRANE_WARN(
-            "Unable to enable hierarchical memory accounting for {} "
-            ": {} {}\n",
-            cgroup_string.c_str(), err, cgroup_strerror(err));
-      }
-    }
   }
 
   auto cgroup = std::make_unique<Cgroup>(cgroup_string, native_cgroup);
   auto *p = cgroup.get();
 
+  LockGuard guard(m_mtx_);
   m_cgroup_ref_count_map_.emplace(cgroup_string,
                                   std::make_pair(std::move(cgroup), 1));
 
@@ -291,19 +283,24 @@ Cgroup *CgroupManager::CreateOrOpen(const std::string &cgroup_string,
 }
 
 bool CgroupManager::Release(const std::string &cgroup_path) {
-  LockGuard guard(m_mtx_);
+  size_t *ref_cnt;
+  bool remove;
+  {
+    LockGuard guard(m_mtx_);
 
-  auto it = m_cgroup_ref_count_map_.find(cgroup_path);
-  if (it == m_cgroup_ref_count_map_.end()) {
-    CRANE_WARN("Destroying an unknown cgroup.");
-    return false;
+    auto it = m_cgroup_ref_count_map_.find(cgroup_path);
+    if (it == m_cgroup_ref_count_map_.end()) {
+      CRANE_WARN("Destroying an unknown cgroup.");
+      return false;
+    }
+
+    ref_cnt = &it->second.second;
+    (*ref_cnt)--;
+    remove = *ref_cnt == 0;
   }
 
-  size_t *ref_cnt = &it->second.second;
-  (*ref_cnt)--;
-
   // Only delete if this is the last ref and we originally created it.
-  if (*ref_cnt == 0) {
+  if (remove) {
     int err;
     // Must re-initialize the cgroup structure before deletion.
     struct cgroup *dcg = cgroup_new_cgroup(cgroup_path.c_str());
@@ -324,13 +321,12 @@ bool CgroupManager::Release(const std::string &cgroup_path) {
              dcg, CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
       CRANE_WARN("Unable to completely remove cgroup {}: {} {}\n",
                  cgroup_path.c_str(), err, cgroup_strerror(err));
-    } else {
-      CRANE_TRACE("Deleted cgroup {}.", cgroup_path.c_str());
     }
 
     // Notice the cgroup struct freed here is not the one held by Cgroup class.
     cgroup_free(&dcg);
 
+    LockGuard guard(m_mtx_);
     // This call results in the destructor call of Cgroup, which frees the
     // internal libcgroup struct.
     m_cgroup_ref_count_map_.erase(cgroup_path);
@@ -340,15 +336,20 @@ bool CgroupManager::Release(const std::string &cgroup_path) {
 }
 
 bool CgroupManager::MigrateProcTo(pid_t pid, const std::string &cgroup_path) {
-  LockGuard guard(m_mtx_);
+  struct cgroup *pcg;
+  {
+    LockGuard guard(m_mtx_);
 
-  // Attempt to migrate a given process to a cgroup.
-  // This can be done without regards to whether the
-  // process is already in the cgroup
-  auto iter = m_cgroup_ref_count_map_.find(cgroup_path);
-  if (iter == m_cgroup_ref_count_map_.end()) {
-    CRANE_WARN(cgroup_path);
-    return false;
+    // Attempt to migrate a given process to a cgroup.
+    // This can be done without regards to whether the
+    // process is already in the cgroup
+    auto iter = m_cgroup_ref_count_map_.find(cgroup_path);
+    if (iter == m_cgroup_ref_count_map_.end()) {
+      CRANE_WARN(cgroup_path);
+      return false;
+    }
+
+    pcg = iter->second.first->m_cgroup_;
   }
 
   using CgroupConstant::Controller;
@@ -449,7 +450,6 @@ bool CgroupManager::MigrateProcTo(pid_t pid, const std::string &cgroup_path) {
 after_migrate:
 
   //  orig_cgroup = NULL;
-  struct cgroup *pcg = iter->second.first->m_cgroup_;
   err = cgroup_attach_task_pid(pcg, pid);
   if (err != 0) {
     CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}\n", pid,

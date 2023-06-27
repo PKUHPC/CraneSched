@@ -149,7 +149,11 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_uid(task.task_to_ctld().uid());
 
     task_it->set_gid(task.persisted_part().gid());
-    task_it->mutable_time_limit()->CopyFrom(task.task_to_ctld().time_limit());
+    task_it->mutable_time_limit()->CopyFrom(
+        task.task_to_ctld().time_limit());  // WARNING: time limit may be
+                                            // modified after submission
+    task_it->mutable_submit_time()->CopyFrom(
+        task.persisted_part().submit_time());
     task_it->mutable_start_time()->CopyFrom(task.persisted_part().start_time());
     task_it->mutable_end_time()->CopyFrom(task.persisted_part().end_time());
     task_it->set_account(task.task_to_ctld().account());
@@ -158,25 +162,48 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_cmd_line(task.task_to_ctld().cmd_line());
     task_it->set_cwd(task.task_to_ctld().cwd());
     task_it->set_username(task.persisted_part().username());
-    task_it->set_qos(task.task_to_ctld().qos());
+    task_it->set_qos(task.task_to_ctld().qos());  // so as qos
 
-    task_it->set_alloc_cpus(task.task_to_ctld().cpus_per_task());
+    task_it->set_alloc_cpu(task.task_to_ctld().cpus_per_task() *
+                           task.task_to_ctld().node_num());
     task_it->set_exit_code(task.persisted_part().exit_code());
 
     task_it->set_status(task.persisted_part().status());
     task_it->set_craned_list(
         util::HostNameListToStr(task.persisted_part().craned_ids()));
   };
-  bool no_start_time_constraint = !request->has_filter_start_time();
-  bool no_end_time_constraint = !request->has_filter_end_time();
+
   auto task_rng_filter_time = [&](crane::grpc::TaskInEmbeddedDb &task) {
-    bool filter_start_time =
-        no_start_time_constraint ||
-        task.persisted_part().start_time() >= request->filter_start_time();
-    bool filter_end_time =
-        no_end_time_constraint ||
-        task.persisted_part().end_time() <= request->filter_end_time();
-    return filter_start_time && filter_end_time;
+    bool has_submit_time_interval = request->has_filter_submit_time_interval();
+    bool has_start_time_interval = request->has_filter_start_time_interval();
+    bool has_end_time_interval = request->has_filter_end_time_interval();
+
+    bool valid = true;
+    if (has_submit_time_interval) {
+      const auto &interval = request->filter_submit_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task.persisted_part().submit_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task.persisted_part().submit_time() <= interval.upper_bound();
+    }
+
+    if (has_start_time_interval) {
+      const auto &interval = request->filter_start_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task.persisted_part().start_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task.persisted_part().start_time() <= interval.upper_bound();
+    }
+
+    if (has_end_time_interval) {
+      const auto &interval = request->filter_end_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task.persisted_part().end_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task.persisted_part().end_time() <= interval.upper_bound();
+    }
+
+    return valid;
   };
 
   bool no_accounts_constraint = request->filter_accounts().empty();
@@ -284,6 +311,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_gid(task->Gid());
     task_it->mutable_time_limit()->set_seconds(
         ToInt64Seconds(task->time_limit));
+    task_it->mutable_submit_time()->CopyFrom(
+        task->PersistedPart().submit_time());
     task_it->mutable_start_time()->CopyFrom(task->PersistedPart().start_time());
     task_it->mutable_end_time()->CopyFrom(task->PersistedPart().end_time());
     task_it->set_account(task->account);
@@ -294,7 +323,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_username(task->PersistedPart().username());
     task_it->set_qos(task->qos);
 
-    task_it->set_alloc_cpus(task->resources.allocatable_resource.cpu_count);
+    task_it->set_alloc_cpu(task->resources.allocatable_resource.cpu_count *
+                           task->node_num);
     task_it->set_exit_code(task->ExitCode());
 
     task_it->set_status(task->Status());
@@ -302,14 +332,38 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   };
 
   auto db_task_rng_filter_time = [&](std::unique_ptr<TaskInCtld> const &task) {
-    bool filter_start_time =
-        no_start_time_constraint ||
-        task->PersistedPart().start_time() >= request->filter_start_time();
-    bool filter_end_time =
-        no_end_time_constraint ||
-        task->PersistedPart().end_time() <= request->filter_end_time();
-    return filter_start_time && filter_end_time;
+    bool has_submit_time_interval = request->has_filter_submit_time_interval();
+    bool has_start_time_interval = request->has_filter_start_time_interval();
+    bool has_end_time_interval = request->has_filter_end_time_interval();
+
+    bool valid = true;
+    if (has_submit_time_interval) {
+      const auto &interval = request->filter_submit_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task->PersistedPart().submit_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task->PersistedPart().submit_time() <= interval.upper_bound();
+    }
+
+    if (has_start_time_interval) {
+      const auto &interval = request->filter_start_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task->PersistedPart().start_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task->PersistedPart().start_time() <= interval.upper_bound();
+    }
+
+    if (has_end_time_interval) {
+      const auto &interval = request->filter_end_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task->PersistedPart().end_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task->PersistedPart().end_time() <= interval.upper_bound();
+    }
+
+    return valid;
   };
+
   auto db_task_rng_filter_account =
       [&](std::unique_ptr<TaskInCtld> const &task) {
         return no_accounts_constraint || req_accounts.contains(task->account);
@@ -1247,9 +1301,10 @@ result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
 
   if (!g_account_manager->CheckUserPermissionToPartition(
           task->Username(), task->account, task->partition_id)) {
-    return result::fail(fmt::format(
-        "The user '{}' don't have access to submit task in partition '{}'",
-        task->uid, task->partition_id));
+    return result::fail(
+        fmt::format("User '{}' doesn't have permission to use partition '{}' "
+                    "when using account '{}'",
+                    task->Username(), task->partition_id, task->account));
   }
 
   if (!g_account_manager->CheckEnableState(task->account, task->Username())) {

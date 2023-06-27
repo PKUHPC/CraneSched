@@ -279,3 +279,131 @@ TEST(Unqlite, Protobuf) {
   // Auto-commit the transaction and close our handle.
   unqlite_close(pDb);
 }
+
+class Jx9Test : public testing::Test {
+  void SetUp() override {
+    int rc;
+
+    // Open our database;
+    rc = unqlite_open(&pDb, db_file.c_str(), UNQLITE_OPEN_CREATE);
+    if (rc != UNQLITE_OK) {
+      GTEST_FAIL();
+    }
+  }
+
+  void TearDown() override { unqlite_close(pDb); }
+
+ protected:
+  void Jx9Print(std::string_view output) {
+    GTEST_LOG_(INFO) << "[JX9] " << output;
+  }
+
+  static int Jx9OutputCallback(const void *pOutput, unsigned int nLen,
+                               void *pThisVoid) {
+    auto *pThis = reinterpret_cast<Jx9Test *>(pThisVoid);
+
+    std::string_view output(reinterpret_cast<const char *>(pOutput), nLen);
+    pThis->Jx9Print(output);
+    return UNQLITE_OK;
+  }
+
+  std::string GetJx9CompileErrorString(int rc) {
+    if (rc == UNQLITE_COMPILE_ERR) {
+      const char *zBuf;
+      int iLen;
+
+      /* Compile-time error, extract the compiler error log */
+      unqlite_config(pDb, UNQLITE_CONFIG_JX9_ERR_LOG, &zBuf, &iLen);
+
+      if (iLen > 0) {
+        return std::string{zBuf};
+      }
+    }
+    return {};
+  }
+
+  unqlite *pDb;
+
+  std::string m_jx9_store_src_{
+      R"(
+print($argv[0]);
+
+// foreach($arg_kvs as $k, $v) {
+//    $o = sprintf("%s=>%s", $k, $v);
+//    print($o);
+// }
+
+if ( !db_exists( $argv[0] ) ) {
+  /* Try to create it */
+  $rc = db_create($argv[0]);
+
+  if ( !$rc ) {
+    // Handle error
+    print db_errlog();
+    return;
+  }
+}
+
+$rc = db_store
+)"};
+};
+
+TEST_F(Jx9Test, StoreAndFetch) {
+  std::string collection_name{"test"};
+
+  int rc;
+  unqlite_vm *pVm;
+  rc = unqlite_compile(pDb, m_jx9_store_src_.c_str(), m_jx9_store_src_.size(),
+                       &pVm);
+  if (rc != UNQLITE_OK) {
+    GTEST_FAIL() << "Failed to compile jx9 src: "
+                 << GetJx9CompileErrorString(rc);
+  }
+
+  rc =
+      unqlite_vm_config(pVm, UNQLITE_VM_CONFIG_OUTPUT, Jx9OutputCallback, this);
+  if (rc != UNQLITE_OK) {
+    GTEST_FAIL() << "Failed to set output callback";
+  }
+
+  rc = unqlite_vm_config(pVm, UNQLITE_VM_CONFIG_ARGV_ENTRY,
+                         collection_name.c_str());
+  if (rc != UNQLITE_OK) {
+    GTEST_FAIL() << "Failed to set argv[0]: " << collection_name;
+  }
+
+  std::vector<std::pair<std::string, std::string>> kv_vec{
+      {"k1", "v1"},
+      {"k2", "v2"},
+  };
+
+  unqlite_value *kv_list = unqlite_vm_new_array(pVm);
+  unqlite_value *pValueStr = unqlite_vm_new_scalar(pVm);
+
+  for (const auto &[k, v] : kv_vec) {
+    unqlite_value_string(pValueStr, v.c_str(), v.size());
+    unqlite_array_add_strkey_elem(kv_list, k.c_str(), pValueStr);
+    unqlite_value_reset_string_cursor(pValueStr);
+  }
+
+  rc = unqlite_vm_config(pVm, UNQLITE_VM_CONFIG_CREATE_VAR, "arg_kvs", kv_list);
+  if (rc != UNQLITE_OK) {
+    GTEST_FAIL() << "Failed to create var";
+  }
+
+  unqlite_vm_release_value(pVm, pValueStr);
+  rc = unqlite_vm_release_value(pVm, kv_list);
+  if (rc != UNQLITE_OK) {
+    GTEST_FAIL() << "Failed to release kv_list";
+  }
+
+  rc = unqlite_vm_exec(pVm);
+  if (rc != UNQLITE_OK) {
+    GTEST_FAIL() << "Failed to execute jx9 vm";
+  }
+
+  rc = unqlite_vm_reset(pVm);
+  if (rc != UNQLITE_OK) {
+    GTEST_FAIL() << "Failed to reset jx9 vm";
+  }
+}

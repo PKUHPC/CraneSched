@@ -149,8 +149,8 @@ bool MongodbClient::FetchJobRecords(
       task->SetTaskId(view["task_id"].get_int32().value);
       task->SetTaskDbId(view["task_db_id"].get_int64().value);
 
-      task->nodes_alloc = view["nodes_alloc"].get_int32().value;
-      task->node_num = 0;
+      task->node_num = task->nodes_alloc =
+          view["nodes_alloc"].get_int32().value;  //?
 
       task->account = view["account"].get_string().value.data();
       task->SetUsername(view["username"].get_string().value.data());
@@ -180,6 +180,7 @@ bool MongodbClient::FetchJobRecords(
       task->SetStatus(static_cast<crane::grpc::TaskStatus>(
           view["state"].get_int32().value));
       task->time_limit = absl::Seconds(view["timelimit"].get_int64().value);
+      task->SetSubmitTimeByUnixSecond(view["time_submit"].get_int64().value);
       task->cwd = view["work_dir"].get_string().value;
       if (view["submit_line"])
         task->cmd_line = view["submit_line"].get_string().value;
@@ -656,7 +657,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   auto const& task_to_ctld = task.task_to_ctld();
   auto const& persisted_part = task.persisted_part();
 
-  // 0  task_id       task_id        mod_time       deleted       account
+  // 0  task_id       task_db_id     mod_time       deleted       account
   // 5  cpus_req      mem_req        task_name      env           id_user
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
   // 15 priority      time_eligible  time_start    time_end    time_suspended
@@ -699,10 +700,12 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              util::HostNameListToStr(persisted_part.craned_ids()), 0, 0,
              task_to_ctld.partition_name(),
              // 15-19
-             0, 0, 0, 0, 0,
+             0, 0, persisted_part.start_time().seconds(),
+             persisted_part.end_time().seconds(), 0,
              // 20-24
              task_to_ctld.batch_meta().sh_script(), persisted_part.status(),
-             task_to_ctld.time_limit().seconds(), 0, task_to_ctld.cwd(),
+             task_to_ctld.time_limit().seconds(),
+             persisted_part.submit_time().seconds(), task_to_ctld.cwd(),
              // 25
              task_to_ctld.cmd_line(), persisted_part.exit_code(),
              persisted_part.username()};
@@ -715,7 +718,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   if (task->type == crane::grpc::Batch)
     script = std::get<BatchMetaInTask>(task->meta).sh_script;
 
-  // 0  task_id       task_id        mod_time       deleted       account
+  // 0  task_id       task_db_id     mod_time       deleted       account
   // 5  cpus_req      mem_req        task_name      env           id_user
   // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
   // 15 priority      time_eligible  time_start    time_end    time_suspended
@@ -754,11 +757,11 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              static_cast<int32_t>(task->Gid()), task->allocated_craneds_regex,
              static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
              // 15-19
-             0, 0, static_cast<int64_t>(task->StartTimeInUnixSecond()),
-             static_cast<int64_t>(task->EndTimeInUnixSecond()), 0,
+             0, 0, task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(),
+             0,
              // 20-24
-             script, task->Status(), absl::ToInt64Seconds(task->time_limit), 0,
-             task->cwd,
+             script, task->Status(), absl::ToInt64Seconds(task->time_limit),
+             task->SubmitTimeInUnixSecond(), task->cwd,
              // 25
              task->cmd_line, task->ExitCode(), task->Username(), task->qos};
 
