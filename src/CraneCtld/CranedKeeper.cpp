@@ -151,7 +151,7 @@ CraneErr CranedStub::CreateCgroupForTasks(
     request.mutable_uid_list()->Add(uid);
   }
 
-  status = m_stub_->CreateCgroupForTask(&context, request, &reply);
+  status = m_stub_->CreateCgroupForTasks(&context, request, &reply);
   if (!status.ok()) {
     CRANE_ERROR(
         "CreateCgroupForTasks RPC for Node {} returned with status not ok: {}",

@@ -469,19 +469,22 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::CreateCgroupForTask(
+grpc::Status CranedServiceImpl::CreateCgroupForTasks(
     grpc::ServerContext *context,
     const crane::grpc::CreateCgroupForTasksRequest *request,
     crane::grpc::CreateCgroupForTasksReply *response) {
+  std::vector<std::pair<task_id_t, uid_t>> task_id_uid_pairs;
   for (int i = 0; i < request->task_id_list_size(); i++) {
     task_id_t task_id = request->task_id_list(i);
     uid_t uid = request->uid_list(i);
 
     CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", task_id, uid);
-    bool ok = g_task_mgr->CreateCgroupAsync(task_id, uid);
-    if (!ok) {
-      CRANE_ERROR("Failed to create cgroup for task #{}, uid {}", task_id, uid);
-    }
+    task_id_uid_pairs.emplace_back(task_id, uid);
+  }
+
+  bool ok = g_task_mgr->CreateCgroupsAsync(std::move(task_id_uid_pairs));
+  if (!ok) {
+    CRANE_ERROR("Failed to create cgroups for some tasks.");
   }
 
   return Status::OK;
@@ -493,6 +496,8 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTask(
     crane::grpc::ReleaseCgroupForTaskReply *response) {
   task_id_t task_id = request->task_id();
   uid_t uid = request->uid();
+
+  CRANE_DEBUG("Release Cgroup for task #{}", task_id);
 
   bool ok = g_task_mgr->ReleaseCgroupAsync(task_id, uid);
   if (!ok) {

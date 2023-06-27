@@ -172,35 +172,38 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_craned_list(
         util::HostNameListToStr(task.persisted_part().craned_ids()));
   };
-  bool no_submit_time_left_constraint = !request->has_filter_submit_time_left();
-  bool no_submit_time_right_constraint =
-      !request->has_filter_submit_time_right();
-  bool no_start_time_left_constraint = !request->has_filter_start_time_left();
-  bool no_start_time_right_constraint = !request->has_filter_start_time_right();
-  bool no_end_time_left_constraint = !request->has_filter_end_time_left();
-  bool no_end_time_right_constraint = !request->has_filter_end_time_right();
+
   auto task_rng_filter_time = [&](crane::grpc::TaskInEmbeddedDb &task) {
-    bool filter_submit_time_left = no_submit_time_left_constraint ||
-                                   task.persisted_part().submit_time() >=
-                                       request->filter_submit_time_left();
-    bool filter_submit_time_right = no_submit_time_right_constraint ||
-                                    task.persisted_part().submit_time() <=
-                                        request->filter_submit_time_right();
-    bool filter_start_time_left =
-        no_start_time_left_constraint ||
-        task.persisted_part().start_time() >= request->filter_start_time_left();
-    bool filter_start_time_right = no_start_time_right_constraint ||
-                                   task.persisted_part().start_time() <=
-                                       request->filter_start_time_right();
-    bool filter_end_time_left =
-        no_end_time_left_constraint ||
-        task.persisted_part().end_time() >= request->filter_end_time_left();
-    bool filter_end_time_right =
-        no_end_time_right_constraint ||
-        task.persisted_part().end_time() <= request->filter_end_time_right();
-    return filter_submit_time_left && filter_submit_time_right &&
-           filter_start_time_left && filter_start_time_right &&
-           filter_end_time_left && filter_end_time_right;
+    bool has_submit_time_interval = request->has_filter_submit_time_interval();
+    bool has_start_time_interval = request->has_filter_start_time_interval();
+    bool has_end_time_interval = request->has_filter_end_time_interval();
+
+    bool valid = true;
+    if (has_submit_time_interval) {
+      const auto &interval = request->filter_submit_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task.persisted_part().submit_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task.persisted_part().submit_time() <= interval.upper_bound();
+    }
+
+    if (has_start_time_interval) {
+      const auto &interval = request->filter_start_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task.persisted_part().start_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task.persisted_part().start_time() <= interval.upper_bound();
+    }
+
+    if (has_end_time_interval) {
+      const auto &interval = request->filter_end_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task.persisted_part().end_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task.persisted_part().end_time() <= interval.upper_bound();
+    }
+
+    return valid;
   };
 
   bool no_accounts_constraint = request->filter_accounts().empty();
@@ -329,28 +332,38 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   };
 
   auto db_task_rng_filter_time = [&](std::unique_ptr<TaskInCtld> const &task) {
-    bool filter_submit_time_left = no_submit_time_left_constraint ||
-                                   task->PersistedPart().submit_time() >=
-                                       request->filter_submit_time_left();
-    bool filter_submit_time_right = no_submit_time_right_constraint ||
-                                    task->PersistedPart().submit_time() <=
-                                        request->filter_submit_time_right();
-    bool filter_start_time_left =
-        no_start_time_left_constraint ||
-        task->PersistedPart().start_time() >= request->filter_start_time_left();
-    bool filter_start_time_right = no_start_time_right_constraint ||
-                                   task->PersistedPart().start_time() <=
-                                       request->filter_start_time_right();
-    bool filter_end_time_left =
-        no_end_time_left_constraint ||
-        task->PersistedPart().end_time() >= request->filter_end_time_left();
-    bool filter_end_time_right =
-        no_end_time_right_constraint ||
-        task->PersistedPart().end_time() <= request->filter_end_time_right();
-    return filter_submit_time_left && filter_submit_time_right &&
-           filter_start_time_left && filter_start_time_right &&
-           filter_end_time_left && filter_end_time_right;
+    bool has_submit_time_interval = request->has_filter_submit_time_interval();
+    bool has_start_time_interval = request->has_filter_start_time_interval();
+    bool has_end_time_interval = request->has_filter_end_time_interval();
+
+    bool valid = true;
+    if (has_submit_time_interval) {
+      const auto &interval = request->filter_submit_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task->PersistedPart().submit_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task->PersistedPart().submit_time() <= interval.upper_bound();
+    }
+
+    if (has_start_time_interval) {
+      const auto &interval = request->filter_start_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task->PersistedPart().start_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task->PersistedPart().start_time() <= interval.upper_bound();
+    }
+
+    if (has_end_time_interval) {
+      const auto &interval = request->filter_end_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task->PersistedPart().end_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task->PersistedPart().end_time() <= interval.upper_bound();
+    }
+
+    return valid;
   };
+
   auto db_task_rng_filter_account =
       [&](std::unique_ptr<TaskInCtld> const &task) {
         return no_accounts_constraint || req_accounts.contains(task->account);

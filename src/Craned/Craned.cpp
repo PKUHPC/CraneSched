@@ -427,8 +427,8 @@ void GlobalVariableInit() {
   // Enable inter-thread custom event notification.
   evthread_use_pthreads();
 
-  Craned::g_thread_pool = std::make_unique<BS::thread_pool>(
-      std::thread::hardware_concurrency() / 2);
+  Craned::g_thread_pool =
+      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
   g_task_mgr = std::make_unique<Craned::TaskManager>();
 

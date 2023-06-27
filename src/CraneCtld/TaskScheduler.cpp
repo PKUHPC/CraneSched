@@ -184,11 +184,14 @@ bool TaskScheduler::Init() {
       CRANE_TRACE("Restore task #{} from embedded pending queue.",
                   task->TaskId());
 
+      bool mark_task_as_failed = false;
       if (task->type == crane::grpc::Batch) {
         err = TryRequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
-      }
+        mark_task_as_failed = (err != CraneErr::kOk);
+      } else
+        mark_task_as_failed = true;
 
-      if (task->type == crane::grpc::Interactive || err != CraneErr::kOk) {
+      if (mark_task_as_failed) {
         // If a batch task failed to requeue the task into pending queue due to
         // insufficient resource or other reasons or the task is an interactive
         // task, Mark it as FAILED and move it to the ended queue.
@@ -291,6 +294,9 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
 }
 
 void TaskScheduler::ScheduleThread_() {
+  std::chrono::steady_clock::time_point begin;
+  std::chrono::steady_clock::time_point end;
+
   while (!m_thread_stop_) {
     // Note: In other parts of code, we must avoid the happening of the
     // situation where m_running_task_map_mtx is acquired and then
@@ -303,12 +309,20 @@ void TaskScheduler::ScheduleThread_() {
       // map first and then locks g_meta_container.
       m_running_task_map_mtx_.Lock();
 
+      begin = std::chrono::steady_clock::now();
+
       std::list<INodeSelectionAlgo::NodeSelectionResult> selection_result_list;
       m_node_selection_algo_->NodeSelect(
           m_running_task_map_, &m_pending_task_map_, &selection_result_list);
 
       m_running_task_map_mtx_.Unlock();
       m_pending_task_map_mtx_.Unlock();
+
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "NodeSelect costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
       for (auto& it : selection_result_list) {
         auto& task = it.first;
@@ -318,9 +332,9 @@ void TaskScheduler::ScheduleThread_() {
         task->SetCranedIds(std::move(it.second));
         task->nodes_alloc = task->CranedIds().size();
 
-        CRANE_DEBUG(
-            "Task #{} is allocated to partition {} and craned nodes: {}",
-            task->TaskId(), partition_id, fmt::join(task->CranedIds(), ", "));
+        // CRANE_DEBUG(
+        // "Task #{} is allocated to partition {} and craned nodes: {}",
+        // task->TaskId(), partition_id, fmt::join(task->CranedIds(), ", "));
 
         task->allocated_craneds_regex =
             util::HostNameListToStr(task->CranedIds());
@@ -329,6 +343,8 @@ void TaskScheduler::ScheduleThread_() {
         // allocated node.
         task->executing_craned_id = task->CranedIds().front();
       }
+
+      begin = std::chrono::steady_clock::now();
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
 
@@ -347,12 +363,28 @@ void TaskScheduler::ScheduleThread_() {
         craned_tasks_map[task->executing_craned_id].emplace_back(task.get());
       }
 
-      for (auto const& [craned_id, task_uid_pairs] : craned_cgroup_map) {
-        CranedStub* stub = g_craned_keeper->GetCranedStub(craned_id);
-        CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
-                    task_uid_pairs.size(), craned_id);
-        stub->CreateCgroupForTasks(task_uid_pairs);
+      absl::BlockingCounter bl(craned_cgroup_map.size());
+      for (auto const iter : craned_cgroup_map) {
+        CranedId const& craned_id = iter.first;
+        auto const& task_uid_pairs = iter.second;
+        g_thread_pool->push_task([=, &bl]() {
+          CranedStub* stub = g_craned_keeper->GetCranedStub(craned_id);
+          CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
+                      task_uid_pairs.size(), craned_id);
+          stub->CreateCgroupForTasks(task_uid_pairs);
+
+          bl.DecrementCount();
+        });
       }
+      bl.Wait();
+
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "CreateCgroupForTasks costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
+
+      begin = std::chrono::steady_clock::now();
 
       // Move tasks into running queue.
       for (auto& it : selection_result_list) {
@@ -392,12 +424,26 @@ void TaskScheduler::ScheduleThread_() {
         }
       }
 
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Move tasks into running queue costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
+
+      begin = std::chrono::steady_clock::now();
+
       for (auto const& [craned_id, tasks] : craned_tasks_map) {
         CranedStub* stub = g_craned_keeper->GetCranedStub(craned_id);
         CRANE_TRACE("Send ExecuteTasks for {} tasks to {}", tasks.size(),
                     craned_id);
         stub->ExecuteTasks(tasks);
       }
+
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "ExecuteTasks costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
     } else {
       m_pending_task_map_mtx_.Unlock();
     }
@@ -497,9 +543,6 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
   }
 
   const std::unique_ptr<TaskInCtld>& task = iter->second;
-
-  CRANE_DEBUG("TaskStatusChange: Task #{} {}->{} In Node {}", task_id,
-              task->Status(), new_status, craned_index);
 
   if (task->type == crane::grpc::Interactive) {
     auto& meta = std::get<InteractiveMetaInTask>(task->meta);
@@ -766,36 +809,38 @@ void TaskScheduler::QueryTasksInRam(
         util::HostNameListToStr(task.PersistedPart().craned_ids()));
   };
 
-  bool no_submit_time_left_constraint = !request->has_filter_submit_time_left();
-  bool no_submit_time_right_constraint =
-      !request->has_filter_submit_time_right();
-  bool no_start_time_left_constraint = !request->has_filter_start_time_left();
-  bool no_start_time_right_constraint = !request->has_filter_start_time_right();
-  bool no_end_time_left_constraint = !request->has_filter_end_time_left();
-  bool no_end_time_right_constraint = !request->has_filter_end_time_right();
   auto task_rng_filter_time = [&](auto& it) {
     TaskInCtld& task = *it.second;
-    bool filter_submit_time_left = no_submit_time_left_constraint ||
-                                   task.PersistedPart().submit_time() >=
-                                       request->filter_submit_time_left();
-    bool filter_submit_time_right = no_submit_time_right_constraint ||
-                                    task.PersistedPart().submit_time() <=
-                                        request->filter_submit_time_right();
-    bool filter_start_time_left =
-        no_start_time_left_constraint ||
-        task.PersistedPart().start_time() >= request->filter_start_time_left();
-    bool filter_start_time_right =
-        no_start_time_right_constraint ||
-        task.PersistedPart().start_time() <= request->filter_start_time_right();
-    bool filter_end_time_left =
-        no_end_time_left_constraint ||
-        task.PersistedPart().end_time() >= request->filter_end_time_left();
-    bool filter_end_time_right =
-        no_end_time_right_constraint ||
-        task.PersistedPart().end_time() <= request->filter_end_time_right();
-    return filter_submit_time_left && filter_submit_time_right &&
-           filter_start_time_left && filter_start_time_right &&
-           filter_end_time_left && filter_end_time_right;
+    bool has_submit_time_interval = request->has_filter_submit_time_interval();
+    bool has_start_time_interval = request->has_filter_start_time_interval();
+    bool has_end_time_interval = request->has_filter_end_time_interval();
+
+    bool valid = true;
+    if (has_submit_time_interval) {
+      const auto& interval = request->filter_submit_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task.PersistedPart().submit_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task.PersistedPart().submit_time() <= interval.upper_bound();
+    }
+
+    if (has_start_time_interval) {
+      const auto& interval = request->filter_start_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task.PersistedPart().start_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task.PersistedPart().start_time() <= interval.upper_bound();
+    }
+
+    if (has_end_time_interval) {
+      const auto& interval = request->filter_end_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task.PersistedPart().end_time() >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task.PersistedPart().end_time() <= interval.upper_bound();
+    }
+
+    return valid;
   };
 
   bool no_accounts_constraint = request->filter_accounts().empty();

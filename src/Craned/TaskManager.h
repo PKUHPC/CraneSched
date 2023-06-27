@@ -161,7 +161,8 @@ class TaskManager {
 
   bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info);
 
-  bool CreateCgroupAsync(uint32_t task_id, uid_t uid);
+  bool CreateCgroupsAsync(
+      std::vector<std::pair<task_id_t, uid_t>>&& task_id_uid_pairs);
 
   bool ReleaseCgroupAsync(uint32_t task_id, uid_t uid);
 
@@ -215,9 +216,8 @@ class TaskManager {
     pid_t pid;
   };
 
-  struct EvQueueCreateCg {
-    uint32_t task_id;
-    uid_t uid;
+  struct EvQueueCreateCgroups {
+    std::vector<std::pair<task_id_t, uid_t>> task_id_uid_pairs;
     std::promise<bool> ok_prom;
   };
 
@@ -261,7 +261,6 @@ class TaskManager {
   struct EvTimerCbArg {
     TaskManager* task_manager;
     TaskInstance* task_instance;
-    struct event* timer_ev;
   };
 
   static std::string CgroupStrByTaskId_(uint32_t task_id);
@@ -277,8 +276,8 @@ class TaskManager {
    *  to the TaskInstance. kProtobufError if the communication between the
    *  parent and the child process fails.
    */
-  CraneErr SpawnProcessInInstance_(TaskInstance* instance,
-                                   std::unique_ptr<ProcessInstance> process);
+  static CraneErr SpawnProcessInInstance_(TaskInstance* instance,
+                                          ProcessInstance* process);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
@@ -317,7 +316,6 @@ class TaskManager {
     CRANE_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
     evtimer_add(ev, &tv);
 
-    arg->timer_ev = ev;
     arg->task_instance->termination_timer = ev;
   }
 
@@ -332,13 +330,11 @@ class TaskManager {
     CRANE_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
     evtimer_add(ev, &tv);
 
-    arg->timer_ev = ev;
     arg->task_instance->termination_timer = ev;
   }
 
   void EvDelTerminationTimer_(TaskInstance* instance) {
     evtimer_del(instance->termination_timer);
-    event_free(instance->termination_timer);
     instance->termination_timer = nullptr;
   }
 
@@ -374,7 +370,9 @@ class TaskManager {
   absl::flat_hash_map<uid_t /*uid*/, absl::flat_hash_set<uint32_t /*task id*/>>
       m_uid_to_task_ids_map_;
 
-  util::CgroupManager& m_cg_mgr_;
+  absl::Mutex m_mtx_;
+
+  static inline util::CgroupManager* s_cg_mgr_;
 
   static void EvSigchldCb_(evutil_socket_t sig, short events, void* user_data);
 
@@ -452,7 +450,7 @@ class TaskManager {
   ConcurrentQueue<EvQueueQueryCgOfTaskId> m_query_cg_of_task_id_queue_;
 
   struct event* m_ev_grpc_create_cg_{};
-  ConcurrentQueue<EvQueueCreateCg> m_grpc_create_cg_queue_;
+  ConcurrentQueue<EvQueueCreateCgroups> m_grpc_create_cg_queue_;
 
   struct event* m_ev_grpc_release_cg_{};
   ConcurrentQueue<EvQueueReleaseCg> m_grpc_release_cg_queue_;

@@ -36,6 +36,7 @@
 #include <absl/strings/ascii.h>
 #include <absl/strings/str_join.h>
 #include <absl/strings/str_split.h>
+#include <absl/synchronization/blocking_counter.h>
 #include <absl/synchronization/mutex.h>
 #include <absl/time/time.h>  // NOLINT(modernize-deprecated-headers)
 
