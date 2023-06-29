@@ -14,7 +14,6 @@ namespace Craned {
 TaskManager::TaskManager() {
   // Only called once. Guaranteed by singleton pattern.
   m_instance_ptr_ = this;
-  s_cg_mgr_ = &util::CgroupManager::Instance();
 
   m_ev_base_ = event_base_new();
   if (m_ev_base_ == nullptr) {
@@ -547,13 +546,12 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // process->SetEvBufEvent(ev_buf_event);
 
     // Migrate the new subprocess to newly created cgroup
-    if (!s_cg_mgr_->MigrateProcTo(process->GetPid(), instance->cg_path)) {
+    if (!instance->cgroup->MigrateProcIn(process->GetPid())) {
       CRANE_ERROR(
           "Terminate the subprocess of task #{} due to failure of cgroup "
           "migration.",
           instance->task.task_id());
 
-      s_cg_mgr_->Release(instance->cg_path);
       err = CraneErr::kCgroupError;
       goto AskChildToSuicide;
     }
@@ -726,24 +724,45 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     auto [iter, _] = this_->m_task_map_.emplace(instance->task.task_id(),
                                                 std::move(popped_instance));
 
-    // Add task id to the running task set of the UID.
-    // Pam module need it.
-    this_->m_uid_to_task_ids_map_[instance->task.uid()].emplace(
-        instance->task.task_id());
+    g_thread_pool->push_task([this_, instance]() {
+      this_->m_mtx_.Lock();
 
-    auto cg_iter = this_->m_task_id_to_cg_map_.find(instance->task.task_id());
-    if (cg_iter == this_->m_task_id_to_cg_map_.end()) {
-      CRANE_ERROR("Failed to find created cgroup for task #{}",
-                  instance->task.task_id());
-      this_->EvActivateTaskStatusChange_(
-          instance->task.task_id(), crane::grpc::TaskStatus::Failed,
-          ExitCode::kExitCodeCgroupError,
-          fmt::format("Failed to find created cgroup for task #{}",
-                      instance->task.task_id()));
-      return;
-    }
+      // Add task id to the running task set of the UID.
+      // Pam module need it.
+      this_->m_uid_to_task_ids_map_[instance->task.uid()].emplace(
+          instance->task.task_id());
 
-    g_thread_pool->push_task([this_, instance, cgroup = cg_iter->second]() {
+      auto cg_iter = this_->m_task_id_to_cg_map_.find(instance->task.task_id());
+      if (cg_iter == this_->m_task_id_to_cg_map_.end()) {
+        this_->m_mtx_.Unlock();
+        CRANE_ERROR("Failed to find created cgroup for task #{}",
+                    instance->task.task_id());
+        this_->EvActivateTaskStatusChange_(
+            instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+            ExitCode::kExitCodeCgroupError,
+            fmt::format("Failed to find created cgroup for task #{}",
+                        instance->task.task_id()));
+        return;
+      }
+
+      // Note: cg_iter is in an absl::node_hash_map. Pointer stability of
+      // iterator is guaranteed. We can modify the value even if mutex is
+      // unlocked.
+      this_->m_mtx_.Unlock();
+
+      // Lazy creation of cgroup
+      // Todo: Lock on iterator may be required here!
+      if (!cg_iter->second) {
+        instance->cgroup_path = CgroupStrByTaskId_(instance->task.task_id());
+        cg_iter->second = util::CgroupUtil::CreateOrOpen(
+            instance->cgroup_path,
+            util::NO_CONTROLLER_FLAG |
+                util::CgroupConstant::Controller::CPU_CONTROLLER |
+                util::CgroupConstant::Controller::MEMORY_CONTROLLER,
+            util::NO_CONTROLLER_FLAG, false);
+      }
+      instance->cgroup = cg_iter->second.get();
+
       instance->pwd_entry.Init(instance->task.uid());
       if (!instance->pwd_entry.Valid()) {
         CRANE_DEBUG("Failed to look up password entry for uid {} of task #{}",
@@ -757,11 +776,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         return;
       }
 
-      this_->m_mtx_.Lock();
       bool ok = AllocatableResourceAllocator::Allocate(
-          instance->task.resources().allocatable_resource(), cgroup);
-      instance->cg_path = cgroup->GetCgroupString();
-      this_->m_mtx_.Unlock();
+          instance->task.resources().allocatable_resource(), instance->cgroup);
 
       if (!ok) {
         CRANE_ERROR(
@@ -897,7 +913,6 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
 
     // Free the TaskInstance structure
     this_->m_task_map_.erase(status_change.task_id);
-
     g_ctld_client->TaskStatusChangeAsync(std::move(status_change));
   }
 
@@ -1105,198 +1120,200 @@ bool TaskManager::CreateCgroupsAsync(
 
   begin = std::chrono::steady_clock::now();
 
-  auto mf = g_thread_pool->parallelize_loop(
-      0, task_id_uid_pairs.size(),
-      [&task_id_uid_pairs, this](int begin, int end) -> size_t {
-        size_t success_num = 0;
-        for (int i = begin; i < end; i++) {
-          auto [task_id, uid] = task_id_uid_pairs[i];
+  this->m_mtx_.Lock();
+  for (int i = 0; i < task_id_uid_pairs.size(); i++) {
+    auto [task_id, uid] = task_id_uid_pairs[i];
 
-          CRANE_TRACE("Create cgroups for task #{}, uid {}", task_id, uid);
+    CRANE_TRACE("Create lazily allocated cgroups for task #{}, uid {}", task_id,
+                uid);
 
-          std::string cg_path = CgroupStrByTaskId_(task_id);
-          util::Cgroup* cgroup;
-          cgroup = s_cg_mgr_->CreateOrOpen(
-              cg_path,
-              util::NO_CONTROLLER_FLAG |
-                  util::CgroupConstant::Controller::CPU_CONTROLLER |
-                  util::CgroupConstant::Controller::MEMORY_CONTROLLER,
-              util::NO_CONTROLLER_FLAG, false);
-
-          // Create cgroup for the new subprocess
-          if (!cgroup) {
-            CRANE_ERROR("Failed to create cgroup for task #{}", task_id);
-          } else {
-            success_num++;
-
-            this->m_mtx_.Lock();
-            this->m_task_id_to_cg_map_.emplace(task_id, cgroup);
-            this->m_uid_to_task_ids_map_[uid].emplace(task_id);
-            this->m_mtx_.Unlock();
-          }
-        }
-        return success_num;
-      });
-
-  size_t success_num = 0;
-  std::vector<size_t> success_num_vec = mf.get();
+    this->m_task_id_to_cg_map_.emplace(task_id, nullptr);
+    this->m_uid_to_task_ids_map_[uid].emplace(task_id);
+  }
+  this->m_mtx_.Unlock();
 
   end = std::chrono::steady_clock::now();
   CRANE_TRACE("Create cgroups costed {} ms",
               std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
                   .count());
 
-  for (const auto& num : success_num_vec) {
-    success_num += num;
-  }
-  return success_num == task_id_uid_pairs.size();
+  return true;
 }
 
 bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
-  EvQueueReleaseCg elem{.task_id = task_id, .uid = uid};
+  //  EvQueueReleaseCg elem{.task_id = task_id, .uid = uid};
+  //
+  //  std::future<bool> ok_fut = elem.ok_prom.get_future();
+  //  m_grpc_release_cg_queue_.enqueue(std::move(elem));
+  //  event_active(m_ev_grpc_release_cg_, 0, 0);
+  //  return ok_fut.get();
+  this->m_mtx_.Lock();
 
-  std::future<bool> ok_fut = elem.ok_prom.get_future();
-  m_grpc_release_cg_queue_.enqueue(std::move(elem));
-  event_active(m_ev_grpc_release_cg_, 0, 0);
-  return ok_fut.get();
+  this->m_uid_to_task_ids_map_[uid].erase(task_id);
+  if (this->m_uid_to_task_ids_map_[uid].empty()) {
+    this->m_uid_to_task_ids_map_.erase(uid);
+  }
+
+  auto iter = this->m_task_id_to_cg_map_.find(task_id);
+  if (iter == this->m_task_id_to_cg_map_.end()) {
+    this->m_mtx_.Unlock();
+    CRANE_DEBUG(
+        "Trying to release a non-existent cgroup for task #{}. Ignoring it...",
+        task_id);
+
+    return false;
+  } else {
+    // The termination of all processes in a cgroup is a time-consuming work.
+    // Therefore, once we are sure that the cgroup for this task exists, we
+    // let gRPC call return and put the termination work into the thread pool
+    // to avoid blocking the event loop of TaskManager.
+    // Kind of async behavior.
+    auto cgroup = iter->second;
+    this->m_task_id_to_cg_map_.erase(iter);
+    this->m_mtx_.Unlock();
+
+    g_thread_pool->push_task([cgroup] {
+      bool rc;
+      int cnt = 0;
+
+      while (true) {
+        if (cgroup->Empty()) break;
+
+        if (cnt >= 5) {
+          CRANE_ERROR(
+              "Couldn't kill the processes in cgroup {} after {} times. "
+              "Skipping it.",
+              cgroup->GetCgroupString(), cnt);
+          break;
+        }
+
+        cgroup->KillAllProcesses();
+        ++cnt;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+    });
+
+    return true;
+  }
 }
 
 void TaskManager::EvGrpcCreateCgroupCb_(int efd, short events,
                                         void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
-  EvQueueCreateCgroups create_cg;
-  while (this_->m_grpc_create_cg_queue_.try_dequeue(create_cg)) {
-  }
+  //  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+  //
+  //  EvQueueCreateCgroups create_cg;
+  //  while (this_->m_grpc_create_cg_queue_.try_dequeue(create_cg)) {
+  //  }
 }
 
 void TaskManager::EvGrpcReleaseCgroupCb_(int efd, short events,
                                          void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
-  EvQueueReleaseCg release_cg;
-  while (this_->m_grpc_release_cg_queue_.try_dequeue(release_cg)) {
-    this_->m_uid_to_task_ids_map_[release_cg.uid].erase(release_cg.task_id);
-    if (this_->m_uid_to_task_ids_map_[release_cg.uid].empty()) {
-      this_->m_uid_to_task_ids_map_.erase(release_cg.uid);
-    }
-
-    auto iter = this_->m_task_id_to_cg_map_.find(release_cg.task_id);
-    if (iter == this_->m_task_id_to_cg_map_.end()) {
-      CRANE_DEBUG(
-          "Trying to release a non-existent cgroup for task #{}. "
-          "Ignoring it...",
-          release_cg.task_id);
-      release_cg.ok_prom.set_value(false);
-      return;
-    } else {
-      // The termination of all processes in a cgroup is a time-consuming work.
-      // Therefore, once we are sure that the cgroup for this task exists, we
-      // let gRPC call return and put the termination work into the thread pool
-      // to avoid blocking the event loop of TaskManager.
-      // Kind of async behavior.
-      release_cg.ok_prom.set_value(true);
-
-      util::Cgroup* cg = iter->second;
-      this_->m_task_id_to_cg_map_.erase(iter);
-
-      g_thread_pool->push_task(
-          [cg, cg_mgr = s_cg_mgr_, task_id = release_cg.task_id] {
-            bool rc;
-            int cnt = 0;
-
-            while (true) {
-              if (cg->Empty()) break;
-
-              if (cnt >= 5) {
-                CRANE_ERROR(
-                    "Couldn't kill the processes in cgroup {} after {} times. "
-                    "Skipping it.",
-                    cg->GetCgroupString(), cnt);
-                break;
-              }
-
-              cg->KillAllProcesses();
-              ++cnt;
-              std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            }
-
-            rc = cg_mgr->Release(cg->GetCgroupString());
-            // Release cgroup for the new subprocess
-            if (!rc) {
-              CRANE_ERROR("Failed to Release cgroup for task #{}", task_id);
-            }
-          });
-    }
-  }
+  //  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+  //
+  //  EvQueueReleaseCg release_cg;
+  //  while (this_->m_grpc_release_cg_queue_.try_dequeue(release_cg)) {
+  //  }
 }
 
 bool TaskManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info) {
-  EvQueueQueryTaskInfoOfUid elem{.uid = uid};
+  //  EvQueueQueryTaskInfoOfUid elem{.uid = uid};
+  //
+  //  std::future<TaskInfoOfUid> info_fut = elem.info_prom.get_future();
+  //  m_query_task_info_of_uid_queue_.enqueue(std::move(elem));
+  //  event_active(m_ev_query_task_info_of_uid_, 0, 0);
+  //
+  //  *info = info_fut.get();
 
-  std::future<TaskInfoOfUid> info_fut = elem.info_prom.get_future();
-  m_query_task_info_of_uid_queue_.enqueue(std::move(elem));
-  event_active(m_ev_query_task_info_of_uid_, 0, 0);
+  CRANE_DEBUG("Query task info for uid {}", uid);
 
-  *info = info_fut.get();
+  info->job_cnt = 0;
+  info->cgroup_exists = false;
+
+  this->m_mtx_.Lock();
+  auto iter = this->m_uid_to_task_ids_map_.find(uid);
+  if (iter != this->m_uid_to_task_ids_map_.end()) {
+    this->m_mtx_.Unlock();
+
+    info->job_cnt = iter->second.size();
+    info->first_task_id = *iter->second.begin();
+
+    auto cg_iter = this->m_task_id_to_cg_map_.find(info->first_task_id);
+    if (cg_iter == this->m_task_id_to_cg_map_.end()) {
+      if (cg_iter->second == nullptr) {
+        // Lazy creation of cgroup
+        // Todo: Lock on iterator may be required here!
+        cg_iter->second = util::CgroupUtil::CreateOrOpen(
+            CgroupStrByTaskId_(info->first_task_id),
+            util::NO_CONTROLLER_FLAG |
+                util::CgroupConstant::Controller::CPU_CONTROLLER |
+                util::CgroupConstant::Controller::MEMORY_CONTROLLER,
+            util::NO_CONTROLLER_FLAG, false);
+      }
+
+      info->cgroup_path = cg_iter->second->GetCgroupString();
+      info->cgroup_exists = true;
+    } else {
+      CRANE_ERROR("Cannot find Cgroup* for uid {}'s task #{}!", uid,
+                  info->first_task_id);
+    }
+  }
+
   return info->job_cnt > 0 && info->cgroup_exists;
 }
 
 void TaskManager::EvGrpcQueryTaskInfoOfUidCb_(int efd, short events,
                                               void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
-  EvQueueQueryTaskInfoOfUid query;
-  while (this_->m_query_task_info_of_uid_queue_.try_dequeue(query)) {
-    CRANE_DEBUG("Query task info for uid {}", query.uid);
-
-    TaskInfoOfUid info{.job_cnt = 0, .cgroup_exists = false};
-
-    auto iter = this_->m_uid_to_task_ids_map_.find(query.uid);
-    if (iter != this_->m_uid_to_task_ids_map_.end()) {
-      info.job_cnt = iter->second.size();
-      info.first_task_id = *iter->second.begin();
-
-      try {
-        util::Cgroup* cg = this_->m_task_id_to_cg_map_.at(info.first_task_id);
-        info.cgroup_path = cg->GetCgroupString();
-        info.cgroup_exists = true;
-      } catch (const std::out_of_range& e) {
-        CRANE_ERROR("Cannot find Cgroup* for uid {}'s task #{}!", query.uid,
-                    info.first_task_id);
-      }
-    }
-
-    query.info_prom.set_value(info);
-  }
+  //  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+  //
+  //  EvQueueQueryTaskInfoOfUid query;
+  //  while (this_->m_query_task_info_of_uid_queue_.try_dequeue(query)) {
+  //    query.info_prom.set_value(info);
+  //  }
 }
 
 bool TaskManager::QueryCgOfTaskIdAsync(uint32_t task_id, util::Cgroup** cg) {
-  EvQueueQueryCgOfTaskId elem{.task_id = task_id};
+  //  EvQueueQueryCgOfTaskId elem{.task_id = task_id};
+  //
+  //  std::future<util::Cgroup*> cg_fut = elem.cg_prom.get_future();
+  //  m_query_cg_of_task_id_queue_.enqueue(std::move(elem));
+  //  event_active(m_ev_query_cg_of_task_id_, 0, 0);
+  //
+  //  *cg = cg_fut.get();
 
-  std::future<util::Cgroup*> cg_fut = elem.cg_prom.get_future();
-  m_query_cg_of_task_id_queue_.enqueue(std::move(elem));
-  event_active(m_ev_query_cg_of_task_id_, 0, 0);
+  CRANE_DEBUG("Query Cgroup* task #{}", task_id);
 
-  *cg = cg_fut.get();
+  this->m_mtx_.Lock();
+
+  auto iter = this->m_task_id_to_cg_map_.find(task_id);
+  if (iter != this->m_task_id_to_cg_map_.end()) {
+    if (iter->second == nullptr) {
+      // Lazy creation of cgroup
+      // Todo: Lock on iterator may be required here!
+      iter->second = util::CgroupUtil::CreateOrOpen(
+          CgroupStrByTaskId_(task_id),
+          util::NO_CONTROLLER_FLAG |
+              util::CgroupConstant::Controller::CPU_CONTROLLER |
+              util::CgroupConstant::Controller::MEMORY_CONTROLLER,
+          util::NO_CONTROLLER_FLAG, false);
+    }
+
+    *cg = iter->second.get();
+  } else {
+    *cg = nullptr;
+  }
+
+  this->m_mtx_.Unlock();
+
   return *cg != nullptr;
 }
 
 void TaskManager::EvGrpcQueryCgOfTaskIdCb_(int efd, short events,
                                            void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
-  EvQueueQueryCgOfTaskId query;
-  while (this_->m_query_cg_of_task_id_queue_.try_dequeue(query)) {
-    CRANE_DEBUG("Query Cgroup* task #{}", query.task_id);
-
-    auto iter = this_->m_task_id_to_cg_map_.find(query.task_id);
-    if (iter != this_->m_task_id_to_cg_map_.end()) {
-      query.cg_prom.set_value(iter->second);
-    } else {
-      query.cg_prom.set_value(nullptr);
-    }
-  }
+  //  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+  //
+  //  EvQueueQueryCgOfTaskId query;
+  //  while (this_->m_query_cg_of_task_id_queue_.try_dequeue(query)) {
+  //  }
 }
 
 bool TaskManager::CheckTaskStatusAsync(task_id_t task_id,
@@ -1387,6 +1404,20 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
       elem.ok_prom.set_value(false);
     }
   }
+}
+
+bool TaskManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
+  this->m_mtx_.Lock();
+
+  auto iter = this->m_task_id_to_cg_map_.find(task_id);
+  if (iter == this->m_task_id_to_cg_map_.end()) {
+    this->m_mtx_.Unlock();
+    return false;
+  }
+
+  this->m_mtx_.Unlock();
+
+  return iter->second->MigrateProcIn(pid);
 }
 
 }  // namespace Craned

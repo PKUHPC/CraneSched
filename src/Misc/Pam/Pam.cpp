@@ -113,13 +113,14 @@ extern "C" {
     pam_get_data(pamh, PAM_ITEM_TASK_ID, (const void **)&task_id_str);
     pam_get_data(pamh, PAM_ITEM_CG_PATH, (const void **)&cgroup_path_str);
 
-    pam_syslog(pamh, LOG_ERR,
-               "[Crane] open_session retrieved task_id: %s, cg_path: %s",
-               task_id_str, cgroup_path_str);
+    pam_syslog(
+        pamh, LOG_ERR,
+        "[Crane] open_session retrieved task_id: %s. Moving it to cgroups",
+        task_id_str);
 
     task_id = std::atoi(task_id_str);
 
-    ok = GrpcMigrateSshProcToCgroup(pamh, getpid(), cgroup_path_str);
+    ok = GrpcMigrateSshProcToCgroup(pamh, getpid(), task_id);
     if (ok)
       return PAM_SUCCESS;
     else

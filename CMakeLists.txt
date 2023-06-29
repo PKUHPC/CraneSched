@@ -128,11 +128,19 @@ add_subdirectory(dependencies/CPM EXCLUDE_FROM_ALL)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
 
 find_package(PAM REQUIRED)
-
-# Check if we found PAM.
-if (NOT PAM_FOUND)
+if (PAM_FOUND)
+    message(STATUS "PAM library found. Include: ${PAM_INCLUDE_DIR}; Libs: ${PAM_LIBRARIES}")
+else ()
     message(FATAL_ERROR "PAM library was not found.")
 endif ()
+
+find_package(LibAIO REQUIRED)
+if (LibAIO_FOUND)
+    message(STATUS "LibAIO found. Include: ${LIBAIO_INCLUDE_DIRS}; Libs: ${LIBAIO_LIBRARIES}")
+else ()
+    message(FATAL_ERROR "LibAIO was not found.")
+endif ()
+
 
 # Find third-party libraries
 set(Boost_USE_STATIC_LIBS ON)

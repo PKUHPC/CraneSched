@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <string>
 
+#include "crane/PublicHeader.h"
+
 bool PamGetUserName(pam_handle_t *pamh, std::string *username);
 
 void PamSendMsgToClient(pam_handle_t *pamh, const char *mesg);
@@ -24,4 +26,4 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
                              std::string *cgroup_path);
 
 bool GrpcMigrateSshProcToCgroup(pam_handle_t *pamh, pid_t pid,
-                                const char *cgroup_path);
+                                task_id_t task_id);

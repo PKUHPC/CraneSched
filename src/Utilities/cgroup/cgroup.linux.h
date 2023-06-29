@@ -216,6 +216,8 @@ class Cgroup {
 
   bool Empty();
 
+  bool MigrateProcIn(pid_t pid);
+
  private:
   std::string m_cgroup_path_;
   mutable struct cgroup *m_cgroup_;
@@ -223,52 +225,25 @@ class Cgroup {
   friend class CgroupManager;
 };
 
-class CgroupManager {
+class CgroupUtil {
  public:
-  static CgroupManager &Instance();
+  static int Init();
 
-  bool Mounted(CgroupConstant::Controller controller) const {
-    return bool(m_mounted_controllers_ & ControllerFlags{controller});
+  static bool Mounted(CgroupConstant::Controller controller) {
+    return bool(m_mounted_controllers_ &ControllerFlags{controller});
   }
 
-  Cgroup *CreateOrOpen(const std::string &cgroup_string,
-                       ControllerFlags preferred_controllers,
-                       ControllerFlags required_controllers, bool retrieve)
-      LOCKS_EXCLUDED(m_mtx_);
-
-  /*
-   * Decrease the cgroup reference count by 1.
-   * If the reference reaches 0, the cgroup will be removed in OS.
-   * Returns true on success, false on failure;
-   */
-  bool Release(const std::string &cgroup_path) LOCKS_EXCLUDED(m_mtx_);
-
-  Cgroup *Find(const std::string &cgroup_path) LOCKS_EXCLUDED(m_mtx_);
-
-  bool MigrateProcTo(pid_t pid, const std::string &cgroup_path)
-      LOCKS_EXCLUDED(m_mtx_);
+  static std::shared_ptr<Cgroup> CreateOrOpen(
+      const std::string &cgroup_string, ControllerFlags preferred_controllers,
+      ControllerFlags required_controllers, bool retrieve);
 
  private:
-  using Mutex = absl::Mutex;
-  using LockGuard = util::lock_guard;
+  static int initialize_controller(struct cgroup &cgroup,
+                                   CgroupConstant::Controller controller,
+                                   bool required, bool has_cgroup,
+                                   bool &changed_cgroup);
 
-  CgroupManager();
-  CgroupManager(const CgroupManager &);
-  CgroupManager &operator=(const CgroupManager &);
-
-  int initialize();
-
-  int initialize_controller(struct cgroup &cgroup,
-                            CgroupConstant::Controller controller,
-                            bool required, bool has_cgroup,
-                            bool &changed_cgroup) const;
-
-  ControllerFlags m_mounted_controllers_;
-
-  absl::flat_hash_map<std::string, std::pair<std::unique_ptr<Cgroup>, size_t>>
-      m_cgroup_ref_count_map_ GUARDED_BY(m_mtx_);
-
-  Mutex m_mtx_;
+  inline static ControllerFlags m_mounted_controllers_;
 };
 
 }  // namespace util

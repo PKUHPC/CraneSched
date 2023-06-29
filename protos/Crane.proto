@@ -128,6 +128,15 @@ message SubmitBatchTaskReply {
   }
 }
 
+message SubmitBatchTasksRequest {
+  repeated TaskToCtld tasks = 1;
+}
+
+message SubmitBatchTasksReply {
+  repeated uint32 task_id_list = 1;
+  repeated string reason_list = 2;
+}
+
 message ExecuteTasksRequest {
   repeated TaskToD tasks = 1;
 }
@@ -357,7 +366,7 @@ message BlockAccountOrUserReply {
 
 message MigrateSshProcToCgroupRequest {
   int32 pid = 1;
-  string cgroup_path = 2;
+  uint32 task_id = 2;
 }
 
 message MigrateSshProcToCgroupReply {
@@ -565,6 +574,7 @@ service CraneCtld {
 
   /* RPCs called from cbatch */
   rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
+  rpc SubmitBatchTasks(SubmitBatchTasksRequest) returns (SubmitBatchTasksReply);
 
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);

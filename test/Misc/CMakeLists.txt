@@ -85,3 +85,14 @@ target_link_libraries(misc_unqlite_test
         test_proto
         )
 gtest_discover_tests(misc_unqlite_test)
+
+add_executable(misc_libaio_test libaio_test.cpp)
+target_include_directories(misc_libaio_test PUBLIC ${LIBAIO_INCLUDE_DIRS})
+target_link_libraries(misc_libaio_test PUBLIC
+        GTest::gtest GTest::gtest_main
+        Threads::Threads
+        spdlog::spdlog
+        test_proto
+        ${LIBAIO_LIBRARIES}
+        )
+gtest_discover_tests(misc_libaio_test)
