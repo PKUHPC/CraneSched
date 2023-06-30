@@ -68,6 +68,25 @@ class EmbeddedDbClient {
 
   bool Init(std::string const& db_path);
 
+  // Begin a manual transaction on a thread.
+  // Note: By the reference of UNQLite API, all the following unqlite_begin()
+  // will be a no-op. We will always call it because we must hold an exclusive
+  // lock on the database. Meanwhile, a flag will be set to prevent all the
+  // following Commit() from being executed until CommitManualTransaction() is
+  // called which unset the flag.
+  bool BeginManualTransaction() {
+    m_in_manual_transaction_ = true;
+    return UNQLITE_OK == BeginTransaction_();
+  }
+
+  bool CommitManualTransaction() {
+    bool ok = UNQLITE_OK == Commit_(true);
+    m_in_manual_transaction_ = false;
+    return ok;
+  }
+
+  bool Commit() { return UNQLITE_OK == Commit_(); }
+
   bool AppendTaskToPendingAndAdvanceTaskIds(TaskInCtld* task);
 
   bool MovePendingOrRunningTaskToEnded(db_id_t db_id);
@@ -129,7 +148,7 @@ class EmbeddedDbClient {
 
   int BeginTransaction_();
 
-  int Commit_();
+  int Commit_(bool force = false);
 
   // Helper functions for the queue structure in the embedded db.
 
@@ -372,6 +391,8 @@ class EmbeddedDbClient {
   std::unordered_map<db_id_t, DbQueueNode> m_running_queue_;
   std::unordered_map<db_id_t, DbQueueNode> m_ended_queue_;
   absl::Mutex m_queue_mtx_;
+
+  std::atomic<bool> m_in_manual_transaction_;
 
   std::string m_db_path_;
   unqlite* m_db_{nullptr};

@@ -218,17 +218,6 @@ class TaskManager {
     pid_t pid;
   };
 
-  struct EvQueueCreateCgroups {
-    std::vector<std::pair<task_id_t, uid_t>> task_id_uid_pairs;
-    std::promise<bool> ok_prom;
-  };
-
-  struct EvQueueReleaseCg {
-    uint32_t task_id;
-    uid_t uid;
-    std::promise<bool> ok_prom;
-  };
-
   struct EvQueueChangeTaskTimeLimit {
     uint32_t task_id;
     absl::Duration time_limit;
@@ -242,17 +231,6 @@ class TaskManager {
     bool terminated_by_timeout{false};  // If the task is canceled by user,
                                         // task->status=Timeout
     bool mark_as_orphaned{false};
-  };
-
-  struct EvQueueQueryTaskInfoOfUid {
-    uid_t uid;
-    pid_t pid;
-    std::promise<TaskInfoOfUid> info_prom;
-  };
-
-  struct EvQueueQueryCgOfTaskId {
-    uint32_t task_id;
-    std::promise<util::Cgroup*> cg_prom;
   };
 
   struct EvQueueCheckTaskStatus {
@@ -381,18 +359,6 @@ class TaskManager {
   static void EvGrpcExecuteTaskCb_(evutil_socket_t efd, short events,
                                    void* user_data);
 
-  static void EvGrpcCreateCgroupCb_(evutil_socket_t efd, short events,
-                                    void* user_data);
-
-  static void EvGrpcReleaseCgroupCb_(evutil_socket_t efd, short events,
-                                     void* user_data);
-
-  static void EvGrpcQueryTaskInfoOfUidCb_(evutil_socket_t efd, short events,
-                                          void* user_data);
-
-  static void EvGrpcQueryCgOfTaskIdCb_(evutil_socket_t efd, short events,
-                                       void* user_data);
-
   static void EvGrpcSpawnInteractiveTaskCb_(evutil_socket_t efd, short events,
                                             void* user_data);
 
@@ -441,18 +407,6 @@ class TaskManager {
 
   struct event* m_ev_query_task_id_from_pid_{};
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
-
-  struct event* m_ev_query_task_info_of_uid_{};
-  ConcurrentQueue<EvQueueQueryTaskInfoOfUid> m_query_task_info_of_uid_queue_;
-
-  struct event* m_ev_query_cg_of_task_id_{};
-  ConcurrentQueue<EvQueueQueryCgOfTaskId> m_query_cg_of_task_id_queue_;
-
-  struct event* m_ev_grpc_create_cg_{};
-  ConcurrentQueue<EvQueueCreateCgroups> m_grpc_create_cg_queue_;
-
-  struct event* m_ev_grpc_release_cg_{};
-  ConcurrentQueue<EvQueueReleaseCg> m_grpc_release_cg_queue_;
 
   // A custom event that handles the ExecuteTask RPC.
   struct event* m_ev_grpc_execute_task_{};

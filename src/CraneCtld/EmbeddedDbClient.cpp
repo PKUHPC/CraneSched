@@ -227,7 +227,9 @@ int EmbeddedDbClient::DeleteDbQueueNodeNoLockAndTxn_(
   return rc;
 }
 
-int EmbeddedDbClient::Commit_() {
+int EmbeddedDbClient::Commit_(bool force) {
+  if (force || m_in_manual_transaction_) return UNQLITE_OK;
+
   int rc;
   while (true) {
     rc = unqlite_commit(m_db_);

@@ -42,8 +42,16 @@ bool TaskScheduler::Init() {
       if (stub == nullptr || stub->Invalid()) {
         CRANE_INFO(
             "The execution node of the restore task #{} is down. "
-            "Requeue it to the pending queue.",
+            "Clean all its allocated craned nodes, and "
+            "move it to pending queue and re-run it.",
             task_id);
+
+        for (CranedId craned_id : task->CranedIds()) {
+          stub = g_craned_keeper->GetCranedStub(craned_id);
+          if (stub != nullptr && !stub->Invalid())
+            stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
+        }
+
         task->SetStatus(crane::grpc::Pending);
 
         task->nodes_alloc = 0;
@@ -139,12 +147,29 @@ bool TaskScheduler::Init() {
           }
         } else {
           // Exec node is up but task id does not exist.
-          // It means that the result of task is lost.
-          // Requeue the task.
+          // It may come up due to the craned has restarted during CraneCtld
+          // was down. Thus, we should clean the Craned nodes on which the task
+          // was possibly running.
+          // The result of task is lost in such a scenario, and we should
+          // requeue the task.
           CRANE_TRACE(
               "Task id #{} can't be found cannot be found in its exec craned. "
-              "Move it to pending queue and re-run it.",
+              "Clean all its allocated craned nodes, and "
+              "move it to pending queue and re-run it.",
               task_id);
+
+          for (CranedId craned_id : task->CranedIds()) {
+            stub = g_craned_keeper->GetCranedStub(craned_id);
+            if (stub != nullptr && !stub->Invalid())
+              stub->TerminateOrphanedTask(task->TaskId());
+          }
+
+          for (CranedId craned_id : task->CranedIds()) {
+            stub = g_craned_keeper->GetCranedStub(craned_id);
+            if (stub != nullptr && !stub->Invalid())
+              stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
+          }
+
           ok = g_embedded_db_client->MoveTaskFromRunningToPending(
               task->TaskDbId());
           if (!ok) {
@@ -294,6 +319,11 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
 }
 
 void TaskScheduler::ScheduleThread_() {
+  std::chrono::steady_clock::time_point schedule_begin;
+  std::chrono::steady_clock::time_point schedule_end;
+  size_t num_tasks_single_schedule;
+  size_t num_tasks_single_execution;
+
   std::chrono::steady_clock::time_point begin;
   std::chrono::steady_clock::time_point end;
 
@@ -309,6 +339,9 @@ void TaskScheduler::ScheduleThread_() {
       // map first and then locks g_meta_container.
       m_running_task_map_mtx_.Lock();
 
+      schedule_begin = std::chrono::steady_clock::now();
+      num_tasks_single_schedule = m_pending_task_map_.size();
+
       begin = std::chrono::steady_clock::now();
 
       std::list<INodeSelectionAlgo::NodeSelectionResult> selection_result_list;
@@ -318,12 +351,15 @@ void TaskScheduler::ScheduleThread_() {
       m_running_task_map_mtx_.Unlock();
       m_pending_task_map_mtx_.Unlock();
 
+      num_tasks_single_execution = selection_result_list.size();
+
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
           "NodeSelect costed {} ms",
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
 
+      begin = std::chrono::steady_clock::now();
       for (auto& it : selection_result_list) {
         auto& task = it.first;
         PartitionId const& partition_id = task->partition_id;
@@ -336,13 +372,20 @@ void TaskScheduler::ScheduleThread_() {
         // "Task #{} is allocated to partition {} and craned nodes: {}",
         // task->TaskId(), partition_id, fmt::join(task->CranedIds(), ", "));
 
-        task->allocated_craneds_regex =
-            util::HostNameListToStr(task->CranedIds());
+        // task->allocated_craneds_regex =
+        //     util::HostNameListToStr(task->CranedIds());
+
+        task->allocated_craneds_regex = absl::StrJoin(task->CranedIds(), ",");
 
         // For the task whose --node > 1, only execute the command at the first
         // allocated node.
         task->executing_craned_id = task->CranedIds().front();
       }
+      end = std::chrono::steady_clock::now();
+      CRANE_TRACE(
+          "Set task fields costed {} ms",
+          std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
 
       begin = std::chrono::steady_clock::now();
 
@@ -387,6 +430,11 @@ void TaskScheduler::ScheduleThread_() {
       begin = std::chrono::steady_clock::now();
 
       // Move tasks into running queue.
+      bool ok = g_embedded_db_client->BeginManualTransaction();
+      if (!ok) {
+        CRANE_ERROR("Embedded database failed to start manual transaction.");
+      }
+
       for (auto& it : selection_result_list) {
         auto& task = it.first;
         if (task->type == crane::grpc::Interactive) {
@@ -414,7 +462,7 @@ void TaskScheduler::ScheduleThread_() {
         g_embedded_db_client->UpdatePersistedPartOfTask(
             task_ptr->TaskDbId(), task_ptr->PersistedPart());
 
-        bool ok = g_embedded_db_client->MoveTaskFromPendingToRunning(
+        ok = g_embedded_db_client->MoveTaskFromPendingToRunning(
             task_ptr->TaskDbId());
         if (!ok) {
           CRANE_ERROR(
@@ -422,6 +470,11 @@ void TaskScheduler::ScheduleThread_() {
               "g_embedded_db_client->MoveTaskFromPendingToRunning({})",
               task_ptr->TaskDbId());
         }
+      }
+
+      ok = g_embedded_db_client->CommitManualTransaction();
+      if (!ok) {
+        CRANE_ERROR("Embedded database failed to commit manual transaction.");
       }
 
       end = std::chrono::steady_clock::now();
@@ -443,6 +496,14 @@ void TaskScheduler::ScheduleThread_() {
       CRANE_TRACE(
           "ExecuteTasks costed {} ms",
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+              .count());
+
+      schedule_end = end;
+      CRANE_TRACE(
+          "Scheduling {} pending tasks. {} get scheduled. Time elapsed: {}ms",
+          num_tasks_single_schedule, num_tasks_single_execution,
+          std::chrono::duration_cast<std::chrono::milliseconds>(schedule_end -
+                                                                schedule_begin)
               .count());
     } else {
       m_pending_task_map_mtx_.Unlock();

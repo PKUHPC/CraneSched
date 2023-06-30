@@ -326,16 +326,17 @@ class Jx9Test : public testing::Test {
 
   std::string m_jx9_store_src_{
       R"(
-print($argv[0]);
+$db_name = $argv[0];
+print($db_name);
 
 // foreach($arg_kvs as $k, $v) {
 //    $o = sprintf("%s=>%s", $k, $v);
 //    print($o);
 // }
 
-if ( !db_exists( $argv[0] ) ) {
+if ( !db_exists( $db_name ) ) {
   /* Try to create it */
-  $rc = db_create($argv[0]);
+  $rc = db_create($db_name);
 
   if ( !$rc ) {
     // Handle error
@@ -343,8 +344,11 @@ if ( !db_exists( $argv[0] ) ) {
     return;
   }
 }
+db_begin();
+$rc = db_store($db_name, $arg_kvs);
+db_commit();
 
-$rc = db_store
+$result = db_fetch_all($db_name);
 )"};
 };
 
@@ -401,6 +405,18 @@ TEST_F(Jx9Test, StoreAndFetch) {
   if (rc != UNQLITE_OK) {
     GTEST_FAIL() << "Failed to execute jx9 vm";
   }
+
+  unqlite_value *result = unqlite_vm_extract_variable(pVm, "result");
+  if (result == nullptr) {
+    GTEST_FAIL() << "Failed to extract jx9 vm result";
+  }
+
+  GTEST_LOG_(INFO) << "result is json object: "
+                   << bool(unqlite_value_is_json_object(result));
+  GTEST_LOG_(INFO) << "result is json array: "
+                   << bool(unqlite_value_is_json_array(result));
+
+  GTEST_LOG_(INFO) << "len of result: " << unqlite_array_count(result);
 
   rc = unqlite_vm_reset(pVm);
   if (rc != UNQLITE_OK) {
