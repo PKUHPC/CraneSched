@@ -11,7 +11,6 @@
 #include <fstream>
 #include <unordered_map>
 
-#include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
 
 bool PamGetUserName(pam_handle_t *pamh, std::string *username) {
@@ -252,7 +251,7 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
 }
 
 bool GrpcMigrateSshProcToCgroup(pam_handle_t *pamh, pid_t pid,
-                                const char *cgroup_path) {
+                                task_id_t task_id) {
   using grpc::Channel;
   using grpc::ClientContext;
   using grpc::Status;
@@ -281,7 +280,7 @@ bool GrpcMigrateSshProcToCgroup(pam_handle_t *pamh, pid_t pid,
   Status status;
 
   request.set_pid(pid);
-  request.set_cgroup_path(cgroup_path);
+  request.set_task_id(task_id);
 
   status = stub->MigrateSshProcToCgroup(&context, request, &reply);
   if (!status.ok()) {

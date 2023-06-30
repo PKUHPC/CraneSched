@@ -29,10 +29,12 @@
 #include <absl/base/thread_annotations.h>
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
+#include <absl/container/node_hash_map.h>
 #include <absl/strings/match.h>
 #include <absl/strings/str_join.h>
 #include <absl/strings/str_replace.h>
 #include <absl/strings/str_split.h>
+#include <absl/synchronization/blocking_counter.h>
 #include <absl/synchronization/mutex.h>
 
 // Boost

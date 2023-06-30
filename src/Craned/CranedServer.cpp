@@ -666,14 +666,14 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
     grpc::ServerContext *context,
     const crane::grpc::MigrateSshProcToCgroupRequest *request,
     crane::grpc::MigrateSshProcToCgroupReply *response) {
-  CRANE_TRACE("Moving pid {} to cgroup {}", request->pid(),
-              request->cgroup_path());
-  bool ok = util::CgroupManager::Instance().MigrateProcTo(
-      request->pid(), request->cgroup_path());
+  CRANE_TRACE("Moving pid {} to cgroup of task #{}", request->pid(),
+              request->task_id());
+  bool ok =
+      g_task_mgr->MigrateProcToCgroupOfTask(request->pid(), request->task_id());
 
   if (!ok) {
-    CRANE_ERROR("GrpcMigrateSshProcToCgroup failed on pid: {}, cgroup: {}",
-                request->pid(), request->cgroup_path());
+    CRANE_ERROR("GrpcMigrateSshProcToCgroup failed on pid: {}, task #{}",
+                request->pid(), request->task_id());
     response->set_ok(false);
   } else {
     response->set_ok(true);

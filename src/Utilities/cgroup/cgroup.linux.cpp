@@ -12,23 +12,11 @@
 namespace util {
 
 /*
- * Create a CgroupManager.  Note this is private - users of the CgroupManager
- * may create an instance via CgroupManager::getInstance()
- */
-
-CgroupManager::CgroupManager() : m_mounted_controllers_() { initialize(); }
-
-CgroupManager &CgroupManager::Instance() {
-  static CgroupManager *singleton = new CgroupManager;
-  return *singleton;
-}
-
-/*
  * Initialize libcgroup and mount the controllers Condor will use (if possible)
  *
  * Returns 0 on success, -1 otherwise.
  */
-int CgroupManager::initialize() {
+int CgroupUtil::Init() {
   // Initialize library and data structures
   CRANE_DEBUG("Initializing cgroup library.");
   cgroup_init();
@@ -120,9 +108,9 @@ int CgroupManager::initialize() {
  * Not designed for external users - extracted from CgroupManager::create to
  * reduce code duplication.
  */
-int CgroupManager::initialize_controller(
+int CgroupUtil::initialize_controller(
     struct cgroup &cgroup, const CgroupConstant::Controller controller,
-    const bool required, const bool has_cgroup, bool &changed_cgroup) const {
+    const bool required, const bool has_cgroup, bool &changed_cgroup) {
   std::string_view controller_str =
       CgroupConstant::GetControllerStringView(controller);
 
@@ -175,27 +163,11 @@ int CgroupManager::initialize_controller(
  *   - -1 on error
  * On failure, the state of cgroup is undefined.
  */
-Cgroup *CgroupManager::CreateOrOpen(const std::string &cgroup_string,
-                                    ControllerFlags preferred_controllers,
-                                    ControllerFlags required_controllers,
-                                    bool retrieve) {
-  // Todo: In our design, the CgroupManager is the only owner and manager of
-  //  all Cgroup in the system. Therefore, when creating a cgroup, there's no
-  //  need to use the cgroup_get_cgroup in libcgroup function to check the
-  //  existence of the cgroup.
-
+std::shared_ptr<Cgroup> CgroupUtil::CreateOrOpen(
+    const std::string &cgroup_string, ControllerFlags preferred_controllers,
+    ControllerFlags required_controllers, bool retrieve) {
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;
-
-  {
-    LockGuard guard(m_mtx_);
-
-    auto iter = m_cgroup_ref_count_map_.find(cgroup_string);
-    if (iter != m_cgroup_ref_count_map_.end()) {
-      iter->second.second++;
-      return iter->second.first.get();
-    }
-  }
 
   bool changed_cgroup = false;
   struct cgroup *native_cgroup = cgroup_new_cgroup(cgroup_string.c_str());
@@ -272,86 +244,10 @@ Cgroup *CgroupManager::CreateOrOpen(const std::string &cgroup_string,
         cgroup_string.c_str(), err, cgroup_strerror(err));
   }
 
-  auto cgroup = std::make_unique<Cgroup>(cgroup_string, native_cgroup);
-  auto *p = cgroup.get();
-
-  LockGuard guard(m_mtx_);
-  m_cgroup_ref_count_map_.emplace(cgroup_string,
-                                  std::make_pair(std::move(cgroup), 1));
-
-  return p;
+  return std::make_unique<Cgroup>(cgroup_string, native_cgroup);
 }
 
-bool CgroupManager::Release(const std::string &cgroup_path) {
-  size_t *ref_cnt;
-  bool remove;
-  {
-    LockGuard guard(m_mtx_);
-
-    auto it = m_cgroup_ref_count_map_.find(cgroup_path);
-    if (it == m_cgroup_ref_count_map_.end()) {
-      CRANE_WARN("Destroying an unknown cgroup.");
-      return false;
-    }
-
-    ref_cnt = &it->second.second;
-    (*ref_cnt)--;
-    remove = *ref_cnt == 0;
-  }
-
-  // Only delete if this is the last ref and we originally created it.
-  if (remove) {
-    int err;
-    // Must re-initialize the cgroup structure before deletion.
-    struct cgroup *dcg = cgroup_new_cgroup(cgroup_path.c_str());
-    assert(dcg != nullptr);
-    if ((err = cgroup_get_cgroup(dcg))) {
-      CRANE_WARN("Unable to read cgroup {} for deletion: {} {}\n",
-                 cgroup_path.c_str(), err, cgroup_strerror(err));
-      cgroup_free(&dcg);
-      return false;
-    }
-
-    // CGFLAG_DELETE_EMPTY_ONLY is set to avoid libgroup from finding parent
-    // cgroup, which is usually the mount point of root cgroup and will cause
-    // ENOENT error.
-    //
-    // Todo: Test this part when cgroup is not empty!
-    if ((err = cgroup_delete_cgroup_ext(
-             dcg, CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
-      CRANE_WARN("Unable to completely remove cgroup {}: {} {}\n",
-                 cgroup_path.c_str(), err, cgroup_strerror(err));
-    }
-
-    // Notice the cgroup struct freed here is not the one held by Cgroup class.
-    cgroup_free(&dcg);
-
-    LockGuard guard(m_mtx_);
-    // This call results in the destructor call of Cgroup, which frees the
-    // internal libcgroup struct.
-    m_cgroup_ref_count_map_.erase(cgroup_path);
-  }
-
-  return true;
-}
-
-bool CgroupManager::MigrateProcTo(pid_t pid, const std::string &cgroup_path) {
-  struct cgroup *pcg;
-  {
-    LockGuard guard(m_mtx_);
-
-    // Attempt to migrate a given process to a cgroup.
-    // This can be done without regards to whether the
-    // process is already in the cgroup
-    auto iter = m_cgroup_ref_count_map_.find(cgroup_path);
-    if (iter == m_cgroup_ref_count_map_.end()) {
-      CRANE_WARN(cgroup_path);
-      return false;
-    }
-
-    pcg = iter->second.first->m_cgroup_;
-  }
-
+bool Cgroup::MigrateProcIn(pid_t pid) {
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;
 
@@ -450,10 +346,10 @@ bool CgroupManager::MigrateProcTo(pid_t pid, const std::string &cgroup_path) {
 after_migrate:
 
   //  orig_cgroup = NULL;
-  err = cgroup_attach_task_pid(pcg, pid);
+  err = cgroup_attach_task_pid(m_cgroup_, pid);
   if (err != 0) {
     CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}\n", pid,
-               cgroup_path.c_str(), err, cgroup_strerror(err));
+               m_cgroup_path_.c_str(), err, cgroup_strerror(err));
   }
 
 //  std::string cpu_cg_path =
@@ -530,19 +426,20 @@ end:
   return err == 0;
 }
 
-Cgroup *CgroupManager::Find(const std::string &cgroup_path) {
-  auto iter = m_cgroup_ref_count_map_.find(cgroup_path);
-  if (iter == m_cgroup_ref_count_map_.end()) return nullptr;
-
-  return iter->second.first.get();
-}
-
 /*
  * Cleanup cgroup.
  * If the cgroup was created by us in the OS, remove it..
  */
 Cgroup::~Cgroup() {
   if (m_cgroup_) {
+    int err;
+    if ((err = cgroup_delete_cgroup_ext(
+             m_cgroup_,
+             CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
+      CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
+                  m_cgroup_path_.c_str(), err, cgroup_strerror(err));
+    }
+
     cgroup_free(&m_cgroup_);
     m_cgroup_ = nullptr;
   }
@@ -594,9 +491,7 @@ bool Cgroup::SetBlockioWeight(uint64_t weight) {
 bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
                                 CgroupConstant::ControllerFile controller_file,
                                 uint64_t value) {
-  CgroupManager &cm = CgroupManager::Instance();
-
-  if (!cm.Mounted(controller)) {
+  if (!CgroupUtil::Mounted(controller)) {
     CRANE_WARN("Unable to set {} because cgroup {} is not mounted.\n",
                CgroupConstant::GetControllerFileStringView(controller_file),
                CgroupConstant::GetControllerStringView(controller));
@@ -640,9 +535,7 @@ bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
 bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
                               CgroupConstant::ControllerFile controller_file,
                               const std::string &str) {
-  CgroupManager &cm = CgroupManager::Instance();
-
-  if (!cm.Mounted(controller)) {
+  if (!CgroupUtil::Mounted(controller)) {
     CRANE_WARN("Unable to set {} because cgroup {} is not mounted.\n",
                CgroupConstant::GetControllerFileStringView(controller_file),
                CgroupConstant::GetControllerStringView(controller));

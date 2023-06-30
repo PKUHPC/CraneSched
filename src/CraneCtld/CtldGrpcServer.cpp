@@ -29,6 +29,25 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
+    grpc::ServerContext *context,
+    const crane::grpc::SubmitBatchTasksRequest *request,
+    crane::grpc::SubmitBatchTasksReply *response) {
+  for (auto const &task_to_ctld : request->tasks()) {
+    auto task = std::make_unique<TaskInCtld>();
+    task->SetFieldsByTaskToCtld(task_to_ctld);
+
+    auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
+    if (result.has_value()) {
+      response->mutable_task_id_list()->Add(result.value());
+    } else {
+      response->mutable_reason_list()->Add(result.error());
+    }
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::TaskStatusChange(
     grpc::ServerContext *context,
     const crane::grpc::TaskStatusChangeRequest *request,
