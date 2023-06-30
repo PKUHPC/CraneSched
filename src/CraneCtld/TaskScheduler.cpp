@@ -1718,7 +1718,8 @@ CraneErr TaskScheduler::CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task) {
   if (satisfied_node_cnt < task->node_num) {
     CRANE_TRACE(
         "Resource not enough. Task #{} needs {} nodes, while only {} "
-        "nodes satisfy its requirement.");
+        "nodes satisfy its requirement.",
+        task->TaskId(), task->node_num, satisfied_node_cnt);
     return CraneErr::kNoResource;
   }
 
