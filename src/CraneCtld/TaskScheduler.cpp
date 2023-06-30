@@ -372,10 +372,8 @@ void TaskScheduler::ScheduleThread_() {
         // "Task #{} is allocated to partition {} and craned nodes: {}",
         // task->TaskId(), partition_id, fmt::join(task->CranedIds(), ", "));
 
-        // task->allocated_craneds_regex =
-        //     util::HostNameListToStr(task->CranedIds());
-
-        task->allocated_craneds_regex = absl::StrJoin(task->CranedIds(), ",");
+        task->allocated_craneds_regex =
+            util::HostNameListToStr(task->CranedIds());
 
         // For the task whose --node > 1, only execute the command at the first
         // allocated node.
