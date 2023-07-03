@@ -467,6 +467,7 @@ void InitializeCtldGlobalVariables() {
   g_meta_container = std::make_unique<CranedMetaContainerSimpleImpl>();
   g_meta_container->InitFromConfig(g_config);
 
+  g_priority = std::make_unique<Priority>();
   bool ok;
   g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
   ok = g_embedded_db_client->Init(g_config.CraneCtldDbPath);

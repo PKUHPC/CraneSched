@@ -1787,13 +1787,14 @@ void Priority::MaxMinInit(
     const absl::flat_hash_map<uint32_t, std::unique_ptr<Ctld::TaskInCtld>>*
         m_running_task_map_) {
   // Initialize the values of each max and min
-  init_val.age_max = 0, init_val.age_min = UINT64_MAX;
-  init_val.qos_priority_max = 0, init_val.qos_priority_min = UINT32_MAX;
-  init_val.part_priority_max = 0, init_val.part_priority_min = UINT32_MAX;
-  init_val.nodes_alloc_max = 0, init_val.nodes_alloc_min = UINT32_MAX;
-  init_val.mem_alloc_max = 0, init_val.mem_alloc_min = UINT64_MAX;
-  init_val.cpus_alloc_max = 0, init_val.cpus_alloc_min = DBL_MAX;
-  init_val.service_val_max = 0, init_val.service_val_min = UINT32_MAX;
+
+  this->age_max = 0, this->age_min = UINT64_MAX;
+  this->qos_priority_max = 0, this->qos_priority_min = UINT32_MAX;
+  this->part_priority_max = 0, this->part_priority_min = UINT32_MAX;
+  this->nodes_alloc_max = 0, this->nodes_alloc_min = UINT32_MAX;
+  this->mem_alloc_max = 0, this->mem_alloc_min = UINT64_MAX;
+  this->cpus_alloc_max = 0, this->cpus_alloc_min = DBL_MAX;
+  this->service_val_max = 0, this->service_val_min = UINT32_MAX;
 
   for (auto iter = pending_task_map->begin(); iter != pending_task_map->end();
        iter++) {
@@ -1801,77 +1802,75 @@ void Priority::MaxMinInit(
         ToUnixSeconds(absl::Now()) - iter->second->SubmitTimeInUnixSecond();
     age = age > g_config.PriorityWeight.MaxAge ? g_config.PriorityWeight.MaxAge
                                                : age;
-    if (age < init_val.age_min) init_val.age_min = age;
-    if (age > init_val.age_max) init_val.age_max = age;
+    if (age < this->age_min) this->age_min = age;
+    if (age > this->age_max) this->age_max = age;
 
     uint32_t nodes_alloc = iter->second->nodes_alloc;
-    if (nodes_alloc < init_val.nodes_alloc_min)
-      init_val.nodes_alloc_min = nodes_alloc;
-    if (nodes_alloc > init_val.nodes_alloc_max)
-      init_val.nodes_alloc_max = nodes_alloc;
+    if (nodes_alloc < this->nodes_alloc_min)
+      this->nodes_alloc_min = nodes_alloc;
+    if (nodes_alloc > this->nodes_alloc_max)
+      this->nodes_alloc_max = nodes_alloc;
 
     uint64_t mem_alloc =
         iter->second->resources.allocatable_resource.memory_bytes;
-    if (mem_alloc < init_val.mem_alloc_min) init_val.mem_alloc_min = mem_alloc;
-    if (mem_alloc > init_val.mem_alloc_max) init_val.mem_alloc_max = mem_alloc;
+    if (mem_alloc < this->mem_alloc_min) this->mem_alloc_min = mem_alloc;
+    if (mem_alloc > this->mem_alloc_max) this->mem_alloc_max = mem_alloc;
 
     double cpus_alloc = iter->second->resources.allocatable_resource.cpu_count;
-    if (cpus_alloc < init_val.cpus_alloc_min)
-      init_val.cpus_alloc_min = cpus_alloc;
-    if (cpus_alloc > init_val.cpus_alloc_max)
-      init_val.cpus_alloc_max = cpus_alloc;
+    if (cpus_alloc < this->cpus_alloc_min) this->cpus_alloc_min = cpus_alloc;
+    if (cpus_alloc > this->cpus_alloc_max) this->cpus_alloc_max = cpus_alloc;
   }
 
   Ctld::AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
       g_account_manager->GetAllQosInfo();
   for (const auto& [name, qos] : *qos_map_shared_ptr) {
     if (!qos->deleted) {
-      if (qos->priority < init_val.qos_priority_min)
-        init_val.qos_priority_min = qos->priority;
-      if (qos->priority > init_val.qos_priority_max)
-        init_val.qos_priority_max = qos->priority;
+      if (qos->priority < this->qos_priority_min)
+        this->qos_priority_min = qos->priority;
+      if (qos->priority > this->qos_priority_max)
+        this->qos_priority_max = qos->priority;
     }
   }
 
   for (const auto& [part_id, part] : g_config.Partitions) {
-    if (part.priority < init_val.part_priority_min)
-      init_val.part_priority_min = part.priority;
-    if (part.priority > init_val.part_priority_max)
-      init_val.part_priority_max = part.priority;
+    if (part.priority < this->part_priority_min)
+      this->part_priority_min = part.priority;
+    if (part.priority > this->part_priority_max)
+      this->part_priority_max = part.priority;
   }
   // auto m_running_task_map_ = g_task_scheduler->getRunningTaskMap();
-  init_val.acc_service_val_map.clear();
+  this->acc_service_val_map.clear();
   for (const auto& [task_id, r_task] : *m_running_task_map_) {
     uint32_t service_val = 0;
-    if (init_val.cpus_alloc_max != init_val.cpus_alloc_min) {
+    if (this->cpus_alloc_max != this->cpus_alloc_min) {
       service_val += (double)(r_task->resources.allocatable_resource.cpu_count -
-                              init_val.cpus_alloc_min) /
-                     (init_val.cpus_alloc_max - init_val.cpus_alloc_min);
+                              this->cpus_alloc_min) /
+                     (this->cpus_alloc_max - this->cpus_alloc_min);
     }
-    if (init_val.nodes_alloc_max != init_val.nodes_alloc_min) {
-      service_val += (double)(r_task->nodes_alloc - init_val.nodes_alloc_min) /
-                     (init_val.nodes_alloc_max - init_val.nodes_alloc_min);
+    if (this->nodes_alloc_max != this->nodes_alloc_min) {
+      service_val += (double)(r_task->nodes_alloc - this->nodes_alloc_min) /
+                     (this->nodes_alloc_max - this->nodes_alloc_min);
     }
-    if (init_val.mem_alloc_max != init_val.mem_alloc_min) {
+    if (this->mem_alloc_max != this->mem_alloc_min) {
       service_val +=
           (double)(r_task->resources.allocatable_resource.memory_bytes -
-                   init_val.mem_alloc_min) /
-          (init_val.mem_alloc_max - init_val.mem_alloc_min);
+                   this->mem_alloc_min) /
+          (this->mem_alloc_max - this->mem_alloc_min);
     }
     auto run_time =
         ToUnixSeconds(absl::Now()) - r_task->StartTimeInUnixSecond();
     service_val *= run_time;
-    if (init_val.acc_service_val_map.find(r_task->account) ==
-        init_val.acc_service_val_map.end()) {
-      init_val.acc_service_val_map.emplace(r_task->account, 0);
+    if (this->acc_service_val_map.find(r_task->account) ==
+        this->acc_service_val_map.end()) {
+      this->acc_service_val_map.emplace(r_task->account, 0);
     }
-    auto iter = init_val.acc_service_val_map.find(r_task->account);
+    auto iter = this->acc_service_val_map.find(r_task->account);
     iter->second += service_val;
   }
 
-  for (const auto& [acc_name, ser_val] : init_val.acc_service_val_map) {
-    if (ser_val < init_val.service_val_min) init_val.service_val_min = ser_val;
-    if (ser_val > init_val.service_val_max) init_val.service_val_max = ser_val;
+  for (const auto& [acc_name, ser_val] : this->acc_service_val_map) {
+    if (ser_val < this->service_val_min) this->service_val_min = ser_val;
+    if (ser_val > this->service_val_max) this->service_val_max = ser_val;
   }
 }
 
@@ -1884,7 +1883,7 @@ uint32_t Priority::CalculatePriority(Ctld::TaskInCtld* task) {
 
   Ctld::AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
       g_account_manager->GetAllQosInfo();
-  const auto it_qos = qos_map_shared_ptr->find(task->qos);
+  const auto it_qos = qos_map_shared_ptr->find(task->qos);  // 判空
   uint32_t task_qos_priority = it_qos->second->priority;
 
   const auto it_partition = g_config.Partitions.find(task->partition_id);
@@ -1894,69 +1893,66 @@ uint32_t Priority::CalculatePriority(Ctld::TaskInCtld* task) {
   uint64_t task_mem_alloc = task->resources.allocatable_resource.memory_bytes;
   double task_cpus_alloc = task->resources.allocatable_resource.cpu_count;
   uint32_t task_service_val =
-      init_val.acc_service_val_map.find(task->account)->second;
+      this->acc_service_val_map.find(task->account)->second;
 
   // age_factor
-  if (init_val.age_max != init_val.age_min)
-    factors.age_factor = (double)(task_age - init_val.age_min) /
-                         (init_val.age_max - init_val.age_min);
+  if (this->age_max != this->age_min)
+    this->age_factor =
+        (double)(task_age - this->age_min) / (this->age_max - this->age_min);
   else
-    factors.age_factor = 0;
+    this->age_factor = 0;
 
   // qos_factor
-  if (init_val.qos_priority_min != init_val.qos_priority_max)
-    factors.qos_factor =
-        (double)(task_qos_priority - init_val.qos_priority_min) /
-        (init_val.qos_priority_max - init_val.qos_priority_min);
+  if (this->qos_priority_min != this->qos_priority_max)
+    this->qos_factor = (double)(task_qos_priority - this->qos_priority_min) /
+                       (this->qos_priority_max - this->qos_priority_min);
   else
-    factors.qos_factor = 0;
+    this->qos_factor = 0;
 
   // partition_factor
-  if (init_val.part_priority_max != init_val.part_priority_min)
-    factors.partition_factor =
-        (double)(task_part_priority - init_val.part_priority_min) /
-        (init_val.part_priority_max - init_val.part_priority_min);
+  if (this->part_priority_max != this->part_priority_min)
+    this->partition_factor =
+        (double)(task_part_priority - this->part_priority_min) /
+        (this->part_priority_max - this->part_priority_min);
   else
-    factors.partition_factor = 0;
+    this->partition_factor = 0;
 
   // job_size_factor
-  factors.job_size_factor = 0;
-  if (init_val.cpus_alloc_max != init_val.cpus_alloc_min)
-    factors.job_size_factor +=
-        (double)(task_cpus_alloc - init_val.cpus_alloc_min) /
-        (init_val.cpus_alloc_max - init_val.cpus_alloc_min);
-  if (init_val.nodes_alloc_max != init_val.nodes_alloc_min)
-    factors.job_size_factor +=
-        (double)(task_nodes_alloc - init_val.nodes_alloc_min) /
-        (init_val.nodes_alloc_max - init_val.nodes_alloc_min);
-  if (init_val.mem_alloc_max != init_val.mem_alloc_min)
-    factors.job_size_factor +=
-        (double)(task_mem_alloc - init_val.mem_alloc_min) /
-        (init_val.mem_alloc_max - init_val.mem_alloc_min);
+  this->job_size_factor = 0;
+  if (this->cpus_alloc_max != this->cpus_alloc_min)
+    this->job_size_factor += (double)(task_cpus_alloc - this->cpus_alloc_min) /
+                             (this->cpus_alloc_max - this->cpus_alloc_min);
+  if (this->nodes_alloc_max != this->nodes_alloc_min)
+    this->job_size_factor +=
+        (double)(task_nodes_alloc - this->nodes_alloc_min) /
+        (this->nodes_alloc_max - this->nodes_alloc_min);
+  if (this->mem_alloc_max != this->mem_alloc_min)
+    this->job_size_factor += (double)(task_mem_alloc - this->mem_alloc_min) /
+                             (this->mem_alloc_max - this->mem_alloc_min);
   if (g_config.PriorityWeight.FavorSmall)
-    factors.job_size_factor = 1 - factors.job_size_factor / 3;
+    this->job_size_factor = 1 - this->job_size_factor / 3;
   else
-    factors.job_size_factor /= 3;
+    this->job_size_factor /= 3;
 
   // fair_share_factor
-  if (init_val.service_val_max != init_val.service_val_min) {
-    factors.fair_share_factor =
-        1 - (double)(task_service_val - init_val.service_val_min) /
-                (init_val.service_val_max - init_val.service_val_min);
+  if (this->service_val_max != this->service_val_min) {
+    this->fair_share_factor =
+        1 - (double)(task_service_val - this->service_val_min) /
+                (this->service_val_max - this->service_val_min);
   } else {
-    factors.fair_share_factor = 0;
+    this->fair_share_factor = 0;
   }
 
   // assoc_factor
-  factors.assoc_factor = 0;
+  this->assoc_factor = 0;
 
   // priority
   uint32_t priority =
-      g_config.PriorityWeight.WeightAge * factors.age_factor +
-      g_config.PriorityWeight.WeightPartition * factors.partition_factor +
-      g_config.PriorityWeight.WeightJobSize * factors.job_size_factor +
-      g_config.PriorityWeight.WeightFairShare * factors.fair_share_factor +
-      g_config.PriorityWeight.WeightAssoc * factors.assoc_factor +
-      g_config.PriorityWeight.WeightQOS * factors.qos_factor;
+      g_config.PriorityWeight.WeightAge * this->age_factor +
+      g_config.PriorityWeight.WeightPartition * this->partition_factor +
+      g_config.PriorityWeight.WeightJobSize * this->job_size_factor +
+      g_config.PriorityWeight.WeightFairShare * this->fair_share_factor +
+      g_config.PriorityWeight.WeightAssoc * this->assoc_factor +
+      g_config.PriorityWeight.WeightQOS * this->qos_factor;
   return priority;
 }
