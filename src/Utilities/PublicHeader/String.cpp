@@ -186,8 +186,15 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
       }
       delimiter_pos++;
     }
+    host_name_str += iter.first.substr(0, delimiter_pos);  // head
 
-    host_name_str += iter.first.substr(0, delimiter_pos);
+    if (iter.second.size() <= 1) {  // Special handling for sizes 0 and 1
+      iter.second.emplace_back("");
+      host_name_str += iter.second.front();
+      res_list->emplace_back(host_name_str);
+      continue;
+    }
+
     host_name_str += "[";
 
     std::sort(iter.second.begin(), iter.second.end(),
@@ -235,7 +242,8 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
       host_name_str += last_str;
     }
     host_name_str += fmt::format(
-        "]{}", iter.first.substr(delimiter_pos + 1, iter.first.size()));
+        "]{}",
+        iter.first.substr(delimiter_pos + 1, iter.first.size()));  // tail
     res_list->emplace_back(host_name_str);
   }
 
