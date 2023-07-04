@@ -94,7 +94,6 @@ message PersistedPartOfTaskInCtld {
   int64 task_db_id = 3;
   int32 gid = 4;
   string username = 5;
-  google.protobuf.Timestamp submit_time = 6;
 
   // Fields that will change after this task is accepted.
   int32 requeue_count = 11;
