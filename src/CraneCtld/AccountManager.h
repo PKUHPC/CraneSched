@@ -82,8 +82,8 @@ class AccountManager {
   result::result<void, std::string> CheckAndApplyQosLimitOnTask(
       const std::string& user, const std::string& account, TaskInCtld* task);
 
-  Result FindUserLevelAccountOfUid(uint32_t uid, User::AdminLevel* level,
-                                   std::string* account);
+  Result FindUserLevelAccountsOfUid(uint32_t uid, User::AdminLevel* level,
+                                    std::list<std::string>* accounts);
 
   AccountManager::Result HasPermissionToAccount(uint32_t uid,
                                                 const std::string& account,
