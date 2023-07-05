@@ -6,6 +6,7 @@
 
 **Crane后端代码地址**：[Crane Code](https://github.com/PKUHPC/Crane)，**Crane前端代码地址**：[Crane Code](https://github.com/PKUHPC/Crane-FrontEnd)，欢迎开发者一起加入。
 
+**Crane demo集群**:（试用账号：demo_admin，密码：@icode2023）：[Crane Demo](https://hpc.pku.edu.cn/demo/crane)
 
 # Crane 设计理念 #
 - **功能强大**：支持高性能计算 + 智能计算
