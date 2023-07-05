@@ -655,8 +655,7 @@ AccountManager::Result AccountManager::BlockAccount(const std::string& name,
   }
 
   if (account->blocked == block) {
-    return Result{false, fmt::format("Account '{}' is already {}", name,
-                                     block ? "blocked" : "unblocked")};
+    return Result{true};
   }
 
   if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
@@ -683,9 +682,7 @@ AccountManager::Result AccountManager::BlockUser(const std::string& name,
   }
 
   if (user->account_to_attrs_map.at(account).blocked == block) {
-    return Result{
-        false, fmt::format("User '{}' is already {} under account '{}'", name,
-                           block ? "blocked" : "unblocked", account)};
+    return Result{true};
   }
 
   if (!g_db_client->UpdateEntityOne(
@@ -789,8 +786,8 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   return {};
 }
 
-AccountManager::Result AccountManager::FindUserLevelAccountOfUid(
-    uint32_t uid, User::AdminLevel* level, std::string* account) {
+AccountManager::Result AccountManager::FindUserLevelAccountsOfUid(
+    uint32_t uid, User::AdminLevel* level, std::list<std::string>* accounts) {
   PasswordEntry entry(uid);
   if (!entry.Valid()) {
     return Result{false,
@@ -806,7 +803,11 @@ AccountManager::Result AccountManager::FindUserLevelAccountOfUid(
             entry.Username())};
   }
   if (level != nullptr) *level = ptr->admin_level;
-  if (account != nullptr) *account = ptr->default_account;
+  if (accounts != nullptr) {
+    for (const auto& [acct, item] : ptr->account_to_attrs_map) {
+      accounts->emplace_back(acct);
+    }
+  }
 
   return Result{true};
 }

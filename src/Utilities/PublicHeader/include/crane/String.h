@@ -40,9 +40,6 @@ std::string HostNameListToStr(T const &host_list)
     if (HostNameListToStr_(source_list, &res_list)) {
       res_list.sort();
       std::string host_name_str{boost::join(res_list, ",")};
-      // Remove brackets containing single numbers
-      std::regex fix_regex(R"(\[([^-,]*?)\])");
-      host_name_str = std::regex_replace(host_name_str, fix_regex, "$1");
       return host_name_str;
     }
     source_list = res_list;

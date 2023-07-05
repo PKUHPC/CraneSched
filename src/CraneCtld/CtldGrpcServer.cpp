@@ -665,13 +665,13 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
     const crane::grpc::QueryEntityInfoRequest *request,
     crane::grpc::QueryEntityInfoReply *response) {
   User::AdminLevel user_level;
-  std::string user_account;
+  std::list<std::string> user_accounts;
   std::list<Account> res_account_list;
   std::list<User> res_user_list;
 
   AccountManager::Result find_res =
-      g_account_manager->FindUserLevelAccountOfUid(request->uid(), &user_level,
-                                                   &user_account);
+      g_account_manager->FindUserLevelAccountsOfUid(request->uid(), &user_level,
+                                                    &user_accounts);
   if (!find_res.ok) {
     response->set_ok(false);
     response->set_reason(find_res.reason);
@@ -694,18 +694,20 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
               res_account_list.emplace_back(*account);
             }
           } else {
-            // Otherwise, only all sub accounts under your own account will be
+            // Otherwise, only all sub-accounts under your own accounts will be
             // returned
             std::queue<std::string> queue;
-            queue.push(user_account);
-            while (!queue.empty()) {
-              std::string father = queue.front();
-              res_account_list.emplace_back(
-                  *(account_map_shared_ptr->at(father)));
-              queue.pop();
-              for (const auto &child :
-                   account_map_shared_ptr->at(father)->child_accounts) {
-                queue.push(child);
+            for (const auto &acct : user_accounts) {
+              queue.push(acct);
+              while (!queue.empty()) {
+                std::string father = queue.front();
+                res_account_list.emplace_back(
+                    *(account_map_shared_ptr->at(father)));
+                queue.pop();
+                for (const auto &child :
+                     account_map_shared_ptr->at(father)->child_accounts) {
+                  queue.push(child);
+                }
               }
             }
           }
@@ -794,17 +796,19 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
                 g_account_manager->GetAllAccountInfo();
 
             std::queue<std::string> queue;
-            queue.push(user_account);
-            while (!queue.empty()) {
-              std::string father = queue.front();
-              for (const auto &user :
-                   account_map_shared_ptr->at(father)->users) {
-                res_user_list.emplace_back(*(user_map_shared_ptr->at(user)));
-              }
-              queue.pop();
-              for (const auto &child :
-                   account_map_shared_ptr->at(father)->child_accounts) {
-                queue.push(child);
+            for (const auto &acct : user_accounts) {
+              queue.push(acct);
+              while (!queue.empty()) {
+                std::string father = queue.front();
+                for (const auto &user :
+                     account_map_shared_ptr->at(father)->users) {
+                  res_user_list.emplace_back(*(user_map_shared_ptr->at(user)));
+                }
+                queue.pop();
+                for (const auto &child :
+                     account_map_shared_ptr->at(father)->child_accounts) {
+                  queue.push(child);
+                }
               }
             }
           }
