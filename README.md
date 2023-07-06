@@ -5,6 +5,7 @@
 **Crane文档地址**：[Crane Document](https://pkuhpc.github.io/Crane-document/)。
 
 **Crane后端代码地址**：[Crane Code](https://github.com/PKUHPC/Crane)，**Crane前端代码地址**：[Crane Code](https://github.com/PKUHPC/Crane-FrontEnd)，欢迎开发者一起加入。
+**Crane demo集群（试用账号：demo_admin，密码：@icode2023）**：[Crane Demo](https://hpc.pku.edu.cn/demo/crane)
 
 
 # Crane 设计理念 #
@@ -22,7 +23,7 @@
 
 **Craned**是部署在计算节点上的守护进程，主要用来监控节点资源及作业状态，接受用户的各种指令，并将其发送给Cranectld，并向用户传送Cranectld的返回结果。
 
-![architecture](./docs/images/architecture.png)
+![architecture](./docs/images/Architecture.png)
 
 在设计Craned的时候，综合考量高性能计算和智能计算服务的特点与不同，在资源分配的时候，设计了Resouces Manager这个对象，当
 - **用户提交高性能计算作业时**，调用Cgroup Manager这个组件，用来为高性能计算服务分配资源，并用Cgroup来隔离作业资源。
@@ -31,4 +32,4 @@
 # Crane 应用场景 #
 Crane支持高性能计算+智能计算的复杂分布式计算场景，结合“东数西算”时代背景，将分布于全国各地的集群通过一个云端联通，Crane通过调度算法将用户的作业提交到最“空闲”的集群上，充分利用各集群资源，减少用户排队时间。
 
-![scenario](./docs/images/scenario.png)
+![scenario](./docs/images/Scenario.png)
