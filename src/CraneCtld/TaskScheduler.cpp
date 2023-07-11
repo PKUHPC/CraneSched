@@ -1765,16 +1765,16 @@ std::list<task_id_t> Priority::GetTaskIdList(
         running_task_map_) {
   std::list<task_id_t> task_id_list;
   g_priority->MaxMinInit(pending_task_map, &running_task_map_);
-  std::list<std::pair<task_id_t /* Task ID */, uint32_t /* Priority */>>
-      task_priority_list;
+  std::vector<std::pair<task_id_t, uint32_t>> task_priority_list;
   for (const auto& [task_id, task] : *pending_task_map) {
     uint32_t priority = g_priority->CalculatePriority(task.get());
     task_priority_list.push_back({task->TaskId(), priority});
   }
-  task_priority_list.sort([](const std::pair<task_id_t, uint32_t>& a,
-                             const std::pair<task_id_t, uint32_t>& b) {
-    return a.second > b.second;
-  });
+  std::sort(task_priority_list.begin(), task_priority_list.end(),
+            [](const std::pair<task_id_t, uint32_t>& a,
+               const std::pair<task_id_t, uint32_t>& b) {
+              return a.second > b.second;
+            });
   for (auto& pair : task_priority_list) {
     task_id_list.push_back(pair.first);
   }
@@ -1800,7 +1800,7 @@ void Priority::MaxMinInit(
        iter++) {
     uint64_t age =
         ToUnixSeconds(absl::Now()) - iter->second->SubmitTimeInUnixSecond();
-    age = age > g_config.PriorityWeight.MaxAge ? g_config.PriorityWeight.MaxAge
+    age = age > g_config.PriorityConfig.MaxAge ? g_config.PriorityConfig.MaxAge
                                                : age;
     if (age < this->age_min) this->age_min = age;
     if (age > this->age_max) this->age_max = age;
@@ -1838,24 +1838,24 @@ void Priority::MaxMinInit(
     if (part.priority > this->part_priority_max)
       this->part_priority_max = part.priority;
   }
-  // auto m_running_task_map_ = g_task_scheduler->getRunningTaskMap();
   this->acc_service_val_map.clear();
   for (const auto& [task_id, r_task] : *m_running_task_map_) {
     uint32_t service_val = 0;
     if (this->cpus_alloc_max != this->cpus_alloc_min) {
-      service_val += (double)(r_task->resources.allocatable_resource.cpu_count -
-                              this->cpus_alloc_min) /
+      service_val += 1.0 *
+                     (r_task->resources.allocatable_resource.cpu_count -
+                      this->cpus_alloc_min) /
                      (this->cpus_alloc_max - this->cpus_alloc_min);
     }
     if (this->nodes_alloc_max != this->nodes_alloc_min) {
-      service_val += (double)(r_task->nodes_alloc - this->nodes_alloc_min) /
+      service_val += 1.0 * (r_task->nodes_alloc - this->nodes_alloc_min) /
                      (this->nodes_alloc_max - this->nodes_alloc_min);
     }
     if (this->mem_alloc_max != this->mem_alloc_min) {
-      service_val +=
-          (double)(r_task->resources.allocatable_resource.memory_bytes -
-                   this->mem_alloc_min) /
-          (this->mem_alloc_max - this->mem_alloc_min);
+      service_val += 1.0 *
+                     (r_task->resources.allocatable_resource.memory_bytes -
+                      this->mem_alloc_min) /
+                     (this->mem_alloc_max - this->mem_alloc_min);
     }
     auto run_time =
         ToUnixSeconds(absl::Now()) - r_task->StartTimeInUnixSecond();
@@ -1877,13 +1877,13 @@ void Priority::MaxMinInit(
 uint32_t Priority::CalculatePriority(Ctld::TaskInCtld* task) {
   uint64_t task_age =
       ToUnixSeconds(absl::Now()) - task->SubmitTimeInUnixSecond();
-  task_age = task_age > g_config.PriorityWeight.MaxAge
-                 ? g_config.PriorityWeight.MaxAge
+  task_age = task_age > g_config.PriorityConfig.MaxAge
+                 ? g_config.PriorityConfig.MaxAge
                  : task_age;
 
   Ctld::AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
       g_account_manager->GetAllQosInfo();
-  const auto it_qos = qos_map_shared_ptr->find(task->qos);  // 判空
+  const auto it_qos = qos_map_shared_ptr->find(task->qos);
   uint32_t task_qos_priority = it_qos->second->priority;
 
   const auto it_partition = g_config.Partitions.find(task->partition_id);
@@ -1898,13 +1898,13 @@ uint32_t Priority::CalculatePriority(Ctld::TaskInCtld* task) {
   // age_factor
   if (this->age_max != this->age_min)
     this->age_factor =
-        (double)(task_age - this->age_min) / (this->age_max - this->age_min);
+        1.0 * (task_age - this->age_min) / (this->age_max - this->age_min);
   else
     this->age_factor = 0;
 
   // qos_factor
   if (this->qos_priority_min != this->qos_priority_max)
-    this->qos_factor = (double)(task_qos_priority - this->qos_priority_min) /
+    this->qos_factor = 1.0 * (task_qos_priority - this->qos_priority_min) /
                        (this->qos_priority_max - this->qos_priority_min);
   else
     this->qos_factor = 0;
@@ -1912,7 +1912,7 @@ uint32_t Priority::CalculatePriority(Ctld::TaskInCtld* task) {
   // partition_factor
   if (this->part_priority_max != this->part_priority_min)
     this->partition_factor =
-        (double)(task_part_priority - this->part_priority_min) /
+        1.0 * (task_part_priority - this->part_priority_min) /
         (this->part_priority_max - this->part_priority_min);
   else
     this->partition_factor = 0;
@@ -1920,16 +1920,15 @@ uint32_t Priority::CalculatePriority(Ctld::TaskInCtld* task) {
   // job_size_factor
   this->job_size_factor = 0;
   if (this->cpus_alloc_max != this->cpus_alloc_min)
-    this->job_size_factor += (double)(task_cpus_alloc - this->cpus_alloc_min) /
+    this->job_size_factor += 1.0 * (task_cpus_alloc - this->cpus_alloc_min) /
                              (this->cpus_alloc_max - this->cpus_alloc_min);
   if (this->nodes_alloc_max != this->nodes_alloc_min)
-    this->job_size_factor +=
-        (double)(task_nodes_alloc - this->nodes_alloc_min) /
-        (this->nodes_alloc_max - this->nodes_alloc_min);
+    this->job_size_factor += 1.0 * (task_nodes_alloc - this->nodes_alloc_min) /
+                             (this->nodes_alloc_max - this->nodes_alloc_min);
   if (this->mem_alloc_max != this->mem_alloc_min)
-    this->job_size_factor += (double)(task_mem_alloc - this->mem_alloc_min) /
+    this->job_size_factor += 1.0 * (task_mem_alloc - this->mem_alloc_min) /
                              (this->mem_alloc_max - this->mem_alloc_min);
-  if (g_config.PriorityWeight.FavorSmall)
+  if (g_config.PriorityConfig.FavorSmall)
     this->job_size_factor = 1 - this->job_size_factor / 3;
   else
     this->job_size_factor /= 3;
@@ -1937,8 +1936,8 @@ uint32_t Priority::CalculatePriority(Ctld::TaskInCtld* task) {
   // fair_share_factor
   if (this->service_val_max != this->service_val_min) {
     this->fair_share_factor =
-        1 - (double)(task_service_val - this->service_val_min) /
-                (this->service_val_max - this->service_val_min);
+        1.0 - (task_service_val - this->service_val_min) /
+                  (this->service_val_max - this->service_val_min);
   } else {
     this->fair_share_factor = 0;
   }
@@ -1948,11 +1947,11 @@ uint32_t Priority::CalculatePriority(Ctld::TaskInCtld* task) {
 
   // priority
   uint32_t priority =
-      g_config.PriorityWeight.WeightAge * this->age_factor +
-      g_config.PriorityWeight.WeightPartition * this->partition_factor +
-      g_config.PriorityWeight.WeightJobSize * this->job_size_factor +
-      g_config.PriorityWeight.WeightFairShare * this->fair_share_factor +
-      g_config.PriorityWeight.WeightAssoc * this->assoc_factor +
-      g_config.PriorityWeight.WeightQOS * this->qos_factor;
+      g_config.PriorityConfig.WeightAge * this->age_factor +
+      g_config.PriorityConfig.WeightPartition * this->partition_factor +
+      g_config.PriorityConfig.WeightJobSize * this->job_size_factor +
+      g_config.PriorityConfig.WeightFairShare * this->fair_share_factor +
+      g_config.PriorityConfig.WeightAssoc * this->assoc_factor +
+      g_config.PriorityConfig.WeightQOS * this->qos_factor;
   return priority;
 }

@@ -47,7 +47,7 @@ struct Config {
     uint32_t WeightQOS;
     uint32_t WeightAssoc;
   };
-  Priority PriorityWeight;
+  Priority PriorityConfig;
 
   CraneCtldListenConf ListenConf;
 
