@@ -1847,16 +1847,22 @@ void Priority::MaxMinInit(
                      (r_task->resources.allocatable_resource.cpu_count -
                       this->cpus_alloc_min) /
                      (this->cpus_alloc_max - this->cpus_alloc_min);
+    } else {
+      service_val += 1.0;
     }
     if (this->nodes_alloc_max != this->nodes_alloc_min) {
       service_val += 1.0 * (r_task->node_num - this->nodes_alloc_min) /
                      (this->nodes_alloc_max - this->nodes_alloc_min);
+    } else {
+      service_val += 1.0;
     }
     if (this->mem_alloc_max != this->mem_alloc_min) {
       service_val += 1.0 *
                      (r_task->resources.allocatable_resource.memory_bytes -
                       this->mem_alloc_min) /
                      (this->mem_alloc_max - this->mem_alloc_min);
+    } else {
+      service_val += 1.0;
     }
     auto run_time =
         ToUnixSeconds(absl::Now()) - r_task->StartTimeInUnixSecond();
