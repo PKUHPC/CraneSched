@@ -864,6 +864,7 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_alloc_cpu(task.resources.allocatable_resource.cpu_count *
                            task.node_num);
     task_it->set_exit_code(0);
+    task_it->set_priority(task.priority);
 
     task_it->set_status(task.PersistedPart().status());
     task_it->set_craned_list(
@@ -1805,7 +1806,7 @@ void Priority::MaxMinInit(
     if (age < this->age_min) this->age_min = age;
     if (age > this->age_max) this->age_max = age;
 
-    uint32_t nodes_alloc = iter->second->nodes_alloc;
+    uint32_t nodes_alloc = iter->second->node_num;
     if (nodes_alloc < this->nodes_alloc_min)
       this->nodes_alloc_min = nodes_alloc;
     if (nodes_alloc > this->nodes_alloc_max)
@@ -1848,7 +1849,7 @@ void Priority::MaxMinInit(
                      (this->cpus_alloc_max - this->cpus_alloc_min);
     }
     if (this->nodes_alloc_max != this->nodes_alloc_min) {
-      service_val += 1.0 * (r_task->nodes_alloc - this->nodes_alloc_min) /
+      service_val += 1.0 * (r_task->node_num - this->nodes_alloc_min) /
                      (this->nodes_alloc_max - this->nodes_alloc_min);
     }
     if (this->mem_alloc_max != this->mem_alloc_min) {
@@ -1889,7 +1890,7 @@ uint32_t Priority::CalculatePriority(Ctld::TaskInCtld* task) {
   const auto it_partition = g_config.Partitions.find(task->partition_id);
   uint32_t task_part_priority = it_partition->second.priority;
 
-  uint32_t task_nodes_alloc = task->nodes_alloc;
+  uint32_t task_nodes_alloc = task->node_num;
   uint64_t task_mem_alloc = task->resources.allocatable_resource.memory_bytes;
   double task_cpus_alloc = task->resources.allocatable_resource.cpu_count;
   uint32_t task_service_val =
@@ -1953,5 +1954,6 @@ uint32_t Priority::CalculatePriority(Ctld::TaskInCtld* task) {
       g_config.PriorityConfig.WeightFairShare * this->fair_share_factor +
       g_config.PriorityConfig.WeightAssoc * this->assoc_factor +
       g_config.PriorityConfig.WeightQOS * this->qos_factor;
+  task->priority = priority;
   return priority;
 }

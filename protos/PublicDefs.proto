@@ -172,6 +172,7 @@ message TaskInfo {
   string craned_list = 32;
   double alloc_cpu = 33;
   uint32 exit_code = 34;
+  uint32 priority = 35;
 }
 
 message PartitionInfo {
