@@ -100,7 +100,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
       const NodeSelectionInfo& node_selection_info,
       const PartitionMeta& partition_metas,
       const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
-      const TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
+      TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
       absl::Time* start_time);
 
   static void SubtractTaskResourceNodeSelectionInfo_(

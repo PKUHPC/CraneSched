@@ -1126,7 +1126,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     const NodeSelectionInfo& node_selection_info,
     const PartitionMeta& partition_metas,
     const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
-    const TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
+    TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
     absl::Time* start_time) {
   uint32_t selected_node_cnt = 0;
   std::vector<TimeSegment> intersected_time_segments;
@@ -1144,15 +1144,37 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       ++task_num_node_id_it;
       continue;
     }
-
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_index);
     auto& craned_meta = craned_meta_map.at(craned_index);
+
+    std::unordered_set<std::string> req_clusters(
+        task->TaskToCtld().nodelist().begin(),
+        task->TaskToCtld().nodelist().end());
+    std::unordered_set<std::string> req_excludes(
+        task->TaskToCtld().excludes().begin(),
+        task->TaskToCtld().excludes().end());
 
     if (!(task->resources <= craned_meta.res_total)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
             "Task #{} needs more resource than that of craned {}. "
+            "Skipping this craned.",
+            task->TaskId(), craned_index);
+      }
+    } else if (!task->TaskToCtld().nodelist().empty() &&
+               !req_clusters.contains(craned_meta.static_meta.hostname)) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Craned {} is not required by Task #{}."
+            "Skipping this craned.",
+            craned_index, task->TaskId());
+      }
+    } else if (!task->TaskToCtld().excludes().empty() &&
+               req_excludes.contains(craned_meta.static_meta.hostname)) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Task #{} excludes craned {}."
             "Skipping this craned.",
             task->TaskId(), craned_index);
       }

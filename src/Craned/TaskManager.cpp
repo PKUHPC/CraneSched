@@ -607,6 +607,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     env_vec.emplace_back("CRANE_JOB_NODELIST",
                          absl::StrJoin(instance->task.allocated_nodes(), ";"));
+    env_vec.emplace_back("CRANE_JOB_NAME", instance->task.name());
 
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
