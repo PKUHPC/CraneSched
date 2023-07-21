@@ -607,7 +607,25 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     env_vec.emplace_back("CRANE_JOB_NODELIST",
                          absl::StrJoin(instance->task.allocated_nodes(), ";"));
+    env_vec.emplace_back("CRANE_EXCLUDES",
+                         absl::StrJoin(instance->task.excludes(), ";"));
     env_vec.emplace_back("CRANE_JOB_NAME", instance->task.name());
+    env_vec.emplace_back("CRANE_ACCOUNT", instance->task.account());
+    env_vec.emplace_back("CRANE_PARTITION", instance->task.partition());
+    env_vec.emplace_back("CRANE_QOS", instance->task.qos());
+    env_vec.emplace_back("CRANE_MEM_PER_NODE",
+                         std::to_string(instance->task.mem()));
+    env_vec.emplace_back("CRANE_JOB_ID",
+                         std::to_string(instance->task.task_id()));
+    int64_t time_limit_in_seconds = instance->task.time_limit().seconds();
+    int hours = time_limit_in_seconds / 3600;
+    int minutes = (time_limit_in_seconds % 3600) / 60;
+    int seconds = time_limit_in_seconds % 60;
+    std::string time_limit =
+        std::to_string(hours) + ":" + (minutes < 10 ? "0" : "") +
+        std::to_string(minutes) + ":" + (seconds < 10 ? "0" : "") +
+        std::to_string(seconds);
+    env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
 
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
