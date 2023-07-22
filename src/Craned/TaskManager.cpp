@@ -617,14 +617,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                          std::to_string(instance->task.mem()));
     env_vec.emplace_back("CRANE_JOB_ID",
                          std::to_string(instance->task.task_id()));
-    int64_t time_limit_in_seconds = instance->task.time_limit().seconds();
-    int hours = time_limit_in_seconds / 3600;
-    int minutes = (time_limit_in_seconds % 3600) / 60;
-    int seconds = time_limit_in_seconds % 60;
+
+    int64_t time_limit_sec = instance->task.time_limit().seconds();
+    int hours = time_limit_sec / 3600;
+    int minutes = (time_limit_sec % 3600) / 60;
+    int seconds = time_limit_sec % 60;
     std::string time_limit =
-        std::to_string(hours) + ":" + (minutes < 10 ? "0" : "") +
-        std::to_string(minutes) + ":" + (seconds < 10 ? "0" : "") +
-        std::to_string(seconds);
+        fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
     env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
 
     if (clearenv()) {
