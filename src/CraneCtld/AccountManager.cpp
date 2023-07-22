@@ -203,7 +203,8 @@ AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
   }
 
   if (new_account.default_qos.empty()) {
-    new_account.default_qos = new_account.allowed_qos_list.front();
+    if (!new_account.allowed_qos_list.empty())
+      new_account.default_qos = new_account.allowed_qos_list.front();
   } else {
     if (std::find(new_account.allowed_qos_list.begin(),
                   new_account.allowed_qos_list.end(),
