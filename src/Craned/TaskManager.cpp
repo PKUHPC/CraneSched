@@ -614,7 +614,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     env_vec.emplace_back("CRANE_PARTITION", instance->task.partition());
     env_vec.emplace_back("CRANE_QOS", instance->task.qos());
     env_vec.emplace_back("CRANE_MEM_PER_NODE",
-                         std::to_string(instance->task.mem()));
+                         std::to_string(instance->task.resources()
+                                            .allocatable_resource()
+                                            .memory_limit_bytes() /
+                                        (1024 * 1024)));
     env_vec.emplace_back("CRANE_JOB_ID",
                          std::to_string(instance->task.task_id()));
 

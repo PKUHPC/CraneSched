@@ -138,7 +138,6 @@ message TaskToD {
   string name = 15;
   string account = 16;
   string qos = 17;
-  uint64 mem = 18;
 
   repeated string excludes = 19;
   repeated string nodelist = 20;

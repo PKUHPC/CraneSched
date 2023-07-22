@@ -1148,10 +1148,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
         node_selection_info.node_time_avail_res_map.at(craned_index);
     auto& craned_meta = craned_meta_map.at(craned_index);
 
-    std::unordered_set<std::string> req_clusters(
+    std::unordered_set<std::string> nodelist_set(
         task->TaskToCtld().nodelist().begin(),
         task->TaskToCtld().nodelist().end());
-    std::unordered_set<std::string> req_excludes(
+    std::unordered_set<std::string> excludes_set(
         task->TaskToCtld().excludes().begin(),
         task->TaskToCtld().excludes().end());
 
@@ -1163,20 +1163,18 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
             task->TaskId(), craned_index);
       }
     } else if (!task->TaskToCtld().nodelist().empty() &&
-               !req_clusters.contains(craned_meta.static_meta.hostname)) {
+               !nodelist_set.contains(craned_meta.static_meta.hostname)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
-            "Craned {} is not required by Task #{}."
+            "Craned {} is not in the nodelist of task #{}. "
             "Skipping this craned.",
             craned_index, task->TaskId());
       }
     } else if (!task->TaskToCtld().excludes().empty() &&
-               req_excludes.contains(craned_meta.static_meta.hostname)) {
+               excludes_set.contains(craned_meta.static_meta.hostname)) {
       if constexpr (kAlgoTraceOutput) {
-        CRANE_TRACE(
-            "Task #{} excludes craned {}."
-            "Skipping this craned.",
-            task->TaskId(), craned_index);
+        CRANE_TRACE("Task #{} excludes craned {}. Skipping this craned.",
+                    task->TaskId(), craned_index);
       }
     } else {
       craned_indexes_.emplace_back(craned_index);
