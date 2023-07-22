@@ -1126,13 +1126,20 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     const NodeSelectionInfo& node_selection_info,
     const PartitionMeta& partition_metas,
     const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
-    const TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
+    TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
     absl::Time* start_time) {
   uint32_t selected_node_cnt = 0;
   std::vector<TimeSegment> intersected_time_segments;
   bool first_pass{true};
 
   std::list<CranedId> craned_indexes_;
+
+  std::unordered_set<std::string> nodelist_set(
+      task->TaskToCtld().nodelist().begin(),
+      task->TaskToCtld().nodelist().end());
+  std::unordered_set<std::string> excludes_set(
+      task->TaskToCtld().excludes().begin(),
+      task->TaskToCtld().excludes().end());
 
   auto task_num_node_id_it = node_selection_info.task_num_node_id_map.begin();
   while (selected_node_cnt < task->node_num &&
@@ -1144,7 +1151,6 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       ++task_num_node_id_it;
       continue;
     }
-
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_index);
     auto& craned_meta = craned_meta_map.at(craned_index);
@@ -1155,6 +1161,20 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
             "Task #{} needs more resource than that of craned {}. "
             "Skipping this craned.",
             task->TaskId(), craned_index);
+      }
+    } else if (!task->TaskToCtld().nodelist().empty() &&
+               !nodelist_set.contains(craned_index)) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Craned {} is not in the nodelist of task #{}. "
+            "Skipping this craned.",
+            craned_index, task->TaskId());
+      }
+    } else if (!task->TaskToCtld().excludes().empty() &&
+               excludes_set.contains(craned_index)) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE("Task #{} excludes craned {}. Skipping this craned.",
+                    task->TaskId(), craned_index);
       }
     } else {
       craned_indexes_.emplace_back(craned_index);

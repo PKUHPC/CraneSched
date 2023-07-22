@@ -48,9 +48,13 @@ CraneErr CranedStub::ExecuteTasks(
 
     // Set type
     mutable_task->set_type(task->type);
-
     mutable_task->set_task_id(task->TaskId());
     mutable_task->set_name(task->name);
+    mutable_task->set_account(task->account);
+    mutable_task->set_qos(task->qos);
+    mutable_task->set_partition(task->TaskToCtld().partition_name());
+    mutable_task->mutable_nodelist()->CopyFrom(task->TaskToCtld().nodelist());
+    mutable_task->mutable_excludes()->CopyFrom(task->TaskToCtld().excludes());
 
     mutable_task->set_node_num(task->node_num);
     mutable_task->set_ntasks_per_node(task->ntasks_per_node);
