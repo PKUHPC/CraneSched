@@ -1220,12 +1220,63 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
   std::list<CranedId> craned_indexes_;
 
-  std::unordered_set<std::string> nodelist_set(
-      task->TaskToCtld().nodelist().begin(),
-      task->TaskToCtld().nodelist().end());
-  std::unordered_set<std::string> excludes_set(
-      task->TaskToCtld().excludes().begin(),
-      task->TaskToCtld().excludes().end());
+  std::unordered_set<std::string> nodelist_set;
+  std::unordered_set<std::string> excludes_set;
+
+  auto parse_node_name = [](const std::string nodes) {
+    std::unordered_set<std::string> result;
+    std::regex regex(R"(\[([a-zA-Z]+)(\d+)-([a-zA-Z]+)(\d+)\])");
+    std::smatch matches;
+    if (std::regex_match(nodes, matches, regex)) {
+      int start = std::stoi(matches[2]);
+      int end = std::stoi(matches[4]);
+      if (matches[1] == matches[3] &&
+          matches[2].length() == matches[4].length() && start <= end) {
+        for (int i = start; i <= end; ++i) {
+          std::ostringstream oss;
+          oss << matches[1] << std::setfill('0')
+              << std::setw(matches[2].length()) << i;
+          result.insert(oss.str());
+        }
+      }
+    }
+    return result;
+  };
+
+  for (auto node : task->TaskToCtld().excludes()) {
+    if (node.find('-') != std::string::npos) {
+      auto result = parse_node_name(node);
+      if (!result.empty()) {
+        excludes_set.insert(result.begin(), result.end());
+      } else {
+        if constexpr (kAlgoTraceOutput) {
+          CRANE_TRACE(
+              "Node name #{} parsing failed."
+              "Skipping this craned.",
+              node);
+        }
+      }
+    } else {
+      excludes_set.insert(node);
+    }
+  }
+  for (auto node : task->TaskToCtld().nodelist()) {
+    if (node.find('-') != std::string::npos) {
+      auto result = parse_node_name(node);
+      if (!result.empty()) {
+        nodelist_set.insert(result.begin(), result.end());
+      } else {
+        if constexpr (kAlgoTraceOutput) {
+          CRANE_TRACE(
+              "Node name #{} parsing failed."
+              "Skipping this craned.",
+              node);
+        }
+      }
+    } else {
+      nodelist_set.insert(node);
+    }
+  }
 
   auto task_num_node_id_it = node_selection_info.task_num_node_id_map.begin();
   while (selected_node_cnt < task->node_num &&
@@ -1823,14 +1874,59 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
                                  .allocatable_resource.memory_sw_bytes));
     return CraneErr::kNoResource;
   }
+  std::unordered_set<std::string> included_nodes;
+  std::unordered_set<std::string> excluded_nodes;
 
-  std::unordered_set<std::string> excluded_nodes(
-      task->TaskToCtld().excludes().begin(),
-      task->TaskToCtld().excludes().end());
+  auto parse_node_name = [](const std::string nodes) {
+    std::unordered_set<std::string> result;
+    std::regex regex(R"(\[([a-zA-Z]+)(\d+)-([a-zA-Z]+)(\d+)\])");
+    std::smatch matches;
+    if (std::regex_match(nodes, matches, regex)) {
+      int start = std::stoi(matches[2]);
+      int end = std::stoi(matches[4]);
+      if (matches[1] == matches[3] &&
+          matches[2].length() == matches[4].length() && start <= end) {
+        for (int i = start; i <= end; ++i) {
+          std::ostringstream oss;
+          oss << matches[1] << std::setfill('0')
+              << std::setw(matches[2].length()) << i;
+          result.insert(oss.str());
+        }
+      }
+    }
+    return result;
+  };
 
-  std::unordered_set<std::string> included_nodes(
-      task->TaskToCtld().nodelist().begin(),
-      task->TaskToCtld().nodelist().end());
+  for (auto node : task->TaskToCtld().excludes()) {
+    if (node.find('-') != std::string::npos) {
+      auto result = parse_node_name(node);
+      if (!result.empty()) {
+        excluded_nodes.insert(result.begin(), result.end());
+      } else {
+        CRANE_TRACE(
+            "Node name #{} parsing failed."
+            "Skipping this craned.",
+            node);
+      }
+    } else {
+      excluded_nodes.insert(node);
+    }
+  }
+  for (auto node : task->TaskToCtld().nodelist()) {
+    if (node.find('-') != std::string::npos) {
+      auto result = parse_node_name(node);
+      if (!result.empty()) {
+        included_nodes.insert(result.begin(), result.end());
+      } else {
+        CRANE_TRACE(
+            "Node name #{} parsing failed."
+            "Skipping this craned.",
+            node);
+      }
+    } else {
+      included_nodes.insert(node);
+    }
+  }
 
   std::unordered_set<std::string> avail_nodes;
   {
