@@ -1772,6 +1772,51 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   // Check whether the selected partition is able to run this task.
   auto metas_ptr = g_meta_container->GetPartitionMetasPtr(task->partition_id);
+
+  std::unordered_set<std::string> exclude_nodes(
+      task->TaskToCtld().excludes().begin(),
+      task->TaskToCtld().excludes().end());
+
+  std::unordered_set<std::string> req_nodes(
+      task->TaskToCtld().nodelist().begin(),
+      task->TaskToCtld().nodelist().end());
+
+  if (!task->TaskToCtld().nodelist().empty()) {
+    uint32_t avail_node_num = 0;
+    for (auto craned_id : metas_ptr->craned_ids) {
+      auto craned_meta_ptr = g_meta_container->GetCranedMetaPtr(craned_id);
+      if (req_nodes.contains(craned_meta_ptr->static_meta.hostname) &&
+          craned_meta_ptr->alive) {
+        avail_node_num++;
+      }
+    }
+    if (task->node_num > avail_node_num) {
+      CRANE_TRACE(
+          "Task #{}'s node-num {} is greater than the number of "
+          "available nodes {} in its partition. Reject it.",
+          task->TaskId(), task->node_num, avail_node_num);
+      return CraneErr::kInvalidNodeNum;
+    }
+  }
+
+  if (!task->TaskToCtld().excludes().empty()) {
+    uint32_t avail_node_num = 0;
+    for (auto craned_id : metas_ptr->craned_ids) {
+      auto craned_meta_ptr = g_meta_container->GetCranedMetaPtr(craned_id);
+      if (!exclude_nodes.contains(craned_meta_ptr->static_meta.hostname) &&
+          craned_meta_ptr->alive) {
+        avail_node_num++;
+      }
+    }
+    if (task->node_num > avail_node_num) {
+      CRANE_TRACE(
+          "Task #{}'s node-num {} is greater than the number of "
+          "available nodes {} in its partition. Reject it.",
+          task->TaskId(), task->node_num, avail_node_num);
+      return CraneErr::kInvalidNodeNum;
+    }
+  }
+
   if (task->node_num > metas_ptr->partition_global_meta.alive_craned_cnt) {
     CRANE_TRACE(
         "Task #{}'s node-num {} is greater than the number of "
@@ -1780,7 +1825,6 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
         metas_ptr->partition_global_meta.alive_craned_cnt);
     return CraneErr::kInvalidNodeNum;
   }
-
   if (!(task->resources <=
         metas_ptr->partition_global_meta.m_resource_total_)) {
     CRANE_TRACE(
