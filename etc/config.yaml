@@ -42,7 +42,6 @@ CranedLogFile: /tmp/craned/craned.log
 CranedForeground: true
 
 PriorityType: priority/multifactor
-#PriorityDecayHalfLife: 0
 PriorityFavorSmall: YES
 PriorityMaxAge: 14-0
 PriorityWeightAge: 500

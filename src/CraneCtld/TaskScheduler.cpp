@@ -1427,8 +1427,15 @@ void MinLoadFirst::NodeSelect(
                                            &node_info_in_a_partition);
   }
 
-  auto task_id_list =
-      g_priority->GetTaskIdList(pending_task_map, running_tasks);
+  std::list<task_id_t> task_id_list;
+
+  if (g_config.PriorityConfig.Type == "priority/multifactor") {
+    task_id_list = g_priority->GetTaskIdList(pending_task_map, running_tasks);
+  } else {
+    for (const auto& pair : *pending_task_map) {
+      task_id_list.push_back(pair.first);
+    }
+  }
 
   // Now we know, on every node, the # of running tasks (which
   //  doesn't include those we select as the incoming running tasks in the
