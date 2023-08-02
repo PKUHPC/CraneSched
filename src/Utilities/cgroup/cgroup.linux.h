@@ -19,6 +19,7 @@
 #include <map>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 #include "crane/Lock.h"
 #include "crane/Logger.h"
@@ -58,6 +59,12 @@ enum class ControllerFile : uint64_t {
   ControllerFileCount
 };
 
+enum class DeviceType : uint64_t {
+  NVIDIA_GRAPHICS_CARD = 0,
+
+  DeviceCount
+};
+
 namespace Internal {
 
 constexpr std::array<std::string_view,
@@ -82,6 +89,18 @@ constexpr std::array<std::string_view,
         "devices.deny",
         "devices.allow",
     };
+
+constexpr std::array<uint64_t,
+                     static_cast<size_t>(DeviceType::DeviceCount)>
+    DeviceId{
+        195,
+    };
+
+constexpr std::array<char,
+                     static_cast<size_t>(DeviceType::DeviceCount)>
+    DeviceOpType{
+        'c',
+    };
 }  // namespace Internal
 
 constexpr std::string_view GetControllerStringView(Controller controller) {
@@ -92,6 +111,14 @@ constexpr std::string_view GetControllerFileStringView(
     ControllerFile controller_file) {
   return Internal::ControllerFileStringView[static_cast<uint64_t>(
       controller_file)];
+}
+
+constexpr uint64_t GetDeviceId(DeviceType Device_type){
+  return Internal::DeviceId[static_cast<uint64_t>(Device_type)];
+}
+
+constexpr char GetDeviceOpType(DeviceType Device_type){
+  return Internal::DeviceOpType[static_cast<uint64_t>(Device_type)];
 }
 
 }  // namespace CgroupConstant
@@ -205,13 +232,17 @@ class Cgroup {
   bool SetMemorySwLimitBytes(uint64_t mem_bytes);
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes);
   bool SetBlockioWeight(uint64_t weight);
+  bool SetDeviceLimit(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_index,bool allow,bool read,bool write,bool mknod);
+  bool SetDeviceDeny(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_index);
   bool SetControllerValue(CgroupConstant::Controller controller,
                           CgroupConstant::ControllerFile controller_file,
                           uint64_t value);
   bool SetControllerStr(CgroupConstant::Controller controller,
                         CgroupConstant::ControllerFile controller_file,
                         const std::string &str);
-
+  bool AddControllerStrArray(CgroupConstant::Controller controller,
+                        CgroupConstant::ControllerFile controller_file,
+                        const std::vector<std::string> &strs);
   bool KillAllProcesses();
 
   bool Empty();
