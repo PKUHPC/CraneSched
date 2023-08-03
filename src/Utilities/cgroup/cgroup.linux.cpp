@@ -488,8 +488,8 @@ bool Cgroup::SetBlockioWeight(uint64_t weight) {
                             weight);
 }
 
-bool Cgroup::SetDeviceLimit(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_index,bool allow,bool read,bool write,bool mknod){
-  std::vector<std::string> strs(device_index.size());
+bool Cgroup::SetDeviceLimit(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_minor,bool allow,bool read,bool write,bool mknod){
+  std::string limitStr;
   std::string op;
   if (read) {
     op += "r";
@@ -501,17 +501,18 @@ bool Cgroup::SetDeviceLimit(CgroupConstant::DeviceType device_type,const std::ve
     op += "m";
   }
   char device_op_type = CgroupConstant::GetDeviceOpType(device_type);
-  const std::string limit = fmt::format("{} {}:",device_op_type,CgroupConstant::GetDeviceId(device_type));
-  for(int i = 0;i<device_index.size();++i){
-    strs[i]=limit+fmt::format("{} {}",device_index[i],op);
+  const std::string limit = fmt::format("{} {}:",device_op_type,CgroupConstant::GetDeviceMajor(device_type));
+  for(int i = 0;i<device_minor.size();++i){
+    limitStr+=fmt::format("{}{} {},",limit,device_minor[i],op);
   }
-  return AddControllerStrArray(CgroupConstant::Controller::DEVICES_CONTROLLER,
+  limitStr.pop_back();
+  return SetControllerStr(CgroupConstant::Controller::DEVICES_CONTROLLER,
                               allow? CgroupConstant::ControllerFile::DEVICES_ALLOW : CgroupConstant::ControllerFile::DEVICES_DENY,
-                              strs);
+                              limitStr);
 }
 
-bool Cgroup::SetDeviceDeny(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_index){
-  return SetDeviceLimit(device_type,device_index,false,true,true,true);
+bool Cgroup::SetDeviceDeny(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_minor){
+  return SetDeviceLimit(device_type,device_minor,false,true,true,true);
 }
 
 bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
@@ -602,51 +603,6 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
   return true;
 }
 
-bool Cgroup::AddControllerStrArray(CgroupConstant::Controller controller,
-                        CgroupConstant::ControllerFile controller_file,
-                        const std::vector<std::string> &strs){
-  if (!CgroupUtil::Mounted(controller)) {
-    CRANE_WARN("Unable to set {} because cgroup {} is not mounted.\n",
-               CgroupConstant::GetControllerFileStringView(controller_file),
-               CgroupConstant::GetControllerStringView(controller));
-    return false;
-  }
-
-  int err;
-
-  struct cgroup_controller *cg_controller;
-
-  if ((cg_controller = cgroup_get_controller(
-           m_cgroup_,
-           CgroupConstant::GetControllerStringView(controller).data())) ==
-      nullptr) {
-    CRANE_WARN("Unable to get cgroup {} controller for {}.\n",
-               CgroupConstant::GetControllerStringView(controller),
-               m_cgroup_path_);
-    return false;
-  }
-
-  for(const auto& str : strs){
-    if ((err = cgroup_add_value_string(
-           cg_controller,
-           CgroupConstant::GetControllerFileStringView(controller_file).data(),
-           str.c_str()))) {
-      CRANE_WARN("Unable to set string for {}: {} {}\n", m_cgroup_path_, err,
-                cgroup_strerror(err));
-      return false;
-    }
-  }
-
-  // Commit cgroup modifications.
-  if ((err = cgroup_modify_cgroup(m_cgroup_))) {
-    CRANE_WARN("Unable to commit {} for cgroup {}: {} {}\n",
-               CgroupConstant::GetControllerFileStringView(controller_file),
-               m_cgroup_path_, err, cgroup_strerror(err));
-    return false;
-  }
-
-  return true;
-}
 
 bool Cgroup::KillAllProcesses() {
   using namespace CgroupConstant::Internal;

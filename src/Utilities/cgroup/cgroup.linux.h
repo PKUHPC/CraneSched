@@ -92,7 +92,7 @@ constexpr std::array<std::string_view,
 
 constexpr std::array<uint64_t,
                      static_cast<size_t>(DeviceType::DeviceCount)>
-    DeviceId{
+    DeviceMajor{
         195,
     };
 
@@ -113,8 +113,8 @@ constexpr std::string_view GetControllerFileStringView(
       controller_file)];
 }
 
-constexpr uint64_t GetDeviceId(DeviceType Device_type){
-  return Internal::DeviceId[static_cast<uint64_t>(Device_type)];
+constexpr uint64_t GetDeviceMajor(DeviceType Device_type){
+  return Internal::DeviceMajor[static_cast<uint64_t>(Device_type)];
 }
 
 constexpr char GetDeviceOpType(DeviceType Device_type){
@@ -232,17 +232,14 @@ class Cgroup {
   bool SetMemorySwLimitBytes(uint64_t mem_bytes);
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes);
   bool SetBlockioWeight(uint64_t weight);
-  bool SetDeviceLimit(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_index,bool allow,bool read,bool write,bool mknod);
-  bool SetDeviceDeny(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_index);
+  bool SetDeviceLimit(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_minor,bool allow,bool read,bool write,bool mknod);
+  bool SetDeviceDeny(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_minor);
   bool SetControllerValue(CgroupConstant::Controller controller,
                           CgroupConstant::ControllerFile controller_file,
                           uint64_t value);
   bool SetControllerStr(CgroupConstant::Controller controller,
                         CgroupConstant::ControllerFile controller_file,
                         const std::string &str);
-  bool AddControllerStrArray(CgroupConstant::Controller controller,
-                        CgroupConstant::ControllerFile controller_file,
-                        const std::vector<std::string> &strs);
   bool KillAllProcesses();
 
   bool Empty();
