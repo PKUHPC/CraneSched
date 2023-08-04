@@ -1,5 +1,7 @@
 #include "DbClient.h"
 
+#include <google/protobuf/util/time_util.h>
+
 #include <bsoncxx/exception/exception.hpp>
 #include <mongocxx/exception/exception.hpp>
 
@@ -43,7 +45,8 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
         std::remove_reference<decltype(qos.max_jobs_per_user)>::type>::max();
     qos.max_running_tasks_per_user = std::numeric_limits<std::remove_reference<
         decltype(qos.max_running_tasks_per_user)>::type>::max();
-    qos.max_time_limit_per_task = absl::Seconds(INT64_MAX);
+    qos.max_time_limit_per_task =
+        absl::Seconds(google::protobuf::util::TimeUtil::kDurationMaxSeconds);
     qos.max_cpus_per_user = std::numeric_limits<
         std::remove_reference<decltype(qos.max_cpus_per_user)>::type>::max();
     qos.max_cpus_per_account = std::numeric_limits<
