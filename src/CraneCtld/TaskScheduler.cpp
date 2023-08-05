@@ -46,7 +46,7 @@ bool TaskScheduler::Init() {
             "move it to pending queue and re-run it.",
             task_id);
 
-        for (CranedId craned_id : task->CranedIds()) {
+        for (const CranedId& craned_id : task->CranedIds()) {
           stub = g_craned_keeper->GetCranedStub(craned_id);
           if (stub != nullptr && !stub->Invalid())
             stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
@@ -103,7 +103,7 @@ bool TaskScheduler::Init() {
               // in case that when processing TaskStatusChange CraneCtld
               // crashed, only part of Craned nodes executed TerminateTask gRPC.
               // Not needed for succeeded tasks.
-              for (CranedId craned_id : task->CranedIds()) {
+              for (const CranedId& craned_id : task->CranedIds()) {
                 stub = g_craned_keeper->GetCranedStub(craned_id);
                 if (stub != nullptr && !stub->Invalid())
                   stub->TerminateOrphanedTask(task->TaskId());
@@ -114,7 +114,7 @@ bool TaskScheduler::Init() {
             // released. Though some craned nodes might have released the
             // cgroup, just resend the gRPC again to guarantee that the cgroup
             // is always released.
-            for (CranedId craned_id : task->CranedIds()) {
+            for (const CranedId& craned_id : task->CranedIds()) {
               stub = g_craned_keeper->GetCranedStub(craned_id);
               if (stub != nullptr && !stub->Invalid())
                 stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
@@ -158,13 +158,13 @@ bool TaskScheduler::Init() {
               "move it to pending queue and re-run it.",
               task_id);
 
-          for (CranedId craned_id : task->CranedIds()) {
+          for (const CranedId& craned_id : task->CranedIds()) {
             stub = g_craned_keeper->GetCranedStub(craned_id);
             if (stub != nullptr && !stub->Invalid())
               stub->TerminateOrphanedTask(task->TaskId());
           }
 
-          for (CranedId craned_id : task->CranedIds()) {
+          for (const CranedId& craned_id : task->CranedIds()) {
             stub = g_craned_keeper->GetCranedStub(craned_id);
             if (stub != nullptr && !stub->Invalid())
               stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
@@ -308,7 +308,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
-  for (CranedId craned_id : task->CranedIds()) {
+  for (const CranedId& craned_id : task->CranedIds()) {
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                              task->resources);
     m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
@@ -405,7 +405,7 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       absl::BlockingCounter bl(craned_cgroup_map.size());
-      for (auto const iter : craned_cgroup_map) {
+      for (auto const& iter : craned_cgroup_map) {
         CranedId const& craned_id = iter.first;
         auto const& task_uid_pairs = iter.second;
         g_thread_pool->push_task([=, &bl]() {
@@ -449,7 +449,7 @@ void TaskScheduler::ScheduleThread_() {
         m_running_task_map_mtx_.Lock();
         m_task_indexes_mtx_.Lock();
 
-        for (CranedId craned_id : task->CranedIds()) {
+        for (const CranedId& craned_id : task->CranedIds()) {
           m_node_to_tasks_map_[craned_id].emplace(task_ptr->TaskId());
         }
         m_running_task_map_.emplace(task->TaskId(), std::move(task));
@@ -1746,7 +1746,7 @@ CraneErr TaskScheduler::CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task) {
   return CraneErr::kOk;
 }
 
-void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
+void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id) {
   CRANE_TRACE("Terminate tasks on craned {}", craned_id);
 
   // The order of LockGuards matters.

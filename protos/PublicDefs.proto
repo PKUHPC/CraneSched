@@ -144,7 +144,7 @@ message TaskToD {
 
   uint32 node_num = 21;
   uint32 ntasks_per_node = 22;
-  uint32 cpus_per_task = 23;
+  double cpus_per_task = 23;
 }
 
 message BatchTaskAdditionalMeta {
