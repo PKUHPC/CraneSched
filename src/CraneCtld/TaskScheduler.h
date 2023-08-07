@@ -246,7 +246,7 @@ class Priority {
       assoc_factor, qos_factor;
 
  public:
-  std::list<task_id_t> GetTaskIdList(
+  std::list<task_id_t> GetOrderedTaskIdList(
       const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
           pending_task_map,
       const absl::flat_hash_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>&

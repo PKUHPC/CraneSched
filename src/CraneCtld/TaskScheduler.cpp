@@ -1430,7 +1430,8 @@ void MinLoadFirst::NodeSelect(
   std::list<task_id_t> task_id_list;
 
   if (g_config.PriorityConfig.Type == "priority/multifactor") {
-    task_id_list = g_priority->GetTaskIdList(pending_task_map, running_tasks);
+    task_id_list =
+        g_priority->GetOrderedTaskIdList(pending_task_map, running_tasks);
   } else {
     for (const auto& pair : *pending_task_map) {
       task_id_list.push_back(pair.first);
@@ -1766,7 +1767,7 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
 
 }  // namespace Ctld
 
-std::list<task_id_t> Priority::GetTaskIdList(
+std::list<task_id_t> Priority::GetOrderedTaskIdList(
     const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
         pending_task_map,
     const absl::flat_hash_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>&
