@@ -488,7 +488,7 @@ bool Cgroup::SetBlockioWeight(uint64_t weight) {
                             weight);
 }
 
-bool Cgroup::SetDeviceLimit(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_minor,bool allow,bool read,bool write,bool mknod){
+bool Cgroup::SetDeviceLimit(CgroupConstant::DeviceType device_type,const uint64_t alloc_bitmap,bool allow,bool read,bool write,bool mknod){
   std::string limitStr;
   std::string op;
   if (read) {
@@ -502,17 +502,23 @@ bool Cgroup::SetDeviceLimit(CgroupConstant::DeviceType device_type,const std::ve
   }
   char device_op_type = CgroupConstant::GetDeviceOpType(device_type);
   const std::string limit = fmt::format("{} {}:",device_op_type,CgroupConstant::GetDeviceMajor(device_type));
-  for(int i = 0;i<device_minor.size();++i){
-    limitStr+=fmt::format("{}{} {},",limit,device_minor[i],op);
+  if(alloc_bitmap==0xffffffff){
+    limitStr=fmt::format("{}{} {}",limit,'*',op);
+  }else{
+    for(int i = 0;i<64;++i){
+    if(alloc_bitmap>>i & 1){
+      limitStr+=fmt::format("{}{} {},",limit,i,op);
+      }
+    }
+    limitStr.pop_back();
   }
-  limitStr.pop_back();
   return SetControllerStr(CgroupConstant::Controller::DEVICES_CONTROLLER,
                               allow? CgroupConstant::ControllerFile::DEVICES_ALLOW : CgroupConstant::ControllerFile::DEVICES_DENY,
                               limitStr);
 }
 
-bool Cgroup::SetDeviceDeny(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_minor){
-  return SetDeviceLimit(device_type,device_minor,false,true,true,true);
+bool Cgroup::SetDeviceDeny(CgroupConstant::DeviceType device_type,const uint64_t alloc_bitmap){
+  return SetDeviceLimit(device_type,alloc_bitmap,false,true,true,true);
 }
 
 bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
@@ -602,7 +608,6 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
 
   return true;
 }
-
 
 bool Cgroup::KillAllProcesses() {
   using namespace CgroupConstant::Internal;
