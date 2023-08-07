@@ -897,6 +897,7 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_name(task.TaskToCtld().name());
     task_it->set_partition(task.TaskToCtld().partition_name());
     task_it->set_uid(task.TaskToCtld().uid());
+    task_it->set_no_time_limit_constraint(task.no_time_limit_constraint);
 
     task_it->set_gid(task.PersistedPart().gid());
     task_it->mutable_time_limit()->set_seconds(ToInt64Seconds(task.time_limit));
