@@ -19,7 +19,6 @@
 #include <map>
 #include <optional>
 #include <string_view>
-#include <vector>
 
 #include "crane/Lock.h"
 #include "crane/Logger.h"
@@ -232,8 +231,8 @@ class Cgroup {
   bool SetMemorySwLimitBytes(uint64_t mem_bytes);
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes);
   bool SetBlockioWeight(uint64_t weight);
-  bool SetDeviceLimit(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_minor,bool allow,bool read,bool write,bool mknod);
-  bool SetDeviceDeny(CgroupConstant::DeviceType device_type,const std::vector<uint64_t>& device_minor);
+  bool SetDeviceLimit(CgroupConstant::DeviceType device_type,const uint64_t alloc_bitmap,bool allow,bool read,bool write,bool mknod);
+  bool SetDeviceDeny(CgroupConstant::DeviceType device_type,const uint64_t alloc_bitmap);
   bool SetControllerValue(CgroupConstant::Controller controller,
                           CgroupConstant::ControllerFile controller_file,
                           uint64_t value);
