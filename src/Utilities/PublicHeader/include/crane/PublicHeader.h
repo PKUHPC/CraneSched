@@ -140,7 +140,19 @@ bool operator==(const AllocatableResource& lhs, const AllocatableResource& rhs);
  * Model the dedicated resources in a craned node.
  * It contains GPU, NIC, etc.
  */
-struct DedicatedResource {};  // Todo: Crane GRES
+struct DedicatedResource {
+  //free->1 bitmap
+  uint64_t nvidia_graphics_card;
+  
+  DedicatedResource() = default;
+  DedicatedResource& operator+=(const DedicatedResource& rhs);
+  DedicatedResource& operator-=(const DedicatedResource& rhs);
+
+};  // Todo: Crane GRES
+
+bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs);
+bool operator<(const DedicatedResource& lhs, const DedicatedResource& rhs);
+bool operator==(const DedicatedResource& lhs,const DedicatedResource& rhs);
 
 /**
  * When a task is allocated a resource UUID, it holds one instance of Resources
@@ -149,6 +161,7 @@ struct DedicatedResource {};  // Todo: Crane GRES
  */
 struct Resources {
   AllocatableResource allocatable_resource;
+  DedicatedResource delicated_resource;
 
   Resources() = default;
 

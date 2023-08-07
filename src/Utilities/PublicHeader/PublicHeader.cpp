@@ -42,6 +42,19 @@ bool operator==(const AllocatableResource& lhs,
   return false;
 }
 
+bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs){
+  return lhs.nvidia_graphics_card<=rhs.nvidia_graphics_card &&
+    rhs.nvidia_graphics_card == (rhs.nvidia_graphics_card & lhs.nvidia_graphics_card);
+}
+bool operator<(const DedicatedResource& lhs, const DedicatedResource& rhs){
+  return lhs.nvidia_graphics_card < rhs.nvidia_graphics_card &&
+    rhs.nvidia_graphics_card == (rhs.nvidia_graphics_card & lhs.nvidia_graphics_card);
+}
+
+bool operator==(const DedicatedResource& lhs,const DedicatedResource& rhs){
+  return lhs.nvidia_graphics_card==rhs.nvidia_graphics_card;
+}
+
 AllocatableResource::AllocatableResource(
     const crane::grpc::AllocatableResource& value) {
   cpu_count = value.cpu_core_limit();
@@ -78,13 +91,22 @@ Resources& Resources::operator-=(const AllocatableResource& rhs) {
 }
 
 bool operator<=(const Resources& lhs, const Resources& rhs) {
-  return lhs.allocatable_resource <= rhs.allocatable_resource;
+  return lhs.allocatable_resource <= rhs.allocatable_resource && lhs.delicated_resource <= rhs.delicated_resource;
 }
 
 bool operator<(const Resources& lhs, const Resources& rhs) {
-  return lhs.allocatable_resource < rhs.allocatable_resource;
+  return lhs.allocatable_resource < rhs.allocatable_resource && lhs.delicated_resource < rhs.delicated_resource;
 }
 
 bool operator==(const Resources& lhs, const Resources& rhs) {
-  return lhs.allocatable_resource == rhs.allocatable_resource;
+  return lhs.allocatable_resource == rhs.allocatable_resource && lhs.delicated_resource == rhs.delicated_resource;
+}
+
+DedicatedResource& DedicatedResource::operator+=(const DedicatedResource& rhs){
+  this->nvidia_graphics_card += rhs.nvidia_graphics_card;
+  return *this;
+}
+DedicatedResource& DedicatedResource::operator-=(const DedicatedResource& rhs){
+  this->nvidia_graphics_card -= rhs.nvidia_graphics_card;
+  return *this;
 }
