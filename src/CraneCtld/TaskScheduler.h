@@ -242,9 +242,6 @@ class Priority {
   uint32_t service_val_max, service_val_min;
   std::map<std::string, uint32_t> acc_service_val_map;
 
-  double age_factor, partition_factor, job_size_factor, fair_share_factor,
-      assoc_factor, qos_factor;
-
  public:
   std::list<task_id_t> GetOrderedTaskIdList(
       const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
