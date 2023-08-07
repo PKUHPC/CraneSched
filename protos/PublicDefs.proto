@@ -20,10 +20,14 @@ message AllocatableResource {
   uint64 memory_sw_limit_bytes = 3;
 }
 
-message DedicatedResource {}
+
+message DedicatedResource {
+  uint64 nvidia_graphics_card = 1;
+}
 
 message Resources {
   AllocatableResource allocatable_resource = 1;
+  DedicatedResource dedicated_resource = 2;
 }
 
 enum PartitionState {

@@ -7,6 +7,7 @@
 
 #include "ResourceAllocators.h"
 #include "crane/FdFunctions.h"
+#include "crane/String.h"
 #include "protos/CraneSubprocess.pb.h"
 
 namespace Craned {
@@ -619,8 +620,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                                             .memory_limit_bytes() /
                                         (1024 * 1024)));
     env_vec.emplace_back("CRANE_JOB_ID",
-                         std::to_string(instance->task.task_id()));
-
+                         std::to_string(instance->task.task_id()));;
+    env_vec.emplace_back("CUDA_VISIABLE_DEVICE",util::GenerateCudaVisiableDeviceStr(instance->task.resources().dedicated_resource()));
     int64_t time_limit_sec = instance->task.time_limit().seconds();
     int hours = time_limit_sec / 3600;
     int minutes = (time_limit_sec % 3600) / 60;
@@ -717,7 +718,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
             instance->cgroup_path,
             util::NO_CONTROLLER_FLAG |
                 util::CgroupConstant::Controller::CPU_CONTROLLER |
-                util::CgroupConstant::Controller::MEMORY_CONTROLLER,
+                util::CgroupConstant::Controller::MEMORY_CONTROLLER |
+                util::CgroupConstant::Controller::DEVICES_CONTROLLER,
             util::NO_CONTROLLER_FLAG, false);
       }
       instance->cgroup = cg_iter->second.get();

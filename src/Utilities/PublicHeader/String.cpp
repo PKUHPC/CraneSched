@@ -282,4 +282,16 @@ bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
   }
 }
 
+std::string GenerateCudaVisiableDeviceStr(const crane::grpc::DedicatedResource& value){
+  uint64_t nvidia_graphics_card = value.nvidia_graphics_card();
+  int num = std::popcount(nvidia_graphics_card);
+  std::string retVal;
+  retVal.reserve(num*2+1);
+  for(int i = 0;i<num;++i){
+    retVal+=fmt::format("{},",i);
+  }
+  retVal.pop_back();
+  return retVal;
+}
+
 }  // namespace util

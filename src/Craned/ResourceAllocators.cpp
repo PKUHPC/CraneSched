@@ -28,4 +28,11 @@ bool AllocatableResourceAllocator::Allocate(
   return ok;
 }
 
+bool DedicatedResourceAllocator::Allocate(const DedicatedResource& resource, util::Cgroup* cg){
+  return cg->SetDeviceDeny(util::CgroupConstant::DeviceType::NVIDIA_GRAPHICS_CARD,resource.nvidia_graphics_card);
+}
+bool DedicatedResourceAllocator::Allocate(const crane::grpc::DedicatedResource& resource,
+                        util::Cgroup* cg){
+  return cg->SetDeviceDeny(util::CgroupConstant::DeviceType::NVIDIA_GRAPHICS_CARD,resource.nvidia_graphics_card());
+                        }
 }  // namespace Craned

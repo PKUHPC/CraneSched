@@ -12,6 +12,7 @@
 #include <regex>
 #include <string>
 #include <vector>
+#include <bit>
 
 #include "crane/PublicHeader.h"
 
@@ -45,5 +46,8 @@ std::string HostNameListToStr(T const &host_list)
     source_list = res_list;
   }
 }
+
+
+std::string GenerateCudaVisiableDeviceStr(const crane::grpc::DedicatedResource& value);
 
 }  // namespace util
