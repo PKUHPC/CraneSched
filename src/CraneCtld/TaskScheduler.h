@@ -103,7 +103,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
       const NodeSelectionInfo& node_selection_info,
       const PartitionMeta& partition_metas,
       const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
-      const TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
+      TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
       absl::Time* start_time);
 
   static void SubtractTaskResourceNodeSelectionInfo_(
@@ -158,7 +158,7 @@ class TaskScheduler {
     TaskStatusChangeNoLock_(task_id, craned_index, new_status, exit_code);
   }
 
-  void TerminateTasksOnCraned(CranedId craned_id);
+  void TerminateTasksOnCraned(const CranedId& craned_id);
 
   // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
   void QueryTasksInRam(const crane::grpc::QueryTasksInfoRequest* request,

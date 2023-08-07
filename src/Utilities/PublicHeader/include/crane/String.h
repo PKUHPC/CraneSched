@@ -27,6 +27,8 @@ bool ParseHostList(const std::string &host_str,
 bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
                                      int *end);
 
+std::string RemoveBracketsWithoutDashOrComma(const std::string &input);
+
 bool HostNameListToStr_(std::list<std::string> &host_list,
                         std::list<std::string> *res_list);
 
@@ -41,9 +43,10 @@ std::string HostNameListToStr(T const &host_list)
       res_list.sort();
       std::string host_name_str{boost::join(res_list, ",")};
       // Remove brackets containing single numbers
-      std::regex fix_regex(R"(\[([^-,]*?)\])");
-      host_name_str = std::regex_replace(host_name_str, fix_regex, "$1");
-      return host_name_str;
+      // Temporary "[]" can be used to mark that the number has been processed,
+      // so "[]" cannot be removed during the processing and can only be deleted
+      // at the end
+      return RemoveBracketsWithoutDashOrComma(host_name_str);
     }
     source_list = res_list;
   }

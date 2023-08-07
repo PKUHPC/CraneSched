@@ -186,8 +186,7 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
       }
       delimiter_pos++;
     }
-
-    host_name_str += iter.first.substr(0, delimiter_pos);
+    host_name_str += iter.first.substr(0, delimiter_pos);  // head
     host_name_str += "[";
 
     std::sort(iter.second.begin(), iter.second.end(),
@@ -235,7 +234,8 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
       host_name_str += last_str;
     }
     host_name_str += fmt::format(
-        "]{}", iter.first.substr(delimiter_pos + 1, iter.first.size()));
+        "]{}",
+        iter.first.substr(delimiter_pos + 1, iter.first.size()));  // tail
     res_list->emplace_back(host_name_str);
   }
 
@@ -272,6 +272,28 @@ bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
   } else {
     return false;
   }
+}
+
+std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
+  std::string output = input;
+  std::size_t leftBracketPos = 0;
+  while ((leftBracketPos = output.find('[', leftBracketPos)) !=
+         std::string::npos) {
+    std::size_t rightBracketPos = output.find(']', leftBracketPos);
+    if (rightBracketPos == std::string::npos) {
+      break;
+    }
+    std::string betweenBrackets =
+        output.substr(leftBracketPos + 1, rightBracketPos - leftBracketPos - 1);
+    if (betweenBrackets.find('-') == std::string::npos &&
+        betweenBrackets.find(',') == std::string::npos) {
+      output.erase(rightBracketPos, 1);
+      output.erase(leftBracketPos, 1);
+    } else {
+      leftBracketPos = rightBracketPos + 1;
+    }
+  }
+  return output;
 }
 
 }  // namespace util

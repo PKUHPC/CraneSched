@@ -48,7 +48,7 @@ bool TaskScheduler::Init() {
             "move it to pending queue and re-run it.",
             task_id);
 
-        for (CranedId craned_id : task->CranedIds()) {
+        for (const CranedId& craned_id : task->CranedIds()) {
           stub = g_craned_keeper->GetCranedStub(craned_id);
           if (stub != nullptr && !stub->Invalid())
             stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
@@ -105,7 +105,7 @@ bool TaskScheduler::Init() {
               // in case that when processing TaskStatusChange CraneCtld
               // crashed, only part of Craned nodes executed TerminateTask gRPC.
               // Not needed for succeeded tasks.
-              for (CranedId craned_id : task->CranedIds()) {
+              for (const CranedId& craned_id : task->CranedIds()) {
                 stub = g_craned_keeper->GetCranedStub(craned_id);
                 if (stub != nullptr && !stub->Invalid())
                   stub->TerminateOrphanedTask(task->TaskId());
@@ -116,7 +116,7 @@ bool TaskScheduler::Init() {
             // released. Though some craned nodes might have released the
             // cgroup, just resend the gRPC again to guarantee that the cgroup
             // is always released.
-            for (CranedId craned_id : task->CranedIds()) {
+            for (const CranedId& craned_id : task->CranedIds()) {
               stub = g_craned_keeper->GetCranedStub(craned_id);
               if (stub != nullptr && !stub->Invalid())
                 stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
@@ -160,13 +160,13 @@ bool TaskScheduler::Init() {
               "move it to pending queue and re-run it.",
               task_id);
 
-          for (CranedId craned_id : task->CranedIds()) {
+          for (const CranedId& craned_id : task->CranedIds()) {
             stub = g_craned_keeper->GetCranedStub(craned_id);
             if (stub != nullptr && !stub->Invalid())
               stub->TerminateOrphanedTask(task->TaskId());
           }
 
-          for (CranedId craned_id : task->CranedIds()) {
+          for (const CranedId& craned_id : task->CranedIds()) {
             stub = g_craned_keeper->GetCranedStub(craned_id);
             if (stub != nullptr && !stub->Invalid())
               stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
@@ -310,7 +310,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
-  for (CranedId craned_id : task->CranedIds()) {
+  for (const CranedId& craned_id : task->CranedIds()) {
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                              task->resources);
     m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
@@ -407,7 +407,7 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       absl::BlockingCounter bl(craned_cgroup_map.size());
-      for (auto const iter : craned_cgroup_map) {
+      for (auto const& iter : craned_cgroup_map) {
         CranedId const& craned_id = iter.first;
         auto const& task_uid_pairs = iter.second;
         g_thread_pool->push_task([=, &bl]() {
@@ -451,7 +451,7 @@ void TaskScheduler::ScheduleThread_() {
         m_running_task_map_mtx_.Lock();
         m_task_indexes_mtx_.Lock();
 
-        for (CranedId craned_id : task->CranedIds()) {
+        for (const CranedId& craned_id : task->CranedIds()) {
           m_node_to_tasks_map_[craned_id].emplace(task_ptr->TaskId());
         }
         m_running_task_map_.emplace(task->TaskId(), std::move(task));
@@ -1129,13 +1129,20 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     const NodeSelectionInfo& node_selection_info,
     const PartitionMeta& partition_metas,
     const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
-    const TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
+    TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
     absl::Time* start_time) {
   uint32_t selected_node_cnt = 0;
   std::vector<TimeSegment> intersected_time_segments;
   bool first_pass{true};
 
   std::list<CranedId> craned_indexes_;
+
+  std::unordered_set<std::string> nodelist_set(
+      task->TaskToCtld().nodelist().begin(),
+      task->TaskToCtld().nodelist().end());
+  std::unordered_set<std::string> excludes_set(
+      task->TaskToCtld().excludes().begin(),
+      task->TaskToCtld().excludes().end());
 
   auto task_num_node_id_it = node_selection_info.task_num_node_id_map.begin();
   while (selected_node_cnt < task->node_num &&
@@ -1147,7 +1154,6 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       ++task_num_node_id_it;
       continue;
     }
-
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_index);
     auto& craned_meta = craned_meta_map.at(craned_index);
@@ -1158,6 +1164,20 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
             "Task #{} needs more resource than that of craned {}. "
             "Skipping this craned.",
             task->TaskId(), craned_index);
+      }
+    } else if (!task->TaskToCtld().nodelist().empty() &&
+               !nodelist_set.contains(craned_index)) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "Craned {} is not in the nodelist of task #{}. "
+            "Skipping this craned.",
+            craned_index, task->TaskId());
+      }
+    } else if (!task->TaskToCtld().excludes().empty() &&
+               excludes_set.contains(craned_index)) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE("Task #{} excludes craned {}. Skipping this craned.",
+                    task->TaskId(), craned_index);
       }
     } else {
       craned_indexes_.emplace_back(craned_index);
@@ -1741,7 +1761,7 @@ CraneErr TaskScheduler::CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task) {
   return CraneErr::kOk;
 }
 
-void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
+void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id) {
   CRANE_TRACE("Terminate tasks on craned {}", craned_id);
 
   // The order of LockGuards matters.
@@ -1766,6 +1786,211 @@ void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
 }
 
 }  // namespace Ctld
+
+std::list<task_id_t> Priority::GetTaskIdList(
+    const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
+        pending_task_map,
+    const absl::flat_hash_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>&
+        running_task_map_) {
+  std::list<task_id_t> task_id_list;
+  g_priority->MaxMinInit(pending_task_map, &running_task_map_);
+  std::vector<std::pair<task_id_t, uint32_t>> task_priority_list;
+  for (const auto& [task_id, task] : *pending_task_map) {
+    uint32_t priority = g_priority->CalculatePriority(task.get());
+    task_priority_list.push_back({task->TaskId(), priority});
+  }
+  std::sort(task_priority_list.begin(), task_priority_list.end(),
+            [](const std::pair<task_id_t, uint32_t>& a,
+               const std::pair<task_id_t, uint32_t>& b) {
+              return a.second > b.second;
+            });
+  for (auto& pair : task_priority_list) {
+    task_id_list.push_back(pair.first);
+  }
+  return task_id_list;
+}
+
+void Priority::MaxMinInit(
+    const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
+        pending_task_map,
+    const absl::flat_hash_map<uint32_t, std::unique_ptr<Ctld::TaskInCtld>>*
+        m_running_task_map_) {
+  // Initialize the values of each max and min
+
+  this->age_max = 0, this->age_min = UINT64_MAX;
+  this->qos_priority_max = 0, this->qos_priority_min = UINT32_MAX;
+  this->part_priority_max = 0, this->part_priority_min = UINT32_MAX;
+  this->nodes_alloc_max = 0, this->nodes_alloc_min = UINT32_MAX;
+  this->mem_alloc_max = 0, this->mem_alloc_min = UINT64_MAX;
+  this->cpus_alloc_max = 0, this->cpus_alloc_min = DBL_MAX;
+  this->service_val_max = 0, this->service_val_min = UINT32_MAX;
+
+  for (auto iter = pending_task_map->begin(); iter != pending_task_map->end();
+       iter++) {
+    uint64_t age =
+        ToUnixSeconds(absl::Now()) - iter->second->SubmitTimeInUnixSecond();
+    age = age > g_config.PriorityConfig.MaxAge ? g_config.PriorityConfig.MaxAge
+                                               : age;
+    if (age < this->age_min) this->age_min = age;
+    if (age > this->age_max) this->age_max = age;
+
+    uint32_t nodes_alloc = iter->second->node_num;
+    if (nodes_alloc < this->nodes_alloc_min)
+      this->nodes_alloc_min = nodes_alloc;
+    if (nodes_alloc > this->nodes_alloc_max)
+      this->nodes_alloc_max = nodes_alloc;
+
+    uint64_t mem_alloc =
+        iter->second->resources.allocatable_resource.memory_bytes;
+    if (mem_alloc < this->mem_alloc_min) this->mem_alloc_min = mem_alloc;
+    if (mem_alloc > this->mem_alloc_max) this->mem_alloc_max = mem_alloc;
+
+    double cpus_alloc = iter->second->resources.allocatable_resource.cpu_count;
+    if (cpus_alloc < this->cpus_alloc_min) this->cpus_alloc_min = cpus_alloc;
+    if (cpus_alloc > this->cpus_alloc_max) this->cpus_alloc_max = cpus_alloc;
+  }
+
+  Ctld::AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
+      g_account_manager->GetAllQosInfo();
+  for (const auto& [name, qos] : *qos_map_shared_ptr) {
+    if (!qos->deleted) {
+      if (qos->priority < this->qos_priority_min)
+        this->qos_priority_min = qos->priority;
+      if (qos->priority > this->qos_priority_max)
+        this->qos_priority_max = qos->priority;
+    }
+  }
+
+  for (const auto& [part_id, part] : g_config.Partitions) {
+    if (part.priority < this->part_priority_min)
+      this->part_priority_min = part.priority;
+    if (part.priority > this->part_priority_max)
+      this->part_priority_max = part.priority;
+  }
+  this->acc_service_val_map.clear();
+  for (const auto& [task_id, r_task] : *m_running_task_map_) {
+    uint32_t service_val = 0;
+    if (this->cpus_alloc_max != this->cpus_alloc_min) {
+      service_val += 1.0 *
+                     (r_task->resources.allocatable_resource.cpu_count -
+                      this->cpus_alloc_min) /
+                     (this->cpus_alloc_max - this->cpus_alloc_min);
+    } else {
+      service_val += 1.0;
+    }
+    if (this->nodes_alloc_max != this->nodes_alloc_min) {
+      service_val += 1.0 * (r_task->node_num - this->nodes_alloc_min) /
+                     (this->nodes_alloc_max - this->nodes_alloc_min);
+    } else {
+      service_val += 1.0;
+    }
+    if (this->mem_alloc_max != this->mem_alloc_min) {
+      service_val += 1.0 *
+                     (r_task->resources.allocatable_resource.memory_bytes -
+                      this->mem_alloc_min) /
+                     (this->mem_alloc_max - this->mem_alloc_min);
+    } else {
+      service_val += 1.0;
+    }
+    auto run_time =
+        ToUnixSeconds(absl::Now()) - r_task->StartTimeInUnixSecond();
+    service_val *= run_time;
+    if (this->acc_service_val_map.find(r_task->account) ==
+        this->acc_service_val_map.end()) {
+      this->acc_service_val_map.emplace(r_task->account, 0);
+    }
+    auto iter = this->acc_service_val_map.find(r_task->account);
+    iter->second += service_val;
+  }
+
+  for (const auto& [acc_name, ser_val] : this->acc_service_val_map) {
+    if (ser_val < this->service_val_min) this->service_val_min = ser_val;
+    if (ser_val > this->service_val_max) this->service_val_max = ser_val;
+  }
+}
+
+uint32_t Priority::CalculatePriority(Ctld::TaskInCtld* task) {
+  uint64_t task_age =
+      ToUnixSeconds(absl::Now()) - task->SubmitTimeInUnixSecond();
+  task_age = task_age > g_config.PriorityConfig.MaxAge
+                 ? g_config.PriorityConfig.MaxAge
+                 : task_age;
+
+  Ctld::AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
+      g_account_manager->GetAllQosInfo();
+  const auto it_qos = qos_map_shared_ptr->find(task->qos);
+  uint32_t task_qos_priority = it_qos->second->priority;
+
+  const auto it_partition = g_config.Partitions.find(task->partition_id);
+  uint32_t task_part_priority = it_partition->second.priority;
+
+  uint32_t task_nodes_alloc = task->node_num;
+  uint64_t task_mem_alloc = task->resources.allocatable_resource.memory_bytes;
+  double task_cpus_alloc = task->resources.allocatable_resource.cpu_count;
+  uint32_t task_service_val =
+      this->acc_service_val_map.find(task->account)->second;
+
+  // age_factor
+  if (this->age_max != this->age_min)
+    this->age_factor =
+        1.0 * (task_age - this->age_min) / (this->age_max - this->age_min);
+  else
+    this->age_factor = 0;
+
+  // qos_factor
+  if (this->qos_priority_min != this->qos_priority_max)
+    this->qos_factor = 1.0 * (task_qos_priority - this->qos_priority_min) /
+                       (this->qos_priority_max - this->qos_priority_min);
+  else
+    this->qos_factor = 0;
+
+  // partition_factor
+  if (this->part_priority_max != this->part_priority_min)
+    this->partition_factor =
+        1.0 * (task_part_priority - this->part_priority_min) /
+        (this->part_priority_max - this->part_priority_min);
+  else
+    this->partition_factor = 0;
+
+  // job_size_factor
+  this->job_size_factor = 0;
+  if (this->cpus_alloc_max != this->cpus_alloc_min)
+    this->job_size_factor += 1.0 * (task_cpus_alloc - this->cpus_alloc_min) /
+                             (this->cpus_alloc_max - this->cpus_alloc_min);
+  if (this->nodes_alloc_max != this->nodes_alloc_min)
+    this->job_size_factor += 1.0 * (task_nodes_alloc - this->nodes_alloc_min) /
+                             (this->nodes_alloc_max - this->nodes_alloc_min);
+  if (this->mem_alloc_max != this->mem_alloc_min)
+    this->job_size_factor += 1.0 * (task_mem_alloc - this->mem_alloc_min) /
+                             (this->mem_alloc_max - this->mem_alloc_min);
+  if (g_config.PriorityConfig.FavorSmall)
+    this->job_size_factor = 1 - this->job_size_factor / 3;
+  else
+    this->job_size_factor /= 3;
+
+  // fair_share_factor
+  if (this->service_val_max != this->service_val_min) {
+    this->fair_share_factor =
+        1.0 - (task_service_val - this->service_val_min) /
+                  (this->service_val_max - this->service_val_min);
+  } else {
+    this->fair_share_factor = 0;
+  }
+
+  // assoc_factor
+  this->assoc_factor = 0;
+
+  // priority
+  uint32_t priority =
+      g_config.PriorityConfig.WeightAge * this->age_factor +
+      g_config.PriorityConfig.WeightPartition * this->partition_factor +
+      g_config.PriorityConfig.WeightJobSize * this->job_size_factor +
+      g_config.PriorityConfig.WeightFairShare * this->fair_share_factor +
+      g_config.PriorityConfig.WeightAssoc * this->assoc_factor +
+      g_config.PriorityConfig.WeightQOS * this->qos_factor;
+  task->priority = priority;
+  return priority;
+}
 
 std::list<task_id_t> Priority::GetOrderedTaskIdList(
     const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*

@@ -81,6 +81,9 @@ message TaskToCtld {
   string cmd_line = 31;
   string cwd = 32; // Current working directory
   string env = 33;
+
+  repeated string excludes = 34;
+  repeated string nodelist = 35;
 }
 
 message TaskInEmbeddedDb {
@@ -119,6 +122,7 @@ message TaskToD {
   google.protobuf.Timestamp start_time = 5; // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 6;
 
+  string partition = 8;
   uint32 uid = 9;
 
   oneof payload {
@@ -132,10 +136,15 @@ message TaskToD {
   repeated string allocated_nodes = 14;
 
   string name = 15;
+  string account = 16;
+  string qos = 17;
+
+  repeated string excludes = 19;
+  repeated string nodelist = 20;
 
   uint32 node_num = 21;
   uint32 ntasks_per_node = 22;
-  uint32 cpus_per_task = 23;
+  double cpus_per_task = 23;
 }
 
 message BatchTaskAdditionalMeta {
