@@ -43,16 +43,35 @@ bool operator==(const AllocatableResource& lhs,
 }
 
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs){
-  return lhs.nvidia_graphics_card<=rhs.nvidia_graphics_card &&
-    rhs.nvidia_graphics_card == (rhs.nvidia_graphics_card & lhs.nvidia_graphics_card);
+  for(auto& it :lhs.devices){
+    auto& lhs_bitmap = it.second;
+    auto& rhs_bitmap = rhs.devices.at(it.first);
+    if((lhs_bitmap&rhs_bitmap)!=lhs_bitmap || rhs_bitmap>rhs_bitmap){
+      return false;
+    }//1->free,lhs&rhs==lhs
+  }
+  return true;
 }
 bool operator<(const DedicatedResource& lhs, const DedicatedResource& rhs){
-  return lhs.nvidia_graphics_card < rhs.nvidia_graphics_card &&
-    rhs.nvidia_graphics_card == (rhs.nvidia_graphics_card & lhs.nvidia_graphics_card);
+  for(auto& it :lhs.devices){
+    auto& lhs_bitmap = it.second;
+    auto& rhs_bitmap = rhs.devices.at(it.first);
+    if((lhs_bitmap&rhs_bitmap)!=lhs_bitmap || rhs_bitmap>=rhs_bitmap){
+      return false;
+    }//1->free,lhs&rhs==lhs
+  }
+  return true;
 }
 
 bool operator==(const DedicatedResource& lhs,const DedicatedResource& rhs){
-  return lhs.nvidia_graphics_card==rhs.nvidia_graphics_card;
+  for(auto& it :lhs.devices){
+    auto& lhs_bitmap = it.second;
+    auto& rhs_bitmap = rhs.devices.at(it.first);
+    if(lhs_bitmap!=rhs_bitmap){
+      return false;
+    }
+  }
+  return true;
 }
 
 AllocatableResource::AllocatableResource(
@@ -91,22 +110,36 @@ Resources& Resources::operator-=(const AllocatableResource& rhs) {
 }
 
 bool operator<=(const Resources& lhs, const Resources& rhs) {
-  return lhs.allocatable_resource <= rhs.allocatable_resource && lhs.delicated_resource <= rhs.delicated_resource;
+  return lhs.allocatable_resource <= rhs.allocatable_resource && lhs.dedicated_resource <= rhs.dedicated_resource;
 }
 
 bool operator<(const Resources& lhs, const Resources& rhs) {
-  return lhs.allocatable_resource < rhs.allocatable_resource && lhs.delicated_resource < rhs.delicated_resource;
+  return lhs.allocatable_resource < rhs.allocatable_resource && lhs.dedicated_resource < rhs.dedicated_resource;
 }
 
 bool operator==(const Resources& lhs, const Resources& rhs) {
-  return lhs.allocatable_resource == rhs.allocatable_resource && lhs.delicated_resource == rhs.delicated_resource;
+  return lhs.allocatable_resource == rhs.allocatable_resource && lhs.dedicated_resource == rhs.dedicated_resource;
 }
 
 DedicatedResource& DedicatedResource::operator+=(const DedicatedResource& rhs){
-  this->nvidia_graphics_card += rhs.nvidia_graphics_card;
+  for(auto& it :this->devices){
+    auto& lhs_bitmap = it.second;
+    auto& rhs_bitmap = rhs.devices.at(it.first);
+    lhs_bitmap |=rhs_bitmap;
+  }
   return *this;
 }
+
 DedicatedResource& DedicatedResource::operator-=(const DedicatedResource& rhs){
-  this->nvidia_graphics_card -= rhs.nvidia_graphics_card;
+  for(auto& it :this->devices){
+    auto& lhs_bitmap = it.second;
+    auto& rhs_bitmap = rhs.devices.at(it.first);
+    lhs_bitmap &=rhs_bitmap;
+  }
+  return *this;
+}
+
+DedicatedResource& DedicatedResource::AddResource(std::string device_name,uint64_t bitmap){
+  this->devices[device_name]|=bitmap;
   return *this;
 }

@@ -1,9 +1,13 @@
 #pragma once
 
+#include <array>
+#include <unordered_map>
+
 #include "protos/Crane.pb.h"
 
 using task_id_t = uint32_t;
 
+struct DedicatedResource;
 enum class CraneErr : uint16_t {
   kOk = 0,
   kGenericFailure,
@@ -141,10 +145,15 @@ bool operator==(const AllocatableResource& lhs, const AllocatableResource& rhs);
  * It contains GPU, NIC, etc.
  */
 struct DedicatedResource {
-  //free->1 bitmap
-  uint64_t nvidia_graphics_card;
-  
+  enum class DeviceType : uint64_t {
+    NVIDIA_GRAPHICS_CARD = 0,
+
+    DeviceCount
+  };
+  //<GresType,DeviceBitMap>
+  std::unordered_map<std::string,uint64_t> devices;
   DedicatedResource() = default;
+  DedicatedResource& AddResource(std::string device_name,uint64_t bitmap);
   DedicatedResource& operator+=(const DedicatedResource& rhs);
   DedicatedResource& operator-=(const DedicatedResource& rhs);
 
@@ -161,7 +170,7 @@ bool operator==(const DedicatedResource& lhs,const DedicatedResource& rhs);
  */
 struct Resources {
   AllocatableResource allocatable_resource;
-  DedicatedResource delicated_resource;
+  DedicatedResource dedicated_resource;
 
   Resources() = default;
 

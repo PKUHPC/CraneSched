@@ -22,7 +22,7 @@ message AllocatableResource {
 
 
 message DedicatedResource {
-  uint64 nvidia_graphics_card = 1;
+  map <string,uint64> devices=1;
 }
 
 message Resources {

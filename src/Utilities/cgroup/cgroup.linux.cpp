@@ -247,6 +247,15 @@ std::shared_ptr<Cgroup> CgroupUtil::CreateOrOpen(
   return std::make_unique<Cgroup>(cgroup_string, native_cgroup);
 }
 
+DedicatedResource::DeviceType CgroupUtil::getDeviceType(std::string device_name){
+  if (device_name.starts_with("gpu"))
+  {
+    return DedicatedResource::DeviceType::NVIDIA_GRAPHICS_CARD;
+  }else{
+    return DedicatedResource::DeviceType::DeviceCount;
+  }
+}
+
 bool Cgroup::MigrateProcIn(pid_t pid) {
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;
@@ -488,7 +497,7 @@ bool Cgroup::SetBlockioWeight(uint64_t weight) {
                             weight);
 }
 
-bool Cgroup::SetDeviceLimit(CgroupConstant::DeviceType device_type,const uint64_t alloc_bitmap,bool allow,bool read,bool write,bool mknod){
+bool Cgroup::SetDeviceLimit(DedicatedResource::DeviceType device_type,const uint64_t alloc_bitmap,bool allow,bool read,bool write,bool mknod){
   std::string limitStr;
   std::string op;
   if (read) {
@@ -517,7 +526,7 @@ bool Cgroup::SetDeviceLimit(CgroupConstant::DeviceType device_type,const uint64_
                               limitStr);
 }
 
-bool Cgroup::SetDeviceDeny(CgroupConstant::DeviceType device_type,const uint64_t alloc_bitmap){
+bool Cgroup::SetDeviceDeny(DedicatedResource::DeviceType device_type,const uint64_t alloc_bitmap){
   return SetDeviceLimit(device_type,alloc_bitmap,false,true,true,true);
 }
 

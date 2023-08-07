@@ -58,12 +58,6 @@ enum class ControllerFile : uint64_t {
   ControllerFileCount
 };
 
-enum class DeviceType : uint64_t {
-  NVIDIA_GRAPHICS_CARD = 0,
-
-  DeviceCount
-};
-
 namespace Internal {
 
 constexpr std::array<std::string_view,
@@ -90,13 +84,13 @@ constexpr std::array<std::string_view,
     };
 
 constexpr std::array<uint64_t,
-                     static_cast<size_t>(DeviceType::DeviceCount)>
+                     static_cast<size_t>(DedicatedResource::DeviceType::DeviceCount)>
     DeviceMajor{
         195,
     };
 
 constexpr std::array<char,
-                     static_cast<size_t>(DeviceType::DeviceCount)>
+                     static_cast<size_t>(DedicatedResource::DeviceType::DeviceCount)>
     DeviceOpType{
         'c',
     };
@@ -112,11 +106,11 @@ constexpr std::string_view GetControllerFileStringView(
       controller_file)];
 }
 
-constexpr uint64_t GetDeviceMajor(DeviceType Device_type){
+constexpr uint64_t GetDeviceMajor(DedicatedResource::DeviceType Device_type){
   return Internal::DeviceMajor[static_cast<uint64_t>(Device_type)];
 }
 
-constexpr char GetDeviceOpType(DeviceType Device_type){
+constexpr char GetDeviceOpType(DedicatedResource::DeviceType Device_type){
   return Internal::DeviceOpType[static_cast<uint64_t>(Device_type)];
 }
 
@@ -231,8 +225,8 @@ class Cgroup {
   bool SetMemorySwLimitBytes(uint64_t mem_bytes);
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes);
   bool SetBlockioWeight(uint64_t weight);
-  bool SetDeviceLimit(CgroupConstant::DeviceType device_type,const uint64_t alloc_bitmap,bool allow,bool read,bool write,bool mknod);
-  bool SetDeviceDeny(CgroupConstant::DeviceType device_type,const uint64_t alloc_bitmap);
+  bool SetDeviceLimit(DedicatedResource::DeviceType device_type,const uint64_t alloc_bitmap,bool allow,bool read,bool write,bool mknod);
+  bool SetDeviceDeny(DedicatedResource::DeviceType device_type,const uint64_t alloc_bitmap);
   bool SetControllerValue(CgroupConstant::Controller controller,
                           CgroupConstant::ControllerFile controller_file,
                           uint64_t value);
@@ -264,6 +258,7 @@ class CgroupUtil {
       const std::string &cgroup_string, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
+  static DedicatedResource::DeviceType getDeviceType(std::string device_name);
  private:
   static int initialize_controller(struct cgroup &cgroup,
                                    CgroupConstant::Controller controller,

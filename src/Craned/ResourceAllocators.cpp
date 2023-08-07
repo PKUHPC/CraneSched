@@ -29,10 +29,22 @@ bool AllocatableResourceAllocator::Allocate(
 }
 
 bool DedicatedResourceAllocator::Allocate(const DedicatedResource& resource, util::Cgroup* cg){
-  return cg->SetDeviceDeny(util::CgroupConstant::DeviceType::NVIDIA_GRAPHICS_CARD,resource.nvidia_graphics_card);
+  for(auto& it:resource.devices){
+    if(!cg->SetDeviceDeny(DedicatedResource::DeviceType(util::CgroupUtil::getDeviceType(it.first)),it.second)){
+      return false;
+    }
+  }
+  return true;
 }
+
 bool DedicatedResourceAllocator::Allocate(const crane::grpc::DedicatedResource& resource,
                         util::Cgroup* cg){
-  return cg->SetDeviceDeny(util::CgroupConstant::DeviceType::NVIDIA_GRAPHICS_CARD,resource.nvidia_graphics_card());
-                        }
+  for(auto& it:resource.devices()){
+    if(!cg->SetDeviceDeny(DedicatedResource::DeviceType(util::CgroupUtil::getDeviceType(it.first)),it.second)){
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace Craned
