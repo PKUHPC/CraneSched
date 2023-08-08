@@ -677,7 +677,7 @@ CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   // Simply wrap the Task structure within a TaskInstance structure and
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
-  instance->task = std::move(task);
+  instance->task = task;
 
   m_grpc_execute_task_queue_.enqueue(std::move(instance));
   event_active(m_ev_grpc_execute_task_, 0, 0);

@@ -94,7 +94,7 @@ class CranedMetaContainerSimpleImpl final
   crane::grpc::QueryPartitionInfoReply QueryPartitionInfo(
       const std::string& partition_name) override;
 
-  virtual crane::grpc::QueryClusterInfoReply QueryClusterInfo(
+  crane::grpc::QueryClusterInfoReply QueryClusterInfo(
       const crane::grpc::QueryClusterInfoRequest& request) override;
 
   void CranedUp(const CranedId& craned_id) override;
