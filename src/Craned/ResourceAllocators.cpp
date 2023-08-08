@@ -30,7 +30,7 @@ bool AllocatableResourceAllocator::Allocate(
 
 bool DedicatedResourceAllocator::Allocate(const DedicatedResource& resource, util::Cgroup* cg){
   for(auto& it:resource.devices){
-    if(!cg->SetDeviceDeny(DedicatedResource::DeviceType(util::CgroupUtil::getDeviceType(it.first)),it.second)){
+    if(!cg->SetDeviceDeny(util::CgroupUtil::getDeviceType(it.first)),it.second){
       return false;
     }
   }
@@ -40,7 +40,7 @@ bool DedicatedResourceAllocator::Allocate(const DedicatedResource& resource, uti
 bool DedicatedResourceAllocator::Allocate(const crane::grpc::DedicatedResource& resource,
                         util::Cgroup* cg){
   for(auto& it:resource.devices()){
-    if(!cg->SetDeviceDeny(DedicatedResource::DeviceType(util::CgroupUtil::getDeviceType(it.first)),it.second)){
+    if(!cg->SetDeviceDeny(util::CgroupUtil::getDeviceType(it.first),it.second)){
       return false;
     }
   }
