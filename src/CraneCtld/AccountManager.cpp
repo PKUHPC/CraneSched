@@ -1,5 +1,7 @@
 #include "AccountManager.h"
 
+#include <google/protobuf/util/time_util.h>
+
 #include "crane/PasswordEntry.h"
 
 namespace Ctld {
@@ -776,9 +778,9 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
     return result::fail(fmt::format("Unknown QOS '{}'", task->qos));
   }
 
-  if (task->time_limit == absl::ZeroDuration()) {
+  if (task->time_limit ==
+      absl::Seconds(google::protobuf::util::TimeUtil::kDurationMaxSeconds)) {
     task->time_limit = qos_share_ptr->max_time_limit_per_task;
-    task->no_time_limit_constraint = true;
   } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
     return result::fail("time-limit reached the user's limit.");
 

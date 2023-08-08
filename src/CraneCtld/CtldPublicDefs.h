@@ -187,7 +187,6 @@ struct TaskInCtld {
   double cpus_per_task{0.0};
 
   bool requeue_if_failed{false};
-  bool no_time_limit_constraint{false};
 
   std::string cmd_line;
   std::string env;

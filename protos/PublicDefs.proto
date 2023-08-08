@@ -176,7 +176,6 @@ message TaskInfo {
   string username = 15;
   string qos = 16;
 
-  bool no_time_limit_constraint = 17;
   // Dynamic task information
   TaskStatus status = 31;
   string craned_list = 32;
