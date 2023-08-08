@@ -147,7 +147,8 @@ struct DedicatedResource {
   enum class DeviceType : uint64_t {
     NVIDIA_GRAPHICS_CARD = 0,
 
-    DeviceCount
+    DeviceCount,
+    InvalidDevice
   };
   //<GresType,DeviceBitMap>
   std::unordered_map<std::string,uint64_t> devices;

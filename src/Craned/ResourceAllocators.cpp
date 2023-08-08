@@ -2,8 +2,8 @@
 
 namespace Craned {
 
-bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
-                                            util::Cgroup *cg) {
+bool AllocatableResourceAllocator::Allocate(const AllocatableResource& resource,
+                                            util::Cgroup* cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(resource.cpu_count);
   ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);
@@ -16,7 +16,7 @@ bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
 }
 
 bool AllocatableResourceAllocator::Allocate(
-    const crane::grpc::AllocatableResource &resource, util::Cgroup *cg) {
+    const crane::grpc::AllocatableResource& resource, util::Cgroup* cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(resource.cpu_core_limit());
   ok &= cg->SetMemoryLimitBytes(resource.memory_limit_bytes());
@@ -28,19 +28,22 @@ bool AllocatableResourceAllocator::Allocate(
   return ok;
 }
 
-bool DedicatedResourceAllocator::Allocate(const DedicatedResource& resource, util::Cgroup* cg){
-  for(auto& it:resource.devices){
-    if(!cg->SetDeviceDeny(util::CgroupUtil::getDeviceType(it.first)),it.second){
+bool DedicatedResourceAllocator::Allocate(const DedicatedResource& resource,
+                                          util::Cgroup* cg) {
+  for (auto& it : resource.devices) {
+    if (!cg->SetDeviceDeny(util::CgroupUtil::getDeviceType(it.first),
+                           it.second)) {
       return false;
     }
   }
   return true;
 }
 
-bool DedicatedResourceAllocator::Allocate(const crane::grpc::DedicatedResource& resource,
-                        util::Cgroup* cg){
-  for(auto& it:resource.devices()){
-    if(!cg->SetDeviceDeny(util::CgroupUtil::getDeviceType(it.first),it.second)){
+bool DedicatedResourceAllocator::Allocate(
+    const crane::grpc::DedicatedResource& resource, util::Cgroup* cg) {
+  for (auto& it : resource.devices()) {
+    if (!cg->SetDeviceDeny(util::CgroupUtil::getDeviceType(it.first),
+                           it.second)) {
       return false;
     }
   }

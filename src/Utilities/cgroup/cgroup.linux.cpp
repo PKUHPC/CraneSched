@@ -247,12 +247,12 @@ std::shared_ptr<Cgroup> CgroupUtil::CreateOrOpen(
   return std::make_unique<Cgroup>(cgroup_string, native_cgroup);
 }
 
-DedicatedResource::DeviceType CgroupUtil::getDeviceType(std::string device_name){
+DedicatedResource::DeviceType CgroupUtil::getDeviceType(const std::string& device_name){
   if (device_name.starts_with("gpu"))
   {
     return DedicatedResource::DeviceType::NVIDIA_GRAPHICS_CARD;
   }else{
-    return DedicatedResource::DeviceType::DeviceCount;
+    return DedicatedResource::DeviceType::InvalidDevice;
   }
 }
 
@@ -497,37 +497,34 @@ bool Cgroup::SetBlockioWeight(uint64_t weight) {
                             weight);
 }
 
-bool Cgroup::SetDeviceLimit(DedicatedResource::DeviceType device_type,const uint64_t alloc_bitmap,bool allow,bool read,bool write,bool mknod){
+bool Cgroup::SetDeviceLimit(DedicatedResource::DeviceType device_type,uint64_t alloc_bitmap,bool allow,bool read,bool write,bool mknod){
   std::string limitStr;
   std::string op;
-  if (read) {
-    op += "r";
-  }
-  if (write) {
-    op += "w";
-  }
-  if (mknod) {
-    op += "m";
-  }
+  if (!read)  op += "r";
+  if (!write) op += "w";
+  if (!mknod) op += "m";
   char device_op_type = CgroupConstant::GetDeviceOpType(device_type);
+  //example: "c 195:0 rwm" write to DEVICES_DENY 
+  //will forbid process from accessing /dev/nvidia0
   const std::string limit = fmt::format("{} {}:",device_op_type,CgroupConstant::GetDeviceMajor(device_type));
   if(alloc_bitmap==0xffffffff){
     limitStr=fmt::format("{}{} {}",limit,'*',op);
   }else{
+    std::vector<std::string> limits(64);
     for(int i = 0;i<64;++i){
     if(alloc_bitmap>>i & 1){
-      limitStr+=fmt::format("{}{} {},",limit,i,op);
+      limits[i]=fmt::format("{}{} {}",limit,i,op);
       }
     }
-    limitStr.pop_back();
+    limitStr=absl::StrJoin(limits,",");
   }
   return SetControllerStr(CgroupConstant::Controller::DEVICES_CONTROLLER,
                               allow? CgroupConstant::ControllerFile::DEVICES_ALLOW : CgroupConstant::ControllerFile::DEVICES_DENY,
                               limitStr);
 }
 
-bool Cgroup::SetDeviceDeny(DedicatedResource::DeviceType device_type,const uint64_t alloc_bitmap){
-  return SetDeviceLimit(device_type,alloc_bitmap,false,true,true,true);
+bool Cgroup::SetDeviceDeny(DedicatedResource::DeviceType device_type,uint64_t alloc_bitmap){
+  return SetDeviceLimit(device_type,alloc_bitmap,false,false,false,false);
 }
 
 bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,

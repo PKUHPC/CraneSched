@@ -9,6 +9,7 @@
 #pragma once
 
 #include <absl/container/flat_hash_map.h>
+#include <absl/strings/str_join.h>
 #include <absl/synchronization/mutex.h>
 #include <libcgroup.h>
 #include <pthread.h>
@@ -83,14 +84,16 @@ constexpr std::array<std::string_view,
         "devices.allow",
     };
 
-constexpr std::array<uint64_t,
-                     static_cast<size_t>(DedicatedResource::DeviceType::DeviceCount)>
+constexpr std::array<uint64_t, static_cast<size_t>(
+                                   DedicatedResource::DeviceType::DeviceCount)>
+    // from Linux Device List, the official registry of allocated device numbers
+    // https://www.kernel.org/doc/html/latest/admin-guide/devices.html
     DeviceMajor{
-        195,
+        195,  // Nvidia graphics devices
     };
 
-constexpr std::array<char,
-                     static_cast<size_t>(DedicatedResource::DeviceType::DeviceCount)>
+constexpr std::array<char, static_cast<size_t>(
+                               DedicatedResource::DeviceType::DeviceCount)>
     DeviceOpType{
         'c',
     };
@@ -106,11 +109,11 @@ constexpr std::string_view GetControllerFileStringView(
       controller_file)];
 }
 
-constexpr uint64_t GetDeviceMajor(DedicatedResource::DeviceType Device_type){
+constexpr uint64_t GetDeviceMajor(DedicatedResource::DeviceType Device_type) {
   return Internal::DeviceMajor[static_cast<uint64_t>(Device_type)];
 }
 
-constexpr char GetDeviceOpType(DedicatedResource::DeviceType Device_type){
+constexpr char GetDeviceOpType(DedicatedResource::DeviceType Device_type) {
   return Internal::DeviceOpType[static_cast<uint64_t>(Device_type)];
 }
 
@@ -225,8 +228,11 @@ class Cgroup {
   bool SetMemorySwLimitBytes(uint64_t mem_bytes);
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes);
   bool SetBlockioWeight(uint64_t weight);
-  bool SetDeviceLimit(DedicatedResource::DeviceType device_type,const uint64_t alloc_bitmap,bool allow,bool read,bool write,bool mknod);
-  bool SetDeviceDeny(DedicatedResource::DeviceType device_type,const uint64_t alloc_bitmap);
+  bool SetDeviceLimit(DedicatedResource::DeviceType device_type,
+                      const uint64_t alloc_bitmap, bool allow, bool read,
+                      bool write, bool mknod);
+  bool SetDeviceDeny(DedicatedResource::DeviceType device_type,
+                     const uint64_t alloc_bitmap);
   bool SetControllerValue(CgroupConstant::Controller controller,
                           CgroupConstant::ControllerFile controller_file,
                           uint64_t value);
@@ -251,14 +257,16 @@ class CgroupUtil {
   static int Init();
 
   static bool Mounted(CgroupConstant::Controller controller) {
-    return bool(m_mounted_controllers_ &ControllerFlags{controller});
+    return bool(m_mounted_controllers_ & ControllerFlags{controller});
   }
 
   static std::shared_ptr<Cgroup> CreateOrOpen(
       const std::string &cgroup_string, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
-  static DedicatedResource::DeviceType getDeviceType(std::string device_name);
+  static DedicatedResource::DeviceType getDeviceType(
+      const std::string &device_name);
+
  private:
   static int initialize_controller(struct cgroup &cgroup,
                                    CgroupConstant::Controller controller,

@@ -4,8 +4,8 @@
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
-#include <bit>
 
+#include <bit>
 
 #include "ResourceAllocators.h"
 #include "crane/FdFunctions.h"
@@ -622,12 +622,15 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                                             .memory_limit_bytes() /
                                         (1024 * 1024)));
     env_vec.emplace_back("CRANE_JOB_ID",
-                         std::to_string(instance->task.task_id()));;
-    for (const auto& resource:instance->task.resources().dedicated_resource().devices())
-    {
-      if(util::CgroupUtil::getDeviceType(resource.first)==DedicatedResource::DeviceType::NVIDIA_GRAPHICS_CARD){
+                         std::to_string(instance->task.task_id()));
+    ;
+    for (const auto& resource :
+         instance->task.resources().dedicated_resource().devices()) {
+      if (util::CgroupUtil::getDeviceType(resource.first) ==
+          DedicatedResource::DeviceType::NVIDIA_GRAPHICS_CARD) {
         env_vec.emplace_back("CUDA_VISIABLE_DEVICE",
-                             util::GenerateCudaVisiableDeviceStr(std::popcount(resource.second)));
+                             util::GenerateCudaVisiableDeviceStr(
+                                 std::popcount(resource.second)));
       }
     }
     int64_t time_limit_sec = instance->task.time_limit().seconds();
@@ -760,19 +763,21 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
                 instance->task.task_id()));
         return;
       }
-      
-      if(!DedicatedResourceAllocator::Allocate(instance->task.resources().dedicated_resource(), instance->cgroup)){
-          CRANE_ERROR(
-          "Failed to allocate dedicated resource in cgroup for task #{}",
-          instance->task.task_id());
-      this_->EvActivateTaskStatusChange_(
-          instance->task.task_id(), crane::grpc::TaskStatus::Failed,
-          ExitCode::kExitCodeCgroupError,
-          fmt::format(
-              "Cannot dedicated resources for the instance of task #{}",
-              instance->task.task_id()));
-      return;
-      }  
+
+      if (!DedicatedResourceAllocator::Allocate(
+              instance->task.resources().dedicated_resource(),
+              instance->cgroup)) {
+        CRANE_ERROR(
+            "Failed to allocate dedicated resource in cgroup for task #{}",
+            instance->task.task_id());
+        this_->EvActivateTaskStatusChange_(
+            instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+            ExitCode::kExitCodeCgroupError,
+            fmt::format(
+                "Cannot dedicated resources for the instance of task #{}",
+                instance->task.task_id()));
+        return;
+      }
 
       // If this is a batch task, run it now.
       if (instance->task.type() == crane::grpc::Batch) {
