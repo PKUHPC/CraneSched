@@ -7,7 +7,6 @@
 
 using task_id_t = uint32_t;
 
-struct DedicatedResource;
 enum class CraneErr : uint16_t {
   kOk = 0,
   kGenericFailure,
