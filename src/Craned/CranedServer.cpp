@@ -36,7 +36,7 @@ Status CranedServiceImpl::SrunXStream(
   // A task id is bound to one connection.
   uint32_t task_id;
   // A resource uuid is bound to one task.
-  uuid resource_uuid;
+  uuid resource_uuid{};
 
   StreamState state = StreamState::kNegotiation;
   while (true) {

@@ -187,14 +187,6 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
       delimiter_pos++;
     }
     host_name_str += iter.first.substr(0, delimiter_pos);  // head
-
-    if (iter.second.size() <= 1) {  // Special handling for sizes 0 and 1
-      iter.second.emplace_back("");
-      host_name_str += iter.second.front();
-      res_list->emplace_back(host_name_str);
-      continue;
-    }
-
     host_name_str += "[";
 
     std::sort(iter.second.begin(), iter.second.end(),
@@ -290,6 +282,28 @@ std::string GenerateCudaVisiableDeviceStr(const uint64_t count){
   }
   retVal.pop_back();
   return retVal;
+}
+
+std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
+  std::string output = input;
+  std::size_t leftBracketPos = 0;
+  while ((leftBracketPos = output.find('[', leftBracketPos)) !=
+         std::string::npos) {
+    std::size_t rightBracketPos = output.find(']', leftBracketPos);
+    if (rightBracketPos == std::string::npos) {
+      break;
+    }
+    std::string betweenBrackets =
+        output.substr(leftBracketPos + 1, rightBracketPos - leftBracketPos - 1);
+    if (betweenBrackets.find('-') == std::string::npos &&
+        betweenBrackets.find(',') == std::string::npos) {
+      output.erase(rightBracketPos, 1);
+      output.erase(leftBracketPos, 1);
+    } else {
+      leftBracketPos = rightBracketPos + 1;
+    }
+  }
+  return output;
 }
 
 }  // namespace util

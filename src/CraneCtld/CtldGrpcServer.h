@@ -95,7 +95,8 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
-  bool WriteCforedRegistrationAck(result::result<void, std::string> res) {
+  bool WriteCforedRegistrationAck(
+      const result::result<void, std::string> &res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
