@@ -1773,46 +1773,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   // Check whether the selected partition is able to run this task.
   auto metas_ptr = g_meta_container->GetPartitionMetasPtr(task->partition_id);
 
-  std::unordered_set<std::string> exclude_nodes(
-      task->TaskToCtld().excludes().begin(),
-      task->TaskToCtld().excludes().end());
-
-  std::unordered_set<std::string> req_nodes(
-      task->TaskToCtld().nodelist().begin(),
-      task->TaskToCtld().nodelist().end());
-  std::unordered_set<std::string> avail_nodes;
-
-  for (auto craned_id : metas_ptr->craned_ids) {
-    auto craned_meta_ptr = g_meta_container->GetCranedMetaPtr(craned_id);
-    if (craned_meta_ptr->alive)
-      avail_nodes.insert(craned_meta_ptr->static_meta.hostname);
-  }
-
-  if (!task->TaskToCtld().nodelist().empty()) {
-    for (auto it = avail_nodes.begin(); it != avail_nodes.end();) {
-      if (!req_nodes.contains(*it)) {
-        avail_nodes.erase(*it);
-      } else {
-        it++;
-      }
-    }
-  }
-  if (!task->TaskToCtld().excludes().empty()) {
-    for (auto it = avail_nodes.begin(); it != avail_nodes.end();) {
-      if (exclude_nodes.contains(*it)) {
-        avail_nodes.erase(*it);
-      } else {
-        it++;
-      }
-    }
-  }
-  if (task->node_num > avail_nodes.size()) {
-    CRANE_TRACE(
-        "Task #{}'s node-num {} is greater than the number of "
-        "available nodes {} in its partition. Reject it.",
-        task->TaskId(), task->node_num, avail_nodes.size());
-    return CraneErr::kInvalidNodeNum;
-  }
+  // Check whether the selected partition is able to run this task.
   if (!(task->resources <=
         metas_ptr->partition_global_meta.m_resource_total_)) {
     CRANE_TRACE(
@@ -1828,24 +1789,35 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     return CraneErr::kNoResource;
   }
 
-  auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
+  std::unordered_set<std::string> excluded_nodes(
+      task->TaskToCtld().excludes().begin(),
+      task->TaskToCtld().excludes().end());
 
-  size_t satisfied_node_cnt = 0;
-  for (CranedId const& craned_id : metas_ptr->craned_ids) {
-    CranedMeta const& craned_meta = craned_meta_map->at(craned_id);
+  std::unordered_set<std::string> included_nodes(
+      task->TaskToCtld().nodelist().begin(),
+      task->TaskToCtld().nodelist().end());
 
-    if (craned_meta.alive && task->resources <= craned_meta.res_total)
-      satisfied_node_cnt++;
+  std::unordered_set<std::string> avail_nodes;
+  {
+    auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
 
-    if (satisfied_node_cnt >= task->node_num) break;
+    for (auto craned_id : metas_ptr->craned_ids) {
+      auto craned_meta = craned_meta_map->at(craned_id);
+      if (craned_meta.alive && task->resources <= craned_meta.res_total &&
+          (included_nodes.empty() || included_nodes.contains(craned_id)) &&
+          (excluded_nodes.empty() || !excluded_nodes.contains(craned_id)))
+        avail_nodes.emplace(craned_meta.static_meta.hostname);
+
+      if (avail_nodes.size() >= task->node_num) break;
+    }
   }
 
-  if (satisfied_node_cnt < task->node_num) {
+  if (task->node_num > avail_nodes.size()) {
     CRANE_TRACE(
         "Resource not enough. Task #{} needs {} nodes, while only {} "
         "nodes satisfy its requirement.",
-        task->TaskId(), task->node_num, satisfied_node_cnt);
-    return CraneErr::kNoResource;
+        task->TaskId(), task->node_num, avail_nodes.size());
+    return CraneErr::kInvalidNodeNum;
   }
 
   return CraneErr::kOk;

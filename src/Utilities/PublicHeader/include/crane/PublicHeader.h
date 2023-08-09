@@ -1,5 +1,7 @@
 #pragma once
 
+#include <google/protobuf/util/time_util.h>
+
 #include "protos/Crane.pb.h"
 
 using task_id_t = uint32_t;
@@ -53,6 +55,9 @@ inline const char* kDefaultCranedMutexFile =
     DEFAULT_CRANE_TEMP_DIR "/craned.lock";
 
 #undef DEFAULT_CRANE_TEMP_DIR
+
+constexpr int64_t kMaxTimeLimitSecond =
+    google::protobuf::util::TimeUtil::kDurationMaxSeconds;
 
 namespace ExitCode {
 
