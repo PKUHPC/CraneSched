@@ -150,12 +150,6 @@ class EmbeddedDbClient {
 
   int Commit_(bool force = false);
 
-  // Helper functions for the queue structure in the embedded db.
-
-  static std::unordered_map<db_id_t, DbQueueNode>::const_iterator
-  FindDbQueueNodeInRamQueueNoLock_(
-      db_id_t db_id, std::unordered_map<db_id_t, DbQueueNode> const& q);
-
   // -----------
 
   // Helper functions for the queue structure in the embedded db.

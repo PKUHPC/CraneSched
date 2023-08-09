@@ -1246,6 +1246,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
                   listen_conf.CraneCtldListenPort);
 
   grpc::ServerBuilder builder;
+  builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_GZIP);
   if (listen_conf.UseTls) {
     grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
     pem_key_cert_pair.cert_chain = listen_conf.ServerCertContent;

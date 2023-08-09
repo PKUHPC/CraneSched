@@ -10,6 +10,9 @@ CtldClient::~CtldClient() {
 }
 
 void CtldClient::InitChannelAndStub(const std::string& server_address) {
+  grpc::ChannelArguments channel_args;
+  channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+
   if (g_config.ListenConf.UseTls) {
     std::string ctld_address = fmt::format("{}.{}:{}", server_address,
                                            g_config.ListenConf.DomainSuffix,
@@ -24,13 +27,13 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
     ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
     ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
 
-    m_ctld_channel_ =
-        grpc::CreateChannel(ctld_address, grpc::SslCredentials(ssl_opts));
+    m_ctld_channel_ = grpc::CreateCustomChannel(
+        ctld_address, grpc::SslCredentials(ssl_opts), channel_args);
   } else {
     std::string ctld_address =
         fmt::format("{}:{}", server_address, g_config.CraneCtldListenPort);
-    m_ctld_channel_ =
-        grpc::CreateChannel(ctld_address, grpc::InsecureChannelCredentials());
+    m_ctld_channel_ = grpc::CreateCustomChannel(
+        ctld_address, grpc::InsecureChannelCredentials(), channel_args);
   }
 
   // std::unique_ptr will automatically release the dangling stub.
