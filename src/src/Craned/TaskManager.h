@@ -189,8 +189,6 @@ class TaskManager {
    */
   void SetSigintCallback(std::function<void()> cb);
 
-  void InitDeviceBitmap(const DedicatedResource& dedicated_resource);
-
  private:
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
@@ -247,10 +245,6 @@ class TaskManager {
 
   static std::string CgroupStrByTaskId_(uint32_t task_id);
 
-  std::unordered_map<std::string, uint64_t> AllocateDeviceBitmap(
-      uint32_t task_id, const DedicatedResource& dedicated_resource);
-
-  void FreeDeviceBitmap(const uint32_t task_id);
   /**
    * EvActivateTaskStatusChange_ must NOT be called in this method and should be
    *  called in the caller method after checking the return value of this
@@ -354,9 +348,7 @@ class TaskManager {
       m_task_id_to_cg_map_;
   absl::flat_hash_map<uid_t /*uid*/, absl::flat_hash_set<uint32_t /*task id*/>>
       m_uid_to_task_ids_map_;
-  std::unordered_map<std::string, uint64_t> m_device_bitmap_;
-  std::unordered_map<uint32_t, std::unordered_map<std::string, uint64_t>>
-      m_task_id_device_bitmap_;
+
   absl::Mutex m_mtx_;
 
   static void EvSigchldCb_(evutil_socket_t sig, short events, void* user_data);

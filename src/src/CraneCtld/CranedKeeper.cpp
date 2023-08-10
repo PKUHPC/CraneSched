@@ -45,12 +45,6 @@ CraneErr CranedStub::ExecuteTasks(
         task->resources.allocatable_resource.memory_bytes);
     mutable_allocatable_resource->set_memory_sw_limit_bytes(
         task->resources.allocatable_resource.memory_sw_bytes);
-    auto *mutable_device_map = mutable_task->mutable_resources()
-                                   ->mutable_dedicated_resource()
-                                   ->mutable_devices();
-    for (const auto &entry : task->resources.dedicated_resource.devices) {
-      (*mutable_device_map)[entry.first] = entry.second;
-    }
 
     // Set type
     mutable_task->set_type(task->type);

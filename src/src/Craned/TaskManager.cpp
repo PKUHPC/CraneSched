@@ -5,11 +5,8 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
 
-#include <bit>
-
 #include "ResourceAllocators.h"
 #include "crane/FdFunctions.h"
-#include "crane/String.h"
 #include "protos/CraneSubprocess.pb.h"
 
 namespace Craned {
@@ -179,48 +176,6 @@ const TaskInstance* TaskManager::FindInstanceByTaskId_(uint32_t task_id) {
 
 std::string TaskManager::CgroupStrByTaskId_(uint32_t task_id) {
   return fmt::format("Crane_Task_{}", task_id);
-}
-
-void TaskManager::InitDeviceBitmap(
-    const DedicatedResource& dedicated_resource) {
-  for (const auto& entry : dedicated_resource.devices) {
-    m_device_bitmap_[entry.first] =
-        (static_cast<uint64_t>(1) << entry.second) - 1;
-  }
-}
-
-std::unordered_map<std::string, uint64_t> TaskManager::AllocateDeviceBitmap(
-    uint32_t task_id, const DedicatedResource& dedicated_resource) {
-  std::unordered_map<std::string, uint64_t> alloc_device_bitmap;
-  for (const auto& entry : dedicated_resource.devices) {
-    if (entry.second == 0) {
-      alloc_device_bitmap[entry.first] = 0xffffffffULL;
-    }
-    uint64_t count = 0;
-    auto& avail_bitmap = m_device_bitmap_[entry.first];
-    for (int i = 0; i < DedicatedResource::BITMAPSIZE; i++) {
-      count += ((avail_bitmap >> i) & 1);
-      if (count == entry.second) {
-        // device corespon to 1 in bitmap will be alloced
-        alloc_device_bitmap[entry.first] =
-            (avail_bitmap & ((static_cast<uint64_t>(1) << (i + 1)) - 1));
-        avail_bitmap &= alloc_device_bitmap[entry.first];
-        // alloc func use 1 for deny access so we take bitwise complement
-        alloc_device_bitmap[entry.first] = ~alloc_device_bitmap[entry.first];
-        break;
-      }
-    }
-  }
-  m_task_id_device_bitmap_.emplace(task_id, alloc_device_bitmap);
-  return alloc_device_bitmap;
-}
-
-void TaskManager::FreeDeviceBitmap(const uint32_t task_id) {
-  auto iter = m_task_id_device_bitmap_.find(task_id);
-  for (auto& entry : iter->second) {
-    m_device_bitmap_[entry.first] |= entry.second;
-  }
-  m_task_id_device_bitmap_.erase(iter);
 }
 
 void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
@@ -665,20 +620,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                                         (1024 * 1024)));
     env_vec.emplace_back("CRANE_JOB_ID",
                          std::to_string(instance->task.task_id()));
-    {
-      uint64_t cuda_count = 0;
-      for (const auto& resource :
-           instance->task.resources().dedicated_resource().devices()) {
-        if (util::CgroupUtil::getDeviceType(resource.first) ==
-            DedicatedResource::DeviceType::NVIDIA_GRAPHICS_CARD) {
-          cuda_count += resource.second;
-        }
-      }
-      if (cuda_count != 0) {
-        env_vec.emplace_back("CUDA_VISIABLE_DEVICE",
-                             util::GenerateCudaVisiableDeviceStr(cuda_count));
-      }
-    }
+
     int64_t time_limit_sec = instance->task.time_limit().seconds();
     int hours = time_limit_sec / 3600;
     int minutes = (time_limit_sec % 3600) / 60;
@@ -726,7 +668,7 @@ CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   // Simply wrap the Task structure within a TaskInstance structure and
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
-  instance->task = task;
+  instance->task = std::move(task);
 
   m_grpc_execute_task_queue_.enqueue(std::move(instance));
   event_active(m_ev_grpc_execute_task_, 0, 0);
@@ -775,8 +717,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
             instance->cgroup_path,
             util::NO_CONTROLLER_FLAG |
                 util::CgroupConstant::Controller::CPU_CONTROLLER |
-                util::CgroupConstant::Controller::MEMORY_CONTROLLER |
-                util::CgroupConstant::Controller::DEVICES_CONTROLLER,
+                util::CgroupConstant::Controller::MEMORY_CONTROLLER,
             util::NO_CONTROLLER_FLAG, false);
       }
       instance->cgroup = cg_iter->second.get();
@@ -806,24 +747,6 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
             ExitCode::kExitCodeCgroupError,
             fmt::format(
                 "Cannot allocate resources for the instance of task #{}",
-                instance->task.task_id()));
-        return;
-      }
-
-      if (!DedicatedResourceAllocator::Allocate(
-              this_->AllocateDeviceBitmap(
-                  instance->task.task_id(),
-                  DedicatedResource(
-                      instance->task.resources().dedicated_resource())),
-              instance->cgroup)) {
-        CRANE_ERROR(
-            "Failed to allocate dedicated resource in cgroup for task #{}",
-            instance->task.task_id());
-        this_->EvActivateTaskStatusChange_(
-            instance->task.task_id(), crane::grpc::TaskStatus::Failed,
-            ExitCode::kExitCodeCgroupError,
-            fmt::format(
-                "Cannot dedicated resources for the instance of task #{}",
                 instance->task.task_id()));
         return;
       }
@@ -1103,7 +1026,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
       CRANE_DEBUG("Trying terminating unknown task #{}", elem.task_id);
       return;
     }
-    this_->FreeDeviceBitmap(elem.task_id);
+
     const auto& task_instance = iter->second;
 
     if (elem.terminated_by_user) task_instance->cancelled_by_user = true;

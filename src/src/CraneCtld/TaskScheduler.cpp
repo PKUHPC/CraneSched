@@ -46,7 +46,7 @@ bool TaskScheduler::Init() {
             "move it to pending queue and re-run it.",
             task_id);
 
-        for (const CranedId& craned_id : task->CranedIds()) {
+        for (CranedId craned_id : task->CranedIds()) {
           stub = g_craned_keeper->GetCranedStub(craned_id);
           if (stub != nullptr && !stub->Invalid())
             stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
@@ -103,7 +103,7 @@ bool TaskScheduler::Init() {
               // in case that when processing TaskStatusChange CraneCtld
               // crashed, only part of Craned nodes executed TerminateTask gRPC.
               // Not needed for succeeded tasks.
-              for (const CranedId& craned_id : task->CranedIds()) {
+              for (CranedId craned_id : task->CranedIds()) {
                 stub = g_craned_keeper->GetCranedStub(craned_id);
                 if (stub != nullptr && !stub->Invalid())
                   stub->TerminateOrphanedTask(task->TaskId());
@@ -114,7 +114,7 @@ bool TaskScheduler::Init() {
             // released. Though some craned nodes might have released the
             // cgroup, just resend the gRPC again to guarantee that the cgroup
             // is always released.
-            for (const CranedId& craned_id : task->CranedIds()) {
+            for (CranedId craned_id : task->CranedIds()) {
               stub = g_craned_keeper->GetCranedStub(craned_id);
               if (stub != nullptr && !stub->Invalid())
                 stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
@@ -158,13 +158,13 @@ bool TaskScheduler::Init() {
               "move it to pending queue and re-run it.",
               task_id);
 
-          for (const CranedId& craned_id : task->CranedIds()) {
+          for (CranedId craned_id : task->CranedIds()) {
             stub = g_craned_keeper->GetCranedStub(craned_id);
             if (stub != nullptr && !stub->Invalid())
               stub->TerminateOrphanedTask(task->TaskId());
           }
 
-          for (const CranedId& craned_id : task->CranedIds()) {
+          for (CranedId craned_id : task->CranedIds()) {
             stub = g_craned_keeper->GetCranedStub(craned_id);
             if (stub != nullptr && !stub->Invalid())
               stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
@@ -308,7 +308,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
-  for (const CranedId& craned_id : task->CranedIds()) {
+  for (CranedId craned_id : task->CranedIds()) {
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                              task->resources);
     m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
@@ -405,7 +405,7 @@ void TaskScheduler::ScheduleThread_() {
       }
 
       absl::BlockingCounter bl(craned_cgroup_map.size());
-      for (auto const& iter : craned_cgroup_map) {
+      for (auto const iter : craned_cgroup_map) {
         CranedId const& craned_id = iter.first;
         auto const& task_uid_pairs = iter.second;
         g_thread_pool->push_task([=, &bl]() {
@@ -449,7 +449,7 @@ void TaskScheduler::ScheduleThread_() {
         m_running_task_map_mtx_.Lock();
         m_task_indexes_mtx_.Lock();
 
-        for (const CranedId& craned_id : task->CranedIds()) {
+        for (CranedId craned_id : task->CranedIds()) {
           m_node_to_tasks_map_[craned_id].emplace(task_ptr->TaskId());
         }
         m_running_task_map_.emplace(task->TaskId(), std::move(task));
@@ -1044,11 +1044,10 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     time_avail_res_map[now] = craned_meta.res_avail;
 
     if constexpr (kAlgoTraceOutput) {
-      CRANE_TRACE("Craned {} initial res_avail now: cpu: {}, mem: {}, gres: {}",
+      CRANE_TRACE("Craned {} initial res_avail now: cpu: {}, mem: {}",
                   craned_id,
                   craned_meta.res_avail.allocatable_resource.cpu_count,
-                  craned_meta.res_avail.allocatable_resource.memory_bytes,
-                  util::ReadableGres(craned_meta.res_avail.dedicated_resource));
+                  craned_meta.res_avail.allocatable_resource.memory_bytes);
     }
 
     {  // Limit the scope of `iter`
@@ -1071,11 +1070,10 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
           if constexpr (kAlgoTraceOutput) {
             CRANE_TRACE(
                 "Insert duration [now+{}s, inf) with resource: "
-                "cpu: {}, mem: {}, gres: {}",
+                "cpu: {}, mem: {}",
                 absl::ToInt64Seconds(end_time - now),
                 craned_meta.res_avail.allocatable_resource.cpu_count,
-                craned_meta.res_avail.allocatable_resource.memory_bytes,
-                util::ReadableGres(craned_meta.res_avail.dedicated_resource));
+                craned_meta.res_avail.allocatable_resource.memory_bytes);
           }
         }
 
@@ -1090,12 +1088,11 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         cur_time_iter->second += running_task->resources;
 
         if constexpr (kAlgoTraceOutput) {
-          CRANE_TRACE(
-              "Craned {} res_avail at now + {}s: cpu: {}, mem: {}, gres: {}; ",
-              craned_id, absl::ToInt64Seconds(cur_time_iter->first - now),
-              cur_time_iter->second.allocatable_resource.cpu_count,
-              cur_time_iter->second.allocatable_resource.memory_bytes,
-              util::ReadableGres(cur_time_iter->second.dedicated_resource));
+          CRANE_TRACE("Craned {} res_avail at now + {}s: cpu: {}, mem: {}; ",
+                      craned_id,
+                      absl::ToInt64Seconds(cur_time_iter->first - now),
+                      cur_time_iter->second.allocatable_resource.cpu_count,
+                      cur_time_iter->second.allocatable_resource.memory_bytes);
         }
       }
 
@@ -1105,22 +1102,20 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         auto prev_iter = time_avail_res_map.begin();
         auto iter = std::next(prev_iter);
         for (; iter != time_avail_res_map.end(); prev_iter++, iter++) {
-          str.append(fmt::format(
-              "[ now+{}s , now+{}s ) Available allocatable "
-              "res: cpu core {}, mem {}, gres {}",
-              absl::ToInt64Seconds(prev_iter->first - now),
-              absl::ToInt64Seconds(iter->first - now),
-              prev_iter->second.allocatable_resource.cpu_count,
-              prev_iter->second.allocatable_resource.memory_bytes,
-              util::ReadableGres(prev_iter->second.dedicated_resource)));
+          str.append(
+              fmt::format("[ now+{}s , now+{}s ) Available allocatable "
+                          "res: cpu core {}, mem {}",
+                          absl::ToInt64Seconds(prev_iter->first - now),
+                          absl::ToInt64Seconds(iter->first - now),
+                          prev_iter->second.allocatable_resource.cpu_count,
+                          prev_iter->second.allocatable_resource.memory_bytes));
         }
-        str.append(fmt::format(
-            "[ now+{}s , inf ) Available allocatable "
-            "res: cpu core {}, mem {}, gres {}",
-            absl::ToInt64Seconds(prev_iter->first - now),
-            prev_iter->second.allocatable_resource.cpu_count,
-            prev_iter->second.allocatable_resource.memory_bytes,
-            util::ReadableGres(prev_iter->second.dedicated_resource)));
+        str.append(
+            fmt::format("[ now+{}s , inf ) Available allocatable "
+                        "res: cpu core {}, mem {}",
+                        absl::ToInt64Seconds(prev_iter->first - now),
+                        prev_iter->second.allocatable_resource.cpu_count,
+                        prev_iter->second.allocatable_resource.memory_bytes));
         CRANE_TRACE("{}", str);
       }
     }
@@ -1717,16 +1712,14 @@ CraneErr TaskScheduler::CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task) {
         metas_ptr->partition_global_meta.m_resource_total_)) {
     CRANE_TRACE(
         "Resource not enough for task #{}. "
-        "Partition total: cpu {}, mem: {}, mem+sw: {}, gres: {}",
+        "Partition total: cpu {}, mem: {}, mem+sw: {}",
         task->TaskId(),
         metas_ptr->partition_global_meta.m_resource_total_.allocatable_resource
             .cpu_count,
         util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_total_
                                  .allocatable_resource.memory_bytes),
         util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_total_
-                                 .allocatable_resource.memory_sw_bytes),
-        util::ReadableGres(metas_ptr->partition_global_meta.m_resource_total_
-                               .dedicated_resource));
+                                 .allocatable_resource.memory_sw_bytes));
     return CraneErr::kNoResource;
   }
 
@@ -1753,7 +1746,7 @@ CraneErr TaskScheduler::CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task) {
   return CraneErr::kOk;
 }
 
-void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id) {
+void TaskScheduler::TerminateTasksOnCraned(CranedId craned_id) {
   CRANE_TRACE("Terminate tasks on craned {}", craned_id);
 
   // The order of LockGuards matters.
