@@ -498,7 +498,6 @@ bool Cgroup::SetBlockioWeight(uint64_t weight) {
 }
 
 bool Cgroup::SetDeviceLimit(DedicatedResource::DeviceType device_type,uint64_t alloc_bitmap,bool allow,bool read,bool write,bool mknod){
-  std::string limitStr;
   std::string op;
   if (!read)  op += "r";
   if (!write) op += "w";
@@ -507,20 +506,19 @@ bool Cgroup::SetDeviceLimit(DedicatedResource::DeviceType device_type,uint64_t a
   //example: "c 195:0 rwm" write to DEVICES_DENY 
   //will forbid process from accessing /dev/nvidia0
   const std::string limit = fmt::format("{} {}:",device_op_type,CgroupConstant::GetDeviceMajor(device_type));
-  if(alloc_bitmap==0xffffffff){
-    limitStr=fmt::format("{}{} {}",limit,'*',op);
+  std::vector<std::string> limits;
+  if(alloc_bitmap==0xffffffffULL){
+    limits.emplace_back(fmt::format("{}{} {}",limit,'*',op));
   }else{
-    std::vector<std::string> limits(64);
-    for(int i = 0;i<64;++i){
+    for(int i = 0;i<DedicatedResource::BITMAPSIZE;++i){
     if(alloc_bitmap>>i & 1){
-      limits[i]=fmt::format("{}{} {}",limit,i,op);
+      limits.emplace_back(fmt::format("{}{} {}",limit,i,op));
       }
     }
-    limitStr=absl::StrJoin(limits,",");
   }
-  return SetControllerStr(CgroupConstant::Controller::DEVICES_CONTROLLER,
+  return SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
                               allow? CgroupConstant::ControllerFile::DEVICES_ALLOW : CgroupConstant::ControllerFile::DEVICES_DENY,
-                              limitStr);
+                              limits);
 }
 
 bool Cgroup::SetDeviceDeny(DedicatedResource::DeviceType device_type,uint64_t alloc_bitmap){
@@ -612,6 +610,49 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
     return false;
   }
 
+  return true;
+}
+
+bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
+                              CgroupConstant::ControllerFile controller_file,
+                              const std::vector<std::string> &strs) {
+  if (!CgroupUtil::Mounted(controller)) {
+    CRANE_WARN("Unable to set {} because cgroup {} is not mounted.\n",
+               CgroupConstant::GetControllerFileStringView(controller_file),
+               CgroupConstant::GetControllerStringView(controller));
+    return false;
+  }
+
+  int err;
+
+  struct cgroup_controller *cg_controller;
+
+  if ((cg_controller = cgroup_get_controller(
+           m_cgroup_,
+           CgroupConstant::GetControllerStringView(controller).data())) ==
+      nullptr) {
+    CRANE_WARN("Unable to get cgroup {} controller for {}.\n",
+               CgroupConstant::GetControllerStringView(controller),
+               m_cgroup_path_);
+    return false;
+  }
+  for(const auto& str:strs){
+    if ((err = cgroup_set_value_string(
+            cg_controller,
+            CgroupConstant::GetControllerFileStringView(controller_file).data(),
+            str.c_str()))) {
+      CRANE_WARN("Unable to add string for {}: {} {}\n", m_cgroup_path_, err,
+                cgroup_strerror(err));
+      return false;
+    }
+    // Commit cgroup modifications.
+    if ((err = cgroup_modify_cgroup(m_cgroup_))) {
+      CRANE_WARN("Unable to commit {} for cgroup {}: {} {}\n",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                m_cgroup_path_, err, cgroup_strerror(err));
+      return false;
+    }
+  }
   return true;
 }
 

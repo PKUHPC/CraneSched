@@ -193,7 +193,7 @@ void ParseConfig(int argc, char** argv) {
             DedicatedResource gres_conf;
             // expample gres: gpu:v100:2.
             // entry[1]:device_name entry[2]:device_type entry[3]:device_num
-            std::regex pattern(R"(\w+)(:\w+)?:(\d+)");
+            std::regex pattern(R"((\w+)(:\w+)?:(\d+))");
             std::smatch entry;
             while (std::regex_search(gres, entry, pattern)) {
               std::string device_name = entry[1];
@@ -459,8 +459,11 @@ void GlobalVariableInit() {
   if (!util::CgroupUtil::Mounted(
           util::CgroupConstant::Controller::CPU_CONTROLLER) ||
       !util::CgroupUtil::Mounted(
-          util::CgroupConstant::Controller::MEMORY_CONTROLLER)) {
-    CRANE_ERROR("Failed to initialize cpu and memory cgroups controller.");
+          util::CgroupConstant::Controller::MEMORY_CONTROLLER)||
+      !util::CgroupUtil::Mounted(
+          util::CgroupConstant::Controller::DEVICES_CONTROLLER
+      )) {
+    CRANE_ERROR("Failed to initialize cpu,memory,devices cgroups controller.");
     std::exit(1);
   }
 
@@ -480,7 +483,7 @@ void StartServer() {
 
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
-
+  g_task_mgr->InitDeviceBitmap(g_config.CranedNodes[g_config.CranedIdOfThisNode]->dedicated_resource);
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
 
   g_server->Wait();

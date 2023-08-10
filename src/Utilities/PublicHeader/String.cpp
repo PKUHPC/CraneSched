@@ -3,6 +3,7 @@
 #include <absl/strings/strip.h>
 
 #include <queue>
+#include <bitset>
 
 #include "crane/Logger.h"
 
@@ -275,6 +276,9 @@ bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
 }
 
 std::string GenerateCudaVisiableDeviceStr(const uint64_t count){
+  if(count == 0){
+    return "";
+  }
   std::string retVal;
   retVal.reserve(count*2+1);
   for(int i = 0;i<count;++i){
@@ -304,6 +308,14 @@ std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
     }
   }
   return output;
+}
+
+std::string ReadableGres(const DedicatedResource &dedicated_resource){
+  std::vector<std::string> kv_strings;
+  for(const auto& entry:dedicated_resource.devices){
+    kv_strings.push_back(absl::StrCat(entry.first,":",entry.second));    
+  }
+  return absl::StrJoin(kv_strings,",");
 }
 
 }  // namespace util

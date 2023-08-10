@@ -198,6 +198,33 @@ void ParseConfig(int argc, char** argv) {
             node_ptr->memory_bytes = memory_bytes;
           } else
             std::exit(1);
+          if (node["gres"]) {
+            auto gres = node["gres"].as<std::string>();
+            DedicatedResource gres_conf;
+            // expample gres: gpu:v100:2.
+            // entry[1]:device_name entry[2]:device_type entry[3]:device_num
+            std::regex pattern(R"((\w+)(:\w+)?:(\d+))");
+            std::smatch entry;
+            while (std::regex_search(gres, entry, pattern)) {
+              std::string device_name = entry[1];
+              std::string device_type = entry[2].matched
+                                            ? std::string(entry[2])
+                                            : std::string("default");
+              uint64_t device_num = std::stoul(entry[3]);
+              if (entry[2].matched) {
+                gres_conf.AddResource(
+                    fmt::format("{}:{}", device_name, device_type), device_num);
+              } else {
+                gres_conf.AddResource(device_name, device_num);
+              }
+              CRANE_TRACE(
+                  "Gres conf parse:gres_name: `{}` ,gres_type: `{}` ,gres_num: "
+                  "`{}` ",
+                  device_name, device_type, device_num);
+              gres = entry.suffix();
+            }
+            node_ptr->dedicated_resource = gres_conf;
+          }
           for (auto&& name : name_list) g_config.Nodes[name] = node_ptr;
         }
       }

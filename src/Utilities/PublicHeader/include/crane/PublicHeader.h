@@ -150,10 +150,13 @@ struct DedicatedResource {
     DeviceCount,
     InvalidDevice
   };
-  //<GresType,DeviceBitMap>
+  static constexpr int BITMAPSIZE = 64;
+  //<GresType,DeviceCount>
   std::unordered_map<std::string,uint64_t> devices;
   DedicatedResource() = default;
-  DedicatedResource& AddResource(std::string device_name,uint64_t bitmap);
+  explicit DedicatedResource(const crane::grpc::DedicatedResource&);
+  DedicatedResource& AddResource(std::string device_name,uint64_t count);
+  DedicatedResource& operator=(const crane::grpc::DedicatedResource&);
   DedicatedResource& operator+=(const DedicatedResource& rhs);
   DedicatedResource& operator-=(const DedicatedResource& rhs);
 

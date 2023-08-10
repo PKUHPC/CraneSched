@@ -1,6 +1,7 @@
 #pragma once
 
 #include <absl/strings/ascii.h>
+#include <absl/strings/str_join.h>
 #include <spdlog/fmt/fmt.h>
 
 #include <boost/algorithm/string.hpp>
@@ -55,4 +56,5 @@ std::string HostNameListToStr(T const &host_list)
 
 std::string GenerateCudaVisiableDeviceStr(const uint64_t count);
 
+std::string ReadableGres(const DedicatedResource &dedicated_resource);
 }  // namespace util

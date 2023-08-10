@@ -15,6 +15,7 @@ struct Config {
   struct Node {
     uint32_t cpu;
     uint64_t memory_bytes;
+    DedicatedResource dedicated_resource;
   };
 
   struct Partition {
@@ -321,6 +322,7 @@ struct TaskInCtld {
     partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                   : val.partition_name();
     resources.allocatable_resource = val.resources().allocatable_resource();
+    resources.dedicated_resource = val.resources().dedicated_resource();
     time_limit = absl::Seconds(val.time_limit().seconds());
 
     type = val.type();

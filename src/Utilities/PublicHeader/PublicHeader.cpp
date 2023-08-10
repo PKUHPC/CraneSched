@@ -44,22 +44,15 @@ bool operator==(const AllocatableResource& lhs,
 
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs){
   for(auto& it :lhs.devices){
-    auto& lhs_bitmap = it.second;
-    auto& rhs_bitmap = rhs.devices.at(it.first);
-    if((lhs_bitmap&rhs_bitmap)!=lhs_bitmap || rhs_bitmap>rhs_bitmap){
-      return false;
-    }//1->free,lhs&rhs==lhs
+    if(it.second>rhs.devices.at(it.first)) return false;
   }
   return true;
 }
 bool operator<(const DedicatedResource& lhs, const DedicatedResource& rhs){
   for(auto& it :lhs.devices){
-    auto& lhs_bitmap = it.second;
-    auto& rhs_bitmap = rhs.devices.at(it.first);
-    if((lhs_bitmap&rhs_bitmap)!=lhs_bitmap || rhs_bitmap>=rhs_bitmap){
-      return false;
-    }//1->free,lhs&rhs==lhs
+    if(it.second>=rhs.devices.at(it.first)) return false;
   }
+  
   return true;
 }
 
@@ -91,11 +84,13 @@ AllocatableResource& AllocatableResource::operator=(
 
 Resources& Resources::operator+=(const Resources& rhs) {
   allocatable_resource += rhs.allocatable_resource;
+  dedicated_resource+=rhs.dedicated_resource;
   return *this;
 }
 
 Resources& Resources::operator-=(const Resources& rhs) {
   allocatable_resource -= rhs.allocatable_resource;
+  dedicated_resource-=rhs.dedicated_resource;
   return *this;
 }
 
@@ -122,24 +117,34 @@ bool operator==(const Resources& lhs, const Resources& rhs) {
 }
 
 DedicatedResource& DedicatedResource::operator+=(const DedicatedResource& rhs){
-  for(auto& it :this->devices){
-    auto& lhs_bitmap = it.second;
-    auto& rhs_bitmap = rhs.devices.at(it.first);
-    lhs_bitmap |=rhs_bitmap;
+  for(auto& it :rhs.devices){
+    this->devices[it.first]+=it.second;
   }
   return *this;
 }
 
 DedicatedResource& DedicatedResource::operator-=(const DedicatedResource& rhs){
-  for(auto& it :this->devices){
-    auto& lhs_bitmap = it.second;
-    auto& rhs_bitmap = rhs.devices.at(it.first);
-    lhs_bitmap &=rhs_bitmap;
+  for(auto& it :rhs.devices){
+    this->devices[it.first]-=it.second;
   }
   return *this;
 }
 
-DedicatedResource& DedicatedResource::AddResource(std::string device_name,uint64_t bitmap){
-  this->devices[device_name]|=bitmap;
+DedicatedResource& DedicatedResource::AddResource(std::string device_name,uint64_t count){
+  this->devices[device_name]+=count;
+  return *this;
+}
+
+
+DedicatedResource::DedicatedResource(const crane::grpc::DedicatedResource& value){
+  for(const auto& entry:value.devices()){
+    devices[entry.first]=entry.second;
+  }
+}
+
+DedicatedResource& DedicatedResource::operator=(const crane::grpc::DedicatedResource& value) {
+  for(const auto& entry:value.devices()){
+    this->devices[entry.first]=entry.second;
+  }
   return *this;
 }

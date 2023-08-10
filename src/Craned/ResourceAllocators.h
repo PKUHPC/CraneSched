@@ -22,6 +22,7 @@ class DedicatedResourceAllocator {
   static bool Allocate(const DedicatedResource& resource, util::Cgroup* cg);
   static bool Allocate(const crane::grpc::DedicatedResource& resource,
                        util::Cgroup* cg);
+  static bool Allocate(const std::unordered_map<std::string,uint64_t>& devices, util::Cgroup* cg);
 };
 
 }  // namespace Craned

@@ -1044,10 +1044,11 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     time_avail_res_map[now] = craned_meta.res_avail;
 
     if constexpr (kAlgoTraceOutput) {
-      CRANE_TRACE("Craned {} initial res_avail now: cpu: {}, mem: {}",
+      CRANE_TRACE("Craned {} initial res_avail now: cpu: {}, mem: {}, gres: {}",
                   craned_id,
                   craned_meta.res_avail.allocatable_resource.cpu_count,
-                  craned_meta.res_avail.allocatable_resource.memory_bytes);
+                  craned_meta.res_avail.allocatable_resource.memory_bytes,
+                  util::ReadableGres(craned_meta.res_avail.dedicated_resource));
     }
 
     {  // Limit the scope of `iter`
@@ -1070,10 +1071,11 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
           if constexpr (kAlgoTraceOutput) {
             CRANE_TRACE(
                 "Insert duration [now+{}s, inf) with resource: "
-                "cpu: {}, mem: {}",
+                "cpu: {}, mem: {}, gres: {}",
                 absl::ToInt64Seconds(end_time - now),
                 craned_meta.res_avail.allocatable_resource.cpu_count,
-                craned_meta.res_avail.allocatable_resource.memory_bytes);
+                craned_meta.res_avail.allocatable_resource.memory_bytes,
+                util::ReadableGres(craned_meta.res_avail.dedicated_resource));
           }
         }
 
@@ -1088,11 +1090,12 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         cur_time_iter->second += running_task->resources;
 
         if constexpr (kAlgoTraceOutput) {
-          CRANE_TRACE("Craned {} res_avail at now + {}s: cpu: {}, mem: {}; ",
+          CRANE_TRACE("Craned {} res_avail at now + {}s: cpu: {}, mem: {}, gres: {}; ",
                       craned_id,
                       absl::ToInt64Seconds(cur_time_iter->first - now),
                       cur_time_iter->second.allocatable_resource.cpu_count,
-                      cur_time_iter->second.allocatable_resource.memory_bytes);
+                      cur_time_iter->second.allocatable_resource.memory_bytes,
+                      util::ReadableGres(cur_time_iter->second.dedicated_resource));
         }
       }
 
@@ -1104,18 +1107,20 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         for (; iter != time_avail_res_map.end(); prev_iter++, iter++) {
           str.append(
               fmt::format("[ now+{}s , now+{}s ) Available allocatable "
-                          "res: cpu core {}, mem {}",
+                          "res: cpu core {}, mem {}, gres {}",
                           absl::ToInt64Seconds(prev_iter->first - now),
                           absl::ToInt64Seconds(iter->first - now),
                           prev_iter->second.allocatable_resource.cpu_count,
-                          prev_iter->second.allocatable_resource.memory_bytes));
+                          prev_iter->second.allocatable_resource.memory_bytes,
+                          util::ReadableGres(prev_iter->second.dedicated_resource)));
         }
         str.append(
             fmt::format("[ now+{}s , inf ) Available allocatable "
-                        "res: cpu core {}, mem {}",
+                        "res: cpu core {}, mem {}, gres {}",
                         absl::ToInt64Seconds(prev_iter->first - now),
                         prev_iter->second.allocatable_resource.cpu_count,
-                        prev_iter->second.allocatable_resource.memory_bytes));
+                        prev_iter->second.allocatable_resource.memory_bytes,
+                        util::ReadableGres(prev_iter->second.dedicated_resource)));
         CRANE_TRACE("{}", str);
       }
     }
@@ -1712,14 +1717,16 @@ CraneErr TaskScheduler::CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task) {
         metas_ptr->partition_global_meta.m_resource_total_)) {
     CRANE_TRACE(
         "Resource not enough for task #{}. "
-        "Partition total: cpu {}, mem: {}, mem+sw: {}",
+        "Partition total: cpu {}, mem: {}, mem+sw: {}, gres: {}",
         task->TaskId(),
         metas_ptr->partition_global_meta.m_resource_total_.allocatable_resource
             .cpu_count,
         util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_total_
                                  .allocatable_resource.memory_bytes),
         util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_total_
-                                 .allocatable_resource.memory_sw_bytes));
+                                 .allocatable_resource.memory_sw_bytes),
+        util::ReadableGres(metas_ptr->partition_global_meta.m_resource_total_
+        .dedicated_resource));
     return CraneErr::kNoResource;
   }
 
