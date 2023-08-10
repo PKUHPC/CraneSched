@@ -202,7 +202,8 @@ void ParseConfig(int argc, char** argv) {
             auto gres = node["gres"].as<std::string>();
             DedicatedResource gres_conf;
             // expample gres: gpu:v100:2.
-            // entry[1]:device_name entry[2]:device_type entry[3]:device_num
+            // entry[1]:device_name "gpu", entry[2]:device_type "v100",
+            // entry[3]:device_num "2".
             std::regex pattern(R"((\w+)(:\w+)?:(\d+))");
             std::smatch entry;
             while (std::regex_search(gres, entry, pattern)) {

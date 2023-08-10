@@ -3,7 +3,6 @@
 #include <absl/strings/strip.h>
 
 #include <queue>
-#include <bitset>
 
 #include "crane/Logger.h"
 

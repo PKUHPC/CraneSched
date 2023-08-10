@@ -174,9 +174,8 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
       part_meta.craned_ids.emplace(craned_name);
 
       CRANE_DEBUG(
-          "Add the resource of Craned {} (cpu: {}, mem: {}, gres{}) to "
-          "partition "
-          "[{}]'s global resource.",
+          "Add the resource of Craned {} (cpu: {}, mem: {}, gres: {}) to "
+          "partition [{}]'s global resource.",
           craned_name,
           craned_meta.static_meta.res.allocatable_resource.cpu_count,
           util::ReadableMemory(
@@ -193,9 +192,9 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
     part_meta.partition_global_meta.nodelist_str = partition.nodelist_str;
 
     CRANE_DEBUG(
-        "partition [{}]'s Global resource now: (cpu: {}, mem: {}, gres{}). It "
-        "has {} "
-        "craneds.",
+        "partition [{}]'s Global resource now: (cpu: {}, mem: {}, gres: {}). "
+        "It "
+        "has {} craneds.",
         part_name,
         part_meta.partition_global_meta.m_resource_total_inc_dead_
             .allocatable_resource.cpu_count,

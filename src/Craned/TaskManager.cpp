@@ -5,8 +5,6 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
 
-#include <bit>
-
 #include "ResourceAllocators.h"
 #include "crane/FdFunctions.h"
 #include "crane/String.h"
