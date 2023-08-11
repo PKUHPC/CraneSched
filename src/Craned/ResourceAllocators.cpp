@@ -30,9 +30,9 @@ bool AllocatableResourceAllocator::Allocate(
 
 bool DedicatedResourceAllocator::Allocate(const DedicatedResource& resource,
                                           util::Cgroup* cg) {
-  for (auto& it : resource.devices) {
-    if (!cg->SetDeviceDeny(util::CgroupUtil::getDeviceType(it.first),
-                           it.second)) {
+  for (const auto& entry : resource.devices) {
+    if (!cg->SetDeviceDeny(util::CgroupUtil::getDeviceType(entry.first),
+                           entry.second)) {
       return false;
     }
   }
@@ -42,9 +42,9 @@ bool DedicatedResourceAllocator::Allocate(const DedicatedResource& resource,
 bool DedicatedResourceAllocator::Allocate(
     const std::unordered_map<std::string, uint64_t>& devices,
     util::Cgroup* cg) {
-  for (auto& it : devices) {
-    if (!cg->SetDeviceDeny(util::CgroupUtil::getDeviceType(it.first),
-                           it.second)) {
+  for (const auto& entry : devices) {
+    if (!cg->SetDeviceDeny(util::CgroupUtil::getDeviceType(entry.first),
+                           entry.second)) {
       return false;
     }
   }
@@ -53,9 +53,9 @@ bool DedicatedResourceAllocator::Allocate(
 
 bool DedicatedResourceAllocator::Allocate(
     const crane::grpc::DedicatedResource& resource, util::Cgroup* cg) {
-  for (auto& it : resource.devices()) {
-    if (!cg->SetDeviceDeny(util::CgroupUtil::getDeviceType(it.first),
-                           it.second)) {
+  for (const auto& entry : resource.devices()) {
+    if (!cg->SetDeviceDeny(util::CgroupUtil::getDeviceType(entry.first),
+                           entry.second)) {
       return false;
     }
   }

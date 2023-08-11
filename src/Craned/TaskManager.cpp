@@ -203,8 +203,9 @@ std::unordered_map<std::string, uint64_t> TaskManager::AllocateDeviceBitmap(
           uint64_t mask = (static_cast<uint64_t>(1) << (i + 1)) - 1;
           // device corespond to 1 in bitmap will be alloced
           // use mask to retain only the relevant device allocation bits
-          // alloc func use 1 for deny access so we take bitwise complement
-          // after that the ones represents deny access of device
+          // allocate func use ones for deny access so we take bitwise
+          // complement after that the ones represents deny access of
+          // device,zeros for accept access
           deny_device_bitmap[entry.first] = ~(avail_bitmap & mask);
           // by bit AND,zeros in deny_device_bitmap will set corespond bit in
           // avail_bitmap to zero,meaning the device is allocated
@@ -214,15 +215,15 @@ std::unordered_map<std::string, uint64_t> TaskManager::AllocateDeviceBitmap(
       }
     }
   }
-  m_task_id_device_bitmap_.emplace(task_id, alloc_device_bitmap);
+  m_task_id_device_bitmap_.emplace(task_id, deny_device_bitmap);
   return deny_device_bitmap;
 }
 
 void TaskManager::FreeDeviceBitmap(const uint32_t task_id) {
   auto iter = m_task_id_device_bitmap_.find(task_id);
   for (auto& entry : iter->second) {
-    // ones in
-    m_device_bitmap_[entry.first] |= entry.second;
+    // zeros in device_bitmap represents allocated devices
+    m_device_bitmap_[entry.first] |= ~entry.second;
   }
   m_task_id_device_bitmap_.erase(iter);
 }
