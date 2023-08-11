@@ -141,11 +141,15 @@ DedicatedResource& DedicatedResource::AddResource(
 
 DedicatedResource::DedicatedResource(
     const crane::grpc::DedicatedResource& value) {
-  this->devices = value.devices();
+  for (const auto& entry : value.devices()) {
+    this->devices[entry.first] = entry.second;
+  }
 }
 
 DedicatedResource& DedicatedResource::operator=(
     const crane::grpc::DedicatedResource& value) {
-  this->devices = value.devices();
+  for (const auto& entry : value.devices()) {
+    this->devices[entry.first] = entry.second;
+  }
   return *this;
 }

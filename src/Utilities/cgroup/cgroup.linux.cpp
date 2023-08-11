@@ -509,15 +509,15 @@ bool Cgroup::SetDeviceLimit(DedicatedResource::DeviceType device_type,
   // will forbid process from accessing /dev/nvidia0
   std::vector<std::string> limit_strs;
   if (limit_bitmap == 0xFFFFFFFFFFFFFFFFULL) {
-    limit_strs.emplace_back(fmt::format(
-        "{} {}:{} {}", device_op_type,
-        CgroupConstant::GetDeviceMajor(device_type), '*', op_limit));
+    limit_strs.emplace_back(
+        fmt::format("{} {}:{} {}", device_op_type,
+                    CgroupConstant::GetDeviceMajor(device_type), '*', op));
   } else {
     for (int i = 0; i < 64; ++i) {
       if (limit_bitmap >> i & 1) {
-        limit_strs.emplace_back(fmt::format(
-            "{} {}:{} {}", device_op_type,
-            CgroupConstant::GetDeviceMajor(device_type), i, op_limit));
+        limit_strs.emplace_back(
+            fmt::format("{} {}:{} {}", device_op_type,
+                        CgroupConstant::GetDeviceMajor(device_type), i, op));
       }
     }
   }

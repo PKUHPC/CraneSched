@@ -206,7 +206,7 @@ std::unordered_map<std::string, uint64_t> TaskManager::AllocateDeviceBitmap(
           // allocate func use ones for deny access so we take bitwise
           // complement after that the ones represents deny access of
           // device,zeros for accept access
-          deny_device_bitmap[entry.first] = ~(avail_bitmap & mask);
+          deny_device_bitmap[entry.first] = ~(avail_bitmap.to_ullong() & mask);
           // by bit AND,zeros in deny_device_bitmap will set corespond bit in
           // avail_bitmap to zero,meaning the device is allocated
           avail_bitmap &= deny_device_bitmap[entry.first];

@@ -279,7 +279,6 @@ std::string GenerateCudaVisiableDeviceStr(const uint64_t count) {
     return "";
   }
   std::vector<int> cuda_visiable_device_vars;
-  cuda_visiable_device_str.reserve(count * 2 + 1);
   for (int i = 0; i < count; ++i) {
     cuda_visiable_device_vars.push_back(i);
   }
