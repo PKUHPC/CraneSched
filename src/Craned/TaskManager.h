@@ -11,6 +11,8 @@
 #include <sys/eventfd.h>
 #include <sys/wait.h>
 
+#include <bitset>
+
 #include "CtldClient.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
@@ -354,8 +356,8 @@ class TaskManager {
       m_task_id_to_cg_map_;
   absl::flat_hash_map<uid_t /*uid*/, absl::flat_hash_set<uint32_t /*task id*/>>
       m_uid_to_task_ids_map_;
-  std::unordered_map<std::string, uint64_t> m_device_bitmap_;
-  std::unordered_map<uint32_t, std::unordered_map<std::string, uint64_t>>
+  std::unordered_map<std::string, std::bitset<64>> m_device_bitmap_;
+  std::unordered_map<uint32_t, std::unordered_map<std::string, uint64>>
       m_task_id_device_bitmap_;
   absl::Mutex m_mtx_;
 

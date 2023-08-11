@@ -189,33 +189,39 @@ void TaskManager::InitDeviceBitmap(
 
 std::unordered_map<std::string, uint64_t> TaskManager::AllocateDeviceBitmap(
     uint32_t task_id, const DedicatedResource& dedicated_resource) {
-  std::unordered_map<std::string, uint64_t> alloc_device_bitmap;
+  std::unordered_map<std::string, uint64_t> deny_device_bitmap;
   for (const auto& entry : dedicated_resource.devices) {
     if (entry.second == 0) {
-      alloc_device_bitmap[entry.first] = 0xffffffffULL;
-    }
-    uint64_t count = 0;
-    auto& avail_bitmap = m_device_bitmap_[entry.first];
-    for (int i = 0; i < DedicatedResource::BITMAPSIZE; i++) {
-      count += ((avail_bitmap >> i) & 1);
-      if (count == entry.second) {
-        // device corespon to 1 in bitmap will be alloced
-        alloc_device_bitmap[entry.first] =
-            (avail_bitmap & ((static_cast<uint64_t>(1) << (i + 1)) - 1));
-        avail_bitmap &= alloc_device_bitmap[entry.first];
-        // alloc func use 1 for deny access so we take bitwise complement
-        alloc_device_bitmap[entry.first] = ~alloc_device_bitmap[entry.first];
-        break;
+      // no request for device,deny all
+      deny_device_bitmap[entry.first] = 0xFFFFFFFFFFFFFFFFULL;
+    } else {
+      auto& avail_bitmap = m_device_bitmap_[entry.first];
+      uint64_t count = 0;
+      for (int i = 0; i < 64; i++) {
+        count += avail_bitmap[i];
+        if (count == entry.second) {
+          uint64_t mask = (static_cast<uint64_t>(1) << (i + 1)) - 1;
+          // device corespond to 1 in bitmap will be alloced
+          // use mask to retain only the relevant device allocation bits
+          // alloc func use 1 for deny access so we take bitwise complement
+          // after that the ones represents deny access of device
+          deny_device_bitmap[entry.first] = ~(avail_bitmap & mask);
+          // by bit AND,zeros in deny_device_bitmap will set corespond bit in
+          // avail_bitmap to zero,meaning the device is allocated
+          avail_bitmap &= deny_device_bitmap[entry.first];
+          break;
+        }
       }
     }
   }
   m_task_id_device_bitmap_.emplace(task_id, alloc_device_bitmap);
-  return alloc_device_bitmap;
+  return deny_device_bitmap;
 }
 
 void TaskManager::FreeDeviceBitmap(const uint32_t task_id) {
   auto iter = m_task_id_device_bitmap_.find(task_id);
   for (auto& entry : iter->second) {
+    // ones in
     m_device_bitmap_[entry.first] |= entry.second;
   }
   m_task_id_device_bitmap_.erase(iter);

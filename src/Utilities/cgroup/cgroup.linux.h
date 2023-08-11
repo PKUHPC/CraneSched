@@ -240,8 +240,8 @@ class Cgroup {
                         CgroupConstant::ControllerFile controller_file,
                         const std::string &str);
   bool SetControllerStrs(CgroupConstant::Controller controller,
-                        CgroupConstant::ControllerFile controller_file,
-                        const std::vector<std::string> &strs); 
+                         CgroupConstant::ControllerFile controller_file,
+                         const std::vector<std::string> &strs);
   bool KillAllProcesses();
 
   bool Empty();

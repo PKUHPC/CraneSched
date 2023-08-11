@@ -274,17 +274,16 @@ bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
   }
 }
 
-std::string GenerateCudaVisiableDeviceStr(const uint64_t count){
-  if(count == 0){
+std::string GenerateCudaVisiableDeviceStr(const uint64_t count) {
+  if (count == 0) {
     return "";
   }
-  std::string retVal;
-  retVal.reserve(count*2+1);
-  for(int i = 0;i<count;++i){
-    retVal+=fmt::format("{},",i);
+  std::vector<int> cuda_visiable_device_vars;
+  cuda_visiable_device_str.reserve(count * 2 + 1);
+  for (int i = 0; i < count; ++i) {
+    cuda_visiable_device_vars.push_back(i);
   }
-  retVal.pop_back();
-  return retVal;
+  return absl::StrJoin(cuda_visiable_device_vars, ",");
 }
 
 std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
@@ -309,12 +308,12 @@ std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
   return output;
 }
 
-std::string ReadableGres(const DedicatedResource &dedicated_resource){
+std::string ReadableGres(const DedicatedResource &dedicated_resource) {
   std::vector<std::string> kv_strings;
-  for(const auto& entry:dedicated_resource.devices){
-    kv_strings.push_back(absl::StrCat(entry.first,":",entry.second));    
+  for (const auto &entry : dedicated_resource.devices) {
+    kv_strings.emplace_back(absl::StrCat(entry.first, ":", entry.second));
   }
-  return absl::StrJoin(kv_strings,",");
+  return absl::StrJoin(kv_strings, ",");
 }
 
 }  // namespace util

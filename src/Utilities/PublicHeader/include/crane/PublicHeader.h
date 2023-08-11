@@ -150,12 +150,14 @@ struct DedicatedResource {
     DeviceCount,
     InvalidDevice
   };
-  static constexpr int BITMAPSIZE = 64;
+
   //<GresType,DeviceCount>
-  std::unordered_map<std::string,uint64_t> devices;
+  std::unordered_map<std::string, uint64_t> devices;
+
   DedicatedResource() = default;
   explicit DedicatedResource(const crane::grpc::DedicatedResource&);
-  DedicatedResource& AddResource(std::string device_name,uint64_t count);
+  DedicatedResource& AddResource(const std::string& device_name,
+                                 uint64_t count);
   DedicatedResource& operator=(const crane::grpc::DedicatedResource&);
   DedicatedResource& operator+=(const DedicatedResource& rhs);
   DedicatedResource& operator-=(const DedicatedResource& rhs);
@@ -164,7 +166,7 @@ struct DedicatedResource {
 
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs);
 bool operator<(const DedicatedResource& lhs, const DedicatedResource& rhs);
-bool operator==(const DedicatedResource& lhs,const DedicatedResource& rhs);
+bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs);
 
 /**
  * When a task is allocated a resource UUID, it holds one instance of Resources

@@ -351,15 +351,15 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
     part_info->set_total_mem(alloc_res_total.memory_bytes);
     part_info->set_avail_mem(alloc_res_avail.memory_bytes);
     part_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
-    auto mutable_device_map = part_info->mutable_device();
+    auto* mutable_device_map = part_info->mutable_device();
     for (const auto& entry : dedicated_res_total.devices) {
       (*mutable_device_map)[entry.first] = entry.second;
     }
-    auto mutable_alloc_device_map = part_info->mutable_alloc_device();
+    auto* mutable_alloc_device_map = part_info->mutable_alloc_device();
     for (const auto& entry : dedicated_res_in_use.devices) {
       (*mutable_alloc_device_map)[entry.first] = entry.second;
     }
-    auto mutable_avail_device_map = part_info->mutable_avail_device();
+    auto* mutable_avail_device_map = part_info->mutable_avail_device();
     for (const auto& entry : dedicated_res_avail.devices) {
       (*mutable_avail_device_map)[entry.first] = entry.second;
     }
@@ -411,15 +411,15 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
   part_info->set_total_mem(res_total.memory_bytes);
   part_info->set_avail_mem(res_avail.memory_bytes);
   part_info->set_alloc_mem(res_in_use.memory_bytes);
-  auto mutable_device_map = part_info->mutable_device();
+  auto* mutable_device_map = part_info->mutable_device();
   for (const auto& entry : dedicated_res_total.devices) {
     (*mutable_device_map)[entry.first] = entry.second;
   }
-  auto mutable_alloc_device_map = part_info->mutable_alloc_device();
+  auto* mutable_alloc_device_map = part_info->mutable_alloc_device();
   for (const auto& entry : dedicated_res_in_use.devices) {
     (*mutable_alloc_device_map)[entry.first] = entry.second;
   }
-  auto mutable_avail_device_map = part_info->mutable_avail_device();
+  auto* mutable_avail_device_map = part_info->mutable_avail_device();
   for (const auto& entry : dedicated_res_avail.devices) {
     (*mutable_avail_device_map)[entry.first] = entry.second;
   }

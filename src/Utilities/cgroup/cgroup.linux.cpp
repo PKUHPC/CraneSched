@@ -220,13 +220,13 @@ std::shared_ptr<Cgroup> CgroupUtil::CreateOrOpen(
                             has_cgroup, changed_cgroup)) {
     return nullptr;
   }
-   if ((preferred_controllers & Controller::DEVICES_CONTROLLER) &&
-       initialize_controller(
-           *native_cgroup, Controller::DEVICES_CONTROLLER,
-           required_controllers & Controller::DEVICES_CONTROLLER, has_cgroup,
-           changed_cgroup)) {
-     return nullptr;
-   }
+  if ((preferred_controllers & Controller::DEVICES_CONTROLLER) &&
+      initialize_controller(
+          *native_cgroup, Controller::DEVICES_CONTROLLER,
+          required_controllers & Controller::DEVICES_CONTROLLER, has_cgroup,
+          changed_cgroup)) {
+    return nullptr;
+  }
 
   int err;
   if (!has_cgroup) {
@@ -247,11 +247,11 @@ std::shared_ptr<Cgroup> CgroupUtil::CreateOrOpen(
   return std::make_unique<Cgroup>(cgroup_string, native_cgroup);
 }
 
-DedicatedResource::DeviceType CgroupUtil::getDeviceType(const std::string& device_name){
-  if (device_name.starts_with("gpu"))
-  {
+DedicatedResource::DeviceType CgroupUtil::getDeviceType(
+    const std::string &device_name) {
+  if (device_name.starts_with("gpu")) {
     return DedicatedResource::DeviceType::NVIDIA_GRAPHICS_CARD;
-  }else{
+  } else {
     return DedicatedResource::DeviceType::InvalidDevice;
   }
 }
@@ -497,32 +497,39 @@ bool Cgroup::SetBlockioWeight(uint64_t weight) {
                             weight);
 }
 
-bool Cgroup::SetDeviceLimit(DedicatedResource::DeviceType device_type,uint64_t alloc_bitmap,bool allow,bool read,bool write,bool mknod){
+bool Cgroup::SetDeviceLimit(DedicatedResource::DeviceType device_type,
+                            uint64_t limit_bitmap, bool allow, bool read,
+                            bool write, bool mknod) {
   std::string op;
-  if (!read)  op += "r";
+  if (!read) op += "r";
   if (!write) op += "w";
   if (!mknod) op += "m";
   char device_op_type = CgroupConstant::GetDeviceOpType(device_type);
-  //example: "c 195:0 rwm" write to DEVICES_DENY 
-  //will forbid process from accessing /dev/nvidia0
-  const std::string limit = fmt::format("{} {}:",device_op_type,CgroupConstant::GetDeviceMajor(device_type));
-  std::vector<std::string> limits;
-  if(alloc_bitmap==0xffffffffULL){
-    limits.emplace_back(fmt::format("{}{} {}",limit,'*',op));
-  }else{
-    for(int i = 0;i<DedicatedResource::BITMAPSIZE;++i){
-    if(alloc_bitmap>>i & 1){
-      limits.emplace_back(fmt::format("{}{} {}",limit,i,op));
+  // example: "c 195:0 rwm" write to DEVICES_DENY
+  // will forbid process from accessing /dev/nvidia0
+  std::vector<std::string> limit_strs;
+  if (limit_bitmap == 0xFFFFFFFFFFFFFFFFULL) {
+    limit_strs.emplace_back(fmt::format(
+        "{} {}:{} {}", device_op_type,
+        CgroupConstant::GetDeviceMajor(device_type), '*', op_limit));
+  } else {
+    for (int i = 0; i < 64; ++i) {
+      if (limit_bitmap >> i & 1) {
+        limit_strs.emplace_back(fmt::format(
+            "{} {}:{} {}", device_op_type,
+            CgroupConstant::GetDeviceMajor(device_type), i, op_limit));
       }
     }
   }
   return SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
-                              allow? CgroupConstant::ControllerFile::DEVICES_ALLOW : CgroupConstant::ControllerFile::DEVICES_DENY,
-                              limits);
+                           allow ? CgroupConstant::ControllerFile::DEVICES_ALLOW
+                                 : CgroupConstant::ControllerFile::DEVICES_DENY,
+                           limit_strs);
 }
 
-bool Cgroup::SetDeviceDeny(DedicatedResource::DeviceType device_type,uint64_t alloc_bitmap){
-  return SetDeviceLimit(device_type,alloc_bitmap,false,false,false,false);
+bool Cgroup::SetDeviceDeny(DedicatedResource::DeviceType device_type,
+                           uint64_t deny_bitmap) {
+  return SetDeviceLimit(device_type, deny_bitmap, false, false, false, false);
 }
 
 bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
@@ -614,8 +621,8 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
 }
 
 bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
-                              CgroupConstant::ControllerFile controller_file,
-                              const std::vector<std::string> &strs) {
+                               CgroupConstant::ControllerFile controller_file,
+                               const std::vector<std::string> &strs) {
   if (!CgroupUtil::Mounted(controller)) {
     CRANE_WARN("Unable to set {} because cgroup {} is not mounted.\n",
                CgroupConstant::GetControllerFileStringView(controller_file),
@@ -636,20 +643,21 @@ bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
                m_cgroup_path_);
     return false;
   }
-  for(const auto& str:strs){
+  for (const auto &str : strs) {
     if ((err = cgroup_set_value_string(
-            cg_controller,
-            CgroupConstant::GetControllerFileStringView(controller_file).data(),
-            str.c_str()))) {
+             cg_controller,
+             CgroupConstant::GetControllerFileStringView(controller_file)
+                 .data(),
+             str.c_str()))) {
       CRANE_WARN("Unable to add string for {}: {} {}\n", m_cgroup_path_, err,
-                cgroup_strerror(err));
+                 cgroup_strerror(err));
       return false;
     }
     // Commit cgroup modifications.
     if ((err = cgroup_modify_cgroup(m_cgroup_))) {
       CRANE_WARN("Unable to commit {} for cgroup {}: {} {}\n",
-                CgroupConstant::GetControllerFileStringView(controller_file),
-                m_cgroup_path_, err, cgroup_strerror(err));
+                 CgroupConstant::GetControllerFileStringView(controller_file),
+                 m_cgroup_path_, err, cgroup_strerror(err));
       return false;
     }
   }

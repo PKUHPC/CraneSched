@@ -53,7 +53,6 @@ std::string HostNameListToStr(T const &host_list)
   }
 }
 
-
 std::string GenerateCudaVisiableDeviceStr(const uint64_t count);
 
 std::string ReadableGres(const DedicatedResource &dedicated_resource);
