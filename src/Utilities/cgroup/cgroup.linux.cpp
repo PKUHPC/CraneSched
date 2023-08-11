@@ -498,12 +498,12 @@ bool Cgroup::SetBlockioWeight(uint64_t weight) {
 }
 
 bool Cgroup::SetDeviceLimit(DedicatedResource::DeviceType device_type,
-                            uint64_t limit_bitmap, bool allow, bool read,
-                            bool write, bool mknod) {
+                            uint64_t limit_bitmap, bool allow, bool set_read,
+                            bool set_write, bool set_mknod) {
   std::string op;
-  if (!read) op += "r";
-  if (!write) op += "w";
-  if (!mknod) op += "m";
+  if (set_read) op += "r";
+  if (set_write) op += "w";
+  if (set_mknod) op += "m";
   char device_op_type = CgroupConstant::GetDeviceOpType(device_type);
   // example: "c 195:0 rwm" write to DEVICES_DENY
   // will forbid process from accessing /dev/nvidia0
@@ -529,7 +529,12 @@ bool Cgroup::SetDeviceLimit(DedicatedResource::DeviceType device_type,
 
 bool Cgroup::SetDeviceDeny(DedicatedResource::DeviceType device_type,
                            uint64_t deny_bitmap) {
-  return SetDeviceLimit(device_type, deny_bitmap, false, false, false, false);
+  return SetDeviceLimit(device_type, deny_bitmap, false, true, true, true);
+}
+
+bool Cgroup::SetDeviceAllowOnly(DedicatedResource::DeviceType device_type,
+                        const uint64_t allow_bitmap){
+  return SetDeviceLimit(device_type,~allow_bitmap, false, true, true, true);
 }
 
 bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,

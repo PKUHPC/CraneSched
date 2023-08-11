@@ -201,8 +201,8 @@ message PartitionInfo {
   uint64 avail_mem = 10;
   uint64 alloc_mem = 11;
   map<string,uint64> device = 12;
-  map<string,uint64> alloc_device =13;
-  map<string,uint64> avail_device =14;
+  map<string,uint64> alloc_device = 13;
+  map<string,uint64> avail_device = 14;
 }
 
 message CranedInfo {
@@ -217,8 +217,8 @@ message CranedInfo {
   repeated string partition_names = 9;
   uint32 running_task_num = 10;
   map<string,uint64> device = 12;
-  map<string,uint64> alloc_device =13;
-  map<string,uint64> avail_device =14;
+  map<string,uint64> alloc_device = 13;
+  map<string,uint64> avail_device = 14;
 }
 
 message TrimmedPartitionInfo {

@@ -229,10 +229,12 @@ class Cgroup {
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes);
   bool SetBlockioWeight(uint64_t weight);
   bool SetDeviceLimit(DedicatedResource::DeviceType device_type,
-                      const uint64_t alloc_bitmap, bool allow, bool read,
-                      bool write, bool mknod);
+                      uint64_t alloc_bitmap, bool allow, bool set_read,
+                      bool set_write, bool set_mknod);
   bool SetDeviceDeny(DedicatedResource::DeviceType device_type,
-                     const uint64_t alloc_bitmap);
+                     uint64_t deny_bitmap);
+  bool SetDeviceAllowOnly(DedicatedResource::DeviceType device_type,
+                          uint64_t allow_bitmap);
   bool SetControllerValue(CgroupConstant::Controller controller,
                           CgroupConstant::ControllerFile controller_file,
                           uint64_t value);

@@ -44,25 +44,37 @@ bool operator==(const AllocatableResource& lhs,
 
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs) {
   for (auto& entry : lhs.devices) {
-    if (entry.second > rhs.devices.at(entry.first)) return false;
+    const std::string& lhs_device_name = entry.first;
+    const uint64_t lhs_device_num = entry.second;
+    if (!rhs.devices.contains(lhs_device_name)) {
+      if (lhs_device_num != 0)return false;
+      else continue;
+    }else if (lhs_device_num > rhs.devices.at(lhs_device_name)) return false;
+
   }
   return true;
 }
 bool operator<(const DedicatedResource& lhs, const DedicatedResource& rhs) {
   for (auto& entry : lhs.devices) {
-    if (entry.second >= rhs.devices.at(entry.first)) return false;
+    const std::string& lhs_device_name = entry.first;
+    const uint64_t lhs_device_num = entry.second;
+    if (!rhs.devices.contains(lhs_device_name)) {
+      if (lhs_device_num != 0)return false;
+      else continue;
+    }else if (lhs_device_num >= rhs.devices.at(lhs_device_name)) return false;
   }
-
   return true;
 }
 
 bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs) {
   for (auto& entry : lhs.devices) {
-    auto& lhs_count = entry.second;
-    auto& rhs_count = rhs.devices.at(entry.first);
-    if (lhs_count != rhs_count) {
+    const std::string& lhs_device_name = entry.first;
+    const uint64_t lhs_device_num = entry.second;
+    if (!rhs.devices.contains(lhs_device_name)) {
+      if (lhs_device_num != 0)  return false;
+      else continue;
+    }else if (lhs_device_num != rhs.devices.at(lhs_device_name))
       return false;
-    }
   }
   return true;
 }
