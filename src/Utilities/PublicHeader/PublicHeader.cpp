@@ -43,23 +43,23 @@ bool operator==(const AllocatableResource& lhs,
 }
 
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs) {
-  for (auto& it : lhs.devices) {
-    if (it.second > rhs.devices.at(it.first)) return false;
+  for (auto& entry : lhs.devices) {
+    if (entry.second > rhs.devices.at(entry.first)) return false;
   }
   return true;
 }
 bool operator<(const DedicatedResource& lhs, const DedicatedResource& rhs) {
-  for (auto& it : lhs.devices) {
-    if (it.second >= rhs.devices.at(it.first)) return false;
+  for (auto& entry : lhs.devices) {
+    if (entry.second >= rhs.devices.at(entry.first)) return false;
   }
 
   return true;
 }
 
 bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs) {
-  for (auto& it : lhs.devices) {
-    auto& lhs_count = it.second;
-    auto& rhs_count = rhs.devices.at(it.first);
+  for (auto& entry : lhs.devices) {
+    auto& lhs_count = entry.second;
+    auto& rhs_count = rhs.devices.at(entry.first);
     if (lhs_count != rhs_count) {
       return false;
     }
