@@ -698,7 +698,10 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
    * https://grpc.github.io/grpc/cpp/md_doc_connection-backoff.html
    */
   grpc::ChannelArguments channel_args;
-  channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+
+  if (g_config.CompressedRpc)
+    channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+
   //  channel_args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, 100 /*ms*/);
   //  channel_args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, 1 /*s*/ * 1000
   //  /*ms*/); channel_args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, 2 /*s*/ *

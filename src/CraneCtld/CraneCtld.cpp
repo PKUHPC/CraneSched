@@ -54,6 +54,9 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.ListenConf.CraneCtldListenPort = kCtldDefaultPort;
 
+      if (config["CompressedRpc"])
+        g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
+
       if (config["UseTls"] && config["UseTls"].as<bool>()) {
         g_config.ListenConf.UseTls = true;
 

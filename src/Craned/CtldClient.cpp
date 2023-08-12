@@ -11,7 +11,9 @@ CtldClient::~CtldClient() {
 
 void CtldClient::InitChannelAndStub(const std::string& server_address) {
   grpc::ChannelArguments channel_args;
-  channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+
+  if (g_config.CompressedRpc)
+    channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   if (g_config.ListenConf.UseTls) {
     std::string ctld_address = fmt::format("{}.{}:{}", server_address,

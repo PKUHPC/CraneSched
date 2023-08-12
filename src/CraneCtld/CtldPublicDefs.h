@@ -36,6 +36,7 @@ struct Config {
   };
 
   CraneCtldListenConf ListenConf;
+  bool CompressedRpc{};
 
   std::string CraneCtldDebugLevel;
   std::string CraneCtldLogFile;
