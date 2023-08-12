@@ -26,6 +26,17 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
     return false;
   }
 
+  // Unqlite does not roll back and clear WAL after crashing.
+  // Call rollback function to prevent DB writing from error due to
+  // possible remaining WAL.
+  rc = unqlite_rollback(m_db_);
+  if (rc != UNQLITE_OK) {
+    m_db_ = nullptr;
+    CRANE_ERROR("Failed to rollback the undone transaction: {}",
+                GetInternalErrorStr_());
+    return false;
+  }
+
   // There is no race during Init stage.
   // No lock is needed.
   rc = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(s_next_task_id_str_,
