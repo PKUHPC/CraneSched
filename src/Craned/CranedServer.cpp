@@ -710,6 +710,10 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
   grpc::ServerBuilder builder;
+
+  if (g_config.CompressedRpc)
+    builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+
   builder.AddListeningPort(listen_conf.UnixSocketListenAddr,
                            grpc::InsecureServerCredentials());
 

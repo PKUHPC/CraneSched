@@ -179,19 +179,6 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(TaskInCtld* task) {
   return true;
 }
 
-std::unordered_map<EmbeddedDbClient::db_id_t,
-                   EmbeddedDbClient::DbQueueNode>::const_iterator
-EmbeddedDbClient::FindDbQueueNodeInRamQueueNoLock_(
-    EmbeddedDbClient::db_id_t db_id,
-    std::unordered_map<db_id_t, DbQueueNode> const& q) {
-  auto db_queue_eq =
-      [db_id](std::unordered_map<db_id_t, DbQueueNode>::value_type const& it) {
-        return it.second.db_id == db_id;
-      };
-
-  return std::find_if(q.cbegin(), q.cend(), db_queue_eq);
-}
-
 int EmbeddedDbClient::DeleteDbQueueNodeNoLockAndTxn_(
     EmbeddedDbClient::db_id_t db_id,
     std::unordered_map<db_id_t, DbQueueNode>* q, DbQueueDummyHead* q_head,
@@ -199,7 +186,7 @@ int EmbeddedDbClient::DeleteDbQueueNodeNoLockAndTxn_(
   db_id_t prev_db_id, next_db_id;
 
   int rc;
-  auto it = FindDbQueueNodeInRamQueueNoLock_(db_id, *q);
+  auto it = q->find(db_id);
   if (it != q->end()) {
     prev_db_id = it->second.prev_db_id;
     next_db_id = it->second.next_db_id;
@@ -312,7 +299,7 @@ int EmbeddedDbClient::InsertBeforeDbQueueNodeNoLockAndTxn_(
 
   if (pos == q_head->db_id) return UNQLITE_INVALID;
 
-  auto it = FindDbQueueNodeInRamQueueNoLock_(pos, *q);
+  auto it = q->find(pos);
   if (it == q->end()) {
     if (pos == q_tail->db_id)
       prev_db_id = q_tail->prev_db_id;

@@ -48,6 +48,7 @@ struct Config {
   };
 
   CranedListenConf ListenConf;
+  bool CompressedRpc{};
 
   std::string ControlMachine;
   std::string CraneCtldListenPort;

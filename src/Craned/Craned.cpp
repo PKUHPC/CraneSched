@@ -65,12 +65,13 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.ListenConf.CranedListenAddr = "0.0.0.0";
 
-      // Todo: Add corresponding configuration field.
-
       g_config.ListenConf.CranedListenPort = kCranedDefaultPort;
 
       g_config.ListenConf.UnixSocketListenAddr =
           fmt::format("unix://{}", kDefaultCranedUnixSockPath);
+
+      if (config["CompressedRpc"])
+        g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
       if (config["UseTls"] && config["UseTls"].as<bool>()) {
         g_config.ListenConf.UseTls = true;
