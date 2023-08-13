@@ -158,53 +158,57 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
       }
 
-      uint64_t default_max_age = 7 * 24 * 3600;
-      g_config.PriorityConfig.MaxAge = default_max_age;
+      g_config.PriorityConfig.MaxAge = kPriorityDefaultMaxAge;
       if (config["PriorityMaxAge"]) {
-        std::string max_age_str = config["PriorityMaxAge"].as<std::string>();
+        std::string max_age = config["PriorityMaxAge"].as<std::string>();
+
         std::regex pattern_hour_min_sec("(\\d+):(\\d+):(\\d+)");
         std::regex pattern_day_hour("(\\d+)-(\\d+)");
         std::regex pattern_min("(\\d+)");
         std::regex pattern_day_hour_min_sec("(\\d+)-(\\d+):(\\d+):(\\d+)");
         std::smatch matches;
-        uint64_t days, hours, mins, secs;
-        if (std::regex_match(max_age_str, matches, pattern_hour_min_sec)) {
-          hours = std::stoi(matches[1]);
-          mins = std::stoi(matches[2]);
-          secs = std::stoi(matches[3]);
-          g_config.PriorityConfig.MaxAge = hours * 3600 + mins * 60 + secs;
-        } else if (std::regex_match(max_age_str, matches, pattern_day_hour)) {
-          days = std::stoi(matches[1]);
-          hours = std::stoi(matches[2]);
-          g_config.PriorityConfig.MaxAge = days * 24 * 3600 + hours * 3600;
-        } else if (std::regex_match(max_age_str, pattern_min)) {
-          mins = std::stoi(max_age_str);
-          g_config.PriorityConfig.MaxAge = mins * 60;
-        } else if (std::regex_match(max_age_str, pattern_day_hour_min_sec)) {
-          days = std::stoi(matches[1]);
-          hours = std::stoi(matches[2]);
-          mins = std::stoi(matches[3]);
-          secs = std::stoi(matches[4]);
+
+        uint64_t day, hour, minute, second;
+        if (std::regex_match(max_age, matches, pattern_hour_min_sec)) {
+          hour = std::stoi(matches[1]);
+          minute = std::stoi(matches[2]);
+          second = std::stoi(matches[3]);
+
+          g_config.PriorityConfig.MaxAge = hour * 3600 + minute * 60 + second;
+        } else if (std::regex_match(max_age, matches, pattern_day_hour)) {
+          day = std::stoi(matches[1]);
+          hour = std::stoi(matches[2]);
+
+          g_config.PriorityConfig.MaxAge = day * 24 * 3600 + hour * 3600;
+        } else if (std::regex_match(max_age, pattern_min)) {
+          minute = std::stoi(max_age);
+
+          g_config.PriorityConfig.MaxAge = minute * 60;
+        } else if (std::regex_match(max_age, pattern_day_hour_min_sec)) {
+          day = std::stoi(matches[1]);
+          hour = std::stoi(matches[2]);
+          minute = std::stoi(matches[3]);
+          second = std::stoi(matches[4]);
+
           g_config.PriorityConfig.MaxAge =
-              days * 24 * 3600 + hours * 3600 + mins * 60 + secs;
+              day * 24 * 3600 + hour * 3600 + minute * 60 + second;
         }
+
         g_config.PriorityConfig.MaxAge =
-            g_config.PriorityConfig.MaxAge > default_max_age
-                ? default_max_age
-                : g_config.PriorityConfig.MaxAge;
+            std::min(g_config.PriorityConfig.MaxAge, kPriorityDefaultMaxAge);
       }
 
-      if (config["PriorityType"] &&
-          config["PriorityType"].as<std::string>() == "priority/multifactor")
-        g_config.PriorityConfig.Type = config["PriorityType"].as<std::string>();
-      else
-        g_config.PriorityConfig.Type = "priority/basic";
+      if (config["PriorityType"]) {
+        std::string priority_type = config["PriorityType"].as<std::string>();
+        if (priority_type == "priority/multifactor")
+          g_config.PriorityConfig.Type = Ctld::Config::Priority::MultiFactor;
+        else
+          g_config.PriorityConfig.Type = Ctld::Config::Priority::Basic;
+      }
 
-      if (config["PriorityFavorSmall"] &&
-          config["PriorityFavorSmall"].as<std::string>() == "NO")
-        g_config.PriorityConfig.FavorSmall = false;
-      else
-        g_config.PriorityConfig.FavorSmall = true;
+      if (config["PriorityFavorSmall"])
+        g_config.PriorityConfig.FavorSmall =
+            config["PriorityFavorSmall"].as<bool>();
 
       if (config["PriorityWeightAge"])
         g_config.PriorityConfig.WeightAge =
@@ -212,9 +216,9 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.PriorityConfig.WeightAge = 1000;
 
-      if (config["PriorityWeightFairshare"])
+      if (config["PriorityWeightFairShare"])
         g_config.PriorityConfig.WeightFairShare =
-            config["PriorityWeightFairshare"].as<uint32_t>();
+            config["PriorityWeightFairShare"].as<uint32_t>();
       else
         g_config.PriorityConfig.WeightFairShare = 0;
 
@@ -333,7 +337,8 @@ void ParseConfig(int argc, char** argv) {
                           name);
             } else {
               CRANE_ERROR(
-                  "Unknown node '{}' found in partition '{}'. It is ignored "
+                  "Unknown node '{}' found in partition '{}'. It is "
+                  "ignored "
                   "and should be contained in the configuration file.",
                   node, name);
             }
@@ -365,7 +370,6 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
       }
-
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
                      e.what());
@@ -518,9 +522,9 @@ void InitializeCtldGlobalVariables() {
   // TaskScheduler will always recovery pending or running tasks since last
   // failure, it might be reasonable to wait some time (1s) for all healthy
   // craned nodes (most of the time all the craned nodes are healthy) to be
-  // online or to wait for the connections to some offline craned nodes to time
-  // out. Otherwise, recovered pending or running tasks may always fail to be
-  // re-queued.
+  // online or to wait for the connections to some offline craned nodes to
+  // time out. Otherwise, recovered pending or running tasks may always fail
+  // to be re-queued.
   std::chrono::time_point<std::chrono::system_clock> wait_end_point =
       std::chrono::system_clock::now() + 1s;
   size_t to_registered_craneds_cnt = g_config.Nodes.size();

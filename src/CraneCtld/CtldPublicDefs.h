@@ -37,8 +37,10 @@ struct Config {
   };
 
   struct Priority {
-    std::string Type;
-    bool FavorSmall;
+    enum TypeEnum { Basic, MultiFactor };
+    TypeEnum Type;
+
+    bool FavorSmall{true};
     uint64_t MaxAge;
     uint32_t WeightAge;
     uint32_t WeightFairShare;

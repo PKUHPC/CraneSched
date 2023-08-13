@@ -42,11 +42,17 @@ CranedLogFile: /tmp/craned/craned.log
 CranedForeground: true
 
 PriorityType: priority/multifactor
-PriorityFavorSmall: YES
+
+# Default value is true
+PriorityFavorSmall: true
+
 PriorityMaxAge: 14-0
 PriorityWeightAge: 500
-PriorityWeightFairshare: 10000
-PriorityWeightJobSize: 0 #don't use the job size factor
+PriorityWeightFairShare: 10000
+
+# 0 means that job size factor is not used.
+PriorityWeightJobSize: 0
+
 PriorityWeightPartition: 1000
 PriorityWeightQ0S: 1000000
 

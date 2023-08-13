@@ -31,12 +31,14 @@ enum class CraneErr : uint16_t {
   __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
 };
 
-inline constexpr size_t kDefaultQueryTaskNumLimit = 100;
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kCforedDefaultPort = "10012";
 inline const char* kDefaultConfigPath = "/etc/crane/config.yaml";
 inline const char* kUnlimitedQosName = "UNLIMITED";
+
+inline constexpr size_t kDefaultQueryTaskNumLimit = 100;
+inline constexpr uint64_t kPriorityDefaultMaxAge = 7 * 24 * 3600;  // 7 days
 
 #define DEFAULT_CRANE_TEMP_DIR "/tmp/crane"
 

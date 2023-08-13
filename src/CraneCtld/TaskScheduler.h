@@ -15,6 +15,11 @@
 
 namespace Ctld {
 
+using OrderedTaskMap = absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>;
+
+using UnorderedTaskMap =
+    absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>;
+
 class INodeSelectionAlgo {
  public:
   // Pair content: <The task which is going to be run,
@@ -225,6 +230,13 @@ class TaskScheduler {
 
   std::thread m_schedule_thread_;
   std::atomic_bool m_thread_stop_{};
+};
+
+class IPrioritySorter {
+ public:
+  virtual std::vector<task_id_t> GetOrderedTaskIdList(
+      const OrderedTaskMap& pending_task_map,
+      const UnorderedTaskMap& running_task_map) = 0;
 };
 
 }  // namespace Ctld

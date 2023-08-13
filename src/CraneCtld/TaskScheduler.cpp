@@ -1449,7 +1449,7 @@ void MinLoadFirst::NodeSelect(
 
   std::list<task_id_t> task_id_list;
 
-  if (g_config.PriorityConfig.Type == "priority/multifactor") {
+  if (g_config.PriorityConfig.Type == Config::Priority::MultiFactor) {
     task_id_list =
         g_priority->GetOrderedTaskIdList(pending_task_map, running_tasks);
   } else {
