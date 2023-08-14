@@ -18,7 +18,52 @@ namespace Ctld {
 using OrderedTaskMap = absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>;
 
 using UnorderedTaskMap =
-    absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>;
+    absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>;
+
+class IPrioritySorter {
+ public:
+  virtual std::vector<task_id_t> GetOrderedTaskIdList(
+      const OrderedTaskMap& pending_task_map,
+      const UnorderedTaskMap& running_task_map) = 0;
+
+  virtual ~IPrioritySorter() = default;
+};
+
+class BasicPriority : public IPrioritySorter {
+ public:
+  std::vector<task_id_t> GetOrderedTaskIdList(
+      const OrderedTaskMap& pending_task_map,
+      const UnorderedTaskMap& running_task_map) override {
+    std::vector<task_id_t> task_id_vec;
+    for (const auto& pair : pending_task_map) task_id_vec.push_back(pair.first);
+    return task_id_vec;
+  }
+};
+
+class MultiFactorPriority : public IPrioritySorter {
+ public:
+  std::vector<task_id_t> GetOrderedTaskIdList(
+      const OrderedTaskMap& pending_task_map,
+      const UnorderedTaskMap& running_task_map) override;
+
+ private:
+  struct FactorBound {
+    uint64_t age_max, age_min;
+    uint32_t qos_priority_max, qos_priority_min;
+    uint32_t part_priority_max, part_priority_min;
+    uint32_t nodes_alloc_max, nodes_alloc_min;
+    uint64_t mem_alloc_max, mem_alloc_min;
+    double cpus_alloc_max, cpus_alloc_min;
+    uint32_t service_val_max, service_val_min;
+    std::map<std::string, uint32_t> acc_service_val_map;
+  };
+
+  void CalculateFactorBound_(const OrderedTaskMap& pending_task_map,
+                             const UnorderedTaskMap& running_task_map);
+  uint32_t CalculatePriority_(Ctld::TaskInCtld* task);
+
+  FactorBound m_factor_bound_;
+};
 
 class INodeSelectionAlgo {
  public:
@@ -61,6 +106,17 @@ class INodeSelectionAlgo {
 };
 
 class MinLoadFirst : public INodeSelectionAlgo {
+ public:
+  MinLoadFirst(IPrioritySorter* priority_sorter)
+      : m_priority_sorter_(priority_sorter) {}
+
+  void NodeSelect(
+      const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>&
+          running_tasks,
+      absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
+      std::list<NodeSelectionResult>* selection_result_list) override;
+
+ private:
   static constexpr bool kAlgoTraceOutput = false;
 
   /**
@@ -116,12 +172,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
       Resources const& resources, std::list<CranedId> const& craned_ids,
       NodeSelectionInfo* node_selection_info);
 
- public:
-  void NodeSelect(
-      const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>&
-          running_tasks,
-      absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
-      std::list<NodeSelectionResult>* selection_result_list) override;
+  IPrioritySorter* m_priority_sorter_;
 };
 
 class TaskScheduler {
@@ -141,8 +192,15 @@ class TaskScheduler {
   using HashSet = absl::flat_hash_set<K>;
 
  public:
-  explicit TaskScheduler(std::unique_ptr<INodeSelectionAlgo> algo)
-      : m_node_selection_algo_(std::move(algo)) {}
+  TaskScheduler() {
+    if (g_config.PriorityConfig.Type == Config::Priority::Basic)
+      m_priority_sorter_ = std::make_unique<BasicPriority>();
+    else if (g_config.PriorityConfig.Type == Config::Priority::MultiFactor)
+      m_priority_sorter_ = std::make_unique<MultiFactorPriority>();
+
+    m_node_selection_algo_ =
+        std::make_unique<MinLoadFirst>(m_priority_sorter_.get());
+  }
 
   ~TaskScheduler();
 
@@ -188,16 +246,14 @@ class TaskScheduler {
                                crane::grpc::TaskStatus new_status,
                                uint32_t exit_code);
 
-  CraneErr TryRequeueRecoveredTaskIntoPendingQueueLock_(
+  void RequeueRecoveredTaskIntoPendingQueueLock_(
       std::unique_ptr<TaskInCtld> task);
 
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
 
-  /**
-   * @brief task->partition will be set if kOk is returned.
-   * @return kOk if the task can be scheduled.
-   */
-  static CraneErr CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task);
+  static CraneErr AcquireTaskAttributes(TaskInCtld* task);
+
+  static CraneErr CheckTaskValidity(TaskInCtld* task);
 
   static void TransferTaskToMongodb_(TaskInCtld* task);
 
@@ -228,47 +284,13 @@ class TaskScheduler {
       m_partition_to_tasks_map_ GUARDED_BY(m_task_indexes_mtx_);
   Mutex m_task_indexes_mtx_;
 
+  std::unique_ptr<IPrioritySorter> m_priority_sorter_;
+
   std::thread m_schedule_thread_;
   std::atomic_bool m_thread_stop_{};
 };
 
-class IPrioritySorter {
- public:
-  virtual std::vector<task_id_t> GetOrderedTaskIdList(
-      const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map) = 0;
-};
-
 }  // namespace Ctld
 
+inline std::unique_ptr<Ctld::MultiFactorPriority> g_priority;
 inline std::unique_ptr<Ctld::TaskScheduler> g_task_scheduler;
-
-class Priority {
- public:
-  struct MaxMinValue {
-    uint64_t age_max, age_min;
-    uint32_t qos_priority_max, qos_priority_min;
-    uint32_t part_priority_max, part_priority_min;
-    uint32_t nodes_alloc_max, nodes_alloc_min;
-    uint64_t mem_alloc_max, mem_alloc_min;
-    double cpus_alloc_max, cpus_alloc_min;
-    uint32_t service_val_max, service_val_min;
-    std::map<std::string, uint32_t> acc_service_val_map;
-  };
-  std::list<task_id_t> GetOrderedTaskIdList(
-      const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
-          pending_task_map,
-      const absl::flat_hash_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>&
-          running_task_map_);
-  void MaxMinInit(
-      const absl::btree_map<task_id_t, std::unique_ptr<Ctld::TaskInCtld>>*
-          pending_task_map,
-      const absl::flat_hash_map<uint32_t, std::unique_ptr<Ctld::TaskInCtld>>*
-          m_running_task_map_);
-  uint32_t CalculatePriority(Ctld::TaskInCtld* task);
-
- private:
-  MaxMinValue max_min_value;
-};
-
-inline std::unique_ptr<Priority> g_priority;

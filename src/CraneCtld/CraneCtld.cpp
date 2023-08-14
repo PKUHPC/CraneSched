@@ -240,12 +240,6 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.PriorityConfig.WeightQOS = 0;
 
-      if (config["PriorityWeightAssoc"])
-        g_config.PriorityConfig.WeightAssoc =
-            config["PriorityWeightAssoc"].as<uint32_t>();
-      else
-        g_config.PriorityConfig.WeightAssoc = 0;
-
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {
@@ -467,12 +461,15 @@ void InitializeCtldGlobalVariables() {
     std::exit(1);
   }
 
+  // Account manager must be initialized before Task Scheduler
+  // since the recovery stage of the task scheduler will acquire
+  // information from account manager.
   g_account_manager = std::make_unique<AccountManager>();
 
   g_meta_container = std::make_unique<CranedMetaContainerSimpleImpl>();
   g_meta_container->InitFromConfig(g_config);
 
-  g_priority = std::make_unique<Priority>();
+  g_priority = std::make_unique<MultiFactorPriority>();
   bool ok;
   g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
   ok = g_embedded_db_client->Init(g_config.CraneCtldDbPath);
@@ -547,8 +544,7 @@ void InitializeCtldGlobalVariables() {
     }
   }
 
-  g_task_scheduler =
-      std::make_unique<TaskScheduler>(std::make_unique<MinLoadFirst>());
+  g_task_scheduler = std::make_unique<TaskScheduler>();
   ok = g_task_scheduler->Init();
   if (!ok) {
     CRANE_ERROR("The initialization of TaskScheduler failed. Exiting...");

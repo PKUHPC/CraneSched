@@ -120,7 +120,7 @@ class CranedMetaContainerSimpleImpl final
   AllPartitionsMetaMap partition_metas_map_;
   CranedMetaMap craned_meta_map_;
 
-  // A craned node may belongs to multiple partitions.
+  // A craned node may belong to multiple partitions.
   absl::flat_hash_map<CranedId /*craned hostname*/, std::list<PartitionId>>
       craned_id_part_ids_map_;
 
