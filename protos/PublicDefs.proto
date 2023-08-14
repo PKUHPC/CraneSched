@@ -22,7 +22,7 @@ message AllocatableResource {
 
 
 message DedicatedResource {
-  map <string,uint64> devices=1;
+  map <string,uint64> devices = 1;
 }
 
 message Resources {
