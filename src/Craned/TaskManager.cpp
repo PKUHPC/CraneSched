@@ -670,7 +670,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       uint64_t cuda_count = 0;
       for (const auto& resource :
            instance->task.resources().dedicated_resource().devices()) {
-        if (util::CgroupUtil::getDeviceType(resource.first) ==
+        if (util::CgroupUtil::GetDeviceType(resource.first) ==
             DedicatedResource::DeviceType::NVIDIA_GRAPHICS_CARD) {
           cuda_count += resource.second;
         }

@@ -269,7 +269,7 @@ class CgroupUtil {
       const std::string &cgroup_string, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
-  static DedicatedResource::DeviceType getDeviceType(
+  static DedicatedResource::DeviceType GetDeviceType(
       const std::string &device_name);
 
  private:

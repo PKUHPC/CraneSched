@@ -247,7 +247,7 @@ std::shared_ptr<Cgroup> CgroupUtil::CreateOrOpen(
   return std::make_unique<Cgroup>(cgroup_string, native_cgroup);
 }
 
-DedicatedResource::DeviceType CgroupUtil::getDeviceType(
+DedicatedResource::DeviceType CgroupUtil::GetDeviceType(
     const std::string &device_name) {
   if (device_name.starts_with("gpu")) {
     return DedicatedResource::DeviceType::NVIDIA_GRAPHICS_CARD;
