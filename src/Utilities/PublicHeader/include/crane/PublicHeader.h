@@ -158,6 +158,7 @@ struct DedicatedResource {
   explicit DedicatedResource(const crane::grpc::DedicatedResource&);
   DedicatedResource& AddResource(const std::string& device_name,
                                  uint64_t count);
+  bool Empty() const;
   DedicatedResource& operator=(const crane::grpc::DedicatedResource&);
   DedicatedResource& operator+=(const DedicatedResource& rhs);
   DedicatedResource& operator-=(const DedicatedResource& rhs);

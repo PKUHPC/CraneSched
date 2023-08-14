@@ -199,15 +199,18 @@ std::unordered_map<std::string, uint64_t> TaskManager::AllocateDeviceBitmap(
     auto& free_device_bitmap = m_device_name_to_free_bitmap_[device_name];
     std::bitset<64> allocate_device_bitmap;
     uint64_t count = 0;
+
     while (count < device_query_num) {
       int offset = std::countr_zero(free_device_bitmap.to_ullong());
       free_device_bitmap.reset(offset);
       allocate_device_bitmap.set(offset);
       ++count;
     }
+
     device_name_to_allocate_device_bitmap[device_name] =
         allocate_device_bitmap.to_ullong();
   }
+
   m_task_id_to_allocated_device_bitmap_.emplace(
       task_id, device_name_to_allocate_device_bitmap);
   return device_name_to_allocate_device_bitmap;
@@ -676,8 +679,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         }
       }
       if (cuda_count != 0) {
-        env_vec.emplace_back("CUDA_VISIABLE_DEVICE",
-                             util::GenerateCudaVisiableDeviceStr(cuda_count));
+        env_vec.emplace_back("CUDA_VISIBLE_DEVICE",
+                             util::CudaVisibleDevices(cuda_count));
       }
     }
     int64_t time_limit_sec = instance->task.time_limit().seconds();
@@ -948,6 +951,7 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
       event_free(task_instance->termination_timer);
     }
 
+    this_->FreeDeviceBitmap(status_change.task_id);
     // Free the TaskInstance structure
     this_->m_task_map_.erase(status_change.task_id);
     g_ctld_client->TaskStatusChangeAsync(std::move(status_change));
@@ -1104,7 +1108,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
       CRANE_DEBUG("Trying terminating unknown task #{}", elem.task_id);
       return;
     }
-    this_->FreeDeviceBitmap(elem.task_id);
+
     const auto& task_instance = iter->second;
 
     if (elem.terminated_by_user) task_instance->cancelled_by_user = true;
@@ -1236,30 +1240,18 @@ bool TaskManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info) {
     auto cg_iter = this->m_task_id_to_cg_map_.find(info->first_task_id);
     if (cg_iter != this->m_task_id_to_cg_map_.end()) {
       this->m_mtx_.Unlock();
-      if (cg_iter->second == nullptr) {
-        // Lazy creation of cgroup
-        // Todo: Lock on iterator may be required here!
-        cg_iter->second = util::CgroupUtil::CreateOrOpen(
-            CgroupStrByTaskId_(info->first_task_id),
-            util::NO_CONTROLLER_FLAG |
-                util::CgroupConstant::Controller::CPU_CONTROLLER |
-                util::CgroupConstant::Controller::MEMORY_CONTROLLER,
-            util::NO_CONTROLLER_FLAG, false);
-      }
-
-      info->cgroup_path = cg_iter->second->GetCgroupString();
-      info->cgroup_exists = true;
     } else {
       CRANE_ERROR("Cannot find Cgroup* for uid {}'s task #{}!", uid,
                   info->first_task_id);
+      this->m_mtx_.Unlock();
     }
   } else {
     this->m_mtx_.Unlock();
   }
 
-  return info->job_cnt > 0 && info->cgroup_exists;
+  return info->job_cnt > 0;
 }
-
+// Todo: remove this
 bool TaskManager::QueryCgOfTaskIdAsync(uint32_t task_id, util::Cgroup** cg) {
   CRANE_DEBUG("Query Cgroup* task #{}", task_id);
 
@@ -1388,6 +1380,17 @@ bool TaskManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
   }
 
   this->m_mtx_.Unlock();
+
+  if (!iter->second) {
+    auto cgroup_path = CgroupStrByTaskId_(task_id);
+    iter->second = util::CgroupUtil::CreateOrOpen(
+        cgroup_path,
+        util::NO_CONTROLLER_FLAG |
+            util::CgroupConstant::Controller::CPU_CONTROLLER |
+            util::CgroupConstant::Controller::MEMORY_CONTROLLER |
+            util::CgroupConstant::Controller::DEVICES_CONTROLLER,
+        util::NO_CONTROLLER_FLAG, false);
+  }
 
   return iter->second->MigrateProcIn(pid);
 }

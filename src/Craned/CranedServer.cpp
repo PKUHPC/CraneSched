@@ -618,24 +618,27 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     response->set_ok(true);
     response->set_task_id(reply_from_remote_service.task_id());
 
-    util::Cgroup *cg;
-    if (g_task_mgr->QueryCgOfTaskIdAsync(reply_from_remote_service.task_id(),
-                                         &cg)) {
-      CRANE_TRACE(
-          "ssh client with remote port {} belongs to task #{}. "
-          "Moving this ssh session process into the task's cgroup",
-          request->ssh_remote_port(), reply_from_remote_service.task_id());
-
-      response->set_ok(true);
-      response->set_task_id(reply_from_remote_service.task_id());
-      response->set_cgroup_path(cg->GetCgroupString());
-    } else {
-      CRANE_TRACE(
-          "ssh client with remote port {} belongs to task #{}. "
-          "But the task's cgroup is not found. Reject this ssh request",
-          request->ssh_remote_port(), reply_from_remote_service.task_id());
-      response->set_ok(false);
-    }
+    CRANE_TRACE(
+        "ssh client with remote port {} belongs to task #{}. "
+        "Moving this ssh session process into the task's cgroup",
+        request->ssh_remote_port(), reply_from_remote_service.task_id());
+//    util::Cgroup *cg;
+//    if (g_task_mgr->QueryCgOfTaskIdAsync(reply_from_remote_service.task_id(),
+//                                         &cg)) {
+//
+//      response->set_ok(true);
+//      response->set_task_id(reply_from_remote_service.task_id());
+//    }
+//
+//      // Todo: Remove it
+//      response->set_cgroup_path(cg->GetCgroupString());
+//    } else {
+//      CRANE_TRACE(
+//          "ssh client with remote port {} belongs to task #{}. "
+//          "But the task's cgroup is not found. Reject this ssh request",
+//          request->ssh_remote_port(), reply_from_remote_service.task_id());
+//      response->set_ok(false);
+//    }
 
     return Status::OK;
   } else {
@@ -648,7 +651,10 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
           "cgroup {}.",
           info.first_task_id, request->uid(), info.cgroup_path);
       response->set_task_id(info.first_task_id);
-      response->set_cgroup_path(info.cgroup_path);
+
+      // Todo: Remove it
+//      response->set_cgroup_path(info.cgroup_path);
+
       response->set_ok(true);
     } else {
       CRANE_TRACE(

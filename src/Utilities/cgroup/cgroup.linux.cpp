@@ -500,6 +500,10 @@ bool Cgroup::SetBlockioWeight(uint64_t weight) {
 bool Cgroup::SetDeviceLimit(DedicatedResource::DeviceType device_type,
                             uint64_t limit_bitmap, bool allow, bool set_read,
                             bool set_write, bool set_mknod) {
+  if (device_type==DedicatedResource::DeviceType::InvalidDevice){
+    CRANE_ERROR("Invalid device type for SetDeviceLimit");
+    return false;
+  }
   std::string op;
   if (set_read) op += "r";
   if (set_write) op += "w";

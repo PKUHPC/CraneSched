@@ -198,7 +198,7 @@ void ParseConfig(int argc, char** argv) {
             while (std::regex_search(gres, entry, pattern)) {
               std::string device_name = entry[1];
               std::string device_type = entry[2].matched
-                                            ? std::string(entry[2])
+                                            ? entry[2]
                                             : std::string("default");
               uint64_t device_num = std::stoul(entry[3]);
               if (entry[2].matched) {

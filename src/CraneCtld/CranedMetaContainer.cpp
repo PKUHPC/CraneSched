@@ -226,9 +226,11 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     auto& alloc_res_total = craned_meta.res_total.allocatable_resource;
     auto& alloc_res_in_use = craned_meta.res_in_use.allocatable_resource;
     auto& alloc_res_avail = craned_meta.res_avail.allocatable_resource;
+
     auto& dedicated_res_total = craned_meta.res_total.dedicated_resource;
     auto& dedicated_res_in_use = craned_meta.res_in_use.dedicated_resource;
     auto& dedicated_res_avail = craned_meta.res_avail.dedicated_resource;
+
     craned_info->set_hostname(craned_meta.static_meta.hostname);
     craned_info->set_cpu(alloc_res_total.cpu_count);
     craned_info->set_alloc_cpu(alloc_res_in_use.cpu_count);
@@ -236,6 +238,9 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     craned_info->set_real_mem(alloc_res_total.memory_bytes);
     craned_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
     craned_info->set_free_mem(alloc_res_avail.memory_bytes);
+    craned_info->set_running_task_num(
+        craned_meta.running_task_resource_map.size());
+
     auto* mutable_device_map = craned_info->mutable_device();
     for (const auto& entry : dedicated_res_total.devices) {
       (*mutable_device_map)[entry.first] = entry.second;
@@ -248,8 +253,7 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     for (const auto& entry : dedicated_res_avail.devices) {
       (*mutable_avail_device_map)[entry.first] = entry.second;
     }
-    craned_info->set_running_task_num(
-        craned_meta.running_task_resource_map.size());
+
     if (craned_meta.alive)
       craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
     else
@@ -281,6 +285,7 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   auto& alloc_res_total = craned_meta.res_total.allocatable_resource;
   auto& alloc_res_in_use = craned_meta.res_in_use.allocatable_resource;
   auto& alloc_res_avail = craned_meta.res_avail.allocatable_resource;
+
   auto& dedicated_res_total = craned_meta.res_total.dedicated_resource;
   auto& dedicated_res_in_use = craned_meta.res_in_use.dedicated_resource;
   auto& dedicated_res_avail = craned_meta.res_avail.dedicated_resource;
@@ -292,6 +297,9 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   craned_info->set_real_mem(alloc_res_total.memory_bytes);
   craned_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
   craned_info->set_free_mem(alloc_res_avail.memory_bytes);
+  craned_info->set_running_task_num(
+      craned_meta.running_task_resource_map.size());
+
   auto* mutable_device_map = craned_info->mutable_device();
   for (const auto& entry : dedicated_res_total.devices) {
     (*mutable_device_map)[entry.first] = entry.second;
@@ -304,8 +312,7 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   for (const auto& entry : dedicated_res_avail.devices) {
     (*mutable_avail_device_map)[entry.first] = entry.second;
   }
-  craned_info->set_running_task_num(
-      craned_meta.running_task_resource_map.size());
+
   if (craned_meta.alive)
     craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
   else
@@ -334,6 +341,7 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
         part_meta.partition_global_meta.m_resource_avail_.allocatable_resource;
     auto& alloc_res_in_use =
         part_meta.partition_global_meta.m_resource_in_use_.allocatable_resource;
+
     auto& dedicated_res_total =
         part_meta.partition_global_meta.m_resource_total_inc_dead_
             .dedicated_resource;
@@ -341,6 +349,7 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
         part_meta.partition_global_meta.m_resource_in_use_.dedicated_resource;
     auto& dedicated_res_avail =
         part_meta.partition_global_meta.m_resource_avail_.dedicated_resource;
+
     part_info->set_name(part_meta.partition_global_meta.name);
     part_info->set_total_nodes(part_meta.partition_global_meta.node_cnt);
     part_info->set_alive_nodes(
@@ -351,6 +360,7 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
     part_info->set_total_mem(alloc_res_total.memory_bytes);
     part_info->set_avail_mem(alloc_res_avail.memory_bytes);
     part_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
+
     auto* mutable_device_map = part_info->mutable_device();
     for (const auto& entry : dedicated_res_total.devices) {
       (*mutable_device_map)[entry.first] = entry.second;
@@ -395,6 +405,7 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
       part_meta.partition_global_meta.m_resource_avail_.allocatable_resource;
   auto& res_in_use =
       part_meta.partition_global_meta.m_resource_in_use_.allocatable_resource;
+
   auto& dedicated_res_total =
       part_meta.partition_global_meta.m_resource_total_inc_dead_
           .dedicated_resource;
@@ -402,6 +413,7 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
       part_meta.partition_global_meta.m_resource_in_use_.dedicated_resource;
   auto& dedicated_res_avail =
       part_meta.partition_global_meta.m_resource_avail_.dedicated_resource;
+
   part_info->set_name(part_meta.partition_global_meta.name);
   part_info->set_total_nodes(part_meta.partition_global_meta.node_cnt);
   part_info->set_alive_nodes(part_meta.partition_global_meta.alive_craned_cnt);
@@ -411,6 +423,7 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
   part_info->set_total_mem(res_total.memory_bytes);
   part_info->set_avail_mem(res_avail.memory_bytes);
   part_info->set_alloc_mem(res_in_use.memory_bytes);
+
   auto* mutable_device_map = part_info->mutable_device();
   for (const auto& entry : dedicated_res_total.devices) {
     (*mutable_device_map)[entry.first] = entry.second;
@@ -465,11 +478,16 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     auto& res_total = craned_meta.res_total.allocatable_resource;
     auto& res_in_use = craned_meta.res_in_use.allocatable_resource;
     auto& res_avail = craned_meta.res_avail.allocatable_resource;
+
+    auto& dedicated_res_total = craned_meta.res_total.dedicated_resource;
+    auto& dedicated_res_in_use = craned_meta.res_in_use.dedicated_resource;
+    auto& dedicated_res_avail = craned_meta.res_avail.dedicated_resource;
+
     if (craned_meta.alive) {
-      if (res_in_use.cpu_count == 0 && res_in_use.memory_bytes == 0) {
+      if (res_in_use.cpu_count == 0 && res_in_use.memory_bytes == 0 && dedicated_res_in_use.Empty()) {
         return filter_craned_states_set.contains(
             crane::grpc::CranedState::CRANE_IDLE);
-      } else if (res_avail.cpu_count == 0 && res_avail.memory_bytes == 0)
+      } else if (res_avail.cpu_count == 0 && res_avail.memory_bytes == 0 && dedicated_res_avail.Empty())
         return filter_craned_states_set.contains(
             crane::grpc::CranedState::CRANE_ALLOC);
       else

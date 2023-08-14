@@ -274,15 +274,15 @@ bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
   }
 }
 
-std::string GenerateCudaVisiableDeviceStr(const uint64_t count) {
+std::string CudaVisibleDevices(const uint64_t count) {
   if (count == 0) {
     return "";
   }
-  std::vector<int> cuda_visiable_device_vars;
+  std::vector<int> cuda_visible_device_vars;
   for (int i = 0; i < count; ++i) {
-    cuda_visiable_device_vars.push_back(i);
+    cuda_visible_device_vars.push_back(i);
   }
-  return absl::StrJoin(cuda_visiable_device_vars, ",");
+  return absl::StrJoin(cuda_visible_device_vars, ",");
 }
 
 std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {

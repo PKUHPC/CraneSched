@@ -163,6 +163,13 @@ DedicatedResource& DedicatedResource::AddResource(
   return *this;
 }
 
+bool DedicatedResource::Empty() const {
+  for(const auto& entry : devices){
+    if(entry.second!=0)return false;
+  }
+  return true;
+}
+
 DedicatedResource::DedicatedResource(
     const crane::grpc::DedicatedResource& value) {
   for (const auto& entry : value.devices()) {
