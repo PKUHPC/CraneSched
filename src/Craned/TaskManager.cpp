@@ -1236,19 +1236,8 @@ bool TaskManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info) {
   if (iter != this->m_uid_to_task_ids_map_.end()) {
     info->job_cnt = iter->second.size();
     info->first_task_id = *iter->second.begin();
-
-    auto cg_iter = this->m_task_id_to_cg_map_.find(info->first_task_id);
-    if (cg_iter != this->m_task_id_to_cg_map_.end()) {
-      this->m_mtx_.Unlock();
-    } else {
-      CRANE_ERROR("Cannot find Cgroup* for uid {}'s task #{}!", uid,
-                  info->first_task_id);
-      this->m_mtx_.Unlock();
-    }
-  } else {
-    this->m_mtx_.Unlock();
   }
-
+  this->m_mtx_.Unlock();
   return info->job_cnt > 0;
 }
 // Todo: remove this
