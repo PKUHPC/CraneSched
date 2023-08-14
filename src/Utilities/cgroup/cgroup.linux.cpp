@@ -533,8 +533,8 @@ bool Cgroup::SetDeviceDeny(DedicatedResource::DeviceType device_type,
 }
 
 bool Cgroup::SetDeviceAllowOnly(DedicatedResource::DeviceType device_type,
-                        const uint64_t allow_bitmap){
-  return SetDeviceLimit(device_type,~allow_bitmap, false, true, true, true);
+                                const uint64_t allow_bitmap) {
+  return SetDeviceLimit(device_type, ~allow_bitmap, false, true, true, true);
 }
 
 bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,

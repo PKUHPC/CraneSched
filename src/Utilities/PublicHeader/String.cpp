@@ -308,6 +308,9 @@ std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
 }
 
 std::string ReadableGres(const DedicatedResource &dedicated_resource) {
+  if (dedicated_resource.devices.empty()) {
+    return "None";
+  }
   std::vector<std::string> kv_strings;
   for (const auto &entry : dedicated_resource.devices) {
     kv_strings.emplace_back(absl::StrCat(entry.first, ":", entry.second));

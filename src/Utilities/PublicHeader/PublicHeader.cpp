@@ -47,33 +47,45 @@ bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs) {
     const std::string& lhs_device_name = entry.first;
     const uint64_t lhs_device_num = entry.second;
     if (!rhs.devices.contains(lhs_device_name)) {
-      if (lhs_device_num != 0)return false;
-      else continue;
-    }else if (lhs_device_num > rhs.devices.at(lhs_device_name)) return false;
-
+      if (lhs_device_num != 0)
+        return false;
+      else
+        continue;
+    } else if (lhs_device_num > rhs.devices.at(lhs_device_name))
+      return false;
   }
   return true;
 }
 bool operator<(const DedicatedResource& lhs, const DedicatedResource& rhs) {
-  for (auto& entry : lhs.devices) {
+  // if both lhs and rhs are empty or the num of devices are all zeros,should
+  // return false
+  bool all_resources_empty = true;
+  for (const auto& entry : lhs.devices) {
     const std::string& lhs_device_name = entry.first;
     const uint64_t lhs_device_num = entry.second;
     if (!rhs.devices.contains(lhs_device_name)) {
-      if (lhs_device_num != 0)return false;
-      else continue;
-    }else if (lhs_device_num >= rhs.devices.at(lhs_device_name)) return false;
+      if (lhs_device_num != 0)
+        return false;
+      else
+        continue;
+    } else if (lhs_device_num >= rhs.devices.at(lhs_device_name))
+      return false;
+    all_resources_empty = false;
   }
-  return true;
+  // should return true,but take care of all_resources_empty
+  return all_resources_empty ? false : true;
 }
 
 bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs) {
-  for (auto& entry : lhs.devices) {
+  for (const auto& entry : lhs.devices) {
     const std::string& lhs_device_name = entry.first;
     const uint64_t lhs_device_num = entry.second;
     if (!rhs.devices.contains(lhs_device_name)) {
-      if (lhs_device_num != 0)  return false;
-      else continue;
-    }else if (lhs_device_num != rhs.devices.at(lhs_device_name))
+      if (lhs_device_num != 0)
+        return false;
+      else
+        continue;
+    } else if (lhs_device_num != rhs.devices.at(lhs_device_name))
       return false;
   }
   return true;

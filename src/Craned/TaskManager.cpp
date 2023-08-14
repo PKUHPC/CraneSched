@@ -191,7 +191,8 @@ void TaskManager::InitDeviceBitmap(
 
 std::unordered_map<std::string, uint64_t> TaskManager::AllocateDeviceBitmap(
     uint32_t task_id, const DedicatedResource& dedicated_resource) {
-  std::unordered_map<std::string, uint64_t> device_name_to_allocate_device_bitmap;
+  std::unordered_map<std::string, uint64_t>
+      device_name_to_allocate_device_bitmap;
   for (auto& entry : dedicated_resource.devices) {
     const std::string& device_name = entry.first;
     uint64_t device_query_num = entry.second;
@@ -204,9 +205,11 @@ std::unordered_map<std::string, uint64_t> TaskManager::AllocateDeviceBitmap(
       allocate_device_bitmap.set(offset);
       ++count;
     }
-    device_name_to_allocate_device_bitmap[device_name]=allocate_device_bitmap.to_ullong();
+    device_name_to_allocate_device_bitmap[device_name] =
+        allocate_device_bitmap.to_ullong();
   }
-    m_task_id_to_allocated_device_bitmap_.emplace(task_id, device_name_to_allocate_device_bitmap);
+  m_task_id_to_allocated_device_bitmap_.emplace(
+      task_id, device_name_to_allocate_device_bitmap);
   return device_name_to_allocate_device_bitmap;
 }
 
@@ -214,7 +217,7 @@ void TaskManager::FreeDeviceBitmap(const uint32_t task_id) {
   auto iter = m_task_id_to_allocated_device_bitmap_.find(task_id);
   for (auto& entry : iter->second) {
     const std::string& device_name = entry.first;
-    uint64_t &allocated_device_bitmap = entry.second;
+    uint64_t& allocated_device_bitmap = entry.second;
     // ones in allocated_device_bitmap represents allocated devices
     m_device_name_to_free_bitmap_[device_name] &= allocated_device_bitmap;
   }
