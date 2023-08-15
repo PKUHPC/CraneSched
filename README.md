@@ -2,10 +2,11 @@
 # Crane 简介 #
 **鸣鹤（Crane）**是北京大学高性能计算校级公共平台自主研发的**分布式智能调度系统**，团队在总结高性能公共平台运行近六年的管理和维护经验之后，从高性能计算任务调度的资源管理、资源查看、作业提交、作业查询和资源隔离等作业调度系统最基本的需求出发，结合智能计算作业调度场景，采用C++、go等语言进行开发，完全自主研发的**融合高性能计算和智能计算调度为一体**的**开源**分布式智能调度系统。
 
-**Crane文档地址**：[Crane Document](https://pkuhpc.github.io/Crane-document/)。
+**Crane文档地址**：[Crane Document](https://pkuhpc.github.io/CraneSched-document/)。
 
-**Crane后端代码地址**：[Crane Code](https://github.com/PKUHPC/Crane)，**Crane前端代码地址**：[Crane Code](https://github.com/PKUHPC/Crane-FrontEnd)，欢迎开发者一起加入。
-**Crane demo集群（试用账号：demo_admin，密码：@icode2023）**：[Crane Demo](https://hpc.pku.edu.cn/demo/crane)
+**Crane后端代码地址**：[Crane Code](https://github.com/PKUHPC/CraneSched)，**Crane前端代码地址**：[Crane Code](https://github.com/PKUHPC/CraneSched-FrontEnd)，欢迎开发者一起加入。
+
+**Crane demo集群（试用账号：demo_admin，密码：demo_admin）**：[Crane Demo](https://hpc.pku.edu.cn/demo/cranesched/)
 
 
 # Crane 设计理念 #
