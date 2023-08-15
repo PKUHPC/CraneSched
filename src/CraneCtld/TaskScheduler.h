@@ -188,15 +188,7 @@ class TaskScheduler {
   using HashSet = absl::flat_hash_set<K>;
 
  public:
-  TaskScheduler() {
-    if (g_config.PriorityConfig.Type == Config::Priority::Basic)
-      m_priority_sorter_ = std::make_unique<BasicPriority>();
-    else if (g_config.PriorityConfig.Type == Config::Priority::MultiFactor)
-      m_priority_sorter_ = std::make_unique<MultiFactorPriority>();
-
-    m_node_selection_algo_ =
-        std::make_unique<MinLoadFirst>(m_priority_sorter_.get());
-  }
+  TaskScheduler();
 
   ~TaskScheduler();
 

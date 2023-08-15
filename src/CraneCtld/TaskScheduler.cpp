@@ -9,6 +9,19 @@
 
 namespace Ctld {
 
+TaskScheduler::TaskScheduler() {
+  if (g_config.PriorityConfig.Type == Config::Priority::Basic) {
+    CRANE_INFO("basic priority sorter is selected.");
+    m_priority_sorter_ = std::make_unique<BasicPriority>();
+  } else if (g_config.PriorityConfig.Type == Config::Priority::MultiFactor) {
+    CRANE_INFO("multifactorial priority sorter is selected.");
+    m_priority_sorter_ = std::make_unique<MultiFactorPriority>();
+  }
+
+  m_node_selection_algo_ =
+      std::make_unique<MinLoadFirst>(m_priority_sorter_.get());
+}
+
 TaskScheduler::~TaskScheduler() {
   m_thread_stop_ = true;
   if (m_schedule_thread_.joinable()) m_schedule_thread_.join();
