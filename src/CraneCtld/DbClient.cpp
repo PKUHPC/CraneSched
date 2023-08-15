@@ -41,16 +41,15 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     qos.name = kUnlimitedQosName;
     qos.description = "Crane default qos for unlimited resource";
     qos.priority = 0;
-    qos.max_jobs_per_user = std::numeric_limits<
-        std::remove_reference<decltype(qos.max_jobs_per_user)>::type>::max();
-    qos.max_running_tasks_per_user = std::numeric_limits<std::remove_reference<
-        decltype(qos.max_running_tasks_per_user)>::type>::max();
-    qos.max_time_limit_per_task =
-        absl::Seconds(google::protobuf::util::TimeUtil::kDurationMaxSeconds);
-    qos.max_cpus_per_user = std::numeric_limits<
-        std::remove_reference<decltype(qos.max_cpus_per_user)>::type>::max();
-    qos.max_cpus_per_account = std::numeric_limits<
-        std::remove_reference<decltype(qos.max_cpus_per_account)>::type>::max();
+    qos.max_jobs_per_user =
+        std::numeric_limits<decltype(qos.max_jobs_per_user)>::max();
+    qos.max_running_tasks_per_user =
+        std::numeric_limits<decltype(qos.max_running_tasks_per_user)>::max();
+    qos.max_time_limit_per_task = absl::Seconds(kMaxTimeLimitSecond);
+    qos.max_cpus_per_user =
+        std::numeric_limits<decltype(qos.max_cpus_per_user)>::max();
+    qos.max_cpus_per_account =
+        std::numeric_limits<decltype(qos.max_cpus_per_account)>::max();
     qos.reference_count = 1;
 
     if (!InsertQos(qos)) {

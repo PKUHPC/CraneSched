@@ -776,9 +776,9 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
     return result::fail(fmt::format("Unknown QOS '{}'", task->qos));
   }
 
-  if (task->time_limit == absl::ZeroDuration())
+  if (task->time_limit >= absl::Seconds(kMaxTimeLimitSecond)) {
     task->time_limit = qos_share_ptr->max_time_limit_per_task;
-  else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
+  } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
     return result::fail("time-limit reached the user's limit.");
 
   if (task->cpus_per_task > qos_share_ptr->max_cpus_per_user)

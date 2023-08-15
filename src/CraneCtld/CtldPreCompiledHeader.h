@@ -56,6 +56,7 @@
 #include <BS_thread_pool.hpp>
 
 // gRPC
+#include <google/protobuf/util/time_util.h>
 #include <grpc++/grpc++.h>
 
 // Ranges-v3
