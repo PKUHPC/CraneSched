@@ -1837,23 +1837,21 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     const UnorderedTaskMap& running_task_map) {
   std::vector<task_id_t> task_id_vec;
 
-  g_priority->CalculateFactorBound_(pending_task_map, running_task_map);
+  CalculateFactorBound_(pending_task_map, running_task_map);
 
-  std::vector<std::pair<task_id_t, uint32_t>> task_priority_list;
+  std::vector<std::pair<task_id_t, uint32_t>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
-    uint32_t priority = g_priority->CalculatePriority_(task.get());
-    task_priority_list.push_back({task->TaskId(), priority});
+    uint32_t priority = CalculatePriority_(task.get());
+    task_priority_vec.emplace_back(task->TaskId(), priority);
   }
 
-  std::sort(task_priority_list.begin(), task_priority_list.end(),
+  std::sort(task_priority_vec.begin(), task_priority_vec.end(),
             [](const std::pair<task_id_t, uint32_t>& a,
                const std::pair<task_id_t, uint32_t>& b) {
               return a.second > b.second;
             });
 
-  for (auto& pair : task_priority_list) {
-    task_id_vec.emplace_back(pair.first);
-  }
+  for (auto& pair : task_priority_vec) task_id_vec.emplace_back(pair.first);
 
   return task_id_vec;
 }
@@ -1887,24 +1885,33 @@ void MultiFactorPriority::CalculateFactorBound_(
 
   for (auto iter = pending_task_map.begin(); iter != pending_task_map.end();
        iter++) {
+    TaskInCtld* task = iter->second.get();
+
     uint64_t age = ToInt64Seconds((absl::Now() - iter->second->SubmitTime()));
     age = std::min(age, g_config.PriorityConfig.MaxAge);
 
     bound.age_min = std::min(age, bound.age_min);
     bound.age_max = std::max(age, bound.age_max);
 
-    uint32_t nodes_alloc = iter->second->node_num;
+    uint32_t nodes_alloc = task->node_num;
     bound.nodes_alloc_min = std::min(nodes_alloc, bound.nodes_alloc_min);
     bound.nodes_alloc_max = std::max(nodes_alloc, bound.nodes_alloc_max);
 
-    uint64_t mem_alloc =
-        iter->second->resources.allocatable_resource.memory_bytes;
+    uint64_t mem_alloc = task->resources.allocatable_resource.memory_bytes;
     bound.mem_alloc_min = std::min(mem_alloc, bound.mem_alloc_min);
     bound.mem_alloc_max = std::max(mem_alloc, bound.mem_alloc_max);
 
-    double cpus_alloc = iter->second->resources.allocatable_resource.cpu_count;
+    double cpus_alloc = task->resources.allocatable_resource.cpu_count;
     bound.cpus_alloc_min = std::min(cpus_alloc, bound.cpus_alloc_min);
     bound.cpus_alloc_max = std::max(cpus_alloc, bound.cpus_alloc_max);
+
+    uint32_t qos_priority = task->qos_priority;
+    bound.qos_priority_min = std::min(qos_priority, bound.qos_priority_min);
+    bound.qos_priority_max = std::max(qos_priority, bound.qos_priority_max);
+
+    uint32_t part_priority = task->partition_priority;
+    bound.part_priority_min = std::min(part_priority, bound.part_priority_min);
+    bound.part_priority_max = std::max(part_priority, bound.part_priority_max);
   }
 
   bound.acc_service_val_map.clear();
@@ -1942,25 +1949,6 @@ void MultiFactorPriority::CalculateFactorBound_(
     }
     auto iter = bound.acc_service_val_map.find(r_task->account);
     iter->second += service_val;
-  }
-
-  // Todo: Performance issue!
-  Ctld::AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
-      g_account_manager->GetAllQosInfo();
-  for (const auto& [name, qos] : *qos_map_shared_ptr) {
-    if (!qos->deleted) {
-      if (qos->priority < bound.qos_priority_min)
-        bound.qos_priority_min = qos->priority;
-      if (qos->priority > bound.qos_priority_max)
-        bound.qos_priority_max = qos->priority;
-    }
-  }
-
-  for (const auto& [part_id, part] : g_config.Partitions) {
-    if (part.priority < bound.part_priority_min)
-      bound.part_priority_min = part.priority;
-    if (part.priority > bound.part_priority_max)
-      bound.part_priority_max = part.priority;
   }
 
   for (const auto& [acc_name, ser_val] : bound.acc_service_val_map) {

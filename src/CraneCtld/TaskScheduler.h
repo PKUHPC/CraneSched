@@ -292,5 +292,4 @@ class TaskScheduler {
 
 }  // namespace Ctld
 
-inline std::unique_ptr<Ctld::MultiFactorPriority> g_priority;
 inline std::unique_ptr<Ctld::TaskScheduler> g_task_scheduler;
