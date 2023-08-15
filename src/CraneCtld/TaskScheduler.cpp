@@ -1201,7 +1201,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
              node_selection_info.task_num_node_id_map.end()) {
     auto craned_index = task_num_node_id_it->second;
     if (!partition_metas.craned_ids.contains(craned_index)) {
-      // Todo: Performance issue! Fix it.
+      // Todo: Performance issue! We can use cached available node set
+      //  for the task when checking task validity in TaskScheduler.
       ++task_num_node_id_it;
       continue;
     }
@@ -1209,6 +1210,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
         node_selection_info.node_time_avail_res_map.at(craned_index);
     auto& craned_meta = craned_meta_map.at(craned_index);
 
+    // If any of the follow `if` is true, skip this node.
     if (!(task->resources <= craned_meta.res_total)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
