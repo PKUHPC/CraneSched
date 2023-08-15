@@ -162,10 +162,10 @@ void ParseConfig(int argc, char** argv) {
       if (config["PriorityMaxAge"]) {
         std::string max_age = config["PriorityMaxAge"].as<std::string>();
 
-        std::regex pattern_hour_min_sec("(\\d+):(\\d+):(\\d+)");
-        std::regex pattern_day_hour("(\\d+)-(\\d+)");
-        std::regex pattern_min("(\\d+)");
-        std::regex pattern_day_hour_min_sec("(\\d+)-(\\d+):(\\d+):(\\d+)");
+        std::regex pattern_hour_min_sec(R"((\d+):(\d+):(\d+))");
+        std::regex pattern_day_hour(R"((\d+)-(\d+))");
+        std::regex pattern_min(R"((\d+))");
+        std::regex pattern_day_hour_min_sec(R"((\d+)-(\d+):(\d+):(\d+))");
         std::smatch matches;
 
         uint64_t day, hour, minute, second;
@@ -331,8 +331,7 @@ void ParseConfig(int argc, char** argv) {
                           name);
             } else {
               CRANE_ERROR(
-                  "Unknown node '{}' found in partition '{}'. It is "
-                  "ignored "
+                  "Unknown node '{}' found in partition '{}'. It is ignored "
                   "and should be contained in the configuration file.",
                   node, name);
             }

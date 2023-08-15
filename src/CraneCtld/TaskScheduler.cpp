@@ -1495,9 +1495,10 @@ void MinLoadFirst::NodeSelect(
   //  task.
   // Iterate over all the pending tasks and select the available node for the
   //  task to run in its partition.
-  for (auto it = task_id_vec.begin(); it != task_id_vec.end();) {
-    auto pending_task_it = pending_task_map->find(*it);
+  for (task_id_t task_id : task_id_vec) {
+    auto pending_task_it = pending_task_map->find(task_id);
     auto& task = pending_task_it->second;
+
     PartitionId part_id = task->partition_id;
 
     NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
@@ -1511,7 +1512,6 @@ void MinLoadFirst::NodeSelect(
         node_info, part_meta, *craned_meta_map, task.get(), now, &craned_ids,
         &expected_start_time);
     if (!ok) {
-      ++it;
       continue;
     }
 
@@ -1569,11 +1569,10 @@ void MinLoadFirst::NodeSelect(
 
       // Erase the task ready to run from temporary
       // partition_pending_task_map and move to the next element
-      pending_task_it = pending_task_map->erase(pending_task_it);
-      it = task_id_vec.erase(it);
+      pending_task_map->erase(pending_task_it);
     } else {
       // The task can't be started now. Move to the next pending task.
-      it++;
+      continue;
     }
   }
 }
