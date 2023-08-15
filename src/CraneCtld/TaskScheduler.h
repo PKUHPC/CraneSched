@@ -3,11 +3,6 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include <event2/event.h>
-
-#include <cfloat>
-#include <vector>
-
 #include "CranedMetaContainer.h"
 #include "DbClient.h"
 #include "crane/Lock.h"

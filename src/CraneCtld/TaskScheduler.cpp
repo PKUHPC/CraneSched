@@ -1863,31 +1863,30 @@ void MultiFactorPriority::CalculateFactorBound_(
 
   // Initialize the values of each max and min
   bound.age_max = 0;
-  bound.age_min = UINT64_MAX;
+  bound.age_min = std::numeric_limits<uint64_t>::max();
 
   bound.qos_priority_max = 0;
-  bound.qos_priority_min = UINT32_MAX;
+  bound.qos_priority_min = std::numeric_limits<uint32_t>::max();
 
   bound.part_priority_max = 0;
-  bound.part_priority_min = UINT32_MAX;
+  bound.part_priority_min = std::numeric_limits<uint32_t>::max();
 
   bound.nodes_alloc_max = 0;
-  bound.nodes_alloc_min = UINT32_MAX;
+  bound.nodes_alloc_min = std::numeric_limits<uint32_t>::max();
 
   bound.mem_alloc_max = 0;
-  bound.mem_alloc_min = UINT64_MAX;
+  bound.mem_alloc_min = std::numeric_limits<uint64_t>::max();
 
   bound.cpus_alloc_max = 0;
-  bound.cpus_alloc_min = DBL_MAX;
+  bound.cpus_alloc_min = std::numeric_limits<double>::max();
 
   bound.service_val_max = 0;
-  bound.service_val_min = UINT32_MAX;
+  bound.service_val_min = std::numeric_limits<uint32_t>::max();
 
-  for (auto iter = pending_task_map.begin(); iter != pending_task_map.end();
-       iter++) {
-    TaskInCtld* task = iter->second.get();
+  bound.acc_service_val_map.clear();
 
-    uint64_t age = ToInt64Seconds((absl::Now() - iter->second->SubmitTime()));
+  for (const auto& [task_id, task] : pending_task_map) {
+    uint64_t age = ToInt64Seconds((absl::Now() - task->SubmitTime()));
     age = std::min(age, g_config.PriorityConfig.MaxAge);
 
     bound.age_min = std::min(age, bound.age_min);
@@ -1914,120 +1913,95 @@ void MultiFactorPriority::CalculateFactorBound_(
     bound.part_priority_max = std::max(part_priority, bound.part_priority_max);
   }
 
-  bound.acc_service_val_map.clear();
-  for (const auto& [task_id, r_task] : running_task_map) {
+  for (const auto& [task_id, task] : running_task_map) {
     uint32_t service_val = 0;
-    if (bound.cpus_alloc_max != bound.cpus_alloc_min) {
+    if (bound.cpus_alloc_max != bound.cpus_alloc_min)
       service_val += 1.0 *
-                     (r_task->resources.allocatable_resource.cpu_count -
+                     (task->resources.allocatable_resource.cpu_count -
                       bound.cpus_alloc_min) /
                      (bound.cpus_alloc_max - bound.cpus_alloc_min);
-    } else {
+    else
       service_val += 1.0;
-    }
-    if (bound.nodes_alloc_max != bound.nodes_alloc_min) {
-      service_val += 1.0 * (r_task->node_num - bound.nodes_alloc_min) /
+
+    if (bound.nodes_alloc_max != bound.nodes_alloc_min)
+      service_val += 1.0 * (task->node_num - bound.nodes_alloc_min) /
                      (bound.nodes_alloc_max - bound.nodes_alloc_min);
-    } else {
+    else
       service_val += 1.0;
-    }
-    if (bound.mem_alloc_max != bound.mem_alloc_min) {
+
+    if (bound.mem_alloc_max != bound.mem_alloc_min)
       service_val += 1.0 *
-                     (r_task->resources.allocatable_resource.memory_bytes -
+                     (task->resources.allocatable_resource.memory_bytes -
                       bound.mem_alloc_min) /
                      (bound.mem_alloc_max - bound.mem_alloc_min);
-    } else {
+    else
       service_val += 1.0;
-    }
 
-    auto run_time =
-        ToUnixSeconds(absl::Now()) - r_task->StartTimeInUnixSecond();
-    service_val *= run_time;
-    if (bound.acc_service_val_map.find(r_task->account) ==
-        bound.acc_service_val_map.end()) {
-      bound.acc_service_val_map.emplace(r_task->account, 0);
-    }
-    auto iter = bound.acc_service_val_map.find(r_task->account);
-    iter->second += service_val;
+    uint64_t run_time = ToInt64Seconds(absl::Now() - task->StartTime());
+    bound.acc_service_val_map[task->account] += service_val * run_time;
   }
 
   for (const auto& [acc_name, ser_val] : bound.acc_service_val_map) {
-    if (ser_val < bound.service_val_min) bound.service_val_min = ser_val;
-    if (ser_val > bound.service_val_max) bound.service_val_max = ser_val;
+    bound.service_val_min = std::min(ser_val, bound.service_val_min);
+    bound.service_val_max = std::max(ser_val, bound.service_val_max);
   }
 }
 
 uint32_t MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
+  FactorBound& bound = m_factor_bound_;
+
   uint64_t task_age =
       ToUnixSeconds(absl::Now()) - task->SubmitTimeInUnixSecond();
-  task_age = task_age > g_config.PriorityConfig.MaxAge
-                 ? g_config.PriorityConfig.MaxAge
-                 : task_age;
+  task_age = std::min(task_age, g_config.PriorityConfig.MaxAge);
 
   uint32_t task_qos_priority = task->qos_priority;
-
   uint32_t task_part_priority = task->partition_priority;
-
   uint32_t task_nodes_alloc = task->node_num;
   uint64_t task_mem_alloc = task->resources.allocatable_resource.memory_bytes;
   double task_cpus_alloc = task->resources.allocatable_resource.cpu_count;
-  uint32_t task_service_val =
-      m_factor_bound_.acc_service_val_map.find(task->account)->second;
+  uint32_t task_service_val = bound.acc_service_val_map.at(task->account);
 
-  double age_factor, partition_factor, job_size_factor, fair_share_factor,
-      qos_factor;
+  double qos_factor{0};
+  double age_factor{0};
+  double partition_factor{0};
+  double job_size_factor{0};
+  double fair_share_factor{0};
 
   // age_factor
-  if (m_factor_bound_.age_max != m_factor_bound_.age_min)
-    age_factor = 1.0 * (task_age - m_factor_bound_.age_min) /
-                 (m_factor_bound_.age_max - m_factor_bound_.age_min);
-  else
-    age_factor = 0;
+  if (bound.age_max != bound.age_min)
+    age_factor =
+        1.0 * (task_age - bound.age_min) / (bound.age_max - bound.age_min);
 
   // qos_factor
-  if (m_factor_bound_.qos_priority_min != m_factor_bound_.qos_priority_max)
-    qos_factor =
-        1.0 * (task_qos_priority - m_factor_bound_.qos_priority_min) /
-        (m_factor_bound_.qos_priority_max - m_factor_bound_.qos_priority_min);
-  else
-    qos_factor = 0;
+  if (bound.qos_priority_min != bound.qos_priority_max)
+    qos_factor = 1.0 * (task_qos_priority - bound.qos_priority_min) /
+                 (bound.qos_priority_max - bound.qos_priority_min);
 
   // partition_factor
-  if (m_factor_bound_.part_priority_max != m_factor_bound_.part_priority_min)
-    partition_factor =
-        1.0 * (task_part_priority - m_factor_bound_.part_priority_min) /
-        (m_factor_bound_.part_priority_max - m_factor_bound_.part_priority_min);
-  else
-    partition_factor = 0;
+  if (bound.part_priority_max != bound.part_priority_min)
+    partition_factor = 1.0 * (task_part_priority - bound.part_priority_min) /
+                       (bound.part_priority_max - bound.part_priority_min);
 
   // job_size_factor
-  job_size_factor = 0;
-  if (m_factor_bound_.cpus_alloc_max != m_factor_bound_.cpus_alloc_min)
-    job_size_factor +=
-        1.0 * (task_cpus_alloc - m_factor_bound_.cpus_alloc_min) /
-        (m_factor_bound_.cpus_alloc_max - m_factor_bound_.cpus_alloc_min);
-  if (m_factor_bound_.nodes_alloc_max != m_factor_bound_.nodes_alloc_min)
-    job_size_factor +=
-        1.0 * (task_nodes_alloc - m_factor_bound_.nodes_alloc_min) /
-        (m_factor_bound_.nodes_alloc_max - m_factor_bound_.nodes_alloc_min);
-  if (m_factor_bound_.mem_alloc_max != m_factor_bound_.mem_alloc_min)
-    job_size_factor +=
-        1.0 * (task_mem_alloc - m_factor_bound_.mem_alloc_min) /
-        (m_factor_bound_.mem_alloc_max - m_factor_bound_.mem_alloc_min);
+  if (bound.cpus_alloc_max != bound.cpus_alloc_min)
+    job_size_factor += 1.0 * (task_cpus_alloc - bound.cpus_alloc_min) /
+                       (bound.cpus_alloc_max - bound.cpus_alloc_min);
+  if (bound.nodes_alloc_max != bound.nodes_alloc_min)
+    job_size_factor += 1.0 * (task_nodes_alloc - bound.nodes_alloc_min) /
+                       (bound.nodes_alloc_max - bound.nodes_alloc_min);
+  if (bound.mem_alloc_max != bound.mem_alloc_min)
+    job_size_factor += 1.0 * (task_mem_alloc - bound.mem_alloc_min) /
+                       (bound.mem_alloc_max - bound.mem_alloc_min);
   if (g_config.PriorityConfig.FavorSmall)
     job_size_factor = 1 - job_size_factor / 3;
   else
     job_size_factor /= 3;
 
   // fair_share_factor
-  if (m_factor_bound_.service_val_max != m_factor_bound_.service_val_min) {
+  if (bound.service_val_max != bound.service_val_min)
     fair_share_factor =
-        1.0 -
-        (task_service_val - m_factor_bound_.service_val_min) /
-            (m_factor_bound_.service_val_max - m_factor_bound_.service_val_min);
-  } else {
-    fair_share_factor = 0;
-  }
+        1.0 - (task_service_val - bound.service_val_min) /
+                  (bound.service_val_max - bound.service_val_min);
 
   uint32_t priority =
       g_config.PriorityConfig.WeightAge * age_factor +
