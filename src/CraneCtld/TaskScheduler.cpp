@@ -1920,6 +1920,9 @@ void MultiFactorPriority::CalculateFactorBound_(
                       bound.cpus_alloc_min) /
                      (bound.cpus_alloc_max - bound.cpus_alloc_min);
     else
+      // += 1.0 here rather than 0.0 in case that the final service_val is 0.
+      // If the final service_val is 0, the running time of the task will not
+      // be ruled out in calculation. We must avoid that.
       service_val += 1.0;
 
     if (bound.nodes_alloc_max != bound.nodes_alloc_min)

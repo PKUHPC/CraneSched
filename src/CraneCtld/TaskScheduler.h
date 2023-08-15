@@ -50,7 +50,8 @@ class MultiFactorPriority : public IPrioritySorter {
     uint64_t mem_alloc_max, mem_alloc_min;
     double cpus_alloc_max, cpus_alloc_min;
     uint32_t service_val_max, service_val_min;
-    std::map<std::string, uint32_t> acc_service_val_map;
+
+    absl::flat_hash_map<std::string, uint32_t> acc_service_val_map;
   };
 
   void CalculateFactorBound_(const OrderedTaskMap& pending_task_map,
