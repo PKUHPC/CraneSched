@@ -41,6 +41,21 @@ CranedLogFile: /tmp/craned/craned.log
 # Determines whether the craned is running in the background
 CranedForeground: true
 
+PriorityType: priority/multifactor
+
+# Default value is true
+PriorityFavorSmall: true
+
+PriorityMaxAge: 14-0
+PriorityWeightAge: 500
+PriorityWeightFairShare: 10000
+
+# 0 means that job size factor is not used.
+PriorityWeightJobSize: 0
+
+PriorityWeightPartition: 1000
+PriorityWeightQ0S: 1000000
+
 
 # list of configuration information of the computing machine
 Nodes:
@@ -51,6 +66,10 @@ Nodes:
 # partition information list
 Partitions:
   - name: CPU
-    nodes: "cn[15-18]"
+    nodes: "cn[15-16]"
+    priority: 5
+  - name: GPU
+    nodes: "cn[17-18]"
+    priority: 3
 
 DefaultPartition: CPU

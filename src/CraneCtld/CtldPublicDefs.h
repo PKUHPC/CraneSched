@@ -19,6 +19,7 @@ struct Config {
 
   struct Partition {
     std::string nodelist_str;
+    uint32_t priority;
     std::unordered_set<std::string> nodes;
     std::unordered_set<std::string> AllowAccounts;
   };
@@ -34,6 +35,21 @@ struct Config {
     std::string ServerKeyFilePath;
     std::string ServerKeyContent;
   };
+
+  struct Priority {
+    enum TypeEnum { Basic, MultiFactor };
+    TypeEnum Type;
+
+    // Config of multifactorial job priority sorting.
+    bool FavorSmall{true};
+    uint64_t MaxAge;
+    uint32_t WeightAge;
+    uint32_t WeightFairShare;
+    uint32_t WeightJobSize;
+    uint32_t WeightPartition;
+    uint32_t WeightQOS;
+  };
+  Priority PriorityConfig;
 
   CraneCtldListenConf ListenConf;
   bool CompressedRpc{};
@@ -212,6 +228,18 @@ struct TaskInCtld {
 
  public:
   /* -----------
+   * Fields that will not change at run time.
+   * However, these fields are NOT persisted on the disk.
+   * ----------- */
+  // set in SetFieldsByTaskToCtld from uid
+  std::unique_ptr<PasswordEntry> password_entry;
+
+  // Cached fields for performance.
+  // Set in TaskScheduler->AcquireAttributes()
+  uint32_t partition_priority{0};
+  uint32_t qos_priority{0};
+
+  /* -----------
    * Fields that may change at run time.
    * However, these fields are NOT persisted on the disk.
    * ----------- */
@@ -220,7 +248,7 @@ struct TaskInCtld {
                                  // node id.
   std::string allocated_craneds_regex;
 
-  std::unique_ptr<PasswordEntry> password_entry;
+  uint32_t schedule_priority{0};
 
   // Helper function
  public:

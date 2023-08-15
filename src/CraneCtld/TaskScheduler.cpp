@@ -2,11 +2,25 @@
 
 #include <google/protobuf/util/time_util.h>
 
+#include "AccountManager.h"
 #include "CranedKeeper.h"
-#include "CtldGrpcServer.h"
+#include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
 
 namespace Ctld {
+
+TaskScheduler::TaskScheduler() {
+  if (g_config.PriorityConfig.Type == Config::Priority::Basic) {
+    CRANE_INFO("basic priority sorter is selected.");
+    m_priority_sorter_ = std::make_unique<BasicPriority>();
+  } else if (g_config.PriorityConfig.Type == Config::Priority::MultiFactor) {
+    CRANE_INFO("multifactorial priority sorter is selected.");
+    m_priority_sorter_ = std::make_unique<MultiFactorPriority>();
+  }
+
+  m_node_selection_algo_ =
+      std::make_unique<MinLoadFirst>(m_priority_sorter_.get());
+}
 
 TaskScheduler::~TaskScheduler() {
   m_thread_stop_ = true;
@@ -34,9 +48,39 @@ bool TaskScheduler::Init() {
       task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
       task->SetFieldsByPersistedPart(task_in_embedded_db.persisted_part());
       task_id_t task_id = task->TaskId();
+      task_db_id_t task_db_id = task->TaskDbId();
 
       CRANE_TRACE("Restore task #{} from embedded running queue.",
                   task->TaskId());
+
+      err = AcquireTaskAttributes(task.get());
+      if (err != CraneErr::kOk) {
+        CRANE_INFO(
+            "Failed to acquire task attributes for restored running task #{}. "
+            "Mark it as FAILED and move it to the ended queue.",
+            task_id);
+        task->SetStatus(crane::grpc::Failed);
+        ok = g_embedded_db_client->UpdatePersistedPartOfTask(
+            task_db_id, task->PersistedPart());
+        if (!ok) {
+          CRANE_ERROR(
+              "UpdatePersistedPartOfTask failed for task #{} when "
+              "mark the task as FAILED.",
+              task_id);
+        }
+
+        ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(task_db_id);
+        if (!ok) {
+          CRANE_ERROR(
+              "MovePendingOrRunningTaskToEnded failed for task #{} when "
+              "this running task to ended queue..",
+              task_id);
+        }
+
+        // Move this problematic task into ended queue and
+        // process next task.
+        continue;
+      }
 
       auto* stub = g_craned_keeper->GetCranedStub(task->executing_craned_id);
       if (stub == nullptr || stub->Invalid()) {
@@ -210,13 +254,27 @@ bool TaskScheduler::Init() {
                   task->TaskId());
 
       bool mark_task_as_failed = false;
-      if (task->type == crane::grpc::Batch) {
-        err = TryRequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
-        mark_task_as_failed = (err != CraneErr::kOk);
-      } else
-        mark_task_as_failed = true;
 
-      if (mark_task_as_failed) {
+      if (task->type != crane::grpc::Batch) {
+        CRANE_INFO("Mark interactive task #{} as FAILED", task_id);
+        mark_task_as_failed = true;
+      }
+
+      if (!mark_task_as_failed &&
+          AcquireTaskAttributes(task.get()) != CraneErr::kOk) {
+        CRANE_ERROR("AcquireTaskAttributes failed for task #{}", task_id);
+        mark_task_as_failed = true;
+      }
+
+      if (!mark_task_as_failed &&
+          CheckTaskValidity(task.get()) != CraneErr::kOk) {
+        CRANE_ERROR("CheckTaskValidity failed for task #{}", task_id);
+        mark_task_as_failed = true;
+      }
+
+      if (!mark_task_as_failed) {
+        RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
+      } else {
         // If a batch task failed to requeue the task into pending queue due to
         // insufficient resource or other reasons or the task is an interactive
         // task, Mark it as FAILED and move it to the ended queue.
@@ -284,35 +342,28 @@ bool TaskScheduler::Init() {
   return true;
 }
 
-CraneErr TaskScheduler::TryRequeueRecoveredTaskIntoPendingQueueLock_(
+void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
-  CraneErr err;
-
-  // task->partition_id will be set in this call.
-  err = CheckTaskValidityAndAcquireAttrs_(task.get());
-  if (err != CraneErr::kOk) return err;
-
   m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_pending_task_map_.emplace(task->TaskId(), std::move(task));
-
-  return CraneErr::kOk;
 }
 
 void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
+  for (const CranedId& craned_id : task->CranedIds())
+    g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
+                                             task->resources);
+
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
-  for (const CranedId& craned_id : task->CranedIds()) {
-    g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
-                                             task->resources);
+  for (const CranedId& craned_id : task->CranedIds())
     m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
-  }
 
   m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_running_task_map_.emplace(task->TaskId(), std::move(task));
@@ -521,8 +572,10 @@ CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
                                    uint32_t* task_id) {
   CraneErr err;
 
-  // task->partition_id will be set in this call.
-  err = CheckTaskValidityAndAcquireAttrs_(task.get());
+  err = AcquireTaskAttributes(task.get());
+  if (err != CraneErr::kOk) return err;
+
+  err = CheckTaskValidity(task.get());
   if (err != CraneErr::kOk) return err;
 
   // Add the task to the pending task queue.
@@ -862,6 +915,7 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_alloc_cpu(task.resources.allocatable_resource.cpu_count *
                            task.node_num);
     task_it->set_exit_code(0);
+    task_it->set_priority(task.schedule_priority);
 
     task_it->set_status(task.PersistedPart().status());
     task_it->set_craned_list(
@@ -1444,15 +1498,19 @@ void MinLoadFirst::NodeSelect(
                                            &node_info_in_a_partition);
   }
 
+  std::vector<task_id_t> task_id_vec;
+  task_id_vec = m_priority_sorter_->GetOrderedTaskIdList(*pending_task_map,
+                                                         running_tasks);
   // Now we know, on every node, the # of running tasks (which
   //  doesn't include those we select as the incoming running tasks in the
   //  following code) and how many resources are available at the end of each
   //  task.
   // Iterate over all the pending tasks and select the available node for the
   //  task to run in its partition.
-  for (auto pending_task_it = pending_task_map->begin();
-       pending_task_it != pending_task_map->end();) {
+  for (task_id_t task_id : task_id_vec) {
+    auto pending_task_it = pending_task_map->find(task_id);
     auto& task = pending_task_it->second;
+
     PartitionId part_id = task->partition_id;
 
     NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
@@ -1466,7 +1524,6 @@ void MinLoadFirst::NodeSelect(
         node_info, part_meta, *craned_meta_map, task.get(), now, &craned_ids,
         &expected_start_time);
     if (!ok) {
-      ++pending_task_it;
       continue;
     }
 
@@ -1524,10 +1581,10 @@ void MinLoadFirst::NodeSelect(
 
       // Erase the task ready to run from temporary
       // partition_pending_task_map and move to the next element
-      pending_task_it = pending_task_map->erase(pending_task_it);
+      pending_task_map->erase(pending_task_it);
     } else {
       // The task can't be started now. Move to the next pending task.
-      pending_task_it++;
+      continue;
     }
   }
 }
@@ -1696,7 +1753,23 @@ void TaskScheduler::TransferTaskToMongodb_(TaskInCtld* task) {
   }
 }
 
-CraneErr TaskScheduler::CheckTaskValidityAndAcquireAttrs_(TaskInCtld* task) {
+CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
+  {
+    auto qos_ptr = g_account_manager->GetExistedQosInfo(task->qos);
+    if (!qos_ptr) return CraneErr::kInvalidParam;
+
+    task->qos_priority = qos_ptr->priority;
+  }
+
+  auto part_it = g_config.Partitions.find(task->partition_id);
+  if (part_it == g_config.Partitions.end()) return CraneErr::kInvalidParam;
+
+  task->partition_priority = part_it->second.priority;
+
+  return CraneErr::kOk;
+}
+
+CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   // Check whether the selected partition is able to run this task.
   auto metas_ptr = g_meta_container->GetPartitionMetasPtr(task->partition_id);
   if (task->node_num > metas_ptr->partition_global_meta.alive_craned_cnt) {
@@ -1768,6 +1841,192 @@ void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id) {
     CRANE_TRACE("No task is executed by craned {}. Ignore cleaning step...",
                 craned_id);
   }
+}
+
+std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
+    const OrderedTaskMap& pending_task_map,
+    const UnorderedTaskMap& running_task_map) {
+  std::vector<task_id_t> task_id_vec;
+
+  CalculateFactorBound_(pending_task_map, running_task_map);
+
+  std::vector<std::pair<task_id_t, uint32_t>> task_priority_vec;
+  for (const auto& [task_id, task] : pending_task_map) {
+    uint32_t priority = CalculatePriority_(task.get());
+    task_priority_vec.emplace_back(task->TaskId(), priority);
+  }
+
+  std::sort(task_priority_vec.begin(), task_priority_vec.end(),
+            [](const std::pair<task_id_t, uint32_t>& a,
+               const std::pair<task_id_t, uint32_t>& b) {
+              return a.second > b.second;
+            });
+
+  for (auto& pair : task_priority_vec) task_id_vec.emplace_back(pair.first);
+
+  return task_id_vec;
+}
+
+void MultiFactorPriority::CalculateFactorBound_(
+    const OrderedTaskMap& pending_task_map,
+    const UnorderedTaskMap& running_task_map) {
+  FactorBound& bound = m_factor_bound_;
+
+  // Initialize the values of each max and min
+  bound.age_max = 0;
+  bound.age_min = std::numeric_limits<uint64_t>::max();
+
+  bound.qos_priority_max = 0;
+  bound.qos_priority_min = std::numeric_limits<uint32_t>::max();
+
+  bound.part_priority_max = 0;
+  bound.part_priority_min = std::numeric_limits<uint32_t>::max();
+
+  bound.nodes_alloc_max = 0;
+  bound.nodes_alloc_min = std::numeric_limits<uint32_t>::max();
+
+  bound.mem_alloc_max = 0;
+  bound.mem_alloc_min = std::numeric_limits<uint64_t>::max();
+
+  bound.cpus_alloc_max = 0;
+  bound.cpus_alloc_min = std::numeric_limits<double>::max();
+
+  bound.service_val_max = 0;
+  bound.service_val_min = std::numeric_limits<uint32_t>::max();
+
+  bound.acc_service_val_map.clear();
+
+  for (const auto& [task_id, task] : pending_task_map) {
+    uint64_t age = ToInt64Seconds((absl::Now() - task->SubmitTime()));
+    age = std::min(age, g_config.PriorityConfig.MaxAge);
+
+    bound.age_min = std::min(age, bound.age_min);
+    bound.age_max = std::max(age, bound.age_max);
+
+    uint32_t nodes_alloc = task->node_num;
+    bound.nodes_alloc_min = std::min(nodes_alloc, bound.nodes_alloc_min);
+    bound.nodes_alloc_max = std::max(nodes_alloc, bound.nodes_alloc_max);
+
+    uint64_t mem_alloc = task->resources.allocatable_resource.memory_bytes;
+    bound.mem_alloc_min = std::min(mem_alloc, bound.mem_alloc_min);
+    bound.mem_alloc_max = std::max(mem_alloc, bound.mem_alloc_max);
+
+    double cpus_alloc = task->resources.allocatable_resource.cpu_count;
+    bound.cpus_alloc_min = std::min(cpus_alloc, bound.cpus_alloc_min);
+    bound.cpus_alloc_max = std::max(cpus_alloc, bound.cpus_alloc_max);
+
+    uint32_t qos_priority = task->qos_priority;
+    bound.qos_priority_min = std::min(qos_priority, bound.qos_priority_min);
+    bound.qos_priority_max = std::max(qos_priority, bound.qos_priority_max);
+
+    uint32_t part_priority = task->partition_priority;
+    bound.part_priority_min = std::min(part_priority, bound.part_priority_min);
+    bound.part_priority_max = std::max(part_priority, bound.part_priority_max);
+  }
+
+  for (const auto& [task_id, task] : running_task_map) {
+    uint32_t service_val = 0;
+    if (bound.cpus_alloc_max != bound.cpus_alloc_min)
+      service_val += 1.0 *
+                     (task->resources.allocatable_resource.cpu_count -
+                      bound.cpus_alloc_min) /
+                     (bound.cpus_alloc_max - bound.cpus_alloc_min);
+    else
+      // += 1.0 here rather than 0.0 in case that the final service_val is 0.
+      // If the final service_val is 0, the running time of the task will not
+      // be ruled out in calculation. We must avoid that.
+      service_val += 1.0;
+
+    if (bound.nodes_alloc_max != bound.nodes_alloc_min)
+      service_val += 1.0 * (task->node_num - bound.nodes_alloc_min) /
+                     (bound.nodes_alloc_max - bound.nodes_alloc_min);
+    else
+      service_val += 1.0;
+
+    if (bound.mem_alloc_max != bound.mem_alloc_min)
+      service_val += 1.0 *
+                     (task->resources.allocatable_resource.memory_bytes -
+                      bound.mem_alloc_min) /
+                     (bound.mem_alloc_max - bound.mem_alloc_min);
+    else
+      service_val += 1.0;
+
+    uint64_t run_time = ToInt64Seconds(absl::Now() - task->StartTime());
+    bound.acc_service_val_map[task->account] += service_val * run_time;
+  }
+
+  for (const auto& [acc_name, ser_val] : bound.acc_service_val_map) {
+    bound.service_val_min = std::min(ser_val, bound.service_val_min);
+    bound.service_val_max = std::max(ser_val, bound.service_val_max);
+  }
+}
+
+uint32_t MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
+  FactorBound& bound = m_factor_bound_;
+
+  uint64_t task_age =
+      ToUnixSeconds(absl::Now()) - task->SubmitTimeInUnixSecond();
+  task_age = std::min(task_age, g_config.PriorityConfig.MaxAge);
+
+  uint32_t task_qos_priority = task->qos_priority;
+  uint32_t task_part_priority = task->partition_priority;
+  uint32_t task_nodes_alloc = task->node_num;
+  uint64_t task_mem_alloc = task->resources.allocatable_resource.memory_bytes;
+  double task_cpus_alloc = task->resources.allocatable_resource.cpu_count;
+  uint32_t task_service_val = bound.acc_service_val_map.at(task->account);
+
+  double qos_factor{0};
+  double age_factor{0};
+  double partition_factor{0};
+  double job_size_factor{0};
+  double fair_share_factor{0};
+
+  // age_factor
+  if (bound.age_max != bound.age_min)
+    age_factor =
+        1.0 * (task_age - bound.age_min) / (bound.age_max - bound.age_min);
+
+  // qos_factor
+  if (bound.qos_priority_min != bound.qos_priority_max)
+    qos_factor = 1.0 * (task_qos_priority - bound.qos_priority_min) /
+                 (bound.qos_priority_max - bound.qos_priority_min);
+
+  // partition_factor
+  if (bound.part_priority_max != bound.part_priority_min)
+    partition_factor = 1.0 * (task_part_priority - bound.part_priority_min) /
+                       (bound.part_priority_max - bound.part_priority_min);
+
+  // job_size_factor
+  if (bound.cpus_alloc_max != bound.cpus_alloc_min)
+    job_size_factor += 1.0 * (task_cpus_alloc - bound.cpus_alloc_min) /
+                       (bound.cpus_alloc_max - bound.cpus_alloc_min);
+  if (bound.nodes_alloc_max != bound.nodes_alloc_min)
+    job_size_factor += 1.0 * (task_nodes_alloc - bound.nodes_alloc_min) /
+                       (bound.nodes_alloc_max - bound.nodes_alloc_min);
+  if (bound.mem_alloc_max != bound.mem_alloc_min)
+    job_size_factor += 1.0 * (task_mem_alloc - bound.mem_alloc_min) /
+                       (bound.mem_alloc_max - bound.mem_alloc_min);
+  if (g_config.PriorityConfig.FavorSmall)
+    job_size_factor = 1 - job_size_factor / 3;
+  else
+    job_size_factor /= 3;
+
+  // fair_share_factor
+  if (bound.service_val_max != bound.service_val_min)
+    fair_share_factor =
+        1.0 - (task_service_val - bound.service_val_min) /
+                  (bound.service_val_max - bound.service_val_min);
+
+  uint32_t priority =
+      g_config.PriorityConfig.WeightAge * age_factor +
+      g_config.PriorityConfig.WeightPartition * partition_factor +
+      g_config.PriorityConfig.WeightJobSize * job_size_factor +
+      g_config.PriorityConfig.WeightFairShare * fair_share_factor +
+      g_config.PriorityConfig.WeightQOS * qos_factor;
+
+  task->schedule_priority = priority;
+
+  return priority;
 }
 
 }  // namespace Ctld

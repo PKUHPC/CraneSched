@@ -158,6 +158,88 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
       }
 
+      g_config.PriorityConfig.MaxAge = kPriorityDefaultMaxAge;
+      if (config["PriorityMaxAge"]) {
+        std::string max_age = config["PriorityMaxAge"].as<std::string>();
+
+        std::regex pattern_hour_min_sec(R"((\d+):(\d+):(\d+))");
+        std::regex pattern_day_hour(R"((\d+)-(\d+))");
+        std::regex pattern_min(R"((\d+))");
+        std::regex pattern_day_hour_min_sec(R"((\d+)-(\d+):(\d+):(\d+))");
+        std::smatch matches;
+
+        uint64_t day, hour, minute, second;
+        if (std::regex_match(max_age, matches, pattern_hour_min_sec)) {
+          hour = std::stoi(matches[1]);
+          minute = std::stoi(matches[2]);
+          second = std::stoi(matches[3]);
+
+          g_config.PriorityConfig.MaxAge = hour * 3600 + minute * 60 + second;
+        } else if (std::regex_match(max_age, matches, pattern_day_hour)) {
+          day = std::stoi(matches[1]);
+          hour = std::stoi(matches[2]);
+
+          g_config.PriorityConfig.MaxAge = day * 24 * 3600 + hour * 3600;
+        } else if (std::regex_match(max_age, pattern_min)) {
+          minute = std::stoi(max_age);
+
+          g_config.PriorityConfig.MaxAge = minute * 60;
+        } else if (std::regex_match(max_age, pattern_day_hour_min_sec)) {
+          day = std::stoi(matches[1]);
+          hour = std::stoi(matches[2]);
+          minute = std::stoi(matches[3]);
+          second = std::stoi(matches[4]);
+
+          g_config.PriorityConfig.MaxAge =
+              day * 24 * 3600 + hour * 3600 + minute * 60 + second;
+        }
+
+        g_config.PriorityConfig.MaxAge =
+            std::min(g_config.PriorityConfig.MaxAge, kPriorityDefaultMaxAge);
+      }
+
+      if (config["PriorityType"]) {
+        std::string priority_type = config["PriorityType"].as<std::string>();
+        if (priority_type == "priority/multifactor")
+          g_config.PriorityConfig.Type = Ctld::Config::Priority::MultiFactor;
+        else
+          g_config.PriorityConfig.Type = Ctld::Config::Priority::Basic;
+      }
+
+      if (config["PriorityFavorSmall"])
+        g_config.PriorityConfig.FavorSmall =
+            config["PriorityFavorSmall"].as<bool>();
+
+      if (config["PriorityWeightAge"])
+        g_config.PriorityConfig.WeightAge =
+            config["PriorityWeightAge"].as<uint32_t>();
+      else
+        g_config.PriorityConfig.WeightAge = 1000;
+
+      if (config["PriorityWeightFairShare"])
+        g_config.PriorityConfig.WeightFairShare =
+            config["PriorityWeightFairShare"].as<uint32_t>();
+      else
+        g_config.PriorityConfig.WeightFairShare = 0;
+
+      if (config["PriorityWeightJobSize"])
+        g_config.PriorityConfig.WeightJobSize =
+            config["PriorityWeightJobSize"].as<uint32_t>();
+      else
+        g_config.PriorityConfig.WeightJobSize = 0;
+
+      if (config["PriorityWeightPartition"])
+        g_config.PriorityConfig.WeightPartition =
+            config["PriorityWeightPartition"].as<uint32_t>();
+      else
+        g_config.PriorityConfig.WeightPartition = 0;
+
+      if (config["PriorityWeightQ0S"])
+        g_config.PriorityConfig.WeightQOS =
+            config["PriorityWeightQ0S"].as<uint32_t>();
+      else
+        g_config.PriorityConfig.WeightQOS = 0;
+
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {
@@ -228,6 +310,11 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
           }
 
+          if (partition["priority"] && !partition["priority"].IsNull()) {
+            part.priority = partition["priority"].as<uint32_t>();
+          } else
+            part.priority = 0;
+
           part.nodelist_str = nodes;
           std::list<std::string> name_list;
           if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
@@ -276,7 +363,6 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
       }
-
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
                      e.what());
@@ -374,6 +460,9 @@ void InitializeCtldGlobalVariables() {
     std::exit(1);
   }
 
+  // Account manager must be initialized before Task Scheduler
+  // since the recovery stage of the task scheduler will acquire
+  // information from account manager.
   g_account_manager = std::make_unique<AccountManager>();
 
   g_meta_container = std::make_unique<CranedMetaContainerSimpleImpl>();
@@ -428,9 +517,9 @@ void InitializeCtldGlobalVariables() {
   // TaskScheduler will always recovery pending or running tasks since last
   // failure, it might be reasonable to wait some time (1s) for all healthy
   // craned nodes (most of the time all the craned nodes are healthy) to be
-  // online or to wait for the connections to some offline craned nodes to time
-  // out. Otherwise, recovered pending or running tasks may always fail to be
-  // re-queued.
+  // online or to wait for the connections to some offline craned nodes to
+  // time out. Otherwise, recovered pending or running tasks may always fail
+  // to be re-queued.
   std::chrono::time_point<std::chrono::system_clock> wait_end_point =
       std::chrono::system_clock::now() + 1s;
   size_t to_registered_craneds_cnt = g_config.Nodes.size();
@@ -453,8 +542,7 @@ void InitializeCtldGlobalVariables() {
     }
   }
 
-  g_task_scheduler =
-      std::make_unique<TaskScheduler>(std::make_unique<MinLoadFirst>());
+  g_task_scheduler = std::make_unique<TaskScheduler>();
   ok = g_task_scheduler->Init();
   if (!ok) {
     CRANE_ERROR("The initialization of TaskScheduler failed. Exiting...");
