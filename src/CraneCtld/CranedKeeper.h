@@ -19,12 +19,6 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include <grpc++/alarm.h>
-#include <grpc++/completion_queue.h>
-
-#include <boost/dynamic_bitset.hpp>
-#include <boost/pool/object_pool.hpp>
-
 #include "crane/Lock.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
@@ -62,8 +56,6 @@ class CranedStub {
  private:
   CranedKeeper *m_craned_keeper_;
 
-  uint32_t m_slot_offset_;
-
   grpc_connectivity_state m_prev_channel_state_;
   std::shared_ptr<grpc::Channel> m_channel_;
 
@@ -85,6 +77,15 @@ class CranedStub {
 };
 
 class CranedKeeper {
+ private:
+  template <typename K, typename V,
+            typename Hash = absl::container_internal::hash_default_hash<K>>
+  using NodeHashMap = absl::node_hash_map<K, V, Hash>;
+
+  using Mutex = absl::Mutex;
+  using ReaderLock = absl::ReaderMutexLock;
+  using WriterLock = absl::WriterMutexLock;
+
  public:
   CranedKeeper();
 
@@ -93,8 +94,6 @@ class CranedKeeper {
   void InitAndRegisterCraneds(std::list<CranedId> craned_id_list);
 
   uint32_t AvailableCranedCount();
-
-  bool CranedValid(uint32_t index);
 
   /**
    * Get the pointer to CranedStub.
@@ -107,8 +106,6 @@ class CranedKeeper {
    * the usage of the CranedStub pointer before CranedIsDown() returns.
    */
   CranedStub *GetCranedStub(const CranedId &craned_id);
-
-  bool CheckCranedIdExists(const CranedId &craned_id);
 
   void SetCranedIsUpCb(std::function<void(CranedId)> cb);
 
@@ -150,40 +147,26 @@ class CranedKeeper {
   // called.
   std::function<void(CranedId)> m_craned_is_down_cb_;
 
-  util::mutex m_tag_pool_mtx_;
+  Mutex m_tag_pool_mtx_;
 
   // Must be declared previous to any grpc::CompletionQueue, so it can be
   // constructed before any CompletionQueue and be destructed after any
   // CompletionQueue.
   boost::object_pool<CqTag> m_tag_pool_;
 
-  // Protect m_node_vec_, m_node_id_slot_offset_map_ and m_empty_slot_bitset_.
-  util::mutex m_craned_mtx_;
+  //  Mutex m_connecting_craned_mtx_;
+  //  NodeHashMap<CranedId, uint32_t> m_connecting_craned_id_stub_map_
+  //      GUARDED_BY(m_connecting_craned_mtx_);
 
-  // Todo: Change to std::shared_ptr. GRPC has sophisticated error handling
-  //  mechanism. So it's ok to access the stub when the Craned is down. What
-  //  should be avoided is null pointer accessing.
-  // Contains connection-established nodes only.
-  std::vector<std::unique_ptr<CranedStub>> m_craned_vec_;
+  Mutex m_connected_craned_mtx_;
+  NodeHashMap<CranedId, std::unique_ptr<CranedStub>>
+      m_connected_craned_id_stub_map_ GUARDED_BY(m_connected_craned_mtx_);
 
-  // Used to track the empty slots in m_craned_vec_. We can use find_first() to
-  // locate the first empty slot.
-  boost::dynamic_bitset<> m_empty_slot_bitset_;
-
-  std::unordered_map<CranedId, uint32_t> m_craned_id_slot_offset_map_;
-
-  util::mutex m_unavail_craned_list_mtx_;
+  Mutex m_unavail_craned_list_mtx_;
   std::list<CranedId> m_unavail_craned_list_;
 
-  // Protect m_alive_craned_bitset_
-  util::rw_mutex m_alive_craned_rw_mtx_;
-
-  // If bit n is set, the craned client n is available to send grpc. (underlying
-  // grpc channel state is GRPC_CHANNEL_READY).
-  boost::dynamic_bitset<> m_alive_craned_bitset_;
-
   grpc::CompletionQueue m_cq_;
-  util::mutex m_cq_mtx_;
+  Mutex m_cq_mtx_;
   bool m_cq_closed_;
 
   std::thread m_cq_thread_;

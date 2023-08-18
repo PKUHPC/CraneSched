@@ -134,6 +134,14 @@ struct BatchMetaInTaskInstance {
 
 // Todo: Task may consists of multiple subtasks
 struct TaskInstance {
+  ~TaskInstance() {
+    if (termination_timer) {
+      event_del(termination_timer);
+      event_free(termination_timer);
+      termination_timer = nullptr;
+    }
+  }
+
   crane::grpc::TaskToD task;
 
   PasswordEntry pwd_entry;
@@ -194,9 +202,6 @@ class TaskManager {
 
   // Wait internal libevent base loop to exit...
   void Wait();
-
-  // Ask TaskManager to stop its event loop.
-  void ShutdownAsync();
 
   /***
    * Set the callback function will be called when SIGINT is triggered.
@@ -276,6 +281,9 @@ class TaskManager {
                                           ProcessInstance* process);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
+
+  // Ask TaskManager to stop its event loop.
+  void EvActivateShutdown_();
 
   /**
    * Inform CraneCtld of the status change of a task.

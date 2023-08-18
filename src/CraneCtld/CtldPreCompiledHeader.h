@@ -59,6 +59,7 @@
 // Boost
 #include <boost/algorithm/string.hpp>
 #include <boost/container_hash/hash.hpp>
+#include <boost/pool/object_pool.hpp>
 #include <boost/thread/shared_mutex.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
@@ -73,6 +74,8 @@
 
 // gRPC
 #include <google/protobuf/util/time_util.h>
+#include <grpc++/alarm.h>
+#include <grpc++/completion_queue.h>
 #include <grpc++/grpc++.h>
 
 // Ranges-v3

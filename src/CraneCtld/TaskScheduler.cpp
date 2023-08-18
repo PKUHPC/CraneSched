@@ -681,13 +681,13 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
     // received.
     meta.has_been_terminated_on_craned = true;
 
-    if (new_status == crane::grpc::ExceedTimeLimit) {
+    if (new_status == crane::grpc::ExceedTimeLimit ||
+        exit_code == ExitCode::kExitCodeCranedDown) {
       meta.has_been_cancelled_on_front_end = true;
       meta.cb_task_cancel(task->TaskId());
-      task->SetStatus(crane::grpc::ExceedTimeLimit);
-    } else {
+      task->SetStatus(new_status);
+    } else
       task->SetStatus(crane::grpc::Completed);
-    }
 
     meta.cb_task_completed(task->TaskId());
   } else {
@@ -1841,7 +1841,8 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   return CraneErr::kOk;
 }
 
-void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id) {
+void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id,
+                                           uint32_t exit_code) {
   CRANE_TRACE("Terminate tasks on craned {}", craned_id);
 
   // The order of LockGuards matters.
@@ -1857,8 +1858,7 @@ void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id) {
 
     for (task_id_t task_id : task_ids)
       TaskStatusChangeNoLock_(task_id, craned_id,
-                              crane::grpc::TaskStatus::Failed,
-                              ExitCode::kExitCodeTerminal);
+                              crane::grpc::TaskStatus::Failed, exit_code);
   } else {
     CRANE_TRACE("No task is executed by craned {}. Ignore cleaning step...",
                 craned_id);

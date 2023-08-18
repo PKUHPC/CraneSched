@@ -85,12 +85,13 @@ inline constexpr size_t kSystemExitCodeNum =
 inline constexpr size_t kCraneExitCodeBase = kSystemExitCodeNum;
 
 enum ExitCodeEnum : uint16_t {
-  kExitCodeTerminal = kCraneExitCodeBase,
+  kExitCodeTerminated = kCraneExitCodeBase,
   kExitCodePermissionDenied,
   kExitCodeCgroupError,
   kExitCodeFileNotFound,
   kExitCodeSpawnProcessFail,
   kExitCodeExceedTimeLimit,
+  kExitCodeCranedDown,
 
   __MAX_EXIT_CODE  // NOLINT(bugprone-reserved-identifier)
 };

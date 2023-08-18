@@ -520,7 +520,8 @@ void InitializeCtldGlobalVariables() {
         "Remove its resource from the global resource pool.",
         craned_id);
     g_meta_container->CranedDown(craned_id);
-    g_task_scheduler->TerminateTasksOnCraned(craned_id);
+    g_task_scheduler->TerminateTasksOnCraned(craned_id,
+                                             ExitCode::kExitCodeCranedDown);
   });
 
   std::list<CranedId> to_register_craned_list;
