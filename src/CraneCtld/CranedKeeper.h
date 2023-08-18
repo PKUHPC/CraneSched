@@ -154,10 +154,6 @@ class CranedKeeper {
   // CompletionQueue.
   boost::object_pool<CqTag> m_tag_pool_;
 
-  //  Mutex m_connecting_craned_mtx_;
-  //  NodeHashMap<CranedId, uint32_t> m_connecting_craned_id_stub_map_
-  //      GUARDED_BY(m_connecting_craned_mtx_);
-
   Mutex m_connected_craned_mtx_;
   NodeHashMap<CranedId, std::unique_ptr<CranedStub>>
       m_connected_craned_id_stub_map_ GUARDED_BY(m_connected_craned_mtx_);

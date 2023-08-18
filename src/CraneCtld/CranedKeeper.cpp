@@ -391,10 +391,9 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   switch (new_state) {
     case GRPC_CHANNEL_READY: {
       {
-        CRANE_TRACE("CONNECTING -> READY");
-        // The two should be modified as a whole.
-        util::lock_guard craned_lock(m_connected_craned_mtx_);
-        CRANE_TRACE("New craned {} connected.", raw_craned->m_craned_id_);
+        CRANE_TRACE("CONNECTING -> READY. New craned {} connected.",
+                    raw_craned->m_craned_id_);
+        WriterLock lock(&m_connected_craned_mtx_);
 
         m_connected_craned_id_stub_map_.emplace(raw_craned->m_craned_id_,
                                                 std::move(tag_data->craned));
