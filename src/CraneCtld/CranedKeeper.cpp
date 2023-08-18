@@ -278,7 +278,7 @@ CranedKeeper::~CranedKeeper() {
 }
 
 void CranedKeeper::InitAndRegisterCraneds(std::list<CranedId> craned_id_list) {
-  util::lock_guard guard(m_unavail_craned_list_mtx_);
+  WriterLock guard(&m_unavail_craned_list_mtx_);
 
   m_unavail_craned_list_.splice(m_unavail_craned_list_.end(),
                                 std::move(craned_id_list));
@@ -338,21 +338,18 @@ void CranedKeeper::StateMonitorThreadFunc_() {
                 reinterpret_cast<InitializingCranedTagData *>(tag->data);
             CRANE_TRACE("Failed connect to {}. Re-connect it later..",
                         tag_data->craned->m_craned_id_);
+
+            // When deleting tag_data, the destructor will call
+            // PutBackNodeIntoUnavailList_ in m_clean_up_cb_ and put this craned
+            // into the re-connecting queue again.
             delete tag_data;
           } else if (tag->type == CqTag::kEstablishedCraned) {
             if (m_craned_is_down_cb_)
               g_thread_pool->push_task(m_craned_is_down_cb_,
                                        craned->m_craned_id_);
 
-            util::lock_guard node_lock(m_craned_mtx_);
-            util::write_lock_guard craned_lock(m_alive_craned_rw_mtx_);
-
-            m_empty_slot_bitset_[craned->m_slot_offset_] = true;
-            m_alive_craned_bitset_[craned->m_slot_offset_] = false;
-
-            m_craned_id_slot_offset_map_.erase(craned->m_craned_id_);
-
-            m_craned_vec_[craned->m_slot_offset_].reset();
+            WriterLock lock(&m_connected_craned_mtx_);
+            m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
           } else {
             CRANE_ERROR("Unknown tag type: {}", tag->type);
           }
@@ -394,37 +391,12 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   switch (new_state) {
     case GRPC_CHANNEL_READY: {
       {
-        CRANE_TRACE("CONNECTING -> READY");
-        // The two should be modified as a whole.
-        util::lock_guard craned_lock(m_craned_mtx_);
-        util::write_lock_guard craned_w_lock(m_alive_craned_rw_mtx_);
+        CRANE_TRACE("CONNECTING -> READY. New craned {} connected.",
+                    raw_craned->m_craned_id_);
+        WriterLock lock(&m_connected_craned_mtx_);
 
-        size_t pos = m_empty_slot_bitset_.find_first();
-        if (pos == boost::dynamic_bitset<>::npos) {
-          // No more room for new elements.
-          raw_craned->m_slot_offset_ = m_empty_slot_bitset_.size();
-
-          CRANE_TRACE("Append Craned at new slot #{}",
-                      raw_craned->m_slot_offset_);
-
-          // Transfer the ownership of this CranedStub to smart pointer.
-          m_craned_vec_.emplace_back(std::move(tag_data->craned));
-
-          m_empty_slot_bitset_.push_back(false);
-          m_alive_craned_bitset_.push_back(true);
-        } else {
-          CRANE_TRACE("Insert Craned at empty slot #{}", pos);
-          // Find empty slot.
-          raw_craned->m_slot_offset_ = pos;
-
-          // Transfer the CranedStub ownership.
-          m_craned_vec_[pos] = std::move(tag_data->craned);
-          m_empty_slot_bitset_[pos] = false;
-          m_alive_craned_bitset_[pos] = true;
-        }
-
-        m_craned_id_slot_offset_map_.emplace(raw_craned->m_craned_id_,
-                                             raw_craned->m_slot_offset_);
+        m_connected_craned_id_stub_map_.emplace(raw_craned->m_craned_id_,
+                                                std::move(tag_data->craned));
 
         raw_craned->m_failure_retry_times_ = 0;
         raw_craned->m_invalid_ = false;
@@ -545,10 +517,6 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
       CRANE_TRACE("READY -> IDLE");
 
       craned->m_invalid_ = true;
-      {
-        util::write_lock_guard lock(m_alive_craned_rw_mtx_);
-        m_alive_craned_bitset_[craned->m_slot_offset_] = false;
-      }
       if (m_craned_is_temp_down_cb_)
         g_thread_pool->push_task(m_craned_is_temp_down_cb_,
                                  craned->m_craned_id_);
@@ -569,10 +537,6 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
 
         craned->m_failure_retry_times_ = 0;
         craned->m_invalid_ = false;
-        {
-          util::write_lock_guard lock(m_alive_craned_rw_mtx_);
-          m_alive_craned_bitset_[craned->m_slot_offset_] = true;
-        }
 
         if (m_craned_rec_from_temp_failure_cb_)
           g_thread_pool->push_task(m_craned_rec_from_temp_failure_cb_,
@@ -590,10 +554,6 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
         CRANE_TRACE("READY -> TRANSIENT_FAILURE -> CONNECTING");
 
         craned->m_invalid_ = true;
-        {
-          util::write_lock_guard lock(m_alive_craned_rw_mtx_);
-          m_alive_craned_bitset_[craned->m_slot_offset_] = false;
-        }
         if (m_craned_is_temp_down_cb_)
           g_thread_pool->push_task(m_craned_is_temp_down_cb_,
                                    craned->m_craned_id_);
@@ -642,9 +602,8 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     }
 
     case GRPC_CHANNEL_SHUTDOWN:
-      CRANE_ERROR(
-          "Unexpected SHUTDOWN channel state on EstablishedCraned #{} !",
-          craned->m_slot_offset_);
+      CRANE_ERROR("Unexpected SHUTDOWN channel state on Established Craned {}!",
+                  craned->m_craned_id_);
       break;
   }
 
@@ -659,29 +618,17 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
 }
 
 uint32_t CranedKeeper::AvailableCranedCount() {
-  util::read_lock_guard r_lock(m_alive_craned_rw_mtx_);
-  return m_alive_craned_bitset_.count();
+  absl::ReaderMutexLock r_lock(&m_connected_craned_mtx_);
+  return m_connected_craned_id_stub_map_.size();
 }
 
 CranedStub *CranedKeeper::GetCranedStub(const CranedId &craned_id) {
-  util::lock_guard lock(m_craned_mtx_);
-  auto iter = m_craned_id_slot_offset_map_.find(craned_id);
-  if (iter != m_craned_id_slot_offset_map_.end())
-    return m_craned_vec_[iter->second].get();
+  ReaderLock lock(&m_connected_craned_mtx_);
+  auto iter = m_connected_craned_id_stub_map_.find(craned_id);
+  if (iter != m_connected_craned_id_stub_map_.end())
+    return iter->second.get();
   else
     return nullptr;
-}
-
-bool CranedKeeper::CheckCranedIdExists(const CranedId &craned_id) {
-  util::lock_guard lock(m_craned_mtx_);
-  size_t cnt = m_craned_id_slot_offset_map_.count(craned_id);
-  return cnt > 0;
-}
-
-bool CranedKeeper::CranedValid(uint32_t index) {
-  util::read_lock_guard r_lock(m_alive_craned_rw_mtx_);
-
-  return m_alive_craned_bitset_.test(index);
 }
 
 void CranedKeeper::SetCranedIsUpCb(std::function<void(CranedId)> cb) {

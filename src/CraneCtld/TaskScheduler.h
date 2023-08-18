@@ -225,7 +225,7 @@ class TaskScheduler {
     TaskStatusChangeNoLock_(task_id, craned_index, new_status, exit_code);
   }
 
-  void TerminateTasksOnCraned(const CranedId& craned_id);
+  void TerminateTasksOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
   // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
   void QueryTasksInRam(const crane::grpc::QueryTasksInfoRequest* request,

@@ -47,14 +47,16 @@ void CranedMetaContainerSimpleImpl::CranedDown(CranedId craned_id) {
     PartitionGlobalMeta& part_global_meta =
         partition_metas_map_.at(part_id).partition_global_meta;
     part_global_meta.m_resource_total_ -= node_meta.res_total;
-    part_global_meta.m_resource_avail_ -= node_meta.res_total;
-    part_global_meta.alive_craned_cnt--;
-
+    part_global_meta.m_resource_avail_ -= node_meta.res_avail;
     part_global_meta.m_resource_in_use_ -= node_meta.res_in_use;
+
+    part_global_meta.alive_craned_cnt--;
   }
 
   // Set the rse_in_use of dead craned to 0
+  node_meta.res_avail += node_meta.res_in_use;
   node_meta.res_in_use -= node_meta.res_in_use;
+  node_meta.running_task_resource_map.clear();
 }
 
 CranedMetaContainerInterface::PartitionMetasPtr
@@ -128,6 +130,12 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId craned_id,
   }
 
   CranedMeta& node_meta = node_meta_iter->second;
+  if (!node_meta.alive) {
+    CRANE_DEBUG("Crane {} has already been down. Ignore FreeResourceFromNode.",
+                node_meta.static_meta.hostname);
+    return;
+  }
+
   auto resource_iter = node_meta.running_task_resource_map.find(task_id);
   if (resource_iter == node_meta_iter->second.running_task_resource_map.end()) {
     CRANE_ERROR("Try to free resource from an unknown task {} on craned {}",

@@ -313,7 +313,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
       // If there's no task running, just stop the loop of TaskManager.
       if (this_->m_is_ending_now_) {
         if (this_->m_task_map_.empty()) {
-          this_->ShutdownAsync();
+          this_->EvActivateShutdown_();
         }
       }
       break;
@@ -354,34 +354,48 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
 
     if (this_->m_sigint_cb_) this_->m_sigint_cb_();
 
-    if (this_->m_task_map_.empty()) {
-      // If there is no task to kill, stop the loop directly.
-      this_->ShutdownAsync();
-    } else {
-      // Send SIGINT to all tasks and the event loop will stop
-      // when the ev_sigchld_cb_ of the last task is called.
-      for (auto&& [task_id, task_instance] : this_->m_task_map_) {
-        for (auto&& [pid, pr_instance] : task_instance->processes) {
-          CRANE_INFO(
-              "Sending SIGTERM to the process group of task #{} with root "
-              "process pid {}",
-              task_id, pr_instance->GetPid());
-          KillProcessInstance_(pr_instance.get(), SIGTERM);
-        }
-      }
-    }
-  } else {
-    if (this_->m_task_map_.empty()) {
-      // If there is no task to kill, stop the loop directly.
-      this_->ShutdownAsync();
-    } else {
-      CRANE_INFO(
-          "SIGINT has been triggered already. Sending SIGKILL to all process "
-          "groups instead.");
-      for (auto&& [task_id, task_instance] : this_->m_task_map_) {
+    for (auto task_it = this_->m_task_map_.begin();
+         task_it != this_->m_task_map_.end();) {
+      task_id_t task_id = task_it->first;
+      TaskInstance* task_instance = task_it->second.get();
+
+      if (task_instance->task.type() == crane::grpc::Batch) {
         for (auto&& [pid, pr_instance] : task_instance->processes) {
           CRANE_INFO(
               "Sending SIGINT to the process group of task #{} with root "
+              "process pid {}",
+              task_id, pr_instance->GetPid());
+          KillProcessInstance_(pr_instance.get(), SIGKILL);
+        }
+        task_it++;
+      } else {
+        // Kill all process in an interactive task and just remove it from the
+        // task map.
+        CRANE_DEBUG("Cleaning interactive task #{}...",
+                    task_instance->task.task_id());
+        task_instance->cgroup->KillAllProcesses();
+
+        auto to_remove_it = task_it++;
+        this_->m_task_map_.erase(to_remove_it);
+      }
+    }
+
+    if (this_->m_task_map_.empty()) {
+      // If there is not any batch task to wait for, stop the loop directly.
+      this_->EvActivateShutdown_();
+    }
+  } else {
+    CRANE_INFO(
+        "SIGINT has been triggered already. Sending SIGKILL to all process "
+        "groups instead.");
+    if (this_->m_task_map_.empty()) {
+      // If there is no task to kill, stop the loop directly.
+      this_->EvActivateShutdown_();
+    } else {
+      for (auto&& [task_id, task_instance] : this_->m_task_map_) {
+        for (auto&& [pid, pr_instance] : task_instance->processes) {
+          CRANE_INFO(
+              "Sending SIGKILL to the process group of task #{} with root "
               "process pid {}",
               task_id, pr_instance->GetPid());
           KillProcessInstance_(pr_instance.get(), SIGKILL);
@@ -400,7 +414,7 @@ void TaskManager::EvExitEventCb_(int efd, short events, void* user_data) {
   event_base_loopexit(this_->m_ev_base_, &delay);
 }
 
-void TaskManager::ShutdownAsync() {
+void TaskManager::EvActivateShutdown_() {
   CRANE_TRACE("Triggering exit event...");
   m_is_ending_now_ = true;
   event_active(m_ev_exit_event_, 0, 0);
@@ -879,13 +893,6 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
     CRANE_ASSERT_MSG(iter != this_->m_task_map_.end(),
                      "Task should be found here.");
 
-    TaskInstance* task_instance = iter->second.get();
-
-    if (task_instance->termination_timer) {
-      event_del(task_instance->termination_timer);
-      event_free(task_instance->termination_timer);
-    }
-
     // Free the TaskInstance structure
     this_->m_task_map_.erase(status_change.task_id);
     g_ctld_client->TaskStatusChangeAsync(std::move(status_change));
@@ -897,7 +904,7 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
     CRANE_TRACE(
         "Craned is ending and all tasks have been reaped. "
         "Stop event loop.");
-    this_->ShutdownAsync();
+    this_->EvActivateShutdown_();
   }
 }
 
@@ -1060,7 +1067,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
     } else if (task_instance->task.type() == crane::grpc::Interactive) {
       // For an Interactive task with no process running, it ends immediately.
       this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Completed,
-                                         ExitCode::kExitCodeTerminal,
+                                         ExitCode::kExitCodeTerminated,
                                          std::nullopt);
     }
   }
