@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <ares.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 

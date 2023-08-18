@@ -17,8 +17,10 @@
 #include <arpa/inet.h>
 #include <gtest/gtest.h>
 #include <netdb.h>
+#include <sys/epoll.h>
 
 #include "crane/Network.h"
+#include "crane/String.h"
 
 TEST(NetworkFunc, ResolveHostName) {
   struct sockaddr_in sa; /* input */
@@ -51,6 +53,100 @@ TEST(NetworkFunc, ResolveIpv4FromHostname) {
   if (ok) {
     GTEST_LOG_(INFO) << "Resolved hostname " << hostname << " to " << ipv4;
   }
+}
+
+void callback(void* arg, int status, int timeouts, struct hostent* host) {
+  (void)timeouts;  // 未使用
+  std::string hostname = *(static_cast<std::string*>(arg));
+
+  if (status != ARES_SUCCESS) {
+    std::cerr << "Failed to resolve " << hostname << ": "
+              << ares_strerror(status) << std::endl;
+    return;
+  }
+
+  if (host->h_addrtype == AF_INET && host->h_length == sizeof(struct in_addr)) {
+    char ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, host->h_addr, ip, sizeof(ip));
+    std::cout << hostname << " -> " << ip << std::endl;
+  }
+}
+
+TEST(NetworkFunc, ResolveIpv4FromHostnameAres) {
+  using crane::ResolveIpv4FromHostname;
+
+  ares_channel channel;
+  int nfds;
+  fd_set readers, writers;
+  struct timeval *tvp, tv{};
+  std::list<std::string> hostnames;
+
+  util::ParseHostList("h[1-1000]", &hostnames);
+
+  //  //before
+  //  for (const auto& hostname : hostnames) {
+  //    std::string ipv4;
+  //    ResolveIpv4FromHostname(hostname, &ipv4);
+  //    std::cout << hostname << " -> " << ipv4 << std::endl;
+  //  }
+  //  //
+
+  if (ares_library_init(ARES_LIB_INIT_ALL) != 0) {
+    std::cerr << "ares_library_init failed" << std::endl;
+    exit(1);
+  }
+
+  if (ares_init(&channel) != ARES_SUCCESS) {
+    std::cerr << "ares_init failed" << std::endl;
+    ares_library_cleanup();
+    exit(1);
+  }
+
+  int epoll_fd = epoll_create1(0);
+  if (epoll_fd == -1) {
+    perror("epoll_create1");
+    exit(1);
+  }
+
+  // Start hostname resolutions
+  for (const auto& hostname : hostnames) {
+    ares_gethostbyname(channel, hostname.c_str(), AF_INET, callback,
+                       (void*)&hostname);
+  }
+
+  // Use epoll for the event loop
+  while (true) {
+    struct epoll_event events[10];
+    int num_fds =
+        epoll_wait(epoll_fd, events, 10, 0);  // wait up to 1000ms (1 second)
+
+    if (num_fds == -1) {
+      perror("epoll_wait");
+      exit(1);
+    }
+
+    if (num_fds == 0) {  // timeout
+      ares_process_fd(channel, ARES_SOCKET_BAD, ARES_SOCKET_BAD);
+      std::cout << "time out" << std::endl;
+    } else {
+      for (int i = 0; i < num_fds; i++) {
+        ares_socket_t rfd =
+            (events[i].events & EPOLLIN) ? events[i].data.fd : ARES_SOCKET_BAD;
+        ares_socket_t wfd =
+            (events[i].events & EPOLLOUT) ? events[i].data.fd : ARES_SOCKET_BAD;
+        std::cout << "close" << std::endl;
+        ares_process_fd(channel, rfd, wfd);
+      }
+    }
+  }
+
+  // Print results
+  //  for (const auto& [hostname, ip] : hostname_to_ip_map) {
+  //    std::cout << hostname << " -> " << ip << std::endl;
+  //  }
+
+  ares_destroy(channel);
+  ares_library_cleanup();
 }
 
 TEST(NetworkFunc, IsAValidIpv4Address) {
