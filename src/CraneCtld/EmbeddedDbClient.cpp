@@ -18,6 +18,169 @@
 
 namespace Ctld {
 
+result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Init(
+    const std::string& path) {
+  int rc;
+
+  m_db_path_ = path;
+
+  rc = unqlite_open(&m_db_, m_db_path_.c_str(), UNQLITE_OPEN_CREATE);
+  if (rc != UNQLITE_OK) {
+    m_db_ = nullptr;
+    CRANE_ERROR("Failed to open unqlite db file {}: {}", m_db_path_,
+                GetInternalErrorStr_());
+    return result::failure(ErrorCode::kOther);
+  }
+
+  // Unqlite does not roll back and clear WAL after crashing.
+  // Call rollback function to prevent DB writing from error due to
+  // possible remaining WAL.
+  rc = unqlite_rollback(m_db_);
+  if (rc != UNQLITE_OK) {
+    m_db_ = nullptr;
+    CRANE_ERROR("Failed to rollback the undone transaction: {}",
+                GetInternalErrorStr_());
+    return result::failure(ErrorCode::kOther);
+  }
+
+  return {};
+}
+
+result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Close() {
+  int rc;
+  if (m_db_ != nullptr) {
+    CRANE_TRACE("Closing unqlite...");
+    rc = unqlite_close(m_db_);
+    if (rc != UNQLITE_OK) {
+      CRANE_ERROR("Failed to close unqlite: {}", GetInternalErrorStr_());
+      return result::failure(ErrorCode::kOther);
+    }
+  }
+
+  return {};
+}
+
+result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Store(
+    IEmbeddedDb::txn_id_t txn_id, const std::string& key, const void* data,
+    size_t len) {
+  int rc;
+  while (true) {
+    rc = unqlite_kv_store(m_db_, key.c_str(), key.size(), data, len);
+    if (rc == UNQLITE_OK) return {};
+    if (rc == UNQLITE_BUSY) {
+      std::this_thread::yield();
+      continue;
+    }
+
+    CRANE_ERROR("Failed to store key {} into db: {}", key,
+                GetInternalErrorStr_());
+    if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
+    return result::failure(ErrorCode::kOther);
+  }
+}
+
+result::result<size_t, IEmbeddedDb::ErrorCode> UnqliteDb::Fetch(
+    IEmbeddedDb::txn_id_t txn_id, const std::string& key, void* buf,
+    size_t* len) {
+  int rc;
+
+  void* buf_arg = (*len == 0) ? nullptr : buf;
+  unqlite_int64 n_bytes;
+
+  while (true) {
+    rc = unqlite_kv_fetch(m_db_, key.c_str(), key.size(), buf_arg, &n_bytes);
+    if (rc == UNQLITE_OK) break;
+    if (rc == UNQLITE_BUSY) {
+      std::this_thread::yield();
+      continue;
+    }
+
+    CRANE_ERROR("Failed to get value size for key {}: {}", key,
+                GetInternalErrorStr_());
+    return rc;
+  }
+
+  if (*len == 0) {
+    *len = n_bytes;
+    return {0};
+  } else if (*len < n_bytes) {
+    *len = n_bytes;
+    return result::failure(ErrorCode::kBufferSmall);
+  }
+
+  *len = n_bytes;
+  return {n_bytes};
+}
+
+result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Delete(
+    IEmbeddedDb::txn_id_t txn_id, const std::string& key) {
+  int rc;
+  while (true) {
+    rc = unqlite_kv_delete(m_db_, key.c_str(), key.size());
+    if (rc == UNQLITE_OK) return {};
+    if (rc == UNQLITE_BUSY) {
+      std::this_thread::yield();
+      continue;
+    }
+
+    CRANE_ERROR("Failed to delete key {} from db: {}", key,
+                GetInternalErrorStr_());
+    if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
+
+    if (rc == UNQLITE_NOTFOUND) return result::failure(ErrorCode::kNotFound);
+    return result::failure(ErrorCode::kOther);
+  }
+
+  return result::result<void, ErrorCode>();
+}
+
+result::result<IEmbeddedDb::txn_id_t, IEmbeddedDb::ErrorCode>
+UnqliteDb::Begin() {
+  int rc;
+  while (true) {
+    rc = unqlite_begin(m_db_);
+    if (rc == UNQLITE_OK) return rc;
+    if (rc == UNQLITE_BUSY) {
+      std::this_thread::yield();
+      continue;
+    }
+    CRANE_ERROR("Failed to begin transaction: {}", GetInternalErrorStr_());
+    return result::failure(ErrorCode::kOther);
+  }
+
+  return {s_fixed_txn_id_};
+};
+
+result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Commit(
+    txn_id_t txn_id) {
+  if (txn_id <= 0 || txn_id > s_fixed_txn_id_) return {};
+
+  int rc;
+  while (true) {
+    rc = unqlite_commit(m_db_);
+    if (rc == UNQLITE_OK) return {};
+    if (rc == UNQLITE_BUSY) {
+      std::this_thread::yield();
+      continue;
+    }
+    CRANE_ERROR("Failed to commit: {}", GetInternalErrorStr_());
+    if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
+    return result::failure(kOther);
+  }
+};
+
+std::string UnqliteDb::GetInternalErrorStr_() {
+  // Insertion fail, Handle error
+  const char* zBuf;
+  int iLen;
+  /* Something goes wrong, extract the database error log */
+  unqlite_config(m_db_, UNQLITE_CONFIG_ERR_LOG, &zBuf, &iLen);
+  if (iLen > 0) {
+    return {zBuf};
+  }
+  return {};
+}
+
 EmbeddedDbClient::~EmbeddedDbClient() {
   int rc;
   if (m_db_ != nullptr) {

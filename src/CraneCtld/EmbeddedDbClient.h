@@ -25,6 +25,72 @@
 
 namespace Ctld {
 
+class IEmbeddedDb {
+ public:
+  enum ErrorCode {
+    kNotFound,
+    kBufferSmall,
+    kOther,
+  };
+
+  using txn_id_t = int64_t;
+
+  virtual ~IEmbeddedDb() = default;
+
+  virtual result::result<void, ErrorCode> Init(std::string const& path) = 0;
+
+  virtual result::result<void, ErrorCode> Close() = 0;
+
+  virtual result::result<void, ErrorCode> Store(txn_id_t txn_id,
+                                                std::string const& key,
+                                                const void* data,
+                                                size_t len) = 0;
+
+  virtual result::result<size_t, ErrorCode> Fetch(txn_id_t txn_id,
+                                                  std::string const& key,
+                                                  void* buf, size_t* len) = 0;
+
+  virtual result::result<void, ErrorCode> Delete(txn_id_t txn_id,
+                                                 std::string const& key) = 0;
+
+  virtual result::result<txn_id_t, ErrorCode> Begin() = 0;
+
+  virtual result::result<void, ErrorCode> Commit(txn_id_t txn_id) = 0;
+
+  virtual std::string const& DbPath() = 0;
+};
+
+class UnqliteDb : public IEmbeddedDb {
+ public:
+  result::result<void, ErrorCode> Init(const std::string& path) override;
+
+  result::result<void, ErrorCode> Close() override;
+
+  result::result<void, ErrorCode> Store(txn_id_t txn_id, const std::string& key,
+                                        const void* data, size_t len) override;
+
+  result::result<size_t, ErrorCode> Fetch(txn_id_t txn_id,
+                                          const std::string& key, void* buf,
+                                          size_t* len) override;
+
+  result::result<void, ErrorCode> Delete(txn_id_t txn_id,
+                                         const std::string& key) override;
+
+  result::result<txn_id_t, ErrorCode> Begin() override;
+
+  result::result<void, ErrorCode> Commit(txn_id_t txn_id) override;
+
+  const std::string& DbPath() override { return m_db_path_; };
+
+ private:
+  static constexpr txn_id_t s_fixed_txn_id_ = 1;
+
+  std::string GetInternalErrorStr_();
+
+  std::string m_db_path_;
+  unqlite* m_db_{nullptr};
+};
+
 class EmbeddedDbClient {
  private:
   using db_id_t = task_db_id_t;
@@ -403,6 +469,8 @@ class EmbeddedDbClient {
   absl::Mutex m_queue_mtx_;
 
   std::atomic<bool> m_in_manual_transaction_;
+
+  std::unique_ptr<IEmbeddedDb> m_embedded_db_;
 
   std::string m_db_path_;
   unqlite* m_db_{nullptr};
