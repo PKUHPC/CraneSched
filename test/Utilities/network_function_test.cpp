@@ -21,6 +21,11 @@
 #include <netdb.h>
 #include <sys/epoll.h>
 
+#include <boost/asio.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/use_awaitable.hpp>
+
 #include "crane/Network.h"
 #include "crane/String.h"
 
@@ -142,6 +147,57 @@ TEST(NetworkFunc, ResolveIpv4FromHostnameAres) {
 
   ares_destroy(channel);
   ares_library_cleanup();
+}
+
+std::list<std::string> hostname_to_ip_map;
+
+namespace asio = boost::asio;
+using asio::ip::tcp;
+
+boost::asio::awaitable<void> resolve_hostname(boost::asio::io_context& io,
+                                              const std::string& hostname) {
+  tcp::resolver resolver(io);
+  try {
+    auto results =
+        co_await resolver.async_resolve(hostname, "", asio::use_awaitable);
+    for (auto& entry : results) {
+      hostname_to_ip_map.push_back(fmt::format(
+          "{} -> {}", hostname, entry.endpoint().address().to_string()));
+    }
+  } catch (const std::exception& e) {
+    std::cerr << "Error resolving " << hostname << ": " << e.what()
+              << std::endl;
+  }
+}
+
+TEST(NetworkFunc, ResolveIpv4FromHostnameBoostCoroutine) {
+  using crane::ResolveIpv4FromHostname;
+
+  std::list<std::string> hostnames;
+
+  util::ParseHostList("h[1-100]", &hostnames);
+
+  //  //before
+  //  for (const auto& hostname : hostnames) {
+  //    std::string ipv4;
+  //    ResolveIpv4FromHostname(hostname, &ipv4);
+  //    hostname_to_ip_map.push_back(fmt::format("{} -> {}",hostname, ipv4));
+  //  }
+  //  //
+
+  boost::asio::io_context io;
+
+  for (const auto& hostname : hostnames) {
+    boost::asio::co_spawn(io, resolve_hostname(io, hostname),
+                          boost::asio::detached);
+  }
+
+  io.run();
+
+  // Print results
+  for (const auto& hostname : hostname_to_ip_map) {
+    std::cout << hostname << std::endl;
+  }
 }
 
 TEST(NetworkFunc, IsAValidIpv4Address) {

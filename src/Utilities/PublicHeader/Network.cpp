@@ -24,8 +24,8 @@
 namespace crane {
 
 bool ResolveHostnameFromIpv4(const std::string& addr, std::string* hostname) {
-  struct sockaddr_in sa; /* input */
-  socklen_t len;         /* input */
+  struct sockaddr_in sa {}; /* input */
+  socklen_t len;            /* input */
   char hbuf[NI_MAXHOST];
 
   std::memset(&sa, 0, sizeof(struct sockaddr_in));
@@ -48,8 +48,8 @@ bool ResolveHostnameFromIpv4(const std::string& addr, std::string* hostname) {
 }
 
 bool ResolveHostnameFromIpv6(const std::string& addr, std::string* hostname) {
-  struct sockaddr_in6 sa6; /* input */
-  socklen_t len;           /* input */
+  struct sockaddr_in6 sa6 {}; /* input */
+  socklen_t len;              /* input */
   char hbuf[NI_MAXHOST];
 
   std::memset(&sa6, 0, sizeof(struct sockaddr_in6));
