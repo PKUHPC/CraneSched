@@ -286,8 +286,6 @@ void CranedKeeper::InitAndRegisterCraneds(std::list<CranedId> craned_id_list) {
 }
 
 void CranedKeeper::StateMonitorThreadFunc_() {
-  using namespace std::chrono_literals;
-
   bool ok;
   CqTag *tag;
 
@@ -328,7 +326,9 @@ void CranedKeeper::StateMonitorThreadFunc_() {
             // When cq is closed, do not register any more callbacks on it.
             craned->m_channel_->NotifyOnStateChange(
                 craned->m_prev_channel_state_,
-                std::chrono::system_clock::now() + 3s, &m_cq_, next_tag);
+                std::chrono::system_clock::now() +
+                    std::chrono::seconds(kCompletionQueueDelaySeconds),
+                &m_cq_, next_tag);
           }
         } else {
           // END state of both state machine. Free the Craned client.
@@ -373,7 +373,9 @@ void CranedKeeper::StateMonitorThreadFunc_() {
           // When cq is closed, do not register any more callbacks on it.
           craned->m_channel_->NotifyOnStateChange(
               craned->m_prev_channel_state_,
-              std::chrono::system_clock::now() + 3s, &m_cq_, tag);
+              std::chrono::system_clock::now() +
+                  std::chrono::seconds(kCompletionQueueDelaySeconds),
+              &m_cq_, tag);
         }
       }
     } else {
@@ -650,8 +652,6 @@ void CranedKeeper::SetCranedIsTempUpCb(std::function<void(CranedId)> cb) {
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
-  using namespace std::chrono_literals;
-
   std::string ip_addr;
   if (!crane::ResolveIpv4FromHostname(craned_id, &ip_addr)) {
     ip_addr = craned_id;
@@ -724,7 +724,9 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
 
   cq_tag_data->craned->m_channel_->NotifyOnStateChange(
       cq_tag_data->craned->m_prev_channel_state_,
-      std::chrono::system_clock::now() + 5s, &m_cq_, tag);
+      std::chrono::system_clock::now() +
+          std::chrono::seconds(kCompletionQueueDelaySeconds),
+      &m_cq_, tag);
 }
 
 void CranedKeeper::PutBackNodeIntoUnavailList_(CranedStub *stub) {

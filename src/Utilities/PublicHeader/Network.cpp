@@ -95,12 +95,14 @@ class HostsMap {
       m_ipv4_to_hostnames_map_;
 };
 
-HostsMap g_hosts_map;
+std::unique_ptr<HostsMap> g_hosts_map;
+
+void InitializeNetworkUtility() { g_hosts_map = std::make_unique<HostsMap>(); }
 
 }  // namespace internal
 
 bool ResolveHostnameFromIpv4(const std::string& addr, std::string* hostname) {
-  if (internal::g_hosts_map.FindFirstHostnameOfIpv4(addr, hostname))
+  if (internal::g_hosts_map->FindFirstHostnameOfIpv4(addr, hostname))
     return true;
 
   struct sockaddr_in sa {}; /* input */
@@ -154,7 +156,7 @@ bool ResolveHostnameFromIpv6(const std::string& addr, std::string* hostname) {
 }
 
 bool ResolveIpv4FromHostname(const std::string& hostname, std::string* addr) {
-  if (internal::g_hosts_map.FindIpv4OfHostname(hostname, addr)) return true;
+  if (internal::g_hosts_map->FindIpv4OfHostname(hostname, addr)) return true;
 
   struct addrinfo hints {};
   struct addrinfo *res, *tmp;

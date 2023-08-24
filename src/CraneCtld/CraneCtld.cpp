@@ -458,6 +458,8 @@ void InitializeLogger() {
 void InitializeCtldGlobalVariables() {
   using namespace Ctld;
 
+  crane::internal::InitializeNetworkUtility();
+
   // Enable inter-thread custom event notification.
   evthread_use_pthreads();
 
