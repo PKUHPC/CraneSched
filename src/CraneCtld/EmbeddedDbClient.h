@@ -25,60 +25,63 @@
 
 namespace Ctld {
 
+using txn_id_t = int64_t;
+
+enum DbErrorCode {
+  kNotFound,
+  kBufferSmall,
+  kParsingError,
+  kOther,
+};
+
 class IEmbeddedDb {
  public:
-  enum ErrorCode {
-    kNotFound,
-    kBufferSmall,
-    kOther,
-  };
-
-  using txn_id_t = int64_t;
-
   virtual ~IEmbeddedDb() = default;
 
-  virtual result::result<void, ErrorCode> Init(std::string const& path) = 0;
+  virtual result::result<void, DbErrorCode> Init(std::string const& path) = 0;
 
-  virtual result::result<void, ErrorCode> Close() = 0;
+  virtual result::result<void, DbErrorCode> Close() = 0;
 
-  virtual result::result<void, ErrorCode> Store(txn_id_t txn_id,
-                                                std::string const& key,
-                                                const void* data,
-                                                size_t len) = 0;
-
-  virtual result::result<size_t, ErrorCode> Fetch(txn_id_t txn_id,
+  virtual result::result<void, DbErrorCode> Store(txn_id_t txn_id,
                                                   std::string const& key,
-                                                  void* buf, size_t* len) = 0;
+                                                  const void* data,
+                                                  size_t len) = 0;
 
-  virtual result::result<void, ErrorCode> Delete(txn_id_t txn_id,
-                                                 std::string const& key) = 0;
+  virtual result::result<size_t, DbErrorCode> Fetch(txn_id_t txn_id,
+                                                    std::string const& key,
+                                                    void* buf, size_t* len) = 0;
 
-  virtual result::result<txn_id_t, ErrorCode> Begin() = 0;
+  virtual result::result<void, DbErrorCode> Delete(txn_id_t txn_id,
+                                                   std::string const& key) = 0;
 
-  virtual result::result<void, ErrorCode> Commit(txn_id_t txn_id) = 0;
+  virtual result::result<txn_id_t, DbErrorCode> Begin() = 0;
+
+  virtual result::result<void, DbErrorCode> Commit(txn_id_t txn_id) = 0;
 
   virtual std::string const& DbPath() = 0;
 };
 
 class UnqliteDb : public IEmbeddedDb {
  public:
-  result::result<void, ErrorCode> Init(const std::string& path) override;
+  result::result<void, DbErrorCode> Init(const std::string& path) override;
 
-  result::result<void, ErrorCode> Close() override;
+  result::result<void, DbErrorCode> Close() override;
 
-  result::result<void, ErrorCode> Store(txn_id_t txn_id, const std::string& key,
-                                        const void* data, size_t len) override;
+  result::result<void, DbErrorCode> Store(txn_id_t txn_id,
+                                          const std::string& key,
+                                          const void* data,
+                                          size_t len) override;
 
-  result::result<size_t, ErrorCode> Fetch(txn_id_t txn_id,
-                                          const std::string& key, void* buf,
-                                          size_t* len) override;
+  result::result<size_t, DbErrorCode> Fetch(txn_id_t txn_id,
+                                            const std::string& key, void* buf,
+                                            size_t* len) override;
 
-  result::result<void, ErrorCode> Delete(txn_id_t txn_id,
-                                         const std::string& key) override;
+  result::result<void, DbErrorCode> Delete(txn_id_t txn_id,
+                                           const std::string& key) override;
 
-  result::result<txn_id_t, ErrorCode> Begin() override;
+  result::result<txn_id_t, DbErrorCode> Begin() override;
 
-  result::result<void, ErrorCode> Commit(txn_id_t txn_id) override;
+  result::result<void, DbErrorCode> Commit(txn_id_t txn_id) override;
 
   const std::string& DbPath() override { return m_db_path_; };
 
@@ -150,24 +153,24 @@ class EmbeddedDbClient {
 
   bool Init(std::string const& db_path);
 
-  // Begin a manual transaction on a thread.
-  // Note: By the reference of UNQLite API, all the following unqlite_begin()
-  // will be a no-op. We will always call it because we must hold an exclusive
-  // lock on the database. Meanwhile, a flag will be set to prevent all the
-  // following Commit() from being executed until CommitManualTransaction() is
-  // called which unset the flag.
-  bool BeginManualTransaction() {
-    m_in_manual_transaction_ = true;
-    return UNQLITE_OK == BeginTransaction_();
+  bool BeginManualTransaction(txn_id_t* txn_id) {
+    auto result = m_embedded_db_->Begin();
+    if (result.has_value()) {
+      *txn_id = result.value();
+      return true;
+    }
+
+    return false;
   }
 
-  bool CommitManualTransaction() {
-    bool ok = UNQLITE_OK == Commit_(true);
-    m_in_manual_transaction_ = false;
-    return ok;
-  }
+  bool CommitManualTransaction(txn_id_t txn_id) {
+    if (txn_id <= 0) {
+      CRANE_ERROR("Commit a transaction with id {} <= 0", txn_id);
+      return false;
+    }
 
-  bool Commit() { return UNQLITE_OK == Commit_(); }
+    return m_embedded_db_->Commit(txn_id).has_value();
+  }
 
   bool AppendTaskToPendingAndAdvanceTaskIds(TaskInCtld* task);
 
@@ -195,23 +198,23 @@ class EmbeddedDbClient {
   }
 
   bool UpdatePersistedPartOfTask(
-      db_id_t db_id,
+      txn_id_t txn_id, db_id_t db_id,
       crane::grpc::PersistedPartOfTaskInCtld const& persisted_part) {
-    return StoreTypeIntoDb_(GetDbQueueNodePersistedPartName_(db_id),
-                            &persisted_part) == UNQLITE_OK;
+    return StoreTypeIntoDb_(txn_id, GetDbQueueNodePersistedPartName_(db_id),
+                            &persisted_part)
+        .has_value();
   }
 
-  bool UpdateTaskToCtld(db_id_t db_id,
+  bool UpdateTaskToCtld(txn_id_t txn_id, db_id_t db_id,
                         crane::grpc::TaskToCtld const& task_to_ctld) {
-    return StoreTypeIntoDb_(GetDbQueueNodeTaskToCtldName_(db_id),
-                            &task_to_ctld) == UNQLITE_OK;
+    return StoreTypeIntoDb_(txn_id, GetDbQueueNodeTaskToCtldName_(db_id),
+                            &task_to_ctld)
+        .has_value();
   }
 
   bool FetchTaskDataInDb(db_id_t db_id, TaskInEmbeddedDb* task_in_db);
 
  private:
-  std::string GetInternalErrorStr_();
-
   inline static std::string GetDbQueueNodeTaskToCtldName_(db_id_t db_id) {
     return fmt::format("{}TaskToCtld", db_id);
   }
@@ -228,12 +231,6 @@ class EmbeddedDbClient {
     return fmt::format("{}Prev", db_id);
   }
 
-  int BeginTransaction_();
-
-  int Commit_(bool force = false);
-
-  // -----------
-
   // Helper functions for the queue structure in the embedded db.
 
   int InsertBeforeDbQueueNodeNoLockAndTxn_(
@@ -244,8 +241,9 @@ class EmbeddedDbClient {
       db_id_t db_id, std::unordered_map<db_id_t, DbQueueNode>* q,
       DbQueueDummyHead* q_head, DbQueueDummyTail* q_tail);
 
-  int ForEachInDbQueueNoLockAndTxn_(DbQueueDummyHead dummy_head,
-                                    DbQueueDummyTail dummy_tail,
+  bool ForEachInDbQueueNoLockAndTxn_(txn_id_t txn_id,
+                                     DbQueueDummyHead dummy_head,
+                                     DbQueueDummyTail dummy_tail,
                                     ForEachInQueueFunc const& func);
 
   int GetQueueCopyNoLock_(std::unordered_map<db_id_t, DbQueueNode> const& q,
@@ -255,200 +253,132 @@ class EmbeddedDbClient {
 
   // Helper functions for basic embedded db operations
 
-  inline int FetchTaskDataInDbAtomic_(db_id_t db_id,
-                                      TaskInEmbeddedDb* task_in_db) {
-    int rc;
-    rc = FetchTypeFromDb_(GetDbQueueNodeTaskToCtldName_(db_id),
-                          task_in_db->mutable_task_to_ctld());
-    if (rc != UNQLITE_OK) return rc;
+  inline result::result<size_t, DbErrorCode> FetchTaskDataInDbAtomic_(
+      txn_id_t txn_id, db_id_t db_id, TaskInEmbeddedDb* task_in_db) {
+    auto result = FetchTypeFromDb_(txn_id, GetDbQueueNodeTaskToCtldName_(db_id),
+                                   task_in_db->mutable_task_to_ctld());
+    if (result.has_error()) return result;
 
-    return FetchTypeFromDb_(GetDbQueueNodePersistedPartName_(db_id),
+    return FetchTypeFromDb_(txn_id, GetDbQueueNodePersistedPartName_(db_id),
                             task_in_db->mutable_persisted_part());
   }
 
   template <std::integral T>
-  int FetchTypeFromDbOrInitWithValueNoLockAndTxn_(std::string const& key,
-                                                  T* buf, T value) {
-    int rc;
+  bool FetchTypeFromDbOrInitWithValueNoLockAndTxn_(txn_id_t txn_id,
+                                                   std::string const& key,
+                                                   T* buf, T value) {
+    result::result<size_t, DbErrorCode> fetch_result =
+        FetchTypeFromDb_(txn_id, key, buf);
+    if (fetch_result.has_value()) return true;
 
-    rc = FetchTypeFromDb_(key, buf);
-    if (rc != UNQLITE_OK) {
-      if (rc == UNQLITE_NOTFOUND) {
-        CRANE_TRACE(
-            "Key {} not found in embedded db. Initialize it with value {}", key,
-            value);
+    if (fetch_result.error() == DbErrorCode::kNotFound) {
+      CRANE_TRACE(
+          "Key {} not found in embedded db. Initialize it with value {}", key,
+          value);
 
-        rc = StoreTypeIntoDb_(key, &value);
-        if (rc != UNQLITE_OK) {
-          CRANE_ERROR("Failed to init {} in db. Code: {}. Msg: {}", key, rc,
-                      GetInternalErrorStr_());
-          return rc;
-        }
-        *buf = value;
-      } else
-        CRANE_ERROR("Failed to fetch {} from db. Code: {}. Msg: {}", key, rc,
-                    GetInternalErrorStr_());
-    }
-    return rc;
-  }
-
-  int FetchTypeFromDb_(std::string const& key, std::string* buf) {
-    int rc;
-    unqlite_int64 n_bytes;
-    while (true) {
-      rc = unqlite_kv_fetch(m_db_, key.c_str(), key.size(), nullptr, &n_bytes);
-      if (rc == UNQLITE_OK) break;
-      if (rc == UNQLITE_BUSY) {
-        std::this_thread::yield();
-        continue;
+      result::result<void, DbErrorCode> store_result =
+          StoreTypeIntoDb_(txn_id, key, &value);
+      if (store_result.has_error()) {
+        CRANE_ERROR("Failed to init key '{}' in db.", key);
+        return false;
       }
 
-      CRANE_ERROR("Failed to get value size for key {}: {}", key,
-                  GetInternalErrorStr_());
-      return rc;
+      *buf = value;
+      return true;
+    } else {
+      CRANE_ERROR("Failed to fetch key '{}' from db.", key);
+      return false;
+    }
+  }
+
+  result::result<size_t, DbErrorCode> FetchTypeFromDb_(txn_id_t txn_id,
+                                                       std::string const& key,
+                                                       std::string* buf) {
+    size_t n_bytes{0};
+
+    auto result = m_embedded_db_->Fetch(txn_id, key, nullptr, &n_bytes);
+    if (result.has_error()) {
+      CRANE_ERROR("Unexpected error when fetching the size of string key '{}'",
+                  key);
+      return result;
     }
 
     buf->resize(n_bytes);
-    while (true) {
-      rc = unqlite_kv_fetch(m_db_, key.c_str(), key.size(), buf->data(),
-                            &n_bytes);
-      if (rc == UNQLITE_OK) return rc;
-      if (rc == UNQLITE_BUSY) {
-        std::this_thread::yield();
-        continue;
-      }
-
-      if (rc != UNQLITE_NOTFOUND) {
-        CRANE_ERROR("Failed to fetch value for key {}: {}", key,
-                    GetInternalErrorStr_());
-        if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
-      }
-      return rc;
+    result = m_embedded_db_->Fetch(txn_id, key, buf->data(), &n_bytes);
+    if (result.has_error()) {
+      CRANE_ERROR("Unexpected error when fetching the data of string key '{}'",
+                  key);
+      return result;
     }
+
+    return {n_bytes};
   }
 
-  int FetchTypeFromDb_(std::string const& key,
-                       google::protobuf::MessageLite* value) {
-    int rc;
-    unqlite_int64 n_bytes;
+  result::result<size_t, DbErrorCode> FetchTypeFromDb_(
+      txn_id_t txn_id, std::string const& key,
+      google::protobuf::MessageLite* value) {
+    size_t n_bytes{0};
     std::string buf;
-    while (true) {
-      rc = unqlite_kv_fetch(m_db_, key.c_str(), key.size(), nullptr, &n_bytes);
-      if (rc == UNQLITE_OK) break;
-      if (rc == UNQLITE_BUSY) {
-        std::this_thread::yield();
-        continue;
-      }
 
-      if (rc != UNQLITE_NOTFOUND) {
-        CRANE_ERROR("Failed to fetch value for key {}: {}", key,
-                    GetInternalErrorStr_());
-        if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
-      }
-      return rc;
+    auto result = m_embedded_db_->Fetch(txn_id, key, nullptr, &n_bytes);
+    if (result.has_error()) {
+      CRANE_ERROR("Unexpected error when fetching the size of proto key '{}'",
+                  key);
+      return result;
     }
 
     buf.resize(n_bytes);
-    while (true) {
-      rc = unqlite_kv_fetch(m_db_, key.c_str(), key.size(), buf.data(),
-                            &n_bytes);
-      if (rc == UNQLITE_OK) {
-        bool ok = value->ParseFromArray(buf.data(), n_bytes);
-        if (!ok) {
-          CRANE_ERROR("Failed to parse protobuf data of key {}", key);
-          return UNQLITE_IOERR;
-        }
-        return UNQLITE_OK;
-      }
-      if (rc == UNQLITE_BUSY) {
-        std::this_thread::yield();
-        continue;
-      }
-
-      if (rc != UNQLITE_NOTFOUND) {
-        CRANE_ERROR("Failed to fetch value for key {}: {}", key,
-                    GetInternalErrorStr_());
-        if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
-      }
-      return rc;
+    result = m_embedded_db_->Fetch(txn_id, key, buf.data(), &n_bytes);
+    if (result.has_error()) {
+      CRANE_ERROR("Unexpected error when fetching the data of proto key '{}'",
+                  key);
+      return result;
     }
+
+    bool ok = value->ParseFromArray(buf.data(), n_bytes);
+    if (!ok) {
+      CRANE_ERROR("Failed to parse protobuf data of key {}", key);
+      return result::failure(DbErrorCode::kParsingError);
+    }
+
+    return {n_bytes};
   }
 
   template <std::integral T>
-  int FetchTypeFromDb_(std::string const& key, T* buf) {
-    int rc;
-    unqlite_int64 n_bytes{sizeof(T)};
-    while (true) {
-      rc = unqlite_kv_fetch(m_db_, key.c_str(), key.size(), buf, &n_bytes);
-      if (rc == UNQLITE_OK) {
-        if (n_bytes != sizeof(T)) {
-          CRANE_ERROR("Fetch {} ({} bytes) from db. However, {} was retrieved",
-                      key, sizeof(T), n_bytes);
-        }
-        return rc;
-      }
-
-      if (rc == UNQLITE_BUSY) {
-        std::this_thread::yield();
-        continue;
-      }
-      if (rc != UNQLITE_NOTFOUND) {
-        CRANE_ERROR("Failed to fetch value for key {}: {}", key,
-                    GetInternalErrorStr_());
-        if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
-      }
-      return rc;
-    }
+  result::result<size_t, DbErrorCode> FetchTypeFromDb_(txn_id_t txn_id,
+                                                       std::string const& key,
+                                                       T* buf) {
+    size_t n_bytes{sizeof(T)};
+    auto result = m_embedded_db_->Fetch(txn_id, key, buf, &n_bytes);
+    if (result.has_error())
+      CRANE_ERROR("Unexpected error when fetching scalar key '{}'.", key);
+    return result;
   }
 
   template <typename T>
-  int StoreTypeIntoDb_(std::string const& key, const T* value)
+  result::result<void, DbErrorCode> StoreTypeIntoDb_(txn_id_t txn_id,
+                                                     std::string const& key,
+                                                     const T* value)
     requires std::derived_from<T, google::protobuf::MessageLite>
   {
     using google::protobuf::io::CodedOutputStream;
     using google::protobuf::io::StringOutputStream;
 
-    int rc;
-
     std::string buf;
     StringOutputStream stringOutputStream(&buf);
     CodedOutputStream codedOutputStream(&stringOutputStream);
 
-    unqlite_int64 n_bytes{static_cast<unqlite_int64>(value->ByteSizeLong())};
+    size_t n_bytes{value->ByteSizeLong()};
     value->SerializeToCodedStream(&codedOutputStream);
 
-    while (true) {
-      rc =
-          unqlite_kv_store(m_db_, key.c_str(), key.size(), buf.data(), n_bytes);
-      if (rc == UNQLITE_OK) return rc;
-      if (rc == UNQLITE_BUSY) {
-        std::this_thread::yield();
-        continue;
-      }
-
-      CRANE_ERROR("Failed to store protobuf for key {}: {}", key,
-                  GetInternalErrorStr_());
-      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
-      return rc;
-    }
+    return m_embedded_db_->Store(txn_id, key, buf.data(), n_bytes);
   }
 
   template <std::integral T>
-  int StoreTypeIntoDb_(std::string const& key, const T* value) {
-    int rc;
-    while (true) {
-      rc = unqlite_kv_store(m_db_, key.c_str(), key.size(), value, sizeof(T));
-      if (rc == UNQLITE_OK) return rc;
-      if (rc == UNQLITE_BUSY) {
-        std::this_thread::yield();
-        continue;
-      }
-
-      CRANE_ERROR("Failed to store {} ({}) into db: {}", key, *value,
-                  GetInternalErrorStr_());
-      if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
-      return rc;
-    }
+  result::result<void, DbErrorCode> StoreTypeIntoDb_(txn_id_t txn_id,
+                                                     std::string const& key,
+                                                     const T* value) {
+    return m_embedded_db_->Store(txn_id, key, value, sizeof(T));
   }
 
   int DeleteKeyFromDbAtomic_(std::string const& key);
@@ -468,12 +398,7 @@ class EmbeddedDbClient {
   std::unordered_map<db_id_t, DbQueueNode> m_ended_queue_;
   absl::Mutex m_queue_mtx_;
 
-  std::atomic<bool> m_in_manual_transaction_;
-
   std::unique_ptr<IEmbeddedDb> m_embedded_db_;
-
-  std::string m_db_path_;
-  unqlite* m_db_{nullptr};
 };
 
 }  // namespace Ctld

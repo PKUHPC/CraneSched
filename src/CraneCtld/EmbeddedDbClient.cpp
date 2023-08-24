@@ -18,8 +18,7 @@
 
 namespace Ctld {
 
-result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Init(
-    const std::string& path) {
+result::result<void, DbErrorCode> UnqliteDb::Init(const std::string& path) {
   int rc;
 
   m_db_path_ = path;
@@ -29,7 +28,7 @@ result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Init(
     m_db_ = nullptr;
     CRANE_ERROR("Failed to open unqlite db file {}: {}", m_db_path_,
                 GetInternalErrorStr_());
-    return result::failure(ErrorCode::kOther);
+    return result::failure(DbErrorCode::kOther);
   }
 
   // Unqlite does not roll back and clear WAL after crashing.
@@ -40,29 +39,30 @@ result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Init(
     m_db_ = nullptr;
     CRANE_ERROR("Failed to rollback the undone transaction: {}",
                 GetInternalErrorStr_());
-    return result::failure(ErrorCode::kOther);
+    return result::failure(DbErrorCode::kOther);
   }
 
   return {};
 }
 
-result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Close() {
+result::result<void, DbErrorCode> UnqliteDb::Close() {
   int rc;
   if (m_db_ != nullptr) {
     CRANE_TRACE("Closing unqlite...");
     rc = unqlite_close(m_db_);
     if (rc != UNQLITE_OK) {
       CRANE_ERROR("Failed to close unqlite: {}", GetInternalErrorStr_());
-      return result::failure(ErrorCode::kOther);
+      return result::failure(DbErrorCode::kOther);
     }
   }
 
   return {};
 }
 
-result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Store(
-    IEmbeddedDb::txn_id_t txn_id, const std::string& key, const void* data,
-    size_t len) {
+result::result<void, DbErrorCode> UnqliteDb::Store(txn_id_t txn_id,
+                                                   const std::string& key,
+                                                   const void* data,
+                                                   size_t len) {
   int rc;
   while (true) {
     rc = unqlite_kv_store(m_db_, key.c_str(), key.size(), data, len);
@@ -75,13 +75,13 @@ result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Store(
     CRANE_ERROR("Failed to store key {} into db: {}", key,
                 GetInternalErrorStr_());
     if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
-    return result::failure(ErrorCode::kOther);
+    return result::failure(DbErrorCode::kOther);
   }
 }
 
-result::result<size_t, IEmbeddedDb::ErrorCode> UnqliteDb::Fetch(
-    IEmbeddedDb::txn_id_t txn_id, const std::string& key, void* buf,
-    size_t* len) {
+result::result<size_t, DbErrorCode> UnqliteDb::Fetch(txn_id_t txn_id,
+                                                     const std::string& key,
+                                                     void* buf, size_t* len) {
   int rc;
 
   void* buf_arg = (*len == 0) ? nullptr : buf;
@@ -89,11 +89,13 @@ result::result<size_t, IEmbeddedDb::ErrorCode> UnqliteDb::Fetch(
 
   while (true) {
     rc = unqlite_kv_fetch(m_db_, key.c_str(), key.size(), buf_arg, &n_bytes);
+
     if (rc == UNQLITE_OK) break;
     if (rc == UNQLITE_BUSY) {
       std::this_thread::yield();
       continue;
     }
+    if (rc == UNQLITE_NOTFOUND) return result::failure(DbErrorCode::kNotFound);
 
     CRANE_ERROR("Failed to get value size for key {}: {}", key,
                 GetInternalErrorStr_());
@@ -105,15 +107,14 @@ result::result<size_t, IEmbeddedDb::ErrorCode> UnqliteDb::Fetch(
     return {0};
   } else if (*len < n_bytes) {
     *len = n_bytes;
-    return result::failure(ErrorCode::kBufferSmall);
+    return result::failure(DbErrorCode::kBufferSmall);
   }
 
-  *len = n_bytes;
   return {n_bytes};
 }
 
-result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Delete(
-    IEmbeddedDb::txn_id_t txn_id, const std::string& key) {
+result::result<void, DbErrorCode> UnqliteDb::Delete(txn_id_t txn_id,
+                                                    const std::string& key) {
   int rc;
   while (true) {
     rc = unqlite_kv_delete(m_db_, key.c_str(), key.size());
@@ -127,15 +128,14 @@ result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Delete(
                 GetInternalErrorStr_());
     if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
 
-    if (rc == UNQLITE_NOTFOUND) return result::failure(ErrorCode::kNotFound);
-    return result::failure(ErrorCode::kOther);
+    if (rc == UNQLITE_NOTFOUND) return result::failure(DbErrorCode::kNotFound);
+    return result::failure(DbErrorCode::kOther);
   }
 
-  return result::result<void, ErrorCode>();
+  return result::result<void, DbErrorCode>();
 }
 
-result::result<IEmbeddedDb::txn_id_t, IEmbeddedDb::ErrorCode>
-UnqliteDb::Begin() {
+result::result<txn_id_t, DbErrorCode> UnqliteDb::Begin() {
   int rc;
   while (true) {
     rc = unqlite_begin(m_db_);
@@ -145,14 +145,13 @@ UnqliteDb::Begin() {
       continue;
     }
     CRANE_ERROR("Failed to begin transaction: {}", GetInternalErrorStr_());
-    return result::failure(ErrorCode::kOther);
+    return result::failure(DbErrorCode::kOther);
   }
 
   return {s_fixed_txn_id_};
 };
 
-result::result<void, IEmbeddedDb::ErrorCode> UnqliteDb::Commit(
-    txn_id_t txn_id) {
+result::result<void, DbErrorCode> UnqliteDb::Commit(txn_id_t txn_id) {
   if (txn_id <= 0 || txn_id > s_fixed_txn_id_) return {};
 
   int rc;
@@ -182,131 +181,98 @@ std::string UnqliteDb::GetInternalErrorStr_() {
 }
 
 EmbeddedDbClient::~EmbeddedDbClient() {
-  int rc;
-  if (m_db_ != nullptr) {
-    CRANE_TRACE("Closing unqlite...");
-    rc = unqlite_close(m_db_);
-    if (rc != UNQLITE_OK) {
-      CRANE_ERROR("Failed to close unqlite: {}", GetInternalErrorStr_());
-    }
-  }
+  auto result = m_embedded_db_->Close();
+  if (result.has_error())
+    CRANE_ERROR("Error occurred when closing the embedded db!");
 }
 
 bool EmbeddedDbClient::Init(const std::string& db_path) {
-  int rc;
+  m_embedded_db_ = std::make_unique<UnqliteDb>();
+  auto result = m_embedded_db_->Init(db_path);
+  if (result.has_error()) return false;
 
-  m_db_path_ = db_path;
-
-  rc = unqlite_open(&m_db_, m_db_path_.c_str(), UNQLITE_OPEN_CREATE);
-  if (rc != UNQLITE_OK) {
-    m_db_ = nullptr;
-    CRANE_ERROR("Failed to open unqlite db file {}: {}", m_db_path_,
-                GetInternalErrorStr_());
-    return false;
-  }
-
-  // Unqlite does not roll back and clear WAL after crashing.
-  // Call rollback function to prevent DB writing from error due to
-  // possible remaining WAL.
-  rc = unqlite_rollback(m_db_);
-  if (rc != UNQLITE_OK) {
-    m_db_ = nullptr;
-    CRANE_ERROR("Failed to rollback the undone transaction: {}",
-                GetInternalErrorStr_());
-    return false;
-  }
+  bool ok;
 
   // There is no race during Init stage.
   // No lock is needed.
-  rc = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(s_next_task_id_str_,
+  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(0, s_next_task_id_str_,
                                                    &s_next_task_id_, 1u);
-  if (rc != UNQLITE_OK) return false;
+  if (!ok) return false;
 
-  rc = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(s_next_task_db_id_str_,
+  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(0, s_next_task_db_id_str_,
                                                    &s_next_task_db_id_, 1l);
-  if (rc != UNQLITE_OK) return false;
+  if (!ok) return false;
 
   std::string pd_head_next_name =
       GetDbQueueNodeNextName_(s_pending_queue_head_.db_id);
-  rc = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
-      pd_head_next_name, &s_pending_queue_head_.next_db_id,
+  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
+      0, pd_head_next_name, &s_pending_queue_head_.next_db_id,
       s_pending_tail_db_id_);
-  if (rc != UNQLITE_OK) return false;
+  if (!ok) return false;
 
   std::string pd_tail_priv_name =
       GetDbQueueNodePrevName_(s_pending_queue_tail_.db_id);
-  rc = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
-      pd_tail_priv_name, &s_pending_queue_tail_.prev_db_id,
+  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
+      0, pd_tail_priv_name, &s_pending_queue_tail_.prev_db_id,
       s_pending_head_db_id_);
-  if (rc != UNQLITE_OK) return false;
+  if (!ok) return false;
 
   std::string r_head_next_name =
       GetDbQueueNodeNextName_(s_running_queue_head_.db_id);
-  rc = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
-      r_head_next_name, &s_running_queue_head_.next_db_id,
+  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
+      0, r_head_next_name, &s_running_queue_head_.next_db_id,
       s_running_tail_db_id_);
-  if (rc != UNQLITE_OK) return false;
+  if (!ok) return false;
 
   std::string r_tail_priv_name =
       GetDbQueueNodePrevName_(s_running_queue_tail_.db_id);
-  rc = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
-      r_tail_priv_name, &s_running_queue_tail_.prev_db_id,
+  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
+      0, r_tail_priv_name, &s_running_queue_tail_.prev_db_id,
       s_running_head_db_id_);
-  if (rc != UNQLITE_OK) return false;
+  if (!ok) return false;
 
-  rc = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
-      GetDbQueueNodeNextName_(s_ended_queue_head_.db_id),
+  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
+      0, GetDbQueueNodeNextName_(s_ended_queue_head_.db_id),
       &s_ended_queue_head_.next_db_id, s_ended_tail_db_id_);
-  if (rc != UNQLITE_OK) return false;
+  if (!ok) return false;
 
-  rc = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
-      GetDbQueueNodePrevName_(s_ended_queue_tail_.db_id),
+  ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(
+      0, GetDbQueueNodePrevName_(s_ended_queue_tail_.db_id),
       &s_ended_queue_tail_.prev_db_id, s_ended_head_db_id_);
-  if (rc != UNQLITE_OK) return false;
+  if (!ok) return false;
 
   // Reconstruct the running queue and the pending queue.
-  rc = ForEachInDbQueueNoLockAndTxn_(
-      s_pending_queue_head_, s_pending_queue_tail_,
+  ok = ForEachInDbQueueNoLockAndTxn_(
+      0, s_pending_queue_head_, s_pending_queue_tail_,
       [this](DbQueueNode const& node) {
         m_pending_queue_.emplace(node.db_id, node);
       });
-  if (rc != UNQLITE_OK) {
+  if (!ok) {
     CRANE_ERROR("Failed to reconstruct pending queue.");
     return false;
   }
 
-  rc = ForEachInDbQueueNoLockAndTxn_(
-      s_running_queue_head_, s_running_queue_tail_,
+  ok = ForEachInDbQueueNoLockAndTxn_(
+      0, s_running_queue_head_, s_running_queue_tail_,
       [this](DbQueueNode const& node) {
         m_running_queue_.emplace(node.db_id, node);
       });
-  if (rc != UNQLITE_OK) {
+  if (!ok) {
     CRANE_ERROR("Failed to reconstruct running queue.");
     return false;
   }
 
-  rc = ForEachInDbQueueNoLockAndTxn_(s_ended_queue_head_, s_ended_queue_tail_,
-                                     [this](DbQueueNode const& node) {
-                                       m_ended_queue_.emplace(node.db_id, node);
-                                     });
-  if (rc != UNQLITE_OK) {
+  ok =
+      ForEachInDbQueueNoLockAndTxn_(0, s_ended_queue_head_, s_ended_queue_tail_,
+                                    [this](DbQueueNode const& node) {
+                                      m_ended_queue_.emplace(node.db_id, node);
+                                    });
+  if (!ok) {
     CRANE_ERROR("Failed to reconstruct ended queue.");
     return false;
   }
 
   return true;
-}
-
-std::string EmbeddedDbClient::GetInternalErrorStr_() {
-  // Insertion fail, Handle error
-  const char* zBuf;
-  int iLen;
-  /* Something goes wrong, extract the database error log */
-  unqlite_config(m_db_, UNQLITE_CONFIG_ERR_LOG, &zBuf, &iLen);
-  if (iLen > 0) {
-    return {zBuf};
-  }
-  return {};
 }
 
 bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(TaskInCtld* task) {
@@ -402,37 +368,6 @@ int EmbeddedDbClient::DeleteDbQueueNodeNoLockAndTxn_(
   q->erase(it);
 
   return rc;
-}
-
-int EmbeddedDbClient::Commit_(bool force) {
-  if (force || m_in_manual_transaction_) return UNQLITE_OK;
-
-  int rc;
-  while (true) {
-    rc = unqlite_commit(m_db_);
-    if (rc == UNQLITE_OK) return rc;
-    if (rc == UNQLITE_BUSY) {
-      std::this_thread::yield();
-      continue;
-    }
-    CRANE_ERROR("Failed to commit: {}", GetInternalErrorStr_());
-    if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
-    return rc;
-  }
-}
-
-int EmbeddedDbClient::BeginTransaction_() {
-  int rc;
-  while (true) {
-    rc = unqlite_begin(m_db_);
-    if (rc == UNQLITE_OK) return rc;
-    if (rc == UNQLITE_BUSY) {
-      std::this_thread::yield();
-      continue;
-    }
-    CRANE_ERROR("Failed to begin transaction: {}", GetInternalErrorStr_());
-    return rc;
-  }
 }
 
 int EmbeddedDbClient::DeleteKeyFromDbAtomic_(const std::string& key) {
@@ -600,12 +535,10 @@ int EmbeddedDbClient::GetQueueCopyNoLock_(
   return rc;
 }
 
-int EmbeddedDbClient::ForEachInDbQueueNoLockAndTxn_(
-    EmbeddedDbClient::DbQueueDummyHead dummy_head,
+bool EmbeddedDbClient::ForEachInDbQueueNoLockAndTxn_(
+    txn_id_t txn_id, EmbeddedDbClient::DbQueueDummyHead dummy_head,
     EmbeddedDbClient::DbQueueDummyTail dummy_tail,
     const EmbeddedDbClient::ForEachInQueueFunc& func) {
-  int rc;
-
   db_id_t prev_pos = dummy_head.db_id;
   db_id_t pos = dummy_head.next_db_id;
   while (pos != dummy_tail.db_id) {
@@ -613,8 +546,8 @@ int EmbeddedDbClient::ForEachInDbQueueNoLockAndTxn_(
 
     // Assert "<db_id>Next" exists in DB. If not so, the callback should not
     // be called.
-    rc = FetchTypeFromDb_(GetDbQueueNodeNextName_(pos), &next_pos);
-    if (rc != UNQLITE_OK) return rc;
+    auto result = FetchTypeFromDb_(0, GetDbQueueNodeNextName_(pos), &next_pos);
+    if (result.has_error()) return false;
 
     func(DbQueueNode{pos, prev_pos, next_pos});
 
@@ -622,7 +555,7 @@ int EmbeddedDbClient::ForEachInDbQueueNoLockAndTxn_(
     pos = next_pos;
   }
 
-  return UNQLITE_OK;
+  return true;
 }
 
 bool EmbeddedDbClient::FetchTaskDataInDb(
