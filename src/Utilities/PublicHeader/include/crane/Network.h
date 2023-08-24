@@ -32,11 +32,7 @@
 
 namespace crane {
 
-namespace internal {
-
-void InitializeNetworkUtility();
-
-}
+void InitializeNetworkFunctions();
 
 bool ResolveHostnameFromIpv4(const std::string& addr, std::string* hostname);
 

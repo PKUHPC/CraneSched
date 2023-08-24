@@ -97,9 +97,11 @@ class HostsMap {
 
 std::unique_ptr<HostsMap> g_hosts_map;
 
-void InitializeNetworkUtility() { g_hosts_map = std::make_unique<HostsMap>(); }
-
 }  // namespace internal
+
+void InitializeNetworkFunctions() {
+  internal::g_hosts_map = std::make_unique<internal::HostsMap>();
+}
 
 bool ResolveHostnameFromIpv4(const std::string& addr, std::string* hostname) {
   if (internal::g_hosts_map->FindFirstHostnameOfIpv4(addr, hostname))

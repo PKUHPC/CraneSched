@@ -458,7 +458,7 @@ void InitializeLogger() {
 void InitializeCtldGlobalVariables() {
   using namespace Ctld;
 
-  crane::internal::InitializeNetworkUtility();
+  crane::InitializeNetworkFunctions();
 
   // Enable inter-thread custom event notification.
   evthread_use_pthreads();
@@ -473,8 +473,8 @@ void InitializeCtldGlobalVariables() {
   g_config.Hostname.assign(hostname);
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
-  g_thread_pool = std::make_unique<BS::thread_pool>(
-      std::thread::hardware_concurrency() * 2);
+  g_thread_pool =
+      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
   g_db_client = std::make_unique<MongodbClient>();
   if (!g_db_client->Connect()) {
@@ -598,8 +598,7 @@ void CreateFolders() {
   create_folders_for_path(g_config.CraneCtldDbPath);
 }
 
-void SetRLimit(uint64_t num) {
-  // This goes somewhere in your code
+void SetMaxFileDescriptorNumber(uint64_t num) {
   struct rlimit rlim {};
 
   rlim.rlim_cur = num;
@@ -614,7 +613,7 @@ void SetRLimit(uint64_t num) {
 int StartServer() {
   InitializeLogger();
 
-  SetRLimit(640000);
+  SetMaxFileDescriptorNumber(640000);
 
   CreateFolders();
 
