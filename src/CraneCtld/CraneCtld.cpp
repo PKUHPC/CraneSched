@@ -19,6 +19,7 @@
 
 #include <event2/thread.h>
 #include <sys/file.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
@@ -31,6 +32,7 @@
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
+#include "crane/Network.h"
 
 // Must be after crane/Logger.h which defines the static log level
 #include <spdlog/async.h>
@@ -414,14 +416,9 @@ void ParseConfig(int argc, char** argv) {
   }
 }
 
-void InitializeCtldGlobalVariables() {
-  using namespace Ctld;
-
-  // Enable inter-thread custom event notification.
-  evthread_use_pthreads();
-
+void InitializeLogger() {
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-      g_config.CraneCtldLogFile, 1048576 * 5, 3);
+      g_config.CraneCtldLogFile, 1048576 * 50, 3);
 
   auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
 
@@ -456,6 +453,15 @@ void InitializeCtldGlobalVariables() {
   spdlog::flush_every(std::chrono::seconds(1));
 
   spdlog::set_level(spdlog::level::trace);
+}
+
+void InitializeCtldGlobalVariables() {
+  using namespace Ctld;
+
+  crane::InitializeNetworkFunctions();
+
+  // Enable inter-thread custom event notification.
+  evthread_use_pthreads();
 
   char hostname[HOST_NAME_MAX + 1];
   int err = gethostname(hostname, HOST_NAME_MAX + 1);
@@ -467,8 +473,8 @@ void InitializeCtldGlobalVariables() {
   g_config.Hostname.assign(hostname);
   CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
-  g_thread_pool = std::make_unique<BS::thread_pool>(
-      std::thread::hardware_concurrency() / 2);
+  g_thread_pool =
+      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
   g_db_client = std::make_unique<MongodbClient>();
   if (!g_db_client->Connect()) {
@@ -592,7 +598,23 @@ void CreateFolders() {
   create_folders_for_path(g_config.CraneCtldDbPath);
 }
 
+void SetMaxFileDescriptorNumber(uint64_t num) {
+  struct rlimit rlim {};
+
+  rlim.rlim_cur = num;
+  rlim.rlim_max = num;
+
+  if (setrlimit(RLIMIT_NOFILE, &rlim) == -1) {
+    CRANE_ERROR("Unable to set file descriptor limits to {}", num);
+    std::exit(1);
+  }
+}
+
 int StartServer() {
+  InitializeLogger();
+
+  SetMaxFileDescriptorNumber(640000);
+
   CreateFolders();
 
   InitializeCtldGlobalVariables();

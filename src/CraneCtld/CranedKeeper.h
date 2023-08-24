@@ -20,6 +20,7 @@
 // Precompiled header comes first!
 
 #include "crane/Lock.h"
+#include "crane/Network.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 
@@ -168,6 +169,8 @@ class CranedKeeper {
   std::thread m_cq_thread_;
 
   std::thread m_period_connect_thread_;
+
+  std::atomic_uint64_t m_channel_count_{0};
 };
 
 }  // namespace Ctld

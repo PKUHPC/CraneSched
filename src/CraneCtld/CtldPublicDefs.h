@@ -26,6 +26,7 @@ using moodycamel::ConcurrentQueue;
 using task_db_id_t = int64_t;
 
 constexpr uint64_t kTaskScheduleIntervalMs = 1000;
+constexpr uint16_t kCompletionQueueDelaySeconds = 20;
 
 struct Config {
   struct Node {

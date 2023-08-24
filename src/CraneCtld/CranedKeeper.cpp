@@ -286,8 +286,6 @@ void CranedKeeper::InitAndRegisterCraneds(std::list<CranedId> craned_id_list) {
 }
 
 void CranedKeeper::StateMonitorThreadFunc_() {
-  using namespace std::chrono_literals;
-
   bool ok;
   CqTag *tag;
 
@@ -328,7 +326,9 @@ void CranedKeeper::StateMonitorThreadFunc_() {
             // When cq is closed, do not register any more callbacks on it.
             craned->m_channel_->NotifyOnStateChange(
                 craned->m_prev_channel_state_,
-                std::chrono::system_clock::now() + 3s, &m_cq_, next_tag);
+                std::chrono::system_clock::now() +
+                    std::chrono::seconds(kCompletionQueueDelaySeconds),
+                &m_cq_, next_tag);
           }
         } else {
           // END state of both state machine. Free the Craned client.
@@ -343,6 +343,8 @@ void CranedKeeper::StateMonitorThreadFunc_() {
             // PutBackNodeIntoUnavailList_ in m_clean_up_cb_ and put this craned
             // into the re-connecting queue again.
             delete tag_data;
+
+            m_channel_count_.fetch_sub(1);
           } else if (tag->type == CqTag::kEstablishedCraned) {
             if (m_craned_is_down_cb_)
               g_thread_pool->push_task(m_craned_is_down_cb_,
@@ -371,7 +373,9 @@ void CranedKeeper::StateMonitorThreadFunc_() {
           // When cq is closed, do not register any more callbacks on it.
           craned->m_channel_->NotifyOnStateChange(
               craned->m_prev_channel_state_,
-              std::chrono::system_clock::now() + 3s, &m_cq_, tag);
+              std::chrono::system_clock::now() +
+                  std::chrono::seconds(kCompletionQueueDelaySeconds),
+              &m_cq_, tag);
         }
       }
     } else {
@@ -648,7 +652,10 @@ void CranedKeeper::SetCranedIsTempUpCb(std::function<void(CranedId)> cb) {
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
-  using namespace std::chrono_literals;
+  std::string ip_addr;
+  if (!crane::ResolveIpv4FromHostname(craned_id, &ip_addr)) {
+    ip_addr = craned_id;
+  }
 
   auto *cq_tag_data = new InitializingCranedTagData{};
   cq_tag_data->craned = std::make_unique<CranedStub>(this);
@@ -674,12 +681,12 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   //  /*ms*/); channel_args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1
   //  /*true*/);
 
+  CRANE_TRACE("Creating a channel to {}:{}. Channel count: {}", craned_id,
+              kCranedDefaultPort, m_channel_count_.fetch_add(1) + 1);
   if (g_config.ListenConf.UseTls) {
     std::string addr_port =
-        fmt::format("{}.{}:{}", craned_id, g_config.ListenConf.DomainSuffix,
+        fmt::format("{}.{}:{}", ip_addr, g_config.ListenConf.DomainSuffix,
                     kCranedDefaultPort);
-
-    CRANE_TRACE("Creating a channel to {}", addr_port);
 
     grpc::SslCredentialsOptions ssl_opts;
     // pem_root_certs is actually the certificate of server side rather than
@@ -693,9 +700,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
     cq_tag_data->craned->m_channel_ = grpc::CreateCustomChannel(
         addr_port, grpc::SslCredentials(ssl_opts), channel_args);
   } else {
-    std::string addr_port = fmt::format("{}:{}", craned_id, kCranedDefaultPort);
-
-    CRANE_TRACE("Creating a channel to {}", addr_port);
+    std::string addr_port = fmt::format("{}:{}", ip_addr, kCranedDefaultPort);
 
     cq_tag_data->craned->m_channel_ = grpc::CreateCustomChannel(
         addr_port, grpc::InsecureChannelCredentials(), channel_args);
@@ -719,7 +724,9 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
 
   cq_tag_data->craned->m_channel_->NotifyOnStateChange(
       cq_tag_data->craned->m_prev_channel_state_,
-      std::chrono::system_clock::now() + 2s, &m_cq_, tag);
+      std::chrono::system_clock::now() +
+          std::chrono::seconds(kCompletionQueueDelaySeconds),
+      &m_cq_, tag);
 }
 
 void CranedKeeper::PutBackNodeIntoUnavailList_(CranedStub *stub) {
@@ -736,7 +743,10 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
     {
       util::lock_guard guard(m_unavail_craned_list_mtx_);
       while (!m_unavail_craned_list_.empty()) {
-        ConnectCranedNode_(m_unavail_craned_list_.front());
+        g_thread_pool->push_task(
+            [this, craned_id = std::move(m_unavail_craned_list_.front())]() {
+              ConnectCranedNode_(craned_id);
+            });
         m_unavail_craned_list_.pop_front();
       }
     }
