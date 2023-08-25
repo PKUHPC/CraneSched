@@ -58,6 +58,8 @@ class IEmbeddedDb {
 
   virtual result::result<void, DbErrorCode> Commit(txn_id_t txn_id) = 0;
 
+  virtual result::result<void, DbErrorCode> Abort(txn_id_t txn_id) = 0;
+
   virtual std::string const& DbPath() = 0;
 };
 
@@ -83,12 +85,14 @@ class UnqliteDb : public IEmbeddedDb {
 
   result::result<void, DbErrorCode> Commit(txn_id_t txn_id) override;
 
+  result::result<void, DbErrorCode> Abort(txn_id_t txn_id) override;
+
   const std::string& DbPath() override { return m_db_path_; };
+
+  std::string GetInternalErrorStr_();
 
  private:
   static constexpr txn_id_t s_fixed_txn_id_ = 1;
-
-  std::string GetInternalErrorStr_();
 
   std::string m_db_path_;
   unqlite* m_db_{nullptr};
@@ -153,17 +157,17 @@ class EmbeddedDbClient {
 
   bool Init(std::string const& db_path);
 
-  bool BeginManualTransaction(txn_id_t* txn_id) {
+  bool BeginTransaction(txn_id_t* txn_id) {
     auto result = m_embedded_db_->Begin();
     if (result.has_value()) {
       *txn_id = result.value();
       return true;
     }
-
+    CRANE_ERROR("Failed to begin a transaction.");
     return false;
   }
 
-  bool CommitManualTransaction(txn_id_t txn_id) {
+  bool CommitTransaction(txn_id_t txn_id) {
     if (txn_id <= 0) {
       CRANE_ERROR("Commit a transaction with id {} <= 0", txn_id);
       return false;
@@ -172,29 +176,41 @@ class EmbeddedDbClient {
     return m_embedded_db_->Commit(txn_id).has_value();
   }
 
-  bool AppendTaskToPendingAndAdvanceTaskIds(TaskInCtld* task);
+  bool AbortTransaction(txn_id_t txn_id) {
+    if (txn_id <= 0) {
+      CRANE_ERROR("Abort a transaction with id {} <= 0", txn_id);
+      return false;
+    }
 
-  bool MovePendingOrRunningTaskToEnded(db_id_t db_id);
-
-  bool MoveTaskFromPendingToRunning(db_id_t db_id);
-
-  bool MoveTaskFromRunningToPending(db_id_t db_id);
-
-  bool PurgeTaskFromEnded(db_id_t db_id);
-
-  bool GetPendingQueueCopy(std::list<crane::grpc::TaskInEmbeddedDb>* list) {
-    absl::MutexLock l(&m_queue_mtx_);
-    return GetQueueCopyNoLock_(m_pending_queue_, list) == UNQLITE_OK;
+    return m_embedded_db_->Abort(txn_id).has_value();
   }
 
-  bool GetRunningQueueCopy(std::list<crane::grpc::TaskInEmbeddedDb>* list) {
+  bool AppendTaskToPendingAndAdvanceTaskIds(txn_id_t txn_id, TaskInCtld* task);
+
+  bool MovePendingOrRunningTaskToEnded(txn_id_t txn_id, db_id_t db_id);
+
+  bool MoveTaskFromPendingToRunning(txn_id_t txn_id, db_id_t db_id);
+
+  bool MoveTaskFromRunningToPending(txn_id_t txn_id, db_id_t db_id);
+
+  bool PurgeTaskFromEnded(txn_id_t txn_id, db_id_t db_id);
+
+  bool GetPendingQueueCopy(txn_id_t txn_id,
+                           std::list<crane::grpc::TaskInEmbeddedDb>* list) {
     absl::MutexLock l(&m_queue_mtx_);
-    return GetQueueCopyNoLock_(m_running_queue_, list) == UNQLITE_OK;
+    return GetQueueCopyNoLock_(txn_id, m_pending_queue_, list);
   }
 
-  bool GetEndedQueueCopy(std::list<crane::grpc::TaskInEmbeddedDb>* list) {
+  bool GetRunningQueueCopy(txn_id_t txn_id,
+                           std::list<crane::grpc::TaskInEmbeddedDb>* list) {
     absl::MutexLock l(&m_queue_mtx_);
-    return GetQueueCopyNoLock_(m_ended_queue_, list) == UNQLITE_OK;
+    return GetQueueCopyNoLock_(txn_id, m_running_queue_, list);
+  }
+
+  bool GetEndedQueueCopy(txn_id_t txn_id,
+                         std::list<crane::grpc::TaskInEmbeddedDb>* list) {
+    absl::MutexLock l(&m_queue_mtx_);
+    return GetQueueCopyNoLock_(txn_id, m_ended_queue_, list);
   }
 
   bool UpdatePersistedPartOfTask(
@@ -212,7 +228,10 @@ class EmbeddedDbClient {
         .has_value();
   }
 
-  bool FetchTaskDataInDb(db_id_t db_id, TaskInEmbeddedDb* task_in_db);
+  bool FetchTaskDataInDb(txn_id_t txn_id, db_id_t db_id,
+                         TaskInEmbeddedDb* task_in_db) {  // Only used in test
+    return FetchTaskDataInDbAtomic_(txn_id, db_id, task_in_db).has_value();
+  }
 
  private:
   inline static std::string GetDbQueueNodeTaskToCtldName_(db_id_t db_id) {
@@ -233,21 +252,24 @@ class EmbeddedDbClient {
 
   // Helper functions for the queue structure in the embedded db.
 
-  int InsertBeforeDbQueueNodeNoLockAndTxn_(
-      db_id_t db_id, db_id_t pos, std::unordered_map<db_id_t, DbQueueNode>* q,
-      DbQueueDummyHead* q_head, DbQueueDummyTail* q_tail);
+  bool InsertBeforeDbQueueNodeNoLockAndTxn_(
+      txn_id_t txn_id, db_id_t db_id, db_id_t pos,
+      std::unordered_map<db_id_t, DbQueueNode>* q, DbQueueDummyHead* q_head,
+      DbQueueDummyTail* q_tail);
 
-  int DeleteDbQueueNodeNoLockAndTxn_(
-      db_id_t db_id, std::unordered_map<db_id_t, DbQueueNode>* q,
-      DbQueueDummyHead* q_head, DbQueueDummyTail* q_tail);
+  bool DeleteDbQueueNodeNoLockAndTxn_(
+      txn_id_t txn_id, db_id_t db_id,
+      std::unordered_map<db_id_t, DbQueueNode>* q, DbQueueDummyHead* q_head,
+      DbQueueDummyTail* q_tail);
 
   bool ForEachInDbQueueNoLockAndTxn_(txn_id_t txn_id,
                                      DbQueueDummyHead dummy_head,
                                      DbQueueDummyTail dummy_tail,
-                                    ForEachInQueueFunc const& func);
+                                     ForEachInQueueFunc const& func);
 
-  int GetQueueCopyNoLock_(std::unordered_map<db_id_t, DbQueueNode> const& q,
-                          std::list<crane::grpc::TaskInEmbeddedDb>* list);
+  bool GetQueueCopyNoLock_(txn_id_t txn_id,
+                           std::unordered_map<db_id_t, DbQueueNode> const& q,
+                           std::list<crane::grpc::TaskInEmbeddedDb>* list);
 
   // -------------------
 
@@ -350,7 +372,7 @@ class EmbeddedDbClient {
                                                        T* buf) {
     size_t n_bytes{sizeof(T)};
     auto result = m_embedded_db_->Fetch(txn_id, key, buf, &n_bytes);
-    if (result.has_error())
+    if (result.has_error() && result.error() != DbErrorCode::kNotFound)
       CRANE_ERROR("Unexpected error when fetching scalar key '{}'.", key);
     return result;
   }
@@ -381,8 +403,6 @@ class EmbeddedDbClient {
     return m_embedded_db_->Store(txn_id, key, value, sizeof(T));
   }
 
-  int DeleteKeyFromDbAtomic_(std::string const& key);
-
   // -----------
 
   inline static std::string const s_next_task_db_id_str_{"NextTaskDbId"};
@@ -398,7 +418,7 @@ class EmbeddedDbClient {
   std::unordered_map<db_id_t, DbQueueNode> m_ended_queue_;
   absl::Mutex m_queue_mtx_;
 
-  std::unique_ptr<IEmbeddedDb> m_embedded_db_;
+  std::unique_ptr<UnqliteDb> m_embedded_db_;
 };
 
 }  // namespace Ctld

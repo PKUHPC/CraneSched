@@ -131,15 +131,13 @@ result::result<void, DbErrorCode> UnqliteDb::Delete(txn_id_t txn_id,
     if (rc == UNQLITE_NOTFOUND) return result::failure(DbErrorCode::kNotFound);
     return result::failure(DbErrorCode::kOther);
   }
-
-  return result::result<void, DbErrorCode>();
 }
 
 result::result<txn_id_t, DbErrorCode> UnqliteDb::Begin() {
   int rc;
   while (true) {
     rc = unqlite_begin(m_db_);
-    if (rc == UNQLITE_OK) return rc;
+    if (rc == UNQLITE_OK) return {s_fixed_txn_id_};
     if (rc == UNQLITE_BUSY) {
       std::this_thread::yield();
       continue;
@@ -147,9 +145,7 @@ result::result<txn_id_t, DbErrorCode> UnqliteDb::Begin() {
     CRANE_ERROR("Failed to begin transaction: {}", GetInternalErrorStr_());
     return result::failure(DbErrorCode::kOther);
   }
-
-  return {s_fixed_txn_id_};
-};
+}
 
 result::result<void, DbErrorCode> UnqliteDb::Commit(txn_id_t txn_id) {
   if (txn_id <= 0 || txn_id > s_fixed_txn_id_) return {};
@@ -166,7 +162,25 @@ result::result<void, DbErrorCode> UnqliteDb::Commit(txn_id_t txn_id) {
     if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
     return result::failure(kOther);
   }
-};
+}
+
+result::result<void, DbErrorCode> UnqliteDb::Abort(txn_id_t txn_id) {
+  if (txn_id <= 0 || txn_id > s_fixed_txn_id_) return {};
+
+  int rc;
+  while (true) {
+    rc = unqlite_rollback(m_db_);
+    if (rc == UNQLITE_OK) return {};
+    // TODO:
+    if (rc == UNQLITE_BUSY) {
+      std::this_thread::yield();
+      continue;
+    }
+    CRANE_ERROR("Failed to abort: {}", GetInternalErrorStr_());
+    if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
+    return result::failure(kOther);
+  }
+}
 
 std::string UnqliteDb::GetInternalErrorStr_() {
   // Insertion fail, Handle error
@@ -275,58 +289,75 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   return true;
 }
 
-bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(TaskInCtld* task) {
-  int rc;
-
+bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(txn_id_t txn_id,
+                                                            TaskInCtld* task) {
   absl::MutexLock lock_queue(&m_queue_mtx_);
   absl::MutexLock lock_ids(&s_task_id_and_db_id_mtx_);
 
   uint32_t task_id{s_next_task_id_};
   db_id_t task_db_id{s_next_task_db_id_};
 
-  rc = BeginTransaction_();
-  if (rc != UNQLITE_OK) return false;
+  bool rc, outer_txn = txn_id > 0;
+  result::result<void, DbErrorCode> res;
+
+  if (!outer_txn) {
+    if (!BeginTransaction(&txn_id)) return false;
+  }
 
   db_id_t pos = s_pending_queue_head_.next_db_id;
-  rc = InsertBeforeDbQueueNodeNoLockAndTxn_(task_db_id, pos, &m_pending_queue_,
-                                            &s_pending_queue_head_,
-                                            &s_pending_queue_tail_);
-  if (rc != UNQLITE_OK) return false;
+  rc = InsertBeforeDbQueueNodeNoLockAndTxn_(
+      txn_id, task_db_id, pos, &m_pending_queue_, &s_pending_queue_head_,
+      &s_pending_queue_tail_);
+  if (!rc) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
 
-  rc = StoreTypeIntoDb_(GetDbQueueNodeTaskToCtldName_(task_db_id),
-                        &task->TaskToCtld());
-  if (rc != UNQLITE_OK) return false;
+  res = StoreTypeIntoDb_(txn_id, GetDbQueueNodeTaskToCtldName_(task_db_id),
+                         &task->TaskToCtld());
+  if (res.has_error()) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
 
   task->SetTaskId(task_id);
   task->SetTaskDbId(task_db_id);
 
-  rc = StoreTypeIntoDb_(GetDbQueueNodePersistedPartName_(task_db_id),
-                        &task->PersistedPart());
-  if (rc != UNQLITE_OK) {
+  res = StoreTypeIntoDb_(txn_id, GetDbQueueNodePersistedPartName_(task_db_id),
+                         &task->PersistedPart());
+  if (res.has_error()) {
     CRANE_ERROR("Failed to store the data of task id: {} / task db id: {}. {}",
-                task_id, task_db_id, GetInternalErrorStr_());
+                task_id, task_db_id, m_embedded_db_->GetInternalErrorStr_());
+    if (!outer_txn) AbortTransaction(txn_id);
     return false;
   }
 
   uint32_t next_task_id_to_store = s_next_task_id_ + 1;
-  rc = StoreTypeIntoDb_(s_next_task_id_str_, &next_task_id_to_store);
-  if (rc != UNQLITE_OK) {
-    CRANE_ERROR("Failed to store next_task_id + 1: {}", GetInternalErrorStr_());
+  res = StoreTypeIntoDb_(txn_id, s_next_task_id_str_, &next_task_id_to_store);
+  if (res.has_error()) {
+    CRANE_ERROR("Failed to store next_task_id + 1: {}",
+                m_embedded_db_->GetInternalErrorStr_());
+    if (!outer_txn) AbortTransaction(txn_id);
     return false;
   }
 
   db_id_t next_task_db_id_to_store = s_next_task_db_id_ + 1;
-  rc = StoreTypeIntoDb_(s_next_task_db_id_str_, &next_task_db_id_to_store);
-  if (rc != UNQLITE_OK) {
+  res = StoreTypeIntoDb_(txn_id, s_next_task_db_id_str_,
+                         &next_task_db_id_to_store);
+  if (res.has_error()) {
     CRANE_ERROR("Failed to store next_task_db_id + 1: {}",
-                GetInternalErrorStr_());
+                m_embedded_db_->GetInternalErrorStr_());
+    if (!outer_txn) AbortTransaction(txn_id);
     return false;
   }
 
-  rc = Commit_();
-  if (rc != UNQLITE_OK) {
-    CRANE_ERROR("Commit error: {}", GetInternalErrorStr_());
-    return false;
+  if (!outer_txn) {
+    rc = CommitTransaction(txn_id);
+    if (!rc) {
+      CRANE_ERROR("Commit error: {}", m_embedded_db_->GetInternalErrorStr_());
+      AbortTransaction(txn_id);
+      return false;
+    }
   }
 
   s_next_task_id_++;
@@ -335,115 +366,212 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(TaskInCtld* task) {
   return true;
 }
 
-int EmbeddedDbClient::DeleteDbQueueNodeNoLockAndTxn_(
-    EmbeddedDbClient::db_id_t db_id,
-    std::unordered_map<db_id_t, DbQueueNode>* q, DbQueueDummyHead* q_head,
-    DbQueueDummyTail* q_tail) {
-  db_id_t prev_db_id, next_db_id;
-
-  int rc;
-  auto it = q->find(db_id);
-  if (it != q->end()) {
-    prev_db_id = it->second.prev_db_id;
-    next_db_id = it->second.next_db_id;
-  } else
-    return UNQLITE_NOTFOUND;
-
-  rc = StoreTypeIntoDb_(GetDbQueueNodeNextName_(prev_db_id), &next_db_id);
-  if (rc != UNQLITE_OK) return rc;
-
-  rc = StoreTypeIntoDb_(GetDbQueueNodePrevName_(next_db_id), &prev_db_id);
-  if (rc != UNQLITE_OK) return rc;
-
-  if (prev_db_id == q_head->db_id)
-    q_head->next_db_id = next_db_id;
-  else
-    q->at(prev_db_id).next_db_id = next_db_id;
-
-  if (next_db_id == q_tail->db_id)
-    q_tail->prev_db_id = prev_db_id;
-  else
-    q->at(next_db_id).prev_db_id = prev_db_id;
-
-  q->erase(it);
-
-  return rc;
-}
-
-int EmbeddedDbClient::DeleteKeyFromDbAtomic_(const std::string& key) {
-  int rc;
-  while (true) {
-    rc = unqlite_kv_delete(m_db_, key.c_str(), key.size());
-    if (rc == UNQLITE_OK) return rc;
-    if (rc == UNQLITE_BUSY) {
-      std::this_thread::yield();
-      continue;
-    }
-
-    CRANE_ERROR("Failed to delete key {} from db: {}", key,
-                GetInternalErrorStr_());
-    if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
-    return rc;
-  }
-}
-
 bool EmbeddedDbClient::MovePendingOrRunningTaskToEnded(
-    EmbeddedDbClient::db_id_t db_id) {
+    txn_id_t txn_id, EmbeddedDbClient::db_id_t db_id) {
   absl::MutexLock l(&m_queue_mtx_);
-  int rc;
 
-  rc = BeginTransaction_();
-  if (rc != UNQLITE_OK) return false;
+  bool rc, outer_txn = txn_id > 0;
+  result::result<void, DbErrorCode> res;
 
-  rc = DeleteDbQueueNodeNoLockAndTxn_(
-      db_id, &m_pending_queue_, &s_pending_queue_head_, &s_pending_queue_tail_);
-  if (rc != UNQLITE_OK) {
-    rc = DeleteDbQueueNodeNoLockAndTxn_(db_id, &m_running_queue_,
+  if (!outer_txn) {
+    if (!BeginTransaction(&txn_id)) return false;
+  }
+
+  rc = DeleteDbQueueNodeNoLockAndTxn_(txn_id, db_id, &m_pending_queue_,
+                                      &s_pending_queue_head_,
+                                      &s_pending_queue_tail_);
+  if (!rc) {
+    rc = DeleteDbQueueNodeNoLockAndTxn_(txn_id, db_id, &m_running_queue_,
                                         &s_running_queue_head_,
                                         &s_running_queue_tail_);
-    if (rc != UNQLITE_OK) return false;
+    if (!rc) {
+      if (!outer_txn) AbortTransaction(txn_id);
+      return false;
+    }
   }
 
   rc = InsertBeforeDbQueueNodeNoLockAndTxn_(
-      db_id, s_ended_queue_head_.next_db_id, &m_ended_queue_,
+      txn_id, db_id, s_ended_queue_head_.next_db_id, &m_ended_queue_,
       &s_ended_queue_head_, &s_ended_queue_tail_);
-  if (rc != UNQLITE_OK) return false;
+  if (!rc) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
 
-  rc = Commit_();
-  if (rc != UNQLITE_OK) return false;
+  if (!outer_txn) {
+    rc = CommitTransaction(txn_id);
+    if (!rc) {
+      AbortTransaction(txn_id);
+      return false;
+    }
+  }
 
   return true;
 }
 
-int EmbeddedDbClient::InsertBeforeDbQueueNodeNoLockAndTxn_(
-    EmbeddedDbClient::db_id_t db_id, EmbeddedDbClient::db_id_t pos,
-    std::unordered_map<db_id_t, DbQueueNode>* q, DbQueueDummyHead* q_head,
-    DbQueueDummyTail* q_tail) {
-  int rc;
+bool EmbeddedDbClient::MoveTaskFromPendingToRunning(
+    txn_id_t txn_id, EmbeddedDbClient::db_id_t db_id) {
+  absl::MutexLock l(&m_queue_mtx_);
+
+  bool rc, outer_txn = txn_id > 0;
+  result::result<void, DbErrorCode> res;
+
+  if (!outer_txn) {
+    if (!BeginTransaction(&txn_id)) return false;
+  }
+
+  rc = DeleteDbQueueNodeNoLockAndTxn_(txn_id, db_id, &m_pending_queue_,
+                                      &s_pending_queue_head_,
+                                      &s_pending_queue_tail_);
+  if (!rc) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
+
+  rc = InsertBeforeDbQueueNodeNoLockAndTxn_(
+      txn_id, db_id, s_running_queue_head_.next_db_id, &m_running_queue_,
+      &s_running_queue_head_, &s_running_queue_tail_);
+  if (!rc) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
+
+  if (!outer_txn) {
+    rc = CommitTransaction(txn_id);
+    if (res.has_error()) {
+      AbortTransaction(txn_id);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool EmbeddedDbClient::MoveTaskFromRunningToPending(
+    txn_id_t txn_id, EmbeddedDbClient::db_id_t db_id) {
+  absl::MutexLock l(&m_queue_mtx_);
+
+  bool rc, outer_txn = txn_id > 0;
+  result::result<void, DbErrorCode> res;
+
+  if (!outer_txn) {
+    if (!BeginTransaction(&txn_id)) return false;
+  }
+
+  rc = DeleteDbQueueNodeNoLockAndTxn_(txn_id, db_id, &m_running_queue_,
+                                      &s_running_queue_head_,
+                                      &s_running_queue_tail_);
+  if (!rc) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
+
+  rc = InsertBeforeDbQueueNodeNoLockAndTxn_(
+      txn_id, db_id, s_pending_queue_head_.next_db_id, &m_pending_queue_,
+      &s_pending_queue_head_, &s_pending_queue_tail_);
+  if (!rc) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
+
+  if (!outer_txn) {
+    rc = CommitTransaction(txn_id);
+    if (!rc) {
+      AbortTransaction(txn_id);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool EmbeddedDbClient::PurgeTaskFromEnded(txn_id_t txn_id,
+                                          EmbeddedDbClient::db_id_t db_id) {
+  absl::MutexLock l(&m_queue_mtx_);
+
+  bool rc, outer_txn = txn_id > 0;
+  result::result<void, DbErrorCode> res;
+
+  if (!outer_txn) {
+    if (!BeginTransaction(&txn_id)) return false;
+  }
+
+  if (!DeleteDbQueueNodeNoLockAndTxn_(txn_id, db_id, &m_ended_queue_,
+                                      &s_ended_queue_head_,
+                                      &s_ended_queue_tail_)) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
+
+  res = m_embedded_db_->Delete(txn_id, GetDbQueueNodeTaskToCtldName_(db_id));
+  if (res.has_error()) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
+
+  res = m_embedded_db_->Delete(txn_id, GetDbQueueNodePersistedPartName_(db_id));
+  if (res.has_error()) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
+
+  if (!outer_txn) {
+    rc = CommitTransaction(txn_id);
+    if (!rc) {
+      AbortTransaction(txn_id);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool EmbeddedDbClient::InsertBeforeDbQueueNodeNoLockAndTxn_(
+    txn_id_t txn_id, EmbeddedDbClient::db_id_t db_id,
+    EmbeddedDbClient::db_id_t pos, std::unordered_map<db_id_t, DbQueueNode>* q,
+    DbQueueDummyHead* q_head, DbQueueDummyTail* q_tail) {
+  bool outer_txn = txn_id > 0;
+  result::result<void, DbErrorCode> res;
   db_id_t prev_db_id, next_db_id{pos};
 
-  if (pos == q_head->db_id) return UNQLITE_INVALID;
+  if (!outer_txn) {
+    if (!BeginTransaction(&txn_id)) return false;
+  }
+
+  if (pos == q_head->db_id) return false;
 
   auto it = q->find(pos);
   if (it == q->end()) {
     if (pos == q_tail->db_id)
       prev_db_id = q_tail->prev_db_id;
     else
-      return UNQLITE_NOTFOUND;
+      return false;
   } else
     prev_db_id = it->second.prev_db_id;
 
-  rc = StoreTypeIntoDb_(GetDbQueueNodeNextName_(db_id), &next_db_id);
-  if (rc != UNQLITE_OK) return rc;
+  res = StoreTypeIntoDb_(txn_id, GetDbQueueNodeNextName_(db_id), &next_db_id);
+  if (res.has_error()) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
 
-  rc = StoreTypeIntoDb_(GetDbQueueNodePrevName_(db_id), &prev_db_id);
-  if (rc != UNQLITE_OK) return rc;
+  res = StoreTypeIntoDb_(txn_id, GetDbQueueNodePrevName_(db_id), &prev_db_id);
+  if (res.has_error()) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
 
-  rc = StoreTypeIntoDb_(GetDbQueueNodeNextName_(prev_db_id), &db_id);
-  if (rc != UNQLITE_OK) return rc;
+  res = StoreTypeIntoDb_(txn_id, GetDbQueueNodeNextName_(prev_db_id), &db_id);
+  if (res.has_error()) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
 
-  rc = StoreTypeIntoDb_(GetDbQueueNodePrevName_(next_db_id), &db_id);
-  if (rc != UNQLITE_OK) return rc;
+  res = StoreTypeIntoDb_(txn_id, GetDbQueueNodePrevName_(next_db_id), &db_id);
+  if (res.has_error()) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
 
   if (prev_db_id == q_head->db_id) {
     q_head->next_db_id = db_id;
@@ -459,86 +587,73 @@ int EmbeddedDbClient::InsertBeforeDbQueueNodeNoLockAndTxn_(
 
   q->emplace(db_id, DbQueueNode{db_id, prev_db_id, next_db_id});
 
-  return UNQLITE_OK;
-}
-
-bool EmbeddedDbClient::MoveTaskFromPendingToRunning(
-    EmbeddedDbClient::db_id_t db_id) {
-  absl::MutexLock l(&m_queue_mtx_);
-  int rc;
-
-  rc = BeginTransaction_();
-  if (rc != UNQLITE_OK) return false;
-
-  rc = DeleteDbQueueNodeNoLockAndTxn_(
-      db_id, &m_pending_queue_, &s_pending_queue_head_, &s_pending_queue_tail_);
-  if (rc != UNQLITE_OK) return false;
-
-  rc = InsertBeforeDbQueueNodeNoLockAndTxn_(
-      db_id, s_running_queue_head_.next_db_id, &m_running_queue_,
-      &s_running_queue_head_, &s_running_queue_tail_);
-  if (rc != UNQLITE_OK) return false;
-
-  rc = Commit_();
-  if (rc != UNQLITE_OK) return false;
-
-  return true;
-}
-
-bool EmbeddedDbClient::MoveTaskFromRunningToPending(
-    EmbeddedDbClient::db_id_t db_id) {
-  absl::MutexLock l(&m_queue_mtx_);
-  int rc;
-
-  rc = BeginTransaction_();
-  if (rc != UNQLITE_OK) return false;
-
-  rc = DeleteDbQueueNodeNoLockAndTxn_(
-      db_id, &m_running_queue_, &s_running_queue_head_, &s_running_queue_tail_);
-  if (rc != UNQLITE_OK) return false;
-
-  rc = InsertBeforeDbQueueNodeNoLockAndTxn_(
-      db_id, s_pending_queue_head_.next_db_id, &m_pending_queue_,
-      &s_pending_queue_head_, &s_pending_queue_tail_);
-  if (rc != UNQLITE_OK) return false;
-
-  rc = Commit_();
-  if (rc != UNQLITE_OK) return false;
-
-  return true;
-}
-
-int EmbeddedDbClient::GetQueueCopyNoLock_(
-    const std::unordered_map<db_id_t, DbQueueNode>& q,
-    std::list<crane::grpc::TaskInEmbeddedDb>* list) {
-  int rc = UNQLITE_OK;
-
-  for (const auto& [key, value] : q) {
-    crane::grpc::TaskInEmbeddedDb task_proto;
-    rc = FetchTypeFromDb_(GetDbQueueNodeTaskToCtldName_(key),
-                          task_proto.mutable_task_to_ctld());
-    if (rc != UNQLITE_OK) {
-      CRANE_ERROR("Failed to fetch task_to_ctld for task id {}: {}", key,
-                  GetInternalErrorStr_());
-      return rc;
-    }
-    rc = FetchTypeFromDb_(GetDbQueueNodePersistedPartName_(key),
-                          task_proto.mutable_persisted_part());
-    if (rc != UNQLITE_OK) {
-      CRANE_ERROR("Failed to fetch persisted_part for task id {}: {}", key,
-                  GetInternalErrorStr_());
-      return rc;
-    }
-    list->emplace_back(std::move(task_proto));
+  if (!outer_txn) {
+    return CommitTransaction(txn_id);
   }
 
-  return rc;
+  return true;
+}
+
+bool EmbeddedDbClient::DeleteDbQueueNodeNoLockAndTxn_(
+    txn_id_t txn_id, EmbeddedDbClient::db_id_t db_id,
+    std::unordered_map<db_id_t, DbQueueNode>* q, DbQueueDummyHead* q_head,
+    DbQueueDummyTail* q_tail) {
+  bool outer_txn = txn_id > 0;
+  result::result<void, DbErrorCode> res;
+  db_id_t prev_db_id, next_db_id;
+
+  if (!outer_txn) {
+    if (!BeginTransaction(&txn_id)) return false;
+  }
+
+  auto it = q->find(db_id);
+  if (it != q->end()) {
+    prev_db_id = it->second.prev_db_id;
+    next_db_id = it->second.next_db_id;
+  } else
+    return false;
+
+  res = StoreTypeIntoDb_(txn_id, GetDbQueueNodeNextName_(prev_db_id),
+                         &next_db_id);
+  if (res.has_error()) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
+
+  res = StoreTypeIntoDb_(txn_id, GetDbQueueNodePrevName_(next_db_id),
+                         &prev_db_id);
+  if (res.has_error()) {
+    if (!outer_txn) AbortTransaction(txn_id);
+    return false;
+  }
+
+  if (prev_db_id == q_head->db_id)
+    q_head->next_db_id = next_db_id;
+  else
+    q->at(prev_db_id).next_db_id = next_db_id;
+
+  if (next_db_id == q_tail->db_id)
+    q_tail->prev_db_id = prev_db_id;
+  else
+    q->at(next_db_id).prev_db_id = prev_db_id;
+
+  q->erase(it);
+
+  if (!outer_txn) return CommitTransaction(txn_id);
+
+  return true;
 }
 
 bool EmbeddedDbClient::ForEachInDbQueueNoLockAndTxn_(
     txn_id_t txn_id, EmbeddedDbClient::DbQueueDummyHead dummy_head,
     EmbeddedDbClient::DbQueueDummyTail dummy_tail,
     const EmbeddedDbClient::ForEachInQueueFunc& func) {
+  bool outer_txn = txn_id > 0;
+
+  if (!outer_txn) {
+    if (!BeginTransaction(&txn_id)) return false;
+  }
+
   db_id_t prev_pos = dummy_head.db_id;
   db_id_t pos = dummy_head.next_db_id;
   while (pos != dummy_tail.db_id) {
@@ -546,8 +661,12 @@ bool EmbeddedDbClient::ForEachInDbQueueNoLockAndTxn_(
 
     // Assert "<db_id>Next" exists in DB. If not so, the callback should not
     // be called.
-    auto result = FetchTypeFromDb_(0, GetDbQueueNodeNextName_(pos), &next_pos);
-    if (result.has_error()) return false;
+    auto result =
+        FetchTypeFromDb_(txn_id, GetDbQueueNodeNextName_(pos), &next_pos);
+    if (result.has_error()) {
+      if (!outer_txn) AbortTransaction(txn_id);
+      return false;
+    }
 
     func(DbQueueNode{pos, prev_pos, next_pos});
 
@@ -555,37 +674,43 @@ bool EmbeddedDbClient::ForEachInDbQueueNoLockAndTxn_(
     pos = next_pos;
   }
 
+  if (!outer_txn) return CommitTransaction(txn_id);
+
   return true;
 }
 
-bool EmbeddedDbClient::FetchTaskDataInDb(
-    EmbeddedDbClient::db_id_t db_id,
-    EmbeddedDbClient::TaskInEmbeddedDb* task_in_db) {
-  int rc;
-  rc = FetchTaskDataInDbAtomic_(db_id, task_in_db);
-  return rc == UNQLITE_OK;
-}
+bool EmbeddedDbClient::GetQueueCopyNoLock_(
+    txn_id_t txn_id, const std::unordered_map<db_id_t, DbQueueNode>& q,
+    std::list<crane::grpc::TaskInEmbeddedDb>* list) {
+  result::result<size_t, DbErrorCode> rc;
+  bool outer_txn = txn_id > 0;
 
-bool EmbeddedDbClient::PurgeTaskFromEnded(EmbeddedDbClient::db_id_t db_id) {
-  absl::MutexLock l(&m_queue_mtx_);
-  int rc;
+  if (!outer_txn) {
+    if (!BeginTransaction(&txn_id)) return false;
+  }
 
-  rc = BeginTransaction_();
-  if (rc != UNQLITE_OK) return false;
+  for (const auto& [key, value] : q) {
+    crane::grpc::TaskInEmbeddedDb task_proto;
+    rc = FetchTypeFromDb_(txn_id, GetDbQueueNodeTaskToCtldName_(key),
+                          task_proto.mutable_task_to_ctld());
+    if (rc.has_error()) {
+      CRANE_ERROR("Failed to fetch task_to_ctld for task id {}: {}", key,
+                  m_embedded_db_->GetInternalErrorStr_());
+      if (!outer_txn) AbortTransaction(txn_id);
+      return false;
+    }
+    rc = FetchTypeFromDb_(txn_id, GetDbQueueNodePersistedPartName_(key),
+                          task_proto.mutable_persisted_part());
+    if (rc.has_error()) {
+      CRANE_ERROR("Failed to fetch persisted_part for task id {}: {}", key,
+                  m_embedded_db_->GetInternalErrorStr_());
+      if (!outer_txn) AbortTransaction(txn_id);
+      return false;
+    }
+    list->emplace_back(std::move(task_proto));
+  }
 
-  rc = DeleteDbQueueNodeNoLockAndTxn_(
-      db_id, &m_ended_queue_, &s_ended_queue_head_, &s_ended_queue_tail_);
-  if (rc != UNQLITE_OK) return false;
-
-  rc = DeleteKeyFromDbAtomic_(GetDbQueueNodeTaskToCtldName_(db_id));
-  if (rc != UNQLITE_OK) return false;
-
-  rc = DeleteKeyFromDbAtomic_(GetDbQueueNodePersistedPartName_(db_id));
-  if (rc != UNQLITE_OK) return false;
-
-  rc = Commit_();
-  if (rc != UNQLITE_OK) return false;
-
+  if (!outer_txn) return CommitTransaction(txn_id);
   return true;
 }
 
