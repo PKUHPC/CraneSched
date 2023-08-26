@@ -106,12 +106,10 @@ void InitializeNetworkFunctions() {
 bool ResolveHostnameFromIpv4(const std::string& addr, std::string* hostname) {
   if (internal::g_hosts_map->FindFirstHostnameOfIpv4(addr, hostname))
     return true;
-
+  // The variable sa will be reset
   struct sockaddr_in sa {}; /* input */
   socklen_t len;            /* input */
   char hbuf[NI_MAXHOST];
-
-  std::memset(&sa, 0, sizeof(struct sockaddr_in));
 
   /* For IPv4*/
   sa.sin_family = AF_INET;
@@ -131,11 +129,10 @@ bool ResolveHostnameFromIpv4(const std::string& addr, std::string* hostname) {
 }
 
 bool ResolveHostnameFromIpv6(const std::string& addr, std::string* hostname) {
+  // The variable sa6 will be reset
   struct sockaddr_in6 sa6 {}; /* input */
   socklen_t len;              /* input */
   char hbuf[NI_MAXHOST];
-
-  std::memset(&sa6, 0, sizeof(struct sockaddr_in6));
 
   /* For IPv4*/
   sa6.sin6_family = AF_INET6;

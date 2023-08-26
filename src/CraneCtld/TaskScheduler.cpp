@@ -798,6 +798,12 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
            task->name == request.filter_task_name();
   };
 
+  auto rng_filter_user_name = [&](auto& it) {
+    std::unique_ptr<TaskInCtld>& task = it.second;
+    return request.filter_username().empty() ||
+           task->Username() == request.filter_username();
+  };
+
   std::unordered_set<uint32_t> filter_task_ids_set(
       request.filter_task_ids().begin(), request.filter_task_ids().end());
   auto rng_filer_task_ids = [&](auto& it) {
@@ -831,7 +837,9 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
     auto& task = task_it->second;
 
-    if (operator_uid != 0 && task->uid != operator_uid) {
+    if (!g_account_manager
+             ->HasPermissionToUser(operator_uid, task->Username(), nullptr)
+             .ok) {
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
@@ -853,7 +861,9 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
     CRANE_TRACE("Cancelling running task #{}", task_id);
 
-    if (operator_uid != 0 && task->uid != operator_uid) {
+    if (!g_account_manager
+             ->HasPermissionToUser(operator_uid, task->Username(), nullptr)
+             .ok) {
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
@@ -881,6 +891,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   auto joined_filters = ranges::views::filter(rng_filter_state) |
                         ranges::views::filter(rng_filter_partition) |
                         ranges::views::filter(rng_filter_account) |
+                        ranges::views::filter(rng_filter_user_name) |
                         ranges::views::filter(rng_filter_task_name) |
                         ranges::views::filter(rng_filer_task_ids) |
                         ranges::views::filter(rng_filter_nodes);

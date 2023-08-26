@@ -24,6 +24,8 @@
 
 namespace Craned {
 
+inline const char* kCranedDefaultLogPath = "/tmp/craned/craned.log";
+
 struct TaskStatusChange {
   task_id_t task_id{};
   crane::grpc::TaskStatus new_status{};

@@ -896,7 +896,8 @@ AccountManager::Result AccountManager::HasPermissionToUser(
   }
 
   if (level_of_uid != nullptr) *level_of_uid = ptr->admin_level;
-  if (ptr->admin_level != User::None) return Result{true};
+  if (ptr->admin_level != User::None || user == entry.Username())
+    return Result{true};
 
   for (const auto& [user_acc, item] : user_ptr->account_to_attrs_map)
     for (const auto& uid_acc : ptr->coordinator_accounts) {

@@ -31,11 +31,6 @@
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
 
-// Must be after crane/Logger.h which defines the static log level
-#include <spdlog/async.h>
-#include <spdlog/sinks/rotating_file_sink.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
-
 using Craned::CranedNode;
 using Craned::g_config;
 using Craned::Partition;
@@ -51,7 +46,7 @@ void ParseConfig(int argc, char** argv) {
        cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
       ("s,server-address", "CraneCtld address format: <IP>:<port>",
        cxxopts::value<std::string>())
-      ("L,log-file", "File path of craned log file", cxxopts::value<std::string>()->default_value("/tmp/craned/craned.log"))
+      ("L,log-file", "File path of craned log file", cxxopts::value<std::string>()->default_value(Craned::kCranedDefaultLogPath))
       ("D,debug-level", "[trace|debug|info|warn|error]", cxxopts::value<std::string>()->default_value("info"))
       ("h,help", "Show help")
       ;
@@ -74,6 +69,21 @@ void ParseConfig(int argc, char** argv) {
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
+
+      if (config["CranedDebugLevel"])
+        g_config.CranedDebugLevel =
+            config["CranedDebugLevel"].as<std::string>();
+      else
+        g_config.CranedDebugLevel = "info";
+
+      if (config["CranedLogFile"])
+        g_config.CranedLogFile = config["CranedLogFile"].as<std::string>();
+      else
+        g_config.CranedLogFile = Craned::kCranedDefaultLogPath;
+      // Spdlog should be initialized as soon as possible
+      Internal::InitSpdlog(g_config.CranedLogFile, g_config.CranedDebugLevel);
+
+      crane::InitializeNetworkFunctions();
 
       if (config["CranedListen"])
         g_config.ListenConf.CranedListenAddr =
@@ -150,17 +160,6 @@ void ParseConfig(int argc, char** argv) {
             config["CraneCtldListenPort"].as<std::string>();
       else
         g_config.CraneCtldListenPort = kCtldDefaultPort;
-
-      if (config["CranedDebugLevel"])
-        g_config.CranedDebugLevel =
-            config["CranedDebugLevel"].as<std::string>();
-      else
-        std::exit(1);
-
-      if (config["CranedLogFile"])
-        g_config.CranedLogFile = config["CranedLogFile"].as<std::string>();
-      else
-        g_config.CranedLogFile = "/tmp/crane/craned.log";
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
@@ -364,60 +363,6 @@ void ParseConfig(int argc, char** argv) {
   CRANE_INFO("CranedId of this machine: {}", g_config.CranedIdOfThisNode);
 }
 
-void InitSpdlog() {
-  if (g_config.CranedDebugLevel == "trace")
-    spdlog::set_level(spdlog::level::trace);
-  else if (g_config.CranedDebugLevel == "debug")
-    spdlog::set_level(spdlog::level::debug);
-  else if (g_config.CranedDebugLevel == "info")
-    spdlog::set_level(spdlog::level::info);
-  else if (g_config.CranedDebugLevel == "warn")
-    spdlog::set_level(spdlog::level::warn);
-  else if (g_config.CranedDebugLevel == "error")
-    spdlog::set_level(spdlog::level::err);
-  else {
-    CRANE_ERROR("Illegal debug-level format.");
-    std::exit(1);
-  }
-
-  auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-      g_config.CranedLogFile, 1048576 * 5, 3);
-
-  auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
-
-  if (g_config.CranedDebugLevel == "trace") {
-    file_sink->set_level(spdlog::level::trace);
-    console_sink->set_level(spdlog::level::trace);
-  } else if (g_config.CranedDebugLevel == "debug") {
-    file_sink->set_level(spdlog::level::debug);
-    console_sink->set_level(spdlog::level::debug);
-  } else if (g_config.CranedDebugLevel == "info") {
-    file_sink->set_level(spdlog::level::info);
-    console_sink->set_level(spdlog::level::info);
-  } else if (g_config.CranedDebugLevel == "warn") {
-    file_sink->set_level(spdlog::level::warn);
-    console_sink->set_level(spdlog::level::warn);
-  } else if (g_config.CranedDebugLevel == "error") {
-    file_sink->set_level(spdlog::level::err);
-    console_sink->set_level(spdlog::level::err);
-  } else {
-    CRANE_ERROR("Illegal debug-level format.");
-    std::exit(1);
-  }
-
-  spdlog::init_thread_pool(256, 1);
-  auto logger = std::make_shared<spdlog::async_logger>(
-      "default", spdlog::sinks_init_list{file_sink, console_sink},
-      spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-
-  spdlog::set_default_logger(logger);
-
-  spdlog::flush_on(spdlog::level::err);
-  spdlog::flush_every(std::chrono::seconds(1));
-
-  spdlog::set_level(spdlog::level::trace);
-}
-
 void CreateRequiredDirectories() {
   // Create log and sh directory recursively.
   try {
@@ -435,7 +380,6 @@ void CreateRequiredDirectories() {
 
 void GlobalVariableInit() {
   CreateRequiredDirectories();
-  InitSpdlog();
 
   // Mask SIGPIPE to prevent Craned from crushing due to
   // SIGPIPE while communicating with spawned task processes.

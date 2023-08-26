@@ -252,20 +252,19 @@ class EmbeddedDbClient {
 
   // Helper functions for the queue structure in the embedded db.
 
-  bool InsertBeforeDbQueueNodeNoLockAndTxn_(
+  bool InsertBeforeDbQueueNodeNoLock_(
       txn_id_t txn_id, db_id_t db_id, db_id_t pos,
       std::unordered_map<db_id_t, DbQueueNode>* q, DbQueueDummyHead* q_head,
       DbQueueDummyTail* q_tail);
 
-  bool DeleteDbQueueNodeNoLockAndTxn_(
-      txn_id_t txn_id, db_id_t db_id,
-      std::unordered_map<db_id_t, DbQueueNode>* q, DbQueueDummyHead* q_head,
-      DbQueueDummyTail* q_tail);
+  bool DeleteDbQueueNodeNoLock_(txn_id_t txn_id, db_id_t db_id,
+                                std::unordered_map<db_id_t, DbQueueNode>* q,
+                                DbQueueDummyHead* q_head,
+                                DbQueueDummyTail* q_tail);
 
-  bool ForEachInDbQueueNoLockAndTxn_(txn_id_t txn_id,
-                                     DbQueueDummyHead dummy_head,
-                                     DbQueueDummyTail dummy_tail,
-                                     ForEachInQueueFunc const& func);
+  bool ForEachInDbQueueNoLock_(txn_id_t txn_id, DbQueueDummyHead dummy_head,
+                               DbQueueDummyTail dummy_tail,
+                               const ForEachInQueueFunc& func);
 
   bool GetQueueCopyNoLock_(txn_id_t txn_id,
                            std::unordered_map<db_id_t, DbQueueNode> const& q,
