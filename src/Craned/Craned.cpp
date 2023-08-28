@@ -101,6 +101,7 @@ void ParseConfig(int argc, char** argv) {
 
       InitLogger(log_level, g_config.CranedLogFile);
 
+      // Parsing node hostnames needs network functions, initialize it first.
       crane::InitializeNetworkFunctions();
 
       if (config["CranedListen"])
