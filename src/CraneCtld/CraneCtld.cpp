@@ -66,9 +66,25 @@ void ParseConfig(int argc, char** argv) {
             config["CraneCtldLogFile"].as<std::string>();
       else
         g_config.CraneCtldLogFile = Ctld::kCraneCtldDefaultLogPath;
+
       // spdlog should be initialized as soon as possible
-      Internal::InitSpdlog(g_config.CraneCtldLogFile,
-                           g_config.CraneCtldDebugLevel);
+      spdlog::level::level_enum log_level;
+      if (g_config.CraneCtldDebugLevel == "trace") {
+        log_level = spdlog::level::trace;
+      } else if (g_config.CraneCtldDebugLevel == "debug") {
+        log_level = spdlog::level::debug;
+      } else if (g_config.CraneCtldDebugLevel == "info") {
+        log_level = spdlog::level::info;
+      } else if (g_config.CraneCtldDebugLevel == "warn") {
+        log_level = spdlog::level::warn;
+      } else if (g_config.CraneCtldDebugLevel == "error") {
+        log_level = spdlog::level::err;
+      } else {
+        fmt::print(stderr, "Illegal debug-level format.");
+        std::exit(1);
+      }
+
+      InitLogger(log_level, g_config.CraneCtldLogFile);
 
       if (config["CraneCtldListenAddr"])
         g_config.ListenConf.CraneCtldListenAddr =
@@ -656,10 +672,6 @@ void CheckSingleton() {
 }
 
 int main(int argc, char** argv) {
-#ifndef NDEBUG
-  spdlog::set_level(spdlog::level::trace);
-#endif
-
   CheckSingleton();
   ParseConfig(argc, argv);
 

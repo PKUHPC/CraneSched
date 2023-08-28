@@ -46,8 +46,9 @@ void ParseConfig(int argc, char** argv) {
        cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
       ("s,server-address", "CraneCtld address format: <IP>:<port>",
        cxxopts::value<std::string>())
-      ("L,log-file", "File path of craned log file", cxxopts::value<std::string>()->default_value(Craned::kCranedDefaultLogPath))
-      ("D,debug-level", "[trace|debug|info|warn|error]", cxxopts::value<std::string>()->default_value("info"))
+      ("L,log-file", "File path of craned log file",
+       cxxopts::value<std::string>()->default_value(Craned::kCranedDefaultLogPath))
+      ("D,debug-level", "<trace|debug|info|warn|error>", cxxopts::value<std::string>()->default_value("info"))
       ("h,help", "Show help")
       ;
   // clang-format on
@@ -80,8 +81,25 @@ void ParseConfig(int argc, char** argv) {
         g_config.CranedLogFile = config["CranedLogFile"].as<std::string>();
       else
         g_config.CranedLogFile = Craned::kCranedDefaultLogPath;
-      // Spdlog should be initialized as soon as possible
-      Internal::InitSpdlog(g_config.CranedLogFile, g_config.CranedDebugLevel);
+
+      // spdlog should be initialized as soon as possible
+      spdlog::level::level_enum log_level;
+      if (g_config.CranedDebugLevel == "trace") {
+        log_level = spdlog::level::trace;
+      } else if (g_config.CranedDebugLevel == "debug") {
+        log_level = spdlog::level::debug;
+      } else if (g_config.CranedDebugLevel == "info") {
+        log_level = spdlog::level::info;
+      } else if (g_config.CranedDebugLevel == "warn") {
+        log_level = spdlog::level::warn;
+      } else if (g_config.CranedDebugLevel == "error") {
+        log_level = spdlog::level::err;
+      } else {
+        fmt::print(stderr, "Illegal debug-level format.");
+        std::exit(1);
+      }
+
+      InitLogger(log_level, g_config.CranedLogFile);
 
       crane::InitializeNetworkFunctions();
 

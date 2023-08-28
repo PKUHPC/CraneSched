@@ -23,10 +23,6 @@
 #  define __FUNCTION__ __PRETTY_FUNCTION__
 #endif
 
-#define SPDLOG_ACTIVE_LEVEL CRANE_LOG_LEVEL
-
-#include <spdlog/spdlog.h>
-
 #include "PublicHeader.h"
 
 #define CRANE_LOG_LEVEL_TRACE SPDLOG_LEVEL_TRACE
@@ -38,17 +34,23 @@
 #define CRANE_LOG_LEVEL_OFF SPDLOG_LEVEL_OFF
 
 #if !defined(CRANE_LOG_LEVEL)
-#  define CRANE_LOG_LEVEL CRANE_LOG_LEVEL_INFO
+#  if defined(NDEBUG)
+#    define CRANE_LOG_LEVEL CRANE_LOG_LEVEL_INFO
+#  else
+#    define CRANE_LOG_LEVEL CRANE_LOG_LEVEL_TRACE
+#  endif
 #endif
 
 #define SPDLOG_ACTIVE_LEVEL CRANE_LOG_LEVEL
 
-#include <spdlog/async.h>
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/fmt/ranges.h>
+#include <spdlog/spdlog.h>
+
+// Must be after the static log level definition
+#include <spdlog/async.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
-#include <spdlog/spdlog.h>
 
 #define CRANE_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
 #define CRANE_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
@@ -140,53 +142,5 @@
     } while (false)
 #endif
 
-namespace Internal {
-
-struct StaticLogFormatSetter {
-  StaticLogFormatSetter() { spdlog::set_pattern("[%^%L%$ %C-%m-%d %s:%#] %v"); }
-};
-
-inline void InitSpdlog(const std::string& log_file_path,
-                       const std::string& debug_level) {
-  auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-      log_file_path, 1048576 * 50, 3);
-
-  auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
-
-  if (debug_level == "trace") {
-    file_sink->set_level(spdlog::level::trace);
-    console_sink->set_level(spdlog::level::trace);
-  } else if (debug_level == "debug") {
-    file_sink->set_level(spdlog::level::debug);
-    console_sink->set_level(spdlog::level::debug);
-  } else if (debug_level == "info") {
-    file_sink->set_level(spdlog::level::info);
-    console_sink->set_level(spdlog::level::info);
-  } else if (debug_level == "warn") {
-    file_sink->set_level(spdlog::level::warn);
-    console_sink->set_level(spdlog::level::warn);
-  } else if (debug_level == "error") {
-    file_sink->set_level(spdlog::level::err);
-    console_sink->set_level(spdlog::level::err);
-  } else {
-    CRANE_ERROR("Illegal debug-level format.");
-    std::exit(1);
-  }
-
-  spdlog::init_thread_pool(256, 1);
-  auto logger = std::make_shared<spdlog::async_logger>(
-      "default", spdlog::sinks_init_list{file_sink, console_sink},
-      spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-
-  spdlog::set_default_logger(logger);
-
-  spdlog::flush_on(spdlog::level::err);
-  spdlog::flush_every(std::chrono::seconds(1));
-
-  spdlog::set_level(spdlog::level::trace);
-}
-
-// Set the global spdlog pattern in global variable initialization.
-[[maybe_unused]] inline StaticLogFormatSetter _static_formatter_setter;
-
-}  // namespace Internal
+void InitLogger(spdlog::level::level_enum level,
+                const std::string& log_file_path);

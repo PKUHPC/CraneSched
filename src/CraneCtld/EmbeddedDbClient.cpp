@@ -159,7 +159,6 @@ result::result<void, DbErrorCode> UnqliteDb::Commit(txn_id_t txn_id) {
       continue;
     }
     CRANE_ERROR("Failed to commit: {}", GetInternalErrorStr_());
-    Abort(txn_id);
     return result::failure(kOther);
   }
 }
@@ -292,25 +291,25 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(txn_id_t txn_id,
   uint32_t task_id{s_next_task_id_};
   db_id_t task_db_id{s_next_task_db_id_};
 
-  bool rc, outer_txn = txn_id > 0;
-  result::result<void, DbErrorCode> res;
+  bool ok, outer_txn = txn_id > 0;
+  result::result<void, DbErrorCode> result;
 
   if (!outer_txn) {
     if (!BeginTransaction(&txn_id)) return false;
   }
 
   db_id_t pos = s_pending_queue_head_.next_db_id;
-  rc = InsertBeforeDbQueueNodeNoLock_(txn_id, task_db_id, pos,
+  ok = InsertBeforeDbQueueNodeNoLock_(txn_id, task_db_id, pos,
                                       &m_pending_queue_, &s_pending_queue_head_,
                                       &s_pending_queue_tail_);
-  if (!rc) {
+  if (!ok) {
     if (!outer_txn) AbortTransaction(txn_id);
     return false;
   }
 
-  res = StoreTypeIntoDb_(txn_id, GetDbQueueNodeTaskToCtldName_(task_db_id),
-                         &task->TaskToCtld());
-  if (res.has_error()) {
+  result = StoreTypeIntoDb_(txn_id, GetDbQueueNodeTaskToCtldName_(task_db_id),
+                            &task->TaskToCtld());
+  if (result.has_error()) {
     if (!outer_txn) AbortTransaction(txn_id);
     return false;
   }
@@ -318,9 +317,10 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(txn_id_t txn_id,
   task->SetTaskId(task_id);
   task->SetTaskDbId(task_db_id);
 
-  res = StoreTypeIntoDb_(txn_id, GetDbQueueNodePersistedPartName_(task_db_id),
-                         &task->PersistedPart());
-  if (res.has_error()) {
+  result =
+      StoreTypeIntoDb_(txn_id, GetDbQueueNodePersistedPartName_(task_db_id),
+                       &task->PersistedPart());
+  if (result.has_error()) {
     CRANE_ERROR("Failed to store the data of task id: {} / task db id: {}. {}",
                 task_id, task_db_id, m_embedded_db_->GetInternalErrorStr_());
     if (!outer_txn) AbortTransaction(txn_id);
@@ -328,8 +328,9 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(txn_id_t txn_id,
   }
 
   uint32_t next_task_id_to_store = s_next_task_id_ + 1;
-  res = StoreTypeIntoDb_(txn_id, s_next_task_id_str_, &next_task_id_to_store);
-  if (res.has_error()) {
+  result =
+      StoreTypeIntoDb_(txn_id, s_next_task_id_str_, &next_task_id_to_store);
+  if (result.has_error()) {
     CRANE_ERROR("Failed to store next_task_id + 1: {}",
                 m_embedded_db_->GetInternalErrorStr_());
     if (!outer_txn) AbortTransaction(txn_id);
@@ -337,9 +338,9 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(txn_id_t txn_id,
   }
 
   db_id_t next_task_db_id_to_store = s_next_task_db_id_ + 1;
-  res = StoreTypeIntoDb_(txn_id, s_next_task_db_id_str_,
-                         &next_task_db_id_to_store);
-  if (res.has_error()) {
+  result = StoreTypeIntoDb_(txn_id, s_next_task_db_id_str_,
+                            &next_task_db_id_to_store);
+  if (result.has_error()) {
     CRANE_ERROR("Failed to store next_task_db_id + 1: {}",
                 m_embedded_db_->GetInternalErrorStr_());
     if (!outer_txn) AbortTransaction(txn_id);
@@ -347,8 +348,8 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(txn_id_t txn_id,
   }
 
   if (!outer_txn) {
-    rc = CommitTransaction(txn_id);
-    if (!rc) {
+    ok = CommitTransaction(txn_id);
+    if (!ok) {
       CRANE_ERROR("Commit error: {}", m_embedded_db_->GetInternalErrorStr_());
       AbortTransaction(txn_id);
       return false;
