@@ -87,7 +87,7 @@ result::result<size_t, DbErrorCode> UnqliteDb::Fetch(txn_id_t txn_id,
   int rc;
 
   void* buf_arg = (*len == 0) ? nullptr : buf;
-  unqlite_int64 n_bytes;
+  unqlite_int64 n_bytes = static_cast<unqlite_int64>(*len);
 
   while (true) {
     rc = unqlite_kv_fetch(m_db_, key.c_str(), key.size(), buf_arg, &n_bytes);
