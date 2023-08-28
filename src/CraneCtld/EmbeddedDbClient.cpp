@@ -50,6 +50,8 @@ result::result<void, DbErrorCode> UnqliteDb::Close() {
   if (m_db_ != nullptr) {
     CRANE_TRACE("Closing unqlite...");
     rc = unqlite_close(m_db_);
+    m_db_ = nullptr;
+
     if (rc != UNQLITE_OK) {
       CRANE_ERROR("Failed to close unqlite: {}", GetInternalErrorStr_());
       return result::failure(DbErrorCode::kOther);

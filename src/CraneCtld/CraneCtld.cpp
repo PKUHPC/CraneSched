@@ -156,7 +156,7 @@ void ParseConfig(int argc, char** argv) {
       if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
         g_config.CraneCtldDbPath = config["CraneCtldDbPath"].as<std::string>();
       else
-        g_config.CraneCtldDbPath = Ctld::kCraneCtldDefaultLogPath;
+        g_config.CraneCtldDbPath = Ctld::kDefaultUnqliteDbPath;
 
       if (config["DbUser"] && !config["DbUser"].IsNull()) {
         g_config.DbUser = config["DbUser"].as<std::string>();
@@ -470,6 +470,11 @@ void InitializeCtldGlobalVariables() {
   ok = g_embedded_db_client->Init(g_config.CraneCtldDbPath);
   if (!ok) {
     CRANE_ERROR("Failed to initialize g_embedded_db_client.");
+
+    // In case that spdlog is destructed before g_embedded_db_client->Close()
+    // which log function is called.
+    g_embedded_db_client.reset();
+
     std::exit(1);
   }
 
