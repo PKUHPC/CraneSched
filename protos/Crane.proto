@@ -219,6 +219,7 @@ message CancelTaskRequest {
   TaskStatus filter_state = 5;
   string filter_task_name = 6;
   repeated string filter_nodes = 7;
+  string filter_username = 8;
 }
 
 message CancelTaskReply {

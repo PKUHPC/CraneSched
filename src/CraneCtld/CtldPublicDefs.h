@@ -25,6 +25,9 @@ using moodycamel::ConcurrentQueue;
 
 using task_db_id_t = int64_t;
 
+inline const char* kCraneCtldDefaultLogPath = "/tmp/cranectld/cranectld.log";
+inline const char* kDefaultUnqliteDbPath = "/tmp/cranectld/unqlite.db";
+
 constexpr uint64_t kTaskScheduleIntervalMs = 1000;
 constexpr uint16_t kCompletionQueueDelaySeconds = 20;
 

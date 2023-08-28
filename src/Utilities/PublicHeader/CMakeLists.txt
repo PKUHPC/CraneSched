@@ -1,5 +1,5 @@
 add_library(Utility_PublicHeader
-        String.cpp Network.cpp FdFunctions.cpp PublicHeader.cpp
+        String.cpp Network.cpp FdFunctions.cpp PublicHeader.cpp Logger.cpp
         include/crane/String.h
         include/crane/Network.h
         include/crane/FdFunctions.h
@@ -7,7 +7,8 @@ add_library(Utility_PublicHeader
         include/crane/Lock.h
         include/crane/Pointer.h
         include/crane/Logger.h
-        include/crane/PasswordEntry.h)
+        include/crane/PasswordEntry.h
+)
 target_include_directories(Utility_PublicHeader PUBLIC include)
 target_link_libraries(Utility_PublicHeader PUBLIC
         Boost::boost # Boost added here for String.cpp
@@ -20,6 +21,6 @@ target_link_libraries(Utility_PublicHeader PUBLIC
 add_library(Utility_PublicHeaderNoLogger
         include/crane/PublicHeader.h
         PublicHeader.cpp
-        )
+)
 target_include_directories(Utility_PublicHeaderNoLogger PUBLIC include)
 target_link_libraries(Utility_PublicHeaderNoLogger PUBLIC crane_proto_lib)

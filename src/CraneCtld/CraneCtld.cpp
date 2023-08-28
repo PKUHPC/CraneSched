@@ -34,11 +34,6 @@
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 
-// Must be after crane/Logger.h which defines the static log level
-#include <spdlog/async.h>
-#include <spdlog/sinks/rotating_file_sink.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
-
 void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("cranectld");
 
@@ -59,6 +54,37 @@ void ParseConfig(int argc, char** argv) {
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
+
+      if (config["CraneCtldDebugLevel"])
+        g_config.CraneCtldDebugLevel =
+            config["CraneCtldDebugLevel"].as<std::string>();
+      else
+        g_config.CraneCtldDebugLevel = "info";
+
+      if (config["CraneCtldLogFile"])
+        g_config.CraneCtldLogFile =
+            config["CraneCtldLogFile"].as<std::string>();
+      else
+        g_config.CraneCtldLogFile = Ctld::kCraneCtldDefaultLogPath;
+
+      // spdlog should be initialized as soon as possible
+      spdlog::level::level_enum log_level;
+      if (g_config.CraneCtldDebugLevel == "trace") {
+        log_level = spdlog::level::trace;
+      } else if (g_config.CraneCtldDebugLevel == "debug") {
+        log_level = spdlog::level::debug;
+      } else if (g_config.CraneCtldDebugLevel == "info") {
+        log_level = spdlog::level::info;
+      } else if (g_config.CraneCtldDebugLevel == "warn") {
+        log_level = spdlog::level::warn;
+      } else if (g_config.CraneCtldDebugLevel == "error") {
+        log_level = spdlog::level::err;
+      } else {
+        fmt::print(stderr, "Illegal debug-level format.");
+        std::exit(1);
+      }
+
+      InitLogger(log_level, g_config.CraneCtldLogFile);
 
       if (config["CraneCtldListenAddr"])
         g_config.ListenConf.CraneCtldListenAddr =
@@ -127,22 +153,10 @@ void ParseConfig(int argc, char** argv) {
         g_config.ListenConf.UseTls = false;
       }
 
-      if (config["CraneCtldDebugLevel"])
-        g_config.CraneCtldDebugLevel =
-            config["CraneCtldDebugLevel"].as<std::string>();
-      else
-        std::exit(1);
-
-      if (config["CraneCtldLogFile"])
-        g_config.CraneCtldLogFile =
-            config["CraneCtldLogFile"].as<std::string>();
-      else
-        g_config.CraneCtldLogFile = "/tmp/cranectld/cranectld.log";
-
       if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
         g_config.CraneCtldDbPath = config["CraneCtldDbPath"].as<std::string>();
       else
-        g_config.CraneCtldDbPath = "/tmp/cranectld/unqlite.db";
+        g_config.CraneCtldDbPath = Ctld::kDefaultUnqliteDbPath;
 
       if (config["DbUser"] && !config["DbUser"].IsNull()) {
         g_config.DbUser = config["DbUser"].as<std::string>();
@@ -416,45 +430,6 @@ void ParseConfig(int argc, char** argv) {
   }
 }
 
-void InitializeLogger() {
-  auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-      g_config.CraneCtldLogFile, 1048576 * 50, 3);
-
-  auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
-
-  if (g_config.CraneCtldDebugLevel == "trace") {
-    file_sink->set_level(spdlog::level::trace);
-    console_sink->set_level(spdlog::level::trace);
-  } else if (g_config.CraneCtldDebugLevel == "debug") {
-    file_sink->set_level(spdlog::level::debug);
-    console_sink->set_level(spdlog::level::debug);
-  } else if (g_config.CraneCtldDebugLevel == "info") {
-    file_sink->set_level(spdlog::level::info);
-    console_sink->set_level(spdlog::level::info);
-  } else if (g_config.CraneCtldDebugLevel == "warn") {
-    file_sink->set_level(spdlog::level::warn);
-    console_sink->set_level(spdlog::level::warn);
-  } else if (g_config.CraneCtldDebugLevel == "error") {
-    file_sink->set_level(spdlog::level::err);
-    console_sink->set_level(spdlog::level::err);
-  } else {
-    CRANE_ERROR("Illegal debug-level format.");
-    std::exit(1);
-  }
-
-  spdlog::init_thread_pool(256, 1);
-  auto logger = std::make_shared<spdlog::async_logger>(
-      "default", spdlog::sinks_init_list{file_sink, console_sink},
-      spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-
-  spdlog::set_default_logger(logger);
-
-  spdlog::flush_on(spdlog::level::err);
-  spdlog::flush_every(std::chrono::seconds(1));
-
-  spdlog::set_level(spdlog::level::trace);
-}
-
 void InitializeCtldGlobalVariables() {
   using namespace Ctld;
 
@@ -495,6 +470,11 @@ void InitializeCtldGlobalVariables() {
   ok = g_embedded_db_client->Init(g_config.CraneCtldDbPath);
   if (!ok) {
     CRANE_ERROR("Failed to initialize g_embedded_db_client.");
+
+    // In case that spdlog is destructed before g_embedded_db_client->Close()
+    // which log function is called.
+    g_embedded_db_client.reset();
+
     std::exit(1);
   }
 
@@ -611,8 +591,6 @@ void SetMaxFileDescriptorNumber(uint64_t num) {
 }
 
 int StartServer() {
-  InitializeLogger();
-
   SetMaxFileDescriptorNumber(640000);
 
   CreateFolders();
@@ -699,10 +677,6 @@ void CheckSingleton() {
 }
 
 int main(int argc, char** argv) {
-#ifndef NDEBUG
-  spdlog::set_level(spdlog::level::trace);
-#endif
-
   CheckSingleton();
   ParseConfig(argc, argv);
 

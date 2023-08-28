@@ -23,22 +23,22 @@
 #  define __FUNCTION__ __PRETTY_FUNCTION__
 #endif
 
-#define SPDLOG_ACTIVE_LEVEL CRANE_LOG_LEVEL
-
-#include <spdlog/spdlog.h>
-
 #include "PublicHeader.h"
 
-#define CRANE_LOG_LEVEL_TRACE SPDLOG_LEVEL_TRACE
-#define CRANE_LOG_LEVEL_DEBUG SPDLOG_LEVEL_DEBUG
-#define CRANE_LOG_LEVEL_INFO SPDLOG_LEVEL_INFO
-#define CRANE_LOG_LEVEL_WARN SPDLOG_LEVEL_WARN
-#define CRANE_LOG_LEVEL_ERROR SPDLOG_LEVEL_ERROR
-#define CRANE_LOG_LEVEL_CRITICAL SPDLOG_LEVEL_CRITICAL
-#define CRANE_LOG_LEVEL_OFF SPDLOG_LEVEL_OFF
+#define CRANE_LOG_LEVEL_TRACE 0
+#define CRANE_LOG_LEVEL_DEBUG 1
+#define CRANE_LOG_LEVEL_INFO 2
+#define CRANE_LOG_LEVEL_WARN 3
+#define CRANE_LOG_LEVEL_ERROR 4
+#define CRANE_LOG_LEVEL_CRITICAL 5
+#define CRANE_LOG_LEVEL_OFF 6
 
 #if !defined(CRANE_LOG_LEVEL)
-#  define CRANE_LOG_LEVEL CRANE_LOG_LEVEL_INFO
+#  if defined(NDEBUG)
+#    define CRANE_LOG_LEVEL CRANE_LOG_LEVEL_INFO
+#  else
+#    define CRANE_LOG_LEVEL CRANE_LOG_LEVEL_TRACE
+#  endif
 #endif
 
 #define SPDLOG_ACTIVE_LEVEL CRANE_LOG_LEVEL
@@ -46,6 +46,11 @@
 #include <spdlog/fmt/fmt.h>
 #include <spdlog/fmt/ranges.h>
 #include <spdlog/spdlog.h>
+
+// Must be after the static log level definition
+#include <spdlog/async.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 #define CRANE_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
 #define CRANE_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
@@ -137,13 +142,5 @@
     } while (false)
 #endif
 
-namespace Internal {
-
-struct StaticLogFormatSetter {
-  StaticLogFormatSetter() { spdlog::set_pattern("[%^%L%$ %C-%m-%d %s:%#] %v"); }
-};
-
-// Set the global spdlog pattern in global variable initialization.
-[[maybe_unused]] inline StaticLogFormatSetter _static_formatter_setter;
-
-}  // namespace Internal
+void InitLogger(spdlog::level::level_enum level,
+                const std::string& log_file_path);

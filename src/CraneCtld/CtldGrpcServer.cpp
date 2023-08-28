@@ -166,7 +166,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   bool ok;
 
   std::list<crane::grpc::TaskInEmbeddedDb> ended_list;
-  ok = g_embedded_db_client->GetEndedQueueCopy(&ended_list);
+  ok = g_embedded_db_client->GetEndedQueueCopy(0, &ended_list);
   if (!ok) {
     CRANE_ERROR(
         "Failed to call "
@@ -1101,7 +1101,6 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
     kCleanData,
   };
 
-  CraneErr err;
   bool ok;
 
   StreamCforedRequest cfored_request;
@@ -1250,8 +1249,6 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
       }
     }
   }
-
-  return grpc::Status::OK;
 }
 
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
