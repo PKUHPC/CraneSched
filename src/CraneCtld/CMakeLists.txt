@@ -20,7 +20,7 @@ add_executable(cranectld
 
 target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 
-target_link_libraries(cranectld
+target_link_libraries(cranectld PRIVATE
         spdlog::spdlog
         concurrentqueue
         pevents
@@ -46,11 +46,22 @@ target_link_libraries(cranectld
 
         yaml-cpp
         mongocxx_static
-        unqlite
 
         range-v3::range-v3
         result
         )
+
+if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
+    target_compile_definitions(cranectld PRIVATE CRANE_HAVE_BERKELEY_DB)
+    target_include_directories(cranectld PRIVATE ${BERKELEY_DB_INCLUDE_DIR})
+    target_link_libraries(cranectld PRIVATE ${BERKELEY_DB_CXX_LIBRARIES})
+endif ()
+
+if (ENABLE_UNQLITE)
+    target_compile_definitions(cranectld PRIVATE CRANE_HAVE_UNQLITE)
+    target_link_libraries(cranectld PRIVATE unqlite)
+endif ()
+
 
 # Linker flag for c++ 17 filesystem library
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")

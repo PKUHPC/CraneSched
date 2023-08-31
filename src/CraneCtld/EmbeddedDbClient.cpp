@@ -18,6 +18,8 @@
 
 namespace Ctld {
 
+#ifdef CRANE_HAVE_UNQLITE
+
 result::result<void, DbErrorCode> UnqliteDb::Init(const std::string& path) {
   int rc;
 
@@ -193,14 +195,249 @@ std::string UnqliteDb::GetInternalErrorStr_() {
   return {};
 }
 
+#endif
+
+#ifdef CRANE_HAVE_BERKELEY_DB
+
+result::result<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
+  try {
+    std::filesystem::path env_dir{m_env_home_};
+    if (!std::filesystem::exists(env_dir))
+      std::filesystem::create_directories(env_dir);
+  } catch (const std::exception& e) {
+    CRANE_CRITICAL("Invalid berkeley db env home path {}: {}", m_env_home_,
+                   e.what());
+    std::exit(1);
+  }
+
+  m_db_path_ = path;
+
+  u_int32_t env_flags = DB_CREATE |      // If the environment does not
+                                         // exist, create it.
+                        DB_INIT_LOCK |   // Initialize locking
+                        DB_INIT_LOG |    // Initialize logging
+                        DB_INIT_MPOOL |  // Initialize the cache
+                        DB_INIT_TXN |    // Initialize transactions
+                        DB_RECOVER;
+
+  u_int32_t oFlags = DB_CREATE | DB_AUTO_COMMIT;  // Open flags;
+
+  try {
+    m_env_ = std::make_unique<DbEnv>(0);
+    m_env_->open(m_env_home_.c_str(), env_flags, 0);
+    m_db_ = std::make_unique<Db>(m_env_.get(), 0);  // Instantiate the Db object
+
+    // Open the database
+    m_db_->open(nullptr,       // Transaction pointer
+                path.c_str(),  // Database file name
+                nullptr,       // Optional logical database name
+                DB_HASH,       // Database access method
+                oFlags,        // Open flags
+                0);            // File mode (using defaults)
+
+    // DbException is not subclassed from std::exception, so
+    // need to catch both of these.
+  } catch (DbException& e) {
+    if (e.get_errno() == ENOENT) {
+      CRANE_ERROR("Failed to open berkeley db file {}: {}", m_db_path_,
+                  e.what());
+    } else {
+      CRANE_ERROR("Failed to init berkeley db: {}", e.what());
+    }
+
+    return result::failure(DbErrorCode::kOther);
+  } catch (std::exception& e) {
+    CRANE_ERROR("Failed to init berkeley db: {}", e.what());
+    return result::failure(DbErrorCode::kOther);
+  }
+
+  return {};
+}
+
+result::result<void, DbErrorCode> BerkeleyDb::Close() {
+  if (m_db_ != nullptr && m_env_ != nullptr) {
+    CRANE_TRACE("Closing berkeley db...");
+    try {
+      // close all databases before closing environment
+      m_db_->close(0);
+      m_env_->close(0);
+    } catch (DbException& e) {
+      CRANE_ERROR("Failed to close berkeley db and environment: {}, {}, {}",
+                  m_db_path_, m_env_home_, e.what());
+      return result::failure(DbErrorCode::kOther);
+    }
+  }
+
+  return {};
+}
+
+result::result<void, DbErrorCode> BerkeleyDb::Store(txn_id_t txn_id,
+                                                    const std::string& key,
+                                                    const void* data,
+                                                    size_t len) {
+  DbTxn* txn = GetDbTxnFromId_(txn_id);
+
+  Dbt key_dbt((void*)key.c_str(), key.length() + 1);
+  Dbt data_dbt((void*)data, len);
+
+  try {
+    m_db_->put(txn, &key_dbt, &data_dbt, 0);
+  } catch (DbException& e) {
+    CRANE_ERROR("Failed to store key {} into db: {}", key, e.what());
+    return result::failure(DbErrorCode::kOther);
+  }
+
+  return {};
+}
+
+result::result<size_t, DbErrorCode> BerkeleyDb::Fetch(txn_id_t txn_id,
+                                                      const std::string& key,
+                                                      void* buf, size_t* len) {
+  int rc;
+  DbTxn* txn = GetDbTxnFromId_(txn_id);
+  Dbt key_dbt, data_dbt;
+
+  key_dbt.set_data((void*)key.c_str());
+  key_dbt.set_size(key.length() + 1);
+
+  void* buf_arg = (*len == 0) ? nullptr : buf;
+  data_dbt.set_data(buf_arg);
+  data_dbt.set_ulen(*len);
+  data_dbt.set_flags(DB_DBT_USERMEM);
+
+  try {
+    rc = m_db_->get(txn, &key_dbt, &data_dbt, 0);
+  } catch (DbException& e) {
+    if (e.get_errno() == DB_BUFFER_SMALL) {
+      *len = data_dbt.get_size();
+      return result::failure(DbErrorCode::kBufferSmall);
+    } else {
+      CRANE_ERROR("Failed to get value size for key {}. {}", key, rc);
+      return result::failure(DbErrorCode::kOther);
+    }
+  }
+
+  if (rc != 0) {
+    if (rc == DB_NOTFOUND)
+      return result::failure(DbErrorCode::kNotFound);
+    else
+      return result::failure(DbErrorCode::kOther);
+  }
+
+  return {data_dbt.get_size()};
+}
+
+result::result<void, DbErrorCode> BerkeleyDb::Delete(txn_id_t txn_id,
+                                                     const std::string& key) {
+  DbTxn* txn = GetDbTxnFromId_(txn_id);
+
+  Dbt key_dbt((void*)key.c_str(), key.length() + 1);
+
+  int rc = m_db_->del(txn, &key_dbt, 0);
+  if (rc != 0) {
+    CRANE_ERROR("Failed to delete key {} from db.", key);
+    if (rc == DB_NOTFOUND) return result::failure(DbErrorCode::kNotFound);
+    return result::failure(DbErrorCode::kOther);
+  }
+
+  return {};
+}
+
+result::result<txn_id_t, DbErrorCode> BerkeleyDb::Begin() {
+  DbTxn* txn = nullptr;
+
+  try {
+    m_env_->txn_begin(
+        nullptr, &txn,
+        DB_TXN_BULK  // Enable transactional bulk insert optimization.
+    );
+  } catch (DbException& e) {
+    CRANE_ERROR("Failed to begin a transaction: {}", e.what());
+    return result::failure(DbErrorCode::kOther);
+  }
+
+  m_txn_map_[txn->id()] = txn;
+  return {txn->id()};
+}
+
+result::result<void, DbErrorCode> BerkeleyDb::Commit(txn_id_t txn_id) {
+  DbTxn* txn = GetDbTxnFromId_(txn_id);
+
+  try {
+    if (txn) txn->commit(0);
+  } catch (DbException& e) {
+    CRANE_ERROR("Failed to commit a transaction: {}", e.what());
+    std::ignore = Abort(txn_id);
+    return result::failure(DbErrorCode::kOther);
+  }
+
+  m_txn_map_.erase(txn_id);
+  return {};
+}
+
+result::result<void, DbErrorCode> BerkeleyDb::Abort(txn_id_t txn_id) {
+  DbTxn* txn = GetDbTxnFromId_(txn_id);
+
+  try {
+    if (txn) txn->abort();
+  } catch (DbException& e) {
+    CRANE_ERROR("Failed to abort a transaction: {}", e.what());
+    m_txn_map_.erase(txn_id);
+    return result::failure(DbErrorCode::kOther);
+  }
+
+  m_txn_map_.erase(txn_id);
+  return {};
+}
+
+DbTxn* BerkeleyDb::GetDbTxnFromId_(txn_id_t txn_id) {
+  // Do not use database transactions
+  if (txn_id == 0) return nullptr;
+
+  auto it = m_txn_map_.find(txn_id);
+  if (it == m_txn_map_.end()) {
+    CRANE_ERROR("Try to obtain a non-existent DbTxn, txn_id : {}", txn_id);
+    return nullptr;
+  } else {
+    return it->second;
+  }
+}
+
+#endif
+
 EmbeddedDbClient::~EmbeddedDbClient() {
-  auto result = m_embedded_db_->Close();
-  if (result.has_error())
-    CRANE_ERROR("Error occurred when closing the embedded db!");
+  if (m_embedded_db_) {
+    auto result = m_embedded_db_->Close();
+    if (result.has_error())
+      CRANE_ERROR("Error occurred when closing the embedded db!");
+  }
 }
 
 bool EmbeddedDbClient::Init(const std::string& db_path) {
-  m_embedded_db_ = std::make_unique<UnqliteDb>();
+  if (g_config.CraneEmbeddedDbBackend == "Unqlite") {
+#ifdef CRANE_HAVE_UNQLITE
+    m_embedded_db_ = std::make_unique<UnqliteDb>();
+#else
+    CRANE_ERROR(
+        "Select unqlite as the embedded db but it's not been compiled.");
+    return false;
+#endif
+
+  } else if (g_config.CraneEmbeddedDbBackend == "BerkeleyDB") {
+#ifdef CRANE_HAVE_BERKELEY_DB
+    m_embedded_db_ = std::make_unique<BerkeleyDb>();
+#else
+    CRANE_ERROR(
+        "Select Berkeley DB as the embedded db but it's not been compiled.");
+    return false;
+#endif
+
+  } else {
+    CRANE_ERROR("Invalid embedded database backend: {}",
+                g_config.CraneEmbeddedDbBackend);
+    return false;
+  }
+
   auto result = m_embedded_db_->Init(db_path);
   if (result.has_error()) return false;
 
@@ -323,8 +560,8 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(txn_id_t txn_id,
       StoreTypeIntoDb_(txn_id, GetDbQueueNodePersistedPartName_(task_db_id),
                        &task->PersistedPart());
   if (result.has_error()) {
-    CRANE_ERROR("Failed to store the data of task id: {} / task db id: {}. {}",
-                task_id, task_db_id, m_embedded_db_->GetInternalErrorStr_());
+    CRANE_ERROR("Failed to store the data of task id: {} / task db id: {}.",
+                task_id, task_db_id);
     if (!outer_txn) AbortTransaction(txn_id);
     return false;
   }
@@ -333,8 +570,7 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(txn_id_t txn_id,
   result =
       StoreTypeIntoDb_(txn_id, s_next_task_id_str_, &next_task_id_to_store);
   if (result.has_error()) {
-    CRANE_ERROR("Failed to store next_task_id + 1: {}",
-                m_embedded_db_->GetInternalErrorStr_());
+    CRANE_ERROR("Failed to store next_task_id + 1.");
     if (!outer_txn) AbortTransaction(txn_id);
     return false;
   }
@@ -343,8 +579,7 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(txn_id_t txn_id,
   result = StoreTypeIntoDb_(txn_id, s_next_task_db_id_str_,
                             &next_task_db_id_to_store);
   if (result.has_error()) {
-    CRANE_ERROR("Failed to store next_task_db_id + 1: {}",
-                m_embedded_db_->GetInternalErrorStr_());
+    CRANE_ERROR("Failed to store next_task_db_id + 1.");
     if (!outer_txn) AbortTransaction(txn_id);
     return false;
   }
@@ -352,7 +587,6 @@ bool EmbeddedDbClient::AppendTaskToPendingAndAdvanceTaskIds(txn_id_t txn_id,
   if (!outer_txn) {
     ok = CommitTransaction(txn_id);
     if (!ok) {
-      CRANE_ERROR("Commit error: {}", m_embedded_db_->GetInternalErrorStr_());
       AbortTransaction(txn_id);
       return false;
     }
@@ -369,7 +603,6 @@ bool EmbeddedDbClient::MovePendingOrRunningTaskToEnded(
   absl::MutexLock l(&m_queue_mtx_);
 
   bool ok, outer_txn = txn_id > 0;
-  result::result<void, DbErrorCode> result;
 
   if (!outer_txn) {
     if (!BeginTransaction(&txn_id)) return false;
@@ -411,7 +644,6 @@ bool EmbeddedDbClient::MoveTaskFromPendingToRunning(
   absl::MutexLock l(&m_queue_mtx_);
 
   bool ok, outer_txn = txn_id > 0;
-  result::result<void, DbErrorCode> result;
 
   if (!outer_txn) {
     if (!BeginTransaction(&txn_id)) return false;
@@ -434,7 +666,7 @@ bool EmbeddedDbClient::MoveTaskFromPendingToRunning(
 
   if (!outer_txn) {
     ok = CommitTransaction(txn_id);
-    if (result.has_error()) {
+    if (!ok) {
       AbortTransaction(txn_id);
       return false;
     }
@@ -692,16 +924,15 @@ bool EmbeddedDbClient::GetQueueCopyNoLock_(
     result = FetchTypeFromDb_(txn_id, GetDbQueueNodeTaskToCtldName_(key),
                               task_proto.mutable_task_to_ctld());
     if (result.has_error()) {
-      CRANE_ERROR("Failed to fetch task_to_ctld for task id {}: {}", key,
-                  m_embedded_db_->GetInternalErrorStr_());
+      CRANE_ERROR("Failed to fetch task_to_ctld for task id {}.", key);
       if (!outer_txn) AbortTransaction(txn_id);
       return false;
     }
+
     result = FetchTypeFromDb_(txn_id, GetDbQueueNodePersistedPartName_(key),
                               task_proto.mutable_persisted_part());
     if (result.has_error()) {
-      CRANE_ERROR("Failed to fetch persisted_part for task id {}: {}", key,
-                  m_embedded_db_->GetInternalErrorStr_());
+      CRANE_ERROR("Failed to fetch persisted_part for task id {}.", key);
       if (!outer_txn) AbortTransaction(txn_id);
       return false;
     }

@@ -23,6 +23,10 @@ project(Crane C CXX)
 
 # Options start here ----------------------------------------------------------------------------
 
+option(ENABLE_BERKELEY_DB "Enable Berkeley DB as the embedded db backend" OFF)
+
+option(ENABLE_UNQLITE "Enable Berkeley DB as the embedded db backend" ON)
+
 option(CRANE_ENABLE_TESTS "Enable test targets" OFF)
 
 option(CRANE_FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." TRUE)
@@ -126,6 +130,24 @@ add_subdirectory(dependencies/CPM EXCLUDE_FROM_ALL)
 
 # Notify CMake that we have module files to find packages/libs.
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
+
+if (ENABLE_BERKELEY_DB)
+    message("Enable berkeley db as one of embedded db backend.")
+    find_package(BerkeleyDB REQUIRED)
+    if (BERKELEYDB_FOUND)
+        message("Berkeley DB found. Include: ${BERKELEY_DB_INCLUDE_DIR}; Libs: ${BERKELEY_DB_CXX_LIBRARIES}")
+    else ()
+        message(FATAL_ERROR "Berkeley DB was not found.")
+    endif ()
+endif ()
+
+if (ENABLE_UNQLITE)
+    message("Enable Unqlite as embedded db.")
+endif ()
+
+if (NOT (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND) AND NOT ENABLE_UNQLITE)
+    message(FATAL_ERROR "At least one of Berkeley DB and Unqlite should be enabled.")
+endif ()
 
 find_package(PAM REQUIRED)
 if (PAM_FOUND)
