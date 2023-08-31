@@ -201,9 +201,12 @@ std::string UnqliteDb::GetInternalErrorStr_() {
 
 result::result<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
   try {
-    std::filesystem::path env_dir{m_env_home_};
+    std::filesystem::path db_dir{g_config.CraneCtldDbPath};
+    std::filesystem::path env_dir = db_dir.parent_path() / "CraneEnv";
     if (!std::filesystem::exists(env_dir))
       std::filesystem::create_directories(env_dir);
+
+    m_env_home_ = env_dir.string();
   } catch (const std::exception& e) {
     CRANE_CRITICAL("Invalid berkeley db env home path {}: {}", m_env_home_,
                    e.what());

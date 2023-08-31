@@ -139,7 +139,7 @@ class BerkeleyDb : public IEmbeddedDb {
  private:
   DbTxn* GetDbTxnFromId_(txn_id_t txn_id);
 
-  std::string m_db_path_, m_env_home_{"/tmp/cranectld/CraneEnv"};
+  std::string m_db_path_, m_env_home_;
 
   std::unique_ptr<Db> m_db_;
 
