@@ -210,7 +210,7 @@ result::result<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
   } catch (const std::exception& e) {
     CRANE_CRITICAL("Invalid berkeley db env home path {}: {}", m_env_home_,
                    e.what());
-    std::exit(1);
+    return false;
   }
 
   m_db_path_ = path;
@@ -223,7 +223,7 @@ result::result<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
                         DB_INIT_TXN |    // Initialize transactions
                         DB_RECOVER;
 
-  u_int32_t oFlags = DB_CREATE | DB_AUTO_COMMIT;  // Open flags;
+  u_int32_t o_flags = DB_CREATE | DB_AUTO_COMMIT;  // Open flags;
 
   try {
     m_env_ = std::make_unique<DbEnv>(0);
@@ -235,11 +235,8 @@ result::result<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
                 path.c_str(),  // Database file name
                 nullptr,       // Optional logical database name
                 DB_HASH,       // Database access method
-                oFlags,        // Open flags
+                o_flags,       // Open flags
                 0);            // File mode (using defaults)
-
-    // DbException is not subclassed from std::exception, so
-    // need to catch both of these.
   } catch (DbException& e) {
     if (e.get_errno() == ENOENT) {
       CRANE_ERROR("Failed to open berkeley db file {}: {}", m_db_path_,

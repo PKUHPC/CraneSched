@@ -142,7 +142,7 @@ if (ENABLE_BERKELEY_DB)
 endif ()
 
 if (ENABLE_UNQLITE)
-    message("Enable Unqlite as embedded db.")
+    message("Enable Unqlite as one of embedded db backend.")
 endif ()
 
 if (NOT (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND) AND NOT ENABLE_UNQLITE)
