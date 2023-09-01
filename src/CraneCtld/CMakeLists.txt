@@ -49,7 +49,7 @@ target_link_libraries(cranectld PRIVATE
 
         range-v3::range-v3
         result
-        )
+)
 
 if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
     target_compile_definitions(cranectld PRIVATE CRANE_HAVE_BERKELEY_DB)
@@ -65,5 +65,5 @@ endif ()
 
 # Linker flag for c++ 17 filesystem library
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_link_libraries(cranectld stdc++fs)
+    target_link_libraries(cranectld PRIVATE stdc++fs)
 endif ()

@@ -1836,7 +1836,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   {
     auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
 
-    for (auto craned_id : metas_ptr->craned_ids) {
+    for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id);
       if (craned_meta.alive && task->resources <= craned_meta.res_total &&
           (included_nodes.empty() || included_nodes.contains(craned_id)) &&
@@ -1901,6 +1901,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
               return a.second > b.second;
             });
 
+  task_id_vec.reserve(task_priority_vec.size());
   for (auto& pair : task_priority_vec) task_id_vec.emplace_back(pair.first);
 
   return task_id_vec;
