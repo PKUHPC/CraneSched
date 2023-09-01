@@ -89,7 +89,7 @@ result::result<size_t, DbErrorCode> UnqliteDb::Fetch(txn_id_t txn_id,
   int rc;
 
   void* buf_arg = (*len == 0) ? nullptr : buf;
-  unqlite_int64 n_bytes = static_cast<unqlite_int64>(*len);
+  auto n_bytes = static_cast<unqlite_int64>(*len);
 
   while (true) {
     rc = unqlite_kv_fetch(m_db_, key.c_str(), key.size(), buf_arg, &n_bytes);
@@ -453,7 +453,7 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   if (!ok) return false;
 
   ok = FetchTypeFromDbOrInitWithValueNoLockAndTxn_(0, s_next_task_db_id_str_,
-                                                   &s_next_task_db_id_, 1l);
+                                                   &s_next_task_db_id_, 1L);
   if (!ok) return false;
 
   std::string pd_head_next_name =

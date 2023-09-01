@@ -65,14 +65,14 @@ class MultiFactorPriority : public IPrioritySorter {
     uint32_t nodes_alloc_max, nodes_alloc_min;
     uint64_t mem_alloc_max, mem_alloc_min;
     double cpus_alloc_max, cpus_alloc_min;
-    uint32_t service_val_max, service_val_min;
+    double service_val_max, service_val_min;
 
-    absl::flat_hash_map<std::string, uint32_t> acc_service_val_map;
+    absl::flat_hash_map<std::string, double> acc_service_val_map;
   };
 
   void CalculateFactorBound_(const OrderedTaskMap& pending_task_map,
                              const UnorderedTaskMap& running_task_map);
-  uint32_t CalculatePriority_(Ctld::TaskInCtld* task);
+  double CalculatePriority_(Ctld::TaskInCtld* task);
 
   FactorBound m_factor_bound_;
 };
@@ -119,7 +119,7 @@ class INodeSelectionAlgo {
 
 class MinLoadFirst : public INodeSelectionAlgo {
  public:
-  MinLoadFirst(IPrioritySorter* priority_sorter)
+  explicit MinLoadFirst(IPrioritySorter* priority_sorter)
       : m_priority_sorter_(priority_sorter) {}
 
   void NodeSelect(
@@ -218,7 +218,7 @@ class TaskScheduler {
 
   void TaskStatusChange(uint32_t task_id, const CranedId& craned_index,
                         crane::grpc::TaskStatus new_status, uint32_t exit_code,
-                        std::optional<std::string> reason) {
+                        std::optional<std::string>&& reason) {
     // The order of LockGuards matters.
     LockGuard running_guard(&m_running_task_map_mtx_);
     LockGuard indexes_guard(&m_task_indexes_mtx_);

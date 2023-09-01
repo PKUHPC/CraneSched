@@ -269,7 +269,7 @@ struct TaskInCtld {
                                  // node id.
   std::string allocated_craneds_regex;
 
-  uint32_t schedule_priority{0};
+  double schedule_priority{0.0};
 
   // Helper function
  public:
