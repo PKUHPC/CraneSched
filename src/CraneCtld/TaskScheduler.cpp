@@ -1939,6 +1939,8 @@ void MultiFactorPriority::CalculateFactorBound_(
     uint64_t age = ToInt64Seconds((absl::Now() - task->SubmitTime()));
     age = std::min(age, g_config.PriorityConfig.MaxAge);
 
+    bound.acc_service_val_map[task->account] = 0;
+
     bound.age_min = std::min(age, bound.age_min);
     bound.age_max = std::max(age, bound.age_max);
 
