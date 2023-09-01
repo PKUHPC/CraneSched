@@ -19,13 +19,19 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include <unqlite.h>
+#ifdef CRANE_HAVE_BERKELEY_DB
+#  include <db_cxx.h>
+#endif
+
+#ifdef CRANE_HAVE_UNQLITE
+#  include <unqlite.h>
+#endif
 
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
 
-using txn_id_t = int64_t;
+using txn_id_t = uint32_t;
 
 enum DbErrorCode {
   kNotFound,
@@ -63,6 +69,8 @@ class IEmbeddedDb {
   virtual std::string const& DbPath() = 0;
 };
 
+#ifdef CRANE_HAVE_UNQLITE
+
 class UnqliteDb : public IEmbeddedDb {
  public:
   result::result<void, DbErrorCode> Init(const std::string& path) override;
@@ -89,14 +97,58 @@ class UnqliteDb : public IEmbeddedDb {
 
   const std::string& DbPath() override { return m_db_path_; };
 
+ private:
   std::string GetInternalErrorStr_();
 
- private:
   static constexpr txn_id_t s_fixed_txn_id_ = 1;
 
   std::string m_db_path_;
   unqlite* m_db_{nullptr};
 };
+
+#endif
+
+#ifdef CRANE_HAVE_BERKELEY_DB
+
+class BerkeleyDb : public IEmbeddedDb {
+ public:
+  result::result<void, DbErrorCode> Init(const std::string& path) override;
+
+  result::result<void, DbErrorCode> Close() override;
+
+  result::result<void, DbErrorCode> Store(txn_id_t txn_id,
+                                          const std::string& key,
+                                          const void* data,
+                                          size_t len) override;
+
+  result::result<size_t, DbErrorCode> Fetch(txn_id_t txn_id,
+                                            const std::string& key, void* buf,
+                                            size_t* len) override;
+
+  result::result<void, DbErrorCode> Delete(txn_id_t txn_id,
+                                           const std::string& key) override;
+
+  result::result<txn_id_t, DbErrorCode> Begin() override;
+
+  result::result<void, DbErrorCode> Commit(txn_id_t txn_id) override;
+
+  result::result<void, DbErrorCode> Abort(txn_id_t txn_id) override;
+
+  const std::string& DbPath() override { return m_db_path_; };
+
+ private:
+  DbTxn* GetDbTxnFromId_(txn_id_t txn_id);
+
+  std::string m_db_path_, m_env_home_;
+
+  std::unique_ptr<Db> m_db_;
+
+  std::unique_ptr<DbEnv> m_env_;
+
+  std::unordered_map<txn_id_t, DbTxn*> m_txn_map_;
+};
+
+#endif
 
 class EmbeddedDbClient {
  private:
@@ -417,7 +469,7 @@ class EmbeddedDbClient {
   std::unordered_map<db_id_t, DbQueueNode> m_ended_queue_;
   absl::Mutex m_queue_mtx_;
 
-  std::unique_ptr<UnqliteDb> m_embedded_db_;
+  std::unique_ptr<IEmbeddedDb> m_embedded_db_;
 };
 
 }  // namespace Ctld

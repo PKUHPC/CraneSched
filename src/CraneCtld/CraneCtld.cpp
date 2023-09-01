@@ -153,10 +153,17 @@ void ParseConfig(int argc, char** argv) {
         g_config.ListenConf.UseTls = false;
       }
 
+      if (config["CraneEmbeddedDbBackend"] &&
+          !config["CraneEmbeddedDbBackend"].IsNull())
+        g_config.CraneEmbeddedDbBackend =
+            config["CraneEmbeddedDbBackend"].as<std::string>();
+      else
+        g_config.CraneEmbeddedDbBackend = "Unqlite";
+
       if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
         g_config.CraneCtldDbPath = config["CraneCtldDbPath"].as<std::string>();
       else
-        g_config.CraneCtldDbPath = Ctld::kDefaultUnqliteDbPath;
+        g_config.CraneCtldDbPath = Ctld::kDefaultDbPath;
 
       if (config["DbUser"] && !config["DbUser"].IsNull()) {
         g_config.DbUser = config["DbUser"].as<std::string>();
@@ -430,6 +437,16 @@ void ParseConfig(int argc, char** argv) {
   }
 }
 
+void DestroyCtldGlobalVariables() {
+  using namespace Ctld;
+
+  g_craned_keeper.reset();
+
+  // In case that spdlog is destructed before g_embedded_db_client->Close()
+  // in which log function is called.
+  g_embedded_db_client.reset();
+}
+
 void InitializeCtldGlobalVariables() {
   using namespace Ctld;
 
@@ -471,10 +488,7 @@ void InitializeCtldGlobalVariables() {
   if (!ok) {
     CRANE_ERROR("Failed to initialize g_embedded_db_client.");
 
-    // In case that spdlog is destructed before g_embedded_db_client->Close()
-    // which log function is called.
-    g_embedded_db_client.reset();
-
+    DestroyCtldGlobalVariables();
     std::exit(1);
   }
 
@@ -549,16 +563,11 @@ void InitializeCtldGlobalVariables() {
   ok = g_task_scheduler->Init();
   if (!ok) {
     CRANE_ERROR("The initialization of TaskScheduler failed. Exiting...");
+    DestroyCtldGlobalVariables();
     std::exit(1);
   }
 
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
-}
-
-void DestroyCtldGlobalVariables() {
-  using namespace Ctld;
-  g_craned_keeper.reset();
-  g_embedded_db_client.reset();
 }
 
 void CreateFolders() {

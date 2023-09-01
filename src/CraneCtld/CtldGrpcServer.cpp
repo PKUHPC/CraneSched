@@ -73,7 +73,7 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
 
   g_task_scheduler->TaskStatusChange(request->task_id(), request->craned_id(),
                                      request->new_status(),
-                                     request->exit_code(), reason);
+                                     request->exit_code(), std::move(reason));
   response->set_ok(true);
   return grpc::Status::OK;
 }

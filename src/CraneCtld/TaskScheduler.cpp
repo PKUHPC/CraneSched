@@ -1051,8 +1051,8 @@ void TaskScheduler::QueryTasksInRam(
   auto running_rng = m_running_task_map_ | ranges::views::all;
   auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
 
-  int num_limit = request->num_limit() <= 0 ? kDefaultQueryTaskNumLimit
-                                            : request->num_limit();
+  size_t num_limit = request->num_limit() <= 0 ? kDefaultQueryTaskNumLimit
+                                               : request->num_limit();
 
   auto filtered_rng = pd_r_rng |
                       ranges::views::filter(task_rng_filter_account) |
@@ -1836,7 +1836,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   {
     auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
 
-    for (auto craned_id : metas_ptr->craned_ids) {
+    for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id);
       if (craned_meta.alive && task->resources <= craned_meta.res_total &&
           (included_nodes.empty() || included_nodes.contains(craned_id)) &&
@@ -1889,9 +1889,9 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
 
   CalculateFactorBound_(pending_task_map, running_task_map);
 
-  std::vector<std::pair<task_id_t, uint32_t>> task_priority_vec;
+  std::vector<std::pair<task_id_t, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
-    uint32_t priority = CalculatePriority_(task.get());
+    double priority = CalculatePriority_(task.get());
     task_priority_vec.emplace_back(task->TaskId(), priority);
   }
 
@@ -1901,6 +1901,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
               return a.second > b.second;
             });
 
+  task_id_vec.reserve(task_priority_vec.size());
   for (auto& pair : task_priority_vec) task_id_vec.emplace_back(pair.first);
 
   return task_id_vec;
@@ -1939,7 +1940,7 @@ void MultiFactorPriority::CalculateFactorBound_(
     uint64_t age = ToInt64Seconds((absl::Now() - task->SubmitTime()));
     age = std::min(age, g_config.PriorityConfig.MaxAge);
 
-    bound.acc_service_val_map[task->account] = 0;
+    bound.acc_service_val_map[task->account] = 0.0;
 
     bound.age_min = std::min(age, bound.age_min);
     bound.age_max = std::max(age, bound.age_max);
@@ -1966,7 +1967,7 @@ void MultiFactorPriority::CalculateFactorBound_(
   }
 
   for (const auto& [task_id, task] : running_task_map) {
-    uint32_t service_val = 0;
+    double service_val = 0;
     if (bound.cpus_alloc_max != bound.cpus_alloc_min)
       service_val += 1.0 *
                      (task->resources.allocatable_resource.cpu_count -
@@ -1985,15 +1986,18 @@ void MultiFactorPriority::CalculateFactorBound_(
       service_val += 1.0;
 
     if (bound.mem_alloc_max != bound.mem_alloc_min)
-      service_val += 1.0 *
-                     (task->resources.allocatable_resource.memory_bytes -
-                      bound.mem_alloc_min) /
-                     (bound.mem_alloc_max - bound.mem_alloc_min);
+      service_val +=
+          1.0 *
+          static_cast<double>(
+              task->resources.allocatable_resource.memory_bytes -
+              bound.mem_alloc_min) /
+          static_cast<double>(bound.mem_alloc_max - bound.mem_alloc_min);
     else
       service_val += 1.0;
 
     uint64_t run_time = ToInt64Seconds(absl::Now() - task->StartTime());
-    bound.acc_service_val_map[task->account] += service_val * run_time;
+    bound.acc_service_val_map[task->account] +=
+        service_val * static_cast<double>(run_time);
   }
 
   for (const auto& [acc_name, ser_val] : bound.acc_service_val_map) {
@@ -2002,7 +2006,7 @@ void MultiFactorPriority::CalculateFactorBound_(
   }
 }
 
-uint32_t MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
+double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
   FactorBound& bound = m_factor_bound_;
 
   uint64_t task_age =
@@ -2014,7 +2018,7 @@ uint32_t MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
   uint32_t task_nodes_alloc = task->node_num;
   uint64_t task_mem_alloc = task->resources.allocatable_resource.memory_bytes;
   double task_cpus_alloc = task->resources.allocatable_resource.cpu_count;
-  uint32_t task_service_val = bound.acc_service_val_map.at(task->account);
+  double task_service_val = bound.acc_service_val_map.at(task->account);
 
   double qos_factor{0};
   double age_factor{0};
@@ -2024,8 +2028,8 @@ uint32_t MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
 
   // age_factor
   if (bound.age_max != bound.age_min)
-    age_factor =
-        1.0 * (task_age - bound.age_min) / (bound.age_max - bound.age_min);
+    age_factor = 1.0 * static_cast<double>(task_age - bound.age_min) /
+                 static_cast<double>(bound.age_max - bound.age_min);
 
   // qos_factor
   if (bound.qos_priority_min != bound.qos_priority_max)
@@ -2045,12 +2049,13 @@ uint32_t MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
     job_size_factor += 1.0 * (task_nodes_alloc - bound.nodes_alloc_min) /
                        (bound.nodes_alloc_max - bound.nodes_alloc_min);
   if (bound.mem_alloc_max != bound.mem_alloc_min)
-    job_size_factor += 1.0 * (task_mem_alloc - bound.mem_alloc_min) /
-                       (bound.mem_alloc_max - bound.mem_alloc_min);
+    job_size_factor +=
+        1.0 * static_cast<double>(task_mem_alloc - bound.mem_alloc_min) /
+        static_cast<double>(bound.mem_alloc_max - bound.mem_alloc_min);
   if (g_config.PriorityConfig.FavorSmall)
-    job_size_factor = 1 - job_size_factor / 3;
+    job_size_factor = 1.0 - job_size_factor / 3;
   else
-    job_size_factor /= 3;
+    job_size_factor /= 3.0;
 
   // fair_share_factor
   if (bound.service_val_max != bound.service_val_min)
@@ -2058,7 +2063,7 @@ uint32_t MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
         1.0 - (task_service_val - bound.service_val_min) /
                   (bound.service_val_max - bound.service_val_min);
 
-  uint32_t priority =
+  double priority =
       g_config.PriorityConfig.WeightAge * age_factor +
       g_config.PriorityConfig.WeightPartition * partition_factor +
       g_config.PriorityConfig.WeightJobSize * job_size_factor +

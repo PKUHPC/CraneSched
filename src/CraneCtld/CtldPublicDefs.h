@@ -26,10 +26,10 @@ using moodycamel::ConcurrentQueue;
 using task_db_id_t = int64_t;
 
 inline const char* kCraneCtldDefaultLogPath = "/tmp/cranectld/cranectld.log";
-inline const char* kDefaultUnqliteDbPath = "/tmp/cranectld/unqlite.db";
+inline const char* kDefaultDbPath = "/tmp/cranectld/embedded.db";
 
 constexpr uint64_t kTaskScheduleIntervalMs = 1000;
-constexpr uint16_t kCompletionQueueDelaySeconds = 20;
+constexpr uint16_t kCompletionQueueDelaySeconds = 15;
 
 struct Config {
   struct Node {
@@ -77,6 +77,7 @@ struct Config {
   std::string CraneCtldDebugLevel;
   std::string CraneCtldLogFile;
 
+  std::string CraneEmbeddedDbBackend;
   std::string CraneCtldDbPath;
 
   bool CraneCtldForeground{};
@@ -268,7 +269,7 @@ struct TaskInCtld {
                                  // node id.
   std::string allocated_craneds_regex;
 
-  uint32_t schedule_priority{0};
+  double schedule_priority{0.0};
 
   // Helper function
  public:
