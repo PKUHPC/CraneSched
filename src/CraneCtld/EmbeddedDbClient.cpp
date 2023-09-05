@@ -210,7 +210,7 @@ result::result<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
   } catch (const std::exception& e) {
     CRANE_CRITICAL("Invalid berkeley db env home path {}: {}", m_env_home_,
                    e.what());
-    return false;
+    return result::failure(DbErrorCode::kOther);
   }
 
   m_db_path_ = path;
