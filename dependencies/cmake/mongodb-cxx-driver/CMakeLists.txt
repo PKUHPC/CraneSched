@@ -9,10 +9,18 @@ set(ENABLE_HTML_DOCS OFF)
 set(ENABLE_EXAMPLES OFF)
 set(ENABLE_AUTOMATIC_INIT_AND_CLEANUP OFF)
 
+if (CRANE_USE_GITEE_SOURCE)
+    set(MONGO_C_DRIVER_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/mongo-c-driver-1.23.0.tar.gz")
+    set(MONGO_CXX_DRIVER_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/mongo-cxx-driver-r3.7.0.tar.gz")
+else ()
+    set(MONGO_C_DRIVER_SRC_URL "https://github.com/mongodb/mongo-c-driver/releases/download/1.23.0/mongo-c-driver-1.23.0.tar.gz")
+    set(MONGO_CXX_DRIVER_SRC_URL "https://github.com/mongodb/mongo-cxx-driver/releases/download/r3.7.0/mongo-cxx-driver-r3.7.0.tar.gz")
+endif ()
+
 FetchContent_Declare(mongo_c_driver_repo
         OVERRIDE_FIND_PACKAGE
 
-        URL https://github.com/mongodb/mongo-c-driver/releases/download/1.23.0/mongo-c-driver-1.23.0.tar.gz
+        URL ${MONGO_C_DRIVER_SRC_URL}
         URL_HASH SHA256=2b91d6a9c1a80ec82c5643676e44f1a9edf3849c7f25d490e1b5587eb408ad93
         INACTIVITY_TIMEOUT 5
 
@@ -27,7 +35,7 @@ set(ENABLE_TESTS OFF)
 FetchContent_Declare(mongocxx
         OVERRIDE_FIND_PACKAGE
 
-        URL https://github.com/mongodb/mongo-cxx-driver/releases/download/r3.7.0/mongo-cxx-driver-r3.7.0.tar.gz
+        URL ${MONGO_CXX_DRIVER_SRC_URL}
         URL_HASH SHA256=fb2da11178db728f63147fe4b0c7509eb49b1b02c5cb55f9bee5f927e451a0c7
         INACTIVITY_TIMEOUT 5
 
