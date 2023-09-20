@@ -37,6 +37,8 @@ target_link_libraries(craned
         absl::flat_hash_map
         absl::synchronization
 
+        uvw::uvw-static
+
         yaml-cpp
         result
         )

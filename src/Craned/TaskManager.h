@@ -26,6 +26,10 @@
 #include <grp.h>
 #include <sys/eventfd.h>
 #include <sys/wait.h>
+#include <uv.h>
+
+#include <memory>
+#include <uvw.hpp>
 
 #include "CtldClient.h"
 #include "crane/PasswordEntry.h"

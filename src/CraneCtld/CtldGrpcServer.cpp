@@ -502,12 +502,12 @@ grpc::Status CraneCtldServiceImpl::AddUser(
     return grpc::Status::OK;
   }
 
-  if (static_cast<int>(request->user().admin_level()) >
+  if (static_cast<int>(request->user().admin_level()) >=
       static_cast<int>(user_level)) {
     response->set_ok(false);
     response->set_reason(
-        "Permission error : You cannot add user who has a larger permission "
-        "than yours");
+        "Permission error : You cannot add a user with the same or greater "
+        "permissions as yourself");
     return grpc::Status::OK;
   }
 
@@ -616,11 +616,11 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
         return grpc::Status::OK;
       }
 
-      if (modifier_shared_ptr->admin_level > user_level) {
+      if (modifier_shared_ptr->admin_level >= user_level) {
         response->set_ok(false);
         response->set_reason(
-            "Permission error : You cannot modify a user who has a larger "
-            "permission than yours");
+            "Permission error : You cannot modify a user with the same or "
+            "greater permissions as yourself");
         return grpc::Status::OK;
       }
       if (request->item() == "admin_level") {
@@ -993,8 +993,8 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
       if (user_level <= deleter_shared_ptr->admin_level) {
         response->set_ok(false);
         response->set_reason(
-            "Permission error : You can't delete a user who has a larger or "
-            "same permission than yours");
+            "Permission error : You cannot delete a user with the same or "
+            "greater permissions as yourself");
         return grpc::Status::OK;
       }
     }

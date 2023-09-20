@@ -140,7 +140,7 @@ TEST_F(EmbeddedDbClientTest, LinkList) {
   ASSERT_EQ(i, 2);
 
   i = 0;
-  rc = g_embedded_db_client->ForEachInDbQueueNoLockAndTxn_(
+  rc = g_embedded_db_client->ForEachInDbQueueNoLock_(
       g_embedded_db_client->s_pending_queue_head_,
       g_embedded_db_client->s_pending_queue_tail_,
       [&i](EmbeddedDbClient::DbQueueNode const& node) {
@@ -152,7 +152,7 @@ TEST_F(EmbeddedDbClientTest, LinkList) {
   ASSERT_EQ(i, 2);
 
   i = 0;
-  rc = g_embedded_db_client->ForEachInDbQueueNoLockAndTxn_(
+  rc = g_embedded_db_client->ForEachInDbQueueNoLock_(
       g_embedded_db_client->s_running_queue_head_,
       g_embedded_db_client->s_running_queue_tail_,
       [&i](EmbeddedDbClient::DbQueueNode const& node) {
@@ -197,7 +197,7 @@ TEST_F(EmbeddedDbClientTest, LinkList) {
   ASSERT_EQ(task_in_embedded_db.persisted_part().task_db_id(), 2);
   ASSERT_EQ(task_in_embedded_db.task_to_ctld().name(), "Task2");
 
-  rc = g_embedded_db_client->ForEachInDbQueueNoLockAndTxn_(
+  rc = g_embedded_db_client->ForEachInDbQueueNoLock_(
       g_embedded_db_client->s_running_queue_head_,
       g_embedded_db_client->s_running_queue_tail_,
       [](EmbeddedDbClient::DbQueueNode const& node) {
@@ -209,7 +209,7 @@ TEST_F(EmbeddedDbClientTest, LinkList) {
   std::list<TaskInEmbeddedDb> ended_list;
 
   i = 0;
-  rc = g_embedded_db_client->ForEachInDbQueueNoLockAndTxn_(
+  rc = g_embedded_db_client->ForEachInDbQueueNoLock_(
       g_embedded_db_client->s_ended_queue_head_,
       g_embedded_db_client->s_ended_queue_tail_,
       [&i](EmbeddedDbClient::DbQueueNode const& node) {
@@ -224,7 +224,7 @@ TEST_F(EmbeddedDbClientTest, LinkList) {
   ASSERT_TRUE(ok);
 
   i = 0;
-  rc = g_embedded_db_client->ForEachInDbQueueNoLockAndTxn_(
+  rc = g_embedded_db_client->ForEachInDbQueueNoLock_(
       g_embedded_db_client->s_ended_queue_head_,
       g_embedded_db_client->s_ended_queue_tail_,
       [&i](EmbeddedDbClient::DbQueueNode const& node) {

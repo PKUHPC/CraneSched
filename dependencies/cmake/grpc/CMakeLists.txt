@@ -1,12 +1,26 @@
 include(FetchContent)
 
+if (CRANE_USE_GITEE_SOURCE)
+    set(ABSL_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/abseil-cpp-20220623.1.tar.gz")
+    set(C_ARES_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/c-ares-1.18.1.tar.gz")
+    set(PROTOBUF_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/protobuf-cpp-3.21.8.tar.gz")
+    set(RE2_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/re2-2022-06-01.tar.gz")
+    set(GRPC_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/grpc-1.51.0.tar.gz")
+else ()
+    set(ABSL_SRC_URL "https://github.com/abseil/abseil-cpp/archive/refs/tags/20220623.1.tar.gz")
+    set(C_ARES_SRC_URL "https://github.com/c-ares/c-ares/releases/download/cares-1_18_1/c-ares-1.18.1.tar.gz")
+    set(PROTOBUF_SRC_URL "https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protobuf-cpp-3.21.8.tar.gz")
+    set(RE2_SRC_URL "https://github.com/google/re2/archive/refs/tags/2022-06-01.tar.gz")
+    set(GRPC_SRC_URL "https://github.com/grpc/grpc/archive/refs/tags/v1.51.0.tar.gz")
+endif ()
+
 set(ABSL_PROPAGATE_CXX_STD ON)
 set(ABSL_ENABLE_INSTALL ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 FetchContent_Declare(absl
         OVERRIDE_FIND_PACKAGE
 
-        URL https://github.com/abseil/abseil-cpp/archive/refs/tags/20220623.1.tar.gz
+        URL ${ABSL_SRC_URL}
         URL_HASH SHA256=91ac87d30cc6d79f9ab974c51874a704de9c2647c40f6932597329a282217ba8
         INACTIVITY_TIMEOUT 5
         )
@@ -19,7 +33,7 @@ set(CARES_STATIC ON)
 FetchContent_Declare(c-ares
         OVERRIDE_FIND_PACKAGE
 
-        URL https://github.com/c-ares/c-ares/releases/download/cares-1_18_1/c-ares-1.18.1.tar.gz
+        URL ${C_ARES_SRC_URL}
         URL_HASH SHA256=1a7d52a8a84a9fbffb1be9133c0f6e17217d91ea5a6fa61f6b4729cda78ebbcf
         INACTIVITY_TIMEOUT 5
         )
@@ -34,7 +48,7 @@ set(protobuf_USE_EXTERNAL_GTEST ON)
 FetchContent_Declare(protobuf
         OVERRIDE_FIND_PACKAGE
 
-        URL https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protobuf-cpp-3.21.8.tar.gz
+        URL ${PROTOBUF_SRC_URL}
         URL_HASH SHA256=f6251f2d00aad41b34c1dfa3d752713cb1bb1b7020108168a4deaa206ba8ed42
         INACTIVITY_TIMEOUT 5
         )
@@ -46,7 +60,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 FetchContent_Declare(re2
         OVERRIDE_FIND_PACKAGE
 
-        URL https://github.com/google/re2/archive/refs/tags/2022-06-01.tar.gz
+        URL ${RE2_SRC_URL}
         URL_HASH SHA256=f89c61410a072e5cbcf8c27e3a778da7d6fd2f2b5b1445cd4f4508bee946ab0f
         INACTIVITY_TIMEOUT 5
         )
@@ -84,7 +98,7 @@ set(gRPC_SSL_PROVIDER package CACHE STRING "" FORCE)
 FetchContent_Declare(grpc
         OVERRIDE_FIND_PACKAGE
 
-        URL https://github.com/grpc/grpc/archive/refs/tags/v1.51.0.tar.gz
+        URL ${GRPC_SRC_URL}
         URL_HASH SHA256=7f42363711eb483a0501239fd5522467b31d8fe98d70d7867c6ca7b52440d828
         INACTIVITY_TIMEOUT 5
         )
