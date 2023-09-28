@@ -209,11 +209,14 @@ struct TaskInCtld {
   uint32_t node_num{0};
   uint32_t ntasks_per_node{0};
   double cpus_per_task{0.0};
+  std::vector<crane::grpc::Dependency> dependencies;
+  std::vector<uint32_t> dependent_by_jobs;
 
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
 
   bool requeue_if_failed{false};
+  bool held{false};
 
   std::string cmd_line;
   std::string env;
@@ -391,7 +394,10 @@ struct TaskInCtld {
     node_num = val.node_num();
     ntasks_per_node = val.ntasks_per_node();
     cpus_per_task = val.cpus_per_task();
-
+    for (const crane::grpc::Dependency& dep : val.dependencies()) {
+      dependencies.push_back(dep);
+    }
+    persisted_part.mutable_dependencies()->CopyFrom(val.dependencies());
     uid = val.uid();
     password_entry = std::make_unique<PasswordEntry>(uid);
     account = val.account();

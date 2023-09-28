@@ -46,7 +46,10 @@ class BasicPriority : public IPrioritySorter {
       const OrderedTaskMap& pending_task_map,
       const UnorderedTaskMap& running_task_map) override {
     std::vector<task_id_t> task_id_vec;
-    for (const auto& pair : pending_task_map) task_id_vec.push_back(pair.first);
+    for (const auto& pair : pending_task_map) {
+      if (!pair.second->held && pair.second->dependencies.empty())
+        task_id_vec.push_back(pair.first);
+    }
     return task_id_vec;
   }
 };
@@ -215,11 +218,13 @@ class TaskScheduler {
   CraneErr SubmitTask(std::unique_ptr<TaskInCtld> task, uint32_t* task_id);
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, int64_t secs);
+  CraneErr HoldReleaseJob(uint32_t task_id, bool hold);
 
   void TaskStatusChange(uint32_t task_id, const CranedId& craned_index,
                         crane::grpc::TaskStatus new_status, uint32_t exit_code,
                         std::optional<std::string>&& reason) {
     // The order of LockGuards matters.
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
     LockGuard running_guard(&m_running_task_map_mtx_);
     LockGuard indexes_guard(&m_task_indexes_mtx_);
     TaskStatusChangeNoLock_(task_id, craned_index, new_status, exit_code);

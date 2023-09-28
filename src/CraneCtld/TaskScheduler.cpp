@@ -654,6 +654,17 @@ CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
 
   *task_id = task->TaskId();
 
+  for (auto dependency_task : task->dependencies) {
+    auto pd_iter = m_pending_task_map_.find(dependency_task.task_id());
+    if (pd_iter != m_pending_task_map_.end()) {
+      pd_iter->second->dependent_by_jobs.push_back(task->TaskId());
+    }
+    auto rn_iter = m_running_task_map_.find(dependency_task.task_id());
+    if (rn_iter != m_running_task_map_.end()) {
+      rn_iter->second->dependent_by_jobs.push_back(task->TaskId());
+    }
+  }
+
   m_task_indexes_mtx_.Lock();
   m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_task_indexes_mtx_.Unlock();
@@ -706,6 +717,24 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
 
   return CraneErr::kOk;
 }
+CraneErr TaskScheduler::HoldReleaseJob(uint32_t task_id, bool hold) {
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+
+  auto pd_iter = m_pending_task_map_.find(task_id);
+  if (pd_iter != m_pending_task_map_.end()) {
+    pd_iter->second->held = hold;
+    crane::grpc::TaskToCtld* task_to_ctld =
+        pd_iter->second->MutableTaskToCtld();
+    task_to_ctld->set_held(hold);
+    g_embedded_db_client->UpdateTaskToCtld(0, pd_iter->second->TaskDbId(),
+                                           *task_to_ctld);
+    return CraneErr::kOk;
+  } else {
+    CRANE_ERROR("Task #{} was not found in pending queue", task_id);
+    return CraneErr::kNonExistent;
+  }
+  return CraneErr::kOk;
+}
 
 void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
                                             const CranedId& craned_index,
@@ -733,8 +762,9 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
       meta.has_been_cancelled_on_front_end = true;
       meta.cb_task_cancel(task->TaskId());
       task->SetStatus(new_status);
-    } else
+    } else {
       task->SetStatus(crane::grpc::Completed);
+    }
 
     meta.cb_task_completed(task->TaskId());
   } else {
@@ -745,6 +775,34 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
     } else {
       task->SetStatus(crane::grpc::Failed);
     }
+  }
+
+  for (auto dependent_by_task : task->dependent_by_jobs) {
+    auto dep_by_iter = m_pending_task_map_.find(dependent_by_task);
+    auto& dependencies = dep_by_iter->second->dependencies;
+
+    // Iterate through and either modify or mark for deletion
+    std::vector<crane::grpc::Dependency> toKeep;
+    for (const auto& dependent_task : dependencies) {
+      if (dependent_task.task_id() == task->TaskId()) {
+        if ((task->Status() == crane::grpc::TaskStatus::Completed &&
+             dependent_task.condition() ==
+                 crane::grpc::DependencyCondition::AFTER_NOTOK) ||
+            (task->Status() != crane::grpc::TaskStatus::Completed &&
+             dependent_task.condition() ==
+                 crane::grpc::DependencyCondition::AFTER_OK)) {
+          crane::grpc::Dependency modified_dependency = dependent_task;
+          modified_dependency.set_task_status(task->Status());
+          toKeep.push_back(modified_dependency);
+        }
+        // Otherwise, we don't keep it, thus effectively removing it
+      } else {
+        toKeep.push_back(dependent_task);  // Keep all the rest
+      }
+    }
+
+    // Replace the original dependencies with the modified list
+    dependencies.swap(toKeep);
   }
 
   task->SetExitCode(exit_code);
@@ -1038,6 +1096,11 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_cwd(task.TaskToCtld().cwd());
     task_it->set_username(task.Username());
     task_it->set_qos(task.qos);
+    task_it->set_held(task.held);
+    auto dependencies = task_it->mutable_dependencies();
+    for (const auto& dependency : task.dependencies) {
+      dependencies->Add()->CopyFrom(dependency);
+    }
 
     task_it->set_alloc_cpu(task.resources.allocatable_resource.cpu_count *
                            task.node_num);
@@ -1045,8 +1108,16 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_priority(task.schedule_priority);
 
     task_it->set_status(task.PersistedPart().status());
-    task_it->set_craned_list(
-        util::HostNameListToStr(task.PersistedPart().craned_ids()));
+    // nodelist
+
+    if (task.held) {
+      task_it->set_craned_list("Held");
+    } else if (!task.dependencies.empty()) {
+      task_it->template set_craned_list("DependencyNeverSatisfied");
+    } else {
+      task_it->set_craned_list(
+          util::HostNameListToStr(task.PersistedPart().craned_ids()));
+    }
   };
 
   auto task_rng_filter_time = [&](auto& it) {
@@ -1962,6 +2033,7 @@ void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id,
   CRANE_TRACE("Terminate tasks on craned {}", craned_id);
 
   // The order of LockGuards matters.
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
@@ -1990,6 +2062,13 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
 
   std::vector<std::pair<task_id_t, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
+    if (task->held) {
+      CRANE_INFO("Task {} is held.", task_id);
+      continue;
+    } else if (!task->dependencies.empty()) {
+      CRANE_INFO("Dependency tasks is not empty.");
+      continue;
+    }
     double priority = CalculatePriority_(task.get());
     task_priority_vec.emplace_back(task->TaskId(), priority);
   }

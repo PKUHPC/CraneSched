@@ -134,6 +134,23 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
           "The compute node failed to change the time limit of task#{}.",
           request->task_id()));
     }
+  } else if (request->attribute() ==
+             TargetAttributes::ModifyTaskRequest_TargetAttributes_Hold) {
+    if (request->manual_hold()) {
+      err = g_task_scheduler->HoldReleaseJob(request->task_id(),
+                                             request->manual_hold());
+      CRANE_INFO("hold job #{} .", request->task_id());
+    } else if (request->release_job()) {
+      err = g_task_scheduler->HoldReleaseJob(request->task_id(), false);
+      CRANE_INFO("release job #{} .", request->task_id());
+    }
+    if (err == CraneErr::kOk) {
+      response->set_ok(true);
+    } else if (err == CraneErr::kNonExistent) {
+      response->set_ok(false);
+      response->set_reason(fmt::format(
+          "Task #{} was not found in pending queue", request->task_id()));
+    }
   } else {
     response->set_ok(false);
     response->set_reason(fmt::format("Invalid request parameters."));
