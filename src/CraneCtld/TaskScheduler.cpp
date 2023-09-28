@@ -357,6 +357,19 @@ bool TaskScheduler::Init() {
   // Start schedule thread first.
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
 
+  m_uv_loop_thread_ = std::thread([this]() {
+    g_uvw_loop = uvw::loop::get_default();
+    m_timer_handle_ = g_uvw_loop->resource<uvw::timer_handle>();
+    m_async_handle_ = g_uvw_loop->resource<uvw::async_handle>();
+
+    m_timer_handle_->on<uvw::timer_event>(
+        [this](const auto&, auto&) { CancelTriggerCallback_(); });
+    m_async_handle_->on<uvw::async_event>(
+        [this](const auto&, auto&) { AsyncTriggerCallback_(); });
+
+    g_uvw_loop->run();
+  });
+
   return true;
 }
 
@@ -761,8 +774,14 @@ CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
     need_to_be_terminated = true;
 
   if (need_to_be_terminated) {
-    auto stub = g_craned_keeper->GetCranedStub(task->executing_craned_id);
-    return stub->TerminateTask(task_id);
+    LockGuard cancel_guard(&m_cancel_task_queue_mtx_);
+    m_cancel_task_queue_.insert({task->executing_craned_id, task_id});
+
+    // Check asynchronous trigger conditions
+    if (m_cancel_task_queue_.size() == 1 ||
+        m_cancel_task_queue_.size() >= kCancelTaskBatchNum) {
+      m_async_handle_->send();
+    }
   }
 
   return CraneErr::kOk;
@@ -773,6 +792,15 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   crane::grpc::CancelTaskReply reply;
 
   uint32_t operator_uid = request.operator_uid();
+
+  // When an ordinary user tries to cancel jobs, they are automatically filtered
+  // to their own jobs.
+  std::string filter_uname = request.filter_username();
+  if (filter_uname.empty() &&
+      !g_account_manager->HasPermissionToAccount(operator_uid, "").ok) {
+    PasswordEntry entry(operator_uid);
+    filter_uname = entry.Username();
+  }
 
   auto rng_filter_state = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
@@ -800,16 +828,24 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
   auto rng_filter_user_name = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
-    return request.filter_username().empty() ||
-           task->Username() == request.filter_username();
+    return filter_uname.empty() || task->Username() == filter_uname;
   };
 
   std::unordered_set<uint32_t> filter_task_ids_set(
       request.filter_task_ids().begin(), request.filter_task_ids().end());
   auto rng_filer_task_ids = [&](auto& it) {
-    std::unique_ptr<TaskInCtld>& task = it.second;
-    return request.filter_task_ids().empty() ||
-           filter_task_ids_set.contains(task->TaskId());
+    if (request.filter_task_ids().empty())
+      return true;
+    else {
+      std::unique_ptr<TaskInCtld>& task = it.second;
+      if (auto iter = filter_task_ids_set.find(task->TaskId()) !=
+                      filter_task_ids_set.end()) {
+        filter_task_ids_set.erase(iter);
+        return true;
+      } else {
+        return false;
+      }
+    }
   };
 
   std::unordered_set<std::string> filter_nodes_set(
@@ -837,8 +873,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
     auto& task = task_it->second;
 
-    if (!g_account_manager
-             ->HasPermissionToUser(operator_uid, task->Username(), nullptr)
+    if (!g_account_manager->HasPermissionToUser(operator_uid, task->Username())
              .ok) {
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
@@ -861,8 +896,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
     CRANE_TRACE("Cancelling running task #{}", task_id);
 
-    if (!g_account_manager
-             ->HasPermissionToUser(operator_uid, task->Username(), nullptr)
+    if (!g_account_manager->HasPermissionToUser(operator_uid, task->Username())
              .ok) {
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
@@ -910,7 +944,61 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   auto running_task_rng = m_running_task_map_ | joined_filters;
   ranges::for_each(running_task_rng, fn_cancel_running_task);
 
+  for (const auto& id : filter_task_ids_set) {
+    reply.add_not_cancelled_tasks(id);
+    reply.add_not_cancelled_reasons("Not Found");
+  }
+
   return reply;
+}
+
+void TaskScheduler::CancelTriggerCallback_() {
+  {
+    LockGuard cancel_guard(&m_cancel_task_queue_mtx_);
+
+    CranedId pre_key =
+        m_cancel_task_queue_.empty() ? "" : m_cancel_task_queue_.begin()->first;
+    std::set<task_id_t> task_set;
+    for (const auto& [k, v] : m_cancel_task_queue_) {
+      if (k == pre_key) {
+        task_set.insert(v);
+      } else {
+        // Must use value passing to ensure task_set is thread safe
+        g_thread_pool->push_task([pre_key, task_set]() {
+          auto stub = g_craned_keeper->GetCranedStub(pre_key);
+          stub->TerminateTask(task_set);
+        });
+        task_set.clear();
+        task_set.insert(v);
+      }
+
+      pre_key = k;
+    }
+    // wind up
+    g_thread_pool->push_task([pre_key, task_set]() {
+      auto stub = g_craned_keeper->GetCranedStub(pre_key);
+      stub->TerminateTask(task_set);
+    });
+
+    m_cancel_task_queue_.clear();
+  }
+
+  // stop timer
+  if (m_timer_handle_->active()) m_timer_handle_->stop();
+}
+
+void TaskScheduler::AsyncTriggerCallback_() {
+  m_cancel_task_queue_mtx_.Lock();
+  if (m_cancel_task_queue_.size() == 1) {
+    m_cancel_task_queue_mtx_.Unlock();
+    if (!m_timer_handle_->active()) {
+      m_timer_handle_->start(uvw::timer_handle::time{kCancelTaskTimeoutMs},
+                             uvw::timer_handle::time{0});
+    }
+  } else if (m_cancel_task_queue_.size() == kCancelTaskBatchNum) {
+    m_cancel_task_queue_mtx_.Unlock();
+    CancelTriggerCallback_();
+  }
 }
 
 void TaskScheduler::QueryTasksInRam(

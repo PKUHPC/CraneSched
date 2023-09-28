@@ -112,7 +112,7 @@ CraneErr CranedStub::ExecuteTasks(
   return CraneErr::kOk;
 }
 
-CraneErr CranedStub::TerminateTask(uint32_t task_id) {
+CraneErr CranedStub::TerminateTask(const std::set<task_id_t> &task_ids) {
   using crane::grpc::TerminateTaskReply;
   using crane::grpc::TerminateTaskRequest;
 
@@ -121,7 +121,7 @@ CraneErr CranedStub::TerminateTask(uint32_t task_id) {
   TerminateTaskRequest request;
   TerminateTaskReply reply;
 
-  request.set_task_id(task_id);
+  for (const auto &id : task_ids) request.add_task_id(id);
 
   status = m_stub_->TerminateTask(&context, request, &reply);
   if (!status.ok()) {
@@ -131,10 +131,7 @@ CraneErr CranedStub::TerminateTask(uint32_t task_id) {
     return CraneErr::kRpcFailure;
   }
 
-  if (reply.ok())
-    return CraneErr::kOk;
-  else
-    return CraneErr::kGenericFailure;
+  return CraneErr::kOk;
 }
 
 CraneErr CranedStub::TerminateOrphanedTask(task_id_t task_id) {

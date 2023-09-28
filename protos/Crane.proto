@@ -174,7 +174,7 @@ message ReleaseCgroupForTaskRequest{
 message ReleaseCgroupForTaskReply{}
 
 message TerminateTaskRequest {
-  uint32 task_id = 1;
+  repeated uint32 task_id = 1;
 }
 
 message TerminateTaskReply {

@@ -32,6 +32,7 @@ target_link_libraries(cranectld PRIVATE
 
         event_core
         event_pthreads
+        uvw::uvw-static
 
         cxxopts
         Threads::Threads

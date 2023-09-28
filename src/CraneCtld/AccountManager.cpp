@@ -829,6 +829,13 @@ AccountManager::Result AccountManager::FindUserLevelAccountsOfUid(
   return Result{true};
 }
 
+/**
+ * @param uid
+ * @param account(when the parameter account is empty, this function can be used
+ * as a permission query function)
+ * @param level_of_uid
+ * @return
+ */
 AccountManager::Result AccountManager::HasPermissionToAccount(
     uint32_t uid, const std::string& account, User::AdminLevel* level_of_uid) {
   PasswordEntry entry(uid);

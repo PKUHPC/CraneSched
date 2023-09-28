@@ -455,7 +455,7 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
   AccountManager::Result judge_res = g_account_manager->HasPermissionToAccount(
-      request->uid(), request->account().parent_account(), nullptr);
+      request->uid(), request->account().parent_account());
 
   if (!judge_res.ok) {
     response->set_ok(false);
@@ -552,7 +552,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
     grpc::ServerContext *context, const crane::grpc::AddQosRequest *request,
     crane::grpc::AddQosReply *response) {
   AccountManager::Result judge_res =
-      g_account_manager->HasPermissionToAccount(request->uid(), "", nullptr);
+      g_account_manager->HasPermissionToAccount(request->uid(), "");
 
   if (!judge_res.ok) {
     response->set_ok(false);
@@ -591,8 +591,8 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
 
   switch (request->entity_type()) {
     case crane::grpc::Account:
-      judge_res = g_account_manager->HasPermissionToAccount(
-          request->uid(), request->name(), nullptr);
+      judge_res = g_account_manager->HasPermissionToAccount(request->uid(),
+                                                            request->name());
 
       if (!judge_res.ok) {
         response->set_ok(false);
@@ -653,8 +653,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
           request->force());
       break;
     case crane::grpc::Qos:
-      judge_res = g_account_manager->HasPermissionToAccount(request->uid(), "",
-                                                            nullptr);
+      judge_res = g_account_manager->HasPermissionToAccount(request->uid(), "");
 
       if (!judge_res.ok) {
         response->set_ok(false);
@@ -750,7 +749,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
 
         AccountManager::Result judge_res =
             g_account_manager->HasPermissionToAccount(request->uid(),
-                                                      request->name(), nullptr);
+                                                      request->name());
 
         if (!judge_res.ok) {
           response->set_ok(false);
@@ -841,7 +840,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         if (user_shared_ptr) {
           AccountManager::Result judge_res =
               g_account_manager->HasPermissionToUser(request->uid(),
-                                                     request->name(), nullptr);
+                                                     request->name());
 
           if (!judge_res.ok) {
             response->set_ok(false);
@@ -1003,7 +1002,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
     case crane::grpc::Account: {
       AccountManager::Result judge_res =
           g_account_manager->HasPermissionToAccount(request->uid(),
-                                                    request->name(), nullptr);
+                                                    request->name());
 
       if (!judge_res.ok) {
         response->set_ok(false);
@@ -1015,8 +1014,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
       break;
     case crane::grpc::Qos: {
       AccountManager::Result judge_res =
-          g_account_manager->HasPermissionToAccount(request->uid(), "",
-                                                    nullptr);
+          g_account_manager->HasPermissionToAccount(request->uid(), "");
 
       if (!judge_res.ok) {
         response->set_ok(false);
@@ -1048,7 +1046,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
   switch (request->entity_type()) {
     case crane::grpc::Account:
       res = g_account_manager->HasPermissionToAccount(request->uid(),
-                                                      request->name(), nullptr);
+                                                      request->name());
 
       if (!res.ok) {
         response->set_ok(false);
@@ -1061,7 +1059,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
       break;
     case crane::grpc::User:
       res = g_account_manager->HasPermissionToUser(request->uid(),
-                                                   request->name(), nullptr);
+                                                   request->name());
 
       if (!res.ok) {
         response->set_ok(false);

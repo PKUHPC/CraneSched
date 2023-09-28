@@ -358,7 +358,7 @@ grpc::Status CranedServiceImpl::TerminateTask(
     grpc::ServerContext *context,
     const crane::grpc::TerminateTaskRequest *request,
     crane::grpc::TerminateTaskReply *response) {
-  g_task_mgr->TerminateTaskAsync(request->task_id());
+  for (const auto &id : request->task_id()) g_task_mgr->TerminateTaskAsync(id);
   response->set_ok(true);
 
   return Status::OK;
