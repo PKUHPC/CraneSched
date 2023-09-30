@@ -44,32 +44,48 @@ std::string ReadableMemory(uint64_t memory_bytes) {
 
 bool ParseNodeList(const std::string &node_str,
                    std::list<std::string> *nodelist) {
-  static const LazyRE2 brackets_regex(R"(.*\[(.*)\])");
+  static const LazyRE2 brackets_regex = {R"(.*\[(.*)\])"};
   if (!RE2::PartialMatch(node_str, *brackets_regex)) {
     return false;
   }
 
-  std::vector<std::string> unit_str_list = absl::StrSplit(node_str, ']');
-  std::string end_str = unit_str_list[unit_str_list.size() - 1];
+  std::vector<std::string_view> unit_str_list = absl::StrSplit(node_str, ']');
+  std::string_view end_str = unit_str_list[unit_str_list.size() - 1];
   unit_str_list.pop_back();
   std::list<std::string> res_list{""};
-  static const LazyRE2 num_regex(R"(\d+)"), scope_regex(R"(\d+-\d+)");
+  static const LazyRE2 num_regex = {R"(\d+)"};
+  static const LazyRE2 scope_regex = {R"(\d+-\d+)"};
 
   for (const auto &str : unit_str_list) {
-    std::vector<std::string> node_num =
+    std::vector<std::string_view> node_num =
         absl::StrSplit(str, absl::ByAnyChar("[,"));
     std::list<std::string> unit_list;
-    std::string head_str = node_num.front();
+    std::string_view head_str = node_num.front();
     size_t len = node_num.size();
 
     for (size_t i = 1; i < len; i++) {
       if (RE2::FullMatch(node_num[i], *num_regex)) {
         unit_list.emplace_back(fmt::format("{}{}", head_str, node_num[i]));
       } else if (RE2::FullMatch(node_num[i], *scope_regex)) {
-        std::vector<std::string> loc_index = absl::StrSplit(node_num[i], '-');
+        std::vector<std::string_view> loc_index =
+            absl::StrSplit(node_num[i], '-');
 
-        size_t l = loc_index[0].length(), end = std::stoi(loc_index[1]);
-        for (size_t j = std::stoi(loc_index[0]); j <= end; j++) {
+        size_t l = loc_index[0].length();
+
+        std::from_chars_result convert_result;
+        size_t start;
+        convert_result =
+            std::from_chars(loc_index[0].data(),
+                            loc_index[0].data() + loc_index[0].size(), start);
+        if (convert_result.ec != std::errc()) return false;
+
+        size_t end;
+        convert_result =
+            std::from_chars(loc_index[1].data(),
+                            loc_index[1].data() + loc_index[1].size(), end);
+        if (convert_result.ec != std::errc()) return false;
+
+        for (size_t j = start; j <= end; j++) {
           std::string s_num = fmt::format("{:0>{}}", std::to_string(j), l);
           unit_list.emplace_back(fmt::format("{}{}", head_str, s_num));
         }
@@ -143,7 +159,7 @@ bool ParseHostList(const std::string &host_str,
     return false;
   }
 
-  static const LazyRE2 regex(R"(.*\[(.*)\](\..*)*$)");
+  static const LazyRE2 regex = {R"(.*\[(.*)\](\..*)*$)"};
   for (auto &&str : str_list) {
     std::string str_s{absl::StripAsciiWhitespace(str)};
     if (!RE2::FullMatch(str_s, *regex)) {

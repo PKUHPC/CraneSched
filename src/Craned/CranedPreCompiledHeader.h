@@ -21,6 +21,7 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <csignal>
 #include <filesystem>
@@ -34,6 +35,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <ranges>
 #include <regex>
 #include <string>
 #include <string_view>

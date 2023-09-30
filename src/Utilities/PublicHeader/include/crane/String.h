@@ -21,6 +21,7 @@
 #include <re2/re2.h>
 #include <spdlog/fmt/fmt.h>
 
+#include <charconv>
 #include <filesystem>
 #include <fstream>
 #include <list>
