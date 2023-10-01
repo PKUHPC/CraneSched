@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <concepts>
 #include <condition_variable>
@@ -34,6 +35,7 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <ranges>
 #include <source_location>
 #include <string>
 #include <thread>

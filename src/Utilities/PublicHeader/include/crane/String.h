@@ -17,15 +17,15 @@
 #pragma once
 
 #include <absl/strings/ascii.h>
+#include <absl/strings/str_join.h>
+#include <re2/re2.h>
 #include <spdlog/fmt/fmt.h>
 
-#include <boost/algorithm/string.hpp>
+#include <charconv>
 #include <filesystem>
 #include <fstream>
 #include <list>
-#include <queue>
 #include <ranges>
-#include <regex>
 #include <string>
 #include <vector>
 
@@ -57,7 +57,7 @@ std::string HostNameListToStr(T const &host_list)
     std::list<std::string> res_list;
     if (HostNameListToStr_(source_list, &res_list)) {
       res_list.sort();
-      std::string host_name_str{boost::join(res_list, ",")};
+      std::string host_name_str{absl::StrJoin(res_list, ",")};
       // Remove brackets containing single numbers
       // Temporary "[]" can be used to mark that the number has been processed,
       // so "[]" cannot be removed during the processing and can only be deleted

@@ -1378,6 +1378,13 @@ result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
         "Task submission failed. "
         "Reason: The resources of the partition are insufficient.");
     return result::fail("The resources of the partition are insufficient");
+  } else if (err == CraneErr::kInvalidParam) {
+    CRANE_DEBUG(
+        "Task submission failed. "
+        "Reason: The param of task is invalid.");
+    return result::fail("The param of task is invalid.");
+  } else {
+    return result::fail(CraneErrStr(err));
   }
 
   return {task_id};

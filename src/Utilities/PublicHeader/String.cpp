@@ -16,9 +16,8 @@
 
 #include "crane/String.h"
 
+#include <absl/strings/str_split.h>
 #include <absl/strings/strip.h>
-
-#include <queue>
 
 #include "crane/Logger.h"
 
@@ -45,35 +44,48 @@ std::string ReadableMemory(uint64_t memory_bytes) {
 
 bool ParseNodeList(const std::string &node_str,
                    std::list<std::string> *nodelist) {
-  std::regex brackets_regex(R"(.*\[(.*)\])");
-  std::smatch match;
-  if (!std::regex_search(node_str, match, brackets_regex)) {
+  static const LazyRE2 brackets_regex = {R"(.*\[(.*)\])"};
+  if (!RE2::PartialMatch(node_str, *brackets_regex)) {
     return false;
   }
 
-  std::vector<std::string> unit_str_list;
-  boost::split(unit_str_list, node_str, boost::is_any_of("]"));
-  std::string end_str = unit_str_list[unit_str_list.size() - 1];
+  std::vector<std::string_view> unit_str_list = absl::StrSplit(node_str, ']');
+  std::string_view end_str = unit_str_list[unit_str_list.size() - 1];
   unit_str_list.pop_back();
   std::list<std::string> res_list{""};
-  std::regex num_regex(R"(\d+)"), scope_regex(R"(\d+-\d+)");
+  static const LazyRE2 num_regex = {R"(\d+)"};
+  static const LazyRE2 scope_regex = {R"(\d+-\d+)"};
 
   for (const auto &str : unit_str_list) {
-    std::vector<std::string> node_num;
-    boost::split(node_num, str, boost::is_any_of("[,"));
+    std::vector<std::string_view> node_num =
+        absl::StrSplit(str, absl::ByAnyChar("[,"));
     std::list<std::string> unit_list;
-    std::string head_str = node_num.front();
+    std::string_view head_str = node_num.front();
     size_t len = node_num.size();
 
     for (size_t i = 1; i < len; i++) {
-      if (std::regex_match(node_num[i], num_regex)) {
+      if (RE2::FullMatch(node_num[i], *num_regex)) {
         unit_list.emplace_back(fmt::format("{}{}", head_str, node_num[i]));
-      } else if (std::regex_match(node_num[i], scope_regex)) {
-        std::vector<std::string> loc_index;
-        boost::split(loc_index, node_num[i], boost::is_any_of("-"));
+      } else if (RE2::FullMatch(node_num[i], *scope_regex)) {
+        std::vector<std::string_view> loc_index =
+            absl::StrSplit(node_num[i], '-');
 
-        size_t l = loc_index[0].length(), end = std::stoi(loc_index[1]);
-        for (size_t j = std::stoi(loc_index[0]); j <= end; j++) {
+        size_t l = loc_index[0].length();
+
+        std::from_chars_result convert_result;
+        size_t start;
+        convert_result =
+            std::from_chars(loc_index[0].data(),
+                            loc_index[0].data() + loc_index[0].size(), start);
+        if (convert_result.ec != std::errc()) return false;
+
+        size_t end;
+        convert_result =
+            std::from_chars(loc_index[1].data(),
+                            loc_index[1].data() + loc_index[1].size(), end);
+        if (convert_result.ec != std::errc()) return false;
+
+        for (size_t j = start; j <= end; j++) {
           std::string s_num = fmt::format("{:0>{}}", std::to_string(j), l);
           unit_list.emplace_back(fmt::format("{}{}", head_str, s_num));
         }
@@ -109,11 +121,11 @@ bool ParseHostList(const std::string &host_str,
   std::string name_meta;
   std::list<std::string> str_list;
 
-  std::queue<char> char_queue;
+  std::string char_queue;
   for (const auto &c : name_str) {
     if (c == '[') {
       if (char_queue.empty()) {
-        char_queue.push(c);
+        char_queue += c;
       } else {
         CRANE_ERROR("Illegal node name string format: duplicate brackets");
         return false;
@@ -123,32 +135,34 @@ bool ParseHostList(const std::string &host_str,
         CRANE_ERROR("Illegal node name string format: isolated bracket");
         return false;
       } else {
-        while (!char_queue.empty()) {
-          name_meta += char_queue.front();
-          char_queue.pop();
-        }
+        name_meta += char_queue;
         name_meta += c;
+        char_queue.clear();
       }
     } else if (c == ',') {
       if (char_queue.empty()) {
         str_list.emplace_back(name_meta);
         name_meta.clear();
       } else {
-        char_queue.push(c);
+        char_queue += c;
       }
     } else {
       if (char_queue.empty()) {
         name_meta += c;
       } else {
-        char_queue.push(c);
+        char_queue += c;
       }
     }
   }
+  if (!char_queue.empty()) {
+    CRANE_ERROR("Illegal node name string format: isolated bracket");
+    return false;
+  }
 
-  std::regex regex(R"(.*\[(.*)\](\..*)*$)");
+  static const LazyRE2 regex = {R"(.*\[(.*)\](\..*)*$)"};
   for (auto &&str : str_list) {
     std::string str_s{absl::StripAsciiWhitespace(str)};
-    if (!std::regex_match(str_s, regex)) {
+    if (!RE2::FullMatch(str_s, *regex)) {
       host_list->emplace_back(str_s);
     } else {
       if (!ParseNodeList(str_s, host_list)) return false;

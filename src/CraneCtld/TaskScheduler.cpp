@@ -1220,13 +1220,6 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
   std::list<CranedId> craned_indexes_;
 
-  std::unordered_set<std::string> nodelist_set(
-      task->TaskToCtld().nodelist().begin(),
-      task->TaskToCtld().nodelist().end());
-  std::unordered_set<std::string> excludes_set(
-      task->TaskToCtld().excludes().begin(),
-      task->TaskToCtld().excludes().end());
-
   auto task_num_node_id_it = node_selection_info.task_num_node_id_map.begin();
   while (selected_node_cnt < task->node_num &&
          task_num_node_id_it !=
@@ -1250,16 +1243,16 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
             "Skipping this craned.",
             task->TaskId(), craned_index);
       }
-    } else if (!task->TaskToCtld().nodelist().empty() &&
-               !nodelist_set.contains(craned_index)) {
+    } else if (!task->included_nodes.empty() &&
+               !task->included_nodes.contains(craned_index)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
             "Craned {} is not in the nodelist of task #{}. "
             "Skipping this craned.",
             craned_index, task->TaskId());
       }
-    } else if (!task->TaskToCtld().excludes().empty() &&
-               excludes_set.contains(craned_index)) {
+    } else if (!task->excluded_nodes.empty() &&
+               task->excluded_nodes.contains(craned_index)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE("Task #{} excludes craned {}. Skipping this craned.",
                     task->TaskId(), craned_index);
@@ -1801,6 +1794,22 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   task->partition_priority = part_it->second.priority;
 
+  if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
+    std::list<std::string> nodes;
+    bool ok = util::ParseHostList(task->TaskToCtld().nodelist(), &nodes);
+    if (!ok) return CraneErr::kInvalidParam;
+
+    for (auto&& node : nodes) task->included_nodes.emplace(std::move(node));
+  }
+
+  if (!task->TaskToCtld().excludes().empty() && task->excluded_nodes.empty()) {
+    std::list<std::string> nodes;
+    bool ok = util::ParseHostList(task->TaskToCtld().excludes(), &nodes);
+    if (!ok) return CraneErr::kInvalidParam;
+
+    for (auto&& node : nodes) task->excluded_nodes.emplace(std::move(node));
+  }
+
   return CraneErr::kOk;
 }
 
@@ -1824,14 +1833,6 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     return CraneErr::kNoResource;
   }
 
-  std::unordered_set<std::string> excluded_nodes(
-      task->TaskToCtld().excludes().begin(),
-      task->TaskToCtld().excludes().end());
-
-  std::unordered_set<std::string> included_nodes(
-      task->TaskToCtld().nodelist().begin(),
-      task->TaskToCtld().nodelist().end());
-
   std::unordered_set<std::string> avail_nodes;
   {
     auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
@@ -1839,8 +1840,10 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id);
       if (craned_meta.alive && task->resources <= craned_meta.res_total &&
-          (included_nodes.empty() || included_nodes.contains(craned_id)) &&
-          (excluded_nodes.empty() || !excluded_nodes.contains(craned_id)))
+          (task->included_nodes.empty() ||
+           task->included_nodes.contains(craned_id)) &&
+          (task->excluded_nodes.empty() ||
+           !task->excluded_nodes.contains(craned_id)))
         avail_nodes.emplace(craned_meta.static_meta.hostname);
 
       if (avail_nodes.size() >= task->node_num) break;

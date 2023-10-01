@@ -207,6 +207,9 @@ struct TaskInCtld {
   uint32_t ntasks_per_node{0};
   double cpus_per_task{0.0};
 
+  std::unordered_set<std::string> included_nodes;
+  std::unordered_set<std::string> excluded_nodes;
+
   bool requeue_if_failed{false};
 
   std::string cmd_line;
