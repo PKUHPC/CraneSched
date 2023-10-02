@@ -14,18 +14,7 @@ ServerKeyFilePath: /etc/crane/server.key
 CaCertFilePath: /etc/crane/ca.crt
 DomainSuffix: riley.local
 
-# EmbeddedDb settings
-CraneEmbeddedDbBackend: Unqlite  # BerkeleyDB or Unqlite(default)
-CraneCtldDbPath: /tmp/cranectld/embedded.db
-
-# Mongodb settings
-DbUser: admin
-DbPassword: "123456"
-DbHost: localhost
-DbPort: 27017
-DbReplSetName: rs0
-DbName: crane_db
-
+DbConfigPath: /etc/crane/database.yaml
 
 # Craned Options
 
