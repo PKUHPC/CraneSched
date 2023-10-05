@@ -358,16 +358,16 @@ bool TaskScheduler::Init() {
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
 
   m_uv_loop_thread_ = std::thread([this]() {
-    g_uvw_loop = uvw::loop::get_default();
-    m_timer_handle_ = g_uvw_loop->resource<uvw::timer_handle>();
-    m_async_handle_ = g_uvw_loop->resource<uvw::async_handle>();
+    std::shared_ptr<uvw::loop> uvw_loop = uvw::loop::get_default();
+    m_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
+    m_async_handle_ = uvw_loop->resource<uvw::async_handle>();
 
     m_timer_handle_->on<uvw::timer_event>(
         [this](const auto&, auto&) { CancelTriggerCallback_(); });
     m_async_handle_->on<uvw::async_event>(
         [this](const auto&, auto&) { AsyncTriggerCallback_(); });
 
-    g_uvw_loop->run();
+    uvw_loop->run();
   });
 
   return true;
@@ -775,11 +775,16 @@ CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
 
   if (need_to_be_terminated) {
     LockGuard cancel_guard(&m_cancel_task_queue_mtx_);
-    m_cancel_task_queue_.insert({task->executing_craned_id, task_id});
+    m_cancel_task_queue_.emplace(task->executing_craned_id, task_id);
 
     // Check asynchronous trigger conditions
-    if (m_cancel_task_queue_.size() == 1 ||
-        m_cancel_task_queue_.size() >= kCancelTaskBatchNum) {
+    if (m_cancel_queue_state_ == empty && !m_cancel_task_queue_.empty())
+      m_cancel_queue_state_ = populated;
+    else if (m_cancel_queue_state_ == populated &&
+             m_cancel_task_queue_.size() >= kCancelTaskBatchNum)
+      m_cancel_queue_state_ = overflow;
+
+    if (m_cancel_queue_state_ != empty) {
       m_async_handle_->send();
     }
   }
@@ -958,7 +963,7 @@ void TaskScheduler::CancelTriggerCallback_() {
 
     CranedId pre_key =
         m_cancel_task_queue_.empty() ? "" : m_cancel_task_queue_.begin()->first;
-    std::set<task_id_t> task_set;
+    std::unordered_set<task_id_t> task_set;
     for (const auto& [k, v] : m_cancel_task_queue_) {
       if (k == pre_key) {
         task_set.insert(v);
@@ -981,6 +986,7 @@ void TaskScheduler::CancelTriggerCallback_() {
     });
 
     m_cancel_task_queue_.clear();
+    m_cancel_queue_state_ = empty;
   }
 
   // stop timer
@@ -989,15 +995,18 @@ void TaskScheduler::CancelTriggerCallback_() {
 
 void TaskScheduler::AsyncTriggerCallback_() {
   m_cancel_task_queue_mtx_.Lock();
-  if (m_cancel_task_queue_.size() == 1) {
+  if (m_cancel_queue_state_ == populated) {
     m_cancel_task_queue_mtx_.Unlock();
     if (!m_timer_handle_->active()) {
       m_timer_handle_->start(uvw::timer_handle::time{kCancelTaskTimeoutMs},
                              uvw::timer_handle::time{0});
     }
-  } else if (m_cancel_task_queue_.size() == kCancelTaskBatchNum) {
+  } else if (m_cancel_queue_state_ == overflow) {
     m_cancel_task_queue_mtx_.Unlock();
     CancelTriggerCallback_();
+  } else {
+    m_cancel_task_queue_mtx_
+        .Unlock();  // Note that all branches must unlock the mutex
   }
 }
 

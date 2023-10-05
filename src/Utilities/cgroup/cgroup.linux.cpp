@@ -363,7 +363,7 @@ after_migrate:
   //  orig_cgroup = NULL;
   err = cgroup_attach_task_pid(m_cgroup_, pid);
   if (err != 0) {
-    CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}\n", pid,
+    CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}", pid,
                m_cgroup_path_.c_str(), err, cgroup_strerror(err));
   }
 

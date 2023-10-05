@@ -87,7 +87,6 @@
 #include <concurrentqueue/concurrentqueue.h>
 
 // UVW
-#include <memory>
 #include <uvw.hpp>
 
 // result

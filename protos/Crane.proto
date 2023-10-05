@@ -173,11 +173,11 @@ message ReleaseCgroupForTaskRequest{
 
 message ReleaseCgroupForTaskReply{}
 
-message TerminateTaskRequest {
-  repeated uint32 task_id = 1;
+message TerminateTasksRequest {
+  repeated uint32 task_id_list = 1;
 }
 
-message TerminateTaskReply {
+message TerminateTasksReply {
   bool ok = 1;
   string reason = 2;
 }
@@ -636,7 +636,7 @@ service Craned {
    If there are processes in this interactive task, kill all the processes and deallocate resources.
   If the task is a batch task, just kill it.
   */
-  rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
+  rpc TerminateTasks(TerminateTasksRequest) returns (TerminateTasksReply);
   rpc TerminateOrphanedTask(TerminateOrphanedTaskRequest) returns (TerminateOrphanedTaskReply);
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
 

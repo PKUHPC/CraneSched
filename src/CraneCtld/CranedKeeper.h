@@ -44,7 +44,7 @@ class CranedStub {
 
   CraneErr ReleaseCgroupForTask(uint32_t task_id, uid_t uid);
 
-  CraneErr TerminateTask(const std::set<task_id_t> &task_ids);
+  CraneErr TerminateTask(const std::unordered_set<task_id_t> &task_ids);
 
   CraneErr TerminateOrphanedTask(task_id_t task_id);
 

@@ -287,6 +287,11 @@ class TaskScheduler {
 
   std::unordered_multimap<CranedId, task_id_t> m_cancel_task_queue_
       GUARDED_BY(m_cancel_task_queue_mtx_);
+  enum QueueState {
+    empty,
+    populated,
+    overflow
+  } m_cancel_queue_state_ = empty GUARDED_BY(m_cancel_task_queue_mtx_);
   Mutex m_cancel_task_queue_mtx_;
 
   // Task Indexes
@@ -304,7 +309,6 @@ class TaskScheduler {
   std::shared_ptr<uvw::timer_handle> m_timer_handle_;
   std::shared_ptr<uvw::async_handle> m_async_handle_;
 
-  std::shared_ptr<uvw::loop> g_uvw_loop;
   std::thread m_uv_loop_thread_;
 };
 
