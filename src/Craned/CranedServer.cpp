@@ -354,11 +354,12 @@ grpc::Status CranedServiceImpl::ExecuteTask(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::TerminateTask(
+grpc::Status CranedServiceImpl::TerminateTasks(
     grpc::ServerContext *context,
-    const crane::grpc::TerminateTaskRequest *request,
-    crane::grpc::TerminateTaskReply *response) {
-  for (const auto &id : request->task_id()) g_task_mgr->TerminateTaskAsync(id);
+    const crane::grpc::TerminateTasksRequest *request,
+    crane::grpc::TerminateTasksReply *response) {
+  for (const auto &id : request->task_id_list())
+    g_task_mgr->TerminateTaskAsync(id);
   response->set_ok(true);
 
   return Status::OK;

@@ -285,13 +285,12 @@ class TaskScheduler {
       m_persisted_task_map_ GUARDED_BY(m_persisted_task_map_mtx_);
   Mutex m_persisted_task_map_mtx_;
 
+  enum CancelTaskQueueState { empty, populated, overflow };
+  CancelTaskQueueState m_cancel_queue_state_
+      GUARDED_BY(m_cancel_task_queue_mtx_){empty};
+
   std::unordered_multimap<CranedId, task_id_t> m_cancel_task_queue_
       GUARDED_BY(m_cancel_task_queue_mtx_);
-  enum QueueState {
-    empty,
-    populated,
-    overflow
-  } m_cancel_queue_state_ = empty GUARDED_BY(m_cancel_task_queue_mtx_);
   Mutex m_cancel_task_queue_mtx_;
 
   // Task Indexes
