@@ -30,7 +30,7 @@ inline const char* kDefaultDbPath = "/tmp/cranectld/embedded.db";
 
 constexpr uint64_t kTaskScheduleIntervalMs = 1000;
 constexpr uint16_t kCompletionQueueDelaySeconds = 15;
-constexpr uint32_t kCancelTaskTimeoutMs = 1000;
+constexpr uint32_t kCancelTaskTimeoutMs = 500;
 constexpr uint64_t kCancelTaskBatchNum = 1000;
 
 struct Config {

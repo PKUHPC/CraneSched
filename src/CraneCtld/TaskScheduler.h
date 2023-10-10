@@ -244,8 +244,6 @@ class TaskScheduler {
   }
 
  private:
-  void ScheduleThread_();
-
   void TaskStatusChangeNoLock_(uint32_t task_id, const CranedId& craned_index,
                                crane::grpc::TaskStatus new_status,
                                uint32_t exit_code);
@@ -262,10 +260,6 @@ class TaskScheduler {
   static void TransferTaskToMongodb_(TaskInCtld* task);
 
   CraneErr TerminateRunningTaskNoLock_(TaskInCtld* task);
-
-  void CancelTriggerCallback_();
-
-  void AsyncTriggerCallback_();
 
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 
@@ -285,14 +279,6 @@ class TaskScheduler {
       m_persisted_task_map_ GUARDED_BY(m_persisted_task_map_mtx_);
   Mutex m_persisted_task_map_mtx_;
 
-  enum CancelTaskQueueState { empty, populated, overflow };
-  CancelTaskQueueState m_cancel_queue_state_
-      GUARDED_BY(m_cancel_task_queue_mtx_){empty};
-
-  std::unordered_multimap<CranedId, task_id_t> m_cancel_task_queue_
-      GUARDED_BY(m_cancel_task_queue_mtx_);
-  Mutex m_cancel_task_queue_mtx_;
-
   // Task Indexes
   HashMap<CranedId, HashSet<uint32_t /* Task ID*/>> m_node_to_tasks_map_
       GUARDED_BY(m_task_indexes_mtx_);
@@ -302,13 +288,25 @@ class TaskScheduler {
 
   std::unique_ptr<IPrioritySorter> m_priority_sorter_;
 
-  std::thread m_schedule_thread_;
+  // If this variable is set to true, all threads must stop in a certain time.
   std::atomic_bool m_thread_stop_{};
 
-  std::shared_ptr<uvw::timer_handle> m_timer_handle_;
-  std::shared_ptr<uvw::async_handle> m_async_handle_;
+  std::thread m_schedule_thread_;
+  void ScheduleThread_();
 
-  std::thread m_uv_loop_thread_;
+  std::thread m_task_cancel_thread_;
+  void CancelTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
+  // Working as channels in golang.
+  std::shared_ptr<uvw::timer_handle> m_cancel_task_timer_handle_;
+  void CancelTaskTimerCb_();
+
+  std::shared_ptr<uvw::async_handle> m_cancel_task_async_handle_;
+  ConcurrentQueue<std::pair<task_id_t, CranedId>> m_cancel_task_queue_;
+  void CancelTaskAsyncCb_();
+
+  std::shared_ptr<uvw::async_handle> m_clean_cancel_queue_handle_;
+  void CleanCancelQueueCb_();
 };
 
 }  // namespace Ctld

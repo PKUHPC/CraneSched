@@ -112,8 +112,7 @@ CraneErr CranedStub::ExecuteTasks(
   return CraneErr::kOk;
 }
 
-CraneErr CranedStub::TerminateTask(
-    const std::unordered_set<task_id_t> &task_ids) {
+CraneErr CranedStub::TerminateTasks(const std::vector<task_id_t> &task_ids) {
   using crane::grpc::TerminateTasksReply;
   using crane::grpc::TerminateTasksRequest;
 

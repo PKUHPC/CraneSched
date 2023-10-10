@@ -354,21 +354,32 @@ bool TaskScheduler::Init() {
     }
   }
 
+  std::shared_ptr<uvw::loop> uvw_loop = uvw::loop::get_default();
+  m_cancel_task_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
+  m_cancel_task_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        CancelTaskTimerCb_();
+      });
+  m_cancel_task_timer_handle_->start(std::chrono::milliseconds(1000),
+                                     std::chrono::milliseconds(500));
+
+  m_cancel_task_async_handle_ = uvw_loop->resource<uvw::async_handle>();
+  m_cancel_task_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CancelTaskAsyncCb_();
+      });
+
+  m_clean_cancel_queue_handle_ = uvw_loop->resource<uvw::async_handle>();
+  m_clean_cancel_queue_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanCancelQueueCb_();
+      });
+
+  m_task_cancel_thread_ = std::thread(
+      [this, loop = std::move(uvw_loop)]() { CancelTaskThread_(loop); });
+
   // Start schedule thread first.
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
-
-  m_uv_loop_thread_ = std::thread([this]() {
-    std::shared_ptr<uvw::loop> uvw_loop = uvw::loop::get_default();
-    m_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
-    m_async_handle_ = uvw_loop->resource<uvw::async_handle>();
-
-    m_timer_handle_->on<uvw::timer_event>(
-        [this](const auto&, auto&) { CancelTriggerCallback_(); });
-    m_async_handle_->on<uvw::async_event>(
-        [this](const auto&, auto&) { AsyncTriggerCallback_(); });
-
-    uvw_loop->run();
-  });
 
   return true;
 }
@@ -398,6 +409,22 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
 
   m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_running_task_map_.emplace(task->TaskId(), std::move(task));
+}
+
+void TaskScheduler::CancelTaskThread_(
+    const std::shared_ptr<uvw::loop>& uvw_loop) {
+  std::shared_ptr<uvw::idle_handle> idle_handle =
+      uvw_loop->resource<uvw::idle_handle>();
+  idle_handle->on<uvw::idle_event>(
+      [this](const uvw::idle_event&, uvw::idle_handle& h) {
+        if (m_thread_stop_) h.parent().stop();
+      });
+
+  if (idle_handle->start() != 0) {
+    CRANE_ERROR("Failed to start the idle event in cancel loop.");
+  }
+
+  uvw_loop->run();
 }
 
 void TaskScheduler::ScheduleThread_() {
@@ -774,19 +801,8 @@ CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
     need_to_be_terminated = true;
 
   if (need_to_be_terminated) {
-    LockGuard cancel_guard(&m_cancel_task_queue_mtx_);
-    m_cancel_task_queue_.emplace(task->executing_craned_id, task_id);
-
-    // Check asynchronous trigger conditions
-    if (m_cancel_queue_state_ == empty && !m_cancel_task_queue_.empty())
-      m_cancel_queue_state_ = populated;
-    else if (m_cancel_queue_state_ == populated &&
-             m_cancel_task_queue_.size() >= kCancelTaskBatchNum)
-      m_cancel_queue_state_ = overflow;
-
-    if (m_cancel_queue_state_ != empty) {
-      m_async_handle_->send();
-    }
+    m_cancel_task_queue_.enqueue({task_id, task->executing_craned_id});
+    m_cancel_task_async_handle_->send();
   }
 
   return CraneErr::kOk;
@@ -957,56 +973,37 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   return reply;
 }
 
-void TaskScheduler::CancelTriggerCallback_() {
-  {
-    LockGuard cancel_guard(&m_cancel_task_queue_mtx_);
-
-    CranedId pre_key =
-        m_cancel_task_queue_.empty() ? "" : m_cancel_task_queue_.begin()->first;
-    std::unordered_set<task_id_t> task_set;
-    for (const auto& [k, v] : m_cancel_task_queue_) {
-      if (k == pre_key) {
-        task_set.insert(v);
-      } else {
-        // Must use value passing to ensure task_set is thread safe
-        g_thread_pool->push_task([pre_key, task_set]() {
-          auto stub = g_craned_keeper->GetCranedStub(pre_key);
-          stub->TerminateTask(task_set);
-        });
-        task_set.clear();
-        task_set.insert(v);
-      }
-
-      pre_key = k;
-    }
-    // wind up
-    g_thread_pool->push_task([pre_key, task_set]() {
-      auto stub = g_craned_keeper->GetCranedStub(pre_key);
-      stub->TerminateTask(task_set);
-    });
-
-    m_cancel_task_queue_.clear();
-    m_cancel_queue_state_ = empty;
-  }
-
-  // stop timer
-  if (m_timer_handle_->active()) m_timer_handle_->stop();
+void TaskScheduler::CancelTaskTimerCb_() {
+  m_clean_cancel_queue_handle_->send();
 }
 
-void TaskScheduler::AsyncTriggerCallback_() {
-  m_cancel_task_queue_mtx_.Lock();
-  if (m_cancel_queue_state_ == populated) {
-    m_cancel_task_queue_mtx_.Unlock();
-    if (!m_timer_handle_->active()) {
-      m_timer_handle_->start(uvw::timer_handle::time{kCancelTaskTimeoutMs},
-                             uvw::timer_handle::time{0});
-    }
-  } else if (m_cancel_queue_state_ == overflow) {
-    m_cancel_task_queue_mtx_.Unlock();
-    CancelTriggerCallback_();
-  } else {
-    m_cancel_task_queue_mtx_
-        .Unlock();  // Note that all branches must unlock the mutex
+void TaskScheduler::CancelTaskAsyncCb_() {
+  if (m_cancel_task_queue_.size_approx() >= kCancelTaskBatchNum) {
+    m_clean_cancel_queue_handle_->send();
+  }
+}
+
+void TaskScheduler::CleanCancelQueueCb_() {
+  HashMap<CranedId, std::vector<task_id_t>> craned_id_task_ids_map;
+
+  size_t approximate_size = m_cancel_task_queue_.size_approx();
+
+  std::vector<std::pair<task_id_t, CranedId>> tasks_to_cancel;
+  tasks_to_cancel.resize(approximate_size);
+
+  size_t actual_size = m_cancel_task_queue_.try_dequeue_bulk(
+      tasks_to_cancel.begin(), approximate_size);
+
+  for (const auto& [task_id, craned_id] : tasks_to_cancel) {
+    craned_id_task_ids_map[craned_id].emplace_back(task_id);
+  }
+
+  for (auto&& [craned_id, task_ids] : craned_id_task_ids_map) {
+    g_thread_pool->push_task(
+        [id = craned_id, task_ids_to_cancel = std::move(task_ids)]() {
+          auto* stub = g_craned_keeper->GetCranedStub(id);
+          stub->TerminateTasks(task_ids_to_cancel);
+        });
   }
 }
 

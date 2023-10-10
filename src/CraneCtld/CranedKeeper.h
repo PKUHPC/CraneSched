@@ -44,7 +44,7 @@ class CranedStub {
 
   CraneErr ReleaseCgroupForTask(uint32_t task_id, uid_t uid);
 
-  CraneErr TerminateTask(const std::unordered_set<task_id_t> &task_ids);
+  CraneErr TerminateTasks(const std::vector<task_id_t> &task_ids);
 
   CraneErr TerminateOrphanedTask(task_id_t task_id);
 
@@ -52,7 +52,7 @@ class CranedStub {
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
-  bool Invalid() { return m_invalid_; }
+  bool Invalid() const { return m_invalid_; }
 
  private:
   CranedKeeper *m_craned_keeper_;
