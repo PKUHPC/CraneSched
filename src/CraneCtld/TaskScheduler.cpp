@@ -1305,25 +1305,29 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
         running_tasks,
     absl::Time now, const PartitionId& partition_id,
-    const PartitionMeta& partition_metas,
-    const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
+    const CranedMetaContainerInterface::AllPartitionsMetaAtomicMap::MutexValue&
+        partition_meta_ptr,
+    const CranedMetaContainerInterface::CranedMetaInnerMap& craned_meta_map,
     NodeSelectionInfo* node_selection_info) {
   NodeSelectionInfo& node_selection_info_ref = *node_selection_info;
 
-  for (const auto& craned_id : partition_metas.craned_ids) {
-    CranedMeta const& craned_meta = craned_meta_map.at(craned_id);
+  std::unordered_set<CranedId> craned_ids =
+      partition_meta_ptr.get_read_ptr()->craned_ids;
+  for (const auto& craned_id : craned_ids) {
+    auto& craned_meta_ptr = craned_meta_map.at(craned_id);
+    auto craned_meta = craned_meta_ptr.get_read_ptr();
 
     // An offline craned shouldn't be scheduled.
-    if (!craned_meta.alive) continue;
+    if (!craned_meta->alive) continue;
 
     // Sort all running task in this node by ending time.
     std::vector<std::pair<absl::Time, uint32_t>> end_time_task_id_vec;
 
     node_selection_info_ref.task_num_node_id_map.emplace(
-        craned_meta.running_task_resource_map.size(), craned_id);
+        craned_meta->running_task_resource_map.size(), craned_id);
 
     std::vector<std::string> running_task_ids_str;
-    for (const auto& [task_id, res] : craned_meta.running_task_resource_map) {
+    for (const auto& [task_id, res] : craned_meta->running_task_resource_map) {
       const auto& task = running_tasks.at(task_id);
       end_time_task_id_vec.emplace_back(task->StartTime() + task->time_limit,
                                         task_id);
@@ -1360,13 +1364,13 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
 
     // Insert [now, inf) interval and thus guarantee time_avail_res_map is not
     // null.
-    time_avail_res_map[now] = craned_meta.res_avail;
+    time_avail_res_map[now] = craned_meta->res_avail;
 
     if constexpr (kAlgoTraceOutput) {
       CRANE_TRACE("Craned {} initial res_avail now: cpu: {}, mem: {}",
                   craned_id,
-                  craned_meta.res_avail.allocatable_resource.cpu_count,
-                  craned_meta.res_avail.allocatable_resource.memory_bytes);
+                  craned_meta->res_avail.allocatable_resource.cpu_count,
+                  craned_meta->res_avail.allocatable_resource.memory_bytes);
     }
 
     {  // Limit the scope of `iter`
@@ -1391,8 +1395,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
                 "Insert duration [now+{}s, inf) with resource: "
                 "cpu: {}, mem: {}",
                 absl::ToInt64Seconds(end_time - now),
-                craned_meta.res_avail.allocatable_resource.cpu_count,
-                craned_meta.res_avail.allocatable_resource.memory_bytes);
+                craned_meta->res_avail.allocatable_resource.cpu_count,
+                craned_meta->res_avail.allocatable_resource.memory_bytes);
           }
         }
 
@@ -1443,8 +1447,9 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
 
 bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     const NodeSelectionInfo& node_selection_info,
-    const PartitionMeta& partition_metas,
-    const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
+    const CranedMetaContainerInterface::AllPartitionsMetaAtomicMap::MutexValue&
+        partition_meta_ptr,
+    const CranedMetaContainerInterface::CranedMetaInnerMap& craned_meta_map,
     TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
     absl::Time* start_time) {
   uint32_t selected_node_cnt = 0;
@@ -1458,7 +1463,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
          task_num_node_id_it !=
              node_selection_info.task_num_node_id_map.end()) {
     auto craned_index = task_num_node_id_it->second;
-    if (!partition_metas.craned_ids.contains(craned_index)) {
+    if (!partition_meta_ptr.get_read_ptr()->craned_ids.contains(craned_index)) {
       // Todo: Performance issue! We can use cached available node set
       //  for the task when checking task validity in TaskScheduler.
       ++task_num_node_id_it;
@@ -1466,10 +1471,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     }
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_index);
-    auto& craned_meta = craned_meta_map.at(craned_index);
+    auto craned_meta = craned_meta_map.at(craned_index).get_read_ptr();
 
     // If any of the follow `if` is true, skip this node.
-    if (!(task->resources <= craned_meta.res_total)) {
+    if (!(task->resources <= craned_meta->res_total)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
             "Task #{} needs more resource than that of craned {}. "
@@ -1509,7 +1514,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_id);
-    auto& node_meta = craned_meta_map.at(craned_id);
+    //    auto& node_meta = craned_meta_map.at(craned_id);
 
     // Find all valid time segments in this node for this task.
     // The expected start time must exist because all tasks in
@@ -1740,8 +1745,8 @@ void MinLoadFirst::NodeSelect(
         running_tasks,
     absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
     std::list<NodeSelectionResult>* selection_result_list) {
-  auto all_partitions_meta_map = g_meta_container->GetAllPartitionsMetaMapPtr();
   auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
+  auto all_partitions_meta_map = g_meta_container->GetAllPartitionsMetaMapPtr();
 
   std::unordered_map<PartitionId, NodeSelectionInfo> part_id_node_info_map;
 
@@ -1806,9 +1811,9 @@ void MinLoadFirst::NodeSelect(
 
     std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
     for (CranedId const& craned_id : craned_ids) {
-      CranedMeta const& craned_meta = craned_meta_map->at(craned_id);
+      auto craned_meta = craned_meta_map->at(craned_id).get_read_ptr();
       for (PartitionId const& partition_id :
-           craned_meta.static_meta.partition_ids) {
+           craned_meta->static_meta.partition_ids) {
         involved_part_craned[partition_id].emplace_back(craned_id);
       }
     }
@@ -2060,39 +2065,44 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
 CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   // Check whether the selected partition is able to run this task.
-  auto metas_ptr = g_meta_container->GetPartitionMetasPtr(task->partition_id);
+  std::unordered_set<CranedId> craned_ids;
 
-  // Check whether the selected partition is able to run this task.
-  if (!(task->resources <=
-        metas_ptr->partition_global_meta.m_resource_total_)) {
-    CRANE_TRACE(
-        "Resource not enough for task #{}. "
-        "Partition total: cpu {}, mem: {}, mem+sw: {}",
-        task->TaskId(),
-        metas_ptr->partition_global_meta.m_resource_total_.allocatable_resource
-            .cpu_count,
-        util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_total_
-                                 .allocatable_resource.memory_bytes),
-        util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_total_
-                                 .allocatable_resource.memory_sw_bytes));
-    return CraneErr::kNoResource;
+  {
+    auto metas_ptr = g_meta_container->GetPartitionMetasPtr(task->partition_id);
+    // Check whether the selected partition is able to run this task.
+    if (!(task->resources <=
+          metas_ptr->partition_global_meta.m_resource_total_)) {
+      CRANE_TRACE(
+          "Resource not enough for task #{}. "
+          "Partition total: cpu {}, mem: {}, mem+sw: {}",
+          task->TaskId(),
+          metas_ptr->partition_global_meta.m_resource_total_
+              .allocatable_resource.cpu_count,
+          util::ReadableMemory(
+              metas_ptr->partition_global_meta.m_resource_total_
+                  .allocatable_resource.memory_bytes),
+          util::ReadableMemory(
+              metas_ptr->partition_global_meta.m_resource_total_
+                  .allocatable_resource.memory_sw_bytes));
+      return CraneErr::kNoResource;
+    }
+    craned_ids = metas_ptr->craned_ids;
   }
 
   std::unordered_set<std::string> avail_nodes;
-  {
-    auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
 
-    for (const auto& craned_id : metas_ptr->craned_ids) {
-      auto craned_meta = craned_meta_map->at(craned_id);
-      if (craned_meta.alive && task->resources <= craned_meta.res_total &&
-          (task->included_nodes.empty() ||
-           task->included_nodes.contains(craned_id)) &&
-          (task->excluded_nodes.empty() ||
-           !task->excluded_nodes.contains(craned_id)))
-        avail_nodes.emplace(craned_meta.static_meta.hostname);
+  auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
 
-      if (avail_nodes.size() >= task->node_num) break;
-    }
+  for (const auto& craned_id : craned_ids) {
+    auto craned_meta = craned_meta_map->at(craned_id).get_read_ptr();
+    if (craned_meta->alive && task->resources <= craned_meta->res_total &&
+        (task->included_nodes.empty() ||
+         task->included_nodes.contains(craned_id)) &&
+        (task->excluded_nodes.empty() ||
+         !task->excluded_nodes.contains(craned_id)))
+      avail_nodes.emplace(craned_meta->static_meta.hostname);
+
+    if (avail_nodes.size() >= task->node_num) break;
   }
 
   if (task->node_num > avail_nodes.size()) {

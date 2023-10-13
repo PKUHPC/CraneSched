@@ -19,6 +19,7 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
 
@@ -29,34 +30,44 @@ namespace Ctld {
  */
 class CranedMetaContainerInterface {
  public:
-  using Mutex = util::recursive_mutex;
-  using LockGuard = util::recursive_lock_guard;
-
-  using AllPartitionsMetaMap = absl::flat_hash_map<PartitionId, PartitionMeta>;
+  //  using AllPartitionsMetaMap = std::unordered_map<PartitionId,
+  //  PartitionMeta>;
+  using AllPartitionsMetaAtomicMap =
+      util::AtomicHashMap<absl::flat_hash_map, PartitionId, PartitionMeta>;
+  using AllPartitionsMetaInnerMap =
+      absl::flat_hash_map<PartitionId, AllPartitionsMetaAtomicMap::MutexValue>;
 
   /**
    * A map from CranedId to global craned information
    */
-  using CranedMetaMap = std::unordered_map<CranedId, CranedMeta>;
+  //  using CranedMetaMap = std::unordered_map<CranedId, CranedMeta>;
+  using CranedMetaAtomicMap =
+      util::AtomicHashMap<std::unordered_map, CranedId, CranedMeta>;
+  using CranedMetaInnerMap =
+      std::unordered_map<CranedId, CranedMetaAtomicMap::MutexValue>;
 
   using AllPartitionsMetaMapPtr =
-      util::ScopeExclusivePtr<AllPartitionsMetaMap, Mutex>;
-  using CranedMetaMapPtr = util::ScopeExclusivePtr<CranedMetaMap, Mutex>;
+      util::ScopeSharedPtr<AllPartitionsMetaInnerMap, util::rw_mutex>;
+  using CranedMetaMapPtr =
+      util::ScopeSharedPtr<CranedMetaInnerMap, util::rw_mutex>;
 
-  using PartitionMetasPtr = util::ScopeExclusivePtr<PartitionMeta, Mutex>;
-  using CranedMetaPtr = util::ScopeExclusivePtr<CranedMeta, Mutex>;
+  using PartitionMetasPtr =
+      util::ScopeSharedPtr<PartitionMeta,
+                           AllPartitionsMetaAtomicMap::CombinedLock>;
+  using CranedMetaPtr =
+      util::ScopeSharedPtr<CranedMeta, CranedMetaAtomicMap::CombinedLock>;
 
   virtual ~CranedMetaContainerInterface() = default;
 
   virtual void CranedUp(const CranedId& node_id) = 0;
 
-  virtual void CranedDown(CranedId node_id) = 0;
+  virtual void CranedDown(const CranedId& node_id) = 0;
 
   virtual bool CheckCranedOnline(const CranedId& node_id) = 0;
 
   virtual void InitFromConfig(const Config& config) = 0;
 
-  virtual bool CheckCranedAllowed(const std::string& hostname) = 0;
+  //  virtual bool CheckCranedAllowed(const std::string& hostname) = 0;
 
   virtual crane::grpc::QueryCranedInfoReply QueryAllCranedInfo() = 0;
 
@@ -117,7 +128,7 @@ class CranedMetaContainerSimpleImpl final
 
   void CranedUp(const CranedId& craned_id) override;
 
-  void CranedDown(CranedId craned_id) override;
+  void CranedDown(const CranedId& craned_id) override;
 
   bool CheckCranedOnline(const CranedId& craned_id) override;
 
@@ -129,7 +140,7 @@ class CranedMetaContainerSimpleImpl final
 
   CranedMetaMapPtr GetCranedMetaMapPtr() override;
 
-  bool CheckCranedAllowed(const std::string& hostname) override;
+  //  bool CheckCranedAllowed(const std::string& hostname) override;
 
   void MallocResourceFromNode(CranedId node_id, task_id_t task_id,
                               const Resources& resources) override;
@@ -137,14 +148,18 @@ class CranedMetaContainerSimpleImpl final
   void FreeResourceFromNode(CranedId craned_id, uint32_t task_id) override;
 
  private:
-  AllPartitionsMetaMap partition_metas_map_;
-  CranedMetaMap craned_meta_map_;
+  // Lock sequence: craned_meta_map_ -> craned_id_part_ids_map_ ->
+  // partition_metas_map_
 
+  // Normally, when locking the read lock in these maps, it is not necessary to
+  // consider the locking order of the lock chain, which will not lead to
+  // deadlock. Only the order of write locks and mutexes affects the deadlock
+  CranedMetaAtomicMap craned_meta_map_;
   // A craned node may belong to multiple partitions.
-  absl::flat_hash_map<CranedId /*craned hostname*/, std::list<PartitionId>>
+  util::AtomicHashMap<std::unordered_map, CranedId /*craned hostname*/,
+                      std::list<PartitionId>>
       craned_id_part_ids_map_;
-
-  Mutex mtx_;
+  AllPartitionsMetaAtomicMap partition_metas_map_;
 };
 
 }  // namespace Ctld

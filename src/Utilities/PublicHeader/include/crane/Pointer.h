@@ -26,12 +26,24 @@ namespace util {
 template <typename T, typename Lockable>
 class ScopeExclusivePtr {
  public:
-  explicit ScopeExclusivePtr(T* data, Lockable* lock = nullptr) noexcept
-      : data_(data), lock_(lock) {}
+  explicit ScopeExclusivePtr(
+      T* data, Lockable* lock = nullptr,
+      std::function<void(Lockable*)> unlock_func =
+          [](Lockable* mutex) { mutex->unlock(); }) noexcept
+      : data_(data), lock_(lock), unlock_func_(unlock_func) {}
+
+  explicit ScopeExclusivePtr(
+      T* data, Lockable&& lock,
+      std::function<void(Lockable*)> unlock_func =
+          [](Lockable* mutex) { mutex->unlock(); }) noexcept
+      : data_(data),
+        own_lock_(std::move(lock)),
+        lock_(&own_lock_),
+        unlock_func_(unlock_func) {}
 
   ~ScopeExclusivePtr() noexcept {
     if (lock_) {
-      lock_->unlock();
+      unlock_func_(lock_);
     }
   }
 
@@ -47,12 +59,16 @@ class ScopeExclusivePtr {
   ScopeExclusivePtr(ScopeExclusivePtr&& val) noexcept {
     data_ = val.data_;
     lock_ = val.lock_;
+    own_lock_ = std::move(val.own_lock_);
+    unlock_func_ = val.unlock_func_;
     val.lock_ = nullptr;
   }
 
  private:
   T* data_;
   Lockable* lock_;
+  Lockable own_lock_;
+  std::function<void(Lockable*)> unlock_func_;
 };
 
 /**
@@ -64,12 +80,24 @@ class ScopeExclusivePtr {
 template <typename T, typename Lockable>
 class ScopeSharedPtr {
  public:
-  explicit ScopeSharedPtr(const T* data, Lockable* lock = nullptr) noexcept
-      : data_(data), lock_(lock) {}
+  explicit ScopeSharedPtr(
+      const T* data, Lockable* lock = nullptr,
+      std::function<void(Lockable*)> unlock_func =
+          [](Lockable* mutex) { mutex->unlock_shared(); }) noexcept
+      : data_(data), lock_(lock), unlock_func_(unlock_func) {}
+
+  explicit ScopeSharedPtr(
+      const T* data, Lockable&& lock,
+      std::function<void(Lockable*)> unlock_func =
+          [](Lockable* mutex) { mutex->unlock_shared(); }) noexcept
+      : data_(data),
+        own_lock_(std::move(lock)),
+        lock_(&own_lock_),
+        unlock_func_(unlock_func) {}
 
   ~ScopeSharedPtr() noexcept {
     if (lock_) {
-      lock_->unlock_shared();
+      unlock_func_(lock_);
     }
   }
 
@@ -85,12 +113,16 @@ class ScopeSharedPtr {
   ScopeSharedPtr(ScopeSharedPtr&& val) noexcept {
     data_ = val.data_;
     lock_ = val.lock_;
+    own_lock_ = std::move(val.own_lock_);
+    unlock_func_ = val.unlock_func_;
     val.lock_ = nullptr;
   }
 
  private:
   const T* data_;
   Lockable* lock_;
+  Lockable own_lock_;
+  std::function<void(Lockable*)> unlock_func_;
 };
 
 }  // namespace util

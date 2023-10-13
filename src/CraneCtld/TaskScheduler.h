@@ -166,16 +166,18 @@ class MinLoadFirst : public INodeSelectionAlgo {
       const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
           running_tasks,
       absl::Time now, const PartitionId& partition_id,
-      const PartitionMeta& partition_metas,
-      const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
+      const CranedMetaContainerInterface::AllPartitionsMetaAtomicMap::
+          MutexValue& partition_meta_ptr,
+      const CranedMetaContainerInterface::CranedMetaInnerMap& craned_meta_map,
       NodeSelectionInfo* node_selection_info);
 
   // Input should guarantee that provided nodes in `node_selection_info` has
   // enough nodes whose resource is >= task->resource.
   static bool CalculateRunningNodesAndStartTime_(
       const NodeSelectionInfo& node_selection_info,
-      const PartitionMeta& partition_metas,
-      const CranedMetaContainerInterface::CranedMetaMap& craned_meta_map,
+      const CranedMetaContainerInterface::AllPartitionsMetaAtomicMap::
+          MutexValue& partition_meta_ptr,
+      const CranedMetaContainerInterface::CranedMetaInnerMap& craned_meta_map,
       TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
       absl::Time* start_time);
 

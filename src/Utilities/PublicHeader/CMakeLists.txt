@@ -8,7 +8,7 @@ add_library(Utility_PublicHeader
         include/crane/Pointer.h
         include/crane/Logger.h
         include/crane/PasswordEntry.h
-)
+        include/crane/AtomicHashMap.h)
 target_include_directories(Utility_PublicHeader PUBLIC include)
 target_link_libraries(Utility_PublicHeader PUBLIC
         Boost::boost # Boost added here for String.cpp
