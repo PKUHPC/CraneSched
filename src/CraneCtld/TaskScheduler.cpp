@@ -859,8 +859,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
       return true;
     else {
       std::unique_ptr<TaskInCtld>& task = it.second;
-      if (auto iter = filter_task_ids_set.find(task->TaskId()) !=
-                      filter_task_ids_set.end()) {
+      auto iter = filter_task_ids_set.find(task->TaskId());
+      if (iter != filter_task_ids_set.end()) {
         filter_task_ids_set.erase(iter);
         return true;
       } else {
