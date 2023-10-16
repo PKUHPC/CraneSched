@@ -328,6 +328,7 @@ grpc::Status CranedServiceImpl::ExecuteTask(
               request->tasks_size());
 
   for (auto const &task_to_d : request->tasks()) {
+    CRANE_INFO("Craned set get_user_env {}", task_to_d.get_user_env());
     g_task_mgr->ExecuteTaskAsync(task_to_d);
   }
 

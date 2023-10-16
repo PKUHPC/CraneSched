@@ -229,6 +229,7 @@ struct TaskInCtld {
   std::unordered_set<std::string> excluded_nodes;
 
   bool requeue_if_failed{false};
+  bool get_user_env{false};
 
   std::string cmd_line;
   std::string env;
@@ -416,6 +417,8 @@ struct TaskInCtld {
     env = val.env();
     cwd = val.cwd();
     qos = val.qos();
+
+    get_user_env = val.get_user_env();
   }
 
   void SetFieldsByPersistedPart(

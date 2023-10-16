@@ -651,6 +651,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     env_vec.emplace_back("CRANE_JOB_ID",
                          std::to_string(instance->task.task_id()));
 
+    if (instance->task.get_user_env()) {
+      env_vec.emplace_back("CBATCH_GET_USER_ENV", instance->task.env());
+    }
+
     int64_t time_limit_sec = instance->task.time_limit().seconds();
     int hours = time_limit_sec / 3600;
     int minutes = (time_limit_sec % 3600) / 60;

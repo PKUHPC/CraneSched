@@ -88,6 +88,7 @@ message TaskToCtld {
   double cpus_per_task = 11;
 
   bool requeue_if_failed = 12;
+  bool get_user_env = 13;
 
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
@@ -161,6 +162,8 @@ message TaskToD {
   uint32 node_num = 21;
   uint32 ntasks_per_node = 22;
   double cpus_per_task = 23;
+
+  bool get_user_env = 24;
 }
 
 message BatchTaskAdditionalMeta {
