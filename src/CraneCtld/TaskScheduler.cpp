@@ -818,7 +818,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   // to their own jobs.
   std::string filter_uname = request.filter_username();
   if (filter_uname.empty() &&
-      !g_account_manager->HasPermissionToAccount(operator_uid, "").ok) {
+      g_account_manager->CheckUidIsAdmin(operator_uid).has_error()) {
     PasswordEntry entry(operator_uid);
     filter_uname = entry.Username();
   }
@@ -986,6 +986,7 @@ void TaskScheduler::CancelTaskAsyncCb_() {
 void TaskScheduler::CleanCancelQueueCb_() {
   HashMap<CranedId, std::vector<task_id_t>> craned_id_task_ids_map;
 
+  // It's ok to use an approximate size.
   size_t approximate_size = m_cancel_task_queue_.size_approx();
 
   std::vector<std::pair<task_id_t, CranedId>> tasks_to_cancel;

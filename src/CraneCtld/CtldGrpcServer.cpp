@@ -551,12 +551,11 @@ grpc::Status CraneCtldServiceImpl::AddUser(
 grpc::Status CraneCtldServiceImpl::AddQos(
     grpc::ServerContext *context, const crane::grpc::AddQosRequest *request,
     crane::grpc::AddQosReply *response) {
-  AccountManager::Result judge_res =
-      g_account_manager->HasPermissionToAccount(request->uid(), "");
+  auto judge_res = g_account_manager->CheckUidIsAdmin(request->uid());
 
-  if (!judge_res.ok) {
+  if (judge_res.has_error()) {
     response->set_ok(false);
-    response->set_reason(judge_res.reason);
+    response->set_reason(judge_res.error());
     return grpc::Status::OK;
   }
 
@@ -652,17 +651,20 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
           request->account(), request->item(), request->value(),
           request->force());
       break;
-    case crane::grpc::Qos:
-      judge_res = g_account_manager->HasPermissionToAccount(request->uid(), "");
 
-      if (!judge_res.ok) {
+    case crane::grpc::Qos: {
+      auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+
+      if (res.has_error()) {
         response->set_ok(false);
-        response->set_reason(judge_res.reason);
+        response->set_reason(res.error());
         return grpc::Status::OK;
       }
+
       modify_res = g_account_manager->ModifyQos(
           request->name(), request->item(), request->value());
-      break;
+    } break;
+
     default:
       break;
   }
@@ -1013,12 +1015,11 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
       res = g_account_manager->DeleteAccount(request->name());
       break;
     case crane::grpc::Qos: {
-      AccountManager::Result judge_res =
-          g_account_manager->HasPermissionToAccount(request->uid(), "");
+      auto judge_res = g_account_manager->CheckUidIsAdmin(request->uid());
 
-      if (!judge_res.ok) {
+      if (judge_res.has_error()) {
         response->set_ok(false);
-        response->set_reason(judge_res.reason);
+        response->set_reason(judge_res.error());
         return grpc::Status::OK;
       }
     }

@@ -829,6 +829,27 @@ AccountManager::Result AccountManager::FindUserLevelAccountsOfUid(
   return Result{true};
 }
 
+result::result<void, std::string> AccountManager::CheckUidIsAdmin(
+    uint32_t uid) {
+  PasswordEntry entry(uid);
+  if (!entry.Valid()) {
+    return result::failure(fmt::format("Uid {} not existed", uid));
+  }
+
+  util::read_lock_guard user_guard(m_rw_user_mutex_);
+  const User* ptr = GetExistedUserInfoNoLock_(entry.Username());
+  if (!ptr) {
+    return result::failure(fmt::format(
+        "Parameter error: User '{}' is not a crane user", entry.Username()));
+  }
+
+  if (ptr->admin_level == User::Operator || ptr->admin_level == User::Admin)
+    return {};
+
+  return result::failure(fmt::format(
+      "Permission error: User '{}' is an ordinary user.", entry.Username()));
+}
+
 /**
  * @param uid
  * @param account(when the parameter account is empty, this function can be used

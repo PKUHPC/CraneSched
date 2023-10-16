@@ -101,6 +101,8 @@ class AccountManager {
   Result FindUserLevelAccountsOfUid(uint32_t uid, User::AdminLevel* level,
                                     std::list<std::string>* accounts);
 
+  result::result<void, std::string> CheckUidIsAdmin(uint32_t uid);
+
   AccountManager::Result HasPermissionToAccount(
       uint32_t uid, const std::string& account,
       User::AdminLevel* level_of_uid = nullptr);
