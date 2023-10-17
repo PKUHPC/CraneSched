@@ -394,7 +394,7 @@ class EmbeddedDbClient {
     std::string buf;
 
     auto result = m_embedded_db_->Fetch(txn_id, key, nullptr, &n_bytes);
-    if (result.has_error()) {
+    if (result.has_error() && result.error() != kBufferSmall) {
       CRANE_ERROR("Unexpected error when fetching the size of proto key '{}'",
                   key);
       return result;
