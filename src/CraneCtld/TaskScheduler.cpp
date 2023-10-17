@@ -41,6 +41,7 @@ TaskScheduler::TaskScheduler() {
 TaskScheduler::~TaskScheduler() {
   m_thread_stop_ = true;
   if (m_schedule_thread_.joinable()) m_schedule_thread_.join();
+  if (m_task_cancel_thread_.joinable()) m_task_cancel_thread_.join();
 }
 
 bool TaskScheduler::Init() {
@@ -864,6 +865,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
         filter_task_ids_set.erase(iter);
         return true;
       } else {
+        reply.add_not_cancelled_tasks(*iter);
+        reply.add_not_cancelled_reasons("Not Found");
         return false;
       }
     }
@@ -964,11 +967,6 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
   auto running_task_rng = m_running_task_map_ | joined_filters;
   ranges::for_each(running_task_rng, fn_cancel_running_task);
-
-  for (const auto& id : filter_task_ids_set) {
-    reply.add_not_cancelled_tasks(id);
-    reply.add_not_cancelled_reasons("Not Found");
-  }
 
   return reply;
 }
