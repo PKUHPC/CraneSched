@@ -51,7 +51,7 @@ void ParseConfig(int argc, char** argv) {
   auto parsed_args = options.parse(argc, argv);
 
   std::string config_path = parsed_args["config"].as<std::string>();
-  std::string db_config_path = Ctld::kDatabaseConfigPath;
+  std::string db_config_path = Ctld::kDefaultDbConfigPath;
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);

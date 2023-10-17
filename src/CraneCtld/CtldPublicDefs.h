@@ -27,7 +27,7 @@ using task_db_id_t = int64_t;
 
 inline const char* kCraneCtldDefaultLogPath = "/tmp/cranectld/cranectld.log";
 inline const char* kDefaultDbPath = "/tmp/cranectld/embedded.db";
-inline const char* kDatabaseConfigPath = "/etc/crane/database.yaml";
+inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
 
 constexpr uint64_t kTaskScheduleIntervalMs = 1000;
 constexpr uint16_t kCompletionQueueDelaySeconds = 15;

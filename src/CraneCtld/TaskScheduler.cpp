@@ -361,8 +361,9 @@ bool TaskScheduler::Init() {
       [this](const uvw::timer_event&, uvw::timer_handle&) {
         CancelTaskTimerCb_();
       });
-  m_cancel_task_timer_handle_->start(std::chrono::milliseconds(1000),
-                                     std::chrono::milliseconds(500));
+  m_cancel_task_timer_handle_->start(
+      std::chrono::milliseconds(kCancelTaskTimeoutMs * 3),
+      std::chrono::milliseconds(kCancelTaskTimeoutMs));
 
   m_cancel_task_async_handle_ = uvw_loop->resource<uvw::async_handle>();
   m_cancel_task_async_handle_->on<uvw::async_event>(
