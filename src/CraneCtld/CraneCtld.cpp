@@ -51,6 +51,7 @@ void ParseConfig(int argc, char** argv) {
   auto parsed_args = options.parse(argc, argv);
 
   std::string config_path = parsed_args["config"].as<std::string>();
+  std::string db_config_path = Ctld::kDefaultDbConfigPath;
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
@@ -153,45 +154,9 @@ void ParseConfig(int argc, char** argv) {
         g_config.ListenConf.UseTls = false;
       }
 
-      if (config["CraneEmbeddedDbBackend"] &&
-          !config["CraneEmbeddedDbBackend"].IsNull())
-        g_config.CraneEmbeddedDbBackend =
-            config["CraneEmbeddedDbBackend"].as<std::string>();
-      else
-        g_config.CraneEmbeddedDbBackend = "Unqlite";
-
-      if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
-        g_config.CraneCtldDbPath = config["CraneCtldDbPath"].as<std::string>();
-      else
-        g_config.CraneCtldDbPath = Ctld::kDefaultDbPath;
-
-      if (config["DbUser"] && !config["DbUser"].IsNull()) {
-        g_config.DbUser = config["DbUser"].as<std::string>();
-        if (config["DbPassword"] && !config["DbPassword"].IsNull())
-          g_config.DbPassword = config["DbPassword"].as<std::string>();
+      if (config["DbConfigPath"]) {
+        db_config_path = config["DbConfigPath"].as<std::string>();
       }
-
-      if (config["DbHost"] && !config["DbHost"].IsNull())
-        g_config.DbHost = config["DbHost"].as<std::string>();
-      else
-        g_config.DbHost = "localhost";
-
-      if (config["DbPort"] && !config["DbPort"].IsNull())
-        g_config.DbPort = config["DbPort"].as<std::string>();
-      else
-        g_config.DbPort = "27017";  // default port 27017
-
-      if (config["DbReplSetName"] && !config["DbReplSetName"].IsNull())
-        g_config.DbRSName = config["DbReplSetName"].as<std::string>();
-      else {
-        CRANE_ERROR("Unknown Replica Set name");
-        std::exit(1);
-      }
-
-      if (config["DbName"] && !config["DbName"].IsNull())
-        g_config.DbName = config["DbName"].as<std::string>();
-      else
-        g_config.DbName = "crane_db";
 
       if (config["CraneCtldForeground"]) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
@@ -403,14 +368,67 @@ void ParseConfig(int argc, char** argv) {
         }
       }
     } catch (YAML::BadFile& e) {
-      CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
-                     e.what());
+      CRANE_CRITICAL("Can't open config file {}: {}", config_path, e.what());
       std::exit(1);
     }
   } else {
     CRANE_CRITICAL("Config file '{}' not existed", config_path);
     std::exit(1);
   }
+
+  if (std::filesystem::exists(db_config_path)) {
+    try {
+      YAML::Node config = YAML::LoadFile(db_config_path);
+
+      if (config["CraneEmbeddedDbBackend"] &&
+          !config["CraneEmbeddedDbBackend"].IsNull())
+        g_config.CraneEmbeddedDbBackend =
+            config["CraneEmbeddedDbBackend"].as<std::string>();
+      else
+        g_config.CraneEmbeddedDbBackend = "Unqlite";
+
+      if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
+        g_config.CraneCtldDbPath = config["CraneCtldDbPath"].as<std::string>();
+      else
+        g_config.CraneCtldDbPath = Ctld::kDefaultDbPath;
+
+      if (config["DbUser"] && !config["DbUser"].IsNull()) {
+        g_config.DbUser = config["DbUser"].as<std::string>();
+        if (config["DbPassword"] && !config["DbPassword"].IsNull())
+          g_config.DbPassword = config["DbPassword"].as<std::string>();
+      }
+
+      if (config["DbHost"] && !config["DbHost"].IsNull())
+        g_config.DbHost = config["DbHost"].as<std::string>();
+      else
+        g_config.DbHost = "localhost";
+
+      if (config["DbPort"] && !config["DbPort"].IsNull())
+        g_config.DbPort = config["DbPort"].as<std::string>();
+      else
+        g_config.DbPort = "27017";  // default port 27017
+
+      if (config["DbReplSetName"] && !config["DbReplSetName"].IsNull())
+        g_config.DbRSName = config["DbReplSetName"].as<std::string>();
+      else {
+        CRANE_ERROR("Unknown Replica Set name");
+        std::exit(1);
+      }
+
+      if (config["DbName"] && !config["DbName"].IsNull())
+        g_config.DbName = config["DbName"].as<std::string>();
+      else
+        g_config.DbName = "crane_db";
+    } catch (YAML::BadFile& e) {
+      CRANE_CRITICAL("Can't open database config file {}: {}", db_config_path,
+                     e.what());
+      std::exit(1);
+    }
+  } else {
+    CRANE_CRITICAL("Database config file '{}' not existed", db_config_path);
+    std::exit(1);
+  }
+
   if (parsed_args.count("listen")) {
     g_config.ListenConf.CraneCtldListenAddr =
         parsed_args["listen"].as<std::string>();

@@ -222,3 +222,7 @@ install(FILES
 install(FILES etc/config.yaml
         DESTINATION /etc/crane
         RENAME config_example.yaml)
+
+install(FILES etc/database.yaml
+        DESTINATION /etc/crane
+        RENAME database_example.yaml)
