@@ -74,8 +74,8 @@ bool TaskScheduler::Init() {
       if (err != CraneErr::kOk) {
         CRANE_INFO(
             "Failed to acquire task attributes for restored running task #{}. "
-            "Mark it as FAILED and move it to the ended queue.",
-            task_id);
+            "Error Code: {}. Mark it as FAILED and move it to the ended queue.",
+            task_id, CraneErrStr(err));
         task->SetStatus(crane::grpc::Failed);
         ok = g_embedded_db_client->UpdatePersistedPartOfTask(
             0, task_db_id, task->PersistedPart());
@@ -857,20 +857,15 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   std::unordered_set<uint32_t> filter_task_ids_set(
       request.filter_task_ids().begin(), request.filter_task_ids().end());
   auto rng_filer_task_ids = [&](auto& it) {
-    if (request.filter_task_ids().empty())
-      return true;
-    else {
-      std::unique_ptr<TaskInCtld>& task = it.second;
-      auto iter = filter_task_ids_set.find(task->TaskId());
-      if (iter != filter_task_ids_set.end()) {
-        filter_task_ids_set.erase(iter);
-        return true;
-      } else {
-        reply.add_not_cancelled_tasks(*iter);
-        reply.add_not_cancelled_reasons("Not Found");
-        return false;
-      }
-    }
+    if (request.filter_task_ids().empty()) return true;
+
+    std::unique_ptr<TaskInCtld>& task = it.second;
+
+    auto iter = filter_task_ids_set.find(task->TaskId());
+    if (iter == filter_task_ids_set.end()) return false;
+
+    filter_task_ids_set.erase(iter);
+    return true;
   };
 
   std::unordered_set<std::string> filter_nodes_set(
@@ -968,6 +963,12 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
   auto running_task_rng = m_running_task_map_ | joined_filters;
   ranges::for_each(running_task_rng, fn_cancel_running_task);
+
+  // We want to show error message for non-existent task ids.
+  for (const auto& id : filter_task_ids_set) {
+    reply.add_not_cancelled_tasks(id);
+    reply.add_not_cancelled_reasons("Not Found");
+  }
 
   return reply;
 }
@@ -1876,11 +1877,12 @@ void TaskScheduler::TransferTaskToMongodb_(TaskInCtld* task) {
 }
 
 CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
-  {
-    auto qos_ptr = g_account_manager->GetExistedQosInfo(task->qos);
-    if (!qos_ptr) return CraneErr::kInvalidParam;
-
-    task->qos_priority = qos_ptr->priority;
+  auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
+      task->Username(), task->account, task);
+  if (check_qos_result.has_error()) {
+    CRANE_ERROR("Failed to call CheckAndApplyQosLimitOnTask: {}",
+                check_qos_result.error());
+    return CraneErr::kInvalidParam;
   }
 
   auto part_it = g_config.Partitions.find(task->partition_id);

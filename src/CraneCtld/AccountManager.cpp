@@ -788,9 +788,10 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   }
 
   const Qos* qos_share_ptr = GetExistedQosInfoNoLock_(task->qos);
-  if (!qos_share_ptr) {
+  if (!qos_share_ptr)
     return result::fail(fmt::format("Unknown QOS '{}'", task->qos));
-  }
+
+  task->qos_priority = qos_share_ptr->priority;
 
   if (task->time_limit >= absl::Seconds(kMaxTimeLimitSecond)) {
     task->time_limit = qos_share_ptr->max_time_limit_per_task;

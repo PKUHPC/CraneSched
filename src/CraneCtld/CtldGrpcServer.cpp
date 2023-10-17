@@ -1351,12 +1351,6 @@ result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
         "The user '{}' or the Ancestor account is disabled", task->Username()));
   }
 
-  auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
-      task->Username(), task->account, task.get());
-  if (check_qos_result.has_error()) {
-    return result::fail(check_qos_result.error());
-  }
-
   uint32_t task_id;
   err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
   if (err == CraneErr::kOk) {
