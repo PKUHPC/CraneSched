@@ -101,13 +101,15 @@ class AccountManager {
   Result FindUserLevelAccountsOfUid(uint32_t uid, User::AdminLevel* level,
                                     std::list<std::string>* accounts);
 
-  AccountManager::Result HasPermissionToAccount(uint32_t uid,
-                                                const std::string& account,
-                                                User::AdminLevel* level_of_uid);
+  result::result<void, std::string> CheckUidIsAdmin(uint32_t uid);
 
-  AccountManager::Result HasPermissionToUser(uint32_t uid,
-                                             const std::string& user,
-                                             User::AdminLevel* level_of_uid);
+  AccountManager::Result HasPermissionToAccount(
+      uint32_t uid, const std::string& account,
+      User::AdminLevel* level_of_uid = nullptr);
+
+  AccountManager::Result HasPermissionToUser(
+      uint32_t uid, const std::string& user,
+      User::AdminLevel* level_of_uid = nullptr);
 
  private:
   void InitDataMap_();

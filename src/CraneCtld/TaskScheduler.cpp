@@ -41,6 +41,7 @@ TaskScheduler::TaskScheduler() {
 TaskScheduler::~TaskScheduler() {
   m_thread_stop_ = true;
   if (m_schedule_thread_.joinable()) m_schedule_thread_.join();
+  if (m_task_cancel_thread_.joinable()) m_task_cancel_thread_.join();
 }
 
 bool TaskScheduler::Init() {
@@ -354,6 +355,30 @@ bool TaskScheduler::Init() {
     }
   }
 
+  std::shared_ptr<uvw::loop> uvw_loop = uvw::loop::get_default();
+  m_cancel_task_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
+  m_cancel_task_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        CancelTaskTimerCb_();
+      });
+  m_cancel_task_timer_handle_->start(std::chrono::milliseconds(1000),
+                                     std::chrono::milliseconds(500));
+
+  m_cancel_task_async_handle_ = uvw_loop->resource<uvw::async_handle>();
+  m_cancel_task_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CancelTaskAsyncCb_();
+      });
+
+  m_clean_cancel_queue_handle_ = uvw_loop->resource<uvw::async_handle>();
+  m_clean_cancel_queue_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanCancelQueueCb_();
+      });
+
+  m_task_cancel_thread_ = std::thread(
+      [this, loop = std::move(uvw_loop)]() { CancelTaskThread_(loop); });
+
   // Start schedule thread first.
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
 
@@ -385,6 +410,22 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
 
   m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_running_task_map_.emplace(task->TaskId(), std::move(task));
+}
+
+void TaskScheduler::CancelTaskThread_(
+    const std::shared_ptr<uvw::loop>& uvw_loop) {
+  std::shared_ptr<uvw::idle_handle> idle_handle =
+      uvw_loop->resource<uvw::idle_handle>();
+  idle_handle->on<uvw::idle_event>(
+      [this](const uvw::idle_event&, uvw::idle_handle& h) {
+        if (m_thread_stop_) h.parent().stop();
+      });
+
+  if (idle_handle->start() != 0) {
+    CRANE_ERROR("Failed to start the idle event in cancel loop.");
+  }
+
+  uvw_loop->run();
 }
 
 void TaskScheduler::ScheduleThread_() {
@@ -761,8 +802,8 @@ CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
     need_to_be_terminated = true;
 
   if (need_to_be_terminated) {
-    auto stub = g_craned_keeper->GetCranedStub(task->executing_craned_id);
-    return stub->TerminateTask(task_id);
+    m_cancel_task_queue_.enqueue({task_id, task->executing_craned_id});
+    m_cancel_task_async_handle_->send();
   }
 
   return CraneErr::kOk;
@@ -773,6 +814,15 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   crane::grpc::CancelTaskReply reply;
 
   uint32_t operator_uid = request.operator_uid();
+
+  // When an ordinary user tries to cancel jobs, they are automatically filtered
+  // to their own jobs.
+  std::string filter_uname = request.filter_username();
+  if (filter_uname.empty() &&
+      g_account_manager->CheckUidIsAdmin(operator_uid).has_error()) {
+    PasswordEntry entry(operator_uid);
+    filter_uname = entry.Username();
+  }
 
   auto rng_filter_state = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
@@ -800,16 +850,26 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
   auto rng_filter_user_name = [&](auto& it) {
     std::unique_ptr<TaskInCtld>& task = it.second;
-    return request.filter_username().empty() ||
-           task->Username() == request.filter_username();
+    return filter_uname.empty() || task->Username() == filter_uname;
   };
 
   std::unordered_set<uint32_t> filter_task_ids_set(
       request.filter_task_ids().begin(), request.filter_task_ids().end());
   auto rng_filer_task_ids = [&](auto& it) {
-    std::unique_ptr<TaskInCtld>& task = it.second;
-    return request.filter_task_ids().empty() ||
-           filter_task_ids_set.contains(task->TaskId());
+    if (request.filter_task_ids().empty())
+      return true;
+    else {
+      std::unique_ptr<TaskInCtld>& task = it.second;
+      auto iter = filter_task_ids_set.find(task->TaskId());
+      if (iter != filter_task_ids_set.end()) {
+        filter_task_ids_set.erase(iter);
+        return true;
+      } else {
+        reply.add_not_cancelled_tasks(*iter);
+        reply.add_not_cancelled_reasons("Not Found");
+        return false;
+      }
+    }
   };
 
   std::unordered_set<std::string> filter_nodes_set(
@@ -837,8 +897,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
     auto& task = task_it->second;
 
-    if (!g_account_manager
-             ->HasPermissionToUser(operator_uid, task->Username(), nullptr)
+    if (!g_account_manager->HasPermissionToUser(operator_uid, task->Username())
              .ok) {
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
@@ -861,8 +920,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
     CRANE_TRACE("Cancelling running task #{}", task_id);
 
-    if (!g_account_manager
-             ->HasPermissionToUser(operator_uid, task->Username(), nullptr)
+    if (!g_account_manager->HasPermissionToUser(operator_uid, task->Username())
              .ok) {
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
@@ -911,6 +969,41 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   ranges::for_each(running_task_rng, fn_cancel_running_task);
 
   return reply;
+}
+
+void TaskScheduler::CancelTaskTimerCb_() {
+  m_clean_cancel_queue_handle_->send();
+}
+
+void TaskScheduler::CancelTaskAsyncCb_() {
+  if (m_cancel_task_queue_.size_approx() >= kCancelTaskBatchNum) {
+    m_clean_cancel_queue_handle_->send();
+  }
+}
+
+void TaskScheduler::CleanCancelQueueCb_() {
+  HashMap<CranedId, std::vector<task_id_t>> craned_id_task_ids_map;
+
+  // It's ok to use an approximate size.
+  size_t approximate_size = m_cancel_task_queue_.size_approx();
+
+  std::vector<std::pair<task_id_t, CranedId>> tasks_to_cancel;
+  tasks_to_cancel.resize(approximate_size);
+
+  size_t actual_size = m_cancel_task_queue_.try_dequeue_bulk(
+      tasks_to_cancel.begin(), approximate_size);
+
+  for (const auto& [task_id, craned_id] : tasks_to_cancel) {
+    craned_id_task_ids_map[craned_id].emplace_back(task_id);
+  }
+
+  for (auto&& [craned_id, task_ids] : craned_id_task_ids_map) {
+    g_thread_pool->push_task(
+        [id = craned_id, task_ids_to_cancel = std::move(task_ids)]() {
+          auto* stub = g_craned_keeper->GetCranedStub(id);
+          stub->TerminateTasks(task_ids_to_cancel);
+        });
+  }
 }
 
 void TaskScheduler::QueryTasksInRam(

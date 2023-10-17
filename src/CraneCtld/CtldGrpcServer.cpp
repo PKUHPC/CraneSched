@@ -455,7 +455,7 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
   AccountManager::Result judge_res = g_account_manager->HasPermissionToAccount(
-      request->uid(), request->account().parent_account(), nullptr);
+      request->uid(), request->account().parent_account());
 
   if (!judge_res.ok) {
     response->set_ok(false);
@@ -551,12 +551,11 @@ grpc::Status CraneCtldServiceImpl::AddUser(
 grpc::Status CraneCtldServiceImpl::AddQos(
     grpc::ServerContext *context, const crane::grpc::AddQosRequest *request,
     crane::grpc::AddQosReply *response) {
-  AccountManager::Result judge_res =
-      g_account_manager->HasPermissionToAccount(request->uid(), "", nullptr);
+  auto judge_res = g_account_manager->CheckUidIsAdmin(request->uid());
 
-  if (!judge_res.ok) {
+  if (judge_res.has_error()) {
     response->set_ok(false);
-    response->set_reason(judge_res.reason);
+    response->set_reason(judge_res.error());
     return grpc::Status::OK;
   }
 
@@ -591,8 +590,8 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
 
   switch (request->entity_type()) {
     case crane::grpc::Account:
-      judge_res = g_account_manager->HasPermissionToAccount(
-          request->uid(), request->name(), nullptr);
+      judge_res = g_account_manager->HasPermissionToAccount(request->uid(),
+                                                            request->name());
 
       if (!judge_res.ok) {
         response->set_ok(false);
@@ -652,18 +651,20 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
           request->account(), request->item(), request->value(),
           request->force());
       break;
-    case crane::grpc::Qos:
-      judge_res = g_account_manager->HasPermissionToAccount(request->uid(), "",
-                                                            nullptr);
 
-      if (!judge_res.ok) {
+    case crane::grpc::Qos: {
+      auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+
+      if (res.has_error()) {
         response->set_ok(false);
-        response->set_reason(judge_res.reason);
+        response->set_reason(res.error());
         return grpc::Status::OK;
       }
+
       modify_res = g_account_manager->ModifyQos(
           request->name(), request->item(), request->value());
-      break;
+    } break;
+
     default:
       break;
   }
@@ -750,7 +751,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
 
         AccountManager::Result judge_res =
             g_account_manager->HasPermissionToAccount(request->uid(),
-                                                      request->name(), nullptr);
+                                                      request->name());
 
         if (!judge_res.ok) {
           response->set_ok(false);
@@ -841,7 +842,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         if (user_shared_ptr) {
           AccountManager::Result judge_res =
               g_account_manager->HasPermissionToUser(request->uid(),
-                                                     request->name(), nullptr);
+                                                     request->name());
 
           if (!judge_res.ok) {
             response->set_ok(false);
@@ -1003,7 +1004,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
     case crane::grpc::Account: {
       AccountManager::Result judge_res =
           g_account_manager->HasPermissionToAccount(request->uid(),
-                                                    request->name(), nullptr);
+                                                    request->name());
 
       if (!judge_res.ok) {
         response->set_ok(false);
@@ -1014,13 +1015,11 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
       res = g_account_manager->DeleteAccount(request->name());
       break;
     case crane::grpc::Qos: {
-      AccountManager::Result judge_res =
-          g_account_manager->HasPermissionToAccount(request->uid(), "",
-                                                    nullptr);
+      auto judge_res = g_account_manager->CheckUidIsAdmin(request->uid());
 
-      if (!judge_res.ok) {
+      if (judge_res.has_error()) {
         response->set_ok(false);
-        response->set_reason(judge_res.reason);
+        response->set_reason(judge_res.error());
         return grpc::Status::OK;
       }
     }
@@ -1048,7 +1047,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
   switch (request->entity_type()) {
     case crane::grpc::Account:
       res = g_account_manager->HasPermissionToAccount(request->uid(),
-                                                      request->name(), nullptr);
+                                                      request->name());
 
       if (!res.ok) {
         response->set_ok(false);
@@ -1061,7 +1060,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
       break;
     case crane::grpc::User:
       res = g_account_manager->HasPermissionToUser(request->uid(),
-                                                   request->name(), nullptr);
+                                                   request->name());
 
       if (!res.ok) {
         response->set_ok(false);

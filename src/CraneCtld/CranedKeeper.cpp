@@ -112,18 +112,18 @@ CraneErr CranedStub::ExecuteTasks(
   return CraneErr::kOk;
 }
 
-CraneErr CranedStub::TerminateTask(uint32_t task_id) {
-  using crane::grpc::TerminateTaskReply;
-  using crane::grpc::TerminateTaskRequest;
+CraneErr CranedStub::TerminateTasks(const std::vector<task_id_t> &task_ids) {
+  using crane::grpc::TerminateTasksReply;
+  using crane::grpc::TerminateTasksRequest;
 
   ClientContext context;
   Status status;
-  TerminateTaskRequest request;
-  TerminateTaskReply reply;
+  TerminateTasksRequest request;
+  TerminateTasksReply reply;
 
-  request.set_task_id(task_id);
+  for (const auto &id : task_ids) request.add_task_id_list(id);
 
-  status = m_stub_->TerminateTask(&context, request, &reply);
+  status = m_stub_->TerminateTasks(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
         "TerminateRunningTask RPC for Node {} returned with status not ok: {}",
@@ -131,10 +131,7 @@ CraneErr CranedStub::TerminateTask(uint32_t task_id) {
     return CraneErr::kRpcFailure;
   }
 
-  if (reply.ok())
-    return CraneErr::kOk;
-  else
-    return CraneErr::kGenericFailure;
+  return CraneErr::kOk;
 }
 
 CraneErr CranedStub::TerminateOrphanedTask(task_id_t task_id) {
