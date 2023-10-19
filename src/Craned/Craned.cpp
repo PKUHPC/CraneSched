@@ -428,6 +428,12 @@ void GlobalVariableInit() {
 }
 
 void StartServer() {
+  constexpr uint64_t file_max = 640000;
+  if (!util::SetMaxFileDescriptorNumber(file_max)) {
+    CRANE_ERROR("Unable to set file descriptor limits to {}", file_max);
+    std::exit(1);
+  }
+
   GlobalVariableInit();
 
   // Set FD_CLOEXEC on stdin, stdout, stderr
