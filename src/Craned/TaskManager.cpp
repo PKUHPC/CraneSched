@@ -714,23 +714,22 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     // Once ExecuteTask RPC is processed, the TaskInstance goes into
     // m_task_map_.
     TaskInstance* instance = popped_instance.get();
+    task_id_t task_id = instance->task.task_id();
 
-    auto [iter, _] = this_->m_task_map_.emplace(instance->task.task_id(),
-                                                std::move(popped_instance));
+    auto [iter, _] =
+        this_->m_task_map_.emplace(task_id, std::move(popped_instance));
 
-    g_thread_pool->push_task([this_, instance]() {
+    g_thread_pool->push_task([this_, instance, task_id]() {
       this_->m_mtx_.Lock();
 
-      auto cg_iter = this_->m_task_id_to_cg_map_.find(instance->task.task_id());
+      auto cg_iter = this_->m_task_id_to_cg_map_.find(task_id);
       if (cg_iter == this_->m_task_id_to_cg_map_.end()) {
         this_->m_mtx_.Unlock();
-        CRANE_ERROR("Failed to find created cgroup for task #{}",
-                    instance->task.task_id());
+        CRANE_ERROR("Failed to find created cgroup for task #{}", task_id);
         this_->EvActivateTaskStatusChange_(
-            instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+            task_id, crane::grpc::TaskStatus::Failed,
             ExitCode::kExitCodeCgroupError,
-            fmt::format("Failed to find created cgroup for task #{}",
-                        instance->task.task_id()));
+            fmt::format("Failed to find created cgroup for task #{}", task_id));
         return;
       }
 
@@ -742,26 +741,35 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       // Lazy creation of cgroup
       // Todo: Lock on iterator may be required here!
       if (!cg_iter->second) {
-        instance->cgroup_path = CgroupStrByTaskId_(instance->task.task_id());
+        instance->cgroup_path = CgroupStrByTaskId_(task_id);
         cg_iter->second = util::CgroupUtil::CreateOrOpen(
             instance->cgroup_path,
             util::NO_CONTROLLER_FLAG |
                 util::CgroupConstant::Controller::CPU_CONTROLLER |
                 util::CgroupConstant::Controller::MEMORY_CONTROLLER,
             util::NO_CONTROLLER_FLAG, false);
+
+        if (!cg_iter->second) {
+          CRANE_ERROR("Failed to created cgroup for task #{}", task_id);
+          this_->EvActivateTaskStatusChange_(
+              task_id, crane::grpc::TaskStatus::Failed,
+              ExitCode::kExitCodeCgroupError,
+              fmt::format("Failed to create cgroup for task #{}", task_id));
+          return;
+        }
       }
       instance->cgroup = cg_iter->second.get();
 
       instance->pwd_entry.Init(instance->task.uid());
       if (!instance->pwd_entry.Valid()) {
         CRANE_DEBUG("Failed to look up password entry for uid {} of task #{}",
-                    instance->task.uid(), instance->task.task_id());
+                    instance->task.uid(), task_id);
         this_->EvActivateTaskStatusChange_(
-            instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+            task_id, crane::grpc::TaskStatus::Failed,
             ExitCode::kExitCodePermissionDenied,
             fmt::format(
                 "Failed to look up password entry for uid {} of task #{}",
-                instance->task.uid(), instance->task.task_id()));
+                instance->task.uid(), task_id));
         return;
       }
 
@@ -771,21 +779,20 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       if (!ok) {
         CRANE_ERROR(
             "Failed to allocate allocatable resource in cgroup for task #{}",
-            instance->task.task_id());
+            task_id);
         this_->EvActivateTaskStatusChange_(
             instance->task.task_id(), crane::grpc::TaskStatus::Failed,
             ExitCode::kExitCodeCgroupError,
             fmt::format(
                 "Cannot allocate resources for the instance of task #{}",
-                instance->task.task_id()));
+                task_id));
         return;
       }
 
       // If this is a batch task, run it now.
       if (instance->task.type() == crane::grpc::Batch) {
         instance->batch_meta.parsed_sh_script_path =
-            fmt::format("{}/Crane-{}.sh", kDefaultCranedScriptDir,
-                        instance->task.task_id());
+            fmt::format("{}/Crane-{}.sh", kDefaultCranedScriptDir, task_id);
         auto& sh_path = instance->batch_meta.parsed_sh_script_path;
 
         FILE* fptr = fopen(sh_path.c_str(), "w");
@@ -793,10 +800,10 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
           CRANE_ERROR("Cannot write shell script for batch task #{}",
                       instance->task.task_id());
           this_->EvActivateTaskStatusChange_(
-              instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+              task_id, crane::grpc::TaskStatus::Failed,
               ExitCode::kExitCodeFileNotFound,
               fmt::format("Cannot write shell script for batch task #{}",
-                          instance->task.task_id()));
+                          task_id));
           return;
         }
         fputs(instance->task.batch_meta().sh_script().c_str(), fptr);
@@ -839,7 +846,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         }
 
         // Replace the format strings.
-        absl::StrReplaceAll({{"%j", std::to_string(instance->task.task_id())},
+        absl::StrReplaceAll({{"%j", std::to_string(task_id)},
                              {"%u", instance->pwd_entry.Username()},
                              {"%x", instance->task.name()}},
                             &process->batch_meta.parsed_output_file_pattern);
@@ -868,11 +875,11 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
           instance->processes.emplace(process->GetPid(), std::move(process));
         } else {
           this_->EvActivateTaskStatusChange_(
-              instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+              task_id, crane::grpc::TaskStatus::Failed,
               ExitCode::kExitCodeSpawnProcessFail,
               fmt::format(
                   "Cannot spawn a new process inside the instance of task #{}",
-                  instance->task.task_id()));
+                  task_id));
         }
       }
 

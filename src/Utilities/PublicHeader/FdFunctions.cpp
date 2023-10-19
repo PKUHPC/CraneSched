@@ -17,6 +17,7 @@
 #include "crane/FdFunctions.h"
 
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -61,6 +62,14 @@ void SetCloseOnExecFromFd(int fd_begin) {
       fcntl(i, F_SETFD, flag | FD_CLOEXEC);
     }
   }
+}
+
+bool SetMaxFileDescriptorNumber(unsigned long num) {
+  struct rlimit rlim {};
+  rlim.rlim_cur = num;
+  rlim.rlim_max = num;
+
+  return setrlimit(RLIMIT_NOFILE, &rlim) == 0;
 }
 
 }  // namespace util

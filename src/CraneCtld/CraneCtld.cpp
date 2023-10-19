@@ -19,7 +19,6 @@
 
 #include <event2/thread.h>
 #include <sys/file.h>
-#include <sys/resource.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
@@ -32,6 +31,7 @@
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
+#include "crane/FdFunctions.h"
 #include "crane/Network.h"
 
 void ParseConfig(int argc, char** argv) {
@@ -605,20 +605,12 @@ void CreateFolders() {
   create_folders_for_path(g_config.CraneCtldDbPath);
 }
 
-void SetMaxFileDescriptorNumber(uint64_t num) {
-  struct rlimit rlim {};
-
-  rlim.rlim_cur = num;
-  rlim.rlim_max = num;
-
-  if (setrlimit(RLIMIT_NOFILE, &rlim) == -1) {
-    CRANE_ERROR("Unable to set file descriptor limits to {}", num);
+int StartServer() {
+  constexpr uint64_t file_max = 640000;
+  if (!util::SetMaxFileDescriptorNumber(file_max)) {
+    CRANE_ERROR("Unable to set file descriptor limits to {}", file_max);
     std::exit(1);
   }
-}
-
-int StartServer() {
-  SetMaxFileDescriptorNumber(640000);
 
   CreateFolders();
 
