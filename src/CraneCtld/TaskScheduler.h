@@ -297,6 +297,9 @@ class TaskScheduler {
   std::thread m_task_cancel_thread_;
   void CancelTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
+  std::thread m_task_submit_thread_;
+  void SubmitTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_cancel_task_timer_handle_;
   void CancelTaskTimerCb_();
@@ -307,6 +310,16 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_cancel_queue_handle_;
   void CleanCancelQueueCb_();
+
+  std::shared_ptr<uvw::timer_handle> m_submit_task_timer_handle_;
+  void SubmitTaskTimerCb_();
+
+  std::shared_ptr<uvw::async_handle> m_submit_task_async_handle_;
+  ConcurrentQueue<std::unique_ptr<TaskInCtld>> m_submit_task_queue_;
+  void SubmitTaskAsyncCb_();
+
+  std::shared_ptr<uvw::async_handle> m_clean_submit_queue_handle_;
+  void CleanSubmitQueueCb_();
 };
 
 }  // namespace Ctld
