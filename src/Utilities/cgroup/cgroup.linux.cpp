@@ -537,7 +537,10 @@ bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
   }
 
   // Commit cgroup modifications.
-  if ((err = cgroup_modify_cgroup(m_cgroup_))) {
+  for (int i = 0; i < 5; i++) {
+    if ((err = cgroup_modify_cgroup(m_cgroup_)) == 0) break;
+  }
+  if (err) {
     CRANE_WARN("Unable to commit {} for cgroup {}: {} {}",
                CgroupConstant::GetControllerFileStringView(controller_file),
                m_cgroup_path_, err, cgroup_strerror(err));

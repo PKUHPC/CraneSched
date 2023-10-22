@@ -683,8 +683,8 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
     crane::grpc::QueryEntityInfoReply *response) {
   User::AdminLevel user_level;
   std::list<std::string> user_accounts;
-  std::list<Account> res_account_list;
-  std::list<User> res_user_list;
+  std::unordered_map<std::string, Account> res_account_list;
+  std::unordered_map<uid_t, User> res_user_list;
 
   AccountManager::Result find_res =
       g_account_manager->FindUserLevelAccountsOfUid(request->uid(), &user_level,
@@ -708,17 +708,25 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
               if (account->deleted) {
                 continue;
               }
-              res_account_list.emplace_back(*account);
+              res_account_list.try_emplace(account->name, *account);
             }
           } else {
             // Otherwise, only all sub-accounts under your own accounts will be
             // returned
             std::queue<std::string> queue;
             for (const auto &acct : user_accounts) {
+              std::string p_name =
+                  account_map_shared_ptr->at(acct)->parent_account;
+              while (!p_name.empty()) {
+                res_account_list.try_emplace(
+                    p_name, *(account_map_shared_ptr->at(p_name)));
+                p_name = account_map_shared_ptr->at(p_name)->parent_account;
+              }
               queue.push(acct);
               while (!queue.empty()) {
                 std::string father = queue.front();
-                res_account_list.emplace_back(
+                res_account_list.try_emplace(
+                    account_map_shared_ptr->at(father)->name,
                     *(account_map_shared_ptr->at(father)));
                 queue.pop();
                 for (const auto &child :
@@ -759,11 +767,11 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           return grpc::Status::OK;
         }
 
-        res_account_list.emplace_back(std::move(temp));
+        res_account_list.emplace(temp.name, std::move(temp));
         response->set_ok(true);
       }
 
-      for (const auto &account : res_account_list) {
+      for (const auto &[_, account] : res_account_list) {
         // put the account info into grpc element
         auto *account_info = response->mutable_account_list()->Add();
         account_info->set_name(account.name);
@@ -806,7 +814,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
               if (user->deleted) {
                 continue;
               }
-              res_user_list.emplace_back(*user);
+              res_user_list.try_emplace(user->uid, *user);
             }
           } else {
             AccountManager::AccountMapMutexSharedPtr account_map_shared_ptr =
@@ -819,7 +827,8 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
                 std::string father = queue.front();
                 for (const auto &user :
                      account_map_shared_ptr->at(father)->users) {
-                  res_user_list.emplace_back(*(user_map_shared_ptr->at(user)));
+                  res_user_list.try_emplace(user_map_shared_ptr->at(user)->uid,
+                                            *(user_map_shared_ptr->at(user)));
                 }
                 queue.pop();
                 for (const auto &child :
@@ -850,7 +859,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
             return grpc::Status::OK;
           }
 
-          res_user_list.emplace_back(*user_shared_ptr);
+          res_user_list.try_emplace(user_shared_ptr->uid, *user_shared_ptr);
           response->set_ok(true);
         } else {
           response->set_ok(false);
@@ -860,7 +869,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         }
       }
 
-      for (const auto &user : res_user_list) {
+      for (const auto &[_, user] : res_user_list) {
         for (const auto &[account, item] : user.account_to_attrs_map) {
           if (!request->account().empty() && account != request->account()) {
             continue;
@@ -1346,9 +1355,10 @@ result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
                     task->Username(), task->partition_id, task->account));
   }
 
-  if (!g_account_manager->CheckEnableState(task->account, task->Username())) {
-    return result::fail(fmt::format(
-        "The user '{}' or the Ancestor account is disabled", task->Username()));
+  auto enable_res =
+      g_account_manager->CheckEnableState(task->account, task->Username());
+  if (enable_res.has_error()) {
+    return result::fail(enable_res.error());
   }
 
   uint32_t task_id;
