@@ -715,6 +715,9 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
             // returned
             std::queue<std::string> queue;
             for (const auto &acct : user_accounts) {
+              // Z->A->B--->C->E
+              //    |->D    |->F
+              // If we query account C, [Z,A,B,C,E,F] is included.
               std::string p_name =
                   account_map_shared_ptr->at(acct)->parent_account;
               while (!p_name.empty()) {
@@ -722,6 +725,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
                     p_name, *(account_map_shared_ptr->at(p_name)));
                 p_name = account_map_shared_ptr->at(p_name)->parent_account;
               }
+
               queue.push(acct);
               while (!queue.empty()) {
                 std::string father = queue.front();
