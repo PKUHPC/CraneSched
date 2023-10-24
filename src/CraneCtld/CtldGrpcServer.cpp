@@ -683,8 +683,8 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
     crane::grpc::QueryEntityInfoReply *response) {
   User::AdminLevel user_level;
   std::list<std::string> user_accounts;
-  std::unordered_map<std::string, Account> res_account_list;
-  std::unordered_map<uid_t, User> res_user_list;
+  std::unordered_map<std::string, Account> res_account_map;
+  std::unordered_map<uid_t, User> res_user_map;
 
   AccountManager::Result find_res =
       g_account_manager->FindUserLevelAccountsOfUid(request->uid(), &user_level,
@@ -708,7 +708,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
               if (account->deleted) {
                 continue;
               }
-              res_account_list.try_emplace(account->name, *account);
+              res_account_map.try_emplace(account->name, *account);
             }
           } else {
             // Otherwise, only all sub-accounts under your own accounts will be
@@ -718,14 +718,14 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
               std::string p_name =
                   account_map_shared_ptr->at(acct)->parent_account;
               while (!p_name.empty()) {
-                res_account_list.try_emplace(
+                res_account_map.try_emplace(
                     p_name, *(account_map_shared_ptr->at(p_name)));
                 p_name = account_map_shared_ptr->at(p_name)->parent_account;
               }
               queue.push(acct);
               while (!queue.empty()) {
                 std::string father = queue.front();
-                res_account_list.try_emplace(
+                res_account_map.try_emplace(
                     account_map_shared_ptr->at(father)->name,
                     *(account_map_shared_ptr->at(father)));
                 queue.pop();
@@ -767,11 +767,12 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           return grpc::Status::OK;
         }
 
-        res_account_list.emplace(temp.name, std::move(temp));
+        res_account_map.emplace(temp.name, std::move(temp));
         response->set_ok(true);
       }
 
-      for (const auto &[_, account] : res_account_list) {
+      for (const auto it : res_account_map) {
+        const auto &account = it.second;
         // put the account info into grpc element
         auto *account_info = response->mutable_account_list()->Add();
         account_info->set_name(account.name);
@@ -814,7 +815,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
               if (user->deleted) {
                 continue;
               }
-              res_user_list.try_emplace(user->uid, *user);
+              res_user_map.try_emplace(user->uid, *user);
             }
           } else {
             AccountManager::AccountMapMutexSharedPtr account_map_shared_ptr =
@@ -827,8 +828,8 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
                 std::string father = queue.front();
                 for (const auto &user :
                      account_map_shared_ptr->at(father)->users) {
-                  res_user_list.try_emplace(user_map_shared_ptr->at(user)->uid,
-                                            *(user_map_shared_ptr->at(user)));
+                  res_user_map.try_emplace(user_map_shared_ptr->at(user)->uid,
+                                           *(user_map_shared_ptr->at(user)));
                 }
                 queue.pop();
                 for (const auto &child :
@@ -859,7 +860,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
             return grpc::Status::OK;
           }
 
-          res_user_list.try_emplace(user_shared_ptr->uid, *user_shared_ptr);
+          res_user_map.try_emplace(user_shared_ptr->uid, *user_shared_ptr);
           response->set_ok(true);
         } else {
           response->set_ok(false);
@@ -869,7 +870,8 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         }
       }
 
-      for (const auto &[_, user] : res_user_list) {
+      for (const auto it : res_user_map) {
+        const auto &user = it.second;
         for (const auto &[account, item] : user.account_to_attrs_map) {
           if (!request->account().empty() && account != request->account()) {
             continue;
