@@ -567,8 +567,8 @@ void TaskScheduler::ScheduleThread_() {
         }
         m_running_task_map_.emplace(task->TaskId(), std::move(task));
 
-        m_running_task_map_mtx_.Unlock();
         m_task_indexes_mtx_.Unlock();
+        m_running_task_map_mtx_.Unlock();
 
         g_embedded_db_client->UpdatePersistedPartOfTask(
             txn_id, task_ptr->TaskDbId(), task_ptr->PersistedPart());

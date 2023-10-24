@@ -10,11 +10,14 @@ fi
 mode=$1
 
 # 读取配置文件中的账号密码以及unqlite文件路径
-confFile=/etc/crane/config.yaml
+confFile=/etc/crane/database.yaml
 username=$(grep 'DbUser' "$confFile" | awk '{print $2}')
+username=${username//\"/}
 password=$(grep 'DbPassword' "$confFile" | awk '{print $2}')
 password=${password//\"/}
-unqpath=$(grep 'CraneCtldDbPath' "$confFile" | awk '{print $2}')
+embedded_db_path=$(grep 'CraneCtldDbPath' "$confFile" | awk '{print $2}')
+parent_dir="${embedded_db_path%/*}"
+env_path="${parent_dir}/CraneEnv"
 
 # MongoDB服务器的地址和端口
 host="localhost"
@@ -39,9 +42,13 @@ fi
 if [ "$mode" -eq 3 ] || [ "$mode" -eq 5 ]; then
   wipe_collection task_table
 
-  if [ -e "$unqpath" ]; then
-    echo "Removing file $unqpath ..."
-    rm "$unqpath"
+  if [ -e "$embedded_db_path" ]; then
+    echo "Removing file $embedded_db_path ..."
+    rm "$embedded_db_path"
+  fi
+  if [ -e "$env_path" ]; then
+    echo "Removing env folder $env_path ..."
+    rm -rf "$env_path"
   fi
 fi
 if [ "$mode" -eq 4 ] || [ "$mode" -eq 5 ] || [ "$mode" -eq 6 ]; then

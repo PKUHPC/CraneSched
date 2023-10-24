@@ -234,6 +234,8 @@ class Cgroup {
   bool MigrateProcIn(pid_t pid);
 
  private:
+  bool ModifyCgroup_(CgroupConstant::ControllerFile controller_file);
+
   std::string m_cgroup_path_;
   mutable struct cgroup *m_cgroup_;
 
@@ -245,7 +247,7 @@ class CgroupUtil {
   static int Init();
 
   static bool Mounted(CgroupConstant::Controller controller) {
-    return bool(m_mounted_controllers_ &ControllerFlags{controller});
+    return bool(m_mounted_controllers_ & ControllerFlags{controller});
   }
 
   static std::shared_ptr<Cgroup> CreateOrOpen(

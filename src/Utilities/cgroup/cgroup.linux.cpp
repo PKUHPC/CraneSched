@@ -507,9 +507,9 @@ bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
                                 CgroupConstant::ControllerFile controller_file,
                                 uint64_t value) {
   if (!CgroupUtil::Mounted(controller)) {
-    CRANE_WARN("Unable to set {} because cgroup {} is not mounted.\n",
-               CgroupConstant::GetControllerFileStringView(controller_file),
-               CgroupConstant::GetControllerStringView(controller));
+    CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                CgroupConstant::GetControllerStringView(controller));
     return false;
   }
 
@@ -521,9 +521,9 @@ bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
            m_cgroup_,
            CgroupConstant::GetControllerStringView(controller).data())) ==
       nullptr) {
-    CRANE_WARN("Unable to get cgroup {} controller for {}.\n",
-               CgroupConstant::GetControllerStringView(controller),
-               m_cgroup_path_);
+    CRANE_ERROR("Unable to get cgroup {} controller for {}.",
+                CgroupConstant::GetControllerStringView(controller),
+                m_cgroup_path_);
     return false;
   }
 
@@ -531,29 +531,22 @@ bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
            cg_controller,
            CgroupConstant::GetControllerFileStringView(controller_file).data(),
            value))) {
-    CRANE_WARN("Unable to set uint64 value for {}: {} {}\n", m_cgroup_path_,
-               err, cgroup_strerror(err));
+    CRANE_ERROR("Unable to set uint64 value for {} in cgroup {}. Code {}, {}",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                m_cgroup_path_, err, cgroup_strerror(err));
     return false;
   }
 
-  // Commit cgroup modifications.
-  if ((err = cgroup_modify_cgroup(m_cgroup_))) {
-    CRANE_WARN("Unable to commit {} for cgroup {}: {} {}",
-               CgroupConstant::GetControllerFileStringView(controller_file),
-               m_cgroup_path_, err, cgroup_strerror(err));
-    return false;
-  }
-
-  return true;
+  return ModifyCgroup_(controller_file);
 }
 
 bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
                               CgroupConstant::ControllerFile controller_file,
                               const std::string &str) {
   if (!CgroupUtil::Mounted(controller)) {
-    CRANE_WARN("Unable to set {} because cgroup {} is not mounted.\n",
-               CgroupConstant::GetControllerFileStringView(controller_file),
-               CgroupConstant::GetControllerStringView(controller));
+    CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.\n",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                CgroupConstant::GetControllerStringView(controller));
     return false;
   }
 
@@ -565,9 +558,9 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
            m_cgroup_,
            CgroupConstant::GetControllerStringView(controller).data())) ==
       nullptr) {
-    CRANE_WARN("Unable to get cgroup {} controller for {}.\n",
-               CgroupConstant::GetControllerStringView(controller),
-               m_cgroup_path_);
+    CRANE_ERROR("Unable to get cgroup {} controller for {}.\n",
+                CgroupConstant::GetControllerStringView(controller),
+                m_cgroup_path_);
     return false;
   }
 
@@ -575,17 +568,47 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
            cg_controller,
            CgroupConstant::GetControllerFileStringView(controller_file).data(),
            str.c_str()))) {
-    CRANE_WARN("Unable to set string for {}: {} {}\n", m_cgroup_path_, err,
-               cgroup_strerror(err));
+    CRANE_ERROR("Unable to set string for {}: {} {}\n", m_cgroup_path_, err,
+                cgroup_strerror(err));
     return false;
   }
 
-  // Commit cgroup modifications.
-  if ((err = cgroup_modify_cgroup(m_cgroup_))) {
-    CRANE_WARN("Unable to commit {} for cgroup {}: {} {}\n",
-               CgroupConstant::GetControllerFileStringView(controller_file),
-               m_cgroup_path_, err, cgroup_strerror(err));
-    return false;
+  return ModifyCgroup_(controller_file);
+}
+
+bool Cgroup::ModifyCgroup_(CgroupConstant::ControllerFile controller_file) {
+  int err;
+  int retry_time = 0;
+  while (true) {
+    err = cgroup_modify_cgroup(m_cgroup_);
+    if (err == 0) return true;
+    if (err != ECGOTHER) {
+      CRANE_ERROR("Unable to modify_cgroup for {} in cgroup {}. Code {}, {}",
+                  CgroupConstant::GetControllerFileStringView(controller_file),
+                  m_cgroup_path_, err, cgroup_strerror(err));
+      return false;
+    }
+
+    int errno_code = cgroup_get_last_errno();
+    if (errno_code != EINTR) {
+      CRANE_ERROR(
+          "Unable to modify_cgroup for {} in cgroup {} "
+          "due to system error. Code {}, {}",
+          CgroupConstant::GetControllerFileStringView(controller_file),
+          m_cgroup_path_, errno_code, strerror(errno_code));
+      return false;
+    }
+
+    CRANE_DEBUG(
+        "Unable to modify_cgroup for {} in cgroup {} due to EINTR. Retrying...",
+        CgroupConstant::GetControllerFileStringView(controller_file),
+        m_cgroup_path_);
+    retry_time++;
+    if (retry_time > 3) {
+      CRANE_ERROR("Unable to modify_cgroup for cgroup {} after 3 times.",
+                  m_cgroup_path_);
+      return false;
+    }
   }
 
   return true;

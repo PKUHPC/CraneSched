@@ -728,8 +728,8 @@ bool AccountManager::CheckUserPermissionToPartition(
   return false;
 }
 
-bool AccountManager::CheckEnableState(const std::string& account,
-                                      const std::string& user) {
+result::result<void, std::string> AccountManager::CheckEnableState(
+    const std::string& account, const std::string& user) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
   std::string p_str = account;
@@ -737,13 +737,17 @@ bool AccountManager::CheckEnableState(const std::string& account,
   do {
     p_account = GetExistedAccountInfoNoLock_(p_str);
     if (p_account->blocked) {
-      return false;
+      return result::fail(
+          fmt::format("Ancestor account '{}' is blocked", p_account->name));
     }
     p_str = p_account->parent_account;
   } while (!p_str.empty());
 
   const User* p_user = GetExistedUserInfoNoLock_(user);
-  return !p_user->account_to_attrs_map.at(account).blocked;
+  if (p_user->account_to_attrs_map.at(account).blocked) {
+    return result::fail(fmt::format("User '{}' is blocked", p_user->name));
+  }
+  return {};
 }
 
 result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
