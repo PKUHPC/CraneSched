@@ -283,6 +283,8 @@ message ModifyTaskRequest {
     bool manual_hold = 5;
     bool release_job = 6;
   }
+
+  int64 hold_time_seconds = 7;
 }
 
 message ModifyTaskReply {

@@ -717,6 +717,17 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
 
   return CraneErr::kOk;
 }
+
+void TaskScheduler::HoldJobForSeconds(uint32_t task_id, int64_t secs) {
+  std::shared_ptr<uvw::loop> uvw_loop = uvw::loop::get_default();
+  auto release_task_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
+  release_task_timer_handle_->on<uvw::timer_event>(
+      [this, task_id](const uvw::timer_event&, uvw::timer_handle&) {
+        HoldReleaseJob(task_id, false);
+      });
+  release_task_timer_handle_->start(std::chrono::seconds(secs),
+                                    std::chrono::seconds(0));
+}
 CraneErr TaskScheduler::HoldReleaseJob(uint32_t task_id, bool hold) {
   LockGuard pending_guard(&m_pending_task_map_mtx_);
 

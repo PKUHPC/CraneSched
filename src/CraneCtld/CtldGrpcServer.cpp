@@ -140,6 +140,10 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       err = g_task_scheduler->HoldReleaseJob(request->task_id(),
                                              request->manual_hold());
       CRANE_INFO("hold job #{} .", request->task_id());
+      if (request->hold_time_seconds()) {
+        g_task_scheduler->HoldJobForSeconds(request->task_id(),
+                                            request->hold_time_seconds());
+      };
     } else if (request->release_job()) {
       err = g_task_scheduler->HoldReleaseJob(request->task_id(), false);
       CRANE_INFO("release job #{} .", request->task_id());

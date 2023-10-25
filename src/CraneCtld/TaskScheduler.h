@@ -218,6 +218,7 @@ class TaskScheduler {
   CraneErr SubmitTask(std::unique_ptr<TaskInCtld> task, uint32_t* task_id);
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, int64_t secs);
+  void HoldJobForSeconds(uint32_t task_id, int64_t secs);
   CraneErr HoldReleaseJob(uint32_t task_id, bool hold);
 
   void TaskStatusChange(uint32_t task_id, const CranedId& craned_index,
@@ -305,6 +306,8 @@ class TaskScheduler {
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_cancel_task_timer_handle_;
   void CancelTaskTimerCb_();
+
+  std::shared_ptr<uvw::timer_handle> m_release_task_timer_handle_;
 
   std::shared_ptr<uvw::async_handle> m_cancel_task_async_handle_;
   ConcurrentQueue<std::pair<task_id_t, CranedId>> m_cancel_task_queue_;
