@@ -270,6 +270,7 @@ message QueryPartitionInfoReply {
 message ModifyTaskRequest {
   enum TargetAttributes {
     TimeLimit = 0;
+    Hold = 1;
   }
 
   uint32 uid = 1;
@@ -279,7 +280,11 @@ message ModifyTaskRequest {
 
   oneof value {
     int64 time_limit_seconds = 4;
+    bool manual_hold = 5;
+    bool release_job = 6;
   }
+
+  int64 hold_time_seconds = 7;
 }
 
 message ModifyTaskReply {
