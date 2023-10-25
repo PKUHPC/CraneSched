@@ -650,9 +650,20 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                                         (1024 * 1024)));
     env_vec.emplace_back("CRANE_JOB_ID",
                          std::to_string(instance->task.task_id()));
+    env_vec.emplace_back("CRANE_EXPORT_ENV",
+                         instance->task.export_env());
 
     if (instance->task.get_user_env()) {
-      env_vec.emplace_back("CBATCH_GET_USER_ENV", instance->task.env());
+      env_vec.emplace_back("CRANE_GET_USER_ENV", "1");
+    }
+
+    if (!instance->task.env().empty()){
+      std::vector<std::string> prop_env_vec =
+          absl::StrSplit(instance->task.env(), "||");
+      for (auto &str: prop_env_vec) {
+        std::vector<std::string> tmp = absl::StrSplit(str, "=");
+        env_vec.emplace_back(tmp[0], tmp[1]);
+      }
     }
 
     int64_t time_limit_sec = instance->task.time_limit().seconds();
@@ -663,8 +674,14 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
     env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
 
-    if (clearenv()) {
-      fmt::print("clearenv() failed!\n");
+    if (!instance->task.get_user_env()) {
+      std::vector<std::string> export_env =
+          absl::StrSplit(instance->task.export_env(), ",");
+      if (!(export_env.empty() && export_env[0] == "NONE")) {
+        if (clearenv()) {
+          fmt::print("clearenv() failed!\n");
+        }
+      }
     }
 
     for (const auto& [name, value] : env_vec) {
