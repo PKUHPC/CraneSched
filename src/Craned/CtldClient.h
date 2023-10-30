@@ -50,12 +50,16 @@ class CtldClient {
    */
   void InitChannelAndStub(const std::string& server_address);
 
+  void CraneCtldConnected();
+
   void TaskStatusChangeAsync(TaskStatusChange&& task_status_change);
 
   bool CancelTaskStatusChangeByTaskId(task_id_t task_id,
                                       crane::grpc::TaskStatus* new_status);
 
   [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
+
+  inline void notify_handle() { s_sigint_cv.notify_one(); }
 
  private:
   void AsyncSendThread_();
@@ -73,6 +77,9 @@ class CtldClient {
   std::unique_ptr<CraneCtld::Stub> m_stub_;
 
   CranedId m_craned_id_;
+
+  std::mutex s_sigint_mtx;
+  std::condition_variable s_sigint_cv;
 };
 
 }  // namespace Craned

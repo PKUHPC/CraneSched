@@ -283,8 +283,7 @@ CranedKeeper::~CranedKeeper() {
 void CranedKeeper::InitAndRegisterCraneds(std::list<CranedId> craned_id_list) {
   WriterLock guard(&m_unavail_craned_list_mtx_);
 
-  m_unavail_craned_list_.splice(m_unavail_craned_list_.end(),
-                                std::move(craned_id_list));
+  m_unavail_craned_list_.insert(craned_id_list.begin(), craned_id_list.end());
   CRANE_TRACE("Trying register all craneds...");
 }
 
@@ -346,8 +345,6 @@ void CranedKeeper::StateMonitorThreadFunc_() {
             // PutBackNodeIntoUnavailList_ in m_clean_up_cb_ and put this craned
             // into the re-connecting queue again.
             delete tag_data;
-
-            m_channel_count_.fetch_sub(1);
           } else if (tag->type == CqTag::kEstablishedCraned) {
             if (m_craned_is_down_cb_)
               g_thread_pool->push_task(m_craned_is_down_cb_,
@@ -654,6 +651,11 @@ void CranedKeeper::SetCranedIsTempUpCb(std::function<void(CranedId)> cb) {
   m_craned_rec_from_temp_failure_cb_ = std::move(cb);
 }
 
+void CranedKeeper::PutNodeIntoUnavailList(const std::string &crane_id) {
+  util::lock_guard guard(g_craned_keeper->m_unavail_craned_list_mtx_);
+  g_craned_keeper->m_unavail_craned_list_.emplace(crane_id);
+}
+
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   std::string ip_addr;
   if (!crane::ResolveIpv4FromHostname(craned_id, &ip_addr)) {
@@ -675,14 +677,15 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  //  channel_args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, 100 /*ms*/);
-  //  channel_args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, 1 /*s*/ * 1000
-  //  /*ms*/); channel_args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, 2 /*s*/ *
-  //  1000 /*ms*/);
-  //  channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIME_MS, 5 /*s*/ * 1000 /*ms*/);
-  //  channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 10 /*s*/ * 1000
-  //  /*ms*/); channel_args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1
-  //  /*true*/);
+  channel_args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, 1000 /*ms*/);
+  channel_args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, 2 /*s*/ * 1000
+                      /*ms*/);
+  channel_args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS,
+                      30 /*s*/ * 1000 /*ms*/);
+  //    channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIME_MS, 5 /*s*/ * 1000 /*ms*/);
+  //    channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 10 /*s*/ * 1000
+  //    /*ms*/); channel_args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1
+  //    /*true*/);
 
   CRANE_TRACE("Creating a channel to {}:{}. Channel count: {}", craned_id,
               kCranedDefaultPort, m_channel_count_.fetch_add(1) + 1);
@@ -714,7 +717,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
       crane::grpc::Craned::NewStub(cq_tag_data->craned->m_channel_);
 
   cq_tag_data->craned->m_craned_id_ = craned_id;
-  cq_tag_data->craned->m_clean_up_cb_ = PutBackNodeIntoUnavailList_;
+  cq_tag_data->craned->m_clean_up_cb_ = CranedChannelConnectFail_;
 
   cq_tag_data->craned->m_maximum_retry_times_ = 2;
 
@@ -731,11 +734,12 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
       &m_cq_, tag);
 }
 
-void CranedKeeper::PutBackNodeIntoUnavailList_(CranedStub *stub) {
+void CranedKeeper::CranedChannelConnectFail_(CranedStub *stub) {
   CranedKeeper *node_keeper = stub->m_craned_keeper_;
   util::lock_guard guard(node_keeper->m_unavail_craned_list_mtx_);
 
-  node_keeper->m_unavail_craned_list_.emplace_back(stub->m_craned_id_);
+  node_keeper->m_channel_count_.fetch_sub(1);
+  node_keeper->m_connecting_craned_set_.erase(stub->m_craned_id_);
 }
 
 void CranedKeeper::PeriodConnectCranedThreadFunc_() {
@@ -744,13 +748,14 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
 
     {
       util::lock_guard guard(m_unavail_craned_list_mtx_);
-      while (!m_unavail_craned_list_.empty()) {
-        g_thread_pool->push_task(
-            [this, craned_id = std::move(m_unavail_craned_list_.front())]() {
-              ConnectCranedNode_(craned_id);
-            });
-        m_unavail_craned_list_.pop_front();
+      for (const auto &craned : m_unavail_craned_list_) {
+        if (!m_connecting_craned_set_.contains(craned)) {
+          m_connecting_craned_set_.emplace(craned);
+          g_thread_pool->push_task(
+              [this, craned_id = craned]() { ConnectCranedNode_(craned_id); });
+        }
       }
+      m_unavail_craned_list_.clear();
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));

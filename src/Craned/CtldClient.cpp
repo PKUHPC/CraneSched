@@ -60,6 +60,21 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
 
+void CtldClient::CraneCtldConnected() {
+  grpc::ClientContext context;
+  crane::grpc::NodeRegisterRequest request;
+  crane::grpc::NodeRegisterReply reply;
+  grpc::Status status;
+
+  request.set_craned_id(m_craned_id_);
+
+  status = m_stub_->NodeRegister(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_DEBUG("NodeActiveConnect RPC returned with status not ok: {}",
+                status.error_message());
+  }
+}
+
 void CtldClient::TaskStatusChangeAsync(TaskStatusChange&& task_status_change) {
   absl::MutexLock lock(&m_task_status_change_mtx_);
   m_task_status_change_list_.emplace_back(std::move(task_status_change));
@@ -88,15 +103,26 @@ bool CtldClient::CancelTaskStatusChangeByTaskId(
 }
 
 void CtldClient::AsyncSendThread_() {
+  std::unique_lock<std::mutex> lk(s_sigint_mtx);
+  s_sigint_cv.wait(lk);
+
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+
   absl::Condition cond(
       +[](decltype(m_task_status_change_list_)* queue) {
         return !queue->empty();
       },
       &m_task_status_change_list_);
 
+  bool pre_state = false;
   while (true) {
     bool connected = m_ctld_channel_->WaitForConnected(
         std::chrono::system_clock::now() + std::chrono::seconds(3));
+
+    if (!pre_state && connected) {
+      g_ctld_client->CraneCtldConnected();
+    }
+    pre_state = connected;
 
     bool has_msg = m_task_status_change_mtx_.LockWhenWithTimeout(
         cond, absl::Milliseconds(50));

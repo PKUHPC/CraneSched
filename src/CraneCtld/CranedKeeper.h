@@ -116,6 +116,8 @@ class CranedKeeper {
 
   void SetCranedIsTempUpCb(std::function<void(CranedId)> cb);
 
+  static void PutNodeIntoUnavailList(const std::string &crane_id);
+
  private:
   struct InitializingCranedTagData {
     std::unique_ptr<CranedStub> craned;
@@ -127,7 +129,7 @@ class CranedKeeper {
     void *data;
   };
 
-  static void PutBackNodeIntoUnavailList_(CranedStub *stub);
+  static void CranedChannelConnectFail_(CranedStub *stub);
 
   void ConnectCranedNode_(CranedId const &craned_id);
 
@@ -160,7 +162,8 @@ class CranedKeeper {
       m_connected_craned_id_stub_map_ GUARDED_BY(m_connected_craned_mtx_);
 
   Mutex m_unavail_craned_list_mtx_;
-  std::list<CranedId> m_unavail_craned_list_;
+  std::unordered_set<CranedId> m_unavail_craned_list_;
+  std::unordered_set<CranedId> m_connecting_craned_set_;
 
   grpc::CompletionQueue m_cq_;
   Mutex m_cq_mtx_;

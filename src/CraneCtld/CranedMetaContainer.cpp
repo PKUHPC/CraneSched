@@ -59,6 +59,13 @@ void CranedMetaContainerSimpleImpl::CranedDown(CranedId craned_id) {
   node_meta.running_task_resource_map.clear();
 }
 
+bool CranedMetaContainerSimpleImpl::CheckCranedOnline(
+    const CranedId& craned_id) {
+  LockGuard guard(mtx_);
+  CRANE_ASSERT(craned_meta_map_.contains(craned_id));
+  return craned_meta_map_.at(craned_id).alive;
+}
+
 CranedMetaContainerInterface::PartitionMetasPtr
 CranedMetaContainerSimpleImpl::GetPartitionMetasPtr(PartitionId partition_id) {
   mtx_.lock();

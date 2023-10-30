@@ -7,5 +7,5 @@ DbUser: admin
 DbPassword: "123456"
 DbHost: localhost
 DbPort: 27017
-DbReplSetName: rs0
+DbReplSetName: crane_rs
 DbName: crane_db
