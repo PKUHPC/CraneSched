@@ -69,6 +69,9 @@ class CranedMetaContainerInterface {
   virtual crane::grpc::QueryClusterInfoReply QueryClusterInfo(
       const crane::grpc::QueryClusterInfoRequest& request) = 0;
 
+  virtual crane::grpc::ModifyNodeReply ChangeNodeState(
+      const crane::grpc::ModifyNodeRequest& request) = 0;
+
   virtual void MallocResourceFromNode(CranedId node_id, uint32_t task_id,
                                       const Resources& resources) = 0;
   virtual void FreeResourceFromNode(CranedId node_id, uint32_t task_id) = 0;
@@ -112,6 +115,9 @@ class CranedMetaContainerSimpleImpl final
 
   crane::grpc::QueryClusterInfoReply QueryClusterInfo(
       const crane::grpc::QueryClusterInfoRequest& request) override;
+
+  crane::grpc::ModifyNodeReply ChangeNodeState(
+      const crane::grpc::ModifyNodeRequest& request) override;
 
   void CranedUp(const CranedId& craned_id) override;
 

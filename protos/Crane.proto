@@ -287,6 +287,17 @@ message ModifyTaskReply {
   string reason = 2;
 }
 
+message ModifyNodeRequest{
+  string name = 1;
+  bool drain = 2;
+  string reason = 3;
+}
+
+message ModifyNodeReply{
+  bool ok = 1;
+  string reason = 2;
+}
+
 message AddAccountRequest {
   uint32 uid = 1;
   AccountInfo account = 2;
@@ -597,6 +608,7 @@ service CraneCtld {
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
+  rpc ModifyNode(ModifyNodeRequest) returns (ModifyNodeReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);

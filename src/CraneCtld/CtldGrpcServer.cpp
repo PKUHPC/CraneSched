@@ -142,6 +142,14 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::ModifyNode(
+    grpc::ServerContext *context, const crane::grpc::ModifyNodeRequest *request,
+    crane::grpc::ModifyNodeReply *response) {
+  *response = g_meta_container->ChangeNodeState(*request);
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryTasksInfoRequest *request,

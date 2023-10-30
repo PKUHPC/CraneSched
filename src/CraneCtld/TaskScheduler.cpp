@@ -1176,7 +1176,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     CranedMeta const& craned_meta = craned_meta_map.at(craned_id);
 
     // An offline craned shouldn't be scheduled.
-    if (!craned_meta.alive) continue;
+    if (!craned_meta.alive || craned_meta.drain) continue;
 
     // Sort all running task in this node by ending time.
     std::vector<std::pair<absl::Time, uint32_t>> end_time_task_id_vec;

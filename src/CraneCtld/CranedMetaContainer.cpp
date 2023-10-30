@@ -416,7 +416,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     auto& res_total = craned_meta.res_total.allocatable_resource;
     auto& res_in_use = craned_meta.res_in_use.allocatable_resource;
     auto& res_avail = craned_meta.res_avail.allocatable_resource;
-    if (craned_meta.alive) {
+    if (craned_meta.alive && !craned_meta.drain) {
       if (res_in_use.cpu_count == 0 && res_in_use.memory_bytes == 0) {
         return filter_craned_states_set.contains(
             crane::grpc::CranedState::CRANE_IDLE);
@@ -426,6 +426,9 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       else
         return filter_craned_states_set.contains(
             crane::grpc::CranedState::CRANE_MIX);
+    } else if (craned_meta.alive && craned_meta.drain) {
+      return filter_craned_states_set.contains(
+          crane::grpc::CranedState::CRANE_DRAIN);
     } else {
       return filter_craned_states_set.contains(
           crane::grpc::CranedState::CRANE_DOWN);
@@ -473,14 +476,16 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     auto* mix_craned_list = craned_lists->Add();
     auto* alloc_craned_list = craned_lists->Add();
     auto* down_craned_list = craned_lists->Add();
+    auto* drain_craned_list = craned_lists->Add();
 
     idle_craned_list->set_state(crane::grpc::CranedState::CRANE_IDLE);
     mix_craned_list->set_state(crane::grpc::CranedState::CRANE_MIX);
     alloc_craned_list->set_state(crane::grpc::CranedState::CRANE_ALLOC);
     down_craned_list->set_state(crane::grpc::CranedState::CRANE_DOWN);
+    drain_craned_list->set_state(crane::grpc::CranedState::CRANE_DRAIN);
 
     std::list<std::string> idle_craned_name_list, mix_craned_name_list,
-        alloc_craned_name_list, down_craned_name_list;
+        alloc_craned_name_list, down_craned_name_list, drain_craned_name_list;
 
     auto craned_rng =
         part_meta.craned_ids |
@@ -497,7 +502,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       auto& res_total = craned_meta.res_total.allocatable_resource;
       auto& res_in_use = craned_meta.res_in_use.allocatable_resource;
       auto& res_avail = craned_meta.res_avail.allocatable_resource;
-      if (craned_meta.alive) {
+      if (craned_meta.alive && !craned_meta.drain) {
         if (res_in_use.cpu_count == 0 && res_in_use.memory_bytes == 0) {
           idle_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
           idle_craned_list->set_count(idle_craned_name_list.size());
@@ -508,6 +513,9 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
           mix_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
           mix_craned_list->set_count(mix_craned_name_list.size());
         }
+      } else if (craned_meta.alive && craned_meta.drain) {
+        drain_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
+        drain_craned_list->set_count(drain_craned_name_list.size());
       } else {
         down_craned_name_list.emplace_back(craned_meta.static_meta.hostname);
         down_craned_list->set_count(down_craned_name_list.size());
@@ -522,8 +530,33 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
         util::HostNameListToStr(alloc_craned_name_list));
     down_craned_list->set_craned_list_regex(
         util::HostNameListToStr(down_craned_name_list));
+    drain_craned_list->set_craned_list_regex(
+        util::HostNameListToStr(drain_craned_name_list));
   });
 
+  return reply;
+}
+
+crane::grpc::ModifyNodeReply CranedMetaContainerSimpleImpl::ChangeNodeState(
+    const crane::grpc::ModifyNodeRequest& request) {
+  crane::grpc::ModifyNodeReply reply;
+
+  auto crane_meta = craned_meta_map_.find(request.name());
+  if (crane_meta == craned_meta_map_.end()) {
+    reply.set_ok(false);
+    reply.set_reason("Invalid node name specified.");
+    return reply;
+  }
+
+  if (request.drain()) {
+    crane_meta->second.drain = true;
+    crane_meta->second.drain_reason = request.reason();
+  } else {
+    crane_meta->second.drain = false;
+    crane_meta->second.drain_reason = "";
+  }
+
+  reply.set_ok(true);
   return reply;
 }
 
