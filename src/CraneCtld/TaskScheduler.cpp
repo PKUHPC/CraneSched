@@ -699,10 +699,16 @@ CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
   m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_task_indexes_mtx_.Unlock();
 
-  m_submit_task_queue_.enqueue(std::move(task));
+  std::promise<bool> promise;
+  std::future<bool> future = promise.get_future();
+
+  m_submit_task_queue_.enqueue({std::move(task), std::move(promise)});
   m_submit_task_async_handle_->send();
 
-  return CraneErr::kOk;
+  if (future.get())
+    return CraneErr::kOk;
+  else
+    return CraneErr::kSystemErr;
 }
 
 CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
@@ -1027,17 +1033,10 @@ void TaskScheduler::CleanCancelQueueCb_() {
       craned_id_task_ids_map[craned_id].emplace_back(task_id);
   }
 
-  for (auto&& [craned_id, task_ids] : craned_id_task_ids_map) {
-    g_thread_pool->push_task(
-        [id = craned_id, task_ids_to_cancel = std::move(task_ids)]() {
-          auto* stub = g_craned_keeper->GetCranedStub(id);
-          stub->TerminateTasks(task_ids_to_cancel);
-        });
-  }
-
   if (pending_tasks_to_cancel.empty()) return;
-  g_thread_pool->push_task([pending_list = std::move(pending_tasks_to_cancel),
-                            this]() {
+  {
+    auto& pending_list = pending_tasks_to_cancel;
+
     std::vector<task_db_id_t> db_id_list;
     std::vector<TaskInCtld*> task_ptr_list;
     db_id_list.reserve(pending_list.size());
@@ -1045,9 +1044,13 @@ void TaskScheduler::CleanCancelQueueCb_() {
 
     LockGuard pending_guard(&m_pending_task_map_mtx_);
 
-    txn_id_t update_txn_id, move_txn_id, purge_txn_id;
+    txn_id_t p_txn_id, update_txn_id, move_txn_id, purge_txn_id;
+    if (!g_embedded_db_client->BeginTransaction(&p_txn_id)) return;
 
-    if (!g_embedded_db_client->BeginTransaction(&update_txn_id)) return;
+    if (!g_embedded_db_client->BeginTransaction(&update_txn_id, p_txn_id)) {
+      g_embedded_db_client->AbortTransaction(p_txn_id);
+      return;
+    }
     for (const auto& id : pending_list) {
       auto it = m_pending_task_map_.find(id);
       CRANE_ASSERT(it != m_pending_task_map_.end());
@@ -1062,9 +1065,15 @@ void TaskScheduler::CleanCancelQueueCb_() {
       g_embedded_db_client->UpdatePersistedPartOfTask(
           update_txn_id, task->TaskDbId(), task->PersistedPart());
     }
-    if (!g_embedded_db_client->CommitTransaction(update_txn_id)) return;
+    if (!g_embedded_db_client->CommitTransaction(update_txn_id)) {
+      g_embedded_db_client->AbortTransaction(p_txn_id);
+      return;
+    }
 
-    if (!g_embedded_db_client->BeginTransaction(&move_txn_id)) return;
+    if (!g_embedded_db_client->BeginTransaction(&move_txn_id, p_txn_id)) {
+      g_embedded_db_client->AbortTransaction(p_txn_id);
+      return;
+    }
 
     for (const auto& db_id : db_id_list) {
       g_embedded_db_client->MovePendingOrRunningTaskToEnded(move_txn_id, db_id);
@@ -1074,16 +1083,19 @@ void TaskScheduler::CleanCancelQueueCb_() {
           "Failed to call "
           "g_embedded_db_client->MovePendingOrRunningTaskToEnded() for a batch "
           "of tasks");
+      g_embedded_db_client->AbortTransaction(p_txn_id);
       return;
     }
 
     if (!g_db_client->InsertJobs(task_ptr_list)) {
       CRANE_ERROR(
           "Failed to call g_db_client->InsertJobs() for a batch of tasks");
+      g_embedded_db_client->AbortTransaction(p_txn_id);
       return;
     }
 
-    if (!g_embedded_db_client->BeginTransaction(&purge_txn_id)) {
+    if (!g_embedded_db_client->BeginTransaction(&purge_txn_id, p_txn_id)) {
+      g_embedded_db_client->AbortTransaction(p_txn_id);
       return;
     }
     for (const auto& db_id : db_id_list) {
@@ -1093,13 +1105,24 @@ void TaskScheduler::CleanCancelQueueCb_() {
       CRANE_ERROR(
           "Failed to call "
           "g_embedded_db_client->PurgeTaskFromEnded() for a batch of tasks");
+      g_embedded_db_client->AbortTransaction(p_txn_id);
       return;
     }
+
+    if (!g_embedded_db_client->CommitTransaction(p_txn_id)) return;
 
     for (const auto& id : pending_list) {
       m_pending_task_map_.erase(id);
     }
-  });
+  }
+
+  for (auto&& [craned_id, task_ids] : craned_id_task_ids_map) {
+    g_thread_pool->push_task(
+        [id = craned_id, task_ids_to_cancel = std::move(task_ids)]() {
+          auto* stub = g_craned_keeper->GetCranedStub(id);
+          stub->TerminateTasks(task_ids_to_cancel);
+        });
+  }
 }
 
 void TaskScheduler::SubmitTaskTimerCb_() {
@@ -1116,7 +1139,8 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_task_queue_.size_approx();
 
-  std::vector<std::unique_ptr<TaskInCtld>> submit_tasks;
+  std::vector<std::pair<std::unique_ptr<TaskInCtld>, std::promise<bool>>>
+      submit_tasks;
   submit_tasks.resize(approximate_size);
 
   size_t actual_size = m_submit_task_queue_.try_dequeue_bulk(
@@ -1125,8 +1149,9 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   if (actual_size == 0) return;
 
   LockGuard pending_guard(&m_pending_task_map_mtx_);
-  for (auto& task : submit_tasks) {
+  for (auto& [task, promise] : submit_tasks) {
     m_pending_task_map_.emplace(task->TaskId(), std::move(task));
+    promise.set_value(true);
   }
 }
 

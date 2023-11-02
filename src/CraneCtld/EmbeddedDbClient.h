@@ -60,7 +60,7 @@ class IEmbeddedDb {
   virtual result::result<void, DbErrorCode> Delete(txn_id_t txn_id,
                                                    std::string const& key) = 0;
 
-  virtual result::result<txn_id_t, DbErrorCode> Begin() = 0;
+  virtual result::result<txn_id_t, DbErrorCode> Begin(txn_id_t p_txn_id) = 0;
 
   virtual result::result<void, DbErrorCode> Commit(txn_id_t txn_id) = 0;
 
@@ -89,7 +89,7 @@ class UnqliteDb : public IEmbeddedDb {
   result::result<void, DbErrorCode> Delete(txn_id_t txn_id,
                                            const std::string& key) override;
 
-  result::result<txn_id_t, DbErrorCode> Begin() override;
+  result::result<txn_id_t, DbErrorCode> Begin(txn_id_t p_txn_id) override;
 
   result::result<void, DbErrorCode> Commit(txn_id_t txn_id) override;
 
@@ -128,7 +128,7 @@ class BerkeleyDb : public IEmbeddedDb {
   result::result<void, DbErrorCode> Delete(txn_id_t txn_id,
                                            const std::string& key) override;
 
-  result::result<txn_id_t, DbErrorCode> Begin() override;
+  result::result<txn_id_t, DbErrorCode> Begin(txn_id_t p_txn_id) override;
 
   result::result<void, DbErrorCode> Commit(txn_id_t txn_id) override;
 
@@ -209,8 +209,8 @@ class EmbeddedDbClient {
 
   bool Init(std::string const& db_path);
 
-  bool BeginTransaction(txn_id_t* txn_id) {
-    auto result = m_embedded_db_->Begin();
+  bool BeginTransaction(txn_id_t* txn_id, txn_id_t p_txn_id = 0) {
+    auto result = m_embedded_db_->Begin(p_txn_id);
     if (result.has_value()) {
       *txn_id = result.value();
       return true;

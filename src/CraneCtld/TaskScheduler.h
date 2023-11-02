@@ -315,7 +315,8 @@ class TaskScheduler {
   void SubmitTaskTimerCb_();
 
   std::shared_ptr<uvw::async_handle> m_submit_task_async_handle_;
-  ConcurrentQueue<std::unique_ptr<TaskInCtld>> m_submit_task_queue_;
+  ConcurrentQueue<std::pair<std::unique_ptr<TaskInCtld>, std::promise<bool>>>
+      m_submit_task_queue_;
   void SubmitTaskAsyncCb_();
 
   std::shared_ptr<uvw::async_handle> m_clean_submit_queue_handle_;
