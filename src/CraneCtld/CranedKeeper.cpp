@@ -338,8 +338,9 @@ void CranedKeeper::StateMonitorThreadFunc_() {
             // free tag_data
             auto *tag_data =
                 reinterpret_cast<InitializingCranedTagData *>(tag->data);
-            CRANE_TRACE("Failed connect to {}. Re-connect it later..",
-                        tag_data->craned->m_craned_id_);
+            CRANE_TRACE(
+                "Failed connect to {}. Waiting for its active connection",
+                tag_data->craned->m_craned_id_);
 
             // When deleting tag_data, the destructor will call
             // PutBackNodeIntoUnavailList_ in m_clean_up_cb_ and put this craned
