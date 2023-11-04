@@ -29,12 +29,13 @@ inline const char* kCraneCtldDefaultLogPath = "/tmp/cranectld/cranectld.log";
 inline const char* kDefaultDbPath = "/tmp/cranectld/embedded.db";
 inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
 
-constexpr uint64_t kTaskScheduleIntervalMs = 1000;
-constexpr uint16_t kCompletionQueueDelaySeconds = 15;
+constexpr uint32_t kTaskScheduleIntervalMs = 1000;
+constexpr uint16_t kCompletionQueueDelaySeconds = 30;
 constexpr uint32_t kCancelTaskTimeoutMs = 500;
-constexpr uint64_t kCancelTaskBatchNum = 1000;
+constexpr uint32_t kCancelTaskBatchNum = 1000;
 constexpr uint32_t kSubmitTaskTimeoutMs = 500;
-constexpr uint64_t kSubmitTaskBatchNum = 1000;
+constexpr uint32_t kSubmitTaskBatchNum = 1000;
+constexpr uint32_t kMaxConnectingNodeNum = 3000;
 
 struct Config {
   struct Node {

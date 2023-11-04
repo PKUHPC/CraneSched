@@ -406,6 +406,12 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
         raw_craned->m_failure_retry_times_ = 0;
         raw_craned->m_invalid_ = false;
       }
+      {
+        util::lock_guard guard(m_unavail_craned_list_mtx_);
+        m_unavail_craned_list_.erase(raw_craned->m_craned_id_);
+        m_connecting_craned_set_.erase(raw_craned->m_craned_id_);
+      }
+
       if (m_craned_is_up_cb_)
         g_thread_pool->push_task(m_craned_is_up_cb_, raw_craned->m_craned_id_);
 
@@ -749,14 +755,19 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
 
     {
       util::lock_guard guard(m_unavail_craned_list_mtx_);
-      for (const auto &craned : m_unavail_craned_list_) {
-        if (!m_connecting_craned_set_.contains(craned)) {
-          m_connecting_craned_set_.emplace(craned);
+      uint32_t fetch_num =
+          kMaxConnectingNodeNum - m_connecting_craned_set_.size();
+
+      auto it = m_unavail_craned_list_.begin();
+      while (it != m_unavail_craned_list_.end() && fetch_num) {
+        if (!m_connecting_craned_set_.contains(*it)) {
+          m_connecting_craned_set_.emplace(*it);
           g_thread_pool->push_task(
-              [this, craned_id = craned]() { ConnectCranedNode_(craned_id); });
+              [this, craned_id = *it]() { ConnectCranedNode_(craned_id); });
+          fetch_num--;
         }
+        it = m_unavail_craned_list_.erase(it);
       }
-      m_unavail_craned_list_.clear();
     }
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
