@@ -62,9 +62,9 @@ void CranedMetaContainerSimpleImpl::CranedDown(const CranedId& craned_id) {
 
 bool CranedMetaContainerSimpleImpl::CheckCranedOnline(
     const CranedId& craned_id) {
-  LockGuard guard(mtx_);
   CRANE_ASSERT(craned_meta_map_.contains(craned_id));
-  return craned_meta_map_.at(craned_id).alive;
+  auto node_meta = craned_meta_map_.get_read_ptr(craned_id);
+  return node_meta->alive;
 }
 
 CranedMetaContainerInterface::PartitionMetasPtr
@@ -219,13 +219,6 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
   craned_id_part_ids_map_.InitFromMap(std::move(craned_partition_map));
   partition_metas_map_.InitFromMap(std::move(partition_map));
 }
-
-// bool CranedMetaContainerSimpleImpl::CheckCranedAllowed(
-//     const std::string& hostname) {
-//   LockGuard guard(mtx_);
-//
-//   return craned_meta_map_.contains(hostname);
-// }
 
 crane::grpc::QueryCranedInfoReply
 CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {

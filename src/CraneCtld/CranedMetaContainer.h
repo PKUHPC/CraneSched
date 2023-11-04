@@ -67,7 +67,7 @@ class CranedMetaContainerInterface {
 
   virtual void InitFromConfig(const Config& config) = 0;
 
-  //  virtual bool CheckCranedAllowed(const std::string& hostname) = 0;
+  virtual bool CheckCranedAllowed(const std::string& hostname) = 0;
 
   virtual crane::grpc::QueryCranedInfoReply QueryAllCranedInfo() = 0;
 
@@ -140,7 +140,9 @@ class CranedMetaContainerSimpleImpl final
 
   CranedMetaMapPtr GetCranedMetaMapPtr() override;
 
-  //  bool CheckCranedAllowed(const std::string& hostname) override;
+  bool CheckCranedAllowed(const std::string& hostname) override {
+    return craned_meta_map_.contains(hostname);
+  };
 
   void MallocResourceFromNode(CranedId node_id, task_id_t task_id,
                               const Resources& resources) override;
