@@ -43,8 +43,9 @@ class CforedStreamWriter {
                                crane::grpc::StreamCforedRequest> *stream)
       : m_stream_(stream), m_valid_(true) {}
 
-  bool WriteTaskIdReply(pid_t calloc_pid,
-                        result::result<task_id_t, std::string> res) {
+  bool WriteTaskIdReply(
+      pid_t calloc_pid,
+      result::result<std::future<task_id_t>, std::string> res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -54,7 +55,7 @@ class CforedStreamWriter {
     if (res.has_value()) {
       task_id_reply->set_ok(true);
       task_id_reply->set_pid(calloc_pid);
-      task_id_reply->set_task_id(res.value());
+      task_id_reply->set_task_id(res.value().get());
     } else {
       task_id_reply->set_ok(false);
       task_id_reply->set_pid(calloc_pid);
@@ -259,7 +260,7 @@ class CtldServer {
 
   inline void Wait() { m_server_->Wait(); }
 
-  result::result<task_id_t, std::string> SubmitTaskToScheduler(
+  result::result<std::future<task_id_t>, std::string> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 
  private:

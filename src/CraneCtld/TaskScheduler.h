@@ -212,7 +212,7 @@ class TaskScheduler {
 
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
-  CraneErr SubmitTask(std::unique_ptr<TaskInCtld> task, uint32_t* task_id);
+  std::future<task_id_t> SubmitTaskToQueue(std::unique_ptr<TaskInCtld> task);
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, int64_t secs);
 
@@ -243,6 +243,10 @@ class TaskScheduler {
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
 
+  static CraneErr AcquireTaskAttributes(TaskInCtld* task);
+
+  static CraneErr CheckTaskValidity(TaskInCtld* task);
+
  private:
   void TaskStatusChangeNoLock_(uint32_t task_id, const CranedId& craned_index,
                                crane::grpc::TaskStatus new_status,
@@ -252,10 +256,6 @@ class TaskScheduler {
       std::unique_ptr<TaskInCtld> task);
 
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
-
-  static CraneErr AcquireTaskAttributes(TaskInCtld* task);
-
-  static CraneErr CheckTaskValidity(TaskInCtld* task);
 
   static void TransferTaskToMongodb_(TaskInCtld* task);
 
@@ -282,8 +282,6 @@ class TaskScheduler {
   // Task Indexes
   HashMap<CranedId, HashSet<uint32_t /* Task ID*/>> m_node_to_tasks_map_
       GUARDED_BY(m_task_indexes_mtx_);
-  HashMap<PartitionId /* Partition ID */, HashSet<uint32_t /* Task ID */>>
-      m_partition_to_tasks_map_ GUARDED_BY(m_task_indexes_mtx_);
   Mutex m_task_indexes_mtx_;
 
   std::unique_ptr<IPrioritySorter> m_priority_sorter_;
@@ -315,7 +313,8 @@ class TaskScheduler {
   void SubmitTaskTimerCb_();
 
   std::shared_ptr<uvw::async_handle> m_submit_task_async_handle_;
-  ConcurrentQueue<std::pair<std::unique_ptr<TaskInCtld>, std::promise<bool>>>
+  ConcurrentQueue<
+      std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>>
       m_submit_task_queue_;
   void SubmitTaskAsyncCb_();
 

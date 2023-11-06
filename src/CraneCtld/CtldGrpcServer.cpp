@@ -36,7 +36,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
   if (result.has_value()) {
     response->set_ok(true);
-    response->set_task_id(result.value());
+    response->set_task_id(result.value().get());
   } else {
     response->set_ok(false);
     response->set_reason(result.error());
@@ -45,20 +45,26 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   return grpc::Status::OK;
 }
 
+// For testing purposes only
 grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTasksRequest *request,
     crane::grpc::SubmitBatchTasksReply *response) {
+  std::vector<result::result<std::future<task_id_t>, std::string>> results;
+
   for (auto const &task_to_ctld : request->tasks()) {
     auto task = std::make_unique<TaskInCtld>();
     task->SetFieldsByTaskToCtld(task_to_ctld);
 
     auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
-    if (result.has_value()) {
-      response->mutable_task_id_list()->Add(result.value());
-    } else {
-      response->mutable_reason_list()->Add(result.error());
-    }
+    results.emplace_back(std::move(result));
+  }
+
+  for (auto &res : results) {
+    if (res.has_value())
+      response->mutable_task_id_list()->Add(res.value().get());
+    else
+      response->mutable_reason_list()->Add(res.error());
   }
 
   return grpc::Status::OK;
@@ -1197,7 +1203,8 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
               auto result =
                   m_ctld_server_->SubmitTaskToScheduler(std::move(task));
 
-              ok = stream_writer.WriteTaskIdReply(payload.pid(), result);
+              ok = stream_writer.WriteTaskIdReply(payload.pid(),
+                                                  std::move(result));
               if (!ok) {
                 CRANE_ERROR(
                     "Failed to send msg to cfored {}. Connection is broken. "
@@ -1208,7 +1215,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
                 if (result.has_value()) {
                   m_ctld_server_->m_mtx_.Lock();
                   m_ctld_server_->m_cfored_running_tasks_[cfored_name].emplace(
-                      result.value());
+                      result.value().get());
                   m_ctld_server_->m_mtx_.Unlock();
                 }
               }
@@ -1324,8 +1331,8 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   signal(SIGINT, &CtldServer::signal_handler_func);
 }
 
-result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
-    std::unique_ptr<TaskInCtld> task) {
+result::result<std::future<task_id_t>, std::string>
+CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   CraneErr err;
 
   if (!task->password_entry->Valid()) {
@@ -1367,12 +1374,19 @@ result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
     return result::fail(enable_res.error());
   }
 
-  uint32_t task_id;
-  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
+  err = g_task_scheduler->AcquireTaskAttributes(task.get());
+
+  if (err == CraneErr::kOk)
+    err = g_task_scheduler->CheckTaskValidity(task.get());
+
   if (err == CraneErr::kOk) {
-    return {task_id};
-    CRANE_DEBUG("Received an task request. Task id allocated: {}", task_id);
-  } else if (err == CraneErr::kNonExistent) {
+    task->SetSubmitTime(absl::Now());
+    std::future<task_id_t> future =
+        g_task_scheduler->SubmitTaskToQueue(std::move(task));
+    return {std::move(future)};
+  }
+
+  if (err == CraneErr::kNonExistent) {
     CRANE_DEBUG("Task submission failed. Reason: Partition doesn't exist!");
     return result::fail("Partition doesn't exist!");
   } else if (err == CraneErr::kInvalidNodeNum) {
@@ -1392,11 +1406,8 @@ result::result<task_id_t, std::string> CtldServer::SubmitTaskToScheduler(
         "Task submission failed. "
         "Reason: The param of task is invalid.");
     return result::fail("The param of task is invalid.");
-  } else {
-    return result::fail(CraneErrStr(err));
   }
-
-  return {task_id};
+  return result::fail(CraneErrStr(err));
 }
 
 }  // namespace Ctld

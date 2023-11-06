@@ -415,9 +415,6 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_task_map_mtx_);
-  LockGuard indexes_guard(&m_task_indexes_mtx_);
-
-  m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_pending_task_map_.emplace(task->TaskId(), std::move(task));
 }
 
@@ -434,7 +431,6 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
   for (const CranedId& craned_id : task->CranedIds())
     m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
 
-  m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_running_task_map_.emplace(task->TaskId(), std::move(task));
 }
 
@@ -445,6 +441,7 @@ void TaskScheduler::CancelTaskThread_(
   idle_handle->on<uvw::idle_event>(
       [this](const uvw::idle_event&, uvw::idle_handle& h) {
         if (m_thread_stop_) h.parent().stop();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
       });
 
   if (idle_handle->start() != 0) {
@@ -461,6 +458,7 @@ void TaskScheduler::SubmitTaskThread_(
   idle_handle->on<uvw::idle_event>(
       [this](const uvw::idle_event&, uvw::idle_handle& h) {
         if (m_thread_stop_) h.parent().stop();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
       });
 
   if (idle_handle->start() != 0) {
@@ -671,44 +669,15 @@ void TaskScheduler::SetNodeSelectionAlgo(
   m_node_selection_algo_ = std::move(algo);
 }
 
-CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
-                                   uint32_t* task_id) {
-  CraneErr err;
-
-  err = AcquireTaskAttributes(task.get());
-  if (err != CraneErr::kOk) return err;
-
-  err = CheckTaskValidity(task.get());
-  if (err != CraneErr::kOk) return err;
-
-  // Add the task to the pending task queue.
-  task->SetStatus(crane::grpc::Pending);
-  task->SetSubmitTime(absl::Now());
-
-  bool ok;
-  ok =
-      g_embedded_db_client->AppendTaskToPendingAndAdvanceTaskIds(0, task.get());
-  if (!ok) {
-    CRANE_ERROR("Failed to append the task to embedded db queue.");
-    return CraneErr::kSystemErr;
-  }
-
-  *task_id = task->TaskId();
-
-  m_task_indexes_mtx_.Lock();
-  m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
-  m_task_indexes_mtx_.Unlock();
-
-  std::promise<bool> promise;
-  std::future<bool> future = promise.get_future();
+std::future<task_id_t> TaskScheduler::SubmitTaskToQueue(
+    std::unique_ptr<TaskInCtld> task) {
+  std::promise<task_id_t> promise;
+  std::future<task_id_t> future = promise.get_future();
 
   m_submit_task_queue_.enqueue({std::move(task), std::move(promise)});
   m_submit_task_async_handle_->send();
 
-  if (future.get())
-    return CraneErr::kOk;
-  else
-    return CraneErr::kSystemErr;
+  return std::move(future);
 }
 
 CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
@@ -1033,8 +1002,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
       craned_id_task_ids_map[craned_id].emplace_back(task_id);
   }
 
-  if (pending_tasks_to_cancel.empty()) return;
-  {
+  if (!pending_tasks_to_cancel.empty()) {
     auto& pending_list = pending_tasks_to_cancel;
 
     std::vector<task_db_id_t> db_id_list;
@@ -1139,19 +1107,43 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_task_queue_.size_approx();
 
-  std::vector<std::pair<std::unique_ptr<TaskInCtld>, std::promise<bool>>>
+  std::vector<std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>>
       submit_tasks;
   submit_tasks.resize(approximate_size);
+
+  std::vector<uint32_t> task_indexes_with_id_allocated;
 
   size_t actual_size = m_submit_task_queue_.try_dequeue_bulk(
       submit_tasks.begin(), approximate_size);
 
   if (actual_size == 0) return;
 
+  txn_id_t txn_id;
+  g_embedded_db_client->BeginTransaction(&txn_id);
+
+  // The order of element inside the bulk is reverse.
+  for (uint32_t i = 0; i < submit_tasks.size(); i++) {
+    uint32_t pos = submit_tasks.size() - 1 - i;
+    auto* task = submit_tasks[pos].first.get();
+    auto& task_id_promise = submit_tasks[pos].second;
+    // Add the task to the pending task queue.
+    task->SetStatus(crane::grpc::Pending);
+
+    if (!g_embedded_db_client->AppendTaskToPendingAndAdvanceTaskIds(txn_id,
+                                                                    task)) {
+      CRANE_ERROR("Failed to append the task to embedded db queue.");
+      task_id_promise.set_value(0);
+    } else
+      task_indexes_with_id_allocated.emplace_back(pos);
+  }
+  g_embedded_db_client->CommitTransaction(txn_id);
+
   LockGuard pending_guard(&m_pending_task_map_mtx_);
-  for (auto& [task, promise] : submit_tasks) {
-    m_pending_task_map_.emplace(task->TaskId(), std::move(task));
-    promise.set_value(true);
+  for (uint32_t i : task_indexes_with_id_allocated) {
+    task_id_t id = submit_tasks[i].first->TaskId();
+
+    m_pending_task_map_.emplace(id, std::move(submit_tasks[i].first));
+    submit_tasks[i].second.set_value(id);
   }
 }
 
@@ -1873,6 +1865,7 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
         uint32_t num_task = it->first + 1;
         node_info.task_num_node_id_map.erase(it);
         node_info.task_num_node_id_map.emplace(num_task, craned_id);
+        break;
       }
     }
 
