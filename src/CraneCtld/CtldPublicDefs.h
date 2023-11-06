@@ -30,12 +30,14 @@ inline const char* kDefaultDbPath = "/tmp/cranectld/embedded.db";
 inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
 
 constexpr uint32_t kTaskScheduleIntervalMs = 1000;
-constexpr uint16_t kCompletionQueueDelaySeconds = 30;
+constexpr uint16_t kCompletionQueueDelaySeconds = 45;
 constexpr uint32_t kCancelTaskTimeoutMs = 500;
 constexpr uint32_t kCancelTaskBatchNum = 1000;
 constexpr uint32_t kSubmitTaskTimeoutMs = 500;
 constexpr uint32_t kSubmitTaskBatchNum = 1000;
-constexpr uint32_t kMaxConnectingNodeNum = 3000;
+constexpr uint32_t kConcurrentStreamQuota = 500;
+constexpr uint32_t kCompletionQueueCapacity = 5000;
+constexpr uint32_t kSingleScheduleTasksQuota = 5000;
 
 struct Config {
   struct Node {

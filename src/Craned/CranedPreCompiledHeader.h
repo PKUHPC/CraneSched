@@ -55,6 +55,8 @@
 #include <absl/synchronization/blocking_counter.h>
 #include <absl/synchronization/mutex.h>
 
+#include "absl/synchronization/notification.h"
+
 // Boost
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/join.hpp>

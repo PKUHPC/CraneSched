@@ -59,7 +59,7 @@ class CtldClient {
 
   [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
 
-  inline void notify_handle() { s_sigint_cv.notify_one(); }
+  inline void start_connecting() { m_connection_notification_.Notify(); }
 
  private:
   void AsyncSendThread_();
@@ -78,8 +78,7 @@ class CtldClient {
 
   CranedId m_craned_id_;
 
-  std::mutex s_sigint_mtx;
-  std::condition_variable s_sigint_cv;
+  absl::Notification m_connection_notification_;
 };
 
 }  // namespace Craned

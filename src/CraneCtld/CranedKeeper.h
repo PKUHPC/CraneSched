@@ -88,7 +88,7 @@ class CranedKeeper {
   using WriterLock = absl::WriterMutexLock;
 
  public:
-  CranedKeeper();
+  explicit CranedKeeper(uint32_t node_num);
 
   ~CranedKeeper();
 
@@ -138,7 +138,7 @@ class CranedKeeper {
   CqTag *EstablishedCranedStateMachine_(CranedStub *craned,
                                         grpc_connectivity_state new_state);
 
-  void StateMonitorThreadFunc_();
+  void StateMonitorThreadFunc_(int thread_id);
 
   void PeriodConnectCranedThreadFunc_();
 
@@ -165,11 +165,11 @@ class CranedKeeper {
   std::unordered_set<CranedId> m_unavail_craned_list_;
   std::unordered_set<CranedId> m_connecting_craned_set_;
 
-  grpc::CompletionQueue m_cq_;
+  std::vector<std::unique_ptr<grpc::CompletionQueue>> m_cq_list_;
   Mutex m_cq_mtx_;
   bool m_cq_closed_;
 
-  std::thread m_cq_thread_;
+  std::vector<std::thread> m_cq_thread_list_;
 
   std::thread m_period_connect_thread_;
 

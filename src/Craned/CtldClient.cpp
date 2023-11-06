@@ -66,13 +66,21 @@ void CtldClient::CraneCtldConnected() {
   crane::grpc::NodeRegisterReply reply;
   grpc::Status status;
 
+  CRANE_INFO("Send a register RPC to cranectld");
   request.set_craned_id(m_craned_id_);
 
-  status = m_stub_->NodeRegister(&context, request, &reply);
-  if (!status.ok()) {
-    CRANE_DEBUG("NodeActiveConnect RPC returned with status not ok: {}",
-                status.error_message());
-  }
+  int retry_time = 5;
+
+  do {
+    status = m_stub_->NodeRegister(&context, request, &reply);
+    if (status.ok()) {
+      return;
+    }
+    CRANE_ERROR(
+        "NodeActiveConnect RPC returned with status not ok: {}, Resend it.",
+        status.error_message());
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+  } while (retry_time--);
 }
 
 void CtldClient::TaskStatusChangeAsync(TaskStatusChange&& task_status_change) {
@@ -103,8 +111,7 @@ bool CtldClient::CancelTaskStatusChangeByTaskId(
 }
 
 void CtldClient::AsyncSendThread_() {
-  std::unique_lock<std::mutex> lk(s_sigint_mtx);
-  s_sigint_cv.wait(lk);
+  m_connection_notification_.WaitForNotification();
 
   std::this_thread::sleep_for(std::chrono::seconds(1));
 
@@ -114,84 +121,80 @@ void CtldClient::AsyncSendThread_() {
       },
       &m_task_status_change_list_);
 
-  bool pre_state = false;
+  bool prev_conn_state = false;
   while (true) {
+    if (m_thread_stop_) break;
+
     bool connected = m_ctld_channel_->WaitForConnected(
         std::chrono::system_clock::now() + std::chrono::seconds(3));
 
-    if (!pre_state && connected) {
+    if (!prev_conn_state && connected) {
       g_ctld_client->CraneCtldConnected();
     }
-    pre_state = connected;
+    prev_conn_state = connected;
+
+    if (!connected) {
+      CRANE_INFO("Channel to CraneCtlD is not connected. Reconnecting...");
+      std::this_thread::sleep_for(std::chrono::seconds(10));
+      continue;
+    }
 
     bool has_msg = m_task_status_change_mtx_.LockWhenWithTimeout(
         cond, absl::Milliseconds(50));
     if (!has_msg) {
       m_task_status_change_mtx_.Unlock();
-      if (m_thread_stop_)
-        break;
-      else
-        continue;
+      continue;
     }
 
-    if (connected) {
-      std::list<TaskStatusChange> changes;
-      changes.splice(changes.begin(), std::move(m_task_status_change_list_));
-      m_task_status_change_mtx_.Unlock();
+    std::list<TaskStatusChange> changes;
+    changes.splice(changes.begin(), std::move(m_task_status_change_list_));
+    m_task_status_change_mtx_.Unlock();
 
-      while (!changes.empty()) {
-        grpc::ClientContext context;
-        crane::grpc::TaskStatusChangeRequest request;
-        crane::grpc::TaskStatusChangeReply reply;
-        grpc::Status status;
+    while (!changes.empty()) {
+      grpc::ClientContext context;
+      crane::grpc::TaskStatusChangeRequest request;
+      crane::grpc::TaskStatusChangeReply reply;
+      grpc::Status status;
 
-        auto status_change = changes.front();
+      auto status_change = changes.front();
 
-        CRANE_TRACE("Sending TaskStatusChange for task #{}",
-                    status_change.task_id);
+      CRANE_TRACE("Sending TaskStatusChange for task #{}",
+                  status_change.task_id);
 
-        request.set_craned_id(m_craned_id_);
-        request.set_task_id(status_change.task_id);
-        request.set_new_status(status_change.new_status);
-        request.set_exit_code(status_change.exit_code);
-        if (status_change.reason.has_value())
-          request.set_reason(status_change.reason.value());
+      request.set_craned_id(m_craned_id_);
+      request.set_task_id(status_change.task_id);
+      request.set_new_status(status_change.new_status);
+      request.set_exit_code(status_change.exit_code);
+      if (status_change.reason.has_value())
+        request.set_reason(status_change.reason.value());
 
-        status = m_stub_->TaskStatusChange(&context, request, &reply);
-        if (!status.ok()) {
-          CRANE_ERROR(
-              "Failed to send TaskStatusChange: "
-              "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
-              status_change.task_id, status_change.new_status,
-              status.error_message(), context.debug_error_string(),
-              status.error_code());
+      status = m_stub_->TaskStatusChange(&context, request, &reply);
+      if (!status.ok()) {
+        CRANE_ERROR(
+            "Failed to send TaskStatusChange: "
+            "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
+            status_change.task_id, status_change.new_status,
+            status.error_message(), context.debug_error_string(),
+            status.error_code());
 
-          if (status.error_code() == grpc::UNAVAILABLE) {
-            // If some messages are not sent due to channel failure,
-            // put them back into m_task_status_change_list_
-            if (!changes.empty()) {
-              m_task_status_change_mtx_.Lock();
-              m_task_status_change_list_.splice(
-                  m_task_status_change_list_.begin(), std::move(changes));
-              m_task_status_change_mtx_.Unlock();
-            }
-            break;
-          } else
-            changes.pop_front();
-        } else {
-          CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
-                      status_change.task_id, reply.ok());
+        if (status.error_code() == grpc::UNAVAILABLE) {
+          // If some messages are not sent due to channel failure,
+          // put them back into m_task_status_change_list_
+          if (!changes.empty()) {
+            m_task_status_change_mtx_.Lock();
+            m_task_status_change_list_.splice(
+                m_task_status_change_list_.begin(), std::move(changes));
+            m_task_status_change_mtx_.Unlock();
+          }
+          break;
+        } else
           changes.pop_front();
-        }
+      } else {
+        CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
+                    status_change.task_id, reply.ok());
+        changes.pop_front();
       }
-    } else {
-      CRANE_TRACE(
-          "New TaskStatusChange in the queue, "
-          "but channel is not connected.");
-      m_task_status_change_mtx_.Unlock();
     }
-
-    if (m_thread_stop_) break;
   }
 }
 

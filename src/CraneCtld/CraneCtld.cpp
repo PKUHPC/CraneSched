@@ -510,7 +510,7 @@ void InitializeCtldGlobalVariables() {
     std::exit(1);
   }
 
-  g_craned_keeper = std::make_unique<CranedKeeper>();
+  g_craned_keeper = std::make_unique<CranedKeeper>(g_config.Nodes.size());
 
   g_craned_keeper->SetCranedIsUpCb([](const CranedId& craned_id) {
     CRANE_TRACE(
@@ -557,10 +557,10 @@ void InitializeCtldGlobalVariables() {
   // to be re-queued.
   size_t to_registered_craneds_cnt = g_config.Nodes.size();
   int time_second =
-      (int)(340.0 /
+      (int)(314.0 /
             (1.0 + std::exp(-0.0001 *
-                            ((double)to_registered_craneds_cnt - 20000.0)))) -
-      39;  // sigmoid
+                            ((double)to_registered_craneds_cnt - 30000.0)))) -
+      13;  // sigmoid
   std::chrono::time_point<std::chrono::system_clock> wait_end_point =
       std::chrono::system_clock::now() + std::chrono::seconds(time_second);
 

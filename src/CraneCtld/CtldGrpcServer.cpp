@@ -88,6 +88,11 @@ grpc::Status CraneCtldServiceImpl::NodeRegister(
     grpc::ServerContext *context,
     const crane::grpc::NodeRegisterRequest *request,
     crane::grpc::NodeRegisterReply *response) {
+  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
   bool alive = g_meta_container->CheckCranedOnline(request->craned_id());
   if (!alive) {
     g_craned_keeper->PutNodeIntoUnavailList(request->craned_id());
