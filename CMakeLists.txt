@@ -199,14 +199,55 @@ if (CRANE_ENABLE_TESTS)
     add_subdirectory(test EXCLUDE_FROM_ALL)
 endif ()
 
-# install binaries
-install(TARGETS cranectld craned
-        EXPORT crane
-        LIBRARY DESTINATION lib
-        ARCHIVE DESTINATION lib
-        RUNTIME DESTINATION bin
-        PUBLIC_HEADER DESTINATION include)
+# # install binaries
+# install(TARGETS cranectld craned
+#         EXPORT crane
+#         LIBRARY DESTINATION lib
+#         ARCHIVE DESTINATION lib
+#         RUNTIME DESTINATION bin
+#         PUBLIC_HEADER DESTINATION include)
 
+cpack_add_component(Cranectld
+    DISPLAY_NAME "Cranectld"
+    DESCRIPTION "This is the Cranectld component"
+)
+
+cpack_add_component(Craned
+    DISPLAY_NAME  "craned"
+    DESCRIPTION   "craned"
+    GROUP Craned)
+
+include(GNUInstallDirs)
+
+
+install(TARGETS cranectld
+        EXPORT crane
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR_MY}
+        COMPONENT Cranectld)
+
+install(FILES 
+        ${PROJECT_BINARY_DIR}/etc/cranectld.service
+        DESTINATION /etc/systemd/system/
+        COMPONENT Cranectld)
+
+install(FILES etc/config.yaml
+        DESTINATION /etc/crane
+        RENAME config_example.yaml
+        COMPONENT Cranectld)
+
+install(TARGETS pam_crane 
+        DESTINATION /usr/lib64/security/
+        COMPONENT Cranectld)
+
+install(TARGETS craned
+        EXPORT crane
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR_MY}
+        COMPONENT Craned)
+
+install(FILES
+        ${PROJECT_BINARY_DIR}/etc/craned.service
+        DESTINATION /etc/systemd/system/
+        COMPONENT Craned)
 
 # Install configuration files
 
@@ -214,15 +255,53 @@ set(BINDIR_VAR ${CMAKE_INSTALL_PREFIX}/bin) # This variable will replace @BINDIR
 configure_file(./etc/cranectld.service.in ${PROJECT_BINARY_DIR}/etc/cranectld.service)
 configure_file(./etc/craned.service.in ${PROJECT_BINARY_DIR}/etc/craned.service)
 
-install(FILES
-        ${PROJECT_BINARY_DIR}/etc/cranectld.service
-        ${PROJECT_BINARY_DIR}/etc/craned.service
-        DESTINATION /etc/systemd/system/)
+# install(FILES
+#         ${PROJECT_BINARY_DIR}/etc/cranectld.service
+#         ${PROJECT_BINARY_DIR}/etc/craned.service
+#         DESTINATION /etc/systemd/system/)
 
-install(FILES etc/config.yaml
-        DESTINATION /etc/crane
-        RENAME config_example.yaml)
+# install(FILES etc/config.yaml
+#         DESTINATION /etc/crane
+#         RENAME config_example.yaml)
 
 install(FILES etc/database.yaml
         DESTINATION /etc/crane
-        RENAME database_example.yaml)
+        RENAME database_example.yaml
+        COMPONENT Cranectld)
+
+
+
+
+
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Crane Sched")
+set(CPACK_PACKAGE_VENDOR "PKU HPC")
+set(CPACK_PACKAGE_VERSION_MAJOR "0")
+set(CPACK_PACKAGE_VERSION_MINOR "1")
+set(CPACK_PACKAGE_VERSION_PATCH "1")
+
+set(CPACK_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME}-${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+set(CPACK_SOURCE_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME}-${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}-source")
+
+set(CPACK_RPM_COMPONENT_INSTALL ON)
+set(CPACK_COMPONENTS_ALL Cranectld Craned)
+
+
+# Set the package generation system to RPM
+set(CPACK_GENERATOR "RPM")
+
+# Include dependencies (this will require RPM to resolve dependencies during installation)
+set(CPACK_RPM_PACKAGE_REQUIRES "epel-release, boost169-devel, boost169-static, openssl-devel, libcgroup-devel, curl-devel,  pam-devel, zlib-devel, zlib-static, libaio-devel")
+
+# Set package license (you'll want to change this to match your project's license)
+set(CPACK_RPM_PACKAGE_LICENSE "Your License Here")
+
+set(CPACK_SOURCE_IGNORE_FILES
+        ${PROJECT_BINARY_DIR}/build
+        ${PROJECT_BINARY_DIR}/cmake-build-debug
+        ${PROJECT_BINARY_DIR}//.idea
+        ${PROJECT_BINARY_DIR}/generated
+        ${PROJECT_BINARY_DIR}/.git)
+
+set(CPACK_RPM_Cranectld_POST_INSTALL_SCRIPT_FILE ${CMAKE_CURRENT_SOURCE_DIR}/post_install.sh)
+
+include(CPack)
