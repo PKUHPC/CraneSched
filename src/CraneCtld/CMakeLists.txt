@@ -30,8 +30,8 @@ target_link_libraries(cranectld PRIVATE
 
         Boost::boost
 
-        event_core
-        event_pthreads
+        event_core_static
+        event_pthreads_static
         uvw::uvw-static
 
         cxxopts

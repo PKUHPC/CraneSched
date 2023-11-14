@@ -63,7 +63,7 @@ def perf_test():
         cranectld = hosts[0]
         cranectld.cmd('echo > /tmp/output/cranectld.out')
         cranectld.cmd('echo > /tmp/output/cranectld.err')
-        cranectld.cmdPrint('nohup /home/llx/Documents/Crane/cmake-build-debug-vmmaster/src/CraneCtld/cranectld -H',
+        cranectld.cmdPrint('/home/llx/Documents/Crane/cmake-build-debug-vmmaster/src/CraneCtld/cranectld -H',
                            cranectld.name,
                            '-C', '/etc/crane/config-mininet.yaml',
                            '>', '/tmp/output/cranectld.out',
@@ -78,7 +78,7 @@ def perf_test():
             h.cmd('echo >', outfiles)
             h.cmd('echo >', errfiles)
             # Start pings
-            h.cmdPrint('nohup /home/llx/Documents/Crane/cmake-build-debug-vmmaster/src/Craned/craned -H', h.name,
+            h.cmdPrint('/home/llx/Documents/Crane/cmake-build-debug-vmmaster/src/Craned/craned -H', h.name,
                        '-C', '/etc/crane/config-mininet.yaml',
                        '>', outfiles,
                        '2>', errfiles,
