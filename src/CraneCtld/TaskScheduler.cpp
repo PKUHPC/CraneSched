@@ -1054,7 +1054,6 @@ void TaskScheduler::CleanCancelQueueCb_() {
     CRANE_ERROR(
         "Failed to call g_embedded_db_client->CommitTransaction() "
         "for cancelled pending tasks");
-    g_embedded_db_client->AbortTransaction(txn_id);
     return;
   }
 
@@ -1089,7 +1088,6 @@ void TaskScheduler::CleanCancelQueueCb_() {
     CRANE_ERROR(
         "Failed to call g_embedded_db_client->CommitTransaction() "
         "for cancelled pending tasks");
-    g_embedded_db_client->AbortTransaction(txn_id);
     return;
   }
 }
