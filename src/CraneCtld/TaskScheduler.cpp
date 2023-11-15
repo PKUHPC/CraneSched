@@ -42,6 +42,7 @@ TaskScheduler::~TaskScheduler() {
   m_thread_stop_ = true;
   if (m_schedule_thread_.joinable()) m_schedule_thread_.join();
   if (m_task_cancel_thread_.joinable()) m_task_cancel_thread_.join();
+  if (m_task_submit_thread_.joinable()) m_task_cancel_thread_.join();
 }
 
 bool TaskScheduler::Init() {
@@ -669,7 +670,7 @@ void TaskScheduler::SetNodeSelectionAlgo(
   m_node_selection_algo_ = std::move(algo);
 }
 
-std::future<task_id_t> TaskScheduler::SubmitTaskToQueue(
+std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
     std::unique_ptr<TaskInCtld> task) {
   std::promise<task_id_t> promise;
   std::future<task_id_t> future = promise.get_future();
@@ -903,7 +904,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
-      m_cancel_task_queue_.enqueue({task_id, ""});
+      m_cancel_task_queue_.enqueue({task_id, {}});
       m_cancel_task_async_handle_->send();
       reply.add_cancelled_tasks(task_id);
     }
@@ -982,114 +983,114 @@ void TaskScheduler::CancelTaskAsyncCb_() {
 }
 
 void TaskScheduler::CleanCancelQueueCb_() {
-  HashMap<CranedId, std::vector<task_id_t>> craned_id_task_ids_map;
-
   // It's ok to use an approximate size.
   size_t approximate_size = m_cancel_task_queue_.size_approx();
-
   std::vector<std::pair<task_id_t, CranedId>> tasks_to_cancel;
   tasks_to_cancel.resize(approximate_size);
+
+  std::vector<task_id_t> pending_tasks_vec;
+  HashMap<CranedId, std::vector<task_id_t>> running_task_craned_id_map;
 
   size_t actual_size = m_cancel_task_queue_.try_dequeue_bulk(
       tasks_to_cancel.begin(), approximate_size);
 
-  std::vector<task_id_t> pending_tasks_to_cancel;
-
   for (const auto& [task_id, craned_id] : tasks_to_cancel) {
     if (craned_id.empty())
-      pending_tasks_to_cancel.emplace_back(task_id);
+      pending_tasks_vec.emplace_back(task_id);
     else
-      craned_id_task_ids_map[craned_id].emplace_back(task_id);
+      running_task_craned_id_map[craned_id].emplace_back(task_id);
   }
 
-  if (!pending_tasks_to_cancel.empty()) {
-    auto& pending_list = pending_tasks_to_cancel;
-
-    std::vector<task_db_id_t> db_id_list;
-    std::vector<TaskInCtld*> task_ptr_list;
-    db_id_list.reserve(pending_list.size());
-    task_ptr_list.reserve(pending_list.size());
-
-    LockGuard pending_guard(&m_pending_task_map_mtx_);
-
-    txn_id_t p_txn_id, update_txn_id, move_txn_id, purge_txn_id;
-    if (!g_embedded_db_client->BeginTransaction(&p_txn_id)) return;
-
-    if (!g_embedded_db_client->BeginTransaction(&update_txn_id, p_txn_id)) {
-      g_embedded_db_client->AbortTransaction(p_txn_id);
-      return;
-    }
-    for (const auto& id : pending_list) {
-      auto it = m_pending_task_map_.find(id);
-      CRANE_ASSERT(it != m_pending_task_map_.end());
-
-      auto& task = it->second;
-      db_id_list.emplace_back(task->TaskDbId());
-      task_ptr_list.emplace_back(task.get());
-
-      task->SetStatus(crane::grpc::Cancelled);
-      task->SetEndTime(absl::Now());
-
-      g_embedded_db_client->UpdatePersistedPartOfTask(
-          update_txn_id, task->TaskDbId(), task->PersistedPart());
-    }
-    if (!g_embedded_db_client->CommitTransaction(update_txn_id)) {
-      g_embedded_db_client->AbortTransaction(p_txn_id);
-      return;
-    }
-
-    if (!g_embedded_db_client->BeginTransaction(&move_txn_id, p_txn_id)) {
-      g_embedded_db_client->AbortTransaction(p_txn_id);
-      return;
-    }
-
-    for (const auto& db_id : db_id_list) {
-      g_embedded_db_client->MovePendingOrRunningTaskToEnded(move_txn_id, db_id);
-    }
-    if (!g_embedded_db_client->CommitTransaction(move_txn_id)) {
-      CRANE_ERROR(
-          "Failed to call "
-          "g_embedded_db_client->MovePendingOrRunningTaskToEnded() for a batch "
-          "of tasks");
-      g_embedded_db_client->AbortTransaction(p_txn_id);
-      return;
-    }
-
-    if (!g_db_client->InsertJobs(task_ptr_list)) {
-      CRANE_ERROR(
-          "Failed to call g_db_client->InsertJobs() for a batch of tasks");
-      g_embedded_db_client->AbortTransaction(p_txn_id);
-      return;
-    }
-
-    if (!g_embedded_db_client->BeginTransaction(&purge_txn_id, p_txn_id)) {
-      g_embedded_db_client->AbortTransaction(p_txn_id);
-      return;
-    }
-    for (const auto& db_id : db_id_list) {
-      g_embedded_db_client->PurgeTaskFromEnded(purge_txn_id, db_id);
-    }
-    if (!g_embedded_db_client->CommitTransaction(purge_txn_id)) {
-      CRANE_ERROR(
-          "Failed to call "
-          "g_embedded_db_client->PurgeTaskFromEnded() for a batch of tasks");
-      g_embedded_db_client->AbortTransaction(p_txn_id);
-      return;
-    }
-
-    if (!g_embedded_db_client->CommitTransaction(p_txn_id)) return;
-
-    for (const auto& id : pending_list) {
-      m_pending_task_map_.erase(id);
-    }
-  }
-
-  for (auto&& [craned_id, task_ids] : craned_id_task_ids_map) {
+  for (auto&& [craned_id, task_ids] : running_task_craned_id_map) {
     g_thread_pool->push_task(
         [id = craned_id, task_ids_to_cancel = std::move(task_ids)]() {
           auto* stub = g_craned_keeper->GetCranedStub(id);
           stub->TerminateTasks(task_ids_to_cancel);
         });
+  }
+
+  if (pending_tasks_vec.empty()) return;
+
+  std::vector<std::unique_ptr<TaskInCtld>> task_pointer_vec;
+  {
+    // Allow temporary inconsistency on task querying here.
+    // In a very short duration, some cancelled tasks might not be visible
+    // immediately after changing to CANCELLED state.
+    // Also, since here we erase the task id from the pending task
+    // map with a little latency, some task id we retrieve might have been
+    // cancelled. Just ignore those who have already been cancelled.
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    for (task_id_t task_id : pending_tasks_vec) {
+      auto it = m_pending_task_map_.find(task_id);
+      if (it == m_pending_task_map_.end()) continue;
+
+      TaskInCtld* task = it->second.get();
+      task->SetStatus(crane::grpc::Cancelled);
+      task->SetEndTime(absl::Now());
+
+      task_pointer_vec.emplace_back(std::move(it->second));
+      m_pending_task_map_.erase(it);
+    }
+  }
+
+  txn_id_t txn_id;
+  if (!g_embedded_db_client->BeginTransaction(&txn_id)) {
+    CRANE_ERROR(
+        "Failed to call g_embedded_db_client->BeginTransaction(&txn_id) for "
+        "when p->e.");
+    return;
+  }
+
+  for (const auto& task : task_pointer_vec) {
+    // The Data part of a task doesn't have any forward or backward
+    // dependencies. It will not cause cycles here.
+    g_embedded_db_client->UpdatePersistedPartOfTask(txn_id, task->TaskDbId(),
+                                                    task->PersistedPart());
+    g_embedded_db_client->MovePendingOrRunningTaskToEnded(txn_id,
+                                                          task->TaskDbId());
+  }
+
+  if (!g_embedded_db_client->CommitTransaction(txn_id)) {
+    CRANE_ERROR(
+        "Failed to call g_embedded_db_client->CommitTransaction() "
+        "for cancelled pending tasks");
+    g_embedded_db_client->AbortTransaction(txn_id);
+    return;
+  }
+
+  {
+    std::vector<TaskInCtld*> task_raw_pointer_vec;
+    task_raw_pointer_vec.reserve(task_pointer_vec.size());
+
+    for (const auto& task : task_pointer_vec)
+      task_raw_pointer_vec.emplace_back(task.get());
+
+    // Now cancelled pending tasks are in MongoDB.
+    if (!g_db_client->InsertJobs(task_raw_pointer_vec)) {
+      CRANE_ERROR(
+          "Failed to call g_db_client->InsertJobs() for cancelled pending "
+          "tasks");
+      return;
+    }
+  }
+
+  txn_id = 0;
+  if (!g_embedded_db_client->BeginTransaction(&txn_id)) {
+    CRANE_ERROR(
+        "Failed to call g_embedded_db_client->BeginTransaction(&txn_id) for "
+        "when p->e.");
+    return;
+  }
+
+  for (const auto& task : task_pointer_vec)
+    g_embedded_db_client->PurgeTaskFromEnded(txn_id, task->TaskDbId());
+
+  if (!g_embedded_db_client->CommitTransaction(txn_id)) {
+    CRANE_ERROR(
+        "Failed to call g_embedded_db_client->CommitTransaction() "
+        "for cancelled pending tasks");
+    g_embedded_db_client->AbortTransaction(txn_id);
+    return;
   }
 }
 

@@ -45,7 +45,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   return grpc::Status::OK;
 }
 
-// For testing purposes only
 grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTasksRequest *request,
@@ -1382,7 +1381,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (err == CraneErr::kOk) {
     task->SetSubmitTime(absl::Now());
     std::future<task_id_t> future =
-        g_task_scheduler->SubmitTaskToQueue(std::move(task));
+        g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
   }
 

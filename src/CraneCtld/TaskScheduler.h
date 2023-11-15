@@ -212,7 +212,9 @@ class TaskScheduler {
 
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
-  std::future<task_id_t> SubmitTaskToQueue(std::unique_ptr<TaskInCtld> task);
+  /// \return The future is set to 0 if task submission is failed.
+  /// Otherwise, it is set to newly allocated task id.
+  std::future<task_id_t> SubmitTaskAsync(std::unique_ptr<TaskInCtld> task);
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, int64_t secs);
 

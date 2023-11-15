@@ -137,7 +137,7 @@ result::result<void, DbErrorCode> UnqliteDb::Delete(txn_id_t txn_id,
   }
 }
 
-result::result<txn_id_t, DbErrorCode> UnqliteDb::Begin(txn_id_t p_txn_id) {
+result::result<txn_id_t, DbErrorCode> UnqliteDb::Begin() {
   int rc;
   while (true) {
     rc = unqlite_begin(m_db_);
@@ -344,13 +344,12 @@ result::result<void, DbErrorCode> BerkeleyDb::Delete(txn_id_t txn_id,
   return {};
 }
 
-result::result<txn_id_t, DbErrorCode> BerkeleyDb::Begin(txn_id_t p_txn_id) {
+result::result<txn_id_t, DbErrorCode> BerkeleyDb::Begin() {
   DbTxn* txn = nullptr;
-  DbTxn* p_txn = GetDbTxnFromId_(p_txn_id);
 
   try {
     m_env_->txn_begin(
-        p_txn, &txn,
+        nullptr, &txn,
         DB_TXN_BULK  // Enable transactional bulk insert optimization.
     );
   } catch (DbException& e) {
