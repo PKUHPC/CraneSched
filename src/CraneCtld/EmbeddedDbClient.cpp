@@ -228,7 +228,6 @@ result::result<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
   try {
     m_env_ = std::make_unique<DbEnv>(0);
     m_env_->open(m_env_home_.c_str(), env_flags, 0);
-    m_env_->set_lk_detect(DB_LOCK_DEFAULT);
     m_db_ = std::make_unique<Db>(m_env_.get(), 0);  // Instantiate the Db object
 
     // Open the database
