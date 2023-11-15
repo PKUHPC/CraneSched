@@ -137,6 +137,29 @@ bool MongodbClient::InsertJob(TaskInCtld* task) {
   return false;
 }
 
+bool MongodbClient::InsertJobs(const std::vector<TaskInCtld*>& tasks) {
+  if (tasks.empty()) return false;
+  std::vector<bsoncxx::document::value> documents;
+
+  for (const auto& task : tasks) {
+    document doc = TaskInCtldToDocument_(task);
+    documents.push_back(doc.extract());
+  }
+
+  mongocxx::options::insert insert_options;
+  insert_options.ordered(false);  // unordered to speed up the operation
+
+  bsoncxx::stdx::optional<mongocxx::result::insert_many> ret =
+      (*GetClient_())[m_db_name_][m_task_collection_name_].insert_many(
+          *GetSession_(), documents, insert_options);
+
+  if (ret != bsoncxx::stdx::nullopt && ret->inserted_count() == tasks.size())
+    return true;
+
+  PrintError_("Failed to insert in-memory TaskInCtld.");
+  return false;
+}
+
 bool MongodbClient::FetchJobRecords(
     std::vector<std::unique_ptr<Ctld::TaskInCtld>>* task_list, size_t limit,
     bool reverse) {

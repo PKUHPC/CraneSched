@@ -47,6 +47,7 @@ class MongodbClient {
   bool InsertRecoveredJob(
       crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
   bool InsertJob(TaskInCtld* task);
+  bool InsertJobs(const std::vector<TaskInCtld*>& tasks);
 
   // Todo: Ugly interface! Since the task is fetch from DB, TaskInCtld is
   //  not a good type choice here!

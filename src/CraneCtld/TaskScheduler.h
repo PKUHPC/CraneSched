@@ -212,7 +212,9 @@ class TaskScheduler {
 
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
-  CraneErr SubmitTask(std::unique_ptr<TaskInCtld> task, uint32_t* task_id);
+  /// \return The future is set to 0 if task submission is failed.
+  /// Otherwise, it is set to newly allocated task id.
+  std::future<task_id_t> SubmitTaskAsync(std::unique_ptr<TaskInCtld> task);
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, int64_t secs);
 
@@ -243,6 +245,10 @@ class TaskScheduler {
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
 
+  static CraneErr AcquireTaskAttributes(TaskInCtld* task);
+
+  static CraneErr CheckTaskValidity(TaskInCtld* task);
+
  private:
   void TaskStatusChangeNoLock_(uint32_t task_id, const CranedId& craned_index,
                                crane::grpc::TaskStatus new_status,
@@ -252,10 +258,6 @@ class TaskScheduler {
       std::unique_ptr<TaskInCtld> task);
 
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
-
-  static CraneErr AcquireTaskAttributes(TaskInCtld* task);
-
-  static CraneErr CheckTaskValidity(TaskInCtld* task);
 
   static void TransferTaskToMongodb_(TaskInCtld* task);
 
@@ -282,8 +284,6 @@ class TaskScheduler {
   // Task Indexes
   HashMap<CranedId, HashSet<uint32_t /* Task ID*/>> m_node_to_tasks_map_
       GUARDED_BY(m_task_indexes_mtx_);
-  HashMap<PartitionId /* Partition ID */, HashSet<uint32_t /* Task ID */>>
-      m_partition_to_tasks_map_ GUARDED_BY(m_task_indexes_mtx_);
   Mutex m_task_indexes_mtx_;
 
   std::unique_ptr<IPrioritySorter> m_priority_sorter_;
@@ -297,6 +297,9 @@ class TaskScheduler {
   std::thread m_task_cancel_thread_;
   void CancelTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
+  std::thread m_task_submit_thread_;
+  void SubmitTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_cancel_task_timer_handle_;
   void CancelTaskTimerCb_();
@@ -307,6 +310,18 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_cancel_queue_handle_;
   void CleanCancelQueueCb_();
+
+  std::shared_ptr<uvw::timer_handle> m_submit_task_timer_handle_;
+  void SubmitTaskTimerCb_();
+
+  std::shared_ptr<uvw::async_handle> m_submit_task_async_handle_;
+  ConcurrentQueue<
+      std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>>
+      m_submit_task_queue_;
+  void SubmitTaskAsyncCb_();
+
+  std::shared_ptr<uvw::async_handle> m_clean_submit_queue_handle_;
+  void CleanSubmitQueueCb_();
 };
 
 }  // namespace Ctld

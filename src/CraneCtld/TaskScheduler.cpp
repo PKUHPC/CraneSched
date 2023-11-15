@@ -42,6 +42,7 @@ TaskScheduler::~TaskScheduler() {
   m_thread_stop_ = true;
   if (m_schedule_thread_.joinable()) m_schedule_thread_.join();
   if (m_task_cancel_thread_.joinable()) m_task_cancel_thread_.join();
+  if (m_task_submit_thread_.joinable()) m_task_cancel_thread_.join();
 }
 
 bool TaskScheduler::Init() {
@@ -355,8 +356,8 @@ bool TaskScheduler::Init() {
     }
   }
 
-  std::shared_ptr<uvw::loop> uvw_loop = uvw::loop::get_default();
-  m_cancel_task_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
+  std::shared_ptr<uvw::loop> uvw_cancel_loop = uvw::loop::create();
+  m_cancel_task_timer_handle_ = uvw_cancel_loop->resource<uvw::timer_handle>();
   m_cancel_task_timer_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
         CancelTaskTimerCb_();
@@ -365,20 +366,45 @@ bool TaskScheduler::Init() {
       std::chrono::milliseconds(kCancelTaskTimeoutMs * 3),
       std::chrono::milliseconds(kCancelTaskTimeoutMs));
 
-  m_cancel_task_async_handle_ = uvw_loop->resource<uvw::async_handle>();
+  m_cancel_task_async_handle_ = uvw_cancel_loop->resource<uvw::async_handle>();
   m_cancel_task_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         CancelTaskAsyncCb_();
       });
 
-  m_clean_cancel_queue_handle_ = uvw_loop->resource<uvw::async_handle>();
+  m_clean_cancel_queue_handle_ = uvw_cancel_loop->resource<uvw::async_handle>();
   m_clean_cancel_queue_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         CleanCancelQueueCb_();
       });
 
   m_task_cancel_thread_ = std::thread(
-      [this, loop = std::move(uvw_loop)]() { CancelTaskThread_(loop); });
+      [this, loop = std::move(uvw_cancel_loop)]() { CancelTaskThread_(loop); });
+
+  std::shared_ptr<uvw::loop> uvw_submit_loop = uvw::loop::create();
+  m_submit_task_timer_handle_ = uvw_submit_loop->resource<uvw::timer_handle>();
+  m_submit_task_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        SubmitTaskTimerCb_();
+      });
+  m_submit_task_timer_handle_->start(
+      std::chrono::milliseconds(kSubmitTaskTimeoutMs * 3),
+      std::chrono::milliseconds(kSubmitTaskTimeoutMs));
+
+  m_submit_task_async_handle_ = uvw_submit_loop->resource<uvw::async_handle>();
+  m_submit_task_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        SubmitTaskAsyncCb_();
+      });
+
+  m_clean_submit_queue_handle_ = uvw_submit_loop->resource<uvw::async_handle>();
+  m_clean_submit_queue_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanSubmitQueueCb_();
+      });
+
+  m_task_submit_thread_ = std::thread(
+      [this, loop = std::move(uvw_submit_loop)]() { SubmitTaskThread_(loop); });
 
   // Start schedule thread first.
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
@@ -390,9 +416,6 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_task_map_mtx_);
-  LockGuard indexes_guard(&m_task_indexes_mtx_);
-
-  m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_pending_task_map_.emplace(task->TaskId(), std::move(task));
 }
 
@@ -409,7 +432,6 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
   for (const CranedId& craned_id : task->CranedIds())
     m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
 
-  m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
   m_running_task_map_.emplace(task->TaskId(), std::move(task));
 }
 
@@ -420,10 +442,28 @@ void TaskScheduler::CancelTaskThread_(
   idle_handle->on<uvw::idle_event>(
       [this](const uvw::idle_event&, uvw::idle_handle& h) {
         if (m_thread_stop_) h.parent().stop();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
       });
 
   if (idle_handle->start() != 0) {
     CRANE_ERROR("Failed to start the idle event in cancel loop.");
+  }
+
+  uvw_loop->run();
+}
+
+void TaskScheduler::SubmitTaskThread_(
+    const std::shared_ptr<uvw::loop>& uvw_loop) {
+  std::shared_ptr<uvw::idle_handle> idle_handle =
+      uvw_loop->resource<uvw::idle_handle>();
+  idle_handle->on<uvw::idle_event>(
+      [this](const uvw::idle_event&, uvw::idle_handle& h) {
+        if (m_thread_stop_) h.parent().stop();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      });
+
+  if (idle_handle->start() != 0) {
+    CRANE_ERROR("Failed to start the idle event in submit loop.");
   }
 
   uvw_loop->run();
@@ -630,39 +670,15 @@ void TaskScheduler::SetNodeSelectionAlgo(
   m_node_selection_algo_ = std::move(algo);
 }
 
-CraneErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtld> task,
-                                   uint32_t* task_id) {
-  CraneErr err;
+std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
+    std::unique_ptr<TaskInCtld> task) {
+  std::promise<task_id_t> promise;
+  std::future<task_id_t> future = promise.get_future();
 
-  err = AcquireTaskAttributes(task.get());
-  if (err != CraneErr::kOk) return err;
+  m_submit_task_queue_.enqueue({std::move(task), std::move(promise)});
+  m_submit_task_async_handle_->send();
 
-  err = CheckTaskValidity(task.get());
-  if (err != CraneErr::kOk) return err;
-
-  // Add the task to the pending task queue.
-  task->SetStatus(crane::grpc::Pending);
-  task->SetSubmitTime(absl::Now());
-
-  bool ok;
-  ok =
-      g_embedded_db_client->AppendTaskToPendingAndAdvanceTaskIds(0, task.get());
-  if (!ok) {
-    CRANE_ERROR("Failed to append the task to embedded db queue.");
-    return CraneErr::kSystemErr;
-  }
-
-  *task_id = task->TaskId();
-
-  m_task_indexes_mtx_.Lock();
-  m_partition_to_tasks_map_[task->partition_id].emplace(task->TaskId());
-  m_task_indexes_mtx_.Unlock();
-
-  m_pending_task_map_mtx_.Lock();
-  m_pending_task_map_.emplace(task->TaskId(), std::move(task));
-  m_pending_task_map_mtx_.Unlock();
-
-  return CraneErr::kOk;
+  return std::move(future);
 }
 
 CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
@@ -749,9 +765,6 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
 
   task->SetExitCode(exit_code);
   task->SetEndTime(absl::Now());
-
-  g_embedded_db_client->UpdatePersistedPartOfTask(0, task->TaskDbId(),
-                                                  task->PersistedPart());
 
   for (CranedId const& craned_id : task->CranedIds()) {
     auto* stub = g_craned_keeper->GetCranedStub(craned_id);
@@ -880,38 +893,25 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     return false;
   };
 
-  auto fn_transform_pending_task_to_id = [&](auto& it) -> task_id_t {
+  auto fn_cancel_pending_task = [&](auto& it) {
     task_id_t task_id = it.first;
-    return task_id;
-  };
 
-  auto fn_cancel_pending_task = [&](task_id_t task_id) {
     CRANE_TRACE("Cancelling pending task #{}", task_id);
 
-    auto task_it = m_pending_task_map_.find(task_id);
-    CRANE_ASSERT(task_it != m_pending_task_map_.end());
-
-    auto& task = task_it->second;
-
-    if (!g_account_manager->HasPermissionToUser(operator_uid, task->Username())
+    if (!g_account_manager
+             ->HasPermissionToUser(operator_uid, it.second->Username())
              .ok) {
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
-      task->SetStatus(crane::grpc::Cancelled);
-      task->SetEndTime(absl::Now());
-      g_embedded_db_client->UpdatePersistedPartOfTask(0, task->TaskDbId(),
-                                                      task->PersistedPart());
-      TransferTaskToMongodb_(task.get());
-
-      m_pending_task_map_.erase(task_it);
-
+      m_cancel_task_queue_.enqueue({task_id, {}});
+      m_cancel_task_async_handle_->send();
       reply.add_cancelled_tasks(task_id);
     }
   };
 
   auto fn_cancel_running_task = [&](auto& it) {
-    auto task_id = it.first;
+    task_id_t task_id = it.first;
     TaskInCtld* task = it.second.get();
 
     CRANE_TRACE("Cancelling running task #{}", task_id);
@@ -953,13 +953,12 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   LockGuard running_guard(&m_running_task_map_mtx_);
 
-  auto pending_task_id_rng =
-      m_pending_task_map_ | joined_filters |
-      ranges::views::transform(fn_transform_pending_task_to_id);
+  auto pending_task_id_rng = m_pending_task_map_ | joined_filters;
   // Evaluate immediately. fn_cancel_pending_task will change the contents
   // of m_pending_task_map_ and invalidate the end() of pending_task_id_rng.
-  auto pending_task_id_vec = ranges::to_vector(pending_task_id_rng);
-  ranges::for_each(pending_task_id_vec, fn_cancel_pending_task);
+  // But now using asynchronous methods to cancel these tasks, there is no need
+  // to worry about this issue.
+  ranges::for_each(pending_task_id_rng, fn_cancel_pending_task);
 
   auto running_task_rng = m_running_task_map_ | joined_filters;
   ranges::for_each(running_task_rng, fn_cancel_running_task);
@@ -984,27 +983,166 @@ void TaskScheduler::CancelTaskAsyncCb_() {
 }
 
 void TaskScheduler::CleanCancelQueueCb_() {
-  HashMap<CranedId, std::vector<task_id_t>> craned_id_task_ids_map;
-
   // It's ok to use an approximate size.
   size_t approximate_size = m_cancel_task_queue_.size_approx();
-
   std::vector<std::pair<task_id_t, CranedId>> tasks_to_cancel;
   tasks_to_cancel.resize(approximate_size);
+
+  std::vector<task_id_t> pending_tasks_vec;
+  HashMap<CranedId, std::vector<task_id_t>> running_task_craned_id_map;
 
   size_t actual_size = m_cancel_task_queue_.try_dequeue_bulk(
       tasks_to_cancel.begin(), approximate_size);
 
   for (const auto& [task_id, craned_id] : tasks_to_cancel) {
-    craned_id_task_ids_map[craned_id].emplace_back(task_id);
+    if (craned_id.empty())
+      pending_tasks_vec.emplace_back(task_id);
+    else
+      running_task_craned_id_map[craned_id].emplace_back(task_id);
   }
 
-  for (auto&& [craned_id, task_ids] : craned_id_task_ids_map) {
+  for (auto&& [craned_id, task_ids] : running_task_craned_id_map) {
     g_thread_pool->push_task(
         [id = craned_id, task_ids_to_cancel = std::move(task_ids)]() {
           auto* stub = g_craned_keeper->GetCranedStub(id);
           stub->TerminateTasks(task_ids_to_cancel);
         });
+  }
+
+  if (pending_tasks_vec.empty()) return;
+
+  std::vector<std::unique_ptr<TaskInCtld>> task_pointer_vec;
+  {
+    // Allow temporary inconsistency on task querying here.
+    // In a very short duration, some cancelled tasks might not be visible
+    // immediately after changing to CANCELLED state.
+    // Also, since here we erase the task id from the pending task
+    // map with a little latency, some task id we retrieve might have been
+    // cancelled. Just ignore those who have already been cancelled.
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    for (task_id_t task_id : pending_tasks_vec) {
+      auto it = m_pending_task_map_.find(task_id);
+      if (it == m_pending_task_map_.end()) continue;
+
+      TaskInCtld* task = it->second.get();
+      task->SetStatus(crane::grpc::Cancelled);
+      task->SetEndTime(absl::Now());
+
+      task_pointer_vec.emplace_back(std::move(it->second));
+      m_pending_task_map_.erase(it);
+    }
+  }
+
+  txn_id_t txn_id;
+  if (!g_embedded_db_client->BeginTransaction(&txn_id)) {
+    CRANE_ERROR(
+        "Failed to call g_embedded_db_client->BeginTransaction(&txn_id) for "
+        "when p->e.");
+    return;
+  }
+
+  for (const auto& task : task_pointer_vec) {
+    // The Data part of a task doesn't have any forward or backward
+    // dependencies. It will not cause cycles here.
+    g_embedded_db_client->UpdatePersistedPartOfTask(txn_id, task->TaskDbId(),
+                                                    task->PersistedPart());
+    g_embedded_db_client->MovePendingOrRunningTaskToEnded(txn_id,
+                                                          task->TaskDbId());
+  }
+
+  if (!g_embedded_db_client->CommitTransaction(txn_id)) {
+    CRANE_ERROR(
+        "Failed to call g_embedded_db_client->CommitTransaction() "
+        "for cancelled pending tasks");
+    return;
+  }
+
+  {
+    std::vector<TaskInCtld*> task_raw_pointer_vec;
+    task_raw_pointer_vec.reserve(task_pointer_vec.size());
+
+    for (const auto& task : task_pointer_vec)
+      task_raw_pointer_vec.emplace_back(task.get());
+
+    // Now cancelled pending tasks are in MongoDB.
+    if (!g_db_client->InsertJobs(task_raw_pointer_vec)) {
+      CRANE_ERROR(
+          "Failed to call g_db_client->InsertJobs() for cancelled pending "
+          "tasks");
+      return;
+    }
+  }
+
+  txn_id = 0;
+  if (!g_embedded_db_client->BeginTransaction(&txn_id)) {
+    CRANE_ERROR(
+        "Failed to call g_embedded_db_client->BeginTransaction(&txn_id) for "
+        "when p->e.");
+    return;
+  }
+
+  for (const auto& task : task_pointer_vec)
+    g_embedded_db_client->PurgeTaskFromEnded(txn_id, task->TaskDbId());
+
+  if (!g_embedded_db_client->CommitTransaction(txn_id)) {
+    CRANE_ERROR(
+        "Failed to call g_embedded_db_client->CommitTransaction() "
+        "for cancelled pending tasks");
+    return;
+  }
+}
+
+void TaskScheduler::SubmitTaskTimerCb_() {
+  m_clean_submit_queue_handle_->send();
+}
+
+void TaskScheduler::SubmitTaskAsyncCb_() {
+  if (m_submit_task_queue_.size_approx() >= kSubmitTaskBatchNum) {
+    m_clean_submit_queue_handle_->send();
+  }
+}
+
+void TaskScheduler::CleanSubmitQueueCb_() {
+  // It's ok to use an approximate size.
+  size_t approximate_size = m_submit_task_queue_.size_approx();
+
+  std::vector<std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>>
+      submit_tasks;
+  submit_tasks.resize(approximate_size);
+
+  std::vector<uint32_t> task_indexes_with_id_allocated;
+
+  size_t actual_size = m_submit_task_queue_.try_dequeue_bulk(
+      submit_tasks.begin(), approximate_size);
+
+  if (actual_size == 0) return;
+
+  txn_id_t txn_id;
+  g_embedded_db_client->BeginTransaction(&txn_id);
+
+  // The order of element inside the bulk is reverse.
+  for (uint32_t i = 0; i < submit_tasks.size(); i++) {
+    uint32_t pos = submit_tasks.size() - 1 - i;
+    auto* task = submit_tasks[pos].first.get();
+    auto& task_id_promise = submit_tasks[pos].second;
+    // Add the task to the pending task queue.
+    task->SetStatus(crane::grpc::Pending);
+
+    if (!g_embedded_db_client->AppendTaskToPendingAndAdvanceTaskIds(txn_id,
+                                                                    task)) {
+      CRANE_ERROR("Failed to append the task to embedded db queue.");
+      task_id_promise.set_value(0);
+    } else
+      task_indexes_with_id_allocated.emplace_back(pos);
+  }
+  g_embedded_db_client->CommitTransaction(txn_id);
+
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  for (uint32_t i : task_indexes_with_id_allocated) {
+    task_id_t id = submit_tasks[i].first->TaskId();
+
+    m_pending_task_map_.emplace(id, std::move(submit_tasks[i].first));
+    submit_tasks[i].second.set_value(id);
   }
 }
 
@@ -1726,6 +1864,7 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
         uint32_t num_task = it->first + 1;
         node_info.task_num_node_id_map.erase(it);
         node_info.task_num_node_id_map.emplace(num_task, craned_id);
+        break;
       }
     }
 
@@ -1851,8 +1990,13 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
 }
 
 void TaskScheduler::TransferTaskToMongodb_(TaskInCtld* task) {
+  txn_id_t txn_id;
+  g_embedded_db_client->BeginTransaction(&txn_id);
+  g_embedded_db_client->UpdatePersistedPartOfTask(txn_id, task->TaskDbId(),
+                                                  task->PersistedPart());
+
   bool ok;
-  ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(0,
+  ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(txn_id,
                                                              task->TaskDbId());
   if (!ok) {
     CRANE_ERROR(
@@ -1867,13 +2011,14 @@ void TaskScheduler::TransferTaskToMongodb_(TaskInCtld* task) {
                 task->TaskId());
   }
 
-  ok = g_embedded_db_client->PurgeTaskFromEnded(0, task->TaskDbId());
+  ok = g_embedded_db_client->PurgeTaskFromEnded(txn_id, task->TaskDbId());
   if (!ok) {
     CRANE_ERROR(
         "Failed to call "
         "g_embedded_db_client->PurgeTaskFromEnded() for task #{}",
         task->TaskId());
   }
+  g_embedded_db_client->CommitTransaction(txn_id);
 }
 
 CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
