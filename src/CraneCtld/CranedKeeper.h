@@ -116,7 +116,7 @@ class CranedKeeper {
 
   void SetCranedIsTempUpCb(std::function<void(CranedId)> cb);
 
-  static void PutNodeIntoUnavailList(const std::string &crane_id);
+  void PutNodeIntoUnavailList(const std::string &crane_id);
 
  private:
   struct InitializingCranedTagData {
@@ -165,9 +165,9 @@ class CranedKeeper {
   std::unordered_set<CranedId> m_unavail_craned_list_;
   std::unordered_set<CranedId> m_connecting_craned_set_;
 
-  std::vector<std::unique_ptr<grpc::CompletionQueue>> m_cq_list_;
-  Mutex m_cq_mtx_;
-  bool m_cq_closed_;
+  std::vector<grpc::CompletionQueue> m_cq_list_;
+  std::vector<Mutex> m_cq_mtx_;
+  std::atomic_bool m_cq_closed_;
 
   std::vector<std::thread> m_cq_thread_list_;
 

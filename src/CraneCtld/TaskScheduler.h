@@ -269,11 +269,11 @@ class TaskScheduler {
 
   // Ordered by task id. Those who comes earlier are in the head,
   // Because they have smaller task id.
-  TreeMap<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>> m_pending_task_map_
+  TreeMap<task_id_t, std::unique_ptr<TaskInCtld>> m_pending_task_map_
       GUARDED_BY(m_pending_task_map_mtx_);
   Mutex m_pending_task_map_mtx_;
 
-  HashMap<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtld>> m_running_task_map_
+  HashMap<task_id_t, std::unique_ptr<TaskInCtld>> m_running_task_map_
       GUARDED_BY(m_running_task_map_mtx_);
   Mutex m_running_task_map_mtx_;
 

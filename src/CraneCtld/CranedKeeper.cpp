@@ -262,10 +262,11 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
 CranedKeeper::CranedKeeper(uint32_t node_num)
     : m_cq_closed_(false), m_tag_pool_(32, 0) {
   uint32_t thread_num = std::ceil((double)node_num / kCompletionQueueCapacity);
-  for (int i = 0; i < thread_num; i++) {
-    auto cq = std::make_unique<grpc::CompletionQueue>();
-    m_cq_list_.emplace_back(std::move(cq));
 
+  m_cq_mtx_ = std::vector<Mutex>(thread_num);
+  m_cq_list_ = std::vector<grpc::CompletionQueue>(thread_num);
+
+  for (int i = 0; i < thread_num; i++) {
     m_cq_thread_list_.emplace_back(&CranedKeeper::StateMonitorThreadFunc_, this,
                                    i);
   }
@@ -275,12 +276,11 @@ CranedKeeper::CranedKeeper(uint32_t node_num)
 }
 
 CranedKeeper::~CranedKeeper() {
-  m_cq_mtx_.Lock();
-
-  for (auto &cq : m_cq_list_) cq->Shutdown();
+  for (int i = 0; i < m_cq_list_.size(); i++) {
+    util::lock_guard lock(m_cq_mtx_[i]);
+    m_cq_list_[i].Shutdown();
+  }
   m_cq_closed_ = true;
-
-  m_cq_mtx_.Unlock();
 
   for (auto &cq_thread : m_cq_thread_list_) cq_thread.join();
   m_period_connect_thread_.join();
@@ -301,7 +301,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
   CqTag *tag;
 
   while (true) {
-    if (m_cq_list_[thread_id]->Next((void **)&tag, &ok)) {
+    if (m_cq_list_[thread_id].Next((void **)&tag, &ok)) {
       CranedStub *craned;
       switch (tag->type) {
         case CqTag::kInitializingCraned:
@@ -329,7 +329,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
             break;
         }
         if (next_tag) {
-          util::lock_guard lock(m_cq_mtx_);
+          util::lock_guard lock(m_cq_mtx_[thread_id]);
           if (!m_cq_closed_) {
             // CRANE_TRACE("Registering next tag: {}", next_tag->type);
 
@@ -339,7 +339,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
                 craned->m_prev_channel_state_,
                 std::chrono::system_clock::now() +
                     std::chrono::seconds(kCompletionQueueDelaySeconds),
-                m_cq_list_[thread_id].get(), next_tag);
+                &m_cq_list_[thread_id], next_tag);
           }
         } else {
           // END state of both state machine. Free the Craned client.
@@ -376,7 +376,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
          *
          * Register the same tag again. Do not free it because we have no newly
          * allocated tag. */
-        util::lock_guard lock(m_cq_mtx_);
+        util::lock_guard lock(m_cq_mtx_[thread_id]);
         if (!m_cq_closed_) {
           // CRANE_TRACE("Registering next tag: {}", tag->type);
 
@@ -385,7 +385,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
               craned->m_prev_channel_state_,
               std::chrono::system_clock::now() +
                   std::chrono::seconds(kCompletionQueueDelaySeconds),
-              m_cq_list_[thread_id].get(), tag);
+              &m_cq_list_[thread_id], tag);
         }
       }
     } else {
@@ -668,8 +668,8 @@ void CranedKeeper::SetCranedIsTempUpCb(std::function<void(CranedId)> cb) {
 }
 
 void CranedKeeper::PutNodeIntoUnavailList(const std::string &crane_id) {
-  util::lock_guard guard(g_craned_keeper->m_unavail_craned_list_mtx_);
-  g_craned_keeper->m_unavail_craned_list_.emplace(crane_id);
+  util::lock_guard guard(m_unavail_craned_list_mtx_);
+  m_unavail_craned_list_.emplace(crane_id);
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
@@ -750,7 +750,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
       cq_tag_data->craned->m_prev_channel_state_,
       std::chrono::system_clock::now() +
           std::chrono::seconds(kCompletionQueueDelaySeconds),
-      m_cq_list_[cur_cq_id].get(), tag);
+      &m_cq_list_[cur_cq_id], tag);
 }
 
 void CranedKeeper::CranedChannelConnectFail_(CranedStub *stub) {
