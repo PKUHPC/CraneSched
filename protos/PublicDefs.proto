@@ -97,7 +97,7 @@ message TaskToCtld {
 
   string cmd_line = 31;
   string cwd = 32; // Current working directory
-  string env = 33;
+  map<string, string> env = 33;
 
   string excludes = 34;
   string nodelist = 35;
@@ -149,7 +149,7 @@ message TaskToD {
     InteractiveTaskAdditionalMeta interactive_meta = 11;
   }
 
-  string env = 12;
+  map<string, string> env = 12;
   string cwd = 13;
 
   repeated string allocated_nodes = 14;
@@ -166,7 +166,6 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
-
   string export_env = 25;
 }
 

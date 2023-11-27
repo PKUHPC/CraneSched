@@ -352,7 +352,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 
   // Query completed tasks in Mongodb
   // (only for cacct, which sets `option_include_completed_tasks` to true)
-  std::vector<std::unique_ptr<TaskInCtld>> db_ended_list;
+  std::vector<std::unique_ptr<TaskInDB>> db_ended_list;
   ok = g_db_client->FetchJobRecords(&db_ended_list,
                                     num_limit - task_list->size(), true);
   if (!ok) {
@@ -360,7 +360,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     return grpc::Status::OK;
   }
 
-  auto db_ended_append_fn = [&](std::unique_ptr<TaskInCtld> const &task) {
+  auto db_ended_append_fn = [&](std::unique_ptr<TaskInDB> const &task) {
     auto *task_it = task_list->Add();
 
     task_it->set_type(task->type);
@@ -392,7 +392,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_craned_list(task->allocated_craneds_regex);
   };
 
-  auto db_task_rng_filter_time = [&](std::unique_ptr<TaskInCtld> const &task) {
+  auto db_task_rng_filter_time = [&](std::unique_ptr<TaskInDB> const &task) {
     bool has_submit_time_interval = request->has_filter_submit_time_interval();
     bool has_start_time_interval = request->has_filter_start_time_interval();
     bool has_end_time_interval = request->has_filter_end_time_interval();
@@ -426,34 +426,34 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   };
 
   auto db_task_rng_filter_account =
-      [&](std::unique_ptr<TaskInCtld> const &task) {
+      [&](std::unique_ptr<TaskInDB> const &task) {
         return no_accounts_constraint || req_accounts.contains(task->account);
       };
 
-  auto db_task_rng_filter_user = [&](std::unique_ptr<TaskInCtld> const &task) {
+  auto db_task_rng_filter_user = [&](std::unique_ptr<TaskInDB> const &task) {
     return no_username_constraint || req_users.contains(task->Username());
   };
 
-  auto db_task_rng_filter_name = [&](std::unique_ptr<TaskInCtld> const &task) {
+  auto db_task_rng_filter_name = [&](std::unique_ptr<TaskInDB> const &task) {
     return no_task_names_constraint ||
            req_task_names.contains(task->TaskToCtld().name());
   };
 
-  auto db_task_rng_filter_qos = [&](std::unique_ptr<TaskInCtld> const &task) {
+  auto db_task_rng_filter_qos = [&](std::unique_ptr<TaskInDB> const &task) {
     return no_qos_constraint || req_qos.contains(task->qos);
   };
 
   auto db_task_rng_filter_partition =
-      [&](std::unique_ptr<TaskInCtld> const &task) {
+      [&](std::unique_ptr<TaskInDB> const &task) {
         return no_partitions_constraint ||
                req_partitions.contains(task->TaskToCtld().partition_name());
       };
 
-  auto db_task_rng_filter_id = [&](std::unique_ptr<TaskInCtld> const &task) {
+  auto db_task_rng_filter_id = [&](std::unique_ptr<TaskInDB> const &task) {
     return no_task_ids_constraint || req_task_ids.contains(task->TaskId());
   };
 
-  auto db_task_rng_filter_state = [&](std::unique_ptr<TaskInCtld> const &task) {
+  auto db_task_rng_filter_state = [&](std::unique_ptr<TaskInDB> const &task) {
     return no_task_states_constraint ||
            req_task_states.contains(task->PersistedPart().status());
   };

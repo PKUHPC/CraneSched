@@ -232,7 +232,7 @@ struct TaskInCtld {
   bool get_user_env{false};
 
   std::string cmd_line;
-  std::string env;
+  std::map<std::string, std::string> env;
   std::string cwd;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
@@ -415,7 +415,9 @@ struct TaskInCtld {
     name = val.name();
     qos = val.qos();
     cmd_line = val.cmd_line();
-    env = val.env();
+    for (auto &[name, value] : val.env()) {
+      env[name] = value;
+    }
     cwd = val.cwd();
     qos = val.qos();
 
@@ -446,6 +448,191 @@ struct TaskInCtld {
     end_time = absl::FromUnixSeconds(persisted_part.end_time().seconds());
   }
 };
+
+struct TaskInDB {
+  /* -------- [1] Fields that are set at the submission time. ------- */
+  absl::Duration time_limit;
+
+  PartitionId partition_id;
+  Resources resources;
+
+  crane::grpc::TaskType type;
+
+  uid_t uid;
+  std::string account;
+  std::string name;
+  std::string qos;
+
+  uint32_t node_num{0};
+  double cpus_per_task{0.0};
+
+  bool get_user_env{false};
+
+  std::string cmd_line;
+  std::map<std::string, std::string> env;
+  std::string cwd;
+
+  std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
+  std::string export_env;
+
+ private:
+  /* ------------- [2] -------------
+   * Fields that won't change after this task is accepted.
+   * Also, these fields are persisted on the disk.
+   * ------------------------------- */
+  task_id_t task_id;
+  task_db_id_t task_db_id;
+  gid_t gid;
+  std::string username;
+
+  /* ----------- [3] ----------------
+   * Fields that may change at run time.
+   * Also, these fields are persisted on the disk.
+   * -------------------------------- */
+  crane::grpc::TaskStatus status;
+  uint32_t exit_code;
+
+  // If this task is PENDING, start_time is either not set (default constructed)
+  // or an estimated start time.
+  // If this task is RUNNING, start_time is the actual starting time.
+  absl::Time submit_time;
+  absl::Time start_time;
+  absl::Time end_time;
+
+  /* ------ duplicate of the fields [1] above just for convenience ----- */
+  crane::grpc::TaskToCtld task_to_ctld;
+
+  /* ------ duplicate of the fields [2][3] above just for convenience ----- */
+  crane::grpc::PersistedPartOfTaskInCtld persisted_part;
+
+ public:
+
+  /* -----------
+   * Fields that may change at run time.
+   * However, these fields are NOT persisted on the disk.
+   * ----------- */
+  uint32_t nodes_alloc;
+  CranedId executing_craned_id;  // The root process of the task started on this
+                                 // node id.
+  std::string allocated_craneds_regex;
+
+  // Helper function
+  crane::grpc::TaskToCtld const& TaskToCtld() const { return task_to_ctld; }
+  crane::grpc::TaskToCtld* MutableTaskToCtld() { return &task_to_ctld; }
+
+  crane::grpc::PersistedPartOfTaskInCtld const& PersistedPart() {
+    return persisted_part;
+  }
+
+  void SetTaskId(task_id_t id) {
+    task_id = id;
+    persisted_part.set_task_id(id);
+  }
+  task_id_t TaskId() const { return task_id; }
+
+  void SetTaskDbId(task_db_id_t id) {
+    task_db_id = id;
+    persisted_part.set_task_db_id(id);
+  }
+  task_id_t TaskDbId() const { return task_db_id; }
+
+  void SetGid(gid_t id) {
+    gid = id;
+    persisted_part.set_gid(id);
+  }
+  uid_t Gid() const { return gid; }
+
+  void SetUsername(std::string const& val) {
+    username = val;
+    persisted_part.set_username(val);
+  }
+  std::string const& Username() const { return username; }
+
+  void SetStatus(crane::grpc::TaskStatus val) {
+    status = val;
+    persisted_part.set_status(val);
+  }
+  crane::grpc::TaskStatus Status() const { return status; }
+
+  void SetExitCode(uint32_t val) {
+    exit_code = val;
+    persisted_part.set_exit_code(val);
+  }
+  uint32_t ExitCode() const { return exit_code; }
+
+  void SetSubmitTime(absl::Time const& val) {
+    submit_time = val;
+    persisted_part.mutable_submit_time()->set_seconds(
+        ToUnixSeconds(submit_time));
+  }
+  void SetSubmitTimeByUnixSecond(uint64_t val) {
+    submit_time = absl::FromUnixSeconds(val);
+    persisted_part.mutable_submit_time()->set_seconds(val);
+  }
+  absl::Time const& SubmitTime() const { return submit_time; }
+  int64_t SubmitTimeInUnixSecond() const { return ToUnixSeconds(submit_time); }
+
+  void SetStartTime(absl::Time const& val) {
+    start_time = val;
+    persisted_part.mutable_start_time()->set_seconds(ToUnixSeconds(start_time));
+  }
+  void SetStartTimeByUnixSecond(uint64_t val) {
+    start_time = absl::FromUnixSeconds(val);
+    persisted_part.mutable_start_time()->set_seconds(val);
+  }
+  absl::Time const& StartTime() const { return start_time; }
+  int64_t StartTimeInUnixSecond() const { return ToUnixSeconds(start_time); }
+
+  void SetEndTime(absl::Time const& val) {
+    end_time = val;
+    persisted_part.mutable_end_time()->set_seconds(ToUnixSeconds(end_time));
+  }
+  void SetEndTimeByUnixSecond(uint64_t val) {
+    end_time = absl::FromUnixSeconds(val);
+    persisted_part.mutable_end_time()->set_seconds(val);
+  }
+  absl::Time const& EndTime() const { return end_time; }
+  int64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
+
+  void SetFieldsByTaskInCtld(TaskInCtld const& val) {
+    task_to_ctld = val.TaskToCtld();
+    time_limit = val.time_limit;
+
+    partition_id = val.partition_id;
+    resources = val.resources;
+
+    type = val.type;
+
+    if (type == crane::grpc::Batch) {
+      meta.emplace<BatchMetaInTask>(std::get<BatchMetaInTask>(val.meta));
+    }
+    //    if (std::holds_alternative<BatchMetaInTask>(val.meta)) {
+    //      meta.emplace<BatchMetaInTask>(std::get<BatchMetaInTask>(val.meta));
+    //    }
+    //    else if (std::holds_alternative<InteractiveMetaInTask>(val.meta)) {
+    //      meta.emplace<InteractiveMetaInTask>(std::get<InteractiveMetaInTask>(val.meta));
+    //    }
+
+
+    uid = val.uid;
+    account = val.account;
+    name = val.name;
+    qos = val.qos;
+
+    node_num = val.node_num;
+    cpus_per_task = val.cpus_per_task;
+
+    get_user_env = val.get_user_env;
+
+    cmd_line = val.cmd_line;
+    env = val.env;
+    cwd = val.cwd;
+
+    export_env = val.export_env;
+
+  }
+};
+
 
 struct Qos {
   bool deleted = false;

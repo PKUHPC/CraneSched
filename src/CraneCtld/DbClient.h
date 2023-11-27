@@ -50,14 +50,10 @@ class MongodbClient {
   bool Connect();
 
   /* ----- Method of operating the job table ----------- */
-  bool InsertRecoveredJob(
-      crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
   bool InsertJob(TaskInCtld* task);
   bool InsertJobs(const std::vector<TaskInCtld*>& tasks);
 
-  // Todo: Ugly interface! Since the task is fetch from DB, TaskInCtld is
-  //  not a good type choice here!
-  bool FetchJobRecords(std::vector<std::unique_ptr<TaskInCtld>>* task_list,
+  bool FetchJobRecords(std::vector<std::unique_ptr<TaskInDB>>* task_list,
                        size_t limit, bool reverse);
 
   bool CheckTaskDbIdExisted(int64_t task_db_id);
@@ -216,9 +212,7 @@ class MongodbClient {
 
   document QosToDocument_(const Qos& qos);
 
-  document TaskInCtldToDocument_(TaskInCtld* task);
-  document TaskInEmbeddedDbToDocument_(
-      crane::grpc::TaskInEmbeddedDb const& task);
+  document TaskInDBToDocument_(TaskInDB* task);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_task_collection_name_{"task_table"};
