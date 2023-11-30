@@ -498,6 +498,7 @@ void TaskScheduler::ScheduleThread_() {
       std::list<INodeSelectionAlgo::NodeSelectionResult> selection_result_list;
       m_node_selection_algo_->NodeSelect(
           m_running_task_map_, &m_pending_task_map_, &selection_result_list);
+      m_pending_map_size_ = m_pending_task_map_.size();
 
       m_running_task_map_mtx_.Unlock();
       m_pending_task_map_mtx_.Unlock();
@@ -1108,12 +1109,18 @@ void TaskScheduler::CleanSubmitQueueCb_() {
 
   std::vector<std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>>
       submit_tasks;
-  submit_tasks.resize(approximate_size);
-
   std::vector<uint32_t> task_indexes_with_id_allocated;
 
-  size_t actual_size = m_submit_task_queue_.try_dequeue_bulk(
-      submit_tasks.begin(), approximate_size);
+  size_t actual_size = 0, map_size = m_pending_map_size_;
+  if (approximate_size > kPendingTasksQuota - map_size) {
+    submit_tasks.resize(kPendingTasksQuota - map_size);
+    actual_size = m_submit_task_queue_.try_dequeue_bulk(
+        submit_tasks.begin(), kPendingTasksQuota - map_size);
+  } else {
+    submit_tasks.resize(approximate_size);
+    actual_size = m_submit_task_queue_.try_dequeue_bulk(submit_tasks.begin(),
+                                                        approximate_size);
+  }
 
   if (actual_size == 0) return;
 
@@ -1144,6 +1151,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     m_pending_task_map_.emplace(id, std::move(submit_tasks[i].first));
     submit_tasks[i].second.set_value(id);
   }
+  m_pending_map_size_ = m_pending_task_map_.size();
 }
 
 void TaskScheduler::QueryTasksInRam(

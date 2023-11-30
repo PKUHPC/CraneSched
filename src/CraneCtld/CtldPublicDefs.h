@@ -37,7 +37,7 @@ constexpr uint32_t kSubmitTaskTimeoutMs = 500;
 constexpr uint32_t kSubmitTaskBatchNum = 1000;
 constexpr uint32_t kConcurrentStreamQuota = 3000;
 constexpr uint32_t kCompletionQueueCapacity = 5000;
-constexpr uint32_t kSingleScheduleTasksQuota = 5000;
+constexpr uint32_t kPendingTasksQuota = 900000;
 
 struct Config {
   struct Node {
