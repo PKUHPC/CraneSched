@@ -42,7 +42,7 @@ TaskScheduler::~TaskScheduler() {
   m_thread_stop_ = true;
   if (m_schedule_thread_.joinable()) m_schedule_thread_.join();
   if (m_task_cancel_thread_.joinable()) m_task_cancel_thread_.join();
-  if (m_task_submit_thread_.joinable()) m_task_cancel_thread_.join();
+  if (m_task_submit_thread_.joinable()) m_task_submit_thread_.join();
 }
 
 bool TaskScheduler::Init() {
