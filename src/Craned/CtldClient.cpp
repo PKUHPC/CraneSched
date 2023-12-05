@@ -60,10 +60,10 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
 
-void CtldClient::CraneCtldConnected() {
+void CtldClient::OnCraneCtldConnected() {
   grpc::ClientContext context;
-  crane::grpc::NodeRegisterRequest request;
-  crane::grpc::NodeRegisterReply reply;
+  crane::grpc::CranedRegisterRequest request;
+  crane::grpc::CranedRegisterReply reply;
   grpc::Status status;
 
   CRANE_INFO("Send a register RPC to cranectld");
@@ -72,7 +72,7 @@ void CtldClient::CraneCtldConnected() {
   int retry_time = 5;
 
   do {
-    status = m_stub_->NodeRegister(&context, request, &reply);
+    status = m_stub_->CranedRegister(&context, request, &reply);
     if (status.ok()) {
       return;
     }
@@ -111,7 +111,7 @@ bool CtldClient::CancelTaskStatusChangeByTaskId(
 }
 
 void CtldClient::AsyncSendThread_() {
-  m_connection_notification_.WaitForNotification();
+  m_start_connecting_notification_.WaitForNotification();
 
   std::this_thread::sleep_for(std::chrono::seconds(1));
 
@@ -129,7 +129,7 @@ void CtldClient::AsyncSendThread_() {
         std::chrono::system_clock::now() + std::chrono::seconds(3));
 
     if (!prev_conn_state && connected) {
-      g_ctld_client->CraneCtldConnected();
+      g_ctld_client->OnCraneCtldConnected();
     }
     prev_conn_state = connected;
 

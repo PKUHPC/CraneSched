@@ -84,10 +84,10 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::NodeRegister(
+grpc::Status CraneCtldServiceImpl::CranedRegister(
     grpc::ServerContext *context,
-    const crane::grpc::NodeRegisterRequest *request,
-    crane::grpc::NodeRegisterReply *response) {
+    const crane::grpc::CranedRegisterRequest *request,
+    crane::grpc::CranedRegisterReply *response) {
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
     response->set_ok(false);
     return grpc::Status::OK;

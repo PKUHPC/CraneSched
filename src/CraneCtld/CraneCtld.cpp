@@ -556,15 +556,17 @@ void InitializeCtldGlobalVariables() {
   // time out. Otherwise, recovered pending or running tasks may always fail
   // to be re-queued.
   size_t to_registered_craneds_cnt = g_config.Nodes.size();
-  int time_second =
+  // sigmoid function, where x=0 -> y=1.89, x=inf -> y=301
+  // The time space is approximately [2s, 5min].
+  int timeout =
       (int)(314.0 /
             (1.0 + std::exp(-0.0001 *
                             ((double)to_registered_craneds_cnt - 30000.0)))) -
-      13;  // sigmoid
+      13;
   std::chrono::time_point<std::chrono::system_clock> wait_end_point =
-      std::chrono::system_clock::now() + std::chrono::seconds(time_second);
+      std::chrono::system_clock::now() + std::chrono::seconds(timeout);
 
-  g_craned_keeper->InitAndRegisterCraneds(std::move(to_register_craned_list));
+  g_craned_keeper->InitAndRegisterCraneds(to_register_craned_list);
   while (true) {
     auto online_cnt = g_craned_keeper->AvailableCranedCount();
     if (online_cnt >= to_registered_craneds_cnt) {
@@ -573,7 +575,7 @@ void InitializeCtldGlobalVariables() {
     }
 
     std::this_thread::sleep_for(
-        std::chrono::microseconds(time_second * 1000 /*ms*/ / 100));
+        std::chrono::microseconds(timeout * 1000 /*ms*/ / 100));
     if (std::chrono::system_clock::now() > wait_end_point) {
       CRANE_INFO(
           "Waiting all craned node to be online timed out. Continuing. "

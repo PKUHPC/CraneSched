@@ -92,7 +92,7 @@ class CranedKeeper {
 
   ~CranedKeeper();
 
-  void InitAndRegisterCraneds(std::list<CranedId> craned_id_list);
+  void InitAndRegisterCraneds(const std::list<CranedId> &craned_id_list);
 
   uint32_t AvailableCranedCount();
 
@@ -161,15 +161,17 @@ class CranedKeeper {
   NodeHashMap<CranedId, std::unique_ptr<CranedStub>>
       m_connected_craned_id_stub_map_ GUARDED_BY(m_connected_craned_mtx_);
 
-  Mutex m_unavail_craned_list_mtx_;
-  std::unordered_set<CranedId> m_unavail_craned_list_;
-  std::unordered_set<CranedId> m_connecting_craned_set_;
+  Mutex m_unavail_craned_set_mtx_;
+  std::unordered_set<CranedId> m_unavail_craned_set_
+      GUARDED_BY(m_unavail_craned_set_mtx_);
+  std::unordered_set<CranedId> m_connecting_craned_set_
+      GUARDED_BY(m_unavail_craned_set_mtx_);
 
-  std::vector<grpc::CompletionQueue> m_cq_list_;
-  std::vector<Mutex> m_cq_mtx_;
+  std::vector<grpc::CompletionQueue> m_cq_vec_;
+  std::vector<Mutex> m_cq_mtx_vec_;
   std::atomic_bool m_cq_closed_;
 
-  std::vector<std::thread> m_cq_thread_list_;
+  std::vector<std::thread> m_cq_thread_vec_;
 
   std::thread m_period_connect_thread_;
 

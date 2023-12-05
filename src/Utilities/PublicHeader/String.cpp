@@ -118,9 +118,12 @@ bool ParseNodeList(const std::string &node_str,
 bool ParseHostList(const std::string &host_str,
                    std::list<std::string> *host_list) {
   std::string name_str;
+  name_str.reserve(host_str.size());
+
   for (auto &i : host_str)
     if (i != ' ') name_str += i;  // remove all spaces
-  name_str += ',';                // uniform end format
+
+  name_str += ',';  // uniform end format
   std::string name_meta;
   std::list<std::string> str_list;
 

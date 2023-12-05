@@ -187,9 +187,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::TaskStatusChangeRequest *request,
       crane::grpc::TaskStatusChangeReply *response) override;
 
-  grpc::Status NodeRegister(grpc::ServerContext *context,
-                            const crane::grpc::NodeRegisterRequest *request,
-                            crane::grpc::NodeRegisterReply *response) override;
+  grpc::Status CranedRegister(
+      grpc::ServerContext *context,
+      const crane::grpc::CranedRegisterRequest *request,
+      crane::grpc::CranedRegisterReply *response) override;
 
   grpc::Status CancelTask(grpc::ServerContext *context,
                           const crane::grpc::CancelTaskRequest *request,
