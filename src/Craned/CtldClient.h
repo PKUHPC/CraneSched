@@ -26,8 +26,8 @@
 namespace Craned {
 
 using crane::grpc::CraneCtld;
+using crane::grpc::CranedRegisterReply;
 using crane::grpc::CranedRegisterRequest;
-using crane::grpc::CranedRegisterResult;
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
@@ -50,12 +50,18 @@ class CtldClient {
    */
   void InitChannelAndStub(const std::string& server_address);
 
+  void OnCraneCtldConnected();
+
   void TaskStatusChangeAsync(TaskStatusChange&& task_status_change);
 
   bool CancelTaskStatusChangeByTaskId(task_id_t task_id,
                                       crane::grpc::TaskStatus* new_status);
 
   [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
+
+  inline void StartConnectingCtld() {
+    m_start_connecting_notification_.Notify();
+  }
 
  private:
   void AsyncSendThread_();
@@ -73,6 +79,8 @@ class CtldClient {
   std::unique_ptr<CraneCtld::Stub> m_stub_;
 
   CranedId m_craned_id_;
+
+  absl::Notification m_start_connecting_notification_;
 };
 
 }  // namespace Craned

@@ -42,7 +42,7 @@ TaskScheduler::~TaskScheduler() {
   m_thread_stop_ = true;
   if (m_schedule_thread_.joinable()) m_schedule_thread_.join();
   if (m_task_cancel_thread_.joinable()) m_task_cancel_thread_.join();
-  if (m_task_submit_thread_.joinable()) m_task_cancel_thread_.join();
+  if (m_task_submit_thread_.joinable()) m_task_submit_thread_.join();
 }
 
 bool TaskScheduler::Init() {
@@ -2006,19 +2006,20 @@ void TaskScheduler::TransferTaskToMongodb_(TaskInCtld* task) {
         task->TaskId());
   }
 
+  g_embedded_db_client->CommitTransaction(txn_id);
+
   if (!g_db_client->InsertJob(task)) {
     CRANE_ERROR("Failed to call g_db_client->InsertJob() for task #{}",
                 task->TaskId());
   }
 
-  ok = g_embedded_db_client->PurgeTaskFromEnded(txn_id, task->TaskDbId());
+  ok = g_embedded_db_client->PurgeTaskFromEnded(0, task->TaskDbId());
   if (!ok) {
     CRANE_ERROR(
         "Failed to call "
         "g_embedded_db_client->PurgeTaskFromEnded() for task #{}",
         task->TaskId());
   }
-  g_embedded_db_client->CommitTransaction(txn_id);
 }
 
 CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {

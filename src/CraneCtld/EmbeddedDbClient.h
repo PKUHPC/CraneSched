@@ -460,7 +460,7 @@ class EmbeddedDbClient {
   inline static std::string const s_next_task_id_str_{"NextTaskId"};
   inline static std::string const s_marked_db_id_str_{"MarkedDbId"};
 
-  inline static uint32_t s_next_task_id_;
+  inline static task_id_t s_next_task_id_;
   inline static db_id_t s_next_task_db_id_;
   inline static absl::Mutex s_task_id_and_db_id_mtx_;
 

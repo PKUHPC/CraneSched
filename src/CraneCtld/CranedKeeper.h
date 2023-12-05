@@ -88,11 +88,11 @@ class CranedKeeper {
   using WriterLock = absl::WriterMutexLock;
 
  public:
-  CranedKeeper();
+  explicit CranedKeeper(uint32_t node_num);
 
   ~CranedKeeper();
 
-  void InitAndRegisterCraneds(std::list<CranedId> craned_id_list);
+  void InitAndRegisterCraneds(const std::list<CranedId> &craned_id_list);
 
   uint32_t AvailableCranedCount();
 
@@ -116,6 +116,8 @@ class CranedKeeper {
 
   void SetCranedIsTempUpCb(std::function<void(CranedId)> cb);
 
+  void PutNodeIntoUnavailList(const std::string &crane_id);
+
  private:
   struct InitializingCranedTagData {
     std::unique_ptr<CranedStub> craned;
@@ -127,7 +129,7 @@ class CranedKeeper {
     void *data;
   };
 
-  static void PutBackNodeIntoUnavailList_(CranedStub *stub);
+  static void CranedChannelConnectFail_(CranedStub *stub);
 
   void ConnectCranedNode_(CranedId const &craned_id);
 
@@ -136,7 +138,7 @@ class CranedKeeper {
   CqTag *EstablishedCranedStateMachine_(CranedStub *craned,
                                         grpc_connectivity_state new_state);
 
-  void StateMonitorThreadFunc_();
+  void StateMonitorThreadFunc_(int thread_id);
 
   void PeriodConnectCranedThreadFunc_();
 
@@ -159,14 +161,17 @@ class CranedKeeper {
   NodeHashMap<CranedId, std::unique_ptr<CranedStub>>
       m_connected_craned_id_stub_map_ GUARDED_BY(m_connected_craned_mtx_);
 
-  Mutex m_unavail_craned_list_mtx_;
-  std::list<CranedId> m_unavail_craned_list_;
+  Mutex m_unavail_craned_set_mtx_;
+  std::unordered_set<CranedId> m_unavail_craned_set_
+      GUARDED_BY(m_unavail_craned_set_mtx_);
+  std::unordered_set<CranedId> m_connecting_craned_set_
+      GUARDED_BY(m_unavail_craned_set_mtx_);
 
-  grpc::CompletionQueue m_cq_;
-  Mutex m_cq_mtx_;
-  bool m_cq_closed_;
+  std::vector<grpc::CompletionQueue> m_cq_vec_;
+  std::vector<Mutex> m_cq_mtx_vec_;
+  std::atomic_bool m_cq_closed_;
 
-  std::thread m_cq_thread_;
+  std::vector<std::thread> m_cq_thread_vec_;
 
   std::thread m_period_connect_thread_;
 

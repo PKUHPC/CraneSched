@@ -441,6 +441,7 @@ void StartServer() {
 
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
 
+  g_ctld_client->StartConnectingCtld();
   g_server->Wait();
 
   // Free global variables

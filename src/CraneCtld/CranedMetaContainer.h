@@ -52,6 +52,8 @@ class CranedMetaContainerInterface {
 
   virtual void CranedDown(CranedId node_id) = 0;
 
+  virtual bool CheckCranedOnline(const CranedId& node_id) = 0;
+
   virtual void InitFromConfig(const Config& config) = 0;
 
   virtual bool CheckCranedAllowed(const std::string& hostname) = 0;
@@ -116,6 +118,8 @@ class CranedMetaContainerSimpleImpl final
   void CranedUp(const CranedId& craned_id) override;
 
   void CranedDown(CranedId craned_id) override;
+
+  bool CheckCranedOnline(const CranedId& craned_id) override;
 
   PartitionMetasPtr GetPartitionMetasPtr(PartitionId partition_id) override;
 

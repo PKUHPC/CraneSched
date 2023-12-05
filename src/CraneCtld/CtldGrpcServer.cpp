@@ -19,6 +19,7 @@
 #include <google/protobuf/util/time_util.h>
 
 #include "AccountManager.h"
+#include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
@@ -79,6 +80,24 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
   g_task_scheduler->TaskStatusChange(request->task_id(), request->craned_id(),
                                      request->new_status(),
                                      request->exit_code(), std::move(reason));
+  response->set_ok(true);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::CranedRegister(
+    grpc::ServerContext *context,
+    const crane::grpc::CranedRegisterRequest *request,
+    crane::grpc::CranedRegisterReply *response) {
+  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+
+  bool alive = g_meta_container->CheckCranedOnline(request->craned_id());
+  if (!alive) {
+    g_craned_keeper->PutNodeIntoUnavailList(request->craned_id());
+  }
+
   response->set_ok(true);
   return grpc::Status::OK;
 }

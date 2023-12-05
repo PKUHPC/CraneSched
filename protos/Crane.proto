@@ -90,27 +90,6 @@ message SrunXStreamReply {
   }
 }
 
-message CranedRegisterRequest {
-  Negotiation header = 1;
-
-  uint32 port = 2;
-
-  /* Todo: Add fields describing what tasks the Craned is still running and the current usage of this craned in case that
-      from Ctld's view, this node is down due to network problem and however this node is still running.
-  */
-}
-
-message CranedRegisterResult {
-  bool ok = 1;
-  oneof payload {
-    // If ok is true
-    CranedId craned_id = 2;
-
-    // If ok is false, reason is set.
-    string reason = 3;
-  }
-}
-
 message TaskStatusChangeRequest {
   uint32 task_id = 1;
   string craned_id = 2;
@@ -120,6 +99,14 @@ message TaskStatusChangeRequest {
 }
 
 message TaskStatusChangeReply {
+  bool ok = 1;
+}
+
+message CranedRegisterRequest {
+  string craned_id = 1;
+}
+
+message CranedRegisterReply {
   bool ok = 1;
 }
 
@@ -582,6 +569,7 @@ message StreamCtldReply {
 service CraneCtld {
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
+  rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
 
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
