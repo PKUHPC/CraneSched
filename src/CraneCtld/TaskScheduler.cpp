@@ -1787,6 +1787,10 @@ void MinLoadFirst::NodeSelect(
       continue;
     }
 
+    // For pending tasks, the `start time` field in TaskInCtld means expected
+    // start time, while for running tasks, it means the time when it starts.
+    task->SetStartTime(expected_start_time);
+
     if constexpr (kAlgoTraceOutput) {
       CRANE_TRACE(
           "\t task #{} ExpectedStartTime=now+{}s, EndTime=now+{}s",
@@ -1817,7 +1821,6 @@ void MinLoadFirst::NodeSelect(
 
     if (expected_start_time == now) {
       // The task can be started now.
-      task->SetStartTime(expected_start_time);
 
       // We leave the change in running_tasks to the scheduling thread
       // caller for the simplicity of selection algorithm. However, the
