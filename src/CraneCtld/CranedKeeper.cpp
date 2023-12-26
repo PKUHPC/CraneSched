@@ -426,9 +426,6 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       if (m_craned_is_up_cb_)
         g_thread_pool->push_task(m_craned_is_up_cb_, raw_craned->m_craned_id_);
 
-      // free tag_data
-      delete tag_data;
-
       // Switch to EstablishedCraned state machine
       next_tag_type = CqTag::kEstablishedCraned;
       break;
@@ -496,6 +493,9 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       util::lock_guard lock(m_tag_pool_mtx_);
       return m_tag_pool_.construct(CqTag{next_tag_type.value(), tag_data});
     } else if (next_tag_type.value() == CqTag::kEstablishedCraned) {
+      (void)tag_data->craned.release();
+      delete tag_data;
+
       util::lock_guard lock(m_tag_pool_mtx_);
       return m_tag_pool_.construct(CqTag{next_tag_type.value(), raw_craned});
     }
