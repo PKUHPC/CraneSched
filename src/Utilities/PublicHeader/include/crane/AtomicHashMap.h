@@ -140,17 +140,7 @@ class AtomicHashMap {
   }
 
   ValueExclusivePtr operator[](const Key& key) {
-    m_global_rw_mutex_.lock_shared();
-    auto iter = m_value_map_.find(key);
-
-    if (iter == m_value_map_.end()) {
-      m_global_rw_mutex_.unlock_shared();
-      return ValueExclusivePtr{};
-    } else {
-      iter->second.Mutex().Lock();
-      CombinedLock combined_lock(&m_global_rw_mutex_, &iter->second.Mutex());
-      return ValueExclusivePtr{iter->second.RawPtr(), std::move(combined_lock)};
-    }
+    return GetValueExclusivePtr(key);
   }
 
   MapSharedPtr GetMapSharedPtr() {
