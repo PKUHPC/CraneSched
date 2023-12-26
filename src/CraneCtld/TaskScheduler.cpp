@@ -1793,8 +1793,11 @@ void MinLoadFirst::NodeSelect(
     }
 
     // For pending tasks, the `start time` field in TaskInCtld means expected
-    // start time, while for running tasks, it means the time when it starts.
+    // start time and the `end time` is expected end time.
+    // For running tasks, the `start time` means the time when it starts and
+    // the `end time` means the latest finishing time.
     task->SetStartTime(expected_start_time);
+    task->SetEndTime(expected_start_time + task->time_limit);
 
     if constexpr (kAlgoTraceOutput) {
       CRANE_TRACE(
