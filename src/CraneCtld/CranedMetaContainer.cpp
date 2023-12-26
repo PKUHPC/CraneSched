@@ -23,9 +23,8 @@ void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
   CRANE_ASSERT(node_meta.get() != nullptr);
   node_meta->alive = true;
 
-  auto partition_id_list = craned_id_part_ids_map_.get_read_ptr(craned_id);
-  CRANE_ASSERT(partition_id_list.get() != nullptr);
-  for (PartitionId const& part_id : *partition_id_list) {
+  CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
+  for (PartitionId const& part_id : craned_id_part_ids_map_.at(craned_id)) {
     auto partition_meta = partition_metas_map_[part_id];
 
     PartitionGlobalMeta& part_global_meta =
@@ -37,13 +36,12 @@ void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
 }
 
 void CranedMetaContainerSimpleImpl::CranedDown(const CranedId& craned_id) {
-  CRANE_ASSERT(craned_meta_map_.contains(craned_id));
+  CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
   auto node_meta = craned_meta_map_[craned_id];
   node_meta->alive = false;
 
   CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
-  auto partition_id_list = craned_id_part_ids_map_.get_read_ptr(craned_id);
-  for (PartitionId const& part_id : *partition_id_list) {
+  for (PartitionId const& part_id : craned_id_part_ids_map_.at(craned_id)) {
     auto partition_meta = partition_metas_map_[part_id];
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
@@ -62,34 +60,34 @@ void CranedMetaContainerSimpleImpl::CranedDown(const CranedId& craned_id) {
 
 bool CranedMetaContainerSimpleImpl::CheckCranedOnline(
     const CranedId& craned_id) {
-  CRANE_ASSERT(craned_meta_map_.contains(craned_id));
-  auto node_meta = craned_meta_map_.get_read_ptr(craned_id);
+  CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
+  auto node_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
   return node_meta->alive;
 }
 
-CranedMetaContainerInterface::PartitionMetasPtr
+CranedMetaContainerInterface::PartitionMetaPtr
 CranedMetaContainerSimpleImpl::GetPartitionMetasPtr(PartitionId partition_id) {
-  return partition_metas_map_.get_read_ptr(partition_id);
+  return partition_metas_map_.GetValueExclusivePtr(partition_id);
 }
 
 CranedMetaContainerInterface::CranedMetaPtr
 CranedMetaContainerSimpleImpl::GetCranedMetaPtr(CranedId craned_id) {
-  return craned_meta_map_.get_read_ptr(craned_id);
+  return craned_meta_map_.GetValueExclusivePtr(craned_id);
 }
 
 CranedMetaContainerInterface::AllPartitionsMetaMapPtr
 CranedMetaContainerSimpleImpl::GetAllPartitionsMetaMapPtr() {
-  return partition_metas_map_.get_map_read();
+  return partition_metas_map_.GetMapSharedPtr();
 }
 
 CranedMetaContainerInterface::CranedMetaMapPtr
 CranedMetaContainerSimpleImpl::GetCranedMetaMapPtr() {
-  return craned_meta_map_.get_map_read();
+  return craned_meta_map_.GetMapSharedPtr();
 }
 
 void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
     CranedId node_id, task_id_t task_id, const Resources& resources) {
-  if (!craned_meta_map_.contains(node_id)) {
+  if (!craned_meta_map_.Contains(node_id)) {
     CRANE_ERROR("Try to malloc resource from an unknown craned {}", node_id);
     return;
   }
@@ -99,8 +97,7 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
   node_meta->res_avail -= resources;
   node_meta->res_in_use += resources;
 
-  auto partition_list = craned_id_part_ids_map_.get_read_ptr(node_id);
-  for (PartitionId const& part_id : *partition_list) {
+  for (PartitionId const& part_id : craned_id_part_ids_map_.at(node_id)) {
     auto partition_meta = partition_metas_map_[part_id];
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
@@ -111,7 +108,7 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
 
 void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId craned_id,
                                                          uint32_t task_id) {
-  if (!craned_meta_map_.contains(craned_id)) {
+  if (!craned_meta_map_.Contains(craned_id)) {
     CRANE_ERROR("Try to free resource from an unknown craned {}", craned_id);
     return;
   }
@@ -135,8 +132,7 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId craned_id,
   node_meta->res_avail += resources;
   node_meta->res_in_use -= resources;
 
-  auto partition_list = craned_id_part_ids_map_.get_read_ptr(craned_id);
-  for (PartitionId const& part_id : *partition_list) {
+  for (PartitionId const& part_id : craned_id_part_ids_map_.at(craned_id)) {
     auto partition_meta = partition_metas_map_[part_id];
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
@@ -148,9 +144,8 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId craned_id,
 }
 
 void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
-  std::unordered_map<CranedId, CranedMeta> craned_map;
-  std::unordered_map<CranedId, std::list<PartitionId>> craned_partition_map;
-  absl::flat_hash_map<PartitionId, PartitionMeta> partition_map;
+  HashMap<CranedId, CranedMeta> craned_map;
+  HashMap<PartitionId, PartitionMeta> partition_map;
 
   for (auto&& [craned_name, node_ptr] : config.Nodes) {
     CRANE_TRACE("Parsing node {}", craned_name);
@@ -182,7 +177,7 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
       auto& craned_meta = craned_map[craned_name];
       craned_meta.static_meta.partition_ids.emplace_back(part_name);
 
-      craned_partition_map[craned_name].emplace_back(part_name);
+      craned_id_part_ids_map_[craned_name].emplace_back(part_name);
 
       part_meta.craned_ids.emplace(craned_name);
 
@@ -216,7 +211,6 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
   }
 
   craned_meta_map_.InitFromMap(std::move(craned_map));
-  craned_id_part_ids_map_.InitFromMap(std::move(craned_partition_map));
   partition_metas_map_.InitFromMap(std::move(partition_map));
 }
 
@@ -225,10 +219,10 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
   crane::grpc::QueryCranedInfoReply reply;
   auto* list = reply.mutable_craned_info_list();
 
-  auto craned_map = craned_meta_map_.get_map_read();
+  auto craned_map = craned_meta_map_.GetMapSharedPtr();
   for (auto&& [craned_index, craned_meta_ptr] : *craned_map) {
     auto* craned_info = list->Add();
-    auto craned_meta = craned_meta_ptr.get_read_ptr();
+    auto craned_meta = craned_meta_ptr.GetExclusivePtr();
 
     auto& alloc_res_total = craned_meta->res_total.allocatable_resource;
     auto& alloc_res_in_use = craned_meta->res_in_use.allocatable_resource;
@@ -261,11 +255,11 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   crane::grpc::QueryCranedInfoReply reply;
   auto* list = reply.mutable_craned_info_list();
 
-  if (!craned_meta_map_.contains(node_name)) {
+  if (!craned_meta_map_.Contains(node_name)) {
     return reply;
   }
 
-  auto craned_meta = craned_meta_map_.get_read_ptr(node_name);
+  auto craned_meta = craned_meta_map_.GetValueExclusivePtr(node_name);
 
   auto* craned_info = list->Add();
   auto& alloc_res_total = craned_meta->res_total.allocatable_resource;
@@ -298,11 +292,11 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
   crane::grpc::QueryPartitionInfoReply reply;
   auto* list = reply.mutable_partition_info();
 
-  auto partition_map = partition_metas_map_.get_map_read();
+  auto partition_map = partition_metas_map_.GetMapSharedPtr();
 
   for (auto&& [part_name, part_meta_ptr] : *partition_map) {
     auto* part_info = list->Add();
-    auto part_meta = part_meta_ptr.get_read_ptr();
+    auto part_meta = part_meta_ptr.GetExclusivePtr();
 
     auto& alloc_res_total =
         part_meta->partition_global_meta.m_resource_total_inc_dead_
@@ -339,9 +333,9 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
   crane::grpc::QueryPartitionInfoReply reply;
   auto* list = reply.mutable_partition_info();
 
-  if (!partition_metas_map_.contains(partition_name)) return reply;
+  if (!partition_metas_map_.Contains(partition_name)) return reply;
 
-  auto part_meta = partition_metas_map_.get_read_ptr(partition_name);
+  auto part_meta = partition_metas_map_.GetValueExclusivePtr(partition_name);
 
   auto* part_info = list->Add();
   auto& res_total = part_meta->partition_global_meta.m_resource_total_inc_dead_
@@ -378,15 +372,15 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
 
   // Ensure that the map global read lock is held during the following filtering
   // operations and craned_meta_map_ must be locked before partition_metas_map_
-  auto craned_map = craned_meta_map_.get_map_read();
-  auto partition_map = partition_metas_map_.get_map_read();
+  auto craned_map = craned_meta_map_.GetMapSharedPtr();
+  auto partition_map = partition_metas_map_.GetMapSharedPtr();
 
   std::unordered_set<std::string> filter_partitions_set(
       request.filter_partitions().begin(), request.filter_partitions().end());
   bool no_partition_constraint = request.filter_partitions().empty();
   auto partition_rng_filter_name = [no_partition_constraint,
                                     &filter_partitions_set](auto& it) {
-    auto part_meta = it.second.get_read_ptr();
+    auto part_meta = it.second.GetExclusivePtr();
     return no_partition_constraint ||
            filter_partitions_set.contains(
                part_meta->partition_global_meta.name);
@@ -399,10 +393,10 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       request.filter_craned_states().begin(),
       request.filter_craned_states().end());
   bool no_craned_state_constraint = request.filter_craned_states().empty();
-  auto craned_rng_filter_state = [&](CranedMetaInnerMap::const_iterator it) {
+  auto craned_rng_filter_state = [&](CranedMetaRawMap::const_iterator it) {
     if (no_craned_state_constraint) return true;
 
-    auto craned_meta = it->second.get_read_ptr();
+    auto craned_meta = it->second.GetExclusivePtr();
     auto& res_total = craned_meta->res_total.allocatable_resource;
     auto& res_in_use = craned_meta->res_in_use.allocatable_resource;
     auto& res_avail = craned_meta->res_avail.allocatable_resource;
@@ -423,23 +417,22 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   };
 
   bool no_craned_hostname_constraint = request.filter_nodes().empty();
-  auto craned_rng_filter_hostname = [&](CranedMetaInnerMap::const_iterator it) {
-    auto craned_meta = it->second.get_read_ptr();
+  auto craned_rng_filter_hostname = [&](CranedMetaRawMap::const_iterator it) {
+    auto craned_meta = it->second.GetExclusivePtr();
     return no_craned_hostname_constraint ||
            req_nodes.contains(craned_meta->static_meta.hostname);
   };
 
   auto craned_rng_filter_only_responding =
-      [&](CranedMetaInnerMap::const_iterator it) {
-        auto craned_meta = it->second.get_read_ptr();
+      [&](CranedMetaRawMap::const_iterator it) {
+        auto craned_meta = it->second.GetExclusivePtr();
         return !request.filter_only_responding_nodes() || craned_meta->alive;
       };
 
-  auto craned_rng_filter_only_down =
-      [&](CranedMetaInnerMap::const_iterator it) {
-        auto craned_meta = it->second.get_read_ptr();
-        return !request.filter_only_down_nodes() || !craned_meta->alive;
-      };
+  auto craned_rng_filter_only_down = [&](CranedMetaRawMap::const_iterator it) {
+    auto craned_meta = it->second.GetExclusivePtr();
+    return !request.filter_only_down_nodes() || !craned_meta->alive;
+  };
 
   auto partition_rng =
       *partition_map | ranges::views::filter(partition_rng_filter_name);
@@ -451,7 +444,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     std::unordered_set<CranedId> craned_ids;
 
     {
-      auto part_meta = it.second.get_read_ptr();
+      auto part_meta = it.second.GetExclusivePtr();
       std::string partition_name = part_meta->partition_global_meta.name;
       if (partition_name == g_config.DefaultPartition) {
         partition_name.append("*");
@@ -481,17 +474,17 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
 
     auto craned_rng =
         craned_ids |
-        ranges::views::transform([&](CranedId const& craned_id)
-                                     -> CranedMetaInnerMap::const_iterator {
-          return craned_map->find(craned_id);
-        }) |
+        ranges::views::transform(
+            [&](CranedId const& craned_id) -> CranedMetaRawMap::const_iterator {
+              return craned_map->find(craned_id);
+            }) |
         ranges::views::filter(craned_rng_filter_hostname) |
         ranges::views::filter(craned_rng_filter_state) |
         ranges::views::filter(craned_rng_filter_only_down) |
         ranges::views::filter(craned_rng_filter_only_responding);
 
-    ranges::for_each(craned_rng, [&](CranedMetaInnerMap::const_iterator it) {
-      auto craned_meta = it->second.get_read_ptr();
+    ranges::for_each(craned_rng, [&](CranedMetaRawMap::const_iterator it) {
+      auto craned_meta = it->second.GetExclusivePtr();
       auto& res_total = craned_meta->res_total.allocatable_resource;
       auto& res_in_use = craned_meta->res_in_use.allocatable_resource;
       auto& res_avail = craned_meta->res_avail.allocatable_resource;

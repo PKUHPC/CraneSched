@@ -18,38 +18,40 @@
 
 namespace util {
 
-/**
- *
- * @tparam T is the type of the stored pointer.
- * @tparam Lockable must have lock() and unlock()
- */
-template <typename T, typename Lockable>
+template <typename T>
+concept StdUnlockable = requires(T t) {
+  { t.unlock() } -> std::same_as<void>;
+};
+
+template <typename T>
+concept StdSharedUnlockable = StdUnlockable<T> and requires(T t) {
+  { t.unlock_shared() } -> std::same_as<void>;
+};
+
+template <typename T>
+concept AbslUnlockable = requires(T t) {
+  { t.Unlock() } -> std::same_as<void>;
+};
+
+template <typename T, typename Unlockable>
+  requires StdUnlockable<Unlockable> || AbslUnlockable<Unlockable>
 class ScopeExclusivePtr {
  public:
-  explicit ScopeExclusivePtr(
-      T* data, Lockable* lock = nullptr,
-      std::function<void(Lockable*)> unlock_func =
-          [](Lockable* mutex) { mutex->unlock(); }) noexcept
-      : data_(data), lock_(lock), unlock_func_(unlock_func) {}
-
-  explicit ScopeExclusivePtr(
-      T* data, Lockable&& lock,
-      std::function<void(Lockable*)> unlock_func =
-          [](Lockable* mutex) { mutex->unlock(); }) noexcept
-      : data_(data),
-        own_lock_(std::move(lock)),
-        lock_(&own_lock_),
-        unlock_func_(unlock_func) {}
+  explicit ScopeExclusivePtr(T* data, Unlockable* lock = nullptr) noexcept
+      : data_(data), lock_(lock) {}
 
   ~ScopeExclusivePtr() noexcept {
     if (lock_) {
-      unlock_func_(lock_);
+      if constexpr (StdUnlockable<Unlockable>)
+        lock_->unlock();
+      else  // AbslLockable
+        lock_->Unlock();
     }
   }
 
-  T* get() { return data_; }
-  T& operator*() { return *data_; }
-  T* operator->() { return data_; }
+  T* get() const { return data_; }
+  T& operator*() const { return *data_; }
+  T* operator->() const { return data_; }
 
   explicit operator bool() { return data_ != nullptr; }
 
@@ -59,53 +61,32 @@ class ScopeExclusivePtr {
   ScopeExclusivePtr(ScopeExclusivePtr&& val) noexcept {
     data_ = val.data_;
     lock_ = val.lock_;
-    own_lock_ = std::move(val.own_lock_);
-    unlock_func_ = val.unlock_func_;
     val.lock_ = nullptr;
   }
 
  private:
   T* data_;
-  Lockable* lock_;
-  Lockable own_lock_;
-  std::function<void(Lockable*)> unlock_func_;
+  Unlockable* lock_;
 };
 
-/**
- * @note remember to limit the lifetime of this variable to prevent the lock
- * from not being released in time
- * @tparam T is the type of the stored pointer.
- * @tparam Lockable must have lock_shared() and unlock_shared()
- */
-template <typename T, typename Lockable>
+template <typename T, typename Unlockable>
+  requires StdSharedUnlockable<Unlockable>
 class ScopeSharedPtr {
  public:
-  explicit ScopeSharedPtr(
-      const T* data, Lockable* lock = nullptr,
-      std::function<void(Lockable*)> unlock_func =
-          [](Lockable* mutex) { mutex->unlock_shared(); }) noexcept
-      : data_(data), lock_(lock), unlock_func_(unlock_func) {}
-
-  explicit ScopeSharedPtr(
-      const T* data, Lockable&& lock,
-      std::function<void(Lockable*)> unlock_func =
-          [](Lockable* mutex) { mutex->unlock_shared(); }) noexcept
-      : data_(data),
-        own_lock_(std::move(lock)),
-        lock_(&own_lock_),
-        unlock_func_(unlock_func) {}
+  explicit ScopeSharedPtr(const T* data, Unlockable* lock = nullptr) noexcept
+      : data_(data), lock_(lock) {}
 
   ~ScopeSharedPtr() noexcept {
     if (lock_) {
-      unlock_func_(lock_);
+      lock_->unlock_shared();
     }
   }
 
-  const T* get() { return data_; }
-  const T& operator*() { return *data_; }
-  const T* operator->() { return data_; }
+  const T* get() const { return data_; }
+  const T& operator*() const { return *data_; }
+  const T* operator->() const { return data_; }
 
-  explicit operator bool() { return data_ != nullptr; }
+  explicit operator bool() const { return data_ != nullptr; }
 
   ScopeSharedPtr(ScopeSharedPtr const&) = delete;
   ScopeSharedPtr& operator=(ScopeSharedPtr const&) = delete;
@@ -113,16 +94,48 @@ class ScopeSharedPtr {
   ScopeSharedPtr(ScopeSharedPtr&& val) noexcept {
     data_ = val.data_;
     lock_ = val.lock_;
-    own_lock_ = std::move(val.own_lock_);
-    unlock_func_ = val.unlock_func_;
     val.lock_ = nullptr;
   }
 
  private:
   const T* data_;
-  Lockable* lock_;
-  Lockable own_lock_;
-  std::function<void(Lockable*)> unlock_func_;
+  Unlockable* lock_;
+};
+
+template <typename T, typename Unlockable>
+  requires StdUnlockable<Unlockable> || AbslUnlockable<Unlockable>
+class ManagedScopeExclusivePtr {
+ public:
+  explicit ManagedScopeExclusivePtr() noexcept : data_(nullptr) {}
+
+  ManagedScopeExclusivePtr(T* data, Unlockable&& lock) noexcept
+      : data_(data), lock_(std::move(lock)) {}
+
+  ~ManagedScopeExclusivePtr() noexcept {
+    if constexpr (StdUnlockable<Unlockable>)
+      lock_.unlock();
+    else  // AbslLockable
+      lock_.Unlock();
+  }
+
+  T* get() const { return data_; }
+  T& operator*() const { return *data_; }
+  T* operator->() const { return data_; }
+
+  explicit operator bool() { return data_ != nullptr; }
+
+  ManagedScopeExclusivePtr(ManagedScopeExclusivePtr const&) = delete;
+  ManagedScopeExclusivePtr& operator=(ManagedScopeExclusivePtr const&) = delete;
+
+  ManagedScopeExclusivePtr(ManagedScopeExclusivePtr&& val) noexcept {
+    data_ = val.data_;
+    lock_ = val.lock_;
+    val.lock_ = nullptr;
+  }
+
+ private:
+  T* data_;
+  Unlockable lock_;
 };
 
 }  // namespace util

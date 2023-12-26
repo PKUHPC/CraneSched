@@ -29,33 +29,42 @@ namespace Ctld {
  * All public methods in this class is thread-safe.
  */
 class CranedMetaContainerInterface {
+ protected:
+  template <typename K, typename V,
+            typename Hash = absl::container_internal::hash_default_hash<K>>
+  using HashMap = absl::flat_hash_map<K, V, Hash>;
+
+  template <typename K, typename V>
+  using TreeMap = absl::btree_map<K, V>;
+
+  CranedMetaContainerInterface() = default;
+
  public:
   //  using AllPartitionsMetaMap = std::unordered_map<PartitionId,
   //  PartitionMeta>;
   using AllPartitionsMetaAtomicMap =
-      util::AtomicHashMap<absl::flat_hash_map, PartitionId, PartitionMeta>;
-  using AllPartitionsMetaInnerMap =
-      absl::flat_hash_map<PartitionId, AllPartitionsMetaAtomicMap::MutexValue>;
+      util::AtomicHashMap<HashMap, PartitionId, PartitionMeta>;
+  using AllPartitionsMetaRawMap = AllPartitionsMetaAtomicMap::RawMap;
 
   /**
    * A map from CranedId to global craned information
    */
   //  using CranedMetaMap = std::unordered_map<CranedId, CranedMeta>;
   using CranedMetaAtomicMap =
-      util::AtomicHashMap<std::unordered_map, CranedId, CranedMeta>;
-  using CranedMetaInnerMap =
-      std::unordered_map<CranedId, CranedMetaAtomicMap::MutexValue>;
+      util::AtomicHashMap<HashMap, CranedId, CranedMeta>;
+  using CranedMetaRawMap = CranedMetaAtomicMap::RawMap;
 
   using AllPartitionsMetaMapPtr =
-      util::ScopeSharedPtr<AllPartitionsMetaInnerMap, util::rw_mutex>;
+      util::ScopeSharedPtr<AllPartitionsMetaRawMap, util::rw_mutex>;
   using CranedMetaMapPtr =
-      util::ScopeSharedPtr<CranedMetaInnerMap, util::rw_mutex>;
+      util::ScopeSharedPtr<CranedMetaRawMap, util::rw_mutex>;
 
-  using PartitionMetasPtr =
-      util::ScopeSharedPtr<PartitionMeta,
-                           AllPartitionsMetaAtomicMap::CombinedLock>;
+  using PartitionMetaPtr =
+      util::ManagedScopeExclusivePtr<PartitionMeta,
+                                     AllPartitionsMetaAtomicMap::CombinedLock>;
   using CranedMetaPtr =
-      util::ScopeSharedPtr<CranedMeta, CranedMetaAtomicMap::CombinedLock>;
+      util::ManagedScopeExclusivePtr<CranedMeta,
+                                     CranedMetaAtomicMap::CombinedLock>;
 
   virtual ~CranedMetaContainerInterface() = default;
 
@@ -93,16 +102,13 @@ class CranedMetaContainerInterface {
    * partition does not exist, a nullptr is returned and no lock is held. Use
    * bool() to check it.
    */
-  virtual PartitionMetasPtr GetPartitionMetasPtr(PartitionId partition_id) = 0;
+  virtual PartitionMetaPtr GetPartitionMetasPtr(PartitionId partition_id) = 0;
 
   virtual CranedMetaPtr GetCranedMetaPtr(CranedId node_id) = 0;
 
   virtual AllPartitionsMetaMapPtr GetAllPartitionsMetaMapPtr() = 0;
 
   virtual CranedMetaMapPtr GetCranedMetaMapPtr() = 0;
-
- protected:
-  CranedMetaContainerInterface() = default;
 };
 
 class CranedMetaContainerSimpleImpl final
@@ -132,7 +138,7 @@ class CranedMetaContainerSimpleImpl final
 
   bool CheckCranedOnline(const CranedId& craned_id) override;
 
-  PartitionMetasPtr GetPartitionMetasPtr(PartitionId partition_id) override;
+  PartitionMetaPtr GetPartitionMetasPtr(PartitionId partition_id) override;
 
   CranedMetaPtr GetCranedMetaPtr(CranedId craned_id) override;
 
@@ -141,7 +147,7 @@ class CranedMetaContainerSimpleImpl final
   CranedMetaMapPtr GetCranedMetaMapPtr() override;
 
   bool CheckCranedAllowed(const std::string& hostname) override {
-    return craned_meta_map_.contains(hostname);
+    return craned_meta_map_.Contains(hostname);
   };
 
   void MallocResourceFromNode(CranedId node_id, task_id_t task_id,
@@ -157,9 +163,10 @@ class CranedMetaContainerSimpleImpl final
   // consider the locking order of the lock chain, which will not lead to
   // deadlock. Only the order of write locks and mutexes affects the deadlock
   CranedMetaAtomicMap craned_meta_map_;
+
   // A craned node may belong to multiple partitions.
-  util::AtomicHashMap<std::unordered_map, CranedId /*craned hostname*/,
-                      std::list<PartitionId>>
+  // Use this map as a READ-ONLY index.
+  HashMap<CranedId /*craned hostname*/, std::list<PartitionId>>
       craned_id_part_ids_map_;
   AllPartitionsMetaAtomicMap partition_metas_map_;
 };

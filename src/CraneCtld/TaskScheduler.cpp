@@ -1305,17 +1305,16 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
         running_tasks,
     absl::Time now, const PartitionId& partition_id,
-    const CranedMetaContainerInterface::AllPartitionsMetaAtomicMap::MutexValue&
-        partition_meta_ptr,
-    const CranedMetaContainerInterface::CranedMetaInnerMap& craned_meta_map,
+    const util::Synchronized<PartitionMeta>& partition_meta_ptr,
+    const CranedMetaContainerInterface::CranedMetaRawMap& craned_meta_map,
     NodeSelectionInfo* node_selection_info) {
   NodeSelectionInfo& node_selection_info_ref = *node_selection_info;
 
   std::unordered_set<CranedId> craned_ids =
-      partition_meta_ptr.get_read_ptr()->craned_ids;
+      partition_meta_ptr.GetExclusivePtr()->craned_ids;
   for (const auto& craned_id : craned_ids) {
     auto& craned_meta_ptr = craned_meta_map.at(craned_id);
-    auto craned_meta = craned_meta_ptr.get_read_ptr();
+    auto craned_meta = craned_meta_ptr.GetExclusivePtr();
 
     // An offline craned shouldn't be scheduled.
     if (!craned_meta->alive) continue;
@@ -1447,9 +1446,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
 
 bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     const NodeSelectionInfo& node_selection_info,
-    const CranedMetaContainerInterface::AllPartitionsMetaAtomicMap::MutexValue&
-        partition_meta_ptr,
-    const CranedMetaContainerInterface::CranedMetaInnerMap& craned_meta_map,
+    const util::Synchronized<PartitionMeta>& partition_meta_ptr,
+    const CranedMetaContainerInterface::CranedMetaRawMap& craned_meta_map,
     TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
     absl::Time* start_time) {
   uint32_t selected_node_cnt = 0;
@@ -1463,7 +1461,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
          task_num_node_id_it !=
              node_selection_info.task_num_node_id_map.end()) {
     auto craned_index = task_num_node_id_it->second;
-    if (!partition_meta_ptr.get_read_ptr()->craned_ids.contains(craned_index)) {
+    if (!partition_meta_ptr.GetExclusivePtr()->craned_ids.contains(
+            craned_index)) {
       // Todo: Performance issue! We can use cached available node set
       //  for the task when checking task validity in TaskScheduler.
       ++task_num_node_id_it;
@@ -1471,7 +1470,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     }
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_index);
-    auto craned_meta = craned_meta_map.at(craned_index).get_read_ptr();
+    auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
 
     // If any of the follow `if` is true, skip this node.
     if (!(task->resources <= craned_meta->res_total)) {
@@ -1814,7 +1813,7 @@ void MinLoadFirst::NodeSelect(
 
     std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
     for (CranedId const& craned_id : craned_ids) {
-      auto craned_meta = craned_meta_map->at(craned_id).get_read_ptr();
+      auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
       for (PartitionId const& partition_id :
            craned_meta->static_meta.partition_ids) {
         involved_part_craned[partition_id].emplace_back(craned_id);
@@ -2097,7 +2096,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
 
   for (const auto& craned_id : craned_ids) {
-    auto craned_meta = craned_meta_map->at(craned_id).get_read_ptr();
+    auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
     if (craned_meta->alive && task->resources <= craned_meta->res_total &&
         (task->included_nodes.empty() ||
          task->included_nodes.contains(craned_id)) &&

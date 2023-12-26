@@ -23,184 +23,143 @@
 
 namespace util {
 
-template <template <typename...> class MapType, typename key_t,
-          typename value_t>
-class AtomicHashMap {
+template <typename T>
+class Synchronized {
+ private:
+  T value_;
+  mutable mutex mutex_;
+
  public:
-  class MutexValue {
-   private:
-    value_t value_;
-    mutable mutex mutex_;
+  // Only implement exclusive lock protected value
+  using ExclusivePtr = util::ScopeExclusivePtr<T, mutex>;
+  using ConstExclusivePtr = util::ScopeExclusivePtr<const T, mutex>;
 
-   public:
-    using ReadPtr = util::ScopeSharedPtr<value_t, mutex>;
-    using WritePtr = util::ScopeExclusivePtr<value_t, mutex>;
+  explicit Synchronized(T const& value) : value_(value) {}
+  explicit Synchronized(T&& value) : value_(std::move(value)) {}
 
-    //    explicit MutexValue(const value_t& value) : value_(value) {}
+  Synchronized(Synchronized&& other) noexcept {
+    lock_guard lock(other.mutex_);
+    value_ = std::move(other.value_);
+  }
 
-    explicit MutexValue(value_t&& value) : value_(std::move(value)) {}
-
-    MutexValue(MutexValue&& other) noexcept {
+  Synchronized& operator=(Synchronized&& other) noexcept {
+    if (this != &other) {
       lock_guard lock(other.mutex_);
       value_ = std::move(other.value_);
     }
+    return *this;
+  }
 
-    MutexValue& operator=(MutexValue&& other) noexcept {
-      if (this != &other) {
-        lock_guard lock(other.mutex_);
-        value_ = std::move(other.value_);
-      }
-      return *this;
-    }
+  Synchronized(const Synchronized& other) = delete;
+  Synchronized& operator=(const Synchronized& other) = delete;
 
-    MutexValue(const MutexValue& other) = delete;
-    MutexValue& operator=(const MutexValue& other) = delete;
+  mutex& Mutex() { return mutex_; }
 
-    void lock() { mutex_.Lock(); }
+  ExclusivePtr GetExclusivePtr() {
+    mutex_.Lock();
+    return ExclusivePtr{&value_, &mutex_};
+  }
 
-    void unlock() { mutex_.Unlock(); }
+  ConstExclusivePtr GetExclusivePtr() const {
+    mutex_.Lock();
+    return ConstExclusivePtr{&value_, &mutex_};
+  }
 
-    value_t* get_value_ptr_nolock() { return &value_; }
+  T* RawPtr() { return &value_; }
+};
 
-    mutex* get_lock_ptr() { return &mutex_; }
+template <template <typename...> class MapType, typename Key, typename T>
+class AtomicHashMap {
+ public:
+  class CombinedLock;
 
-    void set_value(const value_t& new_value) {
-      lock_guard lock(mutex_);
-      value_ = new_value;
-    }
+  using RawMap = MapType<Key, Synchronized<T>>;
 
-    ReadPtr get_read_ptr() const {
-      mutex_.Lock();
-      return ReadPtr{&value_, &mutex_, [](mutex* mtx) { mtx->Unlock(); }};
-    }
+  using ValueExclusivePtr = util::ManagedScopeExclusivePtr<T, CombinedLock>;
 
-    WritePtr get_write_ptr() {
-      mutex_.Lock();
-      return WritePtr{&value_, &mutex_, [](mutex* mtx) { mtx->Unlock(); }};
-    }
-  };
+  using MapSharedPtr =
+      util::ScopeSharedPtr<MapType<Key, Synchronized<T>>, rw_mutex>;
 
   class CombinedLock {
    private:
-    rw_mutex* read_associated_write_mutex_;
-    mutex* atomic_mutex_;
+    rw_mutex* global_map_shared_mutex_;
+    mutex* value_mutex_;
 
    public:
     CombinedLock() = default;
 
-    CombinedLock(rw_mutex* a, mutex* b)
-        : read_associated_write_mutex_(a), atomic_mutex_(b) {}
+    CombinedLock(rw_mutex* rw_mtx, mutex* mtx)
+        : global_map_shared_mutex_(rw_mtx), value_mutex_(mtx) {}
 
     CombinedLock(const CombinedLock&) = delete;
     CombinedLock& operator=(const CombinedLock&) = delete;
 
     CombinedLock(CombinedLock&& val) noexcept {
-      read_associated_write_mutex_ = val.read_associated_write_mutex_;
-      atomic_mutex_ = val.atomic_mutex_;
+      global_map_shared_mutex_ = val.global_map_shared_mutex_;
+      value_mutex_ = val.value_mutex_;
 
-      val.read_associated_write_mutex_ = nullptr;
-      val.atomic_mutex_ = nullptr;
-    }
-
-    void lock() {
-      read_associated_write_mutex_->lock_shared();
-      atomic_mutex_->Lock();
+      val.global_map_shared_mutex_ = nullptr;
+      val.value_mutex_ = nullptr;
     }
 
     void unlock() {
-      atomic_mutex_->Unlock();
-      read_associated_write_mutex_->unlock_shared();
+      global_map_shared_mutex_->unlock_shared();
+      value_mutex_->Unlock();
     }
-
-    void unlock_shared() { unlock(); }
   };
-
-  using ValueReadMutexSharedPtr = util::ScopeSharedPtr<value_t, CombinedLock>;
-  using ValueWriteMutexExclusivePtr =
-      util::ScopeExclusivePtr<value_t, CombinedLock>;
-
-  using MapMutexSharedPtr =
-      util::ScopeSharedPtr<MapType<key_t, MutexValue>, rw_mutex>;
-  using MapMutexExclusivePtr =
-      util::ScopeExclusivePtr<MapType<key_t, MutexValue>, rw_mutex>;
 
   AtomicHashMap() = default;
 
-  void InitFromMap(MapType<key_t, value_t>&& other_map) {
+  // This function should be called only once!
+  void InitFromMap(MapType<Key, T>&& other_map) {
     m_value_map_.reserve(other_map.size());
     for (auto& [k, v] : other_map) {
-      // Using the emplace method and std::move for movement construction in
-      // site
+      // Using the emplace method and
+      // std::move for movement construction in site
       m_value_map_.emplace(k, std::move(v));
     }
   }
 
-  bool contains(const key_t& key) {
+  bool Contains(const Key& key) {
     read_lock_guard lock_guard(m_global_rw_mutex_);
     return m_value_map_.contains(key);
   }
 
-  ValueReadMutexSharedPtr get_read_ptr(const key_t& key) {
+  ValueExclusivePtr GetValueExclusivePtr(const Key& key) {
     m_global_rw_mutex_.lock_shared();
     auto iter = m_value_map_.find(key);
 
     if (iter == m_value_map_.end()) {
       m_global_rw_mutex_.unlock_shared();
-      return ValueReadMutexSharedPtr{nullptr};
+      return ValueExclusivePtr{};
     } else {
-      iter->second.lock();
-      CombinedLock combined_lock(&m_global_rw_mutex_,
-                                 iter->second.get_lock_ptr());
-      return ValueReadMutexSharedPtr{iter->second.get_value_ptr_nolock(),
-                                     std::move(combined_lock)};
+      iter->second.Mutex().Lock();
+      CombinedLock combined_lock(&m_global_rw_mutex_, &iter->second.Mutex());
+      return ValueExclusivePtr{iter->second.RawPtr(), std::move(combined_lock)};
     }
   }
 
-  bool get_copy(const key_t& key, value_t* value) {
+  ValueExclusivePtr operator[](const Key& key) {
     m_global_rw_mutex_.lock_shared();
     auto iter = m_value_map_.find(key);
 
     if (iter == m_value_map_.end()) {
       m_global_rw_mutex_.unlock_shared();
-      value = nullptr;
-      return false;
+      return ValueExclusivePtr{};
     } else {
-      iter->second.lock();
-      *value = *(iter->second.get_value_ptr_nolock());  // copy value
-      m_global_rw_mutex_.unlock_shared();
-      return true;
+      iter->second.Mutex().Lock();
+      CombinedLock combined_lock(&m_global_rw_mutex_, &iter->second.Mutex());
+      return ValueExclusivePtr{iter->second.RawPtr(), std::move(combined_lock)};
     }
   }
 
-  ValueWriteMutexExclusivePtr operator[](const key_t& key) {
+  MapSharedPtr GetMapSharedPtr() {
     m_global_rw_mutex_.lock_shared();
-    auto iter = m_value_map_.find(key);
-
-    if (iter == m_value_map_.end()) {
-      m_global_rw_mutex_.unlock_shared();
-      return ValueWriteMutexExclusivePtr{nullptr};
-    } else {
-      iter->second.lock();
-      CombinedLock combined_lock(&m_global_rw_mutex_,
-                                 iter->second.get_lock_ptr());
-      return ValueWriteMutexExclusivePtr{iter->second.get_value_ptr_nolock(),
-                                         std::move(combined_lock)};
-    }
-  }
-
-  MapMutexSharedPtr get_map_read() {
-    m_global_rw_mutex_.lock_shared();
-    return MapMutexSharedPtr{&m_value_map_, &m_global_rw_mutex_};
-  }
-
-  MapMutexExclusivePtr get_map_write() {
-    m_global_rw_mutex_.lock();
-    return MapMutexExclusivePtr{&m_value_map_, &m_global_rw_mutex_};
+    return MapSharedPtr{&m_value_map_, &m_global_rw_mutex_};
   }
 
  private:
-  MapType<key_t, MutexValue> m_value_map_;
-
+  RawMap m_value_map_;
   rw_mutex m_global_rw_mutex_;
 };
 
