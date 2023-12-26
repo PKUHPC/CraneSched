@@ -163,13 +163,13 @@ bool operator==(const AllocatableResource& lhs, const AllocatableResource& rhs);
 
 /**
  * Model the dedicated resources in a craned node.
- * It Contains GPU, NIC, etc.
+ * It contains GPU, NIC, etc.
  */
 struct DedicatedResource {};  // Todo: Crane GRES
 
 /**
  * When a task is allocated a resource UUID, it holds one instance of Resources
- * struct. Resource struct Contains a AllocatableResource struct and a list of
+ * struct. Resource struct contains a AllocatableResource struct and a list of
  * DedicatedResource.
  */
 struct Resources {
