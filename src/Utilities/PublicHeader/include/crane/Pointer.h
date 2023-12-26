@@ -44,7 +44,7 @@ class ScopeExclusivePtr {
     if (lock_) {
       if constexpr (StdUnlockable<Unlockable>)
         lock_->unlock();
-      else  // AbslLockable
+      else  // AbslUnlockable
         lock_->Unlock();
     }
   }
@@ -114,7 +114,7 @@ class ManagedScopeExclusivePtr {
   ~ManagedScopeExclusivePtr() noexcept {
     if constexpr (StdUnlockable<Unlockable>)
       lock_.unlock();
-    else  // AbslLockable
+    else  // AbslUnlockable
       lock_.Unlock();
   }
 
