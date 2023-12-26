@@ -370,11 +370,6 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   crane::grpc::QueryClusterInfoReply reply;
   auto* partition_list = reply.mutable_partitions();
 
-  // Ensure that the map global read lock is held during the following filtering
-  // operations and craned_meta_map_ must be locked before partition_metas_map_
-  auto craned_map = craned_meta_map_.GetMapSharedPtr();
-  auto partition_map = partition_metas_map_.GetMapSharedPtr();
-
   std::unordered_set<std::string> filter_partitions_set(
       request.filter_partitions().begin(), request.filter_partitions().end());
   bool no_partition_constraint = request.filter_partitions().empty();
@@ -433,6 +428,11 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     auto craned_meta = it->second.GetExclusivePtr();
     return !request.filter_only_down_nodes() || !craned_meta->alive;
   };
+
+  // Ensure that the map global read lock is held during the following filtering
+  // operations and craned_meta_map_ must be locked before partition_metas_map_
+  auto craned_map = craned_meta_map_.GetMapSharedPtr();
+  auto partition_map = partition_metas_map_.GetMapSharedPtr();
 
   auto partition_rng =
       *partition_map | ranges::views::filter(partition_rng_filter_name);
