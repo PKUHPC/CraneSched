@@ -261,8 +261,8 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
 
 CranedKeeper::CranedKeeper(uint32_t node_num)
     : m_cq_closed_(false), m_tag_pool_(32, 0) {
-  uint32_t thread_num =
-      std::ceil(static_cast<double>(node_num) / kCompletionQueueCapacity);
+  uint32_t thread_num = std::bit_ceil(static_cast<uint64_t>(
+      static_cast<double>(node_num) / kCompletionQueueCapacity));
 
   m_cq_mtx_vec_ = std::vector<Mutex>(thread_num);
   m_cq_vec_ = std::vector<grpc::CompletionQueue>(thread_num);
@@ -745,15 +745,16 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
     tag = m_tag_pool_.construct(CqTag{CqTag::kInitializingCraned, cq_tag_data});
   }
 
-  // Round-robin distribution here
-  static uint32_t cur_cq_id = 0;
-  cur_cq_id = (cur_cq_id + 1) % m_cq_vec_.size();
+  // Round-robin distribution here.
+  // Note: this function might be called from multiple thread.
+  //       Use atomic variable here.
+  static std::atomic<uint32_t> cur_cq_id = 0;
 
   cq_tag_data->craned->m_channel_->NotifyOnStateChange(
       cq_tag_data->craned->m_prev_channel_state_,
       std::chrono::system_clock::now() +
           std::chrono::seconds(kCompletionQueueDelaySeconds),
-      &m_cq_vec_[cur_cq_id], tag);
+      &m_cq_vec_[cur_cq_id++ % m_cq_vec_.size()], tag);
 }
 
 void CranedKeeper::CranedChannelConnectFail_(CranedStub *stub) {
