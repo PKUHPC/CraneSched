@@ -63,13 +63,6 @@
 #include <boost/container_hash/hash.hpp>
 #include <boost/pool/object_pool.hpp>
 #include <boost/thread/shared_mutex.hpp>
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/uuid_io.hpp>
-
-#if Boost_MINOR_VERSION >= 71
-#  include <boost/uuid/uuid_hash.hpp>
-#endif
 
 // Thread pool
 #include <BS_thread_pool.hpp>

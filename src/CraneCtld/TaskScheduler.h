@@ -267,8 +267,6 @@ class TaskScheduler {
 
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 
-  boost::uuids::random_generator_mt19937 m_uuid_gen_;
-
   // Ordered by task id. Those who comes earlier are in the head,
   // Because they have smaller task id.
   TreeMap<task_id_t, std::unique_ptr<TaskInCtld>> m_pending_task_map_
