@@ -61,6 +61,7 @@ class ScopeExclusivePtr {
   ScopeExclusivePtr(ScopeExclusivePtr&& val) noexcept {
     data_ = val.data_;
     lock_ = val.lock_;
+    val.data_ = nullptr;
     val.lock_ = nullptr;
   }
 
@@ -94,6 +95,7 @@ class ScopeSharedPtr {
   ScopeSharedPtr(ScopeSharedPtr&& val) noexcept {
     data_ = val.data_;
     lock_ = val.lock_;
+    val.data_ = nullptr;
     val.lock_ = nullptr;
   }
 
@@ -129,8 +131,8 @@ class ManagedScopeExclusivePtr {
 
   ManagedScopeExclusivePtr(ManagedScopeExclusivePtr&& val) noexcept {
     data_ = val.data_;
-    lock_ = val.lock_;
-    val.lock_ = nullptr;
+    val.data_ = nullptr;
+    lock_ = std::move(val.lock_);
   }
 
  private:
