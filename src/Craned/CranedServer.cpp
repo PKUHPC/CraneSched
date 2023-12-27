@@ -24,8 +24,6 @@
 
 namespace Craned {
 
-using boost::uuids::uuid;
-
 Status CranedServiceImpl::SrunXStream(
     ServerContext *context,
     ServerReaderWriter<SrunXStreamReply, SrunXStreamRequest> *stream) {
@@ -52,7 +50,7 @@ Status CranedServiceImpl::SrunXStream(
   // A task id is bound to one connection.
   uint32_t task_id;
   // A resource uuid is bound to one task.
-  uuid resource_uuid{};
+  // uuid resource_uuid{};
 
   StreamState state = StreamState::kNegotiation;
   while (true) {
@@ -92,13 +90,14 @@ Status CranedServiceImpl::SrunXStream(
                         context->peer(), request.GetTypeName());
             state = StreamState::kAbort;
           } else {
-            std::copy(request.check_resource().resource_uuid().begin(),
-                      request.check_resource().resource_uuid().end(),
-                      resource_uuid.data);
+            // std::copy(request.check_resource().resource_uuid().begin(),
+            //           request.check_resource().resource_uuid().end(),
+            //           resource_uuid.data);
 
             task_id = request.check_resource().task_id();
             // Check the validity of resource uuid provided by client.
-            err = g_server->CheckValidityOfResourceUuid(resource_uuid, task_id);
+            // err = g_server->CheckValidityOfResourceUuid(resource_uuid,
+            // task_id);
             if (err != CraneErr::kOk) {
               // The resource uuid provided by Client is invalid. Reject.
               reply.Clear();
@@ -299,7 +298,7 @@ Status CranedServiceImpl::SrunXStream(
         CRANE_DEBUG("Connection from peer {} aborted.", context->peer());
 
         // Invalidate resource uuid and free the resource in use.
-        g_server->RevokeResourceToken(resource_uuid);
+        // g_server->RevokeResourceToken(resource_uuid);
 
         return Status::CANCELLED;
       }
@@ -309,7 +308,7 @@ Status CranedServiceImpl::SrunXStream(
                     context->peer());
 
         // Invalidate resource uuid and free the resource in use.
-        g_server->RevokeResourceToken(resource_uuid);
+        // g_server->RevokeResourceToken(resource_uuid);
 
         return Status::OK;
       }
@@ -319,25 +318,6 @@ Status CranedServiceImpl::SrunXStream(
         return Status::CANCELLED;
     }
   }
-}
-
-void CranedServer::GrantResourceToken(const uuid &resource_uuid,
-                                      uint32_t task_id) {
-  LockGuard guard(m_mtx_);
-  m_resource_uuid_map_[resource_uuid] = task_id;
-}
-
-CraneErr CranedServer::RevokeResourceToken(const uuid &resource_uuid) {
-  LockGuard guard(m_mtx_);
-
-  auto iter = m_resource_uuid_map_.find(resource_uuid);
-  if (iter == m_resource_uuid_map_.end()) {
-    return CraneErr::kNonExistent;
-  }
-
-  m_resource_uuid_map_.erase(iter);
-
-  return CraneErr::kOk;
 }
 
 grpc::Status CranedServiceImpl::ExecuteTask(
@@ -768,18 +748,6 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
     p_server->Shutdown();
     CRANE_TRACE("Grpc Server Shutdown() was called.");
   });
-}
-
-CraneErr CranedServer::CheckValidityOfResourceUuid(const uuid &resource_uuid,
-                                                   uint32_t task_id) {
-  LockGuard guard(m_mtx_);
-
-  auto iter = m_resource_uuid_map_.find(resource_uuid);
-  if (iter == m_resource_uuid_map_.end()) return CraneErr::kNonExistent;
-
-  if (iter->second != task_id) return CraneErr::kInvalidParam;
-
-  return CraneErr::kOk;
 }
 
 }  // namespace Craned

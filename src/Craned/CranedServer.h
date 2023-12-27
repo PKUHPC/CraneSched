@@ -29,8 +29,6 @@
 
 namespace Craned {
 
-using boost::uuids::uuid;
-
 using grpc::Channel;
 using grpc::Server;
 using grpc::ServerContext;
@@ -108,29 +106,7 @@ class CranedServer {
 
   inline void Wait() { m_server_->Wait(); }
 
-  void GrantResourceToken(const uuid &resource_uuid, uint32_t task_id)
-      LOCKS_EXCLUDED(m_mtx_);
-
-  CraneErr RevokeResourceToken(const uuid &resource_uuid)
-      LOCKS_EXCLUDED(m_mtx_);
-
-  CraneErr CheckValidityOfResourceUuid(const uuid &resource_uuid,
-                                       uint32_t task_id) LOCKS_EXCLUDED(m_mtx_);
-
  private:
-  using Mutex = util::mutex;
-  using LockGuard = util::AbslMutexLockGuard;
-
-  // Craned no longer takes the responsibility for resource management.
-  // Resource management is handled in CraneCtld. Craned only records
-  // who have the permission to execute interactive tasks in Craned.
-  // If someone holds a valid resource uuid on a task id, we assume that he
-  // has allocated required resource from CraneCtld.
-  std::unordered_map<uuid, uint32_t /*task id*/> m_resource_uuid_map_
-      GUARDED_BY(m_mtx_);
-
-  Mutex m_mtx_;
-
   std::unique_ptr<CranedServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
 

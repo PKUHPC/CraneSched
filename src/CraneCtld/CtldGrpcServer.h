@@ -25,7 +25,6 @@
 
 namespace Ctld {
 
-using boost::uuids::uuid;
 using crane::grpc::Craned;
 using grpc::Channel;
 using grpc::Server;
@@ -279,7 +278,6 @@ class CtldServer {
   using HashSet = absl::flat_hash_set<K, Hash>;
 
   using Mutex = util::mutex;
-  using LockGuard = util::AbslMutexLockGuard;
 
   std::unique_ptr<CraneCtldServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;

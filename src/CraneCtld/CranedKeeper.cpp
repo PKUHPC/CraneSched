@@ -261,8 +261,8 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
 
 CranedKeeper::CranedKeeper(uint32_t node_num)
     : m_cq_closed_(false), m_tag_pool_(32, 0) {
-  uint32_t thread_num =
-      std::ceil(static_cast<double>(node_num) / kCompletionQueueCapacity);
+  uint32_t thread_num = std::bit_ceil(static_cast<uint64_t>(
+      static_cast<double>(node_num) / kCompletionQueueCapacity));
 
   m_cq_mtx_vec_ = std::vector<Mutex>(thread_num);
   m_cq_vec_ = std::vector<grpc::CompletionQueue>(thread_num);
@@ -426,9 +426,6 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       if (m_craned_is_up_cb_)
         g_thread_pool->push_task(m_craned_is_up_cb_, raw_craned->m_craned_id_);
 
-      // free tag_data
-      delete tag_data;
-
       // Switch to EstablishedCraned state machine
       next_tag_type = CqTag::kEstablishedCraned;
       break;
@@ -496,6 +493,9 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       util::lock_guard lock(m_tag_pool_mtx_);
       return m_tag_pool_.construct(CqTag{next_tag_type.value(), tag_data});
     } else if (next_tag_type.value() == CqTag::kEstablishedCraned) {
+      (void)tag_data->craned.release();
+      delete tag_data;
+
       util::lock_guard lock(m_tag_pool_mtx_);
       return m_tag_pool_.construct(CqTag{next_tag_type.value(), raw_craned});
     }
@@ -745,15 +745,16 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
     tag = m_tag_pool_.construct(CqTag{CqTag::kInitializingCraned, cq_tag_data});
   }
 
-  // Round-robin distribution here
-  static uint32_t cur_cq_id = 0;
-  cur_cq_id = (cur_cq_id + 1) % m_cq_vec_.size();
+  // Round-robin distribution here.
+  // Note: this function might be called from multiple thread.
+  //       Use atomic variable here.
+  static std::atomic<uint32_t> cur_cq_id = 0;
 
   cq_tag_data->craned->m_channel_->NotifyOnStateChange(
       cq_tag_data->craned->m_prev_channel_state_,
       std::chrono::system_clock::now() +
           std::chrono::seconds(kCompletionQueueDelaySeconds),
-      &m_cq_vec_[cur_cq_id], tag);
+      &m_cq_vec_[cur_cq_id++ % m_cq_vec_.size()], tag);
 }
 
 void CranedKeeper::CranedChannelConnectFail_(CranedStub *stub) {

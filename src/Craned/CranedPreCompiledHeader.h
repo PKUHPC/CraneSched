@@ -60,12 +60,6 @@
 // Boost
 #include <boost/algorithm/string.hpp>
 #include <boost/algorithm/string/join.hpp>
-#include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_io.hpp>
-
-#if Boost_MINOR_VERSION >= 69
-#  include <boost/uuid/uuid_hash.hpp>
-#endif
 
 // Thread pool
 #include <BS_thread_pool.hpp>

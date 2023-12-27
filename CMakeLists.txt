@@ -169,7 +169,6 @@ endif ()
 # Find third-party libraries
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost 1.67 REQUIRED COMPONENTS thread system filesystem)
-add_definitions(-DBoost_MINOR_VERSION=${Boost_MINOR_VERSION})
 
 # Needed by grpc
 set(_PROTOBUF_LIBPROTOBUF libprotobuf)

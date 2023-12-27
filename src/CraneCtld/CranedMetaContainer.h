@@ -19,6 +19,7 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
 
@@ -28,29 +29,48 @@ namespace Ctld {
  * All public methods in this class is thread-safe.
  */
 class CranedMetaContainerInterface {
- public:
-  using Mutex = util::recursive_mutex;
-  using LockGuard = util::recursive_lock_guard;
+ protected:
+  template <typename K, typename V,
+            typename Hash = absl::container_internal::hash_default_hash<K>>
+  using HashMap = absl::flat_hash_map<K, V, Hash>;
 
-  using AllPartitionsMetaMap = absl::flat_hash_map<PartitionId, PartitionMeta>;
+  template <typename K, typename V>
+  using TreeMap = absl::btree_map<K, V>;
+
+  CranedMetaContainerInterface() = default;
+
+ public:
+  //  using AllPartitionsMetaMap = std::unordered_map<PartitionId,
+  //  PartitionMeta>;
+  using AllPartitionsMetaAtomicMap =
+      util::AtomicHashMap<HashMap, PartitionId, PartitionMeta>;
+  using AllPartitionsMetaRawMap = AllPartitionsMetaAtomicMap::RawMap;
 
   /**
    * A map from CranedId to global craned information
    */
-  using CranedMetaMap = std::unordered_map<CranedId, CranedMeta>;
+  //  using CranedMetaMap = std::unordered_map<CranedId, CranedMeta>;
+  using CranedMetaAtomicMap =
+      util::AtomicHashMap<HashMap, CranedId, CranedMeta>;
+  using CranedMetaRawMap = CranedMetaAtomicMap::RawMap;
 
-  using AllPartitionsMetaMapPtr =
-      util::ScopeExclusivePtr<AllPartitionsMetaMap, Mutex>;
-  using CranedMetaMapPtr = util::ScopeExclusivePtr<CranedMetaMap, Mutex>;
+  using AllPartitionsMetaMapConstPtr =
+      util::ScopeConstSharedPtr<AllPartitionsMetaRawMap, util::rw_mutex>;
+  using CranedMetaMapConstPtr =
+      util::ScopeConstSharedPtr<CranedMetaRawMap, util::rw_mutex>;
 
-  using PartitionMetasPtr = util::ScopeExclusivePtr<PartitionMeta, Mutex>;
-  using CranedMetaPtr = util::ScopeExclusivePtr<CranedMeta, Mutex>;
+  using PartitionMetaPtr =
+      util::ManagedScopeExclusivePtr<PartitionMeta,
+                                     AllPartitionsMetaAtomicMap::CombinedLock>;
+  using CranedMetaPtr =
+      util::ManagedScopeExclusivePtr<CranedMeta,
+                                     CranedMetaAtomicMap::CombinedLock>;
 
   virtual ~CranedMetaContainerInterface() = default;
 
   virtual void CranedUp(const CranedId& node_id) = 0;
 
-  virtual void CranedDown(CranedId node_id) = 0;
+  virtual void CranedDown(const CranedId& node_id) = 0;
 
   virtual bool CheckCranedOnline(const CranedId& node_id) = 0;
 
@@ -82,16 +102,13 @@ class CranedMetaContainerInterface {
    * partition does not exist, a nullptr is returned and no lock is held. Use
    * bool() to check it.
    */
-  virtual PartitionMetasPtr GetPartitionMetasPtr(PartitionId partition_id) = 0;
+  virtual PartitionMetaPtr GetPartitionMetasPtr(PartitionId partition_id) = 0;
 
   virtual CranedMetaPtr GetCranedMetaPtr(CranedId node_id) = 0;
 
-  virtual AllPartitionsMetaMapPtr GetAllPartitionsMetaMapPtr() = 0;
+  virtual AllPartitionsMetaMapConstPtr GetAllPartitionsMetaMapConstPtr() = 0;
 
-  virtual CranedMetaMapPtr GetCranedMetaMapPtr() = 0;
-
- protected:
-  CranedMetaContainerInterface() = default;
+  virtual CranedMetaMapConstPtr GetCranedMetaMapConstPtr() = 0;
 };
 
 class CranedMetaContainerSimpleImpl final
@@ -117,19 +134,21 @@ class CranedMetaContainerSimpleImpl final
 
   void CranedUp(const CranedId& craned_id) override;
 
-  void CranedDown(CranedId craned_id) override;
+  void CranedDown(const CranedId& craned_id) override;
 
   bool CheckCranedOnline(const CranedId& craned_id) override;
 
-  PartitionMetasPtr GetPartitionMetasPtr(PartitionId partition_id) override;
+  PartitionMetaPtr GetPartitionMetasPtr(PartitionId partition_id) override;
 
   CranedMetaPtr GetCranedMetaPtr(CranedId craned_id) override;
 
-  AllPartitionsMetaMapPtr GetAllPartitionsMetaMapPtr() override;
+  AllPartitionsMetaMapConstPtr GetAllPartitionsMetaMapConstPtr() override;
 
-  CranedMetaMapPtr GetCranedMetaMapPtr() override;
+  CranedMetaMapConstPtr GetCranedMetaMapConstPtr() override;
 
-  bool CheckCranedAllowed(const std::string& hostname) override;
+  bool CheckCranedAllowed(const std::string& hostname) override {
+    return craned_meta_map_.Contains(hostname);
+  };
 
   void MallocResourceFromNode(CranedId node_id, task_id_t task_id,
                               const Resources& resources) override;
@@ -137,14 +156,19 @@ class CranedMetaContainerSimpleImpl final
   void FreeResourceFromNode(CranedId craned_id, uint32_t task_id) override;
 
  private:
-  AllPartitionsMetaMap partition_metas_map_;
-  CranedMetaMap craned_meta_map_;
+  // In this part of code, the following lock sequence MUST be held
+  // to avoid deadlock:
+  // 1. lock elements in partition_metas_map_
+  // 2. lock elements in craned_meta_map_
+  // 3. unlock elements in craned_meta_map_
+  // 4. unlock elements in partition_metas_map_
+  CranedMetaAtomicMap craned_meta_map_;
+  AllPartitionsMetaAtomicMap partition_metas_map_;
 
   // A craned node may belong to multiple partitions.
-  absl::flat_hash_map<CranedId /*craned hostname*/, std::list<PartitionId>>
+  // Use this map as a READ-ONLY index, so multi-thread reading is ok.
+  HashMap<CranedId /*craned hostname*/, std::list<PartitionId>>
       craned_id_part_ids_map_;
-
-  Mutex mtx_;
 };
 
 }  // namespace Ctld
