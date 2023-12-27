@@ -19,14 +19,25 @@
 namespace Ctld {
 
 void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
+  CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
+  auto& part_ids = craned_id_part_ids_map_.at(craned_id);
+
+  std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
+  part_meta_ptrs.reserve(part_ids.size());
+
+  auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
+
+  // Acquire all partition locks first.
+  for (PartitionId const& part_id : part_ids)
+    part_meta_ptrs.emplace_back(
+        raw_part_metas_map_->at(part_id).GetExclusivePtr());
+
+  // Then acquire craned meta lock.
+  CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
   auto node_meta = craned_meta_map_[craned_id];
-  CRANE_ASSERT(node_meta.get() != nullptr);
   node_meta->alive = true;
 
-  CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
-  for (PartitionId const& part_id : craned_id_part_ids_map_.at(craned_id)) {
-    auto partition_meta = partition_metas_map_[part_id];
-
+  for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
     part_global_meta.m_resource_total_ += node_meta->res_total;
@@ -36,13 +47,25 @@ void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
 }
 
 void CranedMetaContainerSimpleImpl::CranedDown(const CranedId& craned_id) {
+  CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
+  auto& part_ids = craned_id_part_ids_map_.at(craned_id);
+
+  std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
+  part_meta_ptrs.reserve(part_ids.size());
+
+  auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
+
+  // Acquire all partition locks first.
+  for (PartitionId const& part_id : part_ids)
+    part_meta_ptrs.emplace_back(
+        raw_part_metas_map_->at(part_id).GetExclusivePtr());
+
+  // Then acquire craned meta lock.
   CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
   auto node_meta = craned_meta_map_[craned_id];
   node_meta->alive = false;
 
-  CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
-  for (PartitionId const& part_id : craned_id_part_ids_map_.at(craned_id)) {
-    auto partition_meta = partition_metas_map_[part_id];
+  for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
     part_global_meta.m_resource_total_ -= node_meta->res_total;
@@ -77,12 +100,12 @@ CranedMetaContainerSimpleImpl::GetCranedMetaPtr(CranedId craned_id) {
 
 CranedMetaContainerInterface::AllPartitionsMetaMapPtr
 CranedMetaContainerSimpleImpl::GetAllPartitionsMetaMapPtr() {
-  return partition_metas_map_.GetMapSharedPtr();
+  return partition_metas_map_.GetMapConstSharedPtr();
 }
 
 CranedMetaContainerInterface::CranedMetaMapPtr
 CranedMetaContainerSimpleImpl::GetCranedMetaMapPtr() {
-  return craned_meta_map_.GetMapSharedPtr();
+  return craned_meta_map_.GetMapConstSharedPtr();
 }
 
 void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
@@ -92,13 +115,25 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
     return;
   }
 
+  auto& part_ids = craned_id_part_ids_map_.at(node_id);
+
+  std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
+  part_meta_ptrs.reserve(part_ids.size());
+
+  auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
+
+  // Acquire all partition locks first.
+  for (PartitionId const& part_id : part_ids)
+    part_meta_ptrs.emplace_back(
+        raw_part_metas_map_->at(part_id).GetExclusivePtr());
+
+  // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
   node_meta->running_task_resource_map.emplace(task_id, resources);
   node_meta->res_avail -= resources;
   node_meta->res_in_use += resources;
 
-  for (PartitionId const& part_id : craned_id_part_ids_map_.at(node_id)) {
-    auto partition_meta = partition_metas_map_[part_id];
+  for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
     part_global_meta.m_resource_avail_ -= resources;
@@ -113,6 +148,19 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId craned_id,
     return;
   }
 
+  auto& part_ids = craned_id_part_ids_map_.at(craned_id);
+
+  std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
+  part_meta_ptrs.reserve(part_ids.size());
+
+  auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
+
+  // Acquire all partition locks first.
+  for (PartitionId const& part_id : part_ids)
+    part_meta_ptrs.emplace_back(
+        raw_part_metas_map_->at(part_id).GetExclusivePtr());
+
+  // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[craned_id];
   if (!node_meta->alive) {
     CRANE_DEBUG("Crane {} has already been down. Ignore FreeResourceFromNode.",
@@ -126,14 +174,12 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId craned_id,
                 task_id, craned_id);
     return;
   }
-
   Resources const& resources = resource_iter->second;
 
   node_meta->res_avail += resources;
   node_meta->res_in_use -= resources;
 
-  for (PartitionId const& part_id : craned_id_part_ids_map_.at(craned_id)) {
-    auto partition_meta = partition_metas_map_[part_id];
+  for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
     part_global_meta.m_resource_avail_ += resources;
@@ -219,7 +265,7 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
   crane::grpc::QueryCranedInfoReply reply;
   auto* list = reply.mutable_craned_info_list();
 
-  auto craned_map = craned_meta_map_.GetMapSharedPtr();
+  auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
   for (auto&& [craned_index, craned_meta_ptr] : *craned_map) {
     auto* craned_info = list->Add();
     auto craned_meta = craned_meta_ptr.GetExclusivePtr();
@@ -292,7 +338,7 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
   crane::grpc::QueryPartitionInfoReply reply;
   auto* list = reply.mutable_partition_info();
 
-  auto partition_map = partition_metas_map_.GetMapSharedPtr();
+  auto partition_map = partition_metas_map_.GetMapConstSharedPtr();
 
   for (auto&& [part_name, part_meta_ptr] : *partition_map) {
     auto* part_info = list->Add();
@@ -431,8 +477,8 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
 
   // Ensure that the map global read lock is held during the following filtering
   // operations and craned_meta_map_ must be locked before partition_metas_map_
-  auto craned_map = craned_meta_map_.GetMapSharedPtr();
-  auto partition_map = partition_metas_map_.GetMapSharedPtr();
+  auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
+  auto partition_map = partition_metas_map_.GetMapConstSharedPtr();
 
   auto partition_rng =
       *partition_map | ranges::views::filter(partition_rng_filter_name);
@@ -441,8 +487,16 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
 
     auto* part_info = partition_list->Add();
 
+    // we make a copy of these craned ids to lower overall latency.
+    // The amortized cost is 1 copy for each craned node.
+    // Although an extra copying cost is introduced,
+    // the time of accessing partition_metas_map_ is minimized and
+    // the copying cost is taken only by this grpc thread handling
+    // cinfo request.
+    // Since we assume the number of cpu cores is sufficient on the
+    // machine running CraneCtld, it's ok to pay 1 core cpu time
+    // for overall low latency.
     std::unordered_set<CranedId> craned_ids;
-
     {
       auto part_meta = it.second.GetExclusivePtr();
       std::string partition_name = part_meta->partition_global_meta.name;
@@ -454,7 +508,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       part_info->set_state(part_meta->partition_global_meta.alive_craned_cnt > 0
                                ? crane::grpc::PartitionState::PARTITION_UP
                                : crane::grpc::PartitionState::PARTITION_DOWN);
-      craned_ids = part_meta->craned_ids;  // copy value avoid deadlock
+      craned_ids = part_meta->craned_ids;
     }
 
     auto* craned_lists = part_info->mutable_craned_lists();

@@ -80,6 +80,9 @@ class AtomicHashMap {
   using MapSharedPtr =
       util::ScopeSharedPtr<MapType<Key, Synchronized<T>>, rw_mutex>;
 
+  using MapConstSharedPtr =
+      util::ScopeConstSharedPtr<MapType<Key, Synchronized<T>>, rw_mutex>;
+
   class CombinedLock {
    private:
     rw_mutex* global_map_shared_mutex_;
@@ -101,6 +104,18 @@ class AtomicHashMap {
       val.global_map_shared_mutex_ = nullptr;
       val.value_mutex_ = nullptr;
     }
+
+    CombinedLock& operator=(CombinedLock&& val) noexcept {
+      if (this != &val) {
+        global_map_shared_mutex_ = val.global_map_shared_mutex_;
+        value_mutex_ = val.value_mutex_;
+
+        val.global_map_shared_mutex_ = nullptr;
+        val.value_mutex_ = nullptr;
+      }
+
+      return *this;
+    };
 
     void unlock() {
       global_map_shared_mutex_->unlock_shared();
@@ -141,6 +156,11 @@ class AtomicHashMap {
 
   ValueExclusivePtr operator[](const Key& key) {
     return GetValueExclusivePtr(key);
+  }
+
+  MapConstSharedPtr GetMapConstSharedPtr() {
+    m_global_rw_mutex_.lock_shared();
+    return MapConstSharedPtr{&m_value_map_, &m_global_rw_mutex_};
   }
 
   MapSharedPtr GetMapSharedPtr() {

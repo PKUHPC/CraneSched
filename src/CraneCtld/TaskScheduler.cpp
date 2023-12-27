@@ -2067,10 +2067,14 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
 CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   // Check whether the selected partition is able to run this task.
-  std::unordered_set<CranedId> craned_ids;
 
+  std::unordered_set<std::string> avail_nodes;
   {
+    // Preserve lock ordering.
     auto metas_ptr = g_meta_container->GetPartitionMetasPtr(task->partition_id);
+
+    // Since we do not access the elements in partition_metas_m
+
     // Check whether the selected partition is able to run this task.
     if (!(task->resources <=
           metas_ptr->partition_global_meta.m_resource_total_)) {
@@ -2088,23 +2092,19 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
                   .allocatable_resource.memory_sw_bytes));
       return CraneErr::kNoResource;
     }
-    craned_ids = metas_ptr->craned_ids;
-  }
 
-  std::unordered_set<std::string> avail_nodes;
+    auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
+    for (const auto& craned_id : metas_ptr->craned_ids) {
+      auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
+      if (craned_meta->alive && task->resources <= craned_meta->res_total &&
+          (task->included_nodes.empty() ||
+           task->included_nodes.contains(craned_id)) &&
+          (task->excluded_nodes.empty() ||
+           !task->excluded_nodes.contains(craned_id)))
+        avail_nodes.emplace(craned_meta->static_meta.hostname);
 
-  auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
-
-  for (const auto& craned_id : craned_ids) {
-    auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-    if (craned_meta->alive && task->resources <= craned_meta->res_total &&
-        (task->included_nodes.empty() ||
-         task->included_nodes.contains(craned_id)) &&
-        (task->excluded_nodes.empty() ||
-         !task->excluded_nodes.contains(craned_id)))
-      avail_nodes.emplace(craned_meta->static_meta.hostname);
-
-    if (avail_nodes.size() >= task->node_num) break;
+      if (avail_nodes.size() >= task->node_num) break;
+    }
   }
 
   if (task->node_num > avail_nodes.size()) {

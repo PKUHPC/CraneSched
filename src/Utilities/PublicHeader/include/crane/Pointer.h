@@ -65,6 +65,16 @@ class ScopeExclusivePtr {
     val.lock_ = nullptr;
   }
 
+  ScopeExclusivePtr& operator=(ScopeExclusivePtr&& val) noexcept {
+    if (this != &val) {
+      data_ = val.data_;
+      lock_ = val.lock_;
+      val.data_ = nullptr;
+      val.lock_ = nullptr;
+    }
+    return *this;
+  };
+
  private:
   T* data_;
   Unlockable* lock_;
@@ -74,10 +84,45 @@ template <typename T, typename Unlockable>
   requires StdSharedUnlockable<Unlockable>
 class ScopeSharedPtr {
  public:
-  explicit ScopeSharedPtr(const T* data, Unlockable* lock = nullptr) noexcept
+  explicit ScopeSharedPtr(T* data, Unlockable* lock = nullptr) noexcept
       : data_(data), lock_(lock) {}
 
   ~ScopeSharedPtr() noexcept {
+    if (lock_) {
+      lock_->unlock_shared();
+    }
+  }
+
+  T* get() { return data_; }
+  T& operator*() { return *data_; }
+  T* operator->() { return data_; }
+
+  explicit operator bool() { return data_ != nullptr; }
+
+  ScopeSharedPtr(ScopeSharedPtr&) = delete;
+  ScopeSharedPtr& operator=(ScopeSharedPtr&) = delete;
+
+  ScopeSharedPtr(ScopeSharedPtr&& val) noexcept {
+    data_ = val.data_;
+    lock_ = val.lock_;
+    val.data_ = nullptr;
+    val.lock_ = nullptr;
+  }
+
+ private:
+  T* data_;
+  Unlockable* lock_;
+};
+
+template <typename T, typename Unlockable>
+  requires StdSharedUnlockable<Unlockable>
+class ScopeConstSharedPtr {
+ public:
+  explicit ScopeConstSharedPtr(const T* data,
+                               Unlockable* lock = nullptr) noexcept
+      : data_(data), lock_(lock) {}
+
+  ~ScopeConstSharedPtr() noexcept {
     if (lock_) {
       lock_->unlock_shared();
     }
@@ -89,10 +134,10 @@ class ScopeSharedPtr {
 
   explicit operator bool() const { return data_ != nullptr; }
 
-  ScopeSharedPtr(ScopeSharedPtr const&) = delete;
-  ScopeSharedPtr& operator=(ScopeSharedPtr const&) = delete;
+  ScopeConstSharedPtr(ScopeConstSharedPtr const&) = delete;
+  ScopeConstSharedPtr& operator=(ScopeConstSharedPtr const&) = delete;
 
-  ScopeSharedPtr(ScopeSharedPtr&& val) noexcept {
+  ScopeConstSharedPtr(ScopeConstSharedPtr&& val) noexcept {
     data_ = val.data_;
     lock_ = val.lock_;
     val.data_ = nullptr;
@@ -110,8 +155,19 @@ class ManagedScopeExclusivePtr {
  public:
   explicit ManagedScopeExclusivePtr() noexcept : data_(nullptr) {}
 
+  ManagedScopeExclusivePtr(ManagedScopeExclusivePtr const&) = delete;
+  ManagedScopeExclusivePtr& operator=(ManagedScopeExclusivePtr const&) = delete;
+
   ManagedScopeExclusivePtr(T* data, Unlockable&& lock) noexcept
       : data_(data), lock_(std::move(lock)) {}
+  ManagedScopeExclusivePtr& operator=(ManagedScopeExclusivePtr&& val) noexcept {
+    if (this != &val) {
+      data_ = val.data_;
+      val.data_ = nullptr;
+      lock_ = std::move(val.lock_);
+    }
+    return *this;
+  };
 
   ~ManagedScopeExclusivePtr() noexcept {
     if constexpr (StdUnlockable<Unlockable>)
@@ -125,9 +181,6 @@ class ManagedScopeExclusivePtr {
   T* operator->() const { return data_; }
 
   explicit operator bool() { return data_ != nullptr; }
-
-  ManagedScopeExclusivePtr(ManagedScopeExclusivePtr const&) = delete;
-  ManagedScopeExclusivePtr& operator=(ManagedScopeExclusivePtr const&) = delete;
 
   ManagedScopeExclusivePtr(ManagedScopeExclusivePtr&& val) noexcept {
     data_ = val.data_;

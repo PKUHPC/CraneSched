@@ -55,9 +55,9 @@ class CranedMetaContainerInterface {
   using CranedMetaRawMap = CranedMetaAtomicMap::RawMap;
 
   using AllPartitionsMetaMapPtr =
-      util::ScopeSharedPtr<AllPartitionsMetaRawMap, util::rw_mutex>;
+      util::ScopeConstSharedPtr<AllPartitionsMetaRawMap, util::rw_mutex>;
   using CranedMetaMapPtr =
-      util::ScopeSharedPtr<CranedMetaRawMap, util::rw_mutex>;
+      util::ScopeConstSharedPtr<CranedMetaRawMap, util::rw_mutex>;
 
   using PartitionMetaPtr =
       util::ManagedScopeExclusivePtr<PartitionMeta,
@@ -156,19 +156,19 @@ class CranedMetaContainerSimpleImpl final
   void FreeResourceFromNode(CranedId craned_id, uint32_t task_id) override;
 
  private:
-  // Lock sequence: craned_meta_map_ -> craned_id_part_ids_map_ ->
-  // partition_metas_map_
-
-  // Normally, when locking the read lock in these maps, it is not necessary to
-  // consider the locking order of the lock chain, which will not lead to
-  // deadlock. Only the order of write locks and mutexes affects the deadlock
+  // In this part of code, the following lock sequence MUST be held
+  // to avoid deadlock:
+  // 1. lock elements in partition_metas_map_
+  // 2. lock elements in craned_meta_map_
+  // 3. unlock elements in craned_meta_map_
+  // 4. unlock elements in partition_metas_map_
   CranedMetaAtomicMap craned_meta_map_;
+  AllPartitionsMetaAtomicMap partition_metas_map_;
 
   // A craned node may belong to multiple partitions.
-  // Use this map as a READ-ONLY index.
+  // Use this map as a READ-ONLY index, so multi-thread reading is ok.
   HashMap<CranedId /*craned hostname*/, std::list<PartitionId>>
       craned_id_part_ids_map_;
-  AllPartitionsMetaAtomicMap partition_metas_map_;
 };
 
 }  // namespace Ctld
