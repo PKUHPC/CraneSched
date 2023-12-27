@@ -54,9 +54,9 @@ class CranedMetaContainerInterface {
       util::AtomicHashMap<HashMap, CranedId, CranedMeta>;
   using CranedMetaRawMap = CranedMetaAtomicMap::RawMap;
 
-  using AllPartitionsMetaMapPtr =
+  using AllPartitionsMetaMapConstPtr =
       util::ScopeConstSharedPtr<AllPartitionsMetaRawMap, util::rw_mutex>;
-  using CranedMetaMapPtr =
+  using CranedMetaMapConstPtr =
       util::ScopeConstSharedPtr<CranedMetaRawMap, util::rw_mutex>;
 
   using PartitionMetaPtr =
@@ -106,9 +106,9 @@ class CranedMetaContainerInterface {
 
   virtual CranedMetaPtr GetCranedMetaPtr(CranedId node_id) = 0;
 
-  virtual AllPartitionsMetaMapPtr GetAllPartitionsMetaMapPtr() = 0;
+  virtual AllPartitionsMetaMapConstPtr GetAllPartitionsMetaMapConstPtr() = 0;
 
-  virtual CranedMetaMapPtr GetCranedMetaMapPtr() = 0;
+  virtual CranedMetaMapConstPtr GetCranedMetaMapConstPtr() = 0;
 };
 
 class CranedMetaContainerSimpleImpl final
@@ -142,9 +142,9 @@ class CranedMetaContainerSimpleImpl final
 
   CranedMetaPtr GetCranedMetaPtr(CranedId craned_id) override;
 
-  AllPartitionsMetaMapPtr GetAllPartitionsMetaMapPtr() override;
+  AllPartitionsMetaMapConstPtr GetAllPartitionsMetaMapConstPtr() override;
 
-  CranedMetaMapPtr GetCranedMetaMapPtr() override;
+  CranedMetaMapConstPtr GetCranedMetaMapConstPtr() override;
 
   bool CheckCranedAllowed(const std::string& hostname) override {
     return craned_meta_map_.Contains(hostname);

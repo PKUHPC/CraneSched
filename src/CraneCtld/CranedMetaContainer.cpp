@@ -98,13 +98,13 @@ CranedMetaContainerSimpleImpl::GetCranedMetaPtr(CranedId craned_id) {
   return craned_meta_map_.GetValueExclusivePtr(craned_id);
 }
 
-CranedMetaContainerInterface::AllPartitionsMetaMapPtr
-CranedMetaContainerSimpleImpl::GetAllPartitionsMetaMapPtr() {
+CranedMetaContainerInterface::AllPartitionsMetaMapConstPtr
+CranedMetaContainerSimpleImpl::GetAllPartitionsMetaMapConstPtr() {
   return partition_metas_map_.GetMapConstSharedPtr();
 }
 
-CranedMetaContainerInterface::CranedMetaMapPtr
-CranedMetaContainerSimpleImpl::GetCranedMetaMapPtr() {
+CranedMetaContainerInterface::CranedMetaMapConstPtr
+CranedMetaContainerSimpleImpl::GetCranedMetaMapConstPtr() {
   return craned_meta_map_.GetMapConstSharedPtr();
 }
 
@@ -476,9 +476,9 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   };
 
   // Ensure that the map global read lock is held during the following filtering
-  // operations and craned_meta_map_ must be locked before partition_metas_map_
-  auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
+  // operations and partition_metas_map_ must be locked before craned_meta_map_
   auto partition_map = partition_metas_map_.GetMapConstSharedPtr();
+  auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
 
   auto partition_rng =
       *partition_map | ranges::views::filter(partition_rng_filter_name);

@@ -1744,8 +1744,9 @@ void MinLoadFirst::NodeSelect(
         running_tasks,
     absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
     std::list<NodeSelectionResult>* selection_result_list) {
-  auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
-  auto all_partitions_meta_map = g_meta_container->GetAllPartitionsMetaMapPtr();
+  auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
+  auto all_partitions_meta_map =
+      g_meta_container->GetAllPartitionsMetaMapConstPtr();
 
   std::unordered_map<PartitionId, NodeSelectionInfo> part_id_node_info_map;
 
@@ -2093,7 +2094,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
       return CraneErr::kNoResource;
     }
 
-    auto craned_meta_map = g_meta_container->GetCranedMetaMapPtr();
+    auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
     for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
       if (craned_meta->alive && task->resources <= craned_meta->res_total &&
