@@ -499,6 +499,10 @@ void TaskScheduler::ScheduleThread_() {
       m_node_selection_algo_->NodeSelect(
           m_running_task_map_, &m_pending_task_map_, &selection_result_list);
 
+      // Update cached pending map size
+      m_pending_map_cached_size_.store(m_pending_task_map_.size(),
+                                       std::memory_order::release);
+
       m_running_task_map_mtx_.Unlock();
       m_pending_task_map_mtx_.Unlock();
 
@@ -1108,12 +1112,16 @@ void TaskScheduler::CleanSubmitQueueCb_() {
 
   std::vector<std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>>
       submit_tasks;
-  submit_tasks.resize(approximate_size);
-
   std::vector<uint32_t> task_indexes_with_id_allocated;
 
-  size_t actual_size = m_submit_task_queue_.try_dequeue_bulk(
-      submit_tasks.begin(), approximate_size);
+  size_t map_size = m_pending_map_cached_size_.load(std::memory_order_acquire);
+
+  size_t batch_size =
+      std::min(approximate_size, kPendingConcurrentQueueBatchSize - map_size);
+  submit_tasks.resize(batch_size);
+
+  size_t actual_size =
+      m_submit_task_queue_.try_dequeue_bulk(submit_tasks.begin(), actual_size);
 
   if (actual_size == 0) return;
 
@@ -1144,6 +1152,9 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     m_pending_task_map_.emplace(id, std::move(submit_tasks[i].first));
     submit_tasks[i].second.set_value(id);
   }
+
+  m_pending_map_cached_size_.store(m_pending_task_map_.size(),
+                                   std::memory_order_release);
 }
 
 void TaskScheduler::QueryTasksInRam(

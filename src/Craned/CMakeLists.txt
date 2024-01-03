@@ -25,8 +25,8 @@ target_link_libraries(craned
         crane_proto_lib
         Boost::boost
 
-        event_core
-        event_pthreads
+        event_core_static
+        event_pthreads_static
 
         bs_thread_pool
 

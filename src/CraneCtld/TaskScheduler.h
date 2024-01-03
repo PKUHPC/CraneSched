@@ -264,6 +264,8 @@ class TaskScheduler {
       GUARDED_BY(m_pending_task_map_mtx_);
   Mutex m_pending_task_map_mtx_;
 
+  std::atomic_uint32_t m_pending_map_cached_size_;
+
   HashMap<task_id_t, std::unique_ptr<TaskInCtld>> m_running_task_map_
       GUARDED_BY(m_running_task_map_mtx_);
   Mutex m_running_task_map_mtx_;

@@ -430,33 +430,6 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   std::unordered_set<std::string> req_nodes(request.filter_nodes().begin(),
                                             request.filter_nodes().end());
 
-  std::unordered_set<int> filter_craned_states_set(
-      request.filter_craned_states().begin(),
-      request.filter_craned_states().end());
-  bool no_craned_state_constraint = request.filter_craned_states().empty();
-  auto craned_rng_filter_state = [&](CranedMetaRawMap::const_iterator it) {
-    if (no_craned_state_constraint) return true;
-
-    auto craned_meta = it->second.GetExclusivePtr();
-    auto& res_total = craned_meta->res_total.allocatable_resource;
-    auto& res_in_use = craned_meta->res_in_use.allocatable_resource;
-    auto& res_avail = craned_meta->res_avail.allocatable_resource;
-    if (craned_meta->alive) {
-      if (res_in_use.cpu_count == 0 && res_in_use.memory_bytes == 0) {
-        return filter_craned_states_set.contains(
-            crane::grpc::CranedState::CRANE_IDLE);
-      } else if (res_avail.cpu_count == 0 && res_avail.memory_bytes == 0)
-        return filter_craned_states_set.contains(
-            crane::grpc::CranedState::CRANE_ALLOC);
-      else
-        return filter_craned_states_set.contains(
-            crane::grpc::CranedState::CRANE_MIX);
-    } else {
-      return filter_craned_states_set.contains(
-          crane::grpc::CranedState::CRANE_DOWN);
-    }
-  };
-
   bool no_craned_hostname_constraint = request.filter_nodes().empty();
   auto craned_rng_filter_hostname = [&](CranedMetaRawMap::const_iterator it) {
     auto craned_meta = it->second.GetExclusivePtr();
@@ -464,16 +437,28 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
            req_nodes.contains(craned_meta->static_meta.hostname);
   };
 
-  auto craned_rng_filter_only_responding =
-      [&](CranedMetaRawMap::const_iterator it) {
-        auto craned_meta = it->second.GetExclusivePtr();
-        return !request.filter_only_responding_nodes() || craned_meta->alive;
-      };
+  bool filter_idle = false, filter_alloc = false, filter_mix = false,
+       filter_down = false;
 
-  auto craned_rng_filter_only_down = [&](CranedMetaRawMap::const_iterator it) {
-    auto craned_meta = it->second.GetExclusivePtr();
-    return !request.filter_only_down_nodes() || !craned_meta->alive;
-  };
+  if (request.filter_craned_states().empty()) return reply;
+  for (const auto& it : request.filter_craned_states()) {
+    switch (it) {
+      case crane::grpc::CranedState::CRANE_IDLE:
+        filter_idle = true;
+        break;
+      case crane::grpc::CranedState::CRANE_ALLOC:
+        filter_alloc = true;
+        break;
+      case crane::grpc::CranedState::CRANE_MIX:
+        filter_mix = true;
+        break;
+      case crane::grpc::CranedState::CRANE_DOWN:
+        filter_down = true;
+        break;
+      default:
+        break;
+    }
+  }
 
   // Ensure that the map global read lock is held during the following filtering
   // operations and partition_metas_map_ must be locked before craned_meta_map_
@@ -532,10 +517,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
             [&](CranedId const& craned_id) -> CranedMetaRawMap::const_iterator {
               return craned_map->find(craned_id);
             }) |
-        ranges::views::filter(craned_rng_filter_hostname) |
-        ranges::views::filter(craned_rng_filter_state) |
-        ranges::views::filter(craned_rng_filter_only_down) |
-        ranges::views::filter(craned_rng_filter_only_responding);
+        ranges::views::filter(craned_rng_filter_hostname);
 
     ranges::for_each(craned_rng, [&](CranedMetaRawMap::const_iterator it) {
       auto craned_meta = it->second.GetExclusivePtr();
@@ -543,18 +525,20 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       auto& res_in_use = craned_meta->res_in_use.allocatable_resource;
       auto& res_avail = craned_meta->res_avail.allocatable_resource;
       if (craned_meta->alive) {
-        if (res_in_use.cpu_count == 0 && res_in_use.memory_bytes == 0) {
+        if (filter_idle && res_in_use.cpu_count == 0 &&
+            res_in_use.memory_bytes == 0) {
           idle_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
           idle_craned_list->set_count(idle_craned_name_list.size());
-        } else if (res_avail.cpu_count == 0 || res_avail.memory_bytes == 0) {
+        } else if (filter_alloc && res_avail.cpu_count == 0 ||
+                   res_avail.memory_bytes == 0) {
           alloc_craned_name_list.emplace_back(
               craned_meta->static_meta.hostname);
           alloc_craned_list->set_count(alloc_craned_name_list.size());
-        } else {
+        } else if (filter_mix) {
           mix_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
           mix_craned_list->set_count(mix_craned_name_list.size());
         }
-      } else {
+      } else if (filter_down) {
         down_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
         down_craned_list->set_count(down_craned_name_list.size());
       }
