@@ -41,7 +41,9 @@ target_link_libraries(craned
 
         yaml-cpp
         result
-        )
+
+        Backward::Interface
+)
 
 # Linker flag for c++ 17 filesystem library
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
