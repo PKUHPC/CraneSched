@@ -43,6 +43,9 @@
 #include <unordered_map>
 #include <utility>
 
+// backward-cpp
+#include <backward.hpp>
+
 // Absl
 #include <absl/base/thread_annotations.h>
 #include <absl/container/flat_hash_map.h>

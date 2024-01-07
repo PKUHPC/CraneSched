@@ -703,9 +703,18 @@ void CheckSingleton() {
   }
 }
 
+void InstallStackTraceHooks() {
+  static backward::SignalHandling sh;
+  if (!sh.loaded()) {
+    CRANE_ERROR("Failed to install stacktrace hooks.");
+    std::exit(1);
+  }
+}
+
 int main(int argc, char** argv) {
   CheckSingleton();
   ParseConfig(argc, argv);
+  InstallStackTraceHooks();
 
   if (g_config.CraneCtldForeground)
     StartServer();

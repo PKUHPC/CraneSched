@@ -50,6 +50,8 @@ target_link_libraries(cranectld PRIVATE
 
         range-v3::range-v3
         result
+
+        Backward::Interface
 )
 
 if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)

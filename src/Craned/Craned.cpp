@@ -524,12 +524,21 @@ void CheckSingleton() {
   }
 }
 
+void InstallStackTraceHooks() {
+  static backward::SignalHandling sh;
+  if (!sh.loaded()) {
+    CRANE_ERROR("Failed to install stacktrace hooks.");
+    std::exit(1);
+  }
+}
+
 int main(int argc, char** argv) {
   CheckSingleton();
 
   // If config parsing fails, this function will not return and will call
   // std::exit(1) instead.
   ParseConfig(argc, argv);
+  InstallStackTraceHooks();
 
   if (g_config.CranedForeground)
     StartServer();
