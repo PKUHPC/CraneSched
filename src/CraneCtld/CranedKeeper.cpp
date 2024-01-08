@@ -452,6 +452,12 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       break;
     }
 
+    case GRPC_CHANNEL_SHUTDOWN: {
+      CRANE_WARN("Unexpected InitializingCraned SHUTDOWN state!");
+      next_tag_type = std::nullopt;
+      break;
+    }
+
     case GRPC_CHANNEL_CONNECTING: {
       if (raw_craned->m_prev_channel_state_ == GRPC_CHANNEL_CONNECTING) {
         if (raw_craned->m_failure_retry_times_ <
@@ -480,10 +486,6 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       // InitializingCraned: BEGIN -> IDLE state switching is handled in
       // CranedKeeper::RegisterNewCraneds. Execution should never reach here.
       CRANE_ERROR("Unexpected InitializingCraned IDLE state!");
-      break;
-
-    case GRPC_CHANNEL_SHUTDOWN:
-      CRANE_ERROR("Unexpected InitializingCraned SHUTDOWN state!");
       break;
   }
 
@@ -564,6 +566,11 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
           g_thread_pool->push_task(m_craned_rec_from_temp_failure_cb_,
                                    craned->m_craned_id_);
 
+        {
+          util::lock_guard guard(m_unavail_craned_set_mtx_);
+          m_connecting_craned_set_.erase(craned->m_craned_id_);
+        }
+
         next_tag_type = CqTag::kEstablishedCraned;
       }
       break;
@@ -574,6 +581,11 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
         // prev     current              next
         // READY -> TRANSIENT_FAILURE -> CONNECTING
         CRANE_TRACE("READY -> TRANSIENT_FAILURE -> CONNECTING");
+
+        {
+          util::lock_guard guard(m_unavail_craned_set_mtx_);
+          m_connecting_craned_set_.emplace(craned->m_craned_id_);
+        }
 
         craned->m_invalid_ = true;
         if (m_craned_is_temp_down_cb_)
@@ -623,10 +635,18 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
       break;
     }
 
-    case GRPC_CHANNEL_SHUTDOWN:
-      CRANE_ERROR("Unexpected SHUTDOWN channel state on Established Craned {}!",
-                  craned->m_craned_id_);
+    case GRPC_CHANNEL_SHUTDOWN: {
+      CRANE_WARN("Unexpected SHUTDOWN channel state on Established Craned {}!",
+                 craned->m_craned_id_);
+
+      craned->m_invalid_ = true;
+      if (m_craned_is_temp_down_cb_)
+        g_thread_pool->push_task(m_craned_is_temp_down_cb_,
+                                 craned->m_craned_id_);
+
+      next_tag_type = std::nullopt;
       break;
+    }
   }
 
   if (next_tag_type.has_value()) {
@@ -700,10 +720,13 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
                       /*ms*/);
   channel_args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS,
                       30 /*s*/ * 1000 /*ms*/);
-  //    channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIME_MS, 5 /*s*/ * 1000 /*ms*/);
-  //    channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 10 /*s*/ * 1000
-  //    /*ms*/); channel_args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1
-  //    /*true*/);
+
+  // Sometimes, Craned might crash without cleaning up sockets and
+  // the socket will remain ESTABLISHED state even if that craned has died.
+  // Open KeepAlive option in case of such situation.
+  channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIME_MS, 5 /*s*/ * 1000 /*ms*/);
+  channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 6 /*s*/ * 1000 /*ms*/);
+  channel_args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1 /*true*/);
 
   CRANE_TRACE("Creating a channel to {}:{}. Channel count: {}", craned_id,
               kCranedDefaultPort, m_channel_count_.fetch_add(1) + 1);
