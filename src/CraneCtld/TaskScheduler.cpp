@@ -1121,7 +1121,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   submit_tasks.resize(batch_size);
 
   size_t actual_size =
-      m_submit_task_queue_.try_dequeue_bulk(submit_tasks.begin(), actual_size);
+      m_submit_task_queue_.try_dequeue_bulk(submit_tasks.begin(), batch_size);
 
   if (actual_size == 0) return;
 
