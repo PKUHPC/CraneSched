@@ -566,6 +566,11 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
           g_thread_pool->push_task(m_craned_rec_from_temp_failure_cb_,
                                    craned->m_craned_id_);
 
+        {
+          util::lock_guard guard(m_unavail_craned_set_mtx_);
+          m_connecting_craned_set_.erase(craned->m_craned_id_);
+        }
+
         next_tag_type = CqTag::kEstablishedCraned;
       }
       break;
@@ -576,6 +581,11 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
         // prev     current              next
         // READY -> TRANSIENT_FAILURE -> CONNECTING
         CRANE_TRACE("READY -> TRANSIENT_FAILURE -> CONNECTING");
+
+        {
+          util::lock_guard guard(m_unavail_craned_set_mtx_);
+          m_connecting_craned_set_.emplace(craned->m_craned_id_);
+        }
 
         craned->m_invalid_ = true;
         if (m_craned_is_temp_down_cb_)
