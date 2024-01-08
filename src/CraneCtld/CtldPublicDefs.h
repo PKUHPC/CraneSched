@@ -161,6 +161,8 @@ struct CranedMeta {
   // just for convenience.
   Resources res_avail;
   Resources res_in_use;
+  bool drain{false};
+  std::string drain_reason;
 
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
