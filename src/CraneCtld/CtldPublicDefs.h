@@ -57,7 +57,7 @@ constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 // Since Unqlite has a limitation of about 900000 tasks per transaction,
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
-constexpr uint32_t kPendingConcurrentQueueBatchSize = 900000;
+constexpr uint32_t kPendingConcurrentQueueBatchSize = 600000;
 
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 
@@ -254,8 +254,8 @@ struct TaskInCtld {
    * Fields that won't change after this task is accepted.
    * Also, these fields are persisted on the disk.
    * ------------------------------- */
-  task_id_t task_id;
-  task_db_id_t task_db_id;
+  task_id_t task_id{0};
+  task_db_id_t task_db_id{0};
   gid_t gid;
   std::string username;
 
