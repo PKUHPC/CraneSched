@@ -293,8 +293,7 @@ CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
       std::make_unique<std::pmr::polymorphic_allocator<CqTag>>(
           m_pmr_pool_res_.get());
 
-  uint32_t thread_num = std::bit_ceil(static_cast<uint64_t>(
-      static_cast<double>(node_num) / kCompletionQueueCapacity));
+  uint32_t thread_num = std::bit_ceil(node_num / kCompletionQueueCapacity);
 
   m_cq_mtx_vec_ = std::vector<Mutex>(thread_num);
   m_cq_vec_ = std::vector<grpc::CompletionQueue>(thread_num);
