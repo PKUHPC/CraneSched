@@ -454,7 +454,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   };
 
   bool filter_idle = false, filter_alloc = false, filter_mix = false,
-       filter_down = false;
+       filter_down = false, filter_drain = false;
 
   if (request.filter_craned_states().empty()) return reply;
   for (const auto& it : request.filter_craned_states()) {
@@ -471,6 +471,8 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       case crane::grpc::CranedState::CRANE_DOWN:
         filter_down = true;
         break;
+      case crane::grpc::CranedState::CRANE_DRAIN:
+        filter_drain = true;
       default:
         break;
     }
@@ -518,14 +520,16 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     auto* mix_craned_list = craned_lists->Add();
     auto* alloc_craned_list = craned_lists->Add();
     auto* down_craned_list = craned_lists->Add();
+    auto* drain_craned_list = craned_lists->Add();
 
     idle_craned_list->set_state(crane::grpc::CranedState::CRANE_IDLE);
     mix_craned_list->set_state(crane::grpc::CranedState::CRANE_MIX);
     alloc_craned_list->set_state(crane::grpc::CranedState::CRANE_ALLOC);
     down_craned_list->set_state(crane::grpc::CranedState::CRANE_DOWN);
+    drain_craned_list->set_state(crane::grpc::CranedState::CRANE_DRAIN);
 
     std::list<std::string> idle_craned_name_list, mix_craned_name_list,
-        alloc_craned_name_list, down_craned_name_list;
+        alloc_craned_name_list, down_craned_name_list, drain_craned_name_list;
 
     auto craned_rng =
         craned_ids |
@@ -554,6 +558,9 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
           mix_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
           mix_craned_list->set_count(mix_craned_name_list.size());
         }
+      } else if (craned_meta->alive && craned_meta->drain) {
+        drain_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
+        drain_craned_list->set_count(drain_craned_name_list.size());
       } else if (filter_down) {
         down_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
         down_craned_list->set_count(down_craned_name_list.size());
@@ -568,8 +575,33 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
         util::HostNameListToStr(alloc_craned_name_list));
     down_craned_list->set_craned_list_regex(
         util::HostNameListToStr(down_craned_name_list));
+    drain_craned_list->set_craned_list_regex(
+        util::HostNameListToStr(drain_craned_name_list));
   });
 
+  return reply;
+}
+
+crane::grpc::ModifyNodeReply CranedMetaContainerSimpleImpl::ChangeNodeState(
+    const crane::grpc::ModifyNodeRequest& request) {
+  crane::grpc::ModifyNodeReply reply;
+
+  if (!craned_meta_map_.Contains(request.name())) {
+    reply.set_ok(false);
+    reply.set_reason("Invalid node name specified.");
+    return reply;
+  }
+  auto crane_meta = craned_meta_map_[request.name()];
+
+  if (request.drain()) {
+    crane_meta->drain = true;
+    crane_meta->drain_reason = request.reason();
+  } else {
+    crane_meta->drain = false;
+    crane_meta->drain_reason = "";
+  }
+
+  reply.set_ok(true);
   return reply;
 }
 
