@@ -270,10 +270,6 @@ class TaskScheduler {
       GUARDED_BY(m_running_task_map_mtx_);
   Mutex m_running_task_map_mtx_;
 
-  HashMap<uint32_t /*Task Db Id*/, std::unique_ptr<TaskInEmbeddedDb>>
-      m_persisted_task_map_ GUARDED_BY(m_persisted_task_map_mtx_);
-  Mutex m_persisted_task_map_mtx_;
-
   // Task Indexes
   HashMap<CranedId, HashSet<uint32_t /* Task ID*/>> m_node_to_tasks_map_
       GUARDED_BY(m_task_indexes_mtx_);
