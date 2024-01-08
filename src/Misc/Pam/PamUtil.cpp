@@ -21,7 +21,8 @@
 #include <pwd.h>
 #include <sys/stat.h>
 
-#include <boost/algorithm/string.hpp>
+#include <absl/strings/ascii.h>
+#include <absl/strings/str_split.h>
 #include <cerrno>
 #include <filesystem>
 #include <fstream>
@@ -123,10 +124,9 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, uint8_t addr[4],
 
   std::getline(tcp_file, line);
   while (std::getline(tcp_file, line)) {
-    boost::trim(line);
-    std::vector<std::string> line_vec;
-    boost::split(line_vec, line, boost::is_any_of(" "),
-                 boost::token_compress_on);
+    absl::StripLeadingAsciiWhitespace(&line);
+    absl::StripTrailingAsciiWhitespace(&line);
+    std::vector<std::string> line_vec = absl::StrSplit(line,' ',absl::SkipWhitespace());
 
     // 2nd row is remote address and 9th row is inode num.
     pam_syslog(pamh, LOG_ERR, "[Crane] TCP conn %s %s, inode: %s",
@@ -168,9 +168,7 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, uint8_t addr[4],
                    "[Crane] inode num %lu not found in /proc/net/tcp",
                    stat_buf.st_ino);
       } else {
-        std::vector<std::string> addr_port_hex;
-        boost::split(addr_port_hex, iter->second, boost::is_any_of(":"));
-
+        std::vector<std::string> addr_port_hex = absl::StrSplit(iter->second,':');
         const std::string &addr_hex = addr_port_hex[0];
         const std::string &port_hex = addr_port_hex[1];
         pam_syslog(pamh, LOG_ERR,
@@ -202,8 +200,7 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, uint8_t addr[4],
 
 bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
                              const std::string &remote_address,
-                             uint16_t port_to_query, uint32_t *task_id,
-                             std::string *cgroup_path) {
+                             uint16_t port_to_query, uint32_t *task_id) {
   using grpc::Channel;
   using grpc::ClientContext;
   using grpc::Status;
@@ -256,7 +253,6 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
                "ssh client with remote port %u belongs to task #%u",
                port_to_query, reply.task_id());
     *task_id = reply.task_id();
-    *cgroup_path = reply.cgroup_path();
     return true;
   } else {
     pam_syslog(pamh, LOG_ERR,

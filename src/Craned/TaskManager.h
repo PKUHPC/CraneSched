@@ -185,8 +185,6 @@ class TaskManager {
 
   std::optional<uint32_t> QueryTaskIdFromPidAsync(pid_t pid);
 
-  bool QueryCgOfTaskIdAsync(uint32_t task_id, util::Cgroup** cg);
-
   bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info);
 
   bool CreateCgroupsAsync(
