@@ -277,13 +277,13 @@ message ModifyTaskReply {
   string reason = 2;
 }
 
-message ModifyNodeRequest{
-  string name = 1;
-  bool drain = 2;
+message ModifyCranedStateRequest{
+  string craned_id = 1;
+  CranedState new_state = 2;
   string reason = 3;
 }
 
-message ModifyNodeReply{
+message ModifyCranedStateReply{
   bool ok = 1;
   string reason = 2;
 }
@@ -597,7 +597,7 @@ service CraneCtld {
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
-  rpc ModifyNode(ModifyNodeRequest) returns (ModifyNodeReply);
+  rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);

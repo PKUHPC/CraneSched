@@ -580,21 +580,22 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   return reply;
 }
 
-crane::grpc::ModifyNodeReply CranedMetaContainerSimpleImpl::ChangeNodeState(
-    const crane::grpc::ModifyNodeRequest& request) {
-  crane::grpc::ModifyNodeReply reply;
+crane::grpc::ModifyCranedStateReply
+CranedMetaContainerSimpleImpl::ChangeNodeState(
+    const crane::grpc::ModifyCranedStateRequest& request) {
+  crane::grpc::ModifyCranedStateReply reply;
 
-  if (!craned_meta_map_.Contains(request.name())) {
+  if (!craned_meta_map_.Contains(request.craned_id())) {
     reply.set_ok(false);
     reply.set_reason("Invalid node name specified.");
     return reply;
   }
-  auto crane_meta = craned_meta_map_[request.name()];
+  auto crane_meta = craned_meta_map_[request.craned_id()];
 
-  if (request.drain()) {
+  if (request.new_state() == crane::grpc::CranedState::CRANE_DRAIN) {
     crane_meta->drain = true;
     crane_meta->drain_reason = request.reason();
-  } else {
+  } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE) {
     crane_meta->drain = false;
     crane_meta->drain_reason = "";
   }
