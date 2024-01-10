@@ -593,15 +593,17 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
     return reply;
   }
 
-  auto crane_meta = craned_meta_map_[request.craned_id()];
+  auto craned_meta = craned_meta_map_[request.craned_id()];
 
   if (request.new_state() == crane::grpc::CranedState::CRANE_DRAIN) {
-    crane_meta->drain = true;
-    crane_meta->drain_reason = request.reason();
+    craned_meta->drain = true;
+    craned_meta->drain_reason = request.reason();
     reply.set_ok(true);
   } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE) {
-    if (crane_meta->alive) {
-      crane_meta->drain = false;
+    if (craned_meta->alive) {
+      craned_meta->drain = false;
+      craned_meta->drain_reason.clear();
+
       reply.set_ok(true);
     } else {
       reply.set_ok(false);
