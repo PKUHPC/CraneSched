@@ -1290,9 +1290,9 @@ AccountManager::Result AccountManager::SetUserDefaultQos_(
 AccountManager::Result AccountManager::SetUserAllowedPartition_(
     const std::string& name, const std::string& account,
     const std::string& partitions) {
-  std::list<std::string> partition_list;
-  boost::split(partition_list, partitions, boost::is_any_of(","));
-  partition_list.remove_if([](const std::string& v) { return v.empty(); });
+  std::vector<std::string> partition_vec =
+      absl::StrSplit(partitions, ',', absl::SkipEmpty());
+
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
 
@@ -1309,7 +1309,7 @@ AccountManager::Result AccountManager::SetUserAllowedPartition_(
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
 
-  for (const auto& par : partition_list) {
+  for (const auto& par : partition_vec) {
     // check if partition existed
     if (!g_config.Partitions.contains(par)) {
       return Result{false, fmt::format("Partition '{}' not existed", par)};
@@ -1328,7 +1328,7 @@ AccountManager::Result AccountManager::SetUserAllowedPartition_(
   // Update the map
   user.account_to_attrs_map[account]
       .allowed_partition_qos_map.clear();  // clear the partitions
-  for (const auto& par : partition_list) {
+  for (const auto& par : partition_vec) {
     user.account_to_attrs_map[account].allowed_partition_qos_map[par] =
         std::pair<std::string, std::list<std::string>>{
             account_ptr->default_qos,
@@ -1349,9 +1349,8 @@ AccountManager::Result AccountManager::SetUserAllowedPartition_(
 AccountManager::Result AccountManager::SetUserAllowedQos_(
     const std::string& name, const std::string& account,
     const std::string& partition, const std::string& qos_list_str, bool force) {
-  std::list<std::string> qos_list;
-  boost::split(qos_list, qos_list_str, boost::is_any_of(","));
-  qos_list.remove_if([](const std::string& v) { return v.empty(); });
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos_list_str, ',', absl::SkipEmpty());
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -1369,7 +1368,7 @@ AccountManager::Result AccountManager::SetUserAllowedQos_(
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
 
-  for (const auto& qos : qos_list) {
+  for (const auto& qos : qos_vec) {
     // check if qos existed
     if (!GetExistedQosInfoNoLock_(qos)) {
       return Result{false, fmt::format("Qos '{}' not existed", qos)};
@@ -1389,8 +1388,8 @@ AccountManager::Result AccountManager::SetUserAllowedQos_(
     // Set the qos of all partition
     for (auto& [par, pair] :
          user.account_to_attrs_map[account].allowed_partition_qos_map) {
-      if (std::find(qos_list.begin(), qos_list.end(), pair.first) ==
-          qos_list.end()) {
+      if (std::find(qos_vec.begin(), qos_vec.end(), pair.first) ==
+          qos_vec.end()) {
         if (!force && !pair.first.empty()) {
           return Result{
               false,
@@ -1400,10 +1399,10 @@ AccountManager::Result AccountManager::SetUserAllowedQos_(
                           "replaced with one of the items in the new qos list",
                           pair.first, par)};
         } else {
-          pair.first = qos_list.empty() ? "" : qos_list.front();
+          pair.first = qos_vec.empty() ? "" : qos_vec.front();
         }
       }
-      pair.second.assign(qos_list.begin(), qos_list.end());
+      pair.second.assign(qos_vec.begin(), qos_vec.end());
     }
   } else {
     // Set the qos of a specified partition
@@ -1417,8 +1416,8 @@ AccountManager::Result AccountManager::SetUserAllowedQos_(
                                 partition)};
     }
 
-    if (std::find(qos_list.begin(), qos_list.end(), iter->second.first) ==
-        qos_list.end()) {
+    if (std::find(qos_vec.begin(), qos_vec.end(), iter->second.first) ==
+        qos_vec.end()) {
       if (!force && !iter->second.first.empty()) {
         return Result{
             false,
@@ -1428,10 +1427,10 @@ AccountManager::Result AccountManager::SetUserAllowedQos_(
                         "replaced with one of the items in the new qos list",
                         iter->second.first, partition)};
       } else {
-        iter->second.first = qos_list.empty() ? "" : qos_list.front();
+        iter->second.first = qos_vec.empty() ? "" : qos_vec.front();
       }
     }
-    iter->second.second.assign(qos_list.begin(), qos_list.end());
+    iter->second.second.assign(qos_vec.begin(), qos_vec.end());
   }
 
   // Update to database
@@ -1740,9 +1739,8 @@ AccountManager::Result AccountManager::SetAccountDefaultQos_(
 
 AccountManager::Result AccountManager::SetAccountAllowedPartition_(
     const std::string& name, const std::string& partitions, bool force) {
-  std::list<std::string> partition_list;
-  boost::split(partition_list, partitions, boost::is_any_of(","));
-  partition_list.remove_if([](const std::string& v) { return v.empty(); });
+  std::vector<std::string> partition_vec =
+      absl::StrSplit(partitions, ',', absl::SkipEmpty());
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
@@ -1752,7 +1750,7 @@ AccountManager::Result AccountManager::SetAccountAllowedPartition_(
     return Result{false, fmt::format("Unknown account '{}'", name)};
   }
   // check if the partition existed
-  for (const auto& p : partition_list) {
+  for (const auto& p : partition_vec) {
     if (!g_config.Partitions.contains(p)) {
       return Result{false, fmt::format("Partition '{}' not existed", p)};
     }
@@ -1762,7 +1760,7 @@ AccountManager::Result AccountManager::SetAccountAllowedPartition_(
   if (!account->parent_account.empty()) {
     const Account* parent =
         GetExistedAccountInfoNoLock_(account->parent_account);
-    for (const auto& p : partition_list) {
+    for (const auto& p : partition_vec) {
       if (std::find(parent->allowed_partition.begin(),
                     parent->allowed_partition.end(),
                     p) == parent->allowed_partition.end()) {
@@ -1775,8 +1773,8 @@ AccountManager::Result AccountManager::SetAccountAllowedPartition_(
 
   std::list<std::string> deleted_partition;
   for (const auto& par : account->allowed_partition) {
-    if (std::find(partition_list.begin(), partition_list.end(), par) ==
-        partition_list.end()) {
+    if (std::find(partition_vec.begin(), partition_vec.end(), par) ==
+        partition_vec.end()) {
       if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account, par)) {
         return Result{
             false,
@@ -1790,7 +1788,7 @@ AccountManager::Result AccountManager::SetAccountAllowedPartition_(
   }
 
   int add_num = 0;
-  for (const auto& par : partition_list) {
+  for (const auto& par : partition_vec) {
     if (std::find(account->allowed_partition.begin(),
                   account->allowed_partition.end(),
                   par) == account->allowed_partition.end()) {
@@ -1807,7 +1805,7 @@ AccountManager::Result AccountManager::SetAccountAllowedPartition_(
         if (add_num > 0) {
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                        "$set", name, "allowed_partition",
-                                       partition_list);
+                                       partition_vec);
         }
       };
 
@@ -1818,17 +1816,16 @@ AccountManager::Result AccountManager::SetAccountAllowedPartition_(
   for (const auto& par : deleted_partition) {
     DeleteAccountAllowedPartitionFromMapNoLock_(account->name, par);
   }
-  m_account_map_[name]->allowed_partition.assign(partition_list.begin(),
-                                                 partition_list.end());
+  m_account_map_[name]->allowed_partition.assign(partition_vec.begin(),
+                                                 partition_vec.end());
 
   return Result{true};
 }
 
 AccountManager::Result AccountManager::SetAccountAllowedQos_(
     const std::string& name, const std::string& qos_list_str, bool force) {
-  std::list<std::string> qos_list;
-  boost::split(qos_list, qos_list_str, boost::is_any_of(","));
-  qos_list.remove_if([](const std::string& v) { return v.empty(); });
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos_list_str, ',', absl::SkipEmpty());
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
@@ -1839,7 +1836,7 @@ AccountManager::Result AccountManager::SetAccountAllowedQos_(
     return Result{false, fmt::format("Unknown account '{}'", name)};
   }
   // check if the qos existed
-  for (const auto& qos : qos_list) {
+  for (const auto& qos : qos_vec) {
     if (!GetExistedQosInfoNoLock_(qos)) {
       return Result{false, fmt::format("Qos '{}' not existed", qos)};
     }
@@ -1849,7 +1846,7 @@ AccountManager::Result AccountManager::SetAccountAllowedQos_(
   if (!account->parent_account.empty()) {
     const Account* parent =
         GetExistedAccountInfoNoLock_(account->parent_account);
-    for (const auto& qos : qos_list) {
+    for (const auto& qos : qos_vec) {
       if (std::find(parent->allowed_qos_list.begin(),
                     parent->allowed_qos_list.end(),
                     qos) == parent->allowed_qos_list.end()) {
@@ -1863,7 +1860,7 @@ AccountManager::Result AccountManager::SetAccountAllowedQos_(
 
   std::list<std::string> deleted_qos;
   for (const auto& qos : account->allowed_qos_list) {
-    if (std::find(qos_list.begin(), qos_list.end(), qos) == qos_list.end()) {
+    if (std::find(qos_vec.begin(), qos_vec.end(), qos) == qos_vec.end()) {
       if (!force && IsDefaultQosOfAnyNodeNoLock_(account, qos)) {
         return Result{
             false,
@@ -1877,7 +1874,7 @@ AccountManager::Result AccountManager::SetAccountAllowedQos_(
   }
 
   std::list<std::string> add_qos;
-  for (const auto& qos : qos_list) {
+  for (const auto& qos : qos_vec) {
     if (std::find(account->allowed_qos_list.begin(),
                   account->allowed_qos_list.end(),
                   qos) == account->allowed_qos_list.end()) {
@@ -1900,12 +1897,12 @@ AccountManager::Result AccountManager::SetAccountAllowedQos_(
           if (temp.default_qos.empty()) {
             g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                          "$set", name, "default_qos",
-                                         qos_list.front());
+                                         qos_vec.front());
           }
 
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                        "$set", name, "allowed_qos_list",
-                                       qos_list);
+                                       qos_vec);
           for (const auto& qos : add_qos) {
             IncQosReferenceCountInDb_(qos, 1);
           }
@@ -1924,10 +1921,10 @@ AccountManager::Result AccountManager::SetAccountAllowedQos_(
 
   if (!add_qos.empty()) {
     if (account->default_qos.empty()) {
-      m_account_map_[name]->default_qos = qos_list.front();
+      m_account_map_[name]->default_qos = qos_vec.front();
     }
-    m_account_map_[name]->allowed_qos_list.assign(qos_list.begin(),
-                                                  qos_list.end());
+    m_account_map_[name]->allowed_qos_list.assign(qos_vec.begin(),
+                                                  qos_vec.end());
     for (const auto& qos : add_qos) {
       m_qos_map_[qos]->reference_count++;
     }

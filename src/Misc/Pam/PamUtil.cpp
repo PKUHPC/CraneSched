@@ -16,13 +16,13 @@
 
 #include "PamUtil.h"
 
+#include <absl/strings/ascii.h>
+#include <absl/strings/str_split.h>
 #include <fmt/format.h>
 #include <grpc++/grpc++.h>
 #include <pwd.h>
 #include <sys/stat.h>
 
-#include <absl/strings/ascii.h>
-#include <absl/strings/str_split.h>
 #include <cerrno>
 #include <filesystem>
 #include <fstream>
@@ -124,9 +124,9 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, uint8_t addr[4],
 
   std::getline(tcp_file, line);
   while (std::getline(tcp_file, line)) {
-    absl::StripLeadingAsciiWhitespace(&line);
-    absl::StripTrailingAsciiWhitespace(&line);
-    std::vector<std::string> line_vec = absl::StrSplit(line,' ',absl::SkipWhitespace());
+    absl::StripAsciiWhitespace(&line);
+    std::vector<std::string> line_vec =
+        absl::StrSplit(line, ' ', absl::SkipWhitespace());
 
     // 2nd row is remote address and 9th row is inode num.
     pam_syslog(pamh, LOG_ERR, "[Crane] TCP conn %s %s, inode: %s",
@@ -168,7 +168,8 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, uint8_t addr[4],
                    "[Crane] inode num %lu not found in /proc/net/tcp",
                    stat_buf.st_ino);
       } else {
-        std::vector<std::string> addr_port_hex = absl::StrSplit(iter->second,':');
+        std::vector<std::string> addr_port_hex =
+            absl::StrSplit(iter->second, ':');
         const std::string &addr_hex = addr_port_hex[0];
         const std::string &port_hex = addr_port_hex[1];
         pam_syslog(pamh, LOG_ERR,

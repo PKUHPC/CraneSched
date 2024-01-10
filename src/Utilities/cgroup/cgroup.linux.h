@@ -29,7 +29,6 @@
 #include <pthread.h>
 
 #include <array>
-#include <boost/move/move.hpp>
 #include <cassert>
 #include <map>
 #include <optional>

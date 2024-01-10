@@ -375,10 +375,9 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
   if (tcp_in) {
     getline(tcp_in, tcp_line);  // Skip the header line
     while (getline(tcp_in, tcp_line)) {
-      boost::trim(tcp_line);
-      std::vector<std::string> tcp_line_vec;
-      boost::split(tcp_line_vec, tcp_line, boost::is_any_of(" :"),
-                   boost::token_compress_on);
+      tcp_line = absl::StripAsciiWhitespace(tcp_line);
+      std::vector<std::string> tcp_line_vec =
+          absl::StrSplit(tcp_line, absl::ByAnyChar(" :"), absl::SkipEmpty());
       CRANE_TRACE("Checking port {} == {}", port_hex, tcp_line_vec[2]);
       if (port_hex == tcp_line_vec[2]) {
         inode_found = true;
@@ -655,7 +654,7 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
 
   if (!ok) {
     CRANE_INFO("GrpcMigrateSshProcToCgroup failed on pid: {}, task #{}",
-                request->pid(), request->task_id());
+               request->pid(), request->task_id());
     response->set_ok(false);
   } else {
     response->set_ok(true);

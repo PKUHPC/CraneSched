@@ -23,7 +23,6 @@ target_link_libraries(craned
         Utility_PublicHeader
 
         crane_proto_lib
-        Boost::boost
 
         event_core_static
         event_pthreads_static

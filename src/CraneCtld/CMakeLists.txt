@@ -23,9 +23,7 @@ target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 target_link_libraries(cranectld PRIVATE
         spdlog::spdlog
         concurrentqueue
-        pevents
 
-        Utility_cgroup
         Utility_PublicHeader
 
         Boost::boost
