@@ -471,15 +471,6 @@ void MongodbClient::DocumentAppendItem_<User::AccountToAttrsMap>(
 }
 
 template <>
-void MongodbClient::SubDocumentAppendItem_<std::list<std::string>>(
-    sub_document& doc, const std::string& key,
-    const std::list<std::string>& value) {
-  doc.append(kvp(key, [&value](sub_array array) {
-    for (const std::string& v : value) array.append(v);
-  }));
-}
-
-template <>
 void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(
     sub_document& doc, const std::string& key,
     const User::PartToAllowedQosMap& value) {

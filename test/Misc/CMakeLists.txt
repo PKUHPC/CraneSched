@@ -20,7 +20,7 @@ target_link_libraries(misc_libevent_example_test
         event_pthreads_static
         Threads::Threads
         spdlog::spdlog
-        )
+)
 gtest_discover_tests(misc_libevent_example_test)
 
 add_executable(misc_libuv_test libuv_test.cpp)
@@ -28,7 +28,7 @@ target_link_libraries(misc_libuv_test
         GTest::gtest GTest::gtest_main
         uv::uv-static
         Threads::Threads
-        )
+)
 gtest_discover_tests(misc_libuv_test)
 
 add_executable(misc_Misc_test Misc_test.cpp)
@@ -38,20 +38,19 @@ target_link_libraries(misc_Misc_test
         absl::btree
         absl::synchronization
         spdlog::spdlog
-        )
+)
 gtest_discover_tests(misc_Misc_test)
 
 
 add_executable(misc_mariadb_c_test mariadb_connector_c_test.cpp)
 target_link_libraries(misc_mariadb_c_test
         GTest::gtest GTest::gtest_main
-        Boost::boost
         Threads::Threads
         absl::strings
         mariadbclient
         Utility_PublicHeader
         spdlog::spdlog
-        )
+)
 target_include_directories(misc_mariadb_c_test PRIVATE ${CMAKE_SOURCE_DIR}/src/CraneCtld)
 gtest_discover_tests(misc_mariadb_c_test)
 
@@ -63,7 +62,7 @@ target_link_libraries(misc_mongodb_test
         spdlog::spdlog
         absl::btree
         Utility_PublicHeader
-        )
+)
 target_include_directories(misc_mongodb_test PRIVATE ${CMAKE_SOURCE_DIR}/src/CraneCtld)
 gtest_discover_tests(misc_mongodb_test)
 
@@ -73,7 +72,7 @@ target_link_libraries(misc_yaml_test
         Threads::Threads
         spdlog::spdlog
         yaml-cpp
-        )
+)
 gtest_discover_tests(misc_yaml_test)
 
 add_executable(misc_unqlite_test unqlite_test.cpp)
@@ -83,7 +82,7 @@ target_link_libraries(misc_unqlite_test
         spdlog::spdlog
         unqlite
         test_proto
-        )
+)
 gtest_discover_tests(misc_unqlite_test)
 
 add_executable(misc_libaio_test libaio_test.cpp)
@@ -94,5 +93,5 @@ target_link_libraries(misc_libaio_test PUBLIC
         spdlog::spdlog
         test_proto
         ${LIBAIO_LIBRARIES}
-        )
+)
 gtest_discover_tests(misc_libaio_test)

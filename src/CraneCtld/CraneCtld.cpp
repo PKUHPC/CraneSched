@@ -347,11 +347,10 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["DefaultPartition"] && !config["DefaultPartition"].IsNull()) {
         auto default_partition = config["DefaultPartition"].as<std::string>();
-        std::vector<std::string> default_partition_vec;
-        boost::split(default_partition_vec, default_partition,
-                     boost::is_any_of(","));
-        g_config.DefaultPartition = default_partition_vec[0];
-        boost::trim(g_config.DefaultPartition);
+        std::vector<std::string> default_partition_vec =
+            absl::StrSplit(default_partition, ',');
+        g_config.DefaultPartition =
+            absl::StripAsciiWhitespace(default_partition_vec[0]);
         if (default_partition_vec.size() > 1) {
           CRANE_ERROR(
               "Default partition contains multiple values. '{}' is used",

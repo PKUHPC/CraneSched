@@ -11,7 +11,6 @@ add_library(Utility_PublicHeader
         include/crane/AtomicHashMap.h)
 target_include_directories(Utility_PublicHeader PUBLIC include)
 target_link_libraries(Utility_PublicHeader PUBLIC
-        Boost::boost # Boost added here for String.cpp
         spdlog::spdlog
         crane_proto_lib)
 

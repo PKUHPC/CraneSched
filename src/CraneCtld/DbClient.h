@@ -32,6 +32,12 @@
 namespace Ctld {
 
 class MongodbClient {
+ private:
+  using array = bsoncxx::builder::basic::array;
+  using document = bsoncxx::builder::basic::document;
+  using sub_array = bsoncxx::builder::basic::sub_array;
+  using sub_document = bsoncxx::builder::basic::sub_document;
+
  public:
   enum class EntityType {
     ACCOUNT = 0,
@@ -103,11 +109,22 @@ class MongodbClient {
   void SelectAllQos(std::list<Qos>* qos_list);
 
   template <typename T>
-  void SubDocumentAppendItem_(bsoncxx::builder::basic::sub_document& doc,
-                              const std::string& key, const T& value) {
+  void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
+                              const T& value) {
     using bsoncxx::builder::basic::kvp;
     doc.append(kvp(key, value));
   };
+
+  template <std::ranges::range T>
+  void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
+                              const T& value)
+    requires std::same_as<std::ranges::range_value_t<T>, std::string>
+  {
+    using bsoncxx::builder::basic::kvp;
+    doc.append(kvp(key, [&value](sub_array array) {
+      for (const std::string& v : value) array.append(v);
+    }));
+  }
 
   template <typename T>
   bool UpdateEntityOne(EntityType type, const std::string& opt,
@@ -161,11 +178,6 @@ class MongodbClient {
       const mongocxx::client_session::with_transaction_cb& callback);
 
  private:
-  using array = bsoncxx::builder::basic::array;
-  using document = bsoncxx::builder::basic::document;
-  using sub_array = bsoncxx::builder::basic::sub_array;
-  using sub_document = bsoncxx::builder::basic::sub_document;
-
   static void PrintError_(
       const char* msg,
       const std::source_location loc = std::source_location::current()) {
@@ -230,11 +242,6 @@ template <>
 void MongodbClient::DocumentAppendItem_<User::AccountToAttrsMap>(
     document& doc, const std::string& key,
     const std::unordered_map<std::string, User::AttrsInAccount>& value);
-
-template <>
-void MongodbClient::SubDocumentAppendItem_<std::list<std::string>>(
-    sub_document& doc, const std::string& key,
-    const std::list<std::string>& value);
 
 template <>
 void MongodbClient::SubDocumentAppendItem_<User::PartToAllowedQosMap>(

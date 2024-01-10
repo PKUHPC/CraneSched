@@ -259,8 +259,11 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
     return CraneErr::kGenericFailure;
 }
 
-CranedKeeper::CranedKeeper(uint32_t node_num)
-    : m_cq_closed_(false), m_tag_pool_(32, 0) {
+CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
+  m_tag_sync_allocator_ =
+      std::make_unique<std::pmr::polymorphic_allocator<CqTag>>(
+          &m_pmr_pool_res_);
+
   uint32_t thread_num = std::bit_ceil(static_cast<uint64_t>(
       static_cast<double>(node_num) / kCompletionQueueCapacity));
 
@@ -369,8 +372,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
           }
         }
 
-        util::lock_guard lock(m_tag_pool_mtx_);
-        m_tag_pool_.free(tag);
+        m_tag_sync_allocator_->delete_object(tag);
       } else {
         /* ok = false implies that NotifyOnStateChange() timed out.
          * See GRPC code: src/core/ext/filters/client_channel/
@@ -492,14 +494,14 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   // CRANE_TRACE("Exit InitCranedStateMachine_");
   if (next_tag_type.has_value()) {
     if (next_tag_type.value() == CqTag::kInitializingCraned) {
-      util::lock_guard lock(m_tag_pool_mtx_);
-      return m_tag_pool_.construct(CqTag{next_tag_type.value(), tag_data});
+      return m_tag_sync_allocator_->new_object<CqTag>(
+          CqTag{next_tag_type.value(), tag_data});
     } else if (next_tag_type.value() == CqTag::kEstablishedCraned) {
       (void)tag_data->craned.release();
       delete tag_data;
 
-      util::lock_guard lock(m_tag_pool_mtx_);
-      return m_tag_pool_.construct(CqTag{next_tag_type.value(), raw_craned});
+      return m_tag_sync_allocator_->new_object<CqTag>(
+          CqTag{next_tag_type.value(), raw_craned});
     }
   }
   return nullptr;
@@ -650,9 +652,9 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
   }
 
   if (next_tag_type.has_value()) {
-    util::lock_guard lock(m_tag_pool_mtx_);
     CRANE_TRACE("Exit EstablishedCranedStateMachine_");
-    return m_tag_pool_.construct(CqTag{next_tag_type.value(), craned});
+    return m_tag_sync_allocator_->new_object<CqTag>(
+        CqTag{next_tag_type.value(), craned});
   }
 
   CRANE_TRACE("Exit EstablishedCranedStateMachine_");
@@ -762,11 +764,8 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
 
   cq_tag_data->craned->m_maximum_retry_times_ = 2;
 
-  CqTag *tag;
-  {
-    util::lock_guard lock(m_tag_pool_mtx_);
-    tag = m_tag_pool_.construct(CqTag{CqTag::kInitializingCraned, cq_tag_data});
-  }
+  CqTag *tag = m_tag_sync_allocator_->new_object<CqTag>(
+      CqTag{CqTag::kInitializingCraned, cq_tag_data});
 
   // Round-robin distribution here.
   // Note: this function might be called from multiple thread.

@@ -65,7 +65,6 @@ extern "C" {
   }
 
   uint32_t task_id;
-  std::string cgroup_path;
 
   std::string remote_address =
       fmt::format("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3]);
@@ -73,8 +72,7 @@ extern "C" {
   pam_syslog(pamh, LOG_ERR, "[Crane] Try to query %s for remote port %hu",
              remote_address.c_str(), port);
 
-  ok = GrpcQueryPortFromCraned(pamh, uid, remote_address, port, &task_id,
-                               &cgroup_path);
+  ok = GrpcQueryPortFromCraned(pamh, uid, remote_address, port, &task_id);
 
   if (ok) {
     pam_syslog(pamh, LOG_ERR,
@@ -82,11 +80,9 @@ extern "C" {
 
     char *auth_result = strdup(PAM_STR_TRUE);
     char *task_id_str = strdup(std::to_string(task_id).c_str());
-    char *cgroup_path_str = strdup(cgroup_path.c_str());
 
     pam_set_data(pamh, PAM_ITEM_AUTH_RESULT, auth_result, clean_up_cb);
     pam_set_data(pamh, PAM_ITEM_TASK_ID, task_id_str, clean_up_cb);
-    pam_set_data(pamh, PAM_ITEM_CG_PATH, cgroup_path_str, clean_up_cb);
 
     return PAM_SUCCESS;
   } else {
@@ -105,7 +101,6 @@ extern "C" {
   int task_id;
   char *auth_result;
   char *task_id_str;
-  char *cgroup_path_str;
 
   bool ok;
   std::string username;
@@ -127,7 +122,6 @@ extern "C" {
   pam_get_data(pamh, PAM_ITEM_AUTH_RESULT, (const void **)&auth_result);
   if (strcmp(auth_result, PAM_STR_TRUE) == 0) {
     pam_get_data(pamh, PAM_ITEM_TASK_ID, (const void **)&task_id_str);
-    pam_get_data(pamh, PAM_ITEM_CG_PATH, (const void **)&cgroup_path_str);
 
     pam_syslog(
         pamh, LOG_ERR,
@@ -143,7 +137,7 @@ extern "C" {
       return PAM_SESSION_ERR;
   } else {
     // If auth result is false, it indicates that system administrator allow a
-    // user with no task running to log im, and then we just let it pass.
+    // user with no task running to log in, and then we just let it pass.
     return PAM_SUCCESS;
   }
 }

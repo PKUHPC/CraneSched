@@ -375,10 +375,9 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
   if (tcp_in) {
     getline(tcp_in, tcp_line);  // Skip the header line
     while (getline(tcp_in, tcp_line)) {
-      boost::trim(tcp_line);
-      std::vector<std::string> tcp_line_vec;
-      boost::split(tcp_line_vec, tcp_line, boost::is_any_of(" :"),
-                   boost::token_compress_on);
+      tcp_line = absl::StripAsciiWhitespace(tcp_line);
+      std::vector<std::string> tcp_line_vec =
+          absl::StrSplit(tcp_line, absl::ByAnyChar(" :"), absl::SkipEmpty());
       CRANE_TRACE("Checking port {} == {}", port_hex, tcp_line_vec[2]);
       if (port_hex == tcp_line_vec[2]) {
         inode_found = true;
@@ -615,24 +614,10 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     response->set_ok(true);
     response->set_task_id(reply_from_remote_service.task_id());
 
-    util::Cgroup *cg;
-    if (g_task_mgr->QueryCgOfTaskIdAsync(reply_from_remote_service.task_id(),
-                                         &cg)) {
-      CRANE_TRACE(
-          "ssh client with remote port {} belongs to task #{}. "
-          "Moving this ssh session process into the task's cgroup",
-          request->ssh_remote_port(), reply_from_remote_service.task_id());
-
-      response->set_ok(true);
-      response->set_task_id(reply_from_remote_service.task_id());
-      response->set_cgroup_path(cg->GetCgroupString());
-    } else {
-      CRANE_TRACE(
-          "ssh client with remote port {} belongs to task #{}. "
-          "But the task's cgroup is not found. Reject this ssh request",
-          request->ssh_remote_port(), reply_from_remote_service.task_id());
-      response->set_ok(false);
-    }
+    CRANE_TRACE(
+        "ssh client with remote port {} belongs to task #{}. "
+        "Moving this ssh session process into the task's cgroup",
+        request->ssh_remote_port(), reply_from_remote_service.task_id());
 
     return Status::OK;
   } else {
@@ -642,10 +627,9 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
       CRANE_TRACE(
           "Found a task #{} belonging to uid {}. "
           "This ssh session process is going to be moved into the task's "
-          "cgroup {}.",
-          info.first_task_id, request->uid(), info.cgroup_path);
+          "cgroup",
+          info.first_task_id, request->uid());
       response->set_task_id(info.first_task_id);
-      response->set_cgroup_path(info.cgroup_path);
       response->set_ok(true);
     } else {
       CRANE_TRACE(
@@ -669,8 +653,8 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
       g_task_mgr->MigrateProcToCgroupOfTask(request->pid(), request->task_id());
 
   if (!ok) {
-    CRANE_ERROR("GrpcMigrateSshProcToCgroup failed on pid: {}, task #{}",
-                request->pid(), request->task_id());
+    CRANE_INFO("GrpcMigrateSshProcToCgroup failed on pid: {}, task #{}",
+               request->pid(), request->task_id());
     response->set_ok(false);
   } else {
     response->set_ok(true);

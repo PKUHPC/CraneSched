@@ -4,7 +4,6 @@ target_link_libraries(Utility_cgroup
         PRIVATE
         PkgConfig::libcgroup
         spdlog::spdlog
-        Boost::boost
         absl::synchronization
         absl::flat_hash_map
         Utility_PublicHeader)

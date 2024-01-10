@@ -1020,16 +1020,27 @@ void TaskManager::EvGrpcQueryTaskIdFromPidCb_(int efd, short events,
 void TaskManager::EvOnTimerCb_(int, short, void* arg_) {
   auto* arg = reinterpret_cast<EvTimerCbArg*>(arg_);
   TaskManager* this_ = arg->task_manager;
-  task_id_t task_id = arg->task_instance->task.task_id();
+  task_id_t task_id = arg->task_id;
 
-  CRANE_TRACE("Task #{} exceeded its time limit. Terminating it...",
-              arg->task_instance->task.task_id());
+  CRANE_TRACE("Task #{} exceeded its time limit. Terminating it...", task_id);
 
-  this_->EvDelTerminationTimer_(arg->task_instance);
+  // Sometimes, task finishes just before time limit.
+  // After the execution of SIGCHLD callback where the task has been erased,
+  // the timer is triggered immediately.
+  // That's why we need to check the existence of the task again in timer
+  // callback, otherwise a segmentation fault will occur.
+  auto task_it = this_->m_task_map_.find(task_id);
+  if (task_it == this_->m_task_map_.end()) {
+    CRANE_TRACE("Task #{} has already been removed.");
+    return;
+  }
 
-  if (arg->task_instance->task.type() == crane::grpc::Batch) {
+  TaskInstance* task_instance = task_it->second.get();
+  this_->EvDelTerminationTimer_(task_instance);
+
+  if (task_instance->task.type() == crane::grpc::Batch) {
     EvQueueTaskTerminate ev_task_terminate{
-        .task_id = arg->task_instance->task.task_id(),
+        .task_id = task_id,
         .terminated_by_timeout = true,
     };
     this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
@@ -1184,60 +1195,9 @@ bool TaskManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info) {
   if (iter != this->m_uid_to_task_ids_map_.end()) {
     info->job_cnt = iter->second.size();
     info->first_task_id = *iter->second.begin();
-
-    auto cg_iter = this->m_task_id_to_cg_map_.find(info->first_task_id);
-    if (cg_iter != this->m_task_id_to_cg_map_.end()) {
-      this->m_mtx_.Unlock();
-      if (cg_iter->second == nullptr) {
-        // Lazy creation of cgroup
-        // Todo: Lock on iterator may be required here!
-        cg_iter->second = util::CgroupUtil::CreateOrOpen(
-            CgroupStrByTaskId_(info->first_task_id),
-            util::NO_CONTROLLER_FLAG |
-                util::CgroupConstant::Controller::CPU_CONTROLLER |
-                util::CgroupConstant::Controller::MEMORY_CONTROLLER,
-            util::NO_CONTROLLER_FLAG, false);
-      }
-
-      info->cgroup_path = cg_iter->second->GetCgroupString();
-      info->cgroup_exists = true;
-    } else {
-      CRANE_ERROR("Cannot find Cgroup* for uid {}'s task #{}!", uid,
-                  info->first_task_id);
-    }
-  } else {
-    this->m_mtx_.Unlock();
   }
-
-  return info->job_cnt > 0 && info->cgroup_exists;
-}
-
-bool TaskManager::QueryCgOfTaskIdAsync(uint32_t task_id, util::Cgroup** cg) {
-  CRANE_DEBUG("Query Cgroup* task #{}", task_id);
-
-  this->m_mtx_.Lock();
-
-  auto iter = this->m_task_id_to_cg_map_.find(task_id);
-  if (iter != this->m_task_id_to_cg_map_.end()) {
-    if (iter->second == nullptr) {
-      // Lazy creation of cgroup
-      // Todo: Lock on iterator may be required here!
-      iter->second = util::CgroupUtil::CreateOrOpen(
-          CgroupStrByTaskId_(task_id),
-          util::NO_CONTROLLER_FLAG |
-              util::CgroupConstant::Controller::CPU_CONTROLLER |
-              util::CgroupConstant::Controller::MEMORY_CONTROLLER,
-          util::NO_CONTROLLER_FLAG, false);
-    }
-
-    *cg = iter->second.get();
-  } else {
-    *cg = nullptr;
-  }
-
   this->m_mtx_.Unlock();
-
-  return *cg != nullptr;
+  return info->job_cnt > 0;
 }
 
 bool TaskManager::CheckTaskStatusAsync(task_id_t task_id,
@@ -1340,6 +1300,17 @@ bool TaskManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
   }
 
   this->m_mtx_.Unlock();
+
+  if (!iter->second) {
+    auto cgroup_path = CgroupStrByTaskId_(task_id);
+    iter->second = util::CgroupUtil::CreateOrOpen(
+        cgroup_path,
+        util::NO_CONTROLLER_FLAG |
+            util::CgroupConstant::Controller::CPU_CONTROLLER |
+            util::CgroupConstant::Controller::MEMORY_CONTROLLER |
+            util::CgroupConstant::Controller::DEVICES_CONTROLLER,
+        util::NO_CONTROLLER_FLAG, false);
+  }
 
   return iter->second->MigrateProcIn(pid);
 }

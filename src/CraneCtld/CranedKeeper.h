@@ -155,7 +155,8 @@ class CranedKeeper {
   // Must be declared previous to any grpc::CompletionQueue, so it can be
   // constructed before any CompletionQueue and be destructed after any
   // CompletionQueue.
-  boost::object_pool<CqTag> m_tag_pool_;
+  std::pmr::synchronized_pool_resource m_pmr_pool_res_;
+  std::unique_ptr<std::pmr::polymorphic_allocator<CqTag>> m_tag_sync_allocator_;
 
   Mutex m_connected_craned_mtx_;
   NodeHashMap<CranedId, std::unique_ptr<CranedStub>>
