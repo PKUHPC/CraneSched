@@ -597,12 +597,12 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
 
   if (request.new_state() == crane::grpc::CranedState::CRANE_DRAIN) {
     craned_meta->drain = true;
-    craned_meta->drain_reason = request.reason();
+    craned_meta->state_reason = request.reason();
     reply.set_ok(true);
   } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE) {
     if (craned_meta->alive) {
       craned_meta->drain = false;
-      craned_meta->drain_reason.clear();
+      craned_meta->state_reason.clear();
 
       reply.set_ok(true);
     } else {
