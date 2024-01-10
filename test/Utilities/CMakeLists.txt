@@ -3,7 +3,6 @@ target_link_libraries(utility_test
         GTest::gtest
         GTest::gtest_main
         concurrentqueue
-        Boost::boost
         Threads::Threads
         event_core_static
         cxxopts

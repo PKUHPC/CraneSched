@@ -32,6 +32,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <memory_resource>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -60,9 +61,6 @@
 #include <absl/synchronization/blocking_counter.h>
 #include <absl/synchronization/mutex.h>
 #include <absl/time/time.h>  // NOLINT(modernize-deprecated-headers)
-
-// Boost
-#include <boost/pool/object_pool.hpp>
 
 // Thread pool
 #include <BS_thread_pool.hpp>

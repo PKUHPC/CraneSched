@@ -26,8 +26,6 @@ target_link_libraries(cranectld PRIVATE
 
         Utility_PublicHeader
 
-        Boost::boost
-
         event_core_static
         event_pthreads_static
         uvw::uvw-static

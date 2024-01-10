@@ -165,11 +165,6 @@ else ()
     message(FATAL_ERROR "LibAIO was not found.")
 endif ()
 
-
-# Find third-party libraries
-set(Boost_USE_STATIC_LIBS ON)
-find_package(Boost 1.67 REQUIRED COMPONENTS thread system filesystem)
-
 # Needed by grpc
 set(_PROTOBUF_LIBPROTOBUF libprotobuf)
 set(_REFLECTION grpc++_reflection)
