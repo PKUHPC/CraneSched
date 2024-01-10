@@ -592,17 +592,23 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
     reply.set_reason("Invalid node name specified.");
     return reply;
   }
+
   auto crane_meta = craned_meta_map_[request.craned_id()];
 
   if (request.new_state() == crane::grpc::CranedState::CRANE_DRAIN) {
     crane_meta->drain = true;
     crane_meta->drain_reason = request.reason();
+    reply.set_ok(true);
   } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE) {
-    crane_meta->drain = false;
-    crane_meta->drain_reason = "";
+    if (crane_meta->alive) {
+      crane_meta->drain = false;
+      reply.set_ok(true);
+    } else {
+      reply.set_ok(false);
+      reply.set_reason("Can't change the state of a DOWN node!");
+    }
   }
 
-  reply.set_ok(true);
   return reply;
 }
 
