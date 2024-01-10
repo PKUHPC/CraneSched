@@ -1020,16 +1020,27 @@ void TaskManager::EvGrpcQueryTaskIdFromPidCb_(int efd, short events,
 void TaskManager::EvOnTimerCb_(int, short, void* arg_) {
   auto* arg = reinterpret_cast<EvTimerCbArg*>(arg_);
   TaskManager* this_ = arg->task_manager;
-  task_id_t task_id = arg->task_instance->task.task_id();
+  task_id_t task_id = arg->task_id;
 
-  CRANE_TRACE("Task #{} exceeded its time limit. Terminating it...",
-              arg->task_instance->task.task_id());
+  CRANE_TRACE("Task #{} exceeded its time limit. Terminating it...", task_id);
 
-  this_->EvDelTerminationTimer_(arg->task_instance);
+  // Sometimes, task finishes just before time limit.
+  // After the execution of SIGCHLD callback where the task has been erased,
+  // the timer is triggered immediately.
+  // That's why we need to check the existence of the task again in timer
+  // callback, otherwise a segmentation fault will occur.
+  auto task_it = this_->m_task_map_.find(task_id);
+  if (task_it == this_->m_task_map_.end()) {
+    CRANE_TRACE("Task #{} has already been removed.");
+    return;
+  }
 
-  if (arg->task_instance->task.type() == crane::grpc::Batch) {
+  TaskInstance* task_instance = task_it->second.get();
+  this_->EvDelTerminationTimer_(task_instance);
+
+  if (task_instance->task.type() == crane::grpc::Batch) {
     EvQueueTaskTerminate ev_task_terminate{
-        .task_id = arg->task_instance->task.task_id(),
+        .task_id = task_id,
         .terminated_by_timeout = true,
     };
     this_->m_task_terminate_queue_.enqueue(ev_task_terminate);

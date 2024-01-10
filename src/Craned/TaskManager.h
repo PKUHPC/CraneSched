@@ -263,7 +263,7 @@ class TaskManager {
 
   struct EvTimerCbArg {
     TaskManager* task_manager;
-    TaskInstance* task_instance;
+    task_id_t task_id;
   };
 
   static std::string CgroupStrByTaskId_(uint32_t task_id);
@@ -311,7 +311,7 @@ class TaskManager {
 
     auto* arg = new EvTimerCbArg;
     arg->task_manager = this;
-    arg->task_instance = instance;
+    arg->task_id = instance->task.task_id();
 
     timeval tv{
         sec.count(),
@@ -322,13 +322,13 @@ class TaskManager {
     CRANE_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
     evtimer_add(ev, &tv);
 
-    arg->task_instance->termination_timer = ev;
+    instance->termination_timer = ev;
   }
 
   void EvAddTerminationTimer_(TaskInstance* instance, int64_t secs) {
     auto* arg = new EvTimerCbArg;
     arg->task_manager = this;
-    arg->task_instance = instance;
+    arg->task_id = instance->task.task_id();
 
     timeval tv{static_cast<__time_t>(secs), 0};
 
@@ -336,7 +336,7 @@ class TaskManager {
     CRANE_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
     evtimer_add(ev, &tv);
 
-    arg->task_instance->termination_timer = ev;
+    instance->termination_timer = ev;
   }
 
   void EvDelTerminationTimer_(TaskInstance* instance) {
