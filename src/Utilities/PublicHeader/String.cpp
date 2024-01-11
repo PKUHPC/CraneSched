@@ -310,6 +310,17 @@ bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
   }
 }
 
+std::string CudaVisibleDevices(const uint64_t count) {
+  if (count == 0) {
+    return "";
+  }
+  std::vector<int> cuda_visible_device_vars;
+  for (int i = 0; i < count; ++i) {
+    cuda_visible_device_vars.push_back(i);
+  }
+  return absl::StrJoin(cuda_visible_device_vars, ",");
+}
+
 std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
   std::string output = input;
   std::size_t leftBracketPos = 0;
@@ -346,6 +357,30 @@ bool ConvertStringToInt64(const std::string &s, int64_t *val) {
   std::from_chars_result convert_result{};
   convert_result = std::from_chars(s.data(), s.data() + s.size(), *val);
   return convert_result.ec == std::errc();
+}
+
+std::string ReadableGres(const DedicatedResource &dedicated_resource) {
+  if (dedicated_resource.Empty()) {
+    return "None";
+  }
+  std::vector<std::string> node_gres_string_vector;
+  for (const auto &[node_id, node_gres] :
+       dedicated_resource.craned_id_gres_map) {
+    std::vector<std::string> node_gres_vec;
+    for (const auto &[device_name, type_slots_map] :
+         node_gres.name_type_slots_map) {
+      for (const auto &[device_type, slots] : type_slots_map.type_slots_map) {
+        node_gres_vec.emplace_back(fmt::format(
+            "{}:{}:{}:{}", node_id, device_name, device_type, slots.size()));
+      }
+    }
+    // node:name:type:count
+    node_gres_string_vector.insert(std::end(node_gres_string_vector),
+        std::make_move_iterator(node_gres_vec.begin()),
+        std::make_move_iterator(node_gres_vec.end()));
+  }
+
+  return absl::StrJoin(node_gres_string_vector, ",");
 }
 
 }  // namespace util

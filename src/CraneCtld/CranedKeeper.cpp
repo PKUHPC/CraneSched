@@ -213,7 +213,37 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
                 m_craned_id_, grpc_status.error_message());
     return CraneErr::kRpcFailure;
   }
+  if (reply.ok())
+    return CraneErr::kOk;
+  else
+    return CraneErr::kGenericFailure;
+}
 
+CraneErr CranedStub::QueryActualGres(DedicatedResourceInNode &resource) {
+  using crane::grpc::QueryActualGresReply;
+  using crane::grpc::QueryActualGresRequest;
+  ClientContext context;
+  Status grpc_status;
+
+  QueryActualGresRequest request;
+  QueryActualGresReply reply;
+
+  grpc_status = m_stub_->QueryActualGres(&context, request, &reply);
+  if (!grpc_status.ok()) {
+    CRANE_ERROR("QueryActualGres to Craned {} failed: {} ", m_craned_id_,
+                grpc_status.error_message());
+    return CraneErr::kRpcFailure;
+  }
+  for (const auto &[device_name, type_slots_map] : reply.dedicated_resource()
+                                                       .each_node_gres()
+                                                       .at(m_craned_id_)
+                                                       .name_tpye_map()) {
+    for (const auto &[device_type, slot_id_set] :
+         type_slots_map.type_slot_map()) {
+      resource.name_type_slots_map[device_name][device_type].insert(
+          slot_id_set.slots().begin(), slot_id_set.slots().end());
+    }
+  }
   if (reply.ok())
     return CraneErr::kOk;
   else
@@ -241,6 +271,29 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
         task->resources.allocatable_resource.memory_bytes);
     mutable_allocatable_resource->set_memory_sw_limit_bytes(
         task->resources.allocatable_resource.memory_sw_bytes);
+
+    if (!task->resources.dedicated_resource.Empty()) {
+      auto *mutable_each_node_gres = mutable_task->mutable_resources()
+                                         ->mutable_actual_dedicated_resource()
+                                         ->mutable_each_node_gres();
+      for (const auto &craned_id : task->CranedIds()) {
+        crane::grpc::DedicatedResourceInNode resource_in_node;
+        for (const auto &[device_name, type_slot_id_map] :
+             task->resources.dedicated_resource.at(craned_id)
+                 .name_type_slots_map) {
+          crane::grpc::DeviceTypeSlotsMap device_type_slots_map;
+          for (const auto &[device_type, slot_id_set] : type_slot_id_map) {
+            crane::grpc::Slots slots;
+            slots.mutable_slots()->Add(slot_id_set.begin(), slot_id_set.end());
+            device_type_slots_map.mutable_type_slot_map()->emplace(
+                device_type, std::move(slots));
+          }
+          resource_in_node.mutable_name_tpye_map()->emplace(
+              device_name, std::move(device_type_slots_map));
+        }
+        mutable_each_node_gres->emplace(craned_id, resource_in_node);
+      }
+    }
 
     // Set type
     mutable_task->set_type(task->type);

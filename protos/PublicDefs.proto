@@ -36,10 +36,37 @@ message AllocatableResource {
   uint64 memory_sw_limit_bytes = 3;
 }
 
-message DedicatedResource {}
+message TypeCountMap{
+  map <string/*Type*/, uint64> type_count_map = 1;
+  uint64 total = 2;
+}
+
+message DeviceMap{
+  map<string/*name*/, TypeCountMap> name_type_map = 1;
+}
+
+message Slots{
+  repeated string slots = 1;
+}
+
+message DeviceTypeSlotsMap{
+  map<string/*Type*/, Slots/*index of slot*/> type_slots_map = 1;
+}
+
+message DedicatedResourceInNode{
+  map <string /*device name*/, DeviceTypeSlotsMap> name_type_map = 1;
+}
+
+message DedicatedResource {
+  map <string /*craned id*/, DedicatedResourceInNode> each_node_gres = 1;
+}
 
 message Resources {
   AllocatableResource allocatable_resource = 1;
+  oneof dedicated_resource {
+    DedicatedResource actual_dedicated_resource = 2;
+    DeviceMap dedicated_resource_req = 3;
+  }
 }
 
 enum PartitionState {
@@ -85,6 +112,7 @@ message TaskToCtld {
   google.protobuf.Duration time_limit = 1;
 
   string partition_name = 2;
+  //the dedicated_resources of the field will not be use
   Resources resources = 3;
 
   TaskType type = 4;
@@ -231,6 +259,7 @@ message TaskInfo {
   // a negative elapsed time might occur.
   // To avoid this, the elapsed time of a task is calculated on the CraneCtld side.
   google.protobuf.Duration elapsed_time = 37;
+  DeviceMap gres_req = 38;
 }
 
 message PartitionInfo {
@@ -246,6 +275,9 @@ message PartitionInfo {
   uint64 total_mem = 9;
   uint64 avail_mem = 10;
   uint64 alloc_mem = 11;
+  DeviceMap device = 12;
+  DeviceMap alloc_device = 13;
+  DeviceMap avail_device = 14;
 }
 
 message CranedInfo {
@@ -260,6 +292,9 @@ message CranedInfo {
   uint64 free_mem = 9;
   repeated string partition_names = 10;
   uint32 running_task_num = 11;
+  DeviceMap device = 12;
+  DeviceMap alloc_device = 13;
+  DeviceMap avail_device = 14;
 }
 
 message TrimmedPartitionInfo {

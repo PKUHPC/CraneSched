@@ -1710,6 +1710,8 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_alloc_cpu(
         static_cast<double>(task.resources.allocatable_resource.cpu_count) *
         task.node_num);
+    task_it->mutable_gres_req()->CopyFrom(
+        task.TaskToCtld().resources().dedicated_resource_req());
     task_it->set_exit_code(0);
     task_it->set_priority(task.cached_priority);
 
@@ -1905,10 +1907,11 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     time_avail_res_map[now] = craned_meta->res_avail;
 
     if constexpr (kAlgoTraceOutput) {
-      CRANE_TRACE("Craned {} initial res_avail now: cpu: {}, mem: {}",
-                  craned_id,
-                  craned_meta->res_avail.allocatable_resource.cpu_count,
-                  craned_meta->res_avail.allocatable_resource.memory_bytes);
+      CRANE_TRACE(
+          "Craned {} initial res_avail now: cpu: {}, mem: {}, gres: {}",
+          craned_id, craned_meta->res_avail.allocatable_resource.cpu_count,
+          craned_meta->res_avail.allocatable_resource.memory_bytes,
+          util::ReadableGres(craned_meta->res_avail.dedicated_resource));
     }
 
     {  // Limit the scope of `iter`
@@ -1931,10 +1934,11 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
           if constexpr (kAlgoTraceOutput) {
             CRANE_TRACE(
                 "Insert duration [now+{}s, inf) with resource: "
-                "cpu: {}, mem: {}",
+                "cpu: {}, mem: {}, gres: {}",
                 absl::ToInt64Seconds(end_time - now),
                 craned_meta->res_avail.allocatable_resource.cpu_count,
-                craned_meta->res_avail.allocatable_resource.memory_bytes);
+                craned_meta->res_avail.allocatable_resource.memory_bytes,
+                util::ReadableGres(craned_meta->res_avail.dedicated_resource));
           }
         }
 
@@ -1949,11 +1953,12 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         cur_time_iter->second += running_task->resources;
 
         if constexpr (kAlgoTraceOutput) {
-          CRANE_TRACE("Craned {} res_avail at now + {}s: cpu: {}, mem: {}; ",
-                      craned_id,
-                      absl::ToInt64Seconds(cur_time_iter->first - now),
-                      cur_time_iter->second.allocatable_resource.cpu_count,
-                      cur_time_iter->second.allocatable_resource.memory_bytes);
+          CRANE_TRACE(
+              "Craned {} res_avail at now + {}s: cpu: {}, mem: {}, gres: {}; ",
+              craned_id, absl::ToInt64Seconds(cur_time_iter->first - now),
+              cur_time_iter->second.allocatable_resource.cpu_count,
+              cur_time_iter->second.allocatable_resource.memory_bytes,
+              util::ReadableGres(cur_time_iter->second.dedicated_resource));
         }
       }
 
@@ -1963,20 +1968,22 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         auto prev_iter = time_avail_res_map.begin();
         auto iter = std::next(prev_iter);
         for (; iter != time_avail_res_map.end(); prev_iter++, iter++) {
-          str.append(
-              fmt::format("[ now+{}s , now+{}s ) Available allocatable "
-                          "res: cpu core {}, mem {}",
-                          absl::ToInt64Seconds(prev_iter->first - now),
-                          absl::ToInt64Seconds(iter->first - now),
-                          prev_iter->second.allocatable_resource.cpu_count,
-                          prev_iter->second.allocatable_resource.memory_bytes));
+          str.append(fmt::format(
+              "[ now+{}s , now+{}s ) Available allocatable "
+              "res: cpu core {}, mem {}, gres {}",
+              absl::ToInt64Seconds(prev_iter->first - now),
+              absl::ToInt64Seconds(iter->first - now),
+              prev_iter->second.allocatable_resource.cpu_count,
+              prev_iter->second.allocatable_resource.memory_bytes,
+              util::ReadableGres(prev_iter->second.dedicated_resource)));
         }
-        str.append(
-            fmt::format("[ now+{}s , inf ) Available allocatable "
-                        "res: cpu core {}, mem {}",
-                        absl::ToInt64Seconds(prev_iter->first - now),
-                        prev_iter->second.allocatable_resource.cpu_count,
-                        prev_iter->second.allocatable_resource.memory_bytes));
+        str.append(fmt::format(
+            "[ now+{}s , inf ) Available allocatable "
+            "res: cpu core {}, mem {}, gres {}",
+            absl::ToInt64Seconds(prev_iter->first - now),
+            prev_iter->second.allocatable_resource.cpu_count,
+            prev_iter->second.allocatable_resource.memory_bytes,
+            util::ReadableGres(prev_iter->second.dedicated_resource)));
         CRANE_TRACE("{}", str);
       }
     }
@@ -2012,7 +2019,12 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
 
     // If any of the follow `if` is true, skip this node.
-    if (!(task->resources <= craned_meta->res_total)) {
+    if (!(/* check dedicated_resource */
+          task->request_gres <=
+              craned_meta->res_total.dedicated_resource.at(craned_index) &&
+          /* check allocatable_resource */
+          task->resources.allocatable_resource <=
+              craned_meta->res_total.allocatable_resource)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
             "Task #{} needs more resource than that of craned {}. "
@@ -2044,6 +2056,51 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   CRANE_ASSERT_MSG(selected_node_cnt == task->node_num,
                    "selected_node_cnt != task->node_num");
 
+  // chose slot for each node gres request
+  for (const auto& craned_id : craned_indexes_) {
+    const auto& craned_meta = craned_meta_map.at(craned_id).GetExclusivePtr();
+    for (const auto& [device_name, name_type_req] : task->request_gres) {
+      const auto& type_req_spec = name_type_req.second;
+      auto name_count = name_type_req.first;
+      auto& this_name_alloc_gres =
+          task->resources.dedicated_resource[craned_id][device_name];
+      for (const auto& [device_type, type_count] : type_req_spec) {
+        const auto& avail_slots =
+            craned_meta->res_total.dedicated_resource.at(craned_id)
+                .at(device_name)
+                .at(device_type);
+        CRANE_ASSERT(avail_slots.size() >= type_count);
+        auto it = avail_slots.begin();
+        for (size_t i = 0; i < type_count; ++i) {
+          if (it == avail_slots.end()) {
+            it = avail_slots.begin();
+          }
+          this_name_alloc_gres[device_type].emplace(*it);
+          ++it;
+        }
+        while (name_count > 0 && it != avail_slots.end()) {
+          this_name_alloc_gres[device_type].emplace(*it);
+          ++it;
+          --name_count;
+        }
+      }
+      if (name_count > 0) {
+        for (const auto& [type, slots] :
+             craned_meta->res_total.dedicated_resource.at(craned_id)
+                 .at(device_name)
+                 .type_slots_map) {
+          if (type_req_spec.contains(type)) continue;
+          auto it = slots.begin();
+          while (name_count > 0 && it != slots.end()) {
+            this_name_alloc_gres[type].emplace(*it);
+            ++it;
+            --name_count;
+          }
+          if (name_count == 0) break;
+        }
+      }
+    }
+  }
   for (CranedId craned_id : craned_indexes_) {
     if constexpr (kAlgoTraceOutput) {
       CRANE_TRACE("Find valid time segments for task #{} on craned {}",
@@ -2076,7 +2133,11 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     while (true) {
       CRANE_ASSERT(res_it != time_avail_res_map.end());
       if (trying) {
-        if (task->resources <= res_it->second) {
+        if (task->resources.allocatable_resource <=
+                res_it->second.allocatable_resource &&
+            (task->resources.dedicated_resource.Empty() ||
+             task->resources.dedicated_resource.at(craned_id) <=
+                 res_it->second.dedicated_resource.at(craned_id))) {
           trying = false;
           expected_start_time = res_it->first;
 
@@ -2094,7 +2155,11 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           continue;
         }
       } else {
-        if (task->resources <= res_it->second) {
+        if (task->resources.allocatable_resource <=
+                res_it->second.allocatable_resource &&
+            (task->resources.dedicated_resource.Empty() ||
+             task->resources.dedicated_resource.at(craned_id) <=
+                 res_it->second.dedicated_resource.at(craned_id))) {
           if (std::next(res_it) == time_avail_res_map.end()) {
             valid_duration = absl::InfiniteDuration();
             time_segments.emplace_back(expected_start_time, valid_duration);
@@ -2407,7 +2472,8 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
     MinLoadFirst::NodeSelectionInfo* node_selection_info) {
   NodeSelectionInfo& node_info = *node_selection_info;
   bool ok;
-
+  Resources task_res_in_node{};
+  task_res_in_node.allocatable_resource = resources.allocatable_resource;
   for (CranedId const& craned_id : craned_ids) {
     // Increase the running task num in Craned `crane_id`.
     for (auto it = node_info.task_num_node_id_map.begin();
@@ -2420,6 +2486,13 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
       }
     }
 
+    if (!resources.dedicated_resource.craned_id_gres_map.empty()) {
+      task_res_in_node.dedicated_resource.craned_id_gres_map.clear();
+      task_res_in_node.dedicated_resource[craned_id] =
+          resources.dedicated_resource.at(craned_id);
+    }
+
+    task_res_in_node.allocatable_resource = resources.allocatable_resource;
     TimeAvailResMap& time_avail_res_map =
         node_info.node_time_avail_res_map[craned_id];
 
@@ -2460,16 +2533,16 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
 
       if (task_duration_begin_it->first == expected_start_time) {
         // Situation #1
-        CRANE_ASSERT(resources <= task_duration_begin_it->second);
-        task_duration_begin_it->second -= resources;
+        CRANE_ASSERT(task_res_in_node <= task_duration_begin_it->second);
+        task_duration_begin_it->second -= task_res_in_node;
       } else {
         // Situation #2
         std::tie(inserted_it, ok) = time_avail_res_map.emplace(
             expected_start_time, task_duration_begin_it->second);
         CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
-        CRANE_ASSERT(resources <= inserted_it->second);
-        inserted_it->second -= resources;
+        CRANE_ASSERT(task_res_in_node <= inserted_it->second);
+        inserted_it->second -= task_res_in_node;
       }
     } else {
       --task_duration_begin_it;
@@ -2510,8 +2583,8 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
       // Subtract the required resources within the interval.
       for (auto in_duration_it = task_duration_begin_it;
            in_duration_it != task_duration_end_it; in_duration_it++) {
-        CRANE_ASSERT(resources <= in_duration_it->second);
-        in_duration_it->second -= resources;
+        CRANE_ASSERT(task_res_in_node <= in_duration_it->second);
+        in_duration_it->second -= task_res_in_node;
       }
 
       // Check if we need to insert a time point at
@@ -2533,8 +2606,8 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
             task_end_time, task_duration_end_it->second);
         CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
-        CRANE_ASSERT(resources <= task_duration_end_it->second);
-        task_duration_end_it->second -= resources;
+        CRANE_ASSERT(task_res_in_node <= task_duration_end_it->second);
+        task_duration_end_it->second -= task_res_in_node;
       }
     }
   }
@@ -2643,7 +2716,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
           metas_ptr->partition_global_meta.m_resource_total_inc_dead_)) {
       CRANE_TRACE(
           "Resource not enough for task #{}. "
-          "Partition total: cpu {}, mem: {}, mem+sw: {}",
+          "Partition total: cpu {}, mem: {}, mem+sw: {}, gres: {}",
           task->TaskId(),
           metas_ptr->partition_global_meta.m_resource_total_inc_dead_
               .allocatable_resource.cpu_count,
@@ -2652,7 +2725,9 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
                   .allocatable_resource.memory_bytes),
           util::ReadableMemory(
               metas_ptr->partition_global_meta.m_resource_total_inc_dead_
-                  .allocatable_resource.memory_sw_bytes));
+                  .allocatable_resource.memory_sw_bytes),
+          util::ReadableGres(metas_ptr->partition_global_meta.m_resource_total_
+                                 .dedicated_resource));
       return CraneErr::kNoResource;
     }
 
@@ -2668,6 +2743,8 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
       if (task->resources <= craned_meta->res_total &&
+          task->request_gres <=
+              craned_meta->res_total.dedicated_resource.at(craned_id) &&
           (task->included_nodes.empty() ||
            task->included_nodes.contains(craned_id)) &&
           (task->excluded_nodes.empty() ||

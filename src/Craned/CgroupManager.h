@@ -207,13 +207,17 @@ class Cgroup {
   bool SetMemorySwLimitBytes(uint64_t mem_bytes);
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes);
   bool SetBlockioWeight(uint64_t weight);
+  bool SetDeviceAccess(const std::vector<Device> &devices, bool set_read,
+                       bool set_write, bool set_mknod);
   bool SetControllerValue(CgroupConstant::Controller controller,
                           CgroupConstant::ControllerFile controller_file,
                           uint64_t value);
   bool SetControllerStr(CgroupConstant::Controller controller,
                         CgroupConstant::ControllerFile controller_file,
                         const std::string &str);
-
+  bool SetControllerStrs(CgroupConstant::Controller controller,
+                         CgroupConstant::ControllerFile controller_file,
+                         const std::vector<std::string> &strs);
   bool KillAllProcesses();
 
   bool Empty();
@@ -231,6 +235,12 @@ class AllocatableResourceAllocator {
  public:
   static bool Allocate(const AllocatableResource &resource, Cgroup *cg);
   static bool Allocate(const crane::grpc::AllocatableResource &resource,
+                       Cgroup *cg);
+};
+
+class DedicatedResourceAllocator {
+ public:
+  static bool Allocate(const crane::grpc::DedicatedResource &request_resource,
                        Cgroup *cg);
 };
 

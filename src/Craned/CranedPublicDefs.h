@@ -40,6 +40,8 @@ struct TaskInfoOfUid {
 struct CranedNode {
   uint32_t cpu;
   uint64_t memory_bytes;
+  DedicatedResource dedicated_resource;
+  std::unordered_map<SlotId, std::string> slot_to_type_map;
 };
 
 struct Partition {
@@ -86,6 +88,8 @@ struct Config {
 };
 
 inline Config g_config;
+
+inline std::vector<Device> g_this_node_device;
 
 }  // namespace Craned
 

@@ -353,7 +353,33 @@ void ParseConfig(int argc, char** argv) {
             node_ptr->memory_bytes = memory_bytes;
           } else
             std::exit(1);
-          for (auto&& name : name_list) g_config.Nodes[name] = node_ptr;
+
+          DedicatedResourceInNode resourceInNode;
+          if (node["gres"]) {
+            for (auto gres_it = node["gres"].begin();
+                 gres_it != node["gres"].end(); ++gres_it) {
+              const auto& gres_node = gres_it->as<YAML::Node>();
+              const auto& device_name = gres_node["name"].as<std::string>();
+              const auto& device_type = gres_node["type"].as<std::string>();
+              std::list<std::string> device_path_list;
+              if (!util::ParseHostList(gres_node["file"].Scalar(),
+                                       &device_path_list)) {
+                CRANE_ERROR("Illegal gres file path string format.");
+                std::exit(1);
+              }
+              CRANE_TRACE("gres file name list parsed: {}",
+                          fmt::join(device_path_list, ", "));
+              for (const auto& device_path : device_path_list) {
+                resourceInNode.name_type_slots_map[device_name][device_type]
+                    .emplace(device_path);
+              }
+            }
+          }
+
+          for (auto&& name : name_list) {
+            g_config.Nodes[name] = node_ptr;
+            g_config.Nodes[name]->dedicated_resource[name] = resourceInNode;
+          }
         }
       }
 

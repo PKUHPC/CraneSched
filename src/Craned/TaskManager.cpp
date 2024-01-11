@@ -23,6 +23,7 @@
 
 #include "CforedClient.h"
 #include "crane/OS.h"
+#include "crane/String.h"
 #include "protos/CraneSubprocess.pb.h"
 
 namespace Craned {
@@ -794,6 +795,28 @@ CraneErr TaskManager::SpawnProcessInInstance_(
                                         (1024 * 1024)));
     env_vec.emplace_back("CRANE_JOB_ID",
                          std::to_string(instance->task.task_id()));
+
+    if (instance->task.resources()
+            .actual_dedicated_resource()
+            .each_node_gres()
+            .contains(g_config.Hostname)) {
+      uint64_t cuda_count = 0;
+      for (const auto& [device_name, type_slots_map] :
+           instance->task.resources()
+               .actual_dedicated_resource()
+               .each_node_gres()
+               .at(g_config.Hostname)
+               .name_type_map()) {
+        std::ranges::for_each(type_slots_map.type_slots_map(),
+                              [&cuda_count](const auto& kv) {
+                                cuda_count += kv.second.slots().size();
+                              });
+      }
+      if (cuda_count != 0) {
+        env_vec.emplace_back("CUDA_VISIBLE_DEVICES",
+                             util::CudaVisibleDevices(cuda_count));
+      }
+    }
 
     if (CheckIfInstanceTypeIsCrun_(instance) &&
         !instance->task.interactive_meta().term_env().empty()) {

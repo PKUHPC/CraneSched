@@ -89,6 +89,11 @@ class CranedServiceImpl : public Craned::Service {
       grpc::ServerContext *context,
       const crane::grpc::ChangeTaskTimeLimitRequest *request,
       crane::grpc::ChangeTaskTimeLimitReply *response) override;
+
+  grpc::Status QueryActualGres(
+      grpc::ServerContext *context,
+      const ::crane::grpc::QueryActualGresRequest *request,
+      crane::grpc::QueryActualGresReply *response) override;
 };
 
 class CranedServer {

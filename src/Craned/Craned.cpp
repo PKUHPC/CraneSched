@@ -49,7 +49,7 @@ void ParseConfig(int argc, char** argv) {
        cxxopts::value<std::string>())
       ("L,log-file", "Path to Craned log file",
        cxxopts::value<std::string>()->default_value(fmt::format("{}{}",kDefaultCraneBaseDir, kDefaultCranedLogPath)))
-      ("D,debug-level", "Logging level of Craned, format: <trace|debug|info|warn|error>", 
+      ("D,debug-level", "Logging level of Craned, format: <trace|debug|info|warn|error>",
        cxxopts::value<std::string>()->default_value("info"))
       ("v,version", "Display version information")
       ("h,help", "Display help for Craned")
@@ -76,6 +76,7 @@ void ParseConfig(int argc, char** argv) {
   }
 
   std::string config_path = parsed_args["config"].as<std::string>();
+  std::unordered_map<std::string, std::vector<Device>> each_node_device;
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
@@ -266,7 +267,30 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
+          std::vector<Device> devices;
+          if (node["gres"]) {
+            for (auto gres_it = node["gres"].begin();
+                 gres_it != node["gres"].end(); ++gres_it) {
+              const auto& gres_node = gres_it->as<YAML::Node>();
+              const auto& device_name = gres_node["name"].as<std::string>();
+              const auto& device_type = gres_node["type"].as<std::string>();
+              std::list<std::string> device_path_list;
+              if (!util::ParseHostList(gres_node["file"].Scalar(),
+                                       &device_path_list)) {
+                CRANE_ERROR("Illegal gres file path string format.");
+                std::exit(1);
+              }
+              CRANE_TRACE("gres file name list parsed: {}",
+                          fmt::join(name_list, ", "));
+              for (const auto& device_path : device_path_list) {
+                devices.emplace_back(device_name, device_type, device_path);
+              }
+            }
+          }
+
           for (auto&& name : name_list) {
+            each_node_device[name].insert(each_node_device[name].end(),
+                                          devices.cbegin(), devices.cend());
             if (crane::IsAValidIpv4Address(name)) {
               CRANE_INFO(
                   "Node name `{}` is a valid ipv4 address and doesn't "
@@ -392,6 +416,25 @@ void ParseConfig(int argc, char** argv) {
   }
 
   CRANE_INFO("Found this machine {} in Nodes", g_config.Hostname);
+  // get this node device info
+  // Todo: Auto detect device
+  {
+    auto node_ptr = g_config.CranedNodes.at(g_config.Hostname);
+    auto& devices = each_node_device[g_config.Hostname];
+    for (auto& dev : devices) {
+      if (!dev.Init()) {
+        CRANE_ERROR("Access Device name:{},type:{},file:{} failed.", dev.name,
+                    dev.type, dev.path);
+        std::exit(1);
+      } else {
+        node_ptr->dedicated_resource.craned_id_gres_map[g_config.Hostname]
+            .name_type_slots_map[dev.name][dev.type]
+            .emplace(dev.path);
+        node_ptr->slot_to_type_map[dev.path] = dev.type;
+        Craned::g_this_node_device.emplace_back(dev);
+      }
+    }
+  }
 
   uint32_t part_id, node_index;
   std::string part_name;
@@ -439,8 +482,9 @@ void GlobalVariableInit() {
   g_cg_mgr = std::make_unique<Craned::CgroupManager>();
   g_cg_mgr->Init();
   if (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
-      !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER)) {
-    CRANE_ERROR("Failed to initialize cpu and memory cgroups controller.");
+      !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER) ||
+      !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER)) {
+    CRANE_ERROR("Failed to initialize cpu,memory,devices cgroups controller.");
     std::exit(1);
   }
 
@@ -469,7 +513,6 @@ void StartServer() {
 
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
-
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
