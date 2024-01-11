@@ -371,9 +371,9 @@ class TaskManager {
   absl::flat_hash_map<uint32_t /*pid*/, ProcessInstance*> m_pid_proc_map_;
 
   absl::node_hash_map<uint32_t /*task id*/, std::shared_ptr<util::Cgroup>>
-      m_task_id_to_cg_map_;
+      m_task_id_to_cg_map_ ABSL_GUARDED_BY(m_mtx_);
   absl::flat_hash_map<uid_t /*uid*/, absl::flat_hash_set<uint32_t /*task id*/>>
-      m_uid_to_task_ids_map_;
+      m_uid_to_task_ids_map_ ABSL_GUARDED_BY(m_mtx_);
 
   absl::Mutex m_mtx_;
 

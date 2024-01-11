@@ -23,6 +23,7 @@
 
 #include "ResourceAllocators.h"
 #include "crane/FdFunctions.h"
+#include "crane/String.h"
 #include "protos/CraneSubprocess.pb.h"
 
 namespace Craned {
@@ -651,6 +652,24 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     env_vec.emplace_back("CRANE_JOB_ID",
                          std::to_string(instance->task.task_id()));
 
+    if (instance->task.resources()
+            .dedicated_resource()
+            .each_node_gres()
+            .contains(g_config.Hostname)) {
+      uint64_t cuda_count = 0;
+      for (const auto& [device_name, slots] : instance->task.resources()
+                                                  .dedicated_resource()
+                                                  .each_node_gres()
+                                                  .at(g_config.Hostname)
+                                                  .name_slots_map()) {
+        cuda_count += slots.slot().size();
+      }
+      if (cuda_count != 0) {
+        env_vec.emplace_back("CUDA_VISIBLE_DEVICES",
+                             util::CudaVisibleDevices(cuda_count));
+      }
+    }
+
     int64_t time_limit_sec = instance->task.time_limit().seconds();
     int hours = time_limit_sec / 3600;
     int minutes = (time_limit_sec % 3600) / 60;
@@ -746,7 +765,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
             instance->cgroup_path,
             util::NO_CONTROLLER_FLAG |
                 util::CgroupConstant::Controller::CPU_CONTROLLER |
-                util::CgroupConstant::Controller::MEMORY_CONTROLLER,
+                util::CgroupConstant::Controller::MEMORY_CONTROLLER |
+                util::CgroupConstant::Controller::DEVICES_CONTROLLER,
             util::NO_CONTROLLER_FLAG, false);
 
         if (!cg_iter->second) {
@@ -786,6 +806,21 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
             fmt::format(
                 "Cannot allocate resources for the instance of task #{}",
                 task_id));
+        return;
+      }
+
+      if (!DedicatedResourceAllocator::Allocate(
+              instance->task.resources().dedicated_resource(),
+              instance->cgroup)) {
+        CRANE_ERROR(
+            "Failed to allocate dedicated resource in cgroup for task #{}",
+            instance->task.task_id());
+        this_->EvActivateTaskStatusChange_(
+            instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+            ExitCode::kExitCodeCgroupError,
+            fmt::format("Cannot allocate dedicated resources for the instance "
+                        "of task #{}",
+                        instance->task.task_id()));
         return;
       }
 

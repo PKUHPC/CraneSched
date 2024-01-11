@@ -62,6 +62,22 @@ CraneErr CranedStub::ExecuteTasks(
     mutable_allocatable_resource->set_memory_sw_limit_bytes(
         task->resources.allocatable_resource.memory_sw_bytes);
 
+    if (task->resources.dedicated_resource.craned_id_gres_map.contains(
+            m_craned_id_)) {
+      auto *mutable_node_gres_map = mutable_task->mutable_resources()
+                                        ->mutable_dedicated_resource()
+                                        ->mutable_each_node_gres();
+      for (const auto &[device_name, device_slots] :
+           task->resources.dedicated_resource.craned_id_gres_map
+               .at(m_craned_id_)
+               .name_slots_map) {
+        (*(*mutable_node_gres_map)[m_craned_id_]
+              .mutable_name_slots_map())[device_name]
+            .mutable_slot()
+            ->Add(device_slots.cbegin(), device_slots.cend());
+      }
+    }
+
     // Set type
     mutable_task->set_type(task->type);
     mutable_task->set_task_id(task->TaskId());
@@ -252,7 +268,39 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
                 m_craned_id_, grpc_status.error_message());
     return CraneErr::kRpcFailure;
   }
+  if (reply.ok())
+    return CraneErr::kOk;
+  else
+    return CraneErr::kGenericFailure;
+}
 
+CraneErr CranedStub::QueryActualGres(
+    std::unordered_map<std::string, std::set<std::string>> *resource,
+    std::unordered_map<std::string, std::string> *slot_2_type_map) {
+  using crane::grpc::QueryActualGresReply;
+  using crane::grpc::QueryActualGresRequest;
+  ClientContext context;
+  Status grpc_status;
+
+  QueryActualGresRequest request;
+  QueryActualGresReply reply;
+
+  grpc_status = m_stub_->QueryActualGres(&context, request, &reply);
+  if (!grpc_status.ok()) {
+    CRANE_ERROR("QueryActualGres to Craned {} failed: {} ", m_craned_id_,
+                grpc_status.error_message());
+    return CraneErr::kRpcFailure;
+  }
+  for (const auto &[device_name, device_slot_array] : reply.dedicated_resource()
+                                                          .each_node_gres()
+                                                          .at(m_craned_id_)
+                                                          .name_slots_map()) {
+    (*resource)[device_name].insert(device_slot_array.slot().begin(),
+                                    device_slot_array.slot().end());
+  }
+  for (const auto &[slot, device_name_type_pair] : reply.slot_to_type_map()) {
+    (*slot_2_type_map).emplace(slot, device_name_type_pair);
+  }
   if (reply.ok())
     return CraneErr::kOk;
   else

@@ -309,6 +309,17 @@ bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
   }
 }
 
+std::string CudaVisibleDevices(const uint64_t count) {
+  if (count == 0) {
+    return "";
+  }
+  std::vector<int> cuda_visible_device_vars;
+  for (int i = 0; i < count; ++i) {
+    cuda_visible_device_vars.push_back(i);
+  }
+  return absl::StrJoin(cuda_visible_device_vars, ",");
+}
+
 std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
   std::string output = input;
   std::size_t leftBracketPos = 0;
@@ -329,6 +340,72 @@ std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
     }
   }
   return output;
+}
+
+std::string ReadableGres(const DedicatedResource &dedicated_resource) {
+  if (dedicated_resource.Empty()) {
+    return "None";
+  }
+  std::vector<std::string> node_gres_string_vector;
+
+  for (const auto &[node_id, node_gres] :
+       dedicated_resource.craned_id_gres_map) {
+    std::vector<std::string> temp;
+    for (const auto &[device_name, device_slots] : node_gres.name_slots_map) {
+      for (const auto &slot : device_slots) {
+        temp.emplace_back(absl::StrCat(device_name, ":", slot));
+      }
+    }
+    std::ranges::for_each(temp, [&node_id](std::string &node_gres) {
+      node_gres = fmt::format("{}:{}", node_id, node_gres);
+    });
+    node_gres_string_vector.insert(std::end(node_gres_string_vector),
+                                   std::make_move_iterator(temp.begin()),
+                                   std::make_move_iterator(temp.end()));
+  }
+
+  return absl::StrJoin(node_gres_string_vector, ",");
+}
+
+std::string ReadableGres(
+    const DedicatedResource &dedicated_resource,
+    const std::unordered_map<DedicatedResourceInNode::SlotType, std::string>
+        &slot_to_type_map) {
+  if (dedicated_resource.Empty()) {
+    return "None";
+  }
+  std::vector<std::string> node_gres_string_vector;
+  if (dedicated_resource.craned_id_gres_map.size() == 1) {
+    // only one node
+    for (const auto &[device_name, device_slots] :
+         dedicated_resource.craned_id_gres_map.begin()->second.name_slots_map) {
+      for (const auto &slot : device_slots) {
+        node_gres_string_vector.emplace_back(
+            absl::StrCat(device_name, ":", slot));
+      }
+    }
+  } else {
+    for (const auto &[node_id, node_gres] :
+         dedicated_resource.craned_id_gres_map) {
+      std::vector<std::string> temp;
+      for (const auto &[device_name, device_slots] : node_gres.name_slots_map) {
+        std::unordered_map<std::string, uint64_t> type_count_map;
+        for (const auto &slot : device_slots) {
+          type_count_map[slot_to_type_map.at(slot)]++;
+        }
+        for (const auto &[type, count] : type_count_map) {
+          temp.emplace_back(absl::StrCat(device_name, ":", type, ":", count));
+        }
+      }
+      std::ranges::for_each(temp, [&node_id](std::string &node_gres) {
+        node_gres = fmt::format("{}:{}", node_id, node_gres);
+      });
+      node_gres_string_vector.insert(std::end(node_gres_string_vector),
+                                     std::make_move_iterator(temp.begin()),
+                                     std::make_move_iterator(temp.end()));
+    }
+  }
+  return absl::StrJoin(node_gres_string_vector, ",");
 }
 
 }  // namespace util

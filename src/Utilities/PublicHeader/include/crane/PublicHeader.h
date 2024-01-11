@@ -18,6 +18,11 @@
 
 #include <google/protobuf/util/time_util.h>
 
+#include <array>
+#include <optional>
+#include <unordered_map>
+#include <variant>
+
 #include "protos/Crane.pb.h"
 
 using task_id_t = uint32_t;
@@ -161,11 +166,76 @@ bool operator<=(const AllocatableResource& lhs, const AllocatableResource& rhs);
 bool operator<(const AllocatableResource& lhs, const AllocatableResource& rhs);
 bool operator==(const AllocatableResource& lhs, const AllocatableResource& rhs);
 
+std::optional<std::tuple<unsigned int, unsigned int, char>>
+GetDeviceFileMajorMinorOpType(const std::string& path);
+
+struct Device {
+  unsigned int major;
+  unsigned int minor;
+  char op_type;
+  // set to true when allocated
+  bool busy = false;
+  // set to true in allocation result to indicate the task own this device
+  bool alloc = false;
+  std::string path;
+  // device type e.g a100
+  std::string type;
+  std::string name;
+  std::vector<int> cpu_affinity;
+  // link count to #index device;
+  std::vector<int> links;
+
+  Device() = default;
+  Device(const std::string& device_name, const std::string& device_type,
+         const std::string& device_path);
+  bool Init();
+  bool Init(const std::string& device_name, const std::string& device_type,
+            const std::string& device_path);
+};
+
+bool operator==(const Device& lhs, const Device& rhs);
+
+struct DedicatedResourceInNode {
+  using SlotType = std::string;
+
+  std::unordered_map<std::string, std::set<SlotType>> name_slots_map;
+  DedicatedResourceInNode& operator+=(const DedicatedResourceInNode& rhs);
+  DedicatedResourceInNode& operator-=(const DedicatedResourceInNode& rhs);
+  std::set<SlotType>& operator[](const std::string& device_name);
+  bool empty() const;
+  // this >= other
+  bool compareGE(
+      const std::unordered_map<
+          std::string,
+          std::pair<uint64_t, std::unordered_map<std::string, uint64_t>>>&
+          other,
+      const std::unordered_map<DedicatedResourceInNode::SlotType, std::string>&
+          slot_2_type_map) const;
+};
+
+bool operator<=(const DedicatedResourceInNode& lhs,
+                const DedicatedResourceInNode& rhs);
+
 /**
  * Model the dedicated resources in a craned node.
  * It contains GPU, NIC, etc.
  */
-struct DedicatedResource {};  // Todo: Crane GRES
+struct DedicatedResource {
+  std::unordered_map<std::string, DedicatedResourceInNode> craned_id_gres_map;
+  DedicatedResource() = default;
+  explicit DedicatedResource(const crane::grpc::DedicatedResource& rhs);
+  DedicatedResource& operator+=(const DedicatedResource& rhs);
+  DedicatedResource& operator-=(const DedicatedResource& rhs);
+  DedicatedResourceInNode& operator[](const std::string& craned_id);
+  DedicatedResourceInNode& at(const std::string& craned_id);
+  const DedicatedResourceInNode& at(const std::string& craned_id) const;
+  bool Empty() const;
+  crane::grpc::DedicatedResource GenerateGrpcType() const;
+};
+
+bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs);
+bool operator<(const DedicatedResource& lhs, const DedicatedResource& rhs);
+bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs);
 
 /**
  * When a task is allocated a resource UUID, it holds one instance of Resources
@@ -174,6 +244,7 @@ struct DedicatedResource {};  // Todo: Crane GRES
  */
 struct Resources {
   AllocatableResource allocatable_resource;
+  DedicatedResource dedicated_resource;
 
   Resources() = default;
 
@@ -182,6 +253,7 @@ struct Resources {
 
   Resources& operator+=(const AllocatableResource& rhs);
   Resources& operator-=(const AllocatableResource& rhs);
+  Resources operator+(const DedicatedResource& rhs) const;
 };
 
 bool operator<=(const Resources& lhs, const Resources& rhs);

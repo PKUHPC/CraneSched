@@ -222,9 +222,18 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_cwd(task.task_to_ctld().cwd());
     task_it->set_username(task.persisted_part().username());
     task_it->set_qos(task.task_to_ctld().qos());  // so as qos
-
-    task_it->set_alloc_cpu(task.task_to_ctld().cpus_per_task() *
-                           task.task_to_ctld().node_num());
+    task_it->set_mem_per_node(task.task_to_ctld()
+                                  .resources()
+                                  .allocatable_resource()
+                                  .memory_sw_limit_bytes());
+    task_it->set_cpu_per_node(task.task_to_ctld().cpus_per_task());
+    for (const auto &[device_name, device_type_count_map] :
+         task.task_to_ctld().gres_count_map()) {
+      (*task_it->mutable_gres_per_node())[device_name]
+          .mutable_device_count_map()
+          ->insert(device_type_count_map.device_count_map().begin(),
+                   device_type_count_map.device_count_map().end());
+    }
     task_it->set_exit_code(task.persisted_part().exit_code());
 
     task_it->set_status(task.persisted_part().status());
@@ -382,8 +391,16 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_username(task->PersistedPart().username());
     task_it->set_qos(task->qos);
 
-    task_it->set_alloc_cpu(task->resources.allocatable_resource.cpu_count *
-                           task->node_num);
+    task_it->set_cpu_per_node(task->cpus_per_task);
+    task_it->set_mem_per_node(
+        task->resources.allocatable_resource.memory_sw_bytes);
+    for (const auto &[device_name, device_type_count_map] :
+         task->request_gres) {
+      (*task_it->mutable_gres_per_node())[device_name]
+          .mutable_device_count_map()
+          ->insert(device_type_count_map.second.begin(),
+                   device_type_count_map.second.end());
+    }
     task_it->set_exit_code(task->ExitCode());
 
     task_it->set_status(task->Status());
