@@ -30,5 +30,10 @@ class AllocatableResourceAllocator {
   static bool Allocate(const crane::grpc::AllocatableResource& resource,
                        util::Cgroup* cg);
 };
+class DedicatedResourceAllocator {
+ public:
+  static bool Allocate(const crane::grpc::DedicatedResource& request_resource,
+                       util::Cgroup* cg);
+};
 
 }  // namespace Craned

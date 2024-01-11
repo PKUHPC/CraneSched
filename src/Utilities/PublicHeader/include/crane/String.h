@@ -68,4 +68,13 @@ std::string HostNameListToStr(T const &host_list)
   }
 }
 
+std::string CudaVisibleDevices(const uint64_t count);
+
+std::string ReadableDevice(const Device &device);
+
+std::string ReadableGres(const DedicatedResource &dedicated_resource);
+std::string ReadableGres(
+    const DedicatedResource &dedicated_resource,
+    const std::unordered_map<DedicatedResourceInNode::SlotType, std::string>
+        &slot_to_type_map);
 }  // namespace util

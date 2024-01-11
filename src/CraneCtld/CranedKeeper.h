@@ -52,6 +52,10 @@ class CranedStub {
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
+  CraneErr QueryActualGres(
+      std::unordered_map<std::string, std::set<std::string>> *resource,
+      std::unordered_map<std::string, std::string> *slot_2_name_type_map);
+
   bool Invalid() const { return m_invalid_; }
 
  private:

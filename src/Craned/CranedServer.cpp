@@ -618,7 +618,6 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
         "ssh client with remote port {} belongs to task #{}. "
         "Moving this ssh session process into the task's cgroup",
         request->ssh_remote_port(), reply_from_remote_service.task_id());
-
     return Status::OK;
   } else {
     TaskInfoOfUid info{};
@@ -684,6 +683,23 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
       request->task_id(), absl::Seconds(request->time_limit_seconds()));
   response->set_ok(ok);
 
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::QueryActualGres(
+    grpc::ServerContext *context,
+    const ::crane::grpc::QueryActualGresRequest *request,
+    crane::grpc::QueryActualGresReply *response) {
+  const auto &dedicated_resource =
+      g_config.CranedNodes[g_config.CranedIdOfThisNode]
+          ->dedicated_resource.GenerateGrpcType();
+  response->mutable_slot_to_type_map()->insert(
+      g_config.CranedNodes[g_config.CranedIdOfThisNode]
+          ->slot_to_type_map.begin(),
+      g_config.CranedNodes[g_config.CranedIdOfThisNode]
+          ->slot_to_type_map.end());
+  response->mutable_dedicated_resource()->CopyFrom(dedicated_resource);
+  response->set_ok(true);
   return Status::OK;
 }
 

@@ -16,6 +16,8 @@
 
 #include "CranedMetaContainer.h"
 
+#include "CranedKeeper.h"
+
 namespace Ctld {
 
 void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
@@ -44,6 +46,13 @@ void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
     part_global_meta.m_resource_avail_ += node_meta->res_total;
     part_global_meta.alive_craned_cnt++;
   }
+  g_thread_pool->push_task([this, craned_id]() {
+    auto* stub = g_craned_keeper->GetCranedStub(craned_id);
+    std::unordered_map<std::string, std::set<std::string>> resources;
+    std::unordered_map<std::string, std::string> slot_2_type_map;
+    stub->QueryActualGres(&resources, &slot_2_type_map);
+    this->AddDedicatedResource(craned_id, resources, slot_2_type_map);
+  });
 }
 
 void CranedMetaContainerSimpleImpl::CranedDown(const CranedId& craned_id) {
@@ -75,8 +84,15 @@ void CranedMetaContainerSimpleImpl::CranedDown(const CranedId& craned_id) {
     part_global_meta.alive_craned_cnt--;
   }
 
+  node_meta->slot_to_type_map.clear();
+  node_meta->res_total.dedicated_resource -=
+      node_meta->res_total.dedicated_resource;
+
+  node_meta->res_avail.allocatable_resource +=
+      node_meta->res_in_use.allocatable_resource;
+  node_meta->res_avail.dedicated_resource -=
+      node_meta->res_avail.dedicated_resource;
   // Set the rse_in_use of dead craned to 0
-  node_meta->res_avail += node_meta->res_in_use;
   node_meta->res_in_use -= node_meta->res_in_use;
   node_meta->running_task_resource_map.clear();
 }
@@ -130,14 +146,26 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
   node_meta->running_task_resource_map.emplace(task_id, resources);
-  node_meta->res_avail -= resources;
-  node_meta->res_in_use += resources;
+  node_meta->res_avail.allocatable_resource -= resources.allocatable_resource;
+  node_meta->res_in_use.allocatable_resource += resources.allocatable_resource;
+  if (resources.dedicated_resource.craned_id_gres_map.contains(node_id)) {
+    node_meta->res_avail.dedicated_resource[node_id] -=
+        resources.dedicated_resource.at(node_id);
+    node_meta->res_in_use.dedicated_resource[node_id] +=
+        resources.dedicated_resource.at(node_id);
+  }
 
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
     part_global_meta.m_resource_avail_ -= resources;
     part_global_meta.m_resource_in_use_ += resources;
+    if (resources.dedicated_resource.craned_id_gres_map.contains(node_id)) {
+      part_global_meta.m_resource_avail_.dedicated_resource[node_id] -=
+          resources.dedicated_resource.at(node_id);
+      part_global_meta.m_resource_in_use_.dedicated_resource[node_id] +=
+          resources.dedicated_resource.at(node_id);
+    }
   }
 }
 
@@ -176,14 +204,31 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId craned_id,
   }
   Resources const& resources = resource_iter->second;
 
-  node_meta->res_avail += resources;
-  node_meta->res_in_use -= resources;
+  node_meta->res_avail.allocatable_resource += resources.allocatable_resource;
+  node_meta->res_in_use.allocatable_resource -= resources.allocatable_resource;
+
+  if (resources.dedicated_resource.craned_id_gres_map.contains(craned_id)) {
+    node_meta->res_avail.dedicated_resource[craned_id] +=
+        resources.dedicated_resource.at(craned_id);
+    node_meta->res_in_use.dedicated_resource[craned_id] -=
+        resources.dedicated_resource.at(craned_id);
+  }
 
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
-    part_global_meta.m_resource_avail_ += resources;
-    part_global_meta.m_resource_in_use_ -= resources;
+
+    part_global_meta.m_resource_avail_.allocatable_resource +=
+        resources.allocatable_resource;
+    part_global_meta.m_resource_in_use_.allocatable_resource -=
+        resources.allocatable_resource;
+
+    if (resources.dedicated_resource.craned_id_gres_map.contains(craned_id)) {
+      part_global_meta.m_resource_avail_.dedicated_resource[craned_id] +=
+          resources.dedicated_resource.at(craned_id);
+      part_global_meta.m_resource_in_use_.dedicated_resource[craned_id] -=
+          resources.dedicated_resource.at(craned_id);
+    }
   }
 
   node_meta->running_task_resource_map.erase(resource_iter);
@@ -205,11 +250,15 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
         config.Nodes.at(craned_name)->memory_bytes;
     static_meta.res.allocatable_resource.memory_sw_bytes =
         config.Nodes.at(craned_name)->memory_bytes;
+    static_meta.res.dedicated_resource =
+        config.Nodes.at(craned_name)->dedicated_resource;
     static_meta.hostname = craned_name;
     static_meta.port = std::strtoul(kCranedDefaultPort, nullptr, 10);
 
-    craned_meta.res_total = static_meta.res;
-    craned_meta.res_avail = static_meta.res;
+    craned_meta.res_total.allocatable_resource =
+        static_meta.res.allocatable_resource;
+    craned_meta.res_avail.allocatable_resource =
+        static_meta.res.allocatable_resource;
   }
 
   for (auto&& [part_name, partition] : config.Partitions) {
@@ -228,12 +277,13 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
       part_meta.craned_ids.emplace(craned_name);
 
       CRANE_DEBUG(
-          "Add the resource of Craned {} (cpu: {}, mem: {}) to partition "
-          "[{}]'s global resource.",
+          "Add the resource of Craned {} (cpu: {}, mem: {}, gres: {}) to "
+          "partition [{}]'s global resource.",
           craned_name,
           craned_meta.static_meta.res.allocatable_resource.cpu_count,
           util::ReadableMemory(
               craned_meta.static_meta.res.allocatable_resource.memory_bytes),
+          util::ReadableGres(craned_meta.static_meta.res.dedicated_resource),
           part_name);
 
       part_res += craned_meta.static_meta.res;
@@ -245,14 +295,16 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
     part_meta.partition_global_meta.nodelist_str = partition.nodelist_str;
 
     CRANE_DEBUG(
-        "partition [{}]'s Global resource now: cpu: {}, mem: {}). It has {} "
-        "craneds.",
+        "partition [{}]'s Global resource now: (cpu: {}, mem: {}, gres: {}). "
+        "It has {} craneds.",
         part_name,
         part_meta.partition_global_meta.m_resource_total_inc_dead_
             .allocatable_resource.cpu_count,
         util::ReadableMemory(
             part_meta.partition_global_meta.m_resource_total_inc_dead_
                 .allocatable_resource.memory_bytes),
+        util::ReadableGres(part_meta.partition_global_meta
+                               .m_resource_total_inc_dead_.dedicated_resource),
         part_meta.partition_global_meta.node_cnt);
   }
 
@@ -274,6 +326,10 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     auto& alloc_res_in_use = craned_meta->res_in_use.allocatable_resource;
     auto& alloc_res_avail = craned_meta->res_avail.allocatable_resource;
 
+    auto& dedicated_res_total = craned_meta->res_total.dedicated_resource;
+    auto& dedicated_res_in_use = craned_meta->res_in_use.dedicated_resource;
+    auto& dedicated_res_avail = craned_meta->res_avail.dedicated_resource;
+
     craned_info->set_hostname(craned_meta->static_meta.hostname);
     craned_info->set_cpu(alloc_res_total.cpu_count);
     craned_info->set_alloc_cpu(alloc_res_in_use.cpu_count);
@@ -283,6 +339,46 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     craned_info->set_free_mem(alloc_res_avail.memory_bytes);
     craned_info->set_running_task_num(
         craned_meta->running_task_resource_map.size());
+
+    if (dedicated_res_total.craned_id_gres_map.contains(craned_index)) {
+      auto* mutable_device_map = craned_info->mutable_device();
+      for (const auto& [device_name, device_slots] :
+           dedicated_res_total.craned_id_gres_map.at(craned_index)
+               .name_slots_map) {
+        for (const auto& slot : device_slots) {
+          const auto& device_type = craned_meta->slot_to_type_map.at(slot);
+          (*(*mutable_device_map)[device_name]
+                .mutable_device_count_map())[device_type] += 1;
+        }
+      }
+    }
+
+    if (dedicated_res_in_use.craned_id_gres_map.contains(craned_index)) {
+      auto* mutable_alloc_device_map = craned_info->mutable_alloc_device();
+      for (const auto& [device_name, device_slots] :
+           dedicated_res_in_use.craned_id_gres_map.at(craned_index)
+               .name_slots_map) {
+        for (const auto& slot : device_slots) {
+          const auto& device_type = craned_meta->slot_to_type_map.at(slot);
+          (*(*mutable_alloc_device_map)[device_name]
+                .mutable_device_count_map())[device_type] += 1;
+        }
+      }
+    }
+
+    if (dedicated_res_avail.craned_id_gres_map.contains(craned_index)) {
+      auto* mutable_avail_device_map = craned_info->mutable_avail_device();
+      for (const auto& [device_name, device_slots] :
+           dedicated_res_avail.craned_id_gres_map.at(craned_index)
+               .name_slots_map) {
+        for (const auto& slot : device_slots) {
+          const auto& device_type = craned_meta->slot_to_type_map.at(slot);
+          (*(*mutable_avail_device_map)[device_name]
+                .mutable_device_count_map())[device_type] += 1;
+        }
+      }
+    }
+
     if (craned_meta->alive)
       craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
     else
@@ -292,7 +388,6 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
         craned_meta->static_meta.partition_ids.begin(),
         craned_meta->static_meta.partition_ids.end());
   }
-
   return reply;
 }
 
@@ -312,6 +407,10 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   auto& alloc_res_in_use = craned_meta->res_in_use.allocatable_resource;
   auto& alloc_res_avail = craned_meta->res_avail.allocatable_resource;
 
+  auto& dedicated_res_total = craned_meta->res_total.dedicated_resource;
+  auto& dedicated_res_in_use = craned_meta->res_in_use.dedicated_resource;
+  auto& dedicated_res_avail = craned_meta->res_avail.dedicated_resource;
+
   craned_info->set_hostname(craned_meta->static_meta.hostname);
   craned_info->set_cpu(alloc_res_total.cpu_count);
   craned_info->set_alloc_cpu(alloc_res_in_use.cpu_count);
@@ -321,6 +420,43 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   craned_info->set_free_mem(alloc_res_avail.memory_bytes);
   craned_info->set_running_task_num(
       craned_meta->running_task_resource_map.size());
+
+  if (dedicated_res_total.craned_id_gres_map.contains(node_name)) {
+    auto* mutable_device_map = craned_info->mutable_device();
+    for (const auto& [device_name, device_slots] :
+         dedicated_res_total.craned_id_gres_map.at(node_name).name_slots_map) {
+      for (const auto& slot : device_slots) {
+        const auto& device_type = craned_meta->slot_to_type_map.at(slot);
+        (*(*mutable_device_map)[device_name]
+              .mutable_device_count_map())[device_type] += 1;
+      }
+    }
+  }
+
+  if (dedicated_res_in_use.craned_id_gres_map.contains(node_name)) {
+    auto* mutable_alloc_device_map = craned_info->mutable_alloc_device();
+    for (const auto& [device_name, device_slots] :
+         dedicated_res_in_use.craned_id_gres_map.at(node_name).name_slots_map) {
+      for (const auto& slot : device_slots) {
+        const auto& device_type = craned_meta->slot_to_type_map.at(slot);
+        (*(*mutable_alloc_device_map)[device_name]
+              .mutable_device_count_map())[device_type] += 1;
+      }
+    }
+  }
+
+  if (dedicated_res_avail.craned_id_gres_map.contains(node_name)) {
+    auto* mutable_avail_device_map = craned_info->mutable_avail_device();
+    for (const auto& [device_name, device_slots] :
+         dedicated_res_avail.craned_id_gres_map.at(node_name).name_slots_map) {
+      for (const auto& slot : device_slots) {
+        const auto& device_type = craned_meta->slot_to_type_map.at(slot);
+        (*(*mutable_avail_device_map)[device_name]
+              .mutable_device_count_map())[device_type] += 1;
+      }
+    }
+  }
+
   if (craned_meta->alive)
     craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
   else
@@ -368,6 +504,54 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
       part_info->set_state(crane::grpc::PartitionState::PARTITION_DOWN);
 
     part_info->set_hostlist(part_meta->partition_global_meta.nodelist_str);
+    auto& craned_map = *craned_meta_map_.GetMapConstSharedPtr();
+    const auto& craned_ids = part_meta->craned_ids;
+    auto* mutable_device_map = part_info->mutable_device();
+    auto* mutable_alloc_device_map = part_info->mutable_alloc_device();
+    auto* mutable_avail_device_map = part_info->mutable_avail_device();
+
+    for (const auto& craned_id : craned_ids) {
+      const auto& craned_meta = craned_map.at(craned_id).GetExclusivePtr();
+      const auto& dedicated_res_total =
+          craned_meta->res_total.dedicated_resource;
+      const auto& dedicated_res_in_use =
+          craned_meta->res_in_use.dedicated_resource;
+      const auto& dedicated_res_avail =
+          craned_meta->res_avail.dedicated_resource;
+      if (dedicated_res_total.craned_id_gres_map.contains(craned_id)) {
+        for (const auto& [device_name, device_slots] :
+             dedicated_res_total.craned_id_gres_map.at(craned_id)
+                 .name_slots_map) {
+          for (const auto& slot : device_slots) {
+            const auto& device_type = craned_meta->slot_to_type_map.at(slot);
+            (*(*mutable_device_map)[device_name]
+                  .mutable_device_count_map())[device_type] += 1;
+          }
+        }
+      }
+      if (dedicated_res_in_use.craned_id_gres_map.contains(craned_id)) {
+        for (const auto& [device_name, device_slots] :
+             dedicated_res_in_use.craned_id_gres_map.at(craned_id)
+                 .name_slots_map) {
+          for (const auto& slot : device_slots) {
+            const auto& device_type = craned_meta->slot_to_type_map.at(slot);
+            (*(*mutable_alloc_device_map)[device_name]
+                  .mutable_device_count_map())[device_type] += 1;
+          }
+        }
+      }
+      if (dedicated_res_avail.craned_id_gres_map.contains(craned_id)) {
+        for (const auto& [device_name, device_slots] :
+             dedicated_res_avail.craned_id_gres_map.at(craned_id)
+                 .name_slots_map) {
+          for (const auto& slot : device_slots) {
+            const auto& device_type = craned_meta->slot_to_type_map.at(slot);
+            (*(*mutable_avail_device_map)[device_name]
+                  .mutable_device_count_map())[device_type] += 1;
+          }
+        }
+      }
+    }
   }
 
   return reply;
@@ -406,6 +590,52 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
     part_info->set_state(crane::grpc::PartitionState::PARTITION_DOWN);
 
   part_info->set_hostlist(part_meta->partition_global_meta.nodelist_str);
+
+  const auto& craned_ids = part_meta->craned_ids;
+  auto& craned_map = *craned_meta_map_.GetMapConstSharedPtr();
+  auto* mutable_device_map = part_info->mutable_device();
+  auto* mutable_alloc_device_map = part_info->mutable_alloc_device();
+  auto* mutable_avail_device_map = part_info->mutable_avail_device();
+  for (const auto& craned_id : craned_ids) {
+    const auto& craned_meta = craned_map.at(craned_id).GetExclusivePtr();
+    const auto& dedicated_res_total = craned_meta->res_total.dedicated_resource;
+    const auto& dedicated_res_in_use =
+        craned_meta->res_in_use.dedicated_resource;
+    const auto& dedicated_res_avail = craned_meta->res_avail.dedicated_resource;
+    if (dedicated_res_total.craned_id_gres_map.contains(craned_id)) {
+      for (const auto& [device_name, device_slots] :
+           dedicated_res_total.craned_id_gres_map.at(craned_id)
+               .name_slots_map) {
+        for (const auto& slot : device_slots) {
+          const auto& device_type = craned_meta->slot_to_type_map.at(slot);
+          (*(*mutable_device_map)[device_name]
+                .mutable_device_count_map())[device_type] += 1;
+        }
+      }
+    }
+    if (dedicated_res_in_use.craned_id_gres_map.contains(craned_id)) {
+      for (const auto& [device_name, device_slots] :
+           dedicated_res_in_use.craned_id_gres_map.at(craned_id)
+               .name_slots_map) {
+        for (const auto& slot : device_slots) {
+          const auto& device_type = craned_meta->slot_to_type_map.at(slot);
+          (*(*mutable_alloc_device_map)[device_name]
+                .mutable_device_count_map())[device_type] += 1;
+        }
+      }
+    }
+    if (dedicated_res_avail.craned_id_gres_map.contains(craned_id)) {
+      for (const auto& [device_name, device_slots] :
+           dedicated_res_avail.craned_id_gres_map.at(craned_id)
+               .name_slots_map) {
+        for (const auto& slot : device_slots) {
+          const auto& device_type = craned_meta->slot_to_type_map.at(slot);
+          (*(*mutable_avail_device_map)[device_name]
+                .mutable_device_count_map())[device_type] += 1;
+        }
+      }
+    }
+  }
 
   return reply;
 }
@@ -555,6 +785,74 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   });
 
   return reply;
+}
+
+void CranedMetaContainerSimpleImpl::AddDedicatedResource(
+    const CranedId& node_id,
+    const std::unordered_map<std::string, std::set<std::string>>& resource,
+    const std::unordered_map<std::string, std::string>& slot_2_type_map) {
+  if (!craned_meta_map_.Contains(node_id)) {
+    CRANE_ERROR("Try to free resource from an unknown craned {}", node_id);
+    return;
+  }
+
+  auto& part_ids = craned_id_part_ids_map_.at(node_id);
+
+  std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
+  part_meta_ptrs.reserve(part_ids.size());
+
+  auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
+
+  // Acquire all partition locks first.
+  for (PartitionId const& part_id : part_ids)
+    part_meta_ptrs.emplace_back(
+        raw_part_metas_map_->at(part_id).GetExclusivePtr());
+
+  // Then acquire craned meta lock.
+  auto node_meta = craned_meta_map_[node_id];
+
+  auto& node_dedicated_res_total = node_meta->res_total.dedicated_resource;
+  auto& node_dedicated_res_avail = node_meta->res_avail.dedicated_resource;
+
+  // find how many resource should add,under the constraint of configured count
+  const auto& constraint = node_meta->static_meta.res.dedicated_resource;
+  DedicatedResource res_should_add;
+
+  for (const auto& [device_name, slot_set] : resource) {
+    if (!constraint.craned_id_gres_map.at(node_id).name_slots_map.contains(
+            device_name)) {
+      CRANE_TRACE("Node #{} try to report {},which is no in the config of ctld",
+                  node_id, device_name);
+      continue;
+    }
+    const auto& this_constraint =
+        constraint.craned_id_gres_map.at(node_id).name_slots_map.at(
+            device_name);
+    const auto& this_avail_current =
+        node_dedicated_res_avail.craned_id_gres_map[node_id]
+            .name_slots_map[device_name];
+    auto& this_slot_should_add =
+        res_should_add.craned_id_gres_map[node_id].name_slots_map[device_name];
+    std::set<std::string> tmp;
+    std::ranges::set_difference(this_constraint, this_avail_current,
+                                std::inserter(tmp, tmp.begin()));
+    std::ranges::set_intersection(
+        tmp, slot_set,
+        std::inserter(this_slot_should_add, this_slot_should_add.begin()));
+  }
+  for (const auto& entry : slot_2_type_map) {
+    node_meta->slot_to_type_map.emplace(entry);
+  }
+
+  node_dedicated_res_total += res_should_add;
+  node_dedicated_res_avail += res_should_add;
+
+  for (auto& partition_meta : part_meta_ptrs) {
+    PartitionGlobalMeta& part_global_meta =
+        partition_meta->partition_global_meta;
+    part_global_meta.m_resource_total_.dedicated_resource += res_should_add;
+    part_global_meta.m_resource_avail_.dedicated_resource += res_should_add;
+  }
 }
 
 }  // namespace Ctld

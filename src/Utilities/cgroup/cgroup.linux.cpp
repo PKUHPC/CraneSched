@@ -235,13 +235,13 @@ std::shared_ptr<Cgroup> CgroupUtil::CreateOrOpen(
                             has_cgroup, changed_cgroup)) {
     return nullptr;
   }
-  //  if ((preferred_controllers & Controller::DEVICES_CONTROLLER) &&
-  //      initialize_controller(
-  //          *native_cgroup, Controller::DEVICES_CONTROLLER,
-  //          required_controllers & Controller::DEVICES_CONTROLLER, has_cgroup,
-  //          changed_cgroup)) {
-  //    return nullptr;
-  //  }
+  if ((preferred_controllers & Controller::DEVICES_CONTROLLER) &&
+      initialize_controller(
+          *native_cgroup, Controller::DEVICES_CONTROLLER,
+          required_controllers & Controller::DEVICES_CONTROLLER, has_cgroup,
+          changed_cgroup)) {
+    return nullptr;
+  }
 
   int err;
   if (!has_cgroup) {
@@ -614,6 +614,50 @@ bool Cgroup::ModifyCgroup_(CgroupConstant::ControllerFile controller_file) {
   return true;
 }
 
+bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
+                               CgroupConstant::ControllerFile controller_file,
+                               const std::vector<std::string> &strs) {
+  if (!CgroupUtil::Mounted(controller)) {
+    CRANE_WARN("Unable to set {} because cgroup {} is not mounted.\n",
+               CgroupConstant::GetControllerFileStringView(controller_file),
+               CgroupConstant::GetControllerStringView(controller));
+    return false;
+  }
+
+  int err;
+
+  struct cgroup_controller *cg_controller;
+
+  if ((cg_controller = cgroup_get_controller(
+           m_cgroup_,
+           CgroupConstant::GetControllerStringView(controller).data())) ==
+      nullptr) {
+    CRANE_WARN("Unable to get cgroup {} controller for {}.\n",
+               CgroupConstant::GetControllerStringView(controller),
+               m_cgroup_path_);
+    return false;
+  }
+  for (const auto &str : strs) {
+    if ((err = cgroup_set_value_string(
+             cg_controller,
+             CgroupConstant::GetControllerFileStringView(controller_file)
+                 .data(),
+             str.c_str()))) {
+      CRANE_WARN("Unable to add string for {}: {} {}\n", m_cgroup_path_, err,
+                 cgroup_strerror(err));
+      return false;
+    }
+    // Commit cgroup modifications.
+    if ((err = cgroup_modify_cgroup(m_cgroup_))) {
+      CRANE_WARN("Unable to commit {} for cgroup {}: {} {}\n",
+                 CgroupConstant::GetControllerFileStringView(controller_file),
+                 m_cgroup_path_, err, cgroup_strerror(err));
+      return false;
+    }
+  }
+  return true;
+}
+
 bool Cgroup::KillAllProcesses() {
   using namespace CgroupConstant::Internal;
 
@@ -664,6 +708,30 @@ bool Cgroup::Empty() {
                 cgroup_strerror(rc));
     return false;
   }
+}
+bool Cgroup::SetDeviceAccess(const std::vector<Device> &devices, bool set_read,
+                             bool set_write, bool set_mknod) {
+  std::string op;
+  if (set_read) op += "r";
+  if (set_write) op += "w";
+  if (set_mknod) op += "m";
+  std::vector<std::string> allow_limits;
+  std::vector<std::string> deny_limits;
+  for (const auto &device : devices) {
+    if (device.alloc) {
+      allow_limits.emplace_back(fmt::format("{} {}:{} {}", device.op_type,
+                                            device.major, device.minor, op));
+    } else {
+      deny_limits.emplace_back(fmt::format("{} {}:{} {}", device.op_type,
+                                           device.major, device.minor, op));
+    }
+  }
+  return SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
+                           CgroupConstant::ControllerFile::DEVICES_ALLOW,
+                           allow_limits) &&
+         SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
+                           CgroupConstant::ControllerFile::DEVICES_DENY,
+                           deny_limits);
 }
 
 }  // namespace util

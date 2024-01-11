@@ -561,6 +561,15 @@ message StreamCtldReply {
   }
 }
 
+message QueryActualGresRequest{
+}
+
+message QueryActualGresReply{
+  bool ok = 1;
+  DedicatedResource dedicated_resource = 2;
+  map <string, string> slot_to_type_map = 3;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -616,6 +625,7 @@ service Craned {
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns(CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTask(ReleaseCgroupForTaskRequest) returns(ReleaseCgroupForTaskReply);
 
+  rpc QueryActualGres(QueryActualGresRequest) returns(QueryActualGresReply);
   /*
   If the task is an interactive task, the resource uuid is also revoked.
    If there's no process in this interactive task, just deallocate all the resources.
