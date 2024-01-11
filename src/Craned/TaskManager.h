@@ -32,6 +32,7 @@
 #include <uvw.hpp>
 
 #include "CtldClient.h"
+#include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
@@ -370,7 +371,8 @@ class TaskManager {
   absl::flat_hash_map<uint32_t /*pid*/, TaskInstance*> m_pid_task_map_;
   absl::flat_hash_map<uint32_t /*pid*/, ProcessInstance*> m_pid_proc_map_;
 
-  absl::node_hash_map<uint32_t /*task id*/, std::shared_ptr<util::Cgroup>>
+  util::AtomicHashMap<absl::flat_hash_map, uint32_t /*task id*/,
+                      std::shared_ptr<util::Cgroup>>
       m_task_id_to_cg_map_;
   absl::flat_hash_map<uid_t /*uid*/, absl::flat_hash_set<uint32_t /*task id*/>>
       m_uid_to_task_ids_map_;

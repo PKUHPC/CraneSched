@@ -722,8 +722,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     g_thread_pool->push_task([this_, instance, task_id]() {
       this_->m_mtx_.Lock();
 
-      auto cg_iter = this_->m_task_id_to_cg_map_.find(task_id);
-      if (cg_iter == this_->m_task_id_to_cg_map_.end()) {
+      if (!this_->m_task_id_to_cg_map_.Contains(task_id)) {
         this_->m_mtx_.Unlock();
         CRANE_ERROR("Failed to find created cgroup for task #{}", task_id);
         this_->EvActivateTaskStatusChange_(
@@ -740,16 +739,18 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
       // Lazy creation of cgroup
       // Todo: Lock on iterator may be required here!
-      if (!cg_iter->second) {
+
+      auto& cg_ptr = *(this_->m_task_id_to_cg_map_[task_id]);
+      if (!cg_ptr) {
         instance->cgroup_path = CgroupStrByTaskId_(task_id);
-        cg_iter->second = util::CgroupUtil::CreateOrOpen(
+        cg_ptr = util::CgroupUtil::CreateOrOpen(
             instance->cgroup_path,
             util::NO_CONTROLLER_FLAG |
                 util::CgroupConstant::Controller::CPU_CONTROLLER |
                 util::CgroupConstant::Controller::MEMORY_CONTROLLER,
             util::NO_CONTROLLER_FLAG, false);
 
-        if (!cg_iter->second) {
+        if (!cg_ptr) {
           CRANE_ERROR("Failed to created cgroup for task #{}", task_id);
           this_->EvActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::Failed,
@@ -758,7 +759,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
           return;
         }
       }
-      instance->cgroup = cg_iter->second.get();
+      instance->cgroup = cg_ptr.get();
 
       instance->pwd_entry.Init(instance->task.uid());
       if (!instance->pwd_entry.Valid()) {
@@ -1119,7 +1120,7 @@ bool TaskManager::CreateCgroupsAsync(
     CRANE_TRACE("Create lazily allocated cgroups for task #{}, uid {}", task_id,
                 uid);
 
-    this->m_task_id_to_cg_map_.emplace(task_id, nullptr);
+    this->m_task_id_to_cg_map_.Emplace(task_id, nullptr);
     this->m_uid_to_task_ids_map_[uid].emplace(task_id);
   }
   this->m_mtx_.Unlock();
@@ -1140,8 +1141,7 @@ bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
     this->m_uid_to_task_ids_map_.erase(uid);
   }
 
-  auto iter = this->m_task_id_to_cg_map_.find(task_id);
-  if (iter == this->m_task_id_to_cg_map_.end()) {
+  if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
     this->m_mtx_.Unlock();
     CRANE_DEBUG(
         "Trying to release a non-existent cgroup for task #{}. Ignoring it...",
@@ -1154,8 +1154,9 @@ bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
     // let gRPC call return and put the termination work into the thread pool
     // to avoid blocking the event loop of TaskManager.
     // Kind of async behavior.
-    std::shared_ptr<util::Cgroup> cgroup = iter->second;
-    this->m_task_id_to_cg_map_.erase(iter);
+    std::shared_ptr<util::Cgroup> cgroup =
+        *(this->m_task_id_to_cg_map_[task_id]);
+    this->m_task_id_to_cg_map_.Erase(task_id);
     this->m_mtx_.Unlock();
 
     if (cgroup) {
@@ -1293,17 +1294,17 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
 bool TaskManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
   this->m_mtx_.Lock();
 
-  auto iter = this->m_task_id_to_cg_map_.find(task_id);
-  if (iter == this->m_task_id_to_cg_map_.end()) {
+  if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
     this->m_mtx_.Unlock();
     return false;
   }
 
   this->m_mtx_.Unlock();
 
-  if (!iter->second) {
+  auto& cg_ptr = *(this->m_task_id_to_cg_map_[task_id]);
+  if (!cg_ptr) {
     auto cgroup_path = CgroupStrByTaskId_(task_id);
-    iter->second = util::CgroupUtil::CreateOrOpen(
+    cg_ptr = util::CgroupUtil::CreateOrOpen(
         cgroup_path,
         util::NO_CONTROLLER_FLAG |
             util::CgroupConstant::Controller::CPU_CONTROLLER |
@@ -1312,7 +1313,7 @@ bool TaskManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
         util::NO_CONTROLLER_FLAG, false);
   }
 
-  return iter->second->MigrateProcIn(pid);
+  return cg_ptr->MigrateProcIn(pid);
 }
 
 }  // namespace Craned

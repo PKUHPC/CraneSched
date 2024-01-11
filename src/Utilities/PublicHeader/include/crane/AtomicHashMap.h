@@ -168,6 +168,19 @@ class AtomicHashMap {
     return MapSharedPtr{&m_value_map_, &m_global_rw_mutex_};
   }
 
+  template <typename... Args>
+  void Emplace(Args&&... args) {
+    m_global_rw_mutex_.lock();
+    m_value_map_.emplace(std::forward<Args>(args)...);
+    m_global_rw_mutex_.unlock();
+  }
+
+  void Erase(const Key& key) {
+    m_global_rw_mutex_.lock();
+    m_value_map_.erase(key);
+    m_global_rw_mutex_.unlock();
+  }
+
  private:
   RawMap m_value_map_;
   rw_mutex m_global_rw_mutex_;
