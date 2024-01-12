@@ -36,6 +36,10 @@ option(CRANE_NATIVE_ARCH_OPT "Enable -march=native compile option" ON)
 option(CRANE_USE_GITEE_SOURCE "Enable the Gitee repository as the download source" ON)
 
 option(CRANE_FULL_DYNAMIC "Enable dynamic libs" ON)
+
+option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" OFF)
+
+option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
 # Options end here -------------------------------------------------------------------------------
 
 set(CMAKE_CXX_STANDARD 20)
@@ -67,6 +71,18 @@ if (${CRANE_FULL_DYNAMIC})
     set(BUILD_SHARED_LIBS ON)
 else ()
     set(BUILD_SHARED_LIBS OFF)
+endif ()
+
+if (${CRANE_ADDRESS_SANITIZER})
+    message(STATUS "address_sanitizer is enabled")
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address)
+endif ()
+
+if (${CRANE_THREAD_SANITIZER})
+    message(STATUS "thread_sanitizer is enabled")
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=thread)
 endif ()
 
 # Check LTO support
