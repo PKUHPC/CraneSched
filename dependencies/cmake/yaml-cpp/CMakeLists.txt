@@ -2,6 +2,11 @@ cmake_policy(SET CMP0069 NEW)
 set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 
 include(FetchContent)
+if (BUILD_SHARED_LIBS)
+    set(YAML_BUILD_SHARED_LIBS ON)
+else ()
+    set(YAML_BUILD_SHARED_LIBS OFF)
+endif ()
 
 if (CRANE_USE_GITEE_SOURCE)
     set(YAML_CPP_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/yaml-cpp-yaml-cpp-0.7.0.tar.gz")

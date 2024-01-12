@@ -28,8 +28,14 @@ FetchContent_MakeAvailable(absl)
 FetchContent_GetProperties(absl)
 find_package(absl REQUIRED CONFIG)
 
-set(CARES_SHARED OFF)
-set(CARES_STATIC ON)
+if (BUILD_SHARED_LIBS)
+    set(CARES_SHARED ON)
+    set(CARES_STATIC OFF)
+else ()
+    set(CARES_SHARED OFF)
+    set(CARES_STATIC ON)
+endif ()
+
 FetchContent_Declare(c-ares
         OVERRIDE_FIND_PACKAGE
 
@@ -45,6 +51,12 @@ set(protobuf_BUILD_TESTS OFF)
 set(protobuf_WITH_ZLIB OFF)
 set(protobuf_MSVC_STATIC_RUNTIME OFF)
 set(protobuf_USE_EXTERNAL_GTEST ON)
+#if (BUILD_SHARED_LIBS)
+#    set(protobuf_BUILD_SHARED_LIBS ON)
+#else()
+#    set(protobuf_BUILD_SHARED_LIBS OFF)
+#endif ()
+set(protobuf_BUILD_SHARED_LIBS OFF)
 FetchContent_Declare(protobuf
         OVERRIDE_FIND_PACKAGE
 

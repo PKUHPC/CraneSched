@@ -24,8 +24,8 @@ target_link_libraries(craned
 
         crane_proto_lib
 
-        event_core_static
-        event_pthreads_static
+        dev_event_core
+        dev_event_pthreads
 
         bs_thread_pool
 
@@ -36,7 +36,7 @@ target_link_libraries(craned
         absl::flat_hash_map
         absl::synchronization
 
-        uvw::uvw-static
+        uvw
 
         yaml-cpp
         result

@@ -35,6 +35,7 @@ option(CRANE_NATIVE_ARCH_OPT "Enable -march=native compile option" ON)
 
 option(CRANE_USE_GITEE_SOURCE "Enable the Gitee repository as the download source" ON)
 
+option(CRANE_FULL_DYNAMIC "Enable dynamic libs" ON)
 # Options end here -------------------------------------------------------------------------------
 
 set(CMAKE_CXX_STANDARD 20)
@@ -60,6 +61,12 @@ endif ()
 if (${CRANE_NATIVE_ARCH_OPT})
     message(STATUS "-march=native enabled")
     add_compile_options(-march=native)
+endif ()
+
+if (${CRANE_FULL_DYNAMIC})
+    set(BUILD_SHARED_LIBS ON)
+else ()
+    set(BUILD_SHARED_LIBS OFF)
 endif ()
 
 # Check LTO support
