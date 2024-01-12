@@ -739,8 +739,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
       // Lazy creation of cgroup
       // Todo: Lock on iterator may be required here!
-
-      auto& cg_ptr = *(this_->m_task_id_to_cg_map_[task_id]);
+      auto cg_pptr = this_->m_task_id_to_cg_map_[task_id];
+      auto& cg_ptr = *cg_pptr;
       if (!cg_ptr) {
         instance->cgroup_path = CgroupStrByTaskId_(task_id);
         cg_ptr = util::CgroupUtil::CreateOrOpen(
@@ -1113,7 +1113,6 @@ bool TaskManager::CreateCgroupsAsync(
 
   begin = std::chrono::steady_clock::now();
 
-  this->m_mtx_.Lock();
   for (int i = 0; i < task_id_uid_pairs.size(); i++) {
     auto [task_id, uid] = task_id_uid_pairs[i];
 
@@ -1121,9 +1120,12 @@ bool TaskManager::CreateCgroupsAsync(
                 uid);
 
     this->m_task_id_to_cg_map_.Emplace(task_id, nullptr);
-    this->m_uid_to_task_ids_map_[uid].emplace(task_id);
+    if (!this->m_uid_to_task_ids_map_.Contains(uid))
+      this->m_uid_to_task_ids_map_.Emplace(
+          uid, absl::flat_hash_set<uint32_t>{task_id});
+    else
+      this->m_uid_to_task_ids_map_[uid]->emplace(task_id);
   }
-  this->m_mtx_.Unlock();
 
   end = std::chrono::steady_clock::now();
   CRANE_TRACE("Create cgroups costed {} ms",
@@ -1134,15 +1136,12 @@ bool TaskManager::CreateCgroupsAsync(
 }
 
 bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
-  this->m_mtx_.Lock();
-
-  this->m_uid_to_task_ids_map_[uid].erase(task_id);
-  if (this->m_uid_to_task_ids_map_[uid].empty()) {
-    this->m_uid_to_task_ids_map_.erase(uid);
+  this->m_uid_to_task_ids_map_[uid]->erase(task_id);
+  if (this->m_uid_to_task_ids_map_[uid]->empty()) {
+    this->m_uid_to_task_ids_map_.Erase(uid);
   }
 
   if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
-    this->m_mtx_.Unlock();
     CRANE_DEBUG(
         "Trying to release a non-existent cgroup for task #{}. Ignoring it...",
         task_id);
@@ -1154,10 +1153,11 @@ bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
     // let gRPC call return and put the termination work into the thread pool
     // to avoid blocking the event loop of TaskManager.
     // Kind of async behavior.
+
+    // avoid deadlock by Erase at next line
     std::shared_ptr<util::Cgroup> cgroup =
         *(this->m_task_id_to_cg_map_[task_id]);
     this->m_task_id_to_cg_map_.Erase(task_id);
-    this->m_mtx_.Unlock();
 
     if (cgroup) {
       g_thread_pool->push_task([cgroup] {
@@ -1191,13 +1191,11 @@ bool TaskManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info) {
   info->job_cnt = 0;
   info->cgroup_exists = false;
 
-  this->m_mtx_.Lock();
-  auto iter = this->m_uid_to_task_ids_map_.find(uid);
-  if (iter != this->m_uid_to_task_ids_map_.end()) {
-    info->job_cnt = iter->second.size();
-    info->first_task_id = *iter->second.begin();
+  if (this->m_uid_to_task_ids_map_.Contains(uid)) {
+    auto task_ids = this->m_uid_to_task_ids_map_[uid];
+    info->job_cnt = task_ids->size();
+    info->first_task_id = *task_ids->begin();
   }
-  this->m_mtx_.Unlock();
   return info->job_cnt > 0;
 }
 
@@ -1292,16 +1290,11 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
 }
 
 bool TaskManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
-  this->m_mtx_.Lock();
-
   if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
-    this->m_mtx_.Unlock();
     return false;
   }
-
-  this->m_mtx_.Unlock();
-
-  auto& cg_ptr = *(this->m_task_id_to_cg_map_[task_id]);
+  auto cg_pptr = this->m_task_id_to_cg_map_[task_id];
+  auto cg_ptr = *cg_pptr;
   if (!cg_ptr) {
     auto cgroup_path = CgroupStrByTaskId_(task_id);
     cg_ptr = util::CgroupUtil::CreateOrOpen(
