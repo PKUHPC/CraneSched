@@ -279,15 +279,22 @@ CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
       std::thread(&CranedKeeper::PeriodConnectCranedThreadFunc_, this);
 }
 
-CranedKeeper::~CranedKeeper() {
+CranedKeeper::~CranedKeeper() { Shutdown(); }
+
+void CranedKeeper::Shutdown() {
+  if (m_cq_closed_) return;
+
+  m_cq_closed_ = true;
+
   for (int i = 0; i < m_cq_vec_.size(); i++) {
     util::lock_guard lock(m_cq_mtx_vec_[i]);
     m_cq_vec_[i].Shutdown();
   }
-  m_cq_closed_ = true;
 
   for (auto &cq_thread : m_cq_thread_vec_) cq_thread.join();
   m_period_connect_thread_.join();
+
+  CRANE_TRACE("CranedKeeper has been closed.");
 
   // Dependency order: rpc_cq -> channel_state_cq -> tag pool.
   // Tag pool's destructor will free all trailing tags in cq.
@@ -320,78 +327,25 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
       // CRANE_TRACE("CQ: ok: {}, tag: {}, craned: {}, prev state: {}", ok,
       // tag->type, (void *)craned, craned->m_prev_channel_state_);
 
-      if (ok) {
-        CqTag *next_tag = nullptr;
-        grpc_connectivity_state new_state = craned->m_channel_->GetState(true);
+      CqTag *next_tag = nullptr;
+      grpc_connectivity_state new_state = craned->m_channel_->GetState(true);
 
-        switch (tag->type) {
-          case CqTag::kInitializingCraned:
-            next_tag = InitCranedStateMachine_(
-                (InitializingCranedTagData *)tag->data, new_state);
-            break;
-          case CqTag::kEstablishedCraned:
-            next_tag = EstablishedCranedStateMachine_(craned, new_state);
-            break;
-        }
+      switch (tag->type) {
+        case CqTag::kInitializingCraned:
+          next_tag = InitCranedStateMachine_(
+              (InitializingCranedTagData *)tag->data, new_state);
+          break;
+        case CqTag::kEstablishedCraned:
+          next_tag = EstablishedCranedStateMachine_(craned, new_state);
+          break;
+      }
 
-        if (next_tag) {
-          util::lock_guard lock(m_cq_mtx_vec_[thread_id]);
-          if (!m_cq_closed_) {
-            // CRANE_TRACE("Registering next tag: {}", next_tag->type);
-            auto deadline = std::chrono::system_clock::now();
-            if (tag->type == CqTag::kInitializingCraned)
-              deadline += std::chrono::seconds(
-                  kCompletionQueueConnectingTimeoutSeconds);
-            else
-              deadline += std::chrono::seconds(
-                  kCompletionQueueEstablishedTimeoutSeconds);
-
-            craned->m_prev_channel_state_ = new_state;
-            // When cq is closed, do not register any more callbacks on it.
-            craned->m_channel_->NotifyOnStateChange(
-                craned->m_prev_channel_state_, deadline, &m_cq_vec_[thread_id],
-                next_tag);
-          }
-        } else {
-          // END state of both state machine. Free the Craned client.
-          if (tag->type == CqTag::kInitializingCraned) {
-            // free tag_data
-            auto *tag_data =
-                reinterpret_cast<InitializingCranedTagData *>(tag->data);
-            CRANE_TRACE(
-                "Failed connect to {}. Waiting for its active connection",
-                tag_data->craned->m_craned_id_);
-
-            // When deleting tag_data, the destructor will call
-            // PutBackNodeIntoUnavailList_ in m_clean_up_cb_ and put this craned
-            // into the re-connecting queue again.
-            delete tag_data;
-          } else if (tag->type == CqTag::kEstablishedCraned) {
-            if (m_craned_is_down_cb_) {
-              g_thread_pool->detach_task(
-                  [this, craned_id = craned->m_craned_id_]() {
-                    m_craned_is_down_cb_(craned_id);
-                  });
-            }
-
-            WriterLock lock(&m_connected_craned_mtx_);
-            m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
-          } else {
-            CRANE_ERROR("Unknown tag type: {}", tag->type);
-          }
-        }
-
-        m_tag_sync_allocator_->delete_object(tag);
-      } else {
-        /* ok = false implies that NotifyOnStateChange() timed out.
-         * See GRPC code: src/core/ext/filters/client_channel/
-         *  channel_connectivity.cc:grpc_channel_watch_connectivity_state()
-         *
-         * Register the same tag again. Do not free it because we have no newly
-         * allocated tag. */
-        util::lock_guard lock(m_cq_mtx_vec_[thread_id]);
+      if (next_tag) {
+        // When cq is closed, do not register any more callbacks on it.
         if (!m_cq_closed_) {
-          // CRANE_TRACE("Registering next tag: {}", tag->type);
+          CRANE_TRACE("Registering next tag {} for {}", tag->type,
+                      craned->m_craned_id_);
+
           auto deadline = std::chrono::system_clock::now();
           if (tag->type == CqTag::kInitializingCraned)
             deadline +=
@@ -400,12 +354,45 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
             deadline +=
                 std::chrono::seconds(kCompletionQueueEstablishedTimeoutSeconds);
 
-          // When cq is closed, do not register any more callbacks on it.
-          craned->m_channel_->NotifyOnStateChange(craned->m_prev_channel_state_,
-                                                  deadline,
-                                                  &m_cq_vec_[thread_id], tag);
+          craned->m_prev_channel_state_ = new_state;
+
+          CRANE_TRACE("Registering next tag {} for {}", next_tag->type,
+                      craned->m_craned_id_);
+
+          util::lock_guard lock(m_cq_mtx_vec_[thread_id]);
+          craned->m_channel_->NotifyOnStateChange(
+              craned->m_prev_channel_state_, deadline, &m_cq_vec_[thread_id],
+              next_tag);
+        }
+      } else {
+        // END state of both state machine. Free the Craned client.
+        if (tag->type == CqTag::kInitializingCraned) {
+          // free tag_data
+          auto *tag_data =
+              reinterpret_cast<InitializingCranedTagData *>(tag->data);
+          CRANE_TRACE("Failed connect to {}. Waiting for its active connection",
+                      tag_data->craned->m_craned_id_);
+
+          // When deleting tag_data, the destructor will call
+          // PutBackNodeIntoUnavailList_ in m_clean_up_cb_ and put this craned
+          // into the re-connecting queue again.
+          delete tag_data;
+        } else if (tag->type == CqTag::kEstablishedCraned) {
+          if (m_craned_is_down_cb_) {
+            g_thread_pool->detach_task(
+                [this, craned_id = craned->m_craned_id_]() {
+                  m_craned_is_down_cb_(craned_id);
+                });
+          }
+
+          WriterLock lock(&m_connected_craned_mtx_);
+          m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
+        } else {
+          CRANE_ERROR("Unknown tag type: {}", tag->type);
         }
       }
+
+      m_tag_sync_allocator_->delete_object(tag);
     } else {
       // m_cq_.Shutdown() has been called. Exit the thread.
       break;
@@ -428,7 +415,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
         WriterLock lock(&m_connected_craned_mtx_);
 
         m_connected_craned_id_stub_map_.emplace(raw_craned->m_craned_id_,
-                                                std::move(tag_data->craned));
+                                                tag_data->craned);
 
         raw_craned->m_invalid_ = false;
       }
@@ -479,10 +466,11 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
         // CRANE_TRACE("IDLE -> CONNECTING");
         next_tag_type = CqTag::kInitializingCraned;
       } else {
-        // prev          current       next
-        // CONNECTING -> CONNECTING -> END
-        CRANE_TRACE("CONNECTING -> CONNECTING -> END");
-        next_tag_type = std::nullopt;
+        // prev    current       next
+        // Any  -> CONNECTING -> CONNECTING
+        CRANE_TRACE("{} -> CONNECTING -> CONNECTING",
+                    raw_craned->m_prev_channel_state_);
+        next_tag_type = CqTag::kInitializingCraned;
       }
       break;
     }
@@ -500,7 +488,6 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       return m_tag_sync_allocator_->new_object<CqTag>(
           CqTag{next_tag_type.value(), tag_data});
     } else if (next_tag_type.value() == CqTag::kEstablishedCraned) {
-      (void)tag_data->craned.release();
       delete tag_data;
 
       return m_tag_sync_allocator_->new_object<CqTag>(
@@ -584,11 +571,12 @@ uint32_t CranedKeeper::AvailableCranedCount() {
   return m_connected_craned_id_stub_map_.size();
 }
 
-CranedStub *CranedKeeper::GetCranedStub(const CranedId &craned_id) {
+std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
+    const CranedId &craned_id) {
   ReaderLock lock(&m_connected_craned_mtx_);
   auto iter = m_connected_craned_id_stub_map_.find(craned_id);
   if (iter != m_connected_craned_id_stub_map_.end())
-    return iter->second.get();
+    return iter->second;
   else
     return nullptr;
 }
@@ -613,7 +601,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   }
 
   auto *cq_tag_data = new InitializingCranedTagData{};
-  cq_tag_data->craned = std::make_unique<CranedStub>(this);
+  cq_tag_data->craned = std::make_shared<CranedStub>(this);
 
   // InitializingCraned: BEGIN -> IDLE
 
@@ -679,12 +667,14 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   // Note: this function might be called from multiple thread.
   //       Use atomic variable here.
   static std::atomic<uint32_t> cur_cq_id = 0;
+  uint32_t thread_id = cur_cq_id++ % m_cq_vec_.size();
 
+  util::lock_guard lock(m_cq_mtx_vec_[thread_id]);
   cq_tag_data->craned->m_channel_->NotifyOnStateChange(
       cq_tag_data->craned->m_prev_channel_state_,
       std::chrono::system_clock::now() +
           std::chrono::seconds(kCompletionQueueConnectingTimeoutSeconds),
-      &m_cq_vec_[cur_cq_id++ % m_cq_vec_.size()], tag);
+      &m_cq_vec_[thread_id], tag);
 }
 
 void CranedKeeper::CranedChannelConnectFail_(CranedStub *stub) {

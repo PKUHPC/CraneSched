@@ -67,7 +67,7 @@ void CtldClient::OnCraneCtldConnected() {
   CRANE_INFO("Send a register RPC to cranectld");
   request.set_craned_id(m_craned_id_);
 
-  int retry_time = 3;
+  int retry_time = 10;
 
   do {
     crane::grpc::CranedRegisterReply reply;
@@ -84,20 +84,21 @@ void CtldClient::OnCraneCtldConnected() {
       if (reply.ok()) {
         if (reply.already_registered()) {
           CRANE_INFO("This craned has already registered.");
-          break;
+          return;
         } else {
           CRANE_INFO(
               "This craned has not registered. "
               "Sending Register request...");
-          std::this_thread::sleep_for(std::chrono::seconds(1));
+          std::this_thread::sleep_for(std::chrono::seconds(3));
         }
       } else {
         CRANE_ERROR("This Craned is not allow to register.");
-        break;
+        return;
       }
     }
-
   } while (retry_time--);
+
+  CRANE_ERROR("Failed to register actively.");
 }
 
 void CtldClient::TaskStatusChangeAsync(TaskStatusChange&& task_status_change) {

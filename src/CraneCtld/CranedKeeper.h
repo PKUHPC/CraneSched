@@ -92,6 +92,8 @@ class CranedKeeper {
 
   ~CranedKeeper();
 
+  void Shutdown();
+
   void InitAndRegisterCraneds(const std::list<CranedId> &craned_id_list);
 
   uint32_t AvailableCranedCount();
@@ -106,7 +108,7 @@ class CranedKeeper {
    * The callback registerer should do necessary synchronization to clean up all
    * the usage of the CranedStub pointer before CranedIsDown() returns.
    */
-  CranedStub *GetCranedStub(const CranedId &craned_id);
+  std::shared_ptr<CranedStub> GetCranedStub(const CranedId &craned_id);
 
   void SetCranedIsUpCb(std::function<void(CranedId)> cb);
 
@@ -116,7 +118,7 @@ class CranedKeeper {
 
  private:
   struct InitializingCranedTagData {
-    std::unique_ptr<CranedStub> craned;
+    std::shared_ptr<CranedStub> craned;
   };
 
   struct CqTag {
@@ -153,7 +155,7 @@ class CranedKeeper {
   std::unique_ptr<std::pmr::polymorphic_allocator<CqTag>> m_tag_sync_allocator_;
 
   Mutex m_connected_craned_mtx_;
-  NodeHashMap<CranedId, std::unique_ptr<CranedStub>>
+  NodeHashMap<CranedId, std::shared_ptr<CranedStub>>
       m_connected_craned_id_stub_map_ GUARDED_BY(m_connected_craned_mtx_);
 
   Mutex m_unavail_craned_set_mtx_;

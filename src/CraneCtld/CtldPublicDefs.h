@@ -39,7 +39,7 @@ constexpr uint32_t kConcurrentStreamQuota = 3000;
 constexpr uint32_t kCompletionQueueCapacity = 5000;
 
 // CranedKeeper Constants
-constexpr uint16_t kCompletionQueueConnectingTimeoutSeconds = 2;
+constexpr uint16_t kCompletionQueueConnectingTimeoutSeconds = 3;
 constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 
 // Since Unqlite has a limitation of about 900000 tasks per transaction,
