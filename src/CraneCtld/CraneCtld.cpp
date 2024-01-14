@@ -462,6 +462,8 @@ void DestroyCtldGlobalVariables() {
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
   g_embedded_db_client.reset();
+
+  g_thread_pool.reset();
 }
 
 void InitializeCtldGlobalVariables() {
