@@ -520,20 +520,8 @@ void InitializeCtldGlobalVariables() {
   });
 
   g_craned_keeper->SetCranedIsDownCb([](const CranedId& craned_id) {
-    CRANE_TRACE("CranedNode #{} is down now.", craned_id);
-  });
-
-  g_craned_keeper->SetCranedIsTempUpCb([](const CranedId& craned_id) {
     CRANE_TRACE(
-        "CranedNode #{} is temporarily up now. "
-        "Add its resource to the global resource pool.",
-        craned_id);
-    g_meta_container->CranedUp(craned_id);
-  });
-
-  g_craned_keeper->SetCranedIsTempDownCb([](const CranedId& craned_id) {
-    CRANE_TRACE(
-        "CranedNode #{} lost connection and is temporarily down now. "
+        "CranedNode #{} is down now."
         "Remove its resource from the global resource pool.",
         craned_id);
     g_meta_container->CranedDown(craned_id);

@@ -99,6 +99,8 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
   }
 
   response->set_ok(true);
+  response->set_already_registered(alive);
+
   return grpc::Status::OK;
 }
 
@@ -1343,6 +1345,8 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     CRANE_TRACE("SIGINT captured. Calling Shutdown() on grpc server...");
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
+
+    g_craned_keeper->Shutdown();
   });
   sigint_waiting_thread.detach();
 

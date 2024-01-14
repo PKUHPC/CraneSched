@@ -32,6 +32,7 @@
 #include <uvw.hpp>
 
 #include "CtldClient.h"
+#include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
@@ -364,18 +365,36 @@ class TaskManager {
   absl::flat_hash_map<uint32_t /*task id*/, std::unique_ptr<TaskInstance>>
       m_task_map_;
 
-  // The two following maps are used as indexes and doesn't have the ownership
-  // of underlying objects. A TaskInstance may contain more than one
-  // ProcessInstance.
-  absl::flat_hash_map<uint32_t /*pid*/, TaskInstance*> m_pid_task_map_;
-  absl::flat_hash_map<uint32_t /*pid*/, ProcessInstance*> m_pid_proc_map_;
+  //  ==================================================================
+  // Critical data region starts
+  //
+  // To improve performance, the cgroup creation and task creation
+  // are parallelized,
+  // which breaks the serializability guaranteed by the single event loop.
+  // The data structures in this region are accessed by multiple threads.
+  // The atomicity of these data structure is guaranteed by either mutex or
+  // AtomicHashMap.
 
-  absl::node_hash_map<uint32_t /*task id*/, std::shared_ptr<util::Cgroup>>
-      m_task_id_to_cg_map_;
-  absl::flat_hash_map<uid_t /*uid*/, absl::flat_hash_set<uint32_t /*task id*/>>
-      m_uid_to_task_ids_map_;
+  // The two following maps are used as indexes
+  // and doesn't have the ownership of underlying objects.
+  // A TaskInstance may contain more than one ProcessInstance.
+  absl::flat_hash_map<uint32_t /*pid*/, TaskInstance*> m_pid_task_map_
+      GUARDED_BY(m_mtx_);
+  absl::flat_hash_map<uint32_t /*pid*/, ProcessInstance*> m_pid_proc_map_
+      GUARDED_BY(m_mtx_);
 
   absl::Mutex m_mtx_;
+
+  util::AtomicHashMap<absl::flat_hash_map, task_id_t,
+                      std::unique_ptr<util::Cgroup>>
+      m_task_id_to_cg_map_;
+
+  util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
+                      absl::flat_hash_set<task_id_t>>
+      m_uid_to_task_ids_map_;
+
+  // Critical data region ends
+  // ========================================================================
 
   static void EvSigchldCb_(evutil_socket_t sig, short events, void* user_data);
 

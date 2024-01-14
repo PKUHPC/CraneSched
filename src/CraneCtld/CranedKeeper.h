@@ -65,7 +65,7 @@ class CranedStub {
   // Set if underlying gRPC is down.
   bool m_invalid_;
 
-  uint32_t m_maximum_retry_times_;
+  static constexpr uint32_t s_maximum_retry_times_ = 5;
   uint32_t m_failure_retry_times_;
 
   CranedId m_craned_id_;
@@ -92,6 +92,8 @@ class CranedKeeper {
 
   ~CranedKeeper();
 
+  void Shutdown();
+
   void InitAndRegisterCraneds(const std::list<CranedId> &craned_id_list);
 
   uint32_t AvailableCranedCount();
@@ -106,21 +108,17 @@ class CranedKeeper {
    * The callback registerer should do necessary synchronization to clean up all
    * the usage of the CranedStub pointer before CranedIsDown() returns.
    */
-  CranedStub *GetCranedStub(const CranedId &craned_id);
+  std::shared_ptr<CranedStub> GetCranedStub(const CranedId &craned_id);
 
   void SetCranedIsUpCb(std::function<void(CranedId)> cb);
 
   void SetCranedIsDownCb(std::function<void(CranedId)> cb);
 
-  void SetCranedIsTempDownCb(std::function<void(CranedId)> cb);
-
-  void SetCranedIsTempUpCb(std::function<void(CranedId)> cb);
-
   void PutNodeIntoUnavailList(const std::string &crane_id);
 
  private:
   struct InitializingCranedTagData {
-    std::unique_ptr<CranedStub> craned;
+    std::shared_ptr<CranedStub> craned;
   };
 
   struct CqTag {
@@ -143,8 +141,6 @@ class CranedKeeper {
   void PeriodConnectCranedThreadFunc_();
 
   std::function<void(CranedId)> m_craned_is_up_cb_;
-  std::function<void(CranedId)> m_craned_is_temp_down_cb_;
-  std::function<void(CranedId)> m_craned_rec_from_temp_failure_cb_;
 
   // Guarantee that the Craned will not be freed before this callback is
   // called.
@@ -159,7 +155,7 @@ class CranedKeeper {
   std::unique_ptr<std::pmr::polymorphic_allocator<CqTag>> m_tag_sync_allocator_;
 
   Mutex m_connected_craned_mtx_;
-  NodeHashMap<CranedId, std::unique_ptr<CranedStub>>
+  NodeHashMap<CranedId, std::shared_ptr<CranedStub>>
       m_connected_craned_id_stub_map_ GUARDED_BY(m_connected_craned_mtx_);
 
   Mutex m_unavail_craned_set_mtx_;

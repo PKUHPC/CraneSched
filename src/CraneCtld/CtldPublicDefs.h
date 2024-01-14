@@ -29,14 +29,18 @@ inline const char* kCraneCtldDefaultLogPath = "/tmp/cranectld/cranectld.log";
 inline const char* kDefaultDbPath = "/tmp/cranectld/embedded.db";
 inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
 
+// TaskScheduler Constants
 constexpr uint32_t kTaskScheduleIntervalMs = 1000;
-constexpr uint16_t kCompletionQueueDelaySeconds = 45;
 constexpr uint32_t kCancelTaskTimeoutMs = 500;
 constexpr uint32_t kCancelTaskBatchNum = 1000;
 constexpr uint32_t kSubmitTaskTimeoutMs = 500;
 constexpr uint32_t kSubmitTaskBatchNum = 1000;
 constexpr uint32_t kConcurrentStreamQuota = 3000;
 constexpr uint32_t kCompletionQueueCapacity = 5000;
+
+// CranedKeeper Constants
+constexpr uint16_t kCompletionQueueConnectingTimeoutSeconds = 3;
+constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 
 // Since Unqlite has a limitation of about 900000 tasks per transaction,
 // we use this value to set the batch size of one dequeue action on

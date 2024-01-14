@@ -108,6 +108,7 @@ message CranedRegisterRequest {
 
 message CranedRegisterReply {
   bool ok = 1;
+  bool already_registered = 2;
 }
 
 message QueryCranedListFromTaskIdRequest {

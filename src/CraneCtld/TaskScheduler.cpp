@@ -101,7 +101,7 @@ bool TaskScheduler::Init() {
         continue;
       }
 
-      auto* stub = g_craned_keeper->GetCranedStub(task->executing_craned_id);
+      auto stub = g_craned_keeper->GetCranedStub(task->executing_craned_id);
       if (stub == nullptr || stub->Invalid()) {
         CRANE_INFO(
             "The execution node of the restore task #{} is down. "
@@ -563,11 +563,12 @@ void TaskScheduler::ScheduleThread_() {
       for (auto const& iter : craned_cgroup_map) {
         CranedId const& craned_id = iter.first;
         auto const& task_uid_pairs = iter.second;
-        g_thread_pool->push_task([=, &bl]() {
-          CranedStub* stub = g_craned_keeper->GetCranedStub(craned_id);
+        g_thread_pool->detach_task([=, &bl]() {
+          auto stub = g_craned_keeper->GetCranedStub(craned_id);
           CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
                       task_uid_pairs.size(), craned_id);
-          stub->CreateCgroupForTasks(task_uid_pairs);
+          if (stub && !stub->Invalid())
+            stub->CreateCgroupForTasks(task_uid_pairs);
 
           bl.DecrementCount();
         });
@@ -641,7 +642,7 @@ void TaskScheduler::ScheduleThread_() {
       begin = std::chrono::steady_clock::now();
 
       for (auto const& [craned_id, tasks] : craned_tasks_map) {
-        CranedStub* stub = g_craned_keeper->GetCranedStub(craned_id);
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
         CRANE_TRACE("Send ExecuteTasks for {} tasks to {}", tasks.size(),
                     craned_id);
         stub->ExecuteTasks(tasks);
@@ -660,6 +661,8 @@ void TaskScheduler::ScheduleThread_() {
           std::chrono::duration_cast<std::chrono::milliseconds>(schedule_end -
                                                                 schedule_begin)
               .count());
+
+      // Todo: Cleaning Tasks that had errors right in the execution stage.
     } else {
       m_pending_task_map_mtx_.Unlock();
     }
@@ -714,8 +717,8 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
 
   // only send request to the first node
   CranedId const& craned_id = rn_iter->second->executing_craned_id;
-  auto* stub = g_craned_keeper->GetCranedStub(craned_id);
-  if (!stub->Invalid()) {
+  auto stub = g_craned_keeper->GetCranedStub(craned_id);
+  if (stub && !stub->Invalid()) {
     CraneErr err = stub->ChangeTaskTimeLimit(task_id, secs);
     if (err != CraneErr::kOk) {
       CRANE_ERROR("Failed to change time limit of task #{} on Node {}", task_id,
@@ -771,8 +774,10 @@ void TaskScheduler::TaskStatusChangeNoLock_(uint32_t task_id,
   task->SetEndTime(absl::Now());
 
   for (CranedId const& craned_id : task->CranedIds()) {
-    auto* stub = g_craned_keeper->GetCranedStub(craned_id);
-    if (!stub->Invalid()) {
+    auto stub = g_craned_keeper->GetCranedStub(craned_id);
+
+    // If the craned is down, just ignore it.
+    if (stub && !stub->Invalid()) {
       CraneErr err = stub->ReleaseCgroupForTask(task_id, task->uid);
       if (err != CraneErr::kOk) {
         CRANE_ERROR("Failed to Release cgroup RPC for task#{} on Node {}",
@@ -1006,10 +1011,11 @@ void TaskScheduler::CleanCancelQueueCb_() {
   }
 
   for (auto&& [craned_id, task_ids] : running_task_craned_id_map) {
-    g_thread_pool->push_task(
+    g_thread_pool->detach_task(
         [id = craned_id, task_ids_to_cancel = std::move(task_ids)]() {
-          auto* stub = g_craned_keeper->GetCranedStub(id);
-          stub->TerminateTasks(task_ids_to_cancel);
+          auto stub = g_craned_keeper->GetCranedStub(id);
+          if (stub && !stub->Invalid())
+            stub->TerminateTasks(task_ids_to_cancel);
         });
   }
 

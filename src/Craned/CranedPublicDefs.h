@@ -85,6 +85,6 @@ struct Config {
 
 inline Config g_config;
 
-inline std::unique_ptr<BS::thread_pool> g_thread_pool;
-
 }  // namespace Craned
+
+inline std::unique_ptr<BS::thread_pool> g_thread_pool;
