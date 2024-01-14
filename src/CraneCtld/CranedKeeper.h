@@ -65,7 +65,7 @@ class CranedStub {
   // Set if underlying gRPC is down.
   bool m_invalid_;
 
-  static constexpr uint32_t s_maximum_retry_times_ = 5;
+  static constexpr uint32_t s_maximum_retry_times_ = 3;
   uint32_t m_failure_retry_times_;
 
   CranedId m_craned_id_;
@@ -117,21 +117,17 @@ class CranedKeeper {
   void PutNodeIntoUnavailList(const std::string &crane_id);
 
  private:
-  struct InitializingCranedTagData {
-    std::shared_ptr<CranedStub> craned;
-  };
-
   struct CqTag {
     enum Type { kInitializingCraned, kEstablishedCraned };
     Type type;
-    void *data;
+    CranedStub *craned;
   };
 
   static void CranedChannelConnectFail_(CranedStub *stub);
 
   void ConnectCranedNode_(CranedId const &craned_id);
 
-  CqTag *InitCranedStateMachine_(InitializingCranedTagData *tag_data,
+  CqTag *InitCranedStateMachine_(CranedStub *craned,
                                  grpc_connectivity_state new_state);
   CqTag *EstablishedCranedStateMachine_(CranedStub *craned,
                                         grpc_connectivity_state new_state);
@@ -151,7 +147,7 @@ class CranedKeeper {
   // Must be declared previous to any grpc::CompletionQueue, so it can be
   // constructed before any CompletionQueue and be destructed after any
   // CompletionQueue.
-  std::pmr::synchronized_pool_resource m_pmr_pool_res_;
+  std::unique_ptr<std::pmr::synchronized_pool_resource> m_pmr_pool_res_;
   std::unique_ptr<std::pmr::polymorphic_allocator<CqTag>> m_tag_sync_allocator_;
 
   Mutex m_connected_craned_mtx_;
