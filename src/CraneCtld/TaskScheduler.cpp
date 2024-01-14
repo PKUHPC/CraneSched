@@ -563,7 +563,7 @@ void TaskScheduler::ScheduleThread_() {
       for (auto const& iter : craned_cgroup_map) {
         CranedId const& craned_id = iter.first;
         auto const& task_uid_pairs = iter.second;
-        g_thread_pool->push_task([=, &bl]() {
+        g_thread_pool->detach_task([=, &bl]() {
           CranedStub* stub = g_craned_keeper->GetCranedStub(craned_id);
           CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
                       task_uid_pairs.size(), craned_id);
@@ -1006,7 +1006,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
   }
 
   for (auto&& [craned_id, task_ids] : running_task_craned_id_map) {
-    g_thread_pool->push_task(
+    g_thread_pool->detach_task(
         [id = craned_id, task_ids_to_cancel = std::move(task_ids)]() {
           auto* stub = g_craned_keeper->GetCranedStub(id);
           stub->TerminateTasks(task_ids_to_cancel);

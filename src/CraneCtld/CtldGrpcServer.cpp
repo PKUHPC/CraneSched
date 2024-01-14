@@ -99,6 +99,8 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
   }
 
   response->set_ok(true);
+  response->set_already_registered(alive);
+
   return grpc::Status::OK;
 }
 

@@ -719,11 +719,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     auto [iter, _] =
         this_->m_task_map_.emplace(task_id, std::move(popped_instance));
 
-    g_thread_pool->push_task([this_, instance, task_id]() {
-      this_->m_mtx_.Lock();
-
+    g_thread_pool->detach_task([this_, instance, task_id]() {
       if (!this_->m_task_id_to_cg_map_.Contains(task_id)) {
-        this_->m_mtx_.Unlock();
         CRANE_ERROR("Failed to find created cgroup for task #{}", task_id);
         this_->EvActivateTaskStatusChange_(
             task_id, crane::grpc::TaskStatus::Failed,
@@ -732,34 +729,29 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         return;
       }
 
-      // Note: cg_iter is in an absl::node_hash_map. Pointer stability of
-      // iterator is guaranteed. We can modify the value even if mutex is
-      // unlocked.
-      this_->m_mtx_.Unlock();
+      {
+        auto cg_it = this_->m_task_id_to_cg_map_[task_id];
+        auto& cg_unique_ptr = *cg_it;
+        if (!cg_unique_ptr) {
+          instance->cgroup_path = CgroupStrByTaskId_(task_id);
+          cg_unique_ptr = util::CgroupUtil::CreateOrOpen(
+              instance->cgroup_path,
+              util::NO_CONTROLLER_FLAG |
+                  util::CgroupConstant::Controller::CPU_CONTROLLER |
+                  util::CgroupConstant::Controller::MEMORY_CONTROLLER,
+              util::NO_CONTROLLER_FLAG, false);
 
-      // Lazy creation of cgroup
-      // Todo: Lock on iterator may be required here!
-      auto cg_pptr = this_->m_task_id_to_cg_map_[task_id];
-      auto& cg_ptr = *cg_pptr;
-      if (!cg_ptr) {
-        instance->cgroup_path = CgroupStrByTaskId_(task_id);
-        cg_ptr = util::CgroupUtil::CreateOrOpen(
-            instance->cgroup_path,
-            util::NO_CONTROLLER_FLAG |
-                util::CgroupConstant::Controller::CPU_CONTROLLER |
-                util::CgroupConstant::Controller::MEMORY_CONTROLLER,
-            util::NO_CONTROLLER_FLAG, false);
-
-        if (!cg_ptr) {
-          CRANE_ERROR("Failed to created cgroup for task #{}", task_id);
-          this_->EvActivateTaskStatusChange_(
-              task_id, crane::grpc::TaskStatus::Failed,
-              ExitCode::kExitCodeCgroupError,
-              fmt::format("Failed to create cgroup for task #{}", task_id));
-          return;
+          if (!cg_unique_ptr) {
+            CRANE_ERROR("Failed to created cgroup for task #{}", task_id);
+            this_->EvActivateTaskStatusChange_(
+                task_id, crane::grpc::TaskStatus::Failed,
+                ExitCode::kExitCodeCgroupError,
+                fmt::format("Failed to create cgroup for task #{}", task_id));
+            return;
+          }
         }
+        instance->cgroup = cg_unique_ptr.get();
       }
-      instance->cgroup = cg_ptr.get();
 
       instance->pwd_entry.Init(instance->task.uid());
       if (!instance->pwd_entry.Valid()) {
@@ -1155,12 +1147,11 @@ bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
     // Kind of async behavior.
 
     // avoid deadlock by Erase at next line
-    std::shared_ptr<util::Cgroup> cgroup =
-        *(this->m_task_id_to_cg_map_[task_id]);
+    util::Cgroup* cgroup = this->m_task_id_to_cg_map_[task_id]->release();
     this->m_task_id_to_cg_map_.Erase(task_id);
 
-    if (cgroup) {
-      g_thread_pool->push_task([cgroup] {
+    if (cgroup != nullptr) {
+      g_thread_pool->detach_task([cgroup]() {
         bool rc;
         int cnt = 0;
 
@@ -1179,6 +1170,8 @@ bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
           ++cnt;
           std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
+
+        delete cgroup;
       });
     }
     return true;
@@ -1293,8 +1286,9 @@ bool TaskManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
   if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
     return false;
   }
-  auto cg_pptr = this->m_task_id_to_cg_map_[task_id];
-  auto cg_ptr = *cg_pptr;
+
+  auto cg_it = this->m_task_id_to_cg_map_[task_id];
+  auto& cg_ptr = *cg_it;
   if (!cg_ptr) {
     auto cgroup_path = CgroupStrByTaskId_(task_id);
     cg_ptr = util::CgroupUtil::CreateOrOpen(

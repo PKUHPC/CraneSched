@@ -65,7 +65,7 @@ class CranedStub {
   // Set if underlying gRPC is down.
   bool m_invalid_;
 
-  uint32_t m_maximum_retry_times_;
+  static constexpr uint32_t s_maximum_retry_times_ = 5;
   uint32_t m_failure_retry_times_;
 
   CranedId m_craned_id_;
@@ -112,10 +112,6 @@ class CranedKeeper {
 
   void SetCranedIsDownCb(std::function<void(CranedId)> cb);
 
-  void SetCranedIsTempDownCb(std::function<void(CranedId)> cb);
-
-  void SetCranedIsTempUpCb(std::function<void(CranedId)> cb);
-
   void PutNodeIntoUnavailList(const std::string &crane_id);
 
  private:
@@ -143,8 +139,6 @@ class CranedKeeper {
   void PeriodConnectCranedThreadFunc_();
 
   std::function<void(CranedId)> m_craned_is_up_cb_;
-  std::function<void(CranedId)> m_craned_is_temp_down_cb_;
-  std::function<void(CranedId)> m_craned_rec_from_temp_failure_cb_;
 
   // Guarantee that the Craned will not be freed before this callback is
   // called.

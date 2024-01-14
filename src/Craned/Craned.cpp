@@ -416,7 +416,7 @@ void GlobalVariableInit() {
     std::exit(1);
   }
 
-  Craned::g_thread_pool =
+  g_thread_pool =
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
   g_task_mgr = std::make_unique<Craned::TaskManager>();
@@ -440,6 +440,7 @@ void StartServer() {
   util::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
 
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
+  std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
   g_ctld_client->StartConnectingCtld();
   g_server->Wait();
@@ -448,6 +449,9 @@ void StartServer() {
   g_task_mgr.reset();
   g_server.reset();
   g_ctld_client.reset();
+
+  g_thread_pool->wait();
+  g_thread_pool.reset();
 
   std::exit(0);
 }

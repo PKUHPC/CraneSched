@@ -61,25 +61,42 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
 }
 
 void CtldClient::OnCraneCtldConnected() {
-  grpc::ClientContext context;
   crane::grpc::CranedRegisterRequest request;
-  crane::grpc::CranedRegisterReply reply;
   grpc::Status status;
 
   CRANE_INFO("Send a register RPC to cranectld");
   request.set_craned_id(m_craned_id_);
 
-  int retry_time = 5;
+  int retry_time = 3;
 
   do {
+    crane::grpc::CranedRegisterReply reply;
+    grpc::ClientContext context;
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(1));
+
     status = m_stub_->CranedRegister(&context, request, &reply);
-    if (status.ok()) {
-      return;
+    if (!status.ok()) {
+      CRANE_ERROR(
+          "NodeActiveConnect RPC returned with status not ok: {}, Resend it.",
+          status.error_message());
+    } else {
+      if (reply.ok()) {
+        if (reply.already_registered()) {
+          CRANE_INFO("This craned has already registered.");
+          break;
+        } else {
+          CRANE_INFO(
+              "This craned has not registered. "
+              "Sending Register request...");
+          std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+      } else {
+        CRANE_ERROR("This Craned is not allow to register.");
+        break;
+      }
     }
-    CRANE_ERROR(
-        "NodeActiveConnect RPC returned with status not ok: {}, Resend it.",
-        status.error_message());
-    std::this_thread::sleep_for(std::chrono::seconds(1));
+
   } while (retry_time--);
 }
 

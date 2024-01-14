@@ -178,7 +178,7 @@ int CgroupUtil::initialize_controller(
  *   - -1 on error
  * On failure, the state of cgroup is undefined.
  */
-std::shared_ptr<Cgroup> CgroupUtil::CreateOrOpen(
+std::unique_ptr<Cgroup> CgroupUtil::CreateOrOpen(
     const std::string &cgroup_string, ControllerFlags preferred_controllers,
     ControllerFlags required_controllers, bool retrieve) {
   using CgroupConstant::Controller;

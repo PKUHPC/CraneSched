@@ -249,7 +249,7 @@ class CgroupUtil {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
   }
 
-  static std::shared_ptr<Cgroup> CreateOrOpen(
+  static std::unique_ptr<Cgroup> CreateOrOpen(
       const std::string &cgroup_string, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
