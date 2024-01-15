@@ -67,11 +67,6 @@ if (${CRANE_NATIVE_ARCH_OPT})
     add_compile_options(-march=native)
 endif ()
 
-if (${CRANE_FULL_DYNAMIC})
-    set(BUILD_SHARED_LIBS ON)
-else ()
-    set(BUILD_SHARED_LIBS OFF)
-endif ()
 
 if (${CRANE_ADDRESS_SANITIZER})
     message(STATUS "address_sanitizer is enabled")

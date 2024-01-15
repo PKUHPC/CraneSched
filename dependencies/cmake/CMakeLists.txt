@@ -4,6 +4,12 @@ set(FETCHCONTENT_QUIET OFF)
 # Suppress all warning on all third party libraries
 add_compile_options(-w)
 
+if (${CRANE_FULL_DYNAMIC})
+    set(BUILD_SHARED_LIBS ON)
+else ()
+    set(BUILD_SHARED_LIBS OFF)
+endif ()
+
 add_subdirectory(BSThreadPool)
 add_subdirectory(nlohmann_json)
 add_subdirectory(yaml-cpp)

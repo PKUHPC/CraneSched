@@ -11,7 +11,7 @@ get_property(protobuf_SOURCE_DIR GLOBAL PROPERTY protobuf_SOURCE_DIR)
 message(STATUS "Generated proto: ${ProtoCxxSources} ${ProtoCxxHeaders}")
 message(STATUS "_PROTOBUF_PROTOC: ${_PROTOBUF_PROTOC};protobuf_SOURCE_DIR: ${protobuf_SOURCE_DIR}")
 
-add_library(crane_proto_lib
+add_library(crane_proto_lib STATIC
         ${ProtoCxxSources} ${ProtoCxxHeaders})
 target_link_libraries(crane_proto_lib
         ${_GRPC_GRPCPP}
