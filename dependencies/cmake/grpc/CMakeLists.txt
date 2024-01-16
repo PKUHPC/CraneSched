@@ -51,12 +51,12 @@ set(protobuf_BUILD_TESTS OFF)
 set(protobuf_WITH_ZLIB OFF)
 set(protobuf_MSVC_STATIC_RUNTIME OFF)
 set(protobuf_USE_EXTERNAL_GTEST ON)
-#if (BUILD_SHARED_LIBS)
-#    set(protobuf_BUILD_SHARED_LIBS ON)
-#else()
-#    set(protobuf_BUILD_SHARED_LIBS OFF)
-#endif ()
-set(protobuf_BUILD_SHARED_LIBS OFF)
+if (BUILD_SHARED_LIBS)
+    set(protobuf_BUILD_SHARED_LIBS ON)
+else ()
+    set(protobuf_BUILD_SHARED_LIBS OFF)
+endif ()
+#set(protobuf_BUILD_SHARED_LIBS OFF)
 FetchContent_Declare(protobuf
         OVERRIDE_FIND_PACKAGE
 
@@ -68,6 +68,7 @@ FetchContent_MakeAvailable(protobuf)
 FetchContent_GetProperties(protobuf)
 find_package(protobuf REQUIRED CONFIG)
 
+set(_PROTOBUF_LIBS_PATH ${protobuf_BINARY_DIR} CACHE INTERNAL "")
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 FetchContent_Declare(re2
         OVERRIDE_FIND_PACKAGE

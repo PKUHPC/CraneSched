@@ -9,6 +9,8 @@ set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 # the NEW behavior for this policy is to do nothing when a normal variable of the same name exists.
 # The normal variable is not removed. The cache entry is not created or updated and is ignored if it exists.
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
+set(CMAKE_SKIP_BUILD_RPATH FALSE)
+set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 
 # Set a default build type if none was specified
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -137,6 +139,8 @@ find_package(Threads REQUIRED)
 # in this project to use dynamic zlib library file.
 set(ZLIB_USE_STATIC_LIBS OFF)
 
+# use in proto generate
+set(_PROTOBUF_LIBS_PATH "" CACHE INTERNAL "")
 # Some content are downloaded and built inside cmake folder.
 # This line must be place before any find_package() command.
 # Independently built projects are installed to ${DEPENDENCIES_ONLINE_DIR}
