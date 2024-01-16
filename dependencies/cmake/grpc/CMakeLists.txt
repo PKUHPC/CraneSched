@@ -56,7 +56,6 @@ if (BUILD_SHARED_LIBS)
 else ()
     set(protobuf_BUILD_SHARED_LIBS OFF)
 endif ()
-#set(protobuf_BUILD_SHARED_LIBS OFF)
 FetchContent_Declare(protobuf
         OVERRIDE_FIND_PACKAGE
 

@@ -69,7 +69,7 @@ if (${CRANE_NATIVE_ARCH_OPT})
     add_compile_options(-march=native)
 endif ()
 
-
+#need to install devtoolset-11-libasan-devel.x86_64 devtoolset-11-libtsan-devel.x86_64
 if (${CRANE_ADDRESS_SANITIZER})
     message(STATUS "address_sanitizer is enabled")
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
@@ -102,6 +102,11 @@ if (CCACHE_PROGRAM)
     set_property(GLOBAL PROPERTY CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
 endif ()
 
+if (${CRANE_FULL_DYNAMIC})
+    set(_STATIC_LIBSTDCPP "")
+else ()
+    set(_STATIC_LIBSTDCPP "-static-libstdc++")
+endif ()
 # If Clang is used, select lld as the linker.
 set(CLANG_LLD_LINKER_FLAGS "-fuse-ld=lld")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -109,18 +114,19 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set(CRANE_LINKER_FLAGS_INIT "-DCMAKE_SHARED_LINKER_FLAGS_INIT=${CLANG_LLD_LINKER_FLAGS}")
 
     # static link on c++ libs
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++ ${CLANG_LLD_LINKER_FLAGS}")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${_STATIC_LIBSTDCPP} ${CLANG_LLD_LINKER_FLAGS}")
     # ld doesn't recognize clang object files with IPO / LTO enabled. Use lld here
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++ ${CLANG_LLD_LINKER_FLAGS}")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${_STATIC_LIBSTDCPP} ${CLANG_LLD_LINKER_FLAGS}")
 else ()
     # Linker flags passed to manually built third party libraries
     set(CRANE_LINKER_FLAGS_INIT)
 
     # static link on c++ libs
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${_STATIC_LIBSTDCPP}")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${_STATIC_LIBSTDCPP}")
 endif ()
-
+message("CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS}")
+message("CMAKE_SHARED_LINKER_FLAGS ${CMAKE_SHARED_LINKER_FLAGS}")
 if (CMAKE_SIZEOF_VOID_P EQUAL 8)
     # search lib64 directory
     set(FIND_LIBRARY_USE_LIB64_PATHS TRUE)
