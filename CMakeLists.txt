@@ -9,8 +9,6 @@ set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 # the NEW behavior for this policy is to do nothing when a normal variable of the same name exists.
 # The normal variable is not removed. The cache entry is not created or updated and is ignored if it exists.
 set(CMAKE_POLICY_DEFAULT_CMP0077 NEW)
-set(CMAKE_SKIP_BUILD_RPATH FALSE)
-set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 
 # Set a default build type if none was specified
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -111,30 +109,23 @@ if (CCACHE_PROGRAM)
 endif ()
 
 if (${CRANE_FULL_DYNAMIC})
-    set(_STATIC_LIBSTDCPP "")
+    set(CMAKE_SKIP_BUILD_RPATH FALSE)
+    set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 else ()
-    set(_STATIC_LIBSTDCPP "-static-libstdc++")
+    # static link on c++ libs
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
 endif ()
+
 # If Clang is used, select lld as the linker.
-set(CLANG_LLD_LINKER_FLAGS "-fuse-ld=lld")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    # Linker flags passed to manually built third party libraries
-    set(CRANE_LINKER_FLAGS_INIT "-DCMAKE_SHARED_LINKER_FLAGS_INIT=${CLANG_LLD_LINKER_FLAGS}")
-
-    # static link on c++ libs
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${_STATIC_LIBSTDCPP} ${CLANG_LLD_LINKER_FLAGS}")
-    # ld doesn't recognize clang object files with IPO / LTO enabled. Use lld here
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${_STATIC_LIBSTDCPP} ${CLANG_LLD_LINKER_FLAGS}")
-else ()
-    # Linker flags passed to manually built third party libraries
-    set(CRANE_LINKER_FLAGS_INIT)
-
-    # static link on c++ libs
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${_STATIC_LIBSTDCPP}")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${_STATIC_LIBSTDCPP}")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=lld")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
 endif ()
+
 message("CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS}")
 message("CMAKE_SHARED_LINKER_FLAGS ${CMAKE_SHARED_LINKER_FLAGS}")
+
 if (CMAKE_SIZEOF_VOID_P EQUAL 8)
     # search lib64 directory
     set(FIND_LIBRARY_USE_LIB64_PATHS TRUE)
