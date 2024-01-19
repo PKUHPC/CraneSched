@@ -37,7 +37,7 @@ option(CRANE_NATIVE_ARCH_OPT "Enable -march=native compile option" ON)
 
 option(CRANE_USE_GITEE_SOURCE "Enable the Gitee repository as the download source" ON)
 
-option(CRANE_FULL_DYNAMIC "Enable dynamic libs" ON)
+option(CRANE_FULL_DYNAMIC "Enable dynamic libs" OFF)
 
 option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" OFF)
 
@@ -73,7 +73,7 @@ endif ()
 if (${CRANE_ADDRESS_SANITIZER})
     message(STATUS "address_sanitizer is enabled")
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer -static-libasan)
-    add_link_options(-fsanitize=address )
+    add_link_options(-fsanitize=address)
 endif ()
 
 if (${CRANE_THREAD_SANITIZER})
