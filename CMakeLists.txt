@@ -67,7 +67,9 @@ if (${CRANE_NATIVE_ARCH_OPT})
     add_compile_options(-march=native)
 endif ()
 
-#need to install devtoolset-11-libasan-devel.x86_64 devtoolset-11-libtsan-devel.x86_64
+# In CentOS 7, the following packages are required to enable sanitizers:
+# 1. devtoolset-11-libasan-devel.x86_64
+# 2. devtoolset-11-libtsan-devel.x86_64
 if (${CRANE_ADDRESS_SANITIZER})
     message(STATUS "address_sanitizer is enabled")
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
