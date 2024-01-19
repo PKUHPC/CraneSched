@@ -152,8 +152,6 @@ find_package(Threads REQUIRED)
 # in this project to use dynamic zlib library file.
 set(ZLIB_USE_STATIC_LIBS OFF)
 
-# use in proto generate
-set(_PROTOBUF_LIBS_PATH "" CACHE INTERNAL "")
 # Some content are downloaded and built inside cmake folder.
 # This line must be place before any find_package() command.
 # Independently built projects are installed to ${DEPENDENCIES_ONLINE_DIR}

@@ -1343,7 +1343,14 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     s_sigint_cv.wait(lk);
 
     CRANE_TRACE("SIGINT captured. Calling Shutdown() on grpc server...");
+
+    // craned_keeper MUST be shutdown before GrpcServer.
+    // Otherwise, once GrpcServer is shut down, the main thread stops and
+    // g_craned_keeper.reset() is called. The Shutdown here and reset() in the
+    // main thread will access g_craned_keeper simultaneously and a race
+    // condition will occur.
     g_craned_keeper->Shutdown();
+
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
   });
