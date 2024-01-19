@@ -67,7 +67,6 @@ FetchContent_MakeAvailable(protobuf)
 FetchContent_GetProperties(protobuf)
 find_package(protobuf REQUIRED CONFIG)
 
-set(_PROTOBUF_LIBS_PATH ${protobuf_BINARY_DIR} CACHE INTERNAL "")
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 FetchContent_Declare(re2
         OVERRIDE_FIND_PACKAGE
@@ -118,3 +117,4 @@ FetchContent_MakeAvailable(grpc)
 FetchContent_GetProperties(grpc)
 
 set_property(GLOBAL PROPERTY protobuf_SOURCE_DIR "${protobuf_SOURCE_DIR}")
+set_property(GLOBAL PROPERTY _PROTOBUF_LIBS_PATH ${protobuf_BINARY_DIR})
