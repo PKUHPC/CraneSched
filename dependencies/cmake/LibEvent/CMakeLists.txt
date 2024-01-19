@@ -1,6 +1,11 @@
 include(FetchContent)
 
-set(EVENT__LIBRARY_TYPE STATIC)
+if (BUILD_SHARED_LIBS)
+    set(EVENT__LIBRARY_TYPE "SHARED")
+else ()
+    set(EVENT__LIBRARY_TYPE "STATIC")
+endif ()
+
 set(EVENT__DISABLE_TESTS ON)
 set(EVENT__DISABLE_BENCHMARK ON)
 
@@ -16,3 +21,11 @@ FetchContent_Declare(libevent_repo
         INACTIVITY_TIMEOUT 5
         )
 FetchContent_MakeAvailable(libevent_repo)
+
+if (BUILD_SHARED_LIBS)
+    add_library(dev_event_core ALIAS event_core_shared)
+    add_library(dev_event_pthreads ALIAS event_pthreads_shared)
+else ()
+    add_library(dev_event_core ALIAS event_core_static)
+    add_library(dev_event_pthreads ALIAS event_pthreads_static)
+endif ()

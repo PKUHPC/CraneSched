@@ -1,6 +1,10 @@
 include(FetchContent)
 
-set(ENABLE_STATIC ON)
+if (BUILD_SHARED_LIBS)
+    set(ENABLE_SHARED ON)
+else ()
+    set(ENABLE_STATIC ON)
+endif ()
 set(ENABLE_TESTS OFF)
 set(ENABLE_MONGODB_AWS_AUTH OFF)
 set(BUILD_TESTING OFF)

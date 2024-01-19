@@ -23,20 +23,26 @@ FetchContent_Declare(absl
         URL ${ABSL_SRC_URL}
         URL_HASH SHA256=91ac87d30cc6d79f9ab974c51874a704de9c2647c40f6932597329a282217ba8
         INACTIVITY_TIMEOUT 5
-        )
+)
 FetchContent_MakeAvailable(absl)
 FetchContent_GetProperties(absl)
 find_package(absl REQUIRED CONFIG)
 
-set(CARES_SHARED OFF)
-set(CARES_STATIC ON)
+if (BUILD_SHARED_LIBS)
+    set(CARES_SHARED ON)
+    set(CARES_STATIC OFF)
+else ()
+    set(CARES_SHARED OFF)
+    set(CARES_STATIC ON)
+endif ()
+
 FetchContent_Declare(c-ares
         OVERRIDE_FIND_PACKAGE
 
         URL ${C_ARES_SRC_URL}
         URL_HASH SHA256=1a7d52a8a84a9fbffb1be9133c0f6e17217d91ea5a6fa61f6b4729cda78ebbcf
         INACTIVITY_TIMEOUT 5
-        )
+)
 FetchContent_MakeAvailable(c-ares)
 FetchContent_GetProperties(c-ares)
 find_package(c-ares REQUIRED CONFIG)
@@ -45,13 +51,18 @@ set(protobuf_BUILD_TESTS OFF)
 set(protobuf_WITH_ZLIB OFF)
 set(protobuf_MSVC_STATIC_RUNTIME OFF)
 set(protobuf_USE_EXTERNAL_GTEST ON)
+if (BUILD_SHARED_LIBS)
+    set(protobuf_BUILD_SHARED_LIBS ON)
+else ()
+    set(protobuf_BUILD_SHARED_LIBS OFF)
+endif ()
 FetchContent_Declare(protobuf
         OVERRIDE_FIND_PACKAGE
 
         URL ${PROTOBUF_SRC_URL}
         URL_HASH SHA256=f6251f2d00aad41b34c1dfa3d752713cb1bb1b7020108168a4deaa206ba8ed42
         INACTIVITY_TIMEOUT 5
-        )
+)
 FetchContent_MakeAvailable(protobuf)
 FetchContent_GetProperties(protobuf)
 find_package(protobuf REQUIRED CONFIG)
@@ -63,7 +74,7 @@ FetchContent_Declare(re2
         URL ${RE2_SRC_URL}
         URL_HASH SHA256=f89c61410a072e5cbcf8c27e3a778da7d6fd2f2b5b1445cd4f4508bee946ab0f
         INACTIVITY_TIMEOUT 5
-        )
+)
 FetchContent_MakeAvailable(re2)
 FetchContent_GetProperties(re2)
 find_package(re2 REQUIRED CONFIG)
@@ -101,8 +112,9 @@ FetchContent_Declare(grpc
         URL ${GRPC_SRC_URL}
         URL_HASH SHA256=7f42363711eb483a0501239fd5522467b31d8fe98d70d7867c6ca7b52440d828
         INACTIVITY_TIMEOUT 5
-        )
+)
 FetchContent_MakeAvailable(grpc)
 FetchContent_GetProperties(grpc)
 
 set_property(GLOBAL PROPERTY protobuf_SOURCE_DIR "${protobuf_SOURCE_DIR}")
+set_property(GLOBAL PROPERTY _PROTOBUF_LIBS_PATH "${protobuf_BINARY_DIR}")

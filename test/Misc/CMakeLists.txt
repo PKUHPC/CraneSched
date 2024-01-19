@@ -26,7 +26,7 @@ gtest_discover_tests(misc_libevent_example_test)
 add_executable(misc_libuv_test libuv_test.cpp)
 target_link_libraries(misc_libuv_test
         GTest::gtest GTest::gtest_main
-        uv::uv-static
+        uvw
         Threads::Threads
 )
 gtest_discover_tests(misc_libuv_test)

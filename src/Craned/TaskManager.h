@@ -40,6 +40,13 @@
 
 namespace Craned {
 
+class TaskManager;
+
+struct EvTimerCbArg {
+  TaskManager* task_manager;
+  task_id_t task_id;
+};
+
 struct BatchMetaInProcessInstance {
   std::string parsed_output_file_pattern;
 };
@@ -141,7 +148,9 @@ struct BatchMetaInTaskInstance {
 struct TaskInstance {
   ~TaskInstance() {
     if (termination_timer) {
-      event_del(termination_timer);
+      delete static_cast<EvTimerCbArg*>(
+          event_get_callback_arg(termination_timer));
+      evtimer_del(termination_timer);
       event_free(termination_timer);
       termination_timer = nullptr;
     }
@@ -262,11 +271,6 @@ class TaskManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
-  struct EvTimerCbArg {
-    TaskManager* task_manager;
-    task_id_t task_id;
-  };
-
   static std::string CgroupStrByTaskId_(uint32_t task_id);
 
   /**
@@ -340,8 +344,11 @@ class TaskManager {
     instance->termination_timer = ev;
   }
 
-  void EvDelTerminationTimer_(TaskInstance* instance) {
+  static void EvDelTerminationTimer_(TaskInstance* instance) {
+    delete static_cast<EvTimerCbArg*>(
+        event_get_callback_arg(instance->termination_timer));
     evtimer_del(instance->termination_timer);
+    event_free(instance->termination_timer);
     instance->termination_timer = nullptr;
   }
 

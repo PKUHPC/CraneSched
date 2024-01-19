@@ -8,6 +8,9 @@ function(PROTOBUF_GENERATE_GRPC_CPP SRCS HDRS OUTDIR SYSTEM_PROTO_DIR)
 
     set(${SRCS})
     set(${HDRS})
+    if (${CRANE_FULL_DYNAMIC})
+        get_property(_PROTOBUF_LIBS_PATH GLOBAL PROPERTY _PROTOBUF_LIBS_PATH)
+    endif ()
     foreach (FIL ${ARGN})
         get_filename_component(ABS_FIL ${FIL} ABSOLUTE)
         get_filename_component(FIL_WE ${FIL} NAME_WE)
@@ -21,7 +24,7 @@ function(PROTOBUF_GENERATE_GRPC_CPP SRCS HDRS OUTDIR SYSTEM_PROTO_DIR)
 
         add_custom_command(
                 OUTPUT "${OUTDIR}/${FIL_WE}.grpc.pb.cc" "${OUTDIR}/${FIL_WE}.grpc.pb.h"
-                COMMAND ${_PROTOBUF_PROTOC}
+                COMMAND ${CMAKE_COMMAND} -E env "LD_LIBRARY_PATH=${_PROTOBUF_LIBS_PATH}:$LD_LIBRARY_PATH"  ${_PROTOBUF_PROTOC}
                 ARGS --grpc_out "${OUTDIR}" --cpp_out "${OUTDIR}" -I ${CMAKE_CURRENT_SOURCE_DIR}
                 -I ${SYSTEM_PROTO_DIR}
                 --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"

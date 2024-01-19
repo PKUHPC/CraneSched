@@ -1,5 +1,11 @@
 include(FetchContent)
 
+if (BUILD_SHARED_LIBS)
+    set(SPDLOG_BUILD_SHARED ON)
+else ()
+    set(SPDLOG_BUILD_SHARED OFF)
+endif ()
+
 if (CRANE_USE_GITEE_SOURCE)
     set(SPDLOG_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/spdlog-1.10.0.tar.gz")
 else ()

@@ -457,6 +457,7 @@ void ParseConfig(int argc, char** argv) {
 void DestroyCtldGlobalVariables() {
   using namespace Ctld;
 
+  g_task_scheduler.reset();
   g_craned_keeper.reset();
 
   // In case that spdlog is destructed before g_embedded_db_client->Close()

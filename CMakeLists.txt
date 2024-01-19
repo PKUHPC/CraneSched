@@ -35,6 +35,11 @@ option(CRANE_NATIVE_ARCH_OPT "Enable -march=native compile option" ON)
 
 option(CRANE_USE_GITEE_SOURCE "Enable the Gitee repository as the download source" ON)
 
+option(CRANE_FULL_DYNAMIC "Enable dynamic libs" OFF)
+
+option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" OFF)
+
+option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
 # Options end here -------------------------------------------------------------------------------
 
 set(CMAKE_CXX_STANDARD 20)
@@ -62,6 +67,37 @@ if (${CRANE_NATIVE_ARCH_OPT})
     add_compile_options(-march=native)
 endif ()
 
+# In CentOS 7, the following packages are required to enable sanitizers:
+# 1. devtoolset-11-libasan-devel.x86_64
+# 2. devtoolset-11-libtsan-devel.x86_64
+if (${CRANE_ADDRESS_SANITIZER})
+    message(STATUS "address_sanitizer is enabled")
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address)
+
+    if (NOT ${CRANE_FULL_DYNAMIC})
+        if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            add_compile_options(-static-libsan)
+        else ()
+            add_compile_options(-static-libasan)
+        endif ()
+    endif ()
+endif ()
+
+if (${CRANE_THREAD_SANITIZER})
+    message(STATUS "thread_sanitizer is enabled")
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=thread)
+
+    if (NOT ${CRANE_FULL_DYNAMIC})
+        if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            add_compile_options(-static-libsan)
+        else ()
+            add_compile_options(-static-libtsan)
+        endif ()
+    endif ()
+endif ()
+
 # Check LTO support
 include(CheckIPOSupported)
 check_ipo_supported(RESULT supported OUTPUT error)
@@ -82,24 +118,23 @@ if (CCACHE_PROGRAM)
     set_property(GLOBAL PROPERTY CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
 endif ()
 
-# If Clang is used, select lld as the linker.
-set(CLANG_LLD_LINKER_FLAGS "-fuse-ld=lld")
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    # Linker flags passed to manually built third party libraries
-    set(CRANE_LINKER_FLAGS_INIT "-DCMAKE_SHARED_LINKER_FLAGS_INIT=${CLANG_LLD_LINKER_FLAGS}")
-
-    # static link on c++ libs
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++ ${CLANG_LLD_LINKER_FLAGS}")
-    # ld doesn't recognize clang object files with IPO / LTO enabled. Use lld here
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++ ${CLANG_LLD_LINKER_FLAGS}")
+if (${CRANE_FULL_DYNAMIC})
+    set(CMAKE_SKIP_BUILD_RPATH FALSE)
+    set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 else ()
-    # Linker flags passed to manually built third party libraries
-    set(CRANE_LINKER_FLAGS_INIT)
-
     # static link on c++ libs
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
 endif ()
+
+# If Clang is used, select lld as the linker.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=lld")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
+endif ()
+
+message("CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS}")
+message("CMAKE_SHARED_LINKER_FLAGS ${CMAKE_SHARED_LINKER_FLAGS}")
 
 if (CMAKE_SIZEOF_VOID_P EQUAL 8)
     # search lib64 directory

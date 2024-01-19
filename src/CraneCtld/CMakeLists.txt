@@ -26,9 +26,9 @@ target_link_libraries(cranectld PRIVATE
 
         Utility_PublicHeader
 
-        event_core_static
-        event_pthreads_static
-        uvw::uvw-static
+        dev_event_core
+        dev_event_pthreads
+        uvw
 
         cxxopts
         Threads::Threads
