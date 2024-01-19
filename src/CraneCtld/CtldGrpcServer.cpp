@@ -1343,10 +1343,9 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     s_sigint_cv.wait(lk);
 
     CRANE_TRACE("SIGINT captured. Calling Shutdown() on grpc server...");
+    g_craned_keeper->Shutdown();
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
-
-    g_craned_keeper->Shutdown();
   });
   sigint_waiting_thread.detach();
 
