@@ -39,7 +39,9 @@
 #include "protos/Crane.pb.h"
 
 namespace Craned {
+
 class TaskManager;
+
 struct EvTimerCbArg {
   TaskManager* task_manager;
   task_id_t task_id;
@@ -141,12 +143,14 @@ class ProcessInstance {
 struct BatchMetaInTaskInstance {
   std::string parsed_sh_script_path;
 };
+
 // Todo: Task may consists of multiple subtasks
 struct TaskInstance {
   ~TaskInstance() {
     if (termination_timer) {
-      delete static_cast<EvTimerCbArg*>(event_get_callback_arg(termination_timer));
-      event_del(termination_timer);
+      delete static_cast<EvTimerCbArg*>(
+          event_get_callback_arg(termination_timer));
+      evtimer_del(termination_timer);
       event_free(termination_timer);
       termination_timer = nullptr;
     }
@@ -340,8 +344,11 @@ class TaskManager {
     instance->termination_timer = ev;
   }
 
-  void EvDelTerminationTimer_(TaskInstance* instance) {
+  static void EvDelTerminationTimer_(TaskInstance* instance) {
+    delete static_cast<EvTimerCbArg*>(
+        event_get_callback_arg(instance->termination_timer));
     evtimer_del(instance->termination_timer);
+    event_free(instance->termination_timer);
     instance->termination_timer = nullptr;
   }
 
