@@ -72,13 +72,13 @@ endif ()
 #need to install devtoolset-11-libasan-devel.x86_64 devtoolset-11-libtsan-devel.x86_64
 if (${CRANE_ADDRESS_SANITIZER})
     message(STATUS "address_sanitizer is enabled")
-    add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=address)
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer -static-libasan)
+    add_link_options(-fsanitize=address )
 endif ()
 
 if (${CRANE_THREAD_SANITIZER})
     message(STATUS "thread_sanitizer is enabled")
-    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -static-libtsan)
     add_link_options(-fsanitize=thread)
 endif ()
 

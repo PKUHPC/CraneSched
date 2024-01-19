@@ -441,7 +441,10 @@ void TaskScheduler::CancelTaskThread_(
       uvw_loop->resource<uvw::idle_handle>();
   idle_handle->on<uvw::idle_event>(
       [this](const uvw::idle_event&, uvw::idle_handle& h) {
-        if (m_thread_stop_) h.parent().stop();
+        if (m_thread_stop_) {
+          h.parent().walk([](auto&& h) { h.close(); });
+          h.parent().stop();
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
       });
 
@@ -458,7 +461,10 @@ void TaskScheduler::SubmitTaskThread_(
       uvw_loop->resource<uvw::idle_handle>();
   idle_handle->on<uvw::idle_event>(
       [this](const uvw::idle_event&, uvw::idle_handle& h) {
-        if (m_thread_stop_) h.parent().stop();
+        if (m_thread_stop_) {
+          h.parent().walk([](auto&& h) { h.close(); });
+          h.parent().stop();
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
       });
 
