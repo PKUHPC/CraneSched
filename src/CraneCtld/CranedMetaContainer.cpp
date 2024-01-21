@@ -283,9 +283,16 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     craned_info->set_free_mem(alloc_res_avail.memory_bytes);
     craned_info->set_running_task_num(
         craned_meta->running_task_resource_map.size());
-    if (craned_meta->alive)
-      craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
-    else
+    if (craned_meta->alive) {
+      if (craned_meta->res_in_use.allocatable_resource.cpu_count == 0 &&
+          craned_meta->res_in_use.allocatable_resource.memory_bytes == 0)
+        craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
+      else if (craned_meta->res_avail.allocatable_resource.cpu_count == 0 ||
+               craned_meta->res_avail.allocatable_resource.memory_bytes == 0)
+        craned_info->set_state(crane::grpc::CranedState::CRANE_ALLOC);
+      else
+        craned_info->set_state(crane::grpc::CranedState::CRANE_MIX);
+    } else
       craned_info->set_state(crane::grpc::CranedState::CRANE_DOWN);
 
     craned_info->mutable_partition_names()->Assign(
@@ -321,9 +328,16 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   craned_info->set_free_mem(alloc_res_avail.memory_bytes);
   craned_info->set_running_task_num(
       craned_meta->running_task_resource_map.size());
-  if (craned_meta->alive)
-    craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
-  else
+  if (craned_meta->alive) {
+    if (craned_meta->res_in_use.allocatable_resource.cpu_count == 0 &&
+        craned_meta->res_in_use.allocatable_resource.memory_bytes == 0)
+      craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
+    else if (craned_meta->res_avail.allocatable_resource.cpu_count == 0 ||
+             craned_meta->res_avail.allocatable_resource.memory_bytes == 0)
+      craned_info->set_state(crane::grpc::CranedState::CRANE_ALLOC);
+    else
+      craned_info->set_state(crane::grpc::CranedState::CRANE_MIX);
+  } else
     craned_info->set_state(crane::grpc::CranedState::CRANE_DOWN);
 
   craned_info->mutable_partition_names()->Assign(
