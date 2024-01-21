@@ -470,6 +470,8 @@ void DestroyCtldGlobalVariables() {
 void InitializeCtldGlobalVariables() {
   using namespace Ctld;
 
+  PasswordEntry::InitializeEntrySize();
+
   crane::InitializeNetworkFunctions();
 
   // Enable inter-thread custom event notification.

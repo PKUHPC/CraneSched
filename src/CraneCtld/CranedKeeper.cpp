@@ -164,10 +164,13 @@ CraneErr CranedStub::CreateCgroupForTasks(
   using crane::grpc::CreateCgroupForTasksReply;
   using crane::grpc::CreateCgroupForTasksRequest;
 
-  ClientContext context;
   Status status;
   CreateCgroupForTasksRequest request;
   CreateCgroupForTasksReply reply;
+
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
   for (auto &&[task_id, uid] : task_uid_pairs) {
     request.mutable_task_id_list()->Add(task_id);
@@ -189,13 +192,17 @@ CraneErr CranedStub::ReleaseCgroupForTask(uint32_t task_id, uid_t uid) {
   using crane::grpc::ReleaseCgroupForTaskReply;
   using crane::grpc::ReleaseCgroupForTaskRequest;
 
-  ClientContext context;
   Status status;
   ReleaseCgroupForTaskRequest request;
   ReleaseCgroupForTaskReply reply;
 
+  ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(kCtldRpcTimeoutSeconds));
+
   request.set_task_id(task_id);
   request.set_uid(uid);
+
   status = m_stub_->ReleaseCgroupForTask(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
@@ -625,9 +632,11 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   // Sometimes, Craned might crash without cleaning up sockets and
   // the socket will remain ESTABLISHED state even if that craned has died.
   // Open KeepAlive option in case of such situation.
+  // See https://grpc.github.io/grpc/cpp/md_doc_keepalive.html
   channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIME_MS, 5 /*s*/ * 1000 /*ms*/);
-  channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 6 /*s*/ * 1000 /*ms*/);
+  channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 10 /*s*/ * 1000 /*ms*/);
   channel_args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1 /*true*/);
+  channel_args.SetInt(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA, 0 /*no limit*/);
 
   CRANE_TRACE("Creating a channel to {}:{}. Channel count: {}", craned_id,
               kCranedDefaultPort, m_channel_count_.fetch_add(1) + 1);

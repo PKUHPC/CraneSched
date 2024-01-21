@@ -407,6 +407,8 @@ void GlobalVariableInit() {
   // Enable inter-thread custom event notification.
   evthread_use_pthreads();
 
+  PasswordEntry::InitializeEntrySize();
+
   util::CgroupUtil::Init();
   if (!util::CgroupUtil::Mounted(
           util::CgroupConstant::Controller::CPU_CONTROLLER) ||
