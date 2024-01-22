@@ -47,6 +47,8 @@ CraneErr CranedStub::ExecuteTasks(
   for (TaskInCtld const *task : tasks) {
     auto *mutable_task = request.mutable_tasks()->Add();
 
+    try {
+
     // Set time_limit
     mutable_task->mutable_time_limit()->CopyFrom(
         google::protobuf::util::TimeUtil::MillisecondsToDuration(
@@ -100,6 +102,13 @@ CraneErr CranedStub::ExecuteTasks(
       mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
       mutable_meta->set_sh_script(meta_in_ctld.sh_script);
     }
+
+    } catch(std::exception& e) {
+      CRANE_ERROR("ExecuteTasks has a exception: {}. "
+          "name.size = {}.", e.what(), task->name.size());
+      std::abort();
+    }
+
   }
 
   status = m_stub_->ExecuteTask(&context, request, &reply);

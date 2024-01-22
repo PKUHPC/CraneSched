@@ -47,7 +47,7 @@ constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 // pending concurrent queue.
 constexpr uint32_t kPendingConcurrentQueueBatchSize = 900000;
 
-constexpr int64_t kCtldRpcTimeoutSeconds = 5;
+constexpr int64_t kCtldRpcTimeoutSeconds = 10; 
 
 struct Config {
   struct Node {
