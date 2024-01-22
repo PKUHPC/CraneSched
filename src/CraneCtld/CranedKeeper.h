@@ -37,7 +37,10 @@ class CranedStub {
 
   ~CranedStub();
 
-  CraneErr ExecuteTasks(std::vector<TaskInCtld const *> const &tasks);
+  CraneErr ExecuteTasks(
+      std::vector<task_id_t> const &tasks,
+      const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>
+          &running_map);
 
   CraneErr CreateCgroupForTasks(
       std::vector<std::pair<task_id_t, uid_t>> const &task_uid_pairs);

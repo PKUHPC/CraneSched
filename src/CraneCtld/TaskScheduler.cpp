@@ -552,8 +552,7 @@ void TaskScheduler::ScheduleThread_() {
 
       absl::flat_hash_map<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
           craned_cgroup_map;
-      absl::flat_hash_map<CranedId, std::vector<TaskInCtld const*>>
-          craned_tasks_map;
+      absl::flat_hash_map<CranedId, std::vector<task_id_t>> craned_tasks_map;
 
       for (auto& it : selection_result_list) {
         auto& task = it.first;
@@ -562,7 +561,8 @@ void TaskScheduler::ScheduleThread_() {
           craned_cgroup_map[craned_id].emplace_back(task->TaskId(), task->uid);
         }
 
-        craned_tasks_map[task->executing_craned_id].emplace_back(task.get());
+        craned_tasks_map[task->executing_craned_id].emplace_back(
+            task->TaskId());
       }
 
       absl::BlockingCounter bl(craned_cgroup_map.size());
@@ -646,14 +646,16 @@ void TaskScheduler::ScheduleThread_() {
               .count());
 
       begin = std::chrono::steady_clock::now();
-
+      // Todo: find a batter way to make sure this task's cgroup create is not
+      // failed
+      m_running_task_map_mtx_.Lock();
       for (auto const& [craned_id, tasks] : craned_tasks_map) {
         auto stub = g_craned_keeper->GetCranedStub(craned_id);
         CRANE_TRACE("Send ExecuteTasks for {} tasks to {}", tasks.size(),
                     craned_id);
-        stub->ExecuteTasks(tasks);
+        stub->ExecuteTasks(tasks, m_running_task_map_);
       }
-
+      m_running_task_map_mtx_.Unlock();
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
           "ExecuteTasks costed {} ms",
