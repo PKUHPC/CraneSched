@@ -4,7 +4,7 @@ After=network.target nss-lookup.target
 
 [Service]
 User=root
-ExecStart=@BINDIR_VAR@/craned
+ExecStart=@CMAKE_INSTALL_PREFIX@/bin/craned
 
 [Install]
 WantedBy=multi-user.target
