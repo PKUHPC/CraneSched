@@ -1,0 +1,23 @@
+# Config for `crane-mininet.py`
+# This file is used to generate routes and hosts for mininet
+cluster:
+  crane01:
+    NodeAddr: 192.168.2.10/24
+    HostNum: 1000
+    Offset: 1
+    Subnet: 10.10.0.0/16
+  crane02:
+    NodeAddr: 192.168.2.11/24
+    HostNum: 1000
+    Offset: 1001
+    Subnet: 10.11.0.0/16
+  crane03:
+    NodeAddr: 192.168.2.12/24
+    HostNum: 1000
+    Offset: 2001
+    Subnet: 10.12.0.0/16
+  # cranectl:
+  #   NodeAddr: 192.168.2.13/24
+  #   HostNum: 500
+  #   Offset: 3001
+  #   Subnet: 10.13.0.0/16
