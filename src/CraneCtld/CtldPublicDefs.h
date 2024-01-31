@@ -236,7 +236,6 @@ struct TaskInCtld {
   std::string cwd;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
-  std::string export_env;
 
  private:
   /* ------------- [2] -------------
@@ -422,7 +421,6 @@ struct TaskInCtld {
     qos = val.qos();
 
     get_user_env = val.get_user_env();
-    export_env = val.export_env();
   }
 
   void SetFieldsByPersistedPart(
@@ -473,7 +471,6 @@ struct TaskInDB {
   std::string cwd;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
-  std::string export_env;
 
  private:
   /* ------------- [2] -------------
@@ -627,8 +624,6 @@ struct TaskInDB {
     cmd_line = val.cmd_line;
     env = val.env;
     cwd = val.cwd;
-
-    export_env = val.export_env;
 
   }
 };

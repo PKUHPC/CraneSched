@@ -621,6 +621,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     close(0);  // close stdin
     util::CloseFdFrom(3);
 
+    if (clearenv()) {
+      fmt::print("clearenv() failed!\n");
+    }
+
     // std::vector<std::string> env_vec =
     //     absl::StrSplit(instance->task.env(), "||");
     std::vector<std::pair<std::string, std::string>> env_vec;
@@ -632,8 +636,12 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // loaded.
     // During login step, "HOME" and "SHELL" are set. Here we are just
     // performing the role of login module.
-    env_vec.emplace_back("HOME", instance->pwd_entry.HomeDir());
-    env_vec.emplace_back("SHELL", instance->pwd_entry.Shell());
+    // su <username> -c /usr/bin/env may maintain more environment variables,
+    // while in most case, only "HOME" and "SHELL" are needed.
+    if (instance->task.get_user_env()) {
+      env_vec.emplace_back("HOME", instance->pwd_entry.HomeDir());
+      env_vec.emplace_back("SHELL", instance->pwd_entry.Shell());
+    }
 
     env_vec.emplace_back("CRANE_JOB_NODELIST",
                          absl::StrJoin(instance->task.allocated_nodes(), ";"));
@@ -650,12 +658,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                                         (1024 * 1024)));
     env_vec.emplace_back("CRANE_JOB_ID",
                          std::to_string(instance->task.task_id()));
-    env_vec.emplace_back("CRANE_EXPORT_ENV",
-                         instance->task.export_env());
-
-    if (instance->task.get_user_env()) {
-      env_vec.emplace_back("CRANE_GET_USER_ENV", "1");
-    }
 
     for (auto & [name, value] : instance->task.env()) {
       env_vec.emplace_back(name, value);
@@ -669,16 +671,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
     env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
 
-    if (!instance->task.get_user_env()) {
-      std::vector<std::string> export_env =
-          absl::StrSplit(instance->task.export_env(), ",");
-      if (export_env.empty() || export_env[0] == "ALL" || export_env[0] == "NIL") {
-        if (clearenv()) {
-          fmt::print("clearenv() failed!\n");
-        }
-      }
-    }
-
     for (const auto& [name, value] : env_vec) {
       if (setenv(name.c_str(), value.c_str(), 1)) {
         fmt::print("setenv for {}={} failed!\n", name, value);
@@ -687,7 +679,15 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
-    argv.emplace_back("--login");
+    if(instance->task.get_user_env()) {
+      // --get-user-env login shell by default,
+      // which will load ~/.bash_profile, ~/.bashrc ...
+      // If not wanted, use /bin/bash instead.
+      argv.emplace_back("--login");
+    }
+    else{
+      argv.emplace_back("/bin/bash");
+    }
     argv.emplace_back(process->GetExecPath().c_str());
     for (auto&& arg : process->GetArgList()) {
       argv.push_back(arg.c_str());

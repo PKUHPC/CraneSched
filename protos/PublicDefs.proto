@@ -101,8 +101,6 @@ message TaskToCtld {
 
   string excludes = 34;
   string nodelist = 35;
-
-  string export_env = 36;
 }
 
 message TaskInEmbeddedDb {
@@ -166,7 +164,6 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
-  string export_env = 25;
 }
 
 message BatchTaskAdditionalMeta {

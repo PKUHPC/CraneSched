@@ -173,7 +173,6 @@ bool MongodbClient::FetchJobRecords(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 export_env
 
   try {
     for (auto view : cursor) {
@@ -221,7 +220,6 @@ bool MongodbClient::FetchJobRecords(
         task->cmd_line = view["submit_line"].get_string().value;
       task->SetExitCode(view["exit_code"].get_int32().value);
       task->get_user_env = view["get_user_env"].get_bool().value;
-      task->export_env = view["export_env"].get_string().value;
 
       // Todo: As for now, only Batch type is implemented and some data
       // resolving
@@ -697,9 +695,8 @@ MongodbClient::document MongodbClient::TaskInDBToDocument_(TaskInDB* task) {
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 export_env
 
-  std::array<std::string, 31> fields{
+  std::array<std::string, 30> fields{
       "task_id",        "task_db_id",    "mod_time",    "deleted",
       "account",  // 0 - 4
       "cpus_req",       "mem_req",       "task_name",   "env",
@@ -712,7 +709,6 @@ MongodbClient::document MongodbClient::TaskInDBToDocument_(TaskInDB* task) {
       "work_dir",                                              // 20 - 24
       "submit_line",    "exit_code",     "username",    "qos",
       "get_user_env",   // 25 - 29
-      "export_env" // 30
   };
 
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,   /*0-4*/
@@ -720,8 +716,7 @@ MongodbClient::document MongodbClient::TaskInDBToDocument_(TaskInDB* task) {
              int32_t, std::string, int32_t, int32_t, std::string, /*10-14*/
              int64_t, int64_t, int64_t, int64_t, int64_t,         /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string, /*20-24*/
-             std::string, int32_t, std::string, std::string, bool, /*25-29*/
-             std::string> /*30*/
+             std::string, int32_t, std::string, std::string, bool>/*25-29*/
       values{// 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -741,9 +736,7 @@ MongodbClient::document MongodbClient::TaskInDBToDocument_(TaskInDB* task) {
              task->SubmitTimeInUnixSecond(), task->cwd,
              // 25-29
              task->cmd_line, task->ExitCode(), task->Username(), task->qos,
-             task->get_user_env,
-             // 30
-             task->export_env};
+             task->get_user_env};
 
   return DocumentConstructor_(fields, values);
 }
