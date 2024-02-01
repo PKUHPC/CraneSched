@@ -1,5 +1,10 @@
 #!/bin/bash
 
+function error_exit {
+  echo "install fail: $1"
+  exit 1
+}
+
 while [[ $# -gt 0 ]]; do
   key="$1"
 
@@ -11,6 +16,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --craned)
       craned_pdsh_params="$2"
+      shift
+      shift
+      ;;
+    --db)
+      db_pdsh_params="$2"
       shift
       shift
       ;;
@@ -49,11 +59,34 @@ if [ -z "$ctld_pdsh_params" ] || [ -z "$craned_pdsh_params" ]; then
   exit 1
 fi
 
-pdsh $ctld_pdsh_params -R ssh "sudo yum install -y pdsh"
-pdsh $craned_pdsh_params -R ssh "sudo yum install -y pdsh"
+echo "checking & installing pdsh.."
 
-pdcp "$ctld_pdsh_params" "$ctld_rpm_path" /tmp/
-pdcp "$craned_pdsh_params" "$craned_rpm_path" /tmp/
+#yum install -y pdsh
+#pdsh "$ctld_pdsh_params" -R ssh "sudo yum install -y pdsh"
+#pdsh "$craned_pdsh_params" -R ssh "sudo yum install -y pdsh"
 
-pdsh $ctld_pdsh_params -R ssh "sudo rpm -ivh /tmp/$ctld_rpm_name"
-pdsh $craned_pdsh_params -R ssh "sudo rpm -ivh /tmp/$craned_rpm_name"
+echo "copying rpm.."
+
+pdcp "$ctld_pdsh_params" "$ctld_rpm_path" /tmp/ || error_exit "copy rpm fail"
+pdcp "$craned_pdsh_params" "$craned_rpm_path" /tmp/ || error_exit "copy rpm fail"
+
+echo "installing rpm.."
+
+pdsh "$ctld_pdsh_params" -R ssh "sudo rpm -ivh /tmp/$ctld_rpm_name" || error_exit "install rpm fail"
+pdsh "$craned_pdsh_params" -R ssh "sudo rpm -ivh /tmp/$craned_rpm_name" || error_exit "install rpm fail"
+
+if [ -z "$ctld_pdsh_params" ]; then
+  echo "skipping mongodb instal.."
+  echo "installation done!"
+  exit 0
+fi
+echo "installing mongodb.."
+echo "please enter the mongodb-data path, or use /var/lib/mongo by default:"
+read -r mongo_path
+if [ -z "$mongo_path" ]; then
+  mongo_path="/var/lib/mongo"
+fi
+
+pdcp "$db_pdsh_params" install_db.sh /tmp/
+pdsh "$db_pdsh_params" -R ssh "sudo bash /tmp/install_db.sh $mongo_path" || error_exit "install mongodb fail"
+echo "installation done."
