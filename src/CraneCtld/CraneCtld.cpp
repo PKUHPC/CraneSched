@@ -164,7 +164,7 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.PriorityConfig.MaxAge = kPriorityDefaultMaxAge;
       if (config["PriorityMaxAge"]) {
-        std::string max_age = config["PriorityMaxAge"].as<std::string>();
+        auto max_age = config["PriorityMaxAge"].as<std::string>();
 
         std::regex pattern_hour_min_sec(R"((\d+):(\d+):(\d+))");
         std::regex pattern_day_hour(R"((\d+)-(\d+))");
@@ -203,7 +203,7 @@ void ParseConfig(int argc, char** argv) {
       }
 
       if (config["PriorityType"]) {
-        std::string priority_type = config["PriorityType"].as<std::string>();
+        auto priority_type = config["PriorityType"].as<std::string>();
         if (priority_type == "priority/multifactor")
           g_config.PriorityConfig.Type = Ctld::Config::Priority::MultiFactor;
         else
@@ -243,6 +243,34 @@ void ParseConfig(int argc, char** argv) {
             config["PriorityWeightQ0S"].as<uint32_t>();
       else
         g_config.PriorityConfig.WeightQOS = 0;
+
+      if (config["CranedContainer"] && config["CranedContainer"]["Enable"] &&
+          config["CranedContainer"]["Enable"].as<bool>()) {
+        try {
+          g_config.CranedContainer.RunTimeState =
+              config["CranedContainer"]["RuntimeState"].as<std::string>();
+          g_config.CranedContainer.RuntimeDelete =
+              config["CranedContainer"]["RuntimeDelete"].as<std::string>();
+          g_config.CranedContainer.RuntimeKill =
+              config["CranedContainer"]["RuntimeKill"].as<std::string>();
+          g_config.CranedContainer.RuntimeRun =
+              config["CranedContainer"]["RuntimeRun"].as<std::string>();
+        } catch (const std::exception& e) {
+          CRANE_ERROR(
+              "Container support is enabled, but the configuration is "
+              "incomplete: {}",
+              e.what());
+          std::exit(1);
+        }
+        g_config.CranedContainer.Enable = true;
+        CRANE_DEBUG("Container support is enabled");
+        CRANE_TRACE("OCI Runtime set to {}",
+                    g_config.CranedContainer.RuntimeRun);
+      } else {
+        g_config.CranedContainer = {};
+        g_config.CranedContainer.Enable = false;
+        CRANE_DEBUG("Container support is disabled");
+      }
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();

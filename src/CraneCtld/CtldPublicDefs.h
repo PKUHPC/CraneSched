@@ -74,6 +74,14 @@ struct Config {
     std::string ServerKeyContent;
   };
 
+  struct CranedContainerConf {
+    bool Enable{false};
+    std::string RunTimeState;
+    std::string RuntimeKill;
+    std::string RuntimeDelete;
+    std::string RuntimeRun;
+  };
+
   struct Priority {
     enum TypeEnum { Basic, MultiFactor };
     TypeEnum Type;
@@ -99,6 +107,8 @@ struct Config {
   std::string CraneCtldDbPath;
 
   bool CraneCtldForeground{};
+
+  CranedContainerConf CranedContainer;
 
   std::string Hostname;
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
