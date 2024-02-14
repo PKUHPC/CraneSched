@@ -26,7 +26,6 @@
 
 namespace fs = std::filesystem;
 using Ctld::EmbeddedDbClient;
-using Ctld::task_db_id_t;
 
 class EmbeddedDbClientTest : public ::testing::Test {
   void SetUp() override {

@@ -719,6 +719,12 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     auto [iter, _] =
         this_->m_task_map_.emplace(task_id, std::move(popped_instance));
 
+    // Add a timer to limit the execution time of a task.
+    // Note: event_new and event_add in this function is not thread safe,
+    //       so we move it outside the multithreading part.
+    this_->EvAddTerminationTimer_(instance,
+                                  instance->task.time_limit().seconds());
+
     g_thread_pool->detach_task([this_, instance, task_id]() {
       if (!this_->m_task_id_to_cg_map_.Contains(task_id)) {
         CRANE_ERROR("Failed to find created cgroup for task #{}", task_id);
@@ -781,7 +787,6 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
                 task_id));
         return;
       }
-
       // If this is a batch task, run it now.
       if (instance->task.type() == crane::grpc::Batch) {
         instance->batch_meta.parsed_sh_script_path =
@@ -875,10 +880,6 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
                   task_id));
         }
       }
-
-      // Add a timer to limit the execution time of a task.
-      this_->EvAddTerminationTimer_(instance,
-                                    instance->task.time_limit().seconds());
     });
   }
 }

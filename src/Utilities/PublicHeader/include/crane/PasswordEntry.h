@@ -22,24 +22,36 @@
 
 class PasswordEntry {
  public:
-  PasswordEntry() = default;
+  static void InitializeEntrySize() {
+    s_passwd_size_ = sysconf(_SC_GETPW_R_SIZE_MAX);
+    if (s_passwd_size_ == -1) s_passwd_size_ = 16384;
+  }
 
   explicit PasswordEntry(uid_t uid) { Init(uid); }
-
+  PasswordEntry() = default;
   void Init(uid_t uid) {
     m_uid_ = uid;
+    struct passwd pwd;
+    struct passwd* result;
+    char* buf;
+    buf = new char[s_passwd_size_];
 
-    passwd* pwd_tmp = getpwuid(uid);
-    if (pwd_tmp == nullptr) return;
+    if (getpwuid_r(uid, &pwd, buf, s_passwd_size_, &result) != 0) {
+      CRANE_ERROR("Error when getpwuid_r");
+    } else if (result == NULL) {
+      CRANE_ERROR("User uid #{} not found.", uid);
+    } else {
+      m_valid_ = true;
+      m_pw_name_.assign(pwd.pw_name);
+      m_pw_passwd_.assign(pwd.pw_passwd);
+      m_pw_uid_ = pwd.pw_uid;
+      m_pw_gid_ = pwd.pw_gid;
+      m_pw_gecos_.assign(pwd.pw_gecos);
+      m_pw_dir_.assign(pwd.pw_dir);
+      m_pw_shell_.assign(pwd.pw_shell);
+    }
 
-    m_valid_ = true;
-    m_pw_name_.assign(pwd_tmp->pw_name);
-    m_pw_passwd_.assign(pwd_tmp->pw_passwd);
-    m_pw_uid_ = pwd_tmp->pw_uid;
-    m_pw_gid_ = pwd_tmp->pw_gid;
-    m_pw_gecos_.assign(pwd_tmp->pw_gecos);
-    m_pw_dir_.assign(pwd_tmp->pw_dir);
-    m_pw_shell_.assign(pwd_tmp->pw_shell);
+    delete[] buf;
   }
 
   bool Valid() const { return m_valid_; };
@@ -62,4 +74,6 @@ class PasswordEntry {
   std::string m_pw_gecos_;  /* user information */
   std::string m_pw_dir_;    /* home directory */
   std::string m_pw_shell_;  /* shell program */
+
+  static inline size_t s_passwd_size_;
 };

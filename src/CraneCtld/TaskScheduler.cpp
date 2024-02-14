@@ -1174,9 +1174,6 @@ void TaskScheduler::QueryTasksInRam(
     crane::grpc::QueryTasksInfoReply* response) {
   auto* task_list = response->mutable_task_info_list();
 
-  LockGuard pending_guard(&m_pending_task_map_mtx_);
-  LockGuard running_guard(&m_running_task_map_mtx_);
-
   auto append_fn = [&](auto& it) {
     TaskInCtld& task = *it.second;
     auto* task_it = task_list->Add();
@@ -1320,6 +1317,9 @@ void TaskScheduler::QueryTasksInRam(
                       ranges::views::filter(task_rng_filter_time) |
                       ranges::views::filter(task_rng_filter_qos) |
                       ranges::views::take(num_limit);
+
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
 
   ranges::for_each(filtered_rng, append_fn);
 }
