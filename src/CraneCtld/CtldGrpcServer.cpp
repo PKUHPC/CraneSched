@@ -425,10 +425,9 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     return valid;
   };
 
-  auto db_task_rng_filter_account =
-      [&](std::unique_ptr<TaskInDB> const &task) {
-        return no_accounts_constraint || req_accounts.contains(task->account);
-      };
+  auto db_task_rng_filter_account = [&](std::unique_ptr<TaskInDB> const &task) {
+    return no_accounts_constraint || req_accounts.contains(task->account);
+  };
 
   auto db_task_rng_filter_user = [&](std::unique_ptr<TaskInDB> const &task) {
     return no_username_constraint || req_users.contains(task->Username());

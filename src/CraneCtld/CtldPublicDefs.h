@@ -414,7 +414,7 @@ struct TaskInCtld {
     name = val.name();
     qos = val.qos();
     cmd_line = val.cmd_line();
-    for (auto &[name, value] : val.env()) {
+    for (auto& [name, value] : val.env()) {
       env[name] = value;
     }
     cwd = val.cwd();
@@ -503,7 +503,6 @@ struct TaskInDB {
   crane::grpc::PersistedPartOfTaskInCtld persisted_part;
 
  public:
-
   /* -----------
    * Fields that may change at run time.
    * However, these fields are NOT persisted on the disk.
@@ -610,7 +609,6 @@ struct TaskInDB {
     //      meta.emplace<InteractiveMetaInTask>(std::get<InteractiveMetaInTask>(val.meta));
     //    }
 
-
     uid = val.uid;
     account = val.account;
     name = val.name;
@@ -624,10 +622,8 @@ struct TaskInDB {
     cmd_line = val.cmd_line;
     env = val.env;
     cwd = val.cwd;
-
   }
 };
-
 
 struct Qos {
   bool deleted = false;

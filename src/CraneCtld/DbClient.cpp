@@ -193,7 +193,8 @@ bool MongodbClient::FetchJobRecords(
           task->resources.allocatable_resource.memory_sw_bytes =
               view["mem_req"].get_int64().value;
       task->name = view["task_name"].get_string().value;
-      for (const auto& element : bsoncxx::from_json(view["env"].get_string().value).view()) {
+      for (const auto& element :
+           bsoncxx::from_json(view["env"].get_string().value).view()) {
         task->env[std::string(element.key())] = element.get_string().value;
       }
       task->qos = view["qos"].get_string().value;
@@ -687,6 +688,7 @@ MongodbClient::document MongodbClient::TaskInDBToDocument_(TaskInDB* task) {
   for (const auto& entry : task->env) {
     env_doc << entry.first << entry.second;
   }
+
   std::string env_str = bsoncxx::to_json(env_doc.view());
 
   // 0  task_id       task_db_id     mod_time       deleted       account
@@ -706,17 +708,18 @@ MongodbClient::document MongodbClient::TaskInDBToDocument_(TaskInDB* task) {
       "priority",       "time_eligible", "time_start",  "time_end",
       "time_suspended",  // 15 - 19
       "script",         "state",         "timelimit",   "time_submit",
-      "work_dir",                                              // 20 - 24
+      "work_dir",  // 20 - 24
       "submit_line",    "exit_code",     "username",    "qos",
-      "get_user_env",   // 25 - 29
+      "get_user_env",  // 25 - 29
   };
 
-  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,   /*0-4*/
-             double, int64_t, std::string, std::string, int32_t,  /*5-9*/
-             int32_t, std::string, int32_t, int32_t, std::string, /*10-14*/
-             int64_t, int64_t, int64_t, int64_t, int64_t,         /*15-19*/
-             std::string, int32_t, int64_t, int64_t, std::string, /*20-24*/
-             std::string, int32_t, std::string, std::string, bool>/*25-29*/
+  std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
+             double, int64_t, std::string, std::string, int32_t,   /*5-9*/
+             int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
+             int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
+             std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
+             std::string, int32_t, std::string, std::string, bool> /*25-29*/
+
       values{// 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,

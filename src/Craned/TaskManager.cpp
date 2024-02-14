@@ -625,20 +625,26 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       fmt::print("clearenv() failed!\n");
     }
 
-    // std::vector<std::string> env_vec =
-    //     absl::StrSplit(instance->task.env(), "||");
     std::vector<std::pair<std::string, std::string>> env_vec;
 
-    // Since we want to reinitialize the environment variables of the user,
-    // we are actually performing two steps: login -> start shell.
-    // Shell starting is done by calling "bash --login".
-    // During shell starting step, /etc/profile, ~/.bash_profile, ... are
-    // loaded.
-    // During login step, "HOME" and "SHELL" are set. Here we are just
-    // performing the role of login module.
-    // su <username> -c /usr/bin/env may maintain more environment variables,
-    // while in most case, only "HOME" and "SHELL" are needed.
     if (instance->task.get_user_env()) {
+      // If --get-user-env is set, the new environment is inherited
+      // from the execution CraneD rather than the submitting node.
+      //
+      // Since we want to reinitialize the environment variables of the user
+      // by reloading the settings in something like .bashrc or /etc/profile,
+      // we are actually performing two steps: login -> start shell.
+      // Shell starting is done by calling "bash --login".
+      //
+      // During shell starting step, the settings in
+      // /etc/profile, ~/.bash_profile, ... are loaded.
+      //
+      // During login step, "HOME" and "SHELL" are set.
+      // Here we are just mimicking the login module.
+
+      // Slurm uses `su <username> -c /usr/bin/env` to retrieve
+      // all the environment variables.
+      // We use a more tidy way.
       env_vec.emplace_back("HOME", instance->pwd_entry.HomeDir());
       env_vec.emplace_back("SHELL", instance->pwd_entry.Shell());
     }
@@ -659,7 +665,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     env_vec.emplace_back("CRANE_JOB_ID",
                          std::to_string(instance->task.task_id()));
 
-    for (auto & [name, value] : instance->task.env()) {
+    for (auto& [name, value] : instance->task.env()) {
       env_vec.emplace_back(name, value);
     }
 
@@ -679,15 +685,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
-    if(instance->task.get_user_env()) {
-      // --get-user-env login shell by default,
-      // which will load ~/.bash_profile, ~/.bashrc ...
-      // If not wanted, use /bin/bash instead.
+    if (instance->task.get_user_env()) {
+      // If --get-user-env is specified,
+      // we need to use --login option of bash to load settings from the user's
+      // settings.
       argv.emplace_back("--login");
     }
-    else{
-      argv.emplace_back("/bin/bash");
-    }
+
     argv.emplace_back(process->GetExecPath().c_str());
     for (auto&& arg : process->GetArgList()) {
       argv.push_back(arg.c_str());
