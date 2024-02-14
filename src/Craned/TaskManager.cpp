@@ -627,6 +627,11 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     std::vector<std::pair<std::string, std::string>> env_vec;
 
+    // Load env from the front end.
+    for (auto& [name, value] : instance->task.env()) {
+      env_vec.emplace_back(name, value);
+    }
+
     if (instance->task.get_user_env()) {
       // If --get-user-env is set, the new environment is inherited
       // from the execution CraneD rather than the submitting node.
@@ -664,10 +669,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                                         (1024 * 1024)));
     env_vec.emplace_back("CRANE_JOB_ID",
                          std::to_string(instance->task.task_id()));
-
-    for (auto& [name, value] : instance->task.env()) {
-      env_vec.emplace_back(name, value);
-    }
 
     int64_t time_limit_sec = instance->task.time_limit().seconds();
     int hours = time_limit_sec / 3600;
