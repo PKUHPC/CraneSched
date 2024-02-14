@@ -621,10 +621,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     close(0);  // close stdin
     util::CloseFdFrom(3);
 
-    if (clearenv()) {
-      fmt::print("clearenv() failed!\n");
-    }
-
     std::vector<std::pair<std::string, std::string>> env_vec;
 
     // Load env from the front end.
@@ -677,6 +673,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     std::string time_limit =
         fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
     env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
+
+    if (clearenv()) {
+      fmt::print("clearenv() failed!\n");
+    }
 
     for (const auto& [name, value] : env_vec) {
       if (setenv(name.c_str(), value.c_str(), 1)) {
