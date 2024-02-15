@@ -24,6 +24,16 @@ while [[ $# -gt 0 ]]; do
       shift
       shift
       ;;
+    --dbpath)
+      mongo_path="$2"
+      shift
+      shift
+      ;;
+    -f)
+      force_install="1"
+      shift
+      shift
+      ;;
     *)
       echo "unknown option $1"
       exit 1
@@ -60,29 +70,45 @@ if [ -z "$ctld_pdsh_params" ] || [ -z "$craned_pdsh_params" ]; then
 fi
 
 echo "checking & installing pdsh.."
-
-#yum install -y pdsh
-#pdsh "$ctld_pdsh_params" -R ssh "sudo yum install -y pdsh"
-#pdsh "$craned_pdsh_params" -R ssh "sudo yum install -y pdsh"
+if command -v pdsh &> /dev/null; then
+    echo "pdsh check done"
+else
+    echo "installing pdsh.."
+    sudo yum install -y pdsh
+fi
+output=$(pdsh "$ctld_pdsh_params" -R ssh "rpm -q pdsh 2>/dev/null")
+if [[ ! "$output" =~ "pdsh" ]]; then
+  echo "installing pdsh for nodes.."
+  pdsh "$ctld_pdsh_params" -R ssh "sudo yum install -y pdsh"
+fi
+output=$(pdsh "$craned_pdsh_params" -R ssh "rpm -q pdsh 2>/dev/null")
+if [[ ! "$output" =~ "pdsh" ]]; then
+  echo "installing pdsh for nodes.."
+  pdsh "$craned_pdsh_params" -R ssh "sudo yum install -y pdsh"
+fi
 
 echo "copying rpm.."
 
 pdcp "$ctld_pdsh_params" "$ctld_rpm_path" /tmp/ || error_exit "copy rpm fail"
 pdcp "$craned_pdsh_params" "$craned_rpm_path" /tmp/ || error_exit "copy rpm fail"
 
+if [ -n "$force_install" ]; then
+  echo "uninstalling former rpm.."
+  pdsh "$ctld_pdsh_params" -R ssh "sudo yum remove cranesched-cranectld -y" || error_exit "uninstall former rpm fail"
+  pdsh "$craned_pdsh_params" -R ssh "sudo yum remove cranesched-craned -y" || error_exit "uninstall former rpm fail"
+fi
+
 echo "installing rpm.."
 
 pdsh "$ctld_pdsh_params" -R ssh "sudo rpm -ivh /tmp/$ctld_rpm_name" || error_exit "install rpm fail"
 pdsh "$craned_pdsh_params" -R ssh "sudo rpm -ivh /tmp/$craned_rpm_name" || error_exit "install rpm fail"
 
-if [ -z "$ctld_pdsh_params" ]; then
+if [ -z "$db_pdsh_params" ]; then
   echo "skipping mongodb instal.."
   echo "installation done!"
   exit 0
 fi
 echo "installing mongodb.."
-echo "please enter the mongodb-data path, or use /var/lib/mongo by default:"
-read -r mongo_path
 if [ -z "$mongo_path" ]; then
   mongo_path="/var/lib/mongo"
 fi
