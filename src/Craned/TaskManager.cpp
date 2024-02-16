@@ -686,6 +686,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
+
+    // Argv[0] is the program name which can be anything.
+    argv.emplace_back("CraneScript");
+
     if (instance->task.get_user_env()) {
       // If --get-user-env is specified,
       // we need to use --login option of bash to load settings from the user's
