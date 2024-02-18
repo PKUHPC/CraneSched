@@ -95,6 +95,7 @@ CraneErr CranedStub::ExecuteTasks(
         task->StartTimeInUnixSecond());
     mutable_task->mutable_time_limit()->set_seconds(
         ToInt64Seconds(task->time_limit));
+    mutable_task->set_container(task->container);
 
     if (task->type == crane::grpc::Batch) {
       auto &meta_in_ctld = std::get<BatchMetaInTask>(task->meta);

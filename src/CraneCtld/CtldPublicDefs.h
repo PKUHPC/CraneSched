@@ -234,6 +234,7 @@ struct TaskInCtld {
   std::string cmd_line;
   std::unordered_map<std::string, std::string> env;
   std::string cwd;
+  std::string container;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
@@ -421,6 +422,7 @@ struct TaskInCtld {
     qos = val.qos();
 
     get_user_env = val.get_user_env();
+    container = val.container();
   }
 
   void SetFieldsByPersistedPart(
