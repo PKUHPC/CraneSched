@@ -55,7 +55,7 @@ class MongodbClient {
   bool InsertJob(TaskInCtld* task);
   bool InsertJobs(const std::vector<TaskInCtld*>& tasks);
 
-  bool FetchJobRecords(std::vector<std::unique_ptr<TaskInDB>>* task_list,
+  bool FetchJobRecords(std::vector<std::unique_ptr<TaskInDb>>* task_list,
                        size_t limit, bool reverse);
 
   bool CheckTaskDbIdExisted(int64_t task_db_id);

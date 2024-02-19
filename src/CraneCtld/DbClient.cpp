@@ -161,7 +161,7 @@ bool MongodbClient::InsertJobs(const std::vector<TaskInCtld*>& tasks) {
 }
 
 bool MongodbClient::FetchJobRecords(
-    std::vector<std::unique_ptr<TaskInDB>>* task_list, size_t limit,
+    std::vector<std::unique_ptr<TaskInDb>>* task_list, size_t limit,
     bool reverse) {
   mongocxx::options::find option;
   if (limit > 0) {
@@ -186,16 +186,14 @@ bool MongodbClient::FetchJobRecords(
 
   try {
     for (auto view : cursor) {
-      auto task = std::make_unique<TaskInDB>();
+      auto task = std::make_unique<TaskInDb>();
 
-      task->SetTaskId(view["task_id"].get_int32().value);
-      task->SetTaskDbId(view["task_db_id"].get_int64().value);
+      task->task_id = view["task_id"].get_int32().value;
 
-      task->node_num = task->nodes_alloc =
-          view["nodes_alloc"].get_int32().value;  //?
+      task->node_num = view["nodes_alloc"].get_int32().value;
 
       task->account = view["account"].get_string().value.data();
-      task->SetUsername(view["username"].get_string().value.data());
+      task->username = view["username"].get_string().value.data();
 
       task->resources.allocatable_resource.cpu_count =
           view["cpus_req"].get_double().value;
@@ -203,34 +201,23 @@ bool MongodbClient::FetchJobRecords(
           task->resources.allocatable_resource.memory_sw_bytes =
               view["mem_req"].get_int64().value;
       task->name = view["task_name"].get_string().value;
-      for (const auto& element :
-           bsoncxx::from_json(view["env"].get_string().value).view()) {
-        task->env[std::string(element.key())] = element.get_string().value;
-      }
       task->qos = view["qos"].get_string().value;
       task->uid = view["id_user"].get_int32().value;
-      task->SetGid(view["id_group"].get_int32().value);
+      task->gid = view["id_group"].get_int32().value;
       task->allocated_craneds_regex =
           view["nodelist"].get_string().value.data();
       task->partition_id = view["partition_name"].get_string().value;
       task->SetStartTimeByUnixSecond(view["time_start"].get_int64().value);
       task->SetEndTimeByUnixSecond(view["time_end"].get_int64().value);
 
-      if (task->type == crane::grpc::Batch) {
-        task->meta = Ctld::BatchMetaInTask{};
-        auto& batch_meta = std::get<Ctld::BatchMetaInTask>(task->meta);
-        batch_meta.sh_script = view["script"].get_string().value;
-      }
-
-      task->SetStatus(static_cast<crane::grpc::TaskStatus>(
-          view["state"].get_int32().value));
+      task->status =
+          static_cast<crane::grpc::TaskStatus>(view["state"].get_int32().value);
       task->time_limit = absl::Seconds(view["timelimit"].get_int64().value);
       task->SetSubmitTimeByUnixSecond(view["time_submit"].get_int64().value);
       task->cwd = view["work_dir"].get_string().value;
       if (view["submit_line"])
         task->cmd_line = view["submit_line"].get_string().value;
-      task->SetExitCode(view["exit_code"].get_int32().value);
-      task->get_user_env = view["get_user_env"].get_bool().value;
+      task->exit_code = view["exit_code"].get_int32().value;
 
       // Todo: As for now, only Batch type is implemented and some data
       // resolving
