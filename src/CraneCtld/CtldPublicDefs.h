@@ -232,7 +232,7 @@ struct TaskInCtld {
   bool get_user_env{false};
 
   std::string cmd_line;
-  std::map<std::string, std::string> env;
+  std::unordered_map<std::string, std::string> env;
   std::string cwd;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
@@ -414,9 +414,9 @@ struct TaskInCtld {
     name = val.name();
     qos = val.qos();
     cmd_line = val.cmd_line();
-    for (auto& [name, value] : val.env()) {
-      env[name] = value;
-    }
+
+    for (auto& [k, v] : val.env()) env[k] = v;
+
     cwd = val.cwd();
     qos = val.qos();
 
