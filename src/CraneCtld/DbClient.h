@@ -50,6 +50,8 @@ class MongodbClient {
   bool Connect();
 
   /* ----- Method of operating the job table ----------- */
+  bool InsertRecoveredJob(
+      crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
   bool InsertJob(TaskInCtld* task);
   bool InsertJobs(const std::vector<TaskInCtld*>& tasks);
 
@@ -212,7 +214,9 @@ class MongodbClient {
 
   document QosToDocument_(const Qos& qos);
 
-  document TaskInDBToDocument_(TaskInDB* task);
+  document TaskInCtldToDocument_(TaskInCtld* task);
+  document TaskInEmbeddedDbToDocument_(
+      crane::grpc::TaskInEmbeddedDb const& task);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_task_collection_name_{"task_table"};

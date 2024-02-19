@@ -335,6 +335,18 @@ bool TaskScheduler::Init() {
                ended_list.size());
 
     for (auto& task_in_embedded_db : ended_list) {
+      task_id_t task_id = task_in_embedded_db.persisted_part().task_id();
+      task_db_id_t db_id = task_in_embedded_db.persisted_part().task_db_id();
+      ok = g_db_client->CheckTaskDbIdExisted(db_id);
+      if (!ok) {
+        if (!g_db_client->InsertRecoveredJob(task_in_embedded_db)) {
+          CRANE_ERROR(
+              "Failed to call g_db_client->InsertRecoveredJob() "
+              "for task #{}",
+              task_id);
+        }
+      }
+
       ok = g_embedded_db_client->PurgeTaskFromEnded(
           0, task_in_embedded_db.persisted_part().task_db_id());
       if (!ok) {
