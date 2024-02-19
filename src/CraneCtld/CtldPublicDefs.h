@@ -229,9 +229,10 @@ struct TaskInCtld {
   std::unordered_set<std::string> excluded_nodes;
 
   bool requeue_if_failed{false};
+  bool get_user_env{false};
 
   std::string cmd_line;
-  std::string env;
+  std::unordered_map<std::string, std::string> env;
   std::string cwd;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
@@ -413,9 +414,13 @@ struct TaskInCtld {
     name = val.name();
     qos = val.qos();
     cmd_line = val.cmd_line();
-    env = val.env();
+
+    for (auto& [k, v] : val.env()) env[k] = v;
+
     cwd = val.cwd();
     qos = val.qos();
+
+    get_user_env = val.get_user_env();
   }
 
   void SetFieldsByPersistedPart(
@@ -440,6 +445,37 @@ struct TaskInCtld {
     start_time = absl::FromUnixSeconds(persisted_part.start_time().seconds());
     end_time = absl::FromUnixSeconds(persisted_part.end_time().seconds());
   }
+};
+
+struct TaskInDb {
+  crane::grpc::TaskType type;
+  task_id_t task_id;
+  std::string name;
+  PartitionId partition_id;
+  uid_t uid;
+
+  gid_t gid;
+  absl::Duration time_limit;
+  google::protobuf::Timestamp submit_time;
+  google::protobuf::Timestamp start_time;
+  google::protobuf::Timestamp end_time;
+  std::string account;
+
+  uint32_t node_num{0};
+  std::string cmd_line;
+  std::string cwd;
+  std::string username;
+  std::string qos;
+
+  Resources resources;
+  uint32_t exit_code;
+  crane::grpc::TaskStatus status;
+  std::string allocated_craneds_regex;
+
+  void SetSubmitTimeByUnixSecond(uint64_t val) { submit_time.set_seconds(val); }
+  void SetStartTimeByUnixSecond(uint64_t val) { start_time.set_seconds(val); }
+
+  void SetEndTimeByUnixSecond(uint64_t val) { end_time.set_seconds(val); }
 };
 
 struct Qos {

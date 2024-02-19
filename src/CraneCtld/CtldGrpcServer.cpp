@@ -352,7 +352,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 
   // Query completed tasks in Mongodb
   // (only for cacct, which sets `option_include_completed_tasks` to true)
-  std::vector<std::unique_ptr<TaskInCtld>> db_ended_list;
+  std::vector<std::unique_ptr<TaskInDb>> db_ended_list;
   ok = g_db_client->FetchJobRecords(&db_ended_list,
                                     num_limit - task_list->size(), true);
   if (!ok) {
@@ -360,39 +360,38 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     return grpc::Status::OK;
   }
 
-  auto db_ended_append_fn = [&](std::unique_ptr<TaskInCtld> const &task) {
+  auto db_ended_append_fn = [&](std::unique_ptr<TaskInDb> const &task) {
     auto *task_it = task_list->Add();
 
     task_it->set_type(task->type);
-    task_it->set_task_id(task->TaskId());
+    task_it->set_task_id(task->task_id);
     task_it->set_name(task->name);
     task_it->set_partition(task->partition_id);
     task_it->set_uid(task->uid);
 
-    task_it->set_gid(task->Gid());
+    task_it->set_gid(task->gid);
     task_it->mutable_time_limit()->set_seconds(
         ToInt64Seconds(task->time_limit));
-    task_it->mutable_submit_time()->CopyFrom(
-        task->PersistedPart().submit_time());
-    task_it->mutable_start_time()->CopyFrom(task->PersistedPart().start_time());
-    task_it->mutable_end_time()->CopyFrom(task->PersistedPart().end_time());
+    task_it->mutable_submit_time()->CopyFrom(task->submit_time);
+    task_it->mutable_start_time()->CopyFrom(task->start_time);
+    task_it->mutable_end_time()->CopyFrom(task->end_time);
     task_it->set_account(task->account);
 
     task_it->set_node_num(task->node_num);
     task_it->set_cmd_line(task->cmd_line);
     task_it->set_cwd(task->cwd);
-    task_it->set_username(task->PersistedPart().username());
+    task_it->set_username(task->username);
     task_it->set_qos(task->qos);
 
     task_it->set_alloc_cpu(task->resources.allocatable_resource.cpu_count *
                            task->node_num);
-    task_it->set_exit_code(task->ExitCode());
+    task_it->set_exit_code(task->exit_code);
 
-    task_it->set_status(task->Status());
+    task_it->set_status(task->status);
     task_it->set_craned_list(task->allocated_craneds_regex);
   };
 
-  auto db_task_rng_filter_time = [&](std::unique_ptr<TaskInCtld> const &task) {
+  auto db_task_rng_filter_time = [&](std::unique_ptr<TaskInDb> const &task) {
     bool has_submit_time_interval = request->has_filter_submit_time_interval();
     bool has_start_time_interval = request->has_filter_start_time_interval();
     bool has_end_time_interval = request->has_filter_end_time_interval();
@@ -401,61 +400,58 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     if (has_submit_time_interval) {
       const auto &interval = request->filter_submit_time_interval();
       valid &= !interval.has_lower_bound() ||
-               task->PersistedPart().submit_time() >= interval.lower_bound();
+               task->submit_time >= interval.lower_bound();
       valid &= !interval.has_upper_bound() ||
-               task->PersistedPart().submit_time() <= interval.upper_bound();
+               task->submit_time <= interval.upper_bound();
     }
 
     if (has_start_time_interval) {
       const auto &interval = request->filter_start_time_interval();
       valid &= !interval.has_lower_bound() ||
-               task->PersistedPart().start_time() >= interval.lower_bound();
+               task->start_time >= interval.lower_bound();
       valid &= !interval.has_upper_bound() ||
-               task->PersistedPart().start_time() <= interval.upper_bound();
+               task->start_time <= interval.upper_bound();
     }
 
     if (has_end_time_interval) {
       const auto &interval = request->filter_end_time_interval();
       valid &= !interval.has_lower_bound() ||
-               task->PersistedPart().end_time() >= interval.lower_bound();
+               task->end_time >= interval.lower_bound();
       valid &= !interval.has_upper_bound() ||
-               task->PersistedPart().end_time() <= interval.upper_bound();
+               task->end_time <= interval.upper_bound();
     }
 
     return valid;
   };
 
-  auto db_task_rng_filter_account =
-      [&](std::unique_ptr<TaskInCtld> const &task) {
-        return no_accounts_constraint || req_accounts.contains(task->account);
-      };
-
-  auto db_task_rng_filter_user = [&](std::unique_ptr<TaskInCtld> const &task) {
-    return no_username_constraint || req_users.contains(task->Username());
+  auto db_task_rng_filter_account = [&](std::unique_ptr<TaskInDb> const &task) {
+    return no_accounts_constraint || req_accounts.contains(task->account);
   };
 
-  auto db_task_rng_filter_name = [&](std::unique_ptr<TaskInCtld> const &task) {
-    return no_task_names_constraint ||
-           req_task_names.contains(task->TaskToCtld().name());
+  auto db_task_rng_filter_user = [&](std::unique_ptr<TaskInDb> const &task) {
+    return no_username_constraint || req_users.contains(task->username);
   };
 
-  auto db_task_rng_filter_qos = [&](std::unique_ptr<TaskInCtld> const &task) {
+  auto db_task_rng_filter_name = [&](std::unique_ptr<TaskInDb> const &task) {
+    return no_task_names_constraint || req_task_names.contains(task->name);
+  };
+
+  auto db_task_rng_filter_qos = [&](std::unique_ptr<TaskInDb> const &task) {
     return no_qos_constraint || req_qos.contains(task->qos);
   };
 
   auto db_task_rng_filter_partition =
-      [&](std::unique_ptr<TaskInCtld> const &task) {
+      [&](std::unique_ptr<TaskInDb> const &task) {
         return no_partitions_constraint ||
-               req_partitions.contains(task->TaskToCtld().partition_name());
+               req_partitions.contains(task->partition_id);
       };
 
-  auto db_task_rng_filter_id = [&](std::unique_ptr<TaskInCtld> const &task) {
-    return no_task_ids_constraint || req_task_ids.contains(task->TaskId());
+  auto db_task_rng_filter_id = [&](std::unique_ptr<TaskInDb> const &task) {
+    return no_task_ids_constraint || req_task_ids.contains(task->task_id);
   };
 
-  auto db_task_rng_filter_state = [&](std::unique_ptr<TaskInCtld> const &task) {
-    return no_task_states_constraint ||
-           req_task_states.contains(task->PersistedPart().status());
+  auto db_task_rng_filter_state = [&](std::unique_ptr<TaskInDb> const &task) {
+    return no_task_states_constraint || req_task_states.contains(task->status);
   };
 
   auto db_ended_rng = db_ended_list |

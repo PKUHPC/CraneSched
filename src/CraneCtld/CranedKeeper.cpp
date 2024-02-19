@@ -83,8 +83,10 @@ CraneErr CranedStub::ExecuteTasks(
     mutable_task->set_cpus_per_task(task->cpus_per_task);
 
     mutable_task->set_uid(task->uid);
-    mutable_task->set_env(task->env);
+    mutable_task->mutable_env()->insert(task->env.begin(), task->env.end());
+
     mutable_task->set_cwd(task->cwd);
+    mutable_task->set_get_user_env(task->get_user_env);
 
     for (const auto &hostname : task->CranedIds())
       mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
