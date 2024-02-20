@@ -31,13 +31,13 @@ CranedLogFile: /tmp/craned/craned.log
 # Determines whether the craned is running in the background
 CranedForeground: true
 
-# Container
+# Container Runtime Options
 CranedContainer:
   Enable: true
-  RuntimeState: "/usr/bin/runc state %n.%u.%j.%s.%t"
-  RuntimeKill: "/usr/bin/runc  --rootless=true --root=/run/user/%U/ kill -a %n.%u.%j.%s.%t"
-  RuntimeDelete: "/usr/bin/runc  --rootless=true --root=/run/user/%U/ delete --force %n.%u.%j.%s.%t"
-  RuntimeRun: "/usr/bin/runc  --rootless=true --root=/run/user/%U/ run %n.%u.%j.%s.%t -b %b"
+  RuntimeState: "/usr/bin/runc --root=/run/user/%U/ state %u.%j"
+  RuntimeKill: "/usr/bin/runc  --rootless=true --root=/run/user/%U/ kill -a %u.%j"
+  RuntimeDelete: "/usr/bin/runc  --rootless=true --root=/run/user/%U/ delete --force %u.%j"
+  RuntimeRun: "/usr/bin/runc  --rootless=true --root=/run/user/%U/ run -b %b %u.%j"
 
 PriorityType: priority/multifactor
 
