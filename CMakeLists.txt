@@ -100,7 +100,7 @@ endif ()
 
 # If Clang is used, select lld as the linker.
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    set(CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS} -fuse-ld=-lld")
+    set(CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS} -fuse-ld=lld")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fuse-ld=lld")
     #set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=lld")
     #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
@@ -149,7 +149,6 @@ endif ()
 # Add pre-included libraries files.
 set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_installed)
 add_subdirectory(${DEPENDENCIES_PRE_INSTALLED_DIR})
-
 
 find_package(Threads REQUIRED)
 
