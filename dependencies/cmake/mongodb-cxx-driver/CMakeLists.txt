@@ -27,8 +27,6 @@ FetchContent_Declare(mongo_c_driver_repo
         URL ${MONGO_C_DRIVER_SRC_URL}
         URL_HASH SHA256=9F6D5615EF189F63D590A68BD414395A2AF3DAC03F9189696EA73E8C230C2DF0
         INACTIVITY_TIMEOUT 5
-
-        # PATCH_COMMAND patch --forward -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/mongo-c-driver.diff || true
         )
 FetchContent_MakeAvailable(mongo_c_driver_repo)
 
@@ -42,9 +40,15 @@ FetchContent_Declare(mongocxx
         URL ${MONGO_CXX_DRIVER_SRC_URL}
         URL_HASH SHA256=458BD58AED3F1A8D4B3347DB0B6F0B122BBAC05BD5343C60DB8F25B4F2681D59
         INACTIVITY_TIMEOUT 5
-
-        # PATCH_COMMAND patch --forward -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/mongo-cxx-driver.diff || true
         )
-FetchContent_MakeAvailable(mongocxx)
+FetchContent_GetProperties(mongocxx)
 
-find_package(mongocxx REQUIRED CONFIG)
+if(NOT mongocxx_POPULATED)
+  FetchContent_Populate(mongocxx)
+
+  # Specify the version number manually as there's a bug in mongocxx repo
+  set(VERSION_FILE ${mongocxx_SOURCE_DIR}/build/VERSION_CURRENT)
+  file(WRITE ${VERSION_FILE} "3.9.0")
+
+  add_subdirectory(${mongocxx_SOURCE_DIR} ${mongocxx_BINARY_DIR} EXCLUDE_FROM_ALL)
+endif()
