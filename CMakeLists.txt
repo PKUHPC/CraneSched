@@ -98,6 +98,20 @@ if (${CRANE_THREAD_SANITIZER})
     endif ()
 endif ()
 
+# If Clang is used, select lld as the linker.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set(CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS} -fuse-ld=-lld")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fuse-ld=lld")
+    #set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=lld")
+    #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
+endif ()
+
+message("CMAKE_C_FLAGS ${CMAKE_C_FLAGS}")
+message("CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS}")
+
+#message("CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS}")
+#message("CMAKE_SHARED_LINKER_FLAGS ${CMAKE_SHARED_LINKER_FLAGS}")
+
 # Check LTO support
 include(CheckIPOSupported)
 check_ipo_supported(RESULT supported OUTPUT error)
@@ -126,15 +140,6 @@ else ()
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
 endif ()
-
-# If Clang is used, select lld as the linker.
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=lld")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
-endif ()
-
-message("CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS}")
-message("CMAKE_SHARED_LINKER_FLAGS ${CMAKE_SHARED_LINKER_FLAGS}")
 
 if (CMAKE_SIZEOF_VOID_P EQUAL 8)
     # search lib64 directory
