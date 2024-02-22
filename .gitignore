@@ -93,3 +93,6 @@ fabric.properties
 .idea/caches/build_file_checksums.ser
 .idea/misc.xml
 .idea/misc.xml
+
+# VS Code 
+.vscode/
