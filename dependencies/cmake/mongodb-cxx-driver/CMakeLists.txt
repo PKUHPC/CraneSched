@@ -49,6 +49,7 @@ if(NOT mongocxx_POPULATED)
   # Specify the version number manually as there's a bug in mongocxx repo
   set(VERSION_FILE ${mongocxx_SOURCE_DIR}/build/VERSION_CURRENT)
   file(WRITE ${VERSION_FILE} "3.9.0")
-
+  
+  set(MONGOCXX_OVERRIDE_DEFAULT_INSTALL_PREFIX OFF)
   add_subdirectory(${mongocxx_SOURCE_DIR} ${mongocxx_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()
