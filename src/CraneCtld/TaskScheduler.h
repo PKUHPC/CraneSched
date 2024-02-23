@@ -214,9 +214,6 @@ class TaskScheduler {
   void TaskStatusChange(uint32_t task_id, const CranedId& craned_index,
                         crane::grpc::TaskStatus new_status, uint32_t exit_code,
                         std::optional<std::string>&& reason) {
-    // The order of LockGuards matters.
-    LockGuard running_guard(&m_running_task_map_mtx_);
-    LockGuard indexes_guard(&m_task_indexes_mtx_);
     TaskStatusChangeNoLock_(task_id, craned_index, new_status, exit_code);
   }
 
@@ -252,7 +249,8 @@ class TaskScheduler {
 
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
 
-  static void TransferTaskToMongodb_(TaskInCtld* task);
+  static void TransferTasksToMongodb_(
+      const std::vector<std::unique_ptr<TaskInCtld>>& tasks);
 
   CraneErr TerminateRunningTaskNoLock_(TaskInCtld* task);
 
@@ -293,6 +291,9 @@ class TaskScheduler {
   std::thread m_task_submit_thread_;
   void SubmitTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
+  std::thread m_task_status_change_thread_;
+  void TaskStatusChangeThread(const std::shared_ptr<uvw::loop>& uvw_loop);
+
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_cancel_task_timer_handle_;
   void CancelTaskTimerCb_();
@@ -315,6 +316,28 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_submit_queue_handle_;
   void CleanSubmitQueueCb_();
+
+  std::shared_ptr<uvw::timer_handle> m_task_status_change_timer_handle;
+  void TaskStatusChangeTimerCb_();
+
+  std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
+
+  struct TaskStatusChangeArg {
+    uint32_t task_id;
+    uint32_t exit_code;
+    crane::grpc::TaskStatus new_status;
+    CranedId craned_index;
+    TaskStatusChangeArg() = default;
+    TaskStatusChangeArg(uint32_t taskId, uint32_t exitCode,
+                        crane::grpc::TaskStatus newStatus,
+                        CranedId cranedIndex);
+  };
+
+  ConcurrentQueue<TaskStatusChangeArg> m_task_status_change_queue_;
+  void TaskStatusChangeAsyncCb_();
+
+  std::shared_ptr<uvw::async_handle> m_clean_task_status_change_queue_handle_;
+  void CleanTaskStatusChangeQueueCb_();
 };
 
 }  // namespace Ctld

@@ -252,7 +252,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
         auto pr_it = instance->processes.find(pid);
         if (pr_it == instance->processes.end()) {
           CRANE_ERROR("Failed to find pid {} in task #{}'s ProcessInstances",
-                      task_id, pid);
+                      pid, task_id);
         } else {
           instance->processes.erase(pr_it);
 
@@ -716,6 +716,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 }
 
 CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
+  if (!m_task_id_to_cg_map_.Contains(task.task_id())) {
+    CRANE_INFO("Executing task #{} no belong to this node,no cgroup for the task", task.task_id());
+    return CraneErr::kCgroupError;
+  }
   CRANE_INFO("Executing task #{}", task.task_id());
 
   auto instance = std::make_unique<TaskInstance>();
@@ -1154,6 +1158,12 @@ bool TaskManager::CreateCgroupsAsync(
 }
 
 bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
+  if (!this->m_uid_to_task_ids_map_.Contains(uid)) {
+    CRANE_DEBUG(
+        "Trying to release a non-existent cgroup for uid #{}. Ignoring it...",
+        uid);
+    return false;
+  }
   this->m_uid_to_task_ids_map_[uid]->erase(task_id);
   if (this->m_uid_to_task_ids_map_[uid]->empty()) {
     this->m_uid_to_task_ids_map_.Erase(uid);
