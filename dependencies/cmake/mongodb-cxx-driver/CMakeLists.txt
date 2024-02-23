@@ -14,21 +14,19 @@ set(ENABLE_EXAMPLES OFF)
 set(ENABLE_AUTOMATIC_INIT_AND_CLEANUP OFF)
 
 if (CRANE_USE_GITEE_SOURCE)
-    set(MONGO_C_DRIVER_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/mongo-c-driver-1.23.0.tar.gz")
-    set(MONGO_CXX_DRIVER_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/mongo-cxx-driver-r3.7.0.tar.gz")
+    set(MONGO_C_DRIVER_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/mongo-c-driver-1.26.0.tar.gz")
+    set(MONGO_CXX_DRIVER_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/mongo-cxx-driver-r3.9.0.tar.gz")
 else ()
-    set(MONGO_C_DRIVER_SRC_URL "https://github.com/mongodb/mongo-c-driver/releases/download/1.23.0/mongo-c-driver-1.23.0.tar.gz")
-    set(MONGO_CXX_DRIVER_SRC_URL "https://github.com/mongodb/mongo-cxx-driver/releases/download/r3.7.0/mongo-cxx-driver-r3.7.0.tar.gz")
+    set(MONGO_C_DRIVER_SRC_URL "https://github.com/mongodb/mongo-c-driver/archive/refs/tags/1.26.0.tar.gz")
+    set(MONGO_CXX_DRIVER_SRC_URL "https://codeload.github.com/mongodb/mongo-cxx-driver/tar.gz/refs/tags/r3.9.0")
 endif ()
 
 FetchContent_Declare(mongo_c_driver_repo
         OVERRIDE_FIND_PACKAGE
 
         URL ${MONGO_C_DRIVER_SRC_URL}
-        URL_HASH SHA256=2b91d6a9c1a80ec82c5643676e44f1a9edf3849c7f25d490e1b5587eb408ad93
+        URL_HASH SHA256=9F6D5615EF189F63D590A68BD414395A2AF3DAC03F9189696EA73E8C230C2DF0
         INACTIVITY_TIMEOUT 5
-
-        PATCH_COMMAND patch --forward -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/mongo-c-driver.diff || true
         )
 FetchContent_MakeAvailable(mongo_c_driver_repo)
 
@@ -40,11 +38,18 @@ FetchContent_Declare(mongocxx
         OVERRIDE_FIND_PACKAGE
 
         URL ${MONGO_CXX_DRIVER_SRC_URL}
-        URL_HASH SHA256=fb2da11178db728f63147fe4b0c7509eb49b1b02c5cb55f9bee5f927e451a0c7
+        URL_HASH SHA256=458BD58AED3F1A8D4B3347DB0B6F0B122BBAC05BD5343C60DB8F25B4F2681D59
         INACTIVITY_TIMEOUT 5
-
-        PATCH_COMMAND patch --forward -p1 < ${CMAKE_CURRENT_SOURCE_DIR}/mongo-cxx-driver.diff || true
         )
-FetchContent_MakeAvailable(mongocxx)
+FetchContent_GetProperties(mongocxx)
 
-find_package(mongocxx REQUIRED CONFIG)
+if(NOT mongocxx_POPULATED)
+  FetchContent_Populate(mongocxx)
+
+  # Specify the version number manually as there's a bug in mongocxx repo
+  set(VERSION_FILE ${mongocxx_SOURCE_DIR}/build/VERSION_CURRENT)
+  file(WRITE ${VERSION_FILE} "3.9.0")
+  
+  set(MONGOCXX_OVERRIDE_DEFAULT_INSTALL_PREFIX OFF)
+  add_subdirectory(${mongocxx_SOURCE_DIR} ${mongocxx_BINARY_DIR} EXCLUDE_FROM_ALL)
+endif()

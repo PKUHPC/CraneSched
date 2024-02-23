@@ -8,15 +8,17 @@ else ()
     set(YAML_BUILD_SHARED_LIBS OFF)
 endif ()
 
+set(YAML_CPP_FORMAT_SOURCE OFF)
+
 if (CRANE_USE_GITEE_SOURCE)
-    set(YAML_CPP_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/yaml-cpp-yaml-cpp-0.7.0.tar.gz")
+    set(YAML_CPP_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/yaml-cpp-0.8.0.tar.gz")
 else ()
-    set(YAML_CPP_SRC_URL "https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-0.7.0.tar.gz")
+    set(YAML_CPP_SRC_URL "https://github.com/jbeder/yaml-cpp/archive/refs/tags/0.8.0.tar.gz")
 endif ()
 
 FetchContent_Declare(yaml_cpp
         URL ${YAML_CPP_SRC_URL}
-        URL_HASH SHA256=43e6a9fcb146ad871515f0d0873947e5d497a1c9c60c58cb102a97b47208b7c3
+        URL_HASH SHA256=FBE74BBDCEE21D656715688706DA3C8BECFD946D92CD44705CC6098BB23B3A16
         INACTIVITY_TIMEOUT 5
         )
 
