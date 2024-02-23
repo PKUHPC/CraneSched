@@ -99,22 +99,45 @@ if (${CRANE_THREAD_SANITIZER})
 endif ()
 
 # If Clang is used, select lld as the linker.
+# Under clang, if lld is not selected as the linker and LLVMGold is not installed,
+# CheckIpoSupported will failed.
+# Normally we should pass "-fuse-ld=lld" to linker flags,
+# but CheckIpoSupported will only use CMAKE_<LANG>_FLAGS to compile test source files.
+# If we add "-fuse-ld=lld" to CMAKE_<LANG>_FLAGS, clang will give the warning:
+# argument unused during compilation: '-fuse-ld=lld'.
+# To solve this, we first set the linker flag in CMAKE_<LANG>_FLAGS and then move it
+# to linker flags.
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    set(CMAKE_C_FLAGS "${CMAKE_CXX_FLAGS} -fuse-ld=lld")
+    set(RAW_CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
+    set(RAW_CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fuse-ld=lld")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fuse-ld=lld")
-    #set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=lld")
-    #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
+
+    message("CMAKE_C_FLAGS ${CMAKE_C_FLAGS}")
+    message("CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS}")
 endif ()
-
-message("CMAKE_C_FLAGS ${CMAKE_C_FLAGS}")
-message("CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS}")
-
-#message("CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS}")
-#message("CMAKE_SHARED_LINKER_FLAGS ${CMAKE_SHARED_LINKER_FLAGS}")
 
 # Check LTO support
 include(CheckIPOSupported)
 check_ipo_supported(RESULT supported OUTPUT error)
+
+# If Clang is used, select lld as the linker.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set(CMAKE_C_FLAGS "${RAW_CMAKE_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${RAW_CMAKE_CXX_FLAGS}")
+    message("CMAKE_C_FLAGS ${CMAKE_C_FLAGS}")
+    message("CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS}")
+
+    unset(RAW_CMAKE_C_FLAGS)
+    unset(RAW_CMAKE_CXX_FLAGS)
+
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -fuse-ld=lld")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fuse-ld=lld")
+    message("CMAKE_EXE_LINKER_FLAGS ${CMAKE_EXE_LINKER_FLAGS}")
+    message("CMAKE_SHARED_LINKER_FLAGS ${CMAKE_SHARED_LINKER_FLAGS}")
+endif ()
+
 if (supported)
     if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_BUILD_TYPE STREQUAL "Release")
         # IPO/LTO is disabled in g++ under Debug mode since it's quite slow.
