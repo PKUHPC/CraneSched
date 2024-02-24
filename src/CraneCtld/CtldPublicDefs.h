@@ -29,21 +29,28 @@ inline const char* kCraneCtldDefaultLogPath = "/tmp/cranectld/cranectld.log";
 inline const char* kDefaultDbPath = "/tmp/cranectld/embedded.db";
 inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
 
+// *****************************************************
 // TaskScheduler Constants
+
 constexpr uint32_t kTaskScheduleIntervalMs = 1000;
-// Clean CancelTaskQueue when timeout or reach batch num
+
+// Clean CancelTaskQueue when timeout or exceeding batch num
 constexpr uint32_t kCancelTaskTimeoutMs = 500;
 constexpr uint32_t kCancelTaskBatchNum = 1000;
-// Clean SubmitTaskQueue when timeout or reach batch num
+
+// Clean SubmitTaskQueue when timeout or exceeding batch num
 constexpr uint32_t kSubmitTaskTimeoutMs = 500;
 constexpr uint32_t kSubmitTaskBatchNum = 1000;
-// Clean TaskStatusChangeQueue when timeout or reach batch num
+
+// Clean TaskStatusChangeQueue when timeout or exceeding batch num
 constexpr uint32_t kTaskStatusChangeTimeoutMS = 500;
 constexpr uint32_t kTaskStatusChangeBatchNum = 1000;
-constexpr uint32_t kConcurrentStreamQuota = 3000;
-constexpr uint32_t kCompletionQueueCapacity = 5000;
+
+//*********************************************************
 
 // CranedKeeper Constants
+constexpr uint32_t kConcurrentStreamQuota = 3000;
+constexpr uint32_t kCompletionQueueCapacity = 5000;
 constexpr uint16_t kCompletionQueueConnectingTimeoutSeconds = 3;
 constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 
@@ -307,17 +314,17 @@ struct TaskInCtld {
     return persisted_part;
   }
 
-  //add this task execute request to requests
+  // add this task execute request to requests
   void AddExecuteTaskRequest(crane::grpc::ExecuteTasksRequest& requests) const {
-    auto *mutable_task = requests.mutable_tasks()->Add();
-    
+    auto* mutable_task = requests.mutable_tasks()->Add();
+
     // Set time_limit
     mutable_task->mutable_time_limit()->CopyFrom(
         google::protobuf::util::TimeUtil::MillisecondsToDuration(
             ToInt64Milliseconds(this->time_limit)));
 
     // Set resources
-    auto *mutable_allocatable_resource =
+    auto* mutable_allocatable_resource =
         mutable_task->mutable_resources()->mutable_allocatable_resource();
     mutable_allocatable_resource->set_cpu_core_limit(
         this->resources.allocatable_resource.cpu_count);
@@ -334,11 +341,11 @@ struct TaskInCtld {
     mutable_task->set_qos(this->qos);
     mutable_task->set_partition(this->TaskToCtld().partition_name());
 
-    for (auto &&node : this->included_nodes) {
+    for (auto&& node : this->included_nodes) {
       mutable_task->mutable_nodelist()->Add()->assign(node);
     }
 
-    for (auto &&node : this->excluded_nodes) {
+    for (auto&& node : this->excluded_nodes) {
       mutable_task->mutable_excludes()->Add()->assign(node);
     }
 
@@ -352,7 +359,7 @@ struct TaskInCtld {
     mutable_task->set_cwd(this->cwd);
     mutable_task->set_get_user_env(this->get_user_env);
 
-    for (const auto &hostname : this->CranedIds())
+    for (const auto& hostname : this->CranedIds())
       mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
 
     mutable_task->mutable_start_time()->set_seconds(
@@ -361,8 +368,8 @@ struct TaskInCtld {
         ToInt64Seconds(this->time_limit));
 
     if (this->type == crane::grpc::Batch) {
-      auto &meta_in_ctld = std::get<BatchMetaInTask>(this->meta);
-      auto *mutable_meta = mutable_task->mutable_batch_meta();
+      auto& meta_in_ctld = std::get<BatchMetaInTask>(this->meta);
+      auto* mutable_meta = mutable_task->mutable_batch_meta();
       mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
       mutable_meta->set_sh_script(meta_in_ctld.sh_script);
     }

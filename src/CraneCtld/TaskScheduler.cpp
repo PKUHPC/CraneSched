@@ -409,13 +409,13 @@ bool TaskScheduler::Init() {
       [this, loop = std::move(uvw_submit_loop)]() { SubmitTaskThread_(loop); });
 
   std::shared_ptr<uvw::loop> uvw_task_status_change_loop = uvw::loop::create();
-  m_task_status_change_timer_handle =
+  m_task_status_change_timer_handle_ =
       uvw_task_status_change_loop->resource<uvw::timer_handle>();
-  m_task_status_change_timer_handle->on<uvw::timer_event>(
+  m_task_status_change_timer_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
         TaskStatusChangeTimerCb_();
       });
-  m_task_status_change_timer_handle->start(
+  m_task_status_change_timer_handle_->start(
       std::chrono::milliseconds(kTaskStatusChangeTimeoutMS * 3),
       std::chrono::milliseconds(kTaskStatusChangeTimeoutMS));
 
@@ -426,9 +426,9 @@ bool TaskScheduler::Init() {
         TaskStatusChangeAsyncCb_();
       });
 
-  m_clean_task_status_change_queue_handle_ =
+  m_clean_task_status_change_handle_ =
       uvw_task_status_change_loop->resource<uvw::async_handle>();
-  m_clean_task_status_change_queue_handle_->on<uvw::async_event>(
+  m_clean_task_status_change_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         CleanTaskStatusChangeQueueCb_();
       });
@@ -659,7 +659,8 @@ void TaskScheduler::ScheduleThread_() {
         }
 
         auto* task_ptr = task.get();
-        task->AddExecuteTaskRequest(craned_tasks_map[task->executing_craned_id]);
+        task->AddExecuteTaskRequest(
+            craned_tasks_map[task->executing_craned_id]);
 
         // IMPORTANT: task must be put into running_task_map before any
         //  time-consuming operation, otherwise TaskStatusChange RPC will come
@@ -1004,7 +1005,9 @@ void TaskScheduler::CleanCancelQueueCb_() {
 
   if (pending_tasks_vec.empty()) return;
 
-  std::vector<std::unique_ptr<TaskInCtld>> task_pointer_vec;
+  // Carry the ownership of TaskInCtld for automatic destruction.
+  std::vector<std::unique_ptr<TaskInCtld>> task_ptr_vec;
+  std::vector<TaskInCtld*> task_raw_ptr_vec;
   {
     // Allow temporary inconsistency on task querying here.
     // In a very short duration, some cancelled tasks might not be visible
@@ -1021,11 +1024,14 @@ void TaskScheduler::CleanCancelQueueCb_() {
       task->SetStatus(crane::grpc::Cancelled);
       task->SetEndTime(absl::Now());
 
-      task_pointer_vec.emplace_back(std::move(it->second));
+      task_raw_ptr_vec.emplace_back(it->second.get());
+      task_ptr_vec.emplace_back(std::move(it->second));
+
       m_pending_task_map_.erase(it);
     }
   }
-  TransferTasksToMongodb_(task_pointer_vec);
+
+  TransferTasksToMongodb_(task_raw_ptr_vec);
 }
 
 void TaskScheduler::SubmitTaskTimerCb_() {
@@ -1033,9 +1039,8 @@ void TaskScheduler::SubmitTaskTimerCb_() {
 }
 
 void TaskScheduler::SubmitTaskAsyncCb_() {
-  if (m_submit_task_queue_.size_approx() >= kSubmitTaskBatchNum) {
+  if (m_submit_task_queue_.size_approx() >= kSubmitTaskBatchNum)
     m_clean_submit_queue_handle_->send();
-  }
 }
 
 void TaskScheduler::CleanSubmitQueueCb_() {
@@ -1098,24 +1103,30 @@ TaskScheduler::TaskStatusChangeArg::TaskStatusChangeArg(
       craned_index(std::move(cranedIndex)){};
 
 void TaskScheduler::TaskStatusChangeTimerCb_() {
-  m_clean_task_status_change_queue_handle_->send();
+  m_clean_task_status_change_handle_->send();
 }
+
 void TaskScheduler::TaskStatusChangeAsyncCb_() {
-  if (m_task_status_change_queue_.size_approx() >= kTaskStatusChangeBatchNum) {
-    m_clean_task_status_change_queue_handle_->send();
-  }
+  if (m_task_status_change_queue_.size_approx() >= kTaskStatusChangeBatchNum)
+    m_clean_task_status_change_handle_->send();
 }
 
 void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   size_t approximate_size = m_task_status_change_queue_.size_approx();
+
   std::vector<TaskStatusChangeArg> args;
-  std::vector<std::unique_ptr<TaskInCtld>> tasks;
   args.resize(approximate_size);
-  tasks.reserve(approximate_size);
+
   auto actual_size = m_task_status_change_queue_.try_dequeue_bulk(
       args.begin(), approximate_size);
-
   if (actual_size == 0) return;
+
+  std::vector<std::unique_ptr<TaskInCtld>> task_ptr_vec;
+  task_ptr_vec.reserve(actual_size);
+
+  std::vector<TaskInCtld*> task_raw_ptr_vec;
+  task_raw_ptr_vec.reserve(actual_size);
+
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
@@ -1187,17 +1198,19 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       g_meta_container->FreeResourceFromNode(craned_id, task_id);
     }
 
-    tasks.emplace_back(std::move(task));
+    task_raw_ptr_vec.emplace_back(task.get());
+    task_ptr_vec.emplace_back(std::move(task));
+
     // As for now, task status change includes only
     // Pending / Running -> Completed / Failed / Cancelled.
     // It means all task status changes will put the task into mongodb,
     // so we don't have any branch code here and just put it into mongodb.
 
-    // hazard pointer update to nullptr and erase
-    CRANE_TRACE("erase task#{} from running job", task_id);
+    CRANE_TRACE("Move task#{} to the Completed Queue", task_id);
     m_running_task_map_.erase(iter);
   }
-  TransferTasksToMongodb_(tasks);
+
+  TransferTasksToMongodb_(task_raw_ptr_vec);
 }
 
 void TaskScheduler::QueryTasksInRam(
@@ -2055,11 +2068,12 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
 }
 
 void TaskScheduler::TransferTasksToMongodb_(
-    const std::vector<std::unique_ptr<TaskInCtld>>& tasks) {
-  if(tasks.empty()) return;
+    std::vector<TaskInCtld*> const& tasks) {
+  if (tasks.empty()) return;
+
   txn_id_t txn_id;
   g_embedded_db_client->BeginTransaction(&txn_id);
-  for (const auto& task : tasks) {
+  for (TaskInCtld* task : tasks) {
     g_embedded_db_client->UpdatePersistedPartOfTask(txn_id, task->TaskDbId(),
                                                     task->PersistedPart());
     bool ok;
@@ -2076,17 +2090,10 @@ void TaskScheduler::TransferTasksToMongodb_(
 
   g_embedded_db_client->CommitTransaction(txn_id);
 
-  {
-    std::vector<TaskInCtld*> task_raw_pointer_vec;
-    task_raw_pointer_vec.reserve(tasks.size());
-
-    for (const auto& task : tasks) task_raw_pointer_vec.emplace_back(task.get());
-
-    // Now cancelled pending tasks are in MongoDB.
-    if (!g_db_client->InsertJobs(task_raw_pointer_vec)) {
-      CRANE_ERROR("Failed to call g_db_client->InsertJobs() ");
-      return;
-    }
+  // Now cancelled pending tasks are in MongoDB.
+  if (!g_db_client->InsertJobs(tasks)) {
+    CRANE_ERROR("Failed to call g_db_client->InsertJobs() ");
+    return;
   }
 
   txn_id = 0;
@@ -2097,7 +2104,7 @@ void TaskScheduler::TransferTasksToMongodb_(
     return;
   }
 
-  for (const auto& task : tasks)
+  for (TaskInCtld* task : tasks)
     g_embedded_db_client->PurgeTaskFromEnded(txn_id, task->TaskDbId());
 
   if (!g_embedded_db_client->CommitTransaction(txn_id)) {

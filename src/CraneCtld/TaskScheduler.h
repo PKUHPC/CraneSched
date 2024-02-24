@@ -249,8 +249,7 @@ class TaskScheduler {
 
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
 
-  static void TransferTasksToMongodb_(
-      const std::vector<std::unique_ptr<TaskInCtld>>& tasks);
+  static void TransferTasksToMongodb_(std::vector<TaskInCtld*> const& tasks);
 
   CraneErr TerminateRunningTaskNoLock_(TaskInCtld* task);
 
@@ -317,7 +316,7 @@ class TaskScheduler {
   std::shared_ptr<uvw::async_handle> m_clean_submit_queue_handle_;
   void CleanSubmitQueueCb_();
 
-  std::shared_ptr<uvw::timer_handle> m_task_status_change_timer_handle;
+  std::shared_ptr<uvw::timer_handle> m_task_status_change_timer_handle_;
   void TaskStatusChangeTimerCb_();
 
   std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
@@ -327,7 +326,9 @@ class TaskScheduler {
     uint32_t exit_code;
     crane::grpc::TaskStatus new_status;
     CranedId craned_index;
+
     TaskStatusChangeArg() = default;
+
     TaskStatusChangeArg(uint32_t taskId, uint32_t exitCode,
                         crane::grpc::TaskStatus newStatus,
                         CranedId cranedIndex);
@@ -336,7 +337,7 @@ class TaskScheduler {
   ConcurrentQueue<TaskStatusChangeArg> m_task_status_change_queue_;
   void TaskStatusChangeAsyncCb_();
 
-  std::shared_ptr<uvw::async_handle> m_clean_task_status_change_queue_handle_;
+  std::shared_ptr<uvw::async_handle> m_clean_task_status_change_handle_;
   void CleanTaskStatusChangeQueueCb_();
 };
 

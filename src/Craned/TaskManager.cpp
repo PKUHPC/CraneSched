@@ -717,7 +717,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
 CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   if (!m_task_id_to_cg_map_.Contains(task.task_id())) {
-    CRANE_INFO("Executing task #{} no belong to this node,no cgroup for the task", task.task_id());
+    CRANE_DEBUG("Executing task #{} without an allocated cgroup. Ignoring it.",
+                task.task_id());
     return CraneErr::kCgroupError;
   }
   CRANE_INFO("Executing task #{}", task.task_id());
@@ -1164,6 +1165,7 @@ bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
         uid);
     return false;
   }
+
   this->m_uid_to_task_ids_map_[uid]->erase(task_id);
   if (this->m_uid_to_task_ids_map_[uid]->empty()) {
     this->m_uid_to_task_ids_map_.Erase(uid);
