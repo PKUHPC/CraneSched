@@ -31,10 +31,13 @@ inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
 
 // TaskScheduler Constants
 constexpr uint32_t kTaskScheduleIntervalMs = 1000;
+// Clean CancelTaskQueue when timeout or reach batch num
 constexpr uint32_t kCancelTaskTimeoutMs = 500;
 constexpr uint32_t kCancelTaskBatchNum = 1000;
+// Clean SubmitTaskQueue when timeout or reach batch num
 constexpr uint32_t kSubmitTaskTimeoutMs = 500;
 constexpr uint32_t kSubmitTaskBatchNum = 1000;
+// Clean TaskStatusChangeQueue when timeout or reach batch num
 constexpr uint32_t kTaskStatusChangeTimeoutMS = 500;
 constexpr uint32_t kTaskStatusChangeBatchNum = 1000;
 constexpr uint32_t kConcurrentStreamQuota = 3000;
