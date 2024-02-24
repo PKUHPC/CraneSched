@@ -1561,16 +1561,21 @@ CraneErr ProcessInstance::Spawn(const task_id_t task_id,
     // Set environment variables related to task info (begin with `CRANE`).
     EnvVector env_vec{std::move(task_envs)};
 
-    // std::vector<std::string> env_vec =
-    //     absl::StrSplit(instance->task.env(), "||");
-
     // Since we want to reinitialize the environment variables of the user,
     // we are actually performing two steps: login -> start shell.
     // Shell starting is done by calling "bash --login".
+    //
     // During shell starting step, /etc/profile, ~/.bash_profile, ... are
     // loaded.
-    // During login step, "HOME" and "SHELL" are set. Here we are just
-    // performing the role of login module.
+    //
+    // During login step, "HOME" and "SHELL" are set.
+    // Here we are just mimicking the login module.
+    //
+    // Slurm uses `su <username> -c /usr/bin/env` to retrieve
+    // all the environment variables.
+    // We use a more tidy way.
+
+    // FIXME: Check instance->task.get_user_env():
     env_vec.emplace_back("HOME", pwd_entry.HomeDir());
     env_vec.emplace_back("SHELL", pwd_entry.Shell());
 
@@ -1586,7 +1591,13 @@ CraneErr ProcessInstance::Spawn(const task_id_t task_id,
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
+
+    // Argv[0] is the program name which can be anything.
+    argv.emplace_back("CraneScript");
+
+    // FIXME: Check instance->task.get_user_env():
     argv.emplace_back("--login");
+
     argv.emplace_back(m_executive_path_.c_str());
     for (auto&& arg : m_arguments_) {
       argv.push_back(arg.c_str());
