@@ -623,16 +623,12 @@ void TaskScheduler::ScheduleThread_() {
       absl::flat_hash_map<CranedId, crane::grpc::ExecuteTasksRequest>
           craned_tasks_map;
 
-      m_task_indexes_mtx_.Lock();
       for (auto& it : selection_result_list) {
         auto& task = it.first;
-
         for (CranedId const& craned_id : task->CranedIds()) {
           craned_cgroup_map[craned_id].emplace_back(task->TaskId(), task->uid);
-          m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
         }
       }
-      m_task_indexes_mtx_.Unlock();
 
       absl::BlockingCounter bl(craned_cgroup_map.size());
       for (auto const& iter : craned_cgroup_map) {
@@ -642,8 +638,18 @@ void TaskScheduler::ScheduleThread_() {
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
           CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
                       task_uid_pairs.size(), craned_id);
-          if (stub && !stub->Invalid())
-            stub->CreateCgroupForTasks(task_uid_pairs);
+          if (stub && !stub->Invalid()) {
+            auto err = stub->CreateCgroupForTasks(task_uid_pairs);
+            if (err != CraneErr::kOk) {
+              CRANE_TRACE(
+                  "CranedNode #{} no ok when CreateCgroupForTasks,"
+                  "Consider it is down",
+                  craned_id);
+              g_meta_container->CranedDown(craned_id);
+              g_task_scheduler->TerminateTasksOnCraned(
+                  craned_id, ExitCode::kExitCodeCranedDown);
+            }
+          }
 
           bl.DecrementCount();
         });
@@ -657,6 +663,15 @@ void TaskScheduler::ScheduleThread_() {
               .count());
 
       begin = std::chrono::steady_clock::now();
+
+      m_task_indexes_mtx_.Lock();
+      for (auto& it : selection_result_list) {
+        auto& task = it.first;
+        for (CranedId const& craned_id : task->CranedIds()) {
+          m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
+        }
+      }
+      m_task_indexes_mtx_.Unlock();
 
       // Move tasks into running queue.
       txn_id_t txn_id{0};
@@ -717,7 +732,7 @@ void TaskScheduler::ScheduleThread_() {
         auto stub = g_craned_keeper->GetCranedStub(craned_id);
         CRANE_TRACE("Send ExecuteTasks for {} tasks to {}", tasks.tasks_size(),
                     craned_id);
-        stub->ExecuteTasks(tasks);
+        if (stub && !stub->Invalid()) stub->ExecuteTasks(tasks);
       }
 
       end = std::chrono::steady_clock::now();
