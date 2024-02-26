@@ -63,6 +63,8 @@ bool TaskScheduler::Init() {
   if (!running_list.empty()) {
     CRANE_INFO("{} running task(s) recovered.", running_list.size());
 
+    std::unordered_map<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
+        craned_cgroups_map;
     for (auto&& task_in_embedded_db : running_list) {
       auto task = std::make_unique<TaskInCtld>();
       task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
@@ -112,9 +114,7 @@ bool TaskScheduler::Init() {
             task_id);
 
         for (const CranedId& craned_id : task->CranedIds()) {
-          stub = g_craned_keeper->GetCranedStub(craned_id);
-          if (stub != nullptr && !stub->Invalid())
-            stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
+          craned_cgroups_map[craned_id].emplace_back(task->TaskId(), task->uid);
         }
 
         task->SetStatus(crane::grpc::Pending);
@@ -180,9 +180,8 @@ bool TaskScheduler::Init() {
             // cgroup, just resend the gRPC again to guarantee that the cgroup
             // is always released.
             for (const CranedId& craned_id : task->CranedIds()) {
-              stub = g_craned_keeper->GetCranedStub(craned_id);
-              if (stub != nullptr && !stub->Invalid())
-                stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
+              craned_cgroups_map[craned_id].emplace_back(task->TaskId(),
+                                                         task->uid);
             }
 
             ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(
@@ -230,9 +229,8 @@ bool TaskScheduler::Init() {
           }
 
           for (const CranedId& craned_id : task->CranedIds()) {
-            stub = g_craned_keeper->GetCranedStub(craned_id);
-            if (stub != nullptr && !stub->Invalid())
-              stub->ReleaseCgroupForTask(task->TaskId(), task->uid);
+            craned_cgroups_map[craned_id].emplace_back(task->TaskId(),
+                                                       task->uid);
           }
 
           ok = g_embedded_db_client->MoveTaskFromRunningToPending(
@@ -248,6 +246,24 @@ bool TaskScheduler::Init() {
         }
       }
     }
+
+    absl::BlockingCounter bl(craned_cgroups_map.size());
+    for (const auto& [craned_id, cgroups] : craned_cgroups_map) {
+      g_thread_pool->detach_task([&bl, &craned_id, &cgroups]() {
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+
+        // If the craned is down, just ignore it.
+        if (stub && !stub->Invalid()) {
+          CraneErr err = stub->ReleaseCgroupForTasks(cgroups);
+          if (err != CraneErr::kOk) {
+            CRANE_ERROR("Failed to Release cgroup RPC for {} tasks on Node {}",
+                        cgroups.size(), craned_id);
+          }
+        }
+        bl.DecrementCount();
+      });
+    }
+    bl.Wait();
   }
 
   // Process the pending tasks in the embedded pending queue. The task may
@@ -1121,15 +1137,17 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       args.begin(), approximate_size);
   if (actual_size == 0) return;
 
+  // Carry the ownership of TaskInCtld for automatic destruction.
   std::vector<std::unique_ptr<TaskInCtld>> task_ptr_vec;
-  task_ptr_vec.reserve(actual_size);
-
   std::vector<TaskInCtld*> task_raw_ptr_vec;
+  task_ptr_vec.reserve(actual_size);
   task_raw_ptr_vec.reserve(actual_size);
 
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
+  std::unordered_map<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
+      craned_cgroups_map;
   for (const auto& [task_id, exit_code, new_status, craned_index] : args) {
     auto iter = m_running_task_map_.find(task_id);
     if (iter == m_running_task_map_.end()) {
@@ -1171,16 +1189,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     task->SetEndTime(absl::Now());
 
     for (CranedId const& craned_id : task->CranedIds()) {
-      auto stub = g_craned_keeper->GetCranedStub(craned_id);
-
-      // If the craned is down, just ignore it.
-      if (stub && !stub->Invalid()) {
-        CraneErr err = stub->ReleaseCgroupForTask(task_id, task->uid);
-        if (err != CraneErr::kOk) {
-          CRANE_ERROR("Failed to Release cgroup RPC for task#{} on Node {}",
-                      task_id, craned_id);
-        }
-      }
+      craned_cgroups_map[craned_id].emplace_back(task_id, task->uid);
 
       auto node_to_task_map_it = m_node_to_tasks_map_.find(craned_id);
       if (node_to_task_map_it == m_node_to_tasks_map_.end()) [[unlikely]] {
@@ -1210,6 +1219,23 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     m_running_task_map_.erase(iter);
   }
 
+  absl::BlockingCounter bl(craned_cgroups_map.size());
+  for (const auto& [craned_id, cgroups] : craned_cgroups_map) {
+    g_thread_pool->detach_task([&bl, &craned_id, &cgroups]() {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+
+      // If the craned is down, just ignore it.
+      if (stub && !stub->Invalid()) {
+        CraneErr err = stub->ReleaseCgroupForTasks(cgroups);
+        if (err != CraneErr::kOk) {
+          CRANE_ERROR("Failed to Release cgroup RPC for {} tasks on Node {}",
+                      cgroups.size(), craned_id);
+        }
+      }
+      bl.DecrementCount();
+    });
+  }
+  bl.Wait();
   TransferTasksToMongodb_(task_raw_ptr_vec);
 }
 
