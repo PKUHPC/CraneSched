@@ -42,7 +42,8 @@ class CranedStub {
   CraneErr CreateCgroupForTasks(
       std::vector<std::pair<task_id_t, uid_t>> const &task_uid_pairs);
 
-  CraneErr ReleaseCgroupForTask(uint32_t task_id, uid_t uid);
+  CraneErr ReleaseCgroupForTasks(
+      const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs);
 
   CraneErr TerminateTasks(const std::vector<task_id_t> &task_ids);
 

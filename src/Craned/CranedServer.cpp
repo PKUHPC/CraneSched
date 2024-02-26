@@ -486,18 +486,21 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::ReleaseCgroupForTask(
+grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
     grpc::ServerContext *context,
-    const crane::grpc::ReleaseCgroupForTaskRequest *request,
-    crane::grpc::ReleaseCgroupForTaskReply *response) {
-  task_id_t task_id = request->task_id();
-  uid_t uid = request->uid();
+    const crane::grpc::ReleaseCgroupForTasksRequest *request,
+    crane::grpc::ReleaseCgroupForTasksReply *response) {
+  for (int i = 0; i < request->task_id_list_size(); ++i) {
+    task_id_t task_id = request->task_id_list(i);
+    uid_t uid = request->uid_list(i);
 
-  CRANE_DEBUG("Release Cgroup for task #{}", task_id);
+    CRANE_DEBUG("Release Cgroup for task #{}", task_id);
 
-  bool ok = g_task_mgr->ReleaseCgroupAsync(task_id, uid);
-  if (!ok) {
-    CRANE_ERROR("Failed to release cgroup for task #{}, uid {}", task_id, uid);
+    bool ok = g_task_mgr->ReleaseCgroupAsync(task_id, uid);
+    if (!ok) {
+      CRANE_ERROR("Failed to release cgroup for task #{}, uid {}", task_id,
+                  uid);
+    }
   }
 
   return Status::OK;

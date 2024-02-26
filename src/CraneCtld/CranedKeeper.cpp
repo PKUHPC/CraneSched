@@ -129,22 +129,25 @@ CraneErr CranedStub::CreateCgroupForTasks(
   return CraneErr::kOk;
 }
 
-CraneErr CranedStub::ReleaseCgroupForTask(uint32_t task_id, uid_t uid) {
-  using crane::grpc::ReleaseCgroupForTaskReply;
-  using crane::grpc::ReleaseCgroupForTaskRequest;
+CraneErr CranedStub::ReleaseCgroupForTasks(
+    const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs) {
+  using crane::grpc::ReleaseCgroupForTasksReply;
+  using crane::grpc::ReleaseCgroupForTasksRequest;
 
   Status status;
-  ReleaseCgroupForTaskRequest request;
-  ReleaseCgroupForTaskReply reply;
+  ReleaseCgroupForTasksRequest request;
+  ReleaseCgroupForTasksReply reply;
 
   ClientContext context;
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  request.set_task_id(task_id);
-  request.set_uid(uid);
+  for (const auto &[task_id, uid] : task_uid_pairs) {
+    request.add_task_id_list(task_id);
+    request.add_uid_list(uid);
+  }
 
-  status = m_stub_->ReleaseCgroupForTask(&context, request, &reply);
+  status = m_stub_->ReleaseCgroupForTasks(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG(
         "ReleaseCgroupForTask gRPC for Node {} returned with status not ok: {}",
