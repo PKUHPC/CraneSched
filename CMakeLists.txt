@@ -227,6 +227,7 @@ install(FILES ${CMAKE_BINARY_DIR}/src/CraneCtld/cranectld
 configure_file(./etc/cranectld.service.in ${PROJECT_BINARY_DIR}/etc/cranectld.service)
 configure_file(./etc/craned.service.in ${PROJECT_BINARY_DIR}/etc/craned.service)]]
 
+#[[
 install(FILES
         ${PROJECT_BINARY_DIR}/etc/cranectld.service
         DESTINATION /etc/systemd/system/
@@ -236,26 +237,23 @@ install(FILES
         ${PROJECT_BINARY_DIR}/etc/craned.service
         DESTINATION /etc/systemd/system/
         COMPONENT cranedc)
+]]
 
 # Install configuration files
-install(FILES etc/config.yaml
+install(FILES /etc/crane/config_example.yaml
         DESTINATION /etc/crane
-        RENAME config_example.yaml
         COMPONENT cranectldc)
 
-install(FILES etc/config.yaml
+install(FILES /etc/crane/config_example.yaml
         DESTINATION /etc/crane
-        RENAME config_example.yaml
         COMPONENT cranedc)
 
-install(FILES etc/database.yaml
+install(FILES /etc/crane/database_example.yaml
         DESTINATION /etc/crane
-        RENAME database_example.yaml
         COMPONENT cranectldc)
 
-install(FILES etc/database.yaml
+install(FILES /etc/crane/database_example.yaml
         DESTINATION /etc/crane
-        RENAME database_example.yaml
         COMPONENT cranedc)
 
 # Install pam config
@@ -272,11 +270,14 @@ install(CODE "execute_process(COMMAND sh ${INSTALL_SCRIPT_PATH})" COMPONENT cran
 install(CODE "execute_process(COMMAND sh ${INSTALL_SCRIPT_PATH})" COMPONENT cranectldc)
 
 # Build rpm
-set(CPACK_GENERATOR "RPM")
+set(CPACK_GENERATOR "RPM;DEB")
 set(CPACK_PACKAGE_NAME "craneSched")
 set(CPACK_PACKAGE_VENDOR "PKUHPC")
 set(CPACK_RPM_PACKAGE_GROUP "PKUHPC")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "PKUHPC")
 set(CPACK_PACKAGE_DESCRIPTION "CraneSched rpm package")
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
 
 # Set uninstall scripts
 set(CPACK_COMPONENT_UNINSTALL_SCRIPT craned "${CMAKE_SOURCE_DIR}/scripts/uninstall_craned.sh")
