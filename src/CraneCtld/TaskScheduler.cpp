@@ -630,29 +630,38 @@ void TaskScheduler::ScheduleThread_() {
         }
       }
 
+      std::unordered_set<CranedId> cgroup_failed_craneds;
+      std::unordered_set<task_id_t> cgroup_failed_tasks;
+      Mutex cgroup_failed_mutex;
       absl::BlockingCounter bl(craned_cgroup_map.size());
       for (auto const& iter : craned_cgroup_map) {
         CranedId const& craned_id = iter.first;
-        auto const& task_uid_pairs = iter.second;
-        g_thread_pool->detach_task([=, &bl]() {
-          auto stub = g_craned_keeper->GetCranedStub(craned_id);
-          CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
-                      task_uid_pairs.size(), craned_id);
-          if (stub && !stub->Invalid()) {
-            auto err = stub->CreateCgroupForTasks(task_uid_pairs);
-            if (err != CraneErr::kOk) {
-              CRANE_TRACE(
-                  "CranedNode #{} no ok when CreateCgroupForTasks,"
-                  "Consider it is down",
-                  craned_id);
-              g_meta_container->CranedDown(craned_id);
-              g_task_scheduler->TerminateTasksOnCraned(
-                  craned_id, ExitCode::kExitCodeCranedDown);
-            }
-          }
+        auto& task_uid_pairs = iter.second;
+        g_thread_pool->detach_task(
+            [=, &bl, &cgroup_failed_tasks, &cgroup_failed_mutex]() {
+              auto stub = g_craned_keeper->GetCranedStub(craned_id);
+              CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
+                          task_uid_pairs.size(), craned_id);
+              if (stub && !stub->Invalid()) {
+                auto err = stub->CreateCgroupForTasks(task_uid_pairs);
+                if (err != CraneErr::kOk) {
+                  cgroup_failed_mutex.Lock();
+                  for (const auto& [task_id, uid] : task_uid_pairs) {
+                    cgroup_failed_tasks.emplace(task_id);
+                  }
+                  cgroup_failed_mutex.Unlock();
+                  CRANE_TRACE("CranedNode #{} no ok when CreateCgroupForTasks.",
+                              craned_id);
+                  // tasks in task_uid_pairs failed to start,they will be moved
+                  // to ended tasks.
+                  // 1. FreeResources from the node
+                  // 2. Release other Cgroup related to these tasks
+                  // 3. Move these tasks to ended
+                }
+              }
 
-          bl.DecrementCount();
-        });
+              bl.DecrementCount();
+            });
       }
       bl.Wait();
 
@@ -664,14 +673,60 @@ void TaskScheduler::ScheduleThread_() {
 
       begin = std::chrono::steady_clock::now();
 
+      // Free Resources for failed tasks.
+      // Add other task to m_node_to_tasks_map_.
       m_task_indexes_mtx_.Lock();
       for (auto& it : selection_result_list) {
         auto& task = it.first;
         for (CranedId const& craned_id : task->CranedIds()) {
-          m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
+          if (cgroup_failed_tasks.contains(task->TaskId())) {
+            cgroup_failed_craneds.emplace(craned_id);
+            g_meta_container->FreeResourceFromNode(craned_id, task->TaskId());
+          } else
+            m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
         }
       }
       m_task_indexes_mtx_.Unlock();
+
+      // Release Cgroups for failed tasks
+      absl::BlockingCounter bl_failed(cgroup_failed_craneds.size());
+      for (const auto& craned_id : cgroup_failed_craneds) {
+        const auto& task_uid_pairs = craned_cgroup_map.at(craned_id);
+        std::vector<std::pair<task_id_t, uid_t>> task_uid_pairs_to_release;
+        for (const auto& [task_id, uid] : task_uid_pairs) {
+          if (cgroup_failed_tasks.contains(task_id))
+            task_uid_pairs_to_release.emplace_back(task_id, uid);
+        }
+        g_thread_pool->detach_task(
+            [=, cgroup_to_release = std::move(task_uid_pairs_to_release),
+             &bl_failed]() {
+              auto stub = g_craned_keeper->GetCranedStub(craned_id);
+              // If the craned is down, just ignore it.
+              if (stub && !stub->Invalid()) {
+                CraneErr err = stub->ReleaseCgroupForTasks(cgroup_to_release);
+                if (err != CraneErr::kOk) {
+                  CRANE_ERROR(
+                      "Failed to Release cgroup RPC for {} tasks on Node {}",
+                      cgroup_to_release.size(), craned_id);
+                }
+              }
+
+              bl_failed.DecrementCount();
+            });
+      }
+      bl_failed.Wait();
+
+      // Move failed tasks to ended.
+      std::vector<TaskInCtld*> task_raw_ptr_vec;
+      for (auto& it : selection_result_list) {
+        auto& task = it.first;
+        if (!cgroup_failed_tasks.contains(task->TaskId())) continue;
+        task->SetStatus(crane::grpc::Failed);
+        task->SetExitCode(ExitCode::kExitCodeCgroupError);
+        task->SetEndTime(absl::Now());
+        task_raw_ptr_vec.emplace_back(task.get());
+      }
+      TransferTasksToMongodb_(task_raw_ptr_vec);
 
       // Move tasks into running queue.
       txn_id_t txn_id{0};
@@ -683,6 +738,7 @@ void TaskScheduler::ScheduleThread_() {
 
       for (auto& it : selection_result_list) {
         auto& task = it.first;
+        if (cgroup_failed_tasks.contains(task->TaskId())) continue;
         if (task->type == crane::grpc::Interactive) {
           std::get<InteractiveMetaInTask>(task->meta)
               .cb_task_res_allocated(task->TaskId(),
