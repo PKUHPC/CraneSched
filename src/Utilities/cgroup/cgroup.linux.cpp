@@ -484,12 +484,12 @@ bool Cgroup::SetCpuShares(uint64_t share) {
 }
 
 bool Cgroup::SetCpuCoreLimit(double core_num) {
-  constexpr uint32_t base = 1000'000;
+  constexpr uint32_t base = 1 << 8;
 
   bool ret;
   ret = SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER,
                            CgroupConstant::ControllerFile::CPU_CFS_QUOTA_US,
-                           uint64_t(base * core_num));
+                           uint64_t(round(base * core_num)));
   ret &= SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER,
                             CgroupConstant::ControllerFile::CPU_CFS_PERIOD_US,
                             base);

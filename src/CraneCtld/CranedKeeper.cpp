@@ -235,7 +235,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
     auto *mutable_allocatable_resource =
         mutable_task->mutable_resources()->mutable_allocatable_resource();
     mutable_allocatable_resource->set_cpu_core_limit(
-        task->resources.allocatable_resource.cpu_count);
+        static_cast<double>(task->resources.allocatable_resource.cpu_count));
     mutable_allocatable_resource->set_memory_limit_bytes(
         task->resources.allocatable_resource.memory_bytes);
     mutable_allocatable_resource->set_memory_sw_limit_bytes(
@@ -259,7 +259,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
 
     mutable_task->set_node_num(task->node_num);
     mutable_task->set_ntasks_per_node(task->ntasks_per_node);
-    mutable_task->set_cpus_per_task(task->cpus_per_task);
+    mutable_task->set_cpus_per_task(static_cast<double>(task->cpus_per_task));
 
     mutable_task->set_uid(task->uid);
     mutable_task->mutable_env()->insert(task->env.begin(), task->env.end());

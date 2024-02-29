@@ -60,14 +60,14 @@ bool operator==(const AllocatableResource& lhs,
 
 AllocatableResource::AllocatableResource(
     const crane::grpc::AllocatableResource& value) {
-  cpu_count = value.cpu_core_limit();
+  cpu_count = cpu_count_t(value.cpu_core_limit());
   memory_bytes = value.memory_limit_bytes();
   memory_sw_bytes = value.memory_sw_limit_bytes();
 }
 
 AllocatableResource& AllocatableResource::operator=(
     const crane::grpc::AllocatableResource& value) {
-  cpu_count = value.cpu_core_limit();
+  cpu_count = cpu_count_t(value.cpu_core_limit());
   memory_bytes = value.memory_limit_bytes();
   memory_sw_bytes = value.memory_sw_limit_bytes();
   return *this;

@@ -200,7 +200,7 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
 
     auto& static_meta = craned_meta.static_meta;
     static_meta.res.allocatable_resource.cpu_count =
-        config.Nodes.at(craned_name)->cpu;
+        cpu_count_t(config.Nodes.at(craned_name)->cpu);
     static_meta.res.allocatable_resource.memory_bytes =
         config.Nodes.at(craned_name)->memory_bytes;
     static_meta.res.allocatable_resource.memory_sw_bytes =
@@ -231,7 +231,8 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
           "Add the resource of Craned {} (cpu: {}, mem: {}) to partition "
           "[{}]'s global resource.",
           craned_name,
-          craned_meta.static_meta.res.allocatable_resource.cpu_count,
+          static_cast<double>(
+              craned_meta.static_meta.res.allocatable_resource.cpu_count),
           util::ReadableMemory(
               craned_meta.static_meta.res.allocatable_resource.memory_bytes),
           part_name);
@@ -248,8 +249,9 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
         "partition [{}]'s Global resource now: cpu: {}, mem: {}). It has {} "
         "craneds.",
         part_name,
-        part_meta.partition_global_meta.m_resource_total_inc_dead_
-            .allocatable_resource.cpu_count,
+        static_cast<double>(
+            part_meta.partition_global_meta.m_resource_total_inc_dead_
+                .allocatable_resource.cpu_count),
         util::ReadableMemory(
             part_meta.partition_global_meta.m_resource_total_inc_dead_
                 .allocatable_resource.memory_bytes),
@@ -275,19 +277,21 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     auto& alloc_res_avail = craned_meta->res_avail.allocatable_resource;
 
     craned_info->set_hostname(craned_meta->static_meta.hostname);
-    craned_info->set_cpu(alloc_res_total.cpu_count);
-    craned_info->set_alloc_cpu(alloc_res_in_use.cpu_count);
-    craned_info->set_free_cpu(alloc_res_avail.cpu_count);
+    craned_info->set_cpu(static_cast<double>(alloc_res_total.cpu_count));
+    craned_info->set_alloc_cpu(static_cast<double>(alloc_res_in_use.cpu_count));
+    craned_info->set_free_cpu(static_cast<double>(alloc_res_avail.cpu_count));
     craned_info->set_real_mem(alloc_res_total.memory_bytes);
     craned_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
     craned_info->set_free_mem(alloc_res_avail.memory_bytes);
     craned_info->set_running_task_num(
         craned_meta->running_task_resource_map.size());
     if (craned_meta->alive) {
-      if (craned_meta->res_in_use.allocatable_resource.cpu_count == 0 &&
+      if (craned_meta->res_in_use.allocatable_resource.cpu_count ==
+              cpu_count_t(0) &&
           craned_meta->res_in_use.allocatable_resource.memory_bytes == 0)
         craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
-      else if (craned_meta->res_avail.allocatable_resource.cpu_count == 0 ||
+      else if (craned_meta->res_avail.allocatable_resource.cpu_count ==
+                   cpu_count_t(0) ||
                craned_meta->res_avail.allocatable_resource.memory_bytes == 0)
         craned_info->set_state(crane::grpc::CranedState::CRANE_ALLOC);
       else
@@ -320,19 +324,21 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   auto& alloc_res_avail = craned_meta->res_avail.allocatable_resource;
 
   craned_info->set_hostname(craned_meta->static_meta.hostname);
-  craned_info->set_cpu(alloc_res_total.cpu_count);
-  craned_info->set_alloc_cpu(alloc_res_in_use.cpu_count);
-  craned_info->set_free_cpu(alloc_res_avail.cpu_count);
+  craned_info->set_cpu(static_cast<double>(alloc_res_total.cpu_count));
+  craned_info->set_alloc_cpu(static_cast<double>(alloc_res_in_use.cpu_count));
+  craned_info->set_free_cpu(static_cast<double>(alloc_res_avail.cpu_count));
   craned_info->set_real_mem(alloc_res_total.memory_bytes);
   craned_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
   craned_info->set_free_mem(alloc_res_avail.memory_bytes);
   craned_info->set_running_task_num(
       craned_meta->running_task_resource_map.size());
   if (craned_meta->alive) {
-    if (craned_meta->res_in_use.allocatable_resource.cpu_count == 0 &&
+    if (craned_meta->res_in_use.allocatable_resource.cpu_count ==
+            cpu_count_t(0) &&
         craned_meta->res_in_use.allocatable_resource.memory_bytes == 0)
       craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
-    else if (craned_meta->res_avail.allocatable_resource.cpu_count == 0 ||
+    else if (craned_meta->res_avail.allocatable_resource.cpu_count ==
+                 cpu_count_t(0) ||
              craned_meta->res_avail.allocatable_resource.memory_bytes == 0)
       craned_info->set_state(crane::grpc::CranedState::CRANE_ALLOC);
     else
@@ -369,9 +375,9 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
     part_info->set_total_nodes(part_meta->partition_global_meta.node_cnt);
     part_info->set_alive_nodes(
         part_meta->partition_global_meta.alive_craned_cnt);
-    part_info->set_total_cpu(alloc_res_total.cpu_count);
-    part_info->set_avail_cpu(alloc_res_avail.cpu_count);
-    part_info->set_alloc_cpu(alloc_res_in_use.cpu_count);
+    part_info->set_total_cpu(static_cast<double>(alloc_res_total.cpu_count));
+    part_info->set_avail_cpu(static_cast<double>(alloc_res_avail.cpu_count));
+    part_info->set_alloc_cpu(static_cast<double>(alloc_res_in_use.cpu_count));
     part_info->set_total_mem(alloc_res_total.memory_bytes);
     part_info->set_avail_mem(alloc_res_avail.memory_bytes);
     part_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
@@ -407,9 +413,9 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
   part_info->set_name(part_meta->partition_global_meta.name);
   part_info->set_total_nodes(part_meta->partition_global_meta.node_cnt);
   part_info->set_alive_nodes(part_meta->partition_global_meta.alive_craned_cnt);
-  part_info->set_total_cpu(res_total.cpu_count);
-  part_info->set_avail_cpu(res_avail.cpu_count);
-  part_info->set_alloc_cpu(res_in_use.cpu_count);
+  part_info->set_total_cpu(static_cast<double>(res_total.cpu_count));
+  part_info->set_avail_cpu(static_cast<double>(res_avail.cpu_count));
+  part_info->set_alloc_cpu(static_cast<double>(res_in_use.cpu_count));
   part_info->set_total_mem(res_total.memory_bytes);
   part_info->set_avail_mem(res_avail.memory_bytes);
   part_info->set_alloc_mem(res_in_use.memory_bytes);
@@ -539,11 +545,11 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       auto& res_in_use = craned_meta->res_in_use.allocatable_resource;
       auto& res_avail = craned_meta->res_avail.allocatable_resource;
       if (craned_meta->alive) {
-        if (filter_idle && res_in_use.cpu_count == 0 &&
+        if (filter_idle && res_in_use.cpu_count == cpu_count_t(0) &&
             res_in_use.memory_bytes == 0) {
           idle_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
           idle_craned_list->set_count(idle_craned_name_list.size());
-        } else if (filter_alloc && res_avail.cpu_count == 0 ||
+        } else if (filter_alloc && res_avail.cpu_count == cpu_count_t(0) ||
                    res_avail.memory_bytes == 0) {
           alloc_craned_name_list.emplace_back(
               craned_meta->static_meta.hostname);

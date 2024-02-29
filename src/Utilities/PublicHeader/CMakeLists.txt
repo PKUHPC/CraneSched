@@ -9,7 +9,7 @@ add_library(Utility_PublicHeader
         include/crane/Logger.h
         include/crane/PasswordEntry.h
         include/crane/AtomicHashMap.h)
-target_include_directories(Utility_PublicHeader PUBLIC include)
+target_include_directories(Utility_PublicHeader PUBLIC include ${fpm_SOURCE_DIR}/include)
 target_link_libraries(Utility_PublicHeader PUBLIC
         spdlog::spdlog
         crane_proto_lib)
@@ -21,5 +21,4 @@ add_library(Utility_PublicHeaderNoLogger
         include/crane/PublicHeader.h
         PublicHeader.cpp
 )
-target_include_directories(Utility_PublicHeaderNoLogger PUBLIC include)
-target_link_libraries(Utility_PublicHeaderNoLogger PUBLIC crane_proto_lib)
+target_include_directories(Utility_PublicHeaderNoLogger PUBLIC include ${fpm_SOURCE_DIR}/include)

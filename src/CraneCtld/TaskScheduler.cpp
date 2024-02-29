@@ -1432,8 +1432,9 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_username(task.Username());
     task_it->set_qos(task.qos);
 
-    task_it->set_alloc_cpu(task.resources.allocatable_resource.cpu_count *
-                           task.node_num);
+    task_it->set_alloc_cpu(
+        static_cast<double>(task.resources.allocatable_resource.cpu_count) *
+        task.node_num);
     task_it->set_exit_code(0);
     task_it->set_priority(task.schedule_priority);
 
@@ -1626,7 +1627,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     if constexpr (kAlgoTraceOutput) {
       CRANE_TRACE("Craned {} initial res_avail now: cpu: {}, mem: {}",
                   craned_id,
-                  craned_meta->res_avail.allocatable_resource.cpu_count,
+                  static_cast<double>(
+                      craned_meta->res_avail.allocatable_resource.cpu_count),
                   craned_meta->res_avail.allocatable_resource.memory_bytes);
     }
 
@@ -1652,7 +1654,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
                 "Insert duration [now+{}s, inf) with resource: "
                 "cpu: {}, mem: {}",
                 absl::ToInt64Seconds(end_time - now),
-                craned_meta->res_avail.allocatable_resource.cpu_count,
+                static_cast<double>(
+                    craned_meta->res_avail.allocatable_resource.cpu_count),
                 craned_meta->res_avail.allocatable_resource.memory_bytes);
           }
         }
@@ -1671,7 +1674,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
           CRANE_TRACE("Craned {} res_avail at now + {}s: cpu: {}, mem: {}; ",
                       craned_id,
                       absl::ToInt64Seconds(cur_time_iter->first - now),
-                      cur_time_iter->second.allocatable_resource.cpu_count,
+                      static_cast<double>(
+                          cur_time_iter->second.allocatable_resource.cpu_count),
                       cur_time_iter->second.allocatable_resource.memory_bytes);
         }
       }
@@ -1687,14 +1691,16 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
                           "res: cpu core {}, mem {}",
                           absl::ToInt64Seconds(prev_iter->first - now),
                           absl::ToInt64Seconds(iter->first - now),
-                          prev_iter->second.allocatable_resource.cpu_count,
+                          static_cast<double>(
+                              prev_iter->second.allocatable_resource.cpu_count),
                           prev_iter->second.allocatable_resource.memory_bytes));
         }
         str.append(
             fmt::format("[ now+{}s , inf ) Available allocatable "
                         "res: cpu core {}, mem {}",
                         absl::ToInt64Seconds(prev_iter->first - now),
-                        prev_iter->second.allocatable_resource.cpu_count,
+                        static_cast<double>(
+                            prev_iter->second.allocatable_resource.cpu_count),
                         prev_iter->second.allocatable_resource.memory_bytes));
         CRANE_TRACE("{}", str);
       }
@@ -2354,8 +2360,8 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
           "Resource not enough for task #{}. "
           "Partition total: cpu {}, mem: {}, mem+sw: {}",
           task->TaskId(),
-          metas_ptr->partition_global_meta.m_resource_total_
-              .allocatable_resource.cpu_count,
+          static_cast<double>(metas_ptr->partition_global_meta.m_resource_total_
+                                  .allocatable_resource.cpu_count),
           util::ReadableMemory(
               metas_ptr->partition_global_meta.m_resource_total_
                   .allocatable_resource.memory_bytes),
@@ -2484,7 +2490,8 @@ void MultiFactorPriority::CalculateFactorBound_(
     bound.mem_alloc_min = std::min(mem_alloc, bound.mem_alloc_min);
     bound.mem_alloc_max = std::max(mem_alloc, bound.mem_alloc_max);
 
-    double cpus_alloc = task->resources.allocatable_resource.cpu_count;
+    double cpus_alloc =
+        static_cast<double>(task->resources.allocatable_resource.cpu_count);
     bound.cpus_alloc_min = std::min(cpus_alloc, bound.cpus_alloc_min);
     bound.cpus_alloc_max = std::max(cpus_alloc, bound.cpus_alloc_max);
 
@@ -2500,10 +2507,11 @@ void MultiFactorPriority::CalculateFactorBound_(
   for (const auto& [task_id, task] : running_task_map) {
     double service_val = 0;
     if (bound.cpus_alloc_max != bound.cpus_alloc_min)
-      service_val += 1.0 *
-                     (task->resources.allocatable_resource.cpu_count -
-                      bound.cpus_alloc_min) /
-                     (bound.cpus_alloc_max - bound.cpus_alloc_min);
+      service_val +=
+          1.0 *
+          (static_cast<double>(task->resources.allocatable_resource.cpu_count) -
+           bound.cpus_alloc_min) /
+          (bound.cpus_alloc_max - bound.cpus_alloc_min);
     else
       // += 1.0 here rather than 0.0 in case that the final service_val is 0.
       // If the final service_val is 0, the running time of the task will not
@@ -2548,7 +2556,8 @@ double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
   uint32_t task_part_priority = task->partition_priority;
   uint32_t task_nodes_alloc = task->node_num;
   uint64_t task_mem_alloc = task->resources.allocatable_resource.memory_bytes;
-  double task_cpus_alloc = task->resources.allocatable_resource.cpu_count;
+  double task_cpus_alloc =
+      static_cast<double>(task->resources.allocatable_resource.cpu_count);
   double task_service_val = bound.acc_service_val_map.at(task->account);
 
   double qos_factor{0};

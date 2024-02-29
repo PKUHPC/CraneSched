@@ -18,6 +18,8 @@
 
 #include <google/protobuf/util/time_util.h>
 
+#include <fpm/fixed.hpp>
+
 #include "protos/Crane.pb.h"
 
 using task_id_t = uint32_t;
@@ -150,11 +152,11 @@ inline std::string_view CraneErrStr(CraneErr err) {
 
 using PartitionId = std::string;
 using CranedId = std::string;
-
+using cpu_count_t = fpm::fixed_24_8;
 // Model the allocatable resources on a craned node.
 // It contains CPU and memory by now.
 struct AllocatableResource {
-  double cpu_count = 0.0;
+  cpu_count_t cpu_count = cpu_count_t(0);
 
   // See documentation of cgroup memory.
   // https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt

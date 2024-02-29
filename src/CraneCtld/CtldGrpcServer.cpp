@@ -383,8 +383,9 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     task_it->set_username(task->username);
     task_it->set_qos(task->qos);
 
-    task_it->set_alloc_cpu(task->resources.allocatable_resource.cpu_count *
-                           task->node_num);
+    task_it->set_alloc_cpu(
+        static_cast<double>(task->resources.allocatable_resource.cpu_count) *
+        task->node_num);
     task_it->set_exit_code(task->exit_code);
 
     task_it->set_status(task->status);
