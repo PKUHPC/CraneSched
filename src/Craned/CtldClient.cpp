@@ -122,7 +122,7 @@ bool CtldClient::CancelTaskStatusChangeByTaskId(
       ++it;
 
   CRANE_ASSERT_MSG(num_removed <= 1,
-                   "TaskStatusChange should happen at most once "
+                   "TaskStatusChangeWithReasonAsync should happen at most once "
                    "for a single running task!");
 
   return num_removed >= 1;
@@ -176,7 +176,7 @@ void CtldClient::AsyncSendThread_() {
 
       auto status_change = changes.front();
 
-      CRANE_TRACE("Sending TaskStatusChange for task #{}",
+      CRANE_TRACE("Sending TaskStatusChangeWithReasonAsync for task #{}",
                   status_change.task_id);
 
       request.set_craned_id(m_craned_id_);
@@ -189,7 +189,7 @@ void CtldClient::AsyncSendThread_() {
       status = m_stub_->TaskStatusChange(&context, request, &reply);
       if (!status.ok()) {
         CRANE_ERROR(
-            "Failed to send TaskStatusChange: "
+            "Failed to send TaskStatusChangeWithReasonAsync: "
             "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
             status_change.task_id, status_change.new_status,
             status.error_message(), context.debug_error_string(),
@@ -208,8 +208,9 @@ void CtldClient::AsyncSendThread_() {
         } else
           changes.pop_front();
       } else {
-        CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
-                    status_change.task_id, reply.ok());
+        CRANE_TRACE(
+            "TaskStatusChangeWithReasonAsync for task #{} sent. reply.ok={}",
+            status_change.task_id, reply.ok());
         changes.pop_front();
       }
     }

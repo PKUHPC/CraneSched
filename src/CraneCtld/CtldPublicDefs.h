@@ -314,67 +314,6 @@ struct TaskInCtld {
     return persisted_part;
   }
 
-  // add this task execute request to requests
-  void AddExecuteTaskRequest(crane::grpc::ExecuteTasksRequest& requests) const {
-    auto* mutable_task = requests.mutable_tasks()->Add();
-
-    // Set time_limit
-    mutable_task->mutable_time_limit()->CopyFrom(
-        google::protobuf::util::TimeUtil::MillisecondsToDuration(
-            ToInt64Milliseconds(this->time_limit)));
-
-    // Set resources
-    auto* mutable_allocatable_resource =
-        mutable_task->mutable_resources()->mutable_allocatable_resource();
-    mutable_allocatable_resource->set_cpu_core_limit(
-        this->resources.allocatable_resource.cpu_count);
-    mutable_allocatable_resource->set_memory_limit_bytes(
-        this->resources.allocatable_resource.memory_bytes);
-    mutable_allocatable_resource->set_memory_sw_limit_bytes(
-        this->resources.allocatable_resource.memory_sw_bytes);
-
-    // Set type
-    mutable_task->set_type(this->type);
-    mutable_task->set_task_id(this->TaskId());
-    mutable_task->set_name(this->name);
-    mutable_task->set_account(this->account);
-    mutable_task->set_qos(this->qos);
-    mutable_task->set_partition(this->TaskToCtld().partition_name());
-
-    for (auto&& node : this->included_nodes) {
-      mutable_task->mutable_nodelist()->Add()->assign(node);
-    }
-
-    for (auto&& node : this->excluded_nodes) {
-      mutable_task->mutable_excludes()->Add()->assign(node);
-    }
-
-    mutable_task->set_node_num(this->node_num);
-    mutable_task->set_ntasks_per_node(this->ntasks_per_node);
-    mutable_task->set_cpus_per_task(this->cpus_per_task);
-
-    mutable_task->set_uid(this->uid);
-    mutable_task->mutable_env()->insert(this->env.begin(), this->env.end());
-
-    mutable_task->set_cwd(this->cwd);
-    mutable_task->set_get_user_env(this->get_user_env);
-
-    for (const auto& hostname : this->CranedIds())
-      mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
-
-    mutable_task->mutable_start_time()->set_seconds(
-        this->StartTimeInUnixSecond());
-    mutable_task->mutable_time_limit()->set_seconds(
-        ToInt64Seconds(this->time_limit));
-
-    if (this->type == crane::grpc::Batch) {
-      auto& meta_in_ctld = std::get<BatchMetaInTask>(this->meta);
-      auto* mutable_meta = mutable_task->mutable_batch_meta();
-      mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
-      mutable_meta->set_sh_script(meta_in_ctld.sh_script);
-    }
-  }
-
   void SetTaskId(task_id_t id) {
     task_id = id;
     persisted_part.set_task_id(id);

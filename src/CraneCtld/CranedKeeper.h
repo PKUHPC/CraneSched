@@ -37,7 +37,11 @@ class CranedStub {
 
   ~CranedStub();
 
-  CraneErr ExecuteTasks(const crane::grpc::ExecuteTasksRequest &requests);
+  static crane::grpc::ExecuteTasksRequest NewExecuteTasksRequest(
+      const std::vector<TaskInCtld *> &tasks);
+
+  std::vector<task_id_t> ExecuteTasks(
+      const crane::grpc::ExecuteTasksRequest &request);
 
   CraneErr CreateCgroupForTasks(
       std::vector<std::pair<task_id_t, uid_t>> const &task_uid_pairs);

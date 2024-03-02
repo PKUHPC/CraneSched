@@ -34,23 +34,32 @@ CranedStub::~CranedStub() {
   if (m_clean_up_cb_) m_clean_up_cb_(this);
 }
 
-CraneErr CranedStub::ExecuteTasks(
-    const crane::grpc::ExecuteTasksRequest &requests) {
+std::vector<task_id_t> CranedStub::ExecuteTasks(
+    const crane::grpc::ExecuteTasksRequest &request) {
   using crane::grpc::ExecuteTasksReply;
   using crane::grpc::ExecuteTasksRequest;
+
+  std::vector<task_id_t> failed_task_ids;
 
   ExecuteTasksReply reply;
   ClientContext context;
   Status status;
 
-  status = m_stub_->ExecuteTask(&context, requests, &reply);
+  status = m_stub_->ExecuteTask(&context, request, &reply);
   if (!status.ok()) {
     CRANE_DEBUG("Execute RPC for Node {} returned with status not ok: {}",
                 m_craned_id_, status.error_message());
-    return CraneErr::kRpcFailure;
+
+    failed_task_ids.reserve(request.tasks_size());
+    for (auto &task : request.tasks())
+      failed_task_ids.emplace_back(task.task_id());
+
+    return failed_task_ids;
   }
 
-  return CraneErr::kOk;
+  failed_task_ids.assign(reply.failed_task_id_list().begin(),
+                         reply.failed_task_id_list().end());
+  return failed_task_ids;
 }
 
 CraneErr CranedStub::TerminateTasks(const std::vector<task_id_t> &task_ids) {
@@ -208,6 +217,73 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
     return CraneErr::kOk;
   else
     return CraneErr::kGenericFailure;
+}
+
+crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
+    const std::vector<TaskInCtld *> &tasks) {
+  crane::grpc::ExecuteTasksRequest request;
+
+  for (TaskInCtld *task : tasks) {
+    auto *mutable_task = request.add_tasks();
+
+    // Set time_limit
+    mutable_task->mutable_time_limit()->CopyFrom(
+        google::protobuf::util::TimeUtil::MillisecondsToDuration(
+            ToInt64Milliseconds(task->time_limit)));
+
+    // Set resources
+    auto *mutable_allocatable_resource =
+        mutable_task->mutable_resources()->mutable_allocatable_resource();
+    mutable_allocatable_resource->set_cpu_core_limit(
+        task->resources.allocatable_resource.cpu_count);
+    mutable_allocatable_resource->set_memory_limit_bytes(
+        task->resources.allocatable_resource.memory_bytes);
+    mutable_allocatable_resource->set_memory_sw_limit_bytes(
+        task->resources.allocatable_resource.memory_sw_bytes);
+
+    // Set type
+    mutable_task->set_type(task->type);
+    mutable_task->set_task_id(task->TaskId());
+    mutable_task->set_name(task->name);
+    mutable_task->set_account(task->account);
+    mutable_task->set_qos(task->qos);
+    mutable_task->set_partition(task->TaskToCtld().partition_name());
+
+    for (auto &&node : task->included_nodes) {
+      mutable_task->mutable_nodelist()->Add()->assign(node);
+    }
+
+    for (auto &&node : task->excluded_nodes) {
+      mutable_task->mutable_excludes()->Add()->assign(node);
+    }
+
+    mutable_task->set_node_num(task->node_num);
+    mutable_task->set_ntasks_per_node(task->ntasks_per_node);
+    mutable_task->set_cpus_per_task(task->cpus_per_task);
+
+    mutable_task->set_uid(task->uid);
+    mutable_task->mutable_env()->insert(task->env.begin(), task->env.end());
+
+    mutable_task->set_cwd(task->cwd);
+    mutable_task->set_get_user_env(task->get_user_env);
+
+    for (const auto &hostname : task->CranedIds())
+      mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
+
+    mutable_task->mutable_start_time()->set_seconds(
+        task->StartTimeInUnixSecond());
+    mutable_task->mutable_time_limit()->set_seconds(
+        ToInt64Seconds(task->time_limit));
+
+    if (task->type == crane::grpc::Batch) {
+      auto &meta_in_ctld = std::get<BatchMetaInTask>(task->meta);
+      auto *mutable_meta = mutable_task->mutable_batch_meta();
+      mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
+      mutable_meta->set_sh_script(meta_in_ctld.sh_script);
+    }
+  }
+
+  return request;
 }
 
 CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {

@@ -327,8 +327,11 @@ grpc::Status CranedServiceImpl::ExecuteTask(
   CRANE_TRACE("Requested from CraneCtld to execute {} tasks.",
               request->tasks_size());
 
+  CraneErr err;
   for (auto const &task_to_d : request->tasks()) {
-    g_task_mgr->ExecuteTaskAsync(task_to_d);
+    err = g_task_mgr->ExecuteTaskAsync(task_to_d);
+    if (err != CraneErr::kOk)
+      response->add_failed_task_id_list(task_to_d.task_id());
   }
 
   return Status::OK;
