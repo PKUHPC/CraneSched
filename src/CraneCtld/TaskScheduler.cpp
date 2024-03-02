@@ -665,7 +665,7 @@ void TaskScheduler::ScheduleThread_() {
           // 1. call g_meta_container->FreeResources() for the failed tasks.
           // 2. Release all cgroups related to these failed tasks.
           // 3. Move these tasks to the completed queue.
-          CRANE_TRACE("CranedNode #{} no ok when CreateCgroupForTasks.",
+          CRANE_ERROR("Craned #{} failed when CreateCgroupForTasks.",
                       craned_id);
 
           bl.DecrementCount();
@@ -805,10 +805,12 @@ void TaskScheduler::ScheduleThread_() {
       // If any task failed during this stage,
       // call TaskStatusChangeAsync since the ownership of tasks
       // has been transferred.
-      for (auto& [craned_id, task_id] : failed_to_exec_task_id_set)
+      for (auto& [craned_id, task_id] : failed_to_exec_task_id_set) {
+        CRANE_ERROR("Task #{} on {} failed to execute.", task_id, craned_id);
         TaskStatusChangeAsync(task_id, craned_id,
                               crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeExecutionError);
+      }
 
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
@@ -949,15 +951,6 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
   }
 
   return CraneErr::kOk;
-}
-
-void TaskScheduler::TaskStatusChangeAsync(uint32_t task_id,
-                                          const CranedId& craned_index,
-                                          crane::grpc::TaskStatus new_status,
-                                          uint32_t exit_code) {
-  m_task_status_change_queue_.enqueue(
-      {task_id, exit_code, new_status, craned_index});
-  m_task_status_change_async_handle_->send();
 }
 
 CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
@@ -1259,6 +1252,15 @@ void TaskScheduler::CleanSubmitQueueCb_() {
                                    std::memory_order_release);
 }
 
+void TaskScheduler::TaskStatusChangeAsync(uint32_t task_id,
+                                          const CranedId& craned_index,
+                                          crane::grpc::TaskStatus new_status,
+                                          uint32_t exit_code) {
+  m_task_status_change_queue_.enqueue(
+      {task_id, exit_code, new_status, craned_index});
+  m_task_status_change_async_handle_->send();
+}
+
 void TaskScheduler::TaskStatusChangeTimerCb_() {
   m_clean_task_status_change_handle_->send();
 }
@@ -1274,9 +1276,11 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   std::vector<TaskStatusChangeArg> args;
   args.resize(approximate_size);
 
-  auto actual_size = m_task_status_change_queue_.try_dequeue_bulk(
+  size_t actual_size = m_task_status_change_queue_.try_dequeue_bulk(
       args.begin(), approximate_size);
   if (actual_size == 0) return;
+
+  CRANE_TRACE("Cleaning TaskStatusChange for {} tasks...", actual_size);
 
   // Carry the ownership of TaskInCtld for automatic destruction.
   std::vector<std::unique_ptr<TaskInCtld>> task_ptr_vec;
