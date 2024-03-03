@@ -554,6 +554,7 @@ void TaskScheduler::ScheduleThread_() {
   std::chrono::steady_clock::time_point begin;
   std::chrono::steady_clock::time_point end;
 
+  util::SetCurrentThreadName("ScheduleThread");
   while (!m_thread_stop_) {
     // Note: In other parts of code, we must avoid the happening of the
     // situation where m_running_task_map_mtx is acquired and then
