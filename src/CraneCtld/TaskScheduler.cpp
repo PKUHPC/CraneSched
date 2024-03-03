@@ -719,19 +719,18 @@ void TaskScheduler::ScheduleThread_() {
       // this thread in the following step to move these tasks to ram and DB
       // running queue before we call stub->ExecuteTasks().
       HashMap<CranedId, std::vector<TaskInCtld*>>
-          craned_succeeded_task_raw_ptrs_map;
+          craned_task_to_exec_raw_ptrs_map;
       for (auto& it : selection_result_list) {
         auto& task = it.first;
-        for (CranedId const& craned_id : task->CranedIds())
-          craned_succeeded_task_raw_ptrs_map[craned_id].emplace_back(
-              task.get());
+        craned_task_to_exec_raw_ptrs_map[task->executing_craned_id]
+            .emplace_back(task.get());
       }
 
       HashMap<CranedId, crane::grpc::ExecuteTasksRequest>
-          craned_tasks_to_exec_map;
+          craned_exec_requests_map;
       for (auto& [craned_id, tasks_raw_ptrs] :
-           craned_succeeded_task_raw_ptrs_map) {
-        craned_tasks_to_exec_map[craned_id] =
+           craned_task_to_exec_raw_ptrs_map) {
+        craned_exec_requests_map[craned_id] =
             CranedStub::NewExecuteTasksRequest(tasks_raw_ptrs);
       }
 
@@ -791,7 +790,7 @@ void TaskScheduler::ScheduleThread_() {
       begin = std::chrono::steady_clock::now();
 
       HashSet<std::pair<CranedId, task_id_t>> failed_to_exec_task_id_set;
-      for (auto const& [craned_id, tasks] : craned_tasks_to_exec_map) {
+      for (auto const& [craned_id, tasks] : craned_exec_requests_map) {
         auto stub = g_craned_keeper->GetCranedStub(craned_id);
         CRANE_TRACE("Send ExecuteTasks for {} tasks to {}", tasks.tasks_size(),
                     craned_id);
