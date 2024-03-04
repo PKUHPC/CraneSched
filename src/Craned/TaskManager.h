@@ -392,6 +392,9 @@ class TaskManager {
 
   absl::Mutex m_mtx_;
 
+  util::AtomicHashMap<absl::flat_hash_map, task_id_t, uid_t>
+      m_task_id_to_uid_map_;
+
   util::AtomicHashMap<absl::flat_hash_map, task_id_t,
                       std::unique_ptr<util::Cgroup>>
       m_task_id_to_cg_map_;

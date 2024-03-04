@@ -70,7 +70,7 @@ class CranedStub {
   // Set if underlying gRPC is down.
   bool m_invalid_;
 
-  static constexpr uint32_t s_maximum_retry_times_ = 3;
+  static constexpr uint32_t s_maximum_retry_times_ = 2;
   uint32_t m_failure_retry_times_;
 
   CranedId m_craned_id_;

@@ -697,10 +697,15 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
   grpc::ServerBuilder builder;
+  builder.AddChannelArgument(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA,
+                             0 /*no limit*/);
   builder.AddChannelArgument(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS,
                              1 /*true*/);
   builder.AddChannelArgument(
-      GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS, 4 * 1000 /*ms*/);
+      GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS,
+      kCranedGrpcServerPingRecvMinIntervalSec * 1000 /*ms*/);
+  builder.AddChannelArgument(GRPC_ARG_HTTP2_MAX_PING_STRIKES,
+                             0 /* unlimited */);
 
   if (g_config.CompressedRpc)
     builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_GZIP);

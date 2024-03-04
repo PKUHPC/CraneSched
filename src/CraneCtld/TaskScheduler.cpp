@@ -626,6 +626,20 @@ void TaskScheduler::ScheduleThread_() {
 
       begin = std::chrono::steady_clock::now();
 
+      // Add task ids to node maps immediately before CreateCgroupForTasks
+      // to ensure that
+      // if a CraneD crash, the callback of CranedKeeper can call
+      // TerminateTasksOnCraned in which m_node_to_tasks_map_ will be searched
+      // and send TerminateTasksOnCraned to appropriate CraneD
+      // to release the cgroups.
+      m_task_indexes_mtx_.Lock();
+      for (auto& it : selection_result_list) {
+        auto& task = it.first;
+        for (CranedId const& craned_id : task->CranedIds())
+          m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
+      }
+      m_task_indexes_mtx_.Unlock();
+
       // RPC is time-consuming. Clustering rpc to one craned for performance.
 
       HashMap<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
@@ -713,17 +727,6 @@ void TaskScheduler::ScheduleThread_() {
       // free all the resource and move them to the completed queue.
 
       // First handle successful tasks in selection_result_list.
-
-      // Add task ids to node maps immediately after CreateCgroupForTasks
-      // to minimize the interval where a CraneD might crash and the callback of
-      // CranedKeeper can call TerminateTasksOnCraned to release the cgroups.
-      m_task_indexes_mtx_.Lock();
-      for (auto& it : selection_result_list) {
-        auto& task = it.first;
-        for (CranedId const& craned_id : task->CranedIds())
-          m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
-      }
-      m_task_indexes_mtx_.Unlock();
 
       // Prepare ExecuteTasksRequest.
       // We do this since the ownership of tasks will be transferred outside

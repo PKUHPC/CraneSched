@@ -390,8 +390,8 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
       if (next_tag) {
         // When cq is closed, do not register any more callbacks on it.
         if (!m_cq_closed_) {
-          CRANE_TRACE("Registering next tag {} for {}", tag->type,
-                      craned->m_craned_id_);
+          // CRANE_TRACE("Registering next tag {} for {}", tag->type,
+          //            craned->m_craned_id_);
 
           auto deadline = std::chrono::system_clock::now();
           if (tag->type == CqTag::kInitializingCraned)
@@ -403,8 +403,8 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
 
           craned->m_prev_channel_state_ = new_state;
 
-          CRANE_TRACE("Registering next tag {} for {}", next_tag->type,
-                      craned->m_craned_id_);
+          // CRANE_TRACE("Registering next tag {} for {}", next_tag->type,
+          //            craned->m_craned_id_);
 
           util::lock_guard lock(m_cq_mtx_vec_[thread_id]);
           craned->m_channel_->NotifyOnStateChange(
@@ -531,7 +531,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
 
 CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     CranedStub *craned, grpc_connectivity_state new_state) {
-  CRANE_TRACE("Enter EstablishedCranedStateMachine_");
+  // CRANE_TRACE("Enter EstablishedCranedStateMachine_");
 
   std::optional<CqTag::Type> next_tag_type;
 
@@ -554,7 +554,6 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     case GRPC_CHANNEL_IDLE: {
       // prev     current
       // READY -> IDLE (the only edge)
-      CRANE_TRACE("READY -> IDLE");
 
       craned->m_invalid_ = true;
 
@@ -564,7 +563,6 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
 
     case GRPC_CHANNEL_READY: {
       // Any -> READY
-      CRANE_TRACE("READY -> READY");
       next_tag_type = CqTag::kEstablishedCraned;
       break;
     }
@@ -572,7 +570,6 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     case GRPC_CHANNEL_TRANSIENT_FAILURE: {
       // current              next
       // TRANSIENT_FAILURE -> END
-      CRANE_TRACE("TRANSIENT_FAILURE -> END");
       next_tag_type = std::nullopt;
       break;
     }
@@ -586,12 +583,12 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
   }
 
   if (next_tag_type.has_value()) {
-    CRANE_TRACE("Exit EstablishedCranedStateMachine_");
+    // CRANE_TRACE("Exit EstablishedCranedStateMachine_");
     return m_tag_sync_allocator_->new_object<CqTag>(
         CqTag{next_tag_type.value(), craned});
   }
 
-  CRANE_TRACE("Exit EstablishedCranedStateMachine_");
+  // CRANE_TRACE("Exit EstablishedCranedStateMachine_");
   return nullptr;
 }
 
@@ -655,7 +652,9 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   // the socket will remain ESTABLISHED state even if that craned has died.
   // Open KeepAlive option in case of such situation.
   // See https://grpc.github.io/grpc/cpp/md_doc_keepalive.html
-  channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIME_MS, 5 /*s*/ * 1000 /*ms*/);
+  channel_args.SetInt(
+      GRPC_ARG_KEEPALIVE_TIME_MS,
+      kCraneCtldGrpcClientPingSendIntervalSec /*s*/ * 1000 /*ms*/);
   channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 10 /*s*/ * 1000 /*ms*/);
   channel_args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1 /*true*/);
   channel_args.SetInt(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA, 0 /*no limit*/);

@@ -1088,7 +1088,41 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
 
     auto iter = this_->m_task_map_.find(elem.task_id);
     if (iter == this_->m_task_map_.end()) {
-      CRANE_DEBUG("Trying terminating unknown task #{}", elem.task_id);
+      CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
+
+      // Note if Ctld wants to terminate some tasks that are not running,
+      // it might indicate other nodes allocated to the task might have crashed.
+      // We should mark the task as kind of not runnable by removing its cgroup.
+      //
+      // Considering such a situation:
+      // In Task Scheduler of Ctld,
+      // the task index from node id to task id have just been added and
+      // Ctld are sending CreateCgroupForTasks.
+      // Right at the moment, one Craned allocated to this task and
+      // designated as the executing node crashes,
+      // but it has been sent a CreateCgroupForTasks and replied.
+      // Then the CranedKeeper search the task index and
+      // send TerminateTasksOnCraned to all Craned allocated to this task
+      // including this node.
+      // In order to give Ctld kind of feedback without adding complicated
+      // synchronizing mechanism in ScheduleThread_(),
+      // we just remove the cgroup for such task, Ctld will fail in the
+      // following ExecuteTasks and the task will go to the right place as well
+      // as the completed queue.
+
+      uid_t uid;
+      {
+        auto vp =
+            this_->m_task_id_to_uid_map_.GetValueExclusivePtr(elem.task_id);
+        if (!vp) return;
+
+        CRANE_DEBUG(
+            "Remove cgroup for task #{} for potential crashes of other craned.",
+            elem.task_id);
+        uid = *vp;
+        this_->ReleaseCgroupAsync(elem.task_id, uid);
+      }
+
       return;
     }
 
@@ -1142,6 +1176,8 @@ bool TaskManager::CreateCgroupsAsync(
     CRANE_TRACE("Create lazily allocated cgroups for task #{}, uid {}", task_id,
                 uid);
 
+    this->m_task_id_to_uid_map_.Emplace(task_id, uid);
+
     this->m_task_id_to_cg_map_.Emplace(task_id, nullptr);
     if (!this->m_uid_to_task_ids_map_.Contains(uid))
       this->m_uid_to_task_ids_map_.Emplace(
@@ -1165,6 +1201,8 @@ bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
         uid);
     return false;
   }
+
+  this->m_task_id_to_uid_map_.Erase(task_id);
 
   this->m_uid_to_task_ids_map_[uid]->erase(task_id);
   if (this->m_uid_to_task_ids_map_[uid]->empty()) {
