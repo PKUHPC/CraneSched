@@ -77,9 +77,9 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
 
-  g_task_scheduler->TaskStatusChange(request->task_id(), request->craned_id(),
-                                     request->new_status(),
-                                     request->exit_code(), std::move(reason));
+  g_task_scheduler->TaskStatusChangeWithReasonAsync(
+      request->task_id(), request->craned_id(), request->new_status(),
+      request->exit_code(), std::move(reason));
   response->set_ok(true);
   return grpc::Status::OK;
 }
@@ -1335,6 +1335,8 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
   // Avoid the potential deadlock error in underlying absl::mutex
   std::thread sigint_waiting_thread([p_server = m_server_.get()] {
+    util::SetCurrentThreadName("SIGINT_Waiter");
+
     std::unique_lock<std::mutex> lk(s_sigint_mtx);
     s_sigint_cv.wait(lk);
 

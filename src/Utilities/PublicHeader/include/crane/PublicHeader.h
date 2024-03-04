@@ -76,6 +76,18 @@ inline const char* kDefaultCranedMutexFile =
 constexpr int64_t kMaxTimeLimitSecond =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
 
+// gRPC Doc: If smaller than 10 seconds, ten seconds will be used instead.
+// See https://github.com/grpc/proposal/blob/master/A8-client-side-keepalive.md
+constexpr int64_t kCraneCtldGrpcClientPingSendIntervalSec = 10;
+
+// Server MUST have a high value of
+// GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS than the value of
+// GRPC_ARG_KEEPALIVE_TIME_MS. We set server's value to the multiple times of
+// the client's value plus 1s to tolerate 1 time packet dropping. See
+// https://github.com/grpc/grpc/blob/master/doc/keepalive.md
+constexpr int64_t kCranedGrpcServerPingRecvMinIntervalSec =
+    3 * kCraneCtldGrpcClientPingSendIntervalSec + 1;
+
 namespace ExitCode {
 
 inline constexpr size_t kExitStatusNum = 256;
@@ -93,6 +105,7 @@ enum ExitCodeEnum : uint16_t {
   kExitCodeSpawnProcessFail,
   kExitCodeExceedTimeLimit,
   kExitCodeCranedDown,
+  kExitCodeExecutionError,
 
   __MAX_EXIT_CODE  // NOLINT(bugprone-reserved-identifier)
 };

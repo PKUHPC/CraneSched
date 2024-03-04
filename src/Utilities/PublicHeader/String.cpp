@@ -18,6 +18,7 @@
 
 #include <absl/strings/str_split.h>
 #include <absl/strings/strip.h>
+#include <pthread.h>
 
 #include "crane/Logger.h"
 
@@ -329,6 +330,16 @@ std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
     }
   }
   return output;
+}
+
+void SetCurrentThreadName(const std::string &name) {
+  // The thread name is not allowed to exceed 16 characters including '\0'.
+  if (name.size() >= 16) {
+    CRANE_ERROR("Thread name cannot exceed 16 character!");
+    return;
+  }
+
+  pthread_setname_np(pthread_self(), name.c_str());
 }
 
 }  // namespace util

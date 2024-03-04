@@ -29,16 +29,28 @@ inline const char* kCraneCtldDefaultLogPath = "/tmp/cranectld/cranectld.log";
 inline const char* kDefaultDbPath = "/tmp/cranectld/embedded.db";
 inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
 
+// *****************************************************
 // TaskScheduler Constants
+
 constexpr uint32_t kTaskScheduleIntervalMs = 1000;
+
+// Clean CancelTaskQueue when timeout or exceeding batch num
 constexpr uint32_t kCancelTaskTimeoutMs = 500;
 constexpr uint32_t kCancelTaskBatchNum = 1000;
+
+// Clean SubmitTaskQueue when timeout or exceeding batch num
 constexpr uint32_t kSubmitTaskTimeoutMs = 500;
 constexpr uint32_t kSubmitTaskBatchNum = 1000;
-constexpr uint32_t kConcurrentStreamQuota = 3000;
-constexpr uint32_t kCompletionQueueCapacity = 5000;
+
+// Clean TaskStatusChangeQueue when timeout or exceeding batch num
+constexpr uint32_t kTaskStatusChangeTimeoutMS = 500;
+constexpr uint32_t kTaskStatusChangeBatchNum = 1000;
+
+//*********************************************************
 
 // CranedKeeper Constants
+constexpr uint32_t kConcurrentStreamQuota = 3000;
+constexpr uint32_t kCompletionQueueCapacity = 5000;
 constexpr uint16_t kCompletionQueueConnectingTimeoutSeconds = 3;
 constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 

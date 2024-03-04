@@ -327,8 +327,11 @@ grpc::Status CranedServiceImpl::ExecuteTask(
   CRANE_TRACE("Requested from CraneCtld to execute {} tasks.",
               request->tasks_size());
 
+  CraneErr err;
   for (auto const &task_to_d : request->tasks()) {
-    g_task_mgr->ExecuteTaskAsync(task_to_d);
+    err = g_task_mgr->ExecuteTaskAsync(task_to_d);
+    if (err != CraneErr::kOk)
+      response->add_failed_task_id_list(task_to_d.task_id());
   }
 
   return Status::OK;
@@ -486,18 +489,21 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::ReleaseCgroupForTask(
+grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
     grpc::ServerContext *context,
-    const crane::grpc::ReleaseCgroupForTaskRequest *request,
-    crane::grpc::ReleaseCgroupForTaskReply *response) {
-  task_id_t task_id = request->task_id();
-  uid_t uid = request->uid();
+    const crane::grpc::ReleaseCgroupForTasksRequest *request,
+    crane::grpc::ReleaseCgroupForTasksReply *response) {
+  for (int i = 0; i < request->task_id_list_size(); ++i) {
+    task_id_t task_id = request->task_id_list(i);
+    uid_t uid = request->uid_list(i);
 
-  CRANE_DEBUG("Release Cgroup for task #{}", task_id);
+    CRANE_DEBUG("Release Cgroup for task #{}", task_id);
 
-  bool ok = g_task_mgr->ReleaseCgroupAsync(task_id, uid);
-  if (!ok) {
-    CRANE_ERROR("Failed to release cgroup for task #{}, uid {}", task_id, uid);
+    bool ok = g_task_mgr->ReleaseCgroupAsync(task_id, uid);
+    if (!ok) {
+      CRANE_ERROR("Failed to release cgroup for task #{}, uid {}", task_id,
+                  uid);
+    }
   }
 
   return Status::OK;
@@ -691,10 +697,15 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
   grpc::ServerBuilder builder;
+  builder.AddChannelArgument(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA,
+                             0 /*no limit*/);
   builder.AddChannelArgument(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS,
                              1 /*true*/);
   builder.AddChannelArgument(
-      GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS, 4 * 1000 /*ms*/);
+      GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS,
+      kCranedGrpcServerPingRecvMinIntervalSec * 1000 /*ms*/);
+  builder.AddChannelArgument(GRPC_ARG_HTTP2_MAX_PING_STRIKES,
+                             0 /* unlimited */);
 
   if (g_config.CompressedRpc)
     builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_GZIP);
