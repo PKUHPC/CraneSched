@@ -485,6 +485,8 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
 
 void TaskScheduler::CancelTaskThread_(
     const std::shared_ptr<uvw::loop>& uvw_loop) {
+  util::SetCurrentThreadName("CancelTaskThr");
+
   std::shared_ptr<uvw::idle_handle> idle_handle =
       uvw_loop->resource<uvw::idle_handle>();
   idle_handle->on<uvw::idle_event>(
@@ -505,6 +507,8 @@ void TaskScheduler::CancelTaskThread_(
 
 void TaskScheduler::SubmitTaskThread_(
     const std::shared_ptr<uvw::loop>& uvw_loop) {
+  util::SetCurrentThreadName("SubmitTaskThr");
+
   std::shared_ptr<uvw::idle_handle> idle_handle =
       uvw_loop->resource<uvw::idle_handle>();
   idle_handle->on<uvw::idle_event>(
@@ -525,6 +529,8 @@ void TaskScheduler::SubmitTaskThread_(
 
 void TaskScheduler::TaskStatusChangeThread_(
     const std::shared_ptr<uvw::loop>& uvw_loop) {
+  util::SetCurrentThreadName("TaskStatChThr");
+
   std::shared_ptr<uvw::idle_handle> idle_handle =
       uvw_loop->resource<uvw::idle_handle>();
   idle_handle->on<uvw::idle_event>(
@@ -546,6 +552,8 @@ void TaskScheduler::TaskStatusChangeThread_(
 }
 
 void TaskScheduler::ScheduleThread_() {
+  util::SetCurrentThreadName("ScheduleThread");
+
   std::chrono::steady_clock::time_point schedule_begin;
   std::chrono::steady_clock::time_point schedule_end;
   size_t num_tasks_single_schedule;
@@ -554,7 +562,6 @@ void TaskScheduler::ScheduleThread_() {
   std::chrono::steady_clock::time_point begin;
   std::chrono::steady_clock::time_point end;
 
-  util::SetCurrentThreadName("ScheduleThread");
   while (!m_thread_stop_) {
     // Note: In other parts of code, we must avoid the happening of the
     // situation where m_running_task_map_mtx is acquired and then

@@ -331,9 +331,14 @@ std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
   }
   return output;
 }
+
 void SetCurrentThreadName(const std::string &name) {
-  // thread name not allowed to exceed 16 include '\0'
-  CRANE_ASSERT(name.size() < 16);
+  // The thread name is not allowed to exceed 16 characters including '\0'.
+  if (name.size() >= 16) {
+    CRANE_ERROR("Thread name cannot exceed 16 character!");
+    return;
+  }
+
   pthread_setname_np(pthread_self(), name.c_str());
 }
 

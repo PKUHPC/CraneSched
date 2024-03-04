@@ -347,6 +347,8 @@ void CranedKeeper::InitAndRegisterCraneds(
 }
 
 void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
+  util::SetCurrentThreadName(fmt::format("KeeStatMon{:0>3}", thread_id));
+
   bool ok;
   CqTag *tag;
   grpc::CompletionQueue::NextStatus next_status;
@@ -714,6 +716,8 @@ void CranedKeeper::CranedChannelConnectFail_(CranedStub *stub) {
 }
 
 void CranedKeeper::PeriodConnectCranedThreadFunc_() {
+  util::SetCurrentThreadName("PeriConnCraned");
+
   while (true) {
     if (m_cq_closed_) break;
 

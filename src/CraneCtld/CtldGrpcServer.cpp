@@ -1335,6 +1335,8 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
   // Avoid the potential deadlock error in underlying absl::mutex
   std::thread sigint_waiting_thread([p_server = m_server_.get()] {
+    util::SetCurrentThreadName("SIGINT_Waiter");
+
     std::unique_lock<std::mutex> lk(s_sigint_mtx);
     s_sigint_cv.wait(lk);
 
