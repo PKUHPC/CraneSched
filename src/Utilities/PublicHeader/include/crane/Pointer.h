@@ -170,6 +170,8 @@ class ManagedScopeExclusivePtr {
   };
 
   ~ManagedScopeExclusivePtr() noexcept {
+    if (data_ == nullptr) return;
+
     if constexpr (StdUnlockable<Unlockable>)
       lock_.unlock();
     else  // AbslUnlockable
