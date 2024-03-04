@@ -2268,9 +2268,8 @@ void TaskScheduler::TransferTasksToMongodb_(
         txn_id, task->TaskDbId());
     if (!ok) {
       CRANE_ERROR(
-          "Failed to call "
-          "g_embedded_db_client->MovePendingOrRunningTaskToEnded() for task "
-          "#{}",
+          "Failed to call g_embedded_db_client->"
+          "MovePendingOrRunningTaskToEnded() for task #{}",
           task->TaskId());
     }
   }
