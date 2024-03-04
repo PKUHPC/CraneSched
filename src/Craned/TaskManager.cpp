@@ -1120,8 +1120,8 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
             "Remove cgroup for task #{} for potential crashes of other craned.",
             elem.task_id);
         uid = *vp;
-        this_->ReleaseCgroupAsync(elem.task_id, uid);
       }
+      this_->ReleaseCgroupAsync(elem.task_id, uid);
 
       return;
     }

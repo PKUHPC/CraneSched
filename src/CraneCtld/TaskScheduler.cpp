@@ -808,10 +808,14 @@ void TaskScheduler::ScheduleThread_() {
         auto stub = g_craned_keeper->GetCranedStub(craned_id);
         CRANE_TRACE("Send ExecuteTasks for {} tasks to {}", tasks.tasks_size(),
                     craned_id);
-        if (stub == nullptr || stub->Invalid()) continue;
+        if (stub == nullptr || stub->Invalid()) {
+          for (auto& task : tasks.tasks())
+            failed_to_exec_task_id_set.emplace(craned_id, task.task_id());
+          continue;
+        }
 
         std::vector<task_id_t> failed_task_ids = stub->ExecuteTasks(tasks);
-        for (auto task_id : failed_task_ids)
+        for (task_id_t task_id : failed_task_ids)
           failed_to_exec_task_id_set.emplace(craned_id, task_id);
       }
 
@@ -2391,7 +2395,6 @@ void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id,
   CRANE_TRACE("Terminate tasks on craned {}", craned_id);
 
   // The order of LockGuards matters.
-  LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
   auto it = m_node_to_tasks_map_.find(craned_id);
