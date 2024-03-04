@@ -11,4 +11,6 @@ FetchContent_Declare(fpm
 FetchContent_GetProperties(fpm)
 if(NOT fpm_POPULATED)
     FetchContent_Populate(fpm)
+    add_library(fpm INTERFACE)
+    target_include_directories(fpm INTERFACE ${fpm_SOURCE_DIR}/include)
 endif()

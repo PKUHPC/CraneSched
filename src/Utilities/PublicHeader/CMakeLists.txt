@@ -9,10 +9,11 @@ add_library(Utility_PublicHeader
         include/crane/Logger.h
         include/crane/PasswordEntry.h
         include/crane/AtomicHashMap.h)
-target_include_directories(Utility_PublicHeader PUBLIC include ${fpm_SOURCE_DIR}/include)
+target_include_directories(Utility_PublicHeader PUBLIC include)
 target_link_libraries(Utility_PublicHeader PUBLIC
         spdlog::spdlog
-        crane_proto_lib)
+        crane_proto_lib
+        fpm)
 
 # This trimmed version is used for PAM module
 # since -fPIC flag should be enabled for a dynamic library
@@ -21,4 +22,5 @@ add_library(Utility_PublicHeaderNoLogger
         include/crane/PublicHeader.h
         PublicHeader.cpp
 )
-target_include_directories(Utility_PublicHeaderNoLogger PUBLIC include ${fpm_SOURCE_DIR}/include)
+target_include_directories(Utility_PublicHeaderNoLogger PUBLIC include)
+target_link_libraries(Utility_PublicHeaderNoLogger PUBLIC crane_proto_lib fpm)
