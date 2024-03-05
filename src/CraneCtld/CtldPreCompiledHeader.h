@@ -80,6 +80,9 @@
 // UVW
 #include <uvw.hpp>
 
+// fpm
+#include <fpm/fixed.hpp>
+
 // result
 #include <result/result.hpp>
 

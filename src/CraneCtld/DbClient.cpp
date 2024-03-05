@@ -196,7 +196,7 @@ bool MongodbClient::FetchJobRecords(
       task->username = view["username"].get_string().value.data();
 
       task->resources.allocatable_resource.cpu_count =
-          view["cpus_req"].get_double().value;
+          cpu_t{view["cpus_req"].get_double().value};
       task->resources.allocatable_resource.memory_bytes =
           task->resources.allocatable_resource.memory_sw_bytes =
               view["mem_req"].get_int64().value;
@@ -788,26 +788,26 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool> /*25-29*/
 
-      values{// 0-4
-             static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
-             absl::ToUnixSeconds(absl::Now()), false, task->account,
-             // 5-9
-             task->resources.allocatable_resource.cpu_count,
-             static_cast<int64_t>(
-                 task->resources.allocatable_resource.memory_bytes),
-             task->name, env_str, static_cast<int32_t>(task->uid),
-             // 10-14
-             static_cast<int32_t>(task->Gid()), task->allocated_craneds_regex,
-             static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
-             // 15-19
-             0, 0, task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(),
-             0,
-             // 20-24
-             script, task->Status(), absl::ToInt64Seconds(task->time_limit),
-             task->SubmitTimeInUnixSecond(), task->cwd,
-             // 25-29
-             task->cmd_line, task->ExitCode(), task->Username(), task->qos,
-             task->get_user_env};
+      values{
+          // 0-4
+          static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
+          absl::ToUnixSeconds(absl::Now()), false, task->account,
+          // 5-9
+          static_cast<double>(task->resources.allocatable_resource.cpu_count),
+          static_cast<int64_t>(
+              task->resources.allocatable_resource.memory_bytes),
+          task->name, env_str, static_cast<int32_t>(task->uid),
+          // 10-14
+          static_cast<int32_t>(task->Gid()), task->allocated_craneds_regex,
+          static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
+          // 15-19
+          0, 0, task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(), 0,
+          // 20-24
+          script, task->Status(), absl::ToInt64Seconds(task->time_limit),
+          task->SubmitTimeInUnixSecond(), task->cwd,
+          // 25-29
+          task->cmd_line, task->ExitCode(), task->Username(), task->qos,
+          task->get_user_env};
 
   return DocumentConstructor_(fields, values);
 }

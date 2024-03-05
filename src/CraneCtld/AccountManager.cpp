@@ -802,7 +802,7 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
     return result::fail("time-limit reached the user's limit.");
 
-  if (task->cpus_per_task > qos_share_ptr->max_cpus_per_user)
+  if (static_cast<double>(task->cpus_per_task) > qos_share_ptr->max_cpus_per_user)
     return result::fail("cpus-per-task reached the user's limit.");
 
   return {};

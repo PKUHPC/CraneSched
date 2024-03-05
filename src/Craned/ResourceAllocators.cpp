@@ -21,7 +21,7 @@ namespace Craned {
 bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
                                             util::Cgroup *cg) {
   bool ok;
-  ok = cg->SetCpuCoreLimit(resource.cpu_count);
+  ok = cg->SetCpuCoreLimit(static_cast<double>(resource.cpu_count));
   ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);
 
   // Depending on the system configuration, the following two options may not

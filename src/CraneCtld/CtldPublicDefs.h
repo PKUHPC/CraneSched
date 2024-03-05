@@ -235,7 +235,7 @@ struct TaskInCtld {
 
   uint32_t node_num{0};
   uint32_t ntasks_per_node{0};
-  double cpus_per_task{0.0};
+  cpu_t cpus_per_task{0};
 
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
@@ -418,7 +418,7 @@ struct TaskInCtld {
 
     node_num = val.node_num();
     ntasks_per_node = val.ntasks_per_node();
-    cpus_per_task = val.cpus_per_task();
+    cpus_per_task = cpu_t(val.cpus_per_task());
 
     uid = val.uid();
     password_entry = std::make_unique<PasswordEntry>(uid);

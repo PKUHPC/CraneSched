@@ -1432,8 +1432,9 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_username(task.Username());
     task_it->set_qos(task.qos);
 
-    task_it->set_alloc_cpu(task.resources.allocatable_resource.cpu_count *
-                           task.node_num);
+    task_it->set_alloc_cpu(
+        static_cast<double>(task.resources.allocatable_resource.cpu_count) *
+        task.node_num);
     task_it->set_exit_code(0);
     task_it->set_priority(task.schedule_priority);
 
@@ -2484,7 +2485,8 @@ void MultiFactorPriority::CalculateFactorBound_(
     bound.mem_alloc_min = std::min(mem_alloc, bound.mem_alloc_min);
     bound.mem_alloc_max = std::max(mem_alloc, bound.mem_alloc_max);
 
-    double cpus_alloc = task->resources.allocatable_resource.cpu_count;
+    double cpus_alloc =
+        static_cast<double>(task->resources.allocatable_resource.cpu_count);
     bound.cpus_alloc_min = std::min(cpus_alloc, bound.cpus_alloc_min);
     bound.cpus_alloc_max = std::max(cpus_alloc, bound.cpus_alloc_max);
 
@@ -2500,10 +2502,11 @@ void MultiFactorPriority::CalculateFactorBound_(
   for (const auto& [task_id, task] : running_task_map) {
     double service_val = 0;
     if (bound.cpus_alloc_max != bound.cpus_alloc_min)
-      service_val += 1.0 *
-                     (task->resources.allocatable_resource.cpu_count -
-                      bound.cpus_alloc_min) /
-                     (bound.cpus_alloc_max - bound.cpus_alloc_min);
+      service_val +=
+          1.0 *
+          (static_cast<double>(task->resources.allocatable_resource.cpu_count) -
+           bound.cpus_alloc_min) /
+          (bound.cpus_alloc_max - bound.cpus_alloc_min);
     else
       // += 1.0 here rather than 0.0 in case that the final service_val is 0.
       // If the final service_val is 0, the running time of the task will not
@@ -2548,7 +2551,8 @@ double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
   uint32_t task_part_priority = task->partition_priority;
   uint32_t task_nodes_alloc = task->node_num;
   uint64_t task_mem_alloc = task->resources.allocatable_resource.memory_bytes;
-  double task_cpus_alloc = task->resources.allocatable_resource.cpu_count;
+  double task_cpus_alloc =
+      static_cast<double>(task->resources.allocatable_resource.cpu_count);
   double task_service_val = bound.acc_service_val_map.at(task->account);
 
   double qos_factor{0};
