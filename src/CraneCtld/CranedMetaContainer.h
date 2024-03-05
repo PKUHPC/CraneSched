@@ -94,6 +94,8 @@ class CranedMetaContainerInterface {
   virtual crane::grpc::ModifyCranedStateReply ChangeNodeState(
       const crane::grpc::ModifyCranedStateRequest& request) = 0;
 
+  virtual crane::grpc::QueryEntityInfoReply QueryEventsInRam() = 0;
+
   virtual void MallocResourceFromNode(CranedId node_id, uint32_t task_id,
                                       const Resources& resources) = 0;
   virtual void FreeResourceFromNode(CranedId node_id, uint32_t task_id) = 0;
@@ -138,6 +140,8 @@ class CranedMetaContainerSimpleImpl final
   crane::grpc::ModifyCranedStateReply ChangeNodeState(
       const crane::grpc::ModifyCranedStateRequest& request) override;
 
+  crane::grpc::QueryEntityInfoReply QueryEventsInRam() override;
+
   void CranedUp(const CranedId& craned_id) override;
 
   void CranedDown(const CranedId& craned_id) override;
@@ -170,6 +174,7 @@ class CranedMetaContainerSimpleImpl final
   // 4. unlock elements in partition_metas_map_
   CranedMetaAtomicMap craned_meta_map_;
   AllPartitionsMetaAtomicMap partition_metas_map_;
+  HashMap<CranedId, NodeEvent> craned_event_map_;
 
   // A craned node may belong to multiple partitions.
   // Use this map as a READ-ONLY index, so multi-thread reading is ok.

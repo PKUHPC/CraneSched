@@ -247,6 +247,18 @@ bool MongodbClient::CheckTaskDbIdExisted(int64_t task_db_id) {
   return false;
 }
 
+bool MongodbClient::InsertNodeEvent(NodeEvent* event) {
+  document doc = EventToDocument_(event);
+  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+      (*GetClient_())[m_db_name_][m_event_collection_name_].insert_one(
+          *GetSession_(), doc.view());
+
+  if (ret != bsoncxx::stdx::nullopt) return true;
+
+  PrintError_("Failed to insert in-memory NodeEvent.");
+  return false;
+}
+
 bool MongodbClient::InsertUser(const Ctld::User& new_user) {
   document doc = UserToDocument_(new_user);
   doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
@@ -808,6 +820,19 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
           task->cmd_line, task->ExitCode(), task->Username(), task->qos,
           task->get_user_env};
 
+  return DocumentConstructor_(fields, values);
+}
+
+MongodbClient::document MongodbClient::EventToDocument_(NodeEvent* event) {
+  std::array<std::string, 6> fields{"time_start", "time_end", "node_name",
+                                    "reason",     "state",    "uid"};
+  std::tuple<int64_t, int64_t, std::string, std::string, int32_t, int32_t>
+      values{absl::ToUnixSeconds(event->time_start),
+             absl::ToUnixSeconds(event->time_end),
+             event->node_name,
+             event->reason,
+             event->state,
+             static_cast<int32_t>(event->uid)};
   return DocumentConstructor_(fields, values);
 }
 

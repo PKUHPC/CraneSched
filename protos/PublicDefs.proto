@@ -238,6 +238,7 @@ message TrimmedPartitionInfo {
     CranedState state = 1;
     uint32 count = 2;
     string craned_list_regex = 3;
+    string reason = 4;
   }
 
   string name = 1;
@@ -249,6 +250,7 @@ enum EntityType {
   Account = 0;
   User = 1;
   Qos = 2;
+  Event = 3;
 }
 
 message AccountInfo {
@@ -301,6 +303,16 @@ message QosInfo {
   uint32 max_jobs_per_user = 4;
   uint32 max_cpus_per_user = 5;
   uint64 max_time_limit_per_task = 6;
+}
+
+message EventInfo {
+  google.protobuf.Timestamp start_time = 1;
+  google.protobuf.Timestamp end_time = 2;
+  string node_name = 3;
+  string cluster_name = 4;
+  string reason = 5;
+  CranedState state = 6;
+  uint32 uid = 7;
 }
 
 message TimeInterval {
