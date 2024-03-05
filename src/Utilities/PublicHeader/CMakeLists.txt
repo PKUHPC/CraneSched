@@ -23,4 +23,4 @@ add_library(Utility_PublicHeaderNoLogger
         PublicHeader.cpp
 )
 target_include_directories(Utility_PublicHeaderNoLogger PUBLIC include)
-target_link_libraries(Utility_PublicHeaderNoLogger PUBLIC crane_proto_lib fpm)
+target_link_libraries(Utility_PublicHeaderNoLogger PUBLIC crane_proto_lib)
