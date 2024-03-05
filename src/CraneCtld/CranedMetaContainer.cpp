@@ -231,8 +231,7 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
           "Add the resource of Craned {} (cpu: {}, mem: {}) to partition "
           "[{}]'s global resource.",
           craned_name,
-          static_cast<double>(
-              craned_meta.static_meta.res.allocatable_resource.cpu_count),
+          craned_meta.static_meta.res.allocatable_resource.cpu_count,
           util::ReadableMemory(
               craned_meta.static_meta.res.allocatable_resource.memory_bytes),
           part_name);
@@ -249,9 +248,8 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
         "partition [{}]'s Global resource now: cpu: {}, mem: {}). It has {} "
         "craneds.",
         part_name,
-        static_cast<double>(
-            part_meta.partition_global_meta.m_resource_total_inc_dead_
-                .allocatable_resource.cpu_count),
+        part_meta.partition_global_meta.m_resource_total_inc_dead_
+            .allocatable_resource.cpu_count,
         util::ReadableMemory(
             part_meta.partition_global_meta.m_resource_total_inc_dead_
                 .allocatable_resource.memory_bytes),
