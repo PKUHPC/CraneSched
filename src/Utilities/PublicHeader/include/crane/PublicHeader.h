@@ -152,11 +152,12 @@ inline std::string_view CraneErrStr(CraneErr err) {
 
 using PartitionId = std::string;
 using CranedId = std::string;
-using cpu_count_t = fpm::fixed_24_8;
+using cpu_t = fpm::fixed_24_8;
+
 // Model the allocatable resources on a craned node.
 // It contains CPU and memory by now.
 struct AllocatableResource {
-  cpu_count_t cpu_count = cpu_count_t(0);
+  cpu_t cpu_count{0};
 
   // See documentation of cgroup memory.
   // https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt

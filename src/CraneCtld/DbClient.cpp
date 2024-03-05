@@ -196,7 +196,7 @@ bool MongodbClient::FetchJobRecords(
       task->username = view["username"].get_string().value.data();
 
       task->resources.allocatable_resource.cpu_count =
-          cpu_count_t(view["cpus_req"].get_double().value);
+          cpu_t{view["cpus_req"].get_double().value};
       task->resources.allocatable_resource.memory_bytes =
           task->resources.allocatable_resource.memory_sw_bytes =
               view["mem_req"].get_int64().value;

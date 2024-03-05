@@ -1627,8 +1627,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     if constexpr (kAlgoTraceOutput) {
       CRANE_TRACE("Craned {} initial res_avail now: cpu: {}, mem: {}",
                   craned_id,
-                  static_cast<double>(
-                      craned_meta->res_avail.allocatable_resource.cpu_count),
+                  craned_meta->res_avail.allocatable_resource.cpu_count,
                   craned_meta->res_avail.allocatable_resource.memory_bytes);
     }
 
@@ -1654,8 +1653,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
                 "Insert duration [now+{}s, inf) with resource: "
                 "cpu: {}, mem: {}",
                 absl::ToInt64Seconds(end_time - now),
-                static_cast<double>(
-                    craned_meta->res_avail.allocatable_resource.cpu_count),
+                craned_meta->res_avail.allocatable_resource.cpu_count,
                 craned_meta->res_avail.allocatable_resource.memory_bytes);
           }
         }
@@ -1674,8 +1672,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
           CRANE_TRACE("Craned {} res_avail at now + {}s: cpu: {}, mem: {}; ",
                       craned_id,
                       absl::ToInt64Seconds(cur_time_iter->first - now),
-                      static_cast<double>(
-                          cur_time_iter->second.allocatable_resource.cpu_count),
+                      cur_time_iter->second.allocatable_resource.cpu_count,
                       cur_time_iter->second.allocatable_resource.memory_bytes);
         }
       }
@@ -1691,16 +1688,14 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
                           "res: cpu core {}, mem {}",
                           absl::ToInt64Seconds(prev_iter->first - now),
                           absl::ToInt64Seconds(iter->first - now),
-                          static_cast<double>(
-                              prev_iter->second.allocatable_resource.cpu_count),
+                          prev_iter->second.allocatable_resource.cpu_count,
                           prev_iter->second.allocatable_resource.memory_bytes));
         }
         str.append(
             fmt::format("[ now+{}s , inf ) Available allocatable "
                         "res: cpu core {}, mem {}",
                         absl::ToInt64Seconds(prev_iter->first - now),
-                        static_cast<double>(
-                            prev_iter->second.allocatable_resource.cpu_count),
+                        prev_iter->second.allocatable_resource.cpu_count,
                         prev_iter->second.allocatable_resource.memory_bytes));
         CRANE_TRACE("{}", str);
       }
@@ -2360,8 +2355,8 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
           "Resource not enough for task #{}. "
           "Partition total: cpu {}, mem: {}, mem+sw: {}",
           task->TaskId(),
-          static_cast<double>(metas_ptr->partition_global_meta.m_resource_total_
-                                  .allocatable_resource.cpu_count),
+          metas_ptr->partition_global_meta.m_resource_total_
+              .allocatable_resource.cpu_count,
           util::ReadableMemory(
               metas_ptr->partition_global_meta.m_resource_total_
                   .allocatable_resource.memory_bytes),

@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <spdlog/fmt/bundled/format.h>
+
 #include <source_location>
 
 // For better logging inside lambda functions
@@ -143,4 +145,22 @@
 #endif
 
 void InitLogger(spdlog::level::level_enum level,
-                const std::string& log_file_path);
+                const std::string &log_file_path);
+
+// Custom type formatting
+namespace fmt {
+
+template <>
+struct formatter<cpu_t> {
+  template <typename ParseContext>
+  constexpr auto parse(ParseContext &ctx) {
+    return ctx.begin();
+  };
+
+  template <typename FormatContext>
+  auto format(const cpu_t &v, FormatContext &ctx) {
+    return format_to(ctx.out(), "{:.2f}", static_cast<double>(v));
+  }
+};
+
+}  // namespace fmt
