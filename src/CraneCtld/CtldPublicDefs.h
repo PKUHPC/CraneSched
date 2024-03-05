@@ -221,6 +221,16 @@ struct BatchMetaInTask {
   std::string output_file_pattern;
 };
 
+struct NodeEvent {
+  absl::Time time_start;
+  absl::Time time_end;
+  std::string node_name;
+  // std::string cluster_name; only set in a cluster event
+  std::string reason;
+  crane::grpc::CranedState state;
+  uid_t uid;
+};
+
 struct TaskInCtld {
   /* -------- [1] Fields that are set at the submission time. ------- */
   absl::Duration time_limit;

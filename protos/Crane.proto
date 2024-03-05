@@ -281,6 +281,7 @@ message ModifyCranedStateRequest{
   string craned_id = 1;
   CranedState new_state = 2;
   string reason = 3;
+  uint32 uid = 4;
 }
 
 message ModifyCranedStateReply{
@@ -367,6 +368,7 @@ message QueryEntityInfoReply {
   repeated UserInfo user_list = 3;
   repeated AccountInfo account_list = 4;
   repeated QosInfo qos_list = 5;
+  repeated EventInfo event_list = 6;
 }
 
 message BlockAccountOrUserRequest {

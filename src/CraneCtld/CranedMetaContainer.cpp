@@ -16,6 +16,8 @@
 
 #include "CranedMetaContainer.h"
 
+#include "DbClient.h"
+
 namespace Ctld {
 
 void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
@@ -428,7 +430,6 @@ crane::grpc::QueryClusterInfoReply
 CranedMetaContainerSimpleImpl::QueryClusterInfo(
     const crane::grpc::QueryClusterInfoRequest& request) {
   crane::grpc::QueryClusterInfoReply reply;
-  auto* partition_list = reply.mutable_partitions();
 
   std::unordered_set<std::string> filter_partitions_set(
       request.filter_partitions().begin(), request.filter_partitions().end());
@@ -481,6 +482,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   auto partition_map = partition_metas_map_.GetMapConstSharedPtr();
   auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
 
+  auto* partition_list = reply.mutable_partitions();
   auto partition_rng =
       *partition_map | ranges::views::filter(partition_rng_filter_name);
   ranges::for_each(partition_rng, [&](auto& it) {
@@ -559,6 +561,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       } else if (craned_meta->alive && craned_meta->drain) {
         drain_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
         drain_craned_list->set_count(drain_craned_name_list.size());
+        drain_craned_list->set_reason(craned_meta->drain_reason);  // 多个reason?
       } else if (filter_down) {
         down_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
         down_craned_list->set_count(down_craned_name_list.size());
@@ -595,7 +598,16 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
   if (request.new_state() == crane::grpc::CranedState::CRANE_DRAIN) {
     crane_meta->drain = true;
     crane_meta->drain_reason = request.reason();
+    NodeEvent* event = new NodeEvent;
+    event->state = crane::grpc::CranedState::CRANE_DRAIN;
+    event->node_name = request.craned_id();
+    event->time_start = absl::Now();
+    event->reason = request.reason();
+    event->uid = request.uid();
+    event->time_end = absl::FromUnixSeconds(0);
+    craned_event_map_.emplace(request.craned_id(), *event);
   } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE) {
+    // 取出内存中的event，修改结束时间加到数据库
     crane_meta->drain = false;
     crane_meta->drain_reason = "";
   }
@@ -604,4 +616,29 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
   return reply;
 }
 
+crane::grpc::QueryEntityInfoReply
+CranedMetaContainerSimpleImpl::QueryEventsInRam() {
+  crane::grpc::QueryEntityInfoReply* response;
+  auto* event_list = response->mutable_event_list();
+  for (const auto& it : craned_event_map_) {
+    auto* event_it = event_list->Add();
+    event_it->set_reason(it.second.reason);
+    event_it->set_state(it.second.state);
+    event_it->set_node_name(it.first);
+    event_it->set_uid(it.second.uid);
+    auto* start_time = new ::google::protobuf::Timestamp();
+    auto start_seconds = absl::ToUnixSeconds(it.second.time_start);
+    auto start_nanos = (absl::ToUnixNanos(it.second.time_start) % 1000000000);
+    start_time->set_seconds(start_seconds);
+    start_time->set_nanos(start_nanos);
+    event_it->set_allocated_start_time(start_time);
+    auto* end_time = new ::google::protobuf::Timestamp();
+    auto end_seconds = absl::ToUnixSeconds(it.second.time_end);
+    auto end_nanos = (absl::ToUnixNanos(it.second.time_end) % 1000000000);
+    end_time->set_seconds(end_seconds);
+    end_time->set_nanos(end_nanos);
+    event_it->set_allocated_end_time(end_time);
+  }
+  return *response;
+}
 }  // namespace Ctld

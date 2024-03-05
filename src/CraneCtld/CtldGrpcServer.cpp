@@ -978,6 +978,8 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           response->set_ok(false);
         }
       }
+    case crane::grpc::Event:
+      *response = g_meta_container->QueryEventsInRam();
     default:
       break;
   }

@@ -540,6 +540,17 @@ AccountManager::QosMapMutexSharedPtr AccountManager::GetAllQosInfo() {
   }
 }
 
+// AccountManager::EventMapMutexSharedPtr AccountManager::GetAllEventsInfo() {
+//   m_rw_qos_mutex_.lock_shared();
+//
+//   if (m_qos_map_.empty()) {
+//     m_rw_qos_mutex_.unlock_shared();
+//     return QosMapMutexSharedPtr{nullptr};
+//   } else {
+//     return QosMapMutexSharedPtr{&m_qos_map_, &m_rw_qos_mutex_};
+//   }
+// }
+
 AccountManager::Result AccountManager::ModifyUser(
     const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
     const std::string& name, const std::string& partition, std::string account,
