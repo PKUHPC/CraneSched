@@ -33,7 +33,7 @@ option(CRANE_FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang
 
 option(CRANE_NATIVE_ARCH_OPT "Enable -march=native compile option" ON)
 
-option(CRANE_USE_GITEE_SOURCE "Enable the Gitee repository as the download source" ON)
+option(CRANE_USE_GITEE_SOURCE "Enable the Gitee repository as the download source" OFF)
 
 option(CRANE_FULL_DYNAMIC "Enable dynamic libs" OFF)
 
