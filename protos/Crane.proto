@@ -17,119 +17,120 @@
 syntax = "proto3";
 
 package crane.grpc;
+
 option go_package = "/protos";
 
 import "PublicDefs.proto";
 
 message Negotiation {
-  uint32 version = 1;
+    uint32 version = 1;
 }
 
 message StreamRequestNegotiation {
-  uint32 version = 1;
+    uint32 version = 1;
 }
 
 message StreamReplyResult {
-  bool ok = 1;
-  string reason = 2; // Set when failed
+    bool ok = 1;
+    string reason = 2; // Set when failed
 }
 
 message StreamRequestCheckResource {
-  bytes resource_uuid = 1;
-  uint32 task_id = 2;
+    bytes resource_uuid = 1;
+    uint32 task_id = 2;
 }
 
 message StreamRequestExecutiveInfo {
-  string executive_path = 1;
-  repeated string arguments = 2;
+    string executive_path = 1;
+    repeated string arguments = 2;
 }
 
 message StreamReplyIo {
-  string buf = 1;
+    string buf = 1;
 }
 
 message StreamReplyExitStatus {
-  enum ExitReason {
-    Normal = 0;
-    Signal = 1;
-  }
+    enum ExitReason {
+        Normal = 0;
+        Signal = 1;
+    }
 
-  ExitReason reason = 1;
-  uint32 value = 2;
+    ExitReason reason = 1;
+    uint32 value = 2;
 }
 
-message SrunXStreamRequest{
-  enum Type {
-    NegotiationType = 0;
-    CheckResourceType = 1;
-    ExecutiveInfoType = 2;
-    SignalType = 3;
-  }
-  Type type = 1;
+message SrunXStreamRequest {
+    enum Type {
+        NegotiationType = 0;
+        CheckResourceType = 1;
+        ExecutiveInfoType = 2;
+        SignalType = 3;
+    }
+    Type type = 1;
 
-  oneof payload {
-    StreamRequestNegotiation negotiation = 2;
-    StreamRequestExecutiveInfo exec_info = 3;
-    int32 signum = 4;
-    StreamRequestCheckResource check_resource = 5;
-  }
+    oneof payload {
+        StreamRequestNegotiation negotiation = 2;
+        StreamRequestExecutiveInfo exec_info = 3;
+        int32 signum = 4;
+        StreamRequestCheckResource check_resource = 5;
+    }
 }
 
 message SrunXStreamReply {
-  enum Type {
-    IoRedirectionType = 0;
-    ExitStatusType = 1;
-    ResultType = 2;
-  }
-  Type type = 1;
+    enum Type {
+        IoRedirectionType = 0;
+        ExitStatusType = 1;
+        ResultType = 2;
+    }
+    Type type = 1;
 
-  oneof payload {
-    StreamReplyIo io = 2 ;
-    StreamReplyExitStatus exit_status = 3;
-    StreamReplyResult result = 4;
-  }
+    oneof payload {
+        StreamReplyIo io = 2;
+        StreamReplyExitStatus exit_status = 3;
+        StreamReplyResult result = 4;
+    }
 }
 
 message TaskStatusChangeRequest {
-  uint32 task_id = 1;
-  string craned_id = 2;
-  TaskStatus new_status = 3;
-  uint32 exit_code = 4;
-  string reason = 5;
+    uint32 task_id = 1;
+    string craned_id = 2;
+    TaskStatus new_status = 3;
+    uint32 exit_code = 4;
+    string reason = 5;
 }
 
 message TaskStatusChangeReply {
-  bool ok = 1;
+    bool ok = 1;
 }
 
 message CranedRegisterRequest {
-  string craned_id = 1;
+    string craned_id = 1;
 }
 
 message CranedRegisterReply {
-  bool ok = 1;
-  bool already_registered = 2;
+    bool ok = 1;
+    bool already_registered = 2;
 }
 
 message QueryCranedListFromTaskIdRequest {
-  uint32 task_id = 1;
+    uint32 task_id = 1;
 }
 
 message QueryCranedListFromTaskIdReply {
-  bool ok = 1;
-  string craned_list = 2;
+    bool ok = 1;
+    string craned_list = 2;
 }
 
 message SubmitBatchTaskRequest {
-  TaskToCtld task = 1;
+    TaskToCtld task = 1;
 }
 
 message SubmitBatchTaskReply {
-  bool ok = 1;
-  oneof payload{
-    uint32 task_id = 2;
-    string reason = 3;
-  }
+    bool ok = 1;
+    oneof payload {
+        uint32 task_id = 2;
+        string reason = 3;
+    }
 }
 
 message SubmitBatchTasksRequest {
@@ -138,511 +139,524 @@ message SubmitBatchTasksRequest {
 }
 
 message SubmitBatchTasksReply {
-  repeated uint32 task_id_list = 1;
-  repeated string reason_list = 2;
+    repeated uint32 task_id_list = 1;
+    repeated string reason_list = 2;
 }
 
 message ExecuteTasksRequest {
-  repeated TaskToD tasks = 1;
+    repeated TaskToD tasks = 1;
 }
 
 message ExecuteTasksReply {
-  repeated uint32 failed_task_id_list = 1;
+    repeated uint32 failed_task_id_list = 1;
 }
 
 message CreateCgroupForTasksRequest {
-  repeated uint32 task_id_list = 1;
-  repeated uint32 uid_list = 2;
+    repeated uint32 task_id_list = 1;
+    repeated uint32 uid_list = 2;
 }
 
-message CreateCgroupForTasksReply{}
+message CreateCgroupForTasksReply {}
 
-message ReleaseCgroupForTasksRequest{
-  repeated uint32 task_id_list = 1;
-  repeated uint32 uid_list = 2;
+message ReleaseCgroupForTasksRequest {
+    repeated uint32 task_id_list = 1;
+    repeated uint32 uid_list = 2;
 }
 
-message ReleaseCgroupForTasksReply{}
+message ReleaseCgroupForTasksReply {}
 
 message TerminateTasksRequest {
-  repeated uint32 task_id_list = 1;
+    repeated uint32 task_id_list = 1;
 }
 
 message TerminateTasksReply {
-  bool ok = 1;
-  string reason = 2;
+    bool ok = 1;
+    string reason = 2;
 }
 
 message TerminateOrphanedTaskRequest {
-  uint32 task_id = 1;
+    uint32 task_id = 1;
 }
 
 message TerminateOrphanedTaskReply {
-  bool ok = 1;
-  string reason = 2;
+    bool ok = 1;
+    string reason = 2;
 }
 
 message ChangeTaskTimeLimitRequest {
-  uint32 task_id = 1;
-  int64 time_limit_seconds = 2;
+    uint32 task_id = 1;
+    int64 time_limit_seconds = 2;
 }
 
 message ChangeTaskTimeLimitReply {
-  bool ok = 1;
+    bool ok = 1;
 }
 
 message CheckTaskStatusRequest {
-  uint32 task_id = 1;
+    uint32 task_id = 1;
 }
 
 message CheckTaskStatusReply {
-  bool ok = 1;
-  TaskStatus status = 2;
+    bool ok = 1;
+    TaskStatus status = 2;
 }
 
 message CancelTaskRequest {
-  uint32 operator_uid = 1;
+    uint32 operator_uid = 1;
 
-  // Filters
-  repeated uint32 filter_task_ids = 2;
-  string filter_partition = 3;
-  string filter_account = 4;
-  TaskStatus filter_state = 5;
-  string filter_task_name = 6;
-  repeated string filter_nodes = 7;
-  string filter_username = 8;
+    // Filters
+    repeated uint32 filter_task_ids = 2;
+    string filter_partition = 3;
+    string filter_account = 4;
+    TaskStatus filter_state = 5;
+    string filter_task_name = 6;
+    repeated string filter_nodes = 7;
+    string filter_username = 8;
 }
 
 message CancelTaskReply {
-  repeated uint32 cancelled_tasks = 2;
-  repeated uint32 not_cancelled_tasks = 3;
-  repeated string not_cancelled_reasons = 4;
+    repeated uint32 cancelled_tasks = 2;
+    repeated uint32 not_cancelled_tasks = 3;
+    repeated string not_cancelled_reasons = 4;
 }
 
 
-message QueryTaskIdFromPortRequest{
-  uint32 port = 1;
+message QueryTaskIdFromPortRequest {
+    uint32 port = 1;
 }
 
-message QueryTaskIdFromPortReply{
-  bool ok = 1;
-  uint32 task_id = 2;
+message QueryTaskIdFromPortReply {
+    bool ok = 1;
+    uint32 task_id = 2;
 }
 
-message QueryTaskIdFromPortForwardRequest{
-  uint32 ssh_remote_port = 1;
-  string ssh_remote_address = 2;
-  uint32 uid = 3;
+message QueryTaskIdFromPortForwardRequest {
+    uint32 ssh_remote_port = 1;
+    string ssh_remote_address = 2;
+    uint32 uid = 3;
 }
 
-message QueryTaskIdFromPortForwardReply{
-  bool ok = 1;
-  bool from_user = 2;
-  uint32 task_id = 3;
-  string cgroup_path = 4;
+message QueryTaskIdFromPortForwardReply {
+    bool ok = 1;
+    bool from_user = 2;
+    uint32 task_id = 3;
+    string cgroup_path = 4;
 }
 
 message QueryCranedInfoRequest {
-  string craned_name = 1;
+    string craned_name = 1;
 }
 
 message QueryCranedInfoReply {
-  repeated CranedInfo craned_info_list = 1;
+    repeated CranedInfo craned_info_list = 1;
 }
 
 message QueryPartitionInfoRequest {
-  string partition_name = 1;
+    string partition_name = 1;
 }
 
 message QueryPartitionInfoReply {
-  repeated PartitionInfo partition_info = 1;
+    repeated PartitionInfo partition_info = 1;
 }
 
 message ModifyTaskRequest {
-  enum TargetAttributes {
-    TimeLimit = 0;
-  }
+    enum TargetAttributes {
+        TimeLimit = 0;
+    }
 
-  uint32 uid = 1;
-  uint32 task_id = 2;
+    uint32 uid = 1;
+    uint32 task_id = 2;
 
-  TargetAttributes attribute = 3;
+    TargetAttributes attribute = 3;
 
-  oneof value {
-    int64 time_limit_seconds = 4;
-  }
+    oneof value {
+        int64 time_limit_seconds = 4;
+    }
 }
 
 message ModifyTaskReply {
-  bool ok = 1;
-  string reason = 2;
+    bool ok = 1;
+    string reason = 2;
 }
 
 message AddAccountRequest {
-  uint32 uid = 1;
-  AccountInfo account = 2;
+    uint32 uid = 1;
+    AccountInfo account = 2;
 }
 
 message AddAccountReply {
-  bool ok = 1;
-  string reason = 2;
+    bool ok = 1;
+    string reason = 2;
 }
 
 message AddUserRequest {
-  uint32 uid = 1;
-  UserInfo user = 2;
+    uint32 uid = 1;
+    UserInfo user = 2;
 }
 
 message AddUserReply {
-  bool ok = 1;
-  string reason = 2;
+    bool ok = 1;
+    string reason = 2;
 }
 
 message AddQosRequest {
-  uint32 uid = 1;
-  QosInfo qos = 2;
+    uint32 uid = 1;
+    QosInfo qos = 2;
 }
 
 message AddQosReply {
-  bool ok = 1;
-  string reason = 2;
+    bool ok = 1;
+    string reason = 2;
 }
 
 message DeleteEntityRequest {
-  uint32 uid = 1;
-  EntityType entity_type = 2;
-  string name = 3;
-  string account = 4;
+    uint32 uid = 1;
+    EntityType entity_type = 2;
+    string name = 3;
+    string account = 4;
 }
 
 message DeleteEntityReply {
-  bool ok = 1;
-  string reason = 2;
+    bool ok = 1;
+    string reason = 2;
 }
 
 message ModifyEntityRequest {
-  uint32 uid = 1;
+    uint32 uid = 1;
 
-  enum OperatorType {
-    Overwrite = 0;
-    Add = 1;
-    Delete = 2;
-  }
+    enum OperatorType {
+        Overwrite = 0;
+        Add = 1;
+        Delete = 2;
+    }
 
-  string item = 2;   //modify item field
-  string value = 3;   //new value
-  string name = 4;
-  string partition = 5;
-  OperatorType type = 6;
-  EntityType entity_type = 7;
-  string account = 8;
-  bool force = 9;
+    string item = 2;   //modify item field
+    string value = 3;   //new value
+    string name = 4;
+    string partition = 5;
+    OperatorType type = 6;
+    EntityType entity_type = 7;
+    string account = 8;
+    bool force = 9;
 }
 
 message ModifyEntityReply {
-  bool ok = 1;
-  string reason = 2;
+    bool ok = 1;
+    string reason = 2;
 }
 
 message QueryEntityInfoRequest {
-  uint32 uid = 1;
-  EntityType entity_type = 2;
-  string name = 3;
-  string account = 4;
+    uint32 uid = 1;
+    EntityType entity_type = 2;
+    string name = 3;
+    string account = 4;
 }
 
 message QueryEntityInfoReply {
-  bool ok = 1;
-  string reason = 2;
-  repeated UserInfo user_list = 3;
-  repeated AccountInfo account_list = 4;
-  repeated QosInfo qos_list = 5;
+    bool ok = 1;
+    string reason = 2;
+    repeated UserInfo user_list = 3;
+    repeated AccountInfo account_list = 4;
+    repeated QosInfo qos_list = 5;
 }
 
 message BlockAccountOrUserRequest {
-  uint32 uid = 1;
-  bool block = 2;
-  EntityType entity_type = 3;
-  string name = 4;
-  string account = 5;
+    uint32 uid = 1;
+    bool block = 2;
+    EntityType entity_type = 3;
+    string name = 4;
+    string account = 5;
 }
 
 message BlockAccountOrUserReply {
-  bool ok = 1;
-  string reason = 2;
+    bool ok = 1;
+    string reason = 2;
 }
 
 message MigrateSshProcToCgroupRequest {
-  int32 pid = 1;
-  uint32 task_id = 2;
+    int32 pid = 1;
+    uint32 task_id = 2;
 }
 
 message MigrateSshProcToCgroupReply {
-  bool ok = 1;
+    bool ok = 1;
 }
 
 message QueryClusterInfoRequest {
-  repeated string filter_partitions = 1;
-  repeated string filter_nodes = 2;
-  repeated CranedState filter_craned_states = 3;
+    repeated string filter_partitions = 1;
+    repeated string filter_nodes = 2;
+    repeated CranedState filter_craned_states = 3;
 }
 
 message QueryClusterInfoReply {
-  bool ok = 1;
-  repeated TrimmedPartitionInfo partitions = 2;
+    bool ok = 1;
+    repeated TrimmedPartitionInfo partitions = 2;
 }
 
-message QueryTasksInfoRequest{
-  repeated uint32 filter_task_ids = 1;
-  repeated string filter_partitions = 2;
-  int32 num_limit = 3;
-  repeated string filter_task_names = 4;
-  repeated string filter_qos = 5;
+message QueryTasksInfoRequest {
+    repeated uint32 filter_task_ids = 1;
+    repeated string filter_partitions = 2;
+    int32 num_limit = 3;
+    repeated string filter_task_names = 4;
+    repeated string filter_qos = 5;
 
-  repeated TaskStatus filter_task_states = 6;
-  repeated string filter_users = 7;
-  repeated string filter_accounts = 8;
-  TimeInterval filter_submit_time_interval = 9;
-  TimeInterval filter_start_time_interval = 10;
-  TimeInterval filter_end_time_interval = 11;
+    repeated TaskStatus filter_task_states = 6;
+    repeated string filter_users = 7;
+    repeated string filter_accounts = 8;
+    TimeInterval filter_submit_time_interval = 9;
+    TimeInterval filter_start_time_interval = 10;
+    TimeInterval filter_end_time_interval = 11;
 
-  bool option_include_completed_tasks = 15;
+    bool option_include_completed_tasks = 15;
 }
 
-message QueryTasksInfoReply{
-  bool ok = 1;
-  repeated TaskInfo task_info_list = 2;
+message QueryTasksInfoReply {
+    bool ok = 1;
+    repeated TaskInfo task_info_list = 2;
 }
 
 message StreamCallocRequest {
-  enum CallocRequestType {
-    TASK_REQUEST = 0;
-    TASK_COMPLETION_REQUEST = 1;
-  }
+    enum CallocRequestType {
+        TASK_REQUEST = 0;
+        TASK_COMPLETION_REQUEST = 1;
+    }
 
-  message TaskReq {
-    int32 calloc_pid = 1;
-    TaskToCtld task = 2;
-  }
+    message TaskReq {
+        int32 calloc_pid = 1;
+        TaskToCtld task = 2;
+    }
 
-  message TaskCompleteReq {
-    uint32 task_id = 1;
-    TaskStatus status = 2;
-  }
+    message TaskCompleteReq {
+        uint32 task_id = 1;
+        TaskStatus status = 2;
+    }
 
-  CallocRequestType type = 1;
+    CallocRequestType type = 1;
 
-  oneof payload {
-    TaskReq payload_task_req = 2;
-    TaskCompleteReq payload_task_complete_req = 3;
-  }
+    oneof payload {
+        TaskReq payload_task_req = 2;
+        TaskCompleteReq payload_task_complete_req = 3;
+    }
 }
 
 message StreamCforedReply {
-  enum CforedReplyType {
-    TASK_ID_REPLY = 0;
-    TASK_RES_ALLOC_REPLY = 1;
-    TASK_CANCEL_REQUEST = 2;
-    TASK_COMPLETION_ACK_REPLY = 3;
-  }
+    enum CforedReplyType {
+        TASK_ID_REPLY = 0;
+        TASK_RES_ALLOC_REPLY = 1;
+        TASK_CANCEL_REQUEST = 2;
+        TASK_COMPLETION_ACK_REPLY = 3;
+    }
 
-  message TaskIdReply {
-    bool ok = 1;
-    uint32 task_id = 2;
-    string failure_reason = 3;
-  }
+    message TaskIdReply {
+        bool ok = 1;
+        uint32 task_id = 2;
+        string failure_reason = 3;
+    }
 
-  message TaskResAllocatedReply {
-    bool ok = 1;
-    string allocated_craned_regex = 2;
-  }
+    message TaskResAllocatedReply {
+        bool ok = 1;
+        string allocated_craned_regex = 2;
+    }
 
-  message TaskCancelRequest {
-    uint32 task_id = 1;
-  }
+    message TaskCancelRequest {
+        uint32 task_id = 1;
+    }
 
-  message TaskCompletionAckReply {
-    bool ok = 1;
-  }
+    message TaskCompletionAckReply {
+        bool ok = 1;
+    }
 
-  CforedReplyType type = 1 ;
+    CforedReplyType type = 1;
 
-  oneof payload {
-    TaskIdReply payload_task_id_reply = 2;
-    TaskResAllocatedReply payload_task_alloc_reply = 3;
-    TaskCancelRequest payload_task_cancel_request = 4;
-    TaskCompletionAckReply payload_task_completion_ack_reply = 5;
-  }
+    oneof payload {
+        TaskIdReply payload_task_id_reply = 2;
+        TaskResAllocatedReply payload_task_alloc_reply = 3;
+        TaskCancelRequest payload_task_cancel_request = 4;
+        TaskCompletionAckReply payload_task_completion_ack_reply = 5;
+    }
 }
 
 message StreamCforedRequest {
-  enum CforedRequestType {
-    CFORED_REGISTRATION = 0;
-    TASK_REQUEST = 1;
-    TASK_COMPLETION_REQUEST = 2;
-    CFORED_GRACEFUL_EXIT = 3;
-  }
-  CforedRequestType type = 1;
+    enum CforedRequestType {
+        CFORED_REGISTRATION = 0;
+        TASK_REQUEST = 1;
+        TASK_COMPLETION_REQUEST = 2;
+        CFORED_GRACEFUL_EXIT = 3;
+    }
+    CforedRequestType type = 1;
 
-  message CforedReg {
-    string cfored_name = 1;
-  }
+    message CforedReg {
+        string cfored_name = 1;
+    }
 
-  message TaskReq {
-    string cfored_name = 1;
-    int32 pid = 2;
-    TaskToCtld task = 3;
-  }
+    message TaskReq {
+        string cfored_name = 1;
+        int32 pid = 2;
+        TaskToCtld task = 3;
+    }
 
-  message TaskCompleteReq {
-    string cfored_name = 1;
-    uint32 task_id = 2;
-    TaskStatus status = 3;
-  }
+    message TaskCompleteReq {
+        string cfored_name = 1;
+        uint32 task_id = 2;
+        TaskStatus status = 3;
+    }
 
-  message GracefulExitReq {
-    string cfored_name = 1;
-  }
+    message GracefulExitReq {
+        string cfored_name = 1;
+    }
 
-  oneof payload {
-    CforedReg payload_cfored_reg = 2;
-    TaskReq payload_task_req = 3;
-    TaskCompleteReq payload_task_complete_req = 4;
-    GracefulExitReq payload_graceful_exit_req = 5;
-  }
+    oneof payload {
+        CforedReg payload_cfored_reg = 2;
+        TaskReq payload_task_req = 3;
+        TaskCompleteReq payload_task_complete_req = 4;
+        GracefulExitReq payload_graceful_exit_req = 5;
+    }
 }
 
 message StreamCtldReply {
-  enum CtldReplyType {
-    TASK_ID_REPLY = 0;
-    TASK_RES_ALLOC_REPLY = 1;
-    TASK_CANCEL_REQUEST = 2;
-    TASK_COMPLETION_ACK_REPLY = 3;
-    CFORED_REGISTRATION_ACK = 4;
-    CFORED_GRACEFUL_EXIT_ACK = 5;
-  }
+    enum CtldReplyType {
+        TASK_ID_REPLY = 0;
+        TASK_RES_ALLOC_REPLY = 1;
+        TASK_CANCEL_REQUEST = 2;
+        TASK_COMPLETION_ACK_REPLY = 3;
+        CFORED_REGISTRATION_ACK = 4;
+        CFORED_GRACEFUL_EXIT_ACK = 5;
+    }
 
-  message TaskIdReply {
-    int32 pid = 1;
-    bool ok = 2;
-    uint32 task_id = 3;
-    string failure_reason = 4;
-  }
+    message TaskIdReply {
+        int32 pid = 1;
+        bool ok = 2;
+        uint32 task_id = 3;
+        string failure_reason = 4;
+    }
 
-  message TaskResAllocatedReply {
-    uint32 task_id = 1;
-    bool ok = 2;
-    string allocated_craned_regex = 3;
-    string failure_reason = 4;
-  }
+    message TaskResAllocatedReply {
+        uint32 task_id = 1;
+        bool ok = 2;
+        string allocated_craned_regex = 3;
+        string failure_reason = 4;
+    }
 
-  message TaskCancelRequest {
-    uint32 task_id = 1;
-  }
+    message TaskCancelRequest {
+        uint32 task_id = 1;
+    }
 
-  message TaskCompletionAckReply {
-    uint32 task_id = 1;
-  }
+    message TaskCompletionAckReply {
+        uint32 task_id = 1;
+    }
 
-  message CforedRegistrationAck {
-    bool ok = 1;
-    string failure_reason = 2;
-  }
+    message CforedRegistrationAck {
+        bool ok = 1;
+        string failure_reason = 2;
+    }
 
-  message CforedGracefulExitAck {
-    bool ok = 1;
-  }
+    message CforedGracefulExitAck {
+        bool ok = 1;
+    }
 
-  CtldReplyType type = 1;
+    CtldReplyType type = 1;
 
-  oneof payload {
-    CforedRegistrationAck payload_cfored_reg_ack = 2;
-    TaskResAllocatedReply payload_task_res_alloc_reply = 3;
-    TaskCancelRequest payload_task_cancel_request = 4;
-    TaskCompletionAckReply payload_task_completion_ack = 5;
-    TaskIdReply payload_task_id_reply = 6;
-    CforedGracefulExitAck payload_graceful_exit_ack = 7;
-  }
+    oneof payload {
+        CforedRegistrationAck payload_cfored_reg_ack = 2;
+        TaskResAllocatedReply payload_task_res_alloc_reply = 3;
+        TaskCancelRequest payload_task_cancel_request = 4;
+        TaskCompletionAckReply payload_task_completion_ack = 5;
+        TaskIdReply payload_task_id_reply = 6;
+        CforedGracefulExitAck payload_graceful_exit_ack = 7;
+    }
+}
+
+message TaskEstimationRequest {
+    repeated TaskToPredictor tasks = 1;
+}
+
+message TaskEstimationReply {
+    repeated EstimatedTime estimations = 1;
 }
 
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
 service CraneCtld {
-  /* RPCs called from Craned */
-  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
-  rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
+    /* RPCs called from Craned */
+    rpc TaskStatusChange (TaskStatusChangeRequest) returns (TaskStatusChangeReply);
+    rpc CranedRegister (CranedRegisterRequest) returns (CranedRegisterReply);
 
-  /* RPCs called from Cfored */
-  rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
+    /* RPCs called from Cfored */
+    rpc CforedStream (stream StreamCforedRequest) returns (stream StreamCtldReply);
 
-  /* RPCs called from ccancel */
-  rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
+    /* RPCs called from ccancel */
+    rpc CancelTask (CancelTaskRequest) returns (CancelTaskReply);
 
-  /* RPCs called from cbatch */
-  rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
-  rpc SubmitBatchTasks(SubmitBatchTasksRequest) returns (SubmitBatchTasksReply);
+    /* RPCs called from cbatch */
+    rpc SubmitBatchTask (SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
+    rpc SubmitBatchTasks (SubmitBatchTasksRequest) returns (SubmitBatchTasksReply);
 
-  /* PRCs called from ccontrol */
-  rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
-  rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
-  rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
+    /* PRCs called from ccontrol */
+    rpc QueryCranedInfo (QueryCranedInfoRequest) returns (QueryCranedInfoReply);
+    rpc QueryPartitionInfo (QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+    rpc ModifyTask (ModifyTaskRequest) returns (ModifyTaskReply);
 
-  /* RPCs called from cacctmgr */
-  rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
-  rpc AddUser(AddUserRequest) returns (AddUserReply);
-  rpc AddQos(AddQosRequest) returns (AddQosReply);
+    /* RPCs called from cacctmgr */
+    rpc AddAccount (AddAccountRequest) returns (AddAccountReply);
+    rpc AddUser (AddUserRequest) returns (AddUserReply);
+    rpc AddQos (AddQosRequest) returns (AddQosReply);
 
-  rpc DeleteEntity(DeleteEntityRequest) returns (DeleteEntityReply);
+    rpc DeleteEntity (DeleteEntityRequest) returns (DeleteEntityReply);
 
-  rpc QueryEntityInfo(QueryEntityInfoRequest) returns (QueryEntityInfoReply);
-  rpc ModifyEntity(ModifyEntityRequest) returns (ModifyEntityReply);
-  rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
+    rpc QueryEntityInfo (QueryEntityInfoRequest) returns (QueryEntityInfoReply);
+    rpc ModifyEntity (ModifyEntityRequest) returns (ModifyEntityReply);
+    rpc BlockAccountOrUser (BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 
-  /* RPCs called from cinfo */
-  rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
+    /* RPCs called from cinfo */
+    rpc QueryClusterInfo (QueryClusterInfoRequest) returns (QueryClusterInfoReply);
 
-  /* common RPCs */
-  rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
+    /* common RPCs */
+    rpc QueryTasksInfo (QueryTasksInfoRequest) returns (QueryTasksInfoReply);
 }
 
 service Craned {
-  /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
+    /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
 
-  /* If the task is a batch task, it will run immediately.
-     If the task is an interactive task, craned will just allocate the resource and waiting for
-     further SrunXStream to execute a real task.
-   */
-  rpc ExecuteTask(ExecuteTasksRequest) returns(ExecuteTasksReply);
+    /* If the task is a batch task, it will run immediately.
+       If the task is an interactive task, craned will just allocate the resource and waiting for
+       further SrunXStream to execute a real task.
+     */
+    rpc ExecuteTask (ExecuteTasksRequest) returns (ExecuteTasksReply);
 
-  rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
+    rpc CheckTaskStatus (CheckTaskStatusRequest) returns (CheckTaskStatusReply);
 
-  rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns(CreateCgroupForTasksReply);
-  rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns(ReleaseCgroupForTasksReply);
+    rpc CreateCgroupForTasks (CreateCgroupForTasksRequest) returns (CreateCgroupForTasksReply);
+    rpc ReleaseCgroupForTasks (ReleaseCgroupForTasksRequest) returns (ReleaseCgroupForTasksReply);
 
-  /*
-  If the task is an interactive task, the resource uuid is also revoked.
-   If there's no process in this interactive task, just deallocate all the resources.
-   If there are processes in this interactive task, kill all the processes and deallocate resources.
-  If the task is a batch task, just kill it.
-  */
-  rpc TerminateTasks(TerminateTasksRequest) returns (TerminateTasksReply);
-  rpc TerminateOrphanedTask(TerminateOrphanedTaskRequest) returns (TerminateOrphanedTaskReply);
-  rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
+    /*
+    If the task is an interactive task, the resource uuid is also revoked.
+     If there's no process in this interactive task, just deallocate all the resources.
+     If there are processes in this interactive task, kill all the processes and deallocate resources.
+    If the task is a batch task, just kill it.
+    */
+    rpc TerminateTasks (TerminateTasksRequest) returns (TerminateTasksReply);
+    rpc TerminateOrphanedTask (TerminateOrphanedTaskRequest) returns (TerminateOrphanedTaskReply);
+    rpc ChangeTaskTimeLimit (ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
 
 
-  /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
-  rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
+    /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
+    rpc QueryTaskIdFromPort (QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
 
-  /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
-  rpc QueryTaskIdFromPortForward(QueryTaskIdFromPortForwardRequest) returns (QueryTaskIdFromPortForwardReply);
-  rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
+    /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
+    rpc QueryTaskIdFromPortForward (QueryTaskIdFromPortForwardRequest) returns (QueryTaskIdFromPortForwardReply);
+    rpc MigrateSshProcToCgroup (MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
 
-  /* ----------------------------------- Called from SrunX --------------------------------------------------------- */
-  rpc SrunXStream(stream SrunXStreamRequest) returns (stream SrunXStreamReply);
+    /* ----------------------------------- Called from SrunX --------------------------------------------------------- */
+    rpc SrunXStream (stream SrunXStreamRequest) returns (stream SrunXStreamReply);
 }
 
 service CraneForeD {
-  rpc CallocStream(stream StreamCallocRequest) returns(stream StreamCforedReply);
-  rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
+    rpc CallocStream (stream StreamCallocRequest) returns (stream StreamCforedReply);
+    rpc QueryTaskIdFromPort (QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
+}
+
+service CranePred {
+    /* RPCs called from CraneCtld */
+    rpc TaskEstimation (TaskEstimationRequest) returns (TaskEstimationReply);
 }
