@@ -272,6 +272,7 @@ struct TaskInCtld {
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
   absl::Time submit_time;
+  absl::Duration estimated_time;
   absl::Time start_time;
   absl::Time end_time;
 
@@ -376,6 +377,11 @@ struct TaskInCtld {
   }
   absl::Time const& SubmitTime() const { return submit_time; }
   int64_t SubmitTimeInUnixSecond() const { return ToUnixSeconds(submit_time); }
+
+  void SetEstimatedTime(absl::Duration const& val) {
+    estimated_time = val;
+  }
+  absl::Duration const& EstimatedTime() const { return estimated_time; }
 
   void SetStartTime(absl::Time const& val) {
     start_time = val;

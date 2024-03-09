@@ -103,6 +103,42 @@ message TaskToCtld {
   string nodelist = 35;
 }
 
+message TaskToPredictor {
+  uint32 task_id = 1;
+
+  /* -------- Fields directly used for estimating ------- */
+  google.protobuf.Duration time_limit = 2;
+  google.protobuf.Timestamp submit_time = 3;
+
+  Resources resources = 4;
+  uint32 node_num = 5;
+  uint32 ntasks_per_node = 6;
+  double cpus_per_task = 7;
+
+  uint32 uid = 8;
+  string account = 9;
+  string partition = 10;
+
+  string name = 11; // ?
+
+  /* -------- Fields used to calculate job correlation ------- */
+  string qos = 12;
+  string cwd = 13;
+
+  repeated string excludes = 14;
+  repeated string nodelist = 15;
+
+  bool get_user_env = 16;
+  map<string, string> env = 17; // most likely "ALL", then much information will be useless
+
+  BatchTaskAdditionalMeta batch_meta = 18;
+}
+
+message EstimatedTime {
+  uint32 task_id = 1; // ?
+  google.protobuf.Duration estimated_time = 2;
+}
+
 message TaskInEmbeddedDb {
   PersistedPartOfTaskInCtld persisted_part = 1;
   TaskToCtld task_to_ctld = 2;
