@@ -1207,6 +1207,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   //  }
 
   if (actual_size == 0) return;
+  SetTaskEstimatedTime(submit_tasks);
   task_ptr_vec.reserve(actual_size);
 
   // The order of element inside the bulk is reverse.
@@ -1373,6 +1374,96 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   }
   bl.Wait();
   TransferTasksToMongodb_(task_raw_ptr_vec);
+}
+
+void TaskScheduler::SetTaskEstimatedTime(
+    std::vector<std::pair<std::unique_ptr<TaskInCtld>,
+                          std::promise<task_id_t>>>& submit_tasks) {
+  auto channel = grpc::CreateChannel(
+      "0.0.0.0:51890", grpc::InsecureChannelCredentials());  // host:port
+  auto stub = crane::grpc::CranePred::NewStub(channel);
+
+  crane::grpc::TaskEstimationRequest request;
+  for (const auto& [task, promise] : submit_tasks) {
+    if (task->type != crane::grpc::Batch) {
+      continue;
+    }
+
+    auto* mutable_task = request.add_tasks();
+
+    mutable_task->set_task_id(task->TaskId());
+
+    mutable_task->mutable_time_limit()->CopyFrom(
+        task->TaskToCtld().time_limit());
+
+    mutable_task->mutable_submit_time()->CopyFrom(
+        task->RuntimeAttr().submit_time());
+
+    auto* mutable_allocatable_resource =
+        mutable_task->mutable_resources()->mutable_allocatable_resource();
+    mutable_allocatable_resource->set_cpu_core_limit(
+        static_cast<double>(task->resources.allocatable_resource.cpu_count));
+    mutable_allocatable_resource->set_memory_limit_bytes(
+        task->resources.allocatable_resource.memory_bytes);
+    mutable_allocatable_resource->set_memory_sw_limit_bytes(
+        task->resources.allocatable_resource.memory_sw_bytes);
+
+    mutable_task->set_node_num(task->node_num);
+    mutable_task->set_ntasks_per_node(task->ntasks_per_node);
+    mutable_task->set_cpus_per_task(static_cast<double>(task->cpus_per_task));
+
+    mutable_task->set_uid(task->uid);
+    mutable_task->set_account(task->account);
+    mutable_task->set_partition(task->TaskToCtld().partition_name());
+
+    mutable_task->set_name(task->name);
+
+    mutable_task->set_qos(task->qos);
+    mutable_task->set_cwd(task->cwd);
+
+    for (auto&& node : task->excluded_nodes) {
+      mutable_task->mutable_excludes()->Add()->assign(node);
+    }
+
+    for (auto&& node : task->included_nodes) {
+      mutable_task->mutable_nodelist()->Add()->assign(node);
+    }
+
+    mutable_task->set_get_user_env(task->get_user_env);
+    mutable_task->mutable_env()->insert(task->env.begin(), task->env.end());
+
+    auto& meta_in_ctld = std::get<BatchMetaInTask>(task->meta);
+    auto* mutable_meta = mutable_task->mutable_batch_meta();
+    mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
+    mutable_meta->set_sh_script(meta_in_ctld.sh_script);
+  }
+
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::milliseconds(500));
+
+  crane::grpc::TaskEstimationReply reply;
+  grpc::Status status = stub->TaskEstimation(&context, request, &reply);
+
+  if (status.ok()) {
+    auto it = submit_tasks.begin();
+    for (const auto& estimation : reply.estimations()) {
+      while (it != submit_tasks.end() &&
+             it->first->type != crane::grpc::Batch) {
+        ++it;
+      }
+      CRANE_ASSERT(it != submit_tasks.end() &&
+                   it->first->TaskId() == estimation.task_id());
+      it->first->SetEstimatedTime(
+          absl::Seconds(estimation.estimated_time().seconds()));
+      ++it;
+    }
+    CRANE_ASSERT(it == submit_tasks.end());
+    CRANE_INFO("Set Estimated time succeeded for {} batch jobs",
+               reply.estimations_size());
+  } else {
+    CRANE_INFO("Set Estimated time failed for {} jobs", submit_tasks.size());
+  }
 }
 
 void TaskScheduler::QueryTasksInRam(

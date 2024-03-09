@@ -332,6 +332,10 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_task_status_change_handle_;
   void CleanTaskStatusChangeQueueCb_();
+
+  void SetTaskEstimatedTime(
+      std::vector<std::pair<std::unique_ptr<TaskInCtld>,
+                            std::promise<task_id_t>>>& submit_tasks);
 };
 
 }  // namespace Ctld
