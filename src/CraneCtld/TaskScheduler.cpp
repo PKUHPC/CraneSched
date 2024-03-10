@@ -1238,8 +1238,6 @@ void TaskScheduler::CleanSubmitQueueCb_() {
 
   if (actual_size == 0) return;
 
-  SetTaskEstimatedTime(submit_tasks);
-
   txn_id_t txn_id;
   g_embedded_db_client->BeginTransaction(&txn_id);
 
@@ -1259,6 +1257,8 @@ void TaskScheduler::CleanSubmitQueueCb_() {
       task_indexes_with_id_allocated.emplace_back(pos);
   }
   g_embedded_db_client->CommitTransaction(txn_id);
+
+  SetTaskEstimatedTime(submit_tasks);
 
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   for (uint32_t i : task_indexes_with_id_allocated) {
@@ -1469,8 +1469,8 @@ void TaskScheduler::SetTaskEstimatedTime(
   }
 
   grpc::ClientContext context;
-  context.set_deadline(std::chrono::system_clock::now() +
-                       std::chrono::milliseconds(500));
+  auto start_time = std::chrono::system_clock::now();
+  context.set_deadline(start_time + std::chrono::milliseconds(500));
 
   crane::grpc::TaskEstimationReply reply;
   grpc::Status status = stub->TaskEstimation(&context, request, &reply);
@@ -1489,10 +1489,13 @@ void TaskScheduler::SetTaskEstimatedTime(
       ++it;
     }
     CRANE_ASSERT(it == submit_tasks.end());
-    CRANE_INFO("Set Estimated time succeeded for {} batch jobs",
-               reply.estimations_size());
+    auto cost_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                         std::chrono::system_clock::now() - start_time)
+                         .count();
+    CRANE_TRACE("Set Estimated time for {} batch jobs costed {} ms",
+                reply.estimations_size(), cost_time);
   } else {
-    CRANE_INFO("Set Estimated time failed for {} jobs", submit_tasks.size());
+    CRANE_TRACE("Set Estimated time for {} jobs failed", submit_tasks.size());
   }
 }
 
