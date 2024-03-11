@@ -336,6 +336,8 @@ class TaskScheduler {
   void SetTaskEstimatedTime(
       std::vector<std::pair<std::unique_ptr<TaskInCtld>,
                             std::promise<task_id_t>>>& submit_tasks);
+
+  void SendRealTimeToPredictor(const std::vector<TaskInCtld*>& tasks);
 };
 
 }  // namespace Ctld

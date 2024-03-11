@@ -119,7 +119,7 @@ message TaskToPredictor {
   string account = 9;
   string partition = 10;
 
-  string name = 11; // ?
+  string name = 11;
 
   /* -------- Fields used to calculate job correlation ------- */
   string qos = 12;
@@ -135,8 +135,13 @@ message TaskToPredictor {
 }
 
 message EstimatedTime {
-  uint32 task_id = 1; // ?
+  uint32 task_id = 1;
   google.protobuf.Duration estimated_time = 2;
+}
+
+message TaskExecutionTime {
+  uint32 task_id = 1;
+  google.protobuf.Duration execution_time = 2;
 }
 
 message TaskInEmbeddedDb {

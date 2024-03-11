@@ -19,7 +19,20 @@ class CranePredServiceImpl final : public crane::grpc::CranePred::Service {
     }
     return grpc::Status::OK;
   }
+
+  grpc::Status ReportExecutionTime(
+      grpc::ServerContext* context,
+      const crane::grpc::TaskExecutionTimeAck* request,
+      ::google::protobuf::Empty* reply) override {
+    for (const auto& report : request->execution_times()) {
+
+      std::cout << "Task " << report.task_id() << " execution time: "
+                << report.execution_time().seconds() << " seconds" << std::endl;
+    }
+    return grpc::Status::OK;
+  }
 };
+
 
 void RunServer() {
   std::string server_address("0.0.0.0:51890");
