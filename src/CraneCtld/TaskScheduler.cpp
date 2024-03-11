@@ -2113,7 +2113,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
   // Calculate the earliest start time
   for (auto&& seg : intersected_time_segments) {
-    if (task->time_limit <= seg.duration) {
+    if (task->EstimatedTime() <= seg.duration) {
       *start_time = seg.start;
       return true;
     }
@@ -2206,7 +2206,7 @@ void MinLoadFirst::NodeSelect(
 
     for (const auto& [partition_id, part_craned_ids] : involved_part_craned) {
       SubtractTaskResourceNodeSelectionInfo_(
-          expected_start_time, task->time_limit, task->resources,
+          expected_start_time, task->EstimatedTime(), task->resources,
           part_craned_ids, &part_id_node_info_map.at(partition_id));
     }
 
