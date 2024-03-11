@@ -1404,6 +1404,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   }
   bl.Wait();
   TransferTasksToMongodb_(task_raw_ptr_vec);
+  SendRealTimeToPredictor(task_raw_ptr_vec);
 }
 
 void TaskScheduler::SetTaskEstimatedTime(
@@ -1496,6 +1497,34 @@ void TaskScheduler::SetTaskEstimatedTime(
                 reply.estimations_size(), cost_time);
   } else {
     CRANE_TRACE("Set Estimated time for {} jobs failed", submit_tasks.size());
+  }
+}
+
+void TaskScheduler::SendRealTimeToPredictor(
+    const std::vector<TaskInCtld*>& tasks) {
+  auto channel = grpc::CreateChannel(
+      "0.0.0.0:51890", grpc::InsecureChannelCredentials());  // host:port
+  auto stub = crane::grpc::CranePred::NewStub(channel);
+  crane::grpc::TaskExecutionTimeAck request;
+  for (const auto& task : tasks) {
+    if (task->type != crane::grpc::Batch ||
+        task->Status() != crane::grpc::Completed) {
+      continue;
+    }
+    auto* execution_time = request.add_execution_times();
+    execution_time->set_task_id(task->TaskId());
+    execution_time->mutable_execution_time()->set_seconds(
+        absl::ToInt64Seconds(task->EndTime() - task->StartTime()));
+  }
+  grpc::ClientContext context;
+  ::google::protobuf::Empty reply;
+  grpc::Status status = stub->ReportExecutionTime(&context, request, &reply);
+  if (status.ok()) {
+    CRANE_TRACE("Send real time to predictor for {} tasks",
+                request.execution_times_size());
+  } else {
+    CRANE_TRACE("Send real time to predictor for {} tasks failed",
+                request.execution_times_size());
   }
 }
 
