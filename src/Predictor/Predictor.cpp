@@ -13,9 +13,16 @@ class CranePredServiceImpl final : public crane::grpc::CranePred::Service {
     for (const auto& task : request->tasks()) {
       auto* estimation = reply->add_estimations();
       estimation->set_task_id(task.task_id());
+
       estimation->mutable_estimated_time()->CopyFrom(task.time_limit());
-      std::cout << "Task " << task.task_id() << " estimated time: "
-                << task.time_limit().seconds() << " seconds" << std::endl;
+
+      // estimated time should be greater than 0 to affect the TimeAvailResMap.
+      if (estimation->estimated_time().seconds() <= 0) {
+        estimation->mutable_estimated_time()->set_seconds(1);
+      }
+      std::cout << "Task " << estimation->task_id()
+                << " estimated time: " << estimation->estimated_time().seconds()
+                << " seconds" << std::endl;
     }
     return grpc::Status::OK;
   }
@@ -25,14 +32,15 @@ class CranePredServiceImpl final : public crane::grpc::CranePred::Service {
       const crane::grpc::TaskExecutionTimeAck* request,
       ::google::protobuf::Empty* reply) override {
     for (const auto& report : request->execution_times()) {
+      // log the execution time
 
-      std::cout << "Task " << report.task_id() << " execution time: "
-                << report.execution_time().seconds() << " seconds" << std::endl;
+      std::cout << "Task " << report.task_id()
+                << " execution time: " << report.execution_time().seconds()
+                << " seconds" << std::endl;
     }
     return grpc::Status::OK;
   }
 };
-
 
 void RunServer() {
   std::string server_address("0.0.0.0:51890");
