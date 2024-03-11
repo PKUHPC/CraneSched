@@ -21,6 +21,7 @@ package crane.grpc;
 option go_package = "/protos";
 
 import "PublicDefs.proto";
+import "google/protobuf/empty.proto";
 
 message Negotiation {
     uint32 version = 1;
@@ -574,6 +575,10 @@ message TaskEstimationReply {
     repeated EstimatedTime estimations = 1;
 }
 
+message TaskExecutionTimeAck {
+    repeated TaskExecutionTime execution_times = 1;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -659,4 +664,5 @@ service CraneForeD {
 service CranePred {
     /* RPCs called from CraneCtld */
     rpc TaskEstimation (TaskEstimationRequest) returns (TaskEstimationReply);
+    rpc ReportExecutionTime(TaskExecutionTimeAck) returns (google.protobuf.Empty);
 }
