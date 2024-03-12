@@ -2,62 +2,26 @@
 // Created by root on 3/9/24.
 //
 
-#include "Predictor.h"
+#include "PredGrpcServer.h"
 
-class CranePredServiceImpl final : public crane::grpc::CranePred::Service {
- public:
-  grpc::Status TaskEstimation(
-      grpc::ServerContext* context,
-      const crane::grpc::TaskEstimationRequest* request,
-      crane::grpc::TaskEstimationReply* reply) override {
-    for (const auto& task : request->tasks()) {
-      auto* estimation = reply->add_estimations();
-      estimation->set_task_id(task.task_id());
+void InitializePredGlobalVariables() {
+  g_pred_server = std::make_unique<Predictor::PredServer>();
+}
 
-      estimation->mutable_estimated_time()->CopyFrom(task.time_limit());
+void DestroyPredGlobalVariables() {
+  g_pred_server.reset();
+}
 
-      // estimated time should be greater than 0 to affect the TimeAvailResMap.
-      if (estimation->estimated_time().seconds() <= 0) {
-        estimation->mutable_estimated_time()->set_seconds(1);
-      }
-      std::cout << "Task " << estimation->task_id()
-                << " estimated time: " << estimation->estimated_time().seconds()
-                << " seconds" << std::endl;
-    }
-    return grpc::Status::OK;
-  }
+void StartServer() {
+  InitializePredGlobalVariables();
 
-  grpc::Status ReportExecutionTime(
-      grpc::ServerContext* context,
-      const crane::grpc::TaskExecutionTimeAck* request,
-      ::google::protobuf::Empty* reply) override {
-    for (const auto& report : request->execution_times()) {
-      // log the execution time
+  g_pred_server->Wait();
 
-      std::cout << "Task " << report.task_id()
-                << " execution time: " << report.execution_time().seconds()
-                << " seconds" << std::endl;
-    }
-    return grpc::Status::OK;
-  }
-};
-
-void RunServer() {
-  std::string server_address("0.0.0.0:51890");
-  CranePredServiceImpl service;
-
-  grpc::ServerBuilder builder;
-  builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-  builder.RegisterService(&service);
-
-  std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-  std::cout << "Server listening on " << server_address << std::endl;
-
-  server->Wait();
+  DestroyPredGlobalVariables();
 }
 
 int main(int argc, char** argv) {
-  RunServer();
+  StartServer();
 
   return 0;
 }
