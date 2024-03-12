@@ -52,7 +52,11 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     crane::grpc::SubmitBatchTasksReply *response) {
   std::vector<result::result<std::future<task_id_t>, std::string>> results;
 
-  for (auto const &task_to_ctld : request->tasks()) {
+  uint32_t task_count = request->count();
+  const auto &task_to_ctld = request->task();
+  results.reserve(task_count);
+
+  for (int i = 0; i < task_count; i++) {
     auto task = std::make_unique<TaskInCtld>();
     task->SetFieldsByTaskToCtld(task_to_ctld);
 

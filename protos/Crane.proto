@@ -133,7 +133,8 @@ message SubmitBatchTaskReply {
 }
 
 message SubmitBatchTasksRequest {
-  repeated TaskToCtld tasks = 1;
+  TaskToCtld task = 1;
+  uint32 count = 2;
 }
 
 message SubmitBatchTasksReply {
