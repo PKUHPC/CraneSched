@@ -3,7 +3,8 @@
 //
 
 #include "PredGrpcServer.h"
-#include "BaselineEstimator.h"
+
+#include "XGBoostEstimator.h"
 
 namespace Predictor {
 
@@ -12,13 +13,6 @@ grpc::Status CranePredServiceImpl::TaskEstimation(
     const crane::grpc::TaskEstimationRequest *request,
     crane::grpc::TaskEstimationReply *reply) {
   m_predictor_server_->EstimateRunTime(request, reply);
-
-  for (const auto &estimation : reply->estimations()) {
-    std::cout << "Task " << estimation.task_id()
-              << " estimated time: " << estimation.estimated_time().seconds()
-              << " seconds" << std::endl;
-  }
-
   return grpc::Status::OK;
 }
 
@@ -50,7 +44,7 @@ PredServer::PredServer() {
 
   std::cout << "Server listening on " << listen_addr_port << std::endl;
 
-  m_time_estimator_ = std::make_unique<BaselineEstimator>();
+  m_time_estimator_ = std::make_unique<XGBoostEstimator>();
 }
 
 void PredServer::EstimateRunTime(

@@ -23,6 +23,7 @@
 #include <memory>
 #include <memory_resource>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <queue>
 #include <ranges>
