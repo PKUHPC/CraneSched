@@ -125,6 +125,8 @@ message TaskToPredictor {
   string qos = 12;
   string cwd = 13;
 
+  string cmd_line = 19;
+
   repeated string excludes = 14;
   repeated string nodelist = 15;
 
