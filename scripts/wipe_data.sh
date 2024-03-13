@@ -11,10 +11,9 @@ mode=$1
 
 # 读取配置文件中的账号密码以及unqlite文件路径
 confFile=/etc/crane/database.yaml
-username=$(grep 'DbUser' "$confFile" | awk '{print $2}')
-username=${username//\"/}
-password=$(grep 'DbPassword' "$confFile" | awk '{print $2}')
-password=${password//\"/}
+username=$(grep 'DbUser' "$confFile" | awk '{print $2}' | sed 's/"//g' | tr -d '\r\n')
+password=$(grep 'DbPassword' "$confFile" | awk '{print $2}' | tr -d '\r\n' | tr -d '\"')
+#password=${password//\"/}
 embedded_db_path=$(grep 'CraneCtldDbPath' "$confFile" | awk '{print $2}')
 parent_dir="${embedded_db_path%/*}"
 env_path="${parent_dir}/CraneEnv"
@@ -26,11 +25,13 @@ port="27017"
 # 使用mongo shell连接到MongoDB服务器并清空指定的集合
 
 function wipe_collection() {
-  mongosh --username "$username" --password "$password" --host "$host" --port "$port" <<EOF
-    use crane_db
-    db.$1.deleteMany({})
-    exit
-EOF
+  commands="
+  use admin;
+  db.auth(\"$username\",\"$password\");
+  use crane_db;
+  db.$1.deleteMany({});
+  exit;"
+  echo "$commands" | mongosh
 }
 
 if [ "$mode" -eq 1 ] || [ "$mode" -eq 5 ] || [ "$mode" -eq 6 ]; then
