@@ -1424,6 +1424,8 @@ void TaskScheduler::SetTaskEstimatedTime(
     mutable_task->set_qos(task->qos);
     mutable_task->set_cwd(task->cwd);
 
+    mutable_task->set_cmd_line(task->cmd_line);
+
     for (auto&& node : task->excluded_nodes) {
       mutable_task->mutable_excludes()->Add()->assign(node);
     }
@@ -1455,13 +1457,19 @@ void TaskScheduler::SetTaskEstimatedTime(
              it->first->type != crane::grpc::Batch) {
         ++it;
       }
-      CRANE_ASSERT(it != submit_tasks.end() &&
-                   it->first->TaskId() == estimation.task_id());
-      it->first->SetEstimatedTime(
-          absl::Seconds(estimation.estimated_time().seconds()));
+      if (it == submit_tasks.end() ||
+          it->first->TaskId() == estimation.task_id()) {
+        CRANE_ERROR("Error when setting estimated time for task #{}",
+                    it->first->TaskId());
+      } else {
+        it->first->SetEstimatedTime(
+            absl::Seconds(estimation.estimated_time().seconds()));
+      }
       ++it;
     }
-    CRANE_ASSERT(it == submit_tasks.end());
+    if (it != submit_tasks.end()) {
+      CRANE_ERROR("Not all tasks have estimated time set.");
+    }
     auto cost_time = std::chrono::duration_cast<std::chrono::milliseconds>(
                          std::chrono::system_clock::now() - start_time)
                          .count();
@@ -1469,6 +1477,12 @@ void TaskScheduler::SetTaskEstimatedTime(
                 reply.estimations_size(), cost_time);
   } else {
     CRANE_TRACE("Set Estimated time for {} jobs failed", submit_tasks.size());
+  }
+  for (auto& [task, promise] : submit_tasks) {
+    if (task->EstimatedTime() < absl::Seconds(1) ||
+        task->EstimatedTime() > task->time_limit) {
+      task->SetEstimatedTime(task->time_limit);
+    }
   }
 }
 
