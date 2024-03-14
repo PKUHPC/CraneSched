@@ -4,34 +4,16 @@
 
 #pragma once
 
+#include <xgboost/c_api.h>
+
 #include "TimeEstimator.h"
 #include "protos/Crane.pb.h"
 
 namespace Predictor {
 
-constexpr int kMaxUserRecentJob = 10;
+constexpr int kMaxUserRecentJob = 2;
 
-struct TaskFeature {
-  int64_t time_limit;
-  int64_t submit_time;
-
-  double cpu_count;
-  uint64_t memory_bytes;
-  uint64_t memory_sw_bytes;
-
-  uint32_t node_num;
-  uint32_t ntasks_per_node;
-  cpu_t cpus_per_task;
-
-  uid_t uid;
-  std::string account;
-  std::string partition;
-
-  std::string name;
-
-  std::vector<int64_t> recent_job_time;
-  double mean_recent_job_time;
-};
+using TaskFeature = std::vector<float>;
 
 struct BatchMetaInTask {
   std::string sh_script;
@@ -140,12 +122,68 @@ class HistoryTaskAnalyser {
   void RemoveTaskInfo(task_id_t task_id);
 };
 
+class XGBoostModel {
+ public:
+  XGBoostModel(const std::string &model_path) {
+    if (XGBoosterCreate(nullptr, 0, &booster) != 0) {
+      throw std::runtime_error("Failed to create XGBooster.");
+    }
+    if (XGBoosterLoadModel(booster, model_path.c_str()) != 0) {
+      throw std::runtime_error("Failed to load model.");
+    }
+  }
+
+  ~XGBoostModel() { XGBoosterFree(booster); }
+
+  void AddRow(const TaskFeature &row) {
+    if (!matrix.empty() && matrix[0].size() != row.size()) {
+      throw std::runtime_error("Row size does not match.");
+    }
+    matrix.emplace_back(row);
+  }
+
+  void Predict(std::vector<int64_t> *result) {
+    result->clear();
+    if (matrix.empty()) {  // No data to predict
+      return;
+    }
+    int nrow = matrix.size();
+    int ncol = matrix[0].size();
+    std::vector<float> data;
+    for (const auto &row : matrix) {
+      data.insert(data.end(), row.begin(), row.end());
+    }
+
+    DMatrixHandle dmat;
+    if (XGDMatrixCreateFromMat(data.data(), nrow, ncol, NAN, &dmat) != 0) {
+      throw std::runtime_error("Failed to create DMatrix.");
+    }
+
+    bst_ulong out_len;
+    const float *out_result;
+    if (XGBoosterPredict(booster, dmat, 0, 0, 0, &out_len, &out_result) != 0) {
+      XGDMatrixFree(dmat);
+      throw std::runtime_error("Prediction failed.");
+    }
+
+    for (bst_ulong i = 0; i < out_len; ++i) {
+      result->push_back((int64_t)std::round(out_result[i]));
+    }
+
+    XGDMatrixFree(dmat);
+    matrix.clear();
+  }
+
+ private:
+  BoosterHandle booster;
+  std::vector<TaskFeature> matrix;
+};
+
 class XGBoostEstimator : public ITimeEstimator {
  public:
-  XGBoostEstimator() = default;
+  explicit XGBoostEstimator(const std::string &model_path)
+      : model_(model_path) {}
   ~XGBoostEstimator() = default;
-
-  void SetModelPath(const std::string &model_path);
 
   void Predict(const crane::grpc::TaskEstimationRequest *request,
                crane::grpc::TaskEstimationReply *reply) override;
@@ -154,6 +192,7 @@ class XGBoostEstimator : public ITimeEstimator {
 
  private:
   HistoryTaskAnalyser history_task_analyser_;
+  XGBoostModel model_;
 };
 
 }  // namespace Predictor
