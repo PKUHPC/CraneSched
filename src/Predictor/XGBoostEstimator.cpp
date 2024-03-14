@@ -3,36 +3,47 @@
 //
 
 #include "XGBoostEstimator.h"
-// #include <xgboost/c_api.h>
 
 namespace Predictor {
 
+/* Features:
+ * 0: time_limit
+ * 1: submit_time
+ * 2: cpu_count
+ * 3: memory_bytes
+ * 4: node_num
+ * 5: ntasks_per_node
+ * 6: cpus_per_task
+ * 7 ... 7 + kMaxUserRecentJob: recent_job_time, mean_recent_job_time
+ */
 void TaskInPredictor::BuildFeature(
     Predictor::HistoryTaskAnalyser *history_task_analyser) {
-  feature.time_limit = time_limit;
-  feature.submit_time = submit_time;
-  feature.cpu_count =
-      static_cast<double>(resources.allocatable_resource.cpu_count);
-  feature.memory_bytes = resources.allocatable_resource.memory_bytes;
-  feature.memory_sw_bytes = resources.allocatable_resource.memory_sw_bytes;
-  feature.node_num = node_num;
-  feature.ntasks_per_node = ntasks_per_node;
-  feature.cpus_per_task = cpus_per_task;
-  feature.uid = uid;
-  feature.account = account;
-  feature.partition = partition;
-  feature.name = name;
+  feature.clear();
+  feature.push_back(static_cast<float>(time_limit));
+  feature.push_back(static_cast<float>(submit_time));
+  feature.push_back(
+      static_cast<float>(resources.allocatable_resource.cpu_count));
+  feature.push_back(
+      static_cast<float>(resources.allocatable_resource.memory_bytes));
+  feature.push_back(static_cast<float>(node_num));
+  feature.push_back(static_cast<float>(ntasks_per_node));
+  feature.push_back(static_cast<float>(cpus_per_task));
 
-  history_task_analyser->GetRecentJobTime(uid, &feature.recent_job_time);
-
-  if (feature.recent_job_time.empty()) {
-    feature.mean_recent_job_time = 0;
-  } else {
-    feature.mean_recent_job_time =
-        std::accumulate(feature.recent_job_time.begin(),
-                        feature.recent_job_time.end(), 0.0) /
-        feature.recent_job_time.size();
+  std::vector<int64_t> recent_job_time;
+  history_task_analyser->GetRecentJobTime(uid, &recent_job_time);
+  if (recent_job_time.empty()) {
+    recent_job_time.push_back(0);
   }
+  while (recent_job_time.size() < kMaxUserRecentJob) {
+    recent_job_time.push_back(recent_job_time.back());
+  }
+
+  for (const auto &time : recent_job_time) {
+    feature.push_back(static_cast<float>(time));
+  }
+  feature.push_back(
+      std::accumulate(recent_job_time.begin(), recent_job_time.end(), 0.0f) /
+      recent_job_time.size());
 }
 
 void HistoryTaskAnalyser::AddTaskInfo(
@@ -118,12 +129,7 @@ void XGBoostEstimator::Predict(
     task_info->SetFeildsByTaskToPredictor(task);
     task_info->BuildFeature(&history_task_analyser_);
 
-    auto estimation = reply->add_estimations();
-    estimation->set_task_id(task.task_id());
-
-    // use the mean of recent job time as the estimation
-    estimation->mutable_estimated_time()->set_seconds(
-        std::round(task_info->feature.mean_recent_job_time));
+    model_.AddRow(task_info->feature);
 
     history_task_analyser_.AddTaskInfo(std::move(task_info));
   }
