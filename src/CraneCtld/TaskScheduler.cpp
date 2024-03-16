@@ -1193,25 +1193,25 @@ void TaskScheduler::CleanSubmitQueueCb_() {
       submit_tasks;
   std::vector<TaskInCtld*> task_ptr_vec;
 
-  submit_tasks.resize(approximate_size);
-  size_t actual_size = m_submit_task_queue_.try_dequeue_bulk(
-      submit_tasks.begin(), approximate_size);
-
   size_t map_size = m_pending_map_cached_size_.load(std::memory_order_acquire);
-  size_t size_in_range =
-      std::min(actual_size, kPendingConcurrentQueueBatchSize - map_size);
+  size_t batch_size =
+      std::min(approximate_size, kPendingConcurrentQueueBatchSize - map_size);
+  submit_tasks.resize(batch_size);
+
+  size_t actual_size =
+      m_submit_task_queue_.try_dequeue_bulk(submit_tasks.begin(), batch_size);
 
   // Reject the task out of range
-  for (uint32_t i = size_in_range; i < submit_tasks.size(); i++) {
-    uint32_t pos = submit_tasks.size() - 1 - i;
-    submit_tasks[pos].second.set_value(0);
-  }
+  //  for (uint32_t i = size_in_range; i < submit_tasks.size(); i++) {
+  //    uint32_t pos = submit_tasks.size() - 1 - i;
+  //    submit_tasks[pos].second.set_value(0);
+  //  }
 
-  if (size_in_range == 0) return;
-  task_ptr_vec.reserve(size_in_range);
+  if (actual_size == 0) return;
+  task_ptr_vec.reserve(actual_size);
 
   // The order of element inside the bulk is reverse.
-  for (uint32_t i = 0; i < size_in_range; i++) {
+  for (uint32_t i = 0; i < submit_tasks.size(); i++) {
     uint32_t pos = submit_tasks.size() - 1 - i;
     auto* task = submit_tasks[pos].first.get();
     // Add the task to the pending task queue.
