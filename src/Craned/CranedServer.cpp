@@ -326,6 +326,7 @@ grpc::Status CranedServiceImpl::ExecuteTask(
     crane::grpc::ExecuteTasksReply *response) {
   CRANE_TRACE("Requested from CraneCtld to execute {} tasks.",
               request->tasks_size());
+  auto begin = std::chrono::steady_clock::now();
 
   CraneErr err;
   for (auto const &task_to_d : request->tasks()) {
@@ -333,6 +334,11 @@ grpc::Status CranedServiceImpl::ExecuteTask(
     if (err != CraneErr::kOk)
       response->add_failed_task_id_list(task_to_d.task_id());
   }
+  auto end = std::chrono::steady_clock::now();
+
+  CRANE_INFO("ExecuteTask for task #{} cost {} ms", request->tasks(0).task_id(),
+             std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+                 .count());
 
   return Status::OK;
 }
@@ -472,6 +478,7 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
     grpc::ServerContext *context,
     const crane::grpc::CreateCgroupForTasksRequest *request,
     crane::grpc::CreateCgroupForTasksReply *response) {
+  auto begin = std::chrono::steady_clock::now();
   std::vector<std::pair<task_id_t, uid_t>> task_id_uid_pairs;
   for (int i = 0; i < request->task_id_list_size(); i++) {
     task_id_t task_id = request->task_id_list(i);
@@ -486,6 +493,12 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
     CRANE_ERROR("Failed to create cgroups for some tasks.");
   }
 
+  auto end = std::chrono::steady_clock::now();
+  CRANE_INFO("CreateCgroupForTasks for task #{} cost {} ms",
+             request->task_id_list(0),
+             std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+                 .count());
+
   return Status::OK;
 }
 
@@ -493,6 +506,7 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
     grpc::ServerContext *context,
     const crane::grpc::ReleaseCgroupForTasksRequest *request,
     crane::grpc::ReleaseCgroupForTasksReply *response) {
+  auto begin = std::chrono::steady_clock::now();
   for (int i = 0; i < request->task_id_list_size(); ++i) {
     task_id_t task_id = request->task_id_list(i);
     uid_t uid = request->uid_list(i);
@@ -505,6 +519,12 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
                   uid);
     }
   }
+  auto end = std::chrono::steady_clock::now();
+
+  CRANE_INFO("ReleaseCgroupForTasks for task #{} cost {} ms",
+             request->task_id_list(0),
+             std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+                 .count());
 
   return Status::OK;
 }
