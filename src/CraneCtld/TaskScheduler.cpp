@@ -644,19 +644,19 @@ void TaskScheduler::ScheduleThread_() {
             bl.DecrementCount();
             return;
           }
-
+          auto cg_begin = std::chrono::steady_clock::now();
           for (const auto& task_uid_pair : task_uid_pairs) {
-            auto cg_begin = std::chrono::steady_clock::now();
             stub->CreateCgroupForTasks({task_uid_pair});
-            auto cg_end = std::chrono::steady_clock::now();
-            CRANE_INFO("CreateCgroupForTask for task #{} cost {} ms",
-                       task_uid_pair.first,
-                       std::chrono::duration_cast<std::chrono::milliseconds>(
-                           cg_end - cg_begin)
-                           .count());
+
             bl.DecrementCount();
-            return;
           }
+          auto cg_end = std::chrono::steady_clock::now();
+          CRANE_INFO("CreateCgroupForTask for {} tasks cost {} micro second",
+                     task_uid_pairs.size(),
+                     std::chrono::duration_cast<std::chrono::microseconds>(
+                         cg_end - cg_begin)
+                         .count());
+          return;
 
           thread_pool_mtx.Lock();
 
@@ -787,19 +787,20 @@ void TaskScheduler::ScheduleThread_() {
           continue;
         }
 
+        auto exec_begin = std::chrono::steady_clock::now();
         for (const auto& task : tasks.tasks()) {
           crane::grpc::ExecuteTasksRequest req;
           req.add_tasks()->CopyFrom(task);
-          auto exec_begin = std::chrono::steady_clock::now();
           std::vector<task_id_t> failed_task_ids = stub->ExecuteTasks(req);
-          auto exec_end = std::chrono::steady_clock::now();
-          CRANE_INFO("ExecuteTask for task #{} cost {} ms", task.task_id(),
-                     std::chrono::duration_cast<std::chrono::milliseconds>(
-                         exec_end - exec_begin)
-                         .count());
           for (task_id_t task_id : failed_task_ids)
             failed_to_exec_task_id_set.emplace(craned_id, task_id);
         }
+        auto exec_end = std::chrono::steady_clock::now();
+        CRANE_INFO("ExecuteTask for {} tasks cost {} microseconds",
+                   tasks.tasks_size(),
+                   std::chrono::duration_cast<std::chrono::microseconds>(
+                       exec_end - exec_begin)
+                       .count());
       }
 
       // If any task failed during this stage,
@@ -1380,21 +1381,20 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
+        auto cg_begin = std::chrono::steady_clock::now();
         for (const auto& cgroup : cgroups) {
-          auto cg_begin = std::chrono::steady_clock::now();
           CraneErr err = stub->ReleaseCgroupForTasks(cgroups);
-          auto cg_end = std::chrono::steady_clock::now();
-          CRANE_INFO("ReleaseCgroupForTask for task #{} cost {} ms",
-                     cgroup.first,
-                     std::chrono::duration_cast<std::chrono::milliseconds>(
-                         cg_end - cg_begin)
-                         .count());
-
           if (err != CraneErr::kOk) {
             CRANE_ERROR("Failed to Release cgroup RPC for {} tasks on Node {}",
                         cgroups.size(), craned_id);
           }
         }
+        auto cg_end = std::chrono::steady_clock::now();
+        CRANE_INFO("ReleaseCgroupForTask for {} tasks cost {} microseconds",
+                   cgroups.size(),
+                   std::chrono::duration_cast<std::chrono::microseconds>(
+                       cg_end - cg_begin)
+                       .count());
       }
       bl.DecrementCount();
     });
