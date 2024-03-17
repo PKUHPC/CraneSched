@@ -336,8 +336,9 @@ grpc::Status CranedServiceImpl::ExecuteTask(
   }
   auto end = std::chrono::steady_clock::now();
 
-  CRANE_INFO("ExecuteTask for task #{} cost {} ms", request->tasks(0).task_id(),
-             std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+  CRANE_INFO("ExecuteTask for task #{} cost {} microseconds",
+             request->tasks(0).task_id(),
+             std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
                  .count());
 
   return Status::OK;
@@ -494,9 +495,9 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
   }
 
   auto end = std::chrono::steady_clock::now();
-  CRANE_INFO("CreateCgroupForTasks for task #{} cost {} ms",
+  CRANE_INFO("CreateCgroupForTasks for task #{} cost {} microseconds",
              request->task_id_list(0),
-             std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+             std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
                  .count());
 
   return Status::OK;
@@ -521,9 +522,9 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
   }
   auto end = std::chrono::steady_clock::now();
 
-  CRANE_INFO("ReleaseCgroupForTasks for task #{} cost {} ms",
+  CRANE_INFO("ReleaseCgroupForTasks for task #{} cost {} microseconds",
              request->task_id_list(0),
-             std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+             std::chrono::duration_cast<std::chrono::microseconds>(end - begin)
                  .count());
 
   return Status::OK;
