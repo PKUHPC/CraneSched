@@ -25,6 +25,7 @@ add_subdirectory(mongodb-cxx-driver)
 add_subdirectory(ranges-v3)
 add_subdirectory(backward-cpp)
 add_subdirectory(fpm)
+add_subdirectory(mimalloc)
 
 #add_subdirectory(mariadb-connector-c)
 
