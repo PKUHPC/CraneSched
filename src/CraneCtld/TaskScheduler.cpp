@@ -1383,7 +1383,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       if (stub && !stub->Invalid()) {
         auto cg_begin = std::chrono::steady_clock::now();
         for (const auto& cgroup : cgroups) {
-          CraneErr err = stub->ReleaseCgroupForTasks(cgroups);
+          CraneErr err = stub->ReleaseCgroupForTasks({cgroup});
           if (err != CraneErr::kOk) {
             CRANE_ERROR("Failed to Release cgroup RPC for {} tasks on Node {}",
                         cgroups.size(), craned_id);
