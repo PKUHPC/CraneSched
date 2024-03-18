@@ -648,7 +648,6 @@ void TaskScheduler::ScheduleThread_() {
           for (const auto& task_uid_pair : task_uid_pairs) {
             stub->CreateCgroupForTasks({task_uid_pair});
 
-            bl.DecrementCount();
           }
           auto cg_end = std::chrono::steady_clock::now();
           CRANE_INFO("CreateCgroupForTask for {} tasks cost {} micro second",
@@ -656,6 +655,7 @@ void TaskScheduler::ScheduleThread_() {
                      std::chrono::duration_cast<std::chrono::microseconds>(
                          cg_end - cg_begin)
                          .count());
+          bl.DecrementCount();
           return;
 
           thread_pool_mtx.Lock();
