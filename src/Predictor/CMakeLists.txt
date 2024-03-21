@@ -1,14 +1,20 @@
 include(FetchContent)
 
 FetchContent_Declare(
-        xgboost
-        GIT_REPOSITORY https://github.com/dmlc/xgboost
-        GIT_TAG v2.0.3
+        lightgbm
+        GIT_REPOSITORY https://github.com/microsoft/LightGBM
+        GIT_TAG v4.3.0
         GIT_SHALLOW TRUE
         UPDATE_DISCONNECTED TRUE
 )
 
-FetchContent_MakeAvailable(xgboost)
+FetchContent_MakeAvailable(lightgbm)
+
+FetchContent_GetProperties(lightgbm)
+if(NOT lightgbm_POPULATED)
+    FetchContent_Populate(lightgbm)
+    add_subdirectory(${lightgbm_SOURCE_DIR} ${lightgbm_BINARY_DIR} EXCLUDE_FROM_ALL)
+endif()
 
 add_executable(predictor
         Predictor.cpp
@@ -19,11 +25,13 @@ add_executable(predictor
         PredGrpcServer.h
         BaselineEstimator.cpp
         BaselineEstimator.h
-        XGBoostEstimator.cpp
-        XGBoostEstimator.h
+        LightGBMEstimator.cpp
+        LightGBMEstimator.h
 )
+
+target_include_directories(predictor PRIVATE ${lightgbm_SOURCE_DIR}/include)
 
 target_link_libraries(predictor PRIVATE
         crane_proto_lib
         Utility_PublicHeader
-        xgboost)
+        _lightgbm)

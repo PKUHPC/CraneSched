@@ -2,32 +2,61 @@
 // Created by root on 3/12/24.
 //
 
-#include "XGBoostEstimator.h"
+#include "LightGBMEstimator.h"
 
 namespace Predictor {
 
-/* Features:
- * 0: time_limit
- * 1: submit_time
- * 2: cpu_count
- * 3: memory_bytes
- * 4: node_num
- * 5: ntasks_per_node
- * 6: cpus_per_task
- * 7 ... 7 + kMaxUserRecentJob: recent_job_time, mean_recent_job_time
+void GetTimeInfo(absl::Time time, int *year, int *quarter, int *month, int *day,
+                 int *hour, int *minute, int *second, int *day_of_year,
+                 int *day_of_month, int *day_of_week) {
+  struct tm tm {};
+  time_t t = ToUnixSeconds(time);
+  localtime_r(&t, &tm);
+  *year = tm.tm_year + 1900;
+  *quarter = (tm.tm_mon / 3) + 1;
+  *month = tm.tm_mon + 1;
+  *day = tm.tm_mday;
+  *hour = tm.tm_hour;
+  *minute = tm.tm_min;
+  *second = tm.tm_sec;
+  *day_of_year = tm.tm_yday + 1;
+  *day_of_month = tm.tm_mday;
+  *day_of_week = tm.tm_wday;
+}
+
+/*
+ feature_names=
+ id_user id_qos cpus_req nodes_alloc timelimit time_submit
+ sub_year sub_quarter sub_month sub_day sub_hour sub_day_of_year
+ sub_day_of_month sub_day_of_week top1_time top2_time top2_mean
  */
 void TaskInPredictor::BuildFeature(
     Predictor::HistoryTaskAnalyser *history_task_analyser) {
   feature.clear();
-  feature.push_back(static_cast<float>(time_limit));
-  feature.push_back(static_cast<float>(submit_time));
+  feature.push_back(static_cast<double>(uid));
+  feature.push_back(static_cast<double>(strtol(qos.c_str(), nullptr, 10)));
   feature.push_back(
-      static_cast<float>(resources.allocatable_resource.cpu_count));
-  feature.push_back(
-      static_cast<float>(resources.allocatable_resource.memory_bytes));
-  feature.push_back(static_cast<float>(node_num));
-  feature.push_back(static_cast<float>(ntasks_per_node));
-  feature.push_back(static_cast<float>(cpus_per_task));
+      static_cast<double>(resources.allocatable_resource.cpu_count));
+  feature.push_back(static_cast<double>(node_num));
+  feature.push_back(static_cast<double>(ToInt64Seconds(time_limit)));
+  feature.push_back(static_cast<double>(ToUnixSeconds(submit_time)));
+
+  int sub_year, sub_quarter, sub_month, sub_day, sub_hour, sub_minute,
+      sub_second, sub_day_of_year, sub_day_of_month, sub_day_of_week;
+  GetTimeInfo(submit_time, &sub_year, &sub_quarter, &sub_month, &sub_day,
+              &sub_hour, &sub_minute, &sub_second, &sub_day_of_year,
+              &sub_day_of_month, &sub_day_of_week);
+
+  feature.push_back(static_cast<double>(sub_year));
+  feature.push_back(static_cast<double>(sub_quarter));
+  feature.push_back(static_cast<double>(sub_month));
+  feature.push_back(static_cast<double>(sub_day));
+  feature.push_back(static_cast<double>(sub_hour));
+  feature.push_back(static_cast<double>(sub_minute));
+  feature.push_back(static_cast<double>(sub_second));
+  feature.push_back(static_cast<double>(sub_day_of_year));
+  feature.push_back(static_cast<double>(sub_day_of_month));
+  feature.push_back(static_cast<double>(sub_day_of_week));
 
   std::vector<int64_t> recent_job_time;
   history_task_analyser->GetRecentJobTime(uid, &recent_job_time);
@@ -39,7 +68,7 @@ void TaskInPredictor::BuildFeature(
   }
 
   for (const auto &time : recent_job_time) {
-    feature.push_back(static_cast<float>(time));
+    feature.push_back(static_cast<double>(time));
   }
   feature.push_back(
       std::accumulate(recent_job_time.begin(), recent_job_time.end(), 0.0f) /
@@ -97,7 +126,7 @@ bool HistoryTaskAnalyser::CheckTaskExist(task_id_t task_id) {
   return true;
 }
 
-void XGBoostEstimator::Predict(
+void LightGBMEstimator::Predict(
     const crane::grpc::TaskEstimationRequest *request,
     crane::grpc::TaskEstimationReply *reply) {
   for (const auto &task : request->tasks()) {
@@ -133,6 +162,13 @@ void XGBoostEstimator::Predict(
 
     history_task_analyser_.AddTaskInfo(std::move(task_info));
   }
+  std::vector<int64_t> result;
+  model_.Predict(&result);
+  for (int i = 0; i < result.size(); i++) {
+    reply->add_estimations()->set_task_id(request->tasks(i).task_id());
+    reply->mutable_estimations(i)->mutable_estimated_time()->set_seconds(
+        result[i]);
+  }
 
   for (const auto &estimation : reply->estimations()) {
     std::cout << "Task " << estimation.task_id()
@@ -141,7 +177,7 @@ void XGBoostEstimator::Predict(
   }
 }
 
-void XGBoostEstimator::Record(
+void LightGBMEstimator::Record(
     const crane::grpc::TaskExecutionTimeAck *request) {
   for (const auto &execution_time : request->execution_times()) {
     history_task_analyser_.AddRealTimeInfo(execution_time.task_id(),

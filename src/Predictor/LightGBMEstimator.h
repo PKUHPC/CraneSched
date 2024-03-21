@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <xgboost/c_api.h>
+#include <LightGBM/c_api.h>
 
 #include "TimeEstimator.h"
 #include "protos/Crane.pb.h"
@@ -13,7 +13,7 @@ namespace Predictor {
 
 constexpr int kMaxUserRecentJob = 2;
 
-using TaskFeature = std::vector<float>;
+using TaskFeature = std::vector<double>;
 
 struct BatchMetaInTask {
   std::string sh_script;
@@ -27,8 +27,8 @@ struct TaskInPredictor {
   int64_t real_time;
 
   /* -------- Fields directly used for estimating ------- */
-  int64_t time_limit;
-  int64_t submit_time;
+  absl::Duration time_limit;
+  absl::Time submit_time;
 
   Resources resources;
   uint32_t node_num{0};
@@ -59,8 +59,8 @@ struct TaskInPredictor {
 
   void SetFeildsByTaskToPredictor(const crane::grpc::TaskToPredictor &val) {
     task_id = val.task_id();
-    time_limit = val.time_limit().seconds();
-    submit_time = val.submit_time().seconds();
+    time_limit = absl::Seconds(val.time_limit().seconds());
+    submit_time = absl::FromUnixSeconds(val.submit_time().seconds());
 
     resources.allocatable_resource = val.resources().allocatable_resource();
 
@@ -122,18 +122,17 @@ class HistoryTaskAnalyser {
   void RemoveTaskInfo(task_id_t task_id);
 };
 
-class XGBoostModel {
+class LightGBMModel {
  public:
-  XGBoostModel(const std::string &model_path) {
-    if (XGBoosterCreate(nullptr, 0, &booster) != 0) {
-      throw std::runtime_error("Failed to create XGBooster.");
-    }
-    if (XGBoosterLoadModel(booster, model_path.c_str()) != 0) {
-      throw std::runtime_error("Failed to load model.");
+  LightGBMModel(const std::string &model_path) {
+    if (LGBM_BoosterCreateFromModelfile(model_path.c_str(), &num_iterations,
+                                        &booster) != 0) {
+      std::cerr << "Could not load model." << std::endl;
+      throw std::runtime_error("Could not load model.");
     }
   }
 
-  ~XGBoostModel() { XGBoosterFree(booster); }
+  ~LightGBMModel() { LGBM_BoosterFree(booster); }
 
   void AddRow(const TaskFeature &row) {
     if (!matrix.empty() && matrix[0].size() != row.size()) {
@@ -147,43 +146,38 @@ class XGBoostModel {
     if (matrix.empty()) {  // No data to predict
       return;
     }
-    int nrow = matrix.size();
-    int ncol = matrix[0].size();
-    std::vector<float> data;
+    int num_rows = matrix.size();
+    int num_cols = matrix[0].size();
+    std::vector<double> data;
     for (const auto &row : matrix) {
       data.insert(data.end(), row.begin(), row.end());
     }
 
-    DMatrixHandle dmat;
-    if (XGDMatrixCreateFromMat(data.data(), nrow, ncol, NAN, &dmat) != 0) {
-      throw std::runtime_error("Failed to create DMatrix.");
-    }
-
-    bst_ulong out_len;
-    const float *out_result;
-    if (XGBoosterPredict(booster, dmat, 0, 0, 0, &out_len, &out_result) != 0) {
-      XGDMatrixFree(dmat);
+    std::vector<double> predictions(num_rows);
+    int64_t out_len = 0;
+    if (LGBM_BoosterPredictForMat(booster, data.data(), C_API_DTYPE_FLOAT64,
+                                  num_rows, num_cols, 1, C_API_PREDICT_NORMAL,
+                                  0, num_iterations, nullptr, &out_len,
+                                  predictions.data()) != 0) {
       throw std::runtime_error("Prediction failed.");
     }
 
-    for (bst_ulong i = 0; i < out_len; ++i) {
-      result->push_back((int64_t)std::round(out_result[i]));
+    for (const auto &pred : predictions) {
+      result->push_back(static_cast<int64_t>(pred));
     }
-
-    XGDMatrixFree(dmat);
-    matrix.clear();
   }
 
  private:
-  BoosterHandle booster;
+  BoosterHandle booster = nullptr;
+  int num_iterations;
   std::vector<TaskFeature> matrix;
 };
 
-class XGBoostEstimator : public ITimeEstimator {
+class LightGBMEstimator : public ITimeEstimator {
  public:
-  explicit XGBoostEstimator(const std::string &model_path)
+  explicit LightGBMEstimator(const std::string &model_path)
       : model_(model_path) {}
-  ~XGBoostEstimator() = default;
+  ~LightGBMEstimator() = default;
 
   void Predict(const crane::grpc::TaskEstimationRequest *request,
                crane::grpc::TaskEstimationReply *reply) override;
@@ -192,7 +186,7 @@ class XGBoostEstimator : public ITimeEstimator {
 
  private:
   HistoryTaskAnalyser history_task_analyser_;
-  XGBoostModel model_;
+  LightGBMModel model_;
 };
 
 }  // namespace Predictor
