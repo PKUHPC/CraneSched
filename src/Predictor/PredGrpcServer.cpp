@@ -4,7 +4,7 @@
 
 #include "PredGrpcServer.h"
 
-#include "XGBoostEstimator.h"
+#include "LightGBMEstimator.h"
 
 namespace Predictor {
 
@@ -32,6 +32,11 @@ grpc::Status CranePredServiceImpl::ReportExecutionTime(
 }
 
 PredServer::PredServer() {
+  std::cerr << "Loading model..." << std::endl;
+  m_time_estimator_ =
+      std::make_unique<LightGBMEstimator>("/home/nameless/Desktop/model.txt");
+  std::cerr << "Model loaded" << std::endl;
+
   m_service_impl_ = std::make_unique<CranePredServiceImpl>(this);
 
   std::string listen_addr_port("0.0.0.0:51890");
@@ -43,8 +48,6 @@ PredServer::PredServer() {
   m_server_ = builder.BuildAndStart();
 
   std::cout << "Server listening on " << listen_addr_port << std::endl;
-
-  m_time_estimator_ = std::make_unique<XGBoostEstimator>("model/xgboost.model");
 }
 
 void PredServer::EstimateRunTime(
