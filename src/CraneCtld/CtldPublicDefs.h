@@ -279,7 +279,7 @@ struct TaskInCtld {
   crane::grpc::TaskToCtld task_to_ctld;
 
   /* ------ duplicate of the fields [2][3] above just for convenience ----- */
-  crane::grpc::PersistedPartOfTaskInCtld persisted_part;
+  crane::grpc::RuntimeAttrOfTask runtime_attr;
 
  public:
   /* -----------
@@ -310,91 +310,88 @@ struct TaskInCtld {
   crane::grpc::TaskToCtld const& TaskToCtld() const { return task_to_ctld; }
   crane::grpc::TaskToCtld* MutableTaskToCtld() { return &task_to_ctld; }
 
-  crane::grpc::PersistedPartOfTaskInCtld const& PersistedPart() {
-    return persisted_part;
-  }
+  crane::grpc::RuntimeAttrOfTask const& RuntimeAttr() { return runtime_attr; }
 
   void SetTaskId(task_id_t id) {
     task_id = id;
-    persisted_part.set_task_id(id);
+    runtime_attr.set_task_id(id);
   }
   task_id_t TaskId() const { return task_id; }
 
   void SetTaskDbId(task_db_id_t id) {
     task_db_id = id;
-    persisted_part.set_task_db_id(id);
+    runtime_attr.set_task_db_id(id);
   }
   task_id_t TaskDbId() const { return task_db_id; }
 
   void SetGid(gid_t id) {
     gid = id;
-    persisted_part.set_gid(id);
+    runtime_attr.set_gid(id);
   }
   uid_t Gid() const { return gid; }
 
   void SetUsername(std::string const& val) {
     username = val;
-    persisted_part.set_username(val);
+    runtime_attr.set_username(val);
   }
   std::string const& Username() const { return username; }
 
   void SetCranedIds(std::list<CranedId>&& val) {
-    persisted_part.mutable_craned_ids()->Assign(val.begin(), val.end());
+    runtime_attr.mutable_craned_ids()->Assign(val.begin(), val.end());
     craned_ids = val;
   }
   std::list<CranedId> const& CranedIds() const { return craned_ids; }
   void CranedIdsClear() {
     craned_ids.clear();
-    persisted_part.mutable_craned_ids()->Clear();
+    runtime_attr.mutable_craned_ids()->Clear();
   }
 
   void CranedIdsAdd(CranedId const& i) {
     craned_ids.emplace_back(i);
-    *persisted_part.mutable_craned_ids()->Add() = i;
+    *runtime_attr.mutable_craned_ids()->Add() = i;
   }
 
   void SetStatus(crane::grpc::TaskStatus val) {
     status = val;
-    persisted_part.set_status(val);
+    runtime_attr.set_status(val);
   }
   crane::grpc::TaskStatus Status() const { return status; }
 
   void SetExitCode(uint32_t val) {
     exit_code = val;
-    persisted_part.set_exit_code(val);
+    runtime_attr.set_exit_code(val);
   }
   uint32_t ExitCode() const { return exit_code; }
 
   void SetSubmitTime(absl::Time const& val) {
     submit_time = val;
-    persisted_part.mutable_submit_time()->set_seconds(
-        ToUnixSeconds(submit_time));
+    runtime_attr.mutable_submit_time()->set_seconds(ToUnixSeconds(submit_time));
   }
   void SetSubmitTimeByUnixSecond(uint64_t val) {
     submit_time = absl::FromUnixSeconds(val);
-    persisted_part.mutable_submit_time()->set_seconds(val);
+    runtime_attr.mutable_submit_time()->set_seconds(val);
   }
   absl::Time const& SubmitTime() const { return submit_time; }
   int64_t SubmitTimeInUnixSecond() const { return ToUnixSeconds(submit_time); }
 
   void SetStartTime(absl::Time const& val) {
     start_time = val;
-    persisted_part.mutable_start_time()->set_seconds(ToUnixSeconds(start_time));
+    runtime_attr.mutable_start_time()->set_seconds(ToUnixSeconds(start_time));
   }
   void SetStartTimeByUnixSecond(uint64_t val) {
     start_time = absl::FromUnixSeconds(val);
-    persisted_part.mutable_start_time()->set_seconds(val);
+    runtime_attr.mutable_start_time()->set_seconds(val);
   }
   absl::Time const& StartTime() const { return start_time; }
   int64_t StartTimeInUnixSecond() const { return ToUnixSeconds(start_time); }
 
   void SetEndTime(absl::Time const& val) {
     end_time = val;
-    persisted_part.mutable_end_time()->set_seconds(ToUnixSeconds(end_time));
+    runtime_attr.mutable_end_time()->set_seconds(ToUnixSeconds(end_time));
   }
   void SetEndTimeByUnixSecond(uint64_t val) {
     end_time = absl::FromUnixSeconds(val);
-    persisted_part.mutable_end_time()->set_seconds(val);
+    runtime_attr.mutable_end_time()->set_seconds(val);
   }
   absl::Time const& EndTime() const { return end_time; }
   int64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
@@ -436,27 +433,26 @@ struct TaskInCtld {
     get_user_env = val.get_user_env();
   }
 
-  void SetFieldsByPersistedPart(
-      crane::grpc::PersistedPartOfTaskInCtld const& val) {
-    persisted_part = val;
+  void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
+    runtime_attr = val;
 
-    task_id = persisted_part.task_id();
-    task_db_id = persisted_part.task_db_id();
-    gid = persisted_part.gid();
-    username = persisted_part.username();
+    task_id = runtime_attr.task_id();
+    task_db_id = runtime_attr.task_db_id();
+    gid = runtime_attr.gid();
+    username = runtime_attr.username();
 
     nodes_alloc = craned_ids.size();
 
-    status = persisted_part.status();
+    status = runtime_attr.status();
 
     if (status != crane::grpc::TaskStatus::Pending) {
-      craned_ids.assign(persisted_part.craned_ids().begin(),
-                        persisted_part.craned_ids().end());
+      craned_ids.assign(runtime_attr.craned_ids().begin(),
+                        runtime_attr.craned_ids().end());
       executing_craned_id = craned_ids.front();
     }
 
-    start_time = absl::FromUnixSeconds(persisted_part.start_time().seconds());
-    end_time = absl::FromUnixSeconds(persisted_part.end_time().seconds());
+    start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());
+    end_time = absl::FromUnixSeconds(runtime_attr.end_time().seconds());
   }
 };
 
