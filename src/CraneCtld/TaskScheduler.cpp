@@ -1444,31 +1444,32 @@ void TaskScheduler::SetTaskEstimatedTime(
     mutable_task->set_cpus_per_task(static_cast<double>(task->cpus_per_task));
 
     mutable_task->set_uid(task->uid);
-    mutable_task->set_account(task->account);
-    mutable_task->set_partition(task->TaskToCtld().partition_name());
+    mutable_task->set_qos(task->qos_priority);
+    //    mutable_task->set_account(task->account);
+    //    mutable_task->set_partition(task->TaskToCtld().partition_name());
+    //
+    //    mutable_task->set_name(task->name);
+    //
+    //    mutable_task->set_cwd(task->cwd);
+    //
+    //    mutable_task->set_cmd_line(task->cmd_line);
 
-    mutable_task->set_name(task->name);
-
-    mutable_task->set_qos(task->qos);
-    mutable_task->set_cwd(task->cwd);
-
-    mutable_task->set_cmd_line(task->cmd_line);
-
-    for (auto&& node : task->excluded_nodes) {
-      mutable_task->mutable_excludes()->Add()->assign(node);
-    }
-
-    for (auto&& node : task->included_nodes) {
-      mutable_task->mutable_nodelist()->Add()->assign(node);
-    }
-
-    mutable_task->set_get_user_env(task->get_user_env);
-    mutable_task->mutable_env()->insert(task->env.begin(), task->env.end());
-
-    auto& meta_in_ctld = std::get<BatchMetaInTask>(task->meta);
-    auto* mutable_meta = mutable_task->mutable_batch_meta();
-    mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
-    mutable_meta->set_sh_script(meta_in_ctld.sh_script);
+    //    for (auto&& node : task->excluded_nodes) {
+    //      mutable_task->mutable_excludes()->Add()->assign(node);
+    //    }
+    //
+    //    for (auto&& node : task->included_nodes) {
+    //      mutable_task->mutable_nodelist()->Add()->assign(node);
+    //    }
+    //
+    //    mutable_task->set_get_user_env(task->get_user_env);
+    //    mutable_task->mutable_env()->insert(task->env.begin(),
+    //    task->env.end());
+    //
+    //    auto& meta_in_ctld = std::get<BatchMetaInTask>(task->meta);
+    //    auto* mutable_meta = mutable_task->mutable_batch_meta();
+    //    mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
+    //    mutable_meta->set_sh_script(meta_in_ctld.sh_script);
   }
 
   grpc::ClientContext context;
@@ -1486,7 +1487,7 @@ void TaskScheduler::SetTaskEstimatedTime(
         ++it;
       }
       if (it == submit_tasks.end() ||
-          it->first->TaskId() == estimation.task_id()) {
+          it->first->TaskId() != estimation.task_id()) {
         CRANE_ERROR("Error when setting estimated time for task #{}",
                     it->first->TaskId());
       } else {

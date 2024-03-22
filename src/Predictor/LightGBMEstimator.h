@@ -36,24 +36,24 @@ struct TaskInPredictor {
   cpu_t cpus_per_task{0};
 
   uid_t uid;
-  std::string account;
-  std::string partition;
-
-  std::string name;
+  uint32_t qos;
 
   /* -------- Fields used to calculate job correlation ------- */
-  std::string qos;
-  std::string cwd;
-
-  std::string cmd_line;
-
-  std::unordered_set<std::string> excludes;
-  std::unordered_set<std::string> nodelist;
-
-  bool get_user_env{false};
-  std::unordered_map<std::string, std::string> env;
-
-  BatchMetaInTask meta;
+  //  std::string account;
+  //  std::string partition;
+  //  std::string name;
+  //  std::string qos;
+  //  std::string cwd;
+  //
+  //  std::string cmd_line;
+  //
+  //  std::unordered_set<std::string> excludes;
+  //  std::unordered_set<std::string> nodelist;
+  //
+  //  bool get_user_env{false};
+  //  std::unordered_map<std::string, std::string> env;
+  //
+  //  BatchMetaInTask meta;
   /* -------- Fields of preprocessed feature ------- */
   TaskFeature feature;
 
@@ -69,31 +69,32 @@ struct TaskInPredictor {
     cpus_per_task = cpu_t(val.cpus_per_task());
 
     uid = val.uid();
-    account = val.account();
-    partition = val.partition();
-
-    name = val.name();
-
     qos = val.qos();
-    cwd = val.cwd();
-
-    cmd_line = val.cmd_line();
-
-    for (const auto &exclude : val.excludes()) {
-      excludes.insert(exclude);
-    }
-
-    for (const auto &node : val.nodelist()) {
-      nodelist.insert(node);
-    }
-
-    get_user_env = val.get_user_env();
-    for (const auto &env_pair : val.env()) {
-      env[env_pair.first] = env_pair.second;
-    }
-
-    meta.sh_script = val.batch_meta().sh_script();
-    meta.output_file_pattern = val.batch_meta().output_file_pattern();
+    //    account = val.account();
+    //    partition = val.partition();
+    //
+    //    name = val.name();
+    //
+    //    qos = val.qos();
+    //    cwd = val.cwd();
+    //
+    //    cmd_line = val.cmd_line();
+    //
+    //    for (const auto &exclude : val.excludes()) {
+    //      excludes.insert(exclude);
+    //    }
+    //
+    //    for (const auto &node : val.nodelist()) {
+    //      nodelist.insert(node);
+    //    }
+    //
+    //    get_user_env = val.get_user_env();
+    //    for (const auto &env_pair : val.env()) {
+    //      env[env_pair.first] = env_pair.second;
+    //    }
+    //
+    //    meta.sh_script = val.batch_meta().sh_script();
+    //    meta.output_file_pattern = val.batch_meta().output_file_pattern();
   }
 
   void SetRealTime(int64_t val) { real_time = val; }
@@ -130,9 +131,13 @@ class LightGBMModel {
       std::cerr << "Could not load model." << std::endl;
       throw std::runtime_error("Could not load model.");
     }
+    std::cerr << "num_iterations: " << num_iterations << std::endl;
+    LGBM_RegisterLogCallback(LogCallback);
   }
 
   ~LightGBMModel() { LGBM_BoosterFree(booster); }
+
+  static void LogCallback(const char *msg) { std::cerr << msg << std::endl; }
 
   void AddRow(const TaskFeature &row) {
     if (!matrix.empty() && matrix[0].size() != row.size()) {
@@ -152,13 +157,16 @@ class LightGBMModel {
     for (const auto &row : matrix) {
       data.insert(data.end(), row.begin(), row.end());
     }
+    matrix.clear();
 
     std::vector<double> predictions(num_rows);
     int64_t out_len = 0;
-    if (LGBM_BoosterPredictForMat(booster, data.data(), C_API_DTYPE_FLOAT64,
-                                  num_rows, num_cols, 1, C_API_PREDICT_NORMAL,
-                                  0, num_iterations, nullptr, &out_len,
-                                  predictions.data()) != 0) {
+    int err_code = LGBM_BoosterPredictForMat(
+        booster, data.data(), C_API_DTYPE_FLOAT64, num_rows, num_cols, 1,
+        C_API_PREDICT_NORMAL, 0, num_iterations, "", &out_len,
+        predictions.data());
+    if (err_code != 0) {
+      std::cerr << "Prediction failed, error code: " << err_code << std::endl;
       throw std::runtime_error("Prediction failed.");
     }
 
