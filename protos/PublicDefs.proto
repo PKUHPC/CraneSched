@@ -106,7 +106,6 @@ message TaskToCtld {
 message TaskToPredictor {
   uint32 task_id = 1;
 
-  /* -------- Fields directly used for estimating ------- */
   google.protobuf.Duration time_limit = 2;
   google.protobuf.Timestamp submit_time = 3;
 
@@ -116,24 +115,7 @@ message TaskToPredictor {
   double cpus_per_task = 7;
 
   uint32 uid = 8;
-  string account = 9;
-  string partition = 10;
-
-  string name = 11;
-
-  /* -------- Fields used to calculate job correlation ------- */
-  string qos = 12;
-  string cwd = 13;
-
-  string cmd_line = 19;
-
-  repeated string excludes = 14;
-  repeated string nodelist = 15;
-
-  bool get_user_env = 16;
-  map<string, string> env = 17; // most likely "ALL", then much information will be useless
-
-  BatchTaskAdditionalMeta batch_meta = 18;
+  uint32 qos = 9;
 }
 
 message EstimatedTime {
