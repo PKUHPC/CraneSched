@@ -184,8 +184,7 @@ result::result<void, DbErrorCode> UnqliteDb::Abort(txn_id_t txn_id) {
   }
 }
 
-result::result<void, DbErrorCode> UnqliteDb::LoadAllKVPairs(
-    KeyValueHandler handler) {
+result::result<void, DbErrorCode> UnqliteDb::IterateAllKv(KvIterFunc func) {
   int rc;
   unqlite_kv_cursor* cursor;
   rc = unqlite_kv_cursor_init(m_db_, &cursor);
@@ -198,14 +197,17 @@ result::result<void, DbErrorCode> UnqliteDb::LoadAllKVPairs(
     unqlite_int64 value_len;
     unqlite_kv_cursor_key(cursor, nullptr, &key_len);
     unqlite_kv_cursor_data(cursor, nullptr, &value_len);
-    // get key string and value binary data
-    std::string key, value;
+
+    std::string key;
     key.resize(key_len);
+
+    std::vector<uint8_t> value;
     value.resize(value_len);
+
     unqlite_kv_cursor_key(cursor, key.data(), &key_len);
     unqlite_kv_cursor_data(cursor, value.data(), &value_len);
 
-    if (!handler(key, value)) {
+    if (!func(std::move(key), std::move(value))) {
       unqlite_kv_cursor_delete_entry(cursor);
     }
   }
@@ -426,8 +428,7 @@ result::result<void, DbErrorCode> BerkeleyDb::Abort(txn_id_t txn_id) {
   return {};
 }
 
-result::result<void, DbErrorCode> BerkeleyDb::LoadAllKVPairs(
-    KeyValueHandler handler) {
+result::result<void, DbErrorCode> BerkeleyDb::IterateAllKv(KvIterFunc func) {
   int rc;
   Dbc* cursor;
   if ((rc = m_db_->cursor(nullptr, &cursor, 0)) != 0) {
@@ -436,10 +437,15 @@ result::result<void, DbErrorCode> BerkeleyDb::LoadAllKVPairs(
 
   Dbt key, value;
   while ((rc = cursor->get(&key, &value, DB_NEXT)) == 0) {
-    std::string key_str(static_cast<char*>(key.get_data()), key.get_size()),
-        value_str(static_cast<char*>(value.get_data()), value.get_size());
-    if (!handler(key_str, value_str)) {
-      cursor->del(0);
+    std::string key_buf;
+    key_buf.assign((char*)key.get_data(), key.get_size());
+
+    std::vector<uint8_t> value_buf;
+    value_buf.assign((uint8_t*)value.get_data(),
+                     (uint8_t*)value.get_data() + value.get_size());
+
+    if (!func(std::move(key_buf), std::move(value_buf))) {
+      cursor->del(0 /*NULL flags*/);
     }
   }
 
@@ -465,14 +471,14 @@ DbTxn* BerkeleyDb::GetDbTxnFromId_(txn_id_t txn_id) {
 #endif
 
 EmbeddedDbClient::~EmbeddedDbClient() {
-  if (m_embedded_db_variable_data_) {
-    auto result = m_embedded_db_variable_data_->Close();
+  if (m_variable_db_) {
+    auto result = m_variable_db_->Close();
     if (result.has_error())
       CRANE_ERROR(
           "Error occurred when closing the embedded db of variable data!");
   }
-  if (m_embedded_db_fixed_data_) {
-    auto result = m_embedded_db_fixed_data_->Close();
+  if (m_fixed_db_) {
+    auto result = m_fixed_db_->Close();
     if (result.has_error())
       CRANE_ERROR("Error occurred when closing the embedded db of fixed data!");
   }
@@ -481,8 +487,8 @@ EmbeddedDbClient::~EmbeddedDbClient() {
 bool EmbeddedDbClient::Init(const std::string& db_path) {
   if (g_config.CraneEmbeddedDbBackend == "Unqlite") {
 #ifdef CRANE_HAVE_UNQLITE
-    m_embedded_db_variable_data_ = std::make_shared<UnqliteDb>();
-    m_embedded_db_fixed_data_ = std::make_shared<UnqliteDb>();
+    m_variable_db_ = std::make_unique<UnqliteDb>();
+    m_fixed_db_ = std::make_unique<UnqliteDb>();
 #else
     CRANE_ERROR(
         "Select unqlite as the embedded db but it's not been compiled.");
@@ -491,8 +497,8 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
 
   } else if (g_config.CraneEmbeddedDbBackend == "BerkeleyDB") {
 #ifdef CRANE_HAVE_BERKELEY_DB
-    m_embedded_db_variable_data_ = std::make_unique<BerkeleyDb>();
-    m_embedded_db_fixed_data_ = std::make_unique<BerkeleyDb>();
+    m_variable_db_ = std::make_unique<BerkeleyDb>();
+    m_fixed_db_ = std::make_unique<BerkeleyDb>();
 #else
     CRANE_ERROR(
         "Select Berkeley DB as the embedded db but it's not been compiled.");
@@ -505,9 +511,9 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
     return false;
   }
 
-  auto result = m_embedded_db_variable_data_->Init(db_path + "var");
+  auto result = m_variable_db_->Init(db_path + "var");
   if (result.has_error()) return false;
-  result = m_embedded_db_fixed_data_->Init(db_path + "fix");
+  result = m_fixed_db_->Init(db_path + "fix");
   if (result.has_error()) return false;
 
   bool ok;
@@ -526,8 +532,8 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   std::unordered_map<db_id_t, crane::grpc::TaskStatus> status_map;
   util::lock_guard guard(m_queue_mtx_);
 
-  result = m_embedded_db_variable_data_->LoadAllKVPairs(
-      [&](const std::string& key, const std::string& value) {
+  result = m_variable_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&& value) {
         if (key.back() != 'S') return true;  // skip the 'NDI' and 'NI'
 
         crane::grpc::TaskInEmbeddedDb task_proto;
@@ -556,9 +562,8 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
     return false;
   }
 
-  result = m_embedded_db_fixed_data_->LoadAllKVPairs([&](const std::string& key,
-                                                         const std::string&
-                                                             value) {
+  result = m_fixed_db_->IterateAllKv([&](std::string&& key,
+                                         std::vector<uint8_t>&& value) {
     task_db_id_t id = std::stol(key.substr(0, key.size() - 1));
 
     if (!status_map.contains(id)) return false;  // delete the redundant data
@@ -590,7 +595,7 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
 
 bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
     const std::vector<TaskInCtld*>& tasks) {
-  txn_id_t fix_txn_id, var_txn_id;
+  txn_id_t txn_id;
   result::result<void, DbErrorCode> result;
 
   absl::MutexLock lock_ids(&s_task_id_and_db_id_mtx_);
@@ -598,14 +603,14 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
   uint32_t task_id{s_next_task_id_};
   db_id_t task_db_id{s_next_task_db_id_};
 
-  if (!BeginFixedDbTransaction(&fix_txn_id)) return false;
+  if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
 
   for (const auto& task : tasks) {
     task->SetTaskId(task_id++);       // Default value is 0
     task->SetTaskDbId(task_db_id++);  // Default value is 0
 
-    result = StoreTypeIntoDb_(fix_txn_id, m_embedded_db_fixed_data_,
-                              GetDbQueueNodeTaskToCtldName_(task->TaskDbId()),
+    result = StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
+                              GetFixedDbEntryName_(task->TaskDbId()),
                               &task->TaskToCtld());
     if (result.has_error()) {
       CRANE_ERROR(
@@ -614,18 +619,17 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
     }
   }
 
-  if (!CommitFixedDbTransaction(fix_txn_id)) return false;
+  if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
 
-  if (!BeginVariableDbTransaction(&var_txn_id)) return false;
+  if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
 
   for (const auto& task : tasks) {
     if (task->TaskId() == 0)
       continue;  // skip the task which failed to store the fix data
 
-    result =
-        StoreTypeIntoDb_(var_txn_id, m_embedded_db_variable_data_,
-                         GetDbQueueNodePersistedPartName_(task->TaskDbId()),
-                         &task->PersistedPart());
+    result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
+                              GetVariableDbEntryName_(task->TaskDbId()),
+                              &task->PersistedPart());
     if (result.has_error()) {
       CRANE_ERROR(
           "Failed to store the variable data of task id: {} / task db id: "
@@ -636,20 +640,20 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
     }
   }
 
-  result = StoreTypeIntoDb_(var_txn_id, m_embedded_db_variable_data_,
-                            s_next_task_id_str_, &task_id);
+  result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id, s_next_task_id_str_,
+                            &task_id);
   if (result.has_error()) {
     CRANE_ERROR("Failed to store next_task_id.");
     return false;
   }
 
-  result = StoreTypeIntoDb_(var_txn_id, m_embedded_db_variable_data_,
+  result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
                             s_next_task_db_id_str_, &task_db_id);
   if (result.has_error()) {
     CRANE_ERROR("Failed to store next_task_db_id.");
     return false;
   }
-  if (!CommitVariableDbTransaction(var_txn_id)) return false;
+  if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
 
   s_next_task_id_ = task_id;
   s_next_task_db_id_ = task_db_id;
@@ -657,29 +661,21 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
   return true;
 }
 
-bool EmbeddedDbClient::PurgeTaskFromEnded(const std::vector<db_id_t>& db_ids) {
+bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
   // To ensure consistency in data recovery operations in the event of a failure
   // between two transactions, it is necessary to ensure that fixed data is
   // written first and erased later.
-  txn_id_t var_txn_id, fix_txn_id;
+  txn_id_t txn_id;
 
-  if (!BeginVariableDbTransaction(&var_txn_id)) return false;
+  if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
+  for (const auto& id : db_ids)
+    std::ignore = m_variable_db_->Delete(txn_id, GetVariableDbEntryName_(id));
+  if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
 
-  for (const auto& id : db_ids) {
-    std::ignore = m_embedded_db_variable_data_->Delete(
-        var_txn_id, GetDbQueueNodePersistedPartName_(id));
-  }
-
-  if (!CommitVariableDbTransaction(var_txn_id)) return false;
-
-  if (!BeginFixedDbTransaction(&fix_txn_id)) return false;
-
-  for (const auto& id : db_ids) {
-    std::ignore = m_embedded_db_fixed_data_->Delete(
-        fix_txn_id, GetDbQueueNodeTaskToCtldName_(id));
-  }
-
-  if (!CommitFixedDbTransaction(fix_txn_id)) return false;
+  if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
+  for (const auto& id : db_ids)
+    std::ignore = m_fixed_db_->Delete(txn_id, GetFixedDbEntryName_(id));
+  if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
 
   return true;
 }
