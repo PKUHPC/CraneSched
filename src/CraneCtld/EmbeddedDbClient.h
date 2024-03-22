@@ -226,11 +226,11 @@ class EmbeddedDbClient {
                                          &m_queue_mtx_};
   }
 
-  bool UpdateVariablePartOfTask(
+  bool UpdateRuntimeAttrOfTask(
       txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::PersistedPartOfTaskInCtld const& persisted_part) {
+      crane::grpc::RuntimeAttrOfTask const& runtime_attr) {
     return StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
-                            GetVariableDbEntryName_(db_id), &persisted_part)
+                            GetVariableDbEntryName_(db_id), &runtime_attr)
         .has_value();
   }
 
@@ -288,7 +288,7 @@ class EmbeddedDbClient {
 
     return FetchTypeFromDb_(m_variable_db_.get(), txn_id,
                             GetVariableDbEntryName_(db_id),
-                            task_in_db->mutable_persisted_part());
+                            task_in_db->mutable_runtime_attr());
   }
 
   template <std::integral T>
