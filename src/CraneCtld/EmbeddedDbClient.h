@@ -44,9 +44,6 @@ enum DbErrorCode {
 
 class IEmbeddedDb {
  public:
-  using KeyValueHandler =
-      std::function<bool(const std::string& key, const std::string& value)>;
-
   virtual ~IEmbeddedDb() = default;
 
   virtual result::result<void, DbErrorCode> Init(std::string const& path) = 0;
@@ -71,8 +68,12 @@ class IEmbeddedDb {
 
   virtual result::result<void, DbErrorCode> Abort(txn_id_t txn_id) = 0;
 
-  virtual result::result<void, DbErrorCode> LoadAllKVPairs(
-      KeyValueHandler handler) = 0;
+  using KvIterFunc =
+      std::function<bool(std::string&& key, std::vector<uint8_t>&& value)>;
+
+  /// @param func if the return value of func is true, continue to next KV.
+  ///             Otherwise, continue to next KV and delete current KV.
+  virtual result::result<void, DbErrorCode> IterateAllKv(KvIterFunc func) = 0;
 
   virtual std::string const& DbPath() = 0;
 };
@@ -103,8 +104,7 @@ class UnqliteDb : public IEmbeddedDb {
 
   result::result<void, DbErrorCode> Abort(txn_id_t txn_id) override;
 
-  result::result<void, DbErrorCode> LoadAllKVPairs(
-      KeyValueHandler handler) override;
+  result::result<void, DbErrorCode> IterateAllKv(KvIterFunc func) override;
 
   const std::string& DbPath() override { return m_db_path_; };
 
@@ -145,8 +145,7 @@ class BerkeleyDb : public IEmbeddedDb {
 
   result::result<void, DbErrorCode> Abort(txn_id_t txn_id) override;
 
-  result::result<void, DbErrorCode> LoadAllKVPairs(
-      KeyValueHandler handler) override;
+  result::result<void, DbErrorCode> IterateAllKv(KvIterFunc func) override;
 
   const std::string& DbPath() override { return m_db_path_; };
 
@@ -179,19 +178,19 @@ class EmbeddedDbClient {
   bool Init(std::string const& db_path);
 
   bool BeginVariableDbTransaction(txn_id_t* txn_id) {
-    return BeginTransaction(txn_id, m_embedded_db_variable_data_);
-  }
-
-  bool BeginFixedDbTransaction(txn_id_t* txn_id) {
-    return BeginTransaction(txn_id, m_embedded_db_fixed_data_);
+    return BeginDbTransaction_(m_variable_db_.get(), txn_id);
   }
 
   bool CommitVariableDbTransaction(txn_id_t txn_id) {
-    return CommitTransaction(txn_id, m_embedded_db_variable_data_);
+    return CommitDbTransaction_(m_variable_db_.get(), txn_id);
+  }
+
+  bool BeginFixedDbTransaction(txn_id_t* txn_id) {
+    return BeginDbTransaction_(m_fixed_db_.get(), txn_id);
   }
 
   bool CommitFixedDbTransaction(txn_id_t txn_id) {
-    return CommitTransaction(txn_id, m_embedded_db_fixed_data_);
+    return CommitDbTransaction_(m_fixed_db_.get(), txn_id);
   }
 
   //  bool AbortTransaction(txn_id_t txn_id,
@@ -207,7 +206,7 @@ class EmbeddedDbClient {
   bool AppendTasksToPendingAndAdvanceTaskIds(
       const std::vector<TaskInCtld*>& tasks);
 
-  bool PurgeTaskFromEnded(const std::vector<db_id_t>& db_ids);
+  bool PurgeEndedTasks(const std::vector<db_id_t>& db_ids);
 
   RecoveredMapMutexExclusivePtr GetRecoveredPendingQueuePtr() {
     m_queue_mtx_.Lock();
@@ -227,19 +226,18 @@ class EmbeddedDbClient {
                                          &m_queue_mtx_};
   }
 
-  bool UpdatePersistedPartOfTask(
+  bool UpdateVariablePartOfTask(
       txn_id_t txn_id, db_id_t db_id,
       crane::grpc::PersistedPartOfTaskInCtld const& persisted_part) {
-    return StoreTypeIntoDb_(txn_id, m_embedded_db_variable_data_,
-                            GetDbQueueNodePersistedPartName_(db_id),
-                            &persisted_part)
+    return StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
+                            GetVariableDbEntryName_(db_id), &persisted_part)
         .has_value();
   }
 
   bool UpdateTaskToCtld(txn_id_t txn_id, db_id_t db_id,
                         crane::grpc::TaskToCtld const& task_to_ctld) {
-    return StoreTypeIntoDb_(txn_id, m_embedded_db_fixed_data_,
-                            GetDbQueueNodeTaskToCtldName_(db_id), &task_to_ctld)
+    return StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
+                            GetFixedDbEntryName_(db_id), &task_to_ctld)
         .has_value();
   }
 
@@ -249,25 +247,26 @@ class EmbeddedDbClient {
   }
 
  private:
-  inline static std::string GetDbQueueNodeTaskToCtldName_(db_id_t db_id) {
+  inline static std::string GetFixedDbEntryName_(db_id_t db_id) {
     return fmt::format("{}T", db_id);
   }
 
-  inline static std::string GetDbQueueNodePersistedPartName_(db_id_t db_id) {
+  inline static std::string GetVariableDbEntryName_(db_id_t db_id) {
     return fmt::format("{}S", db_id);
   }
 
-  bool BeginTransaction(txn_id_t* txn_id, std::shared_ptr<IEmbeddedDb>& db) {
+  bool BeginDbTransaction_(IEmbeddedDb* db, txn_id_t* txn_id) {
     auto result = db->Begin();
     if (result.has_value()) {
       *txn_id = result.value();
       return true;
     }
+
     CRANE_ERROR("Failed to begin a transaction.");
     return false;
   }
 
-  bool CommitTransaction(txn_id_t txn_id, std::shared_ptr<IEmbeddedDb>& db) {
+  bool CommitDbTransaction_(IEmbeddedDb* db, txn_id_t txn_id) {
     if (txn_id <= 0) {
       CRANE_ERROR("Commit a transaction with id {} <= 0", txn_id);
       return false;
@@ -282,13 +281,13 @@ class EmbeddedDbClient {
 
   inline result::result<size_t, DbErrorCode> FetchTaskDataInDbAtomic_(
       txn_id_t txn_id, db_id_t db_id, TaskInEmbeddedDb* task_in_db) {
-    auto result = FetchTypeFromDb_(txn_id, m_embedded_db_fixed_data_,
-                                   GetDbQueueNodeTaskToCtldName_(db_id),
-                                   task_in_db->mutable_task_to_ctld());
+    auto result =
+        FetchTypeFromDb_(m_fixed_db_.get(), txn_id, GetFixedDbEntryName_(db_id),
+                         task_in_db->mutable_task_to_ctld());
     if (result.has_error()) return result;
 
-    return FetchTypeFromDb_(txn_id, m_embedded_db_variable_data_,
-                            GetDbQueueNodePersistedPartName_(db_id),
+    return FetchTypeFromDb_(m_variable_db_.get(), txn_id,
+                            GetVariableDbEntryName_(db_id),
                             task_in_db->mutable_persisted_part());
   }
 
@@ -297,7 +296,7 @@ class EmbeddedDbClient {
                                                       std::string const& key,
                                                       T* buf, T value) {
     result::result<size_t, DbErrorCode> fetch_result =
-        FetchTypeFromDb_(txn_id, m_embedded_db_variable_data_, key, buf);
+        FetchTypeFromDb_(m_variable_db_.get(), txn_id, key, buf);
     if (fetch_result.has_value()) return true;
 
     if (fetch_result.error() == DbErrorCode::kNotFound) {
@@ -306,7 +305,7 @@ class EmbeddedDbClient {
           value);
 
       result::result<void, DbErrorCode> store_result =
-          StoreTypeIntoDb_(txn_id, m_embedded_db_variable_data_, key, &value);
+          StoreTypeIntoDb_(m_variable_db_.get(), txn_id, key, &value);
       if (store_result.has_error()) {
         CRANE_ERROR("Failed to init key '{}' in db.", key);
         return false;
@@ -344,8 +343,8 @@ class EmbeddedDbClient {
   }
 
   result::result<size_t, DbErrorCode> FetchTypeFromDb_(
-      txn_id_t txn_id, const std::shared_ptr<IEmbeddedDb>& db,
-      std::string const& key, google::protobuf::MessageLite* value) {
+      IEmbeddedDb* db, txn_id_t txn_id, std::string const& key,
+      google::protobuf::MessageLite* value) {
     size_t n_bytes{0};
     std::string buf;
 
@@ -374,9 +373,10 @@ class EmbeddedDbClient {
   }
 
   template <std::integral T>
-  result::result<size_t, DbErrorCode> FetchTypeFromDb_(
-      txn_id_t txn_id, const std::shared_ptr<IEmbeddedDb>& db,
-      std::string const& key, T* buf) {
+  result::result<size_t, DbErrorCode> FetchTypeFromDb_(IEmbeddedDb* db,
+                                                       txn_id_t txn_id,
+                                                       std::string const& key,
+                                                       T* buf) {
     size_t n_bytes{sizeof(T)};
     auto result = db->Fetch(txn_id, key, buf, &n_bytes);
     if (result.has_error() && result.error() != DbErrorCode::kNotFound)
@@ -385,9 +385,10 @@ class EmbeddedDbClient {
   }
 
   template <typename T>
-  result::result<void, DbErrorCode> StoreTypeIntoDb_(
-      txn_id_t txn_id, const std::shared_ptr<IEmbeddedDb>& db,
-      std::string const& key, const T* value)
+  result::result<void, DbErrorCode> StoreTypeIntoDb_(IEmbeddedDb* db,
+                                                     txn_id_t txn_id,
+                                                     std::string const& key,
+                                                     const T* value)
     requires std::derived_from<T, google::protobuf::MessageLite>
   {
     using google::protobuf::io::CodedOutputStream;
@@ -404,9 +405,10 @@ class EmbeddedDbClient {
   }
 
   template <std::integral T>
-  result::result<void, DbErrorCode> StoreTypeIntoDb_(
-      txn_id_t txn_id, const std::shared_ptr<IEmbeddedDb>& db,
-      std::string const& key, const T* value) {
+  result::result<void, DbErrorCode> StoreTypeIntoDb_(IEmbeddedDb* db,
+                                                     txn_id_t txn_id,
+                                                     std::string const& key,
+                                                     const T* value) {
     return db->Store(txn_id, key, value, sizeof(T));
   }
 
@@ -424,8 +426,8 @@ class EmbeddedDbClient {
   std::unordered_map<db_id_t, TaskInEmbeddedDb> m_recovered_ended_queue_;
   absl::Mutex m_queue_mtx_;
 
-  std::shared_ptr<IEmbeddedDb> m_embedded_db_variable_data_,
-      m_embedded_db_fixed_data_;
+  std::unique_ptr<IEmbeddedDb> m_variable_db_;
+  std::unique_ptr<IEmbeddedDb> m_fixed_db_;
 };
 
 }  // namespace Ctld
