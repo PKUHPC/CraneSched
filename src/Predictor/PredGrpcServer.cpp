@@ -20,11 +20,8 @@ grpc::Status CranePredServiceImpl::ReportExecutionTime(
     grpc::ServerContext *context,
     const crane::grpc::TaskExecutionTimeAck *request,
     ::google::protobuf::Empty *reply) {
-  for (const auto &report : request->execution_times()) {
-    std::cout << "Task " << report.task_id()
-              << " execution time: " << report.execution_time().seconds()
-              << " seconds" << std::endl;
-  }
+  std::cout << "received task execution time of "
+            << request->execution_times().size() << " tasks" << std::endl;
 
   m_predictor_server_->RecordRunTime(request);
 

@@ -34,7 +34,7 @@ void TaskInPredictor::BuildFeature(
     Predictor::HistoryTaskAnalyser *history_task_analyser) {
   feature.clear();
   feature.push_back(static_cast<double>(uid));
-  feature.push_back(static_cast<double>(strtol(qos.c_str(), nullptr, 10)));
+  feature.push_back(static_cast<double>(qos));
   feature.push_back(
       static_cast<double>(resources.allocatable_resource.cpu_count));
   feature.push_back(static_cast<double>(node_num));
@@ -52,8 +52,6 @@ void TaskInPredictor::BuildFeature(
   feature.push_back(static_cast<double>(sub_month));
   feature.push_back(static_cast<double>(sub_day));
   feature.push_back(static_cast<double>(sub_hour));
-  feature.push_back(static_cast<double>(sub_minute));
-  feature.push_back(static_cast<double>(sub_second));
   feature.push_back(static_cast<double>(sub_day_of_year));
   feature.push_back(static_cast<double>(sub_day_of_month));
   feature.push_back(static_cast<double>(sub_day_of_week));
@@ -129,32 +127,10 @@ bool HistoryTaskAnalyser::CheckTaskExist(task_id_t task_id) {
 void LightGBMEstimator::Predict(
     const crane::grpc::TaskEstimationRequest *request,
     crane::grpc::TaskEstimationReply *reply) {
+  std::cout << "received " << request->tasks_size() << " tasks" << std::endl;
   for (const auto &task : request->tasks()) {
     std::unique_ptr<TaskInPredictor> task_info =
         std::make_unique<TaskInPredictor>();
-
-    std::cout << "task_id: " << task.task_id() << std::endl;
-    std::cout << "time_limit: " << task.time_limit() << std::endl;
-    std::cout << "submit_time: " << task.submit_time() << std::endl;
-    std::cout << "resources: "
-              << static_cast<double>(
-                     task.resources().allocatable_resource().cpu_core_limit())
-              << std::endl;
-    std::cout << "node_num: " << task.node_num() << std::endl;
-    std::cout << "ntasks_per_node: " << task.ntasks_per_node() << std::endl;
-    std::cout << "cpus_per_task: " << task.cpus_per_task() << std::endl;
-    std::cout << "uid: " << task.uid() << std::endl;
-    std::cout << "account: " << task.account() << std::endl;
-    std::cout << "partition: " << task.partition() << std::endl;
-    std::cout << "name: " << task.name() << std::endl;
-    std::cout << "qos: " << task.qos() << std::endl;
-    std::cout << "cwd: " << task.cwd() << std::endl;
-    std::cout << "cmd_line: " << task.cmd_line() << std::endl;
-    std::cout << "get_user_env: " << task.get_user_env() << std::endl;
-    std::cout << "sh_script: " << task.batch_meta().sh_script() << std::endl;
-    std::cout << "output_file_pattern: "
-              << task.batch_meta().output_file_pattern() << std::endl;
-
     task_info->SetFeildsByTaskToPredictor(task);
     task_info->BuildFeature(&history_task_analyser_);
 
@@ -169,12 +145,7 @@ void LightGBMEstimator::Predict(
     reply->mutable_estimations(i)->mutable_estimated_time()->set_seconds(
         result[i]);
   }
-
-  for (const auto &estimation : reply->estimations()) {
-    std::cout << "Task " << estimation.task_id()
-              << " estimated time: " << estimation.estimated_time().seconds()
-              << " seconds" << std::endl;
-  }
+  std::cout << "finish " << request->tasks_size() << " tasks" << std::endl;
 }
 
 void LightGBMEstimator::Record(
