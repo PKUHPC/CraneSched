@@ -537,13 +537,13 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
         if (key.back() != 'S') return true;  // skip the 'NDI' and 'NI'
 
         crane::grpc::TaskInEmbeddedDb task_proto;
-        task_proto.mutable_persisted_part()->ParseFromArray(value.data(),
-                                                            value.size());
+        task_proto.mutable_runtime_attr()->ParseFromArray(value.data(),
+                                                          value.size());
 
         task_db_id_t id = std::stol(key.substr(0, key.size() - 1));
-        status_map[id] = task_proto.persisted_part().status();
+        status_map[id] = task_proto.runtime_attr().status();
 
-        switch (task_proto.persisted_part().status()) {
+        switch (task_proto.runtime_attr().status()) {
           case crane::grpc::Running:
             m_recovered_running_queue_[id] = std::move(task_proto);
             break;
@@ -629,7 +629,7 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
 
     result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
                               GetVariableDbEntryName_(task->TaskDbId()),
-                              &task->PersistedPart());
+                              &task->RuntimeAttr());
     if (result.has_error()) {
       CRANE_ERROR(
           "Failed to store the variable data of task id: {} / task db id: "
