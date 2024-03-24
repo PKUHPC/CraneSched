@@ -1489,7 +1489,8 @@ void TaskScheduler::SetTaskEstimatedTime(
 void TaskScheduler::SendRealTimeToPredictor(
     const std::vector<TaskInCtld*>& tasks) {
   auto channel = grpc::CreateChannel(
-      "0.0.0.0:51890", grpc::InsecureChannelCredentials());  // host:port
+      g_config.PredListenAddr + ":" + g_config.PredListenPort,
+      grpc::InsecureChannelCredentials());
   auto stub = crane::grpc::CranePred::NewStub(channel);
   crane::grpc::TaskExecutionTimeAck request;
   for (const auto& task : tasks) {

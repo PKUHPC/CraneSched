@@ -34,4 +34,5 @@ target_include_directories(predictor PRIVATE ${lightgbm_SOURCE_DIR}/include)
 target_link_libraries(predictor PRIVATE
         crane_proto_lib
         Utility_PublicHeader
+        yaml-cpp
         _lightgbm)

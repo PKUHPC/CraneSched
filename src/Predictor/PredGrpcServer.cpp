@@ -5,6 +5,7 @@
 #include "PredGrpcServer.h"
 
 #include "LightGBMEstimator.h"
+#include "PredictorPublicDefs.h"
 
 namespace Predictor {
 
@@ -30,12 +31,13 @@ grpc::Status CranePredServiceImpl::ReportExecutionTime(
 PredServer::PredServer() {
   CRANE_INFO("Loading model...");
   m_time_estimator_ =
-      std::make_unique<LightGBMEstimator>("/home/nameless/Desktop/model.txt");
+      std::make_unique<LightGBMEstimator>(g_config.PredModelPath);
   CRANE_INFO("Model loaded");
 
   m_service_impl_ = std::make_unique<CranePredServiceImpl>(this);
 
-  std::string listen_addr_port("0.0.0.0:51890");
+  std::string listen_addr_port(g_config.PredListenAddr + ":" +
+                               g_config.PredListenPort);
 
   grpc::ServerBuilder builder;
   builder.AddListeningPort(listen_addr_port, grpc::InsecureServerCredentials());

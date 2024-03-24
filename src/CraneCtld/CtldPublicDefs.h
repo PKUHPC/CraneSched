@@ -122,6 +122,9 @@ struct Config {
   std::string DbPort;
   std::string DbRSName;
   std::string DbName;
+
+  std::string PredListenAddr;
+  std::string PredListenPort;
 };
 
 }  // namespace Ctld
@@ -374,9 +377,7 @@ struct TaskInCtld {
   absl::Time const& SubmitTime() const { return submit_time; }
   int64_t SubmitTimeInUnixSecond() const { return ToUnixSeconds(submit_time); }
 
-  void SetEstimatedTime(absl::Duration const& val) {
-    estimated_time = val;
-  }
+  void SetEstimatedTime(absl::Duration const& val) { estimated_time = val; }
   absl::Duration const& EstimatedTime() const { return estimated_time; }
 
   void SetStartTime(absl::Time const& val) {

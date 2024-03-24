@@ -55,6 +55,7 @@ void ParseConfig(int argc, char** argv) {
 
   std::string config_path = parsed_args["config"].as<std::string>();
   std::string db_config_path = parsed_args["db-config"].as<std::string>();
+  std::string pred_config_path = kDefaultPredConfigPath;
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
@@ -180,6 +181,10 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["DbConfigPath"]) {
         db_config_path = config["DbConfigPath"].as<std::string>();
+      }
+
+      if (config["PredConfigPath"]) {
+        pred_config_path = config["PredConfigPath"].as<std::string>();
       }
 
       if (config["CraneCtldForeground"]) {
@@ -451,6 +456,29 @@ void ParseConfig(int argc, char** argv) {
     }
   } else {
     CRANE_CRITICAL("Database config file '{}' not existed", db_config_path);
+    std::exit(1);
+  }
+
+  if (std::filesystem::exists(pred_config_path)) {
+    try {
+      YAML::Node config = YAML::LoadFile(pred_config_path);
+
+      if (config["PredListenAddr"])
+        g_config.PredListenAddr = config["PredListenAddr"].as<std::string>();
+      else
+        g_config.PredListenAddr = "0.0.0.0";
+
+      if (config["PredListenPort"])
+        g_config.PredListenPort = config["PredListenPort"].as<std::string>();
+      else
+        g_config.PredListenPort = "50051";
+    } catch (YAML::BadFile& e) {
+      CRANE_CRITICAL("Can't open predictor config file {}: {}",
+                     pred_config_path, e.what());
+      std::exit(1);
+    }
+  } else {
+    CRANE_CRITICAL("Predictor config file '{}' not existed", pred_config_path);
     std::exit(1);
   }
 

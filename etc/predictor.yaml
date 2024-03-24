@@ -1,0 +1,7 @@
+# Predictor Server
+PredDebugLevel: info
+PredListenAddr: 0.0.0.0
+PredListenPort: 50051
+
+# Model 
+PredModel: /path/to/model

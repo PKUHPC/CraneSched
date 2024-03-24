@@ -17,6 +17,7 @@ DomainSuffix: riley.local
 
 # Other configurations to be used
 DbConfigPath: /etc/crane/database.yaml
+PredConfigPath: /etc/crane/predictor.yaml
 
 # Data storage settings
 CraneBaseDir: /var/crane/

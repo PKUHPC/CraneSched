@@ -56,6 +56,7 @@ inline const char* kCranedDefaultPort = "10010";
 inline const char* kCforedDefaultPort = "10012";
 
 inline const char* kDefaultConfigPath = "/etc/crane/config.yaml";
+inline const char* kDefaultPredConfigPath = "/etc/crane/predictor.yaml";
 inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
 
 inline const char* kUnlimitedQosName = "UNLIMITED";
