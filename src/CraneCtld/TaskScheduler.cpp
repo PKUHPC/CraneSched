@@ -1207,7 +1207,6 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   //  }
 
   if (actual_size == 0) return;
-  SetTaskEstimatedTime(submit_tasks);
   task_ptr_vec.reserve(actual_size);
 
   // The order of element inside the bulk is reverse.
