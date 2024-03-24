@@ -118,7 +118,7 @@ void HistoryTaskAnalyser::RemoveTaskInfo(task_id_t task_id) {
 
 bool HistoryTaskAnalyser::CheckTaskExist(task_id_t task_id) {
   if (task_info_.find(task_id) == task_info_.end()) {
-    std::cout << "Task " << task_id << " not exist" << std::endl;
+    CRANE_INFO("Task {} not exist", task_id);
     return false;
   }
   return true;
@@ -127,7 +127,7 @@ bool HistoryTaskAnalyser::CheckTaskExist(task_id_t task_id) {
 void LightGBMEstimator::Predict(
     const crane::grpc::TaskEstimationRequest *request,
     crane::grpc::TaskEstimationReply *reply) {
-  std::cout << "received " << request->tasks_size() << " tasks" << std::endl;
+  CRANE_INFO("received {} tasks", request->tasks_size());
   for (const auto &task : request->tasks()) {
     std::unique_ptr<TaskInPredictor> task_info =
         std::make_unique<TaskInPredictor>();
@@ -145,7 +145,7 @@ void LightGBMEstimator::Predict(
     reply->mutable_estimations(i)->mutable_estimated_time()->set_seconds(
         result[i]);
   }
-  std::cout << "finish " << request->tasks_size() << " tasks" << std::endl;
+  CRANE_INFO("finish {} tasks", request->tasks_size());
 }
 
 void LightGBMEstimator::Record(

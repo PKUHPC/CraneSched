@@ -11,6 +11,7 @@ namespace Predictor {
 
 class ITimeEstimator {
  public:
+  virtual ~ITimeEstimator() = default;
   virtual void Predict(const crane::grpc::TaskEstimationRequest *request,
                        crane::grpc::TaskEstimationReply *reply) = 0;
 

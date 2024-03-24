@@ -128,16 +128,16 @@ class LightGBMModel {
   LightGBMModel(const std::string &model_path) {
     if (LGBM_BoosterCreateFromModelfile(model_path.c_str(), &num_iterations,
                                         &booster) != 0) {
-      std::cerr << "Could not load model." << std::endl;
+      CRANE_ERROR("Could not load model.");
       throw std::runtime_error("Could not load model.");
     }
-    std::cerr << "num_iterations: " << num_iterations << std::endl;
+    CRANE_INFO("num_iterations: ", num_iterations);
     LGBM_RegisterLogCallback(LogCallback);
   }
 
   ~LightGBMModel() { LGBM_BoosterFree(booster); }
 
-  static void LogCallback(const char *msg) { std::cerr << msg << std::endl; }
+  static void LogCallback(const char *msg) { CRANE_INFO(msg); }
 
   void AddRow(const TaskFeature &row) {
     if (!matrix.empty() && matrix[0].size() != row.size()) {
@@ -166,7 +166,7 @@ class LightGBMModel {
         C_API_PREDICT_NORMAL, 0, num_iterations, "", &out_len,
         predictions.data());
     if (err_code != 0) {
-      std::cerr << "Prediction failed, error code: " << err_code << std::endl;
+      CRANE_ERROR("Prediction failed, error code: {} ", err_code);
       throw std::runtime_error("Prediction failed.");
     }
 
