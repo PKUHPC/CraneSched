@@ -29,6 +29,12 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.PredDebugLevel = "info";
 
+      // Load log file
+      if (pred_config["PredLogFile"])
+        g_config.PredLogFile = pred_config["PredLogFile"].as<std::string>();
+      else
+        g_config.PredLogFile = Predictor::kPredDefaultLogPath;
+
       spdlog::level::level_enum log_level;
       if (g_config.PredDebugLevel == "trace") {
         log_level = spdlog::level::trace;
@@ -45,7 +51,7 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
-      InitLogger(log_level, g_config.PredDebugLevel);
+      InitLogger(log_level, g_config.PredLogFile);
 
       // Load gRPC listen address and port
       if (pred_config["PredListenAddr"])

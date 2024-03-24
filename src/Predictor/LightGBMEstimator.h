@@ -132,7 +132,7 @@ class LightGBMModel {
       CRANE_ERROR("Could not load model.");
       throw std::runtime_error("Could not load model.");
     }
-    CRANE_INFO("num_iterations: ", num_iterations);
+    CRANE_INFO("num_iterations: {}", num_iterations);
     LGBM_RegisterLogCallback(LogCallback);
   }
 

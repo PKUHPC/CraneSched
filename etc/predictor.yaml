@@ -1,7 +1,10 @@
-# Predictor Server
-PredDebugLevel: info
+# Predictor Server 
 PredListenAddr: 0.0.0.0
 PredListenPort: 50051
 
+# Logging
+PredDebugLevel: info
+PredLogFile: /tmp/cranectld/predictor.log
+
 # Model 
-PredModel: /path/to/model
+PredModelPath: /path/to/model
