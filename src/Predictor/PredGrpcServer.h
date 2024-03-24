@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include "PredictorPublicDefs.h"
 #include "TimeEstimator.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"

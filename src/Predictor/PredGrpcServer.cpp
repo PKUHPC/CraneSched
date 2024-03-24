@@ -20,19 +20,18 @@ grpc::Status CranePredServiceImpl::ReportExecutionTime(
     grpc::ServerContext *context,
     const crane::grpc::TaskExecutionTimeAck *request,
     ::google::protobuf::Empty *reply) {
-  std::cout << "received task execution time of "
-            << request->execution_times().size() << " tasks" << std::endl;
-
+  CRANE_INFO("received task execution time of {} tasks",
+             request->execution_times().size());
   m_predictor_server_->RecordRunTime(request);
 
   return grpc::Status::OK;
 }
 
 PredServer::PredServer() {
-  std::cerr << "Loading model..." << std::endl;
+  CRANE_INFO("Loading model...");
   m_time_estimator_ =
       std::make_unique<LightGBMEstimator>("/home/nameless/Desktop/model.txt");
-  std::cerr << "Model loaded" << std::endl;
+  CRANE_INFO("Model loaded");
 
   m_service_impl_ = std::make_unique<CranePredServiceImpl>(this);
 
@@ -44,7 +43,7 @@ PredServer::PredServer() {
 
   m_server_ = builder.BuildAndStart();
 
-  std::cout << "Server listening on " << listen_addr_port << std::endl;
+  CRANE_INFO("Server listening on {}", listen_addr_port);
 }
 
 void PredServer::EstimateRunTime(

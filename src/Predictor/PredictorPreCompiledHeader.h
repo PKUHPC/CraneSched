@@ -43,6 +43,7 @@
 #include <grpc++/completion_queue.h>
 #include <grpc++/grpc++.h>
 
+#include "crane/Logger.h"
 #include "crane/PublicHeader.h"
 
 #endif  // CRANE_PREDICTORPRECOMPILEDHEADER_H
