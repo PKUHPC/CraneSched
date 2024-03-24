@@ -8,9 +8,15 @@
 #include "PredictorPreCompiledHeader.h"
 
 namespace Predictor {
+
+inline const char* kPredDefaultLogPath = "/tmp/cranectld/predictor.log";
+
 struct Config {
   std::string PredConfigPath;
+
   std::string PredDebugLevel;
+  std::string PredLogFile;
+
   std::string PredListenAddr;
   std::string PredListenPort;
   std::string PredModelPath;
