@@ -6,6 +6,7 @@
 
 #include <LightGBM/c_api.h>
 
+#include "PredictorPublicDefs.h"
 #include "TimeEstimator.h"
 #include "protos/Crane.pb.h"
 

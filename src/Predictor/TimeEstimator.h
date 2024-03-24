@@ -4,7 +4,6 @@
 
 #pragma once
 
-#include "PredictorPublicDefs.h"
 #include "protos/Crane.grpc.pb.h"
 
 namespace Predictor {

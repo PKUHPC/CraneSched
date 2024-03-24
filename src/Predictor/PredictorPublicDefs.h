@@ -7,7 +7,17 @@
 
 #include "PredictorPreCompiledHeader.h"
 
-namespace Predictor{
-}
+namespace Predictor {
+struct Config {
+  std::string PredConfigPath;
+  std::string PredDebugLevel;
+  std::string PredListenAddr;
+  std::string PredListenPort;
+  std::string PredModelPath;
+};
+
+}  // namespace Predictor
+
+inline Predictor::Config g_config;
 
 #endif  // CRANE_PREDICTORPUBLICDEFS_H
