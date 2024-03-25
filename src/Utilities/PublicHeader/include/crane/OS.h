@@ -30,6 +30,8 @@ namespace util {
 
 namespace os {
 
+bool DeleteFile(std::string const& p);
+
 bool CreateFolders(std::string const& p);
 
 bool CreateFoldersForFile(std::string const& p);

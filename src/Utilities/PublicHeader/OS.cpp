@@ -20,15 +20,24 @@ namespace util {
 
 namespace os {
 
-bool CreateFolders(std::string const& p) {
-  try {
-    if (!std::filesystem::exists(p)) std::filesystem::create_directories(p);
-  } catch (const std::exception& e) {
-    CRANE_ERROR("Failed to create folder {}: {}", p, e.what());
-    return false;
-  }
+bool DeleteFile(std::string const& p) {
+  std::error_code ec;
+  bool ok = std::filesystem::remove(p, ec);
 
-  return true;
+  if (!ok) CRANE_ERROR("Failed to remove file {}: {}", p, ec.message());
+
+  return ok;
+}
+
+bool CreateFolders(std::string const& p) {
+  if (std::filesystem::exists(p)) return true;
+
+  std::error_code ec;
+  bool ok = std::filesystem::create_directories(p, ec);
+
+  if (!ok) CRANE_ERROR("Failed to create folder {}: {}", p, ec.message());
+
+  return ok;
 }
 
 bool CreateFoldersForFile(std::string const& p) {

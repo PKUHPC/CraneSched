@@ -817,6 +817,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
                 task_id));
         return;
       }
+
       // If this is a batch task, run it now.
       if (instance->task.type() == crane::grpc::Batch) {
         instance->batch_meta.parsed_sh_script_path =
@@ -845,7 +846,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
         /* Perform file name substitutions
          * %j - Job ID
-         * %u - User name
+         * %u - Username
          * %x - Job name
          */
         if (instance->task.batch_meta().output_file_pattern().empty()) {
@@ -923,6 +924,14 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
     auto iter = this_->m_task_map_.find(status_change.task_id);
     CRANE_ASSERT_MSG(iter != this_->m_task_map_.end(),
                      "Task should be found here.");
+
+    // Clean task scripts.
+    if (iter->second->task.type() == crane::grpc::Batch) {
+      g_thread_pool->detach_task(
+          [p = iter->second->batch_meta.parsed_sh_script_path]() {
+            util::os::DeleteFile(p);
+          });
+    }
 
     // Free the TaskInstance structure
     this_->m_task_map_.erase(status_change.task_id);
