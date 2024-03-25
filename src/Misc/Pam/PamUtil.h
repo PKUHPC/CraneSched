@@ -52,4 +52,5 @@ struct PamConfig {
 
 inline PamConfig g_pam_config;
 
-void LoadCraneConfig(int argc, const char **argv, bool *initialized);
+void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
+                     bool *initialized);

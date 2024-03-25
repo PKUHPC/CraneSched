@@ -34,7 +34,7 @@ extern "C" {
 
 [[maybe_unused]] int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
                                       const char **argv) {
-  std::call_once(g_init_flag, LoadCraneConfig, argc, argv,
+  std::call_once(g_init_flag, LoadCraneConfig, pamh, argc, argv,
                  &g_module_initialized);
 
   int rc;

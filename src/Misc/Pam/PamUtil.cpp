@@ -32,9 +32,8 @@
 
 #include "protos/Crane.grpc.pb.h"
 
-void LoadCraneConfig(int argc, const char **argv, bool *initialized) {
-  if (argc == 0) return;
-
+void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
+                     bool *initialized) {
   g_pam_config.CraneConfigFilePath = kDefaultConfigPath;
 
   for (int i = 0; i < argc; i++) {
@@ -63,6 +62,9 @@ void LoadCraneConfig(int argc, const char **argv, bool *initialized) {
 
     *initialized = true;
   } catch (YAML::BadFile &e) {
+    pam_syslog(pamh, LOG_ERR,
+               "[Crane] Pam module failed to read configuration: %s",
+               e.msg.c_str());
     return;
   }
 }
