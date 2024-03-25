@@ -22,7 +22,9 @@
 #define PAM_STR_FALSE ("F")
 #define PAM_ITEM_AUTH_RESULT ("AUTH_RES")
 #define PAM_ITEM_TASK_ID ("TASK_ID")
-#define PAM_ITEM_CG_PATH ("CG_PATH")
+
+static std::once_flag g_init_flag;
+static bool g_module_initialized{false};
 
 void clean_up_cb(pam_handle_t *pamh, void *data, int error_status) {
   free(data);
@@ -32,6 +34,9 @@ extern "C" {
 
 [[maybe_unused]] int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
                                       const char **argv) {
+  std::call_once(g_init_flag, LoadCraneConfig, pamh, argc, argv,
+                 &g_module_initialized);
+
   int rc;
   bool ok;
   uid_t uid;
@@ -47,6 +52,13 @@ extern "C" {
   if (username == "root") {
     pam_syslog(pamh, LOG_ERR, "[Crane] Allow root to log in");
     return PAM_SUCCESS;
+  }
+
+  if (!g_module_initialized) {
+    pam_syslog(pamh, LOG_ERR,
+               "[Crane] Pam module failed to read configuration. "
+               "Only root is allowed.");
+    return PAM_SESSION_ERR;
   }
 
   ok = PamGetRemoteUid(pamh, username.c_str(), &uid);
@@ -117,6 +129,13 @@ extern "C" {
         pamh, LOG_ERR,
         "[Crane] Allow root to open a session without resource restriction");
     return PAM_SUCCESS;
+  }
+
+  if (!g_module_initialized) {
+    pam_syslog(pamh, LOG_ERR,
+               "[Crane] Pam module failed to read configuration. "
+               "Only root is allowed.");
+    return PAM_SESSION_ERR;
   }
 
   pam_get_data(pamh, PAM_ITEM_AUTH_RESULT, (const void **)&auth_result);

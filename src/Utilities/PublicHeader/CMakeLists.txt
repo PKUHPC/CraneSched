@@ -1,8 +1,8 @@
 add_library(Utility_PublicHeader
-        String.cpp Network.cpp FdFunctions.cpp PublicHeader.cpp Logger.cpp
+        String.cpp Network.cpp OS.cpp PublicHeader.cpp Logger.cpp
         include/crane/String.h
         include/crane/Network.h
-        include/crane/FdFunctions.h
+        include/crane/OS.h
         include/crane/PublicHeader.h
         include/crane/Lock.h
         include/crane/Pointer.h
@@ -13,7 +13,8 @@ target_include_directories(Utility_PublicHeader PUBLIC include)
 target_link_libraries(Utility_PublicHeader PUBLIC
         spdlog::spdlog
         crane_proto_lib
-        fpm)
+        fpm
+)
 
 # This trimmed version is used for PAM module
 # since -fPIC flag should be enabled for a dynamic library

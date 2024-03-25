@@ -11,9 +11,10 @@ target_include_directories(pam_crane PUBLIC ${PAM_INCLUDE_DIR})
 
 target_link_libraries(pam_crane PUBLIC
         ${PAM_LIBRARIES}
+        Utility_PublicHeaderNoLogger
         crane_proto_lib
         fmt::fmt
-        Utility_PublicHeaderNoLogger
+        yaml-cpp
 )
 
 # Linker flag for c++ 17 filesystem library

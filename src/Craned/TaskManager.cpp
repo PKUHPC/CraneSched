@@ -22,7 +22,7 @@
 #include <sys/stat.h>
 
 #include "ResourceAllocators.h"
-#include "crane/FdFunctions.h"
+#include "crane/OS.h"
 #include "protos/CraneSubprocess.pb.h"
 
 namespace Craned {
@@ -619,7 +619,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // If these file descriptors are not closed, a program like mpirun may
     // keep waiting for the input from stdin or other fds and will never end.
     close(0);  // close stdin
-    util::CloseFdFrom(3);
+    util::os::CloseFdFrom(3);
 
     std::vector<std::pair<std::string, std::string>> env_vec;
 
@@ -817,10 +817,11 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
                 task_id));
         return;
       }
+
       // If this is a batch task, run it now.
       if (instance->task.type() == crane::grpc::Batch) {
         instance->batch_meta.parsed_sh_script_path =
-            fmt::format("{}/Crane-{}.sh", kDefaultCranedScriptDir, task_id);
+            fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);
         auto& sh_path = instance->batch_meta.parsed_sh_script_path;
 
         FILE* fptr = fopen(sh_path.c_str(), "w");
@@ -845,7 +846,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
         /* Perform file name substitutions
          * %j - Job ID
-         * %u - User name
+         * %u - Username
          * %x - Job name
          */
         if (instance->task.batch_meta().output_file_pattern().empty()) {
@@ -923,6 +924,14 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
     auto iter = this_->m_task_map_.find(status_change.task_id);
     CRANE_ASSERT_MSG(iter != this_->m_task_map_.end(),
                      "Task should be found here.");
+
+    // Clean task scripts.
+    if (iter->second->task.type() == crane::grpc::Batch) {
+      g_thread_pool->detach_task(
+          [p = iter->second->batch_meta.parsed_sh_script_path]() {
+            util::os::DeleteFile(p);
+          });
+    }
 
     // Free the TaskInstance structure
     this_->m_task_map_.erase(status_change.task_id);

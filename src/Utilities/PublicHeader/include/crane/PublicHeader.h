@@ -54,26 +54,25 @@ enum class CraneErr : uint16_t {
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kCforedDefaultPort = "10012";
+
 inline const char* kDefaultConfigPath = "/etc/crane/config.yaml";
+inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
+
 inline const char* kUnlimitedQosName = "UNLIMITED";
 inline const char* kHostFilePath = "/etc/hosts";
 
 inline constexpr size_t kDefaultQueryTaskNumLimit = 100;
 inline constexpr uint64_t kPriorityDefaultMaxAge = 7 * 24 * 3600;  // 7 days
 
-#define DEFAULT_CRANE_TEMP_DIR "/tmp/crane"
+inline const char* kDefaultCraneBaseDir = "/var/crane/";
+inline const char* kDefaultCraneCtldMutexFile = "cranectld/cranectld.lock";
+inline const char* kCraneCtldDefaultLogPath = "cranectld/cranectld.log";
+inline const char* kDefaultDbPath = "cranectld/embedded.db";
 
-inline const char* kDefaultCraneTempDir = DEFAULT_CRANE_TEMP_DIR;
-inline const char* kDefaultCranedScriptDir =
-    DEFAULT_CRANE_TEMP_DIR "/craned/scripts";
-inline const char* kDefaultCranedUnixSockPath =
-    DEFAULT_CRANE_TEMP_DIR "/craned.sock";
-inline const char* kDefaultCraneCtldMutexFile =
-    DEFAULT_CRANE_TEMP_DIR "/cranectld.lock";
-inline const char* kDefaultCranedMutexFile =
-    DEFAULT_CRANE_TEMP_DIR "/craned.lock";
-
-#undef DEFAULT_CRANE_TEMP_DIR
+inline const char* kDefaultCranedScriptDir = "craned/scripts";
+inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
+inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
+inline const char* kCranedDefaultLogPath = "craned/craned.log";
 
 constexpr int64_t kMaxTimeLimitSecond =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
