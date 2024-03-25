@@ -54,6 +54,13 @@ extern "C" {
     return PAM_SUCCESS;
   }
 
+  if (!g_module_initialized) {
+    pam_syslog(pamh, LOG_ERR,
+               "[Crane] Pam module failed to read configuration. "
+               "Only root is allowed.");
+    return PAM_SESSION_ERR;
+  }
+
   ok = PamGetRemoteUid(pamh, username.c_str(), &uid);
   if (!ok) {
     return PAM_USER_UNKNOWN;
@@ -122,6 +129,13 @@ extern "C" {
         pamh, LOG_ERR,
         "[Crane] Allow root to open a session without resource restriction");
     return PAM_SUCCESS;
+  }
+
+  if (!g_module_initialized) {
+    pam_syslog(pamh, LOG_ERR,
+               "[Crane] Pam module failed to read configuration. "
+               "Only root is allowed.");
+    return PAM_SESSION_ERR;
   }
 
   pam_get_data(pamh, PAM_ITEM_AUTH_RESULT, (const void **)&auth_result);
