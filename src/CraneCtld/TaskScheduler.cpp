@@ -2236,8 +2236,8 @@ void TaskScheduler::TransferTasksToMongodb_(
   txn_id_t txn_id;
   g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
   for (TaskInCtld* task : tasks) {
-    if (g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, task->TaskDbId(),
-                                                      task->RuntimeAttr()))
+    if (!g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, task->TaskDbId(),
+                                                       task->RuntimeAttr()))
       CRANE_ERROR("Failed to call UpdateRuntimeAttrOfTask() for task #{}",
                   task->TaskId());
   }
