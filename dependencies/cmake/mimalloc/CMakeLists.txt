@@ -14,7 +14,3 @@ FetchContent_Declare(mimalloc
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(mimalloc)
-
-find_package(mimalloc REQUIRED CONFIG)
-
-
