@@ -22,7 +22,7 @@
 #include <sys/stat.h>
 
 #include "ResourceAllocators.h"
-#include "crane/FdFunctions.h"
+#include "crane/OS.h"
 #include "protos/CraneSubprocess.pb.h"
 
 namespace Craned {
@@ -619,7 +619,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // If these file descriptors are not closed, a program like mpirun may
     // keep waiting for the input from stdin or other fds and will never end.
     close(0);  // close stdin
-    util::CloseFdFrom(3);
+    util::os::CloseFdFrom(3);
 
     std::vector<std::pair<std::string, std::string>> env_vec;
 
@@ -820,7 +820,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       // If this is a batch task, run it now.
       if (instance->task.type() == crane::grpc::Batch) {
         instance->batch_meta.parsed_sh_script_path =
-            fmt::format("{}/Crane-{}.sh", kDefaultCranedScriptDir, task_id);
+            fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);
         auto& sh_path = instance->batch_meta.parsed_sh_script_path;
 
         FILE* fptr = fopen(sh_path.c_str(), "w");

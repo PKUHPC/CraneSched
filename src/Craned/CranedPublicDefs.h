@@ -24,8 +24,6 @@
 
 namespace Craned {
 
-inline const char* kCranedDefaultLogPath = "/tmp/craned/craned.log";
-
 struct TaskStatusChange {
   task_id_t task_id{};
   crane::grpc::TaskStatus new_status{};
@@ -71,7 +69,12 @@ struct Config {
   std::string ControlMachine;
   std::string CraneCtldListenPort;
   std::string CranedDebugLevel;
+
+  std::string CraneBaseDir;
   std::string CranedLogFile;
+  std::string CranedMutexFilePath;
+  std::string CranedScriptDir;
+  std::string CranedUnixSockPath;
 
   bool CranedForeground{};
 

@@ -25,10 +25,6 @@ using moodycamel::ConcurrentQueue;
 
 using task_db_id_t = int64_t;
 
-inline const char* kCraneCtldDefaultLogPath = "/tmp/cranectld/cranectld.log";
-inline const char* kDefaultDbPath = "/tmp/cranectld/embedded.db";
-inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
-
 // *****************************************************
 // TaskScheduler Constants
 
@@ -109,6 +105,9 @@ struct Config {
 
   std::string CraneEmbeddedDbBackend;
   std::string CraneCtldDbPath;
+
+  std::string CraneBaseDir;
+  std::string CraneCtldMutexFilePath;
 
   bool CraneCtldForeground{};
 

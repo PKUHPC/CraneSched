@@ -22,7 +22,9 @@
 #define PAM_STR_FALSE ("F")
 #define PAM_ITEM_AUTH_RESULT ("AUTH_RES")
 #define PAM_ITEM_TASK_ID ("TASK_ID")
-#define PAM_ITEM_CG_PATH ("CG_PATH")
+
+static std::once_flag g_init_flag;
+static bool g_module_initialized{false};
 
 void clean_up_cb(pam_handle_t *pamh, void *data, int error_status) {
   free(data);
@@ -32,6 +34,9 @@ extern "C" {
 
 [[maybe_unused]] int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
                                       const char **argv) {
+  std::call_once(g_init_flag, LoadCraneConfig, argc, argv,
+                 &g_module_initialized);
+
   int rc;
   bool ok;
   uid_t uid;

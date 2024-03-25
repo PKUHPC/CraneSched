@@ -26,8 +26,8 @@
 
 #include "CranedServer.h"
 #include "CtldClient.h"
-#include "crane/FdFunctions.h"
 #include "crane/Network.h"
+#include "crane/OS.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
 
@@ -47,7 +47,7 @@ void ParseConfig(int argc, char** argv) {
       ("s,server-address", "CraneCtld address format: <IP>:<port>",
        cxxopts::value<std::string>())
       ("L,log-file", "File path of craned log file",
-       cxxopts::value<std::string>()->default_value(Craned::kCranedDefaultLogPath))
+       cxxopts::value<std::string>()->default_value(kCranedDefaultLogPath))
       ("D,debug-level", "<trace|debug|info|warn|error>", cxxopts::value<std::string>()->default_value("info"))
       ("h,help", "Show help")
       ;
@@ -71,16 +71,21 @@ void ParseConfig(int argc, char** argv) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
 
+      if (config["CraneBaseDir"])
+        g_config.CraneBaseDir = config["CraneBaseDir"].as<std::string>();
+      else
+        g_config.CraneBaseDir = kDefaultCraneBaseDir;
+
+      if (config["CranedLogFile"])
+        g_config.CranedLogFile = config["CranedLogFile"].as<std::string>();
+      else
+        g_config.CranedLogFile = g_config.CraneBaseDir + kCranedDefaultLogPath;
+
       if (config["CranedDebugLevel"])
         g_config.CranedDebugLevel =
             config["CranedDebugLevel"].as<std::string>();
       else
         g_config.CranedDebugLevel = "info";
-
-      if (config["CranedLogFile"])
-        g_config.CranedLogFile = config["CranedLogFile"].as<std::string>();
-      else
-        g_config.CranedLogFile = Craned::kCranedDefaultLogPath;
 
       // spdlog should be initialized as soon as possible
       spdlog::level::level_enum log_level;
@@ -101,6 +106,26 @@ void ParseConfig(int argc, char** argv) {
 
       InitLogger(log_level, g_config.CranedLogFile);
 
+      if (config["CranedUnixSockPath"])
+        g_config.CranedUnixSockPath =
+            config["CranedUnixSockPath"].as<std::string>();
+      else
+        g_config.CranedUnixSockPath =
+            g_config.CraneBaseDir + kDefaultCranedUnixSockPath;
+
+      if (config["CranedScriptDir"])
+        g_config.CranedScriptDir = config["CranedScriptDir"].as<std::string>();
+      else
+        g_config.CranedScriptDir =
+            g_config.CraneBaseDir + kDefaultCranedScriptDir;
+
+      if (config["CranedMutexFilePath"])
+        g_config.CranedMutexFilePath =
+            config["CranedMutexFilePath"].as<std::string>();
+      else
+        g_config.CranedMutexFilePath =
+            g_config.CraneBaseDir + kDefaultCranedMutexFile;
+
       // Parsing node hostnames needs network functions, initialize it first.
       crane::InitializeNetworkFunctions();
 
@@ -113,7 +138,7 @@ void ParseConfig(int argc, char** argv) {
       g_config.ListenConf.CranedListenPort = kCranedDefaultPort;
 
       g_config.ListenConf.UnixSocketListenAddr =
-          fmt::format("unix://{}", kDefaultCranedUnixSockPath);
+          fmt::format("unix://{}", g_config.CranedUnixSockPath);
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
@@ -383,18 +408,12 @@ void ParseConfig(int argc, char** argv) {
 }
 
 void CreateRequiredDirectories() {
-  // Create log and sh directory recursively.
-  try {
-    std::filesystem::create_directories(kDefaultCraneTempDir);
-    std::filesystem::create_directories(kDefaultCranedScriptDir);
+  bool ok;
+  ok = util::os::CreateFolders(g_config.CranedScriptDir);
+  if (!ok) std::exit(1);
 
-    std::filesystem::path log_path{g_config.CranedLogFile};
-    auto log_dir = log_path.parent_path();
-    if (!log_dir.empty()) std::filesystem::create_directories(log_dir);
-  } catch (const std::exception& e) {
-    CRANE_ERROR("Invalid CranedLogFile path {}: {}", g_config.CranedLogFile,
-                e.what());
-  }
+  ok = util::os::CreateFoldersForFile(g_config.CranedLogFile);
+  if (!ok) std::exit(1);
 }
 
 void GlobalVariableInit() {
@@ -431,7 +450,7 @@ void GlobalVariableInit() {
 
 void StartServer() {
   constexpr uint64_t file_max = 640000;
-  if (!util::SetMaxFileDescriptorNumber(file_max)) {
+  if (!util::os::SetMaxFileDescriptorNumber(file_max)) {
     CRANE_ERROR("Unable to set file descriptor limits to {}", file_max);
     std::exit(1);
   }
@@ -439,7 +458,7 @@ void StartServer() {
   GlobalVariableInit();
 
   // Set FD_CLOEXEC on stdin, stdout, stderr
-  util::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
+  util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
 
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -506,25 +525,19 @@ void StartDaemon() {
 }
 
 void CheckSingleton() {
-  std::filesystem::path lock_path{kDefaultCranedMutexFile};
-  try {
-    auto lock_dir = lock_path.parent_path();
-    if (!std::filesystem::exists(lock_dir))
-      std::filesystem::create_directories(lock_dir);
-  } catch (const std::exception& e) {
-    CRANE_ERROR("Invalid CranedMutexFile path {}: {}", kDefaultCranedMutexFile,
-                e.what());
-  }
+  bool ok = util::os::CreateFoldersForFile(g_config.CranedMutexFilePath);
+  if (!ok) std::exit(1);
 
-  int pid_file = open(lock_path.c_str(), O_CREAT | O_RDWR, 0666);
+  int pid_file =
+      open(g_config.CranedMutexFilePath.c_str(), O_CREAT | O_RDWR, 0666);
   int rc = flock(pid_file, LOCK_EX | LOCK_NB);
   if (rc) {
     if (EWOULDBLOCK == errno) {
       CRANE_CRITICAL("There is another Craned instance running. Exiting...");
       std::exit(1);
     } else {
-      CRANE_CRITICAL("Failed to lock {}: {}. Exiting...", lock_path.string(),
-                     strerror(errno));
+      CRANE_CRITICAL("Failed to lock {}: {}. Exiting...",
+                     g_config.CranedMutexFilePath, strerror(errno));
       std::exit(1);
     }
   }
@@ -539,11 +552,10 @@ void InstallStackTraceHooks() {
 }
 
 int main(int argc, char** argv) {
-  CheckSingleton();
-
   // If config parsing fails, this function will not return and will call
   // std::exit(1) instead.
   ParseConfig(argc, argv);
+  CheckSingleton();
   InstallStackTraceHooks();
 
   if (g_config.CranedForeground)

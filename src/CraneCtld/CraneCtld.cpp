@@ -31,8 +31,8 @@
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
-#include "crane/FdFunctions.h"
 #include "crane/Network.h"
+#include "crane/OS.h"
 
 void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("cranectld");
@@ -41,6 +41,8 @@ void ParseConfig(int argc, char** argv) {
   options.add_options()
       ("C,config", "Path to configuration file",
       cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
+      ("D,db-config", "Path to DB configuration file",
+       cxxopts::value<std::string>()->default_value(kDefaultDbConfigPath))
       ("l,listen", "listening address",
       cxxopts::value<std::string>()->default_value("0.0.0.0"))
       ("p,port", "listening port",
@@ -51,22 +53,28 @@ void ParseConfig(int argc, char** argv) {
   auto parsed_args = options.parse(argc, argv);
 
   std::string config_path = parsed_args["config"].as<std::string>();
-  std::string db_config_path = Ctld::kDefaultDbConfigPath;
+  std::string db_config_path = parsed_args["db-config"].as<std::string>();
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
+
+      if (config["CraneBaseDir"])
+        g_config.CraneBaseDir = config["CranedBaseDir"].as<std::string>();
+      else
+        g_config.CraneBaseDir = kDefaultCraneBaseDir;
+
+      if (config["CraneCtldLogFile"])
+        g_config.CraneCtldLogFile =
+            config["CraneCtldLogFile"].as<std::string>();
+      else
+        g_config.CraneCtldLogFile =
+            g_config.CraneBaseDir + kCraneCtldDefaultLogPath;
 
       if (config["CraneCtldDebugLevel"])
         g_config.CraneCtldDebugLevel =
             config["CraneCtldDebugLevel"].as<std::string>();
       else
         g_config.CraneCtldDebugLevel = "info";
-
-      if (config["CraneCtldLogFile"])
-        g_config.CraneCtldLogFile =
-            config["CraneCtldLogFile"].as<std::string>();
-      else
-        g_config.CraneCtldLogFile = Ctld::kCraneCtldDefaultLogPath;
 
       // spdlog should be initialized as soon as possible
       spdlog::level::level_enum log_level;
@@ -86,6 +94,18 @@ void ParseConfig(int argc, char** argv) {
       }
 
       InitLogger(log_level, g_config.CraneCtldLogFile);
+
+      if (config["CraneCtldMutexFilePath"])
+        g_config.CraneCtldMutexFilePath =
+            config["CranedMutexFilePath"].as<std::string>();
+      else
+        g_config.CraneCtldMutexFilePath =
+            g_config.CraneBaseDir + kDefaultCraneCtldMutexFile;
+
+      if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
+        g_config.CraneCtldDbPath = config["CraneCtldDbPath"].as<std::string>();
+      else
+        g_config.CraneCtldDbPath = g_config.CraneBaseDir + kDefaultDbPath;
 
       if (config["CraneCtldListenAddr"])
         g_config.ListenConf.CraneCtldListenAddr =
@@ -386,11 +406,6 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.CraneEmbeddedDbBackend = "Unqlite";
 
-      if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
-        g_config.CraneCtldDbPath = config["CraneCtldDbPath"].as<std::string>();
-      else
-        g_config.CraneCtldDbPath = Ctld::kDefaultDbPath;
-
       if (config["DbUser"] && !config["DbUser"].IsNull()) {
         g_config.DbUser = config["DbUser"].as<std::string>();
         if (config["DbPassword"] && !config["DbPassword"].IsNull())
@@ -590,25 +605,23 @@ void InitializeCtldGlobalVariables() {
 }
 
 void CreateFolders() {
-  auto create_folders_for_path = [](std::string const& p) {
-    try {
-      std::filesystem::path log_path{p};
-      auto log_dir = log_path.parent_path();
-      if (!std::filesystem::exists(log_dir))
-        std::filesystem::create_directories(log_dir);
-    } catch (const std::exception& e) {
-      CRANE_ERROR("Failed to create folder for {}: {}", p, e.what());
-      std::exit(1);
-    }
-  };
+  bool ok;
+  ok = util::os::CreateFoldersForFile(g_config.CraneCtldLogFile);
+  if (!ok) {
+    CRANE_ERROR("Failed to create folders for CraneCtld log files!");
+    std::exit(1);
+  }
 
-  create_folders_for_path(g_config.CraneCtldLogFile);
-  create_folders_for_path(g_config.CraneCtldDbPath);
+  ok = util::os::CreateFoldersForFile(g_config.CraneCtldDbPath);
+  if (!ok) {
+    CRANE_ERROR("Failed to create folders for CraneCtld db files!");
+    std::exit(1);
+  }
 }
 
 int StartServer() {
   constexpr uint64_t file_max = 640000;
-  if (!util::SetMaxFileDescriptorNumber(file_max)) {
+  if (!util::os::SetMaxFileDescriptorNumber(file_max)) {
     CRANE_ERROR("Unable to set file descriptor limits to {}", file_max);
     std::exit(1);
   }
@@ -672,25 +685,19 @@ void StartDaemon() {
 }
 
 void CheckSingleton() {
-  std::filesystem::path lock_path{kDefaultCraneCtldMutexFile};
-  try {
-    auto lock_dir = lock_path.parent_path();
-    if (!std::filesystem::exists(lock_dir))
-      std::filesystem::create_directories(lock_dir);
-  } catch (const std::exception& e) {
-    CRANE_ERROR("Invalid CraneCtldMutexFile path {}: {}",
-                kDefaultCraneCtldMutexFile, e.what());
-  }
+  bool ok = util::os::CreateFoldersForFile(g_config.CraneCtldMutexFilePath);
+  if (!ok) std::exit(1);
 
-  int pid_file = open(lock_path.c_str(), O_CREAT | O_RDWR, 0666);
+  int pid_file =
+      open(g_config.CraneCtldMutexFilePath.c_str(), O_CREAT | O_RDWR, 0666);
   int rc = flock(pid_file, LOCK_EX | LOCK_NB);
   if (rc) {
     if (EWOULDBLOCK == errno) {
       CRANE_CRITICAL("There is another CraneCtld instance running. Exiting...");
       std::exit(1);
     } else {
-      CRANE_CRITICAL("Failed to lock {}: {}. Exiting...", lock_path.string(),
-                     strerror(errno));
+      CRANE_CRITICAL("Failed to lock {}: {}. Exiting...",
+                     g_config.CraneCtldMutexFilePath, strerror(errno));
       std::exit(1);
     }
   }
@@ -705,8 +712,8 @@ void InstallStackTraceHooks() {
 }
 
 int main(int argc, char** argv) {
-  CheckSingleton();
   ParseConfig(argc, argv);
+  CheckSingleton();
   InstallStackTraceHooks();
 
   if (g_config.CraneCtldForeground)

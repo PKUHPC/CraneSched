@@ -25,7 +25,7 @@
 #include <thread>
 
 #include "SharedTestImpl/greeter_service_impl.h"
-#include "crane/FdFunctions.h"
+#include "crane/OS.h"
 #include "crane/PublicHeader.h"
 #include "protos/greeter.grpc.pb.h"
 #include "protos/greeter.pb.h"
