@@ -59,12 +59,13 @@ void ParseConfig(int argc, char** argv) {
       YAML::Node config = YAML::LoadFile(config_path);
 
       if (config["CraneBaseDir"])
-        g_config.CraneBaseDir = config["CranedBaseDir"].as<std::string>();
+        g_config.CraneBaseDir = config["CraneBaseDir"].as<std::string>();
       else
         g_config.CraneBaseDir = kDefaultCraneBaseDir;
 
       if (config["CraneCtldLogFile"])
         g_config.CraneCtldLogFile =
+            g_config.CraneBaseDir +
             config["CraneCtldLogFile"].as<std::string>();
       else
         g_config.CraneCtldLogFile =
@@ -97,13 +98,15 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["CraneCtldMutexFilePath"])
         g_config.CraneCtldMutexFilePath =
+            g_config.CraneBaseDir +
             config["CranedMutexFilePath"].as<std::string>();
       else
         g_config.CraneCtldMutexFilePath =
             g_config.CraneBaseDir + kDefaultCraneCtldMutexFile;
 
       if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
-        g_config.CraneCtldDbPath = config["CraneCtldDbPath"].as<std::string>();
+        g_config.CraneCtldDbPath =
+            g_config.CraneBaseDir + config["CraneCtldDbPath"].as<std::string>();
       else
         g_config.CraneCtldDbPath = g_config.CraneBaseDir + kDefaultDbPath;
 
