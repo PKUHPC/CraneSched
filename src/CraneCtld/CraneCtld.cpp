@@ -69,7 +69,7 @@ void ParseConfig(int argc, char** argv) {
             config["CraneCtldLogFile"].as<std::string>();
       else
         g_config.CraneCtldLogFile =
-            g_config.CraneBaseDir + kCraneCtldDefaultLogPath;
+            g_config.CraneBaseDir + kDefaultCraneCtldLogPath;
 
       if (config["CraneCtldDebugLevel"])
         g_config.CraneCtldDebugLevel =
@@ -103,12 +103,6 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.CraneCtldMutexFilePath =
             g_config.CraneBaseDir + kDefaultCraneCtldMutexFile;
-
-      if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
-        g_config.CraneCtldDbPath =
-            g_config.CraneBaseDir + config["CraneCtldDbPath"].as<std::string>();
-      else
-        g_config.CraneCtldDbPath = g_config.CraneBaseDir + kDefaultDbPath;
 
       if (config["CraneCtldListenAddr"])
         g_config.ListenConf.CraneCtldListenAddr =
@@ -408,6 +402,13 @@ void ParseConfig(int argc, char** argv) {
             config["CraneEmbeddedDbBackend"].as<std::string>();
       else
         g_config.CraneEmbeddedDbBackend = "Unqlite";
+
+      if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
+        g_config.CraneCtldDbPath =
+            g_config.CraneBaseDir + config["CraneCtldDbPath"].as<std::string>();
+      else
+        g_config.CraneCtldDbPath =
+            g_config.CraneBaseDir + kDefaultCraneCtldDbPath;
 
       if (config["DbUser"] && !config["DbUser"].IsNull()) {
         g_config.DbUser = config["DbUser"].as<std::string>();

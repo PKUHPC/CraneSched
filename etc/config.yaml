@@ -1,3 +1,4 @@
+# Cluster settings (This must be identical across all nodes)
 # the hostname of node which is running cranectld
 ControlMachine: cn15
 # the name of this cluster
@@ -14,23 +15,33 @@ ServerKeyFilePath: /etc/crane/server.key
 CaCertFilePath: /etc/crane/ca.crt
 DomainSuffix: riley.local
 
+# Other configurations to be used
 DbConfigPath: /etc/crane/database.yaml
 
-# Craned Options
+# Data storage settings
+CraneBaseDir: /var/crane
 
+# Ctld settings
 # debug level of cranectld
 CraneCtldDebugLevel: trace
-# file path of cranectld log file
-CraneCtldLogFile: /tmp/cranectld/cranectld.log
-# Determines whether the cranectld is running in the background
+# file path of cranectld log file (relative to CraneBaseDir)
+CraneCtldLogFile: cranectld/cranectld.log
+# file path of cranectld lock file (relative to CraneBaseDir)
+CraneCtldMutexFilePath: cranectld/cranectld.lock
+# whether the cranectld is running in the background
 CraneCtldForeground: true
+
+# Craned settings
 # debug level of craned
 CranedDebugLevel: trace
-# file path of craned log file
-CranedLogFile: /tmp/craned/craned.log
-# Determines whether the craned is running in the background
+# file path of craned log file (relative to CraneBaseDir)
+CranedLogFile: craned/craned.log
+# file path of craned lock file (relative to CraneBaseDir)
+CranedMutexFilePath: craned/craned.lock
+# whether the craned is running in the background
 CranedForeground: true
 
+# Scheduling settings
 PriorityType: priority/multifactor
 
 # Default value is true
@@ -46,8 +57,8 @@ PriorityWeightJobSize: 0
 PriorityWeightPartition: 1000
 PriorityWeightQ0S: 1000000
 
-
-# list of configuration information of the computing machine
+# Nodes and partitions settings
+# node information list
 Nodes:
   - name: "cn[15-18]"
     cpu: 2

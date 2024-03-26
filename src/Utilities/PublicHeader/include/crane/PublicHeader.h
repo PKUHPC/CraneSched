@@ -66,13 +66,13 @@ inline constexpr uint64_t kPriorityDefaultMaxAge = 7 * 24 * 3600;  // 7 days
 
 inline const char* kDefaultCraneBaseDir = "/var/crane/";
 inline const char* kDefaultCraneCtldMutexFile = "cranectld/cranectld.lock";
-inline const char* kCraneCtldDefaultLogPath = "cranectld/cranectld.log";
-inline const char* kDefaultDbPath = "cranectld/embedded.db";
+inline const char* kDefaultCraneCtldLogPath = "cranectld/cranectld.log";
+inline const char* kDefaultCraneCtldDbPath = "cranectld/embedded.db";
 
 inline const char* kDefaultCranedScriptDir = "craned/scripts";
 inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
 inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
-inline const char* kCranedDefaultLogPath = "craned/craned.log";
+inline const char* kDefaultCranedLogPath = "craned/craned.log";
 
 constexpr int64_t kMaxTimeLimitSecond =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;

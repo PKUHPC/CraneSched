@@ -1,6 +1,8 @@
 # EmbeddedDb settings
-CraneEmbeddedDbBackend: Unqlite  # BerkeleyDB or Unqlite(default)
-CraneCtldDbPath: /tmp/cranectld/embedded.db
+# BerkeleyDB or Unqlite(default)
+CraneEmbeddedDbBackend: Unqlite
+# File path of CraneCtld embeded DB (Relative to CraneBaseDir)
+CraneCtldDbPath: cranectld/embedded.db
 
 # Mongodb settings
 DbUser: admin
