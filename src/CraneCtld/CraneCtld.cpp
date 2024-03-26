@@ -59,7 +59,7 @@ void ParseConfig(int argc, char** argv) {
       YAML::Node config = YAML::LoadFile(config_path);
 
       if (config["CraneBaseDir"])
-        g_config.CraneBaseDir = config["CranedBaseDir"].as<std::string>();
+        g_config.CraneBaseDir = config["CraneBaseDir"].as<std::string>();
       else
         g_config.CraneBaseDir = kDefaultCraneBaseDir;
 

@@ -48,13 +48,13 @@ void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
     YAML::Node config = YAML::LoadFile(g_pam_config.CraneConfigFilePath);
 
     if (config["CraneBaseDir"])
-      g_pam_config.CraneBaseDir =
-          config["CranedUnixSockPath"].as<std::string>();
+      g_pam_config.CraneBaseDir = config["CraneBaseDir"].as<std::string>();
     else
       g_pam_config.CraneBaseDir = kDefaultCraneBaseDir;
 
     if (config["CranedUnixSockPath"])
       g_pam_config.CranedUnixSockPath =
+          g_pam_config.CraneBaseDir +
           config["CranedUnixSockPath"].as<std::string>();
     else
       g_pam_config.CranedUnixSockPath =
