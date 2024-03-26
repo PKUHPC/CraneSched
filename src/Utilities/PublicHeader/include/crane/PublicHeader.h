@@ -67,7 +67,7 @@ inline constexpr uint64_t kPriorityDefaultMaxAge = 7 * 24 * 3600;  // 7 days
 inline const char* kDefaultCraneBaseDir = "/var/crane/";
 inline const char* kDefaultCraneCtldMutexFile = "cranectld/cranectld.lock";
 inline const char* kCraneCtldDefaultLogPath = "cranectld/cranectld.log";
-inline const char* kDefaultDbPath = "cranectld/embedded.db";
+inline const char* kCraneCtldDefaultDbPath = "cranectld/embedded.db";
 
 inline const char* kDefaultCranedScriptDir = "craned/scripts";
 inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
