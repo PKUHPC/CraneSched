@@ -28,7 +28,6 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
-#include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
@@ -70,7 +69,7 @@ void ParseConfig(int argc, char** argv) {
             config["CraneCtldLogFile"].as<std::string>();
       else
         g_config.CraneCtldLogFile =
-            g_config.CraneBaseDir + kCraneCtldDefaultLogPath;
+            g_config.CraneBaseDir + kDefaultCraneCtldLogPath;
 
       if (config["CraneCtldDebugLevel"])
         g_config.CraneCtldDebugLevel =
@@ -405,10 +404,11 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneEmbeddedDbBackend = "Unqlite";
 
       if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
-        g_config.CraneCtldDbPath = config["CraneCtldDbPath"].as<std::string>();
+        g_config.CraneCtldDbPath =
+            g_config.CraneBaseDir + config["CraneCtldDbPath"].as<std::string>();
       else
         g_config.CraneCtldDbPath =
-            g_config.CraneBaseDir + kCraneCtldDefaultDbPath;
+            g_config.CraneBaseDir + kDefaultCraneCtldDbPath;
 
       if (config["DbUser"] && !config["DbUser"].IsNull()) {
         g_config.DbUser = config["DbUser"].as<std::string>();

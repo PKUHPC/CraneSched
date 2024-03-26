@@ -47,7 +47,7 @@ void ParseConfig(int argc, char** argv) {
       ("s,server-address", "CraneCtld address format: <IP>:<port>",
        cxxopts::value<std::string>())
       ("L,log-file", "File path of craned log file",
-       cxxopts::value<std::string>()->default_value(kCranedDefaultLogPath))
+       cxxopts::value<std::string>()->default_value(kDefaultCranedLogPath))
       ("D,debug-level", "<trace|debug|info|warn|error>", cxxopts::value<std::string>()->default_value("info"))
       ("h,help", "Show help")
       ;
@@ -80,7 +80,7 @@ void ParseConfig(int argc, char** argv) {
         g_config.CranedLogFile =
             g_config.CraneBaseDir + config["CranedLogFile"].as<std::string>();
       else
-        g_config.CranedLogFile = g_config.CraneBaseDir + kCranedDefaultLogPath;
+        g_config.CranedLogFile = g_config.CraneBaseDir + kDefaultCranedLogPath;
 
       if (config["CranedDebugLevel"])
         g_config.CranedDebugLevel =
