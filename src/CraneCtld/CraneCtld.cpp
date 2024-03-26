@@ -28,6 +28,7 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
+#include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
@@ -103,6 +104,12 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.CraneCtldMutexFilePath =
             g_config.CraneBaseDir + kDefaultCraneCtldMutexFile;
+
+      if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
+        g_config.CraneCtldDbPath =
+            g_config.CraneBaseDir + config["CraneCtldDbPath"].as<std::string>();
+      else
+        g_config.CraneCtldDbPath = g_config.CraneBaseDir + kDefaultDbPath;
 
       if (config["CraneCtldListenAddr"])
         g_config.ListenConf.CraneCtldListenAddr =
