@@ -77,7 +77,8 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneBaseDir = kDefaultCraneBaseDir;
 
       if (config["CranedLogFile"])
-        g_config.CranedLogFile = config["CranedLogFile"].as<std::string>();
+        g_config.CranedLogFile =
+            g_config.CraneBaseDir + config["CranedLogFile"].as<std::string>();
       else
         g_config.CranedLogFile = g_config.CraneBaseDir + kCranedDefaultLogPath;
 
@@ -108,19 +109,22 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["CranedUnixSockPath"])
         g_config.CranedUnixSockPath =
+            g_config.CraneBaseDir +
             config["CranedUnixSockPath"].as<std::string>();
       else
         g_config.CranedUnixSockPath =
             g_config.CraneBaseDir + kDefaultCranedUnixSockPath;
 
       if (config["CranedScriptDir"])
-        g_config.CranedScriptDir = config["CranedScriptDir"].as<std::string>();
+        g_config.CranedScriptDir =
+            g_config.CraneBaseDir + config["CranedScriptDir"].as<std::string>();
       else
         g_config.CranedScriptDir =
             g_config.CraneBaseDir + kDefaultCranedScriptDir;
 
       if (config["CranedMutexFilePath"])
         g_config.CranedMutexFilePath =
+            g_config.CraneBaseDir +
             config["CranedMutexFilePath"].as<std::string>();
       else
         g_config.CranedMutexFilePath =
