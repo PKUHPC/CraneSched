@@ -15,6 +15,7 @@ add_executable(craned
 target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
 
 target_link_libraries(craned
+        mimalloc
         spdlog::spdlog
         concurrentqueue
 
