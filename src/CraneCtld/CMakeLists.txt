@@ -20,8 +20,11 @@ add_executable(cranectld
 
 target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 
+if ((NOT ${CRANE_ADDRESS_SANITIZER}) OR (NOT ${CRANE_THREAD_SANITIZER}))
+    target_link_libraries(cranectld PRIVATE mimalloc)
+endif() 
+
 target_link_libraries(cranectld PRIVATE
-        mimalloc
         spdlog::spdlog
         concurrentqueue
 

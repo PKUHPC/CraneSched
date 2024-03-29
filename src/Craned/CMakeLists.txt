@@ -14,8 +14,11 @@ add_executable(craned
 
 target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
 
-target_link_libraries(craned
-        mimalloc
+if ((NOT ${CRANE_ADDRESS_SANITIZER}) OR (NOT ${CRANE_THREAD_SANITIZER}))
+    target_link_libraries(craned PRIVATE mimalloc)
+endif() 
+
+target_link_libraries(craned PRIVATE
         spdlog::spdlog
         concurrentqueue
 

@@ -9,8 +9,11 @@ set_target_properties(pam_crane PROPERTIES PREFIX "")
 
 target_include_directories(pam_crane PUBLIC ${PAM_INCLUDE_DIR})
 
+if ((NOT ${CRANE_ADDRESS_SANITIZER}) OR (NOT ${CRANE_THREAD_SANITIZER}))
+    target_link_libraries(pam_crane PUBLIC mimalloc)
+endif() 
+
 target_link_libraries(pam_crane PUBLIC
-        mimalloc
         ${PAM_LIBRARIES}
         crane_proto_lib
         fmt::fmt
