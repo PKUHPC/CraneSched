@@ -233,6 +233,8 @@ struct TaskInCtld {
   std::string name;
   std::string qos;
 
+  std::string error_path;
+
   uint32_t node_num{0};
   uint32_t ntasks_per_node{0};
   cpu_t cpus_per_task{0};
@@ -408,6 +410,8 @@ struct TaskInCtld {
     time_limit = absl::Seconds(val.time_limit().seconds());
 
     type = val.type();
+
+    error_path = val.error_path();
 
     if (type == crane::grpc::Batch) {
       meta.emplace<BatchMetaInTask>(BatchMetaInTask{

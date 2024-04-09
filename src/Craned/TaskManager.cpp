@@ -593,18 +593,44 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
-    const std::string& out_file_path =
-        process->batch_meta.parsed_output_file_pattern;
-    int out_fd = open(out_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
-    if (out_fd == -1) {
-      CRANE_ERROR("[Child Process] Error: open {}. {}", out_file_path,
-                  strerror(errno));
-      std::abort();
-    }
+    if (instance->task.get_error_path().empty()) {
+      // If -e / -error is defined, duplicate stderr to the specified file; 
+      // otherwise, duplicate both stdout and stderr to a default file.
+      const std::string& stdout_file_path =
+          process->batch_meta.parsed_output_file_pattern;
+      const std::string& stderr_file_path = 
+          process->batch_meta.parsed_error_file_pattern;
+      int std_fd = open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
+      if (std_fd == -1) {
+        CRANE_ERROR("[Child Process] Error: open {}. {}", stdout_file_path,
+                    strerror(errno));
+        std::abort();
+      }
+      int err_fd = open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
+      if (err_fd == -1) {
+        CRANE_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
+                    strerror(errno));
+        std::abort();
+      }
 
-    dup2(out_fd, 1);  // stdout -> output file
-    dup2(out_fd, 2);  // stderr -> output file
-    close(out_fd);
+      dup2(std_fd, 1);  // stdout -> output file
+      dup2(err_fd, 2);  // stderr -> error file
+      close(std_fd);
+      close(err_fd);
+    } else {
+      const std::string& out_file_path =
+          process->batch_meta.parsed_output_file_pattern;
+      int out_fd = open(out_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
+      if (out_fd == -1) {
+        CRANE_ERROR("[Child Process] Error: open {}. {}", out_file_path,
+                    strerror(errno));
+        std::abort();
+      }
+
+      dup2(out_fd, 1);  // stdout -> output file
+      dup2(out_fd, 2);  // stderr -> output file
+      close(out_fd);
+    }
 
     child_process_ready.set_ok(true);
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
@@ -878,6 +904,35 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
                              {"%u", instance->pwd_entry.Username()},
                              {"%x", instance->task.name()}},
                             &process->batch_meta.parsed_output_file_pattern);
+
+        if (instance->task.error_path().empty) {
+          // If output file path is not specified, set to default output file.
+          process->batch_meta.parsed_error_file_pattern = 
+              process->batch_meta.parsed_output_file_pattern;
+        } else {
+          if (instance->task.error_path()[0] == '/') {
+            process->batch_meta.parsed_error_file_pattern = 
+            instance->task.error_path();
+          } else {
+            process->batch_meta.parsed_error_file_pattern = 
+                fmt::format("{}/{}", instance->task.cwd(),
+                            instance->task.error_path);
+          }
+        }
+
+        // Path ends with a directory, append default output file name
+        // `Crane-<Job ID>.err` to the path.
+        if (absl::EndsWith(process->batch_meta.parsed_error_file_pattern,
+                          "/")) {
+          process->batch_meta.parsed_error_file_pattern +=
+              fmt::format("Crane-{}.err", g_ctld_client->GetCranedId());
+        }
+
+        // Replace the format strings.
+        absl::StrReplaceAll({{"%j", std::to_string(task_id)},
+                             {"%u", instance->pwd_entry.Username()},
+                             {"%x", instance->task.name()}},
+                            &process->batch_meta.parsed_error_file_pattern);
 
         // auto output_cb = [](std::string&& buf, void* data) {
         //   CRANE_TRACE("Read output from subprocess: {}", buf);

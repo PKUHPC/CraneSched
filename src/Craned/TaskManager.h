@@ -49,6 +49,7 @@ struct EvTimerCbArg {
 
 struct BatchMetaInProcessInstance {
   std::string parsed_output_file_pattern;
+  std::string parsed_error_file_pattern;
 };
 
 class ProcessInstance {
