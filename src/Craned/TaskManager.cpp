@@ -593,7 +593,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
-    if (instance->task.error_path().empty()) {
+    if (!instance->task.error_path().empty()) {
       // If -e / -error is defined, duplicate stderr to the specified file; 
       // otherwise, duplicate both stdout and stderr to a default file.
       const std::string& stdout_file_path =
