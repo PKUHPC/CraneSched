@@ -593,7 +593,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
-    if (instance->task.get_error_path().empty()) {
+    if (instance->task.error_path().empty()) {
       // If -e / -error is defined, duplicate stderr to the specified file; 
       // otherwise, duplicate both stdout and stderr to a default file.
       const std::string& stdout_file_path =
@@ -905,7 +905,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
                              {"%x", instance->task.name()}},
                             &process->batch_meta.parsed_output_file_pattern);
 
-        if (instance->task.error_path().empty) {
+        if (instance->task.error_path().empty()) {
           // If output file path is not specified, set to default output file.
           process->batch_meta.parsed_error_file_pattern = 
               process->batch_meta.parsed_output_file_pattern;
@@ -916,7 +916,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
           } else {
             process->batch_meta.parsed_error_file_pattern = 
                 fmt::format("{}/{}", instance->task.cwd(),
-                            instance->task.error_path);
+                            instance->task.error_path());
           }
         }
 
