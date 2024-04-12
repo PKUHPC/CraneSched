@@ -19,7 +19,7 @@ DomainSuffix: riley.local
 DbConfigPath: /etc/crane/database.yaml
 
 # Data storage settings
-CraneBaseDir: /var/crane
+CraneBaseDir: /var/crane/
 
 # Ctld settings
 # debug level of cranectld

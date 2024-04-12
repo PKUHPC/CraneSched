@@ -99,7 +99,7 @@ void ParseConfig(int argc, char** argv) {
       if (config["CraneCtldMutexFilePath"])
         g_config.CraneCtldMutexFilePath =
             g_config.CraneBaseDir +
-            config["CranedMutexFilePath"].as<std::string>();
+            config["CraneCtldMutexFilePath"].as<std::string>();
       else
         g_config.CraneCtldMutexFilePath =
             g_config.CraneBaseDir + kDefaultCraneCtldMutexFile;
