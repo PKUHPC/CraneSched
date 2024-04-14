@@ -35,7 +35,7 @@ class IPrioritySorter {
  public:
   virtual std::vector<task_id_t> GetOrderedTaskIdList(
       const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map) = 0;
+      const UnorderedTaskMap& running_task_map, size_t limit_num) = 0;
 
   virtual ~IPrioritySorter() = default;
 };
@@ -44,9 +44,14 @@ class BasicPriority : public IPrioritySorter {
  public:
   std::vector<task_id_t> GetOrderedTaskIdList(
       const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map) override {
+      const UnorderedTaskMap& running_task_map, size_t limit_num) override {
     std::vector<task_id_t> task_id_vec;
-    for (const auto& pair : pending_task_map) task_id_vec.push_back(pair.first);
+    size_t i = 0;
+    for (const auto& pair : pending_task_map) {
+      if (i >= limit_num) break;
+      i++;
+      task_id_vec.emplace_back(pair.first);
+    }
     return task_id_vec;
   }
 };
@@ -55,7 +60,7 @@ class MultiFactorPriority : public IPrioritySorter {
  public:
   std::vector<task_id_t> GetOrderedTaskIdList(
       const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map) override;
+      const UnorderedTaskMap& running_task_map, size_t limit_num) override;
 
  private:
   struct FactorBound {

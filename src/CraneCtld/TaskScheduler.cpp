@@ -1193,8 +1193,8 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   std::vector<TaskInCtld*> task_ptr_vec;
 
   size_t map_size = m_pending_map_cached_size_.load(std::memory_order_acquire);
-  size_t batch_size =
-      std::min(approximate_size, kPendingConcurrentQueueBatchSize - map_size);
+  size_t batch_size = std::min(
+      approximate_size, g_config.PendingConcurrentQueueBatchSize - map_size);
   submit_tasks.resize(batch_size);
 
   size_t actual_size =
@@ -1231,9 +1231,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     task_id_t id = submit_tasks[pos].first->TaskId();
     auto& task_id_promise = submit_tasks[pos].second;
 
-    if (id != 0) {  // id == 0 means it was stored to database failed
-      m_pending_task_map_.emplace(id, std::move(submit_tasks[pos].first));
-    }
+    m_pending_task_map_.emplace(id, std::move(submit_tasks[pos].first));
     task_id_promise.set_value(id);
   }
 
@@ -1993,8 +1991,8 @@ void MinLoadFirst::NodeSelect(
   }
 
   std::vector<task_id_t> task_id_vec;
-  task_id_vec = m_priority_sorter_->GetOrderedTaskIdList(*pending_task_map,
-                                                         running_tasks);
+  task_id_vec = m_priority_sorter_->GetOrderedTaskIdList(
+      *pending_task_map, running_tasks, g_config.SingleSchedulingQuota);
   // Now we know, on every node, the # of running tasks (which
   //  doesn't include those we select as the incoming running tasks in the
   //  following code) and how many resources are available at the end of each
@@ -2371,7 +2369,7 @@ void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id,
 
 std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     const OrderedTaskMap& pending_task_map,
-    const UnorderedTaskMap& running_task_map) {
+    const UnorderedTaskMap& running_task_map, size_t limit_num) {
   std::vector<task_id_t> task_id_vec;
 
   CalculateFactorBound_(pending_task_map, running_task_map);
@@ -2388,8 +2386,13 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
               return a.second > b.second;
             });
 
-  task_id_vec.reserve(task_priority_vec.size());
-  for (auto& pair : task_priority_vec) task_id_vec.emplace_back(pair.first);
+  size_t id_vec_len = std::min(limit_num, task_priority_vec.size());
+  task_id_vec.reserve(id_vec_len);
+  for (auto& pair : task_priority_vec) {
+    if (id_vec_len <= 0) break;
+    id_vec_len--;
+    task_id_vec.emplace_back(pair.first);
+  }
 
   return task_id_vec;
 }

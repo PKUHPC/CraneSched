@@ -261,6 +261,30 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.PriorityConfig.WeightQOS = 0;
 
+      if (config["PendingConcurrentQueueBatchSize"]) {
+        g_config.PendingConcurrentQueueBatchSize =
+            config["PendingConcurrentQueueBatchSize"].as<uint32_t>();
+        if (g_config.PendingConcurrentQueueBatchSize >
+            Ctld::kPendingConcurrentQueueBatchSize) {
+          CRANE_WARN(
+              "The value set to 'PendingConcurrentQueueBatchSize' in config "
+              "file is too high and has been reset to {}",
+              Ctld::kPendingConcurrentQueueBatchSize);
+          g_config.PendingConcurrentQueueBatchSize =
+              Ctld::kPendingConcurrentQueueBatchSize;
+        }
+      } else {
+        g_config.PendingConcurrentQueueBatchSize =
+            Ctld::kPendingConcurrentQueueBatchSize;
+      }
+
+      if (config["SingleSchedulingQuota"]) {
+        g_config.SingleSchedulingQuota =
+            config["SingleSchedulingQuota"].as<uint32_t>();
+      } else {
+        g_config.SingleSchedulingQuota = Ctld::kSingleSchedulingQuota;
+      }
+
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {

@@ -606,8 +606,8 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
   if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
 
   for (const auto& task : tasks) {
-    task->SetTaskId(task_id++);       // Default value is 0
-    task->SetTaskDbId(task_db_id++);  // Default value is 0
+    task->SetTaskId(task_id++);
+    task->SetTaskDbId(task_db_id++);
 
     result = StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
                               GetFixedDbEntryName_(task->TaskDbId()),
@@ -616,6 +616,7 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
       CRANE_ERROR(
           "Failed to store the fixed data of task id: {} / task db id: {}.",
           task->TaskId(), task->TaskDbId());
+      return false;
     }
   }
 
@@ -635,8 +636,7 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
           "Failed to store the variable data of task id: {} / task db id: "
           "{}.",
           task->TaskId(), task->TaskDbId());
-      task->SetTaskId(0);
-      task->SetTaskDbId(0);
+      return false;
     }
   }
 
@@ -666,15 +666,20 @@ bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
   // between two transactions, it is necessary to ensure that fixed data is
   // written first and erased later.
   txn_id_t txn_id;
+  result::result<void, DbErrorCode> res;
 
   if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
-  for (const auto& id : db_ids)
-    std::ignore = m_variable_db_->Delete(txn_id, GetVariableDbEntryName_(id));
+  for (const auto& id : db_ids) {
+    res = m_variable_db_->Delete(txn_id, GetVariableDbEntryName_(id));
+    if (res.has_error() && res.error() == DbErrorCode::kOther) return false;
+  }
   if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
 
   if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
-  for (const auto& id : db_ids)
-    std::ignore = m_fixed_db_->Delete(txn_id, GetFixedDbEntryName_(id));
+  for (const auto& id : db_ids) {
+    res = m_fixed_db_->Delete(txn_id, GetFixedDbEntryName_(id));
+    if (res.has_error() && res.error() == DbErrorCode::kOther) return false;
+  }
   if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
 
   return true;

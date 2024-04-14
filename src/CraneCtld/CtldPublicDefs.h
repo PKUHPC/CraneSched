@@ -54,6 +54,7 @@ constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
 constexpr uint32_t kPendingConcurrentQueueBatchSize = 900000;
+constexpr uint32_t kSingleSchedulingQuota = 200000;
 
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 
@@ -122,6 +123,9 @@ struct Config {
   std::string DbPort;
   std::string DbRSName;
   std::string DbName;
+
+  uint32_t PendingConcurrentQueueBatchSize;
+  uint32_t SingleSchedulingQuota;
 };
 
 }  // namespace Ctld

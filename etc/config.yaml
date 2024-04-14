@@ -57,8 +57,12 @@ PriorityWeightJobSize: 0
 PriorityWeightPartition: 1000
 PriorityWeightQ0S: 1000000
 
+PendingConcurrentQueueBatchSize: 900000
+SingleSchedulingQuota: 200000
+
+
+# list of configuration information of the computing machine
 # Nodes and partitions settings
-# node information list
 Nodes:
   - name: "cn[15-18]"
     cpu: 2
