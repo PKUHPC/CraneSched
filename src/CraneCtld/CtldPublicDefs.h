@@ -216,6 +216,7 @@ struct InteractiveMetaInTask {
 struct BatchMetaInTask {
   std::string sh_script;
   std::string output_file_pattern;
+  std::string error_file_pattern;
 };
 
 struct TaskInCtld {
@@ -412,6 +413,7 @@ struct TaskInCtld {
       meta.emplace<BatchMetaInTask>(BatchMetaInTask{
           .sh_script = val.batch_meta().sh_script(),
           .output_file_pattern = val.batch_meta().output_file_pattern(),
+          .error_file_pattern = val.batch_meta().error_file_pattern(),
       });
     }
 

@@ -49,6 +49,7 @@ struct EvTimerCbArg {
 
 struct BatchMetaInProcessInstance {
   std::string parsed_output_file_pattern;
+  std::string parsed_error_file_pattern;
 };
 
 class ProcessInstance {
@@ -272,6 +273,8 @@ class TaskManager {
   };
 
   static std::string CgroupStrByTaskId_(uint32_t task_id);
+
+  static void ParseFilePattern(const std::string& path, std::string& parse_target, const std::string cwd);
 
   /**
    * EvActivateTaskStatusChange_ must NOT be called in this method and should be
