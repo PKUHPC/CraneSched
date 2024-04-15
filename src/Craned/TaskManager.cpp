@@ -593,31 +593,35 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
-    // If -e / -error is defined, duplicate stderr to the specified file;
-    // otherwise, duplicate both stdout and stderr to a default file.
     const std::string& stdout_file_path =
         process->batch_meta.parsed_output_file_pattern;
     const std::string& stderr_file_path =
         process->batch_meta.parsed_error_file_pattern;
-    int std_fd =
+
+    int stdout_fd =
         open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
-    if (std_fd == -1) {
+    if (stdout_fd == -1) {
       CRANE_ERROR("[Child Process] Error: open {}. {}", stdout_file_path,
                   strerror(errno));
       std::abort();
     }
-    int err_fd =
-        open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
-    if (err_fd == -1) {
-      CRANE_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
-                  strerror(errno));
-      std::abort();
+    dup2(stdout_fd, 1);  // stdout -> output file
+
+    if (stderr_file_path.empty()) {  // if stderr filename is not specified
+      dup2(stdout_fd, 2);            // stderr -> output file
+    } else {
+      int stderr_fd =
+          open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
+      if (stderr_fd == -1) {
+        CRANE_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
+                    strerror(errno));
+        std::abort();
+      }
+      dup2(stderr_fd, 2);  // stderr -> error file
+      close(stderr_fd);
     }
 
-    dup2(std_fd, 1);  // stdout -> output file
-    dup2(err_fd, 2);  // stderr -> error file
-    close(std_fd);
-    close(err_fd);
+    close(stdout_fd);
 
     child_process_ready.set_ok(true);
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
@@ -865,25 +869,22 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         process->batch_meta.parsed_output_file_pattern = ParseFilePathPattern_(
             instance->task.batch_meta().output_file_pattern(),
             instance->task.cwd(), task_id);
-
-        process->batch_meta.parsed_error_file_pattern =
-            instance->task.batch_meta().error_file_pattern().empty()
-                // if stderr filename is not specified,
-                // it's the same as stdout filename.
-                ? process->batch_meta.parsed_output_file_pattern
-                : ParseFilePathPattern_(
-                      instance->task.batch_meta().error_file_pattern(),
-                      instance->task.cwd(), task_id);
-
-        // Replace the format strings.
         absl::StrReplaceAll({{"%j", std::to_string(task_id)},
                              {"%u", instance->pwd_entry.Username()},
                              {"%x", instance->task.name()}},
                             &process->batch_meta.parsed_output_file_pattern);
-        absl::StrReplaceAll({{"%j", std::to_string(task_id)},
-                             {"%u", instance->pwd_entry.Username()},
-                             {"%x", instance->task.name()}},
-                            &process->batch_meta.parsed_error_file_pattern);
+
+        // If -e / --error is not defined, leave
+        // batch_meta.parsed_error_file_pattern empty;
+        if (!instance->task.batch_meta().error_file_pattern().empty()) {
+          process->batch_meta.parsed_error_file_pattern = ParseFilePathPattern_(
+              instance->task.batch_meta().error_file_pattern(),
+              instance->task.cwd(), task_id);
+          absl::StrReplaceAll({{"%j", std::to_string(task_id)},
+                               {"%u", instance->pwd_entry.Username()},
+                               {"%x", instance->task.name()}},
+                              &process->batch_meta.parsed_error_file_pattern);
+        }
 
         // auto output_cb = [](std::string&& buf, void* data) {
         //   CRANE_TRACE("Read output from subprocess: {}", buf);
@@ -896,24 +897,25 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         if (err == CraneErr::kOk) {
           this_->m_mtx_.Lock();
 
-          // Child process may finish or abort before we put its pid into maps.
-          // However, it doesn't matter because SIGCHLD will be handled after
-          // this function or event ends.
-          // Add indexes from pid to TaskInstance*, ProcessInstance*
+          // Child process may finish or abort before we put its pid
+          // into maps. However, it doesn't matter because SIGCHLD will
+          // be handled after this function or event ends. Add indexes
+          // from pid to TaskInstance*, ProcessInstance*
           this_->m_pid_task_map_.emplace(process->GetPid(), instance);
           this_->m_pid_proc_map_.emplace(process->GetPid(), process.get());
 
           this_->m_mtx_.Unlock();
 
-          // Move the ownership of ProcessInstance into the TaskInstance.
+          // Move the ownership of ProcessInstance into the
+          // TaskInstance.
           instance->processes.emplace(process->GetPid(), std::move(process));
         } else {
           this_->EvActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::Failed,
               ExitCode::kExitCodeSpawnProcessFail,
-              fmt::format(
-                  "Cannot spawn a new process inside the instance of task #{}",
-                  task_id));
+              fmt::format("Cannot spawn a new process inside the "
+                          "instance of task #{}",
+                          task_id));
         }
       }
     });
