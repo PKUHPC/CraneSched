@@ -49,6 +49,7 @@ struct EvTimerCbArg {
 
 struct BatchMetaInProcessInstance {
   std::string parsed_output_file_pattern;
+  std::string parsed_error_file_pattern;
 };
 
 class ProcessInstance {
@@ -271,7 +272,11 @@ class TaskManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
-  static std::string CgroupStrByTaskId_(uint32_t task_id);
+  static std::string CgroupStrByTaskId_(task_id_t task_id);
+
+  static std::string ParseFilePathPattern_(const std::string& path_pattern,
+                                           const std::string& cwd,
+                                           task_id_t task_id);
 
   /**
    * EvActivateTaskStatusChange_ must NOT be called in this method and should be

@@ -190,7 +190,7 @@ const TaskInstance* TaskManager::FindInstanceByTaskId_(uint32_t task_id) {
   return iter->second.get();
 }
 
-std::string TaskManager::CgroupStrByTaskId_(uint32_t task_id) {
+std::string TaskManager::CgroupStrByTaskId_(task_id_t task_id) {
   return fmt::format("Crane_Task_{}", task_id);
 }
 
@@ -593,18 +593,35 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
-    const std::string& out_file_path =
+    const std::string& stdout_file_path =
         process->batch_meta.parsed_output_file_pattern;
-    int out_fd = open(out_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
-    if (out_fd == -1) {
-      CRANE_ERROR("[Child Process] Error: open {}. {}", out_file_path,
+    const std::string& stderr_file_path =
+        process->batch_meta.parsed_error_file_pattern;
+
+    int stdout_fd =
+        open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
+    if (stdout_fd == -1) {
+      CRANE_ERROR("[Child Process] Error: open {}. {}", stdout_file_path,
                   strerror(errno));
       std::abort();
     }
+    dup2(stdout_fd, 1);  // stdout -> output file
 
-    dup2(out_fd, 1);  // stdout -> output file
-    dup2(out_fd, 2);  // stderr -> output file
-    close(out_fd);
+    if (stderr_file_path.empty()) {  // if stderr filename is not specified
+      dup2(stdout_fd, 2);            // stderr -> output file
+    } else {
+      int stderr_fd =
+          open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
+      if (stderr_fd == -1) {
+        CRANE_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
+                    strerror(errno));
+        std::abort();
+      }
+      dup2(stderr_fd, 2);  // stderr -> error file
+      close(stderr_fd);
+    }
+
+    close(stdout_fd);
 
     child_process_ready.set_ok(true);
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
@@ -849,36 +866,25 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
          * %u - Username
          * %x - Job name
          */
-        if (instance->task.batch_meta().output_file_pattern().empty()) {
-          // If output file path is not specified, first set it to cwd.
-          process->batch_meta.parsed_output_file_pattern =
-              fmt::format("{}/", instance->task.cwd());
-        } else {
-          if (instance->task.batch_meta().output_file_pattern()[0] == '/') {
-            // If output file path is an absolute path, do nothing.
-            process->batch_meta.parsed_output_file_pattern =
-                instance->task.batch_meta().output_file_pattern();
-          } else {
-            // If output file path is a relative path, prepend cwd to the path.
-            process->batch_meta.parsed_output_file_pattern =
-                fmt::format("{}/{}", instance->task.cwd(),
-                            instance->task.batch_meta().output_file_pattern());
-          }
-        }
-
-        // Path ends with a directory, append default output file name
-        // `Crane-<Job ID>.out` to the path.
-        if (absl::EndsWith(process->batch_meta.parsed_output_file_pattern,
-                           "/")) {
-          process->batch_meta.parsed_output_file_pattern +=
-              fmt::format("Crane-{}.out", g_ctld_client->GetCranedId());
-        }
-
-        // Replace the format strings.
+        process->batch_meta.parsed_output_file_pattern = ParseFilePathPattern_(
+            instance->task.batch_meta().output_file_pattern(),
+            instance->task.cwd(), task_id);
         absl::StrReplaceAll({{"%j", std::to_string(task_id)},
                              {"%u", instance->pwd_entry.Username()},
                              {"%x", instance->task.name()}},
                             &process->batch_meta.parsed_output_file_pattern);
+
+        // If -e / --error is not defined, leave
+        // batch_meta.parsed_error_file_pattern empty;
+        if (!instance->task.batch_meta().error_file_pattern().empty()) {
+          process->batch_meta.parsed_error_file_pattern = ParseFilePathPattern_(
+              instance->task.batch_meta().error_file_pattern(),
+              instance->task.cwd(), task_id);
+          absl::StrReplaceAll({{"%j", std::to_string(task_id)},
+                               {"%u", instance->pwd_entry.Username()},
+                               {"%x", instance->task.name()}},
+                              &process->batch_meta.parsed_error_file_pattern);
+        }
 
         // auto output_cb = [](std::string&& buf, void* data) {
         //   CRANE_TRACE("Read output from subprocess: {}", buf);
@@ -900,7 +906,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
           this_->m_mtx_.Unlock();
 
-          // Move the ownership of ProcessInstance into the TaskInstance.
+          // Move the ownership of ProcessInstance into the
+          // TaskInstance.
           instance->processes.emplace(process->GetPid(), std::move(process));
         } else {
           this_->EvActivateTaskStatusChange_(
@@ -913,6 +920,31 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       }
     });
   }
+}
+
+std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
+                                               const std::string& cwd,
+                                               task_id_t task_id) {
+  std::string resolved_path_pattern;
+
+  if (path_pattern.empty()) {
+    // If file path is not specified, first set it to cwd.
+    resolved_path_pattern = fmt::format("{}/", cwd);
+  } else {
+    if (path_pattern[0] == '/')
+      // If output file path is an absolute path, do nothing.
+      resolved_path_pattern = path_pattern;
+    else
+      // If output file path is a relative path, prepend cwd to the path.
+      resolved_path_pattern = fmt::format("{}/{}", cwd, path_pattern);
+  }
+
+  // Path ends with a directory, append default stdout file name
+  // `Crane-<Job ID>.out` to the path.
+  if (absl::EndsWith(resolved_path_pattern, "/"))
+    resolved_path_pattern += fmt::format("Crane-{}.out", task_id);
+
+  return resolved_path_pattern;
 }
 
 void TaskManager::EvTaskStatusChangeCb_(int efd, short events,

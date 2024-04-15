@@ -279,6 +279,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
       auto &meta_in_ctld = std::get<BatchMetaInTask>(task->meta);
       auto *mutable_meta = mutable_task->mutable_batch_meta();
       mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
+      mutable_meta->set_error_file_pattern(meta_in_ctld.error_file_pattern);
       mutable_meta->set_sh_script(meta_in_ctld.sh_script);
     }
   }
