@@ -90,7 +90,6 @@ message TaskToCtld {
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
 
-  string error_path = 14;
 
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
@@ -166,13 +165,12 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
-
-  string error_path = 25;
 }
 
 message BatchTaskAdditionalMeta {
   string sh_script = 1;
   string output_file_pattern = 3;
+  string error_file_pattern = 4;
 }
 
 message InteractiveTaskAdditionalMeta{

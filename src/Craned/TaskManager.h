@@ -274,6 +274,8 @@ class TaskManager {
 
   static std::string CgroupStrByTaskId_(uint32_t task_id);
 
+  static void ParseFilePattern(const std::string& path, std::string& parse_target, const std::string cwd);
+
   /**
    * EvActivateTaskStatusChange_ must NOT be called in this method and should be
    *  called in the caller method after checking the return value of this
