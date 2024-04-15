@@ -897,10 +897,10 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         if (err == CraneErr::kOk) {
           this_->m_mtx_.Lock();
 
-          // Child process may finish or abort before we put its pid
-          // into maps. However, it doesn't matter because SIGCHLD will
-          // be handled after this function or event ends. Add indexes
-          // from pid to TaskInstance*, ProcessInstance*
+          // Child process may finish or abort before we put its pid into maps.
+          // However, it doesn't matter because SIGCHLD will be handled after
+          // this function or event ends.
+          // Add indexes from pid to TaskInstance*, ProcessInstance*
           this_->m_pid_task_map_.emplace(process->GetPid(), instance);
           this_->m_pid_proc_map_.emplace(process->GetPid(), process.get());
 
@@ -913,9 +913,9 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
           this_->EvActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::Failed,
               ExitCode::kExitCodeSpawnProcessFail,
-              fmt::format("Cannot spawn a new process inside the "
-                          "instance of task #{}",
-                          task_id));
+              fmt::format(
+                  "Cannot spawn a new process inside the instance of task #{}",
+                  task_id));
         }
       }
     });
