@@ -943,6 +943,8 @@ std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
   // `Crane-<Job ID>.out` to the path.
   if (absl::EndsWith(resolved_path_pattern, "/"))
     resolved_path_pattern += fmt::format("Crane-{}.out", task_id);
+
+  return resolved_path_pattern;
 }
 
 void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
