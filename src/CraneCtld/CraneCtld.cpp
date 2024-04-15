@@ -261,28 +261,25 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.PriorityConfig.WeightQOS = 0;
 
-      if (config["PendingConcurrentQueueBatchSize"]) {
-        g_config.PendingConcurrentQueueBatchSize =
-            config["PendingConcurrentQueueBatchSize"].as<uint32_t>();
-        if (g_config.PendingConcurrentQueueBatchSize >
-            Ctld::kPendingConcurrentQueueBatchSize) {
+      if (config["PendingQueueMaxSize"]) {
+        g_config.PendingQueueMaxSize =
+            config["PendingQueueMaxSize"].as<uint32_t>();
+        if (g_config.PendingQueueMaxSize > Ctld::kPendingQueueMaxSize) {
           CRANE_WARN(
-              "The value set to 'PendingConcurrentQueueBatchSize' in config "
-              "file is too high and has been reset to {}",
-              Ctld::kPendingConcurrentQueueBatchSize);
-          g_config.PendingConcurrentQueueBatchSize =
-              Ctld::kPendingConcurrentQueueBatchSize;
+              "The value of 'PendingQueueMaxSize' set in config file "
+              "is too high and has been reset to default value {}",
+              Ctld::kPendingQueueMaxSize);
+          g_config.PendingQueueMaxSize = Ctld::kPendingQueueMaxSize;
         }
       } else {
-        g_config.PendingConcurrentQueueBatchSize =
-            Ctld::kPendingConcurrentQueueBatchSize;
+        g_config.PendingQueueMaxSize = Ctld::kPendingQueueMaxSize;
       }
 
-      if (config["SingleSchedulingQuota"]) {
-        g_config.SingleSchedulingQuota =
-            config["SingleSchedulingQuota"].as<uint32_t>();
+      if (config["ScheduledBatchSize"]) {
+        g_config.ScheduledBatchSize =
+            config["ScheduledBatchSize"].as<uint32_t>();
       } else {
-        g_config.SingleSchedulingQuota = Ctld::kSingleSchedulingQuota;
+        g_config.ScheduledBatchSize = Ctld::kScheduledBatchSize;
       }
 
       if (config["Nodes"]) {

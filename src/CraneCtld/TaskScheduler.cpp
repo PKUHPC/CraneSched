@@ -1193,8 +1193,8 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   std::vector<TaskInCtld*> task_ptr_vec;
 
   size_t map_size = m_pending_map_cached_size_.load(std::memory_order_acquire);
-  size_t batch_size = std::min(
-      approximate_size, g_config.PendingConcurrentQueueBatchSize - map_size);
+  size_t batch_size =
+      std::min(approximate_size, g_config.PendingQueueMaxSize - map_size);
   submit_tasks.resize(batch_size);
 
   size_t actual_size =
@@ -1992,7 +1992,7 @@ void MinLoadFirst::NodeSelect(
 
   std::vector<task_id_t> task_id_vec;
   task_id_vec = m_priority_sorter_->GetOrderedTaskIdList(
-      *pending_task_map, running_tasks, g_config.SingleSchedulingQuota);
+      *pending_task_map, running_tasks, g_config.ScheduledBatchSize);
   // Now we know, on every node, the # of running tasks (which
   //  doesn't include those we select as the incoming running tasks in the
   //  following code) and how many resources are available at the end of each

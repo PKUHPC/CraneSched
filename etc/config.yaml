@@ -57,10 +57,6 @@ PriorityWeightJobSize: 0
 PriorityWeightPartition: 1000
 PriorityWeightQ0S: 1000000
 
-PendingConcurrentQueueBatchSize: 900000
-SingleSchedulingQuota: 200000
-
-
 # list of configuration information of the computing machine
 # Nodes and partitions settings
 Nodes:
@@ -78,3 +74,13 @@ Partitions:
     priority: 3
 
 DefaultPartition: CPU
+
+
+# Advanced options:
+
+# Maximum size of Pending Queue and must <=900000.
+PendingQueueMaxSize: 900000
+
+# Maximum size of jobs which the scheduler will attempt to schedule
+# and must <=200000.
+ScheduledBatchSize: 200000
