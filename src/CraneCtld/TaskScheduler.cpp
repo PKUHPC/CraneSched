@@ -543,7 +543,8 @@ void TaskScheduler::ScheduleThread_() {
       m_running_task_map_mtx_.Lock();
 
       schedule_begin = std::chrono::steady_clock::now();
-      num_tasks_single_schedule = m_pending_task_map_.size();
+      num_tasks_single_schedule = std::min((size_t)g_config.ScheduledBatchSize,
+                                           m_pending_task_map_.size());
 
       begin = std::chrono::steady_clock::now();
 

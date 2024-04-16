@@ -83,8 +83,8 @@ PendingQueueMaxSize: 900000
 
 # Maximum size of jobs which the scheduler will attempt to schedule
 # and its upper limit is 200000.
-# Recommended and default value is 2000.
-ScheduledBatchSize: 2000
+# Default value is 100000.
+ScheduledBatchSize: 100000
 
 # Scheduler will reject all jobs beyond processing capacity set by PendingQueueMaxSize
 # if this option is set to true.

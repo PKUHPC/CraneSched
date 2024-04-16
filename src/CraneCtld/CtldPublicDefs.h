@@ -55,7 +55,7 @@ constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 // pending concurrent queue.
 constexpr uint32_t kPendingQueueMaxSize = 900000;
 constexpr uint32_t kMaxScheduledBatchSize = 200000;
-constexpr uint32_t kDefaultScheduledBatchSize = 2000;
+constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 constexpr bool kDefaultRejectTasksBeyondCapacity = false;
