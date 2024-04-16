@@ -35,7 +35,7 @@ class IPrioritySorter {
  public:
   virtual std::vector<task_id_t> GetOrderedTaskIdList(
       const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map) = 0;
+      const UnorderedTaskMap& running_task_map, size_t limit) = 0;
 
   virtual ~IPrioritySorter() = default;
 };
@@ -44,9 +44,17 @@ class BasicPriority : public IPrioritySorter {
  public:
   std::vector<task_id_t> GetOrderedTaskIdList(
       const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map) override {
+      const UnorderedTaskMap& running_task_map, size_t limit) override {
+    size_t len = std::min(pending_task_map.size(), limit);
+
     std::vector<task_id_t> task_id_vec;
-    for (const auto& pair : pending_task_map) task_id_vec.push_back(pair.first);
+    task_id_vec.reserve(len);
+
+    int i = 0;
+    for (auto it = pending_task_map.begin(); i < len; i++, it++) {
+      task_id_vec.emplace_back(it->first);
+    }
+
     return task_id_vec;
   }
 };
@@ -55,7 +63,7 @@ class MultiFactorPriority : public IPrioritySorter {
  public:
   std::vector<task_id_t> GetOrderedTaskIdList(
       const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map) override;
+      const UnorderedTaskMap& running_task_map, size_t limit_num) override;
 
  private:
   struct FactorBound {
@@ -252,7 +260,8 @@ class TaskScheduler {
 
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
 
-  static void TransferTasksToMongodb_(std::vector<TaskInCtld*> const& tasks);
+  static void PersistAndTransferTasksToMongodb_(
+      std::vector<TaskInCtld*> const& tasks);
 
   CraneErr TerminateRunningTaskNoLock_(TaskInCtld* task);
 
@@ -269,10 +278,6 @@ class TaskScheduler {
   HashMap<task_id_t, std::unique_ptr<TaskInCtld>> m_running_task_map_
       GUARDED_BY(m_running_task_map_mtx_);
   Mutex m_running_task_map_mtx_;
-
-  HashMap<uint32_t /*Task Db Id*/, std::unique_ptr<TaskInEmbeddedDb>>
-      m_persisted_task_map_ GUARDED_BY(m_persisted_task_map_mtx_);
-  Mutex m_persisted_task_map_mtx_;
 
   // Task Indexes
   HashMap<CranedId, HashSet<uint32_t /* Task ID*/>> m_node_to_tasks_map_

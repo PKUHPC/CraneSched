@@ -261,6 +261,36 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.PriorityConfig.WeightQOS = 0;
 
+      if (config["PendingQueueMaxSize"]) {
+        g_config.PendingQueueMaxSize =
+            config["PendingQueueMaxSize"].as<uint32_t>();
+        if (g_config.PendingQueueMaxSize > Ctld::kPendingQueueMaxSize) {
+          CRANE_WARN(
+              "The value of 'PendingQueueMaxSize' set in config file "
+              "is too high and has been reset to default value {}",
+              Ctld::kPendingQueueMaxSize);
+          g_config.PendingQueueMaxSize = Ctld::kPendingQueueMaxSize;
+        }
+      } else {
+        g_config.PendingQueueMaxSize = Ctld::kPendingQueueMaxSize;
+      }
+
+      if (config["ScheduledBatchSize"]) {
+        g_config.ScheduledBatchSize =
+            std::min(config["ScheduledBatchSize"].as<uint32_t>(),
+                     Ctld::kMaxScheduledBatchSize);
+      } else {
+        g_config.ScheduledBatchSize = Ctld::kDefaultScheduledBatchSize;
+      }
+
+      if (config["RejectJobsBeyondCapacity"]) {
+        g_config.RejectTasksBeyondCapacity =
+            config["RejectJobsBeyondCapacity"].as<bool>();
+      } else {
+        g_config.RejectTasksBeyondCapacity =
+            Ctld::kDefaultRejectTasksBeyondCapacity;
+      }
+
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {

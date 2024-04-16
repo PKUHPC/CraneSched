@@ -57,8 +57,8 @@ PriorityWeightJobSize: 0
 PriorityWeightPartition: 1000
 PriorityWeightQ0S: 1000000
 
+# list of configuration information of the computing machine
 # Nodes and partitions settings
-# node information list
 Nodes:
   - name: "cn[15-18]"
     cpu: 2
@@ -74,3 +74,19 @@ Partitions:
     priority: 3
 
 DefaultPartition: CPU
+
+
+# Advanced options:
+
+# Maximum size of Pending Queue and must <=900000.
+PendingQueueMaxSize: 900000
+
+# Maximum size of jobs which the scheduler will attempt to schedule
+# and its upper limit is 200000.
+# Default value is 100000.
+ScheduledBatchSize: 100000
+
+# Scheduler will reject all jobs beyond processing capacity set by PendingQueueMaxSize
+# if this option is set to true.
+# Default value is false.
+RejectJobsBeyondCapacity: false

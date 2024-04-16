@@ -53,24 +53,25 @@ bool TaskScheduler::Init() {
   bool ok;
   CraneErr err;
 
-  std::list<TaskInEmbeddedDb> running_list;
-  ok = g_embedded_db_client->GetRunningQueueCopy(0, &running_list);
+  EmbeddedDbClient::DbSnapshot snapshot;
+  ok = g_embedded_db_client->RetrieveLastSnapshot(&snapshot);
   if (!ok) {
-    CRANE_ERROR("Failed to call g_embedded_db_client->GetRunningQueueCopy()");
+    CRANE_ERROR("Failed to retrieve embedded DB snapshot!");
     return false;
   }
 
-  if (!running_list.empty()) {
-    CRANE_INFO("{} running task(s) recovered.", running_list.size());
+  auto& running_queue = snapshot.running_queue;
+
+  if (!running_queue.empty()) {
+    CRANE_INFO("{} running task(s) recovered.", running_queue.size());
 
     std::unordered_map<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
         craned_cgroups_map;
-    for (auto&& task_in_embedded_db : running_list) {
+    for (auto&& [task_db_id, task_in_embedded_db] : running_queue) {
       auto task = std::make_unique<TaskInCtld>();
       task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
-      task->SetFieldsByPersistedPart(task_in_embedded_db.persisted_part());
+      task->SetFieldsByRuntimeAttr(task_in_embedded_db.runtime_attr());
       task_id_t task_id = task->TaskId();
-      task_db_id_t task_db_id = task->TaskDbId();
 
       CRANE_TRACE("Restore task #{} from embedded running queue.",
                   task->TaskId());
@@ -79,24 +80,16 @@ bool TaskScheduler::Init() {
       if (err != CraneErr::kOk) {
         CRANE_INFO(
             "Failed to acquire task attributes for restored running task #{}. "
-            "Error Code: {}. Mark it as FAILED and move it to the ended queue.",
+            "Error Code: {}. "
+            "Mark it as FAILED and move it to the ended queue.",
             task_id, CraneErrStr(err));
         task->SetStatus(crane::grpc::Failed);
-        ok = g_embedded_db_client->UpdatePersistedPartOfTask(
-            0, task_db_id, task->PersistedPart());
+        ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
+                                                           task->RuntimeAttr());
         if (!ok) {
           CRANE_ERROR(
-              "UpdatePersistedPartOfTask failed for task #{} when "
+              "UpdateRuntimeAttrOfTask failed for task #{} when "
               "mark the task as FAILED.",
-              task_id);
-        }
-
-        ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(0,
-                                                                   task_db_id);
-        if (!ok) {
-          CRANE_ERROR(
-              "MovePendingOrRunningTaskToEnded failed for task #{} when "
-              "this running task to ended queue..",
               task_id);
         }
 
@@ -123,29 +116,28 @@ bool TaskScheduler::Init() {
         task->allocated_craneds_regex.clear();
         task->CranedIdsClear();
 
-        ok = g_embedded_db_client->UpdatePersistedPartOfTask(
-            0, task->TaskDbId(), task->PersistedPart());
+        ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task->TaskDbId(),
+                                                           task->RuntimeAttr());
         if (!ok) {
           CRANE_ERROR(
               "Failed to call "
-              "g_embedded_db_client->UpdatePersistedPartOfTask()");
-        }
-
-        ok = g_embedded_db_client->MoveTaskFromRunningToPending(
-            0, task->TaskDbId());
-        if (!ok) {
-          CRANE_ERROR(
-              "Failed to call "
-              "g_embedded_db_client->MoveTaskFromRunningToPending()");
+              "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
         }
 
         // Now the task is moved to the embedded pending queue.
-        // The embedded pending queue will be processed in the following code.
+        RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
       } else {
         crane::grpc::TaskStatus status;
         err = stub->CheckTaskStatus(task->TaskId(), &status);
         if (err == CraneErr::kOk) {
           task->SetStatus(status);
+          ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
+              0, task->TaskDbId(), task->RuntimeAttr());
+          if (!ok) {
+            CRANE_ERROR(
+                "Failed to call "
+                "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
+          }
           if (status == crane::grpc::Running) {
             // Exec node is up and the task is running.
             // Just allocate resource from allocated nodes and
@@ -153,14 +145,15 @@ bool TaskScheduler::Init() {
             PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
 
             CRANE_INFO(
-                "Task #{} is still RUNNING. Put it into memory running queue.",
+                "Task #{} is still RUNNING. "
+                "Put it into memory running queue.",
                 task_id);
           } else {
             // Exec node is up and the task ended.
 
             CRANE_INFO(
-                "Task #{} has ended with status {}. Put it into embedded ended "
-                "queue.",
+                "Task #{} has ended with status {}. "
+                "Put it into embedded ended queue.",
                 task_id, crane::grpc::TaskStatus_Name(status));
 
             if (status != crane::grpc::Completed) {
@@ -184,27 +177,19 @@ bool TaskScheduler::Init() {
                                                          task->uid);
             }
 
-            ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(
-                0, task->TaskDbId());
-            if (!ok) {
-              CRANE_ERROR(
-                  "MovePendingOrRunningTaskToEnded failed for task #{} when "
-                  "recovering running queue.",
-                  task->TaskId());
-            }
-
             ok = g_db_client->InsertJob(task.get());
             if (!ok) {
               CRANE_ERROR(
-                  "InsertJob failed for task #{} when recovering running "
-                  "queue.",
+                  "InsertJob failed for task #{} "
+                  "when recovering running queue.",
                   task->TaskId());
             }
 
-            ok = g_embedded_db_client->PurgeTaskFromEnded(0, task->TaskDbId());
+            std::vector<task_db_id_t> db_ids{task_db_id};
+            ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
             if (!ok) {
               CRANE_ERROR(
-                  "PurgeTaskFromEnded failed for task #{} when recovering "
+                  "PurgeEndedTasks failed for task #{} when recovering "
                   "running queue.",
                   task->TaskId());
             }
@@ -212,14 +197,13 @@ bool TaskScheduler::Init() {
         } else {
           // Exec node is up but task id does not exist.
           // It may come up due to the craned has restarted during CraneCtld
-          // was down. Thus, we should clean the Craned nodes on which the task
-          // was possibly running.
-          // The result of task is lost in such a scenario, and we should
-          // requeue the task.
+          // was down. Thus, we should clean the Craned nodes on which the
+          // task was possibly running. The result of task is lost in such a
+          // scenario, and we should requeue the task.
           CRANE_TRACE(
               "Task id #{} can't be found cannot be found in its exec craned. "
-              "Clean all its allocated craned nodes, and "
-              "move it to pending queue and re-run it.",
+              "Clean all its allocated craned nodes, "
+              "and move it to pending queue and re-run it.",
               task_id);
 
           for (const CranedId& craned_id : task->CranedIds()) {
@@ -233,16 +217,8 @@ bool TaskScheduler::Init() {
                                                        task->uid);
           }
 
-          ok = g_embedded_db_client->MoveTaskFromRunningToPending(
-              0, task->TaskDbId());
-          if (!ok) {
-            CRANE_ERROR(
-                "Failed to call "
-                "g_embedded_db_client->MoveTaskFromRunningToPending()");
-          }
-
           // Now the task is moved to the embedded pending queue.
-          // The embedded pending queue will be processed in the following code.
+          RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
         }
       }
     }
@@ -266,26 +242,17 @@ bool TaskScheduler::Init() {
     bl.Wait();
   }
 
-  // Process the pending tasks in the embedded pending queue. The task may
-  //  come from the embedded running queue due to requeue failure.
+  // Process the pending tasks in the embedded pending queue.
+  auto& pending_queue = snapshot.pending_queue;
+  if (!pending_queue.empty()) {
+    CRANE_INFO("{} pending task(s) recovered.", pending_queue.size());
 
-  std::list<TaskInEmbeddedDb> pending_list;
-  ok = g_embedded_db_client->GetPendingQueueCopy(0, &pending_list);
-  if (!ok) {
-    CRANE_ERROR("Failed to call g_embedded_db_client->GetPendingQueueCopy()");
-    return false;
-  }
-
-  if (!pending_list.empty()) {
-    CRANE_INFO("{} pending task(s) recovered.", pending_list.size());
-
-    for (auto&& task_in_embedded_db : pending_list) {
+    for (auto&& [task_db_id, task_in_embedded_db] : pending_queue) {
       auto task = std::make_unique<TaskInCtld>();
       task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
-      task->SetFieldsByPersistedPart(task_in_embedded_db.persisted_part());
+      task->SetFieldsByRuntimeAttr(task_in_embedded_db.runtime_attr());
 
       task_id_t task_id = task->TaskId();
-      task_db_id_t task_db_id = task->TaskDbId();
 
       CRANE_TRACE("Restore task #{} from embedded pending queue.",
                   task->TaskId());
@@ -320,41 +287,42 @@ bool TaskScheduler::Init() {
             "move it to the ended queue.",
             task_id);
         task->SetStatus(crane::grpc::Failed);
-        ok = g_embedded_db_client->UpdatePersistedPartOfTask(
-            0, task_db_id, task->PersistedPart());
+        ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
+                                                           task->RuntimeAttr());
         if (!ok) {
           CRANE_ERROR(
-              "UpdatePersistedPartOfTask failed for task #{} when "
+              "UpdateRuntimeAttrOfTask failed for task #{} when "
               "mark the task as FAILED.",
               task_id);
         }
 
-        ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(0,
-                                                                   task_db_id);
+        ok = g_db_client->InsertJob(task.get());
         if (!ok) {
           CRANE_ERROR(
-              "MovePendingOrRunningTaskToEnded failed for task #{} when "
-              "requeue-ing this pending task in the embedded queue..",
-              task_id);
+              "InsertJob failed for task #{} when recovering pending "
+              "queue.",
+              task->TaskId());
+        }
+
+        std::vector<task_db_id_t> db_ids{task_db_id};
+        ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
+        if (!ok) {
+          CRANE_ERROR(
+              "PurgeEndedTasks failed for task #{} when recovering "
+              "pending queue.",
+              task->TaskId());
         }
       }
     }
   }
 
-  std::list<TaskInEmbeddedDb> ended_list;
-  ok = g_embedded_db_client->GetEndedQueueCopy(0, &ended_list);
-  if (!ok) {
-    CRANE_ERROR("Failed to call g_embedded_db_client->GetEndedQueueCopy()");
-    return false;
-  }
+  if (!snapshot.final_queue.empty()) {
+    CRANE_INFO("{} final task(s) might not have been put to mongodb.",
+               snapshot.final_queue.size());
 
-  if (!ended_list.empty()) {
-    CRANE_INFO("{} ended task(s) might not have been put to mongodb: ",
-               ended_list.size());
-
-    for (auto& task_in_embedded_db : ended_list) {
-      task_id_t task_id = task_in_embedded_db.persisted_part().task_id();
-      task_db_id_t db_id = task_in_embedded_db.persisted_part().task_db_id();
+    std::vector<task_db_id_t> db_ids;
+    for (auto& [db_id, task_in_embedded_db] : snapshot.final_queue) {
+      task_id_t task_id = task_in_embedded_db.runtime_attr().task_id();
       ok = g_db_client->CheckTaskDbIdExisted(db_id);
       if (!ok) {
         if (!g_db_client->InsertRecoveredJob(task_in_embedded_db)) {
@@ -365,12 +333,12 @@ bool TaskScheduler::Init() {
         }
       }
 
-      ok = g_embedded_db_client->PurgeTaskFromEnded(
-          0, task_in_embedded_db.persisted_part().task_db_id());
-      if (!ok) {
-        CRANE_ERROR(
-            "Failed to call g_embedded_db_client->PurgeTaskFromEnded()");
-      }
+      db_ids.emplace_back(db_id);
+    }
+
+    ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
+    if (!ok) {
+      CRANE_ERROR("Failed to call g_embedded_db_client->PurgeEndedTasks()");
     }
   }
 
@@ -575,7 +543,8 @@ void TaskScheduler::ScheduleThread_() {
       m_running_task_map_mtx_.Lock();
 
       schedule_begin = std::chrono::steady_clock::now();
-      num_tasks_single_schedule = m_pending_task_map_.size();
+      num_tasks_single_schedule = std::min((size_t)g_config.ScheduledBatchSize,
+                                           m_pending_task_map_.size());
 
       begin = std::chrono::steady_clock::now();
 
@@ -750,7 +719,7 @@ void TaskScheduler::ScheduleThread_() {
 
       // Move tasks into running queue.
       txn_id_t txn_id{0};
-      bool ok = g_embedded_db_client->BeginTransaction(&txn_id);
+      bool ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
       if (!ok) {
         CRANE_ERROR(
             "TaskScheduler failed to start transaction when scheduling.");
@@ -758,25 +727,15 @@ void TaskScheduler::ScheduleThread_() {
 
       for (auto& it : selection_result_list) {
         auto& task = it.first;
-        auto* task_ptr = task.get();
 
         // IMPORTANT: task must be put into running_task_map before any
         //  time-consuming operation, otherwise TaskStatusChange RPC will come
         //  earlier before task is put into running_task_map.
-        g_embedded_db_client->UpdatePersistedPartOfTask(
-            txn_id, task_ptr->TaskDbId(), task_ptr->PersistedPart());
-
-        ok = g_embedded_db_client->MoveTaskFromPendingToRunning(
-            txn_id, task_ptr->TaskDbId());
-        if (!ok) {
-          CRANE_ERROR(
-              "Failed to call "
-              "g_embedded_db_client->MoveTaskFromPendingToRunning({})",
-              task_ptr->TaskDbId());
-        }
+        g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, task->TaskDbId(),
+                                                      task->RuntimeAttr());
       }
 
-      ok = g_embedded_db_client->CommitTransaction(txn_id);
+      ok = g_embedded_db_client->CommitVariableDbTransaction(txn_id);
       if (!ok) {
         CRANE_ERROR("Embedded database failed to commit manual transaction.");
       }
@@ -893,7 +852,7 @@ void TaskScheduler::ScheduleThread_() {
           task->SetExitCode(ExitCode::kExitCodeCgroupError);
           task->SetEndTime(absl::Now());
         }
-        TransferTasksToMongodb_(failed_task_raw_ptrs);
+        PersistAndTransferTasksToMongodb_(failed_task_raw_ptrs);
 
         // Failed tasks have been handled properly. Free them explicitly.
         failed_result_list.clear();
@@ -905,6 +864,8 @@ void TaskScheduler::ScheduleThread_() {
                 .count());
       }
     } else {
+      m_pending_map_cached_size_.store(m_pending_task_map_.size(),
+                                       std::memory_order::release);
       m_pending_task_map_mtx_.Unlock();
     }
 
@@ -1207,7 +1168,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
     }
   }
 
-  TransferTasksToMongodb_(task_raw_ptr_vec);
+  PersistAndTransferTasksToMongodb_(task_raw_ptr_vec);
 }
 
 void TaskScheduler::SubmitTaskTimerCb_() {
@@ -1220,54 +1181,88 @@ void TaskScheduler::SubmitTaskAsyncCb_() {
 }
 
 void TaskScheduler::CleanSubmitQueueCb_() {
+  using SubmitQueueElem =
+      std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>;
+
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_task_queue_.size_approx();
 
-  std::vector<std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>>
-      submit_tasks;
-  std::vector<uint32_t> task_indexes_with_id_allocated;
+  std::vector<SubmitQueueElem> accepted_tasks;
+  std::vector<TaskInCtld*> accepted_task_ptrs;
+  std::vector<SubmitQueueElem> rejected_tasks;
 
   size_t map_size = m_pending_map_cached_size_.load(std::memory_order_acquire);
+  size_t accepted_size;
+  size_t rejected_size;
 
-  size_t batch_size =
-      std::min(approximate_size, kPendingConcurrentQueueBatchSize - map_size);
-  submit_tasks.resize(batch_size);
-
-  size_t actual_size =
-      m_submit_task_queue_.try_dequeue_bulk(submit_tasks.begin(), batch_size);
-
-  if (actual_size == 0) return;
-
-  txn_id_t txn_id;
-  g_embedded_db_client->BeginTransaction(&txn_id);
-
-  // The order of element inside the bulk is reverse.
-  for (uint32_t i = 0; i < submit_tasks.size(); i++) {
-    uint32_t pos = submit_tasks.size() - 1 - i;
-    auto* task = submit_tasks[pos].first.get();
-    auto& task_id_promise = submit_tasks[pos].second;
-    // Add the task to the pending task queue.
-    task->SetStatus(crane::grpc::Pending);
-
-    if (!g_embedded_db_client->AppendTaskToPendingAndAdvanceTaskIds(txn_id,
-                                                                    task)) {
-      CRANE_ERROR("Failed to append the task to embedded db queue.");
-      task_id_promise.set_value(0);
-    } else
-      task_indexes_with_id_allocated.emplace_back(pos);
-  }
-  g_embedded_db_client->CommitTransaction(txn_id);
-
-  LockGuard pending_guard(&m_pending_task_map_mtx_);
-  for (uint32_t i : task_indexes_with_id_allocated) {
-    task_id_t id = submit_tasks[i].first->TaskId();
-
-    m_pending_task_map_.emplace(id, std::move(submit_tasks[i].first));
-    submit_tasks[i].second.set_value(id);
+  if (g_config.RejectTasksBeyondCapacity) {
+    accepted_size =
+        std::min(approximate_size, g_config.PendingQueueMaxSize - map_size);
+    rejected_size = approximate_size - accepted_size;
+  } else {
+    accepted_size = approximate_size;
+    rejected_size = 0;
   }
 
-  m_pending_map_cached_size_.store(m_pending_task_map_.size(),
-                                   std::memory_order_release);
+  size_t accepted_actual_size;
+  size_t rejected_actual_size;
+
+  // Accept tasks within queue capacity.
+  do {
+    if (accepted_size == 0) break;
+    accepted_tasks.resize(accepted_size);
+
+    accepted_actual_size = m_submit_task_queue_.try_dequeue_bulk(
+        accepted_tasks.begin(), accepted_size);
+    if (accepted_actual_size == 0) break;
+
+    accepted_task_ptrs.reserve(accepted_actual_size);
+
+    // The order of element inside the bulk is reverse.
+    for (uint32_t i = 0; i < accepted_tasks.size(); i++) {
+      uint32_t pos = accepted_tasks.size() - 1 - i;
+      auto* task = accepted_tasks[pos].first.get();
+      // Add the task to the pending task queue.
+      task->SetStatus(crane::grpc::Pending);
+      accepted_task_ptrs.emplace_back(task);
+    }
+
+    if (!g_embedded_db_client->AppendTasksToPendingAndAdvanceTaskIds(
+            accepted_task_ptrs)) {
+      CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
+      for (auto& pair : accepted_tasks) pair.second /*promise*/.set_value(0);
+      break;
+    }
+
+    m_pending_task_map_mtx_.Lock();
+
+    for (uint32_t i = 0; i < accepted_tasks.size(); i++) {
+      uint32_t pos = accepted_tasks.size() - 1 - i;
+      task_id_t id = accepted_tasks[pos].first->TaskId();
+      auto& task_id_promise = accepted_tasks[pos].second;
+
+      m_pending_task_map_.emplace(id, std::move(accepted_tasks[pos].first));
+      task_id_promise.set_value(id);
+    }
+
+    m_pending_map_cached_size_.store(m_pending_task_map_.size(),
+                                     std::memory_order_release);
+    m_pending_task_map_mtx_.Unlock();
+  } while (false);
+
+  // Reject tasks beyond queue capacity
+  do {
+    if (rejected_size == 0) break;
+    rejected_tasks.resize(rejected_size);
+
+    rejected_actual_size = m_submit_task_queue_.try_dequeue_bulk(
+        rejected_tasks.begin(), rejected_size);
+    if (rejected_actual_size == 0) break;
+
+    CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
+    for (size_t i = 0; i < rejected_actual_size; i++)
+      rejected_tasks[i].second.set_value(0);
+  } while (false);
 }
 
 void TaskScheduler::TaskStatusChangeAsync(uint32_t task_id,
@@ -1401,7 +1396,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     });
   }
   bl.Wait();
-  TransferTasksToMongodb_(task_raw_ptr_vec);
+
+  PersistAndTransferTasksToMongodb_(task_raw_ptr_vec);
 }
 
 void TaskScheduler::QueryTasksInRam(
@@ -1413,17 +1409,16 @@ void TaskScheduler::QueryTasksInRam(
     TaskInCtld& task = *it.second;
     auto* task_it = task_list->Add();
     task_it->set_type(task.TaskToCtld().type());
-    task_it->set_task_id(task.PersistedPart().task_id());
+    task_it->set_task_id(task.RuntimeAttr().task_id());
     task_it->set_name(task.TaskToCtld().name());
     task_it->set_partition(task.TaskToCtld().partition_name());
     task_it->set_uid(task.TaskToCtld().uid());
 
-    task_it->set_gid(task.PersistedPart().gid());
+    task_it->set_gid(task.RuntimeAttr().gid());
     task_it->mutable_time_limit()->set_seconds(ToInt64Seconds(task.time_limit));
-    task_it->mutable_submit_time()->CopyFrom(
-        task.PersistedPart().submit_time());
-    task_it->mutable_start_time()->CopyFrom(task.PersistedPart().start_time());
-    task_it->mutable_end_time()->CopyFrom(task.PersistedPart().end_time());
+    task_it->mutable_submit_time()->CopyFrom(task.RuntimeAttr().submit_time());
+    task_it->mutable_start_time()->CopyFrom(task.RuntimeAttr().start_time());
+    task_it->mutable_end_time()->CopyFrom(task.RuntimeAttr().end_time());
     task_it->set_account(task.account);
 
     task_it->set_node_num(task.node_num);
@@ -1438,9 +1433,9 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_exit_code(0);
     task_it->set_priority(task.schedule_priority);
 
-    task_it->set_status(task.PersistedPart().status());
+    task_it->set_status(task.RuntimeAttr().status());
     task_it->set_craned_list(
-        util::HostNameListToStr(task.PersistedPart().craned_ids()));
+        util::HostNameListToStr(task.RuntimeAttr().craned_ids()));
   };
 
   auto task_rng_filter_time = [&](auto& it) {
@@ -1453,25 +1448,25 @@ void TaskScheduler::QueryTasksInRam(
     if (has_submit_time_interval) {
       const auto& interval = request->filter_submit_time_interval();
       valid &= !interval.has_lower_bound() ||
-               task.PersistedPart().submit_time() >= interval.lower_bound();
+               task.RuntimeAttr().submit_time() >= interval.lower_bound();
       valid &= !interval.has_upper_bound() ||
-               task.PersistedPart().submit_time() <= interval.upper_bound();
+               task.RuntimeAttr().submit_time() <= interval.upper_bound();
     }
 
     if (has_start_time_interval) {
       const auto& interval = request->filter_start_time_interval();
       valid &= !interval.has_lower_bound() ||
-               task.PersistedPart().start_time() >= interval.lower_bound();
+               task.RuntimeAttr().start_time() >= interval.lower_bound();
       valid &= !interval.has_upper_bound() ||
-               task.PersistedPart().start_time() <= interval.upper_bound();
+               task.RuntimeAttr().start_time() <= interval.upper_bound();
     }
 
     if (has_end_time_interval) {
       const auto& interval = request->filter_end_time_interval();
       valid &= !interval.has_lower_bound() ||
-               task.PersistedPart().end_time() >= interval.lower_bound();
+               task.RuntimeAttr().end_time() >= interval.lower_bound();
       valid &= !interval.has_upper_bound() ||
-               task.PersistedPart().end_time() <= interval.upper_bound();
+               task.RuntimeAttr().end_time() <= interval.upper_bound();
     }
 
     return valid;
@@ -1533,7 +1528,7 @@ void TaskScheduler::QueryTasksInRam(
   auto task_rng_filter_state = [&](auto& it) {
     TaskInCtld& task = *it.second;
     return no_task_states_constraint ||
-           req_task_states.contains(task.PersistedPart().status());
+           req_task_states.contains(task.RuntimeAttr().status());
   };
 
   auto pending_rng = m_pending_task_map_ | ranges::views::all;
@@ -1903,8 +1898,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           //   *-------* seg         *-------* seg
           //   *--*             or     *---*
           //   ^                       ^
-          //  it1                     it1 ( ==
-          //  intersected_time_segment.begin())
+          //  it1                     it1 ( == intersected_time_segment.begin())
           auto it1 = std::upper_bound(intersected_time_segments.begin(),
                                       intersected_time_segments.end(), start);
           if (it1 != intersected_time_segments.begin())
@@ -2023,8 +2017,8 @@ void MinLoadFirst::NodeSelect(
   }
 
   std::vector<task_id_t> task_id_vec;
-  task_id_vec = m_priority_sorter_->GetOrderedTaskIdList(*pending_task_map,
-                                                         running_tasks);
+  task_id_vec = m_priority_sorter_->GetOrderedTaskIdList(
+      *pending_task_map, running_tasks, g_config.ScheduledBatchSize);
   // Now we know, on every node, the # of running tasks (which
   //  doesn't include those we select as the incoming running tasks in the
   //  following code) and how many resources are available at the end of each
@@ -2259,49 +2253,35 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
   }
 }
 
-void TaskScheduler::TransferTasksToMongodb_(
+void TaskScheduler::PersistAndTransferTasksToMongodb_(
     std::vector<TaskInCtld*> const& tasks) {
   if (tasks.empty()) return;
 
   txn_id_t txn_id;
-  g_embedded_db_client->BeginTransaction(&txn_id);
+  g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
   for (TaskInCtld* task : tasks) {
-    g_embedded_db_client->UpdatePersistedPartOfTask(txn_id, task->TaskDbId(),
-                                                    task->PersistedPart());
-    bool ok;
-    ok = g_embedded_db_client->MovePendingOrRunningTaskToEnded(
-        txn_id, task->TaskDbId());
-    if (!ok) {
-      CRANE_ERROR(
-          "Failed to call g_embedded_db_client->"
-          "MovePendingOrRunningTaskToEnded() for task #{}",
-          task->TaskId());
-    }
+    if (!g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, task->TaskDbId(),
+                                                       task->RuntimeAttr()))
+      CRANE_ERROR("Failed to call UpdateRuntimeAttrOfTask() for task #{}",
+                  task->TaskId());
   }
 
-  g_embedded_db_client->CommitTransaction(txn_id);
+  g_embedded_db_client->CommitVariableDbTransaction(txn_id);
 
-  // Now cancelled pending tasks are in MongoDB.
+  // Now tasks are in MongoDB.
   if (!g_db_client->InsertJobs(tasks)) {
     CRANE_ERROR("Failed to call g_db_client->InsertJobs() ");
     return;
   }
 
-  txn_id = 0;
-  if (!g_embedded_db_client->BeginTransaction(&txn_id)) {
-    CRANE_ERROR(
-        "Failed to call g_embedded_db_client->BeginTransaction(&txn_id) for "
-        "when p->e.");
-    return;
-  }
+  // Remove tasks in final queue.
+  std::vector<task_db_id_t> db_ids;
+  for (TaskInCtld* task : tasks) db_ids.emplace_back(task->TaskDbId());
 
-  for (TaskInCtld* task : tasks)
-    g_embedded_db_client->PurgeTaskFromEnded(txn_id, task->TaskDbId());
-
-  if (!g_embedded_db_client->CommitTransaction(txn_id)) {
+  if (!g_embedded_db_client->PurgeEndedTasks(db_ids)) {
     CRANE_ERROR(
-        "Failed to call g_embedded_db_client->CommitTransaction() "
-        "for cancelled pending tasks");
+        "Failed to call g_embedded_db_client->PurgeEndedTasks() "
+        "for final tasks");
   }
 }
 
@@ -2416,9 +2396,7 @@ void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id,
 
 std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     const OrderedTaskMap& pending_task_map,
-    const UnorderedTaskMap& running_task_map) {
-  std::vector<task_id_t> task_id_vec;
-
+    const UnorderedTaskMap& running_task_map, size_t limit_num) {
   CalculateFactorBound_(pending_task_map, running_task_map);
 
   std::vector<std::pair<task_id_t, double>> task_priority_vec;
@@ -2433,8 +2411,13 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
               return a.second > b.second;
             });
 
-  task_id_vec.reserve(task_priority_vec.size());
-  for (auto& pair : task_priority_vec) task_id_vec.emplace_back(pair.first);
+  size_t id_vec_len = std::min(limit_num, task_priority_vec.size());
+
+  std::vector<task_id_t> task_id_vec;
+  task_id_vec.reserve(id_vec_len);
+
+  for (int i = 0; i < id_vec_len; i++)
+    task_id_vec.emplace_back(task_priority_vec[i].first);
 
   return task_id_vec;
 }
