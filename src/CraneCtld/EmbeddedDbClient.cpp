@@ -533,26 +533,11 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
 }
 
 bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
-  using TaskToCtld = crane::grpc::TaskToCtld;
+  using TaskStatus = crane::grpc::TaskStatus;
+  using RuntimeAttr = crane::grpc::RuntimeAttrOfTask;
 
-  std::unordered_map<db_id_t, TaskToCtld> task_fixed_data_map;
-
-  auto result = m_fixed_db_->IterateAllKv(
-      [&](std::string&& key, std::vector<uint8_t>&& value) {
-        task_db_id_t id = ExtractDbIdFromEntry_(key);
-
-        TaskToCtld task_to_ctld;
-        task_to_ctld.ParseFromArray(value.data(), value.size());
-
-        // Record all task_id here and don't delete any key,
-        // so true is returned.
-        return true;
-      });
-
-  if (result.has_error()) {
-    CRANE_ERROR("Failed to restore fixed data into queues!");
-    return false;
-  }
+  result::result<void, DbErrorCode> result;
+  std::unordered_map<db_id_t, RuntimeAttr> db_id_runtime_attr_map;
 
   result = m_variable_db_->IterateAllKv(
       [&](std::string&& key, std::vector<uint8_t>&& value) {
@@ -561,35 +546,54 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
 
         task_db_id_t id = ExtractDbIdFromEntry_(key);
 
-        // Delete incomplete task data,
+        RuntimeAttr runtime_attr;
+        runtime_attr.ParseFromArray(value.data(), value.size());
+
+        db_id_runtime_attr_map.emplace(id, std::move(runtime_attr));
+
+        // Record all task_id here and don't delete any key,
+        // so true is returned.
+        return true;
+      });
+
+  if (result.has_error()) {
+    CRANE_ERROR("Failed to restore the variable data into queues");
+    return false;
+  }
+
+  result = m_fixed_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&& value) {
+        task_db_id_t id = ExtractDbIdFromEntry_(key);
+
+        // Delete incomplete task fixed data,
         // where fixed data are stored but variable data are missing.
-        auto fixed_data_it = task_fixed_data_map.find(id);
-        if (fixed_data_it == task_fixed_data_map.end()) return false;
+        auto runtime_attr_it = db_id_runtime_attr_map.find(id);
+        if (runtime_attr_it == db_id_runtime_attr_map.end()) return false;
+
+        TaskStatus status = runtime_attr_it->second.status();
 
         // Assemble TaskInEmbeddedDb here.
-        crane::grpc::TaskInEmbeddedDb task_proto;
-        task_proto.mutable_runtime_attr()->ParseFromArray(value.data(),
-                                                          value.size());
-
-        *task_proto.mutable_task_to_ctld() = std::move(fixed_data_it->second);
+        TaskInEmbeddedDb task;
+        *task.mutable_runtime_attr() = std::move(runtime_attr_it->second);
+        task.mutable_task_to_ctld()->ParseFromArray(value.data(), value.size());
 
         // Dispatch to different queues by status.
-        switch (task_proto.runtime_attr().status()) {
+        switch (status) {
           case crane::grpc::Pending:
-            snapshot->pending_queue.emplace(id, std::move(task_proto));
+            snapshot->pending_queue.emplace(id, std::move(task));
             break;
           case crane::grpc::Running:
-            snapshot->running_queue.emplace(id, std::move(task_proto));
+            snapshot->running_queue.emplace(id, std::move(task));
             break;
           default:
-            snapshot->final_queue.emplace(id, std::move(task_proto));
+            snapshot->final_queue.emplace(id, std::move(task));
             break;
         }
         return true;
       });
 
   if (result.has_error()) {
-    CRANE_ERROR("Failed to restore the variable data into queues");
+    CRANE_ERROR("Failed to restore fixed data into queues!");
     return false;
   }
 
