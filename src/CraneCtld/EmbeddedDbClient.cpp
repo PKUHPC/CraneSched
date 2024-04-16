@@ -477,6 +477,7 @@ EmbeddedDbClient::~EmbeddedDbClient() {
       CRANE_ERROR(
           "Error occurred when closing the embedded db of variable data!");
   }
+
   if (m_fixed_db_) {
     auto result = m_fixed_db_->Close();
     if (result.has_error())
@@ -668,23 +669,34 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
 }
 
 bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
-  // To ensure consistency in data recovery operations in the event of a failure
-  // between two transactions, it is necessary to ensure that fixed data is
-  // written first and erased later.
+  // To ensure consistency of both fixed data db and variable data db under
+  // failure, we must ensure that:
+  // 1. when inserting task data, fixed data db is written before variable db;
+  // 2. when erasing task data, fixed data db is erased after variable db;
+
   txn_id_t txn_id;
   result::result<void, DbErrorCode> res;
 
   if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
   for (const auto& id : db_ids) {
     res = m_variable_db_->Delete(txn_id, GetVariableDbEntryName_(id));
-    if (res.has_error() && res.error() == DbErrorCode::kOther) return false;
+    if (res.has_error()) {
+      CRANE_ERROR(
+          "Failed to delete embedded variable data entry.Error code: {}",
+          res.error());
+      return false;
+    }
   }
   if (!CommitDbTransaction_(m_variable_db_.get(), txn_id)) return false;
 
   if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
   for (const auto& id : db_ids) {
     res = m_fixed_db_->Delete(txn_id, GetFixedDbEntryName_(id));
-    if (res.has_error() && res.error() == DbErrorCode::kOther) return false;
+    if (res.has_error()) {
+      CRANE_ERROR("Failed to delete embedded fixed data entry. Error code: {}",
+                  res.error());
+      return false;
+    }
   }
   if (!CommitDbTransaction_(m_fixed_db_.get(), txn_id)) return false;
 

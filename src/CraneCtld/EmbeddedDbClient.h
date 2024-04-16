@@ -27,8 +27,6 @@
 #  include <unqlite.h>
 #endif
 
-#include "crane/Lock.h"
-#include "crane/Pointer.h"
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
@@ -198,15 +196,8 @@ class EmbeddedDbClient {
     return CommitDbTransaction_(m_fixed_db_.get(), txn_id);
   }
 
-  //  bool AbortTransaction(txn_id_t txn_id,
-  //                        const std::shared_ptr<IEmbeddedDb>& db) {
-  //    if (txn_id <= 0) {
-  //      CRANE_ERROR("Abort a transaction with id {} <= 0", txn_id);
-  //      return false;
-  //    }
-  //
-  //    return db->Abort(txn_id).has_value();
-  //  }
+  // Note: All operations in transaction will abort or rollback automatically if
+  // some operation fails, so we don't need anything like AbortTransaction here!
 
   bool AppendTasksToPendingAndAdvanceTaskIds(
       const std::vector<TaskInCtld*>& tasks);
