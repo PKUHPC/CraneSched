@@ -167,15 +167,20 @@ class EmbeddedDbClient {
  private:
   using db_id_t = task_db_id_t;
   using TaskInEmbeddedDb = crane::grpc::TaskInEmbeddedDb;
-  using RecoveredMapMutexExclusivePtr =
-      util::ScopeExclusivePtr<std::unordered_map<db_id_t, TaskInEmbeddedDb>,
-                              absl::Mutex>;
 
  public:
+  struct DbSnapshot {
+    std::unordered_map<db_id_t, TaskInEmbeddedDb> pending_queue;
+    std::unordered_map<db_id_t, TaskInEmbeddedDb> running_queue;
+    std::unordered_map<db_id_t, TaskInEmbeddedDb> final_queue;
+  };
+
   EmbeddedDbClient() = default;
   ~EmbeddedDbClient();
 
   bool Init(std::string const& db_path);
+
+  bool RetrieveLastSnapshot(DbSnapshot* snapshot);
 
   bool BeginVariableDbTransaction(txn_id_t* txn_id) {
     return BeginDbTransaction_(m_variable_db_.get(), txn_id);
@@ -208,24 +213,6 @@ class EmbeddedDbClient {
 
   bool PurgeEndedTasks(const std::vector<db_id_t>& db_ids);
 
-  RecoveredMapMutexExclusivePtr GetRecoveredPendingQueuePtr() {
-    m_queue_mtx_.Lock();
-    return RecoveredMapMutexExclusivePtr{&m_recovered_pending_queue_,
-                                         &m_queue_mtx_};
-  }
-
-  RecoveredMapMutexExclusivePtr GetRecoveredRunningQueuePtr() {
-    m_queue_mtx_.Lock();
-    return RecoveredMapMutexExclusivePtr{&m_recovered_running_queue_,
-                                         &m_queue_mtx_};
-  }
-
-  RecoveredMapMutexExclusivePtr GetRecoveredEndedQueuePtr() {
-    m_queue_mtx_.Lock();
-    return RecoveredMapMutexExclusivePtr{&m_recovered_ended_queue_,
-                                         &m_queue_mtx_};
-  }
-
   bool UpdateRuntimeAttrOfTask(
       txn_id_t txn_id, db_id_t db_id,
       crane::grpc::RuntimeAttrOfTask const& runtime_attr) {
@@ -253,6 +240,10 @@ class EmbeddedDbClient {
 
   inline static std::string GetVariableDbEntryName_(db_id_t db_id) {
     return fmt::format("{}S", db_id);
+  }
+
+  inline static bool IsVariableDbEntry_(std::string const& key) {
+    return key.back() == 'S';
   }
 
   bool BeginDbTransaction_(IEmbeddedDb* db, txn_id_t* txn_id) {
@@ -420,11 +411,6 @@ class EmbeddedDbClient {
   inline static task_id_t s_next_task_id_;
   inline static db_id_t s_next_task_db_id_;
   inline static absl::Mutex s_task_id_and_db_id_mtx_;
-
-  std::unordered_map<db_id_t, TaskInEmbeddedDb> m_recovered_pending_queue_;
-  std::unordered_map<db_id_t, TaskInEmbeddedDb> m_recovered_running_queue_;
-  std::unordered_map<db_id_t, TaskInEmbeddedDb> m_recovered_ended_queue_;
-  absl::Mutex m_queue_mtx_;
 
   std::unique_ptr<IEmbeddedDb> m_variable_db_;
   std::unique_ptr<IEmbeddedDb> m_fixed_db_;

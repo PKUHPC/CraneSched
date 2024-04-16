@@ -528,13 +528,15 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
                                                       &s_next_task_db_id_, 1L);
   if (!ok) return false;
 
-  // Reconstruct the running queue and the pending queue.
-  std::unordered_map<db_id_t, crane::grpc::TaskStatus> status_map;
-  util::lock_guard guard(m_queue_mtx_);
+  return true;
+}
 
-  result = m_variable_db_->IterateAllKv(
+bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
+  std::unordered_map<db_id_t, crane::grpc::TaskStatus> status_map;
+
+  auto result = m_variable_db_->IterateAllKv(
       [&](std::string&& key, std::vector<uint8_t>&& value) {
-        if (key.back() != 'S') return true;  // skip the 'NDI' and 'NI'
+        if (!IsVariableDbEntry_(key)) return true;  // skip the 'NDI' and 'NI'
 
         crane::grpc::TaskInEmbeddedDb task_proto;
         task_proto.mutable_runtime_attr()->ParseFromArray(value.data(),
@@ -544,14 +546,14 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
         status_map[id] = task_proto.runtime_attr().status();
 
         switch (task_proto.runtime_attr().status()) {
-          case crane::grpc::Running:
-            m_recovered_running_queue_[id] = std::move(task_proto);
-            break;
           case crane::grpc::Pending:
-            m_recovered_pending_queue_[id] = std::move(task_proto);
+            snapshot->pending_queue[id] = std::move(task_proto);
+            break;
+          case crane::grpc::Running:
+            snapshot->running_queue[id] = std::move(task_proto);
             break;
           default:
-            m_recovered_ended_queue_[id] = std::move(task_proto);
+            snapshot->final_queue[id] = std::move(task_proto);
             break;
         }
         return true;
@@ -562,33 +564,35 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
     return false;
   }
 
-  result = m_fixed_db_->IterateAllKv([&](std::string&& key,
-                                         std::vector<uint8_t>&& value) {
-    task_db_id_t id = std::stol(key.substr(0, key.size() - 1));
+  result = m_fixed_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&& value) {
+        task_db_id_t id = std::stol(key.substr(0, key.size() - 1));
 
-    if (!status_map.contains(id)) return false;  // delete the redundant data
+        // delete the incomplete data
+        if (!status_map.contains(id)) return false;
 
-    switch (status_map[id]) {
-      case crane::grpc::Pending:
-        m_recovered_pending_queue_[id].mutable_task_to_ctld()->ParseFromArray(
-            value.data(), value.size());
-        break;
-      case crane::grpc::Running:
-        m_recovered_running_queue_[id].mutable_task_to_ctld()->ParseFromArray(
-            value.data(), value.size());
-        break;
-      default:
-        m_recovered_ended_queue_[id].mutable_task_to_ctld()->ParseFromArray(
-            value.data(), value.size());
-        break;
-    }
-    if (result.has_error()) {
-      CRANE_ERROR("Failed to restore the fixed data into queues");
-      return false;
-    }
+        switch (status_map[id]) {
+          case crane::grpc::Pending:
+            snapshot->pending_queue[id].mutable_task_to_ctld()->ParseFromArray(
+                value.data(), value.size());
+            break;
+          case crane::grpc::Running:
+            snapshot->running_queue[id].mutable_task_to_ctld()->ParseFromArray(
+                value.data(), value.size());
+            break;
+          default:
+            snapshot->final_queue[id].mutable_task_to_ctld()->ParseFromArray(
+                value.data(), value.size());
+            break;
+        }
 
-    return true;
-  });
+        if (result.has_error()) {
+          CRANE_ERROR("Failed to restore fixed data into queues!");
+          return false;
+        }
+
+        return true;
+      });
 
   return true;
 }
@@ -598,6 +602,10 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
   txn_id_t txn_id;
   result::result<void, DbErrorCode> result;
 
+  // Note: In current implementation, this function is called by only
+  // one single thread and the lock here is actually useless.
+  // However, it costs little and prevents race condition,
+  // so we just leave it here.
   absl::MutexLock lock_ids(&s_task_id_and_db_id_mtx_);
 
   uint32_t task_id{s_next_task_id_};

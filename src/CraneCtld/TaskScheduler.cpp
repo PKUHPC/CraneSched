@@ -53,65 +53,84 @@ bool TaskScheduler::Init() {
   bool ok;
   CraneErr err;
 
-  {
-    auto running_map = g_embedded_db_client->GetRecoveredRunningQueuePtr();
+  EmbeddedDbClient::DbSnapshot snapshot;
+  ok = g_embedded_db_client->RetrieveLastSnapshot(&snapshot);
+  if (!ok) {
+    CRANE_ERROR("Failed to retrieve embedded DB snapshot!");
+    return false;
+  }
 
-    if (!running_map->empty()) {
-      CRANE_INFO("{} running task(s) recovered.", running_map->size());
+  auto& running_queue = snapshot.running_queue;
 
-      std::unordered_map<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
-          craned_cgroups_map;
-      for (auto&& [task_db_id, task_in_embedded_db] : *running_map) {
-        auto task = std::make_unique<TaskInCtld>();
-        task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
-        task->SetFieldsByRuntimeAttr(task_in_embedded_db.runtime_attr());
-        task_id_t task_id = task->TaskId();
+  if (!running_queue.empty()) {
+    CRANE_INFO("{} running task(s) recovered.", running_queue.size());
 
-        CRANE_TRACE("Restore task #{} from embedded running queue.",
-                    task->TaskId());
+    std::unordered_map<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
+        craned_cgroups_map;
+    for (auto&& [task_db_id, task_in_embedded_db] : running_queue) {
+      auto task = std::make_unique<TaskInCtld>();
+      task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
+      task->SetFieldsByRuntimeAttr(task_in_embedded_db.runtime_attr());
+      task_id_t task_id = task->TaskId();
 
-        err = AcquireTaskAttributes(task.get());
-        if (err != CraneErr::kOk) {
-          CRANE_INFO(
-              "Failed to acquire task attributes for restored running task "
-              "#{}. "
-              "Error Code: {}. Mark it as FAILED and move it to the ended "
-              "queue.",
-              task_id, CraneErrStr(err));
-          task->SetStatus(crane::grpc::Failed);
-          ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
-              0, task_db_id, task->RuntimeAttr());
-          if (!ok) {
-            CRANE_ERROR(
-                "UpdateRuntimeAttrOfTask failed for task #{} when "
-                "mark the task as FAILED.",
-                task_id);
-          }
+      CRANE_TRACE("Restore task #{} from embedded running queue.",
+                  task->TaskId());
 
-          // Move this problematic task into ended queue and
-          // process next task.
-          continue;
+      err = AcquireTaskAttributes(task.get());
+      if (err != CraneErr::kOk) {
+        CRANE_INFO(
+            "Failed to acquire task attributes for restored running task #{}. "
+            "Error Code: {}. "
+            "Mark it as FAILED and move it to the ended queue.",
+            task_id, CraneErrStr(err));
+        task->SetStatus(crane::grpc::Failed);
+        ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
+                                                           task->RuntimeAttr());
+        if (!ok) {
+          CRANE_ERROR(
+              "UpdateRuntimeAttrOfTask failed for task #{} when "
+              "mark the task as FAILED.",
+              task_id);
         }
 
-        auto stub = g_craned_keeper->GetCranedStub(task->executing_craned_id);
-        if (stub == nullptr || stub->Invalid()) {
-          CRANE_INFO(
-              "The execution node of the restore task #{} is down. "
-              "Clean all its allocated craned nodes, and "
-              "move it to pending queue and re-run it.",
-              task_id);
+        // Move this problematic task into ended queue and
+        // process next task.
+        continue;
+      }
 
-          for (const CranedId& craned_id : task->CranedIds()) {
-            craned_cgroups_map[craned_id].emplace_back(task->TaskId(),
-                                                       task->uid);
-          }
+      auto stub = g_craned_keeper->GetCranedStub(task->executing_craned_id);
+      if (stub == nullptr || stub->Invalid()) {
+        CRANE_INFO(
+            "The execution node of the restore task #{} is down. "
+            "Clean all its allocated craned nodes, and "
+            "move it to pending queue and re-run it.",
+            task_id);
 
-          task->SetStatus(crane::grpc::Pending);
+        for (const CranedId& craned_id : task->CranedIds()) {
+          craned_cgroups_map[craned_id].emplace_back(task->TaskId(), task->uid);
+        }
 
-          task->nodes_alloc = 0;
-          task->allocated_craneds_regex.clear();
-          task->CranedIdsClear();
+        task->SetStatus(crane::grpc::Pending);
 
+        task->nodes_alloc = 0;
+        task->allocated_craneds_regex.clear();
+        task->CranedIdsClear();
+
+        ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task->TaskDbId(),
+                                                           task->RuntimeAttr());
+        if (!ok) {
+          CRANE_ERROR(
+              "Failed to call "
+              "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
+        }
+
+        // Now the task is moved to the embedded pending queue.
+        RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
+      } else {
+        crane::grpc::TaskStatus status;
+        err = stub->CheckTaskStatus(task->TaskId(), &status);
+        if (err == CraneErr::kOk) {
+          task->SetStatus(status);
           ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
               0, task->TaskDbId(), task->RuntimeAttr());
           if (!ok) {
@@ -119,233 +138,207 @@ bool TaskScheduler::Init() {
                 "Failed to call "
                 "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
           }
+          if (status == crane::grpc::Running) {
+            // Exec node is up and the task is running.
+            // Just allocate resource from allocated nodes and
+            // put it back into the running queue.
+            PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
 
-          // Now the task is moved to the embedded pending queue.
-          RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
-        } else {
-          crane::grpc::TaskStatus status;
-          err = stub->CheckTaskStatus(task->TaskId(), &status);
-          if (err == CraneErr::kOk) {
-            task->SetStatus(status);
-            ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
-                0, task->TaskDbId(), task->RuntimeAttr());
-            if (!ok) {
-              CRANE_ERROR(
-                  "Failed to call "
-                  "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
-            }
-            if (status == crane::grpc::Running) {
-              // Exec node is up and the task is running.
-              // Just allocate resource from allocated nodes and
-              // put it back into the running queue.
-              PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
-
-              CRANE_INFO(
-                  "Task #{} is still RUNNING. Put it into memory running "
-                  "queue.",
-                  task_id);
-            } else {
-              // Exec node is up and the task ended.
-
-              CRANE_INFO(
-                  "Task #{} has ended with status {}. Put it into embedded "
-                  "ended "
-                  "queue.",
-                  task_id, crane::grpc::TaskStatus_Name(status));
-
-              if (status != crane::grpc::Completed) {
-                // Check whether the task is orphaned on the allocated nodes
-                // in case that when processing TaskStatusChange CraneCtld
-                // crashed, only part of Craned nodes executed TerminateTask
-                // gRPC. Not needed for succeeded tasks.
-                for (const CranedId& craned_id : task->CranedIds()) {
-                  stub = g_craned_keeper->GetCranedStub(craned_id);
-                  if (stub != nullptr && !stub->Invalid())
-                    stub->TerminateOrphanedTask(task->TaskId());
-                }
-              }
-
-              // For both succeeded and failed tasks, cgroup for them should be
-              // released. Though some craned nodes might have released the
-              // cgroup, just resend the gRPC again to guarantee that the cgroup
-              // is always released.
-              for (const CranedId& craned_id : task->CranedIds()) {
-                craned_cgroups_map[craned_id].emplace_back(task->TaskId(),
-                                                           task->uid);
-              }
-
-              ok = g_db_client->InsertJob(task.get());
-              if (!ok) {
-                CRANE_ERROR(
-                    "InsertJob failed for task #{} when recovering running "
-                    "queue.",
-                    task->TaskId());
-              }
-
-              std::vector<task_db_id_t> db_ids{task_db_id};
-              ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
-              if (!ok) {
-                CRANE_ERROR(
-                    "PurgeEndedTasks failed for task #{} when recovering "
-                    "running queue.",
-                    task->TaskId());
-              }
-            }
-          } else {
-            // Exec node is up but task id does not exist.
-            // It may come up due to the craned has restarted during CraneCtld
-            // was down. Thus, we should clean the Craned nodes on which the
-            // task was possibly running. The result of task is lost in such a
-            // scenario, and we should requeue the task.
-            CRANE_TRACE(
-                "Task id #{} can't be found cannot be found in its exec "
-                "craned. "
-                "Clean all its allocated craned nodes, and "
-                "move it to pending queue and re-run it.",
+            CRANE_INFO(
+                "Task #{} is still RUNNING. "
+                "Put it into memory running queue.",
                 task_id);
+          } else {
+            // Exec node is up and the task ended.
 
-            for (const CranedId& craned_id : task->CranedIds()) {
-              stub = g_craned_keeper->GetCranedStub(craned_id);
-              if (stub != nullptr && !stub->Invalid())
-                stub->TerminateOrphanedTask(task->TaskId());
+            CRANE_INFO(
+                "Task #{} has ended with status {}. "
+                "Put it into embedded ended queue.",
+                task_id, crane::grpc::TaskStatus_Name(status));
+
+            if (status != crane::grpc::Completed) {
+              // Check whether the task is orphaned on the allocated nodes
+              // in case that when processing TaskStatusChange CraneCtld
+              // crashed, only part of Craned nodes executed TerminateTask
+              // gRPC. Not needed for succeeded tasks.
+              for (const CranedId& craned_id : task->CranedIds()) {
+                stub = g_craned_keeper->GetCranedStub(craned_id);
+                if (stub != nullptr && !stub->Invalid())
+                  stub->TerminateOrphanedTask(task->TaskId());
+              }
             }
 
+            // For both succeeded and failed tasks, cgroup for them should be
+            // released. Though some craned nodes might have released the
+            // cgroup, just resend the gRPC again to guarantee that the cgroup
+            // is always released.
             for (const CranedId& craned_id : task->CranedIds()) {
               craned_cgroups_map[craned_id].emplace_back(task->TaskId(),
                                                          task->uid);
             }
 
-            // Now the task is moved to the embedded pending queue.
-            RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
-          }
-        }
-      }
-
-      absl::BlockingCounter bl(craned_cgroups_map.size());
-      for (const auto& [craned_id, cgroups] : craned_cgroups_map) {
-        g_thread_pool->detach_task([&bl, &craned_id, &cgroups]() {
-          auto stub = g_craned_keeper->GetCranedStub(craned_id);
-
-          // If the craned is down, just ignore it.
-          if (stub && !stub->Invalid()) {
-            CraneErr err = stub->ReleaseCgroupForTasks(cgroups);
-            if (err != CraneErr::kOk) {
+            ok = g_db_client->InsertJob(task.get());
+            if (!ok) {
               CRANE_ERROR(
-                  "Failed to Release cgroup RPC for {} tasks on Node {}",
-                  cgroups.size(), craned_id);
+                  "InsertJob failed for task #{} "
+                  "when recovering running queue.",
+                  task->TaskId());
+            }
+
+            std::vector<task_db_id_t> db_ids{task_db_id};
+            ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
+            if (!ok) {
+              CRANE_ERROR(
+                  "PurgeEndedTasks failed for task #{} when recovering "
+                  "running queue.",
+                  task->TaskId());
             }
           }
-          bl.DecrementCount();
-        });
+        } else {
+          // Exec node is up but task id does not exist.
+          // It may come up due to the craned has restarted during CraneCtld
+          // was down. Thus, we should clean the Craned nodes on which the
+          // task was possibly running. The result of task is lost in such a
+          // scenario, and we should requeue the task.
+          CRANE_TRACE(
+              "Task id #{} can't be found cannot be found in its exec craned. "
+              "Clean all its allocated craned nodes, "
+              "and move it to pending queue and re-run it.",
+              task_id);
+
+          for (const CranedId& craned_id : task->CranedIds()) {
+            stub = g_craned_keeper->GetCranedStub(craned_id);
+            if (stub != nullptr && !stub->Invalid())
+              stub->TerminateOrphanedTask(task->TaskId());
+          }
+
+          for (const CranedId& craned_id : task->CranedIds()) {
+            craned_cgroups_map[craned_id].emplace_back(task->TaskId(),
+                                                       task->uid);
+          }
+
+          // Now the task is moved to the embedded pending queue.
+          RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
+        }
       }
-      bl.Wait();
     }
+
+    absl::BlockingCounter bl(craned_cgroups_map.size());
+    for (const auto& [craned_id, cgroups] : craned_cgroups_map) {
+      g_thread_pool->detach_task([&bl, &craned_id, &cgroups]() {
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+
+        // If the craned is down, just ignore it.
+        if (stub && !stub->Invalid()) {
+          CraneErr err = stub->ReleaseCgroupForTasks(cgroups);
+          if (err != CraneErr::kOk) {
+            CRANE_ERROR("Failed to Release cgroup RPC for {} tasks on Node {}",
+                        cgroups.size(), craned_id);
+          }
+        }
+        bl.DecrementCount();
+      });
+    }
+    bl.Wait();
   }
 
   // Process the pending tasks in the embedded pending queue.
-  {
-    auto pending_map = g_embedded_db_client->GetRecoveredPendingQueuePtr();
+  auto& pending_queue = snapshot.pending_queue;
+  if (!pending_queue.empty()) {
+    CRANE_INFO("{} pending task(s) recovered.", pending_queue.size());
 
-    if (!pending_map->empty()) {
-      CRANE_INFO("{} pending task(s) recovered.", pending_map->size());
+    for (auto&& [task_db_id, task_in_embedded_db] : pending_queue) {
+      auto task = std::make_unique<TaskInCtld>();
+      task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
+      task->SetFieldsByRuntimeAttr(task_in_embedded_db.runtime_attr());
 
-      for (auto&& [task_db_id, task_in_embedded_db] : *pending_map) {
-        auto task = std::make_unique<TaskInCtld>();
-        task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
-        task->SetFieldsByRuntimeAttr(task_in_embedded_db.runtime_attr());
+      task_id_t task_id = task->TaskId();
 
-        task_id_t task_id = task->TaskId();
+      CRANE_TRACE("Restore task #{} from embedded pending queue.",
+                  task->TaskId());
 
-        CRANE_TRACE("Restore task #{} from embedded pending queue.",
-                    task->TaskId());
+      bool mark_task_as_failed = false;
 
-        bool mark_task_as_failed = false;
+      if (task->type != crane::grpc::Batch) {
+        CRANE_INFO("Mark interactive task #{} as FAILED", task_id);
+        mark_task_as_failed = true;
+      }
 
-        if (task->type != crane::grpc::Batch) {
-          CRANE_INFO("Mark interactive task #{} as FAILED", task_id);
-          mark_task_as_failed = true;
-        }
+      if (!mark_task_as_failed &&
+          AcquireTaskAttributes(task.get()) != CraneErr::kOk) {
+        CRANE_ERROR("AcquireTaskAttributes failed for task #{}", task_id);
+        mark_task_as_failed = true;
+      }
 
-        if (!mark_task_as_failed &&
-            AcquireTaskAttributes(task.get()) != CraneErr::kOk) {
-          CRANE_ERROR("AcquireTaskAttributes failed for task #{}", task_id);
-          mark_task_as_failed = true;
-        }
+      if (!mark_task_as_failed &&
+          CheckTaskValidity(task.get()) != CraneErr::kOk) {
+        CRANE_ERROR("CheckTaskValidity failed for task #{}", task_id);
+        mark_task_as_failed = true;
+      }
 
-        if (!mark_task_as_failed &&
-            CheckTaskValidity(task.get()) != CraneErr::kOk) {
-          CRANE_ERROR("CheckTaskValidity failed for task #{}", task_id);
-          mark_task_as_failed = true;
-        }
-
-        if (!mark_task_as_failed) {
-          RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
-        } else {
-          // If a batch task failed to requeue the task into pending queue due
-          // to insufficient resource or other reasons or the task is an
-          // interactive task, Mark it as FAILED and move it to the ended queue.
-          CRANE_INFO(
-              "Failed to requeue task #{}. Mark it as FAILED and "
-              "move it to the ended queue.",
+      if (!mark_task_as_failed) {
+        RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
+      } else {
+        // If a batch task failed to requeue the task into pending queue due
+        // to insufficient resource or other reasons or the task is an
+        // interactive task, Mark it as FAILED and move it to the ended queue.
+        CRANE_INFO(
+            "Failed to requeue task #{}. Mark it as FAILED and "
+            "move it to the ended queue.",
+            task_id);
+        task->SetStatus(crane::grpc::Failed);
+        ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
+                                                           task->RuntimeAttr());
+        if (!ok) {
+          CRANE_ERROR(
+              "UpdateRuntimeAttrOfTask failed for task #{} when "
+              "mark the task as FAILED.",
               task_id);
-          task->SetStatus(crane::grpc::Failed);
-          ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
-              0, task_db_id, task->RuntimeAttr());
-          if (!ok) {
-            CRANE_ERROR(
-                "UpdateRuntimeAttrOfTask failed for task #{} when "
-                "mark the task as FAILED.",
-                task_id);
-          }
+        }
 
-          ok = g_db_client->InsertJob(task.get());
-          if (!ok) {
-            CRANE_ERROR(
-                "InsertJob failed for task #{} when recovering pending "
-                "queue.",
-                task->TaskId());
-          }
+        ok = g_db_client->InsertJob(task.get());
+        if (!ok) {
+          CRANE_ERROR(
+              "InsertJob failed for task #{} when recovering pending "
+              "queue.",
+              task->TaskId());
+        }
 
-          std::vector<task_db_id_t> db_ids{task_db_id};
-          ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
-          if (!ok) {
-            CRANE_ERROR(
-                "PurgeEndedTasks failed for task #{} when recovering "
-                "pending queue.",
-                task->TaskId());
-          }
+        std::vector<task_db_id_t> db_ids{task_db_id};
+        ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
+        if (!ok) {
+          CRANE_ERROR(
+              "PurgeEndedTasks failed for task #{} when recovering "
+              "pending queue.",
+              task->TaskId());
         }
       }
     }
   }
 
-  {
-    auto ended_map = g_embedded_db_client->GetRecoveredEndedQueuePtr();
+  if (!snapshot.final_queue.empty()) {
+    CRANE_INFO("{} final task(s) might not have been put to mongodb.",
+               snapshot.final_queue.size());
 
-    if (!ended_map->empty()) {
-      CRANE_INFO("{} ended task(s) might not have been put to mongodb: ",
-                 ended_map->size());
-
-      std::vector<task_db_id_t> db_ids;
-      for (auto& [db_id, task_in_embedded_db] : *ended_map) {
-        task_id_t task_id = task_in_embedded_db.runtime_attr().task_id();
-        ok = g_db_client->CheckTaskDbIdExisted(db_id);
-        if (!ok) {
-          if (!g_db_client->InsertRecoveredJob(task_in_embedded_db)) {
-            CRANE_ERROR(
-                "Failed to call g_db_client->InsertRecoveredJob() "
-                "for task #{}",
-                task_id);
-          }
-        }
-
-        db_ids.emplace_back(db_id);
-      }
-
-      ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
+    std::vector<task_db_id_t> db_ids;
+    for (auto& [db_id, task_in_embedded_db] : snapshot.final_queue) {
+      task_id_t task_id = task_in_embedded_db.runtime_attr().task_id();
+      ok = g_db_client->CheckTaskDbIdExisted(db_id);
       if (!ok) {
-        CRANE_ERROR("Failed to call g_embedded_db_client->PurgeEndedTasks()");
+        if (!g_db_client->InsertRecoveredJob(task_in_embedded_db)) {
+          CRANE_ERROR(
+              "Failed to call g_db_client->InsertRecoveredJob() "
+              "for task #{}",
+              task_id);
+        }
       }
+
+      db_ids.emplace_back(db_id);
+    }
+
+    ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
+    if (!ok) {
+      CRANE_ERROR("Failed to call g_embedded_db_client->PurgeEndedTasks()");
     }
   }
 

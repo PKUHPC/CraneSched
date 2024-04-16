@@ -263,8 +263,10 @@ void ParseConfig(int argc, char** argv) {
             } else {
               std::string ipv4;
               if (!crane::ResolveIpv4FromHostname(name, &ipv4)) {
-                CRANE_ERROR("Init error: Cannot resolve hostname of `{}`",
-                            name);
+                CRANE_ERROR(
+                    "InitAndRetrieveSnapshot error: Cannot resolve hostname of "
+                    "`{}`",
+                    name);
                 std::exit(1);
               }
               CRANE_INFO("Resolve hostname `{}` to `{}`", name, ipv4);
