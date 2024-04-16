@@ -643,8 +643,8 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
                               &task->RuntimeAttr());
     if (result.has_error()) {
       CRANE_ERROR(
-          "Failed to store the variable data of task id: {} / task db id: "
-          "{}.",
+          "Failed to store the variable data of "
+          "task id: {} / task db id: {}.",
           task->TaskId(), task->TaskDbId());
       return false;
     }
