@@ -627,6 +627,8 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
       CRANE_ERROR(
           "Failed to store the fixed data of task id: {} / task db id: {}.",
           task->TaskId(), task->TaskDbId());
+
+      // Just drop this batch if any of them failed.
       return false;
     }
   }
@@ -636,9 +638,6 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
   if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
 
   for (const auto& task : tasks) {
-    if (task->TaskId() == 0)
-      continue;  // skip the task which failed to store the fix data
-
     result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
                               GetVariableDbEntryName_(task->TaskDbId()),
                               &task->RuntimeAttr());
