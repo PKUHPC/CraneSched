@@ -585,14 +585,13 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
                 value.data(), value.size());
             break;
         }
-
-        if (result.has_error()) {
-          CRANE_ERROR("Failed to restore fixed data into queues!");
-          return false;
-        }
-
         return true;
       });
+
+  if (result.has_error()) {
+    CRANE_ERROR("Failed to restore fixed data into queues!");
+    return false;
+  }
 
   return true;
 }
