@@ -35,7 +35,7 @@ class IPrioritySorter {
  public:
   virtual std::vector<task_id_t> GetOrderedTaskIdList(
       const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map, size_t limit_num) = 0;
+      const UnorderedTaskMap& running_task_map, size_t limit) = 0;
 
   virtual ~IPrioritySorter() = default;
 };
@@ -44,14 +44,17 @@ class BasicPriority : public IPrioritySorter {
  public:
   std::vector<task_id_t> GetOrderedTaskIdList(
       const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map, size_t limit_num) override {
+      const UnorderedTaskMap& running_task_map, size_t limit) override {
+    size_t len = std::min(pending_task_map.size(), limit);
+
     std::vector<task_id_t> task_id_vec;
-    size_t i = 0;
-    for (const auto& pair : pending_task_map) {
-      if (i >= limit_num) break;
-      i++;
-      task_id_vec.emplace_back(pair.first);
+    task_id_vec.reserve(len);
+
+    int i = 0;
+    for (auto it = pending_task_map.begin(); i < len; i++, it++) {
+      task_id_vec.emplace_back(it->first);
     }
+
     return task_id_vec;
   }
 };

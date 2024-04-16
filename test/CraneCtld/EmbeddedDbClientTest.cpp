@@ -34,7 +34,7 @@ class EmbeddedDbClientTest : public ::testing::Test {
     }
 
     g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
-    ASSERT_TRUE(g_embedded_db_client->InitAndRetrieveSnapshot(db_file));
+    ASSERT_TRUE(g_embedded_db_client->Init(db_file));
   }
 
   void TearDown() override {

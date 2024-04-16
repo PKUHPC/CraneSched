@@ -2363,8 +2363,6 @@ void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id,
 std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     const OrderedTaskMap& pending_task_map,
     const UnorderedTaskMap& running_task_map, size_t limit_num) {
-  std::vector<task_id_t> task_id_vec;
-
   CalculateFactorBound_(pending_task_map, running_task_map);
 
   std::vector<std::pair<task_id_t, double>> task_priority_vec;
@@ -2380,12 +2378,12 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
             });
 
   size_t id_vec_len = std::min(limit_num, task_priority_vec.size());
+
+  std::vector<task_id_t> task_id_vec;
   task_id_vec.reserve(id_vec_len);
-  for (auto& pair : task_priority_vec) {
-    if (id_vec_len <= 0) break;
-    id_vec_len--;
-    task_id_vec.emplace_back(pair.first);
-  }
+
+  for (int i = 0; i < id_vec_len; i++)
+    task_id_vec.emplace_back(task_priority_vec[i].first);
 
   return task_id_vec;
 }
