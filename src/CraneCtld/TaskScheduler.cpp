@@ -159,8 +159,8 @@ bool TaskScheduler::Init() {
             if (status != crane::grpc::Completed) {
               // Check whether the task is orphaned on the allocated nodes
               // in case that when processing TaskStatusChange CraneCtld
-              // crashed, only part of Craned nodes executed TerminateTask
-              // gRPC. Not needed for succeeded tasks.
+              // crashed, only part of Craned nodes executed TerminateTask gRPC.
+              // Not needed for succeeded tasks.
               for (const CranedId& craned_id : task->CranedIds()) {
                 stub = g_craned_keeper->GetCranedStub(craned_id);
                 if (stub != nullptr && !stub->Invalid())
@@ -279,9 +279,9 @@ bool TaskScheduler::Init() {
       if (!mark_task_as_failed) {
         RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
       } else {
-        // If a batch task failed to requeue the task into pending queue due
-        // to insufficient resource or other reasons or the task is an
-        // interactive task, Mark it as FAILED and move it to the ended queue.
+        // If a batch task failed to requeue the task into pending queue due to
+        // insufficient resource or other reasons or the task is an interactive
+        // task, Mark it as FAILED and move it to the ended queue.
         CRANE_INFO(
             "Failed to requeue task #{}. Mark it as FAILED and "
             "move it to the ended queue.",
@@ -851,7 +851,7 @@ void TaskScheduler::ScheduleThread_() {
           task->SetExitCode(ExitCode::kExitCodeCgroupError);
           task->SetEndTime(absl::Now());
         }
-        TransferTasksToMongodb_(failed_task_raw_ptrs);
+        PersistAndTransferTasksToMongodb_(failed_task_raw_ptrs);
 
         // Failed tasks have been handled properly. Free them explicitly.
         failed_result_list.clear();
@@ -1165,7 +1165,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
     }
   }
 
-  TransferTasksToMongodb_(task_raw_ptr_vec);
+  PersistAndTransferTasksToMongodb_(task_raw_ptr_vec);
 }
 
 void TaskScheduler::SubmitTaskTimerCb_() {
@@ -1182,30 +1182,26 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   size_t approximate_size = m_submit_task_queue_.size_approx();
 
   std::vector<std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>>
-      submit_tasks;
+      dequeued_tasks;
   std::vector<TaskInCtld*> task_ptr_vec;
 
   size_t map_size = m_pending_map_cached_size_.load(std::memory_order_acquire);
-  size_t batch_size =
+  size_t accepted_size =
       std::min(approximate_size, g_config.PendingQueueMaxSize - map_size);
-  submit_tasks.resize(batch_size);
+  size_t rejected_size = approximate_size - accepted_size;
 
-  size_t actual_size =
-      m_submit_task_queue_.try_dequeue_bulk(submit_tasks.begin(), batch_size);
+  dequeued_tasks.resize(accepted_size);
 
-  // Reject the task out of range
-  //  for (uint32_t i = size_in_range; i < submit_tasks.size(); i++) {
-  //    uint32_t pos = submit_tasks.size() - 1 - i;
-  //    submit_tasks[pos].second.set_value(0);
-  //  }
+  size_t actual_size = m_submit_task_queue_.try_dequeue_bulk(
+      dequeued_tasks.begin(), accepted_size);
 
   if (actual_size == 0) return;
   task_ptr_vec.reserve(actual_size);
 
   // The order of element inside the bulk is reverse.
-  for (uint32_t i = 0; i < submit_tasks.size(); i++) {
-    uint32_t pos = submit_tasks.size() - 1 - i;
-    auto* task = submit_tasks[pos].first.get();
+  for (uint32_t i = 0; i < dequeued_tasks.size(); i++) {
+    uint32_t pos = dequeued_tasks.size() - 1 - i;
+    auto* task = dequeued_tasks[pos].first.get();
     // Add the task to the pending task queue.
     task->SetStatus(crane::grpc::Pending);
     task_ptr_vec.emplace_back(task);
@@ -1214,22 +1210,37 @@ void TaskScheduler::CleanSubmitQueueCb_() {
   if (!g_embedded_db_client->AppendTasksToPendingAndAdvanceTaskIds(
           task_ptr_vec)) {
     CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
-    for (auto& pair : submit_tasks) pair.second /*promise*/.set_value(0);
+    for (auto& pair : dequeued_tasks) pair.second /*promise*/.set_value(0);
     return;
   }
 
-  LockGuard pending_guard(&m_pending_task_map_mtx_);
-  for (uint32_t i = 0; i < submit_tasks.size(); i++) {
-    uint32_t pos = submit_tasks.size() - 1 - i;
-    task_id_t id = submit_tasks[pos].first->TaskId();
-    auto& task_id_promise = submit_tasks[pos].second;
+  m_pending_task_map_mtx_.Lock();
 
-    m_pending_task_map_.emplace(id, std::move(submit_tasks[pos].first));
+  for (uint32_t i = 0; i < dequeued_tasks.size(); i++) {
+    uint32_t pos = dequeued_tasks.size() - 1 - i;
+    task_id_t id = dequeued_tasks[pos].first->TaskId();
+    auto& task_id_promise = dequeued_tasks[pos].second;
+
+    m_pending_task_map_.emplace(id, std::move(dequeued_tasks[pos].first));
     task_id_promise.set_value(id);
   }
 
   m_pending_map_cached_size_.store(m_pending_task_map_.size(),
                                    std::memory_order_release);
+  m_pending_task_map_mtx_.Unlock();
+
+  // Reject tasks beyond queue capacity
+  if (rejected_size == 0 || g_config.RejectTasksBeyondCapacity) return;
+
+  dequeued_tasks.clear();
+  dequeued_tasks.resize(rejected_size);
+
+  actual_size = m_submit_task_queue_.try_dequeue_bulk(dequeued_tasks.begin(),
+                                                      rejected_size);
+  if (actual_size == 0) return;
+
+  for (size_t i = 0; i < actual_size; i++)
+    dequeued_tasks[i].second.set_value(0);
 }
 
 void TaskScheduler::TaskStatusChangeAsync(uint32_t task_id,
@@ -1363,7 +1374,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     });
   }
   bl.Wait();
-  TransferTasksToMongodb_(task_raw_ptr_vec);
+
+  PersistAndTransferTasksToMongodb_(task_raw_ptr_vec);
 }
 
 void TaskScheduler::QueryTasksInRam(
@@ -2220,7 +2232,7 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
   }
 }
 
-void TaskScheduler::TransferTasksToMongodb_(
+void TaskScheduler::PersistAndTransferTasksToMongodb_(
     std::vector<TaskInCtld*> const& tasks) {
   if (tasks.empty()) return;
 
@@ -2235,19 +2247,20 @@ void TaskScheduler::TransferTasksToMongodb_(
 
   g_embedded_db_client->CommitVariableDbTransaction(txn_id);
 
-  // Now cancelled pending tasks are in MongoDB.
+  // Now tasks are in MongoDB.
   if (!g_db_client->InsertJobs(tasks)) {
     CRANE_ERROR("Failed to call g_db_client->InsertJobs() ");
     return;
   }
 
+  // Remove tasks in final queue.
   std::vector<task_db_id_t> db_ids;
   for (TaskInCtld* task : tasks) db_ids.emplace_back(task->TaskDbId());
 
   if (!g_embedded_db_client->PurgeEndedTasks(db_ids)) {
     CRANE_ERROR(
         "Failed to call g_embedded_db_client->PurgeEndedTasks() "
-        "for cancelled pending tasks");
+        "for final tasks");
   }
 }
 

@@ -260,7 +260,8 @@ class TaskScheduler {
 
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
 
-  static void TransferTasksToMongodb_(std::vector<TaskInCtld*> const& tasks);
+  static void PersistAndTransferTasksToMongodb_(
+      std::vector<TaskInCtld*> const& tasks);
 
   CraneErr TerminateRunningTaskNoLock_(TaskInCtld* task);
 

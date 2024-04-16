@@ -82,5 +82,11 @@ DefaultPartition: CPU
 PendingQueueMaxSize: 900000
 
 # Maximum size of jobs which the scheduler will attempt to schedule
-# and must <=200000.
-ScheduledBatchSize: 200000
+# and its upper limit is 200000.
+# Recommended and default value is 2000.
+ScheduledBatchSize: 2000
+
+# Scheduler will reject all jobs beyond processing capacity set by PendingQueueMaxSize
+# if this option is set to true.
+# Default value is false.
+RejectJobsBeyondCapacity: false

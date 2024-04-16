@@ -54,9 +54,11 @@ constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
 constexpr uint32_t kPendingQueueMaxSize = 900000;
-constexpr uint32_t kScheduledBatchSize = 200000;
+constexpr uint32_t kMaxScheduledBatchSize = 200000;
+constexpr uint32_t kDefaultScheduledBatchSize = 2000;
 
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
+constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 
 struct Config {
   struct Node {
@@ -126,6 +128,7 @@ struct Config {
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;
+  bool RejectTasksBeyondCapacity{false};
 };
 
 }  // namespace Ctld

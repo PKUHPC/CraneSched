@@ -277,9 +277,18 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["ScheduledBatchSize"]) {
         g_config.ScheduledBatchSize =
-            config["ScheduledBatchSize"].as<uint32_t>();
+            std::min(config["ScheduledBatchSize"].as<uint32_t>(),
+                     Ctld::kMaxScheduledBatchSize);
       } else {
-        g_config.ScheduledBatchSize = Ctld::kScheduledBatchSize;
+        g_config.ScheduledBatchSize = Ctld::kDefaultScheduledBatchSize;
+      }
+
+      if (config["RejectJobsBeyondCapacity"]) {
+        g_config.RejectTasksBeyondCapacity =
+            config["RejectJobsBeyondCapacity"].as<bool>();
+      } else {
+        g_config.RejectTasksBeyondCapacity =
+            Ctld::kDefaultRejectTasksBeyondCapacity;
       }
 
       if (config["Nodes"]) {
