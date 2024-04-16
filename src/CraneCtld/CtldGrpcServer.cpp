@@ -43,7 +43,8 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     } else {
       response->set_ok(false);
       response->set_reason(
-          "System error or exceeded the maximum number of pending tasks");
+          "System error occurred or "
+          "the number of pending tasks exceeded maximum value.");
     }
   } else {
     response->set_ok(false);

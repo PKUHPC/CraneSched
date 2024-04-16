@@ -863,6 +863,8 @@ void TaskScheduler::ScheduleThread_() {
                 .count());
       }
     } else {
+      m_pending_map_cached_size_.store(m_pending_task_map_.size(),
+                                       std::memory_order::release);
       m_pending_task_map_mtx_.Unlock();
     }
 
@@ -1178,69 +1180,88 @@ void TaskScheduler::SubmitTaskAsyncCb_() {
 }
 
 void TaskScheduler::CleanSubmitQueueCb_() {
+  using SubmitQueueElem =
+      std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>;
+
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_task_queue_.size_approx();
 
-  std::vector<std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>>
-      dequeued_tasks;
-  std::vector<TaskInCtld*> task_ptr_vec;
+  std::vector<SubmitQueueElem> accepted_tasks;
+  std::vector<TaskInCtld*> accepted_task_ptrs;
+  std::vector<SubmitQueueElem> rejected_tasks;
 
   size_t map_size = m_pending_map_cached_size_.load(std::memory_order_acquire);
-  size_t accepted_size =
-      std::min(approximate_size, g_config.PendingQueueMaxSize - map_size);
-  size_t rejected_size = approximate_size - accepted_size;
+  size_t accepted_size;
+  size_t rejected_size;
 
-  dequeued_tasks.resize(accepted_size);
-
-  size_t actual_size = m_submit_task_queue_.try_dequeue_bulk(
-      dequeued_tasks.begin(), accepted_size);
-
-  if (actual_size == 0) return;
-  task_ptr_vec.reserve(actual_size);
-
-  // The order of element inside the bulk is reverse.
-  for (uint32_t i = 0; i < dequeued_tasks.size(); i++) {
-    uint32_t pos = dequeued_tasks.size() - 1 - i;
-    auto* task = dequeued_tasks[pos].first.get();
-    // Add the task to the pending task queue.
-    task->SetStatus(crane::grpc::Pending);
-    task_ptr_vec.emplace_back(task);
+  if (g_config.RejectTasksBeyondCapacity) {
+    accepted_size =
+        std::min(approximate_size, g_config.PendingQueueMaxSize - map_size);
+    rejected_size = approximate_size - accepted_size;
+  } else {
+    accepted_size = approximate_size;
+    rejected_size = 0;
   }
 
-  if (!g_embedded_db_client->AppendTasksToPendingAndAdvanceTaskIds(
-          task_ptr_vec)) {
-    CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
-    for (auto& pair : dequeued_tasks) pair.second /*promise*/.set_value(0);
-    return;
-  }
+  size_t accepted_actual_size;
+  size_t rejected_actual_size;
 
-  m_pending_task_map_mtx_.Lock();
+  // Accept tasks within queue capacity.
+  do {
+    if (accepted_size == 0) break;
+    accepted_tasks.resize(accepted_size);
 
-  for (uint32_t i = 0; i < dequeued_tasks.size(); i++) {
-    uint32_t pos = dequeued_tasks.size() - 1 - i;
-    task_id_t id = dequeued_tasks[pos].first->TaskId();
-    auto& task_id_promise = dequeued_tasks[pos].second;
+    accepted_actual_size = m_submit_task_queue_.try_dequeue_bulk(
+        accepted_tasks.begin(), accepted_size);
+    if (accepted_actual_size == 0) break;
 
-    m_pending_task_map_.emplace(id, std::move(dequeued_tasks[pos].first));
-    task_id_promise.set_value(id);
-  }
+    accepted_task_ptrs.reserve(accepted_actual_size);
 
-  m_pending_map_cached_size_.store(m_pending_task_map_.size(),
-                                   std::memory_order_release);
-  m_pending_task_map_mtx_.Unlock();
+    // The order of element inside the bulk is reverse.
+    for (uint32_t i = 0; i < accepted_tasks.size(); i++) {
+      uint32_t pos = accepted_tasks.size() - 1 - i;
+      auto* task = accepted_tasks[pos].first.get();
+      // Add the task to the pending task queue.
+      task->SetStatus(crane::grpc::Pending);
+      accepted_task_ptrs.emplace_back(task);
+    }
+
+    if (!g_embedded_db_client->AppendTasksToPendingAndAdvanceTaskIds(
+            accepted_task_ptrs)) {
+      CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
+      for (auto& pair : accepted_tasks) pair.second /*promise*/.set_value(0);
+      break;
+    }
+
+    m_pending_task_map_mtx_.Lock();
+
+    for (uint32_t i = 0; i < accepted_tasks.size(); i++) {
+      uint32_t pos = accepted_tasks.size() - 1 - i;
+      task_id_t id = accepted_tasks[pos].first->TaskId();
+      auto& task_id_promise = accepted_tasks[pos].second;
+
+      m_pending_task_map_.emplace(id, std::move(accepted_tasks[pos].first));
+      task_id_promise.set_value(id);
+    }
+
+    m_pending_map_cached_size_.store(m_pending_task_map_.size(),
+                                     std::memory_order_release);
+    m_pending_task_map_mtx_.Unlock();
+  } while (false);
 
   // Reject tasks beyond queue capacity
-  if (rejected_size == 0 || g_config.RejectTasksBeyondCapacity) return;
+  do {
+    if (rejected_size == 0) break;
+    rejected_tasks.resize(rejected_size);
 
-  dequeued_tasks.clear();
-  dequeued_tasks.resize(rejected_size);
+    rejected_actual_size = m_submit_task_queue_.try_dequeue_bulk(
+        rejected_tasks.begin(), rejected_size);
+    if (rejected_actual_size == 0) break;
 
-  actual_size = m_submit_task_queue_.try_dequeue_bulk(dequeued_tasks.begin(),
-                                                      rejected_size);
-  if (actual_size == 0) return;
-
-  for (size_t i = 0; i < actual_size; i++)
-    dequeued_tasks[i].second.set_value(0);
+    CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
+    for (size_t i = 0; i < rejected_actual_size; i++)
+      rejected_tasks[i].second.set_value(0);
+  } while (false);
 }
 
 void TaskScheduler::TaskStatusChangeAsync(uint32_t task_id,
@@ -1876,8 +1897,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           //   *-------* seg         *-------* seg
           //   *--*             or     *---*
           //   ^                       ^
-          //  it1                     it1 ( ==
-          //  intersected_time_segment.begin())
+          //  it1                     it1 ( == intersected_time_segment.begin())
           auto it1 = std::upper_bound(intersected_time_segments.begin(),
                                       intersected_time_segments.end(), start);
           if (it1 != intersected_time_segments.begin())
