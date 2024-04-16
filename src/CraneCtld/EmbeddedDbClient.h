@@ -242,8 +242,12 @@ class EmbeddedDbClient {
     return fmt::format("{}S", db_id);
   }
 
-  inline static bool IsVariableDbEntry_(std::string const& key) {
+  inline static bool IsVariableDbTaskDataEntry_(std::string const& key) {
     return key.back() == 'S';
+  }
+
+  inline static task_db_id_t ExtractDbIdFromEntry_(std::string const& key) {
+    return std::stol(key.substr(0, key.size() - 1));
   }
 
   bool BeginDbTransaction_(IEmbeddedDb* db, txn_id_t* txn_id) {
