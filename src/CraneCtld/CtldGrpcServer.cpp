@@ -858,8 +858,25 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
       }
     case crane::grpc::Event:
       *response = g_meta_container->QueryEventsInRam();
-    default:
-      break;
+      std::list<NodeEvent> event_list;
+      g_db_client->SelectAllEvents(&event_list);
+      for (auto &event : event_list) {
+        auto event_info = response->mutable_event_list()->Add();
+        event_info->set_uid(event.uid);
+        event_info->set_state(event.state);
+        event_info->set_reason(event.reason);
+        event_info->set_node_name(event.node_name);
+        event_info->mutable_start_time()->set_seconds(
+            absl::ToUnixSeconds(event.time_start));
+        event_info->mutable_start_time()->set_nanos(
+            absl::ToUnixSeconds(event.time_start) % 1000000000);
+        event_info->mutable_end_time()->set_seconds(
+            absl::ToUnixSeconds(event.time_end));
+        event_info->mutable_end_time()->set_nanos(
+            absl::ToUnixSeconds(event.time_end) % 1000000000);
+      }
+      //    default:
+      //      break;
   }
   return grpc::Status::OK;
 }

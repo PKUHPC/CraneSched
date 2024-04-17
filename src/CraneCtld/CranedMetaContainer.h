@@ -54,6 +54,10 @@ class CranedMetaContainerInterface {
       util::AtomicHashMap<HashMap, CranedId, CranedMeta>;
   using CranedMetaRawMap = CranedMetaAtomicMap::RawMap;
 
+  using CranedEventAtomicMap =
+      util::AtomicHashMap<HashMap, CranedId, NodeEvent>;
+  using CranedEventRawMap = CranedEventAtomicMap::RawMap;
+
   using AllPartitionsMetaMapConstPtr =
       util::ScopeConstSharedPtr<AllPartitionsMetaRawMap, util::rw_mutex>;
   using CranedMetaMapConstPtr =
@@ -174,7 +178,7 @@ class CranedMetaContainerSimpleImpl final
   // 4. unlock elements in partition_metas_map_
   CranedMetaAtomicMap craned_meta_map_;
   AllPartitionsMetaAtomicMap partition_metas_map_;
-  HashMap<CranedId, NodeEvent> craned_event_map_;
+  CranedEventAtomicMap craned_event_map_;
 
   // A craned node may belong to multiple partitions.
   // Use this map as a READ-ONLY index, so multi-thread reading is ok.
