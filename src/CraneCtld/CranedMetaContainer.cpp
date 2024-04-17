@@ -561,7 +561,8 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       } else if (craned_meta->alive && craned_meta->drain) {
         drain_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
         drain_craned_list->set_count(drain_craned_name_list.size());
-        drain_craned_list->set_reason(craned_meta->drain_reason);  // 多个reason?
+        drain_craned_list->set_reason(
+            craned_meta->drain_reason);  // 多个reason?
       } else if (filter_down) {
         down_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
         down_craned_list->set_count(down_craned_name_list.size());
@@ -605,9 +606,12 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
     event->reason = request.reason();
     event->uid = request.uid();
     event->time_end = absl::FromUnixSeconds(0);
-    craned_event_map_.emplace(request.craned_id(), *event);
+    craned_event_map_.Emplace(request.craned_id(), *event);
   } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE) {
-    // 取出内存中的event，修改结束时间加到数据库
+    auto event_meta = craned_event_map_[request.craned_id()];
+    event_meta->time_end = absl::Now();
+    g_db_client->InsertNodeEvent(event_meta.get());
+    craned_event_map_.Erase(request.craned_id());
     crane_meta->drain = false;
     crane_meta->drain_reason = "";
   }
@@ -618,27 +622,31 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
 
 crane::grpc::QueryEntityInfoReply
 CranedMetaContainerSimpleImpl::QueryEventsInRam() {
-  crane::grpc::QueryEntityInfoReply* response;
-  auto* event_list = response->mutable_event_list();
-  for (const auto& it : craned_event_map_) {
+  crane::grpc::QueryEntityInfoReply response;
+  auto* event_list = response.mutable_event_list();
+  auto event_map = craned_event_map_.GetMapSharedPtr();
+  for (auto it = event_map->begin(); it != event_map->end(); ++it) {
     auto* event_it = event_list->Add();
-    event_it->set_reason(it.second.reason);
-    event_it->set_state(it.second.state);
-    event_it->set_node_name(it.first);
-    event_it->set_uid(it.second.uid);
+    event_it->set_reason(it->second.RawPtr()->reason);
+    event_it->set_state(it->second.RawPtr()->state);
+    event_it->set_node_name(it->first);
+    event_it->set_uid(it->second.RawPtr()->uid);
     auto* start_time = new ::google::protobuf::Timestamp();
-    auto start_seconds = absl::ToUnixSeconds(it.second.time_start);
-    auto start_nanos = (absl::ToUnixNanos(it.second.time_start) % 1000000000);
+    auto start_seconds = absl::ToUnixSeconds(it->second.RawPtr()->time_start);
+    auto start_nanos =
+        (absl::ToUnixNanos(it->second.RawPtr()->time_start) % 1000000000);
     start_time->set_seconds(start_seconds);
     start_time->set_nanos(start_nanos);
     event_it->set_allocated_start_time(start_time);
     auto* end_time = new ::google::protobuf::Timestamp();
-    auto end_seconds = absl::ToUnixSeconds(it.second.time_end);
-    auto end_nanos = (absl::ToUnixNanos(it.second.time_end) % 1000000000);
+    auto end_seconds = absl::ToUnixSeconds(it->second.RawPtr()->time_end);
+    auto end_nanos =
+        (absl::ToUnixNanos(it->second.RawPtr()->time_end) % 1000000000);
     end_time->set_seconds(end_seconds);
     end_time->set_nanos(end_nanos);
     event_it->set_allocated_end_time(end_time);
   }
-  return *response;
+  response.set_ok(true);
+  return response;
 }
 }  // namespace Ctld

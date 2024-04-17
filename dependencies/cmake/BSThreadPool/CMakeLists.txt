@@ -2,7 +2,7 @@ include(FetchContent)
 
 if (CRANE_USE_GITEE_SOURCE)
     set(BS_THREAD_POOL_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/thread-pool-3.1.0.tar.gz")
-    MESSAGE(FATAL_ERROR "Thread pool library haven't been synchronized to gitee. Set CRANE_USE_GITEE_SOURCE to OFF.")
+#    MESSAGE(FATAL_ERROR "Thread pool library haven't been synchronized to gitee. Set CRANE_USE_GITEE_SOURCE to OFF.")
 else ()
     set(BS_THREAD_POOL_SRC_URL "https://github.com/bshoshany/thread-pool/archive/refs/tags/v4.0.1.tar.gz")
 endif ()

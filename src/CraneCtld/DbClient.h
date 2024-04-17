@@ -108,6 +108,7 @@ class MongodbClient {
   void SelectAllUser(std::list<User>* user_list);
   void SelectAllAccount(std::list<Account>* account_list);
   void SelectAllQos(std::list<Qos>* qos_list);
+  void SelectAllEvents(std::list<Ctld::NodeEvent>* event_list);
 
   template <typename T>
   void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
@@ -214,6 +215,8 @@ class MongodbClient {
   document AccountToDocument_(const Account& account);
 
   void ViewToQos_(const bsoncxx::document::view& qos_view, Qos* qos);
+  void ViewToEvent_(const bsoncxx::document::view& event_view,
+                    Ctld::NodeEvent* event);
 
   document QosToDocument_(const Qos& qos);
 

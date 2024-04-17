@@ -373,6 +373,16 @@ void MongodbClient::SelectAllQos(std::list<Ctld::Qos>* qos_list) {
   }
 }
 
+void MongodbClient::SelectAllEvents(std::list<Ctld::NodeEvent>* event_list) {
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_event_collection_name_].find({});
+  for (auto view : cursor) {
+    Ctld::NodeEvent event;
+    ViewToEvent_(view, &event);
+    event_list->emplace_back(event);
+  }
+}
+
 bool MongodbClient::UpdateUser(const Ctld::User& user) {
   document doc = UserToDocument_(user), setDocument, filter;
   doc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
@@ -667,6 +677,23 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
   }
 }
 
+void MongodbClient::ViewToEvent_(const bsoncxx::document::view& event_view,
+                                 Ctld::NodeEvent* event) {
+  try {
+    event->time_start =
+        absl::FromUnixSeconds(event_view["time_start"].get_int64().value);
+    event->time_end =
+        absl::FromUnixSeconds(event_view["time_end"].get_int64().value);
+    event->reason = event_view["reason"].get_string().value;
+    event->state = static_cast<crane::grpc::CranedState>(
+        event_view["state"].get_int32().value);
+    event->node_name = event_view["node_name"].get_string().value;
+    event->uid = event_view["uid"].get_int64().value;
+  } catch (const bsoncxx::exception& e) {
+    PrintError_(e.what());
+  }
+}
+
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
   std::array<std::string, 8> fields{
@@ -828,12 +855,9 @@ MongodbClient::document MongodbClient::EventToDocument_(NodeEvent* event) {
   std::array<std::string, 6> fields{"time_start", "time_end", "node_name",
                                     "reason",     "state",    "uid"};
   std::tuple<int64_t, int64_t, std::string, std::string, int32_t, int32_t>
-      values{absl::ToUnixSeconds(event->time_start),
-             absl::ToUnixSeconds(event->time_end),
-             event->node_name,
-             event->reason,
-             event->state,
-             static_cast<int32_t>(event->uid)};
+      values(absl::ToUnixSeconds(event->time_start),
+             absl::ToUnixSeconds(event->time_end), event->node_name,
+             event->reason, event->state, static_cast<int32_t>(event->uid));
   return DocumentConstructor_(fields, values);
 }
 
