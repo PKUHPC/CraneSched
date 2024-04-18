@@ -5,6 +5,8 @@ add_executable(craned
         ResourceAllocators.cpp
         TaskManager.h
         TaskManager.cpp
+        TaskExecutor.h
+        TaskExecutor.cpp
         CranedServer.h
         CranedServer.cpp
         CranedPublicDefs.h
