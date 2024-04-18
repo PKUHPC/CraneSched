@@ -18,7 +18,7 @@
 
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
-
+#include "AccountManager.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
@@ -76,7 +76,9 @@ class CranedMetaContainerInterface {
 
   virtual void InitFromConfig(const Config& config) = 0;
 
-  virtual bool CheckCranedAllowed(const std::string& hostname) = 0;
+  virtual bool CheckCranedExisted(const CranedId & hostname) = 0;
+
+  virtual bool CheckPartitionExisted(const PartitionId & name) = 0;
 
   virtual crane::grpc::QueryCranedInfoReply QueryAllCranedInfo() = 0;
 
@@ -112,6 +114,19 @@ class CranedMetaContainerInterface {
   virtual AllPartitionsMetaMapConstPtr GetAllPartitionsMetaMapConstPtr() = 0;
 
   virtual CranedMetaMapConstPtr GetCranedMetaMapConstPtr() = 0;
+
+  virtual result::result<void, std::string> AddPartition(PartitionMeta&& partition) = 0;
+
+  virtual result::result<void, std::string> AddNode(CranedMeta&& node) = 0;
+
+  virtual result::result<void, std::string> DeletePartition(
+      PartitionId name) = 0;
+
+  virtual result::result<void, std::string> DeleteNode(CranedId name) = 0;
+
+  virtual result::result<void, std::string> UpdatePartition(PartitionMeta&& partition) = 0;
+
+  virtual result::result<void, std::string> UpdateNode(CranedMeta&& node) = 0;
 };
 
 class CranedMetaContainerSimpleImpl final
@@ -152,14 +167,30 @@ class CranedMetaContainerSimpleImpl final
 
   CranedMetaMapConstPtr GetCranedMetaMapConstPtr() override;
 
-  bool CheckCranedAllowed(const std::string& hostname) override {
+  bool CheckCranedExisted(const CranedId & hostname) override {
     return craned_meta_map_.Contains(hostname);
   };
 
-  void MallocResourceFromNode(CranedId node_id, task_id_t task_id,
+  bool CheckPartitionExisted(const PartitionId & name) override {
+    return partition_metas_map_.Contains(name);
+  }
+
+  void MallocResourceFromNode(CranedId crane_id, task_id_t task_id,
                               const Resources& resources) override;
 
   void FreeResourceFromNode(CranedId craned_id, uint32_t task_id) override;
+
+  result::result<void, std::string> AddPartition(PartitionMeta&& partition) override;
+
+  result::result<void, std::string> AddNode(CranedMeta&& node) override;
+
+  result::result<void, std::string> DeletePartition(PartitionId name) override;
+
+  result::result<void, std::string> DeleteNode(CranedId name) override;
+
+  result::result<void, std::string> UpdatePartition(PartitionMeta&& partition) override;
+
+  result::result<void, std::string> UpdateNode(CranedMeta&& node) override;
 
  private:
   // In this part of code, the following lock sequence MUST be held
@@ -170,11 +201,6 @@ class CranedMetaContainerSimpleImpl final
   // 4. unlock elements in partition_metas_map_
   CranedMetaAtomicMap craned_meta_map_;
   AllPartitionsMetaAtomicMap partition_metas_map_;
-
-  // A craned node may belong to multiple partitions.
-  // Use this map as a READ-ONLY index, so multi-thread reading is ok.
-  HashMap<CranedId /*craned hostname*/, std::list<PartitionId>>
-      craned_id_part_ids_map_;
 };
 
 }  // namespace Ctld

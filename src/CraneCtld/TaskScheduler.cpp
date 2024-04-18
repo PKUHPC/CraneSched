@@ -1662,7 +1662,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     NodeSelectionInfo* node_selection_info) {
   NodeSelectionInfo& node_selection_info_ref = *node_selection_info;
 
-  std::unordered_set<CranedId> craned_ids =
+  std::set<CranedId> craned_ids =
       partition_meta_ptr.GetExclusivePtr()->craned_ids;
   for (const auto& craned_id : craned_ids) {
     auto& craned_meta_ptr = craned_meta_map.at(craned_id);
@@ -2132,7 +2132,7 @@ void MinLoadFirst::NodeSelect(
 
     PartitionId part_id = task->partition_id;
 
-    NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
+    NodeSelectionInfo& node_info = part_id_node_info_map[part_id];  // TODO check partition existed!!
     auto& part_meta = all_partitions_meta_map->at(part_id);
 
     std::list<CranedId> craned_ids;
@@ -2170,7 +2170,7 @@ void MinLoadFirst::NodeSelect(
     for (CranedId const& craned_id : craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
       for (PartitionId const& partition_id :
-           craned_meta->static_meta.partition_ids) {
+           craned_meta->partition_ids) {
         involved_part_craned[partition_id].emplace_back(craned_id);
       }
     }
@@ -2377,7 +2377,8 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 
   // Remove tasks in final queue.
   std::vector<task_db_id_t> db_ids;
-  for (TaskInCtld* task : tasks) db_ids.emplace_back(task->TaskDbId());
+  db_ids.reserve(tasks.size());
+for (TaskInCtld* task : tasks) db_ids.emplace_back(task->TaskDbId());
 
   if (!g_embedded_db_client->PurgeEndedTasks(db_ids)) {
     CRANE_ERROR(
@@ -2395,10 +2396,12 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
     return CraneErr::kInvalidParam;
   }
 
-  auto part_it = g_config.Partitions.find(task->partition_id);
-  if (part_it == g_config.Partitions.end()) return CraneErr::kInvalidParam;
+  {
+    auto part_it = g_meta_container->GetPartitionMetasPtr(task->partition_id);
+    if (!part_it) return CraneErr::kInvalidParam;
 
-  task->partition_priority = part_it->second.priority;
+    task->partition_priority = part_it->partition_global_meta.priority;
+  }
 
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;

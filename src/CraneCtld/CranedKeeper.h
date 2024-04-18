@@ -118,7 +118,9 @@ class CranedKeeper {
 
   void SetCranedIsDownCb(std::function<void(CranedId)> cb);
 
-  void PutNodeIntoUnavailList(const std::string &crane_id);
+  void PutNodeIntoUnavailList(const CranedId &crane_id);
+
+  void ResetConnection(const CranedId&craned_id);
 
  private:
   struct CqTag {

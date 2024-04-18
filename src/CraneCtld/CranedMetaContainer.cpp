@@ -16,11 +16,17 @@
 
 #include "CranedMetaContainer.h"
 
+#include "CranedKeeper.h"
+
 namespace Ctld {
 
 void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
-  CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
-  auto& part_ids = craned_id_part_ids_map_.at(craned_id);
+  std::vector<std::string> part_ids;
+  {
+    auto crane_map = craned_meta_map_.GetMapConstSharedPtr();
+    CRANE_ASSERT(crane_map->contains(craned_id));
+    part_ids = crane_map->at(craned_id).GetExclusivePtr()->partition_ids;
+  }
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
@@ -47,8 +53,12 @@ void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
 }
 
 void CranedMetaContainerSimpleImpl::CranedDown(const CranedId& craned_id) {
-  CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
-  auto& part_ids = craned_id_part_ids_map_.at(craned_id);
+  std::vector<std::string> part_ids;
+  {
+    auto crane_map = craned_meta_map_.GetMapConstSharedPtr();
+    CRANE_ASSERT(crane_map->contains(craned_id));
+    part_ids = crane_map->at(craned_id).GetExclusivePtr()->partition_ids;
+  }
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
@@ -109,13 +119,16 @@ CranedMetaContainerSimpleImpl::GetCranedMetaMapConstPtr() {
 }
 
 void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
-    CranedId node_id, task_id_t task_id, const Resources& resources) {
-  if (!craned_meta_map_.Contains(node_id)) {
-    CRANE_ERROR("Try to malloc resource from an unknown craned {}", node_id);
-    return;
+    CranedId crane_id, task_id_t task_id, const Resources& resources) {
+  std::vector<std::string> part_ids;
+  {
+    auto crane_map = craned_meta_map_.GetMapConstSharedPtr();
+    if (!crane_map->contains(crane_id)) {
+      CRANE_ERROR("Try to malloc resource from an unknown craned {}", crane_id);
+      return;
+    }
+    part_ids = crane_map->at(crane_id).GetExclusivePtr()->partition_ids;
   }
-
-  auto& part_ids = craned_id_part_ids_map_.at(node_id);
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
@@ -128,7 +141,7 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
         raw_part_metas_map_->at(part_id).GetExclusivePtr());
 
   // Then acquire craned meta lock.
-  auto node_meta = craned_meta_map_[node_id];
+  auto node_meta = craned_meta_map_[crane_id];
   node_meta->running_task_resource_map.emplace(task_id, resources);
   node_meta->res_avail -= resources;
   node_meta->res_in_use += resources;
@@ -143,12 +156,15 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
 
 void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId craned_id,
                                                          uint32_t task_id) {
-  if (!craned_meta_map_.Contains(craned_id)) {
-    CRANE_ERROR("Try to free resource from an unknown craned {}", craned_id);
-    return;
+  std::vector<std::string> part_ids;
+  {
+    auto crane_map = craned_meta_map_.GetMapConstSharedPtr();
+    if (!crane_map->contains(craned_id)) {
+      CRANE_ERROR("Try to free resource from an unknown craned {}", craned_id);
+      return;
+    }
+    part_ids = crane_map->at(craned_id).GetExclusivePtr()->partition_ids;
   }
-
-  auto& part_ids = craned_id_part_ids_map_.at(craned_id);
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
@@ -189,6 +205,271 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId craned_id,
   node_meta->running_task_resource_map.erase(resource_iter);
 }
 
+result::result<void, std::string> CranedMetaContainerSimpleImpl::AddPartition(
+    PartitionMeta&& partition) {
+  auto part_map = partition_metas_map_.GetMapExclusivePtr();
+  auto craned_map = craned_meta_map_.GetMapExclusivePtr();
+
+  if (part_map->contains(partition.partition_global_meta.name)) {
+    return result::fail(fmt::format("Partition {} already exists.",
+                                    partition.partition_global_meta.name));
+  }
+
+  PartitionGlobalMeta& part_global_meta = partition.partition_global_meta;
+
+  std::list<std::string> down_nodes;
+  for (const auto& node : partition.craned_ids) {
+    auto node_ptr = craned_map->find(node);
+    if (node_ptr == craned_map->end()) {
+      return result::fail(fmt::format("Node {} not existed!", node));
+    } else {
+      auto node_raw_ptr = node_ptr->second.RawPtr();
+
+      part_global_meta.m_resource_total_inc_dead_ += node_raw_ptr->res_total;
+      if (node_raw_ptr->alive) {
+        part_global_meta.m_resource_total_ += node_raw_ptr->res_total;
+        part_global_meta.m_resource_avail_ += node_raw_ptr->res_avail;
+        part_global_meta.m_resource_in_use_ += node_raw_ptr->res_in_use;
+        part_global_meta.alive_craned_cnt++;
+      } else {
+        down_nodes.emplace_back(node);
+      }
+    }
+  }
+
+  for (const auto& node : partition.craned_ids) {
+    auto node_raw_ptr = craned_map->at(node).RawPtr();
+    node_raw_ptr->partition_ids.emplace_back(
+        partition.partition_global_meta.name);
+  }
+
+  part_map->emplace(partition.partition_global_meta.name, std::move(partition));
+
+  // Actively connecting nodes that have not been started
+  for (const auto& node : down_nodes) {
+    g_craned_keeper->PutNodeIntoUnavailList(node);
+  }
+
+  return {};
+}
+
+result::result<void, std::string> CranedMetaContainerSimpleImpl::AddNode(
+    CranedMeta&& node) {
+  auto part_map = partition_metas_map_.GetMapExclusivePtr();
+  auto craned_map = craned_meta_map_.GetMapExclusivePtr();
+
+  CranedId craned_id = node.static_meta.hostname;
+
+  if (craned_map->contains(craned_id)) {
+    return result::fail(fmt::format("Node {} already exists", craned_id));
+  }
+
+  for (const auto& part : node.partition_ids) {
+    if (!part_map->contains(part)) {
+      return result::fail(fmt::format("Partition {} not exists", part));
+    }
+  }
+
+  for (const auto& part : node.partition_ids) {
+    auto part_raw_ptr = part_map->at(part).RawPtr();
+
+    part_raw_ptr->craned_ids.emplace(craned_id);
+    part_raw_ptr->partition_global_meta.m_resource_total_inc_dead_ +=
+        node.res_total;
+    part_raw_ptr->partition_global_meta.node_cnt++;
+
+    std::string node_str = util::HostNameListToStr(part_raw_ptr->craned_ids);
+    part_raw_ptr->partition_global_meta.nodelist_str = node_str;
+  }
+
+  craned_map->emplace(craned_id, std::move(node));
+  g_craned_keeper->PutNodeIntoUnavailList(craned_id);
+
+  return {};
+}
+
+result::result<void, std::string>
+CranedMetaContainerSimpleImpl::DeletePartition(PartitionId name) {
+  auto part_map = partition_metas_map_.GetMapExclusivePtr();
+  auto craned_map = craned_meta_map_.GetMapExclusivePtr();
+
+  auto it = part_map->find(name);
+  if (it == part_map->end()) {
+    return result::fail(fmt::format("Partition {} not exists", name));
+  }
+
+  for (const auto& node : it->second.RawPtr()->craned_ids) {
+    auto crane_ptr = craned_map->at(node).RawPtr();
+    crane_ptr->partition_ids.erase(
+        std::remove(crane_ptr->partition_ids.begin(),
+                    crane_ptr->partition_ids.end(), name),
+        crane_ptr->partition_ids.end());
+  }
+
+  part_map->erase(name);
+
+  return {};
+}
+
+result::result<void, std::string> CranedMetaContainerSimpleImpl::DeleteNode(
+    CranedId name) {
+  auto part_map = partition_metas_map_.GetMapExclusivePtr();
+  auto craned_map = craned_meta_map_.GetMapExclusivePtr();
+
+  auto it = craned_map->find(name);
+  if (it == craned_map->end()) {
+    return result::fail(fmt::format("Node {} not exists", name));
+  }
+
+  CranedMeta* craned_ptr = it->second.RawPtr();
+
+  if (craned_ptr->partition_ids.empty()) {
+    craned_map->erase(name);
+    return {};
+  }
+
+  std::vector<task_id_t> job_ids;
+  for (const auto& [job, res] : craned_ptr->running_task_resource_map) {
+    job_ids.emplace_back(job);
+  }
+  if (!job_ids.empty())
+    g_craned_keeper->GetCranedStub(name)->TerminateTasks(job_ids);
+
+  craned_map->erase(name);
+
+  //--------------------------------------------------------------------------
+  // TODO asynchronous execution
+  // Release lock
+  g_craned_keeper->ResetConnection(name);  // call CranedDown() automatically
+
+  while (true) {
+    if (!g_meta_container->GetCranedMetaPtr(name)->alive) {
+      break;
+    } else {
+      std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+  }
+
+  for (const auto& part : craned_ptr->partition_ids) {  // copy of partition_ids
+    PartitionMeta* part_ptr = part_map->at(part).RawPtr();
+    part_ptr->partition_global_meta.node_cnt--;
+    part_ptr->partition_global_meta.m_resource_total_inc_dead_ -=
+        craned_ptr->res_total;  // copy of res
+    part_ptr->craned_ids.erase(name);
+    part_ptr->partition_global_meta.nodelist_str =
+        util::HostNameListToStr(part_ptr->craned_ids);
+  }
+
+  return {};
+}
+
+result::result<void, std::string>
+CranedMetaContainerSimpleImpl::UpdatePartition(PartitionMeta&& partition) {
+  PartitionId name = partition.partition_global_meta.name;
+  auto part_map = partition_metas_map_.GetMapExclusivePtr();
+  auto craned_map = craned_meta_map_.GetMapExclusivePtr();
+
+  if (!part_map->contains(name)) {
+    return result::fail(fmt::format("Partition {} not exists.",
+                                    name));
+  }
+  auto pre_part_ptr = part_map->at(name).RawPtr();
+
+  PartitionGlobalMeta& part_global_meta = partition.partition_global_meta;
+
+  std::list<std::string> down_nodes;
+  if(!partition.craned_ids.empty()) {
+    for (const auto& node : pre_part_ptr->craned_ids) {
+      auto node_raw_ptr = craned_map->at(node).RawPtr();
+      node_raw_ptr->partition_ids.erase(std::remove(node_raw_ptr->partition_ids.begin(), node_raw_ptr->partition_ids.end(), name),node_raw_ptr->partition_ids.end());
+    }
+
+    for (const auto& node : partition.craned_ids) {
+      auto node_ptr = craned_map->find(node);
+      if (node_ptr == craned_map->end()) {
+        return result::fail(fmt::format("Node {} not existed!", node));
+      } else {
+        auto node_raw_ptr = node_ptr->second.RawPtr();
+
+        part_global_meta.m_resource_total_inc_dead_ += node_raw_ptr->res_total;
+        if (node_raw_ptr->alive) {
+          part_global_meta.m_resource_total_ += node_raw_ptr->res_total;
+          part_global_meta.m_resource_avail_ += node_raw_ptr->res_avail;
+          part_global_meta.m_resource_in_use_ += node_raw_ptr->res_in_use;
+          part_global_meta.alive_craned_cnt++;
+        } else {
+          down_nodes.emplace_back(node);
+        }
+      }
+    }
+
+
+  }else{
+
+  }
+
+  for (const auto& node : partition.craned_ids) {
+    auto node_raw_ptr = craned_map->at(node).RawPtr();
+    node_raw_ptr->partition_ids.emplace_back(
+        partition.partition_global_meta.name);
+  }
+
+  part_map->emplace(partition.partition_global_meta.name, std::move(partition));
+
+  // Actively connecting nodes that have not been started
+  for (const auto& node : down_nodes) {
+    g_craned_keeper->PutNodeIntoUnavailList(node);
+  }
+
+  return {};
+}
+
+result::result<void, std::string> CranedMetaContainerSimpleImpl::UpdateNode(
+    CranedMeta&& node) {
+  CranedId craned_id = node.static_meta.hostname;
+
+  auto craned_ptr = GetCranedMetaPtr(craned_id);
+  if (!craned_ptr) {
+    return result::fail(fmt::format("Node {} not exists", craned_id));
+  }
+
+  if(node.res_total.allocatable_resource.cpu_count > cpu_t{0}){
+    if(node.res_total.allocatable_resource.cpu_count >
+        craned_ptr->static_meta.res_physical.allocatable_resource.cpu_count){
+      return result::fail(fmt::format("The number of CPUs exceeds the number of physical cores ({} cpus)",
+          craned_ptr->static_meta.res_physical.allocatable_resource.cpu_count));
+    }else if(node.res_total.allocatable_resource.cpu_count <
+               craned_ptr->res_in_use.allocatable_resource.cpu_count){
+      return result::fail(fmt::format("The number of CPUs is less than the current number of cores in use ({} cpus)",
+                      craned_ptr->res_in_use.allocatable_resource.cpu_count));
+    }else{
+      craned_ptr->res_total.allocatable_resource.cpu_count = node.res_total.allocatable_resource.cpu_count;
+      craned_ptr->res_avail.allocatable_resource.cpu_count =
+          craned_ptr->res_total.allocatable_resource.cpu_count -
+          craned_ptr->res_in_use.allocatable_resource.cpu_count;
+    }
+  }
+
+  if(node.res_total.allocatable_resource.memory_bytes > 0){
+    if(node.res_total.allocatable_resource.memory_bytes >
+        craned_ptr->static_meta.res_physical.allocatable_resource.memory_bytes){
+      return result::fail(fmt::format("The memory size is smaller than physical memory size ({} B)",
+          craned_ptr->static_meta.res_physical.allocatable_resource.memory_bytes));
+    }else if(node.res_total.allocatable_resource.memory_bytes <
+               craned_ptr->res_in_use.allocatable_resource.memory_bytes){
+      return result::fail(fmt::format("The memory size is smaller than the current memory being used ({} B)",
+          craned_ptr->res_in_use.allocatable_resource.memory_bytes));
+    }else{
+      craned_ptr->res_total.allocatable_resource.memory_bytes = node.res_total.allocatable_resource.memory_bytes;
+      craned_ptr->res_avail.allocatable_resource.memory_bytes =
+          craned_ptr->res_total.allocatable_resource.memory_bytes -
+          craned_ptr->res_in_use.allocatable_resource.memory_bytes;
+    }
+  }
+
+  return {};
+}
+
 void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
   HashMap<CranedId, CranedMeta> craned_map;
   HashMap<PartitionId, PartitionMeta> partition_map;
@@ -198,18 +479,17 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
 
     auto& craned_meta = craned_map[craned_name];
 
-    auto& static_meta = craned_meta.static_meta;
-    static_meta.res.allocatable_resource.cpu_count =
+    craned_meta.res_total.allocatable_resource.cpu_count =
         cpu_t(config.Nodes.at(craned_name)->cpu);
-    static_meta.res.allocatable_resource.memory_bytes =
+    craned_meta.res_total.allocatable_resource.memory_bytes =
         config.Nodes.at(craned_name)->memory_bytes;
-    static_meta.res.allocatable_resource.memory_sw_bytes =
+    craned_meta.res_total.allocatable_resource.memory_sw_bytes =
         config.Nodes.at(craned_name)->memory_bytes;
-    static_meta.hostname = craned_name;
-    static_meta.port = std::strtoul(kCranedDefaultPort, nullptr, 10);
+    craned_meta.static_meta.hostname = craned_name;
+    craned_meta.static_meta.port =
+        std::strtoul(kCranedDefaultPort, nullptr, 10);
 
-    craned_meta.res_total = static_meta.res;
-    craned_meta.res_avail = static_meta.res;
+    craned_meta.res_avail = craned_meta.res_total;
   }
 
   for (auto&& [part_name, partition] : config.Partitions) {
@@ -221,28 +501,26 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
 
     for (auto&& craned_name : partition.nodes) {
       auto& craned_meta = craned_map[craned_name];
-      craned_meta.static_meta.partition_ids.emplace_back(part_name);
-
-      craned_id_part_ids_map_[craned_name].emplace_back(part_name);
+      craned_meta.partition_ids.emplace_back(part_name);
 
       part_meta.craned_ids.emplace(craned_name);
 
       CRANE_DEBUG(
           "Add the resource of Craned {} (cpu: {}, mem: {}) to partition "
           "[{}]'s global resource.",
-          craned_name,
-          craned_meta.static_meta.res.allocatable_resource.cpu_count,
+          craned_name, craned_meta.res_total.allocatable_resource.cpu_count,
           util::ReadableMemory(
-              craned_meta.static_meta.res.allocatable_resource.memory_bytes),
+              craned_meta.res_total.allocatable_resource.memory_bytes),
           part_name);
 
-      part_res += craned_meta.static_meta.res;
+      part_res += craned_meta.res_total;
     }
 
     part_meta.partition_global_meta.name = part_name;
     part_meta.partition_global_meta.m_resource_total_inc_dead_ = part_res;
     part_meta.partition_global_meta.node_cnt = part_meta.craned_ids.size();
     part_meta.partition_global_meta.nodelist_str = partition.nodelist_str;
+    part_meta.partition_global_meta.priority = partition.priority;
 
     CRANE_DEBUG(
         "partition [{}]'s Global resource now: cpu: {}, mem: {}). It has {} "
@@ -254,6 +532,11 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
             part_meta.partition_global_meta.m_resource_total_inc_dead_
                 .allocatable_resource.memory_bytes),
         part_meta.partition_global_meta.node_cnt);
+  }
+
+  for (auto& [name, craned_meta] : craned_map) {
+    std::sort(craned_meta.partition_ids.begin(),
+              craned_meta.partition_ids.end());
   }
 
   craned_meta_map_.InitFromMap(std::move(craned_map));
@@ -300,8 +583,7 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
       craned_info->set_state(crane::grpc::CranedState::CRANE_DOWN);
 
     craned_info->mutable_partition_names()->Assign(
-        craned_meta->static_meta.partition_ids.begin(),
-        craned_meta->static_meta.partition_ids.end());
+        craned_meta->partition_ids.begin(), craned_meta->partition_ids.end());
   }
 
   return reply;
@@ -349,8 +631,7 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
     craned_info->set_state(crane::grpc::CranedState::CRANE_DOWN);
 
   craned_info->mutable_partition_names()->Assign(
-      craned_meta->static_meta.partition_ids.begin(),
-      craned_meta->static_meta.partition_ids.end());
+      craned_meta->partition_ids.begin(), craned_meta->partition_ids.end());
 
   return reply;
 }
@@ -508,7 +789,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     // Since we assume the number of cpu cores is sufficient on the
     // machine running CraneCtld, it's ok to pay 1 core cpu time
     // for overall low latency.
-    std::unordered_set<CranedId> craned_ids;
+    std::set<CranedId> craned_ids;
     {
       auto part_meta = it.second.GetExclusivePtr();
       std::string partition_name = part_meta->partition_global_meta.name;

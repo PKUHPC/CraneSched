@@ -232,6 +232,31 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                       const crane::grpc::AddQosRequest *request,
                       crane::grpc::AddQosReply *response) override;
 
+  grpc::Status AddPartition(grpc::ServerContext *context,
+                            const crane::grpc::AddPartitionRequest *request,
+                            crane::grpc::AddPartitionReply *response) override;
+
+  grpc::Status AddNode(grpc::ServerContext *context,
+                       const crane::grpc::AddNodeRequest *request,
+                       crane::grpc::AddNodeReply *response) override;
+
+  grpc::Status DeletePartition(
+      grpc::ServerContext *context,
+      const crane::grpc::DeletePartitionRequest *request,
+      crane::grpc::DeletePartitionReply *response) override;
+
+  grpc::Status DeleteNode(grpc::ServerContext *context,
+                          const crane::grpc::DeleteNodeRequest *request,
+                          crane::grpc::DeleteNodeReply *response) override;
+
+  grpc::Status UpdatePartition(grpc::ServerContext *context,
+                                 const crane::grpc::UpdatePartitionRequest *request,
+                                 crane::grpc::UpdatePartitionReply *response) override;
+
+  grpc::Status UpdateNode(grpc::ServerContext *context,
+                                 const crane::grpc::UpdateNodeRequest *request,
+                                 crane::grpc::UpdateNodeReply *response) override;
+
   grpc::Status ModifyEntity(grpc::ServerContext *context,
                             const crane::grpc::ModifyEntityRequest *request,
                             crane::grpc::ModifyEntityReply *response) override;

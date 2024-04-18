@@ -322,7 +322,8 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
 
           if (node["cpu"])
-            node_ptr->cpu = std::stoul(node["cpu"].as<std::string>());
+            node_ptr->cpu =
+                std::stoul(node["cpu"].as<std::string>());  // TODO check uint32
           else
             std::exit(1);
 

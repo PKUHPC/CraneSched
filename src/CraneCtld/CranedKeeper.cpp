@@ -623,11 +623,17 @@ void CranedKeeper::SetCranedIsDownCb(std::function<void(CranedId)> cb) {
   m_craned_is_down_cb_ = std::move(cb);
 }
 
-void CranedKeeper::PutNodeIntoUnavailList(const std::string &crane_id) {
+void CranedKeeper::PutNodeIntoUnavailList(const CranedId &crane_id) {
   if (m_cq_closed_) return;
 
   util::lock_guard guard(m_unavail_craned_set_mtx_);
   m_unavail_craned_set_.emplace(crane_id);
+}
+
+void CranedKeeper::ResetConnection(const CranedId&craned_id) {
+  WriterLock lock(&m_connected_craned_mtx_);
+  m_connected_craned_id_stub_map_[craned_id].reset();
+  m_connected_craned_id_stub_map_.erase(craned_id);
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {

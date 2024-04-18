@@ -100,7 +100,7 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
     grpc::ServerContext *context,
     const crane::grpc::CranedRegisterRequest *request,
     crane::grpc::CranedRegisterReply *response) {
-  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+  if (!g_meta_container->CheckCranedExisted(request->craned_id())) {
     response->set_ok(false);
     return grpc::Status::OK;
   }
@@ -386,6 +386,274 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   } else {
     response->set_ok(false);
     response->set_reason(result.reason);
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::AddPartition(
+    grpc::ServerContext *context,
+    const crane::grpc::AddPartitionRequest *request,
+    crane::grpc::AddPartitionReply *response) {
+  if (!g_account_manager->CheckUidIsAdmin(request->uid())) {
+    response->set_ok(false);
+    response->set_reason("Permission Denied.");
+    return grpc::Status::OK;
+  }
+
+  if (!request->has_partition() || request->partition().name().empty()) {
+    response->set_ok(false);
+    response->set_reason("The parameter is empty.");
+    return grpc::Status::OK;
+  }
+
+  const auto &new_partition = request->partition();
+
+  PartitionMeta partition;
+  PartitionGlobalMeta &part_global_meta = partition.partition_global_meta;
+  part_global_meta.name = new_partition.name();
+  part_global_meta.priority = new_partition.priority();
+
+  std::list<std::string> nodes;
+  util::ParseHostList(new_partition.hostlist(), &nodes);
+  for (const auto &node : nodes) {
+      partition.craned_ids.emplace(node);
+  }
+
+  part_global_meta.node_cnt = nodes.size();
+  part_global_meta.nodelist_str = new_partition.hostlist();
+
+  if (new_partition.allow_list_size() > 0 &&
+      new_partition.deny_list_size() > 0) {
+    response->set_ok(false);
+    response->set_reason(
+        "allow_list and deny_list cannot be set simultaneously.");
+    return grpc::Status::OK;
+  }
+
+  for (const auto &account : new_partition.allow_list()) {
+    if (!g_account_manager->GetExistedAccountInfo(account)) {
+      response->set_ok(false);
+      response->set_reason(fmt::format("Account {} not existed!", account));
+      return grpc::Status::OK;
+    } else {
+      part_global_meta.allow_accounts.emplace(account);
+    }
+  }
+  for (const auto &account : new_partition.deny_list()) {
+    if (!g_account_manager->GetExistedAccountInfo(account)) {
+      response->set_ok(false);
+      response->set_reason(fmt::format("Account {} not existed!", account));
+      return grpc::Status::OK;
+    } else {
+      part_global_meta.deny_accounts.emplace(account);
+    }
+  }
+
+  auto res = g_meta_container->AddPartition(std::move(partition));
+  if (res.has_error()) {
+    response->set_ok(false);
+    response->set_reason(res.error());
+  }else{
+    response->set_ok(true);
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::AddNode(
+    grpc::ServerContext *context, const crane::grpc::AddNodeRequest *request,
+    crane::grpc::AddNodeReply *response) {
+  if (!g_account_manager->CheckUidIsAdmin(request->uid())) {
+    response->set_ok(false);
+    response->set_reason("Permission Denied.");
+    return grpc::Status::OK;
+  }
+
+  if (!request->has_node() || request->node().hostname().empty() ||
+      request->node().cpu() == 0.0 || request->node().real_mem() == 0) {
+    response->set_ok(false);
+    response->set_reason("The parameter is empty.");
+    return grpc::Status::OK;
+  }
+
+  const auto &new_node = request->node();
+
+  CranedMeta craned;
+  craned.res_total.allocatable_resource.cpu_count = cpu_t(new_node.cpu());
+  craned.res_total.allocatable_resource.memory_bytes = new_node.real_mem();
+  craned.res_total.allocatable_resource.memory_sw_bytes = new_node.real_mem();
+
+  craned.static_meta.hostname = new_node.hostname();
+  craned.static_meta.port = std::strtoul(kCranedDefaultPort, nullptr, 10);
+
+  craned.res_avail = craned.res_total;
+
+  auto res = g_meta_container->AddNode(std::move(craned));
+  if(res.has_error()){
+    response->set_ok(false);
+    response->set_reason(res.error());
+  }else{
+    response->set_ok(true);
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::DeletePartition(
+    grpc::ServerContext *context,
+    const crane::grpc::DeletePartitionRequest *request,
+    crane::grpc::DeletePartitionReply *response) {
+  if (!g_account_manager->CheckUidIsAdmin(request->uid())) {
+    response->set_ok(false);
+    response->set_reason("Permission Denied.");
+    return grpc::Status::OK;
+  }
+
+  if(request->name().empty()) {
+    response->set_ok(false);
+    response->set_reason("The parameter is empty.");
+    return grpc::Status::OK;
+  }
+
+  auto res = g_meta_container->DeletePartition(request->name());
+  if (res.has_error()) {
+    response->set_ok(false);
+    response->set_reason(res.error());
+  }else{
+    response->set_ok(true);
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::DeleteNode(
+    grpc::ServerContext *context, const crane::grpc::DeleteNodeRequest *request,
+    crane::grpc::DeleteNodeReply *response) {
+  if (!g_account_manager->CheckUidIsAdmin(request->uid())) {
+    response->set_ok(false);
+    response->set_reason("Permission Denied.");
+    return grpc::Status::OK;
+  }
+
+  if(request->name().empty()) {
+    response->set_ok(false);
+    response->set_reason("The parameter is empty.");
+    return grpc::Status::OK;
+  }
+
+  auto res = g_meta_container->DeleteNode(request->name());
+  if (res.has_error()) {
+    response->set_ok(false);
+    response->set_reason(res.error());
+  }else{
+    response->set_ok(true);
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::UpdatePartition(
+    grpc::ServerContext *context,
+    const crane::grpc::UpdatePartitionRequest *request,
+    crane::grpc::UpdatePartitionReply *response) {
+  if (!g_account_manager->CheckUidIsAdmin(request->uid())) {
+    response->set_ok(false);
+    response->set_reason("Permission Denied.");
+    return grpc::Status::OK;
+  }
+
+  if (!request->has_partition() || request->partition().name().empty()) {
+    response->set_ok(false);
+    response->set_reason("The parameter is empty.");
+    return grpc::Status::OK;
+  }
+
+  const auto &new_partition = request->partition();
+
+  PartitionMeta partition;
+  PartitionGlobalMeta &part_global_meta = partition.partition_global_meta;
+  part_global_meta.name = new_partition.name();
+  part_global_meta.priority = new_partition.priority();
+
+  std::list<std::string> nodes;
+  util::ParseHostList(new_partition.hostlist(), &nodes);
+  for (const auto &node : nodes) {
+    partition.craned_ids.emplace(node);
+  }
+
+  part_global_meta.node_cnt = nodes.size();
+  part_global_meta.nodelist_str = new_partition.hostlist();
+
+  if (new_partition.allow_list_size() > 0 &&
+      new_partition.deny_list_size() > 0) {
+    response->set_ok(false);
+    response->set_reason(
+        "allow_list and deny_list cannot be set simultaneously.");
+    return grpc::Status::OK;
+  }
+
+  for (const auto &account : new_partition.allow_list()) {
+    if (!g_account_manager->GetExistedAccountInfo(account)) {
+      response->set_ok(false);
+      response->set_reason(fmt::format("Account {} not existed!", account));
+      return grpc::Status::OK;
+    } else {
+      part_global_meta.allow_accounts.emplace(account);
+    }
+  }
+  for (const auto &account : new_partition.deny_list()) {
+    if (!g_account_manager->GetExistedAccountInfo(account)) {
+      response->set_ok(false);
+      response->set_reason(fmt::format("Account {} not existed!", account));
+      return grpc::Status::OK;
+    } else {
+      part_global_meta.deny_accounts.emplace(account);
+    }
+  }
+
+  auto res = g_meta_container->UpdatePartition(std::move(partition));
+  if (res.has_error()) {
+    response->set_ok(false);
+    response->set_reason(res.error());
+  }else{
+    response->set_ok(true);
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::UpdateNode(
+    grpc::ServerContext *context, const crane::grpc::UpdateNodeRequest *request,
+    crane::grpc::UpdateNodeReply *response) {
+  if (!g_account_manager->CheckUidIsAdmin(request->uid())) {
+    response->set_ok(false);
+    response->set_reason("Permission Denied.");
+    return grpc::Status::OK;
+  }
+
+  if (!request->has_node() || request->node().hostname().empty() ||
+      request->node().cpu() == 0.0 || request->node().real_mem() == 0) {
+    response->set_ok(false);
+    response->set_reason("The parameter is empty.");
+    return grpc::Status::OK;
+  }
+
+  const auto &new_node = request->node();
+
+  CranedMeta craned;
+  craned.res_total.allocatable_resource.cpu_count = cpu_t(new_node.cpu());
+  craned.res_total.allocatable_resource.memory_bytes = new_node.real_mem();
+  craned.res_total.allocatable_resource.memory_sw_bytes = new_node.real_mem();
+
+  craned.static_meta.hostname = new_node.hostname();
+
+  auto res = g_meta_container->UpdateNode(std::move(craned));
+  if(res.has_error()){
+    response->set_ok(false);
+    response->set_reason(res.error());
+  }else{
+    response->set_ok(true);
   }
 
   return grpc::Status::OK;

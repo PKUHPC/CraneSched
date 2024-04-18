@@ -18,6 +18,7 @@
 
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
+#include "crane/Lock.h"
 
 namespace Ctld {
 
@@ -72,7 +73,8 @@ struct Config {
     std::string nodelist_str;
     uint32_t priority;
     std::unordered_set<std::string> nodes;
-    std::unordered_set<std::string> AllowAccounts;
+    std::unordered_set<std::string> AllowAccounts;  // TODO
+    std::unordered_set<std::string> DenyAccounts;
   };
 
   struct CraneCtldListenConf {
@@ -150,9 +152,7 @@ struct CranedStaticMeta {
   std::string hostname;  // the hostname corresponds to the node index
   uint32_t port;
 
-  std::list<std::string> partition_ids;  // Partitions to which
-                                         // this craned belongs to
-  Resources res;
+  Resources res_physical;
 };
 
 /**
@@ -172,6 +172,12 @@ struct CranedMeta {
   bool drain{false};
   std::string state_reason;
 
+  // This parameter determines the order of locking and should be sorted.
+  // Additionally, since it needs to be traversed during job processing, vector
+  // is used
+  std::vector<PartitionId>
+      partition_ids;  // Partitions to which this craned belongs to.
+
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
   absl::flat_hash_map<task_id_t, Resources> running_task_resource_map;
@@ -188,13 +194,18 @@ struct PartitionGlobalMeta {
 
   std::string name;
   std::string nodelist_str;
-  uint32_t node_cnt;
-  uint32_t alive_craned_cnt;
+  uint32_t node_cnt = 0;
+  uint32_t alive_craned_cnt = 0;
+  uint32_t priority;
+
+  std::unordered_set<std::string> allow_accounts;  // TODO
+  std::unordered_set<std::string> deny_accounts;
 };
 
 struct PartitionMeta {
   PartitionGlobalMeta partition_global_meta;
-  std::unordered_set<CranedId> craned_ids;
+  //  This parameter determines the order of locking and should be sorted.
+  std::set<CranedId> craned_ids;
 };
 
 struct InteractiveMetaInTask {
