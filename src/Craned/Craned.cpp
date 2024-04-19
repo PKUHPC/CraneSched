@@ -298,29 +298,26 @@ void ParseConfig(int argc, char** argv) {
           g_config.CranedForeground = false;
       }
 
-      try {
-        if (config["CranedContainer"] && config["CranedContainer"]["Enable"] &&
-            config["CranedContainer"]["Enable"].as<bool>()) {
-          g_config.CranedContainer.RunTimeState =
-              config["CranedContainer"]["RuntimeState"].as<std::string>();
-          g_config.CranedContainer.RuntimeDelete =
-              config["CranedContainer"]["RuntimeDelete"].as<std::string>();
-          g_config.CranedContainer.RuntimeKill =
-              config["CranedContainer"]["RuntimeKill"].as<std::string>();
-          g_config.CranedContainer.RuntimeRun =
-              config["CranedContainer"]["RuntimeRun"].as<std::string>();
-          g_config.CranedContainer.Enable = true;
-          CRANE_DEBUG("Container support is enabled");
-          CRANE_TRACE("OCI Runtime set to {}",
-                      g_config.CranedContainer.RuntimeRun);
-        } else {
-          g_config.CranedContainer = {};
-          g_config.CranedContainer.Enable = false;
-          CRANE_DEBUG("Container support is disabled");
-        }
-      } catch (const std::exception& e) {
-        CRANE_ERROR("Container configuration is corrupted: {}", e.what());
-        std::exit(1);
+      if (config["CranedContainer"] && config["CranedContainer"]["Enable"] &&
+          config["CranedContainer"]["Enable"].as<bool>()) {
+        g_config.CranedContainer.TempDir =
+            config["CranedContainer"]["TempDir"].as<std::string>();
+        g_config.CranedContainer.RunTimeState =
+            config["CranedContainer"]["RuntimeState"].as<std::string>();
+        g_config.CranedContainer.RuntimeDelete =
+            config["CranedContainer"]["RuntimeDelete"].as<std::string>();
+        g_config.CranedContainer.RuntimeKill =
+            config["CranedContainer"]["RuntimeKill"].as<std::string>();
+        g_config.CranedContainer.RuntimeRun =
+            config["CranedContainer"]["RuntimeRun"].as<std::string>();
+        g_config.CranedContainer.Enable = true;
+        CRANE_DEBUG("Container support is enabled");
+        CRANE_TRACE("OCI Runtime set to {}",
+                    g_config.CranedContainer.RuntimeRun);
+      } else {
+        g_config.CranedContainer = {};
+        g_config.CranedContainer.Enable = false;
+        CRANE_DEBUG("Container support is disabled");
       }
 
     } catch (YAML::BadFile& e) {

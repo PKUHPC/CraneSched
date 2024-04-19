@@ -21,7 +21,10 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
 
+#include <filesystem>
+
 #include "ResourceAllocators.h"
+#include "TaskExecutor.h"
 #include "crane/FdFunctions.h"
 #include "protos/CraneSubprocess.pb.h"
 
@@ -424,296 +427,8 @@ void TaskManager::Wait() {
   if (m_ev_loop_thread_.joinable()) m_ev_loop_thread_.join();
 }
 
-CraneErr TaskManager::KillProcessInstance_(const TaskExecutor* proc,
-                                           int signum) {
-  // Todo: Add timer which sends SIGTERM for those tasks who
-  //  will not quit when receiving SIGINT.
-  if (proc) {
-    // Send the signal to the whole process group.
-    int err = kill(-proc->GetPid(), signum);
-
-    if (err == 0)
-      return CraneErr::kOk;
-    else {
-      CRANE_TRACE("kill failed. error: {}", strerror(errno));
-      return CraneErr::kGenericFailure;
-    }
-  }
-
-  return CraneErr::kNonExistent;
-}
-
 void TaskManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
-}
-
-CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
-                                              TaskExecutor* executor) {
-  // TODO: Add support for ContainerInstance
-  using google::protobuf::io::FileInputStream;
-  using google::protobuf::io::FileOutputStream;
-  using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
-  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
-
-  using crane::grpc::subprocess::CanStartMessage;
-  using crane::grpc::subprocess::ChildProcessReady;
-
-  int socket_pair[2];
-
-  if (socketpair(AF_UNIX, SOCK_STREAM, 0, socket_pair) != 0) {
-    CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
-    return CraneErr::kSystemErr;
-  }
-
-  // save the current uid/gid
-  savedPrivilege saved_priv{getuid(), getgid()};
-
-  int rc = setegid(instance->pwd_entry.Gid());
-  if (rc == -1) {
-    CRANE_ERROR("error: setegid. {}", strerror(errno));
-    return CraneErr::kSystemErr;
-  }
-  __gid_t gid_a[1] = {instance->pwd_entry.Gid()};
-  setgroups(1, gid_a);
-  rc = seteuid(instance->pwd_entry.Uid());
-  if (rc == -1) {
-    CRANE_ERROR("error: seteuid. {}", strerror(errno));
-    return CraneErr::kSystemErr;
-  }
-
-  pid_t child_pid = fork();
-  if (child_pid > 0) {  // Parent proc
-    close(socket_pair[1]);
-    int fd = socket_pair[0];
-    bool ok;
-    CraneErr err;
-
-    setegid(saved_priv.gid);
-    seteuid(saved_priv.uid);
-    setgroups(0, nullptr);
-
-    FileInputStream istream(fd);
-    FileOutputStream ostream(fd);
-    CanStartMessage msg;
-    ChildProcessReady child_process_ready;
-
-    CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
-                instance->task.task_id(), child_pid);
-
-    executor->SetPid(child_pid);
-
-    // Add event for stdout/stderr of the new subprocess
-    // struct bufferevent* ev_buf_event;
-    // ev_buf_event =
-    //     bufferevent_socket_new(m_ev_base_, fd, BEV_OPT_CLOSE_ON_FREE);
-    // if (!ev_buf_event) {
-    //   CRANE_ERROR(
-    //       "Error constructing bufferevent for the subprocess of task #!",
-    //       instance->task.task_id());
-    //   err = CraneErr::kLibEventError;
-    //   goto AskChildToSuicide;
-    // }
-    // bufferevent_setcb(ev_buf_event, EvSubprocessReadCb_, nullptr, nullptr,
-    //                   (void*)process.get());
-    // bufferevent_enable(ev_buf_event, EV_READ);
-    // bufferevent_disable(ev_buf_event, EV_WRITE);
-    // process->SetEvBufEvent(ev_buf_event);
-
-    // Migrate the new subprocess to newly created cgroup
-    if (!instance->cgroup->MigrateProcIn(executor->GetPid())) {
-      CRANE_ERROR(
-          "Terminate the subprocess of task #{} due to failure of cgroup "
-          "migration.",
-          instance->task.task_id());
-
-      err = CraneErr::kCgroupError;
-      goto AskChildToSuicide;
-    }
-
-    CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
-                instance->task.task_id());
-
-    // Tell subprocess that the parent process is ready. Then the
-    // subprocess should continue to exec().
-    msg.set_ok(true);
-    ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
-    ok &= ostream.Flush();
-    if (!ok) {
-      CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}",
-                  child_pid, instance->task.task_id());
-      close(fd);
-      return CraneErr::kProtobufError;
-    }
-
-    ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream, nullptr);
-    if (!msg.ok()) {
-      CRANE_ERROR("Failed to read protobuf from subprocess {} of task #{}",
-                  child_pid, instance->task.task_id());
-      close(fd);
-      return CraneErr::kProtobufError;
-    }
-
-    close(fd);
-    return CraneErr::kOk;
-
-  AskChildToSuicide:
-    msg.set_ok(false);
-
-    ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
-    close(fd);
-    if (!ok) {
-      CRANE_ERROR("Failed to ask subprocess {} to suicide for task #{}",
-                  child_pid, instance->task.task_id());
-      return CraneErr::kProtobufError;
-    }
-    return err;
-  } else {  // Child proc
-    const std::string& cwd = instance->task.cwd();
-    rc = chdir(cwd.c_str());
-    if (rc == -1) {
-      CRANE_ERROR("[Child Process] Error: chdir to {}. {}", cwd.c_str(),
-                  strerror(errno));
-      std::abort();
-    }
-
-    setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid());
-    setregid(instance->pwd_entry.Gid(), instance->pwd_entry.Gid());
-
-    // Set pgid to the pid of task root process.
-    setpgid(0, 0);
-
-    close(socket_pair[0]);
-    int fd = socket_pair[1];
-
-    FileInputStream istream(fd);
-    FileOutputStream ostream(fd);
-    CanStartMessage msg;
-    ChildProcessReady child_process_ready;
-    bool ok;
-
-    ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
-    if (!msg.ok()) std::abort();
-
-    auto out_file_path = executor->GetBatchMeta().parsed_output_file_pattern;
-    int out_fd = open(out_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
-    if (out_fd == -1) {
-      CRANE_ERROR("[Child Process] Error: open {}. {}", out_file_path,
-                  strerror(errno));
-      std::abort();
-    }
-
-    dup2(out_fd, 1);  // stdout -> output file
-    dup2(out_fd, 2);  // stderr -> output file
-    close(out_fd);
-
-    child_process_ready.set_ok(true);
-    ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
-    ok &= ostream.Flush();
-    if (!ok) {
-      CRANE_ERROR("[Child Process] Error: Failed to flush.");
-      std::abort();
-    }
-
-    close(fd);
-
-    // If these file descriptors are not closed, a program like mpirun may
-    // keep waiting for the input from stdin or other fds and will never end.
-    close(0);  // close stdin
-    util::CloseFdFrom(3);
-
-    std::vector<std::pair<std::string, std::string>> env_vec;
-
-    // Load env from the front end.
-    for (auto& [name, value] : instance->task.env()) {
-      env_vec.emplace_back(name, value);
-    }
-
-    if (instance->task.get_user_env()) {
-      // If --get-user-env is set, the new environment is inherited
-      // from the execution CraneD rather than the submitting node.
-      //
-      // Since we want to reinitialize the environment variables of the user
-      // by reloading the settings in something like .bashrc or /etc/profile,
-      // we are actually performing two steps: login -> start shell.
-      // Shell starting is done by calling "bash --login".
-      //
-      // During shell starting step, the settings in
-      // /etc/profile, ~/.bash_profile, ... are loaded.
-      //
-      // During login step, "HOME" and "SHELL" are set.
-      // Here we are just mimicking the login module.
-
-      // Slurm uses `su <username> -c /usr/bin/env` to retrieve
-      // all the environment variables.
-      // We use a more tidy way.
-      env_vec.emplace_back("HOME", instance->pwd_entry.HomeDir());
-      env_vec.emplace_back("SHELL", instance->pwd_entry.Shell());
-    }
-
-    env_vec.emplace_back("CRANE_JOB_NODELIST",
-                         absl::StrJoin(instance->task.allocated_nodes(), ";"));
-    env_vec.emplace_back("CRANE_EXCLUDES",
-                         absl::StrJoin(instance->task.excludes(), ";"));
-    env_vec.emplace_back("CRANE_JOB_NAME", instance->task.name());
-    env_vec.emplace_back("CRANE_ACCOUNT", instance->task.account());
-    env_vec.emplace_back("CRANE_PARTITION", instance->task.partition());
-    env_vec.emplace_back("CRANE_QOS", instance->task.qos());
-    env_vec.emplace_back("CRANE_MEM_PER_NODE",
-                         std::to_string(instance->task.resources()
-                                            .allocatable_resource()
-                                            .memory_limit_bytes() /
-                                        (1024 * 1024)));
-    env_vec.emplace_back("CRANE_JOB_ID",
-                         std::to_string(instance->task.task_id()));
-
-    int64_t time_limit_sec = instance->task.time_limit().seconds();
-    int hours = time_limit_sec / 3600;
-    int minutes = (time_limit_sec % 3600) / 60;
-    int seconds = time_limit_sec % 60;
-    std::string time_limit =
-        fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
-    env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
-
-    if (clearenv()) {
-      fmt::print("clearenv() failed!\n");
-    }
-
-    for (const auto& [name, value] : env_vec) {
-      if (setenv(name.c_str(), value.c_str(), 1)) {
-        fmt::print("setenv for {}={} failed!\n", name, value);
-      }
-    }
-
-    // Prepare the command line arguments.
-    std::vector<const char*> argv;
-
-    // Argv[0] is the program name which can be anything.
-    argv.emplace_back("CraneScript");
-
-    if (instance->task.get_user_env()) {
-      // If --get-user-env is specified,
-      // we need to use --login option of bash to load settings from the user's
-      // settings.
-      argv.emplace_back("--login");
-    }
-
-    argv.emplace_back(executor->GetExecPath().c_str());
-    // TODO: Fix this
-    // for (auto&& arg : executor->GetArgList()) {
-    //  argv.push_back(arg.c_str());
-    // }
-    argv.push_back(nullptr);
-
-    execv("/bin/bash", const_cast<char* const*>(argv.data()));
-
-    // Error occurred since execv returned. At this point, errno is set.
-    // Ctld use SIGABRT to inform the client of this failure.
-    fmt::print(stderr, "[Craned Subprocess Error] Failed to execv. Error: {}\n",
-               strerror(errno));
-    // Todo: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
-    //  exit codes
-    abort();
-  }
 }
 
 CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
@@ -817,23 +532,23 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       if (instance->task.type() == crane::grpc::Batch) {
         std::unique_ptr<TaskExecutor> executor = nullptr;
 
+        // Store meta data in executor
+        auto meta = TaskMetaInExecutor{
+            .pwd = instance->pwd_entry,
+            .id = task_id,
+            .name = instance->task.name(),
+        };
+
         // Instantiate ProcessInstance/ContainerInstance
-        // according to the task.
         if (instance->task.container().empty()) {
           // use ProcessInstance
-          instance->batch_meta.parsed_sh_script_path =
-              fmt::format("{}/Crane-{}.sh", kDefaultCranedScriptDir, task_id);
           executor = std::make_unique<ProcessInstance>(
-              instance->task.cwd(), instance->batch_meta.parsed_sh_script_path,
-              std::list<std::string>());
+              meta, instance->task.cwd(), std::list<std::string>());
         } else {
           // use ContainerInstance
           auto bundle_path = std::filesystem::path(instance->task.container());
-          instance->batch_meta.parsed_sh_script_path = fmt::format(
-              "{}/Crane-{}.sh",
-              (bundle_path / kDefaultCranedScriptDir).string(), task_id);
-          executor = std::make_unique<ContainerInstance>(
-              instance->batch_meta.parsed_sh_script_path, bundle_path.string());
+          executor =
+              std::make_unique<ContainerInstance>(meta, bundle_path.string());
         }
 
         if (executor == nullptr) {
@@ -846,7 +561,9 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         }
 
         // Write the script to the file
-        if (!executor->WriteShScript(instance->task.batch_meta().sh_script())) {
+        instance->batch_meta.parsed_sh_script_path =
+            executor->WriteBatchScript(instance->task.batch_meta().sh_script());
+        if (instance->batch_meta.parsed_sh_script_path.empty()) {
           CRANE_ERROR("Cannot write shell script for task #{}", task_id);
           this_->EvActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::Failed,
@@ -903,9 +620,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         // process->SetOutputCb(std::move(output_cb));
 
         // TODO: Modify this for ContainerInstance
-        // err = SpawnExecutorInInstance_(instance, executor.get());
-        err = executor->Spawn(task_id, instance->pwd_entry, instance->cgroup,
-                              std::move(GetEnvVectorFromTask_(*instance)));
+        err = executor->Spawn(instance->cgroup,
+                              std::move(GetEnvironVarsFromTask_(*instance)));
 
         if (err == CraneErr::kOk) {
           this_->m_mtx_.Lock();
@@ -969,9 +685,9 @@ void TaskManager::EvActivateTaskStatusChange_(
   event_active(m_ev_task_status_change_, 0, 0);
 }
 
-TaskExecutor::EnvVector TaskManager::GetEnvVectorFromTask_(
+TaskExecutor::EnvironVars TaskManager::GetEnvironVarsFromTask_(
     const TaskInstance& instance) {
-  TaskExecutor::EnvVector env_vec{};
+  TaskExecutor::EnvironVars env_vec{};
   env_vec.emplace_back("CRANE_JOB_NODELIST",
                        absl::StrJoin(instance.task.allocated_nodes(), ";"));
   env_vec.emplace_back("CRANE_EXCLUDES",
@@ -1051,17 +767,21 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
     }
 
     // TODO: Add container support
+    // FIXME: NOT passing executive path
     auto process = std::make_unique<ProcessInstance>(
-        task_iter->second->task.cwd(), std::move(elem.executive_path),
-        std::move(elem.arguments));
+        TaskMetaInExecutor{
+            .pwd = task_iter->second->pwd_entry,
+            .id = task_iter->second->task.task_id(),
+            .name = task_iter->second->task.name(),
+        },
+        task_iter->second->task.cwd(), std::move(elem.arguments));
 
     process->SetOutputCb(std::move(elem.output_cb));
     process->SetFinishCb(std::move(elem.finish_cb));
 
     CraneErr err;
-    err = process->Spawn(
-        task_iter->second->task.task_id(), task_iter->second->pwd_entry,
-        task_iter->second->cgroup, GetEnvVectorFromTask_(*task_iter->second));
+    err = process->Spawn(task_iter->second->cgroup,
+                         GetEnvironVarsFromTask_(*task_iter->second));
     elem.err_promise.set_value(err);
 
     if (err != CraneErr::kOk)

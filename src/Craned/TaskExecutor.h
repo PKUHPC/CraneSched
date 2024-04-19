@@ -28,6 +28,8 @@
 #include <sys/wait.h>
 #include <uv.h>
 
+#include <filesystem>
+#include <string>
 #include <uvw.hpp>
 
 #include "crane/PasswordEntry.h"
@@ -35,13 +37,31 @@
 
 namespace Craned {
 
+/**
+ * This struct stores some info in TaskInstance,
+ * Fields stored should be immutable.
+ */
+struct TaskMetaInExecutor {
+  const PasswordEntry& pwd;  // pwd_entry of submitter
+  const task_id_t id;        // Task id
+  const std::string name;    // Task name
+};
+
 struct BatchMetaInTaskExecutor {
   std::string parsed_output_file_pattern;
 };
 
+/**
+ * TaskExecutor handles task's execution process, e.g.,
+ * - Prepare environment varibles,
+ * - Write bash script / mount scripts in container,
+ * - Modify OCI container configs,
+ * - Call bash/OCI runtime...
+ * Note: Resource allocation (CGroups) is not in this scope.
+ */
 class TaskExecutor {
  public:
-  using EnvVector = std::vector<std::pair<std::string, std::string>>;
+  using EnvironVars = std::vector<std::pair<std::string, std::string>>;
   TaskExecutor() : m_ev_buf_event_(nullptr) {}
   virtual ~TaskExecutor() {
     if (m_ev_buf_event_) {
@@ -79,12 +99,30 @@ class TaskExecutor {
    * to the TaskInstance. kProtobufError if the communication between the parent
    * and the child process fails.
    */
-  [[nodiscard]] virtual CraneErr Spawn(task_id_t task_id,
-                                       const PasswordEntry& pwd_entry,
-                                       util::Cgroup* cgroup,
-                                       EnvVector task_envs) = 0;
+  [[nodiscard]] virtual CraneErr Spawn(util::Cgroup* cgroup,
+                                       EnvironVars task_envs) = 0;
 
+  /**
+   * Send a signal to the process group to which the processes in
+   *  ProcessInstance belongs.
+   * This function ASSUMES that ALL processes belongs to the process group with
+   *  the PGID set to the PID of the first process in this ProcessInstance.
+   * @param signum the value of signal.
+   * @return if the signal is sent successfully, kOk is returned.
+   * if the task name doesn't exist, kNonExistent is returned.
+   * if the signal is invalid, kInvalidParam is returned.
+   * otherwise, kGenericFailure is returned.
+   * TODO: Notation update needed
+   */
   virtual CraneErr Kill(int signum) = 0;
+
+  /**
+   * Write script to a file and return the path to the file.
+   * The file path is dependent on implementation and will be
+   * stored in m_executive_path.
+   */
+  [[nodiscard]] virtual std::string WriteBatchScript(
+      const std::string_view script) = 0;
 
   /* --- Implemented in TaskExecutor --- */
 
@@ -98,18 +136,6 @@ class TaskExecutor {
 
   virtual void SetFinishCb(std::function<void(bool, int, void*)> cb) {
     m_finish_cb_ = std::move(cb);
-  }
-
-  virtual bool WriteShScript(const std::string_view script) {
-    auto& exec_path = GetExecPath();
-
-    FILE* fptr = fopen(exec_path.c_str(), "w");
-    if (fptr == nullptr) return false;
-    fputs(script.data(), fptr);
-    fclose(fptr);
-
-    chmod(exec_path.c_str(), strtol("0755", nullptr, 8));
-    return true;
   }
 
  protected:
@@ -134,11 +160,12 @@ class TaskExecutor {
 
 class ProcessInstance final : public TaskExecutor {
  public:
-  ProcessInstance(std::string cwd, std::string exec_path,
+  ProcessInstance(TaskMetaInExecutor meta, std::string cwd,
                   std::list<std::string> arg_list)
-      : m_cwd_(std::move(cwd)),
-        m_executive_path_(std::move(exec_path)),
+      : m_meta_(std::move(meta)),
+        m_cwd_(std::move(cwd)),
         m_arguments_(std::move(arg_list)),
+        m_executive_path_(""),
         m_pid_(0),
         m_user_data_(nullptr) {}
 
@@ -179,11 +206,24 @@ class ProcessInstance final : public TaskExecutor {
     if (m_finish_cb_) m_finish_cb_(is_killed, val, m_user_data_);
   }
 
-  [[nodiscard]] CraneErr Spawn(task_id_t task_id,
-                               const PasswordEntry& pwd_entry,
-                               util::Cgroup* cgroup,
-                               EnvVector task_envs) override;
+  [[nodiscard]] CraneErr Spawn(util::Cgroup* cgroup,
+                               EnvironVars task_envs) override;
   CraneErr Kill(int signum) override;
+
+  [[nodiscard]] std::string WriteBatchScript(
+      const std::string_view script) override {
+    m_executive_path_ =
+        fmt::format("{}/Crane-{}.sh", kDefaultCranedScriptDir, m_meta_.id);
+
+    FILE* fptr = fopen(m_executive_path_.c_str(), "w");
+    if (fptr == nullptr) return "";
+    fputs(script.data(), fptr);
+    fclose(fptr);
+
+    chmod(m_executive_path_.c_str(), strtol("0755", nullptr, 8));
+
+    return m_executive_path_;
+  }
 
   void SetUserDataAndCleanCb(void* data, std::function<void(void*)> cb) {
     m_user_data_ = data;
@@ -193,6 +233,7 @@ class ProcessInstance final : public TaskExecutor {
  private:
   std::string m_cwd_;
 
+  TaskMetaInExecutor m_meta_;
   BatchMetaInTaskExecutor m_batch_meta_;
 
   /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
@@ -208,10 +249,8 @@ class ProcessInstance final : public TaskExecutor {
 
 class ContainerInstance : public TaskExecutor {
  public:
-  ContainerInstance(std::string bundle_path, std::string exec_path)
-      : m_executive_path_(std::move(exec_path)),
-        m_bundle_path_(std::move(bundle_path)),
-        m_pid_(0) {}
+  ContainerInstance(TaskMetaInExecutor meta, std::string bundle_path)
+      : m_meta_(meta), m_bundle_path_(std::move(bundle_path)), m_pid_(0) {}
 
   ~ContainerInstance() override = default;
 
@@ -229,6 +268,12 @@ class ContainerInstance : public TaskExecutor {
     return m_executive_path_;
   }
 
+  [[nodiscard]] const std::string& GetTempPath() const { return m_temp_path_; }
+
+  [[nodiscard]] const std::string& GetBundlePath() const {
+    return m_bundle_path_;
+  }
+
   void Output(std::string&& buf) override {
     // TODO: Not implemented.
     if (m_output_cb_) m_output_cb_(std::move(buf), nullptr);
@@ -239,14 +284,26 @@ class ContainerInstance : public TaskExecutor {
     if (m_finish_cb_) m_finish_cb_(is_killed, val, nullptr);
   }
 
-  [[nodiscard]] CraneErr Spawn(task_id_t task_id,
-                               const PasswordEntry& pwd_entry,
-                               util::Cgroup* cgroup,
-                               EnvVector task_envs) override;
+  [[nodiscard]] CraneErr Spawn(util::Cgroup* cgroup,
+                               EnvironVars task_envs) override;
   CraneErr Kill(int signum) override;
 
-  [[nodiscard]] const std::string& GetBundlePath() const {
-    return m_bundle_path_;
+  [[nodiscard]] std::string WriteBatchScript(
+      const std::string_view script) override {
+    // Create temp folder
+    if (AssureContainerTempDir() != CraneErr::kOk) return "";
+
+    // Write into the temp folder
+    m_executive_path_ = fmt::format("{}/Crane-{}.sh", m_temp_path_, m_meta_.id);
+
+    FILE* fptr = fopen(m_executive_path_.c_str(), "w");
+    if (fptr == nullptr) return "";
+    fputs(script.data(), fptr);
+    fclose(fptr);
+
+    chmod(m_executive_path_.c_str(), strtol("0755", nullptr, 8));
+
+    return m_executive_path_;
   }
 
   /***
@@ -270,6 +327,25 @@ class ContainerInstance : public TaskExecutor {
   }
 
  private:
+  CraneErr AssureContainerTempDir() {
+    m_temp_path_ = fmt::format("{}/container-{}",
+                               g_config.CranedContainer.TempDir, m_meta_.id);
+    try {
+      if (!std::filesystem::exists(m_temp_path_))
+        std::filesystem::create_directories(m_temp_path_);
+    } catch (const std::exception& e) {
+      CRANE_ERROR("Failed to create container temp directory: {}", e.what());
+      return CraneErr::kSystemErr;
+    }
+
+    return CraneErr::kOk;
+  }
+
+  CraneErr ModifyBundleConfig() const;
+
+  TaskMetaInExecutor m_meta_;
+
+  std::string m_temp_path_;
   std::string m_bundle_path_;
   std::string m_executive_path_;
 

@@ -36,8 +36,6 @@
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
-#include "protos/Crane.grpc.pb.h"
-#include "protos/Crane.pb.h"
 
 namespace Craned {
 
@@ -183,23 +181,12 @@ class TaskManager {
 
   static std::string CgroupStrByTaskId_(uint32_t task_id);
 
-  /**
-   * EvActivateTaskStatusChange_ must NOT be called in this method and should be
-   *  called in the caller method after checking the return value of this
-   *  method.
-   * @return kSystemErr if the socket pair between the parent process and child
-   *  process cannot be created, and the caller should call strerror() to check
-   *  the unix error code. kLibEventError if bufferevent_socket_new() fails.
-   *  kCgroupError if CgroupManager cannot move the process to the cgroup bound
-   *  to the TaskInstance. kProtobufError if the communication between the
-   *  parent and the child process fails.
-   */
-  [[deprecated]] static CraneErr SpawnProcessInInstance_(
-      TaskInstance* instance, TaskExecutor* executor);
-
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
-  static TaskExecutor::EnvVector GetEnvVectorFromTask_(
+  /**
+   * Generate environment varibles from TaskInstance
+   */
+  static TaskExecutor::EnvironVars GetEnvironVarsFromTask_(
       const TaskInstance& task);
 
   // Ask TaskManager to stop its event loop.
@@ -264,20 +251,6 @@ class TaskManager {
     event_free(instance->termination_timer);
     instance->termination_timer = nullptr;
   }
-
-  /**
-   * Send a signal to the process group to which the processes in
-   *  ProcessInstance belongs.
-   * This function ASSUMES that ALL processes belongs to the process group with
-   *  the PGID set to the PID of the first process in this ProcessInstance.
-   * @param signum the value of signal.
-   * @return if the signal is sent successfully, kOk is returned.
-   * if the task name doesn't exist, kNonExistent is returned.
-   * if the signal is invalid, kInvalidParam is returned.
-   * otherwise, kGenericFailure is returned.
-   */
-  [[deprecated]] static CraneErr KillProcessInstance_(const TaskExecutor* proc,
-                                                      int signum);
 
   // Note: the three maps below are NOT protected by any mutex.
   //  They should be modified in libev callbacks to avoid races.

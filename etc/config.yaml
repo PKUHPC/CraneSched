@@ -34,6 +34,7 @@ CranedForeground: true
 # Container Runtime Options
 CranedContainer:
   Enable: true
+  TempDir: /tmp/craned/container/
   RuntimeState: "/usr/bin/runc --root=/run/user/%U/ state %u.%j"
   RuntimeKill: "/usr/bin/runc  --rootless=true --root=/run/user/%U/ kill -a %u.%j"
   RuntimeDelete: "/usr/bin/runc  --rootless=true --root=/run/user/%U/ delete --force %u.%j"

@@ -67,6 +67,7 @@ struct Config {
 
   struct CranedContainerConf {
     bool Enable{false};
+    std::string TempDir;
     std::string RunTimeState;
     std::string RuntimeKill;
     std::string RuntimeDelete;
