@@ -23,6 +23,7 @@
 #include <unistd.h>
 
 #include <cstdint>
+#include <mutex>
 #include <string>
 
 #include "crane/PublicHeader.h"
@@ -42,3 +43,14 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
 
 bool GrpcMigrateSshProcToCgroup(pam_handle_t *pamh, pid_t pid,
                                 task_id_t task_id);
+
+struct PamConfig {
+  std::string CraneConfigFilePath;
+  std::string CraneBaseDir;
+  std::string CranedUnixSockPath;
+};
+
+inline PamConfig g_pam_config;
+
+void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
+                     bool *initialized);

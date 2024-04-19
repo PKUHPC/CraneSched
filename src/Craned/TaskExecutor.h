@@ -49,6 +49,7 @@ struct TaskMetaInExecutor {
 
 struct BatchMetaInTaskExecutor {
   std::string parsed_output_file_pattern;
+  std::string parsed_error_file_pattern;
 };
 
 /**

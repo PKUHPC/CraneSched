@@ -18,6 +18,8 @@
 
 #include <google/protobuf/util/time_util.h>
 
+#include <fpm/fixed.hpp>
+
 #include "protos/Crane.pb.h"
 
 using task_id_t = uint32_t;
@@ -52,29 +54,40 @@ enum class CraneErr : uint16_t {
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kCforedDefaultPort = "10012";
+
 inline const char* kDefaultConfigPath = "/etc/crane/config.yaml";
+inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
+
 inline const char* kUnlimitedQosName = "UNLIMITED";
 inline const char* kHostFilePath = "/etc/hosts";
 
 inline constexpr size_t kDefaultQueryTaskNumLimit = 100;
 inline constexpr uint64_t kPriorityDefaultMaxAge = 7 * 24 * 3600;  // 7 days
 
-#define DEFAULT_CRANE_TEMP_DIR "/tmp/crane"
+inline const char* kDefaultCraneBaseDir = "/var/crane/";
+inline const char* kDefaultCraneCtldMutexFile = "cranectld/cranectld.lock";
+inline const char* kDefaultCraneCtldLogPath = "cranectld/cranectld.log";
+inline const char* kDefaultCraneCtldDbPath = "cranectld/embedded.db";
 
-inline const char* kDefaultCraneTempDir = DEFAULT_CRANE_TEMP_DIR;
-inline const char* kDefaultCranedScriptDir =
-    DEFAULT_CRANE_TEMP_DIR "/craned/scripts";
-inline const char* kDefaultCranedUnixSockPath =
-    DEFAULT_CRANE_TEMP_DIR "/craned.sock";
-inline const char* kDefaultCraneCtldMutexFile =
-    DEFAULT_CRANE_TEMP_DIR "/cranectld.lock";
-inline const char* kDefaultCranedMutexFile =
-    DEFAULT_CRANE_TEMP_DIR "/craned.lock";
-
-#undef DEFAULT_CRANE_TEMP_DIR
+inline const char* kDefaultCranedScriptDir = "craned/scripts";
+inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
+inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
+inline const char* kDefaultCranedLogPath = "craned/craned.log";
 
 constexpr int64_t kMaxTimeLimitSecond =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
+
+// gRPC Doc: If smaller than 10 seconds, ten seconds will be used instead.
+// See https://github.com/grpc/proposal/blob/master/A8-client-side-keepalive.md
+constexpr int64_t kCraneCtldGrpcClientPingSendIntervalSec = 10;
+
+// Server MUST have a high value of
+// GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS than the value of
+// GRPC_ARG_KEEPALIVE_TIME_MS. We set server's value to the multiple times of
+// the client's value plus 1s to tolerate 1 time packet dropping. See
+// https://github.com/grpc/grpc/blob/master/doc/keepalive.md
+constexpr int64_t kCranedGrpcServerPingRecvMinIntervalSec =
+    3 * kCraneCtldGrpcClientPingSendIntervalSec + 1;
 
 namespace ExitCode {
 
@@ -93,6 +106,7 @@ enum ExitCodeEnum : uint16_t {
   kExitCodeSpawnProcessFail,
   kExitCodeExceedTimeLimit,
   kExitCodeCranedDown,
+  kExitCodeExecutionError,
 
   __MAX_EXIT_CODE  // NOLINT(bugprone-reserved-identifier)
 };
@@ -137,11 +151,12 @@ inline std::string_view CraneErrStr(CraneErr err) {
 
 using PartitionId = std::string;
 using CranedId = std::string;
+using cpu_t = fpm::fixed_24_8;
 
 // Model the allocatable resources on a craned node.
 // It contains CPU and memory by now.
 struct AllocatableResource {
-  double cpu_count = 0.0;
+  cpu_t cpu_count{0};
 
   // See documentation of cgroup memory.
   // https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt

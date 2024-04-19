@@ -196,7 +196,7 @@ bool MongodbClient::FetchJobRecords(
       task->username = view["username"].get_string().value.data();
 
       task->resources.allocatable_resource.cpu_count =
-          view["cpus_req"].get_double().value;
+          cpu_t{view["cpus_req"].get_double().value};
       task->resources.allocatable_resource.memory_bytes =
           task->resources.allocatable_resource.memory_sw_bytes =
               view["mem_req"].get_int64().value;
@@ -679,7 +679,7 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
 MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     const crane::grpc::TaskInEmbeddedDb& task) {
   auto const& task_to_ctld = task.task_to_ctld();
-  auto const& persisted_part = task.persisted_part();
+  auto const& runtime_attr = task.runtime_attr();
 
   bsoncxx::builder::stream::document env_doc;
   for (const auto& entry : task_to_ctld.env()) {
@@ -717,9 +717,9 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool> /*25-29*/
       values{                                                      // 0-4
-             static_cast<int32_t>(persisted_part.task_id()),
-             persisted_part.task_db_id(), absl::ToUnixSeconds(absl::Now()),
-             false, task_to_ctld.account(),
+             static_cast<int32_t>(runtime_attr.task_id()),
+             runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
+             task_to_ctld.account(),
              // 5-9
              task_to_ctld.resources().allocatable_resource().cpu_core_limit(),
              static_cast<int64_t>(task_to_ctld.resources()
@@ -728,20 +728,19 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              task_to_ctld.name(), env_str,
              static_cast<int32_t>(task_to_ctld.uid()),
              // 10-14
-             static_cast<int32_t>(persisted_part.gid()),
-             util::HostNameListToStr(persisted_part.craned_ids()),
-             persisted_part.craned_ids().size(), 0,
-             task_to_ctld.partition_name(),
+             static_cast<int32_t>(runtime_attr.gid()),
+             util::HostNameListToStr(runtime_attr.craned_ids()),
+             runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
              // 15-19
-             0, 0, persisted_part.start_time().seconds(),
-             persisted_part.end_time().seconds(), 0,
+             0, 0, runtime_attr.start_time().seconds(),
+             runtime_attr.end_time().seconds(), 0,
              // 20-24
-             task_to_ctld.batch_meta().sh_script(), persisted_part.status(),
+             task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
              task_to_ctld.time_limit().seconds(),
-             persisted_part.submit_time().seconds(), task_to_ctld.cwd(),
+             runtime_attr.submit_time().seconds(), task_to_ctld.cwd(),
              // 25-29
-             task_to_ctld.cmd_line(), persisted_part.exit_code(),
-             persisted_part.username(), task_to_ctld.qos(),
+             task_to_ctld.cmd_line(), runtime_attr.exit_code(),
+             runtime_attr.username(), task_to_ctld.qos(),
              task_to_ctld.get_user_env()};
 
   return DocumentConstructor_(fields, values);
@@ -788,26 +787,26 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool> /*25-29*/
 
-      values{// 0-4
-             static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
-             absl::ToUnixSeconds(absl::Now()), false, task->account,
-             // 5-9
-             task->resources.allocatable_resource.cpu_count,
-             static_cast<int64_t>(
-                 task->resources.allocatable_resource.memory_bytes),
-             task->name, env_str, static_cast<int32_t>(task->uid),
-             // 10-14
-             static_cast<int32_t>(task->Gid()), task->allocated_craneds_regex,
-             static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
-             // 15-19
-             0, 0, task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(),
-             0,
-             // 20-24
-             script, task->Status(), absl::ToInt64Seconds(task->time_limit),
-             task->SubmitTimeInUnixSecond(), task->cwd,
-             // 25-29
-             task->cmd_line, task->ExitCode(), task->Username(), task->qos,
-             task->get_user_env};
+      values{
+          // 0-4
+          static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
+          absl::ToUnixSeconds(absl::Now()), false, task->account,
+          // 5-9
+          static_cast<double>(task->resources.allocatable_resource.cpu_count),
+          static_cast<int64_t>(
+              task->resources.allocatable_resource.memory_bytes),
+          task->name, env_str, static_cast<int32_t>(task->uid),
+          // 10-14
+          static_cast<int32_t>(task->Gid()), task->allocated_craneds_regex,
+          static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
+          // 15-19
+          0, 0, task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(), 0,
+          // 20-24
+          script, task->Status(), absl::ToInt64Seconds(task->time_limit),
+          task->SubmitTimeInUnixSecond(), task->cwd,
+          // 25-29
+          task->cmd_line, task->ExitCode(), task->Username(), task->qos,
+          task->get_user_env};
 
   return DocumentConstructor_(fields, values);
 }

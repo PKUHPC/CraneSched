@@ -14,15 +14,45 @@
  * See the Mulan PSL v2 for more details.
  */
 
-#include "crane/FdFunctions.h"
-
-#include <fcntl.h>
-#include <sys/resource.h>
-#include <unistd.h>
-
-#include <algorithm>
+#include "crane/OS.h"
 
 namespace util {
+
+namespace os {
+
+bool DeleteFile(std::string const& p) {
+  std::error_code ec;
+  bool ok = std::filesystem::remove(p, ec);
+
+  if (!ok) CRANE_ERROR("Failed to remove file {}: {}", p, ec.message());
+
+  return ok;
+}
+
+bool CreateFolders(std::string const& p) {
+  if (std::filesystem::exists(p)) return true;
+
+  std::error_code ec;
+  bool ok = std::filesystem::create_directories(p, ec);
+
+  if (!ok) CRANE_ERROR("Failed to create folder {}: {}", p, ec.message());
+
+  return ok;
+}
+
+bool CreateFoldersForFile(std::string const& p) {
+  try {
+    std::filesystem::path log_path{p};
+    auto log_dir = log_path.parent_path();
+    if (!std::filesystem::exists(log_dir))
+      std::filesystem::create_directories(log_dir);
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to create folder for {}: {}", p, e.what());
+    return false;
+  }
+
+  return true;
+}
 
 int GetFdOpenMax() { return static_cast<int>(sysconf(_SC_OPEN_MAX)); }
 
@@ -71,5 +101,7 @@ bool SetMaxFileDescriptorNumber(unsigned long num) {
 
   return setrlimit(RLIMIT_NOFILE, &rlim) == 0;
 }
+
+}  // namespace os
 
 }  // namespace util

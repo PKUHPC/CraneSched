@@ -87,10 +87,10 @@ class CranedServiceImpl : public Craned::Service {
       const crane::grpc::CreateCgroupForTasksRequest *request,
       crane::grpc::CreateCgroupForTasksReply *response) override;
 
-  grpc::Status ReleaseCgroupForTask(
+  grpc::Status ReleaseCgroupForTasks(
       grpc::ServerContext *context,
-      const crane::grpc::ReleaseCgroupForTaskRequest *request,
-      crane::grpc::ReleaseCgroupForTaskReply *response) override;
+      const crane::grpc::ReleaseCgroupForTasksRequest *request,
+      crane::grpc::ReleaseCgroupForTasksReply *response) override;
 
   grpc::Status ChangeTaskTimeLimit(
       grpc::ServerContext *context,

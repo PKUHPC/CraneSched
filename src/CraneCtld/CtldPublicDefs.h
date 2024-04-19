@@ -25,29 +25,40 @@ using moodycamel::ConcurrentQueue;
 
 using task_db_id_t = int64_t;
 
-inline const char* kCraneCtldDefaultLogPath = "/tmp/cranectld/cranectld.log";
-inline const char* kDefaultDbPath = "/tmp/cranectld/embedded.db";
-inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
-
+// *****************************************************
 // TaskScheduler Constants
+
 constexpr uint32_t kTaskScheduleIntervalMs = 1000;
+
+// Clean CancelTaskQueue when timeout or exceeding batch num
 constexpr uint32_t kCancelTaskTimeoutMs = 500;
 constexpr uint32_t kCancelTaskBatchNum = 1000;
+
+// Clean SubmitTaskQueue when timeout or exceeding batch num
 constexpr uint32_t kSubmitTaskTimeoutMs = 500;
 constexpr uint32_t kSubmitTaskBatchNum = 1000;
-constexpr uint32_t kConcurrentStreamQuota = 3000;
-constexpr uint32_t kCompletionQueueCapacity = 5000;
+
+// Clean TaskStatusChangeQueue when timeout or exceeding batch num
+constexpr uint32_t kTaskStatusChangeTimeoutMS = 500;
+constexpr uint32_t kTaskStatusChangeBatchNum = 1000;
+
+//*********************************************************
 
 // CranedKeeper Constants
+constexpr uint32_t kConcurrentStreamQuota = 3000;
+constexpr uint32_t kCompletionQueueCapacity = 5000;
 constexpr uint16_t kCompletionQueueConnectingTimeoutSeconds = 3;
 constexpr uint16_t kCompletionQueueEstablishedTimeoutSeconds = 45;
 
 // Since Unqlite has a limitation of about 900000 tasks per transaction,
 // we use this value to set the batch size of one dequeue action on
 // pending concurrent queue.
-constexpr uint32_t kPendingConcurrentQueueBatchSize = 900000;
+constexpr uint32_t kPendingQueueMaxSize = 900000;
+constexpr uint32_t kMaxScheduledBatchSize = 200000;
+constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
+constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 
 struct Config {
   struct Node {
@@ -98,6 +109,9 @@ struct Config {
   std::string CraneEmbeddedDbBackend;
   std::string CraneCtldDbPath;
 
+  std::string CraneBaseDir;
+  std::string CraneCtldMutexFilePath;
+
   bool CraneCtldForeground{};
 
   std::string Hostname;
@@ -111,6 +125,10 @@ struct Config {
   std::string DbPort;
   std::string DbRSName;
   std::string DbName;
+
+  uint32_t PendingQueueMaxSize;
+  uint32_t ScheduledBatchSize;
+  bool RejectTasksBeyondCapacity{false};
 };
 
 }  // namespace Ctld
@@ -205,6 +223,7 @@ struct InteractiveMetaInTask {
 struct BatchMetaInTask {
   std::string sh_script;
   std::string output_file_pattern;
+  std::string error_file_pattern;
 };
 
 struct TaskInCtld {
@@ -223,7 +242,7 @@ struct TaskInCtld {
 
   uint32_t node_num{0};
   uint32_t ntasks_per_node{0};
-  double cpus_per_task{0.0};
+  cpu_t cpus_per_task{0};
 
   std::unordered_set<std::string> included_nodes;
   std::unordered_set<std::string> excluded_nodes;
@@ -243,8 +262,8 @@ struct TaskInCtld {
    * Fields that won't change after this task is accepted.
    * Also, these fields are persisted on the disk.
    * ------------------------------- */
-  task_id_t task_id;
-  task_db_id_t task_db_id;
+  task_id_t task_id{0};
+  task_db_id_t task_db_id{0};
   gid_t gid;
   std::string username;
 
@@ -268,7 +287,7 @@ struct TaskInCtld {
   crane::grpc::TaskToCtld task_to_ctld;
 
   /* ------ duplicate of the fields [2][3] above just for convenience ----- */
-  crane::grpc::PersistedPartOfTaskInCtld persisted_part;
+  crane::grpc::RuntimeAttrOfTask runtime_attr;
 
  public:
   /* -----------
@@ -299,91 +318,88 @@ struct TaskInCtld {
   crane::grpc::TaskToCtld const& TaskToCtld() const { return task_to_ctld; }
   crane::grpc::TaskToCtld* MutableTaskToCtld() { return &task_to_ctld; }
 
-  crane::grpc::PersistedPartOfTaskInCtld const& PersistedPart() {
-    return persisted_part;
-  }
+  crane::grpc::RuntimeAttrOfTask const& RuntimeAttr() { return runtime_attr; }
 
   void SetTaskId(task_id_t id) {
     task_id = id;
-    persisted_part.set_task_id(id);
+    runtime_attr.set_task_id(id);
   }
   task_id_t TaskId() const { return task_id; }
 
   void SetTaskDbId(task_db_id_t id) {
     task_db_id = id;
-    persisted_part.set_task_db_id(id);
+    runtime_attr.set_task_db_id(id);
   }
   task_id_t TaskDbId() const { return task_db_id; }
 
   void SetGid(gid_t id) {
     gid = id;
-    persisted_part.set_gid(id);
+    runtime_attr.set_gid(id);
   }
   uid_t Gid() const { return gid; }
 
   void SetUsername(std::string const& val) {
     username = val;
-    persisted_part.set_username(val);
+    runtime_attr.set_username(val);
   }
   std::string const& Username() const { return username; }
 
   void SetCranedIds(std::list<CranedId>&& val) {
-    persisted_part.mutable_craned_ids()->Assign(val.begin(), val.end());
+    runtime_attr.mutable_craned_ids()->Assign(val.begin(), val.end());
     craned_ids = val;
   }
   std::list<CranedId> const& CranedIds() const { return craned_ids; }
   void CranedIdsClear() {
     craned_ids.clear();
-    persisted_part.mutable_craned_ids()->Clear();
+    runtime_attr.mutable_craned_ids()->Clear();
   }
 
   void CranedIdsAdd(CranedId const& i) {
     craned_ids.emplace_back(i);
-    *persisted_part.mutable_craned_ids()->Add() = i;
+    *runtime_attr.mutable_craned_ids()->Add() = i;
   }
 
   void SetStatus(crane::grpc::TaskStatus val) {
     status = val;
-    persisted_part.set_status(val);
+    runtime_attr.set_status(val);
   }
   crane::grpc::TaskStatus Status() const { return status; }
 
   void SetExitCode(uint32_t val) {
     exit_code = val;
-    persisted_part.set_exit_code(val);
+    runtime_attr.set_exit_code(val);
   }
   uint32_t ExitCode() const { return exit_code; }
 
   void SetSubmitTime(absl::Time const& val) {
     submit_time = val;
-    persisted_part.mutable_submit_time()->set_seconds(
-        ToUnixSeconds(submit_time));
+    runtime_attr.mutable_submit_time()->set_seconds(ToUnixSeconds(submit_time));
   }
   void SetSubmitTimeByUnixSecond(uint64_t val) {
     submit_time = absl::FromUnixSeconds(val);
-    persisted_part.mutable_submit_time()->set_seconds(val);
+    runtime_attr.mutable_submit_time()->set_seconds(val);
   }
   absl::Time const& SubmitTime() const { return submit_time; }
   int64_t SubmitTimeInUnixSecond() const { return ToUnixSeconds(submit_time); }
 
   void SetStartTime(absl::Time const& val) {
     start_time = val;
-    persisted_part.mutable_start_time()->set_seconds(ToUnixSeconds(start_time));
+    runtime_attr.mutable_start_time()->set_seconds(ToUnixSeconds(start_time));
   }
   void SetStartTimeByUnixSecond(uint64_t val) {
     start_time = absl::FromUnixSeconds(val);
-    persisted_part.mutable_start_time()->set_seconds(val);
+    runtime_attr.mutable_start_time()->set_seconds(val);
   }
   absl::Time const& StartTime() const { return start_time; }
   int64_t StartTimeInUnixSecond() const { return ToUnixSeconds(start_time); }
 
   void SetEndTime(absl::Time const& val) {
     end_time = val;
-    persisted_part.mutable_end_time()->set_seconds(ToUnixSeconds(end_time));
+    runtime_attr.mutable_end_time()->set_seconds(ToUnixSeconds(end_time));
   }
   void SetEndTimeByUnixSecond(uint64_t val) {
     end_time = absl::FromUnixSeconds(val);
-    persisted_part.mutable_end_time()->set_seconds(val);
+    runtime_attr.mutable_end_time()->set_seconds(val);
   }
   absl::Time const& EndTime() const { return end_time; }
   int64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
@@ -402,12 +418,13 @@ struct TaskInCtld {
       meta.emplace<BatchMetaInTask>(BatchMetaInTask{
           .sh_script = val.batch_meta().sh_script(),
           .output_file_pattern = val.batch_meta().output_file_pattern(),
+          .error_file_pattern = val.batch_meta().error_file_pattern(),
       });
     }
 
     node_num = val.node_num();
     ntasks_per_node = val.ntasks_per_node();
-    cpus_per_task = val.cpus_per_task();
+    cpus_per_task = cpu_t(val.cpus_per_task());
 
     uid = val.uid();
     password_entry = std::make_unique<PasswordEntry>(uid);
@@ -425,27 +442,26 @@ struct TaskInCtld {
     container = val.container();
   }
 
-  void SetFieldsByPersistedPart(
-      crane::grpc::PersistedPartOfTaskInCtld const& val) {
-    persisted_part = val;
+  void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
+    runtime_attr = val;
 
-    task_id = persisted_part.task_id();
-    task_db_id = persisted_part.task_db_id();
-    gid = persisted_part.gid();
-    username = persisted_part.username();
+    task_id = runtime_attr.task_id();
+    task_db_id = runtime_attr.task_db_id();
+    gid = runtime_attr.gid();
+    username = runtime_attr.username();
 
     nodes_alloc = craned_ids.size();
 
-    status = persisted_part.status();
+    status = runtime_attr.status();
 
     if (status != crane::grpc::TaskStatus::Pending) {
-      craned_ids.assign(persisted_part.craned_ids().begin(),
-                        persisted_part.craned_ids().end());
+      craned_ids.assign(runtime_attr.craned_ids().begin(),
+                        runtime_attr.craned_ids().end());
       executing_craned_id = craned_ids.front();
     }
 
-    start_time = absl::FromUnixSeconds(persisted_part.start_time().seconds());
-    end_time = absl::FromUnixSeconds(persisted_part.end_time().seconds());
+    start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());
+    end_time = absl::FromUnixSeconds(runtime_attr.end_time().seconds());
   }
 };
 

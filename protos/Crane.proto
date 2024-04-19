@@ -133,7 +133,8 @@ message SubmitBatchTaskReply {
 }
 
 message SubmitBatchTasksRequest {
-  repeated TaskToCtld tasks = 1;
+  TaskToCtld task = 1;
+  uint32 count = 2;
 }
 
 message SubmitBatchTasksReply {
@@ -145,7 +146,9 @@ message ExecuteTasksRequest {
   repeated TaskToD tasks = 1;
 }
 
-message ExecuteTasksReply {}
+message ExecuteTasksReply {
+  repeated uint32 failed_task_id_list = 1;
+}
 
 message CreateCgroupForTasksRequest {
   repeated uint32 task_id_list = 1;
@@ -154,12 +157,12 @@ message CreateCgroupForTasksRequest {
 
 message CreateCgroupForTasksReply{}
 
-message ReleaseCgroupForTaskRequest{
-  uint32 task_id = 1;
-  uint32 uid = 2;
+message ReleaseCgroupForTasksRequest{
+  repeated uint32 task_id_list = 1;
+  repeated uint32 uid_list = 2;
 }
 
-message ReleaseCgroupForTaskReply{}
+message ReleaseCgroupForTasksReply{}
 
 message TerminateTasksRequest {
   repeated uint32 task_id_list = 1;
@@ -615,7 +618,7 @@ service Craned {
   rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
 
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns(CreateCgroupForTasksReply);
-  rpc ReleaseCgroupForTask(ReleaseCgroupForTaskRequest) returns(ReleaseCgroupForTaskReply);
+  rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns(ReleaseCgroupForTasksReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.

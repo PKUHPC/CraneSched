@@ -22,13 +22,52 @@
 #include <grpc++/grpc++.h>
 #include <pwd.h>
 #include <sys/stat.h>
+#include <yaml-cpp/yaml.h>
 
 #include <cerrno>
 #include <filesystem>
 #include <fstream>
 #include <unordered_map>
+#include <vector>
 
 #include "protos/Crane.grpc.pb.h"
+
+void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
+                     bool *initialized) {
+  g_pam_config.CraneConfigFilePath = kDefaultConfigPath;
+
+  for (int i = 0; i < argc; i++) {
+    std::vector<std::string_view> split_arg = absl::StrSplit(argv[i], '=');
+    if (split_arg.size() < 2 || split_arg.size() > 2) continue;
+
+    if (split_arg[0] == "config_path")
+      g_pam_config.CraneConfigFilePath = split_arg[1];
+  }
+
+  try {
+    YAML::Node config = YAML::LoadFile(g_pam_config.CraneConfigFilePath);
+
+    if (config["CraneBaseDir"])
+      g_pam_config.CraneBaseDir = config["CraneBaseDir"].as<std::string>();
+    else
+      g_pam_config.CraneBaseDir = kDefaultCraneBaseDir;
+
+    if (config["CranedUnixSockPath"])
+      g_pam_config.CranedUnixSockPath =
+          g_pam_config.CraneBaseDir +
+          config["CranedUnixSockPath"].as<std::string>();
+    else
+      g_pam_config.CranedUnixSockPath =
+          g_pam_config.CraneBaseDir + kDefaultCranedUnixSockPath;
+
+    *initialized = true;
+  } catch (YAML::BadFile &e) {
+    pam_syslog(pamh, LOG_ERR,
+               "[Crane] Pam module failed to read configuration: %s",
+               e.msg.c_str());
+    return;
+  }
+}
 
 bool PamGetUserName(pam_handle_t *pamh, std::string *username) {
   int rc;
@@ -207,7 +246,7 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
   using grpc::Status;
 
   std::string craned_unix_socket_address =
-      fmt::format("unix://{}", kDefaultCranedUnixSockPath);
+      fmt::format("unix://{}", g_pam_config.CranedUnixSockPath);
 
   std::shared_ptr<Channel> channel = grpc::CreateChannel(
       craned_unix_socket_address, grpc::InsecureChannelCredentials());
@@ -270,7 +309,7 @@ bool GrpcMigrateSshProcToCgroup(pam_handle_t *pamh, pid_t pid,
   using grpc::Status;
 
   std::string craned_unix_socket_address =
-      fmt::format("unix://{}", kDefaultCranedUnixSockPath);
+      fmt::format("unix://{}", g_pam_config.CranedUnixSockPath);
 
   std::shared_ptr<Channel> channel = grpc::CreateChannel(
       craned_unix_socket_address, grpc::InsecureChannelCredentials());

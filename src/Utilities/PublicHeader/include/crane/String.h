@@ -68,4 +68,6 @@ std::string HostNameListToStr(T const &host_list)
   }
 }
 
+void SetCurrentThreadName(const std::string &name);
+
 }  // namespace util

@@ -21,7 +21,7 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
 
-#include "crane/FdFunctions.h"
+#include "crane/OS.h"
 #include "protos/CraneSubprocess.pb.h"
 
 namespace Craned {
@@ -170,17 +170,35 @@ CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup, EnvironVars task_envs) {
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
-    auto out_file_path = m_batch_meta_.parsed_output_file_pattern;
-    int out_fd = open(out_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
-    if (out_fd == -1) {
-      CRANE_ERROR("[Child Process] Error: open {}. {}", out_file_path,
+    const std::string& stdout_file_path =
+        m_batch_meta_.parsed_output_file_pattern;
+    const std::string& stderr_file_path =
+        m_batch_meta_.parsed_error_file_pattern;
+
+    int stdout_fd =
+        open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
+    if (stdout_fd == -1) {
+      CRANE_ERROR("[Child Process] Error: open {}. {}", stdout_file_path,
                   strerror(errno));
       std::abort();
     }
+    dup2(stdout_fd, 1);  // stdout -> output file
 
-    dup2(out_fd, 1);  // stdout -> output file
-    dup2(out_fd, 2);  // stderr -> output file
-    close(out_fd);
+    if (stderr_file_path.empty()) {  // if stderr filename is not specified
+      dup2(stdout_fd, 2);            // stderr -> output file
+    } else {
+      int stderr_fd =
+          open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
+      if (stderr_fd == -1) {
+        CRANE_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
+                    strerror(errno));
+        std::abort();
+      }
+      dup2(stderr_fd, 2);  // stderr -> error file
+      close(stderr_fd);
+    }
+
+    close(stdout_fd);
 
     child_process_ready.set_ok(true);
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
@@ -195,28 +213,34 @@ CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup, EnvironVars task_envs) {
     // If these file descriptors are not closed, a program like mpirun may
     // keep waiting for the input from stdin or other fds and will never end.
     close(0);  // close stdin
-    util::CloseFdFrom(3);
+    util::os::CloseFdFrom(3);
 
     // Set environment variables related to task info (begin with `CRANE`).
     EnvironVars envs{std::move(task_envs)};
 
-    // Since we want to reinitialize the environment variables of the user,
-    // we are actually performing two steps: login -> start shell.
-    // Shell starting is done by calling "bash --login".
-    //
-    // During shell starting step, /etc/profile, ~/.bash_profile, ... are
-    // loaded.
-    //
-    // During login step, "HOME" and "SHELL" are set.
-    // Here we are just mimicking the login module.
-    //
-    // Slurm uses `su <username> -c /usr/bin/env` to retrieve
-    // all the environment variables.
-    // We use a more tidy way.
+    // FIXME: --get-user-env
+    // if (instance->task.get_user_env()) {
+    if (true) {
+      // If --get-user-env is set, the new environment is inherited
+      // from the execution CraneD rather than the submitting node.
+      //
+      // Since we want to reinitialize the environment variables of the user
+      // by reloading the settings in something like .bashrc or /etc/profile,
+      // we are actually performing two steps: login -> start shell.
+      // Shell starting is done by calling "bash --login".
+      //
+      // During shell starting step, the settings in
+      // /etc/profile, ~/.bash_profile, ... are loaded.
+      //
+      // During login step, "HOME" and "SHELL" are set.
+      // Here we are just mimicking the login module.
 
-    // FIXME: Check instance->task.get_user_env():
-    envs.emplace_back("HOME", m_meta_.pwd.HomeDir());
-    envs.emplace_back("SHELL", m_meta_.pwd.Shell());
+      // Slurm uses `su <username> -c /usr/bin/env` to retrieve
+      // all the environment variables.
+      // We use a more tidy way.
+      envs.emplace_back("HOME", m_meta_.pwd.HomeDir());
+      envs.emplace_back("SHELL", m_meta_.pwd.Shell());
+    }
 
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
@@ -235,7 +259,13 @@ CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup, EnvironVars task_envs) {
     argv.emplace_back("CraneScript");
 
     // FIXME: Check instance->task.get_user_env():
-    argv.emplace_back("--login");
+    // if (instance->task.get_user_env()) {
+    if (true) {
+      // If --get-user-env is specified,
+      // we need to use --login option of bash to load settings from the user's
+      // settings.
+      argv.emplace_back("--login");
+    }
 
     argv.emplace_back(m_executive_path_.c_str());
     for (auto&& arg : m_arguments_) {
@@ -432,7 +462,7 @@ CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup,
     // If these file descriptors are not closed, a program like mpirun may
     // keep waiting for the input from stdin or other fds and will never end.
     close(0);  // close stdin
-    util::CloseFdFrom(3);
+    util::os::CloseFdFrom(3);
 
     // Set environment variables related to task info (begin with `CRANE`).
     EnvironVars env_vec{std::move(task_envs)};

@@ -483,13 +483,23 @@ bool Cgroup::SetCpuShares(uint64_t share) {
                             CgroupConstant::ControllerFile::CPU_SHARES, share);
 }
 
+/*
+ * CPU_CFS_PERIOD_US is the period of time in microseconds for how long a
+ * cgroup's access to CPU resources is measured.
+ * CPU_CFS_QUOTA_US is the maximum amount of time in microseconds for which a
+ * cgroup's tasks are allowed to run during one period.
+ * CPU_CFS_PERIOD_US should be set to between 1ms(1000) and 1s(1000'000).
+ * CPU_CFS_QUOTA_US should be set to -1 for unlimited, or larger than 1ms(1000).
+ * See
+ * https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/6/html/resource_management_guide/sec-cpu
+ */
 bool Cgroup::SetCpuCoreLimit(double core_num) {
-  constexpr uint32_t base = 1000'000;
+  constexpr uint32_t base = 1 << 16;
 
   bool ret;
   ret = SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER,
                            CgroupConstant::ControllerFile::CPU_CFS_QUOTA_US,
-                           uint64_t(base * core_num));
+                           uint64_t(std::round(base * core_num)));
   ret &= SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER,
                             CgroupConstant::ControllerFile::CPU_CFS_PERIOD_US,
                             base);

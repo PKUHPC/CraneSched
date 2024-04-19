@@ -14,8 +14,6 @@
  * See the Mulan PSL v2 for more details.
  */
 
-#include "CranedKeeper.h"
-
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -29,9 +27,10 @@
 #include <string_view>
 #include <thread>
 
-#include "SharedTestImpl/GlobalDefs.h"
+#include "CranedKeeper.h"
 #include "CranedServer.h"
-#include "crane/FdFunctions.h"
+#include "SharedTestImpl/GlobalDefs.h"
+#include "crane/OS.h"
 
 using testing::_;
 using testing::AnyOf;

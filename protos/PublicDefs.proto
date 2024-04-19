@@ -106,11 +106,11 @@ message TaskToCtld {
 }
 
 message TaskInEmbeddedDb {
-  PersistedPartOfTaskInCtld persisted_part = 1;
+  RuntimeAttrOfTask runtime_attr = 1;
   TaskToCtld task_to_ctld = 2;
 }
 
-message PersistedPartOfTaskInCtld {
+message RuntimeAttrOfTask {
   // Fields that won't change after this task is accepted.
   uint32 task_id = 1;
   int64 task_db_id = 3;
@@ -172,6 +172,7 @@ message TaskToD {
 message BatchTaskAdditionalMeta {
   string sh_script = 1;
   string output_file_pattern = 3;
+  string error_file_pattern = 4;
 }
 
 message InteractiveTaskAdditionalMeta{

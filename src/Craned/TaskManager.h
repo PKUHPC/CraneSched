@@ -46,6 +46,11 @@ struct EvTimerCbArg {
   task_id_t task_id;
 };
 
+// struct BatchMetaInProcessInstance {
+//   std::string parsed_output_file_pattern;
+//   std::string parsed_error_file_pattern;
+// };
+
 struct BatchMetaInTaskInstance {
   std::string parsed_sh_script_path;
 };
@@ -179,7 +184,11 @@ class TaskManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
-  static std::string CgroupStrByTaskId_(uint32_t task_id);
+  static std::string CgroupStrByTaskId_(task_id_t task_id);
+
+  static std::string ParseFilePathPattern_(const std::string& path_pattern,
+                                           const std::string& cwd,
+                                           task_id_t task_id);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
@@ -188,6 +197,9 @@ class TaskManager {
    */
   static TaskExecutor::EnvironVars GetEnvironVarsFromTask_(
       const TaskInstance& task);
+
+  [[deprecated]] CraneErr SpawnProcessInInstance_(TaskInstance* instance,
+                                                  ProcessInstance* process);
 
   // Ask TaskManager to stop its event loop.
   void EvActivateShutdown_();
@@ -278,6 +290,9 @@ class TaskManager {
       GUARDED_BY(m_mtx_);
 
   absl::Mutex m_mtx_;
+
+  util::AtomicHashMap<absl::flat_hash_map, task_id_t, uid_t>
+      m_task_id_to_uid_map_;
 
   util::AtomicHashMap<absl::flat_hash_map, task_id_t,
                       std::unique_ptr<util::Cgroup>>

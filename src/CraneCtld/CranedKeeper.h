@@ -37,12 +37,17 @@ class CranedStub {
 
   ~CranedStub();
 
-  CraneErr ExecuteTasks(std::vector<TaskInCtld const *> const &tasks);
+  static crane::grpc::ExecuteTasksRequest NewExecuteTasksRequest(
+      const std::vector<TaskInCtld *> &tasks);
+
+  std::vector<task_id_t> ExecuteTasks(
+      const crane::grpc::ExecuteTasksRequest &request);
 
   CraneErr CreateCgroupForTasks(
       std::vector<std::pair<task_id_t, uid_t>> const &task_uid_pairs);
 
-  CraneErr ReleaseCgroupForTask(uint32_t task_id, uid_t uid);
+  CraneErr ReleaseCgroupForTasks(
+      const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs);
 
   CraneErr TerminateTasks(const std::vector<task_id_t> &task_ids);
 
@@ -65,7 +70,7 @@ class CranedStub {
   // Set if underlying gRPC is down.
   bool m_invalid_;
 
-  static constexpr uint32_t s_maximum_retry_times_ = 3;
+  static constexpr uint32_t s_maximum_retry_times_ = 2;
   uint32_t m_failure_retry_times_;
 
   CranedId m_craned_id_;

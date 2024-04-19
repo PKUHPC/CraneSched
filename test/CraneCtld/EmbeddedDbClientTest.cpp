@@ -219,7 +219,7 @@ TEST_F(EmbeddedDbClientTest, LinkList) {
   ASSERT_EQ(rc, UNQLITE_OK);
   ASSERT_EQ(i, 3);
 
-  ok = g_embedded_db_client->PurgeTaskFromEnded(1);
+  ok = g_embedded_db_client->PurgeEndedTasks(1);
   ASSERT_TRUE(ok);
 
   i = 0;

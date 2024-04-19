@@ -66,6 +66,13 @@ class IEmbeddedDb {
 
   virtual result::result<void, DbErrorCode> Abort(txn_id_t txn_id) = 0;
 
+  using KvIterFunc =
+      std::function<bool(std::string&& key, std::vector<uint8_t>&& value)>;
+
+  /// @param func if the return value of func is true, continue to next KV.
+  ///             Otherwise, continue to next KV and delete current KV.
+  virtual result::result<void, DbErrorCode> IterateAllKv(KvIterFunc func) = 0;
+
   virtual std::string const& DbPath() = 0;
 };
 
@@ -94,6 +101,8 @@ class UnqliteDb : public IEmbeddedDb {
   result::result<void, DbErrorCode> Commit(txn_id_t txn_id) override;
 
   result::result<void, DbErrorCode> Abort(txn_id_t txn_id) override;
+
+  result::result<void, DbErrorCode> IterateAllKv(KvIterFunc func) override;
 
   const std::string& DbPath() override { return m_db_path_; };
 
@@ -134,6 +143,8 @@ class BerkeleyDb : public IEmbeddedDb {
 
   result::result<void, DbErrorCode> Abort(txn_id_t txn_id) override;
 
+  result::result<void, DbErrorCode> IterateAllKv(KvIterFunc func) override;
+
   const std::string& DbPath() override { return m_db_path_; };
 
  private:
@@ -155,128 +166,56 @@ class EmbeddedDbClient {
   using db_id_t = task_db_id_t;
   using TaskInEmbeddedDb = crane::grpc::TaskInEmbeddedDb;
 
-  struct DbQueueDummyHead {
-    db_id_t db_id;
-    db_id_t next_db_id;
-  };
-
-  struct DbQueueDummyTail {
-    db_id_t db_id;
-    db_id_t prev_db_id;
-  };
-
-  struct DbQueueNode {
-    db_id_t db_id{0};
-    db_id_t prev_db_id{0};
-    db_id_t next_db_id{0};
-  };
-
-  using ForEachInQueueFunc = std::function<void(DbQueueNode const&)>;
-
-  inline static constexpr db_id_t s_pending_head_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 0;
-  inline static constexpr db_id_t s_pending_tail_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 1;
-
-  inline static constexpr db_id_t s_running_head_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 2;
-  inline static constexpr db_id_t s_running_tail_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 3;
-
-  inline static constexpr db_id_t s_ended_head_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 4;
-  inline static constexpr db_id_t s_ended_tail_db_id_ =
-      std::numeric_limits<db_id_t>::max() - 5;
-
-  inline static DbQueueDummyHead s_pending_queue_head_{
-      .db_id = s_pending_head_db_id_};
-  inline static DbQueueDummyTail s_pending_queue_tail_{
-      .db_id = s_pending_tail_db_id_};
-
-  inline static DbQueueDummyHead s_running_queue_head_{
-      .db_id = s_running_head_db_id_};
-  inline static DbQueueDummyTail s_running_queue_tail_{
-      .db_id = s_running_tail_db_id_};
-
-  inline static DbQueueDummyHead s_ended_queue_head_{.db_id =
-                                                         s_ended_head_db_id_};
-  inline static DbQueueDummyTail s_ended_queue_tail_{.db_id =
-                                                         s_ended_tail_db_id_};
-
  public:
+  struct DbSnapshot {
+    std::unordered_map<db_id_t, TaskInEmbeddedDb> pending_queue;
+    std::unordered_map<db_id_t, TaskInEmbeddedDb> running_queue;
+    std::unordered_map<db_id_t, TaskInEmbeddedDb> final_queue;
+  };
+
   EmbeddedDbClient() = default;
   ~EmbeddedDbClient();
 
   bool Init(std::string const& db_path);
 
-  bool BeginTransaction(txn_id_t* txn_id) {
-    auto result = m_embedded_db_->Begin();
-    if (result.has_value()) {
-      *txn_id = result.value();
-      return true;
-    }
-    CRANE_ERROR("Failed to begin a transaction.");
-    return false;
+  bool RetrieveLastSnapshot(DbSnapshot* snapshot);
+
+  bool BeginVariableDbTransaction(txn_id_t* txn_id) {
+    return BeginDbTransaction_(m_variable_db_.get(), txn_id);
   }
 
-  bool CommitTransaction(txn_id_t txn_id) {
-    if (txn_id <= 0) {
-      CRANE_ERROR("Commit a transaction with id {} <= 0", txn_id);
-      return false;
-    }
-
-    return m_embedded_db_->Commit(txn_id).has_value();
+  bool CommitVariableDbTransaction(txn_id_t txn_id) {
+    return CommitDbTransaction_(m_variable_db_.get(), txn_id);
   }
 
-  bool AbortTransaction(txn_id_t txn_id) {
-    if (txn_id <= 0) {
-      CRANE_ERROR("Abort a transaction with id {} <= 0", txn_id);
-      return false;
-    }
-
-    return m_embedded_db_->Abort(txn_id).has_value();
+  bool BeginFixedDbTransaction(txn_id_t* txn_id) {
+    return BeginDbTransaction_(m_fixed_db_.get(), txn_id);
   }
 
-  bool AppendTaskToPendingAndAdvanceTaskIds(txn_id_t txn_id, TaskInCtld* task);
-
-  bool MovePendingOrRunningTaskToEnded(txn_id_t txn_id, db_id_t db_id);
-
-  bool MoveTaskFromPendingToRunning(txn_id_t txn_id, db_id_t db_id);
-
-  bool MoveTaskFromRunningToPending(txn_id_t txn_id, db_id_t db_id);
-
-  bool PurgeTaskFromEnded(txn_id_t txn_id, db_id_t db_id);
-
-  bool GetPendingQueueCopy(txn_id_t txn_id,
-                           std::list<crane::grpc::TaskInEmbeddedDb>* list) {
-    absl::MutexLock l(&m_queue_mtx_);
-    return GetQueueCopyNoLock_(txn_id, m_pending_queue_, list);
+  bool CommitFixedDbTransaction(txn_id_t txn_id) {
+    return CommitDbTransaction_(m_fixed_db_.get(), txn_id);
   }
 
-  bool GetRunningQueueCopy(txn_id_t txn_id,
-                           std::list<crane::grpc::TaskInEmbeddedDb>* list) {
-    absl::MutexLock l(&m_queue_mtx_);
-    return GetQueueCopyNoLock_(txn_id, m_running_queue_, list);
-  }
+  // Note: All operations in transaction will abort or rollback automatically if
+  // some operation fails, so we don't need anything like AbortTransaction here!
 
-  bool GetEndedQueueCopy(txn_id_t txn_id,
-                         std::list<crane::grpc::TaskInEmbeddedDb>* list) {
-    absl::MutexLock l(&m_queue_mtx_);
-    return GetQueueCopyNoLock_(txn_id, m_ended_queue_, list);
-  }
+  bool AppendTasksToPendingAndAdvanceTaskIds(
+      const std::vector<TaskInCtld*>& tasks);
 
-  bool UpdatePersistedPartOfTask(
+  bool PurgeEndedTasks(const std::vector<db_id_t>& db_ids);
+
+  bool UpdateRuntimeAttrOfTask(
       txn_id_t txn_id, db_id_t db_id,
-      crane::grpc::PersistedPartOfTaskInCtld const& persisted_part) {
-    return StoreTypeIntoDb_(txn_id, GetDbQueueNodePersistedPartName_(db_id),
-                            &persisted_part)
+      crane::grpc::RuntimeAttrOfTask const& runtime_attr) {
+    return StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
+                            GetVariableDbEntryName_(db_id), &runtime_attr)
         .has_value();
   }
 
   bool UpdateTaskToCtld(txn_id_t txn_id, db_id_t db_id,
                         crane::grpc::TaskToCtld const& task_to_ctld) {
-    return StoreTypeIntoDb_(txn_id, GetDbQueueNodeTaskToCtldName_(db_id),
-                            &task_to_ctld)
+    return StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
+                            GetFixedDbEntryName_(db_id), &task_to_ctld)
         .has_value();
   }
 
@@ -286,41 +225,41 @@ class EmbeddedDbClient {
   }
 
  private:
-  inline static std::string GetDbQueueNodeTaskToCtldName_(db_id_t db_id) {
-    return fmt::format("{}TaskToCtld", db_id);
+  inline static std::string GetFixedDbEntryName_(db_id_t db_id) {
+    return fmt::format("{}T", db_id);
   }
 
-  inline static std::string GetDbQueueNodePersistedPartName_(db_id_t db_id) {
-    return fmt::format("{}Persisted", db_id);
+  inline static std::string GetVariableDbEntryName_(db_id_t db_id) {
+    return fmt::format("{}S", db_id);
   }
 
-  inline static std::string GetDbQueueNodeNextName_(db_id_t db_id) {
-    return fmt::format("{}Next", db_id);
+  inline static bool IsVariableDbTaskDataEntry_(std::string const& key) {
+    return key.back() == 'S';
   }
 
-  inline static std::string GetDbQueueNodePrevName_(db_id_t db_id) {
-    return fmt::format("{}Prev", db_id);
+  inline static task_db_id_t ExtractDbIdFromEntry_(std::string const& key) {
+    return std::stol(key.substr(0, key.size() - 1));
   }
 
-  // Helper functions for the queue structure in the embedded db.
+  bool BeginDbTransaction_(IEmbeddedDb* db, txn_id_t* txn_id) {
+    auto result = db->Begin();
+    if (result.has_value()) {
+      *txn_id = result.value();
+      return true;
+    }
 
-  bool InsertBeforeDbQueueNodeNoLock_(
-      txn_id_t txn_id, db_id_t db_id, db_id_t pos,
-      std::unordered_map<db_id_t, DbQueueNode>* q, DbQueueDummyHead* q_head,
-      DbQueueDummyTail* q_tail);
+    CRANE_ERROR("Failed to begin a transaction.");
+    return false;
+  }
 
-  bool DeleteDbQueueNodeNoLock_(txn_id_t txn_id, db_id_t db_id,
-                                std::unordered_map<db_id_t, DbQueueNode>* q,
-                                DbQueueDummyHead* q_head,
-                                DbQueueDummyTail* q_tail);
+  bool CommitDbTransaction_(IEmbeddedDb* db, txn_id_t txn_id) {
+    if (txn_id <= 0) {
+      CRANE_ERROR("Commit a transaction with id {} <= 0", txn_id);
+      return false;
+    }
 
-  bool ForEachInDbQueueNoLock_(txn_id_t txn_id, DbQueueDummyHead dummy_head,
-                               DbQueueDummyTail dummy_tail,
-                               const ForEachInQueueFunc& func);
-
-  bool GetQueueCopyNoLock_(txn_id_t txn_id,
-                           std::unordered_map<db_id_t, DbQueueNode> const& q,
-                           std::list<crane::grpc::TaskInEmbeddedDb>* list);
+    return db->Commit(txn_id).has_value();
+  }
 
   // -------------------
 
@@ -328,20 +267,22 @@ class EmbeddedDbClient {
 
   inline result::result<size_t, DbErrorCode> FetchTaskDataInDbAtomic_(
       txn_id_t txn_id, db_id_t db_id, TaskInEmbeddedDb* task_in_db) {
-    auto result = FetchTypeFromDb_(txn_id, GetDbQueueNodeTaskToCtldName_(db_id),
-                                   task_in_db->mutable_task_to_ctld());
+    auto result =
+        FetchTypeFromDb_(m_fixed_db_.get(), txn_id, GetFixedDbEntryName_(db_id),
+                         task_in_db->mutable_task_to_ctld());
     if (result.has_error()) return result;
 
-    return FetchTypeFromDb_(txn_id, GetDbQueueNodePersistedPartName_(db_id),
-                            task_in_db->mutable_persisted_part());
+    return FetchTypeFromDb_(m_variable_db_.get(), txn_id,
+                            GetVariableDbEntryName_(db_id),
+                            task_in_db->mutable_runtime_attr());
   }
 
   template <std::integral T>
-  bool FetchTypeFromDbOrInitWithValueNoLockAndTxn_(txn_id_t txn_id,
-                                                   std::string const& key,
-                                                   T* buf, T value) {
+  bool FetchTypeFromVarDbOrInitWithValueNoLockAndTxn_(txn_id_t txn_id,
+                                                      std::string const& key,
+                                                      T* buf, T value) {
     result::result<size_t, DbErrorCode> fetch_result =
-        FetchTypeFromDb_(txn_id, key, buf);
+        FetchTypeFromDb_(m_variable_db_.get(), txn_id, key, buf);
     if (fetch_result.has_value()) return true;
 
     if (fetch_result.error() == DbErrorCode::kNotFound) {
@@ -350,7 +291,7 @@ class EmbeddedDbClient {
           value);
 
       result::result<void, DbErrorCode> store_result =
-          StoreTypeIntoDb_(txn_id, key, &value);
+          StoreTypeIntoDb_(m_variable_db_.get(), txn_id, key, &value);
       if (store_result.has_error()) {
         CRANE_ERROR("Failed to init key '{}' in db.", key);
         return false;
@@ -364,12 +305,12 @@ class EmbeddedDbClient {
     }
   }
 
-  result::result<size_t, DbErrorCode> FetchTypeFromDb_(txn_id_t txn_id,
-                                                       std::string const& key,
-                                                       std::string* buf) {
+  result::result<size_t, DbErrorCode> FetchTypeFromDb_(
+      txn_id_t txn_id, const std::shared_ptr<IEmbeddedDb>& db,
+      std::string const& key, std::string* buf) {
     size_t n_bytes{0};
 
-    auto result = m_embedded_db_->Fetch(txn_id, key, nullptr, &n_bytes);
+    auto result = db->Fetch(txn_id, key, nullptr, &n_bytes);
     if (result.has_error()) {
       CRANE_ERROR("Unexpected error when fetching the size of string key '{}'",
                   key);
@@ -377,7 +318,7 @@ class EmbeddedDbClient {
     }
 
     buf->resize(n_bytes);
-    result = m_embedded_db_->Fetch(txn_id, key, buf->data(), &n_bytes);
+    result = db->Fetch(txn_id, key, buf->data(), &n_bytes);
     if (result.has_error()) {
       CRANE_ERROR("Unexpected error when fetching the data of string key '{}'",
                   key);
@@ -388,12 +329,12 @@ class EmbeddedDbClient {
   }
 
   result::result<size_t, DbErrorCode> FetchTypeFromDb_(
-      txn_id_t txn_id, std::string const& key,
+      IEmbeddedDb* db, txn_id_t txn_id, std::string const& key,
       google::protobuf::MessageLite* value) {
     size_t n_bytes{0};
     std::string buf;
 
-    auto result = m_embedded_db_->Fetch(txn_id, key, nullptr, &n_bytes);
+    auto result = db->Fetch(txn_id, key, nullptr, &n_bytes);
     if (result.has_error() && result.error() != kBufferSmall) {
       CRANE_ERROR("Unexpected error when fetching the size of proto key '{}'",
                   key);
@@ -401,7 +342,7 @@ class EmbeddedDbClient {
     }
 
     buf.resize(n_bytes);
-    result = m_embedded_db_->Fetch(txn_id, key, buf.data(), &n_bytes);
+    result = db->Fetch(txn_id, key, buf.data(), &n_bytes);
     if (result.has_error()) {
       CRANE_ERROR("Unexpected error when fetching the data of proto key '{}'",
                   key);
@@ -418,18 +359,20 @@ class EmbeddedDbClient {
   }
 
   template <std::integral T>
-  result::result<size_t, DbErrorCode> FetchTypeFromDb_(txn_id_t txn_id,
+  result::result<size_t, DbErrorCode> FetchTypeFromDb_(IEmbeddedDb* db,
+                                                       txn_id_t txn_id,
                                                        std::string const& key,
                                                        T* buf) {
     size_t n_bytes{sizeof(T)};
-    auto result = m_embedded_db_->Fetch(txn_id, key, buf, &n_bytes);
+    auto result = db->Fetch(txn_id, key, buf, &n_bytes);
     if (result.has_error() && result.error() != DbErrorCode::kNotFound)
       CRANE_ERROR("Unexpected error when fetching scalar key '{}'.", key);
     return result;
   }
 
   template <typename T>
-  result::result<void, DbErrorCode> StoreTypeIntoDb_(txn_id_t txn_id,
+  result::result<void, DbErrorCode> StoreTypeIntoDb_(IEmbeddedDb* db,
+                                                     txn_id_t txn_id,
                                                      std::string const& key,
                                                      const T* value)
     requires std::derived_from<T, google::protobuf::MessageLite>
@@ -444,32 +387,28 @@ class EmbeddedDbClient {
     size_t n_bytes{value->ByteSizeLong()};
     value->SerializeToCodedStream(&codedOutputStream);
 
-    return m_embedded_db_->Store(txn_id, key, buf.data(), n_bytes);
+    return db->Store(txn_id, key, buf.data(), n_bytes);
   }
 
   template <std::integral T>
-  result::result<void, DbErrorCode> StoreTypeIntoDb_(txn_id_t txn_id,
+  result::result<void, DbErrorCode> StoreTypeIntoDb_(IEmbeddedDb* db,
+                                                     txn_id_t txn_id,
                                                      std::string const& key,
                                                      const T* value) {
-    return m_embedded_db_->Store(txn_id, key, value, sizeof(T));
+    return db->Store(txn_id, key, value, sizeof(T));
   }
 
   // -----------
 
-  inline static std::string const s_next_task_db_id_str_{"NextTaskDbId"};
-  inline static std::string const s_next_task_id_str_{"NextTaskId"};
-  inline static std::string const s_marked_db_id_str_{"MarkedDbId"};
+  inline static std::string const s_next_task_db_id_str_{"NDI"};
+  inline static std::string const s_next_task_id_str_{"NI"};
 
   inline static task_id_t s_next_task_id_;
   inline static db_id_t s_next_task_db_id_;
   inline static absl::Mutex s_task_id_and_db_id_mtx_;
 
-  std::unordered_map<db_id_t, DbQueueNode> m_pending_queue_;
-  std::unordered_map<db_id_t, DbQueueNode> m_running_queue_;
-  std::unordered_map<db_id_t, DbQueueNode> m_ended_queue_;
-  absl::Mutex m_queue_mtx_;
-
-  std::unique_ptr<IEmbeddedDb> m_embedded_db_;
+  std::unique_ptr<IEmbeddedDb> m_variable_db_;
+  std::unique_ptr<IEmbeddedDb> m_fixed_db_;
 };
 
 }  // namespace Ctld

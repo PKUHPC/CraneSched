@@ -119,13 +119,13 @@ TEST(cgroup, cpu_core_limit) {
     using namespace util;
     const std::string cg_path{"riley_cgroup"};
 
-    CgroupManager& cm = CgroupManager::Instance();
-    Cgroup* cg = cm.CreateOrOpen(cg_path, ALL_CONTROLLER_FLAG,
-                                 NO_CONTROLLER_FLAG, false);
+    CgroupUtil::Init();
+    auto cg = CgroupUtil::CreateOrOpen(cg_path, ALL_CONTROLLER_FLAG,
+                                       NO_CONTROLLER_FLAG, false);
 
     cg->SetCpuCoreLimit(2);
 
-    cm.MigrateProcTo(child_pid, cg_path);
+    cg->MigrateProcIn(child_pid);
 
     val = 1;
     _ = anon_pipe_p_c.WriteIntegerToChild<u_char>(val);
@@ -158,7 +158,7 @@ TEST(cgroup, cpu_core_limit) {
     int child_ret_val;
     wait(&child_ret_val);
 
-    cm.Release(cg_path);
+    cg->KillAllProcesses();
   }
 
   signal(SIGCHLD, SIG_DFL);
@@ -191,15 +191,15 @@ TEST(cgroup, memory_limit) {
     const std::string cg_path{"riley_cgroup"};
 
     using namespace util;
-    CgroupManager& cm = CgroupManager::Instance();
-    Cgroup* cg = cm.CreateOrOpen(cg_path, ALL_CONTROLLER_FLAG,
-                                 NO_CONTROLLER_FLAG, false);
+    CgroupUtil::Init();
+    auto cg = CgroupUtil::CreateOrOpen(cg_path, ALL_CONTROLLER_FLAG,
+                                       NO_CONTROLLER_FLAG, false);
 
     cg->SetMemoryLimitBytes(10 * MB);
     cg->SetMemorySwLimitBytes(10 * MB);
     cg->SetMemorySoftLimitBytes(10 * MB);
 
-    cm.MigrateProcTo(child_pid, cg_path);
+    cg->MigrateProcIn(child_pid);
 
     int child_status;
     wait(&child_status);
@@ -209,7 +209,7 @@ TEST(cgroup, memory_limit) {
         << "Child should exit with SIGTERM rather than "
         << strsignal(WTERMSIG(child_status)) << ".\n";
 
-    cm.Release(cg_path);
+    cg->KillAllProcesses();
   }
 }
 

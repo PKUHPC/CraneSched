@@ -688,7 +688,7 @@ TEST(Protobuf, InterprocessPipe) {
 }
 
 TEST(GrpcExample, UnixSocket) {
-  std::filesystem::create_directories(kDefaultCraneTempDir);
+  std::filesystem::create_directories(kDefaultCraneBaseDir);
 
   std::string server_address =
       fmt::format("{}{}", "unix://", kDefaultCranedUnixSockPath);
