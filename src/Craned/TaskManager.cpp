@@ -1043,6 +1043,13 @@ TaskExecutor::EnvironVars TaskManager::GetEnvironVarsFromTask_(
   std::string time_limit =
       fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
   env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
+
+  // Add env from user
+  auto& env_from_user = instance.task.env();
+  for (auto&& [name, value] : env_from_user) {
+    env_vec.emplace_back(name, value);
+  }
+
   return env_vec;
 }
 
