@@ -66,14 +66,14 @@ PriorityWeightJobSize: 0
 PriorityWeightPartition: 1000
 PriorityWeightQ0S: 1000000
 
-# list of configuration information of the computing machine
 # Nodes and partitions settings
+# node list
 Nodes:
   - name: "cn[15-18]"
     cpu: 2
     memory: 2G
 
-# partition information list
+# partition list
 Partitions:
   - name: CPU
     nodes: "cn[15-16]"
@@ -84,9 +84,7 @@ Partitions:
 
 DefaultPartition: CPU
 
-
-# Advanced options:
-
+# Advanced settings:
 # Maximum size of Pending Queue and must <=900000.
 PendingQueueMaxSize: 900000
 
