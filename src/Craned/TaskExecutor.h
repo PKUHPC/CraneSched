@@ -214,7 +214,7 @@ class ProcessInstance final : public TaskExecutor {
   [[nodiscard]] std::string WriteBatchScript(
       const std::string_view script) override {
     m_executive_path_ =
-        fmt::format("{}/Crane-{}.sh", kDefaultCranedScriptDir, m_meta_.id);
+        fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, m_meta_.id);
 
     FILE* fptr = fopen(m_executive_path_.c_str(), "w");
     if (fptr == nullptr) return "";
