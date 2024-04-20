@@ -237,12 +237,13 @@ class ProcessInstance final : public TaskExecutor {
   TaskMetaInExecutor m_meta_;
   BatchMetaInTaskExecutor m_batch_meta_;
 
+  // FIXME: Modify the notations
   /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
   pid_t m_pid_;
 
   /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
-  std::string m_executive_path_;
-  std::list<std::string> m_arguments_;
+  std::string m_executive_path_;        // script path
+  std::list<std::string> m_arguments_;  // Not used
 
   void* m_user_data_;
   std::function<void(void*)> m_clean_cb_;
@@ -292,7 +293,7 @@ class ContainerInstance : public TaskExecutor {
   [[nodiscard]] std::string WriteBatchScript(
       const std::string_view script) override {
     // Create temp folder
-    if (AssureContainerTempDir() != CraneErr::kOk) return "";
+    if (AssureContainerTempDir_() != CraneErr::kOk) return "";
 
     // Write into the temp folder
     m_executive_path_ = fmt::format("{}/Crane-{}.sh", m_temp_path_, m_meta_.id);
@@ -307,7 +308,9 @@ class ContainerInstance : public TaskExecutor {
     return m_executive_path_;
   }
 
+ private:
   /***
+   * FIXME: Fix the notations
    * Parse the command in config to get the real command for OCI runtime.
    * @param task_id the task id (%j)
    * @param uid the user id (%u, %U)
@@ -315,20 +318,19 @@ class ContainerInstance : public TaskExecutor {
    * @param cmd_to_parse the command to parse
    * @return the parsed command.
    */
-  static std::string ParseContainerCmd(task_id_t task_id,
-                                       const PasswordEntry& pwd_entry,
-                                       std::string_view bundle,
-                                       std::string cmd_to_parse) {
+  static std::string ParseContainerCmdPattern_(std::string cmd_pattern,
+                                               task_id_t task_id,
+                                               const PasswordEntry& pwd_entry,
+                                               std::string_view bundle) {
     absl::StrReplaceAll({{"%b", bundle},
                          {"%j", std::to_string(task_id)},
                          {"%u", pwd_entry.Username()},
                          {"%U", std::to_string(pwd_entry.Uid())}},
-                        &cmd_to_parse);
-    return cmd_to_parse;
+                        &cmd_pattern);
+    return cmd_pattern;
   }
 
- private:
-  CraneErr AssureContainerTempDir() {
+  CraneErr AssureContainerTempDir_() {
     m_temp_path_ = fmt::format("{}/container-{}",
                                g_config.CranedContainer.TempDir, m_meta_.id);
     try {
@@ -342,15 +344,17 @@ class ContainerInstance : public TaskExecutor {
     return CraneErr::kOk;
   }
 
-  CraneErr ModifyBundleConfig() const;
+  CraneErr ModifyBundleConfig_() const;
 
   TaskMetaInExecutor m_meta_;
 
-  std::string m_temp_path_;
-  std::string m_bundle_path_;
-  std::string m_executive_path_;
+  std::string m_temp_path_;       // temp files for container,
+                                  // e.g., modified config.json
+  std::string m_bundle_path_;     // rootfs and origin config.json
+  std::string m_executive_path_;  // script path on host to be mounted
 
-  pid_t m_pid_;  // TODO: Change to ContainerId
+  std::string m_cwd_;  // cwd in container
+  pid_t m_pid_;        // TODO: Change to ContainerId
 
   BatchMetaInTaskExecutor m_batch_meta_;
 };

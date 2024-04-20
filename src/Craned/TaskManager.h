@@ -31,7 +31,6 @@
 #include <memory>
 #include <uvw.hpp>
 
-#include "CtldClient.h"
 #include "TaskExecutor.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
@@ -45,11 +44,6 @@ struct EvTimerCbArg {
   TaskManager* task_manager;
   task_id_t task_id;
 };
-
-// struct BatchMetaInProcessInstance {
-//   std::string parsed_output_file_pattern;
-//   std::string parsed_error_file_pattern;
-// };
 
 struct BatchMetaInTaskInstance {
   std::string parsed_sh_script_path;
@@ -186,9 +180,12 @@ class TaskManager {
 
   static std::string CgroupStrByTaskId_(task_id_t task_id);
 
-  static std::string ParseFilePathPattern_(const std::string& path_pattern,
-                                           const std::string& cwd,
-                                           task_id_t task_id);
+  static void ParseResultPathPattern_(const task_id_t task_id,
+                                      const std::string& task_name,
+                                      const std::string& cwd,
+                                      const PasswordEntry& pwd,
+                                      std::string& stdout_pattern,
+                                      std::string& stderr_pattern);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 

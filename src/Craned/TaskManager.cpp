@@ -16,16 +16,22 @@
 
 #include "TaskManager.h"
 
+#include <absl/strings/match.h>
 #include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
 
 #include <filesystem>
+#include <string>
 
+#include "CranedPublicDefs.h"
+#include "CtldClient.h"
 #include "ResourceAllocators.h"
 #include "TaskExecutor.h"
 #include "crane/OS.h"
+#include "crane/PasswordEntry.h"
+#include "crane/PublicHeader.h"
 #include "protos/CraneSubprocess.pb.h"
 
 namespace Craned {
@@ -823,7 +829,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       if (instance->task.type() == crane::grpc::Batch) {
         std::unique_ptr<TaskExecutor> executor = nullptr;
 
-        // Store meta data in executor
+        // Store some meta data in executor for convenience
         auto meta = TaskMetaInExecutor{
             .pwd = instance->pwd_entry,
             .id = task_id,
@@ -835,18 +841,29 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
           // use ProcessInstance
           executor = std::make_unique<ProcessInstance>(
               meta, instance->task.cwd(), std::list<std::string>());
-        } else {
+        } else if (g_config.CranedContainer.Enable) {
           // use ContainerInstance
           auto bundle_path = std::filesystem::path(instance->task.container());
           executor =
               std::make_unique<ContainerInstance>(meta, bundle_path.string());
+        } else {
+          // not supported by this node
+          CRANE_ERROR("Container support is disabled but requested by task #{}",
+                      task_id);
+          this_->EvActivateTaskStatusChange_(
+              task_id, crane::grpc::TaskStatus::Failed,
+              ExitCode::kExitCodeSpawnExecutorFail,
+              fmt::format(
+                  "Container support is disabled but requested by task #{}",
+                  task_id));
+          return;
         }
 
         if (executor == nullptr) {
           CRANE_ERROR("Failed to create executor for task #{}", task_id);
           this_->EvActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::Failed,
-              ExitCode::kExitCodeSpawnProcessFail,
+              ExitCode::kExitCodeSpawnExecutorFail,
               fmt::format("Failed to create executor for task #{}", task_id));
           return;
         }
@@ -863,37 +880,20 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
           return;
         }
 
-        /* Perform file name substitutions
-         * %j - Job ID
-         * %u - Username
-         * %x - Job name
-         */
-        std::string parsed_output_file_pattern = ParseFilePathPattern_(
-            instance->task.batch_meta().output_file_pattern(),
-            instance->task.cwd(), task_id);
-        absl::StrReplaceAll({{"%j", std::to_string(task_id)},
-                             {"%u", instance->pwd_entry.Username()},
-                             {"%x", instance->task.name()}},
-                            &parsed_output_file_pattern);
+        // Parse the result file patterns
+        auto batch_meta = BatchMetaInTaskExecutor{
+            .parsed_output_file_pattern =
+                instance->task.batch_meta().output_file_pattern(),
+            .parsed_error_file_pattern =
+                instance->task.batch_meta().error_file_pattern(),
+        };
+        ParseResultPathPattern_(task_id, instance->task.name(),
+                                instance->task.cwd(), instance->pwd_entry,
+                                batch_meta.parsed_output_file_pattern,
+                                batch_meta.parsed_error_file_pattern);
 
-        // If -e / --error is not defined, leave
-        // batch_meta.parsed_error_file_pattern empty;
-        std::string parsed_error_file_pattern = "";
-        if (!instance->task.batch_meta().error_file_pattern().empty()) {
-          parsed_error_file_pattern = ParseFilePathPattern_(
-              instance->task.batch_meta().error_file_pattern(),
-              instance->task.cwd(), task_id);
-          absl::StrReplaceAll({{"%j", std::to_string(task_id)},
-                               {"%u", instance->pwd_entry.Username()},
-                               {"%x", instance->task.name()}},
-                              &parsed_error_file_pattern);
-        }
-
-        // Set the parsed output/error file pattern to batch_meta in executor.
-        executor->SetBatchMeta({
-            .parsed_output_file_pattern = std::move(parsed_output_file_pattern),
-            .parsed_error_file_pattern = std::move(parsed_error_file_pattern),
-        });
+        // Set the parsed patterns to batch_meta in executor.
+        executor->SetBatchMeta(std::move(batch_meta));
 
         // auto output_cb = [](std::string&& buf, void* data) {
         //   CRANE_TRACE("Read output from subprocess: {}", buf);
@@ -922,7 +922,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         } else {
           this_->EvActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::Failed,
-              ExitCode::kExitCodeSpawnProcessFail,
+              ExitCode::kExitCodeSpawnExecutorFail,
               fmt::format(
                   "Cannot spawn an executor inside the instance of task #{}",
                   task_id));
@@ -932,29 +932,47 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
   }
 }
 
-std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
-                                               const std::string& cwd,
-                                               task_id_t task_id) {
-  std::string resolved_path_pattern;
+void TaskManager::ParseResultPathPattern_(const task_id_t task_id,
+                                          const std::string& task_name,
+                                          const std::string& cwd,
+                                          const PasswordEntry& pwd,
+                                          std::string& stdout_pattern,
+                                          std::string& stderr_pattern) {
+  // Resolve the path
+  auto path_resolver = [&](std::string& path) {
+    if (path.empty()) {
+      // if not specified, assume cwd.
+      path = fmt::format("{}/", cwd);
+    } else if (path[0] != '/') {
+      // If an absolute path, do nothing.
+      // If a relative path, prepend cwd to the path.
+      path = fmt::format("{}/{}", cwd, path);
+    }
+  };
 
-  if (path_pattern.empty()) {
-    // If file path is not specified, first set it to cwd.
-    resolved_path_pattern = fmt::format("{}/", cwd);
-  } else {
-    if (path_pattern[0] == '/')
-      // If output file path is an absolute path, do nothing.
-      resolved_path_pattern = path_pattern;
-    else
-      // If output file path is a relative path, prepend cwd to the path.
-      resolved_path_pattern = fmt::format("{}/{}", cwd, path_pattern);
-  }
+  // Resolve the pattern
+  // %j - Job ID, %u - Username, %x - Job name
+  auto pattern_filler = [&](std::string& pattern) {
+    absl::StrReplaceAll({{"%j", std::to_string(task_id)},
+                         {"%u", pwd.Username()},
+                         {"%x", task_name}},
+                        &pattern);
+  };
 
-  // Path ends with a directory, append default stdout file name
+  // stdout
+  path_resolver(stdout_pattern);
+  pattern_filler(stdout_pattern);
+  // If ends with a directory, append default stdout file name
   // `Crane-<Job ID>.out` to the path.
-  if (absl::EndsWith(resolved_path_pattern, "/"))
-    resolved_path_pattern += fmt::format("Crane-{}.out", task_id);
+  if (absl::EndsWith(stdout_pattern, "/"))
+    stdout_pattern += fmt::format("Crane-{}.out", task_id);
 
-  return resolved_path_pattern;
+  // stderr, if not defined, leave empty;
+  if (stderr_pattern.empty()) return;
+  path_resolver(stderr_pattern);
+  pattern_filler(stderr_pattern);
+  if (absl::EndsWith(stderr_pattern, "/"))
+    stderr_pattern += fmt::format("Crane-{}.err", task_id);
 }
 
 void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
@@ -1101,7 +1119,7 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
 
     if (err != CraneErr::kOk)
       this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Failed,
-                                         ExitCode::kExitCodeSpawnProcessFail,
+                                         ExitCode::kExitCodeSpawnExecutorFail,
                                          std::string(CraneErrStr(err)));
   }
 }
