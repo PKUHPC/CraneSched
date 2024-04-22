@@ -164,9 +164,11 @@ class TaskExecutor {
 
 class ProcessInstance final : public TaskExecutor {
  public:
-  ProcessInstance(TaskMetaInExecutor meta, std::string cwd,
-                  std::list<std::string> arg_list, EnvironVars env)
+  ProcessInstance(TaskMetaInExecutor meta, std::string interpreter,
+                  std::string cwd, std::list<std::string> arg_list,
+                  EnvironVars env)
       : m_meta_(std::move(meta)),
+        m_interpreter_(std::move(interpreter)),
         m_cwd_(std::move(cwd)),
         m_arguments_(std::move(arg_list)),
         m_env_(std::move(env)),
@@ -235,17 +237,15 @@ class ProcessInstance final : public TaskExecutor {
   }
 
  private:
+  std::string m_interpreter_;
   std::string m_cwd_;
   EnvironVars m_env_;
 
   TaskMetaInExecutor m_meta_;
   BatchMetaInTaskExecutor m_batch_meta_;
 
-  // FIXME: Modify the notations
-  /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
   pid_t m_pid_;
 
-  /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
   std::string m_executive_path_;        // script path
   std::list<std::string> m_arguments_;  // Not used
 
@@ -255,9 +255,10 @@ class ProcessInstance final : public TaskExecutor {
 
 class ContainerInstance : public TaskExecutor {
  public:
-  ContainerInstance(TaskMetaInExecutor meta, std::string bundle_path,
-                    EnvironVars env)
+  ContainerInstance(TaskMetaInExecutor meta, std::string interpreter,
+                    std::string bundle_path, EnvironVars env)
       : m_meta_(std::move(meta)),
+        m_interpreter_(std::move(interpreter)),
         m_bundle_path_(std::move(bundle_path)),
         m_env_(std::move(env)),
         m_pid_(0) {}
@@ -364,13 +365,12 @@ class ContainerInstance : public TaskExecutor {
    */
   CraneErr ModifyBundleConfig_(const std::string& src, const std::string& dst);
 
-  TaskMetaInExecutor m_meta_;
-
   std::string m_temp_path_;       // temp files for container,
                                   // e.g., modified config.json
   std::string m_bundle_path_;     // original rootfs and config.json
   std::string m_executive_path_;  // script path on host to be mounted
 
+  std::string m_interpreter_;
   std::string m_cwd_;  // cwd in container
   EnvironVars m_env_;  // environment variables in container
   pid_t m_pid_;        // pid of the runtime process
@@ -378,6 +378,7 @@ class ContainerInstance : public TaskExecutor {
   // Note: We don't store container id as it's admin's responsibility to
   // use consistent patterns in configured OCI commands.
 
+  TaskMetaInExecutor m_meta_;
   BatchMetaInTaskExecutor m_batch_meta_;
 };
 

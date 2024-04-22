@@ -291,20 +291,11 @@ CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup) {
       }
     }
 
-    // Prepare the command line arguments.
-    std::vector<const char*> argv;
-
-    // Argv[0] is the program name which can be anything.
-    argv.emplace_back("CraneScript");
-
-    // FIXME: Check instance->task.get_user_env():
-    // if (instance->task.get_user_env()) {
-    if (true) {
-      // If --get-user-env is specified,
-      // we need to use --login option of bash to load settings from the user's
-      // settings.
-      argv.emplace_back("--login");
-    }
+    // Argv[0] is the program name
+    std::vector<std::string> split = absl::StrSplit(m_interpreter_, " ");
+    auto split_view =
+        split | std::views::transform([](auto& s) { return s.c_str(); });
+    auto argv = std::vector<const char*>(split_view.begin(), split_view.end());
 
     argv.emplace_back(m_executive_path_.c_str());
     for (auto&& arg : m_arguments_) {
@@ -312,7 +303,7 @@ CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup) {
     }
     argv.push_back(nullptr);
 
-    execv("/bin/bash", const_cast<char* const*>(argv.data()));
+    execv(argv[0], const_cast<char* const*>(argv.data()));
 
     // Error occurred since execv returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.
@@ -405,9 +396,9 @@ CraneErr ContainerInstance::ModifyBundleConfig_(const std::string& src,
       }
       return env_str;
     }();
-    // TODO: Using sh for compatibility. Add more arguments.
+    // TODO: Support more arguments.
     process["args"] = {
-        std::string("/bin/sh"),
+        m_interpreter_,
         mounted_executive,
     };
   } catch (json::exception& e) {
