@@ -189,12 +189,6 @@ class TaskManager {
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
-  /**
-   * Generate environment varibles from TaskInstance
-   */
-  static TaskExecutor::EnvironVars GetEnvironVarsFromTask_(
-      const TaskInstance& task);
-
   [[deprecated]] CraneErr SpawnProcessInInstance_(TaskInstance* instance,
                                                   ProcessInstance* process);
 

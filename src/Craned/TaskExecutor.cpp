@@ -16,17 +16,82 @@
 
 #include "TaskExecutor.h"
 
+#include <absl/strings/str_split.h>
 #include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
 
+#include <filesystem>
+#include <nlohmann/json.hpp>
+#include <ranges>
+
+#include "CranedPublicDefs.h"
+#include "TaskManager.h"
+#include "crane/Logger.h"
 #include "crane/OS.h"
 #include "protos/CraneSubprocess.pb.h"
 
 namespace Craned {
 
-CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup, EnvironVars task_envs) {
+TaskExecutor::EnvironVars TaskExecutor::GetEnvironVarsFromTask(
+    const TaskInstance& instance) {
+  TaskExecutor::EnvironVars env_vec{};
+  env_vec.emplace_back("CRANE_JOB_NODELIST",
+                       absl::StrJoin(instance.task.allocated_nodes(), ";"));
+  env_vec.emplace_back("CRANE_EXCLUDES",
+                       absl::StrJoin(instance.task.excludes(), ";"));
+  env_vec.emplace_back("CRANE_JOB_NAME", instance.task.name());
+  env_vec.emplace_back("CRANE_ACCOUNT", instance.task.account());
+  env_vec.emplace_back("CRANE_PARTITION", instance.task.partition());
+  env_vec.emplace_back("CRANE_QOS", instance.task.qos());
+  env_vec.emplace_back("CRANE_MEM_PER_NODE",
+                       std::to_string(instance.task.resources()
+                                          .allocatable_resource()
+                                          .memory_limit_bytes() /
+                                      (1024 * 1024)));
+  env_vec.emplace_back("CRANE_JOB_ID", std::to_string(instance.task.task_id()));
+
+  int64_t time_limit_sec = instance.task.time_limit().seconds();
+  int hours = time_limit_sec / 3600;
+  int minutes = (time_limit_sec % 3600) / 60;
+  int seconds = time_limit_sec % 60;
+  std::string time_limit =
+      fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
+  env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
+
+  // Add env from user
+  auto& env_from_user = instance.task.env();
+  for (auto&& [name, value] : env_from_user) {
+    env_vec.emplace_back(name, value);
+  }
+
+  if (instance.task.get_user_env()) {
+    // If --get-user-env is set, the new environment is inherited
+    // from the execution CraneD rather than the submitting node.
+    //
+    // Since we want to reinitialize the environment variables of the user
+    // by reloading the settings in something like .bashrc or /etc/profile,
+    // we are actually performing two steps: login -> start shell.
+    // Shell starting is done by calling "bash --login".
+    //
+    // During shell starting step, the settings in
+    // /etc/profile, ~/.bash_profile, ... are loaded.
+    //
+    // During login step, "HOME" and "SHELL" are set.
+    // Here we are just mimicking the login module.
+
+    // Slurm uses `su <username> -c /usr/bin/env` to retrieve
+    // all the environment variables.
+    // We use a more tidy way.
+    env_vec.emplace_back("HOME", instance.pwd_entry.HomeDir());
+    env_vec.emplace_back("SHELL", instance.pwd_entry.Shell());
+  }
+
+  return env_vec;
+}
+
+CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup) {
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -216,38 +281,11 @@ CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup, EnvironVars task_envs) {
     close(0);  // close stdin
     util::os::CloseFdFrom(3);
 
-    // Set environment variables related to task info (begin with `CRANE`).
-    EnvironVars envs{std::move(task_envs)};
-
-    // FIXME: --get-user-env
-    // if (instance->task.get_user_env()) {
-    if (true) {
-      // If --get-user-env is set, the new environment is inherited
-      // from the execution CraneD rather than the submitting node.
-      //
-      // Since we want to reinitialize the environment variables of the user
-      // by reloading the settings in something like .bashrc or /etc/profile,
-      // we are actually performing two steps: login -> start shell.
-      // Shell starting is done by calling "bash --login".
-      //
-      // During shell starting step, the settings in
-      // /etc/profile, ~/.bash_profile, ... are loaded.
-      //
-      // During login step, "HOME" and "SHELL" are set.
-      // Here we are just mimicking the login module.
-
-      // Slurm uses `su <username> -c /usr/bin/env` to retrieve
-      // all the environment variables.
-      // We use a more tidy way.
-      envs.emplace_back("HOME", m_meta_.pwd.HomeDir());
-      envs.emplace_back("SHELL", m_meta_.pwd.Shell());
-    }
-
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
     }
 
-    for (const auto& [name, value] : envs) {
+    for (const auto& [name, value] : m_env_) {
       if (setenv(name.c_str(), value.c_str(), 1)) {
         fmt::print("setenv for {}={} failed!\n", name, value);
       }
@@ -289,7 +327,7 @@ CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup, EnvironVars task_envs) {
 CraneErr ProcessInstance::Kill(int signum) {
   // TODO: Add timer which sends SIGTERM for those tasks who
   //  will not quit when receiving SIGINT.
-  if (!m_pid_) {
+  if (m_pid_) {
     // Send the signal to the whole process group.
     int err = kill(-m_pid_, signum);
 
@@ -304,8 +342,95 @@ CraneErr ProcessInstance::Kill(int signum) {
   return CraneErr::kNonExistent;
 }
 
-CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup,
-                                  Craned::TaskExecutor::EnvironVars task_envs) {
+CraneErr ContainerInstance::ModifyBundleConfig_(const std::string& src,
+                                                const std::string& dst) {
+  using json = nlohmann::json;
+
+  // Check if bundle is valid
+  auto src_config = std::filesystem::path(src) / "config.json";
+  auto src_rootfs = std::filesystem::path(src) / "rootfs";
+  if (!std::filesystem::exists(src_config) ||
+      !std::filesystem::exists(src_rootfs)) {
+    CRANE_ERROR("Bundle provided by Task #{} not exists : {}", m_meta_.id,
+                src_config.string());
+    return CraneErr::kInvalidParam;
+  }
+
+  std::ifstream fin{src_config};
+  if (!fin) {
+    CRANE_ERROR("Failed to open bundle config provided by Task #{}: {}",
+                m_meta_.id, src_config.string());
+    return CraneErr::kSystemErr;
+  }
+
+  json config = json::parse(fin, nullptr, false);
+  if (config.is_discarded()) {
+    CRANE_ERROR("Bundle config provided by Task #{} is invalid: {}", m_meta_.id,
+                src_config.string());
+    return CraneErr::kInvalidParam;
+  }
+
+  try {
+    // Set root object, see:
+    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#root
+    // Set real rootfs path in the modified config.
+    config["root"]["path"] = src_rootfs;
+
+    // Set mounts array, see:
+    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#mounts
+    // Bind mount script into the container
+    // TODO: Make this customizable
+    auto mounts = config["mounts"].get<std::vector<json>>();
+    std::string mounted_executive = "/tmp/crane/script.sh";
+    mounts.emplace_back(json::object({
+        {"destination", mounted_executive},
+        {"source", m_executive_path_},
+        {"options", json::array({"bind", "ro"})},
+    }));
+    config["mounts"] = mounts;
+
+    // Set process object, see:
+    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#process
+    auto& process = config["process"];
+    // TODO: Check if `terminal` setting is correct
+    process["terminal"] = true;
+    // Note: m_cwd_ currently is the submiting path by default which is not
+    // desired. Disable this line till changes from the frontend.
+    // process["cwd"] = m_cwd_;
+    // Write environment variables in IEEE format
+    process["env"] = [this]() {
+      auto env_str = std::vector<std::string>();
+      for (const auto& [name, value] : m_env_) {
+        env_str.emplace_back(fmt::format("{}={}", name, value));
+      }
+      return env_str;
+    }();
+    // TODO: Using sh for compatibility. Add more arguments.
+    process["args"] = {
+        std::string("/bin/sh"),
+        mounted_executive,
+    };
+  } catch (json::exception& e) {
+    CRANE_ERROR("Failed to generate bundle config for Task #{}: {}", m_meta_.id,
+                e.what());
+    return CraneErr::kGenericFailure;
+  }
+
+  // Write the modified config
+  auto dst_config = std::filesystem::path(dst) / "config.json";
+  std::ofstream fout{dst_config};
+  if (!fout) {
+    CRANE_ERROR("Failed to write bundle config for Task #{}: {}", m_meta_.id,
+                dst_config.string());
+    return CraneErr::kSystemErr;
+  }
+  fout << config.dump(4);
+  fout.flush();
+
+  return CraneErr::kOk;
+}
+
+CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup) {
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -424,13 +549,6 @@ CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup,
     }
     return err;
   } else {  // Child proc
-    rc = chdir(m_cwd_.c_str());
-    if (rc == -1) {
-      CRANE_ERROR("[Child Process] Error: chdir to {}. {}", m_cwd_.c_str(),
-                  strerror(errno));
-      std::abort();
-    }
-
     setreuid(m_meta_.pwd.Uid(), m_meta_.pwd.Uid());
     setregid(m_meta_.pwd.Gid(), m_meta_.pwd.Gid());
 
@@ -457,8 +575,8 @@ CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup,
     int stdout_fd =
         open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
     if (stdout_fd == -1) {
-      CRANE_ERROR("[Child Process] Error: open {}. {}", stdout_file_path,
-                  strerror(errno));
+      fmt::print("[Child Process] Error: open {}. {}", stdout_file_path,
+                 strerror(errno));
       std::abort();
     }
     dup2(stdout_fd, 1);  // stdout -> output file
@@ -470,8 +588,8 @@ CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup,
       int stderr_fd =
           open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
       if (stderr_fd == -1) {
-        CRANE_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
-                    strerror(errno));
+        fmt::print("[Child Process] Error: open {}. {}", stderr_file_path,
+                   strerror(errno));
         std::abort();
       }
       dup2(stderr_fd, 2);  // stderr -> error file
@@ -484,7 +602,7 @@ CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup,
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
     ok &= ostream.Flush();
     if (!ok) {
-      CRANE_ERROR("[Child Process] Error: Failed to flush.");
+      fmt::print("[Child Process] Error: Failed to flush.");
       std::abort();
     }
 
@@ -495,79 +613,75 @@ CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup,
     close(0);  // close stdin
     util::os::CloseFdFrom(3);
 
-    // Set environment variables related to task info (begin with `CRANE`).
-    EnvironVars envs{std::move(task_envs)};
-
-    // FIXME: --get-user-env
-    // if (instance->task.get_user_env()) {
-    if (true) {
-      // If --get-user-env is set, the new environment is inherited
-      // from the execution CraneD rather than the submitting node.
-      //
-      // Since we want to reinitialize the environment variables of the user
-      // by reloading the settings in something like .bashrc or /etc/profile,
-      // we are actually performing two steps: login -> start shell.
-      // Shell starting is done by calling "bash --login".
-      //
-      // During shell starting step, the settings in
-      // /etc/profile, ~/.bash_profile, ... are loaded.
-      //
-      // During login step, "HOME" and "SHELL" are set.
-      // Here we are just mimicking the login module.
-
-      // Slurm uses `su <username> -c /usr/bin/env` to retrieve
-      // all the environment variables.
-      // We use a more tidy way.
-      envs.emplace_back("HOME", m_meta_.pwd.HomeDir());
-      envs.emplace_back("SHELL", m_meta_.pwd.Shell());
+    // Generate modified bundle config.
+    CraneErr err = ModifyBundleConfig_(m_bundle_path_, m_temp_path_);
+    if (err != CraneErr::kOk) {
+      fmt::print("[Child Process] Error: Failed to spawn container.");
+      std::abort();
     }
 
-    if (clearenv()) {
-      fmt::print("clearenv() failed!\n");
-    }
+    // Parse the pattern in run command.
+    // we provide m_temp_path_ to runtime so that it would use the modified
+    // config.json
+    auto run_cmd = ParseContainerCmdPattern_(
+        g_config.CranedContainer.RuntimeRun, m_meta_.id, m_meta_.name,
+        m_meta_.pwd, m_temp_path_);
 
-    for (const auto& [name, value] : envs) {
-      if (setenv(name.c_str(), value.c_str(), 1)) {
-        fmt::print("setenv for {}={} failed!\n", name, value);
-      }
-    }
-
-    // Prepare the command line arguments.
-    std::vector<const char*> argv;
-
-    // Argv[0] is the program name which can be anything.
-    argv.emplace_back("CraneScript");
-
-    // FIXME: Check instance->task.get_user_env():
-    // if (instance->task.get_user_env()) {
-    if (true) {
-      // If --get-user-env is specified,
-      // we need to use --login option of bash to load settings from the user's
-      // settings.
-      argv.emplace_back("--login");
-    }
-
-    argv.emplace_back(m_executive_path_.c_str());
-    // for (auto&& arg : m_arguments_) {
-    //   argv.push_back(arg.c_str());
-    // }
+    std::vector<std::string> split = absl::StrSplit(std::move(run_cmd), " ");
+    auto split_view =
+        split | std::views::transform([](auto& s) { return s.c_str(); });
+    auto argv = std::vector<const char*>(split_view.begin(), split_view.end());
     argv.push_back(nullptr);
 
-    execv("/bin/bash", const_cast<char* const*>(argv.data()));
+    // Call OCI Runtime to run container.
+    execv(argv[0], const_cast<char* const*>(argv.data()));
 
     // Error occurred since execv returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.
     fmt::print(stderr, "[Craned Subprocess Error] Failed to execv. Error: {}\n",
                strerror(errno));
     // Todo: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
-    //  exit codes
-    abort();
+    // exit codes
+    std::abort();
   }
 }
 
 CraneErr ContainerInstance::Kill(int signum) {
-  // TODO: Implement this
-  return CraneErr::kOk;
+  // TODO: Add timer which sends SIGTERM for those tasks who
+  //  will not quit when receiving SIGINT.
+  if (m_pid_) {
+    // Send the signal to the whole process group.
+    int rc = kill(-m_pid_, signum);
+    if (rc && (errno != ESRCH)) {
+      CRANE_TRACE("kill pid {} failed. error: {}", m_pid_, strerror(errno));
+    }
+
+    // Try to stop gracefully at first
+    // Note: signum can be set in configured OCI commands
+    auto cmd = ParseContainerCmdPattern_(g_config.CranedContainer.RuntimeKill,
+                                         m_meta_.id, m_meta_.name, m_meta_.pwd,
+                                         m_temp_path_);
+    rc = system(cmd.c_str());
+    if (rc) {
+      CRANE_TRACE("Failed to kill container for Task #{}: error in {}",
+                  m_meta_.id, cmd);
+    }
+
+    // Delete the container
+    cmd = ParseContainerCmdPattern_(g_config.CranedContainer.RuntimeDelete,
+                                    m_meta_.id, m_meta_.name, m_meta_.pwd,
+                                    m_temp_path_);
+    rc = system(cmd.c_str());
+    if (rc) {
+      CRANE_TRACE("Failed to delete container for Task #{}: error in {}",
+                  m_meta_.id, cmd);
+      return CraneErr::kGenericFailure;
+    }
+
+    return CraneErr::kOk;
+  }
+
+  return CraneErr::kNonExistent;
 }
 
 }  // namespace Craned

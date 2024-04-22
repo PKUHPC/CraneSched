@@ -330,6 +330,7 @@ void ParseConfig(int argc, char** argv) {
       if (config["CranedContainer"] && config["CranedContainer"]["Enable"] &&
           config["CranedContainer"]["Enable"].as<bool>()) {
         g_config.CranedContainer.TempDir =
+            g_config.CraneBaseDir +
             config["CranedContainer"]["TempDir"].as<std::string>();
         g_config.CranedContainer.RunTimeState =
             config["CranedContainer"]["RuntimeState"].as<std::string>();

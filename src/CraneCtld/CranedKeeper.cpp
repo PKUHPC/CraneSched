@@ -266,6 +266,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
 
     mutable_task->set_cwd(task->cwd);
     mutable_task->set_get_user_env(task->get_user_env);
+    mutable_task->set_container(task->container);
 
     for (const auto &hostname : task->CranedIds())
       mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);

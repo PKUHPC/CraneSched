@@ -22,7 +22,6 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
 
-#include <filesystem>
 #include <string>
 
 #include "CranedPublicDefs.h"
@@ -836,16 +835,19 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
             .name = instance->task.name(),
         };
 
+        // Generate environment variables
+        auto env = TaskExecutor::GetEnvironVarsFromTask(*instance);
+
         // Instantiate ProcessInstance/ContainerInstance
         if (instance->task.container().empty()) {
           // use ProcessInstance
           executor = std::make_unique<ProcessInstance>(
-              meta, instance->task.cwd(), std::list<std::string>());
+              std::move(meta), instance->task.cwd(), std::list<std::string>(),
+              std::move(env));
         } else if (g_config.CranedContainer.Enable) {
           // use ContainerInstance
-          auto bundle_path = std::filesystem::path(instance->task.container());
-          executor =
-              std::make_unique<ContainerInstance>(meta, bundle_path.string());
+          executor = std::make_unique<ContainerInstance>(
+              std::move(meta), instance->task.container(), std::move(env));
         } else {
           // not supported by this node
           CRANE_ERROR("Container support is disabled but requested by task #{}",
@@ -902,8 +904,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         // process->SetOutputCb(std::move(output_cb));
 
         // TODO: Modify this for ContainerInstance
-        CraneErr err = executor->Spawn(
-            instance->cgroup, std::move(GetEnvironVarsFromTask_(*instance)));
+        CraneErr err = executor->Spawn(instance->cgroup);
 
         if (err == CraneErr::kOk) {
           this_->m_mtx_.Lock();
@@ -1018,41 +1019,6 @@ void TaskManager::EvActivateTaskStatusChange_(
   event_active(m_ev_task_status_change_, 0, 0);
 }
 
-TaskExecutor::EnvironVars TaskManager::GetEnvironVarsFromTask_(
-    const TaskInstance& instance) {
-  TaskExecutor::EnvironVars env_vec{};
-  env_vec.emplace_back("CRANE_JOB_NODELIST",
-                       absl::StrJoin(instance.task.allocated_nodes(), ";"));
-  env_vec.emplace_back("CRANE_EXCLUDES",
-                       absl::StrJoin(instance.task.excludes(), ";"));
-  env_vec.emplace_back("CRANE_JOB_NAME", instance.task.name());
-  env_vec.emplace_back("CRANE_ACCOUNT", instance.task.account());
-  env_vec.emplace_back("CRANE_PARTITION", instance.task.partition());
-  env_vec.emplace_back("CRANE_QOS", instance.task.qos());
-  env_vec.emplace_back("CRANE_MEM_PER_NODE",
-                       std::to_string(instance.task.resources()
-                                          .allocatable_resource()
-                                          .memory_limit_bytes() /
-                                      (1024 * 1024)));
-  env_vec.emplace_back("CRANE_JOB_ID", std::to_string(instance.task.task_id()));
-
-  int64_t time_limit_sec = instance.task.time_limit().seconds();
-  int hours = time_limit_sec / 3600;
-  int minutes = (time_limit_sec % 3600) / 60;
-  int seconds = time_limit_sec % 60;
-  std::string time_limit =
-      fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
-  env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
-
-  // Add env from user
-  auto& env_from_user = instance.task.env();
-  for (auto&& [name, value] : env_from_user) {
-    env_vec.emplace_back(name, value);
-  }
-
-  return env_vec;
-}
-
 CraneErr TaskManager::SpawnInteractiveTaskAsync(
     uint32_t task_id, std::string executive_path,
     std::list<std::string> arguments,
@@ -1114,14 +1080,14 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
             .id = task_iter->second->task.task_id(),
             .name = task_iter->second->task.name(),
         },
-        task_iter->second->task.cwd(), std::move(elem.arguments));
+        task_iter->second->task.cwd(), std::move(elem.arguments),
+        TaskExecutor::GetEnvironVarsFromTask(*task_iter->second));
 
     process->SetOutputCb(std::move(elem.output_cb));
     process->SetFinishCb(std::move(elem.finish_cb));
 
     CraneErr err;
-    err = process->Spawn(task_iter->second->cgroup,
-                         GetEnvironVarsFromTask_(*task_iter->second));
+    err = process->Spawn(task_iter->second->cgroup);
     elem.err_promise.set_value(err);
 
     if (err != CraneErr::kOk)

@@ -44,11 +44,11 @@ CranedForeground: true
 # Container Runtime Options
 CranedContainer:
   Enable: true
-  TempDir: /tmp/craned/container/
-  RuntimeState: "/usr/bin/runc --root=/run/user/%U/ state %u.%j"
-  RuntimeKill: "/usr/bin/runc  --rootless=true --root=/run/user/%U/ kill -a %u.%j"
-  RuntimeDelete: "/usr/bin/runc  --rootless=true --root=/run/user/%U/ delete --force %u.%j"
-  RuntimeRun: "/usr/bin/runc  --rootless=true --root=/run/user/%U/ run -b %b %u.%j"
+  TempDir: craned/containers/
+  RuntimeState: /usr/bin/runc --root=/run/user/%U/ state %u.%U.%j.%x
+  RuntimeKill: /usr/bin/runc --rootless=true --root=/run/user/%U/ kill %u.%U.%j.%x
+  RuntimeDelete: /usr/bin/runc --rootless=true --root=/run/user/%U/ delete --force %u.%U.%j.%x
+  RuntimeRun: /usr/bin/runc --rootless=true --root=/run/user/%U/ run -b %b %u.%U.%j.%x
 
 # Scheduling settings
 PriorityType: priority/multifactor

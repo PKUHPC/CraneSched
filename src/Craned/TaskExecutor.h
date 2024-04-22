@@ -37,6 +37,8 @@
 
 namespace Craned {
 
+struct TaskInstance;
+
 /**
  * This struct stores some info in TaskInstance,
  * Fields stored should be immutable.
@@ -54,7 +56,7 @@ struct BatchMetaInTaskExecutor {
 
 /**
  * TaskExecutor handles task's execution process, e.g.,
- * - Prepare environment varibles,
+ * - Prepare environment variables,
  * - Write bash script / mount scripts in container,
  * - Modify OCI container configs,
  * - Call bash/OCI runtime...
@@ -100,8 +102,7 @@ class TaskExecutor {
    * to the TaskInstance. kProtobufError if the communication between the parent
    * and the child process fails.
    */
-  [[nodiscard]] virtual CraneErr Spawn(util::Cgroup* cgroup,
-                                       EnvironVars task_envs) = 0;
+  [[nodiscard]] virtual CraneErr Spawn(util::Cgroup* cgroup) = 0;
 
   /**
    * Send a signal to the process group to which the processes in
@@ -139,6 +140,8 @@ class TaskExecutor {
     m_finish_cb_ = std::move(cb);
   }
 
+  static EnvironVars GetEnvironVarsFromTask(const TaskInstance& instance);
+
  protected:
   // The underlying event that handles the output of the task.
   struct bufferevent* m_ev_buf_event_{};
@@ -162,10 +165,11 @@ class TaskExecutor {
 class ProcessInstance final : public TaskExecutor {
  public:
   ProcessInstance(TaskMetaInExecutor meta, std::string cwd,
-                  std::list<std::string> arg_list)
+                  std::list<std::string> arg_list, EnvironVars env)
       : m_meta_(std::move(meta)),
         m_cwd_(std::move(cwd)),
         m_arguments_(std::move(arg_list)),
+        m_env_(std::move(env)),
         m_executive_path_(""),
         m_pid_(0),
         m_user_data_(nullptr) {}
@@ -207,8 +211,7 @@ class ProcessInstance final : public TaskExecutor {
     if (m_finish_cb_) m_finish_cb_(is_killed, val, m_user_data_);
   }
 
-  [[nodiscard]] CraneErr Spawn(util::Cgroup* cgroup,
-                               EnvironVars task_envs) override;
+  [[nodiscard]] CraneErr Spawn(util::Cgroup* cgroup) override;
   CraneErr Kill(int signum) override;
 
   [[nodiscard]] std::string WriteBatchScript(
@@ -233,6 +236,7 @@ class ProcessInstance final : public TaskExecutor {
 
  private:
   std::string m_cwd_;
+  EnvironVars m_env_;
 
   TaskMetaInExecutor m_meta_;
   BatchMetaInTaskExecutor m_batch_meta_;
@@ -251,8 +255,12 @@ class ProcessInstance final : public TaskExecutor {
 
 class ContainerInstance : public TaskExecutor {
  public:
-  ContainerInstance(TaskMetaInExecutor meta, std::string bundle_path)
-      : m_meta_(meta), m_bundle_path_(std::move(bundle_path)), m_pid_(0) {}
+  ContainerInstance(TaskMetaInExecutor meta, std::string bundle_path,
+                    EnvironVars env)
+      : m_meta_(std::move(meta)),
+        m_bundle_path_(std::move(bundle_path)),
+        m_env_(std::move(env)),
+        m_pid_(0) {}
 
   ~ContainerInstance() override = default;
 
@@ -270,8 +278,6 @@ class ContainerInstance : public TaskExecutor {
     return m_executive_path_;
   }
 
-  [[nodiscard]] const std::string& GetTempPath() const { return m_temp_path_; }
-
   [[nodiscard]] const std::string& GetBundlePath() const {
     return m_bundle_path_;
   }
@@ -286,8 +292,7 @@ class ContainerInstance : public TaskExecutor {
     if (m_finish_cb_) m_finish_cb_(is_killed, val, nullptr);
   }
 
-  [[nodiscard]] CraneErr Spawn(util::Cgroup* cgroup,
-                               EnvironVars task_envs) override;
+  [[nodiscard]] CraneErr Spawn(util::Cgroup* cgroup) override;
   CraneErr Kill(int signum) override;
 
   [[nodiscard]] std::string WriteBatchScript(
@@ -296,7 +301,8 @@ class ContainerInstance : public TaskExecutor {
     if (AssureContainerTempDir_() != CraneErr::kOk) return "";
 
     // Write into the temp folder
-    m_executive_path_ = fmt::format("{}/Crane-{}.sh", m_temp_path_, m_meta_.id);
+    m_executive_path_ = std::filesystem::path(m_temp_path_) /
+                        fmt::format("Crane-{}.sh", m_meta_.id);
 
     FILE* fptr = fopen(m_executive_path_.c_str(), "w");
     if (fptr == nullptr) return "";
@@ -310,29 +316,33 @@ class ContainerInstance : public TaskExecutor {
 
  private:
   /***
-   * FIXME: Fix the notations
    * Parse the command in config to get the real command for OCI runtime.
-   * @param task_id the task id (%j)
-   * @param uid the user id (%u, %U)
-   * @param bundle the path to the OCI bundle (%b)
    * @param cmd_to_parse the command to parse
-   * @return the parsed command.
+   * @param task_id the task id (%j)
+   * @param task_name for task name (%x)
+   * @param pwd for uid/username (%u/%U)
+   * @param bundle the path to the OCI bundle (%b)
+   * @return the parsed command in string
    */
-  static std::string ParseContainerCmdPattern_(std::string cmd_pattern,
-                                               task_id_t task_id,
-                                               const PasswordEntry& pwd_entry,
-                                               std::string_view bundle) {
+  static std::string ParseContainerCmdPattern_(
+      std::string cmd_pattern, task_id_t task_id, const std::string& task_name,
+      const PasswordEntry& pwd, const std::string& bundle) noexcept {
+    // TODO: What if there is a space after replacing?
     absl::StrReplaceAll({{"%b", bundle},
                          {"%j", std::to_string(task_id)},
-                         {"%u", pwd_entry.Username()},
-                         {"%U", std::to_string(pwd_entry.Uid())}},
+                         {"%x", task_name},
+                         {"%u", pwd.Username()},
+                         {"%U", std::to_string(pwd.Uid())}},
                         &cmd_pattern);
     return cmd_pattern;
   }
 
+  /***
+   * Check and create temporary dir for the container.
+   */
   CraneErr AssureContainerTempDir_() {
-    m_temp_path_ = fmt::format("{}/container-{}",
-                               g_config.CranedContainer.TempDir, m_meta_.id);
+    m_temp_path_ = std::filesystem::path(g_config.CranedContainer.TempDir) /
+                   fmt::format("container-{}/", m_meta_.id);
     try {
       if (!std::filesystem::exists(m_temp_path_))
         std::filesystem::create_directories(m_temp_path_);
@@ -344,17 +354,29 @@ class ContainerInstance : public TaskExecutor {
     return CraneErr::kOk;
   }
 
-  CraneErr ModifyBundleConfig_() const;
+  /**
+   * Create a modified config.json based on original one.
+   * Modified config.json will include user provided scripts,
+   * mount points, environments, process settings and so on.
+   * @param src: Folder the original config.json resides
+   * @param dst: Folder the modified one resides, will be
+   * used in launching.
+   */
+  CraneErr ModifyBundleConfig_(const std::string& src, const std::string& dst);
 
   TaskMetaInExecutor m_meta_;
 
   std::string m_temp_path_;       // temp files for container,
                                   // e.g., modified config.json
-  std::string m_bundle_path_;     // rootfs and origin config.json
+  std::string m_bundle_path_;     // original rootfs and config.json
   std::string m_executive_path_;  // script path on host to be mounted
 
   std::string m_cwd_;  // cwd in container
-  pid_t m_pid_;        // TODO: Change to ContainerId
+  EnvironVars m_env_;  // environment variables in container
+  pid_t m_pid_;        // pid of the runtime process
+
+  // Note: We don't store container id as it's admin's responsibility to
+  // use consistent patterns in configured OCI commands.
 
   BatchMetaInTaskExecutor m_batch_meta_;
 };
