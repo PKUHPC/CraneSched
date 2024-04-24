@@ -75,8 +75,7 @@ struct TaskInstance {
   util::Cgroup* cgroup;
   struct event* termination_timer{nullptr};
 
-  absl::flat_hash_map<pid_t, std::unique_ptr<TaskExecutor>>
-      executors;  // TODO: pid -> executor, what about containers?
+  absl::flat_hash_map<pid_t, std::unique_ptr<TaskExecutor>> executors;
 };
 
 /**
@@ -143,8 +142,8 @@ class TaskManager {
     gid_t gid;
   };
 
-  // TODO: Add support for container
   struct EvQueueGrpcInteractiveTask {
+    // TODO: Add support for container
     std::promise<CraneErr> err_promise;
     uint32_t task_id;
     std::string executive_path;

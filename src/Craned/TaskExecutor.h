@@ -40,7 +40,7 @@ namespace Craned {
 struct TaskInstance;
 
 /**
- * This struct stores some info in TaskInstance,
+ * This struct stores some info in TaskInstance for convenience.
  * Fields stored should be immutable.
  */
 struct TaskMetaInExecutor {
@@ -55,7 +55,7 @@ struct BatchMetaInTaskExecutor {
 };
 
 /**
- * TaskExecutor handles task's execution process, e.g.,
+ * TaskExecutor handles task's execution procedure, e.g.,
  * - Prepare environment variables,
  * - Write bash script / mount scripts in container,
  * - Modify OCI container configs,
@@ -65,6 +65,7 @@ struct BatchMetaInTaskExecutor {
 class TaskExecutor {
  public:
   using EnvironVars = std::vector<std::pair<std::string, std::string>>;
+
   TaskExecutor() : m_ev_buf_event_(nullptr) {}
   virtual ~TaskExecutor() {
     if (m_ev_buf_event_) {
@@ -87,7 +88,7 @@ class TaskExecutor {
   virtual void Finish(bool is_killed, int val) = 0;
 
   /**
-   * Spawn the executable (process / container) in the task.
+   * Spawn process or container in the task.
    * EvActivateTaskStatusChange_ must NOT be called in this method and should be
    *  called in the caller method after checking the return value of this
    *  method.
@@ -105,16 +106,12 @@ class TaskExecutor {
   [[nodiscard]] virtual CraneErr Spawn(util::Cgroup* cgroup) = 0;
 
   /**
-   * Send a signal to the process group to which the processes in
-   *  ProcessInstance belongs.
-   * This function ASSUMES that ALL processes belongs to the process group with
-   *  the PGID set to the PID of the first process in this ProcessInstance.
+   * Kill running process or container.
    * @param signum the value of signal.
    * @return if the signal is sent successfully, kOk is returned.
    * if the task name doesn't exist, kNonExistent is returned.
    * if the signal is invalid, kInvalidParam is returned.
    * otherwise, kGenericFailure is returned.
-   * TODO: Notation update needed
    */
   virtual CraneErr Kill(int signum) = 0;
 
@@ -122,6 +119,8 @@ class TaskExecutor {
    * Write script to a file and return the path to the file.
    * The file path is dependent on implementation and will be
    * stored in m_executive_path.
+   * @param script the script content to write.
+   * @return the path to the file. If failed, empty string will be returned.
    */
   [[nodiscard]] virtual std::string WriteBatchScript(
       const std::string_view script) = 0;
@@ -164,13 +163,13 @@ class TaskExecutor {
 
 class ProcessInstance final : public TaskExecutor {
  public:
-  ProcessInstance(TaskMetaInExecutor meta, std::string interpreter,
-                  std::string cwd, std::list<std::string> arg_list,
+  ProcessInstance(TaskMetaInExecutor meta, std::string cwd,
+                  std::string interpreter, std::list<std::string> args,
                   EnvironVars env)
       : m_meta_(std::move(meta)),
         m_interpreter_(std::move(interpreter)),
         m_cwd_(std::move(cwd)),
-        m_arguments_(std::move(arg_list)),
+        m_arguments_(std::move(args)),
         m_env_(std::move(env)),
         m_executive_path_(""),
         m_pid_(0),
@@ -214,22 +213,11 @@ class ProcessInstance final : public TaskExecutor {
   }
 
   [[nodiscard]] CraneErr Spawn(util::Cgroup* cgroup) override;
+
   CraneErr Kill(int signum) override;
 
   [[nodiscard]] std::string WriteBatchScript(
-      const std::string_view script) override {
-    m_executive_path_ =
-        fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, m_meta_.id);
-
-    FILE* fptr = fopen(m_executive_path_.c_str(), "w");
-    if (fptr == nullptr) return "";
-    fputs(script.data(), fptr);
-    fclose(fptr);
-
-    chmod(m_executive_path_.c_str(), strtol("0755", nullptr, 8));
-
-    return m_executive_path_;
-  }
+      const std::string_view script) override;
 
   void SetUserDataAndCleanCb(void* data, std::function<void(void*)> cb) {
     m_user_data_ = data;
@@ -255,9 +243,11 @@ class ProcessInstance final : public TaskExecutor {
 
 class ContainerInstance : public TaskExecutor {
  public:
-  ContainerInstance(TaskMetaInExecutor meta, std::string interpreter,
-                    std::string bundle_path, EnvironVars env)
+  ContainerInstance(TaskMetaInExecutor meta, std::string cwd,
+                    std::string interpreter, std::string bundle_path,
+                    EnvironVars env)
       : m_meta_(std::move(meta)),
+        m_cwd_(std::move(cwd)),
         m_interpreter_(std::move(interpreter)),
         m_bundle_path_(std::move(bundle_path)),
         m_env_(std::move(env)),
@@ -284,36 +274,19 @@ class ContainerInstance : public TaskExecutor {
   }
 
   void Output(std::string&& buf) override {
-    // TODO: Not implemented.
     if (m_output_cb_) m_output_cb_(std::move(buf), nullptr);
   }
 
   void Finish(bool is_killed, int val) override {
-    // TODO: Not implemented.
     if (m_finish_cb_) m_finish_cb_(is_killed, val, nullptr);
   }
 
   [[nodiscard]] CraneErr Spawn(util::Cgroup* cgroup) override;
+
   CraneErr Kill(int signum) override;
 
   [[nodiscard]] std::string WriteBatchScript(
-      const std::string_view script) override {
-    // Create temp folder
-    if (AssureContainerTempDir_() != CraneErr::kOk) return "";
-
-    // Write into the temp folder
-    m_executive_path_ = std::filesystem::path(m_temp_path_) /
-                        fmt::format("Crane-{}.sh", m_meta_.id);
-
-    FILE* fptr = fopen(m_executive_path_.c_str(), "w");
-    if (fptr == nullptr) return "";
-    fputs(script.data(), fptr);
-    fclose(fptr);
-
-    chmod(m_executive_path_.c_str(), strtol("0755", nullptr, 8));
-
-    return m_executive_path_;
-  }
+      const std::string_view script) override;
 
  private:
   /***
@@ -340,6 +313,8 @@ class ContainerInstance : public TaskExecutor {
 
   /***
    * Check and create temporary dir for the container.
+   * m_temp_dir will be set.
+   * @return kOk if the directory is created successfully, kSystemErr otherwise.
    */
   CraneErr AssureContainerTempDir_() {
     m_temp_path_ = std::filesystem::path(g_config.CranedContainer.TempDir) /
@@ -371,7 +346,7 @@ class ContainerInstance : public TaskExecutor {
   std::string m_executive_path_;  // script path on host to be mounted
 
   std::string m_interpreter_;
-  std::string m_cwd_;  // cwd in container
+  std::string m_cwd_;  // cwd to *execute OCI commands*
   EnvironVars m_env_;  // environment variables in container
   pid_t m_pid_;        // pid of the runtime process
 

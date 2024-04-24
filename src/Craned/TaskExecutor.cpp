@@ -34,6 +34,10 @@
 
 namespace Craned {
 
+/**
+ * Generate CRANE_* vars using task information and
+ * extract task.env() from frontend.
+ */
 TaskExecutor::EnvironVars TaskExecutor::GetEnvironVarsFromTask(
     const TaskInstance& instance) {
   TaskExecutor::EnvironVars env_vec{};
@@ -89,6 +93,20 @@ TaskExecutor::EnvironVars TaskExecutor::GetEnvironVarsFromTask(
   }
 
   return env_vec;
+}
+
+std::string ProcessInstance::WriteBatchScript(const std::string_view script) {
+  m_executive_path_ =
+      fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, m_meta_.id);
+
+  FILE* fptr = fopen(m_executive_path_.c_str(), "w");
+  if (fptr == nullptr) return "";
+  fputs(script.data(), fptr);
+  fclose(fptr);
+
+  chmod(m_executive_path_.c_str(), strtol("0755", nullptr, 8));
+
+  return m_executive_path_;
 }
 
 CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup) {
@@ -370,7 +388,6 @@ CraneErr ContainerInstance::ModifyBundleConfig_(const std::string& src,
     // Set mounts array, see:
     // https://github.com/opencontainers/runtime-spec/blob/main/config.md#mounts
     // Bind mount script into the container
-    // TODO: Make this customizable
     auto mounts = config["mounts"].get<std::vector<json>>();
     std::string mounted_executive = "/tmp/crane/script.sh";
     mounts.emplace_back(json::object({
@@ -383,17 +400,13 @@ CraneErr ContainerInstance::ModifyBundleConfig_(const std::string& src,
     // Set process object, see:
     // https://github.com/opencontainers/runtime-spec/blob/main/config.md#process
     auto& process = config["process"];
-    // TODO: Check if `terminal` setting is correct
-    process["terminal"] = true;
-    // Note: m_cwd_ currently is the submiting path by default which is not
-    // desired. Disable this line till changes from the frontend.
-    // process["cwd"] = m_cwd_;
-    // Write environment variables in IEEE format
+    // Set pass-through mode, see runc docs for detail.
+    process["terminal"] = false;
+    // Write environment variables in IEEE format.
     process["env"] = [this]() {
       auto env_str = std::vector<std::string>();
-      for (const auto& [name, value] : m_env_) {
+      for (const auto& [name, value] : m_env_)
         env_str.emplace_back(fmt::format("{}={}", name, value));
-      }
       return env_str;
     }();
     // TODO: Support more arguments.
@@ -419,6 +432,24 @@ CraneErr ContainerInstance::ModifyBundleConfig_(const std::string& src,
   fout.flush();
 
   return CraneErr::kOk;
+}
+
+std::string ContainerInstance::WriteBatchScript(const std::string_view script) {
+  // Create temp folder
+  if (AssureContainerTempDir_() != CraneErr::kOk) return "";
+
+  // Write into the temp folder
+  m_executive_path_ = std::filesystem::path(m_temp_path_) /
+                      fmt::format("Crane-{}.sh", m_meta_.id);
+
+  FILE* fptr = fopen(m_executive_path_.c_str(), "w");
+  if (fptr == nullptr) return "";
+  fputs(script.data(), fptr);
+  fclose(fptr);
+
+  chmod(m_executive_path_.c_str(), strtol("0755", nullptr, 8));
+
+  return m_executive_path_;
 }
 
 CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup) {
@@ -540,6 +571,14 @@ CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup) {
     }
     return err;
   } else {  // Child proc
+    // Change work dir to execute
+    rc = chdir(m_cwd_.c_str());
+    if (rc == -1) {
+      fmt::print("[Child Process] Error: chdir to {}. {}", m_cwd_.c_str(),
+                 strerror(errno));
+      std::abort();
+    }
+
     setreuid(m_meta_.pwd.Uid(), m_meta_.pwd.Uid());
     setregid(m_meta_.pwd.Gid(), m_meta_.pwd.Gid());
 
@@ -638,27 +677,68 @@ CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup) {
 }
 
 CraneErr ContainerInstance::Kill(int signum) {
-  // TODO: Add timer which sends SIGTERM for those tasks who
-  //  will not quit when receiving SIGINT.
+  using json = nlohmann::json;
   if (m_pid_) {
-    // Send the signal to the whole process group.
-    int rc = kill(-m_pid_, signum);
-    if (rc && (errno != ESRCH)) {
-      CRANE_TRACE("kill pid {} failed. error: {}", m_pid_, strerror(errno));
+    // If m_pid_ not exists, no further operation.
+    int rc = 0;
+    std::array<char, 128> buffer;
+    std::string cmd, ret, status;
+    json jret;
+
+    // Check the state of the container
+    cmd = ParseContainerCmdPattern_(g_config.CranedContainer.RunTimeState,
+                                    m_meta_.id, m_meta_.name, m_meta_.pwd,
+                                    m_temp_path_);
+
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"),
+                                                  pclose);
+    if (!pipe) {
+      CRANE_TRACE("Error in getting container status: popen() failed.");
+      goto ProcessKill;
+    }
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
+           nullptr) {
+      ret += buffer.data();
     }
 
-    // Try to stop gracefully at first
-    // Note: signum can be set in configured OCI commands
-    auto cmd = ParseContainerCmdPattern_(g_config.CranedContainer.RuntimeKill,
-                                         m_meta_.id, m_meta_.name, m_meta_.pwd,
-                                         m_temp_path_);
+    jret = json::parse(std::move(ret), nullptr, false);
+    if (jret.is_discarded() || !jret.contains("status") ||
+        !jret["status"].is_string()) {
+      CRANE_TRACE("Error in parsing container status: {}", cmd);
+      goto ProcessKill;
+    }
+
+    // Take action according to OCI container states, see:
+    // https://github.com/opencontainers/runtime-spec/blob/main/runtime.md#state
+    status = std::move(jret["status"]);
+    if (status == "creating") {
+      goto ProcessKill;
+    } else if (status == "created") {
+      goto ContainerDelete;
+    } else if (status == "running") {
+      goto ContainerKill;
+    } else if (status == "stopped") {
+      goto ContainerDelete;
+    } else {
+      CRANE_WARN("Unknown container status received: {}", status);
+      goto ProcessKill;
+    }
+
+  ContainerKill:
+    // Try to stop gracefully.
+    // Note: Signum is configured in config.yaml instead of in the param.
+    cmd = ParseContainerCmdPattern_(g_config.CranedContainer.RuntimeKill,
+                                    m_meta_.id, m_meta_.name, m_meta_.pwd,
+                                    m_temp_path_);
     rc = system(cmd.c_str());
     if (rc) {
       CRANE_TRACE("Failed to kill container for Task #{}: error in {}",
                   m_meta_.id, cmd);
     }
 
+  ContainerDelete:
     // Delete the container
+    // Note: Admin could choose if --force is configured or not.
     cmd = ParseContainerCmdPattern_(g_config.CranedContainer.RuntimeDelete,
                                     m_meta_.id, m_meta_.name, m_meta_.pwd,
                                     m_temp_path_);
@@ -666,6 +746,14 @@ CraneErr ContainerInstance::Kill(int signum) {
     if (rc) {
       CRANE_TRACE("Failed to delete container for Task #{}: error in {}",
                   m_meta_.id, cmd);
+    }
+
+  ProcessKill:
+    // Kill runc process as the last resort.
+    // Note: If runc is launched in `detached` mode, this will not work.
+    rc = kill(-m_pid_, signum);
+    if (rc && (errno != ESRCH)) {
+      CRANE_TRACE("Failed to kill pid {}. error: {}", m_pid_, strerror(errno));
       return CraneErr::kGenericFailure;
     }
 

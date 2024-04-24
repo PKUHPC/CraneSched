@@ -215,11 +215,24 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
+      // Note: When cancel a container task,
+      // the OCI runtime will signal the process inside the container.
+      // In this case, WIFSIGNALED is false and WEXITSTATUS is set to `128 +
+      // signum`. (i.e., 128 + SIGTERM = 143)
       if (WIFEXITED(status)) {
         // Exited with status WEXITSTATUS(status)
         sigchld_info = {pid, false, WEXITSTATUS(status)};
-        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
-                    pid, WEXITSTATUS(status));
+        if (sigchld_info.value > 128) {
+          sigchld_info.is_terminated_by_signal = true;
+          sigchld_info.value -= 128;
+          CRANE_TRACE(
+              "Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}", pid,
+              sigchld_info.value);
+        } else {
+          CRANE_TRACE(
+              "Receiving SIGCHLD for pid {}. Signaled: false, Status: {}", pid,
+              WEXITSTATUS(status));
+        }
       } else if (WIFSIGNALED(status)) {
         // Killed by signal WTERMSIG(status)
         sigchld_info = {pid, true, WTERMSIG(status)};
@@ -246,7 +259,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
         TaskExecutor* exec = exec_iter->second;
         uint32_t task_id = instance->task.task_id();
 
-        // Remove indexes from pid to ProcessInstance*
+        // Remove indexes from pid to TaskExecutor*
         this_->m_pid_exec_map_.erase(exec_iter);
         this_->m_pid_task_map_.erase(task_iter);
 
@@ -254,24 +267,25 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
 
         exec->Finish(sigchld_info.is_terminated_by_signal, sigchld_info.value);
 
-        // Free the ProcessInstance. ITask struct is not freed here because
-        // the ITask for an Interactive task can have no ProcessInstance.
-        auto pr_it = instance->executors.find(pid);
-        if (pr_it == instance->executors.end()) {
-          CRANE_ERROR("Failed to find pid {} in task #{}'s ProcessInstances",
-                      pid, task_id);
+        // Free the TaskExecutor. ITask struct is not freed here because
+        // the ITask for an Interactive task can have no TaskExecutor.
+        auto exec_it = instance->executors.find(pid);
+        if (exec_it == instance->executors.end()) {
+          // TODO: Potential leak in not freeing TaskExecutor* exec?
+          CRANE_ERROR("Failed to find pid {} in task #{}'s TaskExecutors", pid,
+                      task_id);
         } else {
-          instance->executors.erase(pr_it);
+          instance->executors.erase(exec_it);
 
           if (!instance->executors.empty()) {
             if (sigchld_info.is_terminated_by_signal) {
               // If a task is terminated by a signal and there are other
-              //  running processes belonging to this task, kill them.
+              // running processes belonging to this task, kill them.
               this_->TerminateTaskAsync(task_id);
             }
           } else {
             if (!instance->orphaned) {
-              // If the ProcessInstance has no process left and the task was not
+              // If the TaskExecutor has no process left and the task was not
               // marked as an orphaned task, send TaskStatusChange for this
               // task. See the comment of EvActivateTaskStatusChange_.
               if (instance->task.type() == crane::grpc::Batch) {
@@ -566,12 +580,12 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         if (instance->task.container().empty()) {
           // use ProcessInstance
           executor = std::make_unique<ProcessInstance>(
-              std::move(meta), std::move(interpreter), instance->task.cwd(),
+              std::move(meta), instance->task.cwd(), std::move(interpreter),
               std::move(args), std::move(env));
         } else if (g_config.CranedContainer.Enable) {
           // use ContainerInstance
           executor = std::make_unique<ContainerInstance>(
-              std::move(meta), std::move(interpreter),
+              std::move(meta), instance->task.cwd(), std::move(interpreter),
               instance->task.container(), std::move(env));
         } else {
           // not supported by this node
@@ -628,7 +642,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         //
         // process->SetOutputCb(std::move(output_cb));
 
-        // TODO: Modify this for ContainerInstance
+        // Spawn the process/container
         CraneErr err = executor->Spawn(instance->cgroup);
 
         if (err == CraneErr::kOk) {
@@ -715,6 +729,7 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
     if (iter->second->task.type() == crane::grpc::Batch) {
       g_thread_pool->detach_task(
           [p = iter->second->batch_meta.parsed_sh_script_path]() {
+            // FIXME: Refactor this in TaskExecutor's destructor.
             util::os::DeleteFile(p);
           });
     }
@@ -946,8 +961,8 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
     if (!task_instance->executors.empty()) {
       // For an Interactive task with a process running or a Batch task, we
       // just send a kill signal here.
-      for (auto&& [pid, pr_instance] : task_instance->executors)
-        pr_instance->Kill(sig);
+      for (auto&& [pid, executor] : task_instance->executors)
+        executor->Kill(sig);
     } else if (task_instance->task.type() == crane::grpc::Interactive) {
       // For an Interactive task with no process running, it ends
       // immediately.
