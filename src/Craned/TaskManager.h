@@ -131,17 +131,6 @@ class TaskManager {
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
-  struct SigchldInfo {
-    pid_t pid;
-    bool is_terminated_by_signal;
-    int value;
-  };
-
-  struct savedPrivilege {
-    uid_t uid;
-    gid_t gid;
-  };
-
   struct EvQueueGrpcInteractiveTask {
     // TODO: Add support for container
     std::promise<CraneErr> err_promise;

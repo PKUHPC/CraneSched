@@ -206,8 +206,6 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
   assert(m_instance_ptr_->m_instance_ptr_ != nullptr);
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
-  SigchldInfo sigchld_info{};
-
   int status;
   pid_t pid;
   while (true) {
@@ -215,37 +213,6 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
-      // Note: When cancel a container task,
-      // the OCI runtime will signal the process inside the container.
-      // In this case, WIFSIGNALED is false and WEXITSTATUS is set to `128 +
-      // signum`. (i.e., 128 + SIGTERM = 143)
-      if (WIFEXITED(status)) {
-        // Exited with status WEXITSTATUS(status)
-        sigchld_info = {pid, false, WEXITSTATUS(status)};
-        if (sigchld_info.value > 128) {
-          sigchld_info.is_terminated_by_signal = true;
-          sigchld_info.value -= 128;
-          CRANE_TRACE(
-              "Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}", pid,
-              sigchld_info.value);
-        } else {
-          CRANE_TRACE(
-              "Receiving SIGCHLD for pid {}. Signaled: false, Status: {}", pid,
-              WEXITSTATUS(status));
-        }
-      } else if (WIFSIGNALED(status)) {
-        // Killed by signal WTERMSIG(status)
-        sigchld_info = {pid, true, WTERMSIG(status)};
-        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
-                    pid, WTERMSIG(status));
-      }
-      /* Todo(More status tracing):
-       else if (WIFSTOPPED(status)) {
-        printf("stopped by signal %d\n", WSTOPSIG(status));
-      } else if (WIFCONTINUED(status)) {
-        printf("continued\n");
-      } */
-
       this_->m_mtx_.Lock();
 
       auto task_iter = this_->m_pid_task_map_.find(pid);
@@ -265,7 +232,9 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
 
         this_->m_mtx_.Unlock();
 
-        exec->Finish(sigchld_info.is_terminated_by_signal, sigchld_info.value);
+        // Get the exit status of the child process.
+        auto chld_status = exec->CheckChldStatus(pid, status);
+        exec->Finish(chld_status.signaled, chld_status.value);
 
         // Free the TaskExecutor. ITask struct is not freed here because
         // the ITask for an Interactive task can have no TaskExecutor.
@@ -278,7 +247,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
           instance->executors.erase(exec_it);
 
           if (!instance->executors.empty()) {
-            if (sigchld_info.is_terminated_by_signal) {
+            if (chld_status.signaled) {
               // If a task is terminated by a signal and there are other
               // running processes belonging to this task, kill them.
               this_->TerminateTaskAsync(task_id);
@@ -290,38 +259,38 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
               // task. See the comment of EvActivateTaskStatusChange_.
               if (instance->task.type() == crane::grpc::Batch) {
                 // For a Batch task, the end of the process means it is done.
-                if (sigchld_info.is_terminated_by_signal) {
+                if (chld_status.signaled) {
                   if (instance->cancelled_by_user)
                     this_->EvActivateTaskStatusChange_(
                         task_id, crane::grpc::TaskStatus::Cancelled,
-                        sigchld_info.value + ExitCode::kTerminationSignalBase,
+                        chld_status.value + ExitCode::kTerminationSignalBase,
                         std::nullopt);
                   else if (instance->terminated_by_timeout)
                     this_->EvActivateTaskStatusChange_(
                         task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-                        sigchld_info.value + ExitCode::kTerminationSignalBase,
+                        chld_status.value + ExitCode::kTerminationSignalBase,
                         std::nullopt);
                   else
                     this_->EvActivateTaskStatusChange_(
                         task_id, crane::grpc::TaskStatus::Failed,
-                        sigchld_info.value + ExitCode::kTerminationSignalBase,
+                        chld_status.value + ExitCode::kTerminationSignalBase,
                         std::nullopt);
                 } else
                   this_->EvActivateTaskStatusChange_(
                       task_id, crane::grpc::TaskStatus::Completed,
-                      sigchld_info.value, std::nullopt);
+                      chld_status.value, std::nullopt);
               } else {
                 // For a COMPLETING Interactive task with a process running, the
                 // end of this process means that this task is done.
-                if (sigchld_info.is_terminated_by_signal) {
+                if (chld_status.signaled) {
                   this_->EvActivateTaskStatusChange_(
                       task_id, crane::grpc::TaskStatus::Completed,
-                      sigchld_info.value + ExitCode::kTerminationSignalBase,
+                      chld_status.value + ExitCode::kTerminationSignalBase,
                       std::nullopt);
                 } else {
                   this_->EvActivateTaskStatusChange_(
                       task_id, crane::grpc::TaskStatus::Completed,
-                      sigchld_info.value, std::nullopt);
+                      chld_status.value, std::nullopt);
                 }
               }
             }

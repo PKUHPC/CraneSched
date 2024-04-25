@@ -66,6 +66,13 @@ class TaskExecutor {
  public:
   using EnvironVars = std::vector<std::pair<std::string, std::string>>;
 
+  struct ChldStatus {
+    pid_t pid;
+    bool signaled;
+    int value;  // the signal number if signaled is true,
+                // the return value otherwise
+  };
+
   TaskExecutor() : m_ev_buf_event_(nullptr) {}
   virtual ~TaskExecutor() {
     if (m_ev_buf_event_) {
@@ -116,6 +123,16 @@ class TaskExecutor {
   virtual CraneErr Kill(int signum) = 0;
 
   /**
+   * Check the status of the managed process when receiving SIGCHLD.
+   * @param pid the pid causing SIGCHLD.
+   * @param status the status code returned by waitpid().
+   * @return the exit status of the child process.
+   * Note: As processes and containers behaves differently when
+   * quitting, this method should be implemented in the derived class.
+   */
+  virtual ChldStatus CheckChldStatus(pid_t pid, int status) = 0;
+
+  /**
    * Write script to a file and return the path to the file.
    * The file path is dependent on implementation and will be
    * stored in m_executive_path.
@@ -159,7 +176,7 @@ class TaskExecutor {
    * otherwise.
    */
   std::function<void(bool, int, void*)> m_finish_cb_;
-};
+};  // namespace Craned
 
 class ProcessInstance final : public TaskExecutor {
  public:
@@ -215,6 +232,8 @@ class ProcessInstance final : public TaskExecutor {
   [[nodiscard]] CraneErr Spawn(util::Cgroup* cgroup) override;
 
   CraneErr Kill(int signum) override;
+
+  [[nodiscard]] ChldStatus CheckChldStatus(pid_t pid, int status) override;
 
   [[nodiscard]] std::string WriteBatchScript(
       const std::string_view script) override;
@@ -284,6 +303,8 @@ class ContainerInstance : public TaskExecutor {
   [[nodiscard]] CraneErr Spawn(util::Cgroup* cgroup) override;
 
   CraneErr Kill(int signum) override;
+
+  [[nodiscard]] ChldStatus CheckChldStatus(pid_t pid, int status) override;
 
   [[nodiscard]] std::string WriteBatchScript(
       const std::string_view script) override;

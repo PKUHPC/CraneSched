@@ -351,6 +351,26 @@ CraneErr ProcessInstance::Kill(int signum) {
   return CraneErr::kNonExistent;
 }
 
+TaskExecutor::ChldStatus ProcessInstance::CheckChldStatus(pid_t pid,
+                                                          int status) {
+  ChldStatus chld_status{};
+
+  if (WIFEXITED(status)) {
+    // Exited with status WEXITSTATUS(status)
+    chld_status = {pid, false, WEXITSTATUS(status)};
+    CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
+                pid, WEXITSTATUS(status));
+
+  } else if (WIFSIGNALED(status)) {
+    // Killed by signal WTERMSIG(status)
+    chld_status = {pid, true, WTERMSIG(status)};
+    CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}", pid,
+                WTERMSIG(status));
+  }
+
+  return chld_status;
+}
+
 CraneErr ContainerInstance::ModifyBundleConfig_(const std::string& src,
                                                 const std::string& dst) {
   using json = nlohmann::json;
@@ -469,7 +489,7 @@ CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup) {
   }
 
   // save the current uid/gid
-  std::pair<uid_t, gid_t> saved_priv{getuid(), getgid()};
+  std::pair<uid_t, gid_t> saved_id{getuid(), getgid()};
 
   int rc = setegid(m_meta_.pwd.Gid());
   if (rc == -1) {
@@ -491,8 +511,8 @@ CraneErr ContainerInstance::Spawn(util::Cgroup* cgroup) {
     bool ok;
     CraneErr err;
 
-    setegid(saved_priv.second);
-    seteuid(saved_priv.first);
+    setegid(saved_id.second);
+    seteuid(saved_id.first);
     setgroups(0, nullptr);
 
     FileInputStream istream(fd);
@@ -761,6 +781,39 @@ CraneErr ContainerInstance::Kill(int signum) {
   }
 
   return CraneErr::kNonExistent;
+}
+
+TaskExecutor::ChldStatus ContainerInstance::CheckChldStatus(pid_t pid,
+                                                            int status) {
+  ChldStatus chld_status{};
+
+  if (WIFEXITED(status)) {
+    // Exited with status WEXITSTATUS(status)
+    chld_status = {pid, false, WEXITSTATUS(status)};
+    if (chld_status.value > 128) {
+      // Note: When cancel a container task,
+      // the OCI runtime will signal the process inside the container.
+      // In this case, WIFSIGNALED is false and WEXITSTATUS is set to `128 +
+      // signum` (e.g., 128 + SIGTERM = 143).
+      chld_status.signaled = true;
+      chld_status.value -= 128;
+      CRANE_TRACE(
+          "Receiving SIGCHLD for pid {}. Signaled: true (in container), "
+          "Signal: {}",
+          pid, chld_status.value);
+    } else {
+      CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
+                  pid, WEXITSTATUS(status));
+    }
+  } else if (WIFSIGNALED(status)) {
+    // Killed by signal WTERMSIG(status)
+    // Note: This could happen when the OCI runtime itself got killed.
+    chld_status = {pid, true, WTERMSIG(status)};
+    CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}", pid,
+                WTERMSIG(status));
+  }
+
+  return chld_status;
 }
 
 }  // namespace Craned
