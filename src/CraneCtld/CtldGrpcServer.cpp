@@ -109,6 +109,8 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
   if (!alive) {
     g_craned_keeper->PutNodeIntoUnavailList(request->craned_id());
   }
+  g_meta_container->RegisterPhysicalResource(request->craned_id(),
+                                             request->cpu(), request->memory());
 
   response->set_ok(true);
   response->set_already_registered(alive);
@@ -417,7 +419,7 @@ grpc::Status CraneCtldServiceImpl::AddPartition(
   std::list<std::string> nodes;
   util::ParseHostList(new_partition.hostlist(), &nodes);
   for (const auto &node : nodes) {
-      partition.craned_ids.emplace(node);
+    partition.craned_ids.emplace(node);
   }
 
   part_global_meta.node_cnt = nodes.size();
@@ -454,7 +456,7 @@ grpc::Status CraneCtldServiceImpl::AddPartition(
   if (res.has_error()) {
     response->set_ok(false);
     response->set_reason(res.error());
-  }else{
+  } else {
     response->set_ok(true);
   }
 
@@ -489,11 +491,16 @@ grpc::Status CraneCtldServiceImpl::AddNode(
 
   craned.res_avail = craned.res_total;
 
+  for (const auto &part : new_node.partition_names()) {
+    craned.partition_ids.emplace_back(part);
+  }
+  std::sort(craned.partition_ids.begin(), craned.partition_ids.end());
+
   auto res = g_meta_container->AddNode(std::move(craned));
-  if(res.has_error()){
+  if (res.has_error()) {
     response->set_ok(false);
     response->set_reason(res.error());
-  }else{
+  } else {
     response->set_ok(true);
   }
 
@@ -510,7 +517,7 @@ grpc::Status CraneCtldServiceImpl::DeletePartition(
     return grpc::Status::OK;
   }
 
-  if(request->name().empty()) {
+  if (request->name().empty()) {
     response->set_ok(false);
     response->set_reason("The parameter is empty.");
     return grpc::Status::OK;
@@ -520,7 +527,7 @@ grpc::Status CraneCtldServiceImpl::DeletePartition(
   if (res.has_error()) {
     response->set_ok(false);
     response->set_reason(res.error());
-  }else{
+  } else {
     response->set_ok(true);
   }
 
@@ -536,7 +543,7 @@ grpc::Status CraneCtldServiceImpl::DeleteNode(
     return grpc::Status::OK;
   }
 
-  if(request->name().empty()) {
+  if (request->name().empty()) {
     response->set_ok(false);
     response->set_reason("The parameter is empty.");
     return grpc::Status::OK;
@@ -546,7 +553,7 @@ grpc::Status CraneCtldServiceImpl::DeleteNode(
   if (res.has_error()) {
     response->set_ok(false);
     response->set_reason(res.error());
-  }else{
+  } else {
     response->set_ok(true);
   }
 
@@ -583,7 +590,7 @@ grpc::Status CraneCtldServiceImpl::UpdatePartition(
   }
 
   part_global_meta.node_cnt = nodes.size();
-  part_global_meta.nodelist_str = new_partition.hostlist();
+  part_global_meta.nodelist_str = util::HostNameListToStr(partition.craned_ids);
 
   if (new_partition.allow_list_size() > 0 &&
       new_partition.deny_list_size() > 0) {
@@ -616,7 +623,7 @@ grpc::Status CraneCtldServiceImpl::UpdatePartition(
   if (res.has_error()) {
     response->set_ok(false);
     response->set_reason(res.error());
-  }else{
+  } else {
     response->set_ok(true);
   }
 
@@ -649,10 +656,10 @@ grpc::Status CraneCtldServiceImpl::UpdateNode(
   craned.static_meta.hostname = new_node.hostname();
 
   auto res = g_meta_container->UpdateNode(std::move(craned));
-  if(res.has_error()){
+  if (res.has_error()) {
     response->set_ok(false);
     response->set_reason(res.error());
-  }else{
+  } else {
     response->set_ok(true);
   }
 

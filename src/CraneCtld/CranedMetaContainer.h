@@ -76,9 +76,9 @@ class CranedMetaContainerInterface {
 
   virtual void InitFromConfig(const Config& config) = 0;
 
-  virtual bool CheckCranedExisted(const CranedId & hostname) = 0;
+  virtual bool CheckCranedExisted(const CranedId& hostname) = 0;
 
-  virtual bool CheckPartitionExisted(const PartitionId & name) = 0;
+  virtual bool CheckPartitionExisted(const PartitionId& name) = 0;
 
   virtual crane::grpc::QueryCranedInfoReply QueryAllCranedInfo() = 0;
 
@@ -115,7 +115,8 @@ class CranedMetaContainerInterface {
 
   virtual CranedMetaMapConstPtr GetCranedMetaMapConstPtr() = 0;
 
-  virtual result::result<void, std::string> AddPartition(PartitionMeta&& partition) = 0;
+  virtual result::result<void, std::string> AddPartition(
+      PartitionMeta&& partition) = 0;
 
   virtual result::result<void, std::string> AddNode(CranedMeta&& node) = 0;
 
@@ -124,16 +125,23 @@ class CranedMetaContainerInterface {
 
   virtual result::result<void, std::string> DeleteNode(CranedId name) = 0;
 
-  virtual result::result<void, std::string> UpdatePartition(PartitionMeta&& partition) = 0;
+  virtual result::result<void, std::string> UpdatePartition(
+      PartitionMeta&& partition) = 0;
 
   virtual result::result<void, std::string> UpdateNode(CranedMeta&& node) = 0;
+
+  virtual void RegisterPhysicalResource(const CranedId& name, double cpu,
+                                        uint64_t memory_bytes) = 0;
 };
 
 class CranedMetaContainerSimpleImpl final
     : public CranedMetaContainerInterface {
  public:
   CranedMetaContainerSimpleImpl() = default;
-  ~CranedMetaContainerSimpleImpl() override = default;
+  ~CranedMetaContainerSimpleImpl() override {
+    m_thread_stop_ = true;
+    if (m_delete_craned_thread_.joinable()) m_delete_craned_thread_.join();
+  };
 
   void InitFromConfig(const Config& config) override;
 
@@ -167,11 +175,11 @@ class CranedMetaContainerSimpleImpl final
 
   CranedMetaMapConstPtr GetCranedMetaMapConstPtr() override;
 
-  bool CheckCranedExisted(const CranedId & hostname) override {
+  bool CheckCranedExisted(const CranedId& hostname) override {
     return craned_meta_map_.Contains(hostname);
   };
 
-  bool CheckPartitionExisted(const PartitionId & name) override {
+  bool CheckPartitionExisted(const PartitionId& name) override {
     return partition_metas_map_.Contains(name);
   }
 
@@ -180,7 +188,8 @@ class CranedMetaContainerSimpleImpl final
 
   void FreeResourceFromNode(CranedId craned_id, uint32_t task_id) override;
 
-  result::result<void, std::string> AddPartition(PartitionMeta&& partition) override;
+  result::result<void, std::string> AddPartition(
+      PartitionMeta&& partition) override;
 
   result::result<void, std::string> AddNode(CranedMeta&& node) override;
 
@@ -188,11 +197,21 @@ class CranedMetaContainerSimpleImpl final
 
   result::result<void, std::string> DeleteNode(CranedId name) override;
 
-  result::result<void, std::string> UpdatePartition(PartitionMeta&& partition) override;
+  result::result<void, std::string> UpdatePartition(
+      PartitionMeta&& new_partition) override;
 
   result::result<void, std::string> UpdateNode(CranedMeta&& node) override;
 
+  void RegisterPhysicalResource(const CranedId& name, double cpu,
+                                uint64_t memory_bytes) override;
+
  private:
+  void WaitJobsTerminatedCb_();
+
+  void CleanDeletionQueueCb_();
+
+  void DeleteCranedThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
   // In this part of code, the following lock sequence MUST be held
   // to avoid deadlock:
   // 1. lock elements in partition_metas_map_
@@ -201,6 +220,15 @@ class CranedMetaContainerSimpleImpl final
   // 4. unlock elements in partition_metas_map_
   CranedMetaAtomicMap craned_meta_map_;
   AllPartitionsMetaAtomicMap partition_metas_map_;
+
+  ConcurrentQueue<CranedId> m_delete_craned_queue_;
+  ConcurrentQueue<CranedId> m_wait_jobs_terminated_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_clean_deletion_queue_handle_;
+  std::shared_ptr<uvw::timer_handle> m_wait_jobs_terminated_handle_;
+
+  std::atomic_bool m_thread_stop_{};
+  std::thread m_delete_craned_thread_;
 };
 
 }  // namespace Ctld

@@ -163,6 +163,7 @@ struct CranedMeta {
   CranedStaticMeta static_meta;
 
   bool alive{false};
+  crane::grpc::CranedState status;
 
   // total = avail + in-use
   Resources res_total;  // A copy of res in CranedStaticMeta,

@@ -120,7 +120,7 @@ class CranedKeeper {
 
   void PutNodeIntoUnavailList(const CranedId &crane_id);
 
-  void ResetConnection(const CranedId&craned_id);
+  void ResetConnection(const CranedId &craned_id);
 
  private:
   struct CqTag {
@@ -140,7 +140,9 @@ class CranedKeeper {
 
   void StateMonitorThreadFunc_(int thread_id);
 
-  void PeriodConnectCranedThreadFunc_();
+  void PeriodConnectCranedTimerCb_();
+
+  void PeriodConnectCranedThread_(const std::shared_ptr<uvw::loop> &uvw_loop);
 
   std::function<void(CranedId)> m_craned_is_up_cb_;
 
@@ -172,7 +174,10 @@ class CranedKeeper {
 
   std::vector<std::thread> m_cq_thread_vec_;
 
-  std::thread m_period_connect_thread_;
+  std::shared_ptr<uvw::timer_handle> m_period_connect_handle_;
+  std::shared_ptr<uvw::async_handle> m_remove_craned_handle_;
+
+  std::thread m_craned_keeper_thread_;
 
   std::atomic_uint64_t m_channel_count_{0};
 };

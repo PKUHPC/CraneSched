@@ -83,6 +83,9 @@ struct Config {
   std::unordered_map<std::string, std::string> Ipv4ToCranedHostname;
   std::unordered_map<std::string, std::shared_ptr<CranedNode>> CranedNodes;
   std::unordered_map<std::string, Partition> Partitions;
+
+  double physical_cpus;
+  uint64_t memory_in_bytes;
 };
 
 inline Config g_config;

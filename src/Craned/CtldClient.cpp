@@ -66,6 +66,8 @@ void CtldClient::OnCraneCtldConnected() {
 
   CRANE_INFO("Send a register RPC to cranectld");
   request.set_craned_id(m_craned_id_);
+  request.set_cpu(g_config.physical_cpus);
+  request.set_memory(g_config.memory_in_bytes);
 
   int retry_time = 10;
 

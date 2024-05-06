@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 
 #include "crane/Logger.h"
 #include "crane/OS.h"
@@ -49,6 +50,10 @@ void SetCloseOnExecOnFdRange(int fd_begin, int fd_end);
 void SetCloseOnExecFromFd(int fd_begin);
 
 bool SetMaxFileDescriptorNumber(unsigned long num);
+
+long GetNumberOfProcessors();  // Platform related
+
+uint64_t GetPhysicalMemoryBytes();  // Platform related
 
 }  // namespace os
 

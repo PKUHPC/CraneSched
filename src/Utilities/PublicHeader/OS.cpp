@@ -102,6 +102,26 @@ bool SetMaxFileDescriptorNumber(unsigned long num) {
   return setrlimit(RLIMIT_NOFILE, &rlim) == 0;
 }
 
+long GetNumberOfProcessors() { return sysconf(_SC_NPROCESSORS_ONLN); }
+
+uint64_t GetPhysicalMemoryBytes() {
+  std::string token;
+  std::ifstream file("/proc/meminfo");
+  while (file >> token) {
+    if (token == "MemTotal:") {
+      uint64_t mem;
+      if (file >> mem) {
+        return mem * 1024;
+      } else {
+        return 0;  // Error
+      }
+    }
+    // ignore rest of the line
+    file.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+  }
+  return 0;
+}
+
 }  // namespace os
 
 }  // namespace util

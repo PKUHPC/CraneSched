@@ -35,6 +35,8 @@ message TaskStatusChangeReply {
 
 message CranedRegisterRequest {
   string craned_id = 1;
+  double cpu = 2;
+  uint64 memory = 3;
 }
 
 message CranedRegisterReply {

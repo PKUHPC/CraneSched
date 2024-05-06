@@ -447,6 +447,10 @@ void GlobalVariableInit() {
 
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
 
+  g_config.physical_cpus =
+      static_cast<double>(util::os::GetNumberOfProcessors());
+  g_config.memory_in_bytes = util::os::GetPhysicalMemoryBytes();
+
   g_cfored_manager = std::make_unique<Craned::CforedManager>();
   g_cfored_manager->Init();
 }

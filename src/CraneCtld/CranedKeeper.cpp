@@ -311,15 +311,26 @@ CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
                                   i);
   }
 
-  m_period_connect_thread_ =
-      std::thread(&CranedKeeper::PeriodConnectCranedThreadFunc_, this);
+  std::shared_ptr<uvw::loop> uvw_keeper_loop = uvw::loop::create();
+  m_period_connect_handle_ = uvw_keeper_loop->resource<uvw::timer_handle>();
+  m_period_connect_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event &, uvw::timer_handle &) {
+        PeriodConnectCranedTimerCb_();
+      });
+  m_period_connect_handle_->start(std::chrono::milliseconds(300 * 3),
+                                  std::chrono::milliseconds(300));
+
+  m_craned_keeper_thread_ =
+      std::thread([this, loop = std::move(uvw_keeper_loop)]() {
+        PeriodConnectCranedThread_(loop);
+      });
 }
 
 CranedKeeper::~CranedKeeper() {
   Shutdown();
 
   for (auto &cq_thread : m_cq_thread_vec_) cq_thread.join();
-  m_period_connect_thread_.join();
+  m_craned_keeper_thread_.join();
 
   CRANE_TRACE("CranedKeeper has been closed.");
 }
@@ -630,7 +641,7 @@ void CranedKeeper::PutNodeIntoUnavailList(const CranedId &crane_id) {
   m_unavail_craned_set_.emplace(crane_id);
 }
 
-void CranedKeeper::ResetConnection(const CranedId&craned_id) {
+void CranedKeeper::ResetConnection(const CranedId &craned_id) {
   WriterLock lock(&m_connected_craned_mtx_);
   m_connected_craned_id_stub_map_[craned_id].reset();
   m_connected_craned_id_stub_map_.erase(craned_id);
@@ -728,35 +739,45 @@ void CranedKeeper::CranedChannelConnectFail_(CranedStub *stub) {
   craned_keeper->m_connecting_craned_set_.erase(stub->m_craned_id_);
 }
 
-void CranedKeeper::PeriodConnectCranedThreadFunc_() {
+void CranedKeeper::PeriodConnectCranedTimerCb_() {
+  absl::ReaderMutexLock connected_reader_lock(&m_connected_craned_mtx_);
+  util::lock_guard guard(m_unavail_craned_set_mtx_);
+
+  uint32_t fetch_num = kConcurrentStreamQuota - m_connecting_craned_set_.size();
+
+  auto it = m_unavail_craned_set_.begin();
+  while (it != m_unavail_craned_set_.end() && fetch_num > 0) {
+    if (!m_connecting_craned_set_.contains(*it) &&
+        !m_connected_craned_id_stub_map_.contains(*it)) {
+      m_connecting_craned_set_.emplace(*it);
+      g_thread_pool->detach_task(
+          [this, craned_id = *it]() { ConnectCranedNode_(craned_id); });
+      fetch_num--;
+    }
+    it = m_unavail_craned_set_.erase(it);
+  }
+}
+
+void CranedKeeper::PeriodConnectCranedThread_(
+    const std::shared_ptr<uvw::loop> &uvw_loop) {
   util::SetCurrentThreadName("PeriConnCraned");
 
-  while (true) {
-    if (m_cq_closed_) break;
-
-    // Use a window to limit the maximum number of connecting craned nodes.
-    {
-      absl::ReaderMutexLock connected_reader_lock(&m_connected_craned_mtx_);
-      util::lock_guard guard(m_unavail_craned_set_mtx_);
-
-      uint32_t fetch_num =
-          kConcurrentStreamQuota - m_connecting_craned_set_.size();
-
-      auto it = m_unavail_craned_set_.begin();
-      while (it != m_unavail_craned_set_.end() && fetch_num > 0) {
-        if (!m_connecting_craned_set_.contains(*it) &&
-            !m_connected_craned_id_stub_map_.contains(*it)) {
-          m_connecting_craned_set_.emplace(*it);
-          g_thread_pool->detach_task(
-              [this, craned_id = *it]() { ConnectCranedNode_(craned_id); });
-          fetch_num--;
+  std::shared_ptr<uvw::idle_handle> idle_handle =
+      uvw_loop->resource<uvw::idle_handle>();
+  idle_handle->on<uvw::idle_event>(
+      [this](const uvw::idle_event &, uvw::idle_handle &h) {
+        if (m_cq_closed_) {
+          h.parent().walk([](auto &&h) { h.close(); });
+          h.parent().stop();
         }
-        it = m_unavail_craned_set_.erase(it);
-      }
-    }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  if (idle_handle->start() != 0) {
+    CRANE_ERROR("Failed to start the idle event in craned keeper loop.");
   }
+
+  uvw_loop->run();
 }
 
 }  // namespace Ctld
