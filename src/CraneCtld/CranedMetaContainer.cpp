@@ -563,8 +563,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       } else if (craned_meta->alive && craned_meta->drain) {
         drain_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
         drain_craned_list->set_count(drain_craned_name_list.size());
-        drain_craned_list->set_reason(
-            craned_meta->drain_reason);  // 多个reason?
+        drain_craned_list->set_reason(craned_meta->drain_reason);
       } else if (filter_down) {
         down_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
         down_craned_list->set_count(down_craned_name_list.size());
@@ -591,16 +590,18 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
     const crane::grpc::ModifyCranedStateRequest& request) {
   crane::grpc::ModifyCranedStateReply reply;
 
-  if (!craned_meta_map_.Contains(request.craned_id())) {
+  auto craned_meta_map = craned_meta_map_.GetMapSharedPtr();
+  auto craned_itr = craned_meta_map->find(request.craned_id());
+  if (craned_itr == craned_meta_map->end()) {
     reply.set_ok(false);
     reply.set_reason("Invalid node name specified.");
     return reply;
   }
-  auto crane_meta = craned_meta_map_[request.craned_id()];
+  auto craned_meta_ptr(craned_itr->second.GetExclusivePtr());
 
   if (request.new_state() == crane::grpc::CranedState::CRANE_DRAIN) {
-    crane_meta->drain = true;
-    crane_meta->drain_reason = request.reason();
+    craned_meta_ptr->drain = true;
+    craned_meta_ptr->drain_reason = request.reason();
     NodeEvent* event = new NodeEvent;
     event->state = crane::grpc::CranedState::CRANE_DRAIN;
     event->node_name = request.craned_id();
@@ -608,14 +609,15 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
     event->reason = request.reason();
     event->uid = request.uid();
     event->time_end = absl::FromUnixSeconds(0);
-    craned_event_map_.Emplace(request.craned_id(), *event);
+    auto craned_event_map = craned_event_map_.GetMapSharedPtr();
+    craned_event_map->emplace(request.craned_id(), *event);
   } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE) {
-    auto event_meta = craned_event_map_[request.craned_id()];
-    event_meta->time_end = absl::Now();
-    g_db_client->InsertNodeEvent(event_meta.get());
+    auto event_meta = *craned_event_map_[request.craned_id()];
+    event_meta.time_end = absl::Now();
+    g_db_client->InsertNodeEvent(&event_meta);
     craned_event_map_.Erase(request.craned_id());
-    crane_meta->drain = false;
-    crane_meta->drain_reason = "";
+    craned_meta_ptr->drain = true;
+    craned_meta_ptr->drain_reason = "";
   }
 
   reply.set_ok(true);
