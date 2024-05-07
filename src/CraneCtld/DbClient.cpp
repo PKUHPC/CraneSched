@@ -860,6 +860,16 @@ MongodbClient::document MongodbClient::EventToDocument_(NodeEvent* event) {
   return DocumentConstructor_(fields, values);
 }
 
+MongodbClient::document MongodbClient::EventToDocument_(NodeEvent* event) {
+  std::array<std::string, 6> fields{"time_start", "time_end", "node_name",
+                                    "reason",     "state",    "uid"};
+  std::tuple<int64_t, int64_t, std::string, std::string, int32_t, int32_t>
+      values(absl::ToUnixSeconds(event->time_start),
+             absl::ToUnixSeconds(event->time_end), event->node_name,
+             event->reason, event->state, static_cast<int32_t>(event->uid));
+  return DocumentConstructor_(fields, values);
+}
+
 MongodbClient::MongodbClient() {
   m_instance_ = std::make_unique<mongocxx::instance>();
   m_db_name_ = g_config.DbName;
