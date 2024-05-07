@@ -51,6 +51,10 @@ enum class CraneErr : uint16_t {
   __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
 };
 
+#define CRANE_VERSION_MAJOR 0
+#define CRANE_VERSION_MINOR 8
+#define CRANE_VERSION_PATCH 1
+
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kCforedDefaultPort = "10012";

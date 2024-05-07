@@ -50,6 +50,7 @@ void ParseConfig(int argc, char** argv) {
        cxxopts::value<std::string>()->default_value(kDefaultCranedLogPath))
       ("D,debug-level", "<trace|debug|info|warn|error>", cxxopts::value<std::string>()->default_value("info"))
       ("h,help", "Show help")
+      ("v,version", "Show current version")
       ;
   // clang-format on
 
@@ -63,6 +64,14 @@ void ParseConfig(int argc, char** argv) {
 
   if (parsed_args.count("help") > 0) {
     fmt::print("{}\n", options.help());
+    std::exit(1);
+  }
+  else if (parsed_args.count("version") > 0) {
+    std::string version_string =
+        "Craned version: " + std::to_string(CRANE_VERSION_MAJOR) + "." +
+        std::to_string(CRANE_VERSION_MINOR) + "." +
+        std::to_string(CRANE_VERSION_PATCH);
+    fmt::print("{}\n", version_string);
     std::exit(1);
   }
 
