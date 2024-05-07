@@ -611,12 +611,13 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
     event->time_end = absl::FromUnixSeconds(0);
     auto craned_event_map = craned_event_map_.GetMapSharedPtr();
     craned_event_map->emplace(request.craned_id(), *event);
-  } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE) {
+  } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE &&
+             craned_meta_ptr->drain == true) {
     auto event_meta = *craned_event_map_[request.craned_id()];
     event_meta.time_end = absl::Now();
     g_db_client->InsertNodeEvent(&event_meta);
     craned_event_map_.Erase(request.craned_id());
-    craned_meta_ptr->drain = true;
+    craned_meta_ptr->drain = false;
     craned_meta_ptr->drain_reason = "";
   }
 

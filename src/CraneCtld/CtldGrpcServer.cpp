@@ -875,8 +875,6 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         event_info->mutable_end_time()->set_nanos(
             absl::ToUnixSeconds(event.time_end) % 1000000000);
       }
-      //    default:
-      //      break;
   }
   return grpc::Status::OK;
 }
