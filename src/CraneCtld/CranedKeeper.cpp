@@ -281,6 +281,18 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
       mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
       mutable_meta->set_error_file_pattern(meta_in_ctld.error_file_pattern);
       mutable_meta->set_sh_script(meta_in_ctld.sh_script);
+    }else{
+      auto &meta_in_ctld = std::get<InteractiveMetaInTask>(task->meta);
+      auto* mutable_meta = mutable_task->mutable_interactive_meta();
+      mutable_meta->set_cfored_name(meta_in_ctld.cfored_name);
+      mutable_meta->set_sh_script(meta_in_ctld.sh_script);
+      mutable_meta->set_term_env(meta_in_ctld.term_env);
+      if(meta_in_ctld.source==InteractiveMetaInTask::Source::CRUN){
+        mutable_meta->set_front_end_type(crane::grpc::CRUN);
+      }else{
+        mutable_meta->set_front_end_type(crane::grpc::CALLOC);
+      }
+
     }
   }
 

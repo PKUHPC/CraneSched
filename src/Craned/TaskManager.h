@@ -26,10 +26,8 @@
 #include <grp.h>
 #include <sys/eventfd.h>
 #include <sys/wait.h>
-#include <uv.h>
 
 #include <memory>
-#include <uvw.hpp>
 
 #include "CtldClient.h"
 #include "crane/AtomicHashMap.h"
@@ -145,6 +143,11 @@ struct BatchMetaInTaskInstance {
   std::string parsed_sh_script_path;
 };
 
+struct InteractiveMetaInTaskInstance{
+  std::string parsed_sh_script_path;
+  int msg_forward_fd;
+};
+
 // Todo: Task may consists of multiple subtasks
 struct TaskInstance {
   ~TaskInstance() {
@@ -155,12 +158,15 @@ struct TaskInstance {
       event_free(termination_timer);
       termination_timer = nullptr;
     }
+    if (this->task.type()==crane::grpc::Interactive){
+      close(std::get<InteractiveMetaInTaskInstance>(this->meta).msg_forward_fd);
+    }
   }
 
   crane::grpc::TaskToD task;
 
   PasswordEntry pwd_entry;
-  BatchMetaInTaskInstance batch_meta;
+  std::variant<BatchMetaInTaskInstance,InteractiveMetaInTaskInstance> meta;
 
   bool cancelled_by_user{false};
   bool terminated_by_timeout{false};

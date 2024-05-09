@@ -43,11 +43,6 @@ class CranedServiceImpl : public Craned::Service {
  public:
   CranedServiceImpl() = default;
 
-  [[deprecated]] Status SrunXStream(
-      ServerContext *context,
-      ServerReaderWriter<SrunXStreamReply, SrunXStreamRequest> *stream)
-      override;
-
   grpc::Status ExecuteTask(grpc::ServerContext *context,
                            const crane::grpc::ExecuteTasksRequest *request,
                            crane::grpc::ExecuteTasksReply *response) override;

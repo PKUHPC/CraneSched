@@ -511,6 +511,7 @@ message StreamCforedRequest {
     string cfored_name = 1;
     uint32 task_id = 2;
     TaskStatus status = 3;
+    InteractiveFrontEndType req_front_type = 4;
   }
 
   message GracefulExitReq {
@@ -547,6 +548,7 @@ message StreamCtldReply {
     bool ok = 2;
     string allocated_craned_regex = 3;
     string failure_reason = 4;
+    repeated string craned_ids = 5;
   }
 
   message TaskCancelRequest {
@@ -576,6 +578,144 @@ message StreamCtldReply {
     TaskIdReply payload_task_id_reply = 6;
     CforedGracefulExitAck payload_graceful_exit_ack = 7;
   }
+}
+
+message StreamCrunRequest{
+  enum CrunRequestType {
+    TASK_REQUEST = 0;
+    TASK_COMPLETION_REQUEST = 1;
+    TASK_IO_FORWARD = 2;
+  }
+
+  message TaskReq {
+    int32 crun_pid = 1;
+    TaskToCtld task = 2;
+  }
+
+  message TaskCompleteReq {
+    uint32 task_id = 1;
+    TaskStatus status = 2;
+  }
+
+  message TaskIOForwardReq{
+    uint32 task_id = 1;
+    string msg = 2;
+  }
+
+  CrunRequestType type = 1;
+
+  oneof payload {
+    TaskReq payload_task_req = 2;
+    TaskCompleteReq payload_task_complete_req = 3;
+    TaskIOForwardReq payload_task_io_forward_req = 4;
+  }
+}
+
+message StreamCforedCrunReply {
+  enum CforedCrunReplyType {
+    TASK_ID_REPLY = 0;
+    TASK_RES_ALLOC_REPLY = 1;
+    TASK_CANCEL_REQUEST = 2;
+    TASK_COMPLETION_ACK_REPLY = 3;
+    TASK_IO_FORWARD = 4;
+    TASK_IO_FORWARD_READY = 5;
+  }
+
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  message TaskResAllocatedReply {
+    bool ok = 1;
+    string allocated_craned_regex = 2;
+  }
+
+  message TaskCancelRequest {
+    uint32 task_id = 1;
+  }
+
+  message TaskCompletionAckReply {
+    bool ok = 1;
+  }
+
+  message TaskIOForwardReadyReply {
+    bool ok = 1;
+  }
+
+  message TaskIOForwardReply{
+    string msg = 1;
+  }
+
+  CforedCrunReplyType type = 1 ;
+
+  oneof payload {
+    TaskIdReply payload_task_id_reply = 2;
+    TaskResAllocatedReply payload_task_alloc_reply = 3;
+    TaskCancelRequest payload_task_cancel_request = 4;
+    TaskCompletionAckReply payload_task_completion_ack_reply = 5;
+    TaskIOForwardReadyReply payload_task_io_forward_ready_reply = 6;
+    TaskIOForwardReply payload_task_io_forward_reply = 7;
+  }
+}
+
+message StreamCfroedTaskIORequest{
+
+  enum CranedRequestType{
+    CRANED_REGISTER = 0;
+    CRANED_TASK_OUTPUT = 1;
+    CRANED_UNREGISTER = 2;
+  }
+
+  message CranedRegisterReq{
+    string craned_id = 1;
+  }
+
+  message CranedTaskOutputReq{
+    uint32 task_id = 1;
+    string msg = 2;
+  }
+
+  message CranedUnRegisterReq{
+    string craned_id = 1;
+  }
+
+  CranedRequestType type = 1;
+  oneof payload {
+    CranedRegisterReq payload_register_req = 2;
+    CranedTaskOutputReq payload_task_output_req = 3;
+    CranedUnRegisterReq payload_unregister_req = 4;
+  }
+}
+
+message StreamCfroedTaskIOReply{
+  enum CranedReplyType{
+    CRANED_REGISTER_REPLY = 0;
+    CRANED_TASK_INPUT = 1;
+    CRANED_UNREGISTER_REPLY = 2;
+  }
+
+  message CranedRegisterReply{
+    bool ok = 1;
+  }
+
+  message CranedTaskInputReq{
+    uint32 task_id = 1;
+    string msg = 2;
+  }
+
+  message CranedUnregisterReply{
+    bool ok = 1;
+  }
+
+  CranedReplyType type = 1;
+  oneof payload{
+    CranedRegisterReply payload_craned_register_reply = 2;
+    CranedTaskInputReq payload_task_input_req = 3;
+    CranedUnregisterReply payload_craned_unregister_reply = 4;
+  }
+
 }
 
 // Todo: Divide service into two parts: one for Craned and one for Crun
@@ -658,5 +798,7 @@ service Craned {
 
 service CraneForeD {
   rpc CallocStream(stream StreamCallocRequest) returns(stream StreamCforedReply);
+  rpc CrunStream(stream StreamCrunRequest) returns(stream StreamCforedCrunReply);
+  rpc TaskIOStream(stream StreamCfroedTaskIORequest) returns(stream StreamCfroedTaskIOReply);
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
 }

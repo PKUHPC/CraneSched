@@ -705,8 +705,16 @@ void TaskScheduler::ScheduleThread_() {
           craned_task_to_exec_raw_ptrs_map;
       for (auto& it : selection_result_list) {
         auto& task = it.first;
-        craned_task_to_exec_raw_ptrs_map[task->executing_craned_id]
-            .emplace_back(task.get());
+        if (task->type == crane::grpc::Batch) {
+          craned_task_to_exec_raw_ptrs_map[task->executing_craned_id]
+              .emplace_back(task.get());
+        } else if (task->type == crane::grpc::Interactive &&
+                   std::get<InteractiveMetaInTask>(task->meta).source ==
+                       InteractiveMetaInTask::Source::CRUN) {
+          for (const auto& craned_id : task->CranedIds())
+            craned_task_to_exec_raw_ptrs_map[craned_id].emplace_back(
+                task.get());
+        }
       }
 
       HashMap<CranedId, crane::grpc::ExecuteTasksRequest>
@@ -744,9 +752,11 @@ void TaskScheduler::ScheduleThread_() {
       for (auto& it : selection_result_list) {
         auto& task = it.first;
         if (task->type == crane::grpc::Interactive) {
+          const auto& meta = std::get<InteractiveMetaInTask>(task->meta);
           std::get<InteractiveMetaInTask>(task->meta)
               .cb_task_res_allocated(task->TaskId(),
-                                     task->allocated_craneds_regex);
+                                     task->allocated_craneds_regex,
+                                     task->CranedIds());
         }
 
         m_running_task_map_mtx_.Lock();
@@ -1360,11 +1370,13 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       if (new_status == crane::grpc::ExceedTimeLimit ||
           exit_code == ExitCode::kExitCodeCranedDown) {
         meta.has_been_cancelled_on_front_end = true;
+        //todo:Remove this
+        CRANE_TRACE("cancel task {} for timeout/craned down",task->TaskId());
         meta.cb_task_cancel(task->TaskId());
         task->SetStatus(new_status);
-      } else
+      } else {
         task->SetStatus(crane::grpc::Completed);
-
+      }
       meta.cb_task_completed(task->TaskId());
     } else {
       if (new_status == crane::grpc::Completed) {

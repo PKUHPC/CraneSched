@@ -1059,142 +1059,184 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
   StreamState state = StreamState::kWaitRegReq;
   while (true) {
-    switch (state) {
-      case StreamState::kWaitRegReq:
-        ok = stream->Read(&cfored_request);
-        if (ok) {
-          if (cfored_request.type() !=
-              StreamCforedRequest::CFORED_REGISTRATION) {
-            CRANE_ERROR("Expect type CFORED_REGISTRATION from peer {}.",
-                        context->peer());
-            return Status::CANCELLED;
-          } else {
-            cfored_name = cfored_request.payload_cfored_reg().cfored_name();
-            CRANE_INFO("Cfored {} registered.", cfored_name);
-
-            ok = stream_writer.WriteCforedRegistrationAck({});
-            if (ok) {
-              state = StreamState::kWaitMsg;
+    try {
+      switch (state) {
+        case StreamState::kWaitRegReq:
+          ok = stream->Read(&cfored_request);
+          if (ok) {
+            if (cfored_request.type() !=
+                StreamCforedRequest::CFORED_REGISTRATION) {
+              CRANE_ERROR("Expect type CFORED_REGISTRATION from peer {}.",
+                          context->peer());
+              return Status::CANCELLED;
             } else {
-              CRANE_ERROR(
-                  "Failed to send msg to cfored {}. Connection is broken. "
-                  "Exiting...",
-                  cfored_name);
-              state = StreamState::kCleanData;
-            }
-          }
-        } else {
-          state = StreamState::kCleanData;
-        }
+              cfored_name = cfored_request.payload_cfored_reg().cfored_name();
+              CRANE_INFO("Cfored {} registered.", cfored_name);
 
-        break;
-
-      case StreamState::kWaitMsg: {
-        ok = stream->Read(&cfored_request);
-        if (ok) {
-          switch (cfored_request.type()) {
-            case StreamCforedRequest::TASK_REQUEST: {
-              auto const &payload = cfored_request.payload_task_req();
-              auto task = std::make_unique<TaskInCtld>();
-              task->SetFieldsByTaskToCtld(payload.task());
-
-              auto &meta = std::get<InteractiveMetaInTask>(task->meta);
-              meta.cb_task_res_allocated =
-                  [writer = &stream_writer](
-                      task_id_t task_id,
-                      std::string const &allocated_craned_regex) {
-                    writer->WriteTaskResAllocReply(task_id,
-                                                   {allocated_craned_regex});
-                  };
-
-              meta.cb_task_cancel = [writer =
-                                         &stream_writer](task_id_t task_id) {
-                writer->WriteTaskCancelRequest(task_id);
-              };
-
-              meta.cb_task_completed = [&, cfored_name](task_id_t task_id) {
-                m_ctld_server_->m_mtx_.Lock();
-
-                // If cfored disconnected, the cfored_name should have be
-                // removed from the map and the task completion callback is
-                // generated from cleaning the remaining tasks by calling
-                // g_task_scheduler->TerminateTask(), we should ignore this
-                // callback since the task id has already been cleaned.
-                auto iter =
-                    m_ctld_server_->m_cfored_running_tasks_.find(cfored_name);
-                if (iter != m_ctld_server_->m_cfored_running_tasks_.end())
-                  iter->second.erase(task_id);
-                m_ctld_server_->m_mtx_.Unlock();
-              };
-
-              auto result =
-                  m_ctld_server_->SubmitTaskToScheduler(std::move(task));
-
-              ok = stream_writer.WriteTaskIdReply(payload.pid(),
-                                                  std::move(result));
-              if (!ok) {
+              ok = stream_writer.WriteCforedRegistrationAck({});
+              if (ok) {
+                state = StreamState::kWaitMsg;
+              } else {
                 CRANE_ERROR(
                     "Failed to send msg to cfored {}. Connection is broken. "
                     "Exiting...",
                     cfored_name);
                 state = StreamState::kCleanData;
-              } else {
-                if (result.has_value()) {
-                  m_ctld_server_->m_mtx_.Lock();
-                  m_ctld_server_->m_cfored_running_tasks_[cfored_name].emplace(
-                      result.value().get());
-                  m_ctld_server_->m_mtx_.Unlock();
-                }
               }
-            } break;
-
-            case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
-              auto const &payload = cfored_request.payload_task_complete_req();
-
-              g_task_scheduler->TerminateRunningTask(payload.task_id());
-
-              ok = stream_writer.WriteTaskCompletionAckReply(payload.task_id());
-              if (!ok) {
-                state = StreamState::kCleanData;
-              }
-            } break;
-
-            case StreamCforedRequest::CFORED_GRACEFUL_EXIT: {
-              stream_writer.WriteCforedGracefulExitAck();
-              stream_writer.Invalidate();
-              state = StreamState::kCleanData;
-            } break;
-
-            default:
-              CRANE_ERROR("Not expected cfored request type: {}",
-                          StreamCforedRequest_CforedRequestType_Name(
-                              cfored_request.type()));
-              return Status::CANCELLED;
+            }
+          } else {
+            state = StreamState::kCleanData;
           }
-        } else {
-          state = StreamState::kCleanData;
+
+          break;
+
+        case StreamState::kWaitMsg: {
+          ok = stream->Read(&cfored_request);
+          if (ok) {
+            switch (cfored_request.type()) {
+              case StreamCforedRequest::TASK_REQUEST: {
+                auto const &payload = cfored_request.payload_task_req();
+                auto task = std::make_unique<TaskInCtld>();
+                task->SetFieldsByTaskToCtld(payload.task());
+
+                auto &meta = std::get<InteractiveMetaInTask>(task->meta);
+                meta.cfored_name = payload.cfored_name();
+                meta.sh_script = payload.task().interactive_meta().sh_script();
+                if (payload.task().interactive_meta().front_end_type() ==
+                    crane::grpc::CRUN) {
+                  meta.source = InteractiveMetaInTask::Source::CRUN;
+                  meta.term_env = payload.task().interactive_meta().term_env();
+                } else {
+                  meta.source = InteractiveMetaInTask::Source::CALLOC;
+                }
+
+                meta.cb_task_res_allocated =
+                    [writer = &stream_writer](
+                        task_id_t task_id,
+                        std::string const &allocated_craned_regex,
+                        std::list<std::string> const &craned_ids) {
+                      writer->WriteTaskResAllocReply(
+                          task_id,
+                          {std::make_pair(allocated_craned_regex, craned_ids)});
+                    };
+
+                meta.cb_task_cancel = [writer =
+                                           &stream_writer](task_id_t task_id) {
+                  writer->WriteTaskCancelRequest(task_id);
+                };
+
+                meta.cb_task_completed = [&, cfored_name](task_id_t task_id) {
+                  // calloc will not send TaskCompletionAckReply when task
+                  // Complete.
+                  // crun task will send TaskStatusChange from Craned,
+                  if (meta.source == InteractiveMetaInTask::Source::CRUN) {
+                    // todo: Remove this
+                    CRANE_TRACE(
+                        "Sending TaskCompletionAckReply in task_completed",
+                        task_id);
+                    stream_writer.WriteTaskCompletionAckReply(task_id);
+                  }
+                  m_ctld_server_->m_mtx_.Lock();
+
+                  // If cfored disconnected, the cfored_name should have be
+                  // removed from the map and the task completion callback is
+                  // generated from cleaning the remaining tasks by calling
+                  // g_task_scheduler->TerminateTask(), we should ignore this
+                  // callback since the task id has already been cleaned.
+                  auto iter =
+                      m_ctld_server_->m_cfored_running_tasks_.find(cfored_name);
+                  if (iter != m_ctld_server_->m_cfored_running_tasks_.end())
+                    iter->second.erase(task_id);
+                  m_ctld_server_->m_mtx_.Unlock();
+                };
+
+                auto submit_result =
+                    m_ctld_server_->SubmitTaskToScheduler(std::move(task));
+                result::result<task_id_t, std::string> result;
+                if (submit_result.has_value()) {
+                  result = result::result<task_id_t, std::string>{
+                      submit_result.value().get()};
+                } else {
+                  result = result::fail(submit_result.error());
+                }
+                ok = stream_writer.WriteTaskIdReply(payload.pid(), result);
+
+                if (!ok) {
+                  CRANE_ERROR(
+                      "Failed to send msg to cfored {}. Connection is broken. "
+                      "Exiting...",
+                      cfored_name);
+                  state = StreamState::kCleanData;
+                } else {
+                  if (result.has_value()) {
+                    m_ctld_server_->m_mtx_.Lock();
+                    m_ctld_server_->m_cfored_running_tasks_[cfored_name]
+                        .emplace(result.value());
+                    m_ctld_server_->m_mtx_.Unlock();
+                  }
+                }
+              } break;
+
+              case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
+                auto const &payload =
+                    cfored_request.payload_task_complete_req();
+
+                g_task_scheduler->TerminateRunningTask(payload.task_id());
+
+                if (payload.req_front_type() != crane::grpc::CRUN) {
+                  // todo: Remove this
+                  CRANE_TRACE(
+                      "Sending type {} TaskCompletionAckReply task {} in "
+                      "TASK_COMPLETION_REQUEST",
+                      payload.req_front_type(), payload.task_id());
+                  ok = stream_writer.WriteTaskCompletionAckReply(
+                      payload.task_id());
+                }
+                if (!ok) {
+                  state = StreamState::kCleanData;
+                }
+              } break;
+
+              case StreamCforedRequest::CFORED_GRACEFUL_EXIT: {
+                stream_writer.WriteCforedGracefulExitAck();
+                stream_writer.Invalidate();
+                state = StreamState::kCleanData;
+              } break;
+
+              default:
+                CRANE_ERROR("Not expected cfored request type: {}",
+                            StreamCforedRequest_CforedRequestType_Name(
+                                cfored_request.type()));
+                return Status::CANCELLED;
+            }
+          } else {
+            state = StreamState::kCleanData;
+          }
+        } break;
+
+        case StreamState::kCleanData: {
+          CRANE_INFO("Cfored {} disconnected. Cleaning its data...",
+                     cfored_name);
+          m_ctld_server_->m_mtx_.Lock();
+
+          auto const &running_task_set =
+              m_ctld_server_->m_cfored_running_tasks_[cfored_name];
+          std::vector<task_id_t> running_tasks(running_task_set.begin(),
+                                               running_task_set.end());
+          m_ctld_server_->m_cfored_running_tasks_.erase(cfored_name);
+          m_ctld_server_->m_mtx_.Unlock();
+
+          for (task_id_t task_id : running_tasks) {
+            g_task_scheduler->TerminateRunningTask(task_id);
+          }
+
+          return Status::OK;
         }
-      } break;
-
-      case StreamState::kCleanData: {
-        CRANE_INFO("Cfored {} disconnected. Cleaning its data...", cfored_name);
-
-        m_ctld_server_->m_mtx_.Lock();
-
-        auto const &running_task_set =
-            m_ctld_server_->m_cfored_running_tasks_[cfored_name];
-        std::vector<task_id_t> running_tasks(running_task_set.begin(),
-                                             running_task_set.end());
-        m_ctld_server_->m_cfored_running_tasks_.erase(cfored_name);
-
-        m_ctld_server_->m_mtx_.Unlock();
-
-        for (task_id_t task_id : running_tasks) {
-          g_task_scheduler->TerminateRunningTask(task_id);
-        }
-
-        return Status::OK;
       }
+    } catch (const std::exception &e) {
+      CRANE_ERROR("error {}", e.what());
+    } catch (...) {
+      CRANE_ERROR("error of no type");
     }
   }
 }

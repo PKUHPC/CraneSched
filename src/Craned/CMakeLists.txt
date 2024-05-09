@@ -1,6 +1,8 @@
 add_executable(craned
         CtldClient.h
         CtldClient.cpp
+        CforedClient.h
+        CforedClient.cpp
         ResourceAllocators.h
         ResourceAllocators.cpp
         TaskManager.h
