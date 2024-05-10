@@ -1,0 +1,36 @@
+name: Build and Archive Artifacts
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Pull Docker Image
+        run: |
+          docker pull registry.cn-shanghai.aliyuncs.com/nativus/cranedev:ci
+
+      - name: Run Build Image with Source Code
+        run: |
+          docker run --name build-container -v ${{ github.workspace }}:/Workspace registry.cn-shanghai.aliyuncs.com/nativus/cranedev:ci --mode backend
+
+      - name: Copy Artifacts from Container
+        run: |
+          docker cp build-container:/Workspace/out .
+
+      - name: Archive Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: compiled-artifacts
+          path: out/
+          retention-days: 30
