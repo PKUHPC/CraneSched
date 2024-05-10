@@ -3,10 +3,10 @@ name: Build and Archive Artifacts
 on:
   push:
     branches:
-      - main
+      - master
   pull_request:
     branches:
-      - main
+      - master
   workflow_dispatch:
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Pull Docker Image
         run: |
@@ -25,13 +25,9 @@ jobs:
         run: |
           docker run --name build-container -v ${{ github.workspace }}:/Workspace registry.cn-shanghai.aliyuncs.com/nativus/cranedev:ci --mode backend
 
-      - name: Copy Artifacts from Container
-        run: |
-          docker cp build-container:/Workspace/out .
-
       - name: Archive Artifacts
         uses: actions/upload-artifact@v3
         with:
           name: compiled-artifacts
-          path: out/
+          path: ${{ github.workspace }}/out
           retention-days: 30
