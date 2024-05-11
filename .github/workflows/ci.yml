@@ -14,21 +14,31 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: registry.cn-shanghai.aliyuncs.com/nativus/cranedev:ci
+    defaults:
+      run:
+        shell: bash -leo pipefail {0}
 
     steps:
-      - name: Checkout Code
+      - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Configure
         run: |
           mkdir -p out
-          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_UNQLITE=ON -DENABLE_BERKELEY_DB=OFF -DCRANE_FULL_DYNAMIC=OFF -DCRANE_USE_GITEE_SOURCE=OFF -S . -B out
+          cmake -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_UNQLITE=ON \
+            -DENABLE_BERKELEY_DB=OFF \
+            -DCRANE_FULL_DYNAMIC=OFF \
+            -DCRANE_USE_GITEE_SOURCE=OFF \
+            -S ${{ github.workspace }} \
+            -B ${{ github.workspace }}/out
 
       - name: Build
         run: |
           cmake --build out --config Release --target all
 
-      - name: Upload Artifacts
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: artifacts
