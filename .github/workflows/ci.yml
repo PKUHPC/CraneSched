@@ -24,6 +24,7 @@ jobs:
 
       - name: Configure
         run: |
+          pwd
           mkdir -p out
           cmake -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -31,12 +32,11 @@ jobs:
             -DENABLE_BERKELEY_DB=OFF \
             -DCRANE_FULL_DYNAMIC=OFF \
             -DCRANE_USE_GITEE_SOURCE=OFF \
-            -S ${{ github.workspace }} \
-            -B ${{ github.workspace }}/out
+            -S . -B out
 
       - name: Build
         run: |
-          cmake --build out --config Release --target all
+          cmake --build out --config Release
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
