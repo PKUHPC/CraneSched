@@ -1,4 +1,4 @@
-name: Build and Archive Artifacts
+name: Build and Upload Artifacts
 
 on:
   push:
@@ -12,22 +12,32 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    container:
+      image: registry.cn-shanghai.aliyuncs.com/nativus/cranedev:ci
 
     steps:
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Pull Docker Image
+      - name: Configure
+        shell: bash
         run: |
-          docker pull registry.cn-shanghai.aliyuncs.com/nativus/cranedev:ci
+          mkdir -p out
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_UNQLITE=ON -DENABLE_BERKELEY_DB=OFF -DCRANE_FULL_DYNAMIC=OFF -DCRANE_USE_GITEE_SOURCE=OFF -S . -B out
 
-      - name: Run Build Image with Source Code
+      - name: Build
+        shell: bash
         run: |
-          docker run --name build-container -v ${{ github.workspace }}:/Workspace registry.cn-shanghai.aliyuncs.com/nativus/cranedev:ci --mode backend
+          cmake --build out --config Release --target all
 
-      - name: Archive Artifacts
-        uses: actions/upload-artifact@v3
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: compiled-artifacts
-          path: ${{ github.workspace }}/out
+          name: artifacts
+          path: |
+            ${{ github.workspace }}/out/src/Craned/craned
+            ${{ github.workspace }}/out/src/CraneCtld/cranectld
+            ${{ github.workspace }}/out/src/Misc/Pam/pam_crane.so
+            ${{ github.workspace }}/etc/crane.conf
           retention-days: 30
+          if-no-files-found: error
