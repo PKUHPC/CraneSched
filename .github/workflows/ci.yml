@@ -24,7 +24,7 @@ jobs:
 
       - name: Configure
         run: |
-          pwd
+          echo "Configuring at $(pwd)"
           mkdir -p out
           cmake -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -36,6 +36,7 @@ jobs:
 
       - name: Build
         run: |
+          echo "Building at $(pwd)"
           cmake --build out --config Release
 
       - name: Upload artifacts
@@ -43,9 +44,9 @@ jobs:
         with:
           name: artifacts
           path: |
-            ${{ github.workspace }}/out/src/Craned/craned
-            ${{ github.workspace }}/out/src/CraneCtld/cranectld
-            ${{ github.workspace }}/out/src/Misc/Pam/pam_crane.so
-            ${{ github.workspace }}/etc/crane.conf
+            out/src/Craned/craned
+            out/src/CraneCtld/cranectld
+            out/src/Misc/Pam/pam_crane.so
+            etc/crane.conf
           retention-days: 30
           if-no-files-found: error
