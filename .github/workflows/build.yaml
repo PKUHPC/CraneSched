@@ -13,7 +13,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: registry.cn-shanghai.aliyuncs.com/nativus/cranedev:ci
+      image: ghcr.io/nativu5/cranedev:ci
+      credentials:
+         username: ${{ github.actor }}
+         password: ${{ github.token }}
     defaults:
       run:
         shell: bash -leo pipefail {0}
