@@ -39,14 +39,20 @@ jobs:
           echo "Building at $(pwd)"
           cmake --build out --config Release
 
+      - name: Collect files
+        run: | 
+          mkdir -p upload; pushd upload
+          cp ../out/src/Craned/craned .
+          cp ../out/src/CraneCtld/cranectld .
+          cp ../out/src/Misc/Pam/pam_crane.so .
+          cp -r ../etc . 
+          popd
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: artifacts
           path: |
-            out/src/Craned/craned
-            out/src/CraneCtld/cranectld
-            out/src/Misc/Pam/pam_crane.so
-            etc/crane.conf
+            upload/*
           retention-days: 30
           if-no-files-found: error
