@@ -96,7 +96,7 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
 
     root_user.name = "root";
     root_user.default_account = "ROOT";
-    root_user.admin_level = User::Admin;
+    root_user.admin_level = User::Root;
     root_user.uid = 0;
     root_user.account_to_attrs_map[root_user.default_account] =
         User::AttrsInAccount{User::PartToAllowedQosMap{}, false};

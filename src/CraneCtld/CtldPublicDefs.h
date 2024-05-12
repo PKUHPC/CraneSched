@@ -524,7 +524,7 @@ struct Account {
 };
 
 struct User {
-  enum AdminLevel { None, Operator, Admin };
+  enum AdminLevel { None, Operator, Admin, Root };
 
   using PartToAllowedQosMap = std::unordered_map<
       std::string /*partition name*/,
