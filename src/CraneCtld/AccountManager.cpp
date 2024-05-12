@@ -848,8 +848,7 @@ result::result<void, std::string> AccountManager::CheckUidIsAdmin(
         "Parameter error: User '{}' is not a crane user", entry.Username()));
   }
 
-  if (ptr->admin_level == User::Operator || ptr->admin_level == User::Admin)
-    return {};
+  if (ptr->admin_level >= User::Operator) return {};
 
   return result::failure(fmt::format(
       "Permission error: User '{}' is an ordinary user.", entry.Username()));
