@@ -70,28 +70,6 @@ TaskExecutor::EnvironVars TaskExecutor::GetEnvironVarsFromTask(
     env_vec.emplace_back(name, value);
   }
 
-  if (instance.task.get_user_env()) {
-    // If --get-user-env is set, the new environment is inherited
-    // from the execution CraneD rather than the submitting node.
-    //
-    // Since we want to reinitialize the environment variables of the user
-    // by reloading the settings in something like .bashrc or /etc/profile,
-    // we are actually performing two steps: login -> start shell.
-    // Shell starting is done by calling "bash --login".
-    //
-    // During shell starting step, the settings in
-    // /etc/profile, ~/.bash_profile, ... are loaded.
-    //
-    // During login step, "HOME" and "SHELL" are set.
-    // Here we are just mimicking the login module.
-
-    // Slurm uses `su <username> -c /usr/bin/env` to retrieve
-    // all the environment variables.
-    // We use a more tidy way.
-    env_vec.emplace_back("HOME", instance.pwd_entry.HomeDir());
-    env_vec.emplace_back("SHELL", instance.pwd_entry.Shell());
-  }
-
   return env_vec;
 }
 
@@ -299,6 +277,35 @@ CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup) {
     close(0);  // close stdin
     util::os::CloseFdFrom(3);
 
+    // Use bash to create the executing environment
+    std::vector<const char*> argv{"/bin/bash"};
+
+    // If get_user_env, will load envs using --login
+    // Maybe should use `su` instead.
+    if (m_meta_.get_user_env) {
+      // If --get-user-env is set, the new environment is inherited
+      // from the execution CraneD rather than the submitting node.
+      //
+      // Since we want to reinitialize the environment variables of the user
+      // by reloading the settings in something like .bashrc or /etc/profile,
+      // we are actually performing two steps: login -> start shell.
+      // Shell starting is done by calling "bash --login".
+      //
+      // During shell starting step, the settings in
+      // /etc/profile, ~/.bash_profile, ... are loaded.
+      //
+      // During login step, "HOME" and "SHELL" are set.
+      // Here we are just mimicking the login module.
+
+      // Slurm uses `su <username> -c /usr/bin/env` to retrieve
+      // all the environment variables.
+      // We use a more tidy way.
+      m_env_.emplace_back("HOME", m_meta_.pwd.HomeDir());
+      m_env_.emplace_back("SHELL", m_meta_.pwd.Shell());
+      argv.emplace_back("--login");
+    }
+
+    // Set environment variables
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
     }
@@ -309,17 +316,19 @@ CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup) {
       }
     }
 
-    // Argv[0] is the program name
-    std::vector<std::string> split = absl::StrSplit(m_interpreter_, " ");
-    auto split_view =
-        split | std::views::transform([](auto& s) { return s.c_str(); });
-    auto argv = std::vector<const char*>(split_view.begin(), split_view.end());
-
-    argv.emplace_back(m_executive_path_.c_str());
-    for (auto&& arg : m_arguments_) {
-      argv.push_back(arg.c_str());
+    // Add arguments
+    // TODO: Arguments for the interpreter or executive?
+    std::string arguments{};
+    for (const auto& arg : m_arguments_) {
+      arguments += arg + " ";
     }
-    argv.push_back(nullptr);
+
+    // e.g., /bin/bash -c "/bin/bash script.sh --arg1 --arg2 ..."
+    argv.emplace_back("-c");
+    argv.emplace_back(fmt::format("\"{} {} {}\"", m_interpreter_,
+                                  m_executive_path_, arguments)
+                          .c_str());
+    argv.emplace_back(nullptr);
 
     execv(argv[0], const_cast<char* const*>(argv.data()));
 
@@ -424,6 +433,7 @@ CraneErr ContainerInstance::ModifyBundleConfig_(const std::string& src,
     process["terminal"] = false;
     // Write environment variables in IEEE format.
     process["env"] = [this]() {
+      // TODO: Will discard `--get-user-env`
       auto env_str = std::vector<std::string>();
       for (const auto& [name, value] : m_env_)
         env_str.emplace_back(fmt::format("{}={}", name, value));

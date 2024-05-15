@@ -526,23 +526,22 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         std::unique_ptr<TaskExecutor> executor = nullptr;
 
         // Store some meta data in executor for convenience
-        auto meta = TaskMetaInExecutor{
-            .pwd = instance->pwd_entry,
-            .id = task_id,
-            .name = instance->task.name(),
-        };
+        auto meta =
+            TaskMetaInExecutor{.pwd = instance->pwd_entry,
+                               .id = task_id,
+                               .name = instance->task.name(),
+                               .get_user_env = instance->task.get_user_env()};
 
         // Prepare intepretor
-        // instance->task.interpreter()
+        // FIXME: use instance->task.interpreter() instead
         std::string interpreter{"/bin/bash"};
-        if (instance->task.get_user_env()) interpreter += " --login";
         if (!instance->task.container().empty()) interpreter = "/bin/sh";
 
         // Generate environment variables
         auto env = TaskExecutor::GetEnvironVarsFromTask(*instance);
 
         // Prepare arguments
-        // Note: Currently no arguments should be used in container.
+        // Note: Currently no arguments will be accepted in container.
         auto args = std::list<std::string>{};
 
         // Instantiate ProcessInstance/ContainerInstance
@@ -792,7 +791,7 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
             .id = task_iter->second->task.task_id(),
             .name = task_iter->second->task.name(),
         },
-        std::move(interpreter), task_iter->second->task.cwd(),
+        std::move(task_iter->second->task.cwd()), interpreter,
         std::move(elem.arguments),
         TaskExecutor::GetEnvironVarsFromTask(*task_iter->second));
 

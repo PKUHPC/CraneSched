@@ -47,6 +47,7 @@ struct TaskMetaInExecutor {
   const PasswordEntry& pwd;  // pwd_entry of submitter
   const task_id_t id;        // Task id
   const std::string name;    // Task name
+  const bool get_user_env;   // If the task should inherit user's env
 };
 
 struct BatchMetaInTaskExecutor {
@@ -156,6 +157,8 @@ class TaskExecutor {
     m_finish_cb_ = std::move(cb);
   }
 
+  // Extract environment variables from a TaskInstance.
+  // This method does NOT get environment variables from the node.
   static EnvironVars GetEnvironVarsFromTask(const TaskInstance& instance);
 
  protected:
