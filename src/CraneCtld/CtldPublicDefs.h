@@ -222,6 +222,7 @@ struct InteractiveMetaInTask {
 
 struct BatchMetaInTask {
   std::string sh_script;
+  std::string interpreter;
   std::string output_file_pattern;
   std::string error_file_pattern;
 };
@@ -253,6 +254,7 @@ struct TaskInCtld {
   std::string cmd_line;
   std::unordered_map<std::string, std::string> env;
   std::string cwd;
+
   std::string container;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
@@ -417,6 +419,7 @@ struct TaskInCtld {
     if (type == crane::grpc::Batch) {
       meta.emplace<BatchMetaInTask>(BatchMetaInTask{
           .sh_script = val.batch_meta().sh_script(),
+          .interpreter = val.batch_meta().interpreter(),
           .output_file_pattern = val.batch_meta().output_file_pattern(),
           .error_file_pattern = val.batch_meta().error_file_pattern(),
       });

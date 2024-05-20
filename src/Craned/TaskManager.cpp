@@ -532,11 +532,6 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
                                .name = instance->task.name(),
                                .get_user_env = instance->task.get_user_env()};
 
-        // Prepare intepretor
-        // FIXME: use instance->task.interpreter() instead
-        std::string interpreter{"/bin/bash"};
-        if (!instance->task.container().empty()) interpreter = "/bin/sh";
-
         // Generate environment variables
         auto env = TaskExecutor::GetEnvironVarsFromTask(*instance);
 
@@ -548,13 +543,13 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         if (instance->task.container().empty()) {
           // use ProcessInstance
           executor = std::make_unique<ProcessInstance>(
-              std::move(meta), instance->task.cwd(), std::move(interpreter),
-              std::move(args), std::move(env));
+              std::move(meta), instance->task.cwd(), std::move(args),
+              std::move(env));
         } else if (g_config.CranedContainer.Enable) {
           // use ContainerInstance
           executor = std::make_unique<ContainerInstance>(
-              std::move(meta), instance->task.cwd(), std::move(interpreter),
-              instance->task.container(), std::move(env));
+              std::move(meta), instance->task.cwd(), instance->task.container(),
+              std::move(env));
         } else {
           // not supported by this node
           CRANE_ERROR("Container support is disabled but requested by task #{}",
@@ -589,13 +584,18 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
           return;
         }
 
-        // Parse the result file patterns
         auto batch_meta = BatchMetaInTaskExecutor{
+            .interpreter = instance->task.batch_meta().interpreter(),
             .parsed_output_file_pattern =
                 instance->task.batch_meta().output_file_pattern(),
             .parsed_error_file_pattern =
                 instance->task.batch_meta().error_file_pattern(),
         };
+
+        // Set interpreter, if not specified, use /bin/sh
+        if (batch_meta.interpreter.empty()) batch_meta.interpreter = "/bin/sh";
+
+        // Parse the result file patterns
         ParseResultPathPattern_(task_id, instance->task.name(),
                                 instance->task.cwd(), instance->pwd_entry,
                                 batch_meta.parsed_output_file_pattern,
@@ -780,9 +780,6 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
       return;
     }
 
-    std::string interpreter{"/bin/bash"};
-    if (task_iter->second->task.get_user_env()) interpreter += " --login";
-
     // TODO: Add container support
     // FIXME: Didn't passing executive path
     auto process = std::make_unique<ProcessInstance>(
@@ -791,8 +788,7 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
             .id = task_iter->second->task.task_id(),
             .name = task_iter->second->task.name(),
         },
-        std::move(task_iter->second->task.cwd()), interpreter,
-        std::move(elem.arguments),
+        std::move(task_iter->second->task.cwd()), std::move(elem.arguments),
         TaskExecutor::GetEnvironVarsFromTask(*task_iter->second));
 
     process->SetOutputCb(std::move(elem.output_cb));

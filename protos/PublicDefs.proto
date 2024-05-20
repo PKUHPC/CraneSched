@@ -171,6 +171,7 @@ message TaskToD {
 
 message BatchTaskAdditionalMeta {
   string sh_script = 1;
+  string interpreter = 2;
   string output_file_pattern = 3;
   string error_file_pattern = 4;
 }

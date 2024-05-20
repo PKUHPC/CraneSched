@@ -323,9 +323,9 @@ CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup) {
       arguments += arg + " ";
     }
 
-    // e.g., /bin/bash -c "/bin/bash script.sh --arg1 --arg2 ..."
+    // e.g., /bin/bash -c "/bin/zsh script.sh --arg1 --arg2 ..."
     argv.emplace_back("-c");
-    argv.emplace_back(fmt::format("\"{} {} {}\"", m_interpreter_,
+    argv.emplace_back(fmt::format("\"{} {} {}\"", m_batch_meta_.interpreter,
                                   m_executive_path_, arguments)
                           .c_str());
     argv.emplace_back(nullptr);
@@ -441,7 +441,7 @@ CraneErr ContainerInstance::ModifyBundleConfig_(const std::string& src,
     }();
     // TODO: Support more arguments.
     process["args"] = {
-        m_interpreter_,
+        m_batch_meta_.interpreter,
         mounted_executive,
     };
   } catch (json::exception& e) {

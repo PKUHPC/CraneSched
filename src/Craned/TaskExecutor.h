@@ -51,6 +51,7 @@ struct TaskMetaInExecutor {
 };
 
 struct BatchMetaInTaskExecutor {
+  std::string interpreter;
   std::string parsed_output_file_pattern;
   std::string parsed_error_file_pattern;
 };
@@ -184,10 +185,8 @@ class TaskExecutor {
 class ProcessInstance final : public TaskExecutor {
  public:
   ProcessInstance(TaskMetaInExecutor meta, std::string cwd,
-                  std::string interpreter, std::list<std::string> args,
-                  EnvironVars env)
+                  std::list<std::string> args, EnvironVars env)
       : m_meta_(std::move(meta)),
-        m_interpreter_(std::move(interpreter)),
         m_cwd_(std::move(cwd)),
         m_arguments_(std::move(args)),
         m_env_(std::move(env)),
@@ -209,6 +208,7 @@ class ProcessInstance final : public TaskExecutor {
   void SetBatchMeta(BatchMetaInTaskExecutor batch_meta) override {
     this->m_batch_meta_ = std::move(batch_meta);
   }
+
   [[nodiscard]] const BatchMetaInTaskExecutor& GetBatchMeta() const override {
     return m_batch_meta_;
   }
@@ -247,7 +247,6 @@ class ProcessInstance final : public TaskExecutor {
   }
 
  private:
-  std::string m_interpreter_;
   std::string m_cwd_;
   EnvironVars m_env_;
 
@@ -266,11 +265,9 @@ class ProcessInstance final : public TaskExecutor {
 class ContainerInstance : public TaskExecutor {
  public:
   ContainerInstance(TaskMetaInExecutor meta, std::string cwd,
-                    std::string interpreter, std::string bundle_path,
-                    EnvironVars env)
+                    std::string bundle_path, EnvironVars env)
       : m_meta_(std::move(meta)),
         m_cwd_(std::move(cwd)),
-        m_interpreter_(std::move(interpreter)),
         m_bundle_path_(std::move(bundle_path)),
         m_env_(std::move(env)),
         m_pid_(0) {}
@@ -283,6 +280,7 @@ class ContainerInstance : public TaskExecutor {
   void SetBatchMeta(BatchMetaInTaskExecutor batch_meta) override {
     this->m_batch_meta_ = std::move(batch_meta);
   }
+
   [[nodiscard]] const BatchMetaInTaskExecutor& GetBatchMeta() const override {
     return m_batch_meta_;
   }
@@ -369,7 +367,6 @@ class ContainerInstance : public TaskExecutor {
   std::string m_bundle_path_;     // original rootfs and config.json
   std::string m_executive_path_;  // script path on host to be mounted
 
-  std::string m_interpreter_;
   std::string m_cwd_;  // cwd to *execute OCI commands*
   EnvironVars m_env_;  // environment variables in container
   pid_t m_pid_;        // pid of the runtime process
