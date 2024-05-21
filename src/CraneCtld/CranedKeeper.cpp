@@ -266,6 +266,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
 
     mutable_task->set_cwd(task->cwd);
     mutable_task->set_get_user_env(task->get_user_env);
+
     mutable_task->set_container(task->container);
 
     for (const auto &hostname : task->CranedIds())
@@ -279,6 +280,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
     if (task->type == crane::grpc::Batch) {
       auto &meta_in_ctld = std::get<BatchMetaInTask>(task->meta);
       auto *mutable_meta = mutable_task->mutable_batch_meta();
+      mutable_meta->set_interpreter(meta_in_ctld.interpreter);
       mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
       mutable_meta->set_error_file_pattern(meta_in_ctld.error_file_pattern);
       mutable_meta->set_sh_script(meta_in_ctld.sh_script);

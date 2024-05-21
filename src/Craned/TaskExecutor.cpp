@@ -324,10 +324,11 @@ CraneErr ProcessInstance::Spawn(util::Cgroup* cgroup) {
     }
 
     // e.g., /bin/bash -c "/bin/zsh script.sh --arg1 --arg2 ..."
+    auto cmd = fmt::format("{} {} {}", m_batch_meta_.interpreter,
+                           m_executive_path_, arguments);
+
     argv.emplace_back("-c");
-    argv.emplace_back(fmt::format("\"{} {} {}\"", m_batch_meta_.interpreter,
-                                  m_executive_path_, arguments)
-                          .c_str());
+    argv.emplace_back(cmd.c_str());
     argv.emplace_back(nullptr);
 
     execv(argv[0], const_cast<char* const*>(argv.data()));
