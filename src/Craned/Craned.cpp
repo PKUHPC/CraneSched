@@ -317,15 +317,39 @@ void ParseConfig(int argc, char** argv) {
 
           g_config.Partitions.emplace(std::move(name), std::move(part));
         }
-
-        if (config["CranedForeground"]) {
-          auto val = config["CranedForeground"].as<std::string>();
-          if (val == "true")
-            g_config.CranedForeground = true;
-          else
-            g_config.CranedForeground = false;
-        }
       }
+
+      if (config["CranedForeground"]) {
+        auto val = config["CranedForeground"].as<std::string>();
+        if (val == "true")
+          g_config.CranedForeground = true;
+        else
+          g_config.CranedForeground = false;
+      }
+
+      if (config["CranedContainer"] && config["CranedContainer"]["Enable"] &&
+          config["CranedContainer"]["Enable"].as<bool>()) {
+        g_config.CranedContainer.TempDir =
+            g_config.CraneBaseDir +
+            config["CranedContainer"]["TempDir"].as<std::string>();
+        g_config.CranedContainer.RunTimeState =
+            config["CranedContainer"]["RuntimeState"].as<std::string>();
+        g_config.CranedContainer.RuntimeDelete =
+            config["CranedContainer"]["RuntimeDelete"].as<std::string>();
+        g_config.CranedContainer.RuntimeKill =
+            config["CranedContainer"]["RuntimeKill"].as<std::string>();
+        g_config.CranedContainer.RuntimeRun =
+            config["CranedContainer"]["RuntimeRun"].as<std::string>();
+        g_config.CranedContainer.Enable = true;
+        CRANE_DEBUG("Container support is enabled");
+        CRANE_TRACE("OCI Runtime set to {}",
+                    g_config.CranedContainer.RuntimeRun);
+      } else {
+        g_config.CranedContainer = {};
+        g_config.CranedContainer.Enable = false;
+        CRANE_DEBUG("Container support is disabled");
+      }
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
                      e.what());

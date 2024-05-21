@@ -41,6 +41,15 @@ CranedMutexFilePath: craned/craned.lock
 # whether the craned is running in the background
 CranedForeground: true
 
+# Container Runtime Options
+CranedContainer:
+  Enable: true
+  TempDir: craned/containers/
+  RuntimeState: /usr/bin/runc --root=/run/user/%U/ state %u.%U.%j.%x
+  RuntimeKill: /usr/bin/runc --rootless=true --root=/run/user/%U/ kill -a %u.%U.%j.%x SIGTERM 
+  RuntimeDelete: /usr/bin/runc --rootless=true --root=/run/user/%U/ delete --force %u.%U.%j.%x
+  RuntimeRun: /usr/bin/runc --rootless=true --root=/run/user/%U/ run -b %b %u.%U.%j.%x
+
 # Scheduling settings
 PriorityType: priority/multifactor
 
@@ -57,14 +66,14 @@ PriorityWeightJobSize: 0
 PriorityWeightPartition: 1000
 PriorityWeightQ0S: 1000000
 
-# list of configuration information of the computing machine
 # Nodes and partitions settings
+# node list
 Nodes:
   - name: "cn[15-18]"
     cpu: 2
     memory: 2G
 
-# partition information list
+# partition list
 Partitions:
   - name: CPU
     nodes: "cn[15-16]"
@@ -75,9 +84,7 @@ Partitions:
 
 DefaultPartition: CPU
 
-
-# Advanced options:
-
+# Advanced settings:
 # Maximum size of Pending Queue and must <=900000.
 PendingQueueMaxSize: 900000
 

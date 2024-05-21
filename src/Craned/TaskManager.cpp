@@ -16,14 +16,21 @@
 
 #include "TaskManager.h"
 
+#include <absl/strings/match.h>
 #include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
 
+#include <string>
+
+#include "CranedPublicDefs.h"
+#include "CtldClient.h"
 #include "ResourceAllocators.h"
+#include "TaskExecutor.h"
 #include "crane/OS.h"
-#include "protos/CraneSubprocess.pb.h"
+#include "crane/PasswordEntry.h"
+#include "crane/PublicHeader.h"
 
 namespace Craned {
 
@@ -199,8 +206,6 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
   assert(m_instance_ptr_->m_instance_ptr_ != nullptr);
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
-  SigchldInfo sigchld_info{};
-
   int status;
   pid_t pid;
   while (true) {
@@ -208,99 +213,84 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
-      if (WIFEXITED(status)) {
-        // Exited with status WEXITSTATUS(status)
-        sigchld_info = {pid, false, WEXITSTATUS(status)};
-        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
-                    pid, WEXITSTATUS(status));
-      } else if (WIFSIGNALED(status)) {
-        // Killed by signal WTERMSIG(status)
-        sigchld_info = {pid, true, WTERMSIG(status)};
-        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
-                    pid, WTERMSIG(status));
-      }
-      /* Todo(More status tracing):
-       else if (WIFSTOPPED(status)) {
-        printf("stopped by signal %d\n", WSTOPSIG(status));
-      } else if (WIFCONTINUED(status)) {
-        printf("continued\n");
-      } */
-
       this_->m_mtx_.Lock();
 
       auto task_iter = this_->m_pid_task_map_.find(pid);
-      auto proc_iter = this_->m_pid_proc_map_.find(pid);
+      auto exec_iter = this_->m_pid_exec_map_.find(pid);
       if (task_iter == this_->m_pid_task_map_.end() ||
-          proc_iter == this_->m_pid_proc_map_.end()) {
+          exec_iter == this_->m_pid_exec_map_.end()) {
         CRANE_WARN("Failed to find task id for pid {}.", pid);
         this_->m_mtx_.Unlock();
       } else {
         TaskInstance* instance = task_iter->second;
-        ProcessInstance* proc = proc_iter->second;
+        TaskExecutor* exec = exec_iter->second;
         uint32_t task_id = instance->task.task_id();
 
-        // Remove indexes from pid to ProcessInstance*
-        this_->m_pid_proc_map_.erase(proc_iter);
+        // Remove indexes from pid to TaskExecutor*
+        this_->m_pid_exec_map_.erase(exec_iter);
         this_->m_pid_task_map_.erase(task_iter);
 
         this_->m_mtx_.Unlock();
 
-        proc->Finish(sigchld_info.is_terminated_by_signal, sigchld_info.value);
+        // Get the exit status of the child process.
+        auto chld_status = exec->CheckChldStatus(pid, status);
+        exec->Finish(chld_status.signaled, chld_status.value);
 
-        // Free the ProcessInstance. ITask struct is not freed here because
-        // the ITask for an Interactive task can have no ProcessInstance.
-        auto pr_it = instance->processes.find(pid);
-        if (pr_it == instance->processes.end()) {
-          CRANE_ERROR("Failed to find pid {} in task #{}'s ProcessInstances",
-                      pid, task_id);
+        // Free the TaskExecutor. ITask struct is not freed here because
+        // the ITask for an Interactive task can have no TaskExecutor.
+        auto exec_it = instance->executors.find(pid);
+        if (exec_it == instance->executors.end()) {
+          // TODO: Potential leak in not freeing TaskExecutor* exec?
+          CRANE_ERROR("Failed to find pid {} in task #{}'s TaskExecutors", pid,
+                      task_id);
         } else {
-          instance->processes.erase(pr_it);
+          instance->executors.erase(exec_it);
 
-          if (!instance->processes.empty()) {
-            if (sigchld_info.is_terminated_by_signal) {
+          if (!instance->executors.empty()) {
+            if (chld_status.signaled) {
               // If a task is terminated by a signal and there are other
-              //  running processes belonging to this task, kill them.
+              // running processes belonging to this task, kill them.
               this_->TerminateTaskAsync(task_id);
             }
           } else {
             if (!instance->orphaned) {
-              // If the ProcessInstance has no process left and the task was not
+              // If the TaskExecutor has no process left and the task was not
               // marked as an orphaned task, send TaskStatusChange for this
               // task. See the comment of EvActivateTaskStatusChange_.
               if (instance->task.type() == crane::grpc::Batch) {
                 // For a Batch task, the end of the process means it is done.
-                if (sigchld_info.is_terminated_by_signal) {
+                if (chld_status.signaled) {
                   if (instance->cancelled_by_user)
                     this_->EvActivateTaskStatusChange_(
                         task_id, crane::grpc::TaskStatus::Cancelled,
-                        sigchld_info.value + ExitCode::kTerminationSignalBase,
+                        chld_status.value + ExitCode::kTerminationSignalBase,
                         std::nullopt);
                   else if (instance->terminated_by_timeout)
                     this_->EvActivateTaskStatusChange_(
                         task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-                        sigchld_info.value + ExitCode::kTerminationSignalBase,
+                        chld_status.value + ExitCode::kTerminationSignalBase,
                         std::nullopt);
                   else
                     this_->EvActivateTaskStatusChange_(
                         task_id, crane::grpc::TaskStatus::Failed,
-                        sigchld_info.value + ExitCode::kTerminationSignalBase,
+                        chld_status.value + ExitCode::kTerminationSignalBase,
                         std::nullopt);
                 } else
                   this_->EvActivateTaskStatusChange_(
                       task_id, crane::grpc::TaskStatus::Completed,
-                      sigchld_info.value, std::nullopt);
+                      chld_status.value, std::nullopt);
               } else {
                 // For a COMPLETING Interactive task with a process running, the
                 // end of this process means that this task is done.
-                if (sigchld_info.is_terminated_by_signal) {
+                if (chld_status.signaled) {
                   this_->EvActivateTaskStatusChange_(
                       task_id, crane::grpc::TaskStatus::Completed,
-                      sigchld_info.value + ExitCode::kTerminationSignalBase,
+                      chld_status.value + ExitCode::kTerminationSignalBase,
                       std::nullopt);
                 } else {
                   this_->EvActivateTaskStatusChange_(
                       task_id, crane::grpc::TaskStatus::Completed,
-                      sigchld_info.value, std::nullopt);
+                      chld_status.value, std::nullopt);
                 }
               }
             }
@@ -360,12 +350,12 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
       TaskInstance* task_instance = task_it->second.get();
 
       if (task_instance->task.type() == crane::grpc::Batch) {
-        for (auto&& [pid, pr_instance] : task_instance->processes) {
+        for (auto&& [pid, pr_instance] : task_instance->executors) {
           CRANE_INFO(
               "Sending SIGINT to the process group of task #{} with root "
               "process pid {}",
               task_id, pr_instance->GetPid());
-          KillProcessInstance_(pr_instance.get(), SIGKILL);
+          pr_instance->Kill(SIGKILL);
         }
         task_it++;
       } else {
@@ -393,12 +383,12 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
       this_->EvActivateShutdown_();
     } else {
       for (auto&& [task_id, task_instance] : this_->m_task_map_) {
-        for (auto&& [pid, pr_instance] : task_instance->processes) {
+        for (auto&& [pid, pr_instance] : task_instance->executors) {
           CRANE_INFO(
               "Sending SIGKILL to the process group of task #{} with root "
               "process pid {}",
               task_id, pr_instance->GetPid());
-          KillProcessInstance_(pr_instance.get(), SIGKILL);
+          pr_instance->Kill(SIGKILL);
         }
       }
     }
@@ -424,312 +414,8 @@ void TaskManager::Wait() {
   if (m_ev_loop_thread_.joinable()) m_ev_loop_thread_.join();
 }
 
-CraneErr TaskManager::KillProcessInstance_(const ProcessInstance* proc,
-                                           int signum) {
-  // Todo: Add timer which sends SIGTERM for those tasks who
-  //  will not quit when receiving SIGINT.
-  if (proc) {
-    // Send the signal to the whole process group.
-    int err = kill(-proc->GetPid(), signum);
-
-    if (err == 0)
-      return CraneErr::kOk;
-    else {
-      CRANE_TRACE("kill failed. error: {}", strerror(errno));
-      return CraneErr::kGenericFailure;
-    }
-  }
-
-  return CraneErr::kNonExistent;
-}
-
 void TaskManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
-}
-
-CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
-                                              ProcessInstance* process) {
-  using google::protobuf::io::FileInputStream;
-  using google::protobuf::io::FileOutputStream;
-  using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
-  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
-
-  using crane::grpc::subprocess::CanStartMessage;
-  using crane::grpc::subprocess::ChildProcessReady;
-
-  int socket_pair[2];
-
-  if (socketpair(AF_UNIX, SOCK_STREAM, 0, socket_pair) != 0) {
-    CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
-    return CraneErr::kSystemErr;
-  }
-
-  // save the current uid/gid
-  savedPrivilege saved_priv{getuid(), getgid()};
-
-  int rc = setegid(instance->pwd_entry.Gid());
-  if (rc == -1) {
-    CRANE_ERROR("error: setegid. {}", strerror(errno));
-    return CraneErr::kSystemErr;
-  }
-  __gid_t gid_a[1] = {instance->pwd_entry.Gid()};
-  setgroups(1, gid_a);
-  rc = seteuid(instance->pwd_entry.Uid());
-  if (rc == -1) {
-    CRANE_ERROR("error: seteuid. {}", strerror(errno));
-    return CraneErr::kSystemErr;
-  }
-
-  pid_t child_pid = fork();
-  if (child_pid > 0) {  // Parent proc
-    close(socket_pair[1]);
-    int fd = socket_pair[0];
-    bool ok;
-    CraneErr err;
-
-    setegid(saved_priv.gid);
-    seteuid(saved_priv.uid);
-    setgroups(0, nullptr);
-
-    FileInputStream istream(fd);
-    FileOutputStream ostream(fd);
-    CanStartMessage msg;
-    ChildProcessReady child_process_ready;
-
-    CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
-                instance->task.task_id(), child_pid);
-
-    process->SetPid(child_pid);
-
-    // Add event for stdout/stderr of the new subprocess
-    // struct bufferevent* ev_buf_event;
-    // ev_buf_event =
-    //     bufferevent_socket_new(m_ev_base_, fd, BEV_OPT_CLOSE_ON_FREE);
-    // if (!ev_buf_event) {
-    //   CRANE_ERROR(
-    //       "Error constructing bufferevent for the subprocess of task #!",
-    //       instance->task.task_id());
-    //   err = CraneErr::kLibEventError;
-    //   goto AskChildToSuicide;
-    // }
-    // bufferevent_setcb(ev_buf_event, EvSubprocessReadCb_, nullptr, nullptr,
-    //                   (void*)process.get());
-    // bufferevent_enable(ev_buf_event, EV_READ);
-    // bufferevent_disable(ev_buf_event, EV_WRITE);
-    // process->SetEvBufEvent(ev_buf_event);
-
-    // Migrate the new subprocess to newly created cgroup
-    if (!instance->cgroup->MigrateProcIn(process->GetPid())) {
-      CRANE_ERROR(
-          "Terminate the subprocess of task #{} due to failure of cgroup "
-          "migration.",
-          instance->task.task_id());
-
-      err = CraneErr::kCgroupError;
-      goto AskChildToSuicide;
-    }
-
-    CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
-                instance->task.task_id());
-
-    // Tell subprocess that the parent process is ready. Then the
-    // subprocess should continue to exec().
-    msg.set_ok(true);
-    ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
-    ok &= ostream.Flush();
-    if (!ok) {
-      CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}",
-                  child_pid, instance->task.task_id());
-      close(fd);
-      return CraneErr::kProtobufError;
-    }
-
-    ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream, nullptr);
-    if (!msg.ok()) {
-      CRANE_ERROR("Failed to read protobuf from subprocess {} of task #{}",
-                  child_pid, instance->task.task_id());
-      close(fd);
-      return CraneErr::kProtobufError;
-    }
-
-    close(fd);
-    return CraneErr::kOk;
-
-  AskChildToSuicide:
-    msg.set_ok(false);
-
-    ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
-    close(fd);
-    if (!ok) {
-      CRANE_ERROR("Failed to ask subprocess {} to suicide for task #{}",
-                  child_pid, instance->task.task_id());
-      return CraneErr::kProtobufError;
-    }
-    return err;
-  } else {  // Child proc
-    const std::string& cwd = instance->task.cwd();
-    rc = chdir(cwd.c_str());
-    if (rc == -1) {
-      CRANE_ERROR("[Child Process] Error: chdir to {}. {}", cwd.c_str(),
-                  strerror(errno));
-      std::abort();
-    }
-
-    setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid());
-    setregid(instance->pwd_entry.Gid(), instance->pwd_entry.Gid());
-
-    // Set pgid to the pid of task root process.
-    setpgid(0, 0);
-
-    close(socket_pair[0]);
-    int fd = socket_pair[1];
-
-    FileInputStream istream(fd);
-    FileOutputStream ostream(fd);
-    CanStartMessage msg;
-    ChildProcessReady child_process_ready;
-    bool ok;
-
-    ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
-    if (!msg.ok()) std::abort();
-
-    const std::string& stdout_file_path =
-        process->batch_meta.parsed_output_file_pattern;
-    const std::string& stderr_file_path =
-        process->batch_meta.parsed_error_file_pattern;
-
-    int stdout_fd =
-        open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
-    if (stdout_fd == -1) {
-      CRANE_ERROR("[Child Process] Error: open {}. {}", stdout_file_path,
-                  strerror(errno));
-      std::abort();
-    }
-    dup2(stdout_fd, 1);  // stdout -> output file
-
-    if (stderr_file_path.empty()) {  // if stderr filename is not specified
-      dup2(stdout_fd, 2);            // stderr -> output file
-    } else {
-      int stderr_fd =
-          open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
-      if (stderr_fd == -1) {
-        CRANE_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
-                    strerror(errno));
-        std::abort();
-      }
-      dup2(stderr_fd, 2);  // stderr -> error file
-      close(stderr_fd);
-    }
-
-    close(stdout_fd);
-
-    child_process_ready.set_ok(true);
-    ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
-    ok &= ostream.Flush();
-    if (!ok) {
-      CRANE_ERROR("[Child Process] Error: Failed to flush.");
-      std::abort();
-    }
-
-    close(fd);
-
-    // If these file descriptors are not closed, a program like mpirun may
-    // keep waiting for the input from stdin or other fds and will never end.
-    close(0);  // close stdin
-    util::os::CloseFdFrom(3);
-
-    std::vector<std::pair<std::string, std::string>> env_vec;
-
-    // Load env from the front end.
-    for (auto& [name, value] : instance->task.env()) {
-      env_vec.emplace_back(name, value);
-    }
-
-    if (instance->task.get_user_env()) {
-      // If --get-user-env is set, the new environment is inherited
-      // from the execution CraneD rather than the submitting node.
-      //
-      // Since we want to reinitialize the environment variables of the user
-      // by reloading the settings in something like .bashrc or /etc/profile,
-      // we are actually performing two steps: login -> start shell.
-      // Shell starting is done by calling "bash --login".
-      //
-      // During shell starting step, the settings in
-      // /etc/profile, ~/.bash_profile, ... are loaded.
-      //
-      // During login step, "HOME" and "SHELL" are set.
-      // Here we are just mimicking the login module.
-
-      // Slurm uses `su <username> -c /usr/bin/env` to retrieve
-      // all the environment variables.
-      // We use a more tidy way.
-      env_vec.emplace_back("HOME", instance->pwd_entry.HomeDir());
-      env_vec.emplace_back("SHELL", instance->pwd_entry.Shell());
-    }
-
-    env_vec.emplace_back("CRANE_JOB_NODELIST",
-                         absl::StrJoin(instance->task.allocated_nodes(), ";"));
-    env_vec.emplace_back("CRANE_EXCLUDES",
-                         absl::StrJoin(instance->task.excludes(), ";"));
-    env_vec.emplace_back("CRANE_JOB_NAME", instance->task.name());
-    env_vec.emplace_back("CRANE_ACCOUNT", instance->task.account());
-    env_vec.emplace_back("CRANE_PARTITION", instance->task.partition());
-    env_vec.emplace_back("CRANE_QOS", instance->task.qos());
-    env_vec.emplace_back("CRANE_MEM_PER_NODE",
-                         std::to_string(instance->task.resources()
-                                            .allocatable_resource()
-                                            .memory_limit_bytes() /
-                                        (1024 * 1024)));
-    env_vec.emplace_back("CRANE_JOB_ID",
-                         std::to_string(instance->task.task_id()));
-
-    int64_t time_limit_sec = instance->task.time_limit().seconds();
-    int hours = time_limit_sec / 3600;
-    int minutes = (time_limit_sec % 3600) / 60;
-    int seconds = time_limit_sec % 60;
-    std::string time_limit =
-        fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
-    env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
-
-    if (clearenv()) {
-      fmt::print("clearenv() failed!\n");
-    }
-
-    for (const auto& [name, value] : env_vec) {
-      if (setenv(name.c_str(), value.c_str(), 1)) {
-        fmt::print("setenv for {}={} failed!\n", name, value);
-      }
-    }
-
-    // Prepare the command line arguments.
-    std::vector<const char*> argv;
-
-    // Argv[0] is the program name which can be anything.
-    argv.emplace_back("CraneScript");
-
-    if (instance->task.get_user_env()) {
-      // If --get-user-env is specified,
-      // we need to use --login option of bash to load settings from the user's
-      // settings.
-      argv.emplace_back("--login");
-    }
-
-    argv.emplace_back(process->GetExecPath().c_str());
-    for (auto&& arg : process->GetArgList()) {
-      argv.push_back(arg.c_str());
-    }
-    argv.push_back(nullptr);
-
-    execv("/bin/bash", const_cast<char* const*>(argv.data()));
-
-    // Error occurred since execv returned. At this point, errno is set.
-    // Ctld use SIGABRT to inform the client of this failure.
-    fmt::print(stderr, "[Craned Subprocess Error] Failed to execv. Error: {}\n",
-               strerror(errno));
-    // Todo: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
-    //  exit codes
-    abort();
-  }
 }
 
 CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
@@ -837,54 +523,86 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
       // If this is a batch task, run it now.
       if (instance->task.type() == crane::grpc::Batch) {
-        instance->batch_meta.parsed_sh_script_path =
-            fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);
-        auto& sh_path = instance->batch_meta.parsed_sh_script_path;
+        std::unique_ptr<TaskExecutor> executor = nullptr;
 
-        FILE* fptr = fopen(sh_path.c_str(), "w");
-        if (fptr == nullptr) {
-          CRANE_ERROR("Cannot write shell script for batch task #{}",
-                      instance->task.task_id());
+        // Store some meta data in executor for convenience
+        auto meta =
+            TaskMetaInExecutor{.pwd = instance->pwd_entry,
+                               .id = task_id,
+                               .name = instance->task.name(),
+                               .get_user_env = instance->task.get_user_env()};
+
+        // Generate environment variables
+        auto env = TaskExecutor::GetEnvironVarsFromTask(*instance);
+
+        // Prepare arguments
+        // Note: Currently no arguments will be accepted in container.
+        auto args = std::list<std::string>{};
+
+        // Instantiate ProcessInstance/ContainerInstance
+        if (instance->task.container().empty()) {
+          // use ProcessInstance
+          executor = std::make_unique<ProcessInstance>(
+              std::move(meta), instance->task.cwd(), std::move(args),
+              std::move(env));
+        } else if (g_config.CranedContainer.Enable) {
+          // use ContainerInstance
+          executor = std::make_unique<ContainerInstance>(
+              std::move(meta), instance->task.cwd(), instance->task.container(),
+              std::move(env));
+        } else {
+          // not supported by this node
+          CRANE_ERROR("Container support is disabled but requested by task #{}",
+                      task_id);
+          this_->EvActivateTaskStatusChange_(
+              task_id, crane::grpc::TaskStatus::Failed,
+              ExitCode::kExitCodeSpawnExecutorFail,
+              fmt::format(
+                  "Container support is disabled but requested by task #{}",
+                  task_id));
+          return;
+        }
+
+        if (executor == nullptr) {
+          CRANE_ERROR("Failed to create executor for task #{}", task_id);
+          this_->EvActivateTaskStatusChange_(
+              task_id, crane::grpc::TaskStatus::Failed,
+              ExitCode::kExitCodeSpawnExecutorFail,
+              fmt::format("Failed to create executor for task #{}", task_id));
+          return;
+        }
+
+        // Write the script to the file
+        instance->batch_meta.parsed_sh_script_path =
+            executor->WriteBatchScript(instance->task.batch_meta().sh_script());
+        if (instance->batch_meta.parsed_sh_script_path.empty()) {
+          CRANE_ERROR("Cannot write shell script for task #{}", task_id);
           this_->EvActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::Failed,
               ExitCode::kExitCodeFileNotFound,
-              fmt::format("Cannot write shell script for batch task #{}",
-                          task_id));
+              fmt::format("Cannot write shell script for task #{}", task_id));
           return;
         }
-        fputs(instance->task.batch_meta().sh_script().c_str(), fptr);
-        fclose(fptr);
 
-        chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
+        auto batch_meta = BatchMetaInTaskExecutor{
+            .interpreter = instance->task.batch_meta().interpreter(),
+            .parsed_output_file_pattern =
+                instance->task.batch_meta().output_file_pattern(),
+            .parsed_error_file_pattern =
+                instance->task.batch_meta().error_file_pattern(),
+        };
 
-        CraneErr err = CraneErr::kOk;
-        auto process = std::make_unique<ProcessInstance>(
-            sh_path, std::list<std::string>());
+        // Set interpreter, if not specified, use /bin/sh
+        if (batch_meta.interpreter.empty()) batch_meta.interpreter = "/bin/sh";
 
-        /* Perform file name substitutions
-         * %j - Job ID
-         * %u - Username
-         * %x - Job name
-         */
-        process->batch_meta.parsed_output_file_pattern = ParseFilePathPattern_(
-            instance->task.batch_meta().output_file_pattern(),
-            instance->task.cwd(), task_id);
-        absl::StrReplaceAll({{"%j", std::to_string(task_id)},
-                             {"%u", instance->pwd_entry.Username()},
-                             {"%x", instance->task.name()}},
-                            &process->batch_meta.parsed_output_file_pattern);
+        // Parse the result file patterns
+        ParseResultPathPattern_(task_id, instance->task.name(),
+                                instance->task.cwd(), instance->pwd_entry,
+                                batch_meta.parsed_output_file_pattern,
+                                batch_meta.parsed_error_file_pattern);
 
-        // If -e / --error is not defined, leave
-        // batch_meta.parsed_error_file_pattern empty;
-        if (!instance->task.batch_meta().error_file_pattern().empty()) {
-          process->batch_meta.parsed_error_file_pattern = ParseFilePathPattern_(
-              instance->task.batch_meta().error_file_pattern(),
-              instance->task.cwd(), task_id);
-          absl::StrReplaceAll({{"%j", std::to_string(task_id)},
-                               {"%u", instance->pwd_entry.Username()},
-                               {"%x", instance->task.name()}},
-                              &process->batch_meta.parsed_error_file_pattern);
-        }
+        // Set the parsed patterns to batch_meta in executor.
+        executor->SetBatchMeta(std::move(batch_meta));
 
         // auto output_cb = [](std::string&& buf, void* data) {
         //   CRANE_TRACE("Read output from subprocess: {}", buf);
@@ -892,29 +610,29 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         //
         // process->SetOutputCb(std::move(output_cb));
 
-        err = SpawnProcessInInstance_(instance, process.get());
+        // Spawn the process/container
+        CraneErr err = executor->Spawn(instance->cgroup);
 
         if (err == CraneErr::kOk) {
           this_->m_mtx_.Lock();
 
-          // Child process may finish or abort before we put its pid into maps.
-          // However, it doesn't matter because SIGCHLD will be handled after
-          // this function or event ends.
-          // Add indexes from pid to TaskInstance*, ProcessInstance*
-          this_->m_pid_task_map_.emplace(process->GetPid(), instance);
-          this_->m_pid_proc_map_.emplace(process->GetPid(), process.get());
+          // Child process may finish or abort before we put its pid into
+          // maps. However, it doesn't matter because SIGCHLD will be handled
+          // after this function or event ends. Add indexes from pid to
+          // TaskInstance*, TaskExecutor*
+          this_->m_pid_task_map_.emplace(executor->GetPid(), instance);
+          this_->m_pid_exec_map_.emplace(executor->GetPid(), executor.get());
 
           this_->m_mtx_.Unlock();
 
-          // Move the ownership of ProcessInstance into the
-          // TaskInstance.
-          instance->processes.emplace(process->GetPid(), std::move(process));
+          // Move the ownership of TaskExecutor into the TaskInstance.
+          instance->executors.emplace(executor->GetPid(), std::move(executor));
         } else {
           this_->EvActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::Failed,
-              ExitCode::kExitCodeSpawnProcessFail,
+              ExitCode::kExitCodeSpawnExecutorFail,
               fmt::format(
-                  "Cannot spawn a new process inside the instance of task #{}",
+                  "Cannot spawn an executor inside the instance of task #{}",
                   task_id));
         }
       }
@@ -922,29 +640,47 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
   }
 }
 
-std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
-                                               const std::string& cwd,
-                                               task_id_t task_id) {
-  std::string resolved_path_pattern;
+void TaskManager::ParseResultPathPattern_(const task_id_t task_id,
+                                          const std::string& task_name,
+                                          const std::string& cwd,
+                                          const PasswordEntry& pwd,
+                                          std::string& stdout_pattern,
+                                          std::string& stderr_pattern) {
+  // Resolve the path
+  auto path_resolver = [&](std::string& path) {
+    if (path.empty()) {
+      // if not specified, assume cwd.
+      path = fmt::format("{}/", cwd);
+    } else if (path[0] != '/') {
+      // If an absolute path, do nothing.
+      // If a relative path, prepend cwd to the path.
+      path = fmt::format("{}/{}", cwd, path);
+    }
+  };
 
-  if (path_pattern.empty()) {
-    // If file path is not specified, first set it to cwd.
-    resolved_path_pattern = fmt::format("{}/", cwd);
-  } else {
-    if (path_pattern[0] == '/')
-      // If output file path is an absolute path, do nothing.
-      resolved_path_pattern = path_pattern;
-    else
-      // If output file path is a relative path, prepend cwd to the path.
-      resolved_path_pattern = fmt::format("{}/{}", cwd, path_pattern);
-  }
+  // Resolve the pattern
+  // %j - Job ID, %u - Username, %x - Job name
+  auto pattern_filler = [&](std::string& pattern) {
+    absl::StrReplaceAll({{"%j", std::to_string(task_id)},
+                         {"%u", pwd.Username()},
+                         {"%x", task_name}},
+                        &pattern);
+  };
 
-  // Path ends with a directory, append default stdout file name
+  // stdout
+  path_resolver(stdout_pattern);
+  pattern_filler(stdout_pattern);
+  // If ends with a directory, append default stdout file name
   // `Crane-<Job ID>.out` to the path.
-  if (absl::EndsWith(resolved_path_pattern, "/"))
-    resolved_path_pattern += fmt::format("Crane-{}.out", task_id);
+  if (absl::EndsWith(stdout_pattern, "/"))
+    stdout_pattern += fmt::format("Crane-{}.out", task_id);
 
-  return resolved_path_pattern;
+  // stderr, if not defined, leave empty;
+  if (stderr_pattern.empty()) return;
+  path_resolver(stderr_pattern);
+  pattern_filler(stderr_pattern);
+  if (absl::EndsWith(stderr_pattern, "/"))
+    stderr_pattern += fmt::format("Crane-{}.err", task_id);
 }
 
 void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
@@ -961,6 +697,7 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
     if (iter->second->task.type() == crane::grpc::Batch) {
       g_thread_pool->detach_task(
           [p = iter->second->batch_meta.parsed_sh_script_path]() {
+            // FIXME: Refactor this in TaskExecutor's destructor.
             util::os::DeleteFile(p);
           });
     }
@@ -1043,20 +780,27 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
       return;
     }
 
+    // TODO: Add container support
+    // FIXME: Didn't passing executive path
     auto process = std::make_unique<ProcessInstance>(
-        std::move(elem.executive_path), std::move(elem.arguments));
+        TaskMetaInExecutor{
+            .pwd = task_iter->second->pwd_entry,
+            .id = task_iter->second->task.task_id(),
+            .name = task_iter->second->task.name(),
+        },
+        std::move(task_iter->second->task.cwd()), std::move(elem.arguments),
+        TaskExecutor::GetEnvironVarsFromTask(*task_iter->second));
 
     process->SetOutputCb(std::move(elem.output_cb));
     process->SetFinishCb(std::move(elem.finish_cb));
 
     CraneErr err;
-    err =
-        this_->SpawnProcessInInstance_(task_iter->second.get(), process.get());
+    err = process->Spawn(task_iter->second->cgroup);
     elem.err_promise.set_value(err);
 
     if (err != CraneErr::kOk)
       this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Failed,
-                                         ExitCode::kExitCodeSpawnProcessFail,
+                                         ExitCode::kExitCodeSpawnExecutorFail,
                                          std::string(CraneErrStr(err)));
   }
 }
@@ -1132,8 +876,9 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
       CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
 
       // Note if Ctld wants to terminate some tasks that are not running,
-      // it might indicate other nodes allocated to the task might have crashed.
-      // We should mark the task as kind of not runnable by removing its cgroup.
+      // it might indicate other nodes allocated to the task might have
+      // crashed. We should mark the task as kind of not runnable by
+      // removing its cgroup.
       //
       // Considering such a situation:
       // In Task Scheduler of Ctld,
@@ -1148,8 +893,8 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
       // In order to give Ctld kind of feedback without adding complicated
       // synchronizing mechanism in ScheduleThread_(),
       // we just remove the cgroup for such task, Ctld will fail in the
-      // following ExecuteTasks and the task will go to the right place as well
-      // as the completed queue.
+      // following ExecuteTasks and the task will go to the right place as
+      // well as the completed queue.
 
       uid_t uid;
       {
@@ -1158,7 +903,8 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
         if (!vp) return;
 
         CRANE_DEBUG(
-            "Remove cgroup for task #{} for potential crashes of other craned.",
+            "Remove cgroup for task #{} for potential crashes of other "
+            "craned.",
             elem.task_id);
         uid = *vp;
       }
@@ -1176,13 +922,14 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
     int sig = SIGTERM;  // For BatchTask
     if (task_instance->task.type() == crane::grpc::Interactive) sig = SIGHUP;
 
-    if (!task_instance->processes.empty()) {
-      // For an Interactive task with a process running or a Batch task, we just
-      // send a kill signal here.
-      for (auto&& [pid, pr_instance] : task_instance->processes)
-        KillProcessInstance_(pr_instance.get(), sig);
+    if (!task_instance->executors.empty()) {
+      // For an Interactive task with a process running or a Batch task, we
+      // just send a kill signal here.
+      for (auto&& [pid, executor] : task_instance->executors)
+        executor->Kill(sig);
     } else if (task_instance->task.type() == crane::grpc::Interactive) {
-      // For an Interactive task with no process running, it ends immediately.
+      // For an Interactive task with no process running, it ends
+      // immediately.
       this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Completed,
                                          ExitCode::kExitCodeTerminated,
                                          std::nullopt);
@@ -1238,7 +985,8 @@ bool TaskManager::CreateCgroupsAsync(
 bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
   if (!this->m_uid_to_task_ids_map_.Contains(uid)) {
     CRANE_DEBUG(
-        "Trying to release a non-existent cgroup for uid #{}. Ignoring it...",
+        "Trying to release a non-existent cgroup for uid #{}. Ignoring "
+        "it...",
         uid);
     return false;
   }
@@ -1252,16 +1000,17 @@ bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
 
   if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
     CRANE_DEBUG(
-        "Trying to release a non-existent cgroup for task #{}. Ignoring it...",
+        "Trying to release a non-existent cgroup for task #{}. Ignoring "
+        "it...",
         task_id);
 
     return false;
   } else {
-    // The termination of all processes in a cgroup is a time-consuming work.
-    // Therefore, once we are sure that the cgroup for this task exists, we
-    // let gRPC call return and put the termination work into the thread pool
-    // to avoid blocking the event loop of TaskManager.
-    // Kind of async behavior.
+    // The termination of all processes in a cgroup is a time-consuming
+    // work. Therefore, once we are sure that the cgroup for this task
+    // exists, we let gRPC call return and put the termination work into the
+    // thread pool to avoid blocking the event loop of TaskManager. Kind of
+    // async behavior.
 
     // avoid deadlock by Erase at next line
     util::Cgroup* cgroup = this->m_task_id_to_cg_map_[task_id]->release();
@@ -1339,8 +1088,8 @@ void TaskManager::EvCheckTaskStatusCb_(int, short events, void* user_data) {
     }
 
     // If a task id can be found in g_ctld_client, the task has ended.
-    //  Now if CraneCtld check the status of these tasks, there is no need to
-    //  send to TaskStatusChange again. Just cancel them.
+    //  Now if CraneCtld check the status of these tasks, there is no need
+    //  to send to TaskStatusChange again. Just cancel them.
     crane::grpc::TaskStatus status;
     bool exist =
         g_ctld_client->CancelTaskStatusChangeByTaskId(task_id, &status);

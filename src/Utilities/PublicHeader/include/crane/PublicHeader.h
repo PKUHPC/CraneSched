@@ -103,7 +103,7 @@ enum ExitCodeEnum : uint16_t {
   kExitCodePermissionDenied,
   kExitCodeCgroupError,
   kExitCodeFileNotFound,
-  kExitCodeSpawnProcessFail,
+  kExitCodeSpawnExecutorFail,
   kExitCodeExceedTimeLimit,
   kExitCodeCranedDown,
   kExitCodeExecutionError,

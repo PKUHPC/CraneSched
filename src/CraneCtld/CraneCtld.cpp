@@ -181,7 +181,7 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.PriorityConfig.MaxAge = kPriorityDefaultMaxAge;
       if (config["PriorityMaxAge"]) {
-        std::string max_age = config["PriorityMaxAge"].as<std::string>();
+        auto max_age = config["PriorityMaxAge"].as<std::string>();
 
         std::regex pattern_hour_min_sec(R"((\d+):(\d+):(\d+))");
         std::regex pattern_day_hour(R"((\d+)-(\d+))");
@@ -220,7 +220,7 @@ void ParseConfig(int argc, char** argv) {
       }
 
       if (config["PriorityType"]) {
-        std::string priority_type = config["PriorityType"].as<std::string>();
+        auto priority_type = config["PriorityType"].as<std::string>();
         if (priority_type == "priority/multifactor")
           g_config.PriorityConfig.Type = Ctld::Config::Priority::MultiFactor;
         else
@@ -576,7 +576,7 @@ void InitializeCtldGlobalVariables() {
 
   g_craned_keeper->SetCranedIsDownCb([](const CranedId& craned_id) {
     CRANE_TRACE(
-        "CranedNode #{} is down now."
+        "CranedNode #{} is down now. "
         "Remove its resource from the global resource pool.",
         craned_id);
     g_meta_container->CranedDown(craned_id);

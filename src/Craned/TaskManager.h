@@ -31,12 +31,10 @@
 #include <memory>
 #include <uvw.hpp>
 
-#include "CtldClient.h"
+#include "TaskExecutor.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
-#include "protos/Crane.grpc.pb.h"
-#include "protos/Crane.pb.h"
 
 namespace Craned {
 
@@ -45,100 +43,6 @@ class TaskManager;
 struct EvTimerCbArg {
   TaskManager* task_manager;
   task_id_t task_id;
-};
-
-struct BatchMetaInProcessInstance {
-  std::string parsed_output_file_pattern;
-  std::string parsed_error_file_pattern;
-};
-
-class ProcessInstance {
- public:
-  ProcessInstance(std::string exec_path, std::list<std::string> arg_list)
-      : m_executive_path_(std::move(exec_path)),
-        m_arguments_(std::move(arg_list)),
-        m_pid_(0),
-        m_ev_buf_event_(nullptr),
-        m_user_data_(nullptr) {}
-
-  ~ProcessInstance() {
-    if (m_user_data_) {
-      if (m_clean_cb_) {
-        CRANE_TRACE("Clean Callback for pid {} is called.", m_pid_);
-        m_clean_cb_(m_user_data_);
-      } else
-        CRANE_ERROR(
-            "user_data in ProcessInstance is set, but clean_cb is not set!");
-    }
-
-    if (m_ev_buf_event_) bufferevent_free(m_ev_buf_event_);
-  }
-
-  [[nodiscard]] const std::string& GetExecPath() const {
-    return m_executive_path_;
-  }
-  [[nodiscard]] const std::list<std::string>& GetArgList() const {
-    return m_arguments_;
-  }
-
-  void SetPid(pid_t pid) { m_pid_ = pid; }
-  [[nodiscard]] pid_t GetPid() const { return m_pid_; }
-
-  void SetEvBufEvent(struct bufferevent* ev_buf_event) {
-    m_ev_buf_event_ = ev_buf_event;
-  }
-
-  void SetOutputCb(std::function<void(std::string&&, void*)> cb) {
-    m_output_cb_ = std::move(cb);
-  }
-
-  void SetFinishCb(std::function<void(bool, int, void*)> cb) {
-    m_finish_cb_ = std::move(cb);
-  }
-
-  void Output(std::string&& buf) {
-    if (m_output_cb_) m_output_cb_(std::move(buf), m_user_data_);
-  }
-
-  void Finish(bool is_killed, int val) {
-    if (m_finish_cb_) m_finish_cb_(is_killed, val, m_user_data_);
-  }
-
-  void SetUserDataAndCleanCb(void* data, std::function<void(void*)> cb) {
-    m_user_data_ = data;
-    m_clean_cb_ = std::move(cb);
-  }
-
-  BatchMetaInProcessInstance batch_meta;
-
- private:
-  /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
-  pid_t m_pid_;
-
-  // The underlying event that handles the output of the task.
-  struct bufferevent* m_ev_buf_event_;
-
-  /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
-  std::string m_executive_path_;
-  std::list<std::string> m_arguments_;
-
-  /***
-   * The callback function called when a task writes to stdout or stderr.
-   * @param[in] buf a slice of output buffer.
-   */
-  std::function<void(std::string&& buf, void*)> m_output_cb_;
-
-  /***
-   * The callback function called when a task is finished.
-   * @param[in] bool true if the task is terminated by a signal, false
-   * otherwise.
-   * @param[in] int the number of signal if bool is true, the return value
-   * otherwise.
-   */
-  std::function<void(bool, int, void*)> m_finish_cb_;
-
-  void* m_user_data_;
-  std::function<void(void*)> m_clean_cb_;
 };
 
 struct BatchMetaInTaskInstance {
@@ -171,7 +75,7 @@ struct TaskInstance {
   util::Cgroup* cgroup;
   struct event* termination_timer{nullptr};
 
-  absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
+  absl::flat_hash_map<pid_t, std::unique_ptr<TaskExecutor>> executors;
 };
 
 /**
@@ -227,18 +131,8 @@ class TaskManager {
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
-  struct SigchldInfo {
-    pid_t pid;
-    bool is_terminated_by_signal;
-    int value;
-  };
-
-  struct savedPrivilege {
-    uid_t uid;
-    gid_t gid;
-  };
-
   struct EvQueueGrpcInteractiveTask {
+    // TODO: Add support for container
     std::promise<CraneErr> err_promise;
     uint32_t task_id;
     std::string executive_path;
@@ -274,25 +168,17 @@ class TaskManager {
 
   static std::string CgroupStrByTaskId_(task_id_t task_id);
 
-  static std::string ParseFilePathPattern_(const std::string& path_pattern,
-                                           const std::string& cwd,
-                                           task_id_t task_id);
-
-  /**
-   * EvActivateTaskStatusChange_ must NOT be called in this method and should be
-   *  called in the caller method after checking the return value of this
-   *  method.
-   * @return kSystemErr if the socket pair between the parent process and child
-   *  process cannot be created, and the caller should call strerror() to check
-   *  the unix error code. kLibEventError if bufferevent_socket_new() fails.
-   *  kCgroupError if CgroupManager cannot move the process to the cgroup bound
-   *  to the TaskInstance. kProtobufError if the communication between the
-   *  parent and the child process fails.
-   */
-  static CraneErr SpawnProcessInInstance_(TaskInstance* instance,
-                                          ProcessInstance* process);
+  static void ParseResultPathPattern_(const task_id_t task_id,
+                                      const std::string& task_name,
+                                      const std::string& cwd,
+                                      const PasswordEntry& pwd,
+                                      std::string& stdout_pattern,
+                                      std::string& stderr_pattern);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
+
+  [[deprecated]] CraneErr SpawnProcessInInstance_(TaskInstance* instance,
+                                                  ProcessInstance* process);
 
   // Ask TaskManager to stop its event loop.
   void EvActivateShutdown_();
@@ -357,19 +243,6 @@ class TaskManager {
     instance->termination_timer = nullptr;
   }
 
-  /**
-   * Send a signal to the process group to which the processes in
-   *  ProcessInstance belongs.
-   * This function ASSUMES that ALL processes belongs to the process group with
-   *  the PGID set to the PID of the first process in this ProcessInstance.
-   * @param signum the value of signal.
-   * @return if the signal is sent successfully, kOk is returned.
-   * if the task name doesn't exist, kNonExistent is returned.
-   * if the signal is invalid, kInvalidParam is returned.
-   * otherwise, kGenericFailure is returned.
-   */
-  static CraneErr KillProcessInstance_(const ProcessInstance* proc, int signum);
-
   // Note: the three maps below are NOT protected by any mutex.
   //  They should be modified in libev callbacks to avoid races.
 
@@ -392,7 +265,7 @@ class TaskManager {
   // A TaskInstance may contain more than one ProcessInstance.
   absl::flat_hash_map<uint32_t /*pid*/, TaskInstance*> m_pid_task_map_
       GUARDED_BY(m_mtx_);
-  absl::flat_hash_map<uint32_t /*pid*/, ProcessInstance*> m_pid_proc_map_
+  absl::flat_hash_map<uint32_t /*pid*/, TaskExecutor*> m_pid_exec_map_
       GUARDED_BY(m_mtx_);
 
   absl::Mutex m_mtx_;

@@ -63,6 +63,15 @@ struct Config {
     std::string UnixSocketListenAddr;
   };
 
+  struct CranedContainerConf {
+    bool Enable{false};
+    std::string TempDir;
+    std::string RunTimeState;
+    std::string RuntimeKill;
+    std::string RuntimeDelete;
+    std::string RuntimeRun;
+  };
+
   CranedListenConf ListenConf;
   bool CompressedRpc{};
 
@@ -77,6 +86,8 @@ struct Config {
   std::string CranedUnixSockPath;
 
   bool CranedForeground{};
+
+  CranedContainerConf CranedContainer;
 
   std::string Hostname;
   CranedId CranedIdOfThisNode;

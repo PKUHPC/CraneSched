@@ -95,6 +95,8 @@ message TaskToCtld {
     InteractiveTaskAdditionalMeta interactive_meta = 22;
   }
 
+  string container = 25;
+
   string cmd_line = 31;
   string cwd = 32; // Current working directory
   map<string, string> env = 33;
@@ -164,10 +166,12 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
+  string container = 25;
 }
 
 message BatchTaskAdditionalMeta {
   string sh_script = 1;
+  string interpreter = 2;
   string output_file_pattern = 3;
   string error_file_pattern = 4;
 }
@@ -195,6 +199,8 @@ message TaskInfo {
   string cwd = 14;
   string username = 15;
   string qos = 16;
+
+  string container = 25;
 
   // Dynamic task information
   TaskStatus status = 31;
