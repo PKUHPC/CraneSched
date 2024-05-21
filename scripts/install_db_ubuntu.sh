@@ -72,12 +72,10 @@ echo "$commands" | mongosh || error_exit "failed to execute mongosh"
 
 echo "configure mongod.."
 config2="
-#开启权限验证
 security:
   authorization: enabled
   keyFile: $mongo_path/mongo.key
 replication:
-  #副本集名称,crane的配置文件要与此一致
   replSetName: crane_rs
 "
 echo "$config2" >> /etc/mongod.conf
