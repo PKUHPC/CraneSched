@@ -16,6 +16,8 @@
 
 #include "CranedMetaContainer.h"
 
+#include "DbClient.h"
+
 namespace Ctld {
 
 void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
@@ -430,7 +432,6 @@ crane::grpc::QueryClusterInfoReply
 CranedMetaContainerSimpleImpl::QueryClusterInfo(
     const crane::grpc::QueryClusterInfoRequest& request) {
   crane::grpc::QueryClusterInfoReply reply;
-  auto* partition_list = reply.mutable_partitions();
 
   std::unordered_set<std::string> filter_partitions_set(
       request.filter_partitions().begin(), request.filter_partitions().end());
@@ -454,7 +455,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   };
 
   bool filter_idle = false, filter_alloc = false, filter_mix = false,
-       filter_down = false;
+       filter_down = false, filter_drain = false;
 
   if (request.filter_craned_states().empty()) return reply;
   for (const auto& it : request.filter_craned_states()) {
@@ -471,6 +472,8 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       case crane::grpc::CranedState::CRANE_DOWN:
         filter_down = true;
         break;
+      case crane::grpc::CranedState::CRANE_DRAIN:
+        filter_drain = true;
       default:
         break;
     }
@@ -481,6 +484,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   auto partition_map = partition_metas_map_.GetMapConstSharedPtr();
   auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
 
+  auto* partition_list = reply.mutable_partitions();
   auto partition_rng =
       *partition_map | ranges::views::filter(partition_rng_filter_name);
   ranges::for_each(partition_rng, [&](auto& it) {
@@ -518,14 +522,16 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
     auto* mix_craned_list = craned_lists->Add();
     auto* alloc_craned_list = craned_lists->Add();
     auto* down_craned_list = craned_lists->Add();
+    auto* drain_craned_list = craned_lists->Add();
 
     idle_craned_list->set_state(crane::grpc::CranedState::CRANE_IDLE);
     mix_craned_list->set_state(crane::grpc::CranedState::CRANE_MIX);
     alloc_craned_list->set_state(crane::grpc::CranedState::CRANE_ALLOC);
     down_craned_list->set_state(crane::grpc::CranedState::CRANE_DOWN);
+    drain_craned_list->set_state(crane::grpc::CranedState::CRANE_DRAIN);
 
     std::list<std::string> idle_craned_name_list, mix_craned_name_list,
-        alloc_craned_name_list, down_craned_name_list;
+        alloc_craned_name_list, down_craned_name_list, drain_craned_name_list;
 
     auto craned_rng =
         craned_ids |
@@ -540,7 +546,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       auto& res_total = craned_meta->res_total.allocatable_resource;
       auto& res_in_use = craned_meta->res_in_use.allocatable_resource;
       auto& res_avail = craned_meta->res_avail.allocatable_resource;
-      if (craned_meta->alive) {
+      if (craned_meta->alive && !craned_meta->drain) {
         if (filter_idle && res_in_use.cpu_count == cpu_t(0) &&
             res_in_use.memory_bytes == 0) {
           idle_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
@@ -554,6 +560,10 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
           mix_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
           mix_craned_list->set_count(mix_craned_name_list.size());
         }
+      } else if (craned_meta->alive && craned_meta->drain) {
+        drain_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
+        drain_craned_list->set_count(drain_craned_name_list.size());
+        drain_craned_list->set_reason(craned_meta->drain_reason);
       } else if (filter_down) {
         down_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
         down_craned_list->set_count(down_craned_name_list.size());
@@ -568,9 +578,80 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
         util::HostNameListToStr(alloc_craned_name_list));
     down_craned_list->set_craned_list_regex(
         util::HostNameListToStr(down_craned_name_list));
+    drain_craned_list->set_craned_list_regex(
+        util::HostNameListToStr(drain_craned_name_list));
   });
 
   return reply;
 }
 
+crane::grpc::ModifyCranedStateReply
+CranedMetaContainerSimpleImpl::ChangeNodeState(
+    const crane::grpc::ModifyCranedStateRequest& request) {
+  crane::grpc::ModifyCranedStateReply reply;
+
+  auto craned_meta_map = craned_meta_map_.GetMapSharedPtr();
+  auto craned_itr = craned_meta_map->find(request.craned_id());
+  if (craned_itr == craned_meta_map->end()) {
+    reply.set_ok(false);
+    reply.set_reason("Invalid node name specified.");
+    return reply;
+  }
+  auto craned_meta_ptr(craned_itr->second.GetExclusivePtr());
+
+  if (request.new_state() == crane::grpc::CranedState::CRANE_DRAIN) {
+    craned_meta_ptr->drain = true;
+    craned_meta_ptr->drain_reason = request.reason();
+    NodeEvent* event = new NodeEvent;
+    event->state = crane::grpc::CranedState::CRANE_DRAIN;
+    event->node_name = request.craned_id();
+    event->time_start = absl::Now();
+    event->reason = request.reason();
+    event->uid = request.uid();
+    event->time_end = absl::FromUnixSeconds(0);
+    auto craned_event_map = craned_event_map_.GetMapSharedPtr();
+    craned_event_map->emplace(request.craned_id(), *event);
+  } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE &&
+             craned_meta_ptr->drain == true) {
+    auto event_meta = *craned_event_map_[request.craned_id()];
+    event_meta.time_end = absl::Now();
+    g_db_client->InsertNodeEvent(&event_meta);
+    craned_event_map_.Erase(request.craned_id());
+    craned_meta_ptr->drain = false;
+    craned_meta_ptr->drain_reason = "";
+  }
+
+  reply.set_ok(true);
+  return reply;
+}
+
+crane::grpc::QueryEntityInfoReply
+CranedMetaContainerSimpleImpl::QueryEventsInRam() {
+  crane::grpc::QueryEntityInfoReply response;
+  auto* event_list = response.mutable_event_list();
+  auto event_map = craned_event_map_.GetMapSharedPtr();
+  for (auto it = event_map->begin(); it != event_map->end(); ++it) {
+    auto* event_it = event_list->Add();
+    event_it->set_reason(it->second.RawPtr()->reason);
+    event_it->set_state(it->second.RawPtr()->state);
+    event_it->set_node_name(it->first);
+    event_it->set_uid(it->second.RawPtr()->uid);
+    auto* start_time = new ::google::protobuf::Timestamp();
+    auto start_seconds = absl::ToUnixSeconds(it->second.RawPtr()->time_start);
+    auto start_nanos =
+        (absl::ToUnixNanos(it->second.RawPtr()->time_start) % 1000000000);
+    start_time->set_seconds(start_seconds);
+    start_time->set_nanos(start_nanos);
+    event_it->set_allocated_start_time(start_time);
+    auto* end_time = new ::google::protobuf::Timestamp();
+    auto end_seconds = absl::ToUnixSeconds(it->second.RawPtr()->time_end);
+    auto end_nanos =
+        (absl::ToUnixNanos(it->second.RawPtr()->time_end) % 1000000000);
+    end_time->set_seconds(end_seconds);
+    end_time->set_nanos(end_nanos);
+    event_it->set_allocated_end_time(end_time);
+  }
+  response.set_ok(true);
+  return response;
+}
 }  // namespace Ctld

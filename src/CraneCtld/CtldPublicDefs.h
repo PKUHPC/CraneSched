@@ -167,6 +167,8 @@ struct CranedMeta {
   // just for convenience.
   Resources res_avail;
   Resources res_in_use;
+  bool drain{false};
+  std::string drain_reason;
 
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
@@ -224,6 +226,16 @@ struct BatchMetaInTask {
   std::string sh_script;
   std::string output_file_pattern;
   std::string error_file_pattern;
+};
+
+struct NodeEvent {
+  absl::Time time_start;
+  absl::Time time_end;
+  std::string node_name;
+  // std::string cluster_name; only set in a cluster event
+  std::string reason;
+  crane::grpc::CranedState state;
+  uid_t uid;
 };
 
 struct TaskInCtld {

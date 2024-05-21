@@ -278,6 +278,18 @@ message ModifyTaskReply {
   string reason = 2;
 }
 
+message ModifyCranedStateRequest{
+  string craned_id = 1;
+  CranedState new_state = 2;
+  string reason = 3;
+  uint32 uid = 4;
+}
+
+message ModifyCranedStateReply{
+  bool ok = 1;
+  string reason = 2;
+}
+
 message AddAccountRequest {
   uint32 uid = 1;
   AccountInfo account = 2;
@@ -357,6 +369,7 @@ message QueryEntityInfoReply {
   repeated UserInfo user_list = 3;
   repeated AccountInfo account_list = 4;
   repeated QosInfo qos_list = 5;
+  repeated EventInfo event_list = 6;
 }
 
 message BlockAccountOrUserRequest {
@@ -587,6 +600,7 @@ service CraneCtld {
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
+  rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);

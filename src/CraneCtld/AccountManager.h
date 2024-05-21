@@ -38,6 +38,10 @@ class AccountManager {
   using QosMutexSharedPtr = util::ScopeConstSharedPtr<Qos, util::rw_mutex>;
   using QosMapMutexSharedPtr = util::ScopeConstSharedPtr<
       std::unordered_map<std::string, std::unique_ptr<Qos>>, util::rw_mutex>;
+  using EventMutexSharedPtr =
+      util::ScopeConstSharedPtr<NodeEvent, util::rw_mutex>;
+  using EventMapMutexSharedPtr = util::ScopeConstSharedPtr<
+      std::unordered_map<std::string, std::unique_ptr<Qos>>, util::rw_mutex>;
 
   struct Result {
     bool ok{false};

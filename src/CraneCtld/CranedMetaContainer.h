@@ -54,6 +54,10 @@ class CranedMetaContainerInterface {
       util::AtomicHashMap<HashMap, CranedId, CranedMeta>;
   using CranedMetaRawMap = CranedMetaAtomicMap::RawMap;
 
+  using CranedEventAtomicMap =
+      util::AtomicHashMap<HashMap, CranedId, NodeEvent>;
+  using CranedEventRawMap = CranedEventAtomicMap::RawMap;
+
   using AllPartitionsMetaMapConstPtr =
       util::ScopeConstSharedPtr<AllPartitionsMetaRawMap, util::rw_mutex>;
   using CranedMetaMapConstPtr =
@@ -90,6 +94,11 @@ class CranedMetaContainerInterface {
 
   virtual crane::grpc::QueryClusterInfoReply QueryClusterInfo(
       const crane::grpc::QueryClusterInfoRequest& request) = 0;
+
+  virtual crane::grpc::ModifyCranedStateReply ChangeNodeState(
+      const crane::grpc::ModifyCranedStateRequest& request) = 0;
+
+  virtual crane::grpc::QueryEntityInfoReply QueryEventsInRam() = 0;
 
   virtual void MallocResourceFromNode(CranedId node_id, uint32_t task_id,
                                       const Resources& resources) = 0;
@@ -132,6 +141,11 @@ class CranedMetaContainerSimpleImpl final
   crane::grpc::QueryClusterInfoReply QueryClusterInfo(
       const crane::grpc::QueryClusterInfoRequest& request) override;
 
+  crane::grpc::ModifyCranedStateReply ChangeNodeState(
+      const crane::grpc::ModifyCranedStateRequest& request) override;
+
+  crane::grpc::QueryEntityInfoReply QueryEventsInRam() override;
+
   void CranedUp(const CranedId& craned_id) override;
 
   void CranedDown(const CranedId& craned_id) override;
@@ -164,6 +178,7 @@ class CranedMetaContainerSimpleImpl final
   // 4. unlock elements in partition_metas_map_
   CranedMetaAtomicMap craned_meta_map_;
   AllPartitionsMetaAtomicMap partition_metas_map_;
+  CranedEventAtomicMap craned_event_map_;
 
   // A craned node may belong to multiple partitions.
   // Use this map as a READ-ONLY index, so multi-thread reading is ok.

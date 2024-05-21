@@ -180,6 +180,15 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::ModifyNode(
+    grpc::ServerContext *context,
+    const crane::grpc::ModifyCranedStateRequest *request,
+    crane::grpc::ModifyCranedStateReply *response) {
+  *response = g_meta_container->ChangeNodeState(*request);
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryTasksInfoRequest *request,
@@ -847,8 +856,25 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           response->set_ok(false);
         }
       }
-    default:
-      break;
+    case crane::grpc::Event:
+      *response = g_meta_container->QueryEventsInRam();
+      std::list<NodeEvent> event_list;
+      g_db_client->SelectAllEvents(&event_list);
+      for (auto &event : event_list) {
+        auto event_info = response->mutable_event_list()->Add();
+        event_info->set_uid(event.uid);
+        event_info->set_state(event.state);
+        event_info->set_reason(event.reason);
+        event_info->set_node_name(event.node_name);
+        event_info->mutable_start_time()->set_seconds(
+            absl::ToUnixSeconds(event.time_start));
+        event_info->mutable_start_time()->set_nanos(
+            absl::ToUnixSeconds(event.time_start) % 1000000000);
+        event_info->mutable_end_time()->set_seconds(
+            absl::ToUnixSeconds(event.time_end));
+        event_info->mutable_end_time()->set_nanos(
+            absl::ToUnixSeconds(event.time_end) % 1000000000);
+      }
   }
   return grpc::Status::OK;
 }

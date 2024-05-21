@@ -247,6 +247,18 @@ bool MongodbClient::CheckTaskDbIdExisted(int64_t task_db_id) {
   return false;
 }
 
+bool MongodbClient::InsertNodeEvent(NodeEvent* event) {
+  document doc = EventToDocument_(event);
+  bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
+      (*GetClient_())[m_db_name_][m_event_collection_name_].insert_one(
+          *GetSession_(), doc.view());
+
+  if (ret != bsoncxx::stdx::nullopt) return true;
+
+  PrintError_("Failed to insert in-memory NodeEvent.");
+  return false;
+}
+
 bool MongodbClient::InsertUser(const Ctld::User& new_user) {
   document doc = UserToDocument_(new_user);
   doc.append(kvp("creation_time", ToUnixSeconds(absl::Now())));
@@ -358,6 +370,16 @@ void MongodbClient::SelectAllQos(std::list<Ctld::Qos>* qos_list) {
     Ctld::Qos qos;
     ViewToQos_(view, &qos);
     qos_list->emplace_back(qos);
+  }
+}
+
+void MongodbClient::SelectAllEvents(std::list<Ctld::NodeEvent>* event_list) {
+  mongocxx::cursor cursor =
+      (*GetClient_())[m_db_name_][m_event_collection_name_].find({});
+  for (auto view : cursor) {
+    Ctld::NodeEvent event;
+    ViewToEvent_(view, &event);
+    event_list->emplace_back(event);
   }
 }
 
@@ -655,6 +677,23 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
   }
 }
 
+void MongodbClient::ViewToEvent_(const bsoncxx::document::view& event_view,
+                                 Ctld::NodeEvent* event) {
+  try {
+    event->time_start =
+        absl::FromUnixSeconds(event_view["time_start"].get_int64().value);
+    event->time_end =
+        absl::FromUnixSeconds(event_view["time_end"].get_int64().value);
+    event->reason = event_view["reason"].get_string().value;
+    event->state = static_cast<crane::grpc::CranedState>(
+        event_view["state"].get_int32().value);
+    event->node_name = event_view["node_name"].get_string().value;
+    event->uid = event_view["uid"].get_int64().value;
+  } catch (const bsoncxx::exception& e) {
+    PrintError_(e.what());
+  }
+}
+
 bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
     const Ctld::Qos& qos) {
   std::array<std::string, 8> fields{
@@ -808,6 +847,26 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
           task->cmd_line, task->ExitCode(), task->Username(), task->qos,
           task->get_user_env};
 
+  return DocumentConstructor_(fields, values);
+}
+
+MongodbClient::document MongodbClient::EventToDocument_(NodeEvent* event) {
+  std::array<std::string, 6> fields{"time_start", "time_end", "node_name",
+                                    "reason",     "state",    "uid"};
+  std::tuple<int64_t, int64_t, std::string, std::string, int32_t, int32_t>
+      values(absl::ToUnixSeconds(event->time_start),
+             absl::ToUnixSeconds(event->time_end), event->node_name,
+             event->reason, event->state, static_cast<int32_t>(event->uid));
+  return DocumentConstructor_(fields, values);
+}
+
+MongodbClient::document MongodbClient::EventToDocument_(NodeEvent* event) {
+  std::array<std::string, 6> fields{"time_start", "time_end", "node_name",
+                                    "reason",     "state",    "uid"};
+  std::tuple<int64_t, int64_t, std::string, std::string, int32_t, int32_t>
+      values(absl::ToUnixSeconds(event->time_start),
+             absl::ToUnixSeconds(event->time_end), event->node_name,
+             event->reason, event->state, static_cast<int32_t>(event->uid));
   return DocumentConstructor_(fields, values);
 }
 

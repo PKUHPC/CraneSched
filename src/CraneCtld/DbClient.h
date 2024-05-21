@@ -60,6 +60,9 @@ class MongodbClient {
 
   bool CheckTaskDbIdExisted(int64_t task_db_id);
 
+  /* ----- Method of operating the node event table ----------- */
+  bool InsertNodeEvent(NodeEvent* event);
+
   /* ----- Method of operating the account table ----------- */
   bool InsertUser(const User& new_user);
   bool InsertAccount(const Account& new_account);
@@ -105,6 +108,7 @@ class MongodbClient {
   void SelectAllUser(std::list<User>* user_list);
   void SelectAllAccount(std::list<Account>* account_list);
   void SelectAllQos(std::list<Qos>* qos_list);
+  void SelectAllEvents(std::list<Ctld::NodeEvent>* event_list);
 
   template <typename T>
   void SubDocumentAppendItem_(sub_document& doc, const std::string& key,
@@ -211,10 +215,13 @@ class MongodbClient {
   document AccountToDocument_(const Account& account);
 
   void ViewToQos_(const bsoncxx::document::view& qos_view, Qos* qos);
+  void ViewToEvent_(const bsoncxx::document::view& event_view,
+                    Ctld::NodeEvent* event);
 
   document QosToDocument_(const Qos& qos);
 
   document TaskInCtldToDocument_(TaskInCtld* task);
+  document EventToDocument_(NodeEvent* event);
   document TaskInEmbeddedDbToDocument_(
       crane::grpc::TaskInEmbeddedDb const& task);
 
@@ -223,6 +230,7 @@ class MongodbClient {
   const std::string m_account_collection_name_{"acct_table"};
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};
+  const std::string m_event_collection_name_{"event_table"};
 
   std::unique_ptr<mongocxx::instance> m_instance_;
   std::unique_ptr<mongocxx::pool> m_connect_pool_;
