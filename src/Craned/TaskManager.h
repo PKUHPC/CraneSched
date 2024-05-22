@@ -171,6 +171,8 @@ struct TaskInstance {
   util::Cgroup* cgroup;
   struct event* termination_timer{nullptr};
 
+  CraneErr err_before_exec{CraneErr::kOk};
+
   absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
 };
 

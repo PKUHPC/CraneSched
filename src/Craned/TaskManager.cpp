@@ -267,6 +267,24 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
               // If the ProcessInstance has no process left and the task was not
               // marked as an orphaned task, send TaskStatusChange for this
               // task. See the comment of EvActivateTaskStatusChange_.
+
+              switch (instance->err_before_exec) {
+                case CraneErr::kProtobufError:
+                  this_->EvActivateTaskStatusChange_(
+                      task_id, crane::grpc::TaskStatus::Cancelled,
+                      ExitCode::kExitCodeSpawnProcessFail, std::nullopt);
+                  break;
+
+                case CraneErr::kCgroupError:
+                  this_->EvActivateTaskStatusChange_(
+                      task_id, crane::grpc::TaskStatus::Cancelled,
+                      ExitCode::kExitCodeCgroupError, std::nullopt);
+                  break;
+
+                default:
+                  break;
+              }
+
               if (instance->task.type() == crane::grpc::Batch) {
                 // For a Batch task, the end of the process means it is done.
                 if (sigchld_info.is_terminated_by_signal) {
@@ -514,7 +532,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     close(socket_pair[1]);
     int fd = socket_pair[0];
     bool ok;
-    CraneErr err;
 
     setegid(saved_priv.gid);
     seteuid(saved_priv.uid);
@@ -549,7 +566,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
           "migration.",
           instance->task.task_id());
 
-      err = CraneErr::kCgroupError;
+      instance->err_before_exec = CraneErr::kCgroupError;
       goto AskChildToSuicide;
     }
 
@@ -565,6 +582,14 @@ CraneErr TaskManager::SpawnProcessInInstance_(
       CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}",
                   child_pid, instance->task.task_id());
       close(fd);
+
+      // Communication failure caused by process crash or grpc error.
+      // Since now the parent cannot ask the child
+      // process to commit suicide, return here, trigger a manual
+      // TaskStatusChange, and reap the child process when releasing its cgroup.
+      // Note: if process dies due to crash, a double TaskStatusChange might be
+      // triggered!
+      instance->err_before_exec = CraneErr::kProtobufError;
       return CraneErr::kProtobufError;
     }
 
@@ -573,6 +598,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(
       CRANE_ERROR("Failed to read protobuf from subprocess {} of task #{}",
                   child_pid, instance->task.task_id());
       close(fd);
+
+      // See comments above.
+      instance->err_before_exec = CraneErr::kProtobufError;
       return CraneErr::kProtobufError;
     }
 
@@ -587,9 +615,17 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     if (!ok) {
       CRANE_ERROR("Failed to ask subprocess {} to suicide for task #{}",
                   child_pid, instance->task.task_id());
+
+      // See comments above.
+      instance->err_before_exec = CraneErr::kProtobufError;
       return CraneErr::kProtobufError;
     }
-    return err;
+
+    // See comments above.
+    // As long as fork() is done and the grpc channel to the child process is
+    // healthy, we should return kOk, not trigger a manual TaskStatusChange, and
+    // reap the child process by SIGCHLD after it commits suicide.
+    return CraneErr::kOk;
   } else {  // Child proc
     const std::string& cwd = instance->task.cwd();
     rc = chdir(cwd.c_str());
@@ -976,8 +1012,13 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
   TaskStatusChange status_change;
   while (this_->m_task_status_change_queue_.try_dequeue(status_change)) {
     auto iter = this_->m_task_map_.find(status_change.task_id);
-    CRANE_ASSERT_MSG(iter != this_->m_task_map_.end(),
-                     "Task should be found here.");
+    if (iter == this_->m_task_map_.end()) {
+      // When Ctrl+C is pressed for Craned, all tasks including just forked
+      // tasks will be terminated.
+      // In some error cases, a double TaskStatusChange might be triggered.
+      // Just ignore it. See comments in SpawnProcessInInstance_().
+      continue;
+    }
 
     // Clean task scripts.
     if (iter->second->task.type() == crane::grpc::Batch) {
