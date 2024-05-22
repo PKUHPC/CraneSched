@@ -267,6 +267,24 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
               // If the ProcessInstance has no process left and the task was not
               // marked as an orphaned task, send TaskStatusChange for this
               // task. See the comment of EvActivateTaskStatusChange_.
+
+              switch (instance->err_before_exec) {
+                case CraneErr::kProtobufError:
+                  this_->EvActivateTaskStatusChange_(
+                      task_id, crane::grpc::TaskStatus::Cancelled,
+                      ExitCode::kExitCodeSpawnProcessFail, std::nullopt);
+                  break;
+
+                case CraneErr::kCgroupError:
+                  this_->EvActivateTaskStatusChange_(
+                      task_id, crane::grpc::TaskStatus::Cancelled,
+                      ExitCode::kExitCodeCgroupError, std::nullopt);
+                  break;
+
+                default:
+                  break;
+              }
+
               if (instance->task.type() == crane::grpc::Batch) {
                 // For a Batch task, the end of the process means it is done.
                 if (sigchld_info.is_terminated_by_signal) {
@@ -447,8 +465,8 @@ void TaskManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
 
-CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
-                                              ProcessInstance* process) {
+CraneErr TaskManager::SpawnProcessInInstance_(
+    TaskInstance* instance, std::unique_ptr<ProcessInstance> process) {
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -481,11 +499,39 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   }
 
   pid_t child_pid = fork();
+  if (child_pid == -1) {
+    CRANE_ERROR("fork() failed for task #{}: {}", instance->task.task_id(),
+                strerror(errno));
+    return CraneErr::kSystemErr;
+  }
+
   if (child_pid > 0) {  // Parent proc
+    process->SetPid(child_pid);
+    CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
+                instance->task.task_id(), child_pid);
+
+    // Note that the following code will move the child process into cgroup.
+    // Once the child process is moved into cgroup, it might be killed due to
+    // memory limitation.
+    // Since the task status change is triggered by SIGCHLD,
+    // we should put the child pid into the index map IMMEDIATELY when fork() is
+    // done.
+    // Otherwise, SIGCHLD handler will not find the pid if the child process
+    // stops really fast, for example, due to being killed by oom killer.
+    // In such case, the task status change for this quickly dying job will not
+    // be triggered, and it will cause infinitely running jobs which are
+    // actually dead.
+    m_mtx_.Lock();
+    m_pid_task_map_.emplace(child_pid, instance);
+    m_pid_proc_map_.emplace(child_pid, process.get());
+    m_mtx_.Unlock();
+
+    // Move the ownership of ProcessInstance into the TaskInstance.
+    instance->processes.emplace(child_pid, std::move(process));
+
     close(socket_pair[1]);
     int fd = socket_pair[0];
     bool ok;
-    CraneErr err;
 
     setegid(saved_priv.gid);
     seteuid(saved_priv.uid);
@@ -495,11 +541,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     FileOutputStream ostream(fd);
     CanStartMessage msg;
     ChildProcessReady child_process_ready;
-
-    CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
-                instance->task.task_id(), child_pid);
-
-    process->SetPid(child_pid);
 
     // Add event for stdout/stderr of the new subprocess
     // struct bufferevent* ev_buf_event;
@@ -519,13 +560,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // process->SetEvBufEvent(ev_buf_event);
 
     // Migrate the new subprocess to newly created cgroup
-    if (!instance->cgroup->MigrateProcIn(process->GetPid())) {
+    if (!instance->cgroup->MigrateProcIn(child_pid)) {
       CRANE_ERROR(
           "Terminate the subprocess of task #{} due to failure of cgroup "
           "migration.",
           instance->task.task_id());
 
-      err = CraneErr::kCgroupError;
+      instance->err_before_exec = CraneErr::kCgroupError;
       goto AskChildToSuicide;
     }
 
@@ -541,6 +582,14 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}",
                   child_pid, instance->task.task_id());
       close(fd);
+
+      // Communication failure caused by process crash or grpc error.
+      // Since now the parent cannot ask the child
+      // process to commit suicide, return here, trigger a manual
+      // TaskStatusChange, and reap the child process when releasing its cgroup.
+      // Note: if process dies due to crash, a double TaskStatusChange might be
+      // triggered!
+      instance->err_before_exec = CraneErr::kProtobufError;
       return CraneErr::kProtobufError;
     }
 
@@ -549,6 +598,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       CRANE_ERROR("Failed to read protobuf from subprocess {} of task #{}",
                   child_pid, instance->task.task_id());
       close(fd);
+
+      // See comments above.
+      instance->err_before_exec = CraneErr::kProtobufError;
       return CraneErr::kProtobufError;
     }
 
@@ -563,9 +615,17 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     if (!ok) {
       CRANE_ERROR("Failed to ask subprocess {} to suicide for task #{}",
                   child_pid, instance->task.task_id());
+
+      // See comments above.
+      instance->err_before_exec = CraneErr::kProtobufError;
       return CraneErr::kProtobufError;
     }
-    return err;
+
+    // See comments above.
+    // As long as fork() is done and the grpc channel to the child process is
+    // healthy, we should return kOk, not trigger a manual TaskStatusChange, and
+    // reap the child process by SIGCHLD after it commits suicide.
+    return CraneErr::kOk;
   } else {  // Child proc
     const std::string& cwd = instance->task.cwd();
     rc = chdir(cwd.c_str());
@@ -822,6 +882,15 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       bool ok = AllocatableResourceAllocator::Allocate(
           instance->task.resources().allocatable_resource(), instance->cgroup);
 
+      CRANE_TRACE(
+          "Setting cgroup limit of task #{}. CPU: {:.2f}, Mem: {:.2f} MB.",
+          instance->task.task_id(),
+          instance->task.resources().allocatable_resource().cpu_core_limit(),
+          instance->task.resources()
+                  .allocatable_resource()
+                  .memory_limit_bytes() /
+              (1024.0 * 1024.0));
+
       if (!ok) {
         CRANE_ERROR(
             "Failed to allocate allocatable resource in cgroup for task #{}",
@@ -892,24 +961,13 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         //
         // process->SetOutputCb(std::move(output_cb));
 
-        err = SpawnProcessInInstance_(instance, process.get());
+        // err will NOT be kOk ONLY if fork() is not called due to some failure
+        // or fork() fails.
+        // In this case, SIGCHLD will NOT be received for this task, and
+        // we should send TaskStatusChange manually.
+        err = this_->SpawnProcessInInstance_(instance, std::move(process));
 
-        if (err == CraneErr::kOk) {
-          this_->m_mtx_.Lock();
-
-          // Child process may finish or abort before we put its pid into maps.
-          // However, it doesn't matter because SIGCHLD will be handled after
-          // this function or event ends.
-          // Add indexes from pid to TaskInstance*, ProcessInstance*
-          this_->m_pid_task_map_.emplace(process->GetPid(), instance);
-          this_->m_pid_proc_map_.emplace(process->GetPid(), process.get());
-
-          this_->m_mtx_.Unlock();
-
-          // Move the ownership of ProcessInstance into the
-          // TaskInstance.
-          instance->processes.emplace(process->GetPid(), std::move(process));
-        } else {
+        if (err != CraneErr::kOk) {
           this_->EvActivateTaskStatusChange_(
               task_id, crane::grpc::TaskStatus::Failed,
               ExitCode::kExitCodeSpawnProcessFail,
@@ -954,8 +1012,13 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
   TaskStatusChange status_change;
   while (this_->m_task_status_change_queue_.try_dequeue(status_change)) {
     auto iter = this_->m_task_map_.find(status_change.task_id);
-    CRANE_ASSERT_MSG(iter != this_->m_task_map_.end(),
-                     "Task should be found here.");
+    if (iter == this_->m_task_map_.end()) {
+      // When Ctrl+C is pressed for Craned, all tasks including just forked
+      // tasks will be terminated.
+      // In some error cases, a double TaskStatusChange might be triggered.
+      // Just ignore it. See comments in SpawnProcessInInstance_().
+      continue;
+    }
 
     // Clean task scripts.
     if (iter->second->task.type() == crane::grpc::Batch) {
@@ -1050,8 +1113,8 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
     process->SetFinishCb(std::move(elem.finish_cb));
 
     CraneErr err;
-    err =
-        this_->SpawnProcessInInstance_(task_iter->second.get(), process.get());
+    err = this_->SpawnProcessInInstance_(task_iter->second.get(),
+                                         std::move(process));
     elem.err_promise.set_value(err);
 
     if (err != CraneErr::kOk)
