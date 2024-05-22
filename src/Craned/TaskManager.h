@@ -289,8 +289,8 @@ class TaskManager {
    *  to the TaskInstance. kProtobufError if the communication between the
    *  parent and the child process fails.
    */
-  static CraneErr SpawnProcessInInstance_(TaskInstance* instance,
-                                          ProcessInstance* process);
+  CraneErr SpawnProcessInInstance_(TaskInstance* instance,
+                                   std::unique_ptr<ProcessInstance> process);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
