@@ -284,7 +284,10 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     craned_info->set_running_task_num(
         craned_meta->running_task_resource_map.size());
     if (craned_meta->alive) {
-      if (craned_meta->res_in_use.allocatable_resource.cpu_count == cpu_t(0) &&
+      if (craned_meta->drain){
+        craned_info->set_state(crane::grpc::CranedState::CRANE_DRAIN);
+      }
+      else if (craned_meta->res_in_use.allocatable_resource.cpu_count == cpu_t(0) &&
           craned_meta->res_in_use.allocatable_resource.memory_bytes == 0)
         craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
       else if (craned_meta->res_avail.allocatable_resource.cpu_count ==
@@ -330,7 +333,10 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   craned_info->set_running_task_num(
       craned_meta->running_task_resource_map.size());
   if (craned_meta->alive) {
-    if (craned_meta->res_in_use.allocatable_resource.cpu_count == cpu_t(0) &&
+    if (craned_meta->drain){
+      craned_info->set_state(crane::grpc::CranedState::CRANE_DRAIN);
+    }
+    else if (craned_meta->res_in_use.allocatable_resource.cpu_count == cpu_t(0) &&
         craned_meta->res_in_use.allocatable_resource.memory_bytes == 0)
       craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
     else if (craned_meta->res_avail.allocatable_resource.cpu_count ==
