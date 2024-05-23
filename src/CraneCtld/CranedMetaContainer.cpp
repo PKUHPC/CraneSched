@@ -284,11 +284,11 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     craned_info->set_running_task_num(
         craned_meta->running_task_resource_map.size());
     if (craned_meta->alive) {
-      if (craned_meta->drain){
+      if (craned_meta->drain) {
         craned_info->set_state(crane::grpc::CranedState::CRANE_DRAIN);
-      }
-      else if (craned_meta->res_in_use.allocatable_resource.cpu_count == cpu_t(0) &&
-          craned_meta->res_in_use.allocatable_resource.memory_bytes == 0)
+      } else if (craned_meta->res_in_use.allocatable_resource.cpu_count ==
+                     cpu_t(0) &&
+                 craned_meta->res_in_use.allocatable_resource.memory_bytes == 0)
         craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
       else if (craned_meta->res_avail.allocatable_resource.cpu_count ==
                    cpu_t(0) ||
@@ -333,11 +333,11 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   craned_info->set_running_task_num(
       craned_meta->running_task_resource_map.size());
   if (craned_meta->alive) {
-    if (craned_meta->drain){
+    if (craned_meta->drain) {
       craned_info->set_state(crane::grpc::CranedState::CRANE_DRAIN);
-    }
-    else if (craned_meta->res_in_use.allocatable_resource.cpu_count == cpu_t(0) &&
-        craned_meta->res_in_use.allocatable_resource.memory_bytes == 0)
+    } else if (craned_meta->res_in_use.allocatable_resource.cpu_count ==
+                   cpu_t(0) &&
+               craned_meta->res_in_use.allocatable_resource.memory_bytes == 0)
       craned_info->set_state(crane::grpc::CranedState::CRANE_IDLE);
     else if (craned_meta->res_avail.allocatable_resource.cpu_count ==
                  cpu_t(0) ||
@@ -551,25 +551,38 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       auto& res_in_use = craned_meta->res_in_use.allocatable_resource;
       auto& res_avail = craned_meta->res_avail.allocatable_resource;
       if (craned_meta->alive) {
-        if (filter_idle && res_in_use.cpu_count == cpu_t(0) &&
-            res_in_use.memory_bytes == 0) {
-          idle_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
-          idle_craned_list->set_count(idle_craned_name_list.size());
-        } else if (filter_alloc && res_avail.cpu_count == cpu_t(0) ||
+        if (craned_meta->drain) {
+          if (filter_drain) {
+            drain_craned_name_list.emplace_back(
+                craned_meta->static_meta.hostname);
+            drain_craned_list->set_count(drain_craned_name_list.size());
+          }
+        } else if (res_in_use.cpu_count == cpu_t(0) &&
+                   res_in_use.memory_bytes == 0) {
+          if (filter_idle) {
+            idle_craned_name_list.emplace_back(
+                craned_meta->static_meta.hostname);
+            idle_craned_list->set_count(idle_craned_name_list.size());
+          }
+        } else if (res_avail.cpu_count == cpu_t(0) ||
                    res_avail.memory_bytes == 0) {
-          alloc_craned_name_list.emplace_back(
-              craned_meta->static_meta.hostname);
-          alloc_craned_list->set_count(alloc_craned_name_list.size());
-        } else if (filter_mix) {
-          mix_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
-          mix_craned_list->set_count(mix_craned_name_list.size());
+          if (filter_alloc) {
+            alloc_craned_name_list.emplace_back(
+                craned_meta->static_meta.hostname);
+            alloc_craned_list->set_count(alloc_craned_name_list.size());
+          }
+        } else {
+          if (filter_mix) {
+            mix_craned_name_list.emplace_back(
+                craned_meta->static_meta.hostname);
+            mix_craned_list->set_count(mix_craned_name_list.size());
+          }
         }
-      } else if (filter_drain && craned_meta->alive && craned_meta->drain) {
-        drain_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
-        drain_craned_list->set_count(drain_craned_name_list.size());
-      } else if (filter_down) {
-        down_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
-        down_craned_list->set_count(down_craned_name_list.size());
+      } else {
+        if (filter_down) {
+          down_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
+          down_craned_list->set_count(down_craned_name_list.size());
+        }
       }
     });
 
