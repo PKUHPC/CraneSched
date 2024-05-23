@@ -558,7 +558,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
           mix_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
           mix_craned_list->set_count(mix_craned_name_list.size());
         }
-      } else if (craned_meta->alive && craned_meta->drain) {
+      } else if (filter_drain && craned_meta->alive && craned_meta->drain) {
         drain_craned_name_list.emplace_back(craned_meta->static_meta.hostname);
         drain_craned_list->set_count(drain_craned_name_list.size());
       } else if (filter_down) {
