@@ -401,6 +401,7 @@ message QueryClusterInfoRequest {
 message QueryClusterInfoReply {
   bool ok = 1;
   repeated TrimmedPartitionInfo partitions = 2;
+  repeated string nodes = 3;
 }
 
 message QueryTasksInfoRequest{

@@ -596,6 +596,17 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
         util::HostNameListToStr(down_craned_name_list));
     drain_craned_list->set_craned_list_regex(
         util::HostNameListToStr(drain_craned_name_list));
+
+    reply.mutable_nodes()->Add(idle_craned_name_list.begin(),
+                               idle_craned_name_list.end());
+    reply.mutable_nodes()->Add(mix_craned_name_list.begin(),
+                               mix_craned_name_list.end());
+    reply.mutable_nodes()->Add(alloc_craned_name_list.begin(),
+                               alloc_craned_name_list.end());
+    reply.mutable_nodes()->Add(down_craned_name_list.begin(),
+                               down_craned_name_list.end());
+    reply.mutable_nodes()->Add(drain_craned_name_list.begin(),
+                               drain_craned_name_list.end());
   });
 
   return reply;
