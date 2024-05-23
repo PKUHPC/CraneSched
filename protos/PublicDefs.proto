@@ -278,6 +278,7 @@ message UserInfo {
     None = 0;
     Operator = 1;
     Admin = 2;
+    Root = 3;
   };
   message AllowedPartitionQos{
     string partition_name = 1;
