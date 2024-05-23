@@ -614,20 +614,22 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
 
   auto craned_meta = craned_meta_map_[request.craned_id()];
 
-  if (request.new_state() == crane::grpc::CranedState::CRANE_DRAIN) {
-    craned_meta->drain = true;
-    craned_meta->state_reason = request.reason();
-    reply.set_ok(true);
-  } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE) {
-    if (craned_meta->alive) {
+  if (craned_meta->alive) {
+    if (request.new_state() == crane::grpc::CranedState::CRANE_DRAIN) {
+      craned_meta->drain = true;
+      craned_meta->state_reason = request.reason();
+      reply.set_ok(true);
+    } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE) {
       craned_meta->drain = false;
       craned_meta->state_reason.clear();
-
       reply.set_ok(true);
     } else {
       reply.set_ok(false);
-      reply.set_reason("Can't change the state of a DOWN node!");
+      reply.set_reason("Invalid state.");
     }
+  } else {
+    reply.set_ok(false);
+    reply.set_reason("Can't change the state of a DOWN node!");
   }
 
   return reply;
