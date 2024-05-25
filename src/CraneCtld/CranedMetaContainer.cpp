@@ -449,8 +449,11 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
                part_meta->partition_global_meta.name);
   };
 
-  std::unordered_set<std::string> req_nodes(request.filter_nodes().begin(),
-                                            request.filter_nodes().end());
+  std::string hosts = absl::StrJoin(request.filter_nodes(), ",");
+  std::list<std::string> hosts_list;
+  util::ParseHostList(hosts, &hosts_list);
+  std::unordered_set<std::string> req_nodes;
+  for (auto& host : hosts_list) req_nodes.insert(std::move(host));
 
   bool no_craned_hostname_constraint = request.filter_nodes().empty();
   auto craned_rng_filter_hostname = [&](CranedMetaRawMap::const_iterator it) {
@@ -596,17 +599,6 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
         util::HostNameListToStr(down_craned_name_list));
     drain_craned_list->set_craned_list_regex(
         util::HostNameListToStr(drain_craned_name_list));
-
-    reply.mutable_nodes()->Add(idle_craned_name_list.begin(),
-                               idle_craned_name_list.end());
-    reply.mutable_nodes()->Add(mix_craned_name_list.begin(),
-                               mix_craned_name_list.end());
-    reply.mutable_nodes()->Add(alloc_craned_name_list.begin(),
-                               alloc_craned_name_list.end());
-    reply.mutable_nodes()->Add(down_craned_name_list.begin(),
-                               down_craned_name_list.end());
-    reply.mutable_nodes()->Add(drain_craned_name_list.begin(),
-                               drain_craned_name_list.end());
   });
 
   return reply;
