@@ -1304,16 +1304,22 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     return result::fail("Partition doesn't exist!");
   } else if (err == CraneErr::kInvalidNodeNum) {
     CRANE_DEBUG(
-        "Task submission failed. Reason: --node is either invalid or "
-        "greater than the number of alive nodes in its partition.");
+        "Task submission failed. Reason: --node is either invalid or greater "
+        "than the number of nodes in its partition.");
     return result::fail(
-        "--node is either invalid or greater than "
-        "the number of alive nodes in its partition.");
+        "--node is either invalid or greater than the number of nodes in its "
+        "partition.");
   } else if (err == CraneErr::kNoResource) {
     CRANE_DEBUG(
         "Task submission failed. "
         "Reason: The resources of the partition are insufficient.");
     return result::fail("The resources of the partition are insufficient");
+  } else if (err == CraneErr::kNoAvailNode) {
+    CRANE_DEBUG(
+        "Task submission failed. "
+        "Reason: Nodes satisfying the requirements of task are insufficient");
+    return result::fail(
+        "Nodes satisfying the requirements of task are insufficient.");
   } else if (err == CraneErr::kInvalidParam) {
     CRANE_DEBUG(
         "Task submission failed. "
