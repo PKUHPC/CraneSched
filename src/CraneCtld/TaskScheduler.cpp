@@ -2346,6 +2346,14 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
       return CraneErr::kNoResource;
     }
 
+    if (task->node_num > metas_ptr->craned_ids.size()) {
+      CRANE_TRACE(
+          "Nodes not enough for task #{}. "
+          "Partition total Nodes: {}",
+          task->TaskId(), metas_ptr->craned_ids.size());
+      return CraneErr::kInvalidNodeNum;
+    }
+
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
     for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
@@ -2365,7 +2373,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
         "Resource not enough. Task #{} needs {} nodes, while only {} "
         "nodes satisfy its requirement.",
         task->TaskId(), task->node_num, avail_nodes.size());
-    return CraneErr::kInvalidNodeNum;
+    return CraneErr::kNoAvailNode;
   }
 
   return CraneErr::kOk;

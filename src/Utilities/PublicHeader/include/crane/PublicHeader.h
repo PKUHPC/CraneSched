@@ -30,6 +30,7 @@ enum class CraneErr : uint16_t {
   kNoResource,
   kNonExistent,
   kInvalidNodeNum,
+  kNoAvailNode,
 
   kSystemErr,  // represent the error which sets errno
   kExistingTask,
