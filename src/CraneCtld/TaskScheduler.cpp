@@ -932,6 +932,28 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
   return CraneErr::kOk;
 }
 
+CraneErr TaskScheduler::ChangeTaskPriority(uint32_t task_id,
+                                           uint32_t priority) {
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
+
+  auto pd_iter = m_pending_task_map_.find(task_id);
+  if (pd_iter != m_pending_task_map_.end()) {
+    pd_iter->second->schedule_priority = double(priority);
+    return CraneErr::kOk;
+  }
+
+  // Priority change of a running task is not supported.
+  auto rn_iter = m_running_task_map_.find(task_id);
+  if (rn_iter != m_running_task_map_.end()) {
+    CRANE_ERROR("Task #{} is running, unable to change priority", task_id);
+    return CraneErr::kInvalidParam;
+  }
+
+  CRANE_ERROR("Task #{} was not found in running or pending queue", task_id);
+  return CraneErr::kNonExistent;
+}
+
 CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
   task_id_t task_id = task->TaskId();
 
@@ -2410,8 +2432,12 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
 
   std::vector<std::pair<task_id_t, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
-    double priority = CalculatePriority_(task.get());
-    task_priority_vec.emplace_back(task->TaskId(), priority);
+    // Admin may specify a priority of the job.
+    // In this case, MultiFactorPriority will not calculate the priority.
+    if (task->schedule_priority == 0) {
+      task->schedule_priority = CalculatePriority_(task.get());
+    }
+    task_priority_vec.emplace_back(task->TaskId(), task->schedule_priority);
   }
 
   std::sort(task_priority_vec.begin(), task_priority_vec.end(),
@@ -2596,8 +2622,6 @@ double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
       g_config.PriorityConfig.WeightJobSize * job_size_factor +
       g_config.PriorityConfig.WeightFairShare * fair_share_factor +
       g_config.PriorityConfig.WeightQOS * qos_factor;
-
-  task->schedule_priority = priority;
 
   return priority;
 }

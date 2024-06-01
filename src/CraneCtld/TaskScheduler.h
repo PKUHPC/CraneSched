@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
@@ -218,6 +220,8 @@ class TaskScheduler {
   std::future<task_id_t> SubmitTaskAsync(std::unique_ptr<TaskInCtld> task);
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, int64_t secs);
+
+  CraneErr ChangeTaskPriority(uint32_t task_id, uint32_t priority);
 
   void TaskStatusChangeWithReasonAsync(uint32_t task_id,
                                        const CranedId& craned_index,

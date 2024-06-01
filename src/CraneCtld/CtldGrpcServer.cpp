@@ -164,13 +164,30 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     } else if (err == CraneErr::kNonExistent) {
       response->set_ok(false);
       response->set_reason(
-          fmt::format("Task #{} was not found in running or pending queue",
+          fmt::format("Task #{} was not found in running or pending queue.",
                       request->task_id()));
     } else if (err == CraneErr::kGenericFailure) {
       response->set_ok(false);
       response->set_reason(fmt::format(
           "The compute node failed to change the time limit of task#{}.",
           request->task_id()));
+    }
+  } else if (request->attribute() ==
+             TargetAttributes::ModifyTaskRequest_TargetAttributes_Priority) {
+    err = g_task_scheduler->ChangeTaskPriority(request->task_id(),
+                                               request->priority_value());
+    if (err == CraneErr::kOk) {
+      response->set_ok(true);
+    } else if (err == CraneErr::kNonExistent) {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Task #{} was not found in running or pending queue.",
+                      request->task_id()));
+    } else if (err == CraneErr::kInvalidParam) {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Task #{} is running, unable to change priority.",
+                      request->task_id()));
     }
   } else {
     response->set_ok(false);

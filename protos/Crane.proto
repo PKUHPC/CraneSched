@@ -261,6 +261,7 @@ message QueryPartitionInfoReply {
 message ModifyTaskRequest {
   enum TargetAttributes {
     TimeLimit = 0;
+    Priority = 1;
   }
 
   uint32 uid = 1;
@@ -270,6 +271,7 @@ message ModifyTaskRequest {
 
   oneof value {
     int64 time_limit_seconds = 4;
+    uint32 priority_value = 5;
   }
 }
 
@@ -281,12 +283,12 @@ message ModifyTaskReply {
 message ModifyCranedStateRequest{
   string craned_id = 1;
   CranedState new_state = 2;
-  string reason = 3;
+  string reason =3;
 }
 
 message ModifyCranedStateReply{
   bool ok = 1;
-  string reason = 2;
+  string reason=2;
 }
 
 message AddAccountRequest {
