@@ -862,7 +862,8 @@ result::result<void, std::string> AccountManager::CheckUidIsAdmin(
  * @return
  */
 AccountManager::Result AccountManager::HasPermissionToAccount(
-    uint32_t uid, const std::string& account, User::AdminLevel* level_of_uid) {
+    uint32_t uid, const std::string& account, bool strong,
+    User::AdminLevel* level_of_uid) {
   PasswordEntry entry(uid);
   if (!entry.Valid()) {
     return Result{false, fmt::format("Uid {} not existed", uid)};
@@ -887,9 +888,17 @@ AccountManager::Result AccountManager::HasPermissionToAccount(
           fmt::format("Permission error: User '{}' don't have the permission",
                       entry.Username())};
     } else {
-      for (const auto& acc : ptr->coordinator_accounts) {
-        if (acc == account || PaternityTestNoLock_(acc, account)) {
-          return Result{true};
+      if (strong) {
+        for (const auto& acc : ptr->coordinator_accounts) {
+          if (acc == account || PaternityTestNoLock_(acc, account)) {
+            return Result{true};
+          }
+        }
+      } else {
+        for (const auto& [acc, item] : ptr->account_to_attrs_map) {
+          if (acc == account || PaternityTestNoLock_(acc, account)) {
+            return Result{true};
+          }
         }
       }
 
@@ -905,7 +914,8 @@ AccountManager::Result AccountManager::HasPermissionToAccount(
 }
 
 AccountManager::Result AccountManager::HasPermissionToUser(
-    uint32_t uid, const std::string& user, User::AdminLevel* level_of_uid) {
+    uint32_t uid, const std::string& user, bool strong,
+    User::AdminLevel* level_of_uid) {
   PasswordEntry entry(uid);
   if (!entry.Valid()) {
     return Result{false, fmt::format("Uid {} not existed", uid)};
@@ -931,12 +941,23 @@ AccountManager::Result AccountManager::HasPermissionToUser(
   if (ptr->admin_level != User::None || user == entry.Username())
     return Result{true};
 
-  for (const auto& [user_acc, item] : user_ptr->account_to_attrs_map)
-    for (const auto& uid_acc : ptr->coordinator_accounts) {
-      if (uid_acc == user_acc || PaternityTestNoLock_(uid_acc, user_acc)) {
-        return Result{true};
+  if (strong) {
+    for (const auto& [user_acc, item] : user_ptr->account_to_attrs_map) {
+      for (const auto& uid_acc : ptr->coordinator_accounts) {
+        if (uid_acc == user_acc || PaternityTestNoLock_(uid_acc, user_acc)) {
+          return Result{true};
+        }
       }
     }
+  } else {
+    for (const auto& [user_acc, item] : user_ptr->account_to_attrs_map) {
+      for (const auto& [uid_acc, acct_item] : ptr->account_to_attrs_map) {
+        if (uid_acc == user_acc || PaternityTestNoLock_(uid_acc, user_acc)) {
+          return Result{true};
+        }
+      }
+    }
+  }
 
   return Result{
       false,

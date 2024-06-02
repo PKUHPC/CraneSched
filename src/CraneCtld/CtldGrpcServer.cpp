@@ -403,7 +403,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
     crane::grpc::AddUserReply *response) {
   User::AdminLevel user_level;
   AccountManager::Result judge_res = g_account_manager->HasPermissionToAccount(
-      request->uid(), request->user().account(), &user_level);
+      request->uid(), request->user().account(), true, &user_level);
 
   if (!judge_res.ok) {
     response->set_ok(false);
@@ -516,7 +516,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
           g_account_manager->GetExistedUserInfo(request->name());
       User::AdminLevel user_level;
       judge_res = g_account_manager->HasPermissionToUser(
-          request->uid(), request->name(), &user_level);
+          request->uid(), request->name(), true, &user_level);
 
       if (!judge_res.ok) {
         response->set_ok(false);
@@ -592,8 +592,8 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
     crane::grpc::QueryEntityInfoReply *response) {
   User::AdminLevel user_level;
   std::list<std::string> user_accounts;
-  std::map<std::string, Account> res_account_map;
-  std::map<uid_t, User> res_user_map;
+  std::unordered_map<std::string, Account> res_account_map;
+  std::unordered_map<uid_t, User> res_user_map;
 
   AccountManager::Result find_res =
       g_account_manager->FindUserLevelAccountsOfUid(request->uid(), &user_level,
@@ -672,7 +672,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
 
         AccountManager::Result judge_res =
             g_account_manager->HasPermissionToAccount(request->uid(),
-                                                      request->name());
+                                                      request->name(), false);
 
         if (!judge_res.ok) {
           response->set_ok(false);
@@ -684,7 +684,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         response->set_ok(true);
       }
 
-      for (const auto it : res_account_map) {
+      for (const auto &it : res_account_map) {
         const auto &account = it.second;
         // put the account info into grpc element
         auto *account_info = response->mutable_account_list()->Add();
@@ -765,7 +765,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         if (user_shared_ptr) {
           AccountManager::Result judge_res =
               g_account_manager->HasPermissionToUser(request->uid(),
-                                                     request->name());
+                                                     request->name(), false);
 
           if (!judge_res.ok) {
             response->set_ok(false);
@@ -783,7 +783,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         }
       }
 
-      for (const auto it : res_user_map) {
+      for (const auto &it : res_user_map) {
         const auto &user = it.second;
         for (const auto &[account, item] : user.account_to_attrs_map) {
           if (!request->account().empty() && account != request->account()) {
@@ -884,7 +884,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
         // Remove user from all of it's accounts
         AccountManager::Result judge_res =
             g_account_manager->HasPermissionToAccount(
-                request->uid(), deleter_shared_ptr->default_account,
+                request->uid(), deleter_shared_ptr->default_account, true,
                 &user_level);
         if (user_level == User::None) {
           if (deleter_shared_ptr->account_to_attrs_map.size() != 1) {
@@ -906,7 +906,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
         // Remove user from specific account
         AccountManager::Result judge_res =
             g_account_manager->HasPermissionToAccount(
-                request->uid(), request->account(), &user_level);
+                request->uid(), request->account(), true, &user_level);
 
         if (!judge_res.ok) {
           response->set_ok(false);
