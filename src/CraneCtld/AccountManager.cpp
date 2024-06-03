@@ -802,7 +802,8 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
     return result::fail("time-limit reached the user's limit.");
 
-  if (static_cast<double>(task->cpus_per_task) > qos_share_ptr->max_cpus_per_user)
+  if (static_cast<double>(task->cpus_per_task) >
+      qos_share_ptr->max_cpus_per_user)
     return result::fail("cpus-per-task reached the user's limit.");
 
   return {};
@@ -854,15 +855,11 @@ result::result<void, std::string> AccountManager::CheckUidIsAdmin(
       "Permission error: User '{}' is an ordinary user.", entry.Username()));
 }
 
-/**
- * @param uid
- * @param account(when the parameter account is empty, this function can be used
- * as a permission query function)
- * @param level_of_uid
- * @return
- */
 AccountManager::Result AccountManager::HasPermissionToAccount(
-    uint32_t uid, const std::string& account, User::AdminLevel* level_of_uid) {
+    uint32_t uid, const std::string& account, bool read_only_priv,
+    User::AdminLevel* level_of_uid) {
+  *level_of_uid = User::None;
+
   PasswordEntry entry(uid);
   if (!entry.Valid()) {
     return Result{false, fmt::format("Uid {} not existed", uid)};
@@ -871,78 +868,93 @@ AccountManager::Result AccountManager::HasPermissionToAccount(
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
 
-  const User* ptr = GetExistedUserInfoNoLock_(entry.Username());
-  if (!ptr) {
+  const User* user = GetExistedUserInfoNoLock_(entry.Username());
+  if (!user) {
     return Result{false,
                   fmt::format("Parameter error: User '{}' is not a crane user",
                               entry.Username())};
   }
 
-  if (level_of_uid != nullptr) *level_of_uid = ptr->admin_level;
+  if (level_of_uid != nullptr) *level_of_uid = user->admin_level;
 
-  if (ptr->admin_level == User::None) {
-    if (account.empty()) {
-      return Result{
-          false,
-          fmt::format("Permission error: User '{}' don't have the permission",
-                      entry.Username())};
-    } else {
-      for (const auto& acc : ptr->coordinator_accounts) {
-        if (acc == account || PaternityTestNoLock_(acc, account)) {
+  if (user->admin_level == User::None) {
+    if (account.empty())
+      return Result{false, fmt::format("No account is specified for user {}",
+                                       entry.Username())};
+
+    if (read_only_priv) {
+      // In current implementation, if a user is the coordinator of an
+      // account, it must exist in user->account_to_attrs_map.
+      // This is guaranteed by the procedure of adding coordinator, where the
+      // coordinator is specified only when adding a user to an account.
+      // Thus, user->account_to_attrs_map must cover all the accounts he
+      // coordinates, and it's ok to skip checking user->coordinator_accounts.
+      for (const auto& [acc, item] : user->account_to_attrs_map)
+        if (acc == account || PaternityTestNoLock_(acc, account))
           return Result{true};
-        }
-      }
-
-      return Result{
-          false,
-          fmt::format(
-              "Permission error: User '{}' don't have the permission to "
-              "manager account '{}' which not in subtree of its accounts",
-              entry.Username(), account)};
+    } else {
+      for (const auto& acc : user->coordinator_accounts)
+        if (acc == account || PaternityTestNoLock_(acc, account))
+          return Result{true};
     }
+
+    return Result{
+        false,
+        fmt::format("User {} is not allowed to access"
+                    "account {} out of the subtree of his permitted accounts.",
+                    entry.Username(), account)};
   }
+
   return Result{true};
 }
 
 AccountManager::Result AccountManager::HasPermissionToUser(
-    uint32_t uid, const std::string& user, User::AdminLevel* level_of_uid) {
-  PasswordEntry entry(uid);
-  if (!entry.Valid()) {
+    uint32_t uid, const std::string& target_user, bool read_only_priv,
+    User::AdminLevel* level_of_uid) {
+  PasswordEntry source_user_entry(uid);
+  if (!source_user_entry.Valid()) {
     return Result{false, fmt::format("Uid {} not existed", uid)};
   }
 
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
 
-  const User* ptr = GetExistedUserInfoNoLock_(entry.Username());
-  if (!ptr) {
-    return Result{false,
-                  fmt::format("Parameter error: User '{}' is not a crane user",
-                              entry.Username())};
-  }
-  const User* user_ptr = GetExistedUserInfoNoLock_(user);
-  if (!user_ptr) {
-    return Result{
-        false,
-        fmt::format("Parameter error: User '{}' is not a crane user", user)};
-  }
+  const User* source_user_ptr =
+      GetExistedUserInfoNoLock_(source_user_entry.Username());
+  if (!source_user_ptr)
+    return Result{false, fmt::format("User {} is not a Crane user",
+                                     source_user_entry.Username())};
 
-  if (level_of_uid != nullptr) *level_of_uid = ptr->admin_level;
-  if (ptr->admin_level != User::None || user == entry.Username())
+  const User* target_user_ptr = GetExistedUserInfoNoLock_(target_user);
+  if (!target_user_ptr)
+    return Result{false,
+                  fmt::format("User {} is not a Crane user", target_user)};
+
+  if (level_of_uid != nullptr) *level_of_uid = source_user_ptr->admin_level;
+
+  if (source_user_ptr->admin_level != User::None ||
+      target_user == source_user_entry.Username())
     return Result{true};
 
-  for (const auto& [user_acc, item] : user_ptr->account_to_attrs_map)
-    for (const auto& uid_acc : ptr->coordinator_accounts) {
-      if (uid_acc == user_acc || PaternityTestNoLock_(uid_acc, user_acc)) {
-        return Result{true};
-      }
-    }
+  std::vector<std::string> accounts_under_permission_vec;
+  if (read_only_priv)
+    for (const auto& [acc, acct_item] : source_user_ptr->account_to_attrs_map)
+      accounts_under_permission_vec.emplace_back(acc);
+  else
+    for (const auto& acc : source_user_ptr->coordinator_accounts)
+      accounts_under_permission_vec.emplace_back(acc);
 
-  return Result{
-      false,
-      fmt::format("Permission error: User '{}' don't have the permission to "
-                  "manager user '{}' which not in subtree of its accounts",
-                  entry.Username(), user)};
+  for (const auto& [target_user_acc, item] :
+       target_user_ptr->account_to_attrs_map) {
+    for (const auto& acc_under_perm : accounts_under_permission_vec)
+      if (acc_under_perm == target_user_acc ||
+          PaternityTestNoLock_(acc_under_perm, target_user_acc))
+        return Result{true};
+  }
+
+  return Result{false, fmt::format("User {} is not permitted to access user {} "
+                                   "out of subtrees of his permitted accounts",
+                                   source_user_entry.Username(), target_user)};
 }
 
 void AccountManager::InitDataMap_() {

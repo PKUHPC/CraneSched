@@ -30,7 +30,6 @@ enum class CraneErr : uint16_t {
   kNoResource,
   kNonExistent,
   kInvalidNodeNum,
-  kNoAvailNode,
 
   kSystemErr,  // represent the error which sets errno
   kExistingTask,
@@ -48,6 +47,7 @@ enum class CraneErr : uint16_t {
   kCgroupError,
   kProtobufError,
   kLibEventError,
+  kNoAvailNode,
 
   __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
 };
@@ -140,6 +140,7 @@ constexpr std::array<std::string_view, uint16_t(CraneErr::__ERR_SIZE)>
         "Error when manipulating cgroup",
         "Error when using protobuf",
         "Error when using LibEvent",
+        "Not enough nodes which satisfy resource requirements",
 };
 
 }

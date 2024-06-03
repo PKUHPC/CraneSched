@@ -433,10 +433,13 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.CraneEmbeddedDbBackend = "Unqlite";
 
-      if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull())
-        g_config.CraneCtldDbPath =
-            g_config.CraneBaseDir + config["CraneCtldDbPath"].as<std::string>();
-      else
+      if (config["CraneCtldDbPath"] && !config["CraneCtldDbPath"].IsNull()) {
+        std::filesystem::path path(config["CraneCtldDbPath"].as<std::string>());
+        if (path.is_absolute())
+          g_config.CraneCtldDbPath = path.string();
+        else
+          g_config.CraneCtldDbPath = g_config.CraneBaseDir + path.string();
+      } else
         g_config.CraneCtldDbPath =
             g_config.CraneBaseDir + kDefaultCraneCtldDbPath;
 
