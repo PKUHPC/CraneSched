@@ -592,8 +592,8 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
     crane::grpc::QueryEntityInfoReply *response) {
   User::AdminLevel user_level;
   std::list<std::string> user_accounts;
-  std::unordered_map<std::string, Account> res_account_map;
-  std::unordered_map<uid_t, User> res_user_map;
+  std::map<std::string, Account> res_account_map;
+  std::map<uid_t, User> res_user_map;
 
   AccountManager::Result find_res =
       g_account_manager->FindUserLevelAccountsOfUid(request->uid(), &user_level,
