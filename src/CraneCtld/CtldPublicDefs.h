@@ -524,6 +524,17 @@ struct Account {
 };
 
 struct User {
+  // Root corresponds to root user in Linux System and have any permission over
+  // the whole system.
+  // Admin and Operator are created for just compatability of existing systems
+  // like Slurm.
+  // Root, Admin and Operator actually have no difference when controlling Crane
+  // system in the current stage.
+  // However, Crane system follows the rule that the users with the same admin
+  // level can't control each other, but users with higher level can control
+  // users with lower level. Thus, Root level is created for the integrity of
+  // Crane system to guarantee that there will always a superuser to control all
+  // the administrator of the whole system.
   enum AdminLevel { None, Operator, Admin, Root };
 
   using PartToAllowedQosMap = std::unordered_map<

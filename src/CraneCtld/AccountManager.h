@@ -106,7 +106,7 @@ class AccountManager {
   result::result<void, std::string> CheckUidIsAdmin(uint32_t uid);
 
   AccountManager::Result HasPermissionToAccount(
-      uint32_t uid, const std::string& account, bool strong = true,
+      uint32_t uid, const std::string& account, bool read_only_priv,
       User::AdminLevel* level_of_uid = nullptr);
 
   AccountManager::Result HasPermissionToUser(
