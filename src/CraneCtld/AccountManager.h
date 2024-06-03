@@ -105,12 +105,36 @@ class AccountManager {
 
   result::result<void, std::string> CheckUidIsAdmin(uint32_t uid);
 
+  /**
+   * @param[in] uid is system uid of user.
+   * @param[in] account is the target that uid wants to query or modify.
+   * If its value is an empty string, the permission check fails of course,
+   * but level_of_uid will be filled and thus the function serves as a
+   * query function for user level.
+   * @param[in] read_only_priv specifies the permission type.
+   * If true, the function checks if uid has read/query only permission
+   * to specified account and the check will pass
+   * if the list of accounts the uid belongs to,
+   * which includes all the accounts this uid coordinates
+   * (guaranteed by account rule),
+   * contains any account which is is the parent of target account
+   * (including itself).
+   * If false, the function checks if uid has read/query only permission
+   * to specified account and the check will pass
+   * if the list of accounts coordinated by uid,
+   * contains any account which is is the parent of target account
+   * (including itself).
+   * @param[out] level_of_uid will be written with the user level of uid
+   * when function returns if both uid and user information exist.
+   * @return True if both uid and corresponding user exists and the permission
+   * check is passed, otherwise False.
+   */
   AccountManager::Result HasPermissionToAccount(
       uint32_t uid, const std::string& account, bool read_only_priv,
       User::AdminLevel* level_of_uid = nullptr);
 
   AccountManager::Result HasPermissionToUser(
-      uint32_t uid, const std::string& user, bool strong = true,
+      uint32_t uid, const std::string& target_user, bool read_only_priv,
       User::AdminLevel* level_of_uid = nullptr);
 
  private:

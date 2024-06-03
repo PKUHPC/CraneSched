@@ -516,7 +516,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
           g_account_manager->GetExistedUserInfo(request->name());
       User::AdminLevel user_level;
       judge_res = g_account_manager->HasPermissionToUser(
-          request->uid(), request->name(), true, &user_level);
+          request->uid(), request->name(), false, &user_level);
 
       if (!judge_res.ok) {
         response->set_ok(false);
@@ -765,7 +765,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
         if (user_shared_ptr) {
           AccountManager::Result judge_res =
               g_account_manager->HasPermissionToUser(request->uid(),
-                                                     request->name(), false);
+                                                     request->name(), true);
 
           if (!judge_res.ok) {
             response->set_ok(false);
@@ -984,7 +984,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
       break;
     case crane::grpc::User:
       res = g_account_manager->HasPermissionToUser(request->uid(),
-                                                   request->name());
+                                                   request->name(), false);
 
       if (!res.ok) {
         response->set_ok(false);
