@@ -900,8 +900,8 @@ AccountManager::Result AccountManager::HasPermissionToAccount(
 
     return Result{
         false,
-        fmt::format("Permission error: User '{}' don't have the permission to "
-                    "manager account '{}' which not in subtree of its accounts",
+        fmt::format("User {} is not allowed to access"
+                    "account {} out of the subtree of its permitted accounts.",
                     entry.Username(), account)};
   }
 
