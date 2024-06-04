@@ -992,8 +992,9 @@ CraneErr TaskScheduler::CheckIfUidHasPermissionOnTask(uid_t uid,
     return CraneErr::kNonExistent;
   }
 
-  auto res = g_account_manager->HasPermissionToUser(uid, task_username, false);
-  return res.ok ? CraneErr::kOk : CraneErr::kPermissionDenied;
+  // res.ok == true only if user's level >= User::Admin.
+  auto res = g_account_manager->CheckUidIsAdmin(uid);
+  return res.has_value() ? CraneErr::kOk : CraneErr::kPermissionDenied;
 }
 
 CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
