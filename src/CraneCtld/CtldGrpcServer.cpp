@@ -180,7 +180,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     }
   } else if (request->attribute() == ModifyTaskRequest::Priority) {
     err = g_task_scheduler->ChangeTaskPriority(request->task_id(),
-                                               request->priority_value());
+                                               request->mandated_priority());
     if (err == CraneErr::kOk) {
       response->set_ok(true);
     } else if (err == CraneErr::kNonExistent) {

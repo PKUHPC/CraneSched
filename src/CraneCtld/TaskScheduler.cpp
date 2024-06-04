@@ -941,14 +941,13 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
   return CraneErr::kOk;
 }
 
-CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id,
-                                           uint32_t priority) {
+CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priority) {
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   LockGuard running_guard(&m_running_task_map_mtx_);
 
   auto pd_iter = m_pending_task_map_.find(task_id);
   if (pd_iter != m_pending_task_map_.end()) {
-    pd_iter->second->mandated_priority = double(priority);
+    pd_iter->second->mandated_priority = priority;
     return CraneErr::kOk;
   }
 

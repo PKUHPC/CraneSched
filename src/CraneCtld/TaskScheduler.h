@@ -219,7 +219,7 @@ class TaskScheduler {
 
   CraneErr ChangeTaskTimeLimit(task_id_t task_id, int64_t secs);
 
-  CraneErr ChangeTaskPriority(task_id_t task_id, uint32_t priority);
+  CraneErr ChangeTaskPriority(task_id_t task_id, double priority);
 
   void TaskStatusChangeWithReasonAsync(uint32_t task_id,
                                        const CranedId& craned_index,

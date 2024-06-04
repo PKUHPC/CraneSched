@@ -271,7 +271,7 @@ message ModifyTaskRequest {
 
   oneof value {
     int64 time_limit_seconds = 4;
-    uint32 priority_value = 5;
+    double mandated_priority = 5;
   }
 }
 
