@@ -16,8 +16,6 @@
 
 #pragma once
 
-#include <cstdint>
-
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
