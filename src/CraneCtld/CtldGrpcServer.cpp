@@ -152,11 +152,17 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
 grpc::Status CraneCtldServiceImpl::ModifyTask(
     grpc::ServerContext *context, const crane::grpc::ModifyTaskRequest *request,
     crane::grpc::ModifyTaskReply *response) {
-  using TargetAttributes = crane::grpc::ModifyTaskRequest::TargetAttributes;
+  using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
+
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (res.has_error()) {
+    response->set_ok(false);
+    response->set_reason(res.error());
+    return grpc::Status::OK;
+  }
 
   CraneErr err;
-  if (request->attribute() ==
-      TargetAttributes::ModifyTaskRequest_TargetAttributes_TimeLimit) {
+  if (request->attribute() == ModifyTaskRequest::TimeLimit) {
     err = g_task_scheduler->ChangeTaskTimeLimit(request->task_id(),
                                                 request->time_limit_seconds());
     if (err == CraneErr::kOk) {
@@ -164,17 +170,34 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     } else if (err == CraneErr::kNonExistent) {
       response->set_ok(false);
       response->set_reason(
-          fmt::format("Task #{} was not found in running or pending queue",
+          fmt::format("Task #{} was not found in running or pending queue.",
                       request->task_id()));
-    } else if (err == CraneErr::kGenericFailure) {
+    } else {
       response->set_ok(false);
-      response->set_reason(fmt::format(
-          "The compute node failed to change the time limit of task#{}.",
-          request->task_id()));
+      response->set_reason(
+          fmt::format("Failed to change the time limit of Task#{}: {}.",
+                      request->task_id(), CraneErrStr(err)));
+    }
+  } else if (request->attribute() == ModifyTaskRequest::Priority) {
+    err = g_task_scheduler->ChangeTaskPriority(request->task_id(),
+                                               request->mandated_priority());
+    if (err == CraneErr::kOk) {
+      response->set_ok(true);
+    } else if (err == CraneErr::kNonExistent) {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Task #{} was not found in running or pending queue.",
+                      request->task_id()));
+    } else if (err == CraneErr::kInvalidParam) {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Task #{} is running, unable to change priority.",
+                      request->task_id()));
     }
   } else {
     response->set_ok(false);
-    response->set_reason(fmt::format("Invalid request parameters."));
+    response->set_reason(
+        fmt::format("Failed to change priority: {}.", CraneErrStr(err)));
   }
 
   return grpc::Status::OK;

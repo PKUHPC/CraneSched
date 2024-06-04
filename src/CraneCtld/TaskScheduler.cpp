@@ -890,35 +890,44 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
   return std::move(future);
 }
 
-CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
-  LockGuard pending_guard(&m_pending_task_map_mtx_);
-  LockGuard running_guard(&m_running_task_map_mtx_);
+CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
+  CranedId craned_id;
+  bool found_running{false};
 
-  auto pd_iter = m_pending_task_map_.find(task_id);
-  if (pd_iter != m_pending_task_map_.end()) {
-    pd_iter->second->time_limit = absl::Seconds(secs);
-    crane::grpc::TaskToCtld* task_to_ctld =
-        pd_iter->second->MutableTaskToCtld();
-    task_to_ctld->mutable_time_limit()->set_seconds(secs);
-    g_embedded_db_client->UpdateTaskToCtld(0, pd_iter->second->TaskDbId(),
-                                           *task_to_ctld);
-    return CraneErr::kOk;
+  {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
+
+    TaskInCtld* task;
+    bool found = false;
+
+    auto pd_iter = m_pending_task_map_.find(task_id);
+    if (pd_iter != m_pending_task_map_.end())
+      found = true, task = pd_iter->second.get();
+
+    if (!found) {
+      auto rn_iter = m_running_task_map_.find(task_id);
+      if (rn_iter != m_running_task_map_.end()) {
+        found = found_running = true, task = rn_iter->second.get();
+        craned_id = task->executing_craned_id;
+      }
+    }
+
+    if (!found) {
+      CRANE_DEBUG("Task #{} not in Pd/Rn queue for time limit change!",
+                  task_id);
+      return CraneErr::kNonExistent;
+    }
+
+    task->time_limit = absl::Seconds(secs);
+    task->MutableTaskToCtld()->mutable_time_limit()->set_seconds(secs);
+    g_embedded_db_client->UpdateTaskToCtld(0, task->TaskDbId(),
+                                           task->TaskToCtld());
   }
 
-  auto rn_iter = m_running_task_map_.find(task_id);
-  if (rn_iter == m_running_task_map_.end()) {
-    CRANE_ERROR("Task #{} was not found in running or pending queue", task_id);
-    return CraneErr::kNonExistent;
-  }
+  if (!found_running) return CraneErr::kOk;
 
-  rn_iter->second->time_limit = absl::Seconds(secs);
-  crane::grpc::TaskToCtld* task_to_ctld = rn_iter->second->MutableTaskToCtld();
-  task_to_ctld->mutable_time_limit()->set_seconds(secs);
-  g_embedded_db_client->UpdateTaskToCtld(0, rn_iter->second->TaskDbId(),
-                                         *task_to_ctld);
-
-  // only send request to the first node
-  CranedId const& craned_id = rn_iter->second->executing_craned_id;
+  // Only send request to the executing node
   auto stub = g_craned_keeper->GetCranedStub(craned_id);
   if (stub && !stub->Invalid()) {
     CraneErr err = stub->ChangeTaskTimeLimit(task_id, secs);
@@ -930,6 +939,27 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
   }
 
   return CraneErr::kOk;
+}
+
+CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priority) {
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
+
+  auto pd_iter = m_pending_task_map_.find(task_id);
+  if (pd_iter != m_pending_task_map_.end()) {
+    pd_iter->second->mandated_priority = priority;
+    return CraneErr::kOk;
+  }
+
+  // Priority change of a running task is not supported.
+  auto rn_iter = m_running_task_map_.find(task_id);
+  if (rn_iter != m_running_task_map_.end()) {
+    CRANE_TRACE("Task #{} is running, unable to change priority", task_id);
+    return CraneErr::kInvalidParam;
+  }
+
+  CRANE_TRACE("Task #{} not in Pd/Rn queue for priority change", task_id);
+  return CraneErr::kNonExistent;
 }
 
 CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
@@ -1432,7 +1462,7 @@ void TaskScheduler::QueryTasksInRam(
         static_cast<double>(task.resources.allocatable_resource.cpu_count) *
         task.node_num);
     task_it->set_exit_code(0);
-    task_it->set_priority(task.schedule_priority);
+    task_it->set_priority(task.cached_priority);
 
     task_it->set_status(task.RuntimeAttr().status());
     task_it->set_craned_list(
@@ -2410,7 +2440,12 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
 
   std::vector<std::pair<task_id_t, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
-    double priority = CalculatePriority_(task.get());
+    // Admin may manually specify the priority of a task.
+    // In this case, MultiFactorPriority will not calculate the priority.
+    double priority = (task->mandated_priority == 0.0)
+                          ? CalculatePriority_(task.get())
+                          : task->mandated_priority;
+    task->cached_priority = priority;
     task_priority_vec.emplace_back(task->TaskId(), priority);
   }
 
@@ -2596,8 +2631,6 @@ double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
       g_config.PriorityConfig.WeightJobSize * job_size_factor +
       g_config.PriorityConfig.WeightFairShare * fair_share_factor +
       g_config.PriorityConfig.WeightQOS * qos_factor;
-
-  task->schedule_priority = priority;
 
   return priority;
 }

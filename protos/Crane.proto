@@ -261,6 +261,7 @@ message QueryPartitionInfoReply {
 message ModifyTaskRequest {
   enum TargetAttributes {
     TimeLimit = 0;
+    Priority = 1;
   }
 
   uint32 uid = 1;
@@ -270,6 +271,7 @@ message ModifyTaskRequest {
 
   oneof value {
     int64 time_limit_seconds = 4;
+    double mandated_priority = 5;
   }
 }
 

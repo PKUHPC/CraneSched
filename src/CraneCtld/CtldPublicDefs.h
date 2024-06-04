@@ -294,11 +294,11 @@ struct TaskInCtld {
   /* -----------
    * Fields that will not change at run time.
    * However, these fields are NOT persisted on the disk.
+   * These fields are cached for performance purpose.
    * ----------- */
   // set in SetFieldsByTaskToCtld from uid
   std::unique_ptr<PasswordEntry> password_entry;
 
-  // Cached fields for performance.
   // Set in TaskScheduler->AcquireAttributes()
   uint32_t partition_priority{0};
   uint32_t qos_priority{0};
@@ -312,7 +312,8 @@ struct TaskInCtld {
                                  // node id.
   std::string allocated_craneds_regex;
 
-  double schedule_priority{0.0};
+  double mandated_priority{0.0};
+  double cached_priority{0.0};
 
   // Helper function
  public:

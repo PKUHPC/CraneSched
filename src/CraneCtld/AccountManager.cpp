@@ -839,20 +839,20 @@ result::result<void, std::string> AccountManager::CheckUidIsAdmin(
     uint32_t uid) {
   PasswordEntry entry(uid);
   if (!entry.Valid()) {
-    return result::failure(fmt::format("Uid {} not existed", uid));
+    return result::failure(fmt::format("Uid {} not found.", uid));
   }
 
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   const User* ptr = GetExistedUserInfoNoLock_(entry.Username());
   if (!ptr) {
-    return result::failure(fmt::format(
-        "Parameter error: User '{}' is not a crane user", entry.Username()));
+    return result::failure(
+        fmt::format("User {} is not a Crane user.", entry.Username()));
   }
 
   if (ptr->admin_level >= User::Operator) return {};
 
-  return result::failure(fmt::format(
-      "Permission error: User '{}' is an ordinary user.", entry.Username()));
+  return result::failure(
+      fmt::format("User {} has insufficient privilege.", entry.Username()));
 }
 
 AccountManager::Result AccountManager::HasPermissionToAccount(
