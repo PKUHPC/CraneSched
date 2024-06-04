@@ -963,39 +963,6 @@ CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id,
   return CraneErr::kNonExistent;
 }
 
-CraneErr TaskScheduler::CheckIfUidHasPermissionOnTask(uid_t uid,
-                                                      task_id_t task_id) {
-  m_pending_task_map_mtx_.Lock();
-  m_running_task_map_mtx_.Lock();
-
-  TaskInCtld* task;
-  bool found = false;
-  std::string task_username;
-
-  auto pd_iter = m_pending_task_map_.find(task_id);
-  if (pd_iter != m_pending_task_map_.end())
-    task = pd_iter->second.get(), found = true;
-
-  if (!found) {
-    auto rn_iter = m_running_task_map_.find(task_id);
-    if (rn_iter != m_running_task_map_.end())
-      task = rn_iter->second.get(), found = true;
-  }
-
-  if (found) task_username = task->password_entry->Username();
-
-  m_running_task_map_mtx_.Unlock();
-  m_pending_task_map_mtx_.Unlock();
-
-  if (!found) {
-    CRANE_ERROR("Task #{} not in Pd/Rn queue for permission check!", task_id);
-    return CraneErr::kNonExistent;
-  }
-
-  auto res = g_account_manager->CheckUidIsAdmin(uid);
-  return res.has_value() ? CraneErr::kOk : CraneErr::kPermissionDenied;
-}
-
 CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
   task_id_t task_id = task->TaskId();
 

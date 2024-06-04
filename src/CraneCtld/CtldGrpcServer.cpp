@@ -154,31 +154,14 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     crane::grpc::ModifyTaskReply *response) {
   using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
 
-  CraneErr err;
-  err = g_task_scheduler->CheckIfUidHasPermissionOnTask(request->uid(),
-                                                        request->task_id());
-  switch (err) {
-    case CraneErr::kOk:
-      break;
-
-    case CraneErr::kNonExistent:
-      response->set_ok(false);
-      response->set_reason(
-          "Task #{} was not found in running or pending queue.");
-      return grpc::Status::OK;
-
-    case CraneErr::kPermissionDenied:
-      response->set_ok(false);
-      response->set_reason("Permission denied.");
-      return grpc::Status::OK;
-
-    default:
-      response->set_ok(false);
-      response->set_reason(
-          fmt::format("Failed to check permission: {}.", CraneErrStr(err)));
-      return grpc::Status::OK;
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (res.has_error()) {
+    response->set_ok(false);
+    response->set_reason(res.error());
+    return grpc::Status::OK;
   }
 
+  CraneErr err;
   if (request->attribute() == ModifyTaskRequest::TimeLimit) {
     err = g_task_scheduler->ChangeTaskTimeLimit(request->task_id(),
                                                 request->time_limit_seconds());

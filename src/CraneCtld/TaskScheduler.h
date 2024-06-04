@@ -221,8 +221,6 @@ class TaskScheduler {
 
   CraneErr ChangeTaskPriority(task_id_t task_id, uint32_t priority);
 
-  CraneErr CheckIfUidHasPermissionOnTask(uid_t uid, task_id_t task_id);
-
   void TaskStatusChangeWithReasonAsync(uint32_t task_id,
                                        const CranedId& craned_index,
                                        crane::grpc::TaskStatus new_status,
