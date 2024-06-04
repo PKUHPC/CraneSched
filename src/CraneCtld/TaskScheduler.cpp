@@ -890,35 +890,44 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
   return std::move(future);
 }
 
-CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
-  LockGuard pending_guard(&m_pending_task_map_mtx_);
-  LockGuard running_guard(&m_running_task_map_mtx_);
+CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
+  CranedId craned_id;
+  bool found_running{false};
 
-  auto pd_iter = m_pending_task_map_.find(task_id);
-  if (pd_iter != m_pending_task_map_.end()) {
-    pd_iter->second->time_limit = absl::Seconds(secs);
-    crane::grpc::TaskToCtld* task_to_ctld =
-        pd_iter->second->MutableTaskToCtld();
-    task_to_ctld->mutable_time_limit()->set_seconds(secs);
-    g_embedded_db_client->UpdateTaskToCtld(0, pd_iter->second->TaskDbId(),
-                                           *task_to_ctld);
-    return CraneErr::kOk;
+  {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
+
+    TaskInCtld* task;
+    bool found = false;
+
+    auto pd_iter = m_pending_task_map_.find(task_id);
+    if (pd_iter != m_pending_task_map_.end())
+      found = true, task = pd_iter->second.get();
+
+    if (!found) {
+      auto rn_iter = m_running_task_map_.find(task_id);
+      if (rn_iter != m_running_task_map_.end()) {
+        found = found_running = true, task = rn_iter->second.get();
+        craned_id = task->executing_craned_id;
+      }
+    }
+
+    if (!found) {
+      CRANE_DEBUG("Task #{} not in Pd/Rn queue for time limit change!",
+                  task_id);
+      return CraneErr::kNonExistent;
+    }
+
+    task->time_limit = absl::Seconds(secs);
+    task->MutableTaskToCtld()->mutable_time_limit()->set_seconds(secs);
+    g_embedded_db_client->UpdateTaskToCtld(0, task->TaskDbId(),
+                                           task->TaskToCtld());
   }
 
-  auto rn_iter = m_running_task_map_.find(task_id);
-  if (rn_iter == m_running_task_map_.end()) {
-    CRANE_ERROR("Task #{} was not found in running or pending queue", task_id);
-    return CraneErr::kNonExistent;
-  }
+  if (!found_running) return CraneErr::kOk;
 
-  rn_iter->second->time_limit = absl::Seconds(secs);
-  crane::grpc::TaskToCtld* task_to_ctld = rn_iter->second->MutableTaskToCtld();
-  task_to_ctld->mutable_time_limit()->set_seconds(secs);
-  g_embedded_db_client->UpdateTaskToCtld(0, rn_iter->second->TaskDbId(),
-                                         *task_to_ctld);
-
-  // only send request to the first node
-  CranedId const& craned_id = rn_iter->second->executing_craned_id;
+  // Only send request to the executing node
   auto stub = g_craned_keeper->GetCranedStub(craned_id);
   if (stub && !stub->Invalid()) {
     CraneErr err = stub->ChangeTaskTimeLimit(task_id, secs);
@@ -932,7 +941,7 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(uint32_t task_id, int64_t secs) {
   return CraneErr::kOk;
 }
 
-CraneErr TaskScheduler::ChangeTaskPriority(uint32_t task_id,
+CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id,
                                            uint32_t priority) {
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   LockGuard running_guard(&m_running_task_map_mtx_);
@@ -946,12 +955,45 @@ CraneErr TaskScheduler::ChangeTaskPriority(uint32_t task_id,
   // Priority change of a running task is not supported.
   auto rn_iter = m_running_task_map_.find(task_id);
   if (rn_iter != m_running_task_map_.end()) {
-    CRANE_ERROR("Task #{} is running, unable to change priority", task_id);
+    CRANE_TRACE("Task #{} is running, unable to change priority", task_id);
     return CraneErr::kInvalidParam;
   }
 
-  CRANE_ERROR("Task #{} was not found in running or pending queue", task_id);
+  CRANE_TRACE("Task #{} not in Pd/Rn queue for priority change", task_id);
   return CraneErr::kNonExistent;
+}
+
+CraneErr TaskScheduler::CheckIfUidHasPermissionOnTask(uid_t uid,
+                                                      task_id_t task_id) {
+  m_pending_task_map_mtx_.Lock();
+  m_running_task_map_mtx_.Lock();
+
+  TaskInCtld* task;
+  bool found = false;
+  std::string task_username;
+
+  auto pd_iter = m_pending_task_map_.find(task_id);
+  if (pd_iter != m_pending_task_map_.end())
+    task = pd_iter->second.get(), found = true;
+
+  if (!found) {
+    auto rn_iter = m_running_task_map_.find(task_id);
+    if (rn_iter != m_running_task_map_.end())
+      task = rn_iter->second.get(), found = true;
+  }
+
+  if (found) task_username = task->password_entry->Username();
+
+  m_running_task_map_mtx_.Unlock();
+  m_pending_task_map_mtx_.Unlock();
+
+  if (!found) {
+    CRANE_ERROR("Task #{} not in Pd/Rn queue for permission check!", task_id);
+    return CraneErr::kNonExistent;
+  }
+
+  auto res = g_account_manager->HasPermissionToUser(uid, task_username, false);
+  return res.ok ? CraneErr::kOk : CraneErr::kPermissionDenied;
 }
 
 CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {

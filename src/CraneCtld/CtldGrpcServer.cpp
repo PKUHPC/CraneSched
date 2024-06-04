@@ -152,11 +152,34 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
 grpc::Status CraneCtldServiceImpl::ModifyTask(
     grpc::ServerContext *context, const crane::grpc::ModifyTaskRequest *request,
     crane::grpc::ModifyTaskReply *response) {
-  using TargetAttributes = crane::grpc::ModifyTaskRequest::TargetAttributes;
+  using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
 
   CraneErr err;
-  if (request->attribute() ==
-      TargetAttributes::ModifyTaskRequest_TargetAttributes_TimeLimit) {
+  err = g_task_scheduler->CheckIfUidHasPermissionOnTask(request->uid(),
+                                                        request->task_id());
+  switch (err) {
+    case CraneErr::kOk:
+      break;
+
+    case CraneErr::kNonExistent:
+      response->set_ok(false);
+      response->set_reason(
+          "Task #{} was not found in running or pending queue.");
+      return grpc::Status::OK;
+
+    case CraneErr::kPermissionDenied:
+      response->set_ok(false);
+      response->set_reason("Permission denied.");
+      return grpc::Status::OK;
+
+    default:
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Failed to check permission: {}.", CraneErrStr(err)));
+      return grpc::Status::OK;
+  }
+
+  if (request->attribute() == ModifyTaskRequest::TimeLimit) {
     err = g_task_scheduler->ChangeTaskTimeLimit(request->task_id(),
                                                 request->time_limit_seconds());
     if (err == CraneErr::kOk) {
@@ -166,14 +189,13 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       response->set_reason(
           fmt::format("Task #{} was not found in running or pending queue.",
                       request->task_id()));
-    } else if (err == CraneErr::kGenericFailure) {
+    } else {
       response->set_ok(false);
-      response->set_reason(fmt::format(
-          "The compute node failed to change the time limit of task#{}.",
-          request->task_id()));
+      response->set_reason(
+          fmt::format("Failed to change the time limit of Task#{}: {}.",
+                      request->task_id(), CraneErrStr(err)));
     }
-  } else if (request->attribute() ==
-             TargetAttributes::ModifyTaskRequest_TargetAttributes_Priority) {
+  } else if (request->attribute() == ModifyTaskRequest::Priority) {
     err = g_task_scheduler->ChangeTaskPriority(request->task_id(),
                                                request->priority_value());
     if (err == CraneErr::kOk) {
@@ -191,7 +213,8 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     }
   } else {
     response->set_ok(false);
-    response->set_reason(fmt::format("Invalid request parameters."));
+    response->set_reason(
+        fmt::format("Failed to change priority: {}.", CraneErrStr(err)));
   }
 
   return grpc::Status::OK;

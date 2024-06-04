@@ -219,9 +219,11 @@ class TaskScheduler {
   /// Otherwise, it is set to newly allocated task id.
   std::future<task_id_t> SubmitTaskAsync(std::unique_ptr<TaskInCtld> task);
 
-  CraneErr ChangeTaskTimeLimit(uint32_t task_id, int64_t secs);
+  CraneErr ChangeTaskTimeLimit(task_id_t task_id, int64_t secs);
 
-  CraneErr ChangeTaskPriority(uint32_t task_id, uint32_t priority);
+  CraneErr ChangeTaskPriority(task_id_t task_id, uint32_t priority);
+
+  CraneErr CheckIfUidHasPermissionOnTask(uid_t uid, task_id_t task_id);
 
   void TaskStatusChangeWithReasonAsync(uint32_t task_id,
                                        const CranedId& craned_index,
