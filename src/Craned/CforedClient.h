@@ -41,7 +41,7 @@ class CforedClient {
 
   moodycamel::ConcurrentQueue<std::pair<task_id_t, std::string /*msg*/>>
       m_output_queue_;
-  std::atomic<bool> m_stopped_;
+  std::atomic<bool> m_stopped_{false};
   std::string m_cfored_name_;
   std::thread m_async_read_write_thread_;
 

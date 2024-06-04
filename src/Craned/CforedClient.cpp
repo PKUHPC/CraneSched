@@ -87,11 +87,14 @@ void CforedClient::AsyncSendRecvThread_() {
 
   auto stream =
       m_stub_->AsyncTaskIOStream(&context, &m_cq_, (void*)Tag::Prepare);
+  CRANE_TRACE("Preparing TaskIOStream...");
 
   State state = State::Registering;
   while (true) {
     auto ddl = std::chrono::system_clock::now() + std::chrono::milliseconds(50);
     next_status = m_cq_.AsyncNext((void**)&tag, &ok, ddl);
+    CRANE_TRACE("NextStatus: {}, ok: {}, Tag received: {}, state: {}",
+                int(next_status), ok, int(tag), int(state));
 
     if (next_status == CompletionQueue::SHUTDOWN) break;
 
@@ -130,10 +133,10 @@ void CforedClient::AsyncSendRecvThread_() {
 
     switch (state) {
     case State::Registering:
-      CRANE_ASSERT(tag == Tag::Prepare);
-
       // Stream is ready. Start registering.
       CRANE_TRACE("Registering new stream on cfored {}", m_cfored_name_);
+
+      CRANE_ASSERT_MSG_VA(tag == Tag::Prepare, "Tag: {}", int(tag));
 
       request.set_type(StreamCforedTaskIORequest::CRANED_REGISTER);
       request.mutable_payload_register_req()->set_craned_id(
@@ -145,6 +148,8 @@ void CforedClient::AsyncSendRecvThread_() {
       break;
 
     case State::WaitRegisterAck:
+      CRANE_TRACE("WaitRegisterAck");
+
       if (tag == Tag::Write) {
         CRANE_TRACE("Cfored Registration was sent. Reading Ack...");
         stream->Read(&reply, (void*)Tag::Read);
@@ -197,8 +202,10 @@ void CforedClient::AsyncSendRecvThread_() {
       break;
     }
 
+    CRANE_TRACE("Next state: {}", int(state));
+
     if (state == State::End) break;
-    if (state == State::Unregistering)
+    if (state == State::Forwarding)
       // In case that high frequency of Read causes starving of Write,
       // clean output queue after processing every Read in addition to that in
       // TIMEOUT handling.
