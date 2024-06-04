@@ -507,7 +507,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
                   strerror(errno));
       return CraneErr::kSystemErr;
     }
-    std::get<InteractiveMetaInTaskInstance>(instance->meta).msg_forward_fd =
+    dynamic_cast<InteractiveMetaInTaskInstance*>(instance->meta.get())->msg_forward_fd =
         task_io_socket_pair[0];
   }
 
@@ -951,33 +951,46 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         return;
       }
 
-      // If this is a batch task, run it now.
-      if (instance->task.type() == crane::grpc::Batch) {
-        auto& meta = std::get<BatchMetaInTaskInstance>(instance->meta);
-        meta.parsed_sh_script_path =
-            fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);
-        auto& sh_path = meta.parsed_sh_script_path;
 
-        FILE* fptr = fopen(sh_path.c_str(), "w");
-        if (fptr == nullptr) {
-          CRANE_ERROR("Cannot write shell script for batch task #{}",
-                      instance->task.task_id());
-          this_->EvActivateTaskStatusChange_(
-              task_id, crane::grpc::TaskStatus::Failed,
-              ExitCode::kExitCodeFileNotFound,
-              fmt::format("Cannot write shell script for batch task #{}",
-                          task_id));
+      if (instance->task.type() == crane::grpc::Batch) {
+        instance->meta = std::make_unique<BatchMetaInTaskInstance>();
+      } else {
+        if (instance->task.interactive_meta().front_end_type() ==
+            crane::grpc::CALLOC) {
+          // not launch Calloc job
           return;
         }
+        instance->meta = std::make_unique<InteractiveMetaInTaskInstance>();
+      }
+
+      instance->meta->parsed_sh_script_path =
+          fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);
+      auto& sh_path = instance->meta->parsed_sh_script_path;
+
+      FILE* fptr = fopen(sh_path.c_str(), "w");
+      if (fptr == nullptr) {
+        CRANE_ERROR("Cannot write shell script for batch task #{}",
+                    instance->task.task_id());
+        this_->EvActivateTaskStatusChange_(
+            task_id, crane::grpc::TaskStatus::Failed,
+            ExitCode::kExitCodeFileNotFound,
+            fmt::format("Cannot write shell script for batch task #{}",
+                        task_id));
+        return;
+      }
+      if (instance->task.type() == crane::grpc::Batch) {
         fputs(instance->task.batch_meta().sh_script().c_str(), fptr);
-        fclose(fptr);
+      } else {
+        fputs(instance->task.interactive_meta().sh_script().c_str(), fptr);
+      }
+      fclose(fptr);
 
-        chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
+      chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
 
-        CraneErr err = CraneErr::kOk;
-        auto process = std::make_unique<ProcessInstance>(
-            sh_path, std::list<std::string>());
+      auto process =
+          std::make_unique<ProcessInstance>(sh_path, std::list<std::string>());
 
+      if (instance->task.type() == crane::grpc::Batch) {
         /* Perform file name substitutions
          * %j - Job ID
          * %u - Username
@@ -1002,71 +1015,28 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
                                {"%x", instance->task.name()}},
                               &process->batch_meta.parsed_error_file_pattern);
         }
+      }
 
-        // err will NOT be kOk ONLY if fork() is not called due to some failure
-        // or fork() fails.
-        // In this case, SIGCHLD will NOT be received for this task, and
-        // we should send TaskStatusChange manually.
-        err = this_->SpawnProcessInInstance_(instance, std::move(process));
-        if (err != CraneErr::kOk) {
-          this_->EvActivateTaskStatusChange_(
-              task_id, crane::grpc::TaskStatus::Failed,
-              ExitCode::kExitCodeSpawnProcessFail,
-              fmt::format(
-                  "Cannot spawn a new process inside the instance of task #{}",
-                  task_id));
-        }
-      } else {  // Interactive tasks
-        if (instance->task.interactive_meta().front_end_type() ==
-            crane::grpc::CALLOC) {
-          CRANE_TRACE("Ignoring CALLOC task launch");
-          return;
-        }
+      CraneErr err = CraneErr::kOk;
 
-        CRANE_TRACE("Launching Crun task");
+      // err will NOT be kOk ONLY if fork() is not called due to some failure
+      // or fork() fails.
+      // In this case, SIGCHLD will NOT be received for this task, and
+      // we should send TaskStatusChange manually.
 
-        auto sh_path =
-            fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);
-        instance->meta = InteractiveMetaInTaskInstance{
-            .parsed_sh_script_path = sh_path,
-        };
-        auto& meta = std::get<InteractiveMetaInTaskInstance>(instance->meta);
+      err = this_->SpawnProcessInInstance_(instance, std::move(process));
 
-        FILE* fptr = fopen(sh_path.c_str(), "w");
-        if (fptr == nullptr) {
-          CRANE_ERROR("Cannot write shell script for batch task #{}",
-                      instance->task.task_id());
-          this_->EvActivateTaskStatusChange_(
-              task_id, crane::grpc::TaskStatus::Failed,
-              ExitCode::kExitCodeFileNotFound,
-              fmt::format("Cannot write shell script for batch task #{}",
-                          task_id));
-          return;
-        }
-        fputs(instance->task.interactive_meta().sh_script().c_str(), fptr);
-        CRANE_TRACE("script: {}",
-                    instance->task.interactive_meta().sh_script());
-        fclose(fptr);
-
-        chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
-
-        CraneErr err = CraneErr::kOk;
-        auto process = std::make_unique<ProcessInstance>(
-            sh_path, std::list<std::string>());
-
-        err = this_->SpawnProcessInInstance_(instance, std::move(process));
-
+      if (instance->task.type() == crane::grpc::Interactive)
         // TODO: This statement should be moved into SpawnProcessInInstances_
         g_cfored_manager->RegisterIOForward(instance);
 
-        if (err != CraneErr::kOk) {
-          this_->EvActivateTaskStatusChange_(
-              task_id, crane::grpc::TaskStatus::Failed,
-              ExitCode::kExitCodeSpawnProcessFail,
-              fmt::format(
-                  "Cannot spawn a new process inside the instance of task #{}",
-                  task_id));
-        }
+      if (err != CraneErr::kOk) {
+        this_->EvActivateTaskStatusChange_(
+            task_id, crane::grpc::TaskStatus::Failed,
+            ExitCode::kExitCodeSpawnProcessFail,
+            fmt::format(
+                "Cannot spawn a new process inside the instance of task #{}",
+                task_id));
       }
     });
   }
@@ -1112,16 +1082,10 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
       continue;
     }
 
-    // Clean task scripts.
-    if (iter->second->task.type() == crane::grpc::Batch) {
-      g_thread_pool->detach_task(
-          [p = std::get<BatchMetaInTaskInstance>(iter->second->meta)
-                   .parsed_sh_script_path]() { util::os::DeleteFile(p); });
-    } else {
-      g_thread_pool->detach_task(
-          [p = std::get<InteractiveMetaInTaskInstance>(iter->second->meta)
-                   .parsed_sh_script_path]() { util::os::DeleteFile(p); });
-    }
+    g_thread_pool->detach_task(
+        [p = iter->second->meta->parsed_sh_script_path]() {
+          util::os::DeleteFile(p);
+        });
 
     // Free the TaskInstance structure
     this_->m_task_map_.erase(status_change.task_id);

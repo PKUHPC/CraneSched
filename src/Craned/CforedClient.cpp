@@ -162,7 +162,6 @@ void CforedClient::AsyncSendRecvThread_() {
             m_msg_queue_to_cfored_.try_dequeue_bulk(args.begin(),
                                                     approximate_size);
             for (const auto& [task_id, msg] : args) {
-              CRANE_TRACE("Read msg {} from task #{}", msg, task_id);
               request.clear_payload();
               request.clear_type();
               request.set_type(
@@ -208,10 +207,6 @@ void CforedClient::AsyncSendRecvThread_() {
 
         write_thread.join();
         read_thread.join();
-//        auto future = std::async(std::launch::async,&std::thread::join,&read_thread);
-//        if (future.wait_for(std::chrono::seconds(2))==std::future_status::timeout){
-//          context.TryCancel();
-//        }
         break;
       }
       case State::Unregistering: {
@@ -264,8 +259,8 @@ CforedManager::~CforedManager() {
 }
 
 void CforedManager::RegisterIOForward(TaskInstance* instance) {
-  auto& meta = std::get<InteractiveMetaInTaskInstance>(instance->meta);
-  int fd = meta.msg_forward_fd;
+  auto* meta = dynamic_cast<InteractiveMetaInTaskInstance*>(instance->meta.get());
+  int fd = meta->msg_forward_fd;
   task_id_t task_id = instance->task.task_id();
   const std::string& cfored_name =
       instance->task.interactive_meta().cfored_name();
@@ -290,7 +285,6 @@ void CforedManager::RegisterIOForward(TaskInstance* instance) {
         } else if (ret == -1) {
           CRANE_ERROR("Error when reading from task #{} output", task_id);
         }
-        CRANE_TRACE("Read task output size{}", ret);
         std::string output(buf, ret);
         this->m_cfored_client_map_[cfored_name]->TaskOutPutForward(
             task_id, output);
@@ -319,8 +313,8 @@ void CforedManager::RegisterIOForward(TaskInstance* instance) {
 }
 
 void CforedManager::UnregisterIOForward(TaskInstance* instance) {
-  auto meta = std::get<InteractiveMetaInTaskInstance>(instance->meta);
-  int fd = meta.msg_forward_fd;
+  auto* meta = dynamic_cast<InteractiveMetaInTaskInstance*>(instance->meta.get());
+  int fd = meta->msg_forward_fd;
   task_id_t task_id = instance->task.task_id();
   const std::string& cfored_name =
       instance->task.interactive_meta().cfored_name();

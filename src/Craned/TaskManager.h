@@ -138,14 +138,18 @@ class ProcessInstance {
   void* m_user_data_;
   std::function<void(void*)> m_clean_cb_;
 };
-
-struct BatchMetaInTaskInstance {
+struct MetaInTaskInstance {
   std::string parsed_sh_script_path;
+  virtual ~MetaInTaskInstance()=default;
 };
 
-struct InteractiveMetaInTaskInstance{
-  std::string parsed_sh_script_path;
+struct BatchMetaInTaskInstance : MetaInTaskInstance {
+  ~BatchMetaInTaskInstance() override=default;
+};
+
+struct InteractiveMetaInTaskInstance : MetaInTaskInstance {
   int msg_forward_fd;
+  ~InteractiveMetaInTaskInstance() override =default;
 };
 
 // Todo: Task may consists of multiple subtasks
@@ -158,15 +162,15 @@ struct TaskInstance {
       event_free(termination_timer);
       termination_timer = nullptr;
     }
-    if (this->task.type()==crane::grpc::Interactive){
-      close(std::get<InteractiveMetaInTaskInstance>(this->meta).msg_forward_fd);
+    if (this->task.type() == crane::grpc::Interactive) {
+      close(dynamic_cast<InteractiveMetaInTaskInstance*>(meta.get())->msg_forward_fd);
     }
   }
 
   crane::grpc::TaskToD task;
 
   PasswordEntry pwd_entry;
-  std::variant<BatchMetaInTaskInstance,InteractiveMetaInTaskInstance> meta;
+  std::unique_ptr<MetaInTaskInstance> meta;
 
   bool cancelled_by_user{false};
   bool terminated_by_timeout{false};
