@@ -948,7 +948,7 @@ CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id,
 
   auto pd_iter = m_pending_task_map_.find(task_id);
   if (pd_iter != m_pending_task_map_.end()) {
-    pd_iter->second->schedule_priority = double(priority);
+    pd_iter->second->mandated_priority = double(priority);
     return CraneErr::kOk;
   }
 
@@ -1496,7 +1496,7 @@ void TaskScheduler::QueryTasksInRam(
         static_cast<double>(task.resources.allocatable_resource.cpu_count) *
         task.node_num);
     task_it->set_exit_code(0);
-    task_it->set_priority(task.schedule_priority);
+    task_it->set_priority(task.cached_priority);
 
     task_it->set_status(task.RuntimeAttr().status());
     task_it->set_craned_list(
@@ -2474,12 +2474,13 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
 
   std::vector<std::pair<task_id_t, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
-    // Admin may specify a priority of the job.
+    // Admin may manually specify the priority of a task.
     // In this case, MultiFactorPriority will not calculate the priority.
-    if (task->schedule_priority == 0) {
-      task->schedule_priority = CalculatePriority_(task.get());
-    }
-    task_priority_vec.emplace_back(task->TaskId(), task->schedule_priority);
+    double priority = (task->mandated_priority == 0.0)
+                          ? CalculatePriority_(task.get())
+                          : task->mandated_priority;
+    task->cached_priority = priority;
+    task_priority_vec.emplace_back(task->TaskId(), priority);
   }
 
   std::sort(task_priority_vec.begin(), task_priority_vec.end(),
