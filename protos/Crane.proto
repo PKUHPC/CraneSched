@@ -528,7 +528,7 @@ message StreamCrunRequest{
     TaskStatus status = 2;
   }
 
-  message TaskIOForwardReq{
+  message TaskIOForwardReq {
     uint32 task_id = 1;
     string msg = 2;
   }
@@ -591,24 +591,23 @@ message StreamCforedCrunReply {
   }
 }
 
-message StreamCfroedTaskIORequest{
-
+message StreamCforedTaskIORequest {
   enum CranedRequestType{
     CRANED_REGISTER = 0;
     CRANED_TASK_OUTPUT = 1;
     CRANED_UNREGISTER = 2;
   }
 
-  message CranedRegisterReq{
+  message CranedRegisterReq {
     string craned_id = 1;
   }
 
-  message CranedTaskOutputReq{
+  message CranedTaskOutputReq {
     uint32 task_id = 1;
     string msg = 2;
   }
 
-  message CranedUnRegisterReq{
+  message CranedUnRegisterReq {
     string craned_id = 1;
   }
 
@@ -620,33 +619,33 @@ message StreamCfroedTaskIORequest{
   }
 }
 
-message StreamCfroedTaskIOReply{
-  enum CranedReplyType{
+message StreamCforedTaskIOReply {
+  enum CranedReplyType {
     CRANED_REGISTER_REPLY = 0;
     CRANED_TASK_INPUT = 1;
     CRANED_UNREGISTER_REPLY = 2;
   }
 
-  message CranedRegisterReply{
+  message CranedRegisterReply {
     bool ok = 1;
   }
 
-  message CranedTaskInputReq{
+  message CranedTaskInputReq {
     uint32 task_id = 1;
     string msg = 2;
   }
 
-  message CranedUnregisterReply{
+  message CranedUnregisterReply {
     bool ok = 1;
   }
 
   CranedReplyType type = 1;
-  oneof payload{
+
+  oneof payload {
     CranedRegisterReply payload_craned_register_reply = 2;
     CranedTaskInputReq payload_task_input_req = 3;
     CranedUnregisterReply payload_craned_unregister_reply = 4;
   }
-
 }
 
 // Todo: Divide service into two parts: one for Craned and one for Crun
@@ -727,6 +726,6 @@ service Craned {
 service CraneForeD {
   rpc CallocStream(stream StreamCallocRequest) returns(stream StreamCforedReply);
   rpc CrunStream(stream StreamCrunRequest) returns(stream StreamCforedCrunReply);
-  rpc TaskIOStream(stream StreamCfroedTaskIORequest) returns(stream StreamCfroedTaskIOReply);
+  rpc TaskIOStream(stream StreamCforedTaskIORequest) returns(stream StreamCforedTaskIOReply);
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
 }

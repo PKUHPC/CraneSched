@@ -5,16 +5,15 @@
 #include "crane/String.h"
 namespace Craned {
 
-CforedClient::CforedClient() : m_stopped(false){};
+CforedClient::CforedClient() : m_stopped_(false){};
 
 CforedClient::~CforedClient() {
   // Todo: remove this log
-  CRANE_TRACE("Free cfored client {}", m_cfored_name_);
-  m_stopped = true;
+  m_stopped_ = true;
+  m_cq_.Shutdown();
 
-  m_async_read_write_thread_.join();
-  // Todo: remove this log
-  CRANE_TRACE("Free cfored client {} complete", m_cfored_name_);
+  if (m_async_read_write_thread_.joinable()) m_async_read_write_thread_.join();
+  CRANE_TRACE("CforedClient to {} was destructed.", m_cfored_name_);
 };
 
 void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
@@ -47,173 +46,319 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
   m_async_read_write_thread_ = std::thread([this] { AsyncSendRecvThread_(); });
 }
 
+void CforedClient::CleanOutputQueueAndWriteToStreamSt_(
+    ClientAsyncReaderWriter<StreamCforedTaskIORequest, StreamCforedTaskIOReply>*
+        stream) {
+  size_t approx_size = m_output_queue_.size_approx();
+  if (approx_size == 0) return;
+
+  std::vector<std::pair<task_id_t, std::string>> outputs;
+  outputs.resize(approx_size);
+  m_output_queue_.try_dequeue_bulk(outputs.begin(), approx_size);
+  for (auto& [task_id, output] : outputs) {
+    StreamCforedTaskIORequest request;
+    request.set_type(StreamCforedTaskIORequest::CRANED_TASK_OUTPUT);
+
+    auto* payload = request.mutable_payload_task_output_req();
+    payload->set_msg(output), payload->set_task_id(task_id);
+
+    stream->Write(request, (void*)Tag::Write);
+  }
+}
+
 void CforedClient::AsyncSendRecvThread_() {
-  using crane::grpc::StreamCfroedTaskIOReply;
-  using crane::grpc::StreamCfroedTaskIORequest;
-  grpc::ClientContext context;
-  auto read_writer = m_stub_->TaskIOStream(&context);
   enum class State : int {
     Registering = 0,
-    Forwarding = 1,
-    Unregistering = 2,
-    Failing = 3
+    WaitRegisterAck = 1,
+    Forwarding = 2,
+    Unregistering = 3,
+    End = 4,
+
+    Failing
   };
-  auto state = State::Registering;
-  StreamCfroedTaskIORequest request;
-  StreamCfroedTaskIOReply reply;
+
+  bool ok;
+  Tag tag;
+  grpc::ClientContext context;
+  StreamCforedTaskIORequest request;
+  StreamCforedTaskIOReply reply;
+
+  grpc::CompletionQueue::NextStatus next_status;
+
+  auto stream =
+      m_stub_->AsyncTaskIOStream(&context, &m_cq_, (void*)Tag::Prepare);
+
+  State state = State::Registering;
   while (true) {
-    switch (state) {
-      case State::Registering: {
-        request.set_type(
-            crane::grpc::
-                StreamCfroedTaskIORequest_CranedRequestType_CRANED_REGISTER);
-        request.mutable_payload_register_req()->set_craned_id(
+    auto ddl = std::chrono::system_clock::now() + std::chrono::milliseconds(50);
+    next_status = m_cq_.AsyncNext((void**)&tag, &ok, ddl);
+
+    if (next_status == CompletionQueue::SHUTDOWN) break;
+
+    // TIMEOUT is like the Idle event in libuv.
+    if (next_status == grpc::CompletionQueue::TIMEOUT) {
+      if (m_stopped_) {
+        // Cfored received stopping signal. Unregistering...
+        CRANE_TRACE("Unregistering on cfored {}.", m_cfored_name_);
+
+        request.Clear();
+        request.set_type(StreamCforedTaskIORequest::CRANED_UNREGISTER);
+        request.mutable_payload_unregister_req()->set_craned_id(
             g_config.CranedIdOfThisNode);
-        CRANE_TRACE("Register this node to {}", m_cfored_name_);
-        auto ok = read_writer->Write(request);
-        if (!ok) {
-          CRANE_ERROR(
-              "Connection error when trying to register this craned to cfored "
-              "{}",
-              m_cfored_name_);
-          state = State::Failing;
-          break;
-        }
 
-        ok = read_writer->Read(&reply);
-        if (!ok) {
-          CRANE_ERROR(
-              "Error when reading for CranedRegisterReply form cfored {}",
-              m_cfored_name_);
-          state = State::Failing;
-          break;
-        }
+        stream->WriteLast(request, grpc::WriteOptions(), (void*)Tag::Write);
+        stream->Read(&reply, (void*)Tag::Read);
+        state = State::Unregistering;
+        continue;
+      } else {
+        if (state != State::Forwarding) continue;
 
-        if (reply.type() !=
-            crane::grpc::
-                StreamCfroedTaskIOReply_CranedReplyType_CRANED_REGISTER_REPLY) {
-          CRANE_ERROR(
-              "expect type CRANED_REGISTER_REPLY but receive {} from cfored "
-              "{}",
-              reply.type(), m_cfored_name_);
-          state = State::Failing;
-          break;
-        }
+        // Define the transition edge triggered by new incoming output.
+        // Check output queue regularly and forward if possible.
+        CleanOutputQueueAndWriteToStreamSt_(stream.get());
+        continue;
+      }
+    }
+
+    CRANE_ASSERT(next_status == grpc::CompletionQueue::GOT_EVENT);
+
+    // All failures of Write or Read cause the end of state machine.
+    if (!ok) {
+      CRANE_ERROR("Cfored connection failed.");
+      state = State::End;
+    }
+
+    switch (state) {
+    case State::Registering:
+      CRANE_ASSERT(tag == Tag::Prepare);
+
+      // Stream is ready. Start registering.
+      CRANE_TRACE("Registering new stream on cfored {}", m_cfored_name_);
+
+      request.set_type(StreamCforedTaskIORequest::CRANED_REGISTER);
+      request.mutable_payload_register_req()->set_craned_id(
+          g_config.CranedIdOfThisNode);
+      stream->Write(request, (void*)Tag::Write);
+      stream->Read(&reply, (void*)Tag::Read);
+
+      state = State::WaitRegisterAck;
+      break;
+
+    case State::WaitRegisterAck:
+      if (tag == Tag::Write) {
+        CRANE_TRACE("Cfored Registration was sent. Reading Ack...");
+        stream->Read(&reply, (void*)Tag::Read);
+      } else if (tag == Tag::Read) {
+        CRANE_TRACE("Cfored RegisterAck Read. Start Forwarding..");
+        reply.Clear();
+        stream->Read(&reply, (void*)Tag::Read);
         state = State::Forwarding;
-        CRANE_TRACE("This node register to {}", m_cfored_name_);
+      }
+      break;
+
+    case State::Forwarding: {
+      // Do nothing for acknowledgements of successful writes in Forward State.
+      if (tag == Tag::Write) break;
+      CRANE_ASSERT(tag == Tag::Read);
+      if (reply.type() != StreamCforedTaskIOReply::CRANED_TASK_INPUT) {
+        CRANE_ERROR("Expect TASK_INPUT, but got {}", reply.type());
         break;
       }
-      case State::Forwarding: {
-        absl::Mutex state_mtx;
-        CRANE_TRACE("Forwarding ready for {}", m_cfored_name_);
 
-        std::thread read_thread([&]() {
+      task_id_t task_id = reply.payload_task_input_req().task_id();
+      const std::string& msg = reply.payload_task_input_req().msg();
+
+      m_mtx_.Lock();
+      if (m_task_input_cb_map_.contains(task_id)) {
+        m_task_input_cb_map_[task_id](msg);
+      } else {
+        CRANE_ERROR("Cfored {} trying to send msg to unknown task #{}",
+                    m_cfored_name_, task_id);
+      }
+      m_mtx_.Unlock();
+
+      reply.Clear();
+      stream->Read(&reply, (void*)Tag::Read);
+    } break;
+
+    case State::Unregistering:
+      if (tag == Tag::Write) break;
+      CRANE_ASSERT(tag == Tag::Read);
+
+      if (reply.type() != StreamCforedTaskIOReply::CRANED_UNREGISTER_REPLY) {
+        CRANE_ERROR("Expect UNREGISTER_REPLY, but got {}", reply.type());
+        break;
+      }
+
+      state = State::End;
+      [[fallthrough]];
+
+    case State::End:
+      break;
+    }
+
+    if (state == State::End) break;
+    if (state == State::Unregistering)
+      // In case that high frequency of Read causes starving of Write,
+      // clean output queue after processing every Read in addition to that in
+      // TIMEOUT handling.
+      CleanOutputQueueAndWriteToStreamSt_(stream.get());
+  }
+
+  return;
+
+  //*********************************************************
+  auto read_writer = m_stub_->TaskIOStream(&context);
+
+  while (true) {
+    switch (state) {
+    case State::Registering: {
+      request.set_type(
+          crane::grpc::
+              StreamCforedTaskIORequest_CranedRequestType_CRANED_REGISTER);
+      request.mutable_payload_register_req()->set_craned_id(
+          g_config.CranedIdOfThisNode);
+      CRANE_TRACE("Registering new stream on cfored {}", m_cfored_name_);
+      ok = read_writer->Write(request);
+      if (!ok) {
+        CRANE_ERROR(
+            "Connection error when registering the stream on cfored {} ",
+            m_cfored_name_);
+        state = State::Failing;
+        break;
+      }
+
+      ok = read_writer->Read(&reply);
+      if (!ok) {
+        CRANE_ERROR("Error when reading for CranedRegisterReply form cfored {}",
+                    m_cfored_name_);
+        state = State::Failing;
+        break;
+      }
+
+      if (reply.type() !=
+          crane::grpc::
+              StreamCforedTaskIOReply_CranedReplyType_CRANED_REGISTER_REPLY) {
+        CRANE_ERROR(
+            "expect type CRANED_REGISTER_REPLY but receive {} from cfored "
+            "{}",
+            reply.type(), m_cfored_name_);
+        state = State::Failing;
+        break;
+      }
+      state = State::Forwarding;
+      CRANE_TRACE("This node register to {}", m_cfored_name_);
+      break;
+    }
+    case State::Forwarding: {
+      absl::Mutex state_mtx;
+      CRANE_TRACE("Forwarding ready for {}", m_cfored_name_);
+
+      std::thread read_thread([&]() {
+        state_mtx.Lock();
+        while ((state == State::Forwarding || state == State::Unregistering) &&
+               !m_stopped_) {
+          state_mtx.Unlock();
+          auto ok = read_writer->Read(&reply);
+          if (!ok) {
+            absl::MutexLock lock(&state_mtx);
+            CRANE_ERROR(
+                "Error when reading for CranedRegisterReply form cfored {}",
+                m_cfored_name_);
+            state = State::Failing;
+            return;
+          }
+          CRANE_TRACE("Read reply from {} of type {}", m_cfored_name_,
+                      reply.type());
+          if (reply.type() ==
+              crane::grpc::
+                  StreamCforedTaskIOReply_CranedReplyType_CRANED_TASK_INPUT) {
+            const auto task_id = reply.payload_task_input_req().task_id();
+            const auto& msg = reply.payload_task_input_req().msg();
+            m_mtx_.Lock();
+            if (m_task_input_cb_map_.contains(task_id)) {
+              m_task_input_cb_map_[task_id](msg);
+            } else {
+              CRANE_ERROR("Cfored {} trying to send msg to unknown task #{} ",
+                          m_cfored_name_, task_id);
+            }
+            m_mtx_.Unlock();
+          } else if (
+              reply.type() ==
+              crane::grpc::
+                  StreamCforedTaskIOReply_CranedReplyType_CRANED_UNREGISTER_REPLY) {
+            CRANE_TRACE("Unregister this node to {} successful",
+                        m_cfored_name_);
+            return;
+          }
+
           state_mtx.Lock();
-          while (
-              (state == State::Forwarding || state == State::Unregistering) &&
-              !m_stopped) {
-            state_mtx.Unlock();
-            auto ok = read_writer->Read(&reply);
+        }
+        state_mtx.Unlock();
+      });
+
+      std::thread write_thread([&]() {
+        state_mtx.Lock();
+        while (state == State::Forwarding && !m_stopped_) {
+          state_mtx.Unlock(); /* reading msg from tasks*/
+          auto approximate_size = m_output_queue_.size_approx();
+          std::vector<std::pair<task_id_t, std::string>> args;
+          args.resize(approximate_size);
+          m_output_queue_.try_dequeue_bulk(args.begin(), approximate_size);
+          for (const auto& [task_id, msg] : args) {
+            request.clear_payload();
+            request.clear_type();
+            request.set_type(
+                crane::grpc::
+                    StreamCforedTaskIORequest_CranedRequestType_CRANED_TASK_OUTPUT);
+            auto* req = request.mutable_payload_task_output_req();
+            req->set_msg(msg);
+            req->set_task_id(task_id);
+            auto ok = read_writer->Write(request);
             if (!ok) {
               absl::MutexLock lock(&state_mtx);
               CRANE_ERROR(
-                  "Error when reading for CranedRegisterReply form cfored {}",
+                  "Connection error when trying to unregister this craned to "
+                  "cfored {}",
                   m_cfored_name_);
               state = State::Failing;
               return;
             }
-            CRANE_TRACE("Read reply from {} of type {}", m_cfored_name_,
-                        reply.type());
-            if (reply.type() ==
-                crane::grpc::
-                    StreamCfroedTaskIOReply_CranedReplyType_CRANED_TASK_INPUT) {
-              const auto task_id = reply.payload_task_input_req().task_id();
-              const auto& msg = reply.payload_task_input_req().msg();
-              m_mtx_.Lock();
-              if (m_task_input_cb_map_.contains(task_id)) {
-                m_task_input_cb_map_[task_id](msg);
-              } else {
-                CRANE_ERROR("Cfored {} trying to send msg to unknown task #{}",
-                            m_cfored_name_, task_id);
-              }
-              m_mtx_.Unlock();
-            } else if (
-                reply.type() ==
-                crane::grpc::
-                    StreamCfroedTaskIOReply_CranedReplyType_CRANED_UNREGISTER_REPLY) {
-              CRANE_TRACE("Unregister this node to {} successful",
-                          m_cfored_name_);
-              return;
-            }
-
-            state_mtx.Lock();
           }
-          state_mtx.Unlock();
-        });
-
-        std::thread write_thread([&]() {
+          std::this_thread::sleep_for(std::chrono::microseconds(100));
           state_mtx.Lock();
-          while (state == State::Forwarding && !m_stopped) {
-            state_mtx.Unlock(); /* reading msg from tasks*/
-            auto approximate_size = m_msg_queue_to_cfored_.size_approx();
-            std::vector<std::pair<task_id_t, std::string>> args;
-            args.resize(approximate_size);
-            m_msg_queue_to_cfored_.try_dequeue_bulk(args.begin(),
-                                                    approximate_size);
-            for (const auto& [task_id, msg] : args) {
-              request.clear_payload();
-              request.clear_type();
-              request.set_type(
-                  crane::grpc::
-                      StreamCfroedTaskIORequest_CranedRequestType_CRANED_TASK_OUTPUT);
-              auto* req = request.mutable_payload_task_output_req();
-              req->set_msg(msg);
-              req->set_task_id(task_id);
-              auto ok = read_writer->Write(request);
-              if (!ok) {
-                absl::MutexLock lock(&state_mtx);
-                CRANE_ERROR(
-                    "Connection error when trying to unregister this craned to "
-                    "cfored {}",
-                    m_cfored_name_);
-                state = State::Failing;
-                return;
-              }
-            }
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
-            state_mtx.Lock();
-          }
-          state = State::Unregistering;
-          state_mtx.Unlock();
-          request.clear_payload();
-          request.clear_type();
-          request.set_type(
-              crane::grpc::
-                  StreamCfroedTaskIORequest_CranedRequestType_CRANED_UNREGISTER);
-          request.mutable_payload_unregister_req()->set_craned_id(
-              g_config.CranedIdOfThisNode);
-          CRANE_TRACE("Unregister this node to {}", m_cfored_name_);
-          auto ok = read_writer->Write(request);
-          if (!ok) {
-            CRANE_ERROR(
-                "Connection error when trying to unregister this craned to "
-                "cfored {}",
-                m_cfored_name_);
-            state = State::Failing;
-          }
-          read_writer->WritesDone();
-        });
+        }
+        state = State::Unregistering;
+        state_mtx.Unlock();
+        request.clear_payload();
+        request.clear_type();
+        request.set_type(
+            crane::grpc::
+                StreamCforedTaskIORequest_CranedRequestType_CRANED_UNREGISTER);
+        request.mutable_payload_unregister_req()->set_craned_id(
+            g_config.CranedIdOfThisNode);
+        CRANE_TRACE("Unregister this node to {}", m_cfored_name_);
+        auto ok = read_writer->Write(request);
+        if (!ok) {
+          CRANE_ERROR(
+              "Connection error when trying to unregister this craned to "
+              "cfored {}",
+              m_cfored_name_);
+          state = State::Failing;
+        }
+        read_writer->WritesDone();
+      });
 
-        write_thread.join();
-        read_thread.join();
-        break;
-      }
-      case State::Unregistering: {
-        return;
-      }
-      case State::Failing: {
-        return;
-      }
+      write_thread.join();
+      read_thread.join();
+      break;
+    }
+
+    case State::Unregistering:
+      [[fallthrough]];
+    case State::Failing: {
+      return;
+    }
     }
   }
 }
@@ -231,7 +376,7 @@ void CforedClient::UnsetTaskInputForwardCb(task_id_t task_id) {
 
 void CforedClient::TaskOutPutForward(task_id_t task_id,
                                      const std::string& msg) {
-  m_msg_queue_to_cfored_.enqueue({task_id, msg});
+  m_output_queue_.enqueue({task_id, msg});
 }
 
 CforedManager::CforedManager()
