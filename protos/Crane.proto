@@ -283,12 +283,12 @@ message ModifyTaskReply {
 message ModifyCranedStateRequest{
   string craned_id = 1;
   CranedState new_state = 2;
-  string reason =3;
+  string reason = 3;
 }
 
 message ModifyCranedStateReply{
   bool ok = 1;
-  string reason=2;
+  string reason = 2;
 }
 
 message AddAccountRequest {
