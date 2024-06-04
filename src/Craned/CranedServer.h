@@ -36,8 +36,6 @@ using grpc::ServerReaderWriter;
 using grpc::Status;
 
 using crane::grpc::Craned;
-using crane::grpc::SrunXStreamReply;
-using crane::grpc::SrunXStreamRequest;
 
 class CranedServiceImpl : public Craned::Service {
  public:

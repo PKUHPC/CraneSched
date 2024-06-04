@@ -47,7 +47,7 @@ enum PartitionState {
   PARTITION_DOWN = 1;
 }
 
-enum CranedState{
+enum CranedState {
   CRANE_IDLE = 0;
   CRANE_MIX = 1;
   CRANE_ALLOC = 2;
@@ -71,9 +71,9 @@ enum TaskType {
   Batch = 1;
 }
 
-enum InteractiveFrontEndType{
-  CALLOC = 0;
-  CRUN = 1;
+enum InteractiveTaskType {
+  Calloc = 0;
+  Crun = 1;
 }
 
 message TaskToCtld {
@@ -185,7 +185,7 @@ message InteractiveTaskAdditionalMeta{
   string cfored_name = 1;
   string sh_script = 2;
   string term_env = 3;
-  InteractiveFrontEndType front_end_type = 4;
+  InteractiveTaskType interactive_type = 4;
 }
 
 message TaskInfo {

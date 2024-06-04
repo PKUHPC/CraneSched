@@ -102,7 +102,6 @@ void CforedClient::AsyncSendRecvThread_() {
         state = State::Forwarding;
         CRANE_TRACE("This node register to {}", m_cfored_name_);
         break;
-
       }
       case State::Forwarding: {
         absl::Mutex state_mtx;
@@ -251,44 +250,49 @@ CforedManager::CforedManager()
 }
 
 CforedManager::~CforedManager() {
-  CRANE_TRACE("free cfored manager");
+  CRANE_TRACE("CforedManager destructor called.");
   m_stopped_ = true;
   m_loop->stop();
+
   if (m_ev_loop_thread_.joinable()) m_ev_loop_thread_.join();
+
   m_cfored_client_map_.clear();
 }
 
 void CforedManager::RegisterIOForward(TaskInstance* instance) {
-  auto* meta = dynamic_cast<InteractiveMetaInTaskInstance*>(instance->meta.get());
+  auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
   int fd = meta->msg_forward_fd;
   task_id_t task_id = instance->task.task_id();
   const std::string& cfored_name =
       instance->task.interactive_meta().cfored_name();
 
+  // TODO: Use async way to register handle rather than locking!
   absl::MutexLock lock(&m_mtx);
   m_stopped_temp_ = true;
   m_loop->stop();
+
   auto poll_handle = m_loop->resource<uvw::poll_handle>(fd);
-  poll_handle->on<uvw::poll_event>(
-      [fd, this](const uvw::poll_event&, uvw::poll_handle&) {
-        int MAX_BUF_SIZE = 4096;
-        absl::MutexLock lock(&this->m_mtx);
-        if (!this->m_fd_task_instance_map_.contains(fd)) return;
-        auto* instance = this->m_fd_task_instance_map_[fd];
-        task_id_t task_id = instance->task.task_id();
-        const std::string& cfored_name =
-            instance->task.interactive_meta().cfored_name();
-        char buf[MAX_BUF_SIZE];
-        auto ret = read(fd, buf, MAX_BUF_SIZE);
-        if (ret == 0) {
-          return;
-        } else if (ret == -1) {
-          CRANE_ERROR("Error when reading from task #{} output", task_id);
-        }
-        std::string output(buf, ret);
-        this->m_cfored_client_map_[cfored_name]->TaskOutPutForward(
-            task_id, output);
-      });
+  poll_handle->on<uvw::poll_event>([fd, this](const uvw::poll_event&,
+                                              uvw::poll_handle&) {
+    constexpr int MAX_BUF_SIZE = 4096;
+
+    // TODO: Too large critical area!
+    absl::MutexLock lock(&this->m_mtx);
+    if (!this->m_fd_task_instance_map_.contains(fd)) return;
+
+    auto* instance = this->m_fd_task_instance_map_[fd];
+    task_id_t task_id = instance->task.task_id();
+    const std::string& cfored_name =
+        instance->task.interactive_meta().cfored_name();
+
+    char buf[MAX_BUF_SIZE];
+    auto ret = read(fd, buf, MAX_BUF_SIZE);
+    if (ret == 0) return;
+    if (ret == -1) CRANE_ERROR("Error when reading task #{} output", task_id);
+
+    std::string output(buf, ret);
+    this->m_cfored_client_map_[cfored_name]->TaskOutPutForward(task_id, output);
+  });
   poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
   m_stopped_temp_ = false;
 
@@ -300,24 +304,26 @@ void CforedManager::RegisterIOForward(TaskInstance* instance) {
     m_cfored_client_map_[cfored_name] = std::move(cfored_client);
     m_cfored_client_ref_count_map_[cfored_name] = 1;
   }
+
   m_task_id_handle_map_[task_id] = poll_handle;
   m_fd_task_instance_map_[fd] = instance;
   m_cfored_client_map_[cfored_name]->SetTaskInputForwardCb(
       task_id, [fd](const std::string& msg) {
         CRANE_TRACE("forwarding msg {} to task", msg);
-        auto size = write(fd, msg.c_str(), msg.size());
-        while (size != msg.size()) {
-          size += write(fd, msg.c_str() + size, msg.size() - size);
-        }
+        ssize_t sz_sent = 0;
+        while (sz_sent != msg.size())
+          sz_sent += write(fd, msg.c_str() + sz_sent, msg.size() - sz_sent);
       });
 }
 
 void CforedManager::UnregisterIOForward(TaskInstance* instance) {
-  auto* meta = dynamic_cast<InteractiveMetaInTaskInstance*>(instance->meta.get());
+  auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
   int fd = meta->msg_forward_fd;
   task_id_t task_id = instance->task.task_id();
   const std::string& cfored_name =
       instance->task.interactive_meta().cfored_name();
+
+  // TODO: Too large critical area!
   absl::MutexLock lock(&m_mtx);
   auto count = m_cfored_client_ref_count_map_[cfored_name];
   if (count == 1) {
@@ -327,11 +333,14 @@ void CforedManager::UnregisterIOForward(TaskInstance* instance) {
     --m_cfored_client_ref_count_map_[cfored_name];
     m_cfored_client_map_[cfored_name]->UnsetTaskInputForwardCb(task_id);
   }
+
   m_stopped_temp_ = true;
   m_loop->stop();
+
   m_task_id_handle_map_[task_id]->stop();
   m_task_id_handle_map_[task_id]->close();
   m_task_id_handle_map_.erase(task_id);
+
   m_stopped_temp_ = false;
   m_fd_task_instance_map_.erase(fd);
 }

@@ -709,8 +709,8 @@ void TaskScheduler::ScheduleThread_() {
           craned_task_to_exec_raw_ptrs_map[task->executing_craned_id]
               .emplace_back(task.get());
         } else if (task->type == crane::grpc::Interactive &&
-                   std::get<InteractiveMetaInTask>(task->meta).source ==
-                       InteractiveMetaInTask::Source::CRUN) {
+                   std::get<InteractiveMetaInTask>(task->meta)
+                           .interactive_type == crane::grpc::Crun) {
           for (const auto& craned_id : task->CranedIds())
             craned_task_to_exec_raw_ptrs_map[craned_id].emplace_back(
                 task.get());
@@ -1370,8 +1370,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       if (new_status == crane::grpc::ExceedTimeLimit ||
           exit_code == ExitCode::kExitCodeCranedDown) {
         meta.has_been_cancelled_on_front_end = true;
-        //todo:Remove this
-        CRANE_TRACE("cancel task {} for timeout/craned down",task->TaskId());
+        // todo:Remove this
+        CRANE_TRACE("cancel task {} for timeout/craned down", task->TaskId());
         meta.cb_task_cancel(task->TaskId());
         task->SetStatus(new_status);
       } else {

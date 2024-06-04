@@ -138,18 +138,19 @@ class ProcessInstance {
   void* m_user_data_;
   std::function<void(void*)> m_clean_cb_;
 };
+
 struct MetaInTaskInstance {
   std::string parsed_sh_script_path;
-  virtual ~MetaInTaskInstance()=default;
+  virtual ~MetaInTaskInstance() = default;
 };
 
 struct BatchMetaInTaskInstance : MetaInTaskInstance {
-  ~BatchMetaInTaskInstance() override=default;
+  ~BatchMetaInTaskInstance() override = default;
 };
 
-struct InteractiveMetaInTaskInstance : MetaInTaskInstance {
+struct CrunMetaInTaskInstance : MetaInTaskInstance {
   int msg_forward_fd;
-  ~InteractiveMetaInTaskInstance() override =default;
+  ~CrunMetaInTaskInstance() override = default;
 };
 
 // Todo: Task may consists of multiple subtasks
@@ -162,8 +163,10 @@ struct TaskInstance {
       event_free(termination_timer);
       termination_timer = nullptr;
     }
-    if (this->task.type() == crane::grpc::Interactive) {
-      close(dynamic_cast<InteractiveMetaInTaskInstance*>(meta.get())->msg_forward_fd);
+
+    if (this->task.type() == crane::grpc::Interactive &&
+        this->task.interactive_meta().interactive_type() == crane::grpc::Crun) {
+      close(dynamic_cast<CrunMetaInTaskInstance*>(meta.get())->msg_forward_fd);
     }
   }
 
@@ -290,17 +293,8 @@ class TaskManager {
                                            const std::string& cwd,
                                            task_id_t task_id);
 
-  /**
-   * EvActivateTaskStatusChange_ must NOT be called in this method and should be
-   *  called in the caller method after checking the return value of this
-   *  method.
-   * @return kSystemErr if the socket pair between the parent process and child
-   *  process cannot be created, and the caller should call strerror() to check
-   *  the unix error code. kLibEventError if bufferevent_socket_new() fails.
-   *  kCgroupError if CgroupManager cannot move the process to the cgroup bound
-   *  to the TaskInstance. kProtobufError if the communication between the
-   *  parent and the child process fails.
-   */
+  void LaunchTaskInstanceMt_(TaskInstance* instance);
+
   CraneErr SpawnProcessInInstance_(TaskInstance* instance,
                                    std::unique_ptr<ProcessInstance> process);
 

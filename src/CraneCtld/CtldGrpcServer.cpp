@@ -1038,6 +1038,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
     grpc::ServerContext *context,
     grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
                              crane::grpc::StreamCforedRequest> *stream) {
+  using crane::grpc::InteractiveTaskType;
   using crane::grpc::StreamCforedRequest;
   using crane::grpc::StreamCtldReply;
   using grpc::Status;
@@ -1101,13 +1102,11 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
               auto &meta = std::get<InteractiveMetaInTask>(task->meta);
               meta.cfored_name = payload.cfored_name();
               meta.sh_script = payload.task().interactive_meta().sh_script();
-              if (payload.task().interactive_meta().front_end_type() ==
-                  crane::grpc::CRUN) {
-                meta.source = InteractiveMetaInTask::Source::CRUN;
+
+              meta.interactive_type =
+                  payload.task().interactive_meta().interactive_type();
+              if (meta.interactive_type == InteractiveTaskType::Crun)
                 meta.term_env = payload.task().interactive_meta().term_env();
-              } else {
-                meta.source = InteractiveMetaInTask::Source::CALLOC;
-              }
 
               meta.cb_task_res_allocated =
                   [writer = &stream_writer](
@@ -1128,7 +1127,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
                 // calloc will not send TaskCompletionAckReply when task
                 // Complete.
                 // crun task will send TaskStatusChange from Craned,
-                if (meta.source == InteractiveMetaInTask::Source::CRUN) {
+                if (meta.interactive_type == InteractiveTaskType::Crun) {
                   // todo: Remove this
                   CRANE_TRACE(
                       "Sending TaskCompletionAckReply in task_completed",
@@ -1181,12 +1180,12 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
               g_task_scheduler->TerminateRunningTask(payload.task_id());
 
-              if (payload.req_front_type() != crane::grpc::CRUN) {
+              if (payload.interactive_type() != InteractiveTaskType::Crun) {
                 // todo: Remove this
                 CRANE_TRACE(
                     "Sending type {} TaskCompletionAckReply task {} in "
                     "TASK_COMPLETION_REQUEST",
-                    payload.req_front_type(), payload.task_id());
+                    payload.interactive_type(), payload.task_id());
                 ok = stream_writer.WriteTaskCompletionAckReply(
                     payload.task_id());
               }

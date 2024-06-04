@@ -196,15 +196,14 @@ struct PartitionMeta {
 };
 
 struct InteractiveMetaInTask {
-  enum class Source{
-    CALLOC=1,
-    CRUN=2
-  };
   std::string cfored_name;
+  crane::grpc::InteractiveTaskType interactive_type;
+
   std::string sh_script;
-  Source source;
   std::string term_env;
-  std::function<void(task_id_t, std::string const&,std::list<std::string> const&)> cb_task_res_allocated;
+  std::function<void(task_id_t, std::string const&,
+                     std::list<std::string> const&)>
+      cb_task_res_allocated;
   std::function<void(task_id_t)> cb_task_completed;
   std::function<void(task_id_t)> cb_task_cancel;
 
