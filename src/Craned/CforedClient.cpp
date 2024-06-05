@@ -258,7 +258,7 @@ void CforedClient::UnsetTaskInputForwardCb(task_id_t task_id) {
 
 void CforedClient::TaskOutPutForward(task_id_t task_id,
                                      const std::string& msg) {
-  CRANE_TRACE("Receive TaskOutputForward for task #{}: ", task_id, msg);
+  CRANE_TRACE("Receive TaskOutputForward for task #{}: {}", task_id, msg);
   m_output_queue_.enqueue({task_id, msg});
 }
 

@@ -677,20 +677,21 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     // Set pgid to the pid of task root process.
     setpgid(0, 0);
 
-    close(io_sock_pair[0]);
     close(ctrl_sock_pair[0]);
-    int fd = ctrl_sock_pair[1];
+    int ctrl_fd = ctrl_sock_pair[1];
 
-    FileInputStream istream(fd);
-    FileOutputStream ostream(fd);
+    FileInputStream istream(ctrl_fd);
+    FileOutputStream ostream(ctrl_fd);
     CanStartMessage msg;
     ChildProcessReady child_process_ready;
     bool ok;
 
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
-    int stdout_fd, stderr_fd, stdin_fd;
+
     if (instance->task.type() == crane::grpc::Batch) {
+      int stdout_fd, stderr_fd;
+
       const std::string& stdout_file_path =
           process->batch_meta.parsed_output_file_pattern;
       const std::string& stderr_file_path =
@@ -719,13 +720,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(
         close(stderr_fd);
       }
       close(stdout_fd);
-    } else {
-      stdin_fd = io_sock_pair[1];
-      stdout_fd = io_sock_pair[1];
-      stderr_fd = io_sock_pair[1];
-      dup2(stdin_fd, 0);
-      dup2(stdout_fd, 1);  // stdout -> output file
-      dup2(stderr_fd, 2);
+
+    } else if (CheckIfInstanceTypeIsCrun_(instance)) {
+      close(io_sock_pair[0]);
+
+      dup2(io_sock_pair[1], 0);
+      dup2(io_sock_pair[1], 1);
+      dup2(io_sock_pair[1], 2);
       close(io_sock_pair[1]);
     }
 
@@ -737,7 +738,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
       std::abort();
     }
 
-    close(fd);
+    close(ctrl_fd);
 
     // Close stdin for batch tasks.
     // If these file descriptors are not closed, a program like mpirun may
