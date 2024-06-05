@@ -136,14 +136,9 @@ void CforedClient::AsyncSendRecvThread_() {
         // since every state ends with a read request issuing.
 
         state = State::Unregistering;
-        continue;
-      } else {
-        if (state != State::Forwarding) continue;
-
-        // Define the transition edge triggered by new incoming output.
-        // Check output queue regularly and forward if possible.
-        continue;
       }
+
+      continue;
     }
 
     CRANE_ASSERT(next_status == grpc::CompletionQueue::GOT_EVENT);
