@@ -10,9 +10,8 @@ CforedClient::CforedClient() : m_stopped_(false){};
 CforedClient::~CforedClient() {
   CRANE_TRACE("CforedClient to {} is being destructed.", m_cfored_name_);
   m_stopped_ = true;
-  m_cq_.Shutdown();
-
   if (m_async_read_write_thread_.joinable()) m_async_read_write_thread_.join();
+  m_cq_.Shutdown();
   CRANE_TRACE("CforedClient to {} was destructed.", m_cfored_name_);
 };
 
@@ -51,13 +50,14 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
         stream,
     std::atomic<bool>* write_pending) {
   CRANE_TRACE("CleanOutputQueueThread started.");
+  std::pair<task_id_t, std::string> output;
+  bool ok = m_output_queue_.try_dequeue(output);
 
-  while (!m_stopped_) {
-    std::pair<task_id_t, std::string> output;
-
-    bool ok = m_output_queue_.try_dequeue(output);
+  // clean all msg before stop
+  while (!m_stopped_ || ok) {
     if (!ok) {
       std::this_thread::sleep_for(std::chrono::milliseconds(75));
+      ok = m_output_queue_.try_dequeue(output);
       continue;
     }
 
@@ -73,6 +73,8 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     CRANE_TRACE("Writing output...");
     stream->Write(request, (void*)Tag::Write);
     write_pending->store(true, std::memory_order::release);
+
+    ok = m_output_queue_.try_dequeue(output);
   }
 
   CRANE_TRACE("CleanOutputQueueThread exited.");
