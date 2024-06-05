@@ -35,9 +35,10 @@ class CforedClient {
   void TaskOutPutForward(task_id_t task_id, const std::string& msg);
 
  private:
-  void CleanOutputQueueAndWriteToStreamSt_(
+  void CleanOutputQueueAndWriteToStreamThread_(
       ClientAsyncReaderWriter<StreamCforedTaskIORequest,
-                              StreamCforedTaskIOReply>* stream);
+                              StreamCforedTaskIOReply>* stream,
+      std::atomic<bool>* write_pending);
 
   moodycamel::ConcurrentQueue<std::pair<task_id_t, std::string /*msg*/>>
       m_output_queue_;
@@ -48,7 +49,8 @@ class CforedClient {
   std::shared_ptr<Channel> m_cfored_channel_;
   std::unique_ptr<CraneForeD::Stub> m_stub_;
 
-  enum class Tag : int { Prepare = 0, Read = 1, Write = 2 };
+  // Tag MUST have the same size of void* !!!!
+  enum class Tag : intptr_t { Prepare = 0, Read = 1, Write = 2 };
   grpc::CompletionQueue m_cq_;
 
   absl::Mutex m_mtx_;

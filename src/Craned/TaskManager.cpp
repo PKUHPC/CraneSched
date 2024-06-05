@@ -270,20 +270,20 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
               // task. See the comment of EvActivateTaskStatusChange_.
 
               switch (instance->err_before_exec) {
-                case CraneErr::kProtobufError:
-                  this_->EvActivateTaskStatusChange_(
-                      task_id, crane::grpc::TaskStatus::Cancelled,
-                      ExitCode::kExitCodeSpawnProcessFail, std::nullopt);
-                  break;
+              case CraneErr::kProtobufError:
+                this_->EvActivateTaskStatusChange_(
+                    task_id, crane::grpc::TaskStatus::Cancelled,
+                    ExitCode::kExitCodeSpawnProcessFail, std::nullopt);
+                break;
 
-                case CraneErr::kCgroupError:
-                  this_->EvActivateTaskStatusChange_(
-                      task_id, crane::grpc::TaskStatus::Cancelled,
-                      ExitCode::kExitCodeCgroupError, std::nullopt);
-                  break;
+              case CraneErr::kCgroupError:
+                this_->EvActivateTaskStatusChange_(
+                    task_id, crane::grpc::TaskStatus::Cancelled,
+                    ExitCode::kExitCodeCgroupError, std::nullopt);
+                break;
 
-                default:
-                  break;
+              default:
+                break;
               }
 
               if (instance->task.type() == crane::grpc::Batch) {
@@ -493,22 +493,25 @@ CraneErr TaskManager::SpawnProcessInInstance_(
   using crane::grpc::subprocess::CanStartMessage;
   using crane::grpc::subprocess::ChildProcessReady;
 
-  int socket_pair[2];
+  int ctrl_sock_pair[2];  // Socket pair for passing control messages.
+  int io_sock_pair[2];    // Socket pair for forwarding IO of crun tasks.
 
-  if (socketpair(AF_UNIX, SOCK_STREAM, 0, socket_pair) != 0) {
+  if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
     CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
     return CraneErr::kSystemErr;
   }
 
-  int task_io_socket_pair[2];
-  if (instance->task.type() == crane::grpc::Interactive) {
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, task_io_socket_pair) != 0) {
+  // Create IO socket pair for crun tasks.
+  if (CheckIfInstanceTypeIsCrun_(instance)) {
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, io_sock_pair) != 0) {
       CRANE_ERROR("Failed to create socket pair for task io forward: {}",
                   strerror(errno));
       return CraneErr::kSystemErr;
     }
-    dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get())
-        ->msg_forward_fd = task_io_socket_pair[0];
+
+    auto* crun_meta =
+        dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
+    crun_meta->msg_forward_fd = io_sock_pair[0];
   }
 
   // save the current uid/gid
@@ -539,6 +542,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
                 instance->task.task_id(), child_pid);
 
+    if (CheckIfInstanceTypeIsCrun_(instance))
+      g_cfored_manager->RegisterIOForward(instance);
+
     // Note that the following code will move the child process into cgroup.
     // Once the child process is moved into cgroup, it might be killed due to
     // memory limitation.
@@ -558,17 +564,17 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     // Move the ownership of ProcessInstance into the TaskInstance.
     instance->processes.emplace(child_pid, std::move(process));
 
-    close(task_io_socket_pair[1]);
-    close(socket_pair[1]);
-    int fd = socket_pair[0];
+    close(io_sock_pair[1]);
+    close(ctrl_sock_pair[1]);
+    int ctrl_fd = ctrl_sock_pair[0];
     bool ok;
 
     setegid(saved_priv.gid);
     seteuid(saved_priv.uid);
     setgroups(0, nullptr);
 
-    FileInputStream istream(fd);
-    FileOutputStream ostream(fd);
+    FileInputStream istream(ctrl_fd);
+    FileOutputStream ostream(ctrl_fd);
     CanStartMessage msg;
     ChildProcessReady child_process_ready;
 
@@ -611,7 +617,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     if (!ok) {
       CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}",
                   child_pid, instance->task.task_id());
-      close(fd);
+      close(ctrl_fd);
 
       // Communication failure caused by process crash or grpc error.
       // Since now the parent cannot ask the child
@@ -627,21 +633,21 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     if (!msg.ok()) {
       CRANE_ERROR("Failed to read protobuf from subprocess {} of task #{}",
                   child_pid, instance->task.task_id());
-      close(fd);
+      close(ctrl_fd);
 
       // See comments above.
       instance->err_before_exec = CraneErr::kProtobufError;
       return CraneErr::kProtobufError;
     }
 
-    close(fd);
+    close(ctrl_fd);
     return CraneErr::kOk;
 
   AskChildToSuicide:
     msg.set_ok(false);
 
     ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
-    close(fd);
+    close(ctrl_fd);
     if (!ok) {
       CRANE_ERROR("Failed to ask subprocess {} to suicide for task #{}",
                   child_pid, instance->task.task_id());
@@ -671,9 +677,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     // Set pgid to the pid of task root process.
     setpgid(0, 0);
 
-    close(task_io_socket_pair[0]);
-    close(socket_pair[0]);
-    int fd = socket_pair[1];
+    close(io_sock_pair[0]);
+    close(ctrl_sock_pair[0]);
+    int fd = ctrl_sock_pair[1];
 
     FileInputStream istream(fd);
     FileOutputStream ostream(fd);
@@ -714,13 +720,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(
       }
       close(stdout_fd);
     } else {
-      stdin_fd = task_io_socket_pair[1];
-      stdout_fd = task_io_socket_pair[1];
-      stderr_fd = task_io_socket_pair[1];
+      stdin_fd = io_sock_pair[1];
+      stdout_fd = io_sock_pair[1];
+      stderr_fd = io_sock_pair[1];
       dup2(stdin_fd, 0);
       dup2(stdout_fd, 1);  // stdout -> output file
       dup2(stderr_fd, 2);
-      close(task_io_socket_pair[1]);
+      close(io_sock_pair[1]);
     }
 
     child_process_ready.set_ok(true);
@@ -1026,11 +1032,6 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   // In this case, SIGCHLD will NOT be received for this task, and
   // we should send TaskStatusChange manually.
   CraneErr err = SpawnProcessInInstance_(instance, std::move(process));
-
-  if (instance->task.type() == crane::grpc::Interactive)
-    // TODO: This statement should be moved into SpawnProcessInInstances_
-    g_cfored_manager->RegisterIOForward(instance);
-
   if (err != CraneErr::kOk) {
     EvActivateTaskStatusChange_(
         task_id, crane::grpc::TaskStatus::Failed,
@@ -1539,6 +1540,12 @@ bool TaskManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
   }
 
   return cg_ptr->MigrateProcIn(pid);
+}
+
+bool TaskManager::CheckIfInstanceTypeIsCrun_(TaskInstance* instance) {
+  return instance->task.type() == crane::grpc::Interactive &&
+         instance->task.interactive_meta().interactive_type() ==
+             crane::grpc::Crun;
 }
 
 }  // namespace Craned

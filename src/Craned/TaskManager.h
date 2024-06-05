@@ -293,6 +293,8 @@ class TaskManager {
                                            const std::string& cwd,
                                            task_id_t task_id);
 
+  static bool CheckIfInstanceTypeIsCrun_(TaskInstance* instance);
+
   void LaunchTaskInstanceMt_(TaskInstance* instance);
 
   CraneErr SpawnProcessInInstance_(TaskInstance* instance,
