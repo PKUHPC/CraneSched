@@ -53,7 +53,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
   std::pair<task_id_t, std::string> output;
   bool ok = m_output_queue_.try_dequeue(output);
 
-  // clean all msg before stop
+  // Make sure before exit all output has been drained.
   while (!m_stopped_ || ok) {
     if (!ok) {
       std::this_thread::sleep_for(std::chrono::milliseconds(75));
