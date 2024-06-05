@@ -2436,14 +2436,15 @@ void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id,
 std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     const OrderedTaskMap& pending_task_map,
     const UnorderedTaskMap& running_task_map, size_t limit_num) {
-  CalculateFactorBound_(pending_task_map, running_task_map);
+  absl::Time now_time = absl::Now();
+  CalculateFactorBound_(pending_task_map, running_task_map, now_time);
 
   std::vector<std::pair<task_id_t, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
     // Admin may manually specify the priority of a task.
     // In this case, MultiFactorPriority will not calculate the priority.
     double priority = (task->mandated_priority == 0.0)
-                          ? CalculatePriority_(task.get())
+                          ? CalculatePriority_(task.get(), now_time)
                           : task->mandated_priority;
     task->cached_priority = priority;
     task_priority_vec.emplace_back(task->TaskId(), priority);
@@ -2468,7 +2469,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
 
 void MultiFactorPriority::CalculateFactorBound_(
     const OrderedTaskMap& pending_task_map,
-    const UnorderedTaskMap& running_task_map) {
+    const UnorderedTaskMap& running_task_map, absl::Time now_time) {
   FactorBound& bound = m_factor_bound_;
 
   // Initialize the values of each max and min
@@ -2496,7 +2497,7 @@ void MultiFactorPriority::CalculateFactorBound_(
   bound.acc_service_val_map.clear();
 
   for (const auto& [task_id, task] : pending_task_map) {
-    uint64_t age = ToInt64Seconds((absl::Now() - task->SubmitTime()));
+    uint64_t age = ToInt64Seconds((now_time - task->SubmitTime()));
     age = std::min(age, g_config.PriorityConfig.MaxAge);
 
     bound.acc_service_val_map[task->account] = 0.0;
@@ -2556,7 +2557,7 @@ void MultiFactorPriority::CalculateFactorBound_(
     else
       service_val += 1.0;
 
-    uint64_t run_time = ToInt64Seconds(absl::Now() - task->StartTime());
+    uint64_t run_time = ToInt64Seconds(now_time - task->StartTime());
     bound.acc_service_val_map[task->account] +=
         service_val * static_cast<double>(run_time);
   }
@@ -2567,11 +2568,11 @@ void MultiFactorPriority::CalculateFactorBound_(
   }
 }
 
-double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task) {
+double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task, absl::Time now_time) {
   FactorBound& bound = m_factor_bound_;
 
   uint64_t task_age =
-      ToUnixSeconds(absl::Now()) - task->SubmitTimeInUnixSecond();
+      ToUnixSeconds(now_time) - task->SubmitTimeInUnixSecond();
   task_age = std::min(task_age, g_config.PriorityConfig.MaxAge);
 
   uint32_t task_qos_priority = task->qos_priority;

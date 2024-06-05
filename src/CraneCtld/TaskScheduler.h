@@ -79,8 +79,8 @@ class MultiFactorPriority : public IPrioritySorter {
   };
 
   void CalculateFactorBound_(const OrderedTaskMap& pending_task_map,
-                             const UnorderedTaskMap& running_task_map);
-  double CalculatePriority_(Ctld::TaskInCtld* task);
+                             const UnorderedTaskMap& running_task_map, absl::Time now_time);
+  double CalculatePriority_(Ctld::TaskInCtld* task, absl::Time now_time);
 
   FactorBound m_factor_bound_;
 };
