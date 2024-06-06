@@ -119,7 +119,8 @@ void CforedClient::AsyncSendRecvThread_() {
       if (m_stopped_) {
         // No need to switch to Unregistering state if already switched.
         if (state == State::Unregistering) continue;
-
+        // Not end before no write pending
+        if(write_pending.load(std::memory_order::acquire)) continue;
         // Cfored received stopping signal. Unregistering...
         CRANE_TRACE("Unregistering on cfored {}.", m_cfored_name_);
 
