@@ -858,8 +858,6 @@ result::result<void, std::string> AccountManager::CheckUidIsAdmin(
 AccountManager::Result AccountManager::HasPermissionToAccount(
     uint32_t uid, const std::string& account, bool read_only_priv,
     User::AdminLevel* level_of_uid) {
-  *level_of_uid = User::None;
-
   PasswordEntry entry(uid);
   if (!entry.Valid()) {
     return Result{false, fmt::format("Uid {} not existed", uid)};
