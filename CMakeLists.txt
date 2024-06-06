@@ -40,16 +40,32 @@ option(CRANE_FULL_DYNAMIC "Enable dynamic libs" OFF)
 option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" OFF)
 
 option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
+
+option(CRANE_MIN_LOG_LEVEL "Set the minimal log level (INFO/DEBUG/TRACE)" OFF)
 # Options end here -------------------------------------------------------------------------------
 
 set(CMAKE_CXX_STANDARD 20)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CRANE_ENABLE_TESTS ON)
-    add_compile_definitions(CRANE_LOG_LEVEL=CRANE_LOG_LEVEL_TRACE)
-else ()
-    add_compile_definitions(CRANE_LOG_LEVEL=CRANE_LOG_LEVEL_INFO)
-endif ()
+endif()
+
+# Set the minimal log level based on the build type if it has not been explicitly set by the user
+if(CRANE_MIN_LOG_LEVEL STREQUAL "OFF")
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        set(CRANE_MIN_LOG_LEVEL "TRACE")
+    else()
+        set(CRANE_MIN_LOG_LEVEL "DEBUG")
+    endif()
+endif()
+
+# Validate the user-provided log level
+if(NOT CRANE_MIN_LOG_LEVEL MATCHES "INFO|DEBUG|TRACE")
+    message(FATAL_ERROR "Invalid log level: ${CRANE_MIN_LOG_LEVEL}. Must be INFO, DEBUG, or TRACE.")
+endif()
+
+add_compile_definitions(CRANE_LOG_LEVEL=CRANE_LOG_LEVEL_${CRANE_MIN_LOG_LEVEL})
+message(STATUS "minimal log level is set to ${CRANE_MIN_LOG_LEVEL}")
 
 # Set colorized output when ninja build system is used.
 if (${CRANE_FORCE_COLORED_OUTPUT})
