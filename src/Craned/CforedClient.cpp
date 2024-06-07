@@ -163,6 +163,8 @@ void CforedClient::AsyncSendRecvThread_() {
       request.set_type(StreamCforedTaskIORequest::CRANED_REGISTER);
       request.mutable_payload_register_req()->set_craned_id(
           g_config.CranedIdOfThisNode);
+
+      write_pending.store(true, std::memory_order::release);
       stream->Write(request, (void*)Tag::Write);
 
       state = State::WaitRegisterAck;
@@ -172,7 +174,9 @@ void CforedClient::AsyncSendRecvThread_() {
       CRANE_TRACE("WaitRegisterAck");
 
       if (tag == Tag::Write) {
+        write_pending.store(false, std::memory_order::release);
         CRANE_TRACE("Cfored Registration was sent. Reading Ack...");
+
         reply.Clear();
         stream->Read(&reply, (void*)Tag::Read);
       } else if (tag == Tag::Read) {

@@ -103,7 +103,8 @@ bool TaskScheduler::Init() {
           }
 
           for (const CranedId& craned_id : task->CranedIds()) {
-            craned_cgroups_map[craned_id].emplace_back(task->TaskId(), task->uid);
+            craned_cgroups_map[craned_id].emplace_back(task->TaskId(),
+                                                       task->uid);
           }
 
           ok = g_db_client->InsertJob(task.get());
@@ -123,7 +124,6 @@ bool TaskScheduler::Init() {
                 task->TaskId());
           }
         }
-
 
         // Move this problematic task into ended queue and
         // process next task.
