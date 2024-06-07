@@ -71,8 +71,8 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       std::this_thread::sleep_for(std::chrono::milliseconds(25));
 
     CRANE_TRACE("Writing output...");
-    stream->Write(request, (void*)Tag::Write);
     write_pending->store(true, std::memory_order::release);
+    stream->Write(request, (void*)Tag::Write);
 
     ok = m_output_queue_.try_dequeue(output);
   }
@@ -119,21 +119,19 @@ void CforedClient::AsyncSendRecvThread_() {
       if (m_stopped_) {
         // No need to switch to Unregistering state if already switched.
         if (state == State::Unregistering) continue;
-        // Wait until all pending writes are done.
+        // Wait for forwarding thread to drain output queue and stop.
+        if (output_clean_thread.joinable()) output_clean_thread.join();
+        // If some writes are pending, let state machine clean them up.
         if (write_pending.load(std::memory_order::acquire)) continue;
 
         // Cfored received stopping signal. Unregistering...
         CRANE_TRACE("Unregistering on cfored {}.", m_cfored_name_);
-
-        if (output_clean_thread.joinable()) output_clean_thread.join();
 
         request.Clear();
         request.set_type(StreamCforedTaskIORequest::CRANED_UNREGISTER);
         request.mutable_payload_unregister_req()->set_craned_id(
             g_config.CranedIdOfThisNode);
 
-        while (write_pending.load(std::memory_order::acquire))
-          std::this_thread::sleep_for(std::chrono::milliseconds(25));
         stream->WriteLast(request, grpc::WriteOptions(), (void*)Tag::Write);
 
         // There's no need to issue a read request here,
@@ -223,8 +221,12 @@ void CforedClient::AsyncSendRecvThread_() {
     } break;
 
     case State::Unregistering:
-      if (tag == Tag::Write) break;
+      if (tag == Tag::Write) {
+        CRANE_TRACE("UNREGISTER msg was sent. waiting for reply...");
+        break;
+      }
       CRANE_ASSERT(tag == Tag::Read);
+      CRANE_TRACE("UNREGISTER_REPLY msg received.");
 
       if (reply.type() != StreamCforedTaskIOReply::CRANED_UNREGISTER_REPLY) {
         CRANE_TRACE("Expect UNREGISTER_REPLY, but got {}. Ignoring it.",
