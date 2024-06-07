@@ -429,6 +429,14 @@ struct TaskInCtld {
           .output_file_pattern = val.batch_meta().output_file_pattern(),
           .error_file_pattern = val.batch_meta().error_file_pattern(),
       });
+    }else{
+      auto &InteractiveMeta = std::get<InteractiveMetaInTask>(meta);
+      InteractiveMeta.cfored_name = val.interactive_meta().cfored_name();
+      InteractiveMeta.sh_script = val.interactive_meta().sh_script();
+      InteractiveMeta.interactive_type =
+                val.interactive_meta().interactive_type();
+      if (InteractiveMeta.interactive_type == crane::grpc::InteractiveTaskType::Crun)
+        InteractiveMeta.term_env = val.interactive_meta().term_env();
     }
 
     node_num = val.node_num();

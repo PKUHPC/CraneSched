@@ -1100,13 +1100,6 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
               task->SetFieldsByTaskToCtld(payload.task());
 
               auto &meta = std::get<InteractiveMetaInTask>(task->meta);
-              meta.cfored_name = payload.cfored_name();
-              meta.sh_script = payload.task().interactive_meta().sh_script();
-
-              meta.interactive_type =
-                  payload.task().interactive_meta().interactive_type();
-              if (meta.interactive_type == InteractiveTaskType::Crun)
-                meta.term_env = payload.task().interactive_meta().term_env();
 
               meta.cb_task_res_allocated =
                   [writer = &stream_writer](
@@ -1181,11 +1174,6 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
               g_task_scheduler->TerminateRunningTask(payload.task_id());
 
               if (payload.interactive_type() != InteractiveTaskType::Crun) {
-                // todo: Remove this
-                CRANE_TRACE(
-                    "Sending type {} TaskCompletionAckReply task {} in "
-                    "TASK_COMPLETION_REQUEST",
-                    payload.interactive_type(), payload.task_id());
                 ok = stream_writer.WriteTaskCompletionAckReply(
                     payload.task_id());
               }

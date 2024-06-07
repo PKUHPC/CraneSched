@@ -77,12 +77,7 @@ bool TaskScheduler::Init() {
                   task->TaskId());
 
       err = AcquireTaskAttributes(task.get());
-      if (err != CraneErr::kOk) {
-        CRANE_INFO(
-            "Failed to acquire task attributes for restored running task #{}. "
-            "Error Code: {}. "
-            "Mark it as FAILED and move it to the ended queue.",
-            task_id, CraneErrStr(err));
+      if (err != CraneErr::kOk || task->type == crane::grpc::Interactive) {
         task->SetStatus(crane::grpc::Failed);
         ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
                                                            task->RuntimeAttr());
@@ -92,6 +87,43 @@ bool TaskScheduler::Init() {
               "mark the task as FAILED.",
               task_id);
         }
+        if (err != CraneErr::kOk)
+          CRANE_INFO(
+              "Failed to acquire task attributes for restored running task "
+              "#{}. "
+              "Error Code: {}. "
+              "Mark it as FAILED and move it to the ended queue.",
+              task_id, CraneErrStr(err));
+        else {
+          CRANE_INFO("Mark running interactive task {} as FAILED.", task_id);
+          for (const CranedId& craned_id : task->CranedIds()) {
+            auto stub = g_craned_keeper->GetCranedStub(craned_id);
+            if (stub != nullptr && !stub->Invalid())
+              stub->TerminateOrphanedTask(task->TaskId());
+          }
+
+          for (const CranedId& craned_id : task->CranedIds()) {
+            craned_cgroups_map[craned_id].emplace_back(task->TaskId(), task->uid);
+          }
+
+          ok = g_db_client->InsertJob(task.get());
+          if (!ok) {
+            CRANE_ERROR(
+                "InsertJob failed for task #{} "
+                "when recovering running queue.",
+                task->TaskId());
+          }
+
+          std::vector<task_db_id_t> db_ids{task_db_id};
+          ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
+          if (!ok) {
+            CRANE_ERROR(
+                "PurgeEndedTasks failed for task #{} when recovering "
+                "running queue.",
+                task->TaskId());
+          }
+        }
+
 
         // Move this problematic task into ended queue and
         // process next task.
@@ -708,12 +740,16 @@ void TaskScheduler::ScheduleThread_() {
         if (task->type == crane::grpc::Batch) {
           craned_task_to_exec_raw_ptrs_map[task->executing_craned_id]
               .emplace_back(task.get());
-        } else if (task->type == crane::grpc::Interactive &&
-                   std::get<InteractiveMetaInTask>(task->meta)
-                           .interactive_type == crane::grpc::Crun) {
-          for (const auto& craned_id : task->CranedIds())
-            craned_task_to_exec_raw_ptrs_map[craned_id].emplace_back(
-                task.get());
+        } else if (task->type == crane::grpc::Interactive) {
+          if (std::get<InteractiveMetaInTask>(task->meta).interactive_type ==
+              crane::grpc::Crun) {
+            for (const auto& craned_id : task->CranedIds())
+              craned_task_to_exec_raw_ptrs_map[craned_id].emplace_back(
+                  task.get());
+          } else {
+            craned_task_to_exec_raw_ptrs_map[task->executing_craned_id]
+                .emplace_back(task.get());
+          }
         }
       }
 
@@ -1370,8 +1406,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       if (new_status == crane::grpc::ExceedTimeLimit ||
           exit_code == ExitCode::kExitCodeCranedDown) {
         meta.has_been_cancelled_on_front_end = true;
-        // todo:Remove this
-        CRANE_TRACE("cancel task {} for timeout/craned down", task->TaskId());
         meta.cb_task_cancel(task->TaskId());
         task->SetStatus(new_status);
       } else {

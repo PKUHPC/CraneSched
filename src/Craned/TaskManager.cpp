@@ -1083,10 +1083,12 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
       continue;
     }
 
-    g_thread_pool->detach_task(
-        [p = iter->second->meta->parsed_sh_script_path]() {
-          util::os::DeleteFile(p);
-        });
+    if (iter->second->task.type() == crane::grpc::Batch|| CheckIfInstanceTypeIsCrun_(iter->second.get())) {
+      g_thread_pool->detach_task(
+          [p = iter->second->meta->parsed_sh_script_path]() {
+            util::os::DeleteFile(p);
+          });
+    }
 
     // Free the TaskInstance structure
     this_->m_task_map_.erase(status_change.task_id);
