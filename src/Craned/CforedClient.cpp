@@ -335,7 +335,12 @@ void CforedManager::RegisterIOForward(TaskInstance* instance) {
     m_cfored_client_ref_count_map_[cfored_name]++;
   } else {
     auto cfored_client = std::make_shared<CforedClient>();
+
+    // FIXME: No error handling here.
+    // TODO: time-consuming operation! Move it to uvw worker thread pool
+    //  and notify by async event.
     cfored_client->InitChannelAndStub(cfored_name);
+
     m_cfored_client_map_[cfored_name] = std::move(cfored_client);
     m_cfored_client_ref_count_map_[cfored_name] = 1;
   }
@@ -344,7 +349,6 @@ void CforedManager::RegisterIOForward(TaskInstance* instance) {
   m_fd_task_instance_map_[fd] = instance;
   m_cfored_client_map_[cfored_name]->SetTaskInputForwardCb(
       task_id, [fd](const std::string& msg) {
-        CRANE_TRACE("forwarding msg {} to task", msg);
         ssize_t sz_sent = 0;
         while (sz_sent != msg.size())
           sz_sent += write(fd, msg.c_str() + sz_sent, msg.size() - sz_sent);
