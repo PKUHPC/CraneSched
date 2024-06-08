@@ -219,8 +219,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   // Query tasks in RAM
   g_task_scheduler->QueryTasksInRam(request, response);
 
-  int num_limit = request->num_limit() <= 0 ? kDefaultQueryTaskNumLimit
-                                            : request->num_limit();
+  size_t num_limit = request->num_limit() == 0 ? kDefaultQueryTaskNumLimit
+                                               : request->num_limit();
   auto *task_list = response->mutable_task_info_list();
 
   auto sort_and_truncate = [](auto *task_list, size_t limit) -> void {

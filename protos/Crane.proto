@@ -408,7 +408,7 @@ message QueryClusterInfoReply {
 message QueryTasksInfoRequest{
   repeated uint32 filter_task_ids = 1;
   repeated string filter_partitions = 2;
-  int32 num_limit = 3;
+  uint32 num_limit = 3;
   repeated string filter_task_names = 4;
   repeated string filter_qos = 5;
 
