@@ -59,6 +59,13 @@ enum CranedControlState {
   CRANE_DRAIN = 1;
 }
 
+enum DependencyCondition{
+  AFTER = 0;
+  AFTER_ANY = 1;
+  AFTER_OK = 2;
+  AFTER_NOTOK = 3;
+}
+
 enum TaskStatus {
   Pending = 0;
   Running = 1;
@@ -99,6 +106,8 @@ message TaskToCtld {
 
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
+  bool held = 14;
+  repeated Dependency dependencies = 15;
 
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
@@ -121,6 +130,12 @@ message TaskInEmbeddedDb {
   TaskToCtld task_to_ctld = 2;
 }
 
+message Dependency{
+  uint32 task_id = 1;
+  DependencyCondition condition = 2;
+  TaskStatus task_status = 3;
+}
+
 message RuntimeAttrOfTask {
   // Fields that won't change after this task is accepted.
   uint32 task_id = 1;
@@ -129,6 +144,7 @@ message RuntimeAttrOfTask {
   string username = 5;
 
   // Fields that will change after this task is accepted.
+  repeated Dependency dependencies = 10;
   int32 requeue_count = 11;
   repeated string craned_ids = 12;
   TaskStatus status = 13;
@@ -214,6 +230,8 @@ message TaskInfo {
   string qos = 16;
 
   // Dynamic task information
+  repeated Dependency dependencies=29;
+  bool held = 30;
   TaskStatus status = 31;
   double alloc_cpu = 32;
   uint32 exit_code = 33;
