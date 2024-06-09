@@ -196,6 +196,10 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       response->set_reason(
           fmt::format("Task #{} is running, unable to change priority.",
                       request->task_id()));
+    } else {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Failed to change priority: {}.", CraneErrStr(err)));
     }
   } else {
     response->set_ok(false);
