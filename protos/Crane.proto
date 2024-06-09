@@ -194,6 +194,7 @@ message ModifyTaskRequest {
   enum TargetAttributes {
     TimeLimit = 0;
     Priority = 1;
+    Hold = 2;
   }
 
   uint32 uid = 1;
@@ -204,7 +205,11 @@ message ModifyTaskRequest {
   oneof value {
     int64 time_limit_seconds = 4;
     double mandated_priority = 5;
+    bool manual_hold = 6;
+    bool release_job =7;
   }
+
+  int64 hold_time_seconds = 8;
 }
 
 message ModifyTaskReply {
