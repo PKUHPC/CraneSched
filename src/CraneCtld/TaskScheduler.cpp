@@ -1015,6 +1015,61 @@ CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priority) {
   return CraneErr::kNonExistent;
 }
 
+void TaskScheduler::HoldJobForSeconds(task_id_t task_id, int64_t secs) {
+  std::shared_ptr<uvw::loop> uvw_loop = uvw::loop::create();
+  {
+    LockGuard timer_guard(&m_task_release_handles_mtx_);
+    if (m_task_release_handles_.find(task_id) !=
+        m_task_release_handles_.end()) {
+      m_task_release_handles_[task_id]->close();
+    }
+    std::shared_ptr<uvw::timer_handle> release_task_timer_handle_ =
+        uvw_loop->resource<uvw::timer_handle>();
+    release_task_timer_handle_->on<uvw::timer_event>(
+        [this, task_id](const uvw::timer_event&, uvw::timer_handle& handle) {
+          HoldReleaseJob(task_id, false);
+          handle.close();
+          {
+            LockGuard timer_guard(&m_task_release_handles_mtx_);
+            m_task_release_handles_.erase(task_id);
+          }
+        });
+    release_task_timer_handle_->start(std::chrono::seconds(secs),
+                                      std::chrono::seconds(0));
+    m_task_release_handles_[task_id] = std::move(release_task_timer_handle_);
+  }
+  std::thread([uvw_loop = std::move(uvw_loop)]() { uvw_loop->run(); }).detach();
+}
+
+CraneErr TaskScheduler::HoldReleaseJob(task_id_t task_id, bool hold) {
+  if (hold) {
+    CRANE_TRACE("Hold task #{}", task_id);
+  } else {
+    CRANE_TRACE("Release task #{}", task_id);
+  }
+  LockGuard pending_guard(&m_pending_task_map_mtx_);
+
+  auto pd_iter = m_pending_task_map_.find(task_id);
+  if (pd_iter != m_pending_task_map_.end()) {
+    pd_iter->second->held = hold;
+    crane::grpc::TaskToCtld* task_to_ctld =
+        pd_iter->second->MutableTaskToCtld();
+    task_to_ctld->set_held(hold);
+    g_embedded_db_client->UpdateTaskToCtld(0, pd_iter->second->TaskDbId(),
+                                           *task_to_ctld);
+    return CraneErr::kOk;
+  }
+
+  auto rn_iter = m_running_task_map_.find(task_id);
+  if (rn_iter != m_running_task_map_.end()) {
+    CRANE_TRACE("Task #{} is running, unable to hold/release", task_id);
+    return CraneErr::kInvalidParam;
+  }
+
+  CRANE_TRACE("Task #{} not in Pd queue for hold/release", task_id);
+  return CraneErr::kNonExistent;
+}
+
 CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
   task_id_t task_id = task->TaskId();
 
@@ -1539,6 +1594,7 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_cwd(task.cwd);
     task_it->set_username(task.Username());
     task_it->set_qos(task.qos);
+    task_it->set_held(task.held);
 
     task_it->set_alloc_cpu(
         static_cast<double>(task.resources.allocatable_resource.cpu_count) *
@@ -1553,7 +1609,6 @@ void TaskScheduler::QueryTasksInRam(
       task_it->set_craned_list(task.allocated_craneds_regex);
       task_it->mutable_elapsed_time()->set_seconds(
           ToInt64Seconds(now - task.StartTime()));
-    }
   };
 
   auto task_rng_filter_time = [&](auto& it) {
@@ -2553,6 +2608,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
 
   std::vector<std::pair<TaskInCtld*, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
+    if (task->held) continue;
     // Admin may manually specify the priority of a task.
     // In this case, MultiFactorPriority will not calculate the priority.
     double priority = (task->mandated_priority == 0.0)

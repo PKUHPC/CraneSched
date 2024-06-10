@@ -52,8 +52,12 @@ class BasicPriority : public IPrioritySorter {
 
     int i = 0;
     for (auto it = pending_task_map.begin(); i < len; i++, it++) {
-      it->second->pending_reason = "Priority";
-      task_id_vec.emplace_back(it->first);
+      if (!it->second->held) {
+        task_id_vec.emplace_back(it->first);
+        it->second->pending_reason = "Priority";
+      } else {
+        it->second->pending_reason = "Held";
+      }
     }
 
     return task_id_vec;
@@ -223,6 +227,10 @@ class TaskScheduler {
 
   CraneErr ChangeTaskPriority(task_id_t task_id, double priority);
 
+  void HoldJobForSeconds(task_id_t task_id, int64_t secs);
+
+  CraneErr HoldReleaseJob(task_id_t task_id, bool hold);
+
   void TaskStatusChangeWithReasonAsync(uint32_t task_id,
                                        const CranedId& craned_index,
                                        crane::grpc::TaskStatus new_status,
@@ -344,6 +352,10 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_submit_queue_handle_;
   void CleanSubmitQueueCb_();
+
+  HashMap<task_id_t, std::shared_ptr<uvw::timer_handle>> m_task_release_handles_
+      GUARDED_BY(m_task_release_handles_mtx_);
+  Mutex m_task_release_handles_mtx_;
 
   std::shared_ptr<uvw::timer_handle> m_task_status_change_timer_handle_;
   void TaskStatusChangeTimerCb_();

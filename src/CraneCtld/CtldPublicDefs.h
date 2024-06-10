@@ -267,6 +267,7 @@ struct TaskInCtld {
 
   bool requeue_if_failed{false};
   bool get_user_env{false};
+  bool held{false};
 
   std::string cmd_line;
   std::unordered_map<std::string, std::string> env;
@@ -467,6 +468,7 @@ struct TaskInCtld {
     qos = val.qos();
 
     get_user_env = val.get_user_env();
+    held = val.held();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
