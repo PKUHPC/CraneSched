@@ -2129,6 +2129,7 @@ void MinLoadFirst::NodeSelect(
 
       // Move task out of pending_task_map and insert it to the
       // scheduling_result_list.
+      pending_task_it->second->cached_priority = 0;
       moved_task.swap(pending_task_it->second);
 
       selection_result_list->emplace_back(std::move(moved_task),
