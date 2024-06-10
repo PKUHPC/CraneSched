@@ -216,8 +216,18 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       response->set_ok(true);
     } else if (err == CraneErr::kNonExistent) {
       response->set_ok(false);
-      response->set_reason(fmt::format(
-          "Task #{} was not found in pending queue", request->task_id()));
+      response->set_reason(
+          fmt::format("Task #{} was not found in running or pending queue.",
+                      request->task_id()));
+    } else if (err == CraneErr::kInvalidParam) {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Task #{} is running, unable to hold/release job.",
+                      request->task_id()));
+    } else {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Failed to hold/release job: {}.", CraneErrStr(err)));
     }
   } else {
     response->set_ok(false);
