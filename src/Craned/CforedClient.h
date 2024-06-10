@@ -60,15 +60,20 @@ class CforedClient {
 
 class CforedManager {
  public:
-  CforedManager();
+  CforedManager() = default;
   ~CforedManager();
+
+  bool Init();
+
   void RegisterIOForward(TaskInstance* instance);
   void UnregisterIOForward(TaskInstance* instance);
 
  private:
-  std::atomic<bool> m_stopped_;
-  std::atomic<bool> m_stopped_temp_;
-  std::shared_ptr<uvw::loop> m_loop;
+  void EvLoopThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
+  std::atomic<bool> m_stopped_{false};
+  std::atomic<bool> m_stopped_temp_{false};
+  std::shared_ptr<uvw::loop> m_loop_;
   std::thread m_ev_loop_thread_;
   //  std::shared_ptr<uvw::async_handle> m_
   moodycamel::ConcurrentQueue<std::pair<task_id_t, std::string /*msg*/>>
@@ -89,4 +94,5 @@ class CforedManager {
       GUARDED_BY(m_mtx);
 };
 }  // namespace Craned
+
 inline std::unique_ptr<Craned::CforedManager> g_cfored_manager;

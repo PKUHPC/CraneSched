@@ -24,9 +24,9 @@
 
 #include <cxxopts.hpp>
 
+#include "CforedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
-#include "CforedClient.h"
 #include "crane/Network.h"
 #include "crane/OS.h"
 #include "crane/PublicHeader.h"
@@ -451,7 +451,9 @@ void GlobalVariableInit() {
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
+
   g_cfored_manager = std::make_unique<Craned::CforedManager>();
+  g_cfored_manager->Init();
 }
 
 void StartServer() {

@@ -267,29 +267,35 @@ void CforedClient::TaskOutPutForward(task_id_t task_id,
   m_output_queue_.enqueue({task_id, msg});
 }
 
-CforedManager::CforedManager()
-    : m_stopped_(false), m_stopped_temp_(false), m_loop(uvw::loop::create()) {
-  m_ev_loop_thread_ = std::thread([this]() {
-    util::SetCurrentThreadName("TaskMSGReadThr");
-    while (!m_stopped_) {
-      if (m_stopped_temp_) {
-        std::this_thread::sleep_for(std::chrono::microseconds(100));
-        continue;
-      }
+bool CforedManager::Init() {
+  m_loop_ = uvw::loop::create();
+  m_ev_loop_thread_ = std::thread([=, this]() { EvLoopThread_(m_loop_); });
 
-      m_loop->run();
-    }
-  });
+  return true;
 }
 
 CforedManager::~CforedManager() {
   CRANE_TRACE("CforedManager destructor called.");
   m_stopped_ = true;
-  m_loop->stop();
+  m_loop_->stop();
 
   if (m_ev_loop_thread_.joinable()) m_ev_loop_thread_.join();
 
   m_cfored_client_map_.clear();
+}
+
+void CforedManager::EvLoopThread_(const std::shared_ptr<uvw::loop>& uvw_loop) {
+  util::SetCurrentThreadName("CforedMgrThr");
+
+  while (!m_stopped_) {
+    // TODO: Improve high frequency of looping!
+    if (m_stopped_temp_) {
+      std::this_thread::sleep_for(std::chrono::microseconds(100));
+      continue;
+    }
+
+    m_loop_->run();
+  }
 }
 
 void CforedManager::RegisterIOForward(TaskInstance* instance) {
@@ -303,9 +309,9 @@ void CforedManager::RegisterIOForward(TaskInstance* instance) {
   // TODO: Use async way to register handle rather than locking!
   absl::MutexLock lock(&m_mtx);
   m_stopped_temp_ = true;
-  m_loop->stop();
+  m_loop_->stop();
 
-  auto poll_handle = m_loop->resource<uvw::poll_handle>(fd);
+  auto poll_handle = m_loop_->resource<uvw::poll_handle>(fd);
   poll_handle->on<uvw::poll_event>([fd, this](const uvw::poll_event&,
                                               uvw::poll_handle&) {
     constexpr int MAX_BUF_SIZE = 4096;
@@ -374,7 +380,7 @@ void CforedManager::UnregisterIOForward(TaskInstance* instance) {
   }
 
   m_stopped_temp_ = true;
-  m_loop->stop();
+  m_loop_->stop();
 
   m_task_id_handle_map_[task_id]->stop();
   m_task_id_handle_map_[task_id]->close();
