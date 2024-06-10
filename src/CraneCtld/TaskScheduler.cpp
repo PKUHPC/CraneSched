@@ -1029,10 +1029,6 @@ void TaskScheduler::HoldJobForSeconds(task_id_t task_id, int64_t secs) {
         [this, task_id](const uvw::timer_event&, uvw::timer_handle& handle) {
           HoldReleaseJob(task_id, false);
           handle.close();
-          {
-            LockGuard timer_guard(&m_task_release_handles_mtx_);
-            m_task_release_handles_.erase(task_id);
-          }
         });
     release_task_timer_handle_->start(std::chrono::seconds(secs),
                                       std::chrono::seconds(0));
@@ -1042,11 +1038,6 @@ void TaskScheduler::HoldJobForSeconds(task_id_t task_id, int64_t secs) {
 }
 
 CraneErr TaskScheduler::HoldReleaseJob(task_id_t task_id, bool hold) {
-  if (hold) {
-    CRANE_TRACE("Hold task #{}", task_id);
-  } else {
-    CRANE_TRACE("Release task #{}", task_id);
-  }
   LockGuard pending_guard(&m_pending_task_map_mtx_);
 
   auto pd_iter = m_pending_task_map_.find(task_id);
@@ -1057,6 +1048,10 @@ CraneErr TaskScheduler::HoldReleaseJob(task_id_t task_id, bool hold) {
     task_to_ctld->set_held(hold);
     g_embedded_db_client->UpdateTaskToCtld(0, pd_iter->second->TaskDbId(),
                                            *task_to_ctld);
+    if (!hold) {
+      LockGuard timer_guard(&m_task_release_handles_mtx_);
+      m_task_release_handles_.erase(task_id);
+    }
     return CraneErr::kOk;
   }
 
