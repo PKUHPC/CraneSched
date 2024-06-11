@@ -205,11 +205,17 @@ struct InteractiveMetaInTask {
                      std::list<std::string> const&)>
       cb_task_res_allocated;
   std::function<void(task_id_t)> cb_task_completed;
+
+  // only for calloc.
   std::function<void(task_id_t)> cb_task_cancel;
 
-  // ccancel for an interactive task should call the front end to kill the
-  // user's shell, let Cfored to inform CraneCtld of task completion rather than
-  // directly sending TerminateTask to its craned node.
+  // only for crun.
+  size_t status_change_cnt{0};
+
+  // ccancel for an interactive CALLOC task should call the front end to kill
+  // the user's shell, let Cfored to inform CraneCtld of task completion rather
+  // than directly sending TerminateTask to its craned node.
+  //
   // However, when TIMEOUT event on its craned node happens, Cranectld should
   // also send TaskCancelRequest to the front end. So we need a flag
   // ` has_been_cancelled_on_front_end` to record whether the front end for the
@@ -315,8 +321,7 @@ struct TaskInCtld {
    * However, these fields are NOT persisted on the disk.
    * ----------- */
   uint32_t nodes_alloc;
-  CranedId executing_craned_id;  // The root process of the task started on this
-                                 // node id.
+  std::vector<CranedId> executing_craned_ids;
   std::string allocated_craneds_regex;
 
   double mandated_priority{0.0};
@@ -474,7 +479,19 @@ struct TaskInCtld {
     if (status != crane::grpc::TaskStatus::Pending) {
       craned_ids.assign(runtime_attr.craned_ids().begin(),
                         runtime_attr.craned_ids().end());
-      executing_craned_id = craned_ids.front();
+      if (type == crane::grpc::Batch)
+        executing_craned_ids.emplace_back(craned_ids.front());
+      else {
+        const auto& int_meta = std::get<InteractiveMetaInTask>(meta);
+        if (int_meta.interactive_type == crane::grpc::Calloc)
+          // For calloc tasks we still need to execute a dummy empty task to
+          // set up a timer.
+          executing_craned_ids.emplace_back(CranedIds().front());
+        else
+          // For crun tasks we need to execute tasks on all allocated nodes.
+          for (auto const& craned_id : craned_ids)
+            executing_craned_ids.emplace_back(craned_id);
+      }
     }
 
     start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());

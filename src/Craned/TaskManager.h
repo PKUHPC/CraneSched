@@ -238,6 +238,23 @@ class TaskManager {
    */
   void SetSigintCallback(std::function<void()> cb);
 
+  /**
+   * Inform CraneCtld of the status change of a task.
+   * This method is called when the status of a task is changed:
+   * 1. A task is completed successfully. It means that this task returns
+   *  normally with 0 or a non-zero code. (EvSigchldCb_)
+   * 2. A task is killed by a signal. In this case, the task is considered
+   *  failed. (EvSigchldCb_)
+   * 3. A task cannot be created because of various reasons.
+   *  (EvGrpcSpawnInteractiveTaskCb_ and EvGrpcExecuteTaskCb_)
+   * @param release_resource If set to true, CraneCtld will release the
+   *  resource (mark the task status as REQUEUE) and requeue the task.
+   */
+  void EvActivateTaskStatusChange(uint32_t task_id,
+                                  crane::grpc::TaskStatus new_status,
+                                  uint32_t exit_code,
+                                  std::optional<std::string> reason);
+
  private:
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
@@ -304,23 +321,6 @@ class TaskManager {
 
   // Ask TaskManager to stop its event loop.
   void EvActivateShutdown_();
-
-  /**
-   * Inform CraneCtld of the status change of a task.
-   * This method is called when the status of a task is changed:
-   * 1. A task is completed successfully. It means that this task returns
-   *  normally with 0 or a non-zero code. (EvSigchldCb_)
-   * 2. A task is killed by a signal. In this case, the task is considered
-   *  failed. (EvSigchldCb_)
-   * 3. A task cannot be created because of various reasons.
-   *  (EvGrpcSpawnInteractiveTaskCb_ and EvGrpcExecuteTaskCb_)
-   * @param release_resource If set to true, CraneCtld will release the
-   *  resource (mark the task status as REQUEUE) and requeue the task.
-   */
-  void EvActivateTaskStatusChange_(uint32_t task_id,
-                                   crane::grpc::TaskStatus new_status,
-                                   uint32_t exit_code,
-                                   std::optional<std::string> reason);
 
   template <typename Duration>
   void EvAddTerminationTimer_(TaskInstance* instance, Duration duration) {

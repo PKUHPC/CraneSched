@@ -212,8 +212,8 @@ void CforedClient::AsyncSendRecvThread_() {
       const std::string& msg = reply.payload_task_input_req().msg();
 
       m_mtx_.Lock();
-      if (m_task_input_cb_map_.contains(task_id)) {
-        m_task_input_cb_map_[task_id](msg);
+      if (m_task_fwd_meta_map_.contains(task_id)) {
+        m_task_fwd_meta_map_[task_id].input_cb(msg);
       } else {
         CRANE_ERROR("Cfored {} trying to send msg to unknown task #{}",
                     m_cfored_name_, task_id);
@@ -250,15 +250,24 @@ void CforedClient::AsyncSendRecvThread_() {
   }
 }
 
-void CforedClient::SetTaskInputForwardCb(
+void CforedClient::InitTaskFwdAndSetInputCb(
     task_id_t task_id, std::function<void(const std::string&)> task_input_cb) {
   absl::MutexLock lock(&m_mtx_);
-  m_task_input_cb_map_[task_id] = std::move(task_input_cb);
+  m_task_fwd_meta_map_[task_id].input_cb = std::move(task_input_cb);
 }
 
-void CforedClient::UnsetTaskInputForwardCb(task_id_t task_id) {
+bool CforedClient::TaskOutputFinish(task_id_t task_id) {
   absl::MutexLock lock(&m_mtx_);
-  m_task_input_cb_map_.erase(task_id);
+  auto& task_fwd_meta = m_task_fwd_meta_map_.at(task_id);
+  task_fwd_meta.output_stopped = true;
+  return task_fwd_meta.output_stopped && task_fwd_meta.proc_stopped;
+};
+
+bool CforedClient::TaskProcessStop(task_id_t task_id) {
+  absl::MutexLock lock(&m_mtx_);
+  auto& task_fwd_meta = m_task_fwd_meta_map_.at(task_id);
+  task_fwd_meta.proc_stopped = true;
+  return task_fwd_meta.output_stopped && task_fwd_meta.proc_stopped;
 };
 
 void CforedClient::TaskOutPutForward(task_id_t task_id,
@@ -273,6 +282,10 @@ bool CforedManager::Init() {
   m_register_handle_ = m_loop_->resource<uvw::async_handle>();
   m_register_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) { RegisterCb_(); });
+
+  m_task_stop_handle_ = m_loop_->resource<uvw::async_handle>();
+  m_task_stop_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) { TaskStopCb_(); });
 
   m_unregister_handle_ = m_loop_->resource<uvw::async_handle>();
   m_unregister_handle_->on<uvw::async_event>(
@@ -335,7 +348,7 @@ void CforedManager::RegisterCb_() {
       m_cfored_client_ref_count_map_[elem.cfored] = 1;
     }
 
-    m_cfored_client_map_[elem.cfored]->SetTaskInputForwardCb(
+    m_cfored_client_map_[elem.cfored]->InitTaskFwdAndSetInputCb(
         elem.task_id, [fd = elem.fd](const std::string& msg) {
           ssize_t sz_sent = 0;
           while (sz_sent != msg.size())
@@ -345,36 +358,73 @@ void CforedManager::RegisterCb_() {
     CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.fd,
                 elem.task_id);
     auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.fd);
-    poll_handle->on<uvw::poll_event>(
-        [this, elem = std::move(elem)](const uvw::poll_event&,
-                                       uvw::poll_handle&) {
-          CRANE_TRACE("Detect task #{} output.", elem.task_id);
+    poll_handle->on<uvw::poll_event>([this, elem = std::move(elem)](
+                                         const uvw::poll_event&,
+                                         uvw::poll_handle& h) {
+      CRANE_TRACE("Detect task #{} output.", elem.task_id);
 
-          constexpr int MAX_BUF_SIZE = 4096;
-          char buf[MAX_BUF_SIZE];
+      constexpr int MAX_BUF_SIZE = 4096;
+      char buf[MAX_BUF_SIZE];
 
-          auto ret = read(elem.fd, buf, MAX_BUF_SIZE);
-          if (ret == 0) return;
-          if (ret == -1)
-            CRANE_ERROR("Error when reading task #{} output", elem.task_id);
+      auto ret = read(elem.fd, buf, MAX_BUF_SIZE);
+      if (ret == 0) {
+        CRANE_TRACE("Task #{} to cfored {} finished its output.", elem.task_id,
+                    elem.cfored);
+        h.close();
 
-          std::string output(buf, ret);
-          CRANE_TRACE("Fwd to task #{}: {}", elem.task_id, output);
-          this->m_cfored_client_map_[elem.cfored]->TaskOutPutForward(
-              elem.task_id, output);
-        });
+        bool ok_to_free =
+            m_cfored_client_map_[elem.cfored]->TaskOutputFinish(elem.task_id);
+        if (ok_to_free) {
+          CRANE_TRACE("It's ok to unregister task #{} on {}", elem.task_id,
+                      elem.cfored);
+          UnregisterIOForward_(elem.cfored, elem.task_id);
+        }
+        return;
+      }
+
+      if (ret == -1)
+        CRANE_ERROR("Error when reading task #{} output", elem.task_id);
+
+      std::string output(buf, ret);
+      CRANE_TRACE("Fwd to task #{}: {}", elem.task_id, output);
+      m_cfored_client_map_[elem.cfored]->TaskOutPutForward(elem.task_id,
+                                                           output);
+    });
     int ret = poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
     if (ret < 0)
       CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
-
-    m_task_id_handle_map_[elem.task_id] = poll_handle;
 
     p.second.set_value(true);
   }
 }
 
-void CforedManager::UnregisterIOForward(std::string const& cfored,
-                                        task_id_t task_id) {
+void CforedManager::TaskProcOnCforedStopped(std::string const& cfored,
+                                            task_id_t task_id) {
+  TaskStopElem elem{.cfored = cfored, .task_id = task_id};
+  m_task_stop_queue_.enqueue(std::move(elem));
+  m_task_stop_handle_->send();
+}
+
+void CforedManager::TaskStopCb_() {
+  TaskStopElem elem;
+  while (m_task_stop_queue_.try_dequeue(elem)) {
+    const std::string& cfored = elem.cfored;
+    task_id_t task_id = elem.task_id;
+
+    CRANE_TRACE("Task #{} to cfored {} just stopped its process.", elem.task_id,
+                elem.cfored);
+    bool ok_to_free =
+        m_cfored_client_map_[elem.cfored]->TaskProcessStop(elem.task_id);
+    if (ok_to_free) {
+      CRANE_TRACE("It's ok to unregister task #{} on {}", elem.task_id,
+                  elem.cfored);
+      UnregisterIOForward_(elem.cfored, elem.task_id);
+    }
+  }
+}
+
+void CforedManager::UnregisterIOForward_(const std::string& cfored,
+                                         task_id_t task_id) {
   UnregisterElem elem{.cfored = cfored, .task_id = task_id};
   m_unregister_queue_.enqueue(std::move(elem));
   m_unregister_handle_->send();
@@ -392,12 +442,10 @@ void CforedManager::UnregisterCb_() {
       m_cfored_client_map_.erase(cfored);
     } else {
       --m_cfored_client_ref_count_map_[cfored];
-      m_cfored_client_map_[cfored]->UnsetTaskInputForwardCb(task_id);
     }
 
-    auto& h = m_task_id_handle_map_[task_id];
-    h->close();
-    m_task_id_handle_map_.erase(task_id);
+    g_task_mgr->EvActivateTaskStatusChange(
+        task_id, crane::grpc::TaskStatus::Completed, 0, std::nullopt);
   }
 }
 
