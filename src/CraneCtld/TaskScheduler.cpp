@@ -1134,7 +1134,20 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
-      if (task->type == crane::grpc::Batch) {
+      bool is_calloc = false;
+      if (task->type == crane::grpc::Interactive) {
+        auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+        if (meta.interactive_type == crane::grpc::Calloc) is_calloc = true;
+
+        if (is_calloc && !meta.has_been_cancelled_on_front_end) {
+          meta.has_been_cancelled_on_front_end = true;
+          meta.cb_task_cancel(task_id);
+        }
+      }
+
+      if (is_calloc) {
+        reply.add_cancelled_tasks(task_id);
+      } else {
         CraneErr err = TerminateRunningTaskNoLock_(task);
         if (err == CraneErr::kOk) {
           reply.add_cancelled_tasks(task_id);
@@ -1142,16 +1155,6 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
           reply.add_not_cancelled_tasks(task_id);
           reply.add_not_cancelled_reasons(CraneErrStr(err).data());
         }
-      } else {
-        auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-
-        if (meta.interactive_type == crane::grpc::Calloc &&
-            !meta.has_been_cancelled_on_front_end) {
-          meta.has_been_cancelled_on_front_end = true;
-          meta.cb_task_cancel(task_id);
-        }
-
-        reply.add_cancelled_tasks(task_id);
       }
     }
   };
