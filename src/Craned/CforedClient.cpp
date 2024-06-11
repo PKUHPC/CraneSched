@@ -311,9 +311,6 @@ void CforedManager::RegisterIOForward(std::string const& cfored,
         int fd = h.fd();
         constexpr int MAX_BUF_SIZE = 4096;
 
-        // TODO: Too large critical area!
-        absl::MutexLock lock(&this->m_mtx);
-
         char buf[MAX_BUF_SIZE];
         auto ret = read(fd, buf, MAX_BUF_SIZE);
         if (ret == 0) return;
@@ -321,6 +318,8 @@ void CforedManager::RegisterIOForward(std::string const& cfored,
           CRANE_ERROR("Error when reading task #{} output", task_id);
 
         std::string output(buf, ret);
+
+        absl::MutexLock lock(&this->m_mtx);
         this->m_cfored_client_map_[cfored]->TaskOutPutForward(task_id, output);
       });
 
