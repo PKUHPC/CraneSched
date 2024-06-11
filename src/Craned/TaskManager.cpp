@@ -314,7 +314,9 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
                 bool send_task_status_change = false;
                 if (instance->task.interactive_meta().interactive_type() ==
                     crane::grpc::Crun) {
-                  g_cfored_manager->UnregisterIOForward(instance);
+                  g_cfored_manager->UnregisterIOForward(
+                      instance->task.interactive_meta().cfored_name(),
+                      instance->task.task_id());
 
                   if (instance->task.allocated_nodes(0) ==
                       g_config.CranedIdOfThisNode)
@@ -542,8 +544,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
                 instance->task.task_id(), child_pid);
 
-    if (CheckIfInstanceTypeIsCrun_(instance))
-      g_cfored_manager->RegisterIOForward(instance);
+    if (CheckIfInstanceTypeIsCrun_(instance)) {
+      g_cfored_manager->RegisterIOForward(
+          instance->task.interactive_meta().cfored_name(),
+          instance->task.task_id(),
+          dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get())
+              ->msg_forward_fd);
+    }
 
     // Note that the following code will move the child process into cgroup.
     // Once the child process is moved into cgroup, it might be killed due to

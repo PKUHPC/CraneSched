@@ -65,8 +65,8 @@ class CforedManager {
 
   bool Init();
 
-  void RegisterIOForward(TaskInstance* instance);
-  void UnregisterIOForward(TaskInstance* instance);
+  void RegisterIOForward(std::string const& cfored, task_id_t task_id, int fd);
+  void UnregisterIOForward(std::string const& cfored, task_id_t task_id);
 
  private:
   void EvLoopThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
@@ -89,9 +89,6 @@ class CforedManager {
 
   std::unordered_map<task_id_t, std::shared_ptr<uvw::poll_handle>>
       m_task_id_handle_map_ GUARDED_BY(m_mtx);
-
-  std::unordered_map<int /*fd*/, TaskInstance*> m_fd_task_instance_map_
-      GUARDED_BY(m_mtx);
 };
 }  // namespace Craned
 
