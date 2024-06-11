@@ -58,6 +58,10 @@ class CranedStub {
 
   bool Invalid() const { return m_invalid_; }
 
+  void SetDeactivate(bool value) { m_deactivate_ = value; }
+
+  bool Deactivate() const { return m_deactivate_; }
+
  private:
   CranedKeeper *m_craned_keeper_;
 
@@ -68,6 +72,9 @@ class CranedStub {
 
   // Set if underlying gRPC is down.
   bool m_invalid_;
+
+  // Set if corresponding craned is deleted or set drain status
+  bool m_deactivate_;
 
   static constexpr uint32_t s_maximum_retry_times_ = 2;
   uint32_t m_failure_retry_times_;
@@ -121,6 +128,8 @@ class CranedKeeper {
   void PutNodeIntoUnavailList(const CranedId &crane_id);
 
   void ResetConnection(const CranedId &craned_id);
+
+  bool SetDeactivate(const CranedId &craned_id);
 
  private:
   struct CqTag {

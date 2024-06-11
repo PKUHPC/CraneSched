@@ -160,7 +160,7 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId craned_id,
   {
     auto crane_map = craned_meta_map_.GetMapConstSharedPtr();
     if (!crane_map->contains(craned_id)) {
-      CRANE_ERROR("Try to free resource from an unknown craned {}", craned_id);
+      CRANE_INFO("Try to free resource from a deleted craned {}", craned_id);
       return;
     }
     part_ids = crane_map->at(craned_id).GetExclusivePtr()->partition_ids;
@@ -316,6 +316,7 @@ result::result<void, std::string> CranedMetaContainerSimpleImpl::DeleteNode(
   }
 
   craned_ptr->status = crane::grpc::CranedState::CRANE_DRAIN;
+  g_craned_keeper->SetDeactivate(name);
 
   std::vector<task_id_t> job_ids;
   for (const auto& [job, res] : craned_ptr->running_task_resource_map) {
@@ -1044,6 +1045,7 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
     if (request.new_state() == crane::grpc::CranedState::CRANE_DRAIN) {
       craned_meta->drain = true;
       craned_meta->state_reason = request.reason();
+      g_craned_keeper->SetDeactivate(request.craned_id());
       reply.set_ok(true);
     } else if (request.new_state() == crane::grpc::CranedState::CRANE_IDLE) {
       craned_meta->drain = false;

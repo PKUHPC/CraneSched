@@ -682,7 +682,7 @@ void TaskScheduler::ScheduleThread_() {
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
           CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
                       cgroup_specs.size(), craned_id);
-          if (stub == nullptr || stub->Invalid()) {
+          if (stub == nullptr || stub->Invalid() || stub->Deactivate()) {
             bl.DecrementCount();
             return;
           }
@@ -817,7 +817,7 @@ void TaskScheduler::ScheduleThread_() {
         auto stub = g_craned_keeper->GetCranedStub(craned_id);
         CRANE_TRACE("Send ExecuteTasks for {} tasks to {}", tasks.tasks_size(),
                     craned_id);
-        if (stub == nullptr || stub->Invalid()) {
+        if (stub == nullptr || stub->Invalid() || stub->Deactivate()) {
           for (auto& task : tasks.tasks())
             failed_to_exec_task_id_set.emplace(craned_id, task.task_id());
           continue;
@@ -878,7 +878,7 @@ void TaskScheduler::ScheduleThread_() {
           auto& task_uid_pairs = iter.second;
 
           g_thread_pool->detach_task(
-              [=, cgroups_to_release = std::move(task_uid_pairs)]() {
+              [=, cgroups_to_release = task_uid_pairs]() {
                 auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
                 // If the craned is down, just ignore it.
@@ -2098,6 +2098,9 @@ void MinLoadFirst::NodeSelect(
         running_tasks,
     absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
     std::list<NodeSelectionResult>* selection_result_list) {
+  // Due to the fact that the craned and partition map are locked at the
+  // beginning of the NodeSelect() function, the element will not be modified
+  // during the execution of the function.
   auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
   auto all_partitions_meta_map =
       g_meta_container->GetAllPartitionsMetaMapConstPtr();
@@ -2132,7 +2135,7 @@ void MinLoadFirst::NodeSelect(
 
     PartitionId part_id = task->partition_id;
 
-    NodeSelectionInfo& node_info = part_id_node_info_map[part_id];  // TODO check partition existed!!
+    NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
     auto& part_meta = all_partitions_meta_map->at(part_id);
 
     std::list<CranedId> craned_ids;
@@ -2169,8 +2172,7 @@ void MinLoadFirst::NodeSelect(
     std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
     for (CranedId const& craned_id : craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-      for (PartitionId const& partition_id :
-           craned_meta->partition_ids) {
+      for (PartitionId const& partition_id : craned_meta->partition_ids) {
         involved_part_craned[partition_id].emplace_back(craned_id);
       }
     }
@@ -2378,7 +2380,7 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
   // Remove tasks in final queue.
   std::vector<task_db_id_t> db_ids;
   db_ids.reserve(tasks.size());
-for (TaskInCtld* task : tasks) db_ids.emplace_back(task->TaskDbId());
+  for (TaskInCtld* task : tasks) db_ids.emplace_back(task->TaskDbId());
 
   if (!g_embedded_db_client->PurgeEndedTasks(db_ids)) {
     CRANE_ERROR(

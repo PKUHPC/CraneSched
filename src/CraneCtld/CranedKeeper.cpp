@@ -643,8 +643,20 @@ void CranedKeeper::PutNodeIntoUnavailList(const CranedId &crane_id) {
 
 void CranedKeeper::ResetConnection(const CranedId &craned_id) {
   WriterLock lock(&m_connected_craned_mtx_);
-  m_connected_craned_id_stub_map_[craned_id].reset();
-  m_connected_craned_id_stub_map_.erase(craned_id);
+  if (m_connected_craned_id_stub_map_.contains(craned_id)) {
+    m_connected_craned_id_stub_map_[craned_id].reset();
+    m_connected_craned_id_stub_map_.erase(craned_id);
+  }
+}
+
+bool CranedKeeper::SetDeactivate(const CranedId &craned_id) {
+  ReaderLock lock(&m_connected_craned_mtx_);
+  if (m_connected_craned_id_stub_map_.contains(craned_id)) {
+    m_connected_craned_id_stub_map_[craned_id]->SetDeactivate(true);
+    return true;
+  } else {
+    return false;
+  }
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
