@@ -227,7 +227,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     std::sort(
         task_list->begin(), task_list->end(),
         [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
-          return a.end_time() > b.end_time();
+          return (a.status() == b.status()) ? (a.priority() > b.priority())
+                                            : (a.status() < b.status());
         });
 
     if (task_list->size() > limit)
