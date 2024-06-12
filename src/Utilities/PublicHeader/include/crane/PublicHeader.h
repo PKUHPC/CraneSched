@@ -62,7 +62,7 @@ inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
 inline const char* kUnlimitedQosName = "UNLIMITED";
 inline const char* kHostFilePath = "/etc/hosts";
 
-inline constexpr size_t kDefaultQueryTaskNumLimit = 100;
+inline constexpr size_t kDefaultQueryTaskNumLimit = 1000;
 inline constexpr uint64_t kPriorityDefaultMaxAge = 7 * 24 * 3600;  // 7 days
 
 inline const char* kDefaultCraneBaseDir = "/var/crane/";
