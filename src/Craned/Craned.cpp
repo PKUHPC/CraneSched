@@ -134,69 +134,69 @@ void ParseConfig(int argc, char** argv) {
       crane::InitializeNetworkFunctions();
 
       if (config["CranedListen"])
-        g_config.ListenConf.CranedListenAddr =
+        g_config.PrivateListenConf.CranedListenAddr =
             config["CranedListen"].as<std::string>();
       else
-        g_config.ListenConf.CranedListenAddr = "0.0.0.0";
+        g_config.PrivateListenConf.CranedListenAddr = "0.0.0.0";
 
-      g_config.ListenConf.CranedListenPort = kCranedDefaultPort;
+      g_config.PrivateListenConf.CranedListenPort = kCranedDefaultPort;
 
-      g_config.ListenConf.UnixSocketListenAddr =
+      g_config.PrivateListenConf.UnixSocketListenAddr =
           fmt::format("unix://{}", g_config.CranedUnixSockPath);
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
-      if (config["UseTls"] && config["UseTls"].as<bool>()) {
-        g_config.ListenConf.UseTls = true;
+      if (config["UsePrivateTls"] && config["UsePrivateTls"].as<bool>()) {
+        g_config.PrivateListenConf.UseTls = true;
 
-        if (config["DomainSuffix"])
-          g_config.ListenConf.DomainSuffix =
-              config["DomainSuffix"].as<std::string>();
+        if (config["PrivateDomainSuffix"])
+          g_config.PrivateListenConf.DomainSuffix =
+              config["PrivateDomainSuffix"].as<std::string>();
 
-        if (config["ServerCertFilePath"]) {
-          g_config.ListenConf.ServerCertFilePath =
-              config["ServerCertFilePath"].as<std::string>();
+        if (config["PrivateServerCertFilePath"]) {
+          g_config.PrivateListenConf.ServerCertFilePath =
+              config["PrivateServerCertFilePath"].as<std::string>();
 
           try {
-            g_config.ListenConf.ServerCertContent = util::ReadFileIntoString(
-                g_config.ListenConf.ServerCertFilePath);
+            g_config.PrivateListenConf.ServerCertContent = util::ReadFileIntoString(
+                g_config.PrivateListenConf.ServerCertFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (g_config.ListenConf.ServerCertContent.empty()) {
+          if (g_config.PrivateListenConf.ServerCertContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerCertFilePath "
+                "UsePrivateTls is true, but the file specified by PrivateServerCertFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but ServerCertFilePath is empty");
+          CRANE_ERROR("UsePrivateTls is true, but PrivateServerCertFilePath is empty");
           std::exit(1);
         }
 
-        if (config["ServerKeyFilePath"]) {
-          g_config.ListenConf.ServerKeyFilePath =
-              config["ServerKeyFilePath"].as<std::string>();
+        if (config["PrivateServerKeyFilePath"]) {
+          g_config.PrivateListenConf.ServerKeyFilePath =
+              config["PrivateServerKeyFilePath"].as<std::string>();
 
           try {
-            g_config.ListenConf.ServerKeyContent =
-                util::ReadFileIntoString(g_config.ListenConf.ServerKeyFilePath);
+            g_config.PrivateListenConf.ServerKeyContent =
+                util::ReadFileIntoString(g_config.PrivateListenConf.ServerKeyFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (g_config.ListenConf.ServerKeyContent.empty()) {
+          if (g_config.PrivateListenConf.ServerKeyContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerKeyFilePath "
+                "UsePrivateTls is true, but the file specified by PrivateServerKeyFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but ServerKeyFilePath is empty");
+          CRANE_ERROR("UsePrivateTls is true, but PrivateServerKeyFilePath is empty");
           std::exit(1);
         }
       } else {
-        g_config.ListenConf.UseTls = false;
+        g_config.PrivateListenConf.UseTls = false;
       }
 
       if (config["ControlMachine"]) {
@@ -341,9 +341,9 @@ void ParseConfig(int argc, char** argv) {
   }
 
   if (parsed_args.count("listen")) {
-    g_config.ListenConf.CranedListenAddr =
+    g_config.PrivateListenConf.CranedListenAddr =
         parsed_args["listen"].as<std::string>();
-    g_config.ListenConf.CranedListenPort = kCranedDefaultPort;
+    g_config.PrivateListenConf.CranedListenPort = kCranedDefaultPort;
   }
 
   if (parsed_args.count("server-address") == 0) {
@@ -369,7 +369,7 @@ void ParseConfig(int argc, char** argv) {
   // Check the format of CranedListen
   std::regex ipv4_re(R"(^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$)");
   std::smatch ivp4_match;
-  if (!std::regex_match(g_config.ListenConf.CranedListenAddr, ivp4_match,
+  if (!std::regex_match(g_config.PrivateListenConf.CranedListenAddr, ivp4_match,
                         ipv4_re)) {
     CRANE_ERROR("Illegal Ctld address format.");
     std::exit(1);
@@ -464,7 +464,7 @@ void StartServer() {
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
 
-  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
+  g_server = std::make_unique<Craned::CranedServer>(g_config.PrivateListenConf);
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
   g_ctld_client->StartConnectingCtld();

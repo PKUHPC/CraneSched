@@ -663,18 +663,18 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
               kCranedDefaultPort, m_channel_count_.fetch_add(1) + 1);
 
   std::string addr_port = fmt::format("{}:{}", ip_addr, kCranedDefaultPort);
-  if (g_config.ListenConf.UseTls) {
+  if (g_config.PrivateListenConf.UseTls) {
     channel_args.SetSslTargetNameOverride(
-        fmt::format("{}.{}", craned_id, g_config.ListenConf.DomainSuffix));
+        fmt::format("{}.{}", craned_id, g_config.PrivateListenConf.DomainSuffix));
 
     grpc::SslCredentialsOptions ssl_opts;
     // pem_root_certs is actually the certificate of server side rather than
     // CA certificate. CA certificate is not needed.
     // Since we use the same cert/key pair for both cranectld/craned,
     // pem_root_certs is set to the same certificate.
-    ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
-    ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
-    ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
+    ssl_opts.pem_root_certs = g_config.PrivateListenConf.ServerCertContent;
+    ssl_opts.pem_cert_chain = g_config.PrivateListenConf.ServerCertContent;
+    ssl_opts.pem_private_key = g_config.PrivateListenConf.ServerKeyContent;
 
     craned->m_channel_ = grpc::CreateCustomChannel(
         addr_port, grpc::SslCredentials(ssl_opts), channel_args);

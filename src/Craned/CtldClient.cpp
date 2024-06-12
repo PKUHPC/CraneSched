@@ -31,9 +31,9 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  if (g_config.ListenConf.UseTls) {
+  if (g_config.PrivateListenConf.UseTls) {
     std::string ctld_address = fmt::format("{}.{}:{}", server_address,
-                                           g_config.ListenConf.DomainSuffix,
+                                           g_config.PrivateListenConf.DomainSuffix,
                                            g_config.CraneCtldListenPort);
 
     grpc::SslCredentialsOptions ssl_opts;
@@ -41,9 +41,9 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
     // CA certificate. CA certificate is not needed.
     // Since we use the same cert/key pair for both cranectld/craned,
     // pem_root_certs is set to the same certificate.
-    ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
-    ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
-    ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
+    ssl_opts.pem_root_certs = g_config.PrivateListenConf.ServerCertContent;
+    ssl_opts.pem_cert_chain = g_config.PrivateListenConf.ServerCertContent;
+    ssl_opts.pem_private_key = g_config.PrivateListenConf.ServerKeyContent;
 
     m_ctld_channel_ = grpc::CreateCustomChannel(
         ctld_address, grpc::SslCredentials(ssl_opts), channel_args);
@@ -55,7 +55,7 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
   }
 
   // std::unique_ptr will automatically release the dangling stub.
-  m_stub_ = CraneCtld::NewStub(m_ctld_channel_);
+  m_stub_ = CraneCtldPrivate::NewStub(m_ctld_channel_);
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }

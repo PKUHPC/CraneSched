@@ -27,7 +27,7 @@
 
 namespace Ctld {
 
-grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
+grpc::Status CraneCtldPublicServiceImpl::SubmitBatchTask(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTaskRequest *request,
     crane::grpc::SubmitBatchTaskReply *response) {
@@ -54,7 +54,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
+grpc::Status CraneCtldPublicServiceImpl::SubmitBatchTasks(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTasksRequest *request,
     crane::grpc::SubmitBatchTasksReply *response) {
@@ -82,7 +82,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::TaskStatusChange(
+grpc::Status CraneCtldPrivateServiceImpl::TaskStatusChange(
     grpc::ServerContext *context,
     const crane::grpc::TaskStatusChangeRequest *request,
     crane::grpc::TaskStatusChangeReply *response) {
@@ -96,7 +96,7 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::CranedRegister(
+grpc::Status CraneCtldPrivateServiceImpl::CranedRegister(
     grpc::ServerContext *context,
     const crane::grpc::CranedRegisterRequest *request,
     crane::grpc::CranedRegisterReply *response) {
@@ -116,14 +116,14 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::CancelTask(
+grpc::Status CraneCtldPublicServiceImpl::CancelTask(
     grpc::ServerContext *context, const crane::grpc::CancelTaskRequest *request,
     crane::grpc::CancelTaskReply *response) {
   *response = g_task_scheduler->CancelPendingOrRunningTask(*request);
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryCranedInfo(
+grpc::Status CraneCtldPublicServiceImpl::QueryCranedInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryCranedInfoRequest *request,
     crane::grpc::QueryCranedInfoReply *response) {
@@ -136,7 +136,7 @@ grpc::Status CraneCtldServiceImpl::QueryCranedInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
+grpc::Status CraneCtldPublicServiceImpl::QueryPartitionInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryPartitionInfoRequest *request,
     crane::grpc::QueryPartitionInfoReply *response) {
@@ -149,7 +149,7 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyTask(
+grpc::Status CraneCtldPublicServiceImpl::ModifyTask(
     grpc::ServerContext *context, const crane::grpc::ModifyTaskRequest *request,
     crane::grpc::ModifyTaskReply *response) {
   using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
@@ -203,7 +203,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyNode(
+grpc::Status CraneCtldPublicServiceImpl::ModifyNode(
     grpc::ServerContext *context,
     const crane::grpc::ModifyCranedStateRequest *request,
     crane::grpc::ModifyCranedStateReply *response) {
@@ -212,7 +212,7 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
+grpc::Status CraneCtldPublicServiceImpl::QueryTasksInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryTasksInfoRequest *request,
     crane::grpc::QueryTasksInfoReply *response) {
@@ -383,7 +383,178 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::AddAccount(
+grpc::Status CraneCtldPrivateServiceImpl::QueryTasksInfo(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryTasksInfoRequest *request,
+    crane::grpc::QueryTasksInfoReply *response) {
+  // Query tasks in RAM
+  g_task_scheduler->QueryTasksInRam(request, response);
+
+  int num_limit = request->num_limit() <= 0 ? kDefaultQueryTaskNumLimit
+                                            : request->num_limit();
+  auto *task_list = response->mutable_task_info_list();
+
+  auto sort_and_truncate = [](auto *task_list, size_t limit) -> void {
+    std::sort(
+        task_list->begin(), task_list->end(),
+        [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
+          return a.end_time() > b.end_time();
+        });
+
+    if (task_list->size() > limit)
+      task_list->DeleteSubrange(limit, task_list->size());
+  };
+
+  if (task_list->size() >= num_limit ||
+      !request->option_include_completed_tasks()) {
+    sort_and_truncate(task_list, num_limit);
+    response->set_ok(true);
+    return grpc::Status::OK;
+  }
+
+  // Query completed tasks in Mongodb
+  // (only for cacct, which sets `option_include_completed_tasks` to true)
+  std::vector<std::unique_ptr<TaskInDb>> db_ended_list;
+  if (!g_db_client->FetchJobRecords(&db_ended_list,
+                                    num_limit - task_list->size(), true)) {
+    CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
+    return grpc::Status::OK;
+  }
+
+  auto db_ended_append_fn = [&](std::unique_ptr<TaskInDb> const &task) {
+    auto *task_it = task_list->Add();
+
+    task_it->set_type(task->type);
+    task_it->set_task_id(task->task_id);
+    task_it->set_name(task->name);
+    task_it->set_partition(task->partition_id);
+    task_it->set_uid(task->uid);
+
+    task_it->set_gid(task->gid);
+    task_it->mutable_time_limit()->set_seconds(
+        ToInt64Seconds(task->time_limit));
+    task_it->mutable_submit_time()->CopyFrom(task->submit_time);
+    task_it->mutable_start_time()->CopyFrom(task->start_time);
+    task_it->mutable_end_time()->CopyFrom(task->end_time);
+    task_it->set_account(task->account);
+
+    task_it->set_node_num(task->node_num);
+    task_it->set_cmd_line(task->cmd_line);
+    task_it->set_cwd(task->cwd);
+    task_it->set_username(task->username);
+    task_it->set_qos(task->qos);
+
+    task_it->set_alloc_cpu(
+        static_cast<double>(task->resources.allocatable_resource.cpu_count) *
+        task->node_num);
+    task_it->set_exit_code(task->exit_code);
+
+    task_it->set_status(task->status);
+    task_it->set_craned_list(task->allocated_craneds_regex);
+  };
+
+  auto db_task_rng_filter_time = [&](std::unique_ptr<TaskInDb> const &task) {
+    bool has_submit_time_interval = request->has_filter_submit_time_interval();
+    bool has_start_time_interval = request->has_filter_start_time_interval();
+    bool has_end_time_interval = request->has_filter_end_time_interval();
+
+    bool valid = true;
+    if (has_submit_time_interval) {
+      const auto &interval = request->filter_submit_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task->submit_time >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task->submit_time <= interval.upper_bound();
+    }
+
+    if (has_start_time_interval) {
+      const auto &interval = request->filter_start_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task->start_time >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task->start_time <= interval.upper_bound();
+    }
+
+    if (has_end_time_interval) {
+      const auto &interval = request->filter_end_time_interval();
+      valid &= !interval.has_lower_bound() ||
+               task->end_time >= interval.lower_bound();
+      valid &= !interval.has_upper_bound() ||
+               task->end_time <= interval.upper_bound();
+    }
+
+    return valid;
+  };
+
+  bool no_accounts_constraint = request->filter_accounts().empty();
+  std::unordered_set<std::string> req_accounts(
+      request->filter_accounts().begin(), request->filter_accounts().end());
+  auto db_task_rng_filter_account = [&](std::unique_ptr<TaskInDb> const &task) {
+    return no_accounts_constraint || req_accounts.contains(task->account);
+  };
+
+  bool no_username_constraint = request->filter_users().empty();
+  std::unordered_set<std::string> req_users(request->filter_users().begin(),
+                                            request->filter_users().end());
+  auto db_task_rng_filter_user = [&](std::unique_ptr<TaskInDb> const &task) {
+    return no_username_constraint || req_users.contains(task->username);
+  };
+
+  bool no_task_names_constraint = request->filter_task_names().empty();
+  std::unordered_set<std::string> req_task_names(
+      request->filter_task_names().begin(), request->filter_task_names().end());
+  auto db_task_rng_filter_name = [&](std::unique_ptr<TaskInDb> const &task) {
+    return no_task_names_constraint || req_task_names.contains(task->name);
+  };
+
+  bool no_qos_constraint = request->filter_qos().empty();
+  std::unordered_set<std::string> req_qos(request->filter_qos().begin(),
+                                          request->filter_qos().end());
+  auto db_task_rng_filter_qos = [&](std::unique_ptr<TaskInDb> const &task) {
+    return no_qos_constraint || req_qos.contains(task->qos);
+  };
+
+  bool no_partitions_constraint = request->filter_partitions().empty();
+  std::unordered_set<std::string> req_partitions(
+      request->filter_partitions().begin(), request->filter_partitions().end());
+  auto db_task_rng_filter_partition =
+      [&](std::unique_ptr<TaskInDb> const &task) {
+        return no_partitions_constraint ||
+               req_partitions.contains(task->partition_id);
+      };
+
+  bool no_task_ids_constraint = request->filter_task_ids().empty();
+  std::unordered_set<uint32_t> req_task_ids(request->filter_task_ids().begin(),
+                                            request->filter_task_ids().end());
+  auto db_task_rng_filter_id = [&](std::unique_ptr<TaskInDb> const &task) {
+    return no_task_ids_constraint || req_task_ids.contains(task->task_id);
+  };
+
+  bool no_task_states_constraint = request->filter_task_states().empty();
+  std::unordered_set<int> req_task_states(request->filter_task_states().begin(),
+                                          request->filter_task_states().end());
+  auto db_task_rng_filter_state = [&](std::unique_ptr<TaskInDb> const &task) {
+    return no_task_states_constraint || req_task_states.contains(task->status);
+  };
+
+  auto db_ended_rng = db_ended_list |
+                      ranges::views::filter(db_task_rng_filter_account) |
+                      ranges::views::filter(db_task_rng_filter_name) |
+                      ranges::views::filter(db_task_rng_filter_partition) |
+                      ranges::views::filter(db_task_rng_filter_id) |
+                      ranges::views::filter(db_task_rng_filter_state) |
+                      ranges::views::filter(db_task_rng_filter_user) |
+                      ranges::views::filter(db_task_rng_filter_time) |
+                      ranges::views::filter(db_task_rng_filter_qos) |
+                      ranges::views::take(num_limit - task_list->size());
+  ranges::for_each(db_ended_rng, db_ended_append_fn);
+
+  sort_and_truncate(task_list, num_limit);
+  response->set_ok(true);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldPublicServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
   AccountManager::Result judge_res = g_account_manager->HasPermissionToAccount(
@@ -421,7 +592,7 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::AddUser(
+grpc::Status CraneCtldPublicServiceImpl::AddUser(
     grpc::ServerContext *context, const crane::grpc::AddUserRequest *request,
     crane::grpc::AddUserReply *response) {
   User::AdminLevel user_level;
@@ -480,7 +651,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::AddQos(
+grpc::Status CraneCtldPublicServiceImpl::AddQos(
     grpc::ServerContext *context, const crane::grpc::AddQosRequest *request,
     crane::grpc::AddQosReply *response) {
   auto judge_res = g_account_manager->CheckUidIsAdmin(request->uid());
@@ -513,7 +684,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyEntity(
+grpc::Status CraneCtldPublicServiceImpl::ModifyEntity(
     grpc::ServerContext *context,
     const crane::grpc::ModifyEntityRequest *request,
     crane::grpc::ModifyEntityReply *response) {
@@ -609,7 +780,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
+grpc::Status CraneCtldPublicServiceImpl::QueryEntityInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryEntityInfoRequest *request,
     crane::grpc::QueryEntityInfoReply *response) {
@@ -885,7 +1056,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::DeleteEntity(
+grpc::Status CraneCtldPublicServiceImpl::DeleteEntity(
     grpc::ServerContext *context,
     const crane::grpc::DeleteEntityRequest *request,
     crane::grpc::DeleteEntityReply *response) {
@@ -985,7 +1156,7 @@ grpc::Status CraneCtldServiceImpl::DeleteEntity(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
+grpc::Status CraneCtldPublicServiceImpl::BlockAccountOrUser(
     grpc::ServerContext *context,
     const crane::grpc::BlockAccountOrUserRequest *request,
     crane::grpc::BlockAccountOrUserReply *response) {
@@ -1025,7 +1196,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
+grpc::Status CraneCtldPublicServiceImpl::QueryClusterInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryClusterInfoRequest *request,
     crane::grpc::QueryClusterInfoReply *response) {
@@ -1033,7 +1204,7 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::CforedStream(
+grpc::Status CraneCtldPublicServiceImpl::CforedStream(
     grpc::ServerContext *context,
     grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
                              crane::grpc::StreamCforedRequest> *stream) {
@@ -1198,50 +1369,28 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
   }
 }
 
-CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
-  m_service_impl_ = std::make_unique<CraneCtldServiceImpl>(this);
-
-  std::string listen_addr_port =
-      fmt::format("{}:{}", listen_conf.CraneCtldListenAddr,
-                  listen_conf.CraneCtldListenPort);
+CtldServer::CtldServer(const Config::CraneCtldListenConf &private_listen_conf, 
+                       const Config::CraneCtldListenConf &public_listen_conf) {
+  m_private_service_impl_ = std::make_unique<CraneCtldPrivateServiceImpl>(this);
+  m_public_service_impl_ = std::make_unique<CraneCtldPublicServiceImpl>(this);
 
   grpc::ServerBuilder builder;
 
-  if (g_config.CompressedRpc)
+  if (g_config.CompressedRpc) {
     builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_GZIP);
-
-  if (listen_conf.UseTls) {
-    grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
-    pem_key_cert_pair.cert_chain = listen_conf.ServerCertContent;
-    pem_key_cert_pair.private_key = listen_conf.ServerKeyContent;
-
-    grpc::SslServerCredentialsOptions ssl_opts;
-    // pem_root_certs is actually the certificate of server side rather than
-    // CA certificate. CA certificate is not needed.
-    // Since we use the same cert/key pair for both cranectld/craned,
-    // pem_root_certs is set to the same certificate.
-    ssl_opts.pem_root_certs = listen_conf.ServerCertContent;
-    ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
-    ssl_opts.client_certificate_request =
-        GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
-
-    builder.AddListeningPort(listen_addr_port,
-                             grpc::SslServerCredentials(ssl_opts));
-  } else {
-    builder.AddListeningPort(listen_addr_port,
-                             grpc::InsecureServerCredentials());
   }
 
-  builder.RegisterService(m_service_impl_.get());
+  SetGrpcBuilder(private_listen_conf, &builder);
+  builder.RegisterService(m_private_service_impl_.get());
+
+  SetGrpcBuilder(public_listen_conf, &builder);
+  builder.RegisterService(m_public_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
   if (!m_server_) {
     CRANE_ERROR("Cannot start gRPC server!");
     std::exit(1);
   }
-
-  CRANE_INFO("CraneCtld is listening on {} and Tls is {}", listen_addr_port,
-             listen_conf.UseTls);
 
   // Avoid the potential deadlock error in underlying absl::mutex
   std::thread sigint_waiting_thread([p_server = m_server_.get()] {
@@ -1350,6 +1499,34 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     return result::fail("The param of task is invalid.");
   }
   return result::fail(CraneErrStr(err));
+}
+void CtldServer::SetGrpcBuilder(const Config::CraneCtldListenConf listen_conf, grpc::ServerBuilder *builder) {
+  std::string listen_addr_port =
+            fmt::format("{}:{}", listen_conf.CraneCtldListenAddr,
+                          listen_conf.CraneCtldListenPort);
+  if (listen_conf.UseTls) {
+    grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
+    pem_key_cert_pair.cert_chain = listen_conf.ServerCertContent;
+    pem_key_cert_pair.private_key = listen_conf.ServerKeyContent;
+
+    grpc::SslServerCredentialsOptions ssl_opts;
+    // pem_root_certs is actually the certificate of server side rather than
+    // CA certificate. CA certificate is not needed.
+    // Since we use the same cert/key pair for both cranectld/craned,
+    // pem_root_certs is set to the same certificate.
+    ssl_opts.pem_root_certs = listen_conf.ServerCertContent;
+    ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
+    ssl_opts.client_certificate_request =
+        GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
+
+    builder->AddListeningPort(listen_addr_port,
+                             grpc::SslServerCredentials(ssl_opts));
+  } else {
+    builder->AddListeningPort(listen_addr_port,
+                             grpc::InsecureServerCredentials());
+  }
+  CRANE_INFO("CraneCtld is listening on {} and Tls is {}", listen_addr_port,
+            listen_conf.UseTls);
 }
 
 }  // namespace Ctld

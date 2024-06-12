@@ -100,7 +100,8 @@ struct Config {
   };
   Priority PriorityConfig;
 
-  CraneCtldListenConf ListenConf;
+  CraneCtldListenConf PrivateListenConf;
+  CraneCtldListenConf PublicListenConf;
   bool CompressedRpc{};
 
   std::string CraneCtldDebugLevel;

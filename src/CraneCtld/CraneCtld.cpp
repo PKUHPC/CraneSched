@@ -104,71 +104,131 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldMutexFilePath =
             g_config.CraneBaseDir + kDefaultCraneCtldMutexFile;
 
-      if (config["CraneCtldListenAddr"])
-        g_config.ListenConf.CraneCtldListenAddr =
+      if (config["CraneCtldListenAddr"]) {
+        g_config.PrivateListenConf.CraneCtldListenAddr =
             config["CraneCtldListenAddr"].as<std::string>();
-      else
-        g_config.ListenConf.CraneCtldListenAddr = "0.0.0.0";
+        g_config.PublicListenConf.CraneCtldListenAddr =
+            config["CraneCtldListenAddr"].as<std::string>();
+      } else {
+        g_config.PrivateListenConf.CraneCtldListenAddr = "0.0.0.0";
+        g_config.PublicListenConf.CraneCtldListenAddr = "0.0.0.0";
+      }
 
-      if (config["CraneCtldListenPort"])
-        g_config.ListenConf.CraneCtldListenPort =
+      if (config["CraneCtldListenPort"]) {
+        g_config.PrivateListenConf.CraneCtldListenPort =
             config["CraneCtldListenPort"].as<std::string>();
-      else
-        g_config.ListenConf.CraneCtldListenPort = kCtldDefaultPort;
+        g_config.PublicListenConf.CraneCtldListenPort =
+            config["CraneCtldListenPort"].as<std::string>();
+      } else {
+        g_config.PrivateListenConf.CraneCtldListenPort = kCtldDefaultPort;
+        g_config.PublicListenConf.CraneCtldListenPort = kCtldDefaultPort;
+      }
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
-      if (config["UseTls"] && config["UseTls"].as<bool>()) {
-        g_config.ListenConf.UseTls = true;
+      if (config["UsePrivateTls"] && config["UsePrivateTls"].as<bool>()) {
+        g_config.PrivateListenConf.UseTls = true;
 
-        if (config["DomainSuffix"])
-          g_config.ListenConf.DomainSuffix =
-              config["DomainSuffix"].as<std::string>();
+      if (config["UsePublicTls"] && config["UsePublicTls"].as<bool>()) {
+        g_config.PublicListenConf.UseTls = true;
 
-        if (config["ServerCertFilePath"]) {
-          g_config.ListenConf.ServerCertFilePath =
-              config["ServerCertFilePath"].as<std::string>();
+      if (config["PrivateDomainSuffix"])
+        g_config.PrivateListenConf.DomainSuffix =
+            config["PrivateDomainSuffix"].as<std::string>();
+      
+      if (config["PublicDomainSuffix"])
+        g_config.PublicListenConf.DomainSuffix =
+            config["PublicDomainSuffix"].as<std::string>();
 
-          try {
-            g_config.ListenConf.ServerCertContent = util::ReadFileIntoString(
-                g_config.ListenConf.ServerCertFilePath);
-          } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
-            std::exit(1);
-          }
-          if (g_config.ListenConf.ServerCertContent.empty()) {
-            CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerCertFilePath "
-                "is empty");
-          }
+      if (config["PrivateServerCertFilePath"]) {
+        g_config.PrivateListenConf.ServerCertFilePath =
+            config["PrivateServerCertFilePath"].as<std::string>();
+
+        try {
+          g_config.PrivateListenConf.ServerCertContent = util::ReadFileIntoString(
+              g_config.PrivateListenConf.ServerCertFilePath);
+        } catch (const std::exception& e) {
+          CRANE_ERROR("Read cert file error: {}", e.what());
+          std::exit(1);
+        }
+        if (g_config.PrivateListenConf.ServerCertContent.empty()) {
+          CRANE_ERROR(
+              "UsePrivateTls is true, but the file specified by PrivateServerCertFilePath "
+              "is empty");
+        }
         } else {
-          CRANE_ERROR("UseTls is true, but ServerCertFilePath is empty");
+          CRANE_ERROR("UsePrivateTls is true, but PrivateServerCertFilePath is empty");
           std::exit(1);
         }
 
-        if (config["ServerKeyFilePath"]) {
-          g_config.ListenConf.ServerKeyFilePath =
-              config["ServerKeyFilePath"].as<std::string>();
+        if (config["PrivateServerKeyFilePath"]) {
+          g_config.PrivateListenConf.ServerKeyFilePath =
+              config["PrivateServerKeyFilePath"].as<std::string>();
 
           try {
-            g_config.ListenConf.ServerKeyContent =
-                util::ReadFileIntoString(g_config.ListenConf.ServerKeyFilePath);
+            g_config.PrivateListenConf.ServerKeyContent =
+                util::ReadFileIntoString(g_config.PrivateListenConf.ServerKeyFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (g_config.ListenConf.ServerKeyContent.empty()) {
+          if (g_config.PrivateListenConf.ServerKeyContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerKeyFilePath "
+                "UsePrivateTls is true, but the file specified by PrivateServerKeyFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but ServerKeyFilePath is empty");
+          CRANE_ERROR("UsePrivateTls is true, but PrivateServerKeyFilePath is empty");
           std::exit(1);
         }
       } else {
-        g_config.ListenConf.UseTls = false;
+        g_config.PrivateListenConf.UseTls = false;
+      }
+
+      if (config["PublicServerCertFilePath"]) {
+        g_config.PublicListenConf.ServerCertFilePath =
+            config["PublicServerCertFilePath"].as<std::string>();
+
+        try {
+          g_config.PublicListenConf.ServerCertContent = util::ReadFileIntoString(
+              g_config.PublicListenConf.ServerCertFilePath);
+        } catch (const std::exception& e) {
+          CRANE_ERROR("Read cert file error: {}", e.what());
+          std::exit(1);
+        }
+        if (g_config.PublicListenConf.ServerCertContent.empty()) {
+          CRANE_ERROR(
+              "UsePublicTls is true, but the file specified by PublicServerCertFilePath "
+              "is empty");
+        }
+        } else {
+          CRANE_ERROR("UsePublicTls is true, but PublicServerCertFilePath is empty");
+          std::exit(1);
+        }
+
+        if (config["PublicServerKeyFilePath"]) {
+          g_config.PublicListenConf.ServerKeyFilePath =
+              config["PublicServerKeyFilePath"].as<std::string>();
+
+          try {
+            g_config.PublicListenConf.ServerKeyContent =
+                util::ReadFileIntoString(g_config.PublicListenConf.ServerKeyFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read cert file error: {}", e.what());
+            std::exit(1);
+          }
+          if (g_config.PublicListenConf.ServerKeyContent.empty()) {
+            CRANE_ERROR(
+                "UsePublicTls is true, but the file specified by PublicServerKeyFilePath "
+                "is empty");
+          }
+        } else {
+          CRANE_ERROR("UsePublicTls is true, but PublicServerKeyFilePath is empty");
+          std::exit(1);
+        }
+      } else {
+        g_config.PublicListenConf.UseTls = false;
       }
 
       if (config["DbConfigPath"]) {
@@ -481,11 +541,15 @@ void ParseConfig(int argc, char** argv) {
   }
 
   if (parsed_args.count("listen")) {
-    g_config.ListenConf.CraneCtldListenAddr =
+    g_config.PrivateListenConf.CraneCtldListenAddr =
+        parsed_args["listen"].as<std::string>();
+    g_config.PublicListenConf.CraneCtldListenAddr =
         parsed_args["listen"].as<std::string>();
   }
   if (parsed_args.count("port")) {
-    g_config.ListenConf.CraneCtldListenPort =
+    g_config.PrivateListenConf.CraneCtldListenPort =
+        parsed_args["port"].as<std::string>();
+    g_config.PublicListenConf.CraneCtldListenPort =
         parsed_args["port"].as<std::string>();
   }
 
@@ -495,12 +559,14 @@ void ParseConfig(int argc, char** argv) {
   std::regex regex_port(R"(^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|)"
                         R"(65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$)");
 
-  if (!std::regex_match(g_config.ListenConf.CraneCtldListenAddr, regex_addr)) {
+  if ((!std::regex_match(g_config.PrivateListenConf.CraneCtldListenAddr, regex_addr)) ||
+      (!std::regex_match(g_config.PublicListenConf.CraneCtldListenAddr, regex_addr))) {
     fmt::print("Listening address is invalid.\n");
     std::exit(1);
   }
 
-  if (!std::regex_match(g_config.ListenConf.CraneCtldListenPort, regex_port)) {
+  if ((!std::regex_match(g_config.PrivateListenConf.CraneCtldListenPort, regex_port)) || 
+      (!std::regex_match(g_config.PublicListenConf.CraneCtldListenPort, regex_port))) {
     fmt::print("Listening port is invalid.\n");
     std::exit(1);
   }
@@ -638,7 +704,7 @@ void InitializeCtldGlobalVariables() {
     std::exit(1);
   }
 
-  g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
+  g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.PrivateListenConf, g_config.PublicListenConf);
 }
 
 void CreateFolders() {

@@ -160,9 +160,9 @@ class CforedStreamWriter {
 
 class CtldServer;
 
-class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
+class CraneCtldPublicServiceImpl final : public crane::grpc::CraneCtldPublic::Service {
  public:
-  explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
+  explicit CraneCtldPublicServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
 
   grpc::Status CforedStream(
       grpc::ServerContext *context,
@@ -180,16 +180,6 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       grpc::ServerContext *context,
       const crane::grpc::SubmitBatchTasksRequest *request,
       crane::grpc::SubmitBatchTasksReply *response) override;
-
-  grpc::Status TaskStatusChange(
-      grpc::ServerContext *context,
-      const crane::grpc::TaskStatusChangeRequest *request,
-      crane::grpc::TaskStatusChangeReply *response) override;
-
-  grpc::Status CranedRegister(
-      grpc::ServerContext *context,
-      const crane::grpc::CranedRegisterRequest *request,
-      crane::grpc::CranedRegisterReply *response) override;
 
   grpc::Status CancelTask(grpc::ServerContext *context,
                           const crane::grpc::CancelTaskRequest *request,
@@ -257,6 +247,29 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
   CtldServer *m_ctld_server_;
 };
 
+class CraneCtldPrivateServiceImpl final : public crane::grpc::CraneCtldPrivate::Service {
+ public:
+  explicit CraneCtldPrivateServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
+
+  grpc::Status TaskStatusChange(
+      grpc::ServerContext *context,
+      const crane::grpc::TaskStatusChangeRequest *request,
+      crane::grpc::TaskStatusChangeReply *response) override;
+
+  grpc::Status CranedRegister(
+      grpc::ServerContext *context,
+      const crane::grpc::CranedRegisterRequest *request,
+      crane::grpc::CranedRegisterReply *response) override;
+
+  grpc::Status QueryTasksInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryTasksInfoRequest *request,
+      crane::grpc::QueryTasksInfoReply *response) override;
+
+ private:
+  CtldServer *m_ctld_server_;
+};
+
 /***
  * Note: There should be only ONE instance of CtldServer!!!!
  */
@@ -266,7 +279,8 @@ class CtldServer {
    * User must make sure that this constructor is called only once!
    * @param listen_address The "[Address]:[Port]" of CraneCtld.
    */
-  explicit CtldServer(const Config::CraneCtldListenConf &listen_conf);
+  explicit CtldServer(const Config::CraneCtldListenConf &private_listen_conf, 
+                       const Config::CraneCtldListenConf &public_listen_conf);
 
   inline void Wait() { m_server_->Wait(); }
 
@@ -284,7 +298,8 @@ class CtldServer {
 
   using Mutex = util::mutex;
 
-  std::unique_ptr<CraneCtldServiceImpl> m_service_impl_;
+  std::unique_ptr<CraneCtldPrivateServiceImpl> m_private_service_impl_;
+  std::unique_ptr<CraneCtldPublicServiceImpl> m_public_service_impl_;
   std::unique_ptr<Server> m_server_;
 
   Mutex m_mtx_;
@@ -294,8 +309,10 @@ class CtldServer {
   inline static std::mutex s_sigint_mtx;
   inline static std::condition_variable s_sigint_cv;
   static void signal_handler_func(int) { s_sigint_cv.notify_one(); };
+  void SetGrpcBuilder(const Config::CraneCtldListenConf listen_conf, grpc::ServerBuilder *builder);
 
-  friend class CraneCtldServiceImpl;
+  friend class CraneCtldPrivateServiceImpl;
+  friend class CraneCtldPublicServiceImpl;
 };
 
 }  // namespace Ctld

@@ -549,7 +549,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
   }
 
   std::shared_ptr<Channel> channel_of_remote_service;
-  if (g_config.ListenConf.UseTls) {
+  if (g_config.PrivateListenConf.UseTls) {
     std::string remote_hostname;
     ok = crane::ResolveHostnameFromIpv4(request->ssh_remote_address(),
                                         &remote_hostname);
@@ -559,16 +559,16 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
 
       std::string target_service =
           fmt::format("{}.{}:{}", remote_hostname,
-                      g_config.ListenConf.DomainSuffix, crane_service_port);
+                      g_config.PrivateListenConf.DomainSuffix, crane_service_port);
 
       grpc::SslCredentialsOptions ssl_opts;
       // pem_root_certs is actually the certificate of server side rather than
       // CA certificate. CA certificate is not needed.
       // Since we use the same cert/key pair for both cranectld/craned,
       // pem_root_certs is set to the same certificate.
-      ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
-      ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
-      ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
+      ssl_opts.pem_root_certs = g_config.PrivateListenConf.ServerCertContent;
+      ssl_opts.pem_cert_chain = g_config.PrivateListenConf.ServerCertContent;
+      ssl_opts.pem_private_key = g_config.PrivateListenConf.ServerKeyContent;
 
       channel_of_remote_service =
           grpc::CreateChannel(target_service, grpc::SslCredentials(ssl_opts));

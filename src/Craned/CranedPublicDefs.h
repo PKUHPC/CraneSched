@@ -63,7 +63,7 @@ struct Config {
     std::string UnixSocketListenAddr;
   };
 
-  CranedListenConf ListenConf;
+  CranedListenConf PrivateListenConf;
   bool CompressedRpc{};
 
   std::string ControlMachine;
