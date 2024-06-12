@@ -195,12 +195,73 @@ std::string TaskManager::CgroupStrByTaskId_(task_id_t task_id) {
   return fmt::format("Crane_Task_{}", task_id);
 }
 
+void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
+  auto it = m_task_map_.find(task_id);
+  if (it == m_task_map_.end()) {
+    CRANE_ERROR("Task #{} not found in TaskStopAndDoStatusChangeAsync.",
+                task_id);
+    return;
+  }
+  TaskInstance* instance = it->second.get();
+
+  switch (instance->err_before_exec) {
+  case CraneErr::kProtobufError:
+    EvActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Cancelled,
+                                ExitCode::kExitCodeSpawnProcessFail,
+                                std::nullopt);
+    break;
+
+  case CraneErr::kCgroupError:
+    EvActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Cancelled,
+                                ExitCode::kExitCodeCgroupError, std::nullopt);
+    break;
+
+  default:
+    break;
+  }
+
+  ProcSigchldInfo& sigchld_info = instance->sigchld_info;
+  if (instance->task.type() == crane::grpc::Batch ||
+      CheckIfInstanceTypeIsCrun_(instance)) {
+    // For a Batch task, the end of the process means it is done.
+    if (sigchld_info.is_terminated_by_signal) {
+      if (instance->cancelled_by_user)
+        EvActivateTaskStatusChange_(
+            task_id, crane::grpc::TaskStatus::Cancelled,
+            sigchld_info.value + ExitCode::kTerminationSignalBase,
+            std::nullopt);
+      else if (instance->terminated_by_timeout)
+        EvActivateTaskStatusChange_(
+            task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
+            sigchld_info.value + ExitCode::kTerminationSignalBase,
+            std::nullopt);
+      else
+        EvActivateTaskStatusChange_(
+            task_id, crane::grpc::TaskStatus::Failed,
+            sigchld_info.value + ExitCode::kTerminationSignalBase,
+            std::nullopt);
+    } else
+      EvActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Completed,
+                                  sigchld_info.value, std::nullopt);
+  } else /* Calloc */ {
+    // For a COMPLETING Calloc task with a process running,
+    // the end of this process means that this task is done.
+    if (sigchld_info.is_terminated_by_signal)
+      EvActivateTaskStatusChange_(
+          task_id, crane::grpc::TaskStatus::Completed,
+          sigchld_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+    else
+      EvActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Completed,
+                                  sigchld_info.value, std::nullopt);
+  }
+}
+
 void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
                                void* user_data) {
   assert(m_instance_ptr_->m_instance_ptr_ != nullptr);
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
-  SigchldInfo sigchld_info{};
+  ProcSigchldInfo sigchld_info{};
 
   int status;
   pid_t pid;
@@ -246,6 +307,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
 
         this_->m_mtx_.Unlock();
 
+        instance->sigchld_info = sigchld_info;
         proc->Finish(sigchld_info.is_terminated_by_signal, sigchld_info.value);
 
         // Free the ProcessInstance. ITask struct is not freed here because
@@ -264,72 +326,18 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
               this_->TerminateTaskAsync(task_id);
             }
           } else {
-            if (!instance->orphaned) {
-              // If the ProcessInstance has no process left and the task was not
-              // marked as an orphaned task, send TaskStatusChange for this
-              // task. See the comment of EvActivateTaskStatusChange_.
-
-              switch (instance->err_before_exec) {
-              case CraneErr::kProtobufError:
-                this_->EvActivateTaskStatusChange(
-                    task_id, crane::grpc::TaskStatus::Cancelled,
-                    ExitCode::kExitCodeSpawnProcessFail, std::nullopt);
-                break;
-
-              case CraneErr::kCgroupError:
-                this_->EvActivateTaskStatusChange(
-                    task_id, crane::grpc::TaskStatus::Cancelled,
-                    ExitCode::kExitCodeCgroupError, std::nullopt);
-                break;
-
-              default:
-                break;
-              }
-
-              if (instance->task.type() == crane::grpc::Batch) {
-                // For a Batch task, the end of the process means it is done.
-                if (sigchld_info.is_terminated_by_signal) {
-                  if (instance->cancelled_by_user)
-                    this_->EvActivateTaskStatusChange(
-                        task_id, crane::grpc::TaskStatus::Cancelled,
-                        sigchld_info.value + ExitCode::kTerminationSignalBase,
-                        std::nullopt);
-                  else if (instance->terminated_by_timeout)
-                    this_->EvActivateTaskStatusChange(
-                        task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
-                        sigchld_info.value + ExitCode::kTerminationSignalBase,
-                        std::nullopt);
-                  else
-                    this_->EvActivateTaskStatusChange(
-                        task_id, crane::grpc::TaskStatus::Failed,
-                        sigchld_info.value + ExitCode::kTerminationSignalBase,
-                        std::nullopt);
-                } else
-                  this_->EvActivateTaskStatusChange(
-                      task_id, crane::grpc::TaskStatus::Completed,
-                      sigchld_info.value, std::nullopt);
-              } else {
-                if (instance->task.interactive_meta().interactive_type() ==
-                    crane::grpc::Crun)
-                  // TaskStatusChange of a crun task is triggered in
-                  // CforedManager.
-                  g_cfored_manager->TaskProcOnCforedStopped(
-                      instance->task.interactive_meta().cfored_name(),
-                      instance->task.task_id());
-                else {
-                  // For a COMPLETING Calloc task with a process running,
-                  // the end of this process means that this task is done.
-                  if (sigchld_info.is_terminated_by_signal)
-                    this_->EvActivateTaskStatusChange(
-                        task_id, crane::grpc::TaskStatus::Completed,
-                        sigchld_info.value + ExitCode::kTerminationSignalBase,
-                        std::nullopt);
-                  else
-                    this_->EvActivateTaskStatusChange(
-                        task_id, crane::grpc::TaskStatus::Completed,
-                        sigchld_info.value, std::nullopt);
-                }
-              }
+            if (instance->task.interactive_meta().interactive_type() ==
+                crane::grpc::Crun)
+              // TaskStatusChange of a crun task is triggered in
+              // CforedManager.
+              g_cfored_manager->TaskProcOnCforedStopped(
+                  instance->task.interactive_meta().cfored_name(),
+                  instance->task.task_id());
+            else /* Batch / Calloc */ {
+              // If the ProcessInstance has no process left,
+              // send TaskStatusChange for this task.
+              // See the comment of EvActivateTaskStatusChange_.
+              this_->TaskStopAndDoStatusChangeAsync(task_id);
             }
           }
         }
@@ -386,7 +394,8 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
       task_id_t task_id = task_it->first;
       TaskInstance* task_instance = task_it->second.get();
 
-      if (task_instance->task.type() == crane::grpc::Batch) {
+      if (task_instance->task.type() == crane::grpc::Batch ||
+          CheckIfInstanceTypeIsCrun_(task_instance)) {
         for (auto&& [pid, pr_instance] : task_instance->processes) {
           CRANE_INFO(
               "Sending SIGINT to the process group of task #{} with root "
@@ -396,9 +405,9 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
         }
         task_it++;
       } else {
-        // Kill all process in an interactive task and just remove it from the
+        // Kill all process of a calloc task and just remove it from the
         // task map.
-        CRANE_DEBUG("Cleaning interactive task #{}...",
+        CRANE_DEBUG("Cleaning Calloc task #{}...",
                     task_instance->task.task_id());
         task_instance->cgroup->KillAllProcesses();
 
@@ -895,7 +904,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
 
   if (!m_task_id_to_cg_map_.Contains(task_id)) {
     CRANE_ERROR("Failed to find created cgroup for task #{}", task_id);
-    EvActivateTaskStatusChange(
+    EvActivateTaskStatusChange_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeCgroupError,
         fmt::format("Failed to find created cgroup for task #{}", task_id));
@@ -916,7 +925,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
 
       if (!cg_unique_ptr) {
         CRANE_ERROR("Failed to created cgroup for task #{}", task_id);
-        EvActivateTaskStatusChange(
+        EvActivateTaskStatusChange_(
             task_id, crane::grpc::TaskStatus::Failed,
             ExitCode::kExitCodeCgroupError,
             fmt::format("Failed to create cgroup for task #{}", task_id));
@@ -930,7 +939,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   if (!instance->pwd_entry.Valid()) {
     CRANE_DEBUG("Failed to look up password entry for uid {} of task #{}",
                 instance->task.uid(), task_id);
-    EvActivateTaskStatusChange(
+    EvActivateTaskStatusChange_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodePermissionDenied,
         fmt::format("Failed to look up password entry for uid {} of task #{}",
@@ -953,7 +962,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     CRANE_ERROR(
         "Failed to allocate allocatable resource in cgroup for task #{}",
         task_id);
-    EvActivateTaskStatusChange(
+    EvActivateTaskStatusChange_(
         instance->task.task_id(), crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeCgroupError,
         fmt::format("Cannot allocate resources for the instance of task #{}",
@@ -962,9 +971,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   }
 
   // Calloc tasks have no scripts to run. Just return.
-  if (instance->task.interactive_meta().interactive_type() ==
-      crane::grpc::Calloc)
-    return;
+  if (CheckIfInstanceTypeIsCalloc_(instance)) return;
 
   // Create meta for batch or crun tasks.
   if (instance->task.type() == crane::grpc::Batch)
@@ -979,7 +986,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   FILE* fptr = fopen(sh_path.c_str(), "w");
   if (fptr == nullptr) {
     CRANE_ERROR("Failed write the script for task #{}", task_id);
-    EvActivateTaskStatusChange(
+    EvActivateTaskStatusChange_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeFileNotFound,
         fmt::format("Cannot write shell script for batch task #{}", task_id));
@@ -1032,7 +1039,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   // we should send TaskStatusChange manually.
   CraneErr err = SpawnProcessInInstance_(instance, std::move(process));
   if (err != CraneErr::kOk) {
-    EvActivateTaskStatusChange(
+    EvActivateTaskStatusChange_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeSpawnProcessFail,
         fmt::format(
@@ -1089,9 +1096,13 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
       });
     }
 
+    bool orphaned = instance->orphaned;
+
     // Free the TaskInstance structure
     this_->m_task_map_.erase(status_change.task_id);
-    g_ctld_client->TaskStatusChangeAsync(std::move(status_change));
+
+    if (!orphaned)
+      g_ctld_client->TaskStatusChangeAsync(std::move(status_change));
   }
 
   // Todo: Add additional timer to check periodically whether all children
@@ -1104,7 +1115,7 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
   }
 }
 
-void TaskManager::EvActivateTaskStatusChange(
+void TaskManager::EvActivateTaskStatusChange_(
     uint32_t task_id, crane::grpc::TaskStatus new_status, uint32_t exit_code,
     std::optional<std::string> reason) {
   TaskStatusChange status_change{task_id, new_status, exit_code};
@@ -1179,9 +1190,9 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
     elem.err_promise.set_value(err);
 
     if (err != CraneErr::kOk)
-      this_->EvActivateTaskStatusChange(elem.task_id, crane::grpc::Failed,
-                                        ExitCode::kExitCodeSpawnProcessFail,
-                                        std::string(CraneErrStr(err)));
+      this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Failed,
+                                         ExitCode::kExitCodeSpawnProcessFail,
+                                         std::string(CraneErrStr(err)));
   }
 }
 
@@ -1235,7 +1246,7 @@ void TaskManager::EvOnTimerCb_(int, short, void* arg_) {
     this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
     event_active(this_->m_ev_task_terminate_, 0, 0);
   } else {
-    this_->EvActivateTaskStatusChange(
+    this_->EvActivateTaskStatusChange_(
         task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
         ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
   }
@@ -1291,14 +1302,14 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
       return;
     }
 
-    const auto& task_instance = iter->second;
+    TaskInstance* task_instance = iter->second.get();
 
     if (elem.terminated_by_user) task_instance->cancelled_by_user = true;
     if (elem.mark_as_orphaned) task_instance->orphaned = true;
     if (elem.terminated_by_timeout) task_instance->terminated_by_timeout = true;
 
     int sig = SIGTERM;  // For BatchTask
-    if (task_instance->task.type() == crane::grpc::Interactive) sig = SIGHUP;
+    if (CheckIfInstanceTypeIsCrun_(task_instance)) sig = SIGHUP;
 
     if (!task_instance->processes.empty()) {
       // For an Interactive task with a process running or a Batch task, we just
@@ -1307,9 +1318,9 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
         KillProcessInstance_(pr_instance.get(), sig);
     } else if (task_instance->task.type() == crane::grpc::Interactive) {
       // For an Interactive task with no process running, it ends immediately.
-      this_->EvActivateTaskStatusChange(elem.task_id, crane::grpc::Completed,
-                                        ExitCode::kExitCodeTerminated,
-                                        std::nullopt);
+      this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Completed,
+                                         ExitCode::kExitCodeTerminated,
+                                         std::nullopt);
     }
   }
 }
@@ -1548,6 +1559,12 @@ bool TaskManager::CheckIfInstanceTypeIsCrun_(TaskInstance* instance) {
   return instance->task.type() == crane::grpc::Interactive &&
          instance->task.interactive_meta().interactive_type() ==
              crane::grpc::Crun;
+}
+
+bool TaskManager::CheckIfInstanceTypeIsCalloc_(TaskInstance* instance) {
+  return instance->task.type() == crane::grpc::Interactive &&
+         instance->task.interactive_meta().interactive_type() ==
+             crane::grpc::Calloc;
 }
 
 }  // namespace Craned

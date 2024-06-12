@@ -1406,7 +1406,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     std::unique_ptr<TaskInCtld>& task = iter->second;
 
     if (task->type == crane::grpc::Batch) {
-      task->SetStatus(crane::grpc::Failed);
+      task->SetStatus(new_status);
     } else {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
       if (meta.interactive_type == crane::grpc::Calloc) {
@@ -1434,7 +1434,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
           continue;
         }
 
-        task->SetStatus(crane::grpc::Failed);
+        task->SetStatus(new_status);
         meta.cb_task_completed(task->TaskId());
       }
     }

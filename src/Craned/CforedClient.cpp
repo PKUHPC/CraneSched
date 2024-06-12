@@ -444,8 +444,7 @@ void CforedManager::UnregisterCb_() {
       --m_cfored_client_ref_count_map_[cfored];
     }
 
-    g_task_mgr->EvActivateTaskStatusChange(
-        task_id, crane::grpc::TaskStatus::Completed, 0, std::nullopt);
+    g_task_mgr->TaskStopAndDoStatusChangeAsync(task_id);
   }
 }
 
