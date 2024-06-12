@@ -42,6 +42,8 @@ CranedMutexFilePath: craned/craned.lock
 CranedForeground: true
 
 # Scheduling settings
+# Current implemented scheduling algorithms are:
+# priority/basic, priority/multifactor
 PriorityType: priority/multifactor
 
 # Default value is true
