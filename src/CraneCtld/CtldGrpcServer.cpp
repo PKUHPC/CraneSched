@@ -234,21 +234,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
       task_list->DeleteSubrange(limit, task_list->size());
   };
 
-  if (!request->option_include_completed_tasks()) {
-    if (request->num_limit() <= 0) {
-      std::sort(
-          task_list->begin(), task_list->end(),
-          [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
-            return a.end_time() > b.end_time();
-          });
-    } else {
-      sort_and_truncate(task_list, num_limit);
-    }
-    response->set_ok(true);
-    return grpc::Status::OK;
-  }
-
-  if (task_list->size() >= num_limit) {
+  if (task_list->size() >= num_limit ||
+      !request->option_include_completed_tasks()) {
     sort_and_truncate(task_list, num_limit);
     response->set_ok(true);
     return grpc::Status::OK;
