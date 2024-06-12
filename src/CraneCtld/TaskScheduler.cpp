@@ -1566,7 +1566,7 @@ void TaskScheduler::QueryTasksInRam(
   auto running_rng = m_running_task_map_ | ranges::views::all;
   auto pd_r_rng = ranges::views::concat(pending_rng, running_rng);
 
-  size_t num_limit = request->num_limit() <= 0 ? kDefaultQueryTaskNumLimit
+  size_t num_limit = request->num_limit() == 0 ? kDefaultQueryTaskNumLimit
                                                : request->num_limit();
 
   auto filtered_rng = pd_r_rng |
