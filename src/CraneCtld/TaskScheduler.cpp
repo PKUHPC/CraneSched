@@ -2361,18 +2361,18 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
 
     // Check whether the selected partition is able to run this task.
     if (!(task->resources <=
-          metas_ptr->partition_global_meta.m_resource_total_)) {
+          metas_ptr->partition_global_meta.m_resource_total_inc_dead_)) {
       CRANE_TRACE(
           "Resource not enough for task #{}. "
           "Partition total: cpu {}, mem: {}, mem+sw: {}",
           task->TaskId(),
-          metas_ptr->partition_global_meta.m_resource_total_
+          metas_ptr->partition_global_meta.m_resource_total_inc_dead_
               .allocatable_resource.cpu_count,
           util::ReadableMemory(
-              metas_ptr->partition_global_meta.m_resource_total_
+              metas_ptr->partition_global_meta.m_resource_total_inc_dead_
                   .allocatable_resource.memory_bytes),
           util::ReadableMemory(
-              metas_ptr->partition_global_meta.m_resource_total_
+              metas_ptr->partition_global_meta.m_resource_total_inc_dead_
                   .allocatable_resource.memory_sw_bytes));
       return CraneErr::kNoResource;
     }
@@ -2388,7 +2388,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
     for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-      if (craned_meta->alive && task->resources <= craned_meta->res_total &&
+      if (task->resources <= craned_meta->res_total &&
           (task->included_nodes.empty() ||
            task->included_nodes.contains(craned_id)) &&
           (task->excluded_nodes.empty() ||
