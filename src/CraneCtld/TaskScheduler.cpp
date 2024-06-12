@@ -1038,6 +1038,13 @@ void TaskScheduler::HoldJobForSeconds(task_id_t task_id, int64_t secs) {
 }
 
 CraneErr TaskScheduler::HoldReleaseJob(task_id_t task_id, bool hold) {
+  {
+    LockGuard timer_guard(&m_task_release_handles_mtx_);
+    if (m_task_release_handles_.find(task_id) !=
+        m_task_release_handles_.end()) {
+      m_task_release_handles_[task_id]->close();
+    }
+  }
   LockGuard pending_guard(&m_pending_task_map_mtx_);
 
   auto pd_iter = m_pending_task_map_.find(task_id);
@@ -1048,10 +1055,6 @@ CraneErr TaskScheduler::HoldReleaseJob(task_id_t task_id, bool hold) {
     task_to_ctld->set_held(hold);
     g_embedded_db_client->UpdateTaskToCtld(0, pd_iter->second->TaskDbId(),
                                            *task_to_ctld);
-    if (!hold) {
-      LockGuard timer_guard(&m_task_release_handles_mtx_);
-      m_task_release_handles_.erase(task_id);
-    }
     return CraneErr::kOk;
   }
 
