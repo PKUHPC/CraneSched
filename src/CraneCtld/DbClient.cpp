@@ -161,21 +161,138 @@ bool MongodbClient::InsertJobs(const std::vector<TaskInCtld*>& tasks) {
 }
 
 bool MongodbClient::FetchJobRecords(
-    std::vector<std::unique_ptr<TaskInDb>>* task_list, size_t limit,
-    bool reverse) {
-  mongocxx::options::find option;
-  if (limit > 0) {
-    option = option.limit(limit);
+    const crane::grpc::QueryTasksInfoRequest* request,
+    crane::grpc::QueryTasksInfoReply* response, int limit) {
+  auto* task_list = response->mutable_task_info_list();
+
+  document filter;
+
+  bool has_submit_time_interval = request->has_filter_submit_time_interval();
+  if (has_submit_time_interval) {
+    const auto& interval = request->filter_submit_time_interval();
+    filter.append(kvp("time_submit", [&interval](sub_document time_submit_doc) {
+      if (interval.has_lower_bound()) {
+        time_submit_doc.append(kvp("$gte", interval.lower_bound().seconds()));
+      }
+      if (interval.has_upper_bound()) {
+        time_submit_doc.append(kvp("$lte", interval.upper_bound().seconds()));
+      }
+    }));
   }
 
-  document doc;
-  if (reverse) {
-    doc.append(kvp("task_db_id", -1));
-    option = option.sort(doc.view());
+  bool has_start_time_interval = request->has_filter_start_time_interval();
+  if (has_start_time_interval) {
+    const auto& interval = request->filter_start_time_interval();
+    filter.append(kvp("time_start", [&interval](sub_document time_start_doc) {
+      if (interval.has_lower_bound()) {
+        time_start_doc.append(kvp("$gte", interval.lower_bound().seconds()));
+      }
+      if (interval.has_upper_bound()) {
+        time_start_doc.append(kvp("$lte", interval.upper_bound().seconds()));
+      }
+    }));
   }
+
+  bool has_end_time_interval = request->has_filter_end_time_interval();
+  if (has_end_time_interval) {
+    const auto& interval = request->filter_end_time_interval();
+    filter.append(kvp("time_end", [&interval](sub_document time_end_doc) {
+      if (interval.has_lower_bound()) {
+        time_end_doc.append(kvp("$gte", interval.lower_bound().seconds()));
+      }
+      if (interval.has_upper_bound()) {
+        time_end_doc.append(kvp("$lte", interval.upper_bound().seconds()));
+      }
+    }));
+  }
+
+  bool has_accounts_constraint = !request->filter_accounts().empty();
+  if (has_accounts_constraint) {
+    filter.append(kvp("account", [&request](sub_document account_doc) {
+      array account_array;
+      for (const auto& account : request->filter_accounts()) {
+        account_array.append(account);
+      }
+      account_doc.append(kvp("$in", account_array));
+    }));
+  }
+
+  bool has_users_constraint = !request->filter_users().empty();
+  if (has_users_constraint) {
+    filter.append(kvp("username", [&request](sub_document user_doc) {
+      array user_array;
+      for (const auto& user : request->filter_users()) {
+        user_array.append(user);
+      }
+      user_doc.append(kvp("$in", user_array));
+    }));
+  }
+
+  bool has_task_names_constraint = !request->filter_task_names().empty();
+  if (has_task_names_constraint) {
+    filter.append(kvp("task_name", [&request](sub_document task_name_doc) {
+      array task_name_array;
+      for (const auto& task_name : request->filter_task_names()) {
+        task_name_array.append(task_name);
+      }
+      task_name_doc.append(kvp("$in", task_name_array));
+    }));
+  }
+
+  bool has_qos_constraint = !request->filter_qos().empty();
+  if (has_qos_constraint) {
+    filter.append(kvp("qos", [&request](sub_document qos_doc) {
+      array qos_array;
+      for (const auto& qos : request->filter_qos()) {
+        qos_array.append(qos);
+      }
+      qos_doc.append(kvp("$in", qos_array));
+    }));
+  }
+
+  bool has_partitions_constraint = !request->filter_partitions().empty();
+  if (has_partitions_constraint) {
+    filter.append(kvp("partition_name", [&request](sub_document partition_doc) {
+      array partition_array;
+      for (const auto& partition : request->filter_partitions()) {
+        partition_array.append(partition);
+      }
+      partition_doc.append(kvp("$in", partition_array));
+    }));
+  }
+
+  bool has_task_ids_constraint = !request->filter_task_ids().empty();
+  if (has_task_ids_constraint) {
+    filter.append(kvp("task_id", [&request](sub_document task_id_doc) {
+      array task_id_array;
+      for (const auto& task_id : request->filter_task_ids()) {
+        task_id_array.append(static_cast<std::int32_t>(task_id));
+      }
+      task_id_doc.append(kvp("$in", task_id_array));
+    }));
+  }
+
+  bool has_task_status_constraint = !request->filter_task_states().empty();
+  if (has_task_status_constraint) {
+    filter.append(kvp("state", [&request](sub_document state_doc) {
+      array state_array;
+      for (const auto& state : request->filter_task_states()) {
+        state_array.append(state);
+      }
+      state_doc.append(kvp("$in", state_array));
+    }));
+  }
+
+  mongocxx::options::find option;
+  option = option.limit(limit);
+
+  document sort_doc;
+  sort_doc.append(kvp("task_db_id", -1));
+  option = option.sort(sort_doc.view());
 
   mongocxx::cursor cursor =
-      (*GetClient_())[m_db_name_][m_task_collection_name_].find({}, option);
+      (*GetClient_())[m_db_name_][m_task_collection_name_].find(filter.view(),
+                                                                option);
 
   // 0  task_id       task_db_id     mod_time       deleted       account
   // 5  cpus_req      mem_req        task_name      env           id_user
@@ -186,46 +303,45 @@ bool MongodbClient::FetchJobRecords(
 
   try {
     for (auto view : cursor) {
-      auto task = std::make_unique<TaskInDb>();
+      auto* task_it = task_list->Add();
 
-      task->task_id = view["task_id"].get_int32().value;
+      task_it->set_task_id(view["task_id"].get_int32().value);
 
-      task->node_num = view["nodes_alloc"].get_int32().value;
+      task_it->set_node_num(view["nodes_alloc"].get_int32().value);
 
-      task->account = view["account"].get_string().value.data();
-      task->username = view["username"].get_string().value.data();
+      task_it->set_account(view["account"].get_string().value.data());
+      task_it->set_username(view["username"].get_string().value.data());
+      task_it->set_alloc_cpu(view["cpus_req"].get_double().value *
+                             task_it->node_num());
+      task_it->set_name(std::string(view["task_name"].get_string().value));
+      task_it->set_qos(std::string(view["qos"].get_string().value));
+      task_it->set_uid(view["id_user"].get_int32().value);
+      task_it->set_gid(view["id_group"].get_int32().value);
+      task_it->set_craned_list(view["nodelist"].get_string().value.data());
+      task_it->set_partition(
+          std::string(view["partition_name"].get_string().value));
+      task_it->mutable_start_time()->set_seconds(
+          view["time_start"].get_int64().value);
+      task_it->mutable_end_time()->set_seconds(
+          view["time_end"].get_int64().value);
 
-      task->resources.allocatable_resource.cpu_count =
-          cpu_t{view["cpus_req"].get_double().value};
-      task->resources.allocatable_resource.memory_bytes =
-          task->resources.allocatable_resource.memory_sw_bytes =
-              view["mem_req"].get_int64().value;
-      task->name = view["task_name"].get_string().value;
-      task->qos = view["qos"].get_string().value;
-      task->uid = view["id_user"].get_int32().value;
-      task->gid = view["id_group"].get_int32().value;
-      task->allocated_craneds_regex =
-          view["nodelist"].get_string().value.data();
-      task->partition_id = view["partition_name"].get_string().value;
-      task->SetStartTimeByUnixSecond(view["time_start"].get_int64().value);
-      task->SetEndTimeByUnixSecond(view["time_end"].get_int64().value);
-
-      task->status =
-          static_cast<crane::grpc::TaskStatus>(view["state"].get_int32().value);
-      task->time_limit = absl::Seconds(view["timelimit"].get_int64().value);
-      task->SetSubmitTimeByUnixSecond(view["time_submit"].get_int64().value);
-      task->cwd = view["work_dir"].get_string().value;
+      task_it->set_status(static_cast<crane::grpc::TaskStatus>(
+          view["state"].get_int32().value));
+      task_it->mutable_time_limit()->set_seconds(
+          view["timelimit"].get_int64().value);
+      task_it->mutable_submit_time()->set_seconds(
+          view["time_submit"].get_int64().value);
+      task_it->set_cwd(std::string(view["work_dir"].get_string().value));
       if (view["submit_line"])
-        task->cmd_line = view["submit_line"].get_string().value;
-      task->exit_code = view["exit_code"].get_int32().value;
+        task_it->set_cmd_line(
+            std::string(view["submit_line"].get_string().value));
+      task_it->set_exit_code(view["exit_code"].get_int32().value);
 
       // Todo: As for now, only Batch type is implemented and some data
       // resolving
       //  is hardcoded. Hard-coding for Batch task will be resolved when
       //  Interactive task is implemented.
-      task->type = crane::grpc::Batch;
-
-      task_list->emplace_back(std::move(task));
+      task_it->set_type(crane::grpc::Batch);
     }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
