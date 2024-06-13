@@ -1091,9 +1091,9 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
     TaskInstance* instance = iter->second.get();
     if (instance->task.type() == crane::grpc::Batch ||
         CheckIfInstanceTypeIsCrun_(instance)) {
-      g_thread_pool->detach_task([p = instance->meta->parsed_sh_script_path]() {
-        util::os::DeleteFile(p);
-      });
+      const std::string& path = instance->meta->parsed_sh_script_path;
+      if (!path.empty())
+        g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
     }
 
     bool orphaned = instance->orphaned;
@@ -1267,8 +1267,9 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
       CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
 
       // Note if Ctld wants to terminate some tasks that are not running,
-      // it might indicate other nodes allocated to the task might have crashed.
-      // We should mark the task as kind of not runnable by removing its cgroup.
+      // it might indicate other nodes allocated to the task might have
+      // crashed. We should mark the task as kind of not runnable by removing
+      // its cgroup.
       //
       // Considering such a situation:
       // In Task Scheduler of Ctld,
@@ -1283,8 +1284,8 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
       // In order to give Ctld kind of feedback without adding complicated
       // synchronizing mechanism in ScheduleThread_(),
       // we just remove the cgroup for such task, Ctld will fail in the
-      // following ExecuteTasks and the task will go to the right place as well
-      // as the completed queue.
+      // following ExecuteTasks and the task will go to the right place as
+      // well as the completed queue.
 
       uid_t uid;
       {
@@ -1293,7 +1294,8 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
         if (!vp) return;
 
         CRANE_DEBUG(
-            "Remove cgroup for task #{} for potential crashes of other craned.",
+            "Remove cgroup for task #{} for potential crashes of other "
+            "craned.",
             elem.task_id);
         uid = *vp;
       }
@@ -1312,8 +1314,8 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
     if (CheckIfInstanceTypeIsCrun_(task_instance)) sig = SIGHUP;
 
     if (!task_instance->processes.empty()) {
-      // For an Interactive task with a process running or a Batch task, we just
-      // send a kill signal here.
+      // For an Interactive task with a process running or a Batch task, we
+      // just send a kill signal here.
       for (auto&& [pid, pr_instance] : task_instance->processes)
         KillProcessInstance_(pr_instance.get(), sig);
     } else if (task_instance->task.type() == crane::grpc::Interactive) {
@@ -1387,7 +1389,8 @@ bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
 
   if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
     CRANE_DEBUG(
-        "Trying to release a non-existent cgroup for task #{}. Ignoring it...",
+        "Trying to release a non-existent cgroup for task #{}. Ignoring "
+        "it...",
         task_id);
 
     return false;
