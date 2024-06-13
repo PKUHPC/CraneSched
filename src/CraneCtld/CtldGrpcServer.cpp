@@ -221,6 +221,9 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 
   size_t num_limit = request->num_limit() == 0 ? kDefaultQueryTaskNumLimit
                                                : request->num_limit();
+  if (!request->filter_task_ids().empty())
+    num_limit = std::min((size_t)request->filter_task_ids_size(), num_limit);
+
   auto *task_list = response->mutable_task_info_list();
 
   auto sort_and_truncate = [](auto *task_list, size_t limit) -> void {
@@ -236,9 +239,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   };
 
   if (task_list->size() >= num_limit ||
-      !request->option_include_completed_tasks() ||
-      (!request->filter_task_ids().empty() &&
-       task_list->size() == request->filter_task_ids_size())) {
+      !request->option_include_completed_tasks()) {
     sort_and_truncate(task_list, num_limit);
     response->set_ok(true);
     return grpc::Status::OK;
@@ -246,7 +247,8 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 
   // Query completed tasks in Mongodb
   // (only for cacct, which sets `option_include_completed_tasks` to true)
-  if (!g_db_client->FetchJobRecords(request, response, num_limit - task_list->size())) {
+  if (!g_db_client->FetchJobRecords(request, response,
+                                    num_limit - task_list->size())) {
     CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
     return grpc::Status::OK;
   }
