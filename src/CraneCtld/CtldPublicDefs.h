@@ -466,37 +466,6 @@ struct TaskInCtld {
   }
 };
 
-struct TaskInDb {
-  crane::grpc::TaskType type;
-  task_id_t task_id;
-  std::string name;
-  PartitionId partition_id;
-  uid_t uid;
-
-  gid_t gid;
-  absl::Duration time_limit;
-  google::protobuf::Timestamp submit_time;
-  google::protobuf::Timestamp start_time;
-  google::protobuf::Timestamp end_time;
-  std::string account;
-
-  uint32_t node_num{0};
-  std::string cmd_line;
-  std::string cwd;
-  std::string username;
-  std::string qos;
-
-  Resources resources;
-  uint32_t exit_code;
-  crane::grpc::TaskStatus status;
-  std::string allocated_craneds_regex;
-
-  void SetSubmitTimeByUnixSecond(uint64_t val) { submit_time.set_seconds(val); }
-  void SetStartTimeByUnixSecond(uint64_t val) { start_time.set_seconds(val); }
-
-  void SetEndTimeByUnixSecond(uint64_t val) { end_time.set_seconds(val); }
-};
-
 struct Qos {
   bool deleted = false;
   std::string name;

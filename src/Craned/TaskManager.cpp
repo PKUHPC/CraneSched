@@ -1022,10 +1022,9 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
 
     // Clean task scripts.
     if (iter->second->task.type() == crane::grpc::Batch) {
-      g_thread_pool->detach_task(
-          [p = iter->second->batch_meta.parsed_sh_script_path]() {
-            util::os::DeleteFile(p);
-          });
+      const std::string& path = iter->second->batch_meta.parsed_sh_script_path;
+      if (!path.empty())
+        g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
     }
 
     // Free the TaskInstance structure
