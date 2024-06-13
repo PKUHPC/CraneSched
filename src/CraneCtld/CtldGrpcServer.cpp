@@ -23,7 +23,6 @@
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
-#include "crane/Logger.h"
 #include "crane/String.h"
 
 namespace Ctld {
