@@ -868,6 +868,12 @@ CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
   instance->task = task;
 
+  // Create meta for batch or crun tasks.
+  if (instance->task.type() == crane::grpc::Batch)
+    instance->meta = std::make_unique<BatchMetaInTaskInstance>();
+  else
+    instance->meta = std::make_unique<CrunMetaInTaskInstance>();
+
   m_grpc_execute_task_queue_.enqueue(std::move(instance));
   event_active(m_ev_grpc_execute_task_, 0, 0);
 
@@ -972,12 +978,6 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
 
   // Calloc tasks have no scripts to run. Just return.
   if (CheckIfInstanceTypeIsCalloc_(instance)) return;
-
-  // Create meta for batch or crun tasks.
-  if (instance->task.type() == crane::grpc::Batch)
-    instance->meta = std::make_unique<BatchMetaInTaskInstance>();
-  else
-    instance->meta = std::make_unique<CrunMetaInTaskInstance>();
 
   instance->meta->parsed_sh_script_path =
       fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);
