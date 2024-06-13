@@ -162,7 +162,7 @@ bool MongodbClient::InsertJobs(const std::vector<TaskInCtld*>& tasks) {
 
 bool MongodbClient::FetchJobRecords(
     const crane::grpc::QueryTasksInfoRequest* request,
-    crane::grpc::QueryTasksInfoReply* response, int limit) {
+    crane::grpc::QueryTasksInfoReply* response, size_t limit) {
   auto* task_list = response->mutable_task_info_list();
 
   document filter;
@@ -303,45 +303,43 @@ bool MongodbClient::FetchJobRecords(
 
   try {
     for (auto view : cursor) {
-      auto* task_it = task_list->Add();
+      auto* task = task_list->Add();
 
-      task_it->set_task_id(view["task_id"].get_int32().value);
+      task->set_task_id(view["task_id"].get_int32().value);
 
-      task_it->set_node_num(view["nodes_alloc"].get_int32().value);
+      task->set_node_num(view["nodes_alloc"].get_int32().value);
 
-      task_it->set_account(view["account"].get_string().value.data());
-      task_it->set_username(view["username"].get_string().value.data());
-      task_it->set_alloc_cpu(view["cpus_req"].get_double().value *
-                             task_it->node_num());
-      task_it->set_name(std::string(view["task_name"].get_string().value));
-      task_it->set_qos(std::string(view["qos"].get_string().value));
-      task_it->set_uid(view["id_user"].get_int32().value);
-      task_it->set_gid(view["id_group"].get_int32().value);
-      task_it->set_craned_list(view["nodelist"].get_string().value.data());
-      task_it->set_partition(
+      task->set_account(view["account"].get_string().value.data());
+      task->set_username(view["username"].get_string().value.data());
+      task->set_alloc_cpu(view["cpus_req"].get_double().value *
+                          task->node_num());
+      task->set_name(std::string(view["task_name"].get_string().value));
+      task->set_qos(std::string(view["qos"].get_string().value));
+      task->set_uid(view["id_user"].get_int32().value);
+      task->set_gid(view["id_group"].get_int32().value);
+      task->set_craned_list(view["nodelist"].get_string().value.data());
+      task->set_partition(
           std::string(view["partition_name"].get_string().value));
-      task_it->mutable_start_time()->set_seconds(
+      task->mutable_start_time()->set_seconds(
           view["time_start"].get_int64().value);
-      task_it->mutable_end_time()->set_seconds(
-          view["time_end"].get_int64().value);
+      task->mutable_end_time()->set_seconds(view["time_end"].get_int64().value);
 
-      task_it->set_status(static_cast<crane::grpc::TaskStatus>(
+      task->set_status(static_cast<crane::grpc::TaskStatus>(
           view["state"].get_int32().value));
-      task_it->mutable_time_limit()->set_seconds(
+      task->mutable_time_limit()->set_seconds(
           view["timelimit"].get_int64().value);
-      task_it->mutable_submit_time()->set_seconds(
+      task->mutable_submit_time()->set_seconds(
           view["time_submit"].get_int64().value);
-      task_it->set_cwd(std::string(view["work_dir"].get_string().value));
+      task->set_cwd(std::string(view["work_dir"].get_string().value));
       if (view["submit_line"])
-        task_it->set_cmd_line(
-            std::string(view["submit_line"].get_string().value));
-      task_it->set_exit_code(view["exit_code"].get_int32().value);
+        task->set_cmd_line(std::string(view["submit_line"].get_string().value));
+      task->set_exit_code(view["exit_code"].get_int32().value);
 
       // Todo: As for now, only Batch type is implemented and some data
-      // resolving
-      //  is hardcoded. Hard-coding for Batch task will be resolved when
-      //  Interactive task is implemented.
-      task_it->set_type(crane::grpc::Batch);
+      // resolving is hardcoded.
+      // Hard-coding for Batch task will be resolved when Interactive task is
+      // implemented.
+      task->set_type(crane::grpc::Batch);
     }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());

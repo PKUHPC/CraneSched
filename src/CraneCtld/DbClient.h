@@ -56,7 +56,8 @@ class MongodbClient {
   bool InsertJobs(const std::vector<TaskInCtld*>& tasks);
 
   bool FetchJobRecords(const crane::grpc::QueryTasksInfoRequest* request,
-                       crane::grpc::QueryTasksInfoReply* response, int limit);
+                       crane::grpc::QueryTasksInfoReply* response,
+                       size_t limit);
 
   bool CheckTaskDbIdExisted(int64_t task_db_id);
 
