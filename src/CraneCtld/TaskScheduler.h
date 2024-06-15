@@ -223,13 +223,13 @@ class TaskScheduler {
   /// Otherwise, it is set to newly allocated task id.
   std::future<task_id_t> SubmitTaskAsync(std::unique_ptr<TaskInCtld> task);
 
+  std::future<CraneErr> HoldReleaseTaskAsync(task_id_t task_id, int64_t secs);
+
   CraneErr ChangeTaskTimeLimit(task_id_t task_id, int64_t secs);
 
   CraneErr ChangeTaskPriority(task_id_t task_id, double priority);
 
-  void HoldJobForSeconds(task_id_t task_id, int64_t secs);
-
-  CraneErr HoldReleaseJob(task_id_t task_id, bool hold);
+  CraneErr HoldReleaseTask(task_id_t task_id, bool hold);
 
   void TaskStatusChangeWithReasonAsync(uint32_t task_id,
                                        const CranedId& craned_index,
@@ -321,6 +321,9 @@ class TaskScheduler {
   std::thread m_schedule_thread_;
   void ScheduleThread_();
 
+  std::thread m_task_release_thread_;
+  void ReleaseTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
   std::thread m_task_cancel_thread_;
   void CancelTaskThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
@@ -331,6 +334,18 @@ class TaskScheduler {
   void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   // Working as channels in golang.
+  std::shared_ptr<uvw::timer_handle> m_release_task_timer_handle_;
+  void ReleaseTaskTimerCb_();
+
+  std::shared_ptr<uvw::async_handle> m_release_task_async_handle_;
+  ConcurrentQueue<
+      std::pair<std::pair<task_id_t, int32_t>, std::promise<CraneErr>>>
+      m_release_task_queue_;
+  void ReleaseTaskAsyncCb_();
+
+  std::shared_ptr<uvw::async_handle> m_clean_release_queue_handle_;
+  void CleanReleaseQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
   std::shared_ptr<uvw::timer_handle> m_cancel_task_timer_handle_;
   void CancelTaskTimerCb_();
 
@@ -352,10 +367,6 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_submit_queue_handle_;
   void CleanSubmitQueueCb_();
-
-  HashMap<task_id_t, std::shared_ptr<uvw::timer_handle>> m_task_release_handles_
-      GUARDED_BY(m_task_release_handles_mtx_);
-  Mutex m_task_release_handles_mtx_;
 
   std::shared_ptr<uvw::timer_handle> m_task_status_change_timer_handle_;
   void TaskStatusChangeTimerCb_();

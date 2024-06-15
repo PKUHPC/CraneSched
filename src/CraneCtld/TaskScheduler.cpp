@@ -18,6 +18,8 @@
 
 #include <google/protobuf/util/time_util.h>
 
+#include <future>
+
 #include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
@@ -41,6 +43,7 @@ TaskScheduler::TaskScheduler() {
 TaskScheduler::~TaskScheduler() {
   m_thread_stop_ = true;
   if (m_schedule_thread_.joinable()) m_schedule_thread_.join();
+  if (m_task_release_thread_.joinable()) m_task_release_thread_.join();
   if (m_task_cancel_thread_.joinable()) m_task_cancel_thread_.join();
   if (m_task_submit_thread_.joinable()) m_task_submit_thread_.join();
   if (m_task_status_change_thread_.joinable())
@@ -376,6 +379,35 @@ bool TaskScheduler::Init() {
     }
   }
 
+  std::shared_ptr<uvw::loop> uvw_release_loop = uvw::loop::create();
+  m_release_task_timer_handle_ =
+      uvw_release_loop->resource<uvw::timer_handle>();
+  m_release_task_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        ReleaseTaskTimerCb_();
+      });
+  m_release_task_timer_handle_->start(
+      std::chrono::milliseconds(kReleaseTaskTimeoutMs * 3),
+      std::chrono::milliseconds(kReleaseTaskTimeoutMs));
+
+  m_release_task_async_handle_ =
+      uvw_release_loop->resource<uvw::async_handle>();
+  m_release_task_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        ReleaseTaskAsyncCb_();
+      });
+
+  m_clean_release_queue_handle_ =
+      uvw_release_loop->resource<uvw::async_handle>();
+  m_clean_release_queue_handle_->on<uvw::async_event>(
+      [this, loop = uvw_release_loop](const uvw::async_event&,
+                                      uvw::async_handle&) {
+        CleanReleaseQueueCb_(loop);
+      });
+
+  m_task_release_thread_ = std::thread(
+      [this, loop = uvw_release_loop]() { ReleaseTaskThread_(loop); });
+
   std::shared_ptr<uvw::loop> uvw_cancel_loop = uvw::loop::create();
   m_cancel_task_timer_handle_ = uvw_cancel_loop->resource<uvw::timer_handle>();
   m_cancel_task_timer_handle_->on<uvw::timer_event>(
@@ -483,6 +515,28 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
 
   m_running_task_map_.emplace(task->TaskId(), std::move(task));
+}
+
+void TaskScheduler::ReleaseTaskThread_(
+    const std::shared_ptr<uvw::loop>& uvw_loop) {
+  util::SetCurrentThreadName("ReleaseTaskThr");
+
+  std::shared_ptr<uvw::idle_handle> idle_handle =
+      uvw_loop->resource<uvw::idle_handle>();
+  idle_handle->on<uvw::idle_event>(
+      [this](const uvw::idle_event&, uvw::idle_handle& h) {
+        if (m_thread_stop_) {
+          h.parent().walk([](auto&& h) { h.close(); });
+          h.parent().stop();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      });
+
+  if (idle_handle->start() != 0) {
+    CRANE_ERROR("Failed to start the idle event in cancel loop.");
+  }
+
+  uvw_loop->run();
 }
 
 void TaskScheduler::CancelTaskThread_(
@@ -942,6 +996,18 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
   return std::move(future);
 }
 
+std::future<CraneErr> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
+                                                          int64_t secs) {
+  std::promise<CraneErr> promise;
+  std::future<CraneErr> future = promise.get_future();
+
+  m_release_task_queue_.enqueue(
+      {std::make_pair(task_id, secs), std::move(promise)});
+  m_release_task_async_handle_->send();
+
+  return std::move(future);
+}
+
 CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
   if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErr::kInvalidParam;
 
@@ -1015,36 +1081,7 @@ CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priority) {
   return CraneErr::kNonExistent;
 }
 
-void TaskScheduler::HoldJobForSeconds(task_id_t task_id, int64_t secs) {
-  std::shared_ptr<uvw::loop> uvw_loop = uvw::loop::create();
-  {
-    LockGuard timer_guard(&m_task_release_handles_mtx_);
-    if (m_task_release_handles_.find(task_id) !=
-        m_task_release_handles_.end()) {
-      m_task_release_handles_[task_id]->close();
-    }
-    std::shared_ptr<uvw::timer_handle> release_task_timer_handle_ =
-        uvw_loop->resource<uvw::timer_handle>();
-    release_task_timer_handle_->on<uvw::timer_event>(
-        [this, task_id](const uvw::timer_event&, uvw::timer_handle& handle) {
-          HoldReleaseJob(task_id, false);
-          handle.close();
-        });
-    release_task_timer_handle_->start(std::chrono::seconds(secs),
-                                      std::chrono::seconds(0));
-    m_task_release_handles_[task_id] = std::move(release_task_timer_handle_);
-  }
-  std::thread([uvw_loop = std::move(uvw_loop)]() { uvw_loop->run(); }).detach();
-}
-
-CraneErr TaskScheduler::HoldReleaseJob(task_id_t task_id, bool hold) {
-  {
-    LockGuard timer_guard(&m_task_release_handles_mtx_);
-    if (m_task_release_handles_.find(task_id) !=
-        m_task_release_handles_.end()) {
-      m_task_release_handles_[task_id]->close();
-    }
-  }
+CraneErr TaskScheduler::HoldReleaseTask(task_id_t task_id, bool hold) {
   LockGuard pending_guard(&m_pending_task_map_mtx_);
 
   auto pd_iter = m_pending_task_map_.find(task_id);
@@ -1243,6 +1280,67 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   }
 
   return reply;
+}
+
+void TaskScheduler::ReleaseTaskTimerCb_() {
+  m_clean_release_queue_handle_->send();
+}
+
+void TaskScheduler::ReleaseTaskAsyncCb_() {
+  if (m_release_task_queue_.size_approx() >= kReleaseTaskBatchNum) {
+    m_clean_release_queue_handle_->send();
+  }
+}
+
+void TaskScheduler::CleanReleaseQueueCb_(
+    const std::shared_ptr<uvw::loop>& uvw_loop) {
+  static std::unordered_map<task_id_t, std::shared_ptr<uvw::timer_handle>>
+      task_release_handles_;
+
+  using ReleaseQueueElem =
+      std::pair<std::pair<task_id_t, int32_t>, std::promise<CraneErr>>;
+  // It's ok to use an approximate size.
+  size_t approximate_size = m_release_task_queue_.size_approx();
+
+  std::vector<ReleaseQueueElem> timer_to_create;
+  timer_to_create.resize(approximate_size);
+
+  size_t actual_size = m_release_task_queue_.try_dequeue_bulk(
+      timer_to_create.begin(), approximate_size);
+
+  timer_to_create.resize(actual_size);
+
+  for (auto& [req, promise] : timer_to_create) {
+    const auto& [task_id, secs] = req;
+    if (task_release_handles_.find(task_id) != task_release_handles_.end()) {
+      task_release_handles_[task_id]->close();
+      task_release_handles_.erase(task_id);
+    }
+    CraneErr err;
+    if (secs == -1) {  // release
+      err = HoldReleaseTask(task_id, false);
+    } else {
+      err = HoldReleaseTask(task_id, true);
+      if (secs) {
+        auto release_task_timer_handle_ =
+            uvw_loop->resource<uvw::timer_handle>();
+        release_task_timer_handle_->on<uvw::timer_event>(
+            [this, task_id](const uvw::timer_event&,
+                            uvw::timer_handle& handle) {
+              CraneErr err = HoldReleaseTask(task_id, false);
+              if (err != CraneErr::kOk) {
+                CRANE_ERROR("Failed to release task #{} after hold.", task_id);
+              }
+              handle.close();
+              task_release_handles_.erase(task_id);
+            });
+        release_task_timer_handle_->start(std::chrono::seconds(secs),
+                                          std::chrono::seconds(0));
+        task_release_handles_[task_id] = std::move(release_task_timer_handle_);
+      }
+    }
+    promise.set_value(err);
+  }
 }
 
 void TaskScheduler::CancelTaskTimerCb_() {

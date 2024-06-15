@@ -202,16 +202,17 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
           fmt::format("Failed to change priority: {}.", CraneErrStr(err)));
     }
   } else if (request->attribute() == ModifyTaskRequest::Hold) {
-    if (request->manual_hold()) {
-      err = g_task_scheduler->HoldReleaseJob(request->task_id(),
-                                             request->manual_hold());
-      if (request->hold_time_seconds()) {
-        g_task_scheduler->HoldJobForSeconds(request->task_id(),
-                                            request->hold_time_seconds());
-      };
-    } else if (request->release_job()) {
-      err = g_task_scheduler->HoldReleaseJob(request->task_id(), false);
+    auto task_id = request->task_id();
+    auto secs = request->hold_time_seconds();
+    if (request->release_job()) {
+      secs = -1;
+    } else if (!request->manual_hold()) {
+      response->set_ok(false);
+      response->set_reason(
+          "Invalid request parameters: neither hold nor release job.");
+      return grpc::Status::OK;
     }
+    err = g_task_scheduler->HoldReleaseTaskAsync(task_id, secs).get();
     if (err == CraneErr::kOk) {
       response->set_ok(true);
     } else if (err == CraneErr::kNonExistent) {
