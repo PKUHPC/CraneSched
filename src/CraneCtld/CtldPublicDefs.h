@@ -256,6 +256,7 @@ struct TaskInCtld {
   std::string account;
   std::string name;
   std::string qos;
+  std::string pending_reason;
 
   uint32_t node_num{0};
   uint32_t ntasks_per_node{0};

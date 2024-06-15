@@ -1534,8 +1534,12 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_priority(task.cached_priority);
 
     task_it->set_status(task.RuntimeAttr().status());
-    task_it->set_craned_list(
-        util::HostNameListToStr(task.RuntimeAttr().craned_ids()));
+    if (!task.RuntimeAttr().craned_ids().empty()) {
+      task_it->set_craned_list(
+          util::HostNameListToStr(task.RuntimeAttr().craned_ids()));
+    } else {
+      task_it->set_craned_list(task.pending_reason);
+    }
   };
 
   auto task_rng_filter_time = [&](auto& it) {
@@ -2520,6 +2524,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
                           ? CalculatePriority_(task.get(), now)
                           : task->mandated_priority;
     task->cached_priority = priority;
+    task->pending_reason = "Priority";
     task_priority_vec.emplace_back(task->TaskId(), priority);
   }
 
@@ -2528,6 +2533,12 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
                const std::pair<task_id_t, double>& b) {
               return a.second > b.second;
             });
+  if (task_priority_vec.size() >= 1) {
+    auto task_iter = pending_task_map.find(task_priority_vec[0].first);
+    if (task_iter != pending_task_map.end()) {
+      task_iter->second->pending_reason = "Resources";
+    }
+  }
 
   size_t id_vec_len = std::min(limit_num, task_priority_vec.size());
 
