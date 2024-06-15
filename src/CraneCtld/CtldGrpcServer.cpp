@@ -374,7 +374,8 @@ grpc::Status CraneCtldServiceImpl::AddQos(
 
   qos.name = qos_info->name();
   qos.description = qos_info->description();
-  qos.priority = qos_info->priority();
+  qos.priority =
+      qos_info->priority() == 0 ? kDefaultQosPriority : qos_info->priority();
   qos.max_jobs_per_user = qos_info->max_jobs_per_user();
   qos.max_cpus_per_user = qos_info->max_cpus_per_user();
   qos.max_time_limit_per_task =
