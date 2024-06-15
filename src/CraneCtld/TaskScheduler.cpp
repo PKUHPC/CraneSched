@@ -1083,6 +1083,7 @@ CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priority) {
 
 CraneErr TaskScheduler::HoldReleaseTask(task_id_t task_id, bool hold) {
   LockGuard pending_guard(&m_pending_task_map_mtx_);
+  LockGuard running_guard(&m_running_task_map_mtx_);
 
   auto pd_iter = m_pending_task_map_.find(task_id);
   if (pd_iter != m_pending_task_map_.end()) {
