@@ -30,6 +30,10 @@ using task_db_id_t = int64_t;
 
 constexpr uint32_t kTaskScheduleIntervalMs = 1000;
 
+// Clean ReleaseTaskQueue when timeout or exceeding batch num
+constexpr uint32_t kReleaseTaskTimeoutMs = 500;
+constexpr uint32_t kReleaseTaskBatchNum = 1000;
+
 // Clean CancelTaskQueue when timeout or exceeding batch num
 constexpr uint32_t kCancelTaskTimeoutMs = 500;
 constexpr uint32_t kCancelTaskBatchNum = 1000;
