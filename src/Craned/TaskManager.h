@@ -29,7 +29,6 @@
 
 #include "CgroupManager.h"
 #include "CtldClient.h"
-#include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
@@ -208,22 +207,7 @@ class TaskManager {
 
   CraneErr ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
-  [[deprecated]] CraneErr SpawnInteractiveTaskAsync(
-      uint32_t task_id, std::string executive_path,
-      std::list<std::string> arguments,
-      std::function<void(std::string&&, void*)> output_cb,
-      std::function<void(bool, int, void*)> finish_cb);
-
   std::optional<uint32_t> QueryTaskIdFromPidAsync(pid_t pid);
-
-  bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info);
-
-  bool CreateCgroupsAsync(
-      std::vector<std::pair<task_id_t, uid_t>>&& task_id_uid_pairs);
-
-  bool MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id);
-
-  bool ReleaseCgroupAsync(uint32_t task_id, uid_t uid);
 
   void TerminateTaskAsync(uint32_t task_id);
 
@@ -249,7 +233,7 @@ class TaskManager {
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
-  struct savedPrivilege {
+  struct SavedPrivilege {
     uid_t uid;
     gid_t gid;
   };
@@ -278,8 +262,6 @@ class TaskManager {
     task_id_t task_id;
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
-
-  static std::string CgroupStrByTaskId_(task_id_t task_id);
 
   static std::string ParseFilePathPattern_(const std::string& path_pattern,
                                            const std::string& cwd,
@@ -397,16 +379,6 @@ class TaskManager {
       GUARDED_BY(m_mtx_);
 
   absl::Mutex m_mtx_;
-
-  util::AtomicHashMap<absl::flat_hash_map, task_id_t, uid_t>
-      m_task_id_to_uid_map_;
-
-  util::AtomicHashMap<absl::flat_hash_map, task_id_t, std::unique_ptr<Cgroup>>
-      m_task_id_to_cg_map_;
-
-  util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
-                      absl::flat_hash_set<task_id_t>>
-      m_uid_to_task_ids_map_;
 
   // Critical data region ends
   // ========================================================================

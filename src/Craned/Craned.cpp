@@ -433,11 +433,12 @@ void GlobalVariableInit() {
 
   PasswordEntry::InitializeEntrySize();
 
-  using Craned::CgroupUtil;
+  using Craned::CgroupManager;
   using Craned::CgroupConstant::Controller;
-  CgroupUtil::Init();
-  if (!CgroupUtil::Mounted(Controller::CPU_CONTROLLER) ||
-      !CgroupUtil::Mounted(Controller::MEMORY_CONTROLLER)) {
+  g_cg_mgr = std::make_unique<Craned::CgroupManager>();
+  g_cg_mgr->Init();
+  if (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
+      !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER)) {
     CRANE_ERROR("Failed to initialize cpu and memory cgroups controller.");
     std::exit(1);
   }

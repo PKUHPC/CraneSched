@@ -185,7 +185,7 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
     task_id_uid_pairs.emplace_back(task_id, uid);
   }
 
-  bool ok = g_task_mgr->CreateCgroupsAsync(std::move(task_id_uid_pairs));
+  bool ok = g_cg_mgr->CreateCgroups(std::move(task_id_uid_pairs));
   if (!ok) {
     CRANE_ERROR("Failed to create cgroups for some tasks.");
   }
@@ -203,7 +203,7 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
 
     CRANE_DEBUG("Release Cgroup for task #{}", task_id);
 
-    bool ok = g_task_mgr->ReleaseCgroupAsync(task_id, uid);
+    bool ok = g_cg_mgr->ReleaseCgroup(task_id, uid);
     if (!ok) {
       CRANE_ERROR("Failed to release cgroup for task #{}, uid {}", task_id,
                   uid);
@@ -332,7 +332,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     return Status::OK;
   } else {
     TaskInfoOfUid info{};
-    ok = g_task_mgr->QueryTaskInfoOfUidAsync(request->uid(), &info);
+    ok = g_cg_mgr->QueryTaskInfoOfUidAsync(request->uid(), &info);
     if (ok) {
       CRANE_TRACE(
           "Found a task #{} belonging to uid {}. "
@@ -360,7 +360,7 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
   CRANE_TRACE("Moving pid {} to cgroup of task #{}", request->pid(),
               request->task_id());
   bool ok =
-      g_task_mgr->MigrateProcToCgroupOfTask(request->pid(), request->task_id());
+      g_cg_mgr->MigrateProcToCgroupOfTask(request->pid(), request->task_id());
 
   if (!ok) {
     CRANE_INFO("GrpcMigrateSshProcToCgroup failed on pid: {}, task #{}",

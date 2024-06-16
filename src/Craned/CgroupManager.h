@@ -26,6 +26,7 @@
 #include <libcgroup.h>
 
 #include "CranedPublicDefs.h"
+#include "crane/AtomicHashMap.h"
 
 namespace Craned {
 
@@ -226,25 +227,55 @@ class Cgroup {
   mutable struct cgroup *m_cgroup_;
 };
 
-class CgroupUtil {
+class CgroupManager {
  public:
-  static int Init();
+  int Init();
 
-  static bool Mounted(CgroupConstant::Controller controller) {
+  bool Mounted(CgroupConstant::Controller controller) {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
   }
 
-  static std::unique_ptr<Cgroup> CreateOrOpen(
-      const std::string &cgroup_string, ControllerFlags preferred_controllers,
-      ControllerFlags required_controllers, bool retrieve);
+  bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info);
+
+  bool CreateCgroups(
+      std::vector<std::pair<task_id_t, uid_t>> &&task_id_uid_pairs);
+
+  bool CheckIfCgroupForTasksExists(task_id_t task_id);
+
+  Cgroup *AllocateExistingCgroup(task_id_t task_id);
+
+  bool MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id);
+
+  bool ReleaseCgroup(uint32_t task_id, uid_t uid);
+
+  bool ReleaseCgroupByTaskIdOnly(task_id_t task_id);
 
  private:
-  static int initialize_controller(struct cgroup &cgroup,
-                                   CgroupConstant::Controller controller,
-                                   bool required, bool has_cgroup,
-                                   bool &changed_cgroup);
+  static std::string CgroupStrByTaskId_(task_id_t task_id);
 
-  inline static ControllerFlags m_mounted_controllers_;
+  std::unique_ptr<Cgroup> CreateOrOpen_(const std::string &cgroup_string,
+                                        ControllerFlags preferred_controllers,
+                                        ControllerFlags required_controllers,
+                                        bool retrieve);
+
+  int InitializeController_(struct cgroup &cgroup,
+                            CgroupConstant::Controller controller,
+                            bool required, bool has_cgroup,
+                            bool &changed_cgroup);
+
+  ControllerFlags m_mounted_controllers_;
+
+  util::AtomicHashMap<absl::flat_hash_map, task_id_t, uid_t>
+      m_task_id_to_uid_map_;
+
+  util::AtomicHashMap<absl::flat_hash_map, task_id_t, std::unique_ptr<Cgroup>>
+      m_task_id_to_cg_map_;
+
+  util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
+                      absl::flat_hash_set<task_id_t>>
+      m_uid_to_task_ids_map_;
 };
 
 }  // namespace Craned
+
+inline std::unique_ptr<Craned::CgroupManager> g_cg_mgr;

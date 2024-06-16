@@ -176,10 +176,6 @@ const TaskInstance* TaskManager::FindInstanceByTaskId_(uint32_t task_id) {
   return iter->second.get();
 }
 
-std::string TaskManager::CgroupStrByTaskId_(task_id_t task_id) {
-  return fmt::format("Crane_Task_{}", task_id);
-}
-
 void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
   auto it = m_task_map_.find(task_id);
   if (it == m_task_map_.end()) {
@@ -502,7 +498,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
   }
 
   // save the current uid/gid
-  savedPrivilege saved_priv{getuid(), getgid()};
+  SavedPrivilege saved_priv{getuid(), getgid()};
 
   int rc = setegid(instance->pwd_entry.Gid());
   if (rc == -1) {
@@ -839,7 +835,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 }
 
 CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
-  if (!m_task_id_to_cg_map_.Contains(task.task_id())) {
+  if (!g_cg_mgr->CheckIfCgroupForTasksExists(task.task_id())) {
     CRANE_DEBUG("Executing task #{} without an allocated cgroup. Ignoring it.",
                 task.task_id());
     return CraneErr::kCgroupError;
@@ -893,7 +889,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   // This function runs in a multi-threading manner. Take care of thread safety.
   task_id_t task_id = instance->task.task_id();
 
-  if (!m_task_id_to_cg_map_.Contains(task_id)) {
+  if (!g_cg_mgr->CheckIfCgroupForTasksExists(task_id)) {
     CRANE_ERROR("Failed to find created cgroup for task #{}", task_id);
     EvActivateTaskStatusChange_(
         task_id, crane::grpc::TaskStatus::Failed,
@@ -902,28 +898,17 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     return;
   }
 
-  {
-    auto cg_it = m_task_id_to_cg_map_[task_id];
-    auto& cg_unique_ptr = *cg_it;
-    if (!cg_unique_ptr) {
-      instance->cgroup_path = CgroupStrByTaskId_(task_id);
-      cg_unique_ptr = CgroupUtil::CreateOrOpen(
-          instance->cgroup_path,
-          NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
-              CgroupConstant::Controller::MEMORY_CONTROLLER,
-          NO_CONTROLLER_FLAG, false);
-
-      if (!cg_unique_ptr) {
-        CRANE_ERROR("Failed to created cgroup for task #{}", task_id);
-        EvActivateTaskStatusChange_(
-            task_id, crane::grpc::TaskStatus::Failed,
-            ExitCode::kExitCodeCgroupError,
-            fmt::format("Failed to create cgroup for task #{}", task_id));
-        return;
-      }
-    }
-    instance->cgroup = cg_unique_ptr.get();
+  Cgroup* cg = g_cg_mgr->AllocateExistingCgroup(task_id);
+  if (cg == nullptr) {
+    CRANE_ERROR("Failed to created cgroup for task #{}", task_id);
+    EvActivateTaskStatusChange_(
+        task_id, crane::grpc::TaskStatus::Failed,
+        ExitCode::kExitCodeCgroupError,
+        fmt::format("Failed to create cgroup for task #{}", task_id));
+    return;
   }
+  instance->cgroup = cg;
+  instance->cgroup_path = cg->GetCgroupString();
 
   instance->pwd_entry.Init(instance->task.uid());
   if (!instance->pwd_entry.Valid()) {
@@ -1209,21 +1194,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
       // we just remove the cgroup for such task, Ctld will fail in the
       // following ExecuteTasks and the task will go to the right place as
       // well as the completed queue.
-
-      uid_t uid;
-      {
-        auto vp =
-            this_->m_task_id_to_uid_map_.GetValueExclusivePtr(elem.task_id);
-        if (!vp) return;
-
-        CRANE_DEBUG(
-            "Remove cgroup for task #{} for potential crashes of other "
-            "craned.",
-            elem.task_id);
-        uid = *vp;
-      }
-      this_->ReleaseCgroupAsync(elem.task_id, uid);
-
+      g_cg_mgr->ReleaseCgroupByTaskIdOnly(elem.task_id);
       return;
     }
 
@@ -1260,114 +1231,6 @@ void TaskManager::MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id) {
   EvQueueTaskTerminate elem{.task_id = task_id, .mark_as_orphaned = true};
   m_task_terminate_queue_.enqueue(elem);
   event_active(m_ev_task_terminate_, 0, 0);
-}
-
-bool TaskManager::CreateCgroupsAsync(
-    std::vector<std::pair<task_id_t, uid_t>>&& task_id_uid_pairs) {
-  std::chrono::steady_clock::time_point begin;
-  std::chrono::steady_clock::time_point end;
-
-  CRANE_DEBUG("Creating cgroups for {} tasks", task_id_uid_pairs.size());
-
-  begin = std::chrono::steady_clock::now();
-
-  for (int i = 0; i < task_id_uid_pairs.size(); i++) {
-    auto [task_id, uid] = task_id_uid_pairs[i];
-
-    CRANE_TRACE("Create lazily allocated cgroups for task #{}, uid {}", task_id,
-                uid);
-
-    this->m_task_id_to_uid_map_.Emplace(task_id, uid);
-
-    this->m_task_id_to_cg_map_.Emplace(task_id, nullptr);
-    if (!this->m_uid_to_task_ids_map_.Contains(uid))
-      this->m_uid_to_task_ids_map_.Emplace(
-          uid, absl::flat_hash_set<uint32_t>{task_id});
-    else
-      this->m_uid_to_task_ids_map_[uid]->emplace(task_id);
-  }
-
-  end = std::chrono::steady_clock::now();
-  CRANE_TRACE("Create cgroups costed {} ms",
-              std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-                  .count());
-
-  return true;
-}
-
-bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
-  if (!this->m_uid_to_task_ids_map_.Contains(uid)) {
-    CRANE_DEBUG(
-        "Trying to release a non-existent cgroup for uid #{}. Ignoring it...",
-        uid);
-    return false;
-  }
-
-  this->m_task_id_to_uid_map_.Erase(task_id);
-
-  this->m_uid_to_task_ids_map_[uid]->erase(task_id);
-  if (this->m_uid_to_task_ids_map_[uid]->empty()) {
-    this->m_uid_to_task_ids_map_.Erase(uid);
-  }
-
-  if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
-    CRANE_DEBUG(
-        "Trying to release a non-existent cgroup for task #{}. Ignoring "
-        "it...",
-        task_id);
-
-    return false;
-  } else {
-    // The termination of all processes in a cgroup is a time-consuming work.
-    // Therefore, once we are sure that the cgroup for this task exists, we
-    // let gRPC call return and put the termination work into the thread pool
-    // to avoid blocking the event loop of TaskManager.
-    // Kind of async behavior.
-
-    // avoid deadlock by Erase at next line
-    Cgroup* cgroup = this->m_task_id_to_cg_map_[task_id]->release();
-    this->m_task_id_to_cg_map_.Erase(task_id);
-
-    if (cgroup != nullptr) {
-      g_thread_pool->detach_task([cgroup]() {
-        bool rc;
-        int cnt = 0;
-
-        while (true) {
-          if (cgroup->Empty()) break;
-
-          if (cnt >= 5) {
-            CRANE_ERROR(
-                "Couldn't kill the processes in cgroup {} after {} times. "
-                "Skipping it.",
-                cgroup->GetCgroupString(), cnt);
-            break;
-          }
-
-          cgroup->KillAllProcesses();
-          ++cnt;
-          std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-
-        delete cgroup;
-      });
-    }
-    return true;
-  }
-}
-
-bool TaskManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info) {
-  CRANE_DEBUG("Query task info for uid {}", uid);
-
-  info->job_cnt = 0;
-  info->cgroup_exists = false;
-
-  if (this->m_uid_to_task_ids_map_.Contains(uid)) {
-    auto task_ids = this->m_uid_to_task_ids_map_[uid];
-    info->job_cnt = task_ids->size();
-    info->first_task_id = *task_ids->begin();
-  }
-  return info->job_cnt > 0;
 }
 
 bool TaskManager::CheckTaskStatusAsync(task_id_t task_id,
@@ -1458,26 +1321,6 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
       elem.ok_prom.set_value(false);
     }
   }
-}
-
-bool TaskManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
-  if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
-    return false;
-  }
-
-  auto cg_it = this->m_task_id_to_cg_map_[task_id];
-  auto& cg_ptr = *cg_it;
-  if (!cg_ptr) {
-    auto cgroup_path = CgroupStrByTaskId_(task_id);
-    cg_ptr = CgroupUtil::CreateOrOpen(
-        cgroup_path,
-        NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
-            CgroupConstant::Controller::MEMORY_CONTROLLER |
-            CgroupConstant::Controller::DEVICES_CONTROLLER,
-        NO_CONTROLLER_FLAG, false);
-  }
-
-  return cg_ptr->MigrateProcIn(pid);
 }
 
 bool TaskManager::CheckIfInstanceTypeIsCrun_(TaskInstance* instance) {
