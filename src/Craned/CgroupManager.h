@@ -23,24 +23,11 @@
  */
 #pragma once
 
-#include <absl/container/flat_hash_map.h>
-#include <absl/synchronization/mutex.h>
 #include <libcgroup.h>
-#include <pthread.h>
 
-#include <array>
-#include <cassert>
-#include <map>
-#include <optional>
-#include <string_view>
+#include "CranedPublicDefs.h"
 
-#include "crane/Lock.h"
-#include "crane/Logger.h"
-#include "crane/PublicHeader.h"
-
-namespace util {
-
-class CgroupManager;  // Forward Declaration
+namespace Craned {
 
 namespace CgroupConstant {
 
@@ -197,7 +184,7 @@ const ControllerFlags NO_CONTROLLER_FLAG{};
 
 // In many distributions, 'cpu' and 'cpuacct' are mounted together. 'cpu'
 //  and 'cpuacct' both point to a single 'cpu,cpuacct' account. libcgroup
-//  handles this for us and no additional care needs to be take.
+//  handles this for us and no additional care needs to be taken.
 const ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
 class Cgroup {
@@ -237,8 +224,6 @@ class Cgroup {
 
   std::string m_cgroup_path_;
   mutable struct cgroup *m_cgroup_;
-
-  friend class CgroupManager;
 };
 
 class CgroupUtil {
@@ -262,4 +247,4 @@ class CgroupUtil {
   inline static ControllerFlags m_mounted_controllers_;
 };
 
-}  // namespace util
+}  // namespace Craned

@@ -907,12 +907,11 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     auto& cg_unique_ptr = *cg_it;
     if (!cg_unique_ptr) {
       instance->cgroup_path = CgroupStrByTaskId_(task_id);
-      cg_unique_ptr = util::CgroupUtil::CreateOrOpen(
+      cg_unique_ptr = CgroupUtil::CreateOrOpen(
           instance->cgroup_path,
-          util::NO_CONTROLLER_FLAG |
-              util::CgroupConstant::Controller::CPU_CONTROLLER |
-              util::CgroupConstant::Controller::MEMORY_CONTROLLER,
-          util::NO_CONTROLLER_FLAG, false);
+          NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
+              CgroupConstant::Controller::MEMORY_CONTROLLER,
+          NO_CONTROLLER_FLAG, false);
 
       if (!cg_unique_ptr) {
         CRANE_ERROR("Failed to created cgroup for task #{}", task_id);
@@ -1326,7 +1325,7 @@ bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
     // Kind of async behavior.
 
     // avoid deadlock by Erase at next line
-    util::Cgroup* cgroup = this->m_task_id_to_cg_map_[task_id]->release();
+    Cgroup* cgroup = this->m_task_id_to_cg_map_[task_id]->release();
     this->m_task_id_to_cg_map_.Erase(task_id);
 
     if (cgroup != nullptr) {
@@ -1470,13 +1469,12 @@ bool TaskManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
   auto& cg_ptr = *cg_it;
   if (!cg_ptr) {
     auto cgroup_path = CgroupStrByTaskId_(task_id);
-    cg_ptr = util::CgroupUtil::CreateOrOpen(
+    cg_ptr = CgroupUtil::CreateOrOpen(
         cgroup_path,
-        util::NO_CONTROLLER_FLAG |
-            util::CgroupConstant::Controller::CPU_CONTROLLER |
-            util::CgroupConstant::Controller::MEMORY_CONTROLLER |
-            util::CgroupConstant::Controller::DEVICES_CONTROLLER,
-        util::NO_CONTROLLER_FLAG, false);
+        NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
+            CgroupConstant::Controller::MEMORY_CONTROLLER |
+            CgroupConstant::Controller::DEVICES_CONTROLLER,
+        NO_CONTROLLER_FLAG, false);
   }
 
   return cg_ptr->MigrateProcIn(pid);

@@ -27,8 +27,7 @@
 #include <sys/eventfd.h>
 #include <sys/wait.h>
 
-#include <memory>
-
+#include "CgroupManager.h"
 #include "CtldClient.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
@@ -182,7 +181,7 @@ struct TaskInstance {
   std::unique_ptr<MetaInTaskInstance> meta;
 
   std::string cgroup_path;
-  util::Cgroup* cgroup;
+  Cgroup* cgroup;
   struct event* termination_timer{nullptr};
 
   // Task execution results
@@ -402,8 +401,7 @@ class TaskManager {
   util::AtomicHashMap<absl::flat_hash_map, task_id_t, uid_t>
       m_task_id_to_uid_map_;
 
-  util::AtomicHashMap<absl::flat_hash_map, task_id_t,
-                      std::unique_ptr<util::Cgroup>>
+  util::AtomicHashMap<absl::flat_hash_map, task_id_t, std::unique_ptr<Cgroup>>
       m_task_id_to_cg_map_;
 
   util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,

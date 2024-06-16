@@ -1,6 +1,8 @@
 add_executable(craned
         CtldClient.h
         CtldClient.cpp
+        CgroupManager.h
+        CgroupManager.cpp
         CforedClient.h
         CforedClient.cpp
         ResourceAllocators.h
@@ -17,11 +19,9 @@ add_executable(craned
 target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
 
 target_link_libraries(craned
-        spdlog::spdlog
         concurrentqueue
 
-        Utility_AnonymousPipe
-        Utility_cgroup
+        PkgConfig::libcgroup
         Utility_PublicHeader
 
         crane_proto_lib

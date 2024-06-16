@@ -19,12 +19,9 @@
  *
  */
 
-#include "cgroup.linux.h"
+#include "CgroupManager.h"
 
-#include <csignal>
-#include <fstream>
-
-namespace util {
+namespace Craned {
 
 /*
  * Initialize libcgroup and mount the controllers Condor will use (if possible)
@@ -676,4 +673,4 @@ bool Cgroup::Empty() {
   }
 }
 
-}  // namespace util
+}  // namespace Craned

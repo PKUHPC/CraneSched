@@ -19,7 +19,7 @@
 namespace Craned {
 
 bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
-                                            util::Cgroup *cg) {
+                                            Cgroup *cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(static_cast<double>(resource.cpu_count));
   ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);
@@ -32,7 +32,7 @@ bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
 }
 
 bool AllocatableResourceAllocator::Allocate(
-    const crane::grpc::AllocatableResource &resource, util::Cgroup *cg) {
+    const crane::grpc::AllocatableResource &resource, Cgroup *cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(resource.cpu_core_limit());
   ok &= cg->SetMemoryLimitBytes(resource.memory_limit_bytes());
