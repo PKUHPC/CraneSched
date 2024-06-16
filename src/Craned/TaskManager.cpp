@@ -685,7 +685,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
           process->batch_meta.parsed_error_file_pattern;
 
       stdout_fd =
-          open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
+          open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
       if (stdout_fd == -1) {
         CRANE_ERROR("[Child Process] Error: open {}. {}", stdout_file_path,
                     strerror(errno));
@@ -697,7 +697,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
         dup2(stdout_fd, 2);
       } else {
         stderr_fd =
-            open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
+            open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
         if (stderr_fd == -1) {
           CRANE_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
                       strerror(errno));
