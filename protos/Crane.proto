@@ -692,11 +692,6 @@ service CraneCtld {
 
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
-
-  /* If the task is a batch task, it will run immediately.
-     If the task is an interactive task, craned will just allocate the resource and waiting for
-     further SrunXStream to execute a real task.
-   */
   rpc ExecuteTask(ExecuteTasksRequest) returns(ExecuteTasksReply);
 
   rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);

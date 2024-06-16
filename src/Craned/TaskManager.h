@@ -255,15 +255,6 @@ class TaskManager {
     gid_t gid;
   };
 
-  struct EvQueueGrpcInteractiveTask {
-    std::promise<CraneErr> err_promise;
-    uint32_t task_id;
-    std::string executive_path;
-    std::list<std::string> arguments;
-    std::function<void(std::string&&, void*)> output_cb;
-    std::function<void(bool, int, void*)> finish_cb;
-  };
-
   struct EvQueueQueryTaskIdFromPid {
     std::promise<std::optional<uint32_t> /*task_id*/> task_id_prom;
     pid_t pid;
@@ -430,9 +421,6 @@ class TaskManager {
   static void EvGrpcExecuteTaskCb_(evutil_socket_t efd, short events,
                                    void* user_data);
 
-  static void EvGrpcSpawnInteractiveTaskCb_(evutil_socket_t efd, short events,
-                                            void* user_data);
-
   static void EvGrpcQueryTaskIdFromPidCb_(evutil_socket_t efd, short events,
                                           void* user_data);
 
@@ -468,13 +456,6 @@ class TaskManager {
   // true. Then, AddTaskAsyncMethod will not accept any more new tasks and
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
-
-  // When a new task grpc message arrives, the grpc function (which
-  //  runs in parallel) uses m_grpc_event_fd_ to inform the event
-  //  loop thread and the event loop thread retrieves the message
-  //  from m_grpc_reqs_. We use this to keep thread-safety.
-  struct event* m_ev_grpc_interactive_task_{};
-  ConcurrentQueue<EvQueueGrpcInteractiveTask> m_grpc_interactive_task_queue_;
 
   struct event* m_ev_query_task_id_from_pid_{};
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;

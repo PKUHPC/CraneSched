@@ -61,20 +61,6 @@ TaskManager::TaskManager() {
       std::terminate();
     }
   }
-  {  // gRPC: SpawnInteractiveTask
-    m_ev_grpc_interactive_task_ =
-        event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
-                  EvGrpcSpawnInteractiveTaskCb_, this);
-    if (!m_ev_grpc_interactive_task_) {
-      CRANE_ERROR("Failed to create the grpc event!");
-      std::terminate();
-    }
-
-    if (event_add(m_ev_grpc_interactive_task_, nullptr) < 0) {
-      CRANE_ERROR("Could not add the grpc event to base!");
-      std::terminate();
-    }
-  }
   {  // gRPC: QueryTaskIdFromPid
     m_ev_query_task_id_from_pid_ =
         event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
@@ -173,7 +159,6 @@ TaskManager::~TaskManager() {
   if (m_ev_sigchld_) event_free(m_ev_sigchld_);
   if (m_ev_sigint_) event_free(m_ev_sigint_);
 
-  if (m_ev_grpc_interactive_task_) event_free(m_ev_grpc_interactive_task_);
   if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
   if (m_ev_grpc_execute_task_) event_free(m_ev_grpc_execute_task_);
   if (m_ev_exit_event_) event_free(m_ev_exit_event_);
@@ -1125,26 +1110,6 @@ void TaskManager::EvActivateTaskStatusChange_(
   event_active(m_ev_task_status_change_, 0, 0);
 }
 
-CraneErr TaskManager::SpawnInteractiveTaskAsync(
-    uint32_t task_id, std::string executive_path,
-    std::list<std::string> arguments,
-    std::function<void(std::string&&, void*)> output_cb,
-    std::function<void(bool, int, void*)> finish_cb) {
-  EvQueueGrpcInteractiveTask elem{
-      .task_id = task_id,
-      .executive_path = std::move(executive_path),
-      .arguments = std::move(arguments),
-      .output_cb = std::move(output_cb),
-      .finish_cb = std::move(finish_cb),
-  };
-  std::future<CraneErr> err_future = elem.err_promise.get_future();
-
-  m_grpc_interactive_task_queue_.enqueue(std::move(elem));
-  event_active(m_ev_grpc_interactive_task_, 0, 0);
-
-  return err_future.get();
-}
-
 std::optional<uint32_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
   EvQueueQueryTaskIdFromPid elem{.pid = pid};
   std::future<std::optional<uint32_t>> task_id_opt_future =
@@ -1153,47 +1118,6 @@ std::optional<uint32_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
   event_active(m_ev_query_task_id_from_pid_, 0, 0);
 
   return task_id_opt_future.get();
-}
-
-void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
-                                                void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
-  EvQueueGrpcInteractiveTask elem;
-  while (this_->m_grpc_interactive_task_queue_.try_dequeue(elem)) {
-    CRANE_TRACE("Receive one GrpcSpawnInteractiveTask for task #{}",
-                elem.task_id);
-
-    auto task_iter = this_->m_task_map_.find(elem.task_id);
-    if (task_iter == this_->m_task_map_.end()) {
-      CRANE_ERROR("Cannot find task #{}", elem.task_id);
-      elem.err_promise.set_value(CraneErr::kNonExistent);
-      return;
-    }
-
-    if (task_iter->second->task.type() != crane::grpc::Interactive) {
-      CRANE_ERROR("Try spawning a new process in non-interactive task #{}!",
-                  elem.task_id);
-      elem.err_promise.set_value(CraneErr::kInvalidParam);
-      return;
-    }
-
-    auto process = std::make_unique<ProcessInstance>(
-        std::move(elem.executive_path), std::move(elem.arguments));
-
-    process->SetOutputCb(std::move(elem.output_cb));
-    process->SetFinishCb(std::move(elem.finish_cb));
-
-    CraneErr err;
-    err = this_->SpawnProcessInInstance_(task_iter->second.get(),
-                                         std::move(process));
-    elem.err_promise.set_value(err);
-
-    if (err != CraneErr::kOk)
-      this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Failed,
-                                         ExitCode::kExitCodeSpawnProcessFail,
-                                         std::string(CraneErrStr(err)));
-  }
 }
 
 void TaskManager::EvGrpcQueryTaskIdFromPidCb_(int efd, short events,
