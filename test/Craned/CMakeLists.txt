@@ -1,6 +1,6 @@
 add_executable(craned_test
         ${CMAKE_SOURCE_DIR}/src/Craned/TaskManager.cpp
-        ${CMAKE_SOURCE_DIR}/src/Craned/ResourceAllocators.cpp
+        ${CMAKE_SOURCE_DIR}/src/Craned/CgroupManager.cpp
         ${CMAKE_SOURCE_DIR}/src/Craned/CtldClient.cpp
         TaskManager_test.cpp)
 target_link_libraries(craned_test
@@ -22,7 +22,7 @@ target_link_libraries(craned_test
 
         test_proto
         shared_test_impl_lib
-        )
+)
 
 include(GoogleTest)
 gtest_discover_tests(craned_test)

@@ -43,8 +43,7 @@ class CranedStub {
   std::vector<task_id_t> ExecuteTasks(
       const crane::grpc::ExecuteTasksRequest &request);
 
-  CraneErr CreateCgroupForTasks(
-      std::vector<std::pair<task_id_t, uid_t>> const &task_uid_pairs);
+  CraneErr CreateCgroupForTasks(std::vector<CgroupSpec> const &cgroup_specs);
 
   CraneErr ReleaseCgroupForTasks(
       const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs);

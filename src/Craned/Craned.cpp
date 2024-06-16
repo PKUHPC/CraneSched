@@ -24,6 +24,7 @@
 
 #include <cxxopts.hpp>
 
+#include "CforedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "crane/Network.h"
@@ -432,11 +433,12 @@ void GlobalVariableInit() {
 
   PasswordEntry::InitializeEntrySize();
 
-  util::CgroupUtil::Init();
-  if (!util::CgroupUtil::Mounted(
-          util::CgroupConstant::Controller::CPU_CONTROLLER) ||
-      !util::CgroupUtil::Mounted(
-          util::CgroupConstant::Controller::MEMORY_CONTROLLER)) {
+  using Craned::CgroupManager;
+  using Craned::CgroupConstant::Controller;
+  g_cg_mgr = std::make_unique<Craned::CgroupManager>();
+  g_cg_mgr->Init();
+  if (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
+      !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER)) {
     CRANE_ERROR("Failed to initialize cpu and memory cgroups controller.");
     std::exit(1);
   }
@@ -450,6 +452,9 @@ void GlobalVariableInit() {
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
+
+  g_cfored_manager = std::make_unique<Craned::CforedManager>();
+  g_cfored_manager->Init();
 }
 
 void StartServer() {
@@ -474,6 +479,7 @@ void StartServer() {
   g_task_mgr.reset();
   g_server.reset();
   g_ctld_client.reset();
+  g_cfored_manager.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();

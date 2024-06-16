@@ -335,11 +335,7 @@ bool MongodbClient::FetchJobRecords(
         task->set_cmd_line(std::string(view["submit_line"].get_string().value));
       task->set_exit_code(view["exit_code"].get_int32().value);
 
-      // Todo: As for now, only Batch type is implemented and some data
-      // resolving is hardcoded.
-      // Hard-coding for Batch task will be resolved when Interactive task is
-      // implemented.
-      task->set_type(crane::grpc::Batch);
+      task->set_type((crane::grpc::TaskType)view["type"].get_int32().value);
     }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
@@ -408,15 +404,15 @@ bool MongodbClient::DeleteEntity(const MongodbClient::EntityType type,
   std::string_view coll;
 
   switch (type) {
-    case EntityType::ACCOUNT:
-      coll = m_account_collection_name_;
-      break;
-    case EntityType::USER:
-      coll = m_user_collection_name_;
-      break;
-    case EntityType::QOS:
-      coll = m_qos_collection_name_;
-      break;
+  case EntityType::ACCOUNT:
+    coll = m_account_collection_name_;
+    break;
+  case EntityType::USER:
+    coll = m_user_collection_name_;
+    break;
+  case EntityType::QOS:
+    coll = m_qos_collection_name_;
+    break;
   }
   document filter;
   filter.append(kvp("name", name));
@@ -808,29 +804,36 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
+  // 30 type
 
-  std::array<std::string, 30> fields{
-      "task_id",        "task_db_id",    "mod_time",    "deleted",
-      "account",  // 0 - 4
-      "cpus_req",       "mem_req",       "task_name",   "env",
-      "id_user",  // 5 - 9
-      "id_group",       "nodelist",      "nodes_alloc", "node_inx",
-      "partition_name",  // 10 - 14
-      "priority",       "time_eligible", "time_start",  "time_end",
-      "time_suspended",  // 15 - 19
-      "script",         "state",         "timelimit",   "time_submit",
-      "work_dir",  // 20 - 24
-      "submit_line",    "exit_code",     "username",    "qos",
-      "get_user_env",  // 25 - 29
+  // clang-format off
+  std::array<std::string, 31> fields{
+    // 0 - 4
+    "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
+    // 5 - 9
+    "cpus_req", "mem_req",    "task_name",   "env",      "id_user",
+    // 10 - 14
+    "id_group", "nodelist",   "nodes_alloc", "node_inx", "partition_name",
+    // 15 - 19
+    "priority", "time_eligible", "time_start", "time_end", "time_suspended",
+    // 20 - 24
+    "script", "state", "timelimit", "time_submit", "work_dir",
+    // 25 - 29
+    "submit_line", "exit_code",  "username", "qos", "get_user_env",
+    // 30
+    "type",
   };
+  // clang-format on
 
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
              double, int64_t, std::string, std::string, int32_t,   /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
              int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
-             std::string, int32_t, std::string, std::string, bool> /*25-29*/
-      values{                                                      // 0-4
+             std::string, int32_t, std::string, std::string, bool, /*25-29*/
+             int32_t>                                              /*30*/
+
+      values{// 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
              task_to_ctld.account(),
@@ -855,7 +858,9 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              // 25-29
              task_to_ctld.cmd_line(), runtime_attr.exit_code(),
              runtime_attr.username(), task_to_ctld.qos(),
-             task_to_ctld.get_user_env()};
+             task_to_ctld.get_user_env(),
+             // 30
+             task_to_ctld.type()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -878,28 +883,34 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
+  // 30 type
 
-  std::array<std::string, 30> fields{
-      "task_id",        "task_db_id",    "mod_time",    "deleted",
-      "account",  // 0 - 4
-      "cpus_req",       "mem_req",       "task_name",   "env",
-      "id_user",  // 5 - 9
-      "id_group",       "nodelist",      "nodes_alloc", "node_inx",
-      "partition_name",  // 10 - 14
-      "priority",       "time_eligible", "time_start",  "time_end",
-      "time_suspended",  // 15 - 19
-      "script",         "state",         "timelimit",   "time_submit",
-      "work_dir",  // 20 - 24
-      "submit_line",    "exit_code",     "username",    "qos",
-      "get_user_env",  // 25 - 29
+  // clang-format off
+  std::array<std::string, 31> fields{
+      // 0 - 4
+      "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
+      // 5 - 9
+      "cpus_req", "mem_req",    "task_name",   "env",      "id_user",
+      // 10 - 14
+      "id_group", "nodelist",   "nodes_alloc", "node_inx", "partition_name",
+      // 15 - 19
+      "priority", "time_eligible", "time_start", "time_end", "time_suspended",
+      // 20 - 24
+      "script", "state", "timelimit", "time_submit", "work_dir",
+      // 25 - 29
+      "submit_line", "exit_code",  "username", "qos", "get_user_env",
+      // 30
+      "type",
   };
+  // clang-format on
 
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
              double, int64_t, std::string, std::string, int32_t,   /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
              int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
-             std::string, int32_t, std::string, std::string, bool> /*25-29*/
+             std::string, int32_t, std::string, std::string, bool, /*25-29*/
+             int32_t>                                              /*30*/
 
       values{
           // 0-4
@@ -920,7 +931,9 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
           task->SubmitTimeInUnixSecond(), task->cwd,
           // 25-29
           task->cmd_line, task->ExitCode(), task->Username(), task->qos,
-          task->get_user_env};
+          task->get_user_env,
+          // 30
+          task->type};
 
   return DocumentConstructor_(fields, values);
 }

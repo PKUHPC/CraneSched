@@ -44,7 +44,7 @@ class CforedStreamWriter {
 
   bool WriteTaskIdReply(
       pid_t calloc_pid,
-      result::result<std::future<task_id_t>, std::string> res) {
+      result::result<task_id_t, std::string> res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -54,7 +54,7 @@ class CforedStreamWriter {
     if (res.has_value()) {
       task_id_reply->set_ok(true);
       task_id_reply->set_pid(calloc_pid);
-      task_id_reply->set_task_id(res.value().get());
+      task_id_reply->set_task_id(res.value());
     } else {
       task_id_reply->set_ok(false);
       task_id_reply->set_pid(calloc_pid);
@@ -65,7 +65,7 @@ class CforedStreamWriter {
   }
 
   bool WriteTaskResAllocReply(task_id_t task_id,
-                              result::result<std::string, std::string> res) {
+                              result::result<std::pair<std::string,std::list<std::string>>, std::string> res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -76,7 +76,8 @@ class CforedStreamWriter {
 
     if (res.has_value()) {
       task_res_alloc_reply->set_ok(true);
-      task_res_alloc_reply->set_allocated_craned_regex(std::move(res.value()));
+      task_res_alloc_reply->set_allocated_craned_regex(std::move(res.value().first));
+      std::ranges::for_each(res.value().second,[&task_res_alloc_reply](const auto& craned_id){task_res_alloc_reply->add_craned_ids(craned_id);});
     } else {
       task_res_alloc_reply->set_ok(false);
       task_res_alloc_reply->set_failure_reason(std::move(res.error()));
@@ -88,7 +89,7 @@ class CforedStreamWriter {
   bool WriteTaskCompletionAckReply(task_id_t task_id) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
-
+    CRANE_TRACE("Sending TaskCompletionAckReply to cfored of task id {}",task_id);
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::TASK_COMPLETION_ACK_REPLY);
 

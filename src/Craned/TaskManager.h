@@ -26,13 +26,9 @@
 #include <grp.h>
 #include <sys/eventfd.h>
 #include <sys/wait.h>
-#include <uv.h>
 
-#include <memory>
-#include <uvw.hpp>
-
+#include "CgroupManager.h"
 #include "CtldClient.h"
-#include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
@@ -141,8 +137,24 @@ class ProcessInstance {
   std::function<void(void*)> m_clean_cb_;
 };
 
-struct BatchMetaInTaskInstance {
+struct MetaInTaskInstance {
   std::string parsed_sh_script_path;
+  virtual ~MetaInTaskInstance() = default;
+};
+
+struct BatchMetaInTaskInstance : MetaInTaskInstance {
+  ~BatchMetaInTaskInstance() override = default;
+};
+
+struct CrunMetaInTaskInstance : MetaInTaskInstance {
+  int msg_forward_fd;
+  ~CrunMetaInTaskInstance() override = default;
+};
+
+struct ProcSigchldInfo {
+  pid_t pid;
+  bool is_terminated_by_signal;
+  int value;
 };
 
 // Todo: Task may consists of multiple subtasks
@@ -155,23 +167,28 @@ struct TaskInstance {
       event_free(termination_timer);
       termination_timer = nullptr;
     }
+
+    if (this->task.type() == crane::grpc::Interactive &&
+        this->task.interactive_meta().interactive_type() == crane::grpc::Crun) {
+      close(dynamic_cast<CrunMetaInTaskInstance*>(meta.get())->msg_forward_fd);
+    }
   }
 
   crane::grpc::TaskToD task;
 
   PasswordEntry pwd_entry;
-  BatchMetaInTaskInstance batch_meta;
-
-  bool cancelled_by_user{false};
-  bool terminated_by_timeout{false};
-
-  bool orphaned{false};
+  std::unique_ptr<MetaInTaskInstance> meta;
 
   std::string cgroup_path;
-  util::Cgroup* cgroup;
+  Cgroup* cgroup;
   struct event* termination_timer{nullptr};
 
+  // Task execution results
+  bool orphaned{false};
   CraneErr err_before_exec{CraneErr::kOk};
+  bool cancelled_by_user{false};
+  bool terminated_by_timeout{false};
+  ProcSigchldInfo sigchld_info{};
 
   absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
 };
@@ -190,22 +207,7 @@ class TaskManager {
 
   CraneErr ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
-  [[deprecated]] CraneErr SpawnInteractiveTaskAsync(
-      uint32_t task_id, std::string executive_path,
-      std::list<std::string> arguments,
-      std::function<void(std::string&&, void*)> output_cb,
-      std::function<void(bool, int, void*)> finish_cb);
-
   std::optional<uint32_t> QueryTaskIdFromPidAsync(pid_t pid);
-
-  bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info);
-
-  bool CreateCgroupsAsync(
-      std::vector<std::pair<task_id_t, uid_t>>&& task_id_uid_pairs);
-
-  bool MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id);
-
-  bool ReleaseCgroupAsync(uint32_t task_id, uid_t uid);
 
   void TerminateTaskAsync(uint32_t task_id);
 
@@ -214,6 +216,8 @@ class TaskManager {
   bool CheckTaskStatusAsync(task_id_t task_id, crane::grpc::TaskStatus* status);
 
   bool ChangeTaskTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
+
+  void TaskStopAndDoStatusChangeAsync(uint32_t task_id);
 
   // Wait internal libevent base loop to exit...
   void Wait();
@@ -229,24 +233,9 @@ class TaskManager {
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
-  struct SigchldInfo {
-    pid_t pid;
-    bool is_terminated_by_signal;
-    int value;
-  };
-
-  struct savedPrivilege {
+  struct SavedPrivilege {
     uid_t uid;
     gid_t gid;
-  };
-
-  struct EvQueueGrpcInteractiveTask {
-    std::promise<CraneErr> err_promise;
-    uint32_t task_id;
-    std::string executive_path;
-    std::list<std::string> arguments;
-    std::function<void(std::string&&, void*)> output_cb;
-    std::function<void(bool, int, void*)> finish_cb;
   };
 
   struct EvQueueQueryTaskIdFromPid {
@@ -274,23 +263,15 @@ class TaskManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
-  static std::string CgroupStrByTaskId_(task_id_t task_id);
-
   static std::string ParseFilePathPattern_(const std::string& path_pattern,
                                            const std::string& cwd,
                                            task_id_t task_id);
 
-  /**
-   * EvActivateTaskStatusChange_ must NOT be called in this method and should be
-   *  called in the caller method after checking the return value of this
-   *  method.
-   * @return kSystemErr if the socket pair between the parent process and child
-   *  process cannot be created, and the caller should call strerror() to check
-   *  the unix error code. kLibEventError if bufferevent_socket_new() fails.
-   *  kCgroupError if CgroupManager cannot move the process to the cgroup bound
-   *  to the TaskInstance. kProtobufError if the communication between the
-   *  parent and the child process fails.
-   */
+  static bool CheckIfInstanceTypeIsCrun_(TaskInstance* instance);
+  static bool CheckIfInstanceTypeIsCalloc_(TaskInstance* instance);
+
+  void LaunchTaskInstanceMt_(TaskInstance* instance);
+
   CraneErr SpawnProcessInInstance_(TaskInstance* instance,
                                    std::unique_ptr<ProcessInstance> process);
 
@@ -399,17 +380,6 @@ class TaskManager {
 
   absl::Mutex m_mtx_;
 
-  util::AtomicHashMap<absl::flat_hash_map, task_id_t, uid_t>
-      m_task_id_to_uid_map_;
-
-  util::AtomicHashMap<absl::flat_hash_map, task_id_t,
-                      std::unique_ptr<util::Cgroup>>
-      m_task_id_to_cg_map_;
-
-  util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
-                      absl::flat_hash_set<task_id_t>>
-      m_uid_to_task_ids_map_;
-
   // Critical data region ends
   // ========================================================================
 
@@ -420,9 +390,6 @@ class TaskManager {
 
   static void EvGrpcExecuteTaskCb_(evutil_socket_t efd, short events,
                                    void* user_data);
-
-  static void EvGrpcSpawnInteractiveTaskCb_(evutil_socket_t efd, short events,
-                                            void* user_data);
 
   static void EvGrpcQueryTaskIdFromPidCb_(evutil_socket_t efd, short events,
                                           void* user_data);
@@ -459,13 +426,6 @@ class TaskManager {
   // true. Then, AddTaskAsyncMethod will not accept any more new tasks and
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
-
-  // When a new task grpc message arrives, the grpc function (which
-  //  runs in parallel) uses m_grpc_event_fd_ to inform the event
-  //  loop thread and the event loop thread retrieves the message
-  //  from m_grpc_reqs_. We use this to keep thread-safety.
-  struct event* m_ev_grpc_interactive_task_{};
-  ConcurrentQueue<EvQueueGrpcInteractiveTask> m_grpc_interactive_task_queue_;
 
   struct event* m_ev_query_task_id_from_pid_{};
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;

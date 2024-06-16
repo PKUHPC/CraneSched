@@ -36,17 +36,10 @@ using grpc::ServerReaderWriter;
 using grpc::Status;
 
 using crane::grpc::Craned;
-using crane::grpc::SrunXStreamReply;
-using crane::grpc::SrunXStreamRequest;
 
 class CranedServiceImpl : public Craned::Service {
  public:
   CranedServiceImpl() = default;
-
-  [[deprecated]] Status SrunXStream(
-      ServerContext *context,
-      ServerReaderWriter<SrunXStreamReply, SrunXStreamRequest> *stream)
-      override;
 
   grpc::Status ExecuteTask(grpc::ServerContext *context,
                            const crane::grpc::ExecuteTasksRequest *request,
