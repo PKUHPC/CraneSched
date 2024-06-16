@@ -778,7 +778,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     env_vec.emplace_back("CRANE_JOB_ID",
                          std::to_string(instance->task.task_id()));
 
-    if (instance->task.type() == crane::grpc::Interactive &&
+    if (CheckIfInstanceTypeIsCrun_(instance) &&
         !instance->task.interactive_meta().term_env().empty()) {
       env_vec.emplace_back("TERM",
                            instance->task.interactive_meta().term_env());
