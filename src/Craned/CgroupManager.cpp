@@ -268,35 +268,57 @@ bool CgroupManager::CheckIfCgroupForTasksExists(task_id_t task_id) {
   return m_task_id_to_cg_map_.Contains(task_id);
 }
 
-Cgroup *CgroupManager::AllocateExistingCgroup(task_id_t task_id) {
-  auto cg_it = m_task_id_to_cg_map_[task_id];
-  auto &cg_unique_ptr = *cg_it;
-  if (!cg_unique_ptr)
-    cg_unique_ptr = CgroupManager::CreateOrOpen_(
-        CgroupStrByTaskId_(task_id),
-        NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
-            CgroupConstant::Controller::MEMORY_CONTROLLER,
-        NO_CONTROLLER_FLAG, false);
+bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
+  crane::grpc::Resources res;
+  Cgroup *pcg;
 
-  return cg_unique_ptr.get();
+  {
+    auto cg_spec_it = m_task_id_to_cg_spec_map_[task_id];
+    if (!cg_spec_it) return false;
+    res = cg_spec_it->resources;
+  }
+  {
+    auto cg_it = m_task_id_to_cg_map_[task_id];
+    auto &cg_unique_ptr = *cg_it;
+    if (!cg_unique_ptr)
+      cg_unique_ptr = CgroupManager::CreateOrOpen_(
+          CgroupStrByTaskId_(task_id),
+          NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
+              CgroupConstant::Controller::MEMORY_CONTROLLER,
+          NO_CONTROLLER_FLAG, false);
+
+    if (!cg_unique_ptr) return false;
+
+    pcg = cg_unique_ptr.get();
+    if (cg) *cg = pcg;
+  }
+
+  CRANE_TRACE(
+      "Setting cgroup limit of task #{}. CPU: {:.2f}, Mem: {:.2f} MB.", task_id,
+      res.allocatable_resource().cpu_core_limit(),
+      res.allocatable_resource().memory_limit_bytes() / (1024.0 * 1024.0));
+
+  bool ok =
+      AllocatableResourceAllocator::Allocate(res.allocatable_resource(), pcg);
+  return ok;
 }
 
-bool CgroupManager::CreateCgroups(
-    std::vector<std::pair<task_id_t, uid_t>> &&task_id_uid_pairs) {
+bool CgroupManager::CreateCgroups(std::vector<CgroupSpec> &&cg_specs) {
   std::chrono::steady_clock::time_point begin;
   std::chrono::steady_clock::time_point end;
 
-  CRANE_DEBUG("Creating cgroups for {} tasks", task_id_uid_pairs.size());
+  CRANE_DEBUG("Creating cgroups for {} tasks", cg_specs.size());
 
   begin = std::chrono::steady_clock::now();
 
-  for (int i = 0; i < task_id_uid_pairs.size(); i++) {
-    auto [task_id, uid] = task_id_uid_pairs[i];
+  for (int i = 0; i < cg_specs.size(); i++) {
+    uid_t uid = cg_specs[i].uid;
+    task_id_t task_id = cg_specs[i].task_id;
 
     CRANE_TRACE("Create lazily allocated cgroups for task #{}, uid {}", task_id,
                 uid);
 
-    this->m_task_id_to_uid_map_.Emplace(task_id, uid);
+    this->m_task_id_to_cg_spec_map_.Emplace(task_id, std::move(cg_specs[i]));
 
     this->m_task_id_to_cg_map_.Emplace(task_id, nullptr);
     if (!this->m_uid_to_task_ids_map_.Contains(uid))
@@ -317,13 +339,13 @@ bool CgroupManager::CreateCgroups(
 bool CgroupManager::ReleaseCgroupByTaskIdOnly(task_id_t task_id) {
   uid_t uid;
   {
-    auto vp = this->m_task_id_to_uid_map_.GetValueExclusivePtr(task_id);
+    auto vp = this->m_task_id_to_cg_spec_map_.GetValueExclusivePtr(task_id);
     if (!vp) return false;
 
     CRANE_DEBUG(
         "Remove cgroup for task #{} for potential crashes of other craned.",
         task_id);
-    uid = *vp;
+    uid = vp->uid;
   }
   return this->ReleaseCgroup(task_id, uid);
 }
@@ -336,7 +358,7 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
     return false;
   }
 
-  this->m_task_id_to_uid_map_.Erase(task_id);
+  this->m_task_id_to_cg_spec_map_.Erase(task_id);
 
   this->m_uid_to_task_ids_map_[uid]->erase(task_id);
   if (this->m_uid_to_task_ids_map_[uid]->empty()) {
@@ -404,23 +426,11 @@ bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
 }
 
 bool CgroupManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
-  if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
-    return false;
-  }
+  Cgroup *cg;
+  bool ok = AllocateAndGetCgroup(task_id, &cg);
+  if (cg == nullptr) return false;
 
-  auto cg_it = this->m_task_id_to_cg_map_[task_id];
-  auto &cg_ptr = *cg_it;
-  if (!cg_ptr) {
-    auto cgroup_path = CgroupStrByTaskId_(task_id);
-    cg_ptr = CgroupManager::CreateOrOpen_(
-        cgroup_path,
-        NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
-            CgroupConstant::Controller::MEMORY_CONTROLLER |
-            CgroupConstant::Controller::DEVICES_CONTROLLER,
-        NO_CONTROLLER_FLAG, false);
-  }
-
-  return cg_ptr->MigrateProcIn(pid);
+  return cg->MigrateProcIn(pid);
 }
 
 bool Cgroup::MigrateProcIn(pid_t pid) {
@@ -835,6 +845,32 @@ bool Cgroup::Empty() {
                 cgroup_strerror(rc));
     return false;
   }
+}
+
+bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
+                                            Cgroup *cg) {
+  bool ok;
+  ok = cg->SetCpuCoreLimit(static_cast<double>(resource.cpu_count));
+  ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);
+
+  // Depending on the system configuration, the following two options may not
+  // be enabled, so we ignore the result of them.
+  cg->SetMemorySoftLimitBytes(resource.memory_sw_bytes);
+  cg->SetMemorySwLimitBytes(resource.memory_sw_bytes);
+  return ok;
+}
+
+bool AllocatableResourceAllocator::Allocate(
+    const crane::grpc::AllocatableResource &resource, Cgroup *cg) {
+  bool ok;
+  ok = cg->SetCpuCoreLimit(resource.cpu_core_limit());
+  ok &= cg->SetMemoryLimitBytes(resource.memory_limit_bytes());
+
+  // Depending on the system configuration, the following two options may not
+  // be enabled, so we ignore the result of them.
+  cg->SetMemorySoftLimitBytes(resource.memory_sw_limit_bytes());
+  cg->SetMemorySwLimitBytes(resource.memory_sw_limit_bytes());
+  return ok;
 }
 
 }  // namespace Craned

@@ -227,6 +227,13 @@ class Cgroup {
   mutable struct cgroup *m_cgroup_;
 };
 
+class AllocatableResourceAllocator {
+ public:
+  static bool Allocate(const AllocatableResource &resource, Cgroup *cg);
+  static bool Allocate(const crane::grpc::AllocatableResource &resource,
+                       Cgroup *cg);
+};
+
 class CgroupManager {
  public:
   int Init();
@@ -237,12 +244,11 @@ class CgroupManager {
 
   bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info);
 
-  bool CreateCgroups(
-      std::vector<std::pair<task_id_t, uid_t>> &&task_id_uid_pairs);
+  bool CreateCgroups(std::vector<CgroupSpec> &&cg_specs);
 
   bool CheckIfCgroupForTasksExists(task_id_t task_id);
 
-  Cgroup *AllocateExistingCgroup(task_id_t task_id);
+  bool AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg);
 
   bool MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id);
 
@@ -265,8 +271,8 @@ class CgroupManager {
 
   ControllerFlags m_mounted_controllers_;
 
-  util::AtomicHashMap<absl::flat_hash_map, task_id_t, uid_t>
-      m_task_id_to_uid_map_;
+  util::AtomicHashMap<absl::flat_hash_map, task_id_t, CgroupSpec>
+      m_task_id_to_cg_spec_map_;
 
   util::AtomicHashMap<absl::flat_hash_map, task_id_t, std::unique_ptr<Cgroup>>
       m_task_id_to_cg_map_;

@@ -204,3 +204,9 @@ struct Resources {
 bool operator<=(const Resources& lhs, const Resources& rhs);
 bool operator<(const Resources& lhs, const Resources& rhs);
 bool operator==(const Resources& lhs, const Resources& rhs);
+
+struct CgroupSpec {
+  uid_t uid;
+  task_id_t task_id;
+  crane::grpc::Resources resources;
+};

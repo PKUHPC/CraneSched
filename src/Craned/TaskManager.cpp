@@ -22,7 +22,6 @@
 #include <sys/stat.h>
 
 #include "CforedClient.h"
-#include "ResourceAllocators.h"
 #include "crane/OS.h"
 #include "protos/CraneSubprocess.pb.h"
 
@@ -898,18 +897,6 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     return;
   }
 
-  Cgroup* cg = g_cg_mgr->AllocateExistingCgroup(task_id);
-  if (cg == nullptr) {
-    CRANE_ERROR("Failed to created cgroup for task #{}", task_id);
-    EvActivateTaskStatusChange_(
-        task_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodeCgroupError,
-        fmt::format("Failed to create cgroup for task #{}", task_id));
-    return;
-  }
-  instance->cgroup = cg;
-  instance->cgroup_path = cg->GetCgroupString();
-
   instance->pwd_entry.Init(instance->task.uid());
   if (!instance->pwd_entry.Valid()) {
     CRANE_DEBUG("Failed to look up password entry for uid {} of task #{}",
@@ -922,28 +909,18 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     return;
   }
 
-  // TODO: Move it to CreateCgroup.
-  bool ok = AllocatableResourceAllocator::Allocate(
-      instance->task.resources().allocatable_resource(), instance->cgroup);
-
-  CRANE_TRACE(
-      "Setting cgroup limit of task #{}. CPU: {:.2f}, Mem: {:.2f} MB.",
-      instance->task.task_id(),
-      instance->task.resources().allocatable_resource().cpu_core_limit(),
-      instance->task.resources().allocatable_resource().memory_limit_bytes() /
-          (1024.0 * 1024.0));
-
+  Cgroup* cg;
+  bool ok = g_cg_mgr->AllocateAndGetCgroup(task_id, &cg);
   if (!ok) {
-    CRANE_ERROR(
-        "Failed to allocate allocatable resource in cgroup for task #{}",
-        task_id);
+    CRANE_ERROR("Failed to allocate cgroup for task #{}", task_id);
     EvActivateTaskStatusChange_(
-        instance->task.task_id(), crane::grpc::TaskStatus::Failed,
+        task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeCgroupError,
-        fmt::format("Cannot allocate resources for the instance of task #{}",
-                    task_id));
+        fmt::format("Failed to allocate cgroup for task #{}", task_id));
     return;
   }
+  instance->cgroup = cg;
+  instance->cgroup_path = cg->GetCgroupString();
 
   // Calloc tasks have no scripts to run. Just return.
   if (CheckIfInstanceTypeIsCalloc_(instance)) return;

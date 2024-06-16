@@ -657,13 +657,16 @@ void TaskScheduler::ScheduleThread_() {
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
 
-      HashMap<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
-          craned_cgroup_map;
+      HashMap<CranedId, std::vector<CgroupSpec>> craned_cgroup_map;
 
       for (auto& it : selection_result_list) {
         auto& task = it.first;
-        for (CranedId const& craned_id : task->CranedIds())
-          craned_cgroup_map[craned_id].emplace_back(task->TaskId(), task->uid);
+        for (CranedId const& craned_id : task->CranedIds()) {
+          CgroupSpec spec{.uid = task->uid,
+                          .task_id = task->TaskId(),
+                          .resources = task->TaskToCtld().resources()};
+          craned_cgroup_map[craned_id].emplace_back(std::move(spec));
+        }
       }
 
       Mutex thread_pool_mtx;
@@ -671,20 +674,20 @@ void TaskScheduler::ScheduleThread_() {
       HashSet<task_id_t> failed_task_id_set;
 
       absl::BlockingCounter bl(craned_cgroup_map.size());
-      for (auto const& iter : craned_cgroup_map) {
+      for (auto&& iter : craned_cgroup_map) {
         CranedId const& craned_id = iter.first;
-        auto& task_uid_pairs = iter.second;
+        auto& cgroup_specs = iter.second;
 
         g_thread_pool->detach_task([&]() {
           auto stub = g_craned_keeper->GetCranedStub(craned_id);
           CRANE_TRACE("Send CreateCgroupForTasks for {} tasks to {}",
-                      task_uid_pairs.size(), craned_id);
+                      cgroup_specs.size(), craned_id);
           if (stub == nullptr || stub->Invalid()) {
             bl.DecrementCount();
             return;
           }
 
-          auto err = stub->CreateCgroupForTasks(task_uid_pairs);
+          auto err = stub->CreateCgroupForTasks(cgroup_specs);
           if (err == CraneErr::kOk) {
             bl.DecrementCount();
             return;
@@ -693,9 +696,8 @@ void TaskScheduler::ScheduleThread_() {
           thread_pool_mtx.Lock();
 
           failed_craned_set.emplace(craned_id);
-          for (const auto& [task_id, uid] : task_uid_pairs) {
-            failed_task_id_set.emplace(task_id);
-          }
+          for (const auto& spec : cgroup_specs)
+            failed_task_id_set.emplace(spec.task_id);
 
           thread_pool_mtx.Unlock();
 

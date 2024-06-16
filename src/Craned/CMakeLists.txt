@@ -5,8 +5,6 @@ add_executable(craned
         CgroupManager.cpp
         CforedClient.h
         CforedClient.cpp
-        ResourceAllocators.h
-        ResourceAllocators.cpp
         TaskManager.h
         TaskManager.cpp
         CranedServer.h

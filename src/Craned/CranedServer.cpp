@@ -176,16 +176,20 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
     grpc::ServerContext *context,
     const crane::grpc::CreateCgroupForTasksRequest *request,
     crane::grpc::CreateCgroupForTasksReply *response) {
-  std::vector<std::pair<task_id_t, uid_t>> task_id_uid_pairs;
+  std::vector<CgroupSpec> cg_specs;
   for (int i = 0; i < request->task_id_list_size(); i++) {
     task_id_t task_id = request->task_id_list(i);
     uid_t uid = request->uid_list(i);
+    crane::grpc::Resources const &resources = request->res_list(i);
 
+    CgroupSpec spec{.uid = uid,
+                    .task_id = task_id,
+                    .resources = std::move(resources)};
     CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", task_id, uid);
-    task_id_uid_pairs.emplace_back(task_id, uid);
+    cg_specs.emplace_back(std::move(spec));
   }
 
-  bool ok = g_cg_mgr->CreateCgroups(std::move(task_id_uid_pairs));
+  bool ok = g_cg_mgr->CreateCgroups(std::move(cg_specs));
   if (!ok) {
     CRANE_ERROR("Failed to create cgroups for some tasks.");
   }
