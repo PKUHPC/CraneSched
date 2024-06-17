@@ -42,9 +42,10 @@ class CforedStreamWriter {
                                crane::grpc::StreamCforedRequest> *stream)
       : m_stream_(stream), m_valid_(true) {}
 
-  bool WriteTaskIdReply(
-      pid_t calloc_pid,
-      result::result<task_id_t, std::string> res) {
+  bool WriteTaskIdReply(pid_t calloc_pid,
+                        result::result<task_id_t, std::string> res,
+                        proc_id_t proc_id,
+                        const std::list<std::string> &craned_ids) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -55,6 +56,10 @@ class CforedStreamWriter {
       task_id_reply->set_ok(true);
       task_id_reply->set_pid(calloc_pid);
       task_id_reply->set_task_id(res.value());
+      task_id_reply->set_proc_id(proc_id);
+      if (!craned_ids.empty())
+        task_id_reply->mutable_nodes()->mutable_craned_ids()->Add(
+            craned_ids.begin(), craned_ids.end());
     } else {
       task_id_reply->set_ok(false);
       task_id_reply->set_pid(calloc_pid);
@@ -64,8 +69,11 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
-  bool WriteTaskResAllocReply(task_id_t task_id,
-                              result::result<std::pair<std::string,std::list<std::string>>, std::string> res) {
+  bool WriteTaskResAllocReply(
+      task_id_t task_id,
+      result::result<std::pair<std::string, std::list<std::string>>,
+                     std::string>
+          res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -76,8 +84,12 @@ class CforedStreamWriter {
 
     if (res.has_value()) {
       task_res_alloc_reply->set_ok(true);
-      task_res_alloc_reply->set_allocated_craned_regex(std::move(res.value().first));
-      std::ranges::for_each(res.value().second,[&task_res_alloc_reply](const auto& craned_id){task_res_alloc_reply->add_craned_ids(craned_id);});
+      task_res_alloc_reply->set_allocated_craned_regex(
+          std::move(res.value().first));
+      std::ranges::for_each(res.value().second,
+                            [&task_res_alloc_reply](const auto &craned_id) {
+                              task_res_alloc_reply->add_craned_ids(craned_id);
+                            });
     } else {
       task_res_alloc_reply->set_ok(false);
       task_res_alloc_reply->set_failure_reason(std::move(res.error()));
@@ -89,7 +101,7 @@ class CforedStreamWriter {
   bool WriteTaskCompletionAckReply(task_id_t task_id) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
-    CRANE_TRACE("Sending TaskCompletionAckReply to cfored of task id {}",task_id);
+
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::TASK_COMPLETION_ACK_REPLY);
 

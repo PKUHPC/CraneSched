@@ -41,6 +41,18 @@ grpc::Status CranedServiceImpl::ExecuteTask(
   return Status::OK;
 }
 
+grpc::Status CranedServiceImpl::ExecuteProc(
+    grpc::ServerContext *context,
+    const crane::grpc::ExecuteProcRequest *request,
+    crane::grpc::ExecuteProcReply *response) {
+
+  CraneErr err = g_task_mgr->ExecuteProcAsync(request->proc());
+  if(err!=CraneErr::kOk){
+    response->set_ok(true);
+  }
+  return Status::OK;
+}
+
 grpc::Status CranedServiceImpl::TerminateTasks(
     grpc::ServerContext *context,
     const crane::grpc::TerminateTasksRequest *request,

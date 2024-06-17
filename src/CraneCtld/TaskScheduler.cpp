@@ -689,14 +689,16 @@ void TaskScheduler::ScheduleThread_() {
           task->executing_craned_ids.emplace_back(task->CranedIds().front());
         } else {
           const auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-          if (meta.interactive_type == crane::grpc::Calloc)
-            // For calloc tasks we still need to execute a dummy empty task to
-            // set up a timer.
-            task->executing_craned_ids.emplace_back(task->CranedIds().front());
-          else
-            // For crun tasks we need to execute tasks on all allocated nodes.
-            for (auto const& craned_id : task->CranedIds())
-              task->executing_craned_ids.emplace_back(craned_id);
+          for (auto const& craned_id : task->CranedIds())
+                        task->executing_craned_ids.emplace_back(craned_id);
+//          if (meta.interactive_type == crane::grpc::Calloc)
+//            // For calloc tasks we still need to execute a dummy empty task to
+//            // set up a timer.
+//            task->executing_craned_ids.emplace_back(task->CranedIds().front());
+//          else
+//            // For crun tasks we need to execute tasks on all allocated nodes.
+//            for (auto const& craned_id : task->CranedIds())
+//              task->executing_craned_ids.emplace_back(craned_id);
         }
       }
       end = std::chrono::steady_clock::now();
@@ -1017,6 +1019,35 @@ std::future<CraneErr> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
       {std::make_pair(task_id, secs), std::move(promise)});
   m_task_timeout_async_handle_->send();
 
+  return std::move(future);
+}
+
+std::future<std::pair<proc_id_t, std::list<std::string>>>
+TaskScheduler::SubmitProc(std::unique_ptr<TaskInCtld> task_submit,
+                          task_id_t task_id, pid_t pid) {
+  std::promise<std::pair<proc_id_t, std::list<std::string>>> promise;
+  std::future<std::pair<proc_id_t, std::list<std::string>>> future =
+      promise.get_future();
+
+  m_running_task_map_mtx_.Lock();
+  auto& task = m_running_task_map_[task_id];
+  promise.set_value({pid, task->CranedIds()});
+  auto request = CranedStub::NewExecuteProcRequest(task, task_submit);
+  request.mutable_proc()->set_proc_id(pid);
+
+  CRANE_TRACE("Launch task #{} proc #{}", task_id, pid);
+  for (auto const& craned_id : task->CranedIds()) {
+    auto stub = g_craned_keeper->GetCranedStub(craned_id);
+    if (stub == nullptr || stub->Invalid()) {
+      continue;
+    }
+    CraneErr err = stub->ExecuteProc(request);
+    if (err != CraneErr::kOk) {
+      CRANE_ERROR("Failed to ExecuteProc proc {} for task {} on Node {}", pid,
+                  task_id, craned_id);
+    }
+  }
+  m_running_task_map_mtx_.Unlock();
   return std::move(future);
 }
 
@@ -1593,6 +1624,13 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       task->SetStatus(new_status);
     } else {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+      if (++meta.status_change_cnt < task->node_num) {
+        CRANE_TRACE(
+            "{}/{} TaskStatusChanges of Interactive task #{} were received. "
+            "Keep waiting...",
+            meta.status_change_cnt, task->node_num, task->TaskId());
+        continue;
+      }
       if (meta.interactive_type == crane::grpc::Calloc) {
         // TaskStatusChange may indicate the time limit has been reached and
         // the task has been terminated. No more TerminateTask RPC should be
@@ -1610,13 +1648,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         }
         meta.cb_task_completed(task->TaskId());
       } else {  // Crun
-        if (++meta.status_change_cnt < task->node_num) {
-          CRANE_TRACE(
-              "{}/{} TaskStatusChanges of Crun task #{} were received. "
-              "Keep waiting...",
-              meta.status_change_cnt, task->node_num, task->TaskId());
-          continue;
-        }
 
         task->SetStatus(new_status);
         meta.cb_task_completed(task->TaskId());

@@ -80,6 +80,20 @@ enum InteractiveTaskType {
   Crun = 1;
 }
 
+message ProcToD{
+  uint32 task_id = 1;
+  uint32 proc_id = 2;
+  TaskType type = 3;
+  bool get_user_env = 4;
+  map<string, string> env = 5;
+  string cwd = 6;
+  oneof payload {
+    BatchTaskAdditionalMeta batch_meta = 7;
+    InteractiveTaskAdditionalMeta interactive_meta = 8;
+  }
+
+}
+
 message TaskToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;

@@ -223,6 +223,8 @@ class TaskScheduler {
   /// \return The future is set to 0 if task submission is failed.
   /// Otherwise, it is set to newly allocated task id.
   std::future<task_id_t> SubmitTaskAsync(std::unique_ptr<TaskInCtld> task);
+  // todo: replace TaskInCtld by step instance in ctld
+  std::future<std::pair<proc_id_t, std::list<std::string>>> SubmitProc(std::unique_ptr<TaskInCtld> task_submit,task_id_t task_id,pid_t pid);
 
   std::future<CraneErr> HoldReleaseTaskAsync(task_id_t task_id, int64_t secs);
 

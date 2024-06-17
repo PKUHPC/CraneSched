@@ -99,6 +99,18 @@ TaskManager::TaskManager() {
       std::terminate();
     }
   }
+  {  // Grpc Execute Proc Event
+    m_ev_grpc_execute_proc_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
+                                        EvGrpcExecuteProcCb_, this);
+    if (!m_ev_grpc_execute_proc_) {
+      CRANE_ERROR("Failed to create the grpc_execute_proc event!");
+      std::terminate();
+    }
+    if (event_add(m_ev_grpc_execute_proc_, nullptr) < 0) {
+      CRANE_ERROR("Could not add the m_ev_grpc_execute_proc_ to base!");
+      std::terminate();
+    }
+  }
   {  // Task Status Change Event
     m_ev_task_status_change_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
                                          EvTaskStatusChangeCb_, this);
@@ -160,6 +172,7 @@ TaskManager::~TaskManager() {
 
   if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
   if (m_ev_grpc_execute_task_) event_free(m_ev_grpc_execute_task_);
+  if (m_ev_grpc_execute_proc_) event_free(m_ev_grpc_execute_proc_);
   if (m_ev_exit_event_) event_free(m_ev_exit_event_);
   if (m_ev_task_status_change_) event_free(m_ev_task_status_change_);
   if (m_ev_task_time_limit_change_) event_free(m_ev_task_time_limit_change_);
@@ -297,8 +310,14 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
           CRANE_ERROR("Failed to find pid {} in task #{}'s ProcessInstances",
                       pid, task_id);
         } else {
+          if (CheckIfProcessInstanceIsCrun_(*proc)) {
+            auto* meta = dynamic_cast<InteractiveMetaInProcessInstance*>(
+                proc->meta.get());
+            g_cfored_manager->TaskProcOnCforedStopped(
+                meta->cfored_name, proc->proc.task_id(), proc->proc.proc_id(),
+                meta->proc_in_fd, meta->proc_out_fd);
+          }
           instance->processes.erase(pr_it);
-
           if (!instance->processes.empty()) {
             if (sigchld_info.is_terminated_by_signal) {
               // If a task is terminated by a signal and there are other
@@ -306,18 +325,13 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
               this_->TerminateTaskAsync(task_id);
             }
           } else {
-            if (instance->task.interactive_meta().interactive_type() ==
-                crane::grpc::Crun)
-              // TaskStatusChange of a crun task is triggered in
-              // CforedManager.
-              g_cfored_manager->TaskProcOnCforedStopped(
-                  instance->task.interactive_meta().cfored_name(),
-                  instance->task.task_id());
-            else /* Batch / Calloc */ {
-              // If the ProcessInstance has no process left,
-              // send TaskStatusChange for this task.
-              // See the comment of EvActivateTaskStatusChange_.
+            if (instance->task.type() == crane::grpc::Batch) {
               this_->TaskStopAndDoStatusChangeAsync(task_id);
+            } else if (CheckIfInstanceTypeIsCalloc_(instance)) {
+              CRANE_TRACE("Ignoring calloc all process exit");
+              continue;
+            } else {
+              // for crun, do nothing here
             }
           }
         }
@@ -338,21 +352,6 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
       break;
     }
   }
-}
-
-void TaskManager::EvSubprocessReadCb_(struct bufferevent* bev, void* process) {
-  auto* proc = reinterpret_cast<ProcessInstance*>(process);
-
-  size_t buf_len = evbuffer_get_length(bev->input);
-
-  std::string str;
-  str.resize(buf_len);
-  int n_copy = evbuffer_remove(bev->input, str.data(), buf_len);
-
-  CRANE_TRACE("Read {:>4} bytes from subprocess (pid: {}): {}", n_copy,
-              proc->GetPid(), str);
-
-  proc->Output(std::move(str));
 }
 
 void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
@@ -487,7 +486,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
   }
 
   // Create IO socket pair for crun tasks.
-  if (CheckIfInstanceTypeIsCrun_(instance)) {
+  if (CheckIfProcessInstanceIsCrun_(*process)) {
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, io_in_sock_pair) != 0) {
       CRANE_ERROR("Failed to create socket pair for task io forward: {}",
                   strerror(errno));
@@ -501,7 +500,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     }
 
     auto* crun_meta =
-        dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
+        dynamic_cast<InteractiveMetaInProcessInstance*>(process->meta.get());
     crun_meta->proc_in_fd = io_in_sock_pair[0];
     crun_meta->proc_out_fd = io_out_sock_pair[0];
   }
@@ -524,21 +523,22 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 
   pid_t child_pid = fork();
   if (child_pid == -1) {
-    CRANE_ERROR("fork() failed for task #{}: {}", instance->task.task_id(),
-                strerror(errno));
+    CRANE_ERROR("fork() failed for task #{} proc #{}: {}",
+                instance->task.task_id(), process->proc_id, strerror(errno));
     return CraneErr::kSystemErr;
   }
 
   if (child_pid > 0) {  // Parent proc
     process->SetPid(child_pid);
-    CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
-                instance->task.task_id(), child_pid);
+    CRANE_DEBUG("Subprocess was created for task #{} proc #{} pid: {}",
+                instance->task.task_id(), process->proc_id, child_pid);
 
-    if (CheckIfInstanceTypeIsCrun_(instance)) {
-      auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
+    if (CheckIfProcessInstanceIsCrun_(*process)) {
+      auto* meta =
+          dynamic_cast<InteractiveMetaInProcessInstance*>(process->meta.get());
       g_cfored_manager->RegisterIOForward(
-          instance->task.interactive_meta().cfored_name(),
-          instance->task.task_id(), meta->proc_in_fd, meta->proc_out_fd);
+          meta->cfored_name, instance->task.task_id(), process->proc_id,
+          meta->proc_in_fd, meta->proc_out_fd);
     }
 
     // Note that the following code will move the child process into cgroup.
@@ -557,6 +557,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     m_pid_proc_map_.emplace(child_pid, process.get());
     m_mtx_.Unlock();
 
+    auto proc_id = process->proc_id;
     // Move the ownership of ProcessInstance into the TaskInstance.
     instance->processes.emplace(child_pid, std::move(process));
 
@@ -575,23 +576,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     CanStartMessage msg;
     ChildProcessReady child_process_ready;
 
-    // Add event for stdout/stderr of the new subprocess
-    // struct bufferevent* ev_buf_event;
-    // ev_buf_event =
-    //     bufferevent_socket_new(m_ev_base_, fd, BEV_OPT_CLOSE_ON_FREE);
-    // if (!ev_buf_event) {
-    //   CRANE_ERROR(
-    //       "Error constructing bufferevent for the subprocess of task #!",
-    //       instance->task.task_id());
-    //   err = CraneErr::kLibEventError;
-    //   goto AskChildToSuicide;
-    // }
-    // bufferevent_setcb(ev_buf_event, EvSubprocessReadCb_, nullptr, nullptr,
-    //                   (void*)process.get());
-    // bufferevent_enable(ev_buf_event, EV_READ);
-    // bufferevent_disable(ev_buf_event, EV_WRITE);
-    // process->SetEvBufEvent(ev_buf_event);
-
     // Migrate the new subprocess to newly created cgroup
     if (!instance->cgroup->MigrateProcIn(child_pid)) {
       CRANE_ERROR(
@@ -603,8 +587,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(
       goto AskChildToSuicide;
     }
 
-    CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
-                instance->task.task_id());
+    CRANE_TRACE("New task #{} Proc #{} is ready. Asking subprocess to execv...",
+                instance->task.task_id(), proc_id);
 
     // Tell subprocess that the parent process is ready. Then the
     // subprocess should continue to exec().
@@ -628,8 +612,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 
     ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream, nullptr);
     if (!msg.ok()) {
-      CRANE_ERROR("Failed to read protobuf from subprocess {} of task #{}",
-                  child_pid, instance->task.task_id());
+      CRANE_ERROR(
+          "Failed to read protobuf from subprocess {} of task #{} proc #{}",
+          child_pid, instance->task.task_id(), proc_id);
       close(ctrl_fd);
 
       // See comments above.
@@ -664,7 +649,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
-    const std::string& cwd = instance->task.cwd();
+    const std::string& cwd = process->proc.cwd();
     rc = chdir(cwd.c_str());
     if (rc == -1) {
       CRANE_ERROR("[Child Process] Error: chdir to {}. {}", cwd.c_str(),
@@ -690,13 +675,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
-    if (instance->task.type() == crane::grpc::Batch) {
+    if (process->type == crane::grpc::Batch) {
       int stdout_fd, stderr_fd;
 
-      const std::string& stdout_file_path =
-          process->batch_meta.parsed_output_file_pattern;
-      const std::string& stderr_file_path =
-          process->batch_meta.parsed_error_file_pattern;
+      auto* meta =
+          dynamic_cast<BatchMetaInProcessInstance*>(process->meta.get());
+      const std::string& stdout_file_path = meta->parsed_output_file_pattern;
+      const std::string& stderr_file_path = meta->parsed_error_file_pattern;
 
       stdout_fd =
           open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
@@ -722,7 +707,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
       }
       close(stdout_fd);
 
-    } else if (CheckIfInstanceTypeIsCrun_(instance)) {
+    } else if (CheckIfProcessInstanceIsCrun_(*process)) {
       close(io_in_sock_pair[0]);
       close(io_out_sock_pair[0]);
 
@@ -747,17 +732,17 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     // Close stdin for batch tasks.
     // If these file descriptors are not closed, a program like mpirun may
     // keep waiting for the input from stdin or other fds and will never end.
-    if (instance->task.type() == crane::grpc::Batch) close(0);
+    if (process->type == crane::grpc::Batch) close(0);
     util::os::CloseFdFrom(3);
 
     std::vector<std::pair<std::string, std::string>> env_vec;
 
     // Load env from the front end.
-    for (auto& [name, value] : instance->task.env()) {
+    for (auto& [name, value] : process->proc.env()) {
       env_vec.emplace_back(name, value);
     }
 
-    if (instance->task.get_user_env()) {
+    if (process->proc.get_user_env()) {
       // If --get-user-env is set, the new environment is inherited
       // from the execution CraneD rather than the submitting node.
       //
@@ -795,10 +780,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     env_vec.emplace_back("CRANE_JOB_ID",
                          std::to_string(instance->task.task_id()));
 
-    if (CheckIfInstanceTypeIsCrun_(instance) &&
-        !instance->task.interactive_meta().term_env().empty()) {
-      env_vec.emplace_back("TERM",
-                           instance->task.interactive_meta().term_env());
+    if (CheckIfProcessInstanceIsCrun_(*process) &&
+        !process->proc.interactive_meta().term_env().empty()) {
+      env_vec.emplace_back("TERM", process->proc.interactive_meta().term_env());
     }
 
     int64_t time_limit_sec = instance->task.time_limit().seconds();
@@ -825,7 +809,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     // Argv[0] is the program name which can be anything.
     argv.emplace_back("CraneScript");
 
-    if (instance->task.get_user_env()) {
+    if (process->proc.get_user_env()) {
       // If --get-user-env is specified,
       // we need to use --login option of bash to load settings from the user's
       // settings.
@@ -864,12 +848,6 @@ CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
   instance->task = task;
-
-  // Create meta for batch or crun tasks.
-  if (instance->task.type() == crane::grpc::Batch)
-    instance->meta = std::make_unique<BatchMetaInTaskInstance>();
-  else
-    instance->meta = std::make_unique<CrunMetaInTaskInstance>();
 
   m_grpc_execute_task_queue_.enqueue(std::move(instance));
   event_active(m_ev_grpc_execute_task_, 0, 0);
@@ -948,58 +926,11 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   // Calloc tasks have no scripts to run. Just return.
   if (CheckIfInstanceTypeIsCalloc_(instance)) return;
 
-  instance->meta->parsed_sh_script_path =
-      fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);
-  auto& sh_path = instance->meta->parsed_sh_script_path;
-
-  FILE* fptr = fopen(sh_path.c_str(), "w");
-  if (fptr == nullptr) {
-    CRANE_ERROR("Failed write the script for task #{}", task_id);
-    EvActivateTaskStatusChange_(
-        task_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodeFileNotFound,
-        fmt::format("Cannot write shell script for batch task #{}", task_id));
+  // init proc instance
+  // Create meta for batch or crun tasks.
+  auto process = std::make_unique<ProcessInstance>();
+  if (!SetProcessByTaskInstance(instance, process.get())) {
     return;
-  }
-
-  if (instance->task.type() == crane::grpc::Batch)
-    fputs(instance->task.batch_meta().sh_script().c_str(), fptr);
-  else  // Crun
-    fputs(instance->task.interactive_meta().sh_script().c_str(), fptr);
-
-  fclose(fptr);
-
-  chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
-
-  auto process =
-      std::make_unique<ProcessInstance>(sh_path, std::list<std::string>());
-
-  // Prepare file output name for batch tasks.
-  if (instance->task.type() == crane::grpc::Batch) {
-    /* Perform file name substitutions
-     * %j - Job ID
-     * %u - Username
-     * %x - Job name
-     */
-    process->batch_meta.parsed_output_file_pattern =
-        ParseFilePathPattern_(instance->task.batch_meta().output_file_pattern(),
-                              instance->task.cwd(), task_id);
-    absl::StrReplaceAll({{"%j", std::to_string(task_id)},
-                         {"%u", instance->pwd_entry.Username()},
-                         {"%x", instance->task.name()}},
-                        &process->batch_meta.parsed_output_file_pattern);
-
-    // If -e / --error is not defined, leave
-    // batch_meta.parsed_error_file_pattern empty;
-    if (!instance->task.batch_meta().error_file_pattern().empty()) {
-      process->batch_meta.parsed_error_file_pattern = ParseFilePathPattern_(
-          instance->task.batch_meta().error_file_pattern(),
-          instance->task.cwd(), task_id);
-      absl::StrReplaceAll({{"%j", std::to_string(task_id)},
-                           {"%u", instance->pwd_entry.Username()},
-                           {"%x", instance->task.name()}},
-                          &process->batch_meta.parsed_error_file_pattern);
-    }
   }
 
   // err will NOT be kOk ONLY if fork() is not called due to some failure
@@ -1012,8 +943,83 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeSpawnProcessFail,
         fmt::format(
-            "Cannot spawn a new process inside the instance of task #{}",
-            task_id));
+            "Cannot spawn a new proc #{} inside the instance of task #{}",
+            process->proc_id, task_id));
+  }
+}
+
+CraneErr TaskManager::ExecuteProcAsync(const crane::grpc::ProcToD& proc) {
+  if (!m_task_map_.contains(proc.task_id())) {
+    CRANE_DEBUG("Executing proc #{} with no existing task #{}. Ignoring it.",
+                proc.proc_id(), proc.task_id());
+    return CraneErr::kNonExistent;
+  }
+  if (!g_cg_mgr->CheckIfCgroupForTasksExists(proc.task_id())) {
+    CRANE_DEBUG(
+        "Executing task #{} proc #{} without an allocated cgroup. Ignoring it.",
+        proc.task_id(), proc.proc_id());
+    return CraneErr::kCgroupError;
+  }
+  CRANE_INFO("Executing task #{} proc #{}", proc.task_id(), proc.proc_id());
+
+  m_grpc_execute_proc_queue_.enqueue(proc);
+  event_active(m_ev_grpc_execute_proc_, 0, 0);
+
+  return CraneErr::kOk;
+}
+
+void TaskManager::EvGrpcExecuteProcCb_(int, short events, void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+  crane::grpc::ProcToD popped_proc;
+
+  while (this_->m_grpc_execute_proc_queue_.try_dequeue(popped_proc)) {
+    // Once ExecuteTask RPC is processed, the TaskInstance goes into
+    // m_task_map_.
+    proc_id_t proc_id = popped_proc.proc_id();
+    task_id_t task_id = popped_proc.task_id();
+    auto process = std::make_unique<ProcessInstance>();
+    process->type = popped_proc.type();
+    // Todo: use ctld allocated proc_id
+    process->proc_id = proc_id;
+    process->proc = popped_proc;
+    if (process->type == crane::grpc::Batch)
+      process->meta = std::make_unique<BatchMetaInProcessInstance>();
+    else {
+      process->meta = std::make_unique<InteractiveMetaInProcessInstance>();
+      auto* meta =
+          dynamic_cast<InteractiveMetaInProcessInstance*>(process->meta.get());
+      meta->interactive_type =
+          process->proc.interactive_meta().interactive_type();
+      if (CheckIfProcessInstanceIsCrun_(*process))
+        meta->cfored_name = process->proc.interactive_meta().cfored_name();
+    }
+
+    process->meta->executive_path = fmt::format(
+        "{}/Crane-{}-{}.sh", g_config.CranedScriptDir, task_id, proc_id);
+    auto& sh_path = process->meta->executive_path;
+
+    FILE* fptr = fopen(sh_path.c_str(), "w");
+    if (fptr == nullptr) {
+      CRANE_ERROR("Failed write the script for task #{} Proc #{}", task_id,
+                  proc_id);
+      // todo: Notify proc launch failed
+      return;
+    }
+
+    if (process->type == crane::grpc::Batch)
+      fputs(process->proc.batch_meta().sh_script().c_str(), fptr);
+    else  // Crun
+      fputs(process->proc.interactive_meta().sh_script().c_str(), fptr);
+
+    fclose(fptr);
+
+    chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
+
+    // Step should be interactive type,not handle task output file.
+
+    // todo: TaskInstance may be free when SpawnProcess
+    this_->SpawnProcessInInstance_(this_->m_task_map_[task_id].get(),
+                                   std::move(process));
   }
 }
 
@@ -1058,12 +1064,6 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
     }
 
     TaskInstance* instance = iter->second.get();
-    if (instance->task.type() == crane::grpc::Batch ||
-        CheckIfInstanceTypeIsCrun_(instance)) {
-      const std::string& path = instance->meta->parsed_sh_script_path;
-      if (!path.empty())
-        g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
-    }
 
     bool orphaned = instance->orphaned;
 
@@ -1335,6 +1335,122 @@ bool TaskManager::CheckIfInstanceTypeIsCalloc_(TaskInstance* instance) {
   return instance->task.type() == crane::grpc::Interactive &&
          instance->task.interactive_meta().interactive_type() ==
              crane::grpc::Calloc;
+}
+
+bool TaskManager::CheckIfProcessInstanceIsCrun_(
+    const ProcessInstance& process) {
+  return process.proc.type() == crane::grpc::Interactive &&
+         process.proc.interactive_meta().interactive_type() ==
+             crane::grpc::Crun;
+}
+
+bool TaskManager::CheckIfProcessInstanceIsCalloc_(
+    const ProcessInstance& process) {
+  return process.proc.type() == crane::grpc::Interactive &&
+         process.proc.interactive_meta().interactive_type() ==
+             crane::grpc::Calloc;
+}
+bool TaskManager::SetProcessByTaskInstance(TaskInstance* task,
+                                           ProcessInstance* process) {
+  auto& task_to_d = task->task;
+  task_id_t task_id = task_to_d.task_id();
+  process->type = task_to_d.type();
+  // Todo: use ctld allocated proc_id
+  process->proc_id = 0;
+  auto& proc_to_d = process->proc;
+
+  proc_to_d.set_type(task_to_d.type());
+  proc_to_d.set_task_id(task_to_d.task_id());
+  proc_to_d.mutable_env()->insert(task_to_d.env().begin(),
+                                  task_to_d.env().end());
+
+  proc_to_d.set_cwd(task_to_d.cwd());
+  proc_to_d.set_get_user_env(task_to_d.get_user_env());
+
+  if (task_to_d.type() == crane::grpc::Batch) {
+    auto& meta_in_task = task_to_d.batch_meta();
+    auto* mutable_meta = proc_to_d.mutable_batch_meta();
+    mutable_meta->set_output_file_pattern(meta_in_task.output_file_pattern());
+    mutable_meta->set_error_file_pattern(meta_in_task.error_file_pattern());
+    mutable_meta->set_sh_script(meta_in_task.sh_script());
+  } else {
+    auto& meta_in_task = task_to_d.interactive_meta();
+    auto* mutable_meta = proc_to_d.mutable_interactive_meta();
+    mutable_meta->set_cfored_name(meta_in_task.cfored_name());
+    mutable_meta->set_sh_script(meta_in_task.sh_script());
+    mutable_meta->set_term_env(meta_in_task.term_env());
+    mutable_meta->set_interactive_type(meta_in_task.interactive_type());
+  }
+
+  if (process->type == crane::grpc::Batch)
+    process->meta = std::make_unique<BatchMetaInProcessInstance>();
+  else {
+    process->meta = std::make_unique<InteractiveMetaInProcessInstance>();
+    auto* meta =
+        dynamic_cast<InteractiveMetaInProcessInstance*>(process->meta.get());
+    meta->interactive_type = proc_to_d.interactive_meta().interactive_type();
+    if (CheckIfProcessInstanceIsCrun_(*process))
+      meta->cfored_name = proc_to_d.interactive_meta().cfored_name();
+  }
+
+  process->meta->executive_path = fmt::format(
+      "{}/Crane-{}-{}.sh", g_config.CranedScriptDir, task_id, process->proc_id);
+  auto& sh_path = process->meta->executive_path;
+
+  FILE* fptr = fopen(sh_path.c_str(), "w");
+  if (fptr == nullptr) {
+    CRANE_ERROR("Failed write the script for task #{}", task_id);
+    EvActivateTaskStatusChange_(
+        task_id, crane::grpc::TaskStatus::Failed,
+        ExitCode::kExitCodeFileNotFound,
+        fmt::format("Cannot write shell script for task #{} Proc #{}", task_id,
+                    process->proc_id));
+    return false;
+  }
+
+  if (process->type == crane::grpc::Batch)
+    fputs(process->proc.batch_meta().sh_script().c_str(), fptr);
+  else  // Crun
+    fputs(process->proc.interactive_meta().sh_script().c_str(), fptr);
+
+  fclose(fptr);
+
+  chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
+
+  // Prepare file output name for batch tasks.
+  if (process->type == crane::grpc::Batch) {
+    /* Perform file name substitutions
+     * %j - Job ID
+     * %u - Username
+     * %x - Job name
+     */
+    auto& parsed_output_file_pattern =
+        dynamic_cast<BatchMetaInProcessInstance*>(process->meta.get())
+            ->parsed_output_file_pattern;
+    parsed_output_file_pattern =
+        ParseFilePathPattern_(task->task.batch_meta().output_file_pattern(),
+                              task->task.cwd(), task_id);
+    absl::StrReplaceAll({{"%j", std::to_string(task_id)},
+                         {"%u", task->pwd_entry.Username()},
+                         {"%x", task->task.name()}},
+                        &parsed_output_file_pattern);
+
+    // If -e / --error is not defined, leave
+    // batch_meta.parsed_error_file_pattern empty;
+    if (!task->task.batch_meta().error_file_pattern().empty()) {
+      auto& parsed_error_file_pattern =
+          dynamic_cast<BatchMetaInProcessInstance*>(process->meta.get())
+              ->parsed_error_file_pattern;
+      parsed_error_file_pattern =
+          ParseFilePathPattern_(task->task.batch_meta().error_file_pattern(),
+                                task->task.cwd(), task_id);
+      absl::StrReplaceAll({{"%j", std::to_string(task_id)},
+                           {"%u", task->pwd_entry.Username()},
+                           {"%x", task->task.name()}},
+                          &parsed_error_file_pattern);
+    }
+  }
+  return true;
 }
 
 }  // namespace Craned

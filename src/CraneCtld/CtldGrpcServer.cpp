@@ -997,6 +997,23 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           auto const &payload = cfored_request.payload_task_req();
           auto task = std::make_unique<TaskInCtld>();
           task->SetFieldsByTaskToCtld(payload.task());
+          if (payload.has_task_id()) {
+            auto result = g_task_scheduler->SubmitProc(
+                std::move(task), payload.task_id(), payload.pid());
+            const auto &[proc_id, craned_ids] = result.get();
+            ok = stream_writer.WriteTaskIdReply(
+                payload.pid(),
+                result::result<task_id_t, std::string>{payload.task_id()},
+                proc_id, craned_ids);
+            if (!ok) {
+              CRANE_ERROR(
+                  "Failed to send msg to cfored {}. Connection is broken. "
+                  "Exiting...",
+                  cfored_name);
+              state = StreamState::kCleanData;
+            }
+            break;
+          }
 
           auto &meta = std::get<InteractiveMetaInTask>(task->meta);
           auto i_type = meta.interactive_type;
@@ -1016,12 +1033,13 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
               writer->WriteTaskCancelRequest(task_id);
           };
 
-          meta.cb_task_completed = [this, i_type, cfored_name,
-                                    writer_weak_ptr](task_id_t task_id) {
-            CRANE_TRACE("Sending TaskCompletionAckReply in task_completed",
-                        task_id);
-            if (auto writer = writer_weak_ptr.lock(); writer)
-              writer->WriteTaskCompletionAckReply(task_id);
+          meta.cb_task_completed = [&, cfored_name](task_id_t task_id) {
+            // calloc will not send TaskCompletionAckReply when task
+            // Complete.
+            // crun task will send TaskStatusChange from Craned,
+//            if (meta.interactive_type == InteractiveTaskType::Crun) {
+//              stream_writer.WriteTaskCompletionAckReply(task_id);
+//            }
             m_ctld_server_->m_mtx_.Lock();
 
             // If cfored disconnected, the cfored_name should have be
@@ -1045,7 +1063,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           } else {
             result = result::fail(submit_result.error());
           }
-          ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
+          ok = stream_writer->WriteTaskIdReply(payload.pid(), result, 0, {});
 
           if (!ok) {
             CRANE_ERROR(

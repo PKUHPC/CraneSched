@@ -62,6 +62,24 @@ std::vector<task_id_t> CranedStub::ExecuteTasks(
   return failed_task_ids;
 }
 
+CraneErr CranedStub::ExecuteProc(
+    const crane::grpc::ExecuteProcRequest &request) {
+  using crane::grpc::ExecuteProcReply;
+
+  ClientContext context;
+  Status status;
+  ExecuteProcReply reply;
+
+  status = m_stub_->ExecuteProc(&context,request,&reply);
+  if (!status.ok()) {
+    CRANE_DEBUG(
+        "ExecuteProc RPC for Node {} returned with status not ok: {}",
+        m_craned_id_, status.error_message());
+    return CraneErr::kRpcFailure;
+  }
+  return CraneErr::kOk;
+}
+
 CraneErr CranedStub::TerminateTasks(const std::vector<task_id_t> &task_ids) {
   using crane::grpc::TerminateTasksReply;
   using crane::grpc::TerminateTasksRequest;
@@ -81,7 +99,10 @@ CraneErr CranedStub::TerminateTasks(const std::vector<task_id_t> &task_ids) {
     return CraneErr::kRpcFailure;
   }
 
-  return CraneErr::kOk;
+  if (reply.ok())
+    return CraneErr::kOk;
+  else
+    return CraneErr::kGenericFailure;
 }
 
 CraneErr CranedStub::TerminateOrphanedTask(task_id_t task_id) {
@@ -292,6 +313,37 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
     }
   }
 
+  return request;
+}
+
+// only for Proc launching
+crane::grpc::ExecuteProcRequest CranedStub::NewExecuteProcRequest(
+    std::unique_ptr<TaskInCtld>& task_running,
+    std::unique_ptr<TaskInCtld>& step_submit) {
+  crane::grpc::ExecuteProcRequest request;
+  auto proc_to_d = request.mutable_proc();
+  // Set type
+  proc_to_d->set_type(step_submit->type);
+  proc_to_d->set_task_id(task_running->TaskId());
+  proc_to_d->mutable_env()->insert(step_submit->env.begin(), step_submit->env.end());
+
+  proc_to_d->set_cwd(step_submit->cwd);
+  proc_to_d->set_get_user_env(step_submit->get_user_env);
+
+  if (step_submit->type == crane::grpc::Batch) {
+    auto &meta_in_ctld = std::get<BatchMetaInTask>(step_submit->meta);
+    auto *mutable_meta = proc_to_d->mutable_batch_meta();
+    mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
+    mutable_meta->set_error_file_pattern(meta_in_ctld.error_file_pattern);
+    mutable_meta->set_sh_script(meta_in_ctld.sh_script);
+  } else {
+    auto &meta_in_ctld = std::get<InteractiveMetaInTask>(step_submit->meta);
+    auto *mutable_meta = proc_to_d->mutable_interactive_meta();
+    mutable_meta->set_cfored_name(meta_in_ctld.cfored_name);
+    mutable_meta->set_sh_script(meta_in_ctld.sh_script);
+    mutable_meta->set_term_env(meta_in_ctld.term_env);
+    mutable_meta->set_interactive_type(meta_in_ctld.interactive_type);
+  }
   return request;
 }
 
