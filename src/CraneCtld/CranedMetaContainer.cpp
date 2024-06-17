@@ -402,11 +402,13 @@ CranedMetaContainerSimpleImpl::UpdatePartition(PartitionMeta&& new_partition) {
   if (!new_partition.partition_global_meta.allow_accounts.empty()) {
     part_global_meta.allow_accounts =
         new_partition.partition_global_meta.allow_accounts;
+    part_global_meta.deny_accounts.clear();
   }
 
   if (!new_partition.partition_global_meta.deny_accounts.empty()) {
     part_global_meta.deny_accounts =
         new_partition.partition_global_meta.deny_accounts;
+    part_global_meta.allow_accounts.clear();
   }
 
   if (new_partition.partition_global_meta.priority >= 0) {
@@ -505,6 +507,13 @@ void CranedMetaContainerSimpleImpl::RegisterPhysicalResource(
       cpu_t(cpu);
   craned_ptr->static_meta.res_physical.allocatable_resource.memory_bytes =
       memory_bytes;
+
+  if (cpu_t(cpu) < craned_ptr->res_total.allocatable_resource.cpu_count ||
+      memory_bytes < craned_ptr->res_total.allocatable_resource.memory_bytes) {
+    craned_ptr->drain = true;
+    craned_ptr->status = crane::grpc::CRANE_DRAIN;
+    craned_ptr->state_reason = "Invalid resource num";
+  }
 }
 
 void CranedMetaContainerSimpleImpl::WaitJobsTerminatedCb_() {

@@ -716,6 +716,18 @@ AccountManager::Result AccountManager::BlockUser(const std::string& name,
 bool AccountManager::CheckUserPermissionToPartition(
     const std::string& name, const std::string& account,
     const std::string& partition) {
+  {
+    auto part_meta = g_meta_container->GetPartitionMetasPtr(partition);
+
+    if (part_meta->partition_global_meta.deny_accounts.contains(account)) {
+      return false;
+    } else if (!part_meta->partition_global_meta.allow_accounts.empty() &&
+               !part_meta->partition_global_meta.allow_accounts.contains(
+                   account)) {
+      return false;
+    }
+  }
+
   UserMutexSharedPtr user_share_ptr = GetExistedUserInfo(name);
   if (!user_share_ptr) {
     return false;

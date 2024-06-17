@@ -199,7 +199,7 @@ struct PartitionGlobalMeta {
   uint32_t alive_craned_cnt = 0;
   uint32_t priority;
 
-  std::unordered_set<std::string> allow_accounts;  // TODO
+  std::unordered_set<std::string> allow_accounts;
   std::unordered_set<std::string> deny_accounts;
 };
 

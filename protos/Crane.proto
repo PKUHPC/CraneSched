@@ -733,7 +733,7 @@ service CraneCtld {
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
-  rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
+  rpc ModifyNodeState(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
 
   rpc AddPartition(AddPartitionRequest) returns (AddPartitionReply);
   rpc AddNode(AddNodeRequest) returns (AddNodeReply);

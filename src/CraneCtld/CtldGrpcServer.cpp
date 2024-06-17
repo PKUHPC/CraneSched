@@ -208,7 +208,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyNode(
+grpc::Status CraneCtldServiceImpl::ModifyNodeState(
     grpc::ServerContext *context,
     const crane::grpc::ModifyCranedStateRequest *request,
     crane::grpc::ModifyCranedStateReply *response) {
@@ -583,14 +583,21 @@ grpc::Status CraneCtldServiceImpl::UpdatePartition(
   part_global_meta.name = new_partition.name();
   part_global_meta.priority = new_partition.priority();
 
-  std::list<std::string> nodes;
-  util::ParseHostList(new_partition.hostlist(), &nodes);
-  for (const auto &node : nodes) {
-    partition.craned_ids.emplace(node);
-  }
+  if (!new_partition.hostlist().empty()) {
+    std::list<std::string> nodes;
+    if (!util::ParseHostList(new_partition.hostlist(), &nodes)) {
+      response->set_ok(false);
+      response->set_reason("Illegal node name string format.");
+      return grpc::Status::OK;
+    }
+    for (const auto &node : nodes) {
+      partition.craned_ids.emplace(node);
+    }
 
-  part_global_meta.node_cnt = nodes.size();
-  part_global_meta.nodelist_str = util::HostNameListToStr(partition.craned_ids);
+    part_global_meta.node_cnt = nodes.size();
+    part_global_meta.nodelist_str =
+        util::HostNameListToStr(partition.craned_ids);
+  }
 
   if (new_partition.allow_list_size() > 0 &&
       new_partition.deny_list_size() > 0) {
@@ -640,7 +647,7 @@ grpc::Status CraneCtldServiceImpl::UpdateNode(
   }
 
   if (!request->has_node() || request->node().hostname().empty() ||
-      request->node().cpu() == 0.0 || request->node().real_mem() == 0) {
+      request->node().cpu() == 0.0 && request->node().real_mem() == 0) {
     response->set_ok(false);
     response->set_reason("The parameter is empty.");
     return grpc::Status::OK;
@@ -1465,21 +1472,23 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     }
   }
 
-  if (!g_account_manager->CheckUserPermissionToPartition(
-          task->Username(), task->account, task->partition_id)) {
-    return result::fail(
-        fmt::format("User '{}' doesn't have permission to use partition '{}' "
-                    "when using account '{}'",
-                    task->Username(), task->partition_id, task->account));
-  }
-
-  auto enable_res =
-      g_account_manager->CheckEnableState(task->account, task->Username());
-  if (enable_res.has_error()) {
-    return result::fail(enable_res.error());
-  }
-
   err = g_task_scheduler->AcquireTaskAttributes(task.get());
+
+  if (err == CraneErr::kOk) {
+    if (!g_account_manager->CheckUserPermissionToPartition(
+            task->Username(), task->account, task->partition_id)) {
+      return result::fail(
+          fmt::format("User '{}' doesn't have permission to use partition '{}' "
+                      "when using account '{}'",
+                      task->Username(), task->partition_id, task->account));
+    }
+
+    auto enable_res =
+        g_account_manager->CheckEnableState(task->account, task->Username());
+    if (enable_res.has_error()) {
+      return result::fail(enable_res.error());
+    }
+  }
 
   if (err == CraneErr::kOk)
     err = g_task_scheduler->CheckTaskValidity(task.get());
