@@ -428,7 +428,7 @@ bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
 bool CgroupManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
   Cgroup *cg;
   bool ok = AllocateAndGetCgroup(task_id, &cg);
-  if (cg == nullptr) return false;
+  if (!ok) return false;
 
   return cg->MigrateProcIn(pid);
 }

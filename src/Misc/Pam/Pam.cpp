@@ -152,8 +152,10 @@ extern "C" {
     ok = GrpcMigrateSshProcToCgroup(pamh, getpid(), task_id);
     if (ok)
       return PAM_SUCCESS;
-    else
+    else {
+      PamSendMsgToClient(pamh, "Rejected by CraneD PAM Module.");
       return PAM_SESSION_ERR;
+    }
   } else {
     // If auth result is false, it indicates that system administrator allow a
     // user with no task running to log in, and then we just let it pass.
