@@ -83,6 +83,8 @@ struct Config {
     std::string ServerCertContent;
     std::string ServerKeyFilePath;
     std::string ServerKeyContent;
+    std::string CaCertFilePath;
+    std::string CaCertContent;
   };
 
   struct Priority {

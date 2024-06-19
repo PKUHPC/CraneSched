@@ -203,9 +203,9 @@ void ParseConfig(int argc, char** argv) {
         g_config.ControlMachine = config["ControlMachine"].as<std::string>();
       }
 
-      if (config["CraneCtldListenPort"])
+      if (config["PrivateServiceListenPort"])
         g_config.CraneCtldListenPort =
-            config["CraneCtldListenPort"].as<std::string>();
+            config["PrivateServiceListenPort"].as<std::string>();
       else
         g_config.CraneCtldListenPort = kCtldDefaultPort;
 

@@ -114,13 +114,18 @@ void ParseConfig(int argc, char** argv) {
         g_config.PublicListenConf.CraneCtldListenAddr = "0.0.0.0";
       }
 
-      if (config["CraneCtldListenPort"]) {
+      if (config["PrivateServiceListenPort"]) {
         g_config.PrivateListenConf.CraneCtldListenPort =
-            config["CraneCtldListenPort"].as<std::string>();
-        g_config.PublicListenConf.CraneCtldListenPort =
-            config["CraneCtldListenPort"].as<std::string>();
+            config["PrivateServiceListenPort"].as<std::string>();
       } else {
         g_config.PrivateListenConf.CraneCtldListenPort = kCtldDefaultPort;
+        
+      }
+
+      if (config["PublicServiceListenPort"]) {
+        g_config.PublicListenConf.CraneCtldListenPort =
+            config["PublicServiceListenPort"].as<std::string>();
+      } else {
         g_config.PublicListenConf.CraneCtldListenPort = kCtldDefaultPort;
       }
 
@@ -130,35 +135,49 @@ void ParseConfig(int argc, char** argv) {
       if (config["UsePrivateTls"] && config["UsePrivateTls"].as<bool>()) {
         g_config.PrivateListenConf.UseTls = true;
 
-      if (config["UsePublicTls"] && config["UsePublicTls"].as<bool>()) {
-        g_config.PublicListenConf.UseTls = true;
+        if (config["PrivateDomainSuffix"])
+          g_config.PrivateListenConf.DomainSuffix =
+              config["PrivateDomainSuffix"].as<std::string>();
 
-      if (config["PrivateDomainSuffix"])
-        g_config.PrivateListenConf.DomainSuffix =
-            config["PrivateDomainSuffix"].as<std::string>();
-      
-      if (config["PublicDomainSuffix"])
-        g_config.PublicListenConf.DomainSuffix =
-            config["PublicDomainSuffix"].as<std::string>();
+        if (config["PrivateServerCertFilePath"]) {
+          g_config.PrivateListenConf.ServerCertFilePath =
+              config["PrivateServerCertFilePath"].as<std::string>();
 
-      if (config["PrivateServerCertFilePath"]) {
-        g_config.PrivateListenConf.ServerCertFilePath =
-            config["PrivateServerCertFilePath"].as<std::string>();
-
-        try {
-          g_config.PrivateListenConf.ServerCertContent = util::ReadFileIntoString(
-              g_config.PrivateListenConf.ServerCertFilePath);
-        } catch (const std::exception& e) {
-          CRANE_ERROR("Read cert file error: {}", e.what());
-          std::exit(1);
-        }
-        if (g_config.PrivateListenConf.ServerCertContent.empty()) {
-          CRANE_ERROR(
-              "UsePrivateTls is true, but the file specified by PrivateServerCertFilePath "
-              "is empty");
-        }
+          try {
+            g_config.PrivateListenConf.ServerCertContent = util::ReadFileIntoString(
+                g_config.PrivateListenConf.ServerCertFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read private server cert file error: {}", e.what());
+            std::exit(1);
+          }
+          if (g_config.PrivateListenConf.ServerCertContent.empty()) {
+            CRANE_ERROR(
+                "UsePrivateTls is true, but the file specified by PrivateServerCertFilePath "
+                "is empty");
+          }
         } else {
           CRANE_ERROR("UsePrivateTls is true, but PrivateServerCertFilePath is empty");
+          std::exit(1);
+        }
+
+        if (config["PrivateCaCertFilePath"]) {
+          g_config.PrivateListenConf.CaCertFilePath =
+              config["PrivateCaCertFilePath"].as<std::string>();
+
+          try {
+            g_config.PrivateListenConf.CaCertContent = util::ReadFileIntoString(
+                g_config.PrivateListenConf.CaCertFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read private CA cert file error: {}", e.what());
+            std::exit(1);
+          }
+          if (g_config.PrivateListenConf.CaCertContent.empty()) {
+            CRANE_ERROR(
+                "UsePrivateTls is true, but the file specified by PrivateCaCertFilePath "
+                "is empty");
+          }
+        } else {
+          CRANE_ERROR("UsePrivateTls is true, but PrivateCaCertFilePath is empty");
           std::exit(1);
         }
 
@@ -170,7 +189,7 @@ void ParseConfig(int argc, char** argv) {
             g_config.PrivateListenConf.ServerKeyContent =
                 util::ReadFileIntoString(g_config.PrivateListenConf.ServerKeyFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+            CRANE_ERROR("Read private server key file error: {}", e.what());
             std::exit(1);
           }
           if (g_config.PrivateListenConf.ServerKeyContent.empty()) {
@@ -186,24 +205,52 @@ void ParseConfig(int argc, char** argv) {
         g_config.PrivateListenConf.UseTls = false;
       }
 
-      if (config["PublicServerCertFilePath"]) {
-        g_config.PublicListenConf.ServerCertFilePath =
-            config["PublicServerCertFilePath"].as<std::string>();
+      if (config["UsePublicTls"] && config["UsePublicTls"].as<bool>()) {
+        g_config.PublicListenConf.UseTls = true;
+      
+        if (config["PublicDomainSuffix"])
+          g_config.PublicListenConf.DomainSuffix =
+              config["PublicDomainSuffix"].as<std::string>();
 
-        try {
-          g_config.PublicListenConf.ServerCertContent = util::ReadFileIntoString(
-              g_config.PublicListenConf.ServerCertFilePath);
-        } catch (const std::exception& e) {
-          CRANE_ERROR("Read cert file error: {}", e.what());
-          std::exit(1);
-        }
-        if (g_config.PublicListenConf.ServerCertContent.empty()) {
-          CRANE_ERROR(
-              "UsePublicTls is true, but the file specified by PublicServerCertFilePath "
-              "is empty");
-        }
+        if (config["PublicServerCertFilePath"]) {
+          g_config.PublicListenConf.ServerCertFilePath =
+              config["PublicServerCertFilePath"].as<std::string>();
+
+          try {
+            g_config.PublicListenConf.ServerCertContent = util::ReadFileIntoString(
+                g_config.PublicListenConf.ServerCertFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read public server cert file error: {}", e.what());
+            std::exit(1);
+          }
+          if (g_config.PublicListenConf.ServerCertContent.empty()) {
+            CRANE_ERROR(
+                "UsePublicTls is true, but the file specified by PublicServerCertFilePath "
+                "is empty");
+          }
         } else {
           CRANE_ERROR("UsePublicTls is true, but PublicServerCertFilePath is empty");
+          std::exit(1);
+        }
+
+        if (config["PublicCaCertFilePath"]) {
+          g_config.PublicListenConf.CaCertFilePath =
+              config["PublicCaCertFilePath"].as<std::string>();
+
+          try {
+            g_config.PublicListenConf.CaCertContent = util::ReadFileIntoString(
+                g_config.PublicListenConf.CaCertFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read public CA cert file error: {}", e.what());
+            std::exit(1);
+          }
+          if (g_config.PublicListenConf.CaCertContent.empty()) {
+            CRANE_ERROR(
+                "UsePublicTls is true, but the file specified by PublicCaCertFilePath "
+                "is empty");
+          }
+        } else {
+          CRANE_ERROR("UsePublicTls is true, but PublicCaCertFilePath is empty");
           std::exit(1);
         }
 
@@ -215,7 +262,7 @@ void ParseConfig(int argc, char** argv) {
             g_config.PublicListenConf.ServerKeyContent =
                 util::ReadFileIntoString(g_config.PublicListenConf.ServerKeyFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+            CRANE_ERROR("Read public server key file error: {}", e.what());
             std::exit(1);
           }
           if (g_config.PublicListenConf.ServerKeyContent.empty()) {

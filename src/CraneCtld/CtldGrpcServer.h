@@ -309,7 +309,10 @@ class CtldServer {
   inline static std::mutex s_sigint_mtx;
   inline static std::condition_variable s_sigint_cv;
   static void signal_handler_func(int) { s_sigint_cv.notify_one(); };
-  void SetGrpcBuilder(const Config::CraneCtldListenConf listen_conf, grpc::ServerBuilder *builder);
+  // without CA
+  void SetPrivateGrpcBuilder(const Config::CraneCtldListenConf listen_conf, grpc::ServerBuilder *builder);
+  // with CA
+  void SetPublicGrpcBuilder(const Config::CraneCtldListenConf listen_conf, grpc::ServerBuilder *builder);
 
   friend class CraneCtldPrivateServiceImpl;
   friend class CraneCtldPublicServiceImpl;

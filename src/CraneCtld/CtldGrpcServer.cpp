@@ -386,8 +386,7 @@ grpc::Status CraneCtldPublicServiceImpl::QueryTasksInfo(
 grpc::Status CraneCtldPrivateServiceImpl::QueryTasksInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryTasksInfoRequest *request,
-    crane::grpc::QueryTasksInfoReply *response) {
-  std::cout << "private call Query Tasks" << std::endl;    
+    crane::grpc::QueryTasksInfoReply *response) { 
   return m_ctld_server_->m_public_service_impl_->QueryTasksInfo(context, request, response);
 }
 
@@ -1217,10 +1216,10 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &private_listen_conf,
     builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_GZIP);
   }
 
-  SetGrpcBuilder(private_listen_conf, &builder);
+  SetPrivateGrpcBuilder(private_listen_conf, &builder);
   builder.RegisterService(m_private_service_impl_.get());
 
-  SetGrpcBuilder(public_listen_conf, &builder);
+  SetPublicGrpcBuilder(public_listen_conf, &builder);
   builder.RegisterService(m_public_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
@@ -1228,6 +1227,17 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &private_listen_conf,
     CRANE_ERROR("Cannot start gRPC server!");
     std::exit(1);
   }
+
+  std::string listen_addr_port =
+            fmt::format("{}:{}", public_listen_conf.CraneCtldListenAddr,
+                          public_listen_conf.CraneCtldListenPort);
+  CRANE_INFO("CraneCtldPublic is listening on {} and Tls is {}", listen_addr_port,
+            public_listen_conf.UseTls);
+  listen_addr_port =
+            fmt::format("{}:{}", private_listen_conf.CraneCtldListenAddr,
+                          private_listen_conf.CraneCtldListenPort);
+  CRANE_INFO("CraneCtldPrivate is listening on {} and Tls is {}", listen_addr_port,
+            private_listen_conf.UseTls);
 
   // Avoid the potential deadlock error in underlying absl::mutex
   std::thread sigint_waiting_thread([p_server = m_server_.get()] {
@@ -1337,7 +1347,8 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   }
   return result::fail(CraneErrStr(err));
 }
-void CtldServer::SetGrpcBuilder(const Config::CraneCtldListenConf listen_conf, grpc::ServerBuilder *builder) {
+
+void CtldServer::SetPrivateGrpcBuilder(const Config::CraneCtldListenConf listen_conf, grpc::ServerBuilder *builder) {
   std::string listen_addr_port =
             fmt::format("{}:{}", listen_conf.CraneCtldListenAddr,
                           listen_conf.CraneCtldListenPort);
@@ -1354,7 +1365,7 @@ void CtldServer::SetGrpcBuilder(const Config::CraneCtldListenConf listen_conf, g
     ssl_opts.pem_root_certs = listen_conf.ServerCertContent;
     ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
     ssl_opts.client_certificate_request =
-        GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
+        GRPC_SSL_REQUEST_CLIENT_CERTIFICATE_AND_VERIFY;
 
     builder->AddListeningPort(listen_addr_port,
                              grpc::SslServerCredentials(ssl_opts));
@@ -1362,8 +1373,31 @@ void CtldServer::SetGrpcBuilder(const Config::CraneCtldListenConf listen_conf, g
     builder->AddListeningPort(listen_addr_port,
                              grpc::InsecureServerCredentials());
   }
-  CRANE_INFO("CraneCtld is listening on {} and Tls is {}", listen_addr_port,
-            listen_conf.UseTls);
+}
+
+void CtldServer::SetPublicGrpcBuilder(const Config::CraneCtldListenConf listen_conf, grpc::ServerBuilder *builder) {
+  std::string listen_addr_port =
+            fmt::format("{}:{}", listen_conf.CraneCtldListenAddr,
+                          listen_conf.CraneCtldListenPort);
+  if (listen_conf.UseTls) {
+    grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
+    pem_key_cert_pair.cert_chain = listen_conf.ServerCertContent;
+    pem_key_cert_pair.private_key = listen_conf.ServerKeyContent;
+
+    grpc::SslServerCredentialsOptions ssl_opts;
+    // front-end is exposed to outer environment so CA is needed in 
+    // the connection between front-end/cranectld.
+    ssl_opts.pem_root_certs = listen_conf.CaCertContent;
+    ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
+    ssl_opts.client_certificate_request =
+        GRPC_SSL_REQUEST_CLIENT_CERTIFICATE_AND_VERIFY;
+
+    builder->AddListeningPort(listen_addr_port,
+                             grpc::SslServerCredentials(ssl_opts));
+  } else {
+    builder->AddListeningPort(listen_addr_port,
+                             grpc::InsecureServerCredentials());
+  }
 }
 
 }  // namespace Ctld
