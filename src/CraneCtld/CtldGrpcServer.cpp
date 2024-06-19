@@ -200,7 +200,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     }
   } else {
     response->set_ok(false);
-    response->set_reason(fmt::format("Invalid function."));
+    response->set_reason("Invalid function.");
   }
 
   return grpc::Status::OK;
