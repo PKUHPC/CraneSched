@@ -60,6 +60,8 @@ constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 
+constexpr uint64_t kTaskMinDuration = 10;
+
 struct Config {
   struct Node {
     uint32_t cpu;

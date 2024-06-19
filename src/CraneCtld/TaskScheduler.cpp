@@ -941,6 +941,8 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
 }
 
 CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
+  if (secs <= kTaskMinDuration) return CraneErr::kInvalidParam;
+
   bool found_running{false};
   std::vector<CranedId> craned_ids;
 
@@ -1885,6 +1887,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     // [1,6], [9, inf] | Format: [start_time, duration]
     bool trying = true;
     while (true) {
+      CRANE_ASSERT(res_it != time_avail_res_map.end());
       if (trying) {
         if (task->resources <= res_it->second) {
           trying = false;
@@ -1917,8 +1920,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
         } else {
           trying = true;
           time_segments.emplace_back(expected_start_time, valid_duration);
-          res_it++;
-          continue;
+          if (++res_it == time_avail_res_map.end())
+            break;
+          else
+            continue;
         }
       }
     }
@@ -2415,8 +2420,10 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 }
 
 CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
-  // Check whether the selected partition is able to run this task.
+  if (task->time_limit <= absl::Seconds(kTaskMinDuration))
+    return CraneErr::kInvalidParam;
 
+  // Check whether the selected partition is able to run this task.
   std::unordered_set<std::string> avail_nodes;
   {
     // Preserve lock ordering.
