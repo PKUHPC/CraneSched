@@ -160,27 +160,6 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (config["PrivateCaCertFilePath"]) {
-          g_config.PrivateListenConf.CaCertFilePath =
-              config["PrivateCaCertFilePath"].as<std::string>();
-
-          try {
-            g_config.PrivateListenConf.CaCertContent = util::ReadFileIntoString(
-                g_config.PrivateListenConf.CaCertFilePath);
-          } catch (const std::exception& e) {
-            CRANE_ERROR("Read private CA cert file error: {}", e.what());
-            std::exit(1);
-          }
-          if (g_config.PrivateListenConf.CaCertContent.empty()) {
-            CRANE_ERROR(
-                "UsePrivateTls is true, but the file specified by PrivateCaCertFilePath "
-                "is empty");
-          }
-        } else {
-          CRANE_ERROR("UsePrivateTls is true, but PrivateCaCertFilePath is empty");
-          std::exit(1);
-        }
-
         if (config["PrivateServerKeyFilePath"]) {
           g_config.PrivateListenConf.ServerKeyFilePath =
               config["PrivateServerKeyFilePath"].as<std::string>();

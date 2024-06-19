@@ -6,21 +6,21 @@ ClusterName: pkuhpc_test
 # the ip address of control machine
 CraneCtldListenAddr: 0.0.0.0
 # the port of control machine to listen
-CraneCtldListenPort: 10011
+PrivateServiceListenPort: 10011
+PublicServiceListenPort: 10012
 
 # Private zone tls settings
 UsePrivateTls: false
-PrivateServerCertFilePath: /etc/crane/server.crt
-PrivateServerKeyFilePath: /etc/crane/server.key
-PrivateCaCertFilePath: /etc/crane/ca.crt
-PrivateDomainSuffix: riley.local
+PrivateServerCertFilePath: /etc/crane/private-key/server.crt
+PrivateServerKeyFilePath: /etc/crane/private-key/server.key
+PrivateDomainSuffix: private.crane
 
 # Public zone tls settings
 UsePublicTls: false
-PublicServerCertFilePath: /etc/crane/server.crt
-PublicServerKeyFilePath: /etc/crane/server.key
-PublicCaCertFilePath: /etc/crane/ca.crt
-PublicDomainSuffix: riley.local
+PublicServerCertFilePath: /etc/crane/public-key/server.crt
+PublicServerKeyFilePath: /etc/crane/public-key/server.key
+PublicCaCertFilePath: /etc/crane/public-key/ca.crt
+PublicDomainSuffix: public.crane
 
 # Other configurations to be used
 DbConfigPath: /etc/crane/database.yaml
