@@ -172,6 +172,10 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       response->set_reason(
           fmt::format("Task #{} was not found in running or pending queue.",
                       request->task_id()));
+    } else if (err == CraneErr::kInvalidParam) {
+      response->set_ok(false);
+      response->set_reason(fmt::format(
+          "Time limit of a task must be greater than {}s.", kTaskMinDuration));
     } else {
       response->set_ok(false);
       response->set_reason(
@@ -196,8 +200,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     }
   } else {
     response->set_ok(false);
-    response->set_reason(
-        fmt::format("Failed to change priority: {}.", CraneErrStr(err)));
+    response->set_reason("Invalid function.");
   }
 
   return grpc::Status::OK;

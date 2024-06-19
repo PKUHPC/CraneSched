@@ -608,12 +608,12 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 
       // Communication failure caused by process crash or grpc error.
       // Since now the parent cannot ask the child
-      // process to commit suicide, return here, trigger a manual
-      // TaskStatusChange, and reap the child process when releasing its cgroup.
-      // Note: if process dies due to crash, a double TaskStatusChange might be
-      // triggered!
+      // process to commit suicide, kill child process here and just return.
+      // The child process will be reaped in SIGCHLD handler and
+      // thus only ONE TaskStatusChange will be triggered!
       instance->err_before_exec = CraneErr::kProtobufError;
-      return CraneErr::kProtobufError;
+      KillProcessInstance_(process.get(), SIGKILL);
+      return CraneErr::kOk;
     }
 
     ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream, nullptr);
@@ -624,7 +624,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 
       // See comments above.
       instance->err_before_exec = CraneErr::kProtobufError;
-      return CraneErr::kProtobufError;
+      KillProcessInstance_(process.get(), SIGKILL);
+      return CraneErr::kOk;
     }
 
     close(ctrl_fd);
@@ -641,7 +642,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 
       // See comments above.
       instance->err_before_exec = CraneErr::kProtobufError;
-      return CraneErr::kProtobufError;
+      KillProcessInstance_(process.get(), SIGKILL);
     }
 
     // See comments above.
@@ -870,8 +871,13 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     TaskInstance* instance = popped_instance.get();
     task_id_t task_id = instance->task.task_id();
 
-    auto [iter, _] =
+    auto [iter, ok] =
         this_->m_task_map_.emplace(task_id, std::move(popped_instance));
+    if (!ok) {
+      CRANE_ERROR("Duplicated ExecuteTask request for task #{}. Ignore it.",
+                  task_id);
+      continue;
+    }
 
     // Add a timer to limit the execution time of a task.
     // Note: event_new and event_add in this function is not thread safe,
