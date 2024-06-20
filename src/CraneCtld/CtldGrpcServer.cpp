@@ -1081,6 +1081,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
     case StreamState::kCleanData: {
       CRANE_INFO("Cfored {} disconnected. Cleaning its data...", cfored_name);
+      stream_writer.Invalidate();
       m_ctld_server_->m_mtx_.Lock();
 
       auto const &running_task_set =
