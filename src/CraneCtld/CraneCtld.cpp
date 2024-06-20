@@ -43,14 +43,26 @@ void ParseConfig(int argc, char** argv) {
       cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
       ("D,db-config", "Path to DB configuration file",
        cxxopts::value<std::string>()->default_value(kDefaultDbConfigPath))
-      ("l,listen", "listening address",
+      ("l,listen", "Listening address, format: <IP>:<port>",
       cxxopts::value<std::string>()->default_value("0.0.0.0"))
-      ("p,port", "listening port",
+      ("p,port", "Listening port, format: <IP>:<port>",
       cxxopts::value<std::string>()->default_value(kCtldDefaultPort))
+      ("h,help", "Display help for CraneCtld")
       ;
   // clang-format on
 
-  auto parsed_args = options.parse(argc, argv);
+  cxxopts::ParseResult parsed_args;
+  try {
+    parsed_args = options.parse(argc, argv);
+  } catch (cxxopts::OptionException& e) {
+    CRANE_ERROR("{}\n{}", e.what(), options.help());
+    std::exit(1);
+  }
+
+  if (parsed_args.count("help") > 0) {
+    fmt::print("{}\n", options.help());
+    std::exit(0);
+  }
 
   std::string config_path = parsed_args["config"].as<std::string>();
   std::string db_config_path = parsed_args["db-config"].as<std::string>();
