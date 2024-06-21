@@ -117,6 +117,8 @@ void CforedClient::AsyncSendRecvThread_() {
     // thus a context switch of state machine.
     if (next_status == grpc::CompletionQueue::TIMEOUT) {
       if (m_stopped_) {
+        CRANE_TRACE("TIMEOUT with m_stopped_=true.");
+
         // No need to switch to Unregistering state if already switched.
         if (state == State::Unregistering) continue;
         // Wait for forwarding thread to drain output queue and stop.
@@ -212,12 +214,16 @@ void CforedClient::AsyncSendRecvThread_() {
       const std::string& msg = reply.payload_task_input_req().msg();
 
       m_mtx_.Lock();
-      if (m_task_fwd_meta_map_.contains(task_id)) {
-        m_task_fwd_meta_map_[task_id].input_cb(msg);
+      auto fwd_meta_it = m_task_fwd_meta_map_.find(task_id);
+      if (fwd_meta_it != m_task_fwd_meta_map_.end()) {
+        TaskFwdMeta& meta = fwd_meta_it->second;
+
+        if (!meta.input_stopped) meta.input_stopped = !meta.input_cb(msg);
       } else {
         CRANE_ERROR("Cfored {} trying to send msg to unknown task #{}",
                     m_cfored_name_, task_id);
       }
+
       m_mtx_.Unlock();
 
       reply.Clear();
@@ -253,7 +259,7 @@ void CforedClient::AsyncSendRecvThread_() {
 }
 
 void CforedClient::InitTaskFwdAndSetInputCb(
-    task_id_t task_id, std::function<void(const std::string&)> task_input_cb) {
+    task_id_t task_id, std::function<bool(const std::string&)> task_input_cb) {
   absl::MutexLock lock(&m_mtx_);
   m_task_fwd_meta_map_[task_id].input_cb = std::move(task_input_cb);
 }
@@ -326,8 +332,12 @@ void CforedManager::EvLoopThread_(const std::shared_ptr<uvw::loop>& uvw_loop) {
 }
 
 void CforedManager::RegisterIOForward(std::string const& cfored,
-                                      task_id_t task_id, int fd) {
-  RegisterElem elem{.cfored = cfored, .task_id = task_id, .fd = fd};
+                                      task_id_t task_id, int in_fd,
+                                      int out_fd) {
+  RegisterElem elem{.cfored = cfored,
+                    .task_id = task_id,
+                    .in_fd = in_fd,
+                    .out_fd = out_fd};
   std::promise<bool> done;
   std::future<bool> done_fut = done.get_future();
 
@@ -351,22 +361,23 @@ void CforedManager::RegisterCb_() {
     }
 
     m_cfored_client_map_[elem.cfored]->InitTaskFwdAndSetInputCb(
-        elem.task_id, [fd = elem.fd](const std::string& msg) {
+        elem.task_id, [fd = elem.in_fd](const std::string& msg) -> bool {
           ssize_t sz_sent = 0, sz_written;
           while (sz_sent != msg.size()) {
             sz_written = write(fd, msg.c_str() + sz_sent, msg.size() - sz_sent);
             if (sz_written < 0) {
               CRANE_ERROR("Pipe to Crun task was broken.");
-              return;
+              return false;
             }
 
             sz_sent += sz_written;
           }
+          return true;
         });
 
-    CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.fd,
+    CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.out_fd,
                 elem.task_id);
-    auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.fd);
+    auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.out_fd);
     poll_handle->on<uvw::poll_event>([this, elem = std::move(elem)](
                                          const uvw::poll_event&,
                                          uvw::poll_handle& h) {
@@ -375,11 +386,12 @@ void CforedManager::RegisterCb_() {
       constexpr int MAX_BUF_SIZE = 4096;
       char buf[MAX_BUF_SIZE];
 
-      auto ret = read(elem.fd, buf, MAX_BUF_SIZE);
+      auto ret = read(elem.out_fd, buf, MAX_BUF_SIZE);
       if (ret == 0) {
         CRANE_TRACE("Task #{} to cfored {} finished its output.", elem.task_id,
                     elem.cfored);
         h.close();
+        close(elem.out_fd);
 
         bool ok_to_free =
             m_cfored_client_map_[elem.cfored]->TaskOutputFinish(elem.task_id);
