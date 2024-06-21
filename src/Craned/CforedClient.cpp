@@ -352,9 +352,16 @@ void CforedManager::RegisterCb_() {
 
     m_cfored_client_map_[elem.cfored]->InitTaskFwdAndSetInputCb(
         elem.task_id, [fd = elem.fd](const std::string& msg) {
-          ssize_t sz_sent = 0;
-          while (sz_sent != msg.size())
-            sz_sent += write(fd, msg.c_str() + sz_sent, msg.size() - sz_sent);
+          ssize_t sz_sent = 0, sz_written;
+          while (sz_sent != msg.size()) {
+            sz_written = write(fd, msg.c_str() + sz_sent, msg.size() - sz_sent);
+            if (sz_written < 0) {
+              CRANE_ERROR("Pipe to Crun task was broken.");
+              return;
+            }
+
+            sz_sent += sz_written;
+          }
         });
 
     CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.fd,
