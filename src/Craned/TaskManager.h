@@ -147,7 +147,8 @@ struct BatchMetaInTaskInstance : MetaInTaskInstance {
 };
 
 struct CrunMetaInTaskInstance : MetaInTaskInstance {
-  int msg_forward_fd;
+  int proc_in_fd;
+  int proc_out_fd;
   ~CrunMetaInTaskInstance() override = default;
 };
 
@@ -170,7 +171,7 @@ struct TaskInstance {
 
     if (this->task.type() == crane::grpc::Interactive &&
         this->task.interactive_meta().interactive_type() == crane::grpc::Crun) {
-      close(dynamic_cast<CrunMetaInTaskInstance*>(meta.get())->msg_forward_fd);
+      close(dynamic_cast<CrunMetaInTaskInstance*>(meta.get())->proc_in_fd);
     }
   }
 

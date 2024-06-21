@@ -1004,16 +1004,10 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
           meta.cb_task_completed = [this, i_type, cfored_name,
                                     writer_weak_ptr](task_id_t task_id) {
-            // calloc will not send TaskCompletionAckReply when task
-            // Complete.
-            // crun task will send TaskStatusChange from Craned,
-            if (i_type == InteractiveTaskType::Crun) {
-              // Todo: Remove this
-              CRANE_TRACE("Sending TaskCompletionAckReply in task_completed",
-                          task_id);
-              if (auto writer = writer_weak_ptr.lock(); writer)
-                writer->WriteTaskCompletionAckReply(task_id);
-            }
+            CRANE_TRACE("Sending TaskCompletionAckReply in task_completed",
+                        task_id);
+            if (auto writer = writer_weak_ptr.lock(); writer)
+              writer->WriteTaskCompletionAckReply(task_id);
             m_ctld_server_->m_mtx_.Lock();
 
             // If cfored disconnected, the cfored_name should have be
@@ -1057,15 +1051,11 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
         case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
           auto const &payload = cfored_request.payload_task_complete_req();
+          CRANE_TRACE("Recv TaskCompletionReq of Task #{}", payload.task_id());
 
-          g_task_scheduler->TerminateRunningTask(payload.task_id());
-
-          if (payload.interactive_type() != InteractiveTaskType::Crun) {
-            ok = stream_writer->WriteTaskCompletionAckReply(payload.task_id());
-          }
-          if (!ok) {
-            state = StreamState::kCleanData;
-          }
+          if (g_task_scheduler->TerminatePendingOrRunningTask(
+                  payload.task_id()) != CraneErr::kOk)
+            CRANE_WARN("TaskCompletionReq error: Not found!");
         } break;
 
         case StreamCforedRequest::CFORED_GRACEFUL_EXIT: {
