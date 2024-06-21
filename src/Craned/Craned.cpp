@@ -43,14 +43,15 @@ void ParseConfig(int argc, char** argv) {
   options.add_options()
       ("C,config", "Path to configuration file",
       cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
-      ("l,listen", "Listen address format: <IP>:<port>",
+      ("l,listen", "Listening address, format: <IP>:<port>",
        cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
-      ("s,server-address", "CraneCtld address format: <IP>:<port>",
+      ("s,server-address", "CraneCtld address, format: <IP>:<port>",
        cxxopts::value<std::string>())
-      ("L,log-file", "File path of craned log file",
-       cxxopts::value<std::string>()->default_value(kDefaultCranedLogPath))
-      ("D,debug-level", "<trace|debug|info|warn|error>", cxxopts::value<std::string>()->default_value("info"))
-      ("h,help", "Show help")
+      ("L,log-file", "Path to Craned log file",
+       cxxopts::value<std::string>()->default_value(fmt::format("{}{}",kDefaultCraneBaseDir, kDefaultCranedLogPath)))
+      ("D,debug-level", "Logging level of Craned, format: <trace|debug|info|warn|error>", 
+       cxxopts::value<std::string>()->default_value("info"))
+      ("h,help", "Display help for Craned")
       ;
   // clang-format on
 
@@ -64,7 +65,7 @@ void ParseConfig(int argc, char** argv) {
 
   if (parsed_args.count("help") > 0) {
     fmt::print("{}\n", options.help());
-    std::exit(1);
+    std::exit(0);
   }
 
   std::string config_path = parsed_args["config"].as<std::string>();
@@ -77,13 +78,18 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.CraneBaseDir = kDefaultCraneBaseDir;
 
-      if (config["CranedLogFile"])
+      if (parsed_args.count("log-file"))
+        g_config.CranedLogFile = parsed_args["log-file"].as<std::string>();
+      else if (config["CranedLogFile"])
         g_config.CranedLogFile =
             g_config.CraneBaseDir + config["CranedLogFile"].as<std::string>();
       else
         g_config.CranedLogFile = g_config.CraneBaseDir + kDefaultCranedLogPath;
 
-      if (config["CranedDebugLevel"])
+      if (parsed_args.count("debug-level"))
+        g_config.CranedDebugLevel =
+            parsed_args["debug-level"].as<std::string>();
+      else if (config["CranedDebugLevel"])
         g_config.CranedDebugLevel =
             config["CranedDebugLevel"].as<std::string>();
       else
@@ -336,10 +342,6 @@ void ParseConfig(int argc, char** argv) {
     CRANE_CRITICAL("Config file '{}' not existed", config_path);
     std::exit(1);
   }
-  // Todo: Check static level setting.
-  if (parsed_args.count("debug-level")) {
-    g_config.CranedDebugLevel = parsed_args["debug-level"].as<std::string>();
-  }
 
   if (parsed_args.count("listen")) {
     g_config.ListenConf.CranedListenAddr =
@@ -357,14 +359,6 @@ void ParseConfig(int argc, char** argv) {
     }
   } else {
     g_config.ControlMachine = parsed_args["server-address"].as<std::string>();
-  }
-
-  if (parsed_args.count("debug-level")) {
-    g_config.CranedDebugLevel = parsed_args["debug-level"].as<std::string>();
-  }
-
-  if (parsed_args.count("log-file")) {
-    g_config.CranedLogFile = parsed_args["log-file"].as<std::string>();
   }
 
   // Check the format of CranedListen
