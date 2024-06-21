@@ -204,7 +204,7 @@ void CforedClient::AsyncSendRecvThread_() {
 
       CRANE_ASSERT(tag == Tag::Read);
       if (reply.type() != StreamCforedTaskIOReply::CRANED_TASK_INPUT) {
-        CRANE_ERROR("Expect TASK_INPUT, but got {}", reply.type());
+        CRANE_ERROR("Expect TASK_INPUT, but got {}", (int)reply.type());
         break;
       }
 
@@ -242,6 +242,8 @@ void CforedClient::AsyncSendRecvThread_() {
       [[fallthrough]];
 
     case State::End:
+      m_stopped_ = true;
+      if (output_clean_thread.joinable()) output_clean_thread.join();
       break;
     }
 

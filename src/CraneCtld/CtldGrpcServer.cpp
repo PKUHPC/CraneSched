@@ -938,7 +938,8 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
   StreamCforedRequest cfored_request;
 
-  CforedStreamWriter stream_writer(stream);
+  auto stream_writer = std::make_shared<CforedStreamWriter>(stream);
+  std::weak_ptr<CforedStreamWriter> writer_weak_ptr(stream_writer);
   std::string cfored_name;
 
   CRANE_TRACE("CforedStream from {} created.", context->peer());
@@ -957,7 +958,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           cfored_name = cfored_request.payload_cfored_reg().cfored_name();
           CRANE_INFO("Cfored {} registered.", cfored_name);
 
-          ok = stream_writer.WriteCforedRegistrationAck({});
+          ok = stream_writer->WriteCforedRegistrationAck({});
           if (ok) {
             state = StreamState::kWaitMsg;
           } else {
@@ -984,29 +985,34 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           task->SetFieldsByTaskToCtld(payload.task());
 
           auto &meta = std::get<InteractiveMetaInTask>(task->meta);
+          auto i_type = meta.interactive_type;
 
           meta.cb_task_res_allocated =
-              [writer = &stream_writer](
-                  task_id_t task_id, std::string const &allocated_craned_regex,
-                  std::list<std::string> const &craned_ids) {
-                writer->WriteTaskResAllocReply(
-                    task_id,
-                    {std::make_pair(allocated_craned_regex, craned_ids)});
+              [writer_weak_ptr](task_id_t task_id,
+                                std::string const &allocated_craned_regex,
+                                std::list<std::string> const &craned_ids) {
+                if (auto writer = writer_weak_ptr.lock(); writer)
+                  writer->WriteTaskResAllocReply(
+                      task_id,
+                      {std::make_pair(allocated_craned_regex, craned_ids)});
               };
 
-          meta.cb_task_cancel = [writer = &stream_writer](task_id_t task_id) {
-            writer->WriteTaskCancelRequest(task_id);
+          meta.cb_task_cancel = [writer_weak_ptr](task_id_t task_id) {
+            if (auto writer = writer_weak_ptr.lock(); writer)
+              writer->WriteTaskCancelRequest(task_id);
           };
 
-          meta.cb_task_completed = [&, cfored_name](task_id_t task_id) {
+          meta.cb_task_completed = [this, i_type, cfored_name,
+                                    writer_weak_ptr](task_id_t task_id) {
             // calloc will not send TaskCompletionAckReply when task
             // Complete.
             // crun task will send TaskStatusChange from Craned,
-            if (meta.interactive_type == InteractiveTaskType::Crun) {
-              // todo: Remove this
+            if (i_type == InteractiveTaskType::Crun) {
+              // Todo: Remove this
               CRANE_TRACE("Sending TaskCompletionAckReply in task_completed",
                           task_id);
-              stream_writer.WriteTaskCompletionAckReply(task_id);
+              if (auto writer = writer_weak_ptr.lock(); writer)
+                writer->WriteTaskCompletionAckReply(task_id);
             }
             m_ctld_server_->m_mtx_.Lock();
 
@@ -1031,7 +1037,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           } else {
             result = result::fail(submit_result.error());
           }
-          ok = stream_writer.WriteTaskIdReply(payload.pid(), result);
+          ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
           if (!ok) {
             CRANE_ERROR(
@@ -1055,7 +1061,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           g_task_scheduler->TerminateRunningTask(payload.task_id());
 
           if (payload.interactive_type() != InteractiveTaskType::Crun) {
-            ok = stream_writer.WriteTaskCompletionAckReply(payload.task_id());
+            ok = stream_writer->WriteTaskCompletionAckReply(payload.task_id());
           }
           if (!ok) {
             state = StreamState::kCleanData;
@@ -1063,8 +1069,8 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
         } break;
 
         case StreamCforedRequest::CFORED_GRACEFUL_EXIT: {
-          stream_writer.WriteCforedGracefulExitAck();
-          stream_writer.Invalidate();
+          stream_writer->WriteCforedGracefulExitAck();
+          stream_writer->Invalidate();
           state = StreamState::kCleanData;
         } break;
 
@@ -1081,7 +1087,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
     case StreamState::kCleanData: {
       CRANE_INFO("Cfored {} disconnected. Cleaning its data...", cfored_name);
-      stream_writer.Invalidate();
+      stream_writer->Invalidate();
       m_ctld_server_->m_mtx_.Lock();
 
       auto const &running_task_set =
