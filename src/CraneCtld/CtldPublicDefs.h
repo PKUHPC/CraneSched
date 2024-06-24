@@ -30,6 +30,10 @@ using task_db_id_t = int64_t;
 
 constexpr uint32_t kTaskScheduleIntervalMs = 1000;
 
+// Clean ReleaseTaskQueue when timeout or exceeding batch num
+constexpr uint32_t kReleaseTaskTimeoutMs = 500;
+constexpr uint32_t kReleaseTaskBatchNum = 1000;
+
 // Clean CancelTaskQueue when timeout or exceeding batch num
 constexpr uint32_t kCancelTaskTimeoutMs = 500;
 constexpr uint32_t kCancelTaskBatchNum = 1000;
@@ -266,6 +270,7 @@ struct TaskInCtld {
 
   bool requeue_if_failed{false};
   bool get_user_env{false};
+  bool held{false};
 
   std::string cmd_line;
   std::unordered_map<std::string, std::string> env;
@@ -464,6 +469,7 @@ struct TaskInCtld {
     qos = val.qos();
 
     get_user_env = val.get_user_env();
+    held = val.held();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {

@@ -190,13 +190,36 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     } else if (err == CraneErr::kNonExistent) {
       response->set_ok(false);
       response->set_reason(
-          fmt::format("Task #{} was not found in running or pending queue.",
+          fmt::format("Task #{} was not found in pending queue.",
                       request->task_id()));
-    } else if (err == CraneErr::kInvalidParam) {
+    } else {
       response->set_ok(false);
       response->set_reason(
-          fmt::format("Task #{} is running, unable to change priority.",
+          fmt::format("Failed to change priority: {}.", CraneErrStr(err)));
+    }
+  } else if (request->attribute() == ModifyTaskRequest::Hold) {
+    auto task_id = request->task_id();
+    auto secs = request->hold_time_seconds();
+    if (request->release_job()) {
+      secs = -1;
+    } else if (!request->manual_hold()) {
+      response->set_ok(false);
+      response->set_reason(
+          "Invalid request parameters: neither hold nor release job.");
+      return grpc::Status::OK;
+    }
+    err = g_task_scheduler->HoldReleaseTaskAsync(task_id, secs).get();
+    if (err == CraneErr::kOk) {
+      response->set_ok(true);
+    } else if (err == CraneErr::kNonExistent) {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Task #{} was not found in pending queue.",
                       request->task_id()));
+    } else {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("Failed to hold/release job: {}.", CraneErrStr(err)));
     }
   } else {
     response->set_ok(false);
