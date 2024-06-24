@@ -1967,6 +1967,16 @@ AccountManager::Result AccountManager::DeleteAccountAllowedPartition_(
     return Result{false, fmt::format("Unknown account '{}'", name)};
   }
 
+  if (std::find(account->allowed_partition.begin(),
+                account->allowed_partition.end(),
+                partition) == account->allowed_partition.end()) {
+    return Result{
+        false,
+        fmt::format(
+            "Partition '{}' not in allowed partition list of account '{}'",
+            partition, name)};
+  }
+
   if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account, partition)) {
     return Result{
         false, fmt::format(
@@ -2000,10 +2010,9 @@ AccountManager::Result AccountManager::DeleteAccountAllowedQos_(
     return Result{false, fmt::format("Unknown account '{}'", name)};
   }
 
-  auto iter = std::find(account->allowed_qos_list.begin(),
-                        account->allowed_qos_list.end(), qos);
-
-  if (iter == account->allowed_qos_list.end()) {
+  if (std::find(account->allowed_qos_list.begin(),
+                account->allowed_qos_list.end(),
+                qos) == account->allowed_qos_list.end()) {
     return Result{
         false, fmt::format("Qos '{}' is not in account '{}''s allowed qos list",
                            qos, name)};
