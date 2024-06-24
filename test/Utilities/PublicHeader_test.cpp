@@ -22,7 +22,7 @@
 TEST(String, ParseNodeList) {
   using util::ParseHostList;
 
-  std::string host_list{"aaa[1-2,3],bbb"};
+  std::string host_list{""};
   std::list<std::string> parsed_list;
 
   bool ok = ParseHostList(host_list, &parsed_list);

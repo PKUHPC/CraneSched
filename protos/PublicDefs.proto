@@ -230,6 +230,10 @@ message PartitionInfo {
   uint64 total_mem = 9;
   uint64 avail_mem = 10;
   uint64 alloc_mem = 11;
+
+  int64 priority = 12;
+  repeated string allow_list = 13;
+  repeated string deny_list = 14;
 }
 
 message CranedInfo {

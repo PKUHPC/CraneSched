@@ -35,6 +35,8 @@ message TaskStatusChangeReply {
 
 message CranedRegisterRequest {
   string craned_id = 1;
+  double cpu = 2;
+  uint64 memory = 3;
 }
 
 message CranedRegisterReply {
@@ -249,6 +251,66 @@ message AddQosRequest {
 }
 
 message AddQosReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message AddPartitionRequest {
+  uint32 uid = 1;
+  PartitionInfo partition = 2;
+}
+
+message AddPartitionReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message AddNodeRequest {
+  uint32 uid = 1;
+  CranedInfo node = 2;
+}
+
+message AddNodeReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message DeletePartitionRequest {
+  uint32 uid = 1;
+  string name = 2;
+}
+
+message DeletePartitionReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message DeleteNodeRequest {
+  uint32 uid = 1;
+  string name = 2;
+}
+
+message DeleteNodeReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message UpdatePartitionRequest {
+  uint32 uid = 1;
+  PartitionInfo partition = 2;
+}
+
+message UpdatePartitionReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message UpdateNodeRequest {
+  uint32 uid = 1;
+  CranedInfo node = 2;
+}
+
+message UpdateNodeReply {
   bool ok = 1;
   string reason = 2;
 }
@@ -671,7 +733,16 @@ service CraneCtld {
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
-  rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
+  rpc ModifyNodeState(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
+
+  rpc AddPartition(AddPartitionRequest) returns (AddPartitionReply);
+  rpc AddNode(AddNodeRequest) returns (AddNodeReply);
+
+  rpc DeletePartition(DeletePartitionRequest) returns (DeletePartitionReply);
+  rpc DeleteNode(DeleteNodeRequest) returns (DeleteNodeReply);
+
+  rpc UpdatePartition(UpdatePartitionRequest) returns (UpdatePartitionReply);
+  rpc UpdateNode(UpdateNodeRequest) returns (UpdateNodeReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);

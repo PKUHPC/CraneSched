@@ -70,6 +70,7 @@
 #include <grpc++/alarm.h>
 #include <grpc++/completion_queue.h>
 #include <grpc++/grpc++.h>
+#include <grpc++/channel.h>
 
 // Ranges-v3
 #include <range/v3/all.hpp>

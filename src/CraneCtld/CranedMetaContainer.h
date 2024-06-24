@@ -18,7 +18,7 @@
 
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
-
+#include "AccountManager.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
@@ -76,7 +76,9 @@ class CranedMetaContainerInterface {
 
   virtual void InitFromConfig(const Config& config) = 0;
 
-  virtual bool CheckCranedAllowed(const std::string& hostname) = 0;
+  virtual bool CheckCranedExisted(const CranedId& hostname) = 0;
+
+  virtual bool CheckPartitionExisted(const PartitionId& name) = 0;
 
   virtual crane::grpc::QueryCranedInfoReply QueryAllCranedInfo() = 0;
 
@@ -112,13 +114,34 @@ class CranedMetaContainerInterface {
   virtual AllPartitionsMetaMapConstPtr GetAllPartitionsMetaMapConstPtr() = 0;
 
   virtual CranedMetaMapConstPtr GetCranedMetaMapConstPtr() = 0;
+
+  virtual result::result<void, std::string> AddPartition(
+      PartitionMeta&& partition) = 0;
+
+  virtual result::result<void, std::string> AddNode(CranedMeta&& node) = 0;
+
+  virtual result::result<void, std::string> DeletePartition(
+      PartitionId name) = 0;
+
+  virtual result::result<void, std::string> DeleteNode(CranedId name) = 0;
+
+  virtual result::result<void, std::string> UpdatePartition(
+      PartitionMeta&& partition) = 0;
+
+  virtual result::result<void, std::string> UpdateNode(CranedMeta&& node) = 0;
+
+  virtual void RegisterPhysicalResource(const CranedId& name, double cpu,
+                                        uint64_t memory_bytes) = 0;
 };
 
 class CranedMetaContainerSimpleImpl final
     : public CranedMetaContainerInterface {
  public:
   CranedMetaContainerSimpleImpl() = default;
-  ~CranedMetaContainerSimpleImpl() override = default;
+  ~CranedMetaContainerSimpleImpl() override {
+    m_thread_stop_ = true;
+    if (m_delete_craned_thread_.joinable()) m_delete_craned_thread_.join();
+  };
 
   void InitFromConfig(const Config& config) override;
 
@@ -152,16 +175,43 @@ class CranedMetaContainerSimpleImpl final
 
   CranedMetaMapConstPtr GetCranedMetaMapConstPtr() override;
 
-  bool CheckCranedAllowed(const std::string& hostname) override {
+  bool CheckCranedExisted(const CranedId& hostname) override {
     return craned_meta_map_.Contains(hostname);
   };
 
-  void MallocResourceFromNode(CranedId node_id, task_id_t task_id,
+  bool CheckPartitionExisted(const PartitionId& name) override {
+    return partition_metas_map_.Contains(name);
+  }
+
+  void MallocResourceFromNode(CranedId crane_id, task_id_t task_id,
                               const Resources& resources) override;
 
   void FreeResourceFromNode(CranedId craned_id, uint32_t task_id) override;
 
+  result::result<void, std::string> AddPartition(
+      PartitionMeta&& partition) override;
+
+  result::result<void, std::string> AddNode(CranedMeta&& node) override;
+
+  result::result<void, std::string> DeletePartition(PartitionId name) override;
+
+  result::result<void, std::string> DeleteNode(CranedId name) override;
+
+  result::result<void, std::string> UpdatePartition(
+      PartitionMeta&& new_partition) override;
+
+  result::result<void, std::string> UpdateNode(CranedMeta&& node) override;
+
+  void RegisterPhysicalResource(const CranedId& name, double cpu,
+                                uint64_t memory_bytes) override;
+
  private:
+  void WaitJobsTerminatedCb_();
+
+  void CleanDeletionQueueCb_();
+
+  void DeleteCranedThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
   // In this part of code, the following lock sequence MUST be held
   // to avoid deadlock:
   // 1. lock elements in partition_metas_map_
@@ -171,10 +221,14 @@ class CranedMetaContainerSimpleImpl final
   CranedMetaAtomicMap craned_meta_map_;
   AllPartitionsMetaAtomicMap partition_metas_map_;
 
-  // A craned node may belong to multiple partitions.
-  // Use this map as a READ-ONLY index, so multi-thread reading is ok.
-  HashMap<CranedId /*craned hostname*/, std::list<PartitionId>>
-      craned_id_part_ids_map_;
+  ConcurrentQueue<CranedId> m_delete_craned_queue_;
+  ConcurrentQueue<CranedId> m_wait_jobs_terminated_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_clean_deletion_queue_handle_;
+  std::shared_ptr<uvw::timer_handle> m_wait_jobs_terminated_handle_;
+
+  std::atomic_bool m_thread_stop_{};
+  std::thread m_delete_craned_thread_;
 };
 
 }  // namespace Ctld

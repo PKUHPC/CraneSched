@@ -16,6 +16,7 @@
 
 #include "AccountManager.h"
 
+#include "CranedMetaContainer.h"
 #include "crane/PasswordEntry.h"
 
 namespace Ctld {
@@ -212,7 +213,7 @@ AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
   } else {  // No parent account
     // Check whether partitions exists
     for (const auto& p : new_account.allowed_partition) {
-      if (!g_config.Partitions.contains(p)) {
+      if (!g_meta_container->CheckPartitionExisted(p)) {
         return Result{false, fmt::format("Partition '{}' does not exist", p)};
       }
     }
@@ -715,6 +716,18 @@ AccountManager::Result AccountManager::BlockUser(const std::string& name,
 bool AccountManager::CheckUserPermissionToPartition(
     const std::string& name, const std::string& account,
     const std::string& partition) {
+  {
+    auto part_meta = g_meta_container->GetPartitionMetasPtr(partition);
+
+    if (part_meta->partition_global_meta.deny_accounts.contains(account)) {
+      return false;
+    } else if (!part_meta->partition_global_meta.allow_accounts.empty() &&
+               !part_meta->partition_global_meta.allow_accounts.contains(
+                   account)) {
+      return false;
+    }
+  }
+
   UserMutexSharedPtr user_share_ptr = GetExistedUserInfo(name);
   if (!user_share_ptr) {
     return false;
@@ -1069,7 +1082,7 @@ AccountManager::Result AccountManager::AddUserAllowedPartition_(
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
 
   // check if new partition existed
-  if (!g_config.Partitions.contains(partition)) {
+  if (!g_meta_container->CheckPartitionExisted(partition)) {
     return Result{false, fmt::format("Partition '{}' not existed", partition)};
   }
   // check if account has access to new partition
@@ -1320,7 +1333,7 @@ AccountManager::Result AccountManager::SetUserAllowedPartition_(
 
   for (const auto& par : partition_vec) {
     // check if partition existed
-    if (!g_config.Partitions.contains(par)) {
+    if (!g_meta_container->CheckPartitionExisted(par)) {
       return Result{false, fmt::format("Partition '{}' not existed", par)};
     }
     // check if account has access to new partition
@@ -1596,7 +1609,7 @@ AccountManager::Result AccountManager::AddAccountAllowedPartition_(
   }
 
   // check if the partition existed
-  if (g_config.Partitions.find(partition) == g_config.Partitions.end()) {
+  if (!g_meta_container->CheckPartitionExisted(partition)) {
     return Result{false, fmt::format("Partition '{}' not existed", partition)};
   }
   // Check if parent account has access to the partition
@@ -1760,7 +1773,7 @@ AccountManager::Result AccountManager::SetAccountAllowedPartition_(
   }
   // check if the partition existed
   for (const auto& p : partition_vec) {
-    if (!g_config.Partitions.contains(p)) {
+    if (!g_meta_container->CheckPartitionExisted(p)) {
       return Result{false, fmt::format("Partition '{}' not existed", p)};
     }
   }
