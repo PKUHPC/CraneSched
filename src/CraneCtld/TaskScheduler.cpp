@@ -1534,11 +1534,11 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_priority(task.cached_priority);
 
     task_it->set_status(task.RuntimeAttr().status());
-    if (!task.RuntimeAttr().craned_ids().empty()) {
+    if (task.RuntimeAttr().status() == crane::grpc::Pending) {
+      task_it->set_reason(task.pending_reason);
+    } else {
       task_it->set_craned_list(
           util::HostNameListToStr(task.RuntimeAttr().craned_ids()));
-    } else {
-      task_it->set_craned_list(task.pending_reason);
     }
   };
 
@@ -2533,10 +2533,13 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
                const std::pair<task_id_t, double>& b) {
               return a.second > b.second;
             });
+
+  // Set the pending reason of the task with the highest priority to "Resource".
+  // FIXME: This is a temporary solution. Move this to start time calc func.
   if (task_priority_vec.size() >= 1) {
     auto task_iter = pending_task_map.find(task_priority_vec[0].first);
     if (task_iter != pending_task_map.end()) {
-      task_iter->second->pending_reason = "Resources";
+      task_iter->second->pending_reason = "Resource";
     }
   }
 

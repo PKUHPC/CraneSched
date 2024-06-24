@@ -215,6 +215,7 @@ message TaskInfo {
   double alloc_cpu = 33;
   uint32 exit_code = 34;
   uint32 priority = 35;
+  string reason = 36;
 }
 
 message PartitionInfo {
