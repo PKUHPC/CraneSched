@@ -1039,7 +1039,7 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
 
     task->time_limit = absl::Seconds(secs);
     task->MutableTaskToCtld()->mutable_time_limit()->set_seconds(secs);
-    g_embedded_db_client->UpdateTaskToCtld(0, task->TaskDbId(),
+    g_embedded_db_client->UpdateTaskToCtldIfExists(0, task->TaskDbId(),
                                                   task->TaskToCtld());
   }
 
@@ -1090,7 +1090,7 @@ CraneErr TaskScheduler::HoldReleaseTask(task_id_t task_id, bool hold) {
   crane::grpc::TaskToCtld* task_to_ctld = pd_iter->second->MutableTaskToCtld();
   task_to_ctld->set_held(hold);
   m_pending_task_map_mtx_.Unlock();
-  if (!g_embedded_db_client->UpdateTaskToCtld(
+  if (!g_embedded_db_client->UpdateTaskToCtldIfExists(
           0, pd_iter->second->TaskDbId(), *task_to_ctld)) {
     CRANE_ERROR("Failed to update task #{} to DB", task_id);
   }
