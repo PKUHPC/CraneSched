@@ -1041,7 +1041,7 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
     task->time_limit = absl::Seconds(secs);
     task->MutableTaskToCtld()->mutable_time_limit()->set_seconds(secs);
     g_embedded_db_client->UpdateTaskToCtld(0, task->TaskDbId(),
-                                           task->TaskToCtld());
+                                                  task->TaskToCtld());
   }
 
   // Only send request to the executing node
@@ -1061,49 +1061,39 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
 }
 
 CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priority) {
-  LockGuard pending_guard(&m_pending_task_map_mtx_);
-  LockGuard running_guard(&m_running_task_map_mtx_);
+  m_pending_task_map_mtx_.Lock();
 
   auto pd_iter = m_pending_task_map_.find(task_id);
-  if (pd_iter != m_pending_task_map_.end()) {
-    pd_iter->second->mandated_priority = priority;
-    return CraneErr::kOk;
+  if (pd_iter == m_pending_task_map_.end()) {
+    m_pending_task_map_mtx_.Unlock();
+    CRANE_TRACE("Task #{} not in Pd queue for priority change", task_id);
+    return CraneErr::kNonExistent;
   }
 
-  // Priority change of a running task is not supported.
-  auto rn_iter = m_running_task_map_.find(task_id);
-  if (rn_iter != m_running_task_map_.end()) {
-    CRANE_TRACE("Task #{} is running, unable to change priority", task_id);
-    return CraneErr::kInvalidParam;
-  }
-
-  CRANE_TRACE("Task #{} not in Pd/Rn queue for priority change", task_id);
-  return CraneErr::kNonExistent;
+  pd_iter->second->mandated_priority = priority;
+  m_pending_task_map_mtx_.Unlock();
+  return CraneErr::kOk;
 }
 
 CraneErr TaskScheduler::HoldReleaseTask(task_id_t task_id, bool hold) {
-  LockGuard pending_guard(&m_pending_task_map_mtx_);
-  LockGuard running_guard(&m_running_task_map_mtx_);
+  m_pending_task_map_mtx_.Lock();
 
   auto pd_iter = m_pending_task_map_.find(task_id);
-  if (pd_iter != m_pending_task_map_.end()) {
-    pd_iter->second->held = hold;
-    crane::grpc::TaskToCtld* task_to_ctld =
-        pd_iter->second->MutableTaskToCtld();
-    task_to_ctld->set_held(hold);
-    g_embedded_db_client->UpdateTaskToCtld(0, pd_iter->second->TaskDbId(),
-                                           *task_to_ctld);
-    return CraneErr::kOk;
+  if (pd_iter == m_pending_task_map_.end()) {
+    m_pending_task_map_mtx_.Unlock();
+    CRANE_TRACE("Task #{} not in Pd queue for hold/release", task_id);
+    return CraneErr::kNonExistent;
   }
 
-  auto rn_iter = m_running_task_map_.find(task_id);
-  if (rn_iter != m_running_task_map_.end()) {
-    CRANE_TRACE("Task #{} is running, unable to hold/release", task_id);
-    return CraneErr::kInvalidParam;
+  pd_iter->second->held = hold;
+  crane::grpc::TaskToCtld* task_to_ctld = pd_iter->second->MutableTaskToCtld();
+  task_to_ctld->set_held(hold);
+  m_pending_task_map_mtx_.Unlock();
+  if (!g_embedded_db_client->UpdateTaskToCtld(
+          0, pd_iter->second->TaskDbId(), *task_to_ctld)) {
+    CRANE_ERROR("Failed to update task #{} to DB", task_id);
   }
-
-  CRANE_TRACE("Task #{} not in Pd queue for hold/release", task_id);
-  return CraneErr::kNonExistent;
+  return CraneErr::kOk;
 }
 
 CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
