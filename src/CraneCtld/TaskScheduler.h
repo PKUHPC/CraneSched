@@ -222,7 +222,8 @@ class TaskScheduler {
 
   /// \return The future is set to 0 if task submission is failed.
   /// Otherwise, it is set to newly allocated task id.
-  std::future<task_id_t> SubmitTaskAsync(std::unique_ptr<TaskInCtld> task);
+  std::future<result::result<task_id_t, CraneErr>> SubmitTaskAsync(
+      std::unique_ptr<TaskInCtld> task);
 
   std::future<CraneErr> HoldReleaseTaskAsync(task_id_t task_id, int64_t secs);
 
@@ -289,7 +290,8 @@ class TaskScheduler {
   void PutRecoveredTaskIntoRunningQueueLock_(std::unique_ptr<TaskInCtld> task);
 
   static void PersistAndTransferTasksToMongodb_(
-      std::vector<TaskInCtld*> const& tasks);
+      std::vector<TaskInCtld*> const& tasks,
+      std::vector<TaskInCtld*> const& updated_tasks);
 
   CraneErr TerminateRunningTaskNoLock_(TaskInCtld* task);
 
@@ -366,8 +368,8 @@ class TaskScheduler {
   void SubmitTaskTimerCb_();
 
   std::shared_ptr<uvw::async_handle> m_submit_task_async_handle_;
-  ConcurrentQueue<
-      std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>>
+  ConcurrentQueue<std::pair<std::unique_ptr<TaskInCtld>,
+                            std::promise<result::result<task_id_t, CraneErr>>>>
       m_submit_task_queue_;
   void SubmitTaskAsyncCb_();
 

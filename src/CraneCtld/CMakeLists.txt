@@ -12,6 +12,8 @@ add_executable(cranectld
         CranedMetaContainer.cpp
         AccountManager.h
         AccountManager.cpp
+        DependencyManager.h
+        DependencyManager.cpp
         EmbeddedDbClient.cpp
         EmbeddedDbClient.h
         CraneCtld.cpp

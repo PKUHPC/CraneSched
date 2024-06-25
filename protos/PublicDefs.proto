@@ -80,6 +80,23 @@ enum InteractiveTaskType {
   Crun = 1;
 }
 
+enum DependencyType {
+  AFTER = 0;
+  AFTER_ANY = 1;
+  AFTER_OK = 2;
+  AFTER_NOT_OK = 3;
+}
+
+message DependencyCondition {
+  uint32 task_id = 1;
+  DependencyType type = 2;
+}
+
+message Dependencies{
+  repeated DependencyCondition dependencies = 1;
+  bool depend_all = 2;
+}
+
 message TaskToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -99,6 +116,8 @@ message TaskToCtld {
 
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
+  
+  Dependencies dependencies = 14;
 
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
@@ -139,6 +158,11 @@ message RuntimeAttrOfTask {
   google.protobuf.Timestamp end_time = 17;
 
   bool held = 18;
+  bool dependency_ok = 19;
+  // If this task depends all dependencies, store satisfied dependencies.
+  // If this task depends any dependency, store unsatisfied dependencies.
+  // TaskId must be stored in order to restore.
+  repeated uint32 dependency_ids = 20; 
 }
 
 message TaskToD {
@@ -216,6 +240,7 @@ message TaskInfo {
   string qos = 16;
 
   // Dynamic task information
+  uint32 dependency_state = 29;
   bool held = 30;
   TaskStatus status = 31;
   double alloc_cpu = 32;
