@@ -378,6 +378,30 @@ void ParseConfig(int argc, char** argv) {
           } else
             part.priority = 0;
 
+          if (partition["default_mem_per_cpu"] &&
+              !partition["default_mem_per_cpu"].IsNull()) {
+            part.task_default_mem_per_cpu =
+                partition["default_mem_per_cpu"].as<uint32_t>() * 1024 * 1024;
+          } else
+            part.task_default_mem_per_cpu = 0;
+
+          if (partition["max_mem_per_cpu"] &&
+              !partition["max_mem_per_cpu"].IsNull()) {
+            part.task_max_mem_per_cpu =
+                partition["max_mem_per_cpu"].as<uint32_t>() * 1024 * 1024;
+          } else
+            part.task_max_mem_per_cpu = 0;
+
+          if (part.task_max_mem_per_cpu < part.task_default_mem_per_cpu) {
+            CRANE_ERROR(
+                "The partition {} max_mem_per_cpu {}MB should not"
+                "less than default_mem_per_cpu {}MB",
+                partition["name"].Scalar(),
+                partition["default_mem_per_cpu"].Scalar(),
+                partition["max_mem_per_cpu"].Scalar());
+            std::exit(1);
+          }
+
           part.nodelist_str = nodes;
           std::list<std::string> name_list;
           if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
