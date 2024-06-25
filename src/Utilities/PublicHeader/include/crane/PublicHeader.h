@@ -53,6 +53,10 @@ enum class CraneErr : uint16_t {
   kLibEventError,
   kNoAvailNode,
 
+  kDependencyError,
+  kEmbeddedDbError,
+  kPendingQueueLimit,
+
   __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
 };
 
@@ -147,6 +151,10 @@ constexpr std::array<std::string_view, uint16_t(CraneErr::__ERR_SIZE)>
         "Error when using protobuf",
         "Error when using LibEvent",
         "Not enough nodes which satisfy resource requirements",
+
+        "Dependency task does not exist or has ended",
+        "Error when append task to embedded db queue",
+        "Too much pending tasks",
 };
 
 }
