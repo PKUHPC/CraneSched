@@ -661,6 +661,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     // reap the child process by SIGCHLD after it commits suicide.
     return CraneErr::kOk;
   } else {  // Child proc
+    // Disable SIGABRT backtrace from child processes.
+    signal(SIGABRT, SIG_DFL);
+
     const std::string& cwd = instance->task.cwd();
     rc = chdir(cwd.c_str());
     if (rc == -1) {
