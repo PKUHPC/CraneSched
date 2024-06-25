@@ -1535,7 +1535,7 @@ void TaskScheduler::QueryTasksInRam(
 
     task_it->set_status(task.RuntimeAttr().status());
     if (task.RuntimeAttr().status() == crane::grpc::Pending) {
-      task_it->set_reason(task.pending_reason);
+      task_it->set_pending_reason(task.pending_reason);
     } else {
       task_it->set_craned_list(
           util::HostNameListToStr(task.RuntimeAttr().craned_ids()));
@@ -2516,7 +2516,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
   absl::Time now = absl::Now();
   CalculateFactorBound_(pending_task_map, running_task_map, now);
 
-  std::vector<std::pair<task_id_t, double>> task_priority_vec;
+  std::vector<std::pair<TaskInCtld*, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
     // Admin may manually specify the priority of a task.
     // In this case, MultiFactorPriority will not calculate the priority.
@@ -2525,23 +2525,14 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
                           : task->mandated_priority;
     task->cached_priority = priority;
     task->pending_reason = "Priority";
-    task_priority_vec.emplace_back(task->TaskId(), priority);
+    task_priority_vec.emplace_back(task.get(), priority);
   }
 
   std::sort(task_priority_vec.begin(), task_priority_vec.end(),
-            [](const std::pair<task_id_t, double>& a,
-               const std::pair<task_id_t, double>& b) {
+            [](const std::pair<TaskInCtld*, double>& a,
+               const std::pair<TaskInCtld*, double>& b) {
               return a.second > b.second;
             });
-
-  // Set the pending reason of the task with the highest priority to "Resource".
-  // FIXME: This is a temporary solution. Move this to start time calc func.
-  if (task_priority_vec.size() >= 1) {
-    auto task_iter = pending_task_map.find(task_priority_vec[0].first);
-    if (task_iter != pending_task_map.end()) {
-      task_iter->second->pending_reason = "Resource";
-    }
-  }
 
   size_t id_vec_len = std::min(limit_num, task_priority_vec.size());
 
@@ -2549,7 +2540,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
   task_id_vec.reserve(id_vec_len);
 
   for (int i = 0; i < id_vec_len; i++)
-    task_id_vec.emplace_back(task_priority_vec[i].first);
+    task_id_vec.emplace_back(task_priority_vec[i].first->TaskId());
 
   return task_id_vec;
 }

@@ -52,11 +52,7 @@ class BasicPriority : public IPrioritySorter {
 
     int i = 0;
     for (auto it = pending_task_map.begin(); i < len; i++, it++) {
-      if (i == 0) {
-        it->second->pending_reason = "Resource";
-      } else {
-        it->second->pending_reason = "Priority";
-      }
+      it->second->pending_reason = "Priority";
       task_id_vec.emplace_back(it->first);
     }
 

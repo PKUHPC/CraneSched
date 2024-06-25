@@ -211,11 +211,13 @@ message TaskInfo {
 
   // Dynamic task information
   TaskStatus status = 31;
-  string craned_list = 32;
-  double alloc_cpu = 33;
-  uint32 exit_code = 34;
-  uint32 priority = 35;
-  string reason = 36;
+  double alloc_cpu = 32;
+  uint32 exit_code = 33;
+  uint32 priority = 34;
+  oneof pending_reason_or_craned_list {
+    string pending_reason = 35;
+    string craned_list = 36;
+  }
 }
 
 message PartitionInfo {
