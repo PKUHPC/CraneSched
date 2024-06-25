@@ -389,6 +389,8 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
         // task map.
         CRANE_DEBUG("Cleaning Calloc task #{}...",
                     task_instance->task.task_id());
+
+        // Todo: Performance issue!
         task_instance->cgroup->KillAllProcesses();
 
         auto to_remove_it = task_it++;

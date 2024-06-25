@@ -902,6 +902,8 @@ void TaskScheduler::ScheduleThread_() {
           task->SetExitCode(ExitCode::kExitCodeCgroupError);
           task->SetEndTime(absl::Now());
         }
+        // TODO: Add MovePendingToFinal
+        // TODO: Add crun callback here!
         PersistAndTransferTasksToMongodb_(failed_task_raw_ptrs);
 
         // Failed tasks have been handled properly. Free them explicitly.
