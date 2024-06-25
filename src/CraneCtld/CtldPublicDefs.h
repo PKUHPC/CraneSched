@@ -438,7 +438,6 @@ struct TaskInCtld {
     uint64_t task_mem_per_cpu = uint64_t(allocatable_resource.memory_bytes /
                                          allocatable_resource.cpu_count);
     uint64_t mem_bytes = allocatable_resource.memory_bytes;
-    CRANE_TRACE("init mem:{}", util::ReadableMemory(mem_bytes));
     if (allocatable_resource.memory_bytes == 0) {
       // check for empty mem val
       if (partition_default_mem_per_cpu != 0) {
@@ -457,8 +456,6 @@ struct TaskInCtld {
     }
     allocatable_resource.memory_bytes = mem_bytes;
     allocatable_resource.memory_sw_bytes = mem_bytes;
-    CRANE_TRACE("task cpu:{} mem:{}", allocatable_resource.cpu_count,
-                util::ReadableMemory(mem_bytes));
 
     time_limit = absl::Seconds(val.time_limit().seconds());
 
