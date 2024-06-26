@@ -1534,8 +1534,12 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_priority(task.cached_priority);
 
     task_it->set_status(task.RuntimeAttr().status());
-    task_it->set_craned_list(
-        util::HostNameListToStr(task.RuntimeAttr().craned_ids()));
+    if (task.RuntimeAttr().status() == crane::grpc::Pending) {
+      task_it->set_pending_reason(task.pending_reason);
+    } else {
+      task_it->set_craned_list(
+          util::HostNameListToStr(task.RuntimeAttr().craned_ids()));
+    }
   };
 
   auto task_rng_filter_time = [&](auto& it) {
@@ -2512,7 +2516,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
   absl::Time now = absl::Now();
   CalculateFactorBound_(pending_task_map, running_task_map, now);
 
-  std::vector<std::pair<task_id_t, double>> task_priority_vec;
+  std::vector<std::pair<TaskInCtld*, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
     // Admin may manually specify the priority of a task.
     // In this case, MultiFactorPriority will not calculate the priority.
@@ -2520,12 +2524,13 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
                           ? CalculatePriority_(task.get(), now)
                           : task->mandated_priority;
     task->cached_priority = priority;
-    task_priority_vec.emplace_back(task->TaskId(), priority);
+    task->pending_reason = "Priority";
+    task_priority_vec.emplace_back(task.get(), priority);
   }
 
   std::sort(task_priority_vec.begin(), task_priority_vec.end(),
-            [](const std::pair<task_id_t, double>& a,
-               const std::pair<task_id_t, double>& b) {
+            [](const std::pair<TaskInCtld*, double>& a,
+               const std::pair<TaskInCtld*, double>& b) {
               return a.second > b.second;
             });
 
@@ -2535,7 +2540,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
   task_id_vec.reserve(id_vec_len);
 
   for (int i = 0; i < id_vec_len; i++)
-    task_id_vec.emplace_back(task_priority_vec[i].first);
+    task_id_vec.emplace_back(task_priority_vec[i].first->TaskId());
 
   return task_id_vec;
 }

@@ -325,6 +325,7 @@ struct TaskInCtld {
   uint32_t nodes_alloc;
   std::vector<CranedId> executing_craned_ids;
   std::string allocated_craneds_regex;
+  std::string pending_reason;
 
   double mandated_priority{0.0};
   double cached_priority{0.0};
