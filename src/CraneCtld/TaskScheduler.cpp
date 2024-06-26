@@ -1404,7 +1404,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       CRANE_WARN(
           "Ignoring unknown task id {} in TaskStatusChangeWithReasonAsync.",
           task_id);
-      return;
+      continue;
     }
 
     std::unique_ptr<TaskInCtld>& task = iter->second;
