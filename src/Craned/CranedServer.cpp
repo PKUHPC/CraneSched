@@ -45,7 +45,10 @@ grpc::Status CranedServiceImpl::TerminateTasks(
     grpc::ServerContext *context,
     const crane::grpc::TerminateTasksRequest *request,
     crane::grpc::TerminateTasksReply *response) {
-  for (const auto &id : request->task_id_list())
+  CRANE_TRACE("Receive TerminateTasks for tasks {}",
+              absl::StrJoin(request->task_id_list(), ","));
+
+  for (task_id_t id : request->task_id_list())
     g_task_mgr->TerminateTaskAsync(id);
   response->set_ok(true);
 

@@ -1225,6 +1225,8 @@ void TaskScheduler::CleanCancelQueueCb_() {
   for (auto&& [craned_id, task_ids] : running_task_craned_id_map) {
     g_thread_pool->detach_task(
         [id = craned_id, task_ids_to_cancel = task_ids]() {
+          CRANE_TRACE("Craned {} is going to cancel tasks {}.", id,
+                      absl::StrJoin(task_ids_to_cancel, ","));
           auto stub = g_craned_keeper->GetCranedStub(id);
           if (stub && !stub->Invalid())
             stub->TerminateTasks(task_ids_to_cancel);
