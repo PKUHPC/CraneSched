@@ -1224,7 +1224,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
 
   for (auto&& [craned_id, task_ids] : running_task_craned_id_map) {
     g_thread_pool->detach_task(
-        [id = craned_id, task_ids_to_cancel = std::move(task_ids)]() {
+        [id = craned_id, task_ids_to_cancel = task_ids]() {
           auto stub = g_craned_keeper->GetCranedStub(id);
           if (stub && !stub->Invalid())
             stub->TerminateTasks(task_ids_to_cancel);
