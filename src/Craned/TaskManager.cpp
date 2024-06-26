@@ -1146,7 +1146,7 @@ void TaskManager::EvOnTimerCb_(int, short, void* arg_) {
 void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
-  EvQueueTaskTerminate elem;  // NOLINT(cppcoreguidelines-pro-type-member-init)
+  EvQueueTaskTerminate elem;
   while (this_->m_task_terminate_queue_.try_dequeue(elem)) {
     CRANE_TRACE(
         "Receive TerminateRunningTask Request from internal queue. "
@@ -1178,7 +1178,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
       // following ExecuteTasks and the task will go to the right place as
       // well as the completed queue.
       g_cg_mgr->ReleaseCgroupByTaskIdOnly(elem.task_id);
-      return;
+      continue;
     }
 
     TaskInstance* task_instance = iter->second.get();
