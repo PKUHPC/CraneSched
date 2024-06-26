@@ -2306,8 +2306,6 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
 
       // std::prev can be used without any check here.
       // There will always be one time point (now) before task_end_time.
-      auto task_duration_end_it =
-          std::prev(time_avail_res_map.upper_bound(task_end_time));
 
       if (task_duration_begin_it->first != expected_start_time) {
         // Situation #3 (begin)
@@ -2316,10 +2314,11 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
             expected_start_time, task_duration_begin_it->second);
         CRANE_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
-        CRANE_ASSERT(resources <= inserted_it->second);
-        inserted_it->second -= resources;
-        task_duration_begin_it = std::next(inserted_it);
+        task_duration_begin_it = inserted_it;
       }
+
+      auto task_duration_end_it =
+          std::prev(time_avail_res_map.upper_bound(task_end_time));
 
       // Subtract the required resources within the interval.
       for (auto in_duration_it = task_duration_begin_it;
