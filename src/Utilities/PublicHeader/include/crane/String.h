@@ -70,4 +70,6 @@ std::string HostNameListToStr(T const &host_list)
 
 void SetCurrentThreadName(const std::string &name);
 
+bool ConvertStringToInt64(const std::string &s, int64_t *val);
+
 }  // namespace util

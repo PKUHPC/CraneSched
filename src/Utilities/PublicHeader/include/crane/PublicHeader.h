@@ -76,7 +76,8 @@ inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
 inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* kDefaultCranedLogPath = "craned/craned.log";
 
-constexpr int64_t kMaxTimeLimitSecond =
+constexpr uint64_t kTaskMinTimeLimitSec = 11;
+constexpr int64_t kTaskMaxTimeLimitSec =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
 
 // gRPC Doc: If smaller than 10 seconds, ten seconds will be used instead.
