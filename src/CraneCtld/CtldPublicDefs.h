@@ -42,6 +42,10 @@ constexpr uint32_t kSubmitTaskBatchNum = 1000;
 constexpr uint32_t kTaskStatusChangeTimeoutMS = 500;
 constexpr uint32_t kTaskStatusChangeBatchNum = 1000;
 
+// Clean MailQueue when timeout or exceeding batch num
+constexpr uint32_t kCheckMailTimeoutMS = 5000;
+constexpr uint32_t kCheckMailBatchNum = 50;
+
 //*********************************************************
 
 // CranedKeeper Constants
@@ -104,6 +108,13 @@ struct Config {
 
   CraneCtldListenConf ListenConf;
   bool CompressedRpc{};
+
+  struct Mail {
+    bool Enable{false};
+    bool SubjectOnly{false};
+    std::string SenderAddr;
+  };
+  Mail MailConfig;
 
   std::string CraneCtldDebugLevel;
   std::string CraneCtldLogFile;
@@ -272,6 +283,9 @@ struct TaskInCtld {
   std::string cwd;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
+
+  uint32_t mail_type;
+  std::string mail_user;
 
  private:
   /* ------------- [2] -------------
@@ -465,6 +479,9 @@ struct TaskInCtld {
     qos = val.qos();
 
     get_user_env = val.get_user_env();
+
+    mail_type = val.mail_type();
+    mail_user = val.mail_user();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
@@ -563,6 +580,23 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
+};
+
+enum class MailTypeEnum : uint32_t {
+  NONE = 0,
+  BEGIN = 1,
+  END = 2,
+  FAIL = 4,
+  REQUEUE = 8,
+  INVALID_DEPEND = 16,  // not used now
+  STAGE_OUT = 32,       // not used now
+  ALL = 63,  // ALL (equivalent to BEGIN, END, FAIL, INVALID_DEPEND, REQUEUE,
+             // and STAGE_OUT)
+  TIME_LIMIT = 64,
+  TIME_LIMIT_90 = 128,  // not used now
+  TIME_LIMIT_80 = 256,  // not used now
+  TIME_LIMIT_50 = 512,  // not used now
+  ARRAY_TASKS = 1024,   // not used now
 };
 
 }  // namespace Ctld

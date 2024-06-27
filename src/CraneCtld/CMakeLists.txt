@@ -4,6 +4,8 @@ add_executable(cranectld
         CtldGrpcServer.cpp
         DbClient.h
         DbClient.cpp
+        MailSender.h
+        MailSender.cpp
         TaskScheduler.h
         TaskScheduler.cpp
         CranedKeeper.h

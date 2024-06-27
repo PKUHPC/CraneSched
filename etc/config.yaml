@@ -94,3 +94,9 @@ ScheduledBatchSize: 100000
 # if this option is set to true.
 # Default value is false.
 RejectJobsBeyondCapacity: false
+
+# Mail Configuration
+Mail:
+  Enable: false
+  SenderAddr: "cranesched@pku.edu.cn"
+  SubjectOnly: false

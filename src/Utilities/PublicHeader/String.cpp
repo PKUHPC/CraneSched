@@ -342,4 +342,29 @@ void SetCurrentThreadName(const std::string &name) {
   pthread_setname_np(pthread_self(), name.c_str());
 }
 
+std::string ParseFilePathPattern(const std::string& path_pattern,
+                                        const std::string& cwd,
+                                        task_id_t task_id) {
+  std::string resolved_path_pattern;
+
+  if (path_pattern.empty()) {
+    // If file path is not specified, first set it to cwd.
+    resolved_path_pattern = fmt::format("{}/", cwd);
+  } else {
+    if (path_pattern[0] == '/')
+      // If output file path is an absolute path, do nothing.
+      resolved_path_pattern = path_pattern;
+    else
+      // If output file path is a relative path, prepend cwd to the path.
+      resolved_path_pattern = fmt::format("{}/{}", cwd, path_pattern);
+  }
+
+  // Path ends with a directory, append default stdout file name
+  // `Crane-<Job ID>.out` to the path.
+  if (absl::EndsWith(resolved_path_pattern, "/"))
+    resolved_path_pattern += fmt::format("Crane-{}.out", task_id);
+
+  return resolved_path_pattern;
+}
+
 }  // namespace util

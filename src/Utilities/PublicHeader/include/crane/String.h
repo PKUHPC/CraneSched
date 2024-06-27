@@ -70,4 +70,8 @@ std::string HostNameListToStr(T const &host_list)
 
 void SetCurrentThreadName(const std::string &name);
 
+std::string ParseFilePathPattern(const std::string& path_pattern,
+                                              const std::string& cwd,
+                                              task_id_t task_id);
+
 }  // namespace util

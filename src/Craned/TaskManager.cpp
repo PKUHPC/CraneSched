@@ -964,9 +964,9 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
      * %u - Username
      * %x - Job name
      */
-    process->batch_meta.parsed_output_file_pattern =
-        ParseFilePathPattern_(instance->task.batch_meta().output_file_pattern(),
-                              instance->task.cwd(), task_id);
+    process->batch_meta.parsed_output_file_pattern = util::ParseFilePathPattern(
+        instance->task.batch_meta().output_file_pattern(), instance->task.cwd(),
+        task_id);
     absl::StrReplaceAll({{"%j", std::to_string(task_id)},
                          {"%u", instance->pwd_entry.Username()},
                          {"%x", instance->task.name()}},
@@ -975,9 +975,10 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     // If -e / --error is not defined, leave
     // batch_meta.parsed_error_file_pattern empty;
     if (!instance->task.batch_meta().error_file_pattern().empty()) {
-      process->batch_meta.parsed_error_file_pattern = ParseFilePathPattern_(
-          instance->task.batch_meta().error_file_pattern(),
-          instance->task.cwd(), task_id);
+      process->batch_meta.parsed_error_file_pattern =
+          util::ParseFilePathPattern(
+              instance->task.batch_meta().error_file_pattern(),
+              instance->task.cwd(), task_id);
       absl::StrReplaceAll({{"%j", std::to_string(task_id)},
                            {"%u", instance->pwd_entry.Username()},
                            {"%x", instance->task.name()}},
@@ -998,31 +999,6 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
             "Cannot spawn a new process inside the instance of task #{}",
             task_id));
   }
-}
-
-std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
-                                               const std::string& cwd,
-                                               task_id_t task_id) {
-  std::string resolved_path_pattern;
-
-  if (path_pattern.empty()) {
-    // If file path is not specified, first set it to cwd.
-    resolved_path_pattern = fmt::format("{}/", cwd);
-  } else {
-    if (path_pattern[0] == '/')
-      // If output file path is an absolute path, do nothing.
-      resolved_path_pattern = path_pattern;
-    else
-      // If output file path is a relative path, prepend cwd to the path.
-      resolved_path_pattern = fmt::format("{}/{}", cwd, path_pattern);
-  }
-
-  // Path ends with a directory, append default stdout file name
-  // `Crane-<Job ID>.out` to the path.
-  if (absl::EndsWith(resolved_path_pattern, "/"))
-    resolved_path_pattern += fmt::format("Crane-{}.out", task_id);
-
-  return resolved_path_pattern;
 }
 
 void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
