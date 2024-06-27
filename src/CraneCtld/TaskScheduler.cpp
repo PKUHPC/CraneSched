@@ -941,7 +941,7 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
 }
 
 CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
-  if (secs <= kTaskMinDuration) return CraneErr::kInvalidParam;
+  if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErr::kInvalidParam;
 
   std::vector<CranedId> craned_ids;
 
@@ -1500,6 +1500,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 void TaskScheduler::QueryTasksInRam(
     const crane::grpc::QueryTasksInfoRequest* request,
     crane::grpc::QueryTasksInfoReply* response) {
+  auto now = absl::Now();
   auto* task_list = response->mutable_task_info_list();
 
   auto append_fn = [&](auto& it) {
@@ -1530,12 +1531,13 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_exit_code(0);
     task_it->set_priority(task.cached_priority);
 
-    task_it->set_status(task.RuntimeAttr().status());
-    if (task.RuntimeAttr().status() == crane::grpc::Pending) {
+    task_it->set_status(task.Status());
+    if (task.Status() == crane::grpc::Pending) {
       task_it->set_pending_reason(task.pending_reason);
     } else {
-      task_it->set_craned_list(
-          util::HostNameListToStr(task.RuntimeAttr().craned_ids()));
+      task_it->set_craned_list(task.allocated_craneds_regex);
+      task_it->mutable_elapsed_time()->set_seconds(
+          ToInt64Seconds(now - task.StartTime()));
     }
   };
 
@@ -2422,7 +2424,7 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 }
 
 CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
-  if (task->time_limit <= absl::Seconds(kTaskMinDuration))
+  if (!CheckIfTimeLimitIsValid(task->time_limit))
     return CraneErr::kInvalidParam;
 
   // Check whether the selected partition is able to run this task.

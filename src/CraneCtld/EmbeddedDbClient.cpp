@@ -260,6 +260,12 @@ result::result<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
 
   try {
     m_env_ = std::make_unique<DbEnv>(0);
+
+    // Must be called before DB_ENV->open()!
+    // Set max transaction number to 1 to avoid deadlock handling.
+    if (m_env_->set_tx_max(1) != 0)
+      CRANE_ERROR("Error when set_tx_max(1) for BDB {}!", m_db_path_);
+
     m_env_->open(m_env_home_.c_str(), env_flags, 0);
     m_db_ = std::make_unique<Db>(m_env_.get(), 0);  // Instantiate the Db object
 
@@ -579,15 +585,15 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
 
         // Dispatch to different queues by status.
         switch (status) {
-          case crane::grpc::Pending:
-            snapshot->pending_queue.emplace(id, std::move(task));
-            break;
-          case crane::grpc::Running:
-            snapshot->running_queue.emplace(id, std::move(task));
-            break;
-          default:
-            snapshot->final_queue.emplace(id, std::move(task));
-            break;
+        case crane::grpc::Pending:
+          snapshot->pending_queue.emplace(id, std::move(task));
+          break;
+        case crane::grpc::Running:
+          snapshot->running_queue.emplace(id, std::move(task));
+          break;
+        default:
+          snapshot->final_queue.emplace(id, std::move(task));
+          break;
         }
         return true;
       });

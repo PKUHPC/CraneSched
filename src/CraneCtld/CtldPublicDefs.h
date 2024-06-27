@@ -60,7 +60,6 @@ constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 
-constexpr uint64_t kTaskMinDuration = 10;
 constexpr uint64_t kDefaultTaskMemPerCpu = 200 * 1024 * 1024;
 
 struct Config {
@@ -512,6 +511,8 @@ struct TaskInCtld {
     if (status != crane::grpc::TaskStatus::Pending) {
       craned_ids.assign(runtime_attr.craned_ids().begin(),
                         runtime_attr.craned_ids().end());
+      allocated_craneds_regex = util::HostNameListToStr(craned_ids);
+
       if (type == crane::grpc::Batch)
         executing_craned_ids.emplace_back(craned_ids.front());
       else {
@@ -543,6 +544,28 @@ struct Qos {
   absl::Duration max_time_limit_per_task;
   uint32_t max_cpus_per_user;
   uint32_t max_cpus_per_account;
+
+  static constexpr const char* FieldStringOfDeleted() { return "deleted"; }
+  static constexpr const char* FieldStringOfName() { return "name"; }
+  static constexpr const char* FieldStringOfDescription() {
+    return "description";
+  }
+  static constexpr const char* FieldStringOfReferenceCount() {
+    return "reference_count";
+  }
+  static constexpr const char* FieldStringOfPriority() { return "priority"; }
+  static constexpr const char* FieldStringOfMaxJobsPerUser() {
+    return "max_jobs_per_user";
+  }
+  static constexpr const char* FieldStringOfMaxTimeLimitPerTask() {
+    return "max_time_limit_per_task";
+  }
+  static constexpr const char* FieldStringOfMaxCpusPerUser() {
+    return "max_cpus_per_user";
+  }
+  static constexpr const char* FieldStringOfMaxCpusPerAccount() {
+    return "max_cpus_per_account";
+  }
 };
 
 struct Account {
@@ -594,6 +617,15 @@ struct User {
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
 };
+
+inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
+  return sec >= kTaskMinTimeLimitSec && sec <= kTaskMaxTimeLimitSec;
+}
+
+inline bool CheckIfTimeLimitIsValid(absl::Duration d) {
+  int64_t sec = ToInt64Seconds(d);
+  return CheckIfTimeLimitSecIsValid(sec);
+}
 
 }  // namespace Ctld
 
