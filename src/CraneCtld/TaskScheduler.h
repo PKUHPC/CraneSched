@@ -20,6 +20,7 @@
 // Precompiled header comes first!
 
 #include "CranedMetaContainer.h"
+#include "MailSender.h"
 #include "DbClient.h"
 #include "crane/Lock.h"
 #include "protos/Crane.pb.h"
@@ -304,6 +305,9 @@ class TaskScheduler {
 
   std::thread m_task_status_change_thread_;
   void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+  
+  // Mail-manager
+  std::unique_ptr<Ctld::MailSender> m_mail_sender_;
 
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_cancel_task_timer_handle_;

@@ -263,10 +263,6 @@ class TaskManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
-  static std::string ParseFilePathPattern_(const std::string& path_pattern,
-                                           const std::string& cwd,
-                                           task_id_t task_id);
-
   static bool CheckIfInstanceTypeIsCrun_(TaskInstance* instance);
   static bool CheckIfInstanceTypeIsCalloc_(TaskInstance* instance);
 

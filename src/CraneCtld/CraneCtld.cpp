@@ -31,6 +31,7 @@
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
+#include "crane/Logger.h"
 #include "crane/Network.h"
 #include "crane/OS.h"
 
@@ -425,6 +426,28 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
       }
+
+      if (config["Mail"] && config["Mail"]["Enable"] &&
+          config["Mail"]["Enable"].as<bool>()) {
+        if (config["Mail"]["SenderAddr"]) {
+          g_config.MailConfig.SenderAddr =
+              config["Mail"]["SenderAddr"].as<std::string>();
+        } else {
+          CRANE_ERROR("Mail enabled but sender address not found");
+          std::exit(1);
+        }
+
+        if (config["SubjectOnly"]) {
+          g_config.MailConfig.SubjectOnly = config["SubjectOnly"].as<bool>();
+        }
+
+        g_config.MailConfig.Enable = true;
+        CRANE_INFO("Mail is enabled");
+      } else {
+        g_config.MailConfig.Enable = false;
+        CRANE_INFO("Mail is disabled");
+      }
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", config_path, e.what());
       std::exit(1);

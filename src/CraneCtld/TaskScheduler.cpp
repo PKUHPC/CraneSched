@@ -22,6 +22,7 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
+#include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
 
@@ -456,6 +457,13 @@ bool TaskScheduler::Init() {
         TaskStatusChangeThread_(loop);
       });
 
+  if (g_config.MailConfig.Enable) {
+    m_mail_sender_ = std::make_unique<MailSender>();
+    m_mail_sender_->Init();
+  } else {
+    m_mail_sender_ = nullptr;
+  }
+
   // Start schedule thread first.
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
 
@@ -621,6 +629,12 @@ void TaskScheduler::ScheduleThread_() {
           // For cbatch tasks whose --node > 1,
           // only execute the command at the first allocated node.
           task->executing_craned_ids.emplace_back(task->CranedIds().front());
+
+          // After allocated, send mail to the user.
+          if (g_config.MailConfig.Enable &&
+              (task->mail_type & static_cast<uint32_t>(MailTypeEnum::BEGIN))) {
+            m_mail_sender_->AddToMailQueueAsync(task.get(), "BEGIN");
+          }
         } else {
           const auto& meta = std::get<InteractiveMetaInTask>(task->meta);
           if (meta.interactive_type == crane::grpc::Calloc)
@@ -1447,6 +1461,22 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
     task->SetExitCode(exit_code);
     task->SetEndTime(absl::Now());
+
+    // Send mail if requested by the user.
+    if (g_config.MailConfig.Enable) {
+      if ((task->Status() == crane::grpc::ExceedTimeLimit) &&
+          (task->mail_type & static_cast<uint32_t>(MailTypeEnum::TIME_LIMIT))) {
+        m_mail_sender_->AddToMailQueueAsync(task.get(), "TIME_LIMIT");
+      } else if ((task->Status() == crane::grpc::Completed ||
+                  task->Status() == crane::grpc::Cancelled) &&
+                 (task->mail_type & static_cast<uint32_t>(MailTypeEnum::END))) {
+        m_mail_sender_->AddToMailQueueAsync(task.get(), "END");
+      } else if ((task->Status() == crane::grpc::Failed) &&
+                 (task->mail_type &
+                  static_cast<uint32_t>(MailTypeEnum::FAIL))) {
+        m_mail_sender_->AddToMailQueueAsync(task.get(), "FAIL");
+      }
+    }
 
     for (CranedId const& craned_id : task->CranedIds()) {
       craned_cgroups_map[craned_id].emplace_back(task_id, task->uid);
