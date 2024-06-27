@@ -52,7 +52,9 @@ enum CranedState {
   CRANE_MIX = 1;
   CRANE_ALLOC = 2;
   CRANE_DOWN = 3;
-  CRANE_DRAIN = 4;
+  CRANE_DRAIN_IDLE = 4;
+  CRANE_DRAIN_MIX = 5;
+  CRANE_DRAIN_ALLOC = 6;
 }
 
 enum TaskStatus {
