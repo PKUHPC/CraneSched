@@ -214,7 +214,7 @@ message ModifyTaskReply {
 
 message ModifyCranedStateRequest{
   string craned_id = 1;
-  CranedState new_state = 2;
+  CranedControlState new_state = 2;
   string reason = 3;
 }
 
@@ -329,7 +329,8 @@ message MigrateSshProcToCgroupReply {
 message QueryClusterInfoRequest {
   repeated string filter_partitions = 1;
   repeated string filter_nodes = 2;
-  repeated CranedState filter_craned_states = 3;
+  repeated CranedResourceState filter_craned_resource_states = 3;
+  repeated CranedControlState filter_craned_control_states = 4;
 }
 
 message QueryClusterInfoReply {
