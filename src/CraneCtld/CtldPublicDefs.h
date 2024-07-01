@@ -436,24 +436,23 @@ struct TaskInCtld {
         g_config.Partitions[partition_id].task_default_mem_per_cpu;
     uint64_t partition_max_mem_per_cpu =
         g_config.Partitions[partition_id].task_max_mem_per_cpu;
-    uint64_t task_mem_per_cpu = uint64_t(allocatable_resource.memory_bytes /
-                                         allocatable_resource.cpu_count);
+    uint64_t task_mem_per_cpu = static_cast<uint64_t>(
+        allocatable_resource.memory_bytes / allocatable_resource.cpu_count);
     uint64_t mem_bytes = allocatable_resource.memory_bytes;
-    if (allocatable_resource.memory_bytes == 0) {
+    if (mem_bytes == 0) {
       // check for empty mem val
       if (partition_default_mem_per_cpu != 0) {
-        mem_bytes = uint64_t(allocatable_resource.cpu_count*100) *
-                    partition_default_mem_per_cpu/100;
+        task_mem_per_cpu = partition_default_mem_per_cpu;
       } else {
-        mem_bytes =
-            uint64_t(allocatable_resource.cpu_count*100) * kDefaultTaskMemPerCpu/100;
+        task_mem_per_cpu = kDefaultTaskMemPerCpu;
       }
-
+      mem_bytes = static_cast<uint64_t>(allocatable_resource.cpu_count * 100) *
+                  task_mem_per_cpu / 100;
     } else if (partition_max_mem_per_cpu != 0 &&
                task_mem_per_cpu > partition_max_mem_per_cpu) {
       // check weather mem greater than max mem.
-      mem_bytes =
-          uint64_t (allocatable_resource.cpu_count*100)*partition_max_mem_per_cpu/100;
+      mem_bytes = static_cast<uint64_t>(allocatable_resource.cpu_count * 100) *
+                  partition_max_mem_per_cpu / 100;
     }
     allocatable_resource.memory_bytes = mem_bytes;
     allocatable_resource.memory_sw_bytes = mem_bytes;
