@@ -975,6 +975,23 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           auto const &payload = cfored_request.payload_task_req();
           auto task = std::make_unique<TaskInCtld>();
           task->SetFieldsByTaskToCtld(payload.task());
+          if (payload.has_task_id()) {
+            auto result = g_task_scheduler->SubmitProc(
+                std::move(task), payload.task_id(), payload.pid());
+            const auto &[proc_id, craned_ids] = result.get();
+            ok = stream_writer.WriteTaskIdReply(
+                payload.pid(),
+                result::result<task_id_t, std::string>{payload.task_id()},
+                proc_id, craned_ids);
+            if (!ok) {
+              CRANE_ERROR(
+                  "Failed to send msg to cfored {}. Connection is broken. "
+                  "Exiting...",
+                  cfored_name);
+              state = StreamState::kCleanData;
+            }
+            break;
+          }
 
           auto &meta = std::get<InteractiveMetaInTask>(task->meta);
 
@@ -995,12 +1012,9 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
             // calloc will not send TaskCompletionAckReply when task
             // Complete.
             // crun task will send TaskStatusChange from Craned,
-            if (meta.interactive_type == InteractiveTaskType::Crun) {
-              // todo: Remove this
-              CRANE_TRACE("Sending TaskCompletionAckReply in task_completed",
-                          task_id);
-              stream_writer.WriteTaskCompletionAckReply(task_id);
-            }
+//            if (meta.interactive_type == InteractiveTaskType::Crun) {
+//              stream_writer.WriteTaskCompletionAckReply(task_id);
+//            }
             m_ctld_server_->m_mtx_.Lock();
 
             // If cfored disconnected, the cfored_name should have be
@@ -1024,7 +1038,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           } else {
             result = result::fail(submit_result.error());
           }
-          ok = stream_writer.WriteTaskIdReply(payload.pid(), result);
+          ok = stream_writer.WriteTaskIdReply(payload.pid(), result, 0, {});
 
           if (!ok) {
             CRANE_ERROR(
@@ -1046,8 +1060,8 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           auto const &payload = cfored_request.payload_task_complete_req();
 
           g_task_scheduler->TerminateRunningTask(payload.task_id());
-
-          if (payload.interactive_type() != InteractiveTaskType::Crun) {
+          ok = true;
+          if (payload.interactive_type() != crane::grpc::Crun) {
             ok = stream_writer.WriteTaskCompletionAckReply(payload.task_id());
           }
           if (!ok) {

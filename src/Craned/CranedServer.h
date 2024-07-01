@@ -44,6 +44,9 @@ class CranedServiceImpl : public Craned::Service {
   grpc::Status ExecuteTask(grpc::ServerContext *context,
                            const crane::grpc::ExecuteTasksRequest *request,
                            crane::grpc::ExecuteTasksReply *response) override;
+  grpc::Status ExecuteProc(grpc::ServerContext *context,
+                     const crane::grpc::ExecuteProcRequest *request,
+                     crane::grpc::ExecuteProcReply *response) override;
 
   grpc::Status TerminateTasks(
       grpc::ServerContext *context,
