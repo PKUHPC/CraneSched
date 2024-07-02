@@ -245,6 +245,23 @@ class TaskScheduler {
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
 
+  CraneErr TerminatePendingOrRunningTask(uint32_t task_id) {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    LockGuard running_guard(&m_running_task_map_mtx_);
+
+    auto pd_it = m_pending_task_map_.find(task_id);
+    if (pd_it != m_pending_task_map_.end()) {
+      m_cancel_task_queue_.enqueue({task_id, {}});
+      m_cancel_task_async_handle_->send();
+      return CraneErr::kOk;
+    }
+
+    auto rn_it = m_running_task_map_.find(task_id);
+    if (rn_it == m_running_task_map_.end()) return CraneErr::kNonExistent;
+
+    return TerminateRunningTaskNoLock_(rn_it->second.get());
+  }
+
   CraneErr TerminateRunningTask(uint32_t task_id) {
     LockGuard running_guard(&m_running_task_map_mtx_);
 
