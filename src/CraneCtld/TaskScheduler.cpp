@@ -2391,6 +2391,35 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 }
 
 CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
+  auto part_it = g_config.Partitions.find(task->partition_id);
+  if (part_it == g_config.Partitions.end()) return CraneErr::kInvalidParam;
+
+  task->partition_priority = part_it->second.priority;
+
+  Config::Partition const& part_meta = part_it->second;
+  uint64_t part_max_mem_per_cpu = part_meta.max_mem_per_cpu;
+
+  AllocatableResource const& task_alloc_res =
+      task->resources.allocatable_resource;
+  double core_double = static_cast<double>(task_alloc_res.cpu_count);
+
+  double task_mem_per_cpu;
+  if (task_alloc_res.memory_bytes == 0) {
+    // If a task leaves its memory bytes to 0,
+    // use the partition's default value.
+    task_mem_per_cpu = part_meta.default_mem_per_cpu;
+  } else {
+    // If a task sets its memory bytes,
+    // check if memory/core ratio is greater than the partition's maximum value.
+    task_mem_per_cpu = (double)task_alloc_res.memory_bytes / core_double;
+    task_mem_per_cpu =
+        std::min(task_mem_per_cpu, (double)part_meta.max_mem_per_cpu);
+  }
+
+  uint64_t mem_bytes = core_double * task_mem_per_cpu;
+  task->resources.allocatable_resource.memory_bytes = mem_bytes;
+  task->resources.allocatable_resource.memory_sw_bytes = mem_bytes;
+
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
       task->Username(), task->account, task);
   if (check_qos_result.has_error()) {
@@ -2398,11 +2427,6 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
                 check_qos_result.error());
     return CraneErr::kInvalidParam;
   }
-
-  auto part_it = g_config.Partitions.find(task->partition_id);
-  if (part_it == g_config.Partitions.end()) return CraneErr::kInvalidParam;
-
-  task->partition_priority = part_it->second.priority;
 
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;

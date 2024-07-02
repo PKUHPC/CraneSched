@@ -71,8 +71,8 @@ struct Config {
   struct Partition {
     std::string nodelist_str;
     uint32_t priority;
-    uint64_t task_default_mem_per_cpu;
-    uint64_t task_max_mem_per_cpu;
+    uint64_t default_mem_per_cpu;
+    uint64_t max_mem_per_cpu;
     std::unordered_set<std::string> nodes;
     std::unordered_set<std::string> AllowAccounts;
   };
@@ -429,32 +429,6 @@ struct TaskInCtld {
     partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                   : val.partition_name();
     resources.allocatable_resource = val.resources().allocatable_resource();
-
-    auto& allocatable_resource = resources.allocatable_resource;
-    uint64_t partition_default_mem_per_cpu =
-        g_config.Partitions[partition_id].task_default_mem_per_cpu;
-    uint64_t partition_max_mem_per_cpu =
-        g_config.Partitions[partition_id].task_max_mem_per_cpu;
-    uint64_t task_mem_per_cpu = static_cast<uint64_t>(
-        allocatable_resource.memory_bytes / allocatable_resource.cpu_count);
-    uint64_t mem_bytes = allocatable_resource.memory_bytes;
-    if (mem_bytes == 0) {
-      // check for empty mem val
-      if (partition_default_mem_per_cpu != 0) {
-        task_mem_per_cpu = partition_default_mem_per_cpu;
-      } else {
-        task_mem_per_cpu = kDefaultTaskMemPerCpu;
-      }
-      mem_bytes = static_cast<uint64_t>(allocatable_resource.cpu_count * 100) *
-                  task_mem_per_cpu / 100;
-    } else if (partition_max_mem_per_cpu != 0 &&
-               task_mem_per_cpu > partition_max_mem_per_cpu) {
-      // check weather mem greater than max mem.
-      mem_bytes = static_cast<uint64_t>(allocatable_resource.cpu_count * 100) *
-                  partition_max_mem_per_cpu / 100;
-    }
-    allocatable_resource.memory_bytes = mem_bytes;
-    allocatable_resource.memory_sw_bytes = mem_bytes;
 
     time_limit = absl::Seconds(val.time_limit().seconds());
 

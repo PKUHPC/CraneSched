@@ -378,27 +378,30 @@ void ParseConfig(int argc, char** argv) {
           } else
             part.priority = 0;
 
-          if (partition["default_mem_per_cpu"] &&
-              !partition["default_mem_per_cpu"].IsNull()) {
-            part.task_default_mem_per_cpu =
-                partition["default_mem_per_cpu"].as<uint32_t>() * 1024 * 1024;
+          if (partition["DefaultMemPerCpu"] &&
+              !partition["DefaultMemPerCpu"].IsNull()) {
+            part.default_mem_per_cpu =
+                partition["DefaultMemPerCpu"].as<uint32_t>() * 1024 * 1024;
           } else
-            part.task_default_mem_per_cpu = 0;
+            part.default_mem_per_cpu = Ctld::kDefaultTaskMemPerCpu;
 
-          if (partition["max_mem_per_cpu"] &&
-              !partition["max_mem_per_cpu"].IsNull()) {
-            part.task_max_mem_per_cpu =
-                partition["max_mem_per_cpu"].as<uint32_t>() * 1024 * 1024;
+          if (partition["MaxMemPerCpu"] &&
+              !partition["MaxMemPerCpu"].IsNull()) {
+            part.max_mem_per_cpu =
+                partition["MaxMemPerCpu"].as<uint32_t>() * 1024 * 1024;
           } else
-            part.task_max_mem_per_cpu = 0;
+            part.max_mem_per_cpu = std::numeric_limits<uint64_t>::max();
 
-          if (part.task_max_mem_per_cpu < part.task_default_mem_per_cpu) {
+          if (part.max_mem_per_cpu == 0 || part.default_mem_per_cpu == 0) {
+            CRANE_ERROR("MaxMemPerCpu or DefaultMemPerCpu can't be 0!");
+            std::exit(1);
+          }
+
+          if (part.max_mem_per_cpu < part.default_mem_per_cpu) {
             CRANE_ERROR(
-                "The partition {} max_mem_per_cpu {}MB should not"
-                "less than default_mem_per_cpu {}MB",
-                partition["name"].Scalar(),
-                partition["default_mem_per_cpu"].Scalar(),
-                partition["max_mem_per_cpu"].Scalar());
+                "The partition {} MaxMemPerCpu {}MB should not be "
+                "less than DefaultMemPerCpu {}MB",
+                name, part.default_mem_per_cpu, part.max_mem_per_cpu);
             std::exit(1);
           }
 

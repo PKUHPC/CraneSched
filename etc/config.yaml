@@ -76,10 +76,10 @@ Partitions:
   - name: GPU
     nodes: "cn[17-18]"
     priority: 3
-    #Default mem per cpu in MB
-    default_mem_per_cpu: 100
-    #Max mem per cpu in MB
-    max_mem_per_cpu: 100
+    # Default memory per cpu in MB
+    DefaultMemPerCpu: 100
+    # Maximum memory per cpu in MB
+    MaxMemPerCpu: 100
 
 DefaultPartition: CPU
 
