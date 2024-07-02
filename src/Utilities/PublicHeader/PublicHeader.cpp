@@ -103,7 +103,8 @@ Resources& Resources::operator-=(const AllocatableResource& rhs) {
 
 Resources::operator crane::grpc::Resources() const {
   auto val = crane::grpc::Resources();
-  *val.mutable_allocatable_resource() = allocatable_resource;
+  *val.mutable_allocatable_resource() =
+      static_cast<crane::grpc::AllocatableResource>(allocatable_resource);
   return val;
 }
 
