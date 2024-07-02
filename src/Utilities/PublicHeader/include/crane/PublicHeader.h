@@ -175,7 +175,7 @@ struct AllocatableResource {
 
   AllocatableResource& operator-=(const AllocatableResource& rhs);
 
-  operator crane::grpc::AllocatableResource() const;
+  explicit operator crane::grpc::AllocatableResource() const;
 };
 
 bool operator<=(const AllocatableResource& lhs, const AllocatableResource& rhs);
@@ -203,7 +203,7 @@ struct Resources {
 
   Resources& operator+=(const AllocatableResource& rhs);
   Resources& operator-=(const AllocatableResource& rhs);
-  operator crane::grpc::Resources() const;
+  explicit operator crane::grpc::Resources() const;
 };
 
 bool operator<=(const Resources& lhs, const Resources& rhs);

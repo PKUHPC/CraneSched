@@ -71,7 +71,9 @@ struct Config {
   struct Partition {
     std::string nodelist_str;
     uint32_t priority;
+    // optional, 0 indicates no default val
     uint64_t default_mem_per_cpu;
+    // optional, 0 indicates no limit
     uint64_t max_mem_per_cpu;
     std::unordered_set<std::string> nodes;
     std::unordered_set<std::string> AllowAccounts;

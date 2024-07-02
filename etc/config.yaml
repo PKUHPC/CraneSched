@@ -76,9 +76,9 @@ Partitions:
   - name: GPU
     nodes: "cn[17-18]"
     priority: 3
-    # Default memory per cpu in MB
+    # Optional default memory per cpu in MB, 0 indicates no default value
     DefaultMemPerCpu: 100
-    # Maximum memory per cpu in MB
+    # Optional maximum memory per cpu in MB, 0 indicates no limit
     MaxMemPerCpu: 100
 
 DefaultPartition: CPU

@@ -381,23 +381,19 @@ void ParseConfig(int argc, char** argv) {
           if (partition["DefaultMemPerCpu"] &&
               !partition["DefaultMemPerCpu"].IsNull()) {
             part.default_mem_per_cpu =
-                partition["DefaultMemPerCpu"].as<uint32_t>() * 1024 * 1024;
+                partition["DefaultMemPerCpu"].as<uint64_t>() * 1024 * 1024;
           } else
-            part.default_mem_per_cpu = Ctld::kDefaultTaskMemPerCpu;
+            part.default_mem_per_cpu = 0;
 
           if (partition["MaxMemPerCpu"] &&
               !partition["MaxMemPerCpu"].IsNull()) {
             part.max_mem_per_cpu =
-                partition["MaxMemPerCpu"].as<uint32_t>() * 1024 * 1024;
+                partition["MaxMemPerCpu"].as<uint64_t>() * 1024 * 1024;
           } else
-            part.max_mem_per_cpu = std::numeric_limits<uint64_t>::max();
+            part.max_mem_per_cpu = 0;
 
-          if (part.max_mem_per_cpu == 0 || part.default_mem_per_cpu == 0) {
-            CRANE_ERROR("MaxMemPerCpu or DefaultMemPerCpu can't be 0!");
-            std::exit(1);
-          }
-
-          if (part.max_mem_per_cpu < part.default_mem_per_cpu) {
+          if (part.default_mem_per_cpu != 0 && part.max_mem_per_cpu != 0 &&
+              part.max_mem_per_cpu < part.default_mem_per_cpu) {
             CRANE_ERROR(
                 "The partition {} MaxMemPerCpu {}MB should not be "
                 "less than DefaultMemPerCpu {}MB",
