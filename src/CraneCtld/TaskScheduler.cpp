@@ -664,7 +664,7 @@ void TaskScheduler::ScheduleThread_() {
         for (CranedId const& craned_id : task->CranedIds()) {
           CgroupSpec spec{.uid = task->uid,
                           .task_id = task->TaskId(),
-                          .resources = task->TaskToCtld().resources()};
+                          .resources = task->resources};
           craned_cgroup_map[craned_id].emplace_back(std::move(spec));
         }
       }
@@ -2401,7 +2401,33 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   }
 
   auto part_it = g_config.Partitions.find(task->partition_id);
-  if (part_it == g_config.Partitions.end()) return CraneErr::kInvalidParam;
+  if (part_it == g_config.Partitions.end()) return CraneErr::kNonExistent;
+
+  auto& allocatable_resource = task->resources.allocatable_resource;
+  uint64_t partition_default_mem_per_cpu =
+      g_config.Partitions[task->partition_id].task_default_mem_per_cpu;
+  uint64_t partition_max_mem_per_cpu =
+      g_config.Partitions[task->partition_id].task_max_mem_per_cpu;
+  uint64_t task_mem_per_cpu = static_cast<uint64_t>(
+      allocatable_resource.memory_bytes / allocatable_resource.cpu_count);
+  uint64_t mem_bytes = allocatable_resource.memory_bytes;
+  if (mem_bytes == 0) {
+    // check for empty mem val
+    if (partition_default_mem_per_cpu != 0) {
+      task_mem_per_cpu = partition_default_mem_per_cpu;
+    } else {
+      task_mem_per_cpu = kDefaultTaskMemPerCpu;
+    }
+    mem_bytes = static_cast<uint64_t>(allocatable_resource.cpu_count * 100) *
+                task_mem_per_cpu / 100;
+  } else if (partition_max_mem_per_cpu != 0 &&
+             task_mem_per_cpu > partition_max_mem_per_cpu) {
+    // check weather mem greater than max mem.
+    mem_bytes = static_cast<uint64_t>(allocatable_resource.cpu_count * 100) *
+                partition_max_mem_per_cpu / 100;
+  }
+  allocatable_resource.memory_bytes = mem_bytes;
+  allocatable_resource.memory_sw_bytes = mem_bytes;
 
   task->partition_priority = part_it->second.priority;
 
