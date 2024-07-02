@@ -73,6 +73,14 @@ AllocatableResource& AllocatableResource::operator=(
   return *this;
 }
 
+AllocatableResource::operator crane::grpc::AllocatableResource() const {
+  auto val = crane::grpc::AllocatableResource();
+  val.set_cpu_core_limit(static_cast<double>(this->cpu_count));
+  val.set_memory_limit_bytes(this->memory_bytes);
+  val.set_memory_sw_limit_bytes(this->memory_sw_bytes);
+  return val;
+}
+
 Resources& Resources::operator+=(const Resources& rhs) {
   allocatable_resource += rhs.allocatable_resource;
   return *this;
@@ -91,6 +99,13 @@ Resources& Resources::operator+=(const AllocatableResource& rhs) {
 Resources& Resources::operator-=(const AllocatableResource& rhs) {
   allocatable_resource -= rhs;
   return *this;
+}
+
+Resources::operator crane::grpc::Resources() const {
+  auto val = crane::grpc::Resources();
+  *val.mutable_allocatable_resource() =
+      static_cast<crane::grpc::AllocatableResource>(allocatable_resource);
+  return val;
 }
 
 bool operator<=(const Resources& lhs, const Resources& rhs) {

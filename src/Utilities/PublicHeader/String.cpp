@@ -342,4 +342,10 @@ void SetCurrentThreadName(const std::string &name) {
   pthread_setname_np(pthread_self(), name.c_str());
 }
 
+bool ConvertStringToInt64(const std::string &s, int64_t *val) {
+  std::from_chars_result convert_result{};
+  convert_result = std::from_chars(s.data(), s.data() + s.size(), *val);
+  return convert_result.ec == std::errc();
+}
+
 }  // namespace util

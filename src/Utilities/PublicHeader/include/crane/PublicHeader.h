@@ -76,7 +76,8 @@ inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
 inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* kDefaultCranedLogPath = "craned/craned.log";
 
-constexpr int64_t kMaxTimeLimitSecond =
+constexpr uint64_t kTaskMinTimeLimitSec = 11;
+constexpr int64_t kTaskMaxTimeLimitSec =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
 
 // gRPC Doc: If smaller than 10 seconds, ten seconds will be used instead.
@@ -173,6 +174,8 @@ struct AllocatableResource {
   AllocatableResource& operator+=(const AllocatableResource& rhs);
 
   AllocatableResource& operator-=(const AllocatableResource& rhs);
+
+  explicit operator crane::grpc::AllocatableResource() const;
 };
 
 bool operator<=(const AllocatableResource& lhs, const AllocatableResource& rhs);
@@ -200,6 +203,7 @@ struct Resources {
 
   Resources& operator+=(const AllocatableResource& rhs);
   Resources& operator-=(const AllocatableResource& rhs);
+  explicit operator crane::grpc::Resources() const;
 };
 
 bool operator<=(const Resources& lhs, const Resources& rhs);
