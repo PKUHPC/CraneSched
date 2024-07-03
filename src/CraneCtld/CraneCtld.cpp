@@ -47,6 +47,7 @@ void ParseConfig(int argc, char** argv) {
       cxxopts::value<std::string>()->default_value("0.0.0.0"))
       ("p,port", "Listening port, format: <IP>:<port>",
       cxxopts::value<std::string>()->default_value(kCtldDefaultPort))
+      ("V,version", "Display version information")
       ("h,help", "Display help for CraneCtld")
       ;
   // clang-format on
@@ -61,6 +62,12 @@ void ParseConfig(int argc, char** argv) {
 
   if (parsed_args.count("help") > 0) {
     fmt::print("{}\n", options.help());
+    std::exit(0);
+  }
+
+  if (parsed_args.count("version") > 0) {
+    fmt::print("Version: {}\n", CRANE_VERSION_STRING);
+    fmt::print("Build Time: {}\n", CRANE_BUILD_TIMESTAMP);
     std::exit(0);
   }
 

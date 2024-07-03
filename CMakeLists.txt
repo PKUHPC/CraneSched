@@ -65,15 +65,42 @@ if(NOT CRANE_MIN_LOG_LEVEL MATCHES "INFO|DEBUG|TRACE")
 endif()
 
 add_compile_definitions(CRANE_LOG_LEVEL=CRANE_LOG_LEVEL_${CRANE_MIN_LOG_LEVEL})
-message(STATUS "minimal log level is set to ${CRANE_MIN_LOG_LEVEL}")
+message(STATUS "Minimal log level is set to ${CRANE_MIN_LOG_LEVEL}")
+
+# Generate version text and building timestamp
+if(EXISTS "${CMAKE_SOURCE_DIR}/VERSION")
+    # For a release version, the version file should be provided
+    file(READ "${CMAKE_SOURCE_DIR}/VERSION" VERSION_CONTENT)
+else()
+    # Otherwise, use git hash as the version
+    message(WARNING "No VERSION file found. Use git hash as the version string.")
+    execute_process(
+        COMMAND git rev-parse --short HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE VERSION_CONTENT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+endif()
+
+if("${VERSION_CONTENT}" STREQUAL "")
+    # if not in git repository, fall back to "Unknown"
+    set(VERSION_CONTENT "Unknown")
+endif()
+
+string(TIMESTAMP BUILD_TIMESTAMP "%a, %d %b %Y %H:%M:%S %z")
+
+message(STATUS "Version: ${VERSION_CONTENT}")
+message(STATUS "Building Time: ${BUILD_TIMESTAMP}")
+add_compile_definitions(CRANE_BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
+add_compile_definitions(CRANE_VERSION_STRING="${VERSION_CONTENT}")
 
 # Set colorized output when ninja build system is used.
 if (${CRANE_FORCE_COLORED_OUTPUT})
     if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-        message(STATUS "colorized output for gcc is enabled")
+        message(STATUS "Colorized output for gcc is enabled")
         add_compile_options(-fdiagnostics-color=always)
     elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-        message(STATUS "colorized output for clang is enabled")
+        message(STATUS "Colorized output for clang is enabled")
         add_compile_options(-fcolor-diagnostics)
     endif ()
 endif ()
