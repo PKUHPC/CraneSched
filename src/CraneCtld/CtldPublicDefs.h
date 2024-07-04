@@ -60,8 +60,6 @@ constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 
-constexpr uint64_t kDefaultTaskMemPerCpu = 200 * 1024 * 1024;
-
 struct Config {
   struct Node {
     uint32_t cpu;
@@ -71,7 +69,6 @@ struct Config {
   struct Partition {
     std::string nodelist_str;
     uint32_t priority;
-    // optional, 0 indicates no default val
     uint64_t default_mem_per_cpu;
     // optional, 0 indicates no limit
     uint64_t max_mem_per_cpu;
