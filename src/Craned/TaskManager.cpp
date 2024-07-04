@@ -1287,7 +1287,10 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
 
       if (absl::Now() - start_time >= new_time_limit) {
         // If the task times out, terminate it.
-        EvQueueTaskTerminate ev_task_terminate{elem.task_id};
+        EvQueueTaskTerminate ev_task_terminate{
+            .task_id = elem.task_id,
+            .terminated_by_timeout = true,
+        };
         this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
         event_active(this_->m_ev_task_terminate_, 0, 0);
 

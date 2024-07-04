@@ -943,7 +943,6 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
 CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
   if (secs <= kTaskMinDuration) return CraneErr::kInvalidParam;
 
-  bool found_running{false};
   std::vector<CranedId> craned_ids;
 
   {
@@ -976,8 +975,6 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
     g_embedded_db_client->UpdateTaskToCtld(0, task->TaskDbId(),
                                            task->TaskToCtld());
   }
-
-  if (!found_running) return CraneErr::kOk;
 
   // Only send request to the executing node
   for (const CranedId& craned_id : craned_ids) {
