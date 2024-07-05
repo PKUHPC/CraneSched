@@ -664,8 +664,7 @@ void TaskScheduler::ScheduleThread_() {
         for (CranedId const& craned_id : task->CranedIds()) {
           CgroupSpec spec{.uid = task->uid,
                           .task_id = task->TaskId(),
-                          .resources = static_cast<crane::grpc::Resources>(
-                              task->resources)};
+                          .resources = (crane::grpc::Resources)task->resources};
           craned_cgroup_map[craned_id].emplace_back(std::move(spec));
         }
       }
