@@ -389,6 +389,8 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
         // task map.
         CRANE_DEBUG("Cleaning Calloc task #{}...",
                     task_instance->task.task_id());
+
+        // Todo: Performance issue!
         task_instance->cgroup->KillAllProcesses();
 
         auto to_remove_it = task_it++;
@@ -475,8 +477,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(
   using crane::grpc::subprocess::CanStartMessage;
   using crane::grpc::subprocess::ChildProcessReady;
 
-  int ctrl_sock_pair[2];  // Socket pair for passing control messages.
-  int io_sock_pair[2];    // Socket pair for forwarding IO of crun tasks.
+  int ctrl_sock_pair[2];    // Socket pair for passing control messages.
+  int io_in_sock_pair[2];   // Socket pair for forwarding IO of crun tasks.
+  int io_out_sock_pair[2];  // Socket pair for forwarding IO of crun tasks.
 
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
     CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
@@ -485,7 +488,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 
   // Create IO socket pair for crun tasks.
   if (CheckIfInstanceTypeIsCrun_(instance)) {
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, io_sock_pair) != 0) {
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, io_in_sock_pair) != 0) {
+      CRANE_ERROR("Failed to create socket pair for task io forward: {}",
+                  strerror(errno));
+      return CraneErr::kSystemErr;
+    }
+
+    if (socketpair(AF_UNIX, SOCK_STREAM, 0, io_out_sock_pair) != 0) {
       CRANE_ERROR("Failed to create socket pair for task io forward: {}",
                   strerror(errno));
       return CraneErr::kSystemErr;
@@ -493,7 +502,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 
     auto* crun_meta =
         dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
-    crun_meta->msg_forward_fd = io_sock_pair[0];
+    crun_meta->proc_in_fd = io_in_sock_pair[0];
+    crun_meta->proc_out_fd = io_out_sock_pair[0];
   }
 
   // save the current uid/gid
@@ -525,11 +535,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(
                 instance->task.task_id(), child_pid);
 
     if (CheckIfInstanceTypeIsCrun_(instance)) {
+      auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
       g_cfored_manager->RegisterIOForward(
           instance->task.interactive_meta().cfored_name(),
-          instance->task.task_id(),
-          dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get())
-              ->msg_forward_fd);
+          instance->task.task_id(), meta->proc_in_fd, meta->proc_out_fd);
     }
 
     // Note that the following code will move the child process into cgroup.
@@ -551,7 +560,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     // Move the ownership of ProcessInstance into the TaskInstance.
     instance->processes.emplace(child_pid, std::move(process));
 
-    close(io_sock_pair[1]);
+    close(io_in_sock_pair[1]);
+    close(io_out_sock_pair[1]);
     close(ctrl_sock_pair[1]);
     int ctrl_fd = ctrl_sock_pair[0];
     bool ok;
@@ -651,6 +661,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     // reap the child process by SIGCHLD after it commits suicide.
     return CraneErr::kOk;
   } else {  // Child proc
+    // Disable SIGABRT backtrace from child processes.
+    signal(SIGABRT, SIG_DFL);
+
     const std::string& cwd = instance->task.cwd();
     rc = chdir(cwd.c_str());
     if (rc == -1) {
@@ -710,12 +723,15 @@ CraneErr TaskManager::SpawnProcessInInstance_(
       close(stdout_fd);
 
     } else if (CheckIfInstanceTypeIsCrun_(instance)) {
-      close(io_sock_pair[0]);
+      close(io_in_sock_pair[0]);
+      close(io_out_sock_pair[0]);
 
-      dup2(io_sock_pair[1], 0);
-      dup2(io_sock_pair[1], 1);
-      dup2(io_sock_pair[1], 2);
-      close(io_sock_pair[1]);
+      dup2(io_in_sock_pair[1], 0);
+      close(io_in_sock_pair[1]);
+
+      dup2(io_out_sock_pair[1], 1);
+      dup2(io_out_sock_pair[1], 2);
+      close(io_out_sock_pair[1]);
     }
 
     child_process_ready.set_ok(true);

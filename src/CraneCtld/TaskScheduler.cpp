@@ -902,6 +902,8 @@ void TaskScheduler::ScheduleThread_() {
           task->SetExitCode(ExitCode::kExitCodeCgroupError);
           task->SetEndTime(absl::Now());
         }
+        // TODO: Add MovePendingToFinal
+        // TODO: Add crun callback here!
         PersistAndTransferTasksToMongodb_(failed_task_raw_ptrs);
 
         // Failed tasks have been handled properly. Free them explicitly.
@@ -1245,11 +1247,24 @@ void TaskScheduler::CleanCancelQueueCb_() {
     LockGuard pending_guard(&m_pending_task_map_mtx_);
     for (task_id_t task_id : pending_tasks_vec) {
       auto it = m_pending_task_map_.find(task_id);
-      if (it == m_pending_task_map_.end()) continue;
+      if (it == m_pending_task_map_.end()) {
+        CRANE_TRACE(
+            "Pending task #{} not found when doing actual cancelling. "
+            "Skipping it..",
+            task_id);
+        continue;
+      }
 
       TaskInCtld* task = it->second.get();
       task->SetStatus(crane::grpc::Cancelled);
       task->SetEndTime(absl::Now());
+
+      if (task->type == crane::grpc::Interactive) {
+        auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+        if (meta.interactive_type == crane::grpc::Crun)
+          g_thread_pool->detach_task([cb = meta.cb_task_completed,
+                                      task_id = task_id] { cb(task_id); });
+      }
 
       task_raw_ptr_vec.emplace_back(it->second.get());
       task_ptr_vec.emplace_back(std::move(it->second));

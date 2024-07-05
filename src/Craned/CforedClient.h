@@ -31,7 +31,7 @@ class CforedClient {
   void AsyncSendRecvThread_();
 
   void InitTaskFwdAndSetInputCb(
-      task_id_t task_id, std::function<void(const std::string&)> task_input_cb);
+      task_id_t task_id, std::function<bool(const std::string&)> task_input_cb);
 
   void TaskOutPutForward(task_id_t task_id, const std::string& msg);
 
@@ -41,7 +41,8 @@ class CforedClient {
 
  private:
   struct TaskFwdMeta {
-    std::function<void(const std::string&)> input_cb;
+    std::function<bool(const std::string&)> input_cb;
+    bool input_stopped{false};
     bool output_stopped{false};
     bool proc_stopped{false};
   };
@@ -77,14 +78,16 @@ class CforedManager {
 
   bool Init();
 
-  void RegisterIOForward(std::string const& cfored, task_id_t task_id, int fd);
+  void RegisterIOForward(std::string const& cfored, task_id_t task_id,
+                         int in_fd, int out_fd);
   void TaskProcOnCforedStopped(std::string const& cfored, task_id_t task_id);
 
  private:
   struct RegisterElem {
     std::string cfored;
     task_id_t task_id;
-    int fd;
+    int in_fd;
+    int out_fd;
   };
 
   struct TaskStopElem {
