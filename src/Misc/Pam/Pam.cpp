@@ -104,7 +104,7 @@ extern "C" {
     pam_syslog(pamh, LOG_ERR,
                "[Crane] Rejected ssh connection with remote port %hu ", port);
     PamSendMsgToClient(pamh,
-                       "You don't have any active job in this node. "
+                       "You don't have any active job on this node. "
                        "Your SSH request was rejected by Crane PAM Module.");
     return PAM_PERM_DENIED;
   }
@@ -156,7 +156,7 @@ extern "C" {
       return PAM_SUCCESS;
     else {
       PamSendMsgToClient(pamh,
-                         "You don't have any active job in this node. "
+                         "You don't have any active job on this node. "
                          "Your SSH request was rejected by Crane PAM Module.");
       return PAM_SESSION_ERR;
     }
