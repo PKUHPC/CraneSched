@@ -60,9 +60,6 @@ constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 
-constexpr uint64_t kTaskMinDuration = 10;
-constexpr uint64_t kDefaultTaskMemPerCpu = 200 * 1024 * 1024;
-
 struct Config {
   struct Node {
     uint32_t cpu;
@@ -72,8 +69,9 @@ struct Config {
   struct Partition {
     std::string nodelist_str;
     uint32_t priority;
-    uint64_t task_default_mem_per_cpu;
-    uint64_t task_max_mem_per_cpu;
+    uint64_t default_mem_per_cpu;
+    // optional, 0 indicates no limit
+    uint64_t max_mem_per_cpu;
     std::unordered_set<std::string> nodes;
     std::unordered_set<std::string> AllowAccounts;
   };
@@ -431,32 +429,6 @@ struct TaskInCtld {
                                                   : val.partition_name();
     resources.allocatable_resource = val.resources().allocatable_resource();
 
-    auto& allocatable_resource = resources.allocatable_resource;
-    uint64_t partition_default_mem_per_cpu =
-        g_config.Partitions[partition_id].task_default_mem_per_cpu;
-    uint64_t partition_max_mem_per_cpu =
-        g_config.Partitions[partition_id].task_max_mem_per_cpu;
-    uint64_t task_mem_per_cpu = static_cast<uint64_t>(
-        allocatable_resource.memory_bytes / allocatable_resource.cpu_count);
-    uint64_t mem_bytes = allocatable_resource.memory_bytes;
-    if (mem_bytes == 0) {
-      // check for empty mem val
-      if (partition_default_mem_per_cpu != 0) {
-        task_mem_per_cpu = partition_default_mem_per_cpu;
-      } else {
-        task_mem_per_cpu = kDefaultTaskMemPerCpu;
-      }
-      mem_bytes = static_cast<uint64_t>(allocatable_resource.cpu_count * 100) *
-                  task_mem_per_cpu / 100;
-    } else if (partition_max_mem_per_cpu != 0 &&
-               task_mem_per_cpu > partition_max_mem_per_cpu) {
-      // check weather mem greater than max mem.
-      mem_bytes = static_cast<uint64_t>(allocatable_resource.cpu_count * 100) *
-                  partition_max_mem_per_cpu / 100;
-    }
-    allocatable_resource.memory_bytes = mem_bytes;
-    allocatable_resource.memory_sw_bytes = mem_bytes;
-
     time_limit = absl::Seconds(val.time_limit().seconds());
 
     type = val.type();
@@ -512,6 +484,8 @@ struct TaskInCtld {
     if (status != crane::grpc::TaskStatus::Pending) {
       craned_ids.assign(runtime_attr.craned_ids().begin(),
                         runtime_attr.craned_ids().end());
+      allocated_craneds_regex = util::HostNameListToStr(craned_ids);
+
       if (type == crane::grpc::Batch)
         executing_craned_ids.emplace_back(craned_ids.front());
       else {
@@ -543,6 +517,28 @@ struct Qos {
   absl::Duration max_time_limit_per_task;
   uint32_t max_cpus_per_user;
   uint32_t max_cpus_per_account;
+
+  static constexpr const char* FieldStringOfDeleted() { return "deleted"; }
+  static constexpr const char* FieldStringOfName() { return "name"; }
+  static constexpr const char* FieldStringOfDescription() {
+    return "description";
+  }
+  static constexpr const char* FieldStringOfReferenceCount() {
+    return "reference_count";
+  }
+  static constexpr const char* FieldStringOfPriority() { return "priority"; }
+  static constexpr const char* FieldStringOfMaxJobsPerUser() {
+    return "max_jobs_per_user";
+  }
+  static constexpr const char* FieldStringOfMaxTimeLimitPerTask() {
+    return "max_time_limit_per_task";
+  }
+  static constexpr const char* FieldStringOfMaxCpusPerUser() {
+    return "max_cpus_per_user";
+  }
+  static constexpr const char* FieldStringOfMaxCpusPerAccount() {
+    return "max_cpus_per_account";
+  }
 };
 
 struct Account {
@@ -594,6 +590,15 @@ struct User {
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
 };
+
+inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
+  return sec >= kTaskMinTimeLimitSec && sec <= kTaskMaxTimeLimitSec;
+}
+
+inline bool CheckIfTimeLimitIsValid(absl::Duration d) {
+  int64_t sec = ToInt64Seconds(d);
+  return CheckIfTimeLimitSecIsValid(sec);
+}
 
 }  // namespace Ctld
 

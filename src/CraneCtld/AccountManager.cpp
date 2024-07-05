@@ -553,39 +553,39 @@ AccountManager::Result AccountManager::ModifyUser(
   }
 
   switch (operatorType) {
-    case crane::grpc::ModifyEntityRequest_OperatorType_Add:
-      if (item == "allowed_partition") {
-        return AddUserAllowedPartition_(name, account, value);
-      } else if (item == "allowed_qos_list") {
-        return AddUserAllowedQos_(name, value, account, partition);
-      } else {
-        return Result{false, fmt::format("Field '{}' can't be added", item)};
-      }
+  case crane::grpc::ModifyEntityRequest_OperatorType_Add:
+    if (item == "allowed_partition") {
+      return AddUserAllowedPartition_(name, account, value);
+    } else if (item == "allowed_qos_list") {
+      return AddUserAllowedQos_(name, value, account, partition);
+    } else {
+      return Result{false, fmt::format("Field '{}' can't be added", item)};
+    }
 
-    case crane::grpc::ModifyEntityRequest_OperatorType_Overwrite:
-      if (item == "admin_level") {
-        return SetUserAdminLevel_(name, value);
-      } else if (item == "default_qos") {
-        return SetUserDefaultQos_(name, value, account, partition);
-      } else if (item == "allowed_partition") {
-        return SetUserAllowedPartition_(name, account, value);
-      } else if (item == "allowed_qos_list") {
-        return SetUserAllowedQos_(name, account, partition, value, force);
-      } else {
-        return Result{false, fmt::format("Field '{}' can't be set", item)};
-      }
+  case crane::grpc::ModifyEntityRequest_OperatorType_Overwrite:
+    if (item == "admin_level") {
+      return SetUserAdminLevel_(name, value);
+    } else if (item == "default_qos") {
+      return SetUserDefaultQos_(name, value, account, partition);
+    } else if (item == "allowed_partition") {
+      return SetUserAllowedPartition_(name, account, value);
+    } else if (item == "allowed_qos_list") {
+      return SetUserAllowedQos_(name, account, partition, value, force);
+    } else {
+      return Result{false, fmt::format("Field '{}' can't be set", item)};
+    }
 
-    case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
-      if (item == "allowed_partition") {
-        return DeleteUserAllowedPartition_(name, account, value);
-      } else if (item == "allowed_qos_list") {
-        return DeleteUserAllowedQos_(name, value, account, partition, force);
-      } else {
-        return Result{false, fmt::format("Field '{}' can't be deleted", item)};
-      }
+  case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
+    if (item == "allowed_partition") {
+      return DeleteUserAllowedPartition_(name, account, value);
+    } else if (item == "allowed_qos_list") {
+      return DeleteUserAllowedQos_(name, value, account, partition, force);
+    } else {
+      return Result{false, fmt::format("Field '{}' can't be deleted", item)};
+    }
 
-    default:
-      return Result{false, fmt::format("Unknown field '{}'", item)};
+  default:
+    return Result{false, fmt::format("Unknown field '{}'", item)};
   }
 }
 
@@ -594,45 +594,58 @@ AccountManager::Result AccountManager::ModifyAccount(
     const std::string& name, const std::string& item, const std::string& value,
     bool force) {
   switch (operatorType) {
-    case crane::grpc::ModifyEntityRequest_OperatorType_Add:
-      if (item == "allowed_partition") {
-        return AddAccountAllowedPartition_(name, value);
-      } else if (item == "allowed_qos_list") {
-        return AddAccountAllowedQos_(name, value);
-      } else {
-        return Result{false, fmt::format("Field '{}' can't be added", item)};
-      }
+  case crane::grpc::ModifyEntityRequest_OperatorType_Add:
+    if (item == "allowed_partition") {
+      return AddAccountAllowedPartition_(name, value);
+    } else if (item == "allowed_qos_list") {
+      return AddAccountAllowedQos_(name, value);
+    } else {
+      return Result{false, fmt::format("Field '{}' can't be added", item)};
+    }
 
-    case crane::grpc::ModifyEntityRequest_OperatorType_Overwrite:
-      if (item == "description") {
-        return SetAccountDescription_(name, value);
-      } else if (item == "allowed_partition") {
-        return SetAccountAllowedPartition_(name, value, force);
-      } else if (item == "allowed_qos_list") {
-        return SetAccountAllowedQos_(name, value, force);
-      } else if (item == "default_qos") {
-        return SetAccountDefaultQos_(name, value);
-      } else {
-        return Result{false, fmt::format("Field '{}' can't be set", item)};
-      }
+  case crane::grpc::ModifyEntityRequest_OperatorType_Overwrite:
+    if (item == "description") {
+      return SetAccountDescription_(name, value);
+    } else if (item == "allowed_partition") {
+      return SetAccountAllowedPartition_(name, value, force);
+    } else if (item == "allowed_qos_list") {
+      return SetAccountAllowedQos_(name, value, force);
+    } else if (item == "default_qos") {
+      return SetAccountDefaultQos_(name, value);
+    } else {
+      return Result{false, fmt::format("Field '{}' can't be set", item)};
+    }
 
-    case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
-      if (item == "allowed_partition") {
-        return DeleteAccountAllowedPartition_(name, value, force);
-      } else if (item == "allowed_qos_list") {
-        return DeleteAccountAllowedQos_(name, value, force);
-      } else {
-        return Result{false, fmt::format("Field '{}' can't be deleted", item)};
-      }
+  case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
+    if (item == "allowed_partition") {
+      return DeleteAccountAllowedPartition_(name, value, force);
+    } else if (item == "allowed_qos_list") {
+      return DeleteAccountAllowedQos_(name, value, force);
+    } else {
+      return Result{false, fmt::format("Field '{}' can't be deleted", item)};
+    }
 
-    default:
-      return Result{true};
+  default:
+    return Result{true};
   }
 }
 
 AccountManager::Result AccountManager::ModifyQos(const std::string& name,
                                                  const std::string& item,
                                                  const std::string& value) {
+  bool value_is_number{false};
+  int64_t value_number;
+  if (item != Qos::FieldStringOfDescription()) {
+    bool ok = util::ConvertStringToInt64(value, &value_number);
+    if (!ok) return Result{false, "Failed to convert value to integer"};
+
+    value_is_number = true;
+
+    if (item == Qos::FieldStringOfMaxTimeLimitPerTask() &&
+        !CheckIfTimeLimitSecIsValid(value_number))
+      return Result{false, "Invalid time limit value"};
+  }
+
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const Qos* p = GetExistedQosInfoNoLock_(name);
@@ -646,10 +659,9 @@ AccountManager::Result AccountManager::ModifyQos(const std::string& name,
       return Result{false, "Fail to update the database"};
     }
   } else {
-    if (!g_db_client->UpdateEntityOne(
-            MongodbClient::EntityType::QOS, "$set", name, item,
-            std::stol(
-                value) /*uint32 Type Stores data based on long(int64_t)*/)) {
+    /* uint32 Type Stores data based on long(int64_t) */
+    if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                      name, item, value_number)) {
       return Result{false, "Fail to update the database"};
     }
   }
@@ -797,7 +809,7 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
 
   task->qos_priority = qos_share_ptr->priority;
 
-  if (task->time_limit >= absl::Seconds(kMaxTimeLimitSecond)) {
+  if (task->time_limit >= absl::Seconds(kTaskMaxTimeLimitSec)) {
     task->time_limit = qos_share_ptr->max_time_limit_per_task;
   } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
     return result::fail("time-limit reached the user's limit.");

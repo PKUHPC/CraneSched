@@ -882,8 +882,9 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     // Add a timer to limit the execution time of a task.
     // Note: event_new and event_add in this function is not thread safe,
     //       so we move it outside the multithreading part.
-    this_->EvAddTerminationTimer_(instance,
-                                  instance->task.time_limit().seconds());
+    int64_t sec = instance->task.time_limit().seconds();
+    this_->EvAddTerminationTimer_(instance, sec);
+    CRANE_TRACE("Add a timer of {} seconds for task #{}", sec, task_id);
 
     g_thread_pool->detach_task(
         [this_, instance]() { this_->LaunchTaskInstanceMt_(instance); });
@@ -1273,6 +1274,7 @@ bool TaskManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
 
 void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+  absl::Time now = absl::Now();
 
   EvQueueChangeTaskTimeLimit elem;
   while (this_->m_task_time_limit_change_queue_.try_dequeue(elem)) {
@@ -1285,12 +1287,10 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
           absl::FromUnixSeconds(task_instance->task.start_time().seconds());
       absl::Duration const& new_time_limit = elem.time_limit;
 
-      if (absl::Now() - start_time >= new_time_limit) {
+      if (now - start_time >= new_time_limit) {
         // If the task times out, terminate it.
-        EvQueueTaskTerminate ev_task_terminate{
-            .task_id = elem.task_id,
-            .terminated_by_timeout = true,
-        };
+        EvQueueTaskTerminate ev_task_terminate{.task_id = elem.task_id,
+                                               .terminated_by_timeout = true};
         this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
         event_active(this_->m_ev_task_terminate_, 0, 0);
 

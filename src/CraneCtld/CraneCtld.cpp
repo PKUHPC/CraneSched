@@ -378,30 +378,6 @@ void ParseConfig(int argc, char** argv) {
           } else
             part.priority = 0;
 
-          if (partition["default_mem_per_cpu"] &&
-              !partition["default_mem_per_cpu"].IsNull()) {
-            part.task_default_mem_per_cpu =
-                partition["default_mem_per_cpu"].as<uint32_t>() * 1024 * 1024;
-          } else
-            part.task_default_mem_per_cpu = 0;
-
-          if (partition["max_mem_per_cpu"] &&
-              !partition["max_mem_per_cpu"].IsNull()) {
-            part.task_max_mem_per_cpu =
-                partition["max_mem_per_cpu"].as<uint32_t>() * 1024 * 1024;
-          } else
-            part.task_max_mem_per_cpu = 0;
-
-          if (part.task_max_mem_per_cpu < part.task_default_mem_per_cpu) {
-            CRANE_ERROR(
-                "The partition {} max_mem_per_cpu {}MB should not"
-                "less than default_mem_per_cpu {}MB",
-                partition["name"].Scalar(),
-                partition["default_mem_per_cpu"].Scalar(),
-                partition["max_mem_per_cpu"].Scalar());
-            std::exit(1);
-          }
-
           part.nodelist_str = nodes;
           std::list<std::string> name_list;
           if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
@@ -422,6 +398,37 @@ void ParseConfig(int argc, char** argv) {
                   "and should be contained in the configuration file.",
                   node, name);
             }
+          }
+
+          if (partition["DefaultMemPerCpu"] &&
+              !partition["DefaultMemPerCpu"].IsNull()) {
+            part.default_mem_per_cpu =
+                partition["DefaultMemPerCpu"].as<uint64_t>() * 1024 * 1024;
+          }
+          if (part.default_mem_per_cpu == 0) {
+            uint64_t part_mem = 0;
+            uint32_t part_cpu = 0;
+            for (const auto& node : part.nodes) {
+              part_cpu += g_config.Nodes[node]->cpu;
+              part_mem += g_config.Nodes[node]->memory_bytes;
+            }
+            part.default_mem_per_cpu = part_mem / part_cpu;
+          }
+
+          if (partition["MaxMemPerCpu"] &&
+              !partition["MaxMemPerCpu"].IsNull()) {
+            part.max_mem_per_cpu =
+                partition["MaxMemPerCpu"].as<uint64_t>() * 1024 * 1024;
+          } else
+            part.max_mem_per_cpu = 0;
+
+          if (part.default_mem_per_cpu != 0 && part.max_mem_per_cpu != 0 &&
+              part.max_mem_per_cpu < part.default_mem_per_cpu) {
+            CRANE_ERROR(
+                "The partition {} MaxMemPerCpu {}MB should not be "
+                "less than DefaultMemPerCpu {}MB",
+                name, part.default_mem_per_cpu, part.max_mem_per_cpu);
+            std::exit(1);
           }
 
           g_config.Partitions.emplace(std::move(name), std::move(part));

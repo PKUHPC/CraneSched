@@ -174,8 +174,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
                       request->task_id()));
     } else if (err == CraneErr::kInvalidParam) {
       response->set_ok(false);
-      response->set_reason(fmt::format(
-          "Time limit of a task must be greater than {}s.", kTaskMinDuration));
+      response->set_reason("Invalid time limit value.");
     } else {
       response->set_ok(false);
       response->set_reason(
@@ -378,8 +377,16 @@ grpc::Status CraneCtldServiceImpl::AddQos(
       qos_info->priority() == 0 ? kDefaultQosPriority : qos_info->priority();
   qos.max_jobs_per_user = qos_info->max_jobs_per_user();
   qos.max_cpus_per_user = qos_info->max_cpus_per_user();
-  qos.max_time_limit_per_task =
-      absl::Seconds(qos_info->max_time_limit_per_task());
+
+  int64_t sec = qos_info->max_time_limit_per_task();
+  if (!CheckIfTimeLimitSecIsValid(sec)) {
+    response->set_ok(false);
+    response->set_reason(fmt::format("Time limit should be in [{}, {}] seconds",
+                                     kTaskMinTimeLimitSec,
+                                     kTaskMaxTimeLimitSec));
+    return grpc::Status::OK;
+  }
+  qos.max_time_limit_per_task = absl::Seconds(sec);
 
   AccountManager::Result result = g_account_manager->AddQos(qos);
   if (result.ok) {

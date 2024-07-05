@@ -218,6 +218,12 @@ message TaskInfo {
     string pending_reason = 35;
     string craned_list = 36;
   }
+
+  // The time of different nodes across the whole cluster might not always be synchronized.
+  // If the time on the front end node is more than several seconds ahead of the CraneCtld node,
+  // a negative elapsed time might occur.
+  // To avoid this, the elapsed time of a task is calculated on the CraneCtld side.
+  google.protobuf.Duration elapsed_time = 37;
 }
 
 message PartitionInfo {

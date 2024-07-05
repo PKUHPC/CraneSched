@@ -664,7 +664,7 @@ void TaskScheduler::ScheduleThread_() {
         for (CranedId const& craned_id : task->CranedIds()) {
           CgroupSpec spec{.uid = task->uid,
                           .task_id = task->TaskId(),
-                          .resources = task->TaskToCtld().resources()};
+                          .resources = (crane::grpc::Resources)task->resources};
           craned_cgroup_map[craned_id].emplace_back(std::move(spec));
         }
       }
@@ -941,7 +941,7 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
 }
 
 CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
-  if (secs <= kTaskMinDuration) return CraneErr::kInvalidParam;
+  if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErr::kInvalidParam;
 
   std::vector<CranedId> craned_ids;
 
@@ -1500,6 +1500,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 void TaskScheduler::QueryTasksInRam(
     const crane::grpc::QueryTasksInfoRequest* request,
     crane::grpc::QueryTasksInfoReply* response) {
+  auto now = absl::Now();
   auto* task_list = response->mutable_task_info_list();
 
   auto append_fn = [&](auto& it) {
@@ -1530,12 +1531,13 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_exit_code(0);
     task_it->set_priority(task.cached_priority);
 
-    task_it->set_status(task.RuntimeAttr().status());
-    if (task.RuntimeAttr().status() == crane::grpc::Pending) {
+    task_it->set_status(task.Status());
+    if (task.Status() == crane::grpc::Pending) {
       task_it->set_pending_reason(task.pending_reason);
     } else {
-      task_it->set_craned_list(
-          util::HostNameListToStr(task.RuntimeAttr().craned_ids()));
+      task_it->set_craned_list(task.allocated_craneds_regex);
+      task_it->mutable_elapsed_time()->set_seconds(
+          ToInt64Seconds(now - task.StartTime()));
     }
   };
 
@@ -2389,6 +2391,32 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 }
 
 CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
+  auto part_it = g_config.Partitions.find(task->partition_id);
+  if (part_it == g_config.Partitions.end()) return CraneErr::kInvalidParam;
+
+  task->partition_priority = part_it->second.priority;
+
+  Config::Partition const& part_meta = part_it->second;
+
+  AllocatableResource const& task_alloc_res =
+      task->resources.allocatable_resource;
+  double core_double = static_cast<double>(task_alloc_res.cpu_count);
+
+  double task_mem_per_cpu = (double)task_alloc_res.memory_bytes / core_double;
+  if (task_alloc_res.memory_bytes == 0) {
+    // If a task leaves its memory bytes to 0,
+    // use the partition's default value.
+    task_mem_per_cpu = part_meta.default_mem_per_cpu;
+  } else if (part_meta.max_mem_per_cpu != 0) {
+    // If a task sets its memory bytes,
+    // check if memory/core ratio is greater than the partition's maximum value.
+    task_mem_per_cpu =
+        std::min(task_mem_per_cpu, (double)part_meta.max_mem_per_cpu);
+  }
+  uint64_t mem_bytes = core_double * task_mem_per_cpu;
+  task->resources.allocatable_resource.memory_bytes = mem_bytes;
+  task->resources.allocatable_resource.memory_sw_bytes = mem_bytes;
+
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
       task->Username(), task->account, task);
   if (check_qos_result.has_error()) {
@@ -2396,11 +2424,6 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
                 check_qos_result.error());
     return CraneErr::kInvalidParam;
   }
-
-  auto part_it = g_config.Partitions.find(task->partition_id);
-  if (part_it == g_config.Partitions.end()) return CraneErr::kInvalidParam;
-
-  task->partition_priority = part_it->second.priority;
 
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;
@@ -2422,7 +2445,7 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 }
 
 CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
-  if (task->time_limit <= absl::Seconds(kTaskMinDuration))
+  if (!CheckIfTimeLimitIsValid(task->time_limit))
     return CraneErr::kInvalidParam;
 
   // Check whether the selected partition is able to run this task.
