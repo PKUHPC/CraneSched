@@ -45,11 +45,11 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
   }
 
   std::string object_account = new_user.default_account;
-
   const std::string name = new_user.name;
 
   // Avoid duplicate insertion
   const User* find_user = GetUserInfoNoLock_(name);
+  User res_user;
   if (find_user && !find_user->deleted) {
     if (find_user->account_to_attrs_map.contains(object_account)) {
       return Result{false,
@@ -57,12 +57,15 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
                                 object_account)};
     } else {
       // Add account to user's map
-      new_user = *find_user;
-      new_user.account_to_attrs_map[object_account];
+      res_user = *find_user;
+      res_user.account_to_attrs_map[object_account] =
+          new_user.account_to_attrs_map[object_account];
       if (add_coordinator) {
-        new_user.coordinator_accounts.push_back(object_account);
+        res_user.coordinator_accounts.push_back(object_account);
       }
     }
+  } else {
+    res_user = std::move(new_user);
   }
 
   // Check whether the account exists
@@ -73,11 +76,11 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
 
   const std::list<std::string>& parent_allowed_partition =
       find_account->allowed_partition;
-  if (!new_user.account_to_attrs_map[object_account]
+  if (!res_user.account_to_attrs_map[object_account]
            .allowed_partition_qos_map.empty()) {
     // Check if user's allowed partition is a subset of parent's allowed
     // partition
-    for (auto&& [partition, qos] : new_user.account_to_attrs_map[object_account]
+    for (auto&& [partition, qos] : res_user.account_to_attrs_map[object_account]
                                        .allowed_partition_qos_map) {
       if (std::find(parent_allowed_partition.begin(),
                     parent_allowed_partition.end(),
@@ -93,14 +96,14 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
   } else {
     // Inherit
     for (const auto& partition : parent_allowed_partition) {
-      new_user.account_to_attrs_map[object_account]
+      res_user.account_to_attrs_map[object_account]
           .allowed_partition_qos_map[partition] =
           std::pair<std::string, std::list<std::string>>{
               find_account->default_qos,
               std::list<std::string>{find_account->allowed_qos_list}};
     }
   }
-  new_user.account_to_attrs_map[object_account].blocked = false;
+  res_user.account_to_attrs_map[object_account].blocked = false;
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -117,13 +120,13 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
         if (find_user) {
           // There is a same user but was deleted or user would like to add user
           // to a new account,here will overwrite it with the same name
-          g_db_client->UpdateUser(new_user);
+          g_db_client->UpdateUser(res_user);
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
                                        name, "creation_time",
                                        ToUnixSeconds(absl::Now()));
         } else {
           // Insert the new user
-          g_db_client->InsertUser(new_user);
+          g_db_client->InsertUser(res_user);
         }
       };
 
@@ -135,7 +138,7 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
   if (add_coordinator) {
     m_account_map_[object_account]->coordinators.emplace_back(name);
   }
-  m_user_map_[name] = std::make_unique<User>(std::move(new_user));
+  m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
   return Result{true};
 }
@@ -1964,6 +1967,16 @@ AccountManager::Result AccountManager::DeleteAccountAllowedPartition_(
     return Result{false, fmt::format("Unknown account '{}'", name)};
   }
 
+  if (std::find(account->allowed_partition.begin(),
+                account->allowed_partition.end(),
+                partition) == account->allowed_partition.end()) {
+    return Result{
+        false,
+        fmt::format(
+            "Partition '{}' not in allowed partition list of account '{}'",
+            partition, name)};
+  }
+
   if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account, partition)) {
     return Result{
         false, fmt::format(
@@ -1997,10 +2010,9 @@ AccountManager::Result AccountManager::DeleteAccountAllowedQos_(
     return Result{false, fmt::format("Unknown account '{}'", name)};
   }
 
-  auto iter = std::find(account->allowed_qos_list.begin(),
-                        account->allowed_qos_list.end(), qos);
-
-  if (iter == account->allowed_qos_list.end()) {
+  if (std::find(account->allowed_qos_list.begin(),
+                account->allowed_qos_list.end(),
+                qos) == account->allowed_qos_list.end()) {
     return Result{
         false, fmt::format("Qos '{}' is not in account '{}''s allowed qos list",
                            qos, name)};
