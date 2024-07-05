@@ -253,6 +253,19 @@ bool TaskScheduler::Init() {
                                                        task->uid);
           }
 
+          task->SetStatus(crane::grpc::Pending);
+
+          task->nodes_alloc = 0;
+          task->allocated_craneds_regex.clear();
+          task->CranedIdsClear();
+
+          ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
+              0, task->TaskDbId(), task->RuntimeAttr());
+          if (!ok) {
+            CRANE_ERROR(
+                "Failed to call "
+                "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
+          }
           // Now the task is moved to the embedded pending queue.
           RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
         }
