@@ -1041,7 +1041,7 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
     task->time_limit = absl::Seconds(secs);
     task->MutableTaskToCtld()->mutable_time_limit()->set_seconds(secs);
     g_embedded_db_client->UpdateTaskToCtldIfExists(0, task->TaskDbId(),
-                                                  task->TaskToCtld());
+                                                   task->TaskToCtld());
   }
 
   // Only send request to the executing node
@@ -2696,7 +2696,10 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
 
   std::vector<std::pair<TaskInCtld*, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
-    if (task->held) continue;
+    if (task->held) {
+      task->pending_reason = "Held";
+      continue;
+    }
     // Admin may manually specify the priority of a task.
     // In this case, MultiFactorPriority will not calculate the priority.
     double priority = (task->mandated_priority == 0.0)
