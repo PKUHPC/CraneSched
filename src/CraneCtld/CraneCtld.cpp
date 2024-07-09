@@ -47,7 +47,7 @@ void ParseConfig(int argc, char** argv) {
       cxxopts::value<std::string>()->default_value("0.0.0.0"))
       ("p,port", "Listening port, format: <IP>:<port>",
       cxxopts::value<std::string>()->default_value(kCtldDefaultPort))
-      ("V,version", "Display version information")
+      ("v,version", "Display version information")
       ("h,help", "Display help for CraneCtld")
       ;
   // clang-format on

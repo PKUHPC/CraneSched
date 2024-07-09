@@ -51,7 +51,7 @@ void ParseConfig(int argc, char** argv) {
        cxxopts::value<std::string>()->default_value(fmt::format("{}{}",kDefaultCraneBaseDir, kDefaultCranedLogPath)))
       ("D,debug-level", "Logging level of Craned, format: <trace|debug|info|warn|error>", 
        cxxopts::value<std::string>()->default_value("info"))
-      ("V,version", "Display version information")
+      ("v,version", "Display version information")
       ("h,help", "Display help for Craned")
       ;
   // clang-format on
