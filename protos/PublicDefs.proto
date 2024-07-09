@@ -47,12 +47,16 @@ enum PartitionState {
   PARTITION_DOWN = 1;
 }
 
-enum CranedState {
+enum CranedResourceState {
   CRANE_IDLE = 0;
   CRANE_MIX = 1;
   CRANE_ALLOC = 2;
   CRANE_DOWN = 3;
-  CRANE_DRAIN = 4;
+}
+
+enum CranedControlState {
+  CRANE_NONE = 0;
+  CRANE_DRAIN = 1;
 }
 
 enum TaskStatus {
@@ -243,22 +247,24 @@ message PartitionInfo {
 
 message CranedInfo {
   string hostname = 1;
-  CranedState state = 2;
-  double cpu = 3;
-  double alloc_cpu = 4;
-  double free_cpu = 5;
-  uint64 real_mem = 6;
-  uint64 alloc_mem = 7;
-  uint64 free_mem = 8;
-  repeated string partition_names = 9;
-  uint32 running_task_num = 10;
+  CranedResourceState resource_state = 2;
+  CranedControlState control_state = 3;
+  double cpu = 4;
+  double alloc_cpu = 5;
+  double free_cpu = 6;
+  uint64 real_mem = 7;
+  uint64 alloc_mem = 8;
+  uint64 free_mem = 9;
+  repeated string partition_names = 10;
+  uint32 running_task_num = 11;
 }
 
 message TrimmedPartitionInfo {
   message TrimmedCranedInfo {
-    CranedState state = 1;
-    uint32 count = 2;
-    string craned_list_regex = 3;
+    CranedResourceState resource_state = 1;
+    CranedControlState control_state = 2;
+    uint32 count = 3;
+    string craned_list_regex = 4;
   }
 
   string name = 1;
