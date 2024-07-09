@@ -22,6 +22,10 @@
 
 #include "protos/Crane.pb.h"
 
+#if !defined(CRANE_VERSION_STRING)
+#  define CRANE_VERSION_STRING "Unknown"
+#endif
+
 using task_id_t = uint32_t;
 
 enum class CraneErr : uint16_t {
