@@ -2069,7 +2069,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
             craned_meta->res_total.dedicated_resource.at(craned_id)
                 .at(device_name)
                 .at(device_type);
-        CRANE_ASSERT(avail_slots.size() >= type_count);
+        if (avail_slots.size() < type_count) return false;
         auto it = avail_slots.begin();
         for (size_t i = 0; i < type_count; ++i) {
           if (it == avail_slots.end()) {
@@ -2099,6 +2099,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           if (name_count == 0) break;
         }
       }
+      if (name_count != 0) return false;
     }
   }
   for (CranedId craned_id : craned_indexes_) {

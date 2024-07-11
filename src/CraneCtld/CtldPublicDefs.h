@@ -445,11 +445,12 @@ struct TaskInCtld {
     resources.allocatable_resource = val.resources().allocatable_resource();
 
     for (const auto& [name, type_count_map] :
-         val.resources().dedicated_resource_req().device_req()) {
+         val.resources().dedicated_resource_req().name_type_map()) {
       std::unordered_map<std::string, uint64_t> tmp(
-          type_count_map.device_count_map().begin(),
-          type_count_map.device_count_map().end());
-      request_gres.emplace(name, std::make_pair(type_count_map.total(), tmp));
+          type_count_map.type_count_map().begin(),
+          type_count_map.type_count_map().end());
+      request_gres.emplace(
+          name, std::make_pair(type_count_map.total(), std::move(tmp)));
     }
 
     time_limit = absl::Seconds(val.time_limit().seconds());

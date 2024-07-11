@@ -237,9 +237,9 @@ CraneErr CranedStub::QueryActualGres(DedicatedResourceInNode &resource) {
   for (const auto &[device_name, type_slots_map] : reply.dedicated_resource()
                                                        .each_node_gres()
                                                        .at(m_craned_id_)
-                                                       .name_tpye_map()) {
+                                                       .name_type_map()) {
     for (const auto &[device_type, slot_id_set] :
-         type_slots_map.type_slot_map()) {
+         type_slots_map.type_slots_map()) {
       resource.name_type_slots_map[device_name][device_type].insert(
           slot_id_set.slots().begin(), slot_id_set.slots().end());
     }
@@ -278,17 +278,18 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
                                          ->mutable_each_node_gres();
       for (const auto &craned_id : task->CranedIds()) {
         crane::grpc::DedicatedResourceInNode resource_in_node;
-        for (const auto &[device_name, type_slot_id_map] :
+        for (const auto &[device_name, type_slots_map] :
              task->resources.dedicated_resource.at(craned_id)
                  .name_type_slots_map) {
           crane::grpc::DeviceTypeSlotsMap device_type_slots_map;
-          for (const auto &[device_type, slot_id_set] : type_slot_id_map) {
-            crane::grpc::Slots slots;
-            slots.mutable_slots()->Add(slot_id_set.begin(), slot_id_set.end());
-            device_type_slots_map.mutable_type_slot_map()->emplace(
-                device_type, std::move(slots));
+          for (const auto &[device_type, slots] :
+               type_slots_map.type_slots_map) {
+            crane::grpc::Slots grpc_slots;
+            grpc_slots.mutable_slots()->Add(slots.begin(), slots.end());
+            device_type_slots_map.mutable_type_slots_map()->emplace(
+                device_type, std::move(grpc_slots));
           }
-          resource_in_node.mutable_name_tpye_map()->emplace(
+          resource_in_node.mutable_name_type_map()->emplace(
               device_name, std::move(device_type_slots_map));
         }
         mutable_each_node_gres->emplace(craned_id, resource_in_node);

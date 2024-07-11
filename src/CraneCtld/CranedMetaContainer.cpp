@@ -349,7 +349,7 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
       auto* mutable_device_map = craned_info->mutable_device();
       for (const auto& [device_name, type_slots_map] :
            dedicated_res_total.at(craned_index).name_type_slots_map) {
-        for (const auto& [device_type, slots] : type_slots_map) {
+        for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
           mutable_device_map->mutable_name_type_map()
               ->at(device_name)
               .mutable_type_count_map()
@@ -363,7 +363,7 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
       for (const auto& [device_name, type_slots_map] :
            dedicated_res_in_use.craned_id_gres_map.at(craned_index)
                .name_type_slots_map) {
-        for (const auto& [device_type, slots] : type_slots_map) {
+        for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
           mutable_alloc_device_map->mutable_name_type_map()
               ->at(device_name)
               .mutable_type_count_map()
@@ -377,7 +377,7 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
       for (const auto& [device_name, type_slots_map] :
            dedicated_res_avail.craned_id_gres_map.at(craned_index)
                .name_type_slots_map) {
-        for (const auto& [device_type, slots] : type_slots_map) {
+        for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
           mutable_avail_device_map->mutable_name_type_map()
               ->at(device_name)
               .mutable_type_count_map()
@@ -454,7 +454,7 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
     auto* mutable_device_map = craned_info->mutable_device();
     for (const auto& [device_name, type_slots_map] :
          dedicated_res_total.at(node_name).name_type_slots_map) {
-      for (const auto& [device_type, slots] : type_slots_map) {
+      for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
         mutable_device_map->mutable_name_type_map()
             ->at(device_name)
             .mutable_type_count_map()
@@ -468,7 +468,7 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
     for (const auto& [device_name, type_slots_map] :
          dedicated_res_in_use.craned_id_gres_map.at(node_name)
              .name_type_slots_map) {
-      for (const auto& [device_type, slots] : type_slots_map) {
+      for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
         mutable_alloc_device_map->mutable_name_type_map()
             ->at(device_name)
             .mutable_type_count_map()
@@ -482,7 +482,7 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
     for (const auto& [device_name, type_slots_map] :
          dedicated_res_avail.craned_id_gres_map.at(node_name)
              .name_type_slots_map) {
-      for (const auto& [device_type, slots] : type_slots_map) {
+      for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
         mutable_avail_device_map->mutable_name_type_map()
             ->at(device_name)
             .mutable_type_count_map()
@@ -575,7 +575,8 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
       if (dedicated_res_total.contains(craned_id)) {
         for (const auto& [device_name, type_slots_map] :
              dedicated_res_total.at(craned_id).name_type_slots_map) {
-          for (const auto& [device_type, slots] : type_slots_map) {
+          for (const auto& [device_type, slots] :
+               type_slots_map.type_slots_map) {
             mutable_device_map->mutable_name_type_map()
                 ->at(device_name)
                 .mutable_type_count_map()
@@ -588,7 +589,8 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
         for (const auto& [device_name, type_slots_map] :
              dedicated_res_in_use.craned_id_gres_map.at(craned_id)
                  .name_type_slots_map) {
-          for (const auto& [device_type, slots] : type_slots_map) {
+          for (const auto& [device_type, slots] :
+               type_slots_map.type_slots_map) {
             mutable_alloc_device_map->mutable_name_type_map()
                 ->at(device_name)
                 .mutable_type_count_map()
@@ -601,7 +603,8 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
         for (const auto& [device_name, type_slots_map] :
              dedicated_res_avail.craned_id_gres_map.at(craned_id)
                  .name_type_slots_map) {
-          for (const auto& [device_type, slots] : type_slots_map) {
+          for (const auto& [device_type, slots] :
+               type_slots_map.type_slots_map) {
             mutable_avail_device_map->mutable_name_type_map()
                 ->at(device_name)
                 .mutable_type_count_map()
@@ -664,7 +667,7 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
     if (dedicated_res_total.contains(craned_id)) {
       for (const auto& [device_name, type_slots_map] :
            dedicated_res_total.at(craned_id).name_type_slots_map) {
-        for (const auto& [device_type, slots] : type_slots_map) {
+        for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
           mutable_device_map->mutable_name_type_map()
               ->at(device_name)
               .mutable_type_count_map()
@@ -677,7 +680,7 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
       for (const auto& [device_name, type_slots_map] :
            dedicated_res_in_use.craned_id_gres_map.at(craned_id)
                .name_type_slots_map) {
-        for (const auto& [device_type, slots] : type_slots_map) {
+        for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
           mutable_alloc_device_map->mutable_name_type_map()
               ->at(device_name)
               .mutable_type_count_map()
@@ -690,7 +693,7 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
       for (const auto& [device_name, type_slots_map] :
            dedicated_res_avail.craned_id_gres_map.at(craned_id)
                .name_type_slots_map) {
-        for (const auto& [device_type, slots] : type_slots_map) {
+        for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
           mutable_avail_device_map->mutable_name_type_map()
               ->at(device_name)
               .mutable_type_count_map()
@@ -922,15 +925,15 @@ void CranedMetaContainerSimpleImpl::AddDedicatedResource(
     auto& this_name_to_add =
         res_to_add[node_id].name_type_slots_map[device_name];
     std::set<std::string> tmp;
-    for (const auto& [type, slots] : type_slots_map) {
+    for (const auto& [type, slots] : type_slots_map.type_slots_map) {
       tmp.clear();
       std::ranges::set_difference(this_name_constraint.at(type),
                                   this_name_avail_current.at(type),
                                   std::inserter(tmp, tmp.begin()));
       std::ranges::set_intersection(
           tmp, slots,
-          std::inserter(this_name_to_add.at(type),
-                        this_name_to_add.at(type).begin()));
+          std::inserter(this_name_to_add[type],
+                        this_name_to_add[type].begin()));
     }
   }
 
