@@ -313,6 +313,8 @@ bool MongodbClient::FetchJobRecords(
       task->set_username(view["username"].get_string().value.data());
       task->set_alloc_cpu(view["cpus_req"].get_double().value *
                           task->node_num());
+      task->set_cpu(view["cpus_req"].get_double().value);
+      task->set_mem(view["mem_req"].get_int64().value);
       task->set_name(std::string(view["task_name"].get_string().value));
       task->set_qos(std::string(view["qos"].get_string().value));
       task->set_uid(view["id_user"].get_int32().value);

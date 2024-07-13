@@ -1539,6 +1539,9 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_cwd(task.cwd);
     task_it->set_username(task.Username());
     task_it->set_qos(task.qos);
+    task_it->set_cpu(
+        static_cast<double>(task.resources.allocatable_resource.cpu_count));
+    task_it->set_mem(task.resources.allocatable_resource.memory_bytes);
 
     task_it->set_alloc_cpu(
         static_cast<double>(task.resources.allocatable_resource.cpu_count) *

@@ -212,6 +212,8 @@ message TaskInfo {
   string cwd = 14;
   string username = 15;
   string qos = 16;
+  double cpu = 17;
+  uint64 mem = 18;
 
   // Dynamic task information
   TaskStatus status = 31;
