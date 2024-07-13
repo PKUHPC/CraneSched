@@ -20,8 +20,11 @@
 #include <event2/thread.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/sysinfo.h>
+#include <sys/utsname.h>
 #include <yaml-cpp/yaml.h>
 
+#include <ctime>
 #include <cxxopts.hpp>
 
 #include "CforedClient.h"
@@ -521,6 +524,20 @@ void ParseConfig(int argc, char** argv) {
 
   g_config.CranedIdOfThisNode = g_config.Hostname;
   CRANE_INFO("CranedId of this machine: {}", g_config.CranedIdOfThisNode);
+  {
+    auto& meta = g_config.CranedMeta;
+    auto ok = util::os::GetSystemReleaseInfo(
+        &meta.SystemName, &meta.SystemRelease, &meta.SystemVersion);
+    if (!ok) {
+      CRANE_ERROR("Error when get system release info");
+      meta.SystemName = "";
+      meta.SystemRelease = "";
+      meta.SystemVersion = "";
+    }
+  }
+  g_config.CranedMeta.CranedStartTime = absl::Now();
+
+  g_config.CranedMeta.SystemBootTime = util::os::GetSystemBootTime();
 }
 
 void CreateRequiredDirectories() {

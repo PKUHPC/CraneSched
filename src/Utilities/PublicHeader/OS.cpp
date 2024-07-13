@@ -16,6 +16,15 @@
 
 #include "crane/OS.h"
 
+#ifdef _WIN32
+#  error "Unsupported OS\n"
+#elif __linux__ || __unix__
+#  include <sys/sysinfo.h>
+#  include <sys/utsname.h>
+#else
+#  error "Unidentified OS\n"
+#endif
+
 namespace util {
 
 namespace os {
@@ -100,6 +109,44 @@ bool SetMaxFileDescriptorNumber(unsigned long num) {
   rlim.rlim_max = num;
 
   return setrlimit(RLIMIT_NOFILE, &rlim) == 0;
+}
+
+bool GetSystemReleaseInfo(std::string* system_name, std::string* system_release,
+                          std::string* system_version) {
+#ifdef _WIN32
+  // Windows
+#elif __linux__ || __unix__
+  utsname utsname_info{};
+
+  if (uname(&utsname_info) != -1) {
+    *system_name = utsname_info.sysname;
+    *system_release = utsname_info.release;
+    *system_version = utsname_info.version;
+    return true;
+  } else {
+    return false;
+  }
+#else
+  // Unidentified OS
+#endif
+}
+
+absl::Time GetSystemBootTime() {
+#ifdef _WIN32
+  // Windows
+#elif __linux__ || __unix__
+  struct sysinfo system_info;
+  if (sysinfo(&system_info) != 0) {
+    CRANE_ERROR("Failed to get sysinfo {}.", strerror(errno));
+    return absl::Time();
+  } else {
+    absl::Time current_time = absl::FromTimeT(time(nullptr));
+    absl::Duration uptime = absl::Seconds(system_info.uptime);
+    return current_time - uptime;
+  }
+#else
+  // Unidentified OS
+#endif
 }
 
 }  // namespace os

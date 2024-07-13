@@ -56,7 +56,11 @@ class CranedStub {
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
-  CraneErr QueryActualDres(DedicatedResourceInNode *resource);
+  CraneErr QueryCranedMeta(DedicatedResourceInNode *resource,
+                           std::string *craned_version,
+                           std::string *craned_system,
+                           absl::Time *craned_start_time,
+                           absl::Time *system_boot_time);
 
   bool Invalid() const { return m_invalid_; }
 

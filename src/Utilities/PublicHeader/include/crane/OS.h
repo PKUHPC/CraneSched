@@ -50,6 +50,10 @@ void SetCloseOnExecFromFd(int fd_begin);
 
 bool SetMaxFileDescriptorNumber(unsigned long num);
 
+bool GetSystemReleaseInfo(std::string* system_name, std::string* system_release,
+                          std::string* system_version);
+
+absl::Time GetSystemBootTime();
 }  // namespace os
 
 }  // namespace util

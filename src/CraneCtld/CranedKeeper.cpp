@@ -220,23 +220,33 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
     return CraneErr::kGenericFailure;
 }
 
-CraneErr CranedStub::QueryActualDres(DedicatedResourceInNode *resource) {
-  using crane::grpc::QueryActualDresReply;
-  using crane::grpc::QueryActualDresRequest;
+CraneErr CranedStub::QueryCranedMeta(DedicatedResourceInNode *resource,
+                                     std::string *craned_version,
+                                     std::string *craned_system,
+                                     absl::Time *craned_start_time,
+                                     absl::Time *system_boot_time) {
+  using crane::grpc::QueryCranedMetaReply;
+  using crane::grpc::QueryCranedMetaRequest;
   ClientContext context;
   Status grpc_status;
 
-  QueryActualDresRequest request;
-  QueryActualDresReply reply;
+  QueryCranedMetaRequest request;
+  QueryCranedMetaReply reply;
 
-  grpc_status = m_stub_->QueryActualDres(&context, request, &reply);
+  grpc_status = m_stub_->QueryCranedMeta(&context, request, &reply);
   if (!grpc_status.ok()) {
-    CRANE_ERROR("QueryActualGres to Craned {} failed: {} ", m_craned_id_,
+    CRANE_ERROR("QueryCranedMeta to Craned {} failed: {} ", m_craned_id_,
                 grpc_status.error_message());
     return CraneErr::kRpcFailure;
   }
 
   *resource = static_cast<DedicatedResourceInNode>(reply.dres_in_node());
+
+  *craned_version = reply.craned_version();
+  *craned_system = reply.craned_system();
+  *craned_start_time =
+      absl::FromUnixSeconds(reply.craned_start_time().seconds());
+  *system_boot_time = absl::FromUnixSeconds(reply.system_boot_time().seconds());
 
   if (reply.ok())
     return CraneErr::kOk;

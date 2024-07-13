@@ -183,6 +183,11 @@ struct CranedMeta {
 
   bool drain{false};
   std::string state_reason;
+  std::string craned_version;
+  std::string craned_system;
+  absl::Time craned_start_time;
+  absl::Time system_boot_time;
+  absl::Time last_busy_time;
 
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
@@ -571,10 +576,16 @@ struct TaskInCtld {
     task_info->set_node_num(node_num);
     task_info->set_cmd_line(cmd_line);
     task_info->set_cwd(cwd);
+    task_info->mutable_req_nodes()->Assign(included_nodes.begin(),
+                                         included_nodes.end());
+    task_info->mutable_exclude_nodes()->Assign(excluded_nodes.begin(),
+                                             excluded_nodes.end());
 
     task_info->set_extra_attr(extra_attr);
 
     task_info->set_held(held);
+    task_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
+                                              executing_craned_ids.end());
 
     *task_info->mutable_res_view() =
         static_cast<crane::grpc::ResourceView>(requested_node_res_view);

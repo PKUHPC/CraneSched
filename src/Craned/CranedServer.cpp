@@ -475,14 +475,24 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::QueryActualDres(
+grpc::Status CranedServiceImpl::QueryCranedMeta(
     grpc::ServerContext *context,
-    const ::crane::grpc::QueryActualDresRequest *request,
-    crane::grpc::QueryActualDresReply *response) {
-  const auto &dedicated_resource =
+    const ::crane::grpc::QueryCranedMetaRequest *request,
+    crane::grpc::QueryCranedMetaReply *response) {
+  auto &dedicated_resource =
       g_config.CranedNodes[g_config.CranedIdOfThisNode]->dedicated_resource;
   response->mutable_dres_in_node()->CopyFrom(
       static_cast<crane::grpc::DedicatedResourceInNode>(dedicated_resource));
+
+  response->set_craned_version(CRANE_VERSION_STRING);
+  response->set_craned_system(fmt::format(
+      "{} {} {}", g_config.CranedMeta.SystemName,
+      g_config.CranedMeta.SystemRelease, g_config.CranedMeta.SystemVersion));
+  response->mutable_craned_start_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.CranedStartTime));
+  response->mutable_system_boot_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
+
   response->set_ok(true);
   return Status::OK;
 }
