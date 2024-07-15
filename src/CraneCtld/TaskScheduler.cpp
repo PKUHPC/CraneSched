@@ -1521,13 +1521,13 @@ void TaskScheduler::QueryTasksInRam(
   auto append_fn = [&](auto& it) {
     TaskInCtld& task = *it.second;
     auto* task_it = task_list->Add();
-    task_it->set_type(task.TaskToCtld().type());
-    task_it->set_task_id(task.RuntimeAttr().task_id());
-    task_it->set_name(task.TaskToCtld().name());
-    task_it->set_partition(task.TaskToCtld().partition_name());
-    task_it->set_uid(task.TaskToCtld().uid());
+    task_it->set_type(task.type);
+    task_it->set_task_id(task.TaskId());
+    task_it->set_name(task.name);
+    task_it->set_partition(task.partition_id);
+    task_it->set_uid(task.uid);
 
-    task_it->set_gid(task.RuntimeAttr().gid());
+    task_it->set_gid(task.Gid());
     task_it->mutable_time_limit()->set_seconds(ToInt64Seconds(task.time_limit));
     task_it->mutable_submit_time()->CopyFrom(task.RuntimeAttr().submit_time());
     task_it->mutable_start_time()->CopyFrom(task.RuntimeAttr().start_time());
@@ -1535,8 +1535,8 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_account(task.account);
 
     task_it->set_node_num(task.node_num);
-    task_it->set_cmd_line(task.TaskToCtld().cmd_line());
-    task_it->set_cwd(task.TaskToCtld().cwd());
+    task_it->set_cmd_line(task.cmd_line);
+    task_it->set_cwd(task.cwd);
     task_it->set_username(task.Username());
     task_it->set_qos(task.qos);
 
