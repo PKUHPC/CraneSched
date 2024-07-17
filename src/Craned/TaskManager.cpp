@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
+#include <linux/limits.h>
 #include <sys/stat.h>
 
 #include "CforedClient.h"
@@ -1036,8 +1037,14 @@ std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
 
   // Path ends with a directory, append default stdout file name
   // `Crane-<Job ID>.out` to the path.
-  if (absl::EndsWith(resolved_path_pattern, "/"))
+  if (absl::EndsWith(resolved_path_pattern, "/")) {
     resolved_path_pattern += fmt::format("Crane-{}.out", task_id);
+  } else {
+    // truncate file name to system maximum length
+    // i + 1(slash) + NAME_MAX - 1(terminating null)
+    int i = resolved_path_pattern.rfind("/");
+    resolved_path_pattern = resolved_path_pattern.substr(0, i+NAME_MAX);
+  }
 
   return resolved_path_pattern;
 }
