@@ -20,8 +20,11 @@
 #include <event2/thread.h>
 #include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/sysinfo.h>
+#include <sys/utsname.h>
 #include <yaml-cpp/yaml.h>
 
+#include <ctime>
 #include <cxxopts.hpp>
 
 #include "CforedClient.h"
@@ -411,6 +414,29 @@ void ParseConfig(int argc, char** argv) {
 
   g_config.CranedIdOfThisNode = g_config.Hostname;
   CRANE_INFO("CranedId of this machine: {}", g_config.CranedIdOfThisNode);
+
+  utsname utsname_info{};
+
+  if (uname(&utsname_info) != -1) {
+    g_config.CranedMeta.SystemName = utsname_info.sysname;
+    g_config.CranedMeta.SystemRelease = utsname_info.release;
+    g_config.CranedMeta.SystemVersion = utsname_info.version;
+  } else {
+    CRANE_ERROR("Failed to get uname system information.");
+    std::exit(1);
+  }
+  g_config.CranedMeta.CranedStartTime = absl::Now();
+  g_config.CranedMeta.LastBusyTime = absl::Now();
+
+  struct sysinfo system_info;
+  if (sysinfo(&system_info) != 0) {
+    CRANE_ERROR("Failed to get sysinfo.");
+    std::exit(1);
+  } else {
+    absl::Time current_time = absl::FromTimeT(time(nullptr));
+    absl::Duration uptime = absl::Seconds(system_info.uptime);
+    g_config.CranedMeta.SystemBootTime = current_time - uptime;
+  }
 }
 
 void CreateRequiredDirectories() {

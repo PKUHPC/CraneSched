@@ -259,6 +259,14 @@ message CranedInfo {
   uint64 free_mem = 9;
   repeated string partition_names = 10;
   uint32 running_task_num = 11;
+
+  string craned_version = 12;
+  string system_name = 13;
+  string system_release = 14;
+  string system_version = 15;
+  google.protobuf.Timestamp craned_start_time = 16;
+  google.protobuf.Timestamp system_boot_time = 17;
+  google.protobuf.Timestamp last_busy_time = 18;
 }
 
 message TrimmedPartitionInfo {

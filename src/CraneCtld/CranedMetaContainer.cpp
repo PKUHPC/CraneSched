@@ -16,6 +16,7 @@
 
 #include "CranedMetaContainer.h"
 
+#include "CranedKeeper.h"
 #include "crane/String.h"
 #include "protos/PublicDefs.pb.h"
 
@@ -268,7 +269,9 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
   crane::grpc::QueryCranedInfoReply reply;
   auto* list = reply.mutable_craned_info_list();
 
+  absl::Mutex reply_mutex;
   auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
+  absl::BlockingCounter bl(craned_map->size());
   for (auto&& [craned_index, craned_meta_ptr] : *craned_map) {
     auto* craned_info = list->Add();
     auto craned_meta = craned_meta_ptr.GetExclusivePtr();
@@ -313,8 +316,38 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     craned_info->mutable_partition_names()->Assign(
         craned_meta->static_meta.partition_ids.begin(),
         craned_meta->static_meta.partition_ids.end());
-  }
 
+    g_thread_pool->detach_task(
+        [&bl, craned_info, &craned_index, &reply, &reply_mutex]() {
+          auto stub = g_craned_keeper->GetCranedStub(craned_index);
+          if (stub != nullptr && !stub->Invalid()) {
+            crane::grpc::QueryCranedStatusReply rpc_reply;
+            CraneErr err = stub->QueryCranedStatus(&rpc_reply);
+            if (err != CraneErr::kOk) {
+              CRANE_ERROR("Failed to Query CranedStatus from Node {}",
+                          craned_index);
+              absl::MutexLock lock(&reply_mutex);
+              reply.add_failed_craned_name(craned_index);
+            } else {
+              craned_info->set_craned_version(rpc_reply.craned_version());
+              craned_info->set_system_name(rpc_reply.system_name());
+              craned_info->set_system_release(rpc_reply.system_release());
+              craned_info->set_system_version(rpc_reply.system_version());
+              craned_info->mutable_craned_start_time()->set_seconds(
+                  rpc_reply.craned_start_time().seconds());
+              craned_info->mutable_system_boot_time()->set_seconds(
+                  rpc_reply.system_boot_time().seconds());
+              craned_info->mutable_last_busy_time()->set_seconds(
+                  rpc_reply.last_busy_time().seconds());
+            }
+          } else {
+            absl::MutexLock lock(&reply_mutex);
+            reply.add_failed_craned_name(craned_index);
+          }
+          bl.DecrementCount();
+        });
+  }
+  bl.Wait();
   return reply;
 }
 
@@ -370,6 +403,28 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
       craned_meta->static_meta.partition_ids.begin(),
       craned_meta->static_meta.partition_ids.end());
 
+  auto stub = g_craned_keeper->GetCranedStub(node_name);
+  if (stub != nullptr && !stub->Invalid()) {
+    crane::grpc::QueryCranedStatusReply rpc_reply;
+    CraneErr err = stub->QueryCranedStatus(&rpc_reply);
+    if (err != CraneErr::kOk) {
+      CRANE_ERROR("Failed to Query CranedStatus from Node {}", node_name);
+      reply.add_failed_craned_name(node_name);
+    } else {
+      craned_info->set_craned_version(rpc_reply.craned_version());
+      craned_info->set_system_name(rpc_reply.system_name());
+      craned_info->set_system_release(rpc_reply.system_release());
+      craned_info->set_system_version(rpc_reply.system_version());
+      craned_info->mutable_craned_start_time()->set_seconds(
+          rpc_reply.craned_start_time().seconds());
+      craned_info->mutable_system_boot_time()->set_seconds(
+          rpc_reply.system_boot_time().seconds());
+      craned_info->mutable_last_busy_time()->set_seconds(
+          rpc_reply.last_busy_time().seconds());
+    }
+  } else {
+    reply.add_failed_craned_name(node_name);
+  }
   return reply;
 }
 

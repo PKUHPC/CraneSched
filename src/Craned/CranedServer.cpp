@@ -404,6 +404,24 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
   return Status::OK;
 }
 
+Status CranedServiceImpl::QueryCranedInfo(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryCranedStatusRequest *request,
+    crane::grpc::QueryCranedStatusReply *response) {
+  response->set_craned_version(CRANE_VERSION_STRING);
+  response->set_system_name(g_config.CranedMeta.SystemName);
+  response->set_system_release(g_config.CranedMeta.SystemRelease);
+  response->set_system_version(g_config.CranedMeta.SystemVersion);
+  response->mutable_craned_start_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.CranedStartTime));
+  response->mutable_system_boot_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
+  response->mutable_last_busy_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.LastBusyTime));
+
+  return Status::OK;
+}
+
 CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
