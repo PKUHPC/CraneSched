@@ -80,10 +80,22 @@ struct Config {
   std::string Hostname;
   CranedId CranedIdOfThisNode;
 
+  struct CranedMeta {
+    std::string SystemName;
+    std::string SystemRelease;
+    std::string SystemVersion;
+    absl::Time CranedStartTime;
+    absl::Time SystemBootTime;
+    absl::Time LastBusyTime;
+  };
+
+  CranedMeta CranedMeta;
   std::unordered_map<std::string, std::string> Ipv4ToCranedHostname;
   std::unordered_map<std::string, std::shared_ptr<CranedNode>> CranedNodes;
   std::unordered_map<std::string, Partition> Partitions;
 };
+
+// craned run time meta
 
 inline Config g_config;
 

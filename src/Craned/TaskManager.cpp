@@ -900,6 +900,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     //       so we move it outside the multithreading part.
     int64_t sec = instance->task.time_limit().seconds();
     this_->EvAddTerminationTimer_(instance, sec);
+    g_config.CranedMeta.LastBusyTime = absl::Now();
     CRANE_TRACE("Add a timer of {} seconds for task #{}", sec, task_id);
 
     g_thread_pool->detach_task(

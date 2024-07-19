@@ -212,6 +212,10 @@ message TaskInfo {
   string cwd = 14;
   string username = 15;
   string qos = 16;
+  double cpu = 17;
+  uint64 mem = 18;
+  repeated string req_nodes = 19;
+  repeated string exclude_nodes = 20;
 
   // Dynamic task information
   TaskStatus status = 31;
@@ -228,6 +232,7 @@ message TaskInfo {
   // a negative elapsed time might occur.
   // To avoid this, the elapsed time of a task is calculated on the CraneCtld side.
   google.protobuf.Duration elapsed_time = 37;
+  repeated string execution_node = 38;
 }
 
 message PartitionInfo {
@@ -257,6 +262,14 @@ message CranedInfo {
   uint64 free_mem = 9;
   repeated string partition_names = 10;
   uint32 running_task_num = 11;
+
+  string craned_version = 12;
+  string system_name = 13;
+  string system_release = 14;
+  string system_version = 15;
+  google.protobuf.Timestamp craned_start_time = 16;
+  google.protobuf.Timestamp system_boot_time = 17;
+  google.protobuf.Timestamp last_busy_time = 18;
 }
 
 message TrimmedPartitionInfo {

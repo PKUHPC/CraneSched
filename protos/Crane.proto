@@ -18,7 +18,7 @@ syntax = "proto3";
 
 package crane.grpc;
 option go_package = "/protos";
-
+import "google/protobuf/timestamp.proto";
 import "PublicDefs.proto";
 
 message TaskStatusChangeRequest {
@@ -132,6 +132,18 @@ message CheckTaskStatusReply {
   TaskStatus status = 2;
 }
 
+message QueryCranedStatusRequest{}
+
+message QueryCranedStatusReply {
+  string craned_version = 1;
+  string system_name = 2;
+  string system_release = 3;
+  string system_version = 4;
+  google.protobuf.Timestamp craned_start_time = 5;
+  google.protobuf.Timestamp system_boot_time = 6;
+  google.protobuf.Timestamp last_busy_time = 7;
+}
+
 message CancelTaskRequest {
   uint32 operator_uid = 1;
 
@@ -180,6 +192,7 @@ message QueryCranedInfoRequest {
 
 message QueryCranedInfoReply {
   repeated CranedInfo craned_info_list = 1;
+  repeated string failed_craned_name = 2;
 }
 
 message QueryPartitionInfoRequest {
@@ -710,7 +723,7 @@ service Craned {
   rpc TerminateTasks(TerminateTasksRequest) returns (TerminateTasksReply);
   rpc TerminateOrphanedTask(TerminateOrphanedTaskRequest) returns (TerminateOrphanedTaskReply);
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
-
+  rpc QueryCranedInfo(QueryCranedStatusRequest) returns(QueryCranedStatusReply);
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);

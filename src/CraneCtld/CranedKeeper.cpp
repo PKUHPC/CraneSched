@@ -220,6 +220,25 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
     return CraneErr::kGenericFailure;
 }
 
+CraneErr CranedStub::QueryCranedStatus(
+    crane::grpc::QueryCranedStatusReply *reply) {
+  using crane::grpc::QueryCranedStatusRequest;
+
+  ClientContext context;
+  Status grpc_status;
+
+  QueryCranedStatusRequest request{};
+  grpc_status = m_stub_->QueryCranedInfo(&context, request, reply);
+
+  if (!grpc_status.ok()) {
+    CRANE_ERROR("QueryCranedStatus to Craned {} failed: {} ", m_craned_id_,
+                grpc_status.error_message());
+    return CraneErr::kRpcFailure;
+  }
+
+  return CraneErr::kOk;
+}
+
 crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
     const std::vector<TaskInCtld *> &tasks) {
   crane::grpc::ExecuteTasksRequest request;
