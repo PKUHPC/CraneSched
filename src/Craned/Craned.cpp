@@ -447,6 +447,8 @@ void GlobalVariableInit() {
   g_thread_pool =
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
+  g_cg_mgr->InitCgroupDirectories();
+
   g_task_mgr = std::make_unique<Craned::TaskManager>();
 
   g_ctld_client = std::make_unique<Craned::CtldClient>();

@@ -149,6 +149,7 @@ void CtldClient::AsyncSendThread_() {
     if (!prev_conn_state && connected) {
       g_ctld_client->OnCraneCtldConnected();
     }
+
     prev_conn_state = connected;
 
     if (!connected) {
