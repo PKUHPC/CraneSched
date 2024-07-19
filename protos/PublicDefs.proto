@@ -214,6 +214,8 @@ message TaskInfo {
   string qos = 16;
   double cpu = 17;
   uint64 mem = 18;
+  repeated string req_nodes = 19;
+  repeated string exclude_nodes = 20;
 
   // Dynamic task information
   TaskStatus status = 31;
@@ -230,6 +232,7 @@ message TaskInfo {
   // a negative elapsed time might occur.
   // To avoid this, the elapsed time of a task is calculated on the CraneCtld side.
   google.protobuf.Duration elapsed_time = 37;
+  repeated string execution_node = 38;
 }
 
 message PartitionInfo {

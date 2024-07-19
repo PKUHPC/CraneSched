@@ -1542,12 +1542,18 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_cpu(
         static_cast<double>(task.resources.allocatable_resource.cpu_count));
     task_it->set_mem(task.resources.allocatable_resource.memory_bytes);
+    task_it->mutable_req_nodes()->Assign(task.included_nodes.begin(),
+                                         task.included_nodes.end());
+    task_it->mutable_exclude_nodes()->Assign(task.excluded_nodes.begin(),
+                                             task.excluded_nodes.end());
 
     task_it->set_alloc_cpu(
         static_cast<double>(task.resources.allocatable_resource.cpu_count) *
         task.node_num);
     task_it->set_exit_code(0);
     task_it->set_priority(task.cached_priority);
+    task_it->mutable_execution_node()->Assign(task.executing_craned_ids.begin(),
+                                              task.executing_craned_ids.end());
 
     task_it->set_status(task.Status());
     if (task.Status() == crane::grpc::Pending) {
