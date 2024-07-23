@@ -1043,7 +1043,11 @@ std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
     // truncate file name to system maximum length
     // i + 1(slash) + NAME_MAX - 1(terminating null)
     int i = resolved_path_pattern.rfind("/");
-    resolved_path_pattern = resolved_path_pattern.substr(0, i+NAME_MAX);
+    if (resolved_path_pattern.length() > i + NAME_MAX) {
+      CRANE_DEBUG("Truncate overlong file path, original path: {}",
+                  resolved_path_pattern);
+      resolved_path_pattern = resolved_path_pattern.substr(0, i+NAME_MAX);
+    }
   }
 
   return resolved_path_pattern;
