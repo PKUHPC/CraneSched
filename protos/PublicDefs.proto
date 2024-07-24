@@ -105,6 +105,9 @@ message TaskToCtld {
     InteractiveTaskAdditionalMeta interactive_meta = 22;
   }
 
+  uint32 mail_type = 23;
+  string mail_user = 24;
+
   string cmd_line = 31;
   string cwd = 32; // Current working directory
   map<string, string> env = 33;
