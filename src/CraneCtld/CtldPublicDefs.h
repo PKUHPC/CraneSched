@@ -30,9 +30,9 @@ using task_db_id_t = int64_t;
 
 constexpr uint32_t kTaskScheduleIntervalMs = 1000;
 
-// Clean ReleaseTaskQueue when timeout or exceeding batch num
-constexpr uint32_t kReleaseTaskTimeoutMs = 500;
-constexpr uint32_t kReleaseTaskBatchNum = 1000;
+// Clean TaskHoldTimerQueue when timeout or exceeding batch num
+constexpr uint32_t kTaskHoldTimerTimeoutMs = 500;
+constexpr uint32_t kTaskHoldTimerBatchNum = 1000;
 
 // Clean CancelTaskQueue when timeout or exceeding batch num
 constexpr uint32_t kCancelTaskTimeoutMs = 500;
@@ -271,7 +271,6 @@ struct TaskInCtld {
 
   bool requeue_if_failed{false};
   bool get_user_env{false};
-  bool held{false};
 
   std::string cmd_line;
   std::unordered_map<std::string, std::string> env;
@@ -297,6 +296,7 @@ struct TaskInCtld {
   std::list<CranedId> craned_ids;
   crane::grpc::TaskStatus status;
   uint32_t exit_code;
+  bool held{false};
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -427,6 +427,12 @@ struct TaskInCtld {
   absl::Time const& EndTime() const { return end_time; }
   int64_t EndTimeInUnixSecond() const { return ToUnixSeconds(end_time); }
 
+  void SetHeld(bool val) {
+    held = val;
+    runtime_attr.set_held(val);
+  }
+  bool const& Held() const { return held; }
+
   void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
     task_to_ctld = val;
 
@@ -472,7 +478,6 @@ struct TaskInCtld {
     qos = val.qos();
 
     get_user_env = val.get_user_env();
-    held = val.held();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
@@ -486,6 +491,7 @@ struct TaskInCtld {
     nodes_alloc = craned_ids.size();
 
     status = runtime_attr.status();
+    held = runtime_attr.held();
 
     if (status != crane::grpc::TaskStatus::Pending) {
       craned_ids.assign(runtime_attr.craned_ids().begin(),

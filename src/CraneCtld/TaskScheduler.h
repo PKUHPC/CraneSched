@@ -52,7 +52,8 @@ class BasicPriority : public IPrioritySorter {
 
     int i = 0;
     for (auto it = pending_task_map.begin(); i < len; i++, it++) {
-      if (!it->second->held) {
+      TaskInCtld* task = it->second.get();
+      if (!task->Held()) {
         task_id_vec.emplace_back(it->first);
         it->second->pending_reason = "Priority";
       } else {
@@ -229,8 +230,6 @@ class TaskScheduler {
 
   CraneErr ChangeTaskPriority(task_id_t task_id, double priority);
 
-  CraneErr HoldReleaseTask(task_id_t task_id, bool hold);
-
   void TaskStatusChangeWithReasonAsync(uint32_t task_id,
                                        const CranedId& craned_index,
                                        crane::grpc::TaskStatus new_status,
@@ -294,6 +293,8 @@ class TaskScheduler {
 
   CraneErr TerminateRunningTaskNoLock_(TaskInCtld* task);
 
+  CraneErr SetHoldForTaskInRamAndDb_(task_id_t task_id, bool hold);
+
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 
   // Ordered by task id. Those who comes earlier are in the head,
@@ -334,17 +335,22 @@ class TaskScheduler {
   void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   // Working as channels in golang.
-  std::shared_ptr<uvw::timer_handle> m_release_task_timer_handle_;
-  void ReleaseTaskTimerCb_();
+  std::shared_ptr<uvw::timer_handle> m_task_timer_handle_;
+  void CleanTaskTimerCb_();
 
-  std::shared_ptr<uvw::async_handle> m_release_task_async_handle_;
-  ConcurrentQueue<
-      std::pair<std::pair<task_id_t, int32_t>, std::promise<CraneErr>>>
-      m_release_task_queue_;
-  void ReleaseTaskAsyncCb_();
+  std::unordered_map<task_id_t, std::shared_ptr<uvw::timer_handle>>
+      m_task_timer_handles_;
 
-  std::shared_ptr<uvw::async_handle> m_clean_release_queue_handle_;
-  void CleanReleaseQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
+  std::shared_ptr<uvw::async_handle> m_task_timeout_async_handle_;
+
+  using TaskTimerQueueElem =
+      std::pair<std::pair<task_id_t, int64_t>, std::promise<CraneErr>>;
+  ConcurrentQueue<TaskTimerQueueElem> m_task_timer_queue_;
+
+  void TaskTimerAsyncCb_();
+
+  std::shared_ptr<uvw::async_handle> m_clean_task_timer_queue_handle_;
+  void CleanTaskTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   std::shared_ptr<uvw::timer_handle> m_cancel_task_timer_handle_;
   void CancelTaskTimerCb_();

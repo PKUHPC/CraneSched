@@ -99,7 +99,6 @@ message TaskToCtld {
 
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
-  bool held = 14;
 
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
@@ -135,6 +134,8 @@ message RuntimeAttrOfTask {
   google.protobuf.Timestamp submit_time = 15;
   google.protobuf.Timestamp start_time = 16;
   google.protobuf.Timestamp end_time = 17;
+
+  bool held = 18;
 }
 
 message TaskToD {

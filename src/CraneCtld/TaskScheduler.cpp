@@ -393,29 +393,28 @@ bool TaskScheduler::Init() {
   }
 
   std::shared_ptr<uvw::loop> uvw_release_loop = uvw::loop::create();
-  m_release_task_timer_handle_ =
-      uvw_release_loop->resource<uvw::timer_handle>();
-  m_release_task_timer_handle_->on<uvw::timer_event>(
+  m_task_timer_handle_ = uvw_release_loop->resource<uvw::timer_handle>();
+  m_task_timer_handle_->on<uvw::timer_event>(
       [this](const uvw::timer_event&, uvw::timer_handle&) {
-        ReleaseTaskTimerCb_();
+        CleanTaskTimerCb_();
       });
-  m_release_task_timer_handle_->start(
-      std::chrono::milliseconds(kReleaseTaskTimeoutMs * 3),
-      std::chrono::milliseconds(kReleaseTaskTimeoutMs));
+  m_task_timer_handle_->start(
+      std::chrono::milliseconds(kTaskHoldTimerTimeoutMs * 3),
+      std::chrono::milliseconds(kTaskHoldTimerTimeoutMs));
 
-  m_release_task_async_handle_ =
+  m_task_timeout_async_handle_ =
       uvw_release_loop->resource<uvw::async_handle>();
-  m_release_task_async_handle_->on<uvw::async_event>(
+  m_task_timeout_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        ReleaseTaskAsyncCb_();
+        TaskTimerAsyncCb_();
       });
 
-  m_clean_release_queue_handle_ =
+  m_clean_task_timer_queue_handle_ =
       uvw_release_loop->resource<uvw::async_handle>();
-  m_clean_release_queue_handle_->on<uvw::async_event>(
+  m_clean_task_timer_queue_handle_->on<uvw::async_event>(
       [this, loop = uvw_release_loop](const uvw::async_event&,
                                       uvw::async_handle&) {
-        CleanReleaseQueueCb_(loop);
+        CleanTaskTimerQueueCb_(loop);
       });
 
   m_task_release_thread_ = std::thread(
@@ -1014,9 +1013,9 @@ std::future<CraneErr> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
   std::promise<CraneErr> promise;
   std::future<CraneErr> future = promise.get_future();
 
-  m_release_task_queue_.enqueue(
+  m_task_timer_queue_.enqueue(
       {std::make_pair(task_id, secs), std::move(promise)});
-  m_release_task_async_handle_->send();
+  m_task_timeout_async_handle_->send();
 
   return std::move(future);
 }
@@ -1088,7 +1087,8 @@ CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priority) {
   return CraneErr::kOk;
 }
 
-CraneErr TaskScheduler::HoldReleaseTask(task_id_t task_id, bool hold) {
+CraneErr TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
+                                                  bool hold) {
   m_pending_task_map_mtx_.Lock();
 
   auto pd_iter = m_pending_task_map_.find(task_id);
@@ -1098,14 +1098,19 @@ CraneErr TaskScheduler::HoldReleaseTask(task_id_t task_id, bool hold) {
     return CraneErr::kNonExistent;
   }
 
-  pd_iter->second->held = hold;
-  crane::grpc::TaskToCtld* task_to_ctld = pd_iter->second->MutableTaskToCtld();
-  task_to_ctld->set_held(hold);
+  TaskInCtld* task = pd_iter->second.get();
+  task->SetHeld(hold);
+
+  // Copy persisted data to prevent inconsistency.
+  task_db_id_t db_id = task->TaskDbId();
+  auto runtime_attr = task->RuntimeAttr();
+
   m_pending_task_map_mtx_.Unlock();
-  if (!g_embedded_db_client->UpdateTaskToCtldIfExists(
-          0, pd_iter->second->TaskDbId(), *task_to_ctld)) {
-    CRANE_ERROR("Failed to update task #{} to DB", task_id);
-  }
+
+  if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(0, db_id,
+                                                             runtime_attr))
+    CRANE_ERROR("Failed to update runtime attr of task #{} to DB", task_id);
+
   return CraneErr::kOk;
 }
 
@@ -1286,63 +1291,69 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   return reply;
 }
 
-void TaskScheduler::ReleaseTaskTimerCb_() {
-  m_clean_release_queue_handle_->send();
+void TaskScheduler::CleanTaskTimerCb_() {
+  m_clean_task_timer_queue_handle_->send();
 }
 
-void TaskScheduler::ReleaseTaskAsyncCb_() {
-  if (m_release_task_queue_.size_approx() >= kReleaseTaskBatchNum) {
-    m_clean_release_queue_handle_->send();
+void TaskScheduler::TaskTimerAsyncCb_() {
+  if (m_task_timer_queue_.size_approx() >= kTaskHoldTimerBatchNum) {
+    m_clean_task_timer_queue_handle_->send();
   }
 }
 
-void TaskScheduler::CleanReleaseQueueCb_(
+void TaskScheduler::CleanTaskTimerQueueCb_(
     const std::shared_ptr<uvw::loop>& uvw_loop) {
-  static std::unordered_map<task_id_t, std::shared_ptr<uvw::timer_handle>>
-      task_release_handles_;
-
-  using ReleaseQueueElem =
-      std::pair<std::pair<task_id_t, int32_t>, std::promise<CraneErr>>;
   // It's ok to use an approximate size.
-  size_t approximate_size = m_release_task_queue_.size_approx();
+  size_t approximate_size = m_task_timer_queue_.size_approx();
 
-  std::vector<ReleaseQueueElem> timer_to_create;
+  std::vector<TaskTimerQueueElem> timer_to_create;
   timer_to_create.resize(approximate_size);
 
-  size_t actual_size = m_release_task_queue_.try_dequeue_bulk(
+  size_t actual_size = m_task_timer_queue_.try_dequeue_bulk(
       timer_to_create.begin(), approximate_size);
 
   timer_to_create.resize(actual_size);
 
   for (auto& [req, promise] : timer_to_create) {
     const auto& [task_id, secs] = req;
-    if (task_release_handles_.find(task_id) != task_release_handles_.end()) {
-      task_release_handles_[task_id]->close();
-      task_release_handles_.erase(task_id);
+
+    // If any timer for the task exists, remove it.
+    auto timer_it = m_task_timer_handles_.find(task_id);
+    if (timer_it != m_task_timer_handles_.end()) {
+      timer_it->second->close();
+      m_task_timer_handles_.erase(timer_it);
     }
+
     CraneErr err;
-    if (secs == -1) {  // release
-      err = HoldReleaseTask(task_id, false);
-    } else {
-      err = HoldReleaseTask(task_id, true);
-      if (secs) {
-        auto release_task_timer_handle_ =
-            uvw_loop->resource<uvw::timer_handle>();
-        release_task_timer_handle_->on<uvw::timer_event>(
-            [this, task_id](const uvw::timer_event&,
-                            uvw::timer_handle& handle) {
-              CraneErr err = HoldReleaseTask(task_id, false);
-              if (err != CraneErr::kOk) {
-                CRANE_ERROR("Failed to release task #{} after hold.", task_id);
-              }
-              handle.close();
-              task_release_handles_.erase(task_id);
-            });
-        release_task_timer_handle_->start(std::chrono::seconds(secs),
-                                          std::chrono::seconds(0));
-        task_release_handles_[task_id] = std::move(release_task_timer_handle_);
-      }
+    if (secs == 0) {  // Remove timer
+      CRANE_TRACE("Remove hold constraint timer for task #{}.", task_id);
+      err = SetHoldForTaskInRamAndDb_(task_id, false);
+    } else if (secs == std::numeric_limits<int64_t>::max()) {
+      CRANE_TRACE("Add a hold constraint for task #{} without timer.", task_id);
+      err = SetHoldForTaskInRamAndDb_(task_id, true);
+    } else {  // Set timer
+      CRANE_TRACE("Add a hold constraint for task #{} with {}s timer.", task_id,
+                  secs);
+
+      auto on_timer_cb = [this, task_id](const uvw::timer_event&,
+                                         uvw::timer_handle& handle) {
+        CraneErr err = SetHoldForTaskInRamAndDb_(task_id, false);
+        if (err != CraneErr::kOk)
+          CRANE_ERROR("Failed to release task #{} after hold.", task_id);
+
+        handle.close();
+        m_task_timer_handles_.erase(task_id);
+      };
+
+      err = SetHoldForTaskInRamAndDb_(task_id, true);
+
+      auto task_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
+      task_timer_handle_->on<uvw::timer_event>(std::move(on_timer_cb));
+      task_timer_handle_->start(std::chrono::seconds(secs),
+                                std::chrono::seconds(0));
+      m_task_timer_handles_[task_id] = std::move(task_timer_handle_);
     }
+
     promise.set_value(err);
   }
 }
@@ -1694,7 +1705,7 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_cwd(task.cwd);
     task_it->set_username(task.Username());
     task_it->set_qos(task.qos);
-    task_it->set_held(task.held);
+    task_it->set_held(task.Held());
 
     task_it->set_alloc_cpu(
         static_cast<double>(task.resources.allocatable_resource.cpu_count) *
@@ -2709,7 +2720,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
 
   std::vector<std::pair<TaskInCtld*, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
-    if (task->held) {
+    if (task->Held()) {
       task->pending_reason = "Held";
       continue;
     }
