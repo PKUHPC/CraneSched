@@ -18,6 +18,8 @@
 
 #include <google/protobuf/util/time_util.h>
 
+#include <future>
+
 #include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
@@ -41,6 +43,7 @@ TaskScheduler::TaskScheduler() {
 TaskScheduler::~TaskScheduler() {
   m_thread_stop_ = true;
   if (m_schedule_thread_.joinable()) m_schedule_thread_.join();
+  if (m_task_release_thread_.joinable()) m_task_release_thread_.join();
   if (m_task_cancel_thread_.joinable()) m_task_cancel_thread_.join();
   if (m_task_submit_thread_.joinable()) m_task_submit_thread_.join();
   if (m_task_status_change_thread_.joinable())
@@ -250,6 +253,19 @@ bool TaskScheduler::Init() {
                                                        task->uid);
           }
 
+          task->SetStatus(crane::grpc::Pending);
+
+          task->nodes_alloc = 0;
+          task->allocated_craneds_regex.clear();
+          task->CranedIdsClear();
+
+          ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
+              0, task->TaskDbId(), task->RuntimeAttr());
+          if (!ok) {
+            CRANE_ERROR(
+                "Failed to call "
+                "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
+          }
           // Now the task is moved to the embedded pending queue.
           RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
         }
@@ -376,6 +392,34 @@ bool TaskScheduler::Init() {
     }
   }
 
+  std::shared_ptr<uvw::loop> uvw_release_loop = uvw::loop::create();
+  m_task_timer_handle_ = uvw_release_loop->resource<uvw::timer_handle>();
+  m_task_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        CleanTaskTimerCb_();
+      });
+  m_task_timer_handle_->start(
+      std::chrono::milliseconds(kTaskHoldTimerTimeoutMs * 3),
+      std::chrono::milliseconds(kTaskHoldTimerTimeoutMs));
+
+  m_task_timeout_async_handle_ =
+      uvw_release_loop->resource<uvw::async_handle>();
+  m_task_timeout_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        TaskTimerAsyncCb_();
+      });
+
+  m_clean_task_timer_queue_handle_ =
+      uvw_release_loop->resource<uvw::async_handle>();
+  m_clean_task_timer_queue_handle_->on<uvw::async_event>(
+      [this, loop = uvw_release_loop](const uvw::async_event&,
+                                      uvw::async_handle&) {
+        CleanTaskTimerQueueCb_(loop);
+      });
+
+  m_task_release_thread_ = std::thread(
+      [this, loop = uvw_release_loop]() { ReleaseTaskThread_(loop); });
+
   std::shared_ptr<uvw::loop> uvw_cancel_loop = uvw::loop::create();
   m_cancel_task_timer_handle_ = uvw_cancel_loop->resource<uvw::timer_handle>();
   m_cancel_task_timer_handle_->on<uvw::timer_event>(
@@ -483,6 +527,28 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     m_node_to_tasks_map_[craned_id].emplace(task->TaskId());
 
   m_running_task_map_.emplace(task->TaskId(), std::move(task));
+}
+
+void TaskScheduler::ReleaseTaskThread_(
+    const std::shared_ptr<uvw::loop>& uvw_loop) {
+  util::SetCurrentThreadName("ReleaseTaskThr");
+
+  std::shared_ptr<uvw::idle_handle> idle_handle =
+      uvw_loop->resource<uvw::idle_handle>();
+  idle_handle->on<uvw::idle_event>(
+      [this](const uvw::idle_event&, uvw::idle_handle& h) {
+        if (m_thread_stop_) {
+          h.parent().walk([](auto&& h) { h.close(); });
+          h.parent().stop();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      });
+
+  if (idle_handle->start() != 0) {
+    CRANE_ERROR("Failed to start the idle event in cancel loop.");
+  }
+
+  uvw_loop->run();
 }
 
 void TaskScheduler::CancelTaskThread_(
@@ -942,6 +1008,18 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
   return std::move(future);
 }
 
+std::future<CraneErr> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
+                                                          int64_t secs) {
+  std::promise<CraneErr> promise;
+  std::future<CraneErr> future = promise.get_future();
+
+  m_task_timer_queue_.enqueue(
+      {std::make_pair(task_id, secs), std::move(promise)});
+  m_task_timeout_async_handle_->send();
+
+  return std::move(future);
+}
+
 CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
   if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErr::kInvalidParam;
 
@@ -974,8 +1052,8 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
 
     task->time_limit = absl::Seconds(secs);
     task->MutableTaskToCtld()->mutable_time_limit()->set_seconds(secs);
-    g_embedded_db_client->UpdateTaskToCtld(0, task->TaskDbId(),
-                                           task->TaskToCtld());
+    g_embedded_db_client->UpdateTaskToCtldIfExists(0, task->TaskDbId(),
+                                                   task->TaskToCtld());
   }
 
   // Only send request to the executing node
@@ -995,24 +1073,45 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
 }
 
 CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priority) {
-  LockGuard pending_guard(&m_pending_task_map_mtx_);
-  LockGuard running_guard(&m_running_task_map_mtx_);
+  m_pending_task_map_mtx_.Lock();
 
   auto pd_iter = m_pending_task_map_.find(task_id);
-  if (pd_iter != m_pending_task_map_.end()) {
-    pd_iter->second->mandated_priority = priority;
-    return CraneErr::kOk;
+  if (pd_iter == m_pending_task_map_.end()) {
+    m_pending_task_map_mtx_.Unlock();
+    CRANE_TRACE("Task #{} not in Pd queue for priority change", task_id);
+    return CraneErr::kNonExistent;
   }
 
-  // Priority change of a running task is not supported.
-  auto rn_iter = m_running_task_map_.find(task_id);
-  if (rn_iter != m_running_task_map_.end()) {
-    CRANE_TRACE("Task #{} is running, unable to change priority", task_id);
-    return CraneErr::kInvalidParam;
+  pd_iter->second->mandated_priority = priority;
+  m_pending_task_map_mtx_.Unlock();
+  return CraneErr::kOk;
+}
+
+CraneErr TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
+                                                  bool hold) {
+  m_pending_task_map_mtx_.Lock();
+
+  auto pd_iter = m_pending_task_map_.find(task_id);
+  if (pd_iter == m_pending_task_map_.end()) {
+    m_pending_task_map_mtx_.Unlock();
+    CRANE_TRACE("Task #{} not in Pd queue for hold/release", task_id);
+    return CraneErr::kNonExistent;
   }
 
-  CRANE_TRACE("Task #{} not in Pd/Rn queue for priority change", task_id);
-  return CraneErr::kNonExistent;
+  TaskInCtld* task = pd_iter->second.get();
+  task->SetHeld(hold);
+
+  // Copy persisted data to prevent inconsistency.
+  task_db_id_t db_id = task->TaskDbId();
+  auto runtime_attr = task->RuntimeAttr();
+
+  m_pending_task_map_mtx_.Unlock();
+
+  if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(0, db_id,
+                                                             runtime_attr))
+    CRANE_ERROR("Failed to update runtime attr of task #{} to DB", task_id);
+
+  return CraneErr::kOk;
 }
 
 CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
@@ -1190,6 +1289,73 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   }
 
   return reply;
+}
+
+void TaskScheduler::CleanTaskTimerCb_() {
+  m_clean_task_timer_queue_handle_->send();
+}
+
+void TaskScheduler::TaskTimerAsyncCb_() {
+  if (m_task_timer_queue_.size_approx() >= kTaskHoldTimerBatchNum) {
+    m_clean_task_timer_queue_handle_->send();
+  }
+}
+
+void TaskScheduler::CleanTaskTimerQueueCb_(
+    const std::shared_ptr<uvw::loop>& uvw_loop) {
+  // It's ok to use an approximate size.
+  size_t approximate_size = m_task_timer_queue_.size_approx();
+
+  std::vector<TaskTimerQueueElem> timer_to_create;
+  timer_to_create.resize(approximate_size);
+
+  size_t actual_size = m_task_timer_queue_.try_dequeue_bulk(
+      timer_to_create.begin(), approximate_size);
+
+  timer_to_create.resize(actual_size);
+
+  for (auto& [req, promise] : timer_to_create) {
+    const auto& [task_id, secs] = req;
+
+    // If any timer for the task exists, remove it.
+    auto timer_it = m_task_timer_handles_.find(task_id);
+    if (timer_it != m_task_timer_handles_.end()) {
+      timer_it->second->close();
+      m_task_timer_handles_.erase(timer_it);
+    }
+
+    CraneErr err;
+    if (secs == 0) {  // Remove timer
+      CRANE_TRACE("Remove hold constraint timer for task #{}.", task_id);
+      err = SetHoldForTaskInRamAndDb_(task_id, false);
+    } else if (secs == std::numeric_limits<int64_t>::max()) {
+      CRANE_TRACE("Add a hold constraint for task #{} without timer.", task_id);
+      err = SetHoldForTaskInRamAndDb_(task_id, true);
+    } else {  // Set timer
+      CRANE_TRACE("Add a hold constraint for task #{} with {}s timer.", task_id,
+                  secs);
+
+      auto on_timer_cb = [this, task_id](const uvw::timer_event&,
+                                         uvw::timer_handle& handle) {
+        CraneErr err = SetHoldForTaskInRamAndDb_(task_id, false);
+        if (err != CraneErr::kOk)
+          CRANE_ERROR("Failed to release task #{} after hold.", task_id);
+
+        handle.close();
+        m_task_timer_handles_.erase(task_id);
+      };
+
+      err = SetHoldForTaskInRamAndDb_(task_id, true);
+
+      auto task_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
+      task_timer_handle_->on<uvw::timer_event>(std::move(on_timer_cb));
+      task_timer_handle_->start(std::chrono::seconds(secs),
+                                std::chrono::seconds(0));
+      m_task_timer_handles_[task_id] = std::move(task_timer_handle_);
+    }
+
+    promise.set_value(err);
+  }
 }
 
 void TaskScheduler::CancelTaskTimerCb_() {
@@ -1539,6 +1705,7 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_cwd(task.cwd);
     task_it->set_username(task.Username());
     task_it->set_qos(task.qos);
+    task_it->set_held(task.Held());
 
     task_it->set_alloc_cpu(
         static_cast<double>(task.resources.allocatable_resource.cpu_count) *
@@ -2553,6 +2720,10 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
 
   std::vector<std::pair<TaskInCtld*, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
+    if (task->Held()) {
+      task->pending_reason = "Held";
+      continue;
+    }
     // Admin may manually specify the priority of a task.
     // In this case, MultiFactorPriority will not calculate the priority.
     double priority = (task->mandated_priority == 0.0)

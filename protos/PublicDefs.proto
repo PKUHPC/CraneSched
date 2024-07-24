@@ -137,6 +137,8 @@ message RuntimeAttrOfTask {
   google.protobuf.Timestamp submit_time = 15;
   google.protobuf.Timestamp start_time = 16;
   google.protobuf.Timestamp end_time = 17;
+
+  bool held = 18;
 }
 
 message TaskToD {
@@ -214,6 +216,7 @@ message TaskInfo {
   string qos = 16;
 
   // Dynamic task information
+  bool held = 30;
   TaskStatus status = 31;
   double alloc_cpu = 32;
   uint32 exit_code = 33;
