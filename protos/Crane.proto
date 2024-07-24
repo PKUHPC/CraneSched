@@ -194,6 +194,7 @@ message ModifyTaskRequest {
   enum TargetAttributes {
     TimeLimit = 0;
     Priority = 1;
+    Hold = 2;
   }
 
   uint32 uid = 1;
@@ -204,6 +205,11 @@ message ModifyTaskRequest {
   oneof value {
     int64 time_limit_seconds = 4;
     double mandated_priority = 5;
+
+    // If hold_seconds == 0, release the hold constraint timer if any exists;
+    // If hold_seconds > 0, add or overwrite a hold constraint timer;
+    // If hold_seconds == MaxInt64, add a hold constraint without timer.
+    int64 hold_seconds = 7;
   }
 }
 
