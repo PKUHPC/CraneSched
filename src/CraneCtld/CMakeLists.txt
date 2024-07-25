@@ -23,7 +23,7 @@ target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 target_link_libraries(cranectld PRIVATE
         spdlog::spdlog
         concurrentqueue
-
+        ${LIBCGROUP_LIBRARIES}
         Utility_PublicHeader
 
         dev_event_core

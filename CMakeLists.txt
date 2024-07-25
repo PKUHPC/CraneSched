@@ -271,25 +271,6 @@ if (CRANE_ENABLE_TESTS)
     add_subdirectory(test EXCLUDE_FROM_ALL)
 endif ()
 
-# Add group and components
-set(CPACK_COMPONENTS_GROUPING ONE_PER_GROUP)
-set(CPACK_RPM_COMPONENT_INSTALL ON)
-
-cpack_add_component(cranedc
-        DISPLAY_NAME  "craned"
-        DESCRIPTION   "craned component"
-        GROUP craned)
-cpack_add_component(cranectldc
-        DISPLAY_NAME  "cranectld"
-        DESCRIPTION   "cranectld component"
-        GROUP cranectld)
-
-cpack_add_component_group(craned)
-cpack_add_component_group(cranectld)
-set(CPACK_COMPONENTS_ALL cranedc cranectldc)
-
-configure_file(${CMAKE_SOURCE_DIR}/etc/cranectld.service.in ${CMAKE_BINARY_DIR}/etc/cranectld.service)
-configure_file(${CMAKE_SOURCE_DIR}/etc/craned.service.in ${CMAKE_BINARY_DIR}/etc/craned.service)
 
 # Install binaries
 install(TARGETS craned
@@ -347,7 +328,10 @@ set(CPACK_DEBIAN_PACKAGE_MAINTAINER "PKUHPC")
 set(CPACK_PACKAGE_DESCRIPTION "CraneSched rpm package")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
-
+set(CPACK_PACKAGE_VERSION "0.6.3")
+set(CPACK_RPM_PACKAGE_LICENSE "Mulan PSL v2")
+set(CPACK_RPM_FILE_NAME "${CPACK_PACKAGE_NAME}.rpm")
+set(CPACK_GENERATOR "RPM")
 # Set pam install/uninstall scripts
 set(CPACK_RPM_craned_POST_INSTALL_SCRIPT_FILE ${CMAKE_SOURCE_DIR}/scripts/install_pam.sh)
 set(CPACK_RPM_craned_POST_UNINSTALL_SCRIPT_FILE /${CMAKE_SOURCE_DIR}/scripts/uninstall_pam.sh)
