@@ -27,6 +27,7 @@
 
 #include "CranedPublicDefs.h"
 #include "crane/AtomicHashMap.h"
+#include "crane/OS.h"
 
 namespace Craned {
 
@@ -59,6 +60,8 @@ enum class ControllerFile : uint64_t {
 
   ControllerFileCount
 };
+
+const std::string TASK_DIR_PREFIX = "Crane_Task_";
 
 namespace Internal {
 
@@ -248,6 +251,8 @@ class CgroupManager {
  public:
   int Init();
 
+  int InitCgroupDirectories();
+
   bool Mounted(CgroupConstant::Controller controller) {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
   }
@@ -282,6 +287,8 @@ class CgroupManager {
                             CgroupConstant::Controller controller,
                             bool required, bool has_cgroup,
                             bool &changed_cgroup);
+
+  bool CgroupWalkRelease_(CgroupConstant::Controller controller);
 
   ControllerFlags m_mounted_controllers_;
 

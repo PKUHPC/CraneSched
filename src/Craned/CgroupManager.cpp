@@ -118,6 +118,21 @@ int CgroupManager::Init() {
   return 0;
 }
 
+/**
+ * Initialize cgroup folders.
+ * On each startup, clear task resources that were not successfully deleted.
+ *
+ * Returns 0 on success, -1 otherwise.
+ */
+int CgroupManager::InitCgroupDirectories() {
+  CRANE_DEBUG("Initializing cgroup Directories.");
+
+  CgroupWalkRelease_(CgroupConstant::Controller::CPU_CONTROLLER);
+  CgroupWalkRelease_(CgroupConstant::Controller::MEMORY_CONTROLLER);
+
+  return 0;
+}
+
 /*
  * Initialize a controller for a given cgroup.
  *
@@ -418,6 +433,37 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
     }
     return true;
   }
+}
+
+/**
+ * Scan the specified controller directory
+ * and delete any leftover unused task directories.
+ */
+bool CgroupManager::CgroupWalkRelease_(CgroupConstant::Controller controller) {
+  void *handle = nullptr;
+  cgroup_file_info info{};
+
+  std::string ControllerString(
+      CgroupConstant::GetControllerStringView(controller));
+
+  int base_level;
+  int depth = 1;
+  int ret = cgroup_walk_tree_begin(ControllerString.c_str(), "/", depth,
+                                   &handle, &info, &base_level);
+  while (ret == 0) {
+    if (std::string(info.path).find(CgroupConstant::TASK_DIR_PREFIX) !=
+            std::string::npos &&
+        info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR) {
+      util::os::DeleteFile(info.full_path);
+    }
+    ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
+  }
+
+  if (handle) {
+    cgroup_walk_tree_end(&handle);
+  }
+
+  return true;
 }
 
 bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
