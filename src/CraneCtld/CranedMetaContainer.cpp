@@ -17,7 +17,6 @@
 #include "CranedMetaContainer.h"
 
 #include "CranedKeeper.h"
-
 #include "crane/String.h"
 #include "protos/PublicDefs.pb.h"
 
@@ -346,44 +345,18 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
         craned_meta->running_task_resource_map.size());
 
     if (dedicated_res_total.contains(craned_index)) {
-      auto* mutable_device_map = craned_info->mutable_device();
-      for (const auto& [device_name, type_slots_map] :
-           dedicated_res_total.at(craned_index).name_type_slots_map) {
-        for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
-          mutable_device_map->mutable_name_type_map()
-              ->at(device_name)
-              .mutable_type_count_map()
-              ->at(device_type) += 1;
-        }
-      }
+      dedicated_res_total.at(craned_index)
+          .setGrpcDeviceMap(craned_info->mutable_device());
     }
 
     if (dedicated_res_in_use.contains(craned_index)) {
-      auto* mutable_alloc_device_map = craned_info->mutable_alloc_device();
-      for (const auto& [device_name, type_slots_map] :
-           dedicated_res_in_use.craned_id_gres_map.at(craned_index)
-               .name_type_slots_map) {
-        for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
-          mutable_alloc_device_map->mutable_name_type_map()
-              ->at(device_name)
-              .mutable_type_count_map()
-              ->at(device_type) += 1;
-        }
-      }
+      dedicated_res_in_use.at(craned_index)
+          .setGrpcDeviceMap(craned_info->mutable_alloc_device());
     }
 
     if (dedicated_res_avail.contains(craned_index)) {
-      auto* mutable_avail_device_map = craned_info->mutable_avail_device();
-      for (const auto& [device_name, type_slots_map] :
-           dedicated_res_avail.craned_id_gres_map.at(craned_index)
-               .name_type_slots_map) {
-        for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
-          mutable_avail_device_map->mutable_name_type_map()
-              ->at(device_name)
-              .mutable_type_count_map()
-              ->at(device_type) += 1;
-        }
-      }
+      dedicated_res_avail.at(craned_index)
+          .setGrpcDeviceMap(craned_info->mutable_avail_device());
     }
 
     if (craned_meta->drain) {
@@ -395,9 +368,8 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     }
     if (craned_meta->alive) {
       if (craned_meta->res_in_use.allocatable_resource.cpu_count == cpu_t(0) &&
-          craned_meta->res_in_use.allocatable_resource.memory_bytes ==
-                     0 &&
-                 craned_meta->res_in_use.dedicated_resource.Empty())
+          craned_meta->res_in_use.allocatable_resource.memory_bytes == 0 &&
+          craned_meta->res_in_use.dedicated_resource.Empty())
         craned_info->set_resource_state(
             crane::grpc::CranedResourceState::CRANE_IDLE);
       else if (craned_meta->res_avail.allocatable_resource.cpu_count ==
@@ -451,44 +423,18 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
       craned_meta->running_task_resource_map.size());
 
   if (dedicated_res_total.contains(node_name)) {
-    auto* mutable_device_map = craned_info->mutable_device();
-    for (const auto& [device_name, type_slots_map] :
-         dedicated_res_total.at(node_name).name_type_slots_map) {
-      for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
-        mutable_device_map->mutable_name_type_map()
-            ->at(device_name)
-            .mutable_type_count_map()
-            ->at(device_type) += 1;
-      }
-    }
+    dedicated_res_total.at(node_name).setGrpcDeviceMap(
+        craned_info->mutable_device());
   }
 
   if (dedicated_res_in_use.contains(node_name)) {
-    auto* mutable_alloc_device_map = craned_info->mutable_alloc_device();
-    for (const auto& [device_name, type_slots_map] :
-         dedicated_res_in_use.craned_id_gres_map.at(node_name)
-             .name_type_slots_map) {
-      for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
-        mutable_alloc_device_map->mutable_name_type_map()
-            ->at(device_name)
-            .mutable_type_count_map()
-            ->at(device_type) += 1;
-      }
-    }
+    dedicated_res_in_use.at(node_name).setGrpcDeviceMap(
+        craned_info->mutable_alloc_device());
   }
 
   if (dedicated_res_avail.contains(node_name)) {
-    auto* mutable_avail_device_map = craned_info->mutable_avail_device();
-    for (const auto& [device_name, type_slots_map] :
-         dedicated_res_avail.craned_id_gres_map.at(node_name)
-             .name_type_slots_map) {
-      for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
-        mutable_avail_device_map->mutable_name_type_map()
-            ->at(device_name)
-            .mutable_type_count_map()
-            ->at(device_type) += 1;
-      }
-    }
+    dedicated_res_avail.at(node_name).setGrpcDeviceMap(
+        craned_info->mutable_avail_device());
   }
 
   if (craned_meta->drain) {
@@ -497,10 +443,11 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   } else {
     craned_info->set_control_state(crane::grpc::CranedControlState::CRANE_NONE);
   }
+
   if (craned_meta->alive) {
     if (craned_meta->res_in_use.allocatable_resource.cpu_count == cpu_t(0) &&
         craned_meta->res_in_use.allocatable_resource.memory_bytes == 0 &&
-               craned_meta->res_in_use.dedicated_resource.Empty())
+        craned_meta->res_in_use.dedicated_resource.Empty())
       craned_info->set_resource_state(
           crane::grpc::CranedResourceState::CRANE_IDLE);
     else if (craned_meta->res_avail.allocatable_resource.cpu_count ==
@@ -573,44 +520,18 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
       const auto& dedicated_res_avail =
           craned_meta->res_avail.dedicated_resource;
       if (dedicated_res_total.contains(craned_id)) {
-        for (const auto& [device_name, type_slots_map] :
-             dedicated_res_total.at(craned_id).name_type_slots_map) {
-          for (const auto& [device_type, slots] :
-               type_slots_map.type_slots_map) {
-            mutable_device_map->mutable_name_type_map()
-                ->at(device_name)
-                .mutable_type_count_map()
-                ->at(device_type) += 1;
-          }
-        }
+        dedicated_res_total.at(craned_id).setGrpcDeviceMap(
+            part_info->mutable_device());
       }
 
       if (dedicated_res_in_use.contains(craned_id)) {
-        for (const auto& [device_name, type_slots_map] :
-             dedicated_res_in_use.craned_id_gres_map.at(craned_id)
-                 .name_type_slots_map) {
-          for (const auto& [device_type, slots] :
-               type_slots_map.type_slots_map) {
-            mutable_alloc_device_map->mutable_name_type_map()
-                ->at(device_name)
-                .mutable_type_count_map()
-                ->at(device_type) += 1;
-          }
-        }
+        dedicated_res_in_use.at(craned_id).setGrpcDeviceMap(
+            part_info->mutable_alloc_device());
       }
 
       if (dedicated_res_avail.contains(craned_id)) {
-        for (const auto& [device_name, type_slots_map] :
-             dedicated_res_avail.craned_id_gres_map.at(craned_id)
-                 .name_type_slots_map) {
-          for (const auto& [device_type, slots] :
-               type_slots_map.type_slots_map) {
-            mutable_avail_device_map->mutable_name_type_map()
-                ->at(device_name)
-                .mutable_type_count_map()
-                ->at(device_type) += 1;
-          }
-        }
+        dedicated_res_avail.at(craned_id).setGrpcDeviceMap(
+            part_info->mutable_avail_device());
       }
     }
   }
@@ -665,41 +586,18 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
         craned_meta->res_in_use.dedicated_resource;
     const auto& dedicated_res_avail = craned_meta->res_avail.dedicated_resource;
     if (dedicated_res_total.contains(craned_id)) {
-      for (const auto& [device_name, type_slots_map] :
-           dedicated_res_total.at(craned_id).name_type_slots_map) {
-        for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
-          mutable_device_map->mutable_name_type_map()
-              ->at(device_name)
-              .mutable_type_count_map()
-              ->at(device_type) += 1;
-        }
-      }
+      dedicated_res_total.at(craned_id).setGrpcDeviceMap(
+          part_info->mutable_device());
     }
 
     if (dedicated_res_in_use.contains(craned_id)) {
-      for (const auto& [device_name, type_slots_map] :
-           dedicated_res_in_use.craned_id_gres_map.at(craned_id)
-               .name_type_slots_map) {
-        for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
-          mutable_alloc_device_map->mutable_name_type_map()
-              ->at(device_name)
-              .mutable_type_count_map()
-              ->at(device_type) += 1;
-        }
-      }
+      dedicated_res_in_use.at(craned_id).setGrpcDeviceMap(
+          part_info->mutable_alloc_device());
     }
 
     if (dedicated_res_avail.contains(craned_id)) {
-      for (const auto& [device_name, type_slots_map] :
-           dedicated_res_avail.craned_id_gres_map.at(craned_id)
-               .name_type_slots_map) {
-        for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
-          mutable_avail_device_map->mutable_name_type_map()
-              ->at(device_name)
-              .mutable_type_count_map()
-              ->at(device_type) += 1;
-        }
-      }
+      dedicated_res_avail.at(craned_id).setGrpcDeviceMap(
+          part_info->mutable_avail_device());
     }
   }
 
@@ -745,11 +643,10 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   for (const auto& it : request.filter_craned_control_states())
     control_filters[static_cast<int>(it)] = true;
 
-    const int resource_state_num = crane::grpc::CranedResourceState_ARRAYSIZE;
-      bool resource_filters[resource_state_num] = {false};
-      for (const auto& it : request.filter_craned_resource_states())
-      resource_filters[static_cast<int>(it)] = true;
-
+  const int resource_state_num = crane::grpc::CranedResourceState_ARRAYSIZE;
+  bool resource_filters[resource_state_num] = {false};
+  for (const auto& it : request.filter_craned_resource_states())
+    resource_filters[static_cast<int>(it)] = true;
 
   // Ensure that the map global read lock is held during the following filtering
   // operations and partition_metas_map_ must be locked before craned_meta_map_
@@ -918,17 +815,23 @@ void CranedMetaContainerSimpleImpl::AddDedicatedResource(
           node_id, device_name);
       continue;
     }
-    const auto& this_name_constraint =
+    auto& this_name_constraint =
         constraint.at(node_id).name_type_slots_map.at(device_name);
-    const auto& this_name_avail_current =
+    auto& this_name_avail_current =
         node_dedicated_res_avail[node_id].name_type_slots_map[device_name];
     auto& this_name_to_add =
         res_to_add[node_id].name_type_slots_map[device_name];
     std::set<std::string> tmp;
     for (const auto& [type, slots] : type_slots_map.type_slots_map) {
+      if (!constraint.at(node_id).at(device_name).contains(type)) {
+        CRANE_TRACE(
+            "Node #{} try to report {}:{},which is no in the config of ctld ",
+            node_id, device_name, type);
+        continue;
+      }
       tmp.clear();
       std::ranges::set_difference(this_name_constraint.at(type),
-                                  this_name_avail_current.at(type),
+                                  this_name_avail_current[type],
                                   std::inserter(tmp, tmp.begin()));
       std::ranges::set_intersection(
           tmp, slots,
