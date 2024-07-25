@@ -265,11 +265,9 @@ message CranedInfo {
 
   string craned_version = 12;
   string system_name = 13;
-  string system_release = 14;
-  string system_version = 15;
-  google.protobuf.Timestamp craned_start_time = 16;
-  google.protobuf.Timestamp system_boot_time = 17;
-  google.protobuf.Timestamp last_busy_time = 18;
+  google.protobuf.Timestamp craned_start_time = 14;
+  google.protobuf.Timestamp system_boot_time = 15;
+  google.protobuf.Timestamp last_busy_time = 16;
 }
 
 message TrimmedPartitionInfo {

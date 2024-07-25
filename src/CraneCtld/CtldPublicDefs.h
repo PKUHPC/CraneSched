@@ -176,6 +176,11 @@ struct CranedMeta {
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
   absl::flat_hash_map<task_id_t, Resources> running_task_resource_map;
+  std::string craned_version;
+  std::string craned_system;
+  absl::Time craned_start_time;
+  absl::Time system_boot_time;
+  absl::Time last_busy_time;
 };
 
 struct PartitionGlobalMeta {

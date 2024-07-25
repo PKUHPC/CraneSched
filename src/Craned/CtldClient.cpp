@@ -66,6 +66,14 @@ void CtldClient::OnCraneCtldConnected() {
 
   CRANE_INFO("Send a register RPC to cranectld");
   request.set_craned_id(m_craned_id_);
+  request.set_craned_version(CRANE_VERSION_STRING);
+  request.set_craned_system(fmt::format(
+      "{} {} {}", g_config.CranedMeta.SystemName,
+      g_config.CranedMeta.SystemRelease, g_config.CranedMeta.SystemVersion));
+  request.mutable_craned_start_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.CranedStartTime));
+  request.mutable_system_boot_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
 
   int retry_time = 10;
 

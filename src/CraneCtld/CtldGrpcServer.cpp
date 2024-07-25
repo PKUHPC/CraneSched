@@ -109,6 +109,13 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
   if (!alive) {
     g_craned_keeper->PutNodeIntoUnavailList(request->craned_id());
   }
+  auto craned_meta = g_meta_container->GetCranedMetaPtr(request->craned_id());
+  craned_meta->craned_version = request->craned_version();
+  craned_meta->craned_system = request->craned_system();
+  craned_meta->craned_start_time =
+      absl::FromUnixSeconds(request->craned_start_time().seconds());
+  craned_meta->system_boot_time =
+      absl::FromUnixSeconds(request->system_boot_time().seconds());
 
   response->set_ok(true);
   response->set_already_registered(alive);

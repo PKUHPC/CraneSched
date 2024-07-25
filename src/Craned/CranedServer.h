@@ -60,11 +60,6 @@ class CranedServiceImpl : public Craned::Service {
       const crane::grpc::CheckTaskStatusRequest *request,
       crane::grpc::CheckTaskStatusReply *response) override;
 
-  Status QueryCranedInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryCranedStatusRequest *request,
-      crane::grpc::QueryCranedStatusReply *response) override;
-
   grpc::Status QueryTaskIdFromPort(
       grpc::ServerContext *context,
       const crane::grpc::QueryTaskIdFromPortRequest *request,

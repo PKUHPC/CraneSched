@@ -426,7 +426,6 @@ void ParseConfig(int argc, char** argv) {
     std::exit(1);
   }
   g_config.CranedMeta.CranedStartTime = absl::Now();
-  g_config.CranedMeta.LastBusyTime = absl::Now();
 
   struct sysinfo system_info;
   if (sysinfo(&system_info) != 0) {

@@ -815,6 +815,8 @@ void TaskScheduler::ScheduleThread_() {
       HashSet<std::pair<CranedId, task_id_t>> failed_to_exec_task_id_set;
       for (auto const& [craned_id, tasks] : craned_exec_requests_map) {
         auto stub = g_craned_keeper->GetCranedStub(craned_id);
+        g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
+            absl::Now();
         CRANE_TRACE("Send ExecuteTasks for {} tasks to {}", tasks.tasks_size(),
                     craned_id);
         if (stub == nullptr || stub->Invalid()) {

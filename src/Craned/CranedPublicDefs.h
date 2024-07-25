@@ -86,7 +86,6 @@ struct Config {
     std::string SystemVersion;
     absl::Time CranedStartTime;
     absl::Time SystemBootTime;
-    absl::Time LastBusyTime;
   };
 
   CranedMeta CranedMeta;

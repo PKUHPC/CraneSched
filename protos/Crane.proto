@@ -35,6 +35,10 @@ message TaskStatusChangeReply {
 
 message CranedRegisterRequest {
   string craned_id = 1;
+  string craned_version = 2;
+  string craned_system = 3;
+  google.protobuf.Timestamp craned_start_time = 4;
+  google.protobuf.Timestamp system_boot_time = 5;
 }
 
 message CranedRegisterReply {
@@ -130,18 +134,6 @@ message CheckTaskStatusRequest {
 message CheckTaskStatusReply {
   bool ok = 1;
   TaskStatus status = 2;
-}
-
-message QueryCranedStatusRequest{}
-
-message QueryCranedStatusReply {
-  string craned_version = 1;
-  string system_name = 2;
-  string system_release = 3;
-  string system_version = 4;
-  google.protobuf.Timestamp craned_start_time = 5;
-  google.protobuf.Timestamp system_boot_time = 6;
-  google.protobuf.Timestamp last_busy_time = 7;
 }
 
 message CancelTaskRequest {
@@ -723,7 +715,6 @@ service Craned {
   rpc TerminateTasks(TerminateTasksRequest) returns (TerminateTasksReply);
   rpc TerminateOrphanedTask(TerminateOrphanedTaskRequest) returns (TerminateOrphanedTaskReply);
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
-  rpc QueryCranedInfo(QueryCranedStatusRequest) returns(QueryCranedStatusReply);
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
