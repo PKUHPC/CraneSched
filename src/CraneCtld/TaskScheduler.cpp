@@ -2744,8 +2744,12 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
       if (task->resources <= craned_meta->res_total &&
-          task->request_gres <=
-              craned_meta->res_total.dedicated_resource.at(craned_id) &&
+
+          (task->request_gres.empty() ||
+           (craned_meta->res_total.dedicated_resource.contains(craned_id) &&
+            task->request_gres <=
+                craned_meta->res_total.dedicated_resource.at(craned_id))) &&
+
           (task->included_nodes.empty() ||
            task->included_nodes.contains(craned_id)) &&
           (task->excluded_nodes.empty() ||

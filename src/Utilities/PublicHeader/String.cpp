@@ -360,9 +360,8 @@ bool ConvertStringToInt64(const std::string &s, int64_t *val) {
 }
 
 std::string ReadableGres(const DedicatedResource &dedicated_resource) {
-  if (dedicated_resource.Empty()) {
-    return "None";
-  }
+  if (dedicated_resource.Empty()) return "None";
+
   std::vector<std::string> node_gres_string_vector;
   for (const auto &[node_id, node_gres] :
        dedicated_resource.craned_id_gres_map) {
@@ -375,7 +374,8 @@ std::string ReadableGres(const DedicatedResource &dedicated_resource) {
       }
     }
     // node:name:type:count
-    node_gres_string_vector.insert(std::end(node_gres_string_vector),
+    node_gres_string_vector.insert(
+        std::end(node_gres_string_vector),
         std::make_move_iterator(node_gres_vec.begin()),
         std::make_move_iterator(node_gres_vec.end()));
   }
@@ -383,4 +383,61 @@ std::string ReadableGres(const DedicatedResource &dedicated_resource) {
   return absl::StrJoin(node_gres_string_vector, ",");
 }
 
+std::string ReadableGres(
+    const DedicatedResourceInNode &dedicated_resource_in_node) {
+  if (dedicated_resource_in_node.empty()) {
+    return "0";
+  }
+  std::vector<std::string> node_gres_string_vector;
+  for (const auto &[device_name, type_slots_map] :
+       dedicated_resource_in_node.name_type_slots_map) {
+    for (const auto &[device_type, slots] : type_slots_map.type_slots_map) {
+      // name:type:count
+      node_gres_string_vector.emplace_back(
+          fmt::format("{}:{}:{}", device_name, device_type, slots.size()));
+    }
+  }
+
+  return absl::StrJoin(node_gres_string_vector, ",");
+}
+
+std::string ReadableGres(
+    const crane::grpc::DedicatedResource &dedicated_resource) {
+  if (dedicated_resource.each_node_gres().empty()) return "None";
+
+  std::vector<std::string> node_gres_string_vector;
+  for (const auto &[node_id, node_gres] : dedicated_resource.each_node_gres()) {
+    std::vector<std::string> node_gres_vec;
+    for (const auto &[device_name, type_slots_map] :
+         node_gres.name_type_map()) {
+      for (const auto &[device_type, slots] : type_slots_map.type_slots_map()) {
+        node_gres_vec.emplace_back(fmt::format("{}:{}:{}:{}", node_id,
+                                               device_name, device_type,
+                                               slots.slots().size()));
+      }
+    }
+    // node:name:type:count
+    node_gres_string_vector.insert(
+        std::end(node_gres_string_vector),
+        std::make_move_iterator(node_gres_vec.begin()),
+        std::make_move_iterator(node_gres_vec.end()));
+  }
+
+  return absl::StrJoin(node_gres_string_vector, ",");
+}
+
+std::string ReadableGres(
+    const crane::grpc::DedicatedResourceInNode &dedicated_resource_in_node) {
+  if (dedicated_resource_in_node.name_type_map().empty()) return "None";
+  std::vector<std::string> node_gres_string_vector;
+  for (const auto &[device_name, type_slots_map] :
+       dedicated_resource_in_node.name_type_map()) {
+    for (const auto &[device_type, slots] : type_slots_map.type_slots_map()) {
+      node_gres_string_vector.emplace_back(fmt::format(
+          "{}:{}:{}", device_name, device_type, slots.slots().size()));
+    }
+  }
+
+  return absl::StrJoin(node_gres_string_vector, ",");
+}
 }  // namespace util

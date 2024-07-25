@@ -21,6 +21,8 @@
 
 #include "CgroupManager.h"
 
+#include "crane/String.h"
+
 namespace Craned {
 
 /*
@@ -293,14 +295,19 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
     pcg = cg_unique_ptr.get();
     if (cg) *cg = pcg;
   }
-
   CRANE_TRACE(
-      "Setting cgroup limit of task #{}. CPU: {:.2f}, Mem: {:.2f} MB.", task_id,
-      res.allocatable_resource().cpu_core_limit(),
-      res.allocatable_resource().memory_limit_bytes() / (1024.0 * 1024.0));
+      "Setting cgroup limit of task #{}. CPU: {:.2f}, Mem: {:.2f} MB Gres: {}.",
+      task_id, res.allocatable_resource().cpu_core_limit(),
+      res.allocatable_resource().memory_limit_bytes() / (1024.0 * 1024.0),
+      res.has_actual_dedicated_resource()
+          ? util::ReadableGres(res.actual_dedicated_resource())
+          : "None");
 
   bool ok =
       AllocatableResourceAllocator::Allocate(res.allocatable_resource(), pcg);
+  if (ok)
+    ok &= DedicatedResourceAllocator::Allocate(res.actual_dedicated_resource(),
+                                               pcg);
   return ok;
 }
 

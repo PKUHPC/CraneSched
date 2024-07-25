@@ -266,7 +266,6 @@ bool operator==(const DedicatedResourceInNode& lhs,
 struct DedicatedResource {
   std::unordered_map<CranedId /*craned id*/, DedicatedResourceInNode>
       craned_id_gres_map;
-  uint64_t size_ = 0;
   DedicatedResource() = default;
   explicit DedicatedResource(const crane::grpc::DedicatedResource& rhs);
   DedicatedResource& operator+=(const DedicatedResource& rhs);

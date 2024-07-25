@@ -112,7 +112,6 @@ message TaskToCtld {
   google.protobuf.Duration time_limit = 1;
 
   string partition_name = 2;
-  //the dedicated_resources of the field will not be use
   Resources resources = 3;
 
   TaskType type = 4;

@@ -380,6 +380,8 @@ Resources::operator crane::grpc::Resources() const {
   auto val = crane::grpc::Resources();
   *val.mutable_allocatable_resource() =
       static_cast<crane::grpc::AllocatableResource>(allocatable_resource);
+  *val.mutable_actual_dedicated_resource() =
+      static_cast<crane::grpc::DedicatedResource>(dedicated_resource);
   return val;
 }
 
@@ -613,6 +615,7 @@ void DedicatedResourceInNode::setGrpcDeviceMap(
       mutable_name_type_map->emplace(device_name, crane::grpc::TypeCountMap{});
     }
     for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
+      if (slots.size() == 0) continue;
       auto* mutable_type_count_map =
           mutable_name_type_map->at(device_name).mutable_type_count_map();
       if (!mutable_type_count_map->contains(device_type))
@@ -622,6 +625,7 @@ void DedicatedResourceInNode::setGrpcDeviceMap(
     }
   }
 }
+
 bool DedicatedResourceInNode::TypeSlotsMap::empty() const {
   return std::ranges::all_of(type_slots_map,
                              [](const auto& kv) { return kv.second.empty(); });
