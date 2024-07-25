@@ -1001,7 +1001,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
             auto result = g_task_scheduler->SubmitProc(
                 std::move(task), payload.task_id(), payload.pid());
             const auto &[proc_id, craned_ids] = result.get();
-            ok = stream_writer.WriteTaskIdReply(
+            ok = stream_writer->WriteTaskIdReply(
                 payload.pid(),
                 result::result<task_id_t, std::string>{payload.task_id()},
                 proc_id, craned_ids);
