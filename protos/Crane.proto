@@ -656,6 +656,62 @@ message StreamCforedTaskIOReply {
   }
 }
 
+message PreRunHookRequest {
+  repeated TaskInfo task_info_list = 1;
+}
+
+message PreRunHookReply {
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  repeated TaskIdReply result = 1;
+}
+
+message PostRunHookRequest {
+  repeated TaskInfo task_info_list = 1;
+}
+
+message PostRunHookReply {
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  repeated TaskIdReply result = 1;
+}
+
+message PreCompletionHookRequest {
+  repeated TaskInfo task_info_list = 1;
+}
+
+message PreCompletionHookReply {
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  repeated TaskIdReply result = 1;
+}
+
+message PostCompletionHookRequest {
+  repeated TaskInfo task_info_list = 1;
+}
+
+message PostCompletionHookReply {
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  repeated TaskIdReply result = 1;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -731,4 +787,13 @@ service CraneForeD {
   rpc CrunStream(stream StreamCrunRequest) returns(stream StreamCforedCrunReply);
   rpc TaskIOStream(stream StreamCforedTaskIORequest) returns(stream StreamCforedTaskIOReply);
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
+}
+
+service CranePluginD {
+  /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */  
+  rpc PreRunHook(PreRunHookRequest) returns (PreRunHookReply);
+  rpc PostRunHook(PostRunHookRequest) returns (PostRunHookReply);
+  
+  rpc PreCompletionHook(PreCompletionHookRequest) returns (PreCompletionHookReply);
+  rpc PostCompletionHook(PostCompletionHookRequest) returns (PostCompletionHookReply);
 }
