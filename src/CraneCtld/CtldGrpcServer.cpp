@@ -1037,9 +1037,9 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
             // calloc will not send TaskCompletionAckReply when task
             // Complete.
             // crun task will send TaskStatusChange from Craned,
-//            if (meta.interactive_type == InteractiveTaskType::Crun) {
-//              stream_writer.WriteTaskCompletionAckReply(task_id);
-//            }
+            if (auto writer = writer_weak_ptr.lock();
+                writer && meta.interactive_type == crane::grpc::Calloc)
+              writer->WriteTaskCompletionAckReply(task_id);
             m_ctld_server_->m_mtx_.Lock();
 
             // If cfored disconnected, the cfored_name should have be
