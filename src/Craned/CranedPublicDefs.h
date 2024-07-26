@@ -41,7 +41,6 @@ struct CranedNode {
   uint32_t cpu;
   uint64_t memory_bytes;
   DedicatedResource dedicated_resource;
-  std::unordered_map<SlotId, std::string> slot_to_type_map;
 };
 
 struct Partition {

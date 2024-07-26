@@ -512,26 +512,7 @@ bool Device::Init() {
   return true;
 }
 
-bool Device::Init(const std::string& device_name,
-                  const std::string& device_type,
-                  const std::string& device_path) {
-  this->type = device_type;
-  this->name = device_name;
-  const auto& device_major_minor_optype_option =
-      GetDeviceFileMajorMinorOpType(device_path);
-  if (device_major_minor_optype_option.has_value()) {
-    const auto& device_major_minor_optype =
-        device_major_minor_optype_option.value();
 
-    this->major = std::get<0>(device_major_minor_optype);
-    this->minor = std::get<1>(device_major_minor_optype);
-    this->op_type = std::get<2>(device_major_minor_optype);
-    this->path = device_path;
-  } else {
-    return false;
-  }
-  return true;
-}
 Device::Device(const std::string& device_name, const std::string& device_type,
                const std::string& device_path)
     : name(device_name), type(device_type), path(device_path){};

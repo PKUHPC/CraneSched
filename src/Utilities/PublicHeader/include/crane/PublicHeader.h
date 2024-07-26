@@ -211,12 +211,9 @@ struct Device {
   // link count to #index device;
   std::vector<int> links;
 
-  Device() = default;
   Device(const std::string& device_name, const std::string& device_type,
          const std::string& device_path);
   bool Init();
-  bool Init(const std::string& device_name, const std::string& device_type,
-            const std::string& device_path);
 };
 
 bool operator==(const Device& lhs, const Device& rhs);

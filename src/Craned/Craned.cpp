@@ -430,7 +430,6 @@ void ParseConfig(int argc, char** argv) {
         node_ptr->dedicated_resource.craned_id_gres_map[g_config.Hostname]
             .name_type_slots_map[dev.name][dev.type]
             .emplace(dev.path);
-        node_ptr->slot_to_type_map[dev.path] = dev.type;
         Craned::g_this_node_device.emplace_back(dev);
       }
     }
