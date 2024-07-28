@@ -14,6 +14,8 @@ add_executable(cranectld
         AccountManager.cpp
         EmbeddedDbClient.cpp
         EmbeddedDbClient.h
+        PluginClient.h
+        PluginClient.cpp
         CraneCtld.cpp
 
         CtldPreCompiledHeader.h)

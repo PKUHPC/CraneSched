@@ -191,9 +191,9 @@ void CtldClient::AsyncSendThread_() {
         CRANE_ERROR(
             "Failed to send TaskStatusChange: "
             "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
-            status_change.task_id, status_change.new_status,
+            status_change.task_id, int(status_change.new_status),
             status.error_message(), context.debug_error_string(),
-            status.error_code());
+            int(status.error_code()));
 
         if (status.error_code() == grpc::UNAVAILABLE) {
           // If some messages are not sent due to channel failure,
