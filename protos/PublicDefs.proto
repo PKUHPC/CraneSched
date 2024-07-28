@@ -42,7 +42,7 @@ message TypeCountMap{
 }
 
 message DeviceMap{
-  map<string/*name*/, TypeCountMap> name_type_map = 1;
+  map<string /*name*/, TypeCountMap> name_type_map = 1;
 }
 
 message Slots{
@@ -50,7 +50,7 @@ message Slots{
 }
 
 message DeviceTypeSlotsMap{
-  map<string/*Type*/, Slots/*index of slot*/> type_slots_map = 1;
+  map<string /*Type*/, Slots /*index of slot*/> type_slots_map = 1;
 }
 
 message DedicatedResourceInNode{
@@ -63,8 +63,17 @@ message DedicatedResource {
 
 message Resources {
   AllocatableResource allocatable_resource = 1;
+
   oneof dedicated_resource {
+    // After the task is scheduled, some missing device
+    // specification is fulfilled by the scheduler and
+    // a detailed specification of dedicated resources is generated.
+    // Such a detailed form is sent to Craned for actual device allocation.
     DedicatedResource actual_dedicated_resource = 2;
+
+    // The form of dedicated resource presented by user
+    // is abstracted by DeviceMap.
+    // DeviceMap is used between front end and CraneCtld.
     DeviceMap dedicated_resource_req = 3;
   }
 }
