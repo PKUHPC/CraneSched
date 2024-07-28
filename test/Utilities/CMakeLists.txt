@@ -1,5 +1,4 @@
-add_executable(utility_test
-        dedicated_resource_test.cpp)
+add_executable(utility_test cgroup_limit_test.cpp network_function_test.cpp PublicHeader_test.cpp)
 target_link_libraries(utility_test
         GTest::gtest
         GTest::gtest_main
@@ -9,7 +8,9 @@ target_link_libraries(utility_test
         cxxopts
         absl::synchronization
 
+        Utility_cgroup
         Utility_PublicHeader
+        Utility_AnonymousPipe
         crane_proto_lib
 
         test_proto
