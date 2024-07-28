@@ -335,29 +335,31 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     auto& dedicated_res_avail = craned_meta->res_avail.dedicated_resource;
 
     craned_info->set_hostname(craned_meta->static_meta.hostname);
+
     craned_info->set_cpu(static_cast<double>(alloc_res_total.cpu_count));
     craned_info->set_alloc_cpu(static_cast<double>(alloc_res_in_use.cpu_count));
     craned_info->set_free_cpu(static_cast<double>(alloc_res_avail.cpu_count));
+
     craned_info->set_real_mem(alloc_res_total.memory_bytes);
     craned_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
     craned_info->set_free_mem(alloc_res_avail.memory_bytes);
+
     craned_info->set_running_task_num(
         craned_meta->running_task_resource_map.size());
 
-    if (dedicated_res_total.contains(craned_index)) {
-      dedicated_res_total.at(craned_index)
-          .setGrpcDeviceMap(craned_info->mutable_device());
-    }
+    if (dedicated_res_total.contains(craned_index))
+      *craned_info->mutable_device() = static_cast<crane::grpc::DeviceMap>(
+          dedicated_res_total.at(craned_index));
 
-    if (dedicated_res_in_use.contains(craned_index)) {
-      dedicated_res_in_use.at(craned_index)
-          .setGrpcDeviceMap(craned_info->mutable_alloc_device());
-    }
+    if (dedicated_res_in_use.contains(craned_index))
+      *craned_info->mutable_alloc_device() =
+          static_cast<crane::grpc::DeviceMap>(
+              dedicated_res_in_use.at(craned_index));
 
-    if (dedicated_res_avail.contains(craned_index)) {
-      dedicated_res_avail.at(craned_index)
-          .setGrpcDeviceMap(craned_info->mutable_avail_device());
-    }
+    if (dedicated_res_avail.contains(craned_index))
+      *craned_info->mutable_avail_device() =
+          static_cast<crane::grpc::DeviceMap>(
+              dedicated_res_avail.at(craned_index));
 
     if (craned_meta->drain) {
       craned_info->set_control_state(
@@ -366,6 +368,7 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
       craned_info->set_control_state(
           crane::grpc::CranedControlState::CRANE_NONE);
     }
+
     if (craned_meta->alive) {
       if (craned_meta->res_in_use.allocatable_resource.cpu_count == cpu_t(0) &&
           craned_meta->res_in_use.allocatable_resource.memory_bytes == 0 &&
@@ -413,29 +416,29 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   auto& dedicated_res_avail = craned_meta->res_avail.dedicated_resource;
 
   craned_info->set_hostname(craned_meta->static_meta.hostname);
+
   craned_info->set_cpu(static_cast<double>(alloc_res_total.cpu_count));
   craned_info->set_alloc_cpu(static_cast<double>(alloc_res_in_use.cpu_count));
   craned_info->set_free_cpu(static_cast<double>(alloc_res_avail.cpu_count));
+
   craned_info->set_real_mem(alloc_res_total.memory_bytes);
   craned_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
   craned_info->set_free_mem(alloc_res_avail.memory_bytes);
+
   craned_info->set_running_task_num(
       craned_meta->running_task_resource_map.size());
 
-  if (dedicated_res_total.contains(node_name)) {
-    dedicated_res_total.at(node_name).setGrpcDeviceMap(
-        craned_info->mutable_device());
-  }
+  if (dedicated_res_total.contains(node_name))
+    *craned_info->mutable_device() =
+        static_cast<crane::grpc::DeviceMap>(dedicated_res_total.at(node_name));
 
-  if (dedicated_res_in_use.contains(node_name)) {
-    dedicated_res_in_use.at(node_name).setGrpcDeviceMap(
-        craned_info->mutable_alloc_device());
-  }
+  if (dedicated_res_in_use.contains(node_name))
+    *craned_info->mutable_alloc_device() =
+        static_cast<crane::grpc::DeviceMap>(dedicated_res_in_use.at(node_name));
 
-  if (dedicated_res_avail.contains(node_name)) {
-    dedicated_res_avail.at(node_name).setGrpcDeviceMap(
-        craned_info->mutable_avail_device());
-  }
+  if (dedicated_res_avail.contains(node_name))
+    *craned_info->mutable_avail_device() =
+        static_cast<crane::grpc::DeviceMap>(dedicated_res_avail.at(node_name));
 
   if (craned_meta->drain) {
     craned_info->set_control_state(
@@ -513,26 +516,27 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
 
     for (const auto& craned_id : craned_ids) {
       const auto& craned_meta = craned_map.at(craned_id).GetExclusivePtr();
+
       const auto& dedicated_res_total =
           craned_meta->res_total.dedicated_resource;
       const auto& dedicated_res_in_use =
           craned_meta->res_in_use.dedicated_resource;
       const auto& dedicated_res_avail =
           craned_meta->res_avail.dedicated_resource;
-      if (dedicated_res_total.contains(craned_id)) {
-        dedicated_res_total.at(craned_id).setGrpcDeviceMap(
-            part_info->mutable_device());
-      }
 
-      if (dedicated_res_in_use.contains(craned_id)) {
-        dedicated_res_in_use.at(craned_id).setGrpcDeviceMap(
-            part_info->mutable_alloc_device());
-      }
+      if (dedicated_res_total.contains(craned_id))
+        *part_info->mutable_device() = static_cast<crane::grpc::DeviceMap>(
+            dedicated_res_total.at(craned_id));
 
-      if (dedicated_res_avail.contains(craned_id)) {
-        dedicated_res_avail.at(craned_id).setGrpcDeviceMap(
-            part_info->mutable_avail_device());
-      }
+      if (dedicated_res_in_use.contains(craned_id))
+        *part_info->mutable_alloc_device() =
+            static_cast<crane::grpc::DeviceMap>(
+                dedicated_res_in_use.at(craned_id));
+
+      if (dedicated_res_avail.contains(craned_id))
+        *part_info->mutable_avail_device() =
+            static_cast<crane::grpc::DeviceMap>(
+                dedicated_res_avail.at(craned_id));
     }
   }
 
@@ -581,24 +585,23 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
 
   for (const auto& craned_id : craned_ids) {
     const auto& craned_meta = craned_map.at(craned_id).GetExclusivePtr();
+
     const auto& dedicated_res_total = craned_meta->res_total.dedicated_resource;
     const auto& dedicated_res_in_use =
         craned_meta->res_in_use.dedicated_resource;
     const auto& dedicated_res_avail = craned_meta->res_avail.dedicated_resource;
-    if (dedicated_res_total.contains(craned_id)) {
-      dedicated_res_total.at(craned_id).setGrpcDeviceMap(
-          part_info->mutable_device());
-    }
 
-    if (dedicated_res_in_use.contains(craned_id)) {
-      dedicated_res_in_use.at(craned_id).setGrpcDeviceMap(
-          part_info->mutable_alloc_device());
-    }
+    if (dedicated_res_total.contains(craned_id))
+      *part_info->mutable_device() = static_cast<crane::grpc::DeviceMap>(
+          dedicated_res_total.at(craned_id));
 
-    if (dedicated_res_avail.contains(craned_id)) {
-      dedicated_res_avail.at(craned_id).setGrpcDeviceMap(
-          part_info->mutable_avail_device());
-    }
+    if (dedicated_res_in_use.contains(craned_id))
+      *part_info->mutable_alloc_device() = static_cast<crane::grpc::DeviceMap>(
+          dedicated_res_in_use.at(craned_id));
+
+    if (dedicated_res_avail.contains(craned_id))
+      *part_info->mutable_avail_device() = static_cast<crane::grpc::DeviceMap>(
+          dedicated_res_avail.at(craned_id));
   }
 
   return reply;

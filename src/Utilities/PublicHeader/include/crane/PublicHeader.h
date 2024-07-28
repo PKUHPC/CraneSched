@@ -241,9 +241,11 @@ struct DedicatedResourceInNode {
   bool empty(const std::string& device_name) const;
   bool empty(const std::string& device_name,
              const std::string& device_type) const;
-  void setGrpcDeviceMap(crane::grpc::DeviceMap* device_map) const;
   void flat_(std::set<std::string>& names, std::set<std::string>& types) const;
+
+  explicit operator crane::grpc::DeviceMap() const;
 };
+
 bool operator<=(
     const std::unordered_map<
         std::string /*name*/,

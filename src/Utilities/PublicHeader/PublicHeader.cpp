@@ -512,7 +512,6 @@ bool Device::Init() {
   return true;
 }
 
-
 Device::Device(const std::string& device_name, const std::string& device_type,
                const std::string& device_path)
     : name(device_name), type(device_type), path(device_path){};
@@ -580,6 +579,7 @@ const DedicatedResourceInNode::TypeSlotsMap& DedicatedResourceInNode::at(
 bool DedicatedResourceInNode::contains(const std::string& device_name) const {
   return this->name_type_slots_map.contains(device_name);
 }
+
 void DedicatedResourceInNode::flat_(std::set<std::string>& names,
                                     std::set<std::string>& types) const {
   for (const auto& [name, type_slots_map] : this->name_type_slots_map) {
@@ -588,23 +588,26 @@ void DedicatedResourceInNode::flat_(std::set<std::string>& names,
       types.emplace(type);
   }
 }
-void DedicatedResourceInNode::setGrpcDeviceMap(
-    crane::grpc::DeviceMap* device_map) const {
+
+DedicatedResourceInNode::operator crane::grpc::DeviceMap() const {
+  crane::grpc::DeviceMap dv_map{};
+
   for (const auto& [device_name, type_slots_map] : this->name_type_slots_map) {
-    auto* mutable_name_type_map = device_map->mutable_name_type_map();
-    if (!mutable_name_type_map->contains(device_name)) {
-      mutable_name_type_map->emplace(device_name, crane::grpc::TypeCountMap{});
-    }
+    auto& mutable_name_type_map = *dv_map.mutable_name_type_map();
+
     for (const auto& [device_type, slots] : type_slots_map.type_slots_map) {
+      // If all slots of a device type are used up,
+      // the size of slots in res_avail will be 0.
+      // We don't need such devices to show up in the response, so we skip them.
       if (slots.size() == 0) continue;
-      auto* mutable_type_count_map =
-          mutable_name_type_map->at(device_name).mutable_type_count_map();
-      if (!mutable_type_count_map->contains(device_type))
-        mutable_type_count_map->emplace(device_type, 1);
-      else
-        mutable_type_count_map->at(device_type) += 1;
+
+      auto& mutable_type_count_map =
+          *mutable_name_type_map[device_name].mutable_type_count_map();
+      mutable_type_count_map[device_type] = slots.size();
     }
   }
+
+  return dv_map;
 }
 
 bool DedicatedResourceInNode::TypeSlotsMap::empty() const {
