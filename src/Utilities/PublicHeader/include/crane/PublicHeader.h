@@ -301,6 +301,7 @@ struct Resources {
   Resources& operator+=(const AllocatableResource& rhs);
   Resources& operator-=(const AllocatableResource& rhs);
   Resources operator+(const DedicatedResource& rhs) const;
+
   explicit operator crane::grpc::Resources() const;
 };
 

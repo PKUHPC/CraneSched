@@ -174,6 +174,7 @@ struct CranedMeta {
   Resources res_total;  // A copy of res in CranedStaticMeta,
   Resources res_avail;
   Resources res_in_use;
+
   bool drain{false};
   std::string state_reason;
 
@@ -184,12 +185,12 @@ struct CranedMeta {
 
 struct PartitionGlobalMeta {
   // total = avail + in-use
-  Resources m_resource_total_;
-  Resources m_resource_avail_;
-  Resources m_resource_in_use_;
+  Resources res_total;
+  Resources res_avail;
+  Resources res_in_use;
 
   // Include resources in unavailable nodes.
-  Resources m_resource_total_inc_dead_;
+  Resources res_total_inc_dead;
 
   std::string name;
   std::string nodelist_str;

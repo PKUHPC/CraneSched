@@ -2717,21 +2717,21 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
 
     // Check whether the selected partition is able to run this task.
     if (!(task->resources <=
-          metas_ptr->partition_global_meta.m_resource_total_inc_dead_)) {
+          metas_ptr->partition_global_meta.res_total_inc_dead)) {
       CRANE_TRACE(
           "Resource not enough for task #{}. "
           "Partition total: cpu {}, mem: {}, mem+sw: {}, gres: {}",
           task->TaskId(),
-          metas_ptr->partition_global_meta.m_resource_total_inc_dead_
+          metas_ptr->partition_global_meta.res_total_inc_dead
               .allocatable_resource.cpu_count,
           util::ReadableMemory(
-              metas_ptr->partition_global_meta.m_resource_total_inc_dead_
+              metas_ptr->partition_global_meta.res_total_inc_dead
                   .allocatable_resource.memory_bytes),
           util::ReadableMemory(
-              metas_ptr->partition_global_meta.m_resource_total_inc_dead_
+              metas_ptr->partition_global_meta.res_total_inc_dead
                   .allocatable_resource.memory_sw_bytes),
-          util::ReadableGres(metas_ptr->partition_global_meta.m_resource_total_
-                                 .dedicated_resource));
+          util::ReadableGres(
+              metas_ptr->partition_global_meta.res_total.dedicated_resource));
       return CraneErr::kNoResource;
     }
 
