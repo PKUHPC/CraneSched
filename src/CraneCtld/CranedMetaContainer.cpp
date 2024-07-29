@@ -164,12 +164,6 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
         partition_meta->partition_global_meta;
     part_global_meta.res_avail -= resources;
     part_global_meta.res_in_use += resources;
-    if (resources.dedicated_resource.contains(node_id)) {
-      part_global_meta.res_avail.dedicated_resource[node_id] -=
-          resources.dedicated_resource.at(node_id);
-      part_global_meta.res_in_use.dedicated_resource[node_id] +=
-          resources.dedicated_resource.at(node_id);
-    }
   }
 }
 
@@ -222,17 +216,8 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId craned_id,
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
 
-    part_global_meta.res_avail.allocatable_resource +=
-        resources.allocatable_resource;
-    part_global_meta.res_in_use.allocatable_resource -=
-        resources.allocatable_resource;
-
-    if (resources.dedicated_resource.contains(craned_id)) {
-      part_global_meta.res_avail.dedicated_resource[craned_id] +=
-          resources.dedicated_resource.at(craned_id);
-      part_global_meta.res_in_use.dedicated_resource[craned_id] -=
-          resources.dedicated_resource.at(craned_id);
-    }
+    part_global_meta.res_avail += resources;
+    part_global_meta.res_in_use -= resources;
   }
 
   node_meta->running_task_resource_map.erase(resource_iter);
