@@ -76,7 +76,8 @@ class CranedMetaContainerInterface {
 
   virtual void InitFromConfig(const Config& config) = 0;
 
-  virtual void AddDedicatedResource(const CranedId& node_id, const DedicatedResourceInNode& resource) = 0;
+  virtual void AddDedicatedResource(
+      const CranedId& node_id, const DedicatedResourceInNode& resource) = 0;
 
   virtual bool CheckCranedAllowed(const std::string& hostname) = 0;
 
@@ -180,6 +181,10 @@ class CranedMetaContainerSimpleImpl final
   // Use this map as a READ-ONLY index, so multi-thread reading is ok.
   HashMap<CranedId /*craned hostname*/, std::list<PartitionId>>
       craned_id_part_ids_map_;
+
+ private:  // Helper functions
+  void SetGrpcCranedInfoByCranedMeta_(const CranedMeta& craned_meta,
+                                      crane::grpc::CranedInfo* craned_info);
 };
 
 }  // namespace Ctld
