@@ -273,7 +273,7 @@ struct DedicatedResource {
   DedicatedResourceInNode& at(const std::string& craned_id);
   const DedicatedResourceInNode& at(const std::string& craned_id) const;
   bool contains(const CranedId& craned_id) const;
-  bool Empty() const;
+  bool empty() const;
   // get all craned_id,name,type
   void flat_(std::set<CranedId>& craned_ids, std::set<std::string>& names,
              std::set<std::string>& types) const;

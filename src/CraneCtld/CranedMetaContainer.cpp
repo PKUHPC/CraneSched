@@ -372,13 +372,15 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
     if (craned_meta->alive) {
       if (craned_meta->res_in_use.allocatable_resource.cpu_count == cpu_t(0) &&
           craned_meta->res_in_use.allocatable_resource.memory_bytes == 0 &&
-          craned_meta->res_in_use.dedicated_resource.Empty())
+          craned_meta->res_in_use.dedicated_resource.empty())
         craned_info->set_resource_state(
             crane::grpc::CranedResourceState::CRANE_IDLE);
       else if (craned_meta->res_avail.allocatable_resource.cpu_count ==
                    cpu_t(0) ||
                craned_meta->res_avail.allocatable_resource.memory_bytes == 0 ||
-               craned_meta->res_avail.dedicated_resource.Empty())
+               (!craned_meta->res_total.dedicated_resource.empty() &&
+                craned_meta->res_in_use.dedicated_resource ==
+                    craned_meta->res_total.dedicated_resource))
         craned_info->set_resource_state(
             crane::grpc::CranedResourceState::CRANE_ALLOC);
       else
@@ -450,13 +452,15 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
   if (craned_meta->alive) {
     if (craned_meta->res_in_use.allocatable_resource.cpu_count == cpu_t(0) &&
         craned_meta->res_in_use.allocatable_resource.memory_bytes == 0 &&
-        craned_meta->res_in_use.dedicated_resource.Empty())
+        craned_meta->res_in_use.dedicated_resource.empty())
       craned_info->set_resource_state(
           crane::grpc::CranedResourceState::CRANE_IDLE);
     else if (craned_meta->res_avail.allocatable_resource.cpu_count ==
                  cpu_t(0) ||
              craned_meta->res_avail.allocatable_resource.memory_bytes == 0 ||
-             craned_meta->res_avail.dedicated_resource.Empty())
+             (!craned_meta->res_total.dedicated_resource.empty() &&
+              craned_meta->res_in_use.dedicated_resource ==
+                  craned_meta->res_total.dedicated_resource))
       craned_info->set_resource_state(
           crane::grpc::CranedResourceState::CRANE_ALLOC);
     else
@@ -508,10 +512,8 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
       part_info->set_state(crane::grpc::PartitionState::PARTITION_DOWN);
 
     part_info->set_hostlist(part_meta->partition_global_meta.nodelist_str);
+
     const auto& craned_ids = part_meta->craned_ids;
-    auto* mutable_device_map = part_info->mutable_device();
-    auto* mutable_alloc_device_map = part_info->mutable_alloc_device();
-    auto* mutable_avail_device_map = part_info->mutable_avail_device();
     auto& craned_map = *craned_meta_map_.GetMapConstSharedPtr();
 
     for (const auto& craned_id : craned_ids) {
@@ -578,9 +580,6 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
   part_info->set_hostlist(part_meta->partition_global_meta.nodelist_str);
 
   const auto& craned_ids = part_meta->craned_ids;
-  auto* mutable_device_map = part_info->mutable_device();
-  auto* mutable_alloc_device_map = part_info->mutable_alloc_device();
-  auto* mutable_avail_device_map = part_info->mutable_avail_device();
   auto& craned_map = *craned_meta_map_.GetMapConstSharedPtr();
 
   for (const auto& craned_id : craned_ids) {
@@ -711,10 +710,14 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       }
       crane::grpc::CranedResourceState resource_state;
       if (craned_meta->alive) {
-        if (res_in_use.cpu_count == cpu_t(0) && res_in_use.memory_bytes == 0) {
+        if (res_in_use.cpu_count == cpu_t(0) && res_in_use.memory_bytes == 0 &&
+            craned_meta->res_in_use.dedicated_resource.empty()) {
           resource_state = crane::grpc::CranedResourceState::CRANE_IDLE;
         } else if (res_avail.cpu_count == cpu_t(0) ||
-                   res_avail.memory_bytes == 0) {
+                   res_avail.memory_bytes == 0 ||
+                   (!craned_meta->res_total.dedicated_resource.empty() &&
+                    craned_meta->res_in_use.dedicated_resource ==
+                        craned_meta->res_total.dedicated_resource)) {
           resource_state = crane::grpc::CranedResourceState::CRANE_ALLOC;
         } else {
           resource_state = crane::grpc::CranedResourceState::CRANE_MIX;
@@ -782,7 +785,7 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
 }
 
 void CranedMetaContainerSimpleImpl::AddDedicatedResource(
-    const CranedId& node_id, DedicatedResourceInNode& resource) {
+    const CranedId& node_id, const DedicatedResourceInNode& resource) {
   if (!craned_meta_map_.Contains(node_id)) {
     CRANE_ERROR("Try to free resource from an unknown craned {}", node_id);
     return;
@@ -802,6 +805,7 @@ void CranedMetaContainerSimpleImpl::AddDedicatedResource(
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
+  if (!node_meta->alive) return;
 
   auto& node_dedicated_res_total = node_meta->res_total.dedicated_resource;
   auto& node_dedicated_res_avail = node_meta->res_avail.dedicated_resource;
@@ -812,18 +816,16 @@ void CranedMetaContainerSimpleImpl::AddDedicatedResource(
 
   for (const auto& [device_name, type_slots_map] :
        resource.name_type_slots_map) {
-    if (!constraint.at(node_id).name_type_slots_map.contains(device_name)) {
+    if (!constraint.at(node_id).contains(device_name)) {
       CRANE_TRACE(
           "Node #{} try to report {},which is no in the config of ctld ",
           node_id, device_name);
       continue;
     }
-    auto& this_name_constraint =
-        constraint.at(node_id).name_type_slots_map.at(device_name);
+    auto& this_name_constraint = constraint.at(node_id).at(device_name);
     auto& this_name_avail_current =
-        node_dedicated_res_avail[node_id].name_type_slots_map[device_name];
-    auto& this_name_to_add =
-        res_to_add[node_id].name_type_slots_map[device_name];
+        node_dedicated_res_avail[node_id][device_name];
+    auto& this_name_to_add = res_to_add[node_id][device_name];
     std::set<std::string> tmp;
     for (const auto& [type, slots] : type_slots_map.type_slots_map) {
       if (!constraint.at(node_id).at(device_name).contains(type)) {

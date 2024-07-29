@@ -234,6 +234,9 @@ CraneErr CranedStub::QueryActualGres(DedicatedResourceInNode &resource) {
                 grpc_status.error_message());
     return CraneErr::kRpcFailure;
   }
+  if (!reply.dedicated_resource().each_node_gres().contains(m_craned_id_))
+    return {};
+
   for (const auto &[device_name, type_slots_map] : reply.dedicated_resource()
                                                        .each_node_gres()
                                                        .at(m_craned_id_)

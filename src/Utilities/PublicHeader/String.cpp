@@ -360,7 +360,7 @@ bool ConvertStringToInt64(const std::string &s, int64_t *val) {
 }
 
 std::string ReadableGres(const DedicatedResource &dedicated_resource) {
-  if (dedicated_resource.Empty()) return "None";
+  if (dedicated_resource.empty()) return "None";
 
   std::vector<std::string> node_gres_string_vector;
   for (const auto &[node_id, node_gres] :

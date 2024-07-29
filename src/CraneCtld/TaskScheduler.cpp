@@ -2020,8 +2020,11 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     // If any of the follow `if` is true, skip this node.
     if (!(/* check dedicated_resource */
-          task->request_gres <=
-              craned_meta->res_total.dedicated_resource.at(craned_index) &&
+          (task->request_gres.empty() /*no gres required*/ ||
+           /*required gres <= node gres*/
+           (craned_meta->res_total.dedicated_resource.contains(craned_index) &&
+            task->request_gres <=
+                craned_meta->res_total.dedicated_resource.at(craned_index))) &&
           /* check allocatable_resource */
           task->resources.allocatable_resource <=
               craned_meta->res_total.allocatable_resource)) {
@@ -2136,7 +2139,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       if (trying) {
         if (task->resources.allocatable_resource <=
                 res_it->second.allocatable_resource &&
-            (task->resources.dedicated_resource.Empty() ||
+            (task->resources.dedicated_resource.empty() ||
              task->resources.dedicated_resource.at(craned_id) <=
                  res_it->second.dedicated_resource.at(craned_id))) {
           trying = false;
@@ -2158,7 +2161,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       } else {
         if (task->resources.allocatable_resource <=
                 res_it->second.allocatable_resource &&
-            (task->resources.dedicated_resource.Empty() ||
+            (task->resources.dedicated_resource.empty() ||
              task->resources.dedicated_resource.at(craned_id) <=
                  res_it->second.dedicated_resource.at(craned_id))) {
           if (std::next(res_it) == time_avail_res_map.end()) {

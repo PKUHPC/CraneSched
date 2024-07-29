@@ -420,7 +420,7 @@ bool DedicatedResource::contains(const CranedId& craned_id) const {
   return craned_id_gres_map.contains(craned_id);
 }
 
-bool DedicatedResource::Empty() const {
+bool DedicatedResource::empty() const {
   if (craned_id_gres_map.empty()) return true;
   return std::ranges::all_of(craned_id_gres_map,
                              [](const auto& kv) { return kv.second.empty(); });
@@ -470,6 +470,7 @@ const DedicatedResourceInNode& DedicatedResource::at(
 DedicatedResourceInNode& DedicatedResource::at(const std::string& craned_id) {
   return this->craned_id_gres_map.at(craned_id);
 }
+
 void DedicatedResource::flat_(std::set<CranedId>& craned_ids,
                               std::set<std::string>& names,
                               std::set<std::string>& types) const {
@@ -531,7 +532,7 @@ bool DedicatedResourceInNode::empty(const std::string& device_name,
                                     const std::string& device_type) const {
   if (name_type_slots_map.empty() ||
       !name_type_slots_map.contains(device_name) ||
-      !name_type_slots_map.at(device_name).type_slots_map.contains(device_type))
+      !name_type_slots_map.at(device_name).contains(device_type))
     return true;
   return name_type_slots_map.at(device_name).at(device_type).empty();
 }
@@ -611,6 +612,7 @@ DedicatedResourceInNode::operator crane::grpc::DeviceMap() const {
 }
 
 bool DedicatedResourceInNode::TypeSlotsMap::empty() const {
+  if (type_slots_map.empty()) return true;
   return std::ranges::all_of(type_slots_map,
                              [](const auto& kv) { return kv.second.empty(); });
 }

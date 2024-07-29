@@ -76,8 +76,7 @@ class CranedMetaContainerInterface {
 
   virtual void InitFromConfig(const Config& config) = 0;
 
-  virtual void AddDedicatedResource(const CranedId& node_id,
-                                    DedicatedResourceInNode& resource) = 0;
+  virtual void AddDedicatedResource(const CranedId& node_id, const DedicatedResourceInNode& resource) = 0;
 
   virtual bool CheckCranedAllowed(const std::string& hostname) = 0;
 
@@ -126,7 +125,7 @@ class CranedMetaContainerSimpleImpl final
   void InitFromConfig(const Config& config) override;
 
   void AddDedicatedResource(const CranedId& node_id,
-                            DedicatedResourceInNode& resource) override;
+                            const DedicatedResourceInNode& resource) override;
 
   crane::grpc::QueryCranedInfoReply QueryAllCranedInfo() override;
 
