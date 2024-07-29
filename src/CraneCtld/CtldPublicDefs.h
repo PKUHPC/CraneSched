@@ -135,6 +135,9 @@ struct Config {
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;
+
+  std::unordered_map<std::string, uint32_t> Licenses;
+  
   bool RejectTasksBeyondCapacity{false};
 };
 

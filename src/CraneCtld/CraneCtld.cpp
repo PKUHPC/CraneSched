@@ -302,6 +302,14 @@ void ParseConfig(int argc, char** argv) {
         g_config.ScheduledBatchSize = Ctld::kDefaultScheduledBatchSize;
       }
 
+      if (config["Licenses"]) {
+        std::string licenses_str = config["Licenses"].as<std::string>();
+        if (!util::ParseLicensesList(licenses_str, &g_config.Licenses)) {
+          CRANE_ERROR("Illegal licenses string format.");
+          std::exit(1);
+        }
+      }
+
       if (config["RejectJobsBeyondCapacity"]) {
         g_config.RejectTasksBeyondCapacity =
             config["RejectJobsBeyondCapacity"].as<bool>();
