@@ -670,7 +670,7 @@ void TaskScheduler::ScheduleThread_() {
               .count());
 
       // PreRunHook is called here.
-      if (g_config.Plugin.Enabled) g_plugin_client->PreRunHookAsync();
+      if (g_config.Plugin.Enabled) g_plugin_client->PreStartHookAsync();
 
       begin = std::chrono::steady_clock::now();
       for (auto& it : selection_result_list) {
@@ -901,7 +901,7 @@ void TaskScheduler::ScheduleThread_() {
       // After sending ExecuteTasks RPC, PostRunHook is called.
       // This must before checking failed tasks as TaskStatusChangeAsync may
       // trigger PreCompletion/PostCompletion hooks.
-      if (g_config.Plugin.Enabled) g_plugin_client->PostRunHookAsync();
+      if (g_config.Plugin.Enabled) g_plugin_client->PostStartHookAsync();
 
       // If any task failed during this stage,
       // call TaskStatusChangeAsync since the ownership of tasks

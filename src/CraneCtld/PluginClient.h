@@ -43,8 +43,8 @@ class PluginClient {
   ~PluginClient();
 
   enum class HookType {
-    PRE_RUN,
-    POST_RUN,
+    PRE_START,
+    POST_START,
     PRE_COMPLETION,
     POST_COMPLETION,
 
@@ -59,9 +59,9 @@ class PluginClient {
   void InitChannelAndStub(const std::string& endpoint);
 
   // These functions are used to add HookEvent into the event queue.
-  void PreRunHookAsync();
+  void PreStartHookAsync();
 
-  void PostRunHookAsync();
+  void PostStartHookAsync();
 
   void PreCompletionHookAsync();
 
@@ -71,10 +71,10 @@ class PluginClient {
   // HookDispatchFunc is a function pointer type that handles different event.
   using HookDispatchFunc = grpc::Status (PluginClient::*)(
       grpc::ClientContext*, google::protobuf::Message* msg);
-  grpc::Status SendPreRunHook_(grpc::ClientContext* context,
-                               google::protobuf::Message* msg);
-  grpc::Status SendPostRunHook_(grpc::ClientContext* context,
-                                google::protobuf::Message* msg);
+  grpc::Status SendPreStartHook_(grpc::ClientContext* context,
+                                 google::protobuf::Message* msg);
+  grpc::Status SendPostStartHook_(grpc::ClientContext* context,
+                                  google::protobuf::Message* msg);
   grpc::Status SendPreCompletionHook_(grpc::ClientContext* context,
                                       google::protobuf::Message* msg);
   grpc::Status SendPostCompletionHook_(grpc::ClientContext* context,
@@ -94,8 +94,8 @@ class PluginClient {
   // Use this array to dispatch the hook event to the corresponding function in
   // O(1) time.
   static constexpr std::array<HookDispatchFunc, size_t(HookType::HookTypeCount)>
-      s_hook_dispatch_funcs_{{&PluginClient::SendPreRunHook_,
-                              &PluginClient::SendPostRunHook_,
+      s_hook_dispatch_funcs_{{&PluginClient::SendPreStartHook_,
+                              &PluginClient::SendPostStartHook_,
                               &PluginClient::SendPreCompletionHook_,
                               &PluginClient::SendPostCompletionHook_}};
 };

@@ -656,11 +656,11 @@ message StreamCforedTaskIOReply {
   }
 }
 
-message PreRunHookRequest {
+message PreStartHookRequest {
   repeated TaskInfo task_info_list = 1;
 }
 
-message PreRunHookReply {
+message PreStartHookReply {
   message TaskIdReply {
     bool ok = 1;
     uint32 task_id = 2;
@@ -670,11 +670,11 @@ message PreRunHookReply {
   repeated TaskIdReply result = 1;
 }
 
-message PostRunHookRequest {
+message PostStartHookRequest {
   repeated TaskInfo task_info_list = 1;
 }
 
-message PostRunHookReply {
+message PostStartHookReply {
   message TaskIdReply {
     bool ok = 1;
     uint32 task_id = 2;
@@ -791,8 +791,8 @@ service CraneForeD {
 
 service CranePluginD {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */  
-  rpc PreRunHook(PreRunHookRequest) returns (PreRunHookReply);
-  rpc PostRunHook(PostRunHookRequest) returns (PostRunHookReply);
+  rpc PreStartHook(PreStartHookRequest) returns (PreStartHookReply);
+  rpc PostStartHook(PostStartHookRequest) returns (PostStartHookReply);
   
   rpc PreCompletionHook(PreCompletionHookRequest) returns (PreCompletionHookReply);
   rpc PostCompletionHook(PostCompletionHookRequest) returns (PostCompletionHookReply);

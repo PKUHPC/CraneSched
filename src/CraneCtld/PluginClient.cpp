@@ -137,28 +137,28 @@ void PluginClient::AsyncSendThread_() {
   }
 }
 
-grpc::Status PluginClient::SendPreRunHook_(grpc::ClientContext* context,
-                                           google::protobuf::Message* msg) {
-  using crane::grpc::PreRunHookReply;
-  using crane::grpc::PreRunHookRequest;
+grpc::Status PluginClient::SendPreStartHook_(grpc::ClientContext* context,
+                                             google::protobuf::Message* msg) {
+  using crane::grpc::PreStartHookReply;
+  using crane::grpc::PreStartHookRequest;
 
-  auto request = dynamic_cast<PreRunHookRequest*>(msg);
-  PreRunHookReply reply;
+  auto request = dynamic_cast<PreStartHookRequest*>(msg);
+  PreStartHookReply reply;
 
-  CRANE_TRACE("[Plugin] Sending PreRunHook.");
-  return m_stub_->PreRunHook(context, *request, &reply);
+  CRANE_TRACE("[Plugin] Sending PreStartHook.");
+  return m_stub_->PreStartHook(context, *request, &reply);
 }
 
-grpc::Status PluginClient::SendPostRunHook_(grpc::ClientContext* context,
-                                            google::protobuf::Message* msg) {
-  using crane::grpc::PostRunHookReply;
-  using crane::grpc::PostRunHookRequest;
+grpc::Status PluginClient::SendPostStartHook_(grpc::ClientContext* context,
+                                              google::protobuf::Message* msg) {
+  using crane::grpc::PostStartHookReply;
+  using crane::grpc::PostStartHookRequest;
 
-  auto request = dynamic_cast<PostRunHookRequest*>(msg);
-  PostRunHookReply reply;
+  auto request = dynamic_cast<PostStartHookRequest*>(msg);
+  PostStartHookReply reply;
 
-  CRANE_TRACE("[Plugin] Sending PostRunHook.");
-  return m_stub_->PostRunHook(context, *request, &reply);
+  CRANE_TRACE("[Plugin] Sending PostStartHook.");
+  return m_stub_->PostStartHook(context, *request, &reply);
 }
 
 grpc::Status PluginClient::SendPreCompletionHook_(
@@ -185,20 +185,20 @@ grpc::Status PluginClient::SendPostCompletionHook_(
   return m_stub_->PostCompletionHook(context, *request, &reply);
 }
 
-void PluginClient::PreRunHookAsync() {
-  auto request = new crane::grpc::PreRunHookRequest();
+void PluginClient::PreStartHookAsync() {
+  auto request = new crane::grpc::PreStartHookRequest();
   // TODO: Add data to request.
 
-  HookEvent e{HookType::PRE_RUN,
+  HookEvent e{HookType::PRE_START,
               std::unique_ptr<google::protobuf::Message>(request)};
   absl::MutexLock lock(&m_event_queue_mtx_);
   m_event_queue_.emplace_back(std::move(e));
 }
 
-void PluginClient::PostRunHookAsync() {
-  auto request = new crane::grpc::PostRunHookRequest();
+void PluginClient::PostStartHookAsync() {
+  auto request = new crane::grpc::PostStartHookRequest();
 
-  HookEvent e{HookType::POST_RUN,
+  HookEvent e{HookType::POST_START,
               std::unique_ptr<google::protobuf::Message>(request)};
   absl::MutexLock lock(&m_event_queue_mtx_);
   m_event_queue_.emplace_back(std::move(e));
