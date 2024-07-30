@@ -236,7 +236,7 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNodes(
         part_id_craned_ids_map.at(part_id).size();
   }
 
-  for (auto& [node_id, part_ids] : part_id_craned_ids_map) {
+  for (const CranedId& node_id : node_ids) {
     if (!craned_meta_map_.Contains(node_id)) {
       CRANE_ERROR("Try to free resource from an unknown craned {}", node_id);
       return;

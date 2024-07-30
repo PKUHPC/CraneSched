@@ -2352,9 +2352,9 @@ void MinLoadFirst::NodeSelect(
         running_tasks,
     absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
     std::list<NodeSelectionResult>* selection_result_list) {
-  auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
   auto all_partitions_meta_map =
       g_meta_container->GetAllPartitionsMetaMapConstPtr();
+  auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
 
   std::unordered_map<PartitionId, NodeSelectionInfo> part_id_node_info_map;
 
