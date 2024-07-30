@@ -37,6 +37,15 @@ AllocatableResource& AllocatableResource::operator-=(
   return *this;
 }
 
+AllocatableResource AllocatableResource::operator*(int rhs) const {
+  AllocatableResource res{};
+  res.cpu_count = cpu_count * rhs;
+  res.memory_bytes = memory_bytes * rhs;
+  res.memory_sw_bytes = memory_sw_bytes * rhs;
+
+  return res;
+}
+
 bool operator<=(const AllocatableResource& lhs,
                 const AllocatableResource& rhs) {
   if (lhs.cpu_count <= rhs.cpu_count && lhs.memory_bytes <= rhs.memory_bytes &&

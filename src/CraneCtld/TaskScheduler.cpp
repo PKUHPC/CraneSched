@@ -515,9 +515,8 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
 
 void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
-  for (const CranedId& craned_id : task->CranedIds())
-    g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
-                                             task->resources);
+  g_meta_container->MallocResourceFromNodes(task->CranedIds(), task->TaskId(),
+                                            task->resources);
 
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
@@ -924,8 +923,8 @@ void TaskScheduler::ScheduleThread_() {
 
         for (auto& it : failed_result_list) {
           auto& task = it.first;
-          for (CranedId const& craned_id : task->CranedIds())
-            g_meta_container->FreeResourceFromNode(craned_id, task->TaskId());
+          g_meta_container->FreeResourceFromNodes(
+              task->CranedIds(), task->TaskId(), task->resources);
         }
 
         // Construct the map for cgroups to be released of all failed tasks
@@ -1641,9 +1640,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       }
     }
 
-    for (CranedId const& craned_id : task->CranedIds()) {
-      g_meta_container->FreeResourceFromNode(craned_id, task_id);
-    }
+    g_meta_container->FreeResourceFromNodes(task->CranedIds(), task_id,
+                                            task->resources);
 
     task_raw_ptr_vec.emplace_back(task.get());
     task_ptr_vec.emplace_back(std::move(task));
@@ -2447,9 +2445,8 @@ void MinLoadFirst::NodeSelect(
       // takes effect right now. Otherwise, during the scheduling for the
       // next partition, the algorithm may use the resource which is already
       // allocated.
-      for (CranedId const& craned_id : craned_ids)
-        g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
-                                                 task->resources);
+      g_meta_container->MallocResourceFromNodes(craned_ids, task->TaskId(),
+                                                task->resources);
 
       std::unique_ptr<TaskInCtld> moved_task;
 

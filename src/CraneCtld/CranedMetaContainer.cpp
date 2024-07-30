@@ -128,99 +128,142 @@ CranedMetaContainerSimpleImpl::GetCranedMetaMapConstPtr() {
   return craned_meta_map_.GetMapConstSharedPtr();
 }
 
-void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
-    CranedId node_id, task_id_t task_id, const Resources& resources) {
-  if (!craned_meta_map_.Contains(node_id)) {
-    CRANE_ERROR("Try to malloc resource from an unknown craned {}", node_id);
-    return;
+void CranedMetaContainerSimpleImpl::MallocResourceFromNodes(
+    const std::list<CranedId>& node_ids, task_id_t task_id,
+    const Resources& resources) {
+  // Build PartitionId -> set<CranedId> hash map.
+  HashMap<PartitionId, HashSet<CranedId>> part_id_craned_ids_map;
+
+  for (auto& node_id : node_ids) {
+    if (!craned_id_part_ids_map_.contains(node_id)) {
+      CRANE_ERROR("Malloc resource on {} not in the craned map", node_id);
+      return;
+    }
+
+    auto& part_ids = craned_id_part_ids_map_.at(node_id);
+    for (auto& part_id : part_ids)
+      part_id_craned_ids_map[part_id].emplace(node_id);
   }
 
-  auto& part_ids = craned_id_part_ids_map_.at(node_id);
-
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
-  part_meta_ptrs.reserve(part_ids.size());
+  part_meta_ptrs.reserve(part_id_craned_ids_map.size());
 
   auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
-  for (PartitionId const& part_id : part_ids)
+  for (auto it = part_id_craned_ids_map.begin();
+       it != part_id_craned_ids_map.end(); ++it) {
+    PartitionId const& part_id = it->first;
     part_meta_ptrs.emplace_back(
         raw_part_metas_map_->at(part_id).GetExclusivePtr());
-
-  // Then acquire craned meta lock.
-  auto node_meta = craned_meta_map_[node_id];
-  node_meta->running_task_resource_map.emplace(task_id, resources);
-  node_meta->res_avail.allocatable_resource -= resources.allocatable_resource;
-  node_meta->res_in_use.allocatable_resource += resources.allocatable_resource;
-  if (resources.dedicated_resource.contains(node_id)) {
-    node_meta->res_avail.dedicated_resource[node_id] -=
-        resources.dedicated_resource.at(node_id);
-    node_meta->res_in_use.dedicated_resource[node_id] +=
-        resources.dedicated_resource.at(node_id);
   }
 
   for (auto& partition_meta : part_meta_ptrs) {
-    PartitionGlobalMeta& part_global_meta =
-        partition_meta->partition_global_meta;
-    part_global_meta.res_avail -= resources;
-    part_global_meta.res_in_use += resources;
+    PartitionGlobalMeta& part_gmeta = partition_meta->partition_global_meta;
+    PartitionId const& part_id = part_gmeta.name;
+
+    part_gmeta.res_avail.allocatable_resource -=
+        resources.allocatable_resource *
+        part_id_craned_ids_map.at(part_id).size();
+    part_gmeta.res_in_use.allocatable_resource +=
+        resources.allocatable_resource *
+        part_id_craned_ids_map.at(part_id).size();
+  }
+
+  for (auto& [node_id, part_ids] : part_id_craned_ids_map) {
+    if (!craned_meta_map_.Contains(node_id)) {
+      CRANE_ERROR("Try to malloc resource from an unknown craned {}", node_id);
+      return;
+    }
+
+    // Then acquire craned meta lock.
+    auto node_meta = craned_meta_map_[node_id];
+
+    node_meta->res_avail.allocatable_resource -= resources.allocatable_resource;
+    node_meta->res_in_use.allocatable_resource +=
+        resources.allocatable_resource;
+
+    if (resources.dedicated_resource.contains(node_id)) {
+      node_meta->res_avail.dedicated_resource[node_id] -=
+          resources.dedicated_resource.at(node_id);
+      node_meta->res_in_use.dedicated_resource[node_id] +=
+          resources.dedicated_resource.at(node_id);
+    }
+
+    node_meta->running_task_resource_map.emplace(task_id, resources);
   }
 }
 
-void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId craned_id,
-                                                         uint32_t task_id) {
-  if (!craned_meta_map_.Contains(craned_id)) {
-    CRANE_ERROR("Try to free resource from an unknown craned {}", craned_id);
-    return;
+void CranedMetaContainerSimpleImpl::FreeResourceFromNodes(
+    std::list<CranedId> const& node_ids, uint32_t task_id,
+    Resources const& resources) {
+  // Build PartitionId -> set<CranedId> hash map.
+  HashMap<PartitionId, HashSet<CranedId>> part_id_craned_ids_map;
+
+  for (auto& node_id : node_ids) {
+    if (!craned_id_part_ids_map_.contains(node_id)) {
+      CRANE_ERROR("Free resource on {} not in the craned map", node_id);
+      return;
+    }
+
+    auto& part_ids = craned_id_part_ids_map_.at(node_id);
+    for (auto& part_id : part_ids)
+      part_id_craned_ids_map[part_id].emplace(node_id);
   }
 
-  auto& part_ids = craned_id_part_ids_map_.at(craned_id);
-
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
-  part_meta_ptrs.reserve(part_ids.size());
+  part_meta_ptrs.reserve(part_id_craned_ids_map.size());
 
   auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
-  for (PartitionId const& part_id : part_ids)
+  for (auto it = part_id_craned_ids_map.begin();
+       it != part_id_craned_ids_map.end(); ++it) {
+    PartitionId const& part_id = it->first;
     part_meta_ptrs.emplace_back(
         raw_part_metas_map_->at(part_id).GetExclusivePtr());
-
-  // Then acquire craned meta lock.
-  auto node_meta = craned_meta_map_[craned_id];
-  if (!node_meta->alive) {
-    CRANE_DEBUG("Crane {} has already been down. Ignore FreeResourceFromNode.",
-                node_meta->static_meta.hostname);
-    return;
-  }
-
-  auto resource_iter = node_meta->running_task_resource_map.find(task_id);
-  if (resource_iter == node_meta->running_task_resource_map.end()) {
-    CRANE_ERROR("Try to free resource from an unknown task {} on craned {}",
-                task_id, craned_id);
-    return;
-  }
-  Resources const& resources = resource_iter->second;
-
-  node_meta->res_avail.allocatable_resource += resources.allocatable_resource;
-  node_meta->res_in_use.allocatable_resource -= resources.allocatable_resource;
-
-  if (resources.dedicated_resource.contains(craned_id)) {
-    node_meta->res_avail.dedicated_resource[craned_id] +=
-        resources.dedicated_resource.at(craned_id);
-    node_meta->res_in_use.dedicated_resource[craned_id] -=
-        resources.dedicated_resource.at(craned_id);
   }
 
   for (auto& partition_meta : part_meta_ptrs) {
-    PartitionGlobalMeta& part_global_meta =
-        partition_meta->partition_global_meta;
+    PartitionGlobalMeta& part_gmeta = partition_meta->partition_global_meta;
+    PartitionId const& part_id = part_gmeta.name;
 
-    part_global_meta.res_avail += resources;
-    part_global_meta.res_in_use -= resources;
+    part_gmeta.res_avail.allocatable_resource +=
+        resources.allocatable_resource *
+        part_id_craned_ids_map.at(part_id).size();
+    part_gmeta.res_in_use.allocatable_resource -=
+        resources.allocatable_resource *
+        part_id_craned_ids_map.at(part_id).size();
   }
 
-  node_meta->running_task_resource_map.erase(resource_iter);
+  for (auto& [node_id, part_ids] : part_id_craned_ids_map) {
+    if (!craned_meta_map_.Contains(node_id)) {
+      CRANE_ERROR("Try to free resource from an unknown craned {}", node_id);
+      return;
+    }
+
+    // Then acquire craned meta lock.
+    auto node_meta = craned_meta_map_[node_id];
+    if (!node_meta->alive) {
+      CRANE_DEBUG(
+          "Crane {} has already been down. Ignore FreeResourceFromNodes.",
+          node_meta->static_meta.hostname);
+      return;
+    }
+
+    node_meta->res_avail.allocatable_resource += resources.allocatable_resource;
+    node_meta->res_in_use.allocatable_resource -=
+        resources.allocatable_resource;
+
+    if (resources.dedicated_resource.contains(node_id)) {
+      node_meta->res_avail.dedicated_resource[node_id] +=
+          resources.dedicated_resource.at(node_id);
+      node_meta->res_in_use.dedicated_resource[node_id] -=
+          resources.dedicated_resource.at(node_id);
+    }
+
+    node_meta->running_task_resource_map.erase(task_id);
+  }
 }
 
 void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
