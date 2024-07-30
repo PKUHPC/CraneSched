@@ -113,96 +113,6 @@ bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs) {
   return true;
 }
 
-template <typename T>
-concept HasContainsMethod = requires(T t, const std::string& str) {
-  { t.contains(str) } -> std::same_as<bool>;
-};
-
-template <typename T>
-concept HasAtMethod = requires(T t, const std::string& str) {
-  { t.at(str) };
-};
-
-template <typename T>
-concept HasEmptyMethod = requires(T t) {
-  { t.empty() } -> std::same_as<bool>;
-};
-
-template <typename T>
-  requires HasContainsMethod<T> && HasAtMethod<T> &&
-           HasEmptyMethod<
-               decltype(std::declval<T>().at(std::declval<std::string>()))>
-
-int checkEmpty(const T& lhs, const T& rhs, const std::string& key, bool& eq) {
-  if (lhs.contains(key) && !rhs.contains(key)) {
-    if (!lhs.at(key).empty()) {
-      return -1;
-    } else {
-      return 1;
-    }
-  } else if (!lhs.contains(key) && rhs.contains(key)) {
-    if (!rhs.at(key).empty()) eq = false;
-    return 1;
-  } else if (!lhs.contains(key) && !rhs.contains(key)) {
-    return 1;
-  }
-  return 0;
-}
-
-bool operator<(const DedicatedResource& lhs, const DedicatedResource& rhs) {
-  std::set<CranedId> craned_ids;
-  std::set<std::string> names;
-  std::set<std::string> types;
-  bool all_element_equ_or_empty = true;
-  lhs.flat_(craned_ids, names, types);
-  rhs.flat_(craned_ids, names, types);
-  for (const auto& craned_id : craned_ids) {
-    auto val = checkEmpty(lhs, rhs, craned_id, all_element_equ_or_empty);
-    if (val == 1) {
-      continue;
-    } else if (val == -1) {
-      return false;
-    }
-    const auto& lhs_res_in_node = lhs.at(craned_id);
-    const auto& rhs_res_in_node = rhs.at(craned_id);
-    for (const auto& name : names) {
-      val = checkEmpty(lhs_res_in_node, rhs_res_in_node, name,
-                       all_element_equ_or_empty);
-      if (val == 1) {
-        continue;
-      } else if (val == -1) {
-        return false;
-      }
-      const auto& lhs_type_slots_map = lhs_res_in_node.at(craned_id);
-      const auto& rhs_type_slots_map = rhs_res_in_node.at(craned_id);
-      for (const auto& type : types) {
-        val = checkEmpty(lhs_type_slots_map, rhs_type_slots_map, type,
-                         all_element_equ_or_empty);
-        if (val == 1) {
-          continue;
-        } else if (val == -1) {
-          return false;
-        } else {
-          auto lhs_size = lhs_type_slots_map.at(type).size();
-          auto rhs_size = rhs_type_slots_map.at(type).size();
-          if (lhs_size > rhs_size) {
-            return false;
-          } else {
-            if (std::ranges::includes(rhs_type_slots_map.at(type),
-                                      lhs_type_slots_map.at(type))) {
-              if (lhs_size < rhs_size) all_element_equ_or_empty = false;
-            } else
-              return false;
-          }
-        }
-      }
-    }
-  }
-
-  if (all_element_equ_or_empty) return false;
-  return true;
-}
-
 bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs) {
   std::set<CranedId> craned_ids;
   for (const auto& [craned_id, _] : lhs.craned_id_gres_map)
@@ -397,11 +307,6 @@ Resources::operator crane::grpc::Resources() const {
 bool operator<=(const Resources& lhs, const Resources& rhs) {
   return lhs.allocatable_resource <= rhs.allocatable_resource &&
          lhs.dedicated_resource <= rhs.dedicated_resource;
-}
-
-bool operator<(const Resources& lhs, const Resources& rhs) {
-  return lhs.allocatable_resource < rhs.allocatable_resource &&
-         lhs.dedicated_resource < rhs.dedicated_resource;
 }
 
 bool operator==(const Resources& lhs, const Resources& rhs) {

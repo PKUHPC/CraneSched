@@ -283,7 +283,6 @@ struct DedicatedResource {
 };
 
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs);
-bool operator<(const DedicatedResource& lhs, const DedicatedResource& rhs);
 bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs);
 
 /**
@@ -308,7 +307,6 @@ struct Resources {
 };
 
 bool operator<=(const Resources& lhs, const Resources& rhs);
-bool operator<(const Resources& lhs, const Resources& rhs);
 bool operator==(const Resources& lhs, const Resources& rhs);
 
 struct CgroupSpec {
