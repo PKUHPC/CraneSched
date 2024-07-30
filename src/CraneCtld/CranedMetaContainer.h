@@ -34,12 +34,15 @@ class CranedMetaContainerInterface {
             typename Hash = absl::container_internal::hash_default_hash<K>>
   using HashMap = absl::flat_hash_map<K, V, Hash>;
 
-  template <typename K, typename V>
-  using TreeMap = absl::btree_map<K, V>;
-
   template <typename K,
             typename Hash = absl::container_internal::hash_default_hash<K>>
   using HashSet = absl::flat_hash_set<K, Hash>;
+
+  template <typename K, typename V>
+  using TreeMap = absl::btree_map<K, V>;
+
+  template <typename K>
+  using TreeSet = absl::btree_set<K>;
 
   CranedMetaContainerInterface() = default;
 

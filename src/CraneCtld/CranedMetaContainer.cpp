@@ -132,7 +132,7 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNodes(
     const std::list<CranedId>& node_ids, task_id_t task_id,
     const Resources& resources) {
   // Build PartitionId -> set<CranedId> hash map.
-  HashMap<PartitionId, HashSet<CranedId>> part_id_craned_ids_map;
+  TreeMap<PartitionId, TreeSet<CranedId>> part_id_craned_ids_map;
 
   for (auto& node_id : node_ids) {
     if (!craned_id_part_ids_map_.contains(node_id)) {
@@ -198,7 +198,7 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNodes(
     std::list<CranedId> const& node_ids, uint32_t task_id,
     Resources const& resources) {
   // Build PartitionId -> set<CranedId> hash map.
-  HashMap<PartitionId, HashSet<CranedId>> part_id_craned_ids_map;
+  TreeMap<PartitionId, TreeSet<CranedId>> part_id_craned_ids_map;
 
   for (auto& node_id : node_ids) {
     if (!craned_id_part_ids_map_.contains(node_id)) {
