@@ -23,15 +23,18 @@
 #include <yaml-cpp/yaml.h>
 
 #include <cxxopts.hpp>
+#include <filesystem>
 
 #include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
+#include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "PluginClient.h"
 #include "TaskScheduler.h"
+#include "crane/Logger.h"
 #include "crane/Network.h"
 #include "crane/OS.h"
 
@@ -44,6 +47,8 @@ void ParseConfig(int argc, char** argv) {
       cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
       ("D,db-config", "Path to DB configuration file",
        cxxopts::value<std::string>()->default_value(kDefaultDbConfigPath))
+      ("P,plugin-config", "Path to plugin configuration file",
+       cxxopts::value<std::string>()->default_value(kDefaultPluginConfigPath))
       ("l,listen", "Listening address, format: <IP>:<port>",
       cxxopts::value<std::string>()->default_value("0.0.0.0"))
       ("p,port", "Listening port, format: <IP>:<port>",
@@ -74,6 +79,8 @@ void ParseConfig(int argc, char** argv) {
 
   std::string config_path = parsed_args["config"].as<std::string>();
   std::string db_config_path = parsed_args["db-config"].as<std::string>();
+  std::string plugin_config_path =
+      parsed_args["plugin-config"].as<std::string>();
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
@@ -115,6 +122,14 @@ void ParseConfig(int argc, char** argv) {
       }
 
       InitLogger(log_level, g_config.CraneCtldLogFile);
+
+      // External configuration file path
+      if (!parsed_args.count("db-config") && config["DbConfigPath"]) {
+        db_config_path = config["DbConfigPath"].as<std::string>();
+      }
+      if (!parsed_args.count("plugin-config") && config["PluginConfigPath"]) {
+        plugin_config_path = config["PluginConfigPath"].as<std::string>();
+      }
 
       if (config["CraneCtldMutexFilePath"])
         g_config.CraneCtldMutexFilePath =
@@ -189,10 +204,6 @@ void ParseConfig(int argc, char** argv) {
         }
       } else {
         g_config.ListenConf.UseTls = false;
-      }
-
-      if (config["DbConfigPath"]) {
-        db_config_path = config["DbConfigPath"].as<std::string>();
       }
 
       if (config["CraneCtldForeground"]) {
@@ -531,6 +542,30 @@ void ParseConfig(int argc, char** argv) {
     std::exit(1);
   }
 
+  if (std::filesystem::exists(plugin_config_path)) {
+    try {
+      YAML::Node config = YAML::LoadFile(plugin_config_path);
+
+      if (config["Enabled"])
+        g_config.Plugin.Enabled = config["Enabled"].as<bool>();
+
+      if (config["PlugindSockPath"])
+        g_config.Plugin.PlugindSockPath =
+            fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                        config["PlugindSockPath"].as<std::string>());
+      else
+        g_config.Plugin.PlugindSockPath = fmt::format(
+            "unix://{}{}", g_config.CraneBaseDir, "cranectld/cplugind.sock");
+    } catch (YAML::BadFile& e) {
+      CRANE_CRITICAL("Can't open plugin config file {}: {}", plugin_config_path,
+                     e.what());
+      std::exit(1);
+    }
+  } else {
+    CRANE_CRITICAL("Plugin config file '{}' not existed", plugin_config_path);
+    std::exit(1);
+  }
+
   if (parsed_args.count("listen")) {
     g_config.ListenConf.CraneCtldListenAddr =
         parsed_args["listen"].as<std::string>();
@@ -602,8 +637,11 @@ void InitializeCtldGlobalVariables() {
     std::exit(1);
   }
 
-  g_plugin_client = std::make_unique<PluginClient>();
-  g_plugin_client->InitChannelAndStub(g_config.Hostname);
+  if (g_config.Plugin.Enabled) {
+    CRANE_INFO("[Plugin] Plugin module is enabled.");
+    g_plugin_client = std::make_unique<PluginClient>();
+    g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
+  }
 
   // Account manager must be initialized before Task Scheduler
   // since the recovery stage of the task scheduler will acquire

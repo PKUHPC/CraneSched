@@ -62,6 +62,7 @@ inline const char* kCforedDefaultPort = "10012";
 
 inline const char* kDefaultConfigPath = "/etc/crane/config.yaml";
 inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
+inline const char* kDefaultPluginConfigPath = "/etc/crane/plugin.yaml";
 
 inline const char* kUnlimitedQosName = "UNLIMITED";
 inline const char* kHostFilePath = "/etc/hosts";

@@ -24,6 +24,7 @@
 #include <chrono>
 #include <cstddef>
 #include <memory>
+#include <string>
 #include <thread>
 
 #include "crane/Logger.h"
@@ -38,20 +39,13 @@ PluginClient::~PluginClient() {
   if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
 }
 
-void PluginClient::InitChannelAndStub(const std::string& plugind_host) {
+void PluginClient::InitChannelAndStub(const std::string& endpoint) {
   grpc::ChannelArguments channel_args;
-
-  // FIXME: Port is hard-coded here.
-  std::string plugind_port = "10013";
-
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   if (g_config.ListenConf.UseTls) {
-    std::string plugind_addr =
-        fmt::format("{}.{}:{}", plugind_host, g_config.ListenConf.DomainSuffix,
-                    plugind_port);
-
+    // TODO: Check if domain suffix is needed.
     grpc::SslCredentialsOptions ssl_opts;
     // pem_root_certs is actually the certificate of server side rather than
     // CA certificate. CA certificate is not needed.
@@ -62,11 +56,10 @@ void PluginClient::InitChannelAndStub(const std::string& plugind_host) {
     ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
 
     m_channel_ = grpc::CreateCustomChannel(
-        plugind_addr, grpc::SslCredentials(ssl_opts), channel_args);
+        endpoint, grpc::SslCredentials(ssl_opts), channel_args);
   } else {
-    std::string plugind_addr = fmt::format("{}:{}", plugind_host, plugind_port);
     m_channel_ = grpc::CreateCustomChannel(
-        plugind_addr, grpc::InsecureChannelCredentials(), channel_args);
+        endpoint, grpc::InsecureChannelCredentials(), channel_args);
   }
 
   // std::unique_ptr will automatically release the dangling stub.

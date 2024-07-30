@@ -91,6 +91,7 @@ struct Config {
     std::string ServerKeyFilePath;
     std::string ServerKeyContent;
   };
+  CraneCtldListenConf ListenConf;
 
   struct Priority {
     enum TypeEnum { Basic, MultiFactor };
@@ -105,9 +106,12 @@ struct Config {
     uint32_t WeightPartition;
     uint32_t WeightQOS;
   };
-  Priority PriorityConfig;
 
-  CraneCtldListenConf ListenConf;
+  struct PluginConf {
+    bool Enabled{false};
+    std::string PlugindSockPath;
+  };
+
   bool CompressedRpc{};
 
   std::string CraneCtldDebugLevel;
@@ -126,12 +130,18 @@ struct Config {
   std::unordered_map<std::string, Partition> Partitions;
   std::string DefaultPartition;
 
+  Priority PriorityConfig;
+
+  // Database config
   std::string DbUser;
   std::string DbPassword;
   std::string DbHost;
   std::string DbPort;
   std::string DbRSName;
   std::string DbName;
+
+  // Plugin config
+  PluginConf Plugin;
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;

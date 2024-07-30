@@ -23,7 +23,9 @@
 #include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
+#include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
+#include "PluginClient.h"
 
 namespace Ctld {
 
@@ -667,6 +669,9 @@ void TaskScheduler::ScheduleThread_() {
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
 
+      // PreRunHook is called here.
+      if (g_config.Plugin.Enabled) g_plugin_client->PreRunHookAsync();
+
       begin = std::chrono::steady_clock::now();
       for (auto& it : selection_result_list) {
         auto& task = it.first;
@@ -722,7 +727,6 @@ void TaskScheduler::ScheduleThread_() {
       m_task_indexes_mtx_.Unlock();
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
-
       HashMap<CranedId, std::vector<CgroupSpec>> craned_cgroup_map;
 
       for (auto& it : selection_result_list) {
@@ -893,6 +897,11 @@ void TaskScheduler::ScheduleThread_() {
         for (task_id_t task_id : failed_task_ids)
           failed_to_exec_task_id_set.emplace(craned_id, task_id);
       }
+
+      // After sending ExecuteTasks RPC, PostRunHook is called.
+      // This must before checking failed tasks as TaskStatusChangeAsync may
+      // trigger PreCompletion/PostCompletion hooks.
+      if (g_config.Plugin.Enabled) g_plugin_client->PostRunHookAsync();
 
       // If any task failed during this stage,
       // call TaskStatusChangeAsync since the ownership of tasks
@@ -1566,6 +1575,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
   CRANE_TRACE("Cleaning {} TaskStatusChanges...", actual_size);
 
+  // Call PreCompletion hook here by passing TaskStatusChangeArg.
+  if (g_config.Plugin.Enabled) g_plugin_client->PreCompletionHookAsync();
+
   // Carry the ownership of TaskInCtld for automatic destruction.
   std::vector<std::unique_ptr<TaskInCtld>> task_ptr_vec;
   std::vector<TaskInCtld*> task_raw_ptr_vec;
@@ -1676,6 +1688,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   bl.Wait();
 
   PersistAndTransferTasksToMongodb_(task_raw_ptr_vec);
+
+  // After release cgroups, we can call PostCompletion hook here.
+  if (g_config.Plugin.Enabled) g_plugin_client->PostCompletionHookAsync();
 }
 
 void TaskScheduler::QueryTasksInRam(

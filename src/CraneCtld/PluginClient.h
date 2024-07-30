@@ -56,7 +56,7 @@ class PluginClient {
     std::unique_ptr<google::protobuf::Message> msg;
   };
 
-  void InitChannelAndStub(const std::string& plugind_host);
+  void InitChannelAndStub(const std::string& endpoint);
 
   // These functions are used to add HookEvent into the event queue.
   void PreRunHookAsync();
