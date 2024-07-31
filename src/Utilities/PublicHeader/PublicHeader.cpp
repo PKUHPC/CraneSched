@@ -78,29 +78,22 @@ bool operator==(const Device& lhs, const Device& rhs) {
 
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs) {
   for (const auto& [lhs_node_id, lhs_gres] : lhs.craned_id_gres_map) {
-    if (!rhs.contains(lhs_node_id)) {
-      if (lhs_gres.empty())
-        continue;
-      else
-        return false;
+    if (!rhs.contains(lhs_node_id) && !lhs_gres.empty()) {
+      return false;
     }
 
     for (const auto& [lhs_name, lhs_type_slots_map] :
          lhs_gres.name_type_slots_map) {
-      if (!rhs.at(lhs_node_id).contains(lhs_name)) {
-        if (lhs_type_slots_map.empty())
-          continue;
-        else
-          return false;
+      if (!rhs.at(lhs_node_id).contains(lhs_name) &&
+          !lhs_type_slots_map.empty()) {
+        return false;
       }
 
       for (const auto& [lhs_type, lhs_slots] :
            lhs_type_slots_map.type_slots_map) {
-        if (!rhs.at(lhs_node_id).at(lhs_name).contains(lhs_type)) {
-          if (lhs_slots.empty())
-            continue;
-          else
-            return false;
+        if (!rhs.at(lhs_node_id).at(lhs_name).contains(lhs_type) &&
+            !lhs_slots.empty()) {
+          return false;
         }
 
         if (!std::ranges::includes(
@@ -164,7 +157,7 @@ bool operator<=(
       for (const auto& [rhs_type, rhs_slots] : rhs_type_slots_map) {
         if (req_type_count_map.contains(rhs_type)) continue;
         avail_count += rhs_slots.size();
-        if (untyped_req_count >= avail_count) break;
+        if (untyped_req_count <= avail_count) break;
       }
       if (untyped_req_count >= avail_count) return false;
     } else {
@@ -177,19 +170,14 @@ bool operator<=(
 bool operator<=(const DedicatedResourceInNode& lhs,
                 const DedicatedResourceInNode& rhs) {
   for (const auto& [lhs_name, lhs_type_slots_map] : lhs.name_type_slots_map) {
-    if (!rhs.contains(lhs_name)) {
-      if (lhs_type_slots_map.empty())
-        continue;
-      else
-        return false;
+    if (!rhs.contains(lhs_name) && !lhs_type_slots_map.empty()) {
+      return false;
     }
 
     for (const auto& [lhs_type, lhs_slots] :
          lhs_type_slots_map.type_slots_map) {
+      // slots always not empty
       if (!rhs.at(lhs_name).contains(lhs_type)) {
-        if (lhs_slots.empty())
-          continue;
-        else
           return false;
       }
 
@@ -385,15 +373,6 @@ DedicatedResourceInNode& DedicatedResource::at(const std::string& craned_id) {
   return this->craned_id_gres_map.at(craned_id);
 }
 
-void DedicatedResource::flat_(std::set<CranedId>& craned_ids,
-                              std::set<std::string>& names,
-                              std::set<std::string>& types) const {
-  for (const auto& [craned_id, res_in_node] : this->craned_id_gres_map) {
-    craned_ids.emplace(craned_id);
-    res_in_node.flat_(names, types);
-  }
-}
-
 std::optional<std::tuple<unsigned int, unsigned int, char>>
 GetDeviceFileMajorMinorOpType(const std::string& path) {
   struct stat device_file_info {};
@@ -432,9 +411,7 @@ Device::Device(const std::string& device_name, const std::string& device_type,
     : name(device_name), type(device_type), path(device_path){};
 
 bool DedicatedResourceInNode::empty() const {
-  if (name_type_slots_map.empty()) return true;
-  return std::ranges::all_of(name_type_slots_map,
-                             [](const auto& kv) { return kv.second.empty(); });
+  return name_type_slots_map.empty();
 }
 
 bool DedicatedResourceInNode::empty(const std::string& device_name) const {
@@ -464,15 +441,27 @@ DedicatedResourceInNode& DedicatedResourceInNode::operator+=(
 DedicatedResourceInNode& DedicatedResourceInNode::operator-=(
     const DedicatedResourceInNode& rhs) {
   for (const auto& [rhs_name, rhs_type_slots_map] : rhs.name_type_slots_map) {
-    auto& this_type_slots_map = this->name_type_slots_map.at(rhs_name);
+    if (!this->contains(rhs_name)) continue;
+
     for (const auto& [rhs_type, rhs_slots] :
          rhs_type_slots_map.type_slots_map) {
+      if (!this->at(rhs_name).contains(rhs_type)) continue;
+      auto& this_type_slots_map = this->name_type_slots_map.at(rhs_name);
       std::set<SlotId> temp;
       std::ranges::set_difference(this_type_slots_map.at(rhs_type), rhs_slots,
                                   std::inserter(temp, temp.begin()));
-      this_type_slots_map[rhs_type] = std::move(temp);
+      if (temp.empty()) {
+        this_type_slots_map.type_slots_map.erase(rhs_type);
+      } else {
+        this_type_slots_map[rhs_type] = std::move(temp);
+      }
+    }
+
+    if (this->name_type_slots_map.at(rhs_name).empty()) {
+      this->name_type_slots_map.erase(rhs_name);
     }
   }
+
   return *this;
 }
 
@@ -526,9 +515,7 @@ DedicatedResourceInNode::operator crane::grpc::DeviceMap() const {
 }
 
 bool DedicatedResourceInNode::TypeSlotsMap::empty() const {
-  if (type_slots_map.empty()) return true;
-  return std::ranges::all_of(type_slots_map,
-                             [](const auto& kv) { return kv.second.empty(); });
+  return type_slots_map.empty();
 }
 std::set<SlotId>& DedicatedResourceInNode::TypeSlotsMap::operator[](
     const std::string& type) {
