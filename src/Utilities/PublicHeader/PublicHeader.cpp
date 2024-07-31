@@ -312,8 +312,10 @@ DedicatedResource& DedicatedResource::operator+=(const DedicatedResource& rhs) {
 
 DedicatedResource& DedicatedResource::operator-=(const DedicatedResource& rhs) {
   for (const auto& [rhs_node_id, rhs_name_slots_map] : rhs.craned_id_gres_map) {
-    if (!this->craned_id_gres_map.contains(rhs_node_id)) continue;
+    ABSL_ASSERT(this->craned_id_gres_map.contains(rhs_node_id));
     this->craned_id_gres_map[rhs_node_id] -= rhs_name_slots_map;
+    if (this->craned_id_gres_map[rhs_node_id].empty())
+      this->craned_id_gres_map[rhs_node_id];
   }
 
   return *this;
@@ -441,11 +443,11 @@ DedicatedResourceInNode& DedicatedResourceInNode::operator+=(
 DedicatedResourceInNode& DedicatedResourceInNode::operator-=(
     const DedicatedResourceInNode& rhs) {
   for (const auto& [rhs_name, rhs_type_slots_map] : rhs.name_type_slots_map) {
-    if (!this->contains(rhs_name)) continue;
+    ABSL_ASSERT(this->contains(rhs_name));
 
     for (const auto& [rhs_type, rhs_slots] :
          rhs_type_slots_map.type_slots_map) {
-      if (!this->at(rhs_name).contains(rhs_type)) continue;
+      ABSL_ASSERT(this->at(rhs_name).contains(rhs_type));
       auto& this_type_slots_map = this->name_type_slots_map.at(rhs_name);
       std::set<SlotId> temp;
       std::ranges::set_difference(this_type_slots_map.at(rhs_type), rhs_slots,
