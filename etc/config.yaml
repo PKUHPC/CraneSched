@@ -76,10 +76,10 @@ Partitions:
   - name: GPU
     nodes: "cn[17-18]"
     priority: 3
-    # Optional default memory per cpu in MB
-    DefaultMemPerCpu: 100
+    # Optional default memory per cpu in MB, 0 lets scheduler to decide
+    DefaultMemPerCpu: 0
     # Optional maximum memory per cpu in MB, 0 indicates no limit
-    MaxMemPerCpu: 100
+    MaxMemPerCpu: 0
 
 DefaultPartition: CPU
 
