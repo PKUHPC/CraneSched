@@ -156,7 +156,7 @@ class CforedStreamWriter {
 
   grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
                            crane::grpc::StreamCforedRequest> *m_stream_
-      GUARDED_BY(m_stream_mtx_);
+      ABSL_GUARDED_BY(m_stream_mtx_);
 };
 
 class CtldServer;
@@ -290,7 +290,7 @@ class CtldServer {
 
   Mutex m_mtx_;
   HashMap<std::string /* cfored_name */, HashSet<task_id_t>>
-      m_cfored_running_tasks_ GUARDED_BY(m_mtx_);
+      m_cfored_running_tasks_ ABSL_GUARDED_BY(m_mtx_);
 
   inline static std::mutex s_sigint_mtx;
   inline static std::condition_variable s_sigint_cv;

@@ -7,11 +7,11 @@ if (CRANE_USE_GITEE_SOURCE)
     set(RE2_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/re2-2022-06-01.tar.gz")
     set(GRPC_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/grpc-1.51.0.tar.gz")
 else ()
-    set(ABSL_SRC_URL "https://github.com/abseil/abseil-cpp/archive/refs/tags/20220623.1.tar.gz")
+    set(ABSL_SRC_URL "https://github.com/abseil/abseil-cpp/releases/download/20240116.2/abseil-cpp-20240116.2.tar.gz")
     set(C_ARES_SRC_URL "https://github.com/c-ares/c-ares/releases/download/cares-1_18_1/c-ares-1.18.1.tar.gz")
-    set(PROTOBUF_SRC_URL "https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protobuf-cpp-3.21.8.tar.gz")
+    set(PROTOBUF_SRC_URL "https://github.com/protocolbuffers/protobuf/releases/download/v27.2/protobuf-27.2.tar.gz")
     set(RE2_SRC_URL "https://github.com/google/re2/archive/refs/tags/2022-06-01.tar.gz")
-    set(GRPC_SRC_URL "https://github.com/grpc/grpc/archive/refs/tags/v1.51.0.tar.gz")
+    set(GRPC_SRC_URL "https://github.com/grpc/grpc/archive/refs/tags/v1.65.2.tar.gz")
 endif ()
 
 set(ABSL_PROPAGATE_CXX_STD ON)
@@ -21,7 +21,7 @@ FetchContent_Declare(absl
         OVERRIDE_FIND_PACKAGE
 
         URL ${ABSL_SRC_URL}
-        URL_HASH SHA256=91ac87d30cc6d79f9ab974c51874a704de9c2647c40f6932597329a282217ba8
+        URL_HASH SHA256=733726b8c3a6d39a4120d7e45ea8b41a434cdacde401cba500f14236c49b39dc
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(absl)
@@ -60,7 +60,7 @@ FetchContent_Declare(protobuf
         OVERRIDE_FIND_PACKAGE
 
         URL ${PROTOBUF_SRC_URL}
-        URL_HASH SHA256=f6251f2d00aad41b34c1dfa3d752713cb1bb1b7020108168a4deaa206ba8ed42
+        URL_HASH SHA256=e4ff2aeb767da6f4f52485c2e72468960ddfe5262483879ef6ad552e52757a77
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(protobuf)
@@ -110,7 +110,7 @@ FetchContent_Declare(grpc
         OVERRIDE_FIND_PACKAGE
 
         URL ${GRPC_SRC_URL}
-        URL_HASH SHA256=7f42363711eb483a0501239fd5522467b31d8fe98d70d7867c6ca7b52440d828
+        URL_HASH SHA256=0ff2e0a6abf195cf23b4ce808570bcbb2ff4b5bee453af0b45afd496e661f2c0
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(grpc)

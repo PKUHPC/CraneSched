@@ -148,12 +148,15 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNodes(
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_id_craned_ids_map.size());
 
+  // TODO: Duplicate lock acquiring!
   auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
   for (auto it = part_id_craned_ids_map.begin();
        it != part_id_craned_ids_map.end(); ++it) {
     PartitionId const& part_id = it->first;
+    CRANE_TRACE("Hold partition exclusive lock for {}.", part_id);
+
     part_meta_ptrs.emplace_back(
         raw_part_metas_map_->at(part_id).GetExclusivePtr());
   }

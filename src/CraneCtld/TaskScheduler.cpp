@@ -1844,13 +1844,11 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
         running_tasks,
     absl::Time now, const PartitionId& partition_id,
-    const util::Synchronized<PartitionMeta>& partition_meta_ptr,
+    const std::unordered_set<CranedId> craned_ids,
     const CranedMetaContainerInterface::CranedMetaRawMap& craned_meta_map,
     NodeSelectionInfo* node_selection_info) {
   NodeSelectionInfo& node_selection_info_ref = *node_selection_info;
 
-  std::unordered_set<CranedId> craned_ids =
-      partition_meta_ptr.GetExclusivePtr()->craned_ids;
   for (const auto& craned_id : craned_ids) {
     auto& craned_meta_ptr = craned_meta_map.at(craned_id);
     auto craned_meta = craned_meta_ptr.GetExclusivePtr();
@@ -2352,23 +2350,30 @@ void MinLoadFirst::NodeSelect(
         running_tasks,
     absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
     std::list<NodeSelectionResult>* selection_result_list) {
-  auto all_partitions_meta_map =
-      g_meta_container->GetAllPartitionsMetaMapConstPtr();
-  auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
-
   std::unordered_map<PartitionId, NodeSelectionInfo> part_id_node_info_map;
 
   // Truncated by 1s.
   // We use the time now as the base time across the whole algorithm.
   absl::Time now = absl::FromUnixSeconds(ToUnixSeconds(absl::Now()));
 
-  // Calculate NodeSelectionInfo for all partitions
-  for (auto& [partition_id, partition_metas] : *all_partitions_meta_map) {
-    NodeSelectionInfo& node_info_in_a_partition =
-        part_id_node_info_map[partition_id];
-    CalculateNodeSelectionInfoOfPartition_(running_tasks, now, partition_id,
-                                           partition_metas, *craned_meta_map,
-                                           &node_info_in_a_partition);
+  {
+    auto all_partitions_meta_map =
+        g_meta_container->GetAllPartitionsMetaMapConstPtr();
+    auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
+
+    // Calculate NodeSelectionInfo for all partitions
+    for (auto& [partition_id, partition_metas] : *all_partitions_meta_map) {
+      auto part_meta_ptr = partition_metas.GetExclusivePtr();
+      part_meta_ptr.ForgetDeadlockInfo();
+      std::unordered_set<CranedId> craned_ids = part_meta_ptr->craned_ids;
+
+      NodeSelectionInfo& node_info_in_a_partition =
+          part_id_node_info_map[partition_id];
+
+      CalculateNodeSelectionInfoOfPartition_(running_tasks, now, partition_id,
+                                             craned_ids, *craned_meta_map,
+                                             &node_info_in_a_partition);
+    }
   }
 
   std::vector<task_id_t> task_id_vec;
@@ -2387,45 +2392,52 @@ void MinLoadFirst::NodeSelect(
     PartitionId part_id = task->partition_id;
 
     NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
-    auto& part_meta = all_partitions_meta_map->at(part_id);
-
     std::list<CranedId> craned_ids;
     absl::Time expected_start_time;
-
-    // Note! ok should always be true.
-    bool ok = CalculateRunningNodesAndStartTime_(
-        node_info, part_meta, *craned_meta_map, task.get(), now, &craned_ids,
-        &expected_start_time);
-    if (!ok) {
-      continue;
-    }
-
-    // For pending tasks, the `start time` field in TaskInCtld means expected
-    // start time and the `end time` is expected end time.
-    // For running tasks, the `start time` means the time when it starts and
-    // the `end time` means the latest finishing time.
-    task->SetStartTime(expected_start_time);
-    task->SetEndTime(expected_start_time + task->time_limit);
-
-    if constexpr (kAlgoTraceOutput) {
-      CRANE_TRACE(
-          "\t task #{} ExpectedStartTime=now+{}s, EndTime=now+{}s",
-          task->TaskId(), absl::ToInt64Seconds(expected_start_time - now),
-          absl::ToInt64Seconds(expected_start_time + task->time_limit - now));
-    }
-
-    // The start time and craned ids have been determined.
-    // Modify the corresponding NodeSelectionInfo now.
-    // Note: Since a craned node may belong to multiple partition,
-    //       the NodeSelectionInfo of all the partitions the craned node
-    //       belongs to should be modified!
-
     std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
-    for (CranedId const& craned_id : craned_ids) {
-      auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-      for (PartitionId const& partition_id :
-           craned_meta->static_meta.partition_ids) {
-        involved_part_craned[partition_id].emplace_back(craned_id);
+
+    {
+      auto all_partitions_meta_map =
+          g_meta_container->GetAllPartitionsMetaMapConstPtr();
+      auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
+
+      const util::Synchronized<PartitionMeta>& part_meta =
+          all_partitions_meta_map->at(part_id);
+
+      // Note! ok should always be true.
+      bool ok = CalculateRunningNodesAndStartTime_(
+          node_info, part_meta, *craned_meta_map, task.get(), now, &craned_ids,
+          &expected_start_time);
+      if (!ok) {
+        continue;
+      }
+
+      // For pending tasks, the `start time` field in TaskInCtld means expected
+      // start time and the `end time` is expected end time.
+      // For running tasks, the `start time` means the time when it starts and
+      // the `end time` means the latest finishing time.
+      task->SetStartTime(expected_start_time);
+      task->SetEndTime(expected_start_time + task->time_limit);
+
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE(
+            "\t task #{} ExpectedStartTime=now+{}s, EndTime=now+{}s",
+            task->TaskId(), absl::ToInt64Seconds(expected_start_time - now),
+            absl::ToInt64Seconds(expected_start_time + task->time_limit - now));
+      }
+
+      // The start time and craned ids have been determined.
+      // Modify the corresponding NodeSelectionInfo now.
+      // Note: Since a craned node may belong to multiple partition,
+      //       the NodeSelectionInfo of all the partitions the craned node
+      //       belongs to should be modified!
+
+      for (CranedId const& craned_id : craned_ids) {
+        auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
+        for (PartitionId const& partition_id :
+             craned_meta->static_meta.partition_ids) {
+          involved_part_craned[partition_id].emplace_back(craned_id);
+        }
       }
     }
 

@@ -174,7 +174,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
       const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
           running_tasks,
       absl::Time now, const PartitionId& partition_id,
-      const util::Synchronized<PartitionMeta>& partition_meta_ptr,
+      const std::unordered_set<CranedId> craned_ids,
       const CranedMetaContainerInterface::CranedMetaRawMap& craned_meta_map,
       NodeSelectionInfo* node_selection_info);
 
@@ -300,18 +300,18 @@ class TaskScheduler {
   // Ordered by task id. Those who comes earlier are in the head,
   // Because they have smaller task id.
   TreeMap<task_id_t, std::unique_ptr<TaskInCtld>> m_pending_task_map_
-      GUARDED_BY(m_pending_task_map_mtx_);
+      ABSL_GUARDED_BY(m_pending_task_map_mtx_);
   Mutex m_pending_task_map_mtx_;
 
   std::atomic_uint32_t m_pending_map_cached_size_;
 
   HashMap<task_id_t, std::unique_ptr<TaskInCtld>> m_running_task_map_
-      GUARDED_BY(m_running_task_map_mtx_);
+      ABSL_GUARDED_BY(m_running_task_map_mtx_);
   Mutex m_running_task_map_mtx_;
 
   // Task Indexes
   HashMap<CranedId, HashSet<uint32_t /* Task ID*/>> m_node_to_tasks_map_
-      GUARDED_BY(m_task_indexes_mtx_);
+      ABSL_GUARDED_BY(m_task_indexes_mtx_);
   Mutex m_task_indexes_mtx_;
 
   std::unique_ptr<IPrioritySorter> m_priority_sorter_;

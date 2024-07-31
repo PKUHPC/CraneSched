@@ -75,6 +75,10 @@ class ScopeExclusivePtr {
     return *this;
   };
 
+  void ForgetDeadlockInfo() {
+    if constexpr (AbslUnlockable<Unlockable>) lock_->ForgetDeadlockInfo();
+  }
+
  private:
   T* data_;
   Unlockable* lock_;
