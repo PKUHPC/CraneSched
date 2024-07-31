@@ -194,32 +194,6 @@ bool operator<=(const AllocatableResource& lhs, const AllocatableResource& rhs);
 bool operator<(const AllocatableResource& lhs, const AllocatableResource& rhs);
 bool operator==(const AllocatableResource& lhs, const AllocatableResource& rhs);
 
-std::optional<std::tuple<unsigned int, unsigned int, char>>
-GetDeviceFileMajorMinorOpType(const std::string& path);
-
-struct Device {
-  unsigned int major;
-  unsigned int minor;
-  char op_type;
-  // set to true when allocated
-  bool busy = false;
-  // set to true in allocation result to indicate the task own this device
-  bool alloc = false;
-  std::string path;
-  // device type e.g a100
-  std::string type;
-  std::string name;
-  std::vector<int> cpu_affinity;
-  // link count to #index device;
-  std::vector<int> links;
-
-  Device(const std::string& device_name, const std::string& device_type,
-         const std::string& device_path);
-  bool Init();
-};
-
-bool operator==(const Device& lhs, const Device& rhs);
-
 struct DedicatedResourceInNode {
   struct TypeSlotsMap {
     std::unordered_map<std::string /*type*/, std::set<SlotId> /*index*/>

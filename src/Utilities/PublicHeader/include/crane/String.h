@@ -74,8 +74,6 @@ bool ConvertStringToInt64(const std::string &s, int64_t *val);
 
 std::string CudaVisibleDevices(const uint64_t count);
 
-std::string ReadableDevice(const Device &device);
-
 std::string ReadableGres(const DedicatedResource &dedicated_resource);
 std::string ReadableGres(const DedicatedResourceInNode &dedicated_resource);
 std::string ReadableGres(

@@ -10,6 +10,7 @@ add_executable(craned
         CranedServer.h
         CranedServer.cpp
         CranedPublicDefs.h
+        CranedPublicDefs.cpp
         Craned.cpp
 
         CranedPreCompiledHeader.h)

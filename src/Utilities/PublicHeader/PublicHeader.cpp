@@ -72,10 +72,6 @@ bool operator==(const AllocatableResource& lhs,
   return false;
 }
 
-bool operator==(const Device& lhs, const Device& rhs) {
-  return lhs.path == rhs.path;
-}
-
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs) {
   for (const auto& [lhs_node_id, lhs_gres] : lhs.craned_id_gres_map) {
     if (!rhs.contains(lhs_node_id) && !lhs_gres.empty()) {
@@ -374,43 +370,6 @@ const DedicatedResourceInNode& DedicatedResource::at(
 DedicatedResourceInNode& DedicatedResource::at(const std::string& craned_id) {
   return this->craned_id_gres_map.at(craned_id);
 }
-
-std::optional<std::tuple<unsigned int, unsigned int, char>>
-GetDeviceFileMajorMinorOpType(const std::string& path) {
-  struct stat device_file_info {};
-  if (stat(path.c_str(), &device_file_info) == 0) {
-    char op_type = 'a';
-    if (S_ISBLK(device_file_info.st_mode)) {
-      op_type = 'b';
-    } else if (S_ISCHR(device_file_info.st_mode)) {
-      op_type = 'c';
-    }
-    return std::make_tuple(major(device_file_info.st_rdev),
-                           minor(device_file_info.st_rdev), op_type);
-  } else {
-    return std::nullopt;
-  }
-}
-
-bool Device::Init() {
-  const auto& device_major_minor_optype_option =
-      GetDeviceFileMajorMinorOpType(path);
-  if (device_major_minor_optype_option.has_value()) {
-    const auto& device_major_minor_optype =
-        device_major_minor_optype_option.value();
-
-    this->major = std::get<0>(device_major_minor_optype);
-    this->minor = std::get<1>(device_major_minor_optype);
-    this->op_type = std::get<2>(device_major_minor_optype);
-  } else {
-    return false;
-  }
-  return true;
-}
-
-Device::Device(const std::string& device_name, const std::string& device_type,
-               const std::string& device_path)
-    : name(device_name), type(device_type), path(device_path){};
 
 bool DedicatedResourceInNode::empty() const {
   return name_type_slots_map.empty();

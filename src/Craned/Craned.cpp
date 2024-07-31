@@ -76,7 +76,7 @@ void ParseConfig(int argc, char** argv) {
   }
 
   std::string config_path = parsed_args["config"].as<std::string>();
-  std::unordered_map<std::string, std::vector<Device>> each_node_device;
+  std::unordered_map<std::string, std::vector<Craned::Device>> each_node_device;
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
@@ -267,7 +267,7 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
-          std::vector<Device> devices;
+          std::vector<Craned::Device> devices;
           if (node["gres"]) {
             for (auto gres_it = node["gres"].begin();
                  gres_it != node["gres"].end(); ++gres_it) {

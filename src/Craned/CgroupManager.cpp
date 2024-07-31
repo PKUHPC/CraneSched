@@ -21,6 +21,7 @@
 
 #include "CgroupManager.h"
 
+#include "CranedPublicDefs.h"
 #include "crane/String.h"
 
 namespace Craned {

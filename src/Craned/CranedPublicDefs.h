@@ -16,10 +16,19 @@
 
 #pragma once
 
+#include <google/protobuf/util/time_util.h>
+
+#include <array>
+#include <fpm/fixed.hpp>
+#include <optional>
+#include <unordered_map>
+#include <variant>
+
 #include "CranedPreCompiledHeader.h"
 // Precompiled header comes first
 
 #include "crane/PublicHeader.h"
+#include "protos/Crane.pb.h"
 
 namespace Craned {
 
@@ -86,10 +95,36 @@ struct Config {
   std::unordered_map<std::string, Partition> Partitions;
 };
 
+std::optional<std::tuple<unsigned int, unsigned int, char>>
+GetDeviceFileMajorMinorOpType(const std::string& path);
+
+struct Device {
+  unsigned int major;
+  unsigned int minor;
+  char op_type;
+  // set to true when allocated
+  bool busy = false;
+  // set to true in allocation result to indicate the task own this device
+  bool alloc = false;
+  std::string path;
+  // device type e.g a100
+  std::string type;
+  std::string name;
+  std::vector<int> cpu_affinity;
+  // link count to #index device;
+  std::vector<int> links;
+
+  Device(const std::string& device_name, const std::string& device_type,
+         const std::string& device_path);
+  bool Init();
+  operator std::string() const;
+};
+
+bool operator==(const Device& lhs, const Device& rhs);
+
 inline Config g_config;
 
 inline std::vector<Device> g_this_node_device;
-
 }  // namespace Craned
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
