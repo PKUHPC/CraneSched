@@ -155,7 +155,7 @@ bool operator<=(
         avail_count += rhs_slots.size();
         if (untyped_req_count <= avail_count) break;
       }
-      if (untyped_req_count >= avail_count) return false;
+      if (untyped_req_count > avail_count) return false;
     } else {
       if (untyped_req_count != 0) return false;
     }
@@ -308,7 +308,7 @@ DedicatedResource& DedicatedResource::operator+=(const DedicatedResource& rhs) {
 
 DedicatedResource& DedicatedResource::operator-=(const DedicatedResource& rhs) {
   for (const auto& [rhs_node_id, rhs_name_slots_map] : rhs.craned_id_gres_map) {
-    ABSL_ASSERT(this->craned_id_gres_map.contains(rhs_node_id));
+    if (!this->craned_id_gres_map.contains(rhs_node_id)) continue;
     this->craned_id_gres_map[rhs_node_id] -= rhs_name_slots_map;
     if (this->craned_id_gres_map[rhs_node_id].empty())
       this->craned_id_gres_map[rhs_node_id];

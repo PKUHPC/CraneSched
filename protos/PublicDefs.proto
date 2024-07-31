@@ -250,6 +250,7 @@ message TaskInfo {
   string cwd = 14;
   string username = 15;
   string qos = 16;
+  DeviceMap gres_req = 17;
 
   // Dynamic task information
   bool held = 30;
@@ -267,7 +268,6 @@ message TaskInfo {
   // a negative elapsed time might occur.
   // To avoid this, the elapsed time of a task is calculated on the CraneCtld side.
   google.protobuf.Duration elapsed_time = 37;
-  DeviceMap gres_req = 38;
 }
 
 message PartitionInfo {

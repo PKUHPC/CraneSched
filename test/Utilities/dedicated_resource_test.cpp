@@ -180,6 +180,19 @@ TEST(DEDICATED_RES_NODE, req_map2) {
                req, resourceInNode);
 }
 
+TEST(DEDICATED_RES_NODE, req_map3) {
+  using req_t = std::unordered_map<
+      std::string /*name*/,
+      std::pair<
+          uint64_t /*untyped req count*/,
+          std::unordered_map<std::string /*type*/, uint64_t /*type total*/>>>;
+  req_t req;
+  req["GPU"] = {1, {}};
+  DedicatedResourceInNode resourceInNode;
+  resourceInNode["GPU"]["A100"].insert({slots[0]});
+  ASSERT_LE(req, resourceInNode);
+}
+
 TEST(DEDICATED_RES, le_lt1) {
   DedicatedResource lhs, rhs;
   DedicatedResourceInNode resourceInNode;
