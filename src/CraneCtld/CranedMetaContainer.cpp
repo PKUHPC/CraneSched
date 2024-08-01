@@ -68,9 +68,11 @@ void CranedMetaContainerSimpleImpl::CranedDown(const CranedId& craned_id) {
   auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
-  for (PartitionId const& part_id : part_ids)
-    part_meta_ptrs.emplace_back(
-        raw_part_metas_map_->at(part_id).GetExclusivePtr());
+  for (PartitionId const& part_id : part_ids) {
+    auto& raw_part_meta = raw_part_metas_map_->at(part_id);
+    raw_part_meta.Mutex().ForgetDeadlockInfo();
+    part_meta_ptrs.emplace_back(raw_part_meta.GetExclusivePtr());
+  }
 
   // Then acquire craned meta lock.
   CRANE_ASSERT(craned_meta_map_.Contains(craned_id));

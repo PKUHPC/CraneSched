@@ -53,7 +53,7 @@ class Synchronized {
   Synchronized(const Synchronized& other) = delete;
   Synchronized& operator=(const Synchronized& other) = delete;
 
-  mutex& Mutex() { return mutex_; }
+  mutex& Mutex() const { return mutex_; }
 
   ExclusivePtr GetExclusivePtr() {
     mutex_.Lock();

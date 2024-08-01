@@ -519,6 +519,7 @@ void StartServer() {
   g_server->Wait();
 
   // Free global variables
+  g_task_mgr->Wait();
   g_task_mgr.reset();
   // CforedManager MUST be destructed after TaskManager.
   g_cfored_manager.reset();

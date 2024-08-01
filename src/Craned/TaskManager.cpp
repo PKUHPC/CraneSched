@@ -185,6 +185,8 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
   }
   TaskInstance* instance = it->second.get();
 
+  CRANE_INFO("Task #{} stopped and is doing TaskStatusChange...", task_id);
+
   switch (instance->err_before_exec) {
   case CraneErr::kProtobufError:
     EvActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Cancelled,
@@ -807,10 +809,11 @@ CraneErr TaskManager::SpawnProcessInInstance_(
                .each_node_gres()
                .at(g_config.Hostname)
                .name_type_map()) {
-        std::ranges::for_each(type_slots_map.type_slots_map(),
-                              [&cuda_count](const auto& kv) {
-                                cuda_count += kv.second.slots().size();
-                              });
+        if (device_name == "GPU" || device_name == "gpu")
+          std::ranges::for_each(type_slots_map.type_slots_map(),
+                                [&cuda_count](const auto& kv) {
+                                  cuda_count += kv.second.slots().size();
+                                });
       }
       if (cuda_count != 0) {
         env_vec.emplace_back("CUDA_VISIBLE_DEVICES",

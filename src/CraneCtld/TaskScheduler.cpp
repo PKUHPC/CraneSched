@@ -2363,8 +2363,9 @@ void MinLoadFirst::NodeSelect(
 
     // Calculate NodeSelectionInfo for all partitions
     for (auto& [partition_id, partition_metas] : *all_partitions_meta_map) {
+      partition_metas.Mutex().ForgetDeadlockInfo();
+
       auto part_meta_ptr = partition_metas.GetExclusivePtr();
-      part_meta_ptr.ForgetDeadlockInfo();
       std::unordered_set<CranedId> craned_ids = part_meta_ptr->craned_ids;
 
       NodeSelectionInfo& node_info_in_a_partition =
