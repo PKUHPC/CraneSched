@@ -172,8 +172,12 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNodes(
         resources.allocatable_resource *
         part_id_craned_ids_map.at(part_id).size();
 
-    part_gmeta.res_avail.dedicated_resource -= resources.dedicated_resource;
-    part_gmeta.res_in_use.dedicated_resource += resources.dedicated_resource;
+    for (const auto& [craned_id, res_in_node] :
+         resources.dedicated_resource.craned_id_gres_map) {
+      if (!part_id_craned_ids_map.at(part_id).contains(craned_id)) continue;
+      part_gmeta.res_avail.dedicated_resource[craned_id] -= res_in_node;
+      part_gmeta.res_in_use.dedicated_resource[craned_id] += res_in_node;
+    }
   }
 
   for (const CranedId& node_id : node_ids) {
@@ -240,9 +244,12 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNodes(
     part_gmeta.res_in_use.allocatable_resource -=
         resources.allocatable_resource *
         part_id_craned_ids_map.at(part_id).size();
-
-    part_gmeta.res_avail.dedicated_resource += resources.dedicated_resource;
-    part_gmeta.res_in_use.dedicated_resource -= resources.dedicated_resource;
+    for (const auto& [craned_id, res_in_node] :
+         resources.dedicated_resource.craned_id_gres_map) {
+      if (!part_id_craned_ids_map.at(part_id).contains(craned_id)) continue;
+      part_gmeta.res_avail.dedicated_resource[craned_id] += res_in_node;
+      part_gmeta.res_in_use.dedicated_resource[craned_id] -= res_in_node;
+    }
   }
 
   for (const CranedId& node_id : node_ids) {

@@ -308,7 +308,7 @@ DedicatedResource& DedicatedResource::operator+=(const DedicatedResource& rhs) {
 
 DedicatedResource& DedicatedResource::operator-=(const DedicatedResource& rhs) {
   for (const auto& [rhs_node_id, rhs_name_slots_map] : rhs.craned_id_gres_map) {
-    if (!this->craned_id_gres_map.contains(rhs_node_id)) continue;
+    ABSL_ASSERT(this->craned_id_gres_map.contains(rhs_node_id));
     this->craned_id_gres_map[rhs_node_id] -= rhs_name_slots_map;
     if (this->craned_id_gres_map[rhs_node_id].empty())
       this->craned_id_gres_map[rhs_node_id];
