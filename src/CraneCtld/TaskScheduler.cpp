@@ -920,8 +920,8 @@ void TaskScheduler::ScheduleThread_() {
 
       // After sending ExecuteTasks RPC, StartHook is called.
       // This must before checking failed tasks as TaskStatusChangeAsync may
-      // trigger PreEnd/PostEnd hooks.
-      if (g_config.Plugin.Enabled) {
+      // trigger EndHook.
+      if (g_config.Plugin.Enabled && !tasks_post_start.empty()) {
         g_plugin_client->StartHookAsync(std::move(tasks_post_start));
       }
 
@@ -2574,7 +2574,7 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
         "for final tasks");
   }
 
-  if (g_config.Plugin.Enabled) {
+  if (g_config.Plugin.Enabled && !tasks.empty()) {
     std::vector<crane::grpc::TaskInfo> tasks_post_comp;
     for (TaskInCtld* task : tasks) {
       crane::grpc::TaskInfo t;
