@@ -899,7 +899,7 @@ bool Cgroup::Empty() {
     return false;
   }
 }
-bool Cgroup::SetDeviceAccess(const std::vector<Device> &devices, bool set_read,
+bool Cgroup::SetDeviceAccess(const std::vector<bool> &devices, bool set_read,
                              bool set_write, bool set_mknod) {
   std::string op;
   if (set_read) op += "r";
@@ -907,13 +907,16 @@ bool Cgroup::SetDeviceAccess(const std::vector<Device> &devices, bool set_read,
   if (set_mknod) op += "m";
   std::vector<std::string> allow_limits;
   std::vector<std::string> deny_limits;
-  for (const auto &device : devices) {
-    if (device.alloc) {
-      allow_limits.emplace_back(fmt::format("{} {}:{} {}", device.op_type,
-                                            device.major, device.minor, op));
+  for (int i = 0; i < devices.size(); ++i) {
+    const auto &this_device = Craned::g_this_node_device[i];
+    if (devices[i]) {
+      allow_limits.emplace_back(fmt::format("{} {}:{} {}", this_device.op_type,
+                                            this_device.major,
+                                            this_device.minor, op));
     } else {
-      deny_limits.emplace_back(fmt::format("{} {}:{} {}", device.op_type,
-                                           device.major, device.minor, op));
+      deny_limits.emplace_back(fmt::format("{} {}:{} {}", this_device.op_type,
+                                           this_device.major, this_device.minor,
+                                           op));
     }
   }
   return SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
@@ -952,7 +955,8 @@ bool AllocatableResourceAllocator::Allocate(
 
 bool DedicatedResourceAllocator::Allocate(
     const crane::grpc::DedicatedResource &request_resource, Cgroup *cg) {
-  auto devices = Craned::g_this_node_device;
+  std::vector<bool> devices_alloc(Craned::g_this_node_device.size(), false);
+  const auto &devices = Craned::g_this_node_device;
   std::unordered_set<std::string> all_request_slots;
   if (request_resource.each_node_gres().contains(g_config.Hostname)) {
     for (const auto &[_, type_slots_map] : request_resource.each_node_gres()
@@ -962,10 +966,10 @@ bool DedicatedResourceAllocator::Allocate(
         all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
     };
   }
-  std::ranges::for_each(devices, [&all_request_slots](Device &dev) {
-    dev.alloc = all_request_slots.contains(dev.path);
-  });
-  if (!cg->SetDeviceAccess(devices, true, true, true)) return false;
+  for (int i = 0; i < devices.size(); i++) {
+    devices_alloc[i] = all_request_slots.contains(devices[i].path);
+  }
+  if (!cg->SetDeviceAccess(devices_alloc, true, true, true)) return false;
   return true;
 }
 }  // namespace Craned

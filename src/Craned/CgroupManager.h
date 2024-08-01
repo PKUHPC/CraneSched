@@ -207,7 +207,7 @@ class Cgroup {
   bool SetMemorySwLimitBytes(uint64_t mem_bytes);
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes);
   bool SetBlockioWeight(uint64_t weight);
-  bool SetDeviceAccess(const std::vector<Device> &devices, bool set_read,
+  bool SetDeviceAccess(const std::vector<bool> &devices, bool set_read,
                        bool set_write, bool set_mknod);
   bool SetControllerValue(CgroupConstant::Controller controller,
                           CgroupConstant::ControllerFile controller_file,
