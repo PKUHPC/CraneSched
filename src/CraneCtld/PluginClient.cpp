@@ -141,8 +141,8 @@ void PluginClient::AsyncSendThread_() {
 
 grpc::Status PluginClient::SendPreStartHook_(grpc::ClientContext* context,
                                              google::protobuf::Message* msg) {
-  using crane::grpc::PreStartHookReply;
-  using crane::grpc::PreStartHookRequest;
+  using crane::grpc::plugin::PreStartHookReply;
+  using crane::grpc::plugin::PreStartHookRequest;
 
   auto request = dynamic_cast<PreStartHookRequest*>(msg);
   PreStartHookReply reply;
@@ -153,8 +153,8 @@ grpc::Status PluginClient::SendPreStartHook_(grpc::ClientContext* context,
 
 grpc::Status PluginClient::SendPostStartHook_(grpc::ClientContext* context,
                                               google::protobuf::Message* msg) {
-  using crane::grpc::PostStartHookReply;
-  using crane::grpc::PostStartHookRequest;
+  using crane::grpc::plugin::PostStartHookReply;
+  using crane::grpc::plugin::PostStartHookRequest;
 
   auto request = dynamic_cast<PostStartHookRequest*>(msg);
   PostStartHookReply reply;
@@ -163,32 +163,32 @@ grpc::Status PluginClient::SendPostStartHook_(grpc::ClientContext* context,
   return m_stub_->PostStartHook(context, *request, &reply);
 }
 
-grpc::Status PluginClient::SendPreCompletionHook_(
-    grpc::ClientContext* context, google::protobuf::Message* msg) {
-  using crane::grpc::PreCompletionHookReply;
-  using crane::grpc::PreCompletionHookRequest;
+grpc::Status PluginClient::SendPreEndHook_(grpc::ClientContext* context,
+                                           google::protobuf::Message* msg) {
+  using crane::grpc::plugin::PreEndHookReply;
+  using crane::grpc::plugin::PreEndHookRequest;
 
-  auto request = dynamic_cast<PreCompletionHookRequest*>(msg);
-  PreCompletionHookReply reply;
+  auto request = dynamic_cast<PreEndHookRequest*>(msg);
+  PreEndHookReply reply;
 
-  CRANE_TRACE("[Plugin] Sending PreCompletionHook.");
-  return m_stub_->PreCompletionHook(context, *request, &reply);
+  CRANE_TRACE("[Plugin] Sending PreEndHook.");
+  return m_stub_->PreEndHook(context, *request, &reply);
 }
 
-grpc::Status PluginClient::SendPostCompletionHook_(
-    grpc::ClientContext* context, google::protobuf::Message* msg) {
-  using crane::grpc::PostCompletionHookReply;
-  using crane::grpc::PostCompletionHookRequest;
+grpc::Status PluginClient::SendPostEndHook_(grpc::ClientContext* context,
+                                            google::protobuf::Message* msg) {
+  using crane::grpc::plugin::PostEndHookReply;
+  using crane::grpc::plugin::PostEndHookRequest;
 
-  auto request = dynamic_cast<PostCompletionHookRequest*>(msg);
-  PostCompletionHookReply reply;
+  auto request = dynamic_cast<PostEndHookRequest*>(msg);
+  PostEndHookReply reply;
 
-  CRANE_TRACE("[Plugin] Sending PostCompletionHook.");
-  return m_stub_->PostCompletionHook(context, *request, &reply);
+  CRANE_TRACE("[Plugin] Sending PostEndHook.");
+  return m_stub_->PostEndHook(context, *request, &reply);
 }
 
 void PluginClient::PreStartHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
-  auto request = std::make_unique<crane::grpc::PreStartHookRequest>();
+  auto request = std::make_unique<crane::grpc::plugin::PreStartHookRequest>();
   auto* task_list = request->mutable_task_info_list();
   for (auto& task : tasks) {
     auto* task_it = task_list->Add();
@@ -204,7 +204,7 @@ void PluginClient::PreStartHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
 
 void PluginClient::PostStartHookAsync(
     std::vector<crane::grpc::TaskInfo> tasks) {
-  auto request = std::make_unique<crane::grpc::PostStartHookRequest>();
+  auto request = std::make_unique<crane::grpc::plugin::PostStartHookRequest>();
   auto* task_list = request->mutable_task_info_list();
   for (auto& task : tasks) {
     auto* task_it = task_list->Add();
@@ -217,9 +217,8 @@ void PluginClient::PostStartHookAsync(
   m_event_queue_.emplace_back(std::move(e));
 }
 
-void PluginClient::PreCompletionHookAsync(
-    std::vector<crane::grpc::TaskInfo> tasks) {
-  auto request = new crane::grpc::PreCompletionHookRequest();
+void PluginClient::PreEndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
+  auto request = new crane::grpc::plugin::PreEndHookRequest();
 
   HookEvent e{HookType::PRE_COMPLETION,
               std::unique_ptr<google::protobuf::Message>(request)};
@@ -227,9 +226,8 @@ void PluginClient::PreCompletionHookAsync(
   m_event_queue_.emplace_back(std::move(e));
 }
 
-void PluginClient::PostCompletionHookAsync(
-    std::vector<crane::grpc::TaskInfo> tasks) {
-  auto request = std::make_unique<crane::grpc::PostCompletionHookRequest>();
+void PluginClient::PostEndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
+  auto request = std::make_unique<crane::grpc::plugin::PostEndHookRequest>();
   auto* task_list = request->mutable_task_info_list();
 
   auto now = absl::ToUnixSeconds(absl::Now());

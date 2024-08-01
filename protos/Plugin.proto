@@ -1,0 +1,88 @@
+/**
+ * Copyright (c) 2024 Peking University and Peking University
+ * Changsha Institute for Computing and Digital Economy
+ *
+ * CraneSched is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of
+ * the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+ * WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ */
+
+syntax = "proto3";
+
+package crane.grpc.plugin; 
+option go_package = "/protos";
+
+import "PublicDefs.proto";
+
+message PreStartHookRequest {
+  repeated TaskInfo task_info_list = 1;
+}
+
+message PreStartHookReply {
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  repeated TaskIdReply result = 1;
+}
+
+message PostStartHookRequest {
+  repeated TaskInfo task_info_list = 1;
+}
+
+message PostStartHookReply {
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  repeated TaskIdReply result = 1;
+}
+
+message PreEndHookRequest {
+  repeated TaskInfo task_info_list = 1;
+}
+
+message PreEndHookReply {
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  repeated TaskIdReply result = 1;
+}
+
+message PostEndHookRequest {
+  repeated TaskInfo task_info_list = 1;
+}
+
+message PostEndHookReply {
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  repeated TaskIdReply result = 1;
+}
+
+
+service CranePluginD {
+  /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */  
+  rpc PreStartHook(PreStartHookRequest) returns (PreStartHookReply);
+  rpc PostStartHook(PostStartHookRequest) returns (PostStartHookReply);
+  
+  rpc PreEndHook(PreEndHookRequest) returns (PreEndHookReply);
+  rpc PostEndHook(PostEndHookRequest) returns (PostEndHookReply);
+}

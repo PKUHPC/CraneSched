@@ -33,11 +33,13 @@
 
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
+#include "protos/Plugin.grpc.pb.h"
+#include "protos/Plugin.pb.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
 
-using crane::grpc::CranePluginD;
+using crane::grpc::plugin::CranePluginD;
 using grpc::Channel;
 
 class PluginClient {
@@ -66,9 +68,9 @@ class PluginClient {
 
   void PostStartHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
 
-  void PreCompletionHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
+  [[deprecated]] void PreEndHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
 
-  void PostCompletionHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
+  void PostEndHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
 
  private:
   // HookDispatchFunc is a function pointer type that handles different
@@ -79,10 +81,10 @@ class PluginClient {
                                  google::protobuf::Message* msg);
   grpc::Status SendPostStartHook_(grpc::ClientContext* context,
                                   google::protobuf::Message* msg);
-  grpc::Status SendPreCompletionHook_(grpc::ClientContext* context,
-                                      google::protobuf::Message* msg);
-  grpc::Status SendPostCompletionHook_(grpc::ClientContext* context,
-                                       google::protobuf::Message* msg);
+  grpc::Status SendPreEndHook_(grpc::ClientContext* context,
+                               google::protobuf::Message* msg);
+  grpc::Status SendPostEndHook_(grpc::ClientContext* context,
+                                google::protobuf::Message* msg);
 
   void AsyncSendThread_();
 
@@ -98,10 +100,9 @@ class PluginClient {
   // Use this array to dispatch the hook event to the corresponding function in
   // O(1) time.
   static constexpr std::array<HookDispatchFunc, size_t(HookType::HookTypeCount)>
-      s_hook_dispatch_funcs_{{&PluginClient::SendPreStartHook_,
-                              &PluginClient::SendPostStartHook_,
-                              &PluginClient::SendPreCompletionHook_,
-                              &PluginClient::SendPostCompletionHook_}};
+      s_hook_dispatch_funcs_{
+          {&PluginClient::SendPreStartHook_, &PluginClient::SendPostStartHook_,
+           &PluginClient::SendPreEndHook_, &PluginClient::SendPostEndHook_}};
 };
 
 }  // namespace Ctld

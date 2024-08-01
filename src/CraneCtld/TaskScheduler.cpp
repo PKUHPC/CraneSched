@@ -920,7 +920,7 @@ void TaskScheduler::ScheduleThread_() {
 
       // After sending ExecuteTasks RPC, PostStartHook is called.
       // This must before checking failed tasks as TaskStatusChangeAsync may
-      // trigger PreCompletion/PostCompletion hooks.
+      // trigger PreEnd/PostEnd hooks.
       if (g_config.Plugin.Enabled) {
         g_plugin_client->PostStartHookAsync(std::move(tasks_post_start));
       }
@@ -2581,7 +2581,7 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
       task->SetFieldsOfTaskInfo(&t);
       tasks_post_comp.emplace_back(std::move(t));
     }
-    g_plugin_client->PostCompletionHookAsync(std::move(tasks_post_comp));
+    g_plugin_client->PostEndHookAsync(std::move(tasks_post_comp));
   }
 }
 
