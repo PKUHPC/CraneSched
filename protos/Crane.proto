@@ -81,6 +81,14 @@ message ExecuteTasksReply {
   repeated uint32 failed_task_id_list = 1;
 }
 
+message ExecuteProcRequest{
+    ProcToD proc = 1;
+}
+
+message ExecuteProcReply{
+  bool ok = 1;
+}
+
 message CreateCgroupForTasksRequest {
   repeated uint32 task_id_list = 1;
   repeated uint32 uid_list = 2;
@@ -444,13 +452,16 @@ message StreamCforedRequest {
     string cfored_name = 1;
     int32 pid = 2;
     TaskToCtld task = 3;
+    // for nested task of crun
+    optional uint32 task_id = 4;
   }
 
   message TaskCompleteReq {
     string cfored_name = 1;
     uint32 task_id = 2;
-    TaskStatus status = 3;
-    InteractiveTaskType interactive_type = 4;
+    uint32 proc_id = 3;
+    TaskStatus status = 4;
+    InteractiveTaskType interactive_type = 5;
   }
 
   message GracefulExitReq {
@@ -479,7 +490,12 @@ message StreamCtldReply {
     int32 pid = 1;
     bool ok = 2;
     uint32 task_id = 3;
-    string failure_reason = 4;
+    uint32 proc_id = 4;
+    string failure_reason = 5;
+    message NestedTaskNodes{
+      repeated string  craned_ids = 1;
+    }
+    optional NestedTaskNodes nodes = 6;
   }
 
   message TaskResAllocatedReply {
@@ -492,6 +508,7 @@ message StreamCtldReply {
 
   message TaskCancelRequest {
     uint32 task_id = 1;
+    uint32 proc_id = 2;
   }
 
   message TaskCompletionAckReply {
@@ -529,16 +546,20 @@ message StreamCrunRequest{
   message TaskReq {
     int32 crun_pid = 1;
     TaskToCtld task = 2;
+    // for nested task of crun
+    optional uint32 task_id = 3;
   }
 
   message TaskCompleteReq {
     uint32 task_id = 1;
-    TaskStatus status = 2;
+    uint32 proc_id = 2;
+    TaskStatus status = 3;
   }
 
   message TaskIOForwardReq {
     uint32 task_id = 1;
-    string msg = 2;
+    uint32 proc_id = 2;
+    string msg = 3;
   }
 
   CrunRequestType type = 1;
@@ -558,12 +579,14 @@ message StreamCforedCrunReply {
     TASK_COMPLETION_ACK_REPLY = 3;
     TASK_IO_FORWARD = 4;
     TASK_IO_FORWARD_READY = 5;
+    Proc_FORWARD_END = 6;
   }
 
   message TaskIdReply {
     bool ok = 1;
     uint32 task_id = 2;
-    string failure_reason = 3;
+    uint32 proc_id = 3;
+    string failure_reason = 4;
   }
 
   message TaskResAllocatedReply {
@@ -587,6 +610,10 @@ message StreamCforedCrunReply {
     string msg = 1;
   }
 
+  message ProcForwardEndReply{
+    bool ok = 1;
+  }
+
   CforedCrunReplyType type = 1 ;
 
   oneof payload {
@@ -596,13 +623,14 @@ message StreamCforedCrunReply {
     TaskCompletionAckReply payload_task_completion_ack_reply = 5;
     TaskIOForwardReadyReply payload_task_io_forward_ready_reply = 6;
     TaskIOForwardReply payload_task_io_forward_reply = 7;
+    ProcForwardEndReply payload_proc_forward_end_reply = 8;
   }
 }
 
 message StreamCforedTaskIORequest {
   enum CranedRequestType{
     CRANED_REGISTER = 0;
-    CRANED_TASK_OUTPUT = 1;
+    CRANED_PROC_OUTPUT = 1;
     CRANED_UNREGISTER = 2;
   }
 
@@ -610,9 +638,11 @@ message StreamCforedTaskIORequest {
     string craned_id = 1;
   }
 
-  message CranedTaskOutputReq {
+  message CranedProcOutputReq {
     uint32 task_id = 1;
-    string msg = 2;
+    uint32 proc_id = 2;
+    string msg = 3;
+    bool end = 4;
   }
 
   message CranedUnRegisterReq {
@@ -622,7 +652,7 @@ message StreamCforedTaskIORequest {
   CranedRequestType type = 1;
   oneof payload {
     CranedRegisterReq payload_register_req = 2;
-    CranedTaskOutputReq payload_task_output_req = 3;
+    CranedProcOutputReq payload_proc_output_req = 3;
     CranedUnRegisterReq payload_unregister_req = 4;
   }
 }
@@ -638,9 +668,10 @@ message StreamCforedTaskIOReply {
     bool ok = 1;
   }
 
-  message CranedTaskInputReq {
+  message CranedProcInputReq {
     uint32 task_id = 1;
-    string msg = 2;
+    uint32 proc_id = 2;
+    string msg = 3;
   }
 
   message CranedUnregisterReply {
@@ -651,7 +682,7 @@ message StreamCforedTaskIOReply {
 
   oneof payload {
     CranedRegisterReply payload_craned_register_reply = 2;
-    CranedTaskInputReq payload_task_input_req = 3;
+    CranedProcInputReq payload_proc_input_req = 3;
     CranedUnregisterReply payload_craned_unregister_reply = 4;
   }
 }
@@ -701,6 +732,7 @@ service CraneCtld {
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc ExecuteTask(ExecuteTasksRequest) returns(ExecuteTasksReply);
+  rpc ExecuteProc(ExecuteProcRequest) returns(ExecuteProcReply);
 
   rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
 

@@ -30,14 +30,16 @@ class CforedClient {
 
   void AsyncSendRecvThread_();
 
-  void InitTaskFwdAndSetInputCb(
-      task_id_t task_id, std::function<bool(const std::string&)> task_input_cb);
+  void InitProcFwdAndSetInputCb(
+      task_id_t task_id, proc_id_t proc_id,
+      std::function<bool(const std::string&)> task_input_cb);
 
-  void TaskOutPutForward(task_id_t task_id, const std::string& msg);
+  void ProcOutPutForward(unsigned int task_id, unsigned int proc_id,
+                         const std::string& msg, bool end);
 
-  bool TaskOutputFinish(task_id_t task_id);
+  bool ProcOutputFinish(task_id_t task_id, proc_id_t proc_id);
 
-  bool TaskProcessStop(task_id_t task_id);
+  bool ProcProcessStop(task_id_t task_id, proc_id_t proc_id);
 
  private:
   struct TaskFwdMeta {
@@ -47,12 +49,23 @@ class CforedClient {
     bool proc_stopped{false};
   };
 
+  struct TaskOutPutElem {
+    task_id_t task_id;
+    proc_id_t proc_id;
+    std::string msg;
+    bool end;
+    TaskOutPutElem() = default;
+    TaskOutPutElem(task_id_t task_id, proc_id_t proc_id, std::string msg,
+                   bool end)
+        : task_id(task_id), proc_id(proc_id), msg(std::move(msg)), end{end} {}
+  };
+
   void CleanOutputQueueAndWriteToStreamThread_(
       ClientAsyncReaderWriter<StreamCforedTaskIORequest,
                               StreamCforedTaskIOReply>* stream,
       std::atomic<bool>* write_pending);
 
-  ConcurrentQueue<std::pair<task_id_t, std::string /*msg*/>> m_output_queue_;
+  ConcurrentQueue<TaskOutPutElem> m_output_queue_;
   std::thread m_fwd_thread_;
   std::atomic<bool> m_stopped_{false};
 
@@ -65,7 +78,8 @@ class CforedClient {
   grpc::CompletionQueue m_cq_;
 
   absl::Mutex m_mtx_;
-  std::unordered_map<task_id_t, TaskFwdMeta> m_task_fwd_meta_map_;
+  std::unordered_map<task_id_t, std::unordered_map<proc_id_t, TaskFwdMeta>>
+      m_task_proc_fwd_meta_map_;
 };
 
 class CforedManager {
@@ -79,13 +93,23 @@ class CforedManager {
   bool Init();
 
   void RegisterIOForward(std::string const& cfored, task_id_t task_id,
-                         int in_fd, int out_fd);
-  void TaskProcOnCforedStopped(std::string const& cfored, task_id_t task_id);
+                         proc_id_t proc_id, int in_fd, int out_fd);
+
+  /*!
+   *
+   * @param cfored
+   * @param task_id
+   * @param proc_id 0 indicate main proc exit,trigger task end.
+   */
+  void TaskProcOnCforedStopped(std::string const& cfored, task_id_t task_id,
+                               proc_id_t proc_id, int proc_in_fd,
+                               int proc_out_fd);
 
  private:
   struct RegisterElem {
     std::string cfored;
     task_id_t task_id;
+    proc_id_t proc_id;
     int in_fd;
     int out_fd;
   };
@@ -93,14 +117,19 @@ class CforedManager {
   struct TaskStopElem {
     std::string cfored;
     task_id_t task_id;
+    proc_id_t proc_id;
+    int in_fd;
+    int out_fd;
   };
 
   struct UnregisterElem {
     std::string cfored;
     task_id_t task_id;
+    proc_id_t proc_id;
   };
 
-  void UnregisterIOForward_(std::string const& cfored, task_id_t task_id);
+  void UnregisterIOForward_(std::string const& cfored, task_id_t task_id,
+                            proc_id_t proc_id);
 
   void EvLoopThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
@@ -113,9 +142,9 @@ class CforedManager {
       m_register_queue_;
   void RegisterCb_();
 
-  std::shared_ptr<uvw::async_handle> m_task_stop_handle_;
-  ConcurrentQueue<TaskStopElem> m_task_stop_queue_;
-  void TaskStopCb_();
+  std::shared_ptr<uvw::async_handle> m_proc_stop_handle_;
+  ConcurrentQueue<TaskStopElem> m_proc_stop_queue_;
+  void ProcStopCb_();
 
   std::shared_ptr<uvw::async_handle> m_unregister_handle_;
   ConcurrentQueue<UnregisterElem> m_unregister_queue_;

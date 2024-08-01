@@ -29,6 +29,7 @@
 
 #include "CgroupManager.h"
 #include "CtldClient.h"
+#include "crane/OS.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
@@ -37,22 +38,38 @@
 namespace Craned {
 
 class TaskManager;
+struct TaskInstance;
 
 struct EvTimerCbArg {
   TaskManager* task_manager;
   task_id_t task_id;
 };
 
-struct BatchMetaInProcessInstance {
+struct MetaInProcessInstance {
+  std::string executive_path;
+  virtual ~MetaInProcessInstance() = default;
+};
+
+struct BatchMetaInProcessInstance : MetaInProcessInstance {
   std::string parsed_output_file_pattern;
   std::string parsed_error_file_pattern;
+  ~BatchMetaInProcessInstance() override = default;
+};
+
+struct InteractiveMetaInProcessInstance : MetaInProcessInstance {
+  //this fd show be closed after the process is sure to unregister io fwd.
+  int proc_in_fd;
+  int proc_out_fd;
+  std::string cfored_name;
+  crane::grpc::InteractiveTaskType interactive_type;
+  ~InteractiveMetaInProcessInstance() override = default;
 };
 
 class ProcessInstance {
  public:
-  ProcessInstance(std::string exec_path, std::list<std::string> arg_list)
-      : m_executive_path_(std::move(exec_path)),
-        m_arguments_(std::move(arg_list)),
+  ProcessInstance()
+      : type(crane::grpc::Batch),
+        proc_id(0),
         m_pid_(0),
         m_ev_buf_event_(nullptr),
         m_user_data_(nullptr) {}
@@ -68,10 +85,21 @@ class ProcessInstance {
     }
 
     if (m_ev_buf_event_) bufferevent_free(m_ev_buf_event_);
+    if (this->type == crane::grpc::Interactive) {
+      auto* task_meta =
+          dynamic_cast<InteractiveMetaInProcessInstance*>(meta.get());
+      if (task_meta->interactive_type == crane::grpc::Calloc) return;
+      CRANE_TRACE("Close task {} proc {} forward fd {}",proc.task_id(),proc.proc_id(),task_meta->proc_in_fd);
+    }
+    const std::string& path = meta->executive_path;
+    if (!path.empty())
+      g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
   }
 
+
+
   [[nodiscard]] const std::string& GetExecPath() const {
-    return m_executive_path_;
+    return meta->executive_path;
   }
   [[nodiscard]] const std::list<std::string>& GetArgList() const {
     return m_arguments_;
@@ -105,7 +133,10 @@ class ProcessInstance {
     m_clean_cb_ = std::move(cb);
   }
 
-  BatchMetaInProcessInstance batch_meta;
+  crane::grpc::TaskType type;
+  std::unique_ptr<MetaInProcessInstance> meta;
+  proc_id_t proc_id;
+  crane::grpc::ProcToD proc;
 
  private:
   /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
@@ -115,7 +146,6 @@ class ProcessInstance {
   struct bufferevent* m_ev_buf_event_;
 
   /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
-  std::string m_executive_path_;
   std::list<std::string> m_arguments_;
 
   /***
@@ -137,21 +167,6 @@ class ProcessInstance {
   std::function<void(void*)> m_clean_cb_;
 };
 
-struct MetaInTaskInstance {
-  std::string parsed_sh_script_path;
-  virtual ~MetaInTaskInstance() = default;
-};
-
-struct BatchMetaInTaskInstance : MetaInTaskInstance {
-  ~BatchMetaInTaskInstance() override = default;
-};
-
-struct CrunMetaInTaskInstance : MetaInTaskInstance {
-  int proc_in_fd;
-  int proc_out_fd;
-  ~CrunMetaInTaskInstance() override = default;
-};
-
 struct ProcSigchldInfo {
   pid_t pid;
   bool is_terminated_by_signal;
@@ -168,17 +183,11 @@ struct TaskInstance {
       event_free(termination_timer);
       termination_timer = nullptr;
     }
-
-    if (this->task.type() == crane::grpc::Interactive &&
-        this->task.interactive_meta().interactive_type() == crane::grpc::Crun) {
-      close(dynamic_cast<CrunMetaInTaskInstance*>(meta.get())->proc_in_fd);
-    }
   }
 
   crane::grpc::TaskToD task;
 
   PasswordEntry pwd_entry;
-  std::unique_ptr<MetaInTaskInstance> meta;
 
   std::string cgroup_path;
   Cgroup* cgroup;
@@ -207,6 +216,8 @@ class TaskManager {
   ~TaskManager();
 
   CraneErr ExecuteTaskAsync(crane::grpc::TaskToD const& task);
+
+  CraneErr ExecuteProcAsync(const crane::grpc::ProcToD& proc);
 
   std::optional<uint32_t> QueryTaskIdFromPidAsync(pid_t pid);
 
@@ -268,8 +279,11 @@ class TaskManager {
                                            const std::string& cwd,
                                            task_id_t task_id);
 
+  bool SetProcessByTaskInstance(TaskInstance* task,ProcessInstance* process);
   static bool CheckIfInstanceTypeIsCrun_(TaskInstance* instance);
   static bool CheckIfInstanceTypeIsCalloc_(TaskInstance* instance);
+  static bool CheckIfProcessInstanceIsCrun_(const ProcessInstance& process);
+  static bool CheckIfProcessInstanceIsCalloc_(const ProcessInstance& process);
 
   void LaunchTaskInstanceMt_(TaskInstance* instance);
 
@@ -392,10 +406,11 @@ class TaskManager {
   static void EvGrpcExecuteTaskCb_(evutil_socket_t efd, short events,
                                    void* user_data);
 
+  static void EvGrpcExecuteProcCb_(evutil_socket_t efd, short events,
+                                   void* user_data);
+
   static void EvGrpcQueryTaskIdFromPidCb_(evutil_socket_t efd, short events,
                                           void* user_data);
-
-  static void EvSubprocessReadCb_(struct bufferevent* bev, void* process);
 
   static void EvTaskStatusChangeCb_(evutil_socket_t efd, short events,
                                     void* user_data);
@@ -434,6 +449,11 @@ class TaskManager {
   // A custom event that handles the ExecuteTask RPC.
   struct event* m_ev_grpc_execute_task_{};
   ConcurrentQueue<std::unique_ptr<TaskInstance>> m_grpc_execute_task_queue_;
+
+  // A custom event that handles the ExecuteProc RPC.
+  struct event* m_ev_grpc_execute_proc_{};
+  ConcurrentQueue<crane::grpc::ProcToD>
+      m_grpc_execute_proc_queue_;
 
   // When this event is triggered, the event loop will exit.
   struct event* m_ev_exit_event_{};

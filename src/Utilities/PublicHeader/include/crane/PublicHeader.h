@@ -27,6 +27,7 @@
 #endif
 
 using task_id_t = uint32_t;
+using proc_id_t = uint32_t;
 
 enum class CraneErr : uint16_t {
   kOk = 0,

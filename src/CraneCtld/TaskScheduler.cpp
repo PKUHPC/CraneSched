@@ -689,14 +689,18 @@ void TaskScheduler::ScheduleThread_() {
           task->executing_craned_ids.emplace_back(task->CranedIds().front());
         } else {
           const auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-          if (meta.interactive_type == crane::grpc::Calloc)
-            // For calloc tasks we still need to execute a dummy empty task to
-            // set up a timer.
-            task->executing_craned_ids.emplace_back(task->CranedIds().front());
-          else
-            // For crun tasks we need to execute tasks on all allocated nodes.
-            for (auto const& craned_id : task->CranedIds())
-              task->executing_craned_ids.emplace_back(craned_id);
+          for (auto const& craned_id : task->CranedIds())
+            task->executing_craned_ids.emplace_back(craned_id);
+          //          if (meta.interactive_type == crane::grpc::Calloc)
+          //            // For calloc tasks we still need to execute a dummy
+          //            empty task to
+          //            // set up a timer.
+          //            task->executing_craned_ids.emplace_back(task->CranedIds().front());
+          //          else
+          //            // For crun tasks we need to execute tasks on all
+          //            allocated nodes. for (auto const& craned_id :
+          //            task->CranedIds())
+          //              task->executing_craned_ids.emplace_back(craned_id);
         }
       }
       end = std::chrono::steady_clock::now();
@@ -1017,6 +1021,35 @@ std::future<CraneErr> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
       {std::make_pair(task_id, secs), std::move(promise)});
   m_task_timeout_async_handle_->send();
 
+  return std::move(future);
+}
+
+std::future<std::pair<proc_id_t, std::list<std::string>>>
+TaskScheduler::SubmitProc(std::unique_ptr<TaskInCtld> task_submit,
+                          task_id_t task_id, pid_t pid) {
+  std::promise<std::pair<proc_id_t, std::list<std::string>>> promise;
+  std::future<std::pair<proc_id_t, std::list<std::string>>> future =
+      promise.get_future();
+
+  m_running_task_map_mtx_.Lock();
+  auto& task = m_running_task_map_[task_id];
+  promise.set_value({pid, task->CranedIds()});
+  auto request = CranedStub::NewExecuteProcRequest(task, task_submit);
+  request.mutable_proc()->set_proc_id(pid);
+
+  CRANE_TRACE("Launch task #{} proc #{}", task_id, pid);
+  for (auto const& craned_id : task->CranedIds()) {
+    auto stub = g_craned_keeper->GetCranedStub(craned_id);
+    if (stub == nullptr || stub->Invalid()) {
+      continue;
+    }
+    CraneErr err = stub->ExecuteProc(request);
+    if (err != CraneErr::kOk) {
+      CRANE_ERROR("Failed to ExecuteProc proc {} for task {} on Node {}", pid,
+                  task_id, craned_id);
+    }
+  }
+  m_running_task_map_mtx_.Unlock();
   return std::move(future);
 }
 
@@ -1387,6 +1420,58 @@ void TaskScheduler::CleanCancelQueueCb_() {
       running_task_craned_id_map[craned_id].emplace_back(task_id);
   }
 
+  if (!pending_tasks_vec.empty()) {
+    // Carry the ownership of TaskInCtld for automatic destruction.
+    std::vector<std::unique_ptr<TaskInCtld>> task_ptr_vec;
+    std::vector<TaskInCtld*> task_raw_ptr_vec;
+    {
+      // Allow temporary inconsistency on task querying here.
+      // In a very short duration, some cancelled tasks might not be visible
+      // immediately after changing to CANCELLED state.
+      // Also, since here we erase the task id from the pending task
+      // map with a little latency, some task id we retrieve might have been
+      // cancelled. Just ignore those who have already been cancelled.
+      LockGuard pending_guard(&m_pending_task_map_mtx_);
+      for (task_id_t task_id : pending_tasks_vec) {
+        auto it = m_pending_task_map_.find(task_id);
+        if (it == m_pending_task_map_.end()) {
+          CRANE_TRACE(
+              "Pending task #{} not found when doing actual cancelling. "
+              "Skipping it..",
+              task_id);
+          continue;
+        }
+
+        TaskInCtld* task = it->second.get();
+        task->SetStatus(crane::grpc::Cancelled);
+        task->SetEndTime(absl::Now());
+
+        if (task->type == crane::grpc::Interactive) {
+          auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+          if (meta.interactive_type == crane::grpc::Crun)
+            g_thread_pool->detach_task([cb = meta.cb_task_completed,
+                                        task_id = task_id] { cb(task_id); });
+        }
+
+        task_raw_ptr_vec.emplace_back(it->second.get());
+        task_ptr_vec.emplace_back(std::move(it->second));
+
+        m_pending_task_map_.erase(it);
+      }
+    }
+    PersistAndTransferTasksToMongodb_(task_raw_ptr_vec);
+  }
+
+  {
+    LockGuard running_guard(&m_running_task_map_mtx_);
+    for (auto task_id : pending_tasks_vec) {
+      auto it = m_running_task_map_.find(task_id);
+      if (it == m_running_task_map_.end()) continue;
+      for (const auto& craned_id : it->second->CranedIds())
+        running_task_craned_id_map[craned_id].emplace_back(task_id);
+    }
+  }
+
   for (auto&& [craned_id, task_ids] : running_task_craned_id_map) {
     g_thread_pool->detach_task(
         [id = craned_id, task_ids_to_cancel = task_ids]() {
@@ -1397,49 +1482,6 @@ void TaskScheduler::CleanCancelQueueCb_() {
             stub->TerminateTasks(task_ids_to_cancel);
         });
   }
-
-  if (pending_tasks_vec.empty()) return;
-
-  // Carry the ownership of TaskInCtld for automatic destruction.
-  std::vector<std::unique_ptr<TaskInCtld>> task_ptr_vec;
-  std::vector<TaskInCtld*> task_raw_ptr_vec;
-  {
-    // Allow temporary inconsistency on task querying here.
-    // In a very short duration, some cancelled tasks might not be visible
-    // immediately after changing to CANCELLED state.
-    // Also, since here we erase the task id from the pending task
-    // map with a little latency, some task id we retrieve might have been
-    // cancelled. Just ignore those who have already been cancelled.
-    LockGuard pending_guard(&m_pending_task_map_mtx_);
-    for (task_id_t task_id : pending_tasks_vec) {
-      auto it = m_pending_task_map_.find(task_id);
-      if (it == m_pending_task_map_.end()) {
-        CRANE_TRACE(
-            "Pending task #{} not found when doing actual cancelling. "
-            "Skipping it..",
-            task_id);
-        continue;
-      }
-
-      TaskInCtld* task = it->second.get();
-      task->SetStatus(crane::grpc::Cancelled);
-      task->SetEndTime(absl::Now());
-
-      if (task->type == crane::grpc::Interactive) {
-        auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-        if (meta.interactive_type == crane::grpc::Crun)
-          g_thread_pool->detach_task([cb = meta.cb_task_completed,
-                                      task_id = task_id] { cb(task_id); });
-      }
-
-      task_raw_ptr_vec.emplace_back(it->second.get());
-      task_ptr_vec.emplace_back(std::move(it->second));
-
-      m_pending_task_map_.erase(it);
-    }
-  }
-
-  PersistAndTransferTasksToMongodb_(task_raw_ptr_vec);
 }
 
 void TaskScheduler::SubmitTaskTimerCb_() {
@@ -1593,6 +1635,13 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       task->SetStatus(new_status);
     } else {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+      if (++meta.status_change_cnt < task->node_num) {
+        CRANE_TRACE(
+            "{}/{} TaskStatusChanges of Interactive task #{} were received. "
+            "Keep waiting...",
+            meta.status_change_cnt, task->node_num, task->TaskId());
+        continue;
+      }
       if (meta.interactive_type == crane::grpc::Calloc) {
         // TaskStatusChange may indicate the time limit has been reached and
         // the task has been terminated. No more TerminateTask RPC should be
@@ -1610,13 +1659,6 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         }
         meta.cb_task_completed(task->TaskId());
       } else {  // Crun
-        if (++meta.status_change_cnt < task->node_num) {
-          CRANE_TRACE(
-              "{}/{} TaskStatusChanges of Crun task #{} were received. "
-              "Keep waiting...",
-              meta.status_change_cnt, task->node_num, task->TaskId());
-          continue;
-        }
 
         task->SetStatus(new_status);
         meta.cb_task_completed(task->TaskId());
