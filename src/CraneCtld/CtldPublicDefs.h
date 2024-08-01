@@ -526,6 +526,46 @@ struct TaskInCtld {
     start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());
     end_time = absl::FromUnixSeconds(runtime_attr.end_time().seconds());
   }
+
+  // Helper function to set the fields of TaskInfo using info in
+  // TaskInCtld. Note that mutable_elapsed_time() is not set here for
+  // performance reason. The caller should set it manually.
+  void SetFieldsOfTaskInfo(crane::grpc::TaskInfo* task_info) {
+    task_info->set_type(type);
+    task_info->set_task_id(task_id);
+    task_info->set_name(name);
+
+    task_info->set_account(account);
+    task_info->set_partition(partition_id);
+    task_info->set_qos(qos);
+
+    task_info->mutable_time_limit()->set_seconds(ToInt64Seconds(time_limit));
+    task_info->mutable_submit_time()->CopyFrom(runtime_attr.submit_time());
+    task_info->mutable_start_time()->CopyFrom(runtime_attr.start_time());
+    task_info->mutable_end_time()->CopyFrom(runtime_attr.end_time());
+
+    task_info->set_uid(uid);
+    task_info->set_gid(gid);
+    task_info->set_username(username);
+    task_info->set_node_num(node_num);
+    task_info->set_cmd_line(cmd_line);
+    task_info->set_cwd(cwd);
+
+    task_info->set_held(held);
+
+    task_info->set_alloc_cpu(
+        static_cast<double>(resources.allocatable_resource.cpu_count) *
+        node_num);
+    task_info->set_exit_code(0);
+    task_info->set_priority(cached_priority);
+
+    task_info->set_status(status);
+    if (Status() == crane::grpc::Pending) {
+      task_info->set_pending_reason(pending_reason);
+    } else {
+      task_info->set_craned_list(allocated_craneds_regex);
+    }
+  }
 };
 
 struct Qos {

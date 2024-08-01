@@ -673,7 +673,7 @@ void InitializeCtldGlobalVariables() {
 
   g_craned_keeper->SetCranedIsDownCb([](const CranedId& craned_id) {
     CRANE_TRACE(
-        "CranedNode #{} is down now."
+        "CranedNode #{} is down now. "
         "Remove its resource from the global resource pool.",
         craned_id);
     g_meta_container->CranedDown(craned_id);

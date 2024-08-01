@@ -20,6 +20,7 @@
 // Precompiled header comes first!
 
 #include <absl/base/internal/thread_annotations.h>
+#include <absl/container/flat_hash_map.h>
 #include <google/protobuf/message.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/support/status.h>
@@ -28,9 +29,11 @@
 #include <list>
 #include <memory>
 #include <thread>
+#include <vector>
 
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
+#include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
 
@@ -59,16 +62,17 @@ class PluginClient {
   void InitChannelAndStub(const std::string& endpoint);
 
   // These functions are used to add HookEvent into the event queue.
-  void PreStartHookAsync();
+  void PreStartHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
 
-  void PostStartHookAsync();
+  void PostStartHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
 
-  void PreCompletionHookAsync();
+  void PreCompletionHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
 
-  void PostCompletionHookAsync();
+  void PostCompletionHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
 
  private:
-  // HookDispatchFunc is a function pointer type that handles different event.
+  // HookDispatchFunc is a function pointer type that handles different
+  // event.
   using HookDispatchFunc = grpc::Status (PluginClient::*)(
       grpc::ClientContext*, google::protobuf::Message* msg);
   grpc::Status SendPreStartHook_(grpc::ClientContext* context,
