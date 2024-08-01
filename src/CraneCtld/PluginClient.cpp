@@ -139,95 +139,46 @@ void PluginClient::AsyncSendThread_() {
   }
 }
 
-grpc::Status PluginClient::SendPreStartHook_(grpc::ClientContext* context,
-                                             google::protobuf::Message* msg) {
-  using crane::grpc::plugin::PreStartHookReply;
-  using crane::grpc::plugin::PreStartHookRequest;
+grpc::Status PluginClient::SendStartHook_(grpc::ClientContext* context,
+                                          google::protobuf::Message* msg) {
+  using crane::grpc::plugin::StartHookReply;
+  using crane::grpc::plugin::StartHookRequest;
 
-  auto request = dynamic_cast<PreStartHookRequest*>(msg);
-  PreStartHookReply reply;
+  auto request = dynamic_cast<StartHookRequest*>(msg);
+  StartHookReply reply;
 
-  CRANE_TRACE("[Plugin] Sending PreStartHook.");
-  return m_stub_->PreStartHook(context, *request, &reply);
+  CRANE_TRACE("[Plugin] Sending StartHook.");
+  return m_stub_->StartHook(context, *request, &reply);
 }
 
-grpc::Status PluginClient::SendPostStartHook_(grpc::ClientContext* context,
-                                              google::protobuf::Message* msg) {
-  using crane::grpc::plugin::PostStartHookReply;
-  using crane::grpc::plugin::PostStartHookRequest;
+grpc::Status PluginClient::SendEndHook_(grpc::ClientContext* context,
+                                        google::protobuf::Message* msg) {
+  using crane::grpc::plugin::EndHookReply;
+  using crane::grpc::plugin::EndHookRequest;
 
-  auto request = dynamic_cast<PostStartHookRequest*>(msg);
-  PostStartHookReply reply;
+  auto request = dynamic_cast<EndHookRequest*>(msg);
+  EndHookReply reply;
 
-  CRANE_TRACE("[Plugin] Sending PostStartHook.");
-  return m_stub_->PostStartHook(context, *request, &reply);
+  CRANE_TRACE("[Plugin] Sending EndHook.");
+  return m_stub_->EndHook(context, *request, &reply);
 }
 
-grpc::Status PluginClient::SendPreEndHook_(grpc::ClientContext* context,
-                                           google::protobuf::Message* msg) {
-  using crane::grpc::plugin::PreEndHookReply;
-  using crane::grpc::plugin::PreEndHookRequest;
-
-  auto request = dynamic_cast<PreEndHookRequest*>(msg);
-  PreEndHookReply reply;
-
-  CRANE_TRACE("[Plugin] Sending PreEndHook.");
-  return m_stub_->PreEndHook(context, *request, &reply);
-}
-
-grpc::Status PluginClient::SendPostEndHook_(grpc::ClientContext* context,
-                                            google::protobuf::Message* msg) {
-  using crane::grpc::plugin::PostEndHookReply;
-  using crane::grpc::plugin::PostEndHookRequest;
-
-  auto request = dynamic_cast<PostEndHookRequest*>(msg);
-  PostEndHookReply reply;
-
-  CRANE_TRACE("[Plugin] Sending PostEndHook.");
-  return m_stub_->PostEndHook(context, *request, &reply);
-}
-
-void PluginClient::PreStartHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
-  auto request = std::make_unique<crane::grpc::plugin::PreStartHookRequest>();
-  auto* task_list = request->mutable_task_info_list();
-  for (auto& task : tasks) {
-    auto* task_it = task_list->Add();
-    // task_it->set_status(crane::grpc::TaskStatus::Pending);
-    task_it->CopyFrom(task);
-  }
-
-  HookEvent e{HookType::PRE_START,
-              std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  absl::MutexLock lock(&m_event_queue_mtx_);
-  m_event_queue_.emplace_back(std::move(e));
-}
-
-void PluginClient::PostStartHookAsync(
-    std::vector<crane::grpc::TaskInfo> tasks) {
-  auto request = std::make_unique<crane::grpc::plugin::PostStartHookRequest>();
+void PluginClient::StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
+  auto request = std::make_unique<crane::grpc::plugin::StartHookRequest>();
   auto* task_list = request->mutable_task_info_list();
   for (auto& task : tasks) {
     auto* task_it = task_list->Add();
     task_it->CopyFrom(task);
   }
 
-  HookEvent e{HookType::POST_START,
+  HookEvent e{HookType::START,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
   absl::MutexLock lock(&m_event_queue_mtx_);
   m_event_queue_.emplace_back(std::move(e));
 }
 
-void PluginClient::PreEndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
-  auto request = new crane::grpc::plugin::PreEndHookRequest();
-
-  HookEvent e{HookType::PRE_COMPLETION,
-              std::unique_ptr<google::protobuf::Message>(request)};
-  absl::MutexLock lock(&m_event_queue_mtx_);
-  m_event_queue_.emplace_back(std::move(e));
-}
-
-void PluginClient::PostEndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
-  auto request = std::make_unique<crane::grpc::plugin::PostEndHookRequest>();
+void PluginClient::EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
+  auto request = std::make_unique<crane::grpc::plugin::EndHookRequest>();
   auto* task_list = request->mutable_task_info_list();
 
   auto now = absl::ToUnixSeconds(absl::Now());
@@ -238,7 +189,7 @@ void PluginClient::PostEndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
                                                  task.start_time().seconds());
   }
 
-  HookEvent e{HookType::POST_COMPLETION,
+  HookEvent e{HookType::END,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
   absl::MutexLock lock(&m_event_queue_mtx_);
   m_event_queue_.emplace_back(std::move(e));

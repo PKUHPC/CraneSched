@@ -48,10 +48,8 @@ class PluginClient {
   ~PluginClient();
 
   enum class HookType {
-    PRE_START,
-    POST_START,
-    PRE_COMPLETION,
-    POST_COMPLETION,
+    START,
+    END,
 
     HookTypeCount,
   };
@@ -64,27 +62,18 @@ class PluginClient {
   void InitChannelAndStub(const std::string& endpoint);
 
   // These functions are used to add HookEvent into the event queue.
-  void PreStartHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
-
-  void PostStartHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
-
-  [[deprecated]] void PreEndHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
-
-  void PostEndHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
+  void StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
+  void EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
 
  private:
   // HookDispatchFunc is a function pointer type that handles different
   // event.
   using HookDispatchFunc = grpc::Status (PluginClient::*)(
       grpc::ClientContext*, google::protobuf::Message* msg);
-  grpc::Status SendPreStartHook_(grpc::ClientContext* context,
-                                 google::protobuf::Message* msg);
-  grpc::Status SendPostStartHook_(grpc::ClientContext* context,
-                                  google::protobuf::Message* msg);
-  grpc::Status SendPreEndHook_(grpc::ClientContext* context,
-                               google::protobuf::Message* msg);
-  grpc::Status SendPostEndHook_(grpc::ClientContext* context,
-                                google::protobuf::Message* msg);
+  grpc::Status SendStartHook_(grpc::ClientContext* context,
+                              google::protobuf::Message* msg);
+  grpc::Status SendEndHook_(grpc::ClientContext* context,
+                            google::protobuf::Message* msg);
 
   void AsyncSendThread_();
 
@@ -101,8 +90,7 @@ class PluginClient {
   // O(1) time.
   static constexpr std::array<HookDispatchFunc, size_t(HookType::HookTypeCount)>
       s_hook_dispatch_funcs_{
-          {&PluginClient::SendPreStartHook_, &PluginClient::SendPostStartHook_,
-           &PluginClient::SendPreEndHook_, &PluginClient::SendPostEndHook_}};
+          {&PluginClient::SendStartHook_, &PluginClient::SendEndHook_}};
 };
 
 }  // namespace Ctld

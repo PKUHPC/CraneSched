@@ -21,11 +21,11 @@ option go_package = "/protos";
 
 import "PublicDefs.proto";
 
-message PreStartHookRequest {
+message StartHookRequest {
   repeated TaskInfo task_info_list = 1;
 }
 
-message PreStartHookReply {
+message StartHookReply {
   message TaskIdReply {
     bool ok = 1;
     uint32 task_id = 2;
@@ -35,39 +35,11 @@ message PreStartHookReply {
   repeated TaskIdReply result = 1;
 }
 
-message PostStartHookRequest {
+message EndHookRequest {
   repeated TaskInfo task_info_list = 1;
 }
 
-message PostStartHookReply {
-  message TaskIdReply {
-    bool ok = 1;
-    uint32 task_id = 2;
-    string failure_reason = 3;
-  }
-
-  repeated TaskIdReply result = 1;
-}
-
-message PreEndHookRequest {
-  repeated TaskInfo task_info_list = 1;
-}
-
-message PreEndHookReply {
-  message TaskIdReply {
-    bool ok = 1;
-    uint32 task_id = 2;
-    string failure_reason = 3;
-  }
-
-  repeated TaskIdReply result = 1;
-}
-
-message PostEndHookRequest {
-  repeated TaskInfo task_info_list = 1;
-}
-
-message PostEndHookReply {
+message EndHookReply {
   message TaskIdReply {
     bool ok = 1;
     uint32 task_id = 2;
@@ -80,9 +52,6 @@ message PostEndHookReply {
 
 service CranePluginD {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */  
-  rpc PreStartHook(PreStartHookRequest) returns (PreStartHookReply);
-  rpc PostStartHook(PostStartHookRequest) returns (PostStartHookReply);
-  
-  rpc PreEndHook(PreEndHookRequest) returns (PreEndHookReply);
-  rpc PostEndHook(PostEndHookRequest) returns (PostEndHookReply);
+  rpc StartHook(StartHookRequest) returns (StartHookReply);
+  rpc EndHook(EndHookRequest) returns (EndHookReply);
 }

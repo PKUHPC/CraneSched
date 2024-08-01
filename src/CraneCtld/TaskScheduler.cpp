@@ -709,15 +709,15 @@ void TaskScheduler::ScheduleThread_() {
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
 
-      if (g_config.Plugin.Enabled) {
-        std::vector<crane::grpc::TaskInfo> tasks_pre_start;
-        for (auto& it : selection_result_list) {
-          crane::grpc::TaskInfo task;
-          it.first->SetFieldsOfTaskInfo(&task);
-          tasks_pre_start.emplace_back(std::move(task));
-        }
-        g_plugin_client->PreStartHookAsync(std::move(tasks_pre_start));
-      }
+      // if (g_config.Plugin.Enabled) {
+      //   std::vector<crane::grpc::TaskInfo> tasks_pre_start;
+      //   for (auto& it : selection_result_list) {
+      //     crane::grpc::TaskInfo task;
+      //     it.first->SetFieldsOfTaskInfo(&task);
+      //     tasks_pre_start.emplace_back(std::move(task));
+      //   }
+      //   g_plugin_client->PreStartHookAsync(std::move(tasks_pre_start));
+      // }
 
       begin = std::chrono::steady_clock::now();
 
@@ -835,7 +835,7 @@ void TaskScheduler::ScheduleThread_() {
         auto& task = it.first;
 
         // We need to copy TaskInCtld here since the ownership of task will be
-        // transferred before we call PostStartHook.
+        // transferred before we call StartHook.
         if (g_config.Plugin.Enabled) {
           crane::grpc::TaskInfo task_info;
           task->SetFieldsOfTaskInfo(&task_info);
@@ -918,11 +918,11 @@ void TaskScheduler::ScheduleThread_() {
           failed_to_exec_task_id_set.emplace(craned_id, task_id);
       }
 
-      // After sending ExecuteTasks RPC, PostStartHook is called.
+      // After sending ExecuteTasks RPC, StartHook is called.
       // This must before checking failed tasks as TaskStatusChangeAsync may
       // trigger PreEnd/PostEnd hooks.
       if (g_config.Plugin.Enabled) {
-        g_plugin_client->PostStartHookAsync(std::move(tasks_post_start));
+        g_plugin_client->StartHookAsync(std::move(tasks_post_start));
       }
 
       // If any task failed during this stage,
@@ -2581,7 +2581,7 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
       task->SetFieldsOfTaskInfo(&t);
       tasks_post_comp.emplace_back(std::move(t));
     }
-    g_plugin_client->PostEndHookAsync(std::move(tasks_post_comp));
+    g_plugin_client->EndHookAsync(std::move(tasks_post_comp));
   }
 }
 
