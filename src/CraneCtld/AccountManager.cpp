@@ -547,12 +547,17 @@ AccountManager::Result AccountManager::ModifyUser(
     const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
     const std::string& name, const std::string& partition, std::string account,
     const std::string& item, const std::string& value, bool force) {
-  if (account.empty()) {
+  {
+    // Check if account exists and user belongs to the account
     auto p = GetExistedUserInfo(name);
-    if (!p) {
-      return Result{false, fmt::format("Unknown user '{}'", name)};
+    if (account.empty()) {
+      if (!p) return Result{false, fmt::format("Unknown user '{}'", name)};
+      account = p->default_account;
     }
-    account = p->default_account;
+    if (!p->account_to_attrs_map.contains(account))
+      return Result{
+          false, fmt::format("User '{}' doesn't belong to account '{}'", name,
+                             account)};
   }
 
   switch (operatorType) {
