@@ -828,17 +828,13 @@ AccountManager::Result AccountManager::FindUserLevelAccountsOfUid(
     uint32_t uid, User::AdminLevel* level, std::list<std::string>* accounts) {
   PasswordEntry entry(uid);
   if (!entry.Valid()) {
-    return Result{false,
-                  fmt::format("Uid {} not found on the controller node", uid)};
+    return Result{false, fmt::format("Uid {} not found.", uid)};
   }
 
   UserMutexSharedPtr ptr = GetExistedUserInfo(entry.Username());
   if (!ptr) {
-    return Result{
-        false,
-        fmt::format(
-            "Permission error: User '{}' not found in the account database",
-            entry.Username())};
+    return Result{false, fmt::format("User {} is not a user of Crane.",
+                                     entry.Username())};
   }
   if (level != nullptr) *level = ptr->admin_level;
   if (accounts != nullptr) {
@@ -861,7 +857,7 @@ result::result<void, std::string> AccountManager::CheckUidIsAdmin(
   const User* ptr = GetExistedUserInfoNoLock_(entry.Username());
   if (!ptr) {
     return result::failure(
-        fmt::format("User {} is not a Crane user.", entry.Username()));
+        fmt::format("User {} is not a user of Crane.", entry.Username()));
   }
 
   if (ptr->admin_level >= User::Operator) return {};
@@ -883,9 +879,8 @@ AccountManager::Result AccountManager::HasPermissionToAccount(
 
   const User* user = GetExistedUserInfoNoLock_(entry.Username());
   if (!user) {
-    return Result{false,
-                  fmt::format("Parameter error: User '{}' is not a crane user",
-                              entry.Username())};
+    return Result{false, fmt::format("User '{}' is not a user of Crane",
+                                     entry.Username())};
   }
 
   if (level_of_uid != nullptr) *level_of_uid = user->admin_level;
@@ -935,13 +930,13 @@ AccountManager::Result AccountManager::HasPermissionToUser(
   const User* source_user_ptr =
       GetExistedUserInfoNoLock_(source_user_entry.Username());
   if (!source_user_ptr)
-    return Result{false, fmt::format("User {} is not a Crane user",
+    return Result{false, fmt::format("User {} is not a user of Crane",
                                      source_user_entry.Username())};
 
   const User* target_user_ptr = GetExistedUserInfoNoLock_(target_user);
   if (!target_user_ptr)
     return Result{false,
-                  fmt::format("User {} is not a Crane user", target_user)};
+                  fmt::format("User {} is not a user of Crane", target_user)};
 
   if (level_of_uid != nullptr) *level_of_uid = source_user_ptr->admin_level;
 

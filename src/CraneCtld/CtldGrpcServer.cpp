@@ -517,6 +517,7 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
   std::list<std::string> user_accounts;
   std::unordered_map<std::string, Account> res_account_map;
   std::unordered_map<uid_t, User> res_user_map;
+  std::unordered_map<std::string, Qos> res_qos_map;
 
   AccountManager::Result find_res =
       g_account_manager->FindUserLevelAccountsOfUid(request->uid(), &user_level,
@@ -739,46 +740,91 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
       }
     }
     break;
-  case crane::grpc::Qos:
+  case crane::grpc::Qos: {
+    PasswordEntry entry(request->uid());
+
+    AccountManager::UserMutexSharedPtr user_shared_ptr =
+        g_account_manager->GetExistedUserInfo(entry.Username());
+    if (!user_shared_ptr) {
+      response->set_ok(false);
+      response->set_reason(
+          fmt::format("User {} is not a user of Crane.", entry.Username()));
+      return grpc::Status::OK;
+    }
+
     if (request->name().empty()) {
       AccountManager::QosMapMutexSharedPtr qos_map_shared_ptr =
           g_account_manager->GetAllQosInfo();
 
       if (qos_map_shared_ptr) {
-        auto *list = response->mutable_qos_list();
-        for (const auto &[name, qos] : *qos_map_shared_ptr) {
-          if (qos->deleted) {
-            continue;
+        if (user_level != User::None) {
+          for (const auto &[name, qos] : *qos_map_shared_ptr) {
+            if (qos->deleted) continue;
+            res_qos_map[name] = *qos;
           }
-
-          auto *qos_info = list->Add();
-          qos_info->set_name(qos->name);
-          qos_info->set_description(qos->description);
-          qos_info->set_priority(qos->priority);
-          qos_info->set_max_jobs_per_user(qos->max_jobs_per_user);
-          qos_info->set_max_cpus_per_user(qos->max_cpus_per_user);
-          qos_info->set_max_time_limit_per_task(
-              absl::ToInt64Seconds(qos->max_time_limit_per_task));
+        } else {
+          for (const auto &[acct, item] :
+               user_shared_ptr->account_to_attrs_map) {
+            for (const auto &[part, part_qos_map] :
+                 item.allowed_partition_qos_map) {
+              for (const auto &qos : part_qos_map.second) {
+                res_qos_map[qos] = *(qos_map_shared_ptr->at(qos));
+              }
+            }
+          }
         }
+      } else {
+        response->set_ok(false);
+        response->set_reason("Can't find any QOS!");
+        return grpc::Status::OK;
       }
-      response->set_ok(true);
     } else {
       AccountManager::QosMutexSharedPtr qos_shared_ptr =
           g_account_manager->GetExistedQosInfo(request->name());
-      if (qos_shared_ptr) {
-        auto *qos_info = response->mutable_qos_list()->Add();
-        qos_info->set_name(qos_shared_ptr->name);
-        qos_info->set_description(qos_shared_ptr->description);
-        qos_info->set_priority(qos_shared_ptr->priority);
-        qos_info->set_max_jobs_per_user(qos_shared_ptr->max_jobs_per_user);
-        qos_info->set_max_cpus_per_user(qos_shared_ptr->max_cpus_per_user);
-        qos_info->set_max_time_limit_per_task(
-            absl::ToInt64Seconds(qos_shared_ptr->max_time_limit_per_task));
-        response->set_ok(true);
-      } else {
+      if (!qos_shared_ptr) {
         response->set_ok(false);
+        response->set_reason(
+            fmt::format("Can't find QOS {}!", request->name()));
+        return grpc::Status::OK;
       }
+
+      if (user_level == User::None) {
+        bool found = false;
+        for (const auto &[acct, item] : user_shared_ptr->account_to_attrs_map) {
+          for (const auto &[part, part_qos_map] :
+               item.allowed_partition_qos_map) {
+            for (const auto &qos : part_qos_map.second) {
+              if (qos == request->name()) found = true;
+            }
+          }
+        }
+
+        if (!found) {
+          response->set_ok(false);
+          response->set_reason(
+              fmt::format("User {} is not allowed to access qos {} which is "
+                          "not in allowed qos list",
+                          entry.Username(), request->name()));
+          return grpc::Status::OK;
+        }
+      }
+
+      res_qos_map[request->name()] = *qos_shared_ptr;
     }
+
+    response->set_ok(true);
+    auto *list = response->mutable_qos_list();
+    for (const auto &[name, qos] : res_qos_map) {
+      auto *qos_info = list->Add();
+      qos_info->set_name(qos.name);
+      qos_info->set_description(qos.description);
+      qos_info->set_priority(qos.priority);
+      qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
+      qos_info->set_max_cpus_per_user(qos.max_cpus_per_user);
+      qos_info->set_max_time_limit_per_task(
+          absl::ToInt64Seconds(qos.max_time_limit_per_task));
+    }
+  }
   default:
     break;
   }
