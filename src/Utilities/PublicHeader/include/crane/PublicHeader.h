@@ -195,6 +195,12 @@ bool operator<(const AllocatableResource& lhs, const AllocatableResource& rhs);
 bool operator==(const AllocatableResource& lhs, const AllocatableResource& rhs);
 
 struct DedicatedResourceInNode {
+  // user req type
+  using Req_t = std::unordered_map<
+      std::string /*name*/,
+      std::pair<
+          uint64_t /*untyped req count*/,
+          std::unordered_map<std::string /*type*/, uint64_t /*type total*/>>>;
   struct TypeSlotsMap {
     std::unordered_map<std::string /*type*/, std::set<SlotId> /*index*/>
         type_slots_map;
@@ -222,13 +228,8 @@ struct DedicatedResourceInNode {
   explicit operator crane::grpc::DeviceMap() const;
 };
 
-bool operator<=(
-    const std::unordered_map<
-        std::string /*name*/,
-        std::pair<uint64_t /*untyped req count*/,
-                  std::unordered_map<std::string /*type*/,
-                                     uint64_t /*type total*/>>>& lhs,
-    const DedicatedResourceInNode& rhs);
+bool operator<=(const DedicatedResourceInNode::Req_t& lhs,
+                const DedicatedResourceInNode& rhs);
 bool operator<=(const DedicatedResourceInNode& lhs,
                 const DedicatedResourceInNode& rhs);
 bool operator==(const DedicatedResourceInNode& lhs,

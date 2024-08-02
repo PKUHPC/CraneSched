@@ -110,16 +110,11 @@ bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs) {
     craned_ids.emplace(craned_id);
 
   for (const auto& craned_id : craned_ids) {
+    // craned gres always not empty
     if (lhs.contains(craned_id) && !rhs.contains(craned_id)) {
-      if (lhs.at(craned_id).empty())
-        continue;
-      else
-        return false;
+      return false;
     } else if (!lhs.contains(craned_id) && rhs.contains(craned_id)) {
-      if (rhs.at(craned_id).empty())
-        continue;
-      else
-        return false;
+      return false;
     } else {
       if (!(lhs.at(craned_id) == rhs.at(craned_id))) return false;
     }
@@ -166,6 +161,7 @@ bool operator<=(
 bool operator<=(const DedicatedResourceInNode& lhs,
                 const DedicatedResourceInNode& rhs) {
   for (const auto& [lhs_name, lhs_type_slots_map] : lhs.name_type_slots_map) {
+    // type_slots_map always not empty
     if (!rhs.contains(lhs_name) && !lhs_type_slots_map.empty()) {
       return false;
     }
@@ -174,7 +170,7 @@ bool operator<=(const DedicatedResourceInNode& lhs,
          lhs_type_slots_map.type_slots_map) {
       // slots always not empty
       if (!rhs.at(lhs_name).contains(lhs_type)) {
-          return false;
+        return false;
       }
 
       if (!std::ranges::includes(rhs.at(lhs_name).at(lhs_type), lhs_slots)) {
@@ -192,32 +188,22 @@ bool operator==(const DedicatedResourceInNode& lhs,
   lhs.flat_(names, types);
   rhs.flat_(names, types);
   for (const auto& name : names) {
+    // type_slots_map always not empty
     if (lhs.contains(name) && !rhs.contains(name)) {
-      if (!lhs.at(name).empty())
-        return false;
-      else
-        continue;
+      return false;
     } else if (!lhs.contains(name) && rhs.contains(name)) {
-      if (!rhs.at(name).empty())
-        return false;
-      else
-        continue;
+      return false;
     } else if (lhs.contains(name) && rhs.contains(name)) {
       const auto& lhs_type_slots_map = lhs.at(name);
       const auto& rhs_type_slots_map = rhs.at(name);
       for (const auto& type : types) {
+        // slots set always not empty
         if (lhs_type_slots_map.contains(type) &&
             !rhs_type_slots_map.contains(type)) {
-          if (!lhs_type_slots_map.at(type).empty())
-            return false;
-          else
-            continue;
+          return false;
         } else if (!lhs_type_slots_map.contains(type) &&
                    rhs_type_slots_map.contains(type)) {
-          if (!rhs_type_slots_map.at(type).empty())
-            return false;
-          else
-            continue;
+          return false;
         } else if (lhs_type_slots_map.contains(type) &&
                    rhs_type_slots_map.contains(type)) {
           if (rhs_type_slots_map.at(type) != lhs_type_slots_map.at(type))

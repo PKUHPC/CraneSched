@@ -255,11 +255,7 @@ struct TaskInCtld {
 
   PartitionId partition_id;
   Resources resources;
-  std::unordered_map<std::string /*name*/,
-                     std::pair<uint64_t /*untyped req count*/,
-                               std::unordered_map<std::string /*type*/,
-                                                  uint64_t /*type total*/>>>
-      request_gres;
+  DedicatedResourceInNode::Req_t request_gres;
   crane::grpc::TaskType type;
 
   uid_t uid;
