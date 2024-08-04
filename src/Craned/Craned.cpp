@@ -444,6 +444,8 @@ void GlobalVariableInit() {
     std::exit(1);
   }
 
+  g_cg_mgr->InitCgroupDirectories();
+
   g_thread_pool =
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
