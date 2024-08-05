@@ -287,7 +287,7 @@ void ParseConfig(int argc, char** argv) {
                 std::exit(1);
               }
               CRANE_TRACE("gres file name list parsed: {}",
-                          fmt::join(name_list, ", "));
+                          fmt::join(device_path_list, ", "));
               for (const auto& device_path : device_path_list) {
                 devices.push_back(
                     std::make_tuple(device_name, device_type, device_path));
