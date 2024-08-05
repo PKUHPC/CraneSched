@@ -89,17 +89,17 @@ void CranedMetaContainerSimpleImpl::CranedDown(const CranedId& craned_id) {
     part_global_meta.alive_craned_cnt--;
   }
 
-  node_meta->res_total.dedicated_resource -=
-      node_meta->res_total.dedicated_resource;
+  node_meta->res_total.dedicated_resource.craned_id_gres_map.clear();
 
   node_meta->res_avail.allocatable_resource +=
       node_meta->res_in_use.allocatable_resource;
 
   // clear dedicated_resources,will be set when craned up
-  node_meta->res_avail.dedicated_resource -=
-      node_meta->res_avail.dedicated_resource;
+  node_meta->res_avail.dedicated_resource.craned_id_gres_map.clear();
   // Set the rse_in_use of dead craned to 0
-  node_meta->res_in_use -= node_meta->res_in_use;
+  node_meta->res_in_use.allocatable_resource -=
+      node_meta->res_in_use.allocatable_resource;
+  node_meta->res_in_use.dedicated_resource.craned_id_gres_map.clear();
   node_meta->running_task_resource_map.clear();
 }
 
@@ -130,158 +130,116 @@ CranedMetaContainerSimpleImpl::GetCranedMetaMapConstPtr() {
   return craned_meta_map_.GetMapConstSharedPtr();
 }
 
-void CranedMetaContainerSimpleImpl::MallocResourceFromNodes(
-    const std::list<CranedId>& node_ids, task_id_t task_id,
-    const Resources& resources) {
-  // Build PartitionId -> set<CranedId> hash map.
-  TreeMap<PartitionId, TreeSet<CranedId>> part_id_craned_ids_map;
-
-  for (auto& node_id : node_ids) {
-    if (!craned_id_part_ids_map_.contains(node_id)) {
-      CRANE_ERROR("Malloc resource on {} not in the craned map", node_id);
-      return;
-    }
-
-    auto& part_ids = craned_id_part_ids_map_.at(node_id);
-    for (auto& part_id : part_ids)
-      part_id_craned_ids_map[part_id].emplace(node_id);
+void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
+    CranedId node_id, task_id_t task_id, const Resources& resources) {
+  if (!craned_meta_map_.Contains(node_id)) {
+    CRANE_ERROR("Try to malloc resource from an unknown craned {}", node_id);
+    return;
   }
 
-  std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
-  part_meta_ptrs.reserve(part_id_craned_ids_map.size());
+  auto& part_ids = craned_id_part_ids_map_.at(node_id);
 
-  // TODO: Duplicate lock acquiring!
+  std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
+  part_meta_ptrs.reserve(part_ids.size());
+
   auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
-  for (auto it = part_id_craned_ids_map.begin();
-       it != part_id_craned_ids_map.end(); ++it) {
-    PartitionId const& part_id = it->first;
-    CRANE_TRACE("Hold partition exclusive lock for {}.", part_id);
-
+  for (PartitionId const& part_id : part_ids)
     part_meta_ptrs.emplace_back(
         raw_part_metas_map_->at(part_id).GetExclusivePtr());
+
+  // Then acquire craned meta lock.
+  auto node_meta = craned_meta_map_[node_id];
+  node_meta->running_task_resource_map.emplace(task_id, resources);
+  node_meta->res_avail.allocatable_resource -= resources.allocatable_resource;
+  node_meta->res_in_use.allocatable_resource += resources.allocatable_resource;
+  if (resources.dedicated_resource.contains(node_id)) {
+    node_meta->res_avail.dedicated_resource[node_id] -=
+        resources.dedicated_resource.at(node_id);
+    node_meta->res_in_use.dedicated_resource[node_id] +=
+        resources.dedicated_resource.at(node_id);
   }
 
   for (auto& partition_meta : part_meta_ptrs) {
-    PartitionGlobalMeta& part_gmeta = partition_meta->partition_global_meta;
-    PartitionId const& part_id = part_gmeta.name;
+    PartitionGlobalMeta& part_global_meta =
+        partition_meta->partition_global_meta;
 
-    part_gmeta.res_avail.allocatable_resource -=
-        resources.allocatable_resource *
-        part_id_craned_ids_map.at(part_id).size();
-    part_gmeta.res_in_use.allocatable_resource +=
-        resources.allocatable_resource *
-        part_id_craned_ids_map.at(part_id).size();
-
-    for (const auto& [craned_id, res_in_node] :
-         resources.dedicated_resource.craned_id_gres_map) {
-      if (!part_id_craned_ids_map.at(part_id).contains(craned_id)) continue;
-      part_gmeta.res_avail.dedicated_resource[craned_id] -= res_in_node;
-      part_gmeta.res_in_use.dedicated_resource[craned_id] += res_in_node;
-    }
-  }
-
-  for (const CranedId& node_id : node_ids) {
-    if (!craned_meta_map_.Contains(node_id)) {
-      CRANE_ERROR("Try to malloc resource from an unknown craned {}", node_id);
-      return;
-    }
-
-    // Then acquire craned meta lock.
-    auto node_meta = craned_meta_map_[node_id];
-
-    node_meta->res_avail.allocatable_resource -= resources.allocatable_resource;
-    node_meta->res_in_use.allocatable_resource +=
+    part_global_meta.res_avail.allocatable_resource -=
         resources.allocatable_resource;
-
+    part_global_meta.res_in_use.allocatable_resource +=
+        resources.allocatable_resource;
     if (resources.dedicated_resource.contains(node_id)) {
-      node_meta->res_avail.dedicated_resource[node_id] -=
+      part_global_meta.res_avail.dedicated_resource[node_id] -=
           resources.dedicated_resource.at(node_id);
-      node_meta->res_in_use.dedicated_resource[node_id] +=
+      part_global_meta.res_in_use.dedicated_resource[node_id] +=
           resources.dedicated_resource.at(node_id);
     }
-
-    node_meta->running_task_resource_map.emplace(task_id, resources);
   }
 }
 
-void CranedMetaContainerSimpleImpl::FreeResourceFromNodes(
-    std::list<CranedId> const& node_ids, uint32_t task_id,
-    Resources const& resources) {
-  // Build PartitionId -> set<CranedId> hash map.
-  TreeMap<PartitionId, TreeSet<CranedId>> part_id_craned_ids_map;
-
-  for (auto& node_id : node_ids) {
-    if (!craned_id_part_ids_map_.contains(node_id)) {
-      CRANE_ERROR("Free resource on {} not in the craned map", node_id);
-      return;
-    }
-
-    auto& part_ids = craned_id_part_ids_map_.at(node_id);
-    for (auto& part_id : part_ids)
-      part_id_craned_ids_map[part_id].emplace(node_id);
+void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId node_id,
+                                                         uint32_t task_id) {
+  if (!craned_meta_map_.Contains(node_id)) {
+    CRANE_ERROR("Try to free resource from an unknown craned {}", node_id);
+    return;
   }
 
+  auto& part_ids = craned_id_part_ids_map_.at(node_id);
+
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
-  part_meta_ptrs.reserve(part_id_craned_ids_map.size());
+  part_meta_ptrs.reserve(part_ids.size());
 
   auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
-  for (auto it = part_id_craned_ids_map.begin();
-       it != part_id_craned_ids_map.end(); ++it) {
-    PartitionId const& part_id = it->first;
+  for (PartitionId const& part_id : part_ids)
     part_meta_ptrs.emplace_back(
         raw_part_metas_map_->at(part_id).GetExclusivePtr());
+
+  // Then acquire craned meta lock.
+  auto node_meta = craned_meta_map_[node_id];
+  if (!node_meta->alive) {
+    CRANE_DEBUG("Crane {} has already been down. Ignore FreeResourceFromNode.",
+                node_meta->static_meta.hostname);
+    return;
+  }
+
+  auto resource_iter = node_meta->running_task_resource_map.find(task_id);
+  if (resource_iter == node_meta->running_task_resource_map.end()) {
+    CRANE_ERROR("Try to free resource from an unknown task {} on craned {}",
+                task_id, node_id);
+    return;
+  }
+  Resources const& resources = resource_iter->second;
+
+  node_meta->res_avail.allocatable_resource += resources.allocatable_resource;
+  node_meta->res_in_use.allocatable_resource -= resources.allocatable_resource;
+
+  if (resources.dedicated_resource.contains(node_id)) {
+    node_meta->res_avail.dedicated_resource[node_id] +=
+        resources.dedicated_resource.at(node_id);
+    node_meta->res_in_use.dedicated_resource[node_id] -=
+        resources.dedicated_resource.at(node_id);
   }
 
   for (auto& partition_meta : part_meta_ptrs) {
-    PartitionGlobalMeta& part_gmeta = partition_meta->partition_global_meta;
-    PartitionId const& part_id = part_gmeta.name;
+    PartitionGlobalMeta& part_global_meta =
+        partition_meta->partition_global_meta;
 
-    part_gmeta.res_avail.allocatable_resource +=
-        resources.allocatable_resource *
-        part_id_craned_ids_map.at(part_id).size();
-    part_gmeta.res_in_use.allocatable_resource -=
-        resources.allocatable_resource *
-        part_id_craned_ids_map.at(part_id).size();
-    for (const auto& [craned_id, res_in_node] :
-         resources.dedicated_resource.craned_id_gres_map) {
-      if (!part_id_craned_ids_map.at(part_id).contains(craned_id)) continue;
-      part_gmeta.res_avail.dedicated_resource[craned_id] += res_in_node;
-      part_gmeta.res_in_use.dedicated_resource[craned_id] -= res_in_node;
-    }
-  }
-
-  for (const CranedId& node_id : node_ids) {
-    if (!craned_meta_map_.Contains(node_id)) {
-      CRANE_ERROR("Try to free resource from an unknown craned {}", node_id);
-      return;
-    }
-
-    // Then acquire craned meta lock.
-    auto node_meta = craned_meta_map_[node_id];
-    if (!node_meta->alive) {
-      CRANE_DEBUG(
-          "Crane {} has already been down. Ignore FreeResourceFromNodes.",
-          node_meta->static_meta.hostname);
-      return;
-    }
-
-    node_meta->res_avail.allocatable_resource += resources.allocatable_resource;
-    node_meta->res_in_use.allocatable_resource -=
+    part_global_meta.res_avail.allocatable_resource +=
         resources.allocatable_resource;
-
+    part_global_meta.res_in_use.allocatable_resource -=
+        resources.allocatable_resource;
     if (resources.dedicated_resource.contains(node_id)) {
-      node_meta->res_avail.dedicated_resource[node_id] +=
+      part_global_meta.res_avail.dedicated_resource[node_id] +=
           resources.dedicated_resource.at(node_id);
-      node_meta->res_in_use.dedicated_resource[node_id] -=
+      part_global_meta.res_in_use.dedicated_resource[node_id] -=
           resources.dedicated_resource.at(node_id);
     }
-
-    node_meta->running_task_resource_map.erase(task_id);
   }
+
+  node_meta->running_task_resource_map.erase(resource_iter);
 }
 
 void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {

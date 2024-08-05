@@ -802,23 +802,12 @@ CraneErr TaskManager::SpawnProcessInInstance_(
             .actual_dedicated_resource()
             .each_node_gres()
             .contains(g_config.Hostname)) {
-      uint64_t cuda_count = 0;
-      for (const auto& [device_name, type_slots_map] :
-           instance->task.resources()
-               .actual_dedicated_resource()
-               .each_node_gres()
-               .at(g_config.Hostname)
-               .name_type_map()) {
-        if (device_name == "GPU" || device_name == "gpu")
-          std::ranges::for_each(type_slots_map.type_slots_map(),
-                                [&cuda_count](const auto& kv) {
-                                  cuda_count += kv.second.slots().size();
-                                });
-      }
-      if (cuda_count != 0) {
-        env_vec.emplace_back("CUDA_VISIBLE_DEVICES",
-                             util::CudaVisibleDevices(cuda_count));
-      }
+      std::vector device_envs =
+          DeviceManager::GetEnvironmentVariable(instance->task.resources()
+                                                    .actual_dedicated_resource()
+                                                    .each_node_gres()
+                                                    .at(g_config.Hostname));
+      env_vec.insert(env_vec.end(), device_envs.begin(), device_envs.end());
     }
 
     if (CheckIfInstanceTypeIsCrun_(instance) &&

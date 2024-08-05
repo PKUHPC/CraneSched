@@ -515,8 +515,9 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
 
 void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
-  g_meta_container->MallocResourceFromNodes(task->CranedIds(), task->TaskId(),
-                                            task->resources);
+  for (const CranedId& craned_id : task->CranedIds())
+    g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
+                                             task->resources);
 
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
@@ -923,8 +924,8 @@ void TaskScheduler::ScheduleThread_() {
 
         for (auto& it : failed_result_list) {
           auto& task = it.first;
-          g_meta_container->FreeResourceFromNodes(
-              task->CranedIds(), task->TaskId(), task->resources);
+          for (CranedId const& craned_id : task->CranedIds())
+            g_meta_container->FreeResourceFromNode(craned_id, task->TaskId());
         }
 
         // Construct the map for cgroups to be released of all failed tasks
@@ -1640,8 +1641,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       }
     }
 
-    g_meta_container->FreeResourceFromNodes(task->CranedIds(), task_id,
-                                            task->resources);
+    for (CranedId const& craned_id : task->CranedIds()) {
+      g_meta_container->FreeResourceFromNode(craned_id, task_id);
+    }
 
     task_raw_ptr_vec.emplace_back(task.get());
     task_ptr_vec.emplace_back(std::move(task));
@@ -2136,8 +2138,9 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
         if (task->resources.allocatable_resource <=
                 res_it->second.allocatable_resource &&
             (task->resources.dedicated_resource.empty() ||
-             task->resources.dedicated_resource.at(craned_id) <=
-                 res_it->second.dedicated_resource.at(craned_id))) {
+             (!res_it->second.dedicated_resource.empty() &&
+              task->resources.dedicated_resource.at(craned_id) <=
+                  res_it->second.dedicated_resource.at(craned_id)))) {
           trying = false;
           expected_start_time = res_it->first;
 
@@ -2458,8 +2461,9 @@ void MinLoadFirst::NodeSelect(
       // takes effect right now. Otherwise, during the scheduling for the
       // next partition, the algorithm may use the resource which is already
       // allocated.
-      g_meta_container->MallocResourceFromNodes(craned_ids, task->TaskId(),
-                                                task->resources);
+      for (CranedId const& craned_id : craned_ids)
+        g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
+                                                 task->resources);
 
       std::unique_ptr<TaskInCtld> moved_task;
 

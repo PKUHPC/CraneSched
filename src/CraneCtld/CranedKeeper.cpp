@@ -274,6 +274,9 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
         task->resources.allocatable_resource.memory_bytes);
     mutable_allocatable_resource->set_memory_sw_limit_bytes(
         task->resources.allocatable_resource.memory_sw_bytes);
+    *mutable_task->mutable_resources()->mutable_actual_dedicated_resource() =
+        static_cast<crane::grpc::DedicatedResource>(
+            task->resources.dedicated_resource);
 
     // Set type
     mutable_task->set_type(task->type);

@@ -104,13 +104,10 @@ class CranedMetaContainerInterface {
   virtual crane::grpc::ModifyCranedStateReply ChangeNodeState(
       const crane::grpc::ModifyCranedStateRequest& request) = 0;
 
-  virtual void MallocResourceFromNodes(const std::list<CranedId>& node_ids,
-                                       task_id_t task_id,
-                                       const Resources& resources) = 0;
+  virtual void MallocResourceFromNode(CranedId node_id, uint32_t task_id,
+                                      const Resources& resources) = 0;
 
-  virtual void FreeResourceFromNodes(std::list<CranedId> const& craned_ids,
-                                     uint32_t task_id,
-                                     Resources const& resources) = 0;
+  virtual void FreeResourceFromNode(CranedId node_id, uint32_t task_id) = 0;
 
   /**
    * Provide a thread-safe way to access NodeMeta.
@@ -173,13 +170,10 @@ class CranedMetaContainerSimpleImpl final
     return craned_meta_map_.Contains(hostname);
   };
 
-  void MallocResourceFromNodes(const std::list<CranedId>& node_ids,
-                               task_id_t task_id,
-                               const Resources& resources) override;
+  void MallocResourceFromNode(CranedId node_id, task_id_t task_id,
+                              const Resources& resources) override;
 
-  void FreeResourceFromNodes(std::list<CranedId> const& craned_ids,
-                             uint32_t task_id,
-                             Resources const& resources) override;
+  void FreeResourceFromNode(CranedId craned_id, uint32_t task_id) override;
 
  private:
   // In this part of code, the following lock sequence MUST be held

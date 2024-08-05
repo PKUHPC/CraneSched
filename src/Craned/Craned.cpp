@@ -76,7 +76,11 @@ void ParseConfig(int argc, char** argv) {
   }
 
   std::string config_path = parsed_args["config"].as<std::string>();
-  std::unordered_map<std::string, std::vector<Craned::Device>> each_node_device;
+  std::unordered_map<
+      std::string,
+      std::vector<std::tuple<std::string /*name*/, std::string /*type*/,
+                             std::string /*path*/>>>
+      each_node_device;
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
@@ -267,7 +271,9 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
-          std::vector<Craned::Device> devices;
+          std::vector<std::tuple<std::string /*name*/, std::string /*type*/,
+                                 std::string /*path*/>>
+              devices;
           if (node["gres"]) {
             for (auto gres_it = node["gres"].begin();
                  gres_it != node["gres"].end(); ++gres_it) {
@@ -283,14 +289,16 @@ void ParseConfig(int argc, char** argv) {
               CRANE_TRACE("gres file name list parsed: {}",
                           fmt::join(name_list, ", "));
               for (const auto& device_path : device_path_list) {
-                devices.emplace_back(device_name, device_type, device_path);
+                devices.push_back(
+                    std::make_tuple(device_name, device_type, device_path));
               }
             }
           }
 
           for (auto&& name : name_list) {
-            each_node_device[name].insert(each_node_device[name].end(),
-                                          devices.cbegin(), devices.cend());
+            for (auto& dev : devices) {
+              each_node_device[name].push_back(dev);
+            }
             if (crane::IsAValidIpv4Address(name)) {
               CRANE_INFO(
                   "Node name `{}` is a valid ipv4 address and doesn't "
@@ -421,18 +429,23 @@ void ParseConfig(int argc, char** argv) {
   {
     auto node_ptr = g_config.CranedNodes.at(g_config.Hostname);
     auto& devices = each_node_device[g_config.Hostname];
-    for (auto& dev : devices) {
-      if (!dev.Init()) {
-        CRANE_ERROR("Access Device name:{},type:{},file:{} failed.", dev.name,
-                    dev.type, dev.path);
+    for (auto& dev_arg : devices) {
+      std::string name, type, path;
+      std::tie(name, type, path) = dev_arg;
+      std::unique_ptr dev =
+          Craned::DeviceManager::ConstructDevice(name, type, path);
+      if (!dev->Init()) {
+        CRANE_ERROR("Access Device name:{},type:{},file:{} failed.", dev->name,
+                    dev->type, dev->path);
         std::exit(1);
       } else {
         node_ptr->dedicated_resource.craned_id_gres_map[g_config.Hostname]
-            .name_type_slots_map[dev.name][dev.type]
-            .emplace(dev.path);
-        Craned::g_this_node_device.emplace_back(dev);
+            .name_type_slots_map[dev->name][dev->type]
+            .emplace(dev->path);
+        Craned::g_this_node_device[dev->path] = std::move(dev);
       }
     }
+    each_node_device.clear();
   }
 
   uint32_t part_id, node_index;

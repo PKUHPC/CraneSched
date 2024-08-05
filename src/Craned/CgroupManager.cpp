@@ -22,6 +22,7 @@
 #include "CgroupManager.h"
 
 #include "CranedPublicDefs.h"
+#include "DeviceManager.h"
 #include "crane/String.h"
 
 namespace Craned {
@@ -899,24 +900,23 @@ bool Cgroup::Empty() {
     return false;
   }
 }
-bool Cgroup::SetDeviceAccess(const std::vector<bool> &devices, bool set_read,
-                             bool set_write, bool set_mknod) {
+bool Cgroup::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+                             bool set_read, bool set_write, bool set_mknod) {
   std::string op;
   if (set_read) op += "r";
   if (set_write) op += "w";
   if (set_mknod) op += "m";
   std::vector<std::string> allow_limits;
   std::vector<std::string> deny_limits;
-  for (int i = 0; i < devices.size(); ++i) {
-    const auto &this_device = Craned::g_this_node_device[i];
-    if (devices[i]) {
-      allow_limits.emplace_back(fmt::format("{} {}:{} {}", this_device.op_type,
-                                            this_device.major,
-                                            this_device.minor, op));
+  for (const auto &[_, this_device] : Craned::g_this_node_device) {
+    if (devices.contains(this_device->path)) {
+      allow_limits.emplace_back(fmt::format("{} {}:{} {}", this_device->op_type,
+                                            this_device->major,
+                                            this_device->minor, op));
     } else {
-      deny_limits.emplace_back(fmt::format("{} {}:{} {}", this_device.op_type,
-                                           this_device.major, this_device.minor,
-                                           op));
+      deny_limits.emplace_back(fmt::format("{} {}:{} {}", this_device->op_type,
+                                           this_device->major,
+                                           this_device->minor, op));
     }
   }
   return SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
@@ -955,8 +955,6 @@ bool AllocatableResourceAllocator::Allocate(
 
 bool DedicatedResourceAllocator::Allocate(
     const crane::grpc::DedicatedResource &request_resource, Cgroup *cg) {
-  std::vector<bool> devices_alloc(Craned::g_this_node_device.size(), false);
-  const auto &devices = Craned::g_this_node_device;
   std::unordered_set<std::string> all_request_slots;
   if (request_resource.each_node_gres().contains(g_config.Hostname)) {
     for (const auto &[_, type_slots_map] : request_resource.each_node_gres()
@@ -966,10 +964,7 @@ bool DedicatedResourceAllocator::Allocate(
         all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
     };
   }
-  for (int i = 0; i < devices.size(); i++) {
-    devices_alloc[i] = all_request_slots.contains(devices[i].path);
-  }
-  if (!cg->SetDeviceAccess(devices_alloc, true, true, true)) return false;
+  if (!cg->SetDeviceAccess(all_request_slots, true, true, true)) return false;
   return true;
 }
 }  // namespace Craned

@@ -29,6 +29,7 @@
 
 #include "CgroupManager.h"
 #include "CtldClient.h"
+#include "DeviceManager.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"

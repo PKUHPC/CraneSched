@@ -185,8 +185,6 @@ struct AllocatableResource {
 
   AllocatableResource& operator-=(const AllocatableResource& rhs);
 
-  AllocatableResource operator*(int rhs) const;
-
   explicit operator crane::grpc::AllocatableResource() const;
 };
 
