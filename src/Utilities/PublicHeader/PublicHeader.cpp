@@ -16,9 +16,6 @@
 
 #include "crane/PublicHeader.h"
 
-#include <sys/stat.h>
-#include <sys/sysmacros.h>
-
 #include <ranges>
 
 AllocatableResource& AllocatableResource::operator+=(

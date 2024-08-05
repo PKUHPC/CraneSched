@@ -4,6 +4,9 @@
 
 #include "DeviceManager.h"
 
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+
 namespace Craned {
 
 std::optional<std::tuple<unsigned int, unsigned int, char>>
