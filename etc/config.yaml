@@ -74,10 +74,15 @@ Nodes:
     gres:
       - name: gpu
         type: a100
-        file: /dev/nvidia[0-3]
+        DeviceFileRegex: /dev/nvidia[0-3]
+        DeviceFileList:
+          - /dev/dri/renderer[0-3]
+        EnvInjector: nvidia
+
       - name: gpu
         type: h100
         file: /dev/nvidia[4-7]
+
 # partition information list
 Partitions:
   - name: CPU

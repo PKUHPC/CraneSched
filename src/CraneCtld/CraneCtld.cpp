@@ -361,17 +361,33 @@ void ParseConfig(int argc, char** argv) {
               const auto& gres_node = gres_it->as<YAML::Node>();
               const auto& device_name = gres_node["name"].as<std::string>();
               const auto& device_type = gres_node["type"].as<std::string>();
-              std::list<std::string> device_path_list;
-              if (!util::ParseHostList(gres_node["file"].Scalar(),
-                                       &device_path_list)) {
-                CRANE_ERROR("Illegal gres file path string format.");
-                std::exit(1);
+              if (gres_node["DeviceFileRegex"]) {
+                std::list<std::string> device_path_list;
+                if (!util::ParseHostList(gres_node["DeviceFileRegex"].Scalar(),
+                                         &device_path_list)) {
+                  CRANE_ERROR(
+                      "Illegal gres {}:{} DeviceFileRegex path string format.",
+                      device_name, device_type);
+                  std::exit(1);
+                }
+                for (const auto& device_path : device_path_list) {
+                  resourceInNode.name_type_slots_map[device_name][device_type]
+                      .emplace(device_path);
+                }
               }
-              CRANE_TRACE("gres file name list parsed: {}",
-                          fmt::join(device_path_list, ", "));
-              for (const auto& device_path : device_path_list) {
+
+              if (gres_node["DeviceFileList"]) {
+                std::list<std::string> device_path_list;
+                if (!util::ParseHostList(gres_node["DeviceFileList"].Scalar(),
+                                         &device_path_list)) {
+                  CRANE_ERROR(
+                      "Illegal gres {}:{} DeviceFileList path string format.",
+                      device_name, device_type);
+                  std::exit(1);
+                }
+
                 resourceInNode.name_type_slots_map[device_name][device_type]
-                    .emplace(device_path);
+                    .emplace(device_path_list.front());
               }
             }
           }

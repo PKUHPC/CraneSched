@@ -16,7 +16,45 @@
 
 #include "DeviceManager.h"
 
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+
 namespace Craned {
+
+BasicDevice::BasicDevice(const std::string& device_name,
+                         const std::string& device_type,
+                         const std::vector<std::string>& device_path,
+                         const std::string& env_injector)
+    : name(device_name), type(device_type), env_injector(env_injector) {
+  device_metas.reserve(device_path.size());
+  for (const auto& dev_path : device_path) {
+    device_metas.emplace_back(DeviceMeta{dev_path, 0, 0, 0});
+  }
+}
+
+bool BasicDevice::Init() {
+  for (auto& device_meta : device_metas) {
+    const auto& device_major_minor_optype_option =
+        DeviceManager::GetDeviceFileMajorMinorOpType(device_meta.path);
+    if (!device_major_minor_optype_option.has_value()) return false;
+    const auto& device_major_minor_optype =
+        device_major_minor_optype_option.value();
+
+    device_meta.major = std::get<0>(device_major_minor_optype);
+    device_meta.minor = std::get<1>(device_major_minor_optype);
+    device_meta.op_type = std::get<2>(device_major_minor_optype);
+  }
+  return true;
+}
+
+BasicDevice::operator std::string() const {
+  std::vector<std::string> device_files;
+  for (const auto& device_meta : device_metas) {
+    device_files.push_back(device_meta.path);
+  }
+  return fmt::format("{}:{}:{}", name, type,
+                     util::HostNameListToStr(device_files));
+}
 
 std::optional<std::tuple<unsigned int, unsigned int, char>>
 DeviceManager::GetDeviceFileMajorMinorOpType(const std::string& path) {
@@ -37,14 +75,12 @@ DeviceManager::GetDeviceFileMajorMinorOpType(const std::string& path) {
 
 std::unique_ptr<BasicDevice> DeviceManager::ConstructDevice(
     const std::string& device_name, const std::string& device_type,
-    const std::string& device_path) {
-  if (device_path.find("nvidia") != std::string::npos) {
-    // todo: implement nvidia device
-    return std::make_unique<BasicDevice>(device_name, device_type, device_path);
-  } else {
-    return std::make_unique<BasicDevice>(device_name, device_type, device_path);
-  }
+    const std::vector<std::string>& device_path,
+    const std::string& env_injector) {
+  return std::make_unique<BasicDevice>(device_name, device_type, device_path,
+                                       env_injector);
 }
+
 std::vector<std::pair<std::string, std::string>>
 DeviceManager::GetEnvironmentVariable(
     const crane::grpc::DedicatedResourceInNode& resourceInNode) {
@@ -56,47 +92,22 @@ DeviceManager::GetEnvironmentVariable(
          device_type_slosts_map.type_slots_map())
       all_res_slots.insert(slots.slots().begin(), slots.slots().end());
   }
-  {
-    // nvidia device
-    uint32_t cuda_count = 0;
-    std::ranges::for_each(
-        all_res_slots, [&cuda_count](const std::string& device_path) {
-          cuda_count += device_path.find("nvidia") != std::string::npos;
-        });
-    std::vector<int> cuda_visible_device_vars;
-    for (int i = 0; i < cuda_count; ++i) {
-      cuda_visible_device_vars.push_back(i);
-    }
-    env.emplace_back("CUDA_VISIBLE_DEVICES",
-                     absl::StrJoin(cuda_visible_device_vars, ","));
+  uint32_t cuda_count = 0;
+  uint32_t hip_count = 0;
+  for (const auto& [_, device] : g_this_node_device) {
+    if (!all_res_slots.contains(device->device_metas.front().path)) continue;
+    if (device->env_injector == "nvidia") ++cuda_count;
+    if (device->env_injector == "hip") ++hip_count;
   }
+  // nvidia device
+  env.emplace_back("CUDA_VISIBLE_DEVICES",
+                   util::GenerateCommaSeparatedString(cuda_count));
+
+  // amd/haiguang device
+  env.emplace_back("HIP_VISIBLE_DEVICES",
+                   util::GenerateCommaSeparatedString(hip_count));
+
   return env;
-}
-
-BasicDevice::BasicDevice(const std::string& device_name,
-                         const std::string& device_type,
-                         const std::string& device_path)
-    : name(device_name), type(device_type), path(device_path) {}
-
-bool operator==(const BasicDevice& lhs, const BasicDevice& rhs) {
-  return lhs.path == rhs.path;
-}
-
-bool BasicDevice::Init() {
-  const auto& device_major_minor_optype_option =
-      DeviceManager::GetDeviceFileMajorMinorOpType(path);
-  if (!device_major_minor_optype_option.has_value()) return false;
-  const auto& device_major_minor_optype =
-      device_major_minor_optype_option.value();
-
-  this->major = std::get<0>(device_major_minor_optype);
-  this->minor = std::get<1>(device_major_minor_optype);
-  this->op_type = std::get<2>(device_major_minor_optype);
-  return true;
-}
-
-BasicDevice::operator std::string() const {
-  return fmt::format("{}:{}:{}", name, type, path);
 }
 
 }  // namespace Craned

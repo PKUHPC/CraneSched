@@ -78,4 +78,7 @@ std::string ReadableGres(
     const crane::grpc::DedicatedResource &dedicated_resource);
 std::string ReadableGres(
     const crane::grpc::DedicatedResourceInNode &dedicated_resource_in_node);
+
+std::string GenerateCommaSeparatedString(const int val);
+
 }  // namespace util

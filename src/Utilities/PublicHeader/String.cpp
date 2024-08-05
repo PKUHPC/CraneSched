@@ -310,7 +310,6 @@ bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
   }
 }
 
-
 std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
   std::string output = input;
   std::size_t leftBracketPos = 0;
@@ -430,4 +429,13 @@ std::string ReadableGres(
 
   return absl::StrJoin(node_gres_string_vector, ",");
 }
+std::string GenerateCommaSeparatedString(const int val) {
+  std::vector<int> val_vec;
+  val_vec.reserve(val);
+  for (int i = 0; i < val; ++i) {
+    val_vec.push_back(i);
+  }
+  return absl::StrJoin(val_vec, ",");
+}
+
 }  // namespace util

@@ -909,14 +909,18 @@ bool Cgroup::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   std::vector<std::string> allow_limits;
   std::vector<std::string> deny_limits;
   for (const auto &[_, this_device] : Craned::g_this_node_device) {
-    if (devices.contains(this_device->path)) {
-      allow_limits.emplace_back(fmt::format("{} {}:{} {}", this_device->op_type,
-                                            this_device->major,
-                                            this_device->minor, op));
+    if (devices.contains(this_device->device_metas.front().path)) {
+      for (const auto &dev_meta : this_device->device_metas) {
+        allow_limits.emplace_back(fmt::format("{} {}:{} {}", dev_meta.op_type,
+                                              dev_meta.major, dev_meta.minor,
+                                              op));
+      }
     } else {
-      deny_limits.emplace_back(fmt::format("{} {}:{} {}", this_device->op_type,
-                                           this_device->major,
-                                           this_device->minor, op));
+      for (const auto &dev_meta : this_device->device_metas) {
+        deny_limits.emplace_back(fmt::format("{} {}:{} {}", dev_meta.op_type,
+                                             dev_meta.major, dev_meta.minor,
+                                             op));
+      }
     }
   }
   return SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
