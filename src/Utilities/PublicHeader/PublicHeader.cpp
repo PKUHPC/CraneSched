@@ -61,7 +61,7 @@ bool operator==(const AllocatableResource& lhs,
 }
 
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs) {
-  for (const auto& [lhs_node_id, lhs_gres] : lhs.craned_id_gres_map) {
+  for (const auto& [lhs_node_id, lhs_gres] : lhs.craned_id_dres_in_node_map) {
     if (!rhs.contains(lhs_node_id) && !lhs_gres.empty()) {
       return false;
     }
@@ -92,9 +92,9 @@ bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs) {
 
 bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs) {
   std::set<CranedId> craned_ids;
-  for (const auto& [craned_id, _] : lhs.craned_id_gres_map)
+  for (const auto& [craned_id, _] : lhs.craned_id_dres_in_node_map)
     craned_ids.emplace(craned_id);
-  for (const auto& [craned_id, _] : rhs.craned_id_gres_map)
+  for (const auto& [craned_id, _] : rhs.craned_id_dres_in_node_map)
     craned_ids.emplace(craned_id);
 
   for (const auto& craned_id : craned_ids) {
@@ -273,30 +273,71 @@ bool operator==(const Resources& lhs, const Resources& rhs) {
 }
 
 DedicatedResource& DedicatedResource::operator+=(const DedicatedResource& rhs) {
-  for (const auto& [rhs_node_id, rhs_name_slots_map] : rhs.craned_id_gres_map) {
-    this->craned_id_gres_map[rhs_node_id] += rhs_name_slots_map;
+  for (const auto& [rhs_node_id, rhs_name_slots_map] :
+       rhs.craned_id_dres_in_node_map) {
+    this->craned_id_dres_in_node_map[rhs_node_id] += rhs_name_slots_map;
   }
 
   return *this;
 }
 
 DedicatedResource& DedicatedResource::operator-=(const DedicatedResource& rhs) {
-  for (const auto& [rhs_node_id, rhs_name_slots_map] : rhs.craned_id_gres_map) {
-    ABSL_ASSERT(this->craned_id_gres_map.contains(rhs_node_id));
-    this->craned_id_gres_map[rhs_node_id] -= rhs_name_slots_map;
-    if (this->craned_id_gres_map[rhs_node_id].empty())
-      this->craned_id_gres_map.erase(rhs_node_id);
+  for (auto node_it = rhs.craned_id_dres_in_node_map.cbegin();
+       node_it != rhs.craned_id_dres_in_node_map.cend(); ++node_it) {
+    // Node level
+    const auto& rhs_node_id = node_it->first;
+
+    auto lhs_node_it = this->craned_id_dres_in_node_map.find(rhs_node_id);
+    ABSL_ASSERT(lhs_node_it != this->craned_id_dres_in_node_map.end());
+
+    auto& lhs_d_res = lhs_node_it->second;
+    auto& rhs_d_res = *this;
+  }
+
+  for (const auto& [rhs_node_id, rhs_name_slots_map] :
+       rhs.craned_id_dres_in_node_map) {
+    ABSL_ASSERT(this->craned_id_dres_in_node_map.contains(rhs_node_id));
+    this->craned_id_dres_in_node_map[rhs_node_id] -= rhs_name_slots_map;
+    if (this->craned_id_dres_in_node_map[rhs_node_id].empty())
+      this->craned_id_dres_in_node_map.erase(rhs_node_id);
   }
 
   return *this;
 }
+
+DedicatedResource& DedicatedResource::AddDedicatedResourceInNode(
+    const CranedId& craned_id, const DedicatedResource& rhs) {
+  auto this_node_it = this->craned_id_dres_in_node_map.find(craned_id);
+  if (this_node_it == this->craned_id_dres_in_node_map.end()) return *this;
+
+  auto rhs_node_it = rhs.craned_id_dres_in_node_map.find(craned_id);
+  if (rhs_node_it == rhs.craned_id_dres_in_node_map.end()) return *this;
+
+  this_node_it->second += rhs_node_it->second;
+
+  return *this;
+}
+
+DedicatedResource& DedicatedResource::SubtractDedicatedResourceInNode(
+    const CranedId& craned_id, const DedicatedResource& rhs) {
+  auto this_node_it = this->craned_id_dres_in_node_map.find(craned_id);
+  if (this_node_it == this->craned_id_dres_in_node_map.end()) return *this;
+
+  auto rhs_node_it = rhs.craned_id_dres_in_node_map.find(craned_id);
+  if (rhs_node_it == rhs.craned_id_dres_in_node_map.end()) return *this;
+
+  this_node_it->second -= rhs_node_it->second;
+
+  return *this;
+}
+
 bool DedicatedResource::contains(const CranedId& craned_id) const {
-  return craned_id_gres_map.contains(craned_id);
+  return craned_id_dres_in_node_map.contains(craned_id);
 }
 
 bool DedicatedResource::empty() const {
-  if (craned_id_gres_map.empty()) return true;
-  return std::ranges::all_of(craned_id_gres_map,
+  if (craned_id_dres_in_node_map.empty()) return true;
+  return std::ranges::all_of(craned_id_dres_in_node_map,
                              [](const auto& kv) { return kv.second.empty(); });
 }
 
@@ -304,7 +345,7 @@ DedicatedResource::DedicatedResource(
     const crane::grpc::DedicatedResource& rhs) {
   for (const auto& [craned_id, gres] : rhs.each_node_gres()) {
     auto& this_craned_gres_map =
-        this->craned_id_gres_map[craned_id].name_type_slots_map;
+        this->craned_id_dres_in_node_map[craned_id].name_type_slots_map;
     for (const auto& [name, type_slots_map] : gres.name_type_map()) {
       for (const auto& [type, slots] : type_slots_map.type_slots_map())
         this_craned_gres_map[name][type].insert(slots.slots().begin(),
@@ -315,7 +356,7 @@ DedicatedResource::DedicatedResource(
 
 DedicatedResource::operator crane::grpc::DedicatedResource() const {
   crane::grpc::DedicatedResource val{};
-  for (const auto& [craned_id, gres] : craned_id_gres_map) {
+  for (const auto& [craned_id, gres] : craned_id_dres_in_node_map) {
     for (const auto& [name, type_slots_map] : gres.name_type_slots_map) {
       {
         for (const auto& [type, slots] : type_slots_map.type_slots_map) {
@@ -333,16 +374,16 @@ DedicatedResource::operator crane::grpc::DedicatedResource() const {
 
 DedicatedResourceInNode& DedicatedResource::operator[](
     const std::string& craned_id) {
-  return this->craned_id_gres_map[craned_id];
+  return this->craned_id_dres_in_node_map[craned_id];
 }
 
 const DedicatedResourceInNode& DedicatedResource::at(
     const std::string& craned_id) const {
-  return this->craned_id_gres_map.at(craned_id);
+  return this->craned_id_dres_in_node_map.at(craned_id);
 }
 
 DedicatedResourceInNode& DedicatedResource::at(const std::string& craned_id) {
-  return this->craned_id_gres_map.at(craned_id);
+  return this->craned_id_dres_in_node_map.at(craned_id);
 }
 
 bool DedicatedResourceInNode::empty() const {

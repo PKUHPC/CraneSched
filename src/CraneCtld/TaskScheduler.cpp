@@ -2504,8 +2504,8 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
       }
     }
 
-    if (!resources.dedicated_resource.craned_id_gres_map.empty()) {
-      task_res_in_node.dedicated_resource.craned_id_gres_map.clear();
+    if (!resources.dedicated_resource.craned_id_dres_in_node_map.empty()) {
+      task_res_in_node.dedicated_resource.craned_id_dres_in_node_map.clear();
       task_res_in_node.dedicated_resource[craned_id] =
           resources.dedicated_resource.at(craned_id);
     }

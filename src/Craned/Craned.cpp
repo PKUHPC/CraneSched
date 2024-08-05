@@ -439,7 +439,8 @@ void ParseConfig(int argc, char** argv) {
                     dev->type, dev->path);
         std::exit(1);
       } else {
-        node_ptr->dedicated_resource.craned_id_gres_map[g_config.Hostname]
+        node_ptr->dedicated_resource
+            .craned_id_dres_in_node_map[g_config.Hostname]
             .name_type_slots_map[dev->name][dev->type]
             .emplace(dev->path);
         Craned::g_this_node_device[dev->path] = std::move(dev);

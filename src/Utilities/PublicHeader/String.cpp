@@ -354,7 +354,7 @@ std::string ReadableGres(const DedicatedResource &dedicated_resource) {
 
   std::vector<std::string> node_gres_string_vector;
   for (const auto &[node_id, node_gres] :
-       dedicated_resource.craned_id_gres_map) {
+       dedicated_resource.craned_id_dres_in_node_map) {
     std::vector<std::string> node_gres_vec;
     for (const auto &[device_name, type_slots_map] :
          node_gres.name_type_slots_map) {

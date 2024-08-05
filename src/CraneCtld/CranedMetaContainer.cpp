@@ -89,17 +89,17 @@ void CranedMetaContainerSimpleImpl::CranedDown(const CranedId& craned_id) {
     part_global_meta.alive_craned_cnt--;
   }
 
-  node_meta->res_total.dedicated_resource.craned_id_gres_map.clear();
+  node_meta->res_total.dedicated_resource.craned_id_dres_in_node_map.clear();
 
   node_meta->res_avail.allocatable_resource +=
       node_meta->res_in_use.allocatable_resource;
 
   // clear dedicated_resources,will be set when craned up
-  node_meta->res_avail.dedicated_resource.craned_id_gres_map.clear();
+  node_meta->res_avail.dedicated_resource.craned_id_dres_in_node_map.clear();
   // Set the rse_in_use of dead craned to 0
   node_meta->res_in_use.allocatable_resource -=
       node_meta->res_in_use.allocatable_resource;
-  node_meta->res_in_use.dedicated_resource.craned_id_gres_map.clear();
+  node_meta->res_in_use.dedicated_resource.craned_id_dres_in_node_map.clear();
   node_meta->running_task_resource_map.clear();
 }
 
@@ -152,14 +152,13 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
   node_meta->running_task_resource_map.emplace(task_id, resources);
+
   node_meta->res_avail.allocatable_resource -= resources.allocatable_resource;
   node_meta->res_in_use.allocatable_resource += resources.allocatable_resource;
-  if (resources.dedicated_resource.contains(node_id)) {
-    node_meta->res_avail.dedicated_resource[node_id] -=
-        resources.dedicated_resource.at(node_id);
-    node_meta->res_in_use.dedicated_resource[node_id] +=
-        resources.dedicated_resource.at(node_id);
-  }
+  node_meta->res_avail.dedicated_resource.SubtractDedicatedResourceInNode(
+      node_id, resources.dedicated_resource);
+  node_meta->res_in_use.dedicated_resource.AddDedicatedResourceInNode(
+      node_id, resources.dedicated_resource);
 
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
@@ -169,12 +168,10 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
         resources.allocatable_resource;
     part_global_meta.res_in_use.allocatable_resource +=
         resources.allocatable_resource;
-    if (resources.dedicated_resource.contains(node_id)) {
-      part_global_meta.res_avail.dedicated_resource[node_id] -=
-          resources.dedicated_resource.at(node_id);
-      part_global_meta.res_in_use.dedicated_resource[node_id] +=
-          resources.dedicated_resource.at(node_id);
-    }
+    part_global_meta.res_avail.dedicated_resource
+        .SubtractDedicatedResourceInNode(node_id, resources.dedicated_resource);
+    part_global_meta.res_in_use.dedicated_resource.AddDedicatedResourceInNode(
+        node_id, resources.dedicated_resource);
   }
 }
 
@@ -216,12 +213,10 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId node_id,
   node_meta->res_avail.allocatable_resource += resources.allocatable_resource;
   node_meta->res_in_use.allocatable_resource -= resources.allocatable_resource;
 
-  if (resources.dedicated_resource.contains(node_id)) {
-    node_meta->res_avail.dedicated_resource[node_id] +=
-        resources.dedicated_resource.at(node_id);
-    node_meta->res_in_use.dedicated_resource[node_id] -=
-        resources.dedicated_resource.at(node_id);
-  }
+  node_meta->res_avail.dedicated_resource.AddDedicatedResourceInNode(
+      node_id, resources.dedicated_resource);
+  node_meta->res_in_use.dedicated_resource.SubtractDedicatedResourceInNode(
+      node_id, resources.dedicated_resource);
 
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
@@ -231,12 +226,10 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId node_id,
         resources.allocatable_resource;
     part_global_meta.res_in_use.allocatable_resource -=
         resources.allocatable_resource;
-    if (resources.dedicated_resource.contains(node_id)) {
-      part_global_meta.res_avail.dedicated_resource[node_id] +=
-          resources.dedicated_resource.at(node_id);
-      part_global_meta.res_in_use.dedicated_resource[node_id] -=
-          resources.dedicated_resource.at(node_id);
-    }
+    part_global_meta.res_avail.dedicated_resource.AddDedicatedResourceInNode(
+        node_id, resources.dedicated_resource);
+    part_global_meta.res_in_use.dedicated_resource
+        .SubtractDedicatedResourceInNode(node_id, resources.dedicated_resource);
   }
 
   node_meta->running_task_resource_map.erase(resource_iter);

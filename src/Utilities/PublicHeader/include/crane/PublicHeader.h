@@ -199,6 +199,7 @@ struct DedicatedResourceInNode {
       std::pair<
           uint64_t /*untyped req count*/,
           std::unordered_map<std::string /*type*/, uint64_t /*type total*/>>>;
+
   struct TypeSlotsMap {
     std::unordered_map<std::string /*type*/, std::set<SlotId> /*index*/>
         type_slots_map;
@@ -208,22 +209,30 @@ struct DedicatedResourceInNode {
     const std::set<SlotId>& at(const std::string& type) const;
   };
 
-  // config: gpu:a100 whit file /dev/nvidia[0-3]
-  // parsed: name:gpu,slot:a100,index:/dev/nvidia0,....,/dev/nvidia3
-  std::unordered_map<std::string /*name*/, TypeSlotsMap> name_type_slots_map;
-  DedicatedResourceInNode& operator+=(const DedicatedResourceInNode& rhs);
-  DedicatedResourceInNode& operator-=(const DedicatedResourceInNode& rhs);
+  // Access operators
   TypeSlotsMap& operator[](const std::string& device_name);
   TypeSlotsMap& at(const std::string& device_name);
   const TypeSlotsMap& at(const std::string& device_name) const;
+
+  // Arithmetic operators
+  DedicatedResourceInNode& operator+=(const DedicatedResourceInNode& rhs);
+  DedicatedResourceInNode& operator-=(const DedicatedResourceInNode& rhs);
+
   bool contains(const std::string& device_name) const;
+
   bool empty() const;
   bool empty(const std::string& device_name) const;
   bool empty(const std::string& device_name,
              const std::string& device_type) const;
+
   void flat_(std::set<std::string>& names, std::set<std::string>& types) const;
 
   explicit operator crane::grpc::DeviceMap() const;
+
+ public:
+  // config: gpu:a100 whit file /dev/nvidia[0-3]
+  // parsed: name:gpu,slot:a100,index:/dev/nvidia0,....,/dev/nvidia3
+  std::unordered_map<std::string /*name*/, TypeSlotsMap> name_type_slots_map;
 };
 
 bool operator<=(const DedicatedResourceInNode::Req_t& lhs,
@@ -239,16 +248,27 @@ bool operator==(const DedicatedResourceInNode& lhs,
  */
 struct DedicatedResource {
   std::unordered_map<CranedId /*craned id*/, DedicatedResourceInNode>
-      craned_id_gres_map;
+      craned_id_dres_in_node_map;
+
   DedicatedResource() = default;
   explicit DedicatedResource(const crane::grpc::DedicatedResource& rhs);
+
+  // Arithmetic operators
   DedicatedResource& operator+=(const DedicatedResource& rhs);
   DedicatedResource& operator-=(const DedicatedResource& rhs);
+  DedicatedResource& AddDedicatedResourceInNode(const CranedId& craned_id,
+                                                const DedicatedResource& rhs);
+  DedicatedResource& SubtractDedicatedResourceInNode(
+      const CranedId& craned_id, const DedicatedResource& rhs);
+
+  // Access operators
   DedicatedResourceInNode& operator[](const std::string& craned_id);
   DedicatedResourceInNode& at(const std::string& craned_id);
   const DedicatedResourceInNode& at(const std::string& craned_id) const;
+
   bool contains(const CranedId& craned_id) const;
   bool empty() const;
+
   explicit operator crane::grpc::DedicatedResource() const;
 };
 

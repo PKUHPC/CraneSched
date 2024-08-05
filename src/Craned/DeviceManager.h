@@ -13,6 +13,12 @@
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details.
  */
+
+#pragma once
+
+#include "CranedPublicDefs.h"
+// Precompiled header comes first.
+
 namespace Craned {
 
 struct BasicDevice {
