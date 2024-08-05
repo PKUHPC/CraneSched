@@ -286,6 +286,8 @@ struct TaskInCtld {
   std::unordered_map<std::string, std::string> env;
   std::string cwd;
 
+  std::string extra_attr;
+
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
  private:
@@ -488,6 +490,8 @@ struct TaskInCtld {
     qos = val.qos();
 
     get_user_env = val.get_user_env();
+
+    extra_attr = val.extra_attr();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
@@ -550,6 +554,8 @@ struct TaskInCtld {
     task_info->set_node_num(node_num);
     task_info->set_cmd_line(cmd_line);
     task_info->set_cwd(cwd);
+
+    task_info->set_extra_attr(extra_attr);
 
     task_info->set_held(held);
 
