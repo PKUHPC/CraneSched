@@ -94,13 +94,8 @@ bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs) {
   return lhs.craned_id_dres_in_node_map == rhs.craned_id_dres_in_node_map;
 }
 
-bool operator<=(
-    const std::unordered_map<
-        std::string /*name*/,
-        std::pair<uint64_t /*untyped req count*/,
-                  std::unordered_map<std::string /*type*/,
-                                     uint64_t /*type total*/>>>& lhs,
-    const DedicatedResourceInNode& rhs) {
+bool operator<=(const DedicatedResourceInNode::Req_t& lhs,
+                const DedicatedResourceInNode& rhs) {
   for (const auto& [lhs_name, lhs_name_type_spec] : lhs) {
     const auto& [untyped_req_count, req_type_count_map] = lhs_name_type_spec;
     if (rhs.contains(lhs_name)) {
@@ -249,13 +244,10 @@ DedicatedResource& DedicatedResource::operator-=(const DedicatedResource& rhs) {
 
 DedicatedResource& DedicatedResource::AddDedicatedResourceInNode(
     const CranedId& craned_id, const DedicatedResource& rhs) {
-  auto this_node_it = this->craned_id_dres_in_node_map.find(craned_id);
-  if (this_node_it == this->craned_id_dres_in_node_map.end()) return *this;
-
   auto rhs_node_it = rhs.craned_id_dres_in_node_map.find(craned_id);
   if (rhs_node_it == rhs.craned_id_dres_in_node_map.end()) return *this;
 
-  this_node_it->second += rhs_node_it->second;
+  this->craned_id_dres_in_node_map[craned_id] += rhs_node_it->second;
 
   return *this;
 }

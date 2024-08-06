@@ -99,7 +99,8 @@ DeviceManager::GetEnvironmentVariable(
   for (const auto& [_, device] : g_this_node_device) {
     if (!all_res_slots.contains(device->device_metas.front().path)) continue;
     if (device->env_injector == "nvidia") ++cuda_count;
-    if (device->env_injector == "hip") ++hip_count;
+    else if (device->env_injector == "hip")
+      ++hip_count;
   }
   // nvidia device
   env.emplace_back("CUDA_VISIBLE_DEVICES",
