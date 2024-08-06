@@ -190,6 +190,15 @@ message QueryPartitionInfoReply {
   repeated PartitionInfo partition_info = 1;
 }
 
+message QueryLicensesInfoRequest {
+  string license_name = 1;
+}
+
+message QueryLicensesInfoReply {
+  bool ok = 1;
+  repeated LicenseInfo license_info_list = 2;
+}
+
 message ModifyTaskRequest {
   enum TargetAttributes {
     TimeLimit = 0;
@@ -677,6 +686,7 @@ service CraneCtld {
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+  rpc QueryLicensesInfo(QueryLicensesInfoRequest) returns (QueryLicensesInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
 

@@ -2316,7 +2316,7 @@ void MinLoadFirst::NodeSelect(
   for (task_id_t task_id : task_id_vec) {
     auto pending_task_it = pending_task_map->find(task_id);
     auto& task = pending_task_it->second;
-
+    // todo
     PartitionId part_id = task->partition_id;
 
     NodeSelectionInfo& node_info = part_id_node_info_map[part_id];

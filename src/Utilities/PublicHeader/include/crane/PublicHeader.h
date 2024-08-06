@@ -160,6 +160,7 @@ inline std::string_view CraneErrStr(CraneErr err) {
 using PartitionId = std::string;
 using CranedId = std::string;
 using cpu_t = fpm::fixed_24_8;
+using LicenseId = std::string; 
 
 // Model the allocatable resources on a craned node.
 // It contains CPU and memory by now.

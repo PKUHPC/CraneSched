@@ -338,3 +338,11 @@ message TimeInterval {
   google.protobuf.Timestamp lower_bound = 1;
   google.protobuf.Timestamp upper_bound = 2;
 }
+
+message LicenseInfo {
+  string name = 1;
+  uint32 total = 2;
+  uint32 used = 3;
+  uint32 reserved = 4;
+  uint32 free = 5;
+}

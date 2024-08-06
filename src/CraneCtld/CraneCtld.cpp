@@ -25,6 +25,7 @@
 #include <cxxopts.hpp>
 
 #include "AccountManager.h"
+#include "LicensesManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
@@ -304,7 +305,7 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["Licenses"]) {
         std::string licenses_str = config["Licenses"].as<std::string>();
-        if (!util::ParseLicensesList(licenses_str, &g_config.Licenses)) {
+        if (!util::ParseLicensesList(licenses_str, &g_config.lic_id_to_count_map)) {
           CRANE_ERROR("Illegal licenses string format.");
           std::exit(1);
         }
@@ -611,6 +612,11 @@ void InitializeCtldGlobalVariables() {
   // since the recovery stage of the task scheduler will acquire
   // information from account manager.
   g_account_manager = std::make_unique<AccountManager>();
+
+  g_licenses_manager = std::make_unique<LicensesManager>();
+  g_licenses_manager->Init(g_config.lic_id_to_count_map);
+
+  
 
   g_meta_container = std::make_unique<CranedMetaContainerSimpleImpl>();
   g_meta_container->InitFromConfig(g_config);
