@@ -262,8 +262,8 @@ DedicatedResource& DedicatedResource::SubtractDedicatedResourceInNode(
 
   this_node_it->second -= rhs_node_it->second;
 
-  if (rhs_node_it->second.IsZero())
-    this->craned_id_dres_in_node_map.erase(rhs_node_it);
+  if (this_node_it->second.IsZero())
+    this->craned_id_dres_in_node_map.erase(this_node_it);
 
   return *this;
 }
