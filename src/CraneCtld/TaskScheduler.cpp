@@ -25,7 +25,6 @@
 #include "CranedMetaContainer.h"
 #include "DependencyManager.h"
 #include "EmbeddedDbClient.h"
-#include "crane/PublicHeader.h"
 
 namespace Ctld {
 
