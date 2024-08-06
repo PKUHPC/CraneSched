@@ -184,12 +184,17 @@ void DependencyManager::RecoverFromSnapshot(
   for (const auto& [task_db_id, task] : pending_queue) {
     const auto& runtime_attr = task.runtime_attr();
     const auto& task_to_ctld = task.task_to_ctld();
-    if (task_to_ctld.dependencies().dependencies_size() == 0 ||
-        runtime_attr.dependency_ok())
-      continue;
     task_id_t task_id = runtime_attr.task_id();
     const auto& submitted_dependencies = task_to_ctld.dependencies();
     const auto& updated_dependencies = runtime_attr.dependency_ids();
+    if (g_all_task_info.find(task_id) == g_all_task_info.end()) {
+      g_all_task_info[task_id] = std::make_shared<Info>();
+      g_all_task_info[task_id]->task_id = task_id;
+    }
+    g_all_task_info[task_id]->depend_all = submitted_dependencies.depend_all();
+    if (submitted_dependencies.dependencies_size() == 0 ||
+        runtime_attr.dependency_ok())
+      continue;
     std::unordered_map<task_id_t, crane::grpc::DependencyType>
         rest_dependencies;
     for (auto dep_info : submitted_dependencies.dependencies()) {
@@ -206,11 +211,6 @@ void DependencyManager::RecoverFromSnapshot(
                   task_id);
       continue;
     }
-    if (g_all_task_info.find(task_id) == g_all_task_info.end()) {
-      g_all_task_info[task_id] = std::make_shared<Info>();
-      g_all_task_info[task_id]->task_id = task_id;
-    }
-    g_all_task_info[task_id]->depend_all = submitted_dependencies.depend_all();
     for (const auto& [dep_id, dep_type] : rest_dependencies) {
       if (g_all_task_info.find(dep_id) == g_all_task_info.end()) {
         g_all_task_info[dep_id] = std::make_shared<Info>();
