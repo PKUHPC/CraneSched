@@ -62,14 +62,14 @@ bool operator==(const AllocatableResource& lhs,
 
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs) {
   for (const auto& [lhs_node_id, lhs_gres] : lhs.craned_id_dres_in_node_map) {
-    if (!rhs.contains(lhs_node_id) && !lhs_gres.empty()) {
+    if (!rhs.contains(lhs_node_id) && !lhs_gres.IsZero()) {
       return false;
     }
 
     for (const auto& [lhs_name, lhs_type_slots_map] :
          lhs_gres.name_type_slots_map) {
       if (!rhs.at(lhs_node_id).contains(lhs_name) &&
-          !lhs_type_slots_map.empty()) {
+          !lhs_type_slots_map.IsZero()) {
         return false;
       }
 
@@ -150,7 +150,7 @@ bool operator<=(const DedicatedResourceInNode& lhs,
                 const DedicatedResourceInNode& rhs) {
   for (const auto& [lhs_name, lhs_type_slots_map] : lhs.name_type_slots_map) {
     // type_slots_map always not empty
-    if (!rhs.contains(lhs_name) && !lhs_type_slots_map.empty()) {
+    if (!rhs.contains(lhs_name) && !lhs_type_slots_map.IsZero()) {
       return false;
     }
 
@@ -273,33 +273,20 @@ bool operator==(const Resources& lhs, const Resources& rhs) {
 }
 
 DedicatedResource& DedicatedResource::operator+=(const DedicatedResource& rhs) {
-  for (const auto& [rhs_node_id, rhs_name_slots_map] :
-       rhs.craned_id_dres_in_node_map) {
-    this->craned_id_dres_in_node_map[rhs_node_id] += rhs_name_slots_map;
+  for (auto it = rhs.craned_id_dres_in_node_map.cbegin();
+       it != rhs.craned_id_dres_in_node_map.cend(); ++it) {
+    const std::string& rhs_node_id = it->first;
+    AddDedicatedResourceInNode(rhs_node_id, rhs);
   }
 
   return *this;
 }
 
 DedicatedResource& DedicatedResource::operator-=(const DedicatedResource& rhs) {
-  for (auto node_it = rhs.craned_id_dres_in_node_map.cbegin();
-       node_it != rhs.craned_id_dres_in_node_map.cend(); ++node_it) {
-    // Node level
-    const auto& rhs_node_id = node_it->first;
-
-    auto lhs_node_it = this->craned_id_dres_in_node_map.find(rhs_node_id);
-    ABSL_ASSERT(lhs_node_it != this->craned_id_dres_in_node_map.end());
-
-    auto& lhs_d_res = lhs_node_it->second;
-    auto& rhs_d_res = *this;
-  }
-
-  for (const auto& [rhs_node_id, rhs_name_slots_map] :
-       rhs.craned_id_dres_in_node_map) {
-    ABSL_ASSERT(this->craned_id_dres_in_node_map.contains(rhs_node_id));
-    this->craned_id_dres_in_node_map[rhs_node_id] -= rhs_name_slots_map;
-    if (this->craned_id_dres_in_node_map[rhs_node_id].empty())
-      this->craned_id_dres_in_node_map.erase(rhs_node_id);
+  for (auto it = rhs.craned_id_dres_in_node_map.cbegin();
+       it != rhs.craned_id_dres_in_node_map.cend(); ++it) {
+    const std::string& rhs_node_id = it->first;
+    SubtractDedicatedResourceInNode(rhs_node_id, rhs);
   }
 
   return *this;
@@ -328,6 +315,9 @@ DedicatedResource& DedicatedResource::SubtractDedicatedResourceInNode(
 
   this_node_it->second -= rhs_node_it->second;
 
+  if (rhs_node_it->second.IsZero())
+    this->craned_id_dres_in_node_map.erase(rhs_node_it);
+
   return *this;
 }
 
@@ -335,10 +325,8 @@ bool DedicatedResource::contains(const CranedId& craned_id) const {
   return craned_id_dres_in_node_map.contains(craned_id);
 }
 
-bool DedicatedResource::empty() const {
-  if (craned_id_dres_in_node_map.empty()) return true;
-  return std::ranges::all_of(craned_id_dres_in_node_map,
-                             [](const auto& kv) { return kv.second.empty(); });
+bool DedicatedResource::IsZero() const {
+  return craned_id_dres_in_node_map.empty();
 }
 
 DedicatedResource::DedicatedResource(
@@ -386,15 +374,17 @@ DedicatedResourceInNode& DedicatedResource::at(const std::string& craned_id) {
   return this->craned_id_dres_in_node_map.at(craned_id);
 }
 
-bool DedicatedResourceInNode::empty() const {
+bool DedicatedResourceInNode::IsZero() const {
   return name_type_slots_map.empty();
 }
 
 bool DedicatedResourceInNode::empty(const std::string& device_name) const {
+  // TODO: trim
   if (name_type_slots_map.empty() || !name_type_slots_map.contains(device_name))
     return true;
-  return name_type_slots_map.at(device_name).empty();
+  return name_type_slots_map.at(device_name).IsZero();
 }
+
 bool DedicatedResourceInNode::empty(const std::string& device_name,
                                     const std::string& device_type) const {
   if (name_type_slots_map.empty() ||
@@ -406,52 +396,37 @@ bool DedicatedResourceInNode::empty(const std::string& device_name,
 
 DedicatedResourceInNode& DedicatedResourceInNode::operator+=(
     const DedicatedResourceInNode& rhs) {
-  for (const auto& [rhs_name, rhs_type_slots_map] : rhs.name_type_slots_map) {
-    for (const auto& [rhs_type, rhs_slots] : rhs_type_slots_map.type_slots_map)
-      this->name_type_slots_map[rhs_name][rhs_type].insert(rhs_slots.begin(),
-                                                           rhs_slots.end());
-  }
+  for (const auto& [rhs_name, rhs_type_slots_map] : rhs.name_type_slots_map)
+    this->name_type_slots_map[rhs_name] += rhs_type_slots_map;
+
   return *this;
 }
 
 DedicatedResourceInNode& DedicatedResourceInNode::operator-=(
     const DedicatedResourceInNode& rhs) {
   for (const auto& [rhs_name, rhs_type_slots_map] : rhs.name_type_slots_map) {
-    ABSL_ASSERT(this->contains(rhs_name));
+    auto lhs_type_slots_map_it = this->name_type_slots_map.find(rhs_name);
+    ABSL_ASSERT(lhs_type_slots_map_it != this->name_type_slots_map.end());
 
-    for (const auto& [rhs_type, rhs_slots] :
-         rhs_type_slots_map.type_slots_map) {
-      ABSL_ASSERT(this->at(rhs_name).contains(rhs_type));
-      auto& this_type_slots_map = this->name_type_slots_map.at(rhs_name);
-      std::set<SlotId> temp;
-      std::ranges::set_difference(this_type_slots_map.at(rhs_type), rhs_slots,
-                                  std::inserter(temp, temp.begin()));
-      if (temp.empty()) {
-        this_type_slots_map.type_slots_map.erase(rhs_type);
-      } else {
-        this_type_slots_map[rhs_type] = std::move(temp);
-      }
-    }
+    lhs_type_slots_map_it->second -= rhs_type_slots_map;
 
-    if (this->name_type_slots_map.at(rhs_name).empty()) {
-      this->name_type_slots_map.erase(rhs_name);
-    }
+    if (lhs_type_slots_map_it->second.IsZero())
+      this->name_type_slots_map.erase(lhs_type_slots_map_it);
   }
 
   return *this;
 }
 
-DedicatedResourceInNode::TypeSlotsMap& DedicatedResourceInNode::operator[](
+TypeSlotsMap& DedicatedResourceInNode::operator[](
     const std::string& device_name) {
   return this->name_type_slots_map[device_name];
 }
 
-DedicatedResourceInNode::TypeSlotsMap& DedicatedResourceInNode::at(
-    const std::string& device_name) {
+TypeSlotsMap& DedicatedResourceInNode::at(const std::string& device_name) {
   return this->name_type_slots_map.at(device_name);
 }
 
-const DedicatedResourceInNode::TypeSlotsMap& DedicatedResourceInNode::at(
+const TypeSlotsMap& DedicatedResourceInNode::at(
     const std::string& device_name) const {
   return this->name_type_slots_map.at(device_name);
 }
@@ -490,18 +465,37 @@ DedicatedResourceInNode::operator crane::grpc::DeviceMap() const {
   return dv_map;
 }
 
-bool DedicatedResourceInNode::TypeSlotsMap::empty() const {
-  return type_slots_map.empty();
-}
-std::set<SlotId>& DedicatedResourceInNode::TypeSlotsMap::operator[](
-    const std::string& type) {
+bool TypeSlotsMap::IsZero() const { return type_slots_map.empty(); }
+
+std::set<SlotId>& TypeSlotsMap::operator[](const std::string& type) {
   return type_slots_map[type];
 }
-const std::set<SlotId>& DedicatedResourceInNode::TypeSlotsMap::at(
-    const std::string& type) const {
+
+const std::set<SlotId>& TypeSlotsMap::at(const std::string& type) const {
   return type_slots_map.at(type);
 }
-bool DedicatedResourceInNode::TypeSlotsMap::contains(
-    const std::string& type) const {
+
+bool TypeSlotsMap::contains(const std::string& type) const {
   return type_slots_map.contains(type);
+}
+
+TypeSlotsMap& TypeSlotsMap::operator+=(const TypeSlotsMap& rhs) {
+  for (const auto& [rhs_type, rhs_slots] : rhs.type_slots_map)
+    this->type_slots_map[rhs_type].insert(rhs_slots.begin(), rhs_slots.end());
+
+  return *this;
+}
+
+TypeSlotsMap& TypeSlotsMap::operator-=(const TypeSlotsMap& rhs) {
+  for (const auto& [rhs_type, rhs_slots] : rhs.type_slots_map) {
+    std::set<SlotId> temp;
+    std::ranges::set_difference(this->type_slots_map.at(rhs_type), rhs_slots,
+                                std::inserter(temp, temp.begin()));
+    if (temp.empty())
+      this->type_slots_map.erase(rhs_type);
+    else
+      this->type_slots_map[rhs_type] = std::move(temp);
+  }
+
+  return *this;
 }

@@ -515,13 +515,12 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
       crane::grpc::CranedResourceState resource_state;
       if (craned_meta->alive) {
         if (res_in_use.cpu_count == cpu_t(0) && res_in_use.memory_bytes == 0 &&
-            craned_meta->res_in_use.dedicated_resource.empty()) {
+            craned_meta->res_in_use.dedicated_resource.IsZero()) {
           resource_state = crane::grpc::CranedResourceState::CRANE_IDLE;
         } else if (res_avail.cpu_count == cpu_t(0) ||
                    res_avail.memory_bytes == 0 ||
-                   (!craned_meta->res_total.dedicated_resource.empty() &&
-                    craned_meta->res_in_use.dedicated_resource ==
-                        craned_meta->res_total.dedicated_resource)) {
+                   (!craned_meta->res_total.dedicated_resource.IsZero() &&
+                    craned_meta->res_avail.dedicated_resource.IsZero())) {
           resource_state = crane::grpc::CranedResourceState::CRANE_ALLOC;
         } else {
           resource_state = crane::grpc::CranedResourceState::CRANE_MIX;
@@ -686,14 +685,13 @@ void CranedMetaContainerSimpleImpl::SetGrpcCranedInfoByCranedMeta_(
   if (craned_meta.alive) {
     if (craned_meta.res_in_use.allocatable_resource.cpu_count == cpu_t(0) &&
         craned_meta.res_in_use.allocatable_resource.memory_bytes == 0 &&
-        craned_meta.res_in_use.dedicated_resource.empty())
+        craned_meta.res_in_use.dedicated_resource.IsZero())
       craned_info->set_resource_state(
           crane::grpc::CranedResourceState::CRANE_IDLE);
     else if (craned_meta.res_avail.allocatable_resource.cpu_count == cpu_t(0) ||
              craned_meta.res_avail.allocatable_resource.memory_bytes == 0 ||
-             (!craned_meta.res_total.dedicated_resource.empty() &&
-              craned_meta.res_in_use.dedicated_resource ==
-                  craned_meta.res_total.dedicated_resource))
+             (!craned_meta.res_total.dedicated_resource.IsZero() &&
+              craned_meta.res_avail.dedicated_resource.IsZero()))
       craned_info->set_resource_state(
           crane::grpc::CranedResourceState::CRANE_ALLOC);
     else

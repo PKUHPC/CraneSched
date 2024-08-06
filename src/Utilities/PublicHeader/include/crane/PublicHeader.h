@@ -192,6 +192,20 @@ bool operator<=(const AllocatableResource& lhs, const AllocatableResource& rhs);
 bool operator<(const AllocatableResource& lhs, const AllocatableResource& rhs);
 bool operator==(const AllocatableResource& lhs, const AllocatableResource& rhs);
 
+struct TypeSlotsMap {
+  std::unordered_map<std::string /*type*/, std::set<SlotId> /*index*/>
+      type_slots_map;
+
+  bool IsZero() const;
+  bool contains(const std::string& type) const;
+
+  std::set<SlotId>& operator[](const std::string& type);
+  const std::set<SlotId>& at(const std::string& type) const;
+
+  TypeSlotsMap& operator+=(const TypeSlotsMap& rhs);
+  TypeSlotsMap& operator-=(const TypeSlotsMap& rhs);
+};
+
 struct DedicatedResourceInNode {
   // user req type
   using Req_t = std::unordered_map<
@@ -199,15 +213,6 @@ struct DedicatedResourceInNode {
       std::pair<
           uint64_t /*untyped req count*/,
           std::unordered_map<std::string /*type*/, uint64_t /*type total*/>>>;
-
-  struct TypeSlotsMap {
-    std::unordered_map<std::string /*type*/, std::set<SlotId> /*index*/>
-        type_slots_map;
-    bool empty() const;
-    bool contains(const std::string& type) const;
-    std::set<SlotId>& operator[](const std::string& type);
-    const std::set<SlotId>& at(const std::string& type) const;
-  };
 
   // Access operators
   TypeSlotsMap& operator[](const std::string& device_name);
@@ -220,7 +225,7 @@ struct DedicatedResourceInNode {
 
   bool contains(const std::string& device_name) const;
 
-  bool empty() const;
+  bool IsZero() const;
   bool empty(const std::string& device_name) const;
   bool empty(const std::string& device_name,
              const std::string& device_type) const;
@@ -267,7 +272,7 @@ struct DedicatedResource {
   const DedicatedResourceInNode& at(const std::string& craned_id) const;
 
   bool contains(const CranedId& craned_id) const;
-  bool empty() const;
+  bool IsZero() const;
 
   explicit operator crane::grpc::DedicatedResource() const;
 };

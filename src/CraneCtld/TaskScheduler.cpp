@@ -2137,8 +2137,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       if (trying) {
         if (task->resources.allocatable_resource <=
                 res_it->second.allocatable_resource &&
-            (task->resources.dedicated_resource.empty() ||
-             (!res_it->second.dedicated_resource.empty() &&
+            (task->resources.dedicated_resource.IsZero() ||
+             (!res_it->second.dedicated_resource.IsZero() &&
               task->resources.dedicated_resource.at(craned_id) <=
                   res_it->second.dedicated_resource.at(craned_id)))) {
           trying = false;
@@ -2160,7 +2160,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       } else {
         if (task->resources.allocatable_resource <=
                 res_it->second.allocatable_resource &&
-            (task->resources.dedicated_resource.empty() ||
+            (task->resources.dedicated_resource.IsZero() ||
              task->resources.dedicated_resource.at(craned_id) <=
                  res_it->second.dedicated_resource.at(craned_id))) {
           if (std::next(res_it) == time_avail_res_map.end()) {
