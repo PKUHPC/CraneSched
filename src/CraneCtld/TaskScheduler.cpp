@@ -926,6 +926,7 @@ void TaskScheduler::ScheduleThread_() {
           auto& task = it.first;
           for (CranedId const& craned_id : task->CranedIds())
             g_meta_container->FreeResourceFromNode(craned_id, task->TaskId());
+          g_licenses_manager->FreeLicenseResource(task->licenses_count);
         }
 
         // Construct the map for cgroups to be released of all failed tasks
@@ -1644,6 +1645,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     for (CranedId const& craned_id : task->CranedIds()) {
       g_meta_container->FreeResourceFromNode(craned_id, task_id);
     }
+    g_licenses_manager->FreeLicenseResource(task->licenses_count);
 
     task_raw_ptr_vec.emplace_back(task.get());
     task_ptr_vec.emplace_back(std::move(task));
@@ -2316,7 +2318,11 @@ void MinLoadFirst::NodeSelect(
   for (task_id_t task_id : task_id_vec) {
     auto pending_task_it = pending_task_map->find(task_id);
     auto& task = pending_task_it->second;
-    // todo
+    
+    bool issuff = g_licenses_manager->CheckLicenseCountSufficient(task->licenses_count);
+    if (!issuff) {
+      continue;
+    }
     PartitionId part_id = task->partition_id;
 
     NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
@@ -2378,10 +2384,11 @@ void MinLoadFirst::NodeSelect(
       // takes effect right now. Otherwise, during the scheduling for the
       // next partition, the algorithm may use the resource which is already
       // allocated.
+      // todo:
       for (CranedId const& craned_id : craned_ids)
         g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                                  task->resources);
-
+      g_licenses_manager->MallocLicenseResource(task->licenses_count);
       std::unique_ptr<TaskInCtld> moved_task;
 
       // Move task out of pending_task_map and insert it to the

@@ -281,6 +281,8 @@ struct TaskInCtld {
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
+  std::unordered_map<std::string, uint32_t> licenses_count;
+
  private:
   /* ------------- [2] -------------
    * Fields that won't change after this task is accepted.
@@ -442,6 +444,8 @@ struct TaskInCtld {
     partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                   : val.partition_name();
     resources.allocatable_resource = val.resources().allocatable_resource();
+    
+    for(auto& [k, v] : val.licenses_count()) { licenses_count[k] = v; }
 
     time_limit = absl::Seconds(val.time_limit().seconds());
 
@@ -604,6 +608,14 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
+};
+
+struct License {
+  LicenseId license_id; /* license name */
+  uint32_t total;  /* The total number of configured license */
+  uint32_t used;  /* Number of license in use */
+  uint32_t free;  /* Number of license in free */
+  uint32_t reserved;  /* Number of license reserved for users */
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {

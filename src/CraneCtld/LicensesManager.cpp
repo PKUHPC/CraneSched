@@ -22,35 +22,9 @@ namespace Ctld {
 int LicensesManager::Init(const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map) {
     util::read_lock_guard readLock(rw_mutex_);
     for (auto& [lic_id, count] : lic_id_to_count_map) {
-        lic_id_to_lic_map_.insert({lic_id, std::make_unique<License>(License(lic_id, count))});
+        lic_id_to_lic_map_.insert({lic_id, std::make_unique<License>(License(lic_id, count, 0, count, 0))});
     }
     return 0;
-}
-
-bool LicensesManager::AllocateLicensesToTask(std::vector<std::pair<LicenseId, uint32_t>> &request_lic_vec) {
-    
-    {
-        util::read_lock_guard readLock(rw_mutex_);
-        for (auto& [lic_id, count] : request_lic_vec) {
-            if (!CheckLicensesCountSufficient_(lic_id, count)) {
-                return false;
-            }
-        }
-    }
-
-    {
-        util::write_lock_guard writeLock(rw_mutex_);
-        for (auto& [lic_id, count] : request_lic_vec) {
-            if (!CheckLicensesCountSufficient_(lic_id, count)) {
-                return false;
-            }
-        }
-        for (auto& [lic_id, count] : request_lic_vec) {
-            DoAllocate_(lic_id, count);
-        }
-    }
-    
-    return true;
 }
 
 void LicensesManager::GetLicensesInfo(const crane::grpc::QueryLicensesInfoRequest* request, crane::grpc::QueryLicensesInfoReply* response) {
@@ -60,39 +34,61 @@ void LicensesManager::GetLicensesInfo(const crane::grpc::QueryLicensesInfoReques
         util::read_lock_guard readLock(rw_mutex_);
         for(auto& [lic_index, lic_ptr] : lic_id_to_lic_map_) {
             auto *lic_info = list->Add();
-            lic_info->set_name(lic_ptr->GetLicenseId());
-            lic_info->set_total(lic_ptr->GetTotal());
-            lic_info->set_used(lic_ptr->GetUsed());
-            lic_info->set_free(lic_ptr->GetFree());
-            lic_info->set_reserved(lic_ptr->GetReserved());
+            lic_info->set_name(lic_ptr->license_id);
+            lic_info->set_total(lic_ptr->total);
+            lic_info->set_used(lic_ptr->used);
+            lic_info->set_free(lic_ptr->free);
+            lic_info->set_reserved(lic_ptr->reserved);
         }
     } else {
         util::read_lock_guard readLock(rw_mutex_);
         auto it = lic_id_to_lic_map_.find(request->license_name());
         if (it != lic_id_to_lic_map_.end()) {
             auto *lic_info = list->Add();
-            lic_info->set_name(it->second->GetLicenseId());
-            lic_info->set_total(it->second->GetTotal());
-            lic_info->set_used(it->second->GetUsed());
-            lic_info->set_free(it->second->GetFree());
-            lic_info->set_reserved(it->second->GetReserved());
+            lic_info->set_name(it->second->license_id);
+            lic_info->set_total(it->second->total);
+            lic_info->set_used(it->second->used);
+            lic_info->set_free(it->second->free);
+            lic_info->set_reserved(it->second->reserved);
         }
     }
 }
 
-bool LicensesManager::CheckLicensesCountSufficient_(const LicenseId &license_id, uint32_t count) {
-    auto it = lic_id_to_lic_map_.find(license_id);
-    if (it == lic_id_to_lic_map_.end()) {
-        return false;
+bool LicensesManager::CheckLicenseCountSufficient(std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map) {
+
+    {
+        util::read_lock_guard readLock(rw_mutex_);
+        for(auto& [lic_id, count] : lic_id_to_count_map) {
+            auto it = lic_id_to_lic_map_.find(lic_id);
+            if (it == lic_id_to_lic_map_.end() || it->second->free < count) {
+                return false;
+            }
+        }
     }
 
-    return it->second->GetFree() >= count;
+    return true;
 }
 
-void LicensesManager::DoAllocate_(const LicenseId &license_id, uint32_t count) {
-    auto it = lic_id_to_lic_map_.find(license_id);
-    uint32_t used_count = it->second->GetUsed();
-    it->second->SetUsed(used_count - count);
+void LicensesManager::MallocLicenseResource(std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map) {
+    {
+        util::write_lock_guard writeLock(rw_mutex_);
+        for(auto& [lic_id, count] : lic_id_to_count_map) {
+            auto it = lic_id_to_lic_map_.find(lic_id);
+            it->second->used += count;
+            it->second->free -= count;
+        }
+    }
 }
+
+void LicensesManager::FreeLicenseResource(std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map) {
+    {
+        util::write_lock_guard writeLock(rw_mutex_);
+        for(auto& [lic_id, count] : lic_id_to_count_map) {
+            auto it = lic_id_to_lic_map_.find(lic_id);
+            it->second->used -= count;
+            it->second->free += count;
+        }
+    }
+}   
 
 } // namespace Craned
