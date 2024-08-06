@@ -901,7 +901,7 @@ void TaskScheduler::ScheduleThread_() {
           updated_task_raw_ptrs.emplace_back(task.get());
         }
 
-        {
+        if (!(dependencies.empty() && dep_succ_task_vec.empty())) {
           LockGuard pending_guard(&m_pending_task_map_mtx_);
           for (auto& task_id : dep_succ_task_vec) {
             auto it = m_pending_task_map_.find(task_id);
@@ -1078,7 +1078,8 @@ void TaskScheduler::ScheduleThread_() {
           }
         }
 
-        {
+        if (!(dependencies.empty() && dep_succ_task_vec.empty() &&
+              dep_fail_task_vec.empty())) {
           LockGuard pending_guard(&m_pending_task_map_mtx_);
           for (auto& task_id : dep_fail_task_vec) {
             auto it = m_pending_task_map_.find(task_id);
@@ -1604,7 +1605,9 @@ void TaskScheduler::CleanCancelQueueCb_() {
     }
   }
   std::vector<TaskInCtld*> updated_raw_ptr_vec;
-  {
+
+  if (!(dependencies.empty() && dep_succ_task_vec.empty() &&
+        dep_fail_task_vec.empty())) {
     LockGuard pending_guard(&m_pending_task_map_mtx_);
     for (auto& task_id : dep_fail_task_vec) {
       auto it = m_pending_task_map_.find(task_id);
@@ -1905,42 +1908,45 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   }
 
   std::vector<TaskInCtld*> updated_raw_ptr_vec;
-  m_pending_task_map_mtx_.Lock();
-  for (auto& task_id : dep_fail_task_vec) {
-    auto it = m_pending_task_map_.find(task_id);
-    if (it != m_pending_task_map_.end()) {
-      it->second->SetStatus(crane::grpc::Failed);
-      task_raw_ptr_vec.emplace_back(it->second.get());
-      task_ptr_vec.emplace_back(std::move(it->second));
-      m_pending_task_map_.erase(it);
-    }
-  }
-  for (auto& task_id : dep_succ_task_vec) {
-    auto it = m_pending_task_map_.find(task_id);
-    if (it != m_pending_task_map_.end()) {
-      it->second->SetDependencyOK();
-      updated_raw_ptr_vec.emplace_back(it->second.get());
-    }
-  }
-  for (auto& [task_id, dep_ids] : dependencies) {
-    auto it = m_pending_task_map_.find(task_id);
-    if (it != m_pending_task_map_.end() && it->second->HasDependency()) {
-      it->second->DependencyAdd(dep_ids);
-      if (it->second->NoWaitingDependency()) {
-        if (it->second->dependencies.depend_all()) {
-          it->second->SetDependencyOK();
-        } else {
-          it->second->SetStatus(crane::grpc::Failed);
-          task_raw_ptr_vec.emplace_back(it->second.get());
-          task_ptr_vec.emplace_back(std::move(it->second));
-          m_pending_task_map_.erase(it);
-          continue;
-        }
+
+  if (!(dependencies.empty() && dep_succ_task_vec.empty() &&
+        dep_fail_task_vec.empty())) {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    for (auto& task_id : dep_fail_task_vec) {
+      auto it = m_pending_task_map_.find(task_id);
+      if (it != m_pending_task_map_.end()) {
+        it->second->SetStatus(crane::grpc::Failed);
+        task_raw_ptr_vec.emplace_back(it->second.get());
+        task_ptr_vec.emplace_back(std::move(it->second));
+        m_pending_task_map_.erase(it);
       }
-      updated_raw_ptr_vec.emplace_back(it->second.get());
+    }
+    for (auto& task_id : dep_succ_task_vec) {
+      auto it = m_pending_task_map_.find(task_id);
+      if (it != m_pending_task_map_.end()) {
+        it->second->SetDependencyOK();
+        updated_raw_ptr_vec.emplace_back(it->second.get());
+      }
+    }
+    for (auto& [task_id, dep_ids] : dependencies) {
+      auto it = m_pending_task_map_.find(task_id);
+      if (it != m_pending_task_map_.end() && it->second->HasDependency()) {
+        it->second->DependencyAdd(dep_ids);
+        if (it->second->NoWaitingDependency()) {
+          if (it->second->dependencies.depend_all()) {
+            it->second->SetDependencyOK();
+          } else {
+            it->second->SetStatus(crane::grpc::Failed);
+            task_raw_ptr_vec.emplace_back(it->second.get());
+            task_ptr_vec.emplace_back(std::move(it->second));
+            m_pending_task_map_.erase(it);
+            continue;
+          }
+        }
+        updated_raw_ptr_vec.emplace_back(it->second.get());
+      }
     }
   }
-  m_pending_task_map_mtx_.Unlock();
 
   PersistAndTransferTasksToMongodb_(task_raw_ptr_vec, updated_raw_ptr_vec);
 }
