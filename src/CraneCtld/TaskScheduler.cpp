@@ -1810,7 +1810,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
     std::unique_ptr<TaskInCtld>& task = iter->second;
 
-    if (task->type != crane::grpc::Batch) {
+    if (task->type == crane::grpc::Batch) {
+      task->SetStatus(new_status);
+    } else {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
       if (meta.interactive_type == crane::grpc::Calloc) {
         // TaskStatusChange may indicate the time limit has been reached and
@@ -1823,9 +1825,11 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
             exit_code == ExitCode::kExitCodeCranedDown) {
           meta.has_been_cancelled_on_front_end = true;
           meta.cb_task_cancel(task->TaskId());
+          task->SetStatus(new_status);
         } else {
-          new_status = crane::grpc::Completed;
+          task->SetStatus(crane::grpc::Completed);
         }
+        meta.cb_task_completed(task->TaskId());
       } else {  // Crun
         if (++meta.status_change_cnt < task->node_num) {
           CRANE_TRACE(
@@ -1834,13 +1838,22 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
               meta.status_change_cnt, task->node_num, task->TaskId());
           continue;
         }
+
+        task->SetStatus(new_status);
+        meta.cb_task_completed(task->TaskId());
       }
-      meta.cb_task_completed(task->TaskId());
     }
 
-    task->SetStatus(new_status);
     task->SetExitCode(exit_code);
     task->SetEndTime(now);
+
+    if (new_status == crane::grpc::Completed &&
+        task->type != crane::grpc::Batch) {
+      auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+      if (meta.interactive_type == crane::grpc::Calloc) {
+        exit_code = 0;
+      }
+    }
 
     for (CranedId const& craned_id : task->CranedIds()) {
       craned_cgroups_map[craned_id].emplace_back(task_id, task->uid);
