@@ -19,6 +19,8 @@
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
 
+#include "crane/String.h"
+
 namespace Craned {
 
 BasicDevice::BasicDevice(const std::string& device_name,
