@@ -206,6 +206,8 @@ struct TypeSlotsMap {
   TypeSlotsMap& operator-=(const TypeSlotsMap& rhs);
 };
 
+bool operator==(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs);
+
 struct DedicatedResourceInNode {
   // user req type
   using Req_t = std::unordered_map<
@@ -224,13 +226,7 @@ struct DedicatedResourceInNode {
   DedicatedResourceInNode& operator-=(const DedicatedResourceInNode& rhs);
 
   bool contains(const std::string& device_name) const;
-
   bool IsZero() const;
-  bool empty(const std::string& device_name) const;
-  bool empty(const std::string& device_name,
-             const std::string& device_type) const;
-
-  void flat_(std::set<std::string>& names, std::set<std::string>& types) const;
 
   explicit operator crane::grpc::DeviceMap() const;
 

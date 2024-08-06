@@ -91,23 +91,7 @@ bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs) {
 }
 
 bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs) {
-  std::set<CranedId> craned_ids;
-  for (const auto& [craned_id, _] : lhs.craned_id_dres_in_node_map)
-    craned_ids.emplace(craned_id);
-  for (const auto& [craned_id, _] : rhs.craned_id_dres_in_node_map)
-    craned_ids.emplace(craned_id);
-
-  for (const auto& craned_id : craned_ids) {
-    // craned gres always not empty
-    if (lhs.contains(craned_id) && !rhs.contains(craned_id)) {
-      return false;
-    } else if (!lhs.contains(craned_id) && rhs.contains(craned_id)) {
-      return false;
-    } else {
-      if (!(lhs.at(craned_id) == rhs.at(craned_id))) return false;
-    }
-  }
-  return true;
+  return lhs.craned_id_dres_in_node_map == rhs.craned_id_dres_in_node_map;
 }
 
 bool operator<=(
@@ -171,36 +155,7 @@ bool operator<=(const DedicatedResourceInNode& lhs,
 
 bool operator==(const DedicatedResourceInNode& lhs,
                 const DedicatedResourceInNode& rhs) {
-  std::set<std::string> names;
-  std::set<std::string> types;
-  lhs.flat_(names, types);
-  rhs.flat_(names, types);
-  for (const auto& name : names) {
-    // type_slots_map always not empty
-    if (lhs.contains(name) && !rhs.contains(name)) {
-      return false;
-    } else if (!lhs.contains(name) && rhs.contains(name)) {
-      return false;
-    } else if (lhs.contains(name) && rhs.contains(name)) {
-      const auto& lhs_type_slots_map = lhs.at(name);
-      const auto& rhs_type_slots_map = rhs.at(name);
-      for (const auto& type : types) {
-        // slots set always not empty
-        if (lhs_type_slots_map.contains(type) &&
-            !rhs_type_slots_map.contains(type)) {
-          return false;
-        } else if (!lhs_type_slots_map.contains(type) &&
-                   rhs_type_slots_map.contains(type)) {
-          return false;
-        } else if (lhs_type_slots_map.contains(type) &&
-                   rhs_type_slots_map.contains(type)) {
-          if (rhs_type_slots_map.at(type) != lhs_type_slots_map.at(type))
-            return false;
-        }
-      }
-    }
-  }
-  return true;
+  return lhs.name_type_slots_map == rhs.name_type_slots_map;
 }
 
 AllocatableResource::AllocatableResource(
@@ -378,22 +333,6 @@ bool DedicatedResourceInNode::IsZero() const {
   return name_type_slots_map.empty();
 }
 
-bool DedicatedResourceInNode::empty(const std::string& device_name) const {
-  // TODO: trim
-  if (name_type_slots_map.empty() || !name_type_slots_map.contains(device_name))
-    return true;
-  return name_type_slots_map.at(device_name).IsZero();
-}
-
-bool DedicatedResourceInNode::empty(const std::string& device_name,
-                                    const std::string& device_type) const {
-  if (name_type_slots_map.empty() ||
-      !name_type_slots_map.contains(device_name) ||
-      !name_type_slots_map.at(device_name).contains(device_type))
-    return true;
-  return name_type_slots_map.at(device_name).at(device_type).empty();
-}
-
 DedicatedResourceInNode& DedicatedResourceInNode::operator+=(
     const DedicatedResourceInNode& rhs) {
   for (const auto& [rhs_name, rhs_type_slots_map] : rhs.name_type_slots_map)
@@ -433,15 +372,6 @@ const TypeSlotsMap& DedicatedResourceInNode::at(
 
 bool DedicatedResourceInNode::contains(const std::string& device_name) const {
   return this->name_type_slots_map.contains(device_name);
-}
-
-void DedicatedResourceInNode::flat_(std::set<std::string>& names,
-                                    std::set<std::string>& types) const {
-  for (const auto& [name, type_slots_map] : this->name_type_slots_map) {
-    names.emplace(name);
-    for (const auto& [type, _] : type_slots_map.type_slots_map)
-      types.emplace(type);
-  }
 }
 
 DedicatedResourceInNode::operator crane::grpc::DeviceMap() const {
@@ -498,4 +428,8 @@ TypeSlotsMap& TypeSlotsMap::operator-=(const TypeSlotsMap& rhs) {
   }
 
   return *this;
+}
+
+bool operator==(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs) {
+  return lhs.type_slots_map == rhs.type_slots_map;
 }
