@@ -87,9 +87,7 @@ class PluginClient {
   std::thread m_async_send_thread_;
   std::atomic<bool> m_thread_stop_{false};
 
-  absl::Mutex m_event_queue_mtx_;
-  // ConcurrentQueue<HookEvent> m_event_queue_;
-  std::list<HookEvent> m_event_queue_ GUARDED_BY(m_event_queue_mtx_);
+  ConcurrentQueue<HookEvent> m_event_queue_;
 
   // Use this array to dispatch the hook event to the corresponding function in
   // O(1) time.

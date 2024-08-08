@@ -25,6 +25,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <thread>
@@ -55,9 +56,6 @@ void PluginClient::InitChannelAndStub(const std::string& endpoint) {
 
 void PluginClient::AsyncSendThread_() {
   bool prev_conn_state = false;
-  absl::Condition cond(
-      +[](decltype(m_event_queue_)* queue) { return !queue->empty(); },
-      &m_event_queue_);
 
   while (true) {
     if (m_thread_stop_.load()) break;
@@ -77,17 +75,20 @@ void PluginClient::AsyncSendThread_() {
       continue;
     }
 
-    auto has_msg =
-        m_event_queue_mtx_.LockWhenWithTimeout(cond, absl::Milliseconds(50));
-    if (!has_msg) {
-      m_event_queue_mtx_.Unlock();
+    auto approx_size = m_event_queue_.size_approx();
+    if (approx_size == 0) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
       continue;
     }
 
-    // Move events to local list and release the lock
+    // Move events to local list
     std::list<HookEvent> events;
-    events.splice(events.begin(), std::move(m_event_queue_));
-    m_event_queue_mtx_.Unlock();
+    events.resize(approx_size);
+
+    auto actual_size =
+        m_event_queue_.try_dequeue_bulk(events.begin(), approx_size);
+    events.resize(actual_size);
+    CRANE_DEBUG("[Plugin] Dequeued {} hook events.", actual_size);
 
     while (!events.empty()) {
       auto& e = events.front();
@@ -107,9 +108,8 @@ void PluginClient::AsyncSendThread_() {
           // If some messages are not sent due to channel failure,
           // put them back into m_event_queue_
           if (!events.empty()) {
-            m_event_queue_mtx_.Lock();
-            m_event_queue_.splice(m_event_queue_.begin(), std::move(events));
-            m_event_queue_mtx_.Unlock();
+            m_event_queue_.enqueue_bulk(std::make_move_iterator(events.begin()),
+                                        events.size());
           }
           break;
         }
@@ -156,8 +156,7 @@ void PluginClient::StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
 
   HookEvent e{HookType::START,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  absl::MutexLock lock(&m_event_queue_mtx_);
-  m_event_queue_.emplace_back(std::move(e));
+  m_event_queue_.enqueue(std::move(e));
 }
 
 void PluginClient::EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
@@ -174,8 +173,7 @@ void PluginClient::EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
 
   HookEvent e{HookType::END,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  absl::MutexLock lock(&m_event_queue_mtx_);
-  m_event_queue_.emplace_back(std::move(e));
+  m_event_queue_.enqueue(std::move(e));
 }
 
 }  // namespace plugin
