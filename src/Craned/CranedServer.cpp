@@ -409,36 +409,28 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
     return Status::OK;
   }
   std::string execution_node = execution_node_opt.value();
-  if (!g_config.Ipv4ToCranedHostname.contains(execution_node)) {
+  if (!g_config.CranedNodes.contains(execution_node)) {
     response->set_ok(false);
     return Status::OK;
   }
   std::shared_ptr<Channel> channel_of_remote_service;
   if (g_config.ListenConf.UseTls) {
-    std::string remote_hostname;
-    auto ok = crane::ResolveHostnameFromIpv4(execution_node, &remote_hostname);
-    if (ok) {
-      CRANE_TRACE("Remote address {} was resolved as {}", execution_node,
-                  remote_hostname);
+    std::string target_service = fmt::format(
+        "{}.{}:{}", execution_node, g_config.ListenConf.DomainSuffix,
+        g_config.ListenConf.CranedListenPort);
 
-      std::string target_service = fmt::format(
-          "{}.{}:{}", remote_hostname, g_config.ListenConf.DomainSuffix,
-          g_config.ListenConf.CranedListenPort);
+    grpc::SslCredentialsOptions ssl_opts;
+    // pem_root_certs is actually the certificate of server side rather than
+    // CA certificate. CA certificate is not needed.
+    // Since we use the same cert/key pair for both cranectld/craned,
+    // pem_root_certs is set to the same certificate.
+    ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
+    ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
+    ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
 
-      grpc::SslCredentialsOptions ssl_opts;
-      // pem_root_certs is actually the certificate of server side rather than
-      // CA certificate. CA certificate is not needed.
-      // Since we use the same cert/key pair for both cranectld/craned,
-      // pem_root_certs is set to the same certificate.
-      ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
-      ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
-      ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
+    channel_of_remote_service =
+        grpc::CreateChannel(target_service, grpc::SslCredentials(ssl_opts));
 
-      channel_of_remote_service =
-          grpc::CreateChannel(target_service, grpc::SslCredentials(ssl_opts));
-    } else {
-      CRANE_ERROR("Failed to resolve remote address {}.", execution_node);
-    }
   } else {
     std::string target_service = fmt::format(
         "{}:{}", execution_node, g_config.ListenConf.CranedListenPort);
