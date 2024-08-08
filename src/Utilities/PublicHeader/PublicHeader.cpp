@@ -79,30 +79,42 @@ bool operator<=(const DedicatedResourceInNode::Req_t& lhs,
                 const DedicatedResourceInNode& rhs) {
   for (const auto& [lhs_name, lhs_name_type_spec] : lhs) {
     const auto& [untyped_req_count, req_type_count_map] = lhs_name_type_spec;
-    if (rhs.contains(lhs_name)) {
-      uint32_t avail_count = 0;
-      const auto& rhs_type_slots_map = rhs.at(lhs_name).type_slots_map;
-      for (const auto& [req_type, req_count] : req_type_count_map) {
-        if (req_count == 0) continue;
-        if (!rhs_type_slots_map.contains(req_type)) {
-          return false;
-        } else {
-          auto type_size = rhs_type_slots_map.at(req_type).size();
-          if (type_size < req_count) return false;
-          avail_count += type_size - req_count;
-        }
-      }
-      if (untyped_req_count <= avail_count) continue;
-      for (const auto& [rhs_type, rhs_slots] : rhs_type_slots_map) {
-        if (req_type_count_map.contains(rhs_type)) continue;
-        avail_count += rhs_slots.size();
-        if (untyped_req_count <= avail_count) break;
-      }
-      if (untyped_req_count > avail_count) return false;
-    } else {
-      if (untyped_req_count != 0) return false;
+    auto rhs_it = rhs.name_type_slots_map.find(lhs_name);
+    if (rhs_it == rhs.name_type_slots_map.end()) {
+      if (untyped_req_count != 0 || !req_type_count_map.empty()) return false;
     }
+
+    uint32_t avail_count = 0;
+
+    const auto& rhs_type_slots_map = rhs_it->second.type_slots_map;
+
+    for (const auto& [req_type, req_count] : req_type_count_map) {
+      auto rhs_type_it = rhs_type_slots_map.find(req_type);
+      if (rhs_type_it == rhs_type_slots_map.end()) return false;
+
+      size_t type_size = rhs_type_it->second.size();
+      // E.g. H100:2 of rhs < H100:3 in request
+      if (type_size < req_count) return false;
+
+      // Add redundant slots to avail_count for untyped selection
+      avail_count += type_size - req_count;
+    }
+
+    if (untyped_req_count <= avail_count) continue;
+
+    for (const auto& [rhs_type, rhs_slots] : rhs_type_slots_map) {
+      // Skip already counted types
+      if (req_type_count_map.contains(rhs_type)) continue;
+
+      avail_count += rhs_slots.size();
+
+      // Stop iteration if the untyped request is satisfied
+      if (untyped_req_count <= avail_count) break;
+    }
+
+    if (untyped_req_count > avail_count) return false;
   }
+
   return true;
 }
 
