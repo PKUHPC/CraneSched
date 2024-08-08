@@ -152,10 +152,8 @@ extern "C" {
     task_id = std::atoi(task_id_str);
 
     ok = GrpcMigrateSshProcToCgroupAndSetEnv(pamh, getpid(), task_id);
-    if (!ok) {
-      PamSendMsgToClient(pamh,
-                         "Error when GrpcMigrateSshProcToCgroupAndSetEnv");
-      return PAM_SESSION_ERR;
+    if (ok) {
+      return PAM_SUCCESS;
     } else {
       PamSendMsgToClient(pamh,
                          "You don't have any active job on this node. "

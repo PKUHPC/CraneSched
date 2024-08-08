@@ -252,6 +252,8 @@ TaskManager::~TaskManager() {
   if (m_ev_sigint_) event_free(m_ev_sigint_);
 
   if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
+  if (m_ev_query_task_environment_variables_)
+    event_free(m_ev_query_task_environment_variables_);
   if (m_ev_grpc_execute_task_) event_free(m_ev_grpc_execute_task_);
   if (m_ev_exit_event_) event_free(m_ev_exit_event_);
   if (m_ev_task_status_change_) event_free(m_ev_task_status_change_);
