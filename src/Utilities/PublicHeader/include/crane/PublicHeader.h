@@ -277,13 +277,13 @@ struct DedicatedResource {
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs);
 bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs);
 
-/**
- * When a task is allocated a resource UUID, it holds one instance of Resources
- * struct. Resource struct contains a AllocatableResource struct and a list of
- * DedicatedResource.
- */
 struct Resources {
+  // Since the allocatable resource is the same for all nodes, we only need to
+  // store one copy and do not need to keep the craned id.
   AllocatableResource allocatable_resource;
+
+  // Since DedicatedResource might be different for different nodes, we need to
+  // store a map from craned id to DedicatedResourceInNode in DedicatedResource.
   DedicatedResource dedicated_resource;
 
   Resources() = default;
@@ -298,6 +298,8 @@ struct Resources {
   explicit operator crane::grpc::Resources() const;
 };
 
+// These operators are used to compare the resources of
+// all nodes involved in the task.
 bool operator<=(const Resources& lhs, const Resources& rhs);
 bool operator==(const Resources& lhs, const Resources& rhs);
 
