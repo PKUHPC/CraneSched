@@ -1115,7 +1115,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
           if (g_task_scheduler->TerminatePendingOrRunningTask(
                   payload.task_id()) != CraneErr::kOk)
-            CRANE_WARN("TaskCompletionReq error: Not found!");
+            stream_writer->WriteTaskCompletionAckReply(payload.task_id());
         } break;
 
         case StreamCforedRequest::CFORED_GRACEFUL_EXIT: {
