@@ -379,6 +379,24 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
   return Status::OK;
 }
 
+Status CranedServiceImpl::QueryTaskEnvVariables(
+    grpc::ServerContext *context,
+    const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
+    crane::grpc::QueryTaskEnvVariablesReply *response) {
+  auto task_env =
+      g_task_mgr->QueryTaskEnvironmentVariablesAsync(request->task_id());
+  if (task_env.has_value()) {
+    for (const auto &[name, value] : task_env.value()) {
+      response->add_name(name);
+      response->add_value(value);
+    }
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+  }
+  return Status::OK;
+}
+
 grpc::Status CranedServiceImpl::CheckTaskStatus(
     grpc::ServerContext *context,
     const crane::grpc::CheckTaskStatusRequest *request,

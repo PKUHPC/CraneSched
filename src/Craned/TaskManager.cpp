@@ -28,6 +28,84 @@
 
 namespace Craned {
 
+bool TaskInstance::IsCrun() const {
+  return this->task.type() == crane::grpc::Interactive &&
+         this->task.interactive_meta().interactive_type() == crane::grpc::Crun;
+}
+bool TaskInstance::IsCalloc() const {
+  return this->task.type() == crane::grpc::Interactive &&
+         this->task.interactive_meta().interactive_type() ==
+             crane::grpc::Calloc;
+}
+
+std::vector<std::pair<std::string, std::string>>
+TaskInstance::GetEnvironmentVariables() const {
+  std::vector<std::pair<std::string, std::string>> env_vec;
+  for (auto& [name, value] : this->task.env()) {
+    env_vec.emplace_back(name, value);
+  }
+
+  if (this->task.get_user_env()) {
+    // If --get-user-env is set, the new environment is inherited
+    // from the execution CraneD rather than the submitting node.
+    //
+    // Since we want to reinitialize the environment variables of the user
+    // by reloading the settings in something like .bashrc or /etc/profile,
+    // we are actually performing two steps: login -> start shell.
+    // Shell starting is done by calling "bash --login".
+    //
+    // During shell starting step, the settings in
+    // /etc/profile, ~/.bash_profile, ... are loaded.
+    //
+    // During login step, "HOME" and "SHELL" are set.
+    // Here we are just mimicking the login module.
+
+    // Slurm uses `su <username> -c /usr/bin/env` to retrieve
+    // all the environment variables.
+    // We use a more tidy way.
+    env_vec.emplace_back("HOME", this->pwd_entry.HomeDir());
+    env_vec.emplace_back("SHELL", this->pwd_entry.Shell());
+  }
+
+  env_vec.emplace_back("CRANE_JOB_NODELIST",
+                       absl::StrJoin(this->task.allocated_nodes(), ";"));
+  env_vec.emplace_back("CRANE_EXCLUDES",
+                       absl::StrJoin(this->task.excludes(), ";"));
+  env_vec.emplace_back("CRANE_JOB_NAME", this->task.name());
+  env_vec.emplace_back("CRANE_ACCOUNT", this->task.account());
+  env_vec.emplace_back("CRANE_PARTITION", this->task.partition());
+  env_vec.emplace_back("CRANE_QOS", this->task.qos());
+  env_vec.emplace_back(
+      "CRANE_MEM_PER_NODE",
+      std::to_string(
+          this->task.resources().allocatable_resource().memory_limit_bytes() /
+          (1024 * 1024)));
+  env_vec.emplace_back("CRANE_JOB_ID", std::to_string(this->task.task_id()));
+
+  if (this->task.resources()
+          .actual_dedicated_resource()
+          .each_node_gres()
+          .contains(g_config.Hostname)) {
+    std::vector device_envs = DeviceManager::GetEnvironmentVariable(
+        this->task.resources().actual_dedicated_resource().each_node_gres().at(
+            g_config.Hostname));
+    env_vec.insert(env_vec.end(), device_envs.begin(), device_envs.end());
+  }
+
+  if (this->IsCrun() && !this->task.interactive_meta().term_env().empty()) {
+    env_vec.emplace_back("TERM", this->task.interactive_meta().term_env());
+  }
+
+  int64_t time_limit_sec = this->task.time_limit().seconds();
+  int hours = time_limit_sec / 3600;
+  int minutes = (time_limit_sec % 3600) / 60;
+  int seconds = time_limit_sec % 60;
+  std::string time_limit =
+      fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
+  env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
+  return env_vec;
+}
+
 TaskManager::TaskManager() {
   // Only called once. Guaranteed by singleton pattern.
   m_instance_ptr_ = this;
@@ -72,6 +150,20 @@ TaskManager::TaskManager() {
 
     if (event_add(m_ev_query_task_id_from_pid_, nullptr) < 0) {
       CRANE_ERROR("Could not add the query task id event to base!");
+      std::terminate();
+    }
+  }
+  {  // gRPC: QueryTaskEnvironmentVariable
+    m_ev_query_task_environment_variables_ =
+        event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
+                  EvGrpcQueryTaskEnvironmentVariableCb_, this);
+    if (!m_ev_query_task_environment_variables_) {
+      CRANE_ERROR("Failed to create the query task env event!");
+      std::terminate();
+    }
+
+    if (event_add(m_ev_query_task_environment_variables_, nullptr) < 0) {
+      CRANE_ERROR("Could not add the query task env to base!");
       std::terminate();
     }
   }
@@ -204,8 +296,7 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
   }
 
   ProcSigchldInfo& sigchld_info = instance->sigchld_info;
-  if (instance->task.type() == crane::grpc::Batch ||
-      CheckIfInstanceTypeIsCrun_(instance)) {
+  if (instance->task.type() == crane::grpc::Batch || instance->IsCrun()) {
     // For a Batch task, the end of the process means it is done.
     if (sigchld_info.is_terminated_by_signal) {
       if (instance->cancelled_by_user)
@@ -378,7 +469,7 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
       TaskInstance* task_instance = task_it->second.get();
 
       if (task_instance->task.type() == crane::grpc::Batch ||
-          CheckIfInstanceTypeIsCrun_(task_instance)) {
+          task_instance->IsCrun()) {
         for (auto&& [pid, pr_instance] : task_instance->processes) {
           CRANE_INFO(
               "Sending SIGINT to the process group of task #{} with root "
@@ -490,7 +581,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
   }
 
   // Create IO socket pair for crun tasks.
-  if (CheckIfInstanceTypeIsCrun_(instance)) {
+  if (instance->IsCrun()) {
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, io_in_sock_pair) != 0) {
       CRANE_ERROR("Failed to create socket pair for task io forward: {}",
                   strerror(errno));
@@ -537,7 +628,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
                 instance->task.task_id(), child_pid);
 
-    if (CheckIfInstanceTypeIsCrun_(instance)) {
+    if (instance->IsCrun()) {
       auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
       g_cfored_manager->RegisterIOForward(
           instance->task.interactive_meta().cfored_name(),
@@ -725,7 +816,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
       }
       close(stdout_fd);
 
-    } else if (CheckIfInstanceTypeIsCrun_(instance)) {
+    } else if (instance->IsCrun()) {
       close(io_in_sock_pair[0]);
       close(io_out_sock_pair[0]);
 
@@ -753,76 +844,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     if (instance->task.type() == crane::grpc::Batch) close(0);
     util::os::CloseFdFrom(3);
 
-    std::vector<std::pair<std::string, std::string>> env_vec;
-
-    // Load env from the front end.
-    for (auto& [name, value] : instance->task.env()) {
-      env_vec.emplace_back(name, value);
-    }
-
-    if (instance->task.get_user_env()) {
-      // If --get-user-env is set, the new environment is inherited
-      // from the execution CraneD rather than the submitting node.
-      //
-      // Since we want to reinitialize the environment variables of the user
-      // by reloading the settings in something like .bashrc or /etc/profile,
-      // we are actually performing two steps: login -> start shell.
-      // Shell starting is done by calling "bash --login".
-      //
-      // During shell starting step, the settings in
-      // /etc/profile, ~/.bash_profile, ... are loaded.
-      //
-      // During login step, "HOME" and "SHELL" are set.
-      // Here we are just mimicking the login module.
-
-      // Slurm uses `su <username> -c /usr/bin/env` to retrieve
-      // all the environment variables.
-      // We use a more tidy way.
-      env_vec.emplace_back("HOME", instance->pwd_entry.HomeDir());
-      env_vec.emplace_back("SHELL", instance->pwd_entry.Shell());
-    }
-
-    env_vec.emplace_back("CRANE_JOB_NODELIST",
-                         absl::StrJoin(instance->task.allocated_nodes(), ";"));
-    env_vec.emplace_back("CRANE_EXCLUDES",
-                         absl::StrJoin(instance->task.excludes(), ";"));
-    env_vec.emplace_back("CRANE_JOB_NAME", instance->task.name());
-    env_vec.emplace_back("CRANE_ACCOUNT", instance->task.account());
-    env_vec.emplace_back("CRANE_PARTITION", instance->task.partition());
-    env_vec.emplace_back("CRANE_QOS", instance->task.qos());
-    env_vec.emplace_back("CRANE_MEM_PER_NODE",
-                         std::to_string(instance->task.resources()
-                                            .allocatable_resource()
-                                            .memory_limit_bytes() /
-                                        (1024 * 1024)));
-    env_vec.emplace_back("CRANE_JOB_ID",
-                         std::to_string(instance->task.task_id()));
-
-    if (instance->task.resources()
-            .actual_dedicated_resource()
-            .each_node_gres()
-            .contains(g_config.Hostname)) {
-      std::vector device_envs =
-          DeviceManager::GetEnvironmentVariable(instance->task.resources()
-                                                    .actual_dedicated_resource()
-                                                    .each_node_gres()
-                                                    .at(g_config.Hostname));
-      env_vec.insert(env_vec.end(), device_envs.begin(), device_envs.end());
-    }
-
-    if (CheckIfInstanceTypeIsCrun_(instance) &&
-        !instance->task.interactive_meta().term_env().empty()) {
-      env_vec.emplace_back("TERM",
-                           instance->task.interactive_meta().term_env());
-    }
-
-    int64_t time_limit_sec = instance->task.time_limit().seconds();
-    int hours = time_limit_sec / 3600;
-    int minutes = (time_limit_sec % 3600) / 60;
-    int seconds = time_limit_sec % 60;
-    std::string time_limit =
-        fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
-    env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
+    std::vector env_vec = instance->GetEnvironmentVariables();
 
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
@@ -961,7 +983,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   instance->cgroup_path = cg->GetCgroupString();
 
   // Calloc tasks have no scripts to run. Just return.
-  if (CheckIfInstanceTypeIsCalloc_(instance)) return;
+  if (instance->IsCalloc()) return;
 
   instance->meta->parsed_sh_script_path =
       fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);
@@ -1073,8 +1095,7 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
     }
 
     TaskInstance* instance = iter->second.get();
-    if (instance->task.type() == crane::grpc::Batch ||
-        CheckIfInstanceTypeIsCrun_(instance)) {
+    if (instance->task.type() == crane::grpc::Batch || instance->IsCrun()) {
       const std::string& path = instance->meta->parsed_sh_script_path;
       if (!path.empty())
         g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
@@ -1107,6 +1128,42 @@ void TaskManager::EvActivateTaskStatusChange_(
 
   m_task_status_change_queue_.enqueue(std::move(status_change));
   event_active(m_ev_task_status_change_, 0, 0);
+}
+
+std::optional<std::vector<std::pair<std::string, std::string>>>
+TaskManager::QueryTaskEnvironmentVariablesAsync(task_id_t task_id) {
+  EvQueueQueryTaskEnvironmentVariables elem{.task_id = task_id};
+  std::future<std::optional<std::vector<std::pair<std::string, std::string>>>>
+      env_future = elem.env_prom.get_future();
+  m_query_task_environment_variables_queue.enqueue(std::move(elem));
+  event_active(m_ev_query_task_environment_variables_, 0, 0);
+  return env_future.get();
+}
+
+void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_(int efd, short events,
+                                                        void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueQueryTaskEnvironmentVariables elem;
+  while (this_->m_query_task_environment_variables_queue.try_dequeue(elem)) {
+    this_->m_mtx_.Lock();
+
+    auto task_iter = this_->m_task_map_.find(elem.task_id);
+    if (task_iter == this_->m_task_map_.end())
+
+      elem.env_prom.set_value(std::nullopt);
+    else {
+      auto& instance = task_iter->second;
+
+      std::optional<std::vector<std::pair<std::string, std::string>>> env_opt;
+      for (const auto& [name, value] : instance->GetEnvironmentVariables()) {
+        env_opt->emplace_back(name, value);
+      }
+      elem.env_prom.set_value(std::move(env_opt));
+    }
+
+    this_->m_mtx_.Unlock();
+  }
 }
 
 std::optional<uint32_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
@@ -1220,7 +1277,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
     if (elem.terminated_by_timeout) task_instance->terminated_by_timeout = true;
 
     int sig = SIGTERM;  // For BatchTask
-    if (CheckIfInstanceTypeIsCrun_(task_instance)) sig = SIGHUP;
+    if (task_instance->IsCrun()) sig = SIGHUP;
 
     if (!task_instance->processes.empty()) {
       // For an Interactive task with a process running or a Batch task, we
@@ -1338,18 +1395,6 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
       elem.ok_prom.set_value(false);
     }
   }
-}
-
-bool TaskManager::CheckIfInstanceTypeIsCrun_(TaskInstance* instance) {
-  return instance->task.type() == crane::grpc::Interactive &&
-         instance->task.interactive_meta().interactive_type() ==
-             crane::grpc::Crun;
-}
-
-bool TaskManager::CheckIfInstanceTypeIsCalloc_(TaskInstance* instance) {
-  return instance->task.type() == crane::grpc::Interactive &&
-         instance->task.interactive_meta().interactive_type() ==
-             crane::grpc::Calloc;
 }
 
 }  // namespace Craned

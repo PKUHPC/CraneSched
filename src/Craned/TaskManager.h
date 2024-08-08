@@ -176,6 +176,11 @@ struct TaskInstance {
     }
   }
 
+  bool IsCrun() const;
+  bool IsCalloc() const;
+  std::vector<std::pair<std::string, std::string>> GetEnvironmentVariables()
+      const;
+
   crane::grpc::TaskToD task;
 
   PasswordEntry pwd_entry;
@@ -211,6 +216,9 @@ class TaskManager {
 
   std::optional<uint32_t> QueryTaskIdFromPidAsync(pid_t pid);
 
+  std::optional<std::vector<std::pair<std::string, std::string>>>
+  QueryTaskEnvironmentVariablesAsync(task_id_t task_id);
+
   void TerminateTaskAsync(uint32_t task_id);
 
   void MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id);
@@ -245,6 +253,13 @@ class TaskManager {
     pid_t pid;
   };
 
+  struct EvQueueQueryTaskEnvironmentVariables {
+    std::promise<
+        std::optional<std::vector<std::pair<std::string, std::string>>>>
+        env_prom;
+    task_id_t task_id;
+  };
+
   struct EvQueueChangeTaskTimeLimit {
     uint32_t task_id;
     absl::Duration time_limit;
@@ -268,9 +283,6 @@ class TaskManager {
   static std::string ParseFilePathPattern_(const std::string& path_pattern,
                                            const std::string& cwd,
                                            task_id_t task_id);
-
-  static bool CheckIfInstanceTypeIsCrun_(TaskInstance* instance);
-  static bool CheckIfInstanceTypeIsCalloc_(TaskInstance* instance);
 
   void LaunchTaskInstanceMt_(TaskInstance* instance);
 
@@ -396,6 +408,10 @@ class TaskManager {
   static void EvGrpcQueryTaskIdFromPidCb_(evutil_socket_t efd, short events,
                                           void* user_data);
 
+  static void EvGrpcQueryTaskEnvironmentVariableCb_(evutil_socket_t efd,
+                                                    short events,
+                                                    void* user_data);
+
   static void EvSubprocessReadCb_(struct bufferevent* bev, void* process);
 
   static void EvTaskStatusChangeCb_(evutil_socket_t efd, short events,
@@ -431,6 +447,10 @@ class TaskManager {
 
   struct event* m_ev_query_task_id_from_pid_{};
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
+
+  struct event* m_ev_query_task_environment_variables_{};
+  ConcurrentQueue<EvQueueQueryTaskEnvironmentVariables>
+      m_query_task_environment_variables_queue;
 
   // A custom event that handles the ExecuteTask RPC.
   struct event* m_ev_grpc_execute_task_{};

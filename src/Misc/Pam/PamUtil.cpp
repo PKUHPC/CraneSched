@@ -302,8 +302,8 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
   }
 }
 
-bool GrpcMigrateSshProcToCgroup(pam_handle_t *pamh, pid_t pid,
-                                task_id_t task_id) {
+bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
+                                         task_id_t task_id) {
   using grpc::Channel;
   using grpc::ClientContext;
   using grpc::Status;
@@ -326,27 +326,66 @@ bool GrpcMigrateSshProcToCgroup(pam_handle_t *pamh, pid_t pid,
     return false;
   }
 
-  crane::grpc::MigrateSshProcToCgroupRequest request;
-  crane::grpc::MigrateSshProcToCgroupReply reply;
-  ClientContext context;
-  Status status;
+  {
+    crane::grpc::MigrateSshProcToCgroupRequest request;
+    crane::grpc::MigrateSshProcToCgroupReply reply;
+    ClientContext context;
+    Status status;
 
-  request.set_pid(pid);
-  request.set_task_id(task_id);
+    request.set_pid(pid);
+    request.set_task_id(task_id);
 
-  status = stub->MigrateSshProcToCgroup(&context, request, &reply);
-  if (!status.ok()) {
-    pam_syslog(pamh, LOG_ERR,
-               "[Crane] GrpcMigrateSshProcToCgroup gRPC call failed: %s | %s",
-               status.error_message().c_str(), status.error_details().c_str());
-    return false;
+    status = stub->MigrateSshProcToCgroup(&context, request, &reply);
+    if (!status.ok()) {
+      pam_syslog(pamh, LOG_ERR,
+                 "[Crane] GrpcMigrateSshProcToCgroupAndSetEnv gRPC call "
+                 "failed: %s | %s",
+                 status.error_message().c_str(),
+                 status.error_details().c_str());
+      return false;
+    }
+
+    if (reply.ok()) {
+      pam_syslog(pamh, LOG_ERR,
+                 "[Crane] GrpcMigrateSshProcToCgroupAndSetEnv succeeded.");
+    } else {
+      pam_syslog(pamh, LOG_ERR,
+                 "[Crane] GrpcMigrateSshProcToCgroupAndSetEnv failed.");
+      return false;
+    }
   }
 
-  if (reply.ok()) {
-    pam_syslog(pamh, LOG_ERR, "[Crane] GrpcMigrateSshProcToCgroup succeeded.");
-    return true;
-  } else {
-    pam_syslog(pamh, LOG_ERR, "[Crane] GrpcMigrateSshProcToCgroup failed.");
-    return false;
+  {
+    crane::grpc::QueryTaskEnvVariablesRequest request;
+    crane::grpc::QueryTaskEnvVariablesReply reply;
+    ClientContext context;
+    Status status;
+
+    request.set_task_id(task_id);
+
+    status = stub->QueryTaskEnvVariables(&context, request, &reply);
+    if (!status.ok()) {
+      pam_syslog(pamh, LOG_ERR,
+                 "[Crane] QueryTaskEnvVariables gRPC call failed: %s | %s",
+                 status.error_message().c_str(),
+                 status.error_details().c_str());
+      return false;
+    }
+
+    if (reply.ok()) {
+      pam_syslog(pamh, LOG_ERR, "[Crane] QueryTaskEnvVariables succeeded.");
+      for (int i = 0; i < reply.name_size(); ++i) {
+        if (setenv(reply.name(i).c_str(), reply.value(i).c_str(), 1)) {
+          pam_syslog(pamh, LOG_ERR, "[Crane] Set env %s=%s  failed",
+                     reply.name(i).c_str(), reply.value(i).c_str());
+          return false;
+        }
+      }
+      return true;
+    } else {
+      pam_syslog(pamh, LOG_ERR,
+                 "[Crane] GrpcMigrateSshProcToCgroupAndSetEnv failed.");
+      return false;
+    }
   }
 }
