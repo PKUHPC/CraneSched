@@ -14,11 +14,13 @@
  * See the Mulan PSL v2 for more details.
  */
 
-#include "PluginClient.h"
+#include "crane/PluginClient.h"
 
 #include <absl/synchronization/mutex.h>
 #include <absl/time/time.h>
 #include <google/protobuf/message.h>
+#include <grpcpp/security/credentials.h>
+#include <grpcpp/support/channel_arguments.h>
 #include <unistd.h>
 
 #include <chrono>
@@ -33,7 +35,7 @@
 #include "protos/Crane.pb.h"
 #include "protos/PublicDefs.pb.h"
 
-namespace Ctld {
+namespace plugin {
 
 PluginClient::~PluginClient() {
   m_thread_stop_.store(true);
@@ -41,32 +43,13 @@ PluginClient::~PluginClient() {
   if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
 }
 
+// Note that we do not support TLS in plugin yet.
 void PluginClient::InitChannelAndStub(const std::string& endpoint) {
   grpc::ChannelArguments channel_args;
-  if (g_config.CompressedRpc)
-    channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
-
-  if (g_config.ListenConf.UseTls) {
-    // TODO: Check if domain suffix is needed.
-    grpc::SslCredentialsOptions ssl_opts;
-    // pem_root_certs is actually the certificate of server side rather than
-    // CA certificate. CA certificate is not needed.
-    // Since we use the same cert/key pair for both cranectld/craned,
-    // pem_root_certs is set to the same certificate.
-    ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
-    ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
-    ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
-
-    m_channel_ = grpc::CreateCustomChannel(
-        endpoint, grpc::SslCredentials(ssl_opts), channel_args);
-  } else {
-    m_channel_ = grpc::CreateCustomChannel(
-        endpoint, grpc::InsecureChannelCredentials(), channel_args);
-  }
-
+  m_channel_ = grpc::CreateCustomChannel(
+      endpoint, grpc::InsecureChannelCredentials(), channel_args);
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = CranePluginD::NewStub(m_channel_);
-
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
 
@@ -195,4 +178,4 @@ void PluginClient::EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
   m_event_queue_.emplace_back(std::move(e));
 }
 
-}  // namespace Ctld
+}  // namespace plugin

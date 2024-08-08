@@ -32,11 +32,11 @@
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
-#include "PluginClient.h"
 #include "TaskScheduler.h"
 #include "crane/Logger.h"
 #include "crane/Network.h"
 #include "crane/OS.h"
+#include "crane/PluginClient.h"
 
 void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("cranectld");
@@ -639,7 +639,7 @@ void InitializeCtldGlobalVariables() {
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
-    g_plugin_client = std::make_unique<PluginClient>();
+    g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 

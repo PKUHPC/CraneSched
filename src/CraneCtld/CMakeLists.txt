@@ -14,8 +14,6 @@ add_executable(cranectld
         AccountManager.cpp
         EmbeddedDbClient.cpp
         EmbeddedDbClient.h
-        PluginClient.h
-        PluginClient.cpp
         CraneCtld.cpp
 
         CtldPreCompiledHeader.h)
@@ -27,6 +25,7 @@ target_link_libraries(cranectld PRIVATE
         concurrentqueue
 
         Utility_PublicHeader
+        Utility_PluginClient
 
         dev_event_core
         dev_event_pthreads

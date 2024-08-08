@@ -25,7 +25,7 @@
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
-#include "PluginClient.h"
+#include "crane/PluginClient.h"
 #include "crane/PublicHeader.h"
 #include "protos/PublicDefs.pb.h"
 

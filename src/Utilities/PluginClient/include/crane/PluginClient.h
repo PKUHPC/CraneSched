@@ -16,11 +16,9 @@
 
 #pragma once
 
-#include "CtldPublicDefs.h"
-// Precompiled header comes first!
-
 #include <absl/base/internal/thread_annotations.h>
 #include <absl/container/flat_hash_map.h>
+#include <concurrentqueue/concurrentqueue.h>
 #include <google/protobuf/message.h>
 #include <grpcpp/channel.h>
 #include <grpcpp/support/status.h>
@@ -37,10 +35,16 @@
 #include "protos/Plugin.pb.h"
 #include "protos/PublicDefs.pb.h"
 
-namespace Ctld {
+namespace plugin {
 
 using crane::grpc::plugin::CranePluginD;
 using grpc::Channel;
+using moodycamel::ConcurrentQueue;
+
+struct PluginConfig {
+  bool Enabled{false};
+  std::string PlugindSockPath;
+};
 
 class PluginClient {
  public:
@@ -84,6 +88,7 @@ class PluginClient {
   std::atomic<bool> m_thread_stop_{false};
 
   absl::Mutex m_event_queue_mtx_;
+  // ConcurrentQueue<HookEvent> m_event_queue_;
   std::list<HookEvent> m_event_queue_ GUARDED_BY(m_event_queue_mtx_);
 
   // Use this array to dispatch the hook event to the corresponding function in
@@ -93,6 +98,6 @@ class PluginClient {
           {&PluginClient::SendStartHook_, &PluginClient::SendEndHook_}};
 };
 
-}  // namespace Ctld
+}  // namespace plugin
 
-inline std::unique_ptr<Ctld::PluginClient> g_plugin_client;
+inline std::unique_ptr<plugin::PluginClient> g_plugin_client;
