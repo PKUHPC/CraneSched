@@ -1157,11 +1157,11 @@ void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_(int efd, short events,
     else {
       auto& instance = task_iter->second;
 
-      std::optional<std::vector<std::pair<std::string, std::string>>> env_opt;
+      std::vector<std::pair<std::string, std::string>> env_opt;
       for (const auto& [name, value] : instance->GetEnvironmentVariables()) {
-        env_opt->emplace_back(name, value);
+        env_opt.emplace_back(name, value);
       }
-      elem.env_prom.set_value(std::move(env_opt));
+      elem.env_prom.set_value(env_opt);
     }
 
     this_->m_mtx_.Unlock();

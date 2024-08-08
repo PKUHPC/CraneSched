@@ -25,6 +25,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include <cerrno>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <unordered_map>
@@ -349,7 +350,7 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
       pam_syslog(pamh, LOG_ERR,
                  "[Crane] GrpcMigrateSshProcToCgroup succeeded.");
     } else {
-      pam_syslog(pamh, LOG_ERR, "[Crane] GrpcMigrateSshProcToCgroupfailed.");
+      pam_syslog(pamh, LOG_ERR, "[Crane] GrpcMigrateSshProcToCgroup failed.");
       return false;
     }
   }
@@ -374,7 +375,10 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
     if (reply.ok()) {
       pam_syslog(pamh, LOG_ERR, "[Crane] QueryTaskEnvVariables succeeded.");
       for (int i = 0; i < reply.name_size(); ++i) {
-        if (setenv(reply.name(i).c_str(), reply.value(i).c_str(), 1)) {
+        if (pam_putenv(
+                pamh,
+                fmt::format("{}={}", reply.name(i), reply.value(i)).c_str()) !=
+            PAM_SUCCESS) {
           pam_syslog(pamh, LOG_ERR, "[Crane] Set env %s=%s  failed",
                      reply.name(i).c_str(), reply.value(i).c_str());
           return false;
