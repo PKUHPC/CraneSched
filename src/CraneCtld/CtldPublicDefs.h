@@ -272,6 +272,8 @@ struct TaskInCtld {
   bool requeue_if_failed{false};
   bool get_user_env{false};
 
+  crane::grpc::Dependencies dependencies;
+
   std::string cmd_line;
   std::unordered_map<std::string, std::string> env;
   std::string cwd;
@@ -297,6 +299,8 @@ struct TaskInCtld {
   crane::grpc::TaskStatus status;
   uint32_t exit_code;
   bool held{false};
+  bool dependency_ok{false};
+  std::vector<task_id_t> dependency_ids;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -433,6 +437,21 @@ struct TaskInCtld {
   }
   bool const& Held() const { return held; }
 
+  void SetDependencyOK() {
+    dependency_ok = true;
+    runtime_attr.set_dependency_ok(true);
+  }
+  bool HasDependency() const {
+    return dependencies.dependencies_size() != 0 && !dependency_ok;
+  }
+  void DependencyAdd(const std::vector<task_id_t>& val) {
+    dependency_ids.insert(dependency_ids.end(), val.begin(), val.end());
+    for (auto const& id : val) runtime_attr.add_dependency_ids(id);
+  }
+  bool NoWaitingDependency() const {
+    return dependency_ids.size() == dependencies.dependencies_size();
+  }
+
   void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
     task_to_ctld = val;
 
@@ -478,6 +497,8 @@ struct TaskInCtld {
     qos = val.qos();
 
     get_user_env = val.get_user_env();
+
+    dependencies = val.dependencies();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
@@ -492,6 +513,10 @@ struct TaskInCtld {
 
     status = runtime_attr.status();
     held = runtime_attr.held();
+
+    dependency_ok = runtime_attr.dependency_ok();
+    dependency_ids.assign(runtime_attr.dependency_ids().begin(),
+                          runtime_attr.dependency_ids().end());
 
     if (status != crane::grpc::TaskStatus::Pending) {
       craned_ids.assign(runtime_attr.craned_ids().begin(),
