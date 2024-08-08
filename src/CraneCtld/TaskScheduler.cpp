@@ -1427,9 +1427,8 @@ void TaskScheduler::CleanCancelQueueCb_() {
 
       if (task->type == crane::grpc::Interactive) {
         auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-        if (meta.interactive_type == crane::grpc::Crun)
-          g_thread_pool->detach_task([cb = meta.cb_task_completed,
-                                      task_id = task_id] { cb(task_id); });
+        g_thread_pool->detach_task(
+            [cb = meta.cb_task_cancel, task_id = task_id] { cb(task_id); });
       }
 
       task_raw_ptr_vec.emplace_back(it->second.get());
