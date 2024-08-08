@@ -193,6 +193,36 @@ TEST(DEDICATED_RES_NODE, req_map3) {
   ASSERT_LE(req, resourceInNode);
 }
 
+TEST(DEDICATED_RES_NODE, req_map4) {
+  using req_t = std::unordered_map<
+      std::string /*name*/,
+      std::pair<
+          uint64_t /*untyped req count*/,
+          std::unordered_map<std::string /*type*/, uint64_t /*type total*/>>>;
+  req_t req;
+  req["GPU"] = {4, {{"A100", 1}}};
+  DedicatedResourceInNode resourceInNode;
+  resourceInNode["GPU"]["B100"].insert(
+      {slots[0], slots[1], slots[3], slots[2]});
+  ASSERT_PRED2([](const auto& lhs, const auto& rhs) { return !(lhs <= rhs); },
+               req, resourceInNode);
+}
+
+TEST(DEDICATED_RES_NODE, req_map5) {
+  using req_t = std::unordered_map<
+      std::string /*name*/,
+      std::pair<
+          uint64_t /*untyped req count*/,
+          std::unordered_map<std::string /*type*/, uint64_t /*type total*/>>>;
+  req_t req;
+  req["GPU"] = {4, {{"A100", 1}}};
+  DedicatedResourceInNode resourceInNode;
+  resourceInNode["XPU"]["B100"].insert(
+      {slots[0], slots[1], slots[3], slots[2]});
+  ASSERT_PRED2([](const auto& lhs, const auto& rhs) { return !(lhs <= rhs); },
+               req, resourceInNode);
+}
+
 TEST(DEDICATED_RES, le_lt1) {
   DedicatedResource lhs, rhs;
   DedicatedResourceInNode resourceInNode;
