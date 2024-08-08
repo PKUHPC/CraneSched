@@ -1083,9 +1083,17 @@ void TaskScheduler::ScheduleThread_() {
           for (auto& task_id : dep_fail_task_vec) {
             auto it = m_pending_task_map_.find(task_id);
             if (it != m_pending_task_map_.end()) {
-              it->second->SetStatus(crane::grpc::Failed);
-              failed_task_raw_ptrs.emplace_back(it->second.get());
-              failed_tasks.emplace_back(std::move(it->second));
+              auto& task = it->second;
+              task->SetStatus(crane::grpc::Failed);
+              if (task->type != crane::grpc::Batch) {
+                auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+                g_thread_pool->detach_task(
+                    [cb = meta.cb_task_cancel, task_id = task_id] {
+                      cb(task_id);
+                    });
+              }
+              failed_task_raw_ptrs.emplace_back(task.get());
+              failed_tasks.emplace_back(std::move(task));
               m_pending_task_map_.erase(it);
             }
           }
@@ -1098,21 +1106,28 @@ void TaskScheduler::ScheduleThread_() {
           }
           for (auto& [task_id, dep_ids] : dependencies) {
             auto it = m_pending_task_map_.find(task_id);
-            if (it != m_pending_task_map_.end() &&
-                it->second->HasDependency()) {
-              it->second->DependencyAdd(dep_ids);
-              if (it->second->NoWaitingDependency()) {
-                if (it->second->dependencies.depend_all()) {
-                  it->second->SetDependencyOK();
+            auto& task = it->second;
+            if (it != m_pending_task_map_.end() && task->HasDependency()) {
+              task->DependencyAdd(dep_ids);
+              if (task->NoWaitingDependency()) {
+                if (task->dependencies.depend_all()) {
+                  task->SetDependencyOK();
                 } else {
-                  it->second->SetStatus(crane::grpc::Failed);
-                  failed_task_raw_ptrs.emplace_back(it->second.get());
-                  failed_tasks.emplace_back(std::move(it->second));
+                  task->SetStatus(crane::grpc::Failed);
+                  if (task->type != crane::grpc::Batch) {
+                    auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+                    g_thread_pool->detach_task(
+                        [cb = meta.cb_task_cancel, task_id = task_id] {
+                          cb(task_id);
+                        });
+                  }
+                  failed_task_raw_ptrs.emplace_back(task.get());
+                  failed_tasks.emplace_back(std::move(task));
                   m_pending_task_map_.erase(it);
                   continue;
                 }
               }
-              updated_task_raw_ptrs.emplace_back(it->second.get());
+              updated_task_raw_ptrs.emplace_back(task.get());
             }
           }
         }
@@ -1610,9 +1625,15 @@ void TaskScheduler::CleanCancelQueueCb_() {
     for (auto& task_id : dep_fail_task_vec) {
       auto it = m_pending_task_map_.find(task_id);
       if (it != m_pending_task_map_.end()) {
-        it->second->SetStatus(crane::grpc::Failed);
-        task_raw_ptr_vec.emplace_back(it->second.get());
-        task_ptr_vec.emplace_back(std::move(it->second));
+        auto& task = it->second;
+        task->SetStatus(crane::grpc::Failed);
+        if (task->type != crane::grpc::Batch) {
+          auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+          g_thread_pool->detach_task(
+              [cb = meta.cb_task_cancel, task_id = task_id] { cb(task_id); });
+        }
+        task_raw_ptr_vec.emplace_back(task.get());
+        task_ptr_vec.emplace_back(std::move(task));
         m_pending_task_map_.erase(it);
       }
     }
@@ -1626,19 +1647,25 @@ void TaskScheduler::CleanCancelQueueCb_() {
     for (auto& [task_id, dep_ids] : dependencies) {
       auto it = m_pending_task_map_.find(task_id);
       if (it != m_pending_task_map_.end() && it->second->HasDependency()) {
-        it->second->DependencyAdd(dep_ids);
-        if (it->second->NoWaitingDependency()) {
-          if (it->second->dependencies.depend_all()) {
-            it->second->SetDependencyOK();
+        auto& task = it->second;
+        task->DependencyAdd(dep_ids);
+        if (task->NoWaitingDependency()) {
+          if (task->dependencies.depend_all()) {
+            task->SetDependencyOK();
           } else {
-            it->second->SetStatus(crane::grpc::Failed);
-            task_raw_ptr_vec.emplace_back(it->second.get());
-            task_ptr_vec.emplace_back(std::move(it->second));
+            task->SetStatus(crane::grpc::Failed);
+            if (task->type != crane::grpc::Batch) {
+              auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+              g_thread_pool->detach_task([cb = meta.cb_task_cancel,
+                                          task_id = task_id] { cb(task_id); });
+            }
+            task_raw_ptr_vec.emplace_back(task.get());
+            task_ptr_vec.emplace_back(std::move(task));
             m_pending_task_map_.erase(it);
             continue;
           }
         }
-        updated_raw_ptr_vec.emplace_back(it->second.get());
+        updated_raw_ptr_vec.emplace_back(task.get());
       }
     }
   }
@@ -1926,9 +1953,15 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     for (auto& task_id : dep_fail_task_vec) {
       auto it = m_pending_task_map_.find(task_id);
       if (it != m_pending_task_map_.end()) {
-        it->second->SetStatus(crane::grpc::Failed);
-        task_raw_ptr_vec.emplace_back(it->second.get());
-        task_ptr_vec.emplace_back(std::move(it->second));
+        auto& task = it->second;
+        task->SetStatus(crane::grpc::Failed);
+        if (task->type != crane::grpc::Batch) {
+          auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+          g_thread_pool->detach_task(
+              [cb = meta.cb_task_cancel, task_id = task_id] { cb(task_id); });
+        }
+        task_raw_ptr_vec.emplace_back(task.get());
+        task_ptr_vec.emplace_back(std::move(task));
         m_pending_task_map_.erase(it);
       }
     }
@@ -1942,19 +1975,25 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     for (auto& [task_id, dep_ids] : dependencies) {
       auto it = m_pending_task_map_.find(task_id);
       if (it != m_pending_task_map_.end() && it->second->HasDependency()) {
-        it->second->DependencyAdd(dep_ids);
-        if (it->second->NoWaitingDependency()) {
-          if (it->second->dependencies.depend_all()) {
-            it->second->SetDependencyOK();
+        auto& task = it->second;
+        task->DependencyAdd(dep_ids);
+        if (task->NoWaitingDependency()) {
+          if (task->dependencies.depend_all()) {
+            task->SetDependencyOK();
           } else {
-            it->second->SetStatus(crane::grpc::Failed);
-            task_raw_ptr_vec.emplace_back(it->second.get());
-            task_ptr_vec.emplace_back(std::move(it->second));
+            task->SetStatus(crane::grpc::Failed);
+            if (task->type != crane::grpc::Batch) {
+              auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+              g_thread_pool->detach_task([cb = meta.cb_task_cancel,
+                                          task_id = task_id] { cb(task_id); });
+            }
+            task_raw_ptr_vec.emplace_back(task.get());
+            task_ptr_vec.emplace_back(std::move(task));
             m_pending_task_map_.erase(it);
             continue;
           }
         }
-        updated_raw_ptr_vec.emplace_back(it->second.get());
+        updated_raw_ptr_vec.emplace_back(task.get());
       }
     }
   }
