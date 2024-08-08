@@ -80,6 +80,11 @@ class CranedServiceImpl : public Craned::Service {
       const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
       crane::grpc::QueryTaskEnvVariablesReply *response) override;
 
+  grpc::Status QueryTaskEnvVariablesForward(
+      grpc::ServerContext *context,
+      const ::crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
+      crane::grpc::QueryTaskEnvVariablesForwardReply *response) override;
+
   grpc::Status CreateCgroupForTasks(
       grpc::ServerContext *context,
       const crane::grpc::CreateCgroupForTasksRequest *request,

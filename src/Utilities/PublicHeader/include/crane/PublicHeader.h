@@ -305,4 +305,5 @@ struct CgroupSpec {
   uid_t uid;
   task_id_t task_id;
   crane::grpc::Resources resources;
+  std::string execution_node;
 };

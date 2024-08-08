@@ -443,6 +443,12 @@ bool CgroupManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
   return cg->MigrateProcIn(pid);
 }
 
+std::optional<std::string> CgroupManager::QueryTaskExecutionNode(
+    task_id_t task_id) {
+  if (!this->m_task_id_to_cg_spec_map_.Contains(task_id)) return std::nullopt;
+  return this->m_task_id_to_cg_spec_map_[task_id]->execution_node;
+}
+
 bool Cgroup::MigrateProcIn(pid_t pid) {
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;

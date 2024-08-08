@@ -126,6 +126,7 @@ CraneErr CranedStub::CreateCgroupForTasks(
     request.mutable_task_id_list()->Add(spec.task_id);
     request.mutable_uid_list()->Add(spec.uid);
     *request.mutable_res_list()->Add() = std::move(spec.resources);
+    request.add_execution_node(spec.execution_node);
   }
 
   status = m_stub_->CreateCgroupForTasks(&context, request, &reply);

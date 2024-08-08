@@ -187,7 +187,8 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
 
     CgroupSpec spec{.uid = uid,
                     .task_id = task_id,
-                    .resources = std::move(resources)};
+                    .resources = std::move(resources),
+                    .execution_node = request->execution_node(i)};
     CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", task_id, uid);
     cg_specs.emplace_back(std::move(spec));
   }
@@ -393,6 +394,86 @@ Status CranedServiceImpl::QueryTaskEnvVariables(
     response->set_ok(true);
   } else {
     response->set_ok(false);
+  }
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
+    crane::grpc::QueryTaskEnvVariablesForwardReply *response) {
+  std::optional execution_node_opt =
+      g_cg_mgr->QueryTaskExecutionNode(request->task_id());
+  if (!execution_node_opt.has_value()) {
+    response->set_ok(false);
+    return Status::OK;
+  }
+  std::string execution_node = execution_node_opt.value();
+  if (!g_config.Ipv4ToCranedHostname.contains(execution_node)) {
+    response->set_ok(false);
+    return Status::OK;
+  }
+  std::shared_ptr<Channel> channel_of_remote_service;
+  if (g_config.ListenConf.UseTls) {
+    std::string remote_hostname;
+    auto ok = crane::ResolveHostnameFromIpv4(execution_node, &remote_hostname);
+    if (ok) {
+      CRANE_TRACE("Remote address {} was resolved as {}", execution_node,
+                  remote_hostname);
+
+      std::string target_service = fmt::format(
+          "{}.{}:{}", remote_hostname, g_config.ListenConf.DomainSuffix,
+          g_config.ListenConf.CranedListenPort);
+
+      grpc::SslCredentialsOptions ssl_opts;
+      // pem_root_certs is actually the certificate of server side rather than
+      // CA certificate. CA certificate is not needed.
+      // Since we use the same cert/key pair for both cranectld/craned,
+      // pem_root_certs is set to the same certificate.
+      ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
+      ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
+      ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
+
+      channel_of_remote_service =
+          grpc::CreateChannel(target_service, grpc::SslCredentials(ssl_opts));
+    } else {
+      CRANE_ERROR("Failed to resolve remote address {}.", execution_node);
+    }
+  } else {
+    std::string target_service = fmt::format(
+        "{}:{}", execution_node, g_config.ListenConf.CranedListenPort);
+    channel_of_remote_service =
+        grpc::CreateChannel(target_service, grpc::InsecureChannelCredentials());
+  }
+
+  if (!channel_of_remote_service) {
+    CRANE_ERROR("Failed to create channel to {}.", execution_node);
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  crane::grpc::QueryTaskEnvVariablesRequest request_to_remote_service;
+  crane::grpc::QueryTaskEnvVariablesReply reply_from_remote_service;
+  ClientContext context_of_remote_service;
+  Status status_remote_service;
+  request_to_remote_service.set_task_id(request->task_id());
+  std::unique_ptr<crane::grpc::Craned::Stub> stub_of_remote_craned =
+      crane::grpc::Craned::NewStub(channel_of_remote_service);
+  status_remote_service = stub_of_remote_craned->QueryTaskEnvVariables(
+      &context_of_remote_service, request_to_remote_service,
+      &reply_from_remote_service);
+  if (!status_remote_service.ok() || !reply_from_remote_service.ok()) {
+    CRANE_WARN(
+        "QueryTaskEnvVariables gRPC call failed: {}. Remote is craned: {}",
+        status_remote_service.error_message(), execution_node);
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  response->set_ok(true);
+  for (int i = 0; i < reply_from_remote_service.name_size(); i++) {
+    response->add_name(reply_from_remote_service.name(i));
+    response->add_value(reply_from_remote_service.value(i));
   }
   return Status::OK;
 }

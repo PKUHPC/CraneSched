@@ -254,6 +254,8 @@ class CgroupManager {
 
   bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info);
 
+  std::optional<std::string> QueryTaskExecutionNode(task_id_t task_id);
+
   bool CreateCgroups(std::vector<CgroupSpec> &&cg_specs);
 
   bool CheckIfCgroupForTasksExists(task_id_t task_id);

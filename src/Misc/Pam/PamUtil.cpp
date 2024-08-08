@@ -356,24 +356,25 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
   }
 
   {
-    crane::grpc::QueryTaskEnvVariablesRequest request;
-    crane::grpc::QueryTaskEnvVariablesReply reply;
+    crane::grpc::QueryTaskEnvVariablesForwardRequest request;
+    crane::grpc::QueryTaskEnvVariablesForwardReply reply;
     ClientContext context;
     Status status;
 
     request.set_task_id(task_id);
 
-    status = stub->QueryTaskEnvVariables(&context, request, &reply);
+    status = stub->QueryTaskEnvVariablesForward(&context, request, &reply);
     if (!status.ok()) {
       pam_syslog(pamh, LOG_ERR,
-                 "[Crane] QueryTaskEnvVariables gRPC call failed: %s | %s",
-                 status.error_message().c_str(),
+          "[Crane] QueryTaskEnvVariablesForward gRPC call failed: %s | %s",
+          status.error_message().c_str(),
                  status.error_details().c_str());
       return false;
     }
 
     if (reply.ok()) {
-      pam_syslog(pamh, LOG_ERR, "[Crane] QueryTaskEnvVariables succeeded.");
+      pam_syslog(pamh, LOG_ERR,
+                 "[Crane] QueryTaskEnvVariablesForward succeeded.");
       for (int i = 0; i < reply.name_size(); ++i) {
         if (pam_putenv(
                 pamh,
@@ -386,7 +387,7 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
       }
       return true;
     } else {
-      pam_syslog(pamh, LOG_ERR, "[Crane] GrpcQueryTaskEnvVariables failed.");
+      pam_syslog(pamh, LOG_ERR, "[Crane] QueryTaskEnvVariablesForward failed.");
       return false;
     }
   }

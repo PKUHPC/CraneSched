@@ -85,6 +85,7 @@ message CreateCgroupForTasksRequest {
   repeated uint32 task_id_list = 1;
   repeated uint32 uid_list = 2;
   repeated Resources res_list = 3;
+  repeated string execution_node = 4;
 }
 
 message CreateCgroupForTasksReply{}
@@ -173,6 +174,7 @@ message QueryTaskIdFromPortForwardReply{
   uint32 task_id = 3;
   string cgroup_path = 4;
 }
+
 
 message QueryCranedInfoRequest {
   string craned_name = 1;
@@ -337,6 +339,17 @@ message QueryTaskEnvVariablesRequest{
 }
 
 message QueryTaskEnvVariablesReply{
+  bool ok = 1;
+  repeated string name = 2;
+  repeated string value = 3;
+}
+
+message QueryTaskEnvVariablesForwardRequest{
+  uint32 task_id = 1;
+  string execution_node = 2;
+}
+
+message QueryTaskEnvVariablesForwardReply{
   bool ok = 1;
   repeated string name = 2;
   repeated string value = 3;
@@ -744,6 +757,7 @@ service Craned {
   rpc QueryTaskIdFromPortForward(QueryTaskIdFromPortForwardRequest) returns (QueryTaskIdFromPortForwardReply);
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
   rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest) returns (QueryTaskEnvVariablesReply);
+  rpc QueryTaskEnvVariablesForward(QueryTaskEnvVariablesForwardRequest) returns (QueryTaskEnvVariablesForwardReply);
 }
 
 service CraneForeD {
