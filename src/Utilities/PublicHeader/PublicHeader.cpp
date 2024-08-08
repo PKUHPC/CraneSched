@@ -62,31 +62,12 @@ bool operator==(const AllocatableResource& lhs,
 
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs) {
   for (const auto& [lhs_node_id, lhs_gres] : lhs.craned_id_dres_in_node_map) {
-    if (!rhs.contains(lhs_node_id) && !lhs_gres.IsZero()) {
-      return false;
-    }
+    auto rhs_it = rhs.craned_id_dres_in_node_map.find(lhs_node_id);
+    if (rhs_it == rhs.craned_id_dres_in_node_map.end()) return false;
 
-    for (const auto& [lhs_name, lhs_type_slots_map] :
-         lhs_gres.name_type_slots_map) {
-      if (!rhs.at(lhs_node_id).contains(lhs_name) &&
-          !lhs_type_slots_map.IsZero()) {
-        return false;
-      }
-
-      for (const auto& [lhs_type, lhs_slots] :
-           lhs_type_slots_map.type_slots_map) {
-        if (!rhs.at(lhs_node_id).at(lhs_name).contains(lhs_type) &&
-            !lhs_slots.empty()) {
-          return false;
-        }
-
-        if (!std::ranges::includes(
-                rhs.at(lhs_node_id).at(lhs_name).at(lhs_type), lhs_slots)) {
-          return false;
-        }
-      }
-    }
+    if (!(lhs_gres <= rhs_it->second)) return false;
   }
+
   return true;
 }
 
@@ -128,23 +109,12 @@ bool operator<=(const DedicatedResourceInNode::Req_t& lhs,
 bool operator<=(const DedicatedResourceInNode& lhs,
                 const DedicatedResourceInNode& rhs) {
   for (const auto& [lhs_name, lhs_type_slots_map] : lhs.name_type_slots_map) {
-    // type_slots_map always not empty
-    if (!rhs.contains(lhs_name) && !lhs_type_slots_map.IsZero()) {
-      return false;
-    }
+    auto rhs_it = rhs.name_type_slots_map.find(lhs_name);
+    if (rhs_it == rhs.name_type_slots_map.end()) return false;
 
-    for (const auto& [lhs_type, lhs_slots] :
-         lhs_type_slots_map.type_slots_map) {
-      // slots always not empty
-      if (!rhs.at(lhs_name).contains(lhs_type)) {
-        return false;
-      }
-
-      if (!std::ranges::includes(rhs.at(lhs_name).at(lhs_type), lhs_slots)) {
-        return false;
-      }
-    }
+    if (!(lhs_type_slots_map <= rhs_it->second)) return false;
   }
+
   return true;
 }
 
@@ -292,15 +262,17 @@ DedicatedResource::DedicatedResource(
 DedicatedResource::operator crane::grpc::DedicatedResource() const {
   crane::grpc::DedicatedResource val{};
   for (const auto& [craned_id, gres] : craned_id_dres_in_node_map) {
+    auto* each_node_gres = val.mutable_each_node_gres();
+
     for (const auto& [name, type_slots_map] : gres.name_type_slots_map) {
-      {
-        for (const auto& [type, slots] : type_slots_map.type_slots_map) {
-          (*(*(*val.mutable_each_node_gres())[craned_id]
-                  .mutable_name_type_map())[name]
-                .mutable_type_slots_map())[type]
-              .mutable_slots()
-              ->Assign(slots.begin(), slots.end());
-        }
+      auto* name_type_map =
+          (*each_node_gres)[craned_id].mutable_name_type_map();
+
+      for (const auto& [type, slots] : type_slots_map.type_slots_map) {
+        auto* grpc_type_slots_map =
+            (*name_type_map)[name].mutable_type_slots_map();
+        (*grpc_type_slots_map)[type].mutable_slots()->Assign(slots.begin(),
+                                                             slots.end());
       }
     }
   }
@@ -424,4 +396,15 @@ TypeSlotsMap& TypeSlotsMap::operator-=(const TypeSlotsMap& rhs) {
 
 bool operator==(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs) {
   return lhs.type_slots_map == rhs.type_slots_map;
+}
+
+bool operator<=(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs) {
+  for (const auto& [lhs_type, lhs_slots] : lhs.type_slots_map) {
+    auto rhs_it = rhs.type_slots_map.find(lhs_type);
+    if (rhs_it == rhs.type_slots_map.end()) return false;
+
+    if (!std::ranges::includes(rhs_it->second, lhs_slots)) return false;
+  }
+
+  return true;
 }

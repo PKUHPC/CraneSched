@@ -207,6 +207,7 @@ struct TypeSlotsMap {
 };
 
 bool operator==(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs);
+bool operator<=(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs);
 
 struct DedicatedResourceInNode {
   // user req type
