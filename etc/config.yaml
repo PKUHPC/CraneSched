@@ -17,7 +17,6 @@ DomainSuffix: riley.local
 
 # Other configurations to be used
 DbConfigPath: /etc/crane/database.yaml
-PluginConfigPath: /etc/crane/plugin.yaml
 
 # Data storage settings
 CraneBaseDir: /var/crane/
@@ -99,3 +98,15 @@ ScheduledBatchSize: 100000
 # if this option is set to true.
 # Default value is false.
 RejectJobsBeyondCapacity: false
+
+Plugin:
+  # Toggle the plugin module in CraneSched
+  Enabled: true
+  # Relative to CraneBaseDir
+  PlugindSockPath: "cranectld/cplugind.sock"
+  PlugindDebugLevel: "trace"
+  # Plugins to be loaded in Plugind
+  Plugins:
+    - Name: "dummy"
+      Path: "/path/to/dummy.so"
+      Config: "/path/to/dummy.yaml"

@@ -41,11 +41,6 @@ using crane::grpc::plugin::CranePluginD;
 using grpc::Channel;
 using moodycamel::ConcurrentQueue;
 
-struct PluginConfig {
-  bool Enabled{false};
-  std::string PlugindSockPath;
-};
-
 class PluginClient {
  public:
   PluginClient() = default;

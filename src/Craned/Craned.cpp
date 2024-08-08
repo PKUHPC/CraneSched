@@ -339,6 +339,20 @@ void ParseConfig(int argc, char** argv) {
           else
             g_config.CranedForeground = false;
         }
+
+        if (config["Plugin"]) {
+          const auto& plugin_config = config["Plugin"];
+
+          if (plugin_config["Enabled"])
+            g_config.Plugin.Enabled = config["Enabled"].as<bool>();
+
+          if (plugin_config["PlugindPort"]) {
+            g_config.Plugin.PlugindPort =
+                config["PlugindPort"].as<std::string>();
+          } else {
+            g_config.Plugin.PlugindPort = kPlugindDefaultPort;
+          }
+        }
       }
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,

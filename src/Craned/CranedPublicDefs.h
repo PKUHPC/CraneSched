@@ -62,6 +62,12 @@ struct Config {
     std::string UnixSocketListenAddr;
   };
 
+  struct PluginConfig {
+    bool Enabled{false};
+    std::string PlugindPort;
+  };
+  PluginConfig Plugin;
+
   CranedListenConf ListenConf;
   bool CompressedRpc{};
 

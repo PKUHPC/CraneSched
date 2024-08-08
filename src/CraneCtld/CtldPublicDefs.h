@@ -107,7 +107,7 @@ struct Config {
     uint32_t WeightQOS;
   };
 
-  struct PluginConf {
+  struct PluginConfig {
     bool Enabled{false};
     std::string PlugindSockPath;
   };
@@ -141,7 +141,7 @@ struct Config {
   std::string DbName;
 
   // Plugin config
-  PluginConf Plugin;
+  PluginConfig Plugin;
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;

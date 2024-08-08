@@ -90,6 +90,5 @@
 // Logger.h must be the first
 
 #include "crane/PasswordEntry.h"
-#include "crane/PluginClient.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"

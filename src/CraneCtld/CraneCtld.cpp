@@ -47,8 +47,6 @@ void ParseConfig(int argc, char** argv) {
       cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
       ("D,db-config", "Path to DB configuration file",
        cxxopts::value<std::string>()->default_value(kDefaultDbConfigPath))
-      ("P,plugin-config", "Path to plugin configuration file",
-       cxxopts::value<std::string>()->default_value(kDefaultPluginConfigPath))
       ("l,listen", "Listening address, format: <IP>:<port>",
       cxxopts::value<std::string>()->default_value("0.0.0.0"))
       ("p,port", "Listening port, format: <IP>:<port>",
@@ -79,8 +77,6 @@ void ParseConfig(int argc, char** argv) {
 
   std::string config_path = parsed_args["config"].as<std::string>();
   std::string db_config_path = parsed_args["db-config"].as<std::string>();
-  std::string plugin_config_path =
-      parsed_args["plugin-config"].as<std::string>();
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
@@ -126,9 +122,6 @@ void ParseConfig(int argc, char** argv) {
       // External configuration file path
       if (!parsed_args.count("db-config") && config["DbConfigPath"]) {
         db_config_path = config["DbConfigPath"].as<std::string>();
-      }
-      if (!parsed_args.count("plugin-config") && config["PluginConfigPath"]) {
-        plugin_config_path = config["PluginConfigPath"].as<std::string>();
       }
 
       if (config["CraneCtldMutexFilePath"])
@@ -475,6 +468,23 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
       }
+
+      if (config["Plugin"]) {
+        const auto& plugin_config = config["Plugin"];
+
+        if (plugin_config["Enabled"])
+          g_config.Plugin.Enabled = config["Enabled"].as<bool>();
+
+        if (plugin_config["PlugindSockPath"]) {
+          g_config.Plugin.PlugindSockPath =
+              fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                          config["PlugindSockPath"].as<std::string>());
+        } else {
+          g_config.Plugin.PlugindSockPath =
+              fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                          kDefaultPlugindUnixSockPath);
+        }
+      }
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", config_path, e.what());
       std::exit(1);
@@ -539,30 +549,6 @@ void ParseConfig(int argc, char** argv) {
     }
   } else {
     CRANE_CRITICAL("Database config file '{}' not existed", db_config_path);
-    std::exit(1);
-  }
-
-  if (std::filesystem::exists(plugin_config_path)) {
-    try {
-      YAML::Node config = YAML::LoadFile(plugin_config_path);
-
-      if (config["Enabled"])
-        g_config.Plugin.Enabled = config["Enabled"].as<bool>();
-
-      if (config["PlugindSockPath"])
-        g_config.Plugin.PlugindSockPath =
-            fmt::format("unix://{}{}", g_config.CraneBaseDir,
-                        config["PlugindSockPath"].as<std::string>());
-      else
-        g_config.Plugin.PlugindSockPath = fmt::format(
-            "unix://{}{}", g_config.CraneBaseDir, "cranectld/cplugind.sock");
-    } catch (YAML::BadFile& e) {
-      CRANE_CRITICAL("Can't open plugin config file {}: {}", plugin_config_path,
-                     e.what());
-      std::exit(1);
-    }
-  } else {
-    CRANE_CRITICAL("Plugin config file '{}' not existed", plugin_config_path);
     std::exit(1);
   }
 
