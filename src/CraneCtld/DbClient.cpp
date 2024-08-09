@@ -300,6 +300,7 @@ bool MongodbClient::FetchJobRecords(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
+  // 30 type          extra_attr
 
   try {
     for (auto view : cursor) {
@@ -336,6 +337,8 @@ bool MongodbClient::FetchJobRecords(
       task->set_exit_code(view["exit_code"].get_int32().value);
 
       task->set_type((crane::grpc::TaskType)view["type"].get_int32().value);
+
+      task->set_extra_attr(view["extra_attr"].get_string().value.data());
     }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
@@ -813,10 +816,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type
+  // 30 type          extra_attr
 
   // clang-format off
-  std::array<std::string, 31> fields{
+  std::array<std::string, 32> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -830,7 +833,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 25 - 29
     "submit_line", "exit_code",  "username", "qos", "get_user_env",
     // 30
-    "type",
+    "type", "extra_attr", 
   };
   // clang-format on
 
@@ -840,7 +843,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
-             int32_t>                                              /*30*/
+             int32_t, std::string>                                 /*30-31*/
 
       values{// 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
@@ -868,8 +871,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              task_to_ctld.cmd_line(), runtime_attr.exit_code(),
              runtime_attr.username(), task_to_ctld.qos(),
              task_to_ctld.get_user_env(),
-             // 30
-             task_to_ctld.type()};
+             // 30-31
+             task_to_ctld.type(), task_to_ctld.extra_attr()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -892,10 +895,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type
+  // 30 type          extra_attr
 
   // clang-format off
-  std::array<std::string, 31> fields{
+  std::array<std::string, 32> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -909,7 +912,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 25 - 29
       "submit_line", "exit_code",  "username", "qos", "get_user_env",
       // 30
-      "type",
+      "type", "extra_attr",
   };
   // clang-format on
 
@@ -919,7 +922,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
-             int32_t>                                              /*30*/
+             int32_t, std::string>                                 /*30-31*/
 
       values{
           // 0-4
@@ -941,8 +944,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
           // 25-29
           task->cmd_line, task->ExitCode(), task->Username(), task->qos,
           task->get_user_env,
-          // 30
-          task->type};
+          // 30-31
+          task->type, task->extra_attr};
 
   return DocumentConstructor_(fields, values);
 }

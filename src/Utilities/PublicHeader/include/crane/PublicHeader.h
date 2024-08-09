@@ -59,6 +59,7 @@ enum class CraneErr : uint16_t {
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kCforedDefaultPort = "10012";
+inline const char* kPlugindDefaultPort = "10013";
 
 inline const char* kDefaultConfigPath = "/etc/crane/config.yaml";
 inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
@@ -74,6 +75,7 @@ inline const char* kDefaultCraneBaseDir = "/var/crane/";
 inline const char* kDefaultCraneCtldMutexFile = "cranectld/cranectld.lock";
 inline const char* kDefaultCraneCtldLogPath = "cranectld/cranectld.log";
 inline const char* kDefaultCraneCtldDbPath = "cranectld/embedded.db";
+inline const char* kDefaultPlugindUnixSockPath = "cranectld/cplugind.sock";
 
 inline const char* kDefaultCranedScriptDir = "craned/scripts";
 inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";

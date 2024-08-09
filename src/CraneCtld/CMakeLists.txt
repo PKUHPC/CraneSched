@@ -25,6 +25,7 @@ target_link_libraries(cranectld PRIVATE
         concurrentqueue
 
         Utility_PublicHeader
+        Utility_PluginClient
 
         dev_event_core
         dev_event_pthreads

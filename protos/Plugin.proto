@@ -1,0 +1,57 @@
+/**
+ * Copyright (c) 2024 Peking University and Peking University
+ * Changsha Institute for Computing and Digital Economy
+ *
+ * CraneSched is licensed under Mulan PSL v2.
+ * You can use this software according to the terms and conditions of
+ * the Mulan PSL v2.
+ * You may obtain a copy of Mulan PSL v2 at:
+ *          http://license.coscl.org.cn/MulanPSL2
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS,
+ * WITHOUT WARRANTIES OF ANY KIND,
+ * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+ * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+ * See the Mulan PSL v2 for more details.
+ */
+
+syntax = "proto3";
+
+package crane.grpc.plugin; 
+option go_package = "/protos";
+
+import "PublicDefs.proto";
+
+message StartHookRequest {
+  repeated TaskInfo task_info_list = 1;
+}
+
+message StartHookReply {
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  repeated TaskIdReply result = 1;
+}
+
+message EndHookRequest {
+  repeated TaskInfo task_info_list = 1;
+}
+
+message EndHookReply {
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  repeated TaskIdReply result = 1;
+}
+
+
+service CranePluginD {
+  /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */  
+  rpc StartHook(StartHookRequest) returns (StartHookReply);
+  rpc EndHook(EndHookRequest) returns (EndHookReply);
+}
