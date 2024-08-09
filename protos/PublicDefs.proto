@@ -57,10 +57,21 @@ message DedicatedResourceInNode{
   map <string /*device name*/, DeviceTypeSlotsMap> name_type_map = 1;
 }
 
+message ResourceInNode {
+  AllocatableResource allocatable_res_in_node = 1;
+  DedicatedResourceInNode dedicated_res_in_node = 2;
+}
+
+message ResourceV2{
+  map <string /*craned id*/, ResourceInNode> each_node_res = 1;
+}
+
+// Old implementation
 message DedicatedResource {
   map <string /*craned id*/, DedicatedResourceInNode> each_node_gres = 1;
 }
 
+// Old implementation
 message Resources {
   AllocatableResource allocatable_resource = 1;
 

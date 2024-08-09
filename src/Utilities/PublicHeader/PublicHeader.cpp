@@ -158,6 +158,11 @@ AllocatableResource::operator crane::grpc::AllocatableResource() const {
   return val;
 }
 
+bool AllocatableResource::IsZero() const {
+  return cpu_count == static_cast<cpu_t>(0) && memory_bytes == 0 &&
+         memory_sw_bytes == 0;
+}
+
 Resources& Resources::operator+=(const Resources& rhs) {
   allocatable_resource += rhs.allocatable_resource;
   dedicated_resource += rhs.dedicated_resource;
@@ -260,34 +265,19 @@ bool DedicatedResource::IsZero() const {
 
 DedicatedResource::DedicatedResource(
     const crane::grpc::DedicatedResource& rhs) {
-  for (const auto& [craned_id, gres] : rhs.each_node_gres()) {
-    auto& this_craned_gres_map =
-        this->craned_id_dres_in_node_map[craned_id].name_type_slots_map;
-    for (const auto& [name, type_slots_map] : gres.name_type_map()) {
-      for (const auto& [type, slots] : type_slots_map.type_slots_map())
-        this_craned_gres_map[name][type].insert(slots.slots().begin(),
-                                                slots.slots().end());
-    }
-  }
+  for (const auto& [craned_id, dres_in_node] : rhs.each_node_gres())
+    this->craned_id_dres_in_node_map.emplace(craned_id, dres_in_node);
 }
 
 DedicatedResource::operator crane::grpc::DedicatedResource() const {
   crane::grpc::DedicatedResource val{};
+
+  auto* grpc_each_node_gres = val.mutable_each_node_gres();
   for (const auto& [craned_id, gres] : craned_id_dres_in_node_map) {
-    auto* each_node_gres = val.mutable_each_node_gres();
-
-    for (const auto& [name, type_slots_map] : gres.name_type_slots_map) {
-      auto* name_type_map =
-          (*each_node_gres)[craned_id].mutable_name_type_map();
-
-      for (const auto& [type, slots] : type_slots_map.type_slots_map) {
-        auto* grpc_type_slots_map =
-            (*name_type_map)[name].mutable_type_slots_map();
-        (*grpc_type_slots_map)[type].mutable_slots()->Assign(slots.begin(),
-                                                             slots.end());
-      }
-    }
+    auto& grpc_gres = (*grpc_each_node_gres)[craned_id];
+    grpc_gres = static_cast<crane::grpc::DedicatedResourceInNode>(gres);
   }
+
   return val;
 }
 
@@ -346,6 +336,24 @@ const TypeSlotsMap& DedicatedResourceInNode::at(
   return this->name_type_slots_map.at(device_name);
 }
 
+DedicatedResourceInNode::DedicatedResourceInNode(
+    const crane::grpc::DedicatedResourceInNode& rhs) {
+  for (const auto& [name, type_slots_map] : rhs.name_type_map())
+    // Implicitly call grpc::DeviceTypeSlotsMap -> TypeSlotsMap conversion
+    this->name_type_slots_map.emplace(name, type_slots_map);
+}
+
+DedicatedResourceInNode& DedicatedResourceInNode::operator=(
+    const crane::grpc::DedicatedResourceInNode& rhs) {
+  this->name_type_slots_map.clear();
+
+  for (const auto& [name, type_slots_map] : rhs.name_type_map())
+    // Implicitly call grpc::DeviceTypeSlotsMap -> TypeSlotsMap conversion
+    this->name_type_slots_map[name] = type_slots_map;
+
+  return *this;
+}
+
 bool DedicatedResourceInNode::contains(const std::string& device_name) const {
   return this->name_type_slots_map.contains(device_name);
 }
@@ -369,6 +377,44 @@ DedicatedResourceInNode::operator crane::grpc::DeviceMap() const {
   }
 
   return dv_map;
+}
+
+DedicatedResourceInNode::operator crane::grpc::DedicatedResourceInNode() const {
+  crane::grpc::DedicatedResourceInNode val{};
+  auto* grpc_name_type_map = val.mutable_name_type_map();
+
+  for (const auto& [device_name, type_slots_map] : this->name_type_slots_map) {
+    auto& grpc_type_slots_map = (*grpc_name_type_map)[device_name];
+    grpc_type_slots_map =
+        static_cast<crane::grpc::DeviceTypeSlotsMap>(type_slots_map);
+  }
+
+  return val;
+}
+
+TypeSlotsMap::TypeSlotsMap(const crane::grpc::DeviceTypeSlotsMap& rhs) {
+  for (const auto& [type, slots] : rhs.type_slots_map())
+    this->type_slots_map[type].insert(slots.slots().begin(),
+                                      slots.slots().end());
+}
+
+TypeSlotsMap& TypeSlotsMap::operator=(
+    const crane::grpc::DeviceTypeSlotsMap& rhs) {
+  this->type_slots_map.clear();
+  for (const auto& [type, slots] : rhs.type_slots_map())
+    this->type_slots_map[type].insert(slots.slots().begin(),
+                                      slots.slots().end());
+  return *this;
+}
+
+TypeSlotsMap::operator crane::grpc::DeviceTypeSlotsMap() const {
+  crane::grpc::DeviceTypeSlotsMap val{};
+  for (const auto& [type, slots] : type_slots_map) {
+    auto* grpc_type_slots_map = val.mutable_type_slots_map();
+    auto* grpc_slots = (*grpc_type_slots_map)[type].mutable_slots();
+    grpc_slots->Assign(slots.begin(), slots.end());
+  }
+  return val;
 }
 
 bool TypeSlotsMap::IsZero() const { return type_slots_map.empty(); }
@@ -419,4 +465,112 @@ bool operator<=(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs) {
   }
 
   return true;
+}
+
+ResourceInNode::ResourceInNode(const crane::grpc::ResourceInNode& rhs) {
+  allocatable_res_in_node = rhs.allocatable_res_in_node();
+  dedicated_res_in_node = rhs.dedicated_res_in_node();
+}
+
+ResourceInNode::operator crane::grpc::ResourceInNode() const {
+  crane::grpc::ResourceInNode val{};
+
+  auto* grpc_allocatable_res_in_node = val.mutable_allocatable_res_in_node();
+  *grpc_allocatable_res_in_node =
+      static_cast<crane::grpc::AllocatableResource>(allocatable_res_in_node);
+
+  auto* grpc_dedicated_res_in_node = val.mutable_dedicated_res_in_node();
+  *grpc_dedicated_res_in_node =
+      static_cast<crane::grpc::DedicatedResourceInNode>(dedicated_res_in_node);
+
+  return val;
+}
+
+ResourceInNode& ResourceInNode::operator+=(const ResourceInNode& rhs) {
+  allocatable_res_in_node += rhs.allocatable_res_in_node;
+  dedicated_res_in_node += rhs.dedicated_res_in_node;
+  return *this;
+}
+
+ResourceInNode& ResourceInNode::operator-=(const ResourceInNode& rhs) {
+  allocatable_res_in_node -= rhs.allocatable_res_in_node;
+  dedicated_res_in_node -= rhs.dedicated_res_in_node;
+  return *this;
+}
+
+bool ResourceInNode::IsZero() const {
+  return allocatable_res_in_node.IsZero() && dedicated_res_in_node.IsZero();
+}
+
+bool operator<=(const ResourceInNode& lhs, const ResourceInNode& rhs) {
+  return lhs.allocatable_res_in_node <= rhs.allocatable_res_in_node &&
+         lhs.dedicated_res_in_node <= rhs.dedicated_res_in_node;
+}
+
+bool operator==(const ResourceInNode& lhs, const ResourceInNode& rhs) {
+  return lhs.allocatable_res_in_node == rhs.allocatable_res_in_node &&
+         lhs.dedicated_res_in_node == rhs.dedicated_res_in_node;
+}
+
+ResourceV2::ResourceV2(const crane::grpc::ResourceV2& rhs) {
+  for (const auto& [node_id, res_in_node] : rhs.each_node_res())
+    this->each_node_res_map.emplace(node_id, res_in_node);
+}
+
+ResourceV2::operator crane::grpc::ResourceV2() const {
+  crane::grpc::ResourceV2 val{};
+
+  auto* grpc_each_node_res = val.mutable_each_node_res();
+  for (const auto& [node_id, res_in_node] : this->each_node_res_map) {
+    auto& grpc_res_in_node = (*grpc_each_node_res)[node_id];
+    grpc_res_in_node = static_cast<crane::grpc::ResourceInNode>(res_in_node);
+  }
+
+  return val;
+}
+
+ResourceV2& ResourceV2::operator=(const crane::grpc::ResourceV2& rhs) {
+  this->each_node_res_map.clear();
+
+  for (const auto& [node_id, res_in_node] : rhs.each_node_res())
+    this->each_node_res_map.emplace(node_id, res_in_node);
+
+  return *this;
+}
+
+ResourceV2& ResourceV2::operator+=(const ResourceV2& rhs) {
+  for (const auto& [rhs_node_id, rhs_res_in_node] : rhs.each_node_res_map)
+    this->each_node_res_map[rhs_node_id] += rhs_res_in_node;
+
+  return *this;
+}
+
+ResourceV2& ResourceV2::operator-=(const ResourceV2& rhs) {
+  for (const auto& [rhs_node_id, rhs_res_in_node] : rhs.each_node_res_map) {
+    auto rhs_it = this->each_node_res_map.find(rhs_node_id);
+    if (rhs_it == this->each_node_res_map.end()) continue;
+
+    rhs_it->second -= rhs_res_in_node;
+
+    if (rhs_it->second.IsZero()) this->each_node_res_map.erase(rhs_it);
+  }
+
+  return *this;
+}
+
+bool ResourceV2::IsZero() const { return each_node_res_map.empty(); }
+
+bool operator<=(const ResourceV2& lhs, const ResourceV2& rhs) {
+  for (const auto& [lhs_node_id, lhs_res_in_node] : lhs.each_node_res_map) {
+    auto rhs_it = rhs.each_node_res_map.find(lhs_node_id);
+    if (rhs_it == rhs.each_node_res_map.end()) return false;
+
+    if (!(lhs_res_in_node <= rhs_it->second)) return false;
+  }
+
+  return true;
+}
+
+bool operator==(const ResourceV2& lhs, const ResourceV2& rhs) {
+  return lhs.each_node_res_map == rhs.each_node_res_map;
 }

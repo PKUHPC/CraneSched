@@ -22,7 +22,7 @@
 
 namespace Ctld {
 
-void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
+void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
   CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
   auto& part_ids = craned_id_part_ids_map_.at(craned_id);
 
@@ -58,7 +58,7 @@ void CranedMetaContainerSimpleImpl::CranedUp(const CranedId& craned_id) {
   });
 }
 
-void CranedMetaContainerSimpleImpl::CranedDown(const CranedId& craned_id) {
+void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
   auto& part_ids = craned_id_part_ids_map_.at(craned_id);
 
@@ -103,35 +103,35 @@ void CranedMetaContainerSimpleImpl::CranedDown(const CranedId& craned_id) {
   node_meta->running_task_resource_map.clear();
 }
 
-bool CranedMetaContainerSimpleImpl::CheckCranedOnline(
-    const CranedId& craned_id) {
+bool CranedMetaContainer::CheckCranedOnline(const CranedId& craned_id) {
   CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
   auto node_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
   return node_meta->alive;
 }
 
-CranedMetaContainerInterface::PartitionMetaPtr
-CranedMetaContainerSimpleImpl::GetPartitionMetasPtr(PartitionId partition_id) {
+CranedMetaContainer::PartitionMetaPtr CranedMetaContainer::GetPartitionMetasPtr(
+    PartitionId partition_id) {
   return partition_metas_map_.GetValueExclusivePtr(partition_id);
 }
 
-CranedMetaContainerInterface::CranedMetaPtr
-CranedMetaContainerSimpleImpl::GetCranedMetaPtr(CranedId craned_id) {
+CranedMetaContainer::CranedMetaPtr CranedMetaContainer::GetCranedMetaPtr(
+    CranedId craned_id) {
   return craned_meta_map_.GetValueExclusivePtr(craned_id);
 }
 
-CranedMetaContainerInterface::AllPartitionsMetaMapConstPtr
-CranedMetaContainerSimpleImpl::GetAllPartitionsMetaMapConstPtr() {
+CranedMetaContainer::AllPartitionsMetaMapConstPtr
+CranedMetaContainer::GetAllPartitionsMetaMapConstPtr() {
   return partition_metas_map_.GetMapConstSharedPtr();
 }
 
-CranedMetaContainerInterface::CranedMetaMapConstPtr
-CranedMetaContainerSimpleImpl::GetCranedMetaMapConstPtr() {
+CranedMetaContainer::CranedMetaMapConstPtr
+CranedMetaContainer::GetCranedMetaMapConstPtr() {
   return craned_meta_map_.GetMapConstSharedPtr();
 }
 
-void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
-    CranedId node_id, task_id_t task_id, const Resources& resources) {
+void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
+                                                 task_id_t task_id,
+                                                 const Resources& resources) {
   if (!craned_meta_map_.Contains(node_id)) {
     CRANE_ERROR("Try to malloc resource from an unknown craned {}", node_id);
     return;
@@ -175,8 +175,8 @@ void CranedMetaContainerSimpleImpl::MallocResourceFromNode(
   }
 }
 
-void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId node_id,
-                                                         uint32_t task_id) {
+void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
+                                               uint32_t task_id) {
   if (!craned_meta_map_.Contains(node_id)) {
     CRANE_ERROR("Try to free resource from an unknown craned {}", node_id);
     return;
@@ -235,7 +235,7 @@ void CranedMetaContainerSimpleImpl::FreeResourceFromNode(CranedId node_id,
   node_meta->running_task_resource_map.erase(resource_iter);
 }
 
-void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
+void CranedMetaContainer::InitFromConfig(const Config& config) {
   HashMap<CranedId, CranedMeta> craned_map;
   HashMap<PartitionId, PartitionMeta> partition_map;
 
@@ -312,8 +312,7 @@ void CranedMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
   partition_metas_map_.InitFromMap(std::move(partition_map));
 }
 
-crane::grpc::QueryCranedInfoReply
-CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
+crane::grpc::QueryCranedInfoReply CranedMetaContainer::QueryAllCranedInfo() {
   crane::grpc::QueryCranedInfoReply reply;
   auto* list = reply.mutable_craned_info_list();
 
@@ -327,8 +326,8 @@ CranedMetaContainerSimpleImpl::QueryAllCranedInfo() {
   return reply;
 }
 
-crane::grpc::QueryCranedInfoReply
-CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
+crane::grpc::QueryCranedInfoReply CranedMetaContainer::QueryCranedInfo(
+    const std::string& node_name) {
   crane::grpc::QueryCranedInfoReply reply;
   auto* list = reply.mutable_craned_info_list();
 
@@ -345,7 +344,7 @@ CranedMetaContainerSimpleImpl::QueryCranedInfo(const std::string& node_name) {
 }
 
 crane::grpc::QueryPartitionInfoReply
-CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
+CranedMetaContainer::QueryAllPartitionInfo() {
   crane::grpc::QueryPartitionInfoReply reply;
   auto* list = reply.mutable_partition_info();
 
@@ -378,8 +377,7 @@ CranedMetaContainerSimpleImpl::QueryAllPartitionInfo() {
   return reply;
 }
 
-crane::grpc::QueryPartitionInfoReply
-CranedMetaContainerSimpleImpl::QueryPartitionInfo(
+crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
     const std::string& partition_name) {
   crane::grpc::QueryPartitionInfoReply reply;
   auto* list = reply.mutable_partition_info();
@@ -410,8 +408,7 @@ CranedMetaContainerSimpleImpl::QueryPartitionInfo(
   return reply;
 }
 
-crane::grpc::QueryClusterInfoReply
-CranedMetaContainerSimpleImpl::QueryClusterInfo(
+crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
     const crane::grpc::QueryClusterInfoRequest& request) {
   crane::grpc::QueryClusterInfoReply reply;
   auto* partition_list = reply.mutable_partitions();
@@ -552,8 +549,7 @@ CranedMetaContainerSimpleImpl::QueryClusterInfo(
   return reply;
 }
 
-crane::grpc::ModifyCranedStateReply
-CranedMetaContainerSimpleImpl::ChangeNodeState(
+crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     const crane::grpc::ModifyCranedStateRequest& request) {
   crane::grpc::ModifyCranedStateReply reply;
 
@@ -587,7 +583,7 @@ CranedMetaContainerSimpleImpl::ChangeNodeState(
   return reply;
 }
 
-void CranedMetaContainerSimpleImpl::AddDedicatedResource(
+void CranedMetaContainer::AddDedicatedResource(
     const CranedId& node_id, const DedicatedResourceInNode& resource) {
   if (!craned_meta_map_.Contains(node_id)) {
     CRANE_ERROR("Try to free resource from an unknown craned {}", node_id);
@@ -659,7 +655,7 @@ void CranedMetaContainerSimpleImpl::AddDedicatedResource(
   }
 }
 
-void CranedMetaContainerSimpleImpl::SetGrpcCranedInfoByCranedMeta_(
+void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
     const CranedMeta& craned_meta, crane::grpc::CranedInfo* craned_info) {
   const std::string& craned_index = craned_meta.static_meta.hostname;
 

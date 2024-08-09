@@ -182,10 +182,11 @@ struct AllocatableResource {
   AllocatableResource& operator=(const crane::grpc::AllocatableResource&);
 
   AllocatableResource& operator+=(const AllocatableResource& rhs);
-
   AllocatableResource& operator-=(const AllocatableResource& rhs);
 
   explicit operator crane::grpc::AllocatableResource() const;
+
+  bool IsZero() const;
 };
 
 bool operator<=(const AllocatableResource& lhs, const AllocatableResource& rhs);
@@ -195,6 +196,12 @@ bool operator==(const AllocatableResource& lhs, const AllocatableResource& rhs);
 struct TypeSlotsMap {
   std::unordered_map<std::string /*type*/, std::set<SlotId> /*index*/>
       type_slots_map;
+
+  TypeSlotsMap() = default;
+  explicit TypeSlotsMap(const crane::grpc::DeviceTypeSlotsMap& rhs);
+  TypeSlotsMap& operator=(const crane::grpc::DeviceTypeSlotsMap& rhs);
+
+  explicit operator crane::grpc::DeviceTypeSlotsMap() const;
 
   bool IsZero() const;
   bool contains(const std::string& type) const;
@@ -217,6 +224,12 @@ struct DedicatedResourceInNode {
           uint64_t /*untyped req count*/,
           std::unordered_map<std::string /*type*/, uint64_t /*type total*/>>>;
 
+  DedicatedResourceInNode() = default;
+  explicit DedicatedResourceInNode(
+      const crane::grpc::DedicatedResourceInNode& rhs);
+  DedicatedResourceInNode& operator=(
+      const crane::grpc::DedicatedResourceInNode& rhs);
+
   // Access operators
   TypeSlotsMap& operator[](const std::string& device_name);
   TypeSlotsMap& at(const std::string& device_name);
@@ -230,6 +243,7 @@ struct DedicatedResourceInNode {
   bool IsZero() const;
 
   explicit operator crane::grpc::DeviceMap() const;
+  explicit operator crane::grpc::DedicatedResourceInNode() const;
 
  public:
   // config: gpu:a100 whit file /dev/nvidia[0-3]
@@ -244,6 +258,24 @@ bool operator<=(const DedicatedResourceInNode& lhs,
 bool operator==(const DedicatedResourceInNode& lhs,
                 const DedicatedResourceInNode& rhs);
 
+struct ResourceInNode {
+  AllocatableResource allocatable_res_in_node;
+  DedicatedResourceInNode dedicated_res_in_node;
+
+  ResourceInNode() = default;
+  explicit ResourceInNode(const crane::grpc::ResourceInNode& rhs);
+
+  explicit operator crane::grpc::ResourceInNode() const;
+
+  ResourceInNode& operator+=(const ResourceInNode& rhs);
+  ResourceInNode& operator-=(const ResourceInNode& rhs);
+
+  bool IsZero() const;
+};
+
+bool operator<=(const ResourceInNode& lhs, const ResourceInNode& rhs);
+bool operator==(const ResourceInNode& lhs, const ResourceInNode& rhs);
+
 /**
  * Model the dedicated resources in a craned node.
  * It contains GPU, NIC, etc.
@@ -254,6 +286,8 @@ struct DedicatedResource {
 
   DedicatedResource() = default;
   explicit DedicatedResource(const crane::grpc::DedicatedResource& rhs);
+
+  explicit operator crane::grpc::DedicatedResource() const;
 
   // Arithmetic operators
   DedicatedResource& operator+=(const DedicatedResource& rhs);
@@ -270,8 +304,6 @@ struct DedicatedResource {
 
   bool contains(const CranedId& craned_id) const;
   bool IsZero() const;
-
-  explicit operator crane::grpc::DedicatedResource() const;
 };
 
 bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs);
@@ -302,6 +334,24 @@ struct Resources {
 // all nodes involved in the task.
 bool operator<=(const Resources& lhs, const Resources& rhs);
 bool operator==(const Resources& lhs, const Resources& rhs);
+
+struct ResourceV2 {
+  std::unordered_map<std::string /*craned id*/, ResourceInNode>
+      each_node_res_map;
+
+  ResourceV2() = default;
+  explicit ResourceV2(const crane::grpc::ResourceV2& rhs);
+  explicit operator crane::grpc::ResourceV2() const;
+  ResourceV2& operator=(const crane::grpc::ResourceV2& rhs);
+
+  ResourceV2& operator+=(const ResourceV2& rhs);
+  ResourceV2& operator-=(const ResourceV2& rhs);
+
+  bool IsZero() const;
+};
+
+bool operator<=(const ResourceV2& lhs, const ResourceV2& rhs);
+bool operator==(const ResourceV2& lhs, const ResourceV2& rhs);
 
 struct CgroupSpec {
   uid_t uid;

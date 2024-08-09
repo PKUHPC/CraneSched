@@ -25,11 +25,8 @@
 
 namespace Ctld {
 
-/**
- * All public methods in this class is thread-safe.
- */
-class CranedMetaContainerInterface {
- protected:
+class CranedMetaContainer final {
+ public:
   template <typename K, typename V,
             typename Hash = absl::container_internal::hash_default_hash<K>>
   using HashMap = absl::flat_hash_map<K, V, Hash>;
@@ -44,11 +41,6 @@ class CranedMetaContainerInterface {
   template <typename K>
   using TreeSet = absl::btree_set<K>;
 
-  CranedMetaContainerInterface() = default;
-
- public:
-  //  using AllPartitionsMetaMap = std::unordered_map<PartitionId,
-  //  PartitionMeta>;
   using AllPartitionsMetaAtomicMap =
       util::AtomicHashMap<HashMap, PartitionId, PartitionMeta>;
   using AllPartitionsMetaRawMap = AllPartitionsMetaAtomicMap::RawMap;
@@ -56,7 +48,6 @@ class CranedMetaContainerInterface {
   /**
    * A map from CranedId to global craned information
    */
-  //  using CranedMetaMap = std::unordered_map<CranedId, CranedMeta>;
   using CranedMetaAtomicMap =
       util::AtomicHashMap<HashMap, CranedId, CranedMeta>;
   using CranedMetaRawMap = CranedMetaAtomicMap::RawMap;
@@ -73,107 +64,52 @@ class CranedMetaContainerInterface {
       util::ManagedScopeExclusivePtr<CranedMeta,
                                      CranedMetaAtomicMap::CombinedLock>;
 
-  virtual ~CranedMetaContainerInterface() = default;
+  CranedMetaContainer() = default;
+  ~CranedMetaContainer() = default;
 
-  virtual void CranedUp(const CranedId& node_id) = 0;
-
-  virtual void CranedDown(const CranedId& node_id) = 0;
-
-  virtual bool CheckCranedOnline(const CranedId& node_id) = 0;
-
-  virtual void InitFromConfig(const Config& config) = 0;
-
-  virtual void AddDedicatedResource(
-      const CranedId& node_id, const DedicatedResourceInNode& resource) = 0;
-
-  virtual bool CheckCranedAllowed(const std::string& hostname) = 0;
-
-  virtual crane::grpc::QueryCranedInfoReply QueryAllCranedInfo() = 0;
-
-  virtual crane::grpc::QueryCranedInfoReply QueryCranedInfo(
-      const std::string& craned_name) = 0;
-
-  virtual crane::grpc::QueryPartitionInfoReply QueryAllPartitionInfo() = 0;
-
-  virtual crane::grpc::QueryPartitionInfoReply QueryPartitionInfo(
-      const std::string& partition_name) = 0;
-
-  virtual crane::grpc::QueryClusterInfoReply QueryClusterInfo(
-      const crane::grpc::QueryClusterInfoRequest& request) = 0;
-
-  virtual crane::grpc::ModifyCranedStateReply ChangeNodeState(
-      const crane::grpc::ModifyCranedStateRequest& request) = 0;
-
-  virtual void MallocResourceFromNode(CranedId node_id, uint32_t task_id,
-                                      const Resources& resources) = 0;
-
-  virtual void FreeResourceFromNode(CranedId node_id, uint32_t task_id) = 0;
-
-  /**
-   * Provide a thread-safe way to access NodeMeta.
-   * @return a ScopeExclusivePointerType class. During the initialization of
-   * this type, the unique ownership of data pointed by data is acquired. If the
-   * partition does not exist, a nullptr is returned and no lock is held. Use
-   * bool() to check it.
-   */
-  virtual PartitionMetaPtr GetPartitionMetasPtr(PartitionId partition_id) = 0;
-
-  virtual CranedMetaPtr GetCranedMetaPtr(CranedId node_id) = 0;
-
-  virtual AllPartitionsMetaMapConstPtr GetAllPartitionsMetaMapConstPtr() = 0;
-
-  virtual CranedMetaMapConstPtr GetCranedMetaMapConstPtr() = 0;
-};
-
-class CranedMetaContainerSimpleImpl final
-    : public CranedMetaContainerInterface {
- public:
-  CranedMetaContainerSimpleImpl() = default;
-  ~CranedMetaContainerSimpleImpl() override = default;
-
-  void InitFromConfig(const Config& config) override;
+  void InitFromConfig(const Config& config);
 
   void AddDedicatedResource(const CranedId& node_id,
-                            const DedicatedResourceInNode& resource) override;
+                            const DedicatedResourceInNode& resource);
 
-  crane::grpc::QueryCranedInfoReply QueryAllCranedInfo() override;
+  crane::grpc::QueryCranedInfoReply QueryAllCranedInfo();
 
   crane::grpc::QueryCranedInfoReply QueryCranedInfo(
-      const std::string& node_name) override;
+      const std::string& node_name);
 
-  crane::grpc::QueryPartitionInfoReply QueryAllPartitionInfo() override;
+  crane::grpc::QueryPartitionInfoReply QueryAllPartitionInfo();
 
   crane::grpc::QueryPartitionInfoReply QueryPartitionInfo(
-      const std::string& partition_name) override;
+      const std::string& partition_name);
 
   crane::grpc::QueryClusterInfoReply QueryClusterInfo(
-      const crane::grpc::QueryClusterInfoRequest& request) override;
+      const crane::grpc::QueryClusterInfoRequest& request);
 
   crane::grpc::ModifyCranedStateReply ChangeNodeState(
-      const crane::grpc::ModifyCranedStateRequest& request) override;
+      const crane::grpc::ModifyCranedStateRequest& request);
 
-  void CranedUp(const CranedId& craned_id) override;
+  void CranedUp(const CranedId& craned_id);
 
-  void CranedDown(const CranedId& craned_id) override;
+  void CranedDown(const CranedId& craned_id);
 
-  bool CheckCranedOnline(const CranedId& craned_id) override;
+  bool CheckCranedOnline(const CranedId& craned_id);
 
-  PartitionMetaPtr GetPartitionMetasPtr(PartitionId partition_id) override;
+  PartitionMetaPtr GetPartitionMetasPtr(PartitionId partition_id);
 
-  CranedMetaPtr GetCranedMetaPtr(CranedId craned_id) override;
+  CranedMetaPtr GetCranedMetaPtr(CranedId craned_id);
 
-  AllPartitionsMetaMapConstPtr GetAllPartitionsMetaMapConstPtr() override;
+  AllPartitionsMetaMapConstPtr GetAllPartitionsMetaMapConstPtr();
 
-  CranedMetaMapConstPtr GetCranedMetaMapConstPtr() override;
+  CranedMetaMapConstPtr GetCranedMetaMapConstPtr();
 
-  bool CheckCranedAllowed(const std::string& hostname) override {
+  bool CheckCranedAllowed(const std::string& hostname) {
     return craned_meta_map_.Contains(hostname);
   };
 
   void MallocResourceFromNode(CranedId node_id, task_id_t task_id,
-                              const Resources& resources) override;
+                              const Resources& resources);
 
-  void FreeResourceFromNode(CranedId craned_id, uint32_t task_id) override;
+  void FreeResourceFromNode(CranedId craned_id, uint32_t task_id);
 
  private:
   // In this part of code, the following lock sequence MUST be held
@@ -197,4 +133,4 @@ class CranedMetaContainerSimpleImpl final
 
 }  // namespace Ctld
 
-inline std::unique_ptr<Ctld::CranedMetaContainerInterface> g_meta_container;
+inline std::unique_ptr<Ctld::CranedMetaContainer> g_meta_container;

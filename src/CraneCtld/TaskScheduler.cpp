@@ -1848,7 +1848,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         running_tasks,
     absl::Time now, const PartitionId& partition_id,
     const std::unordered_set<CranedId> craned_ids,
-    const CranedMetaContainerInterface::CranedMetaRawMap& craned_meta_map,
+    const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
     NodeSelectionInfo* node_selection_info) {
   NodeSelectionInfo& node_selection_info_ref = *node_selection_info;
 
@@ -1992,7 +1992,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
 bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     const NodeSelectionInfo& node_selection_info,
     const util::Synchronized<PartitionMeta>& partition_meta_ptr,
-    const CranedMetaContainerInterface::CranedMetaRawMap& craned_meta_map,
+    const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
     TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
     absl::Time* start_time) {
   uint32_t selected_node_cnt = 0;

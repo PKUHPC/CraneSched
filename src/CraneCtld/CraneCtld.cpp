@@ -646,7 +646,7 @@ void InitializeCtldGlobalVariables() {
   // information from account manager.
   g_account_manager = std::make_unique<AccountManager>();
 
-  g_meta_container = std::make_unique<CranedMetaContainerSimpleImpl>();
+  g_meta_container = std::make_unique<CranedMetaContainer>();
   g_meta_container->InitFromConfig(g_config);
 
   bool ok;
