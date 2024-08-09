@@ -135,6 +135,22 @@ bool operator==(const DedicatedResourceInNode& lhs,
   return lhs.name_type_slots_map == rhs.name_type_slots_map;
 }
 
+DedicatedResourceInNode Intersection(const DedicatedResourceInNode& lhs,
+                                     const DedicatedResourceInNode& rhs) {
+  DedicatedResourceInNode result;
+  for (const auto& [lhs_name, lhs_type_slots_map] : lhs.name_type_slots_map) {
+    auto rhs_it = rhs.name_type_slots_map.find(lhs_name);
+    if (rhs_it == rhs.name_type_slots_map.end()) continue;
+
+    TypeSlotsMap intersection =
+        Intersection(lhs_type_slots_map, rhs_it->second);
+    if (!intersection.IsZero())
+      result.name_type_slots_map[lhs_name] = std::move(intersection);
+  }
+
+  return result;
+}
+
 AllocatableResource::AllocatableResource(
     const crane::grpc::AllocatableResource& value) {
   cpu_count = cpu_t{value.cpu_core_limit()};
@@ -161,6 +177,12 @@ AllocatableResource::operator crane::grpc::AllocatableResource() const {
 bool AllocatableResource::IsZero() const {
   return cpu_count == static_cast<cpu_t>(0) && memory_bytes == 0 &&
          memory_sw_bytes == 0;
+}
+
+void AllocatableResource::SetToZero() {
+  cpu_count = static_cast<cpu_t>(0);
+  memory_bytes = 0;
+  memory_sw_bytes = 0;
 }
 
 Resources& Resources::operator+=(const Resources& rhs) {
@@ -392,6 +414,8 @@ DedicatedResourceInNode::operator crane::grpc::DedicatedResourceInNode() const {
   return val;
 }
 
+void DedicatedResourceInNode::SetToZero() { name_type_slots_map.clear(); }
+
 TypeSlotsMap::TypeSlotsMap(const crane::grpc::DeviceTypeSlotsMap& rhs) {
   for (const auto& [type, slots] : rhs.type_slots_map())
     this->type_slots_map[type].insert(slots.slots().begin(),
@@ -467,9 +491,25 @@ bool operator<=(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs) {
   return true;
 }
 
+TypeSlotsMap Intersection(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs) {
+  TypeSlotsMap result;
+
+  for (const auto& [lhs_type, lhs_slots] : lhs.type_slots_map) {
+    auto rhs_it = rhs.type_slots_map.find(lhs_type);
+    if (rhs_it == rhs.type_slots_map.end()) continue;
+
+    std::set<SlotId> temp;
+    std::ranges::set_intersection(lhs_slots, rhs_it->second,
+                                  std::inserter(temp, temp.begin()));
+    if (!temp.empty()) result.type_slots_map[lhs_type] = std::move(temp);
+  }
+
+  return result;
+}
+
 ResourceInNode::ResourceInNode(const crane::grpc::ResourceInNode& rhs) {
-  allocatable_res_in_node = rhs.allocatable_res_in_node();
-  dedicated_res_in_node = rhs.dedicated_res_in_node();
+  allocatable_res = rhs.allocatable_res_in_node();
+  dedicated_res = rhs.dedicated_res_in_node();
 }
 
 ResourceInNode::operator crane::grpc::ResourceInNode() const {
@@ -477,44 +517,53 @@ ResourceInNode::operator crane::grpc::ResourceInNode() const {
 
   auto* grpc_allocatable_res_in_node = val.mutable_allocatable_res_in_node();
   *grpc_allocatable_res_in_node =
-      static_cast<crane::grpc::AllocatableResource>(allocatable_res_in_node);
+      static_cast<crane::grpc::AllocatableResource>(allocatable_res);
 
   auto* grpc_dedicated_res_in_node = val.mutable_dedicated_res_in_node();
   *grpc_dedicated_res_in_node =
-      static_cast<crane::grpc::DedicatedResourceInNode>(dedicated_res_in_node);
+      static_cast<crane::grpc::DedicatedResourceInNode>(dedicated_res);
 
   return val;
 }
 
 ResourceInNode& ResourceInNode::operator+=(const ResourceInNode& rhs) {
-  allocatable_res_in_node += rhs.allocatable_res_in_node;
-  dedicated_res_in_node += rhs.dedicated_res_in_node;
+  allocatable_res += rhs.allocatable_res;
+  dedicated_res += rhs.dedicated_res;
   return *this;
 }
 
 ResourceInNode& ResourceInNode::operator-=(const ResourceInNode& rhs) {
-  allocatable_res_in_node -= rhs.allocatable_res_in_node;
-  dedicated_res_in_node -= rhs.dedicated_res_in_node;
+  allocatable_res -= rhs.allocatable_res;
+  dedicated_res -= rhs.dedicated_res;
   return *this;
 }
 
 bool ResourceInNode::IsZero() const {
-  return allocatable_res_in_node.IsZero() && dedicated_res_in_node.IsZero();
+  return allocatable_res.IsZero() && dedicated_res.IsZero();
+}
+
+void ResourceInNode::SetToZero() {
+  allocatable_res.SetToZero();
+  dedicated_res.SetToZero();
 }
 
 bool operator<=(const ResourceInNode& lhs, const ResourceInNode& rhs) {
-  return lhs.allocatable_res_in_node <= rhs.allocatable_res_in_node &&
-         lhs.dedicated_res_in_node <= rhs.dedicated_res_in_node;
+  return lhs.allocatable_res <= rhs.allocatable_res &&
+         lhs.dedicated_res <= rhs.dedicated_res;
 }
 
 bool operator==(const ResourceInNode& lhs, const ResourceInNode& rhs) {
-  return lhs.allocatable_res_in_node == rhs.allocatable_res_in_node &&
-         lhs.dedicated_res_in_node == rhs.dedicated_res_in_node;
+  return lhs.allocatable_res == rhs.allocatable_res &&
+         lhs.dedicated_res == rhs.dedicated_res;
 }
 
 ResourceV2::ResourceV2(const crane::grpc::ResourceV2& rhs) {
   for (const auto& [node_id, res_in_node] : rhs.each_node_res())
     this->each_node_res_map.emplace(node_id, res_in_node);
+
+  // Update cache
+  for (const auto& [node_id, res_in_node] : each_node_res_map)
+    this->total_allocatable_res += res_in_node.allocatable_res;
 }
 
 ResourceV2::operator crane::grpc::ResourceV2() const {
@@ -526,6 +575,10 @@ ResourceV2::operator crane::grpc::ResourceV2() const {
     grpc_res_in_node = static_cast<crane::grpc::ResourceInNode>(res_in_node);
   }
 
+  auto* grpc_total_allocatable_res = val.mutable_total_allocatable_res();
+  *grpc_total_allocatable_res = static_cast<crane::grpc::AllocatableResource>(
+      this->total_allocatable_res);
+
   return val;
 }
 
@@ -535,12 +588,28 @@ ResourceV2& ResourceV2::operator=(const crane::grpc::ResourceV2& rhs) {
   for (const auto& [node_id, res_in_node] : rhs.each_node_res())
     this->each_node_res_map.emplace(node_id, res_in_node);
 
+  // Update cache
+  for (const auto& [node_id, res_in_node] : each_node_res_map)
+    this->total_allocatable_res += res_in_node.allocatable_res;
+
   return *this;
 }
 
+ResourceInNode& ResourceV2::at(const std::string& craned_id) {
+  return this->each_node_res_map.at(craned_id);
+}
+
+const ResourceInNode& ResourceV2::at(const std::string& craned_id) const {
+  return this->each_node_res_map.at(craned_id);
+}
+
 ResourceV2& ResourceV2::operator+=(const ResourceV2& rhs) {
-  for (const auto& [rhs_node_id, rhs_res_in_node] : rhs.each_node_res_map)
+  for (const auto& [rhs_node_id, rhs_res_in_node] : rhs.each_node_res_map) {
     this->each_node_res_map[rhs_node_id] += rhs_res_in_node;
+
+    // Update cache
+    this->total_allocatable_res += rhs_res_in_node.allocatable_res;
+  }
 
   return *this;
 }
@@ -553,12 +622,46 @@ ResourceV2& ResourceV2::operator-=(const ResourceV2& rhs) {
     rhs_it->second -= rhs_res_in_node;
 
     if (rhs_it->second.IsZero()) this->each_node_res_map.erase(rhs_it);
+
+    // Update cache
+    this->total_allocatable_res -= rhs_res_in_node.allocatable_res;
   }
 
   return *this;
 }
 
+ResourceV2& ResourceV2::AddResourceInNode(const std::string& craned_id,
+                                          const ResourceInNode& rhs) {
+  this->each_node_res_map[craned_id] += rhs;
+
+  // Update cache
+  this->total_allocatable_res += rhs.allocatable_res;
+
+  return *this;
+}
+
+ResourceV2& ResourceV2::SubtractResourceInNode(const std::string& craned_id,
+                                               const ResourceInNode& rhs) {
+  auto this_node_it = this->each_node_res_map.find(craned_id);
+  if (this_node_it == this->each_node_res_map.end()) return *this;
+
+  this_node_it->second -= rhs;
+
+  if (this_node_it->second.IsZero())
+    this->each_node_res_map.erase(this_node_it);
+
+  // Update cache
+  this->total_allocatable_res -= rhs.allocatable_res;
+
+  return *this;
+}
+
 bool ResourceV2::IsZero() const { return each_node_res_map.empty(); }
+
+void ResourceV2::SetToZero() {
+  each_node_res_map.clear();
+  total_allocatable_res.SetToZero();
+}
 
 bool operator<=(const ResourceV2& lhs, const ResourceV2& rhs) {
   for (const auto& [lhs_node_id, lhs_res_in_node] : lhs.each_node_res_map) {

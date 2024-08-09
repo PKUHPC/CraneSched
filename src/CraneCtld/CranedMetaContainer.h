@@ -107,7 +107,7 @@ class CranedMetaContainer final {
   };
 
   void MallocResourceFromNode(CranedId node_id, task_id_t task_id,
-                              const Resources& resources);
+                              const ResourceV2& resources);
 
   void FreeResourceFromNode(CranedId craned_id, uint32_t task_id);
 

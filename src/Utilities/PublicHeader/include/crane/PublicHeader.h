@@ -187,6 +187,7 @@ struct AllocatableResource {
   explicit operator crane::grpc::AllocatableResource() const;
 
   bool IsZero() const;
+  void SetToZero();
 };
 
 bool operator<=(const AllocatableResource& lhs, const AllocatableResource& rhs);
@@ -198,6 +199,13 @@ struct TypeSlotsMap {
       type_slots_map;
 
   TypeSlotsMap() = default;
+
+  TypeSlotsMap(const TypeSlotsMap& rhs) = default;
+  TypeSlotsMap& operator=(const TypeSlotsMap& rhs) = default;
+
+  TypeSlotsMap(TypeSlotsMap&& rhs) = default;
+  TypeSlotsMap& operator=(TypeSlotsMap&& rhs) = default;
+
   explicit TypeSlotsMap(const crane::grpc::DeviceTypeSlotsMap& rhs);
   TypeSlotsMap& operator=(const crane::grpc::DeviceTypeSlotsMap& rhs);
 
@@ -216,6 +224,8 @@ struct TypeSlotsMap {
 bool operator==(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs);
 bool operator<=(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs);
 
+TypeSlotsMap Intersection(const TypeSlotsMap& lhs, const TypeSlotsMap& rhs);
+
 struct DedicatedResourceInNode {
   // user req type
   using Req_t = std::unordered_map<
@@ -225,6 +235,14 @@ struct DedicatedResourceInNode {
           std::unordered_map<std::string /*type*/, uint64_t /*type total*/>>>;
 
   DedicatedResourceInNode() = default;
+
+  DedicatedResourceInNode(const DedicatedResourceInNode& rhs) = default;
+  DedicatedResourceInNode& operator=(const DedicatedResourceInNode& rhs) =
+      default;
+
+  DedicatedResourceInNode(DedicatedResourceInNode&& rhs) = default;
+  DedicatedResourceInNode& operator=(DedicatedResourceInNode&& rhs) = default;
+
   explicit DedicatedResourceInNode(
       const crane::grpc::DedicatedResourceInNode& rhs);
   DedicatedResourceInNode& operator=(
@@ -240,7 +258,9 @@ struct DedicatedResourceInNode {
   DedicatedResourceInNode& operator-=(const DedicatedResourceInNode& rhs);
 
   bool contains(const std::string& device_name) const;
+
   bool IsZero() const;
+  void SetToZero();
 
   explicit operator crane::grpc::DeviceMap() const;
   explicit operator crane::grpc::DedicatedResourceInNode() const;
@@ -258,9 +278,12 @@ bool operator<=(const DedicatedResourceInNode& lhs,
 bool operator==(const DedicatedResourceInNode& lhs,
                 const DedicatedResourceInNode& rhs);
 
+DedicatedResourceInNode Intersection(const DedicatedResourceInNode& lhs,
+                                     const DedicatedResourceInNode& rhs);
+
 struct ResourceInNode {
-  AllocatableResource allocatable_res_in_node;
-  DedicatedResourceInNode dedicated_res_in_node;
+  AllocatableResource allocatable_res;
+  DedicatedResourceInNode dedicated_res;
 
   ResourceInNode() = default;
   explicit ResourceInNode(const crane::grpc::ResourceInNode& rhs);
@@ -271,6 +294,7 @@ struct ResourceInNode {
   ResourceInNode& operator-=(const ResourceInNode& rhs);
 
   bool IsZero() const;
+  void SetToZero();
 };
 
 bool operator<=(const ResourceInNode& lhs, const ResourceInNode& rhs);
@@ -335,19 +359,51 @@ struct Resources {
 bool operator<=(const Resources& lhs, const Resources& rhs);
 bool operator==(const Resources& lhs, const Resources& rhs);
 
-struct ResourceV2 {
-  std::unordered_map<std::string /*craned id*/, ResourceInNode>
-      each_node_res_map;
-
+class ResourceV2 {
+ public:
   ResourceV2() = default;
+
+  // Grpc conversion
   explicit ResourceV2(const crane::grpc::ResourceV2& rhs);
   explicit operator crane::grpc::ResourceV2() const;
   ResourceV2& operator=(const crane::grpc::ResourceV2& rhs);
 
+  // ResourceInNode& operator[](const std::string& craned_id);
+  ResourceInNode& at(const std::string& craned_id);
+  const ResourceInNode& at(const std::string& craned_id) const;
+
   ResourceV2& operator+=(const ResourceV2& rhs);
   ResourceV2& operator-=(const ResourceV2& rhs);
+  ResourceV2& AddResourceInNode(const std::string& craned_id,
+                                const ResourceInNode& rhs);
+  ResourceV2& SubtractResourceInNode(const std::string& craned_id,
+                                     const ResourceInNode& rhs);
 
   bool IsZero() const;
+  void SetToZero();
+
+  std::unordered_map<std::string, ResourceInNode>& EachNodeResMap() {
+    return each_node_res_map;
+  }
+  const std::unordered_map<std::string, ResourceInNode>& EachNodeResMap()
+      const {
+    return each_node_res_map;
+  }
+
+  const AllocatableResource& TotalAllocatableRes() const {
+    return total_allocatable_res;
+  }
+
+ private:
+  std::unordered_map<std::string /*craned id*/, ResourceInNode>
+      each_node_res_map;
+
+  // A cache of the total allocatable resource of all nodes.
+  AllocatableResource total_allocatable_res;
+
+ public:
+  friend bool operator<=(const ResourceV2& lhs, const ResourceV2& rhs);
+  friend bool operator==(const ResourceV2& lhs, const ResourceV2& rhs);
 };
 
 bool operator<=(const ResourceV2& lhs, const ResourceV2& rhs);
@@ -356,6 +412,6 @@ bool operator==(const ResourceV2& lhs, const ResourceV2& rhs);
 struct CgroupSpec {
   uid_t uid;
   task_id_t task_id;
-  crane::grpc::Resources resources;
+  crane::grpc::ResourceInNode resources;
   std::string execution_node;
 };

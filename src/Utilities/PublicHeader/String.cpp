@@ -348,20 +348,20 @@ bool ConvertStringToInt64(const std::string &s, int64_t *val) {
   return convert_result.ec == std::errc();
 }
 
-std::string ReadableGres(const DedicatedResource &dedicated_resource) {
+std::string ReadableDresInResource(const ResourceV2 &dedicated_resource) {
   if (dedicated_resource.IsZero()) return "None";
 
   std::vector<std::string> node_gres_string_vector;
-  for (const auto &[node_id, node_gres] :
-       dedicated_resource.craned_id_dres_in_node_map) {
+  for (const auto &[node_id, node_gres] : dedicated_resource.EachNodeResMap()) {
     std::vector<std::string> node_gres_vec;
     for (const auto &[device_name, type_slots_map] :
-         node_gres.name_type_slots_map) {
+         node_gres.dedicated_res.name_type_slots_map) {
       for (const auto &[device_type, slots] : type_slots_map.type_slots_map) {
         node_gres_vec.emplace_back(fmt::format(
             "{}:{}:{}:{}", node_id, device_name, device_type, slots.size()));
       }
     }
+
     // node:name:type:count
     node_gres_string_vector.insert(
         std::end(node_gres_string_vector),
@@ -372,8 +372,10 @@ std::string ReadableGres(const DedicatedResource &dedicated_resource) {
   return absl::StrJoin(node_gres_string_vector, ",");
 }
 
-std::string ReadableGres(
-    const DedicatedResourceInNode &dedicated_resource_in_node) {
+std::string ReadableDresInNode(const ResourceInNode &resource_in_node) {
+  const DedicatedResourceInNode &dedicated_resource_in_node =
+      resource_in_node.dedicated_res;
+
   if (dedicated_resource_in_node.IsZero()) {
     return "0";
   }

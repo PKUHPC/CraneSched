@@ -68,7 +68,7 @@ struct Config {
   struct Node {
     uint32_t cpu;
     uint64_t memory_bytes;
-    DedicatedResource dedicated_resource;
+    DedicatedResourceInNode dedicated_resource;
   };
 
   struct Partition {
@@ -158,7 +158,7 @@ struct CranedStaticMeta {
 
   std::list<std::string> partition_ids;  // Partitions to which
                                          // this craned belongs to
-  Resources res;
+  ResourceInNode res;
 };
 
 /**
@@ -171,26 +171,26 @@ struct CranedMeta {
   bool alive{false};
 
   // total = avail + in-use
-  Resources res_total;  // A copy of res in CranedStaticMeta,
-  Resources res_avail;
-  Resources res_in_use;
+  ResourceInNode res_total;  // A copy of res in CranedStaticMeta,
+  ResourceInNode res_avail;
+  ResourceInNode res_in_use;
 
   bool drain{false};
   std::string state_reason;
 
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
-  absl::flat_hash_map<task_id_t, Resources> running_task_resource_map;
+  absl::flat_hash_map<task_id_t, ResourceInNode> running_task_resource_map;
 };
 
 struct PartitionGlobalMeta {
   // total = avail + in-use
-  Resources res_total;
-  Resources res_avail;
-  Resources res_in_use;
+  ResourceV2 res_total;
+  ResourceV2 res_avail;
+  ResourceV2 res_in_use;
 
   // Include resources in unavailable nodes.
-  Resources res_total_inc_dead;
+  ResourceV2 res_total_inc_dead;
 
   std::string name;
   std::string nodelist_str;
@@ -254,7 +254,9 @@ struct TaskInCtld {
   absl::Duration time_limit;
 
   PartitionId partition_id;
-  Resources resources;
+
+  ResourceV2 resources;
+
   DedicatedResourceInNode::Req_t request_gres;
   crane::grpc::TaskType type;
 

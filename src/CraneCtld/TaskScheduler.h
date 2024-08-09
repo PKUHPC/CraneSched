@@ -149,7 +149,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
    * In time interval [y, z-1], the amount of available resources is b.
    * In time interval [z, ...], the amount of available resources is c.
    */
-  using TimeAvailResMap = std::map<absl::Time, Resources>;
+  using TimeAvailResMap = std::map<absl::Time, ResourceInNode>;
 
   struct TimeSegment {
     TimeSegment(absl::Time start, absl::Duration duration)
@@ -189,7 +189,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
 
   static void SubtractTaskResourceNodeSelectionInfo_(
       absl::Time const& expected_start_time, absl::Duration const& duration,
-      Resources const& resources, std::list<CranedId> const& craned_ids,
+      ResourceV2 const& resources, std::list<CranedId> const& craned_ids,
       NodeSelectionInfo* node_selection_info);
 
   IPrioritySorter* m_priority_sorter_;
