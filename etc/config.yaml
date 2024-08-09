@@ -102,8 +102,11 @@ RejectJobsBeyondCapacity: false
 Plugin:
   # Toggle the plugin module in CraneSched
   Enabled: true
-  # Relative to CraneBaseDir
+  # Relative to CraneBaseDir, will be used by CraneCtld
   PlugindSockPath: "cranectld/cplugind.sock"
+  # Listening port of Plugind, will be used by Craned
+  PlugindListenPort: 10013
+  # Debug level of Plugind
   PlugindDebugLevel: "trace"
   # Plugins to be loaded in Plugind
   Plugins:

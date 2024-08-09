@@ -64,7 +64,7 @@ struct Config {
 
   struct PluginConfig {
     bool Enabled{false};
-    std::string PlugindPort;
+    std::string PlugindListenPort;
   };
   PluginConfig Plugin;
 

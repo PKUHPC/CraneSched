@@ -473,12 +473,12 @@ void ParseConfig(int argc, char** argv) {
         const auto& plugin_config = config["Plugin"];
 
         if (plugin_config["Enabled"])
-          g_config.Plugin.Enabled = config["Enabled"].as<bool>();
+          g_config.Plugin.Enabled = plugin_config["Enabled"].as<bool>();
 
         if (plugin_config["PlugindSockPath"]) {
           g_config.Plugin.PlugindSockPath =
               fmt::format("unix://{}{}", g_config.CraneBaseDir,
-                          config["PlugindSockPath"].as<std::string>());
+                          plugin_config["PlugindSockPath"].as<std::string>());
         } else {
           g_config.Plugin.PlugindSockPath =
               fmt::format("unix://{}{}", g_config.CraneBaseDir,
