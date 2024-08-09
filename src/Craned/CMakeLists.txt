@@ -12,7 +12,9 @@ add_executable(craned
         CranedPublicDefs.h
         Craned.cpp
 
-        CranedPreCompiledHeader.h)
+        CranedPreCompiledHeader.h
+        DeviceManager.cpp
+        DeviceManager.h)
 
 target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
 

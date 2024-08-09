@@ -126,6 +126,7 @@ CraneErr CranedStub::CreateCgroupForTasks(
     request.mutable_task_id_list()->Add(spec.task_id);
     request.mutable_uid_list()->Add(spec.uid);
     *request.mutable_res_list()->Add() = std::move(spec.resources);
+    request.add_execution_node(spec.execution_node);
   }
 
   status = m_stub_->CreateCgroupForTasks(&context, request, &reply);
@@ -213,7 +214,40 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
                 m_craned_id_, grpc_status.error_message());
     return CraneErr::kRpcFailure;
   }
+  if (reply.ok())
+    return CraneErr::kOk;
+  else
+    return CraneErr::kGenericFailure;
+}
 
+CraneErr CranedStub::QueryActualGres(DedicatedResourceInNode &resource) {
+  using crane::grpc::QueryActualGresReply;
+  using crane::grpc::QueryActualGresRequest;
+  ClientContext context;
+  Status grpc_status;
+
+  QueryActualGresRequest request;
+  QueryActualGresReply reply;
+
+  grpc_status = m_stub_->QueryActualGres(&context, request, &reply);
+  if (!grpc_status.ok()) {
+    CRANE_ERROR("QueryActualGres to Craned {} failed: {} ", m_craned_id_,
+                grpc_status.error_message());
+    return CraneErr::kRpcFailure;
+  }
+  if (!reply.dedicated_resource().each_node_gres().contains(m_craned_id_))
+    return {};
+
+  for (const auto &[device_name, type_slots_map] : reply.dedicated_resource()
+                                                       .each_node_gres()
+                                                       .at(m_craned_id_)
+                                                       .name_type_map()) {
+    for (const auto &[device_type, slot_id_set] :
+         type_slots_map.type_slots_map()) {
+      resource.name_type_slots_map[device_name][device_type].insert(
+          slot_id_set.slots().begin(), slot_id_set.slots().end());
+    }
+  }
   if (reply.ok())
     return CraneErr::kOk;
   else
@@ -241,6 +275,9 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
         task->resources.allocatable_resource.memory_bytes);
     mutable_allocatable_resource->set_memory_sw_limit_bytes(
         task->resources.allocatable_resource.memory_sw_bytes);
+    *mutable_task->mutable_resources()->mutable_actual_dedicated_resource() =
+        static_cast<crane::grpc::DedicatedResource>(
+            task->resources.dedicated_resource);
 
     // Set type
     mutable_task->set_type(task->type);

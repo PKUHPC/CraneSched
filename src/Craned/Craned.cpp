@@ -49,7 +49,7 @@ void ParseConfig(int argc, char** argv) {
        cxxopts::value<std::string>())
       ("L,log-file", "Path to Craned log file",
        cxxopts::value<std::string>()->default_value(fmt::format("{}{}",kDefaultCraneBaseDir, kDefaultCranedLogPath)))
-      ("D,debug-level", "Logging level of Craned, format: <trace|debug|info|warn|error>", 
+      ("D,debug-level", "Logging level of Craned, format: <trace|debug|info|warn|error>",
        cxxopts::value<std::string>()->default_value("info"))
       ("v,version", "Display version information")
       ("h,help", "Display help for Craned")
@@ -76,6 +76,12 @@ void ParseConfig(int argc, char** argv) {
   }
 
   std::string config_path = parsed_args["config"].as<std::string>();
+  std::unordered_map<
+      std::string,
+      std::vector<std::tuple<std::string /*name*/, std::string /*type*/,
+                             std::vector<std::string> /*path*/,
+                             std::string /*EnvInjector*/>>>
+      each_node_device;
   if (std::filesystem::exists(config_path)) {
     try {
       YAML::Node config = YAML::LoadFile(config_path);
@@ -266,7 +272,70 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
+          std::vector<std::tuple<std::string /*name*/, std::string /*type*/,
+                                 std::vector<std::string> /*path*/,
+                                 std::string /*EnvInjector*/>>
+              devices;
+          if (node["gres"]) {
+            for (auto gres_it = node["gres"].begin();
+                 gres_it != node["gres"].end(); ++gres_it) {
+              const auto& gres_node = gres_it->as<YAML::Node>();
+              const auto& device_name = gres_node["name"].as<std::string>();
+              const auto& device_type = gres_node["type"].as<std::string>();
+              bool device_file_configured = false;
+              std::string env_injector;
+              if (gres_node["EnvInjector"]) {
+                env_injector = gres_node["EnvInjector"].as<std::string>();
+              }
+              if (gres_node["DeviceFileRegex"]) {
+                device_file_configured = true;
+                std::list<std::string> device_path_list;
+                if (!util::ParseHostList(gres_node["DeviceFileRegex"].Scalar(),
+                                         &device_path_list)) {
+                  CRANE_ERROR(
+                      "Illegal gres {}:{} DeviceFileRegex path string format.",
+                      device_name, device_type);
+                  std::exit(1);
+                }
+                for (const auto& device_path : device_path_list) {
+                  devices.push_back(std::make_tuple(device_name, device_type,
+                                                    std::vector{device_path},
+                                                    env_injector));
+                }
+              }
+              if (gres_node["DeviceFileList"] &&
+                  gres_node["DeviceFileList"].IsSequence()) {
+                device_file_configured = true;
+                for (const auto& file_regex :
+                     gres_node["DeviceFileList"]
+                         .as<std::vector<std::string>>()) {
+                  std::list<std::string> device_path_list;
+                  if (!util::ParseHostList(file_regex, &device_path_list)) {
+                    CRANE_ERROR(
+                        "Illegal gres {}:{} DeviceFileList path string format.",
+                        device_name, device_type);
+                    std::exit(1);
+                  }
+                  devices.push_back(
+                      std::make_tuple(device_name, device_type,
+                                      std::vector(device_path_list.begin(),
+                                                  device_path_list.end()),
+                                      env_injector));
+                }
+              }
+              if (!device_file_configured) {
+                CRANE_ERROR(
+                    "gres {}:{} device DeviceFileRegex or DeviceFileList not "
+                    "configured",
+                    device_name, device_type);
+              }
+            }
+          }
+
           for (auto&& name : name_list) {
+            for (auto& dev : devices) {
+              each_node_device[name].push_back(dev);
+            }
             if (crane::IsAValidIpv4Address(name)) {
               CRANE_INFO(
                   "Node name `{}` is a valid ipv4 address and doesn't "
@@ -392,6 +461,31 @@ void ParseConfig(int argc, char** argv) {
   }
 
   CRANE_INFO("Found this machine {} in Nodes", g_config.Hostname);
+  // get this node device info
+  // Todo: Auto detect device
+  {
+    auto node_ptr = g_config.CranedNodes.at(g_config.Hostname);
+    auto& devices = each_node_device[g_config.Hostname];
+    for (auto& dev_arg : devices) {
+      std::string name, type, env_injector;
+      std::vector<std::string> path;
+      std::tie(name, type, path, env_injector) = dev_arg;
+      std::unique_ptr dev = Craned::DeviceManager::ConstructDevice(
+          name, type, path, env_injector);
+      if (!dev->Init()) {
+        CRANE_ERROR("Access Device {} failed.", static_cast<std::string>(*dev));
+        std::exit(1);
+      } else {
+        node_ptr->dedicated_resource
+            .craned_id_dres_in_node_map[g_config.Hostname]
+            .name_type_slots_map[dev->name][dev->type]
+            .emplace(dev->device_metas.front().path);
+        Craned::g_this_node_device[dev->device_metas.front().path] =
+            std::move(dev);
+      }
+    }
+    each_node_device.clear();
+  }
 
   uint32_t part_id, node_index;
   std::string part_name;
@@ -439,8 +533,9 @@ void GlobalVariableInit() {
   g_cg_mgr = std::make_unique<Craned::CgroupManager>();
   g_cg_mgr->Init();
   if (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
-      !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER)) {
-    CRANE_ERROR("Failed to initialize cpu and memory cgroups controller.");
+      !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER) ||
+      !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER)) {
+    CRANE_ERROR("Failed to initialize cpu,memory,devices cgroups controller.");
     std::exit(1);
   }
 
@@ -469,7 +564,6 @@ void StartServer() {
 
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
-
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
@@ -477,6 +571,7 @@ void StartServer() {
   g_server->Wait();
 
   // Free global variables
+  g_task_mgr->Wait();
   g_task_mgr.reset();
   // CforedManager MUST be destructed after TaskManager.
   g_cfored_manager.reset();

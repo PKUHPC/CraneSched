@@ -64,9 +64,24 @@ PriorityWeightQ0S: 1000000
 # list of configuration information of the computing machine
 # Nodes and partitions settings
 Nodes:
-  - name: "cn[15-18]"
+  - name: "cn[15-16]"
     cpu: 2
     memory: 2G
+
+  - name: "cn[17-18]"
+    cpu: 2
+    memory: 2G
+    gres:
+      - name: gpu
+        type: a100
+        DeviceFileRegex: /dev/nvidia[0-3]
+        DeviceFileList:
+          - /dev/dri/renderer[0-3]
+        EnvInjector: nvidia
+
+      - name: gpu
+        type: h100
+        file: /dev/nvidia[4-7]
 
 # partition information list
 Partitions:

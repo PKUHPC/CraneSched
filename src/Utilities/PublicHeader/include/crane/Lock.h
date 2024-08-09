@@ -23,17 +23,14 @@
 
 namespace util {
 
-class SCOPED_LOCKABLE AbslMutexLockGuard {
+class ABSL_SCOPED_LOCKABLE AbslMutexLockGuard {
  private:
   absl::Mutex& m;
 
  public:
-  explicit AbslMutexLockGuard(absl::Mutex& m_) EXCLUSIVE_LOCK_FUNCTION(m)
-      : m(m_) {
-    m.Lock();
-  }
+  explicit AbslMutexLockGuard(absl::Mutex& m_) : m(m_) { m.Lock(); }
 
-  ~AbslMutexLockGuard() UNLOCK_FUNCTION() { m.Unlock(); }
+  ~AbslMutexLockGuard() { m.Unlock(); }
 
   AbslMutexLockGuard(AbslMutexLockGuard const&) = delete;
   AbslMutexLockGuard& operator=(AbslMutexLockGuard const&) = delete;

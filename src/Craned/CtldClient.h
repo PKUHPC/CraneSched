@@ -69,7 +69,7 @@ class CtldClient {
   absl::Mutex m_task_status_change_mtx_;
 
   std::list<TaskStatusChange> m_task_status_change_list_
-      GUARDED_BY(m_task_status_change_mtx_);
+      ABSL_GUARDED_BY(m_task_status_change_mtx_);
 
   std::thread m_async_send_thread_;
   std::atomic_bool m_thread_stop_{false};

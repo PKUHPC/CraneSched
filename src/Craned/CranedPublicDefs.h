@@ -16,10 +16,19 @@
 
 #pragma once
 
+#include <google/protobuf/util/time_util.h>
+
+#include <array>
+#include <fpm/fixed.hpp>
+#include <optional>
+#include <unordered_map>
+#include <variant>
+
 #include "CranedPreCompiledHeader.h"
 // Precompiled header comes first
 
 #include "crane/PublicHeader.h"
+#include "protos/Crane.pb.h"
 
 namespace Craned {
 
@@ -40,6 +49,7 @@ struct TaskInfoOfUid {
 struct CranedNode {
   uint32_t cpu;
   uint64_t memory_bytes;
+  DedicatedResource dedicated_resource;
 };
 
 struct Partition {
@@ -86,7 +96,6 @@ struct Config {
 };
 
 inline Config g_config;
-
 }  // namespace Craned
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

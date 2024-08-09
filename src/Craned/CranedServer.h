@@ -75,6 +75,16 @@ class CranedServiceImpl : public Craned::Service {
       const crane::grpc::MigrateSshProcToCgroupRequest *request,
       crane::grpc::MigrateSshProcToCgroupReply *response) override;
 
+  grpc::Status QueryTaskEnvVariables(
+      grpc::ServerContext *context,
+      const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
+      crane::grpc::QueryTaskEnvVariablesReply *response) override;
+
+  grpc::Status QueryTaskEnvVariablesForward(
+      grpc::ServerContext *context,
+      const ::crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
+      crane::grpc::QueryTaskEnvVariablesForwardReply *response) override;
+
   grpc::Status CreateCgroupForTasks(
       grpc::ServerContext *context,
       const crane::grpc::CreateCgroupForTasksRequest *request,
@@ -89,6 +99,11 @@ class CranedServiceImpl : public Craned::Service {
       grpc::ServerContext *context,
       const crane::grpc::ChangeTaskTimeLimitRequest *request,
       crane::grpc::ChangeTaskTimeLimitReply *response) override;
+
+  grpc::Status QueryActualGres(
+      grpc::ServerContext *context,
+      const ::crane::grpc::QueryActualGresRequest *request,
+      crane::grpc::QueryActualGresReply *response) override;
 };
 
 class CranedServer {
