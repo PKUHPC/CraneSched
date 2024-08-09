@@ -198,7 +198,7 @@ message ModifyTaskRequest {
   }
 
   uint32 uid = 1;
-  uint32 task_id = 2;
+  repeated uint32 task_ids = 2;
 
   TargetAttributes attribute = 3;
 
@@ -214,8 +214,9 @@ message ModifyTaskRequest {
 }
 
 message ModifyTaskReply {
-  bool ok = 1;
-  string reason = 2;
+  repeated uint32 modified_tasks = 2;
+  repeated uint32 not_modified_tasks = 3;
+  repeated string not_modified_reasons = 4;
 }
 
 message ModifyCranedStateRequest{
