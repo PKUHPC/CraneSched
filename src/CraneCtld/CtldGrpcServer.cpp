@@ -156,64 +156,71 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (res.has_error()) {
-    response->set_ok(false);
-    response->set_reason(res.error());
+    for (auto task_id : request->task_ids()) {
+      response->add_not_modified_tasks(task_id);
+      response->add_not_modified_reasons(res.error());
+    }
     return grpc::Status::OK;
   }
 
   CraneErr err;
   if (request->attribute() == ModifyTaskRequest::TimeLimit) {
-    err = g_task_scheduler->ChangeTaskTimeLimit(request->task_id(),
-                                                request->time_limit_seconds());
-    if (err == CraneErr::kOk) {
-      response->set_ok(true);
-    } else if (err == CraneErr::kNonExistent) {
-      response->set_ok(false);
-      response->set_reason(
-          fmt::format("Task #{} was not found in running or pending queue.",
-                      request->task_id()));
-    } else if (err == CraneErr::kInvalidParam) {
-      response->set_ok(false);
-      response->set_reason("Invalid time limit value.");
-    } else {
-      response->set_ok(false);
-      response->set_reason(
-          fmt::format("Failed to change the time limit of Task#{}: {}.",
-                      request->task_id(), CraneErrStr(err)));
+    for (auto task_id : request->task_ids()) {
+      err = g_task_scheduler->ChangeTaskTimeLimit(
+          task_id, request->time_limit_seconds());
+      if (err == CraneErr::kOk) {
+        response->add_modified_tasks(task_id);
+      } else if (err == CraneErr::kNonExistent) {
+        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_reasons(fmt::format(
+            "Task #{} was not found in running or pending queue.", task_id));
+      } else if (err == CraneErr::kInvalidParam) {
+        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_reasons("Invalid time limit value.");
+      } else {
+        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_reasons(
+            fmt::format("Failed to change the time limit of Task#{}: {}.",
+                        task_id, CraneErrStr(err)));
+      }
     }
   } else if (request->attribute() == ModifyTaskRequest::Priority) {
-    err = g_task_scheduler->ChangeTaskPriority(request->task_id(),
-                                               request->mandated_priority());
-    if (err == CraneErr::kOk) {
-      response->set_ok(true);
-    } else if (err == CraneErr::kNonExistent) {
-      response->set_ok(false);
-      response->set_reason(fmt::format(
-          "Task #{} was not found in pending queue.", request->task_id()));
-    } else {
-      response->set_ok(false);
-      response->set_reason(
-          fmt::format("Failed to change priority: {}.", CraneErrStr(err)));
+    for (auto task_id : request->task_ids()) {
+      err = g_task_scheduler->ChangeTaskPriority(task_id,
+                                                 request->mandated_priority());
+      if (err == CraneErr::kOk) {
+        response->add_modified_tasks(task_id);
+      } else if (err == CraneErr::kNonExistent) {
+        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_reasons(
+            fmt::format("Task #{} was not found in pending queue.", task_id));
+      } else {
+        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_reasons(
+            fmt::format("Failed to change priority: {}.", CraneErrStr(err)));
+      }
     }
   } else if (request->attribute() == ModifyTaskRequest::Hold) {
-    task_id_t task_id = request->task_id();
     int64_t secs = request->hold_seconds();
-
-    err = g_task_scheduler->HoldReleaseTaskAsync(task_id, secs).get();
-    if (err == CraneErr::kOk) {
-      response->set_ok(true);
-    } else if (err == CraneErr::kNonExistent) {
-      response->set_ok(false);
-      response->set_reason(fmt::format(
-          "Task #{} was not found in pending queue.", request->task_id()));
-    } else {
-      response->set_ok(false);
-      response->set_reason(
-          fmt::format("Failed to hold/release job: {}.", CraneErrStr(err)));
+    for (auto task_id : request->task_ids()) {
+      err = g_task_scheduler->HoldReleaseTaskAsync(task_id, secs).get();
+      if (err == CraneErr::kOk) {
+        response->add_modified_tasks(task_id);
+      } else if (err == CraneErr::kNonExistent) {
+        response->add_not_modified_tasks(task_id);
+        response->add_not_modified_reasons(
+            fmt::format("Task #{} was not found in pending queue.", task_id));
+      } else {
+        response->add_not_modified_tasks(false);
+        response->add_not_modified_reasons(
+            fmt::format("Failed to hold/release job: {}.", CraneErrStr(err)));
+      }
     }
   } else {
-    response->set_ok(false);
-    response->set_reason("Invalid function.");
+    for (auto task_id : request->task_ids()) {
+      response->add_not_modified_tasks(task_id);
+      response->add_not_modified_reasons("Invalid function.");
+    }
   }
 
   return grpc::Status::OK;
