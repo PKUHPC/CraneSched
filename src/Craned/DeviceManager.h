@@ -22,11 +22,15 @@
 namespace Craned {
 
 struct BasicDevice {
-  // e.g gpu
+  std::string dev_id;
+
+  // e.g GPU
   std::string name;
-  // device type e.g a100
+  // Device type e.g. A100
   std::string type;
+
   std::string env_injector;
+
   struct DeviceMeta {
     std::string path;
     unsigned int major;
@@ -38,11 +42,15 @@ struct BasicDevice {
   BasicDevice(const std::string& device_name, const std::string& device_type,
               const std::vector<std::string>& device_path,
               const std::string& env_injector);
+
   BasicDevice(const BasicDevice& another) = default;
+
   virtual ~BasicDevice() = default;
   virtual bool Init();
+
   operator std::string() const;
-  // todo:add virtual function to get device status
+
+  // Todo: Add virtual function to get device status
 };
 
 class DeviceManager {

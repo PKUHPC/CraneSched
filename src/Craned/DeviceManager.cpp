@@ -16,9 +16,6 @@
 
 #include "DeviceManager.h"
 
-#include <sys/stat.h>
-#include <sys/sysmacros.h>
-
 #include "crane/String.h"
 
 namespace Craned {
@@ -87,28 +84,30 @@ std::vector<std::pair<std::string, std::string>>
 DeviceManager::GetDevEnvListByResInNode(
     const crane::grpc::DedicatedResourceInNode& res_in_node) {
   std::vector<std::pair<std::string, std::string>> env;
+
   std::unordered_set<std::string> all_res_slots;
-  for (const auto& [device_name, device_type_slosts_map] :
+  for (const auto& [device_name, device_type_slots_map] :
        res_in_node.name_type_map()) {
     for (const auto& [device_type, slots] :
-         device_type_slosts_map.type_slots_map())
+         device_type_slots_map.type_slots_map())
       all_res_slots.insert(slots.slots().begin(), slots.slots().end());
   }
 
   uint32_t cuda_count = 0;
   uint32_t hip_count = 0;
   for (const auto& [_, device] : g_this_node_device) {
-    if (!all_res_slots.contains(device->device_metas.front().path)) continue;
+    if (!all_res_slots.contains(device->dev_id)) continue;
+
     if (device->env_injector == "nvidia")
       ++cuda_count;
     else if (device->env_injector == "hip")
       ++hip_count;
   }
-  // nvidia device
+  // Nvidia Device
   env.emplace_back("CUDA_VISIBLE_DEVICES",
                    util::GenerateCommaSeparatedString(cuda_count));
 
-  // amd/haiguang device
+  // AMD/Haiguang device
   env.emplace_back("HIP_VISIBLE_DEVICES",
                    util::GenerateCommaSeparatedString(hip_count));
 

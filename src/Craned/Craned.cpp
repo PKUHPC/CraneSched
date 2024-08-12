@@ -476,10 +476,10 @@ void ParseConfig(int argc, char** argv) {
         CRANE_ERROR("Access Device {} failed.", static_cast<std::string>(*dev));
         std::exit(1);
       } else {
+        dev->dev_id = dev->device_metas.front().path;
         node_ptr->dedicated_resource.name_type_slots_map[dev->name][dev->type]
-            .emplace(dev->device_metas.front().path);
-        Craned::g_this_node_device[dev->device_metas.front().path] =
-            std::move(dev);
+            .emplace(dev->dev_id);
+        Craned::g_this_node_device[dev->dev_id] = std::move(dev);
       }
     }
     each_node_device.clear();
