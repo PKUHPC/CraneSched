@@ -220,34 +220,24 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
     return CraneErr::kGenericFailure;
 }
 
-CraneErr CranedStub::QueryActualGres(DedicatedResourceInNode &resource) {
-  using crane::grpc::QueryActualGresReply;
-  using crane::grpc::QueryActualGresRequest;
+CraneErr CranedStub::QueryActualDres(DedicatedResourceInNode *resource) {
+  using crane::grpc::QueryActualDresReply;
+  using crane::grpc::QueryActualDresRequest;
   ClientContext context;
   Status grpc_status;
 
-  QueryActualGresRequest request;
-  QueryActualGresReply reply;
+  QueryActualDresRequest request;
+  QueryActualDresReply reply;
 
-  grpc_status = m_stub_->QueryActualGres(&context, request, &reply);
+  grpc_status = m_stub_->QueryActualDres(&context, request, &reply);
   if (!grpc_status.ok()) {
     CRANE_ERROR("QueryActualGres to Craned {} failed: {} ", m_craned_id_,
                 grpc_status.error_message());
     return CraneErr::kRpcFailure;
   }
-  if (!reply.dedicated_resource().each_node_gres().contains(m_craned_id_))
-    return {};
 
-  for (const auto &[device_name, type_slots_map] : reply.dedicated_resource()
-                                                       .each_node_gres()
-                                                       .at(m_craned_id_)
-                                                       .name_type_map()) {
-    for (const auto &[device_type, slot_id_set] :
-         type_slots_map.type_slots_map()) {
-      resource.name_type_slots_map[device_name][device_type].insert(
-          slot_id_set.slots().begin(), slot_id_set.slots().end());
-    }
-  }
+  *resource = static_cast<DedicatedResourceInNode>(reply.dres_in_node());
+
   if (reply.ok())
     return CraneErr::kOk;
   else

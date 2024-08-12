@@ -542,12 +542,11 @@ message StreamCtldReply {
   }
 }
 
-message QueryActualGresRequest{
-}
+message QueryActualDresRequest{}
 
-message QueryActualGresReply{
+message QueryActualDresReply{
   bool ok = 1;
-  DedicatedResource dedicated_resource = 2;
+  DedicatedResourceInNode dres_in_node = 2;
 }
 
 message StreamCrunRequest{
@@ -738,7 +737,7 @@ service Craned {
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns(CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns(ReleaseCgroupForTasksReply);
 
-  rpc QueryActualGres(QueryActualGresRequest) returns(QueryActualGresReply);
+  rpc QueryActualDres(QueryActualDresRequest) returns(QueryActualDresReply);
   /*
   If the task is an interactive task, the resource uuid is also revoked.
    If there's no process in this interactive task, just deallocate all the resources.

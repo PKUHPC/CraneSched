@@ -54,8 +54,8 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
     auto stub = g_craned_keeper->GetCranedStub(craned_id);
     if (stub != nullptr && !stub->Invalid()) {
       DedicatedResourceInNode resource;
-      stub->QueryActualGres(resource);
-      this->AddDedicatedResource(craned_id, resource);
+      CraneErr err = stub->QueryActualDres(&resource);
+      if (err == CraneErr::kOk) this->AddDedicatedResource(craned_id, resource);
     }
   });
 }

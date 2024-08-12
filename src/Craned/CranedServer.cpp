@@ -494,14 +494,14 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::QueryActualGres(
+grpc::Status CranedServiceImpl::QueryActualDres(
     grpc::ServerContext *context,
-    const ::crane::grpc::QueryActualGresRequest *request,
-    crane::grpc::QueryActualGresReply *response) {
+    const ::crane::grpc::QueryActualDresRequest *request,
+    crane::grpc::QueryActualDresReply *response) {
   const auto &dedicated_resource =
       g_config.CranedNodes[g_config.CranedIdOfThisNode]->dedicated_resource;
-  response->mutable_dedicated_resource()->CopyFrom(
-      static_cast<crane::grpc::DedicatedResource>(dedicated_resource));
+  response->mutable_dres_in_node()->CopyFrom(
+      static_cast<crane::grpc::DedicatedResourceInNode>(dedicated_resource));
   response->set_ok(true);
   return Status::OK;
 }

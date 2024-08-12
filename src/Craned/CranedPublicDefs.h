@@ -49,7 +49,7 @@ struct TaskInfoOfUid {
 struct CranedNode {
   uint32_t cpu;
   uint64_t memory_bytes;
-  DedicatedResource dedicated_resource;
+  DedicatedResourceInNode dedicated_resource;
 };
 
 struct Partition {

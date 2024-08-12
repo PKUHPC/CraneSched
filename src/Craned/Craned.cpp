@@ -476,9 +476,7 @@ void ParseConfig(int argc, char** argv) {
         CRANE_ERROR("Access Device {} failed.", static_cast<std::string>(*dev));
         std::exit(1);
       } else {
-        node_ptr->dedicated_resource
-            .craned_id_dres_in_node_map[g_config.Hostname]
-            .name_type_slots_map[dev->name][dev->type]
+        node_ptr->dedicated_resource.name_type_slots_map[dev->name][dev->type]
             .emplace(dev->device_metas.front().path);
         Craned::g_this_node_device[dev->device_metas.front().path] =
             std::move(dev);
