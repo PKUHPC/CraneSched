@@ -1145,11 +1145,8 @@ void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_(int efd, short events,
 
   EvQueueQueryTaskEnvironmentVariables elem;
   while (this_->m_query_task_environment_variables_queue.try_dequeue(elem)) {
-    this_->m_mtx_.Lock();
-
     auto task_iter = this_->m_task_map_.find(elem.task_id);
     if (task_iter == this_->m_task_map_.end())
-
       elem.env_prom.set_value(std::nullopt);
     else {
       auto& instance = task_iter->second;
@@ -1160,8 +1157,6 @@ void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_(int efd, short events,
       }
       elem.env_prom.set_value(env_opt);
     }
-
-    this_->m_mtx_.Unlock();
   }
 }
 
