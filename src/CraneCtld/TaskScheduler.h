@@ -140,36 +140,69 @@ class MinLoadFirst : public INodeSelectionAlgo {
 
  private:
   static constexpr bool kAlgoTraceOutput = false;
+  static constexpr bool kAlgoRedundantNode = true;
 
   /**
-   * This map stores how much resource is available
-   * over time on each Craned node.
+   * This map stores how much available resource changes over time on each
+   * Craned node.
    *
    * In this map, the time is discretized by 1s and starts from absl::Now().
    * {x: a, y: b, z: c, ...} means that
-   * In time interval [x, y-1], the amount of available resources is a.
-   * In time interval [y, z-1], the amount of available resources is b.
-   * In time interval [z, ...], the amount of available resources is c.
+   * At time x, the amount of available resources is a.
+   * At time y, the amount of available resources is a + b.
+   * At time z, the amount of available resources is a + b + c.
    */
-  using TimeAvailResMap = std::map<absl::Time, ResourceInNode>;
 
-  struct TimeSegment {
-    TimeSegment(absl::Time start, absl::Duration duration)
-        : start(start), duration(duration) {}
-    absl::Time start;
-    absl::Duration duration;
+  using TimeDeltaResMap = std::map<absl::Time, ResourceInNode>;
+  struct TimeDeltaResTracker {
+    const CranedId craned_id;
+    TimeDeltaResMap::const_iterator it;
+    const TimeDeltaResMap::const_iterator end;
+    const ResourceInNode* task_res;
+    ResourceInNode avail_res;
+    int count;
+    bool satisfied{false};
 
-    bool operator<(const absl::Time& rhs) const { return this->start < rhs; }
+    TimeDeltaResTracker(const CranedId& craned_id,
+                        const TimeDeltaResMap::const_iterator& it,
+                        const TimeDeltaResMap::const_iterator& end,
+                        const ResourceInNode* task_res)
+        : craned_id(craned_id), it(it), end(end), task_res(task_res) {
+      avail_res = it->second;
+      count = (it != end && *task_res <= avail_res) ? 1 : 0;
+    }
 
-    friend bool operator<(const absl::Time& lhs, const TimeSegment& rhs) {
-      return lhs < rhs.start;
+    bool genNext() {
+      if (count != 0) satisfied = !satisfied;
+      count = 0;
+      if (++it == end) return false;
+      if (*task_res <= avail_res) count -= 1;
+      avail_res += it->second;
+      if (*task_res <= avail_res) count += 1;
+      return true;
     }
   };
 
   struct NodeSelectionInfo {
-    std::multimap<uint32_t /* # of running tasks */, CranedId>
-        task_num_node_id_map;
-    std::unordered_map<CranedId, TimeAvailResMap> node_time_avail_res_map;
+    // Craned_ids are sorted by cost.
+    std::set<std::pair<uint32_t, CranedId>> cost_node_id_set;
+    std::unordered_map<CranedId, uint32_t> node_cost_map;
+    std::unordered_map<CranedId, TimeDeltaResMap> node_time_delta_res_map;
+
+    // Cost is now the number of tasks running or pending on the node.
+    // TODO: Better the cost function base on the time-resource map.
+    void setCost(const CranedId& craned_id, uint32_t cost) {
+      cost_node_id_set.erase({node_cost_map[craned_id], craned_id});
+      node_cost_map[craned_id] = cost;
+      cost_node_id_set.emplace(cost, craned_id);
+    }
+    void updateCost(const CranedId& craned_id, const absl::Time& start_time,
+                    const absl::Time& end_time, const ResourceInNode& resources) {
+      auto& cost = node_cost_map[craned_id];
+      cost_node_id_set.erase({cost, craned_id});
+      cost += 1;
+      cost_node_id_set.emplace(cost, craned_id);
+    }
   };
 
   static void CalculateNodeSelectionInfoOfPartition_(
@@ -180,8 +213,6 @@ class MinLoadFirst : public INodeSelectionAlgo {
       const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
       NodeSelectionInfo* node_selection_info);
 
-  // Input should guarantee that provided nodes in `node_selection_info` has
-  // enough nodes whose resource is >= task->resource.
   static bool CalculateRunningNodesAndStartTime_(
       const NodeSelectionInfo& node_selection_info,
       const util::Synchronized<PartitionMeta>& partition_meta_ptr,
@@ -247,7 +278,8 @@ class TaskScheduler {
 
   void TerminateTasksOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
-  // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
+  // Temporary inconsistency may happen. If 'false' is returned, just ignore
+  // it.
   void QueryTasksInRam(const crane::grpc::QueryTasksInfoRequest* request,
                        crane::grpc::QueryTasksInfoReply* response);
 
