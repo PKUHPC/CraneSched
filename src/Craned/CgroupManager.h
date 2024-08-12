@@ -268,6 +268,8 @@ class CgroupManager {
 
   bool ReleaseCgroupByTaskIdOnly(task_id_t task_id);
 
+  std::vector<EnvPair> GetResourceEnvListOfTask(task_id_t task_id);
+
  private:
   static std::string CgroupStrByTaskId_(task_id_t task_id);
 

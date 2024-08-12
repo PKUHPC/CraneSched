@@ -38,9 +38,8 @@ bool TaskInstance::IsCalloc() const {
              crane::grpc::Calloc;
 }
 
-std::vector<std::pair<std::string, std::string>>
-TaskInstance::GetEnvironmentVariables() const {
-  std::vector<std::pair<std::string, std::string>> env_vec;
+std::vector<EnvPair> TaskInstance::GetEnvList() const {
+  std::vector<EnvPair> env_vec;
   for (auto& [name, value] : this->task.env()) {
     env_vec.emplace_back(name, value);
   }
@@ -76,18 +75,7 @@ TaskInstance::GetEnvironmentVariables() const {
   env_vec.emplace_back("CRANE_PARTITION", this->task.partition());
   env_vec.emplace_back("CRANE_QOS", this->task.qos());
 
-  const auto& this_node_alloc_res =
-      this->task.resources().allocatable_res_in_node();
-  const auto& this_node_dres = this->task.resources().dedicated_res_in_node();
-
-  env_vec.emplace_back(
-      "CRANE_MEM_PER_NODE",
-      std::to_string(this_node_alloc_res.memory_limit_bytes() / (1024 * 1024)));
   env_vec.emplace_back("CRANE_JOB_ID", std::to_string(this->task.task_id()));
-
-  std::vector device_envs =
-      DeviceManager::GetDevEnvListByResInNode(this_node_dres);
-  env_vec.insert(env_vec.end(), device_envs.begin(), device_envs.end());
 
   if (this->IsCrun() && !this->task.interactive_meta().term_env().empty()) {
     env_vec.emplace_back("TERM", this->task.interactive_meta().term_env());
@@ -843,17 +831,22 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     if (instance->task.type() == crane::grpc::Batch) close(0);
     util::os::CloseFdFrom(3);
 
-    std::vector env_vec = instance->GetEnvironmentVariables();
+    std::vector<EnvPair> task_env_vec = instance->GetEnvList();
+    std::vector<EnvPair> res_env_vec =
+        g_cg_mgr->GetResourceEnvListOfTask(instance->task.task_id());
 
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
     }
 
-    for (const auto& [name, value] : env_vec) {
-      if (setenv(name.c_str(), value.c_str(), 1)) {
-        fmt::print("setenv for {}={} failed!\n", name, value);
-      }
-    }
+    auto FuncSetEnv = [](const std::vector<EnvPair>& v) {
+      for (const auto& [name, value] : v)
+        if (setenv(name.c_str(), value.c_str(), 1))
+          fmt::print("setenv for {}={} failed!\n", name, value);
+    };
+
+    FuncSetEnv(task_env_vec);
+    FuncSetEnv(res_env_vec);
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
@@ -1152,7 +1145,7 @@ void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_(int efd, short events,
       auto& instance = task_iter->second;
 
       std::vector<std::pair<std::string, std::string>> env_opt;
-      for (const auto& [name, value] : instance->GetEnvironmentVariables()) {
+      for (const auto& [name, value] : instance->GetEnvList()) {
         env_opt.emplace_back(name, value);
       }
       elem.env_prom.set_value(env_opt);

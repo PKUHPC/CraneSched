@@ -402,17 +402,27 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
     grpc::ServerContext *context,
     const crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
     crane::grpc::QueryTaskEnvVariablesForwardReply *response) {
+  // First query local device related env list
+  std::vector<EnvPair> dev_envs =
+      g_cg_mgr->GetResourceEnvListOfTask(request->task_id());
+  for (const auto &env : dev_envs) {
+    response->add_name(env.first);
+    response->add_value(env.second);
+  }
+
   std::optional execution_node_opt =
       g_cg_mgr->QueryTaskExecutionNode(request->task_id());
   if (!execution_node_opt.has_value()) {
     response->set_ok(false);
     return Status::OK;
   }
+
   std::string execution_node = execution_node_opt.value();
   if (!g_config.CranedNodes.contains(execution_node)) {
     response->set_ok(false);
     return Status::OK;
   }
+
   std::shared_ptr<Channel> channel_of_remote_service;
   if (g_config.ListenConf.UseTls) {
     std::string target_service = fmt::format(
@@ -448,6 +458,7 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
   crane::grpc::QueryTaskEnvVariablesReply reply_from_remote_service;
   ClientContext context_of_remote_service;
   Status status_remote_service;
+
   request_to_remote_service.set_task_id(request->task_id());
   std::unique_ptr<crane::grpc::Craned::Stub> stub_of_remote_craned =
       crane::grpc::Craned::NewStub(channel_of_remote_service);
@@ -467,6 +478,7 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
     response->add_name(reply_from_remote_service.name(i));
     response->add_value(reply_from_remote_service.value(i));
   }
+
   return Status::OK;
 }
 

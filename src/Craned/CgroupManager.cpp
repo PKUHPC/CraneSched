@@ -448,6 +448,31 @@ std::optional<std::string> CgroupManager::QueryTaskExecutionNode(
   return this->m_task_id_to_cg_spec_map_[task_id]->execution_node;
 }
 
+std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTask(
+    task_id_t task_id) {
+  std::vector<EnvPair> env_vec;
+
+  auto cg_spec_ptr = m_task_id_to_cg_spec_map_[task_id];
+  if (!cg_spec_ptr) {
+    CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
+                task_id);
+    return env_vec;
+  }
+
+  const auto &res_in_node = cg_spec_ptr->res_in_node;
+
+  env_vec = DeviceManager::GetDevEnvListByResInNode(
+      res_in_node.dedicated_res_in_node());
+
+  env_vec.emplace_back(
+      "CRANE_MEM_PER_NODE",
+      std::to_string(
+          res_in_node.allocatable_res_in_node().memory_limit_bytes() /
+          (1024 * 1024)));
+
+  return env_vec;
+}
+
 bool Cgroup::MigrateProcIn(pid_t pid) {
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;
