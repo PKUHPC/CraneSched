@@ -384,7 +384,7 @@ std::string ReadableDresInNode(const ResourceInNode &resource_in_node) {
   return absl::StrJoin(node_gres_string_vector, ",");
 }
 
-std::string ReadableDres(
+std::string ReadableGrpcDresInNode(
     const crane::grpc::DedicatedResourceInNode &dres_in_node) {
   if (dres_in_node.name_type_map_size() == 0) return "None";
 
