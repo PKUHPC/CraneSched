@@ -185,12 +185,12 @@ struct CranedMeta {
 
 struct PartitionGlobalMeta {
   // total = avail + in-use
-  ResourceV2 res_total;
-  ResourceV2 res_avail;
-  ResourceV2 res_in_use;
+  ResourceView res_total;
+  ResourceView res_avail;
+  ResourceView res_in_use;
 
   // Include resources in unavailable nodes.
-  ResourceV2 res_total_inc_dead;
+  ResourceView res_total_inc_dead;
 
   std::string name;
   std::string nodelist_str;
@@ -255,9 +255,9 @@ struct TaskInCtld {
 
   PartitionId partition_id;
 
-  ResourceV2 resources;
+  // Set by user request and probably include untyped devices.
+  ResourceView requested_node_res_view;
 
-  DedicatedResourceInNode::Req_t request_gres;
   crane::grpc::TaskType type;
 
   uid_t uid;
@@ -331,6 +331,11 @@ struct TaskInCtld {
    * Fields that may change at run time.
    * However, these fields are NOT persisted on the disk.
    * ----------- */
+
+  // Might change at each scheduling cycle.
+  ResourceV2 resources;
+  ResourceView allocated_res_view;  // Aggregated from resources of all nodes.
+
   uint32_t nodes_alloc;
   std::vector<CranedId> executing_craned_ids;
   std::string allocated_craneds_regex;
@@ -441,21 +446,7 @@ struct TaskInCtld {
 
     partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                   : val.partition_name();
-    resources.allocatable_resource = val.resources().allocatable_resource();
-
-    if (val.resources().has_dedicated_resource_req()) {
-      for (const auto& [device_name, type_count_map] :
-           val.resources().dedicated_resource_req().name_type_map()) {
-        std::unordered_map<std::string, uint64_t> tmp;
-        for (const auto& [device_type, req_count] :
-             type_count_map.type_count_map()) {
-          if (req_count == 0) continue;
-          tmp[device_type] = req_count;
-        }
-        if (type_count_map.total() == 0 && tmp.empty()) continue;
-        request_gres[device_name] = std::make_pair(type_count_map.total(), tmp);
-      }
-    }
+    requested_node_res_view = static_cast<ResourceView>(val.resources());
 
     time_limit = absl::Seconds(val.time_limit().seconds());
 

@@ -315,16 +315,16 @@ void ParseConfig(int argc, char** argv) {
              ++it) {
           auto node = it->as<YAML::Node>();
           auto node_ptr = std::make_shared<Ctld::Config::Node>();
-          std::list<std::string> name_list;
+          std::list<std::string> node_id_list;
 
           if (node["name"]) {
-            if (!util::ParseHostList(node["name"].Scalar(), &name_list)) {
+            if (!util::ParseHostList(node["name"].Scalar(), &node_id_list)) {
               CRANE_ERROR("Illegal node name string format.");
               std::exit(1);
             }
 
             CRANE_TRACE("node name list parsed: {}",
-                        fmt::join(name_list, ", "));
+                        fmt::join(node_id_list, ", "));
           } else
             std::exit(1);
 
@@ -392,9 +392,9 @@ void ParseConfig(int argc, char** argv) {
             }
           }
 
-          for (auto&& name : name_list) {
-            g_config.Nodes[name] = node_ptr;
-            g_config.Nodes[name]->dedicated_resource[name] = resourceInNode;
+          for (auto&& node_id : node_id_list) {
+            g_config.Nodes[node_id] = node_ptr;
+            g_config.Nodes[node_id]->dedicated_resource = resourceInNode;
           }
         }
       }

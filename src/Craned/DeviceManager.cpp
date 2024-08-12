@@ -84,21 +84,23 @@ std::unique_ptr<BasicDevice> DeviceManager::ConstructDevice(
 }
 
 std::vector<std::pair<std::string, std::string>>
-DeviceManager::GetEnvironmentVariable(
-    const crane::grpc::DedicatedResourceInNode& resourceInNode) {
+DeviceManager::GetDevEnvListByResInNode(
+    const crane::grpc::DedicatedResourceInNode& res_in_node) {
   std::vector<std::pair<std::string, std::string>> env;
   std::unordered_set<std::string> all_res_slots;
   for (const auto& [device_name, device_type_slosts_map] :
-       resourceInNode.name_type_map()) {
+       res_in_node.name_type_map()) {
     for (const auto& [device_type, slots] :
          device_type_slosts_map.type_slots_map())
       all_res_slots.insert(slots.slots().begin(), slots.slots().end());
   }
+
   uint32_t cuda_count = 0;
   uint32_t hip_count = 0;
   for (const auto& [_, device] : g_this_node_device) {
     if (!all_res_slots.contains(device->device_metas.front().path)) continue;
-    if (device->env_injector == "nvidia") ++cuda_count;
+    if (device->env_injector == "nvidia")
+      ++cuda_count;
     else if (device->env_injector == "hip")
       ++hip_count;
   }

@@ -44,10 +44,9 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
-    part_global_meta.res_total.AddResourceInNode(craned_id,
-                                                 node_meta->res_total);
-    part_global_meta.res_avail.AddResourceInNode(craned_id,
-                                                 node_meta->res_avail);
+    part_global_meta.res_total += node_meta->static_meta.res.allocatable_res;
+    part_global_meta.res_avail += node_meta->static_meta.res.allocatable_res;
+    ;
     part_global_meta.alive_craned_cnt++;
   }
 
@@ -160,8 +159,8 @@ void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
 
-    part_global_meta.res_avail.SubtractResourceInNode(node_id, task_node_res);
-    part_global_meta.res_in_use.AddResourceInNode(node_id, task_node_res);
+    part_global_meta.res_avail -= task_node_res;
+    part_global_meta.res_in_use += task_node_res;
   }
 }
 
@@ -208,8 +207,8 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
 
-    part_global_meta.res_avail.AddResourceInNode(node_id, resources);
-    part_global_meta.res_in_use.SubtractResourceInNode(node_id, resources);
+    part_global_meta.res_avail += resources;
+    part_global_meta.res_in_use -= resources;
   }
 
   node_meta->running_task_resource_map.erase(resource_iter);
@@ -243,7 +242,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
   for (auto&& [part_name, partition] : config.Partitions) {
     CRANE_TRACE("Parsing partition {}", part_name);
 
-    ResourceV2 part_res;
+    ResourceView part_res;
 
     auto& part_meta = partition_map[part_name];
 
@@ -263,7 +262,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
               craned_meta.static_meta.res.allocatable_res.memory_bytes),
           util::ReadableDresInNode(craned_meta.static_meta.res), part_name);
 
-      part_res.AddResourceInNode(craned_name, craned_meta.static_meta.res);
+      part_res += craned_meta.static_meta.res;
     }
 
     part_meta.partition_global_meta.name = part_name;
@@ -275,13 +274,11 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
         "partition [{}]'s Global resource now: (cpu: {}, mem: {}, gres: {}). "
         "It has {} craneds.",
         part_name,
-        part_meta.partition_global_meta.res_total_inc_dead.TotalAllocatableRes()
-            .cpu_count,
-        util::ReadableMemory(part_meta.partition_global_meta.res_total_inc_dead
-                                 .TotalAllocatableRes()
-                                 .memory_bytes),
-        util::ReadableDresInResource(
-            part_meta.partition_global_meta.res_total_inc_dead),
+        part_meta.partition_global_meta.res_total_inc_dead.CpuCount(),
+        util::ReadableMemory(
+            part_meta.partition_global_meta.res_total_inc_dead.MemoryBytes()),
+        util::ReadableTypedDeviceMap(
+            part_meta.partition_global_meta.res_total_inc_dead.GetDeviceMap()),
         part_meta.partition_global_meta.node_cnt);
   }
 
@@ -336,11 +333,11 @@ CranedMetaContainer::QueryAllPartitionInfo() {
     part_info->set_alive_nodes(
         part_meta->partition_global_meta.alive_craned_cnt);
 
-    *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceV2>(
+    *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
         part_meta->partition_global_meta.res_total);
-    *part_info->mutable_res_avail() = static_cast<crane::grpc::ResourceV2>(
+    *part_info->mutable_res_avail() = static_cast<crane::grpc::ResourceView>(
         part_meta->partition_global_meta.res_avail);
-    *part_info->mutable_res_alloc() = static_cast<crane::grpc::ResourceV2>(
+    *part_info->mutable_res_alloc() = static_cast<crane::grpc::ResourceView>(
         part_meta->partition_global_meta.res_in_use);
 
     if (part_meta->partition_global_meta.alive_craned_cnt > 0)
@@ -375,11 +372,11 @@ crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
 
   part_info->set_hostlist(part_meta->partition_global_meta.nodelist_str);
 
-  *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceV2>(
+  *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
       part_meta->partition_global_meta.res_total);
-  *part_info->mutable_res_avail() = static_cast<crane::grpc::ResourceV2>(
+  *part_info->mutable_res_avail() = static_cast<crane::grpc::ResourceView>(
       part_meta->partition_global_meta.res_avail);
-  *part_info->mutable_res_alloc() = static_cast<crane::grpc::ResourceV2>(
+  *part_info->mutable_res_alloc() = static_cast<crane::grpc::ResourceView>(
       part_meta->partition_global_meta.res_in_use);
 
   return reply;
@@ -593,10 +590,8 @@ void CranedMetaContainer::AddDedicatedResource(
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
-    part_global_meta.res_avail.EachNodeResMap().at(node_id).dedicated_res +=
-        intersection;
-    part_global_meta.res_total.EachNodeResMap().at(node_id).dedicated_res +=
-        intersection;
+    part_global_meta.res_avail += intersection;
+    part_global_meta.res_total += intersection;
   }
 }
 

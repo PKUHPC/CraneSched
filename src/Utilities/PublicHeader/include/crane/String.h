@@ -72,13 +72,11 @@ void SetCurrentThreadName(const std::string &name);
 
 bool ConvertStringToInt64(const std::string &s, int64_t *val);
 
-std::string ReadableDresInResource(const ResourceV2 &dedicated_resource);
+std::string ReadableTypedDeviceMap(const DeviceMap &dedicated_resource);
 std::string ReadableDresInNode(const ResourceInNode &dedicated_resource);
 
-std::string ReadableGres(
-    const crane::grpc::DedicatedResource &dedicated_resource);
-std::string ReadableGres(
-    const crane::grpc::DedicatedResourceInNode &dedicated_resource_in_node);
+std::string ReadableDres(
+    const crane::grpc::DedicatedResourceInNode &dres_in_node);
 
 std::string GenerateCommaSeparatedString(const int val);
 

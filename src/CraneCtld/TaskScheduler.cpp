@@ -731,7 +731,7 @@ void TaskScheduler::ScheduleThread_() {
           CgroupSpec spec{
               .uid = task->uid,
               .task_id = task->TaskId(),
-              .resources =
+              .res_in_node =
                   (crane::grpc::ResourceInNode)task->resources.at(craned_id),
               .execution_node = task->executing_craned_ids.front()};
           craned_cgroup_map[craned_id].emplace_back(std::move(spec));
@@ -831,7 +831,7 @@ void TaskScheduler::ScheduleThread_() {
       for (auto& [craned_id, tasks_raw_ptrs] :
            craned_task_to_exec_raw_ptrs_map) {
         craned_exec_requests_map[craned_id] =
-            CranedStub::NewExecuteTasksRequest(tasks_raw_ptrs);
+            CranedStub::NewExecuteTasksRequests(craned_id, tasks_raw_ptrs);
       }
 
       // Move tasks into running queue.
@@ -1710,10 +1710,8 @@ void TaskScheduler::QueryTasksInRam(
     task_it->set_qos(task.qos);
     task_it->set_held(task.Held());
 
-    task_it->set_alloc_cpu(
-        static_cast<double>(task.resources.TotalAllocatableRes().cpu_count));
-    task_it->mutable_gres_req()->CopyFrom(
-        task.TaskToCtld().resources().dedicated_resource_req());
+    *task_it->mutable_res_view() =
+        static_cast<crane::grpc::ResourceView>(task.requested_node_res_view);
     task_it->set_exit_code(0);
     task_it->set_priority(task.cached_priority);
 
@@ -2022,10 +2020,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
         task->resources.EachNodeResMap().begin()->second.allocatable_res;
 
     // If any of the follow `if` is true, skip this node.
-    if (!(/* check dedicated_resource */
-          (task->request_gres.empty() /* no gres required */ ||
-           task->request_gres <= craned_meta->res_total.dedicated_res) &&
-          task_alloc_res <= craned_meta->res_total.allocatable_res)) {
+    if (!(task->requested_node_res_view <= craned_meta->res_avail)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
             "Task #{} needs more resource than that of craned {}. "
@@ -2057,52 +2052,26 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   CRANE_ASSERT_MSG(selected_node_cnt == task->node_num,
                    "selected_node_cnt != task->node_num");
 
-  // chose slot for each node gres request
+  task->resources.SetToZero();
+  task->allocated_res_view.SetToZero();
   for (const auto& craned_id : craned_indexes_) {
     const auto& craned_meta = craned_meta_map.at(craned_id).GetExclusivePtr();
-    for (const auto& [device_name, name_type_req] : task->request_gres) {
-      const auto& type_req_spec = name_type_req.second;
-      auto name_count = name_type_req.first;
-      auto& this_name_alloc_gres =
-          task->resources.dedicated_resource[craned_id][device_name];
-      for (const auto& [device_type, type_count] : type_req_spec) {
-        const auto& avail_slots =
-            craned_meta->res_total.dedicated_resource.at(craned_id)
-                .at(device_name)
-                .at(device_type);
-        if (avail_slots.size() < type_count) return false;
-        auto it = avail_slots.begin();
-        for (size_t i = 0; i < type_count; ++i) {
-          if (it == avail_slots.end()) {
-            it = avail_slots.begin();
-          }
-          this_name_alloc_gres[device_type].emplace(*it);
-          ++it;
-        }
-        while (name_count > 0 && it != avail_slots.end()) {
-          this_name_alloc_gres[device_type].emplace(*it);
-          ++it;
-          --name_count;
-        }
-      }
-      if (name_count > 0) {
-        for (const auto& [type, slots] :
-             craned_meta->res_total.dedicated_resource.at(craned_id)
-                 .at(device_name)
-                 .type_slots_map) {
-          if (type_req_spec.contains(type)) continue;
-          auto it = slots.begin();
-          while (name_count > 0 && it != slots.end()) {
-            this_name_alloc_gres[type].emplace(*it);
-            ++it;
-            --name_count;
-          }
-          if (name_count == 0) break;
-        }
-      }
-      if (name_count != 0) return false;
+    ResourceInNode feasible_res;
+
+    bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
+        craned_meta->res_avail, &feasible_res);
+    if (!ok) {
+      CRANE_DEBUG(
+          "Task #{} needs more resource than that of craned {}. "
+          "Craned resource might have been changed.",
+          task->TaskId(), craned_id);
+      return false;
     }
+
+    task->resources.AddResourceInNode(craned_id, feasible_res);
+    task->allocated_res_view += feasible_res;
   }
+
   for (CranedId craned_id : craned_indexes_) {
     if constexpr (kAlgoTraceOutput) {
       CRANE_TRACE("Find valid time segments for task #{} on craned {}",
@@ -2658,8 +2627,8 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   Config::Partition const& part_meta = part_it->second;
 
-  AllocatableResource const& task_alloc_res =
-      task->resources.allocatable_resource;
+  AllocatableResource& task_alloc_res =
+      task->requested_node_res_view.GetAllocatableRes();
   double core_double = static_cast<double>(task_alloc_res.cpu_count);
 
   double task_mem_per_cpu = (double)task_alloc_res.memory_bytes / core_double;
@@ -2674,8 +2643,9 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
         std::min(task_mem_per_cpu, (double)part_meta.max_mem_per_cpu);
   }
   uint64_t mem_bytes = core_double * task_mem_per_cpu;
-  task->resources.allocatable_resource.memory_bytes = mem_bytes;
-  task->resources.allocatable_resource.memory_sw_bytes = mem_bytes;
+
+  task->requested_node_res_view.GetAllocatableRes().memory_bytes = mem_bytes;
+  task->requested_node_res_view.GetAllocatableRes().memory_sw_bytes = mem_bytes;
 
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
       task->Username(), task->account, task);
@@ -2717,22 +2687,25 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     // Since we do not access the elements in partition_metas_m
 
     // Check whether the selected partition is able to run this task.
-    if (!(task->resources <=
+    if (!(task->requested_node_res_view * task->node_num <=
           metas_ptr->partition_global_meta.res_total_inc_dead)) {
       CRANE_TRACE(
           "Resource not enough for task #{}. "
           "Partition total: cpu {}, mem: {}, mem+sw: {}, gres: {}",
           task->TaskId(),
           metas_ptr->partition_global_meta.res_total_inc_dead
-              .allocatable_resource.cpu_count,
+              .GetAllocatableRes()
+              .cpu_count,
           util::ReadableMemory(
               metas_ptr->partition_global_meta.res_total_inc_dead
-                  .allocatable_resource.memory_bytes),
+                  .GetAllocatableRes()
+                  .memory_bytes),
           util::ReadableMemory(
               metas_ptr->partition_global_meta.res_total_inc_dead
-                  .allocatable_resource.memory_sw_bytes),
-          util::ReadableGres(
-              metas_ptr->partition_global_meta.res_total.dedicated_resource));
+                  .GetAllocatableRes()
+                  .memory_sw_bytes),
+          util::ReadableTypedDeviceMap(
+              metas_ptr->partition_global_meta.res_total.GetDeviceMap()));
       return CraneErr::kNoResource;
     }
 
@@ -2747,13 +2720,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
     for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-      if (task->resources <= craned_meta->res_total &&
-
-          (task->request_gres.empty() ||
-           (craned_meta->res_total.dedicated_resource.contains(craned_id) &&
-            task->request_gres <=
-                craned_meta->res_total.dedicated_resource.at(craned_id))) &&
-
+      if (task->requested_node_res_view <= craned_meta->res_total &&
           (task->included_nodes.empty() ||
            task->included_nodes.contains(craned_id)) &&
           (task->excluded_nodes.empty() ||
@@ -2879,12 +2846,11 @@ void MultiFactorPriority::CalculateFactorBound_(
     bound.nodes_alloc_min = std::min(nodes_alloc, bound.nodes_alloc_min);
     bound.nodes_alloc_max = std::max(nodes_alloc, bound.nodes_alloc_max);
 
-    uint64_t mem_alloc = task->resources.allocatable_resource.memory_bytes;
+    uint64_t mem_alloc = task->allocated_res_view.MemoryBytes();
     bound.mem_alloc_min = std::min(mem_alloc, bound.mem_alloc_min);
     bound.mem_alloc_max = std::max(mem_alloc, bound.mem_alloc_max);
 
-    double cpus_alloc =
-        static_cast<double>(task->resources.allocatable_resource.cpu_count);
+    double cpus_alloc = task->allocated_res_view.CpuCount();
     bound.cpus_alloc_min = std::min(cpus_alloc, bound.cpus_alloc_min);
     bound.cpus_alloc_max = std::max(cpus_alloc, bound.cpus_alloc_max);
 
@@ -2901,9 +2867,7 @@ void MultiFactorPriority::CalculateFactorBound_(
     double service_val = 0;
     if (bound.cpus_alloc_max != bound.cpus_alloc_min)
       service_val +=
-          1.0 *
-          (static_cast<double>(task->resources.allocatable_resource.cpu_count) -
-           bound.cpus_alloc_min) /
+          1.0 * (task->allocated_res_view.CpuCount() - bound.cpus_alloc_min) /
           (bound.cpus_alloc_max - bound.cpus_alloc_min);
     else
       // += 1.0 here rather than 0.0 in case that the final service_val is 0.
@@ -2920,9 +2884,8 @@ void MultiFactorPriority::CalculateFactorBound_(
     if (bound.mem_alloc_max != bound.mem_alloc_min)
       service_val +=
           1.0 *
-          static_cast<double>(
-              task->resources.allocatable_resource.memory_bytes -
-              bound.mem_alloc_min) /
+          static_cast<double>(task->allocated_res_view.MemoryBytes() -
+                              bound.mem_alloc_min) /
           static_cast<double>(bound.mem_alloc_max - bound.mem_alloc_min);
     else
       service_val += 1.0;
@@ -2948,9 +2911,9 @@ double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task,
   uint32_t task_qos_priority = task->qos_priority;
   uint32_t task_part_priority = task->partition_priority;
   uint32_t task_nodes_alloc = task->node_num;
-  uint64_t task_mem_alloc = task->resources.allocatable_resource.memory_bytes;
+  uint64_t task_mem_alloc = task->requested_node_res_view.MemoryBytes();
   double task_cpus_alloc =
-      static_cast<double>(task->resources.allocatable_resource.cpu_count);
+      static_cast<double>(task->requested_node_res_view.CpuCount());
   double task_service_val = bound.acc_service_val_map.at(task->account);
 
   double qos_factor{0};

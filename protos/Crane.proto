@@ -84,7 +84,7 @@ message ExecuteTasksReply {
 message CreateCgroupForTasksRequest {
   repeated uint32 task_id_list = 1;
   repeated uint32 uid_list = 2;
-  repeated Resources res_list = 3;
+  repeated ResourceInNode res_list = 3;
   repeated string execution_node = 4;
 }
 

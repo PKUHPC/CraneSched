@@ -348,28 +348,20 @@ bool ConvertStringToInt64(const std::string &s, int64_t *val) {
   return convert_result.ec == std::errc();
 }
 
-std::string ReadableDresInResource(const ResourceV2 &dedicated_resource) {
-  if (dedicated_resource.IsZero()) return "None";
+std::string ReadableTypedDeviceMap(const DeviceMap &device_map) {
+  if (device_map.empty()) return "None";
 
-  std::vector<std::string> node_gres_string_vector;
-  for (const auto &[node_id, node_gres] : dedicated_resource.EachNodeResMap()) {
-    std::vector<std::string> node_gres_vec;
-    for (const auto &[device_name, type_slots_map] :
-         node_gres.dedicated_res.name_type_slots_map) {
-      for (const auto &[device_type, slots] : type_slots_map.type_slots_map) {
-        node_gres_vec.emplace_back(fmt::format(
-            "{}:{}:{}:{}", node_id, device_name, device_type, slots.size()));
-      }
+  std::vector<std::string> typed_device_str_vec;
+  for (const auto &[dev_name, p] : device_map) {
+    const auto &type_size_map = p.second;
+
+    for (const auto &[dev_type, size] : type_size_map) {
+      typed_device_str_vec.push_back(
+          fmt::format("{}:{}:{}", dev_name, dev_type, size));
     }
-
-    // node:name:type:count
-    node_gres_string_vector.insert(
-        std::end(node_gres_string_vector),
-        std::make_move_iterator(node_gres_vec.begin()),
-        std::make_move_iterator(node_gres_vec.end()));
   }
 
-  return absl::StrJoin(node_gres_string_vector, ",");
+  return absl::StrJoin(typed_device_str_vec, ",");
 }
 
 std::string ReadableDresInNode(const ResourceInNode &resource_in_node) {
@@ -392,45 +384,22 @@ std::string ReadableDresInNode(const ResourceInNode &resource_in_node) {
   return absl::StrJoin(node_gres_string_vector, ",");
 }
 
-std::string ReadableGres(
-    const crane::grpc::DedicatedResource &dedicated_resource) {
-  if (dedicated_resource.each_node_gres().empty()) return "None";
+std::string ReadableDres(
+    const crane::grpc::DedicatedResourceInNode &dres_in_node) {
+  if (dres_in_node.name_type_map_size() == 0) return "None";
 
-  std::vector<std::string> node_gres_string_vector;
-  for (const auto &[node_id, node_gres] : dedicated_resource.each_node_gres()) {
-    std::vector<std::string> node_gres_vec;
-    for (const auto &[device_name, type_slots_map] :
-         node_gres.name_type_map()) {
-      for (const auto &[device_type, slots] : type_slots_map.type_slots_map()) {
-        node_gres_vec.emplace_back(fmt::format("{}:{}:{}:{}", node_id,
-                                               device_name, device_type,
-                                               slots.slots().size()));
-      }
-    }
-    // node:name:type:count
-    node_gres_string_vector.insert(
-        std::end(node_gres_string_vector),
-        std::make_move_iterator(node_gres_vec.begin()),
-        std::make_move_iterator(node_gres_vec.end()));
+  std::vector<std::string> typed_device_str_vec;
+  for (const auto &[dev_name, p] : dres_in_node.name_type_map()) {
+    const auto &type_size_map = p.type_slots_map();
+
+    for (const auto &[dev_type, slots] : type_size_map)
+      typed_device_str_vec.push_back(
+          fmt::format("{}:{}:{}", dev_name, dev_type, slots.slots_size()));
   }
 
-  return absl::StrJoin(node_gres_string_vector, ",");
+  return absl::StrJoin(typed_device_str_vec, ",");
 }
 
-std::string ReadableGres(
-    const crane::grpc::DedicatedResourceInNode &dedicated_resource_in_node) {
-  if (dedicated_resource_in_node.name_type_map().empty()) return "None";
-  std::vector<std::string> node_gres_string_vector;
-  for (const auto &[device_name, type_slots_map] :
-       dedicated_resource_in_node.name_type_map()) {
-    for (const auto &[device_type, slots] : type_slots_map.type_slots_map()) {
-      node_gres_string_vector.emplace_back(fmt::format(
-          "{}:{}:{}", device_name, device_type, slots.slots().size()));
-    }
-  }
-
-  return absl::StrJoin(node_gres_string_vector, ",");
-}
 std::string GenerateCommaSeparatedString(const int val) {
   std::vector<int> val_vec;
   val_vec.reserve(val);

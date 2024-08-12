@@ -183,11 +183,11 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
   for (int i = 0; i < request->task_id_list_size(); i++) {
     task_id_t task_id = request->task_id_list(i);
     uid_t uid = request->uid_list(i);
-    crane::grpc::Resources const &resources = request->res_list(i);
+    crane::grpc::ResourceInNode const &res = request->res_list(i);
 
     CgroupSpec spec{.uid = uid,
                     .task_id = task_id,
-                    .resources = std::move(resources),
+                    .res_in_node = std::move(res),
                     .execution_node = request->execution_node(i)};
     CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", task_id, uid);
     cg_specs.emplace_back(std::move(spec));

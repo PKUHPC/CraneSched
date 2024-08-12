@@ -64,9 +64,6 @@ message ResourceInNode {
 
 message ResourceV2 {
   map <string /*craned id*/, ResourceInNode> each_node_res = 1;
-
-  // TODO: Remove this field after ResourceView is finished.
-  AllocatableResource total_allocatable_res = 2;
 }
 
 // Old implementation
@@ -76,7 +73,7 @@ message DedicatedResource {
 
 message ResourceView {
   AllocatableResource allocatable_res = 1;
-  DeviceMap dedicated_res = 2;
+  DeviceMap device_map = 2;
 }
 
 // Old implementation
@@ -140,7 +137,7 @@ message TaskToCtld {
   google.protobuf.Duration time_limit = 1;
 
   string partition_name = 2;
-  Resources resources = 3;
+  ResourceView resources = 3;
 
   TaskType type = 4;
 
@@ -201,7 +198,7 @@ message TaskToD {
   TaskType type = 2;
   uint32 partition_id = 3;
 
-  Resources resources = 4;
+  ResourceInNode resources = 4;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -269,12 +266,12 @@ message TaskInfo {
   string cwd = 14;
   string username = 15;
   string qos = 16;
-  DeviceMap gres_req = 17;
+  ResourceView res_view = 17;
 
   // Dynamic task information
   bool held = 30;
   TaskStatus status = 31;
-  double alloc_cpu = 32;
+
   uint32 exit_code = 33;
   uint32 priority = 34;
   oneof pending_reason_or_craned_list {
@@ -297,9 +294,9 @@ message PartitionInfo {
   uint32 total_nodes = 4;
   uint32 alive_nodes = 5;
 
-  ResourceV2 res_total = 6;
-  ResourceV2 res_avail = 7;
-  ResourceV2 res_alloc = 8;
+  ResourceView res_total = 6;
+  ResourceView res_avail = 7;
+  ResourceView res_alloc = 8;
 }
 
 message CranedInfo {

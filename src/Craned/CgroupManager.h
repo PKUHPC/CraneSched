@@ -240,8 +240,8 @@ class AllocatableResourceAllocator {
 
 class DedicatedResourceAllocator {
  public:
-  static bool Allocate(const crane::grpc::DedicatedResource &request_resource,
-                       Cgroup *cg);
+  static bool Allocate(
+      const crane::grpc::DedicatedResourceInNode &request_resource, Cgroup *cg);
 };
 
 class CgroupManager {

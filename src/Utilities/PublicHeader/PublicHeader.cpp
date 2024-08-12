@@ -34,6 +34,13 @@ AllocatableResource& AllocatableResource::operator-=(
   return *this;
 }
 
+AllocatableResource& AllocatableResource::operator*=(uint32_t rhs) {
+  cpu_count *= rhs;
+  memory_bytes *= rhs;
+  memory_sw_bytes *= rhs;
+  return *this;
+}
+
 bool operator<=(const AllocatableResource& lhs,
                 const AllocatableResource& rhs) {
   if (lhs.cpu_count <= rhs.cpu_count && lhs.memory_bytes <= rhs.memory_bytes &&
@@ -44,11 +51,8 @@ bool operator<=(const AllocatableResource& lhs,
 }
 
 bool operator<(const AllocatableResource& lhs, const AllocatableResource& rhs) {
-  if (lhs.cpu_count < rhs.cpu_count && lhs.memory_bytes < rhs.memory_bytes &&
-      lhs.memory_sw_bytes < rhs.memory_sw_bytes)
-    return true;
-
-  return false;
+  return lhs.cpu_count < rhs.cpu_count && lhs.memory_bytes < rhs.memory_bytes &&
+         lhs.memory_sw_bytes < rhs.memory_sw_bytes;
 }
 
 bool operator==(const AllocatableResource& lhs,
@@ -75,8 +79,41 @@ bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs) {
   return lhs.craned_id_dres_in_node_map == rhs.craned_id_dres_in_node_map;
 }
 
-bool operator<=(const DedicatedResourceInNode::Req_t& lhs,
-                const DedicatedResourceInNode& rhs) {
+bool operator<=(const DeviceMap& lhs, const DeviceMap& rhs) {
+  for (const auto& [lhs_name, lhs_cnt] : lhs) {
+    auto rhs_it = rhs.find(lhs_name);
+    if (rhs_it == rhs.end()) return false;
+
+    const auto& [lhs_untyped_cnt, lhs_typed_cnt_map] = lhs_cnt;
+    const auto& [rhs_untyped_cnt, rhs_typed_cnt_map] = rhs_it->second;
+
+    uint64_t rhs_avail_count = 0;
+    for (const auto& [lhs_type, lhs_type_cnt] : lhs_typed_cnt_map) {
+      auto rhs_type_it = rhs_typed_cnt_map.find(lhs_type);
+      if (rhs_type_it == rhs_typed_cnt_map.end()) return false;
+
+      if (lhs_type_cnt > rhs_type_it->second) return false;
+
+      rhs_avail_count += rhs_type_it->second - lhs_type_cnt;
+    }
+
+    if (lhs_untyped_cnt <= rhs_untyped_cnt + rhs_avail_count) continue;
+
+    for (const auto& [rhs_type, rhs_type_cnt] : rhs_typed_cnt_map) {
+      if (lhs_typed_cnt_map.contains(rhs_type)) continue;
+
+      rhs_avail_count += rhs_type_cnt;
+
+      if (lhs_untyped_cnt <= rhs_untyped_cnt + rhs_avail_count) break;
+    }
+
+    if (lhs_untyped_cnt > rhs_untyped_cnt + rhs_avail_count) return false;
+  }
+
+  return true;
+}
+
+bool operator<=(const DeviceMap& lhs, const DedicatedResourceInNode& rhs) {
   for (const auto& [lhs_name, lhs_name_type_spec] : lhs) {
     const auto& [untyped_req_count, req_type_count_map] = lhs_name_type_spec;
     auto rhs_it = rhs.name_type_slots_map.find(lhs_name);
@@ -206,6 +243,7 @@ Resources& Resources::operator-=(const AllocatableResource& rhs) {
   allocatable_resource -= rhs;
   return *this;
 }
+
 Resources Resources::operator+(const DedicatedResource& rhs) const {
   Resources result(*this);
   result.dedicated_resource += rhs;
@@ -416,6 +454,74 @@ DedicatedResourceInNode::operator crane::grpc::DedicatedResourceInNode() const {
 
 void DedicatedResourceInNode::SetToZero() { name_type_slots_map.clear(); }
 
+crane::grpc::DeviceMap ToGrpcDeviceMap(const DeviceMap& device_map) {
+  crane::grpc::DeviceMap grpc_device_map{};
+
+  for (const auto& [device_name, type_slots_map] : device_map) {
+    auto& grpc_name_type_map = *grpc_device_map.mutable_name_type_map();
+
+    for (const auto& [device_type, slots] : type_slots_map.second) {
+      // If all slots of a device type are used up,
+      // the size of slots in res_avail will be 0.
+      // We don't need such devices to show up in the response, so we skip them.
+      if (slots == 0) continue;
+
+      auto& grpc_type_count_map =
+          *grpc_name_type_map[device_name].mutable_type_count_map();
+      grpc_type_count_map[device_type] = slots;
+    }
+  }
+
+  return grpc_device_map;
+}
+
+DeviceMap FromGrpcDeviceMap(const crane::grpc::DeviceMap& grpc_device_map) {
+  DeviceMap device_map{};
+
+  for (const auto& [device_name, grpc_type_count_map] :
+       grpc_device_map.name_type_map()) {
+    auto& type_slots_map = device_map[device_name].second;
+
+    for (const auto& [device_type, slots] :
+         grpc_type_count_map.type_count_map())
+      type_slots_map[device_type] = slots;
+  }
+
+  return device_map;
+}
+
+void operator+=(DeviceMap& lhs, const DedicatedResourceInNode& rhs) {
+  for (const auto& [rhs_name, rhs_type_slots_map] : rhs.name_type_slots_map)
+    for (const auto& [rhs_type, rhs_slots] : rhs_type_slots_map.type_slots_map)
+      lhs[rhs_name].second[rhs_type] += rhs_slots.size();
+}
+
+void operator-=(DeviceMap& lhs, const DedicatedResourceInNode& rhs) {
+  for (const auto& [rhs_name, rhs_type_slots_map] : rhs.name_type_slots_map) {
+    auto lhs_name_it = lhs.find(rhs_name);
+    ABSL_ASSERT(lhs_name_it != lhs.end());
+
+    for (const auto& [rhs_type, rhs_slots] :
+         rhs_type_slots_map.type_slots_map) {
+      auto& lhs_type_size_map = lhs_name_it->second.second;
+
+      auto lhs_type_it = lhs_type_size_map.find(rhs_type);
+      ABSL_ASSERT(lhs_type_it != lhs_type_size_map.end());
+      ABSL_ASSERT(rhs_slots.size() <= lhs_type_it->second);
+
+      lhs_type_it->second -= rhs_slots.size();
+    }
+  }
+}
+
+void operator*=(DeviceMap& lhs, uint32_t rhs) {
+  for (auto& [_, name_cnt] : lhs) {
+    uint64_t& untyped_cnt = name_cnt.first;
+    untyped_cnt *= rhs;
+    for (auto& [_, typed_cnt] : name_cnt.second) typed_cnt *= rhs;
+  }
+}
+
 TypeSlotsMap::TypeSlotsMap(const crane::grpc::DeviceTypeSlotsMap& rhs) {
   for (const auto& [type, slots] : rhs.type_slots_map())
     this->type_slots_map[type].insert(slots.slots().begin(),
@@ -560,10 +666,6 @@ bool operator==(const ResourceInNode& lhs, const ResourceInNode& rhs) {
 ResourceV2::ResourceV2(const crane::grpc::ResourceV2& rhs) {
   for (const auto& [node_id, res_in_node] : rhs.each_node_res())
     this->each_node_res_map.emplace(node_id, res_in_node);
-
-  // Update cache
-  for (const auto& [node_id, res_in_node] : each_node_res_map)
-    this->total_allocatable_res += res_in_node.allocatable_res;
 }
 
 ResourceV2::operator crane::grpc::ResourceV2() const {
@@ -575,10 +677,6 @@ ResourceV2::operator crane::grpc::ResourceV2() const {
     grpc_res_in_node = static_cast<crane::grpc::ResourceInNode>(res_in_node);
   }
 
-  auto* grpc_total_allocatable_res = val.mutable_total_allocatable_res();
-  *grpc_total_allocatable_res = static_cast<crane::grpc::AllocatableResource>(
-      this->total_allocatable_res);
-
   return val;
 }
 
@@ -587,10 +685,6 @@ ResourceV2& ResourceV2::operator=(const crane::grpc::ResourceV2& rhs) {
 
   for (const auto& [node_id, res_in_node] : rhs.each_node_res())
     this->each_node_res_map.emplace(node_id, res_in_node);
-
-  // Update cache
-  for (const auto& [node_id, res_in_node] : each_node_res_map)
-    this->total_allocatable_res += res_in_node.allocatable_res;
 
   return *this;
 }
@@ -606,9 +700,6 @@ const ResourceInNode& ResourceV2::at(const std::string& craned_id) const {
 ResourceV2& ResourceV2::operator+=(const ResourceV2& rhs) {
   for (const auto& [rhs_node_id, rhs_res_in_node] : rhs.each_node_res_map) {
     this->each_node_res_map[rhs_node_id] += rhs_res_in_node;
-
-    // Update cache
-    this->total_allocatable_res += rhs_res_in_node.allocatable_res;
   }
 
   return *this;
@@ -622,9 +713,6 @@ ResourceV2& ResourceV2::operator-=(const ResourceV2& rhs) {
     rhs_it->second -= rhs_res_in_node;
 
     if (rhs_it->second.IsZero()) this->each_node_res_map.erase(rhs_it);
-
-    // Update cache
-    this->total_allocatable_res -= rhs_res_in_node.allocatable_res;
   }
 
   return *this;
@@ -633,10 +721,6 @@ ResourceV2& ResourceV2::operator-=(const ResourceV2& rhs) {
 ResourceV2& ResourceV2::AddResourceInNode(const std::string& craned_id,
                                           const ResourceInNode& rhs) {
   this->each_node_res_map[craned_id] += rhs;
-
-  // Update cache
-  this->total_allocatable_res += rhs.allocatable_res;
-
   return *this;
 }
 
@@ -650,18 +734,12 @@ ResourceV2& ResourceV2::SubtractResourceInNode(const std::string& craned_id,
   if (this_node_it->second.IsZero())
     this->each_node_res_map.erase(this_node_it);
 
-  // Update cache
-  this->total_allocatable_res -= rhs.allocatable_res;
-
   return *this;
 }
 
 bool ResourceV2::IsZero() const { return each_node_res_map.empty(); }
 
-void ResourceV2::SetToZero() {
-  each_node_res_map.clear();
-  total_allocatable_res.SetToZero();
-}
+void ResourceV2::SetToZero() { each_node_res_map.clear(); }
 
 bool operator<=(const ResourceV2& lhs, const ResourceV2& rhs) {
   for (const auto& [lhs_node_id, lhs_res_in_node] : lhs.each_node_res_map) {
@@ -676,4 +754,158 @@ bool operator<=(const ResourceV2& lhs, const ResourceV2& rhs) {
 
 bool operator==(const ResourceV2& lhs, const ResourceV2& rhs) {
   return lhs.each_node_res_map == rhs.each_node_res_map;
+}
+
+ResourceView::ResourceView(const crane::grpc::ResourceView& rhs) {
+  allocatable_res = rhs.allocatable_res();
+  device_map = FromGrpcDeviceMap(rhs.device_map());
+}
+
+ResourceView::operator crane::grpc::ResourceView() const {
+  crane::grpc::ResourceView val{};
+
+  auto* mutable_allocatable_res = val.mutable_allocatable_res();
+  *mutable_allocatable_res =
+      static_cast<crane::grpc::AllocatableResource>(allocatable_res);
+
+  auto* mutable_dev_map = val.mutable_device_map();
+  *mutable_dev_map = ToGrpcDeviceMap(device_map);
+
+  return val;
+}
+
+ResourceView& ResourceView::operator+=(const ResourceV2& rhs) {
+  for (const auto& [_, rhs_res_in_node] : rhs.each_node_res_map)
+    *this += rhs_res_in_node;
+
+  return *this;
+}
+
+ResourceView& ResourceView::operator-=(const ResourceV2& rhs) {
+  for (const auto& [_, rhs_res_in_node] : rhs.each_node_res_map)
+    *this -= rhs_res_in_node;
+
+  return *this;
+}
+
+ResourceView& ResourceView::operator+=(const ResourceInNode& rhs) {
+  this->device_map += rhs.dedicated_res;
+  this->allocatable_res += rhs.allocatable_res;
+
+  return *this;
+}
+
+ResourceView& ResourceView::operator-=(const ResourceInNode& rhs) {
+  this->device_map -= rhs.dedicated_res;
+
+  ABSL_ASSERT(rhs.allocatable_res <= this->allocatable_res);
+  this->allocatable_res -= rhs.allocatable_res;
+
+  return *this;
+}
+
+ResourceView& ResourceView::operator+=(const AllocatableResource& rhs) {
+  this->allocatable_res += rhs;
+  return *this;
+}
+
+ResourceView& ResourceView::operator-=(const AllocatableResource& rhs) {
+  ABSL_ASSERT(rhs <= this->allocatable_res);
+  this->allocatable_res -= rhs;
+  return *this;
+}
+
+ResourceView& ResourceView::operator+=(const DedicatedResourceInNode& rhs) {
+  this->device_map += rhs;
+  return *this;
+}
+
+ResourceView& ResourceView::operator-=(const DedicatedResourceInNode& rhs) {
+  this->device_map -= rhs;
+  return *this;
+}
+
+bool ResourceView::IsZero() const {
+  return device_map.empty() && allocatable_res.IsZero();
+}
+
+void ResourceView::SetToZero() {
+  device_map.clear();
+  allocatable_res.SetToZero();
+}
+
+double ResourceView::CpuCount() const {
+  return static_cast<double>(allocatable_res.cpu_count);
+}
+
+uint64_t ResourceView::MemoryBytes() const {
+  return allocatable_res.memory_bytes;
+}
+
+bool ResourceView::GetFeasibleResourceInNode(const ResourceInNode& avail_res,
+                                             ResourceInNode* feasible_res) {
+  if (avail_res.allocatable_res < this->allocatable_res) return false;
+
+  feasible_res->allocatable_res = this->allocatable_res;
+
+  // chose slot for each node gres request
+  for (const auto& [dev_name, name_type_req] : this->device_map) {
+    const auto& dres_avail = avail_res.dedicated_res.at(dev_name);
+
+    // e.g. GPU -> (untyped_cnt: 2 , typed_cnt_map:{A100:2, H100:1})
+    uint64_t untyped_cnt = name_type_req.first;
+    const auto& typed_cnt_map = name_type_req.second;
+
+    auto& feasible_res_dev_name = feasible_res->dedicated_res[dev_name];
+
+    for (const auto& [dev_type, typed_cnt] : typed_cnt_map) {
+      const auto& avail_slots = dres_avail.at(dev_type);
+      auto& feasible_res_dev_name_type = feasible_res_dev_name[dev_type];
+
+      if (avail_slots.size() < typed_cnt) return false;
+
+      auto it = avail_slots.begin();
+      for (size_t i = 0; i < typed_cnt; ++i, ++it)
+        feasible_res_dev_name_type.emplace(*it);
+
+      for (; untyped_cnt > 0 && it != avail_slots.end(); ++it, --untyped_cnt)
+        feasible_res_dev_name_type.emplace(*it);
+    }
+
+    // If there are still untyped slots to be allocated,
+    // we need to find the remaining slots from other types.
+    if (untyped_cnt > 0) {
+      for (const auto& [type, slots] : dres_avail.type_slots_map) {
+        if (typed_cnt_map.contains(type)) continue;
+
+        auto it = slots.begin();
+        for (; untyped_cnt > 0 && it != slots.end(); ++it, --untyped_cnt)
+          feasible_res_dev_name[type].emplace(*it);
+
+        if (untyped_cnt == 0) break;
+      }
+    }
+
+    if (untyped_cnt != 0) return false;
+  }
+
+  return true;
+}
+
+ResourceView operator*(const ResourceView& lhs, uint32_t rhs) {
+  ResourceView result(lhs);
+  result.allocatable_res *= int(rhs);
+  result.device_map *= rhs;
+
+  return result;
+}
+
+bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs) {
+  return lhs.device_map <= rhs.dedicated_res &&
+         lhs.allocatable_res <= rhs.allocatable_res;
+}
+
+bool operator<=(const ResourceView& lhs, const ResourceView& rhs) {
+  return lhs.device_map <= rhs.device_map &&
+         lhs.allocatable_res <= rhs.allocatable_res;
 }

@@ -75,22 +75,19 @@ TaskInstance::GetEnvironmentVariables() const {
   env_vec.emplace_back("CRANE_ACCOUNT", this->task.account());
   env_vec.emplace_back("CRANE_PARTITION", this->task.partition());
   env_vec.emplace_back("CRANE_QOS", this->task.qos());
+
+  const auto& this_node_alloc_res =
+      this->task.resources().allocatable_res_in_node();
+  const auto& this_node_dres = this->task.resources().dedicated_res_in_node();
+
   env_vec.emplace_back(
       "CRANE_MEM_PER_NODE",
-      std::to_string(
-          this->task.resources().allocatable_resource().memory_limit_bytes() /
-          (1024 * 1024)));
+      std::to_string(this_node_alloc_res.memory_limit_bytes() / (1024 * 1024)));
   env_vec.emplace_back("CRANE_JOB_ID", std::to_string(this->task.task_id()));
 
-  if (this->task.resources()
-          .actual_dedicated_resource()
-          .each_node_gres()
-          .contains(g_config.Hostname)) {
-    std::vector device_envs = DeviceManager::GetEnvironmentVariable(
-        this->task.resources().actual_dedicated_resource().each_node_gres().at(
-            g_config.Hostname));
-    env_vec.insert(env_vec.end(), device_envs.begin(), device_envs.end());
-  }
+  std::vector device_envs =
+      DeviceManager::GetDevEnvListByResInNode(this_node_dres);
+  env_vec.insert(env_vec.end(), device_envs.begin(), device_envs.end());
 
   if (this->IsCrun() && !this->task.interactive_meta().term_env().empty()) {
     env_vec.emplace_back("TERM", this->task.interactive_meta().term_env());

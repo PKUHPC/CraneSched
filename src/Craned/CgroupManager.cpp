@@ -273,13 +273,13 @@ bool CgroupManager::CheckIfCgroupForTasksExists(task_id_t task_id) {
 }
 
 bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
-  crane::grpc::Resources res;
+  crane::grpc::ResourceInNode res;
   Cgroup *pcg;
 
   {
     auto cg_spec_it = m_task_id_to_cg_spec_map_[task_id];
     if (!cg_spec_it) return false;
-    res = cg_spec_it->resources;
+    res = cg_spec_it->res_in_node;
   }
   {
     auto cg_it = m_task_id_to_cg_map_[task_id];
@@ -297,19 +297,18 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
     pcg = cg_unique_ptr.get();
     if (cg) *cg = pcg;
   }
+
   CRANE_TRACE(
       "Setting cgroup limit of task #{}. CPU: {:.2f}, Mem: {:.2f} MB Gres: {}.",
-      task_id, res.allocatable_resource().cpu_core_limit(),
-      res.allocatable_resource().memory_limit_bytes() / (1024.0 * 1024.0),
-      res.has_actual_dedicated_resource()
-          ? util::ReadableGres(res.actual_dedicated_resource())
-          : "None");
+      task_id, res.allocatable_res_in_node().cpu_core_limit(),
+      res.allocatable_res_in_node().memory_limit_bytes() / (1024.0 * 1024.0),
+      util::ReadableDres(res.dedicated_res_in_node()));
 
-  bool ok =
-      AllocatableResourceAllocator::Allocate(res.allocatable_resource(), pcg);
+  bool ok = AllocatableResourceAllocator::Allocate(
+      res.allocatable_res_in_node(), pcg);
   if (ok)
-    ok &= DedicatedResourceAllocator::Allocate(res.actual_dedicated_resource(),
-                                               pcg);
+    ok &=
+        DedicatedResourceAllocator::Allocate(res.dedicated_res_in_node(), pcg);
   return ok;
 }
 
@@ -964,16 +963,13 @@ bool AllocatableResourceAllocator::Allocate(
 }
 
 bool DedicatedResourceAllocator::Allocate(
-    const crane::grpc::DedicatedResource &request_resource, Cgroup *cg) {
+    const crane::grpc::DedicatedResourceInNode &request_resource, Cgroup *cg) {
   std::unordered_set<std::string> all_request_slots;
-  if (request_resource.each_node_gres().contains(g_config.Hostname)) {
-    for (const auto &[_, type_slots_map] : request_resource.each_node_gres()
-                                               .at(g_config.Hostname)
-                                               .name_type_map()) {
-      for (const auto &[__, slots] : type_slots_map.type_slots_map())
-        all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
-    };
-  }
+  for (const auto &[_, type_slots_map] : request_resource.name_type_map()) {
+    for (const auto &[__, slots] : type_slots_map.type_slots_map())
+      all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
+  };
+
   if (!cg->SetDeviceAccess(all_request_slots, true, true, true)) return false;
   return true;
 }

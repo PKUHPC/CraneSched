@@ -56,8 +56,8 @@ class DeviceManager {
   GetDeviceFileMajorMinorOpType(const std::string& path);
 
   static std::vector<std::pair<std::string, std::string>>
-  GetEnvironmentVariable(
-      const crane::grpc::DedicatedResourceInNode& resourceInNode);
+  GetDevEnvListByResInNode(
+      const crane::grpc::DedicatedResourceInNode& res_in_node);
 
   static std::vector<std::unique_ptr<BasicDevice>> GetSystemDeviceNvml();
 };
