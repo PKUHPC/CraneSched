@@ -66,32 +66,9 @@ message ResourceV2 {
   map <string /*craned id*/, ResourceInNode> each_node_res = 1;
 }
 
-// Old implementation
-message DedicatedResource {
-  map <string /*craned id*/, DedicatedResourceInNode> each_node_gres = 1;
-}
-
 message ResourceView {
   AllocatableResource allocatable_res = 1;
   DeviceMap device_map = 2;
-}
-
-// Old implementation
-message Resources {
-  AllocatableResource allocatable_resource = 1;
-
-  oneof dedicated_resource {
-    // After the task is scheduled, some missing device
-    // specification is fulfilled by the scheduler and
-    // a detailed specification of dedicated resources is generated.
-    // Such a detailed form is sent to Craned for actual device allocation.
-    DedicatedResource actual_dedicated_resource = 2;
-
-    // The form of dedicated resource presented by user
-    // is abstracted by DeviceMap.
-    // DeviceMap is used between front end and CraneCtld.
-    DeviceMap dedicated_resource_req = 3;
-  }
 }
 
 enum PartitionState {

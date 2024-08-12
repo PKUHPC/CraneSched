@@ -308,65 +308,6 @@ struct ResourceInNode {
 bool operator<=(const ResourceInNode& lhs, const ResourceInNode& rhs);
 bool operator==(const ResourceInNode& lhs, const ResourceInNode& rhs);
 
-/**
- * Model the dedicated resources in a craned node.
- * It contains GPU, NIC, etc.
- */
-struct DedicatedResource {
-  std::unordered_map<CranedId /*craned id*/, DedicatedResourceInNode>
-      craned_id_dres_in_node_map;
-
-  DedicatedResource() = default;
-  explicit DedicatedResource(const crane::grpc::DedicatedResource& rhs);
-
-  explicit operator crane::grpc::DedicatedResource() const;
-
-  // Arithmetic operators
-  DedicatedResource& operator+=(const DedicatedResource& rhs);
-  DedicatedResource& operator-=(const DedicatedResource& rhs);
-  DedicatedResource& AddDedicatedResourceInNode(const CranedId& craned_id,
-                                                const DedicatedResource& rhs);
-  DedicatedResource& SubtractDedicatedResourceInNode(
-      const CranedId& craned_id, const DedicatedResource& rhs);
-
-  // Access operators
-  DedicatedResourceInNode& operator[](const std::string& craned_id);
-  DedicatedResourceInNode& at(const std::string& craned_id);
-  const DedicatedResourceInNode& at(const std::string& craned_id) const;
-
-  bool contains(const CranedId& craned_id) const;
-  bool IsZero() const;
-};
-
-bool operator<=(const DedicatedResource& lhs, const DedicatedResource& rhs);
-bool operator==(const DedicatedResource& lhs, const DedicatedResource& rhs);
-
-struct Resources {
-  // Since the allocatable resource is the same for all nodes, we only need to
-  // store one copy and do not need to keep the craned id.
-  AllocatableResource allocatable_resource;
-
-  // Since DedicatedResource might be different for different nodes, we need to
-  // store a map from craned id to DedicatedResourceInNode in DedicatedResource.
-  DedicatedResource dedicated_resource;
-
-  Resources() = default;
-
-  Resources& operator+=(const Resources& rhs);
-  Resources& operator-=(const Resources& rhs);
-
-  Resources& operator+=(const AllocatableResource& rhs);
-  Resources& operator-=(const AllocatableResource& rhs);
-  Resources operator+(const DedicatedResource& rhs) const;
-
-  explicit operator crane::grpc::Resources() const;
-};
-
-// These operators are used to compare the resources of
-// all nodes involved in the task.
-bool operator<=(const Resources& lhs, const Resources& rhs);
-bool operator==(const Resources& lhs, const Resources& rhs);
-
 class ResourceView;
 
 class ResourceV2 {
