@@ -538,7 +538,7 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     if (!craned_meta_map_.Contains(craned_id)) {
       reply.add_not_modified_nodes(craned_id);
       reply.add_not_modified_reasons("Invalid node name specified.");
-      return reply;
+      continue;
     }
 
     auto craned_meta = craned_meta_map_[craned_id];
