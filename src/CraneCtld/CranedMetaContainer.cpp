@@ -23,6 +23,18 @@
 namespace Ctld {
 
 void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
+  DedicatedResourceInNode dres_in_node;
+
+  auto stub = g_craned_keeper->GetCranedStub(craned_id);
+  if (stub != nullptr && !stub->Invalid()) {
+    CraneErr err = stub->QueryActualDres(&dres_in_node);
+    if (err != CraneErr::kOk) {
+      CRANE_ERROR("Failed to query actual resource from craned {}", craned_id);
+      return;
+    }
+    stub.reset();  // Release shared_ptr
+  }
+
   CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
   auto& part_ids = craned_id_part_ids_map_.at(craned_id);
 
@@ -45,23 +57,18 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
       node_meta->static_meta.res.allocatable_res;
   node_meta->res_avail.allocatable_res +=
       node_meta->static_meta.res.allocatable_res;
+  node_meta->res_total.dedicated_res += dres_in_node;
+  node_meta->res_avail.dedicated_res += dres_in_node;
 
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
     part_global_meta.res_total += node_meta->static_meta.res.allocatable_res;
     part_global_meta.res_avail += node_meta->static_meta.res.allocatable_res;
+    part_global_meta.res_total += dres_in_node;
+    part_global_meta.res_avail += dres_in_node;
     part_global_meta.alive_craned_cnt++;
   }
-
-  g_thread_pool->detach_task([this, craned_id]() {
-    auto stub = g_craned_keeper->GetCranedStub(craned_id);
-    if (stub != nullptr && !stub->Invalid()) {
-      DedicatedResourceInNode resource;
-      CraneErr err = stub->QueryActualDres(&resource);
-      if (err == CraneErr::kOk) this->AddDedicatedResource(craned_id, resource);
-    }
-  });
 }
 
 void CranedMetaContainer::CranedDown(const CranedId& craned_id) {

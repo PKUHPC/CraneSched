@@ -304,6 +304,9 @@ struct TaskInCtld {
   absl::Time start_time;
   absl::Time end_time;
 
+  // Might change at each scheduling cycle.
+  ResourceV2 resources;
+
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::TaskToCtld task_to_ctld;
 
@@ -328,9 +331,9 @@ struct TaskInCtld {
    * However, these fields are NOT persisted on the disk.
    * ----------- */
 
+  // Aggregated from resources of all nodes.
   // Might change at each scheduling cycle.
-  ResourceV2 resources;
-  ResourceView allocated_res_view;  // Aggregated from resources of all nodes.
+  ResourceView allocated_res_view;
 
   uint32_t nodes_alloc;
   std::vector<CranedId> executing_craned_ids;
@@ -437,6 +440,13 @@ struct TaskInCtld {
   }
   bool const& Held() const { return held; }
 
+  void SetResources(ResourceV2&& val) {
+    *runtime_attr.mutable_resources() =
+        static_cast<crane::grpc::ResourceV2>(val);
+    resources = std::move(val);
+  }
+  ResourceV2 const& Resources() const { return resources; }
+
   void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
     task_to_ctld = val;
 
@@ -515,6 +525,8 @@ struct TaskInCtld {
           for (auto const& craned_id : craned_ids)
             executing_craned_ids.emplace_back(craned_id);
       }
+
+      resources = static_cast<ResourceV2>(runtime_attr.resources());
     }
 
     start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());

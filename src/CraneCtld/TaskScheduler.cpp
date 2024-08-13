@@ -517,7 +517,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   for (const CranedId& craned_id : task->CranedIds())
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
-                                             task->resources);
+                                             task->Resources());
 
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
@@ -732,7 +732,7 @@ void TaskScheduler::ScheduleThread_() {
               .uid = task->uid,
               .task_id = task->TaskId(),
               .res_in_node =
-                  (crane::grpc::ResourceInNode)task->resources.at(craned_id),
+                  (crane::grpc::ResourceInNode)task->Resources().at(craned_id),
               .execution_node = task->executing_craned_ids.front()};
           craned_cgroup_map[craned_id].emplace_back(std::move(spec));
         }
@@ -1947,7 +1947,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
          * {{now+1+1: available_res(now) + available_res(1) +
          *  available_res(2)}, ...}
          */
-        cur_time_iter->second += running_task->resources.at(craned_id);
+        cur_time_iter->second += running_task->Resources().at(craned_id);
 
         if constexpr (kAlgoTraceOutput) {
           CRANE_TRACE(
@@ -2017,7 +2017,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     // TODO: Trim here after finishing ResourceView.
     AllocatableResource const& task_alloc_res =
-        task->resources.EachNodeResMap().begin()->second.allocatable_res;
+        task->Resources().EachNodeResMap().begin()->second.allocatable_res;
 
     // If any of the follow `if` is true, skip this node.
     if (!(task->requested_node_res_view <= craned_meta->res_avail)) {
@@ -2052,8 +2052,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   CRANE_ASSERT_MSG(selected_node_cnt == task->node_num,
                    "selected_node_cnt != task->node_num");
 
-  task->resources.SetToZero();
-  task->allocated_res_view.SetToZero();
+  ResourceV2 allocated_res;
+
   for (const auto& craned_id : craned_indexes_) {
     const auto& craned_meta = craned_meta_map.at(craned_id).GetExclusivePtr();
     ResourceInNode feasible_res;
@@ -2068,9 +2068,11 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       return false;
     }
 
-    task->resources.AddResourceInNode(craned_id, feasible_res);
+    allocated_res.AddResourceInNode(craned_id, feasible_res);
     task->allocated_res_view += feasible_res;
   }
+
+  task->SetResources(std::move(allocated_res));
 
   for (CranedId craned_id : craned_indexes_) {
     if constexpr (kAlgoTraceOutput) {
@@ -2095,7 +2097,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     absl::Time expected_start_time;
 
     ResourceInNode const& task_node_res =
-        task->resources.EachNodeResMap().at(craned_id);
+        task->Resources().EachNodeResMap().at(craned_id);
 
     // Figure out in this craned node, which time segments have sufficient
     // resource to run the task.
@@ -2408,7 +2410,7 @@ void MinLoadFirst::NodeSelect(
 
     for (const auto& [partition_id, part_craned_ids] : involved_part_craned) {
       SubtractTaskResourceNodeSelectionInfo_(
-          expected_start_time, task->time_limit, task->resources,
+          expected_start_time, task->time_limit, task->Resources(),
           part_craned_ids, &part_id_node_info_map.at(partition_id));
     }
 
@@ -2424,7 +2426,7 @@ void MinLoadFirst::NodeSelect(
       // allocated.
       for (CranedId const& craned_id : craned_ids)
         g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
-                                                 task->resources);
+                                                 task->Resources());
 
       std::unique_ptr<TaskInCtld> moved_task;
 

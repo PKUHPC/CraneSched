@@ -161,13 +161,14 @@ message RuntimeAttrOfTask {
   int32 requeue_count = 11;
   repeated string craned_ids = 12;
   TaskStatus status = 13;
-  uint32 exit_code = 14;
+  uint32 exit_code = 14;;
 
   google.protobuf.Timestamp submit_time = 15;
   google.protobuf.Timestamp start_time = 16;
   google.protobuf.Timestamp end_time = 17;
 
   bool held = 18;
+  ResourceV2 resources = 19;
 }
 
 message TaskToD {

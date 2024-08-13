@@ -667,7 +667,9 @@ void InitializeCtldGlobalVariables() {
         "A new node #{} is up now. Add its resource to the global resource "
         "pool.",
         craned_id);
-    g_meta_container->CranedUp(craned_id);
+
+    g_thread_pool->detach_task(
+        [craned_id]() { g_meta_container->CranedUp(craned_id); });
   });
 
   g_craned_keeper->SetCranedIsDownCb([](const CranedId& craned_id) {
