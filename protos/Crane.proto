@@ -222,14 +222,15 @@ message ModifyTaskReply {
 }
 
 message ModifyCranedStateRequest{
-  string craned_id = 1;
+  repeated string craned_ids = 1;
   CranedControlState new_state = 2;
   string reason = 3;
 }
 
 message ModifyCranedStateReply{
-  bool ok = 1;
-  string reason = 2;
+  repeated string modified_nodes = 2;
+  repeated string not_modified_nodes = 3;
+  repeated string not_modified_reasons = 4;
 }
 
 message AddAccountRequest {

@@ -534,33 +534,34 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     const crane::grpc::ModifyCranedStateRequest& request) {
   crane::grpc::ModifyCranedStateReply reply;
 
-  if (!craned_meta_map_.Contains(request.craned_id())) {
-    reply.set_ok(false);
-    reply.set_reason("Invalid node name specified.");
-    return reply;
-  }
-
-  auto craned_meta = craned_meta_map_[request.craned_id()];
-
-  if (craned_meta->alive) {
-    if (request.new_state() == crane::grpc::CranedControlState::CRANE_DRAIN) {
-      craned_meta->drain = true;
-      craned_meta->state_reason = request.reason();
-      reply.set_ok(true);
-    } else if (request.new_state() ==
-               crane::grpc::CranedControlState::CRANE_NONE) {
-      craned_meta->drain = false;
-      craned_meta->state_reason.clear();
-      reply.set_ok(true);
-    } else {
-      reply.set_ok(false);
-      reply.set_reason("Invalid state.");
+  for (auto craned_id : request.craned_ids()) {
+    if (!craned_meta_map_.Contains(craned_id)) {
+      reply.add_not_modified_nodes(craned_id);
+      reply.add_not_modified_reasons("Invalid node name specified.");
+      return reply;
     }
-  } else {
-    reply.set_ok(false);
-    reply.set_reason("Can't change the state of a DOWN node!");
-  }
 
+    auto craned_meta = craned_meta_map_[craned_id];
+
+    if (craned_meta->alive) {
+      if (request.new_state() == crane::grpc::CranedControlState::CRANE_DRAIN) {
+        craned_meta->drain = true;
+        craned_meta->state_reason = request.reason();
+        reply.add_modified_nodes(craned_id);
+      } else if (request.new_state() ==
+                 crane::grpc::CranedControlState::CRANE_NONE) {
+        craned_meta->drain = false;
+        craned_meta->state_reason.clear();
+        reply.add_modified_nodes(craned_id);
+      } else {
+        reply.add_not_modified_nodes(craned_id);
+        reply.add_not_modified_reasons("Invalid state.");
+      }
+    } else {
+      reply.add_not_modified_nodes(craned_id);
+      reply.add_not_modified_reasons("Can't change the state of a DOWN node!");
+    }
+  }
   return reply;
 }
 
