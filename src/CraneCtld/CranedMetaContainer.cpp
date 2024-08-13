@@ -63,10 +63,12 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
+
     part_global_meta.res_total += node_meta->static_meta.res.allocatable_res;
     part_global_meta.res_avail += node_meta->static_meta.res.allocatable_res;
     part_global_meta.res_total += dres_in_node;
     part_global_meta.res_avail += dres_in_node;
+
     part_global_meta.alive_craned_cnt++;
   }
 }
@@ -95,9 +97,9 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
 
-    part_global_meta.res_total.SetToZero();
-    part_global_meta.res_avail.SetToZero();
-    part_global_meta.res_in_use.SetToZero();
+    part_global_meta.res_total -= node_meta->res_total;
+    part_global_meta.res_avail -= node_meta->res_avail;
+    part_global_meta.res_in_use -= node_meta->res_in_use;
 
     part_global_meta.alive_craned_cnt--;
   }

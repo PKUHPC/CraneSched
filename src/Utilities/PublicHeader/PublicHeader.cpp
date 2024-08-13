@@ -196,6 +196,10 @@ AllocatableResource::operator crane::grpc::AllocatableResource() const {
   return val;
 }
 
+double AllocatableResource::CpuCount() const {
+  return static_cast<double>(cpu_count);
+}
+
 bool AllocatableResource::IsZero() const {
   return cpu_count == static_cast<cpu_t>(0) && memory_bytes == 0 &&
          memory_sw_bytes == 0;
