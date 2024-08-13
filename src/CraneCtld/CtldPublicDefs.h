@@ -86,11 +86,7 @@ struct Config {
     std::string CraneCtldListenPort;
 
     bool UseTls{false};
-    std::string DomainSuffix;
-    std::string ServerCertFilePath;
-    std::string ServerCertContent;
-    std::string ServerKeyFilePath;
-    std::string ServerKeyContent;
+    TlsCertificates Certs;
   };
 
   struct Priority {

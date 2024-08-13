@@ -1114,35 +1114,18 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CraneCtldServiceImpl>(this);
 
-  std::string listen_addr_port =
-      fmt::format("{}:{}", listen_conf.CraneCtldListenAddr,
-                  listen_conf.CraneCtldListenPort);
-
   grpc::ServerBuilder builder;
 
-  if (g_config.CompressedRpc)
-    builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+  if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
   if (listen_conf.UseTls) {
-    grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
-    pem_key_cert_pair.cert_chain = listen_conf.ServerCertContent;
-    pem_key_cert_pair.private_key = listen_conf.ServerKeyContent;
-
-    grpc::SslServerCredentialsOptions ssl_opts;
-    // pem_root_certs is actually the certificate of server side rather than
-    // CA certificate. CA certificate is not needed.
-    // Since we use the same cert/key pair for both cranectld/craned,
-    // pem_root_certs is set to the same certificate.
-    ssl_opts.pem_root_certs = listen_conf.ServerCertContent;
-    ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
-    ssl_opts.client_certificate_request =
-        GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
-
-    builder.AddListeningPort(listen_addr_port,
-                             grpc::SslServerCredentials(ssl_opts));
+    ServerBuilderAddTcpTlsListeningPort(
+        &builder, listen_conf.CraneCtldListenAddr,
+        listen_conf.CraneCtldListenPort, listen_conf.Certs);
   } else {
-    builder.AddListeningPort(listen_addr_port,
-                             grpc::InsecureServerCredentials());
+    ServerBuilderAddTcpInsecureListeningPort(&builder,
+                                             listen_conf.CraneCtldListenAddr,
+                                             listen_conf.CraneCtldListenPort);
   }
 
   builder.RegisterService(m_service_impl_.get());
@@ -1153,7 +1136,8 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     std::exit(1);
   }
 
-  CRANE_INFO("CraneCtld is listening on {} and Tls is {}", listen_addr_port,
+  CRANE_INFO("CraneCtld is listening on {}:{} and Tls is {}",
+             listen_conf.CraneCtldListenAddr, listen_conf.CraneCtldListenPort,
              listen_conf.UseTls);
 
   // Avoid the potential deadlock error in underlying absl::mutex

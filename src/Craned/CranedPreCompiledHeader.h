@@ -26,6 +26,7 @@
 #include <csignal>
 #include <filesystem>
 #include <forward_list>
+#include <fpm/fixed.hpp>
 #include <fstream>
 #include <functional>
 #include <future>
@@ -42,6 +43,7 @@
 #include <thread>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 
 // backward-cpp
 #include <backward.hpp>
@@ -67,6 +69,7 @@
 #include <concurrentqueue/concurrentqueue.h>
 
 // gRPC
+#include <google/protobuf/util/time_util.h>
 #include <grpc++/grpc++.h>
 
 // fpm
@@ -74,4 +77,7 @@
 
 // Include the header which defines the static log level
 #include "crane/Logger.h"
+
+// Then include the other Crane headers
+#include "crane/GrpcHelper.h"
 #include "crane/Network.h"

@@ -16,14 +16,6 @@
 
 #pragma once
 
-#include <google/protobuf/util/time_util.h>
-
-#include <array>
-#include <fpm/fixed.hpp>
-#include <optional>
-#include <unordered_map>
-#include <variant>
-
 #include "CranedPreCompiledHeader.h"
 // Precompiled header comes first
 
@@ -65,11 +57,7 @@ struct Config {
     std::string CranedListenPort;
 
     bool UseTls{false};
-    std::string DomainSuffix;
-    std::string ServerCertFilePath;
-    std::string ServerCertContent;
-    std::string ServerKeyFilePath;
-    std::string ServerKeyContent;
+    TlsCertificates TlsCerts;
 
     std::string UnixSocketListenAddr;
   };

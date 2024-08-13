@@ -230,7 +230,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
   bool remote_is_craned = false;
 
   // May be craned or cfored
-  std::string_view crane_service_port;
+  std::string crane_service_port;
 
   // Check whether the remote address is in the addresses of CraneD nodes.
   if (g_config.Ipv4ToCranedHostname.contains(request->ssh_remote_address())) {
@@ -269,30 +269,15 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
       CRANE_TRACE("Remote address {} was resolved as {}",
                   request->ssh_remote_address(), remote_hostname);
 
-      std::string target_service =
-          fmt::format("{}.{}:{}", remote_hostname,
-                      g_config.ListenConf.DomainSuffix, crane_service_port);
-
-      grpc::SslCredentialsOptions ssl_opts;
-      // pem_root_certs is actually the certificate of server side rather than
-      // CA certificate. CA certificate is not needed.
-      // Since we use the same cert/key pair for both cranectld/craned,
-      // pem_root_certs is set to the same certificate.
-      ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
-      ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
-      ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
-
-      channel_of_remote_service =
-          grpc::CreateChannel(target_service, grpc::SslCredentials(ssl_opts));
+      channel_of_remote_service = CreateTcpTlsChannelByHostname(
+          remote_hostname, crane_service_port, g_config.ListenConf.TlsCerts);
     } else {
       CRANE_ERROR("Failed to resolve remote address {}.",
                   request->ssh_remote_address());
     }
   } else {
-    std::string target_service =
-        fmt::format("{}:{}", request->ssh_remote_address(), crane_service_port);
-    channel_of_remote_service =
-        grpc::CreateChannel(target_service, grpc::InsecureChannelCredentials());
+    channel_of_remote_service = CreateTcpInsecureChannel(
+        request->ssh_remote_address(), crane_service_port);
   }
 
   if (!channel_of_remote_service) {
@@ -424,29 +409,13 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
   }
 
   std::shared_ptr<Channel> channel_of_remote_service;
-  if (g_config.ListenConf.UseTls) {
-    std::string target_service = fmt::format(
-        "{}.{}:{}", execution_node, g_config.ListenConf.DomainSuffix,
-        g_config.ListenConf.CranedListenPort);
-
-    grpc::SslCredentialsOptions ssl_opts;
-    // pem_root_certs is actually the certificate of server side rather than
-    // CA certificate. CA certificate is not needed.
-    // Since we use the same cert/key pair for both cranectld/craned,
-    // pem_root_certs is set to the same certificate.
-    ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
-    ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
-    ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
-
-    channel_of_remote_service =
-        grpc::CreateChannel(target_service, grpc::SslCredentials(ssl_opts));
-
-  } else {
-    std::string target_service = fmt::format(
-        "{}:{}", execution_node, g_config.ListenConf.CranedListenPort);
-    channel_of_remote_service =
-        grpc::CreateChannel(target_service, grpc::InsecureChannelCredentials());
-  }
+  if (g_config.ListenConf.UseTls)
+    channel_of_remote_service = CreateTcpTlsChannelByHostname(
+        execution_node, g_config.ListenConf.CranedListenPort,
+        g_config.ListenConf.TlsCerts);
+  else
+    channel_of_remote_service = CreateTcpInsecureChannel(
+        execution_node, g_config.ListenConf.CranedListenPort);
 
   if (!channel_of_remote_service) {
     CRANE_ERROR("Failed to create channel to {}.", execution_node);
@@ -522,55 +491,31 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
   grpc::ServerBuilder builder;
-  builder.AddChannelArgument(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA,
-                             0 /*no limit*/);
-  builder.AddChannelArgument(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS,
-                             1 /*true*/);
-  builder.AddChannelArgument(
-      GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS,
-      kCranedGrpcServerPingRecvMinIntervalSec * 1000 /*ms*/);
-  builder.AddChannelArgument(GRPC_ARG_HTTP2_MAX_PING_STRIKES,
-                             0 /* unlimited */);
+  ServerBuilderSetKeepAliveArgs(&builder);
+  ServerBuilderAddUnixInsecureListeningPort(&builder,
+                                            listen_conf.UnixSocketListenAddr);
 
-  if (g_config.CompressedRpc)
-    builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+  if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
-  builder.AddListeningPort(listen_conf.UnixSocketListenAddr,
-                           grpc::InsecureServerCredentials());
-
-  std::string listen_addr_port = fmt::format(
-      "{}:{}", listen_conf.CranedListenAddr, listen_conf.CranedListenPort);
   if (listen_conf.UseTls) {
-    grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
-    pem_key_cert_pair.cert_chain = listen_conf.ServerCertContent;
-    pem_key_cert_pair.private_key = listen_conf.ServerKeyContent;
-
-    grpc::SslServerCredentialsOptions ssl_opts;
-    // pem_root_certs is actually the certificate of server side rather than
-    // CA certificate. CA certificate is not needed.
-    // Since we use the same cert/key pair for both cranectld/craned,
-    // pem_root_certs is set to the same certificate.
-    ssl_opts.pem_root_certs = listen_conf.ServerCertContent;
-    ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
-    ssl_opts.client_certificate_request =
-        GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
-
-    builder.AddListeningPort(listen_addr_port,
-                             grpc::SslServerCredentials(ssl_opts));
+    ServerBuilderAddTcpTlsListeningPort(&builder, listen_conf.CranedListenAddr,
+                                        listen_conf.CranedListenPort,
+                                        listen_conf.TlsCerts);
   } else {
-    builder.AddListeningPort(listen_addr_port,
-                             grpc::InsecureServerCredentials());
+    ServerBuilderAddTcpInsecureListeningPort(
+        &builder, listen_conf.CranedListenAddr, listen_conf.CranedListenPort);
   }
 
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
-  CRANE_INFO("Craned is listening on [{}, {}]",
-             listen_conf.UnixSocketListenAddr, listen_addr_port);
+  CRANE_INFO("Craned is listening on [{}, {}:{}]",
+             listen_conf.UnixSocketListenAddr, listen_conf.CranedListenAddr,
+             listen_conf.CranedListenPort);
 
   g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
     p_server->Shutdown();
-    CRANE_TRACE("Grpc Server Shutdown() was called.");
+    CRANE_INFO("Grpc Server Shutdown() was called.");
   });
 }
 

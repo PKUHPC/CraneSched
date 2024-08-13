@@ -139,24 +139,25 @@ void ParseConfig(int argc, char** argv) {
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
       if (config["UseTls"] && config["UseTls"].as<bool>()) {
+        TlsCertificates& tls_certs = g_config.ListenConf.Certs;
+
         g_config.ListenConf.UseTls = true;
 
         if (config["DomainSuffix"])
-          g_config.ListenConf.DomainSuffix =
-              config["DomainSuffix"].as<std::string>();
+          tls_certs.DomainSuffix = config["DomainSuffix"].as<std::string>();
 
         if (config["ServerCertFilePath"]) {
-          g_config.ListenConf.ServerCertFilePath =
+          tls_certs.ServerCertFilePath =
               config["ServerCertFilePath"].as<std::string>();
 
           try {
-            g_config.ListenConf.ServerCertContent = util::ReadFileIntoString(
-                g_config.ListenConf.ServerCertFilePath);
+            tls_certs.ServerCertContent =
+                util::ReadFileIntoString(tls_certs.ServerCertFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (g_config.ListenConf.ServerCertContent.empty()) {
+          if (tls_certs.ServerCertContent.empty()) {
             CRANE_ERROR(
                 "UseTls is true, but the file specified by ServerCertFilePath "
                 "is empty");
@@ -167,17 +168,17 @@ void ParseConfig(int argc, char** argv) {
         }
 
         if (config["ServerKeyFilePath"]) {
-          g_config.ListenConf.ServerKeyFilePath =
+          tls_certs.ServerKeyFilePath =
               config["ServerKeyFilePath"].as<std::string>();
 
           try {
-            g_config.ListenConf.ServerKeyContent =
-                util::ReadFileIntoString(g_config.ListenConf.ServerKeyFilePath);
+            tls_certs.ServerKeyContent =
+                util::ReadFileIntoString(tls_certs.ServerKeyFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (g_config.ListenConf.ServerKeyContent.empty()) {
+          if (tls_certs.ServerKeyContent.empty()) {
             CRANE_ERROR(
                 "UseTls is true, but the file specified by ServerKeyFilePath "
                 "is empty");

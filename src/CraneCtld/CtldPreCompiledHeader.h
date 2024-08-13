@@ -90,6 +90,7 @@
 #include "crane/Logger.h"
 // Logger.h must be the first
 
+#include "crane/GrpcHelper.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
