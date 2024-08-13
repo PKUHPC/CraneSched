@@ -709,7 +709,12 @@ bool ResourceView::GetFeasibleResourceInNode(const ResourceInNode& avail_res,
 
   // chose slot for each node gres request
   for (const auto& [dev_name, name_type_req] : this->device_map) {
-    const auto& dres_avail = avail_res.dedicated_res.at(dev_name);
+    auto dres_avail_it =
+        avail_res.dedicated_res.name_type_slots_map.find(dev_name);
+    if (dres_avail_it == avail_res.dedicated_res.name_type_slots_map.end())
+      return false;
+
+    const auto& dres_avail = dres_avail_it->second;
 
     // e.g. GPU -> (untyped_cnt: 2 , typed_cnt_map:{A100:2, H100:1})
     uint64_t untyped_cnt = name_type_req.first;
@@ -718,7 +723,10 @@ bool ResourceView::GetFeasibleResourceInNode(const ResourceInNode& avail_res,
     auto& feasible_res_dev_name = feasible_res->dedicated_res[dev_name];
 
     for (const auto& [dev_type, typed_cnt] : typed_cnt_map) {
-      const auto& avail_slots = dres_avail.at(dev_type);
+      auto avail_slots_it = dres_avail.type_slots_map.find(dev_type);
+      if (avail_slots_it == dres_avail.type_slots_map.end()) return false;
+
+      const auto& avail_slots = avail_slots_it->second;
       auto& feasible_res_dev_name_type = feasible_res_dev_name[dev_type];
 
       if (avail_slots.size() < typed_cnt) return false;
