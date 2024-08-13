@@ -1,8 +1,11 @@
 generated
 cmake-build-*
-
+build
 third_party/*
-
+out
+etc/*
+.gitignore
+.DS_Store
 # Header only
 !dependencies/cmake
 !dependencies/pre_installed
@@ -96,3 +99,6 @@ fabric.properties
 
 # VS Code 
 .vscode/
+
+.gitignore
+etc/config.yaml
