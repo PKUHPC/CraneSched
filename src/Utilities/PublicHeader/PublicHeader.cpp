@@ -332,8 +332,12 @@ DeviceMap FromGrpcDeviceMap(const crane::grpc::DeviceMap& grpc_device_map) {
 
   for (const auto& [device_name, grpc_type_count_map] :
        grpc_device_map.name_type_map()) {
-    auto& type_slots_map = device_map[device_name].second;
+    auto& name_cnt = device_map[device_name];
 
+    // Set untyped cnt.
+    name_cnt.first = grpc_type_count_map.total();
+
+    auto& type_slots_map = name_cnt.second;
     for (const auto& [device_type, slots] :
          grpc_type_count_map.type_count_map())
       type_slots_map[device_type] = slots;
