@@ -41,12 +41,16 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
   auto node_meta = craned_meta_map_[craned_id];
   node_meta->alive = true;
 
+  node_meta->res_total.allocatable_res +=
+      node_meta->static_meta.res.allocatable_res;
+  node_meta->res_avail.allocatable_res +=
+      node_meta->static_meta.res.allocatable_res;
+
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
     part_global_meta.res_total += node_meta->static_meta.res.allocatable_res;
     part_global_meta.res_avail += node_meta->static_meta.res.allocatable_res;
-    ;
     part_global_meta.alive_craned_cnt++;
   }
 
