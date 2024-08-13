@@ -16,6 +16,8 @@
 
 #include "DeviceManager.h"
 
+#include <sys/sysmacros.h>
+
 #include "crane/String.h"
 
 namespace Craned {
