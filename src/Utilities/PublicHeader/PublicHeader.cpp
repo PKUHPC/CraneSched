@@ -309,18 +309,21 @@ void DedicatedResourceInNode::SetToZero() { name_type_slots_map.clear(); }
 crane::grpc::DeviceMap ToGrpcDeviceMap(const DeviceMap& device_map) {
   crane::grpc::DeviceMap grpc_device_map{};
 
-  for (const auto& [device_name, type_slots_map] : device_map) {
+  for (const auto& [device_name, cnt_pair] : device_map) {
     auto& grpc_name_type_map = *grpc_device_map.mutable_name_type_map();
 
-    for (const auto& [device_type, slots] : type_slots_map.second) {
+    auto& grpc_type_cnt = grpc_name_type_map[device_name];
+    grpc_type_cnt.set_total(cnt_pair.first);
+
+    for (const auto& [dev_type, typed_cnt] : cnt_pair.second) {
       // If all slots of a device type are used up,
       // the size of slots in res_avail will be 0.
       // We don't need such devices to show up in the response, so we skip them.
-      if (slots == 0) continue;
+      if (typed_cnt == 0) [[unlikely]]
+        continue;
 
-      auto& grpc_type_count_map =
-          *grpc_name_type_map[device_name].mutable_type_count_map();
-      grpc_type_count_map[device_type] = slots;
+      auto& grpc_type_count_map = *grpc_type_cnt.mutable_type_count_map();
+      grpc_type_count_map[dev_type] = typed_cnt;
     }
   }
 
