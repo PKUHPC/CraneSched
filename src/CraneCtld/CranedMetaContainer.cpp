@@ -499,7 +499,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
       if (craned_meta->alive) {
         if (res_in_use.IsZero()) {
           resource_state = crane::grpc::CranedResourceState::CRANE_IDLE;
-        } else if (res_avail.allocatable_res.IsZero()) {
+        } else if (res_avail.allocatable_res.IsAnyZero()) {
           resource_state = crane::grpc::CranedResourceState::CRANE_ALLOC;
         } else {
           resource_state = crane::grpc::CranedResourceState::CRANE_MIX;

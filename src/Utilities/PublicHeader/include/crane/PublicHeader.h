@@ -177,6 +177,7 @@ struct AllocatableResource {
   explicit operator crane::grpc::AllocatableResource() const;
 
   bool IsZero() const;
+  bool IsAnyZero() const;
   void SetToZero();
 };
 

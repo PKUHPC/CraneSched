@@ -201,6 +201,11 @@ bool AllocatableResource::IsZero() const {
          memory_sw_bytes == 0;
 }
 
+bool AllocatableResource::IsAnyZero() const {
+  return cpu_count == static_cast<cpu_t>(0) || memory_bytes == 0 ||
+         memory_sw_bytes == 0;
+}
+
 void AllocatableResource::SetToZero() {
   cpu_count = static_cast<cpu_t>(0);
   memory_bytes = 0;
