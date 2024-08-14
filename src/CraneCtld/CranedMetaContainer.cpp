@@ -631,7 +631,7 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
     if (craned_meta.res_in_use.IsZero())
       craned_info->set_resource_state(
           crane::grpc::CranedResourceState::CRANE_IDLE);
-    else if (craned_meta.res_avail.allocatable_res.IsZero())
+    else if (craned_meta.res_avail.allocatable_res.IsAnyZero())
       craned_info->set_resource_state(
           crane::grpc::CranedResourceState::CRANE_ALLOC);
     else
