@@ -770,7 +770,7 @@ bool ResourceView::GetFeasibleResourceInNode(const ResourceInNode& avail_res,
 
 ResourceView operator*(const ResourceView& lhs, uint32_t rhs) {
   ResourceView result(lhs);
-  result.allocatable_res *= int(rhs);
+  result.allocatable_res *= rhs;
   result.device_map *= rhs;
 
   return result;

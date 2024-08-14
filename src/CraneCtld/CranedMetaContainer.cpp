@@ -246,9 +246,6 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
         config.Nodes.at(craned_name)->dedicated_resource;
     static_meta.hostname = craned_name;
     static_meta.port = std::strtoul(kCranedDefaultPort, nullptr, 10);
-
-    craned_meta.res_total.allocatable_res = static_meta.res.allocatable_res;
-    craned_meta.res_avail.allocatable_res = static_meta.res.allocatable_res;
   }
 
   for (auto&& [part_name, partition] : config.Partitions) {
