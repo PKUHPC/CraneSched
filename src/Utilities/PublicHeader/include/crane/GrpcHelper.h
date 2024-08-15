@@ -61,6 +61,9 @@ void SetTlsHostnameOverride(grpc::ChannelArguments* args,
                             const std::string& hostname,
                             const TlsCertificates& certs);
 
+std::shared_ptr<grpc::Channel> CreateUnixInsecureChannel(
+    const std::string& socket_addr);
+
 std::shared_ptr<grpc::Channel> CreateTcpInsecureChannel(
     const std::string& address, const std::string& port);
 

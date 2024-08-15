@@ -29,6 +29,7 @@
 #include "CtldClient.h"
 #include "crane/Network.h"
 #include "crane/OS.h"
+#include "crane/PluginClient.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
 
@@ -408,6 +409,23 @@ void ParseConfig(int argc, char** argv) {
           else
             g_config.CranedForeground = false;
         }
+
+        if (config["Plugin"]) {
+          const auto& plugin_config = config["Plugin"];
+
+          if (plugin_config["Enabled"])
+            g_config.Plugin.Enabled = plugin_config["Enabled"].as<bool>();
+
+          if (plugin_config["PlugindSockPath"]) {
+            g_config.Plugin.PlugindSockPath =
+                fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                            plugin_config["PlugindSockPath"].as<std::string>());
+          } else {
+            g_config.Plugin.PlugindSockPath =
+                fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                            kDefaultPlugindUnixSockPath);
+          }
+        }
       }
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", kDefaultConfigPath,
@@ -547,6 +565,12 @@ void GlobalVariableInit() {
 
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
 
+  if (g_config.Plugin.Enabled) {
+    CRANE_INFO("[Plugin] Plugin module is enabled.");
+    g_plugin_client = std::make_unique<plugin::PluginClient>();
+    g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
+  }
+
   g_cfored_manager = std::make_unique<Craned::CforedManager>();
   g_cfored_manager->Init();
 }
@@ -575,6 +599,7 @@ void StartServer() {
   g_cfored_manager.reset();
   g_server.reset();
   g_ctld_client.reset();
+  g_plugin_client.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();

@@ -22,7 +22,9 @@ target_link_libraries(craned
         concurrentqueue
 
         PkgConfig::libcgroup
+        
         Utility_PublicHeader
+        Utility_PluginClient
 
         crane_proto_lib
 

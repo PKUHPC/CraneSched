@@ -23,16 +23,20 @@
 #include <yaml-cpp/yaml.h>
 
 #include <cxxopts.hpp>
+#include <filesystem>
 
 #include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
+#include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
+#include "crane/Logger.h"
 #include "crane/Network.h"
 #include "crane/OS.h"
+#include "crane/PluginClient.h"
 
 void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("cranectld");
@@ -115,6 +119,11 @@ void ParseConfig(int argc, char** argv) {
 
       InitLogger(log_level, g_config.CraneCtldLogFile);
 
+      // External configuration file path
+      if (!parsed_args.count("db-config") && config["DbConfigPath"]) {
+        db_config_path = config["DbConfigPath"].as<std::string>();
+      }
+
       if (config["CraneCtldMutexFilePath"])
         g_config.CraneCtldMutexFilePath =
             g_config.CraneBaseDir +
@@ -189,10 +198,6 @@ void ParseConfig(int argc, char** argv) {
         }
       } else {
         g_config.ListenConf.UseTls = false;
-      }
-
-      if (config["DbConfigPath"]) {
-        db_config_path = config["DbConfigPath"].as<std::string>();
       }
 
       if (config["CraneCtldForeground"]) {
@@ -506,6 +511,23 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
       }
+
+      if (config["Plugin"]) {
+        const auto& plugin_config = config["Plugin"];
+
+        if (plugin_config["Enabled"])
+          g_config.Plugin.Enabled = plugin_config["Enabled"].as<bool>();
+
+        if (plugin_config["PlugindSockPath"]) {
+          g_config.Plugin.PlugindSockPath =
+              fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                          plugin_config["PlugindSockPath"].as<std::string>());
+        } else {
+          g_config.Plugin.PlugindSockPath =
+              fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                          kDefaultPlugindUnixSockPath);
+        }
+      }
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open config file {}: {}", config_path, e.what());
       std::exit(1);
@@ -605,6 +627,8 @@ void DestroyCtldGlobalVariables() {
   g_task_scheduler.reset();
   g_craned_keeper.reset();
 
+  g_plugin_client.reset();
+
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
   g_embedded_db_client.reset();
@@ -642,6 +666,12 @@ void InitializeCtldGlobalVariables() {
     std::exit(1);
   }
 
+  if (g_config.Plugin.Enabled) {
+    CRANE_INFO("[Plugin] Plugin module is enabled.");
+    g_plugin_client = std::make_unique<plugin::PluginClient>();
+    g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
+  }
+
   // Account manager must be initialized before Task Scheduler
   // since the recovery stage of the task scheduler will acquire
   // information from account manager.
@@ -674,7 +704,7 @@ void InitializeCtldGlobalVariables() {
 
   g_craned_keeper->SetCranedIsDownCb([](const CranedId& craned_id) {
     CRANE_TRACE(
-        "CranedNode #{} is down now."
+        "CranedNode #{} is down now. "
         "Remove its resource from the global resource pool.",
         craned_id);
     g_meta_container->CranedDown(craned_id);
