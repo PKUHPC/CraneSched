@@ -958,7 +958,7 @@ bool Cgroup::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
     ok = SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
                            CgroupConstant::ControllerFile::DEVICES_ALLOW,
                            allow_limits);
-  if (!ok || !deny_limits.empty())
+  if (ok && !deny_limits.empty())
     ok &= SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
                             CgroupConstant::ControllerFile::DEVICES_DENY,
                             deny_limits);
