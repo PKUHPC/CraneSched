@@ -953,12 +953,16 @@ bool Cgroup::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
       }
     }
   }
-  return SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
+  auto ok = true;
+  if (!allow_limits.empty())
+    ok = SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
                            CgroupConstant::ControllerFile::DEVICES_ALLOW,
-                           allow_limits) &&
-         SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
-                           CgroupConstant::ControllerFile::DEVICES_DENY,
-                           deny_limits);
+                           allow_limits);
+  if (!ok || !deny_limits.empty())
+    ok &= SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
+                            CgroupConstant::ControllerFile::DEVICES_DENY,
+                            deny_limits);
+  return ok;
 }
 
 bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
