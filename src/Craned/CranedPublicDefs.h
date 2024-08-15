@@ -20,8 +20,11 @@
 // Precompiled header comes first
 
 #include "crane/PublicHeader.h"
+#include "protos/Crane.pb.h"
 
 namespace Craned {
+
+using EnvPair = std::pair<std::string, std::string>;
 
 struct TaskStatusChange {
   task_id_t task_id{};
@@ -40,6 +43,7 @@ struct TaskInfoOfUid {
 struct CranedNode {
   uint32_t cpu;
   uint64_t memory_bytes;
+  DedicatedResourceInNode dedicated_resource;
 };
 
 struct Partition {
@@ -53,11 +57,7 @@ struct Config {
     std::string CranedListenPort;
 
     bool UseTls{false};
-    std::string DomainSuffix;
-    std::string ServerCertFilePath;
-    std::string ServerCertContent;
-    std::string ServerKeyFilePath;
-    std::string ServerKeyContent;
+    TlsCertificates TlsCerts;
 
     std::string UnixSocketListenAddr;
   };
@@ -86,7 +86,6 @@ struct Config {
 };
 
 inline Config g_config;
-
 }  // namespace Craned
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

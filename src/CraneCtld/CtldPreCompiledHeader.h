@@ -52,6 +52,7 @@
 
 // Absl
 #include <absl/container/btree_map.h>
+#include <absl/container/btree_set.h>
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
 #include <absl/container/node_hash_map.h>
@@ -89,6 +90,7 @@
 #include "crane/Logger.h"
 // Logger.h must be the first
 
+#include "crane/GrpcHelper.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"

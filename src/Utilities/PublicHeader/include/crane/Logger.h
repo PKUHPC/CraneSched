@@ -135,6 +135,9 @@
       }                                                         \
     } while (false)
 #else
+#  define CRANE_ASSERT_MSG_VA(condition, message, ...) \
+    do {                                               \
+    } while (false)
 #  define CRANE_ASSERT_MSG(condition, message) \
     do {                                       \
     } while (false)

@@ -207,13 +207,17 @@ class Cgroup {
   bool SetMemorySwLimitBytes(uint64_t mem_bytes);
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes);
   bool SetBlockioWeight(uint64_t weight);
+  bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
+                       bool set_write, bool set_mknod);
   bool SetControllerValue(CgroupConstant::Controller controller,
                           CgroupConstant::ControllerFile controller_file,
                           uint64_t value);
   bool SetControllerStr(CgroupConstant::Controller controller,
                         CgroupConstant::ControllerFile controller_file,
                         const std::string &str);
-
+  bool SetControllerStrs(CgroupConstant::Controller controller,
+                         CgroupConstant::ControllerFile controller_file,
+                         const std::vector<std::string> &strs);
   bool KillAllProcesses();
 
   bool Empty();
@@ -234,6 +238,12 @@ class AllocatableResourceAllocator {
                        Cgroup *cg);
 };
 
+class DedicatedResourceAllocator {
+ public:
+  static bool Allocate(
+      const crane::grpc::DedicatedResourceInNode &request_resource, Cgroup *cg);
+};
+
 class CgroupManager {
  public:
   int Init();
@@ -243,6 +253,8 @@ class CgroupManager {
   }
 
   bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info);
+
+  std::optional<std::string> QueryTaskExecutionNode(task_id_t task_id);
 
   bool CreateCgroups(std::vector<CgroupSpec> &&cg_specs);
 
@@ -255,6 +267,8 @@ class CgroupManager {
   bool ReleaseCgroup(uint32_t task_id, uid_t uid);
 
   bool ReleaseCgroupByTaskIdOnly(task_id_t task_id);
+
+  std::vector<EnvPair> GetResourceEnvListOfTask(task_id_t task_id);
 
  private:
   static std::string CgroupStrByTaskId_(task_id_t task_id);

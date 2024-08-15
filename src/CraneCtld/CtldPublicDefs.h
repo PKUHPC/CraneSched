@@ -68,6 +68,7 @@ struct Config {
   struct Node {
     uint32_t cpu;
     uint64_t memory_bytes;
+    DedicatedResourceInNode dedicated_resource;
   };
 
   struct Partition {
@@ -85,11 +86,7 @@ struct Config {
     std::string CraneCtldListenPort;
 
     bool UseTls{false};
-    std::string DomainSuffix;
-    std::string ServerCertFilePath;
-    std::string ServerCertContent;
-    std::string ServerKeyFilePath;
-    std::string ServerKeyContent;
+    TlsCertificates Certs;
   };
 
   struct Priority {
@@ -157,7 +154,7 @@ struct CranedStaticMeta {
 
   std::list<std::string> partition_ids;  // Partitions to which
                                          // this craned belongs to
-  Resources res;
+  ResourceInNode res;
 };
 
 /**
@@ -170,26 +167,26 @@ struct CranedMeta {
   bool alive{false};
 
   // total = avail + in-use
-  Resources res_total;  // A copy of res in CranedStaticMeta,
-  // just for convenience.
-  Resources res_avail;
-  Resources res_in_use;
+  ResourceInNode res_total;  // A copy of res in CranedStaticMeta,
+  ResourceInNode res_avail;
+  ResourceInNode res_in_use;
+
   bool drain{false};
   std::string state_reason;
 
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
-  absl::flat_hash_map<task_id_t, Resources> running_task_resource_map;
+  absl::flat_hash_map<task_id_t, ResourceInNode> running_task_resource_map;
 };
 
 struct PartitionGlobalMeta {
   // total = avail + in-use
-  Resources m_resource_total_;
-  Resources m_resource_avail_;
-  Resources m_resource_in_use_;
+  ResourceView res_total;
+  ResourceView res_avail;
+  ResourceView res_in_use;
 
   // Include resources in unavailable nodes.
-  Resources m_resource_total_inc_dead_;
+  ResourceView res_total_inc_dead;
 
   std::string name;
   std::string nodelist_str;
@@ -253,7 +250,9 @@ struct TaskInCtld {
   absl::Duration time_limit;
 
   PartitionId partition_id;
-  Resources resources;
+
+  // Set by user request and probably include untyped devices.
+  ResourceView requested_node_res_view;
 
   crane::grpc::TaskType type;
 
@@ -305,6 +304,9 @@ struct TaskInCtld {
   absl::Time start_time;
   absl::Time end_time;
 
+  // Might change at each scheduling cycle.
+  ResourceV2 resources;
+
   /* ------ duplicate of the fields [1] above just for convenience ----- */
   crane::grpc::TaskToCtld task_to_ctld;
 
@@ -328,6 +330,11 @@ struct TaskInCtld {
    * Fields that may change at run time.
    * However, these fields are NOT persisted on the disk.
    * ----------- */
+
+  // Aggregated from resources of all nodes.
+  // Might change at each scheduling cycle.
+  ResourceView allocated_res_view;
+
   uint32_t nodes_alloc;
   std::vector<CranedId> executing_craned_ids;
   std::string allocated_craneds_regex;
@@ -433,12 +440,19 @@ struct TaskInCtld {
   }
   bool const& Held() const { return held; }
 
+  void SetResources(ResourceV2&& val) {
+    *runtime_attr.mutable_resources() =
+        static_cast<crane::grpc::ResourceV2>(val);
+    resources = std::move(val);
+  }
+  ResourceV2 const& Resources() const { return resources; }
+
   void SetFieldsByTaskToCtld(crane::grpc::TaskToCtld const& val) {
     task_to_ctld = val;
 
     partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                   : val.partition_name();
-    resources.allocatable_resource = val.resources().allocatable_resource();
+    requested_node_res_view = static_cast<ResourceView>(val.resources());
 
     time_limit = absl::Seconds(val.time_limit().seconds());
 
@@ -511,6 +525,8 @@ struct TaskInCtld {
           for (auto const& craned_id : craned_ids)
             executing_craned_ids.emplace_back(craned_id);
       }
+
+      resources = static_cast<ResourceV2>(runtime_attr.resources());
     }
 
     start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());

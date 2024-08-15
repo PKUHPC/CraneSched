@@ -36,10 +36,39 @@ message AllocatableResource {
   uint64 memory_sw_limit_bytes = 3;
 }
 
-message DedicatedResource {}
+message TypeCountMap{
+  map <string/*Type*/, uint64> type_count_map = 1;
+  uint64 total = 2;
+}
 
-message Resources {
-  AllocatableResource allocatable_resource = 1;
+message DeviceMap{
+  map<string /*name*/, TypeCountMap> name_type_map = 1;
+}
+
+message Slots{
+  repeated string slots = 1;
+}
+
+message DeviceTypeSlotsMap{
+  map<string /*Type*/, Slots /*index of slot*/> type_slots_map = 1;
+}
+
+message DedicatedResourceInNode{
+  map <string /*device name*/, DeviceTypeSlotsMap> name_type_map = 1;
+}
+
+message ResourceInNode {
+  AllocatableResource allocatable_res_in_node = 1;
+  DedicatedResourceInNode dedicated_res_in_node = 2;
+}
+
+message ResourceV2 {
+  map <string /*craned id*/, ResourceInNode> each_node_res = 1;
+}
+
+message ResourceView {
+  AllocatableResource allocatable_res = 1;
+  DeviceMap device_map = 2;
 }
 
 enum PartitionState {
@@ -85,7 +114,7 @@ message TaskToCtld {
   google.protobuf.Duration time_limit = 1;
 
   string partition_name = 2;
-  Resources resources = 3;
+  ResourceView resources = 3;
 
   TaskType type = 4;
 
@@ -132,13 +161,14 @@ message RuntimeAttrOfTask {
   int32 requeue_count = 11;
   repeated string craned_ids = 12;
   TaskStatus status = 13;
-  uint32 exit_code = 14;
+  uint32 exit_code = 14;;
 
   google.protobuf.Timestamp submit_time = 15;
   google.protobuf.Timestamp start_time = 16;
   google.protobuf.Timestamp end_time = 17;
 
   bool held = 18;
+  ResourceV2 resources = 19;
 }
 
 message TaskToD {
@@ -146,7 +176,7 @@ message TaskToD {
   TaskType type = 2;
   uint32 partition_id = 3;
 
-  Resources resources = 4;
+  ResourceInNode resources = 4;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -214,11 +244,12 @@ message TaskInfo {
   string cwd = 14;
   string username = 15;
   string qos = 16;
+  ResourceView res_view = 17;
 
   // Dynamic task information
   bool held = 30;
   TaskStatus status = 31;
-  double alloc_cpu = 32;
+
   uint32 exit_code = 33;
   uint32 priority = 34;
   oneof pending_reason_or_craned_list {
@@ -240,24 +271,21 @@ message PartitionInfo {
 
   uint32 total_nodes = 4;
   uint32 alive_nodes = 5;
-  double total_cpu = 6;
-  double avail_cpu = 7;
-  double alloc_cpu = 8;
-  uint64 total_mem = 9;
-  uint64 avail_mem = 10;
-  uint64 alloc_mem = 11;
+
+  ResourceView res_total = 6;
+  ResourceView res_avail = 7;
+  ResourceView res_alloc = 8;
 }
 
 message CranedInfo {
   string hostname = 1;
   CranedResourceState resource_state = 2;
   CranedControlState control_state = 3;
-  double cpu = 4;
-  double alloc_cpu = 5;
-  double free_cpu = 6;
-  uint64 real_mem = 7;
-  uint64 alloc_mem = 8;
-  uint64 free_mem = 9;
+
+  ResourceInNode res_total = 4;
+  ResourceInNode res_avail = 5;
+  ResourceInNode res_alloc = 6;
+
   repeated string partition_names = 10;
   uint32 running_task_num = 11;
 }

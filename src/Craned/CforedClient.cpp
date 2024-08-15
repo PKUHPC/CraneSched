@@ -18,25 +18,15 @@ CforedClient::~CforedClient() {
 void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
   m_cfored_name_ = cfored_name;
   grpc::ChannelArguments channel_args;
-  std::string cfored_address = fmt::format("{}:{}", cfored_name, "10012");
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   if (g_config.ListenConf.UseTls) {
-    grpc::SslCredentialsOptions ssl_opts;
-    // pem_root_certs is actually the certificate of server side rather than
-    // CA certificate. CA certificate is not needed.
-    // Since we use the same cert/key pair for both cranectld/craned,
-    // pem_root_certs is set to the same certificate.
-    ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
-    ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
-    ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
-
-    m_cfored_channel_ = grpc::CreateCustomChannel(
-        cfored_address, grpc::SslCredentials(ssl_opts), channel_args);
+    m_cfored_channel_ = CreateTcpTlsChannelByHostname(
+        cfored_name, kCforedDefaultPort, g_config.ListenConf.TlsCerts);
   } else {
-    m_cfored_channel_ = grpc::CreateCustomChannel(
-        cfored_address, grpc::InsecureChannelCredentials(), channel_args);
+    m_cfored_channel_ =
+        CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
   }
 
   // std::unique_ptr will automatically release the dangling stub.

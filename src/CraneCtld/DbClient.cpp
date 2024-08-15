@@ -311,8 +311,16 @@ bool MongodbClient::FetchJobRecords(
 
       task->set_account(view["account"].get_string().value.data());
       task->set_username(view["username"].get_string().value.data());
-      task->set_alloc_cpu(view["cpus_req"].get_double().value *
-                          task->node_num());
+
+      auto* mutable_res_view = task->mutable_res_view();
+      auto* mutable_alloc_res = mutable_res_view->mutable_allocatable_res();
+      mutable_alloc_res->set_cpu_core_limit(
+          view["cpus_req"].get_double().value);
+      mutable_alloc_res->set_memory_limit_bytes(
+          view["mem_req"].get_int64().value);
+      mutable_alloc_res->set_memory_sw_limit_bytes(
+          view["mem_req"].get_int64().value);
+
       task->set_name(std::string(view["task_name"].get_string().value));
       task->set_qos(std::string(view["qos"].get_string().value));
       task->set_uid(view["id_user"].get_int32().value);
@@ -320,6 +328,7 @@ bool MongodbClient::FetchJobRecords(
       task->set_craned_list(view["nodelist"].get_string().value.data());
       task->set_partition(
           std::string(view["partition_name"].get_string().value));
+
       task->mutable_start_time()->set_seconds(
           view["time_start"].get_int64().value);
       task->mutable_end_time()->set_seconds(view["time_end"].get_int64().value);
@@ -842,34 +851,34 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t>                                              /*30*/
 
-      values{// 0-4
-             static_cast<int32_t>(runtime_attr.task_id()),
-             runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
-             task_to_ctld.account(),
-             // 5-9
-             task_to_ctld.resources().allocatable_resource().cpu_core_limit(),
-             static_cast<int64_t>(task_to_ctld.resources()
-                                      .allocatable_resource()
-                                      .memory_limit_bytes()),
-             task_to_ctld.name(), env_str,
-             static_cast<int32_t>(task_to_ctld.uid()),
-             // 10-14
-             static_cast<int32_t>(runtime_attr.gid()),
-             util::HostNameListToStr(runtime_attr.craned_ids()),
-             runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
-             // 15-19
-             0, 0, runtime_attr.start_time().seconds(),
-             runtime_attr.end_time().seconds(), 0,
-             // 20-24
-             task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
-             task_to_ctld.time_limit().seconds(),
-             runtime_attr.submit_time().seconds(), task_to_ctld.cwd(),
-             // 25-29
-             task_to_ctld.cmd_line(), runtime_attr.exit_code(),
-             runtime_attr.username(), task_to_ctld.qos(),
-             task_to_ctld.get_user_env(),
-             // 30
-             task_to_ctld.type()};
+      values{
+          // 0-4
+          static_cast<int32_t>(runtime_attr.task_id()),
+          runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
+          task_to_ctld.account(),
+          // 5-9
+          task_to_ctld.resources().allocatable_res().cpu_core_limit(),
+          static_cast<int64_t>(
+              task_to_ctld.resources().allocatable_res().memory_limit_bytes()),
+          task_to_ctld.name(), env_str,
+          static_cast<int32_t>(task_to_ctld.uid()),
+          // 10-14
+          static_cast<int32_t>(runtime_attr.gid()),
+          util::HostNameListToStr(runtime_attr.craned_ids()),
+          runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
+          // 15-19
+          0, 0, runtime_attr.start_time().seconds(),
+          runtime_attr.end_time().seconds(), 0,
+          // 20-24
+          task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
+          task_to_ctld.time_limit().seconds(),
+          runtime_attr.submit_time().seconds(), task_to_ctld.cwd(),
+          // 25-29
+          task_to_ctld.cmd_line(), runtime_attr.exit_code(),
+          runtime_attr.username(), task_to_ctld.qos(),
+          task_to_ctld.get_user_env(),
+          // 30
+          task_to_ctld.type()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -921,28 +930,27 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t>                                              /*30*/
 
-      values{
-          // 0-4
-          static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
-          absl::ToUnixSeconds(absl::Now()), false, task->account,
-          // 5-9
-          static_cast<double>(task->resources.allocatable_resource.cpu_count),
-          static_cast<int64_t>(
-              task->resources.allocatable_resource.memory_bytes),
-          task->name, env_str, static_cast<int32_t>(task->uid),
-          // 10-14
-          static_cast<int32_t>(task->Gid()), task->allocated_craneds_regex,
-          static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
-          // 15-19
-          0, 0, task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(), 0,
-          // 20-24
-          script, task->Status(), absl::ToInt64Seconds(task->time_limit),
-          task->SubmitTimeInUnixSecond(), task->cwd,
-          // 25-29
-          task->cmd_line, task->ExitCode(), task->Username(), task->qos,
-          task->get_user_env,
-          // 30
-          task->type};
+      values{// 0-4
+             static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
+             absl::ToUnixSeconds(absl::Now()), false, task->account,
+             // 5-9
+             static_cast<double>(task->requested_node_res_view.CpuCount()),
+             static_cast<int64_t>(task->requested_node_res_view.MemoryBytes()),
+             task->name, env_str, static_cast<int32_t>(task->uid),
+             // 10-14
+             static_cast<int32_t>(task->Gid()), task->allocated_craneds_regex,
+             static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
+             // 15-19
+             0, 0, task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(),
+             0,
+             // 20-24
+             script, task->Status(), absl::ToInt64Seconds(task->time_limit),
+             task->SubmitTimeInUnixSecond(), task->cwd,
+             // 25-29
+             task->cmd_line, task->ExitCode(), task->Username(), task->qos,
+             task->get_user_env,
+             // 30
+             task->type};
 
   return DocumentConstructor_(fields, values);
 }

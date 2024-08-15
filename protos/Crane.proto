@@ -84,7 +84,8 @@ message ExecuteTasksReply {
 message CreateCgroupForTasksRequest {
   repeated uint32 task_id_list = 1;
   repeated uint32 uid_list = 2;
-  repeated Resources res_list = 3;
+  repeated ResourceInNode res_list = 3;
+  repeated string execution_node = 4;
 }
 
 message CreateCgroupForTasksReply{}
@@ -173,6 +174,7 @@ message QueryTaskIdFromPortForwardReply{
   uint32 task_id = 3;
   string cgroup_path = 4;
 }
+
 
 message QueryCranedInfoRequest {
   string craned_name = 1;
@@ -330,6 +332,27 @@ message MigrateSshProcToCgroupRequest {
 
 message MigrateSshProcToCgroupReply {
   bool ok = 1;
+}
+
+message QueryTaskEnvVariablesRequest{
+  uint32 task_id = 1;
+}
+
+message QueryTaskEnvVariablesReply{
+  bool ok = 1;
+  repeated string name = 2;
+  repeated string value = 3;
+}
+
+message QueryTaskEnvVariablesForwardRequest{
+  uint32 task_id = 1;
+  string execution_node = 2;
+}
+
+message QueryTaskEnvVariablesForwardReply{
+  bool ok = 1;
+  repeated string name = 2;
+  repeated string value = 3;
 }
 
 message QueryClusterInfoRequest {
@@ -517,6 +540,13 @@ message StreamCtldReply {
     TaskIdReply payload_task_id_reply = 6;
     CforedGracefulExitAck payload_graceful_exit_ack = 7;
   }
+}
+
+message QueryActualDresRequest{}
+
+message QueryActualDresReply{
+  bool ok = 1;
+  DedicatedResourceInNode dres_in_node = 2;
 }
 
 message StreamCrunRequest{
@@ -707,6 +737,7 @@ service Craned {
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns(CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns(ReleaseCgroupForTasksReply);
 
+  rpc QueryActualDres(QueryActualDresRequest) returns(QueryActualDresReply);
   /*
   If the task is an interactive task, the resource uuid is also revoked.
    If there's no process in this interactive task, just deallocate all the resources.
@@ -724,6 +755,8 @@ service Craned {
   /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
   rpc QueryTaskIdFromPortForward(QueryTaskIdFromPortForwardRequest) returns (QueryTaskIdFromPortForwardReply);
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
+  rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest) returns (QueryTaskEnvVariablesReply);
+  rpc QueryTaskEnvVariablesForward(QueryTaskEnvVariablesForwardRequest) returns (QueryTaskEnvVariablesForwardReply);
 }
 
 service CraneForeD {

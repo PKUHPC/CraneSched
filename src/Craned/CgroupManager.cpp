@@ -21,6 +21,10 @@
 
 #include "CgroupManager.h"
 
+#include "CranedPublicDefs.h"
+#include "DeviceManager.h"
+#include "crane/String.h"
+
 namespace Craned {
 
 /*
@@ -237,13 +241,13 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
                             has_cgroup, changed_cgroup)) {
     return nullptr;
   }
-  //  if ((preferred_controllers & Controller::DEVICES_CONTROLLER) &&
-  //      initialize_controller(
-  //          *native_cgroup, Controller::DEVICES_CONTROLLER,
-  //          required_controllers & Controller::DEVICES_CONTROLLER, has_cgroup,
-  //          changed_cgroup)) {
-  //    return nullptr;
-  //  }
+  if ((preferred_controllers & Controller::DEVICES_CONTROLLER) &&
+      InitializeController_(
+          *native_cgroup, Controller::DEVICES_CONTROLLER,
+          required_controllers & Controller::DEVICES_CONTROLLER, has_cgroup,
+          changed_cgroup)) {
+    return nullptr;
+  }
 
   int err;
   if (!has_cgroup) {
@@ -269,13 +273,13 @@ bool CgroupManager::CheckIfCgroupForTasksExists(task_id_t task_id) {
 }
 
 bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
-  crane::grpc::Resources res;
+  crane::grpc::ResourceInNode res;
   Cgroup *pcg;
 
   {
     auto cg_spec_it = m_task_id_to_cg_spec_map_[task_id];
     if (!cg_spec_it) return false;
-    res = cg_spec_it->resources;
+    res = cg_spec_it->res_in_node;
   }
   {
     auto cg_it = m_task_id_to_cg_map_[task_id];
@@ -284,7 +288,8 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
       cg_unique_ptr = CgroupManager::CreateOrOpen_(
           CgroupStrByTaskId_(task_id),
           NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
-              CgroupConstant::Controller::MEMORY_CONTROLLER,
+              CgroupConstant::Controller::MEMORY_CONTROLLER |
+              CgroupConstant::Controller::DEVICES_CONTROLLER,
           NO_CONTROLLER_FLAG, false);
 
     if (!cg_unique_ptr) return false;
@@ -294,12 +299,16 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
   }
 
   CRANE_TRACE(
-      "Setting cgroup limit of task #{}. CPU: {:.2f}, Mem: {:.2f} MB.", task_id,
-      res.allocatable_resource().cpu_core_limit(),
-      res.allocatable_resource().memory_limit_bytes() / (1024.0 * 1024.0));
+      "Setting cgroup limit of task #{}. CPU: {:.2f}, Mem: {:.2f} MB Gres: {}.",
+      task_id, res.allocatable_res_in_node().cpu_core_limit(),
+      res.allocatable_res_in_node().memory_limit_bytes() / (1024.0 * 1024.0),
+      util::ReadableGrpcDresInNode(res.dedicated_res_in_node()));
 
-  bool ok =
-      AllocatableResourceAllocator::Allocate(res.allocatable_resource(), pcg);
+  bool ok = AllocatableResourceAllocator::Allocate(
+      res.allocatable_res_in_node(), pcg);
+  if (ok)
+    ok &=
+        DedicatedResourceAllocator::Allocate(res.dedicated_res_in_node(), pcg);
   return ok;
 }
 
@@ -431,6 +440,37 @@ bool CgroupManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
   if (!ok) return false;
 
   return cg->MigrateProcIn(pid);
+}
+
+std::optional<std::string> CgroupManager::QueryTaskExecutionNode(
+    task_id_t task_id) {
+  if (!this->m_task_id_to_cg_spec_map_.Contains(task_id)) return std::nullopt;
+  return this->m_task_id_to_cg_spec_map_[task_id]->execution_node;
+}
+
+std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTask(
+    task_id_t task_id) {
+  std::vector<EnvPair> env_vec;
+
+  auto cg_spec_ptr = m_task_id_to_cg_spec_map_[task_id];
+  if (!cg_spec_ptr) {
+    CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
+                task_id);
+    return env_vec;
+  }
+
+  const auto &res_in_node = cg_spec_ptr->res_in_node;
+
+  env_vec = DeviceManager::GetDevEnvListByResInNode(
+      res_in_node.dedicated_res_in_node());
+
+  env_vec.emplace_back(
+      "CRANE_MEM_PER_NODE",
+      std::to_string(
+          res_in_node.allocatable_res_in_node().memory_limit_bytes() /
+          (1024 * 1024)));
+
+  return env_vec;
 }
 
 bool Cgroup::MigrateProcIn(pid_t pid) {
@@ -795,6 +835,50 @@ bool Cgroup::ModifyCgroup_(CgroupConstant::ControllerFile controller_file) {
   return true;
 }
 
+bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
+                               CgroupConstant::ControllerFile controller_file,
+                               const std::vector<std::string> &strs) {
+  if (!g_cg_mgr->Mounted(controller)) {
+    CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.\n",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                CgroupConstant::GetControllerStringView(controller));
+    return false;
+  }
+
+  int err;
+
+  struct cgroup_controller *cg_controller;
+
+  if ((cg_controller = cgroup_get_controller(
+           m_cgroup_,
+           CgroupConstant::GetControllerStringView(controller).data())) ==
+      nullptr) {
+    CRANE_WARN("Unable to get cgroup {} controller for {}.\n",
+               CgroupConstant::GetControllerStringView(controller),
+               m_cgroup_path_);
+    return false;
+  }
+  for (const auto &str : strs) {
+    if ((err = cgroup_set_value_string(
+             cg_controller,
+             CgroupConstant::GetControllerFileStringView(controller_file)
+                 .data(),
+             str.c_str()))) {
+      CRANE_WARN("Unable to add string for {}: {} {}\n", m_cgroup_path_, err,
+                 cgroup_strerror(err));
+      return false;
+    }
+    // Commit cgroup modifications.
+    if ((err = cgroup_modify_cgroup(m_cgroup_))) {
+      CRANE_WARN("Unable to commit {} for cgroup {}: {} {}\n",
+                 CgroupConstant::GetControllerFileStringView(controller_file),
+                 m_cgroup_path_, err, cgroup_strerror(err));
+      return false;
+    }
+  }
+  return true;
+}
+
 bool Cgroup::KillAllProcesses() {
   using namespace CgroupConstant::Internal;
 
@@ -846,6 +930,40 @@ bool Cgroup::Empty() {
     return false;
   }
 }
+bool Cgroup::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+                             bool set_read, bool set_write, bool set_mknod) {
+  std::string op;
+  if (set_read) op += "r";
+  if (set_write) op += "w";
+  if (set_mknod) op += "m";
+  std::vector<std::string> allow_limits;
+  std::vector<std::string> deny_limits;
+  for (const auto &[_, this_device] : Craned::g_this_node_device) {
+    if (devices.contains(this_device->dev_id)) {
+      for (const auto &dev_meta : this_device->device_metas) {
+        allow_limits.emplace_back(fmt::format("{} {}:{} {}", dev_meta.op_type,
+                                              dev_meta.major, dev_meta.minor,
+                                              op));
+      }
+    } else {
+      for (const auto &dev_meta : this_device->device_metas) {
+        deny_limits.emplace_back(fmt::format("{} {}:{} {}", dev_meta.op_type,
+                                             dev_meta.major, dev_meta.minor,
+                                             op));
+      }
+    }
+  }
+  auto ok = true;
+  if (!allow_limits.empty())
+    ok = SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
+                           CgroupConstant::ControllerFile::DEVICES_ALLOW,
+                           allow_limits);
+  if (ok && !deny_limits.empty())
+    ok &= SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
+                            CgroupConstant::ControllerFile::DEVICES_DENY,
+                            deny_limits);
+  return ok;
+}
 
 bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
                                             Cgroup *cg) {
@@ -873,4 +991,15 @@ bool AllocatableResourceAllocator::Allocate(
   return ok;
 }
 
+bool DedicatedResourceAllocator::Allocate(
+    const crane::grpc::DedicatedResourceInNode &request_resource, Cgroup *cg) {
+  std::unordered_set<std::string> all_request_slots;
+  for (const auto &[_, type_slots_map] : request_resource.name_type_map()) {
+    for (const auto &[__, slots] : type_slots_map.type_slots_map())
+      all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
+  };
+
+  if (!cg->SetDeviceAccess(all_request_slots, true, true, true)) return false;
+  return true;
+}
 }  // namespace Craned

@@ -183,11 +183,12 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
   for (int i = 0; i < request->task_id_list_size(); i++) {
     task_id_t task_id = request->task_id_list(i);
     uid_t uid = request->uid_list(i);
-    crane::grpc::Resources const &resources = request->res_list(i);
+    crane::grpc::ResourceInNode const &res = request->res_list(i);
 
     CgroupSpec spec{.uid = uid,
                     .task_id = task_id,
-                    .resources = std::move(resources)};
+                    .res_in_node = std::move(res),
+                    .execution_node = request->execution_node(i)};
     CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", task_id, uid);
     cg_specs.emplace_back(std::move(spec));
   }
@@ -229,7 +230,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
   bool remote_is_craned = false;
 
   // May be craned or cfored
-  std::string_view crane_service_port;
+  std::string crane_service_port;
 
   // Check whether the remote address is in the addresses of CraneD nodes.
   if (g_config.Ipv4ToCranedHostname.contains(request->ssh_remote_address())) {
@@ -268,30 +269,15 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
       CRANE_TRACE("Remote address {} was resolved as {}",
                   request->ssh_remote_address(), remote_hostname);
 
-      std::string target_service =
-          fmt::format("{}.{}:{}", remote_hostname,
-                      g_config.ListenConf.DomainSuffix, crane_service_port);
-
-      grpc::SslCredentialsOptions ssl_opts;
-      // pem_root_certs is actually the certificate of server side rather than
-      // CA certificate. CA certificate is not needed.
-      // Since we use the same cert/key pair for both cranectld/craned,
-      // pem_root_certs is set to the same certificate.
-      ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
-      ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
-      ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
-
-      channel_of_remote_service =
-          grpc::CreateChannel(target_service, grpc::SslCredentials(ssl_opts));
+      channel_of_remote_service = CreateTcpTlsChannelByHostname(
+          remote_hostname, crane_service_port, g_config.ListenConf.TlsCerts);
     } else {
       CRANE_ERROR("Failed to resolve remote address {}.",
                   request->ssh_remote_address());
     }
   } else {
-    std::string target_service =
-        fmt::format("{}:{}", request->ssh_remote_address(), crane_service_port);
-    channel_of_remote_service =
-        grpc::CreateChannel(target_service, grpc::InsecureChannelCredentials());
+    channel_of_remote_service = CreateTcpInsecureChannel(
+        request->ssh_remote_address(), crane_service_port);
   }
 
   if (!channel_of_remote_service) {
@@ -335,7 +321,6 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
         "ssh client with remote port {} belongs to task #{}. "
         "Moving this ssh session process into the task's cgroup",
         request->ssh_remote_port(), reply_from_remote_service.task_id());
-
     return Status::OK;
   } else {
     TaskInfoOfUid info{};
@@ -380,6 +365,92 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
   return Status::OK;
 }
 
+Status CranedServiceImpl::QueryTaskEnvVariables(
+    grpc::ServerContext *context,
+    const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
+    crane::grpc::QueryTaskEnvVariablesReply *response) {
+  auto task_env =
+      g_task_mgr->QueryTaskEnvironmentVariablesAsync(request->task_id());
+  if (task_env.has_value()) {
+    for (const auto &[name, value] : task_env.value()) {
+      response->add_name(name);
+      response->add_value(value);
+    }
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+  }
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
+    crane::grpc::QueryTaskEnvVariablesForwardReply *response) {
+  // First query local device related env list
+  std::vector<EnvPair> dev_envs =
+      g_cg_mgr->GetResourceEnvListOfTask(request->task_id());
+  for (const auto &env : dev_envs) {
+    response->add_name(env.first);
+    response->add_value(env.second);
+  }
+
+  std::optional execution_node_opt =
+      g_cg_mgr->QueryTaskExecutionNode(request->task_id());
+  if (!execution_node_opt.has_value()) {
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  std::string execution_node = execution_node_opt.value();
+  if (!g_config.CranedNodes.contains(execution_node)) {
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  std::shared_ptr<Channel> channel_of_remote_service;
+  if (g_config.ListenConf.UseTls)
+    channel_of_remote_service = CreateTcpTlsChannelByHostname(
+        execution_node, g_config.ListenConf.CranedListenPort,
+        g_config.ListenConf.TlsCerts);
+  else
+    channel_of_remote_service = CreateTcpInsecureChannel(
+        execution_node, g_config.ListenConf.CranedListenPort);
+
+  if (!channel_of_remote_service) {
+    CRANE_ERROR("Failed to create channel to {}.", execution_node);
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  crane::grpc::QueryTaskEnvVariablesRequest request_to_remote_service;
+  crane::grpc::QueryTaskEnvVariablesReply reply_from_remote_service;
+  ClientContext context_of_remote_service;
+  Status status_remote_service;
+
+  request_to_remote_service.set_task_id(request->task_id());
+  std::unique_ptr<crane::grpc::Craned::Stub> stub_of_remote_craned =
+      crane::grpc::Craned::NewStub(channel_of_remote_service);
+  status_remote_service = stub_of_remote_craned->QueryTaskEnvVariables(
+      &context_of_remote_service, request_to_remote_service,
+      &reply_from_remote_service);
+  if (!status_remote_service.ok() || !reply_from_remote_service.ok()) {
+    CRANE_WARN(
+        "QueryTaskEnvVariables gRPC call failed: {}. Remote is craned: {}",
+        status_remote_service.error_message(), execution_node);
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  response->set_ok(true);
+  for (int i = 0; i < reply_from_remote_service.name_size(); i++) {
+    response->add_name(reply_from_remote_service.name(i));
+    response->add_value(reply_from_remote_service.value(i));
+  }
+
+  return Status::OK;
+}
+
 grpc::Status CranedServiceImpl::CheckTaskStatus(
     grpc::ServerContext *context,
     const crane::grpc::CheckTaskStatusRequest *request,
@@ -404,59 +475,47 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
   return Status::OK;
 }
 
+grpc::Status CranedServiceImpl::QueryActualDres(
+    grpc::ServerContext *context,
+    const ::crane::grpc::QueryActualDresRequest *request,
+    crane::grpc::QueryActualDresReply *response) {
+  const auto &dedicated_resource =
+      g_config.CranedNodes[g_config.CranedIdOfThisNode]->dedicated_resource;
+  response->mutable_dres_in_node()->CopyFrom(
+      static_cast<crane::grpc::DedicatedResourceInNode>(dedicated_resource));
+  response->set_ok(true);
+  return Status::OK;
+}
+
 CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
   grpc::ServerBuilder builder;
-  builder.AddChannelArgument(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA,
-                             0 /*no limit*/);
-  builder.AddChannelArgument(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS,
-                             1 /*true*/);
-  builder.AddChannelArgument(
-      GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS,
-      kCranedGrpcServerPingRecvMinIntervalSec * 1000 /*ms*/);
-  builder.AddChannelArgument(GRPC_ARG_HTTP2_MAX_PING_STRIKES,
-                             0 /* unlimited */);
+  ServerBuilderSetKeepAliveArgs(&builder);
+  ServerBuilderAddUnixInsecureListeningPort(&builder,
+                                            listen_conf.UnixSocketListenAddr);
 
-  if (g_config.CompressedRpc)
-    builder.SetDefaultCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+  if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
-  builder.AddListeningPort(listen_conf.UnixSocketListenAddr,
-                           grpc::InsecureServerCredentials());
-
-  std::string listen_addr_port = fmt::format(
-      "{}:{}", listen_conf.CranedListenAddr, listen_conf.CranedListenPort);
   if (listen_conf.UseTls) {
-    grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
-    pem_key_cert_pair.cert_chain = listen_conf.ServerCertContent;
-    pem_key_cert_pair.private_key = listen_conf.ServerKeyContent;
-
-    grpc::SslServerCredentialsOptions ssl_opts;
-    // pem_root_certs is actually the certificate of server side rather than
-    // CA certificate. CA certificate is not needed.
-    // Since we use the same cert/key pair for both cranectld/craned,
-    // pem_root_certs is set to the same certificate.
-    ssl_opts.pem_root_certs = listen_conf.ServerCertContent;
-    ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
-    ssl_opts.client_certificate_request =
-        GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
-
-    builder.AddListeningPort(listen_addr_port,
-                             grpc::SslServerCredentials(ssl_opts));
+    ServerBuilderAddTcpTlsListeningPort(&builder, listen_conf.CranedListenAddr,
+                                        listen_conf.CranedListenPort,
+                                        listen_conf.TlsCerts);
   } else {
-    builder.AddListeningPort(listen_addr_port,
-                             grpc::InsecureServerCredentials());
+    ServerBuilderAddTcpInsecureListeningPort(
+        &builder, listen_conf.CranedListenAddr, listen_conf.CranedListenPort);
   }
 
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
-  CRANE_INFO("Craned is listening on [{}, {}]",
-             listen_conf.UnixSocketListenAddr, listen_addr_port);
+  CRANE_INFO("Craned is listening on [{}, {}:{}]",
+             listen_conf.UnixSocketListenAddr, listen_conf.CranedListenAddr,
+             listen_conf.CranedListenPort);
 
   g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
     p_server->Shutdown();
-    CRANE_TRACE("Grpc Server Shutdown() was called.");
+    CRANE_INFO("Grpc Server Shutdown() was called.");
   });
 }
 

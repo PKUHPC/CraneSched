@@ -48,44 +48,44 @@ set(CMAKE_CXX_STANDARD 20)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CRANE_ENABLE_TESTS ON)
-endif()
+endif ()
 
 # Set the minimal log level based on the build type if it has not been explicitly set by the user
-if(CRANE_MIN_LOG_LEVEL STREQUAL "OFF")
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+if (CRANE_MIN_LOG_LEVEL STREQUAL "OFF")
+    if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         set(CRANE_MIN_LOG_LEVEL "TRACE")
-    else()
+    else ()
         set(CRANE_MIN_LOG_LEVEL "DEBUG")
-    endif()
-endif()
+    endif ()
+endif ()
 
 # Validate the user-provided log level
-if(NOT CRANE_MIN_LOG_LEVEL MATCHES "INFO|DEBUG|TRACE")
+if (NOT CRANE_MIN_LOG_LEVEL MATCHES "INFO|DEBUG|TRACE")
     message(FATAL_ERROR "Invalid log level: ${CRANE_MIN_LOG_LEVEL}. Must be INFO, DEBUG, or TRACE.")
-endif()
+endif ()
 
 add_compile_definitions(CRANE_LOG_LEVEL=CRANE_LOG_LEVEL_${CRANE_MIN_LOG_LEVEL})
 message(STATUS "Minimal log level is set to ${CRANE_MIN_LOG_LEVEL}")
 
 # Generate version text and building timestamp
-if(EXISTS "${CMAKE_SOURCE_DIR}/VERSION")
+if (EXISTS "${CMAKE_SOURCE_DIR}/VERSION")
     # For a release version, the version file should be provided
     file(READ "${CMAKE_SOURCE_DIR}/VERSION" VERSION_CONTENT)
-else()
+else ()
     # Otherwise, use git hash as the version
     message(WARNING "No VERSION file found. Use git hash as the version string.")
     execute_process(
-        COMMAND git rev-parse --short HEAD
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        OUTPUT_VARIABLE VERSION_CONTENT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
+            COMMAND git rev-parse --short HEAD
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            OUTPUT_VARIABLE VERSION_CONTENT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
     )
-endif()
+endif ()
 
-if("${VERSION_CONTENT}" STREQUAL "")
+if ("${VERSION_CONTENT}" STREQUAL "")
     # if not in git repository, fall back to "Unknown"
     set(VERSION_CONTENT "Unknown")
-endif()
+endif ()
 
 string(TIMESTAMP BUILD_TIMESTAMP "%a, %d %b %Y %H:%M:%S %z")
 
@@ -303,12 +303,12 @@ set(CPACK_COMPONENTS_GROUPING ONE_PER_GROUP)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 
 cpack_add_component(cranedc
-        DISPLAY_NAME  "craned"
-        DESCRIPTION   "craned component"
+        DISPLAY_NAME "craned"
+        DESCRIPTION "craned component"
         GROUP craned)
 cpack_add_component(cranectldc
-        DISPLAY_NAME  "cranectld"
-        DESCRIPTION   "cranectld component"
+        DISPLAY_NAME "cranectld"
+        DESCRIPTION "cranectld component"
         GROUP cranectld)
 
 cpack_add_component_group(craned)
@@ -323,13 +323,13 @@ install(TARGETS craned
         DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
         COMPONENT cranedc
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
-        )
+)
 
 install(TARGETS cranectld
         DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
         COMPONENT cranectldc
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
-        )
+)
 
 install(FILES
         ${CMAKE_BINARY_DIR}/etc/cranectld.service

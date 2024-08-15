@@ -139,24 +139,25 @@ void ParseConfig(int argc, char** argv) {
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
       if (config["UseTls"] && config["UseTls"].as<bool>()) {
+        TlsCertificates& tls_certs = g_config.ListenConf.Certs;
+
         g_config.ListenConf.UseTls = true;
 
         if (config["DomainSuffix"])
-          g_config.ListenConf.DomainSuffix =
-              config["DomainSuffix"].as<std::string>();
+          tls_certs.DomainSuffix = config["DomainSuffix"].as<std::string>();
 
         if (config["ServerCertFilePath"]) {
-          g_config.ListenConf.ServerCertFilePath =
+          tls_certs.ServerCertFilePath =
               config["ServerCertFilePath"].as<std::string>();
 
           try {
-            g_config.ListenConf.ServerCertContent = util::ReadFileIntoString(
-                g_config.ListenConf.ServerCertFilePath);
+            tls_certs.ServerCertContent =
+                util::ReadFileIntoString(tls_certs.ServerCertFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (g_config.ListenConf.ServerCertContent.empty()) {
+          if (tls_certs.ServerCertContent.empty()) {
             CRANE_ERROR(
                 "UseTls is true, but the file specified by ServerCertFilePath "
                 "is empty");
@@ -167,17 +168,17 @@ void ParseConfig(int argc, char** argv) {
         }
 
         if (config["ServerKeyFilePath"]) {
-          g_config.ListenConf.ServerKeyFilePath =
+          tls_certs.ServerKeyFilePath =
               config["ServerKeyFilePath"].as<std::string>();
 
           try {
-            g_config.ListenConf.ServerKeyContent =
-                util::ReadFileIntoString(g_config.ListenConf.ServerKeyFilePath);
+            tls_certs.ServerKeyContent =
+                util::ReadFileIntoString(tls_certs.ServerKeyFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (g_config.ListenConf.ServerKeyContent.empty()) {
+          if (tls_certs.ServerKeyContent.empty()) {
             CRANE_ERROR(
                 "UseTls is true, but the file specified by ServerKeyFilePath "
                 "is empty");
@@ -315,16 +316,16 @@ void ParseConfig(int argc, char** argv) {
              ++it) {
           auto node = it->as<YAML::Node>();
           auto node_ptr = std::make_shared<Ctld::Config::Node>();
-          std::list<std::string> name_list;
+          std::list<std::string> node_id_list;
 
           if (node["name"]) {
-            if (!util::ParseHostList(node["name"].Scalar(), &name_list)) {
+            if (!util::ParseHostList(node["name"].Scalar(), &node_id_list)) {
               CRANE_ERROR("Illegal node name string format.");
               std::exit(1);
             }
 
             CRANE_TRACE("node name list parsed: {}",
-                        fmt::join(name_list, ", "));
+                        fmt::join(node_id_list, ", "));
           } else
             std::exit(1);
 
@@ -353,7 +354,49 @@ void ParseConfig(int argc, char** argv) {
             node_ptr->memory_bytes = memory_bytes;
           } else
             std::exit(1);
-          for (auto&& name : name_list) g_config.Nodes[name] = node_ptr;
+
+          DedicatedResourceInNode resourceInNode;
+          if (node["gres"]) {
+            for (auto gres_it = node["gres"].begin();
+                 gres_it != node["gres"].end(); ++gres_it) {
+              const auto& gres_node = gres_it->as<YAML::Node>();
+              const auto& device_name = gres_node["name"].as<std::string>();
+              const auto& device_type = gres_node["type"].as<std::string>();
+              if (gres_node["DeviceFileRegex"]) {
+                std::list<std::string> device_path_list;
+                if (!util::ParseHostList(gres_node["DeviceFileRegex"].Scalar(),
+                                         &device_path_list)) {
+                  CRANE_ERROR(
+                      "Illegal gres {}:{} DeviceFileRegex path string format.",
+                      device_name, device_type);
+                  std::exit(1);
+                }
+                for (const auto& device_path : device_path_list) {
+                  resourceInNode.name_type_slots_map[device_name][device_type]
+                      .emplace(device_path);
+                }
+              }
+
+              if (gres_node["DeviceFileList"]) {
+                std::list<std::string> device_path_list;
+                if (!util::ParseHostList(gres_node["DeviceFileList"].Scalar(),
+                                         &device_path_list)) {
+                  CRANE_ERROR(
+                      "Illegal gres {}:{} DeviceFileList path string format.",
+                      device_name, device_type);
+                  std::exit(1);
+                }
+
+                resourceInNode.name_type_slots_map[device_name][device_type]
+                    .emplace(device_path_list.front());
+              }
+            }
+          }
+
+          for (auto&& node_id : node_id_list) {
+            g_config.Nodes[node_id] = node_ptr;
+            g_config.Nodes[node_id]->dedicated_resource = resourceInNode;
+          }
         }
       }
 
@@ -604,7 +647,7 @@ void InitializeCtldGlobalVariables() {
   // information from account manager.
   g_account_manager = std::make_unique<AccountManager>();
 
-  g_meta_container = std::make_unique<CranedMetaContainerSimpleImpl>();
+  g_meta_container = std::make_unique<CranedMetaContainer>();
   g_meta_container->InitFromConfig(g_config);
 
   bool ok;
@@ -624,7 +667,9 @@ void InitializeCtldGlobalVariables() {
         "A new node #{} is up now. Add its resource to the global resource "
         "pool.",
         craned_id);
-    g_meta_container->CranedUp(craned_id);
+
+    g_thread_pool->detach_task(
+        [craned_id]() { g_meta_container->CranedUp(craned_id); });
   });
 
   g_craned_keeper->SetCranedIsDownCb([](const CranedId& craned_id) {

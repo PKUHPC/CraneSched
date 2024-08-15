@@ -149,7 +149,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
    * In time interval [y, z-1], the amount of available resources is b.
    * In time interval [z, ...], the amount of available resources is c.
    */
-  using TimeAvailResMap = std::map<absl::Time, Resources>;
+  using TimeAvailResMap = std::map<absl::Time, ResourceInNode>;
 
   struct TimeSegment {
     TimeSegment(absl::Time start, absl::Duration duration)
@@ -174,8 +174,8 @@ class MinLoadFirst : public INodeSelectionAlgo {
       const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
           running_tasks,
       absl::Time now, const PartitionId& partition_id,
-      const util::Synchronized<PartitionMeta>& partition_meta_ptr,
-      const CranedMetaContainerInterface::CranedMetaRawMap& craned_meta_map,
+      const std::unordered_set<CranedId> craned_ids,
+      const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
       NodeSelectionInfo* node_selection_info);
 
   // Input should guarantee that provided nodes in `node_selection_info` has
@@ -183,13 +183,13 @@ class MinLoadFirst : public INodeSelectionAlgo {
   static bool CalculateRunningNodesAndStartTime_(
       const NodeSelectionInfo& node_selection_info,
       const util::Synchronized<PartitionMeta>& partition_meta_ptr,
-      const CranedMetaContainerInterface::CranedMetaRawMap& craned_meta_map,
+      const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
       TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
       absl::Time* start_time);
 
   static void SubtractTaskResourceNodeSelectionInfo_(
       absl::Time const& expected_start_time, absl::Duration const& duration,
-      Resources const& resources, std::list<CranedId> const& craned_ids,
+      ResourceV2 const& resources, std::list<CranedId> const& craned_ids,
       NodeSelectionInfo* node_selection_info);
 
   IPrioritySorter* m_priority_sorter_;
@@ -300,18 +300,18 @@ class TaskScheduler {
   // Ordered by task id. Those who comes earlier are in the head,
   // Because they have smaller task id.
   TreeMap<task_id_t, std::unique_ptr<TaskInCtld>> m_pending_task_map_
-      GUARDED_BY(m_pending_task_map_mtx_);
+      ABSL_GUARDED_BY(m_pending_task_map_mtx_);
   Mutex m_pending_task_map_mtx_;
 
   std::atomic_uint32_t m_pending_map_cached_size_;
 
   HashMap<task_id_t, std::unique_ptr<TaskInCtld>> m_running_task_map_
-      GUARDED_BY(m_running_task_map_mtx_);
+      ABSL_GUARDED_BY(m_running_task_map_mtx_);
   Mutex m_running_task_map_mtx_;
 
   // Task Indexes
   HashMap<CranedId, HashSet<uint32_t /* Task ID*/>> m_node_to_tasks_map_
-      GUARDED_BY(m_task_indexes_mtx_);
+      ABSL_GUARDED_BY(m_task_indexes_mtx_);
   Mutex m_task_indexes_mtx_;
 
   std::unique_ptr<IPrioritySorter> m_priority_sorter_;

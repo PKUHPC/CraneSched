@@ -125,7 +125,8 @@ CraneErr CranedStub::CreateCgroupForTasks(
   for (const CgroupSpec &spec : cgroup_specs) {
     request.mutable_task_id_list()->Add(spec.task_id);
     request.mutable_uid_list()->Add(spec.uid);
-    *request.mutable_res_list()->Add() = std::move(spec.resources);
+    *request.mutable_res_list()->Add() = std::move(spec.res_in_node);
+    request.add_execution_node(spec.execution_node);
   }
 
   status = m_stub_->CreateCgroupForTasks(&context, request, &reply);
@@ -213,6 +214,29 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
                 m_craned_id_, grpc_status.error_message());
     return CraneErr::kRpcFailure;
   }
+  if (reply.ok())
+    return CraneErr::kOk;
+  else
+    return CraneErr::kGenericFailure;
+}
+
+CraneErr CranedStub::QueryActualDres(DedicatedResourceInNode *resource) {
+  using crane::grpc::QueryActualDresReply;
+  using crane::grpc::QueryActualDresRequest;
+  ClientContext context;
+  Status grpc_status;
+
+  QueryActualDresRequest request;
+  QueryActualDresReply reply;
+
+  grpc_status = m_stub_->QueryActualDres(&context, request, &reply);
+  if (!grpc_status.ok()) {
+    CRANE_ERROR("QueryActualGres to Craned {} failed: {} ", m_craned_id_,
+                grpc_status.error_message());
+    return CraneErr::kRpcFailure;
+  }
+
+  *resource = static_cast<DedicatedResourceInNode>(reply.dres_in_node());
 
   if (reply.ok())
     return CraneErr::kOk;
@@ -220,8 +244,8 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
     return CraneErr::kGenericFailure;
 }
 
-crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
-    const std::vector<TaskInCtld *> &tasks) {
+crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
+    const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks) {
   crane::grpc::ExecuteTasksRequest request;
 
   for (TaskInCtld *task : tasks) {
@@ -233,14 +257,9 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequest(
             ToInt64Milliseconds(task->time_limit)));
 
     // Set resources
-    auto *mutable_allocatable_resource =
-        mutable_task->mutable_resources()->mutable_allocatable_resource();
-    mutable_allocatable_resource->set_cpu_core_limit(
-        static_cast<double>(task->resources.allocatable_resource.cpu_count));
-    mutable_allocatable_resource->set_memory_limit_bytes(
-        task->resources.allocatable_resource.memory_bytes);
-    mutable_allocatable_resource->set_memory_sw_limit_bytes(
-        task->resources.allocatable_resource.memory_sw_bytes);
+    auto *mutable_res_in_node = mutable_task->mutable_resources();
+    *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
+        task->Resources().at(craned_id));
 
     // Set type
     mutable_task->set_type(task->type);
@@ -646,50 +665,21 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
    * https://grpc.github.io/grpc/cpp/md_doc_connection-backoff.html
    */
   grpc::ChannelArguments channel_args;
+  SetKeepAliveChannelArgs(&channel_args);
 
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  channel_args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, 1000 /*ms*/);
-  channel_args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, 2 /*s*/ * 1000
-                      /*ms*/);
-  channel_args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS,
-                      30 /*s*/ * 1000 /*ms*/);
-
-  // Sometimes, Craned might crash without cleaning up sockets and
-  // the socket will remain ESTABLISHED state even if that craned has died.
-  // Open KeepAlive option in case of such situation.
-  // See https://grpc.github.io/grpc/cpp/md_doc_keepalive.html
-  channel_args.SetInt(
-      GRPC_ARG_KEEPALIVE_TIME_MS,
-      kCraneCtldGrpcClientPingSendIntervalSec /*s*/ * 1000 /*ms*/);
-  channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 10 /*s*/ * 1000 /*ms*/);
-  channel_args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1 /*true*/);
-  channel_args.SetInt(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA, 0 /*no limit*/);
-
   CRANE_TRACE("Creating a channel to {}:{}. Channel count: {}", craned_id,
               kCranedDefaultPort, m_channel_count_.fetch_add(1) + 1);
 
-  std::string addr_port = fmt::format("{}:{}", ip_addr, kCranedDefaultPort);
   if (g_config.ListenConf.UseTls) {
-    channel_args.SetSslTargetNameOverride(
-        fmt::format("{}.{}", craned_id, g_config.ListenConf.DomainSuffix));
-
-    grpc::SslCredentialsOptions ssl_opts;
-    // pem_root_certs is actually the certificate of server side rather than
-    // CA certificate. CA certificate is not needed.
-    // Since we use the same cert/key pair for both cranectld/craned,
-    // pem_root_certs is set to the same certificate.
-    ssl_opts.pem_root_certs = g_config.ListenConf.ServerCertContent;
-    ssl_opts.pem_cert_chain = g_config.ListenConf.ServerCertContent;
-    ssl_opts.pem_private_key = g_config.ListenConf.ServerKeyContent;
-
-    craned->m_channel_ = grpc::CreateCustomChannel(
-        addr_port, grpc::SslCredentials(ssl_opts), channel_args);
-  } else {
-    craned->m_channel_ = grpc::CreateCustomChannel(
-        addr_port, grpc::InsecureChannelCredentials(), channel_args);
-  }
+    SetTlsHostnameOverride(&channel_args, craned_id, g_config.ListenConf.Certs);
+    craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
+        ip_addr, kCranedDefaultPort, g_config.ListenConf.Certs, channel_args);
+  } else
+    craned->m_channel_ = CreateTcpInsecureCustomChannel(
+        ip_addr, kCranedDefaultPort, channel_args);
 
   craned->m_prev_channel_state_ = craned->m_channel_->GetState(true);
   craned->m_stub_ = crane::grpc::Craned::NewStub(craned->m_channel_);

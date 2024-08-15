@@ -348,4 +348,65 @@ bool ConvertStringToInt64(const std::string &s, int64_t *val) {
   return convert_result.ec == std::errc();
 }
 
+std::string ReadableTypedDeviceMap(const DeviceMap &device_map) {
+  if (device_map.empty()) return "None";
+
+  std::vector<std::string> typed_device_str_vec;
+  for (const auto &[dev_name, p] : device_map) {
+    const auto &type_size_map = p.second;
+
+    for (const auto &[dev_type, size] : type_size_map) {
+      typed_device_str_vec.push_back(
+          fmt::format("{}:{}:{}", dev_name, dev_type, size));
+    }
+  }
+
+  return absl::StrJoin(typed_device_str_vec, ",");
+}
+
+std::string ReadableDresInNode(const ResourceInNode &resource_in_node) {
+  const DedicatedResourceInNode &dedicated_resource_in_node =
+      resource_in_node.dedicated_res;
+
+  if (dedicated_resource_in_node.IsZero()) {
+    return "0";
+  }
+  std::vector<std::string> node_gres_string_vector;
+  for (const auto &[device_name, type_slots_map] :
+       dedicated_resource_in_node.name_type_slots_map) {
+    for (const auto &[device_type, slots] : type_slots_map.type_slots_map) {
+      // name:type:count
+      node_gres_string_vector.emplace_back(
+          fmt::format("{}:{}:{}", device_name, device_type, slots.size()));
+    }
+  }
+
+  return absl::StrJoin(node_gres_string_vector, ",");
+}
+
+std::string ReadableGrpcDresInNode(
+    const crane::grpc::DedicatedResourceInNode &dres_in_node) {
+  if (dres_in_node.name_type_map_size() == 0) return "None";
+
+  std::vector<std::string> typed_device_str_vec;
+  for (const auto &[dev_name, p] : dres_in_node.name_type_map()) {
+    const auto &type_size_map = p.type_slots_map();
+
+    for (const auto &[dev_type, slots] : type_size_map)
+      typed_device_str_vec.push_back(
+          fmt::format("{}:{}:{}", dev_name, dev_type, slots.slots_size()));
+  }
+
+  return absl::StrJoin(typed_device_str_vec, ",");
+}
+
+std::string GenerateCommaSeparatedString(const int val) {
+  std::vector<int> val_vec;
+  val_vec.reserve(val);
+  for (int i = 0; i < val; ++i) {
+    val_vec.push_back(i);
+  }
+  return absl::StrJoin(val_vec, ",");
+}
+
 }  // namespace util

@@ -151,10 +151,10 @@ extern "C" {
 
     task_id = std::atoi(task_id_str);
 
-    ok = GrpcMigrateSshProcToCgroup(pamh, getpid(), task_id);
-    if (ok)
+    ok = GrpcMigrateSshProcToCgroupAndSetEnv(pamh, getpid(), task_id);
+    if (ok) {
       return PAM_SUCCESS;
-    else {
+    } else {
       PamSendMsgToClient(pamh,
                          "You don't have any active job on this node. "
                          "Your SSH request was rejected by Crane PAM Module.");

@@ -37,8 +37,8 @@ class CranedStub {
 
   ~CranedStub();
 
-  static crane::grpc::ExecuteTasksRequest NewExecuteTasksRequest(
-      const std::vector<TaskInCtld *> &tasks);
+  static crane::grpc::ExecuteTasksRequest NewExecuteTasksRequests(
+      const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks);
 
   std::vector<task_id_t> ExecuteTasks(
       const crane::grpc::ExecuteTasksRequest &request);
@@ -55,6 +55,8 @@ class CranedStub {
   CraneErr CheckTaskStatus(task_id_t task_id, crane::grpc::TaskStatus *status);
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
+
+  CraneErr QueryActualDres(DedicatedResourceInNode *resource);
 
   bool Invalid() const { return m_invalid_; }
 
@@ -156,13 +158,13 @@ class CranedKeeper {
 
   Mutex m_connected_craned_mtx_;
   NodeHashMap<CranedId, std::shared_ptr<CranedStub>>
-      m_connected_craned_id_stub_map_ GUARDED_BY(m_connected_craned_mtx_);
+      m_connected_craned_id_stub_map_ ABSL_GUARDED_BY(m_connected_craned_mtx_);
 
   Mutex m_unavail_craned_set_mtx_;
   std::unordered_set<CranedId> m_unavail_craned_set_
-      GUARDED_BY(m_unavail_craned_set_mtx_);
+      ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
   std::unordered_set<CranedId> m_connecting_craned_set_
-      GUARDED_BY(m_unavail_craned_set_mtx_);
+      ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
 
   std::vector<grpc::CompletionQueue> m_cq_vec_;
   std::vector<Mutex> m_cq_mtx_vec_;
