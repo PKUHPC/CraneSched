@@ -39,7 +39,7 @@ CranedLogFile: craned/craned.log
 # file path of craned lock file (relative to CraneBaseDir)
 CranedMutexFilePath: craned/craned.lock
 # file path of craned go module unix socket path (relative to CraneBaseDir)
-CranedGoUnixSockPath: craned/craned-go.sock
+CranedCforedSockPath: craned/cfored.sock
 # whether the craned is running in the background
 CranedForeground: true
 
@@ -113,3 +113,16 @@ ScheduledBatchSize: 100000
 # if this option is set to true.
 # Default value is false.
 RejectJobsBeyondCapacity: false
+
+Plugin:
+  # Toggle the plugin module in CraneSched
+  Enabled: true
+  # Relative to CraneBaseDir
+  PlugindSockPath: "cplugind/cplugind.sock"
+  # Debug level of Plugind
+  PlugindDebugLevel: "trace"
+  # Plugins to be loaded in Plugind
+  Plugins:
+    - Name: "dummy"
+      Path: "/path/to/dummy.so"
+      Config: "/path/to/dummy.yaml"

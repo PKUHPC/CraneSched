@@ -134,8 +134,7 @@ message TaskToCtld {
     InteractiveTaskAdditionalMeta interactive_meta = 22;
   }
 
-  uint32 mail_type = 23;
-  string mail_user = 24;
+  string extra_attr = 23;
 
   string cmd_line = 31;
   string cwd = 32; // Current working directory
@@ -230,21 +229,24 @@ message TaskInfo {
   uint32 task_id = 2;
   string name = 3;
   string partition = 4;
-  uint32 uid = 5;
 
+  uint32 uid = 5;
   uint32 gid = 6;
+
   google.protobuf.Duration time_limit = 7;
   google.protobuf.Timestamp start_time = 8;
   google.protobuf.Timestamp end_time = 9;
   google.protobuf.Timestamp submit_time = 10;
+  
   string account = 11;
-
   uint32 node_num = 12;
   string cmd_line = 13;
   string cwd = 14;
   string username = 15;
   string qos = 16;
   ResourceView res_view = 17;
+
+  string extra_attr = 20;
 
   // Dynamic task information
   bool held = 30;

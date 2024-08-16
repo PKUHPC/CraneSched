@@ -23,7 +23,11 @@
 #include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
+#include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
+#include "crane/PluginClient.h"
+#include "crane/PublicHeader.h"
+#include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
 
@@ -722,7 +726,6 @@ void TaskScheduler::ScheduleThread_() {
       m_task_indexes_mtx_.Unlock();
 
       // RPC is time-consuming. Clustering rpc to one craned for performance.
-
       HashMap<CranedId, std::vector<CgroupSpec>> craned_cgroup_map;
 
       for (auto& it : selection_result_list) {
@@ -820,8 +823,18 @@ void TaskScheduler::ScheduleThread_() {
       // running queue before we call stub->ExecuteTasks().
       HashMap<CranedId, std::vector<TaskInCtld*>>
           craned_task_to_exec_raw_ptrs_map;
+      std::vector<crane::grpc::TaskInfo> tasks_post_start;
       for (auto& it : selection_result_list) {
         auto& task = it.first;
+
+        // We need to copy TaskInCtld here since the ownership of task will be
+        // transferred before we call StartHook.
+        if (g_config.Plugin.Enabled) {
+          crane::grpc::TaskInfo task_info;
+          task->SetFieldsOfTaskInfo(&task_info);
+          tasks_post_start.emplace_back(std::move(task_info));
+        }
+
         for (const auto& craned_id : task->executing_craned_ids)
           craned_task_to_exec_raw_ptrs_map[craned_id].emplace_back(task.get());
       }
@@ -868,6 +881,7 @@ void TaskScheduler::ScheduleThread_() {
                                      task->CranedIds());
         }
 
+        // The ownership of TaskInCtld is transferred to the running queue.
         m_running_task_map_mtx_.Lock();
         m_running_task_map_.emplace(task->TaskId(), std::move(task));
         m_running_task_map_mtx_.Unlock();
@@ -895,6 +909,13 @@ void TaskScheduler::ScheduleThread_() {
         std::vector<task_id_t> failed_task_ids = stub->ExecuteTasks(tasks);
         for (task_id_t task_id : failed_task_ids)
           failed_to_exec_task_id_set.emplace(craned_id, task_id);
+      }
+
+      // After sending ExecuteTasks RPC, StartHook is called.
+      // This must before checking failed tasks as TaskStatusChangeAsync may
+      // trigger EndHook.
+      if (g_config.Plugin.Enabled && !tasks_post_start.empty()) {
+        g_plugin_client->StartHookAsync(std::move(tasks_post_start));
       }
 
       // If any task failed during this stage,
@@ -1383,6 +1404,9 @@ void TaskScheduler::CleanCancelQueueCb_() {
   size_t actual_size = m_cancel_task_queue_.try_dequeue_bulk(
       tasks_to_cancel.begin(), approximate_size);
 
+  // To cancel a task, there is two cases:
+  // For pending task, we just need to set the task status to Cancelled.
+  // For running task, we need to send a TerminateTasks RPC to the craned.
   for (const auto& [task_id, craned_id] : tasks_to_cancel) {
     if (craned_id.empty())
       pending_tasks_vec.emplace_back(task_id);
@@ -1584,7 +1608,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     auto iter = m_running_task_map_.find(task_id);
     if (iter == m_running_task_map_.end()) {
       CRANE_WARN(
-          "Ignoring unknown task id {} in TaskStatusChangeWithReasonAsync.",
+          "Ignoring unknown task id {} in CleanTaskStatusChangeQueueCb_.",
           task_id);
       continue;
     }
@@ -1684,44 +1708,14 @@ void TaskScheduler::QueryTasksInRam(
     const crane::grpc::QueryTasksInfoRequest* request,
     crane::grpc::QueryTasksInfoReply* response) {
   auto now = absl::Now();
-  auto* task_list = response->mutable_task_info_list();
 
+  auto* task_list = response->mutable_task_info_list();
   auto append_fn = [&](auto& it) {
     TaskInCtld& task = *it.second;
     auto* task_it = task_list->Add();
-    task_it->set_type(task.type);
-    task_it->set_task_id(task.TaskId());
-    task_it->set_name(task.name);
-    task_it->set_partition(task.partition_id);
-    task_it->set_uid(task.uid);
-
-    task_it->set_gid(task.Gid());
-    task_it->mutable_time_limit()->set_seconds(ToInt64Seconds(task.time_limit));
-    task_it->mutable_submit_time()->CopyFrom(task.RuntimeAttr().submit_time());
-    task_it->mutable_start_time()->CopyFrom(task.RuntimeAttr().start_time());
-    task_it->mutable_end_time()->CopyFrom(task.RuntimeAttr().end_time());
-    task_it->set_account(task.account);
-
-    task_it->set_node_num(task.node_num);
-    task_it->set_cmd_line(task.cmd_line);
-    task_it->set_cwd(task.cwd);
-    task_it->set_username(task.Username());
-    task_it->set_qos(task.qos);
-    task_it->set_held(task.Held());
-
-    *task_it->mutable_res_view() =
-        static_cast<crane::grpc::ResourceView>(task.requested_node_res_view);
-    task_it->set_exit_code(0);
-    task_it->set_priority(task.cached_priority);
-
-    task_it->set_status(task.Status());
-    if (task.Status() == crane::grpc::Pending) {
-      task_it->set_pending_reason(task.pending_reason);
-    } else {
-      task_it->set_craned_list(task.allocated_craneds_regex);
-      task_it->mutable_elapsed_time()->set_seconds(
-          ToInt64Seconds(now - task.StartTime()));
-    }
+    task.SetFieldsOfTaskInfo(task_it);
+    task_it->mutable_elapsed_time()->set_seconds(
+        ToInt64Seconds(now - task.StartTime()));
   };
 
   auto task_rng_filter_time = [&](auto& it) {
@@ -2615,6 +2609,16 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
     CRANE_ERROR(
         "Failed to call g_embedded_db_client->PurgeEndedTasks() "
         "for final tasks");
+  }
+
+  if (g_config.Plugin.Enabled && !tasks.empty()) {
+    std::vector<crane::grpc::TaskInfo> tasks_post_comp;
+    for (TaskInCtld* task : tasks) {
+      crane::grpc::TaskInfo t;
+      task->SetFieldsOfTaskInfo(&t);
+      tasks_post_comp.emplace_back(std::move(t));
+    }
+    g_plugin_client->EndHookAsync(std::move(tasks_post_comp));
   }
 }
 
