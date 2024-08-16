@@ -39,7 +39,7 @@ CranedLogFile: craned/craned.log
 # file path of craned lock file (relative to CraneBaseDir)
 CranedMutexFilePath: craned/craned.lock
 # file path of craned go module unix socket path (relative to CraneBaseDir)
-CranedGoUnixSockPath: craned/cfored.sock
+CranedCforedSockPath: craned/cfored.sock
 # whether the craned is running in the background
 CranedForeground: true
 
