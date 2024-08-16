@@ -2611,6 +2611,7 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
         "for final tasks");
   }
 
+  // Todo: Extract this part into a function!
   if (g_config.Plugin.Enabled && !tasks.empty()) {
     std::vector<crane::grpc::TaskInfo> tasks_post_comp;
     for (TaskInCtld* task : tasks) {

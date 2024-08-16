@@ -115,22 +115,17 @@ int CgroupManager::Init() {
     return -1;
   }
 
+  RmAllTaskCgroups_();
+
   return 0;
 }
 
-/**
- * Initialize cgroup folders.
- * On each startup, clear task resources that were not successfully deleted.
- *
- * Returns 0 on success, -1 otherwise.
- */
-int CgroupManager::InitCgroupDirectories() {
-  CRANE_DEBUG("Initializing cgroup Directories.");
-
-  CgroupWalkRelease_(CgroupConstant::Controller::CPU_CONTROLLER);
-  CgroupWalkRelease_(CgroupConstant::Controller::MEMORY_CONTROLLER);
-
-  return 0;
+void CgroupManager::RmAllTaskCgroups_() {
+  RmAllTaskCgroupsUnderController_(CgroupConstant::Controller::CPU_CONTROLLER);
+  RmAllTaskCgroupsUnderController_(
+      CgroupConstant::Controller::MEMORY_CONTROLLER);
+  RmAllTaskCgroupsUnderController_(
+      CgroupConstant::Controller::DEVICES_CONTROLLER);
 }
 
 /*
@@ -435,35 +430,29 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
   }
 }
 
-/**
- * Scan the specified controller directory
- * and delete any leftover unused task directories.
- */
-bool CgroupManager::CgroupWalkRelease_(CgroupConstant::Controller controller) {
+void CgroupManager::RmAllTaskCgroupsUnderController_(
+    CgroupConstant::Controller controller) {
   void *handle = nullptr;
   cgroup_file_info info{};
 
-  std::string ControllerString(
-      CgroupConstant::GetControllerStringView(controller));
+  const char *controller_str =
+      CgroupConstant::GetControllerStringView(controller).data();
 
   int base_level;
   int depth = 1;
-  int ret = cgroup_walk_tree_begin(ControllerString.c_str(), "/", depth,
-                                   &handle, &info, &base_level);
+  int ret = cgroup_walk_tree_begin(controller_str, "/", depth, &handle, &info,
+                                   &base_level);
   while (ret == 0) {
-    if (std::string(info.path).find(CgroupConstant::TASK_DIR_PREFIX) !=
-            std::string::npos &&
-        info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR) {
+    if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR &&
+        strstr(info.path, CgroupConstant::kTaskCgPathPrefix) != nullptr) {
+      CRANE_DEBUG("Removing remaining task cgroup: {}", info.full_path);
       util::os::DeleteFile(info.full_path);
     }
+
     ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
   }
 
-  if (handle) {
-    cgroup_walk_tree_end(&handle);
-  }
-
-  return true;
+  if (handle) cgroup_walk_tree_end(&handle);
 }
 
 bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
