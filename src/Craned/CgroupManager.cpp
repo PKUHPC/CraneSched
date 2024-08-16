@@ -115,7 +115,17 @@ int CgroupManager::Init() {
     return -1;
   }
 
+  RmAllTaskCgroups_();
+
   return 0;
+}
+
+void CgroupManager::RmAllTaskCgroups_() {
+  RmAllTaskCgroupsUnderController_(CgroupConstant::Controller::CPU_CONTROLLER);
+  RmAllTaskCgroupsUnderController_(
+      CgroupConstant::Controller::MEMORY_CONTROLLER);
+  RmAllTaskCgroupsUnderController_(
+      CgroupConstant::Controller::DEVICES_CONTROLLER);
 }
 
 /*
@@ -418,6 +428,34 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
     }
     return true;
   }
+}
+
+void CgroupManager::RmAllTaskCgroupsUnderController_(
+    CgroupConstant::Controller controller) {
+  void *handle = nullptr;
+  cgroup_file_info info{};
+
+  const char *controller_str =
+      CgroupConstant::GetControllerStringView(controller).data();
+
+  int base_level;
+  int depth = 1;
+  int ret = cgroup_walk_tree_begin(controller_str, "/", depth, &handle, &info,
+                                   &base_level);
+  while (ret == 0) {
+    if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR &&
+        strstr(info.path, CgroupConstant::kTaskCgPathPrefix) != nullptr) {
+      CRANE_DEBUG("Removing remaining task cgroup: {}", info.full_path);
+      int err = rmdir(info.full_path);
+      if (err != 0)
+        CRANE_ERROR("Failed to remove cgroup {}: {}", info.full_path,
+                    strerror(errno));
+    }
+
+    ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
+  }
+
+  if (handle) cgroup_walk_tree_end(&handle);
 }
 
 bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
