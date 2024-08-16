@@ -446,7 +446,10 @@ void CgroupManager::RmAllTaskCgroupsUnderController_(
     if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR &&
         strstr(info.path, CgroupConstant::kTaskCgPathPrefix) != nullptr) {
       CRANE_DEBUG("Removing remaining task cgroup: {}", info.full_path);
-      util::os::DeleteFile(info.full_path);
+      int err = rmdir(info.full_path);
+      if (err != 0)
+        CRANE_ERROR("Failed to remove cgroup {}: {}", info.full_path,
+                    strerror(errno));
     }
 
     ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
