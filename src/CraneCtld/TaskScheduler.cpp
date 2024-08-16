@@ -992,9 +992,7 @@ void TaskScheduler::ScheduleThread_() {
           task->SetExitCode(ExitCode::kExitCodeCgroupError);
           task->SetEndTime(absl::Now());
         }
-        // TODO: Add MovePendingToFinal
-        // TODO: Add crun callback here!
-        PersistAndTransferTasksToMongodb_(failed_task_raw_ptrs);
+        ProcessFinalTasks_(failed_task_raw_ptrs);
 
         // Failed tasks have been handled properly. Free them explicitly.
         failed_result_list.clear();
@@ -1465,7 +1463,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
     }
   }
 
-  PersistAndTransferTasksToMongodb_(task_raw_ptr_vec);
+  ProcessFinalTasks_(task_raw_ptr_vec);
 }
 
 void TaskScheduler::SubmitTaskTimerCb_() {
@@ -1701,7 +1699,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   }
   bl.Wait();
 
-  PersistAndTransferTasksToMongodb_(task_raw_ptr_vec);
+  ProcessFinalTasks_(task_raw_ptr_vec);
 }
 
 void TaskScheduler::QueryTasksInRam(
@@ -2580,6 +2578,24 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
   }
 }
 
+void TaskScheduler::ProcessFinalTasks_(const std::vector<TaskInCtld*>& tasks) {
+  PersistAndTransferTasksToMongodb_(tasks);
+  CallPluginHookForFinalTasks_(tasks);
+}
+
+void TaskScheduler::CallPluginHookForFinalTasks_(
+    std::vector<TaskInCtld*> const& tasks) {
+  if (g_config.Plugin.Enabled && !tasks.empty()) {
+    std::vector<crane::grpc::TaskInfo> tasks_post_comp;
+    for (TaskInCtld* task : tasks) {
+      crane::grpc::TaskInfo t;
+      task->SetFieldsOfTaskInfo(&t);
+      tasks_post_comp.emplace_back(std::move(t));
+    }
+    g_plugin_client->EndHookAsync(std::move(tasks_post_comp));
+  }
+}
+
 void TaskScheduler::PersistAndTransferTasksToMongodb_(
     std::vector<TaskInCtld*> const& tasks) {
   if (tasks.empty()) return;
@@ -2609,17 +2625,6 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
     CRANE_ERROR(
         "Failed to call g_embedded_db_client->PurgeEndedTasks() "
         "for final tasks");
-  }
-
-  // Todo: Extract this part into a function!
-  if (g_config.Plugin.Enabled && !tasks.empty()) {
-    std::vector<crane::grpc::TaskInfo> tasks_post_comp;
-    for (TaskInCtld* task : tasks) {
-      crane::grpc::TaskInfo t;
-      task->SetFieldsOfTaskInfo(&t);
-      tasks_post_comp.emplace_back(std::move(t));
-    }
-    g_plugin_client->EndHookAsync(std::move(tasks_post_comp));
   }
 }
 
