@@ -709,16 +709,6 @@ void TaskScheduler::ScheduleThread_() {
           std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
               .count());
 
-      // if (g_config.Plugin.Enabled) {
-      //   std::vector<crane::grpc::TaskInfo> tasks_pre_start;
-      //   for (auto& it : selection_result_list) {
-      //     crane::grpc::TaskInfo task;
-      //     it.first->SetFieldsOfTaskInfo(&task);
-      //     tasks_pre_start.emplace_back(std::move(task));
-      //   }
-      //   g_plugin_client->PreStartHookAsync(std::move(tasks_pre_start));
-      // }
-
       begin = std::chrono::steady_clock::now();
 
       // Add task ids to node maps immediately before CreateCgroupForTasks
