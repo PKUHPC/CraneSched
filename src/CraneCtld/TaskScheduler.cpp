@@ -1652,7 +1652,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     task->SetExitCode(exit_code);
     task->SetEndTime(absl::Now());
 
-    for (auto const& craned_id : task->CranedIds()) {
+    for (CranedId const& craned_id : task->CranedIds()) {
       craned_cgroups_map[craned_id].emplace_back(task_id, task->uid);
 
       auto node_to_task_map_it = m_node_to_tasks_map_.find(craned_id);
@@ -1667,7 +1667,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       }
     }
 
-    for (auto const& craned_id : task->CranedIds()) {
+    for (CranedId const& craned_id : task->CranedIds()) {
       g_meta_container->FreeResourceFromNode(craned_id, task_id);
     }
 
