@@ -226,6 +226,15 @@ message QueryReservationInfoReply {
   repeated ReservationInfo reservation_info_list = 3;
 }
 
+message QueryLicensesInfoRequest {
+  string license_name = 1;
+}
+
+message QueryLicensesInfoReply {
+  bool ok = 1;
+  repeated LicenseInfo license_info_list = 2;
+}
+
 message ModifyTaskRequest {
   enum TargetAttributes {
     TimeLimit = 0;
@@ -497,6 +506,7 @@ message QueryTasksInfoRequest {
   TimeInterval filter_start_time_interval = 10;
   TimeInterval filter_end_time_interval = 11;
   repeated TaskType filter_task_types = 12;
+  repeated string filter_licenses = 13;
 
   bool option_include_completed_tasks = 15;
 }
@@ -989,6 +999,7 @@ service CraneCtld {
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
   rpc QueryReservationInfo(QueryReservationInfoRequest) returns (QueryReservationInfoReply);
+  rpc QueryLicensesInfo(QueryLicensesInfoRequest) returns (QueryLicensesInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
   rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
