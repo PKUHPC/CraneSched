@@ -194,6 +194,15 @@ message QueryPartitionInfoReply {
   repeated PartitionInfo partition_info = 1;
 }
 
+message QueryLicensesInfoRequest {
+  string license_name = 1;
+}
+
+message QueryLicensesInfoReply {
+  bool ok = 1;
+  repeated LicenseInfo license_info_list = 2;
+}
+
 message ModifyTaskRequest {
   enum TargetAttributes {
     TimeLimit = 0;
@@ -381,9 +390,10 @@ message QueryTasksInfoRequest{
   repeated TaskStatus filter_task_states = 6;
   repeated string filter_users = 7;
   repeated string filter_accounts = 8;
-  TimeInterval filter_submit_time_interval = 9;
-  TimeInterval filter_start_time_interval = 10;
-  TimeInterval filter_end_time_interval = 11;
+  repeated string filter_licenses = 9;
+  TimeInterval filter_submit_time_interval = 10;
+  TimeInterval filter_start_time_interval = 11;
+  TimeInterval filter_end_time_interval = 12;
 
   bool option_include_completed_tasks = 15;
 }
@@ -711,6 +721,7 @@ service CraneCtld {
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+  rpc QueryLicensesInfo(QueryLicensesInfoRequest) returns (QueryLicensesInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
 

@@ -154,6 +154,7 @@ inline std::string_view CraneErrStr(CraneErr err) {
 using PartitionId = std::string;
 using CranedId = std::string;
 using cpu_t = fpm::fixed_24_8;
+using LicenseId = std::string; 
 
 // Device path. e.g. /dev/nvidia0
 using SlotId = std::string;

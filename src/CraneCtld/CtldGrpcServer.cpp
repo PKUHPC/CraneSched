@@ -25,6 +25,7 @@
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
+#include "LicensesManager.h"
 #include "crane/String.h"
 
 namespace Ctld {
@@ -149,6 +150,16 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
   }
 
   return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::QueryLicensesInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryLicensesInfoRequest *request,
+      crane::grpc::QueryLicensesInfoReply *response) {
+        
+    g_licenses_manager->GetLicensesInfo(request, response);
+
+    return grpc::Status::OK;
 }
 
 grpc::Status CraneCtldServiceImpl::ModifyTask(
