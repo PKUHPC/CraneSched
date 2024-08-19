@@ -21,6 +21,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "CranedMetaContainer.h"
+#include "LicensesManager.h"
 #include "protos/Crane.pb.h"
 
 namespace Ctld {

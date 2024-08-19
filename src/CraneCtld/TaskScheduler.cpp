@@ -595,6 +595,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
                                              task->AllocatedRes());
   }
 
+  g_licenses_manager->MallocLicenseResource(task->licenses_count);
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
@@ -1191,6 +1192,7 @@ void TaskScheduler::ScheduleThread_() {
             g_meta_container->FreeResourceFromResv(job->reservation,
                                                    job->TaskId());
           g_account_meta_container->FreeQosResource(*job);
+          g_licenses_manager->FreeLicenseResource(job->licenses_count);
         }
 
         // Move failed jobs to the completed queue.
@@ -2602,7 +2604,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         g_meta_container->FreeResourceFromResv(task->reservation,
                                                task->TaskId());
       g_account_meta_container->FreeQosResource(*task);
-
+      g_licenses_manager->FreeLicenseResource(task->licenses_count);
       context.job_raw_ptrs.insert(task.get());
       context.job_ptrs.emplace(std::move(task));
 
@@ -2942,6 +2944,23 @@ void TaskScheduler::QueryTasksInRam(
            req_partitions.contains(task.partition_id);
   };
 
+  bool no_licenses_constraint = request->filter_licenses().empty();
+  std::unordered_set<std::string> req_licenses(
+      request->filter_licenses().begin(), request->filter_licenses().end());
+  auto task_rng_filter_licenses = [&](auto& it) {
+    if (no_licenses_constraint) {
+      return true;
+    }
+    TaskInCtld& task = *it.second;
+    for (auto& [k, v] : task.TaskToCtld().licenses_count()) {
+      if (req_licenses.contains(k)) {
+        return true;
+      }
+    }
+
+    return no_licenses_constraint;
+  };
+
   bool no_task_ids_constraint = request->filter_task_ids().empty();
   std::unordered_set<uint32_t> req_task_ids(request->filter_task_ids().begin(),
                                             request->filter_task_ids().end());
@@ -2984,6 +3003,7 @@ void TaskScheduler::QueryTasksInRam(
                       ranges::views::filter(task_rng_filter_time) |
                       ranges::views::filter(task_rng_filter_qos) |
                       ranges::views::filter(task_rng_filter_task_type) |
+                      ranges::views::filter(task_rng_filter_licenses) |
                       ranges::views::take(num_limit);
 
   LockGuard pending_guard(&m_pending_task_map_mtx_);
@@ -3428,6 +3448,12 @@ void SchedulerAlgo::NodeSelect(
       }
       scheduler = &resv_scheduler_map[job->reservation];
     }
+    //bool issuff =
+    //    g_licenses_manager->CheckLicenseCountSufficient(job->licenses_count);
+    //if (!issuff) {
+    //  job->reason = "Licenses";
+    //  continue;
+    //}
 
     bool ok = scheduler->CalculateRunningNodesAndStartTime_(now, job);
 
@@ -3640,6 +3666,15 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
     if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_EX_NODE_LIST);
 
     for (auto&& node : nodes) task->excluded_nodes.emplace(std::move(node));
+  }
+
+  auto check_licenses_result = g_licenses_manager->CheckLicensesLegal(
+      task->TaskToCtld().licenses_count());
+  if (check_licenses_result.has_error()) {
+    CRANE_ERROR("Failed to call CheckLicensesLegal: {}",
+                check_licenses_result.error());
+    // TODO:
+    return std::unexpected(CraneErrCode::ERR_INVAILD_EX_NODE_LIST);
   }
 
   return {};
