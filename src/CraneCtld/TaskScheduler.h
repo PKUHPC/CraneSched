@@ -20,6 +20,7 @@
 // Precompiled header comes first!
 
 #include "CranedMetaContainer.h"
+#include "LicensesManager.h"
 #include "DbClient.h"
 #include "crane/Lock.h"
 #include "protos/Crane.pb.h"
