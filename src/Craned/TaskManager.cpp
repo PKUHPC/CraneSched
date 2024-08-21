@@ -641,16 +641,18 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     // Move the ownership of ProcessInstance into the TaskInstance.
     instance->processes.emplace(child_pid, std::move(process));
 
-    close(io_in_sock_pair[1]);
-    close(io_out_sock_pair[1]);
-    close(ctrl_sock_pair[1]);
     int ctrl_fd = ctrl_sock_pair[0];
-    bool ok;
+    close(ctrl_sock_pair[1]);
+    if (instance->IsCrun()) {
+      close(io_in_sock_pair[1]);
+      close(io_out_sock_pair[1]);
+    }
 
     setegid(saved_priv.gid);
     seteuid(saved_priv.uid);
     setgroups(0, nullptr);
 
+    bool ok;
     FileInputStream istream(ctrl_fd);
     FileOutputStream ostream(ctrl_fd);
     CanStartMessage msg;
