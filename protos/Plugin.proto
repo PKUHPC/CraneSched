@@ -49,9 +49,26 @@ message EndHookReply {
   repeated TaskIdReply result = 1;
 }
 
+message JobCheckHookRequest {
+
+  repeated JobCheckInfo jobcheck_info_list = 1;
+}
+
+message JobCheckHookReply {
+  message TaskIdReply {
+    bool ok = 1;
+    uint32 task_id = 2;
+    string failure_reason = 3;
+  }
+
+  repeated TaskIdReply result = 1;
+}
+
 
 service CranePluginD {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */  
   rpc StartHook(StartHookRequest) returns (StartHookReply);
   rpc EndHook(EndHookRequest) returns (EndHookReply);
+  rpc JobCheckHook(JobCheckHookRequest) returns (JobCheckHookReply);
+
 }

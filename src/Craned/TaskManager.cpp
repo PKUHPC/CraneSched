@@ -21,10 +21,15 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
 
+#include <string>
+
 #include "CforedClient.h"
+#include "CranedPublicDefs.h"
 #include "crane/OS.h"
+#include "crane/PluginClient.h"
 #include "crane/String.h"
 #include "protos/CraneSubprocess.pb.h"
+#include "protos/PublicDefs.pb.h"
 
 namespace Craned {
 
