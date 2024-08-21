@@ -691,8 +691,8 @@ bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
     res = m_variable_db_->Delete(txn_id, GetVariableDbEntryName_(id));
     if (res.has_error()) {
       CRANE_ERROR(
-          "Failed to delete embedded variable data entry.Error code: {}",
-          res.error());
+          "Failed to delete embedded variable data entry. Error code: {}",
+          int(res.error()));
       return false;
     }
   }
@@ -703,7 +703,7 @@ bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
     res = m_fixed_db_->Delete(txn_id, GetFixedDbEntryName_(id));
     if (res.has_error()) {
       CRANE_ERROR("Failed to delete embedded fixed data entry. Error code: {}",
-                  res.error());
+                  int(res.error()));
       return false;
     }
   }
