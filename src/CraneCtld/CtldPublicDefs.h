@@ -517,6 +517,7 @@ struct TaskInCtld {
     username = runtime_attr.username();
 
     nodes_alloc = craned_ids.size();
+    exit_code = runtime_attr.exit_code();
 
     status = runtime_attr.status();
     held = runtime_attr.held();
@@ -578,7 +579,7 @@ struct TaskInCtld {
     *task_info->mutable_res_view() =
         static_cast<crane::grpc::ResourceView>(requested_node_res_view);
 
-    task_info->set_exit_code(0);
+    task_info->set_exit_code(runtime_attr.exit_code());
     task_info->set_priority(cached_priority);
 
     task_info->set_status(status);
