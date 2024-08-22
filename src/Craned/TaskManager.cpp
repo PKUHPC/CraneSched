@@ -1113,7 +1113,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   m_pid_proc_map_.emplace(process->GetPid(), process.get());
 
   // Move the ownership of ProcessInstance into the TaskInstance.
-  // <ake sure existing process can be found when handling SIGCHLD.
+  // Make sure existing process can be found when handling SIGCHLD.
   instance->processes.emplace(process->GetPid(), std::move(process));
   m_mtx_.Unlock();
 
