@@ -1111,10 +1111,12 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   m_mtx_.Lock();
   m_pid_task_map_.emplace(process->GetPid(), instance);
   m_pid_proc_map_.emplace(process->GetPid(), process.get());
-  m_mtx_.Unlock();
 
   // Move the ownership of ProcessInstance into the TaskInstance.
+  // <ake sure existing process can be found when handling SIGCHLD.
   instance->processes.emplace(process->GetPid(), std::move(process));
+  m_mtx_.Unlock();
+
 }
 
 std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
