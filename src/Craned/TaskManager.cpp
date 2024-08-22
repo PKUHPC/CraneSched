@@ -280,13 +280,13 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
 
   switch (instance->err_before_exec) {
   case CraneErr::kProtobufError:
-    EvActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Cancelled,
+    EvActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
                                 ExitCode::kExitCodeSpawnProcessFail,
                                 std::nullopt);
     break;
 
   case CraneErr::kCgroupError:
-    EvActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Cancelled,
+    EvActivateTaskStatusChange_(task_id, crane::grpc::TaskStatus::Failed,
                                 ExitCode::kExitCodeCgroupError, std::nullopt);
     break;
 
