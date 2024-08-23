@@ -1104,19 +1104,20 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
         fmt::format(
             "Cannot spawn a new process inside the instance of task #{}",
             task_id));
+  } else {
+    // After SpawnProcessInInstance_ we put the child pid into the index map.
+    // SigChild sent after fork() and before following code will resent to
+    // handler by timer.
+    m_mtx_.Lock();
+    m_pid_task_map_.emplace(process->GetPid(), instance);
+    m_pid_proc_map_.emplace(process->GetPid(), process.get());
+
+    // Move the ownership of ProcessInstance into the TaskInstance.
+    // Make sure existing process can be found when handling SIGCHLD.
+    instance->processes.emplace(process->GetPid(), std::move(process));
+
+    m_mtx_.Unlock();
   }
-  // After SpawnProcessInInstance_ we put the child pid into the index map.
-  // SigChild sent after fork() and before following code will resent to handler
-  // by timer.
-  m_mtx_.Lock();
-  m_pid_task_map_.emplace(process->GetPid(), instance);
-  m_pid_proc_map_.emplace(process->GetPid(), process.get());
-
-  // Move the ownership of ProcessInstance into the TaskInstance.
-  // Make sure existing process can be found when handling SIGCHLD.
-  instance->processes.emplace(process->GetPid(), std::move(process));
-  m_mtx_.Unlock();
-
 }
 
 std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
