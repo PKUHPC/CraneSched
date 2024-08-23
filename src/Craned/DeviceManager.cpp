@@ -82,10 +82,10 @@ std::unique_ptr<BasicDevice> DeviceManager::ConstructDevice(
                                        env_injector);
 }
 
-std::vector<std::pair<std::string, std::string>>
+std::unordered_map<std::string, std::string>
 DeviceManager::GetDevEnvListByResInNode(
     const crane::grpc::DedicatedResourceInNode& res_in_node) {
-  std::vector<std::pair<std::string, std::string>> env;
+  std::unordered_map<std::string, std::string> env;
 
   std::unordered_set<std::string> all_res_slots;
   for (const auto& [device_name, device_type_slots_map] :
@@ -106,12 +106,12 @@ DeviceManager::GetDevEnvListByResInNode(
       ++hip_count;
   }
   // Nvidia Device
-  env.emplace_back("CUDA_VISIBLE_DEVICES",
-                   util::GenerateCommaSeparatedString(cuda_count));
+  env.emplace("CUDA_VISIBLE_DEVICES",
+              util::GenerateCommaSeparatedString(cuda_count));
 
   // AMD/Haiguang device
-  env.emplace_back("HIP_VISIBLE_DEVICES",
-                   util::GenerateCommaSeparatedString(hip_count));
+  env.emplace("HIP_VISIBLE_DEVICES",
+              util::GenerateCommaSeparatedString(hip_count));
 
   return env;
 }

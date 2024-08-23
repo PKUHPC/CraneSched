@@ -24,8 +24,6 @@
 
 namespace Craned {
 
-using EnvPair = std::pair<std::string, std::string>;
-
 struct TaskStatusChange {
   task_id_t task_id{};
   crane::grpc::TaskStatus new_status{};

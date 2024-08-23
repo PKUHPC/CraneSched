@@ -63,8 +63,7 @@ class DeviceManager {
   static std::optional<std::tuple<unsigned int, unsigned int, char>>
   GetDeviceFileMajorMinorOpType(const std::string& path);
 
-  static std::vector<std::pair<std::string, std::string>>
-  GetDevEnvListByResInNode(
+  static std::unordered_map<std::string, std::string> GetDevEnvListByResInNode(
       const crane::grpc::DedicatedResourceInNode& res_in_node);
 
   static std::vector<std::unique_ptr<BasicDevice>> GetSystemDeviceNvml();
