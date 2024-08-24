@@ -24,6 +24,7 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
+#include "DependencyManager.h"
 #include "EmbeddedDbClient.h"
 #include "crane/PluginClient.h"
 #include "crane/PublicHeader.h"
@@ -67,7 +68,142 @@ bool TaskScheduler::Init() {
     return false;
   }
 
+  // Build pending_queue ahead to convient for finding task by task_id and
+  // insert failed task to db.
+  std::unordered_map<task_id_t, std::unique_ptr<TaskInCtld>> pending_queue;
+  if (!snapshot.pending_queue.empty()) {
+    g_dependency_manager->RecoverFromSnapshot(snapshot.pending_queue);
+    CRANE_INFO("{} pending task(s) recovered.", snapshot.pending_queue.size());
+
+    for (auto&& [task_db_id, task_in_embedded_db] : snapshot.pending_queue) {
+      auto task = std::make_unique<TaskInCtld>();
+      task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
+      // Must be called after SetFieldsByTaskToCtld!
+      task->SetFieldsByRuntimeAttr(task_in_embedded_db.runtime_attr());
+
+      task_id_t task_id = task->TaskId();
+
+      CRANE_TRACE("Restore task #{} from embedded pending queue.",
+                  task->TaskId());
+
+      pending_queue.emplace(task_id, std::move(task));
+    }
+  }
+
   auto& running_queue = snapshot.running_queue;
+
+  // After update task status, calling this function to update dependency and
+  // both embedded_db and mongo_db. Task failed due to dependency will be
+  // removed from pending queue.
+  auto update_task_to_db = [&](const std::unique_ptr<TaskInCtld>& task) {
+    std::unordered_map<task_id_t, std::vector<task_id_t>> dependencies;
+    std::vector<task_id_t> dep_succ_task_vec;
+    std::vector<task_id_t> dep_fail_task_vec;
+    bool ok = g_dependency_manager->updateDependencies(
+        task->TaskId(), task->Status(), 0, &dependencies, &dep_succ_task_vec,
+        &dep_fail_task_vec);
+
+    std::vector<TaskInCtld*> dep_updated_task_raw_ptr_vec;
+    std::vector<std::unique_ptr<TaskInCtld>> dep_failed_task_ptr_vec;
+    for (auto& task_id : dep_fail_task_vec) {
+      auto it = pending_queue.find(task_id);
+      if (it != pending_queue.end()) {
+        CRANE_INFO(
+            "Failed to requeue task #{} due to dependency. Mark it as FAILED "
+            "and move it to the ended queue.",
+            task_id);
+        it->second->SetStatus(crane::grpc::Failed);
+        dep_failed_task_ptr_vec.emplace_back(std::move(it->second));
+        pending_queue.erase(it);
+      }
+    }
+    for (auto& task_id : dep_succ_task_vec) {
+      auto it = pending_queue.find(task_id);
+      if (it != pending_queue.end()) {
+        it->second->SetDependencyOK();
+        dep_updated_task_raw_ptr_vec.emplace_back(it->second.get());
+      }
+    }
+    for (auto& [task_id, dep_ids] : dependencies) {
+      auto it = pending_queue.find(task_id);
+      if (it != pending_queue.end() && it->second->HasDependency()) {
+        it->second->DependencyAdd(dep_ids);
+        it->second->DependencyAdd(dep_ids);
+        if (it->second->NoWaitingDependency()) {
+          if (it->second->dependencies.depend_all()) {
+            it->second->SetDependencyOK();
+          } else {
+            CRANE_INFO(
+                "Failed to requeue task #{} due to dependency. Mark it as "
+                "FAILED "
+                "and move it to the ended queue.",
+                task_id);
+            it->second->SetStatus(crane::grpc::Failed);
+            dep_failed_task_ptr_vec.emplace_back(std::move(it->second));
+            pending_queue.erase(it);
+            continue;
+          }
+        }
+        dep_updated_task_raw_ptr_vec.emplace_back(it->second.get());
+      }
+    }
+
+    txn_id_t txn_id;
+
+    ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
+    if (!ok) {
+      CRANE_ERROR(
+          "TaskScheduler failed to start transaction when mark the task #{} as "
+          "FAILED.",
+          task->TaskId());
+    } else {
+      ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
+          txn_id, task->TaskDbId(), task->RuntimeAttr());
+      for (auto& task : dep_updated_task_raw_ptr_vec) {
+        ok &= g_embedded_db_client->UpdateRuntimeAttrOfTask(
+            txn_id, task->TaskDbId(), task->RuntimeAttr());
+      }
+      for (auto& task : dep_failed_task_ptr_vec) {
+        ok &= g_embedded_db_client->UpdateRuntimeAttrOfTask(
+            txn_id, task->TaskDbId(), task->RuntimeAttr());
+      }
+      ok &= g_embedded_db_client->CommitVariableDbTransaction(txn_id);
+
+      if (!ok) {
+        CRANE_ERROR(
+            "UpdateRuntimeAttrOfTask failed for task #{} when "
+            "mark the task as FAILED.",
+            task->TaskId());
+      }
+    }
+
+    std::vector<TaskInCtld*> ended_tasks;
+    for (const auto& task : dep_failed_task_ptr_vec)
+      ended_tasks.emplace_back(task.get());
+    if (task->Status() == crane::grpc::Completed ||
+        task->Status() == crane::grpc::Failed ||
+        task->Status() == crane::grpc::ExceedTimeLimit ||
+        task->Status() == crane::grpc::Cancelled) {
+      ended_tasks.emplace_back(task.get());
+    }
+
+    if (!ended_tasks.empty()) {
+      if (!g_db_client->InsertJobs(ended_tasks)) {
+        CRANE_ERROR("Failed to call g_db_client->InsertJobs() ");
+        return;
+      }
+
+      std::vector<task_db_id_t> db_ids;
+      for (TaskInCtld* task : ended_tasks)
+        db_ids.emplace_back(task->TaskDbId());
+
+      if (!g_embedded_db_client->PurgeEndedTasks(db_ids)) {
+        CRANE_ERROR(
+            "Failed to call g_embedded_db_client->PurgeEndedTasks() "
+            "for final tasks");
+      }
+    }
+  };
 
   if (!running_queue.empty()) {
     CRANE_INFO("{} running task(s) recovered.", running_queue.size());
@@ -84,17 +220,11 @@ bool TaskScheduler::Init() {
       CRANE_TRACE("Restore task #{} from embedded running queue.",
                   task->TaskId());
 
+      std::vector<std::unique_ptr<TaskInCtld>> ended_task_ptr_vec;
       err = AcquireTaskAttributes(task.get());
       if (err != CraneErr::kOk || task->type == crane::grpc::Interactive) {
         task->SetStatus(crane::grpc::Failed);
-        ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
-                                                           task->RuntimeAttr());
-        if (!ok) {
-          CRANE_ERROR(
-              "UpdateRuntimeAttrOfTask failed for task #{} when "
-              "mark the task as FAILED.",
-              task_id);
-        }
+        update_task_to_db(task);
         if (err != CraneErr::kOk)
           CRANE_INFO(
               "Failed to acquire task attributes for restored running task "
@@ -113,23 +243,6 @@ bool TaskScheduler::Init() {
           for (const CranedId& craned_id : task->CranedIds()) {
             craned_cgroups_map[craned_id].emplace_back(task->TaskId(),
                                                        task->uid);
-          }
-
-          ok = g_db_client->InsertJob(task.get());
-          if (!ok) {
-            CRANE_ERROR(
-                "InsertJob failed for task #{} "
-                "when recovering running queue.",
-                task->TaskId());
-          }
-
-          std::vector<task_db_id_t> db_ids{task_db_id};
-          ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
-          if (!ok) {
-            CRANE_ERROR(
-                "PurgeEndedTasks failed for task #{} when recovering "
-                "running queue.",
-                task->TaskId());
           }
         }
 
@@ -156,14 +269,7 @@ bool TaskScheduler::Init() {
         task->allocated_craneds_regex.clear();
         task->CranedIdsClear();
 
-        ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task->TaskDbId(),
-                                                           task->RuntimeAttr());
-        if (!ok) {
-          CRANE_ERROR(
-              "Failed to call "
-              "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
-        }
-
+        update_task_to_db(task);
         // Now the task is moved to the embedded pending queue.
         RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
       } else {
@@ -171,13 +277,7 @@ bool TaskScheduler::Init() {
         err = stub->CheckTaskStatus(task->TaskId(), &status);
         if (err == CraneErr::kOk) {
           task->SetStatus(status);
-          ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
-              0, task->TaskDbId(), task->RuntimeAttr());
-          if (!ok) {
-            CRANE_ERROR(
-                "Failed to call "
-                "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
-          }
+          update_task_to_db(task);
           if (status == crane::grpc::Running) {
             // Exec node is up and the task is running.
             // Just allocate resource from allocated nodes and
@@ -216,23 +316,6 @@ bool TaskScheduler::Init() {
               craned_cgroups_map[craned_id].emplace_back(task->TaskId(),
                                                          task->uid);
             }
-
-            ok = g_db_client->InsertJob(task.get());
-            if (!ok) {
-              CRANE_ERROR(
-                  "InsertJob failed for task #{} "
-                  "when recovering running queue.",
-                  task->TaskId());
-            }
-
-            std::vector<task_db_id_t> db_ids{task_db_id};
-            ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
-            if (!ok) {
-              CRANE_ERROR(
-                  "PurgeEndedTasks failed for task #{} when recovering "
-                  "running queue.",
-                  task->TaskId());
-            }
           }
         } else {
           // Exec node is up but task id does not exist.
@@ -263,13 +346,7 @@ bool TaskScheduler::Init() {
           task->allocated_craneds_regex.clear();
           task->CranedIdsClear();
 
-          ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
-              0, task->TaskDbId(), task->RuntimeAttr());
-          if (!ok) {
-            CRANE_ERROR(
-                "Failed to call "
-                "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
-          }
+          update_task_to_db(task);
           // Now the task is moved to the embedded pending queue.
           RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
         }
@@ -296,21 +373,10 @@ bool TaskScheduler::Init() {
   }
 
   // Process the pending tasks in the embedded pending queue.
-  auto& pending_queue = snapshot.pending_queue;
   if (!pending_queue.empty()) {
-    CRANE_INFO("{} pending task(s) recovered.", pending_queue.size());
-
-    for (auto&& [task_db_id, task_in_embedded_db] : pending_queue) {
-      auto task = std::make_unique<TaskInCtld>();
-      task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
-      // Must be called after SetFieldsByTaskToCtld!
-      task->SetFieldsByRuntimeAttr(task_in_embedded_db.runtime_attr());
-
-      task_id_t task_id = task->TaskId();
-
-      CRANE_TRACE("Restore task #{} from embedded pending queue.",
-                  task->TaskId());
-
+    for (auto it = pending_queue.begin(); it != pending_queue.end();) {
+      auto& task_id = it->first;
+      auto& task = it->second;
       bool mark_task_as_failed = false;
 
       if (task->type != crane::grpc::Batch) {
@@ -330,43 +396,25 @@ bool TaskScheduler::Init() {
         mark_task_as_failed = true;
       }
 
-      if (!mark_task_as_failed) {
-        RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
-      } else {
-        // If a batch task failed to requeue the task into pending queue due to
-        // insufficient resource or other reasons or the task is an interactive
-        // task, Mark it as FAILED and move it to the ended queue.
+      if (mark_task_as_failed) {
+        // If a batch task failed to requeue the task into pending queue due
+        // to insufficient resource or other reasons or the task is an
+        // interactive task, Mark it as FAILED and move it to the ended queue.
         CRANE_INFO(
             "Failed to requeue task #{}. Mark it as FAILED and "
             "move it to the ended queue.",
             task_id);
         task->SetStatus(crane::grpc::Failed);
-        ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
-                                                           task->RuntimeAttr());
-        if (!ok) {
-          CRANE_ERROR(
-              "UpdateRuntimeAttrOfTask failed for task #{} when "
-              "mark the task as FAILED.",
-              task_id);
-        }
-
-        ok = g_db_client->InsertJob(task.get());
-        if (!ok) {
-          CRANE_ERROR(
-              "InsertJob failed for task #{} when recovering pending "
-              "queue.",
-              task->TaskId());
-        }
-
-        std::vector<task_db_id_t> db_ids{task_db_id};
-        ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
-        if (!ok) {
-          CRANE_ERROR(
-              "PurgeEndedTasks failed for task #{} when recovering "
-              "pending queue.",
-              task->TaskId());
-        }
+        std::vector<std::unique_ptr<TaskInCtld>> ended_task_ptr_vec;
+        update_task_to_db(task);
+        it = pending_queue.erase(it);
+      } else {
+        it = std::next(it);
       }
+    }
+
+    for (auto&& [task_id, task] : pending_queue) {
+      RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
     }
   }
 
@@ -847,44 +895,90 @@ void TaskScheduler::ScheduleThread_() {
             CranedStub::NewExecuteTasksRequests(craned_id, tasks_raw_ptrs);
       }
 
-      // Move tasks into running queue.
-      txn_id_t txn_id{0};
-      bool ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
-      if (!ok) {
-        CRANE_ERROR(
-            "TaskScheduler failed to start transaction when scheduling.");
-      }
+      {
+        // Update dependencies due to the execution of tasks.
+        // updated_task_raw_ptrs will not contain duplicated tasks.
+        std::vector<TaskInCtld*> updated_task_raw_ptrs;
+        updated_task_raw_ptrs.reserve(selection_result_list.size());
+        std::unordered_map<task_id_t, std::vector<task_id_t>> dependencies;
+        std::vector<task_id_t> dep_succ_task_vec;
 
-      for (auto& it : selection_result_list) {
-        auto& task = it.first;
-
-        // IMPORTANT: task must be put into running_task_map before any
-        //  time-consuming operation, otherwise TaskStatusChange RPC will come
-        //  earlier before task is put into running_task_map.
-        g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, task->TaskDbId(),
-                                                      task->RuntimeAttr());
-      }
-
-      ok = g_embedded_db_client->CommitVariableDbTransaction(txn_id);
-      if (!ok) {
-        CRANE_ERROR("Embedded database failed to commit manual transaction.");
-      }
-
-      // Set succeed tasks status and do callbacks.
-      for (auto& it : selection_result_list) {
-        auto& task = it.first;
-        if (task->type == crane::grpc::Interactive) {
-          const auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-          std::get<InteractiveMetaInTask>(task->meta)
-              .cb_task_res_allocated(task->TaskId(),
-                                     task->allocated_craneds_regex,
-                                     task->CranedIds());
+        for (auto& it : selection_result_list) {
+          auto& task = it.first;
+          bool ok = g_dependency_manager->updateDependencies(
+              task->TaskId(), crane::grpc::TaskStatus::Running, 0,
+              &dependencies, &dep_succ_task_vec,
+              nullptr);  // start a task never fails any dependency
+          if (!ok) {
+            CRANE_ERROR("Failed to update dependencies for task #{}.",
+                        task->TaskId());
+          }
+          updated_task_raw_ptrs.emplace_back(task.get());
         }
 
-        // The ownership of TaskInCtld is transferred to the running queue.
-        m_running_task_map_mtx_.Lock();
-        m_running_task_map_.emplace(task->TaskId(), std::move(task));
-        m_running_task_map_mtx_.Unlock();
+        if (!(dependencies.empty() && dep_succ_task_vec.empty())) {
+          LockGuard pending_guard(&m_pending_task_map_mtx_);
+          for (auto& task_id : dep_succ_task_vec) {
+            auto it = m_pending_task_map_.find(task_id);
+            if (it != m_pending_task_map_.end()) {
+              it->second->SetDependencyOK();
+              updated_task_raw_ptrs.emplace_back(it->second.get());
+            }
+          }
+          for (auto& [task_id, dep_ids] : dependencies) {
+            auto it = m_pending_task_map_.find(task_id);
+            if (it != m_pending_task_map_.end() &&
+                it->second->HasDependency()) {
+              it->second->DependencyAdd(dep_ids);
+              if (it->second->NoWaitingDependency()) {
+                if (it->second->dependencies.depend_all()) {
+                  it->second->SetDependencyOK();
+                } else {
+                  CRANE_ERROR("Task #{} Failed when starting other tasks.",
+                              task_id);
+                }
+              }
+              updated_task_raw_ptrs.emplace_back(it->second.get());
+            }
+          }
+        }
+
+        // Move tasks into running queue.
+        txn_id_t txn_id{0};
+        bool ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
+        if (!ok) {
+          CRANE_ERROR(
+              "TaskScheduler failed to start transaction when scheduling.");
+        }
+
+        for (auto& task : updated_task_raw_ptrs) {
+          // IMPORTANT: task must be put into running_task_map before any
+          //  time-consuming operation, otherwise TaskStatusChange RPC will
+          //  come earlier before task is put into running_task_map.
+          g_embedded_db_client->UpdateRuntimeAttrOfTask(
+              txn_id, task->TaskDbId(), task->RuntimeAttr());
+        }
+
+        ok = g_embedded_db_client->CommitVariableDbTransaction(txn_id);
+        if (!ok) {
+          CRANE_ERROR("Embedded database failed to commit manual transaction.");
+        }
+
+        // Set succeed tasks status and do callbacks.
+        for (auto& it : selection_result_list) {
+          auto& task = it.first;
+          if (task->type == crane::grpc::Interactive) {
+            const auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+            std::get<InteractiveMetaInTask>(task->meta)
+                .cb_task_res_allocated(task->TaskId(),
+                                       task->allocated_craneds_regex,
+                                       task->CranedIds());
+          }
+
+          m_running_task_map_mtx_.Lock();
+          m_running_task_map_.emplace(task->TaskId(), std::move(task));
+          m_running_task_map_mtx_.Unlock();
+        }
       }
 
       end = std::chrono::steady_clock::now();
@@ -984,6 +1078,12 @@ void TaskScheduler::ScheduleThread_() {
 
         // Move failed tasks to the completed queue.
         std::vector<TaskInCtld*> failed_task_raw_ptrs;
+        std::unordered_map<task_id_t, std::vector<task_id_t>> dependencies;
+        std::vector<task_id_t> dep_succ_task_vec;
+        std::vector<task_id_t> dep_fail_task_vec;
+        std::vector<TaskInCtld*> updated_task_raw_ptrs;
+        std::vector<std::unique_ptr<TaskInCtld>> failed_tasks;
+
         for (auto& it : failed_result_list) {
           auto& task = it.first;
           failed_task_raw_ptrs.emplace_back(task.get());
@@ -991,11 +1091,75 @@ void TaskScheduler::ScheduleThread_() {
           task->SetStatus(crane::grpc::Failed);
           task->SetExitCode(ExitCode::kExitCodeCgroupError);
           task->SetEndTime(absl::Now());
+          bool ok = g_dependency_manager->updateDependencies(
+              task->TaskId(), crane::grpc::TaskStatus::Failed, 0, &dependencies,
+              &dep_succ_task_vec, &dep_fail_task_vec);
+          if (!ok) {
+            CRANE_ERROR("Failed to update dependencies for task #{}.",
+                        task->TaskId());
+          }
         }
-        ProcessFinalTasks_(failed_task_raw_ptrs);
+
+        if (!(dependencies.empty() && dep_succ_task_vec.empty() &&
+              dep_fail_task_vec.empty())) {
+          LockGuard pending_guard(&m_pending_task_map_mtx_);
+          for (auto& task_id : dep_fail_task_vec) {
+            auto it = m_pending_task_map_.find(task_id);
+            if (it != m_pending_task_map_.end()) {
+              auto& task = it->second;
+              task->SetStatus(crane::grpc::Failed);
+              if (task->type != crane::grpc::Batch) {
+                auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+                g_thread_pool->detach_task(
+                    [cb = meta.cb_task_cancel, task_id = task_id] {
+                      cb(task_id);
+                    });
+              }
+              failed_task_raw_ptrs.emplace_back(task.get());
+              failed_tasks.emplace_back(std::move(task));
+              m_pending_task_map_.erase(it);
+            }
+          }
+          for (auto& task_id : dep_succ_task_vec) {
+            auto it = m_pending_task_map_.find(task_id);
+            if (it != m_pending_task_map_.end()) {
+              it->second->SetDependencyOK();
+              updated_task_raw_ptrs.emplace_back(it->second.get());
+            }
+          }
+          for (auto& [task_id, dep_ids] : dependencies) {
+            auto it = m_pending_task_map_.find(task_id);
+            auto& task = it->second;
+            if (it != m_pending_task_map_.end() && task->HasDependency()) {
+              task->DependencyAdd(dep_ids);
+              if (task->NoWaitingDependency()) {
+                if (task->dependencies.depend_all()) {
+                  task->SetDependencyOK();
+                } else {
+                  task->SetStatus(crane::grpc::Failed);
+                  if (task->type != crane::grpc::Batch) {
+                    auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+                    g_thread_pool->detach_task(
+                        [cb = meta.cb_task_cancel, task_id = task_id] {
+                          cb(task_id);
+                        });
+                  }
+                  failed_task_raw_ptrs.emplace_back(task.get());
+                  failed_tasks.emplace_back(std::move(task));
+                  m_pending_task_map_.erase(it);
+                  continue;
+                }
+              }
+              updated_task_raw_ptrs.emplace_back(task.get());
+            }
+          }
+        }
+
+        ProcessFinalTasks_(failed_task_raw_ptrs, updated_task_raw_ptrs);
 
         // Failed tasks have been handled properly. Free them explicitly.
         failed_result_list.clear();
+        failed_tasks.clear();
 
         end = std::chrono::steady_clock::now();
         CRANE_TRACE(
@@ -1019,10 +1183,11 @@ void TaskScheduler::SetNodeSelectionAlgo(
   m_node_selection_algo_ = std::move(algo);
 }
 
-std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
+std::future<result::result<task_id_t, CraneErr>> TaskScheduler::SubmitTaskAsync(
     std::unique_ptr<TaskInCtld> task) {
-  std::promise<task_id_t> promise;
-  std::future<task_id_t> future = promise.get_future();
+  std::promise<result::result<task_id_t, CraneErr>> promise;
+  std::future<result::result<task_id_t, CraneErr>> future =
+      promise.get_future();
 
   m_submit_task_queue_.enqueue({std::move(task), std::move(promise)});
   m_submit_task_async_handle_->send();
@@ -1165,8 +1330,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
   uint32_t operator_uid = request.operator_uid();
 
-  // When an ordinary user tries to cancel jobs, they are automatically filtered
-  // to their own jobs.
+  // When an ordinary user tries to cancel jobs, they are automatically
+  // filtered to their own jobs.
   std::string filter_uname = request.filter_username();
   if (filter_uname.empty() &&
       g_account_manager->CheckUidIsAdmin(operator_uid).has_error()) {
@@ -1463,7 +1628,72 @@ void TaskScheduler::CleanCancelQueueCb_() {
     }
   }
 
-  ProcessFinalTasks_(task_raw_ptr_vec);
+  std::unordered_map<task_id_t, std::vector<task_id_t>> dependencies;
+  std::vector<task_id_t> dep_succ_task_vec;
+  std::vector<task_id_t> dep_fail_task_vec;
+  for (auto& task : task_ptr_vec) {
+    bool ok = g_dependency_manager->updateDependencies(
+        task->TaskId(), crane::grpc::TaskStatus::Cancelled, 0, &dependencies,
+        &dep_succ_task_vec, &dep_fail_task_vec);
+    if (!ok) {
+      CRANE_ERROR("Failed to update dependencies for task #{}.",
+                  task->TaskId());
+    }
+  }
+  std::vector<TaskInCtld*> updated_raw_ptr_vec;
+
+  if (!(dependencies.empty() && dep_succ_task_vec.empty() &&
+        dep_fail_task_vec.empty())) {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    for (auto& task_id : dep_fail_task_vec) {
+      auto it = m_pending_task_map_.find(task_id);
+      if (it != m_pending_task_map_.end()) {
+        auto& task = it->second;
+        task->SetStatus(crane::grpc::Failed);
+        if (task->type != crane::grpc::Batch) {
+          auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+          g_thread_pool->detach_task(
+              [cb = meta.cb_task_cancel, task_id = task_id] { cb(task_id); });
+        }
+        task_raw_ptr_vec.emplace_back(task.get());
+        task_ptr_vec.emplace_back(std::move(task));
+        m_pending_task_map_.erase(it);
+      }
+    }
+    for (auto& task_id : dep_succ_task_vec) {
+      auto it = m_pending_task_map_.find(task_id);
+      if (it != m_pending_task_map_.end()) {
+        it->second->SetDependencyOK();
+        updated_raw_ptr_vec.emplace_back(it->second.get());
+      }
+    }
+    for (auto& [task_id, dep_ids] : dependencies) {
+      auto it = m_pending_task_map_.find(task_id);
+      if (it != m_pending_task_map_.end() && it->second->HasDependency()) {
+        auto& task = it->second;
+        task->DependencyAdd(dep_ids);
+        if (task->NoWaitingDependency()) {
+          if (task->dependencies.depend_all()) {
+            task->SetDependencyOK();
+          } else {
+            task->SetStatus(crane::grpc::Failed);
+            if (task->type != crane::grpc::Batch) {
+              auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+              g_thread_pool->detach_task([cb = meta.cb_task_cancel,
+                                          task_id = task_id] { cb(task_id); });
+            }
+            task_raw_ptr_vec.emplace_back(task.get());
+            task_ptr_vec.emplace_back(std::move(task));
+            m_pending_task_map_.erase(it);
+            continue;
+          }
+        }
+        updated_raw_ptr_vec.emplace_back(task.get());
+      }
+    }
+  }
+
+  ProcessFinalTasks_(task_raw_ptr_vec, updated_raw_ptr_vec);
 }
 
 void TaskScheduler::SubmitTaskTimerCb_() {
@@ -1477,7 +1707,8 @@ void TaskScheduler::SubmitTaskAsyncCb_() {
 
 void TaskScheduler::CleanSubmitQueueCb_() {
   using SubmitQueueElem =
-      std::pair<std::unique_ptr<TaskInCtld>, std::promise<task_id_t>>;
+      std::pair<std::unique_ptr<TaskInCtld>,
+                std::promise<result::result<task_id_t, CraneErr>>>;
 
   // It's ok to use an approximate size.
   size_t approximate_size = m_submit_task_queue_.size_approx();
@@ -1525,10 +1756,13 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     if (!g_embedded_db_client->AppendTasksToPendingAndAdvanceTaskIds(
             accepted_task_ptrs)) {
       CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
-      for (auto& pair : accepted_tasks) pair.second /*promise*/.set_value(0);
+      for (auto& pair : accepted_tasks)
+        pair.second /*promise*/.set_value(
+            result::fail(CraneErr::kEmbeddedDbError));
       break;
     }
 
+    std::vector<task_db_id_t> failed_task_db_ids;
     m_pending_task_map_mtx_.Lock();
 
     for (uint32_t i = 0; i < accepted_tasks.size(); i++) {
@@ -1536,6 +1770,13 @@ void TaskScheduler::CleanSubmitQueueCb_() {
       task_id_t id = accepted_tasks[pos].first->TaskId();
       auto& task_id_promise = accepted_tasks[pos].second;
 
+      auto result = g_dependency_manager->addDependencies(
+          id, accepted_tasks[pos].first->dependencies);
+      if (result.has_error()) {
+        task_id_promise.set_value(result::fail(CraneErr::kDependencyError));
+        failed_task_db_ids.push_back(accepted_tasks[pos].first->TaskDbId());
+        continue;
+      }
       m_pending_task_map_.emplace(id, std::move(accepted_tasks[pos].first));
       task_id_promise.set_value(id);
     }
@@ -1543,6 +1784,8 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     m_pending_map_cached_size_.store(m_pending_task_map_.size(),
                                      std::memory_order_release);
     m_pending_task_map_mtx_.Unlock();
+
+    g_embedded_db_client->PurgeEndedTasks(failed_task_db_ids);
   } while (false);
 
   // Reject tasks beyond queue capacity
@@ -1556,7 +1799,8 @@ void TaskScheduler::CleanSubmitQueueCb_() {
 
     CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
     for (size_t i = 0; i < rejected_actual_size; i++)
-      rejected_tasks[i].second.set_value(0);
+      rejected_tasks[i].second.set_value(
+          result::fail(CraneErr::kPendingQueueLimit));
   } while (false);
 }
 
@@ -1599,10 +1843,12 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   std::unordered_map<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
       craned_cgroups_map;
 
-  LockGuard running_guard(&m_running_task_map_mtx_);
-  LockGuard indexes_guard(&m_task_indexes_mtx_);
+  auto now = absl::Now();
 
-  for (const auto& [task_id, exit_code, new_status, craned_index] : args) {
+  m_running_task_map_mtx_.Lock();
+  m_task_indexes_mtx_.Lock();
+
+  for (auto& [task_id, exit_code, new_status, craned_index] : args) {
     auto iter = m_running_task_map_.find(task_id);
     if (iter == m_running_task_map_.end()) {
       CRANE_WARN(
@@ -1648,7 +1894,15 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     }
 
     task->SetExitCode(exit_code);
-    task->SetEndTime(absl::Now());
+    task->SetEndTime(now);
+
+    if (new_status == crane::grpc::Completed &&
+        task->type != crane::grpc::Batch) {
+      auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+      if (meta.interactive_type == crane::grpc::Calloc) {
+        exit_code = 0;
+      }
+    }
 
     for (CranedId const& craned_id : task->CranedIds()) {
       craned_cgroups_map[craned_id].emplace_back(task_id, task->uid);
@@ -1681,6 +1935,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     m_running_task_map_.erase(iter);
   }
 
+  m_running_task_map_mtx_.Unlock();
+  m_task_indexes_mtx_.Unlock();
+
   absl::BlockingCounter bl(craned_cgroups_map.size());
   for (const auto& [craned_id, cgroups] : craned_cgroups_map) {
     g_thread_pool->detach_task([&bl, &craned_id, &cgroups]() {
@@ -1699,7 +1956,72 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
   }
   bl.Wait();
 
-  ProcessFinalTasks_(task_raw_ptr_vec);
+  std::unordered_map<task_id_t, std::vector<task_id_t>> dependencies;
+  std::vector<task_id_t> dep_succ_task_vec;
+  std::vector<task_id_t> dep_fail_task_vec;
+  for (const auto& [task_id, exit_code, new_status, craned_index] : args) {
+    bool ok = g_dependency_manager->updateDependencies(
+        task_id, new_status, exit_code, &dependencies, &dep_succ_task_vec,
+        &dep_fail_task_vec);
+    if (!ok) {
+      CRANE_ERROR("Failed to update dependencies for task #{}.", task_id);
+    }
+  }
+
+  std::vector<TaskInCtld*> updated_raw_ptr_vec;
+
+  if (!(dependencies.empty() && dep_succ_task_vec.empty() &&
+        dep_fail_task_vec.empty())) {
+    LockGuard pending_guard(&m_pending_task_map_mtx_);
+    for (auto& task_id : dep_fail_task_vec) {
+      auto it = m_pending_task_map_.find(task_id);
+      if (it != m_pending_task_map_.end()) {
+        auto& task = it->second;
+        task->SetStatus(crane::grpc::Failed);
+        if (task->type != crane::grpc::Batch) {
+          auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+          g_thread_pool->detach_task(
+              [cb = meta.cb_task_cancel, task_id = task_id] { cb(task_id); });
+        }
+        task_raw_ptr_vec.emplace_back(task.get());
+        task_ptr_vec.emplace_back(std::move(task));
+        m_pending_task_map_.erase(it);
+      }
+    }
+    for (auto& task_id : dep_succ_task_vec) {
+      auto it = m_pending_task_map_.find(task_id);
+      if (it != m_pending_task_map_.end()) {
+        it->second->SetDependencyOK();
+        updated_raw_ptr_vec.emplace_back(it->second.get());
+      }
+    }
+    for (auto& [task_id, dep_ids] : dependencies) {
+      auto it = m_pending_task_map_.find(task_id);
+      if (it != m_pending_task_map_.end() && it->second->HasDependency()) {
+        auto& task = it->second;
+        task->DependencyAdd(dep_ids);
+        if (task->NoWaitingDependency()) {
+          if (task->dependencies.depend_all()) {
+            task->SetDependencyOK();
+          } else {
+            task->SetStatus(crane::grpc::Failed);
+            if (task->type != crane::grpc::Batch) {
+              auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+              g_thread_pool->detach_task([cb = meta.cb_task_cancel,
+                                          task_id = task_id] { cb(task_id); });
+            }
+            task_raw_ptr_vec.emplace_back(task.get());
+            task_ptr_vec.emplace_back(std::move(task));
+            m_pending_task_map_.erase(it);
+            continue;
+          }
+        }
+        updated_raw_ptr_vec.emplace_back(task.get());
+      }
+    }
+  }
+
+  ProcessFinalTasks_(task_raw_ptr_vec, updated_raw_ptr_vec);
 }
 
 void TaskScheduler::QueryTasksInRam(
@@ -2578,8 +2900,10 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
   }
 }
 
-void TaskScheduler::ProcessFinalTasks_(const std::vector<TaskInCtld*>& tasks) {
-  PersistAndTransferTasksToMongodb_(tasks);
+void TaskScheduler::ProcessFinalTasks_(
+    const std::vector<TaskInCtld*>& tasks,
+    std::vector<TaskInCtld*> const& updated_tasks) {
+  PersistAndTransferTasksToMongodb_(tasks, updated_tasks);
   CallPluginHookForFinalTasks_(tasks);
 }
 
@@ -2597,12 +2921,19 @@ void TaskScheduler::CallPluginHookForFinalTasks_(
 }
 
 void TaskScheduler::PersistAndTransferTasksToMongodb_(
-    std::vector<TaskInCtld*> const& tasks) {
-  if (tasks.empty()) return;
+    std::vector<TaskInCtld*> const& ended_tasks,
+    std::vector<TaskInCtld*> const& updated_tasks) {
+  if (ended_tasks.empty() && updated_tasks.empty()) return;
 
   txn_id_t txn_id;
   g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
-  for (TaskInCtld* task : tasks) {
+  for (TaskInCtld* task : ended_tasks) {
+    if (!g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, task->TaskDbId(),
+                                                       task->RuntimeAttr()))
+      CRANE_ERROR("Failed to call UpdateRuntimeAttrOfTask() for task #{}",
+                  task->TaskId());
+  }
+  for (TaskInCtld* task : updated_tasks) {
     if (!g_embedded_db_client->UpdateRuntimeAttrOfTask(txn_id, task->TaskDbId(),
                                                        task->RuntimeAttr()))
       CRANE_ERROR("Failed to call UpdateRuntimeAttrOfTask() for task #{}",
@@ -2612,14 +2943,14 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
   g_embedded_db_client->CommitVariableDbTransaction(txn_id);
 
   // Now tasks are in MongoDB.
-  if (!g_db_client->InsertJobs(tasks)) {
+  if (!g_db_client->InsertJobs(ended_tasks)) {
     CRANE_ERROR("Failed to call g_db_client->InsertJobs() ");
     return;
   }
 
   // Remove tasks in final queue.
   std::vector<task_db_id_t> db_ids;
-  for (TaskInCtld* task : tasks) db_ids.emplace_back(task->TaskDbId());
+  for (TaskInCtld* task : ended_tasks) db_ids.emplace_back(task->TaskDbId());
 
   if (!g_embedded_db_client->PurgeEndedTasks(db_ids)) {
     CRANE_ERROR(
@@ -2784,6 +3115,10 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
   for (const auto& [task_id, task] : pending_task_map) {
     if (task->Held()) {
       task->pending_reason = "Held";
+      continue;
+    }
+    if (task->HasDependency()) {
+      task->pending_reason = "Dependency";
       continue;
     }
     // Admin may manually specify the priority of a task.

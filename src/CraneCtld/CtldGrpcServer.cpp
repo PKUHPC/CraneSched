@@ -36,15 +36,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
 
   auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
   if (result.has_value()) {
-    task_id_t id = result.value().get();
-    if (id != 0) {
+    auto submit_result = result.value().get();
+    if (submit_result.has_value()) {
       response->set_ok(true);
+      task_id_t id = submit_result.value();
       response->set_task_id(id);
     } else {
       response->set_ok(false);
-      response->set_reason(
-          "System error occurred or "
-          "the number of pending tasks exceeded maximum value.");
+      response->set_reason(std::string(CraneErrStr(submit_result.error())));
     }
   } else {
     response->set_ok(false);
@@ -58,7 +57,9 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTasksRequest *request,
     crane::grpc::SubmitBatchTasksReply *response) {
-  std::vector<result::result<std::future<task_id_t>, std::string>> results;
+  std::vector<result::result<std::future<result::result<task_id_t, CraneErr>>,
+                             std::string>>
+      results;
 
   uint32_t task_count = request->count();
   const auto &task_to_ctld = request->task();
@@ -73,9 +74,14 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
   }
 
   for (auto &res : results) {
-    if (res.has_value())
-      response->mutable_task_id_list()->Add(res.value().get());
-    else
+    if (res.has_value()) {
+      auto submit_res = res.value().get();
+      if (submit_res.has_value())
+        response->mutable_task_id_list()->Add(submit_res.value());
+      else
+        response->mutable_reason_list()->Add(
+            std::string(CraneErrStr(submit_res.error())));
+    } else
       response->mutable_reason_list()->Add(res.error());
   }
 
@@ -1086,8 +1092,13 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
               m_ctld_server_->SubmitTaskToScheduler(std::move(task));
           result::result<task_id_t, std::string> result;
           if (submit_result.has_value()) {
-            result = result::result<task_id_t, std::string>{
-                submit_result.value().get()};
+            auto submit_final_result = submit_result.value().get();
+            if (submit_final_result.has_value()) {
+              result = result::result<task_id_t, std::string>{
+                  submit_final_result.value()};
+            } else {
+              result = result::fail(CraneErrStr(submit_final_result.error()));
+            }
           } else {
             result = result::fail(submit_result.error());
           }
@@ -1210,7 +1221,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   signal(SIGINT, &CtldServer::signal_handler_func);
 }
 
-result::result<std::future<task_id_t>, std::string>
+result::result<std::future<result::result<task_id_t, CraneErr>>, std::string>
 CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   CraneErr err;
 
@@ -1260,7 +1271,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
 
   if (err == CraneErr::kOk) {
     task->SetSubmitTime(absl::Now());
-    std::future<task_id_t> future =
+    std::future<result::result<task_id_t, CraneErr>> future =
         g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
   }

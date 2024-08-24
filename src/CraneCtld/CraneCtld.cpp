@@ -31,6 +31,7 @@
 #include "CtldGrpcServer.h"
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
+#include "DependencyManager.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
 #include "crane/Logger.h"
@@ -626,6 +627,7 @@ void DestroyCtldGlobalVariables() {
 
   g_task_scheduler.reset();
   g_craned_keeper.reset();
+  g_dependency_manager.reset();
 
   g_plugin_client.reset();
 
@@ -754,6 +756,8 @@ void InitializeCtldGlobalVariables() {
       break;
     }
   }
+
+  g_dependency_manager = std::make_unique<DependencyManager>();
 
   g_task_scheduler = std::make_unique<TaskScheduler>();
   ok = g_task_scheduler->Init();
