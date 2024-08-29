@@ -50,6 +50,7 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
   // Avoid duplicate insertion
   const User* find_user = GetUserInfoNoLock_(name);
   User res_user;
+  // user 已存在
   if (find_user && !find_user->deleted) {
     if (find_user->account_to_attrs_map.contains(object_account)) {
       return Result{false,
@@ -73,7 +74,7 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
   if (!find_account) {
     return Result{false, fmt::format("unknown account '{}'", object_account)};
   }
-
+  // 比较父节点partition
   const std::list<std::string>& parent_allowed_partition =
       find_account->allowed_partition;
   if (!res_user.account_to_attrs_map[object_account]
@@ -105,6 +106,7 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
   }
   res_user.account_to_attrs_map[object_account].blocked = false;
 
+  // 插入数据库
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         // Update the user's account
@@ -544,23 +546,43 @@ AccountManager::QosMapMutexSharedPtr AccountManager::GetAllQosInfo() {
 }
 
 AccountManager::Result AccountManager::ModifyUser(
-    const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
-    const std::string& name, const std::string& partition, std::string account,
-    const std::string& item, const std::string& value, bool force) {
+    const crane::grpc::ModifyEntityRequest_OperatorType& operatorType, const std::string& name,
+    const std::string& partition, std::string account, const std::string& item,
+    const std::string& value, bool force) {
+  // 加w user 锁
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
+
+  // auto p = GetExistedUserInfo(name);
+
+  const User* p = GetExistedUserInfoNoLock_(name);
+
+  if (!p) {
+    return Result{false, fmt::format("Unknown user '{}'", p->name)};
+  }
+
   if (account.empty()) {
-    auto p = GetExistedUserInfo(name);
-    if (!p) {
-      return Result{false, fmt::format("Unknown user '{}'", name)};
-    }
     account = p->default_account;
   }
+  // admin_level 不需要判断
+  //  if (!p->account_to_attrs_map.contains(account)) {
+  //   return Result{false,
+  //                 fmt::format("User '{}' doesn't belong to account '{}' ",
+  //                             p->name, account)};
+  // }
 
   switch (operatorType) {
   case crane::grpc::ModifyEntityRequest_OperatorType_Add:
     if (item == "allowed_partition") {
-      return AddUserAllowedPartition_(name, account, value);
+      util::read_lock_guard account_guard(m_rw_account_mutex_);
+      auto result = CheckAddUserAllowedPartition(p, account, value);
+      return !result.ok ? result
+                        : AddUserAllowedPartition_(name, account, value);
     } else if (item == "allowed_qos_list") {
-      return AddUserAllowedQos_(name, value, account, partition);
+      util::read_lock_guard account_guard(m_rw_account_mutex_);
+      util::read_lock_guard qos_guard(m_rw_qos_mutex_);
+      auto result = CheckAddUserAllowedQos(p, account, partition, value);
+      return !result.ok ? result
+                        : AddUserAllowedQos_(name, value, account, partition);
     } else {
       return Result{false, fmt::format("Field '{}' can't be added", item)};
     }
@@ -824,6 +846,7 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   return {};
 }
 
+// 找到对应用户 有权限的所有account
 AccountManager::Result AccountManager::FindUserLevelAccountsOfUid(
     uint32_t uid, User::AdminLevel* level, std::list<std::string>* accounts) {
   PasswordEntry entry(uid);
@@ -866,6 +889,165 @@ result::result<void, std::string> AccountManager::CheckUidIsAdmin(
       fmt::format("User {} has insufficient privilege.", entry.Username()));
 }
 
+// AccountManager::Result AccountManager::CheckUserValid(
+//     const User* user, const std::string& account) {
+//   if (!user->account_to_attrs_map.contains(account)) {
+//     return Result{false,
+//                   fmt::format("User '{}' doesn't belong to account '{}' ",
+//                               user->name, account)};
+//   }
+//   return Result{true};
+// }
+
+AccountManager::Result AccountManager::CheckAddUserAllowedPartition(
+    const User* user, const std::string& account,
+    const std::string& partition) {
+  const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
+  
+  // if (!IsUserValid(user, account)) {
+  if (!user->account_to_attrs_map.contains(account)) {
+    return Result{false,
+                  fmt::format("User '{}' doesn't belong to account '{}' ",
+                              user->name, account)};
+  }
+
+  // if (!IsPartitoinExisted(partition)) {
+  if (!g_config.Partitions.contains(partition)) {
+    return Result{false, fmt::format("Partition '{}' not existed", partition)};
+  }
+
+  if (!IsPartitionAllowedInAccount(account_ptr, partition)) {
+    return Result{false, fmt::format("User '{}''s account '{}' is not allowed "
+                                     "to use the partition '{}'",
+                                     user->name, account, partition)};
+  }
+
+  if (!IsPartitoinExistedInUser(user, account, partition)) {
+    return Result{
+        false, fmt::format("The partition '{}' is already in "
+                           "user '{}''s allowed partition under account '{}'",
+                           partition, user->name, account)};
+  }
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::CheckAddUserAllowedQos(
+    const User* user, const std::string& account, const std::string& partition,
+    const std::string& qos) {
+  const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
+  if (!IsQosExisted(qos)) {
+    return Result{false, fmt::format("Qos '{}' not existed", qos)};
+  }
+
+  // if (!IsQosAllowedInAccount(account_ptr, qos)) {
+  if (std::find(account_ptr->allowed_qos_list.begin(),
+                account_ptr->allowed_qos_list.end(),
+                qos) == account_ptr->allowed_qos_list.end()) {
+    return Result{
+        false,
+        fmt::format("Sorry, account '{}' is not allowed to use the qos '{}'",
+                    account, qos)};
+  }
+
+  std::unordered_map<std::string,
+                     std::pair<std::string, std::list<std::string>>>
+      cache_allowed_partition_qos_map;
+  if (partition.empty()) {
+    cache_allowed_partition_qos_map =
+        user->account_to_attrs_map.at(account).allowed_partition_qos_map;
+  } else {
+    auto iter =
+        user->account_to_attrs_map.at(account).allowed_partition_qos_map.find(
+            partition);
+    if (iter == user->account_to_attrs_map.at(account)
+                    .allowed_partition_qos_map.end()) {
+      return Result{
+          false,
+          fmt::format("Partition '{}' is not in user '{}''s allowed partition",
+                      partition, user->name)};
+    }
+    cache_allowed_partition_qos_map.insert({iter->first, iter->second});
+  }
+
+  if (!IsQosExistedInUser(cache_allowed_partition_qos_map, qos)) {
+    return Result{false, fmt::format("Qos '{}' is already in user '{}''s "
+                                     "allowed qos of partition '{}'",
+                                     qos, user->name, partition)};
+  }
+
+  return Result{true};
+}
+
+bool AccountManager::IsUserValid(const User* user, const std::string& account) {
+  if (!user->account_to_attrs_map.contains(account)) {
+    return false;
+  }
+  return true;
+}
+
+bool AccountManager::IsPartitoinExisted(const std::string& partition) {
+  if (!g_config.Partitions.contains(partition)) {  // 判断partition是否存在
+    return false;
+  }
+  return true;
+}
+
+bool AccountManager::IsQosExisted(const std::string& qos) {
+  // check if qos existed
+  if (!GetExistedQosInfoNoLock_(qos)) {
+    return false;
+  }
+  return true;
+}
+
+bool AccountManager::IsPartitionAllowedInAccount(const Account* account_ptr,
+                                                 const std::string& partition) {
+  // check if account has access to new partition
+  if (std::find(account_ptr->allowed_partition.begin(),
+                account_ptr->allowed_partition.end(),
+                partition) == account_ptr->allowed_partition.end()) {
+    return false;
+  }
+  return true;
+}
+
+bool IsQosAllowedInAccount(const Account* account_ptr, const std::string& qos) {
+  // check if account has access to new qos
+  if (std::find(account_ptr->allowed_qos_list.begin(),
+                account_ptr->allowed_qos_list.end(),
+                qos) == account_ptr->allowed_qos_list.end()) {
+    return false;
+  }
+  return true;
+}
+
+bool AccountManager::IsPartitoinExistedInUser(const User* user,
+                                              const std::string& account,
+                                              const std::string& partition) {
+  if (user->account_to_attrs_map.at(account).allowed_partition_qos_map.contains(
+          partition)) {
+    return false;
+  }
+
+  return true;
+}
+
+bool AccountManager::IsQosExistedInUser(
+    const std::unordered_map<std::string,
+                             std::pair<std::string, std::list<std::string>>>&
+        cache_allowed_partition_qos_map,
+    const std::string& qos) {
+  // 查找qos是否已经在user中
+  for (auto& [par, pair] : cache_allowed_partition_qos_map) {
+    const std::list<std::string>& list = pair.second;
+    if (std::find(list.begin(), list.end(), qos) != list.end()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// 判断 user 对该account是否有操作权限
 AccountManager::Result AccountManager::HasPermissionToAccount(
     uint32_t uid, const std::string& account, bool read_only_priv,
     User::AdminLevel* level_of_uid) {
@@ -916,6 +1098,7 @@ AccountManager::Result AccountManager::HasPermissionToAccount(
   return Result{true};
 }
 
+// 判断source_user 对 target_user 是否有修改权限
 AccountManager::Result AccountManager::HasPermissionToUser(
     uint32_t uid, const std::string& target_user, bool read_only_priv,
     User::AdminLevel* level_of_uid) {
@@ -1062,43 +1245,10 @@ bool AccountManager::IncQosReferenceCountInDb_(const std::string& name,
 AccountManager::Result AccountManager::AddUserAllowedPartition_(
     const std::string& name, const std::string& account,
     const std::string& partition) {
-  util::write_lock_guard user_guard(m_rw_user_mutex_);
-  util::read_lock_guard account_guard(m_rw_account_mutex_);
-
   const User* p = GetExistedUserInfoNoLock_(name);
-  if (!p) {
-    return Result{false, fmt::format("Unknown user '{}'", name)};
-  }
   User user(*p);
 
-  if (!p->account_to_attrs_map.contains(account)) {
-    return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
-                                     name, account)};
-  }
-
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
-
-  // check if new partition existed
-  if (!g_config.Partitions.contains(partition)) {
-    return Result{false, fmt::format("Partition '{}' not existed", partition)};
-  }
-  // check if account has access to new partition
-  if (std::find(account_ptr->allowed_partition.begin(),
-                account_ptr->allowed_partition.end(),
-                partition) == account_ptr->allowed_partition.end()) {
-    return Result{false, fmt::format("User '{}''s account '{}' is not allowed "
-                                     "to use the partition '{}'",
-                                     name, user.default_account, partition)};
-  }
-
-  // check if add item already the user's allowed partition
-  if (user.account_to_attrs_map[account].allowed_partition_qos_map.contains(
-          partition)) {
-    return Result{
-        false, fmt::format("The partition '{}' is already in "
-                           "user '{}''s allowed partition under account '{}'",
-                           partition, name, account)};
-  }
 
   // Update the map
   user.account_to_attrs_map[account].allowed_partition_qos_map[partition] =
@@ -1152,6 +1302,7 @@ AccountManager::Result AccountManager::AddUserAllowedQos_(
   }
 
   // check if add item already the user's allowed qos
+  // 向user中的所有partition添加qos
   if (partition.empty()) {
     // add to all partition
     int change_num = 0;
@@ -1790,10 +1941,13 @@ AccountManager::Result AccountManager::SetAccountAllowedPartition_(
     }
   }
 
+  // 该account应该删除的partition，而在子节点含有
   std::list<std::string> deleted_partition;
   for (const auto& par : account->allowed_partition) {
     if (std::find(partition_vec.begin(), partition_vec.end(), par) ==
         partition_vec.end()) {
+      // IsAllowedPartitionOfAnyNodeNoLock_
+      // 遍历整个子节点判断是否有该partition
       if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account, par)) {
         return Result{
             false,
@@ -1833,6 +1987,7 @@ AccountManager::Result AccountManager::SetAccountAllowedPartition_(
   }
 
   for (const auto& par : deleted_partition) {
+    // 递归删除 partition
     DeleteAccountAllowedPartitionFromMapNoLock_(account->name, par);
   }
   m_account_map_[name]->allowed_partition.assign(partition_vec.begin(),

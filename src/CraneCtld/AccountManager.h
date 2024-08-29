@@ -105,6 +105,40 @@ class AccountManager {
 
   result::result<void, std::string> CheckUidIsAdmin(uint32_t uid);
 
+  Result CheckAddUserAllowedPartition(const User* user,
+                                      const std::string& account,
+                                      const std::string& partition);
+  Result CheckAddUserAllowedQos(const User* user, const std::string& account,
+                                const std::string& partition,
+                                const std::string& qos);
+  Result CheckSetUserDefaultQos(const User* user, const std::string& account,
+                                const std::string& qos);
+  Result CheckSetUserAllowedPartition(const User* user,
+                                      const std::string& account,
+                                      const std::string& partition);
+  Result CheckSetUserAllowedQos(const User* user, const std::string& account,
+                                const std::string& qos);
+  Result CheckDeleteUserAllowedPartition(const User* user,
+                                         const std::string& account,
+                                         const std::string& partition);
+  Result CheckDeleteUserAllowedQos(const User* user, const std::string& account,
+                                   const std::string& qos);
+
+  bool IsUserValid(const User* user, const std::string& account);
+  bool IsPartitoinExisted(const std::string& partition);
+  bool IsQosExisted(const std::string& qos);
+  bool IsPartitionAllowedInAccount(const Account* account_ptr,
+                                   const std::string& partition);
+  bool IsQosAllowedInAccount(const Account* account_ptr,
+                             const std::string& qos);
+  bool IsPartitoinExistedInUser(const User* user, const std::string& account,
+                                const std::string& partition);
+  bool IsQosExistedInUser(
+      const std::unordered_map<std::string,
+                               std::pair<std::string, std::list<std::string>>>&
+          cache_allowed_partition_qos_map,
+      const std::string& qos);
+
   /**
    * @param[in] uid is system uid of user.
    * @param[in] account is the target that uid wants to query or modify.
@@ -159,6 +193,7 @@ class AccountManager {
                             const std::string& partition);
 
   Result SetUserAdminLevel_(const std::string& name, const std::string& level);
+
   Result SetUserDefaultQos_(const std::string& name, const std::string& qos,
                             const std::string& account,
                             const std::string& partition);
@@ -183,7 +218,9 @@ class AccountManager {
 
   Result SetAccountDescription_(const std::string& name,
                                 const std::string& description);
+
   Result SetAccountDefaultQos_(const std::string& name, const std::string& qos);
+
   Result SetAccountAllowedPartition_(const std::string& name,
                                      const std::string& partitions, bool force);
   Result SetAccountAllowedQos_(const std::string& name,
@@ -211,6 +248,7 @@ class AccountManager {
   bool DeleteUserAllowedQosOfAllPartitionFromDBNoLock_(
       const std::string& name, const std::string& account,
       const std::string& qos);
+
   bool DeleteUserAllowedQosOfAllPartitionFromMapNoLock_(
       const std::string& name, const std::string& account,
       const std::string& qos);
