@@ -185,22 +185,26 @@ class MinLoadFirst : public INodeSelectionAlgo {
 
   struct NodeSelectionInfo {
     // Craned_ids are sorted by cost.
-    std::set<std::pair<uint32_t, CranedId>> cost_node_id_set;
-    std::unordered_map<CranedId, uint32_t> node_cost_map;
+    std::set<std::pair<uint64_t, CranedId>> cost_node_id_set;
+    std::unordered_map<CranedId, uint64_t> node_cost_map;
     std::unordered_map<CranedId, TimeDeltaResMap> node_time_delta_res_map;
+    std::unordered_map<CranedId, ResourceInNode> node_res_total_map;
 
-    // Cost is now the number of tasks running or pending on the node.
-    // TODO: Better the cost function base on the time-resource map.
-    void setCost(const CranedId& craned_id, uint32_t cost) {
+    void setCost(const CranedId& craned_id, uint64_t cost) {
       cost_node_id_set.erase({node_cost_map[craned_id], craned_id});
       node_cost_map[craned_id] = cost;
       cost_node_id_set.emplace(cost, craned_id);
     }
     void updateCost(const CranedId& craned_id, const absl::Time& start_time,
-                    const absl::Time& end_time, const ResourceInNode& resources) {
+                    const absl::Time& end_time,
+                    const ResourceInNode& resources) {
       auto& cost = node_cost_map[craned_id];
       cost_node_id_set.erase({cost, craned_id});
-      cost += 1;
+      auto& total_res = node_res_total_map[craned_id];
+      double cpu_rate =
+          static_cast<double>(resources.allocatable_res.cpu_count) /
+          static_cast<double>(total_res.allocatable_res.cpu_count);
+      cost += round((end_time - start_time) / absl::Seconds(1) * cpu_rate);
       cost_node_id_set.emplace(cost, craned_id);
     }
   };
