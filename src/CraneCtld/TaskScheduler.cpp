@@ -1911,16 +1911,19 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     //  second task end, ...] in this node.
     auto& time_delta_res_map =
         node_selection_info_ref.node_time_delta_res_map[craned_id];
+    node_selection_info_ref.node_res_total_map[craned_id] =
+        craned_meta->res_total;
+    node_selection_info_ref.setCost(craned_id, 0);
 
     time_delta_res_map[now] = craned_meta->res_avail;
 
     for (auto& [end_time, task_id] : end_time_task_id_vec) {
       time_delta_res_map[end_time] +=
           running_tasks.at(task_id)->Resources().at(craned_id);
+      node_selection_info_ref.updateCost(
+          craned_id, now, end_time,
+          running_tasks.at(task_id)->Resources().at(craned_id));
     }
-
-    node_selection_info_ref.setCost(
-        craned_id, craned_meta->running_task_resource_map.size());
 
     if constexpr (kAlgoTraceOutput) {
       std::string str;
@@ -2042,6 +2045,15 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       satisfied_count += tmp->count;
       if (tmp->genNext()) pq.emplace(tmp);
     }
+    if constexpr (kAlgoTraceOutput) {
+      CRANE_TRACE("At time now+{}s, {} nodes are satisfied.",
+                  (time - now) / absl::Seconds(1), satisfied_count);
+      for (auto& tracker : trackers) {
+        if (tracker.satisfied) {
+          CRANE_TRACE("Craned {} is satisfied.", tracker.craned_id);
+        }
+      }
+    }
     if (satisfied_count < task->node_num) {
       last_time = absl::InfinitePast();
     } else {
@@ -2057,6 +2069,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
             if (craned_ids->size() >= task->node_num) break;
           }
         }
+        CRANE_ASSERT(craned_ids->size() == task->node_num);
         return true;
       }
     }
