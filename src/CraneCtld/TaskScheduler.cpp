@@ -1240,6 +1240,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
+      it.second->SetStatus(crane::grpc::Cancelled);
+      it.second->SetEndTime(absl::Now());
       m_cancel_task_queue_.enqueue({task_id, {}});
       m_cancel_task_async_handle_->send();
       reply.add_cancelled_tasks(task_id);
@@ -1439,7 +1441,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
     for (task_id_t task_id : pending_tasks_vec) {
       auto it = m_pending_task_map_.find(task_id);
       if (it == m_pending_task_map_.end()) {
-        CRANE_TRACE(
+        CRANE_ERROR(
             "Pending task #{} not found when doing actual cancelling. "
             "Skipping it..",
             task_id);
@@ -1447,9 +1449,6 @@ void TaskScheduler::CleanCancelQueueCb_() {
       }
 
       TaskInCtld* task = it->second.get();
-      task->SetStatus(crane::grpc::Cancelled);
-      task->SetEndTime(absl::Now());
-
       if (task->type == crane::grpc::Interactive) {
         auto& meta = std::get<InteractiveMetaInTask>(task->meta);
         g_thread_pool->detach_task(
@@ -2782,6 +2781,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
 
   std::vector<std::pair<TaskInCtld*, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
+    if (task->Status() != crane::grpc::Pending) continue;
     if (task->Held()) {
       task->pending_reason = "Held";
       continue;
