@@ -286,7 +286,23 @@ message ModifyEntityRequest {
     Delete = 2;
   }
 
-  string item = 2;   //modify item field
+  enum ModifyField {
+    // user and account
+    Partition = 0;
+    Qos = 1;
+    DefaultQos = 2;
+    // account and qos
+    Description = 3; 
+    // user
+    AdminLevel = 4; 
+    // qos
+    Priority = 5;
+    MaxJobsPerUser = 6;
+    MaxCpusPerUser = 7;
+    MaxTimeLimitPerTask = 8;
+  }
+
+  ModifyField modify_field = 2;   //modify item field
   string value = 3;   //new value
   string name = 4;
   string partition = 5;
