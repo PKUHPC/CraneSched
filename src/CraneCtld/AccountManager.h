@@ -111,7 +111,9 @@ class AccountManager {
   Result CheckAddUserAllowedQos(const User* user, const Account* account_ptr,
                                 const std::string& partition,
                                 const std::string& qos);
+  Result CheckSetUserAdminLevel(const User* user, const std::string& level);
   Result CheckSetUserDefaultQos(const User* user, const std::string& account,
+                                const std::string& partition,
                                 const std::string& qos);
   Result CheckSetUserAllowedPartition(const User* user,
                                       const std::string& account,
