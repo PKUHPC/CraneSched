@@ -106,6 +106,25 @@ class AccountManager {
 
   result::result<void, std::string> CheckUidIsAdmin(uint32_t uid);
 
+  Result CheckAddUserAllowedPartition(const User* user,
+                                      const Account* account_ptr,
+                                      const std::string& partition);
+  Result CheckAddUserAllowedQos(const User* user, const Account* account_ptr,
+                                const std::string& partition,
+                                const std::string& qos);
+  Result CheckSetUserDefaultQos(const User* user, const std::string& account,
+                                const std::string& qos);
+  Result CheckSetUserAllowedPartition(const User* user,
+                                      const std::string& account,
+                                      const std::string& partition);
+  Result CheckSetUserAllowedQos(const User* user, const std::string& account,
+                                const std::string& qos);
+  Result CheckDeleteUserAllowedPartition(const User* user,
+                                         const std::string& account,
+                                         const std::string& partition);
+  Result CheckDeleteUserAllowedQos(const User* user, const std::string& account,
+                                   const std::string& qos);
+
   /**
    * @param[in] uid is system uid of user.
    * @param[in] account is the target that uid wants to query or modify.
@@ -158,12 +177,12 @@ class AccountManager {
 
   Result AddQos_(const Qos* find_qos, const Qos& new_qos);
 
-  Result AddUserAllowedPartition_(const std::string& name,
-                                  const std::string& account,
+  Result AddUserAllowedPartition_(const User* user_ptr,
+                                  const Account* account_ptr,
                                   const std::string& partition);
-  Result AddUserAllowedQos_(const std::string& name, const std::string& qos,
-                            const std::string& account,
-                            const std::string& partition);
+  Result AddUserAllowedQos_(const User* user_ptr,
+                                  const Account* account_ptr,
+                                  const std::string& partition, const std::string& qos);
 
   Result SetUserAdminLevel_(const std::string& name, const std::string& level);
   Result SetUserDefaultQos_(const std::string& name, const std::string& qos,
