@@ -408,10 +408,10 @@ AccountManager::QosMapMutexSharedPtr AccountManager::GetAllQosInfo() {
   }
 }
 
-AccountManager::Result AccountManager::ModifyUser(
+AccountManager::Result AccountManager::ModifyUser( 
     const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
     const std::string& name, const std::string& partition, std::string account,
-    const std::string& item, const std::string& value, bool force) {
+    const crane::grpc::ModifyEntityRequest_ModifyField& modifyField, const std::string& value, bool force) {
   
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
@@ -427,95 +427,139 @@ AccountManager::Result AccountManager::ModifyUser(
 
   switch (operatorType) {
   case crane::grpc::ModifyEntityRequest_OperatorType_Add:
-    if (item == "allowed_partition") {
-      util::write_lock_guard account_guard(m_rw_account_mutex_);
-      const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
+    switch (modifyField) {
+      case crane::grpc::ModifyEntityRequest_ModifyField_Partition:
+        {
+          util::write_lock_guard account_guard(m_rw_account_mutex_);
+          const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
 
-      auto result = CheckAddUserAllowedPartition(p, account_ptr, value);
-      return !result.ok ? result
-                        : AddUserAllowedPartition_(p, account_ptr, value);
-    } else if (item == "allowed_qos_list") {
-      util::write_lock_guard account_guard(m_rw_account_mutex_);
-      util::write_lock_guard qos_guard(m_rw_qos_mutex_);
-      const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
+          auto result = CheckAddUserAllowedPartition(p, account_ptr, value);
+          return !result.ok ? result
+                          : AddUserAllowedPartition_(p, account_ptr, value);
+        }
+      
+      case crane::grpc::ModifyEntityRequest_ModifyField_Qos:
+        {
+          util::write_lock_guard account_guard(m_rw_account_mutex_);
+          util::write_lock_guard qos_guard(m_rw_qos_mutex_);
+          const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
 
-      auto result = CheckAddUserAllowedQos(p, account_ptr, partition, value);
-      return !result.ok ? result : AddUserAllowedQos_(p, account_ptr, partition, value);
-    } else {
-      return Result{false, fmt::format("Field '{}' can't be added", item)};
+          auto result = CheckAddUserAllowedQos(p, account_ptr, partition, value);
+          return !result.ok ? result : AddUserAllowedQos_(p, account_ptr, partition, value);
+        }
+      default:
+        break;
     }
 
   case crane::grpc::ModifyEntityRequest_OperatorType_Overwrite:
-    if (item == "admin_level") {
-      return SetUserAdminLevel_(name, value);
-    } else if (item == "default_qos") {
-      return SetUserDefaultQos_(name, value, account, partition);
-    } else if (item == "allowed_partition") {
-      return SetUserAllowedPartition_(name, account, value);
-    } else if (item == "allowed_qos_list") {
-      return SetUserAllowedQos_(name, account, partition, value, force);
-    } else {
-      return Result{false, fmt::format("Field '{}' can't be set", item)};
+    switch(modifyField) {
+      case crane::grpc::ModifyEntityRequest_ModifyField_AdminLevel:
+        return SetUserAdminLevel_(name, value);
+
+      case crane::grpc::ModifyEntityRequest_ModifyField_DefaultQos:
+        return SetUserDefaultQos_(name, value, account, partition);
+
+      case crane::grpc::ModifyEntityRequest_ModifyField_Partition:
+        return SetUserAllowedPartition_(name, account, value);
+
+      case crane::grpc::ModifyEntityRequest_ModifyField_Qos:
+        return SetUserAllowedQos_(name, account, partition, value, force);
+      default:
+        break;
     }
 
   case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
-    if (item == "allowed_partition") {
-      return DeleteUserAllowedPartition_(name, account, value);
-    } else if (item == "allowed_qos_list") {
-      return DeleteUserAllowedQos_(name, value, account, partition, force);
-    } else {
-      return Result{false, fmt::format("Field '{}' can't be deleted", item)};
+    switch(modifyField) {
+      case crane::grpc::ModifyEntityRequest_ModifyField_Partition:
+        return DeleteUserAllowedPartition_(name, account, value);
+
+      case crane::grpc::ModifyEntityRequest_ModifyField_Qos:
+        return DeleteUserAllowedQos_(name, value, account, partition, force);
+      default:
+        break;
     }
 
   default:
-    return Result{false, fmt::format("Unknown field '{}'", item)};
+    break;
   }
+
+  return Result{true};
 }
 
 AccountManager::Result AccountManager::ModifyAccount(
     const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
-    const std::string& name, const std::string& item, const std::string& value,
+    const std::string& name, const crane::grpc::ModifyEntityRequest_ModifyField& modifyField, const std::string& value,
     bool force) {
+
   switch (operatorType) {
   case crane::grpc::ModifyEntityRequest_OperatorType_Add:
-    if (item == "allowed_partition") {
-      return AddAccountAllowedPartition_(name, value);
-    } else if (item == "allowed_qos_list") {
-      return AddAccountAllowedQos_(name, value);
-    } else {
-      return Result{false, fmt::format("Field '{}' can't be added", item)};
+    switch(modifyField) {
+      case crane::grpc::ModifyEntityRequest_ModifyField_Partition:
+        return AddAccountAllowedPartition_(name, value);
+      case crane::grpc::ModifyEntityRequest_ModifyField_Qos:
+        return AddAccountAllowedQos_(name, value);
+      default:
+        break;
     }
 
   case crane::grpc::ModifyEntityRequest_OperatorType_Overwrite:
-    if (item == "description") {
-      return SetAccountDescription_(name, value);
-    } else if (item == "allowed_partition") {
-      return SetAccountAllowedPartition_(name, value, force);
-    } else if (item == "allowed_qos_list") {
-      return SetAccountAllowedQos_(name, value, force);
-    } else if (item == "default_qos") {
-      return SetAccountDefaultQos_(name, value);
-    } else {
-      return Result{false, fmt::format("Field '{}' can't be set", item)};
+    switch(modifyField) {
+      case crane::grpc::ModifyEntityRequest_ModifyField_Description:
+        return SetAccountDescription_(name, value);
+      case crane::grpc::ModifyEntityRequest_ModifyField_Partition:
+        return SetAccountAllowedPartition_(name, value, force);
+      case crane::grpc::ModifyEntityRequest_ModifyField_Qos:
+        return SetAccountAllowedQos_(name, value, force);
+      case crane::grpc::ModifyEntityRequest_ModifyField_DefaultQos:
+        return SetAccountDefaultQos_(name, value);
+      default:
+        break;
     }
 
   case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
-    if (item == "allowed_partition") {
-      return DeleteAccountAllowedPartition_(name, value, force);
-    } else if (item == "allowed_qos_list") {
-      return DeleteAccountAllowedQos_(name, value, force);
-    } else {
-      return Result{false, fmt::format("Field '{}' can't be deleted", item)};
+    switch(modifyField) {
+      case crane::grpc::ModifyEntityRequest_ModifyField_Partition:
+        return DeleteAccountAllowedPartition_(name, value, force);
+      case crane::grpc::ModifyEntityRequest_ModifyField_Qos:
+        return DeleteAccountAllowedQos_(name, value, force);
+      default:
+        break;
     }
 
   default:
-    return Result{true};
+    break;
   }
+
+  return Result{true};
 }
 
 AccountManager::Result AccountManager::ModifyQos(const std::string& name,
-                                                 const std::string& item,
+                                                 const crane::grpc::ModifyEntityRequest_ModifyField& modifyField,
                                                  const std::string& value) {
+  
+  
+  std::string item = "";
+  switch(modifyField) {
+    case crane::grpc::ModifyEntityRequest_ModifyField_Description:
+      item = "description";
+      break;
+    case crane::grpc::ModifyEntityRequest_ModifyField_Priority:
+      item = "priority";
+      break;
+    case crane::grpc::ModifyEntityRequest_ModifyField_MaxJobsPerUser:
+      item = "max-jobs-per-user";
+      break;
+    case crane::grpc::ModifyEntityRequest_ModifyField_MaxCpusPerUser:
+      item = "max-cpus-per-user";
+      break;
+    case crane::grpc::ModifyEntityRequest_ModifyField_MaxTimeLimitPerTask:
+      item = "max-time-limit-per-task";
+      break;
+    default:
+      return Result{false, fmt::format("Field '{}' can't be modify", item)};
+  }
+  
+  
   bool value_is_number{false};
   int64_t value_number;
   if (item != Qos::FieldStringOfDescription()) {

@@ -438,7 +438,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
       return grpc::Status::OK;
     }
     modify_res = g_account_manager->ModifyAccount(
-        request->type(), request->name(), request->item(), request->value(),
+        request->type(), request->name(), request->modify_field(), request->value(),
         request->force());
     break;
   case crane::grpc::User: {
@@ -461,7 +461,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
           "greater permissions as yourself");
       return grpc::Status::OK;
     }
-    if (request->item() == "admin_level") {
+    if (request->modify_field() == crane::grpc::ModifyEntityRequest_ModifyField_AdminLevel) {
       User::AdminLevel new_level;
       if (request->value() == "none") {
         new_level = User::None;
@@ -487,7 +487,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
 
     modify_res = g_account_manager->ModifyUser(
         request->type(), request->name(), request->partition(),
-        request->account(), request->item(), request->value(),
+        request->account(), request->modify_field(), request->value(),
         request->force());
     break;
 
@@ -500,7 +500,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
       return grpc::Status::OK;
     }
 
-    modify_res = g_account_manager->ModifyQos(request->name(), request->item(),
+    modify_res = g_account_manager->ModifyQos(request->name(), request->modify_field(),
                                               request->value());
   } break;
 
