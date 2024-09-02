@@ -152,6 +152,12 @@ class AccountManager {
 
   bool IncQosReferenceCountInDb_(const std::string& name, int num);
 
+  Result AddUser_(const User* find_user, const Account* find_account, User&& new_user);
+
+  Result AddAccount_(const Account* find_account, const Account* find_parent, Account&& new_account);
+
+  Result AddQos_(const Qos* find_qos, const Qos& new_qos);
+
   Result AddUserAllowedPartition_(const std::string& name,
                                   const std::string& account,
                                   const std::string& partition);
