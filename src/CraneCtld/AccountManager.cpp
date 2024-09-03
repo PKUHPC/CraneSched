@@ -500,10 +500,18 @@ AccountManager::Result AccountManager::ModifyUser(
   case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
     switch (modifyField) {
     case crane::grpc::ModifyEntityRequest_ModifyField_Partition:
-      return DeleteUserAllowedPartition_(name, account, value);
+    {
+      auto result = CheckDeleteUserAllowedPartition(*p, account, value);
+      return !result.ok ? result : DeleteUserAllowedPartition_(*p, account, value);
+    }
+      
 
     case crane::grpc::ModifyEntityRequest_ModifyField_Qos:
-      return DeleteUserAllowedQos_(name, value, account, partition, force);
+    {
+      auto result = CheckDeleteUserAllowedQos(*p, account, partition, value, force);
+      return !result.ok ? result : DeleteUserAllowedQos_(*p, value, account, partition, force);
+    }
+      
     default:
       break;
     }
@@ -1093,6 +1101,94 @@ AccountManager::Result AccountManager::CheckSetUserAllowedQos(const User& user, 
   return Result{true};
 }
 
+AccountManager::Result AccountManager::CheckDeleteUserAllowedPartition(const User& user,
+                                         const std::string& account,
+                                         const std::string& partition) {
+  const std::string name = user.name;
+
+  if (!user.account_to_attrs_map.contains(account)) {
+    return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
+                                     name, account)};
+  }
+
+  if (!user.account_to_attrs_map.at(account)
+           .allowed_partition_qos_map.contains(partition)) {
+    return Result{
+        false,
+        fmt::format(
+            "Partition '{}' is not in user '{}''s allowed partition list",
+            partition, name)};
+  }
+
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::CheckDeleteUserAllowedQos(const User& user, const std::string& account, const std::string& partition,
+                                   const std::string& qos, bool force) {
+  
+  const std::string name = user.name;
+  
+  if (!user.account_to_attrs_map.contains(account)) {
+    return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
+                                     name, account)};
+  }
+
+  if (partition.empty()) {
+    bool is_allowed = false;
+    for (auto& [par, pair] : user.account_to_attrs_map.at(account).allowed_partition_qos_map) {
+      if (std::find(pair.second.begin(), pair.second.end(), qos) != pair.second.end()) {
+        is_allowed = true;
+        if (pair.first == qos && !force) {
+            return Result{
+                false, fmt::format(
+                           "Qos '{}' is default qos of partition '{}'.Ignoring "
+                           "this constraint with forced deletion, the deleted "
+                           "default qos is randomly replaced with one of the "
+                           "remaining items in the qos list",
+                           qos, par)};
+        }
+      }
+      if (!is_allowed) {
+        return Result{
+            false, fmt::format(
+                      "Qos '{}' not in allowed qos list of all partition", qos)};
+      }
+    }
+  } else {
+    // Delete the qos of a specified partition
+    auto iter =
+        user.account_to_attrs_map.at(account).allowed_partition_qos_map.find(
+            partition);
+
+    if (iter ==
+        user.account_to_attrs_map.at(account).allowed_partition_qos_map.end()) {
+      return Result{false,
+                    fmt::format("Partition '{}' not in allowed partition list",
+                                partition)};
+    }
+
+    if (std::find(iter->second.second.begin(), iter->second.second.end(),
+                  qos) == iter->second.second.end()) {
+      return Result{
+          false,
+          fmt::format("Qos '{}' not in allowed qos list of partition '{}'", qos,
+                      partition)};
+    }
+
+    if (qos == iter->second.first && !force) {
+      return Result{
+            false,
+            fmt::format("Qos '{}' is default qos of partition '{}'.Ignoring "
+                        "this constraint with forced deletion, the deleted "
+                        "default qos is randomly replaced with one of the "
+                        "remaining items in the qos list",
+                        qos, partition)};
+    }
+  }
+
+  return Result{true};
+}
+
 AccountManager::Result AccountManager::HasPermissionToAccount(
     uint32_t uid, const std::string& account, bool read_only_priv,
     User::AdminLevel* level_of_uid) {
@@ -1480,27 +1576,10 @@ AccountManager::Result AccountManager::SetUserAllowedQos_(
 }
 
 AccountManager::Result AccountManager::DeleteUserAllowedPartition_(
-    const std::string& name, const std::string& account,
+    const User& user, const std::string& account,
     const std::string& partition) {
-  util::write_lock_guard user_guard(m_rw_user_mutex_);
-
-  const User* user = GetExistedUserInfoNoLock_(name);
-  if (!user) {
-    return Result{false, fmt::format("Unknown user '{}'", name)};
-  }
-  if (!user->account_to_attrs_map.contains(account)) {
-    return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
-                                     name, account)};
-  }
-
-  if (!user->account_to_attrs_map.at(account)
-           .allowed_partition_qos_map.contains(partition)) {
-    return Result{
-        false,
-        fmt::format(
-            "Partition '{}' is not in user '{}''s allowed partition list",
-            partition, name)};
-  }
+  
+  const std::string name = user.name;
 
   // Update to database
   if (!g_db_client->UpdateEntityOne(
@@ -1519,95 +1598,46 @@ AccountManager::Result AccountManager::DeleteUserAllowedPartition_(
 }
 
 AccountManager::Result AccountManager::DeleteUserAllowedQos_(
-    const std::string& name, const std::string& qos, const std::string& account,
+    const User& user, const std::string& qos, const std::string& account,
     const std::string& partition, bool force) {
-  util::write_lock_guard user_guard(m_rw_user_mutex_);
 
-  const User* p = GetExistedUserInfoNoLock_(name);
-  if (!p) {
-    return Result{false, fmt::format("Unknown user '{}'", name)};
-  }
-  if (!p->account_to_attrs_map.contains(account)) {
-    return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
-                                     name, account)};
-  }
-  User user(*p);
+  const std::string name = user.name;
+  
+  User res_user(user);
 
   if (partition.empty()) {
     // Delete the qos of all partition
-    int change_num = 0;
     for (auto& [par, pair] :
-         user.account_to_attrs_map[account].allowed_partition_qos_map) {
+         res_user.account_to_attrs_map[account].allowed_partition_qos_map) {
       if (std::find(pair.second.begin(), pair.second.end(), qos) !=
           pair.second.end()) {
-        change_num++;
         pair.second.remove(qos);
-
         if (pair.first == qos) {
-          if (!force) {
-            return Result{
-                false, fmt::format(
-                           "Qos '{}' is default qos of partition '{}'.Ignoring "
-                           "this constraint with forced deletion, the deleted "
-                           "default qos is randomly replaced with one of the "
-                           "remaining items in the qos list",
-                           qos, par)};
-          } else {
             pair.first = pair.second.empty() ? "" : pair.second.front();
-          }
         }
       }
-    }
-
-    if (change_num == 0) {
-      return Result{
-          false, fmt::format(
-                     "Qos '{}' not in allowed qos list of all partition", qos)};
     }
   } else {
     // Delete the qos of a specified partition
     auto iter =
-        user.account_to_attrs_map[account].allowed_partition_qos_map.find(
+        res_user.account_to_attrs_map[account].allowed_partition_qos_map.find(
             partition);
 
-    if (iter ==
-        user.account_to_attrs_map[account].allowed_partition_qos_map.end()) {
-      return Result{false,
-                    fmt::format("Partition '{}' not in allowed partition list",
-                                partition)};
-    }
-
-    if (std::find(iter->second.second.begin(), iter->second.second.end(),
-                  qos) == iter->second.second.end()) {
-      return Result{
-          false,
-          fmt::format("Qos '{}' not in allowed qos list of partition '{}'", qos,
-                      partition)};
-    }
     iter->second.second.remove(qos);
 
     if (qos == iter->second.first) {
-      if (!force)
-        return Result{
-            false,
-            fmt::format("Qos '{}' is default qos of partition '{}'.Ignoring "
-                        "this constraint with forced deletion, the deleted "
-                        "default qos is randomly replaced with one of the "
-                        "remaining items in the qos list",
-                        qos, partition)};
-      else
-        iter->second.first =
+      iter->second.first =
             iter->second.second.empty() ? "" : iter->second.second.front();
     }
   }
 
   // Update to database
-  if (!g_db_client->UpdateUser(user)) {
+  if (!g_db_client->UpdateUser(res_user)) {
     return Result{false, "Fail to update data in database"};
   }
 
   m_user_map_[name]->account_to_attrs_map[account].allowed_partition_qos_map =
-      user.account_to_attrs_map[account].allowed_partition_qos_map;
+      res_user.account_to_attrs_map[account].allowed_partition_qos_map;
 
   return Result{true};
 }
