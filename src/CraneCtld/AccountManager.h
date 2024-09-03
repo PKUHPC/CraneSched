@@ -127,6 +127,17 @@ class AccountManager {
   Result CheckDeleteUserAllowedQos(const User& user, const std::string& account, const std::string& partition,
                                    const std::string& qos, bool force);
 
+  // ModifyAccount
+  Result CheckAddAccountAllowedPartition(const Account& account, const std::string& partition);
+  Result CheckAddAccountAllowedQos(const Account& account, const std::string& qos);
+  Result CheckSetAccountDescription(const Account& account, const std::string& description);
+  Result CheckSetAccountAllowedPartition(const Account& account, const std::string& partitions, bool force);
+  Result CheckSetAccountAllowedQos(const Account& account, const std::string& qos_list, bool force);
+  Result CheckSetAccountDefaultQos(const Account& account, const std::string& default_qos);
+  Result CheckDeleteAccountAllowedPartition(const Account& account, const std::string& partition, bool force);
+  Result CheckDeleteAccountAllowedQos(const Account& account, const std::string& qos, bool force);
+
+
   /**
    * @param[in] uid is system uid of user.
    * @param[in] account is the target that uid wants to query or modify.
@@ -178,6 +189,8 @@ class AccountManager {
   Result AddAccount_(const Account* find_account, const Account* find_parent, Account&& new_account);
 
   Result AddQos_(const Qos* find_qos, const Qos& new_qos);
+
+  Result DeleteUser_(const User& user, const std::string& account);
 
   Result AddUserAllowedPartition_(const User& user,
                                   const Account& account,
