@@ -53,7 +53,6 @@ class BasicPriority : public IPrioritySorter {
     int i = 0;
     for (auto it = pending_task_map.begin(); i < len; i++, it++) {
       TaskInCtld* task = it->second.get();
-      if (task->Status() != crane::grpc::Pending) continue;
       if (!task->Held()) {
         task_id_vec.emplace_back(it->first);
         it->second->pending_reason = "Priority";
@@ -259,7 +258,8 @@ class TaskScheduler {
 
     auto pd_it = m_pending_task_map_.find(task_id);
     if (pd_it != m_pending_task_map_.end()) {
-      m_cancel_task_queue_.enqueue({task_id, {}});
+      m_cancel_task_queue_.enqueue(
+          CancelPendingTaskQueueElem{.task = std::move(pd_it->second)});
       m_cancel_task_async_handle_->send();
       return CraneErr::kOk;
     }
@@ -284,6 +284,14 @@ class TaskScheduler {
   static CraneErr CheckTaskValidity(TaskInCtld* task);
 
  private:
+  template <class... Ts>
+  struct VariantVisitor : Ts... {
+    using Ts::operator()...;
+  };
+
+  template <class... Ts>
+  VariantVisitor(Ts...) -> VariantVisitor<Ts...>;
+
   void RequeueRecoveredTaskIntoPendingQueueLock_(
       std::unique_ptr<TaskInCtld> task);
 
@@ -361,8 +369,20 @@ class TaskScheduler {
   std::shared_ptr<uvw::timer_handle> m_cancel_task_timer_handle_;
   void CancelTaskTimerCb_();
 
+  struct CancelPendingTaskQueueElem {
+    std::unique_ptr<TaskInCtld> task;
+  };
+
+  struct CancelRunningTaskQueueElem {
+    task_id_t task_id;
+    CranedId craned_id;
+  };
+
+  using CancelTaskQueueElem =
+      std::variant<CancelPendingTaskQueueElem, CancelRunningTaskQueueElem>;
+
   std::shared_ptr<uvw::async_handle> m_cancel_task_async_handle_;
-  ConcurrentQueue<std::pair<task_id_t, CranedId>> m_cancel_task_queue_;
+  ConcurrentQueue<CancelTaskQueueElem> m_cancel_task_queue_;
   void CancelTaskAsyncCb_();
 
   std::shared_ptr<uvw::async_handle> m_clean_cancel_queue_handle_;

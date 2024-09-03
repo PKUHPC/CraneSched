@@ -1151,7 +1151,8 @@ CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
 
   if (need_to_be_terminated) {
     for (CranedId const& craned_id : task->executing_craned_ids) {
-      m_cancel_task_queue_.enqueue({task_id, craned_id});
+      m_cancel_task_queue_.enqueue(
+          CancelRunningTaskQueueElem{task_id, craned_id});
       m_cancel_task_async_handle_->send();
     }
   }
@@ -1229,22 +1230,28 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     return false;
   };
 
-  auto fn_cancel_pending_task = [&](auto& it) {
-    task_id_t task_id = it.first;
+  auto rng_transformer_id = [](auto& it) { return it.first; };
 
+  auto fn_cancel_pending_task = [&](task_id_t task_id) {
     CRANE_TRACE("Cancelling pending task #{}", task_id);
 
+    auto it = m_pending_task_map_.find(task_id);
+    CRANE_ASSERT(it != m_pending_task_map_.end());
+    TaskInCtld* task = it->second.get();
+
     auto result = g_account_manager->HasPermissionToUser(
-        operator_uid, it.second->Username(), false);
+        operator_uid, task->Username(), false);
     if (!result.ok) {
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
-      it.second->SetStatus(crane::grpc::Cancelled);
-      it.second->SetEndTime(absl::Now());
-      m_cancel_task_queue_.enqueue({task_id, {}});
-      m_cancel_task_async_handle_->send();
       reply.add_cancelled_tasks(task_id);
+
+      m_cancel_task_queue_.enqueue(
+          CancelPendingTaskQueueElem{std::move(it->second)});
+      m_cancel_task_async_handle_->send();
+
+      m_pending_task_map_.erase(it);
     }
   };
 
@@ -1293,15 +1300,19 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
                         ranges::views::filter(rng_filer_task_ids) |
                         ranges::views::filter(rng_filter_nodes);
 
+  std::vector<task_id_t> to_cancel_pd_task_ids;
+
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   LockGuard running_guard(&m_running_task_map_mtx_);
 
-  auto pending_task_id_rng = m_pending_task_map_ | joined_filters;
+  auto pending_task_id_rng = m_pending_task_map_ | joined_filters |
+                             ranges::views::transform(rng_transformer_id);
+
   // Evaluate immediately. fn_cancel_pending_task will change the contents
   // of m_pending_task_map_ and invalidate the end() of pending_task_id_rng.
-  // But now using asynchronous methods to cancel these tasks, there is no need
-  // to worry about this issue.
-  ranges::for_each(pending_task_id_rng, fn_cancel_pending_task);
+  to_cancel_pd_task_ids =
+      pending_task_id_rng | ranges::to<std::vector<task_id_t>>;
+  ranges::for_each(to_cancel_pd_task_ids, fn_cancel_pending_task);
 
   auto running_task_rng = m_running_task_map_ | joined_filters;
   ranges::for_each(running_task_rng, fn_cancel_running_task);
@@ -1395,10 +1406,11 @@ void TaskScheduler::CancelTaskAsyncCb_() {
 void TaskScheduler::CleanCancelQueueCb_() {
   // It's ok to use an approximate size.
   size_t approximate_size = m_cancel_task_queue_.size_approx();
-  std::vector<std::pair<task_id_t, CranedId>> tasks_to_cancel;
+  std::vector<CancelTaskQueueElem> tasks_to_cancel;
   tasks_to_cancel.resize(approximate_size);
 
-  std::vector<task_id_t> pending_tasks_vec;
+  // Carry the ownership of TaskInCtld for automatic destruction.
+  std::vector<std::unique_ptr<TaskInCtld>> pending_task_ptr_vec;
   HashMap<CranedId, std::vector<task_id_t>> running_task_craned_id_map;
 
   size_t actual_size = m_cancel_task_queue_.try_dequeue_bulk(
@@ -1407,11 +1419,17 @@ void TaskScheduler::CleanCancelQueueCb_() {
   // To cancel a task, there is two cases:
   // For pending task, we just need to set the task status to Cancelled.
   // For running task, we need to send a TerminateTasks RPC to the craned.
-  for (const auto& [task_id, craned_id] : tasks_to_cancel) {
-    if (craned_id.empty())
-      pending_tasks_vec.emplace_back(task_id);
-    else
-      running_task_craned_id_map[craned_id].emplace_back(task_id);
+  for (auto& elem : tasks_to_cancel) {
+    std::visit(  //
+        VariantVisitor{
+            [&](CancelPendingTaskQueueElem& pd_elem) {
+              pending_task_ptr_vec.emplace_back(std::move(pd_elem.task));
+            },
+            [&](CancelRunningTaskQueueElem& rn_elem) {
+              running_task_craned_id_map[rn_elem.craned_id].emplace_back(
+                  rn_elem.task_id);
+            }},
+        elem);
   }
 
   for (auto&& [craned_id, task_ids] : running_task_craned_id_map) {
@@ -1425,44 +1443,23 @@ void TaskScheduler::CleanCancelQueueCb_() {
         });
   }
 
-  if (pending_tasks_vec.empty()) return;
+  if (pending_task_ptr_vec.empty()) return;
 
-  // Carry the ownership of TaskInCtld for automatic destruction.
-  std::vector<std::unique_ptr<TaskInCtld>> task_ptr_vec;
-  std::vector<TaskInCtld*> task_raw_ptr_vec;
-  {
-    // Allow temporary inconsistency on task querying here.
-    // In a very short duration, some cancelled tasks might not be visible
-    // immediately after changing to CANCELLED state.
-    // Also, since here we erase the task id from the pending task
-    // map with a little latency, some task id we retrieve might have been
-    // cancelled. Just ignore those who have already been cancelled.
-    LockGuard pending_guard(&m_pending_task_map_mtx_);
-    for (task_id_t task_id : pending_tasks_vec) {
-      auto it = m_pending_task_map_.find(task_id);
-      if (it == m_pending_task_map_.end()) {
-        CRANE_ERROR(
-            "Pending task #{} not found when doing actual cancelling. "
-            "Skipping it..",
-            task_id);
-        continue;
-      }
+  for (auto& task : pending_task_ptr_vec) {
+    task->SetStatus(crane::grpc::Cancelled);
+    task->SetEndTime(absl::Now());
 
-      TaskInCtld* task = it->second.get();
-      if (task->type == crane::grpc::Interactive) {
-        auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-        g_thread_pool->detach_task(
-            [cb = meta.cb_task_cancel, task_id = task_id] { cb(task_id); });
-      }
-
-      task_raw_ptr_vec.emplace_back(it->second.get());
-      task_ptr_vec.emplace_back(std::move(it->second));
-
-      m_pending_task_map_.erase(it);
+    if (task->type == crane::grpc::Interactive) {
+      auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+      g_thread_pool->detach_task([cb = meta.cb_task_cancel,
+                                  task_id = task->TaskId()] { cb(task_id); });
     }
   }
 
-  ProcessFinalTasks_(task_raw_ptr_vec);
+  std::vector<TaskInCtld*> pd_task_raw_ptrs;
+  for (auto& task : pending_task_ptr_vec)
+    pd_task_raw_ptrs.emplace_back(task.get());
+  ProcessFinalTasks_(pd_task_raw_ptrs);
 }
 
 void TaskScheduler::SubmitTaskTimerCb_() {
@@ -2781,7 +2778,6 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
 
   std::vector<std::pair<TaskInCtld*, double>> task_priority_vec;
   for (const auto& [task_id, task] : pending_task_map) {
-    if (task->Status() != crane::grpc::Pending) continue;
     if (task->Held()) {
       task->pending_reason = "Held";
       continue;
