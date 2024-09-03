@@ -123,8 +123,8 @@ class AccountManager {
   Result CheckDeleteUserAllowedPartition(const User& user,
                                          const std::string& account,
                                          const std::string& partition);
-  Result CheckDeleteUserAllowedQos(const User& user, const std::string& account,
-                                   const std::string& qos);
+  Result CheckDeleteUserAllowedQos(const User& user, const std::string& account, const std::string& partition,
+                                   const std::string& qos, bool force);
 
   /**
    * @param[in] uid is system uid of user.
@@ -197,10 +197,10 @@ class AccountManager {
                             const std::string& partition,
                             const std::string& qos_list_str, bool force);
 
-  Result DeleteUserAllowedPartition_(const std::string& name,
+  Result DeleteUserAllowedPartition_(const User& user,
                                      const std::string& account,
                                      const std::string& partition);
-  Result DeleteUserAllowedQos_(const std::string& name, const std::string& qos,
+  Result DeleteUserAllowedQos_(const User& user, const std::string& qos,
                                const std::string& account,
                                const std::string& partition, bool force);
 
