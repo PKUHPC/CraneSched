@@ -436,9 +436,9 @@ AccountManager::Result AccountManager::ModifyUser(
       if (!account_ptr) {
         return Result{false, fmt::format("Unknown account '{}'", account)};
       }
-      auto result = CheckAddUserAllowedPartition(p, account_ptr, value);
+      auto result = CheckAddUserAllowedPartition(*p, *account_ptr, value);
       return !result.ok ? result
-                        : AddUserAllowedPartition_(p, account_ptr, value);
+                        : AddUserAllowedPartition_(*p, *account_ptr, value);
     }
 
     case crane::grpc::ModifyEntityRequest_ModifyField_Qos: {
@@ -448,9 +448,9 @@ AccountManager::Result AccountManager::ModifyUser(
       if (!account_ptr) {
         return Result{false, fmt::format("Unknown account '{}'", account)};
       }
-      auto result = CheckAddUserAllowedQos(p, account_ptr, partition, value);
+      auto result = CheckAddUserAllowedQos(*p, *account_ptr, partition, value);
       return !result.ok ? result
-                        : AddUserAllowedQos_(p, account_ptr, partition, value);
+                        : AddUserAllowedQos_(*p, *account_ptr, partition, value);
     }
     default:
       break;
@@ -460,15 +460,15 @@ AccountManager::Result AccountManager::ModifyUser(
     switch (modifyField) {
     case crane::grpc::ModifyEntityRequest_ModifyField_AdminLevel: {
       User::AdminLevel new_level;
-      auto result = CheckSetUserAdminLevel(p, value, &new_level);
+      auto result = CheckSetUserAdminLevel(*p, value, &new_level);
 
       return !result.ok ? result : SetUserAdminLevel_(name, new_level);
     }
 
     case crane::grpc::ModifyEntityRequest_ModifyField_DefaultQos: {
-      auto result = CheckSetUserDefaultQos(p, account, partition, value);
+      auto result = CheckSetUserDefaultQos(*p, account, partition, value);
       return !result.ok ? result
-                        : SetUserDefaultQos_(p, account, partition, value);
+                        : SetUserDefaultQos_(*p, account, partition, value);
     }
 
     case crane::grpc::ModifyEntityRequest_ModifyField_Partition: {
@@ -477,9 +477,9 @@ AccountManager::Result AccountManager::ModifyUser(
       if (!account_ptr) {
         return Result{false, fmt::format("Unknown account '{}'", account)};
       }
-      auto result = CheckSetUserAllowedPartition(p, account_ptr, value);
+      auto result = CheckSetUserAllowedPartition(*p, *account_ptr, value);
       return !result.ok ? result
-                        : SetUserAllowedPartition_(p, account_ptr, value);
+                        : SetUserAllowedPartition_(*p, *account_ptr, value);
     }
 
     case crane::grpc::ModifyEntityRequest_ModifyField_Qos: {
@@ -489,8 +489,8 @@ AccountManager::Result AccountManager::ModifyUser(
       if (!account_ptr) {
         return Result{false, fmt::format("Unknown account '{}'", account)};
       }
-      auto result = CheckSetUserAllowedQos(p, account_ptr, partition, value, force);
-      return SetUserAllowedQos_(p, account_ptr, partition, value, force);
+      auto result = CheckSetUserAllowedQos(*p, *account_ptr, partition, value, force);
+      return !result.ok ? result : SetUserAllowedQos_(*p, *account_ptr, partition, value, force);
     }
 
     default:
@@ -818,45 +818,51 @@ result::result<void, std::string> AccountManager::CheckUidIsAdmin(
 }
 
 AccountManager::Result AccountManager::CheckAddUserAllowedPartition(
-    const User* user, const Account* account_ptr,
+    const User& user, const Account& account,
     const std::string& partition) {
-  const std::string name = user->name;
-  const std::string account = account_ptr->name;
+  const std::string name = user.name;
+  const std::string account_name = account.name;
 
-  if (!user->account_to_attrs_map.contains(account)) {
+  if (!user.account_to_attrs_map.contains(account_name)) {
     return Result{false,
                   fmt::format("User '{}' doesn't belong to account '{}' ", name,
-                              account)};
+                              account_name)};
   }
 
   if (!g_config.Partitions.contains(partition)) {
     return Result{false, fmt::format("Partition '{}' not existed", partition)};
   }
 
-  if (std::find(account_ptr->allowed_partition.begin(),
-                account_ptr->allowed_partition.end(),
-                partition) == account_ptr->allowed_partition.end()) {
+  if (std::find(account.allowed_partition.begin(),
+                account.allowed_partition.end(),
+                partition) == account.allowed_partition.end()) {
     return Result{false, fmt::format("User '{}''s account '{}' is not allowed "
                                      "to use the partition '{}'",
-                                     name, account, partition)};
+                                     name, account_name, partition)};
   }
 
-  if (user->account_to_attrs_map.at(account).allowed_partition_qos_map.contains(
+  if (user.account_to_attrs_map.at(account_name).allowed_partition_qos_map.contains(
           partition)) {
     return Result{
         false, fmt::format("The partition '{}' is already in "
                            "user '{}''s allowed partition under account '{}'",
-                           partition, name, account)};
+                           partition, name, account_name)};
   }
 
   return Result{true};
 }
 
 AccountManager::Result AccountManager::CheckAddUserAllowedQos(
-    const User* user, const Account* account_ptr, const std::string& partition,
+    const User& user, const Account& account, const std::string& partition,
     const std::string& qos) {
-  const std::string name = user->name;
-  const std::string account = account_ptr->name;
+  const std::string name = user.name;
+  const std::string account_name = account.name;
+
+
+  if (!user.account_to_attrs_map.contains(account_name)) {
+    return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
+                                     name, account_name)};
+  }
 
   // check if the qos existed
   if (!GetExistedQosInfoNoLock_(qos)) {
@@ -864,20 +870,20 @@ AccountManager::Result AccountManager::CheckAddUserAllowedQos(
   }
 
   // check if account has access to new qos
-  if (std::find(account_ptr->allowed_qos_list.begin(),
-                account_ptr->allowed_qos_list.end(),
-                qos) == account_ptr->allowed_qos_list.end()) {
+  if (std::find(account.allowed_qos_list.begin(),
+                account.allowed_qos_list.end(),
+                qos) == account.allowed_qos_list.end()) {
     return Result{
         false,
         fmt::format("Sorry, account '{}' is not allowed to use the qos '{}'",
-                    account, qos)};
+                    account_name, qos)};
   }
 
   // check if add item already the user's allowed qos
   if (partition.empty()) {
     bool is_allowed = false;
     for (auto& [par, pair] :
-         user->account_to_attrs_map.at(account).allowed_partition_qos_map) {
+         user.account_to_attrs_map.at(account_name).allowed_partition_qos_map) {
       const std::list<std::string>& list = pair.second;
       if (std::find(list.begin(), list.end(), qos) == list.end()) {
         is_allowed = true;
@@ -891,9 +897,9 @@ AccountManager::Result AccountManager::CheckAddUserAllowedQos(
     }
   } else {
     auto iter =
-        user->account_to_attrs_map.at(account).allowed_partition_qos_map.find(
+        user.account_to_attrs_map.at(account_name).allowed_partition_qos_map.find(
             partition);
-    if (iter == user->account_to_attrs_map.at(account)
+    if (iter == user.account_to_attrs_map.at(account_name)
                     .allowed_partition_qos_map.end()) {
       return Result{
           false,
@@ -912,8 +918,8 @@ AccountManager::Result AccountManager::CheckAddUserAllowedQos(
 }
 
 AccountManager::Result AccountManager::CheckSetUserAdminLevel(
-    const User* user, const std::string& level, User::AdminLevel* new_level) {
-  const std::string name = user->name;
+    const User& user, const std::string& level, User::AdminLevel* new_level) {
+  const std::string name = user.name;
 
   if (level == "none") {
     *new_level = User::None;
@@ -925,7 +931,7 @@ AccountManager::Result AccountManager::CheckSetUserAdminLevel(
     return Result{false, fmt::format("Unknown admin level '{}'", level)};
   }
 
-  if (*new_level == user->admin_level) {
+  if (*new_level == user.admin_level) {
     return Result{false,
                   fmt::format("User '{}' is already a {} role", name, level)};
   }
@@ -934,11 +940,11 @@ AccountManager::Result AccountManager::CheckSetUserAdminLevel(
 }
 
 AccountManager::Result AccountManager::CheckSetUserDefaultQos(
-    const User* user, const std::string& account, const std::string& partition,
+    const User& user, const std::string& account, const std::string& partition,
     const std::string& qos) {
-  const std::string name = user->name;
+  const std::string name = user.name;
 
-  if (!user->account_to_attrs_map.contains(account)) {
+  if (!user.account_to_attrs_map.contains(account)) {
     return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
                                      name, account)};
   }
@@ -946,7 +952,7 @@ AccountManager::Result AccountManager::CheckSetUserDefaultQos(
   if (partition.empty()) {
     bool is_allowed = false;
     for (auto& [par, pair] :
-         user->account_to_attrs_map.at(account).allowed_partition_qos_map) {
+         user.account_to_attrs_map.at(account).allowed_partition_qos_map) {
       if (std::find(pair.second.begin(), pair.second.end(), qos) !=
               pair.second.end() &&
           qos != pair.first) {
@@ -962,9 +968,9 @@ AccountManager::Result AccountManager::CheckSetUserDefaultQos(
     }
   } else {
     auto iter =
-        user->account_to_attrs_map.at(account).allowed_partition_qos_map.find(
+        user.account_to_attrs_map.at(account).allowed_partition_qos_map.find(
             partition);
-    if (iter == user->account_to_attrs_map.at(account)
+    if (iter == user.account_to_attrs_map.at(account)
                     .allowed_partition_qos_map.end()) {
       return Result{
           false,
@@ -987,18 +993,18 @@ AccountManager::Result AccountManager::CheckSetUserDefaultQos(
   return Result{true};
 }
 
-AccountManager::Result AccountManager::CheckSetUserAllowedPartition(const User* user,
-                                    const Account* account_ptr,
+AccountManager::Result AccountManager::CheckSetUserAllowedPartition(const User& user,
+                                    const Account& account,
                                     const std::string& partitions) {
-  const std::string name = user->name;
-  const std::string account = account_ptr->name;
+  const std::string name = user.name;
+  const std::string account_name = account.name;
 
   std::vector<std::string> partition_vec =
       absl::StrSplit(partitions, ',', absl::SkipEmpty());
 
-  if (!user->account_to_attrs_map.contains(account)) {
+  if (!user.account_to_attrs_map.contains(account_name)) {
     return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
-                                     name, account)};
+                                     name, account_name)};
   }
 
   for (const auto& par : partition_vec) {
@@ -1007,23 +1013,29 @@ AccountManager::Result AccountManager::CheckSetUserAllowedPartition(const User* 
       return Result{false, fmt::format("Partition '{}' not existed", par)};
     }
     // check if account has access to new partition
-    if (std::find(account_ptr->allowed_partition.begin(),
-                  account_ptr->allowed_partition.end(),
-                  par) == account_ptr->allowed_partition.end()) {
+    if (std::find(account.allowed_partition.begin(),
+                  account.allowed_partition.end(),
+                  par) == account.allowed_partition.end()) {
       return Result{false,
                     fmt::format("User '{}''s account '{}' is not allowed "
                                 "to use the partition '{}'",
-                                name, user->default_account, par)};
+                                name, user.default_account, par)};
     }
   }
 
   return Result{true};
 }
 
-AccountManager::Result AccountManager::CheckSetUserAllowedQos(const User* user, const Account* account_ptr,const std::string& partition,
+AccountManager::Result AccountManager::CheckSetUserAllowedQos(const User& user, const Account& account,const std::string& partition,
                               const std::string& qos_list_str, bool force) {
-  const std::string name = user->name;
-  const std::string account = account_ptr->name;
+  const std::string name = user.name;
+  const std::string account_name = account.name;
+
+
+  if (!user.account_to_attrs_map.contains(account_name)) {
+    return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
+                                     name, account_name)};
+  }
 
   std::vector<std::string> qos_vec =
       absl::StrSplit(qos_list_str, ',', absl::SkipEmpty());
@@ -1034,13 +1046,13 @@ AccountManager::Result AccountManager::CheckSetUserAllowedQos(const User* user, 
       return Result{false, fmt::format("Qos '{}' not existed", qos)};
     }
     // check if account has access to new qos
-    if (std::find(account_ptr->allowed_qos_list.begin(),
-                  account_ptr->allowed_qos_list.end(),
-                  qos) == account_ptr->allowed_qos_list.end()) {
+    if (std::find(account.allowed_qos_list.begin(),
+                  account.allowed_qos_list.end(),
+                  qos) == account.allowed_qos_list.end()) {
       return Result{
           false,
           fmt::format("Sorry, account '{}' is not allowed to use the qos '{}'",
-                      account, qos)};
+                      account_name, qos)};
     }
   }
 
@@ -1049,13 +1061,13 @@ AccountManager::Result AccountManager::CheckSetUserAllowedQos(const User* user, 
         cache_allowed_partition_qos_map;
   if (partition.empty()) {
       cache_allowed_partition_qos_map =
-          user->account_to_attrs_map.at(account).allowed_partition_qos_map;
+          user.account_to_attrs_map.at(account_name).allowed_partition_qos_map;
   } else {
       auto iter =
-          user->account_to_attrs_map.at(account).allowed_partition_qos_map.find(
+          user.account_to_attrs_map.at(account_name).allowed_partition_qos_map.find(
               partition);
       if (iter ==
-          user->account_to_attrs_map.at(account).allowed_partition_qos_map.end()) {
+          user.account_to_attrs_map.at(account_name).allowed_partition_qos_map.end()) {
         return Result{
             false, fmt::format(
                        "Partition '{}' is not in user '{}''s allowed partition",
@@ -1275,42 +1287,42 @@ bool AccountManager::IncQosReferenceCountInDb_(const std::string& name,
 }
 
 AccountManager::Result AccountManager::AddUserAllowedPartition_(
-    const User* user_ptr, const Account* account_ptr,
+    const User& user, const Account& account,
     const std::string& partition) {
-  const std::string name = user_ptr->name;
-  const std::string account = account_ptr->name;
+  const std::string name = user.name;
+  const std::string account_name = account.name;
 
-  User user(*user_ptr);
+  User res_user(user);
 
   // Update the map
-  user.account_to_attrs_map[account].allowed_partition_qos_map[partition] =
+  res_user.account_to_attrs_map[account_name].allowed_partition_qos_map[partition] =
       std::pair<std::string, std::list<std::string>>{
-          account_ptr->default_qos,
-          std::list<std::string>{account_ptr->allowed_qos_list}};
+          account.default_qos,
+          std::list<std::string>{account.allowed_qos_list}};
 
   // Update to database
-  if (!g_db_client->UpdateUser(user)) {
+  if (!g_db_client->UpdateUser(res_user)) {
     return Result{false, "Fail to update data in database"};
   }
 
-  m_user_map_[name]->account_to_attrs_map[account].allowed_partition_qos_map =
-      user.account_to_attrs_map[account].allowed_partition_qos_map;
+  m_user_map_[name]->account_to_attrs_map[account_name].allowed_partition_qos_map =
+      res_user.account_to_attrs_map[account_name].allowed_partition_qos_map;
 
   return Result{true};
 }
 
 AccountManager::Result AccountManager::AddUserAllowedQos_(
-    const User* user_ptr, const Account* account_ptr,
+    const User& user, const Account& account,
     const std::string& partition, const std::string& qos) {
-  const std::string name = user_ptr->name;
-  const std::string account = account_ptr->name;
+  const std::string name = user.name;
+  const std::string account_name = account.name;
 
-  User user(*user_ptr);
+  User res_user(user);
 
   if (partition.empty()) {
     // add to all partition
     for (auto& [par, pair] :
-         user.account_to_attrs_map[account].allowed_partition_qos_map) {
+         res_user.account_to_attrs_map[account_name].allowed_partition_qos_map) {
       std::list<std::string>& list = pair.second;
       if (std::find(list.begin(), list.end(), qos) == list.end()) {
         if (pair.first.empty()) {
@@ -1322,7 +1334,7 @@ AccountManager::Result AccountManager::AddUserAllowedQos_(
   } else {
     // add to exacted partition
     auto iter =
-        user.account_to_attrs_map[account].allowed_partition_qos_map.find(
+        res_user.account_to_attrs_map[account_name].allowed_partition_qos_map.find(
             partition);
     std::list<std::string>& list = iter->second.second;
     if (iter->second.first.empty()) {
@@ -1332,12 +1344,12 @@ AccountManager::Result AccountManager::AddUserAllowedQos_(
   }
 
   // Update to database
-  if (!g_db_client->UpdateUser(user)) {
+  if (!g_db_client->UpdateUser(res_user)) {
     return Result{false, "Fail to update data in database"};
   }
 
-  m_user_map_[name]->account_to_attrs_map[account].allowed_partition_qos_map =
-      user.account_to_attrs_map[account].allowed_partition_qos_map;
+  m_user_map_[name]->account_to_attrs_map[account_name].allowed_partition_qos_map =
+      res_user.account_to_attrs_map[account_name].allowed_partition_qos_map;
 
   return Result{true};
 }
@@ -1357,15 +1369,15 @@ AccountManager::Result AccountManager::SetUserAdminLevel_(
 }
 
 AccountManager::Result AccountManager::SetUserDefaultQos_(
-    const User* user_ptr, const std::string& account,
+    const User& user, const std::string& account,
     const std::string& partition, const std::string& qos) {
-  const std::string name = user_ptr->name;
+  const std::string name = user.name;
 
-  User user(*user_ptr);
+  User res_user(user);
 
   if (partition.empty()) {
     for (auto& [par, pair] :
-         user.account_to_attrs_map[account].allowed_partition_qos_map) {
+         res_user.account_to_attrs_map[account].allowed_partition_qos_map) {
       if (std::find(pair.second.begin(), pair.second.end(), qos) !=
               pair.second.end() &&
           qos != pair.first) {
@@ -1374,69 +1386,69 @@ AccountManager::Result AccountManager::SetUserDefaultQos_(
     }
   } else {
     auto iter =
-        user.account_to_attrs_map[account].allowed_partition_qos_map.find(
+        res_user.account_to_attrs_map[account].allowed_partition_qos_map.find(
             partition);
 
     iter->second.first = qos;
   }
 
   // Update to database
-  if (!g_db_client->UpdateUser(user)) {
+  if (!g_db_client->UpdateUser(res_user)) {
     return Result{false, "Fail to update data in database"};
   }
 
   m_user_map_[name]->account_to_attrs_map[account].allowed_partition_qos_map =
-      user.account_to_attrs_map[account].allowed_partition_qos_map;
+      res_user.account_to_attrs_map[account].allowed_partition_qos_map;
 
   return Result{true};
 }
 
 AccountManager::Result AccountManager::SetUserAllowedPartition_(
-    const User* user_ptr, const Account* account_ptr,
+    const User& user, const Account& account,
     const std::string& partitions) {
-  const std::string name = user_ptr->name;
-  const std::string account = account_ptr->name;
+  const std::string name = user.name;
+  const std::string account_name = account.name;
 
   std::vector<std::string> partition_vec =
       absl::StrSplit(partitions, ',', absl::SkipEmpty());
 
-  User user(*user_ptr);
+  User res_user(user);
   // Update the map
-  user.account_to_attrs_map[account]
+  res_user.account_to_attrs_map[account_name]
       .allowed_partition_qos_map.clear();  // clear the partitions
   for (const auto& par : partition_vec) {
-    user.account_to_attrs_map[account].allowed_partition_qos_map[par] =
+    res_user.account_to_attrs_map[account_name].allowed_partition_qos_map[par] =
         std::pair<std::string, std::list<std::string>>{
-            account_ptr->default_qos,
-            std::list<std::string>{account_ptr->allowed_qos_list}};
+            account.default_qos,
+            std::list<std::string>{account.allowed_qos_list}};
   }
 
   // Update to database
-  if (!g_db_client->UpdateUser(user)) {
+  if (!g_db_client->UpdateUser(res_user)) {
     return Result{false, "Fail to update data in database"};
   }
 
-  m_user_map_[name]->account_to_attrs_map[account].allowed_partition_qos_map =
-      user.account_to_attrs_map[account].allowed_partition_qos_map;
+  m_user_map_[name]->account_to_attrs_map[account_name].allowed_partition_qos_map =
+      res_user.account_to_attrs_map[account_name].allowed_partition_qos_map;
 
   return Result{true};
 }
 
 AccountManager::Result AccountManager::SetUserAllowedQos_(
-    const User* user_ptr, const Account* account_ptr,
+    const User& user, const Account& account,
     const std::string& partition, const std::string& qos_list_str, bool force) {
   
-  const std::string name = user_ptr->name;
-  const std::string account = account_ptr->name;
+  const std::string name = user.name;
+  const std::string account_name = account.name;
 
   std::vector<std::string> qos_vec =
       absl::StrSplit(qos_list_str, ',', absl::SkipEmpty());
 
-  User user(*user_ptr);
+  User res_user(user);
   if (partition.empty()) {
     // Set the qos of all partition
     for (auto& [par, pair] :
-         user.account_to_attrs_map[account].allowed_partition_qos_map) {
+         res_user.account_to_attrs_map[account_name].allowed_partition_qos_map) {
       if (std::find(qos_vec.begin(), qos_vec.end(), pair.first) ==
           qos_vec.end()) {
           pair.first = qos_vec.empty() ? "" : qos_vec.front();
@@ -1446,7 +1458,7 @@ AccountManager::Result AccountManager::SetUserAllowedQos_(
   } else {
     // Set the qos of a specified partition
     auto iter =
-        user.account_to_attrs_map[account].allowed_partition_qos_map.find(
+        res_user.account_to_attrs_map[account_name].allowed_partition_qos_map.find(
             partition);
 
     if (std::find(qos_vec.begin(), qos_vec.end(), iter->second.first) ==
@@ -1457,12 +1469,12 @@ AccountManager::Result AccountManager::SetUserAllowedQos_(
   }
 
   // Update to database
-  if (!g_db_client->UpdateUser(user)) {
+  if (!g_db_client->UpdateUser(res_user)) {
     return Result{false, "Fail to update data in database"};
   }
 
-  m_user_map_[name]->account_to_attrs_map[account].allowed_partition_qos_map =
-      user.account_to_attrs_map[account].allowed_partition_qos_map;
+  m_user_map_[name]->account_to_attrs_map[account_name].allowed_partition_qos_map =
+      res_user.account_to_attrs_map[account_name].allowed_partition_qos_map;
 
   return Result{true};
 }
