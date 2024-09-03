@@ -112,15 +112,15 @@ class AccountManager {
   Result CheckAddUserAllowedQos(const User* user, const Account* account_ptr,
                                 const std::string& partition,
                                 const std::string& qos);
-  Result CheckSetUserAdminLevel(const User* user, const std::string& level);
+  Result CheckSetUserAdminLevel(const User* user, const std::string& level, User::AdminLevel* new_level);
   Result CheckSetUserDefaultQos(const User* user, const std::string& account,
                                 const std::string& partition,
                                 const std::string& qos);
   Result CheckSetUserAllowedPartition(const User* user,
-                                      const std::string& account,
-                                      const std::string& partition);
-  Result CheckSetUserAllowedQos(const User* user, const std::string& account,
-                                const std::string& qos);
+                                      const Account* account_ptr,
+                                      const std::string& partitions);
+  Result CheckSetUserAllowedQos(const User* user, const Account* account_ptr, const std::string& partition,
+                                const std::string& qos_list_str, bool force);
   Result CheckDeleteUserAllowedPartition(const User* user,
                                          const std::string& account,
                                          const std::string& partition);
@@ -186,14 +186,15 @@ class AccountManager {
                                   const Account* account_ptr,
                                   const std::string& partition, const std::string& qos);
 
-  Result SetUserAdminLevel_(const std::string& name, const std::string& level);
-  Result SetUserDefaultQos_(const std::string& name, const std::string& qos,
+  Result SetUserAdminLevel_(const std::string& name, const User::AdminLevel& new_level);
+  Result SetUserDefaultQos_(const User* user_ptr,
                             const std::string& account,
-                            const std::string& partition);
-  Result SetUserAllowedPartition_(const std::string& name,
-                                  const std::string& account,
+                            const std::string& partition,
+                            const std::string& qos);
+  Result SetUserAllowedPartition_(const User* user_ptr,
+                                  const Account* account_ptr,
                                   const std::string& partitions);
-  Result SetUserAllowedQos_(const std::string& name, const std::string& account,
+  Result SetUserAllowedQos_(const User* user_ptr, const Account* account_ptr,
                             const std::string& partition,
                             const std::string& qos_list_str, bool force);
 
