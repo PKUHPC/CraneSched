@@ -253,36 +253,7 @@ AccountManager::Result AccountManager::DeleteAccount(const std::string& name) {
     return Result{false, "This account has child account or users"};
   }
 
-  mongocxx::client_session::with_transaction_cb callback =
-      [&](mongocxx::client_session* session) {
-        if (!account->parent_account.empty()) {
-          // delete form the parent account's child account list
-          g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                       "$pull", account->parent_account,
-                                       "child_accounts", name);
-        }
-        // Delete the account
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
-                                     name, "deleted", true);
-        for (const auto& qos : account->allowed_qos_list) {
-          IncQosReferenceCountInDb_(qos, -1);
-        }
-      };
-
-  if (!g_db_client->CommitTransaction(callback)) {
-    return Result{false, "Fail to update data in database"};
-  }
-
-  if (!account->parent_account.empty()) {
-    m_account_map_[account->parent_account]->child_accounts.remove(name);
-  }
-  m_account_map_[name]->deleted = true;
-
-  for (const auto& qos : account->allowed_qos_list) {
-    m_qos_map_[qos]->reference_count--;
-  }
-
-  return Result{true};
+  return DeleteAccount_(*account);
 }
 
 AccountManager::Result AccountManager::DeleteQos(const std::string& name) {
@@ -291,19 +262,15 @@ AccountManager::Result AccountManager::DeleteQos(const std::string& name) {
 
   if (!qos) {
     return Result{false, fmt::format("Qos '{}' not exists in database", name)};
-  } else if (qos->reference_count != 0) {
+  }
+  
+  if (qos->reference_count != 0) {
     return Result{false,
                   fmt::format("There still has {} references to this qos",
                               qos->reference_count)};
   }
 
-  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
-                                    name, "deleted", true)) {
-    return Result{false, fmt::format("Delete qos '{}' failed", name)};
-  }
-  m_qos_map_[name]->deleted = true;
-
-  return Result{true};
+  return DeleteQos_(name);
 }
 
 AccountManager::UserMutexSharedPtr AccountManager::GetExistedUserInfo(
@@ -501,11 +468,11 @@ AccountManager::Result AccountManager::ModifyAccount(
   switch (operatorType) {
   case crane::grpc::ModifyEntityRequest_OperatorType_Add:
   {
-    util::write_lock_guard account_guard(m_rw_account_mutex_);
-    const Account* account = GetExistedAccountInfoNoLock_(name);
-    if (!account) {
-      return Result{false, fmt::format("Unknown account '{}'", name)};
-    }
+    // util::write_lock_guard account_guard(m_rw_account_mutex_);
+    // const Account* account = GetExistedAccountInfoNoLock_(name);
+    // if (!account) {
+    //   return Result{false, fmt::format("Unknown account '{}'", name)};
+    // }
     switch (modifyField) {
     case crane::grpc::ModifyEntityRequest_ModifyField_Partition:
       return AddAccountAllowedPartition_(name, value);
@@ -1592,6 +1559,52 @@ AccountManager::Result AccountManager::DeleteUser_(const User& user,
   }
 
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
+
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::DeleteAccount_(const Account& account) {
+
+  const std::string name = account.name;
+
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        if (!account.parent_account.empty()) {
+          // delete form the parent account's child account list
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                       "$pull", account.parent_account,
+                                       "child_accounts", name);
+        }
+        // Delete the account
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
+                                     name, "deleted", true);
+        for (const auto& qos : account.allowed_qos_list) {
+          IncQosReferenceCountInDb_(qos, -1);
+        }
+      };
+
+  if (!g_db_client->CommitTransaction(callback)) {
+    return Result{false, "Fail to update data in database"};
+  }
+
+  if (!account.parent_account.empty()) {
+    m_account_map_[account.parent_account]->child_accounts.remove(name);
+  }
+  m_account_map_[name]->deleted = true;
+
+  for (const auto& qos : account.allowed_qos_list) {
+    m_qos_map_[qos]->reference_count--;
+  }
+
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::DeleteQos_(const std::string& name) {
+  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                    name, "deleted", true)) {
+    return Result{false, fmt::format("Delete qos '{}' failed", name)};
+  }
+  m_qos_map_[name]->deleted = true;
 
   return Result{true};
 }
