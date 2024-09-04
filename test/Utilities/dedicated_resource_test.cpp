@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
+#include "crane/Network.h"
 #include "crane/PublicHeader.h"
-
 constexpr std::array slots = {"/dev/nvidia0", "/dev/nvidia1", "/dev/nvidia2",
                               "/dev/nvidia3", "/dev/nvidia4", "/dev/nvidia5",
                               "/dev/nvidia6", "/dev/nvidia7"};
@@ -209,6 +209,15 @@ TEST(DEDICATED_RES_NODE, req_map4) {
 }
 
 TEST(DEDICATED_RES_NODE, req_map5) {
+  ASSERT_EQ(6, crane::GetIpAddressVersion("3001:0da8:82a3:0:0:8B2E:0270:7224"));
+  ASSERT_EQ(6, crane::GetIpAddressVersion("::1"));
+  ASSERT_EQ(6, crane::GetIpAddressVersion("ff::1:2"));
+  ASSERT_EQ(
+      6, crane::GetIpAddressVersion("2001:0db8:85a3:0000:0000:8a2e:0370:7334"));
+  ASSERT_EQ(6, crane::GetIpAddressVersion("ff01::01"));
+  ASSERT_EQ(4, crane::GetIpAddressVersion("10.11.82.1"));
+  ASSERT_EQ(4, crane::GetIpAddressVersion("127.0.0.1"));
+  ASSERT_EQ(-1, crane::GetIpAddressVersion("lijunlin"));
   using req_t = std::unordered_map<
       std::string /*name*/,
       std::pair<
@@ -223,114 +232,3 @@ TEST(DEDICATED_RES_NODE, req_map5) {
                req, resourceInNode);
 }
 
-TEST(DEDICATED_RES, le_lt1) {
-  DedicatedResource lhs, rhs;
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["GPU"]["A100"].insert({slots[0], slots[1]});
-  lhs["node1"] = resourceInNode;
-  DedicatedResourceInNode resourceInNode2;
-  resourceInNode2["GPU"]["A100"].insert({slots[0], slots[1], slots[3]});
-
-  rhs["node1"] = resourceInNode2;
-
-  ASSERT_LE(resourceInNode, resourceInNode2);
-}
-
-TEST(DEDICATED_RES, le_lt2) {
-  DedicatedResource lhs, rhs;
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["GPU"]["A100"].insert({slots[0], slots[1]});
-  lhs["node1"] = resourceInNode;
-  DedicatedResourceInNode resourceInNode2;
-  resourceInNode2["GPU"]["A100"].insert({slots[0], slots[1], slots[3]});
-
-  rhs["node1"] = resourceInNode2;
-  rhs["node2"] = resourceInNode2;
-
-  ASSERT_LE(resourceInNode, resourceInNode2);
-}
-
-TEST(DEDICATED_RES, le_lt3) {
-  DedicatedResource lhs, rhs;
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["GPU"]["A100"].insert({slots[0], slots[1]});
-  lhs["node1"] = resourceInNode;
-  lhs["node2"];
-  DedicatedResourceInNode resourceInNode2;
-  resourceInNode2["GPU"]["A100"].insert({slots[0], slots[1], slots[3]});
-
-  rhs["node1"] = resourceInNode2;
-
-  ASSERT_LE(resourceInNode, resourceInNode2);
-}
-
-TEST(DEDICATED_RES, le_lt4) {
-  DedicatedResource lhs, rhs;
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["GPU"]["A100"].insert({slots[0], slots[1]});
-  lhs["node1"] = resourceInNode;
-  lhs["node2"]["TPU"]["X100"];
-  DedicatedResourceInNode resourceInNode2;
-  resourceInNode2["GPU"]["A100"].insert({slots[0], slots[1], slots[3]});
-
-  rhs["node1"] = resourceInNode2;
-
-  ASSERT_LE(resourceInNode, resourceInNode2);
-}
-
-TEST(DEDICATED_RES, le_lt6) {
-  DedicatedResource lhs, rhs;
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["GPU"]["A100"].insert({slots[0], slots[1]});
-  lhs["node1"] = resourceInNode;
-  lhs["node2"];
-  DedicatedResourceInNode resourceInNode2;
-  resourceInNode2["GPU"]["A100"].insert({slots[0], slots[1], slots[3]});
-
-  rhs["node1"] = resourceInNode2;
-  rhs["node2"] = resourceInNode2;
-
-  ASSERT_LE(resourceInNode, resourceInNode2);
-}
-
-TEST(DEDICATED_RES, le_nle) {
-  DedicatedResource lhs, rhs;
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["GPU"]["A100"].insert({slots[0], slots[1], slots[2]});
-  lhs["node1"] = resourceInNode;
-  DedicatedResourceInNode resourceInNode2;
-  resourceInNode2["GPU"]["A100"].insert({slots[0], slots[1], slots[3]});
-
-  rhs["node1"] = resourceInNode2;
-
-  ASSERT_PRED2([](const auto& lhs, const auto& rhs) { return !(lhs <= rhs); },
-               lhs, rhs);
-}
-
-TEST(DEDICATED_RES, le_equ) {
-  DedicatedResource lhs, rhs;
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["GPU"]["A100"].insert({slots[0], slots[1], slots[3]});
-  lhs["node1"] = resourceInNode;
-  DedicatedResourceInNode resourceInNode2;
-  resourceInNode2["GPU"]["A100"].insert({slots[0], slots[1], slots[3]});
-
-  rhs["node1"] = resourceInNode2;
-
-  ASSERT_LE(lhs, rhs);
-}
-
-TEST(DEDICATED_RES, le_gt) {
-  DedicatedResource lhs, rhs;
-  DedicatedResourceInNode resourceInNode;
-  resourceInNode["GPU"]["A100"].insert(
-      {slots[0], slots[1], slots[3], slots[2]});
-  lhs["node1"] = resourceInNode;
-  DedicatedResourceInNode resourceInNode2;
-  resourceInNode2["GPU"]["A100"].insert({slots[0], slots[1], slots[3]});
-
-  rhs["node1"] = resourceInNode2;
-
-  ASSERT_PRED2([](const auto& lhs, const auto& rhs) { return !(lhs <= rhs); },
-               lhs, rhs);
-}

@@ -662,7 +662,13 @@ void CranedKeeper::PutNodeIntoUnavailList(const std::string &crane_id) {
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   std::string ip_addr;
-  if (!crane::ResolveIpv4FromHostname(craned_id, &ip_addr)) {
+  uint32_t ipv4_addr;
+  absl::uint128 ipv6_addr;
+  if (crane::ResolveIpv4FromHostname(craned_id, &ipv4_addr)) {
+    ip_addr = crane::Ipv4ToString(ipv4_addr);
+  } else if (crane::ResolveIpv6FromHostname(craned_id, &ipv6_addr)) {
+    ip_addr = fmt::format("[{}]", crane::Ipv6ToString(ipv6_addr));
+  } else {
     ip_addr = craned_id;
   }
 
@@ -681,8 +687,8 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  CRANE_TRACE("Creating a channel to {}:{}. Channel count: {}", craned_id,
-              kCranedDefaultPort, m_channel_count_.fetch_add(1) + 1);
+  CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}", craned_id,
+              ip_addr, kCranedDefaultPort, m_channel_count_.fetch_add(1) + 1);
 
   if (g_config.ListenConf.UseTls) {
     SetTlsHostnameOverride(&channel_args, craned_id, g_config.ListenConf.Certs);

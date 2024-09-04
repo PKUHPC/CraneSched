@@ -17,6 +17,7 @@
 #include "PamUtil.h"
 
 #include <absl/strings/ascii.h>
+#include <absl/strings/str_join.h>
 #include <absl/strings/str_split.h>
 #include <fmt/format.h>
 #include <grpc++/grpc++.h>
@@ -147,7 +148,7 @@ bool PamGetRemoteUid(pam_handle_t *pamh, const char *user_name, uid_t *uid) {
   return true;
 }
 
-bool PamGetRemoteAddressPort(pam_handle_t *pamh, uint8_t addr[4],
+bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
                              uint16_t *port) {
   std::ifstream tcp_file("/proc/net/tcp");
   std::string line;
@@ -158,7 +159,8 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, uint8_t addr[4],
 
   pam_syslog(pamh, LOG_ERR, "[Crane] /proc/net/tcp opened.");
 
-  std::unordered_map<ino_t, std::string> inode_addr_port_map;
+  std::unordered_map<ino_t, std::pair<std::string, int /*ip version*/>>
+      inode_addr_port_map;
 
   pam_syslog(pamh, LOG_ERR, "[Crane] inode_addr_port_map inited.");
 
@@ -172,13 +174,35 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, uint8_t addr[4],
     pam_syslog(pamh, LOG_ERR, "[Crane] TCP conn %s %s, inode: %s",
                line_vec[0].c_str(), line_vec[2].c_str(), line_vec[9].c_str());
     ino_t inode_num = std::stoul(line_vec[9]);
-    inode_addr_port_map.emplace(inode_num, line_vec[2]);
+    inode_addr_port_map.emplace(inode_num, std::make_pair(line_vec[2], 4));
+  }
+
+  std::ifstream tcp6_file("/proc/net/tcp6");
+  std::string tcp6_line;
+  if (!tcp6_file) {
+    pam_syslog(pamh, LOG_ERR, "[Crane] Failed to open /proc/net/tcp6");
+    return PAM_PERM_DENIED;
+  }
+
+  pam_syslog(pamh, LOG_ERR, "[Crane] /proc/net/tcp6 opened.");
+
+  std::getline(tcp6_file, tcp6_line);
+  while (std::getline(tcp6_file, tcp6_line)) {
+    absl::StripAsciiWhitespace(&tcp6_line);
+    std::vector<std::string> line_vec =
+        absl::StrSplit(tcp6_line, ' ', absl::SkipWhitespace());
+
+    // 2nd row is remote address and 9th row is inode num.
+    pam_syslog(pamh, LOG_ERR, "[Crane] TCP6 conn %s %s, inode: %s",
+               line_vec[0].c_str(), line_vec[2].c_str(), line_vec[9].c_str());
+    ino_t inode_num = std::stoul(line_vec[9]);
+    inode_addr_port_map.emplace(inode_num, std::make_pair(line_vec[2], 6));
   }
 
 #ifndef NDEBUG
   std::string output;
   for (auto &&[k, v] : inode_addr_port_map) {
-    output += fmt::format("{}:{} ", k, v);
+    output += fmt::format("{}:{}:{} ", k, v.first, v.second);
   }
 
   pam_syslog(pamh, LOG_ERR, "[Crane] inode_addr_port_map: %s", output.c_str());
@@ -205,32 +229,52 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, uint8_t addr[4],
       auto iter = inode_addr_port_map.find(stat_buf.st_ino);
       if (iter == inode_addr_port_map.end()) {
         pam_syslog(pamh, LOG_ERR,
-                   "[Crane] inode num %lu not found in /proc/net/tcp",
+                   "[Crane] inode num %lu not found in /proc/net/tcp and "
+                   "/proc/net/tcp6",
                    stat_buf.st_ino);
       } else {
         std::vector<std::string> addr_port_hex =
-            absl::StrSplit(iter->second, ':');
+            absl::StrSplit(iter->second.first, ':');
         const std::string &addr_hex = addr_port_hex[0];
         const std::string &port_hex = addr_port_hex[1];
-        pam_syslog(pamh, LOG_ERR,
-                   "[Crane] hex addr and port for inode num %lu: %s:%s",
-                   stat_buf.st_ino, addr_hex.c_str(), port_hex.c_str());
 
-        for (int i = 0; i < 4; i++) {
-          std::string addr_part = addr_hex.substr(6 - 2 * i, 2);
-          addr[i] = std::stoul(addr_part, nullptr, 16);
+        if (iter->second.second == 4) {
+          // ipv4
           pam_syslog(pamh, LOG_ERR,
-                     "[Crane] Transform %d part of hex addr: %s to int %hhu", i,
-                     addr_part.c_str(), addr[i]);
+                     "[Crane] ipv4 hex addr and port for inode num %lu: %s:%s",
+                     stat_buf.st_ino, addr_hex.c_str(), port_hex.c_str());
+          uint8_t addr[4];
+          for (int i = 0; i < 4; i++) {
+            std::string addr_part = addr_hex.substr(6 - 2 * i, 2);
+            addr[i] = std::stoul(addr_part, nullptr, 16);
+            pam_syslog(
+                pamh, LOG_ERR,
+                "[Crane] Transform %d part of ipv4 hex addr: %s to int %hhu", i,
+                addr_part.c_str(), addr[i]);
+          }
+
+          address->assign(
+              fmt::format("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3]));
+        } else {
+          // ipv6
+          std::string addr[4];
+          for (int i = 0; i < 4; i++) {
+            std::string addr_part = addr_hex.substr(i * 8, 8);
+            uint32_t host_addr_part = ntohl(std::stoul(addr_part, nullptr, 16));
+            addr[i] = fmt::format("{:x}:{:x}", uint16_t(host_addr_part >> 16),
+                                  uint16_t(host_addr_part));
+            pam_syslog(pamh, LOG_ERR,
+                       "[Crane] Transform %d part of ipv6 hex addr: %s to %s",
+                       i, addr_part.c_str(), addr[i].c_str());
+          }
+          address->assign(absl::StrJoin(addr, ":"));
         }
-
         *port = std::stoul(port_hex, nullptr, 16);
-
-        pam_syslog(pamh, LOG_ERR,
-                   "[Crane] inode num %lu found in /proc/net/tcp: "
-                   "%hhu.%hhu.%hhu.%hhu:%hu",
-                   stat_buf.st_ino, addr[0], addr[1], addr[2], addr[3], *port);
-
+        pam_syslog(
+            pamh, LOG_ERR,
+            "[Crane] inode num %lu found in /proc/net/tcp and /proc/net/tcp6"
+            " [%s]:%hu",
+            stat_buf.st_ino, address->c_str(), *port);
         return true;
       }
     }
@@ -365,10 +409,10 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
 
     status = stub->QueryTaskEnvVariablesForward(&context, request, &reply);
     if (!status.ok()) {
-      pam_syslog(pamh, LOG_ERR,
+      pam_syslog(
+          pamh, LOG_ERR,
           "[Crane] QueryTaskEnvVariablesForward gRPC call failed: %s | %s",
-          status.error_message().c_str(),
-                 status.error_details().c_str());
+          status.error_message().c_str(), status.error_details().c_str());
       return false;
     }
 

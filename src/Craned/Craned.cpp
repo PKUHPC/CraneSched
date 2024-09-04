@@ -162,6 +162,12 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.ListenConf.CranedListenAddr = "0.0.0.0";
 
+      if (config["CranedListenPort"])
+        g_config.ListenConf.CranedListenPort =
+            config["CranedListenPort"].as<std::string>();
+      else
+        g_config.ListenConf.CranedListenPort = kCtldDefaultPort;
+
       g_config.ListenConf.CranedListenPort = kCranedDefaultPort;
 
       g_config.ListenConf.UnixSocketListenAddr =
@@ -341,25 +347,48 @@ void ParseConfig(int argc, char** argv) {
             for (auto& dev : devices) {
               each_node_device[name].push_back(dev);
             }
-            if (crane::IsAValidIpv4Address(name)) {
-              CRANE_INFO(
-                  "Node name `{}` is a valid ipv4 address and doesn't "
-                  "need resolving.",
-                  name);
-              g_config.Ipv4ToCranedHostname[name] = name;
-              g_config.CranedRes[name] = node_res;
-            } else {
-              std::string ipv4;
-              if (!crane::ResolveIpv4FromHostname(name, &ipv4)) {
+            uint32_t ipv4;
+            absl::uint128 ipv6;
+            switch (crane::GetIpAddressVersion(name)) {
+            case -1:
+              if (crane::ResolveIpv4FromHostname(name, &ipv4)) {
+                g_config.Ipv4ToCranedHostname[ipv4] = name;
+                CRANE_INFO("Resolve hostname `{}` to `{}`", name,
+                           crane::Ipv4ToString(ipv4));
+              } else if (crane::ResolveIpv6FromHostname(name, &ipv6)) {
+                g_config.Ipv6ToCranedHostname[ipv6] = name;
+                CRANE_INFO("Resolve hostname `{}` to `{}`", name,
+                           crane::Ipv6ToString(ipv6));
+              } else {
                 CRANE_ERROR("Init error: Cannot resolve hostname of `{}`",
                             name);
                 std::exit(1);
               }
-              CRANE_INFO("Resolve hostname `{}` to `{}`", name, ipv4);
-              g_config.Ipv4ToCranedHostname[ipv4] = name;
+              break;
 
-              g_config.CranedRes[name] = node_res;
+            case 4:
+              CRANE_INFO(
+                  "Node name `{}` is a valid ipv4 address and doesn't "
+                  "need resolving.",
+                  name);
+              if (!crane::Ipv4ToUint32(name, &ipv4)) {
+                std::exit(1);
+              }
+              g_config.Ipv4ToCranedHostname[ipv4] = name;
+              break;
+
+            case 6:
+              CRANE_INFO(
+                  "Node name `{}` is a valid ipv6 address and doesn't "
+                  "need resolving.",
+                  name);
+              if (!crane::Ipv6ToUint128(name, &ipv6)) {
+                std::exit(1);
+              }
+              g_config.Ipv6ToCranedHostname[ipv6] = name;
+              break;
             }
+            g_config.CranedRes[name] = node_res;
           }
         }
       }
@@ -459,12 +488,15 @@ void ParseConfig(int argc, char** argv) {
     g_config.ControlMachine = parsed_args["server-address"].as<std::string>();
   }
 
-  // Check the format of CranedListen
-  std::regex ipv4_re(R"(^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$)");
-  std::smatch ivp4_match;
-  if (!std::regex_match(g_config.ListenConf.CranedListenAddr, ivp4_match,
-                        ipv4_re)) {
-    CRANE_ERROR("Illegal Ctld address format.");
+  if(crane::GetIpAddressVersion(g_config.ListenConf.CranedListenAddr)==-1){
+    CRANE_ERROR("Listening address is invalid.");
+    std::exit(1);
+  }
+
+  std::regex regex_port(R"(^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|)"
+                        R"(65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$)");
+  if (!std::regex_match(g_config.ListenConf.CranedListenPort, regex_port)) {
+    CRANE_ERROR("Listening port is invalid.");
     std::exit(1);
   }
 

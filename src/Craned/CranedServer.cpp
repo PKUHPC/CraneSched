@@ -72,37 +72,26 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
   CRANE_TRACE("Receive QueryTaskIdFromPort RPC from {}: port: {}",
               context->peer(), request->port());
 
-  std::string port_hex = fmt::format("{:0>4X}", request->port());
-
   ino_t inode;
+  bool inode_found = false;
 
   // find inode
   // 1._find_match_in_tcp_file
-  std::string tcp_path{"/proc/net/tcp"};
-  std::ifstream tcp_in(tcp_path, std::ios::in);
-  std::string tcp_line;
-  bool inode_found = false;
-  if (tcp_in) {
-    getline(tcp_in, tcp_line);  // Skip the header line
-    while (getline(tcp_in, tcp_line)) {
-      tcp_line = absl::StripAsciiWhitespace(tcp_line);
-      std::vector<std::string> tcp_line_vec =
-          absl::StrSplit(tcp_line, absl::ByAnyChar(" :"), absl::SkipEmpty());
-      CRANE_TRACE("Checking port {} == {}", port_hex, tcp_line_vec[2]);
-      if (port_hex == tcp_line_vec[2]) {
-        inode_found = true;
-        inode = std::stoul(tcp_line_vec[13]);
-        CRANE_TRACE("Inode num for port {} is {}", request->port(), inode);
-        break;
-      }
-    }
-    if (!inode_found) {
-      CRANE_TRACE("Inode num for port {} is not found.", request->port());
-      response->set_ok(false);
-      return Status::OK;
-    }
-  } else {  // can't find file
-    CRANE_ERROR("Can't open file: {}", tcp_path);
+  inode_found =
+      crane::FindTcpInodeByPort(request->port(), &inode, "/proc/net/tcp");
+  if (!inode_found) {
+    CRANE_TRACE(
+        "Inode num for port {} is not found in /proc/net/tcp, try "
+        "/proc/net/tcp6.",
+        request->port());
+    inode_found =
+        crane::FindTcpInodeByPort(request->port(), &inode, "/proc/net/tcp6");
+  }
+
+  if (!inode_found) {
+    CRANE_TRACE("Inode num for port {} is not found.", request->port());
+    response->set_ok(false);
+    return Status::OK;
   }
 
   // 2.find_pid_by_inode
@@ -231,21 +220,49 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
 
   // May be craned or cfored
   std::string crane_service_port;
+  std::string crane_service_address = request->ssh_remote_address();
 
-  // Check whether the remote address is in the addresses of CraneD nodes.
-  if (g_config.Ipv4ToCranedHostname.contains(request->ssh_remote_address())) {
-    CRANE_TRACE(
-        "Receive QueryTaskIdFromPortForward from Pam module: "
-        "ssh_remote_port: {}, ssh_remote_address: {}. "
-        "This ssh comes from a CraneD node. uid: {}",
-        request->ssh_remote_port(), request->ssh_remote_address(),
-        request->uid());
-    // In the addresses of CraneD nodes. This ssh request comes from a CraneD
-    // node. Check if the remote port belongs to a task. If so, move it in to
-    // the cgroup of this task.
-    crane_service_port = kCranedDefaultPort;
-    remote_is_craned = true;
+  auto ip_version = crane::GetIpAddressVersion(request->ssh_remote_address());
+
+  uint32_t crane_service_address_ipv4;
+  absl::uint128 crane_service_address_ipv6;
+  if (ip_version == 4 &&
+      crane::Ipv4ToUint32(crane_service_address, &crane_service_address_ipv4)) {
+    if (g_config.Ipv4ToCranedHostname.contains(crane_service_address_ipv4)) {
+      CRANE_TRACE(
+          "Receive QueryTaskIdFromPortForward from Pam module: "
+          "ssh_remote_port: {}, ssh_remote_address: {}. "
+          "This ssh comes from a CraneD node. uid: {}",
+          request->ssh_remote_port(), request->ssh_remote_address(),
+          request->uid());
+      // In the addresses of CraneD nodes. This ssh request comes from a
+      // CraneD node. Check if the remote port belongs to a task. If so, move
+      // it in to the cgroup of this task.
+      crane_service_port = g_config.ListenConf.CranedListenPort;
+      remote_is_craned = true;
+    }
+  } else if (ip_version == 6 &&
+             crane::Ipv6ToUint128(crane_service_address,
+                                  &crane_service_address_ipv6)) {
+    if (g_config.Ipv6ToCranedHostname.contains(crane_service_address_ipv6)) {
+      CRANE_TRACE(
+          "Receive QueryTaskIdFromPortForward from Pam module: "
+          "ssh_remote_port: {}, ssh_remote_address: {}. "
+          "This ssh comes from a CraneD node. uid: {}",
+          request->ssh_remote_port(), request->ssh_remote_address(),
+          request->uid());
+      crane_service_port = g_config.ListenConf.CranedListenPort;
+      remote_is_craned = true;
+    }
   } else {
+    CRANE_ERROR(
+        "Unknown ip version for address {} or error converting ip to uint",
+        crane_service_address);
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  if (!remote_is_craned) {
     // Not in the addresses of CraneD nodes. This ssh request comes from a user.
     // Check if the user's uid is running a task. If so, move it in to the
     // cgroup of his first task. If not so, reject this ssh request.
@@ -263,8 +280,16 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
   std::shared_ptr<Channel> channel_of_remote_service;
   if (g_config.ListenConf.UseTls) {
     std::string remote_hostname;
-    ok = crane::ResolveHostnameFromIpv4(request->ssh_remote_address(),
-                                        &remote_hostname);
+    if (ip_version == 4) {
+      ok = crane::ResolveHostnameFromIpv4(crane_service_address_ipv4,
+                                          &remote_hostname);
+    } else if (ip_version == 6) {
+      ok = crane::ResolveHostnameFromIpv6(crane_service_address_ipv6,
+                                          &remote_hostname);
+    } else {
+      ok = false;
+    }
+
     if (ok) {
       CRANE_TRACE("Remote address {} was resolved as {}",
                   request->ssh_remote_address(), remote_hostname);
@@ -276,8 +301,10 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
                   request->ssh_remote_address());
     }
   } else {
-    channel_of_remote_service = CreateTcpInsecureChannel(
-        request->ssh_remote_address(), crane_service_port);
+    if (crane::GetIpAddressVersion(request->ssh_remote_address()) == 6)
+      crane_service_address = fmt::format("[{}]", crane_service_address);
+    channel_of_remote_service =
+        CreateTcpInsecureChannel(crane_service_address, crane_service_port);
   }
 
   if (!channel_of_remote_service) {
@@ -512,20 +539,25 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
+  std::string craned_listen_addr = listen_conf.CranedListenAddr;
+  if (crane::GetIpAddressVersion(craned_listen_addr) == 6) {
+    // grpc needs to use [] to wrap ipv6 address
+    craned_listen_addr = fmt::format("[{}]", craned_listen_addr);
+  }
   if (listen_conf.UseTls) {
-    ServerBuilderAddTcpTlsListeningPort(&builder, listen_conf.CranedListenAddr,
+    ServerBuilderAddTcpTlsListeningPort(&builder, craned_listen_addr,
                                         listen_conf.CranedListenPort,
                                         listen_conf.TlsCerts);
   } else {
-    ServerBuilderAddTcpInsecureListeningPort(
-        &builder, listen_conf.CranedListenAddr, listen_conf.CranedListenPort);
+    ServerBuilderAddTcpInsecureListeningPort(&builder, craned_listen_addr,
+                                             listen_conf.CranedListenPort);
   }
 
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
   CRANE_INFO("Craned is listening on [{}, {}:{}]",
-             listen_conf.UnixSocketListenAddr, listen_conf.CranedListenAddr,
+             listen_conf.UnixSocketListenAddr, craned_listen_addr,
              listen_conf.CranedListenPort);
 
   g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
