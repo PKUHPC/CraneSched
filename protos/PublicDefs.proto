@@ -142,6 +142,8 @@ message TaskToCtld {
 
   string excludes = 34;
   string nodelist = 35;
+
+  map<string, uint32> licenses_count = 36;
 }
 
 message TaskInEmbeddedDb {
@@ -245,7 +247,8 @@ message TaskInfo {
   string username = 15;
   string qos = 16;
   ResourceView res_view = 17;
-
+  string licenses = 18;
+  
   string extra_attr = 20;
 
   // Dynamic task information
@@ -367,4 +370,11 @@ message QosInfo {
 message TimeInterval {
   google.protobuf.Timestamp lower_bound = 1;
   google.protobuf.Timestamp upper_bound = 2;
+}
+
+message LicenseInfo {
+  string name = 1;
+  uint32 total = 2;
+  uint32 used = 3;
+  uint32 free = 4;
 }
