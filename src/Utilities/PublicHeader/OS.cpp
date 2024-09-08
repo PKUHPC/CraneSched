@@ -16,18 +16,16 @@
 
 #include "crane/OS.h"
 
-#ifdef _WIN32
-#  error "Unsupported OS\n"
-#elif __linux__ || __unix__
+#if defined(__linux__) || defined(__unix__)
 #  include <sys/sysinfo.h>
 #  include <sys/utsname.h>
+#elif defined(_WIN32)
+#  error "Win32 Platform is not supported now!"
 #else
-#  error "Unidentified OS\n"
+#  error "Unsupported OS"
 #endif
 
-namespace util {
-
-namespace os {
+namespace util::os {
 
 bool DeleteFile(std::string const& p) {
   std::error_code ec;
@@ -131,7 +129,6 @@ bool GetSystemReleaseInfo(SystemRelInfo* info) {
 
 absl::Time GetSystemBootTime() {
 #if defined(__linux__) || defined(__unix__)
-
   struct sysinfo system_info;
   if (sysinfo(&system_info) != 0) {
     CRANE_ERROR("Failed to get sysinfo {}.", strerror(errno));
@@ -147,6 +144,4 @@ absl::Time GetSystemBootTime() {
 #endif
 }
 
-}  // namespace os
-
-}  // namespace util
+}  // namespace util::os
