@@ -23,11 +23,11 @@
 namespace Ctld {
 
 void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
-  DedicatedResourceInNode dres_in_node;
+  CranedRemoteMeta remote_meta;
 
   auto stub = g_craned_keeper->GetCranedStub(craned_id);
   if (stub != nullptr && !stub->Invalid()) {
-    CraneErr err = stub->QueryActualDres(&dres_in_node);
+    CraneErr err = stub->QueryCranedRemoteMeta(&remote_meta);
     if (err != CraneErr::kOk) {
       CRANE_ERROR("Failed to query actual resource from craned {}", craned_id);
       return;
@@ -53,12 +53,14 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
   auto node_meta = craned_meta_map_[craned_id];
   node_meta->alive = true;
 
+  node_meta->remote_meta = std::move(remote_meta);
+
   node_meta->res_total.allocatable_res +=
       node_meta->static_meta.res.allocatable_res;
   node_meta->res_avail.allocatable_res +=
       node_meta->static_meta.res.allocatable_res;
-  node_meta->res_total.dedicated_res += dres_in_node;
-  node_meta->res_avail.dedicated_res += dres_in_node;
+  node_meta->res_total.dedicated_res += node_meta->remote_meta.dres_in_node;
+  node_meta->res_avail.dedicated_res += node_meta->remote_meta.dres_in_node;
 
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
@@ -66,8 +68,8 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
 
     part_global_meta.res_total += node_meta->static_meta.res.allocatable_res;
     part_global_meta.res_avail += node_meta->static_meta.res.allocatable_res;
-    part_global_meta.res_total += dres_in_node;
-    part_global_meta.res_avail += dres_in_node;
+    part_global_meta.res_total += node_meta->remote_meta.dres_in_node;
+    part_global_meta.res_avail += node_meta->remote_meta.dres_in_node;
 
     part_global_meta.alive_craned_cnt++;
   }
@@ -234,6 +236,8 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     CRANE_TRACE("Parsing node {}", craned_name);
 
     auto& craned_meta = craned_map[craned_name];
+    craned_meta.remote_meta.craned_version = "unknown";
+    craned_meta.remote_meta.sys_rel_info.name = "unknown";
 
     auto& static_meta = craned_meta.static_meta;
     static_meta.res.allocatable_res.cpu_count =
@@ -617,6 +621,19 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
       static_cast<crane::grpc::ResourceInNode>(craned_meta.res_in_use);
 
   craned_info->set_hostname(craned_meta.static_meta.hostname);
+  craned_info->set_craned_version(craned_meta.remote_meta.craned_version);
+  craned_info->mutable_craned_start_time()->set_seconds(
+      ToUnixSeconds(craned_meta.remote_meta.craned_start_time));
+  craned_info->mutable_system_boot_time()->set_seconds(
+      ToUnixSeconds(craned_meta.remote_meta.system_boot_time));
+  craned_info->mutable_last_busy_time()->set_seconds(
+      ToUnixSeconds(craned_meta.last_busy_time));
+
+  std::string system_desc =
+      fmt::format("{} {} {}", craned_meta.remote_meta.sys_rel_info.name,
+                  craned_meta.remote_meta.sys_rel_info.release,
+                  craned_meta.remote_meta.sys_rel_info.version);
+  craned_info->set_system_desc(system_desc);
 
   craned_info->set_running_task_num(
       craned_meta.running_task_resource_map.size());

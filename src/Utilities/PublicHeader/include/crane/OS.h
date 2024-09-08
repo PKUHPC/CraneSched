@@ -26,6 +26,12 @@
 #include "crane/Logger.h"
 #include "crane/OS.h"
 
+struct SystemRelInfo {
+  std::string name;
+  std::string release;
+  std::string version;
+};
+
 namespace util {
 
 namespace os {
@@ -49,6 +55,10 @@ void SetCloseOnExecOnFdRange(int fd_begin, int fd_end);
 void SetCloseOnExecFromFd(int fd_begin);
 
 bool SetMaxFileDescriptorNumber(unsigned long num);
+
+bool GetSystemReleaseInfo(SystemRelInfo* info);
+
+absl::Time GetSystemBootTime();
 
 }  // namespace os
 

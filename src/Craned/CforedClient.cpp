@@ -203,6 +203,7 @@ void CforedClient::AsyncSendRecvThread_() {
       task_id_t task_id = reply.payload_task_input_req().task_id();
       const std::string& msg = reply.payload_task_input_req().msg();
 
+      CRANE_TRACE("Forwarding user input {} to task #{}", msg, task_id);
       m_mtx_.Lock();
       auto fwd_meta_it = m_task_fwd_meta_map_.find(task_id);
       if (fwd_meta_it != m_task_fwd_meta_map_.end()) {

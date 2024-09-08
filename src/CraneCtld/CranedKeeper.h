@@ -56,7 +56,7 @@ class CranedStub {
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
-  CraneErr QueryActualDres(DedicatedResourceInNode *resource);
+  CraneErr QueryCranedRemoteMeta(CranedRemoteMeta *meta);
 
   bool Invalid() const { return m_invalid_; }
 

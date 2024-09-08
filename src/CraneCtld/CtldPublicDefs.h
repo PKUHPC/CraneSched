@@ -167,12 +167,21 @@ struct CranedStaticMeta {
   ResourceInNode res;
 };
 
+struct CranedRemoteMeta {
+  DedicatedResourceInNode dres_in_node;
+  SystemRelInfo sys_rel_info;
+  std::string craned_version;
+  absl::Time craned_start_time;
+  absl::Time system_boot_time;
+};
+
 /**
  * Represent the runtime status on a Craned node.
  * A Node is uniquely identified by (partition id, node index).
  */
 struct CranedMeta {
   CranedStaticMeta static_meta;
+  CranedRemoteMeta remote_meta;
 
   bool alive{false};
 
@@ -183,6 +192,7 @@ struct CranedMeta {
 
   bool drain{false};
   std::string state_reason;
+  absl::Time last_busy_time;
 
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
@@ -571,10 +581,16 @@ struct TaskInCtld {
     task_info->set_node_num(node_num);
     task_info->set_cmd_line(cmd_line);
     task_info->set_cwd(cwd);
+    task_info->mutable_req_nodes()->Assign(included_nodes.begin(),
+                                           included_nodes.end());
+    task_info->mutable_exclude_nodes()->Assign(excluded_nodes.begin(),
+                                               excluded_nodes.end());
 
     task_info->set_extra_attr(extra_attr);
 
     task_info->set_held(held);
+    task_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
+                                                executing_craned_ids.end());
 
     *task_info->mutable_res_view() =
         static_cast<crane::grpc::ResourceView>(requested_node_res_view);

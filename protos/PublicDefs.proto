@@ -160,7 +160,7 @@ message RuntimeAttrOfTask {
   int32 requeue_count = 11;
   repeated string craned_ids = 12;
   TaskStatus status = 13;
-  uint32 exit_code = 14;;
+  uint32 exit_code = 14;
 
   google.protobuf.Timestamp submit_time = 15;
   google.protobuf.Timestamp start_time = 16;
@@ -237,7 +237,7 @@ message TaskInfo {
   google.protobuf.Timestamp start_time = 8;
   google.protobuf.Timestamp end_time = 9;
   google.protobuf.Timestamp submit_time = 10;
-  
+
   string account = 11;
   uint32 node_num = 12;
   string cmd_line = 13;
@@ -245,8 +245,10 @@ message TaskInfo {
   string username = 15;
   string qos = 16;
   ResourceView res_view = 17;
+  repeated string req_nodes = 19;
+  repeated string exclude_nodes = 20;
 
-  string extra_attr = 20;
+  string extra_attr = 21;
 
   // Dynamic task information
   bool held = 30;
@@ -264,6 +266,7 @@ message TaskInfo {
   // a negative elapsed time might occur.
   // To avoid this, the elapsed time of a task is calculated on the CraneCtld side.
   google.protobuf.Duration elapsed_time = 37;
+  repeated string execution_node = 38;
 }
 
 message PartitionInfo {
@@ -290,6 +293,12 @@ message CranedInfo {
 
   repeated string partition_names = 10;
   uint32 running_task_num = 11;
+
+  string craned_version = 12;
+  string system_desc = 13;
+  google.protobuf.Timestamp craned_start_time = 14;
+  google.protobuf.Timestamp system_boot_time = 15;
+  google.protobuf.Timestamp last_busy_time = 16;
 }
 
 message TrimmedPartitionInfo {
@@ -367,4 +376,18 @@ message QosInfo {
 message TimeInterval {
   google.protobuf.Timestamp lower_bound = 1;
   google.protobuf.Timestamp upper_bound = 2;
+}
+
+message SystemRelInfo {
+  string name = 1;
+  string release = 2;
+  string version = 3;
+}
+
+message CranedRemoteMeta {
+  DedicatedResourceInNode dres_in_node = 1;
+  SystemRelInfo sys_rel_info = 2;
+  string craned_version = 3;
+  google.protobuf.Timestamp craned_start_time = 4;
+  google.protobuf.Timestamp system_boot_time = 5;
 }

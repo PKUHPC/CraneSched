@@ -895,6 +895,15 @@ void TaskScheduler::ScheduleThread_() {
 
       begin = std::chrono::steady_clock::now();
 
+      {
+        auto now = absl::Now();
+
+        for (auto const& [craned_id, _] : craned_exec_requests_map) {
+          auto craned_meta_ptr = g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
+                  now;
+        }
+      }
+
       HashSet<std::pair<CranedId, task_id_t>> failed_to_exec_task_id_set;
       for (auto const& [craned_id, tasks] : craned_exec_requests_map) {
         auto stub = g_craned_keeper->GetCranedStub(craned_id);

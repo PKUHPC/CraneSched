@@ -544,14 +544,14 @@ message StreamCtldReply {
   }
 }
 
-message QueryActualDresRequest{}
+message QueryCranedRemoteMetaRequest {}
 
-message QueryActualDresReply{
+message QueryCranedRemoteMetaReply {
   bool ok = 1;
-  DedicatedResourceInNode dres_in_node = 2;
+  CranedRemoteMeta craned_remote_meta = 2;
 }
 
-message StreamCrunRequest{
+message StreamCrunRequest {
   enum CrunRequestType {
     TASK_REQUEST = 0;
     TASK_COMPLETION_REQUEST = 1;
@@ -739,7 +739,8 @@ service Craned {
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns(CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns(ReleaseCgroupForTasksReply);
 
-  rpc QueryActualDres(QueryActualDresRequest) returns(QueryActualDresReply);
+  rpc QueryCranedRemoteMeta(QueryCranedRemoteMetaRequest) returns(QueryCranedRemoteMetaReply);
+
   /*
   If the task is an interactive task, the resource uuid is also revoked.
    If there's no process in this interactive task, just deallocate all the resources.
@@ -749,7 +750,6 @@ service Craned {
   rpc TerminateTasks(TerminateTasksRequest) returns (TerminateTasksReply);
   rpc TerminateOrphanedTask(TerminateOrphanedTaskRequest) returns (TerminateOrphanedTaskReply);
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
-
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);

@@ -16,9 +16,16 @@
 
 #include "crane/OS.h"
 
-namespace util {
+#if defined(__linux__) || defined(__unix__)
+#  include <sys/sysinfo.h>
+#  include <sys/utsname.h>
+#elif defined(_WIN32)
+#  error "Win32 Platform is not supported now!"
+#else
+#  error "Unsupported OS"
+#endif
 
-namespace os {
+namespace util::os {
 
 bool DeleteFile(std::string const& p) {
   std::error_code ec;
@@ -102,6 +109,39 @@ bool SetMaxFileDescriptorNumber(unsigned long num) {
   return setrlimit(RLIMIT_NOFILE, &rlim) == 0;
 }
 
-}  // namespace os
+bool GetSystemReleaseInfo(SystemRelInfo* info) {
+#if defined(__linux__) || defined(__unix__)
+  utsname utsname_info{};
 
-}  // namespace util
+  if (uname(&utsname_info) != -1) {
+    info->name = utsname_info.sysname;
+    info->release = utsname_info.release;
+    info->version = utsname_info.version;
+    return true;
+  }
+
+  return false;
+
+#else
+#  error "Unsupported OS"
+#endif
+}
+
+absl::Time GetSystemBootTime() {
+#if defined(__linux__) || defined(__unix__)
+  struct sysinfo system_info;
+  if (sysinfo(&system_info) != 0) {
+    CRANE_ERROR("Failed to get sysinfo {}.", strerror(errno));
+    return {};
+  }
+
+  absl::Time current_time = absl::FromTimeT(time(nullptr));
+  absl::Duration uptime = absl::Seconds(system_info.uptime);
+  return current_time - uptime;
+
+#else
+#  error "Unsupported OS"
+#endif
+}
+
+}  // namespace util::os
