@@ -111,41 +111,39 @@ bool SetMaxFileDescriptorNumber(unsigned long num) {
   return setrlimit(RLIMIT_NOFILE, &rlim) == 0;
 }
 
-bool GetSystemReleaseInfo(std::string* system_name, std::string* system_release,
-                          std::string* system_version) {
-#ifdef _WIN32
-  // Windows
-#elif __linux__ || __unix__
+bool GetSystemReleaseInfo(SystemRelInfo* info) {
+#if defined(__linux__) || defined(__unix__)
   utsname utsname_info{};
 
   if (uname(&utsname_info) != -1) {
-    *system_name = utsname_info.sysname;
-    *system_release = utsname_info.release;
-    *system_version = utsname_info.version;
+    info->name = utsname_info.sysname;
+    info->release = utsname_info.release;
+    info->version = utsname_info.version;
     return true;
-  } else {
-    return false;
   }
+
+  return false;
+
 #else
-  // Unidentified OS
+#  error "Unsupported OS"
 #endif
 }
 
 absl::Time GetSystemBootTime() {
-#ifdef _WIN32
-  // Windows
-#elif __linux__ || __unix__
+#if defined(__linux__) || defined(__unix__)
+
   struct sysinfo system_info;
   if (sysinfo(&system_info) != 0) {
     CRANE_ERROR("Failed to get sysinfo {}.", strerror(errno));
-    return absl::Time();
-  } else {
-    absl::Time current_time = absl::FromTimeT(time(nullptr));
-    absl::Duration uptime = absl::Seconds(system_info.uptime);
-    return current_time - uptime;
+    return {};
   }
+
+  absl::Time current_time = absl::FromTimeT(time(nullptr));
+  absl::Duration uptime = absl::Seconds(system_info.uptime);
+  return current_time - uptime;
+
 #else
-  // Unidentified OS
+#  error "Unsupported OS"
 #endif
 }
 

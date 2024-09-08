@@ -36,7 +36,6 @@
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
 
-using Craned::CranedNode;
 using Craned::g_config;
 using Craned::Partition;
 
@@ -237,7 +236,7 @@ void ParseConfig(int argc, char** argv) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {
           auto node = it->as<YAML::Node>();
-          auto node_ptr = std::make_shared<CranedNode>();
+          auto node_res = std::make_shared<ResourceInNode>();
           std::list<std::string> name_list;
 
           if (node["name"]) {
@@ -251,7 +250,8 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
 
           if (node["cpu"])
-            node_ptr->cpu = std::stoul(node["cpu"].as<std::string>());
+            node_res->allocatable_res.cpu_count =
+                cpu_t(std::stoul(node["cpu"].as<std::string>()));
           else
             std::exit(1);
 
@@ -272,7 +272,8 @@ void ParseConfig(int argc, char** argv) {
             else if (mem_group[2] == "G")
               memory_bytes *= 1024 * 1024 * 1024;
 
-            node_ptr->memory_bytes = memory_bytes;
+            node_res->allocatable_res.memory_bytes = memory_bytes;
+            node_res->allocatable_res.memory_sw_bytes = memory_bytes;
           } else
             std::exit(1);
 
@@ -346,7 +347,7 @@ void ParseConfig(int argc, char** argv) {
                   "need resolving.",
                   name);
               g_config.Ipv4ToCranedHostname[name] = name;
-              g_config.CranedNodes[name] = node_ptr;
+              g_config.CranedRes[name] = node_res;
             } else {
               std::string ipv4;
               if (!crane::ResolveIpv4FromHostname(name, &ipv4)) {
@@ -357,7 +358,7 @@ void ParseConfig(int argc, char** argv) {
               CRANE_INFO("Resolve hostname `{}` to `{}`", name, ipv4);
               g_config.Ipv4ToCranedHostname[ipv4] = name;
 
-              g_config.CranedNodes[name] = node_ptr;
+              g_config.CranedRes[name] = node_res;
             }
           }
         }
@@ -390,8 +391,8 @@ void ParseConfig(int argc, char** argv) {
           for (auto&& node : name_list) {
             std::string node_s{node};
 
-            auto node_it = g_config.CranedNodes.find(node_s);
-            if (node_it != g_config.CranedNodes.end()) {
+            auto node_it = g_config.CranedRes.find(node_s);
+            if (node_it != g_config.CranedRes.end()) {
               part.nodes.emplace(node_it->first);
               CRANE_INFO("Find node {} in partition {}", node_it->first, name);
             } else {
@@ -475,7 +476,7 @@ void ParseConfig(int argc, char** argv) {
   }
   g_config.Hostname.assign(hostname);
 
-  if (!g_config.CranedNodes.contains(g_config.Hostname)) {
+  if (!g_config.CranedRes.contains(g_config.Hostname)) {
     CRANE_ERROR("This machine {} is not contained in Nodes!",
                 g_config.Hostname);
     std::exit(1);
@@ -485,7 +486,7 @@ void ParseConfig(int argc, char** argv) {
   // get this node device info
   // Todo: Auto detect device
   {
-    auto node_ptr = g_config.CranedNodes.at(g_config.Hostname);
+    auto node_res = g_config.CranedRes.at(g_config.Hostname);
     auto& devices = each_node_device[g_config.Hostname];
     for (auto& dev_arg : devices) {
       std::string name, type, env_injector;
@@ -498,7 +499,7 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       } else {
         dev->dev_id = dev->device_metas.front().path;
-        node_ptr->dedicated_resource.name_type_slots_map[dev->name][dev->type]
+        node_res->dedicated_res.name_type_slots_map[dev->name][dev->type]
             .emplace(dev->dev_id);
         Craned::g_this_node_device[dev->dev_id] = std::move(dev);
       }
@@ -524,19 +525,13 @@ void ParseConfig(int argc, char** argv) {
 
   g_config.CranedIdOfThisNode = g_config.Hostname;
   CRANE_INFO("CranedId of this machine: {}", g_config.CranedIdOfThisNode);
-  {
-    auto& meta = g_config.CranedMeta;
-    auto ok = util::os::GetSystemReleaseInfo(
-        &meta.SystemName, &meta.SystemRelease, &meta.SystemVersion);
-    if (!ok) {
-      CRANE_ERROR("Error when get system release info");
-      meta.SystemName = "";
-      meta.SystemRelease = "";
-      meta.SystemVersion = "";
-    }
-  }
-  g_config.CranedMeta.CranedStartTime = absl::Now();
 
+  auto& meta = g_config.CranedMeta;
+  if (bool ok = util::os::GetSystemReleaseInfo(&meta.SysInfo); !ok) {
+    CRANE_ERROR("Error when get system release info");
+  }
+
+  g_config.CranedMeta.CranedStartTime = absl::Now();
   g_config.CranedMeta.SystemBootTime = util::os::GetSystemBootTime();
 }
 

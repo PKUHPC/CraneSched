@@ -18,7 +18,7 @@ syntax = "proto3";
 
 package crane.grpc;
 option go_package = "/protos";
-import "google/protobuf/timestamp.proto";
+
 import "PublicDefs.proto";
 
 message TaskStatusChangeRequest {
@@ -544,18 +544,14 @@ message StreamCtldReply {
   }
 }
 
-message QueryCranedMetaRequest{}
+message QueryCranedRemoteMetaRequest {}
 
-message QueryCranedMetaReply{
+message QueryCranedRemoteMetaReply {
   bool ok = 1;
-  DedicatedResourceInNode dres_in_node = 2;
-  string craned_version = 3;
-  string craned_system = 4;
-  google.protobuf.Timestamp craned_start_time = 5;
-  google.protobuf.Timestamp system_boot_time = 6;
+  CranedRemoteMeta craned_remote_meta = 2;
 }
 
-message StreamCrunRequest{
+message StreamCrunRequest {
   enum CrunRequestType {
     TASK_REQUEST = 0;
     TASK_COMPLETION_REQUEST = 1;
@@ -743,7 +739,8 @@ service Craned {
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns(CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns(ReleaseCgroupForTasksReply);
 
-  rpc QueryCranedMeta(QueryCranedMetaRequest) returns(QueryCranedMetaReply);
+  rpc QueryCranedRemoteMeta(QueryCranedRemoteMetaRequest) returns(QueryCranedRemoteMetaReply);
+
   /*
   If the task is an interactive task, the resource uuid is also revoked.
    If there's no process in this interactive task, just deallocate all the resources.

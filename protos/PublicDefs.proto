@@ -237,7 +237,7 @@ message TaskInfo {
   google.protobuf.Timestamp start_time = 8;
   google.protobuf.Timestamp end_time = 9;
   google.protobuf.Timestamp submit_time = 10;
-  
+
   string account = 11;
   uint32 node_num = 12;
   string cmd_line = 13;
@@ -295,7 +295,7 @@ message CranedInfo {
   uint32 running_task_num = 11;
 
   string craned_version = 12;
-  string system_name = 13;
+  string system_desc = 13;
   google.protobuf.Timestamp craned_start_time = 14;
   google.protobuf.Timestamp system_boot_time = 15;
   google.protobuf.Timestamp last_busy_time = 16;
@@ -376,4 +376,18 @@ message QosInfo {
 message TimeInterval {
   google.protobuf.Timestamp lower_bound = 1;
   google.protobuf.Timestamp upper_bound = 2;
+}
+
+message SystemRelInfo {
+  string name = 1;
+  string release = 2;
+  string version = 3;
+}
+
+message CranedRemoteMeta {
+  DedicatedResourceInNode dres_in_node = 1;
+  SystemRelInfo sys_rel_info = 2;
+  string craned_version = 3;
+  google.protobuf.Timestamp craned_start_time = 4;
+  google.protobuf.Timestamp system_boot_time = 5;
 }

@@ -403,7 +403,7 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
   }
 
   std::string execution_node = execution_node_opt.value();
-  if (!g_config.CranedNodes.contains(execution_node)) {
+  if (!g_config.CranedRes.contains(execution_node)) {
     response->set_ok(false);
     return Status::OK;
   }
@@ -475,22 +475,27 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::QueryCranedMeta(
+grpc::Status CranedServiceImpl::QueryCranedRemoteMeta(
     grpc::ServerContext *context,
-    const ::crane::grpc::QueryCranedMetaRequest *request,
-    crane::grpc::QueryCranedMetaReply *response) {
-  auto &dedicated_resource =
-      g_config.CranedNodes[g_config.CranedIdOfThisNode]->dedicated_resource;
-  response->mutable_dres_in_node()->CopyFrom(
-      static_cast<crane::grpc::DedicatedResourceInNode>(dedicated_resource));
+    const ::crane::grpc::QueryCranedRemoteMetaRequest *request,
+    crane::grpc::QueryCranedRemoteMetaReply *response) {
+  auto *grpc_meta = response->mutable_craned_remote_meta();
 
-  response->set_craned_version(CRANE_VERSION_STRING);
-  response->set_craned_system(fmt::format(
-      "{} {} {}", g_config.CranedMeta.SystemName,
-      g_config.CranedMeta.SystemRelease, g_config.CranedMeta.SystemVersion));
-  response->mutable_craned_start_time()->set_seconds(
+  auto &dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->dedicated_res;
+  grpc_meta->mutable_dres_in_node()->CopyFrom(
+      static_cast<crane::grpc::DedicatedResourceInNode>(dres));
+
+  grpc_meta->set_craned_version(CRANE_VERSION_STRING);
+
+  const SystemRelInfo &sys_info = g_config.CranedMeta.SysInfo;
+  auto *grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();
+  grpc_sys_rel_info->set_name(sys_info.name);
+  grpc_sys_rel_info->set_release(sys_info.release);
+  grpc_sys_rel_info->set_version(sys_info.version);
+
+  grpc_meta->mutable_craned_start_time()->set_seconds(
       ToUnixSeconds(g_config.CranedMeta.CranedStartTime));
-  response->mutable_system_boot_time()->set_seconds(
+  grpc_meta->mutable_system_boot_time()->set_seconds(
       ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
 
   response->set_ok(true);
