@@ -562,6 +562,15 @@ CraneErr TaskManager::SpawnProcessInInstance_(
   int io_in_sock_pair[2];   // Socket pair for forwarding IO of crun tasks.
   int io_out_sock_pair[2];  // Socket pair for forwarding IO of crun tasks.
 
+  auto res_in_node_opt =
+      g_cg_mgr->GetTaskResourceInNode(instance->task.task_id());
+  if (!res_in_node_opt.has_value()) {
+    CRANE_ERROR("Failed to get resource info for task #{}",
+                instance->task.task_id());
+    return CraneErr::kCgroupError;
+  }
+  const crane::grpc::ResourceInNode& res_in_node = res_in_node_opt.value();
+
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
     CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
     return CraneErr::kSystemErr;
@@ -856,7 +865,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 
     std::vector<EnvPair> task_env_vec = instance->GetEnvList();
     std::vector<EnvPair> res_env_vec =
-        g_cg_mgr->GetResourceEnvListOfTaskNoLock(instance->task.task_id());
+        g_cg_mgr->GetResourceEnvListByResInNode(res_in_node);
 
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");

@@ -486,6 +486,16 @@ std::optional<std::string> CgroupManager::QueryTaskExecutionNode(
   return this->m_task_id_to_cg_spec_map_[task_id]->execution_node;
 }
 
+std::optional<crane::grpc::ResourceInNode> CgroupManager::GetTaskResourceInNode(
+    task_id_t task_id) {
+  auto cg_spec_ptr = this->m_task_id_to_cg_spec_map_[task_id];
+  if (cg_spec_ptr) {
+    return cg_spec_ptr->res_in_node;
+  } else {
+    return std::nullopt;
+  }
+}
+
 std::vector<EnvPair> CgroupManager::GetResourceEnvListByResInNode(
     const crane::grpc::ResourceInNode &res_in_node) {
   auto env_vec = DeviceManager::GetDevEnvListByResInNode(
@@ -498,19 +508,6 @@ std::vector<EnvPair> CgroupManager::GetResourceEnvListByResInNode(
           (1024 * 1024)));
 
   return env_vec;
-}
-
-// only called by SpawnTaskInstance_
-std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTaskNoLock(
-    task_id_t task_id) {
-  auto &cg_spec_map_ptr = m_task_id_to_cg_spec_map_.GetRawMap();
-  auto it = cg_spec_map_ptr.find(task_id);
-  if (it == cg_spec_map_ptr.end()) {
-    CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
-                task_id);
-    return {};
-  } else
-    return GetResourceEnvListByResInNode(it->second.RawPtr()->res_in_node);
 }
 
 std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTask(
