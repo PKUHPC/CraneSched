@@ -601,13 +601,7 @@ AccountManager::Result AccountManager::BlockAccount(const std::string& name,
     return Result{true};
   }
 
-  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
-                                    name, "blocked", block)) {
-    return Result{false, "Can't update the database"};
-  }
-  m_account_map_[name]->blocked = block;
-
-  return Result{true};
+  return BlockAccount_(name, block);
 }
 
 AccountManager::Result AccountManager::BlockUser(const std::string& name,
@@ -619,6 +613,7 @@ AccountManager::Result AccountManager::BlockUser(const std::string& name,
   if (!user) {
     return Result{false, fmt::format("Unknown user '{}'", name)};
   }
+
   if (!user->account_to_attrs_map.contains(account)) {
     return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
                                      name, account)};
@@ -628,14 +623,7 @@ AccountManager::Result AccountManager::BlockUser(const std::string& name,
     return Result{true};
   }
 
-  if (!g_db_client->UpdateEntityOne(
-          MongodbClient::EntityType::USER, "$set", name,
-          "account_to_attrs_map." + account + ".blocked", block)) {
-    return Result{false, "Can't update the database"};
-  }
-  m_user_map_[name]->account_to_attrs_map[account].blocked = block;
-
-  return Result{true};
+  return BlockUser_(name, account, block);
 }
 
 bool AccountManager::CheckUserPermissionToPartition(
@@ -2361,6 +2349,30 @@ AccountManager::Result AccountManager::DeleteAccountAllowedQos_(
 
   DeleteAccountAllowedQosFromMapNoLock_(account.name, qos);
   m_qos_map_[qos]->reference_count -= change_num;
+
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::BlockUser_(const std::string& name, const std::string& account, bool block) {
+
+  if (!g_db_client->UpdateEntityOne(
+          MongodbClient::EntityType::USER, "$set", name,
+          "account_to_attrs_map." + account + ".blocked", block)) {
+    return Result{false, "Can't update the database"};
+  }
+
+  m_user_map_[name]->account_to_attrs_map[account].blocked = block;
+
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::BlockAccount_(const std::string& name, bool block) {
+
+  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
+                                    name, "blocked", block)) {
+    return Result{false, "Can't update the database"};
+  }
+  m_account_map_[name]->blocked = block;
 
   return Result{true};
 }
