@@ -457,8 +457,7 @@ AccountManager::Result AccountManager::ModifyAccount(
                         : SetAccountAllowedPartition_(*account, value, force);
     }
 
-    case crane::grpc::ModifyEntityRequest_ModifyField_Qos:
-    {
+    case crane::grpc::ModifyEntityRequest_ModifyField_Qos: {
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
@@ -467,10 +466,10 @@ AccountManager::Result AccountManager::ModifyAccount(
         return Result{false, fmt::format("Unknown account '{}'", name)};
       }
       auto result = CheckSetAccountAllowedQos(*account, value, force);
-      return !result.ok ? result : SetAccountAllowedQos_(*account, value, force);
+      return !result.ok ? result
+                        : SetAccountAllowedQos_(*account, value, force);
     }
-    case crane::grpc::ModifyEntityRequest_ModifyField_DefaultQos:
-    {
+    case crane::grpc::ModifyEntityRequest_ModifyField_DefaultQos: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
       if (!account) {
@@ -479,15 +478,14 @@ AccountManager::Result AccountManager::ModifyAccount(
       auto result = CheckSetAccountDefaultQos(*account, value);
       return !result.ok ? result : SetAccountDefaultQos_(*account, value);
     }
-      
+
     default:
       break;
     }
 
   case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
     switch (modifyField) {
-    case crane::grpc::ModifyEntityRequest_ModifyField_Partition:
-    {
+    case crane::grpc::ModifyEntityRequest_ModifyField_Partition: {
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
@@ -495,11 +493,12 @@ AccountManager::Result AccountManager::ModifyAccount(
         return Result{false, fmt::format("Unknown account '{}'", name)};
       }
       auto result = CheckDeleteAccountAllowedPartition(*account, value, force);
-      return !result.ok ? result : DeleteAccountAllowedPartition_(*account, value, force);
+      return !result.ok
+                 ? result
+                 : DeleteAccountAllowedPartition_(*account, value, force);
     }
-      
-    case crane::grpc::ModifyEntityRequest_ModifyField_Qos:
-    {
+
+    case crane::grpc::ModifyEntityRequest_ModifyField_Qos: {
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
@@ -508,9 +507,10 @@ AccountManager::Result AccountManager::ModifyAccount(
         return Result{false, fmt::format("Unknown account '{}'", name)};
       }
       auto result = CheckDeleteAccountAllowedQos(*account, value, force);
-      return !result.ok ? result : DeleteAccountAllowedQos_(*account, value, force);
+      return !result.ok ? result
+                        : DeleteAccountAllowedQos_(*account, value, force);
     }
-      
+
     default:
       break;
     }
@@ -1261,9 +1261,8 @@ AccountManager::Result AccountManager::CheckSetAccountAllowedPartition(
 
 AccountManager::Result AccountManager::CheckSetAccountAllowedQos(
     const Account& account, const std::string& qos_list, bool force) {
-  
   const std::string name = account.name;
-  
+
   std::vector<std::string> qos_vec =
       absl::StrSplit(qos_list, ',', absl::SkipEmpty());
 
@@ -1308,7 +1307,6 @@ AccountManager::Result AccountManager::CheckSetAccountAllowedQos(
 
 AccountManager::Result AccountManager::CheckSetAccountDefaultQos(
     const Account& account, const std::string& qos) {
-
   if (account.default_qos == qos) {
     return Result{false,
                   fmt::format("Qos '{}' is already the default qos", qos)};
@@ -1325,7 +1323,6 @@ AccountManager::Result AccountManager::CheckSetAccountDefaultQos(
 
 AccountManager::Result AccountManager::CheckDeleteAccountAllowedPartition(
     const Account& account, const std::string& partition, bool force) {
-  
   const std::string name = account.name;
 
   if (std::find(account.allowed_partition.begin(),
@@ -1351,7 +1348,6 @@ AccountManager::Result AccountManager::CheckDeleteAccountAllowedPartition(
 
 AccountManager::Result AccountManager::CheckDeleteAccountAllowedQos(
     const Account& account, const std::string& qos, bool force) {
-  
   const std::string name = account.name;
 
   if (std::find(account.allowed_qos_list.begin(),
@@ -1766,7 +1762,7 @@ AccountManager::Result AccountManager::DeleteUser_(const User& user,
     res_user.account_to_attrs_map.erase(account);
     if (res_user.default_account == account) {
       if (res_user.account_to_attrs_map.empty()) {
-        // TODO：该user不属于任何account，是否标记删除？
+        res_user.deleted = true;
       } else {
         res_user.default_account = res_user.account_to_attrs_map.begin()->first;
       }
@@ -1866,7 +1862,12 @@ AccountManager::Result AccountManager::AddUserAllowedPartition_(
           std::list<std::string>{account.allowed_qos_list}};
 
   // Update to database
-  if (!g_db_client->UpdateUser(res_user)) {
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateUser(res_user);
+      };
+
+  if (!g_db_client->CommitTransaction(callback)) {
     return Result{false, "Fail to update data in database"};
   }
 
@@ -1910,7 +1911,12 @@ AccountManager::Result AccountManager::AddUserAllowedQos_(
   }
 
   // Update to database
-  if (!g_db_client->UpdateUser(res_user)) {
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateUser(res_user);
+      };
+
+  if (!g_db_client->CommitTransaction(callback)) {
     return Result{false, "Fail to update data in database"};
   }
 
@@ -1961,7 +1967,12 @@ AccountManager::Result AccountManager::SetUserDefaultQos_(
   }
 
   // Update to database
-  if (!g_db_client->UpdateUser(res_user)) {
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateUser(res_user);
+      };
+
+  if (!g_db_client->CommitTransaction(callback)) {
     return Result{false, "Fail to update data in database"};
   }
 
@@ -1990,8 +2001,13 @@ AccountManager::Result AccountManager::SetUserAllowedPartition_(
             std::list<std::string>{account.allowed_qos_list}};
   }
 
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateUser(res_user);
+      };
+
   // Update to database
-  if (!g_db_client->UpdateUser(res_user)) {
+  if (!g_db_client->CommitTransaction(callback)) {
     return Result{false, "Fail to update data in database"};
   }
 
@@ -2035,8 +2051,13 @@ AccountManager::Result AccountManager::SetUserAllowedQos_(
     iter->second.second.assign(qos_vec.begin(), qos_vec.end());
   }
 
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateUser(res_user);
+      };
+
   // Update to database
-  if (!g_db_client->UpdateUser(res_user)) {
+  if (!g_db_client->CommitTransaction(callback)) {
     return Result{false, "Fail to update data in database"};
   }
 
@@ -2103,7 +2124,12 @@ AccountManager::Result AccountManager::DeleteUserAllowedQos_(
   }
 
   // Update to database
-  if (!g_db_client->UpdateUser(res_user)) {
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateUser(res_user);
+      };
+
+  if (!g_db_client->CommitTransaction(callback)) {
     return Result{false, "Fail to update data in database"};
   }
 
@@ -2169,7 +2195,6 @@ AccountManager::Result AccountManager::SetAccountDescription_(
 
 AccountManager::Result AccountManager::SetAccountDefaultQos_(
     const Account& account, const std::string& qos) {
-    
   const std::string name = account.name;
 
   if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
@@ -2183,12 +2208,10 @@ AccountManager::Result AccountManager::SetAccountDefaultQos_(
 
 AccountManager::Result AccountManager::SetAccountAllowedPartition_(
     const Account& account, const std::string& partitions, bool force) {
-  
   const std::string name = account.name;
-  
+
   std::vector<std::string> partition_vec =
       absl::StrSplit(partitions, ',', absl::SkipEmpty());
-
 
   std::list<std::string> deleted_partition;
   for (const auto& par : account.allowed_partition) {
@@ -2235,9 +2258,8 @@ AccountManager::Result AccountManager::SetAccountAllowedPartition_(
 
 AccountManager::Result AccountManager::SetAccountAllowedQos_(
     const Account& account, const std::string& qos_list_str, bool force) {
-  
   const std::string name = account.name;
-  
+
   std::vector<std::string> qos_vec =
       absl::StrSplit(qos_list_str, ',', absl::SkipEmpty());
 
@@ -2310,7 +2332,6 @@ AccountManager::Result AccountManager::SetAccountAllowedQos_(
 
 AccountManager::Result AccountManager::DeleteAccountAllowedPartition_(
     const Account& account, const std::string& partition, bool force) {
-
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         DeleteAccountAllowedPartitionFromDBNoLock_(account.name, partition);
@@ -2327,7 +2348,6 @@ AccountManager::Result AccountManager::DeleteAccountAllowedPartition_(
 
 AccountManager::Result AccountManager::DeleteAccountAllowedQos_(
     const Account& account, const std::string& qos, bool force) {
-
   int change_num;
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
