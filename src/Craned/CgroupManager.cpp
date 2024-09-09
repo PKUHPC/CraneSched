@@ -486,20 +486,9 @@ std::optional<std::string> CgroupManager::QueryTaskExecutionNode(
   return this->m_task_id_to_cg_spec_map_[task_id]->execution_node;
 }
 
-std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTask(
-    task_id_t task_id) {
-  std::vector<EnvPair> env_vec;
-
-  auto cg_spec_ptr = m_task_id_to_cg_spec_map_[task_id];
-  if (!cg_spec_ptr) {
-    CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
-                task_id);
-    return env_vec;
-  }
-
-  const auto &res_in_node = cg_spec_ptr->res_in_node;
-
-  env_vec = DeviceManager::GetDevEnvListByResInNode(
+std::vector<EnvPair> CgroupManager::GetResourceEnvListByResInNode(
+    const crane::grpc::ResourceInNode &res_in_node) {
+  auto env_vec = DeviceManager::GetDevEnvListByResInNode(
       res_in_node.dedicated_res_in_node());
 
   env_vec.emplace_back(
@@ -509,6 +498,30 @@ std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTask(
           (1024 * 1024)));
 
   return env_vec;
+}
+
+// only called by SpawnTaskInstance_
+std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTaskNoLock(
+    task_id_t task_id) {
+  auto &cg_spec_map_ptr = m_task_id_to_cg_spec_map_.GetRawMap();
+  auto it = cg_spec_map_ptr.find(task_id);
+  if (it == cg_spec_map_ptr.end()) {
+    CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
+                task_id);
+    return {};
+  } else
+    return GetResourceEnvListByResInNode(it->second.RawPtr()->res_in_node);
+}
+
+std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTask(
+    task_id_t task_id) {
+  auto cg_spec_ptr = m_task_id_to_cg_spec_map_[task_id];
+  if (!cg_spec_ptr) {
+    CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
+                task_id);
+    return {};
+  } else
+    return GetResourceEnvListByResInNode(cg_spec_ptr->res_in_node);
 }
 
 bool Cgroup::MigrateProcIn(pid_t pid) {

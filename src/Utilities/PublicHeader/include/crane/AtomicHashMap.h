@@ -135,6 +135,8 @@ class AtomicHashMap {
     }
   }
 
+  RawMap& GetRawMap() { return m_value_map_; }
+
   bool Contains(const Key& key) {
     read_lock_guard lock_guard(m_global_rw_mutex_);
     return m_value_map_.contains(key);

@@ -271,7 +271,11 @@ class CgroupManager {
 
   bool ReleaseCgroupByTaskIdOnly(task_id_t task_id);
 
+  std::vector<EnvPair> GetResourceEnvListByResInNode(
+      const crane::grpc::ResourceInNode &res_in_node);
   std::vector<EnvPair> GetResourceEnvListOfTask(task_id_t task_id);
+
+  std::vector<EnvPair> GetResourceEnvListOfTaskNoLock(task_id_t task_id);
 
  private:
   static std::string CgroupStrByTaskId_(task_id_t task_id);

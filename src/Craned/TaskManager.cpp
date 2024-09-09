@@ -856,7 +856,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(
 
     std::vector<EnvPair> task_env_vec = instance->GetEnvList();
     std::vector<EnvPair> res_env_vec =
-        g_cg_mgr->GetResourceEnvListOfTask(instance->task.task_id());
+        g_cg_mgr->GetResourceEnvListOfTaskNoLock(instance->task.task_id());
 
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
