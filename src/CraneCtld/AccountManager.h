@@ -252,6 +252,10 @@ class AccountManager {
   Result DeleteAccountAllowedQos_(const Account& account,
                                   const std::string& qos, bool force);
 
+  Result BlockUser_(const std::string& name, const std::string& account, bool block);
+
+  Result BlockAccount_(const std::string& name, bool block);
+
   bool IsAllowedPartitionOfAnyNodeNoLock_(const Account* account,
                                           const std::string& partition,
                                           int depth = 0);
