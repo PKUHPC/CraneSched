@@ -124,14 +124,14 @@ TaskManager::TaskManager() {
     }
   }
   {
-    m_ev_do_sig_child_ =
+    m_ev_do_sigchld_ =
         event_new(m_ev_base_, -1, EV_PERSIST | EV_READ, EvDoSigchldCb_, this);
-    if (!m_ev_do_sig_child_) {
+    if (!m_ev_do_sigchld_) {
       CRANE_ERROR("Failed to create the Do SIGCHLD event!");
       std::terminate();
     }
 
-    if (event_add(m_ev_do_sig_child_, nullptr) < 0) {
+    if (event_add(m_ev_do_sigchld_, nullptr) < 0) {
       CRANE_ERROR("Could not add the Do SIGCHLD event to base!");
       std::terminate();
     }
@@ -362,7 +362,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
       } */
       this_->m_sigchld_queue_.enqueue(
           std::make_unique<ProcSigchldInfo>(sigchld_info));
-      event_active(this_->m_ev_do_sig_child_, 0, 0);
+      event_active(this_->m_ev_do_sigchld_, 0, 0);
     } else if (pid == 0) {
       // There's no child that needs reaping.
       // If Craned is exiting, check if there's any task remaining.
@@ -392,17 +392,17 @@ void TaskManager::EvDoSigchldCb_(int sig, short events, void* user_data) {
     if (task_iter == this_->m_pid_task_map_.end() ||
         proc_iter == this_->m_pid_proc_map_.end()) {
       this_->m_mtx_.Unlock();
-      auto arg = new EvQueueSigchildArg();
+      auto arg = new EvQueueSigchldArg();
       arg->task_manager = this_;
       arg->sigchld_info = *sigchld_info;
       arg->sigchld_info.resend_timer =
-          event_new(this_->m_ev_base_, -1, 0, EvOnSigchildTimerCb_, arg);
+          event_new(this_->m_ev_base_, -1, 0, EvOnSigchldTimerCb_, arg);
       CRANE_ASSERT_MSG(arg->sigchld_info.resend_timer != nullptr,
                        "Failed to create new timer.");
-      auto tv = timeval{kDefaultCranedSigChildResendMicroSeconds / 1000'000,
-                        kDefaultCranedSigChildResendMicroSeconds % 1000'000};
+      auto tv = timeval{kDefaultCranedSigChldResendMicroSeconds / 1000'000,
+                        kDefaultCranedSigChldResendMicroSeconds % 1000'000};
       evtimer_add(arg->sigchld_info.resend_timer, &tv);
-      CRANE_TRACE("Child Process {} exit too early, will do SigchildCb later",
+      CRANE_TRACE("Child Process {} exit too early, will do SigchldCb later",
                   sigchld_info->pid);
     } else {
       TaskInstance* instance = task_iter->second;
@@ -454,12 +454,12 @@ void TaskManager::EvDoSigchldCb_(int sig, short events, void* user_data) {
   }
 }
 
-void TaskManager::EvOnSigchildTimerCb_(int, short, void* arg_) {
-  auto* arg = reinterpret_cast<EvQueueSigchildArg*>(arg_);
+void TaskManager::EvOnSigchldTimerCb_(int, short, void* arg_) {
+  auto* arg = reinterpret_cast<EvQueueSigchldArg*>(arg_);
   auto* this_ = arg->task_manager;
   this_->m_sigchld_queue_.enqueue(
       std::make_unique<ProcSigchldInfo>(arg->sigchld_info));
-  event_active(this_->m_ev_do_sig_child_, 0, 0);
+  event_active(this_->m_ev_do_sigchld_, 0, 0);
   delete arg;
 }
 
@@ -1106,7 +1106,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
             task_id));
   } else {
     // After SpawnProcessInInstance_ we put the child pid into the index map.
-    // SigChild sent after fork() and before following code will resent to
+    // SigChld sent after fork() and before following code will resent to
     // handler by timer.
     m_mtx_.Lock();
     m_pid_task_map_.emplace(process->GetPid(), instance);

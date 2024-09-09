@@ -153,7 +153,7 @@ struct CrunMetaInTaskInstance : MetaInTaskInstance {
   ~CrunMetaInTaskInstance() override = default;
 };
 
-// also arg for EvDoSigChildCb_
+// also arg for EvDoSigChldCb_
 struct ProcSigchldInfo {
   pid_t pid;
   bool is_terminated_by_signal;
@@ -300,7 +300,7 @@ class TaskManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
-  struct EvQueueSigchildArg {
+  struct EvQueueSigchldArg {
     TaskManager* task_manager;
     ProcSigchldInfo sigchld_info;
   };
@@ -458,7 +458,7 @@ class TaskManager {
 
   static void EvOnTaskTimerCb_(evutil_socket_t, short, void* arg_);
 
-  static void EvOnSigchildTimerCb_(evutil_socket_t, short, void* arg_);
+  static void EvOnSigchldTimerCb_(evutil_socket_t, short, void* arg_);
 
   struct event_base* m_ev_base_{};
   struct event* m_ev_sigchld_{};
@@ -475,7 +475,7 @@ class TaskManager {
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
 
-  struct event* m_ev_do_sig_child_{};
+  struct event* m_ev_do_sigchld_{};
   ConcurrentQueue<std::unique_ptr<ProcSigchldInfo>> m_sigchld_queue_;
 
   struct event* m_ev_query_task_id_from_pid_{};
