@@ -22,22 +22,20 @@ namespace Ctld {
 
 AccountManager::AccountManager() { InitDataMap_(); }
 
-AccountManager::Result AccountManager::AddUser(User&& new_user) {
-  // When you add a new user, you can only associate it with the default account
-  if (new_user.account_to_attrs_map.size() != 1 ||
-      new_user.account_to_attrs_map.begin()->first !=
-          new_user.default_account) {
-    CRANE_ERROR("The added user does not comply with system rules");
-    return Result{false, "Crane system error"};
+AccountManager::Result AccountManager::AddUser(uint32_t uid, User&& new_user) {
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
+  util::write_lock_guard account_guard(m_rw_account_mutex_);
+
+  Result result;
+  result = CheckOperatorPrivilegeHigher(uid, new_user.admin_level);
+  if (!result.ok) {
+    return result;
   }
 
   if (new_user.default_account.empty()) {
     // User must specify an account
     return Result{false, fmt::format("Please specify the user's account")};
   }
-
-  util::write_lock_guard user_guard(m_rw_user_mutex_);
-  util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   std::string object_account = new_user.default_account;
   const std::string name = new_user.name;
@@ -76,7 +74,19 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
   return AddUser_(find_user, find_account, std::move(new_user));
 }
 
-AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
+AccountManager::Result AccountManager::AddAccount(uint32_t uid,
+                                                  Account&& new_account) {
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    util::read_lock_guard account_guard(m_rw_account_mutex_);
+
+    Result result =
+        CheckOpUserHasPermissionToAccount(uid, new_account.name, false);
+    if (!result.ok) {
+      return result;
+    }
+  }
+
   util::write_lock_guard account_guard(m_rw_account_mutex_);
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
@@ -155,7 +165,17 @@ AccountManager::Result AccountManager::AddAccount(Account&& new_account) {
   return AddAccount_(find_account, find_parent, std::move(new_account));
 }
 
-AccountManager::Result AccountManager::AddQos(const Qos& new_qos) {
+AccountManager::Result AccountManager::AddQos(uint32_t uid,
+                                              const Qos& new_qos) {
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    Result result;
+    result = CheckOpUserIsAdmin(uid);
+    if (!result.ok) {
+      return result;
+    }
+  }
+
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const Qos* find_qos = GetQosInfoNoLock_(new_qos.name);
@@ -167,7 +187,8 @@ AccountManager::Result AccountManager::AddQos(const Qos& new_qos) {
   return AddQos_(find_qos, new_qos);
 }
 
-AccountManager::Result AccountManager::DeleteUser(const std::string& name,
+AccountManager::Result AccountManager::DeleteUser(uint32_t uid,
+                                                  const std::string& name,
                                                   const std::string& account) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
@@ -175,6 +196,11 @@ AccountManager::Result AccountManager::DeleteUser(const std::string& name,
   const User* user = GetExistedUserInfoNoLock_(name);
   if (!user) {
     return Result{false, fmt::format("Unknown user '{}'", name)};
+  }
+
+  Result result = CheckOperatorPrivilegeHigher(uid, user->admin_level);
+  if (!result.ok) {
+    return result;
   }
 
   if (!account.empty() && !user->account_to_attrs_map.contains(account)) {
@@ -185,7 +211,18 @@ AccountManager::Result AccountManager::DeleteUser(const std::string& name,
   return DeleteUser_(*user, account);
 }
 
-AccountManager::Result AccountManager::DeleteAccount(const std::string& name) {
+AccountManager::Result AccountManager::DeleteAccount(uint32_t uid,
+                                                     const std::string& name) {
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    util::read_lock_guard account_guard(m_rw_account_mutex_);
+
+    Result result = CheckOpUserHasPermissionToAccount(uid, name, false);
+    if (!result.ok) {
+      return result;
+    }
+  }
+
   util::write_lock_guard account_guard(m_rw_account_mutex_);
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
   const Account* account = GetExistedAccountInfoNoLock_(name);
@@ -202,7 +239,16 @@ AccountManager::Result AccountManager::DeleteAccount(const std::string& name) {
   return DeleteAccount_(*account);
 }
 
-AccountManager::Result AccountManager::DeleteQos(const std::string& name) {
+AccountManager::Result AccountManager::DeleteQos(uint32_t uid,
+                                                 const std::string& name) {
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    Result result = CheckOpUserIsAdmin(uid);
+    if (!result.ok) {
+      return result;
+    }
+  }
+
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
   const Qos* qos = GetExistedQosInfoNoLock_(name);
 
@@ -291,38 +337,225 @@ AccountManager::QosMapMutexSharedPtr AccountManager::GetAllQosInfo() {
   }
 }
 
+AccountManager::Result AccountManager::QueryUserInfo(
+    uint32_t uid, const std::string& name,
+    std::unordered_map<uid_t, User>* res_user_map) {
+
+  util::read_lock_guard user_guard(m_rw_user_mutex_);
+  const User* op_user = nullptr;
+  Result result;
+
+  result = CheckOpUserExisted(uid, &op_user);
+  if (!result.ok) {
+    return result;
+  }
+
+  if (name.empty()) {
+    if (IsOperatorPrivilegeSameAndHigher(*op_user, User::Operator)) {
+      // The rules for querying user information are the same as those for
+      // querying accounts
+      for (const auto& [user_name, user] : m_user_map_) {
+        if (user->deleted) {
+          continue;
+        }
+        res_user_map->try_emplace(user->uid, *user);
+      }
+    } else {
+      util::read_lock_guard account_guard(m_rw_account_mutex_);
+      std::queue<std::string> queue;
+      for (const auto& [acct, item] : op_user->account_to_attrs_map) {
+        queue.push(acct);
+        while (!queue.empty()) {
+          std::string father = queue.front();
+          for (const auto& user : m_account_map_.at(father)->users) {
+            res_user_map->try_emplace(
+                m_user_map_.at(user)->uid,
+                *(m_user_map_.at(user)));
+          }
+          queue.pop();
+          for (const auto& child :
+               m_account_map_.at(father)->child_accounts) {
+            queue.push(child);
+          }
+        }
+      }
+    }
+  } else {
+    util::read_lock_guard account_guard(m_rw_account_mutex_);
+    const User* user = GetExistedUserInfoNoLock_(name);
+    if (!user) {
+      return Result{false, fmt::format("Can't find user {}", name)};
+    }
+    result = CheckUserPermissionOnUser(*op_user, *user, true);
+    if (!result.ok) {
+      return result;
+    }
+    res_user_map->try_emplace(user->uid, *user);
+  }
+
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::QueryAccountInfo(
+    uint32_t uid, const std::string& name,
+    std::unordered_map<std::string, Account>* res_account_map) {
+  User res_user;
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    Result result;
+    const User* op_user = nullptr;
+    result = CheckOpUserExisted(uid, &op_user);
+    if (!result.ok) {
+      return result;
+    }
+    if (!name.empty()) {
+      result = CheckUserPermissionOnAccount(*op_user, name, true);
+      if (!result.ok) {
+        return result;
+      }
+    }
+    res_user = *op_user;
+  }
+
+  util::read_lock_guard account_guard(m_rw_account_mutex_);
+  if (name.empty()) {
+    if (IsOperatorPrivilegeSameAndHigher(res_user, User::Operator)) {
+      // If an administrator user queries account information, all
+      // accounts are returned, variable user_account not used
+      for (const auto& [name, account] : m_account_map_) {
+        if (account->deleted) {
+          continue;
+        }
+        res_account_map->try_emplace(account->name, *account);
+      }
+    } else {
+      // Otherwise, only all sub-accounts under your own accounts will be
+      // returned
+      std::queue<std::string> queue;
+      for (const auto& [acct, item] : res_user.account_to_attrs_map) {
+        // Z->A->B--->C->E
+        //    |->D    |->F
+        // If we query account C, [Z,A,B,C,E,F] is included.
+        std::string p_name = m_account_map_.at(acct)->parent_account;
+        while (!p_name.empty()) {
+          res_account_map->try_emplace(p_name, *(m_account_map_.at(p_name)));
+          p_name = m_account_map_.at(p_name)->parent_account;
+        }
+
+        queue.push(acct);
+        while (!queue.empty()) {
+          std::string father = queue.front();
+          res_account_map->try_emplace(m_account_map_.at(father)->name,
+                                       *(m_account_map_.at(father)));
+          queue.pop();
+          for (const auto& child : m_account_map_.at(father)->child_accounts) {
+            queue.push(child);
+          }
+        }
+      }
+    }
+  } else {
+    res_account_map->try_emplace(name, *(m_account_map_.at(name)));
+  }
+
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::QueryQosInfo(uint32_t uid, const std::string& name, std::unordered_map<std::string, Qos>* res_qos_map) {
+   User res_user;
+   {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    Result result;
+    const User* op_user = nullptr;
+    result = CheckOpUserExisted(uid, &op_user);
+    if (!result.ok) {
+      return result;
+    }
+    res_user = *op_user;
+  }
+
+  util::read_lock_guard qos_guard(m_rw_qos_mutex_);
+  if (name.empty()) {
+    if (IsOperatorPrivilegeSameAndHigher(res_user, User::Operator)) {
+      for (const auto &[name, qos] : m_qos_map_) {
+        if (qos->deleted) {
+          continue;
+        }
+        
+        res_qos_map->try_emplace(name, *qos);
+      }
+    } else {
+      for (const auto &[acct, item] :
+               res_user.account_to_attrs_map) {
+        for (const auto &[part, part_qos_map] :
+                 item.allowed_partition_qos_map) {
+          for (const auto &qos : part_qos_map.second) {
+            res_qos_map->try_emplace(qos, *(m_qos_map_.at(qos)));
+          }
+        }
+      }
+    }
+  } else {
+    const Qos* qos = GetExistedQosInfoNoLock_(name);
+    if (!qos) {
+      return Result{false, fmt::format("Can't find QOS {}!", name)};
+    }
+
+    if (!IsOperatorPrivilegeSameAndHigher(res_user, User::Operator)) {
+      bool found = false;
+      for (const auto &[acct, item] : res_user.account_to_attrs_map) {
+        for (const auto &[part, part_qos_map] :
+               item.allowed_partition_qos_map) {
+          for (const auto &qos : part_qos_map.second) {
+            if (qos == name) found = true;
+          }
+        }
+      }
+      if (!found) {
+        return Result{false, fmt::format("User {} is not allowed to access qos {} which is "
+                          "not in allowed qos list",
+                          res_user.name, name)};
+      }
+    }
+    res_qos_map->try_emplace(name, *qos);
+  }
+
+  return Result{true};
+}
+
 AccountManager::Result AccountManager::ModifyUser(
-    const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
+    const crane::grpc::OperatorType& operatorType, const uint32_t uid,
     const std::string& name, const std::string& partition, std::string account,
-    const crane::grpc::ModifyEntityRequest_ModifyField& modifyField,
-    const std::string& value, bool force) {
+    const crane::grpc::ModifyField& modifyField, const std::string& value,
+    bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   const User* p = GetExistedUserInfoNoLock_(name);
 
-  if (!p) {
-    return Result{false, fmt::format("Unknown user '{}'", name)};
-  }
-
-  if (account.empty()) {
-    account = p->default_account;
+  {
+    util::read_lock_guard account_guard(m_rw_account_mutex_);
+    Result result;
+    result = CheckOpUserHasModifyPermission(uid, p, name, account, false);
+    if (!result.ok) {
+      return result;
+    }
   }
 
   switch (operatorType) {
-  case crane::grpc::ModifyEntityRequest_OperatorType_Add: {
+  case crane::grpc::OperatorType::Add: {
     util::write_lock_guard account_guard(m_rw_account_mutex_);
     const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
     if (!account_ptr) {
       return Result{false, fmt::format("Unknown account '{}'", account)};
     }
     switch (modifyField) {
-    case crane::grpc::ModifyEntityRequest_ModifyField_Partition: {
+    case crane::grpc::ModifyField::Partition: {
       auto result = CheckAddUserAllowedPartition(*p, *account_ptr, value);
       return !result.ok ? result
                         : AddUserAllowedPartition_(*p, *account_ptr, value);
     }
 
-    case crane::grpc::ModifyEntityRequest_ModifyField_Qos: {
+    case crane::grpc::ModifyField::Qos: {
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
       auto result = CheckAddUserAllowedQos(*p, *account_ptr, partition, value);
       return !result.ok
@@ -334,22 +567,22 @@ AccountManager::Result AccountManager::ModifyUser(
     }
   }
 
-  case crane::grpc::ModifyEntityRequest_OperatorType_Overwrite:
+  case crane::grpc::OperatorType::Overwrite:
     switch (modifyField) {
-    case crane::grpc::ModifyEntityRequest_ModifyField_AdminLevel: {
+    case crane::grpc::ModifyField::AdminLevel: {
       User::AdminLevel new_level;
       auto result = CheckSetUserAdminLevel(*p, value, &new_level);
 
       return !result.ok ? result : SetUserAdminLevel_(name, new_level);
     }
 
-    case crane::grpc::ModifyEntityRequest_ModifyField_DefaultQos: {
+    case crane::grpc::ModifyField::DefaultQos: {
       auto result = CheckSetUserDefaultQos(*p, account, partition, value);
       return !result.ok ? result
                         : SetUserDefaultQos_(*p, account, partition, value);
     }
 
-    case crane::grpc::ModifyEntityRequest_ModifyField_Partition: {
+    case crane::grpc::ModifyField::Partition: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
       if (!account_ptr) {
@@ -360,7 +593,7 @@ AccountManager::Result AccountManager::ModifyUser(
                         : SetUserAllowedPartition_(*p, *account_ptr, value);
     }
 
-    case crane::grpc::ModifyEntityRequest_ModifyField_Qos: {
+    case crane::grpc::ModifyField::Qos: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
       const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
@@ -378,15 +611,15 @@ AccountManager::Result AccountManager::ModifyUser(
       break;
     }
 
-  case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
+  case crane::grpc::OperatorType::Delete:
     switch (modifyField) {
-    case crane::grpc::ModifyEntityRequest_ModifyField_Partition: {
+    case crane::grpc::ModifyField::Partition: {
       auto result = CheckDeleteUserAllowedPartition(*p, account, value);
       return !result.ok ? result
                         : DeleteUserAllowedPartition_(*p, account, value);
     }
 
-    case crane::grpc::ModifyEntityRequest_ModifyField_Qos: {
+    case crane::grpc::ModifyField::Qos: {
       auto result =
           CheckDeleteUserAllowedQos(*p, account, partition, value, force);
       return !result.ok
@@ -406,24 +639,33 @@ AccountManager::Result AccountManager::ModifyUser(
 }
 
 AccountManager::Result AccountManager::ModifyAccount(
-    const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
-    const std::string& name,
-    const crane::grpc::ModifyEntityRequest_ModifyField& modifyField,
+    const crane::grpc::OperatorType& operatorType, const uint32_t uid,
+    const std::string& name, const crane::grpc::ModifyField& modifyField,
     const std::string& value, bool force) {
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    util::read_lock_guard account_guard(m_rw_account_mutex_);
+
+    Result result = CheckOpUserHasPermissionToAccount(uid, name, false);
+    if (!result.ok) {
+      return result;
+    }
+  }
+
   switch (operatorType) {
-  case crane::grpc::ModifyEntityRequest_OperatorType_Add: {
+  case crane::grpc::OperatorType::Add: {
     util::write_lock_guard account_guard(m_rw_account_mutex_);
     const Account* account = GetExistedAccountInfoNoLock_(name);
     if (!account) {
       return Result{false, fmt::format("Unknown account '{}'", name)};
     }
     switch (modifyField) {
-    case crane::grpc::ModifyEntityRequest_ModifyField_Partition: {
+    case crane::grpc::ModifyField::Partition: {
       auto result = CheckAddAccountAllowedPartition(*account, value);
       return !result.ok ? result : AddAccountAllowedPartition_(name, value);
     }
 
-    case crane::grpc::ModifyEntityRequest_ModifyField_Qos: {
+    case crane::grpc::ModifyField::Qos: {
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
       auto result = CheckAddAccountAllowedQos(*account, value);
       return !result.ok ? result : AddAccountAllowedQos_(*account, value);
@@ -434,9 +676,9 @@ AccountManager::Result AccountManager::ModifyAccount(
     }
   }
 
-  case crane::grpc::ModifyEntityRequest_OperatorType_Overwrite:
+  case crane::grpc::OperatorType::Overwrite:
     switch (modifyField) {
-    case crane::grpc::ModifyEntityRequest_ModifyField_Description: {
+    case crane::grpc::ModifyField::Description: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
       if (!account) {
@@ -445,7 +687,7 @@ AccountManager::Result AccountManager::ModifyAccount(
       auto result = CheckSetAccountDescription(*account, value);
       return !result.ok ? result : SetAccountDescription_(name, value);
     }
-    case crane::grpc::ModifyEntityRequest_ModifyField_Partition: {
+    case crane::grpc::ModifyField::Partition: {
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
@@ -457,7 +699,7 @@ AccountManager::Result AccountManager::ModifyAccount(
                         : SetAccountAllowedPartition_(*account, value, force);
     }
 
-    case crane::grpc::ModifyEntityRequest_ModifyField_Qos: {
+    case crane::grpc::ModifyField::Qos: {
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
@@ -469,7 +711,7 @@ AccountManager::Result AccountManager::ModifyAccount(
       return !result.ok ? result
                         : SetAccountAllowedQos_(*account, value, force);
     }
-    case crane::grpc::ModifyEntityRequest_ModifyField_DefaultQos: {
+    case crane::grpc::ModifyField::DefaultQos: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
       if (!account) {
@@ -483,9 +725,9 @@ AccountManager::Result AccountManager::ModifyAccount(
       break;
     }
 
-  case crane::grpc::ModifyEntityRequest_OperatorType_Delete:
+  case crane::grpc::OperatorType::Delete:
     switch (modifyField) {
-    case crane::grpc::ModifyEntityRequest_ModifyField_Partition: {
+    case crane::grpc::ModifyField::Partition: {
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
@@ -498,7 +740,7 @@ AccountManager::Result AccountManager::ModifyAccount(
                  : DeleteAccountAllowedPartition_(*account, value, force);
     }
 
-    case crane::grpc::ModifyEntityRequest_ModifyField_Qos: {
+    case crane::grpc::ModifyField::Qos: {
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
@@ -523,24 +765,31 @@ AccountManager::Result AccountManager::ModifyAccount(
 }
 
 AccountManager::Result AccountManager::ModifyQos(
-    const std::string& name,
-    const crane::grpc::ModifyEntityRequest_ModifyField& modifyField,
-    const std::string& value) {
+    const uint32_t uid, const std::string& name,
+    const crane::grpc::ModifyField& modifyField, const std::string& value) {
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    Result result = CheckOpUserIsAdmin(uid);
+    if (!result.ok) {
+      return result;
+    }
+  }
+
   std::string item = "";
   switch (modifyField) {
-  case crane::grpc::ModifyEntityRequest_ModifyField_Description:
+  case crane::grpc::ModifyField::Description:
     item = "description";
     break;
-  case crane::grpc::ModifyEntityRequest_ModifyField_Priority:
+  case crane::grpc::ModifyField::Priority:
     item = "priority";
     break;
-  case crane::grpc::ModifyEntityRequest_ModifyField_MaxJobsPerUser:
+  case crane::grpc::ModifyField::MaxJobsPerUser:
     item = "max-jobs-per-user";
     break;
-  case crane::grpc::ModifyEntityRequest_ModifyField_MaxCpusPerUser:
+  case crane::grpc::ModifyField::MaxCpusPerUser:
     item = "max-cpus-per-user";
     break;
-  case crane::grpc::ModifyEntityRequest_ModifyField_MaxTimeLimitPerTask:
+  case crane::grpc::ModifyField::MaxTimeLimitPerTask:
     item = "max-time-limit-per-task";
     break;
   default:
@@ -763,6 +1012,21 @@ result::result<void, std::string> AccountManager::CheckUidIsAdmin(
 
   return result::failure(
       fmt::format("User {} has insufficient privilege.", entry.Username()));
+}
+
+AccountManager::Result AccountManager::CheckOpUserIsAdmin(uint32_t uid) {
+  const User* op_user = nullptr;
+  Result result = CheckOpUserExisted(uid, &op_user);
+  if (!result.ok) {
+    return result;
+  }
+
+  if (!IsOperatorPrivilegeSameAndHigher(*op_user, User::Operator)) {
+    return Result{false, fmt::format("User {} has insufficient privilege.",
+                                     op_user->name)};
+  }
+
+  return Result{true};
 }
 
 AccountManager::Result AccountManager::CheckAddUserAllowedPartition(
@@ -1456,6 +1720,198 @@ AccountManager::Result AccountManager::HasPermissionToUser(
   return Result{false, fmt::format("User {} is not permitted to access user {} "
                                    "out of subtrees of his permitted accounts",
                                    source_user_entry.Username(), target_user)};
+}
+
+AccountManager::Result AccountManager::CheckOpUserExisted(
+    uint32_t uid, const User** op_user) {
+  PasswordEntry entry(uid);
+
+  if (!entry.Valid()) {
+    return Result{false, fmt::format("Uid {} not existed", uid)};
+  }
+
+  const User* user = GetExistedUserInfoNoLock_(entry.Username());
+
+  if (!user) {
+    return Result{false, fmt::format("User '{}' is not a user of Crane",
+                                     entry.Username())};
+  }
+
+  *op_user = user;
+
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::CheckOpUserHasPermissionToAccount(
+    uint32_t uid, const std::string& account, bool read_only_priv) {
+  const User* op_user = nullptr;
+
+  Result result = CheckOpUserExisted(uid, &op_user);
+
+  if (account.empty()) {
+    return Result{false, fmt::format("No account is specified for user {}",
+                                     op_user->name)};
+  }
+
+  const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
+  if (!account_ptr) {
+    return Result{false, fmt::format("Unknown account '{}'", account)};
+  }
+
+  return CheckUserPermissionOnAccount(*op_user, account, read_only_priv);
+}
+
+AccountManager::Result AccountManager::CheckOpUserHasModifyPermission(
+    uint32_t uid, const User* user, const std::string& name,
+    std::string& account, bool read_only_priv) {
+  PasswordEntry entry(uid);
+
+  const User* op_user = nullptr;
+
+  Result result = CheckOpUserExisted(uid, &op_user);
+  if (!result.ok) {
+    return result;
+  }
+
+  if (!user) {
+    return Result{false, fmt::format("User '{}' is not a user of Crane", name)};
+  }
+
+  if (account.empty()) {
+    account = user->default_account;
+  }
+
+  if (!user->account_to_attrs_map.contains(account)) {
+    return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
+                                     name, account)};
+  }
+
+  if (!IsOperatorPrivilegeSameAndHigher(*op_user, user->admin_level)) {
+    return Result{false,
+                  "Permission error : You cannot modify a user's permissions "
+                  "to which greater than your own permissions"};
+  }
+
+  return CheckUserPermissionOnAccount(*op_user, account, read_only_priv);
+}
+
+bool AccountManager::IsOperatorPrivilegeSameAndHigher(
+    const User& op_user, User::AdminLevel admin_level) {
+  User::AdminLevel op_level = op_user.admin_level;
+
+  bool result = true;
+  switch (op_level) {
+  case User::Admin:
+    break;
+  case User::Operator:
+    if (admin_level == User::Admin) {
+      result = false;
+    }
+    break;
+  case User::None:
+    if (admin_level != User::None) {
+      result = false;
+    }
+    break;
+  default:
+    break;
+  }
+
+  return result;
+}
+
+AccountManager::Result AccountManager::CheckOperatorPrivilegeHigher(
+    uint32_t uid, User::AdminLevel admin_level) {
+  const User* op_user = nullptr;
+
+  Result result = CheckOpUserExisted(uid, &op_user);
+  if (!result.ok) {
+    return result;
+  }
+
+  User::AdminLevel op_level = op_user->admin_level;
+
+  bool level_result = true;
+  switch (op_level) {
+  case User::Admin:
+    if (admin_level == User::Admin) {
+      level_result = false;
+    }
+    break;
+  case User::Operator:
+    if (admin_level != User::None) {
+      level_result = false;
+    }
+    break;
+  case User::None:
+    level_result = false;
+    break;
+  default:
+    break;
+  }
+
+  if (!level_result) {
+    return Result{false,
+                  "Permission error : You cannot add/delete a user with the "
+                  "same or greater permissions as yourself"};
+  }
+
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::CheckUserPermissionOnAccount(
+    const User& op_user, const std::string& account, bool read_only_priv) {
+  if (op_user.admin_level == User::None) {
+    if (read_only_priv) {
+      // In current implementation, if a user is the coordinator of an
+      // account, it must exist in user->account_to_attrs_map.
+      // This is guaranteed by the procedure of adding coordinator, where the
+      // coordinator is specified only when adding a user to an account.
+      // Thus, user->account_to_attrs_map must cover all the accounts he
+      // coordinates, and it's ok to skip checking user->coordinator_accounts.
+      for (const auto& [acc, item] : op_user.account_to_attrs_map)
+        if (acc == account || PaternityTestNoLock_(acc, account))
+          return Result{true};
+    } else {
+      for (const auto& acc : op_user.coordinator_accounts)
+        if (acc == account || PaternityTestNoLock_(acc, account))
+          return Result{true};
+    }
+
+    return Result{
+        false,
+        fmt::format("User {} is not allowed to access"
+                    "account {} out of the subtree of his permitted accounts.",
+                    op_user.name, account)};
+  }
+
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::CheckUserPermissionOnUser(const User& op_user, const User& user, bool read_only_priv) {
+
+  if (user.name == op_user.name) {
+    return Result{true};
+  }
+
+  bool hasPermissionOnUser = false;
+  for (const auto& [acct, item] : user.account_to_attrs_map) {
+    Result result = CheckUserPermissionOnAccount(op_user, acct, read_only_priv);
+    if (result.ok) {
+      hasPermissionOnUser = true;
+      break;
+    }
+  }
+
+  if (IsOperatorPrivilegeSameAndHigher(op_user, user.admin_level) && op_user.admin_level != user.admin_level) {
+    hasPermissionOnUser = true;
+  }
+
+  if (!hasPermissionOnUser) {
+    return Result {false, fmt::format("User {} is not permitted to access user {}", op_user.name, user.name)};
+  }
+
+  return Result{true};
 }
 
 void AccountManager::InitDataMap_() {
@@ -2353,8 +2809,9 @@ AccountManager::Result AccountManager::DeleteAccountAllowedQos_(
   return Result{true};
 }
 
-AccountManager::Result AccountManager::BlockUser_(const std::string& name, const std::string& account, bool block) {
-
+AccountManager::Result AccountManager::BlockUser_(const std::string& name,
+                                                  const std::string& account,
+                                                  bool block) {
   if (!g_db_client->UpdateEntityOne(
           MongodbClient::EntityType::USER, "$set", name,
           "account_to_attrs_map." + account + ".blocked", block)) {
@@ -2366,8 +2823,8 @@ AccountManager::Result AccountManager::BlockUser_(const std::string& name, const
   return Result{true};
 }
 
-AccountManager::Result AccountManager::BlockAccount_(const std::string& name, bool block) {
-
+AccountManager::Result AccountManager::BlockAccount_(const std::string& name,
+                                                     bool block) {
   if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
                                     name, "blocked", block)) {
     return Result{false, "Can't update the database"};

@@ -48,17 +48,17 @@ class AccountManager {
 
   ~AccountManager() = default;
 
-  Result AddUser(User&& new_user);
+  Result AddUser(uint32_t uid, User&& new_user);
 
-  Result AddAccount(Account&& new_account);
+  Result AddAccount(uint32_t uid, Account&& new_account);
 
-  Result AddQos(const Qos& new_qos);
+  Result AddQos(uint32_t uid, const Qos& new_qos);
 
-  Result DeleteUser(const std::string& name, const std::string& account);
+  Result DeleteUser(uint32_t uid, const std::string& name, const std::string& account);
 
-  Result DeleteAccount(const std::string& name);
+  Result DeleteAccount(uint32_t uid, const std::string& name);
 
-  Result DeleteQos(const std::string& name);
+  Result DeleteQos(uint32_t uid, const std::string& name);
 
   UserMutexSharedPtr GetExistedUserInfo(const std::string& name);
   UserMapMutexSharedPtr GetAllUserInfo();
@@ -69,20 +69,29 @@ class AccountManager {
   QosMutexSharedPtr GetExistedQosInfo(const std::string& name);
   QosMapMutexSharedPtr GetAllQosInfo();
 
+  Result QueryUserInfo(uint32_t uid, const std::string& name, std::unordered_map<uid_t, User>* res_user_map);
+
+  Result QueryAccountInfo(uint32_t uid, const std::string& name, std::unordered_map<std::string, Account>* res_account_map);
+
+  Result QueryQosInfo(uint32_t uid, const std::string& name, std::unordered_map<std::string, Qos>* res_qos_map);
+
   Result ModifyUser(
-      const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
+      const crane::grpc::OperatorType& operatorType,
+      const uint32_t uid,
       const std::string& name, const std::string& partition,
       std::string account,
-      const crane::grpc::ModifyEntityRequest_ModifyField& modifyField,
+      const crane::grpc::ModifyField& modifyField,
       const std::string& value, bool force);
   Result ModifyAccount(
-      const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
+      const crane::grpc::OperatorType& operatorType,
+      const uint32_t uid,
       const std::string& name,
-      const crane::grpc::ModifyEntityRequest_ModifyField& modifyField,
+      const crane::grpc::ModifyField& modifyField,
       const std::string& value, bool force);
   Result ModifyQos(
+      const uint32_t uid,
       const std::string& name,
-      const crane::grpc::ModifyEntityRequest_ModifyField& modifyField,
+      const crane::grpc::ModifyField& modifyField,
       const std::string& value);
 
   Result BlockAccount(const std::string& name, bool block);
@@ -180,6 +189,21 @@ class AccountManager {
       uint32_t uid, const std::string& target_user, bool read_only_priv,
       User::AdminLevel* level_of_uid = nullptr);
 
+
+Result CheckOpUserExisted(uint32_t uid, const User** op_user);
+
+Result CheckOpUserHasPermissionToAccount(uint32_t uid, const std::string& account, bool read_only_priv);
+Result CheckOpUserHasModifyPermission(uint32_t uid, const User* user, const std::string& name, std::string& account, bool read_only_priv);
+
+Result CheckUserPermissionOnAccount(const User& op_user, const std::string& account, bool read_only_priv);
+Result CheckUserPermissionOnUser(const User& op_user, const User& user, bool read_only_priv);
+
+Result CheckOpUserIsAdmin(uint32_t uid);
+Result CheckOperatorPrivilegeHigher(uint32_t uid, User::AdminLevel admin_level);
+
+bool IsOperatorPrivilegeSameAndHigher(const User& op_user, User::AdminLevel admin_level);
+
+
  private:
   void InitDataMap_();
 
@@ -251,7 +275,8 @@ class AccountManager {
   Result DeleteAccountAllowedQos_(const Account& account,
                                   const std::string& qos, bool force);
 
-  Result BlockUser_(const std::string& name, const std::string& account, bool block);
+  Result BlockUser_(const std::string& name, const std::string& account,
+                    bool block);
 
   Result BlockAccount_(const std::string& name, bool block);
 
