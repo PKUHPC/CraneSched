@@ -319,7 +319,29 @@ message TrimmedPartitionInfo {
 enum EntityType {
   Account = 0;
   User = 1;
-  Qos = 2;
+  // Qos = 2;
+}
+
+enum OperatorType {
+  Overwrite = 0;
+  Add = 1;
+  Delete = 2;
+}
+
+enum ModifyField {
+  // user and account
+  Partition = 0;
+  Qos = 1;
+  DefaultQos = 2;
+  // account and qos
+  Description = 3; 
+  // user
+  AdminLevel = 4; 
+  // qos
+  Priority = 5;
+  MaxJobsPerUser = 6;
+  MaxCpusPerUser = 7;
+  MaxTimeLimitPerTask = 8;
 }
 
 message AccountInfo {
