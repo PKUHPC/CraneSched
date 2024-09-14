@@ -559,18 +559,15 @@ AccountManager::Result AccountManager::ModifyUserDefaultQos(
     std::string account, const std::string& value, bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
-  const User* op_user = nullptr;
+  const User* p = GetExistedUserInfoNoLock_(name);
   Result result;
 
-  result = CheckOpUserExisted(uid, &op_user);
-  if (!result.ok) {
-    return result;
-  }
-  const User* p = GetExistedUserInfoNoLock_(name);
-  // 1. Self-editable 2.Editable by Admin 3. Editable by Coordinator
-  result = CheckUserPermissionOnUser(*op_user, p, name, account, false);
-  if (!result.ok) {
-    return result;
+  {
+    util::read_lock_guard account_guard(m_rw_account_mutex_);
+    result = CheckOpUserHasModifyPermission(uid, p, name, account, false);
+    if (!result.ok) {
+      return result;
+    }
   }
 
   result = CheckSetUserDefaultQos(*p, account, partition, value);
