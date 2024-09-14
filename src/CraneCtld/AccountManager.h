@@ -123,9 +123,9 @@ class AccountManager {
       const crane::grpc::ModifyField& modifyField,
       const std::string& value);
 
-  Result BlockAccount(const std::string& name, bool block);
+  Result BlockAccount(uint32_t uid, const std::string& name, bool block);
 
-  Result BlockUser(const std::string& name, const std::string& account,
+  Result BlockUser(uint32_t uid, const std::string& name, const std::string& account,
                    bool block);
 
   bool CheckUserPermissionToPartition(const std::string& name,
@@ -206,7 +206,7 @@ class AccountManager {
   * 1. The operating user is the same as the target user.
   * 2. The operating user's level is higher than the target user's level.
   * 3. The operating user is the coordinator of the target user's specified account. 
-  *    If the account is empty, it means the operating user is the coordinator of any of the target user's accounts."
+  *    If the read_only_priv is true, it means the operating user is the coordinator of any of the target user's accounts."
   */
   Result CheckUserPermissionOnUser(const User& op_user, const User* user, const std::string& name, const std::string& account, bool read_only_priv);
 

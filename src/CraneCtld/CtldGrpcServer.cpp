@@ -648,28 +648,12 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
 
   switch (request->entity_type()) {
   case crane::grpc::Account:
-    res = g_account_manager->HasPermissionToAccount(request->uid(),
-                                                    request->name(), false);
-
-    if (!res.ok) {
-      response->set_ok(false);
-      response->set_reason(res.reason);
-      return grpc::Status::OK;
-    }
-    res = g_account_manager->BlockAccount(request->name(), request->block());
+    res = g_account_manager->BlockAccount(request->uid(), request->name(), request->block());
     response->set_ok(res.ok);
     response->set_reason(res.reason);
     break;
   case crane::grpc::User:
-    res = g_account_manager->HasPermissionToUser(request->uid(),
-                                                 request->name(), false);
-
-    if (!res.ok) {
-      response->set_ok(false);
-      response->set_reason(res.reason);
-      return grpc::Status::OK;
-    }
-    res = g_account_manager->BlockUser(request->name(), request->account(),
+    res = g_account_manager->BlockUser(request->uid(), request->name(), request->account(),
                                        request->block());
     response->set_ok(res.ok);
     response->set_reason(res.reason);
