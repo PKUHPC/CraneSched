@@ -413,11 +413,36 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(grpc::ServerContext *context,
   
   AccountManager::Result modify_res;
 
-  modify_res = g_account_manager->ModifyUser(
-        request->type(), request->uid(), request->name(), request->partition(),
-        request->account(), request->modify_field(), request->value(),
-        request->force());
-
+  if (request->type() == crane::grpc::OperatorType::Delete) {
+    switch(request->modify_field()) {
+      case crane::grpc::ModifyField::Partition:
+        modify_res = g_account_manager->DeleteUserAllowedPartiton(request->uid(), request->name(), request->account(), request->value());
+        break;
+      case crane::grpc::ModifyField::Qos:
+        modify_res = g_account_manager->DeleteUserAllowedQos(request->uid(), request->name(), request->partition(), request->account(), request->value(), request->force());
+        break;
+      default:
+        break;
+    }
+  } else {
+    switch(request->modify_field()) {
+      case crane::grpc::ModifyField::AdminLevel:
+        modify_res = g_account_manager->ModifyAdminLevel(request->uid(), request->name(), request->value());
+        break;
+      case crane::grpc::ModifyField::Partition:
+        modify_res = g_account_manager->ModifyUserAllowedParition(request->type(), request->uid(), request->name(), request->account(), request->value());
+        break;
+      case crane::grpc::ModifyField::Qos:
+        modify_res = g_account_manager->ModifyUserAllowedQos(request->type(), request->uid(), request->name(), request->partition(), request->account(), request->value(), request->force());
+        break;
+      case crane::grpc::ModifyField::DefaultQos:
+        modify_res = g_account_manager->ModifyUserDefaultQos(request->uid(), request->name(), request->partition(), request->account(), request->value(), request->force());
+        break;
+      default:
+        break;
+     }
+  }
+  
   if (modify_res.ok) {
     response->set_ok(true);
   } else {

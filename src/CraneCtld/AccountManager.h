@@ -60,6 +60,12 @@ class AccountManager {
 
   Result DeleteQos(uint32_t uid, const std::string& name);
 
+  Result QueryUserInfo(uint32_t uid, const std::string& name, std::unordered_map<uid_t, User>* res_user_map);
+
+  Result QueryAccountInfo(uint32_t uid, const std::string& name, std::unordered_map<std::string, Account>* res_account_map);
+
+  Result QueryQosInfo(uint32_t uid, const std::string& name, std::unordered_map<std::string, Qos>* res_qos_map);
+
   UserMutexSharedPtr GetExistedUserInfo(const std::string& name);
   UserMapMutexSharedPtr GetAllUserInfo();
 
@@ -68,26 +74,49 @@ class AccountManager {
 
   QosMutexSharedPtr GetExistedQosInfo(const std::string& name);
   QosMapMutexSharedPtr GetAllQosInfo();
-
-  Result QueryUserInfo(uint32_t uid, const std::string& name, std::unordered_map<uid_t, User>* res_user_map);
-
-  Result QueryAccountInfo(uint32_t uid, const std::string& name, std::unordered_map<std::string, Account>* res_account_map);
-
-  Result QueryQosInfo(uint32_t uid, const std::string& name, std::unordered_map<std::string, Qos>* res_qos_map);
-
-  Result ModifyUser(
+  
+/* ---------------------------------------------------------------------------
+ * ModifyUser-related functions
+ * ---------------------------------------------------------------------------
+ */
+  Result ModifyAdminLevel(
+      const uint32_t uid, 
+      const std::string& name, const std::string& value);
+  Result ModifyUserDefaultQos(
+      uint32_t uid, 
+      const std::string& name, 
+      const std::string& partition, 
+      std::string account, const std::string& value, bool force);
+  Result ModifyUserAllowedParition(
       const crane::grpc::OperatorType& operatorType,
-      const uint32_t uid,
+      uint32_t uid,
+      const std::string& name,
+      std::string account,
+      const std::string& value);
+  Result ModifyUserAllowedQos(
+      const crane::grpc::OperatorType& operatorType,
+      uint32_t uid,
       const std::string& name, const std::string& partition,
       std::string account,
-      const crane::grpc::ModifyField& modifyField,
       const std::string& value, bool force);
+  Result DeleteUserAllowedPartiton(
+      uint32_t uid,
+      const std::string& name,
+      std::string account,
+      const std::string& value);
+  Result DeleteUserAllowedQos(
+      uint32_t uid,
+      const std::string& name, const std::string& partition,
+      std::string account,
+      const std::string& value, bool force);
+
   Result ModifyAccount(
       const crane::grpc::OperatorType& operatorType,
       const uint32_t uid,
       const std::string& name,
       const crane::grpc::ModifyField& modifyField,
       const std::string& value, bool force);
+      
   Result ModifyQos(
       const uint32_t uid,
       const std::string& name,
@@ -114,22 +143,17 @@ class AccountManager {
 
   result::result<void, std::string> CheckUidIsAdmin(uint32_t uid);
 
-  // ModifyUser
-  Result CheckAddUserAllowedPartition(const User& user, const Account& account,
-                                      const std::string& partition);
-  Result CheckAddUserAllowedQos(const User& user, const Account& account,
-                                const std::string& partition,
-                                const std::string& qos);
+/* ---------------------------------------------------------------------------
+ * ModifyUser-related functions
+ * ---------------------------------------------------------------------------
+ */
+  Result CheckModifyUserAllowedParition(const crane::grpc::OperatorType& operatorType, const User* user, const Account* account_ptr, const std::string& account, const std::string& partition);
+  Result CheckModifyUserAllowedQos(const crane::grpc::OperatorType& operatorType, const User* user, const Account* account_ptr, const std::string& account, const std::string& partition, const std::string& qos_str, bool force);
   Result CheckSetUserAdminLevel(const User& user, const std::string& level,
                                 User::AdminLevel* new_level);
   Result CheckSetUserDefaultQos(const User& user, const std::string& account,
                                 const std::string& partition,
                                 const std::string& qos);
-  Result CheckSetUserAllowedPartition(const User& user, const Account& account,
-                                      const std::string& partitions);
-  Result CheckSetUserAllowedQos(const User& user, const Account& account,
-                                const std::string& partition,
-                                const std::string& qos_list_str, bool force);
   Result CheckDeleteUserAllowedPartition(const User& user,
                                          const std::string& account,
                                          const std::string& partition);
@@ -156,6 +180,37 @@ class AccountManager {
                                             bool force);
   Result CheckDeleteAccountAllowedQos(const Account& account,
                                       const std::string& qos, bool force);
+
+ 
+  /*
+   * Check if the operating user exists
+   */
+  Result CheckOpUserExisted(uint32_t uid, const User** op_user);
+
+  Result CheckOpUserIsAdmin(uint32_t uid);
+
+  Result CheckOperatorPrivilegeHigher(uint32_t uid, User::AdminLevel admin_level);
+
+  Result CheckOpUserHasPermissionToAccount(uint32_t uid, const std::string& account, bool read_only_priv);
+
+  Result CheckOpUserHasModifyPermission(uint32_t uid, const User* user, const std::string& name, std::string& account, bool read_only_priv);
+
+  /*
+   * Check if the operating user is the coordinator of the target user's specified account.
+   */
+  Result CheckUserPermissionOnAccount(const User& op_user, const std::string& account, bool read_only_priv);
+  
+ /*
+  * Check whether the operating user has permissions to access the target user.
+  * Permissions are granted if any of the following three conditions are met:
+  * 1. The operating user is the same as the target user.
+  * 2. The operating user's level is higher than the target user's level.
+  * 3. The operating user is the coordinator of the target user's specified account. 
+  *    If the account is empty, it means the operating user is the coordinator of any of the target user's accounts."
+  */
+  Result CheckUserPermissionOnUser(const User& op_user, const User* user, const std::string& name, const std::string& account, bool read_only_priv);
+
+  bool IsOperatorPrivilegeSameAndHigher(const User& op_user, User::AdminLevel admin_level);
 
   /**
    * @param[in] uid is system uid of user.
@@ -188,21 +243,6 @@ class AccountManager {
   AccountManager::Result HasPermissionToUser(
       uint32_t uid, const std::string& target_user, bool read_only_priv,
       User::AdminLevel* level_of_uid = nullptr);
-
-
-Result CheckOpUserExisted(uint32_t uid, const User** op_user);
-
-Result CheckOpUserHasPermissionToAccount(uint32_t uid, const std::string& account, bool read_only_priv);
-Result CheckOpUserHasModifyPermission(uint32_t uid, const User* user, const std::string& name, std::string& account, bool read_only_priv);
-
-Result CheckUserPermissionOnAccount(const User& op_user, const std::string& account, bool read_only_priv);
-Result CheckUserPermissionOnUser(const User& op_user, const User& user, bool read_only_priv);
-
-Result CheckOpUserIsAdmin(uint32_t uid);
-Result CheckOperatorPrivilegeHigher(uint32_t uid, User::AdminLevel admin_level);
-
-bool IsOperatorPrivilegeSameAndHigher(const User& op_user, User::AdminLevel admin_level);
-
 
  private:
   void InitDataMap_();
