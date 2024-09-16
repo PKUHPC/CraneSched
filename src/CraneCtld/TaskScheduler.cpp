@@ -2006,6 +2006,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
         return lhs->it->first > rhs->it->first;
       });
 
+  trackers.reserve(craned_indexes_.size());
   for (CranedId craned_id : craned_indexes_) {
     auto& time_delta_res_map =
         node_selection_info.node_time_delta_res_map.at(craned_id);
