@@ -662,12 +662,13 @@ void CranedKeeper::PutNodeIntoUnavailList(const std::string &crane_id) {
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   std::string ip_addr;
-  uint32_t ipv4_addr;
-  absl::uint128 ipv6_addr;
+
+  ipv4_t ipv4_addr;
+  ipv6_t ipv6_addr;
   if (crane::ResolveIpv4FromHostname(craned_id, &ipv4_addr)) {
-    ip_addr = crane::Ipv4ToString(ipv4_addr);
+    ip_addr = crane::Ipv4ToStr(ipv4_addr);
   } else if (crane::ResolveIpv6FromHostname(craned_id, &ipv6_addr)) {
-    ip_addr = fmt::format("[{}]", crane::Ipv6ToString(ipv6_addr));
+    ip_addr = crane::Ipv6ToStr(ipv6_addr);
   } else {
     ip_addr = craned_id;
   }

@@ -895,13 +895,11 @@ void TaskScheduler::ScheduleThread_() {
 
       begin = std::chrono::steady_clock::now();
 
-      {
-        auto now = absl::Now();
-
-        for (auto const& [craned_id, _] : craned_exec_requests_map) {
-          auto craned_meta_ptr = g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
-                  now;
-        }
+      // TODO: Refactor here! Add filter chain for post-scheduling stage.
+      absl::Time post_sched_time_point = absl::Now();
+      for (auto const& [craned_id, _] : craned_exec_requests_map) {
+        g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
+            post_sched_time_point;
       }
 
       HashSet<std::pair<CranedId, task_id_t>> failed_to_exec_task_id_set;

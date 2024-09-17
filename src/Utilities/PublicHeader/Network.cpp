@@ -16,8 +16,6 @@
 
 #include "crane/Network.h"
 
-#include <regex>
-
 #include "crane/Logger.h"
 
 namespace crane {
@@ -31,7 +29,7 @@ class HostsMap {
       CRANE_ERROR("Failed to parse file /etc/hosts, DNS service will be used");
   }
 
-  bool FindIpv4OfHostname(std::string const& hostname, uint32_t* ipv4) const {
+  bool FindIpv4OfHostname(std::string const& hostname, ipv4_t* ipv4) const {
     auto it = m_hostname_to_ipv4_map_.find(hostname);
     if (it == m_hostname_to_ipv4_map_.end()) return false;
 
@@ -39,8 +37,7 @@ class HostsMap {
     return true;
   }
 
-  bool FindIpv6OfHostname(std::string const& hostname,
-                          absl::uint128* ipv6) const {
+  bool FindIpv6OfHostname(std::string const& hostname, ipv6_t* ipv6) const {
     auto it = m_hostname_to_ipv6_map_.find(hostname);
     if (it == m_hostname_to_ipv6_map_.end()) return false;
 
@@ -48,7 +45,7 @@ class HostsMap {
     return true;
   }
 
-  bool FindFirstHostnameOfIpv4(uint32_t ipv4, std::string* hostname) const {
+  bool FindFirstHostnameOfIpv4(ipv4_t ipv4, std::string* hostname) const {
     auto it = m_ipv4_to_hostnames_map_.find(ipv4);
     if (it == m_ipv4_to_hostnames_map_.end()) return false;
 
@@ -57,7 +54,7 @@ class HostsMap {
     return true;
   }
 
-  bool FindFirstHostnameOfIpv6(absl::uint128 ipv6,
+  bool FindFirstHostnameOfIpv6(const ipv6_t& ipv6,
                                std::string* hostname) const {
     auto it = m_ipv6_to_hostnames_map_.find(ipv6);
     if (it == m_ipv6_to_hostnames_map_.end()) return false;
@@ -95,19 +92,19 @@ class HostsMap {
           if (parts[i][0] == '#') {
             break;
           }
-          switch (crane::GetIpAddressVersion(ip)) {
+          switch (crane::GetIpAddrVer(ip)) {
           case -1:
             CRANE_ERROR("host file line \'{}\' parse failed", line);
             break;
           case 4:
-            uint32_t ipv4;
-            crane::Ipv4ToUint32(ip, &ipv4);
+            ipv4_t ipv4;
+            crane::StrToIpv4(ip, &ipv4);
             m_hostname_to_ipv4_map_[std::string(parts[i])] = ipv4;
             m_ipv4_to_hostnames_map_[ipv4].emplace(parts[i]);
             break;
           case 6:
-            absl::uint128 ipv6;
-            crane::Ipv6ToUint128(ip, &ipv6);
+            ipv6_t ipv6;
+            crane::StrToIpv6(ip, &ipv6);
             m_hostname_to_ipv6_map_[std::string(parts[i])] = ipv6;
             m_ipv6_to_hostnames_map_[ipv6].emplace(parts[i]);
             break;
@@ -121,18 +118,14 @@ class HostsMap {
     return true;
   }
 
-  absl::flat_hash_map<std::string /*hostname*/, absl::uint128 /*ipv6*/>
-      m_hostname_to_ipv6_map_;
+  absl::flat_hash_map<std::string /*hostname*/, ipv6_t> m_hostname_to_ipv6_map_;
 
-  absl::flat_hash_map<absl::uint128,
-                      absl::flat_hash_set<std::string> /*hostnames*/>
+  absl::flat_hash_map<ipv6_t, absl::flat_hash_set<std::string> /*hostnames*/>
       m_ipv6_to_hostnames_map_;
 
-  absl::flat_hash_map<std::string /*hostname*/, uint32_t /*ipv4*/>
-      m_hostname_to_ipv4_map_;
+  absl::flat_hash_map<std::string /*hostname*/, ipv4_t> m_hostname_to_ipv4_map_;
 
-  absl::flat_hash_map<uint32_t /*ipv4*/,
-                      absl::flat_hash_set<std::string> /*hostnames*/>
+  absl::flat_hash_map<ipv4_t, absl::flat_hash_set<std::string> /*hostnames*/>
       m_ipv4_to_hostnames_map_;
 };
 
@@ -144,18 +137,19 @@ void InitializeNetworkFunctions() {
   internal::g_hosts_map = std::make_unique<internal::HostsMap>();
 }
 
-bool ResolveHostnameFromIpv4(uint32_t addr, std::string* hostname) {
+bool ResolveHostnameFromIpv4(ipv4_t addr, std::string* hostname) {
   if (internal::g_hosts_map->FindFirstHostnameOfIpv4(addr, hostname))
     return true;
   struct sockaddr_in sa {}; /* input */
-  socklen_t len;            /* input */
+                            /* input */
   char hbuf[NI_MAXHOST];
 
-  auto ipv4_str = Ipv4ToString(addr);
+  std::string ipv4_str = Ipv4ToStr(addr);
   /* For IPv4*/
   sa.sin_family = AF_INET;
   sa.sin_addr.s_addr = inet_addr(ipv4_str.c_str());
-  len = sizeof(struct sockaddr_in);
+
+  socklen_t len = sizeof(struct sockaddr_in);
 
   int r;
   if ((r = getnameinfo((struct sockaddr*)&sa, len, hbuf, sizeof(hbuf), nullptr,
@@ -169,19 +163,19 @@ bool ResolveHostnameFromIpv4(uint32_t addr, std::string* hostname) {
   }
 }
 
-bool ResolveHostnameFromIpv6(absl::uint128 addr, std::string* hostname) {
+bool ResolveHostnameFromIpv6(const ipv6_t& addr, std::string* hostname) {
   struct sockaddr_in6 sa6 {}; /* input */
-  socklen_t len;              /* input */
+                              /* input */
   char hbuf[NI_MAXHOST];
 
   /* For IPv6*/
   sa6.sin6_family = AF_INET6;
   in6_addr addr6{};
-  auto ipv6_str = Ipv6ToString(addr);
+  std::string ipv6_str = Ipv6ToStr(addr);
   inet_pton(AF_INET6, ipv6_str.c_str(), &addr6);
   sa6.sin6_addr = addr6;
 
-  len = sizeof(struct sockaddr_in6);
+  socklen_t len = sizeof(struct sockaddr_in6);
 
   int r;
   if ((r = getnameinfo((struct sockaddr*)&sa6, len, hbuf, sizeof(hbuf), nullptr,
@@ -195,23 +189,23 @@ bool ResolveHostnameFromIpv6(absl::uint128 addr, std::string* hostname) {
   }
 }
 
-bool ResolveIpv4FromHostname(const std::string& hostname, uint32_t* addr) {
+bool ResolveIpv4FromHostname(const std::string& hostname, ipv4_t* addr) {
   if (internal::g_hosts_map->FindIpv4OfHostname(hostname, addr)) return true;
 
   struct addrinfo hints {};
-  struct addrinfo *res, *tmp;
+  struct addrinfo* res;
   char host[NI_MAXHOST];
 
   hints.ai_family = AF_INET;
 
   int ret = getaddrinfo(hostname.c_str(), nullptr, &hints, &res);
   if (ret != 0) {
-    CRANE_WARN("Error in getaddrinfo when resolving ipv4 from hostname {}: {}", hostname,
-               gai_strerror(ret));
+    CRANE_WARN("Error in getaddrinfo when resolving ipv4 from hostname {}: {}",
+               hostname, gai_strerror(ret));
     return false;
   }
 
-  for (tmp = res; tmp != nullptr; tmp = tmp->ai_next) {
+  for (struct addrinfo* tmp = res; tmp != nullptr; tmp = tmp->ai_next) {
     ret = getnameinfo(tmp->ai_addr, tmp->ai_addrlen, host, sizeof(host),
                       nullptr, 0, NI_NUMERICHOST);
     auto ipv4_sockaddr = (struct sockaddr_in*)tmp->ai_addr;
@@ -226,7 +220,7 @@ bool ResolveIpv4FromHostname(const std::string& hostname, uint32_t* addr) {
   return true;
 }
 
-bool ResolveIpv6FromHostname(const std::string& hostname, absl::uint128* addr) {
+bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr) {
   if (internal::g_hosts_map->FindIpv6OfHostname(hostname, addr)) return true;
 
   struct addrinfo hints {};
@@ -237,8 +231,8 @@ bool ResolveIpv6FromHostname(const std::string& hostname, absl::uint128* addr) {
 
   int ret = getaddrinfo(hostname.c_str(), nullptr, &hints, &res);
   if (ret != 0) {
-    CRANE_WARN("Error in getaddrinfo when resolving ipv6 from hostname {}: {}", hostname,
-               gai_strerror(ret));
+    CRANE_WARN("Error in getaddrinfo when resolving ipv6 from hostname {}: {}",
+               hostname, gai_strerror(ret));
     return false;
   }
 
@@ -260,7 +254,8 @@ bool ResolveIpv6FromHostname(const std::string& hostname, absl::uint128* addr) {
   freeaddrinfo(res);
   return true;
 }
-bool Ipv4ToUint32(const std::string& ip, uint32_t* addr) {
+
+bool StrToIpv4(const std::string& ip, ipv4_t* addr) {
   struct in_addr ipv4_addr;
   if (inet_pton(AF_INET, ip.c_str(), &ipv4_addr) != 1) {
     CRANE_ERROR("Error converting ipv4 {} to uint32_t", ip);
@@ -272,7 +267,7 @@ bool Ipv4ToUint32(const std::string& ip, uint32_t* addr) {
   return true;
 }
 
-bool Ipv6ToUint128(const std::string& ip, absl::uint128* addr) {
+bool StrToIpv6(const std::string& ip, ipv6_t* addr) {
   struct in6_addr ipv6_addr;
   if (inet_pton(AF_INET6, ip.c_str(), &ipv6_addr) != 1) {
     CRANE_ERROR("Error converting ipv6 {} to uint128", ip);
@@ -289,35 +284,33 @@ bool Ipv6ToUint128(const std::string& ip, absl::uint128* addr) {
   return true;
 }
 
-std::string Ipv4ToString(uint32_t addr) {
+std::string Ipv4ToStr(ipv4_t addr) {
   return fmt::format("{}.{}.{}.{}", (addr >> 24) & 0xff, (addr >> 16) & 0xff,
                      (addr >> 8) & 0xff, addr & 0xff);
 }
 
-std::string Ipv6ToString(absl::uint128 addr) {
+std::string Ipv6ToStr(const ipv6_t& addr) {
   uint64_t high = absl::Uint128High64(addr);
   uint64_t low = absl::Uint128Low64(addr);
   std::vector<std::string> hex_vec;
-  for (int i = 0; i < 4; ++i) {
+  for (int i = 0; i < 4; ++i)
     hex_vec.push_back(fmt::format("{:x}", (high >> (48 - i * 16)) & 0xffff));
-  }
-  for (int i = 0; i < 4; ++i) {
+
+  for (int i = 0; i < 4; ++i)
     hex_vec.push_back(fmt::format("{:x}", (low >> (48 - i * 16)) & 0xffff));
-  }
+
   return absl::StrJoin(hex_vec, ":");
 }
 
-int GetIpAddressVersion(const std::string& ip) {
+int GetIpAddrVer(const std::string& ip) {
   char buf[INET6_ADDRSTRLEN];
-  if (inet_pton(AF_INET, ip.c_str(), buf)) {
-    return 4;
-  } else if (inet_pton(AF_INET6, ip.c_str(), buf)) {
-    return 6;
-  }
+  if (inet_pton(AF_INET, ip.c_str(), buf)) return 4;
+  if (inet_pton(AF_INET6, ip.c_str(), buf)) return 6;
+
   return -1;
 }
 
-bool FindTcpInodeByPort(int port, ino_t* inode, const std::string& tcp_path) {
+bool FindTcpInodeByPort(const std::string& tcp_path, int port, ino_t* inode) {
   std::ifstream tcp_in(tcp_path, std::ios::in);
   std::string tcp_line;
   std::string port_hex = fmt::format("{:0>4X}", port);

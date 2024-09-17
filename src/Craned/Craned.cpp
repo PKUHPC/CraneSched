@@ -347,18 +347,19 @@ void ParseConfig(int argc, char** argv) {
             for (auto& dev : devices) {
               each_node_device[name].push_back(dev);
             }
-            uint32_t ipv4;
-            absl::uint128 ipv6;
-            switch (crane::GetIpAddressVersion(name)) {
+
+            ipv4_t ipv4;
+            ipv6_t ipv6;
+            switch (crane::GetIpAddrVer(name)) {
             case -1:
               if (crane::ResolveIpv4FromHostname(name, &ipv4)) {
                 g_config.Ipv4ToCranedHostname[ipv4] = name;
                 CRANE_INFO("Resolve hostname `{}` to `{}`", name,
-                           crane::Ipv4ToString(ipv4));
+                           crane::Ipv4ToStr(ipv4));
               } else if (crane::ResolveIpv6FromHostname(name, &ipv6)) {
                 g_config.Ipv6ToCranedHostname[ipv6] = name;
                 CRANE_INFO("Resolve hostname `{}` to `{}`", name,
-                           crane::Ipv6ToString(ipv6));
+                           crane::Ipv6ToStr(ipv6));
               } else {
                 CRANE_ERROR("Init error: Cannot resolve hostname of `{}`",
                             name);
@@ -371,7 +372,7 @@ void ParseConfig(int argc, char** argv) {
                   "Node name `{}` is a valid ipv4 address and doesn't "
                   "need resolving.",
                   name);
-              if (!crane::Ipv4ToUint32(name, &ipv4)) {
+              if (!crane::StrToIpv4(name, &ipv4)) {
                 std::exit(1);
               }
               g_config.Ipv4ToCranedHostname[ipv4] = name;
@@ -382,7 +383,7 @@ void ParseConfig(int argc, char** argv) {
                   "Node name `{}` is a valid ipv6 address and doesn't "
                   "need resolving.",
                   name);
-              if (!crane::Ipv6ToUint128(name, &ipv6)) {
+              if (!crane::StrToIpv6(name, &ipv6)) {
                 std::exit(1);
               }
               g_config.Ipv6ToCranedHostname[ipv6] = name;
@@ -488,7 +489,7 @@ void ParseConfig(int argc, char** argv) {
     g_config.ControlMachine = parsed_args["server-address"].as<std::string>();
   }
 
-  if(crane::GetIpAddressVersion(g_config.ListenConf.CranedListenAddr)==-1){
+  if (crane::GetIpAddrVer(g_config.ListenConf.CranedListenAddr) == -1) {
     CRANE_ERROR("Listening address is invalid.");
     std::exit(1);
   }

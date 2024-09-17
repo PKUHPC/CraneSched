@@ -78,14 +78,14 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
   // find inode
   // 1._find_match_in_tcp_file
   inode_found =
-      crane::FindTcpInodeByPort(request->port(), &inode, "/proc/net/tcp");
+      crane::FindTcpInodeByPort("/proc/net/tcp", request->port(), &inode);
   if (!inode_found) {
     CRANE_TRACE(
         "Inode num for port {} is not found in /proc/net/tcp, try "
         "/proc/net/tcp6.",
         request->port());
     inode_found =
-        crane::FindTcpInodeByPort(request->port(), &inode, "/proc/net/tcp6");
+        crane::FindTcpInodeByPort("/proc/net/tcp6", request->port(), &inode);
   }
 
   if (!inode_found) {
@@ -219,16 +219,15 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
   bool remote_is_craned = false;
 
   // May be craned or cfored
-  std::string crane_service_port;
-  std::string crane_service_address = request->ssh_remote_address();
+  std::string crane_port;
+  std::string crane_addr = request->ssh_remote_address();
 
-  auto ip_version = crane::GetIpAddressVersion(request->ssh_remote_address());
+  int ip_ver = crane::GetIpAddrVer(request->ssh_remote_address());
 
-  uint32_t crane_service_address_ipv4;
-  absl::uint128 crane_service_address_ipv6;
-  if (ip_version == 4 &&
-      crane::Ipv4ToUint32(crane_service_address, &crane_service_address_ipv4)) {
-    if (g_config.Ipv4ToCranedHostname.contains(crane_service_address_ipv4)) {
+  ipv4_t crane_addr4;
+  ipv6_t crane_addr6;
+  if (ip_ver == 4 && crane::StrToIpv4(crane_addr, &crane_addr4)) {
+    if (g_config.Ipv4ToCranedHostname.contains(crane_addr4)) {
       CRANE_TRACE(
           "Receive QueryTaskIdFromPortForward from Pam module: "
           "ssh_remote_port: {}, ssh_remote_address: {}. "
@@ -238,26 +237,24 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
       // In the addresses of CraneD nodes. This ssh request comes from a
       // CraneD node. Check if the remote port belongs to a task. If so, move
       // it in to the cgroup of this task.
-      crane_service_port = g_config.ListenConf.CranedListenPort;
+      crane_port = g_config.ListenConf.CranedListenPort;
       remote_is_craned = true;
     }
-  } else if (ip_version == 6 &&
-             crane::Ipv6ToUint128(crane_service_address,
-                                  &crane_service_address_ipv6)) {
-    if (g_config.Ipv6ToCranedHostname.contains(crane_service_address_ipv6)) {
+  } else if (ip_ver == 6 && crane::StrToIpv6(crane_addr, &crane_addr6)) {
+    if (g_config.Ipv6ToCranedHostname.contains(crane_addr6)) {
       CRANE_TRACE(
           "Receive QueryTaskIdFromPortForward from Pam module: "
           "ssh_remote_port: {}, ssh_remote_address: {}. "
           "This ssh comes from a CraneD node. uid: {}",
           request->ssh_remote_port(), request->ssh_remote_address(),
           request->uid());
-      crane_service_port = g_config.ListenConf.CranedListenPort;
+      crane_port = g_config.ListenConf.CranedListenPort;
       remote_is_craned = true;
     }
   } else {
     CRANE_ERROR(
         "Unknown ip version for address {} or error converting ip to uint",
-        crane_service_address);
+        crane_addr);
     response->set_ok(false);
     return Status::OK;
   }
@@ -274,18 +271,16 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
         request->uid());
 
     response->set_from_user(true);
-    crane_service_port = kCforedDefaultPort;
+    crane_port = kCforedDefaultPort;
   }
 
   std::shared_ptr<Channel> channel_of_remote_service;
   if (g_config.ListenConf.UseTls) {
     std::string remote_hostname;
-    if (ip_version == 4) {
-      ok = crane::ResolveHostnameFromIpv4(crane_service_address_ipv4,
-                                          &remote_hostname);
-    } else if (ip_version == 6) {
-      ok = crane::ResolveHostnameFromIpv6(crane_service_address_ipv6,
-                                          &remote_hostname);
+    if (ip_ver == 4) {
+      ok = crane::ResolveHostnameFromIpv4(crane_addr4, &remote_hostname);
+    } else if (ip_ver == 6) {
+      ok = crane::ResolveHostnameFromIpv6(crane_addr6, &remote_hostname);
     } else {
       ok = false;
     }
@@ -295,16 +290,14 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
                   request->ssh_remote_address(), remote_hostname);
 
       channel_of_remote_service = CreateTcpTlsChannelByHostname(
-          remote_hostname, crane_service_port, g_config.ListenConf.TlsCerts);
+          remote_hostname, crane_port, g_config.ListenConf.TlsCerts);
     } else {
       CRANE_ERROR("Failed to resolve remote address {}.",
                   request->ssh_remote_address());
     }
   } else {
-    if (crane::GetIpAddressVersion(request->ssh_remote_address()) == 6)
-      crane_service_address = fmt::format("[{}]", crane_service_address);
     channel_of_remote_service =
-        CreateTcpInsecureChannel(crane_service_address, crane_service_port);
+        CreateTcpInsecureChannel(crane_addr, crane_port);
   }
 
   if (!channel_of_remote_service) {
@@ -540,10 +533,6 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
   std::string craned_listen_addr = listen_conf.CranedListenAddr;
-  if (crane::GetIpAddressVersion(craned_listen_addr) == 6) {
-    // grpc needs to use [] to wrap ipv6 address
-    craned_listen_addr = fmt::format("[{}]", craned_listen_addr);
-  }
   if (listen_conf.UseTls) {
     ServerBuilderAddTcpTlsListeningPort(&builder, craned_listen_addr,
                                         listen_conf.CranedListenPort,

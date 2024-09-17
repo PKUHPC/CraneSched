@@ -1172,17 +1172,12 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
   std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
-  if(crane::GetIpAddressVersion(cranectld_listen_addr)==6){
-    // grpc needs to use [] to wrap ipv6 address
-    cranectld_listen_addr=fmt::format("[{}]", cranectld_listen_addr);
-  }
   if (listen_conf.UseTls) {
-    ServerBuilderAddTcpTlsListeningPort(
-        &builder, cranectld_listen_addr,
-        listen_conf.CraneCtldListenPort, listen_conf.Certs);
+    ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
+                                        listen_conf.CraneCtldListenPort,
+                                        listen_conf.Certs);
   } else {
-    ServerBuilderAddTcpInsecureListeningPort(&builder,
-                                             cranectld_listen_addr,
+    ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
                                              listen_conf.CraneCtldListenPort);
   }
 

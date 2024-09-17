@@ -31,28 +31,34 @@
 #include <fstream>
 #include <string>
 
+using ipv4_t = uint32_t;
+using ipv6_t = absl::uint128;
+
 namespace crane {
 
 void InitializeNetworkFunctions();
 
-bool ResolveHostnameFromIpv4(uint32_t addr, std::string* hostname);
+bool ResolveHostnameFromIpv4(ipv4_t addr, std::string* hostname);
 
-bool ResolveHostnameFromIpv6(absl::uint128 addr, std::string* hostname);
+bool ResolveHostnameFromIpv6(const ipv6_t& addr, std::string* hostname);
 
-bool ResolveIpv4FromHostname(const std::string& hostname, uint32_t* addr);
+bool ResolveIpv4FromHostname(const std::string& hostname, ipv4_t* addr);
 
-bool ResolveIpv6FromHostname(const std::string& hostname, absl::uint128* addr);
+bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr);
 
-bool Ipv4ToUint32(const std::string& ip, uint32_t* addr);
+bool StrToIpv4(const std::string& ip, ipv4_t* addr);
 
-bool Ipv6ToUint128(const std::string& ip, absl::uint128* addr);
+bool StrToIpv6(const std::string& ip, ipv6_t* addr);
 
-std::string Ipv4ToString(uint32_t addr);
+std::string Ipv4ToStr(ipv4_t addr);
 
-std::string Ipv6ToString(absl::uint128 addr);
+std::string Ipv6ToStr(const ipv6_t& addr);
 
-// -1 on error, 4 for IPv4, 6 for IPv6
-int GetIpAddressVersion(const std::string& ip);
+/// @param ip string of ip address
+/// @return -1 if ip is not a valid ipv4 or ipv6 address, otherwise 4 is return
+/// for IPv4 or 6 is returned for IPv6.
+int GetIpAddrVer(const std::string& ip);
 
-bool FindTcpInodeByPort(int port, ino_t* inode, const std::string& tcp_path);
+bool FindTcpInodeByPort(const std::string& tcp_path, int port, ino_t* inode);
+
 }  // namespace crane

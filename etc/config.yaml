@@ -79,9 +79,9 @@ Nodes:
     gres:
       - name: gpu
         type: a100
-        # each file will be parsed as a device
+        # Each file will be parsed as a device.
         DeviceFileRegex: /dev/nvidia[0-3]
-        # following device files will belong to a single device
+        # Following device files will belong to a single device.
         DeviceFileList:
           - /dev/dri/renderer[0-3]
         EnvInjector: nvidia
