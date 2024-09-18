@@ -2014,7 +2014,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
         task->Resources().EachNodeResMap().begin()->second.allocatable_res;
 
     // If any of the follow `if` is true, skip this node.
-    if (!(task->requested_node_res_view <= craned_meta->res_avail)) {
+    if (!(task->requested_node_res_view <= craned_meta->res_total)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
             "Task #{} needs more resource than that of craned {}. "
@@ -2239,7 +2239,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
             if (it1->start + it1->duration > start) {
               // Note: If start == seg.start, there's no intersection.
               new_intersected_time_segments.emplace_back(
-                  start, it1->start + it1->duration - start);
+                  start,
+                  std::min(it1->start + it1->duration - start, end - start));
             }
           }
 
