@@ -2218,6 +2218,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           valid_seg_str.emplace_back(fmt::format(
               "[start: {}, end: {})", absl::ToInt64Seconds(seg.start - now),
               absl::ToInt64Seconds(seg.start - now + seg.duration)));
+        for (auto& seg : intersected_time_segments)
+          valid_seg_str.emplace_back(fmt::format(
+              "[start: {}, end: {})", absl::ToInt64Seconds(seg.start - now),
+              absl::ToInt64Seconds(seg.start - now + seg.duration)));
         CRANE_TRACE("After looping craned {}, valid time segments: {}",
                     craned_id, absl::StrJoin(valid_seg_str, ", "));
       }
