@@ -257,12 +257,12 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
               fmt::format("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3]));
         } else {
           // ipv6
-          std::string addr[4];
+          std::string addr[8];
           for (int i = 0; i < 4; i++) {
             std::string addr_part = addr_hex.substr(i * 8, 8);
             uint32_t host_addr_part = ntohl(std::stoul(addr_part, nullptr, 16));
-            addr[i] = fmt::format("{:x}:{:x}", uint16_t(host_addr_part >> 16),
-                                  uint16_t(host_addr_part));
+            addr[i * 2] = fmt::format("{:x}", uint16_t(host_addr_part >> 16));
+            addr[i * 2 + 1] = fmt::format("{:x}", uint16_t(host_addr_part));
             pam_syslog(pamh, LOG_ERR,
                        "[Crane] Transform %d part of ipv6 hex addr: %s to %s",
                        i, addr_part.c_str(), addr[i].c_str());

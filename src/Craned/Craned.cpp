@@ -351,23 +351,30 @@ void ParseConfig(int argc, char** argv) {
             ipv4_t ipv4;
             ipv6_t ipv6;
             switch (crane::GetIpAddrVer(name)) {
-            case -1:
+            case -1: {
+              bool ip_resolved = false;
               if (crane::ResolveIpv4FromHostname(name, &ipv4)) {
                 g_config.Ipv4ToCranedHostname[ipv4] = name;
                 CRANE_INFO("Resolve hostname `{}` to `{}`", name,
                            crane::Ipv4ToStr(ipv4));
-              } else if (crane::ResolveIpv6FromHostname(name, &ipv6)) {
+                ip_resolved = true;
+              }
+              if (crane::ResolveIpv6FromHostname(name, &ipv6)) {
                 g_config.Ipv6ToCranedHostname[ipv6] = name;
                 CRANE_INFO("Resolve hostname `{}` to `{}`", name,
                            crane::Ipv6ToStr(ipv6));
-              } else {
+                ip_resolved = true;
+              }
+
+              if (!ip_resolved) {
                 CRANE_ERROR("Init error: Cannot resolve hostname of `{}`",
                             name);
                 std::exit(1);
               }
               break;
+            }
 
-            case 4:
+            case 4: {
               CRANE_INFO(
                   "Node name `{}` is a valid ipv4 address and doesn't "
                   "need resolving.",
@@ -377,8 +384,9 @@ void ParseConfig(int argc, char** argv) {
               }
               g_config.Ipv4ToCranedHostname[ipv4] = name;
               break;
+            }
 
-            case 6:
+            case 6: {
               CRANE_INFO(
                   "Node name `{}` is a valid ipv6 address and doesn't "
                   "need resolving.",
@@ -388,6 +396,7 @@ void ParseConfig(int argc, char** argv) {
               }
               g_config.Ipv6ToCranedHostname[ipv6] = name;
               break;
+            }
             }
             g_config.CranedRes[name] = node_res;
           }

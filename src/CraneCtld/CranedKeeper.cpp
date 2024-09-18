@@ -663,14 +663,29 @@ void CranedKeeper::PutNodeIntoUnavailList(const std::string &crane_id) {
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   std::string ip_addr;
 
-  ipv4_t ipv4_addr;
-  ipv6_t ipv6_addr;
-  if (crane::ResolveIpv4FromHostname(craned_id, &ipv4_addr)) {
-    ip_addr = crane::Ipv4ToStr(ipv4_addr);
-  } else if (crane::ResolveIpv6FromHostname(craned_id, &ipv6_addr)) {
-    ip_addr = crane::Ipv6ToStr(ipv6_addr);
+  static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
+      craned_id_to_ip_addr_cache_map;
+  auto it = craned_id_to_ip_addr_cache_map.find(craned_id);
+  if (it != craned_id_to_ip_addr_cache_map.end()) {
+    if (holds_alternative<ipv4_t>(it->second)) {
+      ip_addr = crane::Ipv4ToStr(std::get<ipv4_t>(it->second));
+    } else if (holds_alternative<ipv6_t>(it->second)) {
+      ip_addr = crane::Ipv6ToStr(std::get<ipv6_t>(it->second));
+    } else {
+      CRANE_ERROR("Unknown variant type in craned_id_to_ip_addr_cache_map");
+    }
   } else {
-    ip_addr = craned_id;
+    ipv4_t ipv4_addr;
+    ipv6_t ipv6_addr;
+    if (crane::ResolveIpv4FromHostname(craned_id, &ipv4_addr)) {
+      ip_addr = crane::Ipv4ToStr(ipv4_addr);
+      craned_id_to_ip_addr_cache_map.emplace(craned_id, ipv4_addr);
+    } else if (crane::ResolveIpv6FromHostname(craned_id, &ipv6_addr)) {
+      ip_addr = crane::Ipv6ToStr(ipv6_addr);
+      craned_id_to_ip_addr_cache_map.emplace(craned_id, ipv6_addr);
+    } else {
+      ip_addr = craned_id;
+    }
   }
 
   auto *craned = new CranedStub(this);

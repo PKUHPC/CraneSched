@@ -18,7 +18,7 @@ CaCertFilePath: /etc/crane/ca.crt
 DomainSuffix: riley.local
 
 # Ctld settings
-# the ip address of control machine
+# the listening address of control machine
 CraneCtldListenAddr: 0.0.0.0
 # the port of control machine to listen
 CraneCtldListenPort: 10011
@@ -32,7 +32,7 @@ CraneCtldMutexFilePath: cranectld/cranectld.lock
 CraneCtldForeground: true
 
 # Craned settings
-# the ip address of control machine
+# the listening address of control machine
 CranedListenAddr: 0.0.0.0
 # the port of control machine to listen
 CranedListenPort: 10010

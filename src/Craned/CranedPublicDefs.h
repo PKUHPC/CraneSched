@@ -89,8 +89,8 @@ struct Config {
 
   CranedMeta CranedMeta;
 
-  std::unordered_map<uint32_t, std::string> Ipv4ToCranedHostname;
-  std::unordered_map<absl::uint128, std::string, absl::Hash<absl::uint128>>
+  std::unordered_map<ipv4_t, std::string> Ipv4ToCranedHostname;
+  std::unordered_map<ipv6_t, std::string, absl::Hash<ipv6_t>>
       Ipv6ToCranedHostname;
   std::unordered_map<std::string, std::shared_ptr<ResourceInNode>> CranedRes;
   std::unordered_map<std::string, Partition> Partitions;
