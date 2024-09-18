@@ -54,22 +54,15 @@ AccountManager::Result AccountManager::AddUser(uint32_t uid, User&& new_user) {
 
   // Check whether the account exists
   const Account* find_account = GetExistedAccountInfoNoLock_(object_account);
-  if (!find_account) {
-    return Result{false, fmt::format("unknown account '{}'", object_account)};
-  }
 
-  const std::list<std::string>& parent_allowed_partition =
-      find_account->allowed_partition;
   // Check if user's allowed partition is a subset of parent's allowed
   // partition
   for (auto&& [partition, qos] : new_user.account_to_attrs_map[object_account]
                                      .allowed_partition_qos_map) {
-    if (std::find(parent_allowed_partition.begin(),
-                  parent_allowed_partition.end(),
-                  partition) == parent_allowed_partition.end()) {
-      return Result{false,
-                    fmt::format("Partition '{}' is not allowed in account '{}'",
-                                partition, find_account->name)};
+    Result result =
+        CheckPartitionIsAllowed(find_account, object_account, partition, false);
+    if (!result.ok) {
+      return result;
     }
   }
 
@@ -78,12 +71,13 @@ AccountManager::Result AccountManager::AddUser(uint32_t uid, User&& new_user) {
 
 AccountManager::Result AccountManager::AddAccount(uint32_t uid,
                                                   Account&& new_account) {
+  Result result;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
 
-    Result result = CheckOpUserHasPermissionToAccount(
-        uid, new_account.parent_account, false);
+    result = CheckOpUserHasPermissionToAccount(uid, new_account.parent_account,
+                                               false);
     if (!result.ok) {
       return result;
     }
@@ -382,7 +376,8 @@ AccountManager::Result AccountManager::QueryUserInfo(
   } else {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     const User* user = GetExistedUserInfoNoLock_(name);
-    result = CheckUserPermissionOnUser(*op_user, user, name, "", true);
+    std::string account = "";
+    result = CheckUserPermissionOnUser(*op_user, user, name, account, true);
     if (!result.ok) {
       return result;
     }
@@ -595,17 +590,16 @@ AccountManager::Result AccountManager::ModifyUserAllowedParition(
   }
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
-  result = CheckModifyUserAllowedParition(operatorType, p, account_ptr, account,
-                                          value);
-  if (!result.ok) {
-    return result;
-  }
 
   switch (operatorType) {
   case crane::grpc::OperatorType::Add:
-    return AddUserAllowedPartition_(*p, *account_ptr, value);
+    result = CheckAddUserAllowedPartition(p, account_ptr, account, value);
+    return !result.ok ? result
+                      : AddUserAllowedPartition_(*p, *account_ptr, value);
   case crane::grpc::OperatorType::Overwrite:
-    return SetUserAllowedPartition_(*p, *account_ptr, value);
+    result = CheckSetUserAllowedPartition(p, account_ptr, account, value);
+    return !result.ok ? result
+                      : SetUserAllowedPartition_(*p, *account_ptr, value);
   default:
     break;
   }
@@ -630,17 +624,18 @@ AccountManager::Result AccountManager::ModifyUserAllowedQos(
   }
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
-  result = CheckModifyUserAllowedQos(operatorType, p, account_ptr, account,
-                                     partition, value, force);
-  if (!result.ok) {
-    return result;
-  }
 
   switch (operatorType) {
   case crane::grpc::OperatorType::Add:
-    return AddUserAllowedQos_(*p, *account_ptr, partition, value);
+    result = CheckAddUserAllowedQos(p, account_ptr, account, partition, value);
+    return !result.ok ? result
+                      : AddUserAllowedQos_(*p, *account_ptr, partition, value);
   case crane::grpc::OperatorType::Overwrite:
-    return SetUserAllowedQos_(*p, *account_ptr, partition, value, force);
+    result = CheckSetUserAllowedQos(p, account_ptr, account, partition, value,
+                                    force);
+    return !result.ok
+               ? result
+               : SetUserAllowedQos_(*p, *account_ptr, partition, value, force);
   default:
     break;
   }
@@ -714,18 +709,15 @@ AccountManager::Result AccountManager::ModifyAccount(
   case crane::grpc::OperatorType::Add: {
     util::write_lock_guard account_guard(m_rw_account_mutex_);
     const Account* account = GetExistedAccountInfoNoLock_(name);
-    if (!account) {
-      return Result{false, fmt::format("Unknown account '{}'", name)};
-    }
     switch (modifyField) {
     case crane::grpc::ModifyField::Partition: {
-      auto result = CheckAddAccountAllowedPartition(*account, value);
+      auto result = CheckAddAccountAllowedPartition(account, name, value);
       return !result.ok ? result : AddAccountAllowedPartition_(name, value);
     }
 
     case crane::grpc::ModifyField::Qos: {
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
-      auto result = CheckAddAccountAllowedQos(*account, value);
+      auto result = CheckAddAccountAllowedQos(account, name, value);
       return !result.ok ? result : AddAccountAllowedQos_(*account, value);
     }
 
@@ -739,20 +731,15 @@ AccountManager::Result AccountManager::ModifyAccount(
     case crane::grpc::ModifyField::Description: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      if (!account) {
-        return Result{false, fmt::format("Unknown account '{}'", name)};
-      }
-      auto result = CheckSetAccountDescription(*account, value);
+      auto result = CheckSetAccountDescription(account, name, value);
       return !result.ok ? result : SetAccountDescription_(name, value);
     }
     case crane::grpc::ModifyField::Partition: {
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      if (!account) {
-        return Result{false, fmt::format("Unknown account '{}'", name)};
-      }
-      auto result = CheckSetAccountAllowedPartition(*account, value, force);
+      auto result =
+          CheckSetAccountAllowedPartition(account, name, value, force);
       return !result.ok ? result
                         : SetAccountAllowedPartition_(*account, value, force);
     }
@@ -762,20 +749,14 @@ AccountManager::Result AccountManager::ModifyAccount(
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      if (!account) {
-        return Result{false, fmt::format("Unknown account '{}'", name)};
-      }
-      auto result = CheckSetAccountAllowedQos(*account, value, force);
+      auto result = CheckSetAccountAllowedQos(account, name, value, force);
       return !result.ok ? result
                         : SetAccountAllowedQos_(*account, value, force);
     }
     case crane::grpc::ModifyField::DefaultQos: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      if (!account) {
-        return Result{false, fmt::format("Unknown account '{}'", name)};
-      }
-      auto result = CheckSetAccountDefaultQos(*account, value);
+      auto result = CheckSetAccountDefaultQos(account, name, value);
       return !result.ok ? result : SetAccountDefaultQos_(*account, value);
     }
 
@@ -789,10 +770,8 @@ AccountManager::Result AccountManager::ModifyAccount(
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      if (!account) {
-        return Result{false, fmt::format("Unknown account '{}'", name)};
-      }
-      auto result = CheckDeleteAccountAllowedPartition(*account, value, force);
+      auto result =
+          CheckDeleteAccountAllowedPartition(account, name, value, force);
       return !result.ok
                  ? result
                  : DeleteAccountAllowedPartition_(*account, value, force);
@@ -803,10 +782,7 @@ AccountManager::Result AccountManager::ModifyAccount(
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      if (!account) {
-        return Result{false, fmt::format("Unknown account '{}'", name)};
-      }
-      auto result = CheckDeleteAccountAllowedQos(*account, value, force);
+      auto result = CheckDeleteAccountAllowedQos(account, name, value, force);
       return !result.ok ? result
                         : DeleteAccountAllowedQos_(*account, value, force);
     }
@@ -832,6 +808,8 @@ AccountManager::Result AccountManager::ModifyQos(
       return result;
     }
   }
+
+  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   std::string item = "";
   switch (modifyField) {
@@ -866,8 +844,6 @@ AccountManager::Result AccountManager::ModifyQos(
         !CheckIfTimeLimitSecIsValid(value_number))
       return Result{false, "Invalid time limit value"};
   }
-
-  util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const Qos* p = GetExistedQosInfoNoLock_(name);
   if (!p) {
@@ -1102,38 +1078,15 @@ AccountManager::Result AccountManager::CheckOpUserIsAdmin(uint32_t uid) {
   return Result{true};
 }
 
-AccountManager::Result AccountManager::CheckModifyUserAllowedParition(
-    const crane::grpc::OperatorType& operatorType, const User* user,
-    const Account* account_ptr, const std::string& account,
+AccountManager::Result AccountManager::CheckAddUserAllowedPartition(
+    const User* user, const Account* account_ptr, const std::string& account,
     const std::string& partition) {
-  if (!account_ptr) {
-    return Result{false, fmt::format("Unknown account '{}'", account)};
-  }
-
   const std::string name = user->name;
 
-  std::vector<std::string> partition_vec =
-      absl::StrSplit(partition, ',', absl::SkipEmpty());
-
-  for (auto& part : partition_vec) {
-    // check if new partition existed
-    if (!g_config.Partitions.contains(part)) {
-      return Result{false, fmt::format("Partition '{}' not existed", part)};
-    }
-
-    // check if account has access to new partition
-    if (std::find(account_ptr->allowed_partition.begin(),
-                  account_ptr->allowed_partition.end(),
-                  part) == account_ptr->allowed_partition.end()) {
-      return Result{false,
-                    fmt::format("User '{}''s account '{}' is not allowed "
-                                "to use the partition '{}'",
-                                name, account, part)};
-    }
-  }
-
-  if (operatorType == crane::grpc::OperatorType::Overwrite) {
-    return Result{true};
+  Result result =
+      CheckPartitionIsAllowed(account_ptr, account, partition, false);
+  if (!result.ok) {
+    return result;
   }
 
   if (user->account_to_attrs_map.at(account).allowed_partition_qos_map.contains(
@@ -1147,74 +1100,27 @@ AccountManager::Result AccountManager::CheckModifyUserAllowedParition(
   return Result{true};
 }
 
-AccountManager::Result AccountManager::CheckModifyUserAllowedQos(
-    const crane::grpc::OperatorType& operatorType, const User* user,
-    const Account* account_ptr, const std::string& account,
-    const std::string& partition, const std::string& qos_str, bool force) {
-  if (!account_ptr) {
-    return Result{false, fmt::format("Unknown account '{}'", account)};
-  }
-
+AccountManager::Result AccountManager::CheckSetUserAllowedPartition(
+    const User* user, const Account* account_ptr, const std::string& account,
+    const std::string& partition) {
   const std::string name = user->name;
 
-  std::vector<std::string> qos_vec =
-      absl::StrSplit(qos_str, ',', absl::SkipEmpty());
+  Result result =
+      CheckPartitionIsAllowed(account_ptr, account, partition, false);
 
-  for (auto& qos : qos_vec) {
-    // check if the qos existed
-    if (!GetExistedQosInfoNoLock_(qos)) {
-      return Result{false, fmt::format("Qos '{}' not existed", qos)};
-    }
-
-    // check if account has access to new qos
-    if (std::find(account_ptr->allowed_qos_list.begin(),
-                  account_ptr->allowed_qos_list.end(),
-                  qos) == account_ptr->allowed_qos_list.end()) {
-      return Result{
-          false,
-          fmt::format("Sorry, account '{}' is not allowed to use the qos '{}'",
-                      account, qos)};
-    }
+  if (!result.ok) {
+    return result;
   }
 
-  if (operatorType == crane::grpc::OperatorType::Overwrite) {
-    std::unordered_map<std::string,
-                       std::pair<std::string, std::list<std::string>>>
-        cache_allowed_partition_qos_map;
-    if (partition.empty()) {
-      cache_allowed_partition_qos_map =
-          user->account_to_attrs_map.at(account).allowed_partition_qos_map;
-    } else {
-      auto iter =
-          user->account_to_attrs_map.at(account).allowed_partition_qos_map.find(
-              partition);
-      if (iter == user->account_to_attrs_map.at(account)
-                      .allowed_partition_qos_map.end()) {
-        return Result{
-            false, fmt::format(
-                       "Partition '{}' is not in user '{}''s allowed partition",
-                       partition, name)};
-      }
-      cache_allowed_partition_qos_map.insert({iter->first, iter->second});
-    }
+  return Result{true};
+}
 
-    for (auto& [par, pair] : cache_allowed_partition_qos_map) {
-      if (std::find(qos_vec.begin(), qos_vec.end(), pair.first) ==
-          qos_vec.end()) {
-        if (!force && !pair.first.empty()) {
-          return Result{
-              false,
-              fmt::format("Qos '{}' is default qos of partition '{}',but not "
-                          "found in new qos list.Ignoring this constraint with "
-                          "forced operation, the default qos is randomly "
-                          "replaced with one of the items in the new qos list",
-                          pair.first, par)};
-        }
-      }
-    }
+AccountManager::Result AccountManager::CheckAddUserAllowedQos(
+    const User* user, const Account* account_ptr, const std::string& account,
+    const std::string& partition, const std::string& qos_str) {
+  const std::string name = user->name;
 
-    return Result{true};
-  }
+  Result result = CheckQosIsAllowed(account_ptr, account, qos_str, false);
 
   // check if add item already the user's allowed qos
   if (partition.empty()) {
@@ -1251,6 +1157,54 @@ AccountManager::Result AccountManager::CheckModifyUserAllowedQos(
     }
   }
 
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::CheckSetUserAllowedQos(
+    const User* user, const Account* account_ptr, const std::string& account,
+    const std::string& partition, const std::string& qos_str, bool force) {
+  const std::string name = user->name;
+
+  Result result = CheckQosIsAllowed(account_ptr, account, qos_str, false);
+
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos_str, ',', absl::SkipEmpty());
+
+  std::unordered_map<std::string,
+                     std::pair<std::string, std::list<std::string>>>
+      cache_allowed_partition_qos_map;
+
+  if (partition.empty()) {
+    cache_allowed_partition_qos_map =
+        user->account_to_attrs_map.at(account).allowed_partition_qos_map;
+  } else {
+    auto iter =
+        user->account_to_attrs_map.at(account).allowed_partition_qos_map.find(
+            partition);
+    if (iter == user->account_to_attrs_map.at(account)
+                    .allowed_partition_qos_map.end()) {
+      return Result{
+          false,
+          fmt::format("Partition '{}' is not in user '{}''s allowed partition",
+                      partition, name)};
+    }
+    cache_allowed_partition_qos_map.insert({iter->first, iter->second});
+  }
+
+  for (auto& [par, pair] : cache_allowed_partition_qos_map) {
+    if (std::find(qos_vec.begin(), qos_vec.end(), pair.first) ==
+        qos_vec.end()) {
+      if (!force && !pair.first.empty()) {
+        return Result{
+            false,
+            fmt::format("Qos '{}' is default qos of partition '{}',but not "
+                        "found in new qos list.Ignoring this constraint with "
+                        "forced operation, the default qos is randomly "
+                        "replaced with one of the items in the new qos list",
+                        pair.first, par)};
+      }
+    }
+  }
   return Result{true};
 }
 
@@ -1407,28 +1361,17 @@ AccountManager::Result AccountManager::CheckDeleteUserAllowedQos(
 }
 
 AccountManager::Result AccountManager::CheckAddAccountAllowedPartition(
-    const Account& account, const std::string& partition) {
-  // check if the partition existed
-  if (g_config.Partitions.find(partition) == g_config.Partitions.end()) {
-    return Result{false, fmt::format("Partition '{}' not existed", partition)};
+    const Account* account_ptr, const std::string& account,
+    const std::string& partition) {
+  Result result =
+      CheckPartitionIsAllowed(account_ptr, account, partition, true);
+  if (!result.ok) {
+    return result;
   }
 
-  // Check if parent account has access to the partition
-  if (!account.parent_account.empty()) {
-    const Account* parent =
-        GetExistedAccountInfoNoLock_(account.parent_account);
-    if (std::find(parent->allowed_partition.begin(),
-                  parent->allowed_partition.end(),
-                  partition) == parent->allowed_partition.end()) {
-      return Result{false, fmt::format("Parent account '{}' does not "
-                                       "have access to partition '{}'",
-                                       account.parent_account, partition)};
-    }
-  }
-
-  if (std::find(account.allowed_partition.begin(),
-                account.allowed_partition.end(),
-                partition) != account.allowed_partition.end()) {
+  if (std::find(account_ptr->allowed_partition.begin(),
+                account_ptr->allowed_partition.end(),
+                partition) != account_ptr->allowed_partition.end()) {
     return Result{
         false,
         fmt::format("Partition '{}' is already in allowed partition list",
@@ -1439,30 +1382,16 @@ AccountManager::Result AccountManager::CheckAddAccountAllowedPartition(
 }
 
 AccountManager::Result AccountManager::CheckAddAccountAllowedQos(
-    const Account& account, const std::string& qos) {
-  // check if the qos existed
-  if (!GetExistedQosInfoNoLock_(qos)) {
-    return Result{false, fmt::format("Qos '{}' not existed", qos)};
+    const Account* account_ptr, const std::string& account,
+    const std::string& qos) {
+  Result result = CheckQosIsAllowed(account_ptr, account, qos, true);
+  if (!result.ok) {
+    return result;
   }
 
-  // Check if parent account has access to the qos
-  if (!account.parent_account.empty()) {
-    const Account* parent =
-        GetExistedAccountInfoNoLock_(account.parent_account);
-
-    if (std::find(parent->allowed_qos_list.begin(),
-                  parent->allowed_qos_list.end(),
-                  qos) == parent->allowed_qos_list.end()) {
-      return Result{
-          false,
-          fmt::format("Parent account '{}' does not have access to qos '{}'",
-                      account.parent_account, qos)};
-    }
-  }
-
-  if (std::find(account.allowed_qos_list.begin(),
-                account.allowed_qos_list.end(),
-                qos) != account.allowed_qos_list.end()) {
+  if (std::find(account_ptr->allowed_qos_list.begin(),
+                account_ptr->allowed_qos_list.end(),
+                qos) != account_ptr->allowed_qos_list.end()) {
     return Result{false,
                   fmt::format("Qos '{}' is already in allowed qos list", qos)};
   }
@@ -1471,8 +1400,13 @@ AccountManager::Result AccountManager::CheckAddAccountAllowedQos(
 }
 
 AccountManager::Result AccountManager::CheckSetAccountDescription(
-    const Account& account, const std::string& description) {
-  if (description == account.description) {
+    const Account* account_ptr, const std::string& account,
+    const std::string& description) {
+  if (!account_ptr) {
+    return Result{false, fmt::format("Unknown account '{}'", account)};
+  }
+
+  if (description == account_ptr->description) {
     return Result{false, "Description content not change"};
   }
 
@@ -1480,44 +1414,27 @@ AccountManager::Result AccountManager::CheckSetAccountDescription(
 }
 
 AccountManager::Result AccountManager::CheckSetAccountAllowedPartition(
-    const Account& account, const std::string& partitions, bool force) {
+    const Account* account_ptr, const std::string& account,
+    const std::string& partitions, bool force) {
+  Result result =
+      CheckPartitionIsAllowed(account_ptr, account, partitions, true);
+  if (!result.ok) {
+    return result;
+  }
+
   std::vector<std::string> partition_vec =
       absl::StrSplit(partitions, ',', absl::SkipEmpty());
 
-  const std::string name = account.name;
-
-  // check if the partition existed
-  for (const auto& p : partition_vec) {
-    if (!g_config.Partitions.contains(p)) {
-      return Result{false, fmt::format("Partition '{}' not existed", p)};
-    }
-  }
-
-  // Check if parent account has access to the partition
-  if (!account.parent_account.empty()) {
-    const Account* parent =
-        GetExistedAccountInfoNoLock_(account.parent_account);
-    for (const auto& p : partition_vec) {
-      if (std::find(parent->allowed_partition.begin(),
-                    parent->allowed_partition.end(),
-                    p) == parent->allowed_partition.end()) {
-        return Result{false, fmt::format("Parent account '{}' does not "
-                                         "have access to partition '{}'",
-                                         account.parent_account, p)};
-      }
-    }
-  }
-
-  for (const auto& par : account.allowed_partition) {
+  for (const auto& par : account_ptr->allowed_partition) {
     if (std::find(partition_vec.begin(), partition_vec.end(), par) ==
         partition_vec.end()) {
-      if (!force && IsAllowedPartitionOfAnyNodeNoLock_(&account, par)) {
+      if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account_ptr, par)) {
         return Result{
             false,
             fmt::format("partition '{}' in allowed partition list before is "
                         "used by some descendant node of the account "
                         "'{}'.Ignoring this constraint with forced operation",
-                        par, name)};
+                        par, account)};
       }
     }
   }
@@ -1526,44 +1443,25 @@ AccountManager::Result AccountManager::CheckSetAccountAllowedPartition(
 }
 
 AccountManager::Result AccountManager::CheckSetAccountAllowedQos(
-    const Account& account, const std::string& qos_list, bool force) {
-  const std::string name = account.name;
+    const Account* account_ptr, const std::string& account,
+    const std::string& qos_list, bool force) {
+  Result result = CheckQosIsAllowed(account_ptr, account, qos_list, true);
+  if (!result.ok) {
+    return result;
+  }
 
   std::vector<std::string> qos_vec =
       absl::StrSplit(qos_list, ',', absl::SkipEmpty());
 
-  // check if the qos existed
-  for (const auto& qos : qos_vec) {
-    if (!GetExistedQosInfoNoLock_(qos)) {
-      return Result{false, fmt::format("Qos '{}' not existed", qos)};
-    }
-  }
-
-  // Check if parent account has access to the qos
-  if (!account.parent_account.empty()) {
-    const Account* parent =
-        GetExistedAccountInfoNoLock_(account.parent_account);
-    for (const auto& qos : qos_vec) {
-      if (std::find(parent->allowed_qos_list.begin(),
-                    parent->allowed_qos_list.end(),
-                    qos) == parent->allowed_qos_list.end()) {
-        return Result{
-            false,
-            fmt::format("Parent account '{}' does not have access to qos '{}'",
-                        account.parent_account, qos)};
-      }
-    }
-  }
-
-  for (const auto& qos : account.allowed_qos_list) {
+  for (const auto& qos : account_ptr->allowed_qos_list) {
     if (std::find(qos_vec.begin(), qos_vec.end(), qos) == qos_vec.end()) {
-      if (!force && IsDefaultQosOfAnyNodeNoLock_(&account, qos)) {
+      if (!force && IsDefaultQosOfAnyNodeNoLock_(account_ptr, qos)) {
         return Result{
             false,
             fmt::format("partition '{}' in allowed partition list before is "
                         "used by some descendant node of the account '{}' or "
                         "itself.Ignoring this constraint with forced operation",
-                        qos, name)};
+                        qos, account)};
       }
     }
   }
@@ -1572,59 +1470,50 @@ AccountManager::Result AccountManager::CheckSetAccountAllowedQos(
 }
 
 AccountManager::Result AccountManager::CheckSetAccountDefaultQos(
-    const Account& account, const std::string& qos) {
-  if (account.default_qos == qos) {
-    return Result{false,
-                  fmt::format("Qos '{}' is already the default qos", qos)};
+    const Account* account_ptr, const std::string& account,
+    const std::string& qos) {
+  Result result = CheckQosIsAllowed(account_ptr, account, qos, false);
+  if (!result.ok) {
+    return result;
   }
 
-  if (std::find(account.allowed_qos_list.begin(),
-                account.allowed_qos_list.end(),
-                qos) == account.allowed_qos_list.end()) {
-    return Result{false, fmt::format("Qos '{}' not in allowed qos list", qos)};
+  if (account_ptr->default_qos == qos) {
+    return Result{false,
+                  fmt::format("Qos '{}' is already the default qos", qos)};
   }
 
   return Result{true};
 }
 
 AccountManager::Result AccountManager::CheckDeleteAccountAllowedPartition(
-    const Account& account, const std::string& partition, bool force) {
-  const std::string name = account.name;
-
-  if (std::find(account.allowed_partition.begin(),
-                account.allowed_partition.end(),
-                partition) == account.allowed_partition.end()) {
-    return Result{
-        false,
-        fmt::format(
-            "Partition '{}' not in allowed partition list of account '{}'",
-            partition, name)};
+    const Account* account_ptr, const std::string& account,
+    const std::string& partition, bool force) {
+  Result result =
+      CheckPartitionIsAllowed(account_ptr, account, partition, false);
+  if (!result.ok) {
+    return result;
   }
 
-  if (!force && IsAllowedPartitionOfAnyNodeNoLock_(&account, partition)) {
+  if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account_ptr, partition)) {
     return Result{
         false, fmt::format(
                    "partition '{}' is used by some descendant node of the "
                    "account '{}'.Ignoring this constraint with forced deletion",
-                   partition, name)};
+                   partition, account)};
   }
 
   return Result{true};
 }
 
 AccountManager::Result AccountManager::CheckDeleteAccountAllowedQos(
-    const Account& account, const std::string& qos, bool force) {
-  const std::string name = account.name;
-
-  if (std::find(account.allowed_qos_list.begin(),
-                account.allowed_qos_list.end(),
-                qos) == account.allowed_qos_list.end()) {
-    return Result{
-        false, fmt::format("Qos '{}' is not in account '{}''s allowed qos list",
-                           qos, name)};
+    const Account* account_ptr, const std::string& account,
+    const std::string& qos, bool force) {
+  Result result = CheckQosIsAllowed(account_ptr, account, qos, false);
+  if (!result.ok) {
+    return result;
   }
 
-  if (!force && IsDefaultQosOfAnyNodeNoLock_(&account, qos)) {
+  if (!force && IsDefaultQosOfAnyNodeNoLock_(account_ptr, qos)) {
     return Result{
         false,
         fmt::format("Someone is using qos '{}' as default qos.Ignoring this "
@@ -1809,6 +1698,99 @@ AccountManager::Result AccountManager::CheckOpUserHasModifyPermission(
   return CheckUserPermissionOnAccount(*op_user, account, read_only_priv);
 }
 
+AccountManager::Result AccountManager::CheckPartitionIsAllowed(
+    const Account* account_ptr, const std::string& account,
+    const std::string& partition, bool check_parent) {
+  if (!account_ptr) {
+    return Result{false, fmt::format("Unknown account '{}'", account)};
+  }
+
+  std::vector<std::string> partition_vec =
+      absl::StrSplit(partition, ',', absl::SkipEmpty());
+
+  for (auto& part : partition_vec) {
+    // check if new partition existed
+    if (!g_config.Partitions.contains(part)) {
+      return Result{false, fmt::format("Partition '{}' not existed", part)};
+    }
+
+    if (!check_parent) {
+      // check if account has access to new partition
+      if (std::find(account_ptr->allowed_partition.begin(),
+                    account_ptr->allowed_partition.end(),
+                    part) == account_ptr->allowed_partition.end()) {
+        return Result{false, fmt::format("Sorry, account '{}' is not allowed "
+                                         "to use the partition '{}'",
+                                         account, part)};
+      }
+    } else {
+      // Check if parent account has access to the partition
+      if (!account_ptr->parent_account.empty()) {
+        const Account* parent =
+            GetExistedAccountInfoNoLock_(account_ptr->parent_account);
+        if (std::find(parent->allowed_partition.begin(),
+                      parent->allowed_partition.end(),
+                      part) == parent->allowed_partition.end()) {
+          return Result{false, fmt::format("Parent account '{}' does not "
+                                           "have access to partition '{}'",
+                                           account_ptr->parent_account, part)};
+        }
+      }
+    }
+  }
+
+  return Result{true};
+}
+
+AccountManager::Result AccountManager::CheckQosIsAllowed(
+    const Account* account_ptr, const std::string& account,
+    const std::string& qos_str, bool check_parent) {
+  if (!account_ptr) {
+    return Result{false, fmt::format("Unknown account '{}'", account)};
+  }
+
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos_str, ',', absl::SkipEmpty());
+
+  for (auto& qos : qos_vec) {
+    // check if the qos existed
+    if (!GetExistedQosInfoNoLock_(qos)) {
+      return Result{false, fmt::format("Qos '{}' not existed", qos)};
+    }
+
+    if (!check_parent) {
+      // check if account has access to new qos
+      if (std::find(account_ptr->allowed_qos_list.begin(),
+                    account_ptr->allowed_qos_list.end(),
+                    qos) == account_ptr->allowed_qos_list.end()) {
+        return Result{
+            false, fmt::format(
+                       "Sorry, account '{}' is not allowed to use the qos '{}'",
+                       account, qos)};
+      }
+    } else {
+      // Check if parent account has access to the qos
+      if (!account_ptr->parent_account.empty()) {
+        const Account* parent =
+            GetExistedAccountInfoNoLock_(account_ptr->parent_account);
+        for (const auto& qos : qos_vec) {
+          if (std::find(parent->allowed_qos_list.begin(),
+                        parent->allowed_qos_list.end(),
+                        qos) == parent->allowed_qos_list.end()) {
+            return Result{
+                false,
+                fmt::format(
+                    "Parent account '{}' does not have access to qos '{}'",
+                    account_ptr->parent_account, qos)};
+          }
+        }
+      }
+    }
+  }
+
+  return Result{true};
+}
+
 bool AccountManager::IsOperatorPrivilegeSameAndHigher(
     const User& op_user, User::AdminLevel admin_level) {
   User::AdminLevel op_level = op_user.admin_level;
@@ -1904,7 +1886,7 @@ AccountManager::Result AccountManager::CheckUserPermissionOnAccount(
 
 AccountManager::Result AccountManager::CheckUserPermissionOnUser(
     const User& op_user, const User* user, const std::string& name,
-    const std::string& account, bool read_only_priv) {
+    std::string& account, bool read_only_priv) {
   if (!user) {
     return Result{false, fmt::format("Can't find user {}", name)};
   }
