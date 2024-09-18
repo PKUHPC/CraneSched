@@ -2152,12 +2152,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
       if constexpr (kAlgoTraceOutput) {
         std::vector<std::string> valid_seg_str;
-        for (auto& seg : intersected_time_segments) {
-          valid_seg_str.emplace_back(
-              fmt::format("[start: {}, duration: {}]",
-                          absl::ToInt64Seconds(seg.start - now),
-                          absl::ToInt64Seconds(seg.duration)));
-        }
+        for (auto& seg : intersected_time_segments)
+          valid_seg_str.emplace_back(fmt::format(
+              "[start: {}, end: {})", absl::ToInt64Seconds(seg.start - now),
+              absl::ToInt64Seconds(seg.start - now + seg.duration)));
         CRANE_TRACE("After looping craned {}, valid time segments: {}",
                     craned_id, absl::StrJoin(valid_seg_str, ", "));
       }
@@ -2167,6 +2165,13 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       for (auto&& seg : time_segments) {
         absl::Time start = seg.start;
         absl::Time end = seg.start + seg.duration;
+        if constexpr (kAlgoTraceOutput) {
+          CRANE_TRACE(
+              "Trying to intersect time segment: [start: {}, end: "
+              "{})",
+              absl::ToInt64Seconds(start - now),
+              absl::ToInt64Seconds(start - now + seg.duration));
+        }
         // Segment: [start, end)
         // e.g. segment.start=5, segment.duration=1s => [5,6)
 
@@ -2286,10 +2291,9 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       if constexpr (kAlgoTraceOutput) {
         std::vector<std::string> valid_seg_str;
         for (auto& seg : intersected_time_segments) {
-          valid_seg_str.emplace_back(
-              fmt::format("[start: {}, duration: {}]",
-                          absl::ToInt64Seconds(seg.start - now),
-                          absl::ToInt64Seconds(seg.duration)));
+          valid_seg_str.emplace_back(fmt::format(
+              "[start: {}, end: {})", absl::ToInt64Seconds(seg.start - now),
+              absl::ToInt64Seconds(seg.start - now + seg.duration)));
         }
         CRANE_TRACE("After looping craned {}, valid time segments: {}",
                     craned_id, absl::StrJoin(valid_seg_str, ", "));
