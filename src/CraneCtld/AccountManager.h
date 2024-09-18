@@ -136,12 +136,18 @@ class AccountManager {
    * ModifyUser-related functions
    * ---------------------------------------------------------------------------
    */
-  Result CheckModifyUserAllowedParition(
-      const crane::grpc::OperatorType& operatorType, const User* user,
+  Result CheckAddUserAllowedPartition(
+      const User* user,
       const Account* account_ptr, const std::string& account,
       const std::string& partition);
-  Result CheckModifyUserAllowedQos(
-      const crane::grpc::OperatorType& operatorType, const User* user,
+  Result CheckSetUserAllowedPartition(const User* user,
+      const Account* account_ptr, const std::string& account,
+      const std::string& partition);
+  Result CheckAddUserAllowedQos(
+      const User* user,
+      const Account* account_ptr, const std::string& account,
+      const std::string& partition, const std::string& qos_str);
+  Result CheckSetUserAllowedQos(const User* user,
       const Account* account_ptr, const std::string& account,
       const std::string& partition, const std::string& qos_str, bool force);
   Result CheckSetUserAdminLevel(const User& user, const std::string& level,
@@ -160,23 +166,31 @@ class AccountManager {
    * ModifyAccount-related functions
    * ---------------------------------------------------------------------------
    */
-  Result CheckAddAccountAllowedPartition(const Account& account,
+  Result CheckAddAccountAllowedPartition(const Account* account_ptr,
+                                         const std::string& account,
                                          const std::string& partition);
-  Result CheckAddAccountAllowedQos(const Account& account,
+  Result CheckAddAccountAllowedQos(const Account* account_ptr,
+                                   const std::string& account,
                                    const std::string& qos);
-  Result CheckSetAccountDescription(const Account& account,
+  Result CheckSetAccountDescription(const Account* account_ptr,
+                                    const std::string& account,
                                     const std::string& description);
-  Result CheckSetAccountAllowedPartition(const Account& account,
+  Result CheckSetAccountAllowedPartition(const Account* account_ptr,
+                                         const std::string& account,
                                          const std::string& partitions,
                                          bool force);
-  Result CheckSetAccountAllowedQos(const Account& account,
+  Result CheckSetAccountAllowedQos(const Account* account_ptr,
+                                   const std::string& account,
                                    const std::string& qos_list, bool force);
-  Result CheckSetAccountDefaultQos(const Account& account,
+  Result CheckSetAccountDefaultQos(const Account* account_ptr,
+                                   const std::string& account,
                                    const std::string& qos);
-  Result CheckDeleteAccountAllowedPartition(const Account& account,
+  Result CheckDeleteAccountAllowedPartition(const Account* account_ptr,
+                                            const std::string& account,
                                             const std::string& partition,
                                             bool force);
-  Result CheckDeleteAccountAllowedQos(const Account& account,
+  Result CheckDeleteAccountAllowedQos(const Account* account_ptr,
+                                      const std::string& account,
                                       const std::string& qos, bool force);
 
   /*
@@ -217,8 +231,14 @@ class AccountManager {
    */
   Result CheckUserPermissionOnUser(const User& op_user, const User* user,
                                    const std::string& name,
-                                   const std::string& account,
+                                   std::string& account,
                                    bool read_only_priv);
+  
+  Result CheckPartitionIsAllowed(const Account* account_ptr, const std::string& account,
+                                 const std::string& partition, bool check_parent);
+                                
+  Result CheckQosIsAllowed(const Account* account_ptr, const std::string& account,
+                           const std::string& qos_str, bool check_parent);
 
   bool IsOperatorPrivilegeSameAndHigher(const User& op_user,
                                         User::AdminLevel admin_level);
