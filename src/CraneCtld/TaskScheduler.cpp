@@ -1861,8 +1861,10 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     std::vector<std::string> running_task_ids_str;
     for (const auto& [task_id, res] : craned_meta->running_task_resource_map) {
       const auto& task = running_tasks.at(task_id);
-      end_time_task_id_vec.emplace_back(task->StartTime() + task->time_limit,
-                                        task_id);
+      end_time_task_id_vec.emplace_back(
+          std::max(task->StartTime() + task->time_limit,
+                   now + absl::Seconds(1)),
+          task_id);
 
       running_task_ids_str.emplace_back(std::to_string(task_id));
     }
