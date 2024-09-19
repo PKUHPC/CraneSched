@@ -54,7 +54,9 @@ AccountManager::Result AccountManager::AddUser(uint32_t uid, User&& new_user) {
 
   // Check whether the account exists
   const Account* find_account = GetExistedAccountInfoNoLock_(object_account);
-
+  if (!find_account) {
+    return Result{false, fmt::format("Unknown account '{}'", object_account)};
+  }
   // Check if user's allowed partition is a subset of parent's allowed
   // partition
   for (auto&& [partition, qos] : new_user.account_to_attrs_map[object_account]
