@@ -155,6 +155,7 @@ bool TaskScheduler::Init() {
         task->nodes_alloc = 0;
         task->allocated_craneds_regex.clear();
         task->CranedIdsClear();
+        task->executing_craned_ids.clear();
 
         ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task->TaskDbId(),
                                                            task->RuntimeAttr());
@@ -262,6 +263,7 @@ bool TaskScheduler::Init() {
           task->nodes_alloc = 0;
           task->allocated_craneds_regex.clear();
           task->CranedIdsClear();
+          task->executing_craned_ids.clear();
 
           ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
               0, task->TaskDbId(), task->RuntimeAttr());
