@@ -127,13 +127,10 @@ class AccountManager {
   result::result<void, std::string> CheckAndApplyQosLimitOnTask(
       const std::string& user, const std::string& account, TaskInCtld* task);
 
-  Result FindUserLevelAccountsOfUid(uint32_t uid, User::AdminLevel* level,
-                                    std::list<std::string>* accounts);
-
   result::result<void, std::string> CheckUidIsAdmin(uint32_t uid);
 
   /* ---------------------------------------------------------------------------
-   * ModifyUser-related functions
+   * ModifyUser-related functions(no block)
    * ---------------------------------------------------------------------------
    */
   Result CheckAddUserAllowedPartition(
@@ -163,7 +160,7 @@ class AccountManager {
                                    const std::string& qos, bool force);
 
   /* ---------------------------------------------------------------------------
-   * ModifyAccount-related functions
+   * ModifyAccount-related functions(no block)
    * ---------------------------------------------------------------------------
    */
   Result CheckAddAccountAllowedPartition(const Account* account_ptr,
