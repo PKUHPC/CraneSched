@@ -279,10 +279,9 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     std::string remote_hostname;
     if (ip_ver == 4) {
       ok = crane::ResolveHostnameFromIpv4(crane_addr4, &remote_hostname);
-    } else if (ip_ver == 6) {
-      ok = crane::ResolveHostnameFromIpv6(crane_addr6, &remote_hostname);
     } else {
-      ok = false;
+      CRANE_ASSERT(ip_ver == 6);
+      ok = crane::ResolveHostnameFromIpv6(crane_addr6, &remote_hostname);
     }
 
     if (ok) {

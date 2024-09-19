@@ -359,6 +359,7 @@ void ParseConfig(int argc, char** argv) {
                            crane::Ipv4ToStr(ipv4));
                 ip_resolved = true;
               }
+
               if (crane::ResolveIpv6FromHostname(name, &ipv6)) {
                 g_config.Ipv6ToCranedHostname[ipv6] = name;
                 CRANE_INFO("Resolve hostname `{}` to `{}`", name,
@@ -397,6 +398,9 @@ void ParseConfig(int argc, char** argv) {
               g_config.Ipv6ToCranedHostname[ipv6] = name;
               break;
             }
+
+            default:
+              ABSL_UNREACHABLE();
             }
             g_config.CranedRes[name] = node_res;
           }

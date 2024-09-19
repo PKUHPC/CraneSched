@@ -604,7 +604,7 @@ void ParseConfig(int argc, char** argv) {
         parsed_args["port"].as<std::string>();
   }
 
-  if(crane::GetIpAddrVer(g_config.ListenConf.CraneCtldListenAddr)==-1){
+  if (crane::GetIpAddrVer(g_config.ListenConf.CraneCtldListenAddr) == -1) {
     CRANE_ERROR("Listening address is invalid.");
     std::exit(1);
   }

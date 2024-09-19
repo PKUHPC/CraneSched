@@ -639,10 +639,9 @@ std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
     const CranedId &craned_id) {
   ReaderLock lock(&m_connected_craned_mtx_);
   auto iter = m_connected_craned_id_stub_map_.find(craned_id);
-  if (iter != m_connected_craned_id_stub_map_.end())
-    return iter->second;
-  else
-    return nullptr;
+  if (iter != m_connected_craned_id_stub_map_.end()) return iter->second;
+
+  return nullptr;
 }
 
 void CranedKeeper::SetCranedIsUpCb(std::function<void(CranedId)> cb) {
@@ -661,29 +660,32 @@ void CranedKeeper::PutNodeIntoUnavailList(const std::string &crane_id) {
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
+  static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
+      s_craned_id_to_ip_cache_map;
+
   std::string ip_addr;
 
-  static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
-      craned_id_to_ip_addr_cache_map;
-  auto it = craned_id_to_ip_addr_cache_map.find(craned_id);
-  if (it != craned_id_to_ip_addr_cache_map.end()) {
-    if (holds_alternative<ipv4_t>(it->second)) {
+  auto it = s_craned_id_to_ip_cache_map.find(craned_id);
+  if (it != s_craned_id_to_ip_cache_map.end()) {
+    if (std::holds_alternative<ipv4_t>(it->second)) {  // Ipv4
       ip_addr = crane::Ipv4ToStr(std::get<ipv4_t>(it->second));
-    } else if (holds_alternative<ipv6_t>(it->second)) {
-      ip_addr = crane::Ipv6ToStr(std::get<ipv6_t>(it->second));
     } else {
-      CRANE_ERROR("Unknown variant type in craned_id_to_ip_addr_cache_map");
+      CRANE_ASSERT(std::holds_alternative<ipv6_t>(it->second));
+      ip_addr = crane::Ipv6ToStr(std::get<ipv6_t>(it->second));
     }
   } else {
     ipv4_t ipv4_addr;
     ipv6_t ipv6_addr;
     if (crane::ResolveIpv4FromHostname(craned_id, &ipv4_addr)) {
       ip_addr = crane::Ipv4ToStr(ipv4_addr);
-      craned_id_to_ip_addr_cache_map.emplace(craned_id, ipv4_addr);
+      s_craned_id_to_ip_cache_map.emplace(craned_id, ipv4_addr);
     } else if (crane::ResolveIpv6FromHostname(craned_id, &ipv6_addr)) {
       ip_addr = crane::Ipv6ToStr(ipv6_addr);
-      craned_id_to_ip_addr_cache_map.emplace(craned_id, ipv6_addr);
+      s_craned_id_to_ip_cache_map.emplace(craned_id, ipv6_addr);
     } else {
+      // Just hostname. It should never happen,
+      // but we add error handling here for robustness.
+      CRANE_ERROR("Unresolved hostname: {}", craned_id);
       ip_addr = craned_id;
     }
   }
