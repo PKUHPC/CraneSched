@@ -826,6 +826,11 @@ AccountManager::Result AccountManager::ModifyQos(
 
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
+  const Qos* p = GetExistedQosInfoNoLock_(name);
+  if (!p) {
+    return Result{false, fmt::format("Qos '{}' not existed in database", name)};
+  }
+
   std::string item = "";
   switch (modifyField) {
   case crane::grpc::ModifyField::Description:
@@ -835,13 +840,13 @@ AccountManager::Result AccountManager::ModifyQos(
     item = "priority";
     break;
   case crane::grpc::ModifyField::MaxJobsPerUser:
-    item = "max-jobs-per-user";
+    item = "max_jobs_per_user";
     break;
   case crane::grpc::ModifyField::MaxCpusPerUser:
-    item = "max-cpus-per-user";
+    item = "max_cpus_per_user";
     break;
   case crane::grpc::ModifyField::MaxTimeLimitPerTask:
-    item = "max-time-limit-per-task";
+    item = "max_time_limit_per_task";
     break;
   default:
     return Result{false, fmt::format("Field '{}' can't be modify", item)};
@@ -858,11 +863,6 @@ AccountManager::Result AccountManager::ModifyQos(
     if (item == Qos::FieldStringOfMaxTimeLimitPerTask() &&
         !CheckIfTimeLimitSecIsValid(value_number))
       return Result{false, "Invalid time limit value"};
-  }
-
-  const Qos* p = GetExistedQosInfoNoLock_(name);
-  if (!p) {
-    return Result{false, fmt::format("Qos '{}' not existed in database", name)};
   }
 
   if (item == "description") {

@@ -327,7 +327,7 @@ class AccountManager {
 
   Result AddAccountAllowedPartition_(const std::string& name,
                                      const std::string& partition);
-  AccountManager::Result AddAccountAllowedQos_(const Account& account,
+  Result AddAccountAllowedQos_(const Account& account,
                                                const std::string& qos);
 
   Result SetAccountDescription_(const std::string& name,
