@@ -140,8 +140,8 @@ void InitializeNetworkFunctions() {
 bool ResolveHostnameFromIpv4(ipv4_t addr, std::string* hostname) {
   if (internal::g_hosts_map->FindFirstHostnameOfIpv4(addr, hostname))
     return true;
-  struct sockaddr_in sa {}; /* input */
-                            /* input */
+
+  struct sockaddr_in sa {};
   char hbuf[NI_MAXHOST];
 
   std::string ipv4_str = Ipv4ToStr(addr);
@@ -151,21 +151,23 @@ bool ResolveHostnameFromIpv4(ipv4_t addr, std::string* hostname) {
 
   socklen_t len = sizeof(struct sockaddr_in);
 
-  int r;
-  if ((r = getnameinfo((struct sockaddr*)&sa, len, hbuf, sizeof(hbuf), nullptr,
-                       0, NI_NAMEREQD))) {
+  int r = getnameinfo((struct sockaddr*)&sa, len, hbuf, sizeof(hbuf), nullptr,
+                      0, NI_NAMEREQD);
+  if (r != 0) {
     CRANE_TRACE("Error in getnameinfo when resolving hostname for {}: {}",
                 ipv4_str.c_str(), gai_strerror(r));
     return false;
-  } else {
-    hostname->assign(hbuf);
-    return true;
   }
+
+  hostname->assign(hbuf);
+  return true;
 }
 
 bool ResolveHostnameFromIpv6(const ipv6_t& addr, std::string* hostname) {
-  struct sockaddr_in6 sa6 {}; /* input */
-                              /* input */
+  if (internal::g_hosts_map->FindFirstHostnameOfIpv6(addr, hostname))
+    return true;
+
+  struct sockaddr_in6 sa6 {};
   char hbuf[NI_MAXHOST];
 
   /* For IPv6*/
@@ -177,16 +179,16 @@ bool ResolveHostnameFromIpv6(const ipv6_t& addr, std::string* hostname) {
 
   socklen_t len = sizeof(struct sockaddr_in6);
 
-  int r;
-  if ((r = getnameinfo((struct sockaddr*)&sa6, len, hbuf, sizeof(hbuf), nullptr,
-                       0, NI_NAMEREQD))) {
+  int r = getnameinfo((struct sockaddr*)&sa6, len, hbuf, sizeof(hbuf), nullptr,
+                      0, NI_NAMEREQD);
+  if (r != 0) {
     CRANE_TRACE("Error in getnameinfo when resolving hostname for {}: {}",
                 ipv6_str.c_str(), gai_strerror(r));
     return false;
-  } else {
-    hostname->assign(hbuf);
-    return true;
   }
+
+  hostname->assign(hbuf);
+  return true;
 }
 
 bool ResolveIpv4FromHostname(const std::string& hostname, ipv4_t* addr) {
