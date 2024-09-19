@@ -527,9 +527,18 @@ AccountManager::Result AccountManager::ModifyAdminLevel(
     return Result{false, fmt::format("Unknown user '{}'", name)};
   }
 
-  result = CheckOperatorPrivilegeHigher(uid, user->admin_level);
+  const User* op_user = nullptr;
+
+  result = CheckOpUserExisted(uid, &op_user);
   if (!result.ok) {
     return result;
+  }
+
+  if (!IsOperatorPrivilegeSameAndHigher(*op_user, user->admin_level) ||
+      op_user->admin_level == user->admin_level) {
+    return Result{false,
+                  "Permission error : You cannot modify a user with the same "
+                  "or greater permissions as yourself "};
   }
 
   User::AdminLevel new_level;
@@ -541,6 +550,12 @@ AccountManager::Result AccountManager::ModifyAdminLevel(
     new_level = User::Admin;
   } else {
     return Result{false, fmt::format("Unknown admin level '{}'", value)};
+  }
+
+  if (!IsOperatorPrivilegeSameAndHigher(*op_user, new_level)) {
+    return Result{false,
+                  "Permission error : You cannot modify a user's permissions "
+                  "to which greater than your own permissions "};
   }
 
   if (new_level == user->admin_level) {
@@ -863,7 +878,8 @@ AccountManager::Result AccountManager::ModifyQos(
     }
   }
 
-  // To avoid frequently judging item, obtain the modified qos of the Mongodb
+  // To avoid frequently judging item, obtain the modified qos of the
+  // Mongodb
   Qos qos;
   g_db_client->SelectQos("name", name, &qos);
   *m_qos_map_[name] = std::move(qos);
@@ -1019,28 +1035,6 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
     return result::fail("cpus-per-task reached the user's limit.");
 
   return {};
-}
-
-AccountManager::Result AccountManager::FindUserLevelAccountsOfUid(
-    uint32_t uid, User::AdminLevel* level, std::list<std::string>* accounts) {
-  PasswordEntry entry(uid);
-  if (!entry.Valid()) {
-    return Result{false, fmt::format("Uid {} not found.", uid)};
-  }
-
-  UserMutexSharedPtr ptr = GetExistedUserInfo(entry.Username());
-  if (!ptr) {
-    return Result{false, fmt::format("User {} is not a user of Crane.",
-                                     entry.Username())};
-  }
-  if (level != nullptr) *level = ptr->admin_level;
-  if (accounts != nullptr) {
-    for (const auto& [acct, item] : ptr->account_to_attrs_map) {
-      accounts->emplace_back(acct);
-    }
-  }
-
-  return Result{true};
 }
 
 result::result<void, std::string> AccountManager::CheckUidIsAdmin(
@@ -1553,10 +1547,11 @@ AccountManager::Result AccountManager::HasPermissionToAccount(
     if (read_only_priv) {
       // In current implementation, if a user is the coordinator of an
       // account, it must exist in user->account_to_attrs_map.
-      // This is guaranteed by the procedure of adding coordinator, where the
-      // coordinator is specified only when adding a user to an account.
+      // This is guaranteed by the procedure of adding coordinator, where
+      // the coordinator is specified only when adding a user to an account.
       // Thus, user->account_to_attrs_map must cover all the accounts he
-      // coordinates, and it's ok to skip checking user->coordinator_accounts.
+      // coordinates, and it's ok to skip checking
+      // user->coordinator_accounts.
       for (const auto& [acc, item] : user->account_to_attrs_map)
         if (acc == account || PaternityTestNoLock_(acc, account))
           return Result{true};
@@ -1689,6 +1684,7 @@ AccountManager::Result AccountManager::CheckOpUserHasModifyPermission(
                                      name, account)};
   }
 
+  // op_user.admin_level < admin_level
   if (!IsOperatorPrivilegeSameAndHigher(*op_user, user->admin_level)) {
     return Result{false,
                   "Permission error : You cannot modify a user's permissions "
@@ -1827,26 +1823,8 @@ AccountManager::Result AccountManager::CheckOperatorPrivilegeHigher(
 
   User::AdminLevel op_level = op_user->admin_level;
 
-  bool level_result = true;
-  switch (op_level) {
-  case User::Admin:
-    if (admin_level == User::Admin) {
-      level_result = false;
-    }
-    break;
-  case User::Operator:
-    if (admin_level != User::None) {
-      level_result = false;
-    }
-    break;
-  case User::None:
-    level_result = false;
-    break;
-  default:
-    break;
-  }
-
-  if (!level_result) {
+  if (!IsOperatorPrivilegeSameAndHigher(*op_user, admin_level) ||
+      op_level == admin_level) {
     return Result{false,
                   "Permission error : You cannot add/delete a user with the "
                   "same or greater permissions as yourself"};
@@ -1861,10 +1839,11 @@ AccountManager::Result AccountManager::CheckUserPermissionOnAccount(
     if (read_only_priv) {
       // In current implementation, if a user is the coordinator of an
       // account, it must exist in user->account_to_attrs_map.
-      // This is guaranteed by the procedure of adding coordinator, where the
-      // coordinator is specified only when adding a user to an account.
+      // This is guaranteed by the procedure of adding coordinator, where
+      // the coordinator is specified only when adding a user to an account.
       // Thus, user->account_to_attrs_map must cover all the accounts he
-      // coordinates, and it's ok to skip checking user->coordinator_accounts.
+      // coordinates, and it's ok to skip checking
+      // user->coordinator_accounts.
       for (const auto& [acc, item] : op_user.account_to_attrs_map)
         if (acc == account || PaternityTestNoLock_(acc, account))
           return Result{true};
@@ -2080,8 +2059,8 @@ AccountManager::Result AccountManager::AddUser_(const User* find_user,
         }
 
         if (find_user) {
-          // There is a same user but was deleted or user would like to add user
-          // to a new account,here will overwrite it with the same name
+          // There is a same user but was deleted or user would like to add
+          // user to a new account,here will overwrite it with the same name
           g_db_client->UpdateUser(res_user);
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
                                        name, "creation_time",
@@ -2929,7 +2908,8 @@ int AccountManager::DeleteAccountAllowedQosFromDBNoLock_(
   const Account* account = GetExistedAccountInfoNoLock_(name);
   if (!account) {
     CRANE_ERROR(
-        "Operating on a non-existent account '{}', please check this item in "
+        "Operating on a non-existent account '{}', please check this item "
+        "in "
         "database and restart cranectld",
         name);
     return false;
@@ -2963,7 +2943,8 @@ int AccountManager::DeleteAccountAllowedQosFromDBNoLock_(
 }
 
 /**
- * @note need write lock(m_rw_account_mutex_) and write lock(m_rw_user_mutex_)
+ * @note need write lock(m_rw_account_mutex_) and write
+ * lock(m_rw_user_mutex_)
  * @param name
  * @param qos
  * @return
@@ -2973,7 +2954,8 @@ bool AccountManager::DeleteAccountAllowedQosFromMapNoLock_(
   const Account* account = GetExistedAccountInfoNoLock_(name);
   if (!account) {
     CRANE_ERROR(
-        "Operating on a non-existent account '{}', please check this item in "
+        "Operating on a non-existent account '{}', please check this item "
+        "in "
         "database and restart cranectld",
         name);
     return false;
@@ -3089,7 +3071,8 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDBNoLock_(
   const Account* account = GetExistedAccountInfoNoLock_(name);
   if (!account) {
     CRANE_ERROR(
-        "Operating on a non-existent account '{}', please check this item in "
+        "Operating on a non-existent account '{}', please check this item "
+        "in "
         "database and restart cranectld",
         name);
     return false;
@@ -3119,7 +3102,8 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDBNoLock_(
 }
 
 /**
- * @note need write lock(m_rw_account_mutex_) and write lock(m_rw_user_mutex_)
+ * @note need write lock(m_rw_account_mutex_) and write
+ * lock(m_rw_user_mutex_)
  * @param name
  * @param partition
  * @return
@@ -3129,7 +3113,8 @@ bool AccountManager::DeleteAccountAllowedPartitionFromMapNoLock_(
   const Account* account = GetExistedAccountInfoNoLock_(name);
   if (!account) {
     CRANE_ERROR(
-        "Operating on a non-existent account '{}', please check this item in "
+        "Operating on a non-existent account '{}', please check this item "
+        "in "
         "database and restart cranectld",
         name);
     return false;
