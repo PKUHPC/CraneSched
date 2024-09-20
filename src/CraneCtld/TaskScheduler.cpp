@@ -2056,6 +2056,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
                    "selected_node_cnt != task->node_num");
 
   ResourceV2 allocated_res;
+  task->allocated_res_view.SetToZero();
 
   for (const auto& craned_id : craned_indexes_) {
     const auto& craned_meta = craned_meta_map.at(craned_id).GetExclusivePtr();
