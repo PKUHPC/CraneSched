@@ -16,6 +16,7 @@
 
 #include "TaskScheduler.h"
 
+#include <absl/time/time.h>
 #include <google/protobuf/util/time_util.h>
 
 #include <future>
@@ -1863,10 +1864,17 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     std::vector<std::string> running_task_ids_str;
     for (const auto& [task_id, res] : craned_meta->running_task_resource_map) {
       const auto& task = running_tasks.at(task_id);
-      end_time_task_id_vec.emplace_back(
-          std::max(task->StartTime() + task->time_limit,
-                   now + absl::Seconds(1)),
-          task_id);
+
+      // For some completing tasks,
+      // task->StartTime() + task->time_limit <= absl::Now().
+      // In this case,
+      // max(task->StartTime() + task->time_limit, now + absl::Seconds(1))
+      // should be taken for end time,
+      // otherwise, tasks might be scheduled and executed even when
+      // res_avail = 0 and will cause a severe error where res_avail < 0.
+      absl::Time end_time = std::max(task->StartTime() + task->time_limit,
+                                     now + absl::Seconds(1));
+      end_time_task_id_vec.emplace_back(end_time, task_id);
 
       running_task_ids_str.emplace_back(std::to_string(task_id));
     }
@@ -2167,6 +2175,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       for (auto&& seg : time_segments) {
         absl::Time start = seg.start;
         absl::Time end = seg.start + seg.duration;
+
         if constexpr (kAlgoTraceOutput) {
           CRANE_TRACE(
               "Trying to intersect time segment: [start: {}, end: "
@@ -2174,6 +2183,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
               absl::ToInt64Seconds(start - now),
               absl::ToInt64Seconds(start - now + seg.duration));
         }
+
         // Segment: [start, end)
         // e.g. segment.start=5, segment.duration=1s => [5,6)
 
