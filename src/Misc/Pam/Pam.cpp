@@ -66,9 +66,9 @@ extern "C" {
     return PAM_USER_UNKNOWN;
   }
 
-  uint8_t addr[4];
+  std::string remote_address;
   uint16_t port;
-  ok = PamGetRemoteAddressPort(pamh, addr, &port);
+  ok = PamGetRemoteAddressPort(pamh, &remote_address, &port);
 
   if (!ok) {
     PamSendMsgToClient(
@@ -77,9 +77,6 @@ extern "C" {
   }
 
   uint32_t task_id;
-
-  std::string remote_address =
-      fmt::format("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3]);
 
   pam_syslog(pamh, LOG_ERR, "[Crane] Try to query %s for remote port %hu",
              remote_address.c_str(), port);

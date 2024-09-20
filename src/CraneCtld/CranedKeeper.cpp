@@ -639,10 +639,9 @@ std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
     const CranedId &craned_id) {
   ReaderLock lock(&m_connected_craned_mtx_);
   auto iter = m_connected_craned_id_stub_map_.find(craned_id);
-  if (iter != m_connected_craned_id_stub_map_.end())
-    return iter->second;
-  else
-    return nullptr;
+  if (iter != m_connected_craned_id_stub_map_.end()) return iter->second;
+
+  return nullptr;
 }
 
 void CranedKeeper::SetCranedIsUpCb(std::function<void(CranedId)> cb) {
@@ -661,9 +660,34 @@ void CranedKeeper::PutNodeIntoUnavailList(const std::string &crane_id) {
 }
 
 void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
+  static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
+      s_craned_id_to_ip_cache_map;
+
   std::string ip_addr;
-  if (!crane::ResolveIpv4FromHostname(craned_id, &ip_addr)) {
-    ip_addr = craned_id;
+
+  auto it = s_craned_id_to_ip_cache_map.find(craned_id);
+  if (it != s_craned_id_to_ip_cache_map.end()) {
+    if (std::holds_alternative<ipv4_t>(it->second)) {  // Ipv4
+      ip_addr = crane::Ipv4ToStr(std::get<ipv4_t>(it->second));
+    } else {
+      CRANE_ASSERT(std::holds_alternative<ipv6_t>(it->second));
+      ip_addr = crane::Ipv6ToStr(std::get<ipv6_t>(it->second));
+    }
+  } else {
+    ipv4_t ipv4_addr;
+    ipv6_t ipv6_addr;
+    if (crane::ResolveIpv4FromHostname(craned_id, &ipv4_addr)) {
+      ip_addr = crane::Ipv4ToStr(ipv4_addr);
+      s_craned_id_to_ip_cache_map.emplace(craned_id, ipv4_addr);
+    } else if (crane::ResolveIpv6FromHostname(craned_id, &ipv6_addr)) {
+      ip_addr = crane::Ipv6ToStr(ipv6_addr);
+      s_craned_id_to_ip_cache_map.emplace(craned_id, ipv6_addr);
+    } else {
+      // Just hostname. It should never happen,
+      // but we add error handling here for robustness.
+      CRANE_ERROR("Unresolved hostname: {}", craned_id);
+      ip_addr = craned_id;
+    }
   }
 
   auto *craned = new CranedStub(this);
@@ -681,8 +705,8 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  CRANE_TRACE("Creating a channel to {}:{}. Channel count: {}", craned_id,
-              kCranedDefaultPort, m_channel_count_.fetch_add(1) + 1);
+  CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}", craned_id,
+              ip_addr, kCranedDefaultPort, m_channel_count_.fetch_add(1) + 1);
 
   if (g_config.ListenConf.UseTls) {
     SetTlsHostnameOverride(&channel_args, craned_id, g_config.ListenConf.Certs);

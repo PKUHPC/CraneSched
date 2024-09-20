@@ -1171,13 +1171,13 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
+  std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
   if (listen_conf.UseTls) {
-    ServerBuilderAddTcpTlsListeningPort(
-        &builder, listen_conf.CraneCtldListenAddr,
-        listen_conf.CraneCtldListenPort, listen_conf.Certs);
+    ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
+                                        listen_conf.CraneCtldListenPort,
+                                        listen_conf.Certs);
   } else {
-    ServerBuilderAddTcpInsecureListeningPort(&builder,
-                                             listen_conf.CraneCtldListenAddr,
+    ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
                                              listen_conf.CraneCtldListenPort);
   }
 
@@ -1190,7 +1190,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   }
 
   CRANE_INFO("CraneCtld is listening on {}:{} and Tls is {}",
-             listen_conf.CraneCtldListenAddr, listen_conf.CraneCtldListenPort,
+             cranectld_listen_addr, listen_conf.CraneCtldListenPort,
              listen_conf.UseTls);
 
   // Avoid the potential deadlock error in underlying absl::mutex

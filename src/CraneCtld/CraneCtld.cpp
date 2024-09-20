@@ -604,19 +604,15 @@ void ParseConfig(int argc, char** argv) {
         parsed_args["port"].as<std::string>();
   }
 
-  std::regex regex_addr(
-      R"(^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])(\.(?!$)|$)){4}$)");
-
-  std::regex regex_port(R"(^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|)"
-                        R"(65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$)");
-
-  if (!std::regex_match(g_config.ListenConf.CraneCtldListenAddr, regex_addr)) {
-    fmt::print("Listening address is invalid.\n");
+  if (crane::GetIpAddrVer(g_config.ListenConf.CraneCtldListenAddr) == -1) {
+    CRANE_ERROR("Listening address is invalid.");
     std::exit(1);
   }
 
+  std::regex regex_port(R"(^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|)"
+                        R"(65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$)");
   if (!std::regex_match(g_config.ListenConf.CraneCtldListenPort, regex_port)) {
-    fmt::print("Listening port is invalid.\n");
+    CRANE_ERROR("Listening port is invalid.");
     std::exit(1);
   }
 }

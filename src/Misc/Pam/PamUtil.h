@@ -34,7 +34,7 @@ void PamSendMsgToClient(pam_handle_t *pamh, const char *mesg);
 
 bool PamGetRemoteUid(pam_handle_t *pamh, const char *user_name, uid_t *uid);
 
-bool PamGetRemoteAddressPort(pam_handle_t *pamh, uint8_t addr[4],
+bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
                              uint16_t *port);
 
 bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
