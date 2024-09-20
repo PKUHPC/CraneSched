@@ -2248,26 +2248,46 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           // start
           {
             // If there is an overlap between first segment and `seg`, take
-            // the intersection. std::prev(it1)                 it1 V V
+            // the intersection.
+            // And if (end >= it1->start):
+            // std::prev(it1)                 it1
+            // V                               V
             // *----------------------------*  *--------*
             //         *-----------------------------*
+            //         |<-intersected part->|        ^
+            //         ^                             |
+            //      start                           end
+            //
+            // OR
+            //
+            // else if (end < it1->start):
+            // std::prev(it1)                     it1
+            // V                                   V
+            // *--------------------------------*  *--------*
+            //         *--------------------*
             //         |<-intersected part->|
-            //         ^
-            //      start
+            //         ^                    ^
+            //      start                  end
             it1 = std::prev(it1);
             if (it1->start + it1->duration > start) {
               // Note: If start == seg.start, there's no intersection.
-              new_intersected_time_segments.emplace_back(
-                  start,
-                  std::min(it1->start + it1->duration - start, end - start));
+
+              absl::Duration intersected_duration;
+              if (end < it1->start)
+                intersected_duration = end - start;
+              else
+                intersected_duration = it1->start + it1->duration - start;
+
+              new_intersected_time_segments.emplace_back(start,
+                                                         intersected_duration);
             }
           }
 
-          //           |<--    range  -->|
-          // it1   it should start here     it2
-          // v          v                    v
-          // *~~~~~~~*  *----*  *--------*   *~~~~~~~~~~~~*
-          //       *--------------------------------*
+          //           |<-- intersected range -->|
+          // it1   it should start here             it2
+          // v          v                            v
+          // *~~~~~~~*  *----*  *----------------*   *~~~~~~~~~~~~*
+          //       *----------------------------------------*
           // If std::distance(it1, it2) >= 2, there are other segments
           //  between it1 and it2.
           if (std::distance(it1, it2) >= 2) {
