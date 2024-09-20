@@ -2017,13 +2017,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       ++task_num_node_id_it;
       continue;
     }
+
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_index);
     auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
-
-    // TODO: Trim here after finishing ResourceView.
-    AllocatableResource const& task_alloc_res =
-        task->Resources().EachNodeResMap().begin()->second.allocatable_res;
 
     // If any of the follow `if` is true, skip this node.
     if (!(task->requested_node_res_view <= craned_meta->res_total)) {
