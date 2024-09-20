@@ -2230,7 +2230,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           //   *--*             or     *---*
           //   ^                       ^
           //  it1                     it1 ( == intersected_time_segment.begin())
-          auto it1 = std::upper_bound(intersected_time_segments.begin(),
+          auto it1 = std::lower_bound(intersected_time_segments.begin(),
                                       intersected_time_segments.end(), start);
           if (it1 == intersected_time_segments.begin()) {
             // Case A2:
@@ -2293,24 +2293,41 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           //            v                             v
           // *~~~~~~~*  *----*           *--------*   *~~~~~~~~~~~~*
           //       *----------------------------------------*
-          for (auto it = it1; it != it2; ++it)
+          //
+          //
+          // Case A1-3 (There's no half-intersected tail segment):
+          // it2                    it1
+          // v                       v
+          // *-------------*         *--------------*
+          //           *----------*
+          //
+          // Or
+          //
+          // it2                    it1 == end()
+          // v                       v
+          // *-------------*
+          //           *----------*
+          //
+          // Note: In case A1-3, it2 < it1.
+          //       Thus, termination condition should be (it2 < it1).
+          for (auto it = it1; it < it2; ++it)
             new_intersected_time_segments.emplace_back(it->start, it->duration);
 
-          // the last insertion handles the following 2 situations.
-          //                                        it2
-          // *~~~~~~~*  *~~~~~~~*  *~~~~~~~~*   *------------*
-          //       *--------------------------------*
-          // OR
-          //                                      it2
-          // *~~~~~~~*  *~~~~~~~*  *~~~~~~~~*   *------*
-          //       *-------------------------------------*
-          //
-          // The following situation will NOT happen.
-          //                                                 it2
-          // *~~~~~~~*  *~~~~~~~*  *~~~~~~~~*              *------*
-          //       *-------------------------------------*
-          new_intersected_time_segments.emplace_back(
-              it2->start, std::min(it2->duration, end - it2->start));
+          if (it1 < it2) {
+            // Case A1-3.
+            // No half-intersected tail segment should be handled.
+          } else {
+            // the last insertion handles the following 2 situations.
+            //                                        it2
+            // *~~~~~~~*  *~~~~~~~*  *~~~~~~~~*   *------------*
+            //       *--------------------------------*
+            // OR
+            //                                      it2
+            // *~~~~~~~*  *~~~~~~~*  *~~~~~~~~*   *------*
+            //       *-------------------------------------*
+            new_intersected_time_segments.emplace_back(
+                it2->start, std::min(it2->duration, end - it2->start));
+          }
         }
       }
 
