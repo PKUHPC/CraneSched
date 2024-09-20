@@ -2313,7 +2313,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           for (auto it = it1; it < it2; ++it)
             new_intersected_time_segments.emplace_back(it->start, it->duration);
 
-          if (it1 < it2) {
+          if (it2 < it1) {
             // Case A1-3.
             // No half-intersected tail segment should be handled.
           } else {
