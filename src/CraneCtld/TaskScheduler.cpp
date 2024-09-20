@@ -2188,19 +2188,19 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
         auto it2 = std::lower_bound(intersected_time_segments.begin(),
                                     intersected_time_segments.end(), end);
 
-        // If it2 == intersected_time_segments.begin(), this time segment has
-        // no overlap with any time segment in intersected_time_segments. Just
-        // skip it.
-        //               it2
-        //                V
-        //  seg           *------*    *----* .... intersected_time_segments
-        // *----------*
-        //            ^
-        //           end
-        //
-        // Do nothing under such situation.
-
         if (it2 == intersected_time_segments.begin()) {
+          // If it2 == intersected_time_segments.begin(),
+          // this time segment has no overlap with any time segment
+          // in intersected_time_segments.
+          // Just skip it.
+          //               it2
+          //                V
+          //  seg           *------*    *----* .... intersected_time_segments
+          // *----------*
+          //            ^
+          //           end
+          //
+          // Do nothing under such situation.
           continue;
         } else {
           it2 = std::prev(it2);
@@ -2217,7 +2217,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           // We first find a segment (it1) in `intersected_time_segments`
           // whose start < seg.start and is closet to seg.start...
           // There may be 2 situation:
-          // 1.
+          // A1.
           //     start
           //       V
           //       *-------* seg
@@ -2225,28 +2225,33 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           //             ^
           //            it1 ( != intersected_time_segment.end()  )
           //
-          // 2.
+          // A2.
           //   *-------* seg         *-------* seg
           //   *--*             or     *---*
           //   ^                       ^
           //  it1                     it1 ( == intersected_time_segment.begin())
           auto it1 = std::upper_bound(intersected_time_segments.begin(),
                                       intersected_time_segments.end(), start);
-          if (it1 != intersected_time_segments.begin())
-          // If it1 == intersected_time_segments.begin(), there is no time
-          // segment that starts previous to seg.start but there are some
-          // segments immediately after seg.start. The first one of them is
-          // the beginning of intersected_time_segments.
-          //   begin()        it2
-          //                   V
-          //   *---*           *----*
-          // *-------------------*
-          // ^
-          // start
-          {
+          if (it1 == intersected_time_segments.begin()) {
+            // Case A2:
+            //
+            // If it1 == intersected_time_segments.begin(), there is no time
+            // segment that starts previous to seg.start but there are some
+            // segments immediately after seg.start. The first one of them is
+            // the beginning of intersected_time_segments.
+            //  it1 == begin()   it2
+            //   V                V
+            //   *---*            *----*
+            // *--------------------* seg
+            // ^
+            // start
+          } else {
+            // Case A1:
             // If there is an overlap between first segment and `seg`, take
             // the intersection.
-            // And if (end >= it1->start):
+
+            // Case A1-1 (end >= it1->start):
+            //
             // std::prev(it1)                 it1
             // V                               V
             // *----------------------------*  *--------*
@@ -2257,44 +2262,39 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
             //
             // OR
             //
-            // else if (end < it1->start):
-            // std::prev(it1)                     it1
+            // Case A1-2 (end < it1->start):
+            // it0 == std::prev(it1)              it1
             // V                                   V
             // *--------------------------------*  *--------*
             //         *--------------------*
             //         |<-intersected part->|
             //         ^                    ^
             //      start                  end
-            it1 = std::prev(it1);
-            if (it1->start + it1->duration > start) {
-              // Note: If start == seg.start, there's no intersection.
+            auto it0 = std::prev(it1);
+            if (it0->start + it0->duration > start) {
+              // Note: If it0->start + it0->duration == seg.start,
+              //       there's no intersection.
 
               absl::Duration intersected_duration;
-              if (end < it1->start + it1->duration)
+              if (end < it0->start + it0->duration)
+                // Case A1-2
                 intersected_duration = end - start;
               else
-                intersected_duration = it1->start + it1->duration - start;
+                // Case A1-1
+                intersected_duration = it0->start + it0->duration - start;
 
               new_intersected_time_segments.emplace_back(start,
                                                          intersected_duration);
             }
           }
 
-          //           |<-- intersected range -->|
-          // it1   it should start here             it2
-          // v          v                            v
-          // *~~~~~~~*  *----*  *----------------*   *~~~~~~~~~~~~*
+          //            |<-- intersected range -->|
+          //           it1                           it2
+          //            v                             v
+          // *~~~~~~~*  *----*           *--------*   *~~~~~~~~~~~~*
           //       *----------------------------------------*
-          // If std::distance(it1, it2) >= 2, there are other segments
-          //  between it1 and it2.
-          if (std::distance(it1, it2) >= 2) {
-            auto it = std::next(it1);
-            do {
-              new_intersected_time_segments.emplace_back(it->start,
-                                                         it->duration);
-              ++it;
-            } while (it != it2);
-          }
+          for (auto it = it1; it != it2; ++it)
+            new_intersected_time_segments.emplace_back(it->start, it->duration);
 
           // the last insertion handles the following 2 situations.
           //                                        it2
@@ -2309,9 +2309,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           //                                                 it2
           // *~~~~~~~*  *~~~~~~~*  *~~~~~~~~*              *------*
           //       *-------------------------------------*
-          if (std::distance(it1, it2) >= 1)
-            new_intersected_time_segments.emplace_back(
-                it2->start, std::min(it2->duration, end - it2->start));
+          new_intersected_time_segments.emplace_back(
+              it2->start, std::min(it2->duration, end - it2->start));
         }
       }
 
