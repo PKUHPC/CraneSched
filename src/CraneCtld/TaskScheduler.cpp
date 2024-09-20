@@ -2085,7 +2085,6 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_id);
-    //    auto& node_meta = craned_meta_map.at(craned_id);
 
     // Find all valid time segments in this node for this task.
     // The expected start time must exist because all tasks in
