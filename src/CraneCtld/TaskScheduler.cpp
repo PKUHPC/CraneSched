@@ -2270,7 +2270,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
               // Note: If start == seg.start, there's no intersection.
 
               absl::Duration intersected_duration;
-              if (end < it1->start)
+              if (end < it1->start + it1->duration)
                 intersected_duration = end - start;
               else
                 intersected_duration = it1->start + it1->duration - start;
