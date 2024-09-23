@@ -15,7 +15,7 @@
  */
 
 #include "AccountManager.h"
-
+#include "crane/Logger.h"
 #include "crane/PasswordEntry.h"
 
 namespace Ctld {
@@ -51,6 +51,8 @@ tl::expected<bool, crane::grpc::ErrCode> AccountManager::AddUser(
       //                           object_account)};
       return tl::unexpected(crane::grpc::ErrCode::ERR_USER_DUPLICATE_ACCOUNT);
     }
+  } else {
+    CRANE_INFO("victor test in AddUser, new user name={} not exist.", name);
   }
 
   // Check whether the account exists
@@ -77,6 +79,7 @@ tl::expected<bool, crane::grpc::ErrCode> AccountManager::AddUser(
 
 AccountManager::Result AccountManager::AddAccount(uint32_t uid,
                                                   Account&& new_account) {
+  CRANE_INFO("victor test in AddAccount start, uid={}.", uid);
   Result result;
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -169,6 +172,7 @@ AccountManager::Result AccountManager::AddAccount(uint32_t uid,
 
 AccountManager::Result AccountManager::AddQos(uint32_t uid,
                                               const Qos& new_qos) {
+  CRANE_INFO("victor test in AddQos start, uid={}.", uid);
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     Result result;
@@ -1730,6 +1734,8 @@ AccountManager::Result AccountManager::CheckOpUserHasModifyPermission(
 AccountManager::Result AccountManager::CheckPartitionIsAllowed(
     const Account* account_ptr, const std::string& account,
     const std::string& partition, bool check_parent) {
+  CRANE_INFO("victor test in CheckPartitionIsAllowed start, account={}, "
+  "partition={}, check_parent={}.", account, partition, check_parent);
   if (!account_ptr) {
     return Result{false, fmt::format("Unknown account '{}'", account)};
   }
@@ -1852,6 +1858,8 @@ tl::expected<bool, crane::grpc::ErrCode> AccountManager::CheckOperatorPrivilegeH
   Result result = CheckOpUserExisted(uid, &op_user);
   if (!result.ok) {
     // return result;
+    CRANE_INFO("victor test in CheckOperatorPrivilegeHigher, uid={} is not "
+    "exist.", uid);
     return tl::unexpected(crane::grpc::ErrCode::ERR_INVALID_OP_USER);
   }
 
@@ -2042,7 +2050,8 @@ tl::expected<bool, crane::grpc::ErrCode> AccountManager::AddUser_(
     const User* find_user, const Account* find_account, User&& new_user) {
   const std::string object_account = new_user.default_account;
   const std::string name = new_user.name;
-
+  CRANE_INFO("victor test in AddUser_, default_account={}, new_user_name={}.",
+  object_account, name);
   bool add_coordinator = false;
   if (!new_user.coordinator_accounts.empty()) {
     add_coordinator = true;
@@ -2125,7 +2134,7 @@ AccountManager::Result AccountManager::AddAccount_(const Account* find_account,
                                                    const Account* find_parent,
                                                    Account&& new_account) {
   const std::string name = new_account.name;
-
+  CRANE_INFO("victor test in AddAccount_ start, new_account_name={}.", name);
   if (find_parent != nullptr) {
     if (new_account.allowed_partition.empty()) {
       // Inherit
@@ -2182,6 +2191,7 @@ AccountManager::Result AccountManager::AddAccount_(const Account* find_account,
 
 AccountManager::Result AccountManager::AddQos_(const Qos* find_qos,
                                                const Qos& new_qos) {
+  CRANE_INFO("victor test in AddQos_ start.");
   if (find_qos) {
     // There is a same qos but was deleted,here will delete the original
     // qos and overwrite it with the same name
@@ -2210,6 +2220,7 @@ AccountManager::Result AccountManager::AddQos_(const Qos* find_qos,
 
 tl::expected<bool, crane::grpc::ErrCode> AccountManager::DeleteUser_(const User& user,
                                                    const std::string& account) {
+  CRANE_INFO("victor test in DeleteUser_ start, account={}.", account);
   const std::string name = user.name;
 
   std::list<std::string> remove_accounts;
