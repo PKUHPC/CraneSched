@@ -46,7 +46,7 @@ if [ "$need_compile" = true ]; then
 fi
 
 cd $DIR
-python3 src/main.py $test_args --config_path=conf/conf.yaml --folder='testcases'
+python3 src/main.py $test_args
 
 usage() {
   echo "script usage: $0 [-i] [-c] [-a args]"

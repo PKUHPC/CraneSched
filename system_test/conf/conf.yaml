@@ -1,0 +1,11 @@
+service:
+  class: CranedCtld
+  args:
+      url:
+      port:
+dependency:
+  db:
+    class: MockDb
+    args:
+      types:
+      
