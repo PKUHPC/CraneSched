@@ -202,7 +202,7 @@ class AccountManager {
 
   Result CheckOpUserHasPermissionToAccount(uint32_t uid,
                                            const std::string& account,
-                                           bool read_only_priv);
+                                           bool read_only_priv, bool is_add);
 
   Result CheckOpUserHasModifyPermission(uint32_t uid, const User* user,
                                         const std::string& name,

@@ -77,7 +77,7 @@ AccountManager::Result AccountManager::AddAccount(uint32_t uid,
     util::read_lock_guard account_guard(m_rw_account_mutex_);
 
     result = CheckOpUserHasPermissionToAccount(uid, new_account.parent_account,
-                                               false);
+                                               false, true);
     if (!result.ok) {
       return result;
     }
@@ -213,7 +213,7 @@ AccountManager::Result AccountManager::DeleteAccount(uint32_t uid,
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
 
-    Result result = CheckOpUserHasPermissionToAccount(uid, name, false);
+    Result result = CheckOpUserHasPermissionToAccount(uid, name, false, false);
     if (!result.ok) {
       return result;
     }
@@ -714,7 +714,7 @@ AccountManager::Result AccountManager::ModifyAccount(
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
 
-    Result result = CheckOpUserHasPermissionToAccount(uid, name, false);
+    Result result = CheckOpUserHasPermissionToAccount(uid, name, false, false);
     if (!result.ok) {
       return result;
     }
@@ -894,7 +894,7 @@ AccountManager::Result AccountManager::BlockAccount(uint32_t uid,
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
 
-    Result result = CheckOpUserHasPermissionToAccount(uid, name, false);
+    Result result = CheckOpUserHasPermissionToAccount(uid, name, false, false);
     if (!result.ok) {
       return result;
     }
@@ -1115,6 +1115,9 @@ AccountManager::Result AccountManager::CheckAddUserAllowedQos(
   const std::string name = user->name;
 
   Result result = CheckQosIsAllowed(account_ptr, account, qos_str, false);
+  if (!result.ok) {
+    return result;
+  }
 
   // check if add item already the user's allowed qos
   if (partition.empty()) {
@@ -1641,14 +1644,21 @@ AccountManager::Result AccountManager::CheckOpUserExisted(
 }
 
 AccountManager::Result AccountManager::CheckOpUserHasPermissionToAccount(
-    uint32_t uid, const std::string& account, bool read_only_priv) {
+    uint32_t uid, const std::string& account, bool read_only_priv, bool is_add) {
   const User* op_user = nullptr;
 
   Result result = CheckOpUserExisted(uid, &op_user);
+  if (!result.ok) {
+    return result;
+  }
 
   if (account.empty()) {
-    return Result{false, fmt::format("No account is specified for user {}",
+    if (is_add) {
+      return Result{true};
+    } else {
+      return Result{false, fmt::format("No account is specified for user {}",
                                      op_user->name)};
+    }
   }
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
