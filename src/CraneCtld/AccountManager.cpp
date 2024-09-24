@@ -1628,12 +1628,14 @@ AccountManager::Result AccountManager::CheckOpUserExisted(
   PasswordEntry entry(uid);
 
   if (!entry.Valid()) {
+    CRANE_ERROR("Uid {} not existed", uid);
     return Result{false, fmt::format("Uid {} not existed", uid)};
   }
 
   const User* user = GetExistedUserInfoNoLock_(entry.Username());
 
   if (!user) {
+    CRANE_ERROR("User '{}' is not a user of Crane", entry.Username());
     return Result{false, fmt::format("User '{}' is not a user of Crane",
                                      entry.Username())};
   }
@@ -1644,7 +1646,8 @@ AccountManager::Result AccountManager::CheckOpUserExisted(
 }
 
 AccountManager::Result AccountManager::CheckOpUserHasPermissionToAccount(
-    uint32_t uid, const std::string& account, bool read_only_priv, bool is_add) {
+    uint32_t uid, const std::string& account, bool read_only_priv,
+    bool is_add) {
   const User* op_user = nullptr;
 
   Result result = CheckOpUserExisted(uid, &op_user);
@@ -1653,12 +1656,12 @@ AccountManager::Result AccountManager::CheckOpUserHasPermissionToAccount(
   }
 
   if (account.empty()) {
-    if (is_add) {
+    if (is_add && IsOperatorPrivilegeSameAndHigher(*op_user, User::Operator)) {
       return Result{true};
-    } else {
-      return Result{false, fmt::format("No account is specified for user {}",
-                                     op_user->name)};
     }
+
+    return Result{false, fmt::format("No account is specified for user {}",
+                                     op_user->name)};
   }
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
@@ -1835,6 +1838,9 @@ AccountManager::Result AccountManager::CheckOperatorPrivilegeHigher(
 
   if (!IsOperatorPrivilegeSameAndHigher(*op_user, admin_level) ||
       op_level == admin_level) {
+    CRANE_ERROR(
+        "Permission error : You cannot add/delete a user with the same or "
+        "greater permissions as yourself");
     return Result{false,
                   "Permission error : You cannot add/delete a user with the "
                   "same or greater permissions as yourself"};
