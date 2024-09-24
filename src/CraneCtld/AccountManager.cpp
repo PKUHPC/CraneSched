@@ -1673,7 +1673,8 @@ AccountManager::Result AccountManager::CheckOpUserHasPermissionToAccount(
     uint32_t uid, const std::string& account, bool read_only_priv,
     bool is_add) {
   const User* op_user = nullptr;
-
+  CRANE_INFO("victor test in CheckOpUserHasPermissionToAccount start, uid={}," 
+  " account={}.", uid, account);
   Result result = CheckOpUserExisted(uid, &op_user);
   if (!result.ok) {
     return result;
