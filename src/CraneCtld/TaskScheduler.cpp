@@ -2111,7 +2111,7 @@ void MinLoadFirst::NodeSelect(
 
   std::vector<task_id_t> task_id_vec;
   task_id_vec = m_priority_sorter_->GetOrderedTaskIdList(
-      *pending_task_map, running_tasks, g_config.ScheduledBatchSize);
+      *pending_task_map, running_tasks, g_config.ScheduledBatchSize, now);
   // Now we know, on every node, the # of running tasks (which
   //  doesn't include those we select as the incoming running tasks in the
   //  following code) and how many resources are available at the end of each
@@ -2457,8 +2457,8 @@ void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id,
 
 std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     const OrderedTaskMap& pending_task_map,
-    const UnorderedTaskMap& running_task_map, size_t limit_num) {
-  absl::Time now = absl::Now();
+    const UnorderedTaskMap& running_task_map, size_t limit_num,
+    absl::Time now) {
   CalculateFactorBound_(pending_task_map, running_task_map, now);
 
   std::vector<std::pair<TaskInCtld*, double>> task_priority_vec;
