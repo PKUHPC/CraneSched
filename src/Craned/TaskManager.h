@@ -178,7 +178,7 @@ struct TaskInstance {
 
   bool IsCrun() const;
   bool IsCalloc() const;
-  std::vector<EnvPair> GetEnvList() const;
+  std::vector<EnvPair> GetTaskEnvList() const;
 
   crane::grpc::TaskToD task;
 
