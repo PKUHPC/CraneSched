@@ -21,9 +21,12 @@
 
 #include "CgroupManager.h"
 
+#include <vector>
+
 #include "CranedPublicDefs.h"
 #include "DeviceManager.h"
 #include "crane/String.h"
+#include "protos/PublicDefs.pb.h"
 
 namespace Craned {
 
@@ -488,17 +491,19 @@ std::optional<std::string> CgroupManager::QueryTaskExecutionNode(
 
 std::optional<crane::grpc::ResourceInNode> CgroupManager::GetTaskResourceInNode(
     task_id_t task_id) {
+  std::optional<crane::grpc::ResourceInNode> res;
+
   auto cg_spec_ptr = this->m_task_id_to_cg_spec_map_[task_id];
   if (cg_spec_ptr) {
-    return cg_spec_ptr->res_in_node;
-  } else {
-    return std::nullopt;
+    res = cg_spec_ptr->res_in_node;
   }
+
+  return res;
 }
 
 std::vector<EnvPair> CgroupManager::GetResourceEnvListByResInNode(
     const crane::grpc::ResourceInNode &res_in_node) {
-  auto env_vec = DeviceManager::GetDevEnvListByResInNode(
+  std::vector<EnvPair> env_vec = DeviceManager::GetDevEnvListByResInNode(
       res_in_node.dedicated_res_in_node());
 
   env_vec.emplace_back(
@@ -512,13 +517,16 @@ std::vector<EnvPair> CgroupManager::GetResourceEnvListByResInNode(
 
 std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTask(
     task_id_t task_id) {
+  std::vector<EnvPair> res;
+
   auto cg_spec_ptr = m_task_id_to_cg_spec_map_[task_id];
-  if (!cg_spec_ptr) {
+  if (cg_spec_ptr)
+    res = GetResourceEnvListByResInNode(cg_spec_ptr->res_in_node);
+  else
     CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
                 task_id);
-    return {};
-  } else
-    return GetResourceEnvListByResInNode(cg_spec_ptr->res_in_node);
+
+  return res;
 }
 
 bool Cgroup::MigrateProcIn(pid_t pid) {

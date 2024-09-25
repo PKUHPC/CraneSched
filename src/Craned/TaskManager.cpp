@@ -21,10 +21,13 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
 
+#include <vector>
+
 #include "CforedClient.h"
+#include "CgroupManager.h"
 #include "crane/OS.h"
-#include "crane/String.h"
 #include "protos/CraneSubprocess.pb.h"
+#include "protos/PublicDefs.pb.h"
 
 namespace Craned {
 
@@ -38,7 +41,7 @@ bool TaskInstance::IsCalloc() const {
              crane::grpc::Calloc;
 }
 
-std::vector<EnvPair> TaskInstance::GetEnvList() const {
+std::vector<EnvPair> TaskInstance::GetTaskEnvList() const {
   std::vector<EnvPair> env_vec;
   for (auto& [name, value] : this->task.env()) {
     env_vec.emplace_back(name, value);
@@ -562,14 +565,20 @@ CraneErr TaskManager::SpawnProcessInInstance_(
   int io_in_sock_pair[2];   // Socket pair for forwarding IO of crun tasks.
   int io_out_sock_pair[2];  // Socket pair for forwarding IO of crun tasks.
 
-  auto res_in_node_opt =
+  // The ResourceInNode structure should be copied here for being accessed in
+  // the child process.
+  // Note that CgroupManager acquires a lock for this.
+  // If the lock is held in the parent process during fork, the forked thread in
+  // the child proc will block forever.
+  // That's why we should copy it here and the child proc should not hold any
+  // lock.
+  std::optional<crane::grpc::ResourceInNode> res_in_node =
       g_cg_mgr->GetTaskResourceInNode(instance->task.task_id());
-  if (!res_in_node_opt.has_value()) {
+  if (!res_in_node.has_value()) {
     CRANE_ERROR("Failed to get resource info for task #{}",
                 instance->task.task_id());
     return CraneErr::kCgroupError;
   }
-  const crane::grpc::ResourceInNode& res_in_node = res_in_node_opt.value();
 
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
     CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
@@ -863,9 +872,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(
     if (instance->task.type() == crane::grpc::Batch) close(0);
     util::os::CloseFdFrom(3);
 
-    std::vector<EnvPair> task_env_vec = instance->GetEnvList();
+    std::vector<EnvPair> task_env_vec = instance->GetTaskEnvList();
     std::vector<EnvPair> res_env_vec =
-        g_cg_mgr->GetResourceEnvListByResInNode(res_in_node);
+        CgroupManager::GetResourceEnvListByResInNode(res_in_node.value());
 
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
@@ -1177,7 +1186,7 @@ void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_(int efd, short events,
       auto& instance = task_iter->second;
 
       std::vector<std::pair<std::string, std::string>> env_opt;
-      for (const auto& [name, value] : instance->GetEnvList()) {
+      for (const auto& [name, value] : instance->GetTaskEnvList()) {
         env_opt.emplace_back(name, value);
       }
       elem.env_prom.set_value(env_opt);
