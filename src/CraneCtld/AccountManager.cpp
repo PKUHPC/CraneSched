@@ -36,7 +36,8 @@ AccountManager::Result AccountManager::AddUser(uint32_t uid, User&& new_user) {
 
   if (new_user.default_account.empty()) {
     // User must specify an account
-    return Result{false, fmt::format("Please specify the user's account")};
+    return Result{false, fmt::format("No account is specified for user {}",
+                                     new_user.name)};
   }
 
   std::string object_account = new_user.default_account;
@@ -867,17 +868,24 @@ AccountManager::Result AccountManager::ModifyQos(
       return Result{false, "Invalid time limit value"};
   }
 
+  mongocxx::client_session::with_transaction_cb callback;
   if (item == "description") {
-    if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
-                                      name, item, value)) {
-      return Result{false, "Fail to update the database"};
-    }
+    // Update to database
+    callback = [&](mongocxx::client_session* session) {
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                      name, item, value);
+    };
+
   } else {
     /* uint32 Type Stores data based on long(int64_t) */
-    if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
-                                      name, item, value_number)) {
-      return Result{false, "Fail to update the database"};
-    }
+    callback = [&](mongocxx::client_session* session) {
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                      name, item, value_number);
+    };
+  }
+
+  if (!g_db_client->CommitTransaction(callback)) {
+    return Result{false, "Fail to update data in database"};
   }
 
   // To avoid frequently judging item, obtain the modified qos of the
@@ -1840,9 +1848,6 @@ AccountManager::Result AccountManager::CheckOperatorPrivilegeHigher(
 
   if (!IsOperatorPrivilegeSameAndHigher(*op_user, admin_level) ||
       op_level == admin_level) {
-    CRANE_ERROR(
-        "Permission error : You cannot add/delete a user with the same or "
-        "greater permissions as yourself");
     return Result{false,
                   "Permission error : You cannot add/delete a user with the "
                   "same or greater permissions as yourself"};
@@ -2387,9 +2392,13 @@ AccountManager::Result AccountManager::AddUserAllowedQos_(
 AccountManager::Result AccountManager::SetUserAdminLevel_(
     const std::string& name, const User::AdminLevel& new_level) {
   // Update to database
-  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
-                                    name, "admin_level",
-                                    static_cast<int>(new_level))) {
+  mongocxx::client_session::with_transaction_cb callback = [&](mongocxx::client_session* session) {
+    g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
+                                name, "admin_level",
+                                static_cast<int>(new_level));
+  };
+
+  if (!g_db_client->CommitTransaction(callback)) {
     return Result{false, "Fail to update data in database"};
   }
 
@@ -2531,11 +2540,15 @@ AccountManager::Result AccountManager::DeleteUserAllowedPartition_(
   const std::string name = user.name;
 
   // Update to database
-  if (!g_db_client->UpdateEntityOne(
+  mongocxx::client_session::with_transaction_cb callback = [&](mongocxx::client_session* session) {
+    g_db_client->UpdateEntityOne(
           Ctld::MongodbClient::EntityType::USER, "$unset", name,
           "account_to_attrs_map." + account + ".allowed_partition_qos_map." +
               partition,
-          std::string(""))) {
+          std::string(""));
+  };
+
+  if (!g_db_client->CommitTransaction(callback)) {
     return Result{false, "Fail to update data in database"};
   }
 
@@ -2597,10 +2610,17 @@ AccountManager::Result AccountManager::DeleteUserAllowedQos_(
 
 AccountManager::Result AccountManager::AddAccountAllowedPartition_(
     const std::string& name, const std::string& partition) {
-  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+  
+  // Update to database
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                     "$addToSet", name, "allowed_partition",
-                                    partition)) {
-    return Result{false, "Can't update the  database"};
+                                    partition);
+      };
+
+  if (!g_db_client->CommitTransaction(callback)) {
+    return Result{false, "Fail to update data in database"};
   }
   m_account_map_[name]->allowed_partition.emplace_back(partition);
 
@@ -2639,9 +2659,16 @@ AccountManager::Result AccountManager::AddAccountAllowedQos_(
 
 AccountManager::Result AccountManager::SetAccountDescription_(
     const std::string& name, const std::string& description) {
-  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
-                                    name, "description", description)) {
-    return Result{false, "Can't update the  database"};
+
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
+                                    name, "description", description);
+      };
+
+  // Update to database
+  if (!g_db_client->CommitTransaction(callback)) {
+    return Result{false, "Fail to update data in database"};
   }
 
   m_account_map_[name]->description = description;
@@ -2653,9 +2680,15 @@ AccountManager::Result AccountManager::SetAccountDefaultQos_(
     const Account& account, const std::string& qos) {
   const std::string name = account.name;
 
-  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
-                                    name, "default_qos", qos)) {
-    return Result{false, "Can't update the database"};
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
+                                    name, "default_qos", qos);
+      };
+
+  // Update to database
+  if (!g_db_client->CommitTransaction(callback)) {
+    return Result{false, "Fail to update data in database"};
   }
   m_account_map_[name]->default_qos = qos;
 
