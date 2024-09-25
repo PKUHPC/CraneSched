@@ -19,15 +19,11 @@
 #include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
-#include <sys/stat.h>
-
-#include <vector>
 
 #include "CforedClient.h"
 #include "CgroupManager.h"
 #include "crane/OS.h"
 #include "protos/CraneSubprocess.pb.h"
-#include "protos/PublicDefs.pb.h"
 
 namespace Craned {
 
