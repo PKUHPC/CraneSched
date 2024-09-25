@@ -23,6 +23,7 @@
 #include "DbClient.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
+#include "crane/expected.h"
 
 namespace Ctld {
 
