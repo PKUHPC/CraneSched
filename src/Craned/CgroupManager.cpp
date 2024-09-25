@@ -21,9 +21,14 @@
 
 #include "CgroupManager.h"
 
+#include <utility>
+#include <vector>
+
 #include "CranedPublicDefs.h"
 #include "DeviceManager.h"
+#include "crane/PluginClient.h"
 #include "crane/String.h"
+#include "protos/PublicDefs.pb.h"
 
 namespace Craned {
 
@@ -306,6 +311,15 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
 
     pcg = cg_unique_ptr.get();
     if (cg) *cg = pcg;
+  }
+  // JobCheckHook
+  if (g_config.Plugin.Enabled) {
+    std::vector<crane::grpc::JobCheckInfo> jobcheckinfolist;
+    crane::grpc::JobCheckInfo job_check_info;
+    job_check_info.set_taskid(task_id);
+    job_check_info.set_cgroup(pcg->GetCgroupString());
+    jobcheckinfolist.emplace_back(std::move(job_check_info));
+    g_plugin_client->JobCheckHookAsync(std::move(jobcheckinfolist));
   }
 
   CRANE_TRACE(
