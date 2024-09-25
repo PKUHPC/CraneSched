@@ -2021,6 +2021,15 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     }
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_index);
+    // Number of tasks is not less than map size.
+    // When condition is true, the craned has too many tasks.
+    if (time_avail_res_map.size() >= kAlgoMaxTaskNumPerNode) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE("Craned {} has too many tasks. Skipping this craned.",
+                    craned_index);
+      }
+      continue;
+    }
     auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
 
     // If any of the follow `if` is true, skip this node.
@@ -2098,6 +2107,9 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   absl::Time last_time = absl::InfinitePast();
   while (!pq.empty()) {
     absl::Time time = pq.top()->it->first;
+    if (time - now > kAlgoMaxTimeWindow) {
+      return false;
+    }
     while (!pq.empty() && pq.top()->it->first == time) {
       auto tmp = pq.top();
       pq.pop();

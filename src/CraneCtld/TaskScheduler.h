@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <absl/time/time.h>
+
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
@@ -144,6 +146,8 @@ class MinLoadFirst : public INodeSelectionAlgo {
  private:
   static constexpr bool kAlgoTraceOutput = false;
   static constexpr bool kAlgoRedundantNode = true;
+  static constexpr uint32_t kAlgoMaxTaskNumPerNode = 1000;
+  static constexpr absl::Duration kAlgoMaxTimeWindow = absl::Hours(24 * 7);
 
   /**
    * This map stores how much resource is available
