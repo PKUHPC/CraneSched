@@ -56,7 +56,7 @@ class AccountManager {
 
   Result AddQos(uint32_t uid, const Qos& new_qos);
 
-  Result DeleteUser(uint32_t uid, const std::string& name,
+  tl::expected<bool, crane::grpc::ErrCode> DeleteUser(uint32_t uid, const std::string& name,
                     const std::string& account);
 
   Result DeleteAccount(uint32_t uid, const std::string& name);
@@ -199,7 +199,7 @@ class AccountManager {
 
   Result CheckOpUserIsAdmin(uint32_t uid);
 
-  Result CheckOperatorPrivilegeHigher(uint32_t uid,
+  tl::expected<bool, crane::grpc::ErrCode> CheckOperatorPrivilegeHigher(uint32_t uid,
                                       User::AdminLevel admin_level);
 
   Result CheckOpUserHasPermissionToAccount(uint32_t uid,
@@ -296,7 +296,7 @@ class AccountManager {
 
   Result AddQos_(const Qos* find_qos, const Qos& new_qos);
 
-  Result DeleteUser_(const User& user, const std::string& account);
+  tl::expected<bool, crane::grpc::ErrCode> DeleteUser_(const User& user, const std::string& account);
 
   Result DeleteAccount_(const Account& account);
 

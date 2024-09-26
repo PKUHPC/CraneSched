@@ -29,11 +29,9 @@ tl::expected<bool, crane::grpc::ErrCode> AccountManager::AddUser(
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
-  Result result;
-  result = CheckOperatorPrivilegeHigher(uid, new_user.admin_level);
-  if (!result.ok) {
-    return tl::unexpected(crane::grpc::ErrCode::ERR_INVALID_UID);
-    // return result;
+  auto result = CheckOperatorPrivilegeHigher(uid, new_user.admin_level);
+  if (!result) {
+    return result;
   }
 
   // if (new_user.default_account.empty()) {
@@ -193,7 +191,7 @@ AccountManager::Result AccountManager::AddQos(uint32_t uid,
   return AddQos_(find_qos, new_qos);
 }
 
-AccountManager::Result AccountManager::DeleteUser(uint32_t uid,
+tl::expected<bool, crane::grpc::ErrCode> AccountManager::DeleteUser(uint32_t uid,
                                                   const std::string& name,
                                                   const std::string& account) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
@@ -201,17 +199,19 @@ AccountManager::Result AccountManager::DeleteUser(uint32_t uid,
 
   const User* user = GetExistedUserInfoNoLock_(name);
   if (!user) {
-    return Result{false, fmt::format("Unknown user '{}'", name)};
+    // return Result{false, fmt::format("Unknown user '{}'", name)};
+    return tl::unexpected(crane::grpc::ErrCode::ERR_INVALID_USER);
   }
 
-  Result result = CheckOperatorPrivilegeHigher(uid, user->admin_level);
-  if (!result.ok) {
+  auto result = CheckOperatorPrivilegeHigher(uid, user->admin_level);
+  if (!result) {
     return result;
   }
 
   if (!account.empty() && !user->account_to_attrs_map.contains(account)) {
-    return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
-                                     name, account)};
+    // return Result{false, fmt::format("User '{}' doesn't belong to account '{}'",
+    //                                  name, account)};
+    return tl::unexpected(crane::grpc::ErrCode::ERR_USER_ACCOUNT_MISMATCH);
   }
 
   return DeleteUser_(*user, account);
@@ -1182,6 +1182,9 @@ AccountManager::Result AccountManager::CheckSetUserAllowedQos(
   const std::string name = user->name;
 
   Result result = CheckQosIsAllowed(account_ptr, account, qos_str, false);
+  if (!result.ok) {
+    return result;
+  }
 
   std::vector<std::string> qos_vec =
       absl::StrSplit(qos_str, ',', absl::SkipEmpty());
@@ -1844,25 +1847,28 @@ bool AccountManager::IsOperatorPrivilegeSameAndHigher(
   return result;
 }
 
-AccountManager::Result AccountManager::CheckOperatorPrivilegeHigher(
+tl::expected<bool, crane::grpc::ErrCode> AccountManager::CheckOperatorPrivilegeHigher(
     uint32_t uid, User::AdminLevel admin_level) {
   const User* op_user = nullptr;
 
   Result result = CheckOpUserExisted(uid, &op_user);
   if (!result.ok) {
-    return result;
+    // return result;
+    return tl::unexpected(crane::grpc::ErrCode::ERR_INVALID_OP_USER);
   }
 
   User::AdminLevel op_level = op_user->admin_level;
 
   if (!IsOperatorPrivilegeSameAndHigher(*op_user, admin_level) ||
       op_level == admin_level) {
-    return Result{false,
-                  "Permission error : You cannot add/delete a user with the "
-                  "same or greater permissions as yourself"};
+    // return Result{false,
+    //               "Permission error : You cannot add/delete a user with the "
+    //               "same or greater permissions as yourself"};
+    return tl::unexpected(crane::grpc::ErrCode::ERR_PERMISSION_USER);
   }
 
-  return Result{true};
+  // return Result{true};
+  return true;
 }
 
 AccountManager::Result AccountManager::CheckUserPermissionOnAccount(
@@ -2204,7 +2210,7 @@ AccountManager::Result AccountManager::AddQos_(const Qos* find_qos,
   return Result{true};
 }
 
-AccountManager::Result AccountManager::DeleteUser_(const User& user,
+tl::expected<bool, crane::grpc::ErrCode> AccountManager::DeleteUser_(const User& user,
                                                    const std::string& account) {
   const std::string name = user.name;
 
@@ -2258,7 +2264,8 @@ AccountManager::Result AccountManager::DeleteUser_(const User& user,
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
-    return Result{false, "Fail to update data in database"};
+    // return Result{false, "Fail to update data in database"};
+    return tl::unexpected(crane::grpc::ErrCode::ERR_UPDATE_DATABASE);
   }
 
   for (auto& remove_account : remove_accounts) {
@@ -2270,7 +2277,8 @@ AccountManager::Result AccountManager::DeleteUser_(const User& user,
 
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
-  return Result{true};
+  // return Result{true};
+  return true;
 }
 
 AccountManager::Result AccountManager::DeleteAccount_(const Account& account) {
