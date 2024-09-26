@@ -50,7 +50,7 @@ class AccountManager {
 
   ~AccountManager() = default;
 
-  Result AddUser(uint32_t uid, User&& new_user);
+  tl::expected<bool, crane::grpc::ErrCode> AddUser(uint32_t uid, User&& new_user);
 
   Result AddAccount(uint32_t uid, Account&& new_account);
 
@@ -288,7 +288,7 @@ class AccountManager {
 
   bool IncQosReferenceCountInDb_(const std::string& name, int num);
 
-  Result AddUser_(const User* find_user, const Account* find_account,
+  tl::expected<bool, crane::grpc::ErrCode> AddUser_(const User* find_user, const Account* find_account,
                   User&& new_user);
 
   Result AddAccount_(const Account* find_account, const Account* find_parent,

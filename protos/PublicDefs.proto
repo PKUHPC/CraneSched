@@ -316,6 +316,41 @@ message TrimmedPartitionInfo {
   repeated TrimmedCranedInfo craned_lists = 3;
 }
 
+enum ErrCode {
+  SUCCESS = 0;  // Success
+
+  ERR_INVALID_UID = 10001;   // Invalid UID provided
+  ERR_INVALID_USER = 10002;  // Invalid user
+  ERR_PERMISSION_USER = 10003;  // User permission level too low, operation not permitted
+  ERR_USER_DUPLICATE_ACCOUNT = 10004;  // User duplicate account insertion
+  ERR_USER_ALLOWED_ACCOUNT = 10005;  // User has no permission for the account
+  ERR_USER_ALLOWED_USER = 10006;  // User has no permission for the user
+  ERR_INVALID_ADMIN_LEVEL = 10007;  // Invalid permission level
+  ERR_USER_ACCOUNT_MISMATCH = 10008; // User does not belong to the account
+
+  ERR_INVALID_ACCOUNT = 20001;  // Invalid account
+  ERR_DUPLICATE_ACCOUNT = 20002;  // Duplicate account insertion
+  ERR_INVALID_PARENTACCOUNT = 20003;  // Invalid parent account
+  ERR_DELETE_ACCOUNT = 20004;   // Account has child nodes
+
+  ERR_INVALID_PARTITION = 30001;  // Invalid partition, partition does not exist
+  ERR_ALLOWED_PARTITION = 30002; // Account/User does not include the partition
+  ERR_DUPLICATE_PARTITION = 30003; // Account/User duplicate insertion
+  ERR_PARENT_ALLOWED_PARTITION = 30004; // Parent account does not include the partition
+
+  ERR_INVALID_QOS = 40001;  // Invalid QoS, QoS does not exist
+  ERR_DB_DUPLICATE_QOS = 40004;  // Duplicate QoS insertion in database
+  ERR_DELETE_QOS = 40005;  // QoS reference count is not zero
+  ERR_CONVERT_TO_INTEGER = 40006;  // String to integer conversion failed
+  ERR_TIME_LIMIT = 40007;  // Invalid time value
+  ERR_ALLOWED_QOS = 40008; // Account/User does not include the QoS
+  ERR_DUPLICATE_QOS = 40009; // Account/User duplicate insertion
+  ERR_PARENT_ALLOWED_QOS = 40010; // Parent account does not include the QoS
+  ERR_SET_ALLOWED_QOS = 40011; // QoS '{}' is default QoS of partition '{}', but not found in new QoS list
+
+  ERR_UPDATE_DATABASE = 50001;  // Database update failed
+}
+
 enum EntityType {
   Account = 0;
   User = 1;

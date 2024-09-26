@@ -24,21 +24,23 @@ namespace Ctld {
 
 AccountManager::AccountManager() { InitDataMap_(); }
 
-AccountManager::Result AccountManager::AddUser(uint32_t uid, User&& new_user) {
+tl::expected<bool, crane::grpc::ErrCode> AccountManager::AddUser(
+    uint32_t uid, User&& new_user) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   Result result;
   result = CheckOperatorPrivilegeHigher(uid, new_user.admin_level);
   if (!result.ok) {
-    return result;
+    return tl::unexpected(crane::grpc::ErrCode::ERR_INVALID_UID);
+    // return result;
   }
 
-  if (new_user.default_account.empty()) {
-    // User must specify an account
-    return Result{false, fmt::format("No account is specified for user {}",
-                                     new_user.name)};
-  }
+  // if (new_user.default_account.empty()) {
+  //   // User must specify an account
+  //   return Result{false, fmt::format("No account is specified for user {}",
+  //                                    new_user.name)};
+  // }
 
   std::string object_account = new_user.default_account;
   const std::string name = new_user.name;
@@ -47,16 +49,20 @@ AccountManager::Result AccountManager::AddUser(uint32_t uid, User&& new_user) {
   const User* find_user = GetUserInfoNoLock_(name);
   if (find_user && !find_user->deleted) {
     if (find_user->account_to_attrs_map.contains(object_account)) {
-      return Result{false,
-                    fmt::format("The user '{}' already have account '{}'", name,
-                                object_account)};
+      // return Result{false,
+      //               fmt::format("The user '{}' already have account '{}'",
+      //               name,
+      //                           object_account)};
+      return tl::unexpected(crane::grpc::ErrCode::ERR_USER_DUPLICATE_ACCOUNT);
     }
   }
 
   // Check whether the account exists
   const Account* find_account = GetExistedAccountInfoNoLock_(object_account);
   if (!find_account) {
-    return Result{false, fmt::format("Unknown account '{}'", object_account)};
+    return tl::unexpected(crane::grpc::ErrCode::ERR_INVALID_ACCOUNT);
+    // return Result{false, fmt::format("Unknown account '{}'",
+    // object_account)};
   }
   // Check if user's allowed partition is a subset of parent's allowed
   // partition
@@ -65,7 +71,8 @@ AccountManager::Result AccountManager::AddUser(uint32_t uid, User&& new_user) {
     Result result =
         CheckPartitionIsAllowed(find_account, object_account, partition, false);
     if (!result.ok) {
-      return result;
+      return tl::unexpected(crane::grpc::ErrCode::ERR_INVALID_PARTITION);
+      // return result;
     }
   }
 
@@ -872,15 +879,15 @@ AccountManager::Result AccountManager::ModifyQos(
   if (item == "description") {
     // Update to database
     callback = [&](mongocxx::client_session* session) {
-          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
-                                      name, item, value);
+      g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set", name,
+                                   item, value);
     };
 
   } else {
     /* uint32 Type Stores data based on long(int64_t) */
     callback = [&](mongocxx::client_session* session) {
-          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
-                                      name, item, value_number);
+      g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set", name,
+                                   item, value_number);
     };
   }
 
@@ -1129,7 +1136,9 @@ AccountManager::Result AccountManager::CheckAddUserAllowedQos(
     return result;
   }
 
-  // check if add item already the user's allowed qos
+  // TODO:
+  // 当用户没有partition时，qos不能添加，应返回适当信息，而不是返回qos已经存在
+  //  check if add item already the user's allowed qos
   if (partition.empty()) {
     bool is_allowed = false;
     for (auto& [par, pair] :
@@ -2025,9 +2034,8 @@ bool AccountManager::IncQosReferenceCountInDb_(const std::string& name,
                                       name, "reference_count", num);
 }
 
-AccountManager::Result AccountManager::AddUser_(const User* find_user,
-                                                const Account* find_account,
-                                                User&& new_user) {
+tl::expected<bool, crane::grpc::ErrCode> AccountManager::AddUser_(
+    const User* find_user, const Account* find_account, User&& new_user) {
   const std::string object_account = new_user.default_account;
   const std::string name = new_user.name;
 
@@ -2095,7 +2103,8 @@ AccountManager::Result AccountManager::AddUser_(const User* find_user,
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
-    return Result{false, "Fail to update data in database"};
+    return tl::unexpected(crane::grpc::ErrCode::ERR_UPDATE_DATABASE);
+    // return Result{false, "Fail to update data in database"};
   }
 
   m_account_map_[object_account]->users.emplace_back(name);
@@ -2104,7 +2113,8 @@ AccountManager::Result AccountManager::AddUser_(const User* find_user,
   }
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
-  return Result{true};
+  // return Result{true};
+  return true;
 }
 
 AccountManager::Result AccountManager::AddAccount_(const Account* find_account,
@@ -2392,11 +2402,12 @@ AccountManager::Result AccountManager::AddUserAllowedQos_(
 AccountManager::Result AccountManager::SetUserAdminLevel_(
     const std::string& name, const User::AdminLevel& new_level) {
   // Update to database
-  mongocxx::client_session::with_transaction_cb callback = [&](mongocxx::client_session* session) {
-    g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
-                                name, "admin_level",
-                                static_cast<int>(new_level));
-  };
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
+                                     name, "admin_level",
+                                     static_cast<int>(new_level));
+      };
 
   if (!g_db_client->CommitTransaction(callback)) {
     return Result{false, "Fail to update data in database"};
@@ -2540,13 +2551,14 @@ AccountManager::Result AccountManager::DeleteUserAllowedPartition_(
   const std::string name = user.name;
 
   // Update to database
-  mongocxx::client_session::with_transaction_cb callback = [&](mongocxx::client_session* session) {
-    g_db_client->UpdateEntityOne(
-          Ctld::MongodbClient::EntityType::USER, "$unset", name,
-          "account_to_attrs_map." + account + ".allowed_partition_qos_map." +
-              partition,
-          std::string(""));
-  };
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(
+            Ctld::MongodbClient::EntityType::USER, "$unset", name,
+            "account_to_attrs_map." + account + ".allowed_partition_qos_map." +
+                partition,
+            std::string(""));
+      };
 
   if (!g_db_client->CommitTransaction(callback)) {
     return Result{false, "Fail to update data in database"};
@@ -2610,13 +2622,12 @@ AccountManager::Result AccountManager::DeleteUserAllowedQos_(
 
 AccountManager::Result AccountManager::AddAccountAllowedPartition_(
     const std::string& name, const std::string& partition) {
-  
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                    "$addToSet", name, "allowed_partition",
-                                    partition);
+                                     "$addToSet", name, "allowed_partition",
+                                     partition);
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
@@ -2659,11 +2670,10 @@ AccountManager::Result AccountManager::AddAccountAllowedQos_(
 
 AccountManager::Result AccountManager::SetAccountDescription_(
     const std::string& name, const std::string& description) {
-
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
-                                    name, "description", description);
+                                     name, "description", description);
       };
 
   // Update to database
@@ -2683,7 +2693,7 @@ AccountManager::Result AccountManager::SetAccountDefaultQos_(
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
-                                    name, "default_qos", qos);
+                                     name, "default_qos", qos);
       };
 
   // Update to database
