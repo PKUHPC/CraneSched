@@ -153,10 +153,13 @@ struct CrunMetaInTaskInstance : MetaInTaskInstance {
   ~CrunMetaInTaskInstance() override = default;
 };
 
+// also arg for EvDoSigChldCb_
 struct ProcSigchldInfo {
   pid_t pid;
   bool is_terminated_by_signal;
   int value;
+
+  event* resend_timer{nullptr};
 };
 
 // Todo: Task may consists of multiple subtasks
@@ -170,8 +173,7 @@ struct TaskInstance {
       termination_timer = nullptr;
     }
 
-    if (this->task.type() == crane::grpc::Interactive &&
-        this->task.interactive_meta().interactive_type() == crane::grpc::Crun) {
+    if (this->IsCrun()) {
       close(dynamic_cast<CrunMetaInTaskInstance*>(meta.get())->proc_in_fd);
     }
   }
@@ -279,6 +281,11 @@ class TaskManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
+  struct EvQueueSigchldArg {
+    TaskManager* task_manager;
+    std::unique_ptr<ProcSigchldInfo> sigchld_info;
+  };
+
   static std::string ParseFilePathPattern_(const std::string& path_pattern,
                                            const std::string& cwd,
                                            task_id_t task_id);
@@ -286,7 +293,7 @@ class TaskManager {
   void LaunchTaskInstanceMt_(TaskInstance* instance);
 
   CraneErr SpawnProcessInInstance_(TaskInstance* instance,
-                                   std::unique_ptr<ProcessInstance> process);
+                                   ProcessInstance* process);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
@@ -324,7 +331,7 @@ class TaskManager {
         std::chrono::duration_cast<std::chrono::microseconds>(duration - sec)
             .count()};
 
-    struct event* ev = event_new(m_ev_base_, -1, 0, EvOnTimerCb_, arg);
+    struct event* ev = event_new(m_ev_base_, -1, 0, EvOnTaskTimerCb_, arg);
     CRANE_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
     evtimer_add(ev, &tv);
 
@@ -338,7 +345,7 @@ class TaskManager {
 
     timeval tv{static_cast<__time_t>(secs), 0};
 
-    struct event* ev = event_new(m_ev_base_, -1, 0, EvOnTimerCb_, arg);
+    struct event* ev = event_new(m_ev_base_, -1, 0, EvOnTaskTimerCb_, arg);
     CRANE_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
     evtimer_add(ev, &tv);
 
@@ -398,6 +405,9 @@ class TaskManager {
 
   static void EvSigchldCb_(evutil_socket_t sig, short events, void* user_data);
 
+  static void EvProcessSigchldCb_(evutil_socket_t sig, short events,
+                                  void* user_data);
+
   // Callback function to handle SIGINT sent by Ctrl+C
   static void EvSigintCb_(evutil_socket_t sig, short events, void* user_data);
 
@@ -427,7 +437,9 @@ class TaskManager {
 
   static void EvExitEventCb_(evutil_socket_t, short events, void* user_data);
 
-  static void EvOnTimerCb_(evutil_socket_t, short, void* arg);
+  static void EvOnTaskTimerCb_(evutil_socket_t, short, void* arg_);
+
+  static void EvOnSigchldTimerCb_(evutil_socket_t, short, void* arg_);
 
   struct event_base* m_ev_base_{};
   struct event* m_ev_sigchld_{};
@@ -443,6 +455,9 @@ class TaskManager {
   // true. Then, AddTaskAsyncMethod will not accept any more new tasks and
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
+
+  struct event* m_ev_process_sigchld_{};
+  ConcurrentQueue<std::unique_ptr<ProcSigchldInfo>> m_sigchld_queue_;
 
   struct event* m_ev_query_task_id_from_pid_{};
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;

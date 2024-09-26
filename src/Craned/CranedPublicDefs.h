@@ -25,6 +25,8 @@
 
 namespace Craned {
 
+inline const uint64_t kEvSigChldResendMs = 500'000;
+
 using EnvPair = std::pair<std::string, std::string>;
 
 struct TaskStatusChange {
