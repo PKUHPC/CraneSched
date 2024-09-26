@@ -613,13 +613,12 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(grpc::ServerContext *context,
                           const crane::grpc::DeleteUserRequest *request,
                           crane::grpc::DeleteUserReply *response) {
 
-  AccountManager::Result res;
-  res = g_account_manager->DeleteUser(request->uid(), request->name(), request->account());
-  if (res.ok) {
+  auto res = g_account_manager->DeleteUser(request->uid(), request->name(), request->account());
+  if (res) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(res.reason);
+    response->set_reason(res.error());
   }
 
   return grpc::Status::OK;
