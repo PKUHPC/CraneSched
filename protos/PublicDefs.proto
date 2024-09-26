@@ -327,6 +327,7 @@ enum ErrCode {
   ERR_USER_ALLOWED_USER = 10006;  // User has no permission for the user
   ERR_INVALID_ADMIN_LEVEL = 10007;  // Invalid permission level
   ERR_USER_ACCOUNT_MISMATCH = 10008; // User does not belong to the account
+  ERR_INVALID_OP_USER = 10009;
 
   ERR_INVALID_ACCOUNT = 20001;  // Invalid account
   ERR_DUPLICATE_ACCOUNT = 20002;  // Duplicate account insertion
