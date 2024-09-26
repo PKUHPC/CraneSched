@@ -341,12 +341,12 @@ grpc::Status CraneCtldServiceImpl::AddUser(
           .allowed_partition_qos_map[apq.partition_name()];
   }
 
-  AccountManager::Result result = g_account_manager->AddUser(request->uid(), std::move(user));
-  if (result.ok) {
+  tl::expected<bool, crane::grpc::ErrCode> result = g_account_manager->AddUser(request->uid(), std::move(user));
+  if (result) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(result.reason);
+    response->set_reason(result.error());
   }
 
   return grpc::Status::OK;

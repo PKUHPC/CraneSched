@@ -250,7 +250,7 @@ message AddUserRequest {
 
 message AddUserReply {
   bool ok = 1;
-  string reason = 2;
+  ErrCode reason = 2;
 }
 
 message AddQosRequest {
