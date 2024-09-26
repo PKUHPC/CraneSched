@@ -158,27 +158,8 @@ struct ProcSigchldInfo {
   pid_t pid;
   bool is_terminated_by_signal;
   int value;
-  event* resend_timer;
-  ProcSigchldInfo() = default;
-  ProcSigchldInfo(pid_t pid, bool is_terminated_by_signal, int value)
-      : pid(pid),
-        is_terminated_by_signal(is_terminated_by_signal),
-        value(value),
-        resend_timer(nullptr) {}
-  ProcSigchldInfo(const ProcSigchldInfo& another) {
-    pid = another.pid;
-    is_terminated_by_signal = another.is_terminated_by_signal;
-    value = another.value;
-    resend_timer = nullptr;
-  }
 
-  ~ProcSigchldInfo() {
-    if (resend_timer) {
-      evtimer_del(resend_timer);
-      event_free(resend_timer);
-      resend_timer = nullptr;
-    }
-  }
+  event* resend_timer{nullptr};
 };
 
 // Todo: Task may consists of multiple subtasks
@@ -302,7 +283,7 @@ class TaskManager {
 
   struct EvQueueSigchldArg {
     TaskManager* task_manager;
-    ProcSigchldInfo sigchld_info;
+    std::unique_ptr<ProcSigchldInfo> sigchld_info;
   };
 
   static std::string ParseFilePathPattern_(const std::string& path_pattern,
@@ -424,8 +405,8 @@ class TaskManager {
 
   static void EvSigchldCb_(evutil_socket_t sig, short events, void* user_data);
 
-  static void EvDoSigchldCb_(evutil_socket_t sig, short events,
-                             void* user_data);
+  static void EvProcessSigchldCb_(evutil_socket_t sig, short events,
+                                  void* user_data);
 
   // Callback function to handle SIGINT sent by Ctrl+C
   static void EvSigintCb_(evutil_socket_t sig, short events, void* user_data);
@@ -475,7 +456,7 @@ class TaskManager {
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
 
-  struct event* m_ev_do_sigchld_{};
+  struct event* m_ev_process_sigchld_{};
   ConcurrentQueue<std::unique_ptr<ProcSigchldInfo>> m_sigchld_queue_;
 
   struct event* m_ev_query_task_id_from_pid_{};

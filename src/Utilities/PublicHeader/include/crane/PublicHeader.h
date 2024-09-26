@@ -20,9 +20,7 @@
 
 #include <array>
 #include <fpm/fixed.hpp>
-#include <optional>
 #include <unordered_map>
-#include <variant>
 
 #include "protos/Crane.pb.h"
 
@@ -83,7 +81,6 @@ inline const char* kDefaultCranedScriptDir = "craned/scripts";
 inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
 inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* kDefaultCranedLogPath = "craned/craned.log";
-inline const uint64_t kDefaultCranedSigChldResendMicroSeconds = 500'000;
 
 inline const char* kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 
