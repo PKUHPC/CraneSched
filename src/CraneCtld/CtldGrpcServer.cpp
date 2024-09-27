@@ -301,13 +301,12 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
     account.allowed_qos_list.emplace_back(qos);
   }
 
-  AccountManager::Result result =
-      g_account_manager->AddAccount(request->uid(), std::move(account));
-  if (result.ok) {
+  auto result = g_account_manager->AddAccount(request->uid(), std::move(account));
+  if (result) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(result.reason);
+    response->set_reason(result.error());
   }
 
   return grpc::Status::OK;
@@ -316,7 +315,6 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
 grpc::Status CraneCtldServiceImpl::AddUser(
     grpc::ServerContext *context, const crane::grpc::AddUserRequest *request,
     crane::grpc::AddUserReply *response) {
-
   User user;
   const crane::grpc::UserInfo *user_info = &request->user();
 
@@ -343,7 +341,8 @@ grpc::Status CraneCtldServiceImpl::AddUser(
           .allowed_partition_qos_map[apq.partition_name()];
   }
 
-  tl::expected<bool, crane::grpc::ErrCode> result = g_account_manager->AddUser(request->uid(), std::move(user));
+  AccountManager::SuccessOrErrCode result =
+      g_account_manager->AddUser(request->uid(), std::move(user));
   if (result) {
     response->set_ok(true);
   } else {
@@ -357,7 +356,6 @@ grpc::Status CraneCtldServiceImpl::AddUser(
 grpc::Status CraneCtldServiceImpl::AddQos(
     grpc::ServerContext *context, const crane::grpc::AddQosRequest *request,
     crane::grpc::AddQosReply *response) {
-
   Qos qos;
   const crane::grpc::QosInfo *qos_info = &request->qos();
 
@@ -371,145 +369,158 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
     response->set_ok(false);
-    response->set_reason(fmt::format("Time limit should be in [{}, {}] seconds",
-                                     kTaskMinTimeLimitSec,
-                                     kTaskMaxTimeLimitSec));
+    // response->set_reason(fmt::format("Time limit should be in [{}, {}] seconds",
+    //                                  kTaskMinTimeLimitSec,
+    //                                  kTaskMaxTimeLimitSec));
+    response->set_reason(crane::grpc::ErrCode::ERR_TIME_LIMIT);
     return grpc::Status::OK;
   }
   qos.max_time_limit_per_task = absl::Seconds(sec);
 
-  AccountManager::Result result = g_account_manager->AddQos(request->uid(), qos);
-  if (result.ok) {
+  auto result =
+      g_account_manager->AddQos(request->uid(), qos);
+  if (result) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(result.reason);
+    response->set_reason(result.error());
   }
 
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyAccount(grpc::ServerContext *context, 
-                             const crane::grpc::ModifyAccountRequest *request, 
-                             crane::grpc::ModifyAccountReply *response) {
- 
-  AccountManager::Result modify_res;
-  
-  modify_res = g_account_manager->ModifyAccount(
-        request->type(), request->uid(), request->name(), request->modify_field(),
-        request->value(), request->force());
+grpc::Status CraneCtldServiceImpl::ModifyAccount(
+    grpc::ServerContext *context,
+    const crane::grpc::ModifyAccountRequest *request,
+    crane::grpc::ModifyAccountReply *response) {
 
-  if (modify_res.ok) {
+  auto modify_res = g_account_manager->ModifyAccount(
+      request->type(), request->uid(), request->name(), request->modify_field(),
+      request->value(), request->force());
+
+  if (modify_res) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(modify_res.reason);
+    response->set_reason(modify_res.error());
   }
 
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyUser(grpc::ServerContext *context, 
-                          const crane::grpc::ModifyUserRequest *request,
-                          crane::grpc::ModifyUserReply *response) {
-  
-  AccountManager::Result modify_res;
+grpc::Status CraneCtldServiceImpl::ModifyUser(
+    grpc::ServerContext *context, const crane::grpc::ModifyUserRequest *request,
+    crane::grpc::ModifyUserReply *response) {
+  AccountManager::SuccessOrErrCode modify_res;
 
   if (request->type() == crane::grpc::OperatorType::Delete) {
-    switch(request->modify_field()) {
-      case crane::grpc::ModifyField::Partition:
-        modify_res = g_account_manager->DeleteUserAllowedPartiton(request->uid(), request->name(), request->account(), request->value());
-        break;
-      case crane::grpc::ModifyField::Qos:
-        modify_res = g_account_manager->DeleteUserAllowedQos(request->uid(), request->name(), request->partition(), request->account(), request->value(), request->force());
-        break;
-      default:
-        break;
+    switch (request->modify_field()) {
+    case crane::grpc::ModifyField::Partition:
+      modify_res = g_account_manager->DeleteUserAllowedPartiton(
+          request->uid(), request->name(), request->account(),
+          request->value());
+      break;
+    case crane::grpc::ModifyField::Qos:
+      modify_res = g_account_manager->DeleteUserAllowedQos(
+          request->uid(), request->name(), request->partition(),
+          request->account(), request->value(), request->force());
+      break;
+    default:
+      break;
     }
   } else {
-    switch(request->modify_field()) {
-      case crane::grpc::ModifyField::AdminLevel:
-        modify_res = g_account_manager->ModifyAdminLevel(request->uid(), request->name(), request->value());
-        break;
-      case crane::grpc::ModifyField::Partition:
-        modify_res = g_account_manager->ModifyUserAllowedParition(request->type(), request->uid(), request->name(), request->account(), request->value());
-        break;
-      case crane::grpc::ModifyField::Qos:
-        modify_res = g_account_manager->ModifyUserAllowedQos(request->type(), request->uid(), request->name(), request->partition(), request->account(), request->value(), request->force());
-        break;
-      case crane::grpc::ModifyField::DefaultQos:
-        modify_res = g_account_manager->ModifyUserDefaultQos(request->uid(), request->name(), request->partition(), request->account(), request->value(), request->force());
-        break;
-      default:
-        break;
-     }
+    switch (request->modify_field()) {
+    case crane::grpc::ModifyField::AdminLevel:
+      modify_res = g_account_manager->ModifyAdminLevel(
+          request->uid(), request->name(), request->value());
+      break;
+    case crane::grpc::ModifyField::Partition:
+      modify_res = g_account_manager->ModifyUserAllowedParition(
+          request->type(), request->uid(), request->name(), request->account(),
+          request->value());
+      break;
+    case crane::grpc::ModifyField::Qos:
+      modify_res = g_account_manager->ModifyUserAllowedQos(
+          request->type(), request->uid(), request->name(),
+          request->partition(), request->account(), request->value(),
+          request->force());
+      break;
+    case crane::grpc::ModifyField::DefaultQos:
+      modify_res = g_account_manager->ModifyUserDefaultQos(
+          request->uid(), request->name(), request->partition(),
+          request->account(), request->value(), request->force());
+      break;
+    default:
+      break;
+    }
   }
-  
-  if (modify_res.ok) {
+
+  if (modify_res) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(modify_res.reason);
-  }
-
-  return grpc::Status::OK;
-}
-  
-grpc::Status CraneCtldServiceImpl::ModifyQos(grpc::ServerContext *context, 
-                         const crane::grpc::ModifyQosRequest *request,
-                         crane::grpc::ModifyQosReply *response) {
-  AccountManager::Result modify_res;
-  
-  modify_res = g_account_manager->ModifyQos(request->uid(), request->name(),
-      request->modify_field(), request->value());
-
-  if (modify_res.ok) {
-    response->set_ok(true);
-  } else {
-    response->set_ok(false);
-    response->set_reason(modify_res.reason);
+    response->set_reason(modify_res.error());
   }
 
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryAccountInfo(grpc::ServerContext *context,
-                                const crane::grpc::QueryAccountInfoRequest *request,
-                                crane::grpc::QueryAccountInfoReply *response) {
-    
-    std::unordered_map<std::string, Account> res_account_map;
-    auto modify_res = g_account_manager->QueryAccountInfo(request->uid(), request->name(), &res_account_map);
-    if (modify_res.ok) {
-      response->set_ok(true);
-    } else {
-      response->set_ok(false);
-      response->set_reason(modify_res.reason);
+grpc::Status CraneCtldServiceImpl::ModifyQos(
+    grpc::ServerContext *context, const crane::grpc::ModifyQosRequest *request,
+    crane::grpc::ModifyQosReply *response) {
+
+  auto modify_res =
+      g_account_manager->ModifyQos(request->uid(), request->name(),
+                                   request->modify_field(), request->value());
+
+  if (modify_res) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason(modify_res.error());
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryAccountInfoRequest *request,
+    crane::grpc::QueryAccountInfoReply *response) {
+  std::unordered_map<std::string, Account> res_account_map;
+  auto modify_res = g_account_manager->QueryAccountInfo(
+      request->uid(), request->name(), &res_account_map);
+  if (modify_res) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason(modify_res.error());
+  }
+
+  for (const auto &it : res_account_map) {
+    const auto &account = it.second;
+    // put the account info into grpc element
+    auto *account_info = response->mutable_account_list()->Add();
+    account_info->set_name(account.name);
+    account_info->set_description(account.description);
+
+    auto *user_list = account_info->mutable_users();
+    for (auto &&user : account.users) {
+      user_list->Add()->assign(user);
     }
 
-    for (const auto &it : res_account_map) {
-      const auto &account = it.second;
-      // put the account info into grpc element
-      auto *account_info = response->mutable_account_list()->Add();
-      account_info->set_name(account.name);
-      account_info->set_description(account.description);
+    auto *child_list = account_info->mutable_child_accounts();
+    for (auto &&child : account.child_accounts) {
+      child_list->Add()->assign(child);
+    }
+    account_info->set_parent_account(account.parent_account);
 
-      auto *user_list = account_info->mutable_users();
-      for (auto &&user : account.users) {
-        user_list->Add()->assign(user);
-      }
-
-      auto *child_list = account_info->mutable_child_accounts();
-      for (auto &&child : account.child_accounts) {
-        child_list->Add()->assign(child);
-      }
-      account_info->set_parent_account(account.parent_account);
-
-      auto *partition_list = account_info->mutable_allowed_partitions();
-      for (auto &&partition : account.allowed_partition) {
-        partition_list->Add()->assign(partition);
-      }
-      account_info->set_default_qos(account.default_qos);
-      account_info->set_blocked(account.blocked);
+    auto *partition_list = account_info->mutable_allowed_partitions();
+    for (auto &&partition : account.allowed_partition) {
+      partition_list->Add()->assign(partition);
+    }
+    account_info->set_default_qos(account.default_qos);
+    account_info->set_blocked(account.blocked);
 
       auto *allowed_qos_list = account_info->mutable_allowed_qos_list();
       for (auto &&qos : account.allowed_qos_list) {
@@ -524,44 +535,45 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(grpc::ServerContext *context
 
   return grpc::Status::OK;
 }
-  
-grpc::Status CraneCtldServiceImpl::QueryUserInfo(grpc::ServerContext *context,
-                             const crane::grpc::QueryUserInfoRequest *request,
-                             crane::grpc::QueryUserInfoReply *response) {
 
+grpc::Status CraneCtldServiceImpl::QueryUserInfo(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryUserInfoRequest *request,
+    crane::grpc::QueryUserInfoReply *response) {
   std::unordered_map<uid_t, User> res_user_map;
-  auto modify_res = g_account_manager->QueryUserInfo(request->uid(), request->name(), &res_user_map);
-  if (modify_res.ok) {
+  auto modify_res = g_account_manager->QueryUserInfo(
+      request->uid(), request->name(), &res_user_map);
+  if (modify_res) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(modify_res.reason);
+    response->set_reason(modify_res.error());
   }
 
-    for (const auto &it : res_user_map) {
-      const auto &user = it.second;
-      for (const auto &[account, item] : user.account_to_attrs_map) {
-        if (!request->account().empty() && account != request->account()) {
-          continue;
-        }
-        auto *user_info = response->mutable_user_list()->Add();
-        user_info->set_name(user.name);
-        user_info->set_uid(user.uid);
-        if (account == user.default_account) {
-          user_info->set_account(account + '*');
-        } else {
-          user_info->set_account(account);
-        }
-        user_info->set_admin_level(
-            (crane::grpc::UserInfo_AdminLevel)user.admin_level);
-        user_info->set_blocked(item.blocked);
+  for (const auto &it : res_user_map) {
+    const auto &user = it.second;
+    for (const auto &[account, item] : user.account_to_attrs_map) {
+      if (!request->account().empty() && account != request->account()) {
+        continue;
+      }
+      auto *user_info = response->mutable_user_list()->Add();
+      user_info->set_name(user.name);
+      user_info->set_uid(user.uid);
+      if (account == user.default_account) {
+        user_info->set_account(account + '*');
+      } else {
+        user_info->set_account(account);
+      }
+      user_info->set_admin_level(
+          (crane::grpc::UserInfo_AdminLevel)user.admin_level);
+      user_info->set_blocked(item.blocked);
 
-        auto *partition_qos_list =
-            user_info->mutable_allowed_partition_qos_list();
-        for (const auto &[par_name, pair] : item.allowed_partition_qos_map) {
-          auto *partition_qos = partition_qos_list->Add();
-          partition_qos->set_partition_name(par_name);
-          partition_qos->set_default_qos(pair.first);
+      auto *partition_qos_list =
+          user_info->mutable_allowed_partition_qos_list();
+      for (const auto &[par_name, pair] : item.allowed_partition_qos_map) {
+        auto *partition_qos = partition_qos_list->Add();
+        partition_qos->set_partition_name(par_name);
+        partition_qos->set_default_qos(pair.first);
 
           auto *qos_list = partition_qos->mutable_qos_list();
           for (const auto &qos : pair.second) {
@@ -578,18 +590,20 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(grpc::ServerContext *context,
 
   return grpc::Status::OK;
 }
-  
-grpc::Status CraneCtldServiceImpl::QueryQosInfo(grpc::ServerContext *context,
-                            const crane::grpc::QueryQosInfoRequest *request,
-                            crane::grpc::QueryQosInfoReply *response) {
+
+grpc::Status CraneCtldServiceImpl::QueryQosInfo(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryQosInfoRequest *request,
+    crane::grpc::QueryQosInfoReply *response) {
   std::unordered_map<std::string, Qos> res_qos_map;
 
-  auto modify_res = g_account_manager->QueryQosInfo(request->uid(), request->name(), &res_qos_map);
-  if (modify_res.ok) {
+  auto modify_res = g_account_manager->QueryQosInfo(
+      request->uid(), request->name(), &res_qos_map);
+  if (modify_res) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(modify_res.reason);
+    response->set_reason(modify_res.error());
   }
 
   auto *list = response->mutable_qos_list();
@@ -601,31 +615,32 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(grpc::ServerContext *context,
     qos_info->set_max_jobs_per_user(qos.max_jobs_per_user);
     qos_info->set_max_cpus_per_user(qos.max_cpus_per_user);
     qos_info->set_max_time_limit_per_task(
-          absl::ToInt64Seconds(qos.max_time_limit_per_task));
+        absl::ToInt64Seconds(qos.max_time_limit_per_task));
   }
 
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::DeleteAccount(grpc::ServerContext *context,
-                             const crane::grpc::DeleteAccountRequest *request, 
-                             crane::grpc::DeleteAccountReply *response) {
-    AccountManager::Result 
-    res = g_account_manager->DeleteAccount(request->uid(), request->name());
-    if (res.ok) {
-      response->set_ok(true);
-    } else {
-      response->set_ok(false);
-      response->set_reason(res.reason);
-    }
+grpc::Status CraneCtldServiceImpl::DeleteAccount(
+    grpc::ServerContext *context,
+    const crane::grpc::DeleteAccountRequest *request,
+    crane::grpc::DeleteAccountReply *response) {
+  auto res =
+      g_account_manager->DeleteAccount(request->uid(), request->name());
+  if (res) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason(res.error());
+  }
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::DeleteUser(grpc::ServerContext *context,
-                          const crane::grpc::DeleteUserRequest *request,
-                          crane::grpc::DeleteUserReply *response) {
-
-  auto res = g_account_manager->DeleteUser(request->uid(), request->name(), request->account());
+grpc::Status CraneCtldServiceImpl::DeleteUser(
+    grpc::ServerContext *context, const crane::grpc::DeleteUserRequest *request,
+    crane::grpc::DeleteUserReply *response) {
+  auto res = g_account_manager->DeleteUser(request->uid(), request->name(),
+                                           request->account());
   if (res) {
     response->set_ok(true);
   } else {
@@ -635,17 +650,16 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(grpc::ServerContext *context,
 
   return grpc::Status::OK;
 }
-                
-grpc::Status CraneCtldServiceImpl::DeleteQos(grpc::ServerContext *context,
-                         const crane::grpc::DeleteQosRequest *request,
-                         crane::grpc::DeleteQosReply *response) {
-  AccountManager::Result res;
-  res = g_account_manager->DeleteQos(request->uid(), request->name());
-  if (res.ok) {
+
+grpc::Status CraneCtldServiceImpl::DeleteQos(
+    grpc::ServerContext *context, const crane::grpc::DeleteQosRequest *request,
+    crane::grpc::DeleteQosReply *response) {
+  auto res = g_account_manager->DeleteQos(request->uid(), request->name());
+  if (res) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason(res.reason);
+    response->set_reason(res.error());
   }
 
   return grpc::Status::OK;
@@ -655,23 +669,28 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
     grpc::ServerContext *context,
     const crane::grpc::BlockAccountOrUserRequest *request,
     crane::grpc::BlockAccountOrUserReply *response) {
-  AccountManager::Result res;
+  AccountManager::SuccessOrErrCode res;
 
   switch (request->entity_type()) {
   case crane::grpc::Account:
-    res = g_account_manager->BlockAccount(request->uid(), request->name(), request->block());
-    response->set_ok(res.ok);
-    response->set_reason(res.reason);
+    res = g_account_manager->BlockAccount(request->uid(), request->name(),
+                                          request->block());
     break;
   case crane::grpc::User:
-    res = g_account_manager->BlockUser(request->uid(), request->name(), request->account(),
-                                       request->block());
-    response->set_ok(res.ok);
-    response->set_reason(res.reason);
+    res = g_account_manager->BlockUser(request->uid(), request->name(),
+                                       request->account(), request->block());
     break;
   default:
     break;
   }
+
+  if (res) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason(res.error());
+  }
+
   return grpc::Status::OK;
 }
 

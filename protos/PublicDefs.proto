@@ -327,6 +327,7 @@ enum ErrCode {
   ERR_USER_ALLOWED_ACCOUNT = 10006;  // User does not have permission for the account
   ERR_INVALID_ADMIN_LEVEL = 10007;  // Invalid permission level
   ERR_USER_ACCOUNT_MISMATCH = 10008; // User does not belong to the account
+  ERR_NO_ACCOUNT_SPECIFIED = 10009;
   
   ERR_INVALID_ACCOUNT = 20001;  // Invalid account
   ERR_DUPLICATE_ACCOUNT = 20002;  // Duplicate account insertion
@@ -349,11 +350,12 @@ enum ErrCode {
   ERR_DUPLICATE_QOS = 40009; // Account/user duplicate insertion.
   ERR_PARENT_ALLOWED_QOS = 40010; // Parent account does not include this QoS.
   ERR_SET_ALLOWED_QOS = 40011; // QoS '{}' is the default QoS of partition '{}', but not found in the new QoS list.
-  ERR_INVALID_DEFAULT_QOS = 40012; // Default QoS is not in the allowed QoS list
+  ERR_ALLOWED_DEFAULT_QOS = 40012; // Default QoS is not in the allowed QoS list
   ERR_DUPLICATE_DEFAULT_QOS = 40013; // Duplicate default QoS setting
   ERR_CHILD_HAS_DEFAULT_QOS = 40014; // Someone is using QoS '{}' as default QoS. Ignoring this constraint with forced deletion, the deleted default QoS is randomly replaced with one of the remaining items in the QoS list.
   ERR_CHILD_HAS_QOS = 40015; // QoS '{}' is used by some descendant node or itself of the account '{}'. Ignoring this constraint with forced operation.
-  
+  ERR_SET_DEFAULT_QOS = 40016; // Qos '{}' not in allowed qos list or is already the default qos
+
   ERR_UPDATE_DATABASE = 50001;  // Database update failed
  }
  
