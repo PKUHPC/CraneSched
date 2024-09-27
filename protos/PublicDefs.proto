@@ -266,12 +266,6 @@ message TaskInfo {
   google.protobuf.Duration elapsed_time = 37;
 }
 
-message JobCheckInfo{
-    uint32 taskid = 1;
-    string cgroup = 2;
-  }
-
-
 message PartitionInfo {
   string hostlist = 1;
   PartitionState state = 2;

@@ -296,6 +296,7 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
     if (!cg_spec_it) return false;
     res = cg_spec_it->res_in_node;
   }
+
   {
     auto cg_it = m_task_id_to_cg_map_[task_id];
     auto &cg_unique_ptr = *cg_it;
@@ -312,14 +313,10 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
     pcg = cg_unique_ptr.get();
     if (cg) *cg = pcg;
   }
-  // JobCheckHook
+
+  // JobMonitorHook
   if (g_config.Plugin.Enabled) {
-    std::vector<crane::grpc::JobCheckInfo> jobcheckinfolist;
-    crane::grpc::JobCheckInfo job_check_info;
-    job_check_info.set_taskid(task_id);
-    job_check_info.set_cgroup(pcg->GetCgroupString());
-    jobcheckinfolist.emplace_back(std::move(job_check_info));
-    g_plugin_client->JobCheckHookAsync(std::move(jobcheckinfolist));
+    g_plugin_client->JobMonitorHookAsync(task_id, pcg->GetCgroupString());
   }
 
   CRANE_TRACE(
