@@ -63,5 +63,4 @@ service CranePluginD {
   rpc StartHook(StartHookRequest) returns (StartHookReply);
   rpc EndHook(EndHookRequest) returns (EndHookReply);
   rpc JobMonitorHook(JobMonitorHookRequest) returns (JobMonitorHookReply);
-
 }
