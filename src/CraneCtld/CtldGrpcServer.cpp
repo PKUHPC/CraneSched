@@ -644,6 +644,10 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
       for (const auto &qos : account.allowed_qos_list) {
         allowed_qos_list->Add()->assign(qos);
       }
+
+      for (auto &coordinatorAccount : account.coordinators) {
+        account_info->add_coordinators(coordinatorAccount);
+      }
     }
     break;
   case crane::grpc::User:
@@ -743,6 +747,9 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
           for (const auto &qos : pair.second) {
             qos_list->Add()->assign(qos);
           }
+        }
+        for (auto &coordinatorAccount : user.coordinator_accounts) {
+          user_info->add_coordinator_accounts(coordinatorAccount);
         }
       }
     }
