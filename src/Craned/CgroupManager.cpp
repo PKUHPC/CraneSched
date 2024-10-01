@@ -23,9 +23,18 @@
 
 #include "CgroupManager.h"
 
+#include <dirent.h>
+#include <libcgroup.h>
+#include <sched.h>
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
 #include "CranedPublicDefs.h"
 #include "DeviceManager.h"
 #include "crane/PluginClient.h"
+#include "crane/Logger.h"
 #include "crane/String.h"
 
 namespace Craned {
@@ -42,83 +51,199 @@ int CgroupManager::Init() {
 
   // cgroup_set_loglevel(CGROUP_LOG_DEBUG);
 
-  void *handle = nullptr;
-  controller_data info{};
+  enum cg_setup_mode_t setup_mode;
+  setup_mode = cgroup_setup_mode();
+  switch (setup_mode) {
+  case CGROUP_MODE_LEGACY:
+    //("cgroup mode: Legacy\n");
+    cg_vision_ = CgroupConstant::CgroupVision::CGROUP_V1;
+    break;
+  case CGROUP_MODE_HYBRID:
+    //("cgroup mode: Hybrid\n");
+    cg_vision_ = CgroupConstant::CgroupVision::UNDEFINED;
+    break;
+  case CGROUP_MODE_UNIFIED:
+    //("cgroup mode: Unified\n");
+    cg_vision_ = CgroupConstant::CgroupVision::CGROUP_V2;
+    break;
+  default:
+    //("cgroup mode: Unknown\n");
+    break;
+  }
+
+
 
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;
 
   ControllerFlags NO_CONTROLLERS;
 
-  int ret = cgroup_get_all_controller_begin(&handle, &info);
-  while (ret == 0) {
-    if (info.name == GetControllerStringView(Controller::MEMORY_CONTROLLER)) {
-      m_mounted_controllers_ |=
-          (info.hierarchy != 0) ? ControllerFlags{Controller::MEMORY_CONTROLLER}
-                                : NO_CONTROLLERS;
+  if (GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V1) {
+    void *handle = nullptr;
+    controller_data info{};
+    int ret = cgroup_get_all_controller_begin(&handle, &info);
+    while (ret == 0) {
+      if (info.name == GetControllerStringView(Controller::MEMORY_CONTROLLER)) {
+        m_mounted_controllers_ |=
+            (info.hierarchy != 0)
+                ? ControllerFlags{Controller::MEMORY_CONTROLLER}
+                : NO_CONTROLLERS;
 
-    } else if (info.name ==
-               GetControllerStringView(Controller::CPUACCT_CONTROLLER)) {
-      m_mounted_controllers_ |=
-          (info.hierarchy != 0)
-              ? ControllerFlags{Controller::CPUACCT_CONTROLLER}
-              : NO_CONTROLLERS;
+      } else if (info.name ==
+                 GetControllerStringView(Controller::CPUACCT_CONTROLLER)) {
+        m_mounted_controllers_ |=
+            (info.hierarchy != 0)
+                ? ControllerFlags{Controller::CPUACCT_CONTROLLER}
+                : NO_CONTROLLERS;
 
-    } else if (info.name ==
-               GetControllerStringView(Controller::FREEZE_CONTROLLER)) {
-      m_mounted_controllers_ |=
-          (info.hierarchy != 0) ? ControllerFlags{Controller::FREEZE_CONTROLLER}
-                                : NO_CONTROLLERS;
+      } else if (info.name ==
+                 GetControllerStringView(Controller::FREEZE_CONTROLLER)) {
+        m_mounted_controllers_ |=
+            (info.hierarchy != 0)
+                ? ControllerFlags{Controller::FREEZE_CONTROLLER}
+                : NO_CONTROLLERS;
 
-    } else if (info.name ==
-               GetControllerStringView(Controller::BLOCK_CONTROLLER)) {
-      m_mounted_controllers_ |=
-          (info.hierarchy != 0) ? ControllerFlags{Controller::BLOCK_CONTROLLER}
-                                : NO_CONTROLLERS;
+      } else if (info.name ==
+                 GetControllerStringView(Controller::BLOCK_CONTROLLER)) {
+        m_mounted_controllers_ |=
+            (info.hierarchy != 0)
+                ? ControllerFlags{Controller::BLOCK_CONTROLLER}
+                : NO_CONTROLLERS;
 
-    } else if (info.name ==
-               GetControllerStringView(Controller::CPU_CONTROLLER)) {
-      m_mounted_controllers_ |=
-          (info.hierarchy != 0) ? ControllerFlags{Controller::CPU_CONTROLLER}
-                                : NO_CONTROLLERS;
-    } else if (info.name ==
-               GetControllerStringView(Controller::DEVICES_CONTROLLER)) {
-      m_mounted_controllers_ |=
-          (info.hierarchy != 0)
-              ? ControllerFlags{Controller::DEVICES_CONTROLLER}
-              : NO_CONTROLLERS;
+      } else if (info.name ==
+                 GetControllerStringView(Controller::CPU_CONTROLLER)) {
+        m_mounted_controllers_ |=
+            (info.hierarchy != 0) ? ControllerFlags{Controller::CPU_CONTROLLER}
+                                  : NO_CONTROLLERS;
+      } else if (info.name ==
+                 GetControllerStringView(Controller::DEVICES_CONTROLLER)) {
+        m_mounted_controllers_ |=
+            (info.hierarchy != 0)
+                ? ControllerFlags{Controller::DEVICES_CONTROLLER}
+                : NO_CONTROLLERS;
+      }
+      ret = cgroup_get_all_controller_next(&handle, &info);
     }
-    ret = cgroup_get_all_controller_next(&handle, &info);
-  }
-  if (handle) {
-    cgroup_get_all_controller_end(&handle);
-  }
+    if (handle) {
+      cgroup_get_all_controller_end(&handle);
+    }
 
-  if (!Mounted(Controller::BLOCK_CONTROLLER)) {
-    CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
+
+    if (!Mounted(Controller::BLOCK_CONTROLLER)) {
+      CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
+    }
+    if (!Mounted(Controller::FREEZE_CONTROLLER)) {
+      CRANE_WARN(
+          "Cgroup controller for process management is not available.\n");
+    }
+    if (!Mounted(Controller::CPUACCT_CONTROLLER)) {
+      CRANE_WARN("Cgroup controller for CPU accounting is not available.\n");
+    }
+    if (!Mounted(Controller::MEMORY_CONTROLLER)) {
+      CRANE_WARN("Cgroup controller for memory accounting is not available.\n");
+    }
+    if (!Mounted(Controller::CPU_CONTROLLER)) {
+      CRANE_WARN("Cgroup controller for CPU is not available.\n");
+    }
+    if (!Mounted(Controller::DEVICES_CONTROLLER)) {
+      CRANE_WARN("Cgroup controller for DEVICES is not available.\n");
+    }
+    if (ret != ECGEOF) {
+      CRANE_WARN("Error iterating through cgroups mount information: {}\n",
+                 cgroup_strerror(ret));
+      return -1;
+    }
   }
-  if (!Mounted(Controller::FREEZE_CONTROLLER)) {
-    CRANE_WARN("Cgroup controller for process management is not available.\n");
-  }
-  if (!Mounted(Controller::CPUACCT_CONTROLLER)) {
-    CRANE_WARN("Cgroup controller for CPU accounting is not available.\n");
-  }
-  if (!Mounted(Controller::MEMORY_CONTROLLER)) {
-    CRANE_WARN("Cgroup controller for memory accounting is not available.\n");
-  }
-  if (!Mounted(Controller::CPU_CONTROLLER)) {
-    CRANE_WARN("Cgroup controller for CPU is not available.\n");
-  }
-  if (!Mounted(Controller::DEVICES_CONTROLLER)) {
-    CRANE_WARN("Cgroup controller for DEVICES is not available.\n");
-  }
-  if (ret != ECGEOF) {
-    CRANE_WARN("Error iterating through cgroups mount information: {}\n",
-               cgroup_strerror(ret));
+  // cgroup don't use /proc/cgroups to manage controller
+  else if ((GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V2)) {
+    struct cgroup *root = nullptr;
+    int ret;
+    struct cgroup_controller *group_controller = nullptr;
+    if ((root = cgroup_new_cgroup("/")) == nullptr) {
+      CRANE_WARN("Unable to construct new root cgroup object.");
+      return -1;
+    }
+    if ((ret = cgroup_get_cgroup(root)) != 0) {
+      CRANE_WARN("Error : root cgroup not exist.");
+      return -1;
+    }
+
+    if ((group_controller = cgroup_get_controller(
+             root,
+             GetControllerStringView(Controller::CPU_CONTROLLER_V2).data())) !=
+        nullptr) {
+      m_mounted_controllers_ |= ControllerFlags{Controller::CPU_CONTROLLER_V2};
+      group_controller = nullptr;
+    }
+    if ((group_controller = cgroup_get_controller(
+             root, GetControllerStringView(Controller::MEMORY_CONTORLLER_V2)
+                       .data())) != nullptr) {
+      m_mounted_controllers_ |=
+          ControllerFlags{Controller::MEMORY_CONTORLLER_V2};
+      group_controller = nullptr;
+    }
+    if ((group_controller = cgroup_get_controller(
+             root, GetControllerStringView(Controller::CPUSET_CONTROLLER_V2)
+                       .data())) != nullptr) {
+      m_mounted_controllers_ |=
+          ControllerFlags{Controller::CPUSET_CONTROLLER_V2};
+      group_controller = nullptr;
+    }
+    if ((group_controller = cgroup_get_controller(
+             root,
+             GetControllerStringView(Controller::IO_CONTROLLER_V2).data())) !=
+        nullptr) {
+      m_mounted_controllers_ |= ControllerFlags{Controller::IO_CONTROLLER_V2};
+      group_controller = nullptr;
+    }
+    if ((group_controller = cgroup_get_controller(
+             root,
+             GetControllerStringView(Controller::PIDS_CONTROLLER_V2).data())) !=
+        nullptr) {
+      m_mounted_controllers_ |= ControllerFlags{Controller::PIDS_CONTROLLER_V2};
+      group_controller = nullptr;
+    }
+
+
+    if (!Mounted(Controller::CPU_CONTROLLER_V2)) {
+      CRANE_WARN("Cgroup controller for CPU is not available.\n");
+    }
+    if (!Mounted(Controller::MEMORY_CONTORLLER_V2)) {
+      CRANE_WARN("Cgroup controller for memory is not available.\n");
+    }
+    if (!Mounted(Controller::CPUSET_CONTROLLER_V2)) {
+      CRANE_WARN("Cgroup controller for cpuset is not available.\n");
+    }
+    if (!Mounted(Controller::IO_CONTROLLER_V2)) {
+      CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
+    }
+    if (!Mounted(Controller::PIDS_CONTROLLER_V2)) {
+      CRANE_WARN("Cgroup controller for pids is not available.\n");
+    }
+
+    // root cgroup controller can't be change or created
+
+    // if (!Mounted(Controller::CGROUP_CONTOLLER_V2)) {
+    //   CRANE_WARN("Cgroup controller for cgroup is not available.\n");
+    // }
+
+    // if (ret != ECGEOF) {
+    //   CRANE_WARN("Error iterating through cgroups mount information: {}\n",
+    //              cgroup_strerror(ret));
+    //   return -1;
+    // }
+  } else {
+    CRANE_WARN("Error Cgroup vision is not supported");
     return -1;
   }
+  if(cg_vision_ == CgroupConstant::CgroupVision::CGROUP_V1){
+    RmAllTaskCgroups_();
+  } else if(cg_vision_ == CgroupConstant::CgroupVision::CGROUP_V2){
+    RmAllTaskCgroupsV2_();
+  } else {
+    CRANE_WARN("Error Cgroup vision is not supported");
+  }
 
-  RmAllTaskCgroups_();
 
   return 0;
 }
@@ -168,7 +293,7 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
                  controller_str);
       return required ? 1 : 0;
     } else {
-      // Try to turn on hierarchical memory accounting.
+      // Try to turn on hierarchical memory accounting in V1. 
       if (controller == CgroupConstant::Controller::MEMORY_CONTROLLER) {
         if ((err = cgroup_add_value_bool(p_raw_controller,
                                          "memory.use_hierarchy", true))) {
@@ -220,6 +345,8 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
   }
 
   // Work through the various controllers.
+
+  if(GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V1){
   //  if ((preferred_controllers & Controller::CPUACCT_CONTROLLER) &&
   //      initialize_controller(
   //          *native_cgroup, Controller::CPUACCT_CONTROLLER,
@@ -227,48 +354,89 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
   //          changed_cgroup)) {
   //    return nullptr;
   //  }
-  if ((preferred_controllers & Controller::MEMORY_CONTROLLER) &&
-      InitializeController_(
-          *native_cgroup, Controller::MEMORY_CONTROLLER,
-          required_controllers & Controller::MEMORY_CONTROLLER, has_cgroup,
-          changed_cgroup)) {
-    return nullptr;
+    if ((preferred_controllers & Controller::MEMORY_CONTROLLER) &&
+        InitializeController_(
+            *native_cgroup, Controller::MEMORY_CONTROLLER,
+            required_controllers & Controller::MEMORY_CONTROLLER, has_cgroup,
+            changed_cgroup)) {
+      return nullptr;
+      
+    }
+    if ((preferred_controllers & Controller::FREEZE_CONTROLLER) &&
+        InitializeController_(
+            *native_cgroup, Controller::FREEZE_CONTROLLER,
+            required_controllers & Controller::FREEZE_CONTROLLER, has_cgroup,
+            changed_cgroup)) {
+      return nullptr;
+    }
+    //  if ((preferred_controllers & Controller::BLOCK_CONTROLLER) &&
+    //      initialize_controller(*native_cgroup, Controller::BLOCK_CONTROLLER,
+    //                            required_controllers &
+    //                            Controller::BLOCK_CONTROLLER, has_cgroup,
+    //                            changed_cgroup)) {
+    //    return nullptr;
+    //  }
+    if ((preferred_controllers & Controller::CPU_CONTROLLER) &&
+        InitializeController_(*native_cgroup, Controller::CPU_CONTROLLER,
+                              required_controllers & Controller::CPU_CONTROLLER,
+                              has_cgroup, changed_cgroup)) {
+      return nullptr;
+    }
+    if ((preferred_controllers & Controller::DEVICES_CONTROLLER) &&
+        InitializeController_(
+            *native_cgroup, Controller::DEVICES_CONTROLLER,
+            required_controllers & Controller::DEVICES_CONTROLLER, has_cgroup,
+            changed_cgroup)) {
+      return nullptr;
+    }
+  } else if(GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V2){
+    if ((preferred_controllers & Controller::CPU_CONTROLLER_V2) &&
+        InitializeController_(
+            *native_cgroup, Controller::CPU_CONTROLLER_V2,
+            required_controllers & Controller::CPU_CONTROLLER_V2, has_cgroup,
+            changed_cgroup)) {
+      return nullptr;
+    }
+    if ((preferred_controllers & Controller::MEMORY_CONTORLLER_V2) &&
+        InitializeController_(
+            *native_cgroup, Controller::MEMORY_CONTORLLER_V2,
+            required_controllers & Controller::MEMORY_CONTORLLER_V2, has_cgroup,
+            changed_cgroup)) {
+      return nullptr;
+    }
+    if ((preferred_controllers & Controller::IO_CONTROLLER_V2) &&
+        InitializeController_(
+            *native_cgroup, Controller::IO_CONTROLLER_V2,
+            required_controllers & Controller::IO_CONTROLLER_V2, has_cgroup,
+            changed_cgroup)) {
+      return nullptr;
+    }
+    if ((preferred_controllers & Controller::CPUSET_CONTROLLER_V2) &&
+        InitializeController_(
+            *native_cgroup, Controller::CPUSET_CONTROLLER_V2,
+            required_controllers & Controller::CPUSET_CONTROLLER_V2, has_cgroup,
+            changed_cgroup)) {
+      return nullptr;
+    }
+    if ((preferred_controllers & Controller::PIDS_CONTROLLER_V2) &&
+        InitializeController_(
+            *native_cgroup, Controller::PIDS_CONTROLLER_V2,
+            required_controllers & Controller::PIDS_CONTROLLER_V2, has_cgroup,
+            changed_cgroup)) {
+      return nullptr;
+    }
+
+    
   }
-  if ((preferred_controllers & Controller::FREEZE_CONTROLLER) &&
-      InitializeController_(
-          *native_cgroup, Controller::FREEZE_CONTROLLER,
-          required_controllers & Controller::FREEZE_CONTROLLER, has_cgroup,
-          changed_cgroup)) {
-    return nullptr;
-  }
-  //  if ((preferred_controllers & Controller::BLOCK_CONTROLLER) &&
-  //      initialize_controller(*native_cgroup, Controller::BLOCK_CONTROLLER,
-  //                            required_controllers &
-  //                            Controller::BLOCK_CONTROLLER, has_cgroup,
-  //                            changed_cgroup)) {
-  //    return nullptr;
-  //  }
-  if ((preferred_controllers & Controller::CPU_CONTROLLER) &&
-      InitializeController_(*native_cgroup, Controller::CPU_CONTROLLER,
-                            required_controllers & Controller::CPU_CONTROLLER,
-                            has_cgroup, changed_cgroup)) {
-    return nullptr;
-  }
-  if ((preferred_controllers & Controller::DEVICES_CONTROLLER) &&
-      InitializeController_(
-          *native_cgroup, Controller::DEVICES_CONTROLLER,
-          required_controllers & Controller::DEVICES_CONTROLLER, has_cgroup,
-          changed_cgroup)) {
-    return nullptr;
-  }
+
 
   int err;
   if (!has_cgroup) {
     if ((err = cgroup_create_cgroup(native_cgroup, 0))) {
       // Only record at D_ALWAYS if any cgroup mounts are available.
       CRANE_WARN(
-          "Unable to create cgroup {}. Cgroup functionality will not work: {}",
-          cgroup_string.c_str(), cgroup_strerror(err));
+          "Unable to create cgroup {}. Cgroup functionality will not work",
+          cgroup_string.c_str());
       return nullptr;
     }
   } else if (changed_cgroup && (err = cgroup_modify_cgroup(native_cgroup))) {
@@ -278,7 +446,15 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
         cgroup_string.c_str(), err, cgroup_strerror(err));
   }
 
-  return std::make_unique<Cgroup>(cgroup_string, native_cgroup);
+  if (GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V1) {
+    return std::make_unique<CgroupV1>(cgroup_string, native_cgroup);
+  } else if (GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V2) {
+    return std::make_unique<CgroupV2>(cgroup_string, native_cgroup);
+  } else {
+    CRANE_WARN("Unable to create cgroup {}. Cgroup vision is not supported",
+               cgroup_string.c_str());
+    return nullptr;
+  }
 }
 
 bool CgroupManager::CheckIfCgroupForTasksExists(task_id_t task_id) {
@@ -298,13 +474,24 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
   {
     auto cg_it = m_task_id_to_cg_map_[task_id];
     auto &cg_unique_ptr = *cg_it;
-    if (!cg_unique_ptr)
-      cg_unique_ptr = CgroupManager::CreateOrOpen_(
-          CgroupStrByTaskId_(task_id),
-          NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
-              CgroupConstant::Controller::MEMORY_CONTROLLER |
-              CgroupConstant::Controller::DEVICES_CONTROLLER,
-          NO_CONTROLLER_FLAG, false);
+    if (!cg_unique_ptr){
+      if (GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V1) {
+        cg_unique_ptr = CgroupManager::CreateOrOpen_(
+            CgroupStrByTaskId_(task_id),
+            NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
+                CgroupConstant::Controller::MEMORY_CONTROLLER |
+                CgroupConstant::Controller::DEVICES_CONTROLLER,
+            NO_CONTROLLER_FLAG, false);
+      } else if (GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V2) {
+        cg_unique_ptr = CgroupManager::CreateOrOpen_(
+            CgroupStrByTaskId_(task_id),
+            NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER_V2 |
+                CgroupConstant::Controller::MEMORY_CONTORLLER_V2 ,
+            NO_CONTROLLER_FLAG, false);
+      } else {
+        CRANE_WARN("cgroup vision is not supported.");
+      }
+    }
 
     if (!cg_unique_ptr) return false;
 
@@ -472,6 +659,47 @@ void CgroupManager::RmAllTaskCgroupsUnderController_(
   }
 
   if (handle) cgroup_walk_tree_end(&handle);
+}
+
+void CgroupManager::RmAllTaskCgroupsV2_(){
+
+  RmCgroupsV2_(CgroupConstant::RootCgroupFullPath, CgroupConstant::kTaskCgPathPrefix);
+
+}
+
+void CgroupManager::RmCgroupsV2_(const std::string& root_cgroup_path,const std::string& match_str){
+  DIR *dir = nullptr;
+  if((dir = opendir(root_cgroup_path.c_str())) == nullptr){
+    CRANE_ERROR("Failed to open cgroup dir {}", root_cgroup_path);
+  }
+  struct dirent * entry;
+  std::vector<std::string> cgroup_full_path_to_delete;
+  while ((entry = readdir(dir)) != nullptr) {
+      // Skip "." and ".." directories
+      if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+          continue;
+      }
+
+      std::string dir_name = entry->d_name;
+      std::string full_path = root_cgroup_path + "/" + dir_name;
+
+      // Check if it's a directory and if it contains the match_str
+      struct stat info;
+      if (stat(full_path.c_str(), &info) == 0 && S_ISDIR(info.st_mode)) {
+          if (dir_name.find(match_str) != std::string::npos) {
+              cgroup_full_path_to_delete.push_back(full_path);
+          }
+      }
+  }
+  closedir(dir);
+  for(const auto & tf : cgroup_full_path_to_delete){
+      int err = rmdir(tf.c_str());
+      if(err != 0){
+        CRANE_ERROR("Failed to remove cgroup {}: {}", tf.c_str(),
+              strerror(errno));
+      }
+  }
+
 }
 
 bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
@@ -740,25 +968,25 @@ Cgroup::~Cgroup() {
   }
 }
 
-bool Cgroup::SetMemorySoftLimitBytes(uint64_t memory_bytes) {
+bool CgroupV1::SetMemorySoftLimitBytes(uint64_t memory_bytes) {
   return SetControllerValue(
       CgroupConstant::Controller::MEMORY_CONTROLLER,
       CgroupConstant::ControllerFile::MEMORY_SOFT_LIMIT_BYTES, memory_bytes);
 }
 
-bool Cgroup::SetMemorySwLimitBytes(uint64_t mem_bytes) {
+bool CgroupV1::SetMemorySwLimitBytes(uint64_t mem_bytes) {
   return SetControllerValue(
       CgroupConstant::Controller::MEMORY_CONTROLLER,
       CgroupConstant::ControllerFile::MEMORY_MEMSW_LIMIT_IN_BYTES, mem_bytes);
 }
 
-bool Cgroup::SetMemoryLimitBytes(uint64_t memory_bytes) {
+bool CgroupV1::SetMemoryLimitBytes(uint64_t memory_bytes) {
   return SetControllerValue(CgroupConstant::Controller::MEMORY_CONTROLLER,
                             CgroupConstant::ControllerFile::MEMORY_LIMIT_BYTES,
                             memory_bytes);
 }
 
-bool Cgroup::SetCpuShares(uint64_t share) {
+bool CgroupV1::SetCpuShares(uint64_t share) {
   return SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER,
                             CgroupConstant::ControllerFile::CPU_SHARES, share);
 }
@@ -773,7 +1001,7 @@ bool Cgroup::SetCpuShares(uint64_t share) {
  * See
  * https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/6/html/resource_management_guide/sec-cpu
  */
-bool Cgroup::SetCpuCoreLimit(double core_num) {
+bool CgroupV1::SetCpuCoreLimit(double core_num) {
   constexpr uint32_t base = 1 << 16;
 
   bool ret;
@@ -787,7 +1015,7 @@ bool Cgroup::SetCpuCoreLimit(double core_num) {
   return ret;
 }
 
-bool Cgroup::SetBlockioWeight(uint64_t weight) {
+bool CgroupV1::SetBlockioWeight(uint64_t weight) {
   return SetControllerValue(CgroupConstant::Controller::BLOCK_CONTROLLER,
                             CgroupConstant::ControllerFile::BLOCKIO_WEIGHT,
                             weight);
@@ -948,7 +1176,7 @@ bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
   return true;
 }
 
-bool Cgroup::KillAllProcesses() {
+bool CgroupV1::KillAllProcesses() {
   using namespace CgroupConstant::Internal;
 
   const char *controller = CgroupConstant::GetControllerStringView(
@@ -976,7 +1204,7 @@ bool Cgroup::KillAllProcesses() {
   }
 }
 
-bool Cgroup::Empty() {
+bool CgroupV1::Empty() {
   using namespace CgroupConstant::Internal;
 
   const char *controller = CgroupConstant::GetControllerStringView(
@@ -999,8 +1227,8 @@ bool Cgroup::Empty() {
     return false;
   }
 }
-bool Cgroup::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
-                             bool set_read, bool set_write, bool set_mknod) {
+bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+                               bool set_read, bool set_write, bool set_mknod) {
   std::string op;
   if (set_read) op += "r";
   if (set_write) op += "w";
@@ -1032,6 +1260,124 @@ bool Cgroup::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
                             CgroupConstant::ControllerFile::DEVICES_DENY,
                             deny_limits);
   return ok;
+}
+
+/**
+ *
+ */
+
+bool CgroupV2::SetCpuCoreLimit(double core_num) {
+  constexpr uint32_t period = 1 << 16;
+  uint64_t quota = static_cast<uint64_t>(period * core_num);
+  std::string cpuMaxValue =
+      std::to_string(quota) + " " + std::to_string(period);
+  return SetControllerStr(CgroupConstant::Controller::CPU_CONTROLLER_V2,
+                          CgroupConstant::ControllerFile::CPU_MAX_V2,
+                          cpuMaxValue.c_str());
+}
+
+bool CgroupV2::SetCpuShares(uint64_t share) {
+  return SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER_V2,
+                            CgroupConstant::ControllerFile::CPU_WEIGHT_V2,
+                            share);
+}
+
+bool CgroupV2::SetMemoryLimitBytes(uint64_t memory_bytes) {
+  return SetControllerValue(CgroupConstant::Controller::MEMORY_CONTORLLER_V2,
+                            CgroupConstant::ControllerFile::MEMORY_MAX_V2,
+                            memory_bytes);
+}
+
+bool CgroupV2::SetMemorySoftLimitBytes(uint64_t memory_bytes) {
+  return SetControllerValue(CgroupConstant::Controller::MEMORY_CONTORLLER_V2,
+                            CgroupConstant::ControllerFile::MEMORY_HIGH_V2,
+                            memory_bytes);
+}
+
+bool CgroupV2::SetMemorySwLimitBytes(uint64_t memory_bytes) {
+  return SetControllerValue(CgroupConstant::Controller::MEMORY_CONTORLLER_V2,
+                            CgroupConstant::ControllerFile::MEMORY_SWAP_MAX_V2,
+                            memory_bytes);
+}
+
+bool CgroupV2::SetBlockioWeight(uint64_t weight) {
+  return SetControllerValue(CgroupConstant::Controller::IO_CONTROLLER_V2,
+                            CgroupConstant::ControllerFile::IO_WEIGHT_V2,
+                            weight);
+}
+
+bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+                               bool set_read, bool set_write, bool set_mknod) {
+  // TODO
+  return true;
+}
+
+bool CgroupV2::KillAllProcesses() {
+  using namespace CgroupConstant::Internal;
+
+  const char *controller = CgroupConstant::GetControllerStringView(
+                               CgroupConstant::Controller::CPU_CONTROLLER_V2)
+                               .data();
+
+  const char *cg_name = m_cgroup_path_.c_str();
+
+  int size, rc;
+  pid_t *pids;
+
+  rc = cgroup_get_procs(const_cast<char *>(cg_name),
+                        const_cast<char *>(controller), &pids, &size);
+
+  if (rc == 0) {
+    for (int i = 0; i < size; ++i) {
+      kill(pids[i], SIGKILL);
+    }
+    free(pids);
+    return true;
+  } else {
+    CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
+                cgroup_strerror(rc));
+    return false;
+  }
+}
+
+bool CgroupV2::Empty() {
+  using namespace CgroupConstant::Internal;
+
+  const char *controller = CgroupConstant::GetControllerStringView(
+                               CgroupConstant::Controller::CPU_CONTROLLER_V2)
+                               .data();
+
+  const char *cg_name = m_cgroup_path_.c_str();
+
+  int size, rc;
+  pid_t *pids;
+
+  rc = cgroup_get_procs(const_cast<char *>(cg_name),
+                        const_cast<char *>(controller), &pids, &size);
+  if (rc == 0) {
+    free(pids);
+    return size == 0;
+  } else {
+    CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
+                cgroup_strerror(rc));
+    return false;
+  }
+}
+
+bool CgroupV2::MigrateProcIn(pid_t pid) {
+  using CgroupConstant::Controller;
+  using CgroupConstant::GetControllerStringView;
+  int err;
+after_migrate:
+
+  //  orig_cgroup = NULL;
+  err = cgroup_attach_task_pid(m_cgroup_, pid);
+  if (err != 0) {
+    CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}", pid,
+               m_cgroup_path_.c_str(), err, cgroup_strerror(err));
+  }
+end:
+  return err == 0;
 }
 
 bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
