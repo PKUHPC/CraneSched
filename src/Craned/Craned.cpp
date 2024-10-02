@@ -14,6 +14,7 @@
  * See the Mulan PSL v2 for more details.
  */
 
+#include "CgroupManager.h"
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
@@ -606,12 +607,20 @@ void GlobalVariableInit() {
   using Craned::CgroupConstant::Controller;
   g_cg_mgr = std::make_unique<Craned::CgroupManager>();
   g_cg_mgr->Init();
-  if (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
+  if (g_cg_mgr->GetCgroupVision() == Craned::CgroupConstant::CgroupVision::CGROUP_V1 && 
+      (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
       !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER) ||
-      !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER)) {
+      !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER))) {
     CRANE_ERROR("Failed to initialize cpu,memory,devices cgroups controller.");
     std::exit(1);
   }
+  if (g_cg_mgr->GetCgroupVision() == Craned::CgroupConstant::CgroupVision::CGROUP_V2 && 
+      (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER_V2) ||
+      !g_cg_mgr->Mounted(Controller::MEMORY_CONTORLLER_V2))) {
+    CRANE_ERROR("Failed to initialize cpu,memory,devices cgroups controller.");
+    std::exit(1);
+  }
+
 
   g_thread_pool =
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
