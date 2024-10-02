@@ -243,8 +243,6 @@ int CgroupManager::Init() {
   } else {
     CRANE_WARN("Error Cgroup vision is not supported");
   }
-
-
   return 0;
 }
 
@@ -1413,7 +1411,7 @@ bool DedicatedResourceAllocator::Allocate(
     for (const auto &[__, slots] : type_slots_map.type_slots_map())
       all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
   };
-
+  
   if (!cg->SetDeviceAccess(all_request_slots, true, true, true)) return false;
   return true;
 }
