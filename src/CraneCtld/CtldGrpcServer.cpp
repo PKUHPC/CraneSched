@@ -641,12 +641,13 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
       account_info->set_blocked(account.blocked);
 
       auto *allowed_qos_list = account_info->mutable_allowed_qos_list();
-      for (const auto &qos : account.allowed_qos_list) {
+      for (auto &&qos : account.allowed_qos_list) {
         allowed_qos_list->Add()->assign(qos);
       }
 
-      for (auto &coordinatorAccount : account.coordinators) {
-        account_info->add_coordinators(coordinatorAccount);
+      auto *coordinators = account_info->mutable_coordinators();
+      for (auto &&coord : account.coordinators) {
+        coordinators->Add()->assign(coord);
       }
     }
     break;
@@ -748,8 +749,10 @@ grpc::Status CraneCtldServiceImpl::QueryEntityInfo(
             qos_list->Add()->assign(qos);
           }
         }
-        for (auto &coordinatorAccount : user.coordinator_accounts) {
-          user_info->add_coordinator_accounts(coordinatorAccount);
+
+        auto *coordinated_accounts = user_info->mutable_coordinator_accounts();
+        for (auto &&coord : user.coordinator_accounts) {
+          coordinated_accounts->Add()->assign(coord);
         }
       }
     }
