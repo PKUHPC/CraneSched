@@ -24,6 +24,7 @@
 #include "CgroupManager.h"
 #include "crane/OS.h"
 #include "protos/CraneSubprocess.pb.h"
+#include "protos/PublicDefs.pb.h"
 
 namespace Craned {
 

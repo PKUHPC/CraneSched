@@ -123,7 +123,7 @@ RejectJobsBeyondCapacity: false
 
 Plugin:
   # Toggle the plugin module in CraneSched
-  Enabled: true
+  Enabled: false
   # Relative to CraneBaseDir
   PlugindSockPath: "cplugind/cplugind.sock"
   # Debug level of Plugind

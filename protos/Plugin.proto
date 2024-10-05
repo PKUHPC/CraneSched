@@ -49,9 +49,18 @@ message EndHookReply {
   repeated TaskIdReply result = 1;
 }
 
+message JobMonitorHookRequest {
+  uint32 task_id = 1;
+  string cgroup = 2;
+}
+
+message JobMonitorHookReply {
+  bool ok = 1;
+}
 
 service CranePluginD {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */  
   rpc StartHook(StartHookRequest) returns (StartHookReply);
   rpc EndHook(EndHookRequest) returns (EndHookReply);
+  rpc JobMonitorHook(JobMonitorHookRequest) returns (JobMonitorHookReply);
 }

@@ -27,6 +27,7 @@
 #include <thread>
 #include <vector>
 
+#include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 #include "protos/Plugin.grpc.pb.h"
@@ -47,7 +48,7 @@ class PluginClient {
   enum class HookType {
     START,
     END,
-
+    JOB_MONITOR,
     HookTypeCount,
   };
 
@@ -61,6 +62,7 @@ class PluginClient {
   // These functions are used to add HookEvent into the event queue.
   void StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
   void EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
+  void JobMonitorHookAsync(task_id_t task_id, std::string cgroup_path);
 
  private:
   // HookDispatchFunc is a function pointer type that handles different
@@ -71,6 +73,8 @@ class PluginClient {
                               google::protobuf::Message* msg);
   grpc::Status SendEndHook_(grpc::ClientContext* context,
                             google::protobuf::Message* msg);
+  grpc::Status SendJobMonitorHook_(grpc::ClientContext* context,
+                                   google::protobuf::Message* msg);
 
   void AsyncSendThread_();
 
@@ -85,8 +89,9 @@ class PluginClient {
   // Use this array to dispatch the hook event to the corresponding function in
   // O(1) time.
   static constexpr std::array<HookDispatchFunc, size_t(HookType::HookTypeCount)>
-      s_hook_dispatch_funcs_{
-          {&PluginClient::SendStartHook_, &PluginClient::SendEndHook_}};
+      s_hook_dispatch_funcs_{{&PluginClient::SendStartHook_,
+                              &PluginClient::SendEndHook_,
+                              &PluginClient::SendJobMonitorHook_}};
 };
 
 }  // namespace plugin

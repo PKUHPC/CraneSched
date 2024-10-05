@@ -33,8 +33,10 @@
 
 #include "crane/GrpcHelper.h"
 #include "crane/Logger.h"
+#include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
+#include "protos/Plugin.pb.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace plugin {
@@ -145,6 +147,18 @@ grpc::Status PluginClient::SendEndHook_(grpc::ClientContext* context,
   return m_stub_->EndHook(context, *request, &reply);
 }
 
+grpc::Status PluginClient::SendJobMonitorHook_(grpc::ClientContext* context,
+                                               google::protobuf::Message* msg) {
+  using crane::grpc::plugin::JobMonitorHookReply;
+  using crane::grpc::plugin::JobMonitorHookRequest;
+
+  auto request = dynamic_cast<JobMonitorHookRequest*>(msg);
+  JobMonitorHookReply reply;
+
+  CRANE_TRACE("[Plugin] Sending JobMonitorHook.");
+  return m_stub_->JobMonitorHook(context, *request, &reply);
+}
+
 void PluginClient::StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
   auto request = std::make_unique<crane::grpc::plugin::StartHookRequest>();
   auto* task_list = request->mutable_task_info_list();
@@ -172,6 +186,18 @@ void PluginClient::EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
 
   HookEvent e{HookType::END,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
+  m_event_queue_.enqueue(std::move(e));
+}
+
+void PluginClient::JobMonitorHookAsync(task_id_t task_id,
+                                       std::string cgroup_path) {
+  auto request = std::make_unique<crane::grpc::plugin::JobMonitorHookRequest>();
+  request->set_task_id(task_id);
+  request->set_cgroup(cgroup_path);
+
+  HookEvent e{HookType::JOB_MONITOR,
+              std::unique_ptr<google::protobuf::Message>(std::move(request))};
+
   m_event_queue_.enqueue(std::move(e));
 }
 
