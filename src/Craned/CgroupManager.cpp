@@ -21,14 +21,10 @@
 
 #include "CgroupManager.h"
 
-#include <utility>
-#include <vector>
-
 #include "CranedPublicDefs.h"
 #include "DeviceManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
-#include "protos/PublicDefs.pb.h"
 
 namespace Craned {
 
