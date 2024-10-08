@@ -245,8 +245,7 @@ bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr) {
     if (ret == 0) {
       for (int i = 0; i < 4; ++i) {
         *addr = 0;
-        uint32_t part = ntohl(*(reinterpret_cast<uint64_t*>(
-            &ipv6_sockaddr->sin6_addr.s6_addr32[i])));
+        uint32_t part = ntohl(ipv6_sockaddr->sin6_addr.s6_addr32[i]);
         *addr = (*addr << 32) | part;
       }
     } else
