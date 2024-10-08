@@ -1,7 +1,6 @@
 # Cluster settings (This must be identical across all nodes)
 # the hostname of node which is running cranectld
-ControlMachine: localhost
-
+ControlMachine: cn15
 # the name of this cluster
 ClusterName: pkuhpc_test
 
@@ -68,67 +67,42 @@ PriorityWeightQ0S: 1000000
 
 # list of configuration information of the computing machine
 # Nodes and partitions settings
-# Nodes:
-#   # the hostname of computing node
-#   - name: "cn[15-16]"
-#     cpu: 2
-#     memory: 2G
-
-#   - name: "cn[17-18]"
-#     cpu: 2
-#     memory: 2G
-#     gres:
-#       - name: gpu
-#         type: a100
-#         # Each file will be parsed as a device.
-#         DeviceFileRegex: /dev/nvidia[0-3]
-#         # Following device files will belong to a single device.
-#         DeviceFileList:
-#           - /dev/dri/renderer[0-3]
-#         EnvInjector: nvidia
-
-#       - name: gpu
-#         type: h100
-#         file: /dev/nvidia[4-7]
-
-# # partition information list
-# Partitions:
-#   - name: CPU
-#     nodes: "cn[15-16]"
-#     priority: 5
-#   - name: GPU
-#     nodes: "cn[17-18]"
-#     priority: 3
-#     # Optional default memory per cpu in MB, 0 lets scheduler to decide
-#     DefaultMemPerCpu: 0
-#     # Optional maximum memory per cpu in MB, 0 indicates no limit
-#     MaxMemPerCpu: 0
-
-# DefaultPartition: CPU
-# ...
-
-# Nodes and partitions settings
-# 计算节点
 Nodes:
-  - name: "62810f725947"
+  # the hostname of computing node
+  - name: "cn[15-16]"
     cpu: 2
     memory: 2G
 
-# partition information list
-# 计算节点的分区
-Partitions:
-  - name: CPU              # 分区的名称（可自定义）
-    nodes: "62810f725947"  # 分区中的节点，需要和 Nodes 部分对应
-    priority: 5
-  # - name: GPU
-  #   nodes: "crane[03-04]"
-  #   priority: 3
-  #   # Optional default memory per cpu in MB
-  #   DefaultMemPerCpu: 0     # 建议设置为0
-  #   # Optional maximum memory per cpu in MB, 0 indicates no limit
-  #   MaxMemPerCpu: 0         # 建议设置为0
+  - name: "cn[17-18]"
+    cpu: 2
+    memory: 2G
+    gres:
+      - name: gpu
+        type: a100
+        # Each file will be parsed as a device.
+        DeviceFileRegex: /dev/nvidia[0-3]
+        # Following device files will belong to a single device.
+        DeviceFileList:
+          - /dev/dri/renderer[0-3]
+        EnvInjector: nvidia
 
-# 默认分区，未指定分区的作业将被提交到默认分区
+      - name: gpu
+        type: h100
+        file: /dev/nvidia[4-7]
+
+# partition information list
+Partitions:
+  - name: CPU
+    nodes: "cn[15-16]"
+    priority: 5
+  - name: GPU
+    nodes: "cn[17-18]"
+    priority: 3
+    # Optional default memory per cpu in MB, 0 lets scheduler to decide
+    DefaultMemPerCpu: 0
+    # Optional maximum memory per cpu in MB, 0 indicates no limit
+    MaxMemPerCpu: 0
+
 DefaultPartition: CPU
 
 
@@ -149,7 +123,7 @@ RejectJobsBeyondCapacity: false
 
 Plugin:
   # Toggle the plugin module in CraneSched
-  Enabled: true
+  Enabled: false
   # Relative to CraneBaseDir
   PlugindSockPath: "cplugind/cplugind.sock"
   # Debug level of Plugind
