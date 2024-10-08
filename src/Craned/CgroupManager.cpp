@@ -25,11 +25,6 @@
 
 #include <dirent.h>
 #include <libcgroup.h>
-#include <sched.h>
-
-#include <cstdint>
-#include <string>
-#include <vector>
 
 #include "CranedPublicDefs.h"
 #include "DeviceManager.h"
@@ -56,29 +51,27 @@ int CgroupManager::Init() {
   switch (setup_mode) {
   case CGROUP_MODE_LEGACY:
     //("cgroup mode: Legacy\n");
-    cg_vision_ = CgroupConstant::CgroupVision::CGROUP_V1;
+    cg_version_ = CgroupConstant::CgroupVersion::CGROUP_V1;
     break;
   case CGROUP_MODE_HYBRID:
     //("cgroup mode: Hybrid\n");
-    cg_vision_ = CgroupConstant::CgroupVision::UNDEFINED;
+    cg_version_ = CgroupConstant::CgroupVersion::UNDEFINED;
     break;
   case CGROUP_MODE_UNIFIED:
     //("cgroup mode: Unified\n");
-    cg_vision_ = CgroupConstant::CgroupVision::CGROUP_V2;
+    cg_version_ = CgroupConstant::CgroupVersion::CGROUP_V2;
     break;
   default:
     //("cgroup mode: Unknown\n");
     break;
   }
 
-
-
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;
 
   ControllerFlags NO_CONTROLLERS;
 
-  if (GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V1) {
+  if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
     void *handle = nullptr;
     controller_data info{};
     int ret = cgroup_get_all_controller_begin(&handle, &info);
@@ -128,7 +121,6 @@ int CgroupManager::Init() {
       cgroup_get_all_controller_end(&handle);
     }
 
-
     if (!Mounted(Controller::BLOCK_CONTROLLER)) {
       CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
     }
@@ -155,7 +147,7 @@ int CgroupManager::Init() {
     }
   }
   // cgroup don't use /proc/cgroups to manage controller
-  else if ((GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V2)) {
+  else if ((GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2)) {
     struct cgroup *root = nullptr;
     int ret;
     struct cgroup_controller *group_controller = nullptr;
@@ -204,7 +196,6 @@ int CgroupManager::Init() {
       group_controller = nullptr;
     }
 
-
     if (!Mounted(Controller::CPU_CONTROLLER_V2)) {
       CRANE_WARN("Cgroup controller for CPU is not available.\n");
     }
@@ -233,15 +224,15 @@ int CgroupManager::Init() {
     //   return -1;
     // }
   } else {
-    CRANE_WARN("Error Cgroup vision is not supported");
+    CRANE_WARN("Error Cgroup version is not supported");
     return -1;
   }
-  if(cg_vision_ == CgroupConstant::CgroupVision::CGROUP_V1){
+  if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
     RmAllTaskCgroups_();
-  } else if(cg_vision_ == CgroupConstant::CgroupVision::CGROUP_V2){
+  } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
     RmAllTaskCgroupsV2_();
   } else {
-    CRANE_WARN("Error Cgroup vision is not supported");
+    CRANE_WARN("Error Cgroup version is not supported");
   }
   return 0;
 }
@@ -291,7 +282,7 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
                  controller_str);
       return required ? 1 : 0;
     } else {
-      // Try to turn on hierarchical memory accounting in V1. 
+      // Try to turn on hierarchical memory accounting in V1.
       if (controller == CgroupConstant::Controller::MEMORY_CONTROLLER) {
         if ((err = cgroup_add_value_bool(p_raw_controller,
                                          "memory.use_hierarchy", true))) {
@@ -344,21 +335,20 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
 
   // Work through the various controllers.
 
-  if(GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V1){
-  //  if ((preferred_controllers & Controller::CPUACCT_CONTROLLER) &&
-  //      initialize_controller(
-  //          *native_cgroup, Controller::CPUACCT_CONTROLLER,
-  //          required_controllers & Controller::CPUACCT_CONTROLLER, has_cgroup,
-  //          changed_cgroup)) {
-  //    return nullptr;
-  //  }
+  if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
+    //  if ((preferred_controllers & Controller::CPUACCT_CONTROLLER) &&
+    //      initialize_controller(
+    //          *native_cgroup, Controller::CPUACCT_CONTROLLER,
+    //          required_controllers & Controller::CPUACCT_CONTROLLER,
+    //          has_cgroup, changed_cgroup)) {
+    //    return nullptr;
+    //  }
     if ((preferred_controllers & Controller::MEMORY_CONTROLLER) &&
         InitializeController_(
             *native_cgroup, Controller::MEMORY_CONTROLLER,
             required_controllers & Controller::MEMORY_CONTROLLER, has_cgroup,
             changed_cgroup)) {
       return nullptr;
-      
     }
     if ((preferred_controllers & Controller::FREEZE_CONTROLLER) &&
         InitializeController_(
@@ -387,7 +377,7 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
             changed_cgroup)) {
       return nullptr;
     }
-  } else if(GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V2){
+  } else if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2) {
     if ((preferred_controllers & Controller::CPU_CONTROLLER_V2) &&
         InitializeController_(
             *native_cgroup, Controller::CPU_CONTROLLER_V2,
@@ -423,10 +413,7 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
             changed_cgroup)) {
       return nullptr;
     }
-
-    
   }
-
 
   int err;
   if (!has_cgroup) {
@@ -444,12 +431,12 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
         cgroup_string.c_str(), err, cgroup_strerror(err));
   }
 
-  if (GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V1) {
+  if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
     return std::make_unique<CgroupV1>(cgroup_string, native_cgroup);
-  } else if (GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V2) {
+  } else if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2) {
     return std::make_unique<CgroupV2>(cgroup_string, native_cgroup);
   } else {
-    CRANE_WARN("Unable to create cgroup {}. Cgroup vision is not supported",
+    CRANE_WARN("Unable to create cgroup {}. Cgroup version is not supported",
                cgroup_string.c_str());
     return nullptr;
   }
@@ -472,22 +459,23 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
   {
     auto cg_it = m_task_id_to_cg_map_[task_id];
     auto &cg_unique_ptr = *cg_it;
-    if (!cg_unique_ptr){
-      if (GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V1) {
+    if (!cg_unique_ptr) {
+      if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
         cg_unique_ptr = CgroupManager::CreateOrOpen_(
             CgroupStrByTaskId_(task_id),
             NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
                 CgroupConstant::Controller::MEMORY_CONTROLLER |
                 CgroupConstant::Controller::DEVICES_CONTROLLER,
             NO_CONTROLLER_FLAG, false);
-      } else if (GetCgroupVision() == CgroupConstant::CgroupVision::CGROUP_V2) {
+      } else if (GetCgroupVersion() ==
+                 CgroupConstant::CgroupVersion::CGROUP_V2) {
         cg_unique_ptr = CgroupManager::CreateOrOpen_(
             CgroupStrByTaskId_(task_id),
             NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER_V2 |
-                CgroupConstant::Controller::MEMORY_CONTORLLER_V2 ,
+                CgroupConstant::Controller::MEMORY_CONTORLLER_V2,
             NO_CONTROLLER_FLAG, false);
       } else {
-        CRANE_WARN("cgroup vision is not supported.");
+        CRANE_WARN("cgroup version is not supported.");
       }
     }
 
@@ -659,45 +647,44 @@ void CgroupManager::RmAllTaskCgroupsUnderController_(
   if (handle) cgroup_walk_tree_end(&handle);
 }
 
-void CgroupManager::RmAllTaskCgroupsV2_(){
-
-  RmCgroupsV2_(CgroupConstant::RootCgroupFullPath, CgroupConstant::kTaskCgPathPrefix);
-
+void CgroupManager::RmAllTaskCgroupsV2_() {
+  RmCgroupsV2_(CgroupConstant::RootCgroupFullPath,
+               CgroupConstant::kTaskCgPathPrefix);
 }
 
-void CgroupManager::RmCgroupsV2_(const std::string& root_cgroup_path,const std::string& match_str){
+void CgroupManager::RmCgroupsV2_(const std::string &root_cgroup_path,
+                                 const std::string &match_str) {
   DIR *dir = nullptr;
-  if((dir = opendir(root_cgroup_path.c_str())) == nullptr){
+  if ((dir = opendir(root_cgroup_path.c_str())) == nullptr) {
     CRANE_ERROR("Failed to open cgroup dir {}", root_cgroup_path);
   }
-  struct dirent * entry;
+  struct dirent *entry;
   std::vector<std::string> cgroup_full_path_to_delete;
   while ((entry = readdir(dir)) != nullptr) {
-      // Skip "." and ".." directories
-      if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-          continue;
-      }
+    // Skip "." and ".." directories
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+      continue;
+    }
 
-      std::string dir_name = entry->d_name;
-      std::string full_path = root_cgroup_path + "/" + dir_name;
+    std::string dir_name = entry->d_name;
+    std::string full_path = root_cgroup_path + "/" + dir_name;
 
-      // Check if it's a directory and if it contains the match_str
-      struct stat info;
-      if (stat(full_path.c_str(), &info) == 0 && S_ISDIR(info.st_mode)) {
-          if (dir_name.find(match_str) != std::string::npos) {
-              cgroup_full_path_to_delete.push_back(full_path);
-          }
+    // Check if it's a directory and if it contains the match_str
+    struct stat info;
+    if (stat(full_path.c_str(), &info) == 0 && S_ISDIR(info.st_mode)) {
+      if (dir_name.find(match_str) != std::string::npos) {
+        cgroup_full_path_to_delete.push_back(full_path);
       }
+    }
   }
   closedir(dir);
-  for(const auto & tf : cgroup_full_path_to_delete){
-      int err = rmdir(tf.c_str());
-      if(err != 0){
-        CRANE_ERROR("Failed to remove cgroup {}: {}", tf.c_str(),
-              strerror(errno));
-      }
+  for (const auto &tf : cgroup_full_path_to_delete) {
+    int err = rmdir(tf.c_str());
+    if (err != 0) {
+      CRANE_ERROR("Failed to remove cgroup {}: {}", tf.c_str(),
+                  strerror(errno));
+    }
   }
-
 }
 
 bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
@@ -1397,7 +1384,7 @@ bool DedicatedResourceAllocator::Allocate(
     for (const auto &[__, slots] : type_slots_map.type_slots_map())
       all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
   };
-  
+
   if (!cg->SetDeviceAccess(all_request_slots, true, true, true)) return false;
   return true;
 }

@@ -35,7 +35,7 @@ namespace Craned {
 
 namespace CgroupConstant {
 
-enum class CgroupVision : uint64_t {
+enum class CgroupVersion : uint64_t {
   CGROUP_V1 = 0,
   CGROUP_V2,
   UNDEFINED,
@@ -304,7 +304,7 @@ class Cgroup {
   virtual bool Empty() = 0;
 
  protected:
-  // CgroupConstant::CgroupVision cg_vsion; // maybe for hybird mode
+  // CgroupConstant::CgroupVersion cg_vsion; // maybe for hybird mode
   virtual bool ModifyCgroup_(CgroupConstant::ControllerFile controller_file);
   std::string m_cgroup_path_;
   mutable struct cgroup *m_cgroup_;
@@ -321,7 +321,7 @@ class CgroupV1 : public Cgroup {
   bool SetMemorySwLimitBytes(uint64_t mem_bytes) override;
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
   bool SetBlockioWeight(uint64_t weight) override;
-  
+
   bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
                        bool set_write, bool set_mknod) override;
 
@@ -332,7 +332,6 @@ class CgroupV1 : public Cgroup {
   bool MigrateProcIn(pid_t pid) override;
 
  private:
-
 };
 
 class CgroupV2 : public Cgroup {
@@ -347,7 +346,7 @@ class CgroupV2 : public Cgroup {
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
   bool SetBlockioWeight(uint64_t weight) override;
 
-  //use BPF 
+  // use BPF
   bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
                        bool set_write, bool set_mknod) override;
 
@@ -449,9 +448,9 @@ class CgroupManager {
 
   std::vector<EnvPair> GetResourceEnvListOfTask(task_id_t task_id);
 
-  void SetCgroupVision(CgroupConstant::CgroupVision v) { cg_vision_ = v; }
+  void SetCgroupVersion(CgroupConstant::CgroupVersion v) { cg_version_ = v; }
 
-  CgroupConstant::CgroupVision GetCgroupVision() { return cg_vision_; }
+  CgroupConstant::CgroupVersion GetCgroupVersion() { return cg_version_; }
 
  private:
   static std::string CgroupStrByTaskId_(task_id_t task_id);
@@ -470,11 +469,12 @@ class CgroupManager {
   void RmAllTaskCgroupsUnderController_(CgroupConstant::Controller controller);
 
   void RmAllTaskCgroupsV2_();
-  void RmCgroupsV2_(const std::string &root_cgroup_path,const std::string &match_str);
+  void RmCgroupsV2_(const std::string &root_cgroup_path,
+                    const std::string &match_str);
 
   ControllerFlags m_mounted_controllers_;
 
-  CgroupConstant::CgroupVision cg_vision_;
+  CgroupConstant::CgroupVersion cg_version_;
 
   util::AtomicHashMap<absl::flat_hash_map, task_id_t, CgroupSpec>
       m_task_id_to_cg_spec_map_;

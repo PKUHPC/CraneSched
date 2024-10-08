@@ -119,7 +119,11 @@ RejectJobsBeyondCapacity: false
 
 Plugin:
   # Toggle the plugin module in CraneSched
+<<<<<<< HEAD
   Enabled: false
+=======
+  Enabled: true
+>>>>>>> 52a613a (recover config.yaml)
   # Relative to CraneBaseDir
   PlugindSockPath: "cplugind/cplugind.sock"
   # Debug level of Plugind
