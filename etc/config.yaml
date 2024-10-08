@@ -86,6 +86,13 @@ Nodes:
           - /dev/dri/renderer[0-3]
         EnvInjector: nvidia
 
+<<<<<<< HEAD
+=======
+      - name: gpu
+        type: h100
+        file: /dev/nvidia[4-7]
+
+>>>>>>> fa1a241 (get master config.yaml)
 # partition information list
 Partitions:
   - name: CPU
@@ -120,10 +127,14 @@ RejectJobsBeyondCapacity: false
 Plugin:
   # Toggle the plugin module in CraneSched
 <<<<<<< HEAD
+<<<<<<< HEAD
   Enabled: false
 =======
   Enabled: true
 >>>>>>> 52a613a (recover config.yaml)
+=======
+  Enabled: false
+>>>>>>> fa1a241 (get master config.yaml)
   # Relative to CraneBaseDir
   PlugindSockPath: "cplugind/cplugind.sock"
   # Debug level of Plugind
