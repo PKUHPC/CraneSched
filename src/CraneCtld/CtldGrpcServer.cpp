@@ -522,16 +522,16 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     account_info->set_default_qos(account.default_qos);
     account_info->set_blocked(account.blocked);
 
-      auto *allowed_qos_list = account_info->mutable_allowed_qos_list();
-      for (auto &&qos : account.allowed_qos_list) {
-        allowed_qos_list->Add()->assign(qos);
-      }
-
-      auto *coordinators = account_info->mutable_coordinators();
-      for (auto &&coord : account.coordinators) {
-        coordinators->Add()->assign(coord);
-      }
+    auto *allowed_qos_list = account_info->mutable_allowed_qos_list();
+    for (const auto &qos : account.allowed_qos_list) {
+      allowed_qos_list->Add()->assign(qos);
     }
+
+    auto *coordinators = account_info->mutable_coordinators();
+    for (auto &&coord : account.coordinators) {
+        coordinators->Add()->assign(coord);
+    }
+  }
 
   return grpc::Status::OK;
 }
@@ -575,18 +575,18 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
         partition_qos->set_partition_name(par_name);
         partition_qos->set_default_qos(pair.first);
 
-          auto *qos_list = partition_qos->mutable_qos_list();
-          for (const auto &qos : pair.second) {
-            qos_list->Add()->assign(qos);
-          }
-        }
-
-        auto *coordinated_accounts = user_info->mutable_coordinator_accounts();
-        for (auto &&coord : user.coordinator_accounts) {
-          coordinated_accounts->Add()->assign(coord);
+        auto *qos_list = partition_qos->mutable_qos_list();
+        for (const auto &qos : pair.second) {
+          qos_list->Add()->assign(qos);
         }
       }
+
+      auto *coordinated_accounts = user_info->mutable_coordinator_accounts();
+      for (auto &&coord : user.coordinator_accounts) {
+        coordinated_accounts->Add()->assign(coord);
+      }
     }
+  }
 
   return grpc::Status::OK;
 }
