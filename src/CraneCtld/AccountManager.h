@@ -22,6 +22,7 @@
 #include "DbClient.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
+#include "crane/expected.h"
 
 namespace Ctld {
 
@@ -39,6 +40,8 @@ class AccountManager {
   using QosMapMutexSharedPtr = util::ScopeConstSharedPtr<
       std::unordered_map<std::string, std::unique_ptr<Qos>>, util::rw_mutex>;
 
+  using SuccessOrErrCode = tl::expected<bool, crane::grpc::ErrCode>;
+
   struct Result {
     bool ok{false};
     std::string reason;
@@ -48,20 +51,28 @@ class AccountManager {
 
   ~AccountManager() = default;
 
-  Result AddUser(User&& new_user);
+  SuccessOrErrCode AddUser(uint32_t uid, User&& new_user);
 
-  Result AddAccount(Account&& new_account);
+  SuccessOrErrCode AddAccount(uint32_t uid, Account&& new_account);
 
-  Result AddQos(const Qos& new_qos);
+  SuccessOrErrCode AddQos(uint32_t uid, const Qos& new_qos);
 
-  Result DeleteUser(const std::string& name, const std::string& account);
+  SuccessOrErrCode DeleteUser(uint32_t uid, const std::string& name,
+                    const std::string& account);
 
-  Result RemoveUserFromAccount(const std::string& name,
-                               const std::string& account);
+  SuccessOrErrCode DeleteAccount(uint32_t uid, const std::string& name);
 
-  Result DeleteAccount(const std::string& name);
+  SuccessOrErrCode DeleteQos(uint32_t uid, const std::string& name);
 
-  Result DeleteQos(const std::string& name);
+  SuccessOrErrCode QueryUserInfo(uint32_t uid, const std::string& name,
+                       std::unordered_map<uid_t, User>* res_user_map);
+
+  SuccessOrErrCode QueryAccountInfo(
+      uint32_t uid, const std::string& name,
+      std::unordered_map<std::string, Account>* res_account_map);
+
+  SuccessOrErrCode QueryQosInfo(uint32_t uid, const std::string& name,
+                      std::unordered_map<std::string, Qos>* res_qos_map);
 
   UserMutexSharedPtr GetExistedUserInfo(const std::string& name);
   UserMapMutexSharedPtr GetAllUserInfo();
@@ -72,23 +83,42 @@ class AccountManager {
   QosMutexSharedPtr GetExistedQosInfo(const std::string& name);
   QosMapMutexSharedPtr GetAllQosInfo();
 
-  Result ModifyUser(
-      const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
-      const std::string& name, const std::string& partition,
-      std::string account, const std::string& item, const std::string& value,
-      bool force);
-  Result ModifyAccount(
-      const crane::grpc::ModifyEntityRequest_OperatorType& operatorType,
-      const std::string& name, const std::string& item,
-      const std::string& value, bool force);
+  /* ---------------------------------------------------------------------------
+   * ModifyUser-related functions
+   * ---------------------------------------------------------------------------
+   */
+  SuccessOrErrCode ModifyAdminLevel(const uint32_t uid, const std::string& name,
+                          const std::string& value);
+  SuccessOrErrCode ModifyUserDefaultQos(uint32_t uid, const std::string& name,
+                              const std::string& partition, std::string account,
+                              const std::string& value, bool force);
+  SuccessOrErrCode ModifyUserAllowedParition(
+      const crane::grpc::OperatorType& operatorType, uint32_t uid,
+      const std::string& name, std::string account, const std::string& value);
+  SuccessOrErrCode ModifyUserAllowedQos(const crane::grpc::OperatorType& operatorType,
+                              uint32_t uid, const std::string& name,
+                              const std::string& partition, std::string account,
+                              const std::string& value, bool force);
+  SuccessOrErrCode DeleteUserAllowedPartiton(uint32_t uid, const std::string& name,
+                                   std::string account,
+                                   const std::string& value);
+  SuccessOrErrCode DeleteUserAllowedQos(uint32_t uid, const std::string& name,
+                              const std::string& partition, std::string account,
+                              const std::string& value, bool force);
 
-  Result ModifyQos(const std::string& name, const std::string& item,
+  SuccessOrErrCode ModifyAccount(const crane::grpc::OperatorType& operatorType,
+                       const uint32_t uid, const std::string& name,
+                       const crane::grpc::ModifyField& modifyField,
+                       const std::string& value, bool force);
+
+  SuccessOrErrCode ModifyQos(const uint32_t uid, const std::string& name,
+                   const crane::grpc::ModifyField& modifyField,
                    const std::string& value);
 
-  Result BlockAccount(const std::string& name, bool block);
+  SuccessOrErrCode BlockAccount(uint32_t uid, const std::string& name, bool block);
 
-  Result BlockUser(const std::string& name, const std::string& account,
-                   bool block);
+  SuccessOrErrCode BlockUser(uint32_t uid, const std::string& name,
+                   const std::string& account, bool block);
 
   bool CheckUserPermissionToPartition(const std::string& name,
                                       const std::string& account,
@@ -100,10 +130,118 @@ class AccountManager {
   result::result<void, std::string> CheckAndApplyQosLimitOnTask(
       const std::string& user, const std::string& account, TaskInCtld* task);
 
-  Result FindUserLevelAccountsOfUid(uint32_t uid, User::AdminLevel* level,
-                                    std::list<std::string>* accounts);
-
   result::result<void, std::string> CheckUidIsAdmin(uint32_t uid);
+
+  /* ---------------------------------------------------------------------------
+   * ModifyUser-related functions(no block)
+   * ---------------------------------------------------------------------------
+   */
+  SuccessOrErrCode CheckAddUserAllowedPartition(
+      const User* user,
+      const Account* account_ptr, const std::string& account,
+      const std::string& partition);
+  SuccessOrErrCode CheckSetUserAllowedPartition(const User* user,
+      const Account* account_ptr, const std::string& account,
+      const std::string& partition);
+  SuccessOrErrCode CheckAddUserAllowedQos(
+      const User* user,
+      const Account* account_ptr, const std::string& account,
+      const std::string& partition, const std::string& qos_str);
+  SuccessOrErrCode CheckSetUserAllowedQos(const User* user,
+      const Account* account_ptr, const std::string& account,
+      const std::string& partition, const std::string& qos_str, bool force);
+  SuccessOrErrCode CheckSetUserAdminLevel(const User& user, const std::string& level,
+                                User::AdminLevel* new_level);
+  SuccessOrErrCode CheckSetUserDefaultQos(const User& user, const std::string& account,
+                                const std::string& partition,
+                                const std::string& qos);
+  SuccessOrErrCode CheckDeleteUserAllowedPartition(const User& user,
+                                         const std::string& account,
+                                         const std::string& partition);
+  SuccessOrErrCode CheckDeleteUserAllowedQos(const User& user, const std::string& account,
+                                   const std::string& partition,
+                                   const std::string& qos, bool force);
+
+  /* ---------------------------------------------------------------------------
+   * ModifyAccount-related functions(no block)
+   * ---------------------------------------------------------------------------
+   */
+  SuccessOrErrCode CheckAddAccountAllowedPartition(const Account* account_ptr,
+                                         const std::string& account,
+                                         const std::string& partition);
+  SuccessOrErrCode CheckAddAccountAllowedQos(const Account* account_ptr,
+                                   const std::string& account,
+                                   const std::string& qos);
+  SuccessOrErrCode CheckSetAccountDescription(const Account* account_ptr,
+                                    const std::string& account,
+                                    const std::string& description);
+  SuccessOrErrCode CheckSetAccountAllowedPartition(const Account* account_ptr,
+                                         const std::string& account,
+                                         const std::string& partitions,
+                                         bool force);
+  SuccessOrErrCode CheckSetAccountAllowedQos(const Account* account_ptr,
+                                   const std::string& account,
+                                   const std::string& qos_list, bool force);
+  SuccessOrErrCode CheckSetAccountDefaultQos(const Account* account_ptr,
+                                   const std::string& account,
+                                   const std::string& qos);
+  SuccessOrErrCode CheckDeleteAccountAllowedPartition(const Account* account_ptr,
+                                            const std::string& account,
+                                            const std::string& partition,
+                                            bool force);
+  SuccessOrErrCode CheckDeleteAccountAllowedQos(const Account* account_ptr,
+                                      const std::string& account,
+                                      const std::string& qos, bool force);
+
+  /*
+   * Check if the operating user exists
+   */
+  SuccessOrErrCode CheckOpUserExisted(uint32_t uid, const User** op_user);
+
+  SuccessOrErrCode CheckOpUserIsAdmin(uint32_t uid);
+
+  SuccessOrErrCode CheckOperatorPrivilegeHigher(uint32_t uid,
+                                      User::AdminLevel admin_level);
+
+  SuccessOrErrCode CheckOpUserHasPermissionToAccount(uint32_t uid,
+                                           const std::string& account,
+                                           bool read_only_priv, bool is_add);
+
+  SuccessOrErrCode CheckOpUserHasModifyPermission(uint32_t uid, const User* user,
+                                        const std::string& name,
+                                        std::string& account,
+                                        bool read_only_priv);
+
+  /*
+   * Check if the operating user is the coordinator of the target user's
+   * specified account.
+   */
+  SuccessOrErrCode CheckUserPermissionOnAccount(const User& op_user,
+                                      const std::string& account,
+                                      bool read_only_priv);
+
+  /*
+   * Check whether the operating user has permissions to access the target user.
+   * Permissions are granted if any of the following three conditions are met:
+   * 1. The operating user is the same as the target user.
+   * 2. The operating user's level is higher than the target user's level.
+   * 3. The operating user is the coordinator of the target user's specified
+   * account. If the read_only_priv is true, it means the operating user is the
+   * coordinator of any of the target user's accounts."
+   */
+  SuccessOrErrCode CheckUserPermissionOnUser(const User& op_user, const User* user,
+                                   const std::string& name,
+                                   std::string& account,
+                                   bool read_only_priv);
+  
+  SuccessOrErrCode CheckPartitionIsAllowed(const Account* account_ptr, const std::string& account,
+                                 const std::string& partition, bool check_parent);
+                                
+  SuccessOrErrCode CheckQosIsAllowed(const Account* account_ptr, const std::string& account,
+                           const std::string& qos_str, bool check_parent);
+
+  bool IsOperatorPrivilegeSameAndHigher(const User& op_user,
+                                        User::AdminLevel admin_level);
 
   /**
    * @param[in] uid is system uid of user.
@@ -133,7 +271,7 @@ class AccountManager {
       uint32_t uid, const std::string& account, bool read_only_priv,
       User::AdminLevel* level_of_uid = nullptr);
 
-  AccountManager::Result HasPermissionToUser(
+  bool HasPermissionToUser(
       uint32_t uid, const std::string& target_user, bool read_only_priv,
       User::AdminLevel* level_of_uid = nullptr);
 
@@ -151,49 +289,67 @@ class AccountManager {
 
   bool IncQosReferenceCountInDb_(const std::string& name, int num);
 
-  Result AddUserAllowedPartition_(const std::string& name,
-                                  const std::string& account,
-                                  const std::string& partition);
-  Result AddUserAllowedQos_(const std::string& name, const std::string& qos,
-                            const std::string& account,
-                            const std::string& partition);
+  SuccessOrErrCode AddUser_(const User* find_user, const Account* find_account,
+                  User&& new_user);
 
-  Result SetUserAdminLevel_(const std::string& name, const std::string& level);
-  Result SetUserDefaultQos_(const std::string& name, const std::string& qos,
-                            const std::string& account,
-                            const std::string& partition);
-  Result SetUserAllowedPartition_(const std::string& name,
-                                  const std::string& account,
+  SuccessOrErrCode AddAccount_(const Account* find_account, const Account* find_parent,
+                     Account&& new_account);
+
+  SuccessOrErrCode AddQos_(const Qos* find_qos, const Qos& new_qos);
+
+  SuccessOrErrCode DeleteUser_(const User& user, const std::string& account);
+
+  SuccessOrErrCode DeleteAccount_(const Account& account);
+
+  SuccessOrErrCode DeleteQos_(const std::string& name);
+
+  SuccessOrErrCode AddUserAllowedPartition_(const User& user, const Account& account,
+                                  const std::string& partition);
+  SuccessOrErrCode AddUserAllowedQos_(const User& user, const Account& account,
+                            const std::string& partition,
+                            const std::string& qos);
+
+  SuccessOrErrCode SetUserAdminLevel_(const std::string& name,
+                            const User::AdminLevel& new_level);
+  SuccessOrErrCode SetUserDefaultQos_(const User& user, const std::string& account,
+                            const std::string& partition,
+                            const std::string& qos);
+  SuccessOrErrCode SetUserAllowedPartition_(const User& user, const Account& account,
                                   const std::string& partitions);
-  Result SetUserAllowedQos_(const std::string& name, const std::string& account,
+  SuccessOrErrCode SetUserAllowedQos_(const User& user, const Account& account,
                             const std::string& partition,
                             const std::string& qos_list_str, bool force);
 
-  Result DeleteUserAllowedPartition_(const std::string& name,
+  SuccessOrErrCode DeleteUserAllowedPartition_(const User& user,
                                      const std::string& account,
                                      const std::string& partition);
-  Result DeleteUserAllowedQos_(const std::string& name, const std::string& qos,
+  SuccessOrErrCode DeleteUserAllowedQos_(const User& user, const std::string& qos,
                                const std::string& account,
                                const std::string& partition, bool force);
 
-  Result AddAccountAllowedPartition_(const std::string& name,
+  SuccessOrErrCode AddAccountAllowedPartition_(const std::string& name,
                                      const std::string& partition);
-  AccountManager::Result AddAccountAllowedQos_(const std::string& name,
+  SuccessOrErrCode AddAccountAllowedQos_(const Account& account,
                                                const std::string& qos);
 
-  Result SetAccountDescription_(const std::string& name,
+  SuccessOrErrCode SetAccountDescription_(const std::string& name,
                                 const std::string& description);
-  Result SetAccountDefaultQos_(const std::string& name, const std::string& qos);
-  Result SetAccountAllowedPartition_(const std::string& name,
+  SuccessOrErrCode SetAccountDefaultQos_(const Account& account, const std::string& qos);
+  SuccessOrErrCode SetAccountAllowedPartition_(const Account& account,
                                      const std::string& partitions, bool force);
-  Result SetAccountAllowedQos_(const std::string& name,
+  SuccessOrErrCode SetAccountAllowedQos_(const Account& account,
                                const std::string& qos_list_str, bool force);
 
-  Result DeleteAccountAllowedPartition_(const std::string& name,
+  SuccessOrErrCode DeleteAccountAllowedPartition_(const Account& account,
                                         const std::string& partition,
                                         bool force);
-  Result DeleteAccountAllowedQos_(const std::string& name,
+  SuccessOrErrCode DeleteAccountAllowedQos_(const Account& account,
                                   const std::string& qos, bool force);
+
+  SuccessOrErrCode BlockUser_(const std::string& name, const std::string& account,
+                    bool block);
+
+  SuccessOrErrCode BlockAccount_(const std::string& name, bool block);
 
   bool IsAllowedPartitionOfAnyNodeNoLock_(const Account* account,
                                           const std::string& partition,
