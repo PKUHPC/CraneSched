@@ -278,8 +278,7 @@ bool StrToIpv6(const std::string& ip, ipv6_t* addr) {
 
   *addr = 0;
   for (int i = 0; i < 4; ++i) {
-    uint32_t part =
-        ntohl(*(reinterpret_cast<uint64_t*>(&ipv6_addr.s6_addr32[i])));
+    uint32_t part = ntohl(ipv6_addr.s6_addr32[i]);
     *addr = (*addr << 32) | part;
   }
 
