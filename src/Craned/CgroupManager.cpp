@@ -741,6 +741,20 @@ std::vector<EnvPair> CgroupManager::GetResourceEnvListByResInNode(
   return env_vec;
 }
 
+std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTask(
+    task_id_t task_id) {
+  std::vector<EnvPair> res;
+
+  auto cg_spec_ptr = m_task_id_to_cg_spec_map_[task_id];
+  if (cg_spec_ptr)
+    res = GetResourceEnvListByResInNode(cg_spec_ptr->res_in_node);
+  else
+    CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
+                task_id);
+
+  return res;
+}
+
 bool CgroupV1::MigrateProcIn(pid_t pid) {
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;
