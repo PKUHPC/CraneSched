@@ -461,6 +461,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
           "greater permissions as yourself");
       return grpc::Status::OK;
     }
+
     if (request->item() == "admin_level") {
       User::AdminLevel new_level;
       if (request->value() == "none") {
@@ -475,6 +476,7 @@ grpc::Status CraneCtldServiceImpl::ModifyEntity(
             fmt::format("Unknown admin level '{}'", request->value()));
         return grpc::Status::OK;
       }
+
       if (new_level > user_level) {
         response->set_ok(false);
         response->set_reason(
