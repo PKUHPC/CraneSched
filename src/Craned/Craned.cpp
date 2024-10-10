@@ -16,7 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "CgroupManager.h"
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 

@@ -121,25 +121,7 @@ int CgroupManager::Init() {
       cgroup_get_all_controller_end(&handle);
     }
 
-    if (!Mounted(Controller::BLOCK_CONTROLLER)) {
-      CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
-    }
-    if (!Mounted(Controller::FREEZE_CONTROLLER)) {
-      CRANE_WARN(
-          "Cgroup controller for process management is not available.\n");
-    }
-    if (!Mounted(Controller::CPUACCT_CONTROLLER)) {
-      CRANE_WARN("Cgroup controller for CPU accounting is not available.\n");
-    }
-    if (!Mounted(Controller::MEMORY_CONTROLLER)) {
-      CRANE_WARN("Cgroup controller for memory accounting is not available.\n");
-    }
-    if (!Mounted(Controller::CPU_CONTROLLER)) {
-      CRANE_WARN("Cgroup controller for CPU is not available.\n");
-    }
-    if (!Mounted(Controller::DEVICES_CONTROLLER)) {
-      CRANE_WARN("Cgroup controller for DEVICES is not available.\n");
-    }
+    ControllersMounted();
     if (ret != ECGEOF) {
       CRANE_WARN("Error iterating through cgroups mount information: {}\n",
                  cgroup_strerror(ret));
@@ -196,33 +178,9 @@ int CgroupManager::Init() {
       group_controller = nullptr;
     }
 
-    if (!Mounted(Controller::CPU_CONTROLLER_V2)) {
-      CRANE_WARN("Cgroup controller for CPU is not available.\n");
-    }
-    if (!Mounted(Controller::MEMORY_CONTORLLER_V2)) {
-      CRANE_WARN("Cgroup controller for memory is not available.\n");
-    }
-    if (!Mounted(Controller::CPUSET_CONTROLLER_V2)) {
-      CRANE_WARN("Cgroup controller for cpuset is not available.\n");
-    }
-    if (!Mounted(Controller::IO_CONTROLLER_V2)) {
-      CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
-    }
-    if (!Mounted(Controller::PIDS_CONTROLLER_V2)) {
-      CRANE_WARN("Cgroup controller for pids is not available.\n");
-    }
-
+    ControllersMounted();
     // root cgroup controller can't be change or created
 
-    // if (!Mounted(Controller::CGROUP_CONTOLLER_V2)) {
-    //   CRANE_WARN("Cgroup controller for cgroup is not available.\n");
-    // }
-
-    // if (ret != ECGEOF) {
-    //   CRANE_WARN("Error iterating through cgroups mount information: {}\n",
-    //              cgroup_strerror(ret));
-    //   return -1;
-    // }
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
     return -1;
@@ -243,6 +201,48 @@ void CgroupManager::RmAllTaskCgroups_() {
       CgroupConstant::Controller::MEMORY_CONTROLLER);
   RmAllTaskCgroupsUnderController_(
       CgroupConstant::Controller::DEVICES_CONTROLLER);
+}
+
+void CgroupManager::ControllersMounted(){
+  using namespace CgroupConstant;
+  if(cg_version_ == CgroupVersion::CGROUP_V1){
+    if (!Mounted(Controller::BLOCK_CONTROLLER)) {
+      CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
+    }
+    if (!Mounted(Controller::FREEZE_CONTROLLER)) {
+      CRANE_WARN("Cgroup controller for process management is not available.\n");
+    }
+    if (!Mounted(Controller::CPUACCT_CONTROLLER)) {
+      CRANE_WARN("Cgroup controller for CPU accounting is not available.\n");
+    }
+    if (!Mounted(Controller::MEMORY_CONTROLLER)) {
+      CRANE_WARN("Cgroup controller for memory accounting is not available.\n");
+    }
+    if (!Mounted(Controller::CPU_CONTROLLER)) {
+      CRANE_WARN("Cgroup controller for CPU is not available.\n");
+    }
+    if (!Mounted(Controller::DEVICES_CONTROLLER)) {
+      CRANE_WARN("Cgroup controller for DEVICES is not available.\n");
+    }
+  } else if(cg_version_ == CgroupVersion::CGROUP_V2){
+
+    if (!Mounted(Controller::CPU_CONTROLLER_V2)) {
+      CRANE_WARN("Cgroup controller for CPU is not available.\n");
+    }
+    if (!Mounted(Controller::MEMORY_CONTORLLER_V2)) {
+      CRANE_WARN("Cgroup controller for memory is not available.\n");
+    }
+    if (!Mounted(Controller::CPUSET_CONTROLLER_V2)) {
+      CRANE_WARN("Cgroup controller for cpuset is not available.\n");
+    }
+    if (!Mounted(Controller::IO_CONTROLLER_V2)) {
+      CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
+    }
+    if (!Mounted(Controller::PIDS_CONTROLLER_V2)) {
+      CRANE_WARN("Cgroup controller for pids is not available.\n");
+    }
+  }
+
 }
 
 /*
