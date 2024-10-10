@@ -14,7 +14,6 @@
  * See the Mulan PSL v2 for more details.
  */
 
-#include "CgroupManager.h"
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
