@@ -31,6 +31,11 @@ constexpr int64_t kCraneCtldGrpcClientPingSendIntervalSec = 10;
 constexpr int64_t kCranedGrpcServerPingRecvMinIntervalSec =
     3 * kCraneCtldGrpcClientPingSendIntervalSec + 1;
 
+constexpr int64_t kCraneGrpcClientKeepAliveTimeOutSec = 10;
+
+constexpr int64_t kCraneGrpcServerKeepAliveTimeOutSec =
+    3 * kCraneGrpcClientKeepAliveTimeOutSec + 1;
+
 struct TlsCertificates {
   std::string DomainSuffix;
   std::string ServerCertFilePath;
@@ -55,7 +60,7 @@ void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& port,
                                          const TlsCertificates& certs);
 
-void SetKeepAliveChannelArgs(grpc::ChannelArguments* args);
+void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args);
 
 void SetTlsHostnameOverride(grpc::ChannelArguments* args,
                             const std::string& hostname,
