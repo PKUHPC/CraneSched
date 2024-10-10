@@ -359,49 +359,6 @@ class CgroupV2 : public Cgroup {
  private:
 };
 
-// class Cgroup {
-//  public:
-//   Cgroup(const std::string &path, struct cgroup *handle)
-//       : m_cgroup_path_(path), m_cgroup_(handle) {}
-//   ~Cgroup();
-
-//   struct cgroup *NativeHandle() { return m_cgroup_; }
-
-//   const std::string &GetCgroupString() const { return m_cgroup_path_; };
-
-//   // Using the zombie object pattern as exceptions are not available.
-//   bool Valid() const { return m_cgroup_ != nullptr; }
-
-// bool SetCpuCoreLimit(double core_num);
-// bool SetCpuShares(uint64_t share);
-// bool SetMemoryLimitBytes(uint64_t memory_bytes);
-// bool SetMemorySwLimitBytes(uint64_t mem_bytes);
-// bool SetMemorySoftLimitBytes(uint64_t memory_bytes);
-// bool SetBlockioWeight(uint64_t weight);
-// bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool
-// set_read,
-//                      bool set_write, bool set_mknod);
-// bool SetControllerValue(CgroupConstant::Controller controller,
-//                         CgroupConstant::ControllerFile controller_file,
-//                         uint64_t value);
-// bool SetControllerStr(CgroupConstant::Controller controller,
-//                       CgroupConstant::ControllerFile controller_file,
-//                       const std::string &str);
-// bool SetControllerStrs(CgroupConstant::Controller controller,
-//                        CgroupConstant::ControllerFile controller_file,
-//                        const std::vector<std::string> &strs);
-// bool KillAllProcesses();
-
-// bool Empty();
-
-// bool MigrateProcIn(pid_t pid);
-
-//  private:
-//   bool ModifyCgroup_(CgroupConstant::ControllerFile controller_file);
-
-//   std::string m_cgroup_path_;
-//   mutable struct cgroup *m_cgroup_;
-// };
 
 class AllocatableResourceAllocator {
  public:
@@ -423,6 +380,8 @@ class CgroupManager {
   bool Mounted(CgroupConstant::Controller controller) {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
   }
+
+  void ControllersMounted();
 
   bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info);
 
