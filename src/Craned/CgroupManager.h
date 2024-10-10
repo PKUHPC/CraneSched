@@ -33,6 +33,12 @@ namespace Craned {
 
 namespace CgroupConstant {
 
+enum class CgroupVersion : uint64_t {
+  CGROUP_V1 = 0,
+  CGROUP_V2,
+  UNDEFINED,
+};
+
 enum class Controller : uint64_t {
   MEMORY_CONTROLLER = 0,
   CPUACCT_CONTROLLER,
@@ -40,6 +46,12 @@ enum class Controller : uint64_t {
   BLOCK_CONTROLLER,
   CPU_CONTROLLER,
   DEVICES_CONTROLLER,
+
+  MEMORY_CONTORLLER_V2,
+  CPU_CONTROLLER_V2,
+  IO_CONTROLLER_V2,
+  CPUSET_CONTROLLER_V2,
+  PIDS_CONTROLLER_V2,
 
   ControllerCount,
 };
@@ -57,18 +69,66 @@ enum class ControllerFile : uint64_t {
 
   DEVICES_DENY,
   DEVICES_ALLOW,
+  // V2
 
-  ControllerFileCount
+  CPU_WEIGHT_V2,
+  CPU_MAX_V2,
+
+  MEMORY_MAX_V2,
+  MEMORY_SWAP_MAX_V2,
+  MEMORY_HIGH_V2,
+
+  IO_WEIGHT_V2,
+  // root cgroup controller can't be change or created
+
+  ControllerFileCount,
 };
 
-inline const char *kTaskCgPathPrefix = "Crane_Task_";
+// enum class ControllerV2 : uint64_t{
+//   MEMORY_CONTORLLER_V2 = 0,
+//   CPU_CONTROLLER_V2,
+//   IO_CONTROLLER_V2,
+//   CGROUP_CONTOLLER_V2,
+//   CPUSET_CONTROLLER_V2,
+//   PIDS_CONTROLLER_V2,
 
+//   ControllerV2Count,
+// };
+
+// enum class ControllerV2File : uint64_t{
+//   CPU_WEIGHT = 0,
+//   CPU_MAX,
+
+//   MEMORY_MAX,
+//   MEMORY_SWAP_MAX,
+//   MEMORY_HIGH,
+
+//   IO_WEIGHT,
+
+//   CGROUP_SUBTREE_CONTROL,
+
+//   ControllerV2FileCount
+// };
+
+inline const char *kTaskCgPathPrefix = "Crane_Task_";
+inline const char *RootCgroupFullPath = "/sys/fs/cgroup";
 namespace Internal {
 
 constexpr std::array<std::string_view,
                      static_cast<size_t>(Controller::ControllerCount)>
     ControllerStringView{
-        "memory", "cpuacct", "freezer", "blkio", "cpu", "devices",
+        "memory",
+        "cpuacct",
+        "freezer",
+        "blkio",
+        "cpu",
+        "devices",
+        // V2
+        "memory",
+        "cpu",
+        "io",
+        "cpuset",
+        "pids",
     };
 
 constexpr std::array<std::string_view,
@@ -86,7 +146,19 @@ constexpr std::array<std::string_view,
 
         "devices.deny",
         "devices.allow",
+        // V2
+
+        "cpu.weight",
+        "cpu.max",
+
+        "memory.max",
+        "memory.swap.max",
+        "memory.high",
+
+        "io.weight",
+
     };
+
 }  // namespace Internal
 
 constexpr std::string_view GetControllerStringView(Controller controller) {
@@ -195,7 +267,7 @@ class Cgroup {
  public:
   Cgroup(const std::string &path, struct cgroup *handle)
       : m_cgroup_path_(path), m_cgroup_(handle) {}
-  ~Cgroup();
+  virtual ~Cgroup();
 
   struct cgroup *NativeHandle() { return m_cgroup_; }
 
@@ -204,14 +276,16 @@ class Cgroup {
   // Using the zombie object pattern as exceptions are not available.
   bool Valid() const { return m_cgroup_ != nullptr; }
 
-  bool SetCpuCoreLimit(double core_num);
-  bool SetCpuShares(uint64_t share);
-  bool SetMemoryLimitBytes(uint64_t memory_bytes);
-  bool SetMemorySwLimitBytes(uint64_t mem_bytes);
-  bool SetMemorySoftLimitBytes(uint64_t memory_bytes);
-  bool SetBlockioWeight(uint64_t weight);
-  bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
-                       bool set_write, bool set_mknod);
+  virtual bool SetCpuCoreLimit(double core_num) = 0;
+  virtual bool SetCpuShares(uint64_t share) = 0;
+  virtual bool SetMemoryLimitBytes(uint64_t memory_bytes) = 0;
+  virtual bool SetMemorySwLimitBytes(uint64_t mem_bytes) = 0;
+  virtual bool SetMemorySoftLimitBytes(uint64_t memory_bytes) = 0;
+  virtual bool SetBlockioWeight(uint64_t weight) = 0;
+  virtual bool SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+                               bool set_read, bool set_write,
+                               bool set_mknod) = 0;
+
   bool SetControllerValue(CgroupConstant::Controller controller,
                           CgroupConstant::ControllerFile controller_file,
                           uint64_t value);
@@ -221,18 +295,68 @@ class Cgroup {
   bool SetControllerStrs(CgroupConstant::Controller controller,
                          CgroupConstant::ControllerFile controller_file,
                          const std::vector<std::string> &strs);
-  bool KillAllProcesses();
+  virtual bool MigrateProcIn(pid_t pid) = 0;
 
-  bool Empty();
+  virtual bool KillAllProcesses() = 0;
 
-  bool MigrateProcIn(pid_t pid);
+  virtual bool Empty() = 0;
 
- private:
-  bool ModifyCgroup_(CgroupConstant::ControllerFile controller_file);
-
+ protected:
+  // CgroupConstant::CgroupVersion cg_vsion; // maybe for hybird mode
+  virtual bool ModifyCgroup_(CgroupConstant::ControllerFile controller_file);
   std::string m_cgroup_path_;
   mutable struct cgroup *m_cgroup_;
 };
+
+class CgroupV1 : public Cgroup {
+ public:
+  CgroupV1(const std::string &path, struct cgroup *handle)
+      : Cgroup(path, handle) {}
+  ~CgroupV1() = default;
+  bool SetCpuCoreLimit(double core_num) override;
+  bool SetCpuShares(uint64_t share) override;
+  bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
+  bool SetMemorySwLimitBytes(uint64_t mem_bytes) override;
+  bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
+  bool SetBlockioWeight(uint64_t weight) override;
+
+  bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
+                       bool set_write, bool set_mknod) override;
+
+  bool KillAllProcesses() override;
+
+  bool Empty() override;
+
+  bool MigrateProcIn(pid_t pid) override;
+
+ private:
+};
+
+class CgroupV2 : public Cgroup {
+ public:
+  CgroupV2(const std::string &path, struct cgroup *handle)
+      : Cgroup(path, handle) {}
+  ~CgroupV2() = default;
+  bool SetCpuCoreLimit(double core_num) override;
+  bool SetCpuShares(uint64_t share) override;
+  bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
+  bool SetMemorySwLimitBytes(uint64_t mem_bytes) override;
+  bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
+  bool SetBlockioWeight(uint64_t weight) override;
+
+  // use BPF
+  bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
+                       bool set_write, bool set_mknod) override;
+
+  bool KillAllProcesses() override;
+
+  bool Empty() override;
+
+  bool MigrateProcIn(pid_t pid) override;
+
+ private:
+};
+
 
 class AllocatableResourceAllocator {
  public:
@@ -254,6 +378,8 @@ class CgroupManager {
   bool Mounted(CgroupConstant::Controller controller) {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
   }
+
+  void ControllersMounted();
 
   bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info);
 
@@ -279,6 +405,10 @@ class CgroupManager {
 
   std::vector<EnvPair> GetResourceEnvListOfTask(task_id_t task_id);
 
+  void SetCgroupVersion(CgroupConstant::CgroupVersion v) { cg_version_ = v; }
+
+  CgroupConstant::CgroupVersion GetCgroupVersion() { return cg_version_; }
+
  private:
   static std::string CgroupStrByTaskId_(task_id_t task_id);
 
@@ -295,7 +425,13 @@ class CgroupManager {
   void RmAllTaskCgroups_();
   void RmAllTaskCgroupsUnderController_(CgroupConstant::Controller controller);
 
+  void RmAllTaskCgroupsV2_();
+  void RmCgroupsV2_(const std::string &root_cgroup_path,
+                    const std::string &match_str);
+
   ControllerFlags m_mounted_controllers_;
+
+  CgroupConstant::CgroupVersion cg_version_;
 
   util::AtomicHashMap<absl::flat_hash_map, task_id_t, CgroupSpec>
       m_task_id_to_cg_spec_map_;

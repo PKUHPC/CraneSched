@@ -96,3 +96,5 @@ fabric.properties
 
 # VS Code 
 .vscode/
+build/
+test/Craned/build/
