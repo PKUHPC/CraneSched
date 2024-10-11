@@ -569,7 +569,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
 
 CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     CranedStub *craned, grpc_connectivity_state new_state) {
-  CRANE_TRACE("Enter EstablishedCranedStateMachine_");
+  // CRANE_TRACE("Enter EstablishedCranedStateMachine_");
 
   std::optional<CqTag::Type> next_tag_type;
 
@@ -593,7 +593,7 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     // prev     current
     // READY -> IDLE (the only edge)
 
-    CRANE_TRACE("READY -> IDLE");
+    // CRANE_TRACE("READY -> IDLE");
     craned->m_invalid_ = true;
 
     next_tag_type = CqTag::kEstablishedCraned;
@@ -622,12 +622,12 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
   }
 
   if (next_tag_type.has_value()) {
-    CRANE_TRACE("Exit EstablishedCranedStateMachine_");
+    // CRANE_TRACE("Exit EstablishedCranedStateMachine_");
     return m_tag_sync_allocator_->new_object<CqTag>(
         CqTag{next_tag_type.value(), craned});
   }
 
-  CRANE_TRACE("Exit EstablishedCranedStateMachine_");
+  // CRANE_TRACE("Exit EstablishedCranedStateMachine_");
   return nullptr;
 }
 
