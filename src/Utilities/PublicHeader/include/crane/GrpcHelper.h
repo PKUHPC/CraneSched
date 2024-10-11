@@ -19,18 +19,6 @@
 #include <grpc++/grpc++.h>
 #include <spdlog/fmt/bundled/format.h>
 
-// gRPC Doc: If smaller than 10 seconds, ten seconds will be used instead.
-// See https://github.com/grpc/proposal/blob/master/A8-client-side-keepalive.md
-constexpr int64_t kCraneCtldGrpcClientPingSendIntervalSec = 10;
-
-// Server MUST have a high value of
-// GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS than the value of
-// GRPC_ARG_KEEPALIVE_TIME_MS. We set server's value to the multiple times of
-// the client's value plus 1s to tolerate 1 time packet dropping. See
-// https://github.com/grpc/grpc/blob/master/doc/keepalive.md
-constexpr int64_t kCranedGrpcServerPingRecvMinIntervalSec =
-    3 * kCraneCtldGrpcClientPingSendIntervalSec + 1;
-
 struct TlsCertificates {
   std::string DomainSuffix;
   std::string ServerCertFilePath;
@@ -55,7 +43,7 @@ void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& port,
                                          const TlsCertificates& certs);
 
-void SetKeepAliveChannelArgs(grpc::ChannelArguments* args);
+void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args);
 
 void SetTlsHostnameOverride(grpc::ChannelArguments* args,
                             const std::string& hostname,
