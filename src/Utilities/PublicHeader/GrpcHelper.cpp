@@ -97,6 +97,8 @@ void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args) {
   args->SetInt(GRPC_ARG_KEEPALIVE_TIME_MS, 20 * 1000);
   args->SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 10 * 1000);
   args->SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1);
+
+  args->SetInt(GRPC_ARG_CLIENT_IDLE_TIMEOUT_MS, INT_MAX);
 }
 
 void SetTlsHostnameOverride(grpc::ChannelArguments* args,
