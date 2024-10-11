@@ -31,7 +31,6 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  SetGrpcClientKeepAliveChannelArgs(&channel_args);
   if (g_config.ListenConf.UseTls)
     m_ctld_channel_ = CreateTcpTlsCustomChannelByHostname(
         server_address, g_config.CraneCtldListenPort,
