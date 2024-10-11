@@ -33,11 +33,14 @@ void ServerBuilderSetCompression(grpc::ServerBuilder* builder) {
 void ServerBuilderSetKeepAliveArgs(grpc::ServerBuilder* builder) {
   builder->AddChannelArgument(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA,
                               0 /*no limit*/);
-  builder->AddChannelArgument(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS,
-                              1 /*true*/);
   builder->AddChannelArgument(
       GRPC_ARG_HTTP2_MIN_RECV_PING_INTERVAL_WITHOUT_DATA_MS,
-      kCranedGrpcServerPingRecvMinIntervalSec * 1000 /*ms*/);
+      10 * 1000 /*10 sec*/);
+  builder->AddChannelArgument(GRPC_ARG_KEEPALIVE_TIME_MS, 10 * 60 * 1000);
+  builder->AddChannelArgument(GRPC_ARG_KEEPALIVE_TIMEOUT_MS,
+                              20 * 1000 /*20 sec*/);
+  builder->AddChannelArgument(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS,
+                              1 /*true*/);
   builder->AddChannelArgument(GRPC_ARG_HTTP2_MAX_PING_STRIKES,
                               0 /* unlimited */);
 }
@@ -81,7 +84,7 @@ void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                             grpc::SslServerCredentials(ssl_opts));
 }
 
-void SetKeepAliveChannelArgs(grpc::ChannelArguments* args) {
+void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args) {
   args->SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, 1000 /*ms*/);
   args->SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, 2 /*s*/ * 1000
                /*ms*/);
@@ -91,11 +94,11 @@ void SetKeepAliveChannelArgs(grpc::ChannelArguments* args) {
   // the socket will remain ESTABLISHED state even if that craned has died.
   // Open KeepAlive option in case of such situation.
   // See https://grpc.github.io/grpc/cpp/md_doc_keepalive.html
-  args->SetInt(GRPC_ARG_KEEPALIVE_TIME_MS,
-               kCraneCtldGrpcClientPingSendIntervalSec /*s*/ * 1000 /*ms*/);
-  args->SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 10 /*s*/ * 1000 /*ms*/);
-  args->SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1 /*true*/);
-  args->SetInt(GRPC_ARG_HTTP2_MAX_PINGS_WITHOUT_DATA, 0 /*no limit*/);
+  args->SetInt(GRPC_ARG_KEEPALIVE_TIME_MS, 20 * 1000);
+  args->SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 10 * 1000);
+  args->SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1);
+
+  args->SetInt(GRPC_ARG_CLIENT_IDLE_TIMEOUT_MS, INT_MAX);
 }
 
 void SetTlsHostnameOverride(grpc::ChannelArguments* args,
