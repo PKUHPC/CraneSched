@@ -44,7 +44,7 @@ option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
 option(CRANE_MIN_LOG_LEVEL "Set the minimal log level (INFO/DEBUG/TRACE)" OFF)
 # Options end here -------------------------------------------------------------------------------
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CRANE_ENABLE_TESTS ON)
