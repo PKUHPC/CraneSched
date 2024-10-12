@@ -11,7 +11,7 @@ else ()
     set(C_ARES_SRC_URL "https://github.com/c-ares/c-ares/releases/download/cares-1_18_1/c-ares-1.18.1.tar.gz")
     set(PROTOBUF_SRC_URL "https://github.com/protocolbuffers/protobuf/releases/download/v27.2/protobuf-27.2.tar.gz")
     set(RE2_SRC_URL "https://github.com/google/re2/archive/refs/tags/2022-06-01.tar.gz")
-    set(GRPC_SRC_URL "https://github.com/grpc/grpc/archive/refs/tags/v1.65.2.tar.gz")
+    set(GRPC_SRC_URL "https://github.com/grpc/grpc/archive/refs/tags/v1.67.0.tar.gz")
 endif ()
 
 set(ABSL_PROPAGATE_CXX_STD ON)
@@ -110,7 +110,7 @@ FetchContent_Declare(grpc
         OVERRIDE_FIND_PACKAGE
 
         URL ${GRPC_SRC_URL}
-        URL_HASH SHA256=0ff2e0a6abf195cf23b4ce808570bcbb2ff4b5bee453af0b45afd496e661f2c0
+        URL_HASH SHA256=af0638f73e4452e22e295f8b3f452518234254104713a08497f3d3aaa76733ad
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(grpc)

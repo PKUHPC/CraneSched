@@ -44,7 +44,7 @@ if(VERSION_CONTENT STREQUAL "")
 endif()
 
 project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
-# check and set compiler 
+# check and set compiler
 set(REQUIRED_GNU_VERSION 13.0.0)
 set(REQUIRED_CLANG_VERSION 19.0.0)
 set(REQUIRED_BPF_CLANG_VERSION 17.0.0)
@@ -115,9 +115,7 @@ option(CRANE_MIN_LOG_LEVEL "Set the minimal log level (INFO/DEBUG/TRACE)" OFF)
 option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
 # Options end here -------------------------------------------------------------------------------
 
-
-
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CRANE_ENABLE_TESTS ON)

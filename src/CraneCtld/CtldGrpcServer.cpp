@@ -426,7 +426,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
           request->account(), request->value(), request->force());
       break;
     default:
-      break;
+      std::unreachable();
     }
   } else {
     switch (request->modify_field()) {
@@ -451,7 +451,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
           request->account(), request->value(), request->force());
       break;
     default:
-      break;
+      std::unreachable();
     }
   }
 
@@ -681,7 +681,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
                                        request->account(), request->block());
     break;
   default:
-    break;
+    std::unreachable();
   }
 
   if (res) {
