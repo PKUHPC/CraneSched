@@ -22,7 +22,7 @@
 #include "DbClient.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
-#include "crane/expected.h"
+// #include "crane/expected.h"
 
 namespace Ctld {
 
@@ -40,7 +40,8 @@ class AccountManager {
   using QosMapMutexSharedPtr = util::ScopeConstSharedPtr<
       std::unordered_map<std::string, std::unique_ptr<Qos>>, util::rw_mutex>;
 
-  using SuccessOrErrCode = tl::expected<bool, crane::grpc::ErrCode>;
+  using SuccessOrErrCode = std::expected<bool, crane::grpc::ErrCode>;
+  using CraneErrCode = crane::grpc::ErrCode;
 
   struct Result {
     bool ok{false};

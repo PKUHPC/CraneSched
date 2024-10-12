@@ -46,6 +46,7 @@
 #include <utility>
 #include <variant>
 #include <vector>
+#include <expected>
 
 // backward-cpp
 #include <backward.hpp>
