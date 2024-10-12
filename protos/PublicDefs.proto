@@ -329,34 +329,54 @@ enum ErrCode {
   ERR_USER_ACCOUNT_MISMATCH = 10008; // User does not belong to the account
   ERR_NO_ACCOUNT_SPECIFIED = 10009;
   
-  ERR_INVALID_ACCOUNT = 20001;  // Invalid account
-  ERR_DUPLICATE_ACCOUNT = 20002;  // Duplicate account insertion
-  ERR_INVALID_PARENTACCOUNT = 20003;  // Invalid parent account
-  ERR_DELETE_ACCOUNT = 20004;   // Account has child nodes
+  ERR_INVALID_ACCOUNT = 10010;  // Invalid account
+  ERR_DUPLICATE_ACCOUNT = 10011;  // Duplicate account insertion
+  ERR_INVALID_PARENTACCOUNT = 10012;  // Invalid parent account
+  ERR_DELETE_ACCOUNT = 10013;   // Account has child nodes
   
-  ERR_INVALID_PARTITION = 30001;  // Invalid partition, partition does not exist
-  ERR_ALLOWED_PARTITION = 30002; // Account/user does not include this partition
-  ERR_DUPLICATE_PARTITION = 30003; // Account/user duplicate insertion
-  ERR_PARENT_ALLOWED_PARTITION = 30004; // Parent account does not include this partition
-  ERR_USER_EMPTY_PARTITION = 30005; // Cannot add QoS when user has no partition
-  ERR_CHILD_HAS_PARTITION = 30006; // Partition '{}' is used by some descendant node of the account '{}'. Ignoring this constraint with forced operation.
+  ERR_INVALID_PARTITION = 10014;  // Invalid partition, partition does not exist
+  ERR_ALLOWED_PARTITION = 10015; // Account/user does not include this partition
+  ERR_DUPLICATE_PARTITION = 10016; // Account/user duplicate insertion
+  ERR_PARENT_ALLOWED_PARTITION = 10017; // Parent account does not include this partition
+  ERR_USER_EMPTY_PARTITION = 10018; // Cannot add QoS when user has no partition
+  ERR_CHILD_HAS_PARTITION = 10019; // Partition '{}' is used by some descendant node of the account '{}'. Ignoring this constraint with forced operation.
   
-  ERR_INVALID_QOS = 40001;  // Invalid QoS, QoS does not exist
-  ERR_DB_DUPLICATE_QOS = 40004;  // Duplicate QoS insertion in the database.
-  ERR_DELETE_QOS = 40005;  // QoS reference count is not zero.
-  ERR_CONVERT_TO_INTERGER = 40006;  // String to integer conversion failed
-  ERR_TIME_LIMIT = 40007;  // Invalid time value
-  ERR_ALLOWED_QOS = 40008; // Account/user does not include this QoS.
-  ERR_DUPLICATE_QOS = 40009; // Account/user duplicate insertion.
-  ERR_PARENT_ALLOWED_QOS = 40010; // Parent account does not include this QoS.
-  ERR_SET_ALLOWED_QOS = 40011; // QoS '{}' is the default QoS of partition '{}', but not found in the new QoS list.
-  ERR_ALLOWED_DEFAULT_QOS = 40012; // Default QoS is not in the allowed QoS list
-  ERR_DUPLICATE_DEFAULT_QOS = 40013; // Duplicate default QoS setting
-  ERR_CHILD_HAS_DEFAULT_QOS = 40014; // Someone is using QoS '{}' as default QoS. Ignoring this constraint with forced deletion, the deleted default QoS is randomly replaced with one of the remaining items in the QoS list.
-  ERR_CHILD_HAS_QOS = 40015; // QoS '{}' is used by some descendant node or itself of the account '{}'. Ignoring this constraint with forced operation.
-  ERR_SET_DEFAULT_QOS = 40016; // Qos '{}' not in allowed qos list or is already the default qos
+  ERR_INVALID_QOS = 10020;  // Invalid QoS, QoS does not exist
+  ERR_DB_DUPLICATE_QOS = 10021;  // Duplicate QoS insertion in the database.
+  ERR_DELETE_QOS = 10022;  // QoS reference count is not zero.
+  ERR_CONVERT_TO_INTERGER = 10023;  // String to integer conversion failed
+  ERR_TIME_LIMIT = 10024;  // Invalid time value
+  ERR_ALLOWED_QOS = 10025; // Account/user does not include this QoS.
+  ERR_DUPLICATE_QOS = 10026; // Account/user duplicate insertion.
+  ERR_PARENT_ALLOWED_QOS = 10027; // Parent account does not include this QoS.
+  ERR_SET_ALLOWED_QOS = 10028; // QoS '{}' is the default QoS of partition '{}', but not found in the new QoS list.
+  ERR_ALLOWED_DEFAULT_QOS = 10029; // Default QoS is not in the allowed QoS list
+  ERR_DUPLICATE_DEFAULT_QOS = 10030; // Duplicate default QoS setting
+  ERR_CHILD_HAS_DEFAULT_QOS = 10031; // Someone is using QoS '{}' as default QoS. Ignoring this constraint with forced deletion, the deleted default QoS is randomly replaced with one of the remaining items in the QoS list.
+  ERR_CHILD_HAS_QOS = 10032; // QoS '{}' is used by some descendant node or itself of the account '{}'. Ignoring this constraint with forced operation.
+  ERR_SET_DEFAULT_QOS = 10033; // Qos '{}' not in allowed qos list or is already the default qos
 
-  ERR_UPDATE_DATABASE = 50001;  // Database update failed
+  ERR_UPDATE_DATABASE = 10034;  // Database update failed
+
+  ERR_GENERIC_FAILURE = 10100;
+  ERR_NO_RESOURCE = 10101;
+  ERR_NON_EXISTENT = 10102;
+  ERR_INVALID_NODE_NUM = 10103;
+  ERR_SYSTEM_ERR = 10104;
+  ERR_EXISTING_TASK = 10105;
+  ERR_INVALID_PARAM = 10106;
+  ERR_STOP = 10107;
+  ERR_PERMISSION_DENIED = 10108;
+  ERR_CONNECTION_TIMEOUT = 10109;
+  ERR_CONNECTION_ABORTED = 10110;
+  ERR_RPC_FAILURE = 10111;
+  ERR_TOKEN_REQUEST_FAILURE = 10112;
+  ERR_STREAM_BROKEN = 10113;
+  ERR_INVALID_STUB = 10114;
+  ERR_CGROUP = 10115;
+  ERR_PROTOBUF = 10116;
+  ERR_LIB_EVENT = 10117;
+  ERR_NO_AVAIL_NODE = 10118;
  }
  
 
