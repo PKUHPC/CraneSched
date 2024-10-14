@@ -2004,9 +2004,13 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   bool first_pass{true};
 
   std::list<CranedId> craned_indexes_;
+  std::list<CranedId> available_craned_indexes_;
+
+  ResourceV2 allocated_res;
+  task->allocated_res_view.SetToZero();
 
   auto task_num_node_id_it = node_selection_info.task_num_node_id_map.begin();
-  while (selected_node_cnt < task->node_num &&
+  while (available_craned_indexes_.size() < task->node_num &&
          task_num_node_id_it !=
              node_selection_info.task_num_node_id_map.end()) {
     auto craned_index = task_num_node_id_it->second;
@@ -2045,17 +2049,52 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
                     task->TaskId(), craned_index);
       }
     } else {
-      craned_indexes_.emplace_back(craned_index);
-      ++selected_node_cnt;
+      if (selected_node_cnt < task->node_num) {
+        craned_indexes_.emplace_back(craned_index);
+        ++selected_node_cnt;
+      }
+
+      ResourceInNode feasible_res;
+      bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
+          craned_meta->res_avail, &feasible_res);
+      if (!ok) {
+        CRANE_DEBUG(
+            "Task #{} needs more resource than that of craned {}. "
+            "Craned resource might have been changed.",
+            task->TaskId(), craned_index);
+        return false;
+      }
+
+      auto& time_avail_res_map =
+          node_selection_info.node_time_avail_res_map.at(craned_index);
+      bool can_run = true;
+      for (const auto& [time, res] : time_avail_res_map) {
+        if (time >= now + task->time_limit) break;
+        if (!(feasible_res <= res)) {
+          can_run = false;
+          break;
+        }
+      }
+      if (can_run) {
+        available_craned_indexes_.emplace_back(craned_index);
+        allocated_res.AddResourceInNode(craned_index, feasible_res);
+        task->allocated_res_view += feasible_res;
+      }
     }
     ++task_num_node_id_it;
+  }
+
+  if (available_craned_indexes_.size() == task->node_num) {
+    *craned_ids = std::move(available_craned_indexes_);
+    *start_time = now;
+    task->SetResources(std::move(allocated_res));
+    return true;
   }
 
   if (selected_node_cnt < task->node_num) return false;
   CRANE_ASSERT_MSG(selected_node_cnt == task->node_num,
                    "selected_node_cnt != task->node_num");
 
-  ResourceV2 allocated_res;
   task->allocated_res_view.SetToZero();
 
   for (const auto& craned_id : craned_indexes_) {
