@@ -86,7 +86,11 @@ struct Config {
     std::string CraneCtldListenPort;
 
     bool UseTls{false};
-    TlsCertificates Certs;
+    TlsCertificates ExternalCerts;
+    TlsCertificates InternalCerts;
+    TlsCertificates CforedCerts;
+    std::string InternalCaContent;
+    std::string DomainSuffix;
   };
   CraneCtldListenConf ListenConf;
 

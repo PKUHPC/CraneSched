@@ -32,11 +32,11 @@ constexpr int64_t kCranedGrpcServerPingRecvMinIntervalSec =
     3 * kCraneCtldGrpcClientPingSendIntervalSec + 1;
 
 struct TlsCertificates {
-  std::string DomainSuffix;
   std::string ServerCertFilePath;
   std::string ServerCertContent;
   std::string ServerKeyFilePath;
   std::string ServerKeyContent;
+  std::string DomainSuffix;
 };
 
 void ServerBuilderSetCompression(grpc::ServerBuilder* builder);
