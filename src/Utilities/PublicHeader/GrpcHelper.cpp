@@ -77,10 +77,10 @@ void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
   // CA certificate. CA certificate is not needed.
   // Since we use the same cert/key pair for both cranectld/craned,
   // pem_root_certs is set to the same certificate.
-  ssl_opts.pem_root_certs = certs.ServerCertContent;
+  // ssl_opts.pem_root_certs = certs.ServerCertContent;
   ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
   ssl_opts.client_certificate_request =
-      GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
+      GRPC_SSL_DONT_REQUEST_CLIENT_CERTIFICATE;
 
   builder->AddListeningPort(listen_addr_port,
                             grpc::SslServerCredentials(ssl_opts));

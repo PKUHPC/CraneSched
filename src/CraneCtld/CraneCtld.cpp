@@ -147,52 +147,53 @@ void ParseConfig(int argc, char** argv) {
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
       if (config["UseTls"] && config["UseTls"].as<bool>()) {
-        TlsCertificates& tls_certs = g_config.ListenConf.Certs;
+        TlsCertificates& external_certs = g_config.ListenConf.ExternalCerts;
+        TlsCertificates& internal_certs = g_config.ListenConf.InternalCerts;
 
         g_config.ListenConf.UseTls = true;
 
         if (config["DomainSuffix"])
-          tls_certs.DomainSuffix = config["DomainSuffix"].as<std::string>();
+          g_config.ListenConf.DomainSuffix = config["DomainSuffix"].as<std::string>();
 
-        if (config["ServerCertFilePath"]) {
-          tls_certs.ServerCertFilePath =
-              config["ServerCertFilePath"].as<std::string>();
+        if (config["CranectldExternalCertFilePath"]) {
+          external_certs.ServerCertFilePath =
+              config["CranectldExternalCertFilePath"].as<std::string>();
 
           try {
-            tls_certs.ServerCertContent =
-                util::ReadFileIntoString(tls_certs.ServerCertFilePath);
+            external_certs.ServerCertContent =
+                util::ReadFileIntoString(external_certs.ServerCertFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (tls_certs.ServerCertContent.empty()) {
+          if (external_certs.ServerCertContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerCertFilePath "
+                "UseTls is true, but the file specified by CranectldExternalCertFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but ServerCertFilePath is empty");
+          CRANE_ERROR("UseTls is true, but CranectldExternalCertFilePath is empty");
           std::exit(1);
         }
 
-        if (config["ServerKeyFilePath"]) {
-          tls_certs.ServerKeyFilePath =
-              config["ServerKeyFilePath"].as<std::string>();
+        if (config["CranectldExternalKeyFilePath"]) {
+          external_certs.ServerKeyFilePath =
+              config["CranectldExternalKeyFilePath"].as<std::string>();
 
           try {
-            tls_certs.ServerKeyContent =
-                util::ReadFileIntoString(tls_certs.ServerKeyFilePath);
+            external_certs.ServerKeyContent =
+                util::ReadFileIntoString(external_certs.ServerKeyFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (tls_certs.ServerKeyContent.empty()) {
+          if (external_certs.ServerKeyContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerKeyFilePath "
+                "UseTls is true, but the file specified by CranectldExternalKeyFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but ServerKeyFilePath is empty");
+          CRANE_ERROR("UseTls is true, but CranectldExternalKeyFilePath is empty");
           std::exit(1);
         }
       } else {

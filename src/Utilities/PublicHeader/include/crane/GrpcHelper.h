@@ -22,11 +22,11 @@
 #include <spdlog/fmt/bundled/format.h>
 
 struct TlsCertificates {
-  std::string DomainSuffix;
   std::string ServerCertFilePath;
   std::string ServerCertContent;
   std::string ServerKeyFilePath;
   std::string ServerKeyContent;
+  std::string DomainSuffix;
 };
 
 void ServerBuilderSetCompression(grpc::ServerBuilder* builder);

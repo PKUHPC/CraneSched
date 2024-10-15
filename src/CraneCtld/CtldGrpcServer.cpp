@@ -880,7 +880,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   if (listen_conf.UseTls) {
     ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
                                         listen_conf.CraneCtldListenPort,
-                                        listen_conf.Certs);
+                                        listen_conf.ExternalCerts);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
                                              listen_conf.CraneCtldListenPort);
