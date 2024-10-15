@@ -593,6 +593,7 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     // prev     current
     // READY -> IDLE (the only edge)
 
+    // CRANE_TRACE("READY -> IDLE");
     craned->m_invalid_ = true;
 
     next_tag_type = CqTag::kEstablishedCraned;
@@ -700,7 +701,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
    * https://grpc.github.io/grpc/cpp/md_doc_connection-backoff.html
    */
   grpc::ChannelArguments channel_args;
-  SetKeepAliveChannelArgs(&channel_args);
+  SetGrpcClientKeepAliveChannelArgs(&channel_args);
 
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
