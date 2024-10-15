@@ -22,6 +22,8 @@
 #include <absl/strings/strip.h>
 #include <pthread.h>
 
+#include <regex>
+
 #include "crane/Logger.h"
 
 namespace util {
@@ -419,4 +421,71 @@ uint32_t CalcConfigCRC32(const YAML::Node &config) {
             normalized.size());
   return crc;
 }
+
+std::expected<CertPair, bool> ParseCertificate(const std::string &cert_pem) {
+  // Load the certificate content into a BIO (memory buffer).
+  BIO *bio = BIO_new_mem_buf(cert_pem.data(), cert_pem.size());
+  if (!bio) return std::unexpected(false);
+
+  // Read a PEM-formatted certificate.
+  X509 *cert = PEM_read_bio_X509(bio, nullptr, nullptr, nullptr);
+  if (!cert) {
+    BIO_free(bio);
+    return std::unexpected(false);
+  }
+
+  // Retrieve Subject information.
+  X509_NAME *subject = X509_get_subject_name(cert);
+  if (!subject) {
+    X509_free(cert);
+    BIO_free(bio);
+    return std::unexpected(false);
+  }
+
+  char cn[256];
+  int len = X509_NAME_get_text_by_NID(subject, NID_commonName, cn, sizeof(cn));
+  if (len <= 0) {
+    X509_free(cert);
+    BIO_free(bio);
+    return std::unexpected(false);
+  }
+
+  ASN1_INTEGER *serial = X509_get_serialNumber(cert);
+  if (!serial) {
+    X509_free(cert);
+    BIO_free(bio);
+    return std::unexpected(false);
+  }
+
+  BIGNUM *bn = ASN1_INTEGER_to_BN(serial, nullptr);
+  if (!bn) {
+    X509_free(cert);
+    BIO_free(bio);
+    return std::unexpected(false);
+  }
+
+  char *hex = BN_bn2hex(bn);
+  if (!hex) {
+    BN_free(bn);
+    X509_free(cert);
+    BIO_free(bio);
+    return std::unexpected(false);
+  }
+  std::string serial_number = std::string(hex);
+  std::regex re("(.{2})");
+  serial_number = std::regex_replace(serial_number, re, "$1:");
+  serial_number.pop_back();  // remove the last colon
+
+  std::transform(serial_number.begin(), serial_number.end(),
+                 serial_number.begin(), ::tolower);
+
+  // free the memory
+  OPENSSL_free(hex);
+  BN_free(bn);
+  X509_free(cert);
+  BIO_free(bio);
+
+  return CertPair{cn, serial_number};
+}
+
 }  // namespace util

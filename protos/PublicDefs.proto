@@ -487,9 +487,14 @@ enum ErrCode {
   ERR_NOT_IN_ALLOWED_LIST = 67;  // The current account is not in the allowed account list for the partition.
   ERR_IN_DENIED_LIST = 68;       // The current account has been explicitly added to the deny list for the partition.
   ERR_EBPF = 69;
-  ERR_SUPERVISOR = 70;
 
+  ERR_SUPERVISOR = 70;
   ERR_SHUTTING_DOWN = 71;
+  ERR_SIGN_CERTIFICATE = 72;
+  ERR_DUPLICATE_CERTIFICATE = 73;
+  ERR_REVOKE_CERTIFICATE = 74;
+
+  ERR_IDENTITY_MISMATCH = 75;
 }
 
 enum EntityType {

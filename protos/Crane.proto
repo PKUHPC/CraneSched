@@ -861,6 +861,28 @@ message EnableAutoPowerControlReply {
   repeated string not_modified_reasons = 3;
 }
 
+message SignUserCertificateRequest {
+  uint32 uid = 1;
+  string csr_content = 2;
+  string alt_names = 3;   // "localhost, *.domainSuffix"
+}
+
+message SignUserCertificateResponse {
+  bool ok = 1;
+  string certificate = 2;
+  string external_certificate = 3;
+  ErrCode reason = 4;
+}
+
+message ResetUserCredentialRequest {
+  repeated string user_list = 1;
+}
+
+message ResetUserCredentialReply {
+  bool ok = 1;
+  repeated RichError rich_error_list = 2;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -900,6 +922,8 @@ service CraneCtld {
   rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
 
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
+
+  rpc ResetUserCredential(ResetUserCredentialRequest) returns (ResetUserCredentialReply);
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
