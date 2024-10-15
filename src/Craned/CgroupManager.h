@@ -86,34 +86,12 @@ enum class ControllerFile : uint64_t {
   ControllerFileCount,
 };
 
-// enum class ControllerV2 : uint64_t{
-//   MEMORY_CONTORLLER_V2 = 0,
-//   CPU_CONTROLLER_V2,
-//   IO_CONTROLLER_V2,
-//   CGROUP_CONTOLLER_V2,
-//   CPUSET_CONTROLLER_V2,
-//   PIDS_CONTROLLER_V2,
 
-//   ControllerV2Count,
-// };
-
-// enum class ControllerV2File : uint64_t{
-//   CPU_WEIGHT = 0,
-//   CPU_MAX,
-
-//   MEMORY_MAX,
-//   MEMORY_SWAP_MAX,
-//   MEMORY_HIGH,
-
-//   IO_WEIGHT,
-
-//   CGROUP_SUBTREE_CONTROL,
-
-//   ControllerV2FileCount
-// };
 
 inline const char *kTaskCgPathPrefix = "Crane_Task_";
 inline const char *RootCgroupFullPath = "/sys/fs/cgroup";
+inline const char *BpfObjectFile = "/etc/crane/cgroup_dev_bpf.o";
+inline const char *BpfDeviceMapFile = "/sys/fs/bpf/dev_map";
 namespace Internal {
 
 constexpr std::array<std::string_view,
@@ -347,6 +325,30 @@ class CgroupV2 : public Cgroup {
   bool SetBlockioWeight(uint64_t weight) override;
 
   // use BPF
+  /**
+  * Device controller manages access to device files. 
+  It includes both creation of new device files (using mknod), 
+  and access to the existing device files.
+
+  Cgroup v2 device controller has no interface files and
+  is implemented on top of cgroup BPF. To control access 
+  to device files, a user may create bpf programs of the
+  BPF_CGROUP_DEVICE type and attach them to cgroups. 
+  On an attempt to access a device file, corresponding BPF 
+  programs will be executed, and depending on the return 
+  value the attempt will succeed or fail with -EPERM.
+
+  A BPF_CGROUP_DEVICE program takes a pointer to the 
+  bpf_cgroup_dev_ctx structure, which describes the device 
+  access attempt: access type (mknod/read/write) and device
+  (type, major and minor numbers). 
+  If the program returns 0, the attempt fails with -EPERM, otherwise it succeeds.
+
+  An example of BPF_CGROUP_DEVICE program may be found 
+  in the kernel source tree in the tools/testing/selftests/bpf/dev_cgroup.c file.
+  reference from:
+  https://www.kernel.org/doc/html/v5.10/admin-guide/cgroup-v2.html#device-controller
+  */
   bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
                        bool set_write, bool set_mknod) override;
 
@@ -430,6 +432,7 @@ class CgroupManager {
   void RmAllTaskCgroupsV2_();
   void RmCgroupsV2_(const std::string &root_cgroup_path,
                     const std::string &match_str);
+  void RmBpfDevMap();
 
   ControllerFlags m_mounted_controllers_;
 

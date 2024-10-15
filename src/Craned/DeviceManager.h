@@ -23,6 +23,19 @@
 
 namespace Craned {
 
+enum BPF_PERMISSION{
+    ALLOW = 0,
+    DENY
+};
+
+struct BpfDeviceMeta {
+    unsigned int major;
+    unsigned int minor;
+    int permission;
+    short access;
+    short type;
+};
+
 struct BasicDevice {
   std::string dev_id;
 
