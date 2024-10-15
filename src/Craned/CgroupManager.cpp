@@ -23,13 +23,15 @@
 
 #include "CgroupManager.h"
 
+#include <bpf/bpf.h>
+#include <bpf/libbpf.h>
 #include <dirent.h>
 #include <libcgroup.h>
+#include <linux/bpf.h>
 
 #include "CranedPublicDefs.h"
 #include "DeviceManager.h"
 #include "crane/PluginClient.h"
-#include "crane/Logger.h"
 #include "crane/String.h"
 
 namespace Craned {
@@ -132,7 +134,6 @@ int CgroupManager::Init() {
   else if ((GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2)) {
     struct cgroup *root = nullptr;
     int ret;
-    struct cgroup_controller *group_controller = nullptr;
     if ((root = cgroup_new_cgroup("/")) == nullptr) {
       CRANE_WARN("Unable to construct new root cgroup object.");
       return -1;
@@ -142,40 +143,35 @@ int CgroupManager::Init() {
       return -1;
     }
 
-    if ((group_controller = cgroup_get_controller(
-             root,
-             GetControllerStringView(Controller::CPU_CONTROLLER_V2).data())) !=
+    if ((cgroup_get_controller(
+            root,
+            GetControllerStringView(Controller::CPU_CONTROLLER_V2).data())) !=
         nullptr) {
       m_mounted_controllers_ |= ControllerFlags{Controller::CPU_CONTROLLER_V2};
-      group_controller = nullptr;
     }
-    if ((group_controller = cgroup_get_controller(
-             root, GetControllerStringView(Controller::MEMORY_CONTORLLER_V2)
-                       .data())) != nullptr) {
+    if ((cgroup_get_controller(
+            root, GetControllerStringView(Controller::MEMORY_CONTORLLER_V2)
+                      .data())) != nullptr) {
       m_mounted_controllers_ |=
           ControllerFlags{Controller::MEMORY_CONTORLLER_V2};
-      group_controller = nullptr;
     }
-    if ((group_controller = cgroup_get_controller(
-             root, GetControllerStringView(Controller::CPUSET_CONTROLLER_V2)
-                       .data())) != nullptr) {
+    if ((cgroup_get_controller(
+            root, GetControllerStringView(Controller::CPUSET_CONTROLLER_V2)
+                      .data())) != nullptr) {
       m_mounted_controllers_ |=
           ControllerFlags{Controller::CPUSET_CONTROLLER_V2};
-      group_controller = nullptr;
     }
-    if ((group_controller = cgroup_get_controller(
-             root,
-             GetControllerStringView(Controller::IO_CONTROLLER_V2).data())) !=
+    if ((cgroup_get_controller(
+            root,
+            GetControllerStringView(Controller::IO_CONTROLLER_V2).data())) !=
         nullptr) {
       m_mounted_controllers_ |= ControllerFlags{Controller::IO_CONTROLLER_V2};
-      group_controller = nullptr;
     }
-    if ((group_controller = cgroup_get_controller(
-             root,
-             GetControllerStringView(Controller::PIDS_CONTROLLER_V2).data())) !=
+    if ((cgroup_get_controller(
+            root,
+            GetControllerStringView(Controller::PIDS_CONTROLLER_V2).data())) !=
         nullptr) {
       m_mounted_controllers_ |= ControllerFlags{Controller::PIDS_CONTROLLER_V2};
-      group_controller = nullptr;
     }
 
     ControllersMounted();
@@ -188,6 +184,7 @@ int CgroupManager::Init() {
   if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
     RmAllTaskCgroups_();
   } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
+    RmBpfDevMap();
     RmAllTaskCgroupsV2_();
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
@@ -203,14 +200,15 @@ void CgroupManager::RmAllTaskCgroups_() {
       CgroupConstant::Controller::DEVICES_CONTROLLER);
 }
 
-void CgroupManager::ControllersMounted(){
+void CgroupManager::ControllersMounted() {
   using namespace CgroupConstant;
-  if(cg_version_ == CgroupVersion::CGROUP_V1){
+  if (cg_version_ == CgroupVersion::CGROUP_V1) {
     if (!Mounted(Controller::BLOCK_CONTROLLER)) {
       CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
     }
     if (!Mounted(Controller::FREEZE_CONTROLLER)) {
-      CRANE_WARN("Cgroup controller for process management is not available.\n");
+      CRANE_WARN(
+          "Cgroup controller for process management is not available.\n");
     }
     if (!Mounted(Controller::CPUACCT_CONTROLLER)) {
       CRANE_WARN("Cgroup controller for CPU accounting is not available.\n");
@@ -224,8 +222,7 @@ void CgroupManager::ControllersMounted(){
     if (!Mounted(Controller::DEVICES_CONTROLLER)) {
       CRANE_WARN("Cgroup controller for DEVICES is not available.\n");
     }
-  } else if(cg_version_ == CgroupVersion::CGROUP_V2){
-
+  } else if (cg_version_ == CgroupVersion::CGROUP_V2) {
     if (!Mounted(Controller::CPU_CONTROLLER_V2)) {
       CRANE_WARN("Cgroup controller for CPU is not available.\n");
     }
@@ -242,7 +239,6 @@ void CgroupManager::ControllersMounted(){
       CRANE_WARN("Cgroup controller for pids is not available.\n");
     }
   }
-
 }
 
 /*
@@ -684,6 +680,19 @@ void CgroupManager::RmCgroupsV2_(const std::string &root_cgroup_path,
       CRANE_ERROR("Failed to remove cgroup {}: {}", tf.c_str(),
                   strerror(errno));
     }
+  }
+}
+
+void CgroupManager::RmBpfDevMap() {
+  try {
+    if (std::filesystem::exists(CgroupConstant::BpfDeviceMapFile)) {
+      std::filesystem::remove(CgroupConstant::BpfDeviceMapFile);
+      CRANE_TRACE("Successfully removed: {}", CgroupConstant::BpfDeviceMapFile);
+    } else {
+      CRANE_TRACE("File does not exist: {}", CgroupConstant::BpfDeviceMapFile);
+    }
+  } catch (const std::filesystem::filesystem_error &e) {
+    CRANE_ERROR("Error: {}", e.what());
   }
 }
 
@@ -1248,7 +1257,10 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 }
 
 /**
- *
+ *If a controller implements an absolute resource guarantee and/or limit,
+ * the interface files should be named “min” and “max” respectively.
+ * If a controller implements best effort resource guarantee and/or limit,
+ * the interface files should be named “low” and “high” respectively.
  */
 
 bool CgroupV2::SetCpuCoreLimit(double core_num) {
@@ -1293,7 +1305,106 @@ bool CgroupV2::SetBlockioWeight(uint64_t weight) {
 
 bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
                                bool set_read, bool set_write, bool set_mknod) {
-  // TODO
+  struct bpf_object *obj;
+  struct bpf_map *dev_map;
+  int prog_fd, cgroup_fd;
+  struct bpf_program *prog;
+  std::string slash = "/";
+  std::string cgroup_path =
+      CgroupConstant::RootCgroupFullPath + slash + m_cgroup_path_;
+  cgroup_fd = open(cgroup_path.c_str(), O_RDONLY);
+  if (cgroup_fd < 0) {
+    CRANE_ERROR("Failed to open cgroup");
+    return 1;
+  }
+
+  obj = bpf_object__open_file(CgroupConstant::BpfObjectFile, NULL);
+  if (!obj) {
+    CRANE_ERROR("Failed to open BPF object file {}",
+                CgroupConstant::BpfObjectFile);
+    return false;
+  }
+
+  if (bpf_object__load(obj)) {
+    CRANE_ERROR("Failed to load BPF object {}", CgroupConstant::BpfObjectFile);
+    fprintf(stderr, "Failed to load BPF object\n");
+    return false;
+  }
+
+  prog = bpf_object__find_program_by_name(obj, "device_access");
+  if (!prog) {
+    CRANE_ERROR("Failed to find BPF program {}", CgroupConstant::BpfObjectFile);
+    return false;
+  }
+
+  prog_fd = bpf_program__fd(prog);
+  if (prog_fd < 0) {
+    CRANE_ERROR("Failed to get BPF program file descriptor {}",
+                CgroupConstant::BpfObjectFile);
+    return false;
+  }
+
+  dev_map = bpf_object__find_map_by_name(obj, "dev_map");
+  if (!dev_map) {
+    CRANE_ERROR("Failed to find BPF map {}", "dev_map");
+    return false;
+  }
+
+  short access = 0;
+  if (set_read) access |= BPF_DEVCG_ACC_READ;
+  if (set_write) access |= BPF_DEVCG_ACC_WRITE;
+  if (set_mknod) access |= BPF_DEVCG_ACC_MKNOD;
+
+  std::vector<BpfDeviceMeta> bpf_devices = {};
+  for (const auto &[_, this_device] : Craned::g_this_node_device) {
+    if (devices.contains(this_device->dev_id)) {
+      for (const auto &dev_meta : this_device->device_metas) {
+        short op_type = 0;
+        if (dev_meta.op_type == 'c') {
+          op_type |= BPF_DEVCG_DEV_CHAR;
+        } else if (dev_meta.op_type == 'b') {
+          op_type |= BPF_DEVCG_DEV_BLOCK;
+        } else {
+          op_type |= 0xffff;
+        }
+        bpf_devices.push_back({dev_meta.major, dev_meta.minor,
+                               BPF_PERMISSION::ALLOW, access, op_type});
+      }
+    } else {
+      for (const auto &dev_meta : this_device->device_metas) {
+        short op_type = 0;
+        if (dev_meta.op_type == 'c') {
+          op_type |= BPF_DEVCG_DEV_CHAR;
+        } else if (dev_meta.op_type == 'b') {
+          op_type |= BPF_DEVCG_DEV_BLOCK;
+        } else {
+          op_type |= 0xffff;
+        }
+        bpf_devices.push_back({dev_meta.major, dev_meta.minor,
+                               BPF_PERMISSION::DENY, access, op_type});
+      }
+    }
+  }
+
+  for (int i = 0; i < bpf_devices.size(); i++) {
+    int key = (bpf_devices[i].major << 16) | bpf_devices[i].minor;
+    if (bpf_map__update_elem(dev_map, &key, sizeof(key), &bpf_devices[i],
+                             sizeof(BpfDeviceMeta), BPF_ANY)) {
+      CRANE_ERROR("Failed to update BPF map major {},minor {}",
+                  bpf_devices[i].major, bpf_devices[i].minor);
+      return false;
+    }
+  }
+
+  if (bpf_prog_attach(prog_fd, cgroup_fd, BPF_CGROUP_DEVICE, 0) < 0) {
+    CRANE_ERROR("Failed to attach BPF program");
+    return false;
+  }
+  // attach_bpf_program_to_cgroup(prog_fd, CGROUP_PATH);
+
+  close(cgroup_fd);
+  bpf_object__close(obj);
+
   return true;
 }
 

@@ -282,6 +282,14 @@ else ()
     message(FATAL_ERROR "LibAIO was not found.")
 endif ()
 
+add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_SOURCE_DIR}/etc/cgroup_dev_bpf.o
+    COMMAND clang -target bpf -g -O2 -D__TARGET_ARCH_x86 -c ${CMAKE_CURRENT_SOURCE_DIR}/etc/cgroup_dev_bpf.c -o ${CMAKE_CURRENT_SOURCE_DIR}/etc/cgroup_dev_bpf.o
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/etc/cgroup_dev_bpf.c
+)
+
+add_custom_target(generate_bpf ALL DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/etc/cgroup_dev_bpf.o)
+
 # Needed by grpc
 set(_PROTOBUF_LIBPROTOBUF libprotobuf)
 set(_REFLECTION grpc++_reflection)

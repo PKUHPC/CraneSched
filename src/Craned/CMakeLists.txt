@@ -49,6 +49,8 @@ target_link_libraries(craned
         result
 
         Backward::Interface
+
+        bpf
 )
 
 # Linker flag for c++ 17 filesystem library
