@@ -748,10 +748,6 @@ message StreamCforedTaskIOReply {
 //  We need to distinguish the message sender
 //  and have some kind of authentication
 service CraneCtld {
-  /* RPCs called from Craned */
-  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
-  rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
-
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
 
@@ -793,6 +789,50 @@ service CraneCtld {
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
 }
+
+service CraneCtldForExternal {
+  /* RPCs called from ccancel */
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
+
+  /* RPCs called from cbatch */
+  rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
+  rpc SubmitBatchTasks(SubmitBatchTasksRequest) returns (SubmitBatchTasksReply);
+
+  /* PRCs called from ccontrol */
+  rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
+  rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+  rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
+  rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
+
+  /* RPCs called from cacctmgr */
+  rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
+  rpc AddUser(AddUserRequest) returns (AddUserReply);
+  rpc AddQos(AddQosRequest) returns (AddQosReply);
+
+  rpc DeleteEntity(DeleteEntityRequest) returns (DeleteEntityReply);
+
+  rpc QueryEntityInfo(QueryEntityInfoRequest) returns (QueryEntityInfoReply);
+  rpc ModifyEntity(ModifyEntityRequest) returns (ModifyEntityReply);
+  rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
+
+  /* RPCs called from cinfo */
+  rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
+
+  /* common RPCs */
+  rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
+}
+
+service CraneCtldForCraned {
+  /* RPCs called from Craned */
+  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
+  rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
+}
+
+service CraneCtldForCfored {
+  /* RPCs called from Cfored */
+  rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
+}
+
 
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */

@@ -81,40 +81,6 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::TaskStatusChange(
-    grpc::ServerContext *context,
-    const crane::grpc::TaskStatusChangeRequest *request,
-    crane::grpc::TaskStatusChangeReply *response) {
-  std::optional<std::string> reason;
-  if (!request->reason().empty()) reason = request->reason();
-
-  g_task_scheduler->TaskStatusChangeWithReasonAsync(
-      request->task_id(), request->craned_id(), request->new_status(),
-      request->exit_code(), std::move(reason));
-  response->set_ok(true);
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::CranedRegister(
-    grpc::ServerContext *context,
-    const crane::grpc::CranedRegisterRequest *request,
-    crane::grpc::CranedRegisterReply *response) {
-  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
-    response->set_ok(false);
-    return grpc::Status::OK;
-  }
-
-  bool alive = g_meta_container->CheckCranedOnline(request->craned_id());
-  if (!alive) {
-    g_craned_keeper->PutNodeIntoUnavailList(request->craned_id());
-  }
-
-  response->set_ok(true);
-  response->set_already_registered(alive);
-
-  return grpc::Status::OK;
-}
-
 grpc::Status CraneCtldServiceImpl::CancelTask(
     grpc::ServerContext *context, const crane::grpc::CancelTaskRequest *request,
     crane::grpc::CancelTaskReply *response) {
@@ -880,7 +846,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   if (listen_conf.UseTls) {
     ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
                                         listen_conf.CraneCtldListenPort,
-                                        listen_conf.ExternalCerts);
+                                        listen_conf.TlsCerts.ExternalCerts);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
                                              listen_conf.CraneCtldListenPort);

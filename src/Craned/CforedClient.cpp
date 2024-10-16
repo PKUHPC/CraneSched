@@ -38,8 +38,9 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   if (g_config.ListenConf.UseTls) {
-    m_cfored_channel_ = CreateTcpTlsChannelByHostname(
-        cfored_name, kCforedDefaultPort, g_config.ListenConf.TlsCerts);
+    // m_cfored_channel_ = CreateTcpTlsChannelByHostname(
+    //     cfored_name, kCforedDefaultPort, g_config.ListenConf.TlsCerts);
+    CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
   } else {
     m_cfored_channel_ =
         CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
