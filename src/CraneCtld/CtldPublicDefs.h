@@ -19,6 +19,7 @@
 #pragma once
 
 #include "CtldPreCompiledHeader.h"
+#include "crane/GrpcHelper.h"
 // Precompiled header come first!
 
 namespace Ctld {
@@ -86,13 +87,19 @@ struct Config {
   struct CraneCtldListenConf {
     std::string CraneCtldListenAddr;
     std::string CraneCtldListenPort;
+    std::string CraneCtldForCranedListenPort;
 
     bool UseTls{false};
-    TlsCertificates ExternalCerts;
-    TlsCertificates InternalCerts;
-    TlsCertificates CforedCerts;
-    std::string InternalCaContent;
-    std::string DomainSuffix;
+    struct TlsCertsConfig {
+      std::string InternalCaContent;
+      std::string DomainSuffix;
+      TlsCertificates ExternalCerts;
+      TlsCertificates InternalCerts;
+      ClientTlsCertificates CranedClientCerts;
+      ClientTlsCertificates CforedClientCerts;
+    };
+
+    TlsCertsConfig TlsCerts;
   };
   CraneCtldListenConf ListenConf;
 
