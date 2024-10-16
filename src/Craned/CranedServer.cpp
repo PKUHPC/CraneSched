@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
+#include "CranedPublicDefs.h"
 #include "CtldClient.h"
 
 namespace Craned {
@@ -289,7 +290,8 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
                   request->ssh_remote_address(), remote_hostname);
 
       channel_of_remote_service = CreateTcpTlsChannelByHostname(
-          remote_hostname, crane_port, g_config.ListenConf.TlsCerts);
+          remote_hostname, crane_port, g_config.ListenConf.TlsCerts.CranedTlsCerts, 
+          g_config.ListenConf.TlsCerts.InternalClientTlsCerts, g_config.ListenConf.TlsCerts.DomainSuffix);
     } else {
       CRANE_ERROR("Failed to resolve remote address {}.",
                   request->ssh_remote_address());
@@ -431,7 +433,8 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
   if (g_config.ListenConf.UseTls)
     channel_of_remote_service = CreateTcpTlsChannelByHostname(
         execution_node, g_config.ListenConf.CranedListenPort,
-        g_config.ListenConf.TlsCerts);
+        g_config.ListenConf.TlsCerts.CranedTlsCerts, g_config.ListenConf.TlsCerts.InternalClientTlsCerts, 
+        g_config.ListenConf.TlsCerts.DomainSuffix);
   else
     channel_of_remote_service = CreateTcpInsecureChannel(
         execution_node, g_config.ListenConf.CranedListenPort);
@@ -533,9 +536,9 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
 
   std::string craned_listen_addr = listen_conf.CranedListenAddr;
   if (listen_conf.UseTls) {
-    ServerBuilderAddTcpTlsListeningPort(&builder, craned_listen_addr,
+    ServerBuilderAddmTcpTlsListeningPort(&builder, craned_listen_addr,
                                         listen_conf.CranedListenPort,
-                                        listen_conf.TlsCerts);
+                                        listen_conf.TlsCerts.CranedTlsCerts, listen_conf.TlsCerts.InternalCaContent);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(&builder, craned_listen_addr,
                                              listen_conf.CranedListenPort);
