@@ -18,6 +18,10 @@
 
 #include "CranedKeeper.h"
 
+#include <google/protobuf/util/time_util.h>
+
+#include "CtldPublicDefs.h"
+
 namespace Ctld {
 
 using grpc::ClientContext;
@@ -715,10 +719,11 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
 
   if (g_config.ListenConf.UseTls) {
     SetTlsHostnameOverride(&channel_args, craned_id,
-                           g_config.ListenConf.ExternalCerts);
+                           g_config.ListenConf.TlsCerts.DomainSuffix);
     craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
         ip_addr, g_config.CranedListenConf.CranedListenPort,
-        g_config.ListenConf.ExternalCerts, channel_args);
+        g_config.ListenConf.TlsCerts.InternalCerts,
+        g_config.ListenConf.TlsCerts.CranedClientCerts, channel_args);
   } else
     craned->m_channel_ = CreateTcpInsecureCustomChannel(
         ip_addr, g_config.CranedListenConf.CranedListenPort, channel_args);
