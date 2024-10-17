@@ -21,7 +21,6 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "TaskScheduler.h"
-#include "crane/String.h"
 
 namespace Ctld {
 
@@ -66,15 +65,15 @@ CtldForCranedServer::CtldForCranedServer(const Config::CraneCtldListenConf &list
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
-  if (listen_conf.UseTls) {
+  if (listen_conf.UseTls) 
     ServerBuilderAddmTcpTlsListeningPort(
         &builder, listen_conf.CraneCtldListenAddr,
-        listen_conf.CraneCtldForCranedListenPort, listen_conf.TlsCerts.InternalCerts, listen_conf.TlsCerts.InternalCaContent);
-  } else {
-        ServerBuilderAddTcpInsecureListeningPort(&builder,
+        listen_conf.CraneCtldForCranedListenPort, listen_conf.TlsCerts.InternalCerts, 
+        listen_conf.TlsCerts.InternalCaContent);
+  else 
+    ServerBuilderAddTcpInsecureListeningPort(&builder,
                                              listen_conf.CraneCtldListenAddr,
                                              listen_conf.CraneCtldForCranedListenPort);
-  }
 
   builder.RegisterService(m_service_impl_.get());
   m_server_ = builder.BuildAndStart();
