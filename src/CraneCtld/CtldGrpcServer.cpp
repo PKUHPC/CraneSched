@@ -33,7 +33,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
-  auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
+  auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
   if (result.has_value()) {
     task_id_t id = result.value().get();
     if (id != 0) {
@@ -67,7 +67,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     auto task = std::make_unique<TaskInCtld>();
     task->SetFieldsByTaskToCtld(task_to_ctld);
 
-    auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
+    auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
     results.emplace_back(std::move(result));
   }
 
@@ -708,92 +708,6 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   sigint_waiting_thread.detach();
 
   signal(SIGINT, &CtldServer::signal_handler_func);
-}
-
-result::result<std::future<task_id_t>, std::string>
-CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
-  CraneErr err;
-
-  if (!task->password_entry->Valid()) {
-    return result::fail(
-        fmt::format("Uid {} not found on the controller node", task->uid));
-  }
-  task->SetUsername(task->password_entry->Username());
-
-  {  // Limit the lifecycle of user_scoped_ptr
-    auto user_scoped_ptr =
-        g_account_manager->GetExistedUserInfo(task->Username());
-    if (!user_scoped_ptr) {
-      return result::fail(fmt::format(
-          "User '{}' not found in the account database", task->Username()));
-    }
-
-    if (task->account.empty()) {
-      task->account = user_scoped_ptr->default_account;
-      task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
-    } else {
-      if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
-        return result::fail(fmt::format(
-            "Account '{}' is not in your account list", task->account));
-      }
-    }
-  }
-
-  if (!g_account_manager->CheckUserPermissionToPartition(
-          task->Username(), task->account, task->partition_id)) {
-    return result::fail(
-        fmt::format("User '{}' doesn't have permission to use partition '{}' "
-                    "when using account '{}'",
-                    task->Username(), task->partition_id, task->account));
-  }
-
-  auto enable_res =
-      g_account_manager->CheckIfUserOfAccountIsEnabled(
-      task->Username(), task->account);
-  if (enable_res.has_error()) {
-    return result::fail(enable_res.error());
-  }
-
-  err = g_task_scheduler->AcquireTaskAttributes(task.get());
-
-  if (err == CraneErr::kOk)
-    err = g_task_scheduler->CheckTaskValidity(task.get());
-
-  if (err == CraneErr::kOk) {
-    task->SetSubmitTime(absl::Now());
-    std::future<task_id_t> future =
-        g_task_scheduler->SubmitTaskAsync(std::move(task));
-    return {std::move(future)};
-  }
-
-  if (err == CraneErr::kNonExistent) {
-    CRANE_DEBUG("Task submission failed. Reason: Partition doesn't exist!");
-    return result::fail("Partition doesn't exist!");
-  } else if (err == CraneErr::kInvalidNodeNum) {
-    CRANE_DEBUG(
-        "Task submission failed. Reason: --node is either invalid or greater "
-        "than the number of nodes in its partition.");
-    return result::fail(
-        "--node is either invalid or greater than the number of nodes in its "
-        "partition.");
-  } else if (err == CraneErr::kNoResource) {
-    CRANE_DEBUG(
-        "Task submission failed. "
-        "Reason: The resources of the partition are insufficient.");
-    return result::fail("The resources of the partition are insufficient");
-  } else if (err == CraneErr::kNoAvailNode) {
-    CRANE_DEBUG(
-        "Task submission failed. "
-        "Reason: Nodes satisfying the requirements of task are insufficient");
-    return result::fail(
-        "Nodes satisfying the requirements of task are insufficient.");
-  } else if (err == CraneErr::kInvalidParam) {
-    CRANE_DEBUG(
-        "Task submission failed. "
-        "Reason: The param of task is invalid.");
-    return result::fail("The param of task is invalid.");
-  }
-  return result::fail(CraneErrStr(err));
 }
 
 }  // namespace Ctld

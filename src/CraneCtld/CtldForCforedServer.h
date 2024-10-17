@@ -185,9 +185,6 @@ class CtldForCforedServer {
     explicit CtldForCforedServer(const Config::CraneCtldListenConf &listen_conf);
 
     inline void Wait() { m_server_->Wait(); }
-
-    result::result<std::future<task_id_t>, std::string> SubmitTaskToScheduler(
-      std::unique_ptr<TaskInCtld> task);
   private:
     template <typename K, typename V,
             typename Hash = absl::container_internal::hash_default_hash<K>>
