@@ -4,6 +4,8 @@ add_executable(cranectld
         CtldGrpcServer.cpp
         CtldForCranedServer.h
         CtldForCranedServer.cpp
+        CtldForCforedServer.h
+        CtldForCforedServer.cpp
         DbClient.h
         DbClient.cpp
         TaskScheduler.h

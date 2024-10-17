@@ -61,6 +61,7 @@ struct Config {
       std::string DomainSuffix;
       TlsCertificates CranedTlsCerts;
       ClientTlsCertificates InternalClientTlsCerts;
+      ClientTlsCertificates CforedClientTlsCerts;
     };
     
     TlsCertsConfig TlsCerts;

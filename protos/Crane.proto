@@ -748,49 +748,6 @@ message StreamCforedTaskIOReply {
 //  We need to distinguish the message sender
 //  and have some kind of authentication
 service CraneCtld {
-  /* RPCs called from Cfored */
-  rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
-
-  /* RPCs called from ccancel */
-  rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
-
-  /* RPCs called from cbatch */
-  rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
-  rpc SubmitBatchTasks(SubmitBatchTasksRequest) returns (SubmitBatchTasksReply);
-
-  /* PRCs called from ccontrol */
-  rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
-  rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
-  rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
-  rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
-
-  /* RPCs called from cacctmgr */
-  rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
-  rpc AddUser(AddUserRequest) returns (AddUserReply);
-  rpc AddQos(AddQosRequest) returns (AddQosReply);
-
-  rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountReply);
-  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserReply);
-  rpc DeleteQos(DeleteQosRequest) returns (DeleteQosReply);
-
-  rpc QueryAccountInfo(QueryAccountInfoRequest) returns (QueryAccountInfoReply);
-  rpc QueryUserInfo(QueryUserInfoRequest) returns (QueryUserInfoReply);
-  rpc QueryQosInfo(QueryQosInfoRequest) returns (QueryQosInfoReply);
-
-  rpc ModifyAccount(ModifyAccountRequest) returns (ModifyAccountReply);
-  rpc ModifyUser(ModifyUserRequest) returns (ModifyUserReply);
-  rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
-  
-  rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
-
-  /* RPCs called from cinfo */
-  rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
-
-  /* common RPCs */
-  rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
-}
-
-service CraneCtldForExternal {
   /* RPCs called from ccancel */
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
 

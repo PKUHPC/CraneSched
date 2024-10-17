@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include "CtldForCforedServer.h"
 #include "CtldForCranedServer.h"
 #include "CtldPreCompiledHeader.h"
 // Precompiled header comes first!
@@ -40,6 +41,7 @@
 #include "crane/Logger.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
+#include "crane/PublicHeader.h"
 
 void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("cranectld");
@@ -153,6 +155,20 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.ListenConf.CraneCtldForCranedListenPort =
             kCtldForCranedDefaultPort;
+
+      if (config["CraneCtldForCforedListenPort"])
+        g_config.ListenConf.CraneCtldForCforedListenPort =
+            config["CraneCtldForCforedListenPort"].as<std::string>();
+      else
+        g_config.ListenConf.CraneCtldForCforedListenPort =
+            kCtldForCforedDefaultPort;
+
+      if (config["CraneCtldForCforedListenPort"])
+        g_config.ListenConf.CraneCtldForCforedListenPort =
+            config["CraneCtldForCforedListenPort"].as<std::string>();
+      else
+        g_config.ListenConf.CraneCtldForCforedListenPort =
+            kCtldForCforedDefaultPort;
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
@@ -903,6 +919,9 @@ void InitializeCtldGlobalVariables() {
 
   g_ctld_for_craned_server =
       std::make_unique<Ctld::CtldForCranedServer>(g_config.ListenConf);
+
+  g_ctld_for_cfored_server =
+      std::make_unique<Ctld::CtldForCforedServer>(g_config.ListenConf);
 }
 
 void CreateFolders() {
@@ -935,6 +954,8 @@ int StartServer() {
   g_ctld_server->Wait();
 
   g_ctld_for_craned_server->Wait();
+
+  g_ctld_for_cfored_server->Wait();
 
   DestroyCtldGlobalVariables();
 

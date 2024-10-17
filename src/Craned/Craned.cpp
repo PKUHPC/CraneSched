@@ -180,6 +180,8 @@ void ParseConfig(int argc, char** argv) {
             g_config.ListenConf.TlsCerts.CranedTlsCerts;
         ClientTlsCertificates& internal_client_certs =
             g_config.ListenConf.TlsCerts.InternalClientTlsCerts;
+        ClientTlsCertificates& cfoed_client_certs =
+            g_config.ListenConf.TlsCerts.CforedClientTlsCerts;
 
         if (config["DomainSuffix"])
           g_config.ListenConf.TlsCerts.DomainSuffix =
@@ -270,6 +272,29 @@ void ParseConfig(int argc, char** argv) {
               "UseTls is true, but CranectldInternalCertFilePath is empty");
           std::exit(1);
         }
+
+        if (config["CforedCertFilePath"]) {
+          cfoed_client_certs.ClientCertFilePath =
+              config["CforedCertFilePath"].as<std::string>();
+
+          try {
+            cfoed_client_certs.ClientCertContent =
+                util::ReadFileIntoString(cfoed_client_certs.ClientCertFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read cert file error: {}", e.what());
+            std::exit(1);
+          }
+          if (cfoed_client_certs.ClientCertContent.empty()) {
+            CRANE_ERROR(
+                "UseTls is true, but the file specified by CforedCertFilePath "
+                "is empty");
+          }
+        } else {
+          CRANE_ERROR(
+              "UseTls is true, but CranectldInternalCertFilePath is empty");
+          std::exit(1);
+        }
+
       } else {
         g_config.ListenConf.UseTls = false;
       }

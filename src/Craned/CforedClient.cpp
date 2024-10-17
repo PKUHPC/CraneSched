@@ -18,10 +18,11 @@
 
 #include "CforedClient.h"
 
+#include "CranedPublicDefs.h"
 #include "crane/String.h"
 namespace Craned {
 
-CforedClient::CforedClient() : m_stopped_(false){};
+CforedClient::CforedClient() : m_stopped_(false) {};
 
 CforedClient::~CforedClient() {
   CRANE_TRACE("CforedClient to {} is being destructed.", m_cfored_name_);
@@ -37,14 +38,15 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  if (g_config.ListenConf.UseTls) {
-    // m_cfored_channel_ = CreateTcpTlsChannelByHostname(
-    //     cfored_name, kCforedDefaultPort, g_config.ListenConf.TlsCerts);
-    CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
-  } else {
+  if (g_config.ListenConf.UseTls)
+    m_cfored_channel_ = CreateTcpTlsChannelByHostname(
+        cfored_name, kCforedDefaultPort,
+        g_config.ListenConf.TlsCerts.CranedTlsCerts,
+        g_config.ListenConf.TlsCerts.CforedClientTlsCerts,
+        g_config.ListenConf.TlsCerts.DomainSuffix);
+  else
     m_cfored_channel_ =
         CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
-  }
 
   // std::unique_ptr will automatically release the dangling stub.
   m_stub_ = CraneForeD::NewStub(m_cfored_channel_);
