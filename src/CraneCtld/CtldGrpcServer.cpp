@@ -33,7 +33,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
-  auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
+  auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
   if (result.has_value()) {
     task_id_t id = result.value().get();
     if (id != 0) {
@@ -65,7 +65,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     auto task = std::make_unique<TaskInCtld>();
     task->SetFieldsByTaskToCtld(task_to_ctld);
 
-    auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
+    auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
     results.emplace_back(std::move(result));
   }
 
@@ -1017,71 +1017,6 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   sigint_waiting_thread.detach();
 
   signal(SIGINT, &CtldServer::signal_handler_func);
-}
-
-CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
-    std::unique_ptr<TaskInCtld> task) {
-  if (!task->password_entry->Valid()) {
-    CRANE_DEBUG("Uid {} not found on the controller node", task->uid);
-    return std::unexpected(CraneErrCode::ERR_INVALID_UID);
-  }
-  task->SetUsername(task->password_entry->Username());
-
-  {  // Limit the lifecycle of user_scoped_ptr
-    auto user_scoped_ptr =
-        g_account_manager->GetExistedUserInfo(task->Username());
-    if (!user_scoped_ptr) {
-      CRANE_DEBUG("User '{}' not found in the account database",
-                  task->Username());
-      return std::unexpected(CraneErrCode::ERR_INVALID_USER);
-    }
-
-    if (task->account.empty()) {
-      task->account = user_scoped_ptr->default_account;
-      task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
-    } else {
-      if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
-        CRANE_DEBUG(
-            "Account '{}' is not in the user account list when submitting the "
-            "task",
-            task->account);
-        return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
-      }
-    }
-  }
-
-  if (!g_account_manager->CheckUserPermissionToPartition(
-          task->Username(), task->account, task->partition_id)) {
-    CRANE_DEBUG(
-        "User '{}' doesn't have permission to use partition '{}' when using "
-        "account '{}'",
-        task->Username(), task->partition_id, task->account);
-    return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
-  }
-
-  auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
-      task->Username(), task->account);
-  if (!enable_res) {
-    return std::unexpected(enable_res.error());
-  }
-
-  auto result = g_meta_container->CheckIfAccountIsAllowedInPartition(
-      task->partition_id, task->account);
-  if (!result) return std::unexpected(result.error());
-
-  result = g_task_scheduler->AcquireTaskAttributes(task.get());
-
-  if (result) result = g_task_scheduler->CheckTaskValidity(task.get());
-
-  task->SetSubmitTime(absl::Now());
-
-  if (result) {
-    std::future<task_id_t> future =
-        g_task_scheduler->SubmitTaskAsync(std::move(task));
-    return {std::move(future)};
-  }
-
-  return std::unexpected(result.error());
 }
 
 }  // namespace Ctld
