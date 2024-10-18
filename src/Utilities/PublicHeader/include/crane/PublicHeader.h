@@ -167,8 +167,6 @@ using SlotId = std::string;
 
 // Model the allocatable resources on a craned node.
 // It contains CPU and memory by now.
-// Delta of resources is used, so it can be negative.
-// Using unsigned type do not affect the correctness.
 struct AllocatableResource {
   cpu_t cpu_count{0};
 
