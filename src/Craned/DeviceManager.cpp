@@ -22,10 +22,19 @@
 
 namespace Craned {
 
+DeviceEnvInjector GetDeviceEnvInjectorFromStr(const std::string& str) {
+  for (size_t i = 0; i < DeviceEnvInjectorStr.size(); ++i) {
+    if (str == DeviceEnvInjectorStr[i]) {
+      return static_cast<DeviceEnvInjector>(i);
+    }
+  }
+  return DeviceEnvInjector::InvalidInjector;
+}
+
 BasicDevice::BasicDevice(const std::string& device_name,
                          const std::string& device_type,
                          const std::vector<std::string>& device_path,
-                         const std::string& env_injector)
+                         DeviceEnvInjector env_injector)
     : name(device_name), type(device_type), env_injector(env_injector) {
   device_metas.reserve(device_path.size());
   for (const auto& dev_path : device_path) {
@@ -77,7 +86,7 @@ DeviceManager::GetDeviceFileMajorMinorOpType(const std::string& path) {
 std::unique_ptr<BasicDevice> DeviceManager::ConstructDevice(
     const std::string& device_name, const std::string& device_type,
     const std::vector<std::string>& device_path,
-    const std::string& env_injector) {
+    DeviceEnvInjector env_injector) {
   return std::make_unique<BasicDevice>(device_name, device_type, device_path,
                                        env_injector);
 }
@@ -95,23 +104,15 @@ DeviceManager::GetDevEnvListByResInNode(
       all_res_slots.insert(slots.slots().begin(), slots.slots().end());
   }
 
-  uint32_t cuda_count = 0;
-  uint32_t hip_count = 0;
+  std::unordered_map<int, int> injector_count_map;
   for (const auto& [_, device] : g_this_node_device) {
     if (!all_res_slots.contains(device->dev_id)) continue;
-
-    if (device->env_injector == "nvidia")
-      ++cuda_count;
-    else if (device->env_injector == "hip")
-      ++hip_count;
+    injector_count_map[device->env_injector]++;
   }
-  // Nvidia Device
-  env.emplace_back("CUDA_VISIBLE_DEVICES",
-                   util::GenerateCommaSeparatedString(cuda_count));
-
-  // AMD/Haiguang device
-  env.emplace_back("HIP_VISIBLE_DEVICES",
-                   util::GenerateCommaSeparatedString(hip_count));
+  for (const auto [injector_enum, count] : injector_count_map) {
+    env.emplace_back(DeviceEnvNameStr[injector_enum],
+                     util::GenerateCommaSeparatedString(count));
+  }
 
   return env;
 }

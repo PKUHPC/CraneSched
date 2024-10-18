@@ -21,6 +21,33 @@
 
 namespace Craned {
 
+enum DeviceEnvInjector : uint8_t {
+  Nvidia = 0,
+  Hip,
+  Ascend,
+
+  __DeviceEnvInjector_SIZE,
+  InvalidInjector
+};
+
+constexpr std::array<std::string_view,
+                     DeviceEnvInjector::__DeviceEnvInjector_SIZE>
+    DeviceEnvInjectorStr = {
+        "nvidia",
+        "hip",
+        "ascend",
+};
+
+constexpr std::array<std::string_view,
+                     DeviceEnvInjector::__DeviceEnvInjector_SIZE>
+    DeviceEnvNameStr = {
+        "CUDA_VISIBLE_DEVICES",
+        "HIP_VISIBLE_DEVICES",
+        "ASCEND_RT_VISIBLE_DEVICES",
+};
+
+DeviceEnvInjector GetDeviceEnvInjectorFromStr(const std::string& str);
+
 struct BasicDevice {
   std::string dev_id;
 
@@ -29,7 +56,7 @@ struct BasicDevice {
   // Device type e.g. A100
   std::string type;
 
-  std::string env_injector;
+  DeviceEnvInjector env_injector;
 
   struct DeviceMeta {
     std::string path;
@@ -41,7 +68,7 @@ struct BasicDevice {
 
   BasicDevice(const std::string& device_name, const std::string& device_type,
               const std::vector<std::string>& device_path,
-              const std::string& env_injector);
+              DeviceEnvInjector env_injector);
 
   BasicDevice(const BasicDevice& another) = default;
 
@@ -58,7 +85,7 @@ class DeviceManager {
   static std::unique_ptr<BasicDevice> ConstructDevice(
       const std::string& device_name, const std::string& device_type,
       const std::vector<std::string>& device_path,
-      const std::string& env_injector);
+      DeviceEnvInjector env_injector);
 
   static std::optional<std::tuple<unsigned int, unsigned int, char>>
   GetDeviceFileMajorMinorOpType(const std::string& path);
