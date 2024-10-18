@@ -18,14 +18,10 @@
 
 #pragma once
 
-#include <absl/time/time.h>
-
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
 #include "CranedMetaContainer.h"
-#include "DbClient.h"
-#include "crane/Lock.h"
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
