@@ -1874,7 +1874,6 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     // Sort all running task in this node by ending time.
     std::vector<std::pair<absl::Time, uint32_t>> end_time_task_id_vec;
 
-    std::vector<std::string> running_task_ids_str;
     for (const auto& [task_id, res] : craned_meta->running_task_resource_map) {
       const auto& task = running_tasks.at(task_id);
 
@@ -1888,8 +1887,14 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
       absl::Time end_time = std::max(task->StartTime() + task->time_limit,
                                      now + absl::Seconds(1));
       end_time_task_id_vec.emplace_back(end_time, task_id);
+    }
 
-      running_task_ids_str.emplace_back(std::to_string(task_id));
+    if constexpr (kAlgoTraceOutput) {
+      std::string running_task_ids_str;
+      for (const auto& [end_time, task_id] : end_time_task_id_vec)
+        running_task_ids_str.append(fmt::format("{}, ", task_id));
+      CRANE_TRACE("Craned node {} has running tasks: {}", craned_id,
+                  running_task_ids_str);
     }
 
     std::sort(
@@ -1909,8 +1914,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
       }
     }
 
-    // Calculate delta resources at [now, first task end,
-    //  second task end, ...] in this node.
+    // Calculate how many resources are available at [now, first task end,
+    // second task end, ...] in this node.
     auto& time_avail_res_map =
         node_selection_info_ref.node_time_avail_res_map[craned_id];
     node_selection_info_ref.node_res_total_map[craned_id] =
@@ -1948,6 +1953,16 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
            */
           std::tie(cur_time_iter, ok) =
               time_avail_res_map.emplace(end_time, cur_time_iter->second);
+
+          if constexpr (kAlgoTraceOutput) {
+            CRANE_TRACE(
+                "Insert duration [now+{}s, inf) with resource: "
+                "cpu: {}, mem: {}, gres: {}",
+                absl::ToInt64Seconds(end_time - now),
+                craned_meta->res_avail.allocatable_res.cpu_count,
+                craned_meta->res_avail.allocatable_res.memory_bytes,
+                util::ReadableDresInNode(craned_meta->res_avail));
+          }
         }
 
         /**
@@ -2475,8 +2490,7 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
     task_mem_per_cpu = part_meta.default_mem_per_cpu;
   } else if (part_meta.max_mem_per_cpu != 0) {
     // If a task sets its memory bytes,
-    // check if memory/core ratio is greater than the partition's maximum
-    // value.
+    // check if memory/core ratio is greater than the partition's maximum value.
     task_mem_per_cpu =
         std::min(task_mem_per_cpu, (double)part_meta.max_mem_per_cpu);
   }

@@ -155,7 +155,6 @@ class MinLoadFirst : public INodeSelectionAlgo {
    * In time interval [y, z-1], the amount of available resources is b.
    * In time interval [z, ...], the amount of available resources is c.
    */
-
   using TimeAvailResMap = std::map<absl::Time, ResourceInNode>;
   struct TimeAvailResTracker {
     const CranedId craned_id;
@@ -339,8 +338,7 @@ class TaskScheduler {
 
   void TerminateTasksOnCraned(const CranedId& craned_id, uint32_t exit_code);
 
-  // Temporary inconsistency may happen. If 'false' is returned, just ignore
-  // it.
+  // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
   void QueryTasksInRam(const crane::grpc::QueryTasksInfoRequest* request,
                        crane::grpc::QueryTasksInfoReply* response);
 
