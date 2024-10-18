@@ -328,7 +328,6 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
   if (retrieve && (ECGROUPNOTEXIST == cgroup_get_cgroup(native_cgroup))) {
     has_cgroup = false;
   }
-
   // Work through the various controllers.
 
   if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
@@ -430,7 +429,17 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
   if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
     return std::make_unique<CgroupV1>(cgroup_string, native_cgroup);
   } else if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2) {
-    return std::make_unique<CgroupV2>(cgroup_string, native_cgroup);
+    struct stat cgroup_stat;
+    std::string slash = "/";
+    std::string cgroup_full_path =
+        CgroupConstant::RootCgroupFullPath + slash + cgroup_string;
+    if (stat(cgroup_full_path.c_str(), &cgroup_stat)) {
+      CRANE_ERROR("Failed to get cgroup {} stat", cgroup_string);
+      return nullptr;
+    }
+    return std::make_unique<CgroupV2>(
+        cgroup_string, native_cgroup,
+        static_cast<uint64_t>(cgroup_stat.st_ino));
   } else {
     CRANE_WARN("Unable to create cgroup {}. Cgroup version is not supported",
                cgroup_string.c_str());
@@ -1256,6 +1265,24 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   return ok;
 }
 
+CgroupV2::~CgroupV2() {
+  if (m_cgroup_) {
+    int err;
+    if ((err = cgroup_delete_cgroup_ext(
+             m_cgroup_,
+             CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
+      CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
+                  m_cgroup_path_.c_str(), err, cgroup_strerror(err));
+    }
+
+    cgroup_free(&m_cgroup_);
+    m_cgroup_ = nullptr;
+  }
+  if (!m_cgroup_bpf_devices.empty()) {
+    RmBpfDeviceMap();
+  }
+}
+
 /**
  *If a controller implements an absolute resource guarantee and/or limit,
  * the interface files should be named “min” and “max” respectively.
@@ -1327,7 +1354,6 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 
   if (bpf_object__load(obj)) {
     CRANE_ERROR("Failed to load BPF object {}", CgroupConstant::BpfObjectFile);
-    fprintf(stderr, "Failed to load BPF object\n");
     return false;
   }
 
@@ -1355,7 +1381,7 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   if (set_write) access |= BPF_DEVCG_ACC_WRITE;
   if (set_mknod) access |= BPF_DEVCG_ACC_MKNOD;
 
-  std::vector<BpfDeviceMeta> bpf_devices = {};
+  auto &bpf_devices = m_cgroup_bpf_devices;
   for (const auto &[_, this_device] : Craned::g_this_node_device) {
     if (devices.contains(this_device->dev_id)) {
       for (const auto &dev_meta : this_device->device_metas) {
@@ -1387,11 +1413,12 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   }
 
   for (int i = 0; i < bpf_devices.size(); i++) {
-    int key = (bpf_devices[i].major << 16) | bpf_devices[i].minor;
-    if (bpf_map__update_elem(dev_map, &key, sizeof(key), &bpf_devices[i],
+    struct BpfKey key = {m_cgroup_id, bpf_devices[i].major,
+                         bpf_devices[i].minor};
+    if (bpf_map__update_elem(dev_map, &key, sizeof(BpfKey), &bpf_devices[i],
                              sizeof(BpfDeviceMeta), BPF_ANY)) {
-      CRANE_ERROR("Failed to update BPF map major {},minor {}",
-                  bpf_devices[i].major, bpf_devices[i].minor);
+      CRANE_ERROR("Failed to update BPF map major {},minor {} cgroup id {}",
+                  bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
       return false;
     }
   }
@@ -1403,6 +1430,44 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   // attach_bpf_program_to_cgroup(prog_fd, CGROUP_PATH);
 
   close(cgroup_fd);
+  bpf_object__close(obj);
+
+  return true;
+}
+
+bool CgroupV2::RmBpfDeviceMap() {
+  struct bpf_object *obj;
+  struct bpf_map *dev_map;
+
+  obj = bpf_object__open_file(CgroupConstant::BpfObjectFile, NULL);
+  if (!obj) {
+    CRANE_ERROR("Failed to open BPF object file {}",
+                CgroupConstant::BpfObjectFile);
+    return false;
+  }
+
+  if (bpf_object__load(obj)) {
+    CRANE_ERROR("Failed to load BPF object {}", CgroupConstant::BpfObjectFile);
+    fprintf(stderr, "Failed to load BPF object\n");
+    return false;
+  }
+
+  dev_map = bpf_object__find_map_by_name(obj, "dev_map");
+  if (!dev_map) {
+    CRANE_ERROR("Failed to find BPF map {}", "dev_map");
+    return false;
+  }
+
+  auto &bpf_devices = m_cgroup_bpf_devices;
+  for (int i = 0; i < bpf_devices.size(); i++) {
+    struct BpfKey key = {m_cgroup_id, bpf_devices[i].major,
+                         bpf_devices[i].minor};
+    if (bpf_map__delete_elem(dev_map, &key, sizeof(BpfKey), BPF_ANY)) {
+      CRANE_ERROR("Failed to delete BPF map major {},minor {} in cgroup id {}",
+                  bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
+      return false;
+    }
+  }
   bpf_object__close(obj);
 
   return true;
