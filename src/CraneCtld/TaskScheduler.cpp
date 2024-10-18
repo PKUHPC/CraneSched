@@ -2097,53 +2097,43 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   for (CranedId craned_id : craned_indexes_) {
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_id);
-    auto it = time_avail_res_map.begin();
-    trackers.emplace_back(craned_id, it, time_avail_res_map.end(),
+    trackers.emplace_back(craned_id, time_avail_res_map.begin(),
+                          time_avail_res_map.end(),
                           &task->Resources().at(craned_id));
     pq.emplace(&trackers.back());
   }
 
-  int satisfied_count = 0;
-  absl::Time last_time = absl::InfinitePast();
+  TrackerList satisfied_trackers(task->node_num);
+
   while (!pq.empty()) {
     absl::Time time = pq.top()->it->first;
     if (time - now > kAlgoMaxTimeWindow) {
       return false;
     }
     while (!pq.empty() && pq.top()->it->first == time) {
-      auto tmp = pq.top();
+      auto tracker = pq.top();
       pq.pop();
-      satisfied_count -= tmp->satisfied;
-      if (tmp->genNext()) pq.emplace(tmp);
-      satisfied_count += tmp->satisfied;
-    }
-    if constexpr (kAlgoTraceOutput) {
-      CRANE_TRACE("At time now+{}s, {} nodes are satisfied.",
-                  (time - now) / absl::Seconds(1), satisfied_count);
-      for (auto& tracker : trackers) {
-        if (tracker.satisfied) {
-          CRANE_TRACE("Craned {} is satisfied.", tracker.craned_id);
-        }
+      if (tracker->satisfied()) {
+        satisfied_trackers.try_push_back(tracker, time);
+      } else {
+        satisfied_trackers.try_erase(tracker);
+      }
+      if (tracker->genNext()) {
+        pq.emplace(tracker);
       }
     }
-    if (satisfied_count < task->node_num) {
-      last_time = absl::InfinitePast();
-    } else {
-      if (last_time == absl::InfinitePast()) {
-        last_time = time;
+    if (pq.empty() || satisfied_trackers.kth_time() + task->time_limit <=
+                          pq.top()->it->first) {
+      *start_time = satisfied_trackers.kth_time();
+      craned_ids->clear();
+      auto it = satisfied_trackers.kth_elem;
+      while (it != nullptr) {
+        craned_ids->emplace_back(it->tracker_ptr->craned_id);
+        it = it->prev;
       }
-      if (time - last_time >= task->time_limit || pq.empty()) {
-        *start_time = last_time;
-        craned_ids->clear();
-        for (auto& tracker : trackers) {
-          if (tracker.satisfied) {
-            craned_ids->emplace_back(tracker.craned_id);
-            if (craned_ids->size() >= task->node_num) break;
-          }
-        }
-        CRANE_ASSERT(craned_ids->size() == task->node_num);
-        return true;
-      }
+      CRANE_ASSERT(*start_time != absl::InfiniteFuture());
+      CRANE_ASSERT(craned_ids->size() == task->node_num);
+      return true;
     }
   }
 
