@@ -28,6 +28,12 @@ enum BPF_PERMISSION{
     DENY
 };
 
+struct BpfKey {
+  uint64_t cgroup_id;
+  uint32_t major;
+  uint32_t minor;
+};
+
 struct BpfDeviceMeta {
     unsigned int major;
     unsigned int minor;
