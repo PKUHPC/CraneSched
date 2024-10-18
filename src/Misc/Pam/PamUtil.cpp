@@ -421,16 +421,14 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
     if (reply.ok()) {
       pam_syslog(pamh, LOG_ERR,
                  "[Crane] QueryTaskEnvVariablesForward succeeded.");
-      for (int i = 0; i < reply.name_size(); ++i) {
+      for (const auto &[name, value] : reply.env_map())
         if (pam_putenv(
-                pamh,
-                fmt::format("{}={}", reply.name(i), reply.value(i)).c_str()) !=
+                pamh, fmt::format("{}={}", name, value).c_str()) !=
             PAM_SUCCESS) {
           pam_syslog(pamh, LOG_ERR, "[Crane] Set env %s=%s  failed",
-                     reply.name(i).c_str(), reply.value(i).c_str());
+                     name.c_str(), value.c_str());
           return false;
         }
-      }
       return true;
     } else {
       pam_syslog(pamh, LOG_ERR, "[Crane] QueryTaskEnvVariablesForward failed.");

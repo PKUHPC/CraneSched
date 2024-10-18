@@ -394,8 +394,7 @@ Status CranedServiceImpl::QueryTaskEnvVariables(
       g_task_mgr->QueryTaskEnvironmentVariablesAsync(request->task_id());
   if (task_env.has_value()) {
     for (const auto &[name, value] : task_env.value()) {
-      response->add_name(name);
-      response->add_value(value);
+      response->mutable_env_map()->emplace(name, value);
     }
     response->set_ok(true);
   } else {
@@ -409,11 +408,13 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
     const crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
     crane::grpc::QueryTaskEnvVariablesForwardReply *response) {
   // First query local device related env list
-  std::vector<EnvPair> dev_envs =
-      g_cg_mgr->GetResourceEnvListOfTask(request->task_id());
-  for (const auto &env : dev_envs) {
-    response->add_name(env.first);
-    response->add_value(env.second);
+  auto res_envs_opt = g_cg_mgr->GetResourceEnvListOfTask(request->task_id());
+  if (!res_envs_opt.has_value()) {
+    response->set_ok(false);
+    return Status::OK;
+  }
+  for (const auto &[name, value] : res_envs_opt.value()) {
+    response->mutable_env_map()->emplace(name, value);
   }
 
   std::optional execution_node_opt =
@@ -464,9 +465,8 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
   }
 
   response->set_ok(true);
-  for (int i = 0; i < reply_from_remote_service.name_size(); i++) {
-    response->add_name(reply_from_remote_service.name(i));
-    response->add_value(reply_from_remote_service.value(i));
+  for (const auto &[name, value] : reply_from_remote_service.env_map()) {
+    response->mutable_env_map()->emplace(name, value);
   }
 
   return Status::OK;

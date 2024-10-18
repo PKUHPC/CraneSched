@@ -182,7 +182,7 @@ struct TaskInstance {
 
   bool IsCrun() const;
   bool IsCalloc() const;
-  std::vector<EnvPair> GetTaskEnvList() const;
+  std::unordered_map<std::string, std::string> GetTaskEnvList() const;
 
   crane::grpc::TaskToD task;
 
@@ -219,7 +219,7 @@ class TaskManager {
 
   std::optional<uint32_t> QueryTaskIdFromPidAsync(pid_t pid);
 
-  std::optional<std::vector<std::pair<std::string, std::string>>>
+  std::optional<std::unordered_map<std::string, std::string>>
   QueryTaskEnvironmentVariablesAsync(task_id_t task_id);
 
   void TerminateTaskAsync(uint32_t task_id);
@@ -257,8 +257,7 @@ class TaskManager {
   };
 
   struct EvQueueQueryTaskEnvironmentVariables {
-    std::promise<
-        std::optional<std::vector<std::pair<std::string, std::string>>>>
+    std::promise<std::optional<std::unordered_map<std::string, std::string>>>
         env_prom;
     task_id_t task_id;
   };

@@ -81,11 +81,7 @@ void ParseConfig(int argc, char** argv) {
   }
 
   std::string config_path = parsed_args["config"].as<std::string>();
-  std::unordered_map<
-      std::string,
-      std::vector<std::tuple<std::string /*name*/, std::string /*type*/,
-                             std::vector<std::string> /*path*/,
-                             std::string /*EnvInjector*/>>>
+  std::unordered_map<std::string, std::vector<Craned::DeviceMetaInConfig>>
       each_node_device;
   if (std::filesystem::exists(config_path)) {
     try {
@@ -287,10 +283,7 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
-          std::vector<std::tuple<std::string /*name*/, std::string /*type*/,
-                                 std::vector<std::string> /*path*/,
-                                 std::string /*EnvInjector*/>>
-              devices;
+          std::vector<Craned::DeviceMetaInConfig> devices;
           if (node["gres"]) {
             for (auto gres_it = node["gres"].begin();
                  gres_it != node["gres"].end(); ++gres_it) {
@@ -313,9 +306,10 @@ void ParseConfig(int argc, char** argv) {
                   std::exit(1);
                 }
                 for (const auto& device_path : device_path_list) {
-                  devices.push_back(std::make_tuple(device_name, device_type,
-                                                    std::vector{device_path},
-                                                    env_injector));
+                  devices.push_back(
+                      {device_name, device_type, std::vector{device_path},
+                       !env_injector.empty() ? std::optional(env_injector)
+                                             : std::nullopt});
                 }
               }
               if (gres_node["DeviceFileList"] &&
@@ -331,17 +325,18 @@ void ParseConfig(int argc, char** argv) {
                         device_name, device_type);
                     std::exit(1);
                   }
-                  devices.push_back(
-                      std::make_tuple(device_name, device_type,
-                                      std::vector(device_path_list.begin(),
-                                                  device_path_list.end()),
-                                      env_injector));
+                  devices.push_back({device_name, device_type,
+                                     std::vector(device_path_list.begin(),
+                                                 device_path_list.end()),
+                                     !env_injector.empty()
+                                         ? std::optional(env_injector)
+                                         : std::nullopt});
                 }
               }
               if (!device_file_configured) {
                 CRANE_ERROR(
-                    "gres {}:{} device DeviceFileRegex or DeviceFileList not "
-                    "configured",
+                    "At least one of DeviceFileRegex or DeviceFileList must be "
+                    "configured for GRES {}:{} device.",
                     device_name, device_type);
               }
             }
@@ -539,20 +534,26 @@ void ParseConfig(int argc, char** argv) {
     auto node_res = g_config.CranedRes.at(g_config.Hostname);
     auto& devices = each_node_device[g_config.Hostname];
     for (auto& dev_arg : devices) {
-      std::string name, type, env_injector;
-      std::vector<std::string> path;
-      std::tie(name, type, path, env_injector) = dev_arg;
+      auto& [name, type, path_vec, env_injector] = dev_arg;
+      auto env_injector_enum =
+          Craned::GetDeviceEnvInjectorFromStr(env_injector);
+      if (env_injector_enum == Craned::InvalidInjector) {
+        CRANE_ERROR("Invalid injector type:{} for device {}.",
+                    env_injector.value_or("EmptyVal"), path_vec);
+        std::exit(1);
+      }
+
       std::unique_ptr dev = Craned::DeviceManager::ConstructDevice(
-          name, type, path, env_injector);
+          name, type, path_vec, env_injector_enum);
       if (!dev->Init()) {
         CRANE_ERROR("Access Device {} failed.", static_cast<std::string>(*dev));
         std::exit(1);
-      } else {
-        dev->dev_id = dev->device_metas.front().path;
-        node_res->dedicated_res.name_type_slots_map[dev->name][dev->type]
-            .emplace(dev->dev_id);
-        Craned::g_this_node_device[dev->dev_id] = std::move(dev);
       }
+
+      dev->slot_id = dev->device_file_metas.front().path;
+      node_res->dedicated_res.name_type_slots_map[dev->name][dev->type].emplace(
+          dev->slot_id);
+      Craned::g_this_node_device[dev->slot_id] = std::move(dev);
     }
     each_node_device.clear();
   }

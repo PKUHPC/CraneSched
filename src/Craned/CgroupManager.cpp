@@ -759,32 +759,31 @@ std::optional<crane::grpc::ResourceInNode> CgroupManager::GetTaskResourceInNode(
   return res;
 }
 
-std::vector<EnvPair> CgroupManager::GetResourceEnvListByResInNode(
+std::unordered_map<std::string, std::string>
+CgroupManager::GetResourceEnvListByResInNode(
     const crane::grpc::ResourceInNode &res_in_node) {
-  std::vector<EnvPair> env_vec = DeviceManager::GetDevEnvListByResInNode(
+  std::unordered_map env_map = DeviceManager::GetDevEnvListByResInNode(
       res_in_node.dedicated_res_in_node());
 
-  env_vec.emplace_back(
+  env_map.emplace(
       "CRANE_MEM_PER_NODE",
       std::to_string(
           res_in_node.allocatable_res_in_node().memory_limit_bytes() /
           (1024 * 1024)));
 
-  return env_vec;
+  return env_map;
 }
 
-std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTask(
-    task_id_t task_id) {
-  std::vector<EnvPair> res;
-
-  auto cg_spec_ptr = m_task_id_to_cg_spec_map_[task_id];
-  if (cg_spec_ptr)
-    res = GetResourceEnvListByResInNode(cg_spec_ptr->res_in_node);
-  else
+std::optional<std::unordered_map<std::string, std::string>>
+CgroupManager::GetResourceEnvListOfTask(task_id_t task_id) {
+  auto task_res = GetTaskResourceInNode(task_id);
+  if (task_res.has_value()) {
+    return GetResourceEnvListByResInNode(task_res.value());
+  } else {
     CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
                 task_id);
-
-  return res;
+    return std::nullopt;
+  }
 }
 
 /*
@@ -1096,8 +1095,8 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   if (set_mknod) op += "m";
   std::vector<std::string> deny_limits;
   for (const auto &[_, this_device] : Craned::g_this_node_device) {
-    if (!devices.contains(this_device->dev_id)) {
-      for (const auto &dev_meta : this_device->device_metas) {
+    if (!devices.contains(this_device->slot_id)) {
+      for (const auto &dev_meta : this_device->device_file_metas) {
         deny_limits.emplace_back(fmt::format("{} {}:{} {}", dev_meta.op_type,
                                              dev_meta.major, dev_meta.minor,
                                              op));

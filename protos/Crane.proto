@@ -400,8 +400,7 @@ message QueryTaskEnvVariablesRequest{
 
 message QueryTaskEnvVariablesReply{
   bool ok = 1;
-  repeated string name = 2;
-  repeated string value = 3;
+  map<string/*name*/, string/*value*/> env_map = 2;
 }
 
 message QueryTaskEnvVariablesForwardRequest{
@@ -411,8 +410,7 @@ message QueryTaskEnvVariablesForwardRequest{
 
 message QueryTaskEnvVariablesForwardReply{
   bool ok = 1;
-  repeated string name = 2;
-  repeated string value = 3;
+  map<string/*name*/, string/*value*/> env_map = 2;
 }
 
 message QueryClusterInfoRequest {

@@ -487,10 +487,11 @@ class CgroupManager {
   std::optional<crane::grpc::ResourceInNode> GetTaskResourceInNode(
       task_id_t task_id);
 
-  static std::vector<EnvPair> GetResourceEnvListByResInNode(
-      const crane::grpc::ResourceInNode &res_in_node);
+  static std::unordered_map<std::string, std::string>
+  GetResourceEnvListByResInNode(const crane::grpc::ResourceInNode &res_in_node);
 
-  std::vector<EnvPair> GetResourceEnvListOfTask(task_id_t task_id);
+  std::optional<std::unordered_map<std::string, std::string>>
+  GetResourceEnvListOfTask(task_id_t task_id);
 
   void SetCgroupVersion(CgroupConstant::CgroupVersion v) { cg_version_ = v; }
 
