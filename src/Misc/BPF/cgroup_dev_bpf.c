@@ -6,6 +6,12 @@ enum BPF_PERMISSION{
     DENY
 };
 
+struct BpfKey {
+  unsigned long long cgroup_id;
+  unsigned int major;
+  unsigned int minor;
+};
+
 struct BpfDeviceMeta {
     unsigned int major;
     unsigned int minor;
@@ -13,11 +19,10 @@ struct BpfDeviceMeta {
     short access;
     short type;
 };
-
-#define MAX_ENTRIES 128
+#define MAX_ENTRIES 4096
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __type(key, int);
+    __type(key, struct BpfKey);
     __type(value, struct BpfDeviceMeta);
     __uint(max_entries, MAX_ENTRIES);
     __uint(pinning, LIBBPF_PIN_BY_NAME);
@@ -26,11 +31,12 @@ struct {
 SEC("cgroup/dev")
 int device_access(struct bpf_cgroup_dev_ctx *ctx) {
 
-    int key = (ctx->major << 16) | ctx->minor; 
+    struct BpfKey key = {bpf_get_current_cgroup_id(),ctx->major,ctx->minor};;
+    bpf_printk("ctx cgroup ID : %lu\n",key.cgroup_id);
 
     struct BpfDeviceMeta *meta;
 
-    meta = bpf_map_lookup_elem(&dev_map, &key);
+    meta = (struct BpfDeviceMeta*)bpf_map_lookup_elem(&dev_map, &key);
     if (!meta) {
         bpf_printk("BpfDeviceMeta not found for key %d\n", key);
         return 1;
@@ -39,7 +45,7 @@ int device_access(struct bpf_cgroup_dev_ctx *ctx) {
     short type = ctx->access_type & 0xFFFF;
     short access = ctx->access_type >> 16;
 
-    bpf_printk("Device major=%d, minor=%d, access_type=%d\n", ctx->major, ctx->minor, access);
+    // bpf_printk("Device major=%d, minor=%d, access_type=%d\n", ctx->major, ctx->minor, access);
     bpf_printk("meta Device major=%d, minor=%d, access_type=%d\n", meta->major, meta->minor, meta->access);
 
     if (ctx->major == meta->major && ctx->minor == meta->minor) {
@@ -83,6 +89,8 @@ int device_access(struct bpf_cgroup_dev_ctx *ctx) {
         }
     }
 
+
+    bpf_printk("Access denied for device major=%d, minor=%d\n", ctx->major, ctx->minor);
     return  1;  
 }
 

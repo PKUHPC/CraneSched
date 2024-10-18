@@ -25,6 +25,7 @@
 
 #include <libcgroup.h>
 
+#include "DeviceManager.h"
 #include "CranedPublicDefs.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/OS.h"
@@ -243,8 +244,8 @@ const ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
 class Cgroup {
  public:
-  Cgroup(const std::string &path, struct cgroup *handle)
-      : m_cgroup_path_(path), m_cgroup_(handle) {}
+  Cgroup(const std::string &path, struct cgroup *handle,uint64_t id = 0)
+      : m_cgroup_path_(path), m_cgroup_(handle),m_cgroup_id(id) {}
   virtual ~Cgroup();
 
   struct cgroup *NativeHandle() { return m_cgroup_; }
@@ -284,6 +285,7 @@ class Cgroup {
   virtual bool ModifyCgroup_(CgroupConstant::ControllerFile controller_file);
   std::string m_cgroup_path_;
   mutable struct cgroup *m_cgroup_;
+  uint64_t m_cgroup_id;
 };
 
 class CgroupV1 : public Cgroup {
@@ -312,9 +314,9 @@ class CgroupV1 : public Cgroup {
 
 class CgroupV2 : public Cgroup {
  public:
-  CgroupV2(const std::string &path, struct cgroup *handle)
-      : Cgroup(path, handle) {}
-  ~CgroupV2() = default;
+  CgroupV2(const std::string &path, struct cgroup *handle,uint64_t id)
+      : Cgroup(path, handle,id) {}
+  ~CgroupV2();
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
   bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
@@ -349,7 +351,7 @@ class CgroupV2 : public Cgroup {
   */
   bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
                        bool set_write, bool set_mknod) override;
-
+  bool RmBpfDeviceMap();
   bool KillAllProcesses() override;
 
   bool Empty() override;
@@ -357,6 +359,7 @@ class CgroupV2 : public Cgroup {
   bool MigrateProcIn(pid_t pid) override;
 
  private:
+  std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
 };
 
 
