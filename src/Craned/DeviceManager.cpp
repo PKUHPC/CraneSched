@@ -23,12 +23,16 @@
 namespace Craned {
 
 DeviceEnvInjector GetDeviceEnvInjectorFromStr(const std::string& str) {
-  for (size_t i = 0; i < DeviceEnvInjectorStr.size(); ++i) {
-    if (str == DeviceEnvInjectorStr[i]) {
-      return static_cast<DeviceEnvInjector>(i);
-    }
-  }
-  return DeviceEnvInjector::InvalidInjector;
+  static const std::unordered_map<std::string, DeviceEnvInjector>
+      EnvStrToEnumMap{
+          {"nvidia", DeviceEnvInjector::Nvidia},
+          {"hip", DeviceEnvInjector::Hip},
+          {"ascend", DeviceEnvInjector::Ascend},
+      };
+  if (const auto it = EnvStrToEnumMap.find(str); it != EnvStrToEnumMap.end())
+    return it->second;
+  else
+    return DeviceEnvInjector::InvalidInjector;
 }
 
 BasicDevice::BasicDevice(const std::string& device_name,

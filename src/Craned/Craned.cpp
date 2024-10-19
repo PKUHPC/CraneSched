@@ -542,7 +542,8 @@ void ParseConfig(int argc, char** argv) {
       auto env_injector_enum =
           Craned::GetDeviceEnvInjectorFromStr(env_injector);
       if (env_injector_enum == Craned::InvalidInjector) {
-        CRANE_ERROR("Invalid injector type:{} for device {}.",env_injector, path);
+        CRANE_ERROR("Invalid injector type:{} for device {}.", env_injector,
+                    path);
         std::exit(1);
       }
 
