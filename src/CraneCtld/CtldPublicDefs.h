@@ -475,8 +475,6 @@ struct TaskInCtld {
     partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                   : val.partition_name();
 
-    task_to_ctld.set_partition_name(partition_id);
-
     requested_node_res_view = static_cast<ResourceView>(val.resources());
 
     time_limit = absl::Seconds(val.time_limit().seconds());
