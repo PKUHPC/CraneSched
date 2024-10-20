@@ -280,7 +280,6 @@ else ()
     message(FATAL_ERROR "LibAIO was not found.")
 endif ()
 
-
 # Needed by grpc
 set(_PROTOBUF_LIBPROTOBUF libprotobuf)
 set(_REFLECTION grpc++_reflection)

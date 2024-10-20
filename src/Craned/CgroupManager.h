@@ -429,8 +429,8 @@ class CgroupManager {
                             bool required, bool has_cgroup,
                             bool &changed_cgroup);
 
-  void RmAllTaskCgroups_();
-  void RmAllTaskCgroupsUnderController_(CgroupConstant::Controller controller);
+  static void RmAllTaskCgroups_();
+  static void RmAllTaskCgroupsUnderController_(CgroupConstant::Controller controller);
 
   void RmAllTaskCgroupsV2_();
   void RmCgroupsV2_(const std::string &root_cgroup_path,
