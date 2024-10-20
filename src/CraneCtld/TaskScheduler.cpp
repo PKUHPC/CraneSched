@@ -1795,7 +1795,7 @@ void TaskScheduler::QueryTasksInRam(
   auto task_rng_filter_partition = [&](auto& it) {
     TaskInCtld& task = *it.second;
     return no_partitions_constraint ||
-           req_partitions.contains(task.TaskToCtld().partition_name());
+           req_partitions.contains(task.partition_id);
   };
 
   bool no_task_ids_constraint = request->filter_task_ids().empty();
