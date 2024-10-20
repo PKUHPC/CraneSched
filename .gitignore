@@ -98,3 +98,4 @@ fabric.properties
 .vscode/
 build/
 test/Craned/build/
+src/Misc/BPF/*.o
