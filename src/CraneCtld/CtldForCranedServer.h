@@ -19,7 +19,6 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include "crane/Lock.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 
@@ -58,22 +57,8 @@ class CtldForCranedServer {
   inline void Wait() { m_server_->Wait(); }
 
  private:
-  template <typename K, typename V,
-            typename Hash = absl::container_internal::hash_default_hash<K>>
-  using HashMap = absl::flat_hash_map<K, V, Hash>;
-
-  template <typename K,
-            typename Hash = absl::container_internal::hash_default_hash<K>>
-  using HashSet = absl::flat_hash_set<K, Hash>;
-
-  using Mutex = util::mutex;
-
   std::unique_ptr<CtldForCranedServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
-
-  inline static std::mutex s_sigint_mtx;
-  inline static std::condition_variable s_sigint_cv;
-  static void signal_handler_func(int) { s_sigint_cv.notify_one(); };
 
   friend class CtldForCranedServiceImpl;
 };
