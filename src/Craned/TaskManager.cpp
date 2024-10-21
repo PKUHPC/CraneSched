@@ -417,12 +417,11 @@ void TaskManager::EvProcessSigchldCb_(int sig, short events, void* user_data) {
 
       CRANE_ASSERT_MSG(sigchld_info->resend_timer != nullptr,
                        "Failed to create new timer.");
-
+      CRANE_TRACE("Child Process {} exit too early, will do SigchldCb later",
+                  sigchld_info->pid);
       arg->task_manager = this_;
       arg->sigchld_info = std::move(sigchld_info);
 
-      CRANE_TRACE("Child Process {} exit too early, will do SigchldCb later",
-                  sigchld_info->pid);
       continue;
     }
 
