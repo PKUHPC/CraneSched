@@ -11,17 +11,28 @@ DbConfigPath: /etc/crane/database.yaml
 CraneBaseDir: /var/crane/
 
 # Tls settings
-UseTls: false
-ServerCertFilePath: /etc/crane/server.crt
-ServerKeyFilePath: /etc/crane/server.key
-CaCertFilePath: /etc/crane/ca.crt
-DomainSuffix: riley.local
+UseTls: true
+CranectldExternalCertFilePath: /etc/crane/cranectld_external.pem
+CranectldExternalKeyFilePath: /etc/crane/cranectld_external.key
+ExternalCaFilePath: /etc/crane/external_ca.pem
+
+CranectldInternalCertFilePath: /etc/crane/cranectld_internal.pem
+CranectldInternalKeyFilePath: /etc/crane/cranectld_internal.key
+CranedCertFilePath: /etc/crane/craned.pem
+CranedKeyFilePath: /etc/crane/craned.key
+CforedCertFilePath: /etc/crane/cfored.pem
+CforedKeyFilePath: /etc/crane/cfored.key
+InternalCaFilePath: /etc/crane/internal_ca.pem
+
+DomainSuffix: crane.com
 
 # Ctld settings
 # the listening address of control machine
 CraneCtldListenAddr: 0.0.0.0
 # the port of control machine to listen
 CraneCtldListenPort: 10011
+CraneCtldForCranedListenPort: 10013
+CraneCtldForCforedListenPort: 10014
 # debug level of cranectld
 CraneCtldDebugLevel: trace
 # file path of cranectld log file (relative to CraneBaseDir)
