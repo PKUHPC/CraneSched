@@ -24,19 +24,18 @@ namespace Ctld {
 
 AccountManager::AccountManager() { InitDataMap_(); }
 
-AccountManager::SuccessOrErrCode AccountManager::AddUser(
-    uint32_t uid, User&& new_user) {
+AccountManager::SuccessOrErrCode AccountManager::AddUser(uint32_t uid,
+                                                         User&& new_user) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   auto result = CheckOperatorPrivilegeHigher(uid, new_user.admin_level);
   if (!result) return result;
 
-  // if (new_user.default_account.empty()) {
-  //   // User must specify an account
-  //   return Result{false, fmt::format("No account is specified for user {}",
-  //                                    new_user.name)};
-  // }
+  if (new_user.default_account.empty()) {
+    // User must specify an account
+    return std::unexpected(crane::grpc::ErrCode::ERR_NO_ACCOUNT_SPECIFIED);
+  }
 
   std::string object_account = new_user.default_account;
   const std::string name = new_user.name;
@@ -51,7 +50,8 @@ AccountManager::SuccessOrErrCode AccountManager::AddUser(
 
   // Check whether the account exists
   const Account* find_account = GetExistedAccountInfoNoLock_(object_account);
-  if (!find_account) return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_ACCOUNT);
+  if (!find_account)
+    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_ACCOUNT);
 
   // Check if user's allowed partition is a subset of parent's allowed
   // partition
@@ -137,8 +137,8 @@ AccountManager::SuccessOrErrCode AccountManager::AddAccount(
   return AddAccount_(find_account, find_parent, std::move(new_account));
 }
 
-AccountManager::SuccessOrErrCode AccountManager::AddQos(
-    uint32_t uid, const Qos& new_qos) {
+AccountManager::SuccessOrErrCode AccountManager::AddQos(uint32_t uid,
+                                                        const Qos& new_qos) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto result = CheckOpUserIsAdmin(uid);
@@ -160,8 +160,7 @@ AccountManager::SuccessOrErrCode AccountManager::DeleteUser(
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   const User* user = GetExistedUserInfoNoLock_(name);
-  if (!user)
-    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_USER);
+  if (!user) return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_USER);
 
   auto result = CheckOperatorPrivilegeHigher(uid, user->admin_level);
   if (!result) return result;
@@ -206,8 +205,7 @@ AccountManager::SuccessOrErrCode AccountManager::DeleteQos(
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
   const Qos* qos = GetExistedQosInfoNoLock_(name);
 
-  if (!qos)
-    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_QOS);
+  if (!qos) return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_QOS);
 
   if (qos->reference_count != 0)
     return std::unexpected(crane::grpc::ErrCode::ERR_DELETE_QOS);
@@ -425,8 +423,7 @@ AccountManager::SuccessOrErrCode AccountManager::QueryQosInfo(
     }
   } else {
     const Qos* qos = GetExistedQosInfoNoLock_(name);
-    if (!qos)
-      return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_QOS);
+    if (!qos) return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_QOS);
 
     if (!IsOperatorPrivilegeSameAndHigher(res_user, User::Operator)) {
       bool found = false;
@@ -438,8 +435,7 @@ AccountManager::SuccessOrErrCode AccountManager::QueryQosInfo(
           }
         }
       }
-      if (!found)
-        return std::unexpected(crane::grpc::ErrCode::ERR_ALLOWED_QOS);
+      if (!found) return std::unexpected(crane::grpc::ErrCode::ERR_ALLOWED_QOS);
     }
     res_qos_map->try_emplace(name, *qos);
   }
@@ -452,8 +448,7 @@ AccountManager::SuccessOrErrCode AccountManager::ModifyAdminLevel(
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   const User* user = GetExistedUserInfoNoLock_(name);
-  if (!user)
-    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_USER);
+  if (!user) return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_USER);
 
   const User* op_user = nullptr;
 
@@ -466,10 +461,14 @@ AccountManager::SuccessOrErrCode AccountManager::ModifyAdminLevel(
   }
 
   User::AdminLevel new_level;
-  if (value == "none") new_level = User::None;
-  else if (value == "operator") new_level = User::Operator;
-  else if (value == "admin") new_level = User::Admin;
-  else return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_ADMIN_LEVEL);
+  if (value == "none")
+    new_level = User::None;
+  else if (value == "operator")
+    new_level = User::Operator;
+  else if (value == "admin")
+    new_level = User::Admin;
+  else
+    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_ADMIN_LEVEL);
 
   if (!IsOperatorPrivilegeSameAndHigher(*op_user, new_level))
     return std::unexpected(crane::grpc::ErrCode::ERR_PERMISSION_USER);
@@ -489,7 +488,7 @@ AccountManager::SuccessOrErrCode AccountManager::ModifyUserDefaultQos(
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto result = CheckOpUserHasModifyPermission(uid, p, name, account, false);
-    if (!result)  return result;
+    if (!result) return result;
   }
 
   auto result = CheckSetUserDefaultQos(*p, account, partition, value);
@@ -498,15 +497,14 @@ AccountManager::SuccessOrErrCode AccountManager::ModifyUserDefaultQos(
   return SetUserDefaultQos_(*p, account, partition, value);
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::ModifyUserAllowedParition(
+AccountManager::SuccessOrErrCode AccountManager::ModifyUserAllowedParition(
     const crane::grpc::OperatorType& operatorType, const uint32_t uid,
     const std::string& name, std::string account, const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
 
   const User* p = GetExistedUserInfoNoLock_(name);
-  AccountManager::SuccessOrErrCode  result;
+  AccountManager::SuccessOrErrCode result;
   result = CheckOpUserHasModifyPermission(uid, p, name, account, false);
   if (!result) return result;
 
@@ -535,7 +533,7 @@ AccountManager::SuccessOrErrCode AccountManager::ModifyUserAllowedQos(
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const User* p = GetExistedUserInfoNoLock_(name);
-  AccountManager::SuccessOrErrCode  result;
+  AccountManager::SuccessOrErrCode result;
   result = CheckOpUserHasModifyPermission(uid, p, name, account, false);
   if (!result) return result;
 
@@ -543,13 +541,12 @@ AccountManager::SuccessOrErrCode AccountManager::ModifyUserAllowedQos(
 
   switch (operatorType) {
   case crane::grpc::OperatorType::Add:
-    result =
-        CheckAddUserAllowedQos(p, account_ptr, account, partition, value);
+    result = CheckAddUserAllowedQos(p, account_ptr, account, partition, value);
     return !result ? result
                    : AddUserAllowedQos_(*p, *account_ptr, partition, value);
   case crane::grpc::OperatorType::Overwrite:
-    result = CheckSetUserAllowedQos(p, account_ptr, account, partition,
-                                         value, force);
+    result = CheckSetUserAllowedQos(p, account_ptr, account, partition, value,
+                                    force);
     return !result
                ? result
                : SetUserAllowedQos_(*p, *account_ptr, partition, value, force);
@@ -560,10 +557,9 @@ AccountManager::SuccessOrErrCode AccountManager::ModifyUserAllowedQos(
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::DeleteUserAllowedPartiton(uint32_t uid, const std::string& name,
-                                          std::string account,
-                                          const std::string& value) {
+AccountManager::SuccessOrErrCode AccountManager::DeleteUserAllowedPartiton(
+    uint32_t uid, const std::string& name, std::string account,
+    const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   const User* p = GetExistedUserInfoNoLock_(name);
@@ -714,8 +710,7 @@ AccountManager::SuccessOrErrCode AccountManager::ModifyQos(
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const Qos* p = GetExistedQosInfoNoLock_(name);
-  if (!p)
-    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_QOS);
+  if (!p) return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_QOS);
 
   std::string item = "";
   switch (modifyField) {
@@ -950,11 +945,9 @@ AccountManager::SuccessOrErrCode AccountManager::CheckOpUserIsAdmin(
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckAddUserAllowedPartition(const User* user,
-                                             const Account* account_ptr,
-                                             const std::string& account,
-                                             const std::string& partition) {
+AccountManager::SuccessOrErrCode AccountManager::CheckAddUserAllowedPartition(
+    const User* user, const Account* account_ptr, const std::string& account,
+    const std::string& partition) {
   const std::string name = user->name;
 
   auto result = CheckPartitionIsAllowed(account_ptr, account, partition, false);
@@ -968,11 +961,9 @@ AccountManager::CheckAddUserAllowedPartition(const User* user,
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckSetUserAllowedPartition(const User* user,
-                                             const Account* account_ptr,
-                                             const std::string& account,
-                                             const std::string& partition) {
+AccountManager::SuccessOrErrCode AccountManager::CheckSetUserAllowedPartition(
+    const User* user, const Account* account_ptr, const std::string& account,
+    const std::string& partition) {
   const std::string name = user->name;
 
   auto result = CheckPartitionIsAllowed(account_ptr, account, partition, false);
@@ -1066,10 +1057,14 @@ AccountManager::SuccessOrErrCode AccountManager::CheckSetUserAdminLevel(
     const User& user, const std::string& level, User::AdminLevel* new_level) {
   const std::string name = user.name;
 
-  if (level == "none") *new_level = User::None;
-  else if (level == "operator") *new_level = User::Operator;
-  else if (level == "admin") *new_level = User::Admin;
-  else return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_ADMIN_LEVEL);
+  if (level == "none")
+    *new_level = User::None;
+  else if (level == "operator")
+    *new_level = User::Operator;
+  else if (level == "admin")
+    *new_level = User::Admin;
+  else
+    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_ADMIN_LEVEL);
 
   return true;
 }
@@ -1128,11 +1123,9 @@ AccountManager::CheckDeleteUserAllowedPartition(const User& user,
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckDeleteUserAllowedQos(const User& user,
-                                          const std::string& account,
-                                          const std::string& partition,
-                                          const std::string& qos, bool force) {
+AccountManager::SuccessOrErrCode AccountManager::CheckDeleteUserAllowedQos(
+    const User& user, const std::string& account, const std::string& partition,
+    const std::string& qos, bool force) {
   const std::string name = user.name;
 
   if (partition.empty()) {
@@ -1189,10 +1182,9 @@ AccountManager::CheckAddAccountAllowedPartition(const Account* account_ptr,
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckAddAccountAllowedQos(const Account* account_ptr,
-                                          const std::string& account,
-                                          const std::string& qos) {
+AccountManager::SuccessOrErrCode AccountManager::CheckAddAccountAllowedQos(
+    const Account* account_ptr, const std::string& account,
+    const std::string& qos) {
   auto result = CheckQosIsAllowed(account_ptr, account, qos, true);
   if (!result) return result;
 
@@ -1205,10 +1197,9 @@ AccountManager::CheckAddAccountAllowedQos(const Account* account_ptr,
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckSetAccountDescription(const Account* account_ptr,
-                                           const std::string& account,
-                                           const std::string& description) {
+AccountManager::SuccessOrErrCode AccountManager::CheckSetAccountDescription(
+    const Account* account_ptr, const std::string& account,
+    const std::string& description) {
   if (!account_ptr)
     return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_ACCOUNT);
 
@@ -1238,11 +1229,9 @@ AccountManager::CheckSetAccountAllowedPartition(const Account* account_ptr,
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckSetAccountAllowedQos(const Account* account_ptr,
-                                          const std::string& account,
-                                          const std::string& qos_list,
-                                          bool force) {
+AccountManager::SuccessOrErrCode AccountManager::CheckSetAccountAllowedQos(
+    const Account* account_ptr, const std::string& account,
+    const std::string& qos_list, bool force) {
   auto result = CheckQosIsAllowed(account_ptr, account, qos_list, true);
   if (!result) return result;
 
@@ -1260,10 +1249,9 @@ AccountManager::CheckSetAccountAllowedQos(const Account* account_ptr,
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckSetAccountDefaultQos(const Account* account_ptr,
-                                          const std::string& account,
-                                          const std::string& qos) {
+AccountManager::SuccessOrErrCode AccountManager::CheckSetAccountDefaultQos(
+    const Account* account_ptr, const std::string& account,
+    const std::string& qos) {
   auto result = CheckQosIsAllowed(account_ptr, account, qos, false);
   if (!result) return result;
 
@@ -1287,11 +1275,9 @@ AccountManager::CheckDeleteAccountAllowedPartition(const Account* account_ptr,
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckDeleteAccountAllowedQos(const Account* account_ptr,
-                                             const std::string& account,
-                                             const std::string& qos,
-                                             bool force) {
+AccountManager::SuccessOrErrCode AccountManager::CheckDeleteAccountAllowedQos(
+    const Account* account_ptr, const std::string& account,
+    const std::string& qos, bool force) {
   auto result = CheckQosIsAllowed(account_ptr, account, qos, false);
   if (!result) return result;
 
@@ -1351,9 +1337,10 @@ AccountManager::Result AccountManager::HasPermissionToAccount(
   return Result{true};
 }
 
-bool AccountManager::HasPermissionToUser(
-    uint32_t uid, const std::string& target_user, bool read_only_priv,
-    User::AdminLevel* level_of_uid) {
+bool AccountManager::HasPermissionToUser(uint32_t uid,
+                                         const std::string& target_user,
+                                         bool read_only_priv,
+                                         User::AdminLevel* level_of_uid) {
   PasswordEntry source_user_entry(uid);
   if (!source_user_entry.Valid()) {
     return false;
@@ -1364,12 +1351,10 @@ bool AccountManager::HasPermissionToUser(
 
   const User* source_user_ptr =
       GetExistedUserInfoNoLock_(source_user_entry.Username());
-  if (!source_user_ptr)
-    return false;
+  if (!source_user_ptr) return false;
 
   const User* target_user_ptr = GetExistedUserInfoNoLock_(target_user);
-  if (!target_user_ptr)
-    return false;
+  if (!target_user_ptr) return false;
 
   if (level_of_uid != nullptr) *level_of_uid = source_user_ptr->admin_level;
 
@@ -1440,11 +1425,9 @@ AccountManager::CheckOpUserHasPermissionToAccount(uint32_t uid,
   return CheckUserPermissionOnAccount(*op_user, account, read_only_priv);
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckOpUserHasModifyPermission(uint32_t uid, const User* user,
-                                               const std::string& name,
-                                               std::string& account,
-                                               bool read_only_priv) {
+AccountManager::SuccessOrErrCode AccountManager::CheckOpUserHasModifyPermission(
+    uint32_t uid, const User* user, const std::string& name,
+    std::string& account, bool read_only_priv) {
   PasswordEntry entry(uid);
 
   const User* op_user = nullptr;
@@ -1452,8 +1435,7 @@ AccountManager::CheckOpUserHasModifyPermission(uint32_t uid, const User* user,
   auto result = CheckOpUserExisted(uid, &op_user);
   if (!result) return result;
 
-  if (!user)
-    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_USER);
+  if (!user) return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_USER);
 
   if (account.empty()) account = user->default_account;
 
@@ -1467,11 +1449,9 @@ AccountManager::CheckOpUserHasModifyPermission(uint32_t uid, const User* user,
   return CheckUserPermissionOnAccount(*op_user, account, read_only_priv);
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckPartitionIsAllowed(const Account* account_ptr,
-                                        const std::string& account,
-                                        const std::string& partition,
-                                        bool check_parent) {
+AccountManager::SuccessOrErrCode AccountManager::CheckPartitionIsAllowed(
+    const Account* account_ptr, const std::string& account,
+    const std::string& partition, bool check_parent) {
   if (!account_ptr)
     return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_ACCOUNT);
 
@@ -1538,7 +1518,8 @@ AccountManager::SuccessOrErrCode AccountManager::CheckQosIsAllowed(
           if (std::find(parent->allowed_qos_list.begin(),
                         parent->allowed_qos_list.end(),
                         qos) == parent->allowed_qos_list.end()) {
-            return std::unexpected(crane::grpc::ErrCode::ERR_PARENT_ALLOWED_QOS);
+            return std::unexpected(
+                crane::grpc::ErrCode::ERR_PARENT_ALLOWED_QOS);
           }
         }
       }
@@ -1557,12 +1538,10 @@ bool AccountManager::IsOperatorPrivilegeSameAndHigher(
   case User::Admin:
     break;
   case User::Operator:
-    if (admin_level == User::Admin)
-      result = false;
+    if (admin_level == User::Admin) result = false;
     break;
   case User::None:
-    if (admin_level != User::None)
-      result = false;
+    if (admin_level != User::None) result = false;
     break;
   default:
     std::unreachable();
@@ -1571,9 +1550,8 @@ bool AccountManager::IsOperatorPrivilegeSameAndHigher(
   return result;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckOperatorPrivilegeHigher(uint32_t uid,
-                                             User::AdminLevel admin_level) {
+AccountManager::SuccessOrErrCode AccountManager::CheckOperatorPrivilegeHigher(
+    uint32_t uid, User::AdminLevel admin_level) {
   const User* op_user = nullptr;
 
   auto result = CheckOpUserExisted(uid, &op_user);
@@ -1589,10 +1567,8 @@ AccountManager::CheckOperatorPrivilegeHigher(uint32_t uid,
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckUserPermissionOnAccount(const User& op_user,
-                                             const std::string& account,
-                                             bool read_only_priv) {
+AccountManager::SuccessOrErrCode AccountManager::CheckUserPermissionOnAccount(
+    const User& op_user, const std::string& account, bool read_only_priv) {
   if (op_user.admin_level == User::None) {
     if (read_only_priv) {
       // In current implementation, if a user is the coordinator of an
@@ -1603,12 +1579,10 @@ AccountManager::CheckUserPermissionOnAccount(const User& op_user,
       // coordinates, and it's ok to skip checking
       // user->coordinator_accounts.
       for (const auto& [acc, item] : op_user.account_to_attrs_map)
-        if (acc == account || PaternityTestNoLock_(acc, account))
-          return true;
+        if (acc == account || PaternityTestNoLock_(acc, account)) return true;
     } else {
       for (const auto& acc : op_user.coordinator_accounts)
-        if (acc == account || PaternityTestNoLock_(acc, account))
-          return true;
+        if (acc == account || PaternityTestNoLock_(acc, account)) return true;
     }
 
     return std::unexpected(crane::grpc::ErrCode::ERR_USER_ALLOWED_ACCOUNT);
@@ -1617,11 +1591,9 @@ AccountManager::CheckUserPermissionOnAccount(const User& op_user,
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::CheckUserPermissionOnUser(const User& op_user, const User* user,
-                                          const std::string& name,
-                                          std::string& account,
-                                          bool read_only_priv) {
+AccountManager::SuccessOrErrCode AccountManager::CheckUserPermissionOnUser(
+    const User& op_user, const User* user, const std::string& name,
+    std::string& account, bool read_only_priv) {
   if (!user) return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_USER);
 
   // 1. The operating user is the same as the target user.
@@ -1643,8 +1615,7 @@ AccountManager::CheckUserPermissionOnUser(const User& op_user, const User* user,
       if (result) return true;
     }
   } else {
-    if (account.empty())
-      account = user->default_account;
+    if (account.empty()) account = user->default_account;
     auto result =
         CheckUserPermissionOnAccount(op_user, account, read_only_priv);
     if (result) return true;
@@ -1737,8 +1708,7 @@ AccountManager::SuccessOrErrCode AccountManager::AddUser_(
   const std::string name = new_user.name;
 
   bool add_coordinator = false;
-  if (!new_user.coordinator_accounts.empty())
-    add_coordinator = true;
+  if (!new_user.coordinator_accounts.empty()) add_coordinator = true;
 
   User res_user;
   if (find_user && !find_user->deleted) {
@@ -1869,8 +1839,8 @@ AccountManager::SuccessOrErrCode AccountManager::AddAccount_(
   return true;
 }
 
-AccountManager::SuccessOrErrCode AccountManager::AddQos_(
-    const Qos* find_qos, const Qos& new_qos) {
+AccountManager::SuccessOrErrCode AccountManager::AddQos_(const Qos* find_qos,
+                                                         const Qos& new_qos) {
   if (find_qos) {
     // There is a same qos but was deleted,here will delete the original
     // qos and overwrite it with the same name
@@ -2154,10 +2124,8 @@ AccountManager::SuccessOrErrCode AccountManager::SetUserDefaultQos_(
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::SetUserAllowedPartition_(const User& user,
-                                         const Account& account,
-                                         const std::string& partitions) {
+AccountManager::SuccessOrErrCode AccountManager::SetUserAllowedPartition_(
+    const User& user, const Account& account, const std::string& partitions) {
   const std::string name = user.name;
   const std::string account_name = account.name;
 
@@ -2243,10 +2211,9 @@ AccountManager::SuccessOrErrCode AccountManager::SetUserAllowedQos_(
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::DeleteUserAllowedPartition_(const User& user,
-                                            const std::string& account,
-                                            const std::string& partition) {
+AccountManager::SuccessOrErrCode AccountManager::DeleteUserAllowedPartition_(
+    const User& user, const std::string& account,
+    const std::string& partition) {
   const std::string name = user.name;
 
   // Update to database
@@ -2319,9 +2286,8 @@ AccountManager::SuccessOrErrCode AccountManager::DeleteUserAllowedQos_(
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::AddAccountAllowedPartition_(const std::string& name,
-                                            const std::string& partition) {
+AccountManager::SuccessOrErrCode AccountManager::AddAccountAllowedPartition_(
+    const std::string& name, const std::string& partition) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -2405,10 +2371,8 @@ AccountManager::SuccessOrErrCode AccountManager::SetAccountDefaultQos_(
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::SetAccountAllowedPartition_(const Account& account,
-                                            const std::string& partitions,
-                                            bool force) {
+AccountManager::SuccessOrErrCode AccountManager::SetAccountAllowedPartition_(
+    const Account& account, const std::string& partitions, bool force) {
   const std::string name = account.name;
 
   std::vector<std::string> partition_vec =
@@ -2531,10 +2495,8 @@ AccountManager::SuccessOrErrCode AccountManager::SetAccountAllowedQos_(
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::DeleteAccountAllowedPartition_(const Account& account,
-                                               const std::string& partition,
-                                               bool force) {
+AccountManager::SuccessOrErrCode AccountManager::DeleteAccountAllowedPartition_(
+    const Account& account, const std::string& partition, bool force) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         DeleteAccountAllowedPartitionFromDBNoLock_(account.name, partition);
@@ -2549,9 +2511,8 @@ AccountManager::DeleteAccountAllowedPartition_(const Account& account,
   return true;
 }
 
-AccountManager::SuccessOrErrCode
-AccountManager::DeleteAccountAllowedQos_(const Account& account,
-                                         const std::string& qos, bool force) {
+AccountManager::SuccessOrErrCode AccountManager::DeleteAccountAllowedQos_(
+    const Account& account, const std::string& qos, bool force) {
   int change_num;
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
