@@ -38,25 +38,25 @@ message AllocatableResource {
   uint64 memory_sw_limit_bytes = 3;
 }
 
-message TypeCountMap{
-  map <string/*Type*/, uint64> type_count_map = 1;
+message TypeCountMap {
+  map<string /*Type*/, uint64> type_count_map = 1;
   uint64 total = 2;
 }
 
-message DeviceMap{
+message DeviceMap {
   map<string /*name*/, TypeCountMap> name_type_map = 1;
 }
 
-message Slots{
+message Slots {
   repeated string slots = 1;
 }
 
-message DeviceTypeSlotsMap{
+message DeviceTypeSlotsMap {
   map<string /*Type*/, Slots /*index of slot*/> type_slots_map = 1;
 }
 
-message DedicatedResourceInNode{
-  map <string /*device name*/, DeviceTypeSlotsMap> name_type_map = 1;
+message DedicatedResourceInNode {
+  map<string /*device name*/, DeviceTypeSlotsMap> name_type_map = 1;
 }
 
 message ResourceInNode {
@@ -65,7 +65,7 @@ message ResourceInNode {
 }
 
 message ResourceV2 {
-  map <string /*craned id*/, ResourceInNode> each_node_res = 1;
+  map<string /*craned id*/, ResourceInNode> each_node_res = 1;
 }
 
 message ResourceView {
@@ -139,7 +139,7 @@ message TaskToCtld {
   string extra_attr = 23;
 
   string cmd_line = 31;
-  string cwd = 32; // Current working directory
+  string cwd = 32;  // Current working directory
   map<string, string> env = 33;
 
   string excludes = 34;
@@ -182,7 +182,7 @@ message TaskToD {
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
-  google.protobuf.Timestamp start_time = 5; // Currently Only used in CraneCtld
+  google.protobuf.Timestamp start_time = 5;  // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 6;
 
   string partition = 8;
@@ -218,7 +218,7 @@ message BatchTaskAdditionalMeta {
   string error_file_pattern = 4;
 }
 
-message InteractiveTaskAdditionalMeta{
+message InteractiveTaskAdditionalMeta {
   string cfored_name = 1;
   string sh_script = 2;
   string term_env = 3;
@@ -263,10 +263,11 @@ message TaskInfo {
     string craned_list = 36;
   }
 
-  // The time of different nodes across the whole cluster might not always be synchronized.
-  // If the time on the front end node is more than several seconds ahead of the CraneCtld node,
-  // a negative elapsed time might occur.
-  // To avoid this, the elapsed time of a task is calculated on the CraneCtld side.
+  // The time of different nodes across the whole cluster might not always be
+  // synchronized. If the time on the front end node is more than several
+  // seconds ahead of the CraneCtld node, a negative elapsed time might occur.
+  // To avoid this, the elapsed time of a task is calculated on the CraneCtld
+  // side.
   google.protobuf.Duration elapsed_time = 37;
   repeated string execution_node = 38;
 }
@@ -318,45 +319,45 @@ message TrimmedPartitionInfo {
 
 enum ErrCode {
   SUCCESS = 0;  // Success
-  
-  ERR_INVALID_UID = 10001;   // Invalid UID passed
-  ERR_INVALID_OP_USER = 10002; // Invalid operation user
-  ERR_INVALID_USER = 10003;  // Invalid user
-  ERR_PERMISSION_USER = 10004;  // User permissions too low, no permission to operate
-  ERR_USER_DUPLICATE_ACCOUNT= 10005;  // User duplicate account insertion
-  ERR_USER_ALLOWED_ACCOUNT = 10006;  // User does not have permission for the account
-  ERR_INVALID_ADMIN_LEVEL = 10007;  // Invalid permission level
-  ERR_USER_ACCOUNT_MISMATCH = 10008; // User does not belong to the account
-  ERR_NO_ACCOUNT_SPECIFIED = 10009;
-  
-  ERR_INVALID_ACCOUNT = 10010;  // Invalid account
-  ERR_DUPLICATE_ACCOUNT = 10011;  // Duplicate account insertion
-  ERR_INVALID_PARENTACCOUNT = 10012;  // Invalid parent account
-  ERR_DELETE_ACCOUNT = 10013;   // Account has child nodes
-  
-  ERR_INVALID_PARTITION = 10014;  // Invalid partition, partition does not exist
-  ERR_ALLOWED_PARTITION = 10015; // Account/user does not include this partition
-  ERR_DUPLICATE_PARTITION = 10016; // Account/user duplicate insertion
-  ERR_PARENT_ALLOWED_PARTITION = 10017; // Parent account does not include this partition
-  ERR_USER_EMPTY_PARTITION = 10018; // Cannot add QoS when user has no partition
-  ERR_CHILD_HAS_PARTITION = 10019; // Partition '{}' is used by some descendant node of the account '{}'. Ignoring this constraint with forced operation.
-  
-  ERR_INVALID_QOS = 10020;  // Invalid QoS, QoS does not exist
-  ERR_DB_DUPLICATE_QOS = 10021;  // Duplicate QoS insertion in the database.
-  ERR_DELETE_QOS = 10022;  // QoS reference count is not zero.
-  ERR_CONVERT_TO_INTERGER = 10023;  // String to integer conversion failed
-  ERR_TIME_LIMIT = 10024;  // Invalid time value
-  ERR_ALLOWED_QOS = 10025; // Account/user does not include this QoS.
-  ERR_DUPLICATE_QOS = 10026; // Account/user duplicate insertion.
-  ERR_PARENT_ALLOWED_QOS = 10027; // Parent account does not include this QoS.
-  ERR_SET_ALLOWED_QOS = 10028; // QoS '{}' is the default QoS of partition '{}', but not found in the new QoS list.
-  ERR_ALLOWED_DEFAULT_QOS = 10029; // Default QoS is not in the allowed QoS list
-  ERR_DUPLICATE_DEFAULT_QOS = 10030; // Duplicate default QoS setting
-  ERR_CHILD_HAS_DEFAULT_QOS = 10031; // Someone is using QoS '{}' as default QoS. Ignoring this constraint with forced deletion, the deleted default QoS is randomly replaced with one of the remaining items in the QoS list.
-  ERR_CHILD_HAS_QOS = 10032; // QoS '{}' is used by some descendant node or itself of the account '{}'. Ignoring this constraint with forced operation.
-  ERR_SET_DEFAULT_QOS = 10033; // Qos '{}' not in allowed qos list or is already the default qos
 
-  ERR_UPDATE_DATABASE = 10034;  // Database update failed
+  ERR_INVALID_UID = 10001;
+  ERR_INVALID_OP_USER = 10002;
+  ERR_INVALID_USER = 10003;
+  ERR_PERMISSION_USER = 10004;
+  ERR_USER_DUPLICATE_ACCOUNT = 10005;
+  ERR_USER_ALLOWED_ACCOUNT = 10006;
+  ERR_INVALID_ADMIN_LEVEL = 10007;
+  ERR_USER_ACCOUNT_MISMATCH = 10008;
+  ERR_NO_ACCOUNT_SPECIFIED = 10009;
+
+  ERR_INVALID_ACCOUNT = 10010;
+  ERR_DUPLICATE_ACCOUNT = 10011;
+  ERR_INVALID_PARENTACCOUNT = 10012;
+  ERR_DELETE_ACCOUNT = 10013;
+
+  ERR_INVALID_PARTITION = 10014;
+  ERR_ALLOWED_PARTITION = 10015;
+  ERR_DUPLICATE_PARTITION = 10016;
+  ERR_PARENT_ALLOWED_PARTITION = 10017;
+  ERR_USER_EMPTY_PARTITION = 10018;
+  ERR_CHILD_HAS_PARTITION = 10019;
+
+  ERR_INVALID_QOS = 10020;
+  ERR_DB_DUPLICATE_QOS = 10021;
+  ERR_DELETE_QOS = 10022;
+  ERR_CONVERT_TO_INTERGER = 10023;
+  ERR_TIME_LIMIT = 10024;
+  ERR_ALLOWED_QOS = 10025;
+  ERR_DUPLICATE_QOS = 10026;
+  ERR_PARENT_ALLOWED_QOS = 10027;
+  ERR_SET_ALLOWED_QOS = 10028;
+  ERR_ALLOWED_DEFAULT_QOS = 10029;
+  ERR_DUPLICATE_DEFAULT_QOS = 10030;
+  ERR_CHILD_HAS_DEFAULT_QOS = 10031;
+  ERR_CHILD_HAS_QOS = 10032;
+  ERR_SET_DEFAULT_QOS = 10033;
+
+  ERR_UPDATE_DATABASE = 10034;
 
   ERR_GENERIC_FAILURE = 10100;
   ERR_NO_RESOURCE = 10101;
@@ -377,13 +378,11 @@ enum ErrCode {
   ERR_PROTOBUF = 10116;
   ERR_LIB_EVENT = 10117;
   ERR_NO_AVAIL_NODE = 10118;
- }
- 
+}
 
 enum EntityType {
   Account = 0;
   User = 1;
-  // Qos = 2;
 }
 
 enum OperatorType {
@@ -398,9 +397,9 @@ enum ModifyField {
   Qos = 1;
   DefaultQos = 2;
   // account and qos
-  Description = 3; 
+  Description = 3;
   // user
-  AdminLevel = 4; 
+  AdminLevel = 4;
   // qos
   Priority = 5;
   MaxJobsPerUser = 6;
@@ -421,23 +420,25 @@ message AccountInfo {
   bool blocked = 10;
 }
 
-// Note: UserInfo DIFFERS from the `User` struct in C++ code and database representation
-//       and is ONLY used for communication between CraneCtld and cacctmgr command.
-//       If an user belongs to multiple accounts, There will be multiple `UserInfo`
-//       messages with `account` pointing to each account.
+// Note: UserInfo DIFFERS from the `User` struct in C++ code and database
+// representation
+//       and is ONLY used for communication between CraneCtld and cacctmgr
+//       command. If an user belongs to multiple accounts, There will be
+//       multiple `UserInfo` messages with `account` pointing to each account.
 //       For example, if a user (uid=1) belongs to accounts `1,2,3`,
-//       there will be three `UserInfo` messages: (uid=1, account=1), (uid=1, account=2),
-//       (uid=1, account=3).
-//       The c++ code and database representation use a Map<account name, AttrsInAccount> to contain
-//       in ONE UserInfo message all the information belonging to different accounts.
+//       there will be three `UserInfo` messages: (uid=1, account=1), (uid=1,
+//       account=2), (uid=1, account=3). The c++ code and database
+//       representation use a Map<account name, AttrsInAccount> to contain in
+//       ONE UserInfo message all the information belonging to different
+//       accounts.
 message UserInfo {
-  enum AdminLevel{
+  enum AdminLevel {
     None = 0;
     Operator = 1;
     Admin = 2;
     Root = 3;
   };
-  message AllowedPartitionQos{
+  message AllowedPartitionQos {
     string partition_name = 1;
     repeated string qos_list = 2;
     string default_qos = 3;
