@@ -540,17 +540,26 @@ void ParseConfig(int argc, char** argv) {
       std::string name, type, env_injector;
       std::vector<std::string> path;
       std::tie(name, type, path, env_injector) = dev_arg;
+
+      auto env_injector_enum =
+          Craned::GetDeviceEnvInjectorFromStr(env_injector);
+      if (env_injector_enum == Craned::InvalidInjector) {
+        CRANE_ERROR("Invalid injector type:{} for device {}.", env_injector,
+                    path);
+        std::exit(1);
+      }
+
       std::unique_ptr dev = Craned::DeviceManager::ConstructDevice(
-          name, type, path, env_injector);
+          name, type, path, env_injector_enum);
       if (!dev->Init()) {
         CRANE_ERROR("Access Device {} failed.", static_cast<std::string>(*dev));
         std::exit(1);
-      } else {
-        dev->dev_id = dev->device_metas.front().path;
-        node_res->dedicated_res.name_type_slots_map[dev->name][dev->type]
-            .emplace(dev->dev_id);
-        Craned::g_this_node_device[dev->dev_id] = std::move(dev);
       }
+
+      dev->dev_id = dev->device_metas.front().path;
+      node_res->dedicated_res.name_type_slots_map[dev->name][dev->type].emplace(
+          dev->dev_id);
+      Craned::g_this_node_device[dev->dev_id] = std::move(dev);
     }
     each_node_device.clear();
   }
