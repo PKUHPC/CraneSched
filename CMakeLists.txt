@@ -279,6 +279,7 @@ set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
+pkg_check_modules(libbpf REQUIRED IMPORTED_TARGET libbpf>=1.4.6)
 
 # @formatter:off
 add_definitions(-DCRANE_BUILD_DIRECTORY=\("${CMAKE_BINARY_DIR}"\))
