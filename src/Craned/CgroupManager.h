@@ -27,7 +27,6 @@
 
 #include <libcgroup.h>
 
-#include "DeviceManager.h"
 #include "CranedPublicDefs.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/OS.h"
@@ -87,12 +86,13 @@ enum class ControllerFile : uint64_t {
   ControllerFileCount,
 };
 
-
-
 inline const char *kTaskCgPathPrefix = "Crane_Task_";
 inline const char *RootCgroupFullPath = "/sys/fs/cgroup";
 inline const char *BpfObjectFile = "/etc/crane/cgroup_dev_bpf.o";
-inline const char *BpfDeviceMapFile = "/sys/fs/bpf/dev_map";
+inline const char *BpfDeviceMapFile = "/sys/fs/bpf/craned_dev_map";
+inline const char *BpfMapName = "craned_dev_map";
+inline const char *BpfProgramName = "craned_device_access";
+
 namespace Internal {
 
 constexpr std::array<std::string_view,
@@ -153,6 +153,26 @@ constexpr std::string_view GetControllerFileStringView(
 }
 
 }  // namespace CgroupConstant
+
+enum BPF_PERMISSION { ALLOW = 0, DENY };
+
+#pragma pack(push, 8)
+struct BpfKey {
+  uint64_t cgroup_id;
+  uint32_t major;
+  uint32_t minor;
+};
+#pragma pack(pop)
+
+#pragma pack(push, 8)
+struct BpfDeviceMeta {
+  uint32_t major;
+  uint32_t minor;
+  int permission;
+  short access;
+  short type;
+};
+#pragma pack(pop)
 
 class ControllerFlags {
  public:
@@ -244,19 +264,9 @@ const ControllerFlags NO_CONTROLLER_FLAG{};
 //  handles this for us and no additional care needs to be taken.
 const ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
-class Cgroup {
+class CgroupInterface {
  public:
-  Cgroup(const std::string &path, struct cgroup *handle,uint64_t id = 0)
-      : m_cgroup_path_(path), m_cgroup_(handle),m_cgroup_id(id) {}
-  virtual ~Cgroup();
-
-  struct cgroup *NativeHandle() { return m_cgroup_; }
-
-  const std::string &GetCgroupString() const { return m_cgroup_path_; };
-
-  // Using the zombie object pattern as exceptions are not available.
-  bool Valid() const { return m_cgroup_ != nullptr; }
-
+  virtual ~CgroupInterface() {}
   virtual bool SetCpuCoreLimit(double core_num) = 0;
   virtual bool SetCpuShares(uint64_t share) = 0;
   virtual bool SetMemoryLimitBytes(uint64_t memory_bytes) = 0;
@@ -266,6 +276,24 @@ class Cgroup {
   virtual bool SetDeviceAccess(const std::unordered_set<SlotId> &devices,
                                bool set_read, bool set_write,
                                bool set_mknod) = 0;
+  virtual bool MigrateProcIn(pid_t pid) = 0;
+
+  virtual bool KillAllProcesses() = 0;
+
+  virtual bool Empty() = 0;
+  virtual const std::string &GetCgroupString() const = 0;
+};
+
+class Cgroup {
+ public:
+  Cgroup(const std::string &path, struct cgroup *handle, uint64_t id = 0)
+      : m_cgroup_path_(path), m_cgroup_(handle), m_cgroup_id(id) {}
+  virtual ~Cgroup();
+
+  struct cgroup *NativeHandle() { return m_cgroup_; }
+
+  // Using the zombie object pattern as exceptions are not available.
+  bool Valid() const { return m_cgroup_ != nullptr; }
 
   bool SetControllerValue(CgroupConstant::Controller controller,
                           CgroupConstant::ControllerFile controller_file,
@@ -276,11 +304,6 @@ class Cgroup {
   bool SetControllerStrs(CgroupConstant::Controller controller,
                          CgroupConstant::ControllerFile controller_file,
                          const std::vector<std::string> &strs);
-  virtual bool MigrateProcIn(pid_t pid) = 0;
-
-  virtual bool KillAllProcesses() = 0;
-
-  virtual bool Empty() = 0;
 
  protected:
   // CgroupConstant::CgroupVersion cg_vsion; // maybe for hybird mode
@@ -290,11 +313,11 @@ class Cgroup {
   uint64_t m_cgroup_id;
 };
 
-class CgroupV1 : public Cgroup {
+class CgroupV1 : private Cgroup, public CgroupInterface {
  public:
   CgroupV1(const std::string &path, struct cgroup *handle)
       : Cgroup(path, handle) {}
-  ~CgroupV1() = default;
+  ~CgroupV1() override = default;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
   bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
@@ -311,14 +334,16 @@ class CgroupV1 : public Cgroup {
 
   bool MigrateProcIn(pid_t pid) override;
 
+  const std::string &GetCgroupString() const override { return m_cgroup_path_; }
+
  private:
 };
 
-class CgroupV2 : public Cgroup {
+class CgroupV2 : private Cgroup, public CgroupInterface {
  public:
-  CgroupV2(const std::string &path, struct cgroup *handle,uint64_t id)
-      : Cgroup(path, handle,id) {}
-  ~CgroupV2();
+  CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id)
+      : Cgroup(path, handle, id) {}
+  ~CgroupV2() override;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
   bool SetMemoryLimitBytes(uint64_t memory_bytes) override;
@@ -328,54 +353,59 @@ class CgroupV2 : public Cgroup {
 
   // use BPF
   /**
-  * Device controller manages access to device files. 
-  It includes both creation of new device files (using mknod), 
+  * Device controller manages access to device files.
+  It includes both creation of new device files (using mknod),
   and access to the existing device files.
 
   Cgroup v2 device controller has no interface files and
-  is implemented on top of cgroup BPF. To control access 
+  is implemented on top of cgroup BPF. To control access
   to device files, a user may create bpf programs of the
-  BPF_CGROUP_DEVICE type and attach them to cgroups. 
-  On an attempt to access a device file, corresponding BPF 
-  programs will be executed, and depending on the return 
+  BPF_CGROUP_DEVICE type and attach them to cgroups.
+  On an attempt to access a device file, corresponding BPF
+  programs will be executed, and depending on the return
   value the attempt will succeed or fail with -EPERM.
 
-  A BPF_CGROUP_DEVICE program takes a pointer to the 
-  bpf_cgroup_dev_ctx structure, which describes the device 
+  A BPF_CGROUP_DEVICE program takes a pointer to the
+  bpf_cgroup_dev_ctx structure, which describes the device
   access attempt: access type (mknod/read/write) and device
-  (type, major and minor numbers). 
-  If the program returns 0, the attempt fails with -EPERM, otherwise it succeeds.
+  (type, major and minor numbers).
+  If the program returns 0, the attempt fails with -EPERM, otherwise it
+  succeeds.
 
-  An example of BPF_CGROUP_DEVICE program may be found 
-  in the kernel source tree in the tools/testing/selftests/bpf/dev_cgroup.c file.
-  reference from:
+  An example of BPF_CGROUP_DEVICE program may be found
+  in the kernel source tree in the tools/testing/selftests/bpf/dev_cgroup.c
+  file. reference from:
   https://www.kernel.org/doc/html/v5.10/admin-guide/cgroup-v2.html#device-controller
   */
   bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
                        bool set_write, bool set_mknod) override;
   bool RmBpfDeviceMap();
+
   bool KillAllProcesses() override;
 
   bool Empty() override;
 
   bool MigrateProcIn(pid_t pid) override;
 
+  const std::string &GetCgroupString() const override { return m_cgroup_path_; }
+
  private:
   std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
 };
 
-
 class AllocatableResourceAllocator {
  public:
-  static bool Allocate(const AllocatableResource &resource, Cgroup *cg);
+  static bool Allocate(const AllocatableResource &resource,
+                       CgroupInterface *cg);
   static bool Allocate(const crane::grpc::AllocatableResource &resource,
-                       Cgroup *cg);
+                       CgroupInterface *cg);
 };
 
 class DedicatedResourceAllocator {
  public:
   static bool Allocate(
-      const crane::grpc::DedicatedResourceInNode &request_resource, Cgroup *cg);
+      const crane::grpc::DedicatedResourceInNode &request_resource,
+      CgroupInterface *cg);
 };
 
 class CgroupManager {
@@ -396,7 +426,7 @@ class CgroupManager {
 
   bool CheckIfCgroupForTasksExists(task_id_t task_id);
 
-  bool AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg);
+  bool AllocateAndGetCgroup(task_id_t task_id, CgroupInterface **cg);
 
   bool MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id);
 
@@ -419,10 +449,9 @@ class CgroupManager {
  private:
   static std::string CgroupStrByTaskId_(task_id_t task_id);
 
-  std::unique_ptr<Cgroup> CreateOrOpen_(const std::string &cgroup_string,
-                                        ControllerFlags preferred_controllers,
-                                        ControllerFlags required_controllers,
-                                        bool retrieve);
+  std::unique_ptr<CgroupInterface> CreateOrOpen_(
+      const std::string &cgroup_string, ControllerFlags preferred_controllers,
+      ControllerFlags required_controllers, bool retrieve);
 
   int InitializeController_(struct cgroup &cgroup,
                             CgroupConstant::Controller controller,
@@ -430,7 +459,8 @@ class CgroupManager {
                             bool &changed_cgroup);
 
   static void RmAllTaskCgroups_();
-  static void RmAllTaskCgroupsUnderController_(CgroupConstant::Controller controller);
+  static void RmAllTaskCgroupsUnderController_(
+      CgroupConstant::Controller controller);
 
   void RmAllTaskCgroupsV2_();
   void RmCgroupsV2_(const std::string &root_cgroup_path,
@@ -444,7 +474,8 @@ class CgroupManager {
   util::AtomicHashMap<absl::flat_hash_map, task_id_t, CgroupSpec>
       m_task_id_to_cg_spec_map_;
 
-  util::AtomicHashMap<absl::flat_hash_map, task_id_t, std::unique_ptr<Cgroup>>
+  util::AtomicHashMap<absl::flat_hash_map, task_id_t,
+                      std::unique_ptr<CgroupInterface>>
       m_task_id_to_cg_map_;
 
   util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
