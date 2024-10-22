@@ -26,7 +26,6 @@
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #include <dirent.h>
-#include <libcgroup.h>
 #include <linux/bpf.h>
 
 #include "CranedPublicDefs.h"
@@ -307,7 +306,7 @@ std::string CgroupManager::CgroupStrByTaskId_(task_id_t task_id) {
  *   - -1 on error
  * On failure, the state of cgroup is undefined.
  */
-std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
+std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
     const std::string &cgroup_string, ControllerFlags preferred_controllers,
     ControllerFlags required_controllers, bool retrieve) {
   using CgroupConstant::Controller;
@@ -415,8 +414,9 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
     if ((err = cgroup_create_cgroup(native_cgroup, 0))) {
       // Only record at D_ALWAYS if any cgroup mounts are available.
       CRANE_WARN(
-          "Unable to create cgroup {}. Cgroup functionality will not work",
-          cgroup_string.c_str());
+          "Unable to create cgroup {}. Cgroup functionality will not work:"
+          "{} {}",
+          cgroup_string.c_str(), err, cgroup_strerror(err));
       return nullptr;
     }
   } else if (changed_cgroup && (err = cgroup_modify_cgroup(native_cgroup))) {
@@ -451,9 +451,10 @@ bool CgroupManager::CheckIfCgroupForTasksExists(task_id_t task_id) {
   return m_task_id_to_cg_map_.Contains(task_id);
 }
 
-bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
+bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
+                                         CgroupInterface **cg) {
   crane::grpc::ResourceInNode res;
-  Cgroup *pcg;
+  CgroupInterface *pcg;
 
   {
     auto cg_spec_it = m_task_id_to_cg_spec_map_[task_id];
@@ -593,7 +594,7 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
     // Kind of async behavior.
 
     // avoid deadlock by Erase at next line
-    Cgroup *cgroup = this->m_task_id_to_cg_map_[task_id]->release();
+    CgroupInterface *cgroup = this->m_task_id_to_cg_map_[task_id]->release();
     this->m_task_id_to_cg_map_.Erase(task_id);
 
     if (cgroup != nullptr) {
@@ -720,7 +721,7 @@ bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
 }
 
 bool CgroupManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
-  Cgroup *cg;
+  CgroupInterface *cg;
   bool ok = AllocateAndGetCgroup(task_id, &cg);
   if (!ok) return false;
 
@@ -771,6 +772,180 @@ std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTask(
                 task_id);
 
   return res;
+}
+
+/*
+ * Cleanup cgroup.
+ * If the cgroup was created by us in the OS, remove it..
+ */
+Cgroup::~Cgroup() {
+  if (m_cgroup_) {
+    int err;
+    if ((err = cgroup_delete_cgroup_ext(
+             m_cgroup_,
+             CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
+      CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
+                  m_cgroup_path_.c_str(), err, cgroup_strerror(err));
+    }
+
+    cgroup_free(&m_cgroup_);
+    m_cgroup_ = nullptr;
+  }
+}
+
+bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
+                                CgroupConstant::ControllerFile controller_file,
+                                uint64_t value) {
+  if (!g_cg_mgr->Mounted(controller)) {
+    CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                CgroupConstant::GetControllerStringView(controller));
+    return false;
+  }
+
+  int err;
+
+  struct cgroup_controller *cg_controller;
+
+  if ((cg_controller = cgroup_get_controller(
+           m_cgroup_,
+           CgroupConstant::GetControllerStringView(controller).data())) ==
+      nullptr) {
+    CRANE_ERROR("Unable to get cgroup {} controller for {}.",
+                CgroupConstant::GetControllerStringView(controller),
+                m_cgroup_path_);
+    return false;
+  }
+
+  if ((err = cgroup_set_value_uint64(
+           cg_controller,
+           CgroupConstant::GetControllerFileStringView(controller_file).data(),
+           value))) {
+    CRANE_ERROR("Unable to set uint64 value for {} in cgroup {}. Code {}, {}",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                m_cgroup_path_, err, cgroup_strerror(err));
+    return false;
+  }
+
+  return ModifyCgroup_(controller_file);
+}
+
+bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
+                              CgroupConstant::ControllerFile controller_file,
+                              const std::string &str) {
+  if (!g_cg_mgr->Mounted(controller)) {
+    CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.\n",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                CgroupConstant::GetControllerStringView(controller));
+    return false;
+  }
+
+  int err;
+
+  struct cgroup_controller *cg_controller;
+
+  if ((cg_controller = cgroup_get_controller(
+           m_cgroup_,
+           CgroupConstant::GetControllerStringView(controller).data())) ==
+      nullptr) {
+    CRANE_ERROR("Unable to get cgroup {} controller for {}.\n",
+                CgroupConstant::GetControllerStringView(controller),
+                m_cgroup_path_);
+    return false;
+  }
+
+  if ((err = cgroup_set_value_string(
+           cg_controller,
+           CgroupConstant::GetControllerFileStringView(controller_file).data(),
+           str.c_str()))) {
+    CRANE_ERROR("Unable to set string for {}: {} {}\n", m_cgroup_path_, err,
+                cgroup_strerror(err));
+    return false;
+  }
+
+  return ModifyCgroup_(controller_file);
+}
+
+bool Cgroup::ModifyCgroup_(CgroupConstant::ControllerFile controller_file) {
+  int err;
+  int retry_time = 0;
+  while (true) {
+    err = cgroup_modify_cgroup(m_cgroup_);
+    if (err == 0) return true;
+    if (err != ECGOTHER) {
+      CRANE_ERROR("Unable to modify_cgroup for {} in cgroup {}. Code {}, {}",
+                  CgroupConstant::GetControllerFileStringView(controller_file),
+                  m_cgroup_path_, err, cgroup_strerror(err));
+      return false;
+    }
+
+    int errno_code = cgroup_get_last_errno();
+    if (errno_code != EINTR) {
+      CRANE_ERROR(
+          "Unable to modify_cgroup for {} in cgroup {} "
+          "due to system error. Code {}, {}",
+          CgroupConstant::GetControllerFileStringView(controller_file),
+          m_cgroup_path_, errno_code, strerror(errno_code));
+      return false;
+    }
+
+    CRANE_DEBUG(
+        "Unable to modify_cgroup for {} in cgroup {} due to EINTR. Retrying...",
+        CgroupConstant::GetControllerFileStringView(controller_file),
+        m_cgroup_path_);
+    retry_time++;
+    if (retry_time > 3) {
+      CRANE_ERROR("Unable to modify_cgroup for cgroup {} after 3 times.",
+                  m_cgroup_path_);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
+                               CgroupConstant::ControllerFile controller_file,
+                               const std::vector<std::string> &strs) {
+  if (!g_cg_mgr->Mounted(controller)) {
+    CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.\n",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                CgroupConstant::GetControllerStringView(controller));
+    return false;
+  }
+
+  int err;
+
+  struct cgroup_controller *cg_controller;
+
+  if ((cg_controller = cgroup_get_controller(
+           m_cgroup_,
+           CgroupConstant::GetControllerStringView(controller).data())) ==
+      nullptr) {
+    CRANE_WARN("Unable to get cgroup {} controller for {}.\n",
+               CgroupConstant::GetControllerStringView(controller),
+               m_cgroup_path_);
+    return false;
+  }
+  for (const auto &str : strs) {
+    if ((err = cgroup_set_value_string(
+             cg_controller,
+             CgroupConstant::GetControllerFileStringView(controller_file)
+                 .data(),
+             str.c_str()))) {
+      CRANE_WARN("Unable to add string for {}: {} {}\n", m_cgroup_path_, err,
+                 cgroup_strerror(err));
+      return false;
+    }
+    // Commit cgroup modifications.
+    if ((err = cgroup_modify_cgroup(m_cgroup_))) {
+      CRANE_WARN("Unable to commit {} for cgroup {}: {} {}\n",
+                 CgroupConstant::GetControllerFileStringView(controller_file),
+                 m_cgroup_path_, err, cgroup_strerror(err));
+      return false;
+    }
+  }
+  return true;
 }
 
 bool CgroupV1::MigrateProcIn(pid_t pid) {
@@ -952,25 +1127,6 @@ end:
   return err == 0;
 }
 
-/*
- * Cleanup cgroup.
- * If the cgroup was created by us in the OS, remove it..
- */
-Cgroup::~Cgroup() {
-  if (m_cgroup_) {
-    int err;
-    if ((err = cgroup_delete_cgroup_ext(
-             m_cgroup_,
-             CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
-      CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
-                  m_cgroup_path_.c_str(), err, cgroup_strerror(err));
-    }
-
-    cgroup_free(&m_cgroup_);
-    m_cgroup_ = nullptr;
-  }
-}
-
 bool CgroupV1::SetMemorySoftLimitBytes(uint64_t memory_bytes) {
   return SetControllerValue(
       CgroupConstant::Controller::MEMORY_CONTROLLER,
@@ -1022,161 +1178,6 @@ bool CgroupV1::SetBlockioWeight(uint64_t weight) {
   return SetControllerValue(CgroupConstant::Controller::BLOCK_CONTROLLER,
                             CgroupConstant::ControllerFile::BLOCKIO_WEIGHT,
                             weight);
-}
-
-bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
-                                CgroupConstant::ControllerFile controller_file,
-                                uint64_t value) {
-  if (!g_cg_mgr->Mounted(controller)) {
-    CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.",
-                CgroupConstant::GetControllerFileStringView(controller_file),
-                CgroupConstant::GetControllerStringView(controller));
-    return false;
-  }
-
-  int err;
-
-  struct cgroup_controller *cg_controller;
-
-  if ((cg_controller = cgroup_get_controller(
-           m_cgroup_,
-           CgroupConstant::GetControllerStringView(controller).data())) ==
-      nullptr) {
-    CRANE_ERROR("Unable to get cgroup {} controller for {}.",
-                CgroupConstant::GetControllerStringView(controller),
-                m_cgroup_path_);
-    return false;
-  }
-
-  if ((err = cgroup_set_value_uint64(
-           cg_controller,
-           CgroupConstant::GetControllerFileStringView(controller_file).data(),
-           value))) {
-    CRANE_ERROR("Unable to set uint64 value for {} in cgroup {}. Code {}, {}",
-                CgroupConstant::GetControllerFileStringView(controller_file),
-                m_cgroup_path_, err, cgroup_strerror(err));
-    return false;
-  }
-
-  return ModifyCgroup_(controller_file);
-}
-
-bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
-                              CgroupConstant::ControllerFile controller_file,
-                              const std::string &str) {
-  if (!g_cg_mgr->Mounted(controller)) {
-    CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.\n",
-                CgroupConstant::GetControllerFileStringView(controller_file),
-                CgroupConstant::GetControllerStringView(controller));
-    return false;
-  }
-
-  int err;
-
-  struct cgroup_controller *cg_controller;
-
-  if ((cg_controller = cgroup_get_controller(
-           m_cgroup_,
-           CgroupConstant::GetControllerStringView(controller).data())) ==
-      nullptr) {
-    CRANE_ERROR("Unable to get cgroup {} controller for {}.\n",
-                CgroupConstant::GetControllerStringView(controller),
-                m_cgroup_path_);
-    return false;
-  }
-
-  if ((err = cgroup_set_value_string(
-           cg_controller,
-           CgroupConstant::GetControllerFileStringView(controller_file).data(),
-           str.c_str()))) {
-    CRANE_ERROR("Unable to set string for {}: {} {}\n", m_cgroup_path_, err,
-                cgroup_strerror(err));
-    return false;
-  }
-
-  return ModifyCgroup_(controller_file);
-}
-
-bool Cgroup::ModifyCgroup_(CgroupConstant::ControllerFile controller_file) {
-  int err;
-  int retry_time = 0;
-  while (true) {
-    err = cgroup_modify_cgroup(m_cgroup_);
-    if (err == 0) return true;
-    if (err != ECGOTHER) {
-      CRANE_ERROR("Unable to modify_cgroup for {} in cgroup {}. Code {}, {}",
-                  CgroupConstant::GetControllerFileStringView(controller_file),
-                  m_cgroup_path_, err, cgroup_strerror(err));
-      return false;
-    }
-
-    int errno_code = cgroup_get_last_errno();
-    if (errno_code != EINTR) {
-      CRANE_ERROR(
-          "Unable to modify_cgroup for {} in cgroup {} "
-          "due to system error. Code {}, {}",
-          CgroupConstant::GetControllerFileStringView(controller_file),
-          m_cgroup_path_, errno_code, strerror(errno_code));
-      return false;
-    }
-
-    CRANE_DEBUG(
-        "Unable to modify_cgroup for {} in cgroup {} due to EINTR. Retrying...",
-        CgroupConstant::GetControllerFileStringView(controller_file),
-        m_cgroup_path_);
-    retry_time++;
-    if (retry_time > 3) {
-      CRANE_ERROR("Unable to modify_cgroup for cgroup {} after 3 times.",
-                  m_cgroup_path_);
-      return false;
-    }
-  }
-
-  return true;
-}
-
-bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
-                               CgroupConstant::ControllerFile controller_file,
-                               const std::vector<std::string> &strs) {
-  if (!g_cg_mgr->Mounted(controller)) {
-    CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.\n",
-                CgroupConstant::GetControllerFileStringView(controller_file),
-                CgroupConstant::GetControllerStringView(controller));
-    return false;
-  }
-
-  int err;
-
-  struct cgroup_controller *cg_controller;
-
-  if ((cg_controller = cgroup_get_controller(
-           m_cgroup_,
-           CgroupConstant::GetControllerStringView(controller).data())) ==
-      nullptr) {
-    CRANE_WARN("Unable to get cgroup {} controller for {}.\n",
-               CgroupConstant::GetControllerStringView(controller),
-               m_cgroup_path_);
-    return false;
-  }
-  for (const auto &str : strs) {
-    if ((err = cgroup_set_value_string(
-             cg_controller,
-             CgroupConstant::GetControllerFileStringView(controller_file)
-                 .data(),
-             str.c_str()))) {
-      CRANE_WARN("Unable to add string for {}: {} {}\n", m_cgroup_path_, err,
-                 cgroup_strerror(err));
-      return false;
-    }
-    // Commit cgroup modifications.
-    if ((err = cgroup_modify_cgroup(m_cgroup_))) {
-      CRANE_WARN("Unable to commit {} for cgroup {}: {} {}\n",
-                 CgroupConstant::GetControllerFileStringView(controller_file),
-                 m_cgroup_path_, err, cgroup_strerror(err));
-      return false;
-    }
-  }
-  return true;
 }
 
 bool CgroupV1::KillAllProcesses() {
@@ -1342,24 +1343,30 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   cgroup_fd = open(cgroup_path.c_str(), O_RDONLY);
   if (cgroup_fd < 0) {
     CRANE_ERROR("Failed to open cgroup");
-    return 1;
+    return false;
   }
 
   obj = bpf_object__open_file(CgroupConstant::BpfObjectFile, NULL);
   if (!obj) {
     CRANE_ERROR("Failed to open BPF object file {}",
                 CgroupConstant::BpfObjectFile);
+    close(cgroup_fd);
+    bpf_object__close(obj);
     return false;
   }
 
   if (bpf_object__load(obj)) {
     CRANE_ERROR("Failed to load BPF object {}", CgroupConstant::BpfObjectFile);
+    close(cgroup_fd);
+    bpf_object__close(obj);
     return false;
   }
 
-  prog = bpf_object__find_program_by_name(obj, "device_access");
+  prog = bpf_object__find_program_by_name(obj, CgroupConstant::BpfProgramName);
   if (!prog) {
     CRANE_ERROR("Failed to find BPF program {}", CgroupConstant::BpfObjectFile);
+    close(cgroup_fd);
+    bpf_object__close(obj);
     return false;
   }
 
@@ -1367,12 +1374,17 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   if (prog_fd < 0) {
     CRANE_ERROR("Failed to get BPF program file descriptor {}",
                 CgroupConstant::BpfObjectFile);
+    close(cgroup_fd);
+    bpf_object__close(obj);
     return false;
   }
 
-  dev_map = bpf_object__find_map_by_name(obj, "dev_map");
+  dev_map = bpf_object__find_map_by_name(obj, CgroupConstant::BpfMapName);
   if (!dev_map) {
     CRANE_ERROR("Failed to find BPF map {}", "dev_map");
+    close(cgroup_fd);
+    close(prog_fd);
+    bpf_object__close(obj);
     return false;
   }
 
@@ -1419,17 +1431,26 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
                              sizeof(BpfDeviceMeta), BPF_ANY)) {
       CRANE_ERROR("Failed to update BPF map major {},minor {} cgroup id {}",
                   bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
+      close(cgroup_fd);
+      close(prog_fd);
+
+      bpf_object__close(obj);
       return false;
     }
   }
 
   if (bpf_prog_attach(prog_fd, cgroup_fd, BPF_CGROUP_DEVICE, 0) < 0) {
     CRANE_ERROR("Failed to attach BPF program");
+    close(cgroup_fd);
+    close(prog_fd);
+
+    bpf_object__close(obj);
     return false;
   }
   // attach_bpf_program_to_cgroup(prog_fd, CGROUP_PATH);
 
   close(cgroup_fd);
+  close(prog_fd);
   bpf_object__close(obj);
 
   return true;
@@ -1452,7 +1473,7 @@ bool CgroupV2::RmBpfDeviceMap() {
     return false;
   }
 
-  dev_map = bpf_object__find_map_by_name(obj, "dev_map");
+  dev_map = bpf_object__find_map_by_name(obj, CgroupConstant::BpfMapName);
   if (!dev_map) {
     CRANE_ERROR("Failed to find BPF map {}", "dev_map");
     return false;
@@ -1465,6 +1486,7 @@ bool CgroupV2::RmBpfDeviceMap() {
     if (bpf_map__delete_elem(dev_map, &key, sizeof(BpfKey), BPF_ANY)) {
       CRANE_ERROR("Failed to delete BPF map major {},minor {} in cgroup id {}",
                   bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
+      bpf_object__close(obj);
       return false;
     }
   }
@@ -1542,7 +1564,7 @@ end:
 }
 
 bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
-                                            Cgroup *cg) {
+                                            CgroupInterface *cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(static_cast<double>(resource.cpu_count));
   ok &= cg->SetMemoryLimitBytes(resource.memory_bytes);
@@ -1555,7 +1577,7 @@ bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
 }
 
 bool AllocatableResourceAllocator::Allocate(
-    const crane::grpc::AllocatableResource &resource, Cgroup *cg) {
+    const crane::grpc::AllocatableResource &resource, CgroupInterface *cg) {
   bool ok;
   ok = cg->SetCpuCoreLimit(resource.cpu_core_limit());
   ok &= cg->SetMemoryLimitBytes(resource.memory_limit_bytes());
@@ -1568,7 +1590,8 @@ bool AllocatableResourceAllocator::Allocate(
 }
 
 bool DedicatedResourceAllocator::Allocate(
-    const crane::grpc::DedicatedResourceInNode &request_resource, Cgroup *cg) {
+    const crane::grpc::DedicatedResourceInNode &request_resource,
+    CgroupInterface *cg) {
   std::unordered_set<std::string> all_request_slots;
   for (const auto &[_, type_slots_map] : request_resource.name_type_map()) {
     for (const auto &[__, slots] : type_slots_map.type_slots_map())
