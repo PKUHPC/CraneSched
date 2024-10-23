@@ -985,7 +985,8 @@ AccountManager::SuccessOrErrCode AccountManager::CheckAddUserAllowedQos(
   //  check if add item already the user's allowed qos
   if (partition.empty()) {
     // When the user has no partition, QoS cannot be added.
-    if (user->account_to_attrs_map.empty())
+    if (user->account_to_attrs_map.at(account)
+            .allowed_partition_qos_map.empty())
       return std::unexpected(crane::grpc::ErrCode::ERR_USER_EMPTY_PARTITION);
 
     bool is_allowed = false;
