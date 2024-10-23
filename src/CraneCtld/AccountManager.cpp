@@ -19,6 +19,7 @@
 #include "AccountManager.h"
 
 #include "crane/PasswordEntry.h"
+#include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
 
@@ -57,8 +58,8 @@ AccountManager::SuccessOrErrCode AccountManager::AddUser(uint32_t uid,
   // partition
   for (auto&& [partition, qos] : new_user.account_to_attrs_map[object_account]
                                      .allowed_partition_qos_map) {
-    auto result =
-        CheckPartitionIsAllowed(find_account, object_account, partition, false);
+    auto result = CheckPartitionIsAllowed(find_account, object_account,
+                                          partition, false, true);
     if (!result) return result;
   }
 
@@ -950,7 +951,8 @@ AccountManager::SuccessOrErrCode AccountManager::CheckAddUserAllowedPartition(
     const std::string& partition) {
   const std::string name = user->name;
 
-  auto result = CheckPartitionIsAllowed(account_ptr, account, partition, false);
+  auto result =
+      CheckPartitionIsAllowed(account_ptr, account, partition, false, true);
   if (!result) return result;
 
   if (user->account_to_attrs_map.at(account).allowed_partition_qos_map.contains(
@@ -966,7 +968,8 @@ AccountManager::SuccessOrErrCode AccountManager::CheckSetUserAllowedPartition(
     const std::string& partition) {
   const std::string name = user->name;
 
-  auto result = CheckPartitionIsAllowed(account_ptr, account, partition, false);
+  auto result =
+      CheckPartitionIsAllowed(account_ptr, account, partition, false, true);
 
   return !result ? result : true;
 }
@@ -976,7 +979,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckAddUserAllowedQos(
     const std::string& partition, const std::string& qos_str) {
   const std::string name = user->name;
 
-  auto result = CheckQosIsAllowed(account_ptr, account, qos_str, false);
+  auto result = CheckQosIsAllowed(account_ptr, account, qos_str, false, true);
   if (!result) return result;
 
   //  check if add item already the user's allowed qos
@@ -1018,7 +1021,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckSetUserAllowedQos(
     const std::string& partition, const std::string& qos_str, bool force) {
   const std::string name = user->name;
 
-  auto result = CheckQosIsAllowed(account_ptr, account, qos_str, false);
+  auto result = CheckQosIsAllowed(account_ptr, account, qos_str, false, true);
   if (!result) return result;
 
   std::vector<std::string> qos_vec =
@@ -1170,7 +1173,8 @@ AccountManager::SuccessOrErrCode
 AccountManager::CheckAddAccountAllowedPartition(const Account* account_ptr,
                                                 const std::string& account,
                                                 const std::string& partition) {
-  auto result = CheckPartitionIsAllowed(account_ptr, account, partition, true);
+  auto result =
+      CheckPartitionIsAllowed(account_ptr, account, partition, true, false);
   if (!result) return result;
 
   if (std::find(account_ptr->allowed_partition.begin(),
@@ -1185,7 +1189,7 @@ AccountManager::CheckAddAccountAllowedPartition(const Account* account_ptr,
 AccountManager::SuccessOrErrCode AccountManager::CheckAddAccountAllowedQos(
     const Account* account_ptr, const std::string& account,
     const std::string& qos) {
-  auto result = CheckQosIsAllowed(account_ptr, account, qos, true);
+  auto result = CheckQosIsAllowed(account_ptr, account, qos, true, false);
   if (!result) return result;
 
   if (std::find(account_ptr->allowed_qos_list.begin(),
@@ -1211,7 +1215,8 @@ AccountManager::CheckSetAccountAllowedPartition(const Account* account_ptr,
                                                 const std::string& account,
                                                 const std::string& partitions,
                                                 bool force) {
-  auto result = CheckPartitionIsAllowed(account_ptr, account, partitions, true);
+  auto result =
+      CheckPartitionIsAllowed(account_ptr, account, partitions, true, false);
   if (!result) return result;
 
   std::vector<std::string> partition_vec =
@@ -1232,7 +1237,7 @@ AccountManager::CheckSetAccountAllowedPartition(const Account* account_ptr,
 AccountManager::SuccessOrErrCode AccountManager::CheckSetAccountAllowedQos(
     const Account* account_ptr, const std::string& account,
     const std::string& qos_list, bool force) {
-  auto result = CheckQosIsAllowed(account_ptr, account, qos_list, true);
+  auto result = CheckQosIsAllowed(account_ptr, account, qos_list, true, false);
   if (!result) return result;
 
   std::vector<std::string> qos_vec =
@@ -1252,7 +1257,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckSetAccountAllowedQos(
 AccountManager::SuccessOrErrCode AccountManager::CheckSetAccountDefaultQos(
     const Account* account_ptr, const std::string& account,
     const std::string& qos) {
-  auto result = CheckQosIsAllowed(account_ptr, account, qos, false);
+  auto result = CheckQosIsAllowed(account_ptr, account, qos, false, false);
   if (!result) return result;
 
   if (account_ptr->default_qos == qos)
@@ -1266,7 +1271,8 @@ AccountManager::CheckDeleteAccountAllowedPartition(const Account* account_ptr,
                                                    const std::string& account,
                                                    const std::string& partition,
                                                    bool force) {
-  auto result = CheckPartitionIsAllowed(account_ptr, account, partition, false);
+  auto result =
+      CheckPartitionIsAllowed(account_ptr, account, partition, false, false);
   if (!result) return result;
 
   if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account_ptr, partition))
@@ -1278,7 +1284,7 @@ AccountManager::CheckDeleteAccountAllowedPartition(const Account* account_ptr,
 AccountManager::SuccessOrErrCode AccountManager::CheckDeleteAccountAllowedQos(
     const Account* account_ptr, const std::string& account,
     const std::string& qos, bool force) {
-  auto result = CheckQosIsAllowed(account_ptr, account, qos, false);
+  auto result = CheckQosIsAllowed(account_ptr, account, qos, false, false);
   if (!result) return result;
 
   if (!force && account_ptr->default_qos == qos)
@@ -1458,7 +1464,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckOpUserHasModifyPermission(
 
 AccountManager::SuccessOrErrCode AccountManager::CheckPartitionIsAllowed(
     const Account* account_ptr, const std::string& account,
-    const std::string& partition, bool check_parent) {
+    const std::string& partition, bool check_parent, bool is_user) {
   if (!account_ptr)
     return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_ACCOUNT);
 
@@ -1475,6 +1481,9 @@ AccountManager::SuccessOrErrCode AccountManager::CheckPartitionIsAllowed(
       if (std::find(account_ptr->allowed_partition.begin(),
                     account_ptr->allowed_partition.end(),
                     part) == account_ptr->allowed_partition.end()) {
+        if (is_user)
+          return std::unexpected(
+              crane::grpc::ErrCode::ERR_PARENT_ALLOWED_PARTITION);
         return std::unexpected(crane::grpc::ErrCode::ERR_ALLOWED_PARTITION);
       }
     } else {
@@ -1497,7 +1506,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckPartitionIsAllowed(
 
 AccountManager::SuccessOrErrCode AccountManager::CheckQosIsAllowed(
     const Account* account_ptr, const std::string& account,
-    const std::string& qos_str, bool check_parent) {
+    const std::string& qos_str, bool check_parent, bool is_user) {
   if (!account_ptr)
     return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_ACCOUNT);
 
@@ -1514,6 +1523,8 @@ AccountManager::SuccessOrErrCode AccountManager::CheckQosIsAllowed(
       if (std::find(account_ptr->allowed_qos_list.begin(),
                     account_ptr->allowed_qos_list.end(),
                     qos) == account_ptr->allowed_qos_list.end()) {
+        if (is_user)
+          return std::unexpected(crane::grpc::ErrCode::ERR_PARENT_ALLOWED_QOS);
         return std::unexpected(crane::grpc::ErrCode::ERR_ALLOWED_QOS);
       }
     } else {

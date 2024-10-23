@@ -252,12 +252,12 @@ class AccountManager {
   SuccessOrErrCode CheckPartitionIsAllowed(const Account* account_ptr,
                                            const std::string& account,
                                            const std::string& partition,
-                                           bool check_parent);
+                                           bool check_parent, bool is_user);
 
   SuccessOrErrCode CheckQosIsAllowed(const Account* account_ptr,
                                      const std::string& account,
                                      const std::string& qos_str,
-                                     bool check_parent);
+                                     bool check_parent, bool is_user);
 
   bool IsOperatorPrivilegeSameAndHigher(const User& op_user,
                                         User::AdminLevel admin_level);
