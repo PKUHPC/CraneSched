@@ -1136,7 +1136,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckDeleteUserAllowedQos(
           pair.second.end()) {
         is_allowed = true;
         if (pair.first == qos && !force) {
-          return std::unexpected(crane::grpc::ErrCode::ERR_SET_ALLOWED_QOS);
+          return std::unexpected(crane::grpc::ErrCode::ERR_IS_DEFAULT_QOS);
         }
       }
       if (!is_allowed)
@@ -1159,7 +1159,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckDeleteUserAllowedQos(
     }
 
     if (qos == iter->second.first && !force) {
-      return std::unexpected(crane::grpc::ErrCode::ERR_SET_ALLOWED_QOS);
+      return std::unexpected(crane::grpc::ErrCode::ERR_IS_DEFAULT_QOS);
     }
   }
 
@@ -1176,7 +1176,7 @@ AccountManager::CheckAddAccountAllowedPartition(const Account* account_ptr,
   if (std::find(account_ptr->allowed_partition.begin(),
                 account_ptr->allowed_partition.end(),
                 partition) != account_ptr->allowed_partition.end()) {
-    return std::unexpected(crane::grpc::ErrCode::ERR_ALLOWED_PARTITION);
+    return std::unexpected(crane::grpc::ErrCode::ERR_DUPLICATE_PARTITION);
   }
 
   return true;
@@ -1280,6 +1280,9 @@ AccountManager::SuccessOrErrCode AccountManager::CheckDeleteAccountAllowedQos(
     const std::string& qos, bool force) {
   auto result = CheckQosIsAllowed(account_ptr, account, qos, false);
   if (!result) return result;
+
+  if (!force && account_ptr->default_qos == qos)
+    return std::unexpected(crane::grpc::ErrCode::ERR_IS_DEFAULT_QOS);
 
   if (!force && IsDefaultQosOfAnyNodeNoLock_(account_ptr, qos))
     return std::unexpected(crane::grpc::ErrCode::ERR_CHILD_HAS_DEFAULT_QOS);
@@ -1419,8 +1422,12 @@ AccountManager::CheckOpUserHasPermissionToAccount(uint32_t uid,
   }
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
-  if (!account_ptr)
-    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_ACCOUNT);
+  if (!account_ptr) {
+    if (is_add)
+      return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_PARENTACCOUNT);
+    else
+      return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_ACCOUNT);
+  }
 
   return CheckUserPermissionOnAccount(*op_user, account, read_only_priv);
 }
