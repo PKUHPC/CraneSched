@@ -18,6 +18,8 @@ add_executable(craned
 
 target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
 
+add_dependencies(craned cgroup_dev_bpf_object)
+
 target_link_libraries(craned
         concurrentqueue
 
@@ -46,6 +48,8 @@ target_link_libraries(craned
         result
 
         Backward::Interface
+
+        bpf
 )
 
 # Linker flag for c++ 17 filesystem library

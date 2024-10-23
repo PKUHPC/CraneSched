@@ -23,6 +23,8 @@
 
 namespace Craned {
 
+
+
 struct BasicDevice {
   std::string dev_id;
 

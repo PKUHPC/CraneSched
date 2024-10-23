@@ -190,7 +190,7 @@ struct TaskInstance {
   std::unique_ptr<MetaInTaskInstance> meta;
 
   std::string cgroup_path;
-  Cgroup* cgroup;
+  CgroupInterface* cgroup;
   struct event* termination_timer{nullptr};
 
   // Task execution results

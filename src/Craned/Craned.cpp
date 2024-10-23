@@ -608,9 +608,18 @@ void GlobalVariableInit() {
   using Craned::CgroupConstant::Controller;
   g_cg_mgr = std::make_unique<Craned::CgroupManager>();
   g_cg_mgr->Init();
-  if (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
-      !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER) ||
-      !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER)) {
+  if (g_cg_mgr->GetCgroupVersion() ==
+          Craned::CgroupConstant::CgroupVersion::CGROUP_V1 &&
+      (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
+       !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER) ||
+       !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER))) {
+    CRANE_ERROR("Failed to initialize cpu,memory,devices cgroups controller.");
+    std::exit(1);
+  }
+  if (g_cg_mgr->GetCgroupVersion() ==
+          Craned::CgroupConstant::CgroupVersion::CGROUP_V2 &&
+      (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER_V2) ||
+       !g_cg_mgr->Mounted(Controller::MEMORY_CONTORLLER_V2))) {
     CRANE_ERROR("Failed to initialize cpu,memory,devices cgroups controller.");
     std::exit(1);
   }
