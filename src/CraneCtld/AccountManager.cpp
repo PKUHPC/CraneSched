@@ -1247,7 +1247,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckSetAccountAllowedQos(
   for (const auto& qos : account_ptr->allowed_qos_list) {
     if (std::find(qos_vec.begin(), qos_vec.end(), qos) == qos_vec.end()) {
       if (!force && IsDefaultQosOfAnyNodeNoLock_(account_ptr, qos)) {
-        return std::unexpected(crane::grpc::ErrCode::ERR_CHILD_HAS_QOS);
+        return std::unexpected(crane::grpc::ErrCode::ERR_SET_ACCOUNT_QOS);
       }
     }
   }
