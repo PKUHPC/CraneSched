@@ -40,8 +40,8 @@ class AccountManager {
   using QosMapMutexSharedPtr = util::ScopeConstSharedPtr<
       std::unordered_map<std::string, std::unique_ptr<Qos>>, util::rw_mutex>;
 
-  using SuccessOrErrCode = std::expected<bool, crane::grpc::ErrCode>;
   using CraneErrCode = crane::grpc::ErrCode;
+  using SuccessOrErrCode = std::expected<bool, CraneErrCode>;
 
   struct Result {
     bool ok{false};
