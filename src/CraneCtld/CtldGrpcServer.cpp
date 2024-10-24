@@ -153,7 +153,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     grpc::ServerContext *context, const crane::grpc::ModifyTaskRequest *request,
     crane::grpc::ModifyTaskReply *response) {
   using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
-  
+
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (res.has_error()) {
     for (auto task_id : request->task_ids()) {
@@ -284,7 +284,6 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
-
   Account account;
   const crane::grpc::AccountInfo *account_info = &request->account();
 
@@ -299,7 +298,8 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
     account.allowed_qos_list.emplace_back(qos);
   }
 
-  auto result = g_account_manager->AddAccount(request->uid(), std::move(account));
+  auto result =
+      g_account_manager->AddAccount(request->uid(), std::move(account));
   if (result) {
     response->set_ok(true);
   } else {
@@ -367,16 +367,12 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
     response->set_ok(false);
-    // response->set_reason(fmt::format("Time limit should be in [{}, {}] seconds",
-    //                                  kTaskMinTimeLimitSec,
-    //                                  kTaskMaxTimeLimitSec));
-    response->set_reason(crane::grpc::ErrCode::ERR_TIME_LIMIT);
+    response->set_reason(AccountManager::CraneErrCode::ERR_TIME_LIMIT);
     return grpc::Status::OK;
   }
   qos.max_time_limit_per_task = absl::Seconds(sec);
 
-  auto result =
-      g_account_manager->AddQos(request->uid(), qos);
+  auto result = g_account_manager->AddQos(request->uid(), qos);
   if (result) {
     response->set_ok(true);
   } else {
@@ -391,7 +387,6 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
     grpc::ServerContext *context,
     const crane::grpc::ModifyAccountRequest *request,
     crane::grpc::ModifyAccountReply *response) {
-
   auto modify_res = g_account_manager->ModifyAccount(
       request->type(), request->uid(), request->name(), request->modify_field(),
       request->value(), request->force());
@@ -466,7 +461,6 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
 grpc::Status CraneCtldServiceImpl::ModifyQos(
     grpc::ServerContext *context, const crane::grpc::ModifyQosRequest *request,
     crane::grpc::ModifyQosReply *response) {
-
   auto modify_res =
       g_account_manager->ModifyQos(request->uid(), request->name(),
                                    request->modify_field(), request->value());
@@ -527,7 +521,7 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
 
     auto *coordinators = account_info->mutable_coordinators();
     for (auto &&coord : account.coordinators) {
-        coordinators->Add()->assign(coord);
+      coordinators->Add()->assign(coord);
     }
   }
 
@@ -623,8 +617,7 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
     grpc::ServerContext *context,
     const crane::grpc::DeleteAccountRequest *request,
     crane::grpc::DeleteAccountReply *response) {
-  auto res =
-      g_account_manager->DeleteAccount(request->uid(), request->name());
+  auto res = g_account_manager->DeleteAccount(request->uid(), request->name());
   if (res) {
     response->set_ok(true);
   } else {
