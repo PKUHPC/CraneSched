@@ -1047,10 +1047,11 @@ bool CgroupV1::MigrateProcIn(pid_t pid) {
 after_migrate:
 
   //  orig_cgroup = NULL;
-  err = cgroup_attach_task_pid(m_cgroup_, pid);
+  err = cgroup_attach_task_pid(my_cgroup_info_.m_cgroup_, pid);
   if (err != 0) {
     CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}", pid,
-               m_cgroup_path_.c_str(), err, cgroup_strerror(err));
+               my_cgroup_info_.m_cgroup_path_.c_str(), err,
+               cgroup_strerror(err));
   }
 
 //  std::string cpu_cg_path =
@@ -1128,26 +1129,27 @@ end:
 }
 
 bool CgroupV1::SetMemorySoftLimitBytes(uint64_t memory_bytes) {
-  return SetControllerValue(
+  return my_cgroup_info_.SetControllerValue(
       CgroupConstant::Controller::MEMORY_CONTROLLER,
       CgroupConstant::ControllerFile::MEMORY_SOFT_LIMIT_BYTES, memory_bytes);
 }
 
 bool CgroupV1::SetMemorySwLimitBytes(uint64_t mem_bytes) {
-  return SetControllerValue(
+  return my_cgroup_info_.SetControllerValue(
       CgroupConstant::Controller::MEMORY_CONTROLLER,
       CgroupConstant::ControllerFile::MEMORY_MEMSW_LIMIT_IN_BYTES, mem_bytes);
 }
 
 bool CgroupV1::SetMemoryLimitBytes(uint64_t memory_bytes) {
-  return SetControllerValue(CgroupConstant::Controller::MEMORY_CONTROLLER,
-                            CgroupConstant::ControllerFile::MEMORY_LIMIT_BYTES,
-                            memory_bytes);
+  return my_cgroup_info_.SetControllerValue(
+      CgroupConstant::Controller::MEMORY_CONTROLLER,
+      CgroupConstant::ControllerFile::MEMORY_LIMIT_BYTES, memory_bytes);
 }
 
 bool CgroupV1::SetCpuShares(uint64_t share) {
-  return SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER,
-                            CgroupConstant::ControllerFile::CPU_SHARES, share);
+  return my_cgroup_info_.SetControllerValue(
+      CgroupConstant::Controller::CPU_CONTROLLER,
+      CgroupConstant::ControllerFile::CPU_SHARES, share);
 }
 
 /*
@@ -1164,20 +1166,21 @@ bool CgroupV1::SetCpuCoreLimit(double core_num) {
   constexpr uint32_t base = 1 << 16;
 
   bool ret;
-  ret = SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER,
-                           CgroupConstant::ControllerFile::CPU_CFS_QUOTA_US,
-                           uint64_t(std::round(base * core_num)));
-  ret &= SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER,
-                            CgroupConstant::ControllerFile::CPU_CFS_PERIOD_US,
-                            base);
+  ret = my_cgroup_info_.SetControllerValue(
+      CgroupConstant::Controller::CPU_CONTROLLER,
+      CgroupConstant::ControllerFile::CPU_CFS_QUOTA_US,
+      uint64_t(std::round(base * core_num)));
+  ret &= my_cgroup_info_.SetControllerValue(
+      CgroupConstant::Controller::CPU_CONTROLLER,
+      CgroupConstant::ControllerFile::CPU_CFS_PERIOD_US, base);
 
   return ret;
 }
 
 bool CgroupV1::SetBlockioWeight(uint64_t weight) {
-  return SetControllerValue(CgroupConstant::Controller::BLOCK_CONTROLLER,
-                            CgroupConstant::ControllerFile::BLOCKIO_WEIGHT,
-                            weight);
+  return my_cgroup_info_.SetControllerValue(
+      CgroupConstant::Controller::BLOCK_CONTROLLER,
+      CgroupConstant::ControllerFile::BLOCKIO_WEIGHT, weight);
 }
 
 bool CgroupV1::KillAllProcesses() {
@@ -1187,7 +1190,7 @@ bool CgroupV1::KillAllProcesses() {
                                CgroupConstant::Controller::CPU_CONTROLLER)
                                .data();
 
-  const char *cg_name = m_cgroup_path_.c_str();
+  const char *cg_name = my_cgroup_info_.m_cgroup_path_.c_str();
 
   int size, rc;
   pid_t *pids;
@@ -1215,7 +1218,7 @@ bool CgroupV1::Empty() {
                                CgroupConstant::Controller::CPU_CONTROLLER)
                                .data();
 
-  const char *cg_name = m_cgroup_path_.c_str();
+  const char *cg_name = my_cgroup_info_.m_cgroup_path_.c_str();
 
   int size, rc;
   pid_t *pids;
@@ -1256,29 +1259,17 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   }
   auto ok = true;
   if (!allow_limits.empty())
-    ok = SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
-                           CgroupConstant::ControllerFile::DEVICES_ALLOW,
-                           allow_limits);
+    ok = my_cgroup_info_.SetControllerStrs(
+        CgroupConstant::Controller::DEVICES_CONTROLLER,
+        CgroupConstant::ControllerFile::DEVICES_ALLOW, allow_limits);
   if (ok && !deny_limits.empty())
-    ok &= SetControllerStrs(CgroupConstant::Controller::DEVICES_CONTROLLER,
-                            CgroupConstant::ControllerFile::DEVICES_DENY,
-                            deny_limits);
+    ok &= my_cgroup_info_.SetControllerStrs(
+        CgroupConstant::Controller::DEVICES_CONTROLLER,
+        CgroupConstant::ControllerFile::DEVICES_DENY, deny_limits);
   return ok;
 }
 
 CgroupV2::~CgroupV2() {
-  if (m_cgroup_) {
-    int err;
-    if ((err = cgroup_delete_cgroup_ext(
-             m_cgroup_,
-             CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
-      CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
-                  m_cgroup_path_.c_str(), err, cgroup_strerror(err));
-    }
-
-    cgroup_free(&m_cgroup_);
-    m_cgroup_ = nullptr;
-  }
   if (!m_cgroup_bpf_devices.empty()) {
     RmBpfDeviceMap();
   }
@@ -1296,39 +1287,39 @@ bool CgroupV2::SetCpuCoreLimit(double core_num) {
   uint64_t quota = static_cast<uint64_t>(period * core_num);
   std::string cpuMaxValue =
       std::to_string(quota) + " " + std::to_string(period);
-  return SetControllerStr(CgroupConstant::Controller::CPU_CONTROLLER_V2,
-                          CgroupConstant::ControllerFile::CPU_MAX_V2,
-                          cpuMaxValue.c_str());
+  return my_cgroup_info_.SetControllerStr(
+      CgroupConstant::Controller::CPU_CONTROLLER_V2,
+      CgroupConstant::ControllerFile::CPU_MAX_V2, cpuMaxValue.c_str());
 }
 
 bool CgroupV2::SetCpuShares(uint64_t share) {
-  return SetControllerValue(CgroupConstant::Controller::CPU_CONTROLLER_V2,
-                            CgroupConstant::ControllerFile::CPU_WEIGHT_V2,
-                            share);
+  return my_cgroup_info_.SetControllerValue(
+      CgroupConstant::Controller::CPU_CONTROLLER_V2,
+      CgroupConstant::ControllerFile::CPU_WEIGHT_V2, share);
 }
 
 bool CgroupV2::SetMemoryLimitBytes(uint64_t memory_bytes) {
-  return SetControllerValue(CgroupConstant::Controller::MEMORY_CONTORLLER_V2,
-                            CgroupConstant::ControllerFile::MEMORY_MAX_V2,
-                            memory_bytes);
+  return my_cgroup_info_.SetControllerValue(
+      CgroupConstant::Controller::MEMORY_CONTORLLER_V2,
+      CgroupConstant::ControllerFile::MEMORY_MAX_V2, memory_bytes);
 }
 
 bool CgroupV2::SetMemorySoftLimitBytes(uint64_t memory_bytes) {
-  return SetControllerValue(CgroupConstant::Controller::MEMORY_CONTORLLER_V2,
-                            CgroupConstant::ControllerFile::MEMORY_HIGH_V2,
-                            memory_bytes);
+  return my_cgroup_info_.SetControllerValue(
+      CgroupConstant::Controller::MEMORY_CONTORLLER_V2,
+      CgroupConstant::ControllerFile::MEMORY_HIGH_V2, memory_bytes);
 }
 
 bool CgroupV2::SetMemorySwLimitBytes(uint64_t memory_bytes) {
-  return SetControllerValue(CgroupConstant::Controller::MEMORY_CONTORLLER_V2,
-                            CgroupConstant::ControllerFile::MEMORY_SWAP_MAX_V2,
-                            memory_bytes);
+  return my_cgroup_info_.SetControllerValue(
+      CgroupConstant::Controller::MEMORY_CONTORLLER_V2,
+      CgroupConstant::ControllerFile::MEMORY_SWAP_MAX_V2, memory_bytes);
 }
 
 bool CgroupV2::SetBlockioWeight(uint64_t weight) {
-  return SetControllerValue(CgroupConstant::Controller::IO_CONTROLLER_V2,
-                            CgroupConstant::ControllerFile::IO_WEIGHT_V2,
-                            weight);
+  return my_cgroup_info_.SetControllerValue(
+      CgroupConstant::Controller::IO_CONTROLLER_V2,
+      CgroupConstant::ControllerFile::IO_WEIGHT_V2, weight);
 }
 
 bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
@@ -1338,8 +1329,8 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   int prog_fd, cgroup_fd;
   struct bpf_program *prog;
   std::string slash = "/";
-  std::string cgroup_path =
-      CgroupConstant::RootCgroupFullPath + slash + m_cgroup_path_;
+  std::string cgroup_path = CgroupConstant::RootCgroupFullPath + slash +
+                            my_cgroup_info_.m_cgroup_path_;
   cgroup_fd = open(cgroup_path.c_str(), O_RDONLY);
   if (cgroup_fd < 0) {
     CRANE_ERROR("Failed to open cgroup");
@@ -1425,7 +1416,7 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   }
 
   for (int i = 0; i < bpf_devices.size(); i++) {
-    struct BpfKey key = {m_cgroup_id, bpf_devices[i].major,
+    struct BpfKey key = {my_cgroup_info_.m_cgroup_id, bpf_devices[i].major,
                          bpf_devices[i].minor};
     if (bpf_map__update_elem(dev_map, &key, sizeof(BpfKey), &bpf_devices[i],
                              sizeof(BpfDeviceMeta), BPF_ANY)) {
@@ -1481,7 +1472,7 @@ bool CgroupV2::RmBpfDeviceMap() {
 
   auto &bpf_devices = m_cgroup_bpf_devices;
   for (int i = 0; i < bpf_devices.size(); i++) {
-    struct BpfKey key = {m_cgroup_id, bpf_devices[i].major,
+    struct BpfKey key = {my_cgroup_info_.m_cgroup_id, bpf_devices[i].major,
                          bpf_devices[i].minor};
     if (bpf_map__delete_elem(dev_map, &key, sizeof(BpfKey), BPF_ANY)) {
       CRANE_ERROR("Failed to delete BPF map major {},minor {} in cgroup id {}",
@@ -1502,7 +1493,7 @@ bool CgroupV2::KillAllProcesses() {
                                CgroupConstant::Controller::CPU_CONTROLLER_V2)
                                .data();
 
-  const char *cg_name = m_cgroup_path_.c_str();
+  const char *cg_name = my_cgroup_info_.m_cgroup_path_.c_str();
 
   int size, rc;
   pid_t *pids;
@@ -1530,7 +1521,7 @@ bool CgroupV2::Empty() {
                                CgroupConstant::Controller::CPU_CONTROLLER_V2)
                                .data();
 
-  const char *cg_name = m_cgroup_path_.c_str();
+  const char *cg_name = my_cgroup_info_.m_cgroup_path_.c_str();
 
   int size, rc;
   pid_t *pids;
@@ -1554,10 +1545,11 @@ bool CgroupV2::MigrateProcIn(pid_t pid) {
 after_migrate:
 
   //  orig_cgroup = NULL;
-  err = cgroup_attach_task_pid(m_cgroup_, pid);
+  err = cgroup_attach_task_pid(my_cgroup_info_.m_cgroup_, pid);
   if (err != 0) {
     CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}", pid,
-               m_cgroup_path_.c_str(), err, cgroup_strerror(err));
+               my_cgroup_info_.m_cgroup_path_.c_str(), err,
+               cgroup_strerror(err));
   }
 end:
   return err == 0;

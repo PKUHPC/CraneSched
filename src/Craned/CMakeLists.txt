@@ -22,8 +22,11 @@ target_include_directories(
         craned PRIVATE ${LIBCGROUP_PATH}/include/
 )
 
-add_dependencies(craned cgroup_dev_bpf_object)
 
+
+if(ENABLE_BPF)
+        add_dependencies(craned cgroup_dev_bpf_object)
+endif()
 target_link_libraries(craned
         concurrentqueue
 
