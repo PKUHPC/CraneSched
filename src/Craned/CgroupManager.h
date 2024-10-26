@@ -288,7 +288,7 @@ class Cgroup {
  public:
   Cgroup(const std::string &path, struct cgroup *handle, uint64_t id = 0)
       : m_cgroup_path_(path), m_cgroup_(handle), m_cgroup_id(id) {}
-  virtual ~Cgroup();
+  ~Cgroup();
 
   struct cgroup *NativeHandle() { return m_cgroup_; }
 
@@ -305,18 +305,17 @@ class Cgroup {
                          CgroupConstant::ControllerFile controller_file,
                          const std::vector<std::string> &strs);
 
- protected:
   // CgroupConstant::CgroupVersion cg_vsion; // maybe for hybird mode
-  virtual bool ModifyCgroup_(CgroupConstant::ControllerFile controller_file);
+  bool ModifyCgroup_(CgroupConstant::ControllerFile controller_file);
   std::string m_cgroup_path_;
   mutable struct cgroup *m_cgroup_;
   uint64_t m_cgroup_id;
 };
 
-class CgroupV1 : private Cgroup, public CgroupInterface {
+class CgroupV1 : public CgroupInterface {
  public:
   CgroupV1(const std::string &path, struct cgroup *handle)
-      : Cgroup(path, handle) {}
+      : my_cgroup_info_(path, handle) {}
   ~CgroupV1() override = default;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
@@ -334,15 +333,18 @@ class CgroupV1 : private Cgroup, public CgroupInterface {
 
   bool MigrateProcIn(pid_t pid) override;
 
-  const std::string &GetCgroupString() const override { return m_cgroup_path_; }
+  const std::string &GetCgroupString() const override {
+    return my_cgroup_info_.m_cgroup_path_;
+  }
 
  private:
+  Cgroup my_cgroup_info_;
 };
 
-class CgroupV2 : private Cgroup, public CgroupInterface {
+class CgroupV2 : public CgroupInterface {
  public:
   CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id)
-      : Cgroup(path, handle, id) {}
+      : my_cgroup_info_(path, handle, id) {}
   ~CgroupV2() override;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
@@ -387,10 +389,13 @@ class CgroupV2 : private Cgroup, public CgroupInterface {
 
   bool MigrateProcIn(pid_t pid) override;
 
-  const std::string &GetCgroupString() const override { return m_cgroup_path_; }
+  const std::string &GetCgroupString() const override {
+    return my_cgroup_info_.m_cgroup_path_;
+  }
 
  private:
   std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
+  Cgroup my_cgroup_info_;
 };
 
 class AllocatableResourceAllocator {
