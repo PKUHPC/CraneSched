@@ -46,63 +46,48 @@ endif()
 project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 # check and set compiler 
 set(REQUIRED_GNU_VERSION 13.0.0)
-set(REQUIRED_CLANG_VERSION 17.0.0)
+set(REQUIRED_CLANG_VERSION 19.0.0)
 
-find_program(GPP_EXECUTABLE NAMES g++)
 find_program(CLANG_EXECUTABLE NAMES clang++)
 
-set(GPP_VERSION "0.0.0")
 set(CLANG_VERSION "0.0.0")
 
-if(GPP_EXECUTABLE)
-    execute_process(
-        COMMAND ${GPP_EXECUTABLE} -dumpversion
-        OUTPUT_VARIABLE GPP_VERSION
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-endif()
-
-if(CLANG_EXECUTABLE)
-    execute_process(
-        COMMAND ${CLANG_EXECUTABLE} --version
-        OUTPUT_VARIABLE CLANG_VERSION_OUTPUT
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-    string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" CLANG_VERSION ${CLANG_VERSION_OUTPUT})
-endif()
-
-if(GPP_EXECUTABLE AND GPP_VERSION VERSION_GREATER_EQUAL REQUIRED_GNU_VERSION)
-    set(CMAKE_CXX_COMPILER ${GPP_EXECUTABLE})
-    message(STATUS "Using GNU ${GPP_VERSION} for all modules except cgroup_dev_bpf_object")
-
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_GNU_VERSION)
+    message(STATUS "Using GNU ${CMAKE_CXX_COMPILER_VERSION} for all modules except cgroup_dev_bpf_object")
     if(CLANG_EXECUTABLE)
+        execute_process(
+            COMMAND ${CLANG_EXECUTABLE} --version
+            OUTPUT_VARIABLE CLANG_VERSION_OUTPUT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+        )
+        string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" CLANG_VERSION ${CLANG_VERSION_OUTPUT})
         if(CLANG_VERSION VERSION_GREATER_EQUAL REQUIRED_CLANG_VERSION)
             set(ENABLE_BPF ON)
+            add_compile_definitions(ENABLE_DEVICES_CGROUP_V2=true)
             message(STATUS "Using Clang ${CLANG_VERSION} for cgroup_dev_bpf_object module")
         else()
             set(ENABLE_BPF OFF)
-            message(WARNING "Clang ${CLANG_VERSION} or higher is required for cgroup_dev_bpf_object module. Disable cgroup_dev_bpf_object module")
-            message(WARNING "Cgroup V2 is not supported,you can use Cgroup V1.")
+            add_compile_definitions(ENABLE_DEVICES_CGROUP_V2=false)
+            message(WARNING "Clang ${REQUIRED_CLANG_VERSION} or higher is required for device management on Cgroup V2, disabling it . You can use Cgroup V1.")
         endif()
     else()
         set(ENABLE_BPF OFF)
-        message(WARNING "Clang is not found. Clang ${CLANG_VERSION} or higher is required. Disable cgroup_dev_bpf_object module")
-        message(WARNING "Cgroup V2 is not supported,you can use Cgroup V1.")
+        add_compile_definitions(ENABLE_DEVICES_CGROUP_V2=false)
+
+        message(WARNING "Clang not found. Disabling device management on Cgroup V2 . You can use Cgroup V1.")
     endif()
-elseif(CLANG_EXECUTABLE)
-    if(CLANG_VERSION VERSION_GREATER_EQUAL REQUIRED_CLANG_VERSION)
-        set(CMAKE_OBJCXX_COMPILER ${CLANG_EXECUTABLE})
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_CLANG_VERSION)
         set(ENABLE_BPF ON)
+        add_compile_definitions(ENABLE_DEVICES_CGROUP_V2=true)
         message(STATUS "Using Clang for all modlue.")
     else()
-        set(ENABLE_BPF OFF)
-        message(FATAL_ERROR "Clang ${CLANG_VERSION} or higher is required.")
+        message(FATAL_ERROR "Clang ${REQUIRED_CLANG_VERSION} or higher is required.")
     endif()
 else()
     message(FATAL_ERROR "Neither GNU ${REQUIRED_GNU_VERSION} nor Clang ${REQUIRED_CLANG_VERSION} found. Stop compiling crane")
 endif()
 
-project(Crane C CXX)
 
 # Options start here ----------------------------------------------------------------------------
 
@@ -350,7 +335,9 @@ set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
-pkg_check_modules(libbpf REQUIRED IMPORTED_TARGET libbpf>=1.4.6)
+if(ENABLE_BPF)
+    pkg_check_modules(libbpf REQUIRED IMPORTED_TARGET libbpf>=1.4.6)
+endif()
 
 # @formatter:off
 add_definitions(-DCRANE_BUILD_DIRECTORY=\("${CMAKE_BINARY_DIR}"\))

@@ -315,7 +315,7 @@ class Cgroup {
 class CgroupV1 : public CgroupInterface {
  public:
   CgroupV1(const std::string &path, struct cgroup *handle)
-      : my_cgroup_info_(path, handle) {}
+      : m_cgroup_info_(path, handle) {}
   ~CgroupV1() override = default;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
@@ -334,17 +334,17 @@ class CgroupV1 : public CgroupInterface {
   bool MigrateProcIn(pid_t pid) override;
 
   const std::string &GetCgroupString() const override {
-    return my_cgroup_info_.m_cgroup_path_;
+    return m_cgroup_info_.m_cgroup_path_;
   }
 
  private:
-  Cgroup my_cgroup_info_;
+  Cgroup m_cgroup_info_;
 };
 
 class CgroupV2 : public CgroupInterface {
  public:
   CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id)
-      : my_cgroup_info_(path, handle, id) {}
+      : m_cgroup_info_(path, handle, id) {}
   ~CgroupV2() override;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
@@ -390,12 +390,12 @@ class CgroupV2 : public CgroupInterface {
   bool MigrateProcIn(pid_t pid) override;
 
   const std::string &GetCgroupString() const override {
-    return my_cgroup_info_.m_cgroup_path_;
+    return m_cgroup_info_.m_cgroup_path_;
   }
 
  private:
   std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
-  Cgroup my_cgroup_info_;
+  Cgroup m_cgroup_info_;
 };
 
 class AllocatableResourceAllocator {
