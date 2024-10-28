@@ -18,6 +18,7 @@
 
 #include "AccountManager.h"
 
+#include "CtldPublicDefs.h"
 #include "crane/PasswordEntry.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
@@ -69,7 +70,7 @@ AccountManager::SuccessOrErrCode AccountManager::AddUser(uint32_t uid,
 }
 
 AccountManager::SuccessOrErrCode AccountManager::AddAccount(
-    uint32_t uid, Account&& new_account) {
+    uint32_t uid, const Account& new_account) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -127,7 +128,7 @@ AccountManager::SuccessOrErrCode AccountManager::AddAccount(
       return std::unexpected(CraneErrCode::ERR_ALLOWED_DEFAULT_QOS);
   }
 
-  return AddAccount_(find_account, find_parent, std::move(new_account));
+  return AddAccount_(find_account, find_parent, new_account);
 }
 
 AccountManager::SuccessOrErrCode AccountManager::AddQos(uint32_t uid,
@@ -1748,44 +1749,45 @@ AccountManager::SuccessOrErrCode AccountManager::AddUser_(
 
 AccountManager::SuccessOrErrCode AccountManager::AddAccount_(
     const Account* find_account, const Account* find_parent,
-    Account&& new_account) {
-  const std::string name = new_account.name;
+    const Account& new_account) {
+  Account res_account = new_account;
+  const std::string name = res_account.name;
 
   if (find_parent != nullptr) {
-    if (new_account.allowed_partition.empty()) {
+    if (res_account.allowed_partition.empty()) {
       // Inherit
-      new_account.allowed_partition =
+      res_account.allowed_partition =
           std::list<std::string>{find_parent->allowed_partition};
     }
 
-    if (new_account.allowed_qos_list.empty()) {
+    if (res_account.allowed_qos_list.empty()) {
       // Inherit
-      new_account.allowed_qos_list =
+      res_account.allowed_qos_list =
           std::list<std::string>{find_parent->allowed_qos_list};
     }
   }
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        if (!new_account.parent_account.empty()) {
+        if (!res_account.parent_account.empty()) {
           // update the parent account's child_account_list
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                       "$addToSet", new_account.parent_account,
+                                       "$addToSet", res_account.parent_account,
                                        "child_accounts", name);
         }
 
         if (find_account) {
           // There is a same account but was deleted,here will delete the
           // original account and overwrite it with the same name
-          g_db_client->UpdateAccount(new_account);
+          g_db_client->UpdateAccount(res_account);
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                        "$set", name, "creation_time",
                                        ToUnixSeconds(absl::Now()));
         } else {
           // Insert the new account
-          g_db_client->InsertAccount(new_account);
+          g_db_client->InsertAccount(res_account);
         }
-        for (const auto& qos : new_account.allowed_qos_list) {
+        for (const auto& qos : res_account.allowed_qos_list) {
           IncQosReferenceCountInDb_(qos, 1);
         }
       };
@@ -1793,14 +1795,14 @@ AccountManager::SuccessOrErrCode AccountManager::AddAccount_(
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-  if (!new_account.parent_account.empty()) {
-    m_account_map_[new_account.parent_account]->child_accounts.emplace_back(
+  if (!res_account.parent_account.empty()) {
+    m_account_map_[res_account.parent_account]->child_accounts.emplace_back(
         name);
   }
-  for (const auto& qos : new_account.allowed_qos_list) {
+  for (const auto& qos : res_account.allowed_qos_list) {
     m_qos_map_[qos]->reference_count++;
   }
-  m_account_map_[name] = std::make_unique<Account>(std::move(new_account));
+  m_account_map_[name] = std::make_unique<Account>(std::move(res_account));
 
   return true;
 }

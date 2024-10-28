@@ -300,8 +300,7 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
     account.allowed_qos_list.emplace_back(qos);
   }
 
-  auto result =
-      g_account_manager->AddAccount(request->uid(), std::move(account));
+  auto result = g_account_manager->AddAccount(request->uid(), account);
   if (result) {
     response->set_ok(true);
   } else {
