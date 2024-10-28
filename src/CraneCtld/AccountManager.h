@@ -52,7 +52,7 @@ class AccountManager {
 
   ~AccountManager() = default;
 
-  SuccessOrErrCode AddUser(uint32_t uid, User&& new_user);
+  SuccessOrErrCode AddUser(uint32_t uid, const User& new_user);
 
   SuccessOrErrCode AddAccount(uint32_t uid, Account&& new_account);
 
@@ -309,7 +309,7 @@ class AccountManager {
   bool IncQosReferenceCountInDb_(const std::string& name, int num);
 
   SuccessOrErrCode AddUser_(const User* find_user, const Account* find_account,
-                            User&& new_user);
+                            const User& new_user);
 
   SuccessOrErrCode AddAccount_(const Account* find_account,
                                const Account* find_parent,
