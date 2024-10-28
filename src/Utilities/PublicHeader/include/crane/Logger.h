@@ -56,12 +56,62 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-#define CRANE_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
-#define CRANE_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
-#define CRANE_INFO(...) SPDLOG_INFO(__VA_ARGS__)
-#define CRANE_WARN(...) SPDLOG_WARN(__VA_ARGS__)
-#define CRANE_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
-#define CRANE_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
+// default log
+#define CRANE_TRACE(...) \
+  SPDLOG_LOGGER_TRACE(spdlog::get("default"), __VA_ARGS__)
+#define CRANE_DEBUG(...) \
+  SPDLOG_LOGGER_DEBUG(spdlog::get("default"), __VA_ARGS__)
+#define CRANE_INFO(...)  \
+  SPDLOG_LOGGER_INFO(spdlog::get("default"), __VA_ARGS__)
+#define CRANE_WARN(...)  \
+  SPDLOG_LOGGER_WARN(spdlog::get("default"), __VA_ARGS__)
+#define CRANE_ERROR(...) \
+  SPDLOG_LOGGER_ERROR(spdlog::get("default"), __VA_ARGS__)
+#define CRANE_CRITICAL(...) \
+  SPDLOG_LOGGER_CRITICAL(spdlog::get("default"), __VA_ARGS__)
+
+// taskscheduler log
+#define TASKSCHEDULER_TRACE(...) \
+  SPDLOG_LOGGER_TRACE(spdlog::get("taskscheduler"), __VA_ARGS__)
+#define TASKSCHEDULER_DEBUG(...) \
+  SPDLOG_LOGGER_DEBUG(spdlog::get("taskscheduler"), __VA_ARGS__)
+#define TASKSCHEDULER_INFO(...)  \
+  SPDLOG_LOGGER_INFO(spdlog::get("taskscheduler"), __VA_ARGS__)
+#define TASKSCHEDULER_WARN(...)  \
+  SPDLOG_LOGGER_WARN(spdlog::get("taskscheduler"), __VA_ARGS__)
+#define TASKSCHEDULER_ERROR(...) \
+  SPDLOG_LOGGER_ERROR(spdlog::get("taskscheduler"), __VA_ARGS__)
+#define TASKSCHEDULER_CRITICAL(...) \
+  SPDLOG_LOGGER_CRITICAL(spdlog::get("taskscheduler"), __VA_ARGS__)
+
+// cranedkeeper log
+#define CRANEDKEEPER_TRACE(...) \
+  SPDLOG_LOGGER_TRACE(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_DEBUG(...) \
+  SPDLOG_LOGGER_DEBUG(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_INFO(...)  \
+  SPDLOG_LOGGER_INFO(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_WARN(...)  \
+  SPDLOG_LOGGER_WARN(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_ERROR(...) \
+  SPDLOG_LOGGER_ERROR(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_CRITICAL(...) \
+  SPDLOG_LOGGER_CRITICAL(spdlog::get("cranedkeeper"), __VA_ARGS__)
+
+
+
+#define CRANEDKEEPER_TRACE(...) \
+  SPDLOG_LOGGER_TRACE(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_DEBUG(...) \
+  SPDLOG_LOGGER_DEBUG(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_INFO(...) \
+  SPDLOG_LOGGER_INFO(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_WARN(...) \
+  SPDLOG_LOGGER_WARN(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_ERROR(...) \
+  SPDLOG_LOGGER_ERROR(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_CRITICAL(...) \
+  SPDLOG_LOGGER_CRITICAL(spdlog::get("cranedkeeper"), __VA_ARGS__)
 
 #define CRANE_LOG_LOC_CALL(loc, level, ...)                             \
   spdlog::default_logger_raw()->log(                                    \
