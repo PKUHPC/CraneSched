@@ -30,7 +30,6 @@
 
 #include "CranedPublicDefs.h"
 #include "DeviceManager.h"
-#include "crane/Logger.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
@@ -1241,16 +1240,10 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   if (set_read) op += "r";
   if (set_write) op += "w";
   if (set_mknod) op += "m";
-  std::vector<std::string> allow_limits;
+  // std::vector<std::string> allow_limits;
   std::vector<std::string> deny_limits;
   for (const auto &[_, this_device] : Craned::g_this_node_device) {
-    if (devices.contains(this_device->dev_id)) {
-      for (const auto &dev_meta : this_device->device_metas) {
-        allow_limits.emplace_back(fmt::format("{} {}:{} {}", dev_meta.op_type,
-                                              dev_meta.major, dev_meta.minor,
-                                              op));
-      }
-    } else {
+    if (!devices.contains(this_device->dev_id)) {
       for (const auto &dev_meta : this_device->device_metas) {
         deny_limits.emplace_back(fmt::format("{} {}:{} {}", dev_meta.op_type,
                                              dev_meta.major, dev_meta.minor,
@@ -1259,11 +1252,7 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
     }
   }
   auto ok = true;
-  if (!allow_limits.empty())
-    ok = m_cgroup_info_.SetControllerStrs(
-        CgroupConstant::Controller::DEVICES_CONTROLLER,
-        CgroupConstant::ControllerFile::DEVICES_ALLOW, allow_limits);
-  if (ok && !deny_limits.empty())
+  if (!deny_limits.empty())
     ok &= m_cgroup_info_.SetControllerStrs(
         CgroupConstant::Controller::DEVICES_CONTROLLER,
         CgroupConstant::ControllerFile::DEVICES_DENY, deny_limits);
@@ -1387,20 +1376,7 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 
   auto &bpf_devices = m_cgroup_bpf_devices;
   for (const auto &[_, this_device] : Craned::g_this_node_device) {
-    if (devices.contains(this_device->dev_id)) {
-      for (const auto &dev_meta : this_device->device_metas) {
-        short op_type = 0;
-        if (dev_meta.op_type == 'c') {
-          op_type |= BPF_DEVCG_DEV_CHAR;
-        } else if (dev_meta.op_type == 'b') {
-          op_type |= BPF_DEVCG_DEV_BLOCK;
-        } else {
-          op_type |= 0xffff;
-        }
-        bpf_devices.push_back({dev_meta.major, dev_meta.minor,
-                               BPF_PERMISSION::ALLOW, access, op_type});
-      }
-    } else {
+    if (!devices.contains(this_device->dev_id)) {
       for (const auto &dev_meta : this_device->device_metas) {
         short op_type = 0;
         if (dev_meta.op_type == 'c') {
@@ -1592,15 +1568,12 @@ bool DedicatedResourceAllocator::Allocate(
   };
 
   if (!cg->SetDeviceAccess(all_request_slots, true, true, true)) {
-    bool l = ENABLE_DEVICES_CGROUP_V2;
-    if (g_cg_mgr->GetCgroupVersion() ==
-        CgroupConstant::CgroupVersion::CGROUP_V2) {
-      if (!ENABLE_DEVICES_CGROUP_V2) {
-        CRANE_WARN("Need to use Cgroup V1");
-      }
-      return !ENABLE_DEVICES_CGROUP_V2;
+    if(g_cg_mgr->GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1){
+      CRANE_WARN("Allocate devices access failed in Cgroup V1.");
+    } else if(g_cg_mgr->GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2){
+      CRANE_WARN("Allocate devices access failed in Cgroup V2.");
     }
-    return false;
+    return true;
   }
   return true;
 }
