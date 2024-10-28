@@ -342,7 +342,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   }
 
   AccountManager::SuccessOrErrCode result =
-      g_account_manager->AddUser(request->uid(), std::move(user));
+      g_account_manager->AddUser(request->uid(), user);
   if (result) {
     response->set_ok(true);
   } else {
