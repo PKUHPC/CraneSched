@@ -54,7 +54,7 @@ class AccountManager {
 
   SuccessOrErrCode AddUser(uint32_t uid, const User& new_user);
 
-  SuccessOrErrCode AddAccount(uint32_t uid, Account&& new_account);
+  SuccessOrErrCode AddAccount(uint32_t uid, const Account& new_account);
 
   SuccessOrErrCode AddQos(uint32_t uid, const Qos& new_qos);
 
@@ -313,7 +313,7 @@ class AccountManager {
 
   SuccessOrErrCode AddAccount_(const Account* find_account,
                                const Account* find_parent,
-                               Account&& new_account);
+                               const Account& new_account);
 
   SuccessOrErrCode AddQos_(const Qos* find_qos, const Qos& new_qos);
 
