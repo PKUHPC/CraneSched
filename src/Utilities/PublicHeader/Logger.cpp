@@ -19,7 +19,8 @@
 #include "crane/Logger.h"
 
 void InitLogger(spdlog::level::level_enum level,
-                const std::string& log_file_path) {
+                const std::string& log_file_path,
+                const bool cranectld_flag) {
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
       log_file_path, 1048576 * 50 /*MB*/, 3);
 
@@ -38,8 +39,11 @@ void InitLogger(spdlog::level::level_enum level,
       "cranedkeeper", spdlog::sinks_init_list{file_sink, console_sink},
       spdlog::thread_pool(), spdlog::async_overflow_policy::block);
 
-  file_sink->set_level(level);
-  console_sink->set_level(level);
+  default_logger->set_level(level);
+  if (cranectld_flag) {
+    taskscheduler_logger->set_level(level);
+    cranedkeeper_logger->set_level(level);
+  }
 
   default_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
   taskscheduler_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
@@ -53,4 +57,33 @@ void InitLogger(spdlog::level::level_enum level,
   spdlog::flush_every(std::chrono::seconds(1));
 
   spdlog::set_level(level);
+}
+
+bool set_Logger_log_level(const std::string mode, spdlog::level::level_enum level) {
+    auto logger = spdlog::get(mode);
+    if (logger == nullptr) {
+        return false;
+    }
+    logger->set_level(level);
+
+    return true;
+}
+
+bool str_trans_log_level(const std::string str_level, spdlog::level::level_enum &out_Level) {
+
+    if (str_level == "trace") {
+        out_Level = spdlog::level::trace;
+    } else if (str_level == "debug") {
+        out_Level = spdlog::level::debug;
+    } else if (str_level == "info") {
+        out_Level = spdlog::level::info;
+    } else if (str_level == "warn") {
+        out_Level = spdlog::level::warn;
+    } else if (str_level == "error") {
+        out_Level = spdlog::level::err;
+    } else {
+        return false;
+    }
+
+    return true;
 }

@@ -104,22 +104,38 @@ void ParseConfig(int argc, char** argv) {
 
       // spdlog should be initialized as soon as possible
       spdlog::level::level_enum log_level;
-      if (g_config.CraneCtldDebugLevel == "trace") {
-        log_level = spdlog::level::trace;
-      } else if (g_config.CraneCtldDebugLevel == "debug") {
-        log_level = spdlog::level::debug;
-      } else if (g_config.CraneCtldDebugLevel == "info") {
-        log_level = spdlog::level::info;
-      } else if (g_config.CraneCtldDebugLevel == "warn") {
-        log_level = spdlog::level::warn;
-      } else if (g_config.CraneCtldDebugLevel == "error") {
-        log_level = spdlog::level::err;
-      } else {
+      if (!str_trans_log_level(g_config.CraneCtldDebugLevel, log_level)) {
         fmt::print(stderr, "Illegal debug-level format.");
         std::exit(1);
       }
 
       InitLogger(log_level, g_config.CraneCtldLogFile);
+
+      if (config["CraneCtldTaskSchedulerLevel"]) {
+        g_config.CraneCtldTaskSchedulerLevel =
+            config["CraneCtldTaskSchedulerLevel"].as<std::string>();
+        if (!str_trans_log_level(g_config.CraneCtldTaskSchedulerLevel, log_level)) {
+          fmt::print(stderr, "Illegal taskscheduler-debug-level format.");
+          std::exit(1);
+        }
+        if (!set_Logger_log_level("taskscheduler", log_level)) {
+          fmt::print(stderr, "set taskscheduler-log-level fail.");
+          std::exit(1);
+        }
+      }
+
+      if (config["CraneCtldCranedKeeperLevel"]) {
+        g_config.CraneCtldCranedKeeperLevel =
+            config["CraneCtldCranedKeeperLevel"].as<std::string>();
+        if (!str_trans_log_level(g_config.CraneCtldCranedKeeperLevel, log_level)) {
+          fmt::print(stderr, "Illegal cranedkeeper-debug-level format.");
+          std::exit(1);
+        }
+        if (!set_Logger_log_level("cranedkeeper", log_level)) {
+          fmt::print(stderr, "set cranedkeeper-log-level fail.");
+          std::exit(1);
+        }
+      }
 
       // External configuration file path
       if (!parsed_args.count("db-config") && config["DbConfigPath"]) {

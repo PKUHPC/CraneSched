@@ -115,22 +115,12 @@ void ParseConfig(int argc, char** argv) {
 
       // spdlog should be initialized as soon as possible
       spdlog::level::level_enum log_level;
-      if (g_config.CranedDebugLevel == "trace") {
-        log_level = spdlog::level::trace;
-      } else if (g_config.CranedDebugLevel == "debug") {
-        log_level = spdlog::level::debug;
-      } else if (g_config.CranedDebugLevel == "info") {
-        log_level = spdlog::level::info;
-      } else if (g_config.CranedDebugLevel == "warn") {
-        log_level = spdlog::level::warn;
-      } else if (g_config.CranedDebugLevel == "error") {
-        log_level = spdlog::level::err;
-      } else {
+      if (!str_trans_log_level(g_config.CranedDebugLevel, log_level)) {
         fmt::print(stderr, "Illegal debug-level format.");
         std::exit(1);
       }
 
-      InitLogger(log_level, g_config.CranedLogFile);
+      InitLogger(log_level, g_config.CranedLogFile, false);
 
       if (config["CranedUnixSockPath"])
         g_config.CranedUnixSockPath =

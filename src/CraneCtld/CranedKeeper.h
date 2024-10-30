@@ -26,6 +26,21 @@
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 
+
+// cranedkeeper log macro
+#define CRANEDKEEPER_TRACE(...) \
+  SPDLOG_LOGGER_TRACE(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_DEBUG(...) \
+  SPDLOG_LOGGER_DEBUG(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_INFO(...)  \
+  SPDLOG_LOGGER_INFO(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_WARN(...)  \
+  SPDLOG_LOGGER_WARN(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_ERROR(...) \
+  SPDLOG_LOGGER_ERROR(spdlog::get("cranedkeeper"), __VA_ARGS__)
+#define CRANEDKEEPER_CRITICAL(...) \
+  SPDLOG_LOGGER_CRITICAL(spdlog::get("cranedkeeper"), __VA_ARGS__)
+
 namespace Ctld {
 
 class CranedKeeper;

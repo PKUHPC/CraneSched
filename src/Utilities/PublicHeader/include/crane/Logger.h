@@ -70,34 +70,6 @@
 #define CRANE_CRITICAL(...) \
   SPDLOG_LOGGER_CRITICAL(spdlog::get("default"), __VA_ARGS__)
 
-// taskscheduler log
-#define TASKSCHEDULER_TRACE(...) \
-  SPDLOG_LOGGER_TRACE(spdlog::get("taskscheduler"), __VA_ARGS__)
-#define TASKSCHEDULER_DEBUG(...) \
-  SPDLOG_LOGGER_DEBUG(spdlog::get("taskscheduler"), __VA_ARGS__)
-#define TASKSCHEDULER_INFO(...)  \
-  SPDLOG_LOGGER_INFO(spdlog::get("taskscheduler"), __VA_ARGS__)
-#define TASKSCHEDULER_WARN(...)  \
-  SPDLOG_LOGGER_WARN(spdlog::get("taskscheduler"), __VA_ARGS__)
-#define TASKSCHEDULER_ERROR(...) \
-  SPDLOG_LOGGER_ERROR(spdlog::get("taskscheduler"), __VA_ARGS__)
-#define TASKSCHEDULER_CRITICAL(...) \
-  SPDLOG_LOGGER_CRITICAL(spdlog::get("taskscheduler"), __VA_ARGS__)
-
-// cranedkeeper log
-#define CRANEDKEEPER_TRACE(...) \
-  SPDLOG_LOGGER_TRACE(spdlog::get("cranedkeeper"), __VA_ARGS__)
-#define CRANEDKEEPER_DEBUG(...) \
-  SPDLOG_LOGGER_DEBUG(spdlog::get("cranedkeeper"), __VA_ARGS__)
-#define CRANEDKEEPER_INFO(...)  \
-  SPDLOG_LOGGER_INFO(spdlog::get("cranedkeeper"), __VA_ARGS__)
-#define CRANEDKEEPER_WARN(...)  \
-  SPDLOG_LOGGER_WARN(spdlog::get("cranedkeeper"), __VA_ARGS__)
-#define CRANEDKEEPER_ERROR(...) \
-  SPDLOG_LOGGER_ERROR(spdlog::get("cranedkeeper"), __VA_ARGS__)
-#define CRANEDKEEPER_CRITICAL(...) \
-  SPDLOG_LOGGER_CRITICAL(spdlog::get("cranedkeeper"), __VA_ARGS__)
-
 #define CRANE_LOG_LOC_CALL(loc, level, ...)                             \
   spdlog::default_logger_raw()->log(                                    \
       spdlog::source_loc{loc.file_name(), static_cast<int>(loc.line()), \
@@ -185,7 +157,12 @@
 #endif
 
 void InitLogger(spdlog::level::level_enum level,
-                const std::string &log_file_path);
+                const std::string &log_file_pathm,
+                const bool cranectld_flag = true);
+
+bool set_Logger_log_level(const std::string mode, spdlog::level::level_enum level);
+
+bool str_trans_log_level(const std::string str_level, spdlog::level::level_enum &out_Level);
 
 // Custom type formatting
 namespace fmt {

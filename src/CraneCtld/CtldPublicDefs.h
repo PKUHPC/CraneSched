@@ -114,6 +114,8 @@ struct Config {
   bool CompressedRpc{};
 
   std::string CraneCtldDebugLevel;
+  std::string CraneCtldTaskSchedulerLevel;
+  std::string CraneCtldCranedKeeperLevel;
   std::string CraneCtldLogFile;
 
   std::string CraneEmbeddedDbBackend;
