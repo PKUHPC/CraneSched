@@ -363,20 +363,26 @@ install(TARGETS pam_crane
         DESTINATION /usr/lib64/security/
         COMPONENT cranedc)
 
-set(INSTALL_SCRIPT_PATH "${CMAKE_SOURCE_DIR}/scripts/install_pam.sh")
-install(CODE "execute_process(COMMAND sh ${INSTALL_SCRIPT_PATH})" COMPONENT cranedc)
-# Build rpm
 set(CPACK_GENERATOR "RPM;DEB")
-set(CPACK_PACKAGE_NAME "craneSched")
+set(CPACK_PACKAGE_NAME "CraneSched")
 set(CPACK_PACKAGE_VENDOR "PKUHPC")
-set(CPACK_RPM_PACKAGE_GROUP "PKUHPC")
-set(CPACK_DEBIAN_PACKAGE_MAINTAINER "PKUHPC")
-set(CPACK_PACKAGE_DESCRIPTION "CraneSched rpm package")
-set(CPACK_DEB_COMPONENT_INSTALL ON)
-set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+set(CPACK_PACKAGE_DESCRIPTION "CraneSched package")
+set(CPACK_PACKAGE_VERSION "1.0.0")
+set(CPACK_PACKAGE_VERSION_MAJOR "1")
+set(CPACK_PACKAGE_VERSION_MINOR "0")
+set(CPACK_PACKAGE_VERSION_PATCH "0")
+set(CPACK_RPM_PACKAGE_URL "https://github.com/PKUHPC/CraneSched")
+set(CPACK_RPM_PACKAGE_DESCRIPTION "yaml-cpp is a YAML parser and emitter in C++ matching the YAML 1.2 spec.")
+# not support install dir specification
+set(CPACK_SET_DESTDIR OFF)
 
-# Set pam install/uninstall scripts
-set(CPACK_RPM_craned_POST_INSTALL_SCRIPT_FILE ${CMAKE_SOURCE_DIR}/scripts/install_pam.sh)
-set(CPACK_RPM_craned_POST_UNINSTALL_SCRIPT_FILE /${CMAKE_SOURCE_DIR}/scripts/uninstall_pam.sh)
+#RPM
+set(CPACK_RPM_PACKAGE_GROUP "PKUHPC")
+set(CPACK_RPM_PACKAGE_LICENSE "AGPL v3")
+#DEB
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "PKUHPC")
+
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+
 # pam autoconf for deb package not supported yet
 include(CPack)
