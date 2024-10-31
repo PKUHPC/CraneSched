@@ -31,27 +31,27 @@ void InitLogger(spdlog::level::level_enum level,
       "default", spdlog::sinks_init_list{file_sink, console_sink},
       spdlog::thread_pool(), spdlog::async_overflow_policy::block);
 
-  auto taskscheduler_logger = std::make_shared<spdlog::async_logger>(
-      "taskscheduler", spdlog::sinks_init_list{file_sink, console_sink},
-      spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-
-  auto cranedkeeper_logger = std::make_shared<spdlog::async_logger>(
-      "cranedkeeper", spdlog::sinks_init_list{file_sink, console_sink},
-      spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-
   default_logger->set_level(level);
+
   if (cranectld_flag) {
+    auto taskscheduler_logger = std::make_shared<spdlog::async_logger>(
+        "taskscheduler", spdlog::sinks_init_list{file_sink, console_sink},
+        spdlog::thread_pool(), spdlog::async_overflow_policy::block);
+
+    auto cranedkeeper_logger = std::make_shared<spdlog::async_logger>(
+        "cranedkeeper", spdlog::sinks_init_list{file_sink, console_sink},
+        spdlog::thread_pool(), spdlog::async_overflow_policy::block);
+    
     taskscheduler_logger->set_level(level);
     cranedkeeper_logger->set_level(level);
+    taskscheduler_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
+    cranedkeeper_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
+    spdlog::register_logger(taskscheduler_logger);
+    spdlog::register_logger(cranedkeeper_logger);
   }
 
   default_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
-  taskscheduler_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
-  cranedkeeper_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
-
   spdlog::register_logger(default_logger);
-  spdlog::register_logger(taskscheduler_logger);
-  spdlog::register_logger(cranedkeeper_logger);
 
   spdlog::flush_on(spdlog::level::err);
   spdlog::flush_every(std::chrono::seconds(1));
@@ -70,7 +70,6 @@ bool set_Logger_log_level(const std::string mode, spdlog::level::level_enum leve
 }
 
 bool str_trans_log_level(const std::string str_level, spdlog::level::level_enum &out_Level) {
-
     if (str_level == "trace") {
         out_Level = spdlog::level::trace;
     } else if (str_level == "debug") {
