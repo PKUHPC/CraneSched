@@ -138,6 +138,26 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldMutexFilePath =
             g_config.CraneBaseDir + kDefaultCraneCtldMutexFile;
 
+      if (config["JwtCertFilePath"]) {
+        std::string jwtCertFilePath =
+            config["JwtCertFilePath"].as<std::string>();
+
+        try {
+          g_config.JwtSecretContent = util::ReadFileIntoString(jwtCertFilePath);
+        } catch (const std::exception& e) {
+          CRANE_ERROR("Read cert file error: {}", e.what());
+          std::exit(1);
+        }
+        if (g_config.JwtSecretContent.empty()) {
+          CRANE_ERROR(
+              "The file specified by JwtCertFilePath "
+              "is empty");
+        }
+      } else {
+        CRANE_ERROR("JwtCertFilePath is empty");
+        std::exit(1);
+      }
+
       if (config["CraneCtldListenAddr"])
         g_config.ListenConf.CraneCtldListenAddr =
             config["CraneCtldListenAddr"].as<std::string>();
@@ -156,13 +176,6 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.ListenConf.CraneCtldForCranedListenPort =
             kCtldForCranedDefaultPort;
-
-      if (config["CraneCtldForCforedListenPort"])
-        g_config.ListenConf.CraneCtldForCforedListenPort =
-            config["CraneCtldForCforedListenPort"].as<std::string>();
-      else
-        g_config.ListenConf.CraneCtldForCforedListenPort =
-            kCtldForCforedDefaultPort;
 
       if (config["CraneCtldForCforedListenPort"])
         g_config.ListenConf.CraneCtldForCforedListenPort =
