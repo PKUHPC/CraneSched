@@ -79,6 +79,9 @@ class AtomicHashMap {
 
   using ValueExclusivePtr = util::ManagedScopeExclusivePtr<T, CombinedLock>;
 
+  using MapExclusivePtr =
+      util::ScopeExclusivePtr<MapType<Key, Synchronized<T>>, rw_mutex>;
+
   using MapSharedPtr =
       util::ScopeSharedPtr<MapType<Key, Synchronized<T>>, rw_mutex>;
 
@@ -168,6 +171,11 @@ class AtomicHashMap {
   MapSharedPtr GetMapSharedPtr() {
     m_global_rw_mutex_.lock_shared();
     return MapSharedPtr{&m_value_map_, &m_global_rw_mutex_};
+  }
+
+  MapExclusivePtr GetMapExclusivePtr() {
+    m_global_rw_mutex_.lock();
+    return MapExclusivePtr{&m_value_map_, &m_global_rw_mutex_};
   }
 
   template <typename... Args>
