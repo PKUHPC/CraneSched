@@ -349,11 +349,15 @@ bool CgroupManager::CreateCgroups(std::vector<CgroupSpec> &&cg_specs) {
     this->m_task_id_to_cg_spec_map_.Emplace(task_id, std::move(cg_specs[i]));
 
     this->m_task_id_to_cg_map_.Emplace(task_id, nullptr);
-    if (!this->m_uid_to_task_ids_map_.Contains(uid))
-      this->m_uid_to_task_ids_map_.Emplace(
-          uid, absl::flat_hash_set<uint32_t>{task_id});
+
+    // Acquire map lock to avoid using [uid]set deleted by ReleaseCgroup
+    // after checking contains(uid)
+    auto uid_task_id_map_ptr =
+        this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
+    if (!uid_task_id_map_ptr->contains(uid))
+      uid_task_id_map_ptr->emplace(uid, absl::flat_hash_set<uint32_t>{task_id});
     else
-      this->m_uid_to_task_ids_map_[uid]->emplace(task_id);
+      uid_task_id_map_ptr->at(uid).RawPtr()->emplace(task_id);
   }
 
   end = std::chrono::steady_clock::now();
@@ -388,9 +392,12 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
 
   this->m_task_id_to_cg_spec_map_.Erase(task_id);
 
-  this->m_uid_to_task_ids_map_[uid]->erase(task_id);
-  if (this->m_uid_to_task_ids_map_[uid]->empty()) {
-    this->m_uid_to_task_ids_map_.Erase(uid);
+  {
+    auto uid_task_id_map = this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
+    auto task_id_set_ptr = uid_task_id_map->at(uid).GetExclusivePtr();
+
+    task_id_set_ptr->erase(task_id);
+    if (task_id_set_ptr->empty()) uid_task_id_map->erase(uid);
   }
 
   if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
