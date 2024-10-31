@@ -1,4 +1,4 @@
- /**
+/**
  * Copyright (c) 2023 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
@@ -14,90 +14,92 @@
  * See the Mulan PSL v2 for more details.
  */
 
- #include "LicensesManager.h"
-
+#include "LicensesManager.h"
 
 namespace Ctld {
 
 LicensesManager::LicensesManager() {}
 
-int LicensesManager::Init(const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map) {
+int LicensesManager::Init(
+    const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
+  util::read_lock_guard readLock(rw_mutex_);
+  for (auto& [lic_id, count] : lic_id_to_count_map) {
+    lic_id_to_lic_map_.insert({lic_id, License(lic_id, count, 0, count)});
+  }
+  return 0;
+}
+
+void LicensesManager::GetLicensesInfo(
+    const crane::grpc::QueryLicensesInfoRequest* request,
+    crane::grpc::QueryLicensesInfoReply* response) {
+  auto* list = response->mutable_license_info_list();
+
+  if (request->license_name().empty()) {
     util::read_lock_guard readLock(rw_mutex_);
-    for (auto& [lic_id, count] : lic_id_to_count_map) {
-        lic_id_to_lic_map_.insert({lic_id, std::make_unique<License>(License(lic_id, count, 0, count))});
+    for (auto& [lic_index, lic] : lic_id_to_lic_map_) {
+      auto* lic_info = list->Add();
+      lic_info->set_name(lic.license_id);
+      lic_info->set_total(lic.total);
+      lic_info->set_used(lic.used);
+      lic_info->set_free(lic.free);
     }
-    return 0;
-}
-
-void LicensesManager::GetLicensesInfo(const crane::grpc::QueryLicensesInfoRequest* request, crane::grpc::QueryLicensesInfoReply* response) {
-    auto* list = response->mutable_license_info_list();
-
-    if (request->license_name().empty()) {
-        util::read_lock_guard readLock(rw_mutex_);
-        for(auto& [lic_index, lic_ptr] : lic_id_to_lic_map_) {
-            auto *lic_info = list->Add();
-            lic_info->set_name(lic_ptr->license_id);
-            lic_info->set_total(lic_ptr->total);
-            lic_info->set_used(lic_ptr->used);
-            lic_info->set_free(lic_ptr->free);
-        }
-    } else {
-        util::read_lock_guard readLock(rw_mutex_);
-        auto it = lic_id_to_lic_map_.find(request->license_name());
-        if (it != lic_id_to_lic_map_.end()) {
-            auto *lic_info = list->Add();
-            lic_info->set_name(it->second->license_id);
-            lic_info->set_total(it->second->total);
-            lic_info->set_used(it->second->used);
-            lic_info->set_free(it->second->free);
-        }
-    }
-}
-
-bool LicensesManager::CheckLicenseCountSufficient(const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map) {
-
+  } else {
     util::read_lock_guard readLock(rw_mutex_);
-    for(auto& [lic_id, count] : lic_id_to_count_map) {
-        auto it = lic_id_to_lic_map_.find(lic_id);
-        if (it == lic_id_to_lic_map_.end() || it->second->free < count) {
-            return false;
-        }
+    auto it = lic_id_to_lic_map_.find(request->license_name());
+    if (it != lic_id_to_lic_map_.end()) {
+      auto* lic_info = list->Add();
+      lic_info->set_name(it->second.license_id);
+      lic_info->set_total(it->second.total);
+      lic_info->set_used(it->second.used);
+      lic_info->set_free(it->second.free);
     }
-
-    return true;
+  }
 }
 
-result::result<void, std::string> LicensesManager::CheckLicensesLegal(const ::google::protobuf::Map<std::string, uint32_t> &lic_id_to_count_map) {
-    
-    util::read_lock_guard readLock(rw_mutex_);
-    for(auto& [lic_id, count] : lic_id_to_count_map) {
-        auto it = lic_id_to_lic_map_.find(lic_id);
-        if (it == lic_id_to_lic_map_.end() || count > it->second->total) {
-            return result::fail("Invalid license specification");
-        }
+bool LicensesManager::CheckLicenseCountSufficient(
+    const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
+  util::read_lock_guard readLock(rw_mutex_);
+  for (auto& [lic_id, count] : lic_id_to_count_map) {
+    auto it = lic_id_to_lic_map_.find(lic_id);
+    if (it == lic_id_to_lic_map_.end() || it->second.free < count) {
+      return false;
     }
+  }
 
-    return {};
+  return true;
 }
 
-void LicensesManager::MallocLicenseResource(const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map) {
-    
-    util::write_lock_guard writeLock(rw_mutex_);
-    for(auto& [lic_id, count] : lic_id_to_count_map) {
-        auto it = lic_id_to_lic_map_.find(lic_id);
-        it->second->used += count;
-        it->second->free -= count;
+result::result<void, std::string> LicensesManager::CheckLicensesLegal(
+    const ::google::protobuf::Map<std::string, uint32_t>& lic_id_to_count_map) {
+  util::read_lock_guard readLock(rw_mutex_);
+  for (auto& [lic_id, count] : lic_id_to_count_map) {
+    auto it = lic_id_to_lic_map_.find(lic_id);
+    if (it == lic_id_to_lic_map_.end() || count > it->second.total) {
+      return result::fail("Invalid license specification");
     }
+  }
+
+  return {};
 }
 
-void LicensesManager::FreeLicenseResource(const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map) {
-    
-    util::write_lock_guard writeLock(rw_mutex_);
-    for(auto& [lic_id, count] : lic_id_to_count_map) {
-        auto it = lic_id_to_lic_map_.find(lic_id);
-        it->second->used -= count;
-        it->second->free += count;
-    }
-}   
+void LicensesManager::MallocLicenseResource(
+    const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
+  util::write_lock_guard writeLock(rw_mutex_);
+  for (auto& [lic_id, count] : lic_id_to_count_map) {
+    auto it = lic_id_to_lic_map_.find(lic_id);
+    it->second.used += count;
+    it->second.free -= count;
+  }
+}
 
-} // namespace Craned
+void LicensesManager::FreeLicenseResource(
+    const std::unordered_map<LicenseId, uint32_t>& lic_id_to_count_map) {
+  util::write_lock_guard writeLock(rw_mutex_);
+  for (auto& [lic_id, count] : lic_id_to_count_map) {
+    auto it = lic_id_to_lic_map_.find(lic_id);
+    it->second.used -= count;
+    it->second.free += count;
+  }
+}
+
+}  // namespace Ctld

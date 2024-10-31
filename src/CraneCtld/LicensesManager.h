@@ -23,8 +23,7 @@
 
 namespace Ctld {
 
-using unorderedLicensesMap =
-    absl::flat_hash_map<LicenseId, std::unique_ptr<License>>;
+using unorderedLicensesMap = absl::flat_hash_map<LicenseId, License>;
 
 class LicensesManager {
  public:
