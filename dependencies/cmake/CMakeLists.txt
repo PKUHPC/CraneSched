@@ -13,7 +13,8 @@ if(CRANE_USE_MIMALLOC)
     add_subdirectory(mimalloc)
 endif()
 add_subdirectory(BSThreadPool)
-add_subdirectory(nlohmann_json)
+# add_subdirectory(nlohmann_json)
+add_subdirectory(jwt-cpp)
 add_subdirectory(yaml-cpp)
 add_subdirectory(fmt)
 add_subdirectory(googletest)
@@ -28,6 +29,7 @@ add_subdirectory(mongodb-cxx-driver)
 add_subdirectory(ranges-v3)
 add_subdirectory(backward-cpp)
 add_subdirectory(fpm)
+
 
 #add_subdirectory(mariadb-connector-c)
 
