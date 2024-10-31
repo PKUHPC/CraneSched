@@ -1,4 +1,4 @@
- /**
+/**
  * Copyright (c) 2023 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
@@ -14,16 +14,17 @@
  * See the Mulan PSL v2 for more details.
  */
 
- #pragma once
+#pragma once
 
- #include "CtldPublicDefs.h"
+#include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
 #include "crane/Lock.h"
 
 namespace Ctld {
 
-using unorderedLicensesMap = absl::flat_hash_map<LicenseId, std::unique_ptr<License>>;
+using unorderedLicensesMap =
+    absl::flat_hash_map<LicenseId, std::unique_ptr<License>>;
 
 class LicensesManager {
  public:
@@ -33,24 +34,28 @@ class LicensesManager {
 
   int Init(const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
 
-  void GetLicensesInfo(const crane::grpc::QueryLicensesInfoRequest* request, 
-                        crane::grpc::QueryLicensesInfoReply* response);
-   
-  bool CheckLicenseCountSufficient(const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
+  void GetLicensesInfo(const crane::grpc::QueryLicensesInfoRequest *request,
+                       crane::grpc::QueryLicensesInfoReply *response);
 
-  result::result<void, std::string> CheckLicensesLegal(const ::google::protobuf::Map<std::string, uint32_t> &lic_id_to_count_map);
+  bool CheckLicenseCountSufficient(
+      const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
 
-  void MallocLicenseResource(const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
+  result::result<void, std::string> CheckLicensesLegal(
+      const ::google::protobuf::Map<std::string, uint32_t>
+          &lic_id_to_count_map);
 
-  void FreeLicenseResource(const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
-   
+  void MallocLicenseResource(
+      const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
+
+  void FreeLicenseResource(
+      const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
+
  private:
   unorderedLicensesMap lic_id_to_lic_map_ ABSL_GUARDED_BY(rw_mutex_);
-    
+
   util::rw_mutex rw_mutex_;
 };
 
-} // namespace Ctld
-
+}  // namespace Ctld
 
 inline std::unique_ptr<Ctld::LicensesManager> g_licenses_manager;

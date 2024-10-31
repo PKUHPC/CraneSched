@@ -196,38 +196,22 @@ bool ParseHostList(const std::string &host_str,
   return true;
 }
 
+bool ParseLicensesList(const std::string &licenses_str,
+                       std::unordered_map<LicenseId, uint32_t> *licenses_map) {
+  std::string tmp_str = "";
+  for (auto &ch : licenses_str) {
+    if (ch != ' ') tmp_str += ch;
+  }
 
-bool ParseLicensesList(const std::string& licenses_str, std::unordered_map<std::string, uint32_t> *licenses_map) {
+  std::vector<std::string> licenses_vec = absl::StrSplit(tmp_str, ",");
 
-    std::string tmp_str = "";
-    for(auto& ch : licenses_str) {
-      if(ch != ' ') tmp_str += ch;
-    }
+  static const LazyRE2 pattern(R"((\w+):(\d+))");
 
-    std::vector<std::string> licenses_vec = absl::StrSplit(tmp_str, ",");
-
-    static const LazyRE2 pattern(R"((\w+):(\d+))");
-
-    for(auto& licenses_count : licenses_vec) {
-      if (!RE2::FullMatch(licenses_count, *pattern)) {
-        return false;
-      }
-      std::string name;
-      std::string count;
-      bool isname = true;
-      for (auto& ch : licenses_count) {
-        if(ch == ':') {
-          isname = false;
-        }  else {
-          if (isname) {
-            name += ch;
-          } else {
-            count += ch;
-          }
-        }
-      }
-      licenses_map->insert({name, std::stoul(count)});
-    }
+  for (auto &licenses_count : licenses_vec) {
+    if (!RE2::FullMatch(licenses_count, *pattern)) return false;
+    std::vector<std::string> name_count = absl::StrSplit(licenses_count, ":");
+    licenses_map->insert({name_count[0], std::stoul(name_count[1])});
+  }
 
   return true;
 }
