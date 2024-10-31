@@ -60,7 +60,8 @@ std::string ReadableMemory(uint64_t memory_bytes);
 bool ParseHostList(const std::string &host_str,
                    std::list<std::string> *host_list);
 
-bool ParseLicensesList(const std::string& licenses_str, std::unordered_map<std::string, uint32_t> *licenses_map);
+bool ParseLicensesList(const std::string &licenses_str,
+                       std::unordered_map<LicenseId, uint32_t> *licenses_map);
 
 bool FoundFirstNumberWithoutBrackets(const std::string &input, int *start,
                                      int *end);
