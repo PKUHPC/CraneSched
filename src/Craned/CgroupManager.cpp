@@ -393,12 +393,10 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
 
   {
     auto uid_task_id_map = this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
-
     auto task_id_set_ptr = uid_task_id_map->at(uid).GetExclusivePtr();
+
     task_id_set_ptr->erase(task_id);
-    if (task_id_set_ptr->empty()) {
-      uid_task_id_map->erase(uid);
-    }
+    if (task_id_set_ptr->empty()) uid_task_id_map->erase(uid);
   }
 
   if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
