@@ -19,6 +19,8 @@
 #pragma once
 
 #include <grpc++/grpc++.h>
+#include <grpcpp/security/auth_metadata_processor.h>
+#include <grpcpp/support/status.h>
 #include <spdlog/fmt/bundled/format.h>
 
 struct TlsCertificates {
@@ -30,10 +32,27 @@ struct TlsCertificates {
 };
 
 struct ClientTlsCertificates {
-    std::string ClientCertFilePath;
-    std::string ClientCertContent;
+  std::string ClientCertFilePath;
+  std::string ClientCertContent;
 };
 
+class MyAuthProcessor : public grpc::AuthMetadataProcessor {
+ public:
+  grpc::Status Process(const InputMetadata& auth_metadata,
+                       grpc::AuthContext* context,
+                       OutputMetadata* consumed_auth_metadata,
+                       OutputMetadata* response_metadata) override {
+    for (const auto& [k, v] : auth_metadata) {
+      std::cout << k << " " << v << std::endl;
+    }
+    auto kv = auth_metadata.find("Authorization");
+    if (strcmp(kv->second.data(), "Token") != 0) {
+      return grpc::Status(grpc::StatusCode::UNAUTHENTICATED, "Invalid token");
+    }
+
+    return grpc::Status::OK;
+  }
+};
 
 void ServerBuilderSetCompression(grpc::ServerBuilder* builder);
 
@@ -47,9 +66,10 @@ void ServerBuilderAddTcpInsecureListeningPort(grpc::ServerBuilder* builder,
                                               const std::string& port);
 
 void ServerBuilderAddmTcpTlsListeningPort(grpc::ServerBuilder* builder,
-                                         const std::string& address,
-                                         const std::string& port,
-                                         const TlsCertificates& certs, const std::string pem_root_cert); 
+                                          const std::string& address,
+                                          const std::string& port,
+                                          const TlsCertificates& certs,
+                                          const std::string pem_root_cert);
 
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,
@@ -74,12 +94,15 @@ std::shared_ptr<grpc::Channel> CreateTcpInsecureCustomChannel(
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByIp(
     const std::string& ip, const std::string& port,
-    const TlsCertificates& certs, const ClientTlsCertificates& clientcerts, const grpc::ChannelArguments& args);
+    const TlsCertificates& certs, const ClientTlsCertificates& clientcerts,
+    const grpc::ChannelArguments& args);
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsChannelByHostname(
     const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs, const ClientTlsCertificates& clientcerts, const std::string& domainSuffix);
+    const TlsCertificates& certs, const ClientTlsCertificates& clientcerts,
+    const std::string& domainSuffix);
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByHostname(
     const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs, const ClientTlsCertificates& clientcerts, const std::string& domainSuffix, const grpc::ChannelArguments& args);
+    const TlsCertificates& certs, const ClientTlsCertificates& clientcerts,
+    const std::string& domainSuffix, const grpc::ChannelArguments& args);
