@@ -146,7 +146,7 @@ struct Config {
   uint32_t ScheduledBatchSize;
 
   std::unordered_map<LicenseId, uint32_t> lic_id_to_count_map;
-  
+
   bool RejectTasksBeyondCapacity{false};
 };
 
@@ -304,7 +304,7 @@ struct TaskInCtld {
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 
-  std::unordered_map<std::string, uint32_t> licenses_count;
+  std::unordered_map<LicenseId, uint32_t> licenses_count;
 
  private:
   /* ------------- [2] -------------
@@ -483,7 +483,7 @@ struct TaskInCtld {
                                                   : val.partition_name();
     requested_node_res_view = static_cast<ResourceView>(val.resources());
 
-    for(auto& [k, v] : val.licenses_count()) { licenses_count[k] = v; }
+    for (auto& [k, v] : val.licenses_count()) licenses_count[k] = v;
 
     time_limit = absl::Seconds(val.time_limit().seconds());
 
@@ -580,16 +580,13 @@ struct TaskInCtld {
     task_info->set_qos(qos);
 
     // lic_map -> "lic1:1,lic2:3"
-    std::ostringstream task_lic_oss;
-    bool first = true;
-    for (auto& [k, v] : licenses_count) {
-      if (!first) {
-        task_lic_oss << ",";
-      }
-      task_lic_oss << k << ":" << v;
-      first = false;
-    }
-    task_info->set_licenses(task_lic_oss.str());
+    auto license_strings =
+        licenses_count | ranges::views::transform([](const auto& pair) {
+          return pair.first + ":" + std::to_string(pair.second);
+        });
+    std::string licenses_view =
+        license_strings | ranges::views::join(',') | ranges::to<std::string>();
+    task_info->set_licenses(licenses_view);
 
     task_info->mutable_time_limit()->set_seconds(ToInt64Seconds(time_limit));
     task_info->mutable_submit_time()->CopyFrom(runtime_attr.submit_time());
@@ -715,9 +712,9 @@ struct User {
 
 struct License {
   LicenseId license_id; /* license name */
-  uint32_t total;  /* The total number of configured license */
-  uint32_t used;  /* Number of license in use */
-  uint32_t free;  /* Number of license in free */
+  uint32_t total;       /* The total number of configured license */
+  uint32_t used;        /* Number of license in use */
+  uint32_t free;        /* Number of license in free */
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {

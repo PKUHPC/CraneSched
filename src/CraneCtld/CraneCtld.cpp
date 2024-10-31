@@ -28,13 +28,13 @@
 #include <filesystem>
 
 #include "AccountManager.h"
-#include "LicensesManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
+#include "LicensesManager.h"
 #include "TaskScheduler.h"
 #include "crane/Logger.h"
 #include "crane/Network.h"
@@ -313,7 +313,8 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["Licenses"]) {
         std::string licenses_str = config["Licenses"].as<std::string>();
-        if (!util::ParseLicensesList(licenses_str, &g_config.lic_id_to_count_map)) {
+        if (!util::ParseLicensesList(licenses_str,
+                                     &g_config.lic_id_to_count_map)) {
           CRANE_ERROR("Illegal licenses string format.");
           std::exit(1);
         }
