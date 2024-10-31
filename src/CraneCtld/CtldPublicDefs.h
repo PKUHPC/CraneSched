@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "CtldPreCompiledHeader.h"
 #include "crane/GrpcHelper.h"
 // Precompiled header come first!
@@ -103,6 +105,7 @@ struct Config {
     TlsCertsConfig TlsCerts;
   };
   CraneCtldListenConf ListenConf;
+  std::string JwtSecretContent;
 
   struct Priority {
     enum TypeEnum { Basic, MultiFactor };

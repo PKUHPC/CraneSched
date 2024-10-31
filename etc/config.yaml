@@ -26,6 +26,8 @@ InternalCaFilePath: /etc/crane/internal_ca.pem
 
 DomainSuffix: crane.com
 
+JwtCertFilePath: /etc/crane/jwt.pem
+
 # Ctld settings
 # the listening address of control machine
 CraneCtldListenAddr: 0.0.0.0
