@@ -104,21 +104,21 @@ void ParseConfig(int argc, char** argv) {
 
       // spdlog should be initialized as soon as possible
       spdlog::level::level_enum log_level;
-      if (!str_trans_log_level(g_config.CraneCtldDebugLevel, log_level)) {
+      if (!StrTransLogLevel(g_config.CraneCtldDebugLevel, &log_level)) {
         fmt::print(stderr, "Illegal debug-level format.");
         std::exit(1);
       }
 
-      InitLogger(log_level, g_config.CraneCtldLogFile);
+      InitLogger(log_level, g_config.CraneCtldLogFile, true);
 
       if (config["CraneCtldTaskSchedulerLevel"]) {
         g_config.CraneCtldTaskSchedulerLevel =
             config["CraneCtldTaskSchedulerLevel"].as<std::string>();
-        if (!str_trans_log_level(g_config.CraneCtldTaskSchedulerLevel, log_level)) {
+        if (!StrTransLogLevel(g_config.CraneCtldTaskSchedulerLevel, &log_level)) {
           fmt::print(stderr, "Illegal taskscheduler-debug-level format.");
           std::exit(1);
         }
-        if (!set_Logger_log_level("taskscheduler", log_level)) {
+        if (!SetLoggerLogLevel("taskscheduler", log_level)) {
           fmt::print(stderr, "set taskscheduler-log-level fail.");
           std::exit(1);
         }
@@ -127,11 +127,11 @@ void ParseConfig(int argc, char** argv) {
       if (config["CraneCtldCranedKeeperLevel"]) {
         g_config.CraneCtldCranedKeeperLevel =
             config["CraneCtldCranedKeeperLevel"].as<std::string>();
-        if (!str_trans_log_level(g_config.CraneCtldCranedKeeperLevel, log_level)) {
+        if (!StrTransLogLevel(g_config.CraneCtldCranedKeeperLevel, &log_level)) {
           fmt::print(stderr, "Illegal cranedkeeper-debug-level format.");
           std::exit(1);
         }
-        if (!set_Logger_log_level("cranedkeeper", log_level)) {
+        if (!SetLoggerLogLevel("cranedkeeper", log_level)) {
           fmt::print(stderr, "set cranedkeeper-log-level fail.");
           std::exit(1);
         }

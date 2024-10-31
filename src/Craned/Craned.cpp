@@ -115,7 +115,7 @@ void ParseConfig(int argc, char** argv) {
 
       // spdlog should be initialized as soon as possible
       spdlog::level::level_enum log_level;
-      if (!str_trans_log_level(g_config.CranedDebugLevel, log_level)) {
+      if (!StrTransLogLevel(g_config.CranedDebugLevel, &log_level)) {
         fmt::print(stderr, "Illegal debug-level format.");
         std::exit(1);
       }

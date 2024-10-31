@@ -59,7 +59,7 @@ void InitLogger(spdlog::level::level_enum level,
   spdlog::set_level(level);
 }
 
-bool set_Logger_log_level(const std::string mode, spdlog::level::level_enum level) {
+bool SetLoggerLogLevel(const std::string mode, spdlog::level::level_enum level) {
     auto logger = spdlog::get(mode);
     if (logger == nullptr) {
         return false;
@@ -69,17 +69,17 @@ bool set_Logger_log_level(const std::string mode, spdlog::level::level_enum leve
     return true;
 }
 
-bool str_trans_log_level(const std::string str_level, spdlog::level::level_enum &out_Level) {
+bool StrTransLogLevel(const std::string str_level, spdlog::level::level_enum *out_Level) {
     if (str_level == "trace") {
-        out_Level = spdlog::level::trace;
+        *out_Level = spdlog::level::trace;
     } else if (str_level == "debug") {
-        out_Level = spdlog::level::debug;
+        *out_Level = spdlog::level::debug;
     } else if (str_level == "info") {
-        out_Level = spdlog::level::info;
+        *out_Level = spdlog::level::info;
     } else if (str_level == "warn") {
-        out_Level = spdlog::level::warn;
+        *out_Level = spdlog::level::warn;
     } else if (str_level == "error") {
-        out_Level = spdlog::level::err;
+        *out_Level = spdlog::level::err;
     } else {
         return false;
     }

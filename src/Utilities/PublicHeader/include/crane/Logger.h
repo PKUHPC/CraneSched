@@ -158,11 +158,11 @@
 
 void InitLogger(spdlog::level::level_enum level,
                 const std::string &log_file_pathm,
-                const bool cranectld_flag = true);
+                const bool cranectld_flag);
 
-bool set_Logger_log_level(const std::string mode, spdlog::level::level_enum level);
+bool SetLoggerLogLevel(const std::string mode, spdlog::level::level_enum level);
 
-bool str_trans_log_level(const std::string str_level, spdlog::level::level_enum &out_Level);
+bool StrTransLogLevel(const std::string str_level, spdlog::level::level_enum *out_Level);
 
 // Custom type formatting
 namespace fmt {
