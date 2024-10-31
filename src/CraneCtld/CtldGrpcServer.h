@@ -21,6 +21,7 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "CtldBraftAgent.h"
 #include "crane/Lock.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
@@ -170,9 +171,13 @@ class CforedStreamWriter {
 
 class CtldServer;
 
-class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
+class CraneCtldServiceImpl final
+    : public crane::grpc::CraneCtld::CallbackService {
  public:
-  explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
+  explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {
+    // TODO
+    //    m_cranectld_ = std::make_unique<CraneCtld>(server);
+  }
 
   grpc::Status CforedStream(
       grpc::ServerContext *context,
@@ -291,8 +296,93 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryClusterInfoRequest *request,
       crane::grpc::QueryClusterInfoReply *response) override;
 
+  grpc::ServerUnaryReactor *SubmitBatchTask(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::SubmitBatchTaskRequest *request,
+      crane::grpc::SubmitBatchTaskReply *response) override;
+
+  grpc::ServerUnaryReactor *TaskStatusChange(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::TaskStatusChangeRequest *request,
+      crane::grpc::TaskStatusChangeReply *response) override;
+
+  grpc::ServerUnaryReactor *CranedRegister(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::CranedRegisterRequest *request,
+      crane::grpc::CranedRegisterReply *response) override;
+
+  grpc::ServerUnaryReactor *CancelTask(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::CancelTaskRequest *request,
+      crane::grpc::CancelTaskReply *response) override;
+
+  grpc::ServerUnaryReactor *QueryTasksInfo(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::QueryTasksInfoRequest *request,
+      crane::grpc::QueryTasksInfoReply *response) override;
+
+  grpc::ServerUnaryReactor *QueryCranedInfo(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::QueryCranedInfoRequest *request,
+      crane::grpc::QueryCranedInfoReply *response) override;
+
+  grpc::ServerUnaryReactor *QueryPartitionInfo(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::QueryPartitionInfoRequest *request,
+      crane::grpc::QueryPartitionInfoReply *response) override;
+
+  grpc::ServerUnaryReactor *ModifyTask(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::ModifyTaskRequest *request,
+      crane::grpc::ModifyTaskReply *response) override;
+
+  grpc::ServerUnaryReactor *ModifyNode(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::ModifyCranedStateRequest *request,
+      crane::grpc::ModifyCranedStateReply *response) override;
+
+  grpc::ServerUnaryReactor *AddAccount(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::AddAccountRequest *request,
+      crane::grpc::AddAccountReply *response) override;
+
+  grpc::ServerUnaryReactor *AddUser(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::AddUserRequest *request,
+      crane::grpc::AddUserReply *response) override;
+
+  grpc::ServerUnaryReactor *AddQos(grpc::CallbackServerContext *context,
+                                   const crane::grpc::AddQosRequest *request,
+                                   crane::grpc::AddQosReply *response) override;
+
+  grpc::ServerUnaryReactor *ModifyEntity(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::ModifyEntityRequest *request,
+      crane::grpc::ModifyEntityReply *response) override;
+
+  grpc::ServerUnaryReactor *QueryEntityInfo(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::QueryEntityInfoRequest *request,
+      crane::grpc::QueryEntityInfoReply *response) override;
+
+  grpc::ServerUnaryReactor *DeleteEntity(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::DeleteEntityRequest *request,
+      crane::grpc::DeleteEntityReply *response) override;
+
+  grpc::ServerUnaryReactor *BlockAccountOrUser(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::BlockAccountOrUserRequest *request,
+      crane::grpc::BlockAccountOrUserReply *response) override;
+
+  grpc::ServerUnaryReactor *QueryClusterInfo(
+      grpc::CallbackServerContext *context,
+      const crane::grpc::QueryClusterInfoRequest *request,
+      crane::grpc::QueryClusterInfoReply *response) override;
+
  private:
   CtldServer *m_ctld_server_;
+  std::unique_ptr<CraneCtld> m_cranectld_;
 };
 
 /***
@@ -334,6 +424,7 @@ class CtldServer {
   static void signal_handler_func(int) { s_sigint_cv.notify_one(); };
 
   friend class CraneCtldServiceImpl;
+  friend class CraneCtld;
 };
 
 }  // namespace Ctld

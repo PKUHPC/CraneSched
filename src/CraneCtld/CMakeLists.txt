@@ -2,6 +2,8 @@ add_executable(cranectld
         CtldPublicDefs.h
         CtldGrpcServer.h
         CtldGrpcServer.cpp
+        CtldBraftAgent.h
+        CtldBraftAgent.cpp
         DbClient.h
         DbClient.cpp
         TaskScheduler.h

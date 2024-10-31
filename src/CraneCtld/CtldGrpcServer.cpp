@@ -872,6 +872,164 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
   }
 }
 
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::SubmitBatchTask(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::SubmitBatchTaskRequest *request,
+    crane::grpc::SubmitBatchTaskReply *response) {
+  auto *reactor = context->DefaultReactor();
+  m_cranectld_->SubmitBatchTask(request, response, reactor);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::TaskStatusChange(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::TaskStatusChangeRequest *request,
+    crane::grpc::TaskStatusChangeReply *response) {
+  auto *reactor = context->DefaultReactor();
+  m_cranectld_->TaskStatusChange(request, response, reactor);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::CranedRegister(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::CranedRegisterRequest *request,
+    crane::grpc::CranedRegisterReply *response) {
+  auto *reactor = context->DefaultReactor();
+  m_cranectld_->CranedRegister(request, response, reactor);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::CancelTask(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::CancelTaskRequest *request,
+    crane::grpc::CancelTaskReply *response) {
+  auto *reactor = context->DefaultReactor();
+  m_cranectld_->CancelTask(request, response, reactor);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::QueryTasksInfo(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::QueryTasksInfoRequest *request,
+    crane::grpc::QueryTasksInfoReply *response) {
+  auto *reactor = context->DefaultReactor();
+  RefactorGuard done_guard(reactor);
+  m_cranectld_->QueryTasksInfo(request, response);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::QueryCranedInfo(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::QueryCranedInfoRequest *request,
+    crane::grpc::QueryCranedInfoReply *response) {
+  auto *reactor = context->DefaultReactor();
+  RefactorGuard done_guard(reactor);
+  m_cranectld_->QueryCranedInfo(request, response);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::QueryPartitionInfo(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::QueryPartitionInfoRequest *request,
+    crane::grpc::QueryPartitionInfoReply *response) {
+  auto *reactor = context->DefaultReactor();
+  RefactorGuard done_guard(reactor);
+  m_cranectld_->QueryPartitionInfo(request, response);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::ModifyTask(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::ModifyTaskRequest *request,
+    crane::grpc::ModifyTaskReply *response) {
+  auto *reactor = context->DefaultReactor();
+  m_cranectld_->ModifyTask(request, response, reactor);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::ModifyNode(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::ModifyCranedStateRequest *request,
+    crane::grpc::ModifyCranedStateReply *response) {
+  auto *reactor = context->DefaultReactor();
+  m_cranectld_->ModifyNode(request, response, reactor);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::AddAccount(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::AddAccountRequest *request,
+    crane::grpc::AddAccountReply *response) {
+  auto *reactor = context->DefaultReactor();
+  m_cranectld_->AddAccount(request, response, reactor);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::AddUser(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::AddUserRequest *request,
+    crane::grpc::AddUserReply *response) {
+  auto *reactor = context->DefaultReactor();
+  m_cranectld_->AddUser(request, response, reactor);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::AddQos(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::AddQosRequest *request,
+    crane::grpc::AddQosReply *response) {
+  auto *reactor = context->DefaultReactor();
+  m_cranectld_->AddQos(request, response, reactor);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::ModifyEntity(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::ModifyEntityRequest *request,
+    crane::grpc::ModifyEntityReply *response) {
+  auto *reactor = context->DefaultReactor();
+  m_cranectld_->ModifyEntity(request, response, reactor);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::QueryEntityInfo(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::QueryEntityInfoRequest *request,
+    crane::grpc::QueryEntityInfoReply *response) {
+  auto *reactor = context->DefaultReactor();
+  RefactorGuard done_guard(reactor);
+  m_cranectld_->QueryEntityInfo(request, response);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::DeleteEntity(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::DeleteEntityRequest *request,
+    crane::grpc::DeleteEntityReply *response) {
+  auto *reactor = context->DefaultReactor();
+  m_cranectld_->DeleteEntity(request, response, reactor);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::BlockAccountOrUser(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::BlockAccountOrUserRequest *request,
+    crane::grpc::BlockAccountOrUserReply *response) {
+  auto *reactor = context->DefaultReactor();
+  m_cranectld_->BlockAccountOrUser(request, response, reactor);
+  return reactor;
+}
+
+grpc::ServerUnaryReactor *CraneCtldServiceImpl::QueryClusterInfo(
+    grpc::CallbackServerContext *context,
+    const crane::grpc::QueryClusterInfoRequest *request,
+    crane::grpc::QueryClusterInfoReply *response) {
+  auto *reactor = context->DefaultReactor();
+  RefactorGuard done_guard(reactor);
+  m_cranectld_->QueryClusterInfo(request, response);
+  return reactor;
+}
+
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CraneCtldServiceImpl>(this);
 
