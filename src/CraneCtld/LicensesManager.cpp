@@ -190,7 +190,7 @@ bool LicensesManager::MallocLicenseResource(
     }
   }
 
-  return true;
+    return true;
 }
 
 void LicensesManager::MallocLicenseResourceWhenRecoverRunning(
