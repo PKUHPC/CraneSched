@@ -59,7 +59,7 @@ message SubmitBatchTaskRequest {
 
 message SubmitBatchTaskReply {
   bool ok = 1;
-  oneof payload{
+  oneof payload {
     uint32 task_id = 2;
     string reason = 3;
   }
@@ -90,14 +90,14 @@ message CreateCgroupForTasksRequest {
   repeated string execution_node = 4;
 }
 
-message CreateCgroupForTasksReply{}
+message CreateCgroupForTasksReply {}
 
-message ReleaseCgroupForTasksRequest{
+message ReleaseCgroupForTasksRequest {
   repeated uint32 task_id_list = 1;
   repeated uint32 uid_list = 2;
 }
 
-message ReleaseCgroupForTasksReply{}
+message ReleaseCgroupForTasksReply {}
 
 message TerminateTasksRequest {
   repeated uint32 task_id_list = 1;
@@ -154,29 +154,27 @@ message CancelTaskReply {
   repeated string not_cancelled_reasons = 4;
 }
 
-
-message QueryTaskIdFromPortRequest{
+message QueryTaskIdFromPortRequest {
   uint32 port = 1;
 }
 
-message QueryTaskIdFromPortReply{
+message QueryTaskIdFromPortReply {
   bool ok = 1;
   uint32 task_id = 2;
 }
 
-message QueryTaskIdFromPortForwardRequest{
+message QueryTaskIdFromPortForwardRequest {
   uint32 ssh_remote_port = 1;
   string ssh_remote_address = 2;
   uint32 uid = 3;
 }
 
-message QueryTaskIdFromPortForwardReply{
+message QueryTaskIdFromPortForwardReply {
   bool ok = 1;
   bool from_user = 2;
   uint32 task_id = 3;
   string cgroup_path = 4;
 }
-
 
 message QueryCranedInfoRequest {
   string craned_name = 1;
@@ -195,7 +193,7 @@ message QueryPartitionInfoReply {
 }
 
 message QueryLicensesInfoRequest {
-  string license_name = 1;
+  repeated string license_name_list = 1;
 }
 
 message QueryLicensesInfoReply {
@@ -232,13 +230,13 @@ message ModifyTaskReply {
   repeated string not_modified_reasons = 4;
 }
 
-message ModifyCranedStateRequest{
+message ModifyCranedStateRequest {
   repeated string craned_ids = 1;
   CranedControlState new_state = 2;
   string reason = 3;
 }
 
-message ModifyCranedStateReply{
+message ModifyCranedStateReply {
   repeated string modified_nodes = 2;
   repeated string not_modified_nodes = 3;
   repeated string not_modified_reasons = 4;
@@ -295,8 +293,8 @@ message ModifyEntityRequest {
     Delete = 2;
   }
 
-  string item = 2;   //modify item field
-  string value = 3;   //new value
+  string item = 2;   // modify item field
+  string value = 3;  // new value
   string name = 4;
   string partition = 5;
   OperatorType type = 6;
@@ -347,22 +345,22 @@ message MigrateSshProcToCgroupReply {
   bool ok = 1;
 }
 
-message QueryTaskEnvVariablesRequest{
+message QueryTaskEnvVariablesRequest {
   uint32 task_id = 1;
 }
 
-message QueryTaskEnvVariablesReply{
+message QueryTaskEnvVariablesReply {
   bool ok = 1;
   repeated string name = 2;
   repeated string value = 3;
 }
 
-message QueryTaskEnvVariablesForwardRequest{
+message QueryTaskEnvVariablesForwardRequest {
   uint32 task_id = 1;
   string execution_node = 2;
 }
 
-message QueryTaskEnvVariablesForwardReply{
+message QueryTaskEnvVariablesForwardReply {
   bool ok = 1;
   repeated string name = 2;
   repeated string value = 3;
@@ -380,7 +378,7 @@ message QueryClusterInfoReply {
   repeated TrimmedPartitionInfo partitions = 2;
 }
 
-message QueryTasksInfoRequest{
+message QueryTasksInfoRequest {
   repeated uint32 filter_task_ids = 1;
   repeated string filter_partitions = 2;
   uint32 num_limit = 3;
@@ -398,7 +396,7 @@ message QueryTasksInfoRequest{
   bool option_include_completed_tasks = 15;
 }
 
-message QueryTasksInfoReply{
+message QueryTasksInfoReply {
   bool ok = 1;
   repeated TaskInfo task_info_list = 2;
 }
@@ -454,7 +452,7 @@ message StreamCforedReply {
     bool ok = 1;
   }
 
-  CforedReplyType type = 1 ;
+  CforedReplyType type = 1;
 
   oneof payload {
     TaskIdReply payload_task_id_reply = 2;
@@ -627,11 +625,11 @@ message StreamCforedCrunReply {
     bool ok = 1;
   }
 
-  message TaskIOForwardReply{
+  message TaskIOForwardReply {
     string msg = 1;
   }
 
-  CforedCrunReplyType type = 1 ;
+  CforedCrunReplyType type = 1;
 
   oneof payload {
     TaskIdReply payload_task_id_reply = 2;
@@ -644,7 +642,7 @@ message StreamCforedCrunReply {
 }
 
 message StreamCforedTaskIORequest {
-  enum CranedRequestType{
+  enum CranedRequestType {
     CRANED_REGISTER = 0;
     CRANED_TASK_OUTPUT = 1;
     CRANED_UNREGISTER = 2;
@@ -709,7 +707,7 @@ service CraneCtld {
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
 
   /* RPCs called from Cfored */
-  rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
+  rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);
 
   /* RPCs called from ccancel */
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
@@ -720,8 +718,10 @@ service CraneCtld {
 
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
-  rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
-  rpc QueryLicensesInfo(QueryLicensesInfoRequest) returns (QueryLicensesInfoReply);
+  rpc QueryPartitionInfo(QueryPartitionInfoRequest)
+      returns (QueryPartitionInfoReply);
+  rpc QueryLicensesInfo(QueryLicensesInfoRequest)
+      returns (QueryLicensesInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
 
@@ -734,7 +734,8 @@ service CraneCtld {
 
   rpc QueryEntityInfo(QueryEntityInfoRequest) returns (QueryEntityInfoReply);
   rpc ModifyEntity(ModifyEntityRequest) returns (ModifyEntityReply);
-  rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
+  rpc BlockAccountOrUser(BlockAccountOrUserRequest)
+      returns (BlockAccountOrUserReply);
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
@@ -744,39 +745,56 @@ service CraneCtld {
 }
 
 service Craned {
-  /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
-  rpc ExecuteTask(ExecuteTasksRequest) returns(ExecuteTasksReply);
+  /* ----------------------------------- Called from CraneCtld
+   * ---------------------------------------------------- */
+  rpc ExecuteTask(ExecuteTasksRequest) returns (ExecuteTasksReply);
 
-  rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
+  rpc CheckTaskStatus(CheckTaskStatusRequest) returns (CheckTaskStatusReply);
 
-  rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns(CreateCgroupForTasksReply);
-  rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns(ReleaseCgroupForTasksReply);
+  rpc CreateCgroupForTasks(CreateCgroupForTasksRequest)
+      returns (CreateCgroupForTasksReply);
+  rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest)
+      returns (ReleaseCgroupForTasksReply);
 
-  rpc QueryCranedRemoteMeta(QueryCranedRemoteMetaRequest) returns(QueryCranedRemoteMetaReply);
+  rpc QueryCranedRemoteMeta(QueryCranedRemoteMetaRequest)
+      returns (QueryCranedRemoteMetaReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.
-   If there's no process in this interactive task, just deallocate all the resources.
-   If there are processes in this interactive task, kill all the processes and deallocate resources.
-  If the task is a batch task, just kill it.
+   If there's no process in this interactive task, just deallocate all the
+  resources. If there are processes in this interactive task, kill all the
+  processes and deallocate resources. If the task is a batch task, just kill it.
   */
   rpc TerminateTasks(TerminateTasksRequest) returns (TerminateTasksReply);
-  rpc TerminateOrphanedTask(TerminateOrphanedTaskRequest) returns (TerminateOrphanedTaskReply);
-  rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns (ChangeTaskTimeLimitReply);
+  rpc TerminateOrphanedTask(TerminateOrphanedTaskRequest)
+      returns (TerminateOrphanedTaskReply);
+  rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest)
+      returns (ChangeTaskTimeLimitReply);
 
-  /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
-  rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
+  /* ----------------------------------- Called from Craned
+   * ------------------------------------------------------ */
+  rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest)
+      returns (QueryTaskIdFromPortReply);
 
-  /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
-  rpc QueryTaskIdFromPortForward(QueryTaskIdFromPortForwardRequest) returns (QueryTaskIdFromPortForwardReply);
-  rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
-  rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest) returns (QueryTaskEnvVariablesReply);
-  rpc QueryTaskEnvVariablesForward(QueryTaskEnvVariablesForwardRequest) returns (QueryTaskEnvVariablesForwardReply);
+  /* ----------------------------------- Called from Pam Module
+   * --------------------------------------------------- */
+  rpc QueryTaskIdFromPortForward(QueryTaskIdFromPortForwardRequest)
+      returns (QueryTaskIdFromPortForwardReply);
+  rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest)
+      returns (MigrateSshProcToCgroupReply);
+  rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest)
+      returns (QueryTaskEnvVariablesReply);
+  rpc QueryTaskEnvVariablesForward(QueryTaskEnvVariablesForwardRequest)
+      returns (QueryTaskEnvVariablesForwardReply);
 }
 
 service CraneForeD {
-  rpc CallocStream(stream StreamCallocRequest) returns(stream StreamCforedReply);
-  rpc CrunStream(stream StreamCrunRequest) returns(stream StreamCforedCrunReply);
-  rpc TaskIOStream(stream StreamCforedTaskIORequest) returns(stream StreamCforedTaskIOReply);
-  rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
+  rpc CallocStream(stream StreamCallocRequest)
+      returns (stream StreamCforedReply);
+  rpc CrunStream(stream StreamCrunRequest)
+      returns (stream StreamCforedCrunReply);
+  rpc TaskIOStream(stream StreamCforedTaskIORequest)
+      returns (stream StreamCforedTaskIOReply);
+  rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest)
+      returns (QueryTaskIdFromPortReply);
 }
