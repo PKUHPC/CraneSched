@@ -34,7 +34,7 @@ void LicensesManager::GetLicensesInfo(
     crane::grpc::QueryLicensesInfoReply* response) {
   auto* list = response->mutable_license_info_list();
 
-  if (request->license_name().empty()) {
+  if (request->license_name_list().empty()) {
     util::read_lock_guard readLock(rw_mutex_);
     for (auto& [lic_index, lic] : lic_id_to_lic_map_) {
       auto* lic_info = list->Add();
@@ -45,13 +45,15 @@ void LicensesManager::GetLicensesInfo(
     }
   } else {
     util::read_lock_guard readLock(rw_mutex_);
-    auto it = lic_id_to_lic_map_.find(request->license_name());
-    if (it != lic_id_to_lic_map_.end()) {
-      auto* lic_info = list->Add();
-      lic_info->set_name(it->second.license_id);
-      lic_info->set_total(it->second.total);
-      lic_info->set_used(it->second.used);
-      lic_info->set_free(it->second.free);
+    for (auto& license_name : request->license_name_list()) {
+      auto it = lic_id_to_lic_map_.find(license_name);
+      if (it != lic_id_to_lic_map_.end()) {
+        auto* lic_info = list->Add();
+        lic_info->set_name(it->second.license_id);
+        lic_info->set_total(it->second.total);
+        lic_info->set_used(it->second.used);
+        lic_info->set_free(it->second.free);
+      }
     }
   }
 }
