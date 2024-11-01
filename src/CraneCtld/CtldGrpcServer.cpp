@@ -281,6 +281,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   const crane::grpc::UserInfo *user_info = &request->user();
 
   user.name = user_info->name();
+  user.password = user_info->password();
   user.uid = user_info->uid();
   user.default_account = user_info->account();
   user.admin_level = User::AdminLevel(user_info->admin_level());
@@ -674,6 +675,14 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
                                              listen_conf.CraneCtldListenPort);
   }
 
+  // std::vector<
+  //     std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>>
+  //     creators;
+  // creators.push_back(
+  //     std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>(
+  //         new AuthInterceptorFactory()));
+
+  // builder.experimental().SetInterceptorCreators(std::move(creators));
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
