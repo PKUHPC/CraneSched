@@ -1,12 +1,6 @@
 include(FetchContent)
 include(ExternalProject)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(SYSTEMD REQUIRED libsystemd)
-
-include_directories(${SYSTEMD_INCLUDE_DIRS})
-link_directories(${SYSTEMD_LIBRARY_DIRS})
-
 set(LIBCGROUP_PATH "${CMAKE_BINARY_DIR}/_deps/libcgroup" CACHE STRING "Path to libcgroup dependency" FORCE)
 set(LIBCGROUP_BUILD_PRODUCTS ${LIBCGROUP_PATH}/install/lib/libcgroup.a)
 ExternalProject_Add(
