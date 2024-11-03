@@ -19,7 +19,24 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
             "MinSizeRel" "RelWithDebInfo")
 endif ()
 
-project(Crane C CXX)
+# Generate version text and building timestamp
+if (EXISTS "${CMAKE_SOURCE_DIR}/VERSION")
+    # For a release version, the version file should be provided
+    file(READ "${CMAKE_SOURCE_DIR}/VERSION" VERSION_CONTENT)
+    # Remove suffix
+    string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" CMAKE_PROJECT_VERSION "${VERSION_CONTENT}")
+else ()
+    # Otherwise, use git hash as the version
+    message(WARNING "No VERSION file found. Use git hash as the version string.")
+    execute_process(
+            COMMAND git rev-parse --short HEAD
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            OUTPUT_VARIABLE VERSION_CONTENT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+endif ()
+
+project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 
 # Options start here ----------------------------------------------------------------------------
 
@@ -66,21 +83,6 @@ endif ()
 
 add_compile_definitions(CRANE_LOG_LEVEL=CRANE_LOG_LEVEL_${CRANE_MIN_LOG_LEVEL})
 message(STATUS "Minimal log level is set to ${CRANE_MIN_LOG_LEVEL}")
-
-# Generate version text and building timestamp
-if (EXISTS "${CMAKE_SOURCE_DIR}/VERSION")
-    # For a release version, the version file should be provided
-    file(READ "${CMAKE_SOURCE_DIR}/VERSION" VERSION_CONTENT)
-else ()
-    # Otherwise, use git hash as the version
-    message(WARNING "No VERSION file found. Use git hash as the version string.")
-    execute_process(
-            COMMAND git rev-parse --short HEAD
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            OUTPUT_VARIABLE VERSION_CONTENT
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-endif ()
 
 if ("${VERSION_CONTENT}" STREQUAL "")
     # if not in git repository, fall back to "Unknown"
@@ -366,10 +368,6 @@ set(CPACK_PACKAGE_VENDOR "PKUHPC")
 set(CPACK_PACKAGE_CONTACT "CraneSched <service@csjstt.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "CraneSched package")
 set(CPACK_PACKAGE_DESCRIPTION "CraneSched package")
-set(CPACK_PACKAGE_VERSION "1.0.0")
-set(CPACK_PACKAGE_VERSION_MAJOR "1")
-set(CPACK_PACKAGE_VERSION_MINOR "0")
-set(CPACK_PACKAGE_VERSION_PATCH "0")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 # not support install dir specification
