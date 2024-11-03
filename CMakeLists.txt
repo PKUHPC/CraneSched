@@ -278,7 +278,7 @@ set(_GRPC_GRPCPP grpc++)
 set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
+#pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
 
 # @formatter:off
 add_definitions(-DCRANE_BUILD_DIRECTORY=\("${CMAKE_BINARY_DIR}"\))
@@ -366,19 +366,24 @@ install(TARGETS pam_crane
 set(CPACK_GENERATOR "RPM;DEB")
 set(CPACK_PACKAGE_NAME "CraneSched")
 set(CPACK_PACKAGE_VENDOR "PKUHPC")
+set(CPACK_PACKAGE_CONTACT "CraneSched <service@csjstt.com>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "CraneSched package")
 set(CPACK_PACKAGE_DESCRIPTION "CraneSched package")
 set(CPACK_PACKAGE_VERSION "1.0.0")
 set(CPACK_PACKAGE_VERSION_MAJOR "1")
 set(CPACK_PACKAGE_VERSION_MINOR "0")
 set(CPACK_PACKAGE_VERSION_PATCH "0")
-set(CPACK_RPM_PACKAGE_URL "https://github.com/PKUHPC/CraneSched")
-set(CPACK_RPM_PACKAGE_DESCRIPTION "yaml-cpp is a YAML parser and emitter in C++ matching the YAML 1.2 spec.")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 # not support install dir specification
 set(CPACK_SET_DESTDIR OFF)
+set(CPACK_SOURCE_TGZ_COMPRESSION TRUE)
 
 #RPM
 set(CPACK_RPM_PACKAGE_GROUP "PKUHPC")
 set(CPACK_RPM_PACKAGE_LICENSE "AGPL v3")
+set(CPACK_RPM_PACKAGE_URL "https://github.com/PKUHPC/CraneSched")
+set(CPACK_RPM_PACKAGE_DESCRIPTION "CraneSched package")
 #DEB
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "PKUHPC")
 
