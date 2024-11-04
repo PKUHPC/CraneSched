@@ -340,7 +340,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
           .allowed_partition_qos_map[apq.partition_name()];
   }
 
-  AccountManager::SuccessOrErrCode result =
+  AccountManager::CraneExpected<bool> result =
       g_account_manager->AddUser(request->uid(), user);
   if (result) {
     response->set_ok(true);
@@ -405,7 +405,7 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
 grpc::Status CraneCtldServiceImpl::ModifyUser(
     grpc::ServerContext *context, const crane::grpc::ModifyUserRequest *request,
     crane::grpc::ModifyUserReply *response) {
-  AccountManager::SuccessOrErrCode modify_res;
+  AccountManager::CraneExpected<bool> modify_res;
 
   if (request->type() == crane::grpc::OperatorType::Delete) {
     switch (request->modify_field()) {
@@ -661,7 +661,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
     grpc::ServerContext *context,
     const crane::grpc::BlockAccountOrUserRequest *request,
     crane::grpc::BlockAccountOrUserReply *response) {
-  AccountManager::SuccessOrErrCode res;
+  AccountManager::CraneExpected<bool> res;
 
   switch (request->entity_type()) {
   case crane::grpc::Account:

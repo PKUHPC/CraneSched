@@ -42,7 +42,6 @@ class AccountManager {
       std::unordered_map<std::string, std::unique_ptr<Qos>>, util::rw_mutex>;
 
   using CraneErrCode = crane::grpc::ErrCode;
-  using SuccessOrErrCode = std::expected<bool, CraneErrCode>;
 
   template <typename T>
   using CraneExpected = std::expected<T, CraneErrCode>;
@@ -56,27 +55,28 @@ class AccountManager {
 
   ~AccountManager() = default;
 
-  SuccessOrErrCode AddUser(uint32_t uid, const User& new_user);
+  CraneExpected<bool> AddUser(uint32_t uid, const User& new_user);
 
-  SuccessOrErrCode AddAccount(uint32_t uid, const Account& new_account);
+  CraneExpected<bool> AddAccount(uint32_t uid, const Account& new_account);
 
-  SuccessOrErrCode AddQos(uint32_t uid, const Qos& new_qos);
+  CraneExpected<bool> AddQos(uint32_t uid, const Qos& new_qos);
 
-  SuccessOrErrCode DeleteUser(uint32_t uid, const std::string& name,
-                              const std::string& account);
+  CraneExpected<bool> DeleteUser(uint32_t uid, const std::string& name,
+                                 const std::string& account);
 
-  SuccessOrErrCode DeleteAccount(uint32_t uid, const std::string& name);
+  CraneExpected<bool> DeleteAccount(uint32_t uid, const std::string& name);
 
-  SuccessOrErrCode DeleteQos(uint32_t uid, const std::string& name);
+  CraneExpected<bool> DeleteQos(uint32_t uid, const std::string& name);
 
-  SuccessOrErrCode QueryUserInfo(uint32_t uid, const std::string& name,
-                                 std::unordered_map<uid_t, User>* res_user_map);
+  CraneExpected<bool> QueryUserInfo(
+      uint32_t uid, const std::string& name,
+      std::unordered_map<uid_t, User>* res_user_map);
 
-  SuccessOrErrCode QueryAccountInfo(
+  CraneExpected<bool> QueryAccountInfo(
       uint32_t uid, const std::string& name,
       std::unordered_map<std::string, Account>* res_account_map);
 
-  SuccessOrErrCode QueryQosInfo(
+  CraneExpected<bool> QueryQosInfo(
       uint32_t uid, const std::string& name,
       std::unordered_map<std::string, Qos>* res_qos_map);
 
@@ -93,42 +93,41 @@ class AccountManager {
    * ModifyUser-related functions
    * ---------------------------------------------------------------------------
    */
-  SuccessOrErrCode ModifyAdminLevel(const uint32_t uid, const std::string& name,
-                                    const std::string& value);
-  SuccessOrErrCode ModifyUserDefaultQos(uint32_t uid, const std::string& name,
-                                        const std::string& partition,
-                                        std::string account,
-                                        const std::string& value, bool force);
-  SuccessOrErrCode ModifyUserAllowedParition(
+  CraneExpected<bool> ModifyAdminLevel(const uint32_t uid,
+                                       const std::string& name,
+                                       const std::string& value);
+  CraneExpected<bool> ModifyUserDefaultQos(
+      uint32_t uid, const std::string& name, const std::string& partition,
+      std::string account, const std::string& value, bool force);
+  CraneExpected<bool> ModifyUserAllowedParition(
       const crane::grpc::OperatorType& operatorType, uint32_t uid,
       const std::string& name, std::string account, const std::string& value);
-  SuccessOrErrCode ModifyUserAllowedQos(
+  CraneExpected<bool> ModifyUserAllowedQos(
       const crane::grpc::OperatorType& operatorType, uint32_t uid,
       const std::string& name, const std::string& partition,
       std::string account, const std::string& value, bool force);
-  SuccessOrErrCode DeleteUserAllowedPartiton(uint32_t uid,
-                                             const std::string& name,
-                                             std::string account,
-                                             const std::string& value);
-  SuccessOrErrCode DeleteUserAllowedQos(uint32_t uid, const std::string& name,
-                                        const std::string& partition,
-                                        std::string account,
-                                        const std::string& value, bool force);
+  CraneExpected<bool> DeleteUserAllowedPartiton(uint32_t uid,
+                                                const std::string& name,
+                                                std::string account,
+                                                const std::string& value);
+  CraneExpected<bool> DeleteUserAllowedQos(
+      uint32_t uid, const std::string& name, const std::string& partition,
+      std::string account, const std::string& value, bool force);
 
-  SuccessOrErrCode ModifyAccount(const crane::grpc::OperatorType& operatorType,
-                                 const uint32_t uid, const std::string& name,
-                                 const crane::grpc::ModifyField& modifyField,
-                                 const std::string& value, bool force);
+  CraneExpected<bool> ModifyAccount(
+      const crane::grpc::OperatorType& operatorType, const uint32_t uid,
+      const std::string& name, const crane::grpc::ModifyField& modifyField,
+      const std::string& value, bool force);
 
-  SuccessOrErrCode ModifyQos(const uint32_t uid, const std::string& name,
-                             const crane::grpc::ModifyField& modifyField,
-                             const std::string& value);
+  CraneExpected<bool> ModifyQos(const uint32_t uid, const std::string& name,
+                                const crane::grpc::ModifyField& modifyField,
+                                const std::string& value);
 
-  SuccessOrErrCode BlockAccount(uint32_t uid, const std::string& name,
-                                bool block);
+  CraneExpected<bool> BlockAccount(uint32_t uid, const std::string& name,
+                                   bool block);
 
-  SuccessOrErrCode BlockUser(uint32_t uid, const std::string& name,
-                             const std::string& account, bool block);
+  CraneExpected<bool> BlockUser(uint32_t uid, const std::string& name,
+                                const std::string& account, bool block);
 
   bool CheckUserPermissionToPartition(const std::string& name,
                                       const std::string& account,
@@ -146,97 +145,94 @@ class AccountManager {
    * ModifyUser-related functions(no block)
    * ---------------------------------------------------------------------------
    */
-  SuccessOrErrCode CheckAddUserAllowedPartition(const User* user,
-                                                const Account* account_ptr,
-                                                const std::string& account,
-                                                const std::string& partition);
-  SuccessOrErrCode CheckSetUserAllowedPartition(const User* user,
-                                                const Account* account_ptr,
-                                                const std::string& account,
-                                                const std::string& partition);
-  SuccessOrErrCode CheckAddUserAllowedQos(const User* user,
-                                          const Account* account_ptr,
-                                          const std::string& account,
-                                          const std::string& partition,
-                                          const std::string& qos_str);
-  SuccessOrErrCode CheckSetUserAllowedQos(
+  CraneExpected<bool> CheckAddUserAllowedPartition(
       const User* user, const Account* account_ptr, const std::string& account,
-      const std::string& partition, const std::string& qos_str, bool force);
-  SuccessOrErrCode CheckSetUserAdminLevel(const User& user,
-                                          const std::string& level,
-                                          User::AdminLevel* new_level);
-  SuccessOrErrCode CheckSetUserDefaultQos(const User& user,
-                                          const std::string& account,
-                                          const std::string& partition,
-                                          const std::string& qos);
-  SuccessOrErrCode CheckDeleteUserAllowedPartition(
-      const User& user, const std::string& account,
       const std::string& partition);
-  SuccessOrErrCode CheckDeleteUserAllowedQos(const User& user,
+  CraneExpected<bool> CheckSetUserAllowedPartition(
+      const User* user, const Account* account_ptr, const std::string& account,
+      const std::string& partition);
+  CraneExpected<bool> CheckAddUserAllowedQos(const User* user,
+                                             const Account* account_ptr,
                                              const std::string& account,
                                              const std::string& partition,
-                                             const std::string& qos,
-                                             bool force);
+                                             const std::string& qos_str);
+  CraneExpected<bool> CheckSetUserAllowedQos(
+      const User* user, const Account* account_ptr, const std::string& account,
+      const std::string& partition, const std::string& qos_str, bool force);
+  CraneExpected<bool> CheckSetUserAdminLevel(const User& user,
+                                             const std::string& level,
+                                             User::AdminLevel* new_level);
+  CraneExpected<bool> CheckSetUserDefaultQos(const User& user,
+                                             const std::string& account,
+                                             const std::string& partition,
+                                             const std::string& qos);
+  CraneExpected<bool> CheckDeleteUserAllowedPartition(
+      const User& user, const std::string& account,
+      const std::string& partition);
+  CraneExpected<bool> CheckDeleteUserAllowedQos(const User& user,
+                                                const std::string& account,
+                                                const std::string& partition,
+                                                const std::string& qos,
+                                                bool force);
 
   /* ---------------------------------------------------------------------------
    * ModifyAccount-related functions(no block)
    * ---------------------------------------------------------------------------
    */
-  SuccessOrErrCode CheckAddAccountAllowedPartition(
+  CraneExpected<bool> CheckAddAccountAllowedPartition(
       const Account* account_ptr, const std::string& account,
       const std::string& partition);
-  SuccessOrErrCode CheckAddAccountAllowedQos(const Account* account_ptr,
-                                             const std::string& account,
-                                             const std::string& qos);
-  SuccessOrErrCode CheckSetAccountDescription(const Account* account_ptr,
-                                              const std::string& account,
-                                              const std::string& description);
-  SuccessOrErrCode CheckSetAccountAllowedPartition(
+  CraneExpected<bool> CheckAddAccountAllowedQos(const Account* account_ptr,
+                                                const std::string& account,
+                                                const std::string& qos);
+  CraneExpected<bool> CheckSetAccountDescription(
+      const Account* account_ptr, const std::string& account,
+      const std::string& description);
+  CraneExpected<bool> CheckSetAccountAllowedPartition(
       const Account* account_ptr, const std::string& account,
       const std::string& partitions, bool force);
-  SuccessOrErrCode CheckSetAccountAllowedQos(const Account* account_ptr,
-                                             const std::string& account,
-                                             const std::string& qos_list,
-                                             bool force);
-  SuccessOrErrCode CheckSetAccountDefaultQos(const Account* account_ptr,
-                                             const std::string& account,
-                                             const std::string& qos);
-  SuccessOrErrCode CheckDeleteAccountAllowedPartition(
+  CraneExpected<bool> CheckSetAccountAllowedQos(const Account* account_ptr,
+                                                const std::string& account,
+                                                const std::string& qos_list,
+                                                bool force);
+  CraneExpected<bool> CheckSetAccountDefaultQos(const Account* account_ptr,
+                                                const std::string& account,
+                                                const std::string& qos);
+  CraneExpected<bool> CheckDeleteAccountAllowedPartition(
       const Account* account_ptr, const std::string& account,
       const std::string& partition, bool force);
-  SuccessOrErrCode CheckDeleteAccountAllowedQos(const Account* account_ptr,
-                                                const std::string& account,
-                                                const std::string& qos,
-                                                bool force);
+  CraneExpected<bool> CheckDeleteAccountAllowedQos(const Account* account_ptr,
+                                                   const std::string& account,
+                                                   const std::string& qos,
+                                                   bool force);
 
   /*
    * Check if the operating user exists
    */
-  SuccessOrErrCode CheckOpUserExisted(uint32_t uid, const User** op_user);
+  CraneExpected<const User*> GetUserInfoByUid(uint32_t uid);
 
-  SuccessOrErrCode CheckOpUserIsAdmin(uint32_t uid);
+  CraneExpected<bool> CheckOpUserIsAdmin(uint32_t uid);
 
-  SuccessOrErrCode CheckOperatorPrivilegeHigher(uint32_t uid,
-                                                User::AdminLevel admin_level);
+  CraneExpected<bool> CheckOperatorPrivilegeHigher(
+      uint32_t uid, User::AdminLevel admin_level);
 
-  SuccessOrErrCode CheckOpUserHasPermissionToAccount(uint32_t uid,
-                                                     const std::string& account,
-                                                     bool read_only_priv,
-                                                     bool is_add);
+  CraneExpected<bool> CheckOpUserHasPermissionToAccount(
+      uint32_t uid, const std::string& account, bool read_only_priv,
+      bool is_add);
 
-  SuccessOrErrCode CheckOpUserHasModifyPermission(uint32_t uid,
-                                                  const User* user,
-                                                  const std::string& name,
-                                                  std::string& account,
-                                                  bool read_only_priv);
+  CraneExpected<bool> CheckOpUserHasModifyPermission(uint32_t uid,
+                                                     const User* user,
+                                                     const std::string& name,
+                                                     std::string& account,
+                                                     bool read_only_priv);
 
   /*
    * Check if the operating user is the coordinator of the target user's
    * specified account.
    */
-  SuccessOrErrCode CheckUserPermissionOnAccount(const User& op_user,
-                                                const std::string& account,
-                                                bool read_only_priv);
+  CraneExpected<bool> CheckUserPermissionOnAccount(const User& op_user,
+                                                   const std::string& account,
+                                                   bool read_only_priv);
 
   /**
    * Check whether the operating user has permissions to access the target user.
@@ -247,21 +243,21 @@ class AccountManager {
    * account. If the read_only_priv is true, it means the operating user is the
    * coordinator of any of the target user's accounts."
    */
-  SuccessOrErrCode CheckUserPermissionOnUser(const User& op_user,
-                                             const User* user,
-                                             const std::string& name,
-                                             std::string& account,
-                                             bool read_only_priv);
+  CraneExpected<bool> CheckUserPermissionOnUser(const User& op_user,
+                                                const User* user,
+                                                const std::string& name,
+                                                std::string& account,
+                                                bool read_only_priv);
 
-  SuccessOrErrCode CheckPartitionIsAllowed(const Account* account_ptr,
-                                           const std::string& account,
-                                           const std::string& partition,
-                                           bool check_parent, bool is_user);
+  CraneExpected<bool> CheckPartitionIsAllowed(const Account* account_ptr,
+                                              const std::string& account,
+                                              const std::string& partition,
+                                              bool check_parent, bool is_user);
 
-  SuccessOrErrCode CheckQosIsAllowed(const Account* account_ptr,
-                                     const std::string& account,
-                                     const std::string& qos_str,
-                                     bool check_parent, bool is_user);
+  CraneExpected<bool> CheckQosIsAllowed(const Account* account_ptr,
+                                        const std::string& account,
+                                        const std::string& qos_str,
+                                        bool check_parent, bool is_user);
 
   bool IsOperatorPrivilegeSameAndHigher(const User& op_user,
                                         User::AdminLevel admin_level);
@@ -312,77 +308,78 @@ class AccountManager {
 
   bool IncQosReferenceCountInDb_(const std::string& name, int num);
 
-  SuccessOrErrCode AddUser_(const User* find_user, const Account* find_account,
-                            const User& new_user);
+  CraneExpected<bool> AddUser_(const User& user, const Account* account,
+                               const User* stale_user);
 
-  SuccessOrErrCode AddAccount_(const Account* find_account,
-                               const Account* find_parent,
-                               const Account& new_account);
+  CraneExpected<bool> AddAccount_(const Account& account, const Account* parent,
+                                  const Account* stale_account);
 
-  SuccessOrErrCode AddQos_(const Qos* find_qos, const Qos& new_qos);
+  CraneExpected<bool> AddQos_(const Qos* find_qos, const Qos& new_qos);
 
-  SuccessOrErrCode DeleteUser_(const User& user, const std::string& account);
+  CraneExpected<bool> DeleteUser_(const User& user, const std::string& account);
 
-  SuccessOrErrCode DeleteAccount_(const Account& account);
+  CraneExpected<bool> DeleteAccount_(const Account& account);
 
-  SuccessOrErrCode DeleteQos_(const std::string& name);
+  CraneExpected<bool> DeleteQos_(const std::string& name);
 
-  SuccessOrErrCode AddUserAllowedPartition_(const User& user,
-                                            const Account& account,
-                                            const std::string& partition);
-  SuccessOrErrCode AddUserAllowedQos_(const User& user, const Account& account,
-                                      const std::string& partition,
-                                      const std::string& qos);
-
-  SuccessOrErrCode SetUserAdminLevel_(const std::string& name,
-                                      const User::AdminLevel new_level);
-  SuccessOrErrCode SetUserDefaultQos_(const User& user,
-                                      const std::string& account,
-                                      const std::string& partition,
-                                      const std::string& qos);
-  SuccessOrErrCode SetUserAllowedPartition_(const User& user,
-                                            const Account& account,
-                                            const std::string& partitions);
-  SuccessOrErrCode SetUserAllowedQos_(const User& user, const Account& account,
-                                      const std::string& partition,
-                                      const std::string& qos_list_str,
-                                      bool force);
-
-  SuccessOrErrCode DeleteUserAllowedPartition_(const User& user,
-                                               const std::string& account,
+  CraneExpected<bool> AddUserAllowedPartition_(const User& user,
+                                               const Account& account,
                                                const std::string& partition);
-  SuccessOrErrCode DeleteUserAllowedQos_(const User& user,
-                                         const std::string& qos,
+  CraneExpected<bool> AddUserAllowedQos_(const User& user,
+                                         const Account& account,
+                                         const std::string& partition,
+                                         const std::string& qos);
+
+  CraneExpected<bool> SetUserAdminLevel_(const std::string& name,
+                                         const User::AdminLevel new_level);
+  CraneExpected<bool> SetUserDefaultQos_(const User& user,
                                          const std::string& account,
                                          const std::string& partition,
-                                         bool force);
-
-  SuccessOrErrCode AddAccountAllowedPartition_(const std::string& name,
-                                               const std::string& partition);
-  SuccessOrErrCode AddAccountAllowedQos_(const Account& account,
                                          const std::string& qos);
-
-  SuccessOrErrCode SetAccountDescription_(const std::string& name,
-                                          const std::string& description);
-  SuccessOrErrCode SetAccountDefaultQos_(const Account& account,
-                                         const std::string& qos);
-  SuccessOrErrCode SetAccountAllowedPartition_(const Account& account,
-                                               const std::string& partitions,
-                                               bool force);
-  SuccessOrErrCode SetAccountAllowedQos_(const Account& account,
+  CraneExpected<bool> SetUserAllowedPartition_(const User& user,
+                                               const Account& account,
+                                               const std::string& partitions);
+  CraneExpected<bool> SetUserAllowedQos_(const User& user,
+                                         const Account& account,
+                                         const std::string& partition,
                                          const std::string& qos_list_str,
                                          bool force);
 
-  SuccessOrErrCode DeleteAccountAllowedPartition_(const Account& account,
-                                                  const std::string& partition,
+  CraneExpected<bool> DeleteUserAllowedPartition_(const User& user,
+                                                  const std::string& account,
+                                                  const std::string& partition);
+  CraneExpected<bool> DeleteUserAllowedQos_(const User& user,
+                                            const std::string& qos,
+                                            const std::string& account,
+                                            const std::string& partition,
+                                            bool force);
+
+  CraneExpected<bool> AddAccountAllowedPartition_(const std::string& name,
+                                                  const std::string& partition);
+  CraneExpected<bool> AddAccountAllowedQos_(const Account& account,
+                                            const std::string& qos);
+
+  CraneExpected<bool> SetAccountDescription_(const std::string& name,
+                                             const std::string& description);
+  CraneExpected<bool> SetAccountDefaultQos_(const Account& account,
+                                            const std::string& qos);
+  CraneExpected<bool> SetAccountAllowedPartition_(const Account& account,
+                                                  const std::string& partitions,
                                                   bool force);
-  SuccessOrErrCode DeleteAccountAllowedQos_(const Account& account,
-                                            const std::string& qos, bool force);
+  CraneExpected<bool> SetAccountAllowedQos_(const Account& account,
+                                            const std::string& qos_list_str,
+                                            bool force);
 
-  SuccessOrErrCode BlockUser_(const std::string& name,
-                              const std::string& account, bool block);
+  CraneExpected<bool> DeleteAccountAllowedPartition_(
+      const Account& account, const std::string& partition, bool force);
+  CraneExpected<bool> DeleteAccountAllowedQos_(const Account& account,
+                                               const std::string& qos,
+                                               bool force);
 
-  SuccessOrErrCode BlockAccount_(const std::string& name, bool block);
+  CraneExpected<bool> BlockUser_(const std::string& name,
+                                 const std::string& account, bool block);
+
+  CraneExpected<bool> BlockAccount_(const std::string& name, bool block);
 
   bool IsAllowedPartitionOfAnyNodeNoLock_(const Account* account,
                                           const std::string& partition,
