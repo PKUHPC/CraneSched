@@ -1,8 +1,13 @@
 include(FetchContent)
 include(ExternalProject)
-
 set(LIBCGROUP_PATH "${CMAKE_BINARY_DIR}/_deps/libcgroup" CACHE STRING "Path to libcgroup dependency" FORCE)
-set(LIBCGROUP_BUILD_PRODUCTS ${LIBCGROUP_PATH}/install/lib/libcgroup.a)
+
+if (BUILD_SHARED_LIBS)
+    set(LIBCGROUP_BUILD_PRODUCTS ${LIBCGROUP_PATH}/install/lib/libcgroup.so CACHE STRING "Path to libcgroup library" FORCE)
+else ()
+    set(LIBCGROUP_BUILD_PRODUCTS ${LIBCGROUP_PATH}/install/lib/libcgroup.a CACHE STRING "Path to libcgroup library" FORCE)
+endif ()
+
 ExternalProject_Add(
         libcgroup-extern
         PREFIX ${LIBCGROUP_PATH}

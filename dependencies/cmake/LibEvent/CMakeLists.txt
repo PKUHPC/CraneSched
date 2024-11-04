@@ -5,7 +5,7 @@ if (BUILD_SHARED_LIBS)
 else ()
     set(EVENT__LIBRARY_TYPE "STATIC")
 endif ()
-
+message(STATUS "LibEvent ${EVENT__LIBRARY_TYPE}")
 set(EVENT__DISABLE_TESTS ON)
 set(EVENT__DISABLE_BENCHMARK ON)
 

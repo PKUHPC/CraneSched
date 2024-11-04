@@ -24,7 +24,7 @@ target_include_directories(
 target_link_libraries(craned
         concurrentqueue
 
-        ${LIBCGROUP_PATH}/install/lib/libcgroup.a
+        ${LIBCGROUP_BUILD_PRODUCTS}
 
         Utility_PublicHeader
         Utility_PluginClient
