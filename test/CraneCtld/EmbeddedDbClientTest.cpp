@@ -45,7 +45,7 @@ class EmbeddedDbClientTest : public ::testing::Test {
   }
 
   std::string db_dir{CRANE_BUILD_DIRECTORY};
-  std::string db_file = fmt::format("{}/unqlite.db", db_dir);
+  std::string db_file = std::format("{}/unqlite.db", db_dir);
 };
 
 TEST_F(EmbeddedDbClientTest, Simple) {

@@ -49,11 +49,11 @@ void ParseConfig(int argc, char** argv) {
       ("C,config", "Path to configuration file",
       cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
       ("l,listen", "Listening address, format: <IP>:<port>",
-       cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
+       cxxopts::value<std::string>()->default_value(std::format("0.0.0.0:{}", kCranedDefaultPort)))
       ("s,server-address", "CraneCtld address, format: <IP>:<port>",
        cxxopts::value<std::string>())
       ("L,log-file", "Path to Craned log file",
-       cxxopts::value<std::string>()->default_value(fmt::format("{}{}",kDefaultCraneBaseDir, kDefaultCranedLogPath)))
+       cxxopts::value<std::string>()->default_value(std::format("{}{}",kDefaultCraneBaseDir, kDefaultCranedLogPath)))
       ("D,debug-level", "Logging level of Craned, format: <trace|debug|info|warn|error>",
        cxxopts::value<std::string>()->default_value("info"))
       ("v,version", "Display version information")
@@ -173,7 +173,7 @@ void ParseConfig(int argc, char** argv) {
       g_config.ListenConf.CranedListenPort = kCranedDefaultPort;
 
       g_config.ListenConf.UnixSocketListenAddr =
-          fmt::format("unix://{}", g_config.CranedUnixSockPath);
+          std::format("unix://{}", g_config.CranedUnixSockPath);
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
@@ -253,7 +253,7 @@ void ParseConfig(int argc, char** argv) {
               std::exit(1);
             }
             CRANE_TRACE("node name list parsed: {}",
-                        fmt::join(name_list, ", "));
+                        absl::StrJoin(name_list, ", "));
           } else
             std::exit(1);
 
@@ -467,11 +467,11 @@ void ParseConfig(int argc, char** argv) {
 
           if (plugin_config["PlugindSockPath"]) {
             g_config.Plugin.PlugindSockPath =
-                fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                std::format("unix://{}{}", g_config.CraneBaseDir,
                             plugin_config["PlugindSockPath"].as<std::string>());
           } else {
             g_config.Plugin.PlugindSockPath =
-                fmt::format("unix://{}{}", g_config.CraneBaseDir,
+                std::format("unix://{}{}", g_config.CraneBaseDir,
                             kDefaultPlugindUnixSockPath);
           }
         }

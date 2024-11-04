@@ -16,8 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include <fmt/format.h>
-
 #include "PamUtil.h"
 
 #define PAM_STR_TRUE ("T")

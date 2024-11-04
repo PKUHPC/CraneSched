@@ -41,7 +41,7 @@ TEST(PEVENTS, Simple) {
   while (true) {
     pevents::WaitForMultipleEvents(evs.data(), evs.size(), false,
                                    pevents::WAIT_INFINITE, index);
-    GTEST_LOG_(INFO) << fmt::format("Event #{} triggered!", index);
+    GTEST_LOG_(INFO) << std::format("Event #{} triggered!", index);
     if (++i >= 3) break;
   }
 }

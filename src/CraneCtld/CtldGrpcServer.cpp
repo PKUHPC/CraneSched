@@ -174,7 +174,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
         response->add_modified_tasks(task_id);
       } else if (err == CraneErr::kNonExistent) {
         response->add_not_modified_tasks(task_id);
-        response->add_not_modified_reasons(fmt::format(
+        response->add_not_modified_reasons(std::format(
             "Task #{} was not found in running or pending queue.", task_id));
       } else if (err == CraneErr::kInvalidParam) {
         response->add_not_modified_tasks(task_id);
@@ -182,7 +182,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       } else {
         response->add_not_modified_tasks(task_id);
         response->add_not_modified_reasons(
-            fmt::format("Failed to change the time limit of Task#{}: {}.",
+            std::format("Failed to change the time limit of Task#{}: {}.",
                         task_id, CraneErrStr(err)));
       }
     }
@@ -195,11 +195,11 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       } else if (err == CraneErr::kNonExistent) {
         response->add_not_modified_tasks(task_id);
         response->add_not_modified_reasons(
-            fmt::format("Task #{} was not found in pending queue.", task_id));
+            std::format("Task #{} was not found in pending queue.", task_id));
       } else {
         response->add_not_modified_tasks(task_id);
         response->add_not_modified_reasons(
-            fmt::format("Failed to change priority: {}.", CraneErrStr(err)));
+            std::format("Failed to change priority: {}.", CraneErrStr(err)));
       }
     }
   } else if (request->attribute() == ModifyTaskRequest::Hold) {
@@ -211,11 +211,11 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
       } else if (err == CraneErr::kNonExistent) {
         response->add_not_modified_tasks(task_id);
         response->add_not_modified_reasons(
-            fmt::format("Task #{} was not found in pending queue.", task_id));
+            std::format("Task #{} was not found in pending queue.", task_id));
       } else {
         response->add_not_modified_tasks(false);
         response->add_not_modified_reasons(
-            fmt::format("Failed to hold/release job: {}.", CraneErrStr(err)));
+            std::format("Failed to hold/release job: {}.", CraneErrStr(err)));
       }
     }
   } else {
@@ -931,7 +931,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
 
   if (!task->password_entry->Valid()) {
     return result::fail(
-        fmt::format("Uid {} not found on the controller node", task->uid));
+        std::format("Uid {} not found on the controller node", task->uid));
   }
   task->SetUsername(task->password_entry->Username());
 
@@ -939,7 +939,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     auto user_scoped_ptr =
         g_account_manager->GetExistedUserInfo(task->Username());
     if (!user_scoped_ptr) {
-      return result::fail(fmt::format(
+      return result::fail(std::format(
           "User '{}' not found in the account database", task->Username()));
     }
 
@@ -948,7 +948,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
       task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
     } else {
       if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
-        return result::fail(fmt::format(
+        return result::fail(std::format(
             "Account '{}' is not in your account list", task->account));
       }
     }
@@ -957,7 +957,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (!g_account_manager->CheckUserPermissionToPartition(
           task->Username(), task->account, task->partition_id)) {
     return result::fail(
-        fmt::format("User '{}' doesn't have permission to use partition '{}' "
+        std::format("User '{}' doesn't have permission to use partition '{}' "
                     "when using account '{}'",
                     task->Username(), task->partition_id, task->account));
   }

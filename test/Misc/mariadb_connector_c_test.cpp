@@ -57,14 +57,14 @@ class MariadbClient {
     }
 
     if (mysql_query(m_conn,
-                    fmt::format("CREATE DATABASE IF NOT EXISTS {};", m_db_name)
+                    std::format("CREATE DATABASE IF NOT EXISTS {};", m_db_name)
                         .c_str())) {
-      PrintError_(fmt::format("Cannot check the existence of {}", m_db_name));
+      PrintError_(std::format("Cannot check the existence of {}", m_db_name));
       return false;
     }
 
     if (mysql_select_db(m_conn, m_db_name.c_str()) != 0) {
-      PrintError_(fmt::format("Cannot select {}", m_db_name));
+      PrintError_(std::format("Cannot select {}", m_db_name));
       return false;
     }
 
@@ -179,7 +179,7 @@ class MariadbClient {
     static char query[blob_max_size * 2];
     task_to_ctld.SerializeToArray(blob, blob_max_size);
 
-    std::string query_head = fmt::format(
+    std::string query_head = std::format(
         "INSERT INTO job_table("
         "mod_time, deleted, account, cpus_req, mem_req, job_name, env, "
         "id_job, id_user, id_group, nodelist, nodes_alloc, node_inx, "
@@ -218,7 +218,7 @@ class MariadbClient {
 
   bool UpdateJobRecordField(uint64_t job_db_inx, const std::string& field_name,
                             const std::string& val) {
-    std::string query = fmt::format(
+    std::string query = std::format(
         "UPDATE job_table SET {} = '{}', mod_time = UNIX_TIMESTAMP() WHERE "
         "job_db_inx = {};",
         field_name, val, job_db_inx);
@@ -236,12 +236,12 @@ class MariadbClient {
       const std::list<crane::grpc::TaskStatus>& states) {
     std::vector<std::string> state_piece;
     for (auto state : states) {
-      state_piece.emplace_back(fmt::format("state = {}", state));
+      state_piece.emplace_back(std::format("state = {}", state));
     }
     std::string state_str = absl::StrJoin(state_piece, " or ");
 
     std::string query =
-        fmt::format("SELECT * FROM job_table WHERE {};", state_str);
+        std::format("SELECT * FROM job_table WHERE {};", state_str);
 
     if (mysql_query(m_conn, query.c_str())) {
       PrintError_("Failed to fetch job record");

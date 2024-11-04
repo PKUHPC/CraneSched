@@ -332,7 +332,7 @@ void ParseConfig(int argc, char** argv) {
             }
 
             CRANE_TRACE("node name list parsed: {}",
-                        fmt::join(node_id_list, ", "));
+                        absl::StrJoin(node_id_list, ", "));
           } else
             std::exit(1);
 
@@ -522,11 +522,11 @@ void ParseConfig(int argc, char** argv) {
 
         if (plugin_config["PlugindSockPath"]) {
           g_config.Plugin.PlugindSockPath =
-              fmt::format("unix://{}{}", g_config.CraneBaseDir,
+              std::format("unix://{}{}", g_config.CraneBaseDir,
                           plugin_config["PlugindSockPath"].as<std::string>());
         } else {
           g_config.Plugin.PlugindSockPath =
-              fmt::format("unix://{}{}", g_config.CraneBaseDir,
+              std::format("unix://{}{}", g_config.CraneBaseDir,
                           kDefaultPlugindUnixSockPath);
         }
       }

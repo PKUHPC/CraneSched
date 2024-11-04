@@ -24,7 +24,7 @@
 #include "protos/math.pb.h"
 
 std::string db_dir{CRANE_BUILD_DIRECTORY};
-std::string db_file = fmt::format("{}/unqlite.db", db_dir);
+std::string db_file = std::format("{}/unqlite.db", db_dir);
 
 void PrintErrorAndRollback(unqlite *pDb, int rc) {
   if (rc != UNQLITE_OK) {

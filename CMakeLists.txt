@@ -61,7 +61,7 @@ endif ()
 
 # Validate the user-provided log level
 if (NOT CRANE_MIN_LOG_LEVEL MATCHES "INFO|DEBUG|TRACE")
-    message(FATAL_ERROR "Invalid log level: ${CRANE_MIN_LOG_LEVEL}. Must be INFO, DEBUG, or TRACE.")
+    message(FATAL_ERROR "Invalid log level: ${CRANE_MIN_LOG_LEVEL}. Must be INFO, DEBUG or TRACE.")
 endif ()
 
 add_compile_definitions(CRANE_LOG_LEVEL=CRANE_LOG_LEVEL_${CRANE_MIN_LOG_LEVEL})

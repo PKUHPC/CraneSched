@@ -225,14 +225,15 @@ class EmbeddedDbClient {
       txn_id_t txn_id, db_id_t db_id,
       crane::grpc::RuntimeAttrOfTask const& runtime_attr) {
     return StoreTypeIntoDbIfExists_(m_variable_db_.get(), txn_id,
-                            GetVariableDbEntryName_(db_id), &runtime_attr)
+                                    GetVariableDbEntryName_(db_id),
+                                    &runtime_attr)
         .has_value();
   }
 
   bool UpdateTaskToCtldIfExists(txn_id_t txn_id, db_id_t db_id,
-                               crane::grpc::TaskToCtld const& task_to_ctld) {
+                                crane::grpc::TaskToCtld const& task_to_ctld) {
     return StoreTypeIntoDbIfExists_(m_fixed_db_.get(), txn_id,
-                                   GetFixedDbEntryName_(db_id), &task_to_ctld)
+                                    GetFixedDbEntryName_(db_id), &task_to_ctld)
         .has_value();
   }
 
@@ -243,11 +244,11 @@ class EmbeddedDbClient {
 
  private:
   inline static std::string GetFixedDbEntryName_(db_id_t db_id) {
-    return fmt::format("{}T", db_id);
+    return std::format("{}T", db_id);
   }
 
   inline static std::string GetVariableDbEntryName_(db_id_t db_id) {
-    return fmt::format("{}S", db_id);
+    return std::format("{}S", db_id);
   }
 
   inline static bool IsVariableDbTaskDataEntry_(std::string const& key) {

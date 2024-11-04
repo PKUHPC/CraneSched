@@ -837,14 +837,14 @@ result::result<void, std::string> AccountManager::CheckEnableState(
     p_account = GetExistedAccountInfoNoLock_(p_str);
     if (p_account->blocked) {
       return result::fail(
-          fmt::format("Ancestor account '{}' is blocked", p_account->name));
+          std::format("Ancestor account '{}' is blocked", p_account->name));
     }
     p_str = p_account->parent_account;
   } while (!p_str.empty());
 
   const User* p_user = GetExistedUserInfoNoLock_(user);
   if (p_user->account_to_attrs_map.at(account).blocked) {
-    return result::fail(fmt::format("User '{}' is blocked", p_user->name));
+    return result::fail(std::format("User '{}' is blocked", p_user->name));
   }
   return {};
 }
@@ -856,7 +856,7 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
-    return result::fail(fmt::format("Unknown user '{}'", user));
+    return result::fail(std::format("Unknown user '{}'", user));
   }
 
   if (task->uid != 0) {
@@ -871,13 +871,13 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
       task->qos = partition_it->second.first;
       if (task->qos.empty())
         return result::fail(
-            fmt::format("The user '{}' has no QOS available for this partition "
+            std::format("The user '{}' has no QOS available for this partition "
                         "'{}' to be used",
                         task->Username(), task->partition_id));
     } else {
       // Check whether task.qos in the qos list
       if (!ranges::contains(partition_it->second.second, task->qos))
-        return result::fail(fmt::format(
+        return result::fail(std::format(
             "The qos '{}' you set is not in partition's allowed qos list",
             task->qos));
     }
@@ -889,7 +889,7 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
 
   const Qos* qos_share_ptr = GetExistedQosInfoNoLock_(task->qos);
   if (!qos_share_ptr)
-    return result::fail(fmt::format("Unknown QOS '{}'", task->qos));
+    return result::fail(std::format("Unknown QOS '{}'", task->qos));
 
   task->qos_priority = qos_share_ptr->priority;
 
@@ -909,20 +909,20 @@ result::result<void, std::string> AccountManager::CheckUidIsAdmin(
     uint32_t uid) {
   PasswordEntry entry(uid);
   if (!entry.Valid()) {
-    return result::failure(fmt::format("Uid {} not found.", uid));
+    return result::failure(std::format("Uid {} not found.", uid));
   }
 
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   const User* ptr = GetExistedUserInfoNoLock_(entry.Username());
   if (!ptr) {
     return result::failure(
-        fmt::format("User {} is not a user of Crane.", entry.Username()));
+        std::format("User {} is not a user of Crane.", entry.Username()));
   }
 
   if (ptr->admin_level >= User::Operator) return {};
 
   return result::failure(
-      fmt::format("User {} has insufficient privilege.", entry.Username()));
+      std::format("User {} has insufficient privilege.", entry.Username()));
 }
 
 AccountManager::SuccessOrErrCode AccountManager::CheckOpUserIsAdmin(
@@ -1265,14 +1265,14 @@ AccountManager::Result AccountManager::HasPermissionToAccount(
     User::AdminLevel* level_of_uid) {
   PasswordEntry entry(uid);
   if (!entry.Valid())
-    return Result{false, fmt::format("Uid {} not existed", uid)};
+    return Result{false, std::format("Uid {} not existed", uid)};
 
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
 
   const User* user = GetExistedUserInfoNoLock_(entry.Username());
   if (!user) {
-    return Result{false, fmt::format("User '{}' is not a user of Crane",
+    return Result{false, std::format("User '{}' is not a user of Crane",
                                      entry.Username())};
   }
 
@@ -1280,7 +1280,7 @@ AccountManager::Result AccountManager::HasPermissionToAccount(
 
   if (user->admin_level == User::None) {
     if (account.empty())
-      return Result{false, fmt::format("No account is specified for user {}",
+      return Result{false, std::format("No account is specified for user {}",
                                        entry.Username())};
 
     if (read_only_priv) {
@@ -1302,7 +1302,7 @@ AccountManager::Result AccountManager::HasPermissionToAccount(
 
     return Result{
         false,
-        fmt::format("User {} is not allowed to access"
+        std::format("User {} is not allowed to access"
                     "account {} out of the subtree of his permitted accounts.",
                     entry.Username(), account)};
   }

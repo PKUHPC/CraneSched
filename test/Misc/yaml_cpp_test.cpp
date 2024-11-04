@@ -20,6 +20,7 @@
 #include <spdlog/fmt/fmt.h>
 #include <yaml-cpp/yaml.h>
 
+#include <format>
 #include <string>
 
 TEST(YAML, Sample) {

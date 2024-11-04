@@ -32,20 +32,20 @@
 
 static void log_cb(int severity, const char *msg) {
   switch (severity) {
-    case _EVENT_LOG_DEBUG:
-      SPDLOG_DEBUG("{}", msg);
-      break;
-    case _EVENT_LOG_MSG:
-      SPDLOG_INFO("{}", msg);
-      break;
-    case _EVENT_LOG_WARN:
-      SPDLOG_WARN("{}", msg);
-      break;
-    case _EVENT_LOG_ERR:
-      SPDLOG_ERROR("{}", msg);
-      break;
-    default:
-      break; /* never reached */
+  case _EVENT_LOG_DEBUG:
+    SPDLOG_DEBUG("{}", msg);
+    break;
+  case _EVENT_LOG_MSG:
+    SPDLOG_INFO("{}", msg);
+    break;
+  case _EVENT_LOG_WARN:
+    SPDLOG_WARN("{}", msg);
+    break;
+  case _EVENT_LOG_ERR:
+    SPDLOG_ERROR("{}", msg);
+    break;
+  default:
+    break; /* never reached */
   }
 }
 
@@ -149,7 +149,7 @@ TEST_F(LibEventTest, IoRedirectAndDynamicTaskAdding) {
 
   std::string cmd;
 
-  cmd = fmt::format(R"(bash -c 'echo -e '"'"'{}'"'" | g++ -xc++ -o {} -)",
+  cmd = std::format(R"(bash -c 'echo -e '"'"'{}'"'" | g++ -xc++ -o {} -)",
                     prog_text, test_prog_path);
   SPDLOG_TRACE("Cmd: {}", cmd);
   system(cmd.c_str());

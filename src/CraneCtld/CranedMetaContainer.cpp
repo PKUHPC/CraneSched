@@ -632,7 +632,7 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
       ToUnixSeconds(craned_meta.last_busy_time));
 
   std::string system_desc =
-      fmt::format("{} {} {}", craned_meta.remote_meta.sys_rel_info.name,
+      std::format("{} {} {}", craned_meta.remote_meta.sys_rel_info.name,
                   craned_meta.remote_meta.sys_rel_info.release,
                   craned_meta.remote_meta.sys_rel_info.version);
   craned_info->set_system_desc(system_desc);

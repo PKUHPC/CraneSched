@@ -1,5 +1,7 @@
 include(FetchContent)
 
+set(SPDLOG_USE_STD_FORMAT OFF)
+
 if (BUILD_SHARED_LIBS)
     set(SPDLOG_BUILD_SHARED ON)
 else ()

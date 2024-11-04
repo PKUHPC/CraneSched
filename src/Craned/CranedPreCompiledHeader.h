@@ -27,6 +27,7 @@
 #include <chrono>
 #include <csignal>
 #include <filesystem>
+#include <format>
 #include <forward_list>
 #include <fpm/fixed.hpp>
 #include <fstream>

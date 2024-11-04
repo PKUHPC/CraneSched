@@ -248,7 +248,7 @@ void CforedClient::AsyncSendRecvThread_() {
 
       if (reply.type() != StreamCforedTaskIOReply::CRANED_UNREGISTER_REPLY) {
         CRANE_TRACE("Expect UNREGISTER_REPLY, but got {}. Ignoring it.",
-                    reply.type());
+                    (int)reply.type());
         reply.Clear();
         stream->Read(&reply, (void*)Tag::Read);
         break;

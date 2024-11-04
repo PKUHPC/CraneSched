@@ -687,7 +687,8 @@ void TaskScheduler::ScheduleThread_() {
 
         // CRANE_DEBUG(
         // "Task #{} is allocated to partition {} and craned nodes: {}",
-        // task->TaskId(), partition_id, fmt::join(task->CranedIds(), ", "));
+        // task->TaskId(), partition_id, absl::StrJoin(task->CranedIds(), ",
+        // "));
 
         task->allocated_craneds_regex =
             util::HostNameListToStr(task->CranedIds());
@@ -1894,9 +1895,9 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
       if (!end_time_task_id_vec.empty()) {
         std::string str;
         str.append(
-            fmt::format("Partition {}, Craned {}: ", partition_id, craned_id));
+            std::format("Partition {}, Craned {}: ", partition_id, craned_id));
         for (auto [end_time, task_id] : end_time_task_id_vec) {
-          str.append(fmt::format("Task #{} ends after {}s, ", task_id,
+          str.append(std::format("Task #{} ends after {}s, ", task_id,
                                  absl::ToInt64Seconds(end_time - now)));
         }
         CRANE_TRACE("{}", str);
@@ -1969,12 +1970,12 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
 
       if constexpr (kAlgoTraceOutput) {
         std::string str;
-        str.append(fmt::format("Node ({}, {}): ", partition_id, craned_id));
+        str.append(std::format("Node ({}, {}): ", partition_id, craned_id));
         auto prev_iter = time_avail_res_map.begin();
         auto iter = std::next(prev_iter);
         for (; iter != time_avail_res_map.end(); prev_iter++, iter++) {
           str.append(
-              fmt::format("[ now+{}s , now+{}s ) Available allocatable "
+              std::format("[ now+{}s , now+{}s ) Available allocatable "
                           "res: cpu core {}, mem {}, gres {}",
                           absl::ToInt64Seconds(prev_iter->first - now),
                           absl::ToInt64Seconds(iter->first - now),
@@ -1983,7 +1984,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
                           util::ReadableDresInNode(prev_iter->second)));
         }
         str.append(
-            fmt::format("[ now+{}s , inf ) Available allocatable "
+            std::format("[ now+{}s , inf ) Available allocatable "
                         "res: cpu core {}, mem {}, gres {}",
                         absl::ToInt64Seconds(prev_iter->first - now),
                         prev_iter->second.allocatable_res.cpu_count,
@@ -2201,7 +2202,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       if constexpr (kAlgoTraceOutput) {
         std::vector<std::string> valid_seg_str;
         for (auto& seg : intersected_time_segments)
-          valid_seg_str.emplace_back(fmt::format(
+          valid_seg_str.emplace_back(std::format(
               "[start: {}, end: {})", absl::ToInt64Seconds(seg.start - now),
               absl::ToInt64Seconds(seg.start - now + seg.duration)));
         CRANE_TRACE("After looping craned {}, valid time segments: {}",
@@ -2377,7 +2378,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       if constexpr (kAlgoTraceOutput) {
         std::vector<std::string> valid_seg_str;
         for (auto& seg : intersected_time_segments) {
-          valid_seg_str.emplace_back(fmt::format(
+          valid_seg_str.emplace_back(std::format(
               "[start: {}, end: {})", absl::ToInt64Seconds(seg.start - now),
               absl::ToInt64Seconds(seg.start - now + seg.duration)));
         }

@@ -68,7 +68,7 @@ TEST(Misc, AbseilMutexCondition) {
 
       val = int_queue.front();
       EXPECT_EQ(cnt++, val);
-      GTEST_LOG_(INFO) << fmt::format("Popped val: {}", val);
+      GTEST_LOG_(INFO) << std::format("Popped val: {}", val);
 
       int_queue.pop();
       mtx.Unlock();

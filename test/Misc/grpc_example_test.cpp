@@ -33,9 +33,9 @@
 
 #include "SharedTestImpl/greeter_service_impl.h"
 #include "concurrentqueue/concurrentqueue.h"
+#include "crane/PublicHeader.h"
 #include "protos/math.grpc.pb.h"
 #include "protos/math.pb.h"
-#include "crane/PublicHeader.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -638,7 +638,7 @@ TEST(Protobuf, InterprocessPipe) {
   int socket_pair[2];
 
   if (socketpair(AF_UNIX, SOCK_DGRAM, 0, socket_pair) != 0) {
-    FAIL() << fmt::format("Failed to create socket pair: {}", strerror(errno));
+    FAIL() << std::format("Failed to create socket pair: {}", strerror(errno));
   }
   signal(SIGCHLD, SIG_IGN);
 
@@ -652,7 +652,7 @@ TEST(Protobuf, InterprocessPipe) {
     HelloRequest request;
     ok = ParseDelimitedFromZeroCopyStream(&request, &istream, nullptr);
     ASSERT_TRUE(ok) << "request.ParseFromZeroCopyStream(&istream)";
-    GTEST_LOG_(INFO) << fmt::format("Child receive HelloRequest: {}",
+    GTEST_LOG_(INFO) << std::format("Child receive HelloRequest: {}",
                                     request.name());
 
     HelloReply reply;
@@ -673,7 +673,7 @@ TEST(Protobuf, InterprocessPipe) {
     HelloRequest request;
     request.set_name("Parent");
     ok = SerializeDelimitedToZeroCopyStream(request, &ostream);
-    GTEST_LOG_(INFO) << fmt::format("ostream.ByteCount(): {}",
+    GTEST_LOG_(INFO) << std::format("ostream.ByteCount(): {}",
                                     ostream.ByteCount());
     ASSERT_TRUE(ok) << "request.SerializeToZeroCopyStream(&ostream)";
     ok = ostream.Flush();
@@ -682,7 +682,7 @@ TEST(Protobuf, InterprocessPipe) {
     HelloReply reply;
     ok = ParseDelimitedFromZeroCopyStream(&reply, &istream, nullptr);
     ASSERT_TRUE(ok) << "reply.ParseFromZeroCopyStream(&istream)";
-    GTEST_LOG_(INFO) << fmt::format("Parent receive HelloReply: {}",
+    GTEST_LOG_(INFO) << std::format("Parent receive HelloReply: {}",
                                     reply.message());
   }
 
@@ -693,7 +693,7 @@ TEST(GrpcExample, UnixSocket) {
   std::filesystem::create_directories(kDefaultCraneBaseDir);
 
   std::string server_address =
-      fmt::format("{}{}", "unix://", kDefaultCranedUnixSockPath);
+      std::format("{}{}", "unix://", kDefaultCranedUnixSockPath);
   SPDLOG_INFO("Unix Server Address: {}", server_address);
 
   GreeterSyncServer server(server_address);

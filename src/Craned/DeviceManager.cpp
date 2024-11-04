@@ -55,7 +55,7 @@ BasicDevice::operator std::string() const {
   for (const auto& device_meta : device_metas) {
     device_files.push_back(device_meta.path);
   }
-  return fmt::format("{}:{}:{}", name, type,
+  return std::format("{}:{}:{}", name, type,
                      util::HostNameListToStr(device_files));
 }
 

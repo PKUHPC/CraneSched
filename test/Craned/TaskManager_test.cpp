@@ -21,8 +21,8 @@
 #include <random>
 
 #include "SharedTestImpl/GlobalDefs.h"
-#include "gtest/gtest.h"
 #include "crane/PublicHeader.h"
+#include "gtest/gtest.h"
 
 using namespace Craned;
 
@@ -38,7 +38,7 @@ static std::string GenerateTestProg(const std::string& prog_text) {
   std::string test_prog_path = "/tmp/craned_test_" + RandomFileNameStr();
   std::string cmd;
 
-  cmd = fmt::format(R"(bash -c 'echo -e '"'"'{}'"'" | g++ -xc++ -o {} -)",
+  cmd = std::format(R"(bash -c 'echo -e '"'"'{}'"'" | g++ -xc++ -o {} -)",
                     prog_text, test_prog_path);
   system(cmd.c_str());
 
