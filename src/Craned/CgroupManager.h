@@ -27,9 +27,14 @@
 
 #include <libcgroup.h>
 
+
 #include "CranedPublicDefs.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/OS.h"
+
+#ifdef CRANE_ENABLE_BPF
+#  include <bpf/libbpf.h>
+#endif
 
 namespace Craned {
 
@@ -88,11 +93,12 @@ enum class ControllerFile : uint64_t {
 
 inline const char *kTaskCgPathPrefix = "Crane_Task_";
 inline const char *RootCgroupFullPath = "/sys/fs/cgroup";
+#ifdef CRANE_ENABLE_BPF
 inline const char *BpfObjectFile = "/etc/crane/cgroup_dev_bpf.o";
 inline const char *BpfDeviceMapFile = "/sys/fs/bpf/craned_dev_map";
 inline const char *BpfMapName = "craned_dev_map";
 inline const char *BpfProgramName = "craned_device_access";
-
+#endif
 namespace Internal {
 
 constexpr std::array<std::string_view,
@@ -154,17 +160,18 @@ constexpr std::string_view GetControllerFileStringView(
 
 }  // namespace CgroupConstant
 
+#ifdef CRANE_ENABLE_BPF
 enum BPF_PERMISSION { ALLOW = 0, DENY };
 
-#pragma pack(push, 8)
+#  pragma pack(push, 8)
 struct BpfKey {
   uint64_t cgroup_id;
   uint32_t major;
   uint32_t minor;
 };
-#pragma pack(pop)
+#  pragma pack(pop)
 
-#pragma pack(push, 8)
+#  pragma pack(push, 8)
 struct BpfDeviceMeta {
   uint32_t major;
   uint32_t minor;
@@ -172,7 +179,8 @@ struct BpfDeviceMeta {
   short access;
   short type;
 };
-#pragma pack(pop)
+#  pragma pack(pop)
+#endif
 
 class ControllerFlags {
  public:
@@ -341,10 +349,40 @@ class CgroupV1 : public CgroupInterface {
   Cgroup m_cgroup_info_;
 };
 
+#ifdef CRANE_ENABLE_BPF
+class BpfRuntimeInfo {
+ public:
+  BpfRuntimeInfo();
+  ~BpfRuntimeInfo();
+  bool InitializeBpfObj();
+  void CloseBpfObj();
+  void RmBpfDeviceMap();
+
+  struct bpf_object *BpfObj() { return bpf_obj_; }
+  struct bpf_program *BpfProgram() { return bpf_prog_; }
+  std::mutex *BpfMutex() { return bpf_mtx_; }
+  struct bpf_map *BpfDevMap() { return dev_map_; }
+  int BpfProgFd() { return bpf_prog_fd_; }
+  void SetLogLevel(uint32_t log_devel) { bpf_debug_log_level_ = log_devel; }
+  bool BpfInvalid() {
+    return bpf_obj_ && bpf_prog_ && dev_map_ && bpf_prog_fd_ != -1 &&
+           cgroup_count_ > 0;
+  }
+
+ private:
+  uint32_t bpf_debug_log_level_;
+  struct bpf_object *bpf_obj_;
+  struct bpf_program *bpf_prog_;
+  struct bpf_map *dev_map_;
+  int bpf_prog_fd_;
+  std::mutex *bpf_mtx_;
+  size_t cgroup_count_;
+};
+#endif
+
 class CgroupV2 : public CgroupInterface {
  public:
-  CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id)
-      : m_cgroup_info_(path, handle, id) {}
+  CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id);
   ~CgroupV2() override;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
@@ -381,8 +419,12 @@ class CgroupV2 : public CgroupInterface {
   */
   bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
                        bool set_write, bool set_mknod) override;
-  bool RmBpfDeviceMap();
-
+#ifdef CRANE_ENABLE_BPF
+  bool EraseBpfDeviceMap();
+  static void SetBpfDebugLogLevel(uint32_t l) {
+    bpf_runtime_info_.SetLogLevel(l);
+  }
+#endif
   bool KillAllProcesses() override;
 
   bool Empty() override;
@@ -394,7 +436,10 @@ class CgroupV2 : public CgroupInterface {
   }
 
  private:
+#ifdef CRANE_ENABLE_BPF
   std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
+  static BpfRuntimeInfo bpf_runtime_info_;
+#endif
   Cgroup m_cgroup_info_;
 };
 
@@ -470,7 +515,10 @@ class CgroupManager {
   void RmAllTaskCgroupsV2_();
   void RmCgroupsV2_(const std::string &root_cgroup_path,
                     const std::string &match_str);
+
+#ifdef CRANE_ENABLE_BPF
   void RmBpfDevMap();
+#endif
 
   ControllerFlags m_mounted_controllers_;
 

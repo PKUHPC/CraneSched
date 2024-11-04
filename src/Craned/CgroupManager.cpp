@@ -23,10 +23,13 @@
 
 #include "CgroupManager.h"
 
-#include <bpf/bpf.h>
-#include <bpf/libbpf.h>
+#ifdef CRANE_ENABLE_BPF
+#  include <bpf/bpf.h>
+#  include <bpf/libbpf.h>
+#  include <linux/bpf.h>
+#endif
+
 #include <dirent.h>
-#include <linux/bpf.h>
 
 #include "CranedPublicDefs.h"
 #include "DeviceManager.h"
@@ -34,6 +37,10 @@
 #include "crane/String.h"
 
 namespace Craned {
+
+#ifdef CRANE_ENABLE_BPF
+BpfRuntimeInfo CgroupV2::bpf_runtime_info_{};
+#endif
 
 /*
  * Initialize libcgroup and mount the controllers Condor will use (if possible)
@@ -183,7 +190,9 @@ int CgroupManager::Init() {
   if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
     RmAllTaskCgroups_();
   } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
+#ifdef CRANE_ENABLE_BPF
     RmBpfDevMap();
+#endif
     RmAllTaskCgroupsV2_();
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
@@ -203,39 +212,39 @@ void CgroupManager::ControllersMounted() {
   using namespace CgroupConstant;
   if (cg_version_ == CgroupVersion::CGROUP_V1) {
     if (!Mounted(Controller::BLOCK_CONTROLLER)) {
-      CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
+      CRANE_WARN("Cgroup controller for I/O statistics is not available.");
     }
     if (!Mounted(Controller::FREEZE_CONTROLLER)) {
       CRANE_WARN(
-          "Cgroup controller for process management is not available.\n");
+          "Cgroup controller for process management is not available.");
     }
     if (!Mounted(Controller::CPUACCT_CONTROLLER)) {
-      CRANE_WARN("Cgroup controller for CPU accounting is not available.\n");
+      CRANE_WARN("Cgroup controller for CPU accounting is not available.");
     }
     if (!Mounted(Controller::MEMORY_CONTROLLER)) {
-      CRANE_WARN("Cgroup controller for memory accounting is not available.\n");
+      CRANE_WARN("Cgroup controller for memory accounting is not available.");
     }
     if (!Mounted(Controller::CPU_CONTROLLER)) {
-      CRANE_WARN("Cgroup controller for CPU is not available.\n");
+      CRANE_WARN("Cgroup controller for CPU is not available.");
     }
     if (!Mounted(Controller::DEVICES_CONTROLLER)) {
-      CRANE_WARN("Cgroup controller for DEVICES is not available.\n");
+      CRANE_WARN("Cgroup controller for DEVICES is not available.");
     }
   } else if (cg_version_ == CgroupVersion::CGROUP_V2) {
     if (!Mounted(Controller::CPU_CONTROLLER_V2)) {
-      CRANE_WARN("Cgroup controller for CPU is not available.\n");
+      CRANE_WARN("Cgroup controller for CPU is not available.");
     }
     if (!Mounted(Controller::MEMORY_CONTORLLER_V2)) {
-      CRANE_WARN("Cgroup controller for memory is not available.\n");
+      CRANE_WARN("Cgroup controller for memory is not available.");
     }
     if (!Mounted(Controller::CPUSET_CONTROLLER_V2)) {
-      CRANE_WARN("Cgroup controller for cpuset is not available.\n");
+      CRANE_WARN("Cgroup controller for cpuset is not available.");
     }
     if (!Mounted(Controller::IO_CONTROLLER_V2)) {
-      CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
+      CRANE_WARN("Cgroup controller for I/O statistics is not available.");
     }
     if (!Mounted(Controller::PIDS_CONTROLLER_V2)) {
-      CRANE_WARN("Cgroup controller for pids is not available.\n");
+      CRANE_WARN("Cgroup controller for pids is not available.");
     }
   }
 }
@@ -693,6 +702,7 @@ void CgroupManager::RmCgroupsV2_(const std::string &root_cgroup_path,
   }
 }
 
+#ifdef CRANE_ENABLE_BPF
 void CgroupManager::RmBpfDevMap() {
   try {
     if (std::filesystem::exists(CgroupConstant::BpfDeviceMapFile)) {
@@ -705,6 +715,7 @@ void CgroupManager::RmBpfDevMap() {
     CRANE_ERROR("Error: {}", e.what());
   }
 }
+#endif
 
 bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
   CRANE_DEBUG("Query task info for uid {}", uid);
@@ -1240,7 +1251,6 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   if (set_read) op += "r";
   if (set_write) op += "w";
   if (set_mknod) op += "m";
-  // std::vector<std::string> allow_limits;
   std::vector<std::string> deny_limits;
   for (const auto &[_, this_device] : Craned::g_this_node_device) {
     if (!devices.contains(this_device->dev_id)) {
@@ -1259,10 +1269,134 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   return ok;
 }
 
-CgroupV2::~CgroupV2() {
-  if (!m_cgroup_bpf_devices.empty()) {
+#ifdef CRANE_ENABLE_BPF
+
+BpfRuntimeInfo::BpfRuntimeInfo() {
+  bpf_obj_ = nullptr;
+  bpf_prog_ = nullptr;
+  dev_map_ = nullptr;
+  bpf_debug_log_level_ = 0;
+  bpf_mtx_ = new std::mutex;
+  bpf_prog_fd_ = -1;
+  cgroup_count_ = 0;
+}
+
+BpfRuntimeInfo::~BpfRuntimeInfo() {
+  bpf_obj_ = nullptr;
+  bpf_prog_ = nullptr;
+  dev_map_ = nullptr;
+  delete bpf_mtx_;
+  bpf_prog_fd_ = -1;
+  cgroup_count_ = 0;
+}
+
+bool BpfRuntimeInfo::InitializeBpfObj() {
+  std::unique_lock<std::mutex> lk(*bpf_mtx_);
+
+  if (cgroup_count_ == 0) {
+    bpf_obj_ = bpf_object__open_file(CgroupConstant::BpfObjectFile, NULL);
+    if (!bpf_obj_) {
+      CRANE_ERROR("Failed to open BPF object file {}",
+                  CgroupConstant::BpfObjectFile);
+      bpf_object__close(bpf_obj_);
+      return false;
+    }
+
+    // ban libbpf log
+    libbpf_print_fn_t fn = libbpf_set_print(NULL);
+
+    if (bpf_object__load(bpf_obj_)) {
+      CRANE_ERROR("Failed to load BPF object {}",
+                  CgroupConstant::BpfObjectFile);
+      bpf_object__close(bpf_obj_);
+      return false;
+    }
+
+    bpf_prog_ = bpf_object__find_program_by_name(
+        bpf_obj_, CgroupConstant::BpfProgramName);
+    if (!bpf_prog_) {
+      CRANE_ERROR("Failed to find BPF program {}",
+                  CgroupConstant::BpfProgramName);
+      bpf_object__close(bpf_obj_);
+      return false;
+    }
+
+    bpf_prog_fd_ = bpf_program__fd(bpf_prog_);
+    if (bpf_prog_fd_ < 0) {
+      CRANE_ERROR("Failed to get BPF program file descriptor {}",
+                  CgroupConstant::BpfObjectFile);
+      bpf_object__close(bpf_obj_);
+      return false;
+    }
+
+    dev_map_ =
+        bpf_object__find_map_by_name(bpf_obj_, CgroupConstant::BpfMapName);
+    if (!dev_map_) {
+      CRANE_ERROR("Failed to find BPF map {}", CgroupConstant::BpfMapName);
+      close(bpf_prog_fd_);
+      bpf_object__close(bpf_obj_);
+      return false;
+    }
+
+    struct BpfKey key = {static_cast<uint64_t>(0), static_cast<uint32_t>(0),
+                         static_cast<uint32_t>(0)};
+    struct BpfDeviceMeta meta = {static_cast<uint32_t>(bpf_debug_log_level_),
+                                 static_cast<uint32_t>(0), static_cast<int>(0),
+                                 static_cast<short>(0), static_cast<short>(0)};
+    if (bpf_map__update_elem(dev_map_, &key, sizeof(BpfKey), &meta,
+                             sizeof(BpfDeviceMeta), BPF_ANY)) {
+      CRANE_ERROR("Failed to set debug log level in BPF");
+      return false;
+    }
+  }
+  return ++cgroup_count_ >= 1;
+}
+
+void BpfRuntimeInfo::CloseBpfObj() {
+  std::unique_lock<std::mutex> lk(*bpf_mtx_);
+  if (BpfInvalid() && --cgroup_count_ == 0) {
+    close(bpf_prog_fd_);
+    bpf_object__close(bpf_obj_);
+    bpf_prog_fd_ = -1;
+    bpf_obj_ = nullptr;
+    bpf_prog_ = nullptr;
+    dev_map_ = nullptr;
     RmBpfDeviceMap();
   }
+}
+
+void BpfRuntimeInfo::RmBpfDeviceMap() {
+  try {
+    if (std::filesystem::exists(CgroupConstant::BpfDeviceMapFile)) {
+      std::filesystem::remove(CgroupConstant::BpfDeviceMapFile);
+      CRANE_TRACE("Successfully removed: {}", CgroupConstant::BpfDeviceMapFile);
+    } else {
+      CRANE_TRACE("File does not exist: {}", CgroupConstant::BpfDeviceMapFile);
+    }
+  } catch (const std::filesystem::filesystem_error &e) {
+    CRANE_ERROR("Error: {}", e.what());
+  }
+}
+#endif
+
+CgroupV2::CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id)
+    : m_cgroup_info_(path, handle, id) {
+#ifdef CRANE_ENABLE_BPF
+  if (bpf_runtime_info_.InitializeBpfObj()) {
+    CRANE_TRACE("Bpf object initialization succeed");
+  } else {
+    CRANE_TRACE("Bpf object initialization failed");
+  }
+#endif
+}
+
+CgroupV2::~CgroupV2() {
+#ifdef CRANE_ENABLE_BPF
+  if (!m_cgroup_bpf_devices.empty()) {
+    EraseBpfDeviceMap();
+  }
+  bpf_runtime_info_.CloseBpfObj();
+#endif
 }
 
 /**
@@ -1314,58 +1448,18 @@ bool CgroupV2::SetBlockioWeight(uint64_t weight) {
 
 bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
                                bool set_read, bool set_write, bool set_mknod) {
-  struct bpf_object *obj;
-  struct bpf_map *dev_map;
-  int prog_fd, cgroup_fd;
-  struct bpf_program *prog;
+#ifdef CRANE_ENABLE_BPF
+  if (!bpf_runtime_info_.BpfInvalid()) {
+    CRANE_WARN("BPF is not initialized.");
+    return false;
+  }
+  int cgroup_fd;
   std::string slash = "/";
   std::string cgroup_path = CgroupConstant::RootCgroupFullPath + slash +
                             m_cgroup_info_.m_cgroup_path_;
   cgroup_fd = open(cgroup_path.c_str(), O_RDONLY);
   if (cgroup_fd < 0) {
     CRANE_ERROR("Failed to open cgroup");
-    return false;
-  }
-
-  obj = bpf_object__open_file(CgroupConstant::BpfObjectFile, NULL);
-  if (!obj) {
-    CRANE_ERROR("Failed to open BPF object file {}",
-                CgroupConstant::BpfObjectFile);
-    close(cgroup_fd);
-    bpf_object__close(obj);
-    return false;
-  }
-
-  if (bpf_object__load(obj)) {
-    CRANE_ERROR("Failed to load BPF object {}", CgroupConstant::BpfObjectFile);
-    close(cgroup_fd);
-    bpf_object__close(obj);
-    return false;
-  }
-
-  prog = bpf_object__find_program_by_name(obj, CgroupConstant::BpfProgramName);
-  if (!prog) {
-    CRANE_ERROR("Failed to find BPF program {}", CgroupConstant::BpfObjectFile);
-    close(cgroup_fd);
-    bpf_object__close(obj);
-    return false;
-  }
-
-  prog_fd = bpf_program__fd(prog);
-  if (prog_fd < 0) {
-    CRANE_ERROR("Failed to get BPF program file descriptor {}",
-                CgroupConstant::BpfObjectFile);
-    close(cgroup_fd);
-    bpf_object__close(obj);
-    return false;
-  }
-
-  dev_map = bpf_object__find_map_by_name(obj, CgroupConstant::BpfMapName);
-  if (!dev_map) {
-    CRANE_ERROR("Failed to find BPF map {}", "dev_map");
-    close(cgroup_fd);
-    close(prog_fd);
-    bpf_object__close(obj);
     return false;
   }
 
@@ -1391,77 +1485,63 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
       }
     }
   }
+  {
+    std::unique_lock<std::mutex> lk(*bpf_runtime_info_.BpfMutex());
+    for (int i = 0; i < bpf_devices.size(); i++) {
+      struct BpfKey key = {m_cgroup_info_.m_cgroup_id, bpf_devices[i].major,
+                           bpf_devices[i].minor};
+      if (bpf_map__update_elem(bpf_runtime_info_.BpfDevMap(), &key,
+                               sizeof(BpfKey), &bpf_devices[i],
+                               sizeof(BpfDeviceMeta), BPF_ANY)) {
+        CRANE_ERROR("Failed to update BPF map major {},minor {} cgroup id {}",
+                    bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
+        close(cgroup_fd);
+        return false;
+      }
+    }
 
-  for (int i = 0; i < bpf_devices.size(); i++) {
-    struct BpfKey key = {m_cgroup_info_.m_cgroup_id, bpf_devices[i].major,
-                         bpf_devices[i].minor};
-    if (bpf_map__update_elem(dev_map, &key, sizeof(BpfKey), &bpf_devices[i],
-                             sizeof(BpfDeviceMeta), BPF_ANY)) {
-      CRANE_ERROR("Failed to update BPF map major {},minor {} cgroup id {}",
-                  bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
+    if (bpf_prog_attach(bpf_runtime_info_.BpfProgFd(), cgroup_fd,
+                        BPF_CGROUP_DEVICE, 0) < 0) {
+      CRANE_ERROR("Failed to attach BPF program");
       close(cgroup_fd);
-      close(prog_fd);
-
-      bpf_object__close(obj);
       return false;
     }
   }
-
-  if (bpf_prog_attach(prog_fd, cgroup_fd, BPF_CGROUP_DEVICE, 0) < 0) {
-    CRANE_ERROR("Failed to attach BPF program");
-    close(cgroup_fd);
-    close(prog_fd);
-
-    bpf_object__close(obj);
-    return false;
-  }
-  // attach_bpf_program_to_cgroup(prog_fd, CGROUP_PATH);
-
   close(cgroup_fd);
-  close(prog_fd);
-  bpf_object__close(obj);
-
   return true;
+#endif
+
+#ifndef CRANE_ENABLE_BPF
+  CRANE_WARN(
+      "BPF is disabled in craned, you can use Cgroup V1 to set devices access");
+  return false;
+#endif
 }
 
-bool CgroupV2::RmBpfDeviceMap() {
-  struct bpf_object *obj;
-  struct bpf_map *dev_map;
-
-  obj = bpf_object__open_file(CgroupConstant::BpfObjectFile, NULL);
-  if (!obj) {
-    CRANE_ERROR("Failed to open BPF object file {}",
-                CgroupConstant::BpfObjectFile);
-    return false;
-  }
-
-  if (bpf_object__load(obj)) {
-    CRANE_ERROR("Failed to load BPF object {}", CgroupConstant::BpfObjectFile);
-    fprintf(stderr, "Failed to load BPF object\n");
-    return false;
-  }
-
-  dev_map = bpf_object__find_map_by_name(obj, CgroupConstant::BpfMapName);
-  if (!dev_map) {
-    CRANE_ERROR("Failed to find BPF map {}", "dev_map");
-    return false;
-  }
-
-  auto &bpf_devices = m_cgroup_bpf_devices;
-  for (int i = 0; i < bpf_devices.size(); i++) {
-    struct BpfKey key = {m_cgroup_info_.m_cgroup_id, bpf_devices[i].major,
-                         bpf_devices[i].minor};
-    if (bpf_map__delete_elem(dev_map, &key, sizeof(BpfKey), BPF_ANY)) {
-      CRANE_ERROR("Failed to delete BPF map major {},minor {} in cgroup id {}",
-                  bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
-      bpf_object__close(obj);
+#ifdef CRANE_ENABLE_BPF
+bool CgroupV2::EraseBpfDeviceMap() {
+  {
+    if (!bpf_runtime_info_.BpfInvalid()) {
+      CRANE_WARN("BPF is not initialized.");
       return false;
     }
+    std::unique_lock<std::mutex> lk(*bpf_runtime_info_.BpfMutex());
+    auto &bpf_devices = m_cgroup_bpf_devices;
+    for (int i = 0; i < bpf_devices.size(); i++) {
+      struct BpfKey key = {m_cgroup_info_.m_cgroup_id, bpf_devices[i].major,
+                           bpf_devices[i].minor};
+      if (bpf_map__delete_elem(bpf_runtime_info_.BpfDevMap(), &key,
+                               sizeof(BpfKey), BPF_ANY)) {
+        CRANE_ERROR(
+            "Failed to delete BPF map major {},minor {} in cgroup id {}",
+            bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
+        return false;
+      }
+    }
   }
-  bpf_object__close(obj);
-
   return true;
 }
+#endif
 
 bool CgroupV2::KillAllProcesses() {
   using namespace CgroupConstant::Internal;
@@ -1568,9 +1648,11 @@ bool DedicatedResourceAllocator::Allocate(
   };
 
   if (!cg->SetDeviceAccess(all_request_slots, true, true, true)) {
-    if(g_cg_mgr->GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1){
+    if (g_cg_mgr->GetCgroupVersion() ==
+        CgroupConstant::CgroupVersion::CGROUP_V1) {
       CRANE_WARN("Allocate devices access failed in Cgroup V1.");
-    } else if(g_cg_mgr->GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2){
+    } else if (g_cg_mgr->GetCgroupVersion() ==
+               CgroupConstant::CgroupVersion::CGROUP_V2) {
       CRANE_WARN("Allocate devices access failed in Cgroup V2.");
     }
     return true;
