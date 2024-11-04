@@ -96,9 +96,11 @@ class AccountManager {
   CraneExpected<bool> ModifyAdminLevel(const uint32_t uid,
                                        const std::string& name,
                                        const std::string& value);
-  CraneExpected<bool> ModifyUserDefaultQos(
-      uint32_t uid, const std::string& name, const std::string& partition,
-      std::string account, const std::string& value, bool force);
+  CraneExpected<bool> ModifyUserDefaultQos(uint32_t uid,
+                                           const std::string& name,
+                                           const std::string& partition,
+                                           std::string account,
+                                           const std::string& value);
   CraneExpected<bool> ModifyUserAllowedParition(
       const crane::grpc::OperatorType& operatorType, uint32_t uid,
       const std::string& name, std::string account, const std::string& value);
@@ -127,7 +129,7 @@ class AccountManager {
                                    bool block);
 
   CraneExpected<bool> BlockUser(uint32_t uid, const std::string& name,
-                                const std::string& account, bool block);
+                                std::string account, bool block);
 
   bool CheckUserPermissionToPartition(const std::string& name,
                                       const std::string& account,
@@ -149,8 +151,7 @@ class AccountManager {
       const User* user, const Account* account_ptr, const std::string& account,
       const std::string& partition);
   CraneExpected<bool> CheckSetUserAllowedPartition(
-      const User* user, const Account* account_ptr, const std::string& account,
-      const std::string& partition);
+      const User* user, const Account* account, const std::string& partition);
   CraneExpected<bool> CheckAddUserAllowedQos(const User* user,
                                              const Account* account_ptr,
                                              const std::string& account,
@@ -182,27 +183,19 @@ class AccountManager {
   CraneExpected<bool> CheckAddAccountAllowedPartition(
       const Account* account_ptr, const std::string& account,
       const std::string& partition);
-  CraneExpected<bool> CheckAddAccountAllowedQos(const Account* account_ptr,
-                                                const std::string& account,
+  CraneExpected<bool> CheckAddAccountAllowedQos(const Account* account,
                                                 const std::string& qos);
-  CraneExpected<bool> CheckSetAccountDescription(
-      const Account* account_ptr, const std::string& account,
-      const std::string& description);
+  CraneExpected<bool> CheckSetAccountDescription(const Account* account);
   CraneExpected<bool> CheckSetAccountAllowedPartition(
-      const Account* account_ptr, const std::string& account,
-      const std::string& partitions, bool force);
-  CraneExpected<bool> CheckSetAccountAllowedQos(const Account* account_ptr,
-                                                const std::string& account,
+      const Account* account, const std::string& partitions, bool force);
+  CraneExpected<bool> CheckSetAccountAllowedQos(const Account* account,
                                                 const std::string& qos_list,
                                                 bool force);
-  CraneExpected<bool> CheckSetAccountDefaultQos(const Account* account_ptr,
-                                                const std::string& account,
+  CraneExpected<bool> CheckSetAccountDefaultQos(const Account* account,
                                                 const std::string& qos);
   CraneExpected<bool> CheckDeleteAccountAllowedPartition(
-      const Account* account_ptr, const std::string& account,
-      const std::string& partition, bool force);
-  CraneExpected<bool> CheckDeleteAccountAllowedQos(const Account* account_ptr,
-                                                   const std::string& account,
+      const Account* account, const std::string& partition, bool force);
+  CraneExpected<bool> CheckDeleteAccountAllowedQos(const Account* account,
                                                    const std::string& qos,
                                                    bool force);
 
@@ -249,13 +242,11 @@ class AccountManager {
                                                 std::string& account,
                                                 bool read_only_priv);
 
-  CraneExpected<bool> CheckPartitionIsAllowed(const Account* account_ptr,
-                                              const std::string& account,
+  CraneExpected<bool> CheckPartitionIsAllowed(const Account* account,
                                               const std::string& partition,
                                               bool check_parent, bool is_user);
 
-  CraneExpected<bool> CheckQosIsAllowed(const Account* account_ptr,
-                                        const std::string& account,
+  CraneExpected<bool> CheckQosIsAllowed(const Account* account,
                                         const std::string& qos_str,
                                         bool check_parent, bool is_user);
 
@@ -314,7 +305,7 @@ class AccountManager {
   CraneExpected<bool> AddAccount_(const Account& account, const Account* parent,
                                   const Account* stale_account);
 
-  CraneExpected<bool> AddQos_(const Qos* find_qos, const Qos& new_qos);
+  CraneExpected<bool> AddQos_(const Qos& qos, const Qos* stale_qos);
 
   CraneExpected<bool> DeleteUser_(const User& user, const std::string& account);
 
@@ -363,18 +354,15 @@ class AccountManager {
                                              const std::string& description);
   CraneExpected<bool> SetAccountDefaultQos_(const Account& account,
                                             const std::string& qos);
-  CraneExpected<bool> SetAccountAllowedPartition_(const Account& account,
-                                                  const std::string& partitions,
-                                                  bool force);
+  CraneExpected<bool> SetAccountAllowedPartition_(
+      const Account& account, const std::string& partitions);
   CraneExpected<bool> SetAccountAllowedQos_(const Account& account,
-                                            const std::string& qos_list_str,
-                                            bool force);
+                                            const std::string& qos_list_str);
 
   CraneExpected<bool> DeleteAccountAllowedPartition_(
-      const Account& account, const std::string& partition, bool force);
+      const Account& account, const std::string& partition);
   CraneExpected<bool> DeleteAccountAllowedQos_(const Account& account,
-                                               const std::string& qos,
-                                               bool force);
+                                               const std::string& qos);
 
   CraneExpected<bool> BlockUser_(const std::string& name,
                                  const std::string& account, bool block);

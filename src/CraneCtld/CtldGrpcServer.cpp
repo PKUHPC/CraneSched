@@ -442,7 +442,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
     case crane::grpc::ModifyField::DefaultQos:
       modify_res = g_account_manager->ModifyUserDefaultQos(
           request->uid(), request->name(), request->partition(),
-          request->account(), request->value(), request->force());
+          request->account(), request->value());
       break;
     default:
       std::unreachable();

@@ -45,28 +45,27 @@ AccountManager::CraneExpected<bool> AccountManager::AddUser(
   const std::string& name = new_user.name;
 
   // Avoid duplicate insertion
-  const User* find_user = GetUserInfoNoLock_(name);
-  if (find_user && !find_user->deleted) {
-    if (find_user->account_to_attrs_map.contains(object_account)) {
+  const User* stale_user = GetUserInfoNoLock_(name);
+  if (stale_user && !stale_user->deleted) {
+    if (stale_user->account_to_attrs_map.contains(object_account)) {
       return std::unexpected(CraneErrCode::ERR_USER_DUPLICATE_ACCOUNT);
     }
   }
 
   // Check whether the account exists
-  const Account* find_account = GetExistedAccountInfoNoLock_(object_account);
-  if (!find_account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+  const Account* account = GetExistedAccountInfoNoLock_(object_account);
+  if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   // Check if user's allowed partition is a subset of parent's allowed
   // partition
   for (const auto& [partition, qos] :
        new_user.account_to_attrs_map.at(object_account)
            .allowed_partition_qos_map) {
-    result = CheckPartitionIsAllowed(find_account, object_account, partition,
-                                     false, true);
+    result = CheckPartitionIsAllowed(account, partition, false, true);
     if (!result) return result;
   }
 
-  return AddUser_(find_user, find_account, new_user);
+  return AddUser_(new_user, account, stale_user);
 }
 
 AccountManager::CraneExpected<bool> AccountManager::AddAccount(
@@ -86,8 +85,8 @@ AccountManager::CraneExpected<bool> AccountManager::AddAccount(
   const std::string& name = new_account.name;
 
   // Avoid duplicate insertion
-  const Account* find_account = GetAccountInfoNoLock_(name);
-  if (find_account && !find_account->deleted)
+  const Account* stale_account = GetAccountInfoNoLock_(name);
+  if (stale_account && !stale_account->deleted)
     return std::unexpected(CraneErrCode::ERR_DUPLICATE_ACCOUNT);
 
   const Account* find_parent = nullptr;
@@ -128,7 +127,7 @@ AccountManager::CraneExpected<bool> AccountManager::AddAccount(
       return std::unexpected(CraneErrCode::ERR_ALLOWED_DEFAULT_QOS);
   }
 
-  return AddAccount_(find_account, find_parent, new_account);
+  return AddAccount_(new_account, find_parent, stale_account);
 }
 
 AccountManager::CraneExpected<bool> AccountManager::AddQos(uint32_t uid,
@@ -145,7 +144,7 @@ AccountManager::CraneExpected<bool> AccountManager::AddQos(uint32_t uid,
   if (find_qos && !find_qos->deleted)
     return std::unexpected(CraneErrCode::ERR_DB_DUPLICATE_QOS);
 
-  return AddQos_(find_qos, new_qos);
+  return AddQos_(new_qos, find_qos);
 }
 
 AccountManager::CraneExpected<bool> AccountManager::DeleteUser(
@@ -472,7 +471,7 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyAdminLevel(
 
 AccountManager::CraneExpected<bool> AccountManager::ModifyUserDefaultQos(
     uint32_t uid, const std::string& name, const std::string& partition,
-    std::string account, const std::string& value, bool force) {
+    std::string account, const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   const User* p = GetExistedUserInfoNoLock_(name);
@@ -508,7 +507,7 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyUserAllowedParition(
     result = CheckAddUserAllowedPartition(p, account_ptr, account, value);
     return !result ? result : AddUserAllowedPartition_(*p, *account_ptr, value);
   case crane::grpc::OperatorType::Overwrite:
-    result = CheckSetUserAllowedPartition(p, account_ptr, account, value);
+    result = CheckSetUserAllowedPartition(p, account_ptr, value);
     return !result ? result : SetUserAllowedPartition_(*p, *account_ptr, value);
   default:
     std::unreachable();
@@ -616,7 +615,7 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyAccount(
 
     case crane::grpc::ModifyField::Qos: {
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
-      result = CheckAddAccountAllowedQos(account, name, value);
+      result = CheckAddAccountAllowedQos(account, value);
       return !result ? result : AddAccountAllowedQos_(*account, value);
     }
 
@@ -630,16 +629,15 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyAccount(
     case crane::grpc::ModifyField::Description: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      result = CheckSetAccountDescription(account, name, value);
+      result = CheckSetAccountDescription(account);
       return !result ? result : SetAccountDescription_(name, value);
     }
     case crane::grpc::ModifyField::Partition: {
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      result = CheckSetAccountAllowedPartition(account, name, value, force);
-      return !result ? result
-                     : SetAccountAllowedPartition_(*account, value, force);
+      result = CheckSetAccountAllowedPartition(account, value, force);
+      return !result ? result : SetAccountAllowedPartition_(*account, value);
     }
 
     case crane::grpc::ModifyField::Qos: {
@@ -647,13 +645,13 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyAccount(
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      result = CheckSetAccountAllowedQos(account, name, value, force);
-      return !result ? result : SetAccountAllowedQos_(*account, value, force);
+      result = CheckSetAccountAllowedQos(account, value, force);
+      return !result ? result : SetAccountAllowedQos_(*account, value);
     }
     case crane::grpc::ModifyField::DefaultQos: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      result = CheckSetAccountDefaultQos(account, name, value);
+      result = CheckSetAccountDefaultQos(account, value);
       return !result ? result : SetAccountDefaultQos_(*account, value);
     }
 
@@ -667,9 +665,8 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyAccount(
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      result = CheckDeleteAccountAllowedPartition(account, name, value, force);
-      return !result ? result
-                     : DeleteAccountAllowedPartition_(*account, value, force);
+      result = CheckDeleteAccountAllowedPartition(account, value, force);
+      return !result ? result : DeleteAccountAllowedPartition_(*account, value);
     }
 
     case crane::grpc::ModifyField::Qos: {
@@ -677,9 +674,8 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyAccount(
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      result = CheckDeleteAccountAllowedQos(account, name, value, force);
-      return !result ? result
-                     : DeleteAccountAllowedQos_(*account, value, force);
+      result = CheckDeleteAccountAllowedQos(account, value, force);
+      return !result ? result : DeleteAccountAllowedQos_(*account, value);
     }
 
     default:
@@ -790,21 +786,19 @@ AccountManager::CraneExpected<bool> AccountManager::BlockAccount(
 }
 
 AccountManager::CraneExpected<bool> AccountManager::BlockUser(
-    uint32_t uid, const std::string& name, const std::string& account,
-    bool block) {
+    uint32_t uid, const std::string& name, std::string account, bool block) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   const User* user = GetExistedUserInfoNoLock_(name);
 
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    std::string account_name = account;
     auto result =
-        CheckOpUserHasModifyPermission(uid, user, name, account_name, false);
+        CheckOpUserHasModifyPermission(uid, user, name, account, false);
     if (!result) return result;
   }
 
-  if (user->account_to_attrs_map.at(account).blocked == block) return {};
+  if (user->account_to_attrs_map.at(account).blocked == block) return true;
 
   return BlockUser_(name, account, block);
 }
@@ -941,8 +935,7 @@ AccountManager::CheckAddUserAllowedPartition(const User* user,
                                              const std::string& partition) {
   const std::string& name = user->name;
 
-  auto result =
-      CheckPartitionIsAllowed(account_ptr, account, partition, false, true);
+  auto result = CheckPartitionIsAllowed(account_ptr, partition, false, true);
   if (!result) return result;
 
   if (user->account_to_attrs_map.at(account).allowed_partition_qos_map.contains(
@@ -955,13 +948,11 @@ AccountManager::CheckAddUserAllowedPartition(const User* user,
 
 AccountManager::CraneExpected<bool>
 AccountManager::CheckSetUserAllowedPartition(const User* user,
-                                             const Account* account_ptr,
-                                             const std::string& account,
+                                             const Account* account,
                                              const std::string& partition) {
   const std::string& name = user->name;
 
-  auto result =
-      CheckPartitionIsAllowed(account_ptr, account, partition, false, true);
+  auto result = CheckPartitionIsAllowed(account, partition, false, true);
 
   return !result ? result : true;
 }
@@ -971,7 +962,7 @@ AccountManager::CraneExpected<bool> AccountManager::CheckAddUserAllowedQos(
     const std::string& partition, const std::string& qos_str) {
   const std::string& name = user->name;
 
-  auto result = CheckQosIsAllowed(account_ptr, account, qos_str, false, true);
+  auto result = CheckQosIsAllowed(account_ptr, qos_str, false, true);
   if (!result) return result;
 
   //  check if add item already the user's allowed qos
@@ -1011,7 +1002,7 @@ AccountManager::CraneExpected<bool> AccountManager::CheckSetUserAllowedQos(
     const std::string& partition, const std::string& qos_str, bool force) {
   const std::string& name = user->name;
 
-  auto result = CheckQosIsAllowed(account_ptr, account, qos_str, false, true);
+  auto result = CheckQosIsAllowed(account_ptr, qos_str, false, true);
   if (!result) return result;
 
   std::vector<std::string> qos_vec =
@@ -1148,8 +1139,7 @@ AccountManager::CraneExpected<bool>
 AccountManager::CheckAddAccountAllowedPartition(const Account* account_ptr,
                                                 const std::string& account,
                                                 const std::string& partition) {
-  auto result =
-      CheckPartitionIsAllowed(account_ptr, account, partition, true, false);
+  auto result = CheckPartitionIsAllowed(account_ptr, partition, true, false);
   if (!result) return result;
 
   if (ranges::contains(account_ptr->allowed_partition, partition))
@@ -1159,40 +1149,36 @@ AccountManager::CheckAddAccountAllowedPartition(const Account* account_ptr,
 }
 
 AccountManager::CraneExpected<bool> AccountManager::CheckAddAccountAllowedQos(
-    const Account* account_ptr, const std::string& account,
-    const std::string& qos) {
-  auto result = CheckQosIsAllowed(account_ptr, account, qos, true, false);
+    const Account* account, const std::string& qos) {
+  auto result = CheckQosIsAllowed(account, qos, true, false);
   if (!result) return result;
 
-  if (ranges::contains(account_ptr->allowed_qos_list, qos))
+  if (ranges::contains(account->allowed_qos_list, qos))
     return std::unexpected(CraneErrCode::ERR_DUPLICATE_QOS);
 
   return true;
 }
 
 AccountManager::CraneExpected<bool> AccountManager::CheckSetAccountDescription(
-    const Account* account_ptr, const std::string& account,
-    const std::string& description) {
-  if (!account_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+    const Account* account) {
+  if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   return true;
 }
 
 AccountManager::CraneExpected<bool>
-AccountManager::CheckSetAccountAllowedPartition(const Account* account_ptr,
-                                                const std::string& account,
+AccountManager::CheckSetAccountAllowedPartition(const Account* account,
                                                 const std::string& partitions,
                                                 bool force) {
-  auto result =
-      CheckPartitionIsAllowed(account_ptr, account, partitions, true, false);
+  auto result = CheckPartitionIsAllowed(account, partitions, true, false);
   if (!result) return result;
 
   std::vector<std::string> partition_vec =
       absl::StrSplit(partitions, ',', absl::SkipEmpty());
 
-  for (const auto& par : account_ptr->allowed_partition) {
+  for (const auto& par : account->allowed_partition) {
     if (!ranges::contains(partition_vec, par)) {
-      if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account_ptr, par))
+      if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account, par))
         return std::unexpected(CraneErrCode::ERR_CHILD_HAS_PARTITION);
     }
   }
@@ -1201,17 +1187,16 @@ AccountManager::CheckSetAccountAllowedPartition(const Account* account_ptr,
 }
 
 AccountManager::CraneExpected<bool> AccountManager::CheckSetAccountAllowedQos(
-    const Account* account_ptr, const std::string& account,
-    const std::string& qos_list, bool force) {
-  auto result = CheckQosIsAllowed(account_ptr, account, qos_list, true, false);
+    const Account* account, const std::string& qos_list, bool force) {
+  auto result = CheckQosIsAllowed(account, qos_list, true, false);
   if (!result) return result;
 
   std::vector<std::string> qos_vec =
       absl::StrSplit(qos_list, ',', absl::SkipEmpty());
 
-  for (const auto& qos : account_ptr->allowed_qos_list) {
+  for (const auto& qos : account->allowed_qos_list) {
     if (!ranges::contains(qos_vec, qos)) {
-      if (!force && IsDefaultQosOfAnyNodeNoLock_(account_ptr, qos))
+      if (!force && IsDefaultQosOfAnyNodeNoLock_(account, qos))
         return std::unexpected(CraneErrCode::ERR_SET_ACCOUNT_QOS);
     }
   }
@@ -1220,44 +1205,40 @@ AccountManager::CraneExpected<bool> AccountManager::CheckSetAccountAllowedQos(
 }
 
 AccountManager::CraneExpected<bool> AccountManager::CheckSetAccountDefaultQos(
-    const Account* account_ptr, const std::string& account,
-    const std::string& qos) {
-  auto result = CheckQosIsAllowed(account_ptr, account, qos, false, false);
+    const Account* account, const std::string& qos) {
+  auto result = CheckQosIsAllowed(account, qos, false, false);
   if (!result) return result;
 
-  if (account_ptr->default_qos == qos)
+  if (account->default_qos == qos)
     return std::unexpected(CraneErrCode::ERR_DUPLICATE_DEFAULT_QOS);
 
   return true;
 }
 
 AccountManager::CraneExpected<bool>
-AccountManager::CheckDeleteAccountAllowedPartition(const Account* account_ptr,
-                                                   const std::string& account,
+AccountManager::CheckDeleteAccountAllowedPartition(const Account* account,
                                                    const std::string& partition,
                                                    bool force) {
-  auto result =
-      CheckPartitionIsAllowed(account_ptr, account, partition, false, false);
+  auto result = CheckPartitionIsAllowed(account, partition, false, false);
   if (!result) return result;
 
-  if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account_ptr, partition))
+  if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account, partition))
     return std::unexpected(CraneErrCode::ERR_CHILD_HAS_PARTITION);
 
   return true;
 }
 
 AccountManager::CraneExpected<bool>
-AccountManager::CheckDeleteAccountAllowedQos(const Account* account_ptr,
-                                             const std::string& account,
+AccountManager::CheckDeleteAccountAllowedQos(const Account* account,
                                              const std::string& qos,
                                              bool force) {
-  auto result = CheckQosIsAllowed(account_ptr, account, qos, false, false);
+  auto result = CheckQosIsAllowed(account, qos, false, false);
   if (!result) return result;
 
-  if (!force && account_ptr->default_qos == qos)
+  if (!force && account->default_qos == qos)
     return std::unexpected(CraneErrCode::ERR_IS_DEFAULT_QOS);
 
-  if (!force && IsDefaultQosOfAnyNodeNoLock_(account_ptr, qos))
+  if (!force && IsDefaultQosOfAnyNodeNoLock_(account, qos))
     return std::unexpected(CraneErrCode::ERR_CHILD_HAS_DEFAULT_QOS);
 
   return true;
@@ -1428,9 +1409,9 @@ AccountManager::CheckOpUserHasModifyPermission(uint32_t uid, const User* user,
 }
 
 AccountManager::CraneExpected<bool> AccountManager::CheckPartitionIsAllowed(
-    const Account* account_ptr, const std::string& account,
-    const std::string& partition, bool check_parent, bool is_user) {
-  if (!account_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+    const Account* account, const std::string& partition, bool check_parent,
+    bool is_user) {
+  if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   std::vector<std::string> partition_vec =
       absl::StrSplit(partition, ',', absl::SkipEmpty());
@@ -1442,16 +1423,16 @@ AccountManager::CraneExpected<bool> AccountManager::CheckPartitionIsAllowed(
 
     if (!check_parent) {
       // check if account has access to new partition
-      if (!ranges::contains(account_ptr->allowed_partition, part)) {
+      if (!ranges::contains(account->allowed_partition, part)) {
         if (is_user)
           return std::unexpected(CraneErrCode::ERR_PARENT_ALLOWED_PARTITION);
         return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
       }
     } else {
       // Check if parent account has access to the partition
-      if (!account_ptr->parent_account.empty()) {
+      if (!account->parent_account.empty()) {
         const Account* parent =
-            GetExistedAccountInfoNoLock_(account_ptr->parent_account);
+            GetExistedAccountInfoNoLock_(account->parent_account);
         if (!ranges::contains(parent->allowed_partition, part)) {
           return std::unexpected(CraneErrCode::ERR_PARENT_ALLOWED_PARTITION);
         }
@@ -1463,9 +1444,9 @@ AccountManager::CraneExpected<bool> AccountManager::CheckPartitionIsAllowed(
 }
 
 AccountManager::CraneExpected<bool> AccountManager::CheckQosIsAllowed(
-    const Account* account_ptr, const std::string& account,
-    const std::string& qos_str, bool check_parent, bool is_user) {
-  if (!account_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+    const Account* account, const std::string& qos_str, bool check_parent,
+    bool is_user) {
+  if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   std::vector<std::string> qos_vec =
       absl::StrSplit(qos_str, ',', absl::SkipEmpty());
@@ -1477,16 +1458,16 @@ AccountManager::CraneExpected<bool> AccountManager::CheckQosIsAllowed(
 
     if (!check_parent) {
       // check if account has access to new qos
-      if (!ranges::contains(account_ptr->allowed_qos_list, qos)) {
+      if (!ranges::contains(account->allowed_qos_list, qos)) {
         if (is_user)
           return std::unexpected(CraneErrCode::ERR_PARENT_ALLOWED_QOS);
         return std::unexpected(CraneErrCode::ERR_ALLOWED_QOS);
       }
     } else {
       // Check if parent account has access to the qos
-      if (!account_ptr->parent_account.empty()) {
+      if (!account->parent_account.empty()) {
         const Account* parent =
-            GetExistedAccountInfoNoLock_(account_ptr->parent_account);
+            GetExistedAccountInfoNoLock_(account->parent_account);
         for (const auto& qos : qos_vec) {
           if (!ranges::contains(parent->allowed_qos_list, qos))
             return std::unexpected(CraneErrCode::ERR_PARENT_ALLOWED_QOS);
@@ -1811,15 +1792,15 @@ AccountManager::CraneExpected<bool> AccountManager::AddAccount_(
 }
 
 AccountManager::CraneExpected<bool> AccountManager::AddQos_(
-    const Qos* find_qos, const Qos& new_qos) {
-  if (find_qos) {
+    const Qos& qos, const Qos* stale_qos) {
+  if (stale_qos) {
     // There is a same qos but was deleted,here will delete the original
     // qos and overwrite it with the same name
     mongocxx::client_session::with_transaction_cb callback =
         [&](mongocxx::client_session* session) {
-          g_db_client->UpdateQos(new_qos);
+          g_db_client->UpdateQos(qos);
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
-                                       new_qos.name, "creation_time",
+                                       qos.name, "creation_time",
                                        ToUnixSeconds(absl::Now()));
         };
 
@@ -1828,11 +1809,11 @@ AccountManager::CraneExpected<bool> AccountManager::AddQos_(
     }
   } else {
     // Insert the new qos
-    if (!g_db_client->InsertQos(new_qos))
+    if (!g_db_client->InsertQos(qos))
       return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
-  m_qos_map_[new_qos.name] = std::make_unique<Qos>(new_qos);
+  m_qos_map_[qos.name] = std::make_unique<Qos>(qos);
 
   return true;
 }
@@ -2331,7 +2312,7 @@ AccountManager::CraneExpected<bool> AccountManager::SetAccountDefaultQos_(
 }
 
 AccountManager::CraneExpected<bool> AccountManager::SetAccountAllowedPartition_(
-    const Account& account, const std::string& partitions, bool force) {
+    const Account& account, const std::string& partitions) {
   const std::string& name = account.name;
 
   std::vector<std::string> partition_vec =
@@ -2375,7 +2356,7 @@ AccountManager::CraneExpected<bool> AccountManager::SetAccountAllowedPartition_(
 }
 
 AccountManager::CraneExpected<bool> AccountManager::SetAccountAllowedQos_(
-    const Account& account, const std::string& qos_list_str, bool force) {
+    const Account& account, const std::string& qos_list_str) {
   const std::string& name = account.name;
 
   std::vector<std::string> qos_vec =
@@ -2445,8 +2426,7 @@ AccountManager::CraneExpected<bool> AccountManager::SetAccountAllowedQos_(
 
 AccountManager::CraneExpected<bool>
 AccountManager::DeleteAccountAllowedPartition_(const Account& account,
-                                               const std::string& partition,
-                                               bool force) {
+                                               const std::string& partition) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         DeleteAccountAllowedPartitionFromDBNoLock_(account.name, partition);
@@ -2462,7 +2442,7 @@ AccountManager::DeleteAccountAllowedPartition_(const Account& account,
 }
 
 AccountManager::CraneExpected<bool> AccountManager::DeleteAccountAllowedQos_(
-    const Account& account, const std::string& qos, bool force) {
+    const Account& account, const std::string& qos) {
   int change_num;
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
