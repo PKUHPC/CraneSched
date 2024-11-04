@@ -67,6 +67,11 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CRANE_ENABLE_TESTS ON)
 endif ()
 
+if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "/usr/local" CACHE PATH "Install path prefix, prepended onto install directories." FORCE)
+endif ()
+message(STATUS "Install prefix is set to ${CMAKE_INSTALL_PREFIX}")
+
 # Set the minimal log level based on the build type if it has not been explicitly set by the user
 if (CRANE_MIN_LOG_LEVEL STREQUAL "OFF")
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -297,39 +302,41 @@ if (CRANE_ENABLE_TESTS)
     add_subdirectory(test EXCLUDE_FROM_ALL)
 endif ()
 
+# Generate the configuration file
+configure_file(${CMAKE_SOURCE_DIR}/etc/cranectld.service.in ${CMAKE_BINARY_DIR}/etc/cranectld.service)
+configure_file(${CMAKE_SOURCE_DIR}/etc/craned.service.in ${CMAKE_BINARY_DIR}/etc/craned.service)
+
 # Add group and components
 set(CPACK_COMPONENTS_GROUPING ONE_PER_GROUP)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 
 cpack_add_component(cranedc
         DISPLAY_NAME "craned"
-        DESCRIPTION "craned component"
+        DESCRIPTION "craned - Execution Daemon of CraneSched"
         GROUP craned)
 cpack_add_component(cranectldc
         DISPLAY_NAME "cranectld"
-        DESCRIPTION "cranectld component"
+        DESCRIPTION "cranectld - Control Daemon of CraneSched"
         GROUP cranectld)
 
 cpack_add_component_group(craned)
 cpack_add_component_group(cranectld)
 set(CPACK_COMPONENTS_ALL cranedc cranectldc)
 
-configure_file(${CMAKE_SOURCE_DIR}/etc/cranectld.service.in ${CMAKE_BINARY_DIR}/etc/cranectld.service)
-configure_file(${CMAKE_SOURCE_DIR}/etc/craned.service.in ${CMAKE_BINARY_DIR}/etc/craned.service)
-
 # Install binaries
-install(TARGETS craned
-        DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
-        COMPONENT cranedc
-        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
-)
-
 install(TARGETS cranectld
         DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
         COMPONENT cranectldc
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
 )
 
+install(TARGETS craned
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
+        COMPONENT cranedc
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
+)
+
+# Install unit files
 install(FILES
         ${CMAKE_BINARY_DIR}/etc/cranectld.service
         DESTINATION /etc/systemd/system/
@@ -349,40 +356,39 @@ install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         DESTINATION /etc/crane/
         COMPONENT cranedc)
 
+# Only cranectld needs database.yaml
 install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
         DESTINATION /etc/crane/
         COMPONENT cranectldc)
 
-install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
-        DESTINATION /etc/crane/
-        COMPONENT cranedc)
+# install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
+#         DESTINATION /etc/crane/
+#         COMPONENT cranedc)
 
-# Install pam config
+# Install PAM config
 install(TARGETS pam_crane
         DESTINATION /usr/lib64/security/
         COMPONENT cranedc)
 
 set(CPACK_GENERATOR "RPM;DEB")
+set(CMAKE_PROJECT_HOMEPAGE_URL "https://github.com/PKUHPC/CraneSched")
 set(CPACK_PACKAGE_NAME "CraneSched")
 set(CPACK_PACKAGE_VENDOR "PKUHPC")
 set(CPACK_PACKAGE_CONTACT "CraneSched <service@csjstt.com>")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "CraneSched package")
-set(CPACK_PACKAGE_DESCRIPTION "CraneSched package")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "An HPC and Cloud Computing Fused Job Scheduling System")
+set(CPACK_PACKAGE_DESCRIPTION "An HPC and Cloud Computing Fused Job Scheduling System")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
-# not support install dir specification
-set(CPACK_SET_DESTDIR OFF)
-set(CPACK_SOURCE_TGZ_COMPRESSION TRUE)
 
-#RPM
+set(CPACK_PACKAGING_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
+message(STATUS "Package prefix is set to ${CPACK_PACKAGING_INSTALL_PREFIX}")
+
+# RPM
 set(CPACK_RPM_PACKAGE_GROUP "PKUHPC")
 set(CPACK_RPM_PACKAGE_LICENSE "AGPL v3")
-set(CPACK_RPM_PACKAGE_URL "https://github.com/PKUHPC/CraneSched")
-set(CPACK_RPM_PACKAGE_DESCRIPTION "CraneSched package")
-#DEB
-set(CPACK_DEBIAN_PACKAGE_MAINTAINER "PKUHPC")
 
+# DEB
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "PKUHPC")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 
-# pam autoconf for deb package not supported yet
 include(CPack)

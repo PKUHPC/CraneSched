@@ -13,6 +13,9 @@ FetchContent_Declare(unqlite_repo
         )
 
 SET(ENABLE_THREADS ON)
+
+# Unqlite will pollute `CMAKE_INSTALL_PREFIX`. Set this to OFF to avoid it.
+set(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT OFF)
 FetchContent_MakeAvailable(unqlite_repo)
 
 target_include_directories(unqlite PUBLIC ${unqlite_repo_SOURCE_DIR})
