@@ -339,31 +339,32 @@ install(TARGETS craned
 # Install unit files
 install(FILES
         ${CMAKE_BINARY_DIR}/etc/cranectld.service
-        DESTINATION /etc/systemd/system/
-        COMPONENT cranectldc)
+        DESTINATION /usr/lib/systemd/system/
+        COMPONENT cranectldc
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 install(FILES
         ${CMAKE_BINARY_DIR}/etc/craned.service
-        DESTINATION /etc/systemd/system/
-        COMPONENT cranedc)
+        DESTINATION /usr/lib/systemd/system/
+        COMPONENT cranedc
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 # Install configuration files
 install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         DESTINATION /etc/crane/
-        COMPONENT cranectldc)
+        COMPONENT cranectldc
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         DESTINATION /etc/crane/
-        COMPONENT cranedc)
+        COMPONENT cranedc
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
-# Only cranectld needs database.yaml
+# Only cranectld needs database.yaml and permission should be 600
 install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
         DESTINATION /etc/crane/
-        COMPONENT cranectldc)
-
-# install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
-#         DESTINATION /etc/crane/
-#         COMPONENT cranedc)
+        COMPONENT cranectldc
+        PERMISSIONS OWNER_READ OWNER_WRITE)
 
 # Install PAM config
 install(TARGETS pam_crane
@@ -380,11 +381,11 @@ set(CPACK_PACKAGE_DESCRIPTION "An HPC and Cloud Computing Fused Job Scheduling S
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 
-set(CPACK_PACKAGING_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
-message(STATUS "Package prefix is set to ${CPACK_PACKAGING_INSTALL_PREFIX}")
+# Do not allow the package to be relocated
+set(CPACK_PACKAGE_RELOCATABLE OFF)
 
 # RPM
-set(CPACK_RPM_PACKAGE_GROUP "PKUHPC")
+set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
 set(CPACK_RPM_PACKAGE_LICENSE "AGPL v3")
 
 # DEB
