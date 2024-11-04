@@ -8,6 +8,12 @@ endif ()
 message(STATUS "LibEvent ${EVENT__LIBRARY_TYPE}")
 set(EVENT__DISABLE_TESTS ON)
 set(EVENT__DISABLE_BENCHMARK ON)
+set(EVENT__DISABLE_REGRESS ON)
+set(EVENT__DISABLE_SAMPLES ON)
+
+# Disable as we don't use network functions in libevent
+set(EVENT__DISABLE_OPENSSL ON)
+set(EVENT__DISABLE_MBEDTLS ON)
 
 if (CRANE_USE_GITEE_SOURCE)
     set(LIBEVENT_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/libevent-2.1.12-stable.tar.gz")

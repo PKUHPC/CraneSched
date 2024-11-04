@@ -23,7 +23,7 @@ endif ()
 if (EXISTS "${CMAKE_SOURCE_DIR}/VERSION")
     # For a release version, the version file should be provided
     file(READ "${CMAKE_SOURCE_DIR}/VERSION" VERSION_CONTENT)
-    # Remove suffix
+    string(STRIP "${VERSION_CONTENT}" VERSION_CONTENT)
     string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" CMAKE_PROJECT_VERSION "${VERSION_CONTENT}")
 else ()
     # Otherwise, use git hash as the version
@@ -33,8 +33,15 @@ else ()
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
             OUTPUT_VARIABLE VERSION_CONTENT
             OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
     )
 endif ()
+
+if(VERSION_CONTENT STREQUAL "")
+    # Fallback version
+    set(VERSION_CONTENT "Unknown")
+    set(CMAKE_PROJECT_VERSION "0.0.0")
+endif()
 
 project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 
@@ -89,17 +96,13 @@ endif ()
 add_compile_definitions(CRANE_LOG_LEVEL=CRANE_LOG_LEVEL_${CRANE_MIN_LOG_LEVEL})
 message(STATUS "Minimal log level is set to ${CRANE_MIN_LOG_LEVEL}")
 
-if ("${VERSION_CONTENT}" STREQUAL "")
-    # if not in git repository, fall back to "Unknown"
-    set(VERSION_CONTENT "Unknown")
-endif ()
-
+# Generate the building timestamp
 string(TIMESTAMP BUILD_TIMESTAMP "%a, %d %b %Y %H:%M:%S %z")
 
-message(STATUS "Version: ${VERSION_CONTENT}")
-message(STATUS "Building Time: ${BUILD_TIMESTAMP}")
 add_compile_definitions(CRANE_BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
 add_compile_definitions(CRANE_VERSION_STRING="${VERSION_CONTENT}")
+message(STATUS "Version: ${VERSION_CONTENT}")
+message(STATUS "Building Time: ${BUILD_TIMESTAMP}")
 
 # Set colorized output when ninja build system is used.
 if (${CRANE_FORCE_COLORED_OUTPUT})
