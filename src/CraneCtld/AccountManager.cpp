@@ -41,8 +41,8 @@ AccountManager::SuccessOrErrCode AccountManager::AddUser(uint32_t uid,
   if (new_user.default_account.empty())
     return std::unexpected(CraneErrCode::ERR_NO_ACCOUNT_SPECIFIED);
 
-  std::string object_account = new_user.default_account;
-  const std::string name = new_user.name;
+  const std::string& object_account = new_user.default_account;
+  const std::string& name = new_user.name;
 
   // Avoid duplicate insertion
   const User* find_user = GetUserInfoNoLock_(name);
@@ -83,7 +83,7 @@ AccountManager::SuccessOrErrCode AccountManager::AddAccount(
   util::write_lock_guard account_guard(m_rw_account_mutex_);
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
-  const std::string name = new_account.name;
+  const std::string& name = new_account.name;
 
   // Avoid duplicate insertion
   const Account* find_account = GetAccountInfoNoLock_(name);
@@ -940,7 +940,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckOpUserIsAdmin(
 AccountManager::SuccessOrErrCode AccountManager::CheckAddUserAllowedPartition(
     const User* user, const Account* account_ptr, const std::string& account,
     const std::string& partition) {
-  const std::string name = user->name;
+  const std::string& name = user->name;
 
   auto result =
       CheckPartitionIsAllowed(account_ptr, account, partition, false, true);
@@ -957,7 +957,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckAddUserAllowedPartition(
 AccountManager::SuccessOrErrCode AccountManager::CheckSetUserAllowedPartition(
     const User* user, const Account* account_ptr, const std::string& account,
     const std::string& partition) {
-  const std::string name = user->name;
+  const std::string& name = user->name;
 
   auto result =
       CheckPartitionIsAllowed(account_ptr, account, partition, false, true);
@@ -968,7 +968,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckSetUserAllowedPartition(
 AccountManager::SuccessOrErrCode AccountManager::CheckAddUserAllowedQos(
     const User* user, const Account* account_ptr, const std::string& account,
     const std::string& partition, const std::string& qos_str) {
-  const std::string name = user->name;
+  const std::string& name = user->name;
 
   auto result = CheckQosIsAllowed(account_ptr, account, qos_str, false, true);
   if (!result) return result;
@@ -1008,7 +1008,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckAddUserAllowedQos(
 AccountManager::SuccessOrErrCode AccountManager::CheckSetUserAllowedQos(
     const User* user, const Account* account_ptr, const std::string& account,
     const std::string& partition, const std::string& qos_str, bool force) {
-  const std::string name = user->name;
+  const std::string& name = user->name;
 
   auto result = CheckQosIsAllowed(account_ptr, account, qos_str, false, true);
   if (!result) return result;
@@ -1045,7 +1045,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckSetUserAllowedQos(
 
 AccountManager::SuccessOrErrCode AccountManager::CheckSetUserAdminLevel(
     const User& user, const std::string& level, User::AdminLevel* new_level) {
-  const std::string name = user.name;
+  const std::string& name = user.name;
 
   if (level == "none")
     *new_level = User::None;
@@ -1062,7 +1062,7 @@ AccountManager::SuccessOrErrCode AccountManager::CheckSetUserAdminLevel(
 AccountManager::SuccessOrErrCode AccountManager::CheckSetUserDefaultQos(
     const User& user, const std::string& account, const std::string& partition,
     const std::string& qos) {
-  const std::string name = user.name;
+  const std::string& name = user.name;
 
   if (partition.empty()) {
     bool is_allowed = false;
@@ -1097,7 +1097,7 @@ AccountManager::SuccessOrErrCode
 AccountManager::CheckDeleteUserAllowedPartition(const User& user,
                                                 const std::string& account,
                                                 const std::string& partition) {
-  const std::string name = user.name;
+  const std::string& name = user.name;
 
   if (!user.account_to_attrs_map.at(account).allowed_partition_qos_map.contains(
           partition))
@@ -1109,7 +1109,7 @@ AccountManager::CheckDeleteUserAllowedPartition(const User& user,
 AccountManager::SuccessOrErrCode AccountManager::CheckDeleteUserAllowedQos(
     const User& user, const std::string& account, const std::string& partition,
     const std::string& qos, bool force) {
-  const std::string name = user.name;
+  const std::string& name = user.name;
 
   if (partition.empty()) {
     bool is_allowed = false;
@@ -1671,8 +1671,8 @@ bool AccountManager::IncQosReferenceCountInDb_(const std::string& name,
 
 AccountManager::SuccessOrErrCode AccountManager::AddUser_(
     const User* find_user, const Account* find_account, const User& new_user) {
-  const std::string object_account = new_user.default_account;
-  const std::string name = new_user.name;
+  const std::string& object_account = new_user.default_account;
+  const std::string& name = new_user.name;
 
   bool add_coordinator = false;
   if (!new_user.coordinator_accounts.empty()) add_coordinator = true;
@@ -1751,7 +1751,7 @@ AccountManager::SuccessOrErrCode AccountManager::AddAccount_(
     const Account* find_account, const Account* find_parent,
     const Account& new_account) {
   Account res_account = new_account;
-  const std::string name = res_account.name;
+  const std::string& name = res_account.name;
 
   if (find_parent != nullptr) {
     if (res_account.allowed_partition.empty()) {
@@ -1836,7 +1836,7 @@ AccountManager::SuccessOrErrCode AccountManager::AddQos_(const Qos* find_qos,
 
 AccountManager::SuccessOrErrCode AccountManager::DeleteUser_(
     const User& user, const std::string& account) {
-  const std::string name = user.name;
+  const std::string& name = user.name;
 
   std::list<std::string> remove_accounts;
   std::list<std::string> remove_coordinator_accounts;
@@ -1897,13 +1897,12 @@ AccountManager::SuccessOrErrCode AccountManager::DeleteUser_(
 
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
-  // return Result{true};
   return true;
 }
 
 AccountManager::SuccessOrErrCode AccountManager::DeleteAccount_(
     const Account& account) {
-  const std::string name = account.name;
+  const std::string& name = account.name;
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -1950,8 +1949,8 @@ AccountManager::SuccessOrErrCode AccountManager::DeleteQos_(
 
 AccountManager::SuccessOrErrCode AccountManager::AddUserAllowedPartition_(
     const User& user, const Account& account, const std::string& partition) {
-  const std::string name = user.name;
-  const std::string account_name = account.name;
+  const std::string& name = user.name;
+  const std::string& account_name = account.name;
 
   User res_user(user);
 
@@ -1983,8 +1982,8 @@ AccountManager::SuccessOrErrCode AccountManager::AddUserAllowedPartition_(
 AccountManager::SuccessOrErrCode AccountManager::AddUserAllowedQos_(
     const User& user, const Account& account, const std::string& partition,
     const std::string& qos) {
-  const std::string name = user.name;
-  const std::string account_name = account.name;
+  const std::string& name = user.name;
+  const std::string& account_name = account.name;
 
   User res_user(user);
 
@@ -2030,7 +2029,7 @@ AccountManager::SuccessOrErrCode AccountManager::AddUserAllowedQos_(
 }
 
 AccountManager::SuccessOrErrCode AccountManager::SetUserAdminLevel_(
-    const std::string& name, const User::AdminLevel& new_level) {
+    const std::string& name, const User::AdminLevel new_level) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -2051,7 +2050,7 @@ AccountManager::SuccessOrErrCode AccountManager::SetUserAdminLevel_(
 AccountManager::SuccessOrErrCode AccountManager::SetUserDefaultQos_(
     const User& user, const std::string& account, const std::string& partition,
     const std::string& qos) {
-  const std::string name = user.name;
+  const std::string& name = user.name;
 
   User res_user(user);
 
@@ -2087,8 +2086,8 @@ AccountManager::SuccessOrErrCode AccountManager::SetUserDefaultQos_(
 
 AccountManager::SuccessOrErrCode AccountManager::SetUserAllowedPartition_(
     const User& user, const Account& account, const std::string& partitions) {
-  const std::string name = user.name;
-  const std::string account_name = account.name;
+  const std::string& name = user.name;
+  const std::string& account_name = account.name;
 
   std::vector<std::string> partition_vec =
       absl::StrSplit(partitions, ',', absl::SkipEmpty());
@@ -2125,8 +2124,8 @@ AccountManager::SuccessOrErrCode AccountManager::SetUserAllowedPartition_(
 AccountManager::SuccessOrErrCode AccountManager::SetUserAllowedQos_(
     const User& user, const Account& account, const std::string& partition,
     const std::string& qos_list_str, bool force) {
-  const std::string name = user.name;
-  const std::string account_name = account.name;
+  const std::string& name = user.name;
+  const std::string& account_name = account.name;
 
   std::vector<std::string> qos_vec =
       absl::StrSplit(qos_list_str, ',', absl::SkipEmpty());
@@ -2172,7 +2171,7 @@ AccountManager::SuccessOrErrCode AccountManager::SetUserAllowedQos_(
 AccountManager::SuccessOrErrCode AccountManager::DeleteUserAllowedPartition_(
     const User& user, const std::string& account,
     const std::string& partition) {
-  const std::string name = user.name;
+  const std::string& name = user.name;
 
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
@@ -2198,7 +2197,7 @@ AccountManager::SuccessOrErrCode AccountManager::DeleteUserAllowedPartition_(
 AccountManager::SuccessOrErrCode AccountManager::DeleteUserAllowedQos_(
     const User& user, const std::string& qos, const std::string& account,
     const std::string& partition, bool force) {
-  const std::string name = user.name;
+  const std::string& name = user.name;
 
   User res_user(user);
 
@@ -2263,7 +2262,7 @@ AccountManager::SuccessOrErrCode AccountManager::AddAccountAllowedPartition_(
 
 AccountManager::SuccessOrErrCode AccountManager::AddAccountAllowedQos_(
     const Account& account, const std::string& qos) {
-  const std::string name = account.name;
+  const std::string& name = account.name;
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -2311,7 +2310,7 @@ AccountManager::SuccessOrErrCode AccountManager::SetAccountDescription_(
 
 AccountManager::SuccessOrErrCode AccountManager::SetAccountDefaultQos_(
     const Account& account, const std::string& qos) {
-  const std::string name = account.name;
+  const std::string& name = account.name;
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -2330,7 +2329,7 @@ AccountManager::SuccessOrErrCode AccountManager::SetAccountDefaultQos_(
 
 AccountManager::SuccessOrErrCode AccountManager::SetAccountAllowedPartition_(
     const Account& account, const std::string& partitions, bool force) {
-  const std::string name = account.name;
+  const std::string& name = account.name;
 
   std::vector<std::string> partition_vec =
       absl::StrSplit(partitions, ',', absl::SkipEmpty());
@@ -2374,7 +2373,7 @@ AccountManager::SuccessOrErrCode AccountManager::SetAccountAllowedPartition_(
 
 AccountManager::SuccessOrErrCode AccountManager::SetAccountAllowedQos_(
     const Account& account, const std::string& qos_list_str, bool force) {
-  const std::string name = account.name;
+  const std::string& name = account.name;
 
   std::vector<std::string> qos_vec =
       absl::StrSplit(qos_list_str, ',', absl::SkipEmpty());
@@ -2631,8 +2630,7 @@ bool AccountManager::DeleteAccountAllowedQosFromMapNoLock_(
   if (!account) {
     CRANE_ERROR(
         "Operating on a non-existent account '{}', please check this item "
-        "in "
-        "database and restart cranectld",
+        "in database and restart cranectld",
         name);
     return false;
   }
@@ -2741,8 +2739,7 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDBNoLock_(
   if (!account) {
     CRANE_ERROR(
         "Operating on a non-existent account '{}', please check this item "
-        "in "
-        "database and restart cranectld",
+        "in database and restart cranectld",
         name);
     return false;
   }
@@ -2779,8 +2776,7 @@ bool AccountManager::DeleteAccountAllowedPartitionFromMapNoLock_(
   if (!account) {
     CRANE_ERROR(
         "Operating on a non-existent account '{}', please check this item "
-        "in "
-        "database and restart cranectld",
+        "in database and restart cranectld",
         name);
     return false;
   }

@@ -23,6 +23,7 @@
 #include "DbClient.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
+#include "range/v3/view/unique.hpp"
 
 namespace Ctld {
 
@@ -42,6 +43,9 @@ class AccountManager {
 
   using CraneErrCode = crane::grpc::ErrCode;
   using SuccessOrErrCode = std::expected<bool, CraneErrCode>;
+
+  template <typename T>
+  using CraneExpected = std::expected<T, CraneErrCode>;
 
   struct Result {
     bool ok{false};
@@ -331,7 +335,7 @@ class AccountManager {
                                       const std::string& qos);
 
   SuccessOrErrCode SetUserAdminLevel_(const std::string& name,
-                                      const User::AdminLevel& new_level);
+                                      const User::AdminLevel new_level);
   SuccessOrErrCode SetUserDefaultQos_(const User& user,
                                       const std::string& account,
                                       const std::string& partition,
