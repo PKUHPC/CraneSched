@@ -17,9 +17,9 @@ add_executable(craned
         DeviceManager.h)
 
 target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
-add_dependencies(craned libcgroup-extern)
+add_dependencies(craned libcgroup)
 target_include_directories(
-        craned PRIVATE ${LIBCGROUP_PATH}/install/include/
+        craned PRIVATE ${libcgroup_BINARY_DIR}/include/
 )
 target_link_libraries(craned
         concurrentqueue
