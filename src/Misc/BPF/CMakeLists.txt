@@ -18,14 +18,7 @@ else()
     set(BPF_COMPILER ${CMAKE_C_COMPILER})
 endif()
 
-set(BPF_DEBUG_MODE "-DBPF_DEBUG")
-
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    list(APPEND BPF_COMPILE_OPTIONS -g -O2 ${BPF_DEBUG_MODE})
-else()
-    list(APPEND BPF_COMPILE_OPTIONS -g -O2)
-endif()
-
+list(APPEND BPF_COMPILE_OPTIONS -g -O2 )
 
 add_custom_command(
     OUTPUT ${BPF_OBJECT_FILE}
@@ -37,6 +30,8 @@ add_custom_command(
 add_custom_target(cgroup_dev_bpf_object ALL
     DEPENDS ${BPF_OBJECT_FILE}
 )
+
+
 
 
 

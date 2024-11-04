@@ -131,7 +131,9 @@ void ParseConfig(int argc, char** argv) {
       }
 
       InitLogger(log_level, g_config.CranedLogFile);
-
+#ifdef CRANE_ENABLE_BPF
+      Craned::CgroupV2::SetBpfDebugLogLevel(static_cast<uint32_t>(log_level));
+#endif
       if (config["CranedUnixSockPath"])
         g_config.CranedUnixSockPath =
             g_config.CraneBaseDir +
@@ -620,7 +622,7 @@ void GlobalVariableInit() {
           Craned::CgroupConstant::CgroupVersion::CGROUP_V2 &&
       (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER_V2) ||
        !g_cg_mgr->Mounted(Controller::MEMORY_CONTORLLER_V2))) {
-    CRANE_ERROR("Failed to initialize cpu,memory,devices cgroups controller.");
+    CRANE_ERROR("Failed to initialize cpu,memory cgroups controller.");
     std::exit(1);
   }
 
