@@ -246,8 +246,8 @@ class AccountManager {
                                         const std::string& qos_str,
                                         bool check_parent, bool is_user);
 
-  bool IsOperatorPrivilegeSameAndHigher(const User& op_user,
-                                        User::AdminLevel admin_level);
+  bool IsOperatorPrivilegeSameOrHigher(const User& op_user,
+                                       User::AdminLevel admin_level);
 
   /**
    * @param[in] uid is system uid of user.

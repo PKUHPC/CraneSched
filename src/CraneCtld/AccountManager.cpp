@@ -288,7 +288,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = *user_result;
   if (name.empty()) {
-    if (IsOperatorPrivilegeSameAndHigher(*op_user, User::Operator)) {
+    if (IsOperatorPrivilegeSameOrHigher(*op_user, User::Operator)) {
       // The rules for querying user information are the same as those for
       // querying accounts
       for (const auto& [user_name, user] : m_user_map_) {
@@ -345,7 +345,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
 
   util::read_lock_guard account_guard(m_rw_account_mutex_);
   if (name.empty()) {
-    if (IsOperatorPrivilegeSameAndHigher(res_user, User::Operator)) {
+    if (IsOperatorPrivilegeSameOrHigher(res_user, User::Operator)) {
       // If an administrator user queries account information, all
       // accounts are returned, variable user_account not used
       for (const auto& [name, account] : m_account_map_) {
@@ -399,7 +399,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryQosInfo(
 
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
   if (name.empty()) {
-    if (IsOperatorPrivilegeSameAndHigher(res_user, User::Operator)) {
+    if (IsOperatorPrivilegeSameOrHigher(res_user, User::Operator)) {
       for (const auto& [name, qos] : m_qos_map_) {
         if (qos->deleted) continue;
         res_qos_map->try_emplace(name, *qos);
@@ -418,7 +418,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryQosInfo(
     const Qos* qos = GetExistedQosInfoNoLock_(name);
     if (!qos) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
 
-    if (!IsOperatorPrivilegeSameAndHigher(res_user, User::Operator)) {
+    if (!IsOperatorPrivilegeSameOrHigher(res_user, User::Operator)) {
       bool found = false;
       for (const auto& [acct, item] : res_user.account_to_attrs_map) {
         for (const auto& [part, part_qos_map] :
@@ -447,7 +447,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAdminLevel(
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = *user_result;
 
-  if (!IsOperatorPrivilegeSameAndHigher(*op_user, user->admin_level) ||
+  if (!IsOperatorPrivilegeSameOrHigher(*op_user, user->admin_level) ||
       op_user->admin_level == user->admin_level) {
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
   }
@@ -462,7 +462,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAdminLevel(
   else
     return std::unexpected(CraneErrCode::ERR_INVALID_ADMIN_LEVEL);
 
-  if (!IsOperatorPrivilegeSameAndHigher(*op_user, new_level))
+  if (!IsOperatorPrivilegeSameOrHigher(*op_user, new_level))
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 
   if (new_level == user->admin_level) return {};
@@ -921,7 +921,7 @@ AccountManager::CraneExpected<void> AccountManager::CheckOpUserIsAdmin(
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = *user_result;
 
-  if (!IsOperatorPrivilegeSameAndHigher(*op_user, User::Operator))
+  if (!IsOperatorPrivilegeSameOrHigher(*op_user, User::Operator))
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 
   return {};
@@ -1041,8 +1041,6 @@ AccountManager::CraneExpected<void> AccountManager::CheckSetUserAdminLevel(
 AccountManager::CraneExpected<void> AccountManager::CheckSetUserDefaultQos(
     const User& user, const std::string& account, const std::string& partition,
     const std::string& qos) {
-  const std::string& name = user.name;
-
   if (partition.empty()) {
     bool is_allowed = false;
     for (const auto& [par, pair] :
@@ -1076,8 +1074,6 @@ AccountManager::CraneExpected<void>
 AccountManager::CheckDeleteUserAllowedPartition(const User& user,
                                                 const std::string& account,
                                                 const std::string& partition) {
-  const std::string& name = user.name;
-
   if (!user.account_to_attrs_map.at(account).allowed_partition_qos_map.contains(
           partition))
     return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
@@ -1088,8 +1084,6 @@ AccountManager::CheckDeleteUserAllowedPartition(const User& user,
 AccountManager::CraneExpected<void> AccountManager::CheckDeleteUserAllowedQos(
     const User& user, const std::string& account, const std::string& partition,
     const std::string& qos, bool force) {
-  const std::string& name = user.name;
-
   if (partition.empty()) {
     bool is_allowed = false;
     for (const auto& [par, pair] :
@@ -1353,7 +1347,7 @@ AccountManager::CheckOpUserHasPermissionToAccount(uint32_t uid,
   const User* op_user = *user_result;
 
   if (account.empty()) {
-    if (is_add && IsOperatorPrivilegeSameAndHigher(*op_user, User::Operator))
+    if (is_add && IsOperatorPrivilegeSameOrHigher(*op_user, User::Operator))
       return {};
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
   }
@@ -1387,7 +1381,7 @@ AccountManager::CheckOpUserHasModifyPermission(uint32_t uid, const User* user,
     return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
 
   // op_user.admin_level < admin_level
-  if (!IsOperatorPrivilegeSameAndHigher(*op_user, user->admin_level))
+  if (!IsOperatorPrivilegeSameOrHigher(*op_user, user->admin_level))
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 
   return CheckUserPermissionOnAccount(*op_user, account, read_only_priv);
@@ -1465,7 +1459,7 @@ AccountManager::CraneExpected<void> AccountManager::CheckQosIsAllowed(
 }
 
 // 改成IsOperatorPrivilegeSameOrHigher
-bool AccountManager::IsOperatorPrivilegeSameAndHigher(
+bool AccountManager::IsOperatorPrivilegeSameOrHigher(
     const User& op_user, User::AdminLevel admin_level) {
   User::AdminLevel op_level = op_user.admin_level;
 
@@ -1495,7 +1489,7 @@ AccountManager::CheckOperatorPrivilegeHigher(uint32_t uid,
 
   User::AdminLevel op_level = op_user->admin_level;
 
-  if (!IsOperatorPrivilegeSameAndHigher(*op_user, admin_level) ||
+  if (!IsOperatorPrivilegeSameOrHigher(*op_user, admin_level) ||
       op_level == admin_level) {
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
   }
@@ -1538,7 +1532,7 @@ AccountManager::CraneExpected<void> AccountManager::CheckUserPermissionOnUser(
   if (user->name == op_user.name) return {};
 
   // 2. The operating user's level is higher than the target user's level.
-  if (IsOperatorPrivilegeSameAndHigher(op_user, user->admin_level) &&
+  if (IsOperatorPrivilegeSameOrHigher(op_user, user->admin_level) &&
       op_user.admin_level != user->admin_level)
     return {};
 
@@ -1585,11 +1579,8 @@ void AccountManager::InitDataMap_() {
   }
 }
 
-/**
- *
- * @param name
- * @note copy user info from m_user_map_
- * @return bool
+/*
+ * Get the user info form mongodb
  */
 const User* AccountManager::GetUserInfoNoLock_(const std::string& name) {
   auto find_res = m_user_map_.find(name);
@@ -2559,8 +2550,7 @@ int AccountManager::DeleteAccountAllowedQosFromDBNoLock_(
   if (!account) {
     CRANE_ERROR(
         "Operating on a non-existent account '{}', please check this item "
-        "in "
-        "database and restart cranectld",
+        "in database and restart cranectld",
         name);
     return false;
   }
