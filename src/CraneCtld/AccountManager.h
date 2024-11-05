@@ -20,10 +20,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include "DbClient.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
-#include "range/v3/view/unique.hpp"
 
 namespace Ctld {
 
@@ -102,10 +100,10 @@ class AccountManager {
                                            std::string account,
                                            const std::string& value);
   CraneExpected<bool> ModifyUserAllowedParition(
-      const crane::grpc::OperatorType& operatorType, uint32_t uid,
+      crane::grpc::OperatorType operator_type, uint32_t uid,
       const std::string& name, std::string account, const std::string& value);
   CraneExpected<bool> ModifyUserAllowedQos(
-      const crane::grpc::OperatorType& operatorType, uint32_t uid,
+      crane::grpc::OperatorType operator_type, uint32_t uid,
       const std::string& name, const std::string& partition,
       std::string account, const std::string& value, bool force);
   CraneExpected<bool> DeleteUserAllowedPartiton(uint32_t uid,
@@ -116,13 +114,13 @@ class AccountManager {
       uint32_t uid, const std::string& name, const std::string& partition,
       std::string account, const std::string& value, bool force);
 
-  CraneExpected<bool> ModifyAccount(
-      const crane::grpc::OperatorType& operatorType, const uint32_t uid,
-      const std::string& name, const crane::grpc::ModifyField& modifyField,
-      const std::string& value, bool force);
+  CraneExpected<bool> ModifyAccount(crane::grpc::OperatorType operator_type,
+                                    const uint32_t uid, const std::string& name,
+                                    crane::grpc::ModifyField modify_field,
+                                    const std::string& value, bool force);
 
   CraneExpected<bool> ModifyQos(const uint32_t uid, const std::string& name,
-                                const crane::grpc::ModifyField& modifyField,
+                                crane::grpc::ModifyField modify_field,
                                 const std::string& value);
 
   CraneExpected<bool> BlockAccount(uint32_t uid, const std::string& name,
@@ -148,20 +146,19 @@ class AccountManager {
    * ---------------------------------------------------------------------------
    */
   CraneExpected<bool> CheckAddUserAllowedPartition(
-      const User* user, const Account* account_ptr, const std::string& account,
-      const std::string& partition);
-  CraneExpected<bool> CheckSetUserAllowedPartition(
       const User* user, const Account* account, const std::string& partition);
+  CraneExpected<bool> CheckSetUserAllowedPartition(
+      const Account* account, const std::string& partition);
   CraneExpected<bool> CheckAddUserAllowedQos(const User* user,
-                                             const Account* account_ptr,
-                                             const std::string& account,
+                                             const Account* account,
                                              const std::string& partition,
                                              const std::string& qos_str);
-  CraneExpected<bool> CheckSetUserAllowedQos(
-      const User* user, const Account* account_ptr, const std::string& account,
-      const std::string& partition, const std::string& qos_str, bool force);
-  CraneExpected<bool> CheckSetUserAdminLevel(const User& user,
-                                             const std::string& level,
+  CraneExpected<bool> CheckSetUserAllowedQos(const User* user,
+                                             const Account* account,
+                                             const std::string& partition,
+                                             const std::string& qos_str,
+                                             bool force);
+  CraneExpected<bool> CheckSetUserAdminLevel(const std::string& level,
                                              User::AdminLevel* new_level);
   CraneExpected<bool> CheckSetUserDefaultQos(const User& user,
                                              const std::string& account,
@@ -181,8 +178,7 @@ class AccountManager {
    * ---------------------------------------------------------------------------
    */
   CraneExpected<bool> CheckAddAccountAllowedPartition(
-      const Account* account_ptr, const std::string& account,
-      const std::string& partition);
+      const Account* account, const std::string& partition);
   CraneExpected<bool> CheckAddAccountAllowedQos(const Account* account,
                                                 const std::string& qos);
   CraneExpected<bool> CheckSetAccountDescription(const Account* account);
@@ -215,7 +211,6 @@ class AccountManager {
 
   CraneExpected<bool> CheckOpUserHasModifyPermission(uint32_t uid,
                                                      const User* user,
-                                                     const std::string& name,
                                                      std::string& account,
                                                      bool read_only_priv);
 
@@ -238,7 +233,6 @@ class AccountManager {
    */
   CraneExpected<bool> CheckUserPermissionOnUser(const User& op_user,
                                                 const User* user,
-                                                const std::string& name,
                                                 std::string& account,
                                                 bool read_only_priv);
 
@@ -322,7 +316,7 @@ class AccountManager {
                                          const std::string& qos);
 
   CraneExpected<bool> SetUserAdminLevel_(const std::string& name,
-                                         const User::AdminLevel new_level);
+                                         User::AdminLevel new_level);
   CraneExpected<bool> SetUserDefaultQos_(const User& user,
                                          const std::string& account,
                                          const std::string& partition,

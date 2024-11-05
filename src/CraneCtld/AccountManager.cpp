@@ -18,6 +18,8 @@
 
 #include "AccountManager.h"
 
+#include <string>
+
 #include "CtldPublicDefs.h"
 #include "crane/PasswordEntry.h"
 #include "protos/PublicDefs.pb.h"
@@ -83,7 +85,6 @@ AccountManager::CraneExpected<bool> AccountManager::AddAccount(
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const std::string& name = new_account.name;
-
   // Avoid duplicate insertion
   const Account* stale_account = GetAccountInfoNoLock_(name);
   if (stale_account && !stale_account->deleted)
@@ -316,7 +317,7 @@ AccountManager::CraneExpected<bool> AccountManager::QueryUserInfo(
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     const User* user = GetExistedUserInfoNoLock_(name);
     std::string account = "";
-    result = CheckUserPermissionOnUser(*op_user, user, name, account, true);
+    result = CheckUserPermissionOnUser(*op_user, user, account, true);
     if (!result) return result;
     res_user_map->try_emplace(user->uid, *user);
   }
@@ -479,7 +480,7 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyUserDefaultQos(
 
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    result = CheckOpUserHasModifyPermission(uid, p, name, account, false);
+    result = CheckOpUserHasModifyPermission(uid, p, account, false);
     if (!result) return result;
   }
 
@@ -490,24 +491,24 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyUserDefaultQos(
 }
 
 AccountManager::CraneExpected<bool> AccountManager::ModifyUserAllowedParition(
-    const crane::grpc::OperatorType& operatorType, const uint32_t uid,
+    crane::grpc::OperatorType operator_type, const uint32_t uid,
     const std::string& name, std::string account, const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
 
   const User* p = GetExistedUserInfoNoLock_(name);
   AccountManager::CraneExpected<bool> result;
-  result = CheckOpUserHasModifyPermission(uid, p, name, account, false);
+  result = CheckOpUserHasModifyPermission(uid, p, account, false);
   if (!result) return result;
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
 
-  switch (operatorType) {
+  switch (operator_type) {
   case crane::grpc::OperatorType::Add:
-    result = CheckAddUserAllowedPartition(p, account_ptr, account, value);
+    result = CheckAddUserAllowedPartition(p, account_ptr, value);
     return !result ? result : AddUserAllowedPartition_(*p, *account_ptr, value);
   case crane::grpc::OperatorType::Overwrite:
-    result = CheckSetUserAllowedPartition(p, account_ptr, value);
+    result = CheckSetUserAllowedPartition(account_ptr, value);
     return !result ? result : SetUserAllowedPartition_(*p, *account_ptr, value);
   default:
     std::unreachable();
@@ -517,7 +518,7 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyUserAllowedParition(
 }
 
 AccountManager::CraneExpected<bool> AccountManager::ModifyUserAllowedQos(
-    const crane::grpc::OperatorType& operatorType, uint32_t uid,
+    crane::grpc::OperatorType operator_type, uint32_t uid,
     const std::string& name, const std::string& partition, std::string account,
     const std::string& value, bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
@@ -526,19 +527,18 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyUserAllowedQos(
 
   const User* p = GetExistedUserInfoNoLock_(name);
   AccountManager::CraneExpected<bool> result;
-  result = CheckOpUserHasModifyPermission(uid, p, name, account, false);
+  result = CheckOpUserHasModifyPermission(uid, p, account, false);
   if (!result) return result;
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
 
-  switch (operatorType) {
+  switch (operator_type) {
   case crane::grpc::OperatorType::Add:
-    result = CheckAddUserAllowedQos(p, account_ptr, account, partition, value);
+    result = CheckAddUserAllowedQos(p, account_ptr, partition, value);
     return !result ? result
                    : AddUserAllowedQos_(*p, *account_ptr, partition, value);
   case crane::grpc::OperatorType::Overwrite:
-    result = CheckSetUserAllowedQos(p, account_ptr, account, partition, value,
-                                    force);
+    result = CheckSetUserAllowedQos(p, account_ptr, partition, value, force);
     return !result
                ? result
                : SetUserAllowedQos_(*p, *account_ptr, partition, value, force);
@@ -559,7 +559,7 @@ AccountManager::CraneExpected<bool> AccountManager::DeleteUserAllowedPartiton(
 
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    result = CheckOpUserHasModifyPermission(uid, p, name, account, false);
+    result = CheckOpUserHasModifyPermission(uid, p, account, false);
     if (!result) return result;
   }
 
@@ -579,7 +579,7 @@ AccountManager::CraneExpected<bool> AccountManager::DeleteUserAllowedQos(
 
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    result = CheckOpUserHasModifyPermission(uid, p, name, account, false);
+    result = CheckOpUserHasModifyPermission(uid, p, account, false);
     if (!result) return result;
   }
 
@@ -590,8 +590,8 @@ AccountManager::CraneExpected<bool> AccountManager::DeleteUserAllowedQos(
 }
 
 AccountManager::CraneExpected<bool> AccountManager::ModifyAccount(
-    const crane::grpc::OperatorType& operatorType, const uint32_t uid,
-    const std::string& name, const crane::grpc::ModifyField& modifyField,
+    crane::grpc::OperatorType operator_type, const uint32_t uid,
+    const std::string& name, crane::grpc::ModifyField modify_field,
     const std::string& value, bool force) {
   CraneExpected<bool> result;
 
@@ -603,13 +603,13 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyAccount(
     if (!result) return result;
   }
 
-  switch (operatorType) {
+  switch (operator_type) {
   case crane::grpc::OperatorType::Add: {
     util::write_lock_guard account_guard(m_rw_account_mutex_);
     const Account* account = GetExistedAccountInfoNoLock_(name);
-    switch (modifyField) {
+    switch (modify_field) {
     case crane::grpc::ModifyField::Partition: {
-      result = CheckAddAccountAllowedPartition(account, name, value);
+      result = CheckAddAccountAllowedPartition(account, value);
       return !result ? result : AddAccountAllowedPartition_(name, value);
     }
 
@@ -625,7 +625,7 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyAccount(
   }
 
   case crane::grpc::OperatorType::Overwrite:
-    switch (modifyField) {
+    switch (modify_field) {
     case crane::grpc::ModifyField::Description: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
@@ -660,7 +660,7 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyAccount(
     }
 
   case crane::grpc::OperatorType::Delete:
-    switch (modifyField) {
+    switch (modify_field) {
     case crane::grpc::ModifyField::Partition: {
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
@@ -691,7 +691,7 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyAccount(
 
 AccountManager::CraneExpected<bool> AccountManager::ModifyQos(
     const uint32_t uid, const std::string& name,
-    const crane::grpc::ModifyField& modifyField, const std::string& value) {
+    crane::grpc::ModifyField modify_field, const std::string& value) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto result = CheckOpUserIsAdmin(uid);
@@ -704,7 +704,7 @@ AccountManager::CraneExpected<bool> AccountManager::ModifyQos(
   if (!p) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
 
   std::string item = "";
-  switch (modifyField) {
+  switch (modify_field) {
   case crane::grpc::ModifyField::Description:
     item = "description";
     break;
@@ -793,8 +793,7 @@ AccountManager::CraneExpected<bool> AccountManager::BlockUser(
 
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    auto result =
-        CheckOpUserHasModifyPermission(uid, user, name, account, false);
+    auto result = CheckOpUserHasModifyPermission(uid, user, account, false);
     if (!result) return result;
   }
 
@@ -930,16 +929,14 @@ AccountManager::CraneExpected<bool> AccountManager::CheckOpUserIsAdmin(
 
 AccountManager::CraneExpected<bool>
 AccountManager::CheckAddUserAllowedPartition(const User* user,
-                                             const Account* account_ptr,
-                                             const std::string& account,
+                                             const Account* account,
                                              const std::string& partition) {
-  const std::string& name = user->name;
-
-  auto result = CheckPartitionIsAllowed(account_ptr, partition, false, true);
+  auto result = CheckPartitionIsAllowed(account, partition, false, true);
   if (!result) return result;
 
-  if (user->account_to_attrs_map.at(account).allowed_partition_qos_map.contains(
-          partition)) {
+  const std::string& account_name = account->name;
+  if (user->account_to_attrs_map.at(account_name)
+          .allowed_partition_qos_map.contains(partition)) {
     return std::unexpected(CraneErrCode::ERR_DUPLICATE_PARTITION);
   }
 
@@ -947,34 +944,30 @@ AccountManager::CheckAddUserAllowedPartition(const User* user,
 }
 
 AccountManager::CraneExpected<bool>
-AccountManager::CheckSetUserAllowedPartition(const User* user,
-                                             const Account* account,
+AccountManager::CheckSetUserAllowedPartition(const Account* account,
                                              const std::string& partition) {
-  const std::string& name = user->name;
-
   auto result = CheckPartitionIsAllowed(account, partition, false, true);
+  if (!result) return result;
 
-  return !result ? result : true;
+  return true;
 }
 
 AccountManager::CraneExpected<bool> AccountManager::CheckAddUserAllowedQos(
-    const User* user, const Account* account_ptr, const std::string& account,
-    const std::string& partition, const std::string& qos_str) {
-  const std::string& name = user->name;
-
-  auto result = CheckQosIsAllowed(account_ptr, qos_str, false, true);
+    const User* user, const Account* account, const std::string& partition,
+    const std::string& qos_str) {
+  auto result = CheckQosIsAllowed(account, qos_str, false, true);
   if (!result) return result;
-
+  const std::string& account_name = account->name;
   //  check if add item already the user's allowed qos
   if (partition.empty()) {
     // When the user has no partition, QoS cannot be added.
-    if (user->account_to_attrs_map.at(account)
+    if (user->account_to_attrs_map.at(account_name)
             .allowed_partition_qos_map.empty())
       return std::unexpected(CraneErrCode::ERR_USER_EMPTY_PARTITION);
 
     bool is_allowed = false;
-    for (const auto& [par, pair] :
-         user->account_to_attrs_map.at(account).allowed_partition_qos_map) {
+    for (const auto& [par, pair] : user->account_to_attrs_map.at(account_name)
+                                       .allowed_partition_qos_map) {
       const std::list<std::string>& list = pair.second;
       if (!ranges::contains(list, qos_str)) {
         is_allowed = true;
@@ -983,11 +976,10 @@ AccountManager::CraneExpected<bool> AccountManager::CheckAddUserAllowedQos(
     }
     if (!is_allowed) return std::unexpected(CraneErrCode::ERR_DUPLICATE_QOS);
   } else {
-    auto iter =
-        user->account_to_attrs_map.at(account).allowed_partition_qos_map.find(
-            partition);
-    if (iter ==
-        user->account_to_attrs_map.at(account).allowed_partition_qos_map.end())
+    auto iter = user->account_to_attrs_map.at(account_name)
+                    .allowed_partition_qos_map.find(partition);
+    if (iter == user->account_to_attrs_map.at(account_name)
+                    .allowed_partition_qos_map.end())
       return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
     const std::list<std::string>& list = iter->second.second;
     if (ranges::contains(list, qos_str))
@@ -998,13 +990,11 @@ AccountManager::CraneExpected<bool> AccountManager::CheckAddUserAllowedQos(
 }
 
 AccountManager::CraneExpected<bool> AccountManager::CheckSetUserAllowedQos(
-    const User* user, const Account* account_ptr, const std::string& account,
-    const std::string& partition, const std::string& qos_str, bool force) {
-  const std::string& name = user->name;
-
-  auto result = CheckQosIsAllowed(account_ptr, qos_str, false, true);
+    const User* user, const Account* account, const std::string& partition,
+    const std::string& qos_str, bool force) {
+  auto result = CheckQosIsAllowed(account, qos_str, false, true);
   if (!result) return result;
-
+  const std::string& account_name = account->name;
   std::vector<std::string> qos_vec =
       absl::StrSplit(qos_str, ',', absl::SkipEmpty());
 
@@ -1014,12 +1004,11 @@ AccountManager::CraneExpected<bool> AccountManager::CheckSetUserAllowedQos(
 
   if (partition.empty()) {
     cache_allowed_partition_qos_map =
-        user->account_to_attrs_map.at(account).allowed_partition_qos_map;
+        user->account_to_attrs_map.at(account_name).allowed_partition_qos_map;
   } else {
-    auto iter =
-        user->account_to_attrs_map.at(account).allowed_partition_qos_map.find(
-            partition);
-    if (iter == user->account_to_attrs_map.at(account)
+    auto iter = user->account_to_attrs_map.at(account_name)
+                    .allowed_partition_qos_map.find(partition);
+    if (iter == user->account_to_attrs_map.at(account_name)
                     .allowed_partition_qos_map.end()) {
       return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
     }
@@ -1036,9 +1025,7 @@ AccountManager::CraneExpected<bool> AccountManager::CheckSetUserAllowedQos(
 }
 
 AccountManager::CraneExpected<bool> AccountManager::CheckSetUserAdminLevel(
-    const User& user, const std::string& level, User::AdminLevel* new_level) {
-  const std::string& name = user.name;
-
+    const std::string& level, User::AdminLevel* new_level) {
   if (level == "none")
     *new_level = User::None;
   else if (level == "operator")
@@ -1136,13 +1123,12 @@ AccountManager::CraneExpected<bool> AccountManager::CheckDeleteUserAllowedQos(
 }
 
 AccountManager::CraneExpected<bool>
-AccountManager::CheckAddAccountAllowedPartition(const Account* account_ptr,
-                                                const std::string& account,
+AccountManager::CheckAddAccountAllowedPartition(const Account* account,
                                                 const std::string& partition) {
-  auto result = CheckPartitionIsAllowed(account_ptr, partition, true, false);
+  auto result = CheckPartitionIsAllowed(account, partition, true, false);
   if (!result) return result;
 
-  if (ranges::contains(account_ptr->allowed_partition, partition))
+  if (ranges::contains(account->allowed_partition, partition))
     return std::unexpected(CraneErrCode::ERR_DUPLICATE_PARTITION);
 
   return true;
@@ -1385,7 +1371,6 @@ AccountManager::CheckOpUserHasPermissionToAccount(uint32_t uid,
 
 AccountManager::CraneExpected<bool>
 AccountManager::CheckOpUserHasModifyPermission(uint32_t uid, const User* user,
-                                               const std::string& name,
                                                std::string& account,
                                                bool read_only_priv) {
   PasswordEntry entry(uid);
@@ -1479,6 +1464,7 @@ AccountManager::CraneExpected<bool> AccountManager::CheckQosIsAllowed(
   return true;
 }
 
+// 改成IsOperatorPrivilegeSameOrHigher
 bool AccountManager::IsOperatorPrivilegeSameAndHigher(
     const User& op_user, User::AdminLevel admin_level) {
   User::AdminLevel op_level = op_user.admin_level;
@@ -1544,12 +1530,12 @@ AccountManager::CheckUserPermissionOnAccount(const User& op_user,
 }
 
 AccountManager::CraneExpected<bool> AccountManager::CheckUserPermissionOnUser(
-    const User& op_user, const User* user, const std::string& name,
-    std::string& account, bool read_only_priv) {
+    const User& op_user, const User* user, std::string& account,
+    bool read_only_priv) {
   if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
   // 1. The operating user is the same as the target user.
-  if (name == op_user.name) return true;
+  if (user->name == op_user.name) return true;
 
   // 2. The operating user's level is higher than the target user's level.
   if (IsOperatorPrivilegeSameAndHigher(op_user, user->admin_level) &&
@@ -1734,9 +1720,9 @@ AccountManager::CraneExpected<bool> AccountManager::AddUser_(
 AccountManager::CraneExpected<bool> AccountManager::AddAccount_(
     const Account& account, const Account* parent,
     const Account* stale_account) {
-  Account res_account = account;
-  const std::string& name = res_account.name;
+  const std::string& name = account.name;
 
+  Account res_account(account);
   if (parent != nullptr) {
     if (res_account.allowed_partition.empty()) {
       // Inherit
@@ -2013,7 +1999,7 @@ AccountManager::CraneExpected<bool> AccountManager::AddUserAllowedQos_(
 }
 
 AccountManager::CraneExpected<bool> AccountManager::SetUserAdminLevel_(
-    const std::string& name, const User::AdminLevel new_level) {
+    const std::string& name, User::AdminLevel new_level) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
