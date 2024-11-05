@@ -17,12 +17,15 @@ add_executable(craned
         DeviceManager.h)
 
 target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
-
+add_dependencies(craned libcgroup)
+target_include_directories(
+        craned PRIVATE ${LIBCGROUP_PATH}/include/
+)
 target_link_libraries(craned
         concurrentqueue
 
-        PkgConfig::libcgroup
-        
+        ${LIBCGROUP_BUILD_PRODUCTS}
+
         Utility_PublicHeader
         Utility_PluginClient
 

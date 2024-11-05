@@ -19,7 +19,31 @@ if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
             "MinSizeRel" "RelWithDebInfo")
 endif ()
 
-project(Crane C CXX)
+# Generate version text and building timestamp
+if (EXISTS "${CMAKE_SOURCE_DIR}/VERSION")
+    # For a release version, the version file should be provided
+    file(READ "${CMAKE_SOURCE_DIR}/VERSION" VERSION_CONTENT)
+    string(STRIP "${VERSION_CONTENT}" VERSION_CONTENT)
+    string(REGEX MATCH "^[0-9]+\\.[0-9]+\\.[0-9]+" CMAKE_PROJECT_VERSION "${VERSION_CONTENT}")
+else ()
+    # Otherwise, use git hash as the version
+    message(WARNING "No VERSION file found. Use git hash as the version string.")
+    execute_process(
+            COMMAND git rev-parse --short HEAD
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            OUTPUT_VARIABLE VERSION_CONTENT
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET
+    )
+endif ()
+
+if(VERSION_CONTENT STREQUAL "")
+    # Fallback version
+    set(VERSION_CONTENT "Unknown")
+    set(CMAKE_PROJECT_VERSION "0.0.0")
+endif()
+
+project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
 
 # Options start here ----------------------------------------------------------------------------
 
@@ -50,6 +74,11 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CRANE_ENABLE_TESTS ON)
 endif ()
 
+if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "/usr/local" CACHE PATH "Install path prefix, prepended onto install directories." FORCE)
+endif ()
+message(STATUS "Install prefix is set to ${CMAKE_INSTALL_PREFIX}")
+
 # Set the minimal log level based on the build type if it has not been explicitly set by the user
 if (CRANE_MIN_LOG_LEVEL STREQUAL "OFF")
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
@@ -67,32 +96,13 @@ endif ()
 add_compile_definitions(CRANE_LOG_LEVEL=CRANE_LOG_LEVEL_${CRANE_MIN_LOG_LEVEL})
 message(STATUS "Minimal log level is set to ${CRANE_MIN_LOG_LEVEL}")
 
-# Generate version text and building timestamp
-if (EXISTS "${CMAKE_SOURCE_DIR}/VERSION")
-    # For a release version, the version file should be provided
-    file(READ "${CMAKE_SOURCE_DIR}/VERSION" VERSION_CONTENT)
-else ()
-    # Otherwise, use git hash as the version
-    message(WARNING "No VERSION file found. Use git hash as the version string.")
-    execute_process(
-            COMMAND git rev-parse --short HEAD
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            OUTPUT_VARIABLE VERSION_CONTENT
-            OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-endif ()
-
-if ("${VERSION_CONTENT}" STREQUAL "")
-    # if not in git repository, fall back to "Unknown"
-    set(VERSION_CONTENT "Unknown")
-endif ()
-
+# Generate the building timestamp
 string(TIMESTAMP BUILD_TIMESTAMP "%a, %d %b %Y %H:%M:%S %z")
 
-message(STATUS "Version: ${VERSION_CONTENT}")
-message(STATUS "Building Time: ${BUILD_TIMESTAMP}")
 add_compile_definitions(CRANE_BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
 add_compile_definitions(CRANE_VERSION_STRING="${VERSION_CONTENT}")
+message(STATUS "Version: ${VERSION_CONTENT}")
+message(STATUS "Building Time: ${BUILD_TIMESTAMP}")
 
 # Set colorized output when ninja build system is used.
 if (${CRANE_FORCE_COLORED_OUTPUT})
@@ -277,9 +287,6 @@ set(_PROTOBUF_PROTOC $<TARGET_FILE:protoc>)
 set(_GRPC_GRPCPP grpc++)
 set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
-
 # @formatter:off
 add_definitions(-DCRANE_BUILD_DIRECTORY=\("${CMAKE_BINARY_DIR}"\))
 # @formatter:on
@@ -298,85 +305,95 @@ if (CRANE_ENABLE_TESTS)
     add_subdirectory(test EXCLUDE_FROM_ALL)
 endif ()
 
+# Generate the configuration file
+configure_file(${CMAKE_SOURCE_DIR}/etc/cranectld.service.in ${CMAKE_BINARY_DIR}/etc/cranectld.service)
+configure_file(${CMAKE_SOURCE_DIR}/etc/craned.service.in ${CMAKE_BINARY_DIR}/etc/craned.service)
+
 # Add group and components
 set(CPACK_COMPONENTS_GROUPING ONE_PER_GROUP)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
 
 cpack_add_component(cranedc
         DISPLAY_NAME "craned"
-        DESCRIPTION "craned component"
+        DESCRIPTION "craned - Execution Daemon of CraneSched"
         GROUP craned)
 cpack_add_component(cranectldc
         DISPLAY_NAME "cranectld"
-        DESCRIPTION "cranectld component"
+        DESCRIPTION "cranectld - Control Daemon of CraneSched"
         GROUP cranectld)
 
 cpack_add_component_group(craned)
 cpack_add_component_group(cranectld)
 set(CPACK_COMPONENTS_ALL cranedc cranectldc)
 
-configure_file(${CMAKE_SOURCE_DIR}/etc/cranectld.service.in ${CMAKE_BINARY_DIR}/etc/cranectld.service)
-configure_file(${CMAKE_SOURCE_DIR}/etc/craned.service.in ${CMAKE_BINARY_DIR}/etc/craned.service)
-
 # Install binaries
-install(TARGETS craned
-        DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
-        COMPONENT cranedc
-        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
-)
-
 install(TARGETS cranectld
         DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
         COMPONENT cranectldc
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
 )
 
+install(TARGETS craned
+        DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
+        COMPONENT cranedc
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
+)
+
+# Install unit files
 install(FILES
         ${CMAKE_BINARY_DIR}/etc/cranectld.service
-        DESTINATION /etc/systemd/system/
-        COMPONENT cranectldc)
+        DESTINATION /usr/lib/systemd/system/
+        COMPONENT cranectldc
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 install(FILES
         ${CMAKE_BINARY_DIR}/etc/craned.service
-        DESTINATION /etc/systemd/system/
-        COMPONENT cranedc)
+        DESTINATION /usr/lib/systemd/system/
+        COMPONENT cranedc
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 # Install configuration files
 install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         DESTINATION /etc/crane/
-        COMPONENT cranectldc)
+        COMPONENT cranectldc
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         DESTINATION /etc/crane/
-        COMPONENT cranedc)
+        COMPONENT cranedc
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
+# Only cranectld needs database.yaml and permission should be 600
 install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
         DESTINATION /etc/crane/
-        COMPONENT cranectldc)
+        COMPONENT cranectldc
+        PERMISSIONS OWNER_READ OWNER_WRITE)
 
-install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
-        DESTINATION /etc/crane/
-        COMPONENT cranedc)
-
-# Install pam config
+# Install PAM config
 install(TARGETS pam_crane
         DESTINATION /usr/lib64/security/
         COMPONENT cranedc)
 
-set(INSTALL_SCRIPT_PATH "${CMAKE_SOURCE_DIR}/scripts/install_pam.sh")
-install(CODE "execute_process(COMMAND sh ${INSTALL_SCRIPT_PATH})" COMPONENT cranedc)
-# Build rpm
 set(CPACK_GENERATOR "RPM;DEB")
-set(CPACK_PACKAGE_NAME "craneSched")
+set(CMAKE_PROJECT_HOMEPAGE_URL "https://github.com/PKUHPC/CraneSched")
+set(CPACK_PACKAGE_NAME "CraneSched")
 set(CPACK_PACKAGE_VENDOR "PKUHPC")
-set(CPACK_RPM_PACKAGE_GROUP "PKUHPC")
-set(CPACK_DEBIAN_PACKAGE_MAINTAINER "PKUHPC")
-set(CPACK_PACKAGE_DESCRIPTION "CraneSched rpm package")
-set(CPACK_DEB_COMPONENT_INSTALL ON)
-set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+set(CPACK_PACKAGE_CONTACT "CraneSched <service@csjstt.com>")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "An HPC and Cloud Computing Fused Job Scheduling System")
+set(CPACK_PACKAGE_DESCRIPTION "An HPC and Cloud Computing Fused Job Scheduling System")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 
-# Set pam install/uninstall scripts
-set(CPACK_RPM_craned_POST_INSTALL_SCRIPT_FILE ${CMAKE_SOURCE_DIR}/scripts/install_pam.sh)
-set(CPACK_RPM_craned_POST_UNINSTALL_SCRIPT_FILE /${CMAKE_SOURCE_DIR}/scripts/uninstall_pam.sh)
-# pam autoconf for deb package not supported yet
+# Do not allow the package to be relocated
+set(CPACK_PACKAGE_RELOCATABLE OFF)
+
+# RPM
+set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
+set(CPACK_RPM_PACKAGE_LICENSE "AGPL v3")
+set(CPACK_RPM_COMPRESSION_TYPE "xz")
+
+# DEB
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(CPACK_DEBIAN_COMPRESSION_TYPE "xz")
+
 include(CPack)
