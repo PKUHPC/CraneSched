@@ -18,7 +18,7 @@
 
 #include "crane/Logger.h"
 
-void InitLogger(spdlog::level::level_enum level,
+void InitLogger(const std::map<std::string, spdlog::level::level_enum>& logLevels,
                 const std::string& log_file_path,
                 const bool cranectld_flag) {
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
@@ -27,40 +27,63 @@ void InitLogger(spdlog::level::level_enum level,
   auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
 
   spdlog::init_thread_pool(256, 1);
-  auto default_logger = std::make_shared<spdlog::async_logger>(
-      "default", spdlog::sinks_init_list{file_sink, console_sink},
-      spdlog::thread_pool(), spdlog::async_overflow_policy::block);
+    auto create_logger = [&](const std::string& name) {
+        auto logger = std::make_shared<spdlog::async_logger>(
+            name, spdlog::sinks_init_list{file_sink, console_sink},
+            spdlog::thread_pool(), spdlog::async_overflow_policy::block);
+        logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
+        return logger;
+    };
 
-  default_logger->set_level(level);
-
+  spdlog::level::level_enum level;
   if (cranectld_flag) {
-    auto taskscheduler_logger = std::make_shared<spdlog::async_logger>(
-        "taskscheduler", spdlog::sinks_init_list{file_sink, console_sink},
-        spdlog::thread_pool(), spdlog::async_overflow_policy::block);
+    auto cranectld_default_logger = create_logger("CraneCtld::Default");
+    auto cranectld_taskscheduler_logger = create_logger("CraneCtld::TaskScheduler");
+    auto cranectld_cranedkeeper_logger = create_logger("CraneCtld::CranedKeeper");
 
-    auto cranedkeeper_logger = std::make_shared<spdlog::async_logger>(
-        "cranedkeeper", spdlog::sinks_init_list{file_sink, console_sink},
-        spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-    
-    taskscheduler_logger->set_level(level);
-    cranedkeeper_logger->set_level(level);
-    taskscheduler_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
-    cranedkeeper_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
-    spdlog::register_logger(taskscheduler_logger);
-    spdlog::register_logger(cranedkeeper_logger);
+    FindLoggerValidLevel(logLevels, "CraneCtld::Default", &level);
+    cranectld_default_logger->set_level(level);
+    spdlog::set_level(level);
+
+    FindLoggerValidLevel(logLevels, "CraneCtld::TaskScheduler", &level);
+    cranectld_taskscheduler_logger->set_level(level);
+
+    FindLoggerValidLevel(logLevels, "CraneCtld::CranedKeeper", &level);
+    cranectld_cranedkeeper_logger->set_level(level);
+
+    spdlog::register_logger(cranectld_default_logger);
+    spdlog::register_logger(cranectld_taskscheduler_logger);
+    spdlog::register_logger(cranectld_cranedkeeper_logger);
+  } else {
+    auto craned_default_logger = create_logger("Craned::Default");
+
+    FindLoggerValidLevel(logLevels, "Craned::Default", &level);
+    craned_default_logger->set_level(level);
+    spdlog::set_level(level);
+
+    spdlog::register_logger(craned_default_logger);
   }
-
-  default_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
-  spdlog::register_logger(default_logger);
 
   spdlog::flush_on(spdlog::level::err);
   spdlog::flush_every(std::chrono::seconds(1));
-
-  spdlog::set_level(level);
 }
 
-bool SetLoggerLogLevel(const std::string mode, spdlog::level::level_enum level) {
-    auto logger = spdlog::get(mode);
+void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>& logLevels,
+                          const std::string& loggerName,
+                          spdlog::level::level_enum *out_level) {
+    if (out_level == nullptr) {
+        return;
+    }
+    auto it = logLevels.find(loggerName);
+    if (it != logLevels.end()) {
+        *out_level = it->second;  // 使用迭代器访问值
+    } else {
+        *out_level = spdlog::level::trace;  // 默认级别
+    }
+}
+
+bool SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level) {
+    auto logger = spdlog::get(logger_name);
     if (logger == nullptr) {
         return false;
     }
@@ -69,7 +92,7 @@ bool SetLoggerLogLevel(const std::string mode, spdlog::level::level_enum level) 
     return true;
 }
 
-bool StrTransLogLevel(const std::string str_level, spdlog::level::level_enum *out_Level) {
+bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_Level) {
     if (str_level == "trace") {
         *out_Level = spdlog::level::trace;
     } else if (str_level == "debug") {
@@ -85,4 +108,24 @@ bool StrTransLogLevel(const std::string str_level, spdlog::level::level_enum *ou
     }
 
     return true;
+}
+
+std::shared_ptr<spdlog::logger> GetCranectldDefaultLogger() {
+    static auto logger = spdlog::get("CraneCtld::Default");
+    return logger;
+}
+
+std::shared_ptr<spdlog::logger> GetCranectldTaskSchedulerLogger() {
+    static auto logger = spdlog::get("CraneCtld::TaskScheduler");
+    return logger;
+}
+
+std::shared_ptr<spdlog::logger> GetCranectldCranedKeeperLogger() {
+    static auto logger = spdlog::get("CraneCtld::CranedKeeper");
+    return logger;
+}
+
+std::shared_ptr<spdlog::logger> GetCranedDefaultLogger() {
+    static auto logger = spdlog::get("Craned::Default");
+    return logger;
 }

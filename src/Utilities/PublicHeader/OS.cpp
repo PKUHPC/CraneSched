@@ -33,7 +33,7 @@ bool DeleteFile(std::string const& p) {
   std::error_code ec;
   bool ok = std::filesystem::remove(p, ec);
 
-  if (!ok) CRANE_ERROR("Failed to remove file {}: {}", p, ec.message());
+  if (!ok) CRANECTLD_ERROR("Failed to remove file {}: {}", p, ec.message());
 
   return ok;
 }
@@ -44,7 +44,7 @@ bool CreateFolders(std::string const& p) {
   std::error_code ec;
   bool ok = std::filesystem::create_directories(p, ec);
 
-  if (!ok) CRANE_ERROR("Failed to create folder {}: {}", p, ec.message());
+  if (!ok) CRANECTLD_ERROR("Failed to create folder {}: {}", p, ec.message());
 
   return ok;
 }
@@ -56,7 +56,7 @@ bool CreateFoldersForFile(std::string const& p) {
     if (!std::filesystem::exists(log_dir))
       std::filesystem::create_directories(log_dir);
   } catch (const std::exception& e) {
-    CRANE_ERROR("Failed to create folder for {}: {}", p, e.what());
+    CRANECTLD_ERROR("Failed to create folder for {}: {}", p, e.what());
     return false;
   }
 
@@ -133,7 +133,7 @@ absl::Time GetSystemBootTime() {
 #if defined(__linux__) || defined(__unix__)
   struct sysinfo system_info;
   if (sysinfo(&system_info) != 0) {
-    CRANE_ERROR("Failed to get sysinfo {}.", strerror(errno));
+    CRANECTLD_ERROR("Failed to get sysinfo {}.", strerror(errno));
     return {};
   }
 

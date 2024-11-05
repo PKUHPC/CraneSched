@@ -63,10 +63,10 @@ class ProcessInstance {
   ~ProcessInstance() {
     if (m_user_data_) {
       if (m_clean_cb_) {
-        CRANE_TRACE("Clean Callback for pid {} is called.", m_pid_);
+        CRANED_TRACE("Clean Callback for pid {} is called.", m_pid_);
         m_clean_cb_(m_user_data_);
       } else
-        CRANE_ERROR(
+        CRANED_ERROR(
             "user_data in ProcessInstance is set, but clean_cb is not set!");
     }
 

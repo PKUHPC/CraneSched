@@ -98,14 +98,14 @@ bool TaskScheduler::Init() {
               "mark the task as FAILED.",
               task_id);
         }
-        if (err != CraneErr::kOk)
+        if (err != CraneErr::kOk) {
           TASKSCHEDULER_INFO(
               "Failed to acquire task attributes for restored running task "
               "#{}. "
               "Error Code: {}. "
               "Mark it as FAILED and move it to the ended queue.",
               task_id, CraneErrStr(err));
-        else {
+        } else {
           TASKSCHEDULER_INFO("Mark running interactive task {} as FAILED.", task_id);
           for (const CranedId& craned_id : task->CranedIds()) {
             auto stub = g_craned_keeper->GetCranedStub(craned_id);

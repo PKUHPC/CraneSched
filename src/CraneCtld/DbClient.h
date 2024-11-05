@@ -163,7 +163,7 @@ class MongodbClient {
             *GetSession_(), filter.view(), updateItem.view());
 
     if (!result || !result->modified_count()) {
-      CRANE_ERROR(
+      CRANECTLD_ERROR(
           "Update date in database fail(name:{},opt:{},key:{},value:{})", name,
           opt, key, value);
       return false;

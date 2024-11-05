@@ -56,19 +56,75 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-// default log
-#define CRANE_TRACE(...) \
-  SPDLOG_LOGGER_TRACE(spdlog::get("default"), __VA_ARGS__)
-#define CRANE_DEBUG(...) \
-  SPDLOG_LOGGER_DEBUG(spdlog::get("default"), __VA_ARGS__)
-#define CRANE_INFO(...)  \
-  SPDLOG_LOGGER_INFO(spdlog::get("default"), __VA_ARGS__)
-#define CRANE_WARN(...)  \
-  SPDLOG_LOGGER_WARN(spdlog::get("default"), __VA_ARGS__)
-#define CRANE_ERROR(...) \
-  SPDLOG_LOGGER_ERROR(spdlog::get("default"), __VA_ARGS__)
-#define CRANE_CRITICAL(...) \
-  SPDLOG_LOGGER_CRITICAL(spdlog::get("default"), __VA_ARGS__)
+//cranectld spdlog sink
+std::shared_ptr<spdlog::logger> GetCranectldDefaultLogger();
+std::shared_ptr<spdlog::logger> GetCranectldTaskSchedulerLogger();
+std::shared_ptr<spdlog::logger> GetCranectldCranedKeeperLogger();
+
+//craned spdlog sink
+std::shared_ptr<spdlog::logger> GetCranedDefaultLogger();
+
+// default cranetld log
+#define CRANECTLD_TRACE(...) \
+  if (auto logger = GetCranectldDefaultLogger()) { \
+    SPDLOG_LOGGER_TRACE(logger, __VA_ARGS__); \
+  }
+
+#define CRANECTLD_DEBUG(...) \
+  if (auto logger = GetCranectldDefaultLogger()) { \
+    SPDLOG_LOGGER_DEBUG(logger, __VA_ARGS__); \
+  }
+
+#define CRANECTLD_INFO(...) \
+  if (auto logger = GetCranectldDefaultLogger()) { \
+    SPDLOG_LOGGER_INFO(logger, __VA_ARGS__); \
+  }
+
+#define CRANECTLD_WARN(...) \
+  if (auto logger = GetCranectldDefaultLogger()) { \
+    SPDLOG_LOGGER_WARN(logger, __VA_ARGS__); \
+  }
+
+#define CRANECTLD_ERROR(...) \
+  if (auto logger = GetCranectldDefaultLogger()) { \
+    SPDLOG_LOGGER_ERROR(logger, __VA_ARGS__); \
+  }
+
+#define CRANECTLD_CRITICAL(...) \
+  if (auto logger = GetCranectldDefaultLogger()) { \
+    SPDLOG_LOGGER_CRITICAL(logger, __VA_ARGS__); \
+  }
+
+// default craned log
+#define CRANED_TRACE(...) \
+  if (auto logger = GetCranedDefaultLogger()) { \
+    SPDLOG_LOGGER_TRACE(logger, __VA_ARGS__); \
+  }
+
+#define CRANED_DEBUG(...) \
+  if (auto logger = GetCranedDefaultLogger()) { \
+    SPDLOG_LOGGER_DEBUG(logger, __VA_ARGS__); \
+  }
+
+#define CRANED_INFO(...) \
+  if (auto logger = GetCranedDefaultLogger()) { \
+    SPDLOG_LOGGER_INFO(logger, __VA_ARGS__); \
+  }
+
+#define CRANED_WARN(...) \
+  if (auto logger = GetCranedDefaultLogger()) { \
+    SPDLOG_LOGGER_WARN(logger, __VA_ARGS__); \
+  }
+
+#define CRANED_ERROR(...) \
+  if (auto logger = GetCranedDefaultLogger()) { \
+    SPDLOG_LOGGER_ERROR(logger, __VA_ARGS__); \
+  }
+
+#define CRANED_CRITICAL(...) \
+  if (auto logger = GetCranedDefaultLogger()) { \
+    SPDLOG_LOGGER_CRITICAL(logger, __VA_ARGS__); \
+  }
 
 #define CRANE_LOG_LOC_CALL(loc, level, ...)                             \
   spdlog::default_logger_raw()->log(                                    \
@@ -122,7 +178,7 @@
 #  define CRANE_ASSERT_MSG_VA(condition, message, ...)                    \
     do {                                                                  \
       if (!(condition)) {                                                 \
-        CRANE_CRITICAL("Assertion failed: \"" #condition "\": " #message, \
+        CRANECTLD_CRITICAL("Assertion failed: \"" #condition "\": " #message, \
                        __VA_ARGS__);                                      \
         std::terminate();                                                 \
       }                                                                   \
@@ -131,7 +187,7 @@
 #  define CRANE_ASSERT_MSG(condition, message)                             \
     do {                                                                   \
       if (!(condition)) {                                                  \
-        CRANE_CRITICAL("Assertion failed: \"" #condition "\": " #message); \
+        CRANECTLD_CRITICAL("Assertion failed: \"" #condition "\": " #message); \
         std::terminate();                                                  \
       }                                                                    \
     } while (false)
@@ -139,7 +195,7 @@
 #  define CRANE_ASSERT(condition)                               \
     do {                                                        \
       if (!(condition)) {                                       \
-        CRANE_CRITICAL("Assertion failed: \"" #condition "\""); \
+        CRANECTLD_CRITICAL("Assertion failed: \"" #condition "\""); \
         std::terminate();                                       \
       }                                                         \
     } while (false)
@@ -156,13 +212,19 @@
     } while (false)
 #endif
 
-void InitLogger(spdlog::level::level_enum level,
-                const std::string &log_file_pathm,
+void InitLogger(const std::map<std::string, spdlog::level::level_enum>& logLevels,
+                const std::string& log_file_path,
                 const bool cranectld_flag);
 
-bool SetLoggerLogLevel(const std::string mode, spdlog::level::level_enum level);
+void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>& logLevels, 
+                          const std::string& loggerName,
+                          spdlog::level::level_enum *out_level);
 
-bool StrTransLogLevel(const std::string str_level, spdlog::level::level_enum *out_Level);
+bool SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level);
+
+bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_Level);
+
+
 
 // Custom type formatting
 namespace fmt {

@@ -72,7 +72,7 @@ struct Config {
 
   std::string ControlMachine;
   std::string CraneCtldListenPort;
-  std::string CranedDebugLevel;
+  std::map<std::string, spdlog::level::level_enum> logLevels;
 
   std::string CraneBaseDir;
   std::string CranedLogFile;

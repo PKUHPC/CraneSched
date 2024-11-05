@@ -113,9 +113,7 @@ struct Config {
 
   bool CompressedRpc{};
 
-  std::string CraneCtldDebugLevel;
-  std::string CraneCtldTaskSchedulerLevel;
-  std::string CraneCtldCranedKeeperLevel;
+  std::map<std::string, spdlog::level::level_enum> logLevels;
   std::string CraneCtldLogFile;
 
   std::string CraneEmbeddedDbBackend;
