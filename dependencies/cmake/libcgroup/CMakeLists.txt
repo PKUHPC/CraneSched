@@ -16,6 +16,7 @@ if (BUILD_SHARED_LIBS)
 else ()
     set(LIBCGROUP_BUILD_PRODUCTS ${libcgroup_BINARY_DIR}/lib/libcgroup.a CACHE STRING "Path to libcgroup library" FORCE)
 endif ()
+set(LIBCGROUP_PATH "${libcgroup_BINARY_DIR}" CACHE STRING "Path to libcgroup dependency" FORCE)
 
 ExternalProject_Add(
         libcgroup

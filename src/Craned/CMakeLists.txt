@@ -19,7 +19,7 @@ add_executable(craned
 target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
 add_dependencies(craned libcgroup)
 target_include_directories(
-        craned PRIVATE ${libcgroup_BINARY_DIR}/include/
+        craned PRIVATE ${LIBCGROUP_PATH}/include/
 )
 target_link_libraries(craned
         concurrentqueue
