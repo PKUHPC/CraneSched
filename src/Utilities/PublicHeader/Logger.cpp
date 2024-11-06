@@ -35,7 +35,7 @@ void InitLogger(const std::map<std::string, spdlog::level::level_enum>& logLevel
         return logger;
     };
 
-  spdlog::level::level_enum level;
+  spdlog::level::level_enum level = spdlog::level::trace;
   if (cranectld_flag) {
     auto cranectld_default_logger = create_logger("CraneCtld::Default");
     auto cranectld_taskscheduler_logger = create_logger("CraneCtld::TaskScheduler");
@@ -72,6 +72,7 @@ void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>
                           const std::string& loggerName,
                           spdlog::level::level_enum *out_level) {
     if (out_level == nullptr) {
+        fmt::print("Logger map empty.\n");
         return;
     }
     auto it = logLevels.find(loggerName);
