@@ -56,12 +56,6 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-//cranectld spdlog sink
-std::shared_ptr<spdlog::logger> GetDefaultLogger();
-std::shared_ptr<spdlog::logger> GetCtldTaskSchedulerLogger();
-std::shared_ptr<spdlog::logger> GetCtldCranedKeeperLogger();
-
-
 // default cranetld log
 #define CRANE_TRACE(...) SPDLOG_LOGGER_TRACE(GetDefaultLogger(), __VA_ARGS__);
 #define CRANE_DEBUG(...) SPDLOG_LOGGER_DEBUG(GetDefaultLogger(), __VA_ARGS__);
@@ -155,6 +149,11 @@ std::shared_ptr<spdlog::logger> GetCtldCranedKeeperLogger();
     do {                          \
     } while (false)
 #endif
+
+//cranectld spdlog sink
+std::shared_ptr<spdlog::logger> GetDefaultLogger();
+std::shared_ptr<spdlog::logger> GetCtldTaskSchedulerLogger();
+std::shared_ptr<spdlog::logger> GetCtldCranedKeeperLogger();
 
 void InitLogger(const std::map<std::string, spdlog::level::level_enum>& logLevels,
                 const std::string& log_file_path,
