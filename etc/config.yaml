@@ -1,4 +1,7 @@
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 237f485 (comment)
 # Cluster settings (This must be identical across all nodes)
 # the hostname of node which is running cranectld
 ControlMachine: cn15
@@ -88,12 +91,18 @@ Nodes:
         EnvInjector: nvidia
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
+=======
+>>>>>>> 237f485 (comment)
       - name: gpu
         type: h100
         file: /dev/nvidia[4-7]
 
+<<<<<<< HEAD
 >>>>>>> fa1a241 (get master config.yaml)
+=======
+>>>>>>> 237f485 (comment)
 # partition information list
 Partitions:
   - name: CPU
@@ -129,6 +138,7 @@ Plugin:
   # Toggle the plugin module in CraneSched
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
   Enabled: false
 =======
   Enabled: true
@@ -136,6 +146,9 @@ Plugin:
 =======
   Enabled: false
 >>>>>>> fa1a241 (get master config.yaml)
+=======
+  Enabled: false
+>>>>>>> 237f485 (comment)
   # Relative to CraneBaseDir
   PlugindSockPath: "cplugind/cplugind.sock"
   # Debug level of Plugind
@@ -145,5 +158,8 @@ Plugin:
     - Name: "dummy"
       Path: "/path/to/dummy.so"
       Config: "/path/to/dummy.yaml"
+<<<<<<< HEAD
 =======
 >>>>>>> 67dcd70 (check name)
+=======
+>>>>>>> 237f485 (comment)
