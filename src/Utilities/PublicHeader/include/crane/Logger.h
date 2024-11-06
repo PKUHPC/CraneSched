@@ -73,35 +73,12 @@ std::shared_ptr<spdlog::logger> GetCranedDefaultLogger();
 #define CRANECTLD_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(GetCtldDefaultLogger(), __VA_ARGS__);
 
 // default craned log
-#define CRANED_TRACE(...) \
-  if (auto logger = GetCranedDefaultLogger()) { \
-    SPDLOG_LOGGER_TRACE(logger, __VA_ARGS__); \
-  }
-
-#define CRANED_DEBUG(...) \
-  if (auto logger = GetCranedDefaultLogger()) { \
-    SPDLOG_LOGGER_DEBUG(logger, __VA_ARGS__); \
-  }
-
-#define CRANED_INFO(...) \
-  if (auto logger = GetCranedDefaultLogger()) { \
-    SPDLOG_LOGGER_INFO(logger, __VA_ARGS__); \
-  }
-
-#define CRANED_WARN(...) \
-  if (auto logger = GetCranedDefaultLogger()) { \
-    SPDLOG_LOGGER_WARN(logger, __VA_ARGS__); \
-  }
-
-#define CRANED_ERROR(...) \
-  if (auto logger = GetCranedDefaultLogger()) { \
-    SPDLOG_LOGGER_ERROR(logger, __VA_ARGS__); \
-  }
-
-#define CRANED_CRITICAL(...) \
-  if (auto logger = GetCranedDefaultLogger()) { \
-    SPDLOG_LOGGER_CRITICAL(logger, __VA_ARGS__); \
-  }
+#define CRANED_TRACE(...) SPDLOG_LOGGER_TRACE(GetCranedDefaultLogger(), __VA_ARGS__);
+#define CRANED_DEBUG(...) SPDLOG_LOGGER_DEBUG(GetCranedDefaultLogger(), __VA_ARGS__);
+#define CRANED_INFO(...) SPDLOG_LOGGER_INFO(GetCranedDefaultLogger(), __VA_ARGS__);
+#define CRANED_WARN(...) SPDLOG_LOGGER_WARN(GetCranedDefaultLogger(), __VA_ARGS__);
+#define CRANED_ERROR(...) SPDLOG_LOGGER_ERROR(GetCranedDefaultLogger(), __VA_ARGS__);
+#define CRANED_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(GetCranedDefaultLogger(), __VA_ARGS__);
 
 #define CRANE_LOG_LOC_CALL(loc, level, ...)                             \
   spdlog::default_logger_raw()->log(                                    \
