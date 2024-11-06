@@ -150,6 +150,11 @@
     } while (false)
 #endif
 
+  struct Result {
+    bool ok{false};
+    std::string reason;
+  };
+
 //cranectld spdlog sink
 std::shared_ptr<spdlog::logger> GetDefaultLogger();
 std::shared_ptr<spdlog::logger> GetCtldTaskSchedulerLogger();
@@ -159,14 +164,16 @@ void InitLogger(const std::map<std::string, spdlog::level::level_enum>& logLevel
                 const std::string& log_file_path,
                 const bool cranectld_flag);
 
+
 void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>& logLevels, 
                           const std::string& loggerName,
                           spdlog::level::level_enum *out_level);
 
-bool SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level);
-
 bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_Level);
 
+bool SetSingleLoggerLevel(const std::string& logger_name, spdlog::level::level_enum level);
+
+Result SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level);
 
 
 // Custom type formatting

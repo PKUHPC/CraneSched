@@ -26,6 +26,7 @@
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
 #include "crane/String.h"
+#include "CtldPublicDefs.h"
 
 namespace Ctld {
 
@@ -233,6 +234,28 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
     const crane::grpc::ModifyCranedStateRequest *request,
     crane::grpc::ModifyCranedStateReply *response) {
   *response = g_meta_container->ChangeNodeState(*request);
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::SetLogerLevel (
+    grpc::ServerContext *context,
+    const crane::grpc::SetLogLevelRequest *request,
+    crane::grpc::SetLogLevelReply *response) {
+    spdlog::level::level_enum level;
+  
+  if (!StrToLogLevel(request->log_level(), &level)) {
+    response->set_ok(false);
+    response->set_reason("parameter error");
+    return grpc::Status::OK;
+  }
+  Result set_logger_res = SetLoggerLogLevel(request->logger(), level);
+  if (!set_logger_res.ok) {
+      response->set_ok(false);
+  } else {
+    response->set_ok(true);
+  }
+  response->set_reason(set_logger_res.reason);
 
   return grpc::Status::OK;
 }

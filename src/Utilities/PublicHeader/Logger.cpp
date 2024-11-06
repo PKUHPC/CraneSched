@@ -37,20 +37,20 @@ void InitLogger(const std::map<std::string, spdlog::level::level_enum>& logLevel
 
   spdlog::level::level_enum level = spdlog::level::trace;
 
-  auto default_logger = create_logger("Default");
-  FindLoggerValidLevel(logLevels, "Default", &level);
+  auto default_logger = create_logger("default");
+  FindLoggerValidLevel(logLevels, "default", &level);
   default_logger->set_level(level);
   spdlog::set_level(level);
   spdlog::register_logger(default_logger);
 
   if (cranectld_flag) {
-    auto cranectld_taskscheduler_logger = create_logger("TaskScheduler");
-    auto cranectld_cranedkeeper_logger = create_logger("CranedKeeper");
+    auto cranectld_taskscheduler_logger = create_logger("taskscheduler");
+    auto cranectld_cranedkeeper_logger = create_logger("cranedkeeper");
 
-    FindLoggerValidLevel(logLevels, "TaskScheduler", &level);
+    FindLoggerValidLevel(logLevels, "taskscheduler", &level);
     cranectld_taskscheduler_logger->set_level(level);
 
-    FindLoggerValidLevel(logLevels, "CranedKeeper", &level);
+    FindLoggerValidLevel(logLevels, "cranedkeeper", &level);
     cranectld_cranedkeeper_logger->set_level(level);
 
     spdlog::register_logger(cranectld_taskscheduler_logger);
@@ -76,14 +76,26 @@ void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>
     }
 }
 
-bool SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level) {
-    auto logger = spdlog::get(logger_name);
-    if (logger == nullptr) {
-        return false;
+Result SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level) {
+    std::vector<std::string> loggers_to_set;
+    if (logger_name == "all") {
+        loggers_to_set = {"default", "taskscheduler", "cranedkeeper"};
+    } else if (logger_name == "other") {
+        loggers_to_set = {"default"};
+    } else if (logger_name == "taskscheduler" || logger_name == "cranedkeeper") {
+        loggers_to_set = {logger_name};
+    } else {
+        return Result{false, fmt::format("logger {} not found\n", logger_name)};
     }
-    logger->set_level(level);
 
-    return true;
+    for (const auto& name : loggers_to_set) {
+        if (!SetSingleLoggerLevel(name, level)) {
+            return Result{false, fmt::format("{} logger set failed\n", name)};
+        }
+    }
+
+    return Result{true, fmt::format("logger(s) {} set succeed\n", logger_name)};
+
 }
 
 bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_Level) {
@@ -104,17 +116,26 @@ bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_
     return true;
 }
 
+bool SetSingleLoggerLevel(const std::string& logger_name, spdlog::level::level_enum level) {
+    auto logger = spdlog::get(logger_name);
+    if (logger == nullptr) {
+        return false;
+    }
+    logger->set_level(level);
+    return true;
+}
+
 std::shared_ptr<spdlog::logger> GetDefaultLogger() {
-    static auto logger = spdlog::get("Default");
+    static auto logger = spdlog::get("default");
     return logger;
 }
 
 std::shared_ptr<spdlog::logger> GetCtldTaskSchedulerLogger() {
-    static auto logger = spdlog::get("TaskScheduler");
+    static auto logger = spdlog::get("taskscheduler");
     return logger;
 }
 
 std::shared_ptr<spdlog::logger> GetCtldCranedKeeperLogger() {
-    static auto logger = spdlog::get("CranedKeeper");
+    static auto logger = spdlog::get("cranedkeeper");
     return logger;
 }
