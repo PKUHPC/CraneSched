@@ -1,0 +1,135 @@
+# Cluster settings (This must be identical across all nodes)
+# the hostname of node which is running cranectld
+ControlMachine: cn15
+# the name of this cluster
+ClusterName: pkuhpc_test
+
+# Other configurations to be used
+DbConfigPath: /etc/crane/database.yaml
+
+# Data storage settings
+CraneBaseDir: /var/crane/
+
+# Tls settings
+UseTls: false
+ServerCertFilePath: /etc/crane/server.crt
+ServerKeyFilePath: /etc/crane/server.key
+CaCertFilePath: /etc/crane/ca.crt
+DomainSuffix: riley.local
+
+# Ctld settings
+# the listening address of control machine
+CraneCtldListenAddr: 0.0.0.0
+# the port of control machine to listen
+CraneCtldListenPort: 10011
+# debug level of cranectld
+CraneCtldDebugLevel: trace
+# file path of cranectld log file (relative to CraneBaseDir)
+CraneCtldLogFile: cranectld/cranectld.log
+# file path of cranectld lock file (relative to CraneBaseDir)
+CraneCtldMutexFilePath: cranectld/cranectld.lock
+# whether the cranectld is running in the background
+CraneCtldForeground: true
+
+# Craned settings
+# the listening address of control machine
+CranedListenAddr: 0.0.0.0
+# the port of control machine to listen
+CranedListenPort: 10010
+# debug level of craned
+CranedDebugLevel: trace
+# file path of craned log file (relative to CraneBaseDir)
+CranedLogFile: craned/craned.log
+# file path of craned lock file (relative to CraneBaseDir)
+CranedMutexFilePath: craned/craned.lock
+# file path of craned go module unix socket path (relative to CraneBaseDir)
+CranedCforedSockPath: craned/cfored.sock
+# whether the craned is running in the background
+CranedForeground: true
+
+# Scheduling settings
+# Current implemented scheduling algorithms are:
+# priority/basic, priority/multifactor
+PriorityType: priority/multifactor
+
+# Default value is true
+PriorityFavorSmall: true
+
+PriorityMaxAge: 14-0
+PriorityWeightAge: 500
+PriorityWeightFairShare: 10000
+
+# 0 means that job size factor is not used.
+PriorityWeightJobSize: 0
+
+PriorityWeightPartition: 1000
+PriorityWeightQ0S: 1000000
+
+# list of configuration information of the computing machine
+# Nodes and partitions settings
+Nodes:
+  # the hostname of computing node
+  - name: "cn[15-16]"
+    cpu: 2
+    memory: 2G
+
+  - name: "cn[17-18]"
+    cpu: 2
+    memory: 2G
+    gres:
+      - name: gpu
+        type: a100
+        # Each file will be parsed as a device.
+        DeviceFileRegex: /dev/nvidia[0-3]
+        # Following device files will belong to a single device.
+        DeviceFileList:
+          - /dev/dri/renderer[0-3]
+        EnvInjector: nvidia
+
+      - name: gpu
+        type: h100
+        file: /dev/nvidia[4-7]
+
+# partition information list
+Partitions:
+  - name: CPU
+    nodes: "cn[15-16]"
+    priority: 5
+  - name: GPU
+    nodes: "cn[17-18]"
+    priority: 3
+    # Optional default memory per cpu in MB, 0 lets scheduler to decide
+    DefaultMemPerCpu: 0
+    # Optional maximum memory per cpu in MB, 0 indicates no limit
+    MaxMemPerCpu: 0
+
+DefaultPartition: CPU
+
+
+# Advanced options:
+
+# Maximum size of Pending Queue and must <=900000.
+PendingQueueMaxSize: 900000
+
+# Maximum size of jobs which the scheduler will attempt to schedule
+# and its upper limit is 200000.
+# Default value is 100000.
+ScheduledBatchSize: 100000
+
+# Scheduler will reject all jobs beyond processing capacity set by PendingQueueMaxSize
+# if this option is set to true.
+# Default value is false.
+RejectJobsBeyondCapacity: false
+
+Plugin:
+  # Toggle the plugin module in CraneSched
+  Enabled: false
+  # Relative to CraneBaseDir
+  PlugindSockPath: "cplugind/cplugind.sock"
+  # Debug level of Plugind
+  PlugindDebugLevel: "trace"
+  # Plugins to be loaded in Plugind
+  Plugins:
+    - Name: "dummy"
+      Path: "/path/to/dummy.so"
+      Config: "/path/to/dummy.yaml"
