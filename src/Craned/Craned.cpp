@@ -115,7 +115,7 @@ void ParseConfig(int argc, char** argv) {
                     spdlog::level::level_enum level;
                     std::string loggerMode;
                     if (StrToLogLevel(strLevel, &level)) {
-                        loggerMode = loggerName + "::" + componentName;
+                        loggerMode = componentName;
                         g_config.logLevels[loggerMode] = level;
                     } else {
                         fmt::print(stderr, "Logger {} level {} is illegal.\n", loggerMode, strLevel);

@@ -28,12 +28,12 @@
 
 
 // cranedkeeper log macro
-#define CRANEDKEEPER_TRACE(...) SPDLOG_LOGGER_TRACE(GetCranectldCranedKeeperLogger(), __VA_ARGS__);
-#define CRANEDKEEPER_DEBUG(...) SPDLOG_LOGGER_DEBUG(GetCranectldCranedKeeperLogger(), __VA_ARGS__);
-#define CRANEDKEEPER_INFO(...)  SPDLOG_LOGGER_INFO(GetCranectldCranedKeeperLogger(), __VA_ARGS__);
-#define CRANEDKEEPER_WARN(...)  SPDLOG_LOGGER_WARN(GetCranectldCranedKeeperLogger(), __VA_ARGS__);
-#define CRANEDKEEPER_ERROR(...) SPDLOG_LOGGER_ERROR(GetCranectldCranedKeeperLogger(), __VA_ARGS__);
-#define CRANEDKEEPER_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(GetCranectldCranedKeeperLogger(), __VA_ARGS__);
+#define CRANEDKEEPER_TRACE(...) SPDLOG_LOGGER_TRACE(GetCtldCranedKeeperLogger(), __VA_ARGS__);
+#define CRANEDKEEPER_DEBUG(...) SPDLOG_LOGGER_DEBUG(GetCtldCranedKeeperLogger(), __VA_ARGS__);
+#define CRANEDKEEPER_INFO(...)  SPDLOG_LOGGER_INFO(GetCtldCranedKeeperLogger(), __VA_ARGS__);
+#define CRANEDKEEPER_WARN(...)  SPDLOG_LOGGER_WARN(GetCtldCranedKeeperLogger(), __VA_ARGS__);
+#define CRANEDKEEPER_ERROR(...) SPDLOG_LOGGER_ERROR(GetCtldCranedKeeperLogger(), __VA_ARGS__);
+#define CRANEDKEEPER_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(GetCtldCranedKeeperLogger(), __VA_ARGS__);
 
 namespace Ctld {
 

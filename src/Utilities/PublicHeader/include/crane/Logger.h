@@ -57,20 +57,20 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 //cranectld spdlog sink
-std::shared_ptr<spdlog::logger> GetCranectldDefaultLogger();
-std::shared_ptr<spdlog::logger> GetCranectldTaskSchedulerLogger();
-std::shared_ptr<spdlog::logger> GetCranectldCranedKeeperLogger();
+std::shared_ptr<spdlog::logger> GetCtldDefaultLogger();
+std::shared_ptr<spdlog::logger> GetCtldTaskSchedulerLogger();
+std::shared_ptr<spdlog::logger> GetCtldCranedKeeperLogger();
 
 //craned spdlog sink
 std::shared_ptr<spdlog::logger> GetCranedDefaultLogger();
 
 // default cranetld log
-#define CRANECTLD_TRACE(...) SPDLOG_LOGGER_TRACE(GetCranectldDefaultLogger(), __VA_ARGS__);
-#define CRANECTLD_DEBUG(...) SPDLOG_LOGGER_DEBUG(GetCranectldDefaultLogger(), __VA_ARGS__);
-#define CRANECTLD_INFO(...) SPDLOG_LOGGER_INFO(GetCranectldDefaultLogger(), __VA_ARGS__);
-#define CRANECTLD_WARN(...) SPDLOG_LOGGER_WARN(GetCranectldDefaultLogger(), __VA_ARGS__);
-#define CRANECTLD_ERROR(...) SPDLOG_LOGGER_ERROR(GetCranectldDefaultLogger(), __VA_ARGS__);
-#define CRANECTLD_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(GetCranectldDefaultLogger(), __VA_ARGS__);
+#define CRANECTLD_TRACE(...) SPDLOG_LOGGER_TRACE(GetCtldDefaultLogger(), __VA_ARGS__);
+#define CRANECTLD_DEBUG(...) SPDLOG_LOGGER_DEBUG(GetCtldDefaultLogger(), __VA_ARGS__);
+#define CRANECTLD_INFO(...) SPDLOG_LOGGER_INFO(GetCtldDefaultLogger(), __VA_ARGS__);
+#define CRANECTLD_WARN(...) SPDLOG_LOGGER_WARN(GetCtldDefaultLogger(), __VA_ARGS__);
+#define CRANECTLD_ERROR(...) SPDLOG_LOGGER_ERROR(GetCtldDefaultLogger(), __VA_ARGS__);
+#define CRANECTLD_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(GetCtldDefaultLogger(), __VA_ARGS__);
 
 // default craned log
 #define CRANED_TRACE(...) \

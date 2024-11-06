@@ -105,7 +105,7 @@ void ParseConfig(int argc, char** argv) {
                     std::string strLevel = levelNode.second.as<std::string>();
 
                     spdlog::level::level_enum level;
-                    std::string loggerMode = loggerName + "::" + componentName;
+                    std::string loggerMode = componentName;
                     if (StrToLogLevel(strLevel, &level)) {
                         g_config.logLevels[loggerMode] = level;
                     } else {

@@ -27,12 +27,12 @@
 #include "protos/Crane.pb.h"
 
 // // taskscheduler log macro
-#define TASKSCHEDULER_TRACE(...) SPDLOG_LOGGER_TRACE(GetCranectldTaskSchedulerLogger(), __VA_ARGS__);
-#define TASKSCHEDULER_DEBUG(...) SPDLOG_LOGGER_DEBUG(GetCranectldTaskSchedulerLogger(), __VA_ARGS__);
-#define TASKSCHEDULER_INFO(...)  SPDLOG_LOGGER_INFO(GetCranectldTaskSchedulerLogger(), __VA_ARGS__);
-#define TASKSCHEDULER_WARN(...)  SPDLOG_LOGGER_WARN(GetCranectldTaskSchedulerLogger(), __VA_ARGS__);
-#define TASKSCHEDULER_ERROR(...) SPDLOG_LOGGER_ERROR(GetCranectldTaskSchedulerLogger(), __VA_ARGS__);
-#define TASKSCHEDULER_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(GetCranectldTaskSchedulerLogger(), __VA_ARGS__);
+#define TASKSCHEDULER_TRACE(...) SPDLOG_LOGGER_TRACE(GetCtldTaskSchedulerLogger(), __VA_ARGS__);
+#define TASKSCHEDULER_DEBUG(...) SPDLOG_LOGGER_DEBUG(GetCtldTaskSchedulerLogger(), __VA_ARGS__);
+#define TASKSCHEDULER_INFO(...)  SPDLOG_LOGGER_INFO(GetCtldTaskSchedulerLogger(), __VA_ARGS__);
+#define TASKSCHEDULER_WARN(...)  SPDLOG_LOGGER_WARN(GetCtldTaskSchedulerLogger(), __VA_ARGS__);
+#define TASKSCHEDULER_ERROR(...) SPDLOG_LOGGER_ERROR(GetCtldTaskSchedulerLogger(), __VA_ARGS__);
+#define TASKSCHEDULER_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(GetCtldTaskSchedulerLogger(), __VA_ARGS__);
 
 namespace Ctld {
 
