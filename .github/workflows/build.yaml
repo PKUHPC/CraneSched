@@ -1,9 +1,10 @@
-name: Build and Upload Artifacts
+name: Build and Upload Packages
 
 on:
   push:
     branches:
       - master
+      - release/*
   pull_request:
     branches:
       - master
@@ -31,10 +32,7 @@ jobs:
           mkdir -p out
           cmake -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DENABLE_UNQLITE=ON \
-            -DENABLE_BERKELEY_DB=OFF \
             -DCRANE_FULL_DYNAMIC=OFF \
-            -DCRANE_USE_GITEE_SOURCE=OFF \
             -S . -B out
 
       - name: Build
@@ -42,20 +40,25 @@ jobs:
           echo "Building at $(pwd)"
           cmake --build out --config Release
 
-      - name: Collect files
-        run: | 
-          mkdir -p upload; pushd upload
-          cp ../out/src/Craned/craned .
-          cp ../out/src/CraneCtld/cranectld .
-          cp ../out/src/Misc/Pam/pam_crane.so .
-          cp -r ../etc . 
+      - name: Package with CPack
+        run: |
+          echo "Packaging with CPack"
+          pushd out
+          cpack
           popd
 
-      - name: Upload artifacts
+      - name: Collect packages
+        run: |
+          mkdir -p upload/packages
+          cp out/*.deb upload/packages/ || true
+          cp out/*.rpm upload/packages/ || true
+
+      - name: Upload packages
         uses: actions/upload-artifact@v4
         with:
-          name: artifacts
+          name: packages
           path: |
-            upload/*
+            upload/packages/*
           retention-days: 30
           if-no-files-found: error
+          description: "DEB and RPM for CraneSched"
