@@ -99,18 +99,18 @@ TaskManager::TaskManager() {
 
   m_ev_base_ = event_base_new();
   if (m_ev_base_ == nullptr) {
-    CRANED_ERROR("Could not initialize libevent!");
+    CRANE_ERROR("Could not initialize libevent!");
     std::terminate();
   }
   {  // SIGCHLD
     m_ev_sigchld_ = evsignal_new(m_ev_base_, SIGCHLD, EvSigchldCb_, this);
     if (!m_ev_sigchld_) {
-      CRANED_ERROR("Failed to create the SIGCHLD event!");
+      CRANE_ERROR("Failed to create the SIGCHLD event!");
       std::terminate();
     }
 
     if (event_add(m_ev_sigchld_, nullptr) < 0) {
-      CRANED_ERROR("Could not add the SIGCHLD event to base!");
+      CRANE_ERROR("Could not add the SIGCHLD event to base!");
       std::terminate();
     }
   }
@@ -118,24 +118,24 @@ TaskManager::TaskManager() {
     m_ev_process_sigchld_ = event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
                                       EvProcessSigchldCb_, this);
     if (!m_ev_process_sigchld_) {
-      CRANED_ERROR("Failed to create the Do SIGCHLD event!");
+      CRANE_ERROR("Failed to create the Do SIGCHLD event!");
       std::terminate();
     }
 
     if (event_add(m_ev_process_sigchld_, nullptr) < 0) {
-      CRANED_ERROR("Could not add the Do SIGCHLD event to base!");
+      CRANE_ERROR("Could not add the Do SIGCHLD event to base!");
       std::terminate();
     }
   }
   {  // SIGINT
     m_ev_sigint_ = evsignal_new(m_ev_base_, SIGINT, EvSigintCb_, this);
     if (!m_ev_sigint_) {
-      CRANED_ERROR("Failed to create the SIGCHLD event!");
+      CRANE_ERROR("Failed to create the SIGCHLD event!");
       std::terminate();
     }
 
     if (event_add(m_ev_sigint_, nullptr) < 0) {
-      CRANED_ERROR("Could not add the SIGINT event to base!");
+      CRANE_ERROR("Could not add the SIGINT event to base!");
       std::terminate();
     }
   }
@@ -144,12 +144,12 @@ TaskManager::TaskManager() {
         event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
                   EvGrpcQueryTaskIdFromPidCb_, this);
     if (!m_ev_query_task_id_from_pid_) {
-      CRANED_ERROR("Failed to create the query task id event!");
+      CRANE_ERROR("Failed to create the query task id event!");
       std::terminate();
     }
 
     if (event_add(m_ev_query_task_id_from_pid_, nullptr) < 0) {
-      CRANED_ERROR("Could not add the query task id event to base!");
+      CRANE_ERROR("Could not add the query task id event to base!");
       std::terminate();
     }
   }
@@ -158,12 +158,12 @@ TaskManager::TaskManager() {
         event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
                   EvGrpcQueryTaskEnvironmentVariableCb_, this);
     if (!m_ev_query_task_environment_variables_) {
-      CRANED_ERROR("Failed to create the query task env event!");
+      CRANE_ERROR("Failed to create the query task env event!");
       std::terminate();
     }
 
     if (event_add(m_ev_query_task_environment_variables_, nullptr) < 0) {
-      CRANED_ERROR("Could not add the query task env to base!");
+      CRANE_ERROR("Could not add the query task env to base!");
       std::terminate();
     }
   }
@@ -171,12 +171,12 @@ TaskManager::TaskManager() {
     m_ev_exit_event_ =
         event_new(m_ev_base_, -1, EV_PERSIST | EV_READ, EvExitEventCb_, this);
     if (!m_ev_exit_event_) {
-      CRANED_ERROR("Failed to create the exit event!");
+      CRANE_ERROR("Failed to create the exit event!");
       std::terminate();
     }
 
     if (event_add(m_ev_exit_event_, nullptr) < 0) {
-      CRANED_ERROR("Could not add the exit event to base!");
+      CRANE_ERROR("Could not add the exit event to base!");
       std::terminate();
     }
   }
@@ -184,11 +184,11 @@ TaskManager::TaskManager() {
     m_ev_grpc_execute_task_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
                                         EvGrpcExecuteTaskCb_, this);
     if (!m_ev_grpc_execute_task_) {
-      CRANED_ERROR("Failed to create the grpc_execute_task event!");
+      CRANE_ERROR("Failed to create the grpc_execute_task event!");
       std::terminate();
     }
     if (event_add(m_ev_grpc_execute_task_, nullptr) < 0) {
-      CRANED_ERROR("Could not add the m_ev_grpc_execute_task_ to base!");
+      CRANE_ERROR("Could not add the m_ev_grpc_execute_task_ to base!");
       std::terminate();
     }
   }
@@ -196,11 +196,11 @@ TaskManager::TaskManager() {
     m_ev_task_status_change_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
                                          EvTaskStatusChangeCb_, this);
     if (!m_ev_task_status_change_) {
-      CRANED_ERROR("Failed to create the task_status_change event!");
+      CRANE_ERROR("Failed to create the task_status_change event!");
       std::terminate();
     }
     if (event_add(m_ev_task_status_change_, nullptr) < 0) {
-      CRANED_ERROR("Could not add the m_ev_task_status_change_event_ to base!");
+      CRANE_ERROR("Could not add the m_ev_task_status_change_event_ to base!");
       std::terminate();
     }
   }
@@ -208,11 +208,11 @@ TaskManager::TaskManager() {
     m_ev_task_time_limit_change_ = event_new(
         m_ev_base_, -1, EV_READ | EV_PERSIST, EvChangeTaskTimeLimitCb_, this);
     if (!m_ev_task_time_limit_change_) {
-      CRANED_ERROR("Failed to create the task_time_limit_change event!");
+      CRANE_ERROR("Failed to create the task_time_limit_change event!");
       std::terminate();
     }
     if (event_add(m_ev_task_time_limit_change_, nullptr) < 0) {
-      CRANED_ERROR("Could not add the m_ev_task_time_limit_change_ to base!");
+      CRANE_ERROR("Could not add the m_ev_task_time_limit_change_ to base!");
       std::terminate();
     }
   }
@@ -220,11 +220,11 @@ TaskManager::TaskManager() {
     m_ev_task_terminate_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
                                      EvTerminateTaskCb_, this);
     if (!m_ev_task_terminate_) {
-      CRANED_ERROR("Failed to create the task_terminate event!");
+      CRANE_ERROR("Failed to create the task_terminate event!");
       std::terminate();
     }
     if (event_add(m_ev_task_terminate_, nullptr) < 0) {
-      CRANED_ERROR("Could not add the m_ev_task_terminate_ to base!");
+      CRANE_ERROR("Could not add the m_ev_task_terminate_ to base!");
       std::terminate();
     }
   }
@@ -232,11 +232,11 @@ TaskManager::TaskManager() {
     m_ev_check_task_status_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
                                         EvCheckTaskStatusCb_, this);
     if (!m_ev_check_task_status_) {
-      CRANED_ERROR("Failed to create the check_task_status event!");
+      CRANE_ERROR("Failed to create the check_task_status event!");
       std::terminate();
     }
     if (event_add(m_ev_check_task_status_, nullptr) < 0) {
-      CRANED_ERROR("Could not add the m_ev_check_task_status_ to base!");
+      CRANE_ERROR("Could not add the m_ev_check_task_status_ to base!");
       std::terminate();
     }
   }
@@ -273,13 +273,13 @@ const TaskInstance* TaskManager::FindInstanceByTaskId_(uint32_t task_id) {
 void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
   auto it = m_task_map_.find(task_id);
   if (it == m_task_map_.end()) {
-    CRANED_ERROR("Task #{} not found in TaskStopAndDoStatusChangeAsync.",
+    CRANE_ERROR("Task #{} not found in TaskStopAndDoStatusChangeAsync.",
                 task_id);
     return;
   }
   TaskInstance* instance = it->second.get();
 
-  CRANED_INFO("Task #{} stopped and is doing TaskStatusChange...", task_id);
+  CRANE_INFO("Task #{} stopped and is doing TaskStatusChange...", task_id);
 
   switch (instance->err_before_exec) {
   case CraneErr::kProtobufError:
@@ -352,7 +352,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
         sigchld_info->is_terminated_by_signal = false;
         sigchld_info->value = WEXITSTATUS(status);
 
-        CRANED_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
+        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
                     pid, WEXITSTATUS(status));
       } else if (WIFSIGNALED(status)) {
         // Killed by signal WTERMSIG(status)
@@ -360,7 +360,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
         sigchld_info->is_terminated_by_signal = true;
         sigchld_info->value = WTERMSIG(status);
 
-        CRANED_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
+        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
                     pid, WTERMSIG(status));
       }
       /* Todo(More status tracing):
@@ -383,7 +383,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
       break;
     } else if (pid < 0) {
       if (errno != ECHILD)
-        CRANED_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
+        CRANE_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
       break;
     }
   }
@@ -419,7 +419,7 @@ void TaskManager::EvProcessSigchldCb_(int sig, short events, void* user_data) {
 
       CRANE_ASSERT_MSG(sigchld_info->resend_timer != nullptr,
                        "Failed to create new timer.");
-      CRANED_TRACE("Child Process {} exit too early, will do SigchldCb later",
+      CRANE_TRACE("Child Process {} exit too early, will do SigchldCb later",
                   sigchld_info->pid);
       arg->task_manager = this_;
       arg->sigchld_info = std::move(sigchld_info);
@@ -444,7 +444,7 @@ void TaskManager::EvProcessSigchldCb_(int sig, short events, void* user_data) {
     // the ITask for an Interactive task can have no ProcessInstance.
     auto pr_it = instance->processes.find(pid);
     if (pr_it == instance->processes.end()) {
-      CRANED_ERROR("Failed to find pid {} in task #{}'s ProcessInstances", pid,
+      CRANE_ERROR("Failed to find pid {} in task #{}'s ProcessInstances", pid,
                   task_id);
     } else {
       instance->processes.erase(pr_it);
@@ -492,7 +492,7 @@ void TaskManager::EvSubprocessReadCb_(struct bufferevent* bev, void* process) {
   str.resize(buf_len);
   int n_copy = evbuffer_remove(bev->input, str.data(), buf_len);
 
-  CRANED_TRACE("Read {:>4} bytes from subprocess (pid: {}): {}", n_copy,
+  CRANE_TRACE("Read {:>4} bytes from subprocess (pid: {}): {}", n_copy,
               proc->GetPid(), str);
 
   proc->Output(std::move(str));
@@ -506,7 +506,7 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
     // the signal sender can't wait to stop Craned and Craned just send SIGTERM
     // to all tasks to kill them immediately.
 
-    CRANED_INFO("Caught SIGINT. Send SIGTERM to all running tasks...");
+    CRANE_INFO("Caught SIGINT. Send SIGTERM to all running tasks...");
 
     this_->m_is_ending_now_ = true;
 
@@ -520,7 +520,7 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
       if (task_instance->task.type() == crane::grpc::Batch ||
           task_instance->IsCrun()) {
         for (auto&& [pid, pr_instance] : task_instance->processes) {
-          CRANED_INFO(
+          CRANE_INFO(
               "Sending SIGINT to the process group of task #{} with root "
               "process pid {}",
               task_id, pr_instance->GetPid());
@@ -530,7 +530,7 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
       } else {
         // Kill all process of a calloc task and just remove it from the
         // task map.
-        CRANED_DEBUG("Cleaning Calloc task #{}...",
+        CRANE_DEBUG("Cleaning Calloc task #{}...",
                     task_instance->task.task_id());
 
         // Todo: Performance issue!
@@ -546,7 +546,7 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
       this_->EvActivateShutdown_();
     }
   } else {
-    CRANED_INFO(
+    CRANE_INFO(
         "SIGINT has been triggered already. Sending SIGKILL to all process "
         "groups instead.");
     if (this_->m_task_map_.empty()) {
@@ -555,7 +555,7 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
     } else {
       for (auto&& [task_id, task_instance] : this_->m_task_map_) {
         for (auto&& [pid, pr_instance] : task_instance->processes) {
-          CRANED_INFO(
+          CRANE_INFO(
               "Sending SIGKILL to the process group of task #{} with root "
               "process pid {}",
               task_id, pr_instance->GetPid());
@@ -569,14 +569,14 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
 void TaskManager::EvExitEventCb_(int efd, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
-  CRANED_TRACE("Exit event triggered. Stop event loop.");
+  CRANE_TRACE("Exit event triggered. Stop event loop.");
 
   struct timeval delay = {0, 0};
   event_base_loopexit(this_->m_ev_base_, &delay);
 }
 
 void TaskManager::EvActivateShutdown_() {
-  CRANED_TRACE("Triggering exit event...");
+  CRANE_TRACE("Triggering exit event...");
   m_is_ending_now_ = true;
   event_active(m_ev_exit_event_, 0, 0);
 }
@@ -590,7 +590,7 @@ CraneErr TaskManager::KillProcessInstance_(const ProcessInstance* proc,
   // Todo: Add timer which sends SIGTERM for those tasks who
   //  will not quit when receiving SIGINT.
   if (proc) {
-    CRANED_TRACE("Killing pid {} with signal {}", proc->GetPid(), signum);
+    CRANE_TRACE("Killing pid {} with signal {}", proc->GetPid(), signum);
 
     // Send the signal to the whole process group.
     int err = kill(-proc->GetPid(), signum);
@@ -598,7 +598,7 @@ CraneErr TaskManager::KillProcessInstance_(const ProcessInstance* proc,
     if (err == 0)
       return CraneErr::kOk;
     else {
-      CRANED_TRACE("kill failed. error: {}", strerror(errno));
+      CRANE_TRACE("kill failed. error: {}", strerror(errno));
       return CraneErr::kGenericFailure;
     }
   }
@@ -634,26 +634,26 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   std::optional<crane::grpc::ResourceInNode> res_in_node =
       g_cg_mgr->GetTaskResourceInNode(instance->task.task_id());
   if (!res_in_node.has_value()) {
-    CRANED_ERROR("Failed to get resource info for task #{}",
+    CRANE_ERROR("Failed to get resource info for task #{}",
                 instance->task.task_id());
     return CraneErr::kCgroupError;
   }
 
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
-    CRANED_ERROR("Failed to create socket pair: {}", strerror(errno));
+    CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
     return CraneErr::kSystemErr;
   }
 
   // Create IO socket pair for crun tasks.
   if (instance->IsCrun()) {
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, io_in_sock_pair) != 0) {
-      CRANED_ERROR("Failed to create socket pair for task io forward: {}",
+      CRANE_ERROR("Failed to create socket pair for task io forward: {}",
                   strerror(errno));
       return CraneErr::kSystemErr;
     }
 
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, io_out_sock_pair) != 0) {
-      CRANED_ERROR("Failed to create socket pair for task io forward: {}",
+      CRANE_ERROR("Failed to create socket pair for task io forward: {}",
                   strerror(errno));
       return CraneErr::kSystemErr;
     }
@@ -669,27 +669,27 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
   int rc = setegid(instance->pwd_entry.Gid());
   if (rc == -1) {
-    CRANED_ERROR("error: setegid. {}", strerror(errno));
+    CRANE_ERROR("error: setegid. {}", strerror(errno));
     return CraneErr::kSystemErr;
   }
   __gid_t gid_a[1] = {instance->pwd_entry.Gid()};
   setgroups(1, gid_a);
   rc = seteuid(instance->pwd_entry.Uid());
   if (rc == -1) {
-    CRANED_ERROR("error: seteuid. {}", strerror(errno));
+    CRANE_ERROR("error: seteuid. {}", strerror(errno));
     return CraneErr::kSystemErr;
   }
 
   pid_t child_pid = fork();
   if (child_pid == -1) {
-    CRANED_ERROR("fork() failed for task #{}: {}", instance->task.task_id(),
+    CRANE_ERROR("fork() failed for task #{}: {}", instance->task.task_id(),
                 strerror(errno));
     return CraneErr::kSystemErr;
   }
 
   if (child_pid > 0) {  // Parent proc
     process->SetPid(child_pid);
-    CRANED_DEBUG("Subprocess was created for task #{} pid: {}",
+    CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
                 instance->task.task_id(), child_pid);
 
     if (instance->IsCrun()) {
@@ -721,7 +721,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // ev_buf_event =
     //     bufferevent_socket_new(m_ev_base_, fd, BEV_OPT_CLOSE_ON_FREE);
     // if (!ev_buf_event) {
-    //   CRANED_ERROR(
+    //   CRANE_ERROR(
     //       "Error constructing bufferevent for the subprocess of task #!",
     //       instance->task.task_id());
     //   err = CraneErr::kLibEventError;
@@ -735,7 +735,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     // Migrate the new subprocess to newly created cgroup
     if (!instance->cgroup->MigrateProcIn(child_pid)) {
-      CRANED_ERROR(
+      CRANE_ERROR(
           "Terminate the subprocess of task #{} due to failure of cgroup "
           "migration.",
           instance->task.task_id());
@@ -744,7 +744,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       goto AskChildToSuicide;
     }
 
-    CRANED_TRACE("New task #{} is ready. Asking subprocess to execv...",
+    CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
                 instance->task.task_id());
 
     // Tell subprocess that the parent process is ready. Then the
@@ -752,13 +752,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     msg.set_ok(true);
     ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
     if (!ok) {
-      CRANED_ERROR("Failed to serialize msg to ostream: {}",
+      CRANE_ERROR("Failed to serialize msg to ostream: {}",
                   strerror(ostream.GetErrno()));
     }
 
     if (ok) ok &= ostream.Flush();
     if (!ok) {
-      CRANED_ERROR("Failed to send ok=true to subprocess {} for task #{}: {}",
+      CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}: {}",
                   child_pid, instance->task.task_id(),
                   strerror(ostream.GetErrno()));
       close(ctrl_fd);
@@ -777,10 +777,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                                           nullptr);
     if (!ok || !msg.ok()) {
       if (!ok)
-        CRANED_ERROR("Socket child endpoint failed: {}",
+        CRANE_ERROR("Socket child endpoint failed: {}",
                     strerror(istream.GetErrno()));
       if (!msg.ok())
-        CRANED_ERROR("False from subprocess {} of task #{}", child_pid,
+        CRANE_ERROR("False from subprocess {} of task #{}", child_pid,
                     instance->task.task_id());
       close(ctrl_fd);
 
@@ -799,7 +799,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
     close(ctrl_fd);
     if (!ok) {
-      CRANED_ERROR("Failed to ask subprocess {} to suicide for task #{}",
+      CRANE_ERROR("Failed to ask subprocess {} to suicide for task #{}",
                   child_pid, instance->task.task_id());
 
       // See comments above.
@@ -819,7 +819,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     const std::string& cwd = instance->task.cwd();
     rc = chdir(cwd.c_str());
     if (rc == -1) {
-      CRANED_ERROR("[Child Process] Error: chdir to {}. {}", cwd.c_str(),
+      CRANE_ERROR("[Child Process] Error: chdir to {}. {}", cwd.c_str(),
                   strerror(errno));
       std::abort();
     }
@@ -843,11 +843,11 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     if (!ok || !msg.ok()) {
       if (!ok) {
         int err = istream.GetErrno();
-        CRANED_ERROR("Failed to read socket from parent: {}", strerror(err));
+        CRANE_ERROR("Failed to read socket from parent: {}", strerror(err));
       }
 
       if (!msg.ok())
-        CRANED_ERROR("Parent process ask not to start the subprocess.");
+        CRANE_ERROR("Parent process ask not to start the subprocess.");
 
       std::abort();
     }
@@ -863,7 +863,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       stdout_fd =
           open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
       if (stdout_fd == -1) {
-        CRANED_ERROR("[Child Process] Error: open {}. {}", stdout_file_path,
+        CRANE_ERROR("[Child Process] Error: open {}. {}", stdout_file_path,
                     strerror(errno));
         std::abort();
       }
@@ -875,7 +875,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         stderr_fd =
             open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
         if (stderr_fd == -1) {
-          CRANED_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
+          CRANE_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
                       strerror(errno));
           std::abort();
         }
@@ -900,7 +900,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
     ok &= ostream.Flush();
     if (!ok) {
-      CRANED_ERROR("[Child Process] Error: Failed to flush.");
+      CRANE_ERROR("[Child Process] Error: Failed to flush.");
       std::abort();
     }
 
@@ -962,11 +962,11 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
 CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   if (!g_cg_mgr->CheckIfCgroupForTasksExists(task.task_id())) {
-    CRANED_DEBUG("Executing task #{} without an allocated cgroup. Ignoring it.",
+    CRANE_DEBUG("Executing task #{} without an allocated cgroup. Ignoring it.",
                 task.task_id());
     return CraneErr::kCgroupError;
   }
-  CRANED_INFO("Executing task #{}", task.task_id());
+  CRANE_INFO("Executing task #{}", task.task_id());
 
   auto instance = std::make_unique<TaskInstance>();
 
@@ -1000,7 +1000,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     auto [iter, ok] =
         this_->m_task_map_.emplace(task_id, std::move(popped_instance));
     if (!ok) {
-      CRANED_ERROR("Duplicated ExecuteTask request for task #{}. Ignore it.",
+      CRANE_ERROR("Duplicated ExecuteTask request for task #{}. Ignore it.",
                   task_id);
       continue;
     }
@@ -1010,7 +1010,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     //       so we move it outside the multithreading part.
     int64_t sec = instance->task.time_limit().seconds();
     this_->EvAddTerminationTimer_(instance, sec);
-    CRANED_TRACE("Add a timer of {} seconds for task #{}", sec, task_id);
+    CRANE_TRACE("Add a timer of {} seconds for task #{}", sec, task_id);
 
     g_thread_pool->detach_task(
         [this_, instance]() { this_->LaunchTaskInstanceMt_(instance); });
@@ -1022,7 +1022,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   task_id_t task_id = instance->task.task_id();
 
   if (!g_cg_mgr->CheckIfCgroupForTasksExists(task_id)) {
-    CRANED_ERROR("Failed to find created cgroup for task #{}", task_id);
+    CRANE_ERROR("Failed to find created cgroup for task #{}", task_id);
     EvActivateTaskStatusChange_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeCgroupError,
@@ -1032,7 +1032,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
 
   instance->pwd_entry.Init(instance->task.uid());
   if (!instance->pwd_entry.Valid()) {
-    CRANED_DEBUG("Failed to look up password entry for uid {} of task #{}",
+    CRANE_DEBUG("Failed to look up password entry for uid {} of task #{}",
                 instance->task.uid(), task_id);
     EvActivateTaskStatusChange_(
         task_id, crane::grpc::TaskStatus::Failed,
@@ -1045,7 +1045,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   Cgroup* cg;
   bool ok = g_cg_mgr->AllocateAndGetCgroup(task_id, &cg);
   if (!ok) {
-    CRANED_ERROR("Failed to allocate cgroup for task #{}", task_id);
+    CRANE_ERROR("Failed to allocate cgroup for task #{}", task_id);
     EvActivateTaskStatusChange_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeCgroupError,
@@ -1064,7 +1064,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
 
   FILE* fptr = fopen(sh_path.c_str(), "w");
   if (fptr == nullptr) {
-    CRANED_ERROR("Failed write the script for task #{}", task_id);
+    CRANE_ERROR("Failed write the script for task #{}", task_id);
     EvActivateTaskStatusChange_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeFileNotFound,
@@ -1202,7 +1202,7 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
   // Todo: Add additional timer to check periodically whether all children
   //  have exited.
   if (this_->m_is_ending_now_ && this_->m_task_map_.empty()) {
-    CRANED_TRACE(
+    CRANE_TRACE(
         "Craned is ending and all tasks have been reaped. "
         "Stop event loop.");
     this_->EvActivateShutdown_();
@@ -1286,7 +1286,7 @@ void TaskManager::EvOnTaskTimerCb_(int, short, void* arg_) {
   TaskManager* this_ = arg->task_manager;
   task_id_t task_id = arg->task_id;
 
-  CRANED_TRACE("Task #{} exceeded its time limit. Terminating it...", task_id);
+  CRANE_TRACE("Task #{} exceeded its time limit. Terminating it...", task_id);
 
   // Sometimes, task finishes just before time limit.
   // After the execution of SIGCHLD callback where the task has been erased,
@@ -1295,7 +1295,7 @@ void TaskManager::EvOnTaskTimerCb_(int, short, void* arg_) {
   // callback, otherwise a segmentation fault will occur.
   auto task_it = this_->m_task_map_.find(task_id);
   if (task_it == this_->m_task_map_.end()) {
-    CRANED_TRACE("Task #{} has already been removed.");
+    CRANE_TRACE("Task #{} has already been removed.");
     return;
   }
 
@@ -1321,14 +1321,14 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
 
   EvQueueTaskTerminate elem;
   while (this_->m_task_terminate_queue_.try_dequeue(elem)) {
-    CRANED_TRACE(
+    CRANE_TRACE(
         "Receive TerminateRunningTask Request from internal queue. "
         "Task id: {}",
         elem.task_id);
 
     auto iter = this_->m_task_map_.find(elem.task_id);
     if (iter == this_->m_task_map_.end()) {
-      CRANED_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
+      CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
 
       // Note if Ctld wants to terminate some tasks that are not running,
       // it might indicate other nodes allocated to the task might have
@@ -1474,7 +1474,7 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
       }
       elem.ok_prom.set_value(true);
     } else {
-      CRANED_ERROR("Try to update the time limit of a non-existent task #{}.",
+      CRANE_ERROR("Try to update the time limit of a non-existent task #{}.",
                   elem.task_id);
       elem.ok_prom.set_value(false);
     }

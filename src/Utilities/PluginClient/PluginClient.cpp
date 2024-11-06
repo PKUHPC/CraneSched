@@ -45,7 +45,7 @@ namespace plugin {
 
 PluginClient::~PluginClient() {
   m_thread_stop_.store(true);
-  CRANECTLD_TRACE("PluginClient is ending. Waiting for the thread to finish.");
+  CRANE_TRACE("PluginClient is ending. Waiting for the thread to finish.");
   if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
 }
 
@@ -68,12 +68,12 @@ void PluginClient::AsyncSendThread_() {
         std::chrono::system_clock::now() + std::chrono::milliseconds(3000));
 
     if (!prev_conn_state && connected) {
-      CRANECTLD_INFO("[Plugin] Plugind is connected.");
+      CRANE_INFO("[Plugin] Plugind is connected.");
     }
     prev_conn_state = connected;
 
     if (!connected) {
-      CRANECTLD_INFO("[Plugin] Plugind is not connected. Reconnecting...");
+      CRANE_INFO("[Plugin] Plugind is not connected. Reconnecting...");
       std::this_thread::sleep_for(std::chrono::seconds(1));
       continue;
     }
@@ -91,7 +91,7 @@ void PluginClient::AsyncSendThread_() {
     auto actual_size =
         m_event_queue_.try_dequeue_bulk(events.begin(), approx_size);
     events.resize(actual_size);
-    CRANECTLD_DEBUG("[Plugin] Dequeued {} hook events.", actual_size);
+    CRANE_DEBUG("[Plugin] Dequeued {} hook events.", actual_size);
 
     while (!events.empty()) {
       auto& e = events.front();
@@ -101,7 +101,7 @@ void PluginClient::AsyncSendThread_() {
       auto status = (this->*f)(&context, e.msg.get());
 
       if (!status.ok()) {
-        CRANECTLD_ERROR(
+        CRANE_ERROR(
             "[Plugin] Failed to send hook event: "
             "hook type: {}; {}; {} (code: {})",
             int(e.type), context.debug_error_string(), status.error_message(),
@@ -117,7 +117,7 @@ void PluginClient::AsyncSendThread_() {
           break;
         }
       } else {
-        CRANECTLD_TRACE("[Plugin] Hook event sent: hook type: {}", int(e.type));
+        CRANE_TRACE("[Plugin] Hook event sent: hook type: {}", int(e.type));
       }
 
       events.pop_front();
@@ -133,7 +133,7 @@ grpc::Status PluginClient::SendStartHook_(grpc::ClientContext* context,
   auto request = dynamic_cast<StartHookRequest*>(msg);
   StartHookReply reply;
 
-  CRANECTLD_TRACE("[Plugin] Sending StartHook.");
+  CRANE_TRACE("[Plugin] Sending StartHook.");
   return m_stub_->StartHook(context, *request, &reply);
 }
 
@@ -145,7 +145,7 @@ grpc::Status PluginClient::SendEndHook_(grpc::ClientContext* context,
   auto request = dynamic_cast<EndHookRequest*>(msg);
   EndHookReply reply;
 
-  CRANECTLD_TRACE("[Plugin] Sending EndHook.");
+  CRANE_TRACE("[Plugin] Sending EndHook.");
   return m_stub_->EndHook(context, *request, &reply);
 }
 
@@ -157,7 +157,7 @@ grpc::Status PluginClient::SendJobMonitorHook_(grpc::ClientContext* context,
   auto request = dynamic_cast<JobMonitorHookRequest*>(msg);
   JobMonitorHookReply reply;
 
-  CRANECTLD_TRACE("[Plugin] Sending JobMonitorHook.");
+  CRANE_TRACE("[Plugin] Sending JobMonitorHook.");
   return m_stub_->JobMonitorHook(context, *request, &reply);
 }
 

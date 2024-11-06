@@ -36,14 +36,16 @@ void InitLogger(const std::map<std::string, spdlog::level::level_enum>& logLevel
     };
 
   spdlog::level::level_enum level = spdlog::level::trace;
+
+  auto default_logger = create_logger("Default");
+  FindLoggerValidLevel(logLevels, "Default", &level);
+  default_logger->set_level(level);
+  spdlog::set_level(level);
+  spdlog::register_logger(default_logger);
+
   if (cranectld_flag) {
-    auto cranectld_default_logger = create_logger("Default");
     auto cranectld_taskscheduler_logger = create_logger("TaskScheduler");
     auto cranectld_cranedkeeper_logger = create_logger("CranedKeeper");
-
-    FindLoggerValidLevel(logLevels, "Default", &level);
-    cranectld_default_logger->set_level(level);
-    spdlog::set_level(level);
 
     FindLoggerValidLevel(logLevels, "TaskScheduler", &level);
     cranectld_taskscheduler_logger->set_level(level);
@@ -51,17 +53,8 @@ void InitLogger(const std::map<std::string, spdlog::level::level_enum>& logLevel
     FindLoggerValidLevel(logLevels, "CranedKeeper", &level);
     cranectld_cranedkeeper_logger->set_level(level);
 
-    spdlog::register_logger(cranectld_default_logger);
     spdlog::register_logger(cranectld_taskscheduler_logger);
     spdlog::register_logger(cranectld_cranedkeeper_logger);
-  } else {
-    auto craned_default_logger = create_logger("Default");
-
-    FindLoggerValidLevel(logLevels, "Default", &level);
-    craned_default_logger->set_level(level);
-    spdlog::set_level(level);
-
-    spdlog::register_logger(craned_default_logger);
   }
 
   spdlog::flush_on(spdlog::level::err);
@@ -111,7 +104,7 @@ bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_
     return true;
 }
 
-std::shared_ptr<spdlog::logger> GetCtldDefaultLogger() {
+std::shared_ptr<spdlog::logger> GetDefaultLogger() {
     static auto logger = spdlog::get("Default");
     return logger;
 }
@@ -123,10 +116,5 @@ std::shared_ptr<spdlog::logger> GetCtldTaskSchedulerLogger() {
 
 std::shared_ptr<spdlog::logger> GetCtldCranedKeeperLogger() {
     static auto logger = spdlog::get("CranedKeeper");
-    return logger;
-}
-
-std::shared_ptr<spdlog::logger> GetCranedDefaultLogger() {
-    static auto logger = spdlog::get("Default");
     return logger;
 }

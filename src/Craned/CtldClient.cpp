@@ -23,7 +23,7 @@ namespace Craned {
 CtldClient::~CtldClient() {
   m_thread_stop_ = true;
 
-  CRANED_TRACE("CtldClient is ending. Waiting for the thread to finish.");
+  CRANE_TRACE("CtldClient is ending. Waiting for the thread to finish.");
   m_async_send_thread_.join();
 }
 
@@ -51,7 +51,7 @@ void CtldClient::OnCraneCtldConnected() {
   crane::grpc::CranedRegisterRequest request;
   grpc::Status status;
 
-  CRANED_INFO("Send a register RPC to cranectld");
+  CRANE_INFO("Send a register RPC to cranectld");
   request.set_craned_id(m_craned_id_);
 
   int retry_time = 10;
@@ -64,28 +64,28 @@ void CtldClient::OnCraneCtldConnected() {
 
     status = m_stub_->CranedRegister(&context, request, &reply);
     if (!status.ok()) {
-      CRANED_ERROR(
+      CRANE_ERROR(
           "NodeActiveConnect RPC returned with status not ok: {}, Resend it.",
           status.error_message());
     } else {
       if (reply.ok()) {
         if (reply.already_registered()) {
-          CRANED_INFO("This craned has already registered.");
+          CRANE_INFO("This craned has already registered.");
           return;
         } else {
-          CRANED_INFO(
+          CRANE_INFO(
               "This craned has not registered. "
               "Sending Register request...");
           std::this_thread::sleep_for(std::chrono::seconds(3));
         }
       } else {
-        CRANED_ERROR("This Craned is not allow to register.");
+        CRANE_ERROR("This Craned is not allow to register.");
         return;
       }
     }
   } while (retry_time--);
 
-  CRANED_ERROR("Failed to register actively.");
+  CRANE_ERROR("Failed to register actively.");
 }
 
 void CtldClient::TaskStatusChangeAsync(TaskStatusChange&& task_status_change) {
@@ -139,7 +139,7 @@ void CtldClient::AsyncSendThread_() {
     prev_conn_state = connected;
 
     if (!connected) {
-      CRANED_INFO("Channel to CraneCtlD is not connected. Reconnecting...");
+      CRANE_INFO("Channel to CraneCtlD is not connected. Reconnecting...");
       std::this_thread::sleep_for(std::chrono::seconds(10));
       continue;
     }
@@ -163,7 +163,7 @@ void CtldClient::AsyncSendThread_() {
 
       auto status_change = changes.front();
 
-      CRANED_TRACE("Sending TaskStatusChange for task #{}",
+      CRANE_TRACE("Sending TaskStatusChange for task #{}",
                   status_change.task_id);
 
       request.set_craned_id(m_craned_id_);
@@ -175,7 +175,7 @@ void CtldClient::AsyncSendThread_() {
 
       status = m_stub_->TaskStatusChange(&context, request, &reply);
       if (!status.ok()) {
-        CRANED_ERROR(
+        CRANE_ERROR(
             "Failed to send TaskStatusChange: "
             "{{TaskId: {}, NewStatus: {}}}, reason: {} | {}, code: {}",
             status_change.task_id, int(status_change.new_status),
@@ -195,7 +195,7 @@ void CtldClient::AsyncSendThread_() {
         } else
           changes.pop_front();
       } else {
-        CRANED_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
+        CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
                     status_change.task_id, reply.ok());
         changes.pop_front();
       }

@@ -28,7 +28,7 @@ class HostsMap {
  public:
   HostsMap() {
     if (!ParseHosts_())
-      CRANECTLD_ERROR("Failed to parse file /etc/hosts, DNS service will be used");
+      CRANE_ERROR("Failed to parse file /etc/hosts, DNS service will be used");
   }
 
   bool FindIpv4OfHostname(std::string const& hostname, ipv4_t* ipv4) const {
@@ -72,7 +72,7 @@ class HostsMap {
     std::ifstream hosts_ifstream(kHostFilePath);
     std::string line;
     if (!hosts_ifstream.is_open()) {
-      CRANECTLD_ERROR("Failed to parse hosts from file {}", kHostFilePath);
+      CRANE_ERROR("Failed to parse hosts from file {}", kHostFilePath);
       return false;
     }
 
@@ -96,7 +96,7 @@ class HostsMap {
           }
           switch (crane::GetIpAddrVer(ip)) {
           case -1:
-            CRANECTLD_ERROR("host file line \'{}\' parse failed", line);
+            CRANE_ERROR("host file line \'{}\' parse failed", line);
             break;
           case 4:
             ipv4_t ipv4;
@@ -156,7 +156,7 @@ bool ResolveHostnameFromIpv4(ipv4_t addr, std::string* hostname) {
   int r = getnameinfo((struct sockaddr*)&sa, len, hbuf, sizeof(hbuf), nullptr,
                       0, NI_NAMEREQD);
   if (r != 0) {
-    CRANECTLD_TRACE("Error in getnameinfo when resolving hostname for {}: {}",
+    CRANE_TRACE("Error in getnameinfo when resolving hostname for {}: {}",
                 ipv4_str.c_str(), gai_strerror(r));
     return false;
   }
@@ -184,7 +184,7 @@ bool ResolveHostnameFromIpv6(const ipv6_t& addr, std::string* hostname) {
   int r = getnameinfo((struct sockaddr*)&sa6, len, hbuf, sizeof(hbuf), nullptr,
                       0, NI_NAMEREQD);
   if (r != 0) {
-    CRANECTLD_TRACE("Error in getnameinfo when resolving hostname for {}: {}",
+    CRANE_TRACE("Error in getnameinfo when resolving hostname for {}: {}",
                 ipv6_str.c_str(), gai_strerror(r));
     return false;
   }
@@ -204,7 +204,7 @@ bool ResolveIpv4FromHostname(const std::string& hostname, ipv4_t* addr) {
 
   int ret = getaddrinfo(hostname.c_str(), nullptr, &hints, &res);
   if (ret != 0) {
-    CRANECTLD_WARN("Error in getaddrinfo when resolving ipv4 from hostname {}: {}",
+    CRANE_WARN("Error in getaddrinfo when resolving ipv4 from hostname {}: {}",
                hostname, gai_strerror(ret));
     return false;
   }
@@ -217,7 +217,7 @@ bool ResolveIpv4FromHostname(const std::string& hostname, ipv4_t* addr) {
       *addr =
           ntohl(static_cast<struct in_addr>(ipv4_sockaddr->sin_addr).s_addr);
     else
-      CRANECTLD_ERROR("error getnameinfo {}", gai_strerror(ret));
+      CRANE_ERROR("error getnameinfo {}", gai_strerror(ret));
   }
 
   freeaddrinfo(res);
@@ -235,7 +235,7 @@ bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr) {
 
   int ret = getaddrinfo(hostname.c_str(), nullptr, &hints, &res);
   if (ret != 0) {
-    CRANECTLD_WARN("Error in getaddrinfo when resolving ipv6 from hostname {}: {}",
+    CRANE_WARN("Error in getaddrinfo when resolving ipv6 from hostname {}: {}",
                hostname, gai_strerror(ret));
     return false;
   }
@@ -251,7 +251,7 @@ bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr) {
         *addr = (*addr << 32) | part;
       }
     } else
-      CRANECTLD_ERROR("error getnameinfo {}", gai_strerror(ret));
+      CRANE_ERROR("error getnameinfo {}", gai_strerror(ret));
   }
 
   freeaddrinfo(res);
@@ -261,7 +261,7 @@ bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr) {
 bool StrToIpv4(const std::string& ip, ipv4_t* addr) {
   struct in_addr ipv4_addr;
   if (inet_pton(AF_INET, ip.c_str(), &ipv4_addr) != 1) {
-    CRANECTLD_ERROR("Error converting ipv4 {} to uint32_t", ip);
+    CRANE_ERROR("Error converting ipv4 {} to uint32_t", ip);
     return false;
   }
 
@@ -273,7 +273,7 @@ bool StrToIpv4(const std::string& ip, ipv4_t* addr) {
 bool StrToIpv6(const std::string& ip, ipv6_t* addr) {
   struct in6_addr ipv6_addr;
   if (inet_pton(AF_INET6, ip.c_str(), &ipv6_addr) != 1) {
-    CRANECTLD_ERROR("Error converting ipv6 {} to uint128", ip);
+    CRANE_ERROR("Error converting ipv6 {} to uint128", ip);
     return false;
   }
 
@@ -322,15 +322,15 @@ bool FindTcpInodeByPort(const std::string& tcp_path, int port, ino_t* inode) {
       tcp_line = absl::StripAsciiWhitespace(tcp_line);
       std::vector<std::string> tcp_line_vec =
           absl::StrSplit(tcp_line, absl::ByAnyChar(" :"), absl::SkipEmpty());
-      CRANECTLD_TRACE("Checking port {} == {}", port_hex, tcp_line_vec[2]);
+      CRANE_TRACE("Checking port {} == {}", port_hex, tcp_line_vec[2]);
       if (port_hex == tcp_line_vec[2]) {
         *inode = std::stoul(tcp_line_vec[13]);
-        CRANECTLD_TRACE("Inode num for port {} is {}", port, *inode);
+        CRANE_TRACE("Inode num for port {} is {}", port, *inode);
         return true;
       }
     }
   } else {  // can't find file
-    CRANECTLD_ERROR("Can't open file: {}", tcp_path);
+    CRANE_ERROR("Can't open file: {}", tcp_path);
   }
   return false;
 }

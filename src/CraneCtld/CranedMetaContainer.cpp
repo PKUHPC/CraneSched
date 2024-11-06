@@ -31,7 +31,7 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
   if (stub != nullptr && !stub->Invalid()) {
     CraneErr err = stub->QueryCranedRemoteMeta(&remote_meta);
     if (err != CraneErr::kOk) {
-      CRANECTLD_ERROR("Failed to query actual resource from craned {}", craned_id);
+      CRANE_ERROR("Failed to query actual resource from craned {}", craned_id);
       return;
     }
     stub.reset();  // Release shared_ptr
@@ -145,7 +145,7 @@ void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
                                                  task_id_t task_id,
                                                  const ResourceV2& resources) {
   if (!craned_meta_map_.Contains(node_id)) {
-    CRANECTLD_ERROR("Try to malloc resource from an unknown craned {}", node_id);
+    CRANE_ERROR("Try to malloc resource from an unknown craned {}", node_id);
     return;
   }
 
@@ -183,7 +183,7 @@ void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
 void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
                                                uint32_t task_id) {
   if (!craned_meta_map_.Contains(node_id)) {
-    CRANECTLD_ERROR("Try to free resource from an unknown craned {}", node_id);
+    CRANE_ERROR("Try to free resource from an unknown craned {}", node_id);
     return;
   }
 
@@ -202,14 +202,14 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
   if (!node_meta->alive) {
-    CRANECTLD_DEBUG("Crane {} has already been down. Ignore FreeResourceFromNode.",
+    CRANE_DEBUG("Crane {} has already been down. Ignore FreeResourceFromNode.",
                 node_meta->static_meta.hostname);
     return;
   }
 
   auto resource_iter = node_meta->running_task_resource_map.find(task_id);
   if (resource_iter == node_meta->running_task_resource_map.end()) {
-    CRANECTLD_ERROR("Try to free resource from an unknown task {} on craned {}",
+    CRANE_ERROR("Try to free resource from an unknown task {} on craned {}",
                 task_id, node_id);
     return;
   }
@@ -235,7 +235,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
   HashMap<PartitionId, PartitionMeta> partition_map;
 
   for (auto&& [craned_name, node_ptr] : config.Nodes) {
-    CRANECTLD_TRACE("Parsing node {}", craned_name);
+    CRANE_TRACE("Parsing node {}", craned_name);
 
     auto& craned_meta = craned_map[craned_name];
     craned_meta.remote_meta.craned_version = "unknown";
@@ -255,7 +255,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
   }
 
   for (auto&& [part_name, partition] : config.Partitions) {
-    CRANECTLD_TRACE("Parsing partition {}", part_name);
+    CRANE_TRACE("Parsing partition {}", part_name);
 
     ResourceView part_res;
 
@@ -269,7 +269,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
 
       part_meta.craned_ids.emplace(craned_name);
 
-      CRANECTLD_DEBUG(
+      CRANE_DEBUG(
           "Add the resource of Craned {} (cpu: {}, mem: {}, gres: {}) to "
           "partition [{}]'s global resource.",
           craned_name, craned_meta.static_meta.res.allocatable_res.cpu_count,
@@ -285,7 +285,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     part_meta.partition_global_meta.node_cnt = part_meta.craned_ids.size();
     part_meta.partition_global_meta.nodelist_str = partition.nodelist_str;
 
-    CRANECTLD_DEBUG(
+    CRANE_DEBUG(
         "partition [{}]'s Global resource now: (cpu: {}, mem: {}, gres: {}). "
         "It has {} craneds.",
         part_name,
@@ -574,7 +574,7 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
 void CranedMetaContainer::AddDedicatedResource(
     const CranedId& node_id, const DedicatedResourceInNode& resource) {
   if (!craned_meta_map_.Contains(node_id)) {
-    CRANECTLD_ERROR("Try to free resource from an unknown craned {}", node_id);
+    CRANE_ERROR("Try to free resource from an unknown craned {}", node_id);
     return;
   }
 

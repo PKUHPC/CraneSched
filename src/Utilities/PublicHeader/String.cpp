@@ -135,12 +135,12 @@ bool ParseHostList(const std::string &host_str,
       if (char_queue.empty()) {
         char_queue += c;
       } else {
-        CRANECTLD_ERROR("Illegal node name string format: duplicate brackets");
+        CRANE_ERROR("Illegal node name string format: duplicate brackets");
         return false;
       }
     } else if (c == ']') {
       if (char_queue.empty()) {
-        CRANECTLD_ERROR("Illegal node name string format: isolated bracket");
+        CRANE_ERROR("Illegal node name string format: isolated bracket");
         return false;
       } else {
         name_meta += char_queue;
@@ -163,7 +163,7 @@ bool ParseHostList(const std::string &host_str,
     }
   }
   if (!char_queue.empty()) {
-    CRANECTLD_ERROR("Illegal node name string format: isolated bracket");
+    CRANE_ERROR("Illegal node name string format: isolated bracket");
     return false;
   }
 
@@ -337,7 +337,7 @@ std::string RemoveBracketsWithoutDashOrComma(const std::string &input) {
 void SetCurrentThreadName(const std::string &name) {
   // The thread name is not allowed to exceed 16 characters including '\0'.
   if (name.size() >= 16) {
-    CRANECTLD_ERROR("Thread name cannot exceed 16 character!");
+    CRANE_ERROR("Thread name cannot exceed 16 character!");
     return;
   }
 
