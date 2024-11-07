@@ -36,7 +36,6 @@ void InitLogger(const std::map<std::string, spdlog::level::level_enum>& logLevel
     };
 
   spdlog::level::level_enum level = spdlog::level::trace;
-
   auto default_logger = create_logger("Default");
   FindLoggerValidLevel(logLevels, "Default", &level);
   default_logger->set_level(level);
@@ -78,7 +77,6 @@ void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>
 
 Result SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level) {
  std::map<std::string, bool> loggers_to_set;
-
     if (logger_name == "All") {
         loggers_to_set = {{"Default", false}, {"TaskScheduler", false}, {"CranedKeeper", false}};
     } else if (logger_name == "Other") {
@@ -108,7 +106,6 @@ Result SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_en
             failed_loggers += name;
         }
     }
-
     std::string final_message;
     if (!success_loggers.empty()) {
         final_message += fmt::format("Loggers {} set successfully.\n", success_loggers);
