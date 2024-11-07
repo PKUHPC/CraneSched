@@ -69,9 +69,9 @@ void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>
     }
     auto it = logLevels.find(loggerName);
     if (it != logLevels.end()) {
-        *out_level = it->second;  // 使用迭代器访问值
+        *out_level = it->second;
     } else {
-        *out_level = spdlog::level::trace;  // 默认级别
+        *out_level = spdlog::level::trace;  //default level
     }
 }
 
