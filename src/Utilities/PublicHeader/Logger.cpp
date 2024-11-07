@@ -37,20 +37,20 @@ void InitLogger(const std::map<std::string, spdlog::level::level_enum>& logLevel
 
   spdlog::level::level_enum level = spdlog::level::trace;
 
-  auto default_logger = create_logger("default");
-  FindLoggerValidLevel(logLevels, "default", &level);
+  auto default_logger = create_logger("Default");
+  FindLoggerValidLevel(logLevels, "Default", &level);
   default_logger->set_level(level);
   spdlog::set_level(level);
   spdlog::register_logger(default_logger);
 
   if (cranectld_flag) {
-    auto cranectld_taskscheduler_logger = create_logger("taskscheduler");
-    auto cranectld_cranedkeeper_logger = create_logger("cranedkeeper");
+    auto cranectld_taskscheduler_logger = create_logger("TaskScheduler");
+    auto cranectld_cranedkeeper_logger = create_logger("CranedKeeper");
 
-    FindLoggerValidLevel(logLevels, "taskscheduler", &level);
+    FindLoggerValidLevel(logLevels, "TaskScheduler", &level);
     cranectld_taskscheduler_logger->set_level(level);
 
-    FindLoggerValidLevel(logLevels, "cranedkeeper", &level);
+    FindLoggerValidLevel(logLevels, "CranedKeeper", &level);
     cranectld_cranedkeeper_logger->set_level(level);
 
     spdlog::register_logger(cranectld_taskscheduler_logger);
@@ -77,24 +77,48 @@ void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>
 }
 
 Result SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level) {
-    std::vector<std::string> loggers_to_set;
-    if (logger_name == "all") {
-        loggers_to_set = {"default", "taskscheduler", "cranedkeeper"};
-    } else if (logger_name == "other") {
-        loggers_to_set = {"default"};
-    } else if (logger_name == "taskscheduler" || logger_name == "cranedkeeper") {
-        loggers_to_set = {logger_name};
+ std::map<std::string, bool> loggers_to_set;
+
+    if (logger_name == "All") {
+        loggers_to_set = {{"Default", false}, {"TaskScheduler", false}, {"CranedKeeper", false}};
+    } else if (logger_name == "Other") {
+        loggers_to_set = {{"Default", false}};
+    } else if (logger_name == "TaskScheduler" || logger_name == "CranedKeeper") {
+        loggers_to_set = {{logger_name, false}};
     } else {
         return Result{false, fmt::format("logger {} not found\n", logger_name)};
     }
 
-    for (const auto& name : loggers_to_set) {
-        if (!SetSingleLoggerLevel(name, level)) {
-            return Result{false, fmt::format("{} logger set failed\n", name)};
+    for (auto& [name, result] : loggers_to_set) {
+        result = SetSingleLoggerLevel(name, level);
+    }
+
+    std::string success_loggers;
+    std::string failed_loggers;
+    for (const auto& [name, result] : loggers_to_set) {
+        if (result) {
+            if (!success_loggers.empty()) {
+                success_loggers += ", ";
+            }
+            success_loggers += name;
+        } else {
+            if (!failed_loggers.empty()) {
+                failed_loggers += ", ";
+            }
+            failed_loggers += name;
         }
     }
 
-    return Result{true, fmt::format("logger(s) {} set succeed\n", logger_name)};
+    std::string final_message;
+    if (!success_loggers.empty()) {
+        final_message += fmt::format("Loggers {} set successfully.\n", success_loggers);
+    }
+    if (!failed_loggers.empty()) {
+        final_message += fmt::format("Loggers {} set failed.\n", failed_loggers);
+    }
+
+    bool overall_success = failed_loggers.empty();
+    return Result{overall_success, final_message};
 
 }
 
@@ -126,16 +150,16 @@ bool SetSingleLoggerLevel(const std::string& logger_name, spdlog::level::level_e
 }
 
 std::shared_ptr<spdlog::logger> GetDefaultLogger() {
-    static auto logger = spdlog::get("default");
+    static auto logger = spdlog::get("Default");
     return logger;
 }
 
 std::shared_ptr<spdlog::logger> GetCtldTaskSchedulerLogger() {
-    static auto logger = spdlog::get("taskscheduler");
+    static auto logger = spdlog::get("TaskScheduler");
     return logger;
 }
 
 std::shared_ptr<spdlog::logger> GetCtldCranedKeeperLogger() {
-    static auto logger = spdlog::get("cranedkeeper");
+    static auto logger = spdlog::get("CranedKeeper");
     return logger;
 }

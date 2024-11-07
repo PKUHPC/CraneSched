@@ -103,13 +103,11 @@ void ParseConfig(int argc, char** argv) {
                 for (const auto& levelNode : loggerNode.second) {
                     std::string componentName = levelNode.first.as<std::string>();
                     std::string strLevel = levelNode.second.as<std::string>();
-
                     spdlog::level::level_enum level;
-                    std::string loggerMode = componentName;
                     if (StrToLogLevel(strLevel, &level)) {
-                        g_config.logLevels[loggerMode] = level;
+                        g_config.logLevels[componentName] = level;
                     } else {
-                        fmt::print(stderr, "Logger {} level {} is illegal.\n", loggerMode, strLevel);
+                        fmt::print(stderr, "Logger {} level {} is illegal.\n", componentName, strLevel);
                         std::exit(1);
                     }
                 }
