@@ -101,17 +101,17 @@ class AccountManager {
                                            const std::string& partition,
                                            std::string account,
                                            const std::string& value);
-  CraneExpected<void> ModifyUserAllowedParition(
+  CraneExpected<void> ModifyUserAllowedPartition(
       crane::grpc::OperatorType operator_type, uint32_t uid,
       const std::string& name, std::string account, const std::string& value);
   CraneExpected<void> ModifyUserAllowedQos(
       crane::grpc::OperatorType operator_type, uint32_t uid,
       const std::string& name, const std::string& partition,
       std::string account, const std::string& value, bool force);
-  CraneExpected<void> DeleteUserAllowedPartiton(uint32_t uid,
-                                                const std::string& name,
-                                                std::string account,
-                                                const std::string& value);
+  CraneExpected<void> DeleteUserAllowedPartition(uint32_t uid,
+                                                 const std::string& name,
+                                                 const std::string& account,
+                                                 const std::string& value);
   CraneExpected<void> DeleteUserAllowedQos(
       uint32_t uid, const std::string& name, const std::string& partition,
       std::string account, const std::string& value, bool force);
@@ -213,7 +213,7 @@ class AccountManager {
 
   CraneExpected<void> CheckOpUserHasModifyPermission(uint32_t uid,
                                                      const User* user,
-                                                     std::string& account,
+                                                     std::string* account,
                                                      bool read_only_priv);
 
   /*
@@ -231,12 +231,12 @@ class AccountManager {
    * 2. The operating user's level is higher than the target user's level.
    * 3. The operating user is the coordinator of the target user's specified
    * account. If the read_only_priv is true, it means the operating user is the
-   * coordinator of any of the target user's accounts."
+   * coordinator of any target user's account.
    */
   CraneExpected<void> CheckUserPermissionOnUser(const User& op_user,
                                                 const User* user,
-                                                std::string& account,
-                                                bool read_only_priv);
+                                                bool read_only_priv,
+                                                std::string* account);
 
   CraneExpected<void> CheckPartitionIsAllowed(const Account* account,
                                               const std::string& partition,

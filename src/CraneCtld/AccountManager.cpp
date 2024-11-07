@@ -282,7 +282,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
     uint32_t uid, const std::string& name,
     std::unordered_map<uid_t, User>* res_user_map) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
-  CraneExpected<void> result;
+  CraneExpected<void> result{};
 
   auto user_result = GetUserInfoByUid(uid);
   if (!user_result) return std::unexpected(user_result.error());
@@ -316,13 +316,14 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
   } else {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     const User* user = GetExistedUserInfoNoLock_(name);
-    std::string account = "";
-    result = CheckUserPermissionOnUser(*op_user, user, account, true);
+
+    std::string account;
+    result = CheckUserPermissionOnUser(*op_user, user, true, &account);
     if (!result) return result;
     res_user_map->try_emplace(user->uid, *user);
   }
 
-  return {};
+  return result;
 }
 
 AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
@@ -423,8 +424,8 @@ AccountManager::CraneExpected<void> AccountManager::QueryQosInfo(
       for (const auto& [acct, item] : res_user.account_to_attrs_map) {
         for (const auto& [part, part_qos_map] :
              item.allowed_partition_qos_map) {
-          for (const auto& qos : part_qos_map.second) {
-            if (qos == name) found = true;
+          for (const auto& part_qos : part_qos_map.second) {
+            if (part_qos == name) found = true;
           }
         }
       }
@@ -480,7 +481,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserDefaultQos(
 
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    result = CheckOpUserHasModifyPermission(uid, p, account, false);
+    result = CheckOpUserHasModifyPermission(uid, p, &account, false);
     if (!result) return result;
   }
 
@@ -490,7 +491,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserDefaultQos(
   return SetUserDefaultQos_(*p, account, partition, value);
 }
 
-AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedParition(
+AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedPartition(
     crane::grpc::OperatorType operator_type, const uint32_t uid,
     const std::string& name, std::string account, const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
@@ -498,7 +499,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedParition(
 
   const User* p = GetExistedUserInfoNoLock_(name);
   AccountManager::CraneExpected<void> result;
-  result = CheckOpUserHasModifyPermission(uid, p, account, false);
+  result = CheckOpUserHasModifyPermission(uid, p, &account, false);
   if (!result) return result;
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
@@ -527,7 +528,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedQos(
 
   const User* p = GetExistedUserInfoNoLock_(name);
   AccountManager::CraneExpected<void> result;
-  result = CheckOpUserHasModifyPermission(uid, p, account, false);
+  result = CheckOpUserHasModifyPermission(uid, p, &account, false);
   if (!result) return result;
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
@@ -549,8 +550,8 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedQos(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedPartiton(
-    uint32_t uid, const std::string& name, std::string account,
+AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedPartition(
+    uint32_t uid, const std::string& name, const std::string& account,
     const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
@@ -558,8 +559,11 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedPartiton(
   CraneExpected<void> result;
 
   {
+    // Account might be empty. In that case, ues user->default_account.
+    std::string actual_account = account;
+
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    result = CheckOpUserHasModifyPermission(uid, p, account, false);
+    result = CheckOpUserHasModifyPermission(uid, p, &actual_account, false);
     if (!result) return result;
   }
 
@@ -579,7 +583,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedQos(
 
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    result = CheckOpUserHasModifyPermission(uid, p, account, false);
+    result = CheckOpUserHasModifyPermission(uid, p, &account, false);
     if (!result) return result;
   }
 
@@ -793,7 +797,7 @@ AccountManager::CraneExpected<void> AccountManager::BlockUser(
 
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    auto result = CheckOpUserHasModifyPermission(uid, user, account, false);
+    auto result = CheckOpUserHasModifyPermission(uid, user, &account, false);
     if (!result) return result;
   }
 
@@ -1365,26 +1369,26 @@ AccountManager::CheckOpUserHasPermissionToAccount(uint32_t uid,
 
 AccountManager::CraneExpected<void>
 AccountManager::CheckOpUserHasModifyPermission(uint32_t uid, const User* user,
-                                               std::string& account,
+                                               std::string* account,
                                                bool read_only_priv) {
+  if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+
   PasswordEntry entry(uid);
 
   auto user_result = GetUserInfoByUid(uid);
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = *user_result;
 
-  if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  if (account->empty()) *account = user->default_account;
 
-  if (account.empty()) account = user->default_account;
-
-  if (!user->account_to_attrs_map.contains(account))
+  if (!user->account_to_attrs_map.contains(*account))
     return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
 
   // op_user.admin_level < admin_level
   if (!IsOperatorPrivilegeSameOrHigher(*op_user, user->admin_level))
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 
-  return CheckUserPermissionOnAccount(*op_user, account, read_only_priv);
+  return CheckUserPermissionOnAccount(*op_user, *account, read_only_priv);
 }
 
 AccountManager::CraneExpected<void> AccountManager::CheckPartitionIsAllowed(
@@ -1524,8 +1528,8 @@ AccountManager::CheckUserPermissionOnAccount(const User& op_user,
 }
 
 AccountManager::CraneExpected<void> AccountManager::CheckUserPermissionOnUser(
-    const User& op_user, const User* user, std::string& account,
-    bool read_only_priv) {
+    const User& op_user, const User* user, bool read_only_priv,
+    std::string* account) {
   if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
   // 1. The operating user is the same as the target user.
@@ -1547,8 +1551,8 @@ AccountManager::CraneExpected<void> AccountManager::CheckUserPermissionOnUser(
       if (result) return {};
     }
   } else {
-    if (account.empty()) account = user->default_account;
-    result = CheckUserPermissionOnAccount(op_user, account, read_only_priv);
+    if (account->empty()) *account = user->default_account;
+    result = CheckUserPermissionOnAccount(op_user, *account, read_only_priv);
     if (result) return {};
   }
 
@@ -2540,9 +2544,6 @@ bool AccountManager::IsDefaultQosOfAnyPartitionNoLock_(const User* user,
 
 /**
  * @note need read lock(m_rw_user_mutex_ && m_rw_account_mutex_)
- * @param name
- * @param qos
- * @return
  */
 int AccountManager::DeleteAccountAllowedQosFromDBNoLock_(
     const std::string& name, const std::string& qos) {

@@ -410,7 +410,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
   if (request->type() == crane::grpc::OperatorType::Delete) {
     switch (request->modify_field()) {
     case crane::grpc::ModifyField::Partition:
-      modify_res = g_account_manager->DeleteUserAllowedPartiton(
+      modify_res = g_account_manager->DeleteUserAllowedPartition(
           request->uid(), request->name(), request->account(),
           request->value());
       break;
@@ -429,7 +429,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
           request->uid(), request->name(), request->value());
       break;
     case crane::grpc::ModifyField::Partition:
-      modify_res = g_account_manager->ModifyUserAllowedParition(
+      modify_res = g_account_manager->ModifyUserAllowedPartition(
           request->type(), request->uid(), request->name(), request->account(),
           request->value());
       break;
