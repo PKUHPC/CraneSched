@@ -301,7 +301,7 @@ message ModifyAccountRequest {
   ModifyField modify_field = 2;   //modify item field
   string value = 3;   //new value
   string name = 4;
-  OperatorType type = 5;
+  OperationType type = 5;
   bool force = 6;
 }
 
@@ -316,7 +316,7 @@ message ModifyUserRequest {
   string value = 3;   //new value
   string name = 4;
   string partition = 5;
-  OperatorType type = 6;
+  OperationType type = 6;
   string account = 8;
   bool force = 9;
 }

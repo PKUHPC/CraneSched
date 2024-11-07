@@ -385,7 +385,7 @@ enum EntityType {
   User = 1;
 }
 
-enum OperatorType {
+enum OperationType {
   Overwrite = 0;
   Add = 1;
   Delete = 2;

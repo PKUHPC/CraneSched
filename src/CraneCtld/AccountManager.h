@@ -23,7 +23,6 @@
 #include "DbClient.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
-#include "range/v3/view/unique.hpp"
 
 namespace Ctld {
 
@@ -45,11 +44,6 @@ class AccountManager {
 
   template <typename T>
   using CraneExpected = std::expected<T, CraneErrCode>;
-
-  struct Result {
-    bool ok{false};
-    std::string reason;
-  };
 
   AccountManager();
 
@@ -99,24 +93,25 @@ class AccountManager {
   CraneExpected<void> ModifyUserDefaultQos(uint32_t uid,
                                            const std::string& name,
                                            const std::string& partition,
-                                           std::string account,
+                                           const std::string& account,
                                            const std::string& value);
   CraneExpected<void> ModifyUserAllowedPartition(
-      crane::grpc::OperatorType operator_type, uint32_t uid,
-      const std::string& name, std::string account, const std::string& value);
+      crane::grpc::OperationType operator_type, uint32_t uid,
+      const std::string& name, const std::string& account,
+      const std::string& value);
   CraneExpected<void> ModifyUserAllowedQos(
-      crane::grpc::OperatorType operator_type, uint32_t uid,
+      crane::grpc::OperationType operator_type, uint32_t uid,
       const std::string& name, const std::string& partition,
-      std::string account, const std::string& value, bool force);
+      const std::string& account, const std::string& value, bool force);
   CraneExpected<void> DeleteUserAllowedPartition(uint32_t uid,
                                                  const std::string& name,
                                                  const std::string& account,
                                                  const std::string& value);
   CraneExpected<void> DeleteUserAllowedQos(
       uint32_t uid, const std::string& name, const std::string& partition,
-      std::string account, const std::string& value, bool force);
+      const std::string& account, const std::string& value, bool force);
 
-  CraneExpected<void> ModifyAccount(crane::grpc::OperatorType operator_type,
+  CraneExpected<void> ModifyAccount(crane::grpc::OperationType operator_type,
                                     const uint32_t uid, const std::string& name,
                                     crane::grpc::ModifyField modify_field,
                                     const std::string& value, bool force);
@@ -129,7 +124,7 @@ class AccountManager {
                                    bool block);
 
   CraneExpected<void> BlockUser(uint32_t uid, const std::string& name,
-                                std::string account, bool block);
+                                const std::string& account, bool block);
 
   bool CheckUserPermissionToPartition(const std::string& name,
                                       const std::string& account,
@@ -248,34 +243,6 @@ class AccountManager {
 
   bool IsOperatorPrivilegeSameOrHigher(const User& op_user,
                                        User::AdminLevel admin_level);
-
-  /**
-   * @param[in] uid is system uid of user.
-   * @param[in] account is the target that uid wants to query or modify.
-   * If its value is an empty string, the permission check fails of course,
-   * but level_of_uid will be filled and thus the function serves as a
-   * query function for user level.
-   * @param[in] read_only_priv specifies the permission type.
-   * If true, the function checks if uid has read/query only permission
-   * to specified account and the check will pass
-   * if the list of accounts the uid belongs to,
-   * which includes all the accounts this uid coordinates
-   * (guaranteed by account rule),
-   * contains any account which is is the parent of target account
-   * (including itself).
-   * If false, the function checks if uid has read/query only permission
-   * to specified account and the check will pass
-   * if the list of accounts coordinated by uid,
-   * contains any account which is is the parent of target account
-   * (including itself).
-   * @param[out] level_of_uid will be written with the user level of uid
-   * when function returns if both uid and user information exist.
-   * @return True if both uid and corresponding user exists and the permission
-   * check is passed, otherwise False.
-   */
-  AccountManager::Result HasPermissionToAccount(
-      uint32_t uid, const std::string& account, bool read_only_priv,
-      User::AdminLevel* level_of_uid = nullptr);
 
   bool HasPermissionToUser(uint32_t uid, const std::string& target_user,
                            bool read_only_priv,

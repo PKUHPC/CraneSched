@@ -407,7 +407,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
     crane::grpc::ModifyUserReply *response) {
   AccountManager::CraneExpected<void> modify_res;
 
-  if (request->type() == crane::grpc::OperatorType::Delete) {
+  if (request->type() == crane::grpc::OperationType::Delete) {
     switch (request->modify_field()) {
     case crane::grpc::ModifyField::Partition:
       modify_res = g_account_manager->DeleteUserAllowedPartition(
