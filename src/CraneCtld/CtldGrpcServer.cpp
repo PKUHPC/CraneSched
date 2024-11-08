@@ -151,6 +151,20 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryReservationInfoRequest *request,
+    crane::grpc::QueryReservationInfoReply *response) {
+  if (request->reservation_name().empty()) {
+    *response = g_meta_container->QueryAllReservationInfo();
+  } else {
+    *response =
+        g_meta_container->QueryReservationInfo(request->reservation_name());
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::ModifyTask(
     grpc::ServerContext *context, const crane::grpc::ModifyTaskRequest *request,
     crane::grpc::ModifyTaskReply *response) {
@@ -691,6 +705,22 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     const crane::grpc::QueryClusterInfoRequest *request,
     crane::grpc::QueryClusterInfoReply *response) {
   *response = g_meta_container->QueryClusterInfo(*request);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::CreateReservation(
+    grpc::ServerContext *context,
+    const crane::grpc::CreateReservationRequest *request,
+    crane::grpc::CreateReservationReply *response) {
+  *response = g_task_scheduler->CreateReservation(*request);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::DeleteReservation(
+    grpc::ServerContext *context,
+    const crane::grpc::DeleteReservationRequest *request,
+    crane::grpc::DeleteReservationReply *response) {
+  *response = g_task_scheduler->DeleteReservation(*request);
   return grpc::Status::OK;
 }
 

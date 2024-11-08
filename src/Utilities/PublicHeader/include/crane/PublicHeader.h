@@ -90,6 +90,8 @@ constexpr uint64_t kTaskMinTimeLimitSec = 11;
 constexpr int64_t kTaskMaxTimeLimitSec =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
 
+constexpr uint64_t kReservationMinAdvanceSec = 60 * 60 * 24 * 2;  // 2 days
+
 namespace ExitCode {
 
 inline constexpr size_t kExitStatusNum = 256;
@@ -153,6 +155,7 @@ inline std::string_view CraneErrStr(CraneErr err) {
 
 using PartitionId = std::string;
 using CranedId = std::string;
+using ReservationId = std::string;
 using cpu_t = fpm::fixed_24_8;
 
 // Device path. e.g. /dev/nvidia0
