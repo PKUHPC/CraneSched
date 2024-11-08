@@ -202,6 +202,7 @@ struct CranedMeta {
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
   absl::flat_hash_map<task_id_t, ResourceInNode> running_task_resource_map;
+  absl::flat_hash_map<ReservationId, ResourceInNode> reservation_resource_map;
 };
 
 struct PartitionGlobalMeta {
@@ -274,6 +275,21 @@ struct InteractiveMetaInTask {
   // (triggered by either normal shell exit or ccancel).
   std::atomic<bool> has_been_cancelled_on_front_end{false};
   std::atomic<bool> has_been_terminated_on_craned{false};
+};
+
+struct ReservationMeta {
+  ReservationId name;
+  ResourceView resources_total;
+  ResourceView resources_avail;
+  ResourceView resources_in_use;
+
+  absl::Time start_time;
+  absl::Time end_time;
+
+  PartitionId partition_id;
+  std::list<CranedId> craned_ids;
+
+  ResourceV2 allocatable_res;
 };
 
 struct BatchMetaInTask {
