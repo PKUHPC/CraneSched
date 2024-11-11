@@ -280,7 +280,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
     mutable_task->set_name(task->name);
     mutable_task->set_account(task->account);
     mutable_task->set_qos(task->qos);
-    mutable_task->set_partition(task->TaskToCtld().partition_name());
+    mutable_task->set_partition(task->partition_id);
 
     for (auto &&node : task->included_nodes) {
       mutable_task->mutable_nodelist()->Add()->assign(node);
