@@ -138,8 +138,12 @@ class AccountManager {
 
   result::result<void, std::string> CheckUidIsAdmin(uint32_t uid);
 
+  bool HasPermissionToUser(uint32_t uid, const std::string& target_user,
+                           bool read_only_priv,
+                           User::AdminLevel* level_of_uid = nullptr);
+
   /* ---------------------------------------------------------------------------
-   * ModifyUser-related functions(no block)
+   * ModifyUser-related functions(no lock)
    * ---------------------------------------------------------------------------
    */
   CraneExpected<void> CheckAddUserAllowedPartition(
@@ -171,7 +175,7 @@ class AccountManager {
                                                 bool force);
 
   /* ---------------------------------------------------------------------------
-   * ModifyAccount-related functions(no block)
+   * ModifyAccount-related functions(no lock)
    * ---------------------------------------------------------------------------
    */
   CraneExpected<void> CheckAddAccountAllowedPartition(
@@ -192,46 +196,37 @@ class AccountManager {
                                                    const std::string& qos,
                                                    bool force);
 
-  /*
-   * Check if the operating user exists
-   */
-  CraneExpected<const User*> GetUserInfoByUid(uint32_t uid);
+  // Compare the user's permission levels for operations.
+  CraneExpected<void> CheckIfUserHasHigherPrivThan(
+      const User& op_user, User::AdminLevel admin_level);
 
-  CraneExpected<void> CheckOpUserIsAdmin(uint32_t uid);
-
-  CraneExpected<void> CheckOperatorPrivilegeHigher(
-      uint32_t uid, User::AdminLevel admin_level);
-
-  CraneExpected<void> CheckOpUserHasPermissionToAccount(
-      uint32_t uid, const std::string& account, bool read_only_priv,
-      bool is_add);
-
-  CraneExpected<void> CheckOpUserHasModifyPermission(uint32_t uid,
-                                                     const User* user,
-                                                     std::string* account,
-                                                     bool read_only_priv);
-
-  /*
-   * Check if the operating user is the coordinator of the target user's
-   * specified account.
-   */
-  CraneExpected<void> CheckUserPermissionOnAccount(const User& op_user,
-                                                   const std::string& account,
-                                                   bool read_only_priv);
+  // Determine if the operating user has permissions for the account.
+  // admin Or coordinater
+  CraneExpected<void> CheckIfUserHasPemOnAccount(const User& op_user,
+                                                 const std::string& account,
+                                                 bool read_only_priv);
 
   /**
    * Check whether the operating user has permissions to access the target user.
    * Permissions are granted if any of the following three conditions are met:
    * 1. The operating user is the same as the target user.
    * 2. The operating user's level is higher than the target user's level.
-   * 3. The operating user is the coordinator of the target user's specified
-   * account. If the read_only_priv is true, it means the operating user is the
+   * 3. The operating user is the coordinator of the target user's account.
+   * If the read_only_priv is true, it means the operating user is the
    * coordinator of any target user's account.
    */
-  CraneExpected<void> CheckUserPermissionOnUser(const User& op_user,
-                                                const User* user,
-                                                bool read_only_priv,
-                                                std::string* account);
+  CraneExpected<void> CheckIfUserHasPemOnUser(const User& op_user,
+                                              const User* user,
+                                              bool read_only_priv);
+
+  // Determine if the operating user has permissions for a specific account of a
+  // particular user.
+  // 1. The operating user's permissions are greater than the target user's.
+  // 2. The operating user is the coordinator of the account.
+  CraneExpected<void> CheckIfUserHasPemOnUserOfAccount(const User& op_user,
+                                                       const User* user,
+                                                       std::string* account,
+                                                       bool read_only_priv);
 
   CraneExpected<void> CheckPartitionIsAllowed(const Account* account,
                                               const std::string& partition,
@@ -241,15 +236,10 @@ class AccountManager {
                                         const std::string& qos_str,
                                         bool check_parent, bool is_user);
 
-  bool IsOperatorPrivilegeSameOrHigher(const User& op_user,
-                                       User::AdminLevel admin_level);
-
-  bool HasPermissionToUser(uint32_t uid, const std::string& target_user,
-                           bool read_only_priv,
-                           User::AdminLevel* level_of_uid = nullptr);
-
  private:
   void InitDataMap_();
+
+  CraneExpected<const User*> GetUserInfoByUidNoLock_(uint32_t uid);
 
   const User* GetUserInfoNoLock_(const std::string& name);
   const User* GetExistedUserInfoNoLock_(const std::string& name);
