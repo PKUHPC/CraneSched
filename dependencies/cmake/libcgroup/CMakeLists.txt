@@ -1,3 +1,27 @@
+if (${CRANE_USE_SYSTEM_LIBCGROUP})
+    message(STATUS "Using libcgroup from system.")
+
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
+
+    if (libcgroup_FOUND)
+        message(STATUS "Found libcgroup ${libcgroup_VERSION} in system using pkg-config.")
+    else()
+        message(FATAL_ERROR "libcgroup in system is not found using pkg-config.")
+    endif()
+
+    add_library(libcgroup INTERFACE)
+    target_link_libraries(libcgroup INTERFACE PkgConfig::libcgroup)
+    target_include_directories(libcgroup INTERFACE ${libcgroup_INCLUDE_DIRS})
+
+    # libcgroup in system is a shared library
+    set(LIBCGROUP_BUILD_PRODUCTS ${libcgroup_LIBRARY_DIRS}/libcgroup.so CACHE STRING "Path to libcgroup library" FORCE)
+    message(STATUS "Using libcgroup from system at ${LIBCGROUP_BUILD_PRODUCTS}.")
+    return()
+endif ()
+
+message(STATUS "Building libcgroup from source.")
+
 include(FetchContent)
 include(ExternalProject)
 
