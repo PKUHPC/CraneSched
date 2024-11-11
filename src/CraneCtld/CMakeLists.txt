@@ -29,8 +29,6 @@ target_link_libraries(cranectld PRIVATE
         Utility_PublicHeader
         Utility_PluginClient
 
-        dev_event_core
-        dev_event_pthreads
         uvw
 
         cxxopts

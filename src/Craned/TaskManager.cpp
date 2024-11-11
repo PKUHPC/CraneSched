@@ -97,36 +97,23 @@ TaskManager::TaskManager() {
   // Only called once. Guaranteed by singleton pattern.
   m_instance_ptr_ = this;
 
+  auto m_uvw_loop = uvw::loop::create();
   m_ev_base_ = event_base_new();
   if (m_ev_base_ == nullptr) {
     CRANE_ERROR("Could not initialize libevent!");
     std::terminate();
   }
-  {  // SIGCHLD
-    m_ev_sigchld_ = evsignal_new(m_ev_base_, SIGCHLD, EvSigchldCb_, this);
-    if (!m_ev_sigchld_) {
-      CRANE_ERROR("Failed to create the SIGCHLD event!");
-      std::terminate();
-    }
+  m_sigchld_handle = m_uvw_loop->resource<uvw::signal_handle>();
+  m_sigchld_handle->on<uvw::signal_event>(
+      [this](const uvw::signal_event&, uvw::signal_handle&) {
+        EvSigchldCb_();
+      });
+  m_process_sigchld_handle = m_uvw_loop->resource<uvw::async_handle>();
+  m_process_sigchld_handle->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvProcessSigchldCb_();
+      });
 
-    if (event_add(m_ev_sigchld_, nullptr) < 0) {
-      CRANE_ERROR("Could not add the SIGCHLD event to base!");
-      std::terminate();
-    }
-  }
-  {
-    m_ev_process_sigchld_ = event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
-                                      EvProcessSigchldCb_, this);
-    if (!m_ev_process_sigchld_) {
-      CRANE_ERROR("Failed to create the Do SIGCHLD event!");
-      std::terminate();
-    }
-
-    if (event_add(m_ev_process_sigchld_, nullptr) < 0) {
-      CRANE_ERROR("Could not add the Do SIGCHLD event to base!");
-      std::terminate();
-    }
-  }
   {  // SIGINT
     m_ev_sigint_ = evsignal_new(m_ev_base_, SIGINT, EvSigintCb_, this);
     if (!m_ev_sigint_) {
@@ -332,10 +319,8 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
   }
 }
 
-void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
-                               void* user_data) {
+void TaskManager::EvSigchldCb_() {
   assert(m_instance_ptr_->m_instance_ptr_ != nullptr);
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
   int status;
   pid_t pid;
@@ -369,15 +354,15 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
       } else if (WIFCONTINUED(status)) {
         printf("continued\n");
       } */
-      this_->m_sigchld_queue_.enqueue(std::move(sigchld_info));
-      event_active(this_->m_ev_process_sigchld_, 0, 0);
+      this->m_sigchld_queue_.enqueue(std::move(sigchld_info));
+      event_active(this->m_ev_process_sigchld_, 0, 0);
     } else if (pid == 0) {
       // There's no child that needs reaping.
       // If Craned is exiting, check if there's any task remaining.
       // If there's no task running, just stop the loop of TaskManager.
-      if (this_->m_is_ending_now_) {
-        if (this_->m_task_map_.empty()) {
-          this_->EvActivateShutdown_();
+      if (this->m_is_ending_now_) {
+        if (this->m_task_map_.empty()) {
+          this->EvActivateShutdown_();
         }
       }
       break;
@@ -389,11 +374,9 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
   }
 }
 
-void TaskManager::EvProcessSigchldCb_(int sig, short events, void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
+void TaskManager::EvProcessSigchldCb_() {
   std::unique_ptr<ProcSigchldInfo> sigchld_info;
-  while (this_->m_sigchld_queue_.try_dequeue(sigchld_info)) {
+  while (this->m_sigchld_queue_.try_dequeue(sigchld_info)) {
     auto pid = sigchld_info->pid;
 
     if (sigchld_info->resend_timer != nullptr) {
@@ -402,26 +385,26 @@ void TaskManager::EvProcessSigchldCb_(int sig, short events, void* user_data) {
       sigchld_info->resend_timer = nullptr;
     }
 
-    this_->m_mtx_.Lock();
-    auto task_iter = this_->m_pid_task_map_.find(pid);
-    auto proc_iter = this_->m_pid_proc_map_.find(pid);
+    this->m_mtx_.Lock();
+    auto task_iter = this->m_pid_task_map_.find(pid);
+    auto proc_iter = this->m_pid_proc_map_.find(pid);
 
-    if (task_iter == this_->m_pid_task_map_.end() ||
-        proc_iter == this_->m_pid_proc_map_.end()) {
-      this_->m_mtx_.Unlock();
+    if (task_iter == this->m_pid_task_map_.end() ||
+        proc_iter == this->m_pid_proc_map_.end()) {
+      this->m_mtx_.Unlock();
 
       EvQueueSigchldArg* arg = new EvQueueSigchldArg;
 
       timeval tv{kEvSigChldResendMs / 1000'000, kEvSigChldResendMs % 1000'000};
       sigchld_info->resend_timer =
-          event_new(this_->m_ev_base_, -1, 0, EvOnSigchldTimerCb_, arg);
+          event_new(this->m_ev_base_, -1, 0, EvOnSigchldTimerCb_, arg);
       evtimer_add(sigchld_info->resend_timer, &tv);
 
       CRANE_ASSERT_MSG(sigchld_info->resend_timer != nullptr,
                        "Failed to create new timer.");
       CRANE_TRACE("Child Process {} exit too early, will do SigchldCb later",
                   sigchld_info->pid);
-      arg->task_manager = this_;
+      arg->task_manager = this;
       arg->sigchld_info = std::move(sigchld_info);
 
       continue;
@@ -432,10 +415,10 @@ void TaskManager::EvProcessSigchldCb_(int sig, short events, void* user_data) {
     uint32_t task_id = instance->task.task_id();
 
     // Remove indexes from pid to ProcessInstance*
-    this_->m_pid_proc_map_.erase(proc_iter);
-    this_->m_pid_task_map_.erase(task_iter);
+    this->m_pid_proc_map_.erase(proc_iter);
+    this->m_pid_task_map_.erase(task_iter);
 
-    this_->m_mtx_.Unlock();
+    this->m_mtx_.Unlock();
 
     instance->sigchld_info = *sigchld_info;
     proc->Finish(sigchld_info->is_terminated_by_signal, sigchld_info->value);
@@ -453,7 +436,7 @@ void TaskManager::EvProcessSigchldCb_(int sig, short events, void* user_data) {
         if (sigchld_info->is_terminated_by_signal) {
           // If a task is terminated by a signal and there are other
           //  running processes belonging to this task, kill them.
-          this_->TerminateTaskAsync(task_id);
+          this->TerminateTaskAsync(task_id);
         }
       } else {
         if (instance->IsCrun())
@@ -466,7 +449,7 @@ void TaskManager::EvProcessSigchldCb_(int sig, short events, void* user_data) {
           // If the ProcessInstance has no process left,
           // send TaskStatusChange for this task.
           // See the comment of EvActivateTaskStatusChange_.
-          this_->TaskStopAndDoStatusChangeAsync(task_id);
+          this->TaskStopAndDoStatusChangeAsync(task_id);
         }
       }
     }

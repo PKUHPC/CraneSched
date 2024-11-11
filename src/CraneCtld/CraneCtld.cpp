@@ -19,7 +19,6 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header comes first!
 
-#include <event2/thread.h>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
@@ -640,9 +639,6 @@ void InitializeCtldGlobalVariables() {
   PasswordEntry::InitializeEntrySize();
 
   crane::InitializeNetworkFunctions();
-
-  // Enable inter-thread custom event notification.
-  evthread_use_pthreads();
 
   char hostname[HOST_NAME_MAX + 1];
   int err = gethostname(hostname, HOST_NAME_MAX + 1);

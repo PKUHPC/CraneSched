@@ -29,6 +29,8 @@
 #include <sys/eventfd.h>
 #include <sys/wait.h>
 
+#include <uvw.hpp>
+
 #include "CgroupManager.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
@@ -402,13 +404,12 @@ class TaskManager {
   // Critical data region ends
   // ========================================================================
 
-  static void EvSigchldCb_(evutil_socket_t sig, short events, void* user_data);
+  void EvSigchldCb_();
 
-  static void EvProcessSigchldCb_(evutil_socket_t sig, short events,
-                                  void* user_data);
+  void EvProcessSigchldCb_();
 
   // Callback function to handle SIGINT sent by Ctrl+C
-  static void EvSigintCb_(evutil_socket_t sig, short events, void* user_data);
+  void EvSigintCb_();
 
   static void EvGrpcExecuteTaskCb_(evutil_socket_t efd, short events,
                                    void* user_data);
@@ -440,6 +441,9 @@ class TaskManager {
 
   static void EvOnSigchldTimerCb_(evutil_socket_t, short, void* arg_);
 
+  std::shared_ptr<uvw::signal_handle> m_sigchld_handle;
+  std::shared_ptr<uvw::async_handle> m_process_sigchld_handle;
+  std::shared_ptr<uvw::signal_handle> m_sigint_handle;
   struct event_base* m_ev_base_{};
   struct event* m_ev_sigchld_{};
 
