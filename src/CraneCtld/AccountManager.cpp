@@ -965,22 +965,33 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
 
 result::result<void, std::string> AccountManager::CheckUidIsAdmin(
     uint32_t uid) {
-  PasswordEntry entry(uid);
-  if (!entry.Valid()) {
-    return result::failure(fmt::format("Uid {} not found.", uid));
-  }
-
   util::read_lock_guard user_guard(m_rw_user_mutex_);
-  const User* ptr = GetExistedUserInfoNoLock_(entry.Username());
-  if (!ptr) {
-    return result::failure(
-        fmt::format("User {} is not a user of Crane.", entry.Username()));
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) {
+    return result::failure("User is not a user of Crane.");
   }
+  const User* ptr = user_result.value();
 
   if (ptr->admin_level >= User::Operator) return {};
 
-  return result::failure(
-      fmt::format("User {} has insufficient privilege.", entry.Username()));
+  return result::failure("User has insufficient privilege.");
+}
+
+AccountManager::CraneExpected<void>
+AccountManager::CheckIfUserHasPemOnUserWithLock(uint32_t uid,
+                                                const std::string& username,
+                                                bool read_only_priv) {
+  util::read_lock_guard user_guard(m_rw_user_mutex_);
+  util::read_lock_guard account_guard(m_rw_account_mutex_);
+
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+
+  const User* op_user = user_result.value();
+
+  const User* user = GetExistedUserInfoNoLock_(username);
+
+  return CheckIfUserHasPemOnUser(*op_user, user, read_only_priv);
 }
 
 AccountManager::CraneExpected<void>
@@ -1278,50 +1289,6 @@ AccountManager::CheckDeleteAccountAllowedQos(const Account* account,
     return std::unexpected(CraneErrCode::ERR_CHILD_HAS_DEFAULT_QOS);
 
   return {};
-}
-
-bool AccountManager::HasPermissionToUser(uint32_t uid,
-                                         const std::string& target_user,
-                                         bool read_only_priv,
-                                         User::AdminLevel* level_of_uid) {
-  PasswordEntry source_user_entry(uid);
-  if (!source_user_entry.Valid()) {
-    return false;
-  }
-
-  util::read_lock_guard user_guard(m_rw_user_mutex_);
-  util::read_lock_guard account_guard(m_rw_account_mutex_);
-
-  const User* source_user_ptr =
-      GetExistedUserInfoNoLock_(source_user_entry.Username());
-  if (!source_user_ptr) return false;
-
-  const User* target_user_ptr = GetExistedUserInfoNoLock_(target_user);
-  if (!target_user_ptr) return false;
-
-  if (level_of_uid != nullptr) *level_of_uid = source_user_ptr->admin_level;
-
-  if (source_user_ptr->admin_level != User::None ||
-      target_user == source_user_entry.Username())
-    return true;
-
-  std::vector<std::string> accounts_under_permission_vec;
-  if (read_only_priv)
-    for (const auto& [acc, acct_item] : source_user_ptr->account_to_attrs_map)
-      accounts_under_permission_vec.emplace_back(acc);
-  else
-    for (const auto& acc : source_user_ptr->coordinator_accounts)
-      accounts_under_permission_vec.emplace_back(acc);
-
-  for (const auto& [target_user_acc, item] :
-       target_user_ptr->account_to_attrs_map) {
-    for (const auto& acc_under_perm : accounts_under_permission_vec)
-      if (acc_under_perm == target_user_acc ||
-          PaternityTestNoLock_(acc_under_perm, target_user_acc))
-        return true;
-  }
-
-  return false;
 }
 
 AccountManager::CraneExpected<void>

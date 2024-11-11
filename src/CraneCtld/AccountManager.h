@@ -138,9 +138,8 @@ class AccountManager {
 
   result::result<void, std::string> CheckUidIsAdmin(uint32_t uid);
 
-  bool HasPermissionToUser(uint32_t uid, const std::string& target_user,
-                           bool read_only_priv,
-                           User::AdminLevel* level_of_uid = nullptr);
+  CraneExpected<void> CheckIfUserHasPemOnUserWithLock(
+      uint32_t uid, const std::string& username, bool read_only_priv);
 
   /* ---------------------------------------------------------------------------
    * ModifyUser-related functions(no lock)
