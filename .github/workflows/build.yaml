@@ -38,7 +38,7 @@ jobs:
       - name: Build
         run: |
           echo "Building at $(pwd)"
-          cmake --build out --config Release
+          cmake --build out -j$(nproc) --config Release
 
       - name: Package with CPack
         run: |
