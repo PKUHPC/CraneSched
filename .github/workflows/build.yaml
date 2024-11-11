@@ -4,9 +4,9 @@ on:
   push:
     branches:
       - master
-      - release/*
   pull_request:
     branches:
+      - master
       - release/*
   workflow_dispatch:
 
@@ -52,13 +52,52 @@ jobs:
           mkdir -p upload/packages
           cp out/*.deb upload/packages/ || true
           cp out/*.rpm upload/packages/ || true
+          for package in upload/packages/*; do
+            package_name=$(basename "$package")
+            case "$package_name" in
+              *craned.rpm)
+                echo "ARTIFACT_NAME_CRANED_RPM=$package_name" >> $GITHUB_ENV
+                ;;
+              *craned.deb)
+                echo "ARTIFACT_NAME_CRANED_DEB=$package_name" >> $GITHUB_ENV
+                ;;
+              *cranectld.rpm)
+                echo "ARTIFACT_NAME_CRANECTLD_RPM=$package_name" >> $GITHUB_ENV
+                ;;
+              *cranectld.deb)
+                echo "ARTIFACT_NAME_CRANECTLD_DEB=$package_name" >> $GITHUB_ENV
+                ;;
+            esac
+          done
 
-      - name: Upload packages
+      - name: Upload craned .deb package
         uses: actions/upload-artifact@v4
         with:
-          name: packages
-          path: |
-            upload/packages/*.deb
-            upload/packages/*.rpm
+          name: ${{ env.ARTIFACT_NAME_CRANED_DEB }}
+          path: upload/packages/${{ env.ARTIFACT_NAME_CRANED_DEB }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload craned .rpm package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME_CRANED_RPM }}
+          path: upload/packages/${{ env.ARTIFACT_NAME_CRANED_RPM }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload cranectld .deb package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME_CRANECTLD_DEB }}
+          path: upload/packages/${{ env.ARTIFACT_NAME_CRANECTLD_DEB }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload cranectld .rpm package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME_CRANECTLD_RPM }}
+          path: upload/packages/${{ env.ARTIFACT_NAME_CRANECTLD_RPM }}
           retention-days: 30
           if-no-files-found: error
