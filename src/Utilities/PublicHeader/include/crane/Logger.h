@@ -208,8 +208,6 @@ void FindLoggerValidLevel(const std::unordered_map<std::string, spdlog::level::l
 
 bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_Level);
 
-bool SetSingleLoggerLevel(const std::string& logger_name, spdlog::level::level_enum level);
-
 Result SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level);
 
 
@@ -271,7 +269,7 @@ public:
         if (it != map.end()) {
             return map[name]();
         }
-        return nullptr;  // 未找到插件则返回 nullptr
+        return nullptr;  // not found return nullptr
     }
 
 private:

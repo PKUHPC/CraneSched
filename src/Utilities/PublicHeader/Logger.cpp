@@ -29,7 +29,7 @@ BasicLogger* Logger::CreateLogger() {
 void Logger::Init(const std::string& log_file_path, const std::string& name) {
    static std::once_flag init_flag;
     std::call_once(init_flag, [&]() {
-        // 初始化 spdlog
+        // init spdlog
         spdlog::init_thread_pool(256, 1);
         spdlog::flush_on(spdlog::level::err);
         spdlog::flush_every(std::chrono::seconds(1));
@@ -150,11 +150,3 @@ bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_
     return true;
 }
 
-bool SetSingleLoggerLevel(const std::string& logger_name, spdlog::level::level_enum level) {
-    auto logger = spdlog::get(logger_name);
-    if (logger == nullptr) {
-        return false;
-    }
-    logger->set_level(level);
-    return true;
-}
