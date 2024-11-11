@@ -97,159 +97,93 @@ TaskManager::TaskManager() {
   // Only called once. Guaranteed by singleton pattern.
   m_instance_ptr_ = this;
 
-  auto m_uvw_loop = uvw::loop::create();
-  m_ev_base_ = event_base_new();
-  if (m_ev_base_ == nullptr) {
-    CRANE_ERROR("Could not initialize libevent!");
-    std::terminate();
-  }
+  m_uvw_loop = uvw::loop::create();
+
   m_sigchld_handle_ = m_uvw_loop->resource<uvw::signal_handle>();
   m_sigchld_handle_->on<uvw::signal_event>(
       [this](const uvw::signal_event&, uvw::signal_handle&) {
         EvSigchldCb_();
       });
-  m_sigchld_handle_->start(SIGCLD);
 
-  m_process_sigchld_handle_ = m_uvw_loop->resource<uvw::async_handle>();
-  m_process_sigchld_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvProcessSigchldCb_();
-      });
+  if (m_sigchld_handle_->start(SIGCLD) != 0) {
+    CRANE_ERROR("Failed to start the SIGCLD handle");
+  }
+
   m_sigint_handle_ = m_uvw_loop->resource<uvw::signal_handle>();
   m_sigint_handle_->on<uvw::signal_event>(
       [this](const uvw::signal_event&, uvw::signal_handle&) { EvSigintCb_(); });
-  m_sigint_handle_->start(SIGINT);
+  if (m_sigint_handle_->start(SIGINT) != 0) {
+    CRANE_ERROR("Failed to start the SIGINT handle");
+  }
 
-  m_ev_query_task_id_from_pid_handle_ =
+  // gRPC: QueryTaskIdFromPid
+  m_query_task_id_from_pid_async_handle_ =
       m_uvw_loop->resource<uvw::async_handle>();
-  m_ev_query_task_id_from_pid_handle_->on<uvw::async_event>(
+  m_query_task_id_from_pid_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvGrpcQueryTaskIdFromPidCb_();
+        CleanGrpcQueryTaskIdFromPidQueueCb_();
       });
 
-  {  // gRPC: QueryTaskIdFromPid
-    m_ev_query_task_id_from_pid_ =
-        event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
-                  EvGrpcQueryTaskIdFromPidCb_, this);
-    if (!m_ev_query_task_id_from_pid_) {
-      CRANE_ERROR("Failed to create the query task id event!");
-      std::terminate();
-    }
+  // gRPC: QueryTaskEnvironmentVariable
+  m_query_task_environment_variables_async_handle_ =
+      m_uvw_loop->resource<uvw::async_handle>();
+  m_query_task_environment_variables_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvGrpcQueryTaskEnvironmentVariableCb_();
+      });
 
-    if (event_add(m_ev_query_task_id_from_pid_, nullptr) < 0) {
-      CRANE_ERROR("Could not add the query task id event to base!");
-      std::terminate();
-    }
-  }
-  {  // gRPC: QueryTaskEnvironmentVariable
-    m_ev_query_task_environment_variables_ =
-        event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
-                  EvGrpcQueryTaskEnvironmentVariableCb_, this);
-    if (!m_ev_query_task_environment_variables_) {
-      CRANE_ERROR("Failed to create the query task env event!");
-      std::terminate();
-    }
+  // gRPC Execute Task Event
+  m_grpc_execute_task_async_handle_ = m_uvw_loop->resource<uvw::async_handle>();
+  m_grpc_execute_task_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvGrpcExecuteTaskCb_();
+      });
 
-    if (event_add(m_ev_query_task_environment_variables_, nullptr) < 0) {
-      CRANE_ERROR("Could not add the query task env to base!");
-      std::terminate();
-    }
-  }
-  {  // Exit Event
-    m_ev_exit_event_ =
-        event_new(m_ev_base_, -1, EV_PERSIST | EV_READ, EvExitEventCb_, this);
-    if (!m_ev_exit_event_) {
-      CRANE_ERROR("Failed to create the exit event!");
-      std::terminate();
-    }
+  m_process_sigchld_async_handle_ = m_uvw_loop->resource<uvw::async_handle>();
+  m_process_sigchld_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvProcessSigchldCb_();
+      });
 
-    if (event_add(m_ev_exit_event_, nullptr) < 0) {
-      CRANE_ERROR("Could not add the exit event to base!");
-      std::terminate();
-    }
-  }
-  {  // Grpc Execute Task Event
-    m_ev_grpc_execute_task_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
-                                        EvGrpcExecuteTaskCb_, this);
-    if (!m_ev_grpc_execute_task_) {
-      CRANE_ERROR("Failed to create the grpc_execute_task event!");
-      std::terminate();
-    }
-    if (event_add(m_ev_grpc_execute_task_, nullptr) < 0) {
-      CRANE_ERROR("Could not add the m_ev_grpc_execute_task_ to base!");
-      std::terminate();
-    }
-  }
-  {  // Task Status Change Event
-    m_ev_task_status_change_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
-                                         EvTaskStatusChangeCb_, this);
-    if (!m_ev_task_status_change_) {
-      CRANE_ERROR("Failed to create the task_status_change event!");
-      std::terminate();
-    }
-    if (event_add(m_ev_task_status_change_, nullptr) < 0) {
-      CRANE_ERROR("Could not add the m_ev_task_status_change_event_ to base!");
-      std::terminate();
-    }
-  }
-  {
-    m_ev_task_time_limit_change_ = event_new(
-        m_ev_base_, -1, EV_READ | EV_PERSIST, EvChangeTaskTimeLimitCb_, this);
-    if (!m_ev_task_time_limit_change_) {
-      CRANE_ERROR("Failed to create the task_time_limit_change event!");
-      std::terminate();
-    }
-    if (event_add(m_ev_task_time_limit_change_, nullptr) < 0) {
-      CRANE_ERROR("Could not add the m_ev_task_time_limit_change_ to base!");
-      std::terminate();
-    }
-  }
-  {
-    m_ev_task_terminate_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
-                                     EvTerminateTaskCb_, this);
-    if (!m_ev_task_terminate_) {
-      CRANE_ERROR("Failed to create the task_terminate event!");
-      std::terminate();
-    }
-    if (event_add(m_ev_task_terminate_, nullptr) < 0) {
-      CRANE_ERROR("Could not add the m_ev_task_terminate_ to base!");
-      std::terminate();
-    }
-  }
-  {
-    m_ev_check_task_status_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
-                                        EvCheckTaskStatusCb_, this);
-    if (!m_ev_check_task_status_) {
-      CRANE_ERROR("Failed to create the check_task_status event!");
-      std::terminate();
-    }
-    if (event_add(m_ev_check_task_status_, nullptr) < 0) {
-      CRANE_ERROR("Could not add the m_ev_check_task_status_ to base!");
-      std::terminate();
-    }
-  }
+  // Exit Event
+  m_exit_event_async_handle_ = m_uvw_loop->resource<uvw::async_handle>();
+  m_exit_event_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvExitEventCb_();
+      });
 
-  m_ev_loop_thread_ =
-      std::thread([this]() { event_base_dispatch(m_ev_base_); });
+  // Task Status Change Event
+  m_task_status_change_async_handle_ =
+      m_uvw_loop->resource<uvw::async_handle>();
+  m_task_status_change_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanTaskStatusChangeQueueCb_();
+      });
+
+  m_change_task_time_limit_async_handle_ =
+      m_uvw_loop->resource<uvw::async_handle>();
+  m_change_task_time_limit_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanChangeTaskTimeLimitQueueCb_();
+      });
+
+  m_terminate_task_async_handle_ = m_uvw_loop->resource<uvw::async_handle>();
+  m_terminate_task_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanTerminateTaskQueueCb_();
+      });
+
+  m_check_task_status_async_handle_ = m_uvw_loop->resource<uvw::async_handle>();
+  m_check_task_status_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanCheckTaskStatusQueueCb_();
+      });
+
+  m_uvw_thread = std::thread([this]() { m_uvw_loop->run(); });
 }
 
 TaskManager::~TaskManager() {
-  if (m_ev_loop_thread_.joinable()) m_ev_loop_thread_.join();
-
-  if (m_ev_sigchld_) event_free(m_ev_sigchld_);
-  if (m_ev_sigint_) event_free(m_ev_sigint_);
-
-  if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
-  if (m_ev_query_task_environment_variables_)
-    event_free(m_ev_query_task_environment_variables_);
-  if (m_ev_grpc_execute_task_) event_free(m_ev_grpc_execute_task_);
-  if (m_ev_exit_event_) event_free(m_ev_exit_event_);
-  if (m_ev_task_status_change_) event_free(m_ev_task_status_change_);
-  if (m_ev_task_time_limit_change_) event_free(m_ev_task_time_limit_change_);
-  if (m_ev_task_terminate_) event_free(m_ev_task_terminate_);
-  if (m_ev_check_task_status_) event_free(m_ev_check_task_status_);
-
-  if (m_ev_base_) event_base_free(m_ev_base_);
+  if (m_uvw_thread.joinable()) m_uvw_thread.join();
 }
 
 const TaskInstance* TaskManager::FindInstanceByTaskId_(uint32_t task_id) {
@@ -356,7 +290,7 @@ void TaskManager::EvSigchldCb_() {
         printf("continued\n");
       } */
       this->m_sigchld_queue_.enqueue(std::move(sigchld_info));
-      event_active(this->m_ev_process_sigchld_, 0, 0);
+      m_process_sigchld_async_handle_->send();
     } else if (pid == 0) {
       // There's no child that needs reaping.
       // If Craned is exiting, check if there's any task remaining.
@@ -381,9 +315,8 @@ void TaskManager::EvProcessSigchldCb_() {
     auto pid = sigchld_info->pid;
 
     if (sigchld_info->resend_timer != nullptr) {
-      evtimer_del(sigchld_info->resend_timer);
-      event_free(sigchld_info->resend_timer);
-      sigchld_info->resend_timer = nullptr;
+      sigchld_info->resend_timer->close();
+      sigchld_info->resend_timer.reset();
     }
 
     this->m_mtx_.Lock();
@@ -394,20 +327,19 @@ void TaskManager::EvProcessSigchldCb_() {
         proc_iter == this->m_pid_proc_map_.end()) {
       this->m_mtx_.Unlock();
 
-      EvQueueSigchldArg* arg = new EvQueueSigchldArg;
-
-      timeval tv{kEvSigChldResendMs / 1000'000, kEvSigChldResendMs % 1000'000};
-      sigchld_info->resend_timer =
-          event_new(this->m_ev_base_, -1, 0, EvOnSigchldTimerCb_, arg);
-      evtimer_add(sigchld_info->resend_timer, &tv);
-
-      CRANE_ASSERT_MSG(sigchld_info->resend_timer != nullptr,
-                       "Failed to create new timer.");
+      auto* sigchld_info_raw_ptr = sigchld_info.release();
+      sigchld_info_raw_ptr->resend_timer =
+          this->m_uvw_loop->resource<uvw::timer_handle>();
+      sigchld_info_raw_ptr->resend_timer->on<uvw::timer_event>(
+          [this, sigchld_info_raw_ptr](const uvw::timer_event&,
+                                       uvw::timer_handle&) {
+            SigchldTimerCb_(sigchld_info_raw_ptr);
+          });
+      sigchld_info_raw_ptr->resend_timer->start(
+          std::chrono::milliseconds(kEvSigChldResendMs),
+          std::chrono::milliseconds(0));
       CRANE_TRACE("Child Process {} exit too early, will do SigchldCb later",
-                  sigchld_info->pid);
-      arg->task_manager = this;
-      arg->sigchld_info = std::move(sigchld_info);
-
+                  pid);
       continue;
     }
 
@@ -457,45 +389,24 @@ void TaskManager::EvProcessSigchldCb_() {
   }
 }
 
-void TaskManager::EvOnSigchldTimerCb_(int, short, void* arg_) {
-  auto* arg = reinterpret_cast<EvQueueSigchldArg*>(arg_);
-  auto* this_ = arg->task_manager;
-
-  this_->m_sigchld_queue_.enqueue(std::move(arg->sigchld_info));
-  event_active(this_->m_ev_process_sigchld_, 0, 0);
-
-  delete arg;
-}
-
-void TaskManager::EvSubprocessReadCb_(struct bufferevent* bev, void* process) {
-  auto* proc = reinterpret_cast<ProcessInstance*>(process);
-
-  size_t buf_len = evbuffer_get_length(bev->input);
-
-  std::string str;
-  str.resize(buf_len);
-  int n_copy = evbuffer_remove(bev->input, str.data(), buf_len);
-
-  CRANE_TRACE("Read {:>4} bytes from subprocess (pid: {}): {}", n_copy,
-              proc->GetPid(), str);
-
-  proc->Output(std::move(str));
+void TaskManager::SigchldTimerCb_(ProcSigchldInfo* sigchld_info) {
+  m_sigchld_queue_.enqueue(std::unique_ptr<ProcSigchldInfo>(sigchld_info));
+  m_process_sigchld_async_handle_->send();
 }
 
 void TaskManager::EvSigintCb_() {
-  if (!this->m_is_ending_now_) {
+  if (!m_is_ending_now_) {
     // SIGINT has been sent once. If SIGINT are captured twice, it indicates
     // the signal sender can't wait to stop Craned and Craned just send SIGTERM
     // to all tasks to kill them immediately.
 
     CRANE_INFO("Caught SIGINT. Send SIGTERM to all running tasks...");
 
-    this->m_is_ending_now_ = true;
+    m_is_ending_now_ = true;
 
-    if (this->m_sigint_cb_) this->m_sigint_cb_();
+    if (m_sigint_cb_) m_sigint_cb_();
 
-    for (auto task_it = this->m_task_map_.begin();
-         task_it != this->m_task_map_.end();) {
+    for (auto task_it = m_task_map_.begin(); task_it != m_task_map_.end();) {
       task_id_t task_id = task_it->first;
       TaskInstance* task_instance = task_it->second.get();
 
@@ -519,13 +430,13 @@ void TaskManager::EvSigintCb_() {
         task_instance->cgroup->KillAllProcesses();
 
         auto to_remove_it = task_it++;
-        this->m_task_map_.erase(to_remove_it);
+        m_task_map_.erase(to_remove_it);
       }
     }
 
-    if (this->m_task_map_.empty()) {
+    if (m_task_map_.empty()) {
       // If there is not any batch task to wait for, stop the loop directly.
-      this->EvActivateShutdown_();
+      EvActivateShutdown_();
     }
   } else {
     CRANE_INFO(
@@ -548,23 +459,22 @@ void TaskManager::EvSigintCb_() {
   }
 }
 
-void TaskManager::EvExitEventCb_(int efd, short events, void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
+void TaskManager::EvExitEventCb_() {
   CRANE_TRACE("Exit event triggered. Stop event loop.");
 
-  struct timeval delay = {0, 0};
-  event_base_loopexit(this_->m_ev_base_, &delay);
+  // Close all handle
+  m_uvw_loop->walk([](auto&& h) { h.close(); });
+  m_uvw_loop->stop();
 }
 
 void TaskManager::EvActivateShutdown_() {
   CRANE_TRACE("Triggering exit event...");
-  m_is_ending_now_ = true;
-  event_active(m_ev_exit_event_, 0, 0);
+  CRANE_ASSERT(m_is_ending_now_ == true);
+  m_exit_event_async_handle_->send();
 }
 
 void TaskManager::Wait() {
-  if (m_ev_loop_thread_.joinable()) m_ev_loop_thread_.join();
+  if (m_uvw_thread.joinable()) m_uvw_thread.join();
 }
 
 CraneErr TaskManager::KillProcessInstance_(const ProcessInstance* proc,
@@ -964,23 +874,22 @@ CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
     instance->meta = std::make_unique<CrunMetaInTaskInstance>();
 
   m_grpc_execute_task_queue_.enqueue(std::move(instance));
-  event_active(m_ev_grpc_execute_task_, 0, 0);
+  m_grpc_execute_task_async_handle_->send();
 
   return CraneErr::kOk;
 }
 
-void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+void TaskManager::EvGrpcExecuteTaskCb_() {
   std::unique_ptr<TaskInstance> popped_instance;
 
-  while (this_->m_grpc_execute_task_queue_.try_dequeue(popped_instance)) {
+  while (this->m_grpc_execute_task_queue_.try_dequeue(popped_instance)) {
     // Once ExecuteTask RPC is processed, the TaskInstance goes into
     // m_task_map_.
     TaskInstance* instance = popped_instance.get();
     task_id_t task_id = instance->task.task_id();
 
     auto [iter, ok] =
-        this_->m_task_map_.emplace(task_id, std::move(popped_instance));
+        this->m_task_map_.emplace(task_id, std::move(popped_instance));
     if (!ok) {
       CRANE_ERROR("Duplicated ExecuteTask request for task #{}. Ignore it.",
                   task_id);
@@ -991,11 +900,11 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     // Note: event_new and event_add in this function is not thread safe,
     //       so we move it outside the multithreading part.
     int64_t sec = instance->task.time_limit().seconds();
-    this_->EvAddTerminationTimer_(instance, sec);
+    this->AddTerminationTimer_(instance, sec);
     CRANE_TRACE("Add a timer of {} seconds for task #{}", sec, task_id);
 
     g_thread_pool->detach_task(
-        [this_, instance]() { this_->LaunchTaskInstanceMt_(instance); });
+        [this, instance]() { this->LaunchTaskInstanceMt_(instance); });
   }
 }
 
@@ -1150,14 +1059,11 @@ std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
   return resolved_path_pattern;
 }
 
-void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
-                                        void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
-  TaskStatusChange status_change;
-  while (this_->m_task_status_change_queue_.try_dequeue(status_change)) {
-    auto iter = this_->m_task_map_.find(status_change.task_id);
-    if (iter == this_->m_task_map_.end()) {
+void TaskManager::CleanTaskStatusChangeQueueCb_() {
+  TaskStatusChangeQueueElem status_change;
+  while (this->m_task_status_change_queue_.try_dequeue(status_change)) {
+    auto iter = this->m_task_map_.find(status_change.task_id);
+    if (iter == this->m_task_map_.end()) {
       // When Ctrl+C is pressed for Craned, all tasks including just forked
       // tasks will be terminated.
       // In some error cases, a double TaskStatusChange might be triggered.
@@ -1175,7 +1081,7 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
     bool orphaned = instance->orphaned;
 
     // Free the TaskInstance structure
-    this_->m_task_map_.erase(status_change.task_id);
+    this->m_task_map_.erase(status_change.task_id);
 
     if (!orphaned)
       g_ctld_client->TaskStatusChangeAsync(std::move(status_change));
@@ -1183,40 +1089,37 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
 
   // Todo: Add additional timer to check periodically whether all children
   //  have exited.
-  if (this_->m_is_ending_now_ && this_->m_task_map_.empty()) {
+  if (this->m_is_ending_now_ && this->m_task_map_.empty()) {
     CRANE_TRACE(
         "Craned is ending and all tasks have been reaped. "
         "Stop event loop.");
-    this_->EvActivateShutdown_();
+    this->EvActivateShutdown_();
   }
 }
 
 void TaskManager::EvActivateTaskStatusChange_(
     uint32_t task_id, crane::grpc::TaskStatus new_status, uint32_t exit_code,
     std::optional<std::string> reason) {
-  TaskStatusChange status_change{task_id, new_status, exit_code};
+  TaskStatusChangeQueueElem status_change{task_id, new_status, exit_code};
   if (reason.has_value()) status_change.reason = std::move(reason);
 
   m_task_status_change_queue_.enqueue(std::move(status_change));
-  event_active(m_ev_task_status_change_, 0, 0);
+  m_task_status_change_async_handle_->send();
 }
 
 CraneExpected<EnvMap> TaskManager::QueryTaskEnvMapAsync(task_id_t task_id) {
   EvQueueQueryTaskEnvMap elem{.task_id = task_id};
   std::future<CraneExpected<EnvMap>> env_future = elem.env_prom.get_future();
   m_query_task_environment_variables_queue.enqueue(std::move(elem));
-  event_active(m_ev_query_task_environment_variables_, 0, 0);
+  m_query_task_environment_variables_async_handle_->send();
   return env_future.get();
 }
 
-void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_(int efd, short events,
-                                                        void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
+void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_() {
   EvQueueQueryTaskEnvMap elem;
-  while (this_->m_query_task_environment_variables_queue.try_dequeue(elem)) {
-    auto task_iter = this_->m_task_map_.find(elem.task_id);
-    if (task_iter == this_->m_task_map_.end())
+  while (this->m_query_task_environment_variables_queue.try_dequeue(elem)) {
+    auto task_iter = this->m_task_map_.find(elem.task_id);
+    if (task_iter == this->m_task_map_.end())
       elem.env_prom.set_value(std::unexpected(CraneErr::kSystemErr));
     else {
       auto& instance = task_iter->second;
@@ -1235,19 +1138,17 @@ CraneExpected<task_id_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
   std::future<CraneExpected<task_id_t>> task_id_opt_future =
       elem.task_id_prom.get_future();
   m_query_task_id_from_pid_queue_.enqueue(std::move(elem));
-  event_active(m_ev_query_task_id_from_pid_, 0, 0);
-
+  m_query_task_environment_variables_async_handle_->send();
   return task_id_opt_future.get();
 }
 
-void TaskManager::EvGrpcQueryTaskIdFromPidCb_() {
-
+void TaskManager::CleanGrpcQueryTaskIdFromPidQueueCb_() {
   EvQueueQueryTaskIdFromPid elem;
-  while (this->m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
-    this->m_mtx_.Lock();
+  while (m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
+    m_mtx_.Lock();
 
-    auto task_iter = this->m_pid_task_map_.find(elem.pid);
-    if (task_iter == this->m_pid_task_map_.end())
+    auto task_iter = m_pid_task_map_.find(elem.pid);
+    if (task_iter == m_pid_task_map_.end())
       elem.task_id_prom.set_value(std::unexpected(CraneErr::kSystemErr));
     else {
       TaskInstance* instance = task_iter->second;
@@ -1255,15 +1156,11 @@ void TaskManager::EvGrpcQueryTaskIdFromPidCb_() {
       elem.task_id_prom.set_value(task_id);
     }
 
-    this->m_mtx_.Unlock();
+    m_mtx_.Unlock();
   }
 }
 
-void TaskManager::EvOnTaskTimerCb_(int, short, void* arg_) {
-  auto* arg = reinterpret_cast<EvTimerCbArg*>(arg_);
-  TaskManager* this_ = arg->task_manager;
-  task_id_t task_id = arg->task_id;
-
+void TaskManager::OnTaskTimerCb_(task_id_t task_id) {
   CRANE_TRACE("Task #{} exceeded its time limit. Terminating it...", task_id);
 
   // Sometimes, task finishes just before time limit.
@@ -1271,41 +1168,39 @@ void TaskManager::EvOnTaskTimerCb_(int, short, void* arg_) {
   // the timer is triggered immediately.
   // That's why we need to check the existence of the task again in timer
   // callback, otherwise a segmentation fault will occur.
-  auto task_it = this_->m_task_map_.find(task_id);
-  if (task_it == this_->m_task_map_.end()) {
+  auto task_it = this->m_task_map_.find(task_id);
+  if (task_it == m_task_map_.end()) {
     CRANE_TRACE("Task #{} has already been removed.");
     return;
   }
 
   TaskInstance* task_instance = task_it->second.get();
-  this_->EvDelTerminationTimer_(task_instance);
+  DelTerminationTimer_(task_instance);
 
   if (task_instance->task.type() == crane::grpc::Batch) {
-    EvQueueTaskTerminate ev_task_terminate{
+    TaskTerminateQueueElem ev_task_terminate{
         .task_id = task_id,
         .terminated_by_timeout = true,
     };
-    this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
-    event_active(this_->m_ev_task_terminate_, 0, 0);
+    this->m_task_terminate_queue_.enqueue(ev_task_terminate);
+    m_terminate_task_async_handle_->send();
   } else {
-    this_->EvActivateTaskStatusChange_(
+    this->EvActivateTaskStatusChange_(
         task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
         ExitCode::kExitCodeExceedTimeLimit, std::nullopt);
   }
 }
 
-void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
-  EvQueueTaskTerminate elem;
-  while (this_->m_task_terminate_queue_.try_dequeue(elem)) {
+void TaskManager::CleanTerminateTaskQueueCb_() {
+  TaskTerminateQueueElem elem;
+  while (this->m_task_terminate_queue_.try_dequeue(elem)) {
     CRANE_TRACE(
         "Receive TerminateRunningTask Request from internal queue. "
         "Task id: {}",
         elem.task_id);
 
-    auto iter = this_->m_task_map_.find(elem.task_id);
-    if (iter == this_->m_task_map_.end()) {
+    auto iter = this->m_task_map_.find(elem.task_id);
+    if (iter == this->m_task_map_.end()) {
       CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
 
       // Note if Ctld wants to terminate some tasks that are not running,
@@ -1348,34 +1243,34 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
         KillProcessInstance_(pr_instance.get(), sig);
     } else if (task_instance->task.type() == crane::grpc::Interactive) {
       // For an Interactive task with no process running, it ends immediately.
-      this_->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Completed,
-                                         ExitCode::kExitCodeTerminated,
-                                         std::nullopt);
+      this->EvActivateTaskStatusChange_(elem.task_id, crane::grpc::Completed,
+                                        ExitCode::kExitCodeTerminated,
+                                        std::nullopt);
     }
   }
 }
 
 void TaskManager::TerminateTaskAsync(uint32_t task_id) {
-  EvQueueTaskTerminate elem{.task_id = task_id, .terminated_by_user = true};
+  TaskTerminateQueueElem elem{.task_id = task_id, .terminated_by_user = true};
   m_task_terminate_queue_.enqueue(elem);
-  event_active(m_ev_task_terminate_, 0, 0);
+  m_terminate_task_async_handle_->send();
 }
 
 void TaskManager::MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id) {
-  EvQueueTaskTerminate elem{.task_id = task_id, .mark_as_orphaned = true};
+  TaskTerminateQueueElem elem{.task_id = task_id, .mark_as_orphaned = true};
   m_task_terminate_queue_.enqueue(elem);
-  event_active(m_ev_task_terminate_, 0, 0);
+  m_terminate_task_async_handle_->send();
 }
 
 bool TaskManager::CheckTaskStatusAsync(task_id_t task_id,
                                        crane::grpc::TaskStatus* status) {
-  EvQueueCheckTaskStatus elem{.task_id = task_id};
+  CheckTaskStatusQueueElem elem{.task_id = task_id};
 
   std::future<std::pair<bool, crane::grpc::TaskStatus>> res{
       elem.status_prom.get_future()};
 
   m_check_task_status_queue_.enqueue(std::move(elem));
-  event_active(m_ev_check_task_status_, 0, 0);
+  m_check_task_status_async_handle_->send();
 
   auto [ok, task_status] = res.get();
   if (!ok) return false;
@@ -1384,13 +1279,11 @@ bool TaskManager::CheckTaskStatusAsync(task_id_t task_id,
   return true;
 }
 
-void TaskManager::EvCheckTaskStatusCb_(int, short events, void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
-  EvQueueCheckTaskStatus elem;
-  while (this_->m_check_task_status_queue_.try_dequeue(elem)) {
+void TaskManager::CleanCheckTaskStatusQueueCb_() {
+  CheckTaskStatusQueueElem elem;
+  while (m_check_task_status_queue_.try_dequeue(elem)) {
     task_id_t task_id = elem.task_id;
-    if (this_->m_task_map_.contains(task_id)) {
+    if (m_task_map_.contains(task_id)) {
       // Found in task map. The task must be running.
       elem.status_prom.set_value({true, crane::grpc::TaskStatus::Running});
       continue;
@@ -1414,24 +1307,24 @@ void TaskManager::EvCheckTaskStatusCb_(int, short events, void* user_data) {
 
 bool TaskManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
                                            absl::Duration time_limit) {
-  EvQueueChangeTaskTimeLimit elem{.task_id = task_id, .time_limit = time_limit};
+  ChangeTaskTimeLimitQueueElem elem{.task_id = task_id,
+                                    .time_limit = time_limit};
 
   std::future<bool> ok_fut = elem.ok_prom.get_future();
   m_task_time_limit_change_queue_.enqueue(std::move(elem));
-  event_active(m_ev_task_time_limit_change_, 0, 0);
+  m_change_task_time_limit_async_handle_->send();
   return ok_fut.get();
 }
 
-void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+void TaskManager::CleanChangeTaskTimeLimitQueueCb_() {
   absl::Time now = absl::Now();
 
-  EvQueueChangeTaskTimeLimit elem;
-  while (this_->m_task_time_limit_change_queue_.try_dequeue(elem)) {
-    auto iter = this_->m_task_map_.find(elem.task_id);
-    if (iter != this_->m_task_map_.end()) {
+  ChangeTaskTimeLimitQueueElem elem;
+  while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
+    auto iter = m_task_map_.find(elem.task_id);
+    if (iter != m_task_map_.end()) {
       TaskInstance* task_instance = iter->second.get();
-      this_->EvDelTerminationTimer_(task_instance);
+      DelTerminationTimer_(task_instance);
 
       absl::Time start_time =
           absl::FromUnixSeconds(task_instance->task.start_time().seconds());
@@ -1439,14 +1332,14 @@ void TaskManager::EvChangeTaskTimeLimitCb_(int, short events, void* user_data) {
 
       if (now - start_time >= new_time_limit) {
         // If the task times out, terminate it.
-        EvQueueTaskTerminate ev_task_terminate{.task_id = elem.task_id,
-                                               .terminated_by_timeout = true};
-        this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
-        event_active(this_->m_ev_task_terminate_, 0, 0);
+        TaskTerminateQueueElem ev_task_terminate{.task_id = elem.task_id,
+                                                 .terminated_by_timeout = true};
+        m_task_terminate_queue_.enqueue(ev_task_terminate);
+        m_terminate_task_async_handle_->send();
 
       } else {
         // If the task haven't timed out, set up a new timer.
-        this_->EvAddTerminationTimer_(
+        AddTerminationTimer_(
             task_instance,
             ToInt64Seconds((new_time_limit - (absl::Now() - start_time))));
       }

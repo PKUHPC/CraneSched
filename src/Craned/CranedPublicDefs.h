@@ -27,11 +27,11 @@
 
 namespace Craned {
 
-inline const uint64_t kEvSigChldResendMs = 500'000;
+inline const uint64_t kEvSigChldResendMs = 500;
 
 using EnvMap = std::unordered_map<std::string, std::string>;
 
-struct TaskStatusChange {
+struct TaskStatusChangeQueueElem {
   task_id_t task_id{};
   crane::grpc::TaskStatus new_status{};
   uint32_t exit_code{};

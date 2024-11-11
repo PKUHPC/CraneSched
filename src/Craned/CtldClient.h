@@ -54,7 +54,7 @@ class CtldClient {
 
   void OnCraneCtldConnected();
 
-  void TaskStatusChangeAsync(TaskStatusChange&& task_status_change);
+  void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
   bool CancelTaskStatusChangeByTaskId(task_id_t task_id,
                                       crane::grpc::TaskStatus* new_status);
@@ -70,7 +70,7 @@ class CtldClient {
 
   absl::Mutex m_task_status_change_mtx_;
 
-  std::list<TaskStatusChange> m_task_status_change_list_
+  std::list<TaskStatusChangeQueueElem> m_task_status_change_list_
       ABSL_GUARDED_BY(m_task_status_change_mtx_);
 
   std::thread m_async_send_thread_;
