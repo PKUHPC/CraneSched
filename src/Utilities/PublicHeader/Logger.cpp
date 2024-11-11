@@ -17,6 +17,7 @@
  */
 
 #include "crane/Logger.h"
+#include <unordered_map>
 
 std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> BasicLogger::file_sink = nullptr;
 std::shared_ptr<spdlog::sinks::stderr_color_sink_mt> BasicLogger::console_sink = nullptr;
@@ -46,17 +47,15 @@ void Logger::Init(const std::string& log_file_path, const std::string& name) {
     spdlog::register_logger(real_logger);
 }
 
-Logger::Logger() {
-}
-
-void InitLogger(const std::map<std::string, spdlog::level::level_enum>& log_levels,
+void InitLogger(const std::unordered_map<std::string, spdlog::level::level_enum>& log_levels,
                 const std::string& log_file_path,
                 const bool cranectld_flag) {
-    
+    //resister logger
     for (const auto& [name, level] : log_levels) {
         REGISTER_LOGGER(name, Logger::CreateLogger);
     }
-    std::map<std::string, bool> loggers_to_set;
+
+    //get logger
     for (const auto& [name, level] : log_levels) {
         auto logger = LoggerRegistry<BasicLogger>::Create(name);
         if (!logger) {
@@ -65,16 +64,10 @@ void InitLogger(const std::map<std::string, spdlog::level::level_enum>& log_leve
         }
         logger->Init(log_file_path, name);
         logger->real_logger->set_level(level);
-        if (logger) {
-            loggers_to_set[name] = true;
-        } else {
-             loggers_to_set[name] = false;
-        }
     }
 }
 
-
-void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>& log_Levels,
+void FindLoggerValidLevel(const std::unordered_map<std::string, spdlog::level::level_enum>& log_Levels,
                           const std::string& logger_name,
                           spdlog::level::level_enum *out_level) {
     if (out_level == nullptr) {
@@ -90,7 +83,7 @@ void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>
 }
 
 Result SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level) {
- std::map<std::string, bool> loggers_to_set;
+ std::unordered_map<std::string, bool> loggers_to_set;
     if (logger_name == "All") {
         loggers_to_set = {{"Default", false}, {"TaskScheduler", false}, {"CranedKeeper", false}};
     } else if (logger_name == "Other") {

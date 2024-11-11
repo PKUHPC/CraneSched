@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <unordered_map>
 #include "CranedPreCompiledHeader.h"
 // Precompiled header comes first
 
@@ -72,7 +73,7 @@ struct Config {
 
   std::string ControlMachine;
   std::string CraneCtldListenPort;
-  std::map<std::string, spdlog::level::level_enum> logLevels;
+  std::unordered_map<std::string, spdlog::level::level_enum> logLevels;
 
   std::string CraneBaseDir;
   std::string CranedLogFile;

@@ -197,12 +197,12 @@
     std::string reason;
   };
 
-void InitLogger(const std::map<std::string, spdlog::level::level_enum>& log_levels,
+void InitLogger(const std::unordered_map<std::string, spdlog::level::level_enum>& log_levels,
                 const std::string& log_file_path,
                 const bool cranectld_flag);
 
 
-void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>& log_levels, 
+void FindLoggerValidLevel(const std::unordered_map<std::string, spdlog::level::level_enum>& log_levels, 
                           const std::string& logger_name,
                           spdlog::level::level_enum *out_level);
 
@@ -245,7 +245,6 @@ public:
 
 class Logger : public BasicLogger {
 public:
-  Logger();
   void Init(const std::string& log_file_path, const std::string& name) override;
   std::shared_ptr<spdlog::async_logger> GetLogger(const std::string& name);
   static BasicLogger* CreateLogger();
