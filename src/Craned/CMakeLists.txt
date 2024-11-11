@@ -40,9 +40,6 @@ target_link_libraries(craned
 
         crane_proto_lib
 
-        dev_event_core
-        dev_event_pthreads
-
         bs_thread_pool
 
         cxxopts

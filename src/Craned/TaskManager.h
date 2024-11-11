@@ -21,10 +21,6 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include <event2/bufferevent.h>
-#include <event2/event.h>
-#include <event2/util.h>
-#include <evrpc.h>
 #include <grp.h>
 #include <sys/eventfd.h>
 #include <sys/wait.h>
@@ -71,8 +67,6 @@ class ProcessInstance {
         CRANE_ERROR(
             "user_data in ProcessInstance is set, but clean_cb is not set!");
     }
-
-    if (m_ev_buf_event_) bufferevent_free(m_ev_buf_event_);
   }
 
   [[nodiscard]] const std::string& GetExecPath() const {
