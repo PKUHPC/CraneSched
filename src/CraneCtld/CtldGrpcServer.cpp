@@ -963,7 +963,8 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   }
 
   auto enable_res =
-      g_account_manager->CheckEnableState(task->account, task->Username());
+      g_account_manager->CheckIfUserOfAccountIsEnabled(
+      task->Username(), task->account);
   if (enable_res.has_error()) {
     return result::fail(enable_res.error());
   }

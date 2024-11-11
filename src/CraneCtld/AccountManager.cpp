@@ -38,9 +38,9 @@ AccountManager::CraneExpected<void> AccountManager::AddUser(
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
-  const User* op_user = user_result.value();
+  const User& op_user = user_result.value();
 
-  result = CheckIfUserHasHigherPrivThan(*op_user, new_user.admin_level);
+  result = CheckIfUserHasHigherPrivThan_(op_user, new_user.admin_level);
   if (!result) return result;
 
   // User must specify an account
@@ -67,7 +67,7 @@ AccountManager::CraneExpected<void> AccountManager::AddUser(
   for (const auto& [partition, qos] :
        new_user.account_to_attrs_map.at(object_account)
            .allowed_partition_qos_map) {
-    result = CheckPartitionIsAllowed(account, partition, false, true);
+    result = CheckPartitionIsAllowedNoLock_(account, partition, false, true);
     if (!result) return result;
   }
 
@@ -82,13 +82,13 @@ AccountManager::CraneExpected<void> AccountManager::AddAccount(
     CraneExpected<void> result;
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
+    const User& op_user = user_result.value();
     if (new_account.parent_account.empty()) {
-      result = CheckIfUserHasHigherPrivThan(*op_user, User::AdminLevel::None);
+      result = CheckIfUserHasHigherPrivThan_(op_user, User::AdminLevel::None);
       if (!result) return result;
     }
-    result =
-        CheckIfUserHasPemOnAccount(*op_user, new_account.parent_account, false);
+    result = CheckIfUserHasPermOnAccountNoLock_(
+        op_user, new_account.parent_account, false);
     if (!result) return result;
   }
 
@@ -148,9 +148,9 @@ AccountManager::CraneExpected<void> AccountManager::AddQos(uint32_t uid,
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = *user_result;
+    const User& op_user = *user_result;
 
-    auto result = CheckIfUserHasHigherPrivThan(*op_user, User::None);
+    auto result = CheckIfUserHasHigherPrivThan_(op_user, User::None);
     if (!result) return result;
   }
 
@@ -170,12 +170,12 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser(
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
-  const User* op_user = user_result.value();
+  const User& op_user = user_result.value();
 
   const User* user = GetExistedUserInfoNoLock_(name);
   if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
-  auto result = CheckIfUserHasHigherPrivThan(*op_user, user->admin_level);
+  auto result = CheckIfUserHasHigherPrivThan_(op_user, user->admin_level);
   if (!result) return result;
 
   if (!account.empty() && !user->account_to_attrs_map.contains(account))
@@ -192,9 +192,9 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccount(
 
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
+    const User& op_user = user_result.value();
 
-    auto result = CheckIfUserHasPemOnAccount(*op_user, name, false);
+    auto result = CheckIfUserHasPermOnAccountNoLock_(op_user, name, false);
     if (!result) return result;
   }
 
@@ -216,9 +216,9 @@ AccountManager::CraneExpected<void> AccountManager::DeleteQos(
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
+    const User& op_user = user_result.value();
 
-    auto result = CheckIfUserHasHigherPrivThan(*op_user, User::None);
+    auto result = CheckIfUserHasHigherPrivThan_(op_user, User::None);
     if (!result) return result;
   }
 
@@ -313,9 +313,9 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
-  const User* op_user = *user_result;
+  const User& op_user = *user_result;
   if (name.empty()) {
-    if (CheckIfUserHasHigherPrivThan(*op_user, User::None)) {
+    if (CheckIfUserHasHigherPrivThan_(op_user, User::None)) {
       // The rules for querying user information are the same as those for
       // querying accounts
       for (const auto& [user_name, user] : m_user_map_) {
@@ -325,7 +325,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
     } else {
       util::read_lock_guard account_guard(m_rw_account_mutex_);
       std::queue<std::string> queue;
-      for (const auto& [acct, item] : op_user->account_to_attrs_map) {
+      for (const auto& [acct, item] : op_user.account_to_attrs_map) {
         queue.push(acct);
         while (!queue.empty()) {
           std::string father = queue.front();
@@ -343,7 +343,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
   } else {  // Query the specified user information.
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     const User* user = GetExistedUserInfoNoLock_(name);
-    result = CheckIfUserHasPemOnUser(*op_user, user, true);
+    result = CheckIfUserHasPermOnUserNoLock_(*op_user, user, true);
     if (!result) return result;
     res_user_map->try_emplace(user->uid, *user);
   }
@@ -361,9 +361,9 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
+    const User& op_user = user_result.value();
     if (!name.empty()) {
-      result = CheckIfUserHasPemOnAccount(*op_user, name, true);
+      result = CheckIfUserHasPermOnAccountNoLock_(op_user, name, true);
       if (!result) return result;
     }
     res_user = *op_user;
@@ -371,7 +371,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
 
   util::read_lock_guard account_guard(m_rw_account_mutex_);
   if (name.empty()) {
-    if (CheckIfUserHasHigherPrivThan(res_user, User::None)) {
+    if (CheckIfUserHasHigherPrivThan_(res_user, User::None)) {
       // If an administrator user queries account information, all
       // accounts are returned, variable user_account not used
       for (const auto& [name, account] : m_account_map_) {
@@ -405,7 +405,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
       }
     }
   } else {
-    res_account_map->try_emplace(name, *(m_account_map_.at(name)));
+    res_account_map->try_emplace(name, *m_account_map_.at(name));
   }
 
   return result;
@@ -420,13 +420,13 @@ AccountManager::CraneExpected<void> AccountManager::QueryQosInfo(
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
-    res_user = *op_user;
+    const User& op_user = user_result.value();
+    res_user = op_user;
   }
 
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
   if (name.empty()) {
-    if (CheckIfUserHasHigherPrivThan(res_user, User::None)) {
+    if (CheckIfUserHasHigherPrivThan_(res_user, User::None)) {
       for (const auto& [name, qos] : m_qos_map_) {
         if (qos->deleted) continue;
         res_qos_map->try_emplace(name, *qos);
@@ -472,8 +472,9 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAdminLevel(
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
-  const User* op_user = *user_result;
-  auto result = CheckIfUserHasHigherPrivThan(*op_user, user->admin_level);
+  const User& op_user = user_result.value();
+
+  auto result = CheckIfUserHasHigherPrivThan_(op_user, user->admin_level);
   if (!result) return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 
   User::AdminLevel new_level;
@@ -486,7 +487,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAdminLevel(
   else
     return std::unexpected(CraneErrCode::ERR_INVALID_ADMIN_LEVEL);
 
-  if (op_user->admin_level <= new_level)
+  if (op_user.admin_level <= new_level)
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 
   if (new_level == user->admin_level) return {};
@@ -499,29 +500,32 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserDefaultQos(
     const std::string& account, const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
-  const User* p = GetExistedUserInfoNoLock_(name);
+  const User* p_target_user = GetExistedUserInfoNoLock_(name);
   CraneExpected<void> result{};
   // Account might be empty. In that case, ues user->default_account.
   std::string actual_account = account;
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
+
+    // FIXME: Repeat Locking!!!
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
-    result =
-        CheckIfUserHasPemOnUserOfAccount(*op_user, p, &actual_account, false);
+    const User& op_user = user_result.value();
+    result = CheckIfUserHasPermOnUserOfAccountNoLock_(op_user, p_target_user,
+                                                      &actual_account, false);
     if (!result) return result;
   }
 
-  result = CheckSetUserDefaultQos(*p, actual_account, partition, value);
+  result = CheckSetUserDefaultQosNoLock_(*p_target_user, actual_account,
+                                         partition, value);
   if (!result) return result;
 
-  return SetUserDefaultQos_(*p, actual_account, partition, value);
+  return SetUserDefaultQos_(*p_target_user, actual_account, partition, value);
 }
 
 AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedPartition(
-    crane::grpc::OperationType operator_type, const uint32_t uid,
+    crane::grpc::OperationType operation_type, const uint32_t uid,
     const std::string& name, const std::string& account,
     const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
@@ -532,19 +536,19 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedPartition(
   std::string actual_account = account;
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
-  const User* op_user = user_result.value();
-  result =
-      CheckIfUserHasPemOnUserOfAccount(*op_user, p, &actual_account, false);
+  const User& op_user = user_result.value();
+  result = CheckIfUserHasPermOnUserOfAccountNoLock_(op_user, p, &actual_account,
+                                                    false);
   if (!result) return result;
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(actual_account);
 
-  switch (operator_type) {
+  switch (operation_type) {
   case crane::grpc::OperationType::Add:
-    result = CheckAddUserAllowedPartition(p, account_ptr, value);
+    result = CheckAddUserAllowedPartitionNoLock_(p, account_ptr, value);
     return !result ? result : AddUserAllowedPartition_(*p, *account_ptr, value);
   case crane::grpc::OperationType::Overwrite:
-    result = CheckSetUserAllowedPartition(account_ptr, value);
+    result = CheckSetUserAllowedPartitionNoLock_(account_ptr, value);
     return !result ? result : SetUserAllowedPartition_(*p, *account_ptr, value);
   default:
     std::unreachable();
@@ -554,7 +558,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedPartition(
 }
 
 AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedQos(
-    crane::grpc::OperationType operator_type, uint32_t uid,
+    crane::grpc::OperationType operation_type, uint32_t uid,
     const std::string& name, const std::string& partition,
     const std::string& account, const std::string& value, bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
@@ -566,20 +570,21 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedQos(
   std::string actual_account = account;
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
-  const User* op_user = user_result.value();
-  result =
-      CheckIfUserHasPemOnUserOfAccount(*op_user, p, &actual_account, false);
+  const User& op_user = user_result.value();
+  result = CheckIfUserHasPermOnUserOfAccountNoLock_(op_user, p, &actual_account,
+                                                    false);
   if (!result) return result;
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(actual_account);
 
-  switch (operator_type) {
+  switch (operation_type) {
   case crane::grpc::OperationType::Add:
-    result = CheckAddUserAllowedQos(p, account_ptr, partition, value);
+    result = CheckAddUserAllowedQosNoLock_(p, account_ptr, partition, value);
     return !result ? result
                    : AddUserAllowedQos_(*p, *account_ptr, partition, value);
   case crane::grpc::OperationType::Overwrite:
-    result = CheckSetUserAllowedQos(p, account_ptr, partition, value, force);
+    result =
+        CheckSetUserAllowedQosNoLock_(p, account_ptr, partition, value, force);
     return !result
                ? result
                : SetUserAllowedQos_(*p, *account_ptr, partition, value, force);
@@ -603,13 +608,13 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedPartition(
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
-    result =
-        CheckIfUserHasPemOnUserOfAccount(*op_user, p, &actual_account, false);
+    const User& op_user = user_result.value();
+    result = CheckIfUserHasPermOnUserOfAccountNoLock_(op_user, p,
+                                                      &actual_account, false);
     if (!result) return result;
   }
 
-  result = CheckDeleteUserAllowedPartition(*p, actual_account, value);
+  result = CheckDeleteUserAllowedPartitionNoLock_(*p, actual_account, value);
   if (!result) return result;
 
   return DeleteUserAllowedPartition_(*p, actual_account, value);
@@ -627,21 +632,21 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedQos(
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
-    result =
-        CheckIfUserHasPemOnUserOfAccount(*op_user, p, &actual_account, false);
+    const User& op_user = user_result.value();
+    result = CheckIfUserHasPermOnUserOfAccountNoLock_(op_user, p,
+                                                      &actual_account, false);
     if (!result) return result;
   }
 
-  result =
-      CheckDeleteUserAllowedQos(*p, actual_account, partition, value, force);
+  result = CheckDeleteUserAllowedQosNoLock_(*p, actual_account, partition,
+                                            value, force);
   if (!result) return result;
 
   return DeleteUserAllowedQos_(*p, value, actual_account, partition, force);
 }
 
 AccountManager::CraneExpected<void> AccountManager::ModifyAccount(
-    crane::grpc::OperationType operator_type, const uint32_t uid,
+    crane::grpc::OperationType operation_type, const uint32_t uid,
     const std::string& name, crane::grpc::ModifyField modify_field,
     const std::string& value, bool force) {
   CraneExpected<void> result{};
@@ -652,25 +657,25 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAccount(
 
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
+    const User& op_user = user_result.value();
 
-    result = CheckIfUserHasPemOnAccount(*op_user, name, false);
+    result = CheckIfUserHasPermOnAccountNoLock_(op_user, name, false);
     if (!result) return result;
   }
 
-  switch (operator_type) {
+  switch (operation_type) {
   case crane::grpc::OperationType::Add: {
     util::write_lock_guard account_guard(m_rw_account_mutex_);
     const Account* account = GetExistedAccountInfoNoLock_(name);
     switch (modify_field) {
     case crane::grpc::ModifyField::Partition: {
-      result = CheckAddAccountAllowedPartition(account, value);
+      result = CheckAddAccountAllowedPartitionNoLock_(account, value);
       return !result ? result : AddAccountAllowedPartition_(name, value);
     }
 
     case crane::grpc::ModifyField::Qos: {
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
-      result = CheckAddAccountAllowedQos(account, value);
+      result = CheckAddAccountAllowedQosNoLock_(account, value);
       return !result ? result : AddAccountAllowedQos_(*account, value);
     }
 
@@ -684,14 +689,14 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAccount(
     case crane::grpc::ModifyField::Description: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      result = CheckSetAccountDescription(account);
+      result = CheckSetAccountDescriptionNoLock_(account);
       return !result ? result : SetAccountDescription_(name, value);
     }
     case crane::grpc::ModifyField::Partition: {
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      result = CheckSetAccountAllowedPartition(account, value, force);
+      result = CheckSetAccountAllowedPartitionNoLock_(account, value, force);
       return !result ? result : SetAccountAllowedPartition_(*account, value);
     }
 
@@ -700,13 +705,13 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAccount(
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      result = CheckSetAccountAllowedQos(account, value, force);
+      result = CheckSetAccountAllowedQosNoLock_(account, value, force);
       return !result ? result : SetAccountAllowedQos_(*account, value);
     }
     case crane::grpc::ModifyField::DefaultQos: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      result = CheckSetAccountDefaultQos(account, value);
+      result = CheckSetAccountDefaultQosNoLock_(account, value);
       return !result ? result : SetAccountDefaultQos_(*account, value);
     }
 
@@ -720,7 +725,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAccount(
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      result = CheckDeleteAccountAllowedPartition(account, value, force);
+      result = CheckDeleteAccountAllowedPartitionNoLock_(account, value, force);
       return !result ? result : DeleteAccountAllowedPartition_(*account, value);
     }
 
@@ -729,7 +734,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAccount(
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
-      result = CheckDeleteAccountAllowedQos(account, value, force);
+      result = CheckDeleteAccountAllowedQosNoLock_(account, value, force);
       return !result ? result : DeleteAccountAllowedQos_(*account, value);
     }
 
@@ -751,9 +756,9 @@ AccountManager::CraneExpected<void> AccountManager::ModifyQos(
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = *user_result;
+    const User& op_user = *user_result;
 
-    auto result = CheckIfUserHasHigherPrivThan(*op_user, User::None);
+    auto result = CheckIfUserHasHigherPrivThan_(op_user, User::None);
     if (!result) return result;
   }
 
@@ -832,9 +837,9 @@ AccountManager::CraneExpected<void> AccountManager::BlockAccount(
 
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
+    const User& op_user = user_result.value();
 
-    auto result = CheckIfUserHasPemOnAccount(*op_user, name, false);
+    auto result = CheckIfUserHasPermOnAccountNoLock_(op_user, name, false);
     if (!result) return result;
   }
 
@@ -859,9 +864,9 @@ AccountManager::CraneExpected<void> AccountManager::BlockUser(
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
-    auto result = CheckIfUserHasPemOnUserOfAccount(*op_user, user,
-                                                   &actual_account, false);
+    const User& op_user = user_result.value();
+    auto result = CheckIfUserHasPermOnUserOfAccountNoLock_(
+        op_user, user, &actual_account, false);
     if (!result) return result;
   }
 
@@ -885,24 +890,24 @@ bool AccountManager::CheckUserPermissionToPartition(
   return false;
 }
 
-result::result<void, std::string> AccountManager::CheckEnableState(
-    const std::string& account, const std::string& user) {
+result::result<void, std::string> AccountManager::CheckIfUserOfAccountIsEnabled(
+    const std::string& user, const std::string& account) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
-  std::string p_str = account;
-  const Account* p_account;
-  do {
-    p_account = GetExistedAccountInfoNoLock_(p_str);
-    if (p_account->blocked) {
-      return result::fail(
-          fmt::format("Ancestor account '{}' is blocked", p_account->name));
-    }
-    p_str = p_account->parent_account;
-  } while (!p_str.empty());
+  std::string account_name = account;
 
-  const User* p_user = GetExistedUserInfoNoLock_(user);
-  if (p_user->account_to_attrs_map.at(account).blocked) {
-    return result::fail(fmt::format("User '{}' is blocked", p_user->name));
+  do {
+    const Account* account_ptr = GetExistedAccountInfoNoLock_(account_name);
+    if (account_ptr->blocked) {
+      return result::fail(
+          fmt::format("Ancestor account '{}' is blocked", account_ptr->name));
+    }
+    account_name = account_ptr->parent_account;
+  } while (!account_name.empty());
+
+  const User* user_ptr = GetExistedUserInfoNoLock_(user);
+  if (user_ptr->account_to_attrs_map.at(account).blocked) {
+    return result::fail(fmt::format("User '{}' is blocked", user_ptr->name));
   }
   return {};
 }
@@ -970,35 +975,31 @@ result::result<void, std::string> AccountManager::CheckUidIsAdmin(
   if (!user_result) {
     return result::failure("User is not a user of Crane.");
   }
-  const User* ptr = user_result.value();
+  const User& user_ptr = user_result.value();
 
-  if (ptr->admin_level >= User::Operator) return {};
+  if (user_ptr.admin_level >= User::Operator) return {};
 
   return result::failure("User has insufficient privilege.");
 }
 
-AccountManager::CraneExpected<void>
-AccountManager::CheckIfUserHasPemOnUserWithLock(uint32_t uid,
-                                                const std::string& username,
-                                                bool read_only_priv) {
+AccountManager::CraneExpected<void> AccountManager::CheckIfUidHasPermOnUser(
+    uint32_t uid, const std::string& username, bool read_only_priv) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
-
-  const User* op_user = user_result.value();
+  const User& op_user = user_result.value();
 
   const User* user = GetExistedUserInfoNoLock_(username);
 
-  return CheckIfUserHasPemOnUser(*op_user, user, read_only_priv);
+  return CheckIfUserHasPermOnUserNoLock_(op_user, user, read_only_priv);
 }
 
 AccountManager::CraneExpected<void>
-AccountManager::CheckAddUserAllowedPartition(const User* user,
-                                             const Account* account,
-                                             const std::string& partition) {
-  auto result = CheckPartitionIsAllowed(account, partition, false, true);
+AccountManager::CheckAddUserAllowedPartitionNoLock_(
+    const User* user, const Account* account, const std::string& partition) {
+  auto result = CheckPartitionIsAllowedNoLock_(account, partition, false, true);
   if (!result) return result;
 
   const std::string& account_name = account->name;
@@ -1011,18 +1012,20 @@ AccountManager::CheckAddUserAllowedPartition(const User* user,
 }
 
 AccountManager::CraneExpected<void>
-AccountManager::CheckSetUserAllowedPartition(const Account* account,
-                                             const std::string& partition) {
-  auto result = CheckPartitionIsAllowed(account, partition, false, true);
+AccountManager::CheckSetUserAllowedPartitionNoLock_(
+    const Account* account, const std::string& partition) {
+  auto result = CheckPartitionIsAllowedNoLock_(account, partition, false, true);
   if (!result) return result;
 
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckAddUserAllowedQos(
-    const User* user, const Account* account, const std::string& partition,
-    const std::string& qos_str) {
-  auto result = CheckQosIsAllowed(account, qos_str, false, true);
+AccountManager::CraneExpected<void>
+AccountManager::CheckAddUserAllowedQosNoLock_(const User* user,
+                                              const Account* account,
+                                              const std::string& partition,
+                                              const std::string& qos_str) {
+  auto result = CheckQosIsAllowedNoLock_(account, qos_str, false, true);
   if (!result) return result;
   const std::string& account_name = account->name;
   //  check if add item already the user's allowed qos
@@ -1056,10 +1059,13 @@ AccountManager::CraneExpected<void> AccountManager::CheckAddUserAllowedQos(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckSetUserAllowedQos(
-    const User* user, const Account* account, const std::string& partition,
-    const std::string& qos_str, bool force) {
-  auto result = CheckQosIsAllowed(account, qos_str, false, true);
+AccountManager::CraneExpected<void>
+AccountManager::CheckSetUserAllowedQosNoLock_(const User* user,
+                                              const Account* account,
+                                              const std::string& partition,
+                                              const std::string& qos_str,
+                                              bool force) {
+  auto result = CheckQosIsAllowedNoLock_(account, qos_str, false, true);
   if (!result) return result;
   const std::string& account_name = account->name;
   std::vector<std::string> qos_vec =
@@ -1091,8 +1097,9 @@ AccountManager::CraneExpected<void> AccountManager::CheckSetUserAllowedQos(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckSetUserAdminLevel(
-    const std::string& level, User::AdminLevel* new_level) {
+AccountManager::CraneExpected<void>
+AccountManager::CheckSetUserAdminLevelNoLock_(const std::string& level,
+                                              User::AdminLevel* new_level) {
   if (level == "none")
     *new_level = User::None;
   else if (level == "operator")
@@ -1105,9 +1112,11 @@ AccountManager::CraneExpected<void> AccountManager::CheckSetUserAdminLevel(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckSetUserDefaultQos(
-    const User& user, const std::string& account, const std::string& partition,
-    const std::string& qos) {
+AccountManager::CraneExpected<void>
+AccountManager::CheckSetUserDefaultQosNoLock_(const User& user,
+                                              const std::string& account,
+                                              const std::string& partition,
+                                              const std::string& qos) {
   if (partition.empty()) {
     bool is_allowed = false;
     for (const auto& [par, pair] :
@@ -1138,9 +1147,9 @@ AccountManager::CraneExpected<void> AccountManager::CheckSetUserDefaultQos(
 }
 
 AccountManager::CraneExpected<void>
-AccountManager::CheckDeleteUserAllowedPartition(const User& user,
-                                                const std::string& account,
-                                                const std::string& partition) {
+AccountManager::CheckDeleteUserAllowedPartitionNoLock_(
+    const User& user, const std::string& account,
+    const std::string& partition) {
   if (!user.account_to_attrs_map.at(account).allowed_partition_qos_map.contains(
           partition))
     return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
@@ -1148,9 +1157,12 @@ AccountManager::CheckDeleteUserAllowedPartition(const User& user,
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckDeleteUserAllowedQos(
-    const User& user, const std::string& account, const std::string& partition,
-    const std::string& qos, bool force) {
+AccountManager::CraneExpected<void>
+AccountManager::CheckDeleteUserAllowedQosNoLock_(const User& user,
+                                                 const std::string& account,
+                                                 const std::string& partition,
+                                                 const std::string& qos,
+                                                 bool force) {
   if (partition.empty()) {
     bool is_allowed = false;
     for (const auto& [par, pair] :
@@ -1184,9 +1196,9 @@ AccountManager::CraneExpected<void> AccountManager::CheckDeleteUserAllowedQos(
 }
 
 AccountManager::CraneExpected<void>
-AccountManager::CheckAddAccountAllowedPartition(const Account* account,
-                                                const std::string& partition) {
-  auto result = CheckPartitionIsAllowed(account, partition, true, false);
+AccountManager::CheckAddAccountAllowedPartitionNoLock_(
+    const Account* account, const std::string& partition) {
+  auto result = CheckPartitionIsAllowedNoLock_(account, partition, true, false);
   if (!result) return result;
 
   if (ranges::contains(account->allowed_partition, partition))
@@ -1195,9 +1207,10 @@ AccountManager::CheckAddAccountAllowedPartition(const Account* account,
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckAddAccountAllowedQos(
-    const Account* account, const std::string& qos) {
-  auto result = CheckQosIsAllowed(account, qos, true, false);
+AccountManager::CraneExpected<void>
+AccountManager::CheckAddAccountAllowedQosNoLock_(const Account* account,
+                                                 const std::string& qos) {
+  auto result = CheckQosIsAllowedNoLock_(account, qos, true, false);
   if (!result) return result;
 
   if (ranges::contains(account->allowed_qos_list, qos))
@@ -1206,18 +1219,18 @@ AccountManager::CraneExpected<void> AccountManager::CheckAddAccountAllowedQos(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckSetAccountDescription(
-    const Account* account) {
+AccountManager::CraneExpected<void>
+AccountManager::CheckSetAccountDescriptionNoLock_(const Account* account) {
   if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   return {};
 }
 
 AccountManager::CraneExpected<void>
-AccountManager::CheckSetAccountAllowedPartition(const Account* account,
-                                                const std::string& partitions,
-                                                bool force) {
-  auto result = CheckPartitionIsAllowed(account, partitions, true, false);
+AccountManager::CheckSetAccountAllowedPartitionNoLock_(
+    const Account* account, const std::string& partitions, bool force) {
+  auto result =
+      CheckPartitionIsAllowedNoLock_(account, partitions, true, false);
   if (!result) return result;
 
   std::vector<std::string> partition_vec =
@@ -1233,9 +1246,11 @@ AccountManager::CheckSetAccountAllowedPartition(const Account* account,
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckSetAccountAllowedQos(
-    const Account* account, const std::string& qos_list, bool force) {
-  auto result = CheckQosIsAllowed(account, qos_list, true, false);
+AccountManager::CraneExpected<void>
+AccountManager::CheckSetAccountAllowedQosNoLock_(const Account* account,
+                                                 const std::string& qos_list,
+                                                 bool force) {
+  auto result = CheckQosIsAllowedNoLock_(account, qos_list, true, false);
   if (!result) return result;
 
   std::vector<std::string> qos_vec =
@@ -1251,9 +1266,10 @@ AccountManager::CraneExpected<void> AccountManager::CheckSetAccountAllowedQos(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckSetAccountDefaultQos(
-    const Account* account, const std::string& qos) {
-  auto result = CheckQosIsAllowed(account, qos, false, false);
+AccountManager::CraneExpected<void>
+AccountManager::CheckSetAccountDefaultQosNoLock_(const Account* account,
+                                                 const std::string& qos) {
+  auto result = CheckQosIsAllowedNoLock_(account, qos, false, false);
   if (!result) return result;
 
   if (account->default_qos == qos)
@@ -1263,10 +1279,10 @@ AccountManager::CraneExpected<void> AccountManager::CheckSetAccountDefaultQos(
 }
 
 AccountManager::CraneExpected<void>
-AccountManager::CheckDeleteAccountAllowedPartition(const Account* account,
-                                                   const std::string& partition,
-                                                   bool force) {
-  auto result = CheckPartitionIsAllowed(account, partition, false, false);
+AccountManager::CheckDeleteAccountAllowedPartitionNoLock_(
+    const Account* account, const std::string& partition, bool force) {
+  auto result =
+      CheckPartitionIsAllowedNoLock_(account, partition, false, false);
   if (!result) return result;
 
   if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account, partition))
@@ -1276,10 +1292,10 @@ AccountManager::CheckDeleteAccountAllowedPartition(const Account* account,
 }
 
 AccountManager::CraneExpected<void>
-AccountManager::CheckDeleteAccountAllowedQos(const Account* account,
-                                             const std::string& qos,
-                                             bool force) {
-  auto result = CheckQosIsAllowed(account, qos, false, false);
+AccountManager::CheckDeleteAccountAllowedQosNoLock_(const Account* account,
+                                                    const std::string& qos,
+                                                    bool force) {
+  auto result = CheckQosIsAllowedNoLock_(account, qos, false, false);
   if (!result) return result;
 
   if (!force && account->default_qos == qos)
@@ -1292,16 +1308,18 @@ AccountManager::CheckDeleteAccountAllowedQos(const Account* account,
 }
 
 AccountManager::CraneExpected<void>
-AccountManager::CheckIfUserHasHigherPrivThan(const User& op_user,
-                                             User::AdminLevel admin_level) {
+AccountManager::CheckIfUserHasHigherPrivThan_(const User& op_user,
+                                              User::AdminLevel admin_level) {
   if (op_user.admin_level <= admin_level)
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckIfUserHasPemOnAccount(
-    const User& op_user, const std::string& account, bool read_only_priv) {
+AccountManager::CraneExpected<void>
+AccountManager::CheckIfUserHasPermOnAccountNoLock_(const User& op_user,
+                                                   const std::string& account,
+                                                   bool read_only_priv) {
   if (account.empty()) {
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
   }
@@ -1334,10 +1352,10 @@ AccountManager::CraneExpected<void> AccountManager::CheckIfUserHasPemOnAccount(
 }
 
 AccountManager::CraneExpected<void>
-AccountManager::CheckIfUserHasPemOnUserOfAccount(const User& op_user,
-                                                 const User* user,
-                                                 std::string* account,
-                                                 bool read_only_priv) {
+AccountManager::CheckIfUserHasPermOnUserOfAccountNoLock_(const User& op_user,
+                                                         const User* user,
+                                                         std::string* account,
+                                                         bool read_only_priv) {
   if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
   if (account->empty()) *account = user->default_account;
@@ -1348,28 +1366,33 @@ AccountManager::CheckIfUserHasPemOnUserOfAccount(const User& op_user,
   if (op_user.admin_level < user->admin_level)
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 
-  return CheckIfUserHasPemOnAccount(op_user, *account, read_only_priv);
+  return CheckIfUserHasPermOnAccountNoLock_(op_user, *account, read_only_priv);
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckIfUserHasPemOnUser(
-    const User& op_user, const User* user, bool read_only_priv) {
+AccountManager::CraneExpected<void>
+AccountManager::CheckIfUserHasPermOnUserNoLock_(const User& op_user,
+                                                const User* user,
+                                                bool read_only_priv) {
   if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
-  if (CheckIfUserHasHigherPrivThan(op_user, user->admin_level) ||
+  if (CheckIfUserHasHigherPrivThan_(op_user, user->admin_level) ||
       op_user.name == user->name)
     return {};
 
   CraneExpected<void> result;
   for (const auto& [acct, item] : user->account_to_attrs_map) {
-    if (CheckIfUserHasPemOnAccount(op_user, acct, read_only_priv)) return {};
+    if (CheckIfUserHasPermOnAccountNoLock_(op_user, acct, read_only_priv))
+      return {};
   }
 
   return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckPartitionIsAllowed(
-    const Account* account, const std::string& partition, bool check_parent,
-    bool is_user) {
+AccountManager::CraneExpected<void>
+AccountManager::CheckPartitionIsAllowedNoLock_(const Account* account,
+                                               const std::string& partition,
+                                               bool check_parent,
+                                               bool is_user) {
   if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   std::vector<std::string> partition_vec =
@@ -1402,7 +1425,7 @@ AccountManager::CraneExpected<void> AccountManager::CheckPartitionIsAllowed(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckQosIsAllowed(
+AccountManager::CraneExpected<void> AccountManager::CheckQosIsAllowedNoLock_(
     const Account* account, const std::string& qos_str, bool check_parent,
     bool is_user) {
   if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
@@ -1462,7 +1485,7 @@ void AccountManager::InitDataMap_() {
   }
 }
 
-AccountManager::CraneExpected<const User*>
+AccountManager::CraneExpected<const User&>
 AccountManager::GetUserInfoByUidNoLock_(uint32_t uid) {
   PasswordEntry entry(uid);
 
@@ -1478,7 +1501,7 @@ AccountManager::GetUserInfoByUidNoLock_(uint32_t uid) {
     return std::unexpected(CraneErrCode::ERR_INVALID_OP_USER);
   }
 
-  return user;
+  return *user;
 }
 
 /*

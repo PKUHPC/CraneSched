@@ -1251,7 +1251,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     CRANE_ASSERT(it != m_pending_task_map_.end());
     TaskInCtld* task = it->second.get();
 
-    auto result = g_account_manager->CheckIfUserHasPemOnUserWithLock(
+    auto result = g_account_manager->CheckIfUidHasPermOnUser(
         operator_uid, task->Username(), false);
     if (!result) {
       reply.add_not_cancelled_tasks(task_id);
@@ -1273,7 +1273,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
     CRANE_TRACE("Cancelling running task #{}", task_id);
 
-    auto result = g_account_manager->CheckIfUserHasPemOnUserWithLock(
+    auto result = g_account_manager->CheckIfUidHasPermOnUser(
         operator_uid, task->Username(), false);
     if (!result) {
       reply.add_not_cancelled_tasks(task_id);
