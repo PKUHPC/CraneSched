@@ -1,0 +1,103 @@
+name: Build and Upload Packages
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+      - release/*
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/nativu5/cranedev:ci
+      credentials:
+         username: ${{ github.actor }}
+         password: ${{ github.token }}
+    defaults:
+      run:
+        shell: bash -leo pipefail {0}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: |
+          echo "Configuring at $(pwd)"
+          mkdir -p out
+          cmake -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCRANE_FULL_DYNAMIC=OFF \
+            -S . -B out
+
+      - name: Build
+        run: |
+          echo "Building at $(pwd)"
+          cmake --build out --config Release
+
+      - name: Package with CPack
+        run: |
+          echo "Packaging with CPack"
+          pushd out
+          cpack
+          popd
+
+      - name: Collect packages
+        run: |
+          mkdir -p upload/packages
+          cp out/*.deb upload/packages/ || true
+          cp out/*.rpm upload/packages/ || true
+          for package in upload/packages/*; do
+            package_name=$(basename "$package")
+            case "$package_name" in
+              *craned.rpm)
+                echo "ARTIFACT_NAME_CRANED_RPM=$package_name" >> $GITHUB_ENV
+                ;;
+              *craned.deb)
+                echo "ARTIFACT_NAME_CRANED_DEB=$package_name" >> $GITHUB_ENV
+                ;;
+              *cranectld.rpm)
+                echo "ARTIFACT_NAME_CRANECTLD_RPM=$package_name" >> $GITHUB_ENV
+                ;;
+              *cranectld.deb)
+                echo "ARTIFACT_NAME_CRANECTLD_DEB=$package_name" >> $GITHUB_ENV
+                ;;
+            esac
+          done
+
+      - name: Upload craned .deb package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME_CRANED_DEB }}
+          path: upload/packages/${{ env.ARTIFACT_NAME_CRANED_DEB }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload craned .rpm package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME_CRANED_RPM }}
+          path: upload/packages/${{ env.ARTIFACT_NAME_CRANED_RPM }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload cranectld .deb package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME_CRANECTLD_DEB }}
+          path: upload/packages/${{ env.ARTIFACT_NAME_CRANECTLD_DEB }}
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload cranectld .rpm package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME_CRANECTLD_RPM }}
+          path: upload/packages/${{ env.ARTIFACT_NAME_CRANECTLD_RPM }}
+          retention-days: 30
+          if-no-files-found: error
