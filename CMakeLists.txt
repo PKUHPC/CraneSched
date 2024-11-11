@@ -59,6 +59,8 @@ option(CRANE_NATIVE_ARCH_OPT "Enable -march=native compile option" ON)
 
 option(CRANE_USE_GITEE_SOURCE "Enable the Gitee repository as the download source" OFF)
 
+option(CRANE_USE_SYSTEM_LIBCGROUP "Use libcgroup from system instead of building from source" OFF)
+
 option(CRANE_FULL_DYNAMIC "Enable dynamic libs" OFF)
 
 option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" OFF)
