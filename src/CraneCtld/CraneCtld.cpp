@@ -62,7 +62,7 @@ void ParseConfig(int argc, char** argv) {
   try {
     parsed_args = options.parse(argc, argv);
   } catch (cxxopts::OptionException& e) {
-    CRANE_ERROR("{}\n{}", e.what(), options.help());
+    CRANE_ERROR("Default", "{}\n{}", e.what(), options.help());
     std::exit(1);
   }
 
@@ -161,16 +161,16 @@ void ParseConfig(int argc, char** argv) {
             tls_certs.ServerCertContent =
                 util::ReadFileIntoString(tls_certs.ServerCertFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+            CRANE_ERROR("Default", "Read cert file error: {}", e.what());
             std::exit(1);
           }
           if (tls_certs.ServerCertContent.empty()) {
-            CRANE_ERROR(
+            CRANE_ERROR("Default", 
                 "UseTls is true, but the file specified by ServerCertFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but ServerCertFilePath is empty");
+          CRANE_ERROR("Default", "UseTls is true, but ServerCertFilePath is empty");
           std::exit(1);
         }
 
@@ -182,16 +182,16 @@ void ParseConfig(int argc, char** argv) {
             tls_certs.ServerKeyContent =
                 util::ReadFileIntoString(tls_certs.ServerKeyFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+            CRANE_ERROR("Default", "Read cert file error: {}", e.what());
             std::exit(1);
           }
           if (tls_certs.ServerKeyContent.empty()) {
-            CRANE_ERROR(
+            CRANE_ERROR("Default", 
                 "UseTls is true, but the file specified by ServerKeyFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but ServerKeyFilePath is empty");
+          CRANE_ERROR("Default", "UseTls is true, but ServerKeyFilePath is empty");
           std::exit(1);
         }
       } else {
@@ -288,7 +288,7 @@ void ParseConfig(int argc, char** argv) {
         g_config.PendingQueueMaxSize =
             config["PendingQueueMaxSize"].as<uint32_t>();
         if (g_config.PendingQueueMaxSize > Ctld::kPendingQueueMaxSize) {
-          CRANE_WARN(
+          CRANE_WARN("Default", 
               "The value of 'PendingQueueMaxSize' set in config file "
               "is too high and has been reset to default value {}",
               Ctld::kPendingQueueMaxSize);
@@ -323,11 +323,11 @@ void ParseConfig(int argc, char** argv) {
 
           if (node["name"]) {
             if (!util::ParseHostList(node["name"].Scalar(), &node_id_list)) {
-              CRANE_ERROR("Illegal node name string format.");
+              CRANE_ERROR("Default", "Illegal node name string format.");
               std::exit(1);
             }
 
-            CRANE_TRACE("node name list parsed: {}",
+            CRANE_TRACE("Default", "node name list parsed: {}",
                         fmt::join(node_id_list, ", "));
           } else
             std::exit(1);
@@ -342,7 +342,7 @@ void ParseConfig(int argc, char** argv) {
             std::regex mem_regex(R"((\d+)([KMBG]))");
             std::smatch mem_group;
             if (!std::regex_search(memory, mem_group, mem_regex)) {
-              CRANE_ERROR("Illegal memory format.");
+              CRANE_ERROR("Default", "Illegal memory format.");
               std::exit(1);
             }
 
@@ -369,7 +369,7 @@ void ParseConfig(int argc, char** argv) {
                 std::list<std::string> device_path_list;
                 if (!util::ParseHostList(gres_node["DeviceFileRegex"].Scalar(),
                                          &device_path_list)) {
-                  CRANE_ERROR(
+                  CRANE_ERROR("Default", 
                       "Illegal gres {}:{} DeviceFileRegex path string format.",
                       device_name, device_type);
                   std::exit(1);
@@ -384,7 +384,7 @@ void ParseConfig(int argc, char** argv) {
                 std::list<std::string> device_path_list;
                 if (!util::ParseHostList(gres_node["DeviceFileList"].Scalar(),
                                          &device_path_list)) {
-                  CRANE_ERROR(
+                  CRANE_ERROR("Default", 
                       "Illegal gres {}:{} DeviceFileList path string format.",
                       device_name, device_type);
                   std::exit(1);
@@ -414,14 +414,14 @@ void ParseConfig(int argc, char** argv) {
           if (partition["name"] && !partition["name"].IsNull()) {
             name.append(partition["name"].Scalar());
           } else {
-            CRANE_ERROR("Partition name not found");
+            CRANE_ERROR("Default", "Partition name not found");
             std::exit(1);
           }
 
           if (partition["nodes"] && !partition["nodes"].IsNull()) {
             nodes = partition["nodes"].as<std::string>();
           } else {
-            CRANE_ERROR("The node of the partition {} was not found",
+            CRANE_ERROR("Default", "The node of the partition {} was not found",
                         partition["name"].Scalar());
             std::exit(1);
           }
@@ -435,7 +435,7 @@ void ParseConfig(int argc, char** argv) {
           std::list<std::string> name_list;
           if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
                                    &name_list)) {
-            CRANE_ERROR("Illegal node name string format.");
+            CRANE_ERROR("Default", "Illegal node name string format.");
             std::exit(1);
           }
 
@@ -443,10 +443,10 @@ void ParseConfig(int argc, char** argv) {
             auto node_it = g_config.Nodes.find(node);
             if (node_it != g_config.Nodes.end()) {
               part.nodes.emplace(node_it->first);
-              CRANE_TRACE("Set the partition of node {} to {}", node_it->first,
+              CRANE_TRACE("Default", "Set the partition of node {} to {}", node_it->first,
                           name);
             } else {
-              CRANE_ERROR(
+              CRANE_ERROR("Default", 
                   "Unknown node '{}' found in partition '{}'. It is ignored "
                   "and should be contained in the configuration file.",
                   node, name);
@@ -477,7 +477,7 @@ void ParseConfig(int argc, char** argv) {
 
           if (part.default_mem_per_cpu != 0 && part.max_mem_per_cpu != 0 &&
               part.max_mem_per_cpu < part.default_mem_per_cpu) {
-            CRANE_ERROR(
+            CRANE_ERROR("Default", 
                 "The partition {} MaxMemPerCpu {}MB should not be "
                 "less than DefaultMemPerCpu {}MB",
                 name, part.default_mem_per_cpu, part.max_mem_per_cpu);
@@ -495,7 +495,7 @@ void ParseConfig(int argc, char** argv) {
         g_config.DefaultPartition =
             absl::StripAsciiWhitespace(default_partition_vec[0]);
         if (default_partition_vec.size() > 1) {
-          CRANE_ERROR(
+          CRANE_ERROR("Default", 
               "Default partition contains multiple values. '{}' is used",
               g_config.DefaultPartition);
         }
@@ -504,7 +504,7 @@ void ParseConfig(int argc, char** argv) {
                          [&](const auto& p) {
                            return p.first == g_config.DefaultPartition;
                          })) {
-          CRANE_ERROR("Unknown default partition {}",
+          CRANE_ERROR("Default", "Unknown default partition {}",
                       g_config.DefaultPartition);
           std::exit(1);
         }
@@ -527,11 +527,11 @@ void ParseConfig(int argc, char** argv) {
         }
       }
     } catch (YAML::BadFile& e) {
-      CRANE_CRITICAL("Can't open config file {}: {}", config_path, e.what());
+      CRANE_CRITICAL("Default", "Can't open config file {}: {}", config_path, e.what());
       std::exit(1);
     }
   } else {
-    CRANE_CRITICAL("Config file '{}' not existed", config_path);
+    CRANE_CRITICAL("Default", "Config file '{}' not existed", config_path);
     std::exit(1);
   }
 
@@ -575,7 +575,7 @@ void ParseConfig(int argc, char** argv) {
       if (config["DbReplSetName"] && !config["DbReplSetName"].IsNull())
         g_config.DbRSName = config["DbReplSetName"].as<std::string>();
       else {
-        CRANE_ERROR("Unknown Replica Set name");
+        CRANE_ERROR("Default", "Unknown Replica Set name");
         std::exit(1);
       }
 
@@ -584,12 +584,12 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.DbName = "crane_db";
     } catch (YAML::BadFile& e) {
-      CRANE_CRITICAL("Can't open database config file {}: {}", db_config_path,
+      CRANE_CRITICAL("Default", "Can't open database config file {}: {}", db_config_path,
                      e.what());
       std::exit(1);
     }
   } else {
-    CRANE_CRITICAL("Database config file '{}' not existed", db_config_path);
+    CRANE_CRITICAL("Default", "Database config file '{}' not existed", db_config_path);
     std::exit(1);
   }
 
@@ -603,14 +603,14 @@ void ParseConfig(int argc, char** argv) {
   }
 
   if (crane::GetIpAddrVer(g_config.ListenConf.CraneCtldListenAddr) == -1) {
-    CRANE_ERROR("Listening address is invalid.");
+    CRANE_ERROR("Default", "Listening address is invalid.");
     std::exit(1);
   }
 
   std::regex regex_port(R"(^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|)"
                         R"(65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$)");
   if (!std::regex_match(g_config.ListenConf.CraneCtldListenPort, regex_port)) {
-    CRANE_ERROR("Listening port is invalid.");
+    CRANE_ERROR("Default", "Listening port is invalid.");
     std::exit(1);
   }
 }
@@ -643,12 +643,12 @@ void InitializeCtldGlobalVariables() {
   char hostname[HOST_NAME_MAX + 1];
   int err = gethostname(hostname, HOST_NAME_MAX + 1);
   if (err != 0) {
-    CRANE_ERROR("Error: get hostname.");
+    CRANE_ERROR("Default", "Error: get hostname.");
     std::exit(1);
   }
 
   g_config.Hostname.assign(hostname);
-  CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
+  CRANE_INFO("Default", "Hostname of CraneCtld: {}", g_config.Hostname);
 
   g_thread_pool = std::make_unique<BS::thread_pool>(
       std::thread::hardware_concurrency(),
@@ -656,12 +656,12 @@ void InitializeCtldGlobalVariables() {
 
   g_db_client = std::make_unique<MongodbClient>();
   if (!g_db_client->Connect()) {
-    CRANE_ERROR("Error: MongoDb client connect fail");
+    CRANE_ERROR("Default", "Error: MongoDb client connect fail");
     std::exit(1);
   }
 
   if (g_config.Plugin.Enabled) {
-    CRANE_INFO("[Plugin] Plugin module is enabled.");
+    CRANE_INFO("Default", "[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
@@ -678,7 +678,7 @@ void InitializeCtldGlobalVariables() {
   g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
   ok = g_embedded_db_client->Init(g_config.CraneCtldDbPath);
   if (!ok) {
-    CRANE_ERROR("Failed to initialize g_embedded_db_client.");
+    CRANE_ERROR("Default", "Failed to initialize g_embedded_db_client.");
 
     DestroyCtldGlobalVariables();
     std::exit(1);
@@ -734,14 +734,14 @@ void InitializeCtldGlobalVariables() {
   while (true) {
     auto online_cnt = g_craned_keeper->AvailableCranedCount();
     if (online_cnt >= to_registered_craneds_cnt) {
-      CRANE_INFO("All craned nodes are up.");
+      CRANE_INFO("Default", "All craned nodes are up.");
       break;
     }
 
     std::this_thread::sleep_for(
         std::chrono::microseconds(timeout * 1000 /*ms*/ / 100));
     if (std::chrono::system_clock::now() > wait_end_point) {
-      CRANE_INFO(
+      CRANE_INFO("Default", 
           "Waiting all craned node to be online timed out. Continuing. "
           "{} craned is online. Total: {}.",
           online_cnt, to_registered_craneds_cnt);
@@ -752,7 +752,7 @@ void InitializeCtldGlobalVariables() {
   g_task_scheduler = std::make_unique<TaskScheduler>();
   ok = g_task_scheduler->Init();
   if (!ok) {
-    CRANE_ERROR("The initialization of TaskScheduler failed. Exiting...");
+    CRANE_ERROR("Default", "The initialization of TaskScheduler failed. Exiting...");
     DestroyCtldGlobalVariables();
     std::exit(1);
   }
@@ -764,13 +764,13 @@ void CreateFolders() {
   bool ok;
   ok = util::os::CreateFoldersForFile(g_config.CraneCtldLogFile);
   if (!ok) {
-    CRANE_ERROR("Failed to create folders for CraneCtld log files!");
+    CRANE_ERROR("Default", "Failed to create folders for CraneCtld log files!");
     std::exit(1);
   }
 
   ok = util::os::CreateFoldersForFile(g_config.CraneCtldDbPath);
   if (!ok) {
-    CRANE_ERROR("Failed to create folders for CraneCtld db files!");
+    CRANE_ERROR("Default", "Failed to create folders for CraneCtld db files!");
     std::exit(1);
   }
 }
@@ -778,7 +778,7 @@ void CreateFolders() {
 int StartServer() {
   constexpr uint64_t file_max = 640000;
   if (!util::os::SetMaxFileDescriptorNumber(file_max)) {
-    CRANE_ERROR("Unable to set file descriptor limits to {}", file_max);
+    CRANE_ERROR("Default", "Unable to set file descriptor limits to {}", file_max);
     std::exit(1);
   }
 
@@ -800,7 +800,7 @@ void StartDaemon() {
   /* Fork off the parent process */
   pid = fork();
   if (pid < 0) {
-    CRANE_ERROR("Error: fork()");
+    CRANE_ERROR("Default", "Error: fork()");
     exit(1);
   }
   /* If we got a good PID, then
@@ -818,13 +818,13 @@ void StartDaemon() {
   sid = setsid();
   if (sid < 0) {
     /* Log the failure */
-    CRANE_ERROR("Error: setsid()");
+    CRANE_ERROR("Default", "Error: setsid()");
     exit(1);
   }
 
   /* Change the current working directory */
   if ((chdir("/")) < 0) {
-    CRANE_ERROR("Error: chdir()");
+    CRANE_ERROR("Default", "Error: chdir()");
     /* Log the failure */
     exit(1);
   }
@@ -849,10 +849,10 @@ void CheckSingleton() {
   int rc = flock(pid_file, LOCK_EX | LOCK_NB);
   if (rc) {
     if (EWOULDBLOCK == errno) {
-      CRANE_CRITICAL("There is another CraneCtld instance running. Exiting...");
+      CRANE_CRITICAL("Default", "There is another CraneCtld instance running. Exiting...");
       std::exit(1);
     } else {
-      CRANE_CRITICAL("Failed to lock {}: {}. Exiting...",
+      CRANE_CRITICAL("Default", "Failed to lock {}: {}. Exiting...",
                      g_config.CraneCtldMutexFilePath, strerror(errno));
       std::exit(1);
     }
@@ -862,7 +862,7 @@ void CheckSingleton() {
 void InstallStackTraceHooks() {
   static backward::SignalHandling sh;
   if (!sh.loaded()) {
-    CRANE_ERROR("Failed to install stacktrace hooks.");
+    CRANE_ERROR("Default", "Failed to install stacktrace hooks.");
     std::exit(1);
   }
 }

@@ -39,9 +39,9 @@ class PasswordEntry {
     buf = new char[s_passwd_size_];
 
     if (getpwuid_r(uid, &pwd, buf, s_passwd_size_, &result) != 0) {
-      CRANE_ERROR("Error when getpwuid_r");
+      CRANE_ERROR("Default", "Error when getpwuid_r");
     } else if (result == NULL) {
-      CRANE_ERROR("User uid #{} not found.", uid);
+      CRANE_ERROR("Default", "User uid #{} not found.", uid);
     } else {
       m_valid_ = true;
       m_pw_name_.assign(pwd.pw_name);

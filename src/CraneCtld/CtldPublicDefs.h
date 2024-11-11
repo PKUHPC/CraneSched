@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <unordered_map>
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
@@ -113,7 +114,7 @@ struct Config {
 
   bool CompressedRpc{};
 
-  std::map<std::string, spdlog::level::level_enum> logLevels;
+  std::unordered_map<std::string, spdlog::level::level_enum> logLevels;
   std::string CraneCtldLogFile;
 
   std::string CraneEmbeddedDbBackend;

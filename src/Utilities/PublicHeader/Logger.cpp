@@ -18,57 +18,71 @@
 
 #include "crane/Logger.h"
 
-void InitLogger(const std::map<std::string, spdlog::level::level_enum>& logLevels,
-                const std::string& log_file_path,
-                const bool cranectld_flag) {
-  auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-      log_file_path, 1048576 * 50 /*MB*/, 3);
+std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> BasicLogger::file_sink = nullptr;
+std::shared_ptr<spdlog::sinks::stderr_color_sink_mt> BasicLogger::console_sink = nullptr;
 
-  auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
-
-  spdlog::init_thread_pool(256, 1);
-    auto create_logger = [&](const std::string& name) {
-        auto logger = std::make_shared<spdlog::async_logger>(
-            name, spdlog::sinks_init_list{file_sink, console_sink},
-            spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-        logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
-        return logger;
-    };
-
-  spdlog::level::level_enum level = spdlog::level::trace;
-  auto default_logger = create_logger("Default");
-  FindLoggerValidLevel(logLevels, "Default", &level);
-  default_logger->set_level(level);
-  spdlog::set_level(level);
-  spdlog::register_logger(default_logger);
-
-  if (cranectld_flag) {
-    auto cranectld_taskscheduler_logger = create_logger("TaskScheduler");
-    auto cranectld_cranedkeeper_logger = create_logger("CranedKeeper");
-
-    FindLoggerValidLevel(logLevels, "TaskScheduler", &level);
-    cranectld_taskscheduler_logger->set_level(level);
-
-    FindLoggerValidLevel(logLevels, "CranedKeeper", &level);
-    cranectld_cranedkeeper_logger->set_level(level);
-
-    spdlog::register_logger(cranectld_taskscheduler_logger);
-    spdlog::register_logger(cranectld_cranedkeeper_logger);
-  }
-
-  spdlog::flush_on(spdlog::level::err);
-  spdlog::flush_every(std::chrono::seconds(1));
+BasicLogger* Logger::CreateLogger() {
+     return new Logger();
 }
 
-void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>& logLevels,
-                          const std::string& loggerName,
+void Logger::Init(const std::string& log_file_path, const std::string& name) {
+   static std::once_flag init_flag;
+    std::call_once(init_flag, [&]() {
+        // 初始化 spdlog
+        spdlog::init_thread_pool(256, 1);
+        spdlog::flush_on(spdlog::level::err);
+        spdlog::flush_every(std::chrono::seconds(1));
+        spdlog::set_level(spdlog::level::trace);
+
+        BasicLogger::file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+            log_file_path, 1048576 * 50 /*MB*/, 3);
+        BasicLogger::console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+    });
+    real_logger = std::make_shared<spdlog::async_logger>(
+        name, spdlog::sinks_init_list{BasicLogger::file_sink, BasicLogger::console_sink},
+        spdlog::thread_pool(), spdlog::async_overflow_policy::block);
+    real_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
+    real_logger->set_level(spdlog::level::trace);
+    spdlog::register_logger(real_logger);
+}
+
+Logger::Logger() {
+}
+
+void InitLogger(const std::map<std::string, spdlog::level::level_enum>& log_levels,
+                const std::string& log_file_path,
+                const bool cranectld_flag) {
+    
+    for (const auto& [name, level] : log_levels) {
+        REGISTER_LOGGER(name, Logger::CreateLogger);
+    }
+    std::map<std::string, bool> loggers_to_set;
+    for (const auto& [name, level] : log_levels) {
+        auto logger = LoggerRegistry<BasicLogger>::Create(name);
+        if (!logger) {
+            fmt::print("Logger {} install failed.\n",name);
+            continue;
+        }
+        logger->Init(log_file_path, name);
+        logger->real_logger->set_level(level);
+        if (logger) {
+            loggers_to_set[name] = true;
+        } else {
+             loggers_to_set[name] = false;
+        }
+    }
+}
+
+
+void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>& log_Levels,
+                          const std::string& logger_name,
                           spdlog::level::level_enum *out_level) {
     if (out_level == nullptr) {
         fmt::print("Logger map empty.\n");
         return;
     }
-    auto it = logLevels.find(loggerName);
-    if (it != logLevels.end()) {
+    auto it = log_Levels.find(logger_name);
+    if (it != log_Levels.end()) {
         *out_level = it->second;
     } else {
         *out_level = spdlog::level::trace;  //default level
@@ -88,7 +102,13 @@ Result SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_en
     }
 
     for (auto& [name, result] : loggers_to_set) {
-        result = SetSingleLoggerLevel(name, level);
+        auto logger = spdlog::get(name);
+        if (logger == nullptr) {
+            result = false;
+        } else {
+            logger->set_level(level);
+            result = true;
+        }
     }
 
     std::string success_loggers;
@@ -144,19 +164,4 @@ bool SetSingleLoggerLevel(const std::string& logger_name, spdlog::level::level_e
     }
     logger->set_level(level);
     return true;
-}
-
-std::shared_ptr<spdlog::logger> GetDefaultLogger() {
-    static auto logger = spdlog::get("Default");
-    return logger;
-}
-
-std::shared_ptr<spdlog::logger> GetCtldTaskSchedulerLogger() {
-    static auto logger = spdlog::get("TaskScheduler");
-    return logger;
-}
-
-std::shared_ptr<spdlog::logger> GetCtldCranedKeeperLogger() {
-    static auto logger = spdlog::get("CranedKeeper");
-    return logger;
 }

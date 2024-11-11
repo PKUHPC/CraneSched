@@ -37,7 +37,7 @@ namespace Craned {
  */
 int CgroupManager::Init() {
   // Initialize library and data structures
-  CRANE_DEBUG("Initializing cgroup library.");
+  CRANE_DEBUG("Default", "Initializing cgroup library.");
   cgroup_init();
 
   // cgroup_set_loglevel(CGROUP_LOG_DEBUG);
@@ -95,25 +95,25 @@ int CgroupManager::Init() {
   }
 
   if (!Mounted(Controller::BLOCK_CONTROLLER)) {
-    CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
+    CRANE_WARN("Default", "Cgroup controller for I/O statistics is not available.\n");
   }
   if (!Mounted(Controller::FREEZE_CONTROLLER)) {
-    CRANE_WARN("Cgroup controller for process management is not available.\n");
+    CRANE_WARN("Default", "Cgroup controller for process management is not available.\n");
   }
   if (!Mounted(Controller::CPUACCT_CONTROLLER)) {
-    CRANE_WARN("Cgroup controller for CPU accounting is not available.\n");
+    CRANE_WARN("Default", "Cgroup controller for CPU accounting is not available.\n");
   }
   if (!Mounted(Controller::MEMORY_CONTROLLER)) {
-    CRANE_WARN("Cgroup controller for memory accounting is not available.\n");
+    CRANE_WARN("Default", "Cgroup controller for memory accounting is not available.\n");
   }
   if (!Mounted(Controller::CPU_CONTROLLER)) {
-    CRANE_WARN("Cgroup controller for CPU is not available.\n");
+    CRANE_WARN("Default", "Cgroup controller for CPU is not available.\n");
   }
   if (!Mounted(Controller::DEVICES_CONTROLLER)) {
-    CRANE_WARN("Cgroup controller for DEVICES is not available.\n");
+    CRANE_WARN("Default", "Cgroup controller for DEVICES is not available.\n");
   }
   if (ret != ECGEOF) {
-    CRANE_WARN("Error iterating through cgroups mount information: {}\n",
+    CRANE_WARN("Default", "Error iterating through cgroups mount information: {}\n",
                cgroup_strerror(ret));
     return -1;
   }
@@ -148,7 +148,7 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
 
   if (!Mounted(controller)) {
     if (required) {
-      CRANE_WARN("Error - cgroup controller {} not mounted, but required.\n",
+      CRANE_WARN("Default", "Error - cgroup controller {} not mounted, but required.\n",
                  CgroupConstant::GetControllerStringView(controller));
       return 1;
     } else {
@@ -164,7 +164,7 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
     changed_cgroup = true;
     if ((p_raw_controller = cgroup_add_controller(
              &cgroup, controller_str.data())) == nullptr) {
-      CRANE_WARN("Unable to initialize cgroup {} controller.\n",
+      CRANE_WARN("Default", "Unable to initialize cgroup {} controller.\n",
                  controller_str);
       return required ? 1 : 0;
     } else {
@@ -172,7 +172,7 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
       if (controller == CgroupConstant::Controller::MEMORY_CONTROLLER) {
         if ((err = cgroup_add_value_bool(p_raw_controller,
                                          "memory.use_hierarchy", true))) {
-          CRANE_WARN("Unable to set hierarchical memory settings: {} {}\n", err,
+          CRANE_WARN("Default", "Unable to set hierarchical memory settings: {} {}\n", err,
                      cgroup_strerror(err));
         }
       }
@@ -206,7 +206,7 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
   bool changed_cgroup = false;
   struct cgroup *native_cgroup = cgroup_new_cgroup(cgroup_string.c_str());
   if (native_cgroup == NULL) {
-    CRANE_WARN("Unable to construct new cgroup object.\n");
+    CRANE_WARN("Default", "Unable to construct new cgroup object.\n");
     return nullptr;
   }
 
@@ -266,13 +266,13 @@ std::unique_ptr<Cgroup> CgroupManager::CreateOrOpen_(
   if (!has_cgroup) {
     if ((err = cgroup_create_cgroup(native_cgroup, 0))) {
       // Only record at D_ALWAYS if any cgroup mounts are available.
-      CRANE_WARN(
+      CRANE_WARN("Default", 
           "Unable to create cgroup {}. Cgroup functionality will not work: {}",
           cgroup_string.c_str(), cgroup_strerror(err));
       return nullptr;
     }
   } else if (changed_cgroup && (err = cgroup_modify_cgroup(native_cgroup))) {
-    CRANE_WARN(
+    CRANE_WARN("Default", 
         "Unable to modify cgroup {}. Some cgroup functionality may not work: "
         "{} {}",
         cgroup_string.c_str(), err, cgroup_strerror(err));
@@ -317,7 +317,7 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id, Cgroup **cg) {
     g_plugin_client->JobMonitorHookAsync(task_id, pcg->GetCgroupString());
   }
 
-  CRANE_TRACE(
+  CRANE_TRACE("Default", 
       "Setting cgroup limit of task #{}. CPU: {:.2f}, Mem: {:.2f} MB Gres: {}.",
       task_id, res.allocatable_res_in_node().cpu_core_limit(),
       res.allocatable_res_in_node().memory_limit_bytes() / (1024.0 * 1024.0),
@@ -335,7 +335,7 @@ bool CgroupManager::CreateCgroups(std::vector<CgroupSpec> &&cg_specs) {
   std::chrono::steady_clock::time_point begin;
   std::chrono::steady_clock::time_point end;
 
-  CRANE_DEBUG("Creating cgroups for {} tasks", cg_specs.size());
+  CRANE_DEBUG("Default", "Creating cgroups for {} tasks", cg_specs.size());
 
   begin = std::chrono::steady_clock::now();
 
@@ -343,7 +343,7 @@ bool CgroupManager::CreateCgroups(std::vector<CgroupSpec> &&cg_specs) {
     uid_t uid = cg_specs[i].uid;
     task_id_t task_id = cg_specs[i].task_id;
 
-    CRANE_TRACE("Create lazily allocated cgroups for task #{}, uid {}", task_id,
+    CRANE_TRACE("Default", "Create lazily allocated cgroups for task #{}, uid {}", task_id,
                 uid);
 
     this->m_task_id_to_cg_spec_map_.Emplace(task_id, std::move(cg_specs[i]));
@@ -357,7 +357,7 @@ bool CgroupManager::CreateCgroups(std::vector<CgroupSpec> &&cg_specs) {
   }
 
   end = std::chrono::steady_clock::now();
-  CRANE_TRACE("Create cgroups costed {} ms",
+  CRANE_TRACE("Default", "Create cgroups costed {} ms",
               std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
                   .count());
 
@@ -370,7 +370,7 @@ bool CgroupManager::ReleaseCgroupByTaskIdOnly(task_id_t task_id) {
     auto vp = this->m_task_id_to_cg_spec_map_.GetValueExclusivePtr(task_id);
     if (!vp) return false;
 
-    CRANE_DEBUG(
+    CRANE_DEBUG("Default", 
         "Remove cgroup for task #{} for potential crashes of other craned.",
         task_id);
     uid = vp->uid;
@@ -380,7 +380,7 @@ bool CgroupManager::ReleaseCgroupByTaskIdOnly(task_id_t task_id) {
 
 bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
   if (!this->m_uid_to_task_ids_map_.Contains(uid)) {
-    CRANE_DEBUG(
+    CRANE_DEBUG("Default", 
         "Trying to release a non-existent cgroup for uid #{}. Ignoring it...",
         uid);
     return false;
@@ -394,7 +394,7 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
   }
 
   if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
-    CRANE_DEBUG(
+    CRANE_DEBUG("Default", 
         "Trying to release a non-existent cgroup for task #{}. Ignoring "
         "it...",
         task_id);
@@ -420,7 +420,7 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
           if (cgroup->Empty()) break;
 
           if (cnt >= 5) {
-            CRANE_ERROR(
+            CRANE_ERROR("Default", 
                 "Couldn't kill the processes in cgroup {} after {} times. "
                 "Skipping it.",
                 cgroup->GetCgroupString(), cnt);
@@ -454,10 +454,10 @@ void CgroupManager::RmAllTaskCgroupsUnderController_(
   while (ret == 0) {
     if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR &&
         strstr(info.path, CgroupConstant::kTaskCgPathPrefix) != nullptr) {
-      CRANE_DEBUG("Removing remaining task cgroup: {}", info.full_path);
+      CRANE_DEBUG("Default", "Removing remaining task cgroup: {}", info.full_path);
       int err = rmdir(info.full_path);
       if (err != 0)
-        CRANE_ERROR("Failed to remove cgroup {}: {}", info.full_path,
+        CRANE_ERROR("Default", "Failed to remove cgroup {}: {}", info.full_path,
                     strerror(errno));
     }
 
@@ -468,7 +468,7 @@ void CgroupManager::RmAllTaskCgroupsUnderController_(
 }
 
 bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
-  CRANE_DEBUG("Query task info for uid {}", uid);
+  CRANE_DEBUG("Default", "Query task info for uid {}", uid);
 
   info->job_cnt = 0;
   info->cgroup_exists = false;
@@ -529,7 +529,7 @@ std::vector<EnvPair> CgroupManager::GetResourceEnvListOfTask(
   if (cg_spec_ptr)
     res = GetResourceEnvListByResInNode(cg_spec_ptr->res_in_node);
   else
-    CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
+    CRANE_ERROR("Default", "Trying to get resource env list of a non-existent task #{}",
                 task_id);
 
   return res;
@@ -554,7 +554,7 @@ bool Cgroup::MigrateProcIn(pid_t pid) {
 //      (err = cgroup_get_current_controller_path(
 //           pid, GetControllerStringView(Controller::MEMORY_CONTROLLER).data(),
 //           &orig_cgroup_path))) {
-//    CRANE_WARN(
+//    CRANE_WARN("Default", 
 //        "Unable to determine current memory cgroup for PID {}. Error {}:
 //        {}\n", pid, err, cgroup_strerror(err));
 //    return false;
@@ -570,7 +570,7 @@ bool Cgroup::MigrateProcIn(pid_t pid) {
 //    orig_cgroup = cgroup_new_cgroup(orig_cgroup_path);
 //    assert(orig_cgroup != nullptr);
 //    if ((err = cgroup_get_cgroup(orig_cgroup))) {
-//      CRANE_WARN("Unable to read original cgroup {}. Error {}: {}\n",
+//      CRANE_WARN("Default", "Unable to read original cgroup {}. Error {}: {}\n",
 //                  orig_cgroup_path, err, cgroup_strerror(err));
 //      cgroup_free(&orig_cgroup);
 //      goto after_migrate;
@@ -580,7 +580,7 @@ bool Cgroup::MigrateProcIn(pid_t pid) {
 //             GetControllerStringView(Controller::MEMORY_CONTROLLER).data()))
 //             ==
 //        nullptr) {
-//      CRANE_WARN(
+//      CRANE_WARN("Default", 
 //          "Unable to get memory controller of cgroup {}. Error {}: {}\n",
 //          orig_cgroup_path, err, cgroup_strerror(err));
 //      cgroup_free(&orig_cgroup);
@@ -592,13 +592,13 @@ bool Cgroup::MigrateProcIn(pid_t pid) {
 //      if (err == ECGROUPVALUENOTEXIST) {
 //        // Older kernels don't have the ability to migrate memory accounting
 //        // to the new cgroup.
-//        CRANE_WARN(
+//        CRANE_WARN("Default", 
 //            "This kernel does not support memory usage migration; cgroup "
 //            "{} memory statistics"
 //            " will be slightly incorrect.\n",
 //            cgroup_path.c_str());
 //      } else {
-//        CRANE_WARN(
+//        CRANE_WARN("Default", 
 //            "Unable to read cgroup {} memory controller settings for "
 //            "migration: {} {}\n",
 //            orig_cgroup_path, err, cgroup_strerror(err));
@@ -618,7 +618,7 @@ bool Cgroup::MigrateProcIn(pid_t pid) {
 //                              "memory.move_charge_at_immigrate", 3);
 //      if ((err = cgroup_modify_cgroup(orig_cgroup))) {
 //        // Not allowed to change settings
-//        CRANE_WARN(
+//        CRANE_WARN("Default", 
 //            "Unable to change cgroup {} memory controller settings for "
 //            "migration. "
 //            "Some memory accounting will be inaccurate: {} "
@@ -636,7 +636,7 @@ after_migrate:
   //  orig_cgroup = NULL;
   err = cgroup_attach_task_pid(m_cgroup_, pid);
   if (err != 0) {
-    CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}", pid,
+    CRANE_WARN("Default", "Cannot attach pid {} to cgroup {}: {} {}", pid,
                m_cgroup_path_.c_str(), err, cgroup_strerror(err));
   }
 
@@ -648,34 +648,34 @@ after_migrate:
 //
 //  FILE *cpu_cg_f = fopen(cpu_cg_path.c_str(), "ae");
 //  if (cpu_cg_f == nullptr) {
-//    CRANE_ERROR("fopen failed: {}", strerror(errno));
+//    CRANE_ERROR("Default", "fopen failed: {}", strerror(errno));
 //    err = 1;
 //    goto end;
 //  } else {
-//    CRANE_TRACE("Open {} succeeded.", cpu_cg_path);
+//    CRANE_TRACE("Default", "Open {} succeeded.", cpu_cg_path);
 //  }
 //
 //  err = fprintf(cpu_cg_f, "%d", pid);
 //  if (err < 0) {
-//    CRANE_ERROR("fprintf failed: {}", strerror(errno));
+//    CRANE_ERROR("Default", "fprintf failed: {}", strerror(errno));
 //    goto end;
 //  } else {
-//    CRANE_TRACE("fprintf {} bytes succeeded.", err);
+//    CRANE_TRACE("Default", "fprintf {} bytes succeeded.", err);
 //  }
 //
 //  err = fflush(cpu_cg_f);
 //  if (err < 0) {
-//    CRANE_ERROR("fflush failed: {}", strerror(errno));
+//    CRANE_ERROR("Default", "fflush failed: {}", strerror(errno));
 //    goto end;
 //  } else {
-//    CRANE_TRACE("fflush succeeded.");
+//    CRANE_TRACE("Default", "fflush succeeded.");
 //  }
 //
 //  fclose(cpu_cg_f);
 //
 //  if (cpu_cg_content.is_open()) {
 //    while (std::getline(cpu_cg_content, line)) {
-//      CRANE_TRACE("Pid in {}: {}", cgroup_path, line);
+//      CRANE_TRACE("Default", "Pid in {}: {}", cgroup_path, line);
 //    }
 //    cpu_cg_content.close();
 //  }
@@ -693,7 +693,7 @@ after_migrate:
 //                                  "memory.move_charge_at_immigrate",
 //                                  orig_migrate))) {
 //      if ((err = cgroup_modify_cgroup(orig_cgroup))) {
-//        CRANE_WARN(
+//        CRANE_WARN("Default", 
 //            "Unable to change cgroup {} memory controller settings for "
 //            "migration. "
 //            "Some memory accounting will be inaccurate: {} "
@@ -724,7 +724,7 @@ Cgroup::~Cgroup() {
     if ((err = cgroup_delete_cgroup_ext(
              m_cgroup_,
              CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
-      CRANE_ERROR("Unable to completely remove cgroup {}: {} {}\n",
+      CRANE_ERROR("Default", "Unable to completely remove cgroup {}: {} {}\n",
                   m_cgroup_path_.c_str(), err, cgroup_strerror(err));
     }
 
@@ -790,7 +790,7 @@ bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
                                 CgroupConstant::ControllerFile controller_file,
                                 uint64_t value) {
   if (!g_cg_mgr->Mounted(controller)) {
-    CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.",
+    CRANE_ERROR("Default", "Unable to set {} because cgroup {} is not mounted.",
                 CgroupConstant::GetControllerFileStringView(controller_file),
                 CgroupConstant::GetControllerStringView(controller));
     return false;
@@ -804,7 +804,7 @@ bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
            m_cgroup_,
            CgroupConstant::GetControllerStringView(controller).data())) ==
       nullptr) {
-    CRANE_ERROR("Unable to get cgroup {} controller for {}.",
+    CRANE_ERROR("Default", "Unable to get cgroup {} controller for {}.",
                 CgroupConstant::GetControllerStringView(controller),
                 m_cgroup_path_);
     return false;
@@ -814,7 +814,7 @@ bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
            cg_controller,
            CgroupConstant::GetControllerFileStringView(controller_file).data(),
            value))) {
-    CRANE_ERROR("Unable to set uint64 value for {} in cgroup {}. Code {}, {}",
+    CRANE_ERROR("Default", "Unable to set uint64 value for {} in cgroup {}. Code {}, {}",
                 CgroupConstant::GetControllerFileStringView(controller_file),
                 m_cgroup_path_, err, cgroup_strerror(err));
     return false;
@@ -827,7 +827,7 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
                               CgroupConstant::ControllerFile controller_file,
                               const std::string &str) {
   if (!g_cg_mgr->Mounted(controller)) {
-    CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.\n",
+    CRANE_ERROR("Default", "Unable to set {} because cgroup {} is not mounted.\n",
                 CgroupConstant::GetControllerFileStringView(controller_file),
                 CgroupConstant::GetControllerStringView(controller));
     return false;
@@ -841,7 +841,7 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
            m_cgroup_,
            CgroupConstant::GetControllerStringView(controller).data())) ==
       nullptr) {
-    CRANE_ERROR("Unable to get cgroup {} controller for {}.\n",
+    CRANE_ERROR("Default", "Unable to get cgroup {} controller for {}.\n",
                 CgroupConstant::GetControllerStringView(controller),
                 m_cgroup_path_);
     return false;
@@ -851,7 +851,7 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
            cg_controller,
            CgroupConstant::GetControllerFileStringView(controller_file).data(),
            str.c_str()))) {
-    CRANE_ERROR("Unable to set string for {}: {} {}\n", m_cgroup_path_, err,
+    CRANE_ERROR("Default", "Unable to set string for {}: {} {}\n", m_cgroup_path_, err,
                 cgroup_strerror(err));
     return false;
   }
@@ -866,7 +866,7 @@ bool Cgroup::ModifyCgroup_(CgroupConstant::ControllerFile controller_file) {
     err = cgroup_modify_cgroup(m_cgroup_);
     if (err == 0) return true;
     if (err != ECGOTHER) {
-      CRANE_ERROR("Unable to modify_cgroup for {} in cgroup {}. Code {}, {}",
+      CRANE_ERROR("Default", "Unable to modify_cgroup for {} in cgroup {}. Code {}, {}",
                   CgroupConstant::GetControllerFileStringView(controller_file),
                   m_cgroup_path_, err, cgroup_strerror(err));
       return false;
@@ -874,7 +874,7 @@ bool Cgroup::ModifyCgroup_(CgroupConstant::ControllerFile controller_file) {
 
     int errno_code = cgroup_get_last_errno();
     if (errno_code != EINTR) {
-      CRANE_ERROR(
+      CRANE_ERROR("Default", 
           "Unable to modify_cgroup for {} in cgroup {} "
           "due to system error. Code {}, {}",
           CgroupConstant::GetControllerFileStringView(controller_file),
@@ -882,13 +882,13 @@ bool Cgroup::ModifyCgroup_(CgroupConstant::ControllerFile controller_file) {
       return false;
     }
 
-    CRANE_DEBUG(
+    CRANE_DEBUG("Default", 
         "Unable to modify_cgroup for {} in cgroup {} due to EINTR. Retrying...",
         CgroupConstant::GetControllerFileStringView(controller_file),
         m_cgroup_path_);
     retry_time++;
     if (retry_time > 3) {
-      CRANE_ERROR("Unable to modify_cgroup for cgroup {} after 3 times.",
+      CRANE_ERROR("Default", "Unable to modify_cgroup for cgroup {} after 3 times.",
                   m_cgroup_path_);
       return false;
     }
@@ -901,7 +901,7 @@ bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
                                CgroupConstant::ControllerFile controller_file,
                                const std::vector<std::string> &strs) {
   if (!g_cg_mgr->Mounted(controller)) {
-    CRANE_ERROR("Unable to set {} because cgroup {} is not mounted.\n",
+    CRANE_ERROR("Default", "Unable to set {} because cgroup {} is not mounted.\n",
                 CgroupConstant::GetControllerFileStringView(controller_file),
                 CgroupConstant::GetControllerStringView(controller));
     return false;
@@ -915,7 +915,7 @@ bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
            m_cgroup_,
            CgroupConstant::GetControllerStringView(controller).data())) ==
       nullptr) {
-    CRANE_WARN("Unable to get cgroup {} controller for {}.\n",
+    CRANE_WARN("Default", "Unable to get cgroup {} controller for {}.\n",
                CgroupConstant::GetControllerStringView(controller),
                m_cgroup_path_);
     return false;
@@ -926,13 +926,13 @@ bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
              CgroupConstant::GetControllerFileStringView(controller_file)
                  .data(),
              str.c_str()))) {
-      CRANE_WARN("Unable to add string for {}: {} {}\n", m_cgroup_path_, err,
+      CRANE_WARN("Default", "Unable to add string for {}: {} {}\n", m_cgroup_path_, err,
                  cgroup_strerror(err));
       return false;
     }
     // Commit cgroup modifications.
     if ((err = cgroup_modify_cgroup(m_cgroup_))) {
-      CRANE_WARN("Unable to commit {} for cgroup {}: {} {}\n",
+      CRANE_WARN("Default", "Unable to commit {} for cgroup {}: {} {}\n",
                  CgroupConstant::GetControllerFileStringView(controller_file),
                  m_cgroup_path_, err, cgroup_strerror(err));
       return false;
@@ -963,7 +963,7 @@ bool Cgroup::KillAllProcesses() {
     free(pids);
     return true;
   } else {
-    CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
+    CRANE_ERROR("Default", "cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
                 cgroup_strerror(rc));
     return false;
   }
@@ -987,7 +987,7 @@ bool Cgroup::Empty() {
     free(pids);
     return size == 0;
   } else {
-    CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
+    CRANE_ERROR("Default", "cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
                 cgroup_strerror(rc));
     return false;
   }

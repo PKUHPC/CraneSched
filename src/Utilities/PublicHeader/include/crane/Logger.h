@@ -21,6 +21,7 @@
 #include <spdlog/fmt/bundled/format.h>
 
 #include <source_location>
+#include <unordered_map>
 
 // For better logging inside lambda functions
 #if defined(__clang__) || defined(__GNUC__) || defined(__GNUG__)
@@ -56,13 +57,55 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+
 // default cranetld log
-#define CRANE_TRACE(...) SPDLOG_LOGGER_TRACE(GetDefaultLogger(), __VA_ARGS__);
-#define CRANE_DEBUG(...) SPDLOG_LOGGER_DEBUG(GetDefaultLogger(), __VA_ARGS__);
-#define CRANE_INFO(...) SPDLOG_LOGGER_INFO(GetDefaultLogger(), __VA_ARGS__);
-#define CRANE_WARN(...) SPDLOG_LOGGER_WARN(GetDefaultLogger(), __VA_ARGS__);
-#define CRANE_ERROR(...) SPDLOG_LOGGER_ERROR(GetDefaultLogger(), __VA_ARGS__);
-#define CRANE_CRITICAL(...) SPDLOG_LOGGER_CRITICAL(GetDefaultLogger(), __VA_ARGS__);
+#define CRANE_TRACE(logger_name, ...) \
+    do { \
+        auto logger = spdlog::get(logger_name); \
+        if (logger) { \
+            SPDLOG_LOGGER_TRACE(logger, __VA_ARGS__); \
+        } \
+    } while (0)
+
+#define CRANE_DEBUG(logger_name, ...) \
+    do { \
+        auto logger = spdlog::get(logger_name); \
+        if (logger) { \
+            SPDLOG_LOGGER_DEBUG(logger, __VA_ARGS__); \
+        } \
+    } while (0)
+
+#define CRANE_INFO(logger_name, ...) \
+    do { \
+        auto logger = spdlog::get(logger_name); \
+        if (logger) { \
+            SPDLOG_LOGGER_INFO(logger, __VA_ARGS__); \
+        } \
+    } while (0)
+
+#define CRANE_WARN(logger_name, ...) \
+    do { \
+        auto logger = spdlog::get(logger_name); \
+        if (logger) { \
+            SPDLOG_LOGGER_WARN(logger, __VA_ARGS__); \
+        } \
+    } while (0)
+
+#define CRANE_ERROR(logger_name, ...) \
+    do { \
+        auto logger = spdlog::get(logger_name); \
+        if (logger) { \
+            SPDLOG_LOGGER_ERROR(logger, __VA_ARGS__); \
+        } \
+    } while (0)
+
+#define CRANE_CRITICAL(logger_name, ...) \
+    do { \
+        auto logger = spdlog::get(logger_name); \
+        if (logger) { \
+            SPDLOG_LOGGER_CRITICAL(logger, __VA_ARGS__); \
+        } \
+    } while (0)
 
 #define CRANE_LOG_LOC_CALL(loc, level, ...)                             \
   spdlog::default_logger_raw()->log(                                    \
@@ -116,7 +159,7 @@
 #  define CRANE_ASSERT_MSG_VA(condition, message, ...)                    \
     do {                                                                  \
       if (!(condition)) {                                                 \
-        CRANE_CRITICAL("Assertion failed: \"" #condition "\": " #message, \
+        CRANE_CRITICAL("Default", "Assertion failed: \"" #condition "\": " #message, \
                        __VA_ARGS__);                                      \
         std::terminate();                                                 \
       }                                                                   \
@@ -125,7 +168,7 @@
 #  define CRANE_ASSERT_MSG(condition, message)                             \
     do {                                                                   \
       if (!(condition)) {                                                  \
-        CRANE_CRITICAL("Assertion failed: \"" #condition "\": " #message); \
+        CRANE_CRITICAL("Default", "Assertion failed: \"" #condition "\": " #message); \
         std::terminate();                                                  \
       }                                                                    \
     } while (false)
@@ -133,7 +176,7 @@
 #  define CRANE_ASSERT(condition)                               \
     do {                                                        \
       if (!(condition)) {                                       \
-        CRANE_CRITICAL("Assertion failed: \"" #condition "\""); \
+        CRANE_CRITICAL("Default", "Assertion failed: \"" #condition "\""); \
         std::terminate();                                       \
       }                                                         \
     } while (false)
@@ -149,24 +192,18 @@
     do {                          \
     } while (false)
 #endif
-
   struct Result {
     bool ok{false};
     std::string reason;
   };
 
-//cranectld spdlog sink
-std::shared_ptr<spdlog::logger> GetDefaultLogger();
-std::shared_ptr<spdlog::logger> GetCtldTaskSchedulerLogger();
-std::shared_ptr<spdlog::logger> GetCtldCranedKeeperLogger();
-
-void InitLogger(const std::map<std::string, spdlog::level::level_enum>& logLevels,
+void InitLogger(const std::map<std::string, spdlog::level::level_enum>& log_levels,
                 const std::string& log_file_path,
                 const bool cranectld_flag);
 
 
-void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>& logLevels, 
-                          const std::string& loggerName,
+void FindLoggerValidLevel(const std::map<std::string, spdlog::level::level_enum>& log_levels, 
+                          const std::string& logger_name,
                           spdlog::level::level_enum *out_level);
 
 bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_Level);
@@ -193,3 +230,54 @@ struct formatter<cpu_t> {
 };
 
 }  // namespace fmt
+
+#define REGISTER_LOGGER(name, create_func) \
+      LoggerRegistry<BasicLogger>::Register(name, create_func)
+class BasicLogger {
+public:
+    virtual ~BasicLogger()=default;
+    virtual void Init(const std::string& log_file_path, const std::string& name) = 0;
+public:
+  static std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> file_sink;
+  static std::shared_ptr<spdlog::sinks::stderr_color_sink_mt> console_sink;
+  std::shared_ptr<spdlog::async_logger> real_logger = nullptr;
+};
+
+class Logger : public BasicLogger {
+public:
+  Logger();
+  void Init(const std::string& log_file_path, const std::string& name) override;
+  std::shared_ptr<spdlog::async_logger> GetLogger(const std::string& name);
+  static BasicLogger* CreateLogger();
+};
+
+template <typename T>
+class LoggerRegistry {
+public:
+    using LoggerFactoryFunction = std::function<T*()>;
+    using LoggerFactoryMap = std::unordered_map<std::string, LoggerFactoryFunction>;
+
+    static bool Register(const std::string& name, LoggerFactoryFunction factory) {
+        auto& map = getLoggerFactoryMap();
+        if (map.find(name) != map.end()) {
+            return false; // Logger with this name already exists
+        }
+        map[name] = factory;
+        return true;
+    }
+
+    static T* Create(const std::string& name) {
+        auto& map = getLoggerFactoryMap();
+        auto it = map.find(name);
+        if (it != map.end()) {
+            return map[name]();
+        }
+        return nullptr;  // 未找到插件则返回 nullptr
+    }
+
+private:
+    static LoggerFactoryMap& getLoggerFactoryMap() {
+        static LoggerFactoryMap map;
+        return map;
+    }
+};
