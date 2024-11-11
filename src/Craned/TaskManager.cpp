@@ -103,29 +103,30 @@ TaskManager::TaskManager() {
     CRANE_ERROR("Could not initialize libevent!");
     std::terminate();
   }
-  m_sigchld_handle = m_uvw_loop->resource<uvw::signal_handle>();
-  m_sigchld_handle->on<uvw::signal_event>(
+  m_sigchld_handle_ = m_uvw_loop->resource<uvw::signal_handle>();
+  m_sigchld_handle_->on<uvw::signal_event>(
       [this](const uvw::signal_event&, uvw::signal_handle&) {
         EvSigchldCb_();
       });
-  m_process_sigchld_handle = m_uvw_loop->resource<uvw::async_handle>();
-  m_process_sigchld_handle->on<uvw::async_event>(
+  m_sigchld_handle_->start(SIGCLD);
+
+  m_process_sigchld_handle_ = m_uvw_loop->resource<uvw::async_handle>();
+  m_process_sigchld_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvProcessSigchldCb_();
       });
+  m_sigint_handle_ = m_uvw_loop->resource<uvw::signal_handle>();
+  m_sigint_handle_->on<uvw::signal_event>(
+      [this](const uvw::signal_event&, uvw::signal_handle&) { EvSigintCb_(); });
+  m_sigint_handle_->start(SIGINT);
 
-  {  // SIGINT
-    m_ev_sigint_ = evsignal_new(m_ev_base_, SIGINT, EvSigintCb_, this);
-    if (!m_ev_sigint_) {
-      CRANE_ERROR("Failed to create the SIGCHLD event!");
-      std::terminate();
-    }
+  m_ev_query_task_id_from_pid_handle_ =
+      m_uvw_loop->resource<uvw::async_handle>();
+  m_ev_query_task_id_from_pid_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvGrpcQueryTaskIdFromPidCb_();
+      });
 
-    if (event_add(m_ev_sigint_, nullptr) < 0) {
-      CRANE_ERROR("Could not add the SIGINT event to base!");
-      std::terminate();
-    }
-  }
   {  // gRPC: QueryTaskIdFromPid
     m_ev_query_task_id_from_pid_ =
         event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
@@ -481,22 +482,20 @@ void TaskManager::EvSubprocessReadCb_(struct bufferevent* bev, void* process) {
   proc->Output(std::move(str));
 }
 
-void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
-  if (!this_->m_is_ending_now_) {
+void TaskManager::EvSigintCb_() {
+  if (!this->m_is_ending_now_) {
     // SIGINT has been sent once. If SIGINT are captured twice, it indicates
     // the signal sender can't wait to stop Craned and Craned just send SIGTERM
     // to all tasks to kill them immediately.
 
     CRANE_INFO("Caught SIGINT. Send SIGTERM to all running tasks...");
 
-    this_->m_is_ending_now_ = true;
+    this->m_is_ending_now_ = true;
 
-    if (this_->m_sigint_cb_) this_->m_sigint_cb_();
+    if (this->m_sigint_cb_) this->m_sigint_cb_();
 
-    for (auto task_it = this_->m_task_map_.begin();
-         task_it != this_->m_task_map_.end();) {
+    for (auto task_it = this->m_task_map_.begin();
+         task_it != this->m_task_map_.end();) {
       task_id_t task_id = task_it->first;
       TaskInstance* task_instance = task_it->second.get();
 
@@ -520,23 +519,23 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
         task_instance->cgroup->KillAllProcesses();
 
         auto to_remove_it = task_it++;
-        this_->m_task_map_.erase(to_remove_it);
+        this->m_task_map_.erase(to_remove_it);
       }
     }
 
-    if (this_->m_task_map_.empty()) {
+    if (this->m_task_map_.empty()) {
       // If there is not any batch task to wait for, stop the loop directly.
-      this_->EvActivateShutdown_();
+      this->EvActivateShutdown_();
     }
   } else {
     CRANE_INFO(
         "SIGINT has been triggered already. Sending SIGKILL to all process "
         "groups instead.");
-    if (this_->m_task_map_.empty()) {
+    if (this->m_task_map_.empty()) {
       // If there is no task to kill, stop the loop directly.
-      this_->EvActivateShutdown_();
+      this->EvActivateShutdown_();
     } else {
-      for (auto&& [task_id, task_instance] : this_->m_task_map_) {
+      for (auto&& [task_id, task_instance] : this->m_task_map_) {
         for (auto&& [pid, pr_instance] : task_instance->processes) {
           CRANE_INFO(
               "Sending SIGKILL to the process group of task #{} with root "
@@ -1241,16 +1240,14 @@ CraneExpected<task_id_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
   return task_id_opt_future.get();
 }
 
-void TaskManager::EvGrpcQueryTaskIdFromPidCb_(int efd, short events,
-                                              void* user_data) {
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+void TaskManager::EvGrpcQueryTaskIdFromPidCb_() {
 
   EvQueueQueryTaskIdFromPid elem;
-  while (this_->m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
-    this_->m_mtx_.Lock();
+  while (this->m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
+    this->m_mtx_.Lock();
 
-    auto task_iter = this_->m_pid_task_map_.find(elem.pid);
-    if (task_iter == this_->m_pid_task_map_.end())
+    auto task_iter = this->m_pid_task_map_.find(elem.pid);
+    if (task_iter == this->m_pid_task_map_.end())
       elem.task_id_prom.set_value(std::unexpected(CraneErr::kSystemErr));
     else {
       TaskInstance* instance = task_iter->second;
@@ -1258,7 +1255,7 @@ void TaskManager::EvGrpcQueryTaskIdFromPidCb_(int efd, short events,
       elem.task_id_prom.set_value(task_id);
     }
 
-    this_->m_mtx_.Unlock();
+    this->m_mtx_.Unlock();
   }
 }
 

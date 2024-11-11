@@ -414,8 +414,7 @@ class TaskManager {
   static void EvGrpcExecuteTaskCb_(evutil_socket_t efd, short events,
                                    void* user_data);
 
-  static void EvGrpcQueryTaskIdFromPidCb_(evutil_socket_t efd, short events,
-                                          void* user_data);
+  void EvGrpcQueryTaskIdFromPidCb_();
 
   static void EvGrpcQueryTaskEnvironmentVariableCb_(evutil_socket_t efd,
                                                     short events,
@@ -441,9 +440,10 @@ class TaskManager {
 
   static void EvOnSigchldTimerCb_(evutil_socket_t, short, void* arg_);
 
-  std::shared_ptr<uvw::signal_handle> m_sigchld_handle;
-  std::shared_ptr<uvw::async_handle> m_process_sigchld_handle;
-  std::shared_ptr<uvw::signal_handle> m_sigint_handle;
+  std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
+  std::shared_ptr<uvw::async_handle> m_process_sigchld_handle_;
+  std::shared_ptr<uvw::signal_handle> m_sigint_handle_;
+  std::shared_ptr<uvw::async_handle> m_ev_query_task_id_from_pid_handle_;
   struct event_base* m_ev_base_{};
   struct event* m_ev_sigchld_{};
 
