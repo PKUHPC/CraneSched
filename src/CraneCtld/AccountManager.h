@@ -87,8 +87,7 @@ class AccountManager {
    * ModifyUser-related functions
    * ---------------------------------------------------------------------------
    */
-  CraneExpected<void> ModifyAdminLevel(const uint32_t uid,
-                                       const std::string& name,
+  CraneExpected<void> ModifyAdminLevel(uint32_t uid, const std::string& name,
                                        const std::string& value);
   CraneExpected<void> ModifyUserDefaultQos(uint32_t uid,
                                            const std::string& name,
@@ -112,11 +111,11 @@ class AccountManager {
       const std::string& account, const std::string& value, bool force);
 
   CraneExpected<void> ModifyAccount(crane::grpc::OperationType operation_type,
-                                    const uint32_t uid, const std::string& name,
+                                    uint32_t uid, const std::string& name,
                                     crane::grpc::ModifyField modify_field,
                                     const std::string& value, bool force);
 
-  CraneExpected<void> ModifyQos(const uint32_t uid, const std::string& name,
+  CraneExpected<void> ModifyQos(uint32_t uid, const std::string& name,
                                 crane::grpc::ModifyField modify_field,
                                 const std::string& value);
 
@@ -145,7 +144,7 @@ class AccountManager {
  private:
   void InitDataMap_();
 
-  CraneExpected<const User&> GetUserInfoByUidNoLock_(uint32_t uid);
+  CraneExpected<const User*> GetUserInfoByUidNoLock_(uint32_t uid);
 
   const User* GetUserInfoNoLock_(const std::string& name);
   const User* GetExistedUserInfoNoLock_(const std::string& name);
@@ -170,8 +169,6 @@ class AccountManager {
   CraneExpected<void> CheckSetUserAllowedQosNoLock_(
       const User* user, const Account* account, const std::string& partition,
       const std::string& qos_str, bool force);
-  CraneExpected<void> CheckSetUserAdminLevelNoLock_(
-      const std::string& level, User::AdminLevel* new_level);
   CraneExpected<void> CheckSetUserDefaultQosNoLock_(
       const User& user, const std::string& account,
       const std::string& partition, const std::string& qos);
