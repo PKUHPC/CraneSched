@@ -173,7 +173,7 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
   for (int i = 0; i < request->task_id_list_size(); i++) {
     task_id_t task_id = request->task_id_list(i);
     uid_t uid = request->uid_list(i);
-    crane::grpc::ResourceInNode res = request->res_list(i);
+    const crane::grpc::ResourceInNode &res = request->res_list(i);
 
     CgroupSpec spec{.uid = uid,
                     .task_id = task_id,
