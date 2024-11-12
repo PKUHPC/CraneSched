@@ -2058,7 +2058,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
       ResourceInNode feasible_res;
       bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
-          craned_meta->res_avail, &feasible_res);
+          craned_meta->res_total, &feasible_res);
       if (!ok) {
         CRANE_DEBUG(
             "Task #{} needs more resource than that of craned {}. "
@@ -2104,7 +2104,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     ResourceInNode feasible_res;
 
     bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
-        craned_meta->res_avail, &feasible_res);
+        craned_meta->res_total, &feasible_res);
     if (!ok) {
       CRANE_DEBUG(
           "Task #{} needs more resource than that of craned {}. "
