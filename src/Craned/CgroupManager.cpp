@@ -573,31 +573,6 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
   this->m_task_id_to_cg_spec_map_.Erase(task_id);
 
   {
-    auto uid_task_id_map = this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
-    if (!uid_task_id_map->contains(uid)) {
-      CRANE_DEBUG(
-          "Trying to release a non-existent cgroup for uid #{}. Ignoring it...",
-          uid);
-      return false;
-    }
-
-    auto task_id_set_ptr = uid_task_id_map->at(uid).RawPtr();
-
-    task_id_set_ptr->erase(task_id);
-    if (task_id_set_ptr->empty()) {
-      uid_task_id_map->erase(uid);
-    }
-    // Do not access task_id_set_ptr after erasing form map
-  }
-
-  if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
-    CRANE_DEBUG(
-        "Trying to release a non-existent cgroup for task #{}. Ignoring "
-        "it...",
-        task_id);
-
-    return false;
-  } else {
     // The termination of all processes in a cgroup is a time-consuming work.
     // Therefore, once we are sure that the cgroup for this task exists, we
     // let gRPC call return and put the termination work into the thread pool
@@ -605,8 +580,20 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
     // Kind of async behavior.
 
     // avoid deadlock by Erase at next line
-    CgroupInterface *cgroup = this->m_task_id_to_cg_map_[task_id]->release();
-    this->m_task_id_to_cg_map_.Erase(task_id);
+    auto task_id_to_cg_map_ptr =
+        this->m_task_id_to_cg_map_.GetMapExclusivePtr();
+    auto it = task_id_to_cg_map_ptr->find(task_id);
+    if (it == task_id_to_cg_map_ptr->end()) {
+      CRANE_DEBUG(
+          "Trying to release a non-existent cgroup for task #{}. Ignoring "
+          "it...",
+          task_id);
+
+      return false;
+    }
+    CgroupInterface *cgroup = it->second.GetExclusivePtr()->release();
+
+    task_id_to_cg_map_ptr->erase(task_id);
 
     if (cgroup != nullptr) {
       g_thread_pool->detach_task([cgroup]() {
@@ -632,8 +619,27 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
         delete cgroup;
       });
     }
-    return true;
   }
+
+  {
+    auto uid_task_ids_map_ptr = this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
+    auto it = uid_task_ids_map_ptr->find(uid);
+    if (it == uid_task_ids_map_ptr->end()) {
+      CRANE_DEBUG(
+          "Trying to release a non-existent cgroup for uid #{}. Ignoring it...",
+          uid);
+      return false;
+    }
+
+    auto task_id_set_ptr = uid_task_ids_map_ptr->at(uid).RawPtr();
+
+    task_id_set_ptr->erase(task_id);
+    if (task_id_set_ptr->empty()) {
+      uid_task_ids_map_ptr->erase(uid);
+    }
+    // Do not access task_id_set_ptr after erasing form map
+  }
+  return true;
 }
 
 void CgroupManager::RmAllTaskCgroupsUnderController_(
@@ -725,8 +731,11 @@ bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
   info->job_cnt = 0;
   info->cgroup_exists = false;
 
-  if (this->m_uid_to_task_ids_map_.Contains(uid)) {
-    auto task_ids = this->m_uid_to_task_ids_map_[uid];
+  if (auto task_ids = this->m_uid_to_task_ids_map_[uid]) {
+    if (!task_ids) {
+      CRANE_WARN("Uid {} not found in uid_to_task_ids_map", uid);
+      return false;
+    }
     info->job_cnt = task_ids->size();
     info->first_task_id = *task_ids->begin();
   }
