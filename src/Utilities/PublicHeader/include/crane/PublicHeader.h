@@ -94,7 +94,7 @@ constexpr uint64_t kTaskMinTimeLimitSec = 11;
 constexpr int64_t kTaskMaxTimeLimitSec =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
 
-constexpr uint64_t kReservationMinAdvanceSec = 60 * 60 * 24 * 2;  // 2 days
+constexpr uint64_t kReservationMinAdvanceSec = 0;
 
 namespace ExitCode {
 
