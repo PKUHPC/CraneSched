@@ -284,7 +284,7 @@ class TaskManager {
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
   // Ask TaskManager to stop its event loop.
-  void EvActivateShutdown_();
+  void ActivateShutdownAsync_();
 
   /**
    * Inform CraneCtld of the status change of a task.
@@ -298,7 +298,7 @@ class TaskManager {
    * @param release_resource If set to true, CraneCtld will release the
    *  resource (mark the task status as REQUEUE) and requeue the task.
    */
-  void EvActivateTaskStatusChange_(uint32_t task_id,
+  void ActivateTaskStatusChangeAsync_(uint32_t task_id,
                                    crane::grpc::TaskStatus new_status,
                                    uint32_t exit_code,
                                    std::optional<std::string> reason);
@@ -309,7 +309,7 @@ class TaskManager {
     termination_handel->on<uvw::timer_event>(
         [this, task_id = instance->task.task_id()](const uvw::timer_event&,
                                                    uvw::timer_handle& h) {
-          OnTaskTimerCb_(task_id);
+          TaskTimerCb_(task_id);
         });
     termination_handel->start(
         std::chrono::duration_cast<std::chrono::milliseconds>(duration),
@@ -322,7 +322,7 @@ class TaskManager {
     termination_handel->on<uvw::timer_event>(
         [this, task_id = instance->task.task_id()](const uvw::timer_event&,
                                                    uvw::timer_handle& h) {
-          OnTaskTimerCb_(task_id);
+          TaskTimerCb_(task_id);
         });
     termination_handel->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
@@ -378,12 +378,12 @@ class TaskManager {
   // Critical data region ends
   // ========================================================================
 
-  void EvSigchldCb_();
+  void SigchldCb_();
 
   void CleanSigchldQueueCb_();
 
   // Callback function to handle SIGINT sent by Ctrl+C
-  void EvSigintCb_();
+  void SigintCb_();
 
   void CleanGrpcExecuteTaskQueueCb_();
 
@@ -401,7 +401,7 @@ class TaskManager {
 
   void ExitEventCb_();
 
-  void OnTaskTimerCb_(task_id_t task_id);
+  void TaskTimerCb_(task_id_t task_id);
 
   void SigchldTimerCb_(ProcSigchldInfo* sigchld_info);
 
