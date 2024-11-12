@@ -34,7 +34,7 @@ void CraneCtldClosure::Run() {
   cranectld_->redirect(response_);
 }
 
-int CraneCtld::start(const std::string &ip_addr, int port) {
+int CraneStateMachine::start(const std::string &ip_addr, int port) {
   butil::EndPoint addr(butil::my_ip(), port);
   braft::NodeOptions node_options;
   if (node_options.initial_conf.parse_from("") != 0) {  // TODO
@@ -60,8 +60,8 @@ int CraneCtld::start(const std::string &ip_addr, int port) {
   return 0;
 }
 
-void CraneCtld::apply(CraneCtld::CraneCtldOpType type,
-                      const google::protobuf::Message *request,
+void CraneStateMachine::apply(CraneStateMachine::CraneCtldOpType type,
+                              const google::protobuf::Message *request,
                       google::protobuf::Message *response,
                       grpc::ServerUnaryReactor *done) {
   RefactorGuard done_guard(done);
@@ -99,7 +99,7 @@ void CraneCtld::apply(CraneCtld::CraneCtldOpType type,
   return node_->apply(task);
 }
 
-void CraneCtld::on_apply(braft::Iterator &iter) {
+void CraneStateMachine::on_apply(braft::Iterator &iter) {
   // A batch of tasks are committed, which must be processed through
   // |iter|
   for (; iter.valid(); iter.next()) {
@@ -198,8 +198,8 @@ void CraneCtld::on_apply(braft::Iterator &iter) {
   }
 }
 
-void CraneCtld::SubmitBatchTask(const butil::IOBuf &data,
-                                const google::protobuf::Message *request,
+void CraneStateMachine::SubmitBatchTask(
+    const butil::IOBuf &data, const google::protobuf::Message *request,
                                 google::protobuf::Message *response) {
   auto task = std::make_unique<TaskInCtld>();
   auto *resp = dynamic_cast<crane::grpc::SubmitBatchTaskReply *>(response);
@@ -235,8 +235,8 @@ void CraneCtld::SubmitBatchTask(const butil::IOBuf &data,
   }
 }
 
-void CraneCtld::TaskStatusChange(const butil::IOBuf &data,
-                                 const google::protobuf::Message *request,
+void CraneStateMachine::TaskStatusChange(
+    const butil::IOBuf &data, const google::protobuf::Message *request,
                                  google::protobuf::Message *response) {
   std::optional<std::string> reason;
   auto *resp = dynamic_cast<crane::grpc::TaskStatusChangeReply *>(response);
@@ -263,56 +263,56 @@ void CraneCtld::TaskStatusChange(const butil::IOBuf &data,
   }
 }
 
-void CraneCtld::CranedRegister(const butil::IOBuf &data,
-                               const google::protobuf::Message *request,
+void CraneStateMachine::CranedRegister(const butil::IOBuf &data,
+                                       const google::protobuf::Message *request,
                                google::protobuf::Message *response) {}
 
-void CraneCtld::CancelTask(const butil::IOBuf &data,
-                           const google::protobuf::Message *request,
+void CraneStateMachine::CancelTask(const butil::IOBuf &data,
+                                   const google::protobuf::Message *request,
                            google::protobuf::Message *response) {}
 
-void CraneCtld::QueryTasksInfo(const butil::IOBuf &data,
-                               const google::protobuf::Message *request,
+void CraneStateMachine::QueryTasksInfo(const butil::IOBuf &data,
+                                       const google::protobuf::Message *request,
                                google::protobuf::Message *response) {}
 
-void CraneCtld::QueryCranedInfo(const butil::IOBuf &data,
-                                const google::protobuf::Message *request,
+void CraneStateMachine::QueryCranedInfo(
+    const butil::IOBuf &data, const google::protobuf::Message *request,
                                 google::protobuf::Message *response) {}
 
-void CraneCtld::QueryPartitionInfo(const butil::IOBuf &data,
-                                   const google::protobuf::Message *request,
+void CraneStateMachine::QueryPartitionInfo(
+    const butil::IOBuf &data, const google::protobuf::Message *request,
                                    google::protobuf::Message *response) {}
 
-void CraneCtld::ModifyTask(const butil::IOBuf &data,
-                           const google::protobuf::Message *request,
+void CraneStateMachine::ModifyTask(const butil::IOBuf &data,
+                                   const google::protobuf::Message *request,
                            google::protobuf::Message *response) {}
 
-void CraneCtld::ModifyNode(const butil::IOBuf &data,
-                           const google::protobuf::Message *request,
+void CraneStateMachine::ModifyNode(const butil::IOBuf &data,
+                                   const google::protobuf::Message *request,
                            google::protobuf::Message *response) {}
-void CraneCtld::AddAccount(const butil::IOBuf &data,
-                           const google::protobuf::Message *request,
+void CraneStateMachine::AddAccount(const butil::IOBuf &data,
+                                   const google::protobuf::Message *request,
                            google::protobuf::Message *response) {}
-void CraneCtld::AddUser(const butil::IOBuf &data,
-                        const google::protobuf::Message *request,
+void CraneStateMachine::AddUser(const butil::IOBuf &data,
+                                const google::protobuf::Message *request,
                         google::protobuf::Message *response) {}
-void CraneCtld::AddQos(const butil::IOBuf &data,
-                       const google::protobuf::Message *request,
+void CraneStateMachine::AddQos(const butil::IOBuf &data,
+                               const google::protobuf::Message *request,
                        google::protobuf::Message *response) {}
-void CraneCtld::ModifyEntity(const butil::IOBuf &data,
-                             const google::protobuf::Message *request,
+void CraneStateMachine::ModifyEntity(const butil::IOBuf &data,
+                                     const google::protobuf::Message *request,
                              google::protobuf::Message *response) {}
-void CraneCtld::QueryEntityInfo(const butil::IOBuf &data,
-                                const google::protobuf::Message *request,
+void CraneStateMachine::QueryEntityInfo(
+    const butil::IOBuf &data, const google::protobuf::Message *request,
                                 google::protobuf::Message *response) {}
-void CraneCtld::DeleteEntity(const butil::IOBuf &data,
-                             const google::protobuf::Message *request,
+void CraneStateMachine::DeleteEntity(const butil::IOBuf &data,
+                                     const google::protobuf::Message *request,
                              google::protobuf::Message *response) {}
-void CraneCtld::BlockAccountOrUser(const butil::IOBuf &data,
-                                   const google::protobuf::Message *request,
+void CraneStateMachine::BlockAccountOrUser(
+    const butil::IOBuf &data, const google::protobuf::Message *request,
                                    google::protobuf::Message *response) {}
-void CraneCtld::QueryClusterInfo(const butil::IOBuf &data,
-                                 const google::protobuf::Message *request,
+void CraneStateMachine::QueryClusterInfo(
+    const butil::IOBuf &data, const google::protobuf::Message *request,
                                  google::protobuf::Message *response) {}
 
 }  // namespace Ctld

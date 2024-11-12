@@ -170,6 +170,7 @@ class CforedStreamWriter {
 };
 
 class CtldServer;
+class CraneStateMachine;
 
 class CraneCtldServiceImpl final
     : public crane::grpc::CraneCtld::CallbackService {
@@ -382,7 +383,7 @@ class CraneCtldServiceImpl final
 
  private:
   CtldServer *m_ctld_server_;
-  std::unique_ptr<CraneCtld> m_cranectld_;
+  std::unique_ptr<CraneStateMachine> m_cranectld_;
 };
 
 /***

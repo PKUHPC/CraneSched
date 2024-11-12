@@ -76,12 +76,12 @@ class RefactorGuard {
   grpc::ServerUnaryReactor *done_;
 };
 
-class CraneCtld;
+class CraneStateMachine;
 
 // Implements Closure which encloses RPC stuff
 class CraneCtldClosure : public braft::Closure {
  public:
-  CraneCtldClosure(CraneCtld *cranectld,
+  CraneCtldClosure(CraneStateMachine *cranectld,
                    const google::protobuf::Message *request,
                    google::protobuf::Message *response, butil::IOBuf *data,
                    grpc::ServerUnaryReactor *done)
@@ -100,7 +100,7 @@ class CraneCtldClosure : public braft::Closure {
 
  private:
   // Disable explicitly delete
-  CraneCtld *cranectld_;
+  CraneStateMachine *cranectld_;
   const google::protobuf::Message *request_;
   google::protobuf::Message *response_;
   butil::IOBuf *data_;
@@ -110,7 +110,7 @@ class CraneCtldClosure : public braft::Closure {
 class CtldServer;
 
 // Implementation of CraneCtld as a braft::StateMachine.
-class CraneCtld : public braft::StateMachine {
+class CraneStateMachine : public braft::StateMachine {
  public:
   // Define types for different operation
   enum CraneCtldOpType : uint8_t {
@@ -134,10 +134,10 @@ class CraneCtld : public braft::StateMachine {
     //    OP_QUERY_CLUSTER_INFO = 17,
   };
 
-  explicit CraneCtld(CtldServer *server)
+  explicit CraneStateMachine(CtldServer *server)
       : m_ctld_server_(server), node_(nullptr), leader_term_(-1) {}
 
-  ~CraneCtld() override { delete node_; }
+  ~CraneStateMachine() override { delete node_; }
 
   // Starts this node
   int start(const std::string &ip_addr, int port);
