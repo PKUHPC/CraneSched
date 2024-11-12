@@ -24,7 +24,7 @@ CtldClient::~CtldClient() {
   m_thread_stop_ = true;
 
   CRANE_TRACE("CtldClient is ending. Waiting for the thread to finish.");
-  if(m_async_send_thread_.joinable())m_async_send_thread_.join();
+  if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
 }
 
 void CtldClient::InitChannelAndStub(const std::string& server_address) {

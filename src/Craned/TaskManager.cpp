@@ -713,8 +713,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     const std::string& cwd = instance->task.cwd();
     rc = chdir(cwd.c_str());
     if (rc == -1) {
-      CRANE_ERROR("[Child Process] Error: chdir to {}. {}", cwd.c_str(),
-                  strerror(errno));
+      // CRANE_ERROR("[Child Process] Error: chdir to {}. {}", cwd.c_str(),
+      //             strerror(errno));
       std::abort();
     }
 
@@ -735,13 +735,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!ok || !msg.ok()) {
-      if (!ok) {
-        int err = istream.GetErrno();
-        CRANE_ERROR("Failed to read socket from parent: {}", strerror(err));
-      }
+      // if (!ok) {
+      // int err = istream.GetErrno();
+      // CRANE_ERROR("Failed to read socket from parent: {}", strerror(err));
+      // }
 
-      if (!msg.ok())
-        CRANE_ERROR("Parent process ask not to start the subprocess.");
+      // if (!msg.ok())
+      // CRANE_ERROR("Parent process ask not to start the subprocess.");
 
       std::abort();
     }
@@ -757,8 +757,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       stdout_fd =
           open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
       if (stdout_fd == -1) {
-        CRANE_ERROR("[Child Process] Error: open {}. {}", stdout_file_path,
-                    strerror(errno));
+        // CRANE_ERROR("[Child Process] Error: open {}. {}", stdout_file_path,
+        // strerror(errno));
         std::abort();
       }
       dup2(stdout_fd, 1);
@@ -769,8 +769,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         stderr_fd =
             open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
         if (stderr_fd == -1) {
-          CRANE_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
-                      strerror(errno));
+          // CRANE_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
+          //             strerror(errno));
           std::abort();
         }
         dup2(stderr_fd, 2);  // stderr -> error file
@@ -794,7 +794,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
     ok &= ostream.Flush();
     if (!ok) {
-      CRANE_ERROR("[Child Process] Error: Failed to flush.");
+      // CRANE_ERROR("[Child Process] Error: Failed to flush.");
       std::abort();
     }
 

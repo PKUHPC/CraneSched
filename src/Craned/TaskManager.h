@@ -29,7 +29,6 @@
 
 #include "CgroupManager.h"
 #include "CtldClient.h"
-#include "DeviceManager.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
@@ -299,9 +298,9 @@ class TaskManager {
    *  resource (mark the task status as REQUEUE) and requeue the task.
    */
   void ActivateTaskStatusChangeAsync_(uint32_t task_id,
-                                   crane::grpc::TaskStatus new_status,
-                                   uint32_t exit_code,
-                                   std::optional<std::string> reason);
+                                      crane::grpc::TaskStatus new_status,
+                                      uint32_t exit_code,
+                                      std::optional<std::string> reason);
 
   template <typename Duration>
   void AddTerminationTimer_(TaskInstance* instance, Duration duration) {
