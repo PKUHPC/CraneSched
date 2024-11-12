@@ -506,9 +506,6 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserDefaultQos(
   std::string actual_account = account;
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-
-    // FIXME: Repeat Locking!!!
-    util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
     const User& op_user = user_result.value();
