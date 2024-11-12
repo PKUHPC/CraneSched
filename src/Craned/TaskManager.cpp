@@ -129,28 +129,26 @@ TaskManager::TaskManager() {
       m_uvw_loop->resource<uvw::async_handle>();
   m_query_task_environment_variables_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvGrpcQueryTaskEnvironmentVariableCb_();
+        CleanGrpcQueryTaskEnvironmentVariableQueueCb_();
       });
 
   // gRPC Execute Task Event
   m_grpc_execute_task_async_handle_ = m_uvw_loop->resource<uvw::async_handle>();
   m_grpc_execute_task_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvGrpcExecuteTaskCb_();
+        CleanGrpcExecuteTaskQueueCb_();
       });
 
   m_process_sigchld_async_handle_ = m_uvw_loop->resource<uvw::async_handle>();
   m_process_sigchld_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        EvProcessSigchldCb_();
+        CleanSigchldQueueCb_();
       });
 
   // Exit Event
   m_exit_event_async_handle_ = m_uvw_loop->resource<uvw::async_handle>();
   m_exit_event_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvExitEventCb_();
-      });
+      [this](const uvw::async_event&, uvw::async_handle&) { ExitEventCb_(); });
 
   // Task Status Change Event
   m_task_status_change_async_handle_ =
@@ -309,7 +307,7 @@ void TaskManager::EvSigchldCb_() {
   }
 }
 
-void TaskManager::EvProcessSigchldCb_() {
+void TaskManager::CleanSigchldQueueCb_() {
   std::unique_ptr<ProcSigchldInfo> sigchld_info;
   while (this->m_sigchld_queue_.try_dequeue(sigchld_info)) {
     auto pid = sigchld_info->pid;
@@ -459,7 +457,7 @@ void TaskManager::EvSigintCb_() {
   }
 }
 
-void TaskManager::EvExitEventCb_() {
+void TaskManager::ExitEventCb_() {
   CRANE_TRACE("Exit event triggered. Stop event loop.");
 
   // Close all handle
@@ -879,7 +877,7 @@ CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   return CraneErr::kOk;
 }
 
-void TaskManager::EvGrpcExecuteTaskCb_() {
+void TaskManager::CleanGrpcExecuteTaskQueueCb_() {
   std::unique_ptr<TaskInstance> popped_instance;
 
   while (this->m_grpc_execute_task_queue_.try_dequeue(popped_instance)) {
@@ -1115,7 +1113,7 @@ CraneExpected<EnvMap> TaskManager::QueryTaskEnvMapAsync(task_id_t task_id) {
   return env_future.get();
 }
 
-void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_() {
+void TaskManager::CleanGrpcQueryTaskEnvironmentVariableQueueCb_() {
   EvQueueQueryTaskEnvMap elem;
   while (this->m_query_task_environment_variables_queue.try_dequeue(elem)) {
     auto task_iter = this->m_task_map_.find(elem.task_id);

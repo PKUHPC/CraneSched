@@ -380,16 +380,16 @@ class TaskManager {
 
   void EvSigchldCb_();
 
-  void EvProcessSigchldCb_();
+  void CleanSigchldQueueCb_();
 
   // Callback function to handle SIGINT sent by Ctrl+C
   void EvSigintCb_();
 
-  void EvGrpcExecuteTaskCb_();
+  void CleanGrpcExecuteTaskQueueCb_();
 
   void CleanGrpcQueryTaskIdFromPidQueueCb_();
 
-  void EvGrpcQueryTaskEnvironmentVariableCb_();
+  void CleanGrpcQueryTaskEnvironmentVariableQueueCb_();
 
   void CleanTaskStatusChangeQueueCb_();
 
@@ -399,7 +399,7 @@ class TaskManager {
 
   void CleanChangeTaskTimeLimitQueueCb_();
 
-  void EvExitEventCb_();
+  void ExitEventCb_();
 
   void OnTaskTimerCb_(task_id_t task_id);
 
