@@ -144,11 +144,6 @@ TaskManager::TaskManager() {
         CleanSigchldQueueCb_();
       });
 
-  // Exit Event
-  m_exit_event_async_handle_ = m_uvw_loop->resource<uvw::async_handle>();
-  m_exit_event_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) { ExitEventCb_(); });
-
   // Task Status Change Event
   m_task_status_change_async_handle_ =
       m_uvw_loop->resource<uvw::async_handle>();
@@ -178,6 +173,18 @@ TaskManager::TaskManager() {
 
   m_uvw_thread = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
+    auto idle_handle = m_uvw_loop->resource<uvw::idle_handle>();
+    idle_handle->on<uvw::idle_event>(
+        [this](const uvw::idle_event&, uvw::idle_handle& h) {
+          if (m_task_cleared) {
+            h.parent().walk([](auto&& h) { h.close(); });
+            h.parent().stop();
+          }
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        });
+    if (idle_handle->start() != 0) {
+      CRANE_ERROR("Failed to start the idle event in TaskManager loop.");
+    }
     m_uvw_loop->run();
   });
 }
@@ -398,6 +405,7 @@ void TaskManager::SigchldTimerCb_(ProcSigchldInfo* sigchld_info) {
 }
 
 void TaskManager::SigintCb_() {
+  absl::MutexLock lock_guard(&m_mtx_);
   if (!m_is_ending_now_) {
     // SIGINT has been sent once. If SIGINT are captured twice, it indicates
     // the signal sender can't wait to stop Craned and Craned just send SIGTERM
@@ -462,18 +470,10 @@ void TaskManager::SigintCb_() {
   }
 }
 
-void TaskManager::ExitEventCb_() {
-  CRANE_TRACE("Exit event triggered. Stop event loop.");
-
-  // Close all handle
-  m_uvw_loop->walk([](auto&& h) { h.close(); });
-  m_uvw_loop->stop();
-}
-
 void TaskManager::ActivateShutdownAsync_() {
   CRANE_TRACE("Triggering exit event...");
   CRANE_ASSERT(m_is_ending_now_ == true);
-  m_exit_event_async_handle_->send();
+  m_task_cleared = true;
 }
 
 void TaskManager::Wait() {

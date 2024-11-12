@@ -428,9 +428,6 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_process_sigchld_async_handle_;
   ConcurrentQueue<std::unique_ptr<ProcSigchldInfo>> m_sigchld_queue_;
 
-  // When this event is triggered, the event loop will exit.
-  std::shared_ptr<uvw::async_handle> m_exit_event_async_handle_;
-
   std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
   ConcurrentQueue<TaskStatusChangeQueueElem> m_task_status_change_queue_;
 
@@ -450,6 +447,9 @@ class TaskManager {
   // true. Then, AddTaskAsyncMethod will not accept any more new tasks and
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
+
+  // After m_is_ending_now_ set to true, when all task are cleared, we can exit.
+  std::atomic_bool m_task_cleared{false};
 
   std::thread m_uvw_thread;
 
