@@ -148,7 +148,7 @@ AccountManager::CraneExpected<void> AccountManager::AddQos(uint32_t uid,
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User& op_user = *user_result;
+    const User& op_user = user_result.value();
 
     auto result = CheckIfUserHasHigherPrivThan_(op_user, User::None);
     if (!result) return result;
@@ -313,7 +313,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
-  const User& op_user = *user_result;
+  const User& op_user = user_result.value();
   if (name.empty()) {
     if (CheckIfUserHasHigherPrivThan_(op_user, User::None)) {
       // The rules for querying user information are the same as those for
@@ -343,7 +343,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
   } else {  // Query the specified user information.
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     const User* user = GetExistedUserInfoNoLock_(name);
-    result = CheckIfUserHasPermOnUserNoLock_(*op_user, user, true);
+    result = CheckIfUserHasPermOnUserNoLock_(op_user, user, true);
     if (!result) return result;
     res_user_map->try_emplace(user->uid, *user);
   }
@@ -366,7 +366,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
       result = CheckIfUserHasPermOnAccountNoLock_(op_user, name, true);
       if (!result) return result;
     }
-    res_user = *op_user;
+    res_user = op_user;
   }
 
   util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -1026,15 +1026,16 @@ AccountManager::CheckAddUserAllowedQosNoLock_(const User* user,
   if (!result) return result;
   const std::string& account_name = account->name;
   //  check if add item already the user's allowed qos
+  const auto& attrs_in_account_map =
+      user->account_to_attrs_map.at(account_name);
   if (partition.empty()) {
     // When the user has no partition, QoS cannot be added.
-    if (user->account_to_attrs_map.at(account_name)
-            .allowed_partition_qos_map.empty())
+    if (attrs_in_account_map.allowed_partition_qos_map.empty())
       return std::unexpected(CraneErrCode::ERR_USER_EMPTY_PARTITION);
 
     bool is_allowed = false;
-    for (const auto& [par, pair] : user->account_to_attrs_map.at(account_name)
-                                       .allowed_partition_qos_map) {
+    for (const auto& [par, pair] :
+         attrs_in_account_map.allowed_partition_qos_map) {
       const std::list<std::string>& list = pair.second;
       if (!ranges::contains(list, qos_str)) {
         is_allowed = true;
@@ -1043,10 +1044,8 @@ AccountManager::CheckAddUserAllowedQosNoLock_(const User* user,
     }
     if (!is_allowed) return std::unexpected(CraneErrCode::ERR_DUPLICATE_QOS);
   } else {
-    auto iter = user->account_to_attrs_map.at(account_name)
-                    .allowed_partition_qos_map.find(partition);
-    if (iter == user->account_to_attrs_map.at(account_name)
-                    .allowed_partition_qos_map.end())
+    auto iter = attrs_in_account_map.allowed_partition_qos_map.find(partition);
+    if (iter == attrs_in_account_map.allowed_partition_qos_map.end())
       return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
     const std::list<std::string>& list = iter->second.second;
     if (ranges::contains(list, qos_str))
@@ -1071,15 +1070,14 @@ AccountManager::CheckSetUserAllowedQosNoLock_(const User* user,
   std::unordered_map<std::string,
                      std::pair<std::string, std::list<std::string>>>
       cache_allowed_partition_qos_map;
-
+  const auto& attrs_in_account_map =
+      user->account_to_attrs_map.at(account_name);
   if (partition.empty()) {
     cache_allowed_partition_qos_map =
-        user->account_to_attrs_map.at(account_name).allowed_partition_qos_map;
+        attrs_in_account_map.allowed_partition_qos_map;
   } else {
-    auto iter = user->account_to_attrs_map.at(account_name)
-                    .allowed_partition_qos_map.find(partition);
-    if (iter == user->account_to_attrs_map.at(account_name)
-                    .allowed_partition_qos_map.end()) {
+    auto iter = attrs_in_account_map.allowed_partition_qos_map.find(partition);
+    if (iter == attrs_in_account_map.allowed_partition_qos_map.end()) {
       return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
     }
     cache_allowed_partition_qos_map.insert({iter->first, iter->second});
