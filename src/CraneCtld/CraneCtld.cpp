@@ -785,6 +785,7 @@ int StartServer() {
     CRANE_ERROR("Unable to set file descriptor limits to {}", file_max);
     std::exit(1);
   }
+  util::os::CheckProxyEnvironmentVariable();
 
   CreateFolders();
 
