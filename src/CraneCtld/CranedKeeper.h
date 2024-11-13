@@ -26,7 +26,6 @@
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 
-
 namespace Ctld {
 
 class CranedKeeper;
