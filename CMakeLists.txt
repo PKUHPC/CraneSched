@@ -53,7 +53,7 @@ set(CLANG_VERSION "0.0.0")
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_GNU_VERSION)
     if(CRANE_ENABLE_CGROUP_V2)
-        message(STATUS "Using GNU ${CMAKE_CXX_COMPILER_VERSION} for all modules except cgroup_dev_bpf_object")
+        message(STATUS "Enabling Cgroup V2 will build cgroup_dev_bpf_object, which requires Clang ${REQUIRED_BPF_CLANG_VERSION}+. Use GNU ${CMAKE_CXX_COMPILER_VERSION} for other modules. ")
         find_program(CLANG_EXECUTABLE NAMES clang)
         if(CLANG_EXECUTABLE)
             execute_process(
@@ -64,14 +64,12 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_G
             string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" CLANG_VERSION ${CLANG_VERSION_OUTPUT})
             if(CLANG_VERSION VERSION_GREATER_EQUAL REQUIRED_BPF_CLANG_VERSION)
                 set(ENABLE_BPF ON)
-                message(STATUS "Using Clang ${CLANG_VERSION} for cgroup_dev_bpf_object module")
+                message(STATUS "The found Clang at ${CLANG_EXECUTABLE} is version ${CLANG_VERSION}, using Clang ${CLANG_VERSION} for cgroup_dev_bpf_object module")
             else()
-                set(ENABLE_BPF OFF)
-                message(WARNING "Clang ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2, disabling it . You can use Cgroup V1.")
+                message(FATAL_ERROR "The found Clang at ${CLANG_EXECUTABLE} is version ${CLANG_VERSION}, but Clang ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2. You can use Cgroup V1.")
             endif()
         else()
-            set(ENABLE_BPF OFF)
-            message(WARNING "Clang ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2, disabling it . You can use Cgroup V1.")
+            message(FATAL_ERROR "Clang ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2. You can use Cgroup V1.")
         endif()
     endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -79,7 +77,7 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         if(CRANE_ENABLE_CGROUP_V2)
             set(ENABLE_BPF ON)
         endif()
-        message(STATUS "Using Clang for all modlue.")
+        message(STATUS "Using Clang for all module.")
     else()
         message(FATAL_ERROR "Clang ${REQUIRED_CLANG_VERSION} or higher is required.")
     endif()
@@ -104,7 +102,7 @@ option(CRANE_USE_GITEE_SOURCE "Enable the Gitee repository as the download sourc
 
 option(CRANE_USE_SYSTEM_LIBCGROUP "Use libcgroup from system instead of building from source" OFF)
 
-option(CRANE_ENABLE_CGROUP_V2 "Use Cgroup V2" OFF)
+option(CRANE_ENABLE_CGROUP_V2 "Enable Cgroup V2 support" OFF)
 
 option(CRANE_FULL_DYNAMIC "Enable dynamic libs" OFF)
 
@@ -335,6 +333,7 @@ set(_GRPC_GRPCPP grpc++)
 set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 
 if(ENABLE_BPF)
+    find_package(PkgConfig REQUIRED)
     pkg_check_modules(libbpf REQUIRED IMPORTED_TARGET libbpf>=1.4.6)
 endif()
 # @formatter:off
