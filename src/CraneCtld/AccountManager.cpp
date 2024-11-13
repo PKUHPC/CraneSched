@@ -84,11 +84,10 @@ AccountManager::CraneExpected<void> AccountManager::AddAccount(
     const User* op_user = user_result.value();
     // When creating an account without a parent, the permission level of
     // op_user must be Operator or higher.
-    if (new_account.parent_account.empty()) {
+    if (new_account.parent_account.empty())
       result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
-      if (!result) return result;
-    }
-    result = CheckIfUserHasPermOnAccountNoLock_(
+    else
+      result = CheckIfUserHasPermOnAccountNoLock_(
         *op_user, new_account.parent_account, false);
     if (!result) return result;
   }
@@ -416,9 +415,8 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
     }
   } else {
     const Account* account = GetAccountInfoNoLock_(name);
-    if (!account) {
+    if (!account)
       return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
-    }
     res_account_map->try_emplace(name, *account);
   }
 
@@ -1373,7 +1371,6 @@ AccountManager::CheckIfUserHasPermOnUserNoLock_(const User& op_user,
       op_user.name == user->name)
     return {};
 
-  CraneExpected<void> result;
   for (const auto& [acct, item] : user->account_to_attrs_map) {
     if (CheckIfUserHasPermOnAccountNoLock_(op_user, acct, read_only_priv))
       return {};
