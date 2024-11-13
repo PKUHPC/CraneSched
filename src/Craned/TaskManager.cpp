@@ -1042,7 +1042,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     return;
   }
 
-  Cgroup* cg;
+  CgroupInterface* cg;
   bool ok = g_cg_mgr->AllocateAndGetCgroup(task_id, &cg);
   if (!ok) {
     CRANE_ERROR("Failed to allocate cgroup for task #{}", task_id);

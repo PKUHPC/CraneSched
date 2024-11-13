@@ -21,6 +21,13 @@ add_dependencies(craned libcgroup)
 target_include_directories(
         craned PRIVATE ${LIBCGROUP_PATH}/include/
 )
+
+
+
+if(ENABLE_BPF)
+        add_dependencies(craned cgroup_dev_bpf_object)
+        target_compile_definitions(craned PRIVATE CRANE_ENABLE_BPF)
+endif()
 target_link_libraries(craned
         concurrentqueue
 
@@ -49,6 +56,8 @@ target_link_libraries(craned
         result
 
         Backward::Interface
+
+        $<$<BOOL:${ENABLE_BPF}>:bpf>
 )
 
 # Linker flag for c++ 17 filesystem library
