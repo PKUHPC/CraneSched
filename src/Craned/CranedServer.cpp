@@ -496,6 +496,31 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
   return Status::OK;
 }
 
+::grpc::Status CranedServiceImpl::SetCranedLoggerLevel(
+    ::grpc::ServerContext* context,
+    const ::crane::grpc::SetCranedLoggerLevelRequest* request, 
+    ::crane::grpc::SetCranedLoggerLevelReply* response) {
+  spdlog::level::level_enum level;
+  if (!StrToLogLevel(request->log_level(), &level)) {
+    response->set_ok(false);
+    CRANE_WARN("Default", 
+        "craned logger {} level parameter error",
+        request->logger(), level);
+    return grpc::Status::OK;
+  }
+  Result logger_res = SetLoggerLogLevel(request->logger(), level);
+  if (logger_res.ok) {
+      response->set_ok(true);
+  } else {
+        CRANE_WARN("Default", 
+        "craned logger {} set level {} error",
+        request->logger(), level);
+    response->set_ok(false);
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CranedServiceImpl::QueryCranedRemoteMeta(
     grpc::ServerContext *context,
     const ::crane::grpc::QueryCranedRemoteMetaRequest *request,

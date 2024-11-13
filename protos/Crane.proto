@@ -154,6 +154,14 @@ message CancelTaskReply {
   repeated string not_cancelled_reasons = 4;
 }
 
+message SetCranedLoggerLevelRequest {
+  string logger = 1;
+  string log_level = 2;
+}
+
+message SetCranedLoggerLevelReply {
+  bool ok = 1;
+}
 
 message QueryTaskIdFromPortRequest{
   uint32 port = 1;
@@ -690,15 +698,17 @@ message StreamCforedTaskIOReply {
   }
 }
 
-  message SetLogLevelRequest {
-    string logger = 1;
-    string log_level = 2;
-}
+  message SetLoggerLevelRequest {
+    repeated string node_name = 1;
+    string logger = 2;
+    string log_level = 3;
+  }
 
-  message SetLogLevelReply {
-    bool ok = 1;
-    string reason = 2;
-}
+  message SetLoggerLevelReply {
+    repeated string modified_nodes = 1;
+    repeated string not_modified_nodes = 2;
+    repeated string not_modified_reasons = 3;
+  }
 
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
@@ -739,7 +749,7 @@ service CraneCtld {
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
 
   /* RPCs called from logger */
-  rpc SetLogerLevel(SetLogLevelRequest) returns (SetLogLevelReply);
+  rpc SetLoggerLevel(SetLoggerLevelRequest) returns (SetLoggerLevelReply);
 
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
@@ -768,6 +778,9 @@ service Craned {
 
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
+
+  /* RPCs called from logger */
+  rpc SetCranedLoggerLevel(SetCranedLoggerLevelRequest) returns (SetCranedLoggerLevelReply);
 
   /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
   rpc QueryTaskIdFromPortForward(QueryTaskIdFromPortForwardRequest) returns (QueryTaskIdFromPortForwardReply);

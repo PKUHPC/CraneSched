@@ -61,7 +61,7 @@
 // default cranetld log
 #define CRANE_TRACE(logger_name, ...) \
     do { \
-        auto logger = spdlog::get(logger_name); \
+        auto logger = GetLoggerByName(logger_name); \
         if (logger) { \
             SPDLOG_LOGGER_TRACE(logger, __VA_ARGS__); \
         } \
@@ -69,7 +69,7 @@
 
 #define CRANE_DEBUG(logger_name, ...) \
     do { \
-        auto logger = spdlog::get(logger_name); \
+        auto logger = GetLoggerByName(logger_name); \
         if (logger) { \
             SPDLOG_LOGGER_DEBUG(logger, __VA_ARGS__); \
         } \
@@ -77,7 +77,7 @@
 
 #define CRANE_INFO(logger_name, ...) \
     do { \
-        auto logger = spdlog::get(logger_name); \
+        auto logger = GetLoggerByName(logger_name); \
         if (logger) { \
             SPDLOG_LOGGER_INFO(logger, __VA_ARGS__); \
         } \
@@ -85,7 +85,7 @@
 
 #define CRANE_WARN(logger_name, ...) \
     do { \
-        auto logger = spdlog::get(logger_name); \
+        auto logger = GetLoggerByName(logger_name); \
         if (logger) { \
             SPDLOG_LOGGER_WARN(logger, __VA_ARGS__); \
         } \
@@ -93,7 +93,7 @@
 
 #define CRANE_ERROR(logger_name, ...) \
     do { \
-        auto logger = spdlog::get(logger_name); \
+        auto logger = GetLoggerByName(logger_name); \
         if (logger) { \
             SPDLOG_LOGGER_ERROR(logger, __VA_ARGS__); \
         } \
@@ -101,7 +101,7 @@
 
 #define CRANE_CRITICAL(logger_name, ...) \
     do { \
-        auto logger = spdlog::get(logger_name); \
+        auto logger = GetLoggerByName(logger_name); \
         if (logger) { \
             SPDLOG_LOGGER_CRITICAL(logger, __VA_ARGS__); \
         } \
@@ -201,15 +201,11 @@ void InitLogger(const std::unordered_map<std::string, spdlog::level::level_enum>
                 const std::string& log_file_path,
                 const bool cranectld_flag);
 
-
-void FindLoggerValidLevel(const std::unordered_map<std::string, spdlog::level::level_enum>& log_levels, 
-                          const std::string& logger_name,
-                          spdlog::level::level_enum *out_level);
-
 bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_Level);
 
 Result SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level);
 
+std::shared_ptr<spdlog::logger> GetLoggerByName(const std::string& logger_name);
 
 // Custom type formatting
 namespace fmt {

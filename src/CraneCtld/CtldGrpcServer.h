@@ -198,10 +198,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                           const crane::grpc::CancelTaskRequest *request,
                           crane::grpc::CancelTaskReply *response) override;
 
-  grpc::Status SetLogerLevel (
+  grpc::Status SetLoggerLevel (
       grpc::ServerContext *context,
-      const crane::grpc::SetLogLevelRequest *request,
-      crane::grpc::SetLogLevelReply *response) override;
+      const crane::grpc::SetLoggerLevelRequest *request,
+      crane::grpc::SetLoggerLevelReply *response) override;
 
   grpc::Status QueryTasksInfo(
       grpc::ServerContext *context,

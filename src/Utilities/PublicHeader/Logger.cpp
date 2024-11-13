@@ -67,29 +67,16 @@ void InitLogger(const std::unordered_map<std::string, spdlog::level::level_enum>
     }
 }
 
-void FindLoggerValidLevel(const std::unordered_map<std::string, spdlog::level::level_enum>& log_Levels,
-                          const std::string& logger_name,
-                          spdlog::level::level_enum *out_level) {
-    if (out_level == nullptr) {
-        fmt::print("Logger map empty.\n");
-        return;
-    }
-    auto it = log_Levels.find(logger_name);
-    if (it != log_Levels.end()) {
-        *out_level = it->second;
-    } else {
-        *out_level = spdlog::level::trace;  //default level
-    }
-}
-
 Result SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level) {
  std::unordered_map<std::string, bool> loggers_to_set;
-    if (logger_name == "All") {
+    if (logger_name == "all") {
         loggers_to_set = {{"Default", false}, {"TaskScheduler", false}, {"CranedKeeper", false}};
-    } else if (logger_name == "Other") {
+    } else if (logger_name == "default") {
         loggers_to_set = {{"Default", false}};
-    } else if (logger_name == "TaskScheduler" || logger_name == "CranedKeeper") {
-        loggers_to_set = {{logger_name, false}};
+    } else if (logger_name == "taskScheduler") {
+        loggers_to_set = {{"TaskScheduler", false}};
+    } else if (logger_name == "cranedkeeper") {
+         loggers_to_set = {{"CranedKeeper", false}};
     } else {
         return Result{false, fmt::format("logger {} not found\n", logger_name)};
     }
@@ -150,3 +137,18 @@ bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_
     return true;
 }
 
+std::shared_ptr<spdlog::logger> GetLoggerByName(const std::string& logger_name) {
+    static std::shared_ptr<spdlog::logger> default_logger = spdlog::get("Default");
+    static std::shared_ptr<spdlog::logger> cranedkeeper_logger = spdlog::get("CranedKeeper");
+    static std::shared_ptr<spdlog::logger> taskscheduler_logger = spdlog::get("TaskScheduler");
+
+    if (logger_name == "Default") {
+        return default_logger;
+    } else if (logger_name == "CranedKeeper") {
+        return cranedkeeper_logger;
+    } else if (logger_name == "TaskScheduler") {
+        return taskscheduler_logger;
+    } else {
+        return nullptr;
+    }
+}

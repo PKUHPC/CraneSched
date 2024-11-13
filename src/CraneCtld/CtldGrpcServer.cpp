@@ -238,24 +238,44 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::SetLogerLevel (
+grpc::Status CraneCtldServiceImpl::SetLoggerLevel (
     grpc::ServerContext *context,
-    const crane::grpc::SetLogLevelRequest *request,
-    crane::grpc::SetLogLevelReply *response) {
-    spdlog::level::level_enum level;
-  
-  if (!StrToLogLevel(request->log_level(), &level)) {
-    response->set_ok(false);
-    response->set_reason("parameter error");
+    const crane::grpc::SetLoggerLevelRequest *request,
+    crane::grpc::SetLoggerLevelReply *response) {
+  spdlog::level::level_enum level;
+  if (request->node_name_size() == 1 &&  request->node_name(0) == "cranectld") {
+    if (!StrToLogLevel(request->log_level(), &level)) {
+        response->add_not_modified_nodes("cranectld");
+        response->add_not_modified_reasons("level parameter error");
+        return grpc::Status::OK;
+    }
+    Result logger_res = SetLoggerLogLevel(request->logger(), level);
+    if (logger_res.ok) {
+        response->add_modified_nodes(request->node_name(0));
+    } else {
+        response->add_not_modified_nodes(request->node_name(0));
+        response->add_not_modified_reasons(logger_res.reason);      
+    }
     return grpc::Status::OK;
   }
-  Result set_logger_res = SetLoggerLogLevel(request->logger(), level);
-  if (!set_logger_res.ok) {
-      response->set_ok(false);
-  } else {
-    response->set_ok(true);
+
+  for (const auto& craned_id : request->node_name()) {
+    auto stub = g_craned_keeper->GetCranedStub(craned_id);
+    if (stub != nullptr && !stub->Invalid()) {
+      CraneErr err = stub->SetCranedLoggerLevel(request->logger(), request->log_level());
+      if (err != CraneErr::kOk) {
+          response->add_not_modified_nodes(craned_id);
+          response->add_not_modified_reasons(
+          std::format("node {} not found or logger {} level: {} failed",
+           craned_id, request->logger(), request->log_level()));
+      } else {
+        response->add_modified_nodes(craned_id);
+      }
+    } else {
+      response->add_not_modified_nodes(craned_id);
+      response->add_not_modified_reasons(std::format("node {} not find or down state", craned_id));
+    }
   }
-  response->set_reason(set_logger_res.reason);
 
   return grpc::Status::OK;
 }
