@@ -969,6 +969,8 @@ bool CgroupV1::MigrateProcIn(pid_t pid) {
   // If there is no memory controller present, we skip all this and just attempt
   // a migrate
   int err;
+  // TODO handle memory.move_charge_at_immigrate 
+  // https://github.com/PKUHPC/CraneSched/pull/327/files/eaa0d04dcc4c12a1773ac9a3fd42aa9f898741aa..9dc93a50528c1b22dbf50d0bf40a11a98bbed36d#r1838007422
   err = cgroup_attach_task_pid(m_cgroup_info_.m_cgroup_, pid);
   if (err != 0) {
     CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}", pid,
@@ -1440,7 +1442,6 @@ bool CgroupV2::MigrateProcIn(pid_t pid) {
   int err;
 after_migrate:
 
-  //  orig_cgroup = NULL;
   err = cgroup_attach_task_pid(m_cgroup_info_.m_cgroup_, pid);
   if (err != 0) {
     CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}", pid,
