@@ -703,6 +703,24 @@ inline bool CheckIfTimeLimitIsValid(absl::Duration d) {
   return CheckIfTimeLimitSecIsValid(sec);
 }
 
+struct QosResource {
+  uint32_t cpus_per_user;
+  uint32_t jobs_per_user;
+};
+
+struct QosResourceLimit {
+  QosResource res_total;
+  QosResource res_avail;
+  QosResource res_in_use;
+};
+
+struct UserResourceMeta {
+  using QosToQosResourceMap = std::unordered_map<std::string,  // QosName
+                                                 QosResourceLimit>;
+
+  QosToQosResourceMap qos_to_resource_map;
+};
+
 }  // namespace Ctld
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

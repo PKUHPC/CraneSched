@@ -25,6 +25,7 @@
 
 #include <cxxopts.hpp>
 #include <filesystem>
+#include <memory>
 
 #include "AccountManager.h"
 #include "CranedKeeper.h"
@@ -682,6 +683,8 @@ void InitializeCtldGlobalVariables() {
 
   g_meta_container = std::make_unique<CranedMetaContainer>();
   g_meta_container->InitFromConfig(g_config);
+
+  g_meta_account_container = std::make_unique<CranedMetaContainer>();
 
   bool ok;
   g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
