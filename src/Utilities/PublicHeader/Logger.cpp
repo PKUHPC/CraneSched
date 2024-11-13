@@ -132,8 +132,7 @@ bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_
         *out_Level = spdlog::level::err;
     } else if (str_level == "critical") {
         *out_Level = spdlog::level::critical;
-    }
-    else {
+    } else {
         return false;
     }
 
