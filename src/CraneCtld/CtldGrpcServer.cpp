@@ -251,9 +251,9 @@ grpc::Status CraneCtldServiceImpl::SetLoggerLevel (
     }
     Result logger_res = SetLoggerLogLevel(request->logger(), level);
     if (logger_res.ok) {
-        response->add_modified_nodes(request->node_name(0));
+        response->add_modified_nodes("cranectld");
     } else {
-        response->add_not_modified_nodes(request->node_name(0));
+        response->add_not_modified_nodes("cranectld");
         response->add_not_modified_reasons(logger_res.reason);      
     }
     return grpc::Status::OK;
