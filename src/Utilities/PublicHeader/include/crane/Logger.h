@@ -239,7 +239,6 @@ public:
 class LoggerContainer : public BasicLoggerContainer {
 public:
   void Init(const std::string& log_file_path, const std::string& name) override;
-  std::shared_ptr<spdlog::async_logger> GetLogger(const std::string& name);
   static BasicLoggerContainer* CreateLogger();
 };
 
