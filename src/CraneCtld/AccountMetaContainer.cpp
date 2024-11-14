@@ -94,7 +94,7 @@ void AccountMetaContainer::EraseQosResourceOnUser(const std::string& username) {
 void AccountMetaContainer::FreeQosLimitOnUser(const std::string& username,
                                               const TaskInCtld& task) {
   auto user_meta = user_meta_map_[username];
-  auto qos_resource = user_meta->qos_to_resource_map[task.qos];
+  auto& qos_resource = user_meta->qos_to_resource_map[task.qos];
 
   uint32_t cpus_per_task = static_cast<uint32_t>(task.cpus_per_task);
   qos_resource.res_avail.cpus_per_user += cpus_per_task;
@@ -108,7 +108,7 @@ bool AccountMetaContainer::CheckAndApplyQosLimitOnUser(
     const std::string& username, const TaskInCtld& task) {
   auto user_meta = user_meta_map_[username];
   uint32_t cpus_per_task = static_cast<uint32_t>(task.cpus_per_task);
-  auto qos_resource = user_meta->qos_to_resource_map[task.qos];
+  auto& qos_resource = user_meta->qos_to_resource_map[task.qos];
   if (qos_resource.res_avail.jobs_per_user == 0 ||
       qos_resource.res_avail.cpus_per_user < cpus_per_task)
     return false;
