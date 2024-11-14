@@ -60,6 +60,8 @@ bool SetMaxFileDescriptorNumber(unsigned long num);
 
 bool GetSystemReleaseInfo(SystemRelInfo* info);
 
+bool CheckProxyEnvironmentVariable();
+
 absl::Time GetSystemBootTime();
 
 }  // namespace os

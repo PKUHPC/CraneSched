@@ -657,6 +657,7 @@ void StartServer() {
 
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
+  util::os::CheckProxyEnvironmentVariable();
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
