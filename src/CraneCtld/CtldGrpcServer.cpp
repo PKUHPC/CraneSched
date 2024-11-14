@@ -246,6 +246,12 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::Login(
+    grpc::ServerContext *context, const crane::grpc::LoginRequest *request,
+    crane::grpc::LoginReply *response) {
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
@@ -667,22 +673,22 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
   std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
   if (listen_conf.UseTls) {
-    ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
-                                        listen_conf.CraneCtldListenPort,
-                                        listen_conf.TlsCerts.ExternalCerts);
+    ServerBuilderAddTcpTlsListeningPort(
+        &builder, cranectld_listen_addr, listen_conf.CraneCtldListenPort,
+        listen_conf.TlsCerts.ExternalCerts, g_config.JwtSecretContent);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
                                              listen_conf.CraneCtldListenPort);
+    std::vector<
+        std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>>
+        creators;
+    creators.push_back(
+        std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>(
+            new JwtAuthInterceptorFactory(g_config.JwtSecretContent)));
+
+    builder.experimental().SetInterceptorCreators(std::move(creators));
   }
 
-  // std::vector<
-  //     std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>>
-  //     creators;
-  // creators.push_back(
-  //     std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>(
-  //         new AuthInterceptorFactory()));
-
-  // builder.experimental().SetInterceptorCreators(std::move(creators));
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();

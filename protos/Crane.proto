@@ -744,6 +744,17 @@ message StreamCforedTaskIOReply {
   }
 }
 
+message LoginRequest {
+  uint32 uid = 1;
+  string password = 2;
+}
+
+message LoginReply {
+  bool ok = 1;
+  string token = 2;
+  string reason = 3;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -774,6 +785,9 @@ service CraneCtld {
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
+
+  /* RPCs called from clogin */
+  rpc Login(LoginRequest) returns (LoginReply);
 
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);

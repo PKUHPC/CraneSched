@@ -20,8 +20,12 @@
 
 #include <grpc++/grpc++.h>
 #include <grpcpp/security/auth_metadata_processor.h>
+#include <grpcpp/security/server_credentials.h>
 #include <grpcpp/support/status.h>
 #include <spdlog/fmt/bundled/format.h>
+
+#include "crane/Network.h"
+#include "crane/jwt.h"
 
 struct TlsCertificates {
   std::string ServerCertFilePath;
@@ -36,22 +40,43 @@ struct ClientTlsCertificates {
   std::string ClientCertContent;
 };
 
-class MyAuthProcessor : public grpc::AuthMetadataProcessor {
- public:
-  grpc::Status Process(const InputMetadata& auth_metadata,
-                       grpc::AuthContext* context,
-                       OutputMetadata* consumed_auth_metadata,
-                       OutputMetadata* response_metadata) override {
-    for (const auto& [k, v] : auth_metadata) {
-      std::cout << k << " " << v << std::endl;
-    }
-    auto kv = auth_metadata.find("Authorization");
-    if (strcmp(kv->second.data(), "Token") != 0) {
-      return grpc::Status(grpc::StatusCode::UNAUTHENTICATED, "Invalid token");
-    }
+// class JwtAuthProcessor : public grpc::AuthMetadataProcessor {
+//  public:
+//   JwtAuthProcessor(std::string secret) : jwt_secret_(secret) {}
+//   grpc::Status Process(const InputMetadata& auth_metadata,
+//                        grpc::AuthContext* context,
+//                        OutputMetadata* consumed_auth_metadata,
+//                        OutputMetadata* response_metadata) override;
 
-    return grpc::Status::OK;
+//  private:
+//   std::string jwt_secret_;
+// };
+
+// class JwtAuthInterceptor : public grpc::experimental::Interceptor {
+//  public:
+//   explicit JwtAuthInterceptor(grpc::experimental::ServerRpcInfo* info,
+//                               std::string secret)
+//       : info_(info), jwt_secret_(secret) {}
+
+//   void Intercept(grpc::experimental::InterceptorBatchMethods* methods)
+//   override;
+
+//  private:
+//   grpc::experimental::ServerRpcInfo* info_;
+//   std::string jwt_secret_;
+// };
+
+class JwtAuthInterceptorFactory
+    : public grpc::experimental::ServerInterceptorFactoryInterface {
+ public:
+  JwtAuthInterceptorFactory(std::string secret) : jwt_secret_(secret) {}
+  grpc::experimental::Interceptor* CreateServerInterceptor(
+      grpc::experimental::ServerRpcInfo* info) override {
+    return new JwtAuthInterceptor(info, jwt_secret_);
   }
+
+ private:
+  std::string jwt_secret_;
 };
 
 void ServerBuilderSetCompression(grpc::ServerBuilder* builder);
@@ -74,7 +99,8 @@ void ServerBuilderAddmTcpTlsListeningPort(grpc::ServerBuilder* builder,
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,
                                          const std::string& port,
-                                         const TlsCertificates& certs);
+                                         const TlsCertificates& certs,
+                                         const std::string& jwt_secret);
 
 void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args);
 
