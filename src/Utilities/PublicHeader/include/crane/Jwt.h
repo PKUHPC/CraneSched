@@ -16,6 +16,6 @@ std::string GenerateToken(
 
 bool VerifyToken(const std::string& secret, const std::string& token);
 
-std::string GetClaim(const std::string& key);
+std::string GetClaim(const std::string& key, const std::string& token);
 
 }  // namespace util

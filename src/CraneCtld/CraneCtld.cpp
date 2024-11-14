@@ -16,8 +16,6 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "CtldForCforedServer.h"
-#include "CtldForCranedServer.h"
 #include "CtldPreCompiledHeader.h"
 // Precompiled header comes first!
 
@@ -33,6 +31,8 @@
 #include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
+#include "CtldForCforedServer.h"
+#include "CtldForCranedServer.h"
 #include "CtldGrpcServer.h"
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
