@@ -154,12 +154,12 @@ message CancelTaskReply {
   repeated string not_cancelled_reasons = 4;
 }
 
-message SetCranedLoggerLevelRequest {
+message SetCranedLoggingLevelRequest {
   string logger = 1;
   string log_level = 2;
 }
 
-message SetCranedLoggerLevelReply {
+message SetCranedLoggingLevelReply {
   bool ok = 1;
   string reason = 2;
 }
@@ -699,13 +699,13 @@ message StreamCforedTaskIOReply {
   }
 }
 
-  message SetLoggerLevelRequest {
+  message SetLoggingLevelRequest {
     repeated string node_name = 1;
     string logger = 2;
     string log_level = 3;
   }
 
-  message SetLoggerLevelReply {
+  message SetLoggingLevelReply {
     repeated string modified_nodes = 1;
     repeated string not_modified_nodes = 2;
     repeated string not_modified_reasons = 3;
@@ -750,7 +750,7 @@ service CraneCtld {
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
 
   /* RPCs called from ccontrol */
-  rpc SetLoggerLevel(SetLoggerLevelRequest) returns (SetLoggerLevelReply);
+  rpc SetLoggingLevel(SetLoggingLevelRequest) returns (SetLoggingLevelReply);
 
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
@@ -781,7 +781,7 @@ service Craned {
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
 
   /* RPCs called from ccontrol */
-  rpc SetCranedLoggerLevel(SetCranedLoggerLevelRequest) returns (SetCranedLoggerLevelReply);
+  rpc SetCranedLoggingLevel(SetCranedLoggingLevelRequest) returns (SetCranedLoggingLevelReply);
 
   /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
   rpc QueryTaskIdFromPortForward(QueryTaskIdFromPortForwardRequest) returns (QueryTaskIdFromPortForwardReply);

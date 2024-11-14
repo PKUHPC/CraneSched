@@ -265,13 +265,13 @@ class EmbeddedDbClient {
       return true;
     }
 
-    CRANE_ERROR("Default", "Failed to begin a transaction.");
+    CRANE_ERROR("default", "Failed to begin a transaction.");
     return false;
   }
 
   bool CommitDbTransaction_(IEmbeddedDb* db, txn_id_t txn_id) {
     if (txn_id <= 0) {
-      CRANE_ERROR("Default", "Commit a transaction with id {} <= 0", txn_id);
+      CRANE_ERROR("default", "Commit a transaction with id {} <= 0", txn_id);
       return false;
     }
 
@@ -303,21 +303,21 @@ class EmbeddedDbClient {
     if (fetch_result.has_value()) return true;
 
     if (fetch_result.error() == DbErrorCode::kNotFound) {
-      CRANE_TRACE("Default", 
+      CRANE_TRACE("default", 
           "Key {} not found in embedded db. Initialize it with value {}", key,
           value);
 
       result::result<void, DbErrorCode> store_result =
           StoreTypeIntoDb_(m_variable_db_.get(), txn_id, key, &value);
       if (store_result.has_error()) {
-        CRANE_ERROR("Default", "Failed to init key '{}' in db.", key);
+        CRANE_ERROR("default", "Failed to init key '{}' in db.", key);
         return false;
       }
 
       *buf = value;
       return true;
     } else {
-      CRANE_ERROR("Default", "Failed to fetch key '{}' from db.", key);
+      CRANE_ERROR("default", "Failed to fetch key '{}' from db.", key);
       return false;
     }
   }
@@ -329,7 +329,7 @@ class EmbeddedDbClient {
 
     auto result = db->Fetch(txn_id, key, nullptr, &n_bytes);
     if (result.has_error()) {
-      CRANE_ERROR("Default", "Unexpected error when fetching the size of string key '{}'",
+      CRANE_ERROR("default", "Unexpected error when fetching the size of string key '{}'",
                   key);
       return result;
     }
@@ -337,7 +337,7 @@ class EmbeddedDbClient {
     buf->resize(n_bytes);
     result = db->Fetch(txn_id, key, buf->data(), &n_bytes);
     if (result.has_error()) {
-      CRANE_ERROR("Default", "Unexpected error when fetching the data of string key '{}'",
+      CRANE_ERROR("default", "Unexpected error when fetching the data of string key '{}'",
                   key);
       return result;
     }
@@ -353,7 +353,7 @@ class EmbeddedDbClient {
 
     auto result = db->Fetch(txn_id, key, nullptr, &n_bytes);
     if (result.has_error() && result.error() != kBufferSmall) {
-      CRANE_ERROR("Default", "Unexpected error when fetching the size of proto key '{}'",
+      CRANE_ERROR("default", "Unexpected error when fetching the size of proto key '{}'",
                   key);
       return result;
     }
@@ -361,14 +361,14 @@ class EmbeddedDbClient {
     buf.resize(n_bytes);
     result = db->Fetch(txn_id, key, buf.data(), &n_bytes);
     if (result.has_error()) {
-      CRANE_ERROR("Default", "Unexpected error when fetching the data of proto key '{}'",
+      CRANE_ERROR("default", "Unexpected error when fetching the data of proto key '{}'",
                   key);
       return result;
     }
 
     bool ok = value->ParseFromArray(buf.data(), n_bytes);
     if (!ok) {
-      CRANE_ERROR("Default", "Failed to parse protobuf data of key {}", key);
+      CRANE_ERROR("default", "Failed to parse protobuf data of key {}", key);
       return result::failure(DbErrorCode::kParsingError);
     }
 
@@ -383,7 +383,7 @@ class EmbeddedDbClient {
     size_t n_bytes{sizeof(T)};
     auto result = db->Fetch(txn_id, key, buf, &n_bytes);
     if (result.has_error() && result.error() != DbErrorCode::kNotFound)
-      CRANE_ERROR("Default", "Unexpected error when fetching scalar key '{}'.", key);
+      CRANE_ERROR("default", "Unexpected error when fetching scalar key '{}'.", key);
     return result;
   }
 

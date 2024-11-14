@@ -114,7 +114,7 @@ struct Config {
 
   bool CompressedRpc{};
 
-  std::unordered_map<std::string, spdlog::level::level_enum> logLevels;
+  std::unordered_map<std::string, spdlog::level::level_enum> LogLevels;
   std::string CraneCtldLogFile;
 
   std::string CraneEmbeddedDbBackend;

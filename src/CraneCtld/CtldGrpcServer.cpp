@@ -238,10 +238,10 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::SetLoggerLevel (
+grpc::Status CraneCtldServiceImpl::SetLoggingLevel (
     grpc::ServerContext *context,
-    const crane::grpc::SetLoggerLevelRequest *request,
-    crane::grpc::SetLoggerLevelReply *response) {
+    const crane::grpc::SetLoggingLevelRequest *request,
+    crane::grpc::SetLoggingLevelReply *response) {
   spdlog::level::level_enum level;
   auto str = request->node_name(0);
   if (request->node_name_size() == 1 &&  request->node_name(0) == "") {
@@ -264,7 +264,7 @@ grpc::Status CraneCtldServiceImpl::SetLoggerLevel (
     auto stub = g_craned_keeper->GetCranedStub(craned_id);
     if (stub != nullptr && !stub->Invalid()) {
       std::string reason;
-      CraneErr err = stub->SetCranedLoggerLevel(request->logger(), request->log_level(), reason);
+      CraneErr err = stub->SetCranedLoggingLevel(request->logger(), request->log_level(), reason);
       if (err != CraneErr::kOk) {
           response->add_not_modified_nodes(craned_id);
           response->add_not_modified_reasons(reason);
@@ -317,7 +317,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   // (only for cacct, which sets `option_include_completed_tasks` to true)
   if (!g_db_client->FetchJobRecords(request, response,
                                     num_limit - task_list->size())) {
-    CRANE_ERROR("Default", "Failed to call g_db_client->FetchJobRecords");
+    CRANE_ERROR("default", "Failed to call g_db_client->FetchJobRecords");
     return grpc::Status::OK;
   }
 
@@ -1064,7 +1064,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
   std::weak_ptr<CforedStreamWriter> writer_weak_ptr(stream_writer);
   std::string cfored_name;
 
-  CRANE_TRACE("Default","CforedStream from {} created.", context->peer());
+  CRANE_TRACE("default","CforedStream from {} created.", context->peer());
 
   StreamState state = StreamState::kWaitRegReq;
   while (true) {
@@ -1073,18 +1073,18 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
       ok = stream->Read(&cfored_request);
       if (ok) {
         if (cfored_request.type() != StreamCforedRequest::CFORED_REGISTRATION) {
-          CRANE_ERROR("Default", "Expect type CFORED_REGISTRATION from peer {}.",
+          CRANE_ERROR("default", "Expect type CFORED_REGISTRATION from peer {}.",
                       context->peer());
           return Status::CANCELLED;
         } else {
           cfored_name = cfored_request.payload_cfored_reg().cfored_name();
-          CRANE_INFO("Default", "Cfored {} registered.", cfored_name);
+          CRANE_INFO("default", "Cfored {} registered.", cfored_name);
 
           ok = stream_writer->WriteCforedRegistrationAck({});
           if (ok) {
             state = StreamState::kWaitMsg;
           } else {
-            CRANE_ERROR("Default", 
+            CRANE_ERROR("default", 
                 "Failed to send msg to cfored {}. Connection is broken. "
                 "Exiting...",
                 cfored_name);
@@ -1126,7 +1126,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
           meta.cb_task_completed = [this, i_type, cfored_name,
                                     writer_weak_ptr](task_id_t task_id) {
-            CRANE_TRACE("Default","Sending TaskCompletionAckReply in task_completed",
+            CRANE_TRACE("default","Sending TaskCompletionAckReply in task_completed",
                         task_id);
             if (auto writer = writer_weak_ptr.lock(); writer)
               writer->WriteTaskCompletionAckReply(task_id);
@@ -1156,7 +1156,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
           if (!ok) {
-            CRANE_ERROR("Default", 
+            CRANE_ERROR("default", 
                 "Failed to send msg to cfored {}. Connection is broken. "
                 "Exiting...",
                 cfored_name);
@@ -1173,7 +1173,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
         case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
           auto const &payload = cfored_request.payload_task_complete_req();
-          CRANE_TRACE("Default","Recv TaskCompletionReq of Task #{}", payload.task_id());
+          CRANE_TRACE("default","Recv TaskCompletionReq of Task #{}", payload.task_id());
 
           if (g_task_scheduler->TerminatePendingOrRunningTask(
                   payload.task_id()) != CraneErr::kOk)
@@ -1187,7 +1187,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
         } break;
 
         default:
-          CRANE_ERROR("Default", "Not expected cfored request type: {}",
+          CRANE_ERROR("default", "Not expected cfored request type: {}",
                       StreamCforedRequest_CforedRequestType_Name(
                           cfored_request.type()));
           return Status::CANCELLED;
@@ -1198,7 +1198,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
     } break;
 
     case StreamState::kCleanData: {
-      CRANE_INFO("Default", "Cfored {} disconnected. Cleaning its data...", cfored_name);
+      CRANE_INFO("default", "Cfored {} disconnected. Cleaning its data...", cfored_name);
       stream_writer->Invalidate();
       m_ctld_server_->m_mtx_.Lock();
 
@@ -1240,11 +1240,11 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
   m_server_ = builder.BuildAndStart();
   if (!m_server_) {
-    CRANE_ERROR("Default", "Cannot start gRPC server!");
+    CRANE_ERROR("default", "Cannot start gRPC server!");
     std::exit(1);
   }
 
-  CRANE_INFO("Default", "CraneCtld is listening on {}:{} and Tls is {}",
+  CRANE_INFO("default", "CraneCtld is listening on {}:{} and Tls is {}",
              cranectld_listen_addr, listen_conf.CraneCtldListenPort,
              listen_conf.UseTls);
 
@@ -1255,7 +1255,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     std::unique_lock<std::mutex> lk(s_sigint_mtx);
     s_sigint_cv.wait(lk);
 
-    CRANE_TRACE("Default","SIGINT captured. Calling Shutdown() on grpc server...");
+    CRANE_TRACE("default","SIGINT captured. Calling Shutdown() on grpc server...");
 
     // craned_keeper MUST be shutdown before GrpcServer.
     // Otherwise, once GrpcServer is shut down, the main thread stops and
@@ -1328,28 +1328,28 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   }
 
   if (err == CraneErr::kNonExistent) {
-    CRANE_DEBUG("Default", "Task submission failed. Reason: Partition doesn't exist!");
+    CRANE_DEBUG("default", "Task submission failed. Reason: Partition doesn't exist!");
     return result::fail("Partition doesn't exist!");
   } else if (err == CraneErr::kInvalidNodeNum) {
-    CRANE_DEBUG("Default", 
+    CRANE_DEBUG("default", 
         "Task submission failed. Reason: --node is either invalid or greater "
         "than the number of nodes in its partition.");
     return result::fail(
         "--node is either invalid or greater than the number of nodes in its "
         "partition.");
   } else if (err == CraneErr::kNoResource) {
-    CRANE_DEBUG("Default", 
+    CRANE_DEBUG("default", 
         "Task submission failed. "
         "Reason: The resources of the partition are insufficient.");
     return result::fail("The resources of the partition are insufficient");
   } else if (err == CraneErr::kNoAvailNode) {
-    CRANE_DEBUG("Default", 
+    CRANE_DEBUG("default", 
         "Task submission failed. "
         "Reason: Nodes satisfying the requirements of task are insufficient");
     return result::fail(
         "Nodes satisfying the requirements of task are insufficient.");
   } else if (err == CraneErr::kInvalidParam) {
-    CRANE_DEBUG("Default", 
+    CRANE_DEBUG("default", 
         "Task submission failed. "
         "Reason: The param of task is invalid.");
     return result::fail("The param of task is invalid.");

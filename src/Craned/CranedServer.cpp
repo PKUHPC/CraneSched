@@ -30,7 +30,7 @@ grpc::Status CranedServiceImpl::ExecuteTask(
     grpc::ServerContext *context,
     const crane::grpc::ExecuteTasksRequest *request,
     crane::grpc::ExecuteTasksReply *response) {
-  CRANE_TRACE("Default", "Requested from CraneCtld to execute {} tasks.",
+  CRANE_TRACE("default", "Requested from CraneCtld to execute {} tasks.",
               request->tasks_size());
 
   CraneErr err;
@@ -47,7 +47,7 @@ grpc::Status CranedServiceImpl::TerminateTasks(
     grpc::ServerContext *context,
     const crane::grpc::TerminateTasksRequest *request,
     crane::grpc::TerminateTasksReply *response) {
-  CRANE_TRACE("Default", "Receive TerminateTasks for tasks {}",
+  CRANE_TRACE("default", "Receive TerminateTasks for tasks {}",
               absl::StrJoin(request->task_id_list(), ","));
 
   for (task_id_t id : request->task_id_list())
@@ -71,7 +71,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
     grpc::ServerContext *context,
     const crane::grpc::QueryTaskIdFromPortRequest *request,
     crane::grpc::QueryTaskIdFromPortReply *response) {
-  CRANE_TRACE("Default", "Receive QueryTaskIdFromPort RPC from {}: port: {}",
+  CRANE_TRACE("default", "Receive QueryTaskIdFromPort RPC from {}: port: {}",
               context->peer(), request->port());
 
   ino_t inode;
@@ -82,7 +82,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
   inode_found =
       crane::FindTcpInodeByPort("/proc/net/tcp", request->port(), &inode);
   if (!inode_found) {
-    CRANE_TRACE("Default", 
+    CRANE_TRACE("default", 
         "Inode num for port {} is not found in /proc/net/tcp, try "
         "/proc/net/tcp6.",
         request->port());
@@ -91,7 +91,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
   }
 
   if (!inode_found) {
-    CRANE_TRACE("Default", "Inode num for port {} is not found.", request->port());
+    CRANE_TRACE("default", "Inode num for port {} is not found.", request->port());
     response->set_ok(false);
     return Status::OK;
   }
@@ -118,7 +118,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
         }
         if (statbuf.st_ino == inode) {
           pid_i = std::stoi(pid_s);
-          CRANE_TRACE("Default", "Pid for the process that owns port {} is {}",
+          CRANE_TRACE("default", "Pid for the process that owns port {} is {}",
                       request->port(), pid_i);
           break;
         }
@@ -129,7 +129,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
     }
   }
   if (pid_i == -1) {
-    CRANE_TRACE("Default", "Pid for the process that owns port {} is not found.",
+    CRANE_TRACE("default", "Pid for the process that owns port {} is not found.",
                 request->port());
     response->set_ok(false);
     return Status::OK;
@@ -140,7 +140,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
     std::optional<uint32_t> task_id_opt =
         g_task_mgr->QueryTaskIdFromPidAsync(pid_i);
     if (task_id_opt.has_value()) {
-      CRANE_TRACE("Default", "Task id for pid {} is #{}", pid_i, task_id_opt.value());
+      CRANE_TRACE("default", "Task id for pid {} is #{}", pid_i, task_id_opt.value());
       response->set_ok(true);
       response->set_task_id(task_id_opt.value());
       return Status::OK;
@@ -149,11 +149,11 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
       YAML::Node proc_details = YAML::LoadFile(proc_dir);
       if (proc_details["PPid"]) {
         pid_t ppid = std::stoi(proc_details["PPid"].as<std::string>());
-        CRANE_TRACE("Default", "Pid {} not found in TaskManager. Checking ppid {}", pid_i,
+        CRANE_TRACE("default", "Pid {} not found in TaskManager. Checking ppid {}", pid_i,
                     ppid);
         pid_i = ppid;
       } else {
-        CRANE_TRACE("Default", 
+        CRANE_TRACE("default", 
             "Pid {} not found in TaskManager. "
             "However ppid is 1. Break the loop.",
             pid_i);
@@ -180,13 +180,13 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
                     .task_id = task_id,
                     .res_in_node = std::move(res),
                     .execution_node = request->execution_node(i)};
-    CRANE_TRACE("Default", "Receive CreateCgroup for task #{}, uid {}", task_id, uid);
+    CRANE_TRACE("default", "Receive CreateCgroup for task #{}, uid {}", task_id, uid);
     cg_specs.emplace_back(std::move(spec));
   }
 
   bool ok = g_cg_mgr->CreateCgroups(std::move(cg_specs));
   if (!ok) {
-    CRANE_ERROR("Default", "Failed to create cgroups for some tasks.");
+    CRANE_ERROR("default", "Failed to create cgroups for some tasks.");
   }
 
   return Status::OK;
@@ -200,11 +200,11 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
     task_id_t task_id = request->task_id_list(i);
     uid_t uid = request->uid_list(i);
 
-    CRANE_DEBUG("Default", "Release Cgroup for task #{}", task_id);
+    CRANE_DEBUG("default", "Release Cgroup for task #{}", task_id);
 
     bool ok = g_cg_mgr->ReleaseCgroup(task_id, uid);
     if (!ok) {
-      CRANE_ERROR("Default", "Failed to release cgroup for task #{}, uid {}", task_id,
+      CRANE_ERROR("default", "Failed to release cgroup for task #{}, uid {}", task_id,
                   uid);
     }
   }
@@ -230,7 +230,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
   ipv6_t crane_addr6;
   if (ip_ver == 4 && crane::StrToIpv4(crane_addr, &crane_addr4)) {
     if (g_config.Ipv4ToCranedHostname.contains(crane_addr4)) {
-      CRANE_TRACE("Default", 
+      CRANE_TRACE("default", 
           "Receive QueryTaskIdFromPortForward from Pam module: "
           "ssh_remote_port: {}, ssh_remote_address: {}. "
           "This ssh comes from a CraneD node. uid: {}",
@@ -244,7 +244,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     }
   } else if (ip_ver == 6 && crane::StrToIpv6(crane_addr, &crane_addr6)) {
     if (g_config.Ipv6ToCranedHostname.contains(crane_addr6)) {
-      CRANE_TRACE("Default", 
+      CRANE_TRACE("default", 
           "Receive QueryTaskIdFromPortForward from Pam module: "
           "ssh_remote_port: {}, ssh_remote_address: {}. "
           "This ssh comes from a CraneD node. uid: {}",
@@ -254,7 +254,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
       remote_is_craned = true;
     }
   } else {
-    CRANE_ERROR("Default", 
+    CRANE_ERROR("default", 
         "Unknown ip version for address {} or error converting ip to uint",
         crane_addr);
     response->set_ok(false);
@@ -265,7 +265,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     // Not in the addresses of CraneD nodes. This ssh request comes from a user.
     // Check if the user's uid is running a task. If so, move it in to the
     // cgroup of his first task. If not so, reject this ssh request.
-    CRANE_TRACE("Default", 
+    CRANE_TRACE("default", 
         "Receive QueryTaskIdFromPortForward from Pam module: "
         "ssh_remote_port: {}, ssh_remote_address: {}. "
         "This ssh comes from a user machine. uid: {}",
@@ -287,13 +287,13 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     }
 
     if (ok) {
-      CRANE_TRACE("Default", "Remote address {} was resolved as {}",
+      CRANE_TRACE("default", "Remote address {} was resolved as {}",
                   request->ssh_remote_address(), remote_hostname);
 
       channel_of_remote_service = CreateTcpTlsChannelByHostname(
           remote_hostname, crane_port, g_config.ListenConf.TlsCerts);
     } else {
-      CRANE_ERROR("Default", "Failed to resolve remote address {}.",
+      CRANE_ERROR("default", "Failed to resolve remote address {}.",
                   request->ssh_remote_address());
     }
   } else {
@@ -302,7 +302,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
   }
 
   if (!channel_of_remote_service) {
-    CRANE_ERROR("Default", "Failed to create channel to {}.",
+    CRANE_ERROR("default", "Failed to create channel to {}.",
                 request->ssh_remote_address());
     response->set_ok(false);
     return Status::OK;
@@ -330,7 +330,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
   }
 
   if (!status_remote_service.ok()) {
-    CRANE_WARN("Default", "QueryTaskIdFromPort gRPC call failed: {}. Remote is craned: {}",
+    CRANE_WARN("default", "QueryTaskIdFromPort gRPC call failed: {}. Remote is craned: {}",
                status_remote_service.error_message(), remote_is_craned);
   }
 
@@ -338,7 +338,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     response->set_ok(true);
     response->set_task_id(reply_from_remote_service.task_id());
 
-    CRANE_TRACE("Default", 
+    CRANE_TRACE("default", 
         "ssh client with remote port {} belongs to task #{}. "
         "Moving this ssh session process into the task's cgroup",
         request->ssh_remote_port(), reply_from_remote_service.task_id());
@@ -347,7 +347,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     TaskInfoOfUid info{};
     ok = g_cg_mgr->QueryTaskInfoOfUidAsync(request->uid(), &info);
     if (ok) {
-      CRANE_TRACE("Default", 
+      CRANE_TRACE("default", 
           "Found a task #{} belonging to uid {}. "
           "This ssh session process is going to be moved into the task's "
           "cgroup",
@@ -355,7 +355,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
       response->set_task_id(info.first_task_id);
       response->set_ok(true);
     } else {
-      CRANE_TRACE("Default", 
+      CRANE_TRACE("default", 
           "This ssh session can't be moved into uid {}'s tasks. "
           "This uid has {} task(s) and cgroup found: {}. "
           "Reject this ssh request.",
@@ -370,13 +370,13 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
     grpc::ServerContext *context,
     const crane::grpc::MigrateSshProcToCgroupRequest *request,
     crane::grpc::MigrateSshProcToCgroupReply *response) {
-  CRANE_TRACE("Default", "Moving pid {} to cgroup of task #{}", request->pid(),
+  CRANE_TRACE("default", "Moving pid {} to cgroup of task #{}", request->pid(),
               request->task_id());
   bool ok =
       g_cg_mgr->MigrateProcToCgroupOfTask(request->pid(), request->task_id());
 
   if (!ok) {
-    CRANE_INFO("Default", "GrpcMigrateSshProcToCgroup failed on pid: {}, task #{}",
+    CRANE_INFO("default", "GrpcMigrateSshProcToCgroup failed on pid: {}, task #{}",
                request->pid(), request->task_id());
     response->set_ok(false);
   } else {
@@ -439,7 +439,7 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
         execution_node, g_config.ListenConf.CranedListenPort);
 
   if (!channel_of_remote_service) {
-    CRANE_ERROR("Default", "Failed to create channel to {}.", execution_node);
+    CRANE_ERROR("default", "Failed to create channel to {}.", execution_node);
     response->set_ok(false);
     return Status::OK;
   }
@@ -456,7 +456,7 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
       &context_of_remote_service, request_to_remote_service,
       &reply_from_remote_service);
   if (!status_remote_service.ok() || !reply_from_remote_service.ok()) {
-    CRANE_WARN("Default", 
+    CRANE_WARN("default", 
         "QueryTaskEnvVariables gRPC call failed: {}. Remote is craned: {}",
         status_remote_service.error_message(), execution_node);
     response->set_ok(false);
@@ -496,15 +496,15 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
   return Status::OK;
 }
 
-::grpc::Status CranedServiceImpl::SetCranedLoggerLevel(
+::grpc::Status CranedServiceImpl::SetCranedLoggingLevel(
     ::grpc::ServerContext* context,
-    const ::crane::grpc::SetCranedLoggerLevelRequest* request, 
-    ::crane::grpc::SetCranedLoggerLevelReply* response) {
+    const ::crane::grpc::SetCranedLoggingLevelRequest* request, 
+    ::crane::grpc::SetCranedLoggingLevelReply* response) {
   spdlog::level::level_enum level;
   if (!StrToLogLevel(request->log_level(), &level)) {
     response->set_ok(false);
     response->set_reason("level is illegal");
-    CRANE_WARN("Default", 
+    CRANE_WARN("default", 
         "craned logger {} level is illegal",
         request->logger(), level);
     return grpc::Status::OK;
@@ -513,7 +513,7 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
   if (logger_res.ok) {
       response->set_ok(true);
   } else {
-        CRANE_WARN("Default", 
+        CRANE_WARN("default", 
         "craned logger {} set level {} error",
         request->logger(), level);
     response->set_ok(false);
@@ -573,13 +573,13 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
-  CRANE_INFO("Default", "Craned is listening on [{}, {}:{}]",
+  CRANE_INFO("default", "Craned is listening on [{}, {}:{}]",
              listen_conf.UnixSocketListenAddr, craned_listen_addr,
              listen_conf.CranedListenPort);
 
   g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
     p_server->Shutdown();
-    CRANE_INFO("Default", "Grpc Server Shutdown() was called.");
+    CRANE_INFO("default", "Grpc Server Shutdown() was called.");
   });
 }
 

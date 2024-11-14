@@ -29,7 +29,7 @@ AccountManager::Result AccountManager::AddUser(User&& new_user) {
   if (new_user.account_to_attrs_map.size() != 1 ||
       new_user.account_to_attrs_map.begin()->first !=
           new_user.default_account) {
-    CRANE_ERROR("Default", "The added user does not comply with system rules");
+    CRANE_ERROR("default", "The added user does not comply with system rules");
     return Result{false, "Crane system error"};
   }
 
@@ -2121,7 +2121,7 @@ int AccountManager::DeleteAccountAllowedQosFromDBNoLock_(
     const std::string& name, const std::string& qos) {
   const Account* account = GetExistedAccountInfoNoLock_(name);
   if (!account) {
-    CRANE_ERROR("Default", 
+    CRANE_ERROR("default", 
         "Operating on a non-existent account '{}', please check this item in "
         "database and restart cranectld",
         name);
@@ -2165,7 +2165,7 @@ bool AccountManager::DeleteAccountAllowedQosFromMapNoLock_(
     const std::string& name, const std::string& qos) {
   const Account* account = GetExistedAccountInfoNoLock_(name);
   if (!account) {
-    CRANE_ERROR("Default", 
+    CRANE_ERROR("default", 
         "Operating on a non-existent account '{}', please check this item in "
         "database and restart cranectld",
         name);
@@ -2206,14 +2206,14 @@ bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromDBNoLock_(
     const std::string& qos) {
   const User* p = GetExistedUserInfoNoLock_(name);
   if (!p) {
-    CRANE_ERROR("Default", 
+    CRANE_ERROR("default", 
         "Operating on a non-existent user '{}', please check this item in "
         "database and restart cranectld",
         name);
     return false;
   }
   if (!p->account_to_attrs_map.contains(account)) {
-    CRANE_ERROR("Default", "User '{}' doesn't belong to account '{}'", name, account);
+    CRANE_ERROR("default", "User '{}' doesn't belong to account '{}'", name, account);
     return false;
   }
   User user(*p);
@@ -2245,14 +2245,14 @@ bool AccountManager::DeleteUserAllowedQosOfAllPartitionFromMapNoLock_(
     const std::string& qos) {
   const User* p = GetExistedUserInfoNoLock_(name);
   if (!p) {
-    CRANE_ERROR("Default", 
+    CRANE_ERROR("default", 
         "Operating on a non-existent user '{}', please check this item in "
         "database and restart cranectld",
         name);
     return false;
   }
   if (!p->account_to_attrs_map.contains(account)) {
-    CRANE_ERROR("Default", "User '{}' doesn't belong to account '{}'", name, account);
+    CRANE_ERROR("default", "User '{}' doesn't belong to account '{}'", name, account);
     return false;
   }
   User user(*p);
@@ -2281,7 +2281,7 @@ bool AccountManager::DeleteAccountAllowedPartitionFromDBNoLock_(
     const std::string& name, const std::string& partition) {
   const Account* account = GetExistedAccountInfoNoLock_(name);
   if (!account) {
-    CRANE_ERROR("Default", 
+    CRANE_ERROR("default", 
         "Operating on a non-existent account '{}', please check this item in "
         "database and restart cranectld",
         name);
@@ -2321,7 +2321,7 @@ bool AccountManager::DeleteAccountAllowedPartitionFromMapNoLock_(
     const std::string& name, const std::string& partition) {
   const Account* account = GetExistedAccountInfoNoLock_(name);
   if (!account) {
-    CRANE_ERROR("Default", 
+    CRANE_ERROR("default", 
         "Operating on a non-existent account '{}', please check this item in "
         "database and restart cranectld",
         name);

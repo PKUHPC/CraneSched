@@ -49,7 +49,7 @@ std::vector<task_id_t> CranedStub::ExecuteTasks(
 
   status = m_stub_->ExecuteTask(&context, request, &reply);
   if (!status.ok()) {
-    CRANE_DEBUG("CranedKeeper", "Execute RPC for Node {} returned with status not ok: {}",
+    CRANE_DEBUG("cranedkeeper", "Execute RPC for Node {} returned with status not ok: {}",
                 m_craned_id_, status.error_message());
 
     failed_task_ids.reserve(request.tasks_size());
@@ -77,7 +77,7 @@ CraneErr CranedStub::TerminateTasks(const std::vector<task_id_t> &task_ids) {
 
   status = m_stub_->TerminateTasks(&context, request, &reply);
   if (!status.ok()) {
-    CRANE_DEBUG("CranedKeeper", 
+    CRANE_DEBUG("cranedkeeper", 
         "TerminateRunningTask RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
     return CraneErr::kRpcFailure;
@@ -99,7 +99,7 @@ CraneErr CranedStub::TerminateOrphanedTask(task_id_t task_id) {
 
   status = m_stub_->TerminateOrphanedTask(&context, request, &reply);
   if (!status.ok()) {
-    CRANE_DEBUG("CranedKeeper", 
+    CRANE_DEBUG("cranedkeeper", 
         "TerminateOrphanedTask RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
     return CraneErr::kRpcFailure;
@@ -133,7 +133,7 @@ CraneErr CranedStub::CreateCgroupForTasks(
 
   status = m_stub_->CreateCgroupForTasks(&context, request, &reply);
   if (!status.ok()) {
-    CRANE_ERROR("CranedKeeper", 
+    CRANE_ERROR("cranedkeeper", 
         "CreateCgroupForTasks RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
     return CraneErr::kRpcFailure;
@@ -162,7 +162,7 @@ CraneErr CranedStub::ReleaseCgroupForTasks(
 
   status = m_stub_->ReleaseCgroupForTasks(&context, request, &reply);
   if (!status.ok()) {
-    CRANE_DEBUG("CranedKeeper", 
+    CRANE_DEBUG("cranedkeeper", 
         "ReleaseCgroupForTask gRPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
     return CraneErr::kRpcFailure;
@@ -185,7 +185,7 @@ CraneErr CranedStub::CheckTaskStatus(task_id_t task_id,
   grpc_status = m_stub_->CheckTaskStatus(&context, request, &reply);
 
   if (!grpc_status.ok()) {
-    CRANE_DEBUG("CranedKeeper", 
+    CRANE_DEBUG("cranedkeeper", 
         "CheckTaskStatus gRPC for Node {} returned with status not ok: {}",
         m_craned_id_, grpc_status.error_message());
     return CraneErr::kRpcFailure;
@@ -212,7 +212,7 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
   grpc_status = m_stub_->ChangeTaskTimeLimit(&context, request, &reply);
 
   if (!grpc_status.ok()) {
-    CRANE_ERROR("CranedKeeper", "ChangeTaskTimeLimitAsync to Craned {} failed: {} ",
+    CRANE_ERROR("cranedkeeper", "ChangeTaskTimeLimitAsync to Craned {} failed: {} ",
                 m_craned_id_, grpc_status.error_message());
     return CraneErr::kRpcFailure;
   }
@@ -222,23 +222,23 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
     return CraneErr::kGenericFailure;
 }
 
-CraneErr CranedStub::SetCranedLoggerLevel(const std::string& logger, const std::string& level, std::string& reason) {
-  using crane::grpc::SetCranedLoggerLevelRequest;
-  using crane::grpc::SetCranedLoggerLevelReply;
+CraneErr CranedStub::SetCranedLoggingLevel(const std::string& logger, const std::string& level, std::string& reason) {
+  using crane::grpc::SetCranedLoggingLevelRequest;
+  using crane::grpc::SetCranedLoggingLevelReply;
 
   ClientContext context;
   Status grpc_status;
 
-  SetCranedLoggerLevelRequest request;
-  SetCranedLoggerLevelReply reply;
+  SetCranedLoggingLevelRequest request;
+  SetCranedLoggingLevelReply reply;
 
   request.set_logger(logger);
   request.set_log_level(level);
 
-  grpc_status = m_stub_->SetCranedLoggerLevel(&context, request, &reply);
+  grpc_status = m_stub_->SetCranedLoggingLevel(&context, request, &reply);
   reason = reply.reason();
   if (!grpc_status.ok()) {
-    CRANE_ERROR("CranedKeeper", "Craned {} set logger failed: {}", m_craned_id_,
+    CRANE_ERROR("cranedkeeper", "Craned {} set logger failed: {}", m_craned_id_,
                 grpc_status.error_message());
 
     return CraneErr::kRpcFailure;
@@ -259,7 +259,7 @@ CraneErr CranedStub::QueryCranedRemoteMeta(CranedRemoteMeta *meta) {
 
   grpc_status = m_stub_->QueryCranedRemoteMeta(&context, request, &reply);
   if (!grpc_status.ok()) {
-    CRANE_ERROR("CranedKeeper", "QueryCranedMeta to Craned {} failed: {} ", m_craned_id_,
+    CRANE_ERROR("cranedkeeper", "QueryCranedMeta to Craned {} failed: {} ", m_craned_id_,
                 grpc_status.error_message());
     return CraneErr::kRpcFailure;
   }
@@ -379,7 +379,7 @@ CranedKeeper::~CranedKeeper() {
   for (auto &cq_thread : m_cq_thread_vec_) cq_thread.join();
   m_period_connect_thread_.join();
 
-  CRANE_TRACE("CranedKeeper", "CranedKeeper has been closed.");
+  CRANE_TRACE("cranedkeeper", "CranedKeeper has been closed.");
 }
 
 void CranedKeeper::Shutdown() {
@@ -409,7 +409,7 @@ void CranedKeeper::InitAndRegisterCraneds(
   WriterLock guard(&m_unavail_craned_set_mtx_);
 
   m_unavail_craned_set_.insert(craned_id_list.begin(), craned_id_list.end());
-  CRANE_TRACE("CranedKeeper", "Trying register all craneds...");
+  CRANE_TRACE("cranedkeeper", "Trying register all craneds...");
 }
 
 void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
@@ -456,7 +456,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
       if (next_tag) {
         // When cq is closed, do not register any more callbacks on it.
         if (!m_cq_closed_) {
-          // CRANE_TRACE("CranedKeeper", "Registering next tag {} for {}", tag->type,
+          // CRANE_TRACE("cranedkeeper", "Registering next tag {} for {}", tag->type,
           //            craned->m_craned_id_);
 
           auto deadline = std::chrono::system_clock::now();
@@ -469,7 +469,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
 
           craned->m_prev_channel_state_ = new_state;
 
-          // CRANE_TRACE("CranedKeeper", "Registering next tag {} for {}", next_tag->type,
+          // CRANE_TRACE("cranedkeeper", "Registering next tag {} for {}", next_tag->type,
           //            craned->m_craned_id_);
 
           util::lock_guard lock(m_cq_mtx_vec_[thread_id]);
@@ -480,7 +480,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
       } else {
         // END state of both state machine. Free the Craned client.
         if (tag->type == CqTag::kInitializingCraned) {
-          CRANE_TRACE("CranedKeeper", "Failed connect to {}. Waiting for its active connection",
+          CRANE_TRACE("cranedkeeper", "Failed connect to {}. Waiting for its active connection",
                       craned->m_craned_id_);
 
           // When deleting craned, the destructor will call
@@ -498,7 +498,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
           WriterLock lock(&m_connected_craned_mtx_);
           m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
         } else {
-          CRANE_ERROR("CranedKeeper", "Unknown tag type: {}", tag->type);
+          CRANE_ERROR("cranedkeeper", "Unknown tag type: {}", tag->type);
         }
       }
 
@@ -512,14 +512,14 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
 
 CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
     CranedStub *craned, grpc_connectivity_state new_state) {
-  // CRANE_TRACE("CranedKeeper", "Enter InitCranedStateMachine_");
+  // CRANE_TRACE("cranedkeeper", "Enter InitCranedStateMachine_");
 
   std::optional<CqTag::Type> next_tag_type;
 
   switch (new_state) {
   case GRPC_CHANNEL_READY: {
     {
-      CRANE_TRACE("CranedKeeper", "CONNECTING -> READY. New craned {} connected.",
+      CRANE_TRACE("cranedkeeper", "CONNECTING -> READY. New craned {} connected.",
                   craned->m_craned_id_);
 
       WriterLock lock(&m_connected_craned_mtx_);
@@ -551,14 +551,14 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
     else
       next_tag_type = std::nullopt;
 
-    CRANE_TRACE("CranedKeeper", "{} -> TRANSIENT_FAILURE({}/{}) -> CONNECTING/END",
+    CRANE_TRACE("cranedkeeper", "{} -> TRANSIENT_FAILURE({}/{}) -> CONNECTING/END",
                 craned->m_prev_channel_state_, craned->m_failure_retry_times_,
                 craned->s_maximum_retry_times_);
     break;
   }
 
   case GRPC_CHANNEL_SHUTDOWN: {
-    CRANE_WARN("CranedKeeper", "Unexpected InitializingCraned SHUTDOWN state!");
+    CRANE_WARN("cranedkeeper", "Unexpected InitializingCraned SHUTDOWN state!");
     next_tag_type = std::nullopt;
     break;
   }
@@ -567,12 +567,12 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
     if (craned->m_prev_channel_state_ == GRPC_CHANNEL_IDLE) {
       // prev    now
       // IDLE -> CONNECTING
-      // CRANE_TRACE("CranedKeeper", "IDLE -> CONNECTING");
+      // CRANE_TRACE("cranedkeeper", "IDLE -> CONNECTING");
       next_tag_type = CqTag::kInitializingCraned;
     } else {
       // prev    current       next
       // Any  -> CONNECTING -> CONNECTING
-      CRANE_TRACE("CranedKeeper", "{} -> CONNECTING -> CONNECTING",
+      CRANE_TRACE("cranedkeeper", "{} -> CONNECTING -> CONNECTING",
                   craned->m_prev_channel_state_);
       next_tag_type = CqTag::kInitializingCraned;
     }
@@ -582,11 +582,11 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
   case GRPC_CHANNEL_IDLE:
     // InitializingCraned: BEGIN -> IDLE state switching is handled in
     // CranedKeeper::RegisterNewCraneds. Execution should never reach here.
-    CRANE_ERROR("CranedKeeper", "Unexpected InitializingCraned IDLE state!");
+    CRANE_ERROR("cranedkeeper", "Unexpected InitializingCraned IDLE state!");
     break;
   }
 
-  // CRANE_TRACE("CranedKeeper", "Exit InitCranedStateMachine_");
+  // CRANE_TRACE("cranedkeeper", "Exit InitCranedStateMachine_");
   if (next_tag_type.has_value()) {
     return m_tag_sync_allocator_->new_object<CqTag>(
         CqTag{next_tag_type.value(), craned});
@@ -597,7 +597,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
 
 CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     CranedStub *craned, grpc_connectivity_state new_state) {
-  // CRANE_TRACE("CranedKeeper", "Enter EstablishedCranedStateMachine_");
+  // CRANE_TRACE("cranedkeeper", "Enter EstablishedCranedStateMachine_");
 
   std::optional<CqTag::Type> next_tag_type;
 
@@ -606,12 +606,12 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     if (craned->m_prev_channel_state_ == GRPC_CHANNEL_CONNECTING) {
       // prev          current       next
       // CONNECTING -> CONNECTING -> END
-      CRANE_TRACE("CranedKeeper", "CONNECTING -> CONNECTING -> END");
+      CRANE_TRACE("cranedkeeper", "CONNECTING -> CONNECTING -> END");
       next_tag_type = std::nullopt;
     } else {
       // prev    now
       // IDLE -> CONNECTING
-      CRANE_TRACE("CranedKeeper", "IDLE -> CONNECTING");
+      CRANE_TRACE("cranedkeeper", "IDLE -> CONNECTING");
       next_tag_type = CqTag::kEstablishedCraned;
     }
     break;
@@ -621,7 +621,7 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     // prev     current
     // READY -> IDLE (the only edge)
 
-    // CRANE_TRACE("CranedKeeper", "READY -> IDLE");
+    // CRANE_TRACE("cranedkeeper", "READY -> IDLE");
     craned->m_invalid_ = true;
 
     next_tag_type = CqTag::kEstablishedCraned;
@@ -650,12 +650,12 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
   }
 
   if (next_tag_type.has_value()) {
-    // CRANE_TRACE("CranedKeeper", "Exit EstablishedCranedStateMachine_");
+    // CRANE_TRACE("cranedkeeper", "Exit EstablishedCranedStateMachine_");
     return m_tag_sync_allocator_->new_object<CqTag>(
         CqTag{next_tag_type.value(), craned});
   }
 
-  // CRANE_TRACE("CranedKeeper", "Exit EstablishedCranedStateMachine_");
+  // CRANE_TRACE("cranedkeeper", "Exit EstablishedCranedStateMachine_");
   return nullptr;
 }
 
@@ -714,7 +714,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
     } else {
       // Just hostname. It should never happen,
       // but we add error handling here for robustness.
-      CRANE_ERROR("CranedKeeper", "Unresolved hostname: {}", craned_id);
+      CRANE_ERROR("cranedkeeper", "Unresolved hostname: {}", craned_id);
       ip_addr = craned_id;
     }
   }
@@ -734,7 +734,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  CRANE_TRACE("CranedKeeper", "Creating a channel to {} {}:{}. Channel count: {}", craned_id,
+  CRANE_TRACE("cranedkeeper", "Creating a channel to {} {}:{}. Channel count: {}", craned_id,
               ip_addr, kCranedDefaultPort, m_channel_count_.fetch_add(1) + 1);
 
   if (g_config.ListenConf.UseTls) {

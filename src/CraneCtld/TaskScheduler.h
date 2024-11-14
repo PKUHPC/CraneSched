@@ -26,7 +26,6 @@
 #include "crane/Lock.h"
 #include "protos/Crane.pb.h"
 
-
 namespace Ctld {
 
 using OrderedTaskMap = absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>;

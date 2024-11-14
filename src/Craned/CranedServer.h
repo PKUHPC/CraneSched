@@ -102,10 +102,10 @@ class CranedServiceImpl : public Craned::Service {
       const crane::grpc::ChangeTaskTimeLimitRequest *request,
       crane::grpc::ChangeTaskTimeLimitReply *response) override;
 
-  ::grpc::Status SetCranedLoggerLevel(
+  ::grpc::Status SetCranedLoggingLevel(
       ::grpc::ServerContext* context,
-      const ::crane::grpc::SetCranedLoggerLevelRequest* request, 
-      ::crane::grpc::SetCranedLoggerLevelReply* response) override;
+      const ::crane::grpc::SetCranedLoggingLevelRequest* request, 
+      ::crane::grpc::SetCranedLoggingLevelReply* response) override;
 
   grpc::Status QueryCranedRemoteMeta(
       grpc::ServerContext *context,

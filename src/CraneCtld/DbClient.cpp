@@ -37,13 +37,13 @@ bool MongodbClient::Connect() {
 
     if (std::find(database_name.begin(), database_name.end(), m_db_name_) ==
         database_name.end()) {
-      CRANE_INFO("Default", 
+      CRANE_INFO("default", 
           "Mongodb: database {} is not existed, crane will create the new "
           "database.",
           m_db_name_);
     }
   } catch (const mongocxx::exception& e) {
-    CRANE_CRITICAL("Default", e.what());
+    CRANE_CRITICAL("default", e.what());
     return false;
   }
 
@@ -53,7 +53,7 @@ bool MongodbClient::Connect() {
 bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
   Qos qos;
   if (!SelectQos("name", kUnlimitedQosName, &qos)) {
-    CRANE_TRACE("Default", "Default Qos {} not found, crane will create it",
+    CRANE_TRACE("default", "Default Qos {} not found, crane will create it",
                 kUnlimitedQosName);
 
     qos.name = kUnlimitedQosName;
@@ -71,14 +71,14 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     qos.reference_count = 1;
 
     if (!InsertQos(qos)) {
-      CRANE_ERROR("Default", "Failed to insert default qos {}!", kUnlimitedQosName);
+      CRANE_ERROR("default", "Failed to insert default qos {}!", kUnlimitedQosName);
       return false;
     }
   }
 
   Account root_account;
   if (!SelectAccount("name", "ROOT", &root_account)) {
-    CRANE_TRACE("Default", "Default account ROOT not found. insert ROOT account into DB.");
+    CRANE_TRACE("default", "Default account ROOT not found. insert ROOT account into DB.");
 
     root_account.name = "ROOT";
     root_account.description = "Crane default account for root user";
@@ -87,14 +87,14 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     root_account.users.emplace_back("root");
 
     if (!InsertAccount(root_account)) {
-      CRANE_ERROR("Default", "Failed to insert default ROOT account!");
+      CRANE_ERROR("default", "Failed to insert default ROOT account!");
       return false;
     }
   }
 
   User root_user;
   if (!SelectUser("uid", 0, &root_user)) {
-    CRANE_TRACE("Default", "Default user ROOT not found. Insert it into DB.");
+    CRANE_TRACE("default", "Default user ROOT not found. Insert it into DB.");
 
     root_user.name = "root";
     root_user.default_account = "ROOT";
@@ -104,7 +104,7 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
         User::AttrsInAccount{User::PartToAllowedQosMap{}, false};
 
     if (!InsertUser(root_user)) {
-      CRANE_ERROR("Default", "Failed to insert default user ROOT!");
+      CRANE_ERROR("default", "Failed to insert default user ROOT!");
       return false;
     }
   }
@@ -547,7 +547,7 @@ bool MongodbClient::CommitTransaction(
     opts.read_preference(m_rp_primary_);
     GetSession_()->with_transaction(callback, opts);
   } catch (const mongocxx::exception& e) {
-    CRANE_ERROR("Default", "Database transaction failed: {}", e.what());
+    CRANE_ERROR("default", "Database transaction failed: {}", e.what());
     return false;
   }
   return true;
@@ -971,7 +971,7 @@ MongodbClient::MongodbClient() {
   m_connect_uri_ = fmt::format(
       "mongodb://{}{}:{}/?replicaSet={}&maxPoolSize=1000", authentication,
       g_config.DbHost, g_config.DbPort, g_config.DbRSName);
-  CRANE_TRACE("Default", "Mongodb connect uri: {}", m_connect_uri_);
+  CRANE_TRACE("default", "Mongodb connect uri: {}", m_connect_uri_);
   m_wc_majority_.acknowledge_level(mongocxx::write_concern::level::k_majority);
   m_rc_local_.acknowledge_level(mongocxx::read_concern::level::k_local);
   m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);

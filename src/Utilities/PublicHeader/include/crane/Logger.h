@@ -159,7 +159,7 @@
 #  define CRANE_ASSERT_MSG_VA(condition, message, ...)                    \
     do {                                                                  \
       if (!(condition)) {                                                 \
-        CRANE_CRITICAL("Default", "Assertion failed: \"" #condition "\": " #message, \
+        CRANE_CRITICAL("default", "Assertion failed: \"" #condition "\": " #message, \
                        __VA_ARGS__);                                      \
         std::terminate();                                                 \
       }                                                                   \
@@ -168,7 +168,7 @@
 #  define CRANE_ASSERT_MSG(condition, message)                             \
     do {                                                                   \
       if (!(condition)) {                                                  \
-        CRANE_CRITICAL("Default", "Assertion failed: \"" #condition "\": " #message); \
+        CRANE_CRITICAL("default", "Assertion failed: \"" #condition "\": " #message); \
         std::terminate();                                                  \
       }                                                                    \
     } while (false)
@@ -176,7 +176,7 @@
 #  define CRANE_ASSERT(condition)                               \
     do {                                                        \
       if (!(condition)) {                                       \
-        CRANE_CRITICAL("Default", "Assertion failed: \"" #condition "\""); \
+        CRANE_CRITICAL("default", "Assertion failed: \"" #condition "\""); \
         std::terminate();                                       \
       }                                                         \
     } while (false)

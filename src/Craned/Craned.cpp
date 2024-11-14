@@ -65,7 +65,7 @@ void ParseConfig(int argc, char** argv) {
   try {
     parsed_args = options.parse(argc, argv);
   } catch (cxxopts::OptionException& e) {
-    CRANE_ERROR("Default", "{}\n{}", e.what(), options.help());
+    CRANE_ERROR("default", "{}\n{}", e.what(), options.help());
     std::exit(1);
   }
 
@@ -104,15 +104,18 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.CranedLogFile = g_config.CraneBaseDir + kDefaultCranedLogPath;
 
+      // spdlog should be initialized as soon as possible
       if (config["Logger"] && config["Logger"].IsMap()) {
           const auto& cranedNode = config["Logger"]["Craned"];
           if (cranedNode && cranedNode.IsMap()) {
             for (const auto& levelNode : cranedNode) {
               std::string componentName = levelNode.first.as<std::string>();
               std::string strLevel = levelNode.second.as<std::string>();
+              std::transform(componentName.begin(), componentName.end(), componentName.begin(),
+                    [](unsigned char c) { return std::tolower(c); });
               spdlog::level::level_enum level;
               if (StrToLogLevel(strLevel, &level)) {
-                  g_config.logLevels[componentName] = level;
+                  g_config.LogLevels[componentName] = level;
               } else {
                   fmt::print(stderr, "Logger {} level {} is illegal.\n", componentName, strLevel);
                   std::exit(1);
@@ -121,7 +124,7 @@ void ParseConfig(int argc, char** argv) {
           }
         }
 
-      InitLogger(g_config.logLevels, g_config.CranedLogFile);
+      InitLogger(g_config.LogLevels, g_config.CranedLogFile);
 
       if (config["CranedUnixSockPath"])
         g_config.CranedUnixSockPath =
@@ -184,16 +187,16 @@ void ParseConfig(int argc, char** argv) {
             tls_certs.ServerCertContent =
                 util::ReadFileIntoString(tls_certs.ServerCertFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Default", "Read cert file error: {}", e.what());
+            CRANE_ERROR("default", "Read cert file error: {}", e.what());
             std::exit(1);
           }
           if (tls_certs.ServerCertContent.empty()) {
-            CRANE_ERROR("Default", 
+            CRANE_ERROR("default", 
                 "UseTls is true, but the file specified by ServerCertFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("Default", "UseTls is true, but ServerCertFilePath is empty");
+          CRANE_ERROR("default", "UseTls is true, but ServerCertFilePath is empty");
           std::exit(1);
         }
 
@@ -205,16 +208,16 @@ void ParseConfig(int argc, char** argv) {
             tls_certs.ServerKeyContent =
                 util::ReadFileIntoString(tls_certs.ServerKeyFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Default", "Read cert file error: {}", e.what());
+            CRANE_ERROR("default", "Read cert file error: {}", e.what());
             std::exit(1);
           }
           if (tls_certs.ServerKeyContent.empty()) {
-            CRANE_ERROR("Default", 
+            CRANE_ERROR("default", 
                 "UseTls is true, but the file specified by ServerKeyFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("Default", "UseTls is true, but ServerKeyFilePath is empty");
+          CRANE_ERROR("default", "UseTls is true, but ServerKeyFilePath is empty");
           std::exit(1);
         }
       } else {
@@ -240,10 +243,10 @@ void ParseConfig(int argc, char** argv) {
 
           if (node["name"]) {
             if (!util::ParseHostList(node["name"].Scalar(), &name_list)) {
-              CRANE_ERROR("Default", "Illegal node name string format.");
+              CRANE_ERROR("default", "Illegal node name string format.");
               std::exit(1);
             }
-            CRANE_TRACE("Default", "node name list parsed: {}",
+            CRANE_TRACE("default", "node name list parsed: {}",
                         fmt::join(name_list, ", "));
           } else
             std::exit(1);
@@ -259,7 +262,7 @@ void ParseConfig(int argc, char** argv) {
             std::regex mem_regex(R"((\d+)([KMBG]))");
             std::smatch mem_group;
             if (!std::regex_search(memory, mem_group, mem_regex)) {
-              CRANE_ERROR("Default", "Illegal memory format.");
+              CRANE_ERROR("default", "Illegal memory format.");
               std::exit(1);
             }
 
@@ -296,7 +299,7 @@ void ParseConfig(int argc, char** argv) {
                 std::list<std::string> device_path_list;
                 if (!util::ParseHostList(gres_node["DeviceFileRegex"].Scalar(),
                                          &device_path_list)) {
-                  CRANE_ERROR("Default", 
+                  CRANE_ERROR("default", 
                       "Illegal gres {}:{} DeviceFileRegex path string format.",
                       device_name, device_type);
                   std::exit(1);
@@ -315,7 +318,7 @@ void ParseConfig(int argc, char** argv) {
                          .as<std::vector<std::string>>()) {
                   std::list<std::string> device_path_list;
                   if (!util::ParseHostList(file_regex, &device_path_list)) {
-                    CRANE_ERROR("Default", 
+                    CRANE_ERROR("default", 
                         "Illegal gres {}:{} DeviceFileList path string format.",
                         device_name, device_type);
                     std::exit(1);
@@ -328,7 +331,7 @@ void ParseConfig(int argc, char** argv) {
                 }
               }
               if (!device_file_configured) {
-                CRANE_ERROR("Default", 
+                CRANE_ERROR("default", 
                     "gres {}:{} device DeviceFileRegex or DeviceFileList not "
                     "configured",
                     device_name, device_type);
@@ -348,20 +351,20 @@ void ParseConfig(int argc, char** argv) {
               bool ip_resolved = false;
               if (crane::ResolveIpv4FromHostname(name, &ipv4)) {
                 g_config.Ipv4ToCranedHostname[ipv4] = name;
-                CRANE_INFO("Default", "Resolve hostname `{}` to `{}`", name,
+                CRANE_INFO("default", "Resolve hostname `{}` to `{}`", name,
                            crane::Ipv4ToStr(ipv4));
                 ip_resolved = true;
               }
 
               if (crane::ResolveIpv6FromHostname(name, &ipv6)) {
                 g_config.Ipv6ToCranedHostname[ipv6] = name;
-                CRANE_INFO("Default", "Resolve hostname `{}` to `{}`", name,
+                CRANE_INFO("default", "Resolve hostname `{}` to `{}`", name,
                            crane::Ipv6ToStr(ipv6));
                 ip_resolved = true;
               }
 
               if (!ip_resolved) {
-                CRANE_ERROR("Default", "Init error: Cannot resolve hostname of `{}`",
+                CRANE_ERROR("default", "Init error: Cannot resolve hostname of `{}`",
                             name);
                 std::exit(1);
               }
@@ -369,7 +372,7 @@ void ParseConfig(int argc, char** argv) {
             }
 
             case 4: {
-              CRANE_INFO("Default", 
+              CRANE_INFO("default", 
                   "Node name `{}` is a valid ipv4 address and doesn't "
                   "need resolving.",
                   name);
@@ -381,7 +384,7 @@ void ParseConfig(int argc, char** argv) {
             }
 
             case 6: {
-              CRANE_INFO("Default", 
+              CRANE_INFO("default", 
                   "Node name `{}` is a valid ipv6 address and doesn't "
                   "need resolving.",
                   name);
@@ -420,7 +423,7 @@ void ParseConfig(int argc, char** argv) {
 
           std::list<std::string> name_list;
           if (!util::ParseHostList(nodes, &name_list)) {
-            CRANE_ERROR("Default", "Illegal node name string format.");
+            CRANE_ERROR("default", "Illegal node name string format.");
             std::exit(1);
           }
 
@@ -430,9 +433,9 @@ void ParseConfig(int argc, char** argv) {
             auto node_it = g_config.CranedRes.find(node_s);
             if (node_it != g_config.CranedRes.end()) {
               part.nodes.emplace(node_it->first);
-              CRANE_INFO("Default", "Find node {} in partition {}", node_it->first, name);
+              CRANE_INFO("default", "Find node {} in partition {}", node_it->first, name);
             } else {
-              CRANE_ERROR("Default", 
+              CRANE_ERROR("default", 
                   "Unknown node '{}' found in partition '{}'. It is ignored "
                   "and should be contained in the configuration file.",
                   node, name);
@@ -468,12 +471,12 @@ void ParseConfig(int argc, char** argv) {
         }
       }
     } catch (YAML::BadFile& e) {
-      CRANE_CRITICAL("Default", "Can't open config file {}: {}", kDefaultConfigPath,
+      CRANE_CRITICAL("default", "Can't open config file {}: {}", kDefaultConfigPath,
                      e.what());
       std::exit(1);
     }
   } else {
-    CRANE_CRITICAL("Default", "Config file '{}' not existed", config_path);
+    CRANE_CRITICAL("default", "Config file '{}' not existed", config_path);
     std::exit(1);
   }
 
@@ -485,7 +488,7 @@ void ParseConfig(int argc, char** argv) {
 
   if (parsed_args.count("server-address") == 0) {
     if (g_config.ControlMachine.empty()) {
-      CRANE_CRITICAL("Default", 
+      CRANE_CRITICAL("default", 
           "CraneCtld address must be specified in command line or config "
           "file.\n{}",
           options.help());
@@ -496,32 +499,32 @@ void ParseConfig(int argc, char** argv) {
   }
 
   if (crane::GetIpAddrVer(g_config.ListenConf.CranedListenAddr) == -1) {
-    CRANE_ERROR("Default", "Listening address is invalid.");
+    CRANE_ERROR("default", "Listening address is invalid.");
     std::exit(1);
   }
 
   std::regex regex_port(R"(^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|)"
                         R"(65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$)");
   if (!std::regex_match(g_config.ListenConf.CranedListenPort, regex_port)) {
-    CRANE_ERROR("Default", "Listening port is invalid.");
+    CRANE_ERROR("default", "Listening port is invalid.");
     std::exit(1);
   }
 
   char hostname[HOST_NAME_MAX + 1];
   int r = gethostname(hostname, HOST_NAME_MAX + 1);
   if (r != 0) {
-    CRANE_ERROR("Default", "Error: get hostname.");
+    CRANE_ERROR("default", "Error: get hostname.");
     std::exit(1);
   }
   g_config.Hostname.assign(hostname);
 
   if (!g_config.CranedRes.contains(g_config.Hostname)) {
-    CRANE_ERROR("Default", "This machine {} is not contained in Nodes!",
+    CRANE_ERROR("default", "This machine {} is not contained in Nodes!",
                 g_config.Hostname);
     std::exit(1);
   }
 
-  CRANE_INFO("Default", "Found this machine {} in Nodes", g_config.Hostname);
+  CRANE_INFO("default", "Found this machine {} in Nodes", g_config.Hostname);
   // get this node device info
   // Todo: Auto detect device
   {
@@ -534,7 +537,7 @@ void ParseConfig(int argc, char** argv) {
       std::unique_ptr dev = Craned::DeviceManager::ConstructDevice(
           name, type, path, env_injector);
       if (!dev->Init()) {
-        CRANE_ERROR("Default", "Access Device {} failed.", static_cast<std::string>(*dev));
+        CRANE_ERROR("default", "Access Device {} failed.", static_cast<std::string>(*dev));
         std::exit(1);
       } else {
         dev->dev_id = dev->device_metas.front().path;
@@ -551,23 +554,23 @@ void ParseConfig(int argc, char** argv) {
   for (const auto& par : g_config.Partitions) {
     if (par.second.nodes.contains(g_config.Hostname)) {
       part_name = par.first;
-      CRANE_INFO("Default", "Found this machine {} in partition {}", g_config.Hostname,
+      CRANE_INFO("default", "Found this machine {} in partition {}", g_config.Hostname,
                  par.first);
       break;
     }
   }
   if (part_name.empty()) {
-    CRANE_ERROR("Default", "This machine {} doesn't belong to any partition",
+    CRANE_ERROR("default", "This machine {} doesn't belong to any partition",
                 g_config.Hostname);
     std::exit(1);
   }
 
   g_config.CranedIdOfThisNode = g_config.Hostname;
-  CRANE_INFO("Default", "CranedId of this machine: {}", g_config.CranedIdOfThisNode);
+  CRANE_INFO("default", "CranedId of this machine: {}", g_config.CranedIdOfThisNode);
 
   auto& meta = g_config.CranedMeta;
   if (bool ok = util::os::GetSystemReleaseInfo(&meta.SysInfo); !ok) {
-    CRANE_ERROR("Default", "Error when get system release info");
+    CRANE_ERROR("default", "Error when get system release info");
   }
 
   g_config.CranedMeta.CranedStartTime = absl::Now();
@@ -602,7 +605,7 @@ void GlobalVariableInit() {
   if (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
       !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER) ||
       !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER)) {
-    CRANE_ERROR("Default", "Failed to initialize cpu,memory,devices cgroups controller.");
+    CRANE_ERROR("default", "Failed to initialize cpu,memory,devices cgroups controller.");
     std::exit(1);
   }
 
@@ -617,7 +620,7 @@ void GlobalVariableInit() {
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
 
   if (g_config.Plugin.Enabled) {
-    CRANE_INFO("Default", "[Plugin] Plugin module is enabled.");
+    CRANE_INFO("default", "[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
@@ -629,7 +632,7 @@ void GlobalVariableInit() {
 void StartServer() {
   constexpr uint64_t file_max = 640000;
   if (!util::os::SetMaxFileDescriptorNumber(file_max)) {
-    CRANE_ERROR("Default", "Unable to set file descriptor limits to {}", file_max);
+    CRANE_ERROR("default", "Unable to set file descriptor limits to {}", file_max);
     std::exit(1);
   }
 
@@ -665,7 +668,7 @@ void StartDaemon() {
   /* Fork off the parent process */
   pid = fork();
   if (pid < 0) {
-    CRANE_ERROR("Default", "Error: fork()");
+    CRANE_ERROR("default", "Error: fork()");
     exit(1);
   }
   /* If we got a good PID, then
@@ -683,13 +686,13 @@ void StartDaemon() {
   sid = setsid();
   if (sid < 0) {
     /* Log the failure */
-    CRANE_ERROR("Default", "Error: setsid()");
+    CRANE_ERROR("default", "Error: setsid()");
     exit(1);
   }
 
   /* Change the current working directory */
   if ((chdir("/")) < 0) {
-    CRANE_ERROR("Default", "Error: chdir()");
+    CRANE_ERROR("default", "Error: chdir()");
     /* Log the failure */
     exit(1);
   }
@@ -714,10 +717,10 @@ void CheckSingleton() {
   int rc = flock(pid_file, LOCK_EX | LOCK_NB);
   if (rc) {
     if (EWOULDBLOCK == errno) {
-      CRANE_CRITICAL("Default", "There is another Craned instance running. Exiting...");
+      CRANE_CRITICAL("default", "There is another Craned instance running. Exiting...");
       std::exit(1);
     } else {
-      CRANE_CRITICAL("Default", "Failed to lock {}: {}. Exiting...",
+      CRANE_CRITICAL("default", "Failed to lock {}: {}. Exiting...",
                      g_config.CranedMutexFilePath, strerror(errno));
       std::exit(1);
     }
@@ -727,7 +730,7 @@ void CheckSingleton() {
 void InstallStackTraceHooks() {
   static backward::SignalHandling sh;
   if (!sh.loaded()) {
-    CRANE_ERROR("Default", "Failed to install stacktrace hooks.");
+    CRANE_ERROR("default", "Failed to install stacktrace hooks.");
     std::exit(1);
   }
 }
