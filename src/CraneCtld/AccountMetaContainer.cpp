@@ -19,36 +19,81 @@
 #include "AccountMetaContainer.h"
 
 #include <cstdint>
+#include <string>
 
+#include "AccountManager.h"
 #include "CtldPublicDefs.h"
 
 namespace Ctld {
 
 AccountMetaContainer::UserResourceMetaPtr
 AccountMetaContainer::GetUserResourceMetaPtr(const std::string& username) {
-  return user_mate_map_.GetValueExclusivePtr(username);
+  return user_meta_map_.GetValueExclusivePtr(username);
 }
 
 AccountMetaContainer::UserResourceMetaMapConstPtr
 AccountMetaContainer::GetUserResourceMetaMapConstPtr() {
-  return user_mate_map_.GetMapConstSharedPtr();
+  return user_meta_map_.GetMapConstSharedPtr();
 }
 
+void AccountMetaContainer::InitFromDB() {
+  HashMap<std::string, UserResourceMeta> user_meta_map;
+
+  AccountManager::UserMapMutexSharedPtr all_user =
+      g_account_manager->GetAllUserInfo();
+  for (const auto& [username, user] : *all_user) {
+    UserResourceMeta::QosToQosResourceMap qos_resource_map;
+    for (const auto& [account, attrs_in_account] : user->account_to_attrs_map) {
+      for (const auto& [part, qos_list] :
+           attrs_in_account.allowed_partition_qos_map) {
+        // TODO:初始化
+        for (const auto& qos_name : qos_list.second) {
+          AccountManager::QosMutexSharedPtr qos =
+              g_account_manager->GetExistedQosInfo(qos_name);
+          QosResource qos_resource =
+              QosResource{qos->max_cpus_per_user, qos->max_jobs_per_user};
+          qos_resource_map.emplace(
+              qos_name,
+              QosResourceLimit{qos_resource, qos_resource, QosResource{}});
+        }
+      }
+    }
+    user_meta_map.emplace(username, qos_resource_map);
+  }
+  user_meta_map_.InitFromMap(std::move(user_meta_map));
+}
+
+// TODO: 优化 传入resourcelist，只加一次锁
 void AccountMetaContainer::MallocQosResourceToUser(
     const std::string& username, const std::string& qos_name,
     const QosResource& qos_resource) {
-  // auto user_meta_map_ptr = user_mate_map_.GetMapExclusivePtr();
-  // if (!user_meta_map_ptr->contains(username)) {
-  //   user_meta_map_ptr->emplace(username, UserResourceMeta{});
-  // }
-  auto user_meta = user_mate_map_[username];
+  {
+    auto user_meta_map_ptr = user_meta_map_.GetMapExclusivePtr();
+    if (!user_meta_map_ptr->contains(username)) {
+      user_meta_map_ptr->emplace(username, UserResourceMeta{});
+    }
+  }
+
+  auto user_meta = user_meta_map_[username];
   user_meta->qos_to_resource_map[qos_name] =
-      QosResourceLimit{qos_resource, QosResource{}, QosResource{}};
+      QosResourceLimit{qos_resource, qos_resource, QosResource{}};
 }
 
-void AccountMetaContainer::FreeQosResourceToUser(const std::string& username,
-                                                 const TaskInCtld& task) {
-  auto user_meta = user_mate_map_[username];
+void AccountMetaContainer::FreeQosResourceOnUser(
+    const std::string& username, const std::list<std::string>& qos_list) {
+  auto user_meta = user_meta_map_[username];
+
+  for (const auto& qos_name : qos_list)
+    user_meta->qos_to_resource_map.erase(qos_name);
+}
+
+void AccountMetaContainer::EraseQosResourceOnUser(const std::string& username) {
+  user_meta_map_.Erase(username);
+}
+
+void AccountMetaContainer::FreeQosLimitOnUser(const std::string& username,
+                                              const TaskInCtld& task) {
+  auto user_meta = user_meta_map_[username];
   auto qos_resource = user_meta->qos_to_resource_map[task.qos];
 
   uint32_t cpus_per_task = static_cast<uint32_t>(task.cpus_per_task);
@@ -61,7 +106,7 @@ void AccountMetaContainer::FreeQosResourceToUser(const std::string& username,
 
 bool AccountMetaContainer::CheckAndApplyQosLimitOnUser(
     const std::string& username, const TaskInCtld& task) {
-  auto user_meta = user_mate_map_[username];
+  auto user_meta = user_meta_map_[username];
   uint32_t cpus_per_task = static_cast<uint32_t>(task.cpus_per_task);
   auto qos_resource = user_meta->qos_to_resource_map[task.qos];
   if (qos_resource.res_avail.jobs_per_user == 0 ||
