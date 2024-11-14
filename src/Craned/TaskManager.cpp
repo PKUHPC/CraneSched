@@ -21,6 +21,7 @@
 #include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
+#include <pty.h>
 #include <sys/wait.h>
 
 #include "CforedClient.h"
@@ -102,7 +103,9 @@ TaskManager::TaskManager() {
 
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
   m_sigchld_handle_->on<uvw::signal_event>(
-      [this](const uvw::signal_event&, uvw::signal_handle&) { EvSigchldCb_(); });
+      [this](const uvw::signal_event&, uvw::signal_handle&) {
+        EvSigchldCb_();
+      });
 
   if (m_sigchld_handle_->start(SIGCLD) != 0) {
     CRANE_ERROR("Failed to start the SIGCLD handle");
@@ -539,26 +542,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     return CraneErr::kSystemErr;
   }
 
-  // Create IO socket pair for crun tasks.
-  if (instance->IsCrun()) {
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, io_in_sock_pair) != 0) {
-      CRANE_ERROR("Failed to create socket pair for task io forward: {}",
-                  strerror(errno));
-      return CraneErr::kSystemErr;
-    }
-
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, io_out_sock_pair) != 0) {
-      CRANE_ERROR("Failed to create socket pair for task io forward: {}",
-                  strerror(errno));
-      return CraneErr::kSystemErr;
-    }
-
-    auto* crun_meta =
-        dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
-    crun_meta->proc_in_fd = io_in_sock_pair[0];
-    crun_meta->proc_out_fd = io_out_sock_pair[0];
-  }
-
   // save the current uid/gid
   SavedPrivilege saved_priv{getuid(), getgid()};
 
@@ -575,7 +558,15 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     return CraneErr::kSystemErr;
   }
 
-  pid_t child_pid = fork();
+  pid_t child_pid;
+
+  if (instance->IsCrun()) {
+    auto* crun_meta =
+        dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
+    child_pid = forkpty(&crun_meta->msg_fd, NULL, NULL, NULL);
+  } else {
+    child_pid = fork();
+  }
   if (child_pid == -1) {
     CRANE_ERROR("fork() failed for task #{}: {}", instance->task.task_id(),
                 strerror(errno));
@@ -591,7 +582,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
       g_cfored_manager->RegisterIOForward(
           instance->task.interactive_meta().cfored_name(),
-          instance->task.task_id(), meta->proc_in_fd, meta->proc_out_fd);
+          instance->task.task_id(), meta->msg_fd);
     }
 
     int ctrl_fd = ctrl_sock_pair[0];

@@ -18,6 +18,8 @@
 
 #include "CforedClient.h"
 
+#include <cerrno>
+
 #include "crane/String.h"
 namespace Craned {
 
@@ -343,12 +345,8 @@ void CforedManager::EvLoopThread_(const std::shared_ptr<uvw::loop>& uvw_loop) {
 }
 
 void CforedManager::RegisterIOForward(std::string const& cfored,
-                                      task_id_t task_id, int in_fd,
-                                      int out_fd) {
-  RegisterElem elem{.cfored = cfored,
-                    .task_id = task_id,
-                    .in_fd = in_fd,
-                    .out_fd = out_fd};
+                                      task_id_t task_id, int fd) {
+  RegisterElem elem{.cfored = cfored, .task_id = task_id, .fd = fd};
   std::promise<bool> done;
   std::future<bool> done_fut = done.get_future();
 
@@ -372,7 +370,7 @@ void CforedManager::RegisterCb_() {
     }
 
     m_cfored_client_map_[elem.cfored]->InitTaskFwdAndSetInputCb(
-        elem.task_id, [fd = elem.in_fd](const std::string& msg) -> bool {
+        elem.task_id, [fd = elem.fd](const std::string& msg) -> bool {
           ssize_t sz_sent = 0, sz_written;
           while (sz_sent != msg.size()) {
             sz_written = write(fd, msg.c_str() + sz_sent, msg.size() - sz_sent);
@@ -386,9 +384,9 @@ void CforedManager::RegisterCb_() {
           return true;
         });
 
-    CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.out_fd,
+    CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.fd,
                 elem.task_id);
-    auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.out_fd);
+    auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.fd);
     poll_handle->on<uvw::poll_event>([this, elem = std::move(elem)](
                                          const uvw::poll_event&,
                                          uvw::poll_handle& h) {
@@ -397,25 +395,38 @@ void CforedManager::RegisterCb_() {
       constexpr int MAX_BUF_SIZE = 4096;
       char buf[MAX_BUF_SIZE];
 
-      auto ret = read(elem.out_fd, buf, MAX_BUF_SIZE);
+      auto ret = read(elem.fd, buf, MAX_BUF_SIZE);
       if (ret == 0) {
-        CRANE_TRACE("Task #{} to cfored {} finished its output.", elem.task_id,
-                    elem.cfored);
-        h.close();
-        close(elem.out_fd);
-
-        bool ok_to_free =
-            m_cfored_client_map_[elem.cfored]->TaskOutputFinish(elem.task_id);
-        if (ok_to_free) {
-          CRANE_TRACE("It's ok to unregister task #{} on {}", elem.task_id,
-                      elem.cfored);
-          UnregisterIOForward_(elem.cfored, elem.task_id);
-        }
-        return;
+        CRANE_ASSERT(false);
       }
 
-      if (ret == -1)
-        CRANE_ERROR("Error when reading task #{} output", elem.task_id);
+      if (ret == -1) {
+        if (errno == EIO) {
+          // For pty output, the read() will return -1 with errno set to EIO
+          // when process exit.
+          // ref: https://unix.stackexchange.com/questions/538198
+          CRANE_TRACE("Task #{} to cfored {} finished its output.",
+                      elem.task_id, elem.cfored);
+          h.close();
+          close(elem.fd);
+
+          bool ok_to_free =
+              m_cfored_client_map_[elem.cfored]->TaskOutputFinish(elem.task_id);
+          if (ok_to_free) {
+            CRANE_TRACE("It's ok to unregister task #{} on {}", elem.task_id,
+                        elem.cfored);
+            UnregisterIOForward_(elem.cfored, elem.task_id);
+          }
+          return;
+        } else if (errno == EAGAIN) {
+          // Read before the process begin.
+          return;
+        } else {
+          CRANE_ERROR("Error when reading task #{} output, error {}",
+                      elem.task_id, std::strerror(errno));
+          return;
+        }
+      }
 
       std::string output(buf, ret);
       CRANE_TRACE("Fwd to task #{}: {}", elem.task_id, output);
