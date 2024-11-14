@@ -18,7 +18,49 @@
 
 #include "crane/GrpcHelper.h"
 
-#include "crane/Network.h"
+// grpc::Status JwtAuthProcessor::Process(const InputMetadata& auth_metadata,
+//                                        grpc::AuthContext* context,
+//                                        OutputMetadata*
+//                                        consumed_auth_metadata,
+//                                        OutputMetadata* response_metadata) {
+//   auto iter = auth_metadata.find("Authorization");
+//   if (iter == auth_metadata.end()) {
+//     return grpc::Status(grpc::StatusCode::UNAUTHENTICATED, "Miss token");
+//   }
+
+//   auto token = iter->second.data();
+//   if (!util::VerifyToken(jwt_secret_, token)) {
+//     return grpc::Status(grpc::StatusCode::UNAUTHENTICATED, "Invalid token");
+//   }
+
+//   return grpc::Status::OK;
+// }
+
+void JwtAuthInterceptor::Intercept(
+    grpc::experimental::InterceptorBatchMethods* methods) {
+  if (methods->QueryInterceptionHookPoint(
+          grpc::experimental::InterceptionHookPoints::
+              POST_RECV_INITIAL_METADATA)) {
+    auto* metadata_map = methods->GetRecvInitialMetadata();
+
+    auto iter = metadata_map->find("Authorization");
+    if (iter == metadata_map->end()) {
+      info_->server_context()->TryCancel();
+      return;
+    }
+    std::unordered_map<std::string, std::string> clams = {{"UID", "0"}};
+    std::string ptoken = util::GenerateToken(jwt_secret_, clams);
+    std::cout << ptoken << std::endl;
+    auto token = iter->second.data();
+    if (!util::VerifyToken(jwt_secret_, token)) {
+      info_->server_context()->TryCancel();
+      return;
+    }
+    info_->server_context()->AddInitialMetadata("UID",
+                                                util::GetClaim("UID", token));
+  }
+  methods->Proceed();
+}
 
 static std::string GrpcFormatIpAddress(std::string const& addr) {
   // Grpc needs to use [] to wrap ipv6 address
@@ -64,7 +106,8 @@ void ServerBuilderAddTcpInsecureListeningPort(grpc::ServerBuilder* builder,
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,
                                          const std::string& port,
-                                         const TlsCertificates& certs) {
+                                         const TlsCertificates& certs,
+                                         const std::string& jwt_secret) {
   std::string listen_addr_port =
       fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
 
@@ -73,11 +116,6 @@ void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
   pem_key_cert_pair.private_key = certs.ServerKeyContent;
 
   grpc::SslServerCredentialsOptions ssl_opts;
-  // pem_root_certs is actually the certificate of server side rather than
-  // CA certificate. CA certificate is not needed.
-  // Since we use the same cert/key pair for both cranectld/craned,
-  // pem_root_certs is set to the same certificate.
-  // ssl_opts.pem_root_certs = certs.ServerCertContent;
   ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
   ssl_opts.client_certificate_request =
       GRPC_SSL_DONT_REQUEST_CLIENT_CERTIFICATE;

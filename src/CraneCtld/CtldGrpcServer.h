@@ -81,6 +81,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::ModifyPartitionAclRequest *request,
       crane::grpc::ModifyPartitionAclReply *response) override;
 
+  grpc::Status Login(grpc::ServerContext *context,
+                     const crane::grpc::LoginRequest *request,
+                     crane::grpc::LoginReply *response) override;
+
   grpc::Status AddAccount(grpc::ServerContext *context,
                           const crane::grpc::AddAccountRequest *request,
                           crane::grpc::AddAccountReply *response) override;
