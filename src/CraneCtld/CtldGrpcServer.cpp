@@ -243,18 +243,19 @@ grpc::Status CraneCtldServiceImpl::SetLoggerLevel (
     const crane::grpc::SetLoggerLevelRequest *request,
     crane::grpc::SetLoggerLevelReply *response) {
   spdlog::level::level_enum level;
-  if (request->node_name_size() == 1 &&  request->node_name(0) == "cranectld") {
+  auto str = request->node_name(0);
+  if (request->node_name_size() == 1 &&  request->node_name(0) == "") {
     if (!StrToLogLevel(request->log_level(), &level)) {
-        response->add_not_modified_nodes("cranectld");
-        response->add_not_modified_reasons("level parameter error");
+        response->add_not_modified_nodes("control node");
+        response->add_not_modified_reasons("level is illegal");
         return grpc::Status::OK;
     }
     Result logger_res = SetLoggerLogLevel(request->logger(), level);
     if (logger_res.ok) {
-        response->add_modified_nodes("cranectld");
+        response->add_modified_nodes("control node");
     } else {
-        response->add_not_modified_nodes("cranectld");
-        response->add_not_modified_reasons(logger_res.reason);      
+        response->add_not_modified_nodes("control node");
+        response->add_not_modified_reasons(logger_res.reason);
     }
     return grpc::Status::OK;
   }
@@ -262,12 +263,11 @@ grpc::Status CraneCtldServiceImpl::SetLoggerLevel (
   for (const auto& craned_id : request->node_name()) {
     auto stub = g_craned_keeper->GetCranedStub(craned_id);
     if (stub != nullptr && !stub->Invalid()) {
-      CraneErr err = stub->SetCranedLoggerLevel(request->logger(), request->log_level());
+      std::string reason;
+      CraneErr err = stub->SetCranedLoggerLevel(request->logger(), request->log_level(), reason);
       if (err != CraneErr::kOk) {
           response->add_not_modified_nodes(craned_id);
-          response->add_not_modified_reasons(
-          std::format("node {} not found or logger {} level: {} failed",
-           craned_id, request->logger(), request->log_level()));
+          response->add_not_modified_reasons(reason);
       } else {
         response->add_modified_nodes(craned_id);
       }

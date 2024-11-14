@@ -198,8 +198,7 @@
   };
 
 void InitLogger(const std::unordered_map<std::string, spdlog::level::level_enum>& log_levels,
-                const std::string& log_file_path,
-                const bool cranectld_flag);
+                const std::string& log_file_path);
 
 bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_Level);
 

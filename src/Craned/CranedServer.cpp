@@ -503,8 +503,9 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
   spdlog::level::level_enum level;
   if (!StrToLogLevel(request->log_level(), &level)) {
     response->set_ok(false);
+    response->set_reason("level is illegal");
     CRANE_WARN("Default", 
-        "craned logger {} level parameter error",
+        "craned logger {} level is illegal",
         request->logger(), level);
     return grpc::Status::OK;
   }
@@ -516,6 +517,7 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
         "craned logger {} set level {} error",
         request->logger(), level);
     response->set_ok(false);
+    response->set_reason(logger_res.reason);
   }
 
   return grpc::Status::OK;

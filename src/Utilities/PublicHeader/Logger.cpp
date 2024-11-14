@@ -21,6 +21,7 @@
 
 std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> BasicLogger::file_sink = nullptr;
 std::shared_ptr<spdlog::sinks::stderr_color_sink_mt> BasicLogger::console_sink = nullptr;
+static std::unordered_set<std::string> g_logger_array;
 
 BasicLogger* Logger::CreateLogger() {
      return new Logger();
@@ -48,8 +49,7 @@ void Logger::Init(const std::string& log_file_path, const std::string& name) {
 }
 
 void InitLogger(const std::unordered_map<std::string, spdlog::level::level_enum>& log_levels,
-                const std::string& log_file_path,
-                const bool cranectld_flag) {
+                const std::string& log_file_path) {
     //resister logger
     for (const auto& [name, level] : log_levels) {
         REGISTER_LOGGER(name, Logger::CreateLogger);
@@ -64,54 +64,39 @@ void InitLogger(const std::unordered_map<std::string, spdlog::level::level_enum>
         }
         logger->Init(log_file_path, name);
         logger->real_logger->set_level(level);
+        g_logger_array.insert(name);
     }
 }
 
 Result SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level) {
- std::unordered_map<std::string, bool> loggers_to_set;
+    std::unordered_set<std::string> loggers_to_set;
     if (logger_name == "all") {
-        loggers_to_set = {{"Default", false}, {"TaskScheduler", false}, {"CranedKeeper", false}};
-    } else if (logger_name == "default") {
-        loggers_to_set = {{"Default", false}};
-    } else if (logger_name == "taskScheduler") {
-        loggers_to_set = {{"TaskScheduler", false}};
-    } else if (logger_name == "cranedkeeper") {
-         loggers_to_set = {{"CranedKeeper", false}};
+        loggers_to_set = g_logger_array;
+    } else if (g_logger_array.find(logger_name) != g_logger_array.end()) {
+        loggers_to_set.insert(logger_name);
     } else {
-        return Result{false, fmt::format("logger {} not found\n", logger_name)};
+        return Result{false, fmt::format("logger {} not found", logger_name)};
     }
 
-    for (auto& [name, result] : loggers_to_set) {
+    std::unordered_set<std::string> success_loggers;
+    std::unordered_set<std::string> failed_loggers;
+    for (const auto& name : loggers_to_set) {
         auto logger = spdlog::get(name);
-        if (logger == nullptr) {
-            result = false;
-        } else {
+        if (logger) {
             logger->set_level(level);
-            result = true;
-        }
-    }
-
-    std::string success_loggers;
-    std::string failed_loggers;
-    for (const auto& [name, result] : loggers_to_set) {
-        if (result) {
-            if (!success_loggers.empty()) {
-                success_loggers += ", ";
-            }
-            success_loggers += name;
+            success_loggers.insert(name);
         } else {
-            if (!failed_loggers.empty()) {
-                failed_loggers += ", ";
-            }
-            failed_loggers += name;
+            failed_loggers.insert(name);
         }
     }
     std::string final_message;
     if (!success_loggers.empty()) {
-        final_message += fmt::format("Loggers {} set successfully.\n", success_loggers);
+        final_message += fmt::format("\nLoggers {} set successfully",
+         fmt::join(success_loggers, ", "));
     }
     if (!failed_loggers.empty()) {
-        final_message += fmt::format("Loggers {} set failed.\n", failed_loggers);
+        final_message += fmt::format("\nLoggers {} set failed",
+         fmt::join(failed_loggers, ", "));
     }
 
     bool overall_success = failed_loggers.empty();

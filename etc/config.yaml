@@ -17,7 +17,7 @@ ServerKeyFilePath: /etc/crane/server.key
 CaCertFilePath: /etc/crane/ca.crt
 DomainSuffix: riley.local
 
-#Logging Leve
+#Logging Level
 Logger:
   CraneCtld:
     Default: trace

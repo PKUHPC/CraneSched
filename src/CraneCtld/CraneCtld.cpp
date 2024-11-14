@@ -96,26 +96,24 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldLogFile =
             g_config.CraneBaseDir + kDefaultCraneCtldLogPath;
 
-      if (config["Logger"] && config["Logger"].IsMap()) {
-          for (const auto& loggerNode : config["Logger"]) {
-              std::string loggerName = loggerNode.first.as<std::string>();
-              if (loggerName == "CraneCtld") {
-                for (const auto& levelNode : loggerNode.second) {
-                    std::string componentName = levelNode.first.as<std::string>();
-                    std::string strLevel = levelNode.second.as<std::string>();
-                    spdlog::level::level_enum level;
-                    if (StrToLogLevel(strLevel, &level)) {
-                        g_config.logLevels[componentName] = level;
-                    } else {
-                        fmt::print(stderr, "Logger {} level {} is illegal.\n", componentName, strLevel);
-                        std::exit(1);
-                    }
-                }
-              }
+    if (config["Logger"] && config["Logger"].IsMap()) {
+      const auto& craneCtldNode = config["Logger"]["CraneCtld"];
+      if (craneCtldNode && craneCtldNode.IsMap()) {
+        for (const auto& levelNode : craneCtldNode) {
+          std::string componentName = levelNode.first.as<std::string>();
+          std::string strLevel = levelNode.second.as<std::string>();
+          spdlog::level::level_enum level;
+          if (StrToLogLevel(strLevel, &level)) {
+              g_config.logLevels[componentName] = level;
+          } else {
+              fmt::print(stderr, "Logger {} level {} is illegal.\n", componentName, strLevel);
+              std::exit(1);
           }
+        }
       }
+    }
 
-      InitLogger(g_config.logLevels, g_config.CraneCtldLogFile, true);
+      InitLogger(g_config.logLevels, g_config.CraneCtldLogFile);
 
       // External configuration file path
       if (!parsed_args.count("db-config") && config["DbConfigPath"]) {

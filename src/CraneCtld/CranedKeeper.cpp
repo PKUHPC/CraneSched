@@ -222,7 +222,7 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
     return CraneErr::kGenericFailure;
 }
 
-CraneErr CranedStub::SetCranedLoggerLevel(const std::string& logger, const std::string& level) {
+CraneErr CranedStub::SetCranedLoggerLevel(const std::string& logger, const std::string& level, std::string& reason) {
   using crane::grpc::SetCranedLoggerLevelRequest;
   using crane::grpc::SetCranedLoggerLevelReply;
 
@@ -236,10 +236,11 @@ CraneErr CranedStub::SetCranedLoggerLevel(const std::string& logger, const std::
   request.set_log_level(level);
 
   grpc_status = m_stub_->SetCranedLoggerLevel(&context, request, &reply);
+  reason = reply.reason();
   if (!grpc_status.ok()) {
     CRANE_ERROR("CranedKeeper", "Craned {} set logger failed: {}", m_craned_id_,
                 grpc_status.error_message());
-    
+
     return CraneErr::kRpcFailure;
   }
   if (reply.ok()) return CraneErr::kOk;

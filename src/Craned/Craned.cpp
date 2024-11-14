@@ -105,25 +105,23 @@ void ParseConfig(int argc, char** argv) {
         g_config.CranedLogFile = g_config.CraneBaseDir + kDefaultCranedLogPath;
 
       if (config["Logger"] && config["Logger"].IsMap()) {
-          for (const auto& loggerNode : config["Logger"]) {
-              std::string loggerName = loggerNode.first.as<std::string>();
-              if (loggerName == "Craned") {
-                for (const auto& levelNode : loggerNode.second) {
-                    std::string componentName = levelNode.first.as<std::string>();
-                    std::string strLevel = levelNode.second.as<std::string>();
-
-                    spdlog::level::level_enum level;
-                    if (StrToLogLevel(strLevel, &level)) {
-                        g_config.logLevels[componentName] = level;
-                    } else {
-                        fmt::print(stderr, "Logger {} level {} is illegal.\n", componentName, strLevel);
-                        std::exit(1);
-                    }
-                }
+          const auto& cranedNode = config["Logger"]["Craned"];
+          if (cranedNode && cranedNode.IsMap()) {
+            for (const auto& levelNode : cranedNode) {
+              std::string componentName = levelNode.first.as<std::string>();
+              std::string strLevel = levelNode.second.as<std::string>();
+              spdlog::level::level_enum level;
+              if (StrToLogLevel(strLevel, &level)) {
+                  g_config.logLevels[componentName] = level;
+              } else {
+                  fmt::print(stderr, "Logger {} level {} is illegal.\n", componentName, strLevel);
+                  std::exit(1);
               }
+            }
           }
-      }
-      InitLogger(g_config.logLevels, g_config.CranedLogFile, false);
+        }
+
+      InitLogger(g_config.logLevels, g_config.CranedLogFile);
 
       if (config["CranedUnixSockPath"])
         g_config.CranedUnixSockPath =

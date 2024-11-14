@@ -58,7 +58,7 @@ class CranedStub {
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
-  CraneErr SetCranedLoggerLevel(const std::string& logger, const std::string& level);
+  CraneErr SetCranedLoggerLevel(const std::string& logger, const std::string& level, std::string& reason);
 
   CraneErr QueryCranedRemoteMeta(CranedRemoteMeta *meta);
 
