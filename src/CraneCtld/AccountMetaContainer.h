@@ -60,22 +60,29 @@ class AccountMetaContainer final {
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
+  void InitFromDB();
+
   UserResourceMetaPtr GetUserResourceMetaPtr(const std::string& username);
 
   UserResourceMetaMapConstPtr GetUserResourceMetaMapConstPtr();
 
+  // std::list<std::pair<std::string, QosResource>>& qos_resource_list
   void MallocQosResourceToUser(const std::string& username,
                                const std::string& qos_name,
                                const QosResource& qos_resource);
 
-  void FreeQosResourceToUser(const std::string& username,
-                             const TaskInCtld& task);
+  void FreeQosResourceOnUser(const std::string& username,
+                             const std::list<std::string>& qos_list);
+
+  void EraseQosResourceOnUser(const std::string& username);
+
+  void FreeQosLimitOnUser(const std::string& username, const TaskInCtld& task);
 
   bool CheckAndApplyQosLimitOnUser(const std::string& username,
                                    const TaskInCtld& task);
-
+  // TODO:AddUser, SetUserQos, SetAccountQos, ModifyQos 都需要修改
  private:
-  UserResourceMetaAtomicMap user_mate_map_;
+  UserResourceMetaAtomicMap user_meta_map_;
 };
 
 inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;

@@ -28,6 +28,7 @@
 #include <memory>
 
 #include "AccountManager.h"
+#include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
@@ -684,7 +685,8 @@ void InitializeCtldGlobalVariables() {
   g_meta_container = std::make_unique<CranedMetaContainer>();
   g_meta_container->InitFromConfig(g_config);
 
-  g_meta_account_container = std::make_unique<CranedMetaContainer>();
+  g_account_meta_container = std::make_unique<AccountMetaContainer>();
+  g_account_meta_container->InitFromDB();
 
   bool ok;
   g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
