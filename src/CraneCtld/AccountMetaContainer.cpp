@@ -41,13 +41,16 @@ void AccountMetaContainer::InitFromDB() {
 
   AccountManager::UserMapMutexSharedPtr all_user =
       g_account_manager->GetAllUserInfo();
+  // all users in user_map
   for (const auto& [username, user] : *all_user) {
     UserResourceMeta::QosToQosResourceMap qos_resource_map;
+    // query all qos in user  account->partitioin->qos
     for (const auto& [account, attrs_in_account] : user->account_to_attrs_map) {
       for (const auto& [part, qos_list] :
            attrs_in_account.allowed_partition_qos_map) {
-        // TODO:初始化
+        // user qos list
         for (const auto& qos_name : qos_list.second) {
+          // initialize
           AccountManager::QosMutexSharedPtr qos =
               g_account_manager->GetExistedQosInfo(qos_name);
           QosResource qos_resource =
@@ -63,20 +66,17 @@ void AccountMetaContainer::InitFromDB() {
   user_meta_map_.InitFromMap(std::move(user_meta_map));
 }
 
-// TODO: 优化 传入resourcelist，只加一次锁
 void AccountMetaContainer::MallocQosResourceToUser(
-    const std::string& username, const std::string& qos_name,
-    const QosResource& qos_resource) {
-  {
-    auto user_meta_map_ptr = user_meta_map_.GetMapExclusivePtr();
-    if (!user_meta_map_ptr->contains(username)) {
-      user_meta_map_ptr->emplace(username, UserResourceMeta{});
-    }
-  }
+    const std::string& username, const QosResourceList& qos_resource_list) {
+  auto user_meta_map_ptr = user_meta_map_.GetMapExclusivePtr();
+  if (!user_meta_map_ptr->contains(username))
+    user_meta_map_ptr->emplace(username, UserResourceMeta{});
 
-  auto user_meta = user_meta_map_[username];
-  user_meta->qos_to_resource_map[qos_name] =
-      QosResourceLimit{qos_resource, qos_resource, QosResource{}};
+  auto& qos_resource_map =
+      user_meta_map_ptr->find(username)->second.RawPtr()->qos_to_resource_map;
+  for (const auto& pair : qos_resource_list)
+    qos_resource_map.emplace(
+        pair.first, QosResourceLimit{pair.second, pair.second, QosResource{}});
 }
 
 void AccountMetaContainer::FreeQosResourceOnUser(

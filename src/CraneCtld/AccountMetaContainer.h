@@ -57,6 +57,8 @@ class AccountMetaContainer final {
       util::ManagedScopeExclusivePtr<UserResourceMeta,
                                      UserResourceMetaAtomicMap::CombinedLock>;
 
+  using QosResourceList = std::list<std::pair<std::string, QosResource>>;
+
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
@@ -66,10 +68,8 @@ class AccountMetaContainer final {
 
   UserResourceMetaMapConstPtr GetUserResourceMetaMapConstPtr();
 
-  // std::list<std::pair<std::string, QosResource>>& qos_resource_list
   void MallocQosResourceToUser(const std::string& username,
-                               const std::string& qos_name,
-                               const QosResource& qos_resource);
+                               const QosResourceList& qos_resource_list);
 
   void FreeQosResourceOnUser(const std::string& username,
                              const std::list<std::string>& qos_list);
