@@ -111,6 +111,31 @@ bool SetMaxFileDescriptorNumber(unsigned long num) {
   return setrlimit(RLIMIT_NOFILE, &rlim) == 0;
 }
 
+bool CheckProxyEnvironmentVariable() {
+  bool has_proxy = false;
+  const char* HTTP_PROXY = std::getenv("HTTP_PROXY");
+  if (HTTP_PROXY) {
+    has_proxy = true;
+    CRANE_WARN("HTTP_PROXY is set to {}", HTTP_PROXY);
+  }
+  const char* http_proxy = std::getenv("http_proxy");
+  if (http_proxy) {
+    has_proxy = true;
+    CRANE_WARN("http_proxy is set to {}", http_proxy);
+  }
+  const char* HTTPS_PROXY = std::getenv("HTTPS_PROXY");
+  if (HTTPS_PROXY) {
+    has_proxy = true;
+    CRANE_WARN("HTTPS_PROXY is set to {}", HTTPS_PROXY);
+  }
+  const char* https_proxy = std::getenv("https_proxy");
+  if (https_proxy) {
+    has_proxy = true;
+    CRANE_WARN("https_proxy is set to {}", https_proxy);
+  }
+  return has_proxy;
+}
+
 bool GetSystemReleaseInfo(SystemRelInfo* info) {
 #if defined(__linux__) || defined(__unix__)
   utsname utsname_info{};
