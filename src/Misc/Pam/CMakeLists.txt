@@ -9,12 +9,18 @@ set_target_properties(pam_crane PROPERTIES PREFIX "")
 
 target_include_directories(pam_crane PUBLIC ${PAM_INCLUDE_DIR})
 
+if(CRANE_USE_MIMALLOC)
+        add_compile_definitions(pam_crane PRIVATE MI_OVERRIDE=ON)
+        message("Override malloc with mimalloc in pam_crane")
+endif()
+
 target_link_libraries(pam_crane PUBLIC
         ${PAM_LIBRARIES}
         Utility_PublicHeaderNoLogger
         crane_proto_lib
         fmt::fmt
         yaml-cpp
+        $<$<BOOL:${CRANE_USE_MIMALLOC}>:mimalloc>
 )
 
 # Linker flag for c++ 17 filesystem library

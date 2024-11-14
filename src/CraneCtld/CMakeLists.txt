@@ -20,6 +20,12 @@ add_executable(cranectld
 
 target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 
+if(CRANE_USE_MIMALLOC)
+        add_compile_definitions(cranectld PRIVATE MI_OVERRIDE=ON)
+        message("Override malloc with mimalloc in cranectld")
+endif()
+
+
 target_link_libraries(cranectld PRIVATE
         spdlog::spdlog
         concurrentqueue
@@ -49,6 +55,7 @@ target_link_libraries(cranectld PRIVATE
         result
 
         Backward::Interface
+        $<$<BOOL:${CRANE_USE_MIMALLOC}>:mimalloc>
 )
 
 if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
