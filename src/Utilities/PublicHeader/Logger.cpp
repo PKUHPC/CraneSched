@@ -17,17 +17,16 @@
  */
 
 #include "crane/Logger.h"
-#include <unordered_map>
 
-std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> BasicLogger::file_sink = nullptr;
-std::shared_ptr<spdlog::sinks::stderr_color_sink_mt> BasicLogger::console_sink = nullptr;
+std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> BasicLoggerContainer::file_sink = nullptr;
+std::shared_ptr<spdlog::sinks::stderr_color_sink_mt> BasicLoggerContainer::console_sink = nullptr;
 static std::unordered_set<std::string> g_logger_array;
 
-BasicLogger* Logger::CreateLogger() {
-     return new Logger();
+BasicLoggerContainer* LoggerContainer::CreateLogger() {
+     return new LoggerContainer();
 }
 
-void Logger::Init(const std::string& log_file_path, const std::string& name) {
+void LoggerContainer::Init(const std::string& log_file_path, const std::string& name) {
    static std::once_flag init_flag;
     std::call_once(init_flag, [&]() {
         // init spdlog
@@ -36,12 +35,12 @@ void Logger::Init(const std::string& log_file_path, const std::string& name) {
         spdlog::flush_every(std::chrono::seconds(1));
         spdlog::set_level(spdlog::level::trace);
 
-        BasicLogger::file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+        BasicLoggerContainer::file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
             log_file_path, 1048576 * 50 /*MB*/, 3);
-        BasicLogger::console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+        BasicLoggerContainer::console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
     });
     real_logger = std::make_shared<spdlog::async_logger>(
-        name, spdlog::sinks_init_list{BasicLogger::file_sink, BasicLogger::console_sink},
+        name, spdlog::sinks_init_list{BasicLoggerContainer::file_sink, BasicLoggerContainer::console_sink},
         spdlog::thread_pool(), spdlog::async_overflow_policy::block);
     real_logger->set_pattern("[%Y-%m-%d %H:%M:%S.%f] [%n] [%^%l%$] [%s:%#] %v");
     real_logger->set_level(spdlog::level::trace);
@@ -52,12 +51,12 @@ void InitLogger(const std::unordered_map<std::string, spdlog::level::level_enum>
                 const std::string& log_file_path) {
     //resister logger
     for (const auto& [name, level] : log_levels) {
-        REGISTER_LOGGER(name, Logger::CreateLogger);
+        REGISTER_LOGGER(name, LoggerContainer::CreateLogger);
     }
 
     //get logger
     for (const auto& [name, level] : log_levels) {
-        auto logger = LoggerRegistry<BasicLogger>::Create(name);
+        auto logger = LoggerRegistry<BasicLoggerContainer>::Create(name);
         if (!logger) {
             fmt::print("Logger {} install failed.\n",name);
             continue;

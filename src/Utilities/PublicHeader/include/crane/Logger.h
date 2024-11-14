@@ -225,10 +225,10 @@ struct formatter<cpu_t> {
 }  // namespace fmt
 
 #define REGISTER_LOGGER(name, create_func) \
-      LoggerRegistry<BasicLogger>::Register(name, create_func)
-class BasicLogger {
+      LoggerRegistry<BasicLoggerContainer>::Register(name, create_func)
+class BasicLoggerContainer {
 public:
-    virtual ~BasicLogger()=default;
+    virtual ~BasicLoggerContainer()=default;
     virtual void Init(const std::string& log_file_path, const std::string& name) = 0;
 public:
   static std::shared_ptr<spdlog::sinks::rotating_file_sink_mt> file_sink;
@@ -236,11 +236,11 @@ public:
   std::shared_ptr<spdlog::async_logger> real_logger = nullptr;
 };
 
-class Logger : public BasicLogger {
+class LoggerContainer : public BasicLoggerContainer {
 public:
   void Init(const std::string& log_file_path, const std::string& name) override;
   std::shared_ptr<spdlog::async_logger> GetLogger(const std::string& name);
-  static BasicLogger* CreateLogger();
+  static BasicLoggerContainer* CreateLogger();
 };
 
 template <typename T>
