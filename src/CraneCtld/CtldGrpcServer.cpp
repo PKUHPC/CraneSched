@@ -243,7 +243,6 @@ grpc::Status CraneCtldServiceImpl::SetLoggingLevel (
     const crane::grpc::SetLoggingLevelRequest *request,
     crane::grpc::SetLoggingLevelReply *response) {
   spdlog::level::level_enum level;
-  auto str = request->node_name(0);
   if (request->node_name_size() == 1 &&  request->node_name(0) == "") {
     if (!StrToLogLevel(request->log_level(), &level)) {
         response->add_not_modified_nodes("control node");
