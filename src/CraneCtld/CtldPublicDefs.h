@@ -225,6 +225,7 @@ struct InteractiveMetaInTask {
 
   std::string sh_script;
   std::string term_env;
+  bool pty;
   std::function<void(task_id_t, std::string const&,
                      std::list<std::string> const&)>
       cb_task_res_allocated;
@@ -493,8 +494,10 @@ struct TaskInCtld {
       InteractiveMeta.interactive_type =
           val.interactive_meta().interactive_type();
       if (InteractiveMeta.interactive_type ==
-          crane::grpc::InteractiveTaskType::Crun)
+          crane::grpc::InteractiveTaskType::Crun) {
         InteractiveMeta.term_env = val.interactive_meta().term_env();
+        InteractiveMeta.pty = val.interactive_meta().pty();
+      }
     }
 
     node_num = val.node_num();
