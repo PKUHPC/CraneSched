@@ -123,17 +123,17 @@ TEST_F(CranedKeeperTest, OneStub_OneAbortedServer) {
 
   ON_CALL((*m_mock_ctld_server_), CranedIsUpCb(CranedId{0, 0}, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE("Node {} is Up", node_id);
+        CRANE_TRACE("default", "Node {} is Up", node_id);
       }));
 
   ON_CALL((*m_mock_ctld_server_), CranedIsTempDownCb(CranedId{0, 0}, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE("Node {} is Temp Down", node_id);
+        CRANE_TRACE("default", "Node {} is Temp Down", node_id);
       }));
 
   ON_CALL((*m_mock_ctld_server_), CranedIsDownCb(CranedId{0, 0}, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE("Node {} is Down", node_id);
+        CRANE_TRACE("default", "Node {} is Down", node_id);
         has_exited = true;
       }));
 
@@ -191,23 +191,23 @@ TEST_F(CranedKeeperTest, OneStub_OneTempDownServer) {
 
   ON_CALL((*m_mock_ctld_server_), CranedIsUpCb(CranedId{0, 0}, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE("Node {} is Up", node_id);
+        CRANE_TRACE("default", "Node {} is Up", node_id);
       }));
 
   ON_CALL((*m_mock_ctld_server_), CranedIsTempDownCb(CranedId{0, 0}, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE("Node {} is Temp Down", node_id);
+        CRANE_TRACE("default", "Node {} is Temp Down", node_id);
       }));
 
   ON_CALL((*m_mock_ctld_server_),
           CranedRecFromTempFailureCb(CranedId{0, 0}, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE("Node {} recovered from temporary failure", node_id);
+        CRANE_TRACE("default", "Node {} recovered from temporary failure", node_id);
       }));
 
   ON_CALL((*m_mock_ctld_server_), CranedIsDownCb(CranedId{0, 0}, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE("Node {} is Down", node_id);
+        CRANE_TRACE("default", "Node {} is Down", node_id);
         has_exited = true;
       }));
 
@@ -280,24 +280,24 @@ TEST_F(CranedKeeperTest, OneStub_OneTempAbortedServer) {
 
   ON_CALL((*m_mock_ctld_server_), CranedIsUpCb(CranedId{0, 0}, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE("Node {} is Up", node_id);
+        CRANE_TRACE("default", "Node {} is Up", node_id);
       }));
 
   ON_CALL((*m_mock_ctld_server_), CranedIsTempDownCb(CranedId{0, 0}, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE("Node {} is Temp Down", node_id);
+        CRANE_TRACE("default", "Node {} is Temp Down", node_id);
       }));
 
   ON_CALL((*m_mock_ctld_server_),
           CranedRecFromTempFailureCb(CranedId{0, 0}, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE("Node {} recovered from temporary failure", node_id);
+        CRANE_TRACE("default", "Node {} recovered from temporary failure", node_id);
         xd_rec_barrier.wait();
       }));
 
   ON_CALL((*m_mock_ctld_server_), CranedIsDownCb(CranedId{0, 0}, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE("Node {} is Down", node_id);
+        CRANE_TRACE("default", "Node {} is Down", node_id);
         has_exited = true;
       }));
 
@@ -429,7 +429,7 @@ TEST_F(CranedKeeperTest, TwoStubs_TwoTempDownServers) {
   ON_CALL((*m_mock_ctld_server_),
           CranedIsUpCb(AnyOf(CranedId{0, 0}, CranedId{0, 1}), _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE(RED "Node {} is Up" RESET, node_id);
+        CRANE_TRACE("default", RED "Node {} is Up" RESET, node_id);
 
         if (node_id == CranedId{0, 0}) {
           terminate_barrier_0->wait();
@@ -441,14 +441,14 @@ TEST_F(CranedKeeperTest, TwoStubs_TwoTempDownServers) {
   ON_CALL((*m_mock_ctld_server_),
           CranedIsTempDownCb(AnyOf(CranedId{0, 0}, CranedId{0, 1}), _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE(RED "Node {} is Temp Down" RESET, node_id);
+        CRANE_TRACE("default", RED "Node {} is Temp Down" RESET, node_id);
         disconnected_count++;
       }));
 
   ON_CALL((*m_mock_ctld_server_),
           CranedRecFromTempFailureCb(CranedId{0, 0}, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE(RED "Node {} recovered from temporary failure" RESET,
+        CRANE_TRACE("default", RED "Node {} recovered from temporary failure" RESET,
                      node_id);
         terminate_barrier_0->wait();
       }));
@@ -456,7 +456,7 @@ TEST_F(CranedKeeperTest, TwoStubs_TwoTempDownServers) {
   ON_CALL((*m_mock_ctld_server_),
           CranedIsDownCb(AnyOf(CranedId{0, 0}, CranedId{0, 1}), _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
-        CRANE_TRACE(RED "Node {} is Down" RESET, node_id);
+        CRANE_TRACE("default", RED "Node {} is Down" RESET, node_id);
         exit_count++;
       }));
 
@@ -582,11 +582,11 @@ TEST_F(CranedKeeperTest, CheckReuseOfSlot) {
         ASSERT_THAT(node_id,
                     AnyOf(CranedId{0, 0}, CranedId{0, 1}, CranedId{0, 2}));
 
-        CRANE_TRACE(RED "Node {} is Up" RESET, node_id);
+        CRANE_TRACE("default", RED "Node {} is Up" RESET, node_id);
 
         start_count++;
         if (start_count >= 3 && !has_restarted_1) {
-          CRANE_TRACE(RED "Terminate Node #1 ..." RESET);
+          CRANE_TRACE("default", RED "Terminate Node #1 ..." RESET);
           terminate_barriers[1]->wait();
         } else if (has_restarted_1) {
           for (auto&& i : {0, 1, 2}) terminate_barriers[i]->wait();
@@ -597,14 +597,14 @@ TEST_F(CranedKeeperTest, CheckReuseOfSlot) {
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
         ASSERT_THAT(node_id,
                     AnyOf(CranedId{0, 0}, CranedId{0, 1}, CranedId{0, 2}));
-        CRANE_TRACE(RED "Node {} is Temp Down" RESET, node_id);
+        CRANE_TRACE("default", RED "Node {} is Temp Down" RESET, node_id);
       }));
 
   ON_CALL((*m_mock_ctld_server_), CranedRecFromTempFailureCb(_, _))
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
         ASSERT_THAT(node_id,
                     AnyOf(CranedId{0, 0}, CranedId{0, 1}, CranedId{0, 2}));
-        CRANE_TRACE(RED "Node {} recovered from temporary failure" RESET,
+        CRANE_TRACE("default", RED "Node {} recovered from temporary failure" RESET,
                      node_id);
       }));
 
@@ -612,9 +612,9 @@ TEST_F(CranedKeeperTest, CheckReuseOfSlot) {
       .WillByDefault(Invoke([&](CranedId node_id, void*) {
         ASSERT_THAT(node_id,
                     AnyOf(CranedId{0, 0}, CranedId{0, 1}, CranedId{0, 2}));
-        CRANE_TRACE(RED "Node #{} is Down" RESET, node_id);
+        CRANE_TRACE("default", RED "Node #{} is Down" RESET, node_id);
         if (!has_restarted_1 && node_id == CranedId{0, 1}) {
-          CRANE_TRACE(RED "Restarting Node (0,1) ..." RESET);
+          CRANE_TRACE("default", RED "Restarting Node (0,1) ..." RESET);
           restart_barrier_1->wait();
           has_restarted_1 = true;
         } else if (has_restarted_1) {

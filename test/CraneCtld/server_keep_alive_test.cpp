@@ -80,7 +80,7 @@ class KeepAliveGreeterClient {
         server_addr, grpc::InsecureChannelCredentials(), channel_args);
 
     m_last_grpc_conn_state_ = m_channel_->GetState(true);
-    CRANE_INFO("Channel initial conn state: {}",
+    CRANE_INFO("default", "Channel initial conn state: {}",
                GrpcConnStateStr(m_last_grpc_conn_state_));
 
     using namespace std::chrono_literals;
@@ -107,7 +107,7 @@ class KeepAliveGreeterClient {
     if (status.ok()) {
       return reply.message();
     } else {
-      CRANE_INFO("{}:{}", status.error_code(), status.error_message());
+      CRANE_INFO("default", "{}:{}", status.error_code(), status.error_message());
       return "RPC failed";
     }
   }
@@ -125,7 +125,7 @@ class KeepAliveGreeterClient {
 
  private:
   void StateMonitorThreadFunc() {
-    CRANE_INFO("StateMonitorThread started...");
+    CRANE_INFO("default", "StateMonitorThread started...");
 
     bool ok;
     void* tag;
@@ -152,7 +152,7 @@ class KeepAliveGreeterClient {
         break;
     }
 
-    CRANE_INFO("StateMonitorThread is exiting...");
+    CRANE_INFO("default", "StateMonitorThread is exiting...");
   }
 
   grpc_connectivity_state m_last_grpc_conn_state_;
@@ -177,7 +177,7 @@ TEST(KeepAlive, ServerNormallyExit) {
 
   auto state_change_cb = [](grpc_connectivity_state old_state,
                             grpc_connectivity_state new_state) {
-    CRANE_INFO("Underlying conn state changed: {} -> {}",
+    CRANE_INFO("default", "Underlying conn state changed: {} -> {}",
                GrpcConnStateStr(old_state), GrpcConnStateStr(new_state));
   };
 
@@ -186,7 +186,7 @@ TEST(KeepAlive, ServerNormallyExit) {
       std::make_unique<KeepAliveGreeterClient>(server_addr, state_change_cb);
 
   std::string reply = client->SayHello("Riley");
-  CRANE_INFO("SayHello(Riley) -> {}", reply);
+  CRANE_INFO("default", "SayHello(Riley) -> {}", reply);
 
   std::this_thread::sleep_for(10s);
 
@@ -206,7 +206,7 @@ TEST(KeepAlive, ServerAborts) {
   if (pid > 0) {
     auto state_change_cb = [](grpc_connectivity_state old_state,
                               grpc_connectivity_state new_state) {
-      CRANE_INFO("Underlying conn state changed: {} -> {}",
+      CRANE_INFO("default", "Underlying conn state changed: {} -> {}",
                  GrpcConnStateStr(old_state), GrpcConnStateStr(new_state));
     };
 
@@ -216,7 +216,7 @@ TEST(KeepAlive, ServerAborts) {
     std::this_thread::sleep_for(6s);
 
     std::string reply = client->SayHello("Riley");
-    CRANE_INFO("SayHello(Riley) -> {}", reply);
+    CRANE_INFO("default", "SayHello(Riley) -> {}", reply);
 
     EXPECT_EQ(reply, "RPC failed");
 

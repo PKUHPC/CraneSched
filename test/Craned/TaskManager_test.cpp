@@ -48,7 +48,7 @@ static std::string GenerateTestProg(const std::string& prog_text) {
 static void RemoveTestProg(const std::string& test_prog_path) {
   // Cleanup
   if (remove(test_prog_path.c_str()) != 0)
-    CRANE_ERROR("Error removing test_prog:", strerror(errno));
+    CRANE_ERROR("default", Error removing test_prog:", strerror(errno));
 }
 
 class TaskManagerTest : public testing::Test {
@@ -95,7 +95,7 @@ TEST_F(TaskManagerTest, NormalExit) {
   };
 
   CraneErr err = g_task_mgr->DeprecatedAddTaskAsync__(std::move(info));
-  CRANE_TRACE("err value: {}, reason: {}", uint64_t(err), CraneErrStr(err));
+  CRANE_TRACE("default", "err value: {}, reason: {}", uint64_t(err), CraneErrStr(err));
 
   using namespace std::chrono_literals;
   std::this_thread::sleep_for(2s);
@@ -105,7 +105,7 @@ TEST_F(TaskManagerTest, NormalExit) {
 
   g_task_mgr->Wait();
 
-  CRANE_TRACE("Exiting test...");
+  CRANE_TRACE("default", "Exiting test...");
 
   RemoveTestProg(test_prog_path);
 }
@@ -174,7 +174,7 @@ TEST_F(TaskManagerTest, SigintTermination) {
 
   g_task_mgr->Wait();
 
-  CRANE_TRACE("Exiting test...");
+  CRANE_TRACE("default", "Exiting test...");
 
   RemoveTestProg(test_prog_path);
 }
@@ -216,7 +216,7 @@ TEST_F(TaskManagerTest, LsOutput) {
 
   g_task_mgr->Wait();
 
-  CRANE_TRACE("Exiting test...");
+  CRANE_TRACE("default", "Exiting test...");
 }
 
 TEST_F(TaskManagerTest, Shutdown) {

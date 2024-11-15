@@ -305,11 +305,11 @@ class MariadbClient {
 
  private:
   void PrintError_(const std::string& msg) {
-    CRANE_ERROR("{}: {}\n", msg, mysql_error(m_conn));
+    CRANE_ERROR("default", "{}: {}\n", msg, mysql_error(m_conn));
   }
 
   void PrintError_(const char* msg) {
-    CRANE_ERROR("{}: {}\n", msg, mysql_error(m_conn));
+    CRANE_ERROR("default", "{}: {}\n", msg, mysql_error(m_conn));
   }
 
   MYSQL* m_conn{nullptr};

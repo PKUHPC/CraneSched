@@ -61,50 +61,32 @@
 // default cranetld log
 #define CRANE_TRACE(logger_name, ...) \
     do { \
-        auto logger = GetLoggerByName(logger_name); \
-        if (logger) { \
-            SPDLOG_LOGGER_TRACE(logger, __VA_ARGS__); \
-        } \
+        SPDLOG_LOGGER_TRACE(GetLoggerByName(logger_name), __VA_ARGS__); \
     } while (0)
 
 #define CRANE_DEBUG(logger_name, ...) \
     do { \
-        auto logger = GetLoggerByName(logger_name); \
-        if (logger) { \
-            SPDLOG_LOGGER_DEBUG(logger, __VA_ARGS__); \
-        } \
+        SPDLOG_LOGGER_DEBUG(GetLoggerByName(logger_name), __VA_ARGS__); \
     } while (0)
 
 #define CRANE_INFO(logger_name, ...) \
     do { \
-        auto logger = GetLoggerByName(logger_name); \
-        if (logger) { \
-            SPDLOG_LOGGER_INFO(logger, __VA_ARGS__); \
-        } \
+        SPDLOG_LOGGER_INFO(GetLoggerByName(logger_name), __VA_ARGS__); \
     } while (0)
 
 #define CRANE_WARN(logger_name, ...) \
     do { \
-        auto logger = GetLoggerByName(logger_name); \
-        if (logger) { \
-            SPDLOG_LOGGER_WARN(logger, __VA_ARGS__); \
-        } \
+        SPDLOG_LOGGER_WARN(GetLoggerByName(logger_name), __VA_ARGS__); \
     } while (0)
 
 #define CRANE_ERROR(logger_name, ...) \
     do { \
-        auto logger = GetLoggerByName(logger_name); \
-        if (logger) { \
-            SPDLOG_LOGGER_ERROR(logger, __VA_ARGS__); \
-        } \
+        SPDLOG_LOGGER_ERROR(GetLoggerByName(logger_name), __VA_ARGS__); \
     } while (0)
 
 #define CRANE_CRITICAL(logger_name, ...) \
     do { \
-        auto logger = GetLoggerByName(logger_name); \
-        if (logger) { \
-            SPDLOG_LOGGER_CRITICAL(logger, __VA_ARGS__); \
-        } \
+        SPDLOG_LOGGER_CRITICAL(GetLoggerByName(logger_name), __VA_ARGS__); \
     } while (0)
 
 #define CRANE_LOG_LOC_CALL(loc, level, ...)                             \

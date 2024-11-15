@@ -91,7 +91,7 @@ class CforedStreamWriter {
   bool WriteTaskCompletionAckReply(task_id_t task_id) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
-    CRANE_TRACE("Sending TaskCompletionAckReply to cfored of task id {}",task_id);
+    CRANE_TRACE("default", "Sending TaskCompletionAckReply to cfored of task id {}",task_id);
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::TASK_COMPLETION_ACK_REPLY);
 
