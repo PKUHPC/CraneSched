@@ -1,9 +1,4 @@
-#include "crane/jwt.h"
-
-#include <exception>
-
-#include "jwt-cpp/jwt.h"
-#include "jwt-cpp/traits/kazuho-picojson/defaults.h"
+#include "crane/Jwt.h"
 
 namespace util {
 std::string GenerateToken(

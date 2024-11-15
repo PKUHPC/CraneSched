@@ -4,7 +4,6 @@
 
 #include <jwt-cpp/jwt.h>
 
-#include <cstdint>
 #include <string>
 #include <unordered_map>
 

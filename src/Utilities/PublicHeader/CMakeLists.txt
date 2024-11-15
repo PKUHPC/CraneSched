@@ -1,5 +1,5 @@
 add_library(Utility_PublicHeader
-        String.cpp Network.cpp OS.cpp PublicHeader.cpp Logger.cpp jwt.cpp
+        String.cpp Network.cpp OS.cpp PublicHeader.cpp Logger.cpp Jwt.cpp
         include/crane/String.h
         include/crane/Network.h
         include/crane/OS.h
@@ -7,7 +7,7 @@ add_library(Utility_PublicHeader
         include/crane/Lock.h
         include/crane/Pointer.h
         include/crane/Logger.h
-        include/crane/jwt.h
+        include/crane/Jwt.h
         include/crane/PasswordEntry.h
         include/crane/AtomicHashMap.h
         GrpcHelper.cpp

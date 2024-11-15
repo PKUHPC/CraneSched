@@ -48,9 +48,6 @@ void JwtAuthInterceptor::Intercept(
       info_->server_context()->TryCancel();
       return;
     }
-    std::unordered_map<std::string, std::string> clams = {{"UID", "0"}};
-    std::string ptoken = util::GenerateToken(jwt_secret_, clams);
-    std::cout << ptoken << std::endl;
     auto token = iter->second.data();
     if (!util::VerifyToken(jwt_secret_, token)) {
       info_->server_context()->TryCancel();
