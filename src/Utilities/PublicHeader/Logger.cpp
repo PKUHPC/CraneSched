@@ -122,19 +122,3 @@ bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_
 
     return true;
 }
-
-std::shared_ptr<spdlog::logger> GetLoggerByName(const std::string& logger_name) {
-    static std::shared_ptr<spdlog::logger> default_logger = spdlog::get("default");
-    static std::shared_ptr<spdlog::logger> cranedkeeper_logger = spdlog::get("cranedkeeper");
-    static std::shared_ptr<spdlog::logger> taskscheduler_logger = spdlog::get("taskscheduler");
-
-    if (logger_name == "default") {
-        return default_logger;
-    } else if (logger_name == "cranedkeeper") {
-        return cranedkeeper_logger;
-    } else if (logger_name == "taskscheduler") {
-        return taskscheduler_logger;
-    } else {
-        return nullptr;
-    }
-}

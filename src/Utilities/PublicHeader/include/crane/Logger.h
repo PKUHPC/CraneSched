@@ -186,7 +186,21 @@ bool StrToLogLevel(const std::string& str_level, spdlog::level::level_enum *out_
 
 Result SetLoggerLogLevel(const std::string& logger_name, spdlog::level::level_enum level);
 
-std::shared_ptr<spdlog::logger> GetLoggerByName(const std::string& logger_name);
+// 获取日志记录器的函数
+inline std::shared_ptr<spdlog::logger> GetLoggerByName(const std::string& logger_name) {
+    static std::unordered_map<std::string, std::shared_ptr<spdlog::logger>> loggers = {
+        {"default", spdlog::get("default")},
+        {"cranedkeeper", spdlog::get("cranedkeeper")},
+        {"taskscheduler", spdlog::get("taskscheduler")}
+    };
+
+    auto it = loggers.find(logger_name);
+    if (it != loggers.end()) {
+        return it->second;
+    } else {
+        return nullptr;
+    }
+}
 
 // Custom type formatting
 namespace fmt {
