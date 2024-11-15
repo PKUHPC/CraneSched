@@ -673,21 +673,22 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
   std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
   if (listen_conf.UseTls) {
-    ServerBuilderAddTcpTlsListeningPort(
-        &builder, cranectld_listen_addr, listen_conf.CraneCtldListenPort,
-        listen_conf.TlsCerts.ExternalCerts, g_config.JwtSecretContent);
+    ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
+                                        listen_conf.CraneCtldListenPort,
+                                        listen_conf.TlsCerts.ExternalCerts);
   } else {
     ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
                                              listen_conf.CraneCtldListenPort);
-    std::vector<
-        std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>>
-        creators;
-    creators.push_back(
-        std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>(
-            new JwtAuthInterceptorFactory(g_config.JwtSecretContent)));
-
-    builder.experimental().SetInterceptorCreators(std::move(creators));
   }
+
+  std::vector<
+      std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>>
+      creators;
+  creators.push_back(
+      std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>(
+          new JwtAuthInterceptorFactory(g_config.JwtSecretContent)));
+
+  builder.experimental().SetInterceptorCreators(std::move(creators));
 
   builder.RegisterService(m_service_impl_.get());
 
