@@ -139,7 +139,7 @@ message TaskToCtld {
   string extra_attr = 23;
 
   string cmd_line = 31;
-  string cwd = 32;  // Current working directory
+  string cwd = 32; // Current working directory
   map<string, string> env = 33;
 
   string excludes = 34;
@@ -182,7 +182,7 @@ message TaskToD {
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
-  google.protobuf.Timestamp start_time = 5;  // Currently Only used in CraneCtld
+  google.protobuf.Timestamp start_time = 5; // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 6;
 
   string partition = 8;
