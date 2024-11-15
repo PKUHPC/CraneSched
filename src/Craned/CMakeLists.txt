@@ -26,7 +26,11 @@ target_include_directories(
 
 if(ENABLE_BPF)
         add_dependencies(craned cgroup_dev_bpf_object)
-        target_compile_definitions(craned PRIVATE CRANE_ENABLE_BPF)
+        add_compile_definitions(craned PRIVATE CRANE_ENABLE_BPF)
+endif()
+if(CRANE_USE_MIMALLOC)
+        add_compile_definitions(craned PRIVATE MI_OVERRIDE=ON)
+        message("Override malloc with mimalloc in craned")
 endif()
 target_link_libraries(craned
         concurrentqueue
@@ -58,6 +62,8 @@ target_link_libraries(craned
         Backward::Interface
 
         $<$<BOOL:${ENABLE_BPF}>:bpf>
+        
+        $<$<BOOL:${CRANE_USE_MIMALLOC}>:mimalloc>
 )
 
 # Linker flag for c++ 17 filesystem library
