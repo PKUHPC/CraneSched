@@ -24,8 +24,8 @@
 #include <grpcpp/support/status.h>
 #include <spdlog/fmt/bundled/format.h>
 
+#include "crane/Jwt.h"
 #include "crane/Network.h"
-#include "crane/jwt.h"
 
 struct TlsCertificates {
   std::string ServerCertFilePath;
@@ -52,19 +52,18 @@ struct ClientTlsCertificates {
 //   std::string jwt_secret_;
 // };
 
-// class JwtAuthInterceptor : public grpc::experimental::Interceptor {
-//  public:
-//   explicit JwtAuthInterceptor(grpc::experimental::ServerRpcInfo* info,
-//                               std::string secret)
-//       : info_(info), jwt_secret_(secret) {}
+class JwtAuthInterceptor : public grpc::experimental::Interceptor {
+ public:
+  explicit JwtAuthInterceptor(grpc::experimental::ServerRpcInfo* info,
+                              std::string secret)
+      : info_(info), jwt_secret_(secret) {}
 
-//   void Intercept(grpc::experimental::InterceptorBatchMethods* methods)
-//   override;
+  void Intercept(grpc::experimental::InterceptorBatchMethods* methods) override;
 
-//  private:
-//   grpc::experimental::ServerRpcInfo* info_;
-//   std::string jwt_secret_;
-// };
+ private:
+  grpc::experimental::ServerRpcInfo* info_;
+  std::string jwt_secret_;
+};
 
 class JwtAuthInterceptorFactory
     : public grpc::experimental::ServerInterceptorFactoryInterface {
