@@ -39,7 +39,6 @@ AccountManager::Result AccountManager::Login(uint32_t uid,
   if (!user) {
     return Result{false, "user not existed"};
   }
-
   if (password != user->password) {
     return Result{false, "Incorrect password"};
   }

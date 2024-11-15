@@ -268,9 +268,9 @@ grpc::Status CraneCtldServiceImpl::Login(
 
   response->set_ok(result.ok);
   if (result.ok) {
-    response->set_token(response->reason());
+    response->set_token(result.reason);
   } else {
-    response->set_reason(response->reason());
+    response->set_reason(result.reason);
   }
   return grpc::Status::OK;
 }
