@@ -1,5 +1,3 @@
-
-if(CRANE_USE_MIMALLOC)
 include(FetchContent)
 FetchContent_Declare(
     mimalloc
@@ -16,4 +14,3 @@ if(CRANE_ADDRESS_SANITIZER AND NOT CRANE_THREAD_SANITIZER)
 endif()
 
 FetchContent_MakeAvailable(mimalloc)
-endif()
