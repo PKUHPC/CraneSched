@@ -98,8 +98,7 @@ void ServerBuilderAddmTcpTlsListeningPort(grpc::ServerBuilder* builder,
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,
                                          const std::string& port,
-                                         const TlsCertificates& certs,
-                                         const std::string& jwt_secret);
+                                         const TlsCertificates& certs);
 
 void SetGrpcClientKeepAliveChannelArgs(grpc::ChannelArguments* args);
 
