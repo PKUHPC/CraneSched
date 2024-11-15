@@ -233,7 +233,7 @@ CraneErr CranedStub::SetCranedLoggingLevel(const std::string& logger, const std:
   SetCranedLoggingLevelReply reply;
 
   request.set_logger(logger);
-  request.set_log_level(level);
+  request.set_level(level);
 
   grpc_status = m_stub_->SetCranedLoggingLevel(&context, request, &reply);
   reason = reply.reason();

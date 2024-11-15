@@ -156,7 +156,7 @@ message CancelTaskReply {
 
 message SetCranedLoggingLevelRequest {
   string logger = 1;
-  string log_level = 2;
+  string level = 2;
 }
 
 message SetCranedLoggingLevelReply {

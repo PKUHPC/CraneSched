@@ -245,15 +245,15 @@ grpc::Status CraneCtldServiceImpl::SetLoggingLevel (
   spdlog::level::level_enum level;
   if (request->node_name_size() == 1 &&  request->node_name(0) == "") {
     if (!StrToLogLevel(request->log_level(), &level)) {
-        response->add_not_modified_nodes("control node");
+        response->add_not_modified_nodes("cranctld");
         response->add_not_modified_reasons("level is illegal");
         return grpc::Status::OK;
     }
     Result logger_res = SetLoggerLogLevel(request->logger(), level);
     if (logger_res.ok) {
-        response->add_modified_nodes("control node");
+        response->add_modified_nodes("cranctld");
     } else {
-        response->add_not_modified_nodes("control node");
+        response->add_not_modified_nodes("cranctld");
         response->add_not_modified_reasons(logger_res.reason);
     }
     return grpc::Status::OK;
