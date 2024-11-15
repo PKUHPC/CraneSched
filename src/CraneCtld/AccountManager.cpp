@@ -26,6 +26,56 @@ namespace Ctld {
 
 AccountManager::AccountManager() { InitDataMap_(); }
 
+AccountManager::Result AccountManager::Login(uint32_t uid,
+                                             const std::string& password) {
+  util::read_lock_guard user_guard(m_rw_user_mutex_);
+
+  PasswordEntry entry(uid);
+  if (!entry.Valid()) {
+    return Result{false, fmt::format("Uid {} not existed", uid)};
+  }
+
+  const User* user = GetExistedUserInfoNoLock_(entry.Username());
+  if (!user) {
+    return Result{false, "user not existed"};
+  }
+
+  if (password != user->password) {
+    return Result{false, "Incorrect password"};
+  }
+  std::unordered_map<std::string, std::string> claims{
+      {"UID", std::to_string(uid)}};
+  const std::string& token =
+      util::GenerateToken(g_config.JwtSecretContent, claims);
+
+  return Result{true, token};
+}
+
+AccountManager::Result AccountManager::Login(uint32_t uid,
+                                             const std::string& password) {
+  util::read_lock_guard user_guard(m_rw_user_mutex_);
+
+  PasswordEntry entry(uid);
+  if (!entry.Valid()) {
+    return Result{false, fmt::format("Uid {} not existed", uid)};
+  }
+
+  const User* user = GetExistedUserInfoNoLock_(entry.Username());
+  if (!user) {
+    return Result{false, "user not existed"};
+  }
+
+  if (password != user->password) {
+    return Result{false, "Incorrect password"};
+  }
+  std::unordered_map<std::string, std::string> claims{
+      {"UID", std::to_string(uid)}};
+  const std::string& token =
+      util::GenerateToken(g_config.JwtSecretContent, claims);
+
+  return Result{true, token};
+}
+
 AccountManager::CraneExpected<void> AccountManager::AddUser(
     uint32_t uid, const User& new_user) {
   CraneExpected<void> result;

@@ -263,6 +263,15 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 grpc::Status CraneCtldServiceImpl::Login(
     grpc::ServerContext *context, const crane::grpc::LoginRequest *request,
     crane::grpc::LoginReply *response) {
+  AccountManager::Result result =
+      g_account_manager->Login(request->uid(), request->password());
+
+  response->set_ok(result.ok);
+  if (result.ok) {
+    response->set_token(response->reason());
+  } else {
+    response->set_reason(response->reason());
+  }
   return grpc::Status::OK;
 }
 
