@@ -587,6 +587,7 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
     if (task_id_set_ptr->empty()) {
       uid_task_id_map->erase(uid);
     }
+    // Do not access task_id_set_ptr after erasing form map
   }
 
   if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
