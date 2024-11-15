@@ -215,8 +215,7 @@ void CgroupManager::ControllersMounted() {
       CRANE_WARN("Cgroup controller for I/O statistics is not available.");
     }
     if (!Mounted(Controller::FREEZE_CONTROLLER)) {
-      CRANE_WARN(
-          "Cgroup controller for process management is not available.");
+      CRANE_WARN("Cgroup controller for process management is not available.");
     }
     if (!Mounted(Controller::CPUACCT_CONTROLLER)) {
       CRANE_WARN("Cgroup controller for CPU accounting is not available.");
@@ -571,21 +570,23 @@ bool CgroupManager::ReleaseCgroupByTaskIdOnly(task_id_t task_id) {
 }
 
 bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
-  if (!this->m_uid_to_task_ids_map_.Contains(uid)) {
-    CRANE_DEBUG(
-        "Trying to release a non-existent cgroup for uid #{}. Ignoring it...",
-        uid);
-    return false;
-  }
-
   this->m_task_id_to_cg_spec_map_.Erase(task_id);
 
   {
     auto uid_task_id_map = this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
-    auto task_id_set_ptr = uid_task_id_map->at(uid).GetExclusivePtr();
+    if (!uid_task_id_map->contains(uid)) {
+      CRANE_DEBUG(
+          "Trying to release a non-existent cgroup for uid #{}. Ignoring it...",
+          uid);
+      return false;
+    }
+
+    auto task_id_set_ptr = uid_task_id_map->at(uid).RawPtr();
 
     task_id_set_ptr->erase(task_id);
-    if (task_id_set_ptr->empty()) uid_task_id_map->erase(uid);
+    if (task_id_set_ptr->empty()) {
+      uid_task_id_map->erase(uid);
+    }
   }
 
   if (!this->m_task_id_to_cg_map_.Contains(task_id)) {
@@ -969,7 +970,7 @@ bool CgroupV1::MigrateProcIn(pid_t pid) {
   // If there is no memory controller present, we skip all this and just attempt
   // a migrate
   int err;
-  // TODO handle memory.move_charge_at_immigrate 
+  // TODO: handle memory.move_charge_at_immigrate
   // https://github.com/PKUHPC/CraneSched/pull/327/files/eaa0d04dcc4c12a1773ac9a3fd42aa9f898741aa..9dc93a50528c1b22dbf50d0bf40a11a98bbed36d#r1838007422
   err = cgroup_attach_task_pid(m_cgroup_info_.m_cgroup_, pid);
   if (err != 0) {
