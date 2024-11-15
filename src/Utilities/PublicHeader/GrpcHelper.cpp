@@ -41,20 +41,22 @@ void JwtAuthInterceptor::Intercept(
   if (methods->QueryInterceptionHookPoint(
           grpc::experimental::InterceptionHookPoints::
               POST_RECV_INITIAL_METADATA)) {
-    auto* metadata_map = methods->GetRecvInitialMetadata();
+    if (strcmp(info_->method(), "/crane.grpc.CraneCtld/Login") != 0) {
+      auto* metadata_map = methods->GetRecvInitialMetadata();
 
-    auto iter = metadata_map->find("Authorization");
-    if (iter == metadata_map->end()) {
-      info_->server_context()->TryCancel();
-      return;
+      auto iter = metadata_map->find("authorization");
+      if (iter == metadata_map->end()) {
+        info_->server_context()->TryCancel();
+        return;
+      }
+      auto token = iter->second.data();
+      if (!util::VerifyToken(jwt_secret_, token)) {
+        info_->server_context()->TryCancel();
+        return;
+      }
+      info_->server_context()->AddInitialMetadata("uid",
+                                                  util::GetClaim("UID", token));
     }
-    auto token = iter->second.data();
-    if (!util::VerifyToken(jwt_secret_, token)) {
-      info_->server_context()->TryCancel();
-      return;
-    }
-    info_->server_context()->AddInitialMetadata("UID",
-                                                util::GetClaim("UID", token));
   }
   methods->Proceed();
 }

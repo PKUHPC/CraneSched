@@ -20,6 +20,8 @@ bool VerifyToken(const std::string& secret, const std::string& token) {
         .verify(decoded);
   } catch (std::invalid_argument& a) {
     return false;
+  } catch (std::runtime_error& e) {
+    return false;
   } catch (jwt::error::token_verification_exception& e) {
     return false;
   }
