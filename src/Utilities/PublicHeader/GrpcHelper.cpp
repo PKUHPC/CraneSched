@@ -103,8 +103,7 @@ void ServerBuilderAddTcpInsecureListeningPort(grpc::ServerBuilder* builder,
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,
                                          const std::string& port,
-                                         const TlsCertificates& certs,
-                                         const std::string& jwt_secret) {
+                                         const TlsCertificates& certs) {
   std::string listen_addr_port =
       fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
 
