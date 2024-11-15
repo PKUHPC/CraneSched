@@ -115,6 +115,10 @@ option(CRANE_MIN_LOG_LEVEL "Set the minimal log level (INFO/DEBUG/TRACE)" OFF)
 option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
 # Options end here -------------------------------------------------------------------------------
 
+if (CRANE_ADDRESS_SANITIZER AND CRANE_THREAD_SANITIZER)
+  message(FATAL_ERROR "CRANE_ADDRESS_SANITIZER and CRANE_THREAD_SANITIZER cannot be enabled at the same time.")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
