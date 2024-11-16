@@ -10,7 +10,7 @@ FetchContent_Declare(
 
 if(CRANE_ADDRESS_SANITIZER AND NOT CRANE_THREAD_SANITIZER)
     set(MI_TRACK_ASAN ON CACHE BOOL "Enable ASAN in mimalloc" FORCE)
-    message("Set ASAN enable in mimalloc")
+    message(STATUS "Set ASAN enable in mimalloc")
 endif()
 
 FetchContent_MakeAvailable(mimalloc)
