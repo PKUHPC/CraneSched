@@ -26,7 +26,7 @@ target_include_directories(
 
 if(ENABLE_BPF)
         add_dependencies(craned cgroup_dev_bpf_object)
-        add_compile_definitions(craned PRIVATE CRANE_ENABLE_BPF)
+        target_compile_definitions(craned PRIVATE CRANE_ENABLE_BPF)
 endif()
 
 target_link_libraries(craned
