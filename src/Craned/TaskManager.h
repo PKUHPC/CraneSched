@@ -304,7 +304,7 @@ class TaskManager {
 
   template <typename Duration>
   void AddTerminationTimer_(TaskInstance* instance, Duration duration) {
-    auto termination_handel = m_uvw_loop->resource<uvw::timer_handle>();
+    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
         [this, task_id = instance->task.task_id()](const uvw::timer_event&,
                                                    uvw::timer_handle& h) {
@@ -317,7 +317,7 @@ class TaskManager {
   }
 
   void AddTerminationTimer_(TaskInstance* instance, int64_t secs) {
-    auto termination_handel = m_uvw_loop->resource<uvw::timer_handle>();
+    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
         [this, task_id = instance->task.task_id()](const uvw::timer_event&,
                                                    uvw::timer_handle& h) {
@@ -404,7 +404,7 @@ class TaskManager {
 
   void SigchldTimerCb_(ProcSigchldInfo* sigchld_info);
 
-  std::shared_ptr<uvw::loop> m_uvw_loop;
+  std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
 
@@ -448,9 +448,9 @@ class TaskManager {
   std::atomic_bool m_is_ending_now_{false};
 
   // After m_is_ending_now_ set to true, when all task are cleared, we can exit.
-  std::atomic_bool m_task_cleared{false};
+  std::atomic_bool m_task_cleared_{false};
 
-  std::thread m_uvw_thread;
+  std::thread m_uvw_thread_;
 
   static inline TaskManager* m_instance_ptr_;
 };
