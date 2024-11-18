@@ -22,8 +22,6 @@ bool VerifyToken(const std::string& secret, const std::string& token) {
     return false;
   } catch (std::runtime_error& e) {
     return false;
-  } catch (jwt::error::token_verification_exception& e) {
-    return false;
   }
 
   return true;
