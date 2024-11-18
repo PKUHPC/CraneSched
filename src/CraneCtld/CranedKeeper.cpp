@@ -20,8 +20,6 @@
 
 #include <google/protobuf/util/time_util.h>
 
-#include "CtldPublicDefs.h"
-
 namespace Ctld {
 
 using grpc::ClientContext;

@@ -16,8 +16,6 @@
 
 #pragma once
 
-#include <memory>
-#include "CtldForCranedServer.h"
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
@@ -26,7 +24,7 @@
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
-  
+
 using crane::grpc::Craned;
 using grpc::Channel;
 using grpc::Server;
@@ -44,9 +42,8 @@ class CforedStreamWriter {
                                crane::grpc::StreamCforedRequest> *stream)
       : m_stream_(stream), m_valid_(true) {}
 
-  bool WriteTaskIdReply(
-      pid_t calloc_pid,
-      result::result<task_id_t, std::string> res) {
+  bool WriteTaskIdReply(pid_t calloc_pid,
+                        result::result<task_id_t, std::string> res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -66,8 +63,11 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
-  bool WriteTaskResAllocReply(task_id_t task_id,
-                              result::result<std::pair<std::string,std::list<std::string>>, std::string> res) {
+  bool WriteTaskResAllocReply(
+      task_id_t task_id,
+      result::result<std::pair<std::string, std::list<std::string>>,
+                     std::string>
+          res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -78,8 +78,12 @@ class CforedStreamWriter {
 
     if (res.has_value()) {
       task_res_alloc_reply->set_ok(true);
-      task_res_alloc_reply->set_allocated_craned_regex(std::move(res.value().first));
-      std::ranges::for_each(res.value().second,[&task_res_alloc_reply](const auto& craned_id){task_res_alloc_reply->add_craned_ids(craned_id);});
+      task_res_alloc_reply->set_allocated_craned_regex(
+          std::move(res.value().first));
+      std::ranges::for_each(res.value().second,
+                            [&task_res_alloc_reply](const auto &craned_id) {
+                              task_res_alloc_reply->add_craned_ids(craned_id);
+                            });
     } else {
       task_res_alloc_reply->set_ok(false);
       task_res_alloc_reply->set_failure_reason(std::move(res.error()));
@@ -91,7 +95,8 @@ class CforedStreamWriter {
   bool WriteTaskCompletionAckReply(task_id_t task_id) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
-    CRANE_TRACE("Sending TaskCompletionAckReply to cfored of task id {}",task_id);
+    CRANE_TRACE("Sending TaskCompletionAckReply to cfored of task id {}",
+                task_id);
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::TASK_COMPLETION_ACK_REPLY);
 
@@ -163,50 +168,52 @@ class CforedStreamWriter {
 
 class CtldForCforedServer;
 
-class CtldForCforedServiceImpl final : public crane::grpc::CraneCtldForCfored::Service {
-  public:
-    explicit CtldForCforedServiceImpl(CtldForCforedServer *server) : m_ctld_server_(server) {}
-    
-    grpc::Status CforedStream(
+class CtldForCforedServiceImpl final
+    : public crane::grpc::CraneCtldForCfored::Service {
+ public:
+  explicit CtldForCforedServiceImpl(CtldForCforedServer *server)
+      : m_ctld_server_(server) {}
+
+  grpc::Status CforedStream(
       grpc::ServerContext *context,
       grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
                                crane::grpc::StreamCforedRequest> *stream)
       override;
 
-  private:
-    CtldForCforedServer *m_ctld_server_;
+ private:
+  CtldForCforedServer *m_ctld_server_;
 };
 
 /***
  * Note: There should be only ONE instance of CtldServer!!!!
  */
 class CtldForCforedServer {
-  public:
-    explicit CtldForCforedServer(const Config::CraneCtldListenConf &listen_conf);
+ public:
+  explicit CtldForCforedServer(const Config::CraneCtldListenConf &listen_conf);
 
-    inline void Wait() { m_server_->Wait(); }
-  private:
-    template <typename K, typename V,
+  inline void Wait() { m_server_->Wait(); }
+
+ private:
+  template <typename K, typename V,
             typename Hash = absl::container_internal::hash_default_hash<K>>
-    using HashMap = absl::flat_hash_map<K, V, Hash>;
+  using HashMap = absl::flat_hash_map<K, V, Hash>;
 
-    template <typename K,
+  template <typename K,
             typename Hash = absl::container_internal::hash_default_hash<K>>
-    using HashSet = absl::flat_hash_set<K, Hash>;
+  using HashSet = absl::flat_hash_set<K, Hash>;
 
-    using Mutex = util::mutex;
+  using Mutex = util::mutex;
 
-    std::unique_ptr<CtldForCforedServiceImpl> m_service_impl_;
-    std::unique_ptr<Server> m_server_;
+  std::unique_ptr<CtldForCforedServiceImpl> m_service_impl_;
+  std::unique_ptr<Server> m_server_;
 
-    Mutex m_mtx_;
-    HashMap<std::string /* cfored_name */, HashSet<task_id_t>>
+  Mutex m_mtx_;
+  HashMap<std::string /* cfored_name */, HashSet<task_id_t>>
       m_cfored_running_tasks_ ABSL_GUARDED_BY(m_mtx_);
 
-    friend class CtldForCforedServiceImpl;
+  friend class CtldForCforedServiceImpl;
 };
 
-
-} // namespace Ctld
+}  // namespace Ctld
 
 inline std::unique_ptr<Ctld::CtldForCforedServer> g_ctld_for_cfored_server;
