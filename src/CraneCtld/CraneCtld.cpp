@@ -137,12 +137,13 @@ void ParseConfig(int argc, char** argv) {
             config["JwtCertFilePath"].as<std::string>();
 
         try {
-          g_config.JwtSecretContent = util::ReadFileIntoString(jwtCertFilePath);
+          g_config.ListenConf.JwtSecretContent =
+              util::ReadFileIntoString(jwtCertFilePath);
         } catch (const std::exception& e) {
           CRANE_ERROR("Read cert file error: {}", e.what());
           std::exit(1);
         }
-        if (g_config.JwtSecretContent.empty()) {
+        if (g_config.ListenConf.JwtSecretContent.empty()) {
           CRANE_ERROR(
               "The file specified by JwtCertFilePath "
               "is empty");
@@ -182,6 +183,8 @@ void ParseConfig(int argc, char** argv) {
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
       if (config["UseTls"] && config["UseTls"].as<bool>()) {
+        const auto& ssl_config = config["SSL"];
+
         TlsCertificates& external_certs =
             g_config.ListenConf.TlsCerts.ExternalCerts;
         TlsCertificates& internal_certs =
@@ -193,13 +196,13 @@ void ParseConfig(int argc, char** argv) {
 
         g_config.ListenConf.UseTls = true;
 
-        if (config["DomainSuffix"])
+        if (ssl_config["DomainSuffix"])
           g_config.ListenConf.TlsCerts.DomainSuffix =
-              config["DomainSuffix"].as<std::string>();
+              ssl_config["DomainSuffix"].as<std::string>();
 
-        if (config["CranectldExternalCertFilePath"]) {
+        if (ssl_config["CranectldExternalCertFilePath"]) {
           external_certs.ServerCertFilePath =
-              config["CranectldExternalCertFilePath"].as<std::string>();
+              ssl_config["CranectldExternalCertFilePath"].as<std::string>();
 
           try {
             external_certs.ServerCertContent =
@@ -220,9 +223,9 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (config["CranectldExternalKeyFilePath"]) {
+        if (ssl_config["CranectldExternalKeyFilePath"]) {
           external_certs.ServerKeyFilePath =
-              config["CranectldExternalKeyFilePath"].as<std::string>();
+              ssl_config["CranectldExternalKeyFilePath"].as<std::string>();
 
           try {
             external_certs.ServerKeyContent =
@@ -243,9 +246,9 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (config["InternalCaFilePath"]) {
+        if (ssl_config["InternalCaFilePath"]) {
           std::string internalCaFilePath =
-              config["InternalCaFilePath"].as<std::string>();
+              ssl_config["InternalCaFilePath"].as<std::string>();
 
           try {
             g_config.ListenConf.TlsCerts.InternalCaContent =
@@ -264,9 +267,9 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (config["CranectldInternalCertFilePath"]) {
+        if (ssl_config["CranectldInternalCertFilePath"]) {
           internal_certs.ServerCertFilePath =
-              config["CranectldInternalCertFilePath"].as<std::string>();
+              ssl_config["CranectldInternalCertFilePath"].as<std::string>();
 
           try {
             internal_certs.ServerCertContent =
@@ -287,9 +290,9 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (config["CranectldInternalKeyFilePath"]) {
+        if (ssl_config["CranectldInternalKeyFilePath"]) {
           internal_certs.ServerKeyFilePath =
-              config["CranectldInternalKeyFilePath"].as<std::string>();
+              ssl_config["CranectldInternalKeyFilePath"].as<std::string>();
 
           try {
             internal_certs.ServerKeyContent =
@@ -310,9 +313,9 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (config["CranedCertFilePath"]) {
+        if (ssl_config["CranedCertFilePath"]) {
           craned_certs.ClientCertFilePath =
-              config["CranedCertFilePath"].as<std::string>();
+              ssl_config["CranedCertFilePath"].as<std::string>();
 
           try {
             craned_certs.ClientCertContent =
@@ -331,9 +334,9 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (config["CforedCertFilePath"]) {
+        if (ssl_config["CforedCertFilePath"]) {
           cfored_certs.ClientCertFilePath =
-              config["CforedCertFilePath"].as<std::string>();
+              ssl_config["CforedCertFilePath"].as<std::string>();
 
           try {
             cfored_certs.ClientCertContent =

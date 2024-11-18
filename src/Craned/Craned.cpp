@@ -25,12 +25,10 @@
 
 #include <ctime>
 #include <cxxopts.hpp>
-#include <string>
 
 #include "CforedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
-#include "crane/GrpcHelper.h"
 #include "crane/Network.h"
 #include "crane/OS.h"
 #include "crane/PluginClient.h"
@@ -175,6 +173,8 @@ void ParseConfig(int argc, char** argv) {
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
       if (config["UseTls"] && config["UseTls"].as<bool>()) {
+        const auto& ssl_config = config["SSL"];
+
         g_config.ListenConf.UseTls = true;
         TlsCertificates& craned_certs =
             g_config.ListenConf.TlsCerts.CranedTlsCerts;
@@ -183,13 +183,13 @@ void ParseConfig(int argc, char** argv) {
         ClientTlsCertificates& cfoed_client_certs =
             g_config.ListenConf.TlsCerts.CforedClientTlsCerts;
 
-        if (config["DomainSuffix"])
+        if (ssl_config["DomainSuffix"])
           g_config.ListenConf.TlsCerts.DomainSuffix =
-              config["DomainSuffix"].as<std::string>();
+              ssl_config["DomainSuffix"].as<std::string>();
 
-        if (config["InternalCaFilePath"]) {
+        if (ssl_config["InternalCaFilePath"]) {
           std::string internalCaFilePath =
-              config["InternalCaFilePath"].as<std::string>();
+              ssl_config["InternalCaFilePath"].as<std::string>();
 
           try {
             g_config.ListenConf.TlsCerts.InternalCaContent =
@@ -208,9 +208,9 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (config["CranedCertFilePath"]) {
+        if (ssl_config["CranedCertFilePath"]) {
           craned_certs.ServerCertFilePath =
-              config["CranedCertFilePath"].as<std::string>();
+              ssl_config["CranedCertFilePath"].as<std::string>();
 
           try {
             craned_certs.ServerCertContent =
@@ -229,9 +229,9 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (config["CranedKeyFilePath"]) {
+        if (ssl_config["CranedKeyFilePath"]) {
           craned_certs.ServerKeyFilePath =
-              config["CranedKeyFilePath"].as<std::string>();
+              ssl_config["CranedKeyFilePath"].as<std::string>();
 
           try {
             craned_certs.ServerKeyContent =
@@ -250,9 +250,9 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (config["CranectldInternalCertFilePath"]) {
+        if (ssl_config["CranectldInternalCertFilePath"]) {
           internal_client_certs.ClientCertFilePath =
-              config["CranectldInternalCertFilePath"].as<std::string>();
+              ssl_config["CranectldInternalCertFilePath"].as<std::string>();
 
           try {
             internal_client_certs.ClientCertContent = util::ReadFileIntoString(
@@ -273,9 +273,9 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (config["CforedCertFilePath"]) {
+        if (ssl_config["CforedCertFilePath"]) {
           cfoed_client_certs.ClientCertFilePath =
-              config["CforedCertFilePath"].as<std::string>();
+              ssl_config["CforedCertFilePath"].as<std::string>();
 
           try {
             cfoed_client_certs.ClientCertContent =

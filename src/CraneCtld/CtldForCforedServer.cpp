@@ -18,13 +18,11 @@
 
 #include <google/protobuf/util/time_util.h>
 #include <grpcpp/server_builder.h>
-#include <memory>
 
 #include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
-#include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
 #include "crane/String.h"
@@ -209,22 +207,24 @@ grpc::Status CtldForCforedServiceImpl::CforedStream(
   }
 }
 
-CtldForCforedServer::CtldForCforedServer(const Config::CraneCtldListenConf &listen_conf) {
+CtldForCforedServer::CtldForCforedServer(
+    const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CtldForCforedServiceImpl>(this);
 
   grpc::ServerBuilder builder;
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
-  if (listen_conf.UseTls) 
+  if (listen_conf.UseTls)
     ServerBuilderAddmTcpTlsListeningPort(
         &builder, listen_conf.CraneCtldListenAddr,
-        listen_conf.CraneCtldForCforedListenPort, listen_conf.TlsCerts.InternalCerts, 
+        listen_conf.CraneCtldForCforedListenPort,
+        listen_conf.TlsCerts.InternalCerts,
         listen_conf.TlsCerts.InternalCaContent);
-  else 
-    ServerBuilderAddTcpInsecureListeningPort(&builder,
-                                             listen_conf.CraneCtldListenAddr,
-                                             listen_conf.CraneCtldForCforedListenPort);
+  else
+    ServerBuilderAddTcpInsecureListeningPort(
+        &builder, listen_conf.CraneCtldListenAddr,
+        listen_conf.CraneCtldForCforedListenPort);
 
   builder.RegisterService(m_service_impl_.get());
   m_server_ = builder.BuildAndStart();
@@ -233,8 +233,8 @@ CtldForCforedServer::CtldForCforedServer(const Config::CraneCtldListenConf &list
     std::exit(1);
   }
   CRANE_INFO("CraneCtld For Cfored Server is listening on {}:{} and Tls is {}",
-             listen_conf.CraneCtldListenAddr, listen_conf.CraneCtldForCforedListenPort,
-             listen_conf.UseTls);
+             listen_conf.CraneCtldListenAddr,
+             listen_conf.CraneCtldForCforedListenPort, listen_conf.UseTls);
 }
 
-} // namespace Ctld
+}  // namespace Ctld

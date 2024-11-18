@@ -47,7 +47,7 @@ AccountManager::Result AccountManager::Login(uint32_t uid,
   std::unordered_map<std::string, std::string> claims{
       {"UID", std::to_string(uid)}};
   const std::string& token =
-      util::GenerateToken(g_config.JwtSecretContent, claims);
+      util::GenerateToken(g_config.ListenConf.JwtSecretContent, claims);
 
   return Result{true, token};
 }

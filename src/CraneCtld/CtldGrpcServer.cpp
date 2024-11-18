@@ -695,7 +695,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
       creators;
   creators.push_back(
       std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>(
-          new JwtAuthInterceptorFactory(g_config.JwtSecretContent)));
+          new JwtAuthInterceptorFactory(g_config.ListenConf.JwtSecretContent)));
 
   builder.experimental().SetInterceptorCreators(std::move(creators));
 
