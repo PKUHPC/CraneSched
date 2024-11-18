@@ -24,8 +24,6 @@
 #include <yaml-cpp/yaml.h>
 
 #include <cxxopts.hpp>
-#include <filesystem>
-#include <memory>
 
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
@@ -38,11 +36,8 @@
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
-#include "crane/GrpcHelper.h"
-#include "crane/Logger.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
-#include "crane/PublicHeader.h"
 
 void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("cranectld");
