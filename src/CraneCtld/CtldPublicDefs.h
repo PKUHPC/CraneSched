@@ -18,11 +18,10 @@
 
 #pragma once
 
-#include <string>
-
 #include "CtldPreCompiledHeader.h"
-#include "crane/GrpcHelper.h"
 // Precompiled header come first!
+
+#include "crane/GrpcHelper.h"
 
 namespace Ctld {
 
@@ -104,9 +103,9 @@ struct Config {
     };
 
     TlsCertsConfig TlsCerts;
+    std::string JwtSecretContent;
   };
   CraneCtldListenConf ListenConf;
-  std::string JwtSecretContent;
 
   struct CranedListenConf {
     std::string CranedListenPort;

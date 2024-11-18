@@ -12,20 +12,21 @@ CraneBaseDir: /var/crane/
 
 # Tls settings
 UseTls: true
-CranectldExternalCertFilePath: /etc/crane/cranectld_external.pem
-CranectldExternalKeyFilePath: /etc/crane/cranectld_external.key
-ExternalCaFilePath: /etc/crane/external_ca.pem
-
-CranectldInternalCertFilePath: /etc/crane/cranectld_internal.pem
-CranectldInternalKeyFilePath: /etc/crane/cranectld_internal.key
-CranedCertFilePath: /etc/crane/craned.pem
-CranedKeyFilePath: /etc/crane/craned.key
-CforedCertFilePath: /etc/crane/cfored.pem
-CforedKeyFilePath: /etc/crane/cfored.key
-InternalCaFilePath: /etc/crane/internal_ca.pem
-
-DomainSuffix: crane.com
-
+SSL:
+  CranectldExternalCertFilePath: /etc/crane/cranectld_external.pem
+  CranectldExternalKeyFilePath: /etc/crane/cranectld_external.key
+  ExternalCaFilePath: /etc/crane/external_ca.pem
+    
+  CranectldInternalCertFilePath: /etc/crane/cranectld_internal.pem
+  CranectldInternalKeyFilePath: /etc/crane/cranectld_internal.key
+  CranedCertFilePath: /etc/crane/craned.pem
+  CranedKeyFilePath: /etc/crane/craned.key
+  CforedCertFilePath: /etc/crane/cfored.pem
+  CforedKeyFilePath: /etc/crane/cfored.key
+  InternalCaFilePath: /etc/crane/internal_ca.pem
+    
+  DomainSuffix: crane.com
+  
 JwtCertFilePath: /etc/crane/jwt.pem
 
 # Ctld settings
