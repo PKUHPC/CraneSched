@@ -88,7 +88,7 @@ AccountManager::CraneExpected<void> AccountManager::AddAccount(
       result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
     else
       result = CheckIfUserHasPermOnAccountNoLock_(
-        *op_user, new_account.parent_account, false);
+          *op_user, new_account.parent_account, false);
     if (!result) return result;
   }
 
@@ -415,8 +415,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
     }
   } else {
     const Account* account = GetAccountInfoNoLock_(name);
-    if (!account)
-      return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+    if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
     res_account_map->try_emplace(name, *account);
   }
 
@@ -1642,6 +1641,11 @@ AccountManager::CraneExpected<void> AccountManager::AddAccount_(
       res_account.allowed_qos_list =
           std::list<std::string>{parent->allowed_qos_list};
     }
+  }
+
+  if (res_account.default_qos.empty()) {
+    if (!res_account.allowed_qos_list.empty())
+      res_account.default_qos = res_account.allowed_qos_list.front();
   }
 
   mongocxx::client_session::with_transaction_cb callback =
