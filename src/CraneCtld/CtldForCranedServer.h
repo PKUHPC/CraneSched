@@ -14,7 +14,7 @@
  * See the Mulan PSL v2 for more details.
  */
 
- #pragma once
+#pragma once
 
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
@@ -30,9 +30,11 @@ using grpc::Server;
 
 class CtldForCranedServer;
 
-class CtldForCranedServiceImpl final : public crane::grpc::CraneCtldForCraned::Service {
+class CtldForCranedServiceImpl final
+    : public crane::grpc::CraneCtldForCraned::Service {
  public:
-  explicit CtldForCranedServiceImpl(CtldForCranedServer* server) : m_ctld_for_craned_server_(server) {}
+  explicit CtldForCranedServiceImpl(CtldForCranedServer *server)
+      : m_ctld_for_craned_server_(server) {}
   grpc::Status TaskStatusChange(
       grpc::ServerContext *context,
       const crane::grpc::TaskStatusChangeRequest *request,
@@ -42,6 +44,7 @@ class CtldForCranedServiceImpl final : public crane::grpc::CraneCtldForCraned::S
       grpc::ServerContext *context,
       const crane::grpc::CranedRegisterRequest *request,
       crane::grpc::CranedRegisterReply *response) override;
+
  private:
   CtldForCranedServer *m_ctld_for_craned_server_;
 };
@@ -56,6 +59,8 @@ class CtldForCranedServer {
 
   inline void Wait() { m_server_->Wait(); }
 
+  void Shutdown();
+
  private:
   std::unique_ptr<CtldForCranedServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
@@ -64,5 +69,5 @@ class CtldForCranedServer {
 };
 
 }  // namespace Ctld
- 
+
 inline std::unique_ptr<Ctld::CtldForCranedServer> g_ctld_for_craned_server;

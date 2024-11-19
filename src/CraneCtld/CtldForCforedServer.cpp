@@ -207,6 +207,11 @@ grpc::Status CtldForCforedServiceImpl::CforedStream(
   }
 }
 
+void CtldForCforedServer::Shutdown() {
+  m_server_->Shutdown(std::chrono::system_clock::now() +
+                      std::chrono::seconds(1));
+}
+
 CtldForCforedServer::CtldForCforedServer(
     const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CtldForCforedServiceImpl>(this);

@@ -58,22 +58,29 @@ grpc::Status CtldForCranedServiceImpl::CranedRegister(
   return grpc::Status::OK;
 }
 
-CtldForCranedServer::CtldForCranedServer(const Config::CraneCtldListenConf &listen_conf) {
+void CtldForCranedServer::Shutdown() {
+  m_server_->Shutdown(std::chrono::system_clock::now() +
+                      std::chrono::seconds(1));
+}
+
+CtldForCranedServer::CtldForCranedServer(
+    const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CtldForCranedServiceImpl>(this);
 
   grpc::ServerBuilder builder;
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
-  if (listen_conf.UseTls) 
+  if (listen_conf.UseTls)
     ServerBuilderAddmTcpTlsListeningPort(
         &builder, listen_conf.CraneCtldListenAddr,
-        listen_conf.CraneCtldForCranedListenPort, listen_conf.TlsCerts.InternalCerts, 
+        listen_conf.CraneCtldForCranedListenPort,
+        listen_conf.TlsCerts.InternalCerts,
         listen_conf.TlsCerts.InternalCaContent);
-  else 
-    ServerBuilderAddTcpInsecureListeningPort(&builder,
-                                             listen_conf.CraneCtldListenAddr,
-                                             listen_conf.CraneCtldForCranedListenPort);
+  else
+    ServerBuilderAddTcpInsecureListeningPort(
+        &builder, listen_conf.CraneCtldListenAddr,
+        listen_conf.CraneCtldForCranedListenPort);
 
   builder.RegisterService(m_service_impl_.get());
   m_server_ = builder.BuildAndStart();
@@ -82,8 +89,8 @@ CtldForCranedServer::CtldForCranedServer(const Config::CraneCtldListenConf &list
     std::exit(1);
   }
   CRANE_INFO("CraneCtld For Craned Server is listening on {}:{} and Tls is {}",
-             listen_conf.CraneCtldListenAddr, listen_conf.CraneCtldForCranedListenPort,
-             listen_conf.UseTls);
+             listen_conf.CraneCtldListenAddr,
+             listen_conf.CraneCtldForCranedListenPort, listen_conf.UseTls);
 }
 
 }  // namespace Ctld
