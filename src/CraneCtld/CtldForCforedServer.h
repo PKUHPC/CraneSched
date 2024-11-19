@@ -193,6 +193,8 @@ class CtldForCforedServer {
 
   inline void Wait() { m_server_->Wait(); }
 
+  void Shutdown();
+
  private:
   template <typename K, typename V,
             typename Hash = absl::container_internal::hash_default_hash<K>>

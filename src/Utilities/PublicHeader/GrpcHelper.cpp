@@ -137,10 +137,6 @@ void ServerBuilderAddmTcpTlsListeningPort(grpc::ServerBuilder* builder,
   pem_key_cert_pair.private_key = certs.ServerKeyContent;
 
   grpc::SslServerCredentialsOptions ssl_opts;
-  // pem_root_certs is actually the certificate of server side rather than
-  // CA certificate. CA certificate is not needed.
-  // Since we use the same cert/key pair for both cranectld/craned,
-  // pem_root_certs is set to the same certificate.
   ssl_opts.pem_root_certs = pem_root_cert;
   ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
   ssl_opts.client_certificate_request =
