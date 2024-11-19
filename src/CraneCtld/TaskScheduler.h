@@ -263,6 +263,7 @@ class TaskScheduler {
       m_cancel_task_queue_.enqueue(
           CancelPendingTaskQueueElem{.task = std::move(pd_it->second)});
       m_cancel_task_async_handle_->send();
+      m_pending_task_map_.erase(pd_it);
       return CraneErr::kOk;
     }
 
