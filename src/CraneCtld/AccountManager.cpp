@@ -404,10 +404,11 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
         queue.push(acct);
         while (!queue.empty()) {
           std::string father = queue.front();
-          res_account_map->try_emplace(m_account_map_.at(father)->name,
-                                       *(m_account_map_.at(father)));
+          const auto& account_content = m_account_map_.at(father);
+          res_account_map->try_emplace(account_content->name,
+                                       *(account_content));
           queue.pop();
-          for (const auto& child : m_account_map_.at(father)->child_accounts) {
+          for (const auto& child : account_content->child_accounts) {
             queue.push(child);
           }
         }
@@ -1108,10 +1109,10 @@ AccountManager::CheckSetUserDefaultQosNoLock_(const User& user,
                                               const std::string& account,
                                               const std::string& partition,
                                               const std::string& qos) {
+  const auto& attrs_in_account = user.account_to_attrs_map.at(account);
   if (partition.empty()) {
     bool is_allowed = false;
-    for (const auto& [par, pair] :
-         user.account_to_attrs_map.at(account).allowed_partition_qos_map) {
+    for (const auto& [par, pair] : attrs_in_account.allowed_partition_qos_map) {
       if (ranges::contains(pair.second, qos) && qos != pair.first) {
         is_allowed = true;
         break;
@@ -1120,13 +1121,11 @@ AccountManager::CheckSetUserDefaultQosNoLock_(const User& user,
 
     if (!is_allowed) return std::unexpected(CraneErrCode::ERR_SET_DEFAULT_QOS);
   } else {
-    auto iter =
-        user.account_to_attrs_map.at(account).allowed_partition_qos_map.find(
-            partition);
-    if (iter ==
-        user.account_to_attrs_map.at(account).allowed_partition_qos_map.end()) {
+    auto iter = attrs_in_account.allowed_partition_qos_map.find(partition);
+
+    if (iter == attrs_in_account.allowed_partition_qos_map.end())
       return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
-    }
+
     if (!ranges::contains(iter->second.second, qos))
       return std::unexpected(CraneErrCode::ERR_ALLOWED_QOS);
 
@@ -1154,10 +1153,10 @@ AccountManager::CheckDeleteUserAllowedQosNoLock_(const User& user,
                                                  const std::string& partition,
                                                  const std::string& qos,
                                                  bool force) {
+  const auto& attrs_in_account = user.account_to_attrs_map.at(account);
   if (partition.empty()) {
     bool is_allowed = false;
-    for (const auto& [par, pair] :
-         user.account_to_attrs_map.at(account).allowed_partition_qos_map) {
+    for (const auto& [par, pair] : attrs_in_account.allowed_partition_qos_map) {
       if (ranges::contains(pair.second, qos)) {
         is_allowed = true;
         if (pair.first == qos && !force)
@@ -1167,14 +1166,10 @@ AccountManager::CheckDeleteUserAllowedQosNoLock_(const User& user,
     }
   } else {
     // Delete the qos of a specified partition
-    auto iter =
-        user.account_to_attrs_map.at(account).allowed_partition_qos_map.find(
-            partition);
+    auto iter = attrs_in_account.allowed_partition_qos_map.find(partition);
 
-    if (iter ==
-        user.account_to_attrs_map.at(account).allowed_partition_qos_map.end()) {
+    if (iter == attrs_in_account.allowed_partition_qos_map.end())
       return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
-    }
 
     if (!ranges::contains(iter->second.second, qos))
       return std::unexpected(CraneErrCode::ERR_ALLOWED_QOS);
