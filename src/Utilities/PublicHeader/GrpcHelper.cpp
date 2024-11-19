@@ -49,9 +49,7 @@ void JwtAuthInterceptor::Intercept(
         info_->server_context()->TryCancel();
         return;
       }
-      char token[iter->second.size()];
-      std::strcpy(token, iter->second.data());
-      token[iter->second.size()] = '\0';
+      std::string token(iter->second.data(), iter->second.size());
       if (!util::VerifyToken(jwt_secret_, token)) {
         info_->server_context()->TryCancel();
         return;
