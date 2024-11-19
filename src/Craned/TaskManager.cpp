@@ -519,9 +519,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   using crane::grpc::subprocess::CanStartMessage;
   using crane::grpc::subprocess::ChildProcessReady;
 
-  int ctrl_sock_pair[2];    // Socket pair for passing control messages.
-  int io_in_sock_pair[2];   // Socket pair for forwarding IO of crun tasks.
-  int io_out_sock_pair[2];  // Socket pair for forwarding IO of crun tasks.
+  int ctrl_sock_pair[2];  // Socket pair for passing control messages.
+
+  // Socket pair for forwarding IO of crun tasks. Craned read from index 0.
+  int crun_msg_sock_pair[2];
 
   // The ResourceInNode structure should be copied here for being accessed in
   // the child process.
@@ -559,11 +560,25 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   }
 
   pid_t child_pid;
+  bool launch_pty{false};
 
   if (instance->IsCrun()) {
     auto* crun_meta =
         dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
-    child_pid = forkpty(&crun_meta->msg_fd, NULL, NULL, NULL);
+    CRANE_DEBUG("Launching crun task #{} pty:{}", instance->task.task_id(),
+                instance->task.interactive_meta().pty());
+    if (instance->task.interactive_meta().pty()) {
+      launch_pty = true;
+      child_pid = forkpty(&crun_meta->msg_fd, nullptr, nullptr, nullptr);
+    } else {
+      if (socketpair(AF_UNIX, SOCK_STREAM, 0, crun_msg_sock_pair) != 0) {
+        CRANE_ERROR("Failed to create socket pair for task io forward: {}",
+                    strerror(errno));
+        return CraneErr::kSystemErr;
+      }
+      crun_meta->msg_fd = crun_msg_sock_pair[0];
+      child_pid = fork();
+    }
   } else {
     child_pid = fork();
   }
@@ -582,14 +597,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
       g_cfored_manager->RegisterIOForward(
           instance->task.interactive_meta().cfored_name(),
-          instance->task.task_id(), meta->msg_fd);
+          instance->task.task_id(), meta->msg_fd, launch_pty);
     }
 
     int ctrl_fd = ctrl_sock_pair[0];
     close(ctrl_sock_pair[1]);
-    if (instance->IsCrun()) {
-      close(io_in_sock_pair[1]);
-      close(io_out_sock_pair[1]);
+    if (instance->IsCrun() && !launch_pty) {
+      close(crun_msg_sock_pair[1]);
     }
 
     setegid(saved_priv.gid);
@@ -770,16 +784,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       }
       close(stdout_fd);
 
-    } else if (instance->IsCrun()) {
-      close(io_in_sock_pair[0]);
-      close(io_out_sock_pair[0]);
+    } else if (instance->IsCrun() && !launch_pty) {
+      close(crun_msg_sock_pair[0]);
 
-      dup2(io_in_sock_pair[1], 0);
-      close(io_in_sock_pair[1]);
-
-      dup2(io_out_sock_pair[1], 1);
-      dup2(io_out_sock_pair[1], 2);
-      close(io_out_sock_pair[1]);
+      dup2(crun_msg_sock_pair[1], 0);
+      dup2(crun_msg_sock_pair[1], 1);
+      dup2(crun_msg_sock_pair[1], 2);
+      close(crun_msg_sock_pair[1]);
     }
 
     child_process_ready.set_ok(true);

@@ -86,7 +86,8 @@ class CforedManager {
 
   bool Init();
 
-  void RegisterIOForward(std::string const& cfored, task_id_t task_id, int fd);
+  void RegisterIOForward(std::string const& cfored, task_id_t task_id, int fd,
+                         bool pty);
   void TaskProcOnCforedStopped(std::string const& cfored, task_id_t task_id);
 
  private:
@@ -94,6 +95,7 @@ class CforedManager {
     std::string cfored;
     task_id_t task_id;
     int fd;
+    bool pty;
   };
 
   struct TaskStopElem {
