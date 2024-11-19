@@ -30,6 +30,7 @@ if(ENABLE_BPF)
 endif()
 
 target_link_libraries(craned
+        $<$<BOOL:${CRANE_USE_MIMALLOC}>:dev_mimalloc>
         concurrentqueue
 
         ${LIBCGROUP_BUILD_PRODUCTS}
@@ -60,7 +61,6 @@ target_link_libraries(craned
 
         $<$<BOOL:${ENABLE_BPF}>:bpf>
         
-        $<$<BOOL:${CRANE_USE_MIMALLOC}>:dev_mimalloc>
 )
 
 # Linker flag for c++ 17 filesystem library
