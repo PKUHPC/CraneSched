@@ -25,7 +25,7 @@ FetchContent_MakeAvailable(mimalloc)
 if (BUILD_SHARED_LIBS)
     add_library(dev_mimalloc ALIAS mimalloc) 
 else ()
-    # when building with static library ,make sure that link it as the first object file.
+    # When building with static library, make sure that link it as the first object file.
     # https://github.com/microsoft/mimalloc?tab=readme-ov-file#static-override
     add_library(dev_mimalloc ALIAS mimalloc-static) 
 endif()
