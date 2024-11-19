@@ -5,8 +5,8 @@ FetchContent_Declare(
     GIT_TAG v2.1.7 
     GIT_SHALLOW TRUE
 )
-# if MI_OVERRIDE is ON then operator new and delete will be override not only malloc and free  
-# https://github.com/microsoft/mimalloc/issues/535
+# If MI_OVERRIDE is ON then operator new and delete will be override not only malloc and free  
+# ref: https://github.com/microsoft/mimalloc/issues/535
 set(MI_OVERRIDE ON)
 set(MI_BUILD_TESTS OFF)
 if (BUILD_SHARED_LIBS)
@@ -26,6 +26,6 @@ if (BUILD_SHARED_LIBS)
     add_library(dev_mimalloc ALIAS mimalloc) 
 else ()
     # When building with static library, make sure that link it as the first object file.
-    # https://github.com/microsoft/mimalloc?tab=readme-ov-file#static-override
+    # ref: https://github.com/microsoft/mimalloc?tab=readme-ov-file#static-override
     add_library(dev_mimalloc ALIAS mimalloc-static) 
 endif()
