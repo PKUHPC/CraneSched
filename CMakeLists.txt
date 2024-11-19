@@ -111,7 +111,11 @@ option(CRANE_ADDRESS_SANITIZER "Enable address sanitizer" OFF)
 option(CRANE_THREAD_SANITIZER "Enable thread sanitizer" OFF)
 
 option(CRANE_MIN_LOG_LEVEL "Set the minimal log level (INFO/DEBUG/TRACE)" OFF)
+
+option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
 # Options end here -------------------------------------------------------------------------------
+
+
 
 set(CMAKE_CXX_STANDARD 20)
 
@@ -168,6 +172,10 @@ endif ()
 # In CentOS 7, the following packages are required to enable sanitizers:
 # 1. devtoolset-11-libasan-devel.x86_64
 # 2. devtoolset-11-libtsan-devel.x86_64
+if (CRANE_ADDRESS_SANITIZER AND CRANE_THREAD_SANITIZER)
+  message(FATAL_ERROR "CRANE_ADDRESS_SANITIZER and CRANE_THREAD_SANITIZER cannot be enabled at the same time.")
+endif()
+
 if (${CRANE_ADDRESS_SANITIZER})
     message(STATUS "address_sanitizer is enabled")
     add_compile_options(-fsanitize=address -fno-omit-frame-pointer)

@@ -21,6 +21,8 @@ add_executable(cranectld
 target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 
 target_link_libraries(cranectld PRIVATE
+        $<$<BOOL:${CRANE_USE_MIMALLOC}>:dev_mimalloc>
+
         spdlog::spdlog
         concurrentqueue
 
