@@ -522,7 +522,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
   for (const CranedId& craned_id : task->CranedIds())
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                              task->Resources());
-
+  g_account_meta_container->MallocQosResourceFromUser(task->Username(), *task);
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
@@ -972,7 +972,7 @@ void TaskScheduler::ScheduleThread_() {
           auto& task = it.first;
           for (CranedId const& craned_id : task->CranedIds())
             g_meta_container->FreeResourceFromNode(craned_id, task->TaskId());
-          g_account_meta_container->FreeQosLimitOnUser(task->Username(), *task);
+          g_account_meta_container->FreeQosResource(task->Username(), *task);
         }
 
         // Construct the map for cgroups to be released of all failed tasks
@@ -1692,7 +1692,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     for (CranedId const& craned_id : task->CranedIds()) {
       g_meta_container->FreeResourceFromNode(craned_id, task_id);
     }
-    g_account_meta_container->FreeQosLimitOnUser(task->Username(), *task);
+    g_account_meta_container->FreeQosResource(task->Username(), *task);
 
     task_raw_ptr_vec.emplace_back(task.get());
     task_ptr_vec.emplace_back(std::move(task));
@@ -2483,6 +2483,10 @@ void MinLoadFirst::NodeSelect(
         continue;
       }
 
+      bool apply_qos_result = g_account_meta_container->CheckQosLimitOnUser(
+          task->Username(), *task);
+      if (!apply_qos_result) continue;
+
       // For pending tasks, the `start time` field in TaskInCtld means expected
       // start time and the `end time` is expected end time.
       // For running tasks, the `start time` means the time when it starts and
@@ -2531,7 +2535,8 @@ void MinLoadFirst::NodeSelect(
       for (CranedId const& craned_id : craned_ids)
         g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                                  task->Resources());
-
+      g_account_meta_container->MallocQosResourceFromUser(task->Username(),
+                                                          *task);
       std::unique_ptr<TaskInCtld> moved_task;
 
       // Move task out of pending_task_map and insert it to the
