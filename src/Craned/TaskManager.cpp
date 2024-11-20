@@ -311,6 +311,11 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
             task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
             std::nullopt);
+      else if (instance->terminated_by_oom)
+        EvActivateTaskStatusChange_(
+            task_id, crane::grpc::TaskStatus::Failed,
+            sigchld_info.value + ExitCode::kTerminationSignalBase,
+            std::nullopt);
       else
         EvActivateTaskStatusChange_(
             task_id, crane::grpc::TaskStatus::Failed,
@@ -1055,6 +1060,9 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   instance->cgroup = cg;
   instance->cgroup_path = cg->GetCgroupString();
 
+  EvSetCgroupV2TerminationOOM_(instance);
+  CRANE_TRACE("Set a OOM event for task #{}", task_id);
+
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
 
@@ -1316,6 +1324,65 @@ void TaskManager::EvOnTaskTimerCb_(int, short, void* arg_) {
   }
 }
 
+void TaskManager::EvCgroupV2OutOfMemoryCb_(evutil_socket_t fd, short,
+                                           void* arg_) {
+  constexpr int buffer_size = 32 * (sizeof(struct inotify_event) + 16);
+  char buffer[buffer_size];
+  auto* arg = reinterpret_cast<EvOOMCbArg*>(arg_);
+  auto* this_ = arg->task_manager;
+  auto task_id = arg->task_id;
+  auto oom_event_path = arg->memory_events_full_path;
+  int length = read(fd, buffer, buffer_size);
+  if (length < 0) {
+    CRANE_ERROR("Error reading inotify event");
+    return;
+  }
+  int i = 0;
+  while (i < length) {
+    struct inotify_event* event = (struct inotify_event*)&buffer[i];
+    if (event->mask & IN_MODIFY) {
+      std::ifstream eventsFile(oom_event_path);
+      if (eventsFile.is_open()) {
+        std::string line;
+        while (std::getline(eventsFile, line)) {
+          if (line.find("oom_kill") != std::string::npos) {
+            std::istringstream iss(line);
+            std::string field;
+            int value = 0;
+
+            iss >> field >> value;
+            if (value > 0) {
+              CRANE_TRACE(
+                  "Task #{} exceeded its memory limit. Terminating it...",
+                  task_id);
+              auto task_it = this_->m_task_map_.find(task_id);
+              if (task_it == this_->m_task_map_.end()) {
+                CRANE_TRACE("Task #{} has already been removed.", task_id);
+                return;
+              }
+              TaskInstance* task_instance = task_it->second.get();
+              if (task_instance->task.type() == crane::grpc::Batch) {
+                EvQueueTaskTerminate ev_task_terminate{
+                    .task_id = task_id,
+                    .terminated_by_oom = true,
+                };
+                this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
+                event_active(this_->m_ev_task_terminate_, 0, 0);
+              } else {
+                this_->EvActivateTaskStatusChange_(
+                    task_id, crane::grpc::TaskStatus::Failed,
+                    ExitCode::kExitCodeOOMError, std::nullopt);
+              }
+            }
+          }
+        }
+      }
+      eventsFile.close();
+    }
+    i += sizeof(struct inotify_event) + event->len;
+  }
+}
+
 void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
@@ -1359,6 +1426,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
     if (elem.terminated_by_user) task_instance->cancelled_by_user = true;
     if (elem.mark_as_orphaned) task_instance->orphaned = true;
     if (elem.terminated_by_timeout) task_instance->terminated_by_timeout = true;
+    if (elem.terminated_by_oom) task_instance->terminated_by_oom = true;
 
     int sig = SIGTERM;  // For BatchTask
     if (task_instance->IsCrun()) sig = SIGHUP;

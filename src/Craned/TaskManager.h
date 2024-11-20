@@ -27,6 +27,7 @@
 #include <evrpc.h>
 #include <grp.h>
 #include <sys/eventfd.h>
+#include <sys/inotify.h>
 #include <sys/wait.h>
 
 #include "CgroupManager.h"
@@ -39,11 +40,19 @@
 
 namespace Craned {
 
+inline const char* MemoryEvents = "memory.events";
+
 class TaskManager;
 
 struct EvTimerCbArg {
   TaskManager* task_manager;
   task_id_t task_id;
+};
+
+struct EvOOMCbArg {
+  TaskManager* task_manager;
+  task_id_t task_id;
+  std::string memory_events_full_path;
 };
 
 struct BatchMetaInProcessInstance {
@@ -192,6 +201,7 @@ struct TaskInstance {
   std::string cgroup_path;
   CgroupInterface* cgroup;
   struct event* termination_timer{nullptr};
+  struct event* out_of_memory{nullptr};
 
   // Task execution results
   bool orphaned{false};
@@ -199,6 +209,7 @@ struct TaskInstance {
   bool cancelled_by_user{false};
   bool terminated_by_timeout{false};
   ProcSigchldInfo sigchld_info{};
+  bool terminated_by_oom{false};
 
   absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
 };
@@ -276,6 +287,8 @@ class TaskManager {
     bool terminated_by_timeout{false};  // If the task is canceled by user,
                                         // task->status=Timeout
     bool mark_as_orphaned{false};
+
+    bool terminated_by_oom{false};
   };
 
   struct EvQueueCheckTaskStatus {
@@ -362,6 +375,47 @@ class TaskManager {
     instance->termination_timer = nullptr;
   }
 
+  void EvSetCgroupV2TerminationOOM_(TaskInstance* instance) {
+    std::string slice = "/";
+    std::string memory_events_full_path = CgroupConstant::RootCgroupFullPath +
+                                          slice + instance->cgroup_path +
+                                          slice + MemoryEvents;
+
+    int inotify_fd = inotify_init();
+    if (inotify_fd < 0) {
+      CRANE_ERROR("Error initializing inotify");
+      return;
+    }
+
+    int wd = inotify_add_watch(inotify_fd, memory_events_full_path.c_str(),
+                               IN_MODIFY);
+    if (wd < 0) {
+      CRANE_ERROR("Error adding inotify watch to file {}",
+                  memory_events_full_path);
+      close(inotify_fd);
+      return;
+    }
+    auto* arg = new EvOOMCbArg;
+    arg->task_manager = this;
+    arg->task_id = instance->task.task_id();
+    arg->memory_events_full_path = memory_events_full_path;
+
+    struct event* ev = event_new(m_ev_base_, inotify_fd, EV_READ | EV_PERSIST,
+                                 EvCgroupV2OutOfMemoryCb_, arg);
+    if (ev == nullptr) {
+      CRANE_ERROR("Error creating OOM event in task id : {}",
+                  instance->task.task_id());
+      close(inotify_fd);
+      return;
+    }
+    if (event_add(ev, nullptr) < 0) {
+      CRANE_ERROR("Could not add the oom event for task #{} to base!",
+                  instance->task.task_id());
+      std::terminate();
+    }
+    instance->out_of_memory = ev;
+  }
+
   /**
    * Send a signal to the process group to which the processes in
    *  ProcessInstance belongs.
@@ -442,6 +496,8 @@ class TaskManager {
   static void EvOnTaskTimerCb_(evutil_socket_t, short, void* arg_);
 
   static void EvOnSigchldTimerCb_(evutil_socket_t, short, void* arg_);
+
+  static void EvCgroupV2OutOfMemoryCb_(evutil_socket_t fd, short, void* arg_);
 
   struct event_base* m_ev_base_{};
   struct event* m_ev_sigchld_{};
