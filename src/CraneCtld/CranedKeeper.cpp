@@ -671,6 +671,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
 
   {
     util::lock_guard guard(s_craned_id_to_ip_cache_map_mtx);
+
     auto it = s_craned_id_to_ip_cache_map.find(craned_id);
     if (it != s_craned_id_to_ip_cache_map.end()) {
       if (std::holds_alternative<ipv4_t>(it->second)) {  // Ipv4
