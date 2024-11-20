@@ -144,6 +144,9 @@ struct Config {
 
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;
+
+  std::unordered_map<LicenseId, uint32_t> lic_id_to_count_map;
+
   bool RejectTasksBeyondCapacity{false};
 };
 
@@ -300,6 +303,8 @@ struct TaskInCtld {
   std::string extra_attr;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
+
+  std::unordered_map<LicenseId, uint32_t> licenses_count;
 
  private:
   /* ------------- [2] -------------
@@ -478,6 +483,8 @@ struct TaskInCtld {
                                                   : val.partition_name();
     requested_node_res_view = static_cast<ResourceView>(val.resources());
 
+    for (auto& [k, v] : val.licenses_count()) licenses_count[k] = v;
+
     time_limit = absl::Seconds(val.time_limit().seconds());
 
     type = val.type();
@@ -571,6 +578,15 @@ struct TaskInCtld {
     task_info->set_account(account);
     task_info->set_partition(partition_id);
     task_info->set_qos(qos);
+
+    // lic_map -> "lic1:1,lic2:3"
+    auto license_strings =
+        licenses_count | ranges::views::transform([](const auto& pair) {
+          return pair.first + ":" + std::to_string(pair.second);
+        });
+    std::string licenses_view =
+        license_strings | ranges::views::join(',') | ranges::to<std::string>();
+    task_info->set_licenses(licenses_view);
 
     task_info->mutable_time_limit()->set_seconds(ToInt64Seconds(time_limit));
     task_info->mutable_submit_time()->CopyFrom(runtime_attr.submit_time());
@@ -692,6 +708,13 @@ struct User {
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
+};
+
+struct License {
+  LicenseId license_id; /* license name */
+  uint32_t total;       /* The total number of configured license */
+  uint32_t used;        /* Number of license in use */
+  uint32_t free;        /* Number of license in free */
 };
 
 inline bool CheckIfTimeLimitSecIsValid(int64_t sec) {
