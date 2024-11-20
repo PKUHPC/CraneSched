@@ -832,6 +832,12 @@ AccountManager::CraneExpected<void> AccountManager::ModifyQos(
   // Mongodb
   Qos qos;
   g_db_client->SelectQos("name", name, &qos);
+
+  // Modify QosResource when max_jobs_per_user or max_cpus_per_user is changed.
+  if (item == "max_jobs_per_user" || item == "max_cpus_per_user")
+    g_account_meta_container->ModifyQosResourceOnUser(
+        name, QosResource{qos.max_cpus_per_user, qos.max_jobs_per_user});
+
   *m_qos_map_[name] = std::move(qos);
 
   return {};
@@ -2108,6 +2114,8 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
+  g_account_meta_container->EraseQosResourceOnUser(name, qos);
+
   m_user_map_[name]->account_to_attrs_map[account].allowed_partition_qos_map =
       res_user.account_to_attrs_map[account].allowed_partition_qos_map;
 
@@ -2508,6 +2516,7 @@ bool AccountManager::DeleteAccountAllowedQosFromMapNoLock_(
 
   for (const auto& child : account->child_accounts) {
     DeleteAccountAllowedQosFromMapNoLock_(child, qos);
+    g_account_meta_container->EraseQosResourceOnUser(name, qos);
   }
 
   for (const auto& user : account->users) {
