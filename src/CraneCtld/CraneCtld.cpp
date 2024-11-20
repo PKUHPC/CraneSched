@@ -686,7 +686,6 @@ void InitializeCtldGlobalVariables() {
   g_meta_container->InitFromConfig(g_config);
 
   g_account_meta_container = std::make_unique<AccountMetaContainer>();
-  g_account_meta_container->InitFromDB();
 
   bool ok;
   g_embedded_db_client = std::make_unique<Ctld::EmbeddedDbClient>();
