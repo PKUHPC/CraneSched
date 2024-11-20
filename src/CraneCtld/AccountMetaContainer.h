@@ -18,8 +18,6 @@
 
 #pragma once
 
-#include <string>
-
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
@@ -53,36 +51,46 @@ class AccountMetaContainer final {
   using UserResourceMetaMapConstPtr =
       util::ScopeConstSharedPtr<UserResourceMetaRawMap, util::rw_mutex>;
 
+  using UserResourceMetaMapExclusivePtr =
+      util::ScopeExclusivePtr<UserResourceMetaRawMap, util::rw_mutex>;
+
   using UserResourceMetaPtr =
       util::ManagedScopeExclusivePtr<UserResourceMeta,
                                      UserResourceMetaAtomicMap::CombinedLock>;
 
   using QosResourceList = std::list<std::pair<std::string, QosResource>>;
 
-  AccountMetaContainer() = default;
+  AccountMetaContainer();
   ~AccountMetaContainer() = default;
-
-  void InitFromDB();
 
   UserResourceMetaPtr GetUserResourceMetaPtr(const std::string& username);
 
   UserResourceMetaMapConstPtr GetUserResourceMetaMapConstPtr();
 
-  void MallocQosResourceToUser(const std::string& username,
-                               const QosResourceList& qos_resource_list);
+  UserResourceMetaMapExclusivePtr GetUserResourceMetaMapExclusivePtr();
 
-  void FreeQosResourceOnUser(const std::string& username,
-                             const std::list<std::string>& qos_list);
+  void AddQosResourceToUser(const std::string& username,
+                            const QosResourceList& qos_resource_list);
 
-  void EraseQosResourceOnUser(const std::string& username);
+  void EraseQosResourceOnUser(const std::string& username,
+                              const std::string& qos_name);
 
-  void FreeQosLimitOnUser(const std::string& username, const TaskInCtld& task);
+  void EraseUserResource(const std::string& username);
 
-  bool CheckAndApplyQosLimitOnUser(const std::string& username,
-                                   const TaskInCtld& task);
-  // TODO:AddUser, SetUserQos, SetAccountQos, ModifyQos 都需要修改
+  void ModifyQosResourceOnUser(const std::string& qos_name,
+                               const QosResource& qos_resource);
+
+  void FreeQosResource(const std::string& username, const TaskInCtld& task);
+
+  bool CheckQosLimitOnUser(const std::string& username, const TaskInCtld& task);
+
+  void MallocQosResourceFromUser(const std::string& username,
+                                 const TaskInCtld& task);
+
  private:
   UserResourceMetaAtomicMap user_meta_map_;
+
+  void InitFromDB_();
 };
 
 inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;
