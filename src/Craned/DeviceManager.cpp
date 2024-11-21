@@ -24,70 +24,84 @@
 
 namespace Craned {
 
+DeviceEnvInjectorEnum GetDeviceEnvInjectorFromStr(
+    const std::optional<std::string>& str) {
+  if (!str.has_value()) return DeviceEnvInjectorEnum::CommonDevice;
+  static const std::unordered_map<std::string, DeviceEnvInjectorEnum>
+      EnvStrToEnumMap{
+          {"common", DeviceEnvInjectorEnum::CommonDevice},
+          {"nvidia", DeviceEnvInjectorEnum::Nvidia},
+          {"hip", DeviceEnvInjectorEnum::Hip},
+          {"ascend", DeviceEnvInjectorEnum::Ascend},
+      };
+  if (const auto it = EnvStrToEnumMap.find(str.value());
+      it != EnvStrToEnumMap.end())
+    return it->second;
+
+  return DeviceEnvInjectorEnum::InvalidInjector;
+}
+
 BasicDevice::BasicDevice(const std::string& device_name,
                          const std::string& device_type,
                          const std::vector<std::string>& device_path,
-                         const std::string& env_injector)
+                         DeviceEnvInjectorEnum env_injector)
     : name(device_name), type(device_type), env_injector(env_injector) {
-  device_metas.reserve(device_path.size());
+  device_file_metas.reserve(device_path.size());
   for (const auto& dev_path : device_path) {
-    device_metas.emplace_back(DeviceMeta{dev_path, 0, 0, 0});
+    device_file_metas.emplace_back(DeviceFileMeta{dev_path, 0, 0, 0});
   }
 }
 
 bool BasicDevice::Init() {
-  for (auto& device_meta : device_metas) {
-    const auto& device_major_minor_optype_option =
-        DeviceManager::GetDeviceFileMajorMinorOpType(device_meta.path);
-    if (!device_major_minor_optype_option.has_value()) return false;
-    const auto& device_major_minor_optype =
-        device_major_minor_optype_option.value();
-
-    device_meta.major = std::get<0>(device_major_minor_optype);
-    device_meta.minor = std::get<1>(device_major_minor_optype);
-    device_meta.op_type = std::get<2>(device_major_minor_optype);
+  for (auto& device_file_meta : device_file_metas) {
+    auto err = DeviceManager::GetDeviceFileMajorMinorOpType(&device_file_meta);
+    if (err != CraneErr::kOk) return false;
   }
   return true;
 }
 
 BasicDevice::operator std::string() const {
   std::vector<std::string> device_files;
-  for (const auto& device_meta : device_metas) {
+  for (const auto& device_meta : device_file_metas) {
     device_files.push_back(device_meta.path);
   }
   return fmt::format("{}:{}:{}", name, type,
                      util::HostNameListToStr(device_files));
 }
 
-std::optional<std::tuple<unsigned int, unsigned int, char>>
-DeviceManager::GetDeviceFileMajorMinorOpType(const std::string& path) {
+CraneErr DeviceManager::GetDeviceFileMajorMinorOpType(
+    DeviceFileMeta* device_file_meta) {
   struct stat device_file_info {};
-  if (stat(path.c_str(), &device_file_info) == 0) {
+  if (stat(device_file_meta->path.c_str(), &device_file_info) == 0) {
     char op_type = 'a';
     if (S_ISBLK(device_file_info.st_mode)) {
       op_type = 'b';
     } else if (S_ISCHR(device_file_info.st_mode)) {
       op_type = 'c';
     }
-    return std::make_tuple(major(device_file_info.st_rdev),
-                           minor(device_file_info.st_rdev), op_type);
+    device_file_meta->major = major(device_file_info.st_rdev);
+    device_file_meta->minor = minor(device_file_info.st_rdev);
+    device_file_meta->op_type = op_type;
+    return CraneErr::kOk;
   } else {
-    return std::nullopt;
+    CRANE_ERROR("Failed to stat device file {} err:{}", device_file_meta->path,
+                std::strerror(errno));
+    return CraneErr::kSystemErr;
   }
 }
 
 std::unique_ptr<BasicDevice> DeviceManager::ConstructDevice(
     const std::string& device_name, const std::string& device_type,
     const std::vector<std::string>& device_path,
-    const std::string& env_injector) {
+    DeviceEnvInjectorEnum env_injector) {
   return std::make_unique<BasicDevice>(device_name, device_type, device_path,
                                        env_injector);
 }
 
-std::vector<std::pair<std::string, std::string>>
-DeviceManager::GetDevEnvListByResInNode(
+std::unordered_map<std::string, std::string>
+DeviceManager::GetDevEnvMapByResInNode(
     const crane::grpc::DedicatedResourceInNode& res_in_node) {
-  std::vector<std::pair<std::string, std::string>> env;
+  EnvMap env_map;
 
   std::unordered_set<std::string> all_res_slots;
   for (const auto& [device_name, device_type_slots_map] :
@@ -97,25 +111,19 @@ DeviceManager::GetDevEnvListByResInNode(
       all_res_slots.insert(slots.slots().begin(), slots.slots().end());
   }
 
-  uint32_t cuda_count = 0;
-  uint32_t hip_count = 0;
+  std::unordered_map<DeviceEnvInjectorEnum, int> injector_count_map;
   for (const auto& [_, device] : g_this_node_device) {
-    if (!all_res_slots.contains(device->dev_id)) continue;
-
-    if (device->env_injector == "nvidia")
-      ++cuda_count;
-    else if (device->env_injector == "hip")
-      ++hip_count;
+    if (!all_res_slots.contains(device->slot_id)) continue;
+    if (device->env_injector == DeviceEnvInjectorEnum::CommonDevice) continue;
+    injector_count_map[device->env_injector]++;
   }
-  // Nvidia Device
-  env.emplace_back("CUDA_VISIBLE_DEVICES",
-                   util::GenerateCommaSeparatedString(cuda_count));
+  for (const auto [injector_enum, count] : injector_count_map) {
+    if (count == 0) continue;
+    env_map.emplace(DeviceEnvNameStr[injector_enum],
+                    util::GenerateCommaSeparatedString(count));
+  }
 
-  // AMD/Haiguang device
-  env.emplace_back("HIP_VISIBLE_DEVICES",
-                   util::GenerateCommaSeparatedString(hip_count));
-
-  return env;
+  return env_map;
 }
 
 }  // namespace Craned

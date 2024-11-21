@@ -355,6 +355,8 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
   using grpc::ClientContext;
   using grpc::Status;
 
+  Status status;
+
   std::string craned_unix_socket_address =
       fmt::format("unix://{}", g_pam_config.CranedUnixSockPath);
 
@@ -377,7 +379,6 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
     crane::grpc::MigrateSshProcToCgroupRequest request;
     crane::grpc::MigrateSshProcToCgroupReply reply;
     ClientContext context;
-    Status status;
 
     request.set_pid(pid);
     request.set_task_id(task_id);
@@ -405,7 +406,6 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
     crane::grpc::QueryTaskEnvVariablesForwardRequest request;
     crane::grpc::QueryTaskEnvVariablesForwardReply reply;
     ClientContext context;
-    Status status;
 
     request.set_task_id(task_id);
 
@@ -418,23 +418,21 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
       return false;
     }
 
-    if (reply.ok()) {
-      pam_syslog(pamh, LOG_ERR,
-                 "[Crane] QueryTaskEnvVariablesForward succeeded.");
-      for (int i = 0; i < reply.name_size(); ++i) {
-        if (pam_putenv(
-                pamh,
-                fmt::format("{}={}", reply.name(i), reply.value(i)).c_str()) !=
-            PAM_SUCCESS) {
-          pam_syslog(pamh, LOG_ERR, "[Crane] Set env %s=%s  failed",
-                     reply.name(i).c_str(), reply.value(i).c_str());
-          return false;
-        }
-      }
-      return true;
-    } else {
+    if (!reply.ok()) {
       pam_syslog(pamh, LOG_ERR, "[Crane] QueryTaskEnvVariablesForward failed.");
       return false;
     }
+
+    pam_syslog(pamh, LOG_ERR,
+               "[Crane] QueryTaskEnvVariablesForward succeeded.");
+    for (const auto &[name, value] : reply.env_map()) {
+      int ret = pam_putenv(pamh, fmt::format("{}={}", name, value).c_str());
+      if (ret != PAM_SUCCESS) {
+        pam_syslog(pamh, LOG_ERR, "[Crane] Set env %s=%s  failed", name.c_str(),
+                   value.c_str());
+        return false;
+      }
+    }
+    return true;
   }
 }

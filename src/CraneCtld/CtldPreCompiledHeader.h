@@ -27,6 +27,7 @@
 #include <concepts>
 #include <condition_variable>
 #include <csignal>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -48,7 +49,6 @@
 #include <utility>
 #include <variant>
 #include <vector>
-#include <expected>
 
 // backward-cpp
 #include <backward.hpp>

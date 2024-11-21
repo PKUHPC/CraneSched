@@ -40,10 +40,11 @@ bool TaskInstance::IsCalloc() const {
              crane::grpc::Calloc;
 }
 
-std::vector<EnvPair> TaskInstance::GetTaskEnvList() const {
-  std::vector<EnvPair> env_vec;
+EnvMap TaskInstance::GetTaskEnvMap() const {
+  std::unordered_map<std::string, std::string> env_map;
+  // Crane Env will override user task env;
   for (auto& [name, value] : this->task.env()) {
-    env_vec.emplace_back(name, value);
+    env_map.emplace(name, value);
   }
 
   if (this->task.get_user_env()) {
@@ -64,23 +65,22 @@ std::vector<EnvPair> TaskInstance::GetTaskEnvList() const {
     // Slurm uses `su <username> -c /usr/bin/env` to retrieve
     // all the environment variables.
     // We use a more tidy way.
-    env_vec.emplace_back("HOME", this->pwd_entry.HomeDir());
-    env_vec.emplace_back("SHELL", this->pwd_entry.Shell());
+    env_map.emplace("HOME", this->pwd_entry.HomeDir());
+    env_map.emplace("SHELL", this->pwd_entry.Shell());
   }
 
-  env_vec.emplace_back("CRANE_JOB_NODELIST",
-                       absl::StrJoin(this->task.allocated_nodes(), ";"));
-  env_vec.emplace_back("CRANE_EXCLUDES",
-                       absl::StrJoin(this->task.excludes(), ";"));
-  env_vec.emplace_back("CRANE_JOB_NAME", this->task.name());
-  env_vec.emplace_back("CRANE_ACCOUNT", this->task.account());
-  env_vec.emplace_back("CRANE_PARTITION", this->task.partition());
-  env_vec.emplace_back("CRANE_QOS", this->task.qos());
+  env_map.emplace("CRANE_JOB_NODELIST",
+                  absl::StrJoin(this->task.allocated_nodes(), ";"));
+  env_map.emplace("CRANE_EXCLUDES", absl::StrJoin(this->task.excludes(), ";"));
+  env_map.emplace("CRANE_JOB_NAME", this->task.name());
+  env_map.emplace("CRANE_ACCOUNT", this->task.account());
+  env_map.emplace("CRANE_PARTITION", this->task.partition());
+  env_map.emplace("CRANE_QOS", this->task.qos());
 
-  env_vec.emplace_back("CRANE_JOB_ID", std::to_string(this->task.task_id()));
+  env_map.emplace("CRANE_JOB_ID", std::to_string(this->task.task_id()));
 
   if (this->IsCrun() && !this->task.interactive_meta().term_env().empty()) {
-    env_vec.emplace_back("TERM", this->task.interactive_meta().term_env());
+    env_map.emplace("TERM", this->task.interactive_meta().term_env());
   }
 
   int64_t time_limit_sec = this->task.time_limit().seconds();
@@ -89,8 +89,8 @@ std::vector<EnvPair> TaskInstance::GetTaskEnvList() const {
   int seconds = time_limit_sec % 60;
   std::string time_limit =
       fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
-  env_vec.emplace_back("CRANE_TIMELIMIT", time_limit);
-  return env_vec;
+  env_map.emplace("CRANE_TIMELIMIT", time_limit);
+  return env_map;
 }
 
 TaskManager::TaskManager() {
@@ -631,8 +631,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   // the child proc will block forever.
   // That's why we should copy it here and the child proc should not hold any
   // lock.
-  std::optional<crane::grpc::ResourceInNode> res_in_node =
-      g_cg_mgr->GetTaskResourceInNode(instance->task.task_id());
+  auto res_in_node = g_cg_mgr->GetTaskResourceInNode(instance->task.task_id());
   if (!res_in_node.has_value()) {
     CRANE_ERROR("Failed to get resource info for task #{}",
                 instance->task.task_id());
@@ -912,22 +911,23 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     if (instance->task.type() == crane::grpc::Batch) close(0);
     util::os::CloseFdFrom(3);
 
-    std::vector<EnvPair> task_env_vec = instance->GetTaskEnvList();
-    std::vector<EnvPair> res_env_vec =
-        CgroupManager::GetResourceEnvListByResInNode(res_in_node.value());
+    EnvMap task_env_map = instance->GetTaskEnvMap();
+    EnvMap res_env_map =
+        CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
 
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
     }
 
-    auto FuncSetEnv = [](const std::vector<EnvPair>& v) {
-      for (const auto& [name, value] : v)
-        if (setenv(name.c_str(), value.c_str(), 1))
-          fmt::print("setenv for {}={} failed!\n", name, value);
-    };
+    auto FuncSetEnv =
+        [](const std::unordered_map<std::string, std::string>& v) {
+          for (const auto& [name, value] : v)
+            if (setenv(name.c_str(), value.c_str(), 1))
+              fmt::print("setenv for {}={} failed!\n", name, value);
+        };
 
-    FuncSetEnv(task_env_vec);
-    FuncSetEnv(res_env_vec);
+    FuncSetEnv(task_env_map);
+    FuncSetEnv(res_env_map);
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
@@ -1219,11 +1219,9 @@ void TaskManager::EvActivateTaskStatusChange_(
   event_active(m_ev_task_status_change_, 0, 0);
 }
 
-std::optional<std::vector<std::pair<std::string, std::string>>>
-TaskManager::QueryTaskEnvironmentVariablesAsync(task_id_t task_id) {
-  EvQueueQueryTaskEnvironmentVariables elem{.task_id = task_id};
-  std::future<std::optional<std::vector<std::pair<std::string, std::string>>>>
-      env_future = elem.env_prom.get_future();
+CraneExpected<EnvMap> TaskManager::QueryTaskEnvMapAsync(task_id_t task_id) {
+  EvQueueQueryTaskEnvMap elem{.task_id = task_id};
+  std::future<CraneExpected<EnvMap>> env_future = elem.env_prom.get_future();
   m_query_task_environment_variables_queue.enqueue(std::move(elem));
   event_active(m_ev_query_task_environment_variables_, 0, 0);
   return env_future.get();
@@ -1233,26 +1231,26 @@ void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_(int efd, short events,
                                                         void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
-  EvQueueQueryTaskEnvironmentVariables elem;
+  EvQueueQueryTaskEnvMap elem;
   while (this_->m_query_task_environment_variables_queue.try_dequeue(elem)) {
     auto task_iter = this_->m_task_map_.find(elem.task_id);
     if (task_iter == this_->m_task_map_.end())
-      elem.env_prom.set_value(std::nullopt);
+      elem.env_prom.set_value(std::unexpected(CraneErr::kSystemErr));
     else {
       auto& instance = task_iter->second;
 
-      std::vector<std::pair<std::string, std::string>> env_opt;
-      for (const auto& [name, value] : instance->GetTaskEnvList()) {
-        env_opt.emplace_back(name, value);
+      std::unordered_map<std::string, std::string> env_map;
+      for (const auto& [name, value] : instance->GetTaskEnvMap()) {
+        env_map.emplace(name, value);
       }
-      elem.env_prom.set_value(env_opt);
+      elem.env_prom.set_value(env_map);
     }
   }
 }
 
-std::optional<uint32_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
+CraneExpected<task_id_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
   EvQueueQueryTaskIdFromPid elem{.pid = pid};
-  std::future<std::optional<uint32_t>> task_id_opt_future =
+  std::future<CraneExpected<task_id_t>> task_id_opt_future =
       elem.task_id_prom.get_future();
   m_query_task_id_from_pid_queue_.enqueue(std::move(elem));
   event_active(m_ev_query_task_id_from_pid_, 0, 0);
@@ -1270,7 +1268,7 @@ void TaskManager::EvGrpcQueryTaskIdFromPidCb_(int efd, short events,
 
     auto task_iter = this_->m_pid_task_map_.find(elem.pid);
     if (task_iter == this_->m_pid_task_map_.end())
-      elem.task_id_prom.set_value(std::nullopt);
+      elem.task_id_prom.set_value(std::unexpected(CraneErr::kSystemErr));
     else {
       TaskInstance* instance = task_iter->second;
       uint32_t task_id = instance->task.task_id();
