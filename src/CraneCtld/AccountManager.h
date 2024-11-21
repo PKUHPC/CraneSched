@@ -49,7 +49,7 @@ class AccountManager {
 
   ~AccountManager() = default;
 
-  Result Login(uint32_t uid, const std::string& password);
+  CraneExpected<std::string> Login(uint32_t uid, const std::string& password);
 
   CraneExpected<void> AddUser(uint32_t uid, const User& new_user);
 
