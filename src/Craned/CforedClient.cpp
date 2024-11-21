@@ -18,8 +18,6 @@
 
 #include "CforedClient.h"
 
-#include <utility>
-
 #include "crane/String.h"
 namespace Craned {
 

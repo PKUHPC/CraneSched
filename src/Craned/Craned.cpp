@@ -30,10 +30,7 @@
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
-#include "crane/Network.h"
-#include "crane/OS.h"
 #include "crane/PluginClient.h"
-#include "crane/PublicHeader.h"
 #include "crane/String.h"
 
 using Craned::g_config;

@@ -21,9 +21,7 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
-#include "protos/Crane.pb.h"
 
 namespace Craned {
 

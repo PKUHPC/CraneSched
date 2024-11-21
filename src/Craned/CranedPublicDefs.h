@@ -22,12 +22,11 @@
 // Precompiled header comes first
 
 #include "crane/OS.h"
-#include "crane/PublicHeader.h"
-#include "protos/Crane.pb.h"
+
 
 namespace Craned {
 
-inline const uint64_t kEvSigChldResendMs = 500;
+inline constexpr uint64_t kEvSigChldResendMs = 500;
 
 using EnvMap = std::unordered_map<std::string, std::string>;
 

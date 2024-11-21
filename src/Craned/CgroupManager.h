@@ -24,12 +24,12 @@
  *
  */
 #pragma once
+#include "CranedPublicDefs.h"
+// Precompiled header comes first.
 
 #include <libcgroup.h>
 
-#include "CranedPublicDefs.h"
 #include "crane/AtomicHashMap.h"
-#include "crane/OS.h"
 
 #ifdef CRANE_ENABLE_BPF
 #  include <bpf/libbpf.h>

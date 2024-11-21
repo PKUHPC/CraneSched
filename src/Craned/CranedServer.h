@@ -21,11 +21,7 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include <google/protobuf/util/time_util.h>
-
 #include "TaskManager.h"
-#include "crane/Lock.h"
-#include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 

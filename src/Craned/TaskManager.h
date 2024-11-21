@@ -22,17 +22,13 @@
 // Precompiled header comes first.
 
 #include <grp.h>
-#include <sys/eventfd.h>
-#include <sys/wait.h>
 
 #include <uvw.hpp>
 
 #include "CgroupManager.h"
 #include "CtldClient.h"
 #include "crane/PasswordEntry.h"
-#include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
-#include "protos/Crane.pb.h"
 
 namespace Craned {
 
@@ -54,7 +50,6 @@ class ProcessInstance {
       : m_executive_path_(std::move(exec_path)),
         m_arguments_(std::move(arg_list)),
         m_pid_(0),
-        m_ev_buf_event_(nullptr),
         m_user_data_(nullptr) {}
 
   ~ProcessInstance() {
@@ -78,14 +73,6 @@ class ProcessInstance {
   void SetPid(pid_t pid) { m_pid_ = pid; }
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
 
-  void SetEvBufEvent(struct bufferevent* ev_buf_event) {
-    m_ev_buf_event_ = ev_buf_event;
-  }
-
-  void SetOutputCb(std::function<void(std::string&&, void*)> cb) {
-    m_output_cb_ = std::move(cb);
-  }
-
   void SetFinishCb(std::function<void(bool, int, void*)> cb) {
     m_finish_cb_ = std::move(cb);
   }
@@ -108,9 +95,6 @@ class ProcessInstance {
  private:
   /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
   pid_t m_pid_;
-
-  // The underlying event that handles the output of the task.
-  struct bufferevent* m_ev_buf_event_;
 
   /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
   std::string m_executive_path_;
@@ -150,7 +134,7 @@ struct CrunMetaInTaskInstance : MetaInTaskInstance {
   ~CrunMetaInTaskInstance() override = default;
 };
 
-// also arg for EvDoSigChldCb_
+// also arg for EvSigchldTimerCb_
 struct ProcSigchldInfo {
   pid_t pid;
   bool is_terminated_by_signal;
@@ -308,7 +292,7 @@ class TaskManager {
     termination_handel->on<uvw::timer_event>(
         [this, task_id = instance->task.task_id()](const uvw::timer_event&,
                                                    uvw::timer_handle& h) {
-          TaskTimerCb_(task_id);
+          EvTaskTimerCb_(task_id);
         });
     termination_handel->start(
         std::chrono::duration_cast<std::chrono::milliseconds>(duration),
@@ -321,7 +305,7 @@ class TaskManager {
     termination_handel->on<uvw::timer_event>(
         [this, task_id = instance->task.task_id()](const uvw::timer_event&,
                                                    uvw::timer_handle& h) {
-          TaskTimerCb_(task_id);
+          EvTaskTimerCb_(task_id);
         });
     termination_handel->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
@@ -377,32 +361,30 @@ class TaskManager {
   // Critical data region ends
   // ========================================================================
 
-  void SigchldCb_();
+  void EvSigchldCb_();
 
-  void CleanSigchldQueueCb_();
+  void EvCleanSigchldQueueCb_();
 
   // Callback function to handle SIGINT sent by Ctrl+C
-  void SigintCb_();
+  void EvSigintCb_();
 
-  void CleanGrpcExecuteTaskQueueCb_();
+  void EvCleanGrpcExecuteTaskQueueCb_();
 
-  void CleanGrpcQueryTaskIdFromPidQueueCb_();
+  void EvCleanGrpcQueryTaskIdFromPidQueueCb_();
 
-  void CleanGrpcQueryTaskEnvironmentVariableQueueCb_();
+  void EvCleanGrpcQueryTaskEnvQueueCb_();
 
-  void CleanTaskStatusChangeQueueCb_();
+  void EvCleanTaskStatusChangeQueueCb_();
 
-  void CleanTerminateTaskQueueCb_();
+  void EvCleanTerminateTaskQueueCb_();
 
-  void CleanCheckTaskStatusQueueCb_();
+  void EvCleanCheckTaskStatusQueueCb_();
 
-  void CleanChangeTaskTimeLimitQueueCb_();
+  void EvCleanChangeTaskTimeLimitQueueCb_();
 
-  void ExitEventCb_();
+  void EvTaskTimerCb_(task_id_t task_id);
 
-  void TaskTimerCb_(task_id_t task_id);
-
-  void SigchldTimerCb_(ProcSigchldInfo* sigchld_info);
+  void EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info);
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 

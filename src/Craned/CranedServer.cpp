@@ -18,11 +18,7 @@
 
 #include "CranedServer.h"
 
-#include <arpa/inet.h>
-#include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
-
-#include "CtldClient.h"
 
 namespace Craned {
 

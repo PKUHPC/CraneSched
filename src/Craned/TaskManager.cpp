@@ -21,10 +21,9 @@
 #include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
+#include <sys/wait.h>
 
 #include "CforedClient.h"
-#include "CgroupManager.h"
-#include "crane/OS.h"
 #include "crane/String.h"
 #include "protos/CraneSubprocess.pb.h"
 #include "protos/PublicDefs.pb.h"
@@ -102,7 +101,7 @@ TaskManager::TaskManager() {
 
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
   m_sigchld_handle_->on<uvw::signal_event>(
-      [this](const uvw::signal_event&, uvw::signal_handle&) { SigchldCb_(); });
+      [this](const uvw::signal_event&, uvw::signal_handle&) { EvSigchldCb_(); });
 
   if (m_sigchld_handle_->start(SIGCLD) != 0) {
     CRANE_ERROR("Failed to start the SIGCLD handle");
@@ -110,7 +109,7 @@ TaskManager::TaskManager() {
 
   m_sigint_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
   m_sigint_handle_->on<uvw::signal_event>(
-      [this](const uvw::signal_event&, uvw::signal_handle&) { SigintCb_(); });
+      [this](const uvw::signal_event&, uvw::signal_handle&) { EvSigintCb_(); });
   if (m_sigint_handle_->start(SIGINT) != 0) {
     CRANE_ERROR("Failed to start the SIGINT handle");
   }
@@ -120,7 +119,7 @@ TaskManager::TaskManager() {
       m_uvw_loop_->resource<uvw::async_handle>();
   m_query_task_id_from_pid_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanGrpcQueryTaskIdFromPidQueueCb_();
+        EvCleanGrpcQueryTaskIdFromPidQueueCb_();
       });
 
   // gRPC: QueryTaskEnvironmentVariable
@@ -128,7 +127,7 @@ TaskManager::TaskManager() {
       m_uvw_loop_->resource<uvw::async_handle>();
   m_query_task_environment_variables_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanGrpcQueryTaskEnvironmentVariableQueueCb_();
+        EvCleanGrpcQueryTaskEnvQueueCb_();
       });
 
   // gRPC Execute Task Event
@@ -136,13 +135,13 @@ TaskManager::TaskManager() {
       m_uvw_loop_->resource<uvw::async_handle>();
   m_grpc_execute_task_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanGrpcExecuteTaskQueueCb_();
+        EvCleanGrpcExecuteTaskQueueCb_();
       });
 
   m_process_sigchld_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_process_sigchld_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanSigchldQueueCb_();
+        EvCleanSigchldQueueCb_();
       });
 
   // Task Status Change Event
@@ -150,27 +149,27 @@ TaskManager::TaskManager() {
       m_uvw_loop_->resource<uvw::async_handle>();
   m_task_status_change_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanTaskStatusChangeQueueCb_();
+        EvCleanTaskStatusChangeQueueCb_();
       });
 
   m_change_task_time_limit_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
   m_change_task_time_limit_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanChangeTaskTimeLimitQueueCb_();
+        EvCleanChangeTaskTimeLimitQueueCb_();
       });
 
   m_terminate_task_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
   m_terminate_task_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanTerminateTaskQueueCb_();
+        EvCleanTerminateTaskQueueCb_();
       });
 
   m_check_task_status_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
   m_check_task_status_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanCheckTaskStatusQueueCb_();
+        EvCleanCheckTaskStatusQueueCb_();
       });
 
   m_uvw_thread_ = std::thread([this]() {
@@ -266,7 +265,7 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
   }
 }
 
-void TaskManager::SigchldCb_() {
+void TaskManager::EvSigchldCb_() {
   assert(m_instance_ptr_->m_instance_ptr_ != nullptr);
 
   int status;
@@ -321,7 +320,7 @@ void TaskManager::SigchldCb_() {
   }
 }
 
-void TaskManager::CleanSigchldQueueCb_() {
+void TaskManager::EvCleanSigchldQueueCb_() {
   std::unique_ptr<ProcSigchldInfo> sigchld_info;
   while (m_sigchld_queue_.try_dequeue(sigchld_info)) {
     auto pid = sigchld_info->pid;
@@ -345,7 +344,7 @@ void TaskManager::CleanSigchldQueueCb_() {
       sigchld_info_raw_ptr->resend_timer->on<uvw::timer_event>(
           [this, sigchld_info_raw_ptr](const uvw::timer_event&,
                                        uvw::timer_handle&) {
-            SigchldTimerCb_(sigchld_info_raw_ptr);
+            EvSigchldTimerCb_(sigchld_info_raw_ptr);
           });
       sigchld_info_raw_ptr->resend_timer->start(
           std::chrono::milliseconds(kEvSigChldResendMs),
@@ -401,12 +400,12 @@ void TaskManager::CleanSigchldQueueCb_() {
   }
 }
 
-void TaskManager::SigchldTimerCb_(ProcSigchldInfo* sigchld_info) {
+void TaskManager::EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info) {
   m_sigchld_queue_.enqueue(std::unique_ptr<ProcSigchldInfo>(sigchld_info));
   m_process_sigchld_async_handle_->send();
 }
 
-void TaskManager::SigintCb_() {
+void TaskManager::EvSigintCb_() {
   absl::MutexLock lock_guard(&m_mtx_);
   if (!m_is_ending_now_) {
     // SIGINT has been sent once. If SIGINT are captured twice, it indicates
@@ -884,7 +883,7 @@ CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   return CraneErr::kOk;
 }
 
-void TaskManager::CleanGrpcExecuteTaskQueueCb_() {
+void TaskManager::EvCleanGrpcExecuteTaskQueueCb_() {
   std::unique_ptr<TaskInstance> popped_instance;
 
   while (m_grpc_execute_task_queue_.try_dequeue(popped_instance)) {
@@ -1063,7 +1062,7 @@ std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
   return resolved_path_pattern;
 }
 
-void TaskManager::CleanTaskStatusChangeQueueCb_() {
+void TaskManager::EvCleanTaskStatusChangeQueueCb_() {
   TaskStatusChangeQueueElem status_change;
   while (m_task_status_change_queue_.try_dequeue(status_change)) {
     auto iter = m_task_map_.find(status_change.task_id);
@@ -1119,7 +1118,7 @@ CraneExpected<EnvMap> TaskManager::QueryTaskEnvMapAsync(task_id_t task_id) {
   return env_future.get();
 }
 
-void TaskManager::CleanGrpcQueryTaskEnvironmentVariableQueueCb_() {
+void TaskManager::EvCleanGrpcQueryTaskEnvQueueCb_() {
   EvQueueQueryTaskEnvMap elem;
   while (m_query_task_environment_variables_queue.try_dequeue(elem)) {
     auto task_iter = m_task_map_.find(elem.task_id);
@@ -1146,7 +1145,7 @@ CraneExpected<task_id_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
   return task_id_opt_future.get();
 }
 
-void TaskManager::CleanGrpcQueryTaskIdFromPidQueueCb_() {
+void TaskManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
   EvQueueQueryTaskIdFromPid elem;
   while (m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
     m_mtx_.Lock();
@@ -1164,7 +1163,7 @@ void TaskManager::CleanGrpcQueryTaskIdFromPidQueueCb_() {
   }
 }
 
-void TaskManager::TaskTimerCb_(task_id_t task_id) {
+void TaskManager::EvTaskTimerCb_(task_id_t task_id) {
   CRANE_TRACE("Task #{} exceeded its time limit. Terminating it...", task_id);
 
   // Sometimes, task finishes just before time limit.
@@ -1195,7 +1194,7 @@ void TaskManager::TaskTimerCb_(task_id_t task_id) {
   }
 }
 
-void TaskManager::CleanTerminateTaskQueueCb_() {
+void TaskManager::EvCleanTerminateTaskQueueCb_() {
   TaskTerminateQueueElem elem;
   while (m_task_terminate_queue_.try_dequeue(elem)) {
     CRANE_TRACE(
@@ -1283,7 +1282,7 @@ bool TaskManager::CheckTaskStatusAsync(task_id_t task_id,
   return true;
 }
 
-void TaskManager::CleanCheckTaskStatusQueueCb_() {
+void TaskManager::EvCleanCheckTaskStatusQueueCb_() {
   CheckTaskStatusQueueElem elem;
   while (m_check_task_status_queue_.try_dequeue(elem)) {
     task_id_t task_id = elem.task_id;
@@ -1320,7 +1319,7 @@ bool TaskManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
   return ok_fut.get();
 }
 
-void TaskManager::CleanChangeTaskTimeLimitQueueCb_() {
+void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   absl::Time now = absl::Now();
 
   ChangeTaskTimeLimitQueueElem elem;

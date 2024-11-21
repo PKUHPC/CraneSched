@@ -18,8 +18,6 @@
 
 #include "DbClient.h"
 
-#include <google/protobuf/util/time_util.h>
-
 #include <bsoncxx/exception/exception.hpp>
 #include <mongocxx/exception/exception.hpp>
 

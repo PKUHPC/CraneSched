@@ -19,7 +19,6 @@
 #include "CranedMetaContainer.h"
 
 #include "CranedKeeper.h"
-#include "crane/String.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {

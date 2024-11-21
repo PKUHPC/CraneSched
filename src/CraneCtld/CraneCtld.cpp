@@ -34,9 +34,7 @@
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
-#include "crane/Logger.h"
 #include "crane/Network.h"
-#include "crane/OS.h"
 #include "crane/PluginClient.h"
 
 void ParseConfig(int argc, char** argv) {
