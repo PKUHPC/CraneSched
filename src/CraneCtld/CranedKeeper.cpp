@@ -472,7 +472,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
           WriterLock lock(&m_connected_craned_mtx_);
           m_connected_craned_id_stub_map_.erase(craned->m_craned_id_);
         } else {
-          CRANE_ERROR("Unknown tag type: {}", tag->type);
+          CRANE_ERROR("Unknown tag type: {}", (int)tag->type);
         }
       }
 
@@ -526,8 +526,8 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       next_tag_type = std::nullopt;
 
     CRANE_TRACE("{} -> TRANSIENT_FAILURE({}/{}) -> CONNECTING/END",
-                craned->m_prev_channel_state_, craned->m_failure_retry_times_,
-                craned->s_maximum_retry_times_);
+                (int)craned->m_prev_channel_state_,
+                craned->m_failure_retry_times_, craned->s_maximum_retry_times_);
     break;
   }
 
@@ -547,7 +547,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       // prev    current       next
       // Any  -> CONNECTING -> CONNECTING
       CRANE_TRACE("{} -> CONNECTING -> CONNECTING",
-                  craned->m_prev_channel_state_);
+                  (int)craned->m_prev_channel_state_);
       next_tag_type = CqTag::kInitializingCraned;
     }
     break;

@@ -24,27 +24,27 @@
 
 namespace Craned {
 
-DeviceEnvInjector GetDeviceEnvInjectorFromStr(
+DeviceEnvInjectorEnum GetDeviceEnvInjectorFromStr(
     const std::optional<std::string>& str) {
-  if (!str.has_value()) return DeviceEnvInjector::CommonDevice;
-  static const std::unordered_map<std::string, DeviceEnvInjector>
+  if (!str.has_value()) return DeviceEnvInjectorEnum::CommonDevice;
+  static const std::unordered_map<std::string, DeviceEnvInjectorEnum>
       EnvStrToEnumMap{
-          {"common", DeviceEnvInjector::CommonDevice},
-          {"nvidia", DeviceEnvInjector::Nvidia},
-          {"hip", DeviceEnvInjector::Hip},
-          {"ascend", DeviceEnvInjector::Ascend},
+          {"common", DeviceEnvInjectorEnum::CommonDevice},
+          {"nvidia", DeviceEnvInjectorEnum::Nvidia},
+          {"hip", DeviceEnvInjectorEnum::Hip},
+          {"ascend", DeviceEnvInjectorEnum::Ascend},
       };
   if (const auto it = EnvStrToEnumMap.find(str.value());
       it != EnvStrToEnumMap.end())
     return it->second;
-  else
-    return DeviceEnvInjector::InvalidInjector;
+
+  return DeviceEnvInjectorEnum::InvalidInjector;
 }
 
 BasicDevice::BasicDevice(const std::string& device_name,
                          const std::string& device_type,
                          const std::vector<std::string>& device_path,
-                         DeviceEnvInjector env_injector)
+                         DeviceEnvInjectorEnum env_injector)
     : name(device_name), type(device_type), env_injector(env_injector) {
   device_file_metas.reserve(device_path.size());
   for (const auto& dev_path : device_path) {
@@ -93,7 +93,7 @@ CraneErr DeviceManager::GetDeviceFileMajorMinorOpType(
 std::unique_ptr<BasicDevice> DeviceManager::ConstructDevice(
     const std::string& device_name, const std::string& device_type,
     const std::vector<std::string>& device_path,
-    DeviceEnvInjector env_injector) {
+    DeviceEnvInjectorEnum env_injector) {
   return std::make_unique<BasicDevice>(device_name, device_type, device_path,
                                        env_injector);
 }
@@ -101,7 +101,7 @@ std::unique_ptr<BasicDevice> DeviceManager::ConstructDevice(
 std::unordered_map<std::string, std::string>
 DeviceManager::GetDevEnvListByResInNode(
     const crane::grpc::DedicatedResourceInNode& res_in_node) {
-  std::unordered_map<std::string, std::string> env;
+  EnvMap env_map;
 
   std::unordered_set<std::string> all_res_slots;
   for (const auto& [device_name, device_type_slots_map] :
@@ -111,19 +111,19 @@ DeviceManager::GetDevEnvListByResInNode(
       all_res_slots.insert(slots.slots().begin(), slots.slots().end());
   }
 
-  std::unordered_map<DeviceEnvInjector, int> injector_count_map;
+  std::unordered_map<DeviceEnvInjectorEnum, int> injector_count_map;
   for (const auto& [_, device] : g_this_node_device) {
     if (!all_res_slots.contains(device->slot_id)) continue;
-    if (device->env_injector == DeviceEnvInjector::CommonDevice) continue;
+    if (device->env_injector == DeviceEnvInjectorEnum::CommonDevice) continue;
     injector_count_map[device->env_injector]++;
   }
   for (const auto [injector_enum, count] : injector_count_map) {
     if (count == 0) continue;
-    env.emplace(DeviceEnvNameStr[injector_enum],
-                util::GenerateCommaSeparatedString(count));
+    env_map.emplace(DeviceEnvNameStr[injector_enum],
+                    util::GenerateCommaSeparatedString(count));
   }
 
-  return env;
+  return env_map;
 }
 
 }  // namespace Craned

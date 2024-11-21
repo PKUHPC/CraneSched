@@ -23,7 +23,7 @@
 
 namespace Craned {
 
-enum DeviceEnvInjector : uint8_t {
+enum DeviceEnvInjectorEnum : uint8_t {
   CommonDevice = 0,
   Nvidia,
   Hip,
@@ -34,7 +34,7 @@ enum DeviceEnvInjector : uint8_t {
 };
 
 constexpr std::array<std::string_view,
-                     DeviceEnvInjector::__DeviceEnvInjector_SIZE>
+                     DeviceEnvInjectorEnum::__DeviceEnvInjector_SIZE>
     DeviceEnvInjectorStr = {
         "common",
         "nvidia",
@@ -43,7 +43,7 @@ constexpr std::array<std::string_view,
 };
 
 constexpr std::array<std::string_view,
-                     DeviceEnvInjector::__DeviceEnvInjector_SIZE>
+                     DeviceEnvInjectorEnum::__DeviceEnvInjector_SIZE>
     DeviceEnvNameStr = {
         "common",
         "CUDA_VISIBLE_DEVICES",
@@ -51,7 +51,7 @@ constexpr std::array<std::string_view,
         "ASCEND_RT_VISIBLE_DEVICES",
 };
 
-DeviceEnvInjector GetDeviceEnvInjectorFromStr(
+DeviceEnvInjectorEnum GetDeviceEnvInjectorFromStr(
     const std::optional<std::string>& str);
 
 struct DeviceMetaInConfig {
@@ -76,13 +76,12 @@ struct BasicDevice {
   // Device type e.g. A100
   std::string type;
 
-  DeviceEnvInjector env_injector;
-
+  DeviceEnvInjectorEnum env_injector;
   std::vector<DeviceFileMeta> device_file_metas;
 
   BasicDevice(const std::string& device_name, const std::string& device_type,
               const std::vector<std::string>& device_path,
-              DeviceEnvInjector env_injector);
+              DeviceEnvInjectorEnum env_injector);
 
   BasicDevice(const BasicDevice& another) = default;
 
@@ -99,15 +98,13 @@ class DeviceManager {
   static std::unique_ptr<BasicDevice> ConstructDevice(
       const std::string& device_name, const std::string& device_type,
       const std::vector<std::string>& device_path,
-      DeviceEnvInjector env_injector);
+      DeviceEnvInjectorEnum env_injector);
 
   static CraneErr GetDeviceFileMajorMinorOpType(
       DeviceFileMeta* device_file_meta);
 
-  static std::unordered_map<std::string, std::string> GetDevEnvListByResInNode(
+  static EnvMap GetDevEnvListByResInNode(
       const crane::grpc::DedicatedResourceInNode& res_in_node);
-
-  static std::vector<std::unique_ptr<BasicDevice>> GetSystemDeviceNvml();
 };
 
 // read only after init
