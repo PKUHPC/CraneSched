@@ -747,20 +747,15 @@ std::optional<std::string> CgroupManager::QueryTaskExecutionNode(
   return this->m_task_id_to_cg_spec_map_[task_id]->execution_node;
 }
 
-std::optional<crane::grpc::ResourceInNode> CgroupManager::GetTaskResourceInNode(
+CraneExpected<crane::grpc::ResourceInNode> CgroupManager::GetTaskResourceInNode(
     task_id_t task_id) {
-  std::optional<crane::grpc::ResourceInNode> res;
-
   auto cg_spec_ptr = this->m_task_id_to_cg_spec_map_[task_id];
-  if (cg_spec_ptr) {
-    res = cg_spec_ptr->res_in_node;
-  }
+  if (cg_spec_ptr) return cg_spec_ptr->res_in_node;
 
-  return res;
+  return std::unexpected(CraneErr::kCgroupError);
 }
 
-std::unordered_map<std::string, std::string>
-CgroupManager::GetResourceEnvListByResInNode(
+EnvMap CgroupManager::GetResourceEnvListByResInNode(
     const crane::grpc::ResourceInNode &res_in_node) {
   std::unordered_map env_map = DeviceManager::GetDevEnvListByResInNode(
       res_in_node.dedicated_res_in_node());
@@ -774,16 +769,16 @@ CgroupManager::GetResourceEnvListByResInNode(
   return env_map;
 }
 
-std::optional<std::unordered_map<std::string, std::string>>
-CgroupManager::GetResourceEnvListOfTask(task_id_t task_id) {
+CraneExpected<EnvMap> CgroupManager::GetResourceEnvListOfTask(
+    task_id_t task_id) {
   auto task_res = GetTaskResourceInNode(task_id);
   if (task_res.has_value()) {
     return GetResourceEnvListByResInNode(task_res.value());
-  } else {
-    CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
-                task_id);
-    return std::nullopt;
   }
+
+  CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
+              task_id);
+  return std::unexpected(CraneErr::kSystemErr);
 }
 
 /*

@@ -27,7 +27,6 @@
 
 #include <libcgroup.h>
 
-
 #include "CranedPublicDefs.h"
 #include "crane/AtomicHashMap.h"
 #include "crane/OS.h"
@@ -484,14 +483,13 @@ class CgroupManager {
 
   bool ReleaseCgroupByTaskIdOnly(task_id_t task_id);
 
-  std::optional<crane::grpc::ResourceInNode> GetTaskResourceInNode(
+  CraneExpected<crane::grpc::ResourceInNode> GetTaskResourceInNode(
       task_id_t task_id);
 
-  static std::unordered_map<std::string, std::string>
-  GetResourceEnvListByResInNode(const crane::grpc::ResourceInNode &res_in_node);
+  static EnvMap GetResourceEnvListByResInNode(
+      const crane::grpc::ResourceInNode &res_in_node);
 
-  std::optional<std::unordered_map<std::string, std::string>>
-  GetResourceEnvListOfTask(task_id_t task_id);
+  CraneExpected<EnvMap> GetResourceEnvListOfTask(task_id_t task_id);
 
   void SetCgroupVersion(CgroupConstant::CgroupVersion v) { cg_version_ = v; }
 
