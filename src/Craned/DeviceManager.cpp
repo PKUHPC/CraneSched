@@ -54,15 +54,8 @@ BasicDevice::BasicDevice(const std::string& device_name,
 
 bool BasicDevice::Init() {
   for (auto& device_file_meta : device_file_metas) {
-    const auto& device_major_minor_optype_option =
-        DeviceManager::GetDeviceFileMajorMinorOpType(device_file_meta.path);
-    if (!device_major_minor_optype_option.has_value()) return false;
-    const auto& device_major_minor_optype =
-        device_major_minor_optype_option.value();
-
-    device_file_meta.major = std::get<0>(device_major_minor_optype);
-    device_file_meta.minor = std::get<1>(device_major_minor_optype);
-    device_file_meta.op_type = std::get<2>(device_major_minor_optype);
+    auto err = DeviceManager::GetDeviceFileMajorMinorOpType(&device_file_meta);
+    if (err != CraneErr::kOk) return false;
   }
   return true;
 }
@@ -76,20 +69,24 @@ BasicDevice::operator std::string() const {
                      util::HostNameListToStr(device_files));
 }
 
-std::optional<std::tuple<unsigned int, unsigned int, char>>
-DeviceManager::GetDeviceFileMajorMinorOpType(const std::string& path) {
+CraneErr DeviceManager::GetDeviceFileMajorMinorOpType(
+    DeviceFileMeta* device_file_meta) {
   struct stat device_file_info {};
-  if (stat(path.c_str(), &device_file_info) == 0) {
+  if (stat(device_file_meta->path.c_str(), &device_file_info) == 0) {
     char op_type = 'a';
     if (S_ISBLK(device_file_info.st_mode)) {
       op_type = 'b';
     } else if (S_ISCHR(device_file_info.st_mode)) {
       op_type = 'c';
     }
-    return std::make_tuple(major(device_file_info.st_rdev),
-                           minor(device_file_info.st_rdev), op_type);
+    device_file_meta->major = major(device_file_info.st_rdev);
+    device_file_meta->minor = minor(device_file_info.st_rdev);
+    device_file_meta->op_type = op_type;
+    return CraneErr::kOk;
   } else {
-    return std::nullopt;
+    CRANE_ERROR("Failed to stat device file {} err:{}", device_file_meta->path,
+                std::strerror(errno));
+    return CraneErr::kSystemErr;
   }
 }
 

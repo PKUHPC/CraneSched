@@ -101,8 +101,8 @@ class DeviceManager {
       const std::vector<std::string>& device_path,
       DeviceEnvInjector env_injector);
 
-  static std::optional<std::tuple<unsigned int, unsigned int, char>>
-  GetDeviceFileMajorMinorOpType(const std::string& path);
+  static CraneErr GetDeviceFileMajorMinorOpType(
+      DeviceFileMeta* device_file_meta);
 
   static std::unordered_map<std::string, std::string> GetDevEnvListByResInNode(
       const crane::grpc::DedicatedResourceInNode& res_in_node);

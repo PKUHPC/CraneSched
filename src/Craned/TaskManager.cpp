@@ -632,8 +632,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   // the child proc will block forever.
   // That's why we should copy it here and the child proc should not hold any
   // lock.
-  std::optional<crane::grpc::ResourceInNode> res_in_node =
-      g_cg_mgr->GetTaskResourceInNode(instance->task.task_id());
+  auto res_in_node = g_cg_mgr->GetTaskResourceInNode(instance->task.task_id());
   if (!res_in_node.has_value()) {
     CRANE_ERROR("Failed to get resource info for task #{}",
                 instance->task.task_id());

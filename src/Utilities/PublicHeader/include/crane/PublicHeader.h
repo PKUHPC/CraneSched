@@ -413,5 +413,3 @@ struct CgroupSpec {
   crane::grpc::ResourceInNode res_in_node;
   std::string execution_node;
 };
-
-using EnvMap = std::unordered_map<std::string, std::string>;
