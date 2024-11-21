@@ -753,7 +753,7 @@ message LoginRequest {
 message LoginReply {
   bool ok = 1;
   string token = 2;
-  string reason = 3;
+  ErrCode reason = 3;
 }
 
 // Todo: Divide service into two parts: one for Craned and one for Crun
@@ -778,10 +778,18 @@ service CraneCtld {
   rpc AddUser(AddUserRequest) returns (AddUserReply);
   rpc AddQos(AddQosRequest) returns (AddQosReply);
 
-  rpc DeleteEntity(DeleteEntityRequest) returns (DeleteEntityReply);
+  rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountReply);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserReply);
+  rpc DeleteQos(DeleteQosRequest) returns (DeleteQosReply);
 
-  rpc QueryEntityInfo(QueryEntityInfoRequest) returns (QueryEntityInfoReply);
-  rpc ModifyEntity(ModifyEntityRequest) returns (ModifyEntityReply);
+  rpc QueryAccountInfo(QueryAccountInfoRequest) returns (QueryAccountInfoReply);
+  rpc QueryUserInfo(QueryUserInfoRequest) returns (QueryUserInfoReply);
+  rpc QueryQosInfo(QueryQosInfoRequest) returns (QueryQosInfoReply);
+
+  rpc ModifyAccount(ModifyAccountRequest) returns (ModifyAccountReply);
+  rpc ModifyUser(ModifyUserRequest) returns (ModifyUserReply);
+  rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
+  
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 
   /* RPCs called from cinfo */
