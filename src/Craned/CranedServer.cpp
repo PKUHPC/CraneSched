@@ -390,7 +390,7 @@ Status CranedServiceImpl::QueryTaskEnvVariables(
     const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
     crane::grpc::QueryTaskEnvVariablesReply *response) {
   auto task_env_map =
-      g_task_mgr->QueryTaskEnvironmentVariablesAsync(request->task_id());
+      g_task_mgr->QueryTaskEnvMapAsync(request->task_id());
   if (task_env_map.has_value()) {
     for (const auto &[name, value] : task_env_map.value())
       response->mutable_env_map()->emplace(name, value);
@@ -406,7 +406,7 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
     const crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
     crane::grpc::QueryTaskEnvVariablesForwardReply *response) {
   // First query local device related env list
-  auto res_envs_opt = g_cg_mgr->GetResourceEnvListOfTask(request->task_id());
+  auto res_envs_opt = g_cg_mgr->GetResourceEnvMapOfTask(request->task_id());
   if (!res_envs_opt.has_value()) {
     response->set_ok(false);
     return Status::OK;

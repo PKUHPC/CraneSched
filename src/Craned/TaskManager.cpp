@@ -40,8 +40,7 @@ bool TaskInstance::IsCalloc() const {
              crane::grpc::Calloc;
 }
 
-std::unordered_map<std::string, std::string> TaskInstance::GetTaskEnvList()
-    const {
+EnvMap TaskInstance::GetTaskEnvMap() const {
   std::unordered_map<std::string, std::string> env_map;
   // Crane Env will override user task env;
   for (auto& [name, value] : this->task.env()) {
@@ -912,9 +911,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     if (instance->task.type() == crane::grpc::Batch) close(0);
     util::os::CloseFdFrom(3);
 
-    std::unordered_map task_env_map = instance->GetTaskEnvList();
-    std::unordered_map res_env_map =
-        CgroupManager::GetResourceEnvListByResInNode(res_in_node.value());
+    EnvMap task_env_map = instance->GetTaskEnvMap();
+    EnvMap res_env_map =
+        CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
 
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
@@ -1220,9 +1219,8 @@ void TaskManager::EvActivateTaskStatusChange_(
   event_active(m_ev_task_status_change_, 0, 0);
 }
 
-CraneExpected<EnvMap> TaskManager::QueryTaskEnvironmentVariablesAsync(
-    task_id_t task_id) {
-  EvQueueQueryTaskEnvironmentVariables elem{.task_id = task_id};
+CraneExpected<EnvMap> TaskManager::QueryTaskEnvMapAsync(task_id_t task_id) {
+  EvQueueQueryTaskEnvMap elem{.task_id = task_id};
   std::future<CraneExpected<EnvMap>> env_future = elem.env_prom.get_future();
   m_query_task_environment_variables_queue.enqueue(std::move(elem));
   event_active(m_ev_query_task_environment_variables_, 0, 0);
@@ -1233,7 +1231,7 @@ void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_(int efd, short events,
                                                         void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
-  EvQueueQueryTaskEnvironmentVariables elem;
+  EvQueueQueryTaskEnvMap elem;
   while (this_->m_query_task_environment_variables_queue.try_dequeue(elem)) {
     auto task_iter = this_->m_task_map_.find(elem.task_id);
     if (task_iter == this_->m_task_map_.end())
@@ -1242,7 +1240,7 @@ void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_(int efd, short events,
       auto& instance = task_iter->second;
 
       std::unordered_map<std::string, std::string> env_map;
-      for (const auto& [name, value] : instance->GetTaskEnvList()) {
+      for (const auto& [name, value] : instance->GetTaskEnvMap()) {
         env_map.emplace(name, value);
       }
       elem.env_prom.set_value(env_map);

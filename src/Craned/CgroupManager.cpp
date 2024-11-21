@@ -755,9 +755,9 @@ CraneExpected<crane::grpc::ResourceInNode> CgroupManager::GetTaskResourceInNode(
   return std::unexpected(CraneErr::kCgroupError);
 }
 
-EnvMap CgroupManager::GetResourceEnvListByResInNode(
+EnvMap CgroupManager::GetResourceEnvMapByResInNode(
     const crane::grpc::ResourceInNode &res_in_node) {
-  std::unordered_map env_map = DeviceManager::GetDevEnvListByResInNode(
+  std::unordered_map env_map = DeviceManager::GetDevEnvMapByResInNode(
       res_in_node.dedicated_res_in_node());
 
   env_map.emplace(
@@ -769,11 +769,11 @@ EnvMap CgroupManager::GetResourceEnvListByResInNode(
   return env_map;
 }
 
-CraneExpected<EnvMap> CgroupManager::GetResourceEnvListOfTask(
+CraneExpected<EnvMap> CgroupManager::GetResourceEnvMapOfTask(
     task_id_t task_id) {
   auto task_res = GetTaskResourceInNode(task_id);
   if (task_res.has_value()) {
-    return GetResourceEnvListByResInNode(task_res.value());
+    return GetResourceEnvMapByResInNode(task_res.value());
   }
 
   CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",

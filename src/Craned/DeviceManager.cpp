@@ -99,7 +99,7 @@ std::unique_ptr<BasicDevice> DeviceManager::ConstructDevice(
 }
 
 std::unordered_map<std::string, std::string>
-DeviceManager::GetDevEnvListByResInNode(
+DeviceManager::GetDevEnvMapByResInNode(
     const crane::grpc::DedicatedResourceInNode& res_in_node) {
   EnvMap env_map;
 

@@ -486,10 +486,10 @@ class CgroupManager {
   CraneExpected<crane::grpc::ResourceInNode> GetTaskResourceInNode(
       task_id_t task_id);
 
-  static EnvMap GetResourceEnvListByResInNode(
+  static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
 
-  CraneExpected<EnvMap> GetResourceEnvListOfTask(task_id_t task_id);
+  CraneExpected<EnvMap> GetResourceEnvMapOfTask(task_id_t task_id);
 
   void SetCgroupVersion(CgroupConstant::CgroupVersion v) { cg_version_ = v; }
 

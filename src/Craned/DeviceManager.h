@@ -103,7 +103,7 @@ class DeviceManager {
   static CraneErr GetDeviceFileMajorMinorOpType(
       DeviceFileMeta* device_file_meta);
 
-  static EnvMap GetDevEnvListByResInNode(
+  static EnvMap GetDevEnvMapByResInNode(
       const crane::grpc::DedicatedResourceInNode& res_in_node);
 };
 

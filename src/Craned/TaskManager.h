@@ -182,7 +182,7 @@ struct TaskInstance {
 
   bool IsCrun() const;
   bool IsCalloc() const;
-  std::unordered_map<std::string, std::string> GetTaskEnvList() const;
+  EnvMap GetTaskEnvMap() const;
 
   crane::grpc::TaskToD task;
 
@@ -219,7 +219,7 @@ class TaskManager {
 
   CraneExpected<task_id_t> QueryTaskIdFromPidAsync(pid_t pid);
 
-  CraneExpected<EnvMap> QueryTaskEnvironmentVariablesAsync(task_id_t task_id);
+  CraneExpected<EnvMap> QueryTaskEnvMapAsync(task_id_t task_id);
 
   void TerminateTaskAsync(uint32_t task_id);
 
@@ -255,7 +255,7 @@ class TaskManager {
     pid_t pid;
   };
 
-  struct EvQueueQueryTaskEnvironmentVariables {
+  struct EvQueueQueryTaskEnvMap {
     std::promise<CraneExpected<EnvMap>> env_prom;
     task_id_t task_id;
   };
@@ -462,7 +462,7 @@ class TaskManager {
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
 
   struct event* m_ev_query_task_environment_variables_{};
-  ConcurrentQueue<EvQueueQueryTaskEnvironmentVariables>
+  ConcurrentQueue<EvQueueQueryTaskEnvMap>
       m_query_task_environment_variables_queue;
 
   // A custom event that handles the ExecuteTask RPC.
