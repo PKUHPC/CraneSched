@@ -1221,11 +1221,10 @@ void TaskManager::EvActivateTaskStatusChange_(
   event_active(m_ev_task_status_change_, 0, 0);
 }
 
-std::optional<std::unordered_map<std::string, std::string>>
-TaskManager::QueryTaskEnvironmentVariablesAsync(task_id_t task_id) {
+CraneExpected<EnvMap> TaskManager::QueryTaskEnvironmentVariablesAsync(
+    task_id_t task_id) {
   EvQueueQueryTaskEnvironmentVariables elem{.task_id = task_id};
-  std::future<std::optional<std::unordered_map<std::string, std::string>>>
-      env_future = elem.env_prom.get_future();
+  std::future<CraneExpected<EnvMap>> env_future = elem.env_prom.get_future();
   m_query_task_environment_variables_queue.enqueue(std::move(elem));
   event_active(m_ev_query_task_environment_variables_, 0, 0);
   return env_future.get();
@@ -1239,7 +1238,7 @@ void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_(int efd, short events,
   while (this_->m_query_task_environment_variables_queue.try_dequeue(elem)) {
     auto task_iter = this_->m_task_map_.find(elem.task_id);
     if (task_iter == this_->m_task_map_.end())
-      elem.env_prom.set_value(std::nullopt);
+      elem.env_prom.set_value(std::unexpected(CraneErr::kSystemErr));
     else {
       auto& instance = task_iter->second;
 
@@ -1252,9 +1251,9 @@ void TaskManager::EvGrpcQueryTaskEnvironmentVariableCb_(int efd, short events,
   }
 }
 
-std::optional<uint32_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
+CraneExpected<task_id_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
   EvQueueQueryTaskIdFromPid elem{.pid = pid};
-  std::future<std::optional<uint32_t>> task_id_opt_future =
+  std::future<CraneExpected<task_id_t>> task_id_opt_future =
       elem.task_id_prom.get_future();
   m_query_task_id_from_pid_queue_.enqueue(std::move(elem));
   event_active(m_ev_query_task_id_from_pid_, 0, 0);
@@ -1272,7 +1271,7 @@ void TaskManager::EvGrpcQueryTaskIdFromPidCb_(int efd, short events,
 
     auto task_iter = this_->m_pid_task_map_.find(elem.pid);
     if (task_iter == this_->m_pid_task_map_.end())
-      elem.task_id_prom.set_value(std::nullopt);
+      elem.task_id_prom.set_value(std::unexpected(CraneErr::kSystemErr));
     else {
       TaskInstance* instance = task_iter->second;
       uint32_t task_id = instance->task.task_id();

@@ -26,6 +26,7 @@
 #include <charconv>
 #include <chrono>
 #include <csignal>
+#include <expected>
 #include <filesystem>
 #include <forward_list>
 #include <fpm/fixed.hpp>

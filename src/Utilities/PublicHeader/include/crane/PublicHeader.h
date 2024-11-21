@@ -21,6 +21,7 @@
 #include <google/protobuf/util/time_util.h>
 
 #include <array>
+#include <expected>
 #include <fpm/fixed.hpp>
 #include <unordered_map>
 
@@ -59,6 +60,9 @@ enum class CraneErr : uint16_t {
 
   __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
 };
+
+template <typename T>
+using CraneExpected = std::expected<T, CraneErr>;
 
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
@@ -409,3 +413,5 @@ struct CgroupSpec {
   crane::grpc::ResourceInNode res_in_node;
   std::string execution_node;
 };
+
+using EnvMap = std::unordered_map<std::string, std::string>;

@@ -390,16 +390,15 @@ Status CranedServiceImpl::QueryTaskEnvVariables(
     grpc::ServerContext *context,
     const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
     crane::grpc::QueryTaskEnvVariablesReply *response) {
-  auto task_env =
+  auto task_env_map =
       g_task_mgr->QueryTaskEnvironmentVariablesAsync(request->task_id());
-  if (task_env.has_value()) {
-    for (const auto &[name, value] : task_env.value()) {
+  if (task_env_map.has_value()) {
+    for (const auto &[name, value] : task_env_map.value())
       response->mutable_env_map()->emplace(name, value);
-    }
     response->set_ok(true);
-  } else {
+  } else
     response->set_ok(false);
-  }
+
   return Status::OK;
 }
 
