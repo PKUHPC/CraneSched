@@ -242,7 +242,7 @@ message AddAccountRequest {
 
 message AddAccountReply {
   bool ok = 1;
-  string reason = 2;
+  ErrCode reason = 2;
 }
 
 message AddUserRequest {
@@ -252,7 +252,7 @@ message AddUserRequest {
 
 message AddUserReply {
   bool ok = 1;
-  string reason = 2;
+  ErrCode reason = 2;
 }
 
 message AddQosRequest {
@@ -262,57 +262,113 @@ message AddQosRequest {
 
 message AddQosReply {
   bool ok = 1;
-  string reason = 2;
+  ErrCode reason = 2;
 }
 
-message DeleteEntityRequest {
+message DeleteAccountRequest {
   uint32 uid = 1;
-  EntityType entity_type = 2;
-  string name = 3;
-  string account = 4;
+  string name = 2;
 }
 
-message DeleteEntityReply {
+message DeleteAccountReply {
   bool ok = 1;
-  string reason = 2;
+  ErrCode reason = 2;
 }
 
-message ModifyEntityRequest {
+message DeleteUserRequest {
   uint32 uid = 1;
+  string name = 2;
+  string account = 3;
+}
 
-  enum OperatorType {
-    Overwrite = 0;
-    Add = 1;
-    Delete = 2;
-  }
+message DeleteUserReply {
+  bool ok = 1;
+  ErrCode reason = 2;
+}
 
-  string item = 2;   //modify item field
+message DeleteQosRequest {
+  uint32 uid = 1;
+  string name = 2;
+}
+
+message DeleteQosReply {
+  bool ok = 1;
+  ErrCode reason = 2;
+}
+
+message ModifyAccountRequest {
+  uint32 uid = 1;
+  ModifyField modify_field = 2;   //modify item field
+  string value = 3;   //new value
+  string name = 4;
+  OperationType type = 5;
+  bool force = 6;
+}
+
+message ModifyAccountReply {
+  bool ok = 1;
+  ErrCode reason = 2;
+}
+
+message ModifyUserRequest {
+  uint32 uid = 1;
+  ModifyField modify_field = 2;   //modify item field
   string value = 3;   //new value
   string name = 4;
   string partition = 5;
-  OperatorType type = 6;
-  EntityType entity_type = 7;
+  OperationType type = 6;
   string account = 8;
   bool force = 9;
 }
 
-message ModifyEntityReply {
+message ModifyUserReply {
   bool ok = 1;
-  string reason = 2;
+  ErrCode reason = 2;
 }
 
-message QueryEntityInfoRequest {
+message ModifyQosRequest {
   uint32 uid = 1;
-  EntityType entity_type = 2;
-  string name = 3;
-  string account = 4;
+  ModifyField modify_field = 2;   //modify item field
+  string value = 3;   //new value
+  string name = 4;
 }
 
-message QueryEntityInfoReply {
+message ModifyQosReply {
   bool ok = 1;
-  string reason = 2;
-  repeated UserInfo user_list = 3;
-  repeated AccountInfo account_list = 4;
+  ErrCode reason = 2;
+}
+
+message QueryAccountInfoRequest {
+  uint32 uid = 1;
+  string name = 2;
+}
+
+message QueryAccountInfoReply {
+  bool ok = 1;
+  ErrCode reason = 2;
+  repeated AccountInfo account_list = 3;
+}
+
+message QueryUserInfoRequest {
+  uint32 uid = 1;
+  string name = 2;
+  string account = 3;
+}
+
+message QueryUserInfoReply {
+  bool ok = 1;
+  ErrCode reason = 2;
+  repeated UserInfo user_list = 3; 
+}
+
+message QueryQosInfoRequest {
+  uint32 uid = 1;
+  string name = 2;
+}
+
+message QueryQosInfoReply {
+  bool ok = 1;
+  ErrCode reason = 2;
   repeated QosInfo qos_list = 5;
 }
 
@@ -326,7 +382,7 @@ message BlockAccountOrUserRequest {
 
 message BlockAccountOrUserReply {
   bool ok = 1;
-  string reason = 2;
+  ErrCode reason = 2;
 }
 
 message MigrateSshProcToCgroupRequest {
@@ -719,10 +775,18 @@ service CraneCtld {
   rpc AddUser(AddUserRequest) returns (AddUserReply);
   rpc AddQos(AddQosRequest) returns (AddQosReply);
 
-  rpc DeleteEntity(DeleteEntityRequest) returns (DeleteEntityReply);
+  rpc DeleteAccount(DeleteAccountRequest) returns (DeleteAccountReply);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserReply);
+  rpc DeleteQos(DeleteQosRequest) returns (DeleteQosReply);
 
-  rpc QueryEntityInfo(QueryEntityInfoRequest) returns (QueryEntityInfoReply);
-  rpc ModifyEntity(ModifyEntityRequest) returns (ModifyEntityReply);
+  rpc QueryAccountInfo(QueryAccountInfoRequest) returns (QueryAccountInfoReply);
+  rpc QueryUserInfo(QueryUserInfoRequest) returns (QueryUserInfoReply);
+  rpc QueryQosInfo(QueryQosInfoRequest) returns (QueryQosInfoReply);
+
+  rpc ModifyAccount(ModifyAccountRequest) returns (ModifyAccountReply);
+  rpc ModifyUser(ModifyUserRequest) returns (ModifyUserReply);
+  rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
+  
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 
   /* RPCs called from cinfo */

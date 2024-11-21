@@ -37,53 +37,53 @@ else ()
     )
 endif ()
 
-if(VERSION_CONTENT STREQUAL "")
+if (VERSION_CONTENT STREQUAL "")
     # Fallback version
     set(VERSION_CONTENT "Unknown")
     set(CMAKE_PROJECT_VERSION "0.0.0")
-endif()
+endif ()
 
 project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
-# check and set compiler 
+# check and set compiler
 set(REQUIRED_GNU_VERSION 13.0.0)
 set(REQUIRED_CLANG_VERSION 19.0.0)
 set(REQUIRED_BPF_CLANG_VERSION 17.0.0)
 
 set(CLANG_VERSION "0.0.0")
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_GNU_VERSION)
-    if(CRANE_ENABLE_CGROUP_V2)
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_GNU_VERSION)
+    if (CRANE_ENABLE_CGROUP_V2)
         message(STATUS "Enabling Cgroup V2 will build cgroup_dev_bpf_object, which requires Clang ${REQUIRED_BPF_CLANG_VERSION}+. Use GNU ${CMAKE_CXX_COMPILER_VERSION} for other modules. ")
         find_program(CLANG_EXECUTABLE NAMES clang)
-        if(CLANG_EXECUTABLE)
+        if (CLANG_EXECUTABLE)
             execute_process(
-                COMMAND ${CLANG_EXECUTABLE} --version
-                OUTPUT_VARIABLE CLANG_VERSION_OUTPUT
-                OUTPUT_STRIP_TRAILING_WHITESPACE
+                    COMMAND ${CLANG_EXECUTABLE} --version
+                    OUTPUT_VARIABLE CLANG_VERSION_OUTPUT
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
             )
             string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" CLANG_VERSION ${CLANG_VERSION_OUTPUT})
-            if(CLANG_VERSION VERSION_GREATER_EQUAL REQUIRED_BPF_CLANG_VERSION)
+            if (CLANG_VERSION VERSION_GREATER_EQUAL REQUIRED_BPF_CLANG_VERSION)
                 set(ENABLE_BPF ON)
                 message(STATUS "Found Clang at ${CLANG_EXECUTABLE} with version ${CLANG_VERSION}; using this version for the cgroup_dev_bpf_object module.")
-            else()
+            else ()
                 message(FATAL_ERROR "Clang found at ${CLANG_EXECUTABLE} is version ${CLANG_VERSION}, but version ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2. You may use Cgroup V1 instead.")
-            endif()
-        else()
+            endif ()
+        else ()
             message(FATAL_ERROR "Clang ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2. You can use Cgroup V1.")
-        endif()
-    endif()
-elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_CLANG_VERSION)
-        if(CRANE_ENABLE_CGROUP_V2)
+        endif ()
+    endif ()
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_CLANG_VERSION)
+        if (CRANE_ENABLE_CGROUP_V2)
             set(ENABLE_BPF ON)
-        endif()
+        endif ()
         message(STATUS "Using Clang for all module.")
-    else()
+    else ()
         message(FATAL_ERROR "Clang ${REQUIRED_CLANG_VERSION} or higher is required.")
-    endif()
-else()
+    endif ()
+else ()
     message(FATAL_ERROR "Neither GNU ${REQUIRED_GNU_VERSION}+ nor Clang ${REQUIRED_CLANG_VERSION}+ found. Stop compiling crane")
-endif()
+endif ()
 
 
 # Options start here ----------------------------------------------------------------------------
@@ -115,9 +115,7 @@ option(CRANE_MIN_LOG_LEVEL "Set the minimal log level (INFO/DEBUG/TRACE)" OFF)
 option(CRANE_USE_MIMALLOC "Override malloc using mimalloc" OFF)
 # Options end here -------------------------------------------------------------------------------
 
-
-
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(CRANE_ENABLE_TESTS ON)
@@ -173,8 +171,8 @@ endif ()
 # 1. devtoolset-11-libasan-devel.x86_64
 # 2. devtoolset-11-libtsan-devel.x86_64
 if (CRANE_ADDRESS_SANITIZER AND CRANE_THREAD_SANITIZER)
-  message(FATAL_ERROR "CRANE_ADDRESS_SANITIZER and CRANE_THREAD_SANITIZER cannot be enabled at the same time.")
-endif()
+    message(FATAL_ERROR "CRANE_ADDRESS_SANITIZER and CRANE_THREAD_SANITIZER cannot be enabled at the same time.")
+endif ()
 
 if (${CRANE_ADDRESS_SANITIZER})
     message(STATUS "address_sanitizer is enabled")
@@ -340,10 +338,10 @@ set(_PROTOBUF_PROTOC $<TARGET_FILE:protoc>)
 set(_GRPC_GRPCPP grpc++)
 set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 
-if(ENABLE_BPF)
+if (ENABLE_BPF)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(libbpf REQUIRED IMPORTED_TARGET libbpf>=1.4.6)
-endif()
+endif ()
 # @formatter:off
 add_definitions(-DCRANE_BUILD_DIRECTORY=\("${CMAKE_BINARY_DIR}"\))
 # @formatter:on

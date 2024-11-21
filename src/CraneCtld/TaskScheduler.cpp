@@ -1251,9 +1251,9 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
     CRANE_ASSERT(it != m_pending_task_map_.end());
     TaskInCtld* task = it->second.get();
 
-    auto result = g_account_manager->HasPermissionToUser(
+    auto result = g_account_manager->CheckIfUidHasPermOnUser(
         operator_uid, task->Username(), false);
-    if (!result.ok) {
+    if (!result) {
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
@@ -1273,9 +1273,9 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
     CRANE_TRACE("Cancelling running task #{}", task_id);
 
-    auto result = g_account_manager->HasPermissionToUser(
+    auto result = g_account_manager->CheckIfUidHasPermOnUser(
         operator_uid, task->Username(), false);
-    if (!result.ok) {
+    if (!result) {
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
