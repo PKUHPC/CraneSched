@@ -1059,8 +1059,10 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   }
   instance->cgroup = cg;
   instance->cgroup_path = cg->GetCgroupString();
-
-  EvSetCgroupV2TerminationOOM_(instance);
+  if(g_cg_mgr->GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2){
+    EvSetCgroupV2TerminationOOM_(instance);
+  }
+  // TODO oom event for V1
   CRANE_TRACE("Set a OOM event for task #{}", task_id);
 
   // Calloc tasks have no scripts to run. Just return.
