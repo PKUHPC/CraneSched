@@ -1070,13 +1070,11 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
 
   err = AcquireTaskAttributes(task.get());
 
-  if (err == CraneErr::kOk)
-    err = CheckTaskValidity(task.get());
+  if (err == CraneErr::kOk) err = CheckTaskValidity(task.get());
 
   if (err == CraneErr::kOk) {
     task->SetSubmitTime(absl::Now());
-    std::future<task_id_t> future =
-        SubmitTaskAsync(std::move(task));
+    std::future<task_id_t> future = SubmitTaskAsync(std::move(task));
     return {std::move(future)};
   }
 

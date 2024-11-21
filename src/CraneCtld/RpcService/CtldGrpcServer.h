@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "CtldPublicDefs.h"
+#include "../CtldPublicDefs.h"
 // Precompiled header comes first!
 
 #include "CtldForCforedServer.h"
