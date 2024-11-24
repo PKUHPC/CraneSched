@@ -44,9 +44,8 @@ class CforedStreamWriter {
                                crane::grpc::StreamCforedRequest> *stream)
       : m_stream_(stream), m_valid_(true) {}
 
-  bool WriteTaskIdReply(
-      pid_t calloc_pid,
-      result::result<task_id_t, std::string> res) {
+  bool WriteTaskIdReply(pid_t calloc_pid,
+                        result::result<task_id_t, std::string> res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -66,8 +65,11 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
-  bool WriteTaskResAllocReply(task_id_t task_id,
-                              result::result<std::pair<std::string,std::list<std::string>>, std::string> res) {
+  bool WriteTaskResAllocReply(
+      task_id_t task_id,
+      result::result<std::pair<std::string, std::list<std::string>>,
+                     std::string>
+          res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -78,8 +80,12 @@ class CforedStreamWriter {
 
     if (res.has_value()) {
       task_res_alloc_reply->set_ok(true);
-      task_res_alloc_reply->set_allocated_craned_regex(std::move(res.value().first));
-      std::ranges::for_each(res.value().second,[&task_res_alloc_reply](const auto& craned_id){task_res_alloc_reply->add_craned_ids(craned_id);});
+      task_res_alloc_reply->set_allocated_craned_regex(
+          std::move(res.value().first));
+      std::ranges::for_each(res.value().second,
+                            [&task_res_alloc_reply](const auto &craned_id) {
+                              task_res_alloc_reply->add_craned_ids(craned_id);
+                            });
     } else {
       task_res_alloc_reply->set_ok(false);
       task_res_alloc_reply->set_failure_reason(std::move(res.error()));
@@ -91,7 +97,8 @@ class CforedStreamWriter {
   bool WriteTaskCompletionAckReply(task_id_t task_id) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
-    CRANE_TRACE("Sending TaskCompletionAckReply to cfored of task id {}",task_id);
+    CRANE_TRACE("Sending TaskCompletionAckReply to cfored of task id {}",
+                task_id);
     StreamCtldReply reply;
     reply.set_type(StreamCtldReply::TASK_COMPLETION_ACK_REPLY);
 
@@ -199,6 +206,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                           crane::grpc::CancelTaskReply *response) override;
 
   grpc::Status QueryTasksInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryTasksInfoRequest *request,
+      crane::grpc::QueryTasksInfoReply *response) override;
+
+  grpc::Status QueryTasksInfoByIds(
       grpc::ServerContext *context,
       const crane::grpc::QueryTasksInfoRequest *request,
       crane::grpc::QueryTasksInfoReply *response) override;

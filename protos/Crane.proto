@@ -728,6 +728,9 @@ service CraneCtld {
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
 
+  /* RPCs called from ceff */
+  rpc QueryTasksInfoByIds(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
+
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
 }

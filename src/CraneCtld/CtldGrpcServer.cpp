@@ -283,6 +283,26 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::QueryTasksInfoByIds(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryTasksInfoRequest *request,
+    crane::grpc::QueryTasksInfoReply *response) {
+  // Query tasks in RAM
+  g_task_scheduler->QueryTasksInRam(request, response);
+  size_t num_limit = kDefaultQueryTaskNumLimit;
+
+  auto *task_list = response->mutable_task_info_list();
+
+  if (!g_db_client->FetchJobRecords(request, response,
+                                    num_limit - task_list->size())) {
+    CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
+    return grpc::Status::OK;
+  }
+  response->set_ok(true);
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
