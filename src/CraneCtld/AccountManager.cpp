@@ -312,7 +312,7 @@ AccountManager::QosMapMutexSharedPtr AccountManager::GetAllQosInfo() {
 }
 
 AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
-    uint32_t uid, const std::string& name,
+    uint32_t uid, const std::string& user_list,
     std::unordered_map<uid_t, User>* res_user_map) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   CraneExpected<void> result{};
@@ -321,7 +321,10 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
-  if (name.empty()) {  // Query all users that can be queried.
+  std::vector<std::string> user_vec =
+      absl::StrSplit(user_list, ',', absl::SkipEmpty());
+
+  if (user_vec.empty()) {  // Query all users that can be queried.
     // Operators and above can query all users.
     if (CheckIfUserHasHigherPrivThan_(*op_user, User::None)) {
       // The rules for querying user information are the same as those for
@@ -350,20 +353,25 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
     }
   } else {  // Query the specified user information.
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    const User* user = GetExistedUserInfoNoLock_(name);
-    result = CheckIfUserHasPermOnUserNoLock_(*op_user, user, true);
-    if (!result) return result;
-    res_user_map->try_emplace(user->uid, *user);
+    for (const auto& user_name : user_vec) {
+      const User* user = GetExistedUserInfoNoLock_(user_name);
+      result = CheckIfUserHasPermOnUserNoLock_(*op_user, user, true);
+      if (!result) return result;
+      res_user_map->try_emplace(user->uid, *user);
+    }
   }
 
   return result;
 }
 
 AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
-    uint32_t uid, const std::string& name,
+    uint32_t uid, const std::string& account_list,
     std::unordered_map<std::string, Account>* res_account_map) {
   User res_user;
   CraneExpected<void> result{};
+
+  std::vector<std::string> account_vec =
+      absl::StrSplit(account_list, ',', absl::SkipEmpty());
 
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -371,15 +379,18 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
-    if (!name.empty()) {
-      result = CheckIfUserHasPermOnAccountNoLock_(*op_user, name, true);
-      if (!result) return result;
+    if (!account_vec.empty()) {
+      for (const auto& account_name : account_vec) {
+        result =
+            CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, true);
+        if (!result) return result;
+      }
     }
     res_user = *op_user;
   }
 
   util::read_lock_guard account_guard(m_rw_account_mutex_);
-  if (name.empty()) {
+  if (account_vec.empty()) {
     if (CheckIfUserHasHigherPrivThan_(res_user, User::None)) {
       // If an administrator user queries account information, all
       // accounts are returned, variable user_account not used
@@ -415,16 +426,18 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
       }
     }
   } else {
-    const Account* account = GetAccountInfoNoLock_(name);
-    if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
-    res_account_map->try_emplace(name, *account);
+    for (const auto& account_name : account_vec) {
+      const Account* account = GetAccountInfoNoLock_(account_name);
+      if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+      res_account_map->try_emplace(account_name, *account);
+    }
   }
 
   return result;
 }
 
 AccountManager::CraneExpected<void> AccountManager::QueryQosInfo(
-    uint32_t uid, const std::string& name,
+    uint32_t uid, const std::string& qos_list,
     std::unordered_map<std::string, Qos>* res_qos_map) {
   User res_user;
   CraneExpected<void> result{};
@@ -437,7 +450,10 @@ AccountManager::CraneExpected<void> AccountManager::QueryQosInfo(
   }
 
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
-  if (name.empty()) {
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos_list, ',', absl::SkipEmpty());
+
+  if (qos_vec.empty()) {
     if (CheckIfUserHasHigherPrivThan_(res_user, User::None)) {
       for (const auto& [name, qos] : m_qos_map_) {
         if (qos->deleted) continue;
@@ -454,22 +470,24 @@ AccountManager::CraneExpected<void> AccountManager::QueryQosInfo(
       }
     }
   } else {
-    const Qos* qos = GetExistedQosInfoNoLock_(name);
-    if (!qos) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+    for (const auto& qos_name : qos_vec) {
+      const Qos* qos = GetExistedQosInfoNoLock_(qos_name);
+      if (!qos) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
 
-    if (res_user.admin_level < User::Operator) {
-      bool found = false;
-      for (const auto& [acct, item] : res_user.account_to_attrs_map) {
-        for (const auto& [part, part_qos_map] :
-             item.allowed_partition_qos_map) {
-          for (const auto& part_qos : part_qos_map.second) {
-            if (part_qos == name) found = true;
+      if (res_user.admin_level < User::Operator) {
+        bool found = false;
+        for (const auto& [acct, item] : res_user.account_to_attrs_map) {
+          for (const auto& [part, part_qos_map] :
+               item.allowed_partition_qos_map) {
+            for (const auto& part_qos : part_qos_map.second) {
+              if (part_qos == qos_name) found = true;
+            }
           }
         }
+        if (!found) return std::unexpected(CraneErrCode::ERR_ALLOWED_QOS);
       }
-      if (!found) return std::unexpected(CraneErrCode::ERR_ALLOWED_QOS);
+      res_qos_map->try_emplace(qos_name, *qos);
     }
-    res_qos_map->try_emplace(name, *qos);
   }
 
   return result;

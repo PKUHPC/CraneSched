@@ -63,15 +63,15 @@ class AccountManager {
   CraneExpected<void> DeleteQos(uint32_t uid, const std::string& name);
 
   CraneExpected<void> QueryUserInfo(
-      uint32_t uid, const std::string& name,
+      uint32_t uid, const std::string& user_list,
       std::unordered_map<uid_t, User>* res_user_map);
 
   CraneExpected<void> QueryAccountInfo(
-      uint32_t uid, const std::string& name,
+      uint32_t uid, const std::string& account_list,
       std::unordered_map<std::string, Account>* res_account_map);
 
   CraneExpected<void> QueryQosInfo(
-      uint32_t uid, const std::string& name,
+      uint32_t uid, const std::string& qos_list,
       std::unordered_map<std::string, Qos>* res_qos_map);
 
   UserMutexSharedPtr GetExistedUserInfo(const std::string& name);
