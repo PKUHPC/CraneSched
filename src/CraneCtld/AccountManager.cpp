@@ -1083,32 +1083,40 @@ AccountManager::CheckAddUserAllowedQosNoLock_(const User* user,
                                               const std::string& qos_str) {
   auto result = CheckQosIsAllowedNoLock_(account, qos_str, false, true);
   if (!result) return result;
+
   const std::string& account_name = account->name;
   //  check if add item already the user's allowed qos
   const auto& attrs_in_account_map =
       user->account_to_attrs_map.at(account_name);
+
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos_str, ',', absl::SkipEmpty());
+
   if (partition.empty()) {
     // When the user has no partition, QoS cannot be added.
     if (attrs_in_account_map.allowed_partition_qos_map.empty())
       return std::unexpected(CraneErrCode::ERR_USER_EMPTY_PARTITION);
-
-    bool is_allowed = false;
-    for (const auto& [par, pair] :
-         attrs_in_account_map.allowed_partition_qos_map) {
-      const std::list<std::string>& list = pair.second;
-      if (!ranges::contains(list, qos_str)) {
-        is_allowed = true;
-        break;
+    for (const auto& qos_name : qos_vec) {
+      bool is_allowed = false;
+      for (const auto& [par, pair] :
+           attrs_in_account_map.allowed_partition_qos_map) {
+        const std::list<std::string>& list = pair.second;
+        if (!ranges::contains(list, qos_name)) {
+          is_allowed = true;
+          break;
+        }
       }
+      if (!is_allowed) return std::unexpected(CraneErrCode::ERR_DUPLICATE_QOS);
     }
-    if (!is_allowed) return std::unexpected(CraneErrCode::ERR_DUPLICATE_QOS);
   } else {
     auto iter = attrs_in_account_map.allowed_partition_qos_map.find(partition);
     if (iter == attrs_in_account_map.allowed_partition_qos_map.end())
       return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
     const std::list<std::string>& list = iter->second.second;
-    if (ranges::contains(list, qos_str))
-      return std::unexpected(CraneErrCode::ERR_DUPLICATE_QOS);
+    for (const auto& qos_name : qos_vec) {
+      if (ranges::contains(list, qos_name))
+        return std::unexpected(CraneErrCode::ERR_DUPLICATE_QOS);
+    }
   }
 
   return {};
@@ -1251,8 +1259,13 @@ AccountManager::CheckAddAccountAllowedQosNoLock_(const Account* account,
   auto result = CheckQosIsAllowedNoLock_(account, qos, true, false);
   if (!result) return result;
 
-  if (ranges::contains(account->allowed_qos_list, qos))
-    return std::unexpected(CraneErrCode::ERR_DUPLICATE_QOS);
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos, ',', absl::SkipEmpty());
+
+  for (const auto& qos_name : qos_vec) {
+    if (ranges::contains(account->allowed_qos_list, qos_name))
+      return std::unexpected(CraneErrCode::ERR_DUPLICATE_QOS);
+  }
 
   return {};
 }
@@ -1919,16 +1932,21 @@ AccountManager::CraneExpected<void> AccountManager::AddUserAllowedQos_(
 
   User res_user(user);
 
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos, ',', absl::SkipEmpty());
+
   if (partition.empty()) {
     // add to all partition
-    for (auto& [par, pair] : res_user.account_to_attrs_map[account_name]
-                                 .allowed_partition_qos_map) {
-      std::list<std::string>& list = pair.second;
-      if (!ranges::contains(list, qos)) {
-        if (pair.first.empty()) {
-          pair.first = qos;
+    for (const auto& qos_name : qos_vec) {
+      for (auto& [par, pair] : res_user.account_to_attrs_map[account_name]
+                                   .allowed_partition_qos_map) {
+        std::list<std::string>& list = pair.second;
+        if (!ranges::contains(list, qos_name)) {
+          if (pair.first.empty()) {
+            pair.first = qos_name;
+          }
+          list.emplace_back(qos_name);
         }
-        list.emplace_back(qos);
       }
     }
   } else {
@@ -1936,10 +1954,12 @@ AccountManager::CraneExpected<void> AccountManager::AddUserAllowedQos_(
     auto iter = res_user.account_to_attrs_map[account_name]
                     .allowed_partition_qos_map.find(partition);
     std::list<std::string>& list = iter->second.second;
-    if (iter->second.first.empty()) {
-      iter->second.first = qos;
+    for (const auto& qos_name : qos_vec) {
+      if (iter->second.first.empty()) {
+        iter->second.first = qos_name;
+      }
+      list.push_back(qos_name);
     }
-    list.push_back(qos);
   }
 
   // Update to database
@@ -2220,28 +2240,34 @@ AccountManager::CraneExpected<void> AccountManager::AddAccountAllowedQos_(
     const Account& account, const std::string& qos) {
   const std::string& name = account.name;
 
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos, ',', absl::SkipEmpty());
+
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        if (account.default_qos.empty()) {
+        for (const auto& qos_name : qos_vec) {
+          if (account.default_qos.empty()) {
+            g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                         "$set", name, "default_qos", qos_name);
+          }
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                       "$set", name, "default_qos", qos);
+                                       "$addToSet", name, "allowed_qos_list",
+                                       qos_name);
+          IncQosReferenceCountInDb_(qos_name, 1);
         }
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                     "$addToSet", name, "allowed_qos_list",
-                                     qos);
-        IncQosReferenceCountInDb_(qos, 1);
       };
 
   // Update to database
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-
-  if (account.default_qos.empty()) {
-    m_account_map_[name]->default_qos = qos;
+  for (const auto& qos_name : qos_vec) {
+    if (account.default_qos.empty()) {
+      m_account_map_[name]->default_qos = qos_name;
+    }
+    m_account_map_[name]->allowed_qos_list.emplace_back(qos_name);
+    m_qos_map_[qos_name]->reference_count++;
   }
-  m_account_map_[name]->allowed_qos_list.emplace_back(qos);
-  m_qos_map_[qos]->reference_count++;
 
   return {};
 }
