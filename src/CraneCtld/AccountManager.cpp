@@ -1195,9 +1195,14 @@ AccountManager::CraneExpected<void>
 AccountManager::CheckDeleteUserAllowedPartitionNoLock_(
     const User& user, const std::string& account,
     const std::string& partition) {
-  if (!user.account_to_attrs_map.at(account).allowed_partition_qos_map.contains(
-          partition))
-    return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
+  std::vector<std::string> partition_vec =
+      absl::StrSplit(partition, ',', absl::SkipEmpty());
+
+  for (const auto& par_name : partition_vec) {
+    if (!user.account_to_attrs_map.at(account)
+             .allowed_partition_qos_map.contains(par_name))
+      return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
+  }
 
   return {};
 }
@@ -1208,16 +1213,23 @@ AccountManager::CheckDeleteUserAllowedQosNoLock_(const User& user,
                                                  const std::string& partition,
                                                  const std::string& qos,
                                                  bool force) {
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos, ',', absl::SkipEmpty());
+
   const auto& attrs_in_account = user.account_to_attrs_map.at(account);
+
   if (partition.empty()) {
-    bool is_allowed = false;
-    for (const auto& [par, pair] : attrs_in_account.allowed_partition_qos_map) {
-      if (ranges::contains(pair.second, qos)) {
-        is_allowed = true;
-        if (pair.first == qos && !force)
-          return std::unexpected(CraneErrCode::ERR_IS_DEFAULT_QOS);
+    for (const auto& qos_name : qos_vec) {
+      bool is_allowed = false;
+      for (const auto& [par, pair] :
+           attrs_in_account.allowed_partition_qos_map) {
+        if (ranges::contains(pair.second, qos_name)) {
+          is_allowed = true;
+          if (pair.first == qos_name && !force)
+            return std::unexpected(CraneErrCode::ERR_IS_DEFAULT_QOS);
+        }
+        if (!is_allowed) return std::unexpected(CraneErrCode::ERR_ALLOWED_QOS);
       }
-      if (!is_allowed) return std::unexpected(CraneErrCode::ERR_ALLOWED_QOS);
     }
   } else {
     // Delete the qos of a specified partition
@@ -1226,11 +1238,13 @@ AccountManager::CheckDeleteUserAllowedQosNoLock_(const User& user,
     if (iter == attrs_in_account.allowed_partition_qos_map.end())
       return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
 
-    if (!ranges::contains(iter->second.second, qos))
-      return std::unexpected(CraneErrCode::ERR_ALLOWED_QOS);
+    for (const auto& qos_name : qos_vec) {
+      if (!ranges::contains(iter->second.second, qos_name))
+        return std::unexpected(CraneErrCode::ERR_ALLOWED_QOS);
 
-    if (qos == iter->second.first && !force)
-      return std::unexpected(CraneErrCode::ERR_IS_DEFAULT_QOS);
+      if (qos_name == iter->second.first && !force)
+        return std::unexpected(CraneErrCode::ERR_IS_DEFAULT_QOS);
+    }
   }
 
   return {};
@@ -1336,8 +1350,13 @@ AccountManager::CheckDeleteAccountAllowedPartitionNoLock_(
       CheckPartitionIsAllowedNoLock_(account, partition, false, false);
   if (!result) return result;
 
-  if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account, partition))
-    return std::unexpected(CraneErrCode::ERR_CHILD_HAS_PARTITION);
+  std::vector<std::string> partition_vec =
+      absl::StrSplit(partition, ',', absl::SkipEmpty());
+
+  for (const auto& par_name : partition_vec) {
+    if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account, par_name))
+      return std::unexpected(CraneErrCode::ERR_CHILD_HAS_PARTITION);
+  }
 
   return {};
 }
@@ -1349,11 +1368,16 @@ AccountManager::CheckDeleteAccountAllowedQosNoLock_(const Account* account,
   auto result = CheckQosIsAllowedNoLock_(account, qos, false, false);
   if (!result) return result;
 
-  if (!force && account->default_qos == qos)
-    return std::unexpected(CraneErrCode::ERR_IS_DEFAULT_QOS);
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos, ',', absl::SkipEmpty());
 
-  if (!force && IsDefaultQosOfAnyNodeNoLock_(account, qos))
-    return std::unexpected(CraneErrCode::ERR_CHILD_HAS_DEFAULT_QOS);
+  for (const auto& qos_name : qos_vec) {
+    if (!force && account->default_qos == qos_name)
+      return std::unexpected(CraneErrCode::ERR_IS_DEFAULT_QOS);
+
+    if (!force && IsDefaultQosOfAnyNodeNoLock_(account, qos_name))
+      return std::unexpected(CraneErrCode::ERR_CHILD_HAS_DEFAULT_QOS);
+  }
 
   return {};
 }
@@ -2143,23 +2167,29 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedPartition_(
     const std::string& partition) {
   const std::string& name = user.name;
 
+  std::vector<std::string> partition_vec =
+      absl::StrSplit(partition, ',', absl::SkipEmpty());
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        g_db_client->UpdateEntityOne(
-            Ctld::MongodbClient::EntityType::USER, "$unset", name,
-            "account_to_attrs_map." + account + ".allowed_partition_qos_map." +
-                partition,
-            std::string(""));
+        for (const auto& par_name : partition_vec) {
+          g_db_client->UpdateEntityOne(
+              Ctld::MongodbClient::EntityType::USER, "$unset", name,
+              "account_to_attrs_map." + account +
+                  ".allowed_partition_qos_map." + par_name,
+              std::string(""));
+        }
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
-  m_user_map_[name]
-      ->account_to_attrs_map[account]
-      .allowed_partition_qos_map.erase(partition);
+  for (const auto& par_name : partition_vec) {
+    m_user_map_[name]
+        ->account_to_attrs_map[account]
+        .allowed_partition_qos_map.erase(par_name);
+  }
 
   return {};
 }
@@ -2171,14 +2201,19 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
 
   User res_user(user);
 
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos, ',', absl::SkipEmpty());
+
   if (partition.empty()) {
-    // Delete the qos of all partition
-    for (auto& [par, pair] :
-         res_user.account_to_attrs_map[account].allowed_partition_qos_map) {
-      if (ranges::contains(pair.second, qos)) {
-        pair.second.remove(qos);
-        if (pair.first == qos) {
-          pair.first = pair.second.empty() ? "" : pair.second.front();
+    for (const auto& qos_name : qos_vec) {
+      // Delete the qos of all partition
+      for (auto& [par, pair] :
+           res_user.account_to_attrs_map[account].allowed_partition_qos_map) {
+        if (ranges::contains(pair.second, qos_name)) {
+          pair.second.remove(qos_name);
+          if (pair.first == qos_name) {
+            pair.first = pair.second.empty() ? "" : pair.second.front();
+          }
         }
       }
     }
@@ -2188,11 +2223,13 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
         res_user.account_to_attrs_map[account].allowed_partition_qos_map.find(
             partition);
 
-    iter->second.second.remove(qos);
+    for (const auto& qos_name : qos_vec) {
+      iter->second.second.remove(qos_name);
 
-    if (qos == iter->second.first) {
-      iter->second.first =
-          iter->second.second.empty() ? "" : iter->second.second.front();
+      if (qos_name == iter->second.first) {
+        iter->second.first =
+            iter->second.second.empty() ? "" : iter->second.second.front();
+      }
     }
   }
 
@@ -2425,16 +2462,22 @@ AccountManager::CraneExpected<void> AccountManager::SetAccountAllowedQos_(
 AccountManager::CraneExpected<void>
 AccountManager::DeleteAccountAllowedPartition_(const Account& account,
                                                const std::string& partition) {
+  std::vector<std::string> partition_vec =
+      absl::StrSplit(partition, ',', absl::SkipEmpty());
+
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        DeleteAccountAllowedPartitionFromDBNoLock_(account.name, partition);
+        for (const auto& par_name : partition_vec) {
+          DeleteAccountAllowedPartitionFromDBNoLock_(account.name, par_name);
+        }
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-
-  DeleteAccountAllowedPartitionFromMapNoLock_(account.name, partition);
+  for (const auto& par_name : partition_vec) {
+    DeleteAccountAllowedPartitionFromMapNoLock_(account.name, par_name);
+  }
 
   return {};
 }
@@ -2442,18 +2485,26 @@ AccountManager::DeleteAccountAllowedPartition_(const Account& account,
 AccountManager::CraneExpected<void> AccountManager::DeleteAccountAllowedQos_(
     const Account& account, const std::string& qos) {
   int change_num;
+  std::vector<std::string> qos_vec =
+      absl::StrSplit(qos, ',', absl::SkipEmpty());
+
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        change_num = DeleteAccountAllowedQosFromDBNoLock_(account.name, qos);
-        IncQosReferenceCountInDb_(qos, -change_num);
+        for (const auto& qos_name : qos_vec) {
+          change_num =
+              DeleteAccountAllowedQosFromDBNoLock_(account.name, qos_name);
+          IncQosReferenceCountInDb_(qos_name, -change_num);
+        }
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
-  DeleteAccountAllowedQosFromMapNoLock_(account.name, qos);
-  m_qos_map_[qos]->reference_count -= change_num;
+  for (const auto& qos_name : qos_vec) {
+    DeleteAccountAllowedQosFromMapNoLock_(account.name, qos_name);
+    m_qos_map_[qos_name]->reference_count -= change_num;
+  }
 
   return {};
 }
