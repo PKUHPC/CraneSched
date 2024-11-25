@@ -1054,10 +1054,14 @@ AccountManager::CheckAddUserAllowedPartitionNoLock_(
   auto result = CheckPartitionIsAllowedNoLock_(account, partition, false, true);
   if (!result) return result;
 
+  std::vector<std::string> partition_vec =
+      absl::StrSplit(partition, ',', absl::SkipEmpty());
+
   const std::string& account_name = account->name;
-  if (user->account_to_attrs_map.at(account_name)
-          .allowed_partition_qos_map.contains(partition)) {
-    return std::unexpected(CraneErrCode::ERR_DUPLICATE_PARTITION);
+  for (const auto& par_name : partition_vec) {
+    if (user->account_to_attrs_map.at(account_name)
+            .allowed_partition_qos_map.contains(par_name))
+      return std::unexpected(CraneErrCode::ERR_DUPLICATE_PARTITION);
   }
 
   return {};
@@ -1230,8 +1234,13 @@ AccountManager::CheckAddAccountAllowedPartitionNoLock_(
   auto result = CheckPartitionIsAllowedNoLock_(account, partition, true, false);
   if (!result) return result;
 
-  if (ranges::contains(account->allowed_partition, partition))
-    return std::unexpected(CraneErrCode::ERR_DUPLICATE_PARTITION);
+  std::vector<std::string> partition_vec =
+      absl::StrSplit(partition, ',', absl::SkipEmpty());
+
+  for (const auto& par_name : partition_vec) {
+    if (ranges::contains(account->allowed_partition, par_name))
+      return std::unexpected(CraneErrCode::ERR_DUPLICATE_PARTITION);
+  }
 
   return {};
 }
@@ -1872,12 +1881,17 @@ AccountManager::CraneExpected<void> AccountManager::AddUserAllowedPartition_(
 
   User res_user(user);
 
+  std::vector<std::string> partition_vec =
+      absl::StrSplit(partition, ',', absl::SkipEmpty());
+
   // Update the map
-  res_user.account_to_attrs_map[account_name]
-      .allowed_partition_qos_map[partition] =
-      std::pair<std::string, std::list<std::string>>{
-          account.default_qos,
-          std::list<std::string>{account.allowed_qos_list}};
+  for (const auto& par_name : partition_vec) {
+    res_user.account_to_attrs_map[account_name]
+        .allowed_partition_qos_map[par_name] =
+        std::pair<std::string, std::list<std::string>>{
+            account.default_qos,
+            std::list<std::string>{account.allowed_qos_list}};
+  }
 
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
@@ -2181,17 +2195,23 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
 AccountManager::CraneExpected<void> AccountManager::AddAccountAllowedPartition_(
     const std::string& name, const std::string& partition) {
   // Update to database
+  std::vector<std::string> partition_vec =
+      absl::StrSplit(partition, ',', absl::SkipEmpty());
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                     "$addToSet", name, "allowed_partition",
-                                     partition);
+        for (const auto& par_name : partition_vec) {
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                       "$addToSet", name, "allowed_partition",
+                                       par_name);
+        }
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-  m_account_map_[name]->allowed_partition.emplace_back(partition);
+  for (const auto& par_name : partition_vec) {
+    m_account_map_[name]->allowed_partition.emplace_back(par_name);
+  }
 
   return {};
 }
