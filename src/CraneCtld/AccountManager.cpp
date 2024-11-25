@@ -2559,11 +2559,11 @@ bool AccountManager::DeleteAccountAllowedQosFromMapNoLock_(
 
   for (const auto& child : account->child_accounts) {
     DeleteAccountAllowedQosFromMapNoLock_(child, qos);
-    g_account_meta_container->EraseQosResourceOnUser(name, qos);
   }
 
   for (const auto& user : account->users) {
     DeleteUserAllowedQosOfAllPartitionFromMapNoLock_(user, name, qos);
+    g_account_meta_container->EraseQosResourceOnUser(user, qos);
   }
   m_account_map_[name]->allowed_qos_list.remove(qos);
   if (account->default_qos == qos) {
