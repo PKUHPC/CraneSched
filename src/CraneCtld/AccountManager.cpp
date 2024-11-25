@@ -863,7 +863,9 @@ AccountManager::CraneExpected<void> AccountManager::ModifyQos(
 }
 
 AccountManager::CraneExpected<void> AccountManager::BlockAccount(
-    uint32_t uid, const std::string& name, bool block) {
+    uint32_t uid, const std::string& account_list, bool block) {
+  std::vector<std::string> account_vec =
+      absl::StrSplit(account_list, ',', absl::SkipEmpty());
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -871,19 +873,27 @@ AccountManager::CraneExpected<void> AccountManager::BlockAccount(
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
-
-    auto result = CheckIfUserHasPermOnAccountNoLock_(*op_user, name, false);
-    if (!result) return result;
+    // If the account_list is empty, perform operations on all accounts.
+    if (account_list == "") {
+      account_vec.clear();
+      for (const auto& [account_name, account] : m_account_map_) {
+        account_vec.emplace_back(account_name);
+      }
+    }
+    for (const auto& account_name : account_vec) {
+      auto result =
+          CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, false);
+      if (!result) return result;
+    }
   }
 
   util::write_lock_guard account_guard(m_rw_account_mutex_);
+  for (const auto& account_name : account_vec) {
+    const Account* account = GetExistedAccountInfoNoLock_(account_name);
+    if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+  }
 
-  const Account* account = GetExistedAccountInfoNoLock_(name);
-  if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
-
-  if (account->blocked == block) return {};
-
-  return BlockAccount_(name, block);
+  return BlockAccount_(account_vec, block);
 }
 
 AccountManager::CraneExpected<void> AccountManager::BlockUser(
@@ -2412,17 +2422,21 @@ AccountManager::CraneExpected<void> AccountManager::BlockUser_(
 }
 
 AccountManager::CraneExpected<void> AccountManager::BlockAccount_(
-    const std::string& name, bool block) {
+    const std::vector<std::string>& account_vec, bool block) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
-                                     name, "blocked", block);
+        for (const auto& account_name : account_vec) {
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                       "$set", account_name, "blocked", block);
+        }
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-  m_account_map_[name]->blocked = block;
+  for (const auto& account_name : account_vec) {
+    m_account_map_[account_name]->blocked = block;
+  }
 
   return {};
 }

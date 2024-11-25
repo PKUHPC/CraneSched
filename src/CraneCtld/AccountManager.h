@@ -122,8 +122,8 @@ class AccountManager {
                                 crane::grpc::ModifyField modify_field,
                                 const std::string& value);
 
-  CraneExpected<void> BlockAccount(uint32_t uid, const std::string& name,
-                                   bool block);
+  CraneExpected<void> BlockAccount(uint32_t uid,
+                                   const std::string& account_list, bool block);
 
   CraneExpected<void> BlockUser(uint32_t uid, const std::string& name,
                                 const std::string& account, bool block);
@@ -314,7 +314,8 @@ class AccountManager {
   CraneExpected<void> BlockUser_(const std::string& name,
                                  const std::string& account, bool block);
 
-  CraneExpected<void> BlockAccount_(const std::string& name, bool block);
+  CraneExpected<void> BlockAccount_(const std::vector<std::string>& account_vec,
+                                    bool block);
 
   bool IsAllowedPartitionOfAnyNodeNoLock_(const Account* account,
                                           const std::string& partition,
