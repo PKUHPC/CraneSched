@@ -874,8 +874,7 @@ AccountManager::CraneExpected<void> AccountManager::BlockAccount(
     if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
     // If the account_list is empty, perform operations on all accounts.
-    if (account_list == "") {
-      account_vec.clear();
+    if (account_vec.empty()) {
       for (const auto& [account_name, account] : m_account_map_) {
         account_vec.emplace_back(account_name);
       }
@@ -897,25 +896,35 @@ AccountManager::CraneExpected<void> AccountManager::BlockAccount(
 }
 
 AccountManager::CraneExpected<void> AccountManager::BlockUser(
-    uint32_t uid, const std::string& name, const std::string& account,
+    uint32_t uid, const std::string& user_list, const std::string& account,
     bool block) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
-
-  const User* user = GetExistedUserInfoNoLock_(name);
-  std::string actual_account = account;
+  std::vector<std::string> user_vec =
+      absl::StrSplit(user_list, ',', absl::SkipEmpty());
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
-    auto result = CheckIfUserHasPermOnUserOfAccountNoLock_(
-        *op_user, user, &actual_account, false);
-    if (!result) return result;
+    if (account.empty()) {
+      return std::unexpected(CraneErrCode::ERR_NO_ACCOUNT_SPECIFIED);
+    }
+    // When the user_list is empty, block/unblock all users.
+    if (user_vec.empty()) {
+      for (const auto& [user_name, user] : m_user_map_) {
+        user_vec.emplace_back(user_name);
+      }
+    }
+    std::string actual_account = account;
+    for (const auto& user_name : user_vec) {
+      const User* user = GetExistedUserInfoNoLock_(user_name);
+      auto result = CheckIfUserHasPermOnUserOfAccountNoLock_(
+          *op_user, user, &actual_account, false);
+      if (!result) return result;
+    }
   }
 
-  if (user->account_to_attrs_map.at(actual_account).blocked == block) return {};
-
-  return BlockUser_(name, actual_account, block);
+  return BlockUser_(user_vec, account, block);
 }
 
 bool AccountManager::CheckUserPermissionToPartition(
@@ -2404,19 +2413,22 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccountAllowedQos_(
 }
 
 AccountManager::CraneExpected<void> AccountManager::BlockUser_(
-    const std::string& name, const std::string& account, bool block) {
+    const std::vector<std::string>& user_vec, const std::string& account,
+    bool block) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        g_db_client->UpdateEntityOne(
-            MongodbClient::EntityType::USER, "$set", name,
-            "account_to_attrs_map." + account + ".blocked", block);
+        for (const auto& user_name : user_vec) {
+          g_db_client->UpdateEntityOne(
+              MongodbClient::EntityType::USER, "$set", user_name,
+              "account_to_attrs_map." + account + ".blocked", block);
+        }
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-
-  m_user_map_[name]->account_to_attrs_map[account].blocked = block;
+  for (const auto& user_name : user_vec)
+    m_user_map_[user_name]->account_to_attrs_map[account].blocked = block;
 
   return {};
 }
