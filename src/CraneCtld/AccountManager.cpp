@@ -924,15 +924,12 @@ AccountManager::CraneExpected<void> AccountManager::BlockUser(
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
-    if (account.empty()) {
+
+    if (account.empty())
       return std::unexpected(CraneErrCode::ERR_NO_ACCOUNT_SPECIFIED);
-    }
-    // When the user_list is empty, block/unblock all users.
-    if (user_vec.empty()) {
-      for (const auto& [user_name, user] : m_user_map_) {
-        user_vec.emplace_back(user_name);
-      }
-    }
+    if (user_vec.empty())
+      return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+
     std::string actual_account = account;
     for (const auto& user_name : user_vec) {
       const User* user = GetExistedUserInfoNoLock_(user_name);
