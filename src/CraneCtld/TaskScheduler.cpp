@@ -686,22 +686,37 @@ void TaskScheduler::ScheduleThread_() {
         task->allocated_craneds_regex =
             util::HostNameListToStr(task->CranedIds());
 
+        // Task execute on all node, otherwise on the first node
+        bool launch_all_node;
         if (task->type == crane::grpc::Batch) {
           // For cbatch tasks whose --node > 1,
           // only execute the command at the first allocated node.
-          task->executing_craned_ids.emplace_back(task->CranedIds().front());
+          launch_all_node = false;
         } else {
           const auto& meta = std::get<InteractiveMetaInTask>(task->meta);
           if (meta.interactive_type == crane::grpc::Calloc)
             // For calloc tasks we still need to execute a dummy empty task to
             // set up a timer.
-            task->executing_craned_ids.emplace_back(task->CranedIds().front());
-          else
-            // For crun tasks we need to execute tasks on all allocated nodes.
-            for (auto const& craned_id : task->CranedIds())
-              task->executing_craned_ids.emplace_back(craned_id);
+            launch_all_node = false;
+          else {
+            // For crun tasks we need to execute tasks on all allocated
+            // nodes.
+
+            // Crun task with pty only launch on first node
+            if (task->TaskToCtld().interactive_meta().pty())
+              launch_all_node = false;
+            else
+              launch_all_node = true;
+          }
         }
+
+        if (launch_all_node) {
+          for (auto const& craned_id : task->CranedIds())
+            task->executing_craned_ids.emplace_back(craned_id);
+        } else
+          task->executing_craned_ids.emplace_back(task->CranedIds().front());
       }
+
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
           "Set task fields costed {} ms",
@@ -1636,7 +1651,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
         }
         meta.cb_task_completed(task->TaskId());
       } else {  // Crun
-        if (++meta.status_change_cnt < task->node_num) {
+        if (++meta.status_change_cnt < task->excluded_nodes.size()) {
           CRANE_TRACE(
               "{}/{} TaskStatusChanges of Crun task #{} were received. "
               "Keep waiting...",
