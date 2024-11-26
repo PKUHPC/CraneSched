@@ -1288,18 +1288,12 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
-      bool is_calloc = false;
       if (task->type == crane::grpc::Interactive) {
         auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-        if (meta.interactive_type == crane::grpc::Calloc) is_calloc = true;
-
-        if (is_calloc && !meta.has_been_cancelled_on_front_end) {
+        if (!meta.has_been_cancelled_on_front_end) {
           meta.has_been_cancelled_on_front_end = true;
           meta.cb_task_cancel(task_id);
         }
-      }
-
-      if (is_calloc) {
         reply.add_cancelled_tasks(task_id);
       } else {
         CraneErr err = TerminateRunningTaskNoLock_(task);
@@ -1472,8 +1466,12 @@ void TaskScheduler::CleanCancelQueueCb_() {
 
     if (task->type == crane::grpc::Interactive) {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-      g_thread_pool->detach_task([cb = meta.cb_task_cancel,
-                                  task_id = task->TaskId()] { cb(task_id); });
+      // Cancel request may come from crun/calloc
+      if (!meta.has_been_cancelled_on_front_end) {
+        meta.has_been_cancelled_on_front_end = true;
+        g_thread_pool->detach_task([cb = meta.cb_task_cancel,
+                                    task_id = task->TaskId()] { cb(task_id); });
+      }
     }
   }
 
@@ -1634,34 +1632,35 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       task->SetStatus(new_status);
     } else {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-      if (meta.interactive_type == crane::grpc::Calloc) {
-        // TaskStatusChange may indicate the time limit has been reached and
-        // the task has been terminated. No more TerminateTask RPC should be
-        // sent to the craned node if any further CancelTask or
-        // TaskCompletionRequest RPC is received.
-        meta.has_been_terminated_on_craned = true;
-
-        if (new_status == crane::grpc::ExceedTimeLimit ||
-            exit_code == ExitCode::kExitCodeCranedDown) {
-          meta.has_been_cancelled_on_front_end = true;
-          meta.cb_task_cancel(task->TaskId());
-          task->SetStatus(new_status);
-        } else {
-          task->SetStatus(crane::grpc::Completed);
-        }
-        meta.cb_task_completed(task->TaskId());
-      } else {  // Crun
-        if (++meta.status_change_cnt < task->excluded_nodes.size()) {
+      if (meta.interactive_type == crane::grpc::Crun) {  // Crun
+        if (++meta.status_change_cnt < task->executing_craned_ids.size()) {
           CRANE_TRACE(
               "{}/{} TaskStatusChanges of Crun task #{} were received. "
               "Keep waiting...",
-              meta.status_change_cnt, task->node_num, task->TaskId());
+              meta.status_change_cnt, task->executing_craned_ids.size(),
+              task->TaskId());
           continue;
         }
-
-        task->SetStatus(new_status);
-        meta.cb_task_completed(task->TaskId());
       }
+
+      // TaskStatusChange may indicate the time limit has been reached and
+      // the task has been terminated. No more TerminateTask RPC should be
+      // sent to the craned node if any further CancelTask or
+      // TaskCompletionRequest RPC is received.
+
+      // Task end triggered by craned.
+      if (!meta.has_been_cancelled_on_front_end) {
+        meta.has_been_cancelled_on_front_end = true;
+        meta.cb_task_cancel(task->TaskId());
+        // Completion ack will send in grpc server triggered by task complete
+        // req
+        meta.cb_task_completed(task->TaskId(), false);
+      } else {
+        // Send Completion Ack to frontend now.
+        meta.cb_task_completed(task->TaskId(), true);
+      }
+
+      task->SetStatus(new_status);
     }
 
     task->SetExitCode(exit_code);
