@@ -55,10 +55,11 @@ class AccountManager {
 
   CraneExpected<void> AddQos(uint32_t uid, const Qos& new_qos);
 
-  CraneExpected<void> DeleteUser(uint32_t uid, const std::string& name,
+  CraneExpected<void> DeleteUser(uint32_t uid, const std::string& user_list,
                                  const std::string& account);
 
-  CraneExpected<void> DeleteAccount(uint32_t uid, const std::string& name);
+  CraneExpected<void> DeleteAccount(uint32_t uid,
+                                    const std::string& account_list);
 
   CraneExpected<void> DeleteQos(uint32_t uid, const std::string& name);
 
@@ -250,9 +251,11 @@ class AccountManager {
 
   CraneExpected<void> AddQos_(const Qos& qos, const Qos* stale_qos);
 
-  CraneExpected<void> DeleteUser_(const User& user, const std::string& account);
+  CraneExpected<void> DeleteUser_(const std::vector<const User*>& user_ptr_vec,
+                                  const std::string& account);
 
-  CraneExpected<void> DeleteAccount_(const Account& account);
+  CraneExpected<void> DeleteAccount_(
+      const std::vector<const Account*>& account_vec);
 
   CraneExpected<void> DeleteQos_(const std::string& name);
 

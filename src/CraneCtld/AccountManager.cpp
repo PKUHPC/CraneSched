@@ -167,7 +167,7 @@ AccountManager::CraneExpected<void> AccountManager::AddQos(uint32_t uid,
 }
 
 AccountManager::CraneExpected<void> AccountManager::DeleteUser(
-    uint32_t uid, const std::string& name, const std::string& account) {
+    uint32_t uid, const std::string& user_list, const std::string& account) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
@@ -175,21 +175,29 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser(
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
-  const User* user = GetExistedUserInfoNoLock_(name);
-  if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  std::vector<std::string> user_vec =
+      absl::StrSplit(user_list, ',', absl::SkipEmpty());
+  std::vector<const User*> user_ptr_vec;
+  for (const auto& user_name : user_vec) {
+    const User* user = GetExistedUserInfoNoLock_(user_name);
+    if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
-  auto result = CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level);
-  if (!result) return result;
+    auto result = CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level);
+    if (!result) return result;
 
-  // The provided account is invalid.
-  if (!account.empty() && !user->account_to_attrs_map.contains(account))
-    return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
+    // The provided account is invalid.
+    if (!account.empty() && !user->account_to_attrs_map.contains(account))
+      return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
+    user_ptr_vec.emplace_back(user);
+  }
 
-  return DeleteUser_(*user, account);
+  return DeleteUser_(user_ptr_vec, account);
 }
 
 AccountManager::CraneExpected<void> AccountManager::DeleteAccount(
-    uint32_t uid, const std::string& name) {
+    uint32_t uid, const std::string& account_list) {
+  std::vector<std::string> account_vec =
+      absl::StrSplit(account_list, ',', absl::SkipEmpty());
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -198,21 +206,30 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccount(
     if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
 
-    auto result = CheckIfUserHasPermOnAccountNoLock_(*op_user, name, false);
-    if (!result) return result;
+    for (const auto& account_name : account_vec) {
+      auto result =
+          CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, false);
+      if (!result) return result;
+    }
   }
 
   util::write_lock_guard account_guard(m_rw_account_mutex_);
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
-  const Account* account = GetExistedAccountInfoNoLock_(name);
-  if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+  std::vector<const Account*> account_ptr_vec;
 
-  // Cannot delete because there are child nodes.
-  if (!account->child_accounts.empty() || !account->users.empty())
-    return std::unexpected(CraneErrCode::ERR_DELETE_ACCOUNT);
+  for (const auto& account_name : account_vec) {
+    const Account* account = GetExistedAccountInfoNoLock_(account_name);
+    if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
-  return DeleteAccount_(*account);
+    // Cannot delete because there are child nodes.
+    if (!account->child_accounts.empty() || !account->users.empty())
+      return std::unexpected(CraneErrCode::ERR_DELETE_ACCOUNT);
+
+    account_ptr_vec.emplace_back(account);
+  }
+
+  return DeleteAccount_(account_ptr_vec);
 }
 
 AccountManager::CraneExpected<void> AccountManager::DeleteQos(
@@ -1812,90 +1829,117 @@ AccountManager::CraneExpected<void> AccountManager::AddQos_(
 }
 
 AccountManager::CraneExpected<void> AccountManager::DeleteUser_(
-    const User& user, const std::string& account) {
-  const std::string& name = user.name;
+    const std::vector<const User*>& user_ptr_vec, const std::string& account) {
+  std::vector<std::list<std::string>> users_to_remove_accounts;
+  std::vector<std::list<std::string>> users_to_remove_coordinator_accounts;
 
-  std::list<std::string> remove_accounts;
-  std::list<std::string> remove_coordinator_accounts;
+  std::vector<User> res_user_vec;
 
-  User res_user(user);
+  for (const auto& user : user_ptr_vec) {
+    std::list<std::string> remove_accounts;
+    std::list<std::string> remove_coordinator_accounts;
+    User res_user(user);
+    if (account.empty()) {
+      // Delete the user
+      for (const auto& kv : user->account_to_attrs_map) {
+        remove_accounts.emplace_back(kv.first);
+      }
+      for (const auto& coordinatorAccount : user->coordinator_accounts) {
+        remove_coordinator_accounts.emplace_back(coordinatorAccount);
+      }
+      res_user.deleted = true;
+    } else {
+      // Remove user from account
+      remove_accounts.emplace_back(account);
+      if (ranges::contains(user->coordinator_accounts, account))
+        remove_coordinator_accounts.emplace_back(account);
 
-  if (account.empty()) {
-    // Delete the user
-    for (const auto& kv : user.account_to_attrs_map) {
-      remove_accounts.emplace_back(kv.first);
+      res_user.account_to_attrs_map.erase(account);
+      if (res_user.default_account == account) {
+        if (res_user.account_to_attrs_map.empty())
+          res_user.deleted = true;
+        else
+          res_user.default_account =
+              res_user.account_to_attrs_map.begin()->first;
+      }
     }
-    for (const auto& coordinatorAccount : user.coordinator_accounts) {
-      remove_coordinator_accounts.emplace_back(coordinatorAccount);
-    }
-    res_user.deleted = true;
-  } else {
-    // Remove user from account
-    remove_accounts.emplace_back(account);
-    if (ranges::contains(user.coordinator_accounts, account))
-      remove_coordinator_accounts.emplace_back(account);
-
-    res_user.account_to_attrs_map.erase(account);
-    if (res_user.default_account == account) {
-      if (res_user.account_to_attrs_map.empty())
-        res_user.deleted = true;
-      else
-        res_user.default_account = res_user.account_to_attrs_map.begin()->first;
-    }
+    res_user_vec.emplace_back(std::move(res_user));
+    users_to_remove_accounts.emplace_back(std::move(remove_accounts));
+    users_to_remove_coordinator_accounts.emplace_back(
+        remove_coordinator_accounts);
   }
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        // delete form the parent accounts' users list
-        for (const auto& remove_account : remove_accounts) {
-          g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                       "$pull", remove_account,
-                                       /*account name*/ "users", name);
-        }
-        for (const auto& coordinatorAccount : remove_coordinator_accounts) {
-          g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                       "$pull", coordinatorAccount,
-                                       /*account name*/ "coordinators", name);
-        }
+        for (size_t i = 0; i < res_user_vec.size(); i++) {
+          const auto& res_user = res_user_vec[i];
+          const auto& remove_accounts = users_to_remove_accounts[i];
+          const auto& remove_coordinator_accounts =
+              users_to_remove_coordinator_accounts[i];
+          const std::string& name = res_user.name;
+          // delete form the parent accounts' users list
+          for (const auto& remove_account : remove_accounts) {
+            g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                         "$pull", remove_account,
+                                         /*account name*/ "users", name);
+          }
+          for (const auto& coordinatorAccount : remove_coordinator_accounts) {
+            g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                         "$pull", coordinatorAccount,
+                                         /*account name*/ "coordinators", name);
+          }
 
-        g_db_client->UpdateUser(res_user);
+          g_db_client->UpdateUser(res_user);
+        }
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
-  for (auto& remove_account : remove_accounts) {
-    m_account_map_[remove_account]->users.remove(name);
-  }
-  for (auto& coordinatorAccount : remove_coordinator_accounts) {
-    m_account_map_[coordinatorAccount]->coordinators.remove(name);
-  }
+  for (size_t i = 0; i < res_user_vec.size(); i++) {
+    const auto& remove_accounts = users_to_remove_accounts[i];
+    const auto& remove_coordinator_accounts =
+        users_to_remove_coordinator_accounts[i];
+    const std::string& name = res_user_vec[i].name;
 
+<<<<<<< HEAD
   g_account_meta_container->DeleteUserResource(name);
 
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
+=======
+    for (auto& remove_account : remove_accounts) {
+      m_account_map_[remove_account]->users.remove(name);
+    }
+    for (auto& coordinatorAccount : remove_coordinator_accounts) {
+      m_account_map_[coordinatorAccount]->coordinators.remove(name);
+    }
+
+    m_user_map_[name] = std::make_unique<User>(std::move(res_user_vec[i]));
+  }
+>>>>>>> a40907e (feat: Batch delete user/account)
 
   return {};
 }
 
 AccountManager::CraneExpected<void> AccountManager::DeleteAccount_(
-    const Account& account) {
-  const std::string& name = account.name;
-
+    const std::vector<const Account*>& account_vec) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        if (!account.parent_account.empty()) {
-          // delete form the parent account's child account list
+        for (const auto& account : account_vec) {
+          const std::string& name = account->name;
+          if (!account->parent_account.empty()) {
+            // delete form the parent account's child account list
+            g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
+                                         "$pull", account->parent_account,
+                                         "child_accounts", name);
+          }
+          // Delete the account
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
-                                       "$pull", account.parent_account,
-                                       "child_accounts", name);
-        }
-        // Delete the account
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT, "$set",
-                                     name, "deleted", true);
-        for (const auto& qos : account.allowed_qos_list) {
-          IncQosReferenceCountInDb_(qos, -1);
+                                       "$set", name, "deleted", true);
+          for (const auto& qos : account->allowed_qos_list) {
+            IncQosReferenceCountInDb_(qos, -1);
+          }
         }
       };
 
@@ -1903,13 +1947,16 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccount_(
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
-  if (!account.parent_account.empty()) {
-    m_account_map_[account.parent_account]->child_accounts.remove(name);
-  }
-  m_account_map_[name]->deleted = true;
+  for (const auto& account : account_vec) {
+    const std::string& name = account->name;
+    if (!account->parent_account.empty()) {
+      m_account_map_[account->parent_account]->child_accounts.remove(name);
+    }
+    m_account_map_[name]->deleted = true;
 
-  for (const auto& qos : account.allowed_qos_list) {
-    m_qos_map_[qos]->reference_count--;
+    for (const auto& qos : account->allowed_qos_list) {
+      m_qos_map_[qos]->reference_count--;
+    }
   }
 
   return {};
