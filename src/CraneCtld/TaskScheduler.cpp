@@ -1466,11 +1466,17 @@ void TaskScheduler::CleanCancelQueueCb_() {
 
     if (task->type == crane::grpc::Interactive) {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-      // Cancel request may come from crun/calloc
+      // Cancel request may not come from crun/calloc, ask them to exit
       if (!meta.has_been_cancelled_on_front_end) {
         meta.has_been_cancelled_on_front_end = true;
         g_thread_pool->detach_task([cb = meta.cb_task_cancel,
                                     task_id = task->TaskId()] { cb(task_id); });
+      } else {
+        // Cancel request from crun/calloc, reply CompletionAck
+        g_thread_pool->detach_task(
+            [cb = meta.cb_task_completed, task_id = task->TaskId()] {
+              cb(task_id, true);
+            });
       }
     }
   }
