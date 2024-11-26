@@ -168,6 +168,10 @@ AccountManager::CraneExpected<void> AccountManager::AddQos(uint32_t uid,
 
 AccountManager::CraneExpected<void> AccountManager::DeleteUser(
     uint32_t uid, const std::string& user_list, const std::string& account) {
+  std::vector<std::string> user_vec =
+      absl::StrSplit(user_list, ',', absl::SkipEmpty());
+  if (user_vec.empty()) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
@@ -175,8 +179,6 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser(
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
-  std::vector<std::string> user_vec =
-      absl::StrSplit(user_list, ',', absl::SkipEmpty());
   std::vector<const User*> user_ptr_vec;
   for (const auto& user_name : user_vec) {
     const User* user = GetExistedUserInfoNoLock_(user_name);
@@ -198,6 +200,9 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccount(
     uint32_t uid, const std::string& account_list) {
   std::vector<std::string> account_vec =
       absl::StrSplit(account_list, ',', absl::SkipEmpty());
+  if (!account_vec.empty())
+    return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
