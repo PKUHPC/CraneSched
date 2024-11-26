@@ -776,15 +776,16 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
               };
 
           meta.cb_task_cancel = [writer_weak_ptr](task_id_t task_id) {
+            CRANE_TRACE("Sending TaskCancelRequest in task_cancel", task_id);
             if (auto writer = writer_weak_ptr.lock(); writer)
               writer->WriteTaskCancelRequest(task_id);
           };
 
-          meta.cb_task_completed = [this, i_type, cfored_name,
-                                    writer_weak_ptr](task_id_t task_id) {
-            CRANE_TRACE("Sending TaskCompletionAckReply in task_completed",
-                        task_id);
-            if (auto writer = writer_weak_ptr.lock(); writer)
+          meta.cb_task_completed = [this, i_type, cfored_name, writer_weak_ptr](
+                                       task_id_t task_id,
+                                       bool send_comlete_ack) {
+            if (auto writer = writer_weak_ptr.lock();
+                writer && send_comlete_ack)
               writer->WriteTaskCompletionAckReply(task_id);
             m_ctld_server_->m_mtx_.Lock();
 
@@ -830,8 +831,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
         case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
           auto const &payload = cfored_request.payload_task_complete_req();
           CRANE_TRACE("Recv TaskCompletionReq of Task #{}", payload.task_id());
-
-          if (g_task_scheduler->TerminatePendingOrRunningTask(
+          if (g_task_scheduler->TerminateInteractivePendingOrRunningTask(
                   payload.task_id()) != CraneErr::kOk)
             stream_writer->WriteTaskCompletionAckReply(payload.task_id());
         } break;
@@ -965,8 +965,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
                     task->Username(), task->partition_id, task->account));
   }
 
-  auto enable_res =
-      g_account_manager->CheckIfUserOfAccountIsEnabled(
+  auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
       task->Username(), task->account);
   if (!enable_res) {
     return std::unexpected(enable_res.error());

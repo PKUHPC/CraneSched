@@ -229,9 +229,10 @@ struct InteractiveMetaInTask {
   std::function<void(task_id_t, std::string const&,
                      std::list<std::string> const&)>
       cb_task_res_allocated;
-  std::function<void(task_id_t)> cb_task_completed;
 
-  // only for calloc.
+  std::function<void(task_id_t, bool)> cb_task_completed;
+
+  // This will ask front end like crun/calloc to exit
   std::function<void(task_id_t)> cb_task_cancel;
 
   // only for crun.
