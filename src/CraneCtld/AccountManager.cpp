@@ -1838,7 +1838,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser_(
   for (const auto& user : user_ptr_vec) {
     std::list<std::string> remove_accounts;
     std::list<std::string> remove_coordinator_accounts;
-    User res_user(user);
+    User res_user(*user);
     if (account.empty()) {
       // Delete the user
       for (const auto& kv : user->account_to_attrs_map) {
@@ -1915,7 +1915,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser_(
       m_account_map_[coordinatorAccount]->coordinators.remove(name);
     }
 
-    m_user_map_[name] = std::make_unique<User>(std::move(res_user_vec[i]));
+    m_user_map_[name] = std::make_unique<User>(res_user_vec[i]);
   }
 >>>>>>> a40907e (feat: Batch delete user/account)
 
