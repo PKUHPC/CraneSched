@@ -23,6 +23,9 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/wait.h>
 
+#include <fstream>
+#include <optional>
+
 #include "CforedClient.h"
 #include "crane/String.h"
 #include "protos/CraneSubprocess.pb.h"
@@ -101,7 +104,9 @@ TaskManager::TaskManager() {
 
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
   m_sigchld_handle_->on<uvw::signal_event>(
-      [this](const uvw::signal_event&, uvw::signal_handle&) { EvSigchldCb_(); });
+      [this](const uvw::signal_event&, uvw::signal_handle&) {
+        EvSigchldCb_();
+      });
 
   if (m_sigchld_handle_->start(SIGCLD) != 0) {
     CRANE_ERROR("Failed to start the SIGCLD handle");
@@ -232,17 +237,25 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
   if (instance->task.type() == crane::grpc::Batch || instance->IsCrun()) {
     // For a Batch task, the end of the process means it is done.
     if (sigchld_info.is_terminated_by_signal) {
-      if (instance->cancelled_by_user)
+      if (instance->termination_event ==
+          TaskInstance::TerminationEvent::CANCELLED_BY_USER)
         ActivateTaskStatusChangeAsync_(
             task_id, crane::grpc::TaskStatus::Cancelled,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
             std::nullopt);
-      else if (instance->terminated_by_timeout)
+      else if (instance->termination_event ==
+               TaskInstance::TerminationEvent::TERMINATION_BY_TIMEOUT)
         ActivateTaskStatusChangeAsync_(
             task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
             std::nullopt);
-      else
+      else if (instance->termination_event ==
+               TaskInstance::TerminationEvent::TERMINATION_BY_OOM) {
+        ActivateTaskStatusChangeAsync_(
+            task_id, crane::grpc::TaskStatus::Failed,
+            sigchld_info.value + ExitCode::kTerminationSignalBase,
+            std::nullopt);
+      } else
         ActivateTaskStatusChangeAsync_(
             task_id, crane::grpc::TaskStatus::Failed,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
@@ -403,6 +416,55 @@ void TaskManager::EvCleanSigchldQueueCb_() {
 void TaskManager::EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info) {
   m_sigchld_queue_.enqueue(std::unique_ptr<ProcSigchldInfo>(sigchld_info));
   m_process_sigchld_async_handle_->send();
+}
+
+void TaskManager::EvCgroupOutOfMemoryCb_(uv_fs_event_t* handle,
+                                         const char* filename, int events,
+                                         int status) {
+  EvOomCbArg* arg = reinterpret_cast<EvOomCbArg*>(handle->data);
+  auto task_id = arg->task_id;
+  auto this_ = arg->task_manager;
+  auto oom_event_path = arg->memory_events_full_path;
+
+  std::ifstream events_file(oom_event_path);
+  if (events_file.is_open()) {
+    std::string line;
+    while (std::getline(events_file, line)) {
+      if (line.find("oom_kill") != std::string::npos) {
+        std::istringstream iss(line);
+        std::string field;
+        int value = 0;
+
+        iss >> field >> value;
+        if (value > 0) {
+          CRANE_TRACE("Task #{} exceeded its memory limit. Terminating it...",
+                      task_id);
+
+          auto task_it = this_->m_task_map_.find(task_id);
+          if (task_it == this_->m_task_map_.end()) {
+            CRANE_TRACE("Task #{} has already been removed.", task_id);
+            return;
+          }
+          TaskInstance* task_instance = task_it->second.get();
+
+          if (task_instance->task.type() == crane::grpc::Batch) {
+            TaskTerminateQueueElem ev_task_terminate{
+                .task_id = task_id,
+                .terminated_by_oom = true,
+            };
+            this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
+            this_->m_terminate_task_async_handle_->send();
+          } else {
+            this_->ActivateTaskStatusChangeAsync_(
+                task_id, crane::grpc::TaskStatus::Failed,
+                ExitCode::kExitCodeOOMError, std::nullopt);
+          }
+        }
+        break;
+      }
+    }
+  }
+  events_file.close();
 }
 
 void TaskManager::EvSigintCb_() {
@@ -949,6 +1011,15 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   instance->cgroup = cg;
   instance->cgroup_path = cg->GetCgroupString();
 
+  if (g_cg_mgr->GetCgroupVersion() ==
+      CgroupConstant::CgroupVersion::CGROUP_V2) {
+    EvSetCgroupV2TerminationOOM_(instance);
+  } 
+  // else if (g_cg_mgr->GetCgroupVersion() ==
+  //            CgroupConstant::CgroupVersion::CGROUP_V1) {
+  //   EvSetCgroupV1TerminationOOM_(instance);
+  // }
+
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
 
@@ -1232,9 +1303,22 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
 
     TaskInstance* task_instance = iter->second.get();
 
-    if (elem.terminated_by_user) task_instance->cancelled_by_user = true;
+    // only terminated once
+    if (task_instance->termination_event ==
+        TaskInstance::TerminationEvent::NONE) {
+      if (elem.terminated_by_user) {
+        task_instance->termination_event =
+            TaskInstance::TerminationEvent::CANCELLED_BY_USER;
+      } else if (elem.terminated_by_timeout) {
+        task_instance->termination_event =
+            TaskInstance::TerminationEvent::TERMINATION_BY_TIMEOUT;
+      } else if (elem.terminated_by_oom) {
+        task_instance->termination_event =
+            TaskInstance::TerminationEvent::TERMINATION_BY_OOM;
+      }
+    }
+
     if (elem.mark_as_orphaned) task_instance->orphaned = true;
-    if (elem.terminated_by_timeout) task_instance->terminated_by_timeout = true;
 
     int sig = SIGTERM;  // For BatchTask
     if (task_instance->IsCrun()) sig = SIGHUP;
