@@ -1277,6 +1277,16 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
       }
     }
   }
+  // get gid by uid
+  struct passwd pwd;
+  struct passwd *result;
+  char buffer[1024];
+  int status = getpwuid_r(task->uid, &pwd, buffer, sizeof(buffer), &result);
+  if (status != 0 || result == nullptr) {
+    return result::fail(fmt::format("Failed to find gid by uid '{}', error: {}",
+                                    task->uid, strerror(status)));
+  }
+  task->SetGid(pwd.pw_gid);
 
   if (!g_account_manager->CheckUserPermissionToPartition(
           task->Username(), task->account, task->partition_id)) {
