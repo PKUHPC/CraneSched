@@ -1311,7 +1311,7 @@ AccountManager::CheckIfUserHasPermOnAccountNoLock_(const User& op_user,
                                                    const std::string& account,
                                                    bool read_only_priv) {
   if (account.empty())
-    return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
+    return std::unexpected(CraneErrCode::ERR_NO_ACCOUNT_SPECIFIED);
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
   if (!account_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
