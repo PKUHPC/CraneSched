@@ -29,7 +29,6 @@
 
 #include "CgroupManager.h"
 #include "CtldClient.h"
-#include "crane/Logger.h"
 #include "crane/PasswordEntry.h"
 #include "protos/Crane.grpc.pb.h"
 
@@ -155,22 +154,21 @@ struct ProcSigchldInfo {
   std::shared_ptr<uvw::timer_handle> resend_timer{nullptr};
 };
 
+enum class TerminatedBy : uint64_t {
+  NONE = 0,
+  CANCELLED_BY_USER,
+  TERMINATION_BY_TIMEOUT,
+  TERMINATION_BY_OOM
+};
+
 // Todo: Task may consists of multiple subtasks
 struct TaskInstance {
   ~TaskInstance() {
     if (termination_timer) {
       termination_timer->close();
     }
-
     if (termination_oom) {
-      if (uv_fs_event_stop(termination_oom)) {
-        CRANE_ERROR("Failed to stop fs event.");
-      }
-      if (termination_oom->data) {
-        delete reinterpret_cast<EvOomCbArg*>(termination_oom->data);
-        termination_oom->data = nullptr;
-      }
-      delete termination_oom;
+      termination_oom->close();
     }
 
     if (this->IsCrun()) {
@@ -190,19 +188,13 @@ struct TaskInstance {
   std::string cgroup_path;
   CgroupInterface* cgroup;
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
-  uv_fs_event_t* termination_oom{nullptr};
+  std::shared_ptr<uvw::fs_event_handle> termination_oom{nullptr};
 
   // Task execution results
   bool orphaned{false};
   CraneErr err_before_exec{CraneErr::kOk};
 
-  enum class TerminationEvent : uint64_t {
-    NONE = 0,
-    CANCELLED_BY_USER,
-    TERMINATION_BY_TIMEOUT,
-    TERMINATION_BY_OOM
-  };
-  TerminationEvent termination_event{TerminationEvent::NONE};
+  TerminatedBy termination_event{TerminatedBy::NONE};
 
   ProcSigchldInfo sigchld_info{};
 
@@ -274,11 +266,7 @@ class TaskManager {
 
   struct TaskTerminateQueueElem {
     uint32_t task_id{0};
-    bool terminated_by_user{false};     // If the task is canceled by user,
-                                        // task->status=Cancelled
-    bool terminated_by_timeout{false};  // If the task is canceled by user,
-                                        // task->status=Timeout
-    bool terminated_by_oom{false};
+    TerminatedBy terminated_by{TerminatedBy::NONE};
     bool mark_as_orphaned{false};
   };
 
@@ -356,40 +344,21 @@ class TaskManager {
                                           slice + instance->cgroup_path +
                                           slice + MemoryEvents;
 
-    uv_fs_event_t* ev = new uv_fs_event_t;
-    if (uv_fs_event_init(m_uvw_loop_->raw(), ev)) {
-      CRANE_ERROR("Error in initializing fs_event");
-    }
-    auto* arg =
-        new EvOomCbArg{.task_id = instance->task.task_id(),
-                       .task_manager = this,
-                       .memory_events_full_path = memory_events_full_path};
-    ev->data = arg;
-    uv_fs_event_start(ev, EvCgroupOutOfMemoryCb_,
-                      memory_events_full_path.c_str(), UV_FS_EVENT_RECURSIVE);
+    auto args = EvOomCbArg{.task_id = instance->task.task_id(),
+                           .task_manager = this,
+                           .memory_events_full_path = memory_events_full_path};
+    auto ev = m_uvw_loop_->resource<uvw::fs_event_handle>();
+
+    ev->on<uvw::fs_event_event>(
+        [this, args](uvw::fs_event_event& event, uvw::fs_event_handle& handle) {
+          EvCgroupOutOfMemoryCb_(event, args);
+        });
+
+    ev->start(memory_events_full_path,
+              uvw::fs_event_handle::event_flags::RECURSIVE);
+
     instance->termination_oom = ev;
   }
-
-  // void EvSetCgroupV1TerminationOOM_(TaskInstance* instance) {
-  //   std::string slice = "/";
-  //   std::string memory_events_full_path =
-  //       CgroupConstant::RootCgroupFullPath + slice +
-  //       GetControllerStringView(CgroupConstant::Controller::MEMORY_CONTROLLER)
-  //           .data() +
-  //       slice + instance->cgroup_path + slice + MemoryOomControl;
-  //   uv_fs_event_t* ev = new uv_fs_event_t;
-  //   if (uv_fs_event_init(m_uvw_loop_->raw(), ev)) {
-  //     CRANE_ERROR("Error in initializing fs_event");
-  //   }
-  //   auto* arg =
-  //       new EvOomCbArg{.task_id = instance->task.task_id(),
-  //                      .task_manager = this,
-  //                      .memory_events_full_path = memory_events_full_path};
-  //   ev->data = arg;
-  //   uv_fs_event_start(ev, EvCgroupOutOfMemoryCb_,
-  //                     memory_events_full_path.c_str(), UV_FS_EVENT_RECURSIVE);
-  //   instance->termination_oom = ev;
-  // }
 
   /**
    * Send a signal to the process group to which the processes in
@@ -459,9 +428,8 @@ class TaskManager {
 
   void EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info);
 
-  static void EvCgroupOutOfMemoryCb_(uv_fs_event_t* handle,
-                                     const char* filename, int events,
-                                     int status);
+  void EvCgroupOutOfMemoryCb_(const uvw::fs_event_event& event,
+                              EvOomCbArg args);
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 

@@ -63,7 +63,7 @@ int CgroupManager::Init() {
     break;
   case CGROUP_MODE_HYBRID:
     //("cgroup mode: Hybrid\n");
-    cg_version_ = CgroupConstant::CgroupVersion::CGROUP_V1;
+    cg_version_ = CgroupConstant::CgroupVersion::UNDEFINED;
     break;
   case CGROUP_MODE_UNIFIED:
     //("cgroup mode: Unified\n");

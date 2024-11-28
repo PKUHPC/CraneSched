@@ -23,9 +23,6 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/wait.h>
 
-#include <fstream>
-#include <optional>
-
 #include "CforedClient.h"
 #include "crane/String.h"
 #include "protos/CraneSubprocess.pb.h"
@@ -237,25 +234,23 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
   if (instance->task.type() == crane::grpc::Batch || instance->IsCrun()) {
     // For a Batch task, the end of the process means it is done.
     if (sigchld_info.is_terminated_by_signal) {
-      if (instance->termination_event ==
-          TaskInstance::TerminationEvent::CANCELLED_BY_USER)
+      if (instance->termination_event == TerminatedBy::CANCELLED_BY_USER)
         ActivateTaskStatusChangeAsync_(
             task_id, crane::grpc::TaskStatus::Cancelled,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
             std::nullopt);
       else if (instance->termination_event ==
-               TaskInstance::TerminationEvent::TERMINATION_BY_TIMEOUT)
+               TerminatedBy::TERMINATION_BY_TIMEOUT)
         ActivateTaskStatusChangeAsync_(
             task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
             std::nullopt);
-      else if (instance->termination_event ==
-               TaskInstance::TerminationEvent::TERMINATION_BY_OOM) {
+      else if (instance->termination_event == TerminatedBy::TERMINATION_BY_OOM)
         ActivateTaskStatusChangeAsync_(
             task_id, crane::grpc::TaskStatus::Failed,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
             std::nullopt);
-      } else
+      else
         ActivateTaskStatusChangeAsync_(
             task_id, crane::grpc::TaskStatus::Failed,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
@@ -418,13 +413,11 @@ void TaskManager::EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info) {
   m_process_sigchld_async_handle_->send();
 }
 
-void TaskManager::EvCgroupOutOfMemoryCb_(uv_fs_event_t* handle,
-                                         const char* filename, int events,
-                                         int status) {
-  EvOomCbArg* arg = reinterpret_cast<EvOomCbArg*>(handle->data);
-  auto task_id = arg->task_id;
-  auto this_ = arg->task_manager;
-  auto oom_event_path = arg->memory_events_full_path;
+void TaskManager::EvCgroupOutOfMemoryCb_(const uvw::fs_event_event& event,
+                                         EvOomCbArg args) {
+  auto task_id = args.task_id;
+  auto this_ = args.task_manager;
+  auto oom_event_path = args.memory_events_full_path;
 
   std::ifstream events_file(oom_event_path);
   if (events_file.is_open()) {
@@ -450,7 +443,7 @@ void TaskManager::EvCgroupOutOfMemoryCb_(uv_fs_event_t* handle,
           if (task_instance->task.type() == crane::grpc::Batch) {
             TaskTerminateQueueElem ev_task_terminate{
                 .task_id = task_id,
-                .terminated_by_oom = true,
+                .terminated_by = TerminatedBy::TERMINATION_BY_OOM,
             };
             this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
             this_->m_terminate_task_async_handle_->send();
@@ -1014,11 +1007,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   if (g_cg_mgr->GetCgroupVersion() ==
       CgroupConstant::CgroupVersion::CGROUP_V2) {
     EvSetCgroupV2TerminationOOM_(instance);
-  } 
-  // else if (g_cg_mgr->GetCgroupVersion() ==
-  //            CgroupConstant::CgroupVersion::CGROUP_V1) {
-  //   EvSetCgroupV1TerminationOOM_(instance);
-  // }
+  }
 
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
@@ -1254,7 +1243,7 @@ void TaskManager::EvTaskTimerCb_(task_id_t task_id) {
   if (task_instance->task.type() == crane::grpc::Batch) {
     TaskTerminateQueueElem ev_task_terminate{
         .task_id = task_id,
-        .terminated_by_timeout = true,
+        .terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT,
     };
     m_task_terminate_queue_.enqueue(ev_task_terminate);
     m_terminate_task_async_handle_->send();
@@ -1304,17 +1293,13 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     TaskInstance* task_instance = iter->second.get();
 
     // only terminated once
-    if (task_instance->termination_event ==
-        TaskInstance::TerminationEvent::NONE) {
-      if (elem.terminated_by_user) {
-        task_instance->termination_event =
-            TaskInstance::TerminationEvent::CANCELLED_BY_USER;
-      } else if (elem.terminated_by_timeout) {
-        task_instance->termination_event =
-            TaskInstance::TerminationEvent::TERMINATION_BY_TIMEOUT;
-      } else if (elem.terminated_by_oom) {
-        task_instance->termination_event =
-            TaskInstance::TerminationEvent::TERMINATION_BY_OOM;
+    if (task_instance->termination_event == TerminatedBy::NONE) {
+      if (elem.terminated_by == TerminatedBy::CANCELLED_BY_USER) {
+        task_instance->termination_event = TerminatedBy::CANCELLED_BY_USER;
+      } else if (elem.terminated_by == TerminatedBy::TERMINATION_BY_TIMEOUT) {
+        task_instance->termination_event = TerminatedBy::TERMINATION_BY_TIMEOUT;
+      } else if (elem.terminated_by == TerminatedBy::TERMINATION_BY_OOM) {
+        task_instance->termination_event = TerminatedBy::TERMINATION_BY_OOM;
       }
     }
 
@@ -1338,7 +1323,8 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
 }
 
 void TaskManager::TerminateTaskAsync(uint32_t task_id) {
-  TaskTerminateQueueElem elem{.task_id = task_id, .terminated_by_user = true};
+  TaskTerminateQueueElem elem{.task_id = task_id,
+                              .terminated_by = TerminatedBy::CANCELLED_BY_USER};
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
 }
@@ -1419,8 +1405,9 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 
       if (now - start_time >= new_time_limit) {
         // If the task times out, terminate it.
-        TaskTerminateQueueElem ev_task_terminate{.task_id = elem.task_id,
-                                                 .terminated_by_timeout = true};
+        TaskTerminateQueueElem ev_task_terminate{
+            .task_id = elem.task_id,
+            .terminated_by = TerminatedBy::TERMINATION_BY_TIMEOUT};
         m_task_terminate_queue_.enqueue(ev_task_terminate);
         m_terminate_task_async_handle_->send();
 
