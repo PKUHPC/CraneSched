@@ -84,3 +84,4 @@
 // Then include the other Crane headers
 #include "crane/GrpcHelper.h"
 #include "crane/Network.h"
+#include "crane/PublicHeader.h"

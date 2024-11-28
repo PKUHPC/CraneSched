@@ -19,11 +19,8 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include <event2/thread.h>
 #include <sys/file.h>
 #include <sys/stat.h>
-#include <sys/sysinfo.h>
-#include <sys/utsname.h>
 #include <yaml-cpp/yaml.h>
 
 #include <ctime>
@@ -32,10 +29,8 @@
 #include "CforedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
-#include "crane/Network.h"
-#include "crane/OS.h"
+#include "DeviceManager.h"
 #include "crane/PluginClient.h"
-#include "crane/PublicHeader.h"
 #include "crane/String.h"
 
 using Craned::g_config;
@@ -601,9 +596,6 @@ void GlobalVariableInit() {
   // Mask SIGPIPE to prevent Craned from crushing due to
   // SIGPIPE while communicating with spawned task processes.
   signal(SIGPIPE, SIG_IGN);
-
-  // Enable inter-thread custom event notification.
-  evthread_use_pthreads();
 
   PasswordEntry::InitializeEntrySize();
 

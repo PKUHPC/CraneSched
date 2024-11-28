@@ -21,30 +21,15 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include <event2/bufferevent.h>
-#include <event2/event.h>
-#include <event2/util.h>
-#include <evrpc.h>
 #include <grp.h>
-#include <sys/eventfd.h>
-#include <sys/wait.h>
+
+#include <uvw.hpp>
 
 #include "CgroupManager.h"
-#include "CtldClient.h"
-#include "DeviceManager.h"
 #include "crane/PasswordEntry.h"
-#include "crane/PublicHeader.h"
 #include "protos/Crane.grpc.pb.h"
-#include "protos/Crane.pb.h"
 
 namespace Craned {
-
-class TaskManager;
-
-struct EvTimerCbArg {
-  TaskManager* task_manager;
-  task_id_t task_id;
-};
 
 struct BatchMetaInProcessInstance {
   std::string parsed_output_file_pattern;
@@ -57,7 +42,6 @@ class ProcessInstance {
       : m_executive_path_(std::move(exec_path)),
         m_arguments_(std::move(arg_list)),
         m_pid_(0),
-        m_ev_buf_event_(nullptr),
         m_user_data_(nullptr) {}
 
   ~ProcessInstance() {
@@ -69,8 +53,6 @@ class ProcessInstance {
         CRANE_ERROR(
             "user_data in ProcessInstance is set, but clean_cb is not set!");
     }
-
-    if (m_ev_buf_event_) bufferevent_free(m_ev_buf_event_);
   }
 
   [[nodiscard]] const std::string& GetExecPath() const {
@@ -82,14 +64,6 @@ class ProcessInstance {
 
   void SetPid(pid_t pid) { m_pid_ = pid; }
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
-
-  void SetEvBufEvent(struct bufferevent* ev_buf_event) {
-    m_ev_buf_event_ = ev_buf_event;
-  }
-
-  void SetOutputCb(std::function<void(std::string&&, void*)> cb) {
-    m_output_cb_ = std::move(cb);
-  }
 
   void SetFinishCb(std::function<void(bool, int, void*)> cb) {
     m_finish_cb_ = std::move(cb);
@@ -113,9 +87,6 @@ class ProcessInstance {
  private:
   /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
   pid_t m_pid_;
-
-  // The underlying event that handles the output of the task.
-  struct bufferevent* m_ev_buf_event_;
 
   /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
   std::string m_executive_path_;
@@ -155,24 +126,20 @@ struct CrunMetaInTaskInstance : MetaInTaskInstance {
   ~CrunMetaInTaskInstance() override = default;
 };
 
-// also arg for EvDoSigChldCb_
+// also arg for EvSigchldTimerCb_
 struct ProcSigchldInfo {
   pid_t pid;
   bool is_terminated_by_signal;
   int value;
 
-  event* resend_timer{nullptr};
+  std::shared_ptr<uvw::timer_handle> resend_timer{nullptr};
 };
 
 // Todo: Task may consists of multiple subtasks
 struct TaskInstance {
   ~TaskInstance() {
     if (termination_timer) {
-      delete static_cast<EvTimerCbArg*>(
-          event_get_callback_arg(termination_timer));
-      evtimer_del(termination_timer);
-      event_free(termination_timer);
-      termination_timer = nullptr;
+      termination_timer->close();
     }
 
     if (this->IsCrun()) {
@@ -191,7 +158,7 @@ struct TaskInstance {
 
   std::string cgroup_path;
   CgroupInterface* cgroup;
-  struct event* termination_timer{nullptr};
+  std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
 
   // Task execution results
   bool orphaned{false};
@@ -260,13 +227,13 @@ class TaskManager {
     task_id_t task_id;
   };
 
-  struct EvQueueChangeTaskTimeLimit {
+  struct ChangeTaskTimeLimitQueueElem {
     uint32_t task_id;
     absl::Duration time_limit;
     std::promise<bool> ok_prom;
   };
 
-  struct EvQueueTaskTerminate {
+  struct TaskTerminateQueueElem {
     uint32_t task_id{0};
     bool terminated_by_user{false};     // If the task is canceled by user,
                                         // task->status=Cancelled
@@ -275,14 +242,9 @@ class TaskManager {
     bool mark_as_orphaned{false};
   };
 
-  struct EvQueueCheckTaskStatus {
+  struct CheckTaskStatusQueueElem {
     task_id_t task_id;
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
-  };
-
-  struct EvQueueSigchldArg {
-    TaskManager* task_manager;
-    std::unique_ptr<ProcSigchldInfo> sigchld_info;
   };
 
   static std::string ParseFilePathPattern_(const std::string& path_pattern,
@@ -297,7 +259,7 @@ class TaskManager {
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
   // Ask TaskManager to stop its event loop.
-  void EvActivateShutdown_();
+  void ActivateShutdownAsync_();
 
   /**
    * Inform CraneCtld of the status change of a task.
@@ -311,52 +273,41 @@ class TaskManager {
    * @param release_resource If set to true, CraneCtld will release the
    *  resource (mark the task status as REQUEUE) and requeue the task.
    */
-  void EvActivateTaskStatusChange_(uint32_t task_id,
-                                   crane::grpc::TaskStatus new_status,
-                                   uint32_t exit_code,
-                                   std::optional<std::string> reason);
+  void ActivateTaskStatusChangeAsync_(uint32_t task_id,
+                                      crane::grpc::TaskStatus new_status,
+                                      uint32_t exit_code,
+                                      std::optional<std::string> reason);
 
   template <typename Duration>
-  void EvAddTerminationTimer_(TaskInstance* instance, Duration duration) {
-    std::chrono::seconds const sec =
-        std::chrono::duration_cast<std::chrono::seconds>(duration);
-
-    auto* arg = new EvTimerCbArg;
-    arg->task_manager = this;
-    arg->task_id = instance->task.task_id();
-
-    timeval tv{
-        sec.count(),
-        std::chrono::duration_cast<std::chrono::microseconds>(duration - sec)
-            .count()};
-
-    struct event* ev = event_new(m_ev_base_, -1, 0, EvOnTaskTimerCb_, arg);
-    CRANE_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
-    evtimer_add(ev, &tv);
-
-    instance->termination_timer = ev;
+  void AddTerminationTimer_(TaskInstance* instance, Duration duration) {
+    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
+    termination_handel->on<uvw::timer_event>(
+        [this, task_id = instance->task.task_id()](const uvw::timer_event&,
+                                                   uvw::timer_handle& h) {
+          EvTaskTimerCb_(task_id);
+        });
+    termination_handel->start(
+        std::chrono::duration_cast<std::chrono::milliseconds>(duration),
+        std::chrono::seconds(0));
+    instance->termination_timer = termination_handel;
   }
 
-  void EvAddTerminationTimer_(TaskInstance* instance, int64_t secs) {
-    auto* arg = new EvTimerCbArg;
-    arg->task_manager = this;
-    arg->task_id = instance->task.task_id();
-
-    timeval tv{static_cast<__time_t>(secs), 0};
-
-    struct event* ev = event_new(m_ev_base_, -1, 0, EvOnTaskTimerCb_, arg);
-    CRANE_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
-    evtimer_add(ev, &tv);
-
-    instance->termination_timer = ev;
+  void AddTerminationTimer_(TaskInstance* instance, int64_t secs) {
+    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
+    termination_handel->on<uvw::timer_event>(
+        [this, task_id = instance->task.task_id()](const uvw::timer_event&,
+                                                   uvw::timer_handle& h) {
+          EvTaskTimerCb_(task_id);
+        });
+    termination_handel->start(std::chrono::seconds(secs),
+                              std::chrono::seconds(0));
+    instance->termination_timer = termination_handel;
   }
 
-  static void EvDelTerminationTimer_(TaskInstance* instance) {
-    delete static_cast<EvTimerCbArg*>(
-        event_get_callback_arg(instance->termination_timer));
-    evtimer_del(instance->termination_timer);
-    event_free(instance->termination_timer);
-    instance->termination_timer = nullptr;
+  static void DelTerminationTimer_(TaskInstance* instance) {
+    // Close handle before free
+    instance->termination_timer->close();
+    instance->termination_timer.reset();
   }
 
   /**
@@ -402,50 +353,65 @@ class TaskManager {
   // Critical data region ends
   // ========================================================================
 
-  static void EvSigchldCb_(evutil_socket_t sig, short events, void* user_data);
+  void EvSigchldCb_();
 
-  static void EvProcessSigchldCb_(evutil_socket_t sig, short events,
-                                  void* user_data);
+  void EvCleanSigchldQueueCb_();
 
   // Callback function to handle SIGINT sent by Ctrl+C
-  static void EvSigintCb_(evutil_socket_t sig, short events, void* user_data);
+  void EvSigintCb_();
 
-  static void EvGrpcExecuteTaskCb_(evutil_socket_t efd, short events,
-                                   void* user_data);
+  void EvCleanGrpcExecuteTaskQueueCb_();
 
-  static void EvGrpcQueryTaskIdFromPidCb_(evutil_socket_t efd, short events,
-                                          void* user_data);
+  void EvCleanGrpcQueryTaskIdFromPidQueueCb_();
 
-  static void EvGrpcQueryTaskEnvironmentVariableCb_(evutil_socket_t efd,
-                                                    short events,
-                                                    void* user_data);
+  void EvCleanGrpcQueryTaskEnvQueueCb_();
 
-  static void EvSubprocessReadCb_(struct bufferevent* bev, void* process);
+  void EvCleanTaskStatusChangeQueueCb_();
 
-  static void EvTaskStatusChangeCb_(evutil_socket_t efd, short events,
-                                    void* user_data);
+  void EvCleanTerminateTaskQueueCb_();
 
-  static void EvTerminateTaskCb_(evutil_socket_t efd, short events,
-                                 void* user_data);
+  void EvCleanCheckTaskStatusQueueCb_();
 
-  static void EvCheckTaskStatusCb_(evutil_socket_t, short events,
-                                   void* user_data);
+  void EvCleanChangeTaskTimeLimitQueueCb_();
 
-  static void EvChangeTaskTimeLimitCb_(evutil_socket_t, short events,
-                                       void* user_data);
+  void EvTaskTimerCb_(task_id_t task_id);
 
-  static void EvExitEventCb_(evutil_socket_t, short events, void* user_data);
+  void EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info);
 
-  static void EvOnTaskTimerCb_(evutil_socket_t, short, void* arg_);
+  std::shared_ptr<uvw::loop> m_uvw_loop_;
 
-  static void EvOnSigchldTimerCb_(evutil_socket_t, short, void* arg_);
-
-  struct event_base* m_ev_base_{};
-  struct event* m_ev_sigchld_{};
+  std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
 
   // When this event is triggered, the TaskManager will not accept
   // any more new tasks and quit as soon as all existing task end.
-  struct event* m_ev_sigint_{};
+  std::shared_ptr<uvw::signal_handle> m_sigint_handle_;
+
+  std::shared_ptr<uvw::async_handle> m_query_task_id_from_pid_async_handle_;
+  ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
+
+  std::shared_ptr<uvw::async_handle>
+      m_query_task_environment_variables_async_handle_;
+  ConcurrentQueue<EvQueueQueryTaskEnvMap>
+      m_query_task_environment_variables_queue;
+
+  std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
+  // A custom event that handles the ExecuteTask RPC.
+  ConcurrentQueue<std::unique_ptr<TaskInstance>> m_grpc_execute_task_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_process_sigchld_async_handle_;
+  ConcurrentQueue<std::unique_ptr<ProcSigchldInfo>> m_sigchld_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
+  ConcurrentQueue<TaskStatusChangeQueueElem> m_task_status_change_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
+  ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
+  ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_check_task_status_async_handle_;
+  ConcurrentQueue<CheckTaskStatusQueueElem> m_check_task_status_queue_;
 
   // The function which will be called when SIGINT is triggered.
   std::function<void()> m_sigint_cb_;
@@ -455,36 +421,10 @@ class TaskManager {
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
 
-  struct event* m_ev_process_sigchld_{};
-  ConcurrentQueue<std::unique_ptr<ProcSigchldInfo>> m_sigchld_queue_;
+  // After m_is_ending_now_ set to true, when all task are cleared, we can exit.
+  std::atomic_bool m_task_cleared_{false};
 
-  struct event* m_ev_query_task_id_from_pid_{};
-  ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
-
-  struct event* m_ev_query_task_environment_variables_{};
-  ConcurrentQueue<EvQueueQueryTaskEnvMap>
-      m_query_task_environment_variables_queue;
-
-  // A custom event that handles the ExecuteTask RPC.
-  struct event* m_ev_grpc_execute_task_{};
-  ConcurrentQueue<std::unique_ptr<TaskInstance>> m_grpc_execute_task_queue_;
-
-  // When this event is triggered, the event loop will exit.
-  struct event* m_ev_exit_event_{};
-
-  struct event* m_ev_task_status_change_{};
-  ConcurrentQueue<TaskStatusChange> m_task_status_change_queue_;
-
-  struct event* m_ev_task_time_limit_change_{};
-  ConcurrentQueue<EvQueueChangeTaskTimeLimit> m_task_time_limit_change_queue_;
-
-  struct event* m_ev_task_terminate_{};
-  ConcurrentQueue<EvQueueTaskTerminate> m_task_terminate_queue_;
-
-  struct event* m_ev_check_task_status_{};
-  ConcurrentQueue<EvQueueCheckTaskStatus> m_check_task_status_queue_;
-
-  std::thread m_ev_loop_thread_;
+  std::thread m_uvw_thread_;
 
   static inline TaskManager* m_instance_ptr_;
 };

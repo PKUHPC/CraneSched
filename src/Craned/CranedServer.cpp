@@ -18,11 +18,9 @@
 
 #include "CranedServer.h"
 
-#include <arpa/inet.h>
-#include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
-#include "CtldClient.h"
+#include "TaskManager.h"
 
 namespace Craned {
 
@@ -173,11 +171,11 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
   for (int i = 0; i < request->task_id_list_size(); i++) {
     task_id_t task_id = request->task_id_list(i);
     uid_t uid = request->uid_list(i);
-    crane::grpc::ResourceInNode const &res = request->res_list(i);
+    const crane::grpc::ResourceInNode &res = request->res_list(i);
 
     CgroupSpec spec{.uid = uid,
                     .task_id = task_id,
-                    .res_in_node = std::move(res),
+                    .res_in_node = res,
                     .execution_node = request->execution_node(i)};
     CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", task_id, uid);
     cg_specs.emplace_back(std::move(spec));
@@ -309,7 +307,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
 
   crane::grpc::QueryTaskIdFromPortRequest request_to_remote_service;
   crane::grpc::QueryTaskIdFromPortReply reply_from_remote_service;
-  ClientContext context_of_remote_service;
+  grpc::ClientContext context_of_remote_service;
   Status status_remote_service;
 
   request_to_remote_service.set_port(request->ssh_remote_port());
@@ -389,8 +387,7 @@ Status CranedServiceImpl::QueryTaskEnvVariables(
     grpc::ServerContext *context,
     const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
     crane::grpc::QueryTaskEnvVariablesReply *response) {
-  auto task_env_map =
-      g_task_mgr->QueryTaskEnvMapAsync(request->task_id());
+  auto task_env_map = g_task_mgr->QueryTaskEnvMapAsync(request->task_id());
   if (task_env_map.has_value()) {
     for (const auto &[name, value] : task_env_map.value())
       response->mutable_env_map()->emplace(name, value);
@@ -445,7 +442,7 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
 
   crane::grpc::QueryTaskEnvVariablesRequest request_to_remote_service;
   crane::grpc::QueryTaskEnvVariablesReply reply_from_remote_service;
-  ClientContext context_of_remote_service;
+  grpc::ClientContext context_of_remote_service;
   Status status_remote_service;
 
   request_to_remote_service.set_task_id(request->task_id());

@@ -22,16 +22,15 @@
 // Precompiled header comes first
 
 #include "crane/OS.h"
-#include "crane/PublicHeader.h"
-#include "protos/Crane.pb.h"
+
 
 namespace Craned {
 
-inline const uint64_t kEvSigChldResendMs = 500'000;
+inline constexpr uint64_t kEvSigChldResendMs = 500;
 
 using EnvMap = std::unordered_map<std::string, std::string>;
 
-struct TaskStatusChange {
+struct TaskStatusChangeQueueElem {
   task_id_t task_id{};
   crane::grpc::TaskStatus new_status{};
   uint32_t exit_code{};

@@ -18,18 +18,12 @@
 
 #include "TaskScheduler.h"
 
-#include <absl/time/time.h>
-#include <google/protobuf/util/time_util.h>
-
-#include <future>
-
 #include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
 #include "crane/PluginClient.h"
-#include "crane/PublicHeader.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {

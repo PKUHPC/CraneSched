@@ -24,7 +24,7 @@ CtldClient::~CtldClient() {
   m_thread_stop_ = true;
 
   CRANE_TRACE("CtldClient is ending. Waiting for the thread to finish.");
-  m_async_send_thread_.join();
+  if (m_async_send_thread_.joinable()) m_async_send_thread_.join();
 }
 
 void CtldClient::InitChannelAndStub(const std::string& server_address) {
@@ -83,12 +83,12 @@ void CtldClient::OnCraneCtldConnected() {
         return;
       }
     }
-  } while (retry_time--);
+  } while (!m_thread_stop_ && retry_time--);
 
   CRANE_ERROR("Failed to register actively.");
 }
 
-void CtldClient::TaskStatusChangeAsync(TaskStatusChange&& task_status_change) {
+void CtldClient::TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change) {
   absl::MutexLock lock(&m_task_status_change_mtx_);
   m_task_status_change_list_.emplace_back(std::move(task_status_change));
 }
@@ -151,7 +151,7 @@ void CtldClient::AsyncSendThread_() {
       continue;
     }
 
-    std::list<TaskStatusChange> changes;
+    std::list<TaskStatusChangeQueueElem> changes;
     changes.splice(changes.begin(), std::move(m_task_status_change_list_));
     m_task_status_change_mtx_.Unlock();
 
