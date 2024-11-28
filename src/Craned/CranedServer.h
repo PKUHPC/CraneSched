@@ -21,7 +21,6 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include "TaskManager.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 

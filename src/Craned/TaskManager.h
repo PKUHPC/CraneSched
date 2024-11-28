@@ -26,18 +26,10 @@
 #include <uvw.hpp>
 
 #include "CgroupManager.h"
-#include "CtldClient.h"
 #include "crane/PasswordEntry.h"
 #include "protos/Crane.grpc.pb.h"
 
 namespace Craned {
-
-class TaskManager;
-
-struct EvTimerCbArg {
-  TaskManager* task_manager;
-  task_id_t task_id;
-};
 
 struct BatchMetaInProcessInstance {
   std::string parsed_output_file_pattern;

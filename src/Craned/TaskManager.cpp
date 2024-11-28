@@ -24,6 +24,7 @@
 #include <sys/wait.h>
 
 #include "CforedClient.h"
+#include "CtldClient.h"
 #include "crane/String.h"
 #include "protos/CraneSubprocess.pb.h"
 #include "protos/PublicDefs.pb.h"
@@ -406,7 +407,6 @@ void TaskManager::EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info) {
 }
 
 void TaskManager::EvSigintCb_() {
-  absl::MutexLock lock_guard(&m_mtx_);
   if (!m_is_ending_now_) {
     // SIGINT has been sent once. If SIGINT are captured twice, it indicates
     // the signal sender can't wait to stop Craned and Craned just send SIGTERM
