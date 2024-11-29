@@ -18,7 +18,6 @@
 
 #include "AccountManager.h"
 
-#include "crane/PasswordEntry.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
@@ -83,16 +82,12 @@ AccountManager::CraneExpected<void> AccountManager::AddAccount(
     // op_user must be Operator or higher.
     if (new_account.parent_account.empty())
       result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
-    else
+    else {
       result = CheckIfUserHasPermOnAccountNoLock_(
-                   *op_user, new_account.parent_account, false)
-                   .or_else([](const CraneErrCode& err) {
-                     if (err == CraneErrCode::ERR_INVALID_ACCOUNT)
-                       return CraneExpected<void>{std::unexpected(
-                           CraneErrCode::ERR_INVALID_PARENTACCOUNT)};
-                     return CraneExpected<void>{std::unexpected(err)};
-                   });
-    ;
+          *op_user, new_account.parent_account, false);
+      if (!result && result.error() == CraneErrCode::ERR_INVALID_ACCOUNT)
+        return std::unexpected(CraneErrCode::ERR_INVALID_PARENTACCOUNT);
+    }
     if (!result) return result;
   }
 
