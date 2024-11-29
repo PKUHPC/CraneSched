@@ -82,9 +82,12 @@ AccountManager::CraneExpected<void> AccountManager::AddAccount(
     // op_user must be Operator or higher.
     if (new_account.parent_account.empty())
       result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
-    else
+    else {
       result = CheckIfUserHasPermOnAccountNoLock_(
           *op_user, new_account.parent_account, false);
+      if (!result && result.error() == CraneErrCode::ERR_INVALID_ACCOUNT)
+        return std::unexpected(CraneErrCode::ERR_INVALID_PARENTACCOUNT);
+    }
     if (!result) return result;
   }
 
@@ -1302,14 +1305,11 @@ AccountManager::CraneExpected<void>
 AccountManager::CheckIfUserHasPermOnAccountNoLock_(const User& op_user,
                                                    const std::string& account,
                                                    bool read_only_priv) {
-  if (account.empty()) {
-    return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
-  }
+  if (account.empty())
+    return std::unexpected(CraneErrCode::ERR_NO_ACCOUNT_SPECIFIED);
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
-  if (!account_ptr) {
-    return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
-  }
+  if (!account_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   if (op_user.admin_level == User::None) {
     if (read_only_priv) {
