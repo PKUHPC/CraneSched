@@ -66,6 +66,9 @@
 #include <absl/synchronization/mutex.h>
 #include <absl/time/time.h>  // NOLINT(modernize-deprecated-headers)
 
+// parallel-hashmap
+#include <parallel_hashmap/phmap.h>
+
 // Thread pool
 #include <BS_thread_pool.hpp>
 
