@@ -40,6 +40,8 @@ target_link_libraries(cranectld PRIVATE
         absl::synchronization
         absl::flat_hash_map
 
+        phmap
+
         crane_proto_lib
 
         bs_thread_pool
