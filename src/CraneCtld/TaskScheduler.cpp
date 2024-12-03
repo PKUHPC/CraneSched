@@ -2720,7 +2720,7 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 
 CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   auto part_it = g_config.Partitions.find(task->partition_id);
-  if (part_it == g_config.Partitions.end()) return CraneErr::kInvalidParam;
+  if (part_it == g_config.Partitions.end()) return CraneErr::kNonExistent;
 
   task->partition_priority = part_it->second.priority;
 
@@ -2748,16 +2748,12 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
       task->Username(), task->account, task);
-  if (!check_qos_result) {
-    CRANE_ERROR("Failed to call CheckAndApplyQosLimitOnTask: {}",
-                check_qos_result.error());
-    return CraneErr::kInvalidParam;
-  }
+  if (!check_qos_result) return check_qos_result;
 
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().nodelist(), &nodes);
-    if (!ok) return CraneErr::kInvalidParam;
+    if (!ok) return CraneErr::kInvaildNodeList;
 
     for (auto&& node : nodes) task->included_nodes.emplace(std::move(node));
   }
@@ -2765,7 +2761,7 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (!task->TaskToCtld().excludes().empty() && task->excluded_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().excludes(), &nodes);
-    if (!ok) return CraneErr::kInvalidParam;
+    if (!ok) return CraneErr::kInvalidExNodeList;
 
     for (auto&& node : nodes) task->excluded_nodes.emplace(std::move(node));
   }
@@ -2774,8 +2770,11 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 }
 
 CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
-  if (!CheckIfTimeLimitIsValid(task->time_limit))
-    return CraneErr::kInvalidParam;
+  if (!CheckIfTimeLimitIsValid(task->time_limit)) {
+    CRANE_TRACE("Time-limit {} reached the user's limit",
+                absl::FormatDuration(task->time_limit));
+    return CraneErr::kInvalidTimeLimit;
+  }
 
   // Check whether the selected partition is able to run this task.
   std::unordered_set<std::string> avail_nodes;

@@ -26,6 +26,7 @@
 #include <unordered_map>
 
 #include "protos/Crane.pb.h"
+#include "protos/PublicDefs.pb.h"
 
 #if !defined(CRANE_VERSION_STRING)
 #  define CRANE_VERSION_STRING "Unknown"
@@ -63,6 +64,9 @@ enum class CraneErr : uint16_t {
 
 template <typename T>
 using CraneExpected = std::expected<T, CraneErr>;
+
+template <typename T>
+using CraneErrCodeExpected = std::expected<T, crane::grpc::ErrCode>;
 
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
@@ -147,10 +151,84 @@ constexpr std::array<std::string_view, uint16_t(CraneErr::__ERR_SIZE)>
         "Not enough nodes which satisfy resource requirements",
 };
 
+const std::unordered_map<crane::grpc::ErrCode, std::string_view> ErrCodeStrMap = {
+    {crane::grpc::ErrCode::SUCCESS, "Success"},
+    {crane::grpc::ErrCode::ERR_INVALID_UID, "Invalid UID"},
+    {crane::grpc::ErrCode::ERR_INVALID_OP_USER, "You are not a user of Crane"},
+    {crane::grpc::ErrCode::ERR_INVALID_USER, "The entered user is not a user of Crane"},
+    {crane::grpc::ErrCode::ERR_PERMISSION_USER, "Your permission is insufficient"},
+    {crane::grpc::ErrCode::ERR_USER_DUPLICATE_ACCOUNT, "The user already exists in this account"},
+    {crane::grpc::ErrCode::ERR_USER_ALLOWED_ACCOUNT, "he user is not allowed to access account"},
+    {crane::grpc::ErrCode::ERR_INVALID_ADMIN_LEVEL, "Unknown admin level"},
+    {crane::grpc::ErrCode::ERR_USER_ACCOUNT_MISMATCH, "The user does not belong to this account"},
+    {crane::grpc::ErrCode::ERR_NO_ACCOUNT_SPECIFIED, "No account is specified for the user"},
+    {crane::grpc::ErrCode::ERR_INVALID_ACCOUNT, "The entered account does not exist"},
+    {crane::grpc::ErrCode::ERR_DUPLICATE_ACCOUNT, "The account already exists in the crane"},
+    {crane::grpc::ErrCode::ERR_INVALID_PARENTACCOUNT, "The parent account of the entered account does not exist"},
+    {crane::grpc::ErrCode::ERR_DELETE_ACCOUNT, "The account has child account or users, unable to delete"},
+    {crane::grpc::ErrCode::ERR_INVALID_PARTITION, "The entered partition does not exist"},
+    {crane::grpc::ErrCode::ERR_ALLOWED_PARTITION, "The entered account or user does not include this partition"},
+    {crane::grpc::ErrCode::ERR_DUPLICATE_PARTITION, "The partition already exists in the account or user"},
+    {crane::grpc::ErrCode::ERR_PARENT_ALLOWED_PARTITION, "Parent account does not include the partition"},
+    {crane::grpc::ErrCode::ERR_USER_EMPTY_PARTITION, "The user does not contain any partitions, operation cannot be performed"},
+    {crane::grpc::ErrCode::ERR_CHILD_HAS_PARTITION, "Child has partiton error"},
+    {crane::grpc::ErrCode::ERR_HAS_NO_QOS_IN_PARTITION, "The user has no QoS available for this partition to be used"},
+    {crane::grpc::ErrCode::ERR_HAS_ALLOWED_QOS_IN_PARTITION, "The qos you set is not in partition's allowed qos list"},
+    {crane::grpc::ErrCode::ERR_INVALID_QOS, "The entered qos does not exist"},
+    {crane::grpc::ErrCode::ERR_DB_DUPLICATE_QOS, "Qos already exists in the crane"},
+    {crane::grpc::ErrCode::ERR_DELETE_QOS, "QoS is still being used by accounts or users, unable to delete"},
+    {crane::grpc::ErrCode::ERR_CONVERT_TO_INTERGER, "Failed to convert value to integer"},
+    {crane::grpc::ErrCode::ERR_TIME_LIMIT, "Invalid time limit value"},
+    {crane::grpc::ErrCode::ERR_ALLOWED_QOS, "The entered account or user does not include this qos"},
+    {crane::grpc::ErrCode::ERR_DUPLICATE_QOS, "The Qos already exists in the account or user"},
+    {crane::grpc::ErrCode::ERR_PARENT_ALLOWED_QOS, "Parent account does not include the qos"},
+    {crane::grpc::ErrCode::ERR_SET_ALLOWED_QOS, "Set allowed qos error"},
+    {crane::grpc::ErrCode::ERR_ALLOWED_DEFAULT_QOS, "The entered default_qos is not allowed"},
+    {crane::grpc::ErrCode::ERR_DUPLICATE_DEFAULT_QOS, "The QoS is already the default QoS for the account or specified partition of the user"},
+    {crane::grpc::ErrCode::ERR_CHILD_HAS_DEFAULT_QOS, "child accounts has default error"},
+    {crane::grpc::ErrCode::ERR_SET_ACCOUNT_QOS, "set account qos error"},
+    {crane::grpc::ErrCode::ERR_SET_DEFAULT_QOS, "The Qos not allowed or is already the default qos"},
+    {crane::grpc::ErrCode::ERR_IS_DEFAULT_QOS, "Is default qos error"},
+    {crane::grpc::ErrCode::ERR_UPDATE_DATABASE, "Fail to update data in database"},
+    {crane::grpc::ErrCode::ERR_GENERIC_FAILURE, "Generic Failure"},
+    {crane::grpc::ErrCode::ERR_NO_RESOURCE, "Resource not enough for task"},
+    {crane::grpc::ErrCode::ERR_NON_EXISTENT, "Non-existent Error"},
+    {crane::grpc::ErrCode::ERR_INVALID_NODE_NUM, "Nodes partition not enough for task"},
+    {crane::grpc::ErrCode::ERR_INVAILD_NODE_LIST, "Invalid node list"},
+    {crane::grpc::ErrCode::ERR_INVAILD_EX_NODE_LIST, "Invalid exclude node list"},
+    {crane::grpc::ErrCode::ERR_TIME_TIMIT_BEYOND, "Time-limit reached the user's limit"},
+    {crane::grpc::ErrCode::ERR_CPUS_PER_TASK_BEYOND, "cpus-per-task reached the user's limit"},
+    {crane::grpc::ErrCode::ERR_NO_ENOUGH_NODE, "Nodes num not enough for task"},
+    {crane::grpc::ErrCode::ERR_SYSTEM_ERR, "System Error"},
+    {crane::grpc::ErrCode::ERR_EXISTING_TASK, "Existing Task"},
+    {crane::grpc::ErrCode::ERR_BEYOND_TASK_ID, "System error occurred or the number of pending tasks exceeded maximum value"},
+    {crane::grpc::ErrCode::ERR_INVALID_PARAM, "Invalid Parameter"},
+    {crane::grpc::ErrCode::ERR_STOP, "Stop Error"},
+    {crane::grpc::ErrCode::ERR_PERMISSION_DENIED, "Permission Denied"},
+    {crane::grpc::ErrCode::ERR_CONNECTION_TIMEOUT, "Connection Timeout"},
+    {crane::grpc::ErrCode::ERR_CONNECTION_ABORTED, "Connection Aborted"},
+    {crane::grpc::ErrCode::ERR_RPC_FAILURE, "RPC Failure"},
+    {crane::grpc::ErrCode::ERR_TOKEN_REQUEST_FAILURE, "Token Request Failure"},
+    {crane::grpc::ErrCode::ERR_STREAM_BROKEN, "Stream Broken"},
+    {crane::grpc::ErrCode::ERR_INVALID_STUB, "Invalid Stub"},
+    {crane::grpc::ErrCode::ERR_CGROUP, "CGroup Error"},
+    {crane::grpc::ErrCode::ERR_PROTOBUF, "Protobuf Error"},
+    {crane::grpc::ErrCode::ERR_LIB_EVENT, "Lib Event Error"},
+    {crane::grpc::ErrCode::ERR_NO_AVAIL_NODE, "No Available Node"}
+};
+
 }
 
 inline std::string_view CraneErrStr(CraneErr err) {
   return Internal::CraneErrStrArr[uint16_t(err)];
+}
+
+inline std::string_view CraneErrCodeStr(crane::grpc::ErrCode err) {
+    auto it = Internal::ErrCodeStrMap.find(err);
+    if (it != Internal::ErrCodeStrMap.end()) {
+        return it->second;
+    }
+    return "Unknown Error";
 }
 
 /* ----------- Public definitions for all components */

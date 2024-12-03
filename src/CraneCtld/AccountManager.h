@@ -132,8 +132,9 @@ class AccountManager {
   std::expected<void, std::string> CheckIfUserOfAccountIsEnabled(
       const std::string& user, const std::string& account);
 
-  std::expected<void, std::string> CheckAndApplyQosLimitOnTask(
-      const std::string& user, const std::string& account, TaskInCtld* task);
+  CraneExpected<void> CheckAndApplyQosLimitOnTask(const std::string& user,
+                                       const std::string& account,
+                                       TaskInCtld* task);
 
   std::expected<void, std::string> CheckUidIsAdmin(uint32_t uid);
 
