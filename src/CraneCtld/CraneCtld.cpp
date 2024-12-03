@@ -404,6 +404,9 @@ void ParseConfig(int argc, char** argv) {
         }
       }
 
+      std::unordered_set nodes_without_part = g_config.Nodes |
+                                              ranges::views::keys |
+                                              ranges::to<std::unordered_set>();
       if (config["Partitions"]) {
         for (auto it = config["Partitions"].begin();
              it != config["Partitions"].end(); ++it) {
@@ -444,6 +447,7 @@ void ParseConfig(int argc, char** argv) {
             auto node_it = g_config.Nodes.find(node);
             if (node_it != g_config.Nodes.end()) {
               part.nodes.emplace(node_it->first);
+              nodes_without_part.erase(node_it->first);
               CRANE_TRACE("Set the partition of node {} to {}", node_it->first,
                           name);
             } else {
@@ -487,6 +491,13 @@ void ParseConfig(int argc, char** argv) {
 
           g_config.Partitions.emplace(std::move(name), std::move(part));
         }
+      }
+
+      if (!nodes_without_part.empty()) {
+        CRANE_ERROR("Nodes {} not belong to any partition",
+                    ranges::views::join(nodes_without_part, ",") |
+                        ranges::to<std::string>);
+        std::exit(1);
       }
 
       if (config["DefaultPartition"] && !config["DefaultPartition"].IsNull()) {
