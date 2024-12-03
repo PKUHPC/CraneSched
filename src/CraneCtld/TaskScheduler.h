@@ -282,6 +282,12 @@ class TaskScheduler {
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
 
+  crane::grpc::CreateReservationReply CreateReservation(
+      const crane::grpc::CreateReservationRequest& request);
+
+  crane::grpc::DeleteReservationReply DeleteReservation(
+      const crane::grpc::DeleteReservationRequest& request);
+
   static CraneErr AcquireTaskAttributes(TaskInCtld* task);
 
   static CraneErr CheckTaskValidity(TaskInCtld* task);
