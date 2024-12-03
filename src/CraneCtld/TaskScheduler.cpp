@@ -318,7 +318,7 @@ bool TaskScheduler::Init() {
         mark_task_as_failed = true;
       }
 
-      if (!mark_task_as_failed && !AcquireTaskAttributes(task.get())) {
+      if (!mark_task_as_failed && !(AcquireTaskAttributes(task.get()))) {
         CRANE_ERROR("AcquireTaskAttributes failed for task #{}", task_id);
         mark_task_as_failed = true;
       }
@@ -1062,8 +1062,7 @@ std::future<CraneErrCode> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
   return std::move(future);
 }
 
-CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
-                                                int64_t secs) {
+CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
   if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErrCode::ERR_INVALID_PARAM;
 
   std::vector<CranedId> craned_ids;
@@ -1115,8 +1114,7 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode TaskScheduler::ChangeTaskPriority(task_id_t task_id,
-                                               double priority) {
+CraneErrCode TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priority) {
   m_pending_task_map_mtx_.Lock();
 
   auto pd_iter = m_pending_task_map_.find(task_id);
@@ -2482,7 +2480,7 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   auto part_it = g_config.Partitions.find(task->partition_id);
   if (part_it == g_config.Partitions.end()) {
-    CRANE_ERROR("Failed to call AcquireTaskAttributes: {}",
+        CRANE_ERROR("Failed to call AcquireTaskAttributes: {}",
                 CraneErrStr(CraneErrCode::ERR_INVALID_PARTITION));
     return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
   }

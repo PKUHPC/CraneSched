@@ -26,6 +26,7 @@
 #include <unordered_map>
 
 #include "protos/Crane.pb.h"
+#include "protos/PublicDefs.pb.h"
 
 #if !defined(CRANE_VERSION_STRING)
 #  define CRANE_VERSION_STRING "Unknown"
@@ -95,8 +96,7 @@ enum ExitCodeEnum : uint16_t {
 }  // namespace ExitCode
 
 namespace Internal {
-constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)>
-    CraneErrStrArr = {
+constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> CraneErrStrArr = {
         // 0 - 4
         "Success",
 
@@ -145,7 +145,7 @@ constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)>
         "The parent account does not include the QoS",
         "The new QoS list does not include the current default QoS",
         "The new default QoS is not in the allowed QoS list",
-        "The QoS is already the default QoS for the account"
+        "The QoS is already the default QoS for the account",
 
         // 35 - 39
         "Some user is using the QoS as his default QoS",
@@ -189,8 +189,9 @@ constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)>
         "LibEvent error",
         "No available node",
 
-        // 65 - 66
+        // 65 - 67
         "The current running job exceeds the QoS limit (MaxJobPerUser)",
+        "User has insufficient privilege"
 };
 
 }
