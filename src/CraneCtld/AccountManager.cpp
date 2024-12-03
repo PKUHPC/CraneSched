@@ -18,13 +18,7 @@
 
 #include "AccountManager.h"
 
-<<<<<<< HEAD
-=======
-#include <string>
-
 #include "AccountMetaContainer.h"
-#include "crane/PasswordEntry.h"
->>>>>>> a324eeb (refactor)
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
