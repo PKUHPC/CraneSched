@@ -21,61 +21,26 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include "crane/AtomicHashMap.h"
-#include "crane/Lock.h"
-#include "crane/Pointer.h"
-
 namespace Ctld {
 
 class AccountMetaContainer final {
  public:
-  template <typename K, typename V,
-            typename Hash = absl::container_internal::hash_default_hash<K>>
-  using HashMap = absl::flat_hash_map<K, V, Hash>;
+  using QosToQosResourceMap = phmap::parallel_flat_hash_map<
+      std::string,  // QosName
+      QosResourceLimit, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, QosResourceLimit>>, 4,
+      std::shared_mutex>;
 
-  template <typename K,
-            typename Hash = absl::container_internal::hash_default_hash<K>>
-  using HashSet = absl::flat_hash_set<K, Hash>;
-
-  template <typename K, typename V>
-  using TreeMap = absl::btree_map<K, V>;
-
-  template <typename K>
-  using TreeSet = absl::btree_set<K>;
-
-  using UserResourceMetaAtomicMap =
-      util::AtomicHashMap<HashMap, std::string, /*username*/
-                          UserResourceMeta>;
-  using UserResourceMetaRawMap = UserResourceMetaAtomicMap::RawMap;
-
-  using UserResourceMetaMapConstPtr =
-      util::ScopeConstSharedPtr<UserResourceMetaRawMap, util::rw_mutex>;
-
-  using UserResourceMetaMapExclusivePtr =
-      util::ScopeExclusivePtr<UserResourceMetaRawMap, util::rw_mutex>;
-
-  using UserResourceMetaPtr =
-      util::ManagedScopeExclusivePtr<UserResourceMeta,
-                                     UserResourceMetaAtomicMap::CombinedLock>;
-
-  using QosResourceList = std::list<std::pair<std::string, QosResource>>;
+  using UserResourceMetaMap = std::unordered_map<std::string,  // username
+                                                 QosToQosResourceMap>;
 
   AccountMetaContainer();
   ~AccountMetaContainer() = default;
 
-  UserResourceMetaPtr GetUserResourceMetaPtr(const std::string& username);
-
-  UserResourceMetaMapConstPtr GetUserResourceMetaMapConstPtr();
-
-  UserResourceMetaMapExclusivePtr GetUserResourceMetaMapExclusivePtr();
-
   void AddQosResourceToUser(const std::string& username,
-                            const QosResourceList& qos_resource_list);
-
-  void EraseQosResourceOnUser(const std::string& username,
-                              const std::string& qos_name);
-
-  void EraseUserResource(const std::string& username);
+                            const std::string& qos_name,
+                            const QosResource& qos_resource);
 
   void ModifyQosResourceOnUser(const std::string& qos_name,
                                const QosResource& qos_resource);
@@ -88,9 +53,12 @@ class AccountMetaContainer final {
                                  const TaskInCtld& task);
 
  private:
-  UserResourceMetaAtomicMap user_meta_map_;
+  UserResourceMetaMap user_meta_map_;
 
   void InitFromDB_();
+
+  void TryEmplace_(const std::string& username, const std::string& qos_name,
+                   const QosResource& qos_resource);
 };
 
 inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;
