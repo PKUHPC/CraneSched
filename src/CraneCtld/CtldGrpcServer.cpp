@@ -962,8 +962,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
                     task->Username(), task->partition_id, task->account));
   }
 
-  auto enable_res =
-      g_account_manager->CheckIfUserOfAccountIsEnabled(
+  auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
       task->Username(), task->account);
   if (enable_res.has_error()) {
     return result::fail(enable_res.error());
@@ -981,34 +980,64 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     return {std::move(future)};
   }
 
-  if (err == CraneErr::kNonExistent) {
+  switch (err) {
+  case CraneErr::kNonExistent:
     CRANE_DEBUG("Task submission failed. Reason: Partition doesn't exist!");
-    return result::fail("Partition doesn't exist!");
-  } else if (err == CraneErr::kInvalidNodeNum) {
+    return result::fail("Partition doesn't exist");
+
+  case CraneErr::kInvalidNodeNum:
     CRANE_DEBUG(
         "Task submission failed. Reason: --node is either invalid or greater "
         "than the number of nodes in its partition.");
     return result::fail(
         "--node is either invalid or greater than the number of nodes in its "
-        "partition.");
-  } else if (err == CraneErr::kNoResource) {
+        "partition");
+
+  case CraneErr::kNoResource:
     CRANE_DEBUG(
         "Task submission failed. "
         "Reason: The resources of the partition are insufficient.");
     return result::fail("The resources of the partition are insufficient");
-  } else if (err == CraneErr::kNoAvailNode) {
+
+  case CraneErr::kNoAvailNode:
     CRANE_DEBUG(
         "Task submission failed. "
         "Reason: Nodes satisfying the requirements of task are insufficient");
     return result::fail(
-        "Nodes satisfying the requirements of task are insufficient.");
-  } else if (err == CraneErr::kInvalidParam) {
+        "Nodes satisfying the requirements of task are insufficient");
+
+  case CraneErr::kInvalidUser:
+    CRANE_DEBUG("Task submission failed. Reason: Unknown user");
+    return result::fail("Unknown user");
+
+  case CraneErr::kInvalidQos:
     CRANE_DEBUG(
-        "Task submission failed. "
-        "Reason: The param of task is invalid.");
-    return result::fail("The param of task is invalid.");
+        "Task submission failed. Reason: "
+        "Unknown Qos or not in partition's allowed qos list");
+    return result::fail("Unkown Qos or not in partition's allowed qos list");
+
+  case CraneErr::kInvalidTimeLimit:
+    CRANE_DEBUG(
+        "Task submission failed. Reason: time-limit reached the user's limit");
+    return result::fail("time-limit reached the user's limit");
+
+  case CraneErr::kInvaildCpusperTask:
+    CRANE_DEBUG(
+        "Task submission failed. Reason: cpus-per-task reached the user's "
+        "limit");
+    return result::fail("cpus-per-task reached the user's limit");
+
+  case CraneErr::kInvaildNodeList:
+    CRANE_DEBUG("Task submission failed. Reason: Invalid nodelist");
+    return result::fail("Invalid nodelist");
+
+  case CraneErr::kInvalidExNodeList:
+    CRANE_DEBUG("Task submission failed. Reason: Invalid excluded nodelist");
+    return result::fail("Invalid excluded nodelist");
+
+  default:
+    return result::fail(CraneErrStr(err));
   }
-  return result::fail(CraneErrStr(err));
 }
 
 }  // namespace Ctld

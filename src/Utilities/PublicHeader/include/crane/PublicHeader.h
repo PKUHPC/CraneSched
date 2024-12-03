@@ -43,6 +43,12 @@ enum class CraneErr : uint16_t {
   kSystemErr,  // represent the error which sets errno
   kExistingTask,
   kInvalidParam,
+  kInvalidUser,
+  kInvalidQos,
+  kInvalidTimeLimit,
+  kInvaildCpusperTask,
+  kInvaildNodeList,
+  kInvalidExNodeList,
   kStop,
   kPermissionDenied,
 

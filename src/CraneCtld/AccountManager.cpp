@@ -921,14 +921,16 @@ result::result<void, std::string> AccountManager::CheckIfUserOfAccountIsEnabled(
   return {};
 }
 
-result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
-    const std::string& user, const std::string& account, TaskInCtld* task) {
+CraneErr AccountManager::CheckAndApplyQosLimitOnTask(const std::string& user,
+                                                     const std::string& account,
+                                                     TaskInCtld* task) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
-    return result::fail(fmt::format("Unknown user '{}'", user));
+    CRANE_ERROR("CheckAndApplyQosLimitOnTask error: Unknown user {}", user);
+    return CraneErr::kInvalidUser;
   }
 
   if (task->uid != 0) {
@@ -936,22 +938,30 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
                             .allowed_partition_qos_map.find(task->partition_id);
     if (partition_it == user_share_ptr->account_to_attrs_map.at(account)
                             .allowed_partition_qos_map.end())
-      return result::fail("Partition is not allowed for this user.");
+      CRANE_ERROR(
+          "CheckAndApplyQosLimitOnTask error: Partition is not allowed for "
+          "this user");
+    return CraneErr::kNonExistent;
 
     if (task->qos.empty()) {
       // Default qos
       task->qos = partition_it->second.first;
-      if (task->qos.empty())
-        return result::fail(
-            fmt::format("The user '{}' has no QOS available for this partition "
-                        "'{}' to be used",
-                        task->Username(), task->partition_id));
+      if (task->qos.empty()) {
+        CRANE_ERROR(
+            "CheckAndApplyQosLimitOnTask error: The user '{}' has no QOS "
+            "available for this partition '{}' to be used",
+            task->Username(), task->partition_id);
+        return CraneErr::kInvalidQos;
+      }
     } else {
       // Check whether task.qos in the qos list
-      if (!ranges::contains(partition_it->second.second, task->qos))
-        return result::fail(fmt::format(
-            "The qos '{}' you set is not in partition's allowed qos list",
-            task->qos));
+      if (!ranges::contains(partition_it->second.second, task->qos)) {
+        CRANE_ERROR(
+            "CheckAndApplyQosLimitOnTask error: The qos '{}'"
+            " you set is not in partition's allowed qos list",
+            task->qos);
+        return CraneErr::kInvalidQos;
+      }
     }
   } else {
     if (task->qos.empty()) {
@@ -960,21 +970,27 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   }
 
   const Qos* qos_share_ptr = GetExistedQosInfoNoLock_(task->qos);
-  if (!qos_share_ptr)
-    return result::fail(fmt::format("Unknown QOS '{}'", task->qos));
+  if (!qos_share_ptr) {
+    CRANE_ERROR("Unknown QOS '{}'", task->qos);
+    return CraneErr::kInvalidQos;
+  }
 
   task->qos_priority = qos_share_ptr->priority;
 
   if (task->time_limit >= absl::Seconds(kTaskMaxTimeLimitSec)) {
     task->time_limit = qos_share_ptr->max_time_limit_per_task;
-  } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
-    return result::fail("time-limit reached the user's limit.");
+  } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task) {
+    CRANE_ERROR("time-limit reached the user's limit");
+    return CraneErr::kInvalidTimeLimit;
+  }
 
   if (static_cast<double>(task->cpus_per_task) >
-      qos_share_ptr->max_cpus_per_user)
-    return result::fail("cpus-per-task reached the user's limit.");
+      qos_share_ptr->max_cpus_per_user) {
+    CRANE_ERROR("cpus-per-task reached the user's limit");
+    return CraneErr::kInvaildCpusperTask;
+  }
 
-  return {};
+  return CraneErr::kOk;
 }
 
 result::result<void, std::string> AccountManager::CheckUidIsAdmin(
