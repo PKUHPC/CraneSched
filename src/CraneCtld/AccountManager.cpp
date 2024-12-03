@@ -38,7 +38,6 @@ AccountManager::CraneExpected<void> AccountManager::AddUser(
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
-  util::read_lock_guard qos_quard(m_rw_qos_mutex_);
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
@@ -842,7 +841,8 @@ AccountManager::CraneExpected<void> AccountManager::ModifyQos(
   g_db_client->SelectQos("name", name, &qos);
 
   // Modify QosResource when max_jobs_per_user or max_cpus_per_user is changed.
-  if (item == "max_jobs_per_user" || item == "max_cpus_per_user")
+  if (modify_field == crane::grpc::ModifyField::MaxJobsPerUser ||
+      modify_field == crane::grpc::ModifyField::MaxCpusPerUser)
     g_account_meta_container->ModifyQosResourceOnUser(
         name, QosResource{qos.max_cpus_per_user, qos.max_jobs_per_user});
 
@@ -986,6 +986,11 @@ std::expected<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   if (static_cast<double>(task->cpus_per_task) >
       qos_share_ptr->max_cpus_per_user)
     return std::unexpected("cpus-per-task reached the user's limit.");
+
+  g_account_meta_container->AddQosResourceToUser(
+      user_share_ptr->name, qos_share_ptr->name,
+      QosResource{qos_share_ptr->max_cpus_per_user,
+                  qos_share_ptr->max_jobs_per_user});
 
   return {};
 }
@@ -1590,18 +1595,6 @@ AccountManager::CraneExpected<void> AccountManager::AddUser_(
   }
   res_user.account_to_attrs_map[object_account].blocked = false;
 
-  AccountMetaContainer::QosResourceList qos_resource_list;
-  for (const auto& [partition, qos] :
-       res_user.account_to_attrs_map[object_account]
-           .allowed_partition_qos_map) {
-    for (const auto& qos_name : qos.second) {
-      const Qos* qos_content = GetExistedQosInfoNoLock_(qos_name);
-      qos_resource_list.emplace_back(
-          qos_name, QosResource{qos_content->max_cpus_per_user,
-                                qos_content->max_jobs_per_user});
-    }
-  }
-
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         // Update the user's account
@@ -1630,8 +1623,6 @@ AccountManager::CraneExpected<void> AccountManager::AddUser_(
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-
-  g_account_meta_container->AddQosResourceToUser(name, qos_resource_list);
 
   m_account_map_[object_account]->users.emplace_back(name);
   if (add_coordinator) {
@@ -1788,8 +1779,6 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser_(
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
-  g_account_meta_container->EraseUserResource(name);
-
   for (auto& remove_account : remove_accounts) {
     m_account_map_[remove_account]->users.remove(name);
   }
@@ -1921,13 +1910,6 @@ AccountManager::CraneExpected<void> AccountManager::AddUserAllowedQos_(
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-
-  AccountMetaContainer::QosResourceList qos_resource_list;
-  const Qos* qos_content = GetExistedQosInfoNoLock_(qos);
-  qos_resource_list.emplace_back(qos,
-                                 QosResource{qos_content->max_cpus_per_user,
-                                             qos_content->max_jobs_per_user});
-  g_account_meta_container->AddQosResourceToUser(name, qos_resource_list);
 
   m_user_map_[name]
       ->account_to_attrs_map[account_name]
@@ -2069,18 +2051,6 @@ AccountManager::CraneExpected<void> AccountManager::SetUserAllowedQos_(
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
-  AccountMetaContainer::QosResourceList qos_resource_list;
-  for (const auto& [partition, qos] :
-       res_user.account_to_attrs_map[account_name].allowed_partition_qos_map) {
-    for (const auto& qos_name : qos.second) {
-      const Qos* qos_content = GetExistedQosInfoNoLock_(qos_name);
-      qos_resource_list.emplace_back(
-          qos_name, QosResource{qos_content->max_cpus_per_user,
-                                qos_content->max_jobs_per_user});
-    }
-  }
-  g_account_meta_container->AddQosResourceToUser(name, qos_resource_list);
-
   m_user_map_[name]
       ->account_to_attrs_map[account_name]
       .allowed_partition_qos_map =
@@ -2156,8 +2126,6 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-
-  g_account_meta_container->EraseQosResourceOnUser(name, qos);
 
   m_user_map_[name]->account_to_attrs_map[account].allowed_partition_qos_map =
       res_user.account_to_attrs_map[account].allowed_partition_qos_map;
@@ -2563,7 +2531,6 @@ bool AccountManager::DeleteAccountAllowedQosFromMapNoLock_(
 
   for (const auto& user : account->users) {
     DeleteUserAllowedQosOfAllPartitionFromMapNoLock_(user, name, qos);
-    g_account_meta_container->EraseQosResourceOnUser(user, qos);
   }
   m_account_map_[name]->allowed_qos_list.remove(qos);
   if (account->default_qos == qos) {
