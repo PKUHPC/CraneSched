@@ -95,7 +95,7 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     CRANE_TRACE("Default user ROOT not found. Insert it into DB.");
 
     root_user.name = "root";
-    root_user.password = "root";
+    root_user.password = "";
     root_user.default_account = "ROOT";
     root_user.admin_level = User::Root;
     root_user.uid = 0;
