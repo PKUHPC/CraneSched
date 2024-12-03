@@ -38,7 +38,7 @@ class AccountMetaContainer final {
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  bool CheckAndMallocQosResourceFromUser(const std::string& username,
+  CraneErrCode CheckAndMallocQosResourceFromUser(const std::string& username,
                                          const TaskInCtld& task,
                                          const Qos& qos);
 
