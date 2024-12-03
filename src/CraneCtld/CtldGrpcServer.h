@@ -78,7 +78,7 @@ class CforedStreamWriter {
 
     if (res.has_value()) {
       task_res_alloc_reply->set_ok(true);
-        task_res_alloc_reply->set_allocated_craned_regex(std::move(res.value().first));
+      task_res_alloc_reply->set_allocated_craned_regex(std::move(res.value().first));
       std::ranges::for_each(res.value().second,[&task_res_alloc_reply](const auto& craned_id){task_res_alloc_reply->add_craned_ids(craned_id);});
     } else {
       task_res_alloc_reply->set_ok(false);
