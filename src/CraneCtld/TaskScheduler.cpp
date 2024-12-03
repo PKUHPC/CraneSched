@@ -2776,11 +2776,8 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 }
 
 CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
-  if (!CheckIfTimeLimitIsValid(task->time_limit)) {
-    CRANE_TRACE("Time-limit {} reached the user's limit",
-                absl::FormatDuration(task->time_limit));
+  if (!CheckIfTimeLimitIsValid(task->time_limit))
     return CraneErr::kInvalidTimeLimit;
-  }
 
   // Check whether the selected partition is able to run this task.
   std::unordered_set<std::string> avail_nodes;
