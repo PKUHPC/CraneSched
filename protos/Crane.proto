@@ -268,7 +268,7 @@ message AddQosReply {
 
 message DeleteAccountRequest {
   uint32 uid = 1;
-  string name = 2;
+  repeated string account_list = 2;
 }
 
 message DeleteAccountReply {
@@ -278,7 +278,7 @@ message DeleteAccountReply {
 
 message DeleteUserRequest {
   uint32 uid = 1;
-  string name = 2;
+  repeated string user_list = 2;
   string account = 3;
 }
 
@@ -341,7 +341,7 @@ message ModifyQosReply {
 
 message QueryAccountInfoRequest {
   uint32 uid = 1;
-  string name = 2;
+  repeated string account_list = 2;
 }
 
 message QueryAccountInfoReply {
@@ -352,7 +352,7 @@ message QueryAccountInfoReply {
 
 message QueryUserInfoRequest {
   uint32 uid = 1;
-  string name = 2;
+  repeated string user_list = 2;
   string account = 3;
 }
 
@@ -377,7 +377,7 @@ message BlockAccountOrUserRequest {
   uint32 uid = 1;
   bool block = 2;
   EntityType entity_type = 3;
-  string name = 4;
+  repeated string entity_list = 4;
   string account = 5;
 }
 

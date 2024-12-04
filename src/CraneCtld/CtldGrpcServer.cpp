@@ -496,8 +496,14 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     const crane::grpc::QueryAccountInfoRequest *request,
     crane::grpc::QueryAccountInfoReply *response) {
   std::unordered_map<std::string, Account> res_account_map;
+
+  std::vector<std::string> account_list;
+  for (const auto &account : request->account_list()) {
+    account_list.emplace_back(account);
+  }
+
   auto modify_res = g_account_manager->QueryAccountInfo(
-      request->uid(), request->name(), &res_account_map);
+      request->uid(), account_list, &res_account_map);
   if (modify_res) {
     response->set_ok(true);
   } else {
@@ -549,8 +555,13 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
     const crane::grpc::QueryUserInfoRequest *request,
     crane::grpc::QueryUserInfoReply *response) {
   std::unordered_map<uid_t, User> res_user_map;
-  auto modify_res = g_account_manager->QueryUserInfo(
-      request->uid(), request->name(), &res_user_map);
+
+  std::vector<std::string> user_list;
+  for (const auto &user : request->user_list()) {
+    user_list.emplace_back(user);
+  }
+  auto modify_res = g_account_manager->QueryUserInfo(request->uid(), user_list,
+                                                     &res_user_map);
   if (modify_res) {
     response->set_ok(true);
   } else {
@@ -633,7 +644,12 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
     grpc::ServerContext *context,
     const crane::grpc::DeleteAccountRequest *request,
     crane::grpc::DeleteAccountReply *response) {
-  auto res = g_account_manager->DeleteAccount(request->uid(), request->name());
+  std::vector<std::string> account_list;
+  for (const auto &account : request->account_list()) {
+    account_list.emplace_back(account);
+  }
+
+  auto res = g_account_manager->DeleteAccount(request->uid(), account_list);
   if (res) {
     response->set_ok(true);
   } else {
@@ -646,7 +662,11 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
 grpc::Status CraneCtldServiceImpl::DeleteUser(
     grpc::ServerContext *context, const crane::grpc::DeleteUserRequest *request,
     crane::grpc::DeleteUserReply *response) {
-  auto res = g_account_manager->DeleteUser(request->uid(), request->name(),
+  std::vector<std::string> user_list;
+  for (const auto &user : request->user_list()) {
+    user_list.emplace_back(user);
+  }
+  auto res = g_account_manager->DeleteUser(request->uid(), user_list,
                                            request->account());
   if (res) {
     response->set_ok(true);
@@ -678,13 +698,18 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
     crane::grpc::BlockAccountOrUserReply *response) {
   AccountManager::CraneExpected<void> res;
 
+  std::vector<std::string> entity_list;
+  for (const auto &entity : request->entity_list()) {
+    entity_list.emplace_back(entity);
+  }
+
   switch (request->entity_type()) {
   case crane::grpc::Account:
-    res = g_account_manager->BlockAccount(request->uid(), request->name(),
+    res = g_account_manager->BlockAccount(request->uid(), entity_list,
                                           request->block());
     break;
   case crane::grpc::User:
-    res = g_account_manager->BlockUser(request->uid(), request->name(),
+    res = g_account_manager->BlockUser(request->uid(), entity_list,
                                        request->account(), request->block());
     break;
   default:

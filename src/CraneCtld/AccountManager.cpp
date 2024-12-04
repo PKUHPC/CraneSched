@@ -167,10 +167,9 @@ AccountManager::CraneExpected<void> AccountManager::AddQos(uint32_t uid,
 }
 
 AccountManager::CraneExpected<void> AccountManager::DeleteUser(
-    uint32_t uid, const std::string& user_list, const std::string& account) {
-  std::vector<std::string> user_vec =
-      absl::StrSplit(user_list, ',', absl::SkipEmpty());
-  if (user_vec.empty()) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+    uint32_t uid, const std::vector<std::string>& user_list,
+    const std::string& account) {
+  if (user_list.empty()) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
@@ -180,7 +179,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser(
   const User* op_user = user_result.value();
 
   std::vector<const User*> user_ptr_vec;
-  for (const auto& user_name : user_vec) {
+  for (const auto& user_name : user_list) {
     const User* user = GetExistedUserInfoNoLock_(user_name);
     if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
@@ -197,10 +196,8 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser(
 }
 
 AccountManager::CraneExpected<void> AccountManager::DeleteAccount(
-    uint32_t uid, const std::string& account_list) {
-  std::vector<std::string> account_vec =
-      absl::StrSplit(account_list, ',', absl::SkipEmpty());
-  if (!account_vec.empty())
+    uint32_t uid, const std::vector<std::string>& account_list) {
+  if (!account_list.empty())
     return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   {
@@ -211,7 +208,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccount(
     if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
 
-    for (const auto& account_name : account_vec) {
+    for (const auto& account_name : account_list) {
       auto result =
           CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, false);
       if (!result) return result;
@@ -223,7 +220,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccount(
 
   std::vector<const Account*> account_ptr_vec;
 
-  for (const auto& account_name : account_vec) {
+  for (const auto& account_name : account_list) {
     const Account* account = GetExistedAccountInfoNoLock_(account_name);
     if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
@@ -334,7 +331,7 @@ AccountManager::QosMapMutexSharedPtr AccountManager::GetAllQosInfo() {
 }
 
 AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
-    uint32_t uid, const std::string& user_list,
+    uint32_t uid, const std::vector<std::string>& user_list,
     std::unordered_map<uid_t, User>* res_user_map) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   CraneExpected<void> result{};
@@ -343,10 +340,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
-  std::vector<std::string> user_vec =
-      absl::StrSplit(user_list, ',', absl::SkipEmpty());
-
-  if (user_vec.empty()) {  // Query all users that can be queried.
+  if (user_list.empty()) {  // Query all users that can be queried.
     // Operators and above can query all users.
     if (CheckIfUserHasHigherPrivThan_(*op_user, User::None)) {
       // The rules for querying user information are the same as those for
@@ -375,7 +369,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
     }
   } else {  // Query the specified user information.
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    for (const auto& user_name : user_vec) {
+    for (const auto& user_name : user_list) {
       const User* user = GetExistedUserInfoNoLock_(user_name);
       result = CheckIfUserHasPermOnUserNoLock_(*op_user, user, true);
       if (!result) return result;
@@ -387,13 +381,10 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
 }
 
 AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
-    uint32_t uid, const std::string& account_list,
+    uint32_t uid, const std::vector<std::string>& account_list,
     std::unordered_map<std::string, Account>* res_account_map) {
   User res_user;
   CraneExpected<void> result{};
-
-  std::vector<std::string> account_vec =
-      absl::StrSplit(account_list, ',', absl::SkipEmpty());
 
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -401,8 +392,8 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
-    if (!account_vec.empty()) {
-      for (const auto& account_name : account_vec) {
+    if (!account_list.empty()) {
+      for (const auto& account_name : account_list) {
         result =
             CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, true);
         if (!result) return result;
@@ -412,7 +403,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
   }
 
   util::read_lock_guard account_guard(m_rw_account_mutex_);
-  if (account_vec.empty()) {
+  if (account_list.empty()) {
     if (CheckIfUserHasHigherPrivThan_(res_user, User::None)) {
       // If an administrator user queries account information, all
       // accounts are returned, variable user_account not used
@@ -448,7 +439,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
       }
     }
   } else {
-    for (const auto& account_name : account_vec) {
+    for (const auto& account_name : account_list) {
       const Account* account = GetAccountInfoNoLock_(account_name);
       if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
       res_account_map->try_emplace(account_name, *account);
@@ -903,9 +894,8 @@ AccountManager::CraneExpected<void> AccountManager::ModifyQos(
 }
 
 AccountManager::CraneExpected<void> AccountManager::BlockAccount(
-    uint32_t uid, const std::string& account_list, bool block) {
-  std::vector<std::string> account_vec =
-      absl::StrSplit(account_list, ',', absl::SkipEmpty());
+    uint32_t uid, const std::vector<std::string>& account_list, bool block) {
+  std::vector<std::string> actual_account_list{account_list};
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -914,12 +904,13 @@ AccountManager::CraneExpected<void> AccountManager::BlockAccount(
     if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
     // If the account_list is empty, perform operations on all accounts.
-    if (account_vec.empty()) {
+
+    if (actual_account_list.empty()) {
       for (const auto& [account_name, account] : m_account_map_) {
-        account_vec.emplace_back(account_name);
+        actual_account_list.emplace_back(account_name);
       }
     }
-    for (const auto& account_name : account_vec) {
+    for (const auto& account_name : actual_account_list) {
       auto result =
           CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, false);
       if (!result) return result;
@@ -927,20 +918,21 @@ AccountManager::CraneExpected<void> AccountManager::BlockAccount(
   }
 
   util::write_lock_guard account_guard(m_rw_account_mutex_);
-  for (const auto& account_name : account_vec) {
+  for (const auto& account_name : actual_account_list) {
     const Account* account = GetExistedAccountInfoNoLock_(account_name);
     if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
   }
 
-  return BlockAccount_(account_vec, block);
+  return BlockAccount_(actual_account_list, block);
 }
 
 AccountManager::CraneExpected<void> AccountManager::BlockUser(
-    uint32_t uid, const std::string& user_list, const std::string& account,
-    bool block) {
+    uint32_t uid, const std::vector<std::string>& user_list,
+    const std::string& account, bool block) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
-  std::vector<std::string> user_vec =
-      absl::StrSplit(user_list, ',', absl::SkipEmpty());
+
+  std::vector<std::string> actual_user_list{user_list};
+
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
@@ -949,11 +941,18 @@ AccountManager::CraneExpected<void> AccountManager::BlockUser(
 
     if (account.empty())
       return std::unexpected(CraneErrCode::ERR_NO_ACCOUNT_SPECIFIED);
-    if (user_vec.empty())
-      return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+
+    if (actual_user_list.empty()) {
+      const auto& account_ptr = GetAccountInfoNoLock_(account);
+      if (!account_ptr)
+        return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+      for (const auto& username : account_ptr->users) {
+        actual_user_list.emplace_back(username);
+      }
+    }
 
     std::string actual_account = account;
-    for (const auto& user_name : user_vec) {
+    for (const auto& user_name : actual_user_list) {
       const User* user = GetExistedUserInfoNoLock_(user_name);
       auto result = CheckIfUserHasPermOnUserOfAccountNoLock_(
           *op_user, user, &actual_account, false);
@@ -961,7 +960,7 @@ AccountManager::CraneExpected<void> AccountManager::BlockUser(
     }
   }
 
-  return BlockUser_(user_vec, account, block);
+  return BlockUser_(actual_user_list, account, block);
 }
 
 bool AccountManager::CheckUserPermissionToPartition(
@@ -2577,11 +2576,11 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccountAllowedQos_(
 }
 
 AccountManager::CraneExpected<void> AccountManager::BlockUser_(
-    const std::vector<std::string>& user_vec, const std::string& account,
+    const std::vector<std::string>& user_list, const std::string& account,
     bool block) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        for (const auto& user_name : user_vec) {
+        for (const auto& user_name : user_list) {
           g_db_client->UpdateEntityOne(
               MongodbClient::EntityType::USER, "$set", user_name,
               "account_to_attrs_map." + account + ".blocked", block);
@@ -2591,17 +2590,17 @@ AccountManager::CraneExpected<void> AccountManager::BlockUser_(
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-  for (const auto& user_name : user_vec)
+  for (const auto& user_name : user_list)
     m_user_map_[user_name]->account_to_attrs_map[account].blocked = block;
 
   return {};
 }
 
 AccountManager::CraneExpected<void> AccountManager::BlockAccount_(
-    const std::vector<std::string>& account_vec, bool block) {
+    const std::vector<std::string>& account_list, bool block) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        for (const auto& account_name : account_vec) {
+        for (const auto& account_name : account_list) {
           g_db_client->UpdateEntityOne(MongodbClient::EntityType::ACCOUNT,
                                        "$set", account_name, "blocked", block);
         }
@@ -2610,7 +2609,7 @@ AccountManager::CraneExpected<void> AccountManager::BlockAccount_(
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-  for (const auto& account_name : account_vec) {
+  for (const auto& account_name : account_list) {
     m_account_map_[account_name]->blocked = block;
   }
 
