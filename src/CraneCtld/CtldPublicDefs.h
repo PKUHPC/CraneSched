@@ -21,8 +21,6 @@
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
-#include "crane/GrpcHelper.h"
-
 namespace Ctld {
 
 using moodycamel::ConcurrentQueue;
