@@ -78,6 +78,8 @@ class JwtAuthInterceptorFactory
   std::string jwt_secret_;
 };
 
+uint32_t ExtractUIDFromMetadata(const grpc::ServerContext* context);
+
 void ServerBuilderSetCompression(grpc::ServerBuilder* builder);
 
 void ServerBuilderSetKeepAliveArgs(grpc::ServerBuilder* builder);

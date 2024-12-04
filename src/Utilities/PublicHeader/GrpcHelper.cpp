@@ -54,8 +54,6 @@ void JwtAuthInterceptor::Intercept(
         info_->server_context()->TryCancel();
         return;
       }
-      info_->server_context()->AddInitialMetadata("uid",
-                                                  util::GetClaim("UID", token));
     }
   }
   methods->Proceed();
@@ -67,6 +65,14 @@ static std::string GrpcFormatIpAddress(std::string const& addr) {
     return fmt::format("[{}]", addr);
 
   return addr;
+}
+
+uint32_t ExtractUIDFromMetadata(const grpc::ServerContext* context) {
+  auto iter = context->client_metadata().find("authorization");
+  uint32_t uid = static_cast<uint32_t>(std::stoul(util::GetClaim(
+      "UID", std::string(iter->second.data(), iter->second.size()))));
+
+  return uid;
 }
 
 void ServerBuilderSetCompression(grpc::ServerBuilder* builder) {
