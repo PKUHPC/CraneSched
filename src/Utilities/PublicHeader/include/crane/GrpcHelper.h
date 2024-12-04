@@ -95,7 +95,7 @@ void ServerBuilderAddmTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                           const std::string& address,
                                           const std::string& port,
                                           const TlsCertificates& certs,
-                                          const std::string pem_root_cert);
+                                          const std::string& pem_root_cert);
 
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,

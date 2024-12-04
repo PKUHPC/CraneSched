@@ -132,7 +132,7 @@ void ServerBuilderAddmTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                           const std::string& address,
                                           const std::string& port,
                                           const TlsCertificates& certs,
-                                          const std::string pem_root_cert) {
+                                          const std::string& pem_root_cert) {
   std::string listen_addr_port =
       fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
 
@@ -195,10 +195,6 @@ std::shared_ptr<grpc::Channel> CreateTcpInsecureCustomChannel(
 static void SetSslCredOpts(grpc::SslCredentialsOptions* opts,
                            const TlsCertificates& certs,
                            const ClientTlsCertificates& clientcerts) {
-  // pem_root_certs is actually the certificate of server side rather than
-  // CA certificate. CA certificate is not needed.
-  // Since we use the same cert/key pair for both cranectld/craned,
-  // pem_root_certs is set to the same certificate.
   opts->pem_root_certs = clientcerts.ClientCertContent;
   opts->pem_cert_chain = certs.ServerCertContent;
   opts->pem_private_key = certs.ServerKeyContent;
