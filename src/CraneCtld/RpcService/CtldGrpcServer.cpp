@@ -117,9 +117,9 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     grpc::ServerContext *context, const crane::grpc::ModifyTaskRequest *request,
     crane::grpc::ModifyTaskReply *response) {
   using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
-
-  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
-  if (!res) {
+  uint32_t uid = ExtractUIDFromMetadata(context);
+  auto res = g_account_manager->CheckUidIsAdmin(uid);
+  if (res.has_error()) {
     for (auto task_id : request->task_ids()) {
       response->add_not_modified_tasks(task_id);
       if (res.error() == CraneErrCode::ERR_INVALID_USER) {
@@ -319,6 +319,8 @@ grpc::Status CraneCtldServiceImpl::Login(
 grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
+  uint32_t uid = ExtractUIDFromMetadata(context);
+
   Account account;
   const crane::grpc::AccountInfo *account_info = &request->account();
 
@@ -333,7 +335,7 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
     account.allowed_qos_list.emplace_back(qos);
   }
 
-  auto result = g_account_manager->AddAccount(request->uid(), account);
+  auto result = g_account_manager->AddAccount(uid, account);
   if (result) {
     response->set_ok(true);
   } else {
@@ -347,6 +349,8 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
 grpc::Status CraneCtldServiceImpl::AddUser(
     grpc::ServerContext *context, const crane::grpc::AddUserRequest *request,
     crane::grpc::AddUserReply *response) {
+  uint32_t uid = ExtractUIDFromMetadata(context);
+
   User user;
   const crane::grpc::UserInfo *user_info = &request->user();
 
@@ -388,6 +392,8 @@ grpc::Status CraneCtldServiceImpl::AddUser(
 grpc::Status CraneCtldServiceImpl::AddQos(
     grpc::ServerContext *context, const crane::grpc::AddQosRequest *request,
     crane::grpc::AddQosReply *response) {
+  uint32_t uid = ExtractUIDFromMetadata(context);
+
   Qos qos;
   const crane::grpc::QosInfo *qos_info = &request->qos();
 
@@ -406,7 +412,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   }
   qos.max_time_limit_per_task = absl::Seconds(sec);
 
-  auto result = g_account_manager->AddQos(request->uid(), qos);
+  auto result = g_account_manager->AddQos(uid, qos);
   if (result) {
     response->set_ok(true);
   } else {
@@ -421,6 +427,8 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
     grpc::ServerContext *context,
     const crane::grpc::ModifyAccountRequest *request,
     crane::grpc::ModifyAccountReply *response) {
+  uint32_t uid = ExtractUIDFromMetadata(context);
+
   if (request->type() == crane::grpc::OperationType::Overwrite &&
       request->modify_field() ==
           crane::grpc::ModifyField::Partition) {  // SetAccountAllowedPartition
@@ -428,8 +436,7 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
         request->value_list().begin(), request->value_list().end()};
 
     auto rich_res = g_account_manager->SetAccountAllowedPartition(
-        request->uid(), request->name(), std::move(partition_list),
-        request->force());
+        uid, request->name(), std::move(partition_list), request->force());
     if (!rich_res) {
       if (rich_res.error().description().empty())
         rich_res.error().set_description(
@@ -446,7 +453,7 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
     std::string default_qos = "";
     if (!request->value_list().empty()) default_qos = request->value_list()[0];
     auto rich_res = g_account_manager->SetAccountAllowedQos(
-        request->uid(), request->name(), default_qos, std::move(qos_list),
+        uid, request->name(), default_qos, std::move(qos_list),
         request->force());
     if (!rich_res) {
       if (rich_res.error().description().empty())
@@ -458,8 +465,8 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
   } else {  // other operations
     for (const auto &value : request->value_list()) {
       auto modify_res = g_account_manager->ModifyAccount(
-          request->type(), request->uid(), request->name(),
-          request->modify_field(), value, request->force());
+          request->type(), uid, request->name(), request->modify_field(), value,
+          request->force());
       if (!modify_res) {
         auto *new_err_record = response->mutable_rich_error_list()->Add();
         new_err_record->set_description(value);
@@ -480,6 +487,8 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
 grpc::Status CraneCtldServiceImpl::ModifyUser(
     grpc::ServerContext *context, const crane::grpc::ModifyUserRequest *request,
     crane::grpc::ModifyUserReply *response) {
+  uint32_t uid = ExtractUIDFromMetadata(context);
+
   CraneExpected<void> modify_res;
 
   if (request->type() == crane::grpc::OperationType::Delete) {
@@ -487,7 +496,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
     case crane::grpc::ModifyField::Partition:
       for (const auto &value : request->value_list()) {
         modify_res = g_account_manager->DeleteUserAllowedPartition(
-            request->uid(), request->name(), request->account(), value);
+            uid, request->name(), request->account(), value);
         if (!modify_res) {
           auto *new_err_record = response->mutable_rich_error_list()->Add();
           new_err_record->set_description(value);
@@ -499,8 +508,8 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
     case crane::grpc::ModifyField::Qos:
       for (const auto &value : request->value_list()) {
         modify_res = g_account_manager->DeleteUserAllowedQos(
-            request->uid(), request->name(), request->partition(),
-            request->account(), value, request->force());
+            uid, request->name(), request->partition(), request->account(),
+            value, request->force());
         if (!modify_res) {
           auto *new_err_record = response->mutable_rich_error_list()->Add();
           new_err_record->set_description(value);
@@ -515,7 +524,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
     switch (request->modify_field()) {
     case crane::grpc::ModifyField::AdminLevel:
       modify_res = g_account_manager->ModifyAdminLevel(
-          request->uid(), request->name(), request->value_list()[0]);
+          uid, request->name(), request->value_list()[0]);
       if (!modify_res) {
         auto *new_err_record = response->mutable_rich_error_list()->Add();
         new_err_record->set_description(request->value_list()[0]);
@@ -583,8 +592,8 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
       break;
     case crane::grpc::ModifyField::DefaultQos:
       modify_res = g_account_manager->ModifyUserDefaultQos(
-          request->uid(), request->name(), request->partition(),
-          request->account(), request->value_list()[0]);
+          uid, request->name(), request->partition(), request->account(),
+          request->value_list()[0]);
       if (!modify_res) {
         auto *new_err_record = response->mutable_rich_error_list()->Add();
         new_err_record->set_description(request->value_list()[0]);
@@ -616,9 +625,10 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
 grpc::Status CraneCtldServiceImpl::ModifyQos(
     grpc::ServerContext *context, const crane::grpc::ModifyQosRequest *request,
     crane::grpc::ModifyQosReply *response) {
-  auto modify_res =
-      g_account_manager->ModifyQos(request->uid(), request->name(),
-                                   request->modify_field(), request->value());
+  uint32_t uid = ExtractUIDFromMetadata(context);
+
+  auto modify_res = g_account_manager->ModifyQos(
+      uid, request->name(), request->modify_field(), request->value());
 
   if (modify_res) {
     response->set_ok(true);
