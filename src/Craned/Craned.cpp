@@ -29,8 +29,7 @@
 #include "CforedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
-#include "crane/Network.h"
-#include "crane/OS.h"
+#include "DeviceManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 

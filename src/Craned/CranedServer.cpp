@@ -20,8 +20,7 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include "CranedPublicDefs.h"
-#include "CtldClient.h"
+#include "TaskManager.h"
 
 namespace Craned {
 
