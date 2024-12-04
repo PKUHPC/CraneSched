@@ -289,7 +289,7 @@ message DeleteUserReply {
 
 message DeleteQosRequest {
   uint32 uid = 1;
-  string name = 2;
+  repeated string qos_list = 2;
 }
 
 message DeleteQosReply {
@@ -364,7 +364,7 @@ message QueryUserInfoReply {
 
 message QueryQosInfoRequest {
   uint32 uid = 1;
-  string name = 2;
+  repeated string qos_list = 2;
 }
 
 message QueryQosInfoReply {

@@ -616,8 +616,12 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     crane::grpc::QueryQosInfoReply *response) {
   std::unordered_map<std::string, Qos> res_qos_map;
 
-  auto modify_res = g_account_manager->QueryQosInfo(
-      request->uid(), request->name(), &res_qos_map);
+  std::vector<std::string> qos_list;
+  for (const auto &qos : request->qos_list()) {
+    qos_list.emplace_back(qos);
+  }
+  auto modify_res =
+      g_account_manager->QueryQosInfo(request->uid(), qos_list, &res_qos_map);
   if (modify_res) {
     response->set_ok(true);
   } else {
@@ -681,7 +685,11 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(
 grpc::Status CraneCtldServiceImpl::DeleteQos(
     grpc::ServerContext *context, const crane::grpc::DeleteQosRequest *request,
     crane::grpc::DeleteQosReply *response) {
-  auto res = g_account_manager->DeleteQos(request->uid(), request->name());
+  std::vector<std::string> qos_list;
+  for (const auto &qos : request->qos_list()) {
+    qos_list.emplace_back(qos);
+  }
+  auto res = g_account_manager->DeleteQos(request->uid(), qos_list);
   if (res) {
     response->set_ok(true);
   } else {

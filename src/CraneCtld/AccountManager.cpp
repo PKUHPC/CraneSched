@@ -235,7 +235,9 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccount(
 }
 
 AccountManager::CraneExpected<void> AccountManager::DeleteQos(
-    uint32_t uid, const std::string& name) {
+    uint32_t uid, const std::vector<std::string>& qos_list) {
+  if (qos_list.empty()) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
@@ -248,14 +250,16 @@ AccountManager::CraneExpected<void> AccountManager::DeleteQos(
 
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
-  const Qos* qos = GetExistedQosInfoNoLock_(name);
-  if (!qos) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+  for (const auto& qos_name : qos_list) {
+    const Qos* qos = GetExistedQosInfoNoLock_(qos_name);
+    if (!qos) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
 
-  // Cannot delete because the QoS is still in use.
-  if (qos->reference_count != 0)
-    return std::unexpected(CraneErrCode::ERR_DELETE_QOS);
+    // Cannot delete because the QoS is still in use.
+    if (qos->reference_count != 0)
+      return std::unexpected(CraneErrCode::ERR_DELETE_QOS);
+  }
 
-  return DeleteQos_(name);
+  return DeleteQos_(qos_list);
 }
 
 AccountManager::UserMutexSharedPtr AccountManager::GetExistedUserInfo(
@@ -450,7 +454,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
 }
 
 AccountManager::CraneExpected<void> AccountManager::QueryQosInfo(
-    uint32_t uid, const std::string& qos_list,
+    uint32_t uid, const std::vector<std::string>& qos_list,
     std::unordered_map<std::string, Qos>* res_qos_map) {
   User res_user;
   CraneExpected<void> result{};
@@ -463,10 +467,8 @@ AccountManager::CraneExpected<void> AccountManager::QueryQosInfo(
   }
 
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
-  std::vector<std::string> qos_vec =
-      absl::StrSplit(qos_list, ',', absl::SkipEmpty());
 
-  if (qos_vec.empty()) {
+  if (qos_list.empty()) {
     if (CheckIfUserHasHigherPrivThan_(res_user, User::None)) {
       for (const auto& [name, qos] : m_qos_map_) {
         if (qos->deleted) continue;
@@ -483,7 +485,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryQosInfo(
       }
     }
   } else {
-    for (const auto& qos_name : qos_vec) {
+    for (const auto& qos_name : qos_list) {
       const Qos* qos = GetExistedQosInfoNoLock_(qos_name);
       if (!qos) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
 
@@ -1967,12 +1969,22 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccount_(
 }
 
 AccountManager::CraneExpected<void> AccountManager::DeleteQos_(
-    const std::string& name) {
-  if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
-                                    name, "deleted", true)) {
+    const std::vector<std::string>& qos_list) {
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        for (const auto& qos_name : qos_list) {
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
+                                       qos_name, "deleted", true);
+        }
+      };
+
+  if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
-  m_qos_map_[name]->deleted = true;
+
+  for (const auto& qos_name : qos_list) {
+    m_qos_map_[qos_name]->deleted = true;
+  }
 
   return {};
 }

@@ -62,7 +62,8 @@ class AccountManager {
   CraneExpected<void> DeleteAccount(
       uint32_t uid, const std::vector<std::string>& account_list);
 
-  CraneExpected<void> DeleteQos(uint32_t uid, const std::string& name);
+  CraneExpected<void> DeleteQos(uint32_t uid,
+                                const std::vector<std::string>& qos_list);
 
   CraneExpected<void> QueryUserInfo(
       uint32_t uid, const std::vector<std::string>& user_list,
@@ -73,7 +74,7 @@ class AccountManager {
       std::unordered_map<std::string, Account>* res_account_map);
 
   CraneExpected<void> QueryQosInfo(
-      uint32_t uid, const std::string& qos_list,
+      uint32_t uid, const std::vector<std::string>& qos_list,
       std::unordered_map<std::string, Qos>* res_qos_map);
 
   UserMutexSharedPtr GetExistedUserInfo(const std::string& name);
@@ -260,7 +261,7 @@ class AccountManager {
   CraneExpected<void> DeleteAccount_(
       const std::vector<const Account*>& account_vec);
 
-  CraneExpected<void> DeleteQos_(const std::string& name);
+  CraneExpected<void> DeleteQos_(const std::vector<std::string>& qos_list);
 
   CraneExpected<void> AddUserAllowedPartition_(const User& user,
                                                const Account& account,
