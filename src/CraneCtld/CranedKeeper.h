@@ -179,6 +179,10 @@ class CranedKeeper {
   std::atomic_uint64_t m_channel_count_{0};
 };
 
+namespace internal {
+inline StaticLoggerRegister g_craned_keeper_logger_register("Keeper");
+}
+
 }  // namespace Ctld
 
 inline std::unique_ptr<Ctld::CranedKeeper> g_craned_keeper;

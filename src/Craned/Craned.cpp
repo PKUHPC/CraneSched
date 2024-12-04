@@ -105,23 +105,18 @@ void ParseConfig(int argc, char** argv) {
         g_config.CranedDebugLevel = "info";
 
       // spdlog should be initialized as soon as possible
-      spdlog::level::level_enum log_level;
-      if (g_config.CranedDebugLevel == "trace") {
-        log_level = spdlog::level::trace;
-      } else if (g_config.CranedDebugLevel == "debug") {
-        log_level = spdlog::level::debug;
-      } else if (g_config.CranedDebugLevel == "info") {
-        log_level = spdlog::level::info;
-      } else if (g_config.CranedDebugLevel == "warn") {
-        log_level = spdlog::level::warn;
-      } else if (g_config.CranedDebugLevel == "error") {
-        log_level = spdlog::level::err;
-      } else {
-        fmt::print(stderr, "Illegal debug-level format.");
+      spdlog::level::level_enum log_level =
+          spdlog::level::from_str(g_config.CranedDebugLevel);
+      if (log_level == spdlog::level::off &&
+          g_config.CranedDebugLevel != "off") {
+        fmt::print(stderr,
+                   "Illegal debug-level format. "
+                   "Logger level is set to off.");
         std::exit(1);
       }
 
-      InitLogger(log_level, g_config.CranedLogFile);
+      LoggerFactory::InitAndSetDefaultLogger(log_level, g_config.CranedLogFile);
+
 #ifdef CRANE_ENABLE_BPF
       Craned::CgroupV2::SetBpfDebugLogLevel(static_cast<uint32_t>(log_level));
 #endif

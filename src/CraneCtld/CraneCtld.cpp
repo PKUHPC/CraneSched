@@ -100,23 +100,17 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldDebugLevel = "info";
 
       // spdlog should be initialized as soon as possible
-      spdlog::level::level_enum log_level;
-      if (g_config.CraneCtldDebugLevel == "trace") {
-        log_level = spdlog::level::trace;
-      } else if (g_config.CraneCtldDebugLevel == "debug") {
-        log_level = spdlog::level::debug;
-      } else if (g_config.CraneCtldDebugLevel == "info") {
-        log_level = spdlog::level::info;
-      } else if (g_config.CraneCtldDebugLevel == "warn") {
-        log_level = spdlog::level::warn;
-      } else if (g_config.CraneCtldDebugLevel == "error") {
-        log_level = spdlog::level::err;
-      } else {
-        fmt::print(stderr, "Illegal debug-level format.");
+      spdlog::level::level_enum log_level =
+          spdlog::level::from_str(g_config.CraneCtldDebugLevel);
+      if (log_level == spdlog::level::off &&
+          g_config.CraneCtldDebugLevel != "off") {
+        fmt::print(stderr,
+                   "Illegal debug-level format. "
+                   "Logger level is set to off.");
         std::exit(1);
       }
 
-      InitLogger(log_level, g_config.CraneCtldLogFile);
+      LoggerFactory::InitAndSetDefaultLogger(log_level, g_config.CraneCtldLogFile);
 
       // External configuration file path
       if (!parsed_args.count("db-config") && config["DbConfigPath"]) {

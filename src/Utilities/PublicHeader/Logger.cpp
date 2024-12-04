@@ -18,27 +18,60 @@
 
 #include "crane/Logger.h"
 
-void InitLogger(spdlog::level::level_enum level,
-                const std::string& log_file_path) {
+void LoggerFactory::InitAndSetDefaultLogger(spdlog::level::level_enum level,
+                                            const std::string& log_file_path) {
+  spdlog::init_thread_pool(256, 1);
   spdlog::set_pattern("[%^%L%$ %C-%m-%d %s:%#] %v");
 
-  auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+  s_file_sink_ = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
       log_file_path, 1048576 * 50 /*MB*/, 3);
+  s_file_sink_->set_level(level);
 
-  auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+  s_console_sink_ = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+  s_console_sink_->set_level(level);
 
-  spdlog::init_thread_pool(256, 1);
-  auto logger = std::make_shared<spdlog::async_logger>(
-      "default", spdlog::sinks_init_list{file_sink, console_sink},
-      spdlog::thread_pool(), spdlog::async_overflow_policy::block);
+  s_sinks_init_list_ = {s_file_sink_, s_console_sink_};
 
-  file_sink->set_level(level);
-  console_sink->set_level(level);
+  std::vector<std::shared_ptr<spdlog::logger>> loggers;
+  for (auto [name, level] : s_static_registered_logger_level_map_) {
+    auto logger = std::make_shared<spdlog::async_logger>(
+        name.data(), s_sinks_init_list_, spdlog::thread_pool(),
+        s_overflow_policy_);
+    logger->set_level(level);
 
-  spdlog::set_default_logger(logger);
+    loggers.push_back(logger);
+  }
+
+  s_logger_map_mtx_.lock();
+  for (auto& logger : loggers) s_logger_map_.emplace(logger->name(), logger);
+  spdlog::set_default_logger(s_logger_map_.at("default"));
+  s_logger_map_mtx_.unlock();
 
   spdlog::flush_on(spdlog::level::err);
   spdlog::flush_every(std::chrono::seconds(1));
 
   spdlog::set_level(level);
+}
+
+std::shared_ptr<spdlog::logger> LoggerFactory::RegisterLogger(
+    const std::string& name, const spdlog::level::level_enum level) {
+  auto logger = std::make_shared<spdlog::async_logger>(
+      name, s_sinks_init_list_, spdlog::thread_pool(), s_overflow_policy_);
+  logger->set_level(level);
+
+  s_logger_map_mtx_.lock();
+  s_logger_map_.emplace(name, logger);
+  s_logger_map_mtx_.unlock();
+
+  return logger;
+}
+
+void LoggerFactory::SetLoggerLevel(const std::string& name,
+                                   spdlog::level::level_enum level) {
+  std::lock_guard lock(s_logger_map_mtx_);
+
+  auto it = s_logger_map_.find(name);
+  if (it == s_logger_map_.end()) return;
+
+  it->second->set_level(level);
 }

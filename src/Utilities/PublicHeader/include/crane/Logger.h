@@ -56,12 +56,29 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-#define CRANE_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
-#define CRANE_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
-#define CRANE_INFO(...) SPDLOG_INFO(__VA_ARGS__)
-#define CRANE_WARN(...) SPDLOG_WARN(__VA_ARGS__)
-#define CRANE_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
-#define CRANE_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
+constexpr static const char *kDefaultLoggerName = "Default";
+
+#define CRANE_DEFAULT_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
+#define CRANE_DEFAULT_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
+#define CRANE_DEFAULT_INFO(...) SPDLOG_INFO(__VA_ARGS__)
+#define CRANE_DEFAULT_WARN(...) SPDLOG_WARN(__VA_ARGS__)
+#define CRANE_DEFAULT_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
+#define CRANE_DEFAULT_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
+
+#define CRANE_LOGGER_TRACE(logger, ...) SPDLOG_LOGGER_TRACE(logger, __VA_ARGS__)
+#define CRANE_LOGGER_DEBUG(logger, ...) SPDLOG_LOGGER_DEBUG(logger, __VA_ARGS__)
+#define CRANE_LOGGER_INFO(logger, ...) SPDLOG_LOGGER_INFO(logger, __VA_ARGS__)
+#define CRANE_LOGGER_WARN(logger, ...) SPDLOG_LOGGER_WARN(logger, __VA_ARGS__)
+#define CRANE_LOGGER_ERROR(logger, ...) SPDLOG_LOGGER_ERROR(logger, __VA_ARGS__)
+#define CRANE_LOGGER_CRITICAL(logger, ...) \
+  SPDLOG_LOGGER_CRITICAL(logger, __VA_ARGS__)
+
+#define CRANE_TRACE(...) CRANE_DEFAULT_TRACE(__VA_ARGS__)
+#define CRANE_DEBUG(...) CRANE_DEFAULT_DEBUG(__VA_ARGS__)
+#define CRANE_INFO(...) CRANE_DEFAULT_INFO(__VA_ARGS__)
+#define CRANE_WARN(...) CRANE_DEFAULT_WARN(__VA_ARGS__)
+#define CRANE_ERROR(...) CRANE_DEFAULT_ERROR(__VA_ARGS__)
+#define CRANE_CRITICAL(...) CRANE_DEFAULT_CRITICAL(__VA_ARGS__)
 
 #define CRANE_LOG_LOC_CALL(loc, level, ...)                             \
   spdlog::default_logger_raw()->log(                                    \
@@ -149,12 +166,65 @@
     } while (false)
 #endif
 
-void InitLogger(spdlog::level::level_enum level,
-                const std::string &log_file_path);
+struct StaticLoggerRegister;
+
+class LoggerFactory {
+  friend struct StaticLoggerRegister;
+
+ private:
+  constinit inline static spdlog::async_overflow_policy s_overflow_policy_{
+      spdlog::async_overflow_policy::overrun_oldest};
+
+ public:
+  static void InitAndSetDefaultLogger(spdlog::level::level_enum level,
+                                      const std::string &log_file_path);
+
+  static std::shared_ptr<spdlog::logger> RegisterLogger(
+      const std::string &name, spdlog::level::level_enum level);
+
+  static void SetLoggerLevel(const std::string &name,
+                             spdlog::level::level_enum level);
+
+ private:
+  static inline std::unordered_map<std::string_view, spdlog::level::level_enum>
+      s_static_registered_logger_level_map_;
+
+  static inline std::mutex s_logger_map_mtx_;
+  static inline std::unordered_map<std::string, std::shared_ptr<spdlog::logger>>
+      s_logger_map_ ABSL_GUARDED_BY(s_logger_map_mtx_);
+
+  static inline spdlog::sinks_init_list s_sinks_init_list_;
+
+  static inline std::shared_ptr<spdlog::sinks::sink> s_file_sink_;
+  static inline std::shared_ptr<spdlog::sinks::sink> s_console_sink_;
+};
+
+struct StaticLoggerRegister {
+  StaticLoggerRegister(constexpr std::string_view name,
+                       spdlog::level::level_enum level = spdlog::level::info) {
+    s_logger_name_ = name;
+    LoggerFactory::s_static_registered_logger_level_map_.emplace(name, level);
+  }
+
+  static spdlog::logger *GetLogger() {
+    static spdlog::logger *logger = GetLoggerFromFactory_();
+    return logger;
+  }
+
+ private:
+  static inline std::string_view s_logger_name_;
+
+  static spdlog::logger *GetLoggerFromFactory_() {
+    std::lock_guard lock(LoggerFactory::s_logger_map_mtx_);
+    spdlog::logger *logger =
+        LoggerFactory::s_logger_map_.at(s_logger_name_.data()).get();
+    ABSL_ASSERT(logger != nullptr);
+    return logger;
+  }
+};
 
 // Custom type formatting
 namespace fmt {
-
 template <>
 struct formatter<cpu_t> {
   template <typename ParseContext>
@@ -167,5 +237,8 @@ struct formatter<cpu_t> {
     return fmt::format_to(ctx.out(), "{:.2f}", static_cast<double>(v));
   }
 };
-
 }  // namespace fmt
+
+namespace internal {
+inline StaticLoggerRegister g_default_logger_register(kDefaultLoggerName);
+}
