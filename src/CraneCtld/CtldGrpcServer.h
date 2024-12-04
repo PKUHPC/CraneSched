@@ -203,11 +203,6 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryTasksInfoRequest *request,
       crane::grpc::QueryTasksInfoReply *response) override;
 
-  grpc::Status QueryTasksInfoByIds(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryTasksInfoRequest *request,
-      crane::grpc::QueryTasksInfoReply *response) override;
-
   grpc::Status QueryCranedInfo(
       grpc::ServerContext *context,
       const crane::grpc::QueryCranedInfoRequest *request,
