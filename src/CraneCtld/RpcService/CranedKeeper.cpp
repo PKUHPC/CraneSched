@@ -18,8 +18,6 @@
 
 #include "CranedKeeper.h"
 
-#include <google/protobuf/util/time_util.h>
-
 namespace Ctld {
 
 using grpc::ClientContext;
