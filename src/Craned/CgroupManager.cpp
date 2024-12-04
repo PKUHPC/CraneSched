@@ -501,18 +501,9 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
   }
 
   if (g_config.Plugin.Enabled) {
-    std::vector<std::string> requested_devices;
-    for (const auto& [_, type_slots_map] : res.dedicated_res_in_node().name_type_map()) {
-      for (const auto& [__, slots] : type_slots_map.type_slots_map()) {
-        requested_devices.insert(requested_devices.end(), 
-                               slots.slots().begin(), 
-                               slots.slots().end());
-      }
-    }
-
     g_plugin_client->CreateCgroupHookAsync(task_id, 
-                                           pcg->GetCgroupString(),
-                                           requested_devices);
+                                          pcg->GetCgroupString(),
+                                          res.dedicated_res_in_node());
   }
 
   CRANE_TRACE(

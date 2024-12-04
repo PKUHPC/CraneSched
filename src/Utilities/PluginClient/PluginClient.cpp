@@ -130,7 +130,9 @@ grpc::Status PluginClient::SendStartHook_(grpc::ClientContext* context,
   using crane::grpc::plugin::StartHookReply;
   using crane::grpc::plugin::StartHookRequest;
 
-  auto request = dynamic_cast<StartHookRequest*>(msg);
+  auto* request = dynamic_cast<StartHookRequest*>(msg);
+  CRANE_ASSERT(request != nullptr);
+  
   StartHookReply reply;
 
   CRANE_TRACE("[Plugin] Sending StartHook.");
@@ -142,7 +144,9 @@ grpc::Status PluginClient::SendEndHook_(grpc::ClientContext* context,
   using crane::grpc::plugin::EndHookReply;
   using crane::grpc::plugin::EndHookRequest;
 
-  auto request = dynamic_cast<EndHookRequest*>(msg);
+  auto* request = dynamic_cast<EndHookRequest*>(msg);
+  CRANE_ASSERT(request != nullptr);
+  
   EndHookReply reply;
 
   CRANE_TRACE("[Plugin] Sending EndHook.");
@@ -154,7 +158,9 @@ grpc::Status PluginClient::SendCreateCgroupHook_(grpc::ClientContext* context,
   using crane::grpc::plugin::CreateCgroupHookReply;
   using crane::grpc::plugin::CreateCgroupHookRequest;
 
-  auto request = dynamic_cast<CreateCgroupHookRequest*>(msg);
+  auto* request = dynamic_cast<CreateCgroupHookRequest*>(msg);
+  CRANE_ASSERT(request != nullptr);
+  
   CreateCgroupHookReply reply;
 
   CRANE_TRACE("[Plugin] Sending CreateCgroupHook.");
@@ -166,7 +172,9 @@ grpc::Status PluginClient::SendDestroyCgroupHook_(grpc::ClientContext* context,
   using crane::grpc::plugin::DestroyCgroupHookReply;
   using crane::grpc::plugin::DestroyCgroupHookRequest;
 
-  auto request = dynamic_cast<DestroyCgroupHookRequest*>(msg);
+  auto* request = dynamic_cast<DestroyCgroupHookRequest*>(msg);
+  CRANE_ASSERT(request != nullptr);
+  
   DestroyCgroupHookReply reply;
 
   CRANE_TRACE("[Plugin] Sending DestroyCgroupHook.");
@@ -205,13 +213,11 @@ void PluginClient::EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
 
 void PluginClient::CreateCgroupHookAsync(task_id_t task_id,
                                         const std::string& cgroup,
-                                        const std::vector<std::string>& devices) {
+                                        const crane::grpc::DedicatedResourceInNode &request_resource) {
   auto request = std::make_unique<crane::grpc::plugin::CreateCgroupHookRequest>();
   request->set_task_id(task_id);
   request->set_cgroup(cgroup);
-  for (const auto& device : devices) {
-    request->add_devices(device);
-  }
+  request->mutable_request_res()->CopyFrom(request_resource);
 
   HookEvent e{HookType::CREATE_CGROUP,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
