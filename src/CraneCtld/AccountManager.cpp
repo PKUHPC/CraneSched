@@ -18,6 +18,7 @@
 
 #include "AccountManager.h"
 
+#include "AccountMetaContainer.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
@@ -832,6 +833,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyQos(
   // Mongodb
   Qos qos;
   g_db_client->SelectQos("name", name, &qos);
+
   *m_qos_map_[name] = std::move(qos);
 
   return {};
@@ -969,8 +971,8 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
     return result::fail("time-limit reached the user's limit.");
 
-  if (static_cast<double>(task->cpus_per_task) >
-      qos_share_ptr->max_cpus_per_user)
+  if (!g_account_meta_container->CheckAndMallocQosResourceFromUser(
+          user_share_ptr->name, *task, *qos_share_ptr))
     return result::fail("cpus-per-task reached the user's limit.");
 
   return {};
