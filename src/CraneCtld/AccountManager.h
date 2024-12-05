@@ -55,23 +55,26 @@ class AccountManager {
 
   CraneExpected<void> AddQos(uint32_t uid, const Qos& new_qos);
 
-  CraneExpected<void> DeleteUser(uint32_t uid, const std::string& name,
+  CraneExpected<void> DeleteUser(uint32_t uid,
+                                 const std::vector<std::string>& user_list,
                                  const std::string& account);
 
-  CraneExpected<void> DeleteAccount(uint32_t uid, const std::string& name);
+  CraneExpected<void> DeleteAccount(
+      uint32_t uid, const std::vector<std::string>& account_list);
 
-  CraneExpected<void> DeleteQos(uint32_t uid, const std::string& name);
+  CraneExpected<void> DeleteQos(uint32_t uid,
+                                const std::vector<std::string>& qos_list);
 
   CraneExpected<void> QueryUserInfo(
-      uint32_t uid, const std::string& name,
+      uint32_t uid, const std::vector<std::string>& user_list,
       std::unordered_map<uid_t, User>* res_user_map);
 
   CraneExpected<void> QueryAccountInfo(
-      uint32_t uid, const std::string& name,
+      uint32_t uid, const std::vector<std::string>& account_list,
       std::unordered_map<std::string, Account>* res_account_map);
 
   CraneExpected<void> QueryQosInfo(
-      uint32_t uid, const std::string& name,
+      uint32_t uid, const std::vector<std::string>& qos_list,
       std::unordered_map<std::string, Qos>* res_qos_map);
 
   UserMutexSharedPtr GetExistedUserInfo(const std::string& name);
@@ -119,10 +122,12 @@ class AccountManager {
                                 crane::grpc::ModifyField modify_field,
                                 const std::string& value);
 
-  CraneExpected<void> BlockAccount(uint32_t uid, const std::string& name,
+  CraneExpected<void> BlockAccount(uint32_t uid,
+                                   const std::vector<std::string>& account_list,
                                    bool block);
 
-  CraneExpected<void> BlockUser(uint32_t uid, const std::string& name,
+  CraneExpected<void> BlockUser(uint32_t uid,
+                                const std::vector<std::string>& user_list,
                                 const std::string& account, bool block);
 
   bool CheckUserPermissionToPartition(const std::string& name,
@@ -247,11 +252,13 @@ class AccountManager {
 
   CraneExpected<void> AddQos_(const Qos& qos, const Qos* stale_qos);
 
-  CraneExpected<void> DeleteUser_(const User& user, const std::string& account);
+  CraneExpected<void> DeleteUser_(const std::vector<const User*>& user_ptr_vec,
+                                  const std::string& account);
 
-  CraneExpected<void> DeleteAccount_(const Account& account);
+  CraneExpected<void> DeleteAccount_(
+      const std::vector<const Account*>& account_vec);
 
-  CraneExpected<void> DeleteQos_(const std::string& name);
+  CraneExpected<void> DeleteQos_(const std::vector<std::string>& qos_list);
 
   CraneExpected<void> AddUserAllowedPartition_(const User& user,
                                                const Account& account,
@@ -304,10 +311,11 @@ class AccountManager {
   CraneExpected<void> DeleteAccountAllowedQos_(const Account& account,
                                                const std::string& qos);
 
-  CraneExpected<void> BlockUser_(const std::string& name,
+  CraneExpected<void> BlockUser_(const std::vector<std::string>& user_list,
                                  const std::string& account, bool block);
 
-  CraneExpected<void> BlockAccount_(const std::string& name, bool block);
+  CraneExpected<void> BlockAccount_(
+      const std::vector<std::string>& account_list, bool block);
 
   bool IsAllowedPartitionOfAnyNodeNoLock_(const Account* account,
                                           const std::string& partition,
