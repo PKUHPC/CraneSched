@@ -141,7 +141,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
 
  private:
   static constexpr bool kAlgoTraceOutput = false;
-  static constexpr bool kAlgoRedundantNode = true;
+  static constexpr bool kAlgoRedundantNode = false;
   static constexpr uint32_t kAlgoMaxTaskNumPerNode = 1000;
   static constexpr absl::Duration kAlgoMaxTimeWindow = absl::Hours(24 * 7);
 
@@ -175,7 +175,15 @@ class MinLoadFirst : public INodeSelectionAlgo {
 
     bool satisfied() const { return *task_res <= it->second; }
 
-    bool genNext() { return ++it != end; }
+    bool genNextUnsatisfied() {
+      while (++it != end && satisfied());
+      return it != end;
+    }
+
+    bool genNextSatisfied() {
+      while (++it != end && !satisfied());
+      return it != end;
+    }
   };
 
   struct TrackerList {
