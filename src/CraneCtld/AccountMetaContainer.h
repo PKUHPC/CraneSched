@@ -25,40 +25,20 @@ namespace Ctld {
 
 class AccountMetaContainer final {
  public:
-  using QosToQosResourceMap = phmap::parallel_flat_hash_map<
-      std::string,  // QosName
-      QosResourceLimit, phmap::priv::hash_default_hash<std::string>,
-      phmap::priv::hash_default_eq<std::string>,
-      std::allocator<std::pair<const std::string, QosResourceLimit>>, 4,
-      std::shared_mutex>;
-
   using UserResourceMetaMap = std::unordered_map<std::string,  // username
-                                                 QosToQosResourceMap>;
+                                                 ResourcePerUser>;
 
-  AccountMetaContainer();
+  AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  void AddQosResourceToUser(const std::string& username,
-                            const std::string& qos_name,
-                            const QosResource& qos_resource);
-
-  void ModifyQosResourceOnUser(const std::string& qos_name,
-                               const QosResource& qos_resource);
+  bool CheckAndMallocQosResourceFromUser(const std::string& username,
+                                         const TaskInCtld& task,
+                                         const Qos& qos);
 
   void FreeQosResource(const std::string& username, const TaskInCtld& task);
 
-  bool CheckQosLimitOnUser(const std::string& username, const TaskInCtld& task);
-
-  void MallocQosResourceFromUser(const std::string& username,
-                                 const TaskInCtld& task);
-
  private:
   UserResourceMetaMap user_meta_map_;
-
-  void InitFromDB_();
-
-  void TryEmplace_(const std::string& username, const std::string& qos_name,
-                   const QosResource& qos_resource);
 };
 
 inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;
