@@ -30,15 +30,17 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTaskRequest *request,
     crane::grpc::SubmitBatchTaskReply *response) {
+  CRANE_INFO("victor test in SubmitBatchTask start.");    
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
-
+  
   auto result = m_ctld_server_->SubmitTaskToScheduler(std::move(task));
   if (result.has_value()) {
     task_id_t id = result.value().get();
     if (id != 0) {
       response->set_ok(true);
       response->set_task_id(id);
+      CRANE_INFO("victor test in SubmitBatchTask set task_id={} successful.", id);   
     } else {
       response->set_ok(false);
       response->set_reason(

@@ -909,12 +909,14 @@ void TaskScheduler::ScheduleThread_() {
         if (stub == nullptr || stub->Invalid()) {
           for (auto& task : tasks.tasks())
             failed_to_exec_task_id_set.emplace(craned_id, task.task_id());
+            CRANE_TRACE("Victor test, Execute Task_id={} invalid", craned_id);
           continue;
         }
 
         std::vector<task_id_t> failed_task_ids = stub->ExecuteTasks(tasks);
         for (task_id_t task_id : failed_task_ids)
           failed_to_exec_task_id_set.emplace(craned_id, task_id);
+          CRANE_TRACE("Victor test, Execute Task_id={} failed", craned_id);
       }
 
       // After sending ExecuteTasks RPC, StartHook is called.
