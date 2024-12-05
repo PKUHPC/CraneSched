@@ -834,12 +834,6 @@ AccountManager::CraneExpected<void> AccountManager::ModifyQos(
   Qos qos;
   g_db_client->SelectQos("name", name, &qos);
 
-  // Modify QosResource when max_jobs_per_user or max_cpus_per_user is changed.
-  if (modify_field == crane::grpc::ModifyField::MaxJobsPerUser ||
-      modify_field == crane::grpc::ModifyField::MaxCpusPerUser)
-    g_account_meta_container->ModifyQosResourceOnUser(
-        name, QosResource{qos.max_cpus_per_user, qos.max_jobs_per_user});
-
   *m_qos_map_[name] = std::move(qos);
 
   return {};
@@ -981,16 +975,10 @@ std::expected<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
       qos_share_ptr->max_cpus_per_user)
     return std::unexpected("cpus-per-task reached the user's limit.");
 
-  g_account_meta_container->AddQosResourceToUser(
-      user_share_ptr->name, qos_share_ptr->name,
-      QosResource{qos_share_ptr->max_cpus_per_user,
-                  qos_share_ptr->max_jobs_per_user});
-
   return {};
 }
 
-std::expected<void, std::string> AccountManager::CheckUidIsAdmin(
-    uint32_t uid) {
+std::expected<void, std::string> AccountManager::CheckUidIsAdmin(uint32_t uid) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) {
