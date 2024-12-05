@@ -959,8 +959,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
                     task->Username(), task->partition_id, task->account));
   }
 
-  auto enable_res =
-      g_account_manager->CheckIfUserOfAccountIsEnabled(
+  auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
       task->Username(), task->account);
   if (enable_res.has_error()) {
     return result::fail(enable_res.error());

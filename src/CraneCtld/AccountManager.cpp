@@ -834,12 +834,6 @@ AccountManager::CraneExpected<void> AccountManager::ModifyQos(
   Qos qos;
   g_db_client->SelectQos("name", name, &qos);
 
-  // Modify QosResource when max_jobs_per_user or max_cpus_per_user is changed.
-  if (modify_field == crane::grpc::ModifyField::MaxJobsPerUser ||
-      modify_field == crane::grpc::ModifyField::MaxCpusPerUser)
-    g_account_meta_container->ModifyQosResourceOnUser(
-        name, QosResource{qos.max_cpus_per_user, qos.max_jobs_per_user});
-
   *m_qos_map_[name] = std::move(qos);
 
   return {};
@@ -977,14 +971,9 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
     return result::fail("time-limit reached the user's limit.");
 
-  if (static_cast<double>(task->cpus_per_task) >
-      qos_share_ptr->max_cpus_per_user)
+  if (!g_account_meta_container->CheckAndMallocQosResourceFromUser(
+          user_share_ptr->name, *task, *qos_share_ptr))
     return result::fail("cpus-per-task reached the user's limit.");
-
-  g_account_meta_container->AddQosResourceToUser(
-      user_share_ptr->name, qos_share_ptr->name,
-      QosResource{qos_share_ptr->max_cpus_per_user,
-                  qos_share_ptr->max_jobs_per_user});
 
   return {};
 }

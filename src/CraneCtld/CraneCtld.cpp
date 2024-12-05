@@ -25,7 +25,6 @@
 
 #include <cxxopts.hpp>
 #include <filesystem>
-#include <memory>
 
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
