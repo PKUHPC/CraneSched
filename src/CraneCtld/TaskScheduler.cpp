@@ -87,8 +87,8 @@ bool TaskScheduler::Init() {
       CRANE_TRACE("Restore task #{} from embedded running queue.",
                   task->TaskId());
 
-      err = AcquireTaskAttributes(task.get());
-      if (err != CraneErr::kOk || task->type == crane::grpc::Interactive) {
+      auto result = AcquireTaskAttributes(task.get());
+      if (!result || task->type == crane::grpc::Interactive) {
         task->SetStatus(crane::grpc::Failed);
         ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
                                                            task->RuntimeAttr());
@@ -98,13 +98,13 @@ bool TaskScheduler::Init() {
               "mark the task as FAILED.",
               task_id);
         }
-        if (err != CraneErr::kOk)
+        if (!result)
           CRANE_INFO(
               "Failed to acquire task attributes for restored running task "
               "#{}. "
               "Error Code: {}. "
               "Mark it as FAILED and move it to the ended queue.",
-              task_id, CraneErrStr(err));
+              task_id, CraneErrCodeStr(result.error()));
         else {
           CRANE_INFO("Mark running interactive task {} as FAILED.", task_id);
           for (const CranedId& craned_id : task->CranedIds()) {
@@ -324,13 +324,13 @@ bool TaskScheduler::Init() {
       }
 
       if (!mark_task_as_failed &&
-          AcquireTaskAttributes(task.get()) != CraneErr::kOk) {
+          !(AcquireTaskAttributes(task.get()))) {
         CRANE_ERROR("AcquireTaskAttributes failed for task #{}", task_id);
         mark_task_as_failed = true;
       }
 
       if (!mark_task_as_failed &&
-          CheckTaskValidity(task.get()) != CraneErr::kOk) {
+          !(CheckTaskValidity(task.get()))) {
         CRANE_ERROR("CheckTaskValidity failed for task #{}", task_id);
         mark_task_as_failed = true;
       }
@@ -2724,9 +2724,10 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
   }
 }
 
-CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
+CraneErrCodeExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   auto part_it = g_config.Partitions.find(task->partition_id);
-  if (part_it == g_config.Partitions.end()) return CraneErr::kNonExistent;
+  if (part_it == g_config.Partitions.end()) 
+    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_PARTITION);
 
   task->partition_priority = part_it->second.priority;
 
@@ -2754,12 +2755,12 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
       task->Username(), task->account, task);
-  if (check_qos_result != CraneErr::kOk) return check_qos_result;
+  if (!check_qos_result) return check_qos_result;
 
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().nodelist(), &nodes);
-    if (!ok) return CraneErr::kInvaildNodeList;
+    if (!ok) return std::unexpected(crane::grpc::ErrCode::ERR_INVAILD_NODE_LIST);
 
     for (auto&& node : nodes) task->included_nodes.emplace(std::move(node));
   }
@@ -2767,17 +2768,17 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (!task->TaskToCtld().excludes().empty() && task->excluded_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().excludes(), &nodes);
-    if (!ok) return CraneErr::kInvalidExNodeList;
+    if (!ok) return std::unexpected(crane::grpc::ErrCode::ERR_INVAILD_EX_NODE_LIST);
 
     for (auto&& node : nodes) task->excluded_nodes.emplace(std::move(node));
   }
 
-  return CraneErr::kOk;
+  return {};
 }
 
-CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
+CraneErrCodeExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   if (!CheckIfTimeLimitIsValid(task->time_limit))
-    return CraneErr::kInvalidTimeLimit;
+    return std::unexpected(crane::grpc::ErrCode::ERR_TIME_TIMIT_BEYOND) ;
 
   // Check whether the selected partition is able to run this task.
   std::unordered_set<std::string> avail_nodes;
@@ -2807,7 +2808,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
                   .memory_sw_bytes),
           util::ReadableTypedDeviceMap(
               metas_ptr->partition_global_meta.res_total.GetDeviceMap()));
-      return CraneErr::kNoResource;
+      return std::unexpected(crane::grpc::ErrCode::ERR_NO_RESOURCE) ;        
     }
 
     if (task->node_num > metas_ptr->craned_ids.size()) {
@@ -2815,7 +2816,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
           "Nodes not enough for task #{}. "
           "Partition total Nodes: {}",
           task->TaskId(), metas_ptr->craned_ids.size());
-      return CraneErr::kInvalidNodeNum;
+      return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_NODE_NUM);        
     }
 
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
@@ -2837,10 +2838,10 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
         "Resource not enough. Task #{} needs {} nodes, while only {} "
         "nodes satisfy its requirement.",
         task->TaskId(), task->node_num, avail_nodes.size());
-    return CraneErr::kNoAvailNode;
+    return std::unexpected(crane::grpc::ErrCode::ERR_NO_ENOUGH_NODE);        
   }
 
-  return CraneErr::kOk;
+  return {};
 }
 
 void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id,

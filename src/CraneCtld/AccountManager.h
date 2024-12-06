@@ -132,7 +132,7 @@ class AccountManager {
   result::result<void, std::string> CheckIfUserOfAccountIsEnabled(
       const std::string& user, const std::string& account);
 
-  CraneErr CheckAndApplyQosLimitOnTask(const std::string& user,
+  CraneExpected<void> CheckAndApplyQosLimitOnTask(const std::string& user,
                                        const std::string& account,
                                        TaskInCtld* task);
 
