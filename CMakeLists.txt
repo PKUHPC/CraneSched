@@ -278,6 +278,7 @@ set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_
 add_subdirectory(${DEPENDENCIES_PRE_INSTALLED_DIR})
 
 find_package(Threads REQUIRED)
+find_library(LIBUTIL_LIBRARY util)
 
 # New in version cmake3.24:
 # Set ZLIB_USE_STATIC_LIBS to ON to look for static libraries. Default is OFF.

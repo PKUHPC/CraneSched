@@ -254,21 +254,34 @@ class TaskScheduler {
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
 
-  CraneErr TerminatePendingOrRunningTask(uint32_t task_id) {
+  CraneErr TerminateInteractivePendingOrRunningTask(uint32_t task_id) {
     LockGuard pending_guard(&m_pending_task_map_mtx_);
     LockGuard running_guard(&m_running_task_map_mtx_);
 
     auto pd_it = m_pending_task_map_.find(task_id);
     if (pd_it != m_pending_task_map_.end()) {
+      auto& task = pd_it->second;
+      if (task->type == crane::grpc::TaskType::Interactive) {
+        auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+        meta.has_been_cancelled_on_front_end = true;
+      }
       m_cancel_task_queue_.enqueue(
-          CancelPendingTaskQueueElem{.task = std::move(pd_it->second)});
+          CancelPendingTaskQueueElem{.task = std::move(task)});
       m_cancel_task_async_handle_->send();
       m_pending_task_map_.erase(pd_it);
       return CraneErr::kOk;
     }
 
     auto rn_it = m_running_task_map_.find(task_id);
-    if (rn_it == m_running_task_map_.end()) return CraneErr::kNonExistent;
+    if (rn_it == m_running_task_map_.end())
+      return CraneErr::kNonExistent;
+    else {
+      auto& task = rn_it->second;
+      if (task->type == crane::grpc::TaskType::Interactive) {
+        auto& meta = std::get<InteractiveMetaInTask>(task->meta);
+        meta.has_been_cancelled_on_front_end = true;
+      }
+    }
 
     return TerminateRunningTaskNoLock_(rn_it->second.get());
   }
