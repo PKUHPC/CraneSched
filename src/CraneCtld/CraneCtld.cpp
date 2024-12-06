@@ -359,6 +359,15 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
+          if (node["bmc"]) {
+            auto bmc = node["bmc"].as<YAML::Node>();
+            node_ptr->bmc.ip = bmc["ip"].as<std::string>();
+            node_ptr->bmc.port = bmc["port"].as<std::string>();
+            node_ptr->bmc.username = bmc["username"].as<std::string>();
+            node_ptr->bmc.password = bmc["password"].as<std::string>();
+            node_ptr->bmc.interface = bmc["interface"].as<std::string>();
+          }
+
           DedicatedResourceInNode resourceInNode;
           if (node["gres"]) {
             for (auto gres_it = node["gres"].begin();

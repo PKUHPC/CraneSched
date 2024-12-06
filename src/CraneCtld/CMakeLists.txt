@@ -1,3 +1,5 @@
+find_package(CURL REQUIRED)
+
 add_executable(cranectld
         CtldPublicDefs.h
         CtldGrpcServer.h
@@ -15,6 +17,10 @@ add_executable(cranectld
         EmbeddedDbClient.cpp
         EmbeddedDbClient.h
         CraneCtld.cpp
+        EnergyAwareScheduler.h
+        EnergyAwareScheduler.cpp
+        InfluxDBClient.h
+        InfluxDBClient.cpp
 
         CtldPreCompiledHeader.h)
 
@@ -49,6 +55,10 @@ target_link_libraries(cranectld PRIVATE
         result
 
         Backward::Interface
+        
+        influxdb_cpp
+
+        CURL::libcurl 
 )
 
 if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
