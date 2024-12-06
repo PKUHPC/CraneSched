@@ -1,3 +1,0 @@
-add_library(result INTERFACE)
-target_include_directories(result INTERFACE include)
-target_compile_definitions(result INTERFACE -DRESULT_NAMESPACE=cpp_result)
