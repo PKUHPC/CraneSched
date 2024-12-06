@@ -22,7 +22,7 @@ namespace Ctld {
 
 #ifdef CRANE_HAVE_UNQLITE
 
-result::result<void, DbErrorCode> UnqliteDb::Init(const std::string& path) {
+std::expected<void, DbErrorCode> UnqliteDb::Init(const std::string& path) {
   int rc;
 
   m_db_path_ = path;
@@ -32,7 +32,7 @@ result::result<void, DbErrorCode> UnqliteDb::Init(const std::string& path) {
     m_db_ = nullptr;
     CRANE_ERROR("Failed to open unqlite db file {}: {}", m_db_path_,
                 GetInternalErrorStr_());
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 
   // Unqlite does not roll back and clear WAL after crashing.
@@ -43,13 +43,13 @@ result::result<void, DbErrorCode> UnqliteDb::Init(const std::string& path) {
     m_db_ = nullptr;
     CRANE_ERROR("Failed to rollback the undone transaction: {}",
                 GetInternalErrorStr_());
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 
   return {};
 }
 
-result::result<void, DbErrorCode> UnqliteDb::Close() {
+std::expected<void, DbErrorCode> UnqliteDb::Close() {
   int rc;
   if (m_db_ != nullptr) {
     CRANE_TRACE("Closing unqlite...");
@@ -58,14 +58,14 @@ result::result<void, DbErrorCode> UnqliteDb::Close() {
 
     if (rc != UNQLITE_OK) {
       CRANE_ERROR("Failed to close unqlite: {}", GetInternalErrorStr_());
-      return result::failure(DbErrorCode::kOther);
+      return std::unexpected(DbErrorCode::kOther);
     }
   }
 
   return {};
 }
 
-result::result<void, DbErrorCode> UnqliteDb::Store(txn_id_t txn_id,
+std::expected<void, DbErrorCode> UnqliteDb::Store(txn_id_t txn_id,
                                                    const std::string& key,
                                                    const void* data,
                                                    size_t len) {
@@ -81,11 +81,11 @@ result::result<void, DbErrorCode> UnqliteDb::Store(txn_id_t txn_id,
     CRANE_ERROR("Failed to store key {} into db: {}", key,
                 GetInternalErrorStr_());
     if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 }
 
-result::result<size_t, DbErrorCode> UnqliteDb::Fetch(txn_id_t txn_id,
+std::expected<size_t, DbErrorCode> UnqliteDb::Fetch(txn_id_t txn_id,
                                                      const std::string& key,
                                                      void* buf, size_t* len) {
   int rc;
@@ -101,12 +101,12 @@ result::result<size_t, DbErrorCode> UnqliteDb::Fetch(txn_id_t txn_id,
       std::this_thread::yield();
       continue;
     }
-    if (rc == UNQLITE_NOTFOUND) return result::failure(DbErrorCode::kNotFound);
+    if (rc == UNQLITE_NOTFOUND) return std::unexpected(DbErrorCode::kNotFound);
 
     CRANE_ERROR("Failed to get value size for key {}: {}", key,
                 GetInternalErrorStr_());
     unqlite_rollback(m_db_);
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 
   if (*len == 0) {
@@ -114,13 +114,13 @@ result::result<size_t, DbErrorCode> UnqliteDb::Fetch(txn_id_t txn_id,
     return {0};
   } else if (*len < n_bytes) {
     *len = n_bytes;
-    return result::failure(DbErrorCode::kBufferSmall);
+    return std::unexpected(DbErrorCode::kBufferSmall);
   }
 
   return {n_bytes};
 }
 
-result::result<void, DbErrorCode> UnqliteDb::Delete(txn_id_t txn_id,
+std::expected<void, DbErrorCode> UnqliteDb::Delete(txn_id_t txn_id,
                                                     const std::string& key) {
   int rc;
   while (true) {
@@ -130,17 +130,17 @@ result::result<void, DbErrorCode> UnqliteDb::Delete(txn_id_t txn_id,
       std::this_thread::yield();
       continue;
     }
-    if (rc == UNQLITE_NOTFOUND) return result::failure(DbErrorCode::kNotFound);
+    if (rc == UNQLITE_NOTFOUND) return std::unexpected(DbErrorCode::kNotFound);
 
     CRANE_ERROR("Failed to delete key {} from db: {}", key,
                 GetInternalErrorStr_());
     if (rc != UNQLITE_NOTIMPLEMENTED) unqlite_rollback(m_db_);
 
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 }
 
-result::result<txn_id_t, DbErrorCode> UnqliteDb::Begin() {
+std::expected<txn_id_t, DbErrorCode> UnqliteDb::Begin() {
   int rc;
   while (true) {
     rc = unqlite_begin(m_db_);
@@ -150,11 +150,11 @@ result::result<txn_id_t, DbErrorCode> UnqliteDb::Begin() {
       continue;
     }
     CRANE_ERROR("Failed to begin transaction: {}", GetInternalErrorStr_());
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 }
 
-result::result<void, DbErrorCode> UnqliteDb::Commit(txn_id_t txn_id) {
+std::expected<void, DbErrorCode> UnqliteDb::Commit(txn_id_t txn_id) {
   if (txn_id <= 0 || txn_id > s_fixed_txn_id_) return {};
 
   int rc;
@@ -166,11 +166,11 @@ result::result<void, DbErrorCode> UnqliteDb::Commit(txn_id_t txn_id) {
       continue;
     }
     CRANE_ERROR("Failed to commit: {}", GetInternalErrorStr_());
-    return result::failure(kOther);
+    return std::unexpected(kOther);
   }
 }
 
-result::result<void, DbErrorCode> UnqliteDb::Abort(txn_id_t txn_id) {
+std::expected<void, DbErrorCode> UnqliteDb::Abort(txn_id_t txn_id) {
   if (txn_id <= 0 || txn_id > s_fixed_txn_id_) return {};
 
   int rc;
@@ -182,15 +182,15 @@ result::result<void, DbErrorCode> UnqliteDb::Abort(txn_id_t txn_id) {
       continue;
     }
     CRANE_ERROR("Failed to abort: {}", GetInternalErrorStr_());
-    return result::failure(kOther);
+    return std::unexpected(kOther);
   }
 }
 
-result::result<void, DbErrorCode> UnqliteDb::IterateAllKv(KvIterFunc func) {
+std::expected<void, DbErrorCode> UnqliteDb::IterateAllKv(KvIterFunc func) {
   int rc;
   unqlite_kv_cursor* cursor;
   rc = unqlite_kv_cursor_init(m_db_, &cursor);
-  if (rc != UNQLITE_OK) return result::failure(kOther);
+  if (rc != UNQLITE_OK) return std::unexpected(kOther);
 
   for (unqlite_kv_cursor_first_entry(cursor);
        unqlite_kv_cursor_valid_entry(cursor);
@@ -234,7 +234,7 @@ std::string UnqliteDb::GetInternalErrorStr_() {
 
 #ifdef CRANE_HAVE_BERKELEY_DB
 
-result::result<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
+std::expected<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
   try {
     std::filesystem::path db_dir{path};
     std::filesystem::path env_dir{path + "Env"};
@@ -245,7 +245,7 @@ result::result<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
   } catch (const std::exception& e) {
     CRANE_CRITICAL("Invalid berkeley db env home path {}: {}", m_env_home_,
                    e.what());
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 
   m_db_path_ = path;
@@ -286,16 +286,16 @@ result::result<void, DbErrorCode> BerkeleyDb::Init(const std::string& path) {
       CRANE_ERROR("Failed to init berkeley db: {}", e.what());
     }
 
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   } catch (std::exception& e) {
     CRANE_ERROR("Failed to init berkeley db: {}", e.what());
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 
   return {};
 }
 
-result::result<void, DbErrorCode> BerkeleyDb::Close() {
+std::expected<void, DbErrorCode> BerkeleyDb::Close() {
   if (m_db_ != nullptr && m_env_ != nullptr) {
     CRANE_TRACE("Closing berkeley db...");
     try {
@@ -305,14 +305,14 @@ result::result<void, DbErrorCode> BerkeleyDb::Close() {
     } catch (DbException& e) {
       CRANE_ERROR("Failed to close berkeley db and environment: {}, {}, {}",
                   m_db_path_, m_env_home_, e.what());
-      return result::failure(DbErrorCode::kOther);
+      return std::unexpected(DbErrorCode::kOther);
     }
   }
 
   return {};
 }
 
-result::result<void, DbErrorCode> BerkeleyDb::Store(txn_id_t txn_id,
+std::expected<void, DbErrorCode> BerkeleyDb::Store(txn_id_t txn_id,
                                                     const std::string& key,
                                                     const void* data,
                                                     size_t len) {
@@ -326,13 +326,13 @@ result::result<void, DbErrorCode> BerkeleyDb::Store(txn_id_t txn_id,
   } catch (DbException& e) {
     CRANE_ERROR("Failed to store key {} into db: {}", key, e.what());
     std::ignore = Abort(txn_id);
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 
   return {};
 }
 
-result::result<size_t, DbErrorCode> BerkeleyDb::Fetch(txn_id_t txn_id,
+std::expected<size_t, DbErrorCode> BerkeleyDb::Fetch(txn_id_t txn_id,
                                                       const std::string& key,
                                                       void* buf, size_t* len) {
   int rc;
@@ -352,27 +352,27 @@ result::result<size_t, DbErrorCode> BerkeleyDb::Fetch(txn_id_t txn_id,
   } catch (DbException& e) {
     if (e.get_errno() == DB_BUFFER_SMALL) {
       *len = data_dbt.get_size();
-      return result::failure(DbErrorCode::kBufferSmall);
+      return std::unexpected(DbErrorCode::kBufferSmall);
     } else {
       CRANE_ERROR("Failed to get value size for key {}. {}", key, e.what());
       std::ignore = Abort(txn_id);
-      return result::failure(DbErrorCode::kOther);
+      return std::unexpected(DbErrorCode::kOther);
     }
   }
 
   if (rc != 0) {
     if (rc == DB_NOTFOUND)
-      return result::failure(DbErrorCode::kNotFound);
+      return std::unexpected(DbErrorCode::kNotFound);
     else {
       std::ignore = Abort(txn_id);
-      return result::failure(DbErrorCode::kOther);
+      return std::unexpected(DbErrorCode::kOther);
     }
   }
 
   return {data_dbt.get_size()};
 }
 
-result::result<void, DbErrorCode> BerkeleyDb::Delete(txn_id_t txn_id,
+std::expected<void, DbErrorCode> BerkeleyDb::Delete(txn_id_t txn_id,
                                                      const std::string& key) {
   DbTxn* txn = GetDbTxnFromId_(txn_id);
 
@@ -381,15 +381,15 @@ result::result<void, DbErrorCode> BerkeleyDb::Delete(txn_id_t txn_id,
   int rc = m_db_->del(txn, &key_dbt, 0);
   if (rc != 0) {
     CRANE_ERROR("Failed to delete key {} from db.", key);
-    if (rc == DB_NOTFOUND) return result::failure(DbErrorCode::kNotFound);
+    if (rc == DB_NOTFOUND) return std::unexpected(DbErrorCode::kNotFound);
     std::ignore = Abort(txn_id);
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 
   return {};
 }
 
-result::result<txn_id_t, DbErrorCode> BerkeleyDb::Begin() {
+std::expected<txn_id_t, DbErrorCode> BerkeleyDb::Begin() {
   DbTxn* txn = nullptr;
 
   try {
@@ -399,14 +399,14 @@ result::result<txn_id_t, DbErrorCode> BerkeleyDb::Begin() {
     );
   } catch (DbException& e) {
     CRANE_ERROR("Failed to begin a transaction: {}", e.what());
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 
   m_txn_map_[txn->id()] = txn;
   return {txn->id()};
 }
 
-result::result<void, DbErrorCode> BerkeleyDb::Commit(txn_id_t txn_id) {
+std::expected<void, DbErrorCode> BerkeleyDb::Commit(txn_id_t txn_id) {
   DbTxn* txn = GetDbTxnFromId_(txn_id);
 
   try {
@@ -414,14 +414,14 @@ result::result<void, DbErrorCode> BerkeleyDb::Commit(txn_id_t txn_id) {
   } catch (DbException& e) {
     CRANE_ERROR("Failed to commit a transaction: {}", e.what());
     std::ignore = Abort(txn_id);
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 
   m_txn_map_.erase(txn_id);
   return {};
 }
 
-result::result<void, DbErrorCode> BerkeleyDb::Abort(txn_id_t txn_id) {
+std::expected<void, DbErrorCode> BerkeleyDb::Abort(txn_id_t txn_id) {
   DbTxn* txn = GetDbTxnFromId_(txn_id);
 
   try {
@@ -429,18 +429,18 @@ result::result<void, DbErrorCode> BerkeleyDb::Abort(txn_id_t txn_id) {
   } catch (DbException& e) {
     CRANE_ERROR("Failed to abort a transaction: {}", e.what());
     m_txn_map_.erase(txn_id);
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 
   m_txn_map_.erase(txn_id);
   return {};
 }
 
-result::result<void, DbErrorCode> BerkeleyDb::IterateAllKv(KvIterFunc func) {
+std::expected<void, DbErrorCode> BerkeleyDb::IterateAllKv(KvIterFunc func) {
   int rc;
   Dbc* cursor;
   if ((rc = m_db_->cursor(nullptr, &cursor, 0)) != 0) {
-    return result::failure(DbErrorCode::kOther);
+    return std::unexpected(DbErrorCode::kOther);
   }
 
   Dbt key, value;
@@ -458,7 +458,7 @@ result::result<void, DbErrorCode> BerkeleyDb::IterateAllKv(KvIterFunc func) {
   }
 
   rc = cursor->close();
-  if (rc) return result::failure(DbErrorCode::kOther);
+  if (rc) return std::unexpected(DbErrorCode::kOther);
 
   return {};
 }
@@ -481,14 +481,14 @@ DbTxn* BerkeleyDb::GetDbTxnFromId_(txn_id_t txn_id) {
 EmbeddedDbClient::~EmbeddedDbClient() {
   if (m_variable_db_) {
     auto result = m_variable_db_->Close();
-    if (result.has_error())
+    if (!result)
       CRANE_ERROR(
           "Error occurred when closing the embedded db of variable data!");
   }
 
   if (m_fixed_db_) {
     auto result = m_fixed_db_->Close();
-    if (result.has_error())
+    if (!result)
       CRANE_ERROR("Error occurred when closing the embedded db of fixed data!");
   }
 }
@@ -521,9 +521,9 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   }
 
   auto result = m_variable_db_->Init(db_path + "var");
-  if (result.has_error()) return false;
+  if (!result) return false;
   result = m_fixed_db_->Init(db_path + "fix");
-  if (result.has_error()) return false;
+  if (!result) return false;
 
   bool ok;
 
@@ -544,7 +544,7 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
   using TaskStatus = crane::grpc::TaskStatus;
   using RuntimeAttr = crane::grpc::RuntimeAttrOfTask;
 
-  result::result<void, DbErrorCode> result;
+  std::expected<void, DbErrorCode> result;
   std::unordered_map<db_id_t, RuntimeAttr> db_id_runtime_attr_map;
 
   result = m_variable_db_->IterateAllKv(
@@ -564,7 +564,7 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
         return true;
       });
 
-  if (result.has_error()) {
+  if (!result) {
     CRANE_ERROR("Failed to restore the variable data into queues");
     return false;
   }
@@ -600,7 +600,7 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
         return true;
       });
 
-  if (result.has_error()) {
+  if (!result) {
     CRANE_ERROR("Failed to restore fixed data into queues!");
     return false;
   }
@@ -611,7 +611,7 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
 bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
     const std::vector<TaskInCtld*>& tasks) {
   txn_id_t txn_id;
-  result::result<void, DbErrorCode> result;
+  std::expected<void, DbErrorCode> result;
 
   // Note: In current implementation, this function is called by only
   // one single thread and the lock here is actually useless.
@@ -631,7 +631,7 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
     result = StoreTypeIntoDb_(m_fixed_db_.get(), txn_id,
                               GetFixedDbEntryName_(task->TaskDbId()),
                               &task->TaskToCtld());
-    if (result.has_error()) {
+    if (!result) {
       CRANE_ERROR(
           "Failed to store the fixed data of task id: {} / task db id: {}.",
           task->TaskId(), task->TaskDbId());
@@ -649,7 +649,7 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
     result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
                               GetVariableDbEntryName_(task->TaskDbId()),
                               &task->RuntimeAttr());
-    if (result.has_error()) {
+    if (!result) {
       CRANE_ERROR(
           "Failed to store the variable data of "
           "task id: {} / task db id: {}.",
@@ -660,14 +660,14 @@ bool EmbeddedDbClient::AppendTasksToPendingAndAdvanceTaskIds(
 
   result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id, s_next_task_id_str_,
                             &task_id);
-  if (result.has_error()) {
+  if (!result) {
     CRANE_ERROR("Failed to store next_task_id.");
     return false;
   }
 
   result = StoreTypeIntoDb_(m_variable_db_.get(), txn_id,
                             s_next_task_db_id_str_, &task_db_id);
-  if (result.has_error()) {
+  if (!result) {
     CRANE_ERROR("Failed to store next_task_db_id.");
     return false;
   }
@@ -686,12 +686,12 @@ bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
   // 2. when erasing task data, fixed data db is erased after variable db;
 
   txn_id_t txn_id;
-  result::result<void, DbErrorCode> res;
+  std::expected<void, DbErrorCode> res;
 
   if (!BeginDbTransaction_(m_variable_db_.get(), &txn_id)) return false;
   for (const auto& id : db_ids) {
     res = m_variable_db_->Delete(txn_id, GetVariableDbEntryName_(id));
-    if (res.has_error()) {
+    if (!res) {
       CRANE_ERROR(
           "Failed to delete embedded variable data entry. Error code: {}",
           int(res.error()));
@@ -703,7 +703,7 @@ bool EmbeddedDbClient::PurgeEndedTasks(const std::vector<db_id_t>& db_ids) {
   if (!BeginDbTransaction_(m_fixed_db_.get(), &txn_id)) return false;
   for (const auto& id : db_ids) {
     res = m_fixed_db_->Delete(txn_id, GetFixedDbEntryName_(id));
-    if (res.has_error()) {
+    if (!res) {
       CRANE_ERROR("Failed to delete embedded fixed data entry. Error code: {}",
                   int(res.error()));
       return false;
