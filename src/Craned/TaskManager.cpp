@@ -565,10 +565,11 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   if (instance->IsCrun()) {
     auto* crun_meta =
         dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
-    CRANE_DEBUG("Launching crun task #{} pty:{}", instance->task.task_id(),
-                instance->task.interactive_meta().pty());
-    if (instance->task.interactive_meta().pty()) {
-      launch_pty = true;
+    launch_pty = instance->task.interactive_meta().pty();
+    CRANE_DEBUG("Launch crun task #{} pty:{}", instance->task.task_id(),
+                launch_pty);
+
+    if (launch_pty) {
       child_pid = forkpty(&crun_meta->msg_fd, nullptr, nullptr, nullptr);
     } else {
       if (socketpair(AF_UNIX, SOCK_STREAM, 0, crun_msg_sock_pair) != 0) {
@@ -582,6 +583,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   } else {
     child_pid = fork();
   }
+
   if (child_pid == -1) {
     CRANE_ERROR("fork() failed for task #{}: {}", instance->task.task_id(),
                 strerror(errno));
