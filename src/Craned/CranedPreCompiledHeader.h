@@ -28,8 +28,8 @@
 #include <csignal>
 #include <expected>
 #include <filesystem>
+#include <format>
 #include <forward_list>
-#include <fpm/fixed.hpp>
 #include <fstream>
 #include <functional>
 #include <future>
@@ -38,6 +38,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <print>
 #include <queue>
 #include <ranges>
 #include <regex>

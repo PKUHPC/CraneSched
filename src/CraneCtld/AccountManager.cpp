@@ -908,14 +908,14 @@ result::result<void, std::string> AccountManager::CheckIfUserOfAccountIsEnabled(
     const Account* account_ptr = GetExistedAccountInfoNoLock_(account_name);
     if (account_ptr->blocked) {
       return result::fail(
-          fmt::format("Ancestor account '{}' is blocked", account_ptr->name));
+          std::format("Ancestor account '{}' is blocked", account_ptr->name));
     }
     account_name = account_ptr->parent_account;
   } while (!account_name.empty());
 
   const User* user_ptr = GetExistedUserInfoNoLock_(user);
   if (user_ptr->account_to_attrs_map.at(account).blocked) {
-    return result::fail(fmt::format("User '{}' is blocked", user_ptr->name));
+    return result::fail(std::format("User '{}' is blocked", user_ptr->name));
   }
   return {};
 }
@@ -927,7 +927,7 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
-    return result::fail(fmt::format("Unknown user '{}'", user));
+    return result::fail(std::format("Unknown user '{}'", user));
   }
 
   if (task->uid != 0) {
@@ -942,13 +942,13 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
       task->qos = partition_it->second.first;
       if (task->qos.empty())
         return result::fail(
-            fmt::format("The user '{}' has no QOS available for this partition "
+            std::format("The user '{}' has no QOS available for this partition "
                         "'{}' to be used",
                         task->Username(), task->partition_id));
     } else {
       // Check whether task.qos in the qos list
       if (!ranges::contains(partition_it->second.second, task->qos))
-        return result::fail(fmt::format(
+        return result::fail(std::format(
             "The qos '{}' you set is not in partition's allowed qos list",
             task->qos));
     }
@@ -960,7 +960,7 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
 
   const Qos* qos_share_ptr = GetExistedQosInfoNoLock_(task->qos);
   if (!qos_share_ptr)
-    return result::fail(fmt::format("Unknown QOS '{}'", task->qos));
+    return result::fail(std::format("Unknown QOS '{}'", task->qos));
 
   task->qos_priority = qos_share_ptr->priority;
 

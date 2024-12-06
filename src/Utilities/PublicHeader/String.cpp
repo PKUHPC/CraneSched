@@ -36,13 +36,13 @@ std::string ReadFileIntoString(std::filesystem::path const &p) {
 
 std::string ReadableMemory(uint64_t memory_bytes) {
   if (memory_bytes < 1024)
-    return fmt::format("{}B", memory_bytes);
+    return std::format("{}B", memory_bytes);
   else if (memory_bytes < 1024 * 1024)
-    return fmt::format("{}K", memory_bytes / 1024);
+    return std::format("{}K", memory_bytes / 1024);
   else if (memory_bytes < 1024 * 1024 * 1024)
-    return fmt::format("{}M", memory_bytes / 1024 / 1024);
+    return std::format("{}M", memory_bytes / 1024 / 1024);
   else
-    return fmt::format("{}G", memory_bytes / 1024 / 1024 / 1024);
+    return std::format("{}G", memory_bytes / 1024 / 1024 / 1024);
 }
 
 bool ParseNodeList(const std::string &node_str,
@@ -68,7 +68,7 @@ bool ParseNodeList(const std::string &node_str,
 
     for (size_t i = 1; i < len; i++) {
       if (RE2::FullMatch(node_num[i], *num_regex)) {
-        unit_list.emplace_back(fmt::format("{}{}", head_str, node_num[i]));
+        unit_list.emplace_back(std::format("{}{}", head_str, node_num[i]));
       } else if (RE2::FullMatch(node_num[i], *scope_regex)) {
         std::vector<std::string_view> loc_index =
             absl::StrSplit(node_num[i], '-');
@@ -89,8 +89,8 @@ bool ParseNodeList(const std::string &node_str,
         if (convert_result.ec != std::errc()) return false;
 
         for (size_t j = start; j <= end; j++) {
-          std::string s_num = fmt::format("{:0>{}}", std::to_string(j), l);
-          unit_list.emplace_back(fmt::format("{}{}", head_str, s_num));
+          std::string s_num = std::format("{:0>{}}", std::to_string(j), l);
+          unit_list.emplace_back(std::format("{}{}", head_str, s_num));
         }
       } else {
         // Format error
@@ -101,7 +101,7 @@ bool ParseNodeList(const std::string &node_str,
     std::list<std::string> temp_list;
     for (const auto &left : res_list) {
       for (const auto &right : unit_list) {
-        temp_list.emplace_back(fmt::format("{}{}", left, right));
+        temp_list.emplace_back(std::format("{}{}", left, right));
       }
     }
     res_list.assign(temp_list.begin(), temp_list.end());
@@ -201,7 +201,7 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
       std::string num_str = host.substr(start, end - start),
                   head_str = host.substr(0, start),
                   tail_str = host.substr(end, host.size());
-      std::string key_str = fmt::format("{}<{}", head_str, tail_str);
+      std::string key_str = std::format("{}<{}", head_str, tail_str);
       if (!host_map.contains(key_str)) {
         std::vector<std::string> list;
         host_map[key_str] = list;
@@ -271,7 +271,7 @@ bool HostNameListToStr_(std::list<std::string> &host_list,
       host_name_str += "-";
       host_name_str += last_str;
     }
-    host_name_str += fmt::format(
+    host_name_str += std::format(
         "]{}",
         iter.first.substr(delimiter_pos + 1, iter.first.size()));  // tail
     res_list->emplace_back(host_name_str);
@@ -359,7 +359,7 @@ std::string ReadableTypedDeviceMap(const DeviceMap &device_map) {
 
     for (const auto &[dev_type, size] : type_size_map) {
       typed_device_str_vec.push_back(
-          fmt::format("{}:{}:{}", dev_name, dev_type, size));
+          std::format("{}:{}:{}", dev_name, dev_type, size));
     }
   }
 
@@ -379,7 +379,7 @@ std::string ReadableDresInNode(const ResourceInNode &resource_in_node) {
     for (const auto &[device_type, slots] : type_slots_map.type_slots_map) {
       // name:type:count
       node_gres_string_vector.emplace_back(
-          fmt::format("{}:{}:{}", device_name, device_type, slots.size()));
+          std::format("{}:{}:{}", device_name, device_type, slots.size()));
     }
   }
 
@@ -396,7 +396,7 @@ std::string ReadableGrpcDresInNode(
 
     for (const auto &[dev_type, slots] : type_size_map)
       typed_device_str_vec.push_back(
-          fmt::format("{}:{}:{}", dev_name, dev_type, slots.slots_size()));
+          std::format("{}:{}:{}", dev_name, dev_type, slots.slots_size()));
   }
 
   return absl::StrJoin(typed_device_str_vec, ",");
