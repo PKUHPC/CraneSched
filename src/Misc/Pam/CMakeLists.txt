@@ -16,7 +16,6 @@ target_link_libraries(pam_crane PUBLIC
         ${PAM_LIBRARIES}
         Utility_PublicHeaderNoLogger
         crane_proto_lib
-        fmt::fmt
         yaml-cpp
 )
 

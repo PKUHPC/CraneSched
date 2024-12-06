@@ -23,7 +23,7 @@
 static std::string GrpcFormatIpAddress(std::string const& addr) {
   // Grpc needs to use [] to wrap ipv6 address
   if (int ip_ver = crane::GetIpAddrVer(addr); ip_ver == 6)
-    return fmt::format("[{}]", addr);
+    return std::format("[{}]", addr);
 
   return addr;
 }
@@ -56,7 +56,7 @@ void ServerBuilderAddTcpInsecureListeningPort(grpc::ServerBuilder* builder,
                                               const std::string& address,
                                               const std::string& port) {
   std::string listen_addr_port =
-      fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
+      std::format("{}:{}", GrpcFormatIpAddress(address), port);
   builder->AddListeningPort(listen_addr_port,
                             grpc::InsecureServerCredentials());
 }
@@ -66,7 +66,7 @@ void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& port,
                                          const TlsCertificates& certs) {
   std::string listen_addr_port =
-      fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
+      std::format("{}:{}", GrpcFormatIpAddress(address), port);
 
   grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
   pem_key_cert_pair.cert_chain = certs.ServerCertContent;
@@ -107,7 +107,7 @@ void SetTlsHostnameOverride(grpc::ChannelArguments* args,
                             const std::string& hostname,
                             const TlsCertificates& certs) {
   args->SetSslTargetNameOverride(
-      fmt::format("{}.{}", hostname, certs.DomainSuffix));
+      std::format("{}.{}", hostname, certs.DomainSuffix));
 }
 
 std::shared_ptr<grpc::Channel> CreateUnixInsecureChannel(
@@ -117,14 +117,14 @@ std::shared_ptr<grpc::Channel> CreateUnixInsecureChannel(
 
 std::shared_ptr<grpc::Channel> CreateTcpInsecureChannel(
     const std::string& address, const std::string& port) {
-  std::string target = fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
+  std::string target = std::format("{}:{}", GrpcFormatIpAddress(address), port);
   return grpc::CreateChannel(target, grpc::InsecureChannelCredentials());
 }
 
 std::shared_ptr<grpc::Channel> CreateTcpInsecureCustomChannel(
     const std::string& address, const std::string& port,
     const grpc::ChannelArguments& args) {
-  std::string target = fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
+  std::string target = std::format("{}:{}", GrpcFormatIpAddress(address), port);
   return grpc::CreateCustomChannel(target, grpc::InsecureChannelCredentials(),
                                    args);
 }
@@ -146,7 +146,7 @@ std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByIp(
   grpc::SslCredentialsOptions ssl_opts;
   SetSslCredOpts(&ssl_opts, certs);
 
-  std::string target = fmt::format("{}:{}", GrpcFormatIpAddress(ip), port);
+  std::string target = std::format("{}:{}", GrpcFormatIpAddress(ip), port);
   return grpc::CreateCustomChannel(target, grpc::SslCredentials(ssl_opts),
                                    args);
 }
@@ -158,7 +158,7 @@ std::shared_ptr<grpc::Channel> CreateTcpTlsChannelByHostname(
   SetSslCredOpts(&ssl_opts, certs);
 
   std::string target =
-      fmt::format("{}.{}:{}", hostname, certs.DomainSuffix, port);
+      std::format("{}.{}:{}", hostname, certs.DomainSuffix, port);
   return grpc::CreateChannel(target, grpc::SslCredentials(ssl_opts));
 }
 
@@ -169,7 +169,7 @@ std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByHostname(
   SetSslCredOpts(&ssl_opts, certs);
 
   std::string target =
-      fmt::format("{}.{}:{}", hostname, certs.DomainSuffix, port);
+      std::format("{}.{}:{}", hostname, certs.DomainSuffix, port);
   return grpc::CreateCustomChannel(target, grpc::SslCredentials(ssl_opts),
                                    args);
 }

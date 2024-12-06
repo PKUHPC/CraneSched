@@ -385,7 +385,7 @@ void CranedKeeper::InitAndRegisterCraneds(
 }
 
 void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
-  util::SetCurrentThreadName(fmt::format("KeeStatMon{:0>3}", thread_id));
+  util::SetCurrentThreadName(std::format("KeeStatMon{:0>3}", thread_id));
 
   bool ok;
   CqTag *tag;

@@ -243,11 +243,11 @@ class EmbeddedDbClient {
 
  private:
   inline static std::string GetFixedDbEntryName_(db_id_t db_id) {
-    return fmt::format("{}T", db_id);
+    return std::format("{}T", db_id);
   }
 
   inline static std::string GetVariableDbEntryName_(db_id_t db_id) {
-    return fmt::format("{}S", db_id);
+    return std::format("{}S", db_id);
   }
 
   inline static bool IsVariableDbTaskDataEntry_(std::string const& key) {
