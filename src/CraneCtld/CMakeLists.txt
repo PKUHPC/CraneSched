@@ -15,6 +15,8 @@ add_executable(cranectld
         EmbeddedDbClient.cpp
         EmbeddedDbClient.h
         CraneCtld.cpp
+        EnergyAwareScheduler.h
+        EnergyAwareScheduler.cpp
 
         CtldPreCompiledHeader.h)
 
@@ -49,6 +51,8 @@ target_link_libraries(cranectld PRIVATE
         result
 
         Backward::Interface
+        
+        influxdb_cpp
 )
 
 if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)

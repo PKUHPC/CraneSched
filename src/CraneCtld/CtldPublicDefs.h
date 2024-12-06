@@ -67,10 +67,20 @@ constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 
 struct Config {
+
+  struct BMC {
+    std::string ip;
+    std::string port;
+    std::string username;
+    std::string password;
+    std::string interface;
+  };
+
   struct Node {
     uint32_t cpu;
     uint64_t memory_bytes;
     DedicatedResourceInNode dedicated_resource;
+    BMC bmc;
   };
 
   struct Partition {
@@ -163,6 +173,8 @@ namespace result = cpp_result;
 struct CranedStaticMeta {
   std::string hostname;  // the hostname corresponds to the node index
   uint32_t port;
+
+  Config::BMC bmc;
 
   std::list<std::string> partition_ids;  // Partitions to which
                                          // this craned belongs to
