@@ -50,7 +50,8 @@ class PluginClient {
   enum class HookType {
     START,
     END,
-    JOB_MONITOR,
+    CREATE_CGROUP,
+    DESTROY_CGROUP,
     HookTypeCount,
   };
 
@@ -62,9 +63,14 @@ class PluginClient {
   void InitChannelAndStub(const std::string& endpoint);
 
   // These functions are used to add HookEvent into the event queue.
+  // Launched by Ctld
   void StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
   void EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
-  void JobMonitorHookAsync(task_id_t task_id, std::string cgroup_path);
+
+  // Launched by Craned
+  void CreateCgroupHookAsync(task_id_t task_id, const std::string& cgroup,
+                             const crane::grpc::DedicatedResourceInNode &request_resource);
+  void DestroyCgroupHookAsync(task_id_t task_id, const std::string& cgroup);
 
  private:
   // HookDispatchFunc is a function pointer type that handles different
@@ -75,8 +81,10 @@ class PluginClient {
                               google::protobuf::Message* msg);
   grpc::Status SendEndHook_(grpc::ClientContext* context,
                             google::protobuf::Message* msg);
-  grpc::Status SendJobMonitorHook_(grpc::ClientContext* context,
-                                   google::protobuf::Message* msg);
+  grpc::Status SendCreateCgroupHook_(grpc::ClientContext* context,
+                                      google::protobuf::Message* msg);
+  grpc::Status SendDestroyCgroupHook_(grpc::ClientContext* context,
+                                    google::protobuf::Message* msg);
 
   void AsyncSendThread_();
 
@@ -93,7 +101,8 @@ class PluginClient {
   static constexpr std::array<HookDispatchFunc, size_t(HookType::HookTypeCount)>
       s_hook_dispatch_funcs_{{&PluginClient::SendStartHook_,
                               &PluginClient::SendEndHook_,
-                              &PluginClient::SendJobMonitorHook_}};
+                              &PluginClient::SendCreateCgroupHook_,
+                              &PluginClient::SendDestroyCgroupHook_}};
 };
 
 }  // namespace plugin

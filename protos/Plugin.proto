@@ -51,12 +51,22 @@ message EndHookReply {
   repeated TaskIdReply result = 1;
 }
 
-message JobMonitorHookRequest {
+message CreateCgroupHookRequest {
+  uint32 task_id = 1;
+  string cgroup = 2;
+  DedicatedResourceInNode request_res = 3;
+}
+
+message CreateCgroupHookReply {
+  bool ok = 1;
+}
+
+message DestroyCgroupHookRequest {
   uint32 task_id = 1;
   string cgroup = 2;
 }
 
-message JobMonitorHookReply {
+message DestroyCgroupHookReply {
   bool ok = 1;
 }
 
@@ -64,5 +74,8 @@ service CranePluginD {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */  
   rpc StartHook(StartHookRequest) returns (StartHookReply);
   rpc EndHook(EndHookRequest) returns (EndHookReply);
-  rpc JobMonitorHook(JobMonitorHookRequest) returns (JobMonitorHookReply);
+
+  /* ----------------------------------- Called from Craned ---------------------------------------------------- */
+  rpc CreateCgroupHook(CreateCgroupHookRequest) returns (CreateCgroupHookReply);
+  rpc DestroyCgroupHook(DestroyCgroupHookRequest) returns (DestroyCgroupHookReply);
 }
