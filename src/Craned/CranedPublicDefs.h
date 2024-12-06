@@ -21,6 +21,7 @@
 #include "CranedPreCompiledHeader.h"
 // Precompiled header comes first
 
+#include "crane/GrpcHelper.h"
 #include "crane/OS.h"
 
 
@@ -55,7 +56,15 @@ struct Config {
     std::string CranedListenPort;
 
     bool UseTls{false};
-    TlsCertificates TlsCerts;
+    struct TlsCertsConfig {
+      std::string InternalCaContent;
+      std::string DomainSuffix;
+      TlsCertificates CranedTlsCerts;
+      ClientTlsCertificates InternalClientTlsCerts;
+      ClientTlsCertificates CforedClientTlsCerts;
+    };
+    
+    TlsCertsConfig TlsCerts;
 
     std::string UnixSocketListenAddr;
   };
@@ -71,6 +80,7 @@ struct Config {
 
   std::string ControlMachine;
   std::string CraneCtldListenPort;
+  std::string CraneCtldForCranedPort;
   std::string CranedDebugLevel;
 
   std::string CraneBaseDir;

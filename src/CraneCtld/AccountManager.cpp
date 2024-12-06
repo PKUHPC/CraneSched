@@ -25,6 +25,25 @@ namespace Ctld {
 
 AccountManager::AccountManager() { InitDataMap_(); }
 
+AccountManager::CraneExpected<std::string> AccountManager::Login(
+    uint32_t uid, const std::string& password) {
+  util::read_lock_guard user_guard(m_rw_user_mutex_);
+
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+  const User* user = user_result.value();
+
+  if (password != user->password) {
+    return std::unexpected(CraneErrCode::ERR_PASSWORD_MISMATCH);
+  }
+  std::unordered_map<std::string, std::string> claims{
+      {"UID", std::to_string(uid)}};
+  const std::string& token =
+      util::GenerateToken(g_config.ListenConf.JwtSecretContent, claims);
+
+  return token;
+}
+
 AccountManager::CraneExpected<void> AccountManager::AddUser(
     uint32_t uid, const User& new_user) {
   CraneExpected<void> result;
