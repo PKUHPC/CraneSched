@@ -898,7 +898,7 @@ bool AccountManager::CheckUserPermissionToPartition(
   return false;
 }
 
-result::result<void, std::string> AccountManager::CheckIfUserOfAccountIsEnabled(
+std::expected<void, std::string> AccountManager::CheckIfUserOfAccountIsEnabled(
     const std::string& user, const std::string& account) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -907,7 +907,7 @@ result::result<void, std::string> AccountManager::CheckIfUserOfAccountIsEnabled(
   do {
     const Account* account_ptr = GetExistedAccountInfoNoLock_(account_name);
     if (account_ptr->blocked) {
-      return result::fail(
+      return std::unexpected(
           std::format("Ancestor account '{}' is blocked", account_ptr->name));
     }
     account_name = account_ptr->parent_account;
@@ -915,19 +915,19 @@ result::result<void, std::string> AccountManager::CheckIfUserOfAccountIsEnabled(
 
   const User* user_ptr = GetExistedUserInfoNoLock_(user);
   if (user_ptr->account_to_attrs_map.at(account).blocked) {
-    return result::fail(std::format("User '{}' is blocked", user_ptr->name));
+    return std::unexpected(std::format("User '{}' is blocked", user_ptr->name));
   }
   return {};
 }
 
-result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
+std::expected<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
     const std::string& user, const std::string& account, TaskInCtld* task) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
-    return result::fail(std::format("Unknown user '{}'", user));
+    return std::unexpected(std::format("Unknown user '{}'", user));
   }
 
   if (task->uid != 0) {
@@ -935,20 +935,20 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
                             .allowed_partition_qos_map.find(task->partition_id);
     if (partition_it == user_share_ptr->account_to_attrs_map.at(account)
                             .allowed_partition_qos_map.end())
-      return result::fail("Partition is not allowed for this user.");
+      return std::unexpected("Partition is not allowed for this user.");
 
     if (task->qos.empty()) {
       // Default qos
       task->qos = partition_it->second.first;
       if (task->qos.empty())
-        return result::fail(
+        return std::unexpected(
             std::format("The user '{}' has no QOS available for this partition "
                         "'{}' to be used",
                         task->Username(), task->partition_id));
     } else {
       // Check whether task.qos in the qos list
       if (!ranges::contains(partition_it->second.second, task->qos))
-        return result::fail(std::format(
+        return std::unexpected(std::format(
             "The qos '{}' you set is not in partition's allowed qos list",
             task->qos));
     }
@@ -960,34 +960,34 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
 
   const Qos* qos_share_ptr = GetExistedQosInfoNoLock_(task->qos);
   if (!qos_share_ptr)
-    return result::fail(std::format("Unknown QOS '{}'", task->qos));
+    return std::unexpected(std::format("Unknown QOS '{}'", task->qos));
 
   task->qos_priority = qos_share_ptr->priority;
 
   if (task->time_limit >= absl::Seconds(kTaskMaxTimeLimitSec)) {
     task->time_limit = qos_share_ptr->max_time_limit_per_task;
   } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
-    return result::fail("time-limit reached the user's limit.");
+    return std::unexpected("time-limit reached the user's limit.");
 
   if (static_cast<double>(task->cpus_per_task) >
       qos_share_ptr->max_cpus_per_user)
-    return result::fail("cpus-per-task reached the user's limit.");
+    return std::unexpected("cpus-per-task reached the user's limit.");
 
   return {};
 }
 
-result::result<void, std::string> AccountManager::CheckUidIsAdmin(
+std::expected<void, std::string> AccountManager::CheckUidIsAdmin(
     uint32_t uid) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) {
-    return result::failure("User is not a user of Crane.");
+    return std::unexpected("User is not a user of Crane.");
   }
   const User* user_ptr = user_result.value();
 
   if (user_ptr->admin_level >= User::Operator) return {};
 
-  return result::failure("User has insufficient privilege.");
+  return std::unexpected("User has insufficient privilege.");
 }
 
 AccountManager::CraneExpected<void> AccountManager::CheckIfUidHasPermOnUser(

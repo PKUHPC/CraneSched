@@ -46,34 +46,34 @@ class IEmbeddedDb {
  public:
   virtual ~IEmbeddedDb() = default;
 
-  virtual result::result<void, DbErrorCode> Init(std::string const& path) = 0;
+  virtual std::expected<void, DbErrorCode> Init(std::string const& path) = 0;
 
-  virtual result::result<void, DbErrorCode> Close() = 0;
+  virtual std::expected<void, DbErrorCode> Close() = 0;
 
-  virtual result::result<void, DbErrorCode> Store(txn_id_t txn_id,
-                                                  std::string const& key,
-                                                  const void* data,
-                                                  size_t len) = 0;
+  virtual std::expected<void, DbErrorCode> Store(txn_id_t txn_id,
+                                                 std::string const& key,
+                                                 const void* data,
+                                                 size_t len) = 0;
 
-  virtual result::result<size_t, DbErrorCode> Fetch(txn_id_t txn_id,
-                                                    std::string const& key,
-                                                    void* buf, size_t* len) = 0;
+  virtual std::expected<size_t, DbErrorCode> Fetch(txn_id_t txn_id,
+                                                   std::string const& key,
+                                                   void* buf, size_t* len) = 0;
 
-  virtual result::result<void, DbErrorCode> Delete(txn_id_t txn_id,
-                                                   std::string const& key) = 0;
+  virtual std::expected<void, DbErrorCode> Delete(txn_id_t txn_id,
+                                                  std::string const& key) = 0;
 
-  virtual result::result<txn_id_t, DbErrorCode> Begin() = 0;
+  virtual std::expected<txn_id_t, DbErrorCode> Begin() = 0;
 
-  virtual result::result<void, DbErrorCode> Commit(txn_id_t txn_id) = 0;
+  virtual std::expected<void, DbErrorCode> Commit(txn_id_t txn_id) = 0;
 
-  virtual result::result<void, DbErrorCode> Abort(txn_id_t txn_id) = 0;
+  virtual std::expected<void, DbErrorCode> Abort(txn_id_t txn_id) = 0;
 
   using KvIterFunc =
       std::function<bool(std::string&& key, std::vector<uint8_t>&& value)>;
 
   /// @param func if the return value of func is true, continue to next KV.
   ///             Otherwise, continue to next KV and delete current KV.
-  virtual result::result<void, DbErrorCode> IterateAllKv(KvIterFunc func) = 0;
+  virtual std::expected<void, DbErrorCode> IterateAllKv(KvIterFunc func) = 0;
 
   virtual std::string const& DbPath() = 0;
 };
@@ -82,29 +82,28 @@ class IEmbeddedDb {
 
 class UnqliteDb : public IEmbeddedDb {
  public:
-  result::result<void, DbErrorCode> Init(const std::string& path) override;
+  std::expected<void, DbErrorCode> Init(const std::string& path) override;
 
-  result::result<void, DbErrorCode> Close() override;
+  std::expected<void, DbErrorCode> Close() override;
 
-  result::result<void, DbErrorCode> Store(txn_id_t txn_id,
-                                          const std::string& key,
-                                          const void* data,
-                                          size_t len) override;
+  std::expected<void, DbErrorCode> Store(txn_id_t txn_id,
+                                         const std::string& key,
+                                         const void* data, size_t len) override;
 
-  result::result<size_t, DbErrorCode> Fetch(txn_id_t txn_id,
-                                            const std::string& key, void* buf,
-                                            size_t* len) override;
+  std::expected<size_t, DbErrorCode> Fetch(txn_id_t txn_id,
+                                           const std::string& key, void* buf,
+                                           size_t* len) override;
 
-  result::result<void, DbErrorCode> Delete(txn_id_t txn_id,
-                                           const std::string& key) override;
+  std::expected<void, DbErrorCode> Delete(txn_id_t txn_id,
+                                          const std::string& key) override;
 
-  result::result<txn_id_t, DbErrorCode> Begin() override;
+  std::expected<txn_id_t, DbErrorCode> Begin() override;
 
-  result::result<void, DbErrorCode> Commit(txn_id_t txn_id) override;
+  std::expected<void, DbErrorCode> Commit(txn_id_t txn_id) override;
 
-  result::result<void, DbErrorCode> Abort(txn_id_t txn_id) override;
+  std::expected<void, DbErrorCode> Abort(txn_id_t txn_id) override;
 
-  result::result<void, DbErrorCode> IterateAllKv(KvIterFunc func) override;
+  std::expected<void, DbErrorCode> IterateAllKv(KvIterFunc func) override;
 
   const std::string& DbPath() override { return m_db_path_; };
 
@@ -123,29 +122,28 @@ class UnqliteDb : public IEmbeddedDb {
 
 class BerkeleyDb : public IEmbeddedDb {
  public:
-  result::result<void, DbErrorCode> Init(const std::string& path) override;
+  std::expected<void, DbErrorCode> Init(const std::string& path) override;
 
-  result::result<void, DbErrorCode> Close() override;
+  std::expected<void, DbErrorCode> Close() override;
 
-  result::result<void, DbErrorCode> Store(txn_id_t txn_id,
-                                          const std::string& key,
-                                          const void* data,
-                                          size_t len) override;
+  std::expected<void, DbErrorCode> Store(txn_id_t txn_id,
+                                         const std::string& key,
+                                         const void* data, size_t len) override;
 
-  result::result<size_t, DbErrorCode> Fetch(txn_id_t txn_id,
-                                            const std::string& key, void* buf,
-                                            size_t* len) override;
+  std::expected<size_t, DbErrorCode> Fetch(txn_id_t txn_id,
+                                           const std::string& key, void* buf,
+                                           size_t* len) override;
 
-  result::result<void, DbErrorCode> Delete(txn_id_t txn_id,
-                                           const std::string& key) override;
+  std::expected<void, DbErrorCode> Delete(txn_id_t txn_id,
+                                          const std::string& key) override;
 
-  result::result<txn_id_t, DbErrorCode> Begin() override;
+  std::expected<txn_id_t, DbErrorCode> Begin() override;
 
-  result::result<void, DbErrorCode> Commit(txn_id_t txn_id) override;
+  std::expected<void, DbErrorCode> Commit(txn_id_t txn_id) override;
 
-  result::result<void, DbErrorCode> Abort(txn_id_t txn_id) override;
+  std::expected<void, DbErrorCode> Abort(txn_id_t txn_id) override;
 
-  result::result<void, DbErrorCode> IterateAllKv(KvIterFunc func) override;
+  std::expected<void, DbErrorCode> IterateAllKv(KvIterFunc func) override;
 
   const std::string& DbPath() override { return m_db_path_; };
 
@@ -225,14 +223,15 @@ class EmbeddedDbClient {
       txn_id_t txn_id, db_id_t db_id,
       crane::grpc::RuntimeAttrOfTask const& runtime_attr) {
     return StoreTypeIntoDbIfExists_(m_variable_db_.get(), txn_id,
-                            GetVariableDbEntryName_(db_id), &runtime_attr)
+                                    GetVariableDbEntryName_(db_id),
+                                    &runtime_attr)
         .has_value();
   }
 
   bool UpdateTaskToCtldIfExists(txn_id_t txn_id, db_id_t db_id,
-                               crane::grpc::TaskToCtld const& task_to_ctld) {
+                                crane::grpc::TaskToCtld const& task_to_ctld) {
     return StoreTypeIntoDbIfExists_(m_fixed_db_.get(), txn_id,
-                                   GetFixedDbEntryName_(db_id), &task_to_ctld)
+                                    GetFixedDbEntryName_(db_id), &task_to_ctld)
         .has_value();
   }
 
@@ -282,12 +281,12 @@ class EmbeddedDbClient {
 
   // Helper functions for basic embedded db operations
 
-  inline result::result<size_t, DbErrorCode> FetchTaskDataInDbAtomic_(
+  inline std::expected<size_t, DbErrorCode> FetchTaskDataInDbAtomic_(
       txn_id_t txn_id, db_id_t db_id, TaskInEmbeddedDb* task_in_db) {
     auto result =
         FetchTypeFromDb_(m_fixed_db_.get(), txn_id, GetFixedDbEntryName_(db_id),
                          task_in_db->mutable_task_to_ctld());
-    if (result.has_error()) return result;
+    if (!result) return result;
 
     return FetchTypeFromDb_(m_variable_db_.get(), txn_id,
                             GetVariableDbEntryName_(db_id),
@@ -298,7 +297,7 @@ class EmbeddedDbClient {
   bool FetchTypeFromVarDbOrInitWithValueNoLockAndTxn_(txn_id_t txn_id,
                                                       std::string const& key,
                                                       T* buf, T value) {
-    result::result<size_t, DbErrorCode> fetch_result =
+    std::expected<size_t, DbErrorCode> fetch_result =
         FetchTypeFromDb_(m_variable_db_.get(), txn_id, key, buf);
     if (fetch_result.has_value()) return true;
 
@@ -307,9 +306,9 @@ class EmbeddedDbClient {
           "Key {} not found in embedded db. Initialize it with value {}", key,
           value);
 
-      result::result<void, DbErrorCode> store_result =
+      std::expected store_result =
           StoreTypeIntoDb_(m_variable_db_.get(), txn_id, key, &value);
-      if (store_result.has_error()) {
+      if (!store_result) {
         CRANE_ERROR("Failed to init key '{}' in db.", key);
         return false;
       }
@@ -322,13 +321,13 @@ class EmbeddedDbClient {
     }
   }
 
-  result::result<size_t, DbErrorCode> FetchTypeFromDb_(
+  std::expected<size_t, DbErrorCode> FetchTypeFromDb_(
       txn_id_t txn_id, const std::shared_ptr<IEmbeddedDb>& db,
       std::string const& key, std::string* buf) {
     size_t n_bytes{0};
 
     auto result = db->Fetch(txn_id, key, nullptr, &n_bytes);
-    if (result.has_error()) {
+    if (!result) {
       CRANE_ERROR("Unexpected error when fetching the size of string key '{}'",
                   key);
       return result;
@@ -336,7 +335,7 @@ class EmbeddedDbClient {
 
     buf->resize(n_bytes);
     result = db->Fetch(txn_id, key, buf->data(), &n_bytes);
-    if (result.has_error()) {
+    if (!result) {
       CRANE_ERROR("Unexpected error when fetching the data of string key '{}'",
                   key);
       return result;
@@ -345,14 +344,14 @@ class EmbeddedDbClient {
     return {n_bytes};
   }
 
-  result::result<size_t, DbErrorCode> FetchTypeFromDb_(
+  std::expected<size_t, DbErrorCode> FetchTypeFromDb_(
       IEmbeddedDb* db, txn_id_t txn_id, std::string const& key,
       google::protobuf::MessageLite* value) {
     size_t n_bytes{0};
     std::string buf;
 
     auto result = db->Fetch(txn_id, key, nullptr, &n_bytes);
-    if (result.has_error() && result.error() != kBufferSmall) {
+    if (!result && result.error() != kBufferSmall) {
       CRANE_ERROR("Unexpected error when fetching the size of proto key '{}'",
                   key);
       return result;
@@ -360,7 +359,7 @@ class EmbeddedDbClient {
 
     buf.resize(n_bytes);
     result = db->Fetch(txn_id, key, buf.data(), &n_bytes);
-    if (result.has_error()) {
+    if (!result) {
       CRANE_ERROR("Unexpected error when fetching the data of proto key '{}'",
                   key);
       return result;
@@ -369,29 +368,29 @@ class EmbeddedDbClient {
     bool ok = value->ParseFromArray(buf.data(), n_bytes);
     if (!ok) {
       CRANE_ERROR("Failed to parse protobuf data of key {}", key);
-      return result::failure(DbErrorCode::kParsingError);
+      return std::unexpected(DbErrorCode::kParsingError);
     }
 
     return {n_bytes};
   }
 
   template <std::integral T>
-  result::result<size_t, DbErrorCode> FetchTypeFromDb_(IEmbeddedDb* db,
-                                                       txn_id_t txn_id,
-                                                       std::string const& key,
-                                                       T* buf) {
+  std::expected<size_t, DbErrorCode> FetchTypeFromDb_(IEmbeddedDb* db,
+                                                      txn_id_t txn_id,
+                                                      std::string const& key,
+                                                      T* buf) {
     size_t n_bytes{sizeof(T)};
     auto result = db->Fetch(txn_id, key, buf, &n_bytes);
-    if (result.has_error() && result.error() != DbErrorCode::kNotFound)
+    if (!result && result.error() != DbErrorCode::kNotFound)
       CRANE_ERROR("Unexpected error when fetching scalar key '{}'.", key);
     return result;
   }
 
   template <typename T>
-  result::result<void, DbErrorCode> StoreTypeIntoDb_(IEmbeddedDb* db,
-                                                     txn_id_t txn_id,
-                                                     std::string const& key,
-                                                     const T* value)
+  std::expected<void, DbErrorCode> StoreTypeIntoDb_(IEmbeddedDb* db,
+                                                    txn_id_t txn_id,
+                                                    std::string const& key,
+                                                    const T* value)
     requires std::derived_from<T, google::protobuf::MessageLite>
   {
     using google::protobuf::io::CodedOutputStream;
@@ -408,15 +407,15 @@ class EmbeddedDbClient {
   }
 
   template <std::integral T>
-  result::result<void, DbErrorCode> StoreTypeIntoDb_(IEmbeddedDb* db,
-                                                     txn_id_t txn_id,
-                                                     std::string const& key,
-                                                     const T* value) {
+  std::expected<void, DbErrorCode> StoreTypeIntoDb_(IEmbeddedDb* db,
+                                                    txn_id_t txn_id,
+                                                    std::string const& key,
+                                                    const T* value) {
     return db->Store(txn_id, key, value, sizeof(T));
   }
 
   template <typename T>
-  result::result<void, DbErrorCode> StoreTypeIntoDbIfExists_(
+  std::expected<void, DbErrorCode> StoreTypeIntoDbIfExists_(
       IEmbeddedDb* db, txn_id_t txn_id, const std::string& key, const T* value)
     requires std::derived_from<T, google::protobuf::MessageLite>
   {
@@ -431,44 +430,44 @@ class EmbeddedDbClient {
     value->SerializeToCodedStream(&codedOutputStream);
 
     if (!BeginDbTransaction_(db, &txn_id))
-      return result::failure(DbErrorCode::kOther);
+      return std::unexpected(DbErrorCode::kOther);
 
     size_t len = 0;
     auto fetch_result = db->Fetch(txn_id, key, nullptr, &len);
-    if (fetch_result.has_error()) {
+    if (!fetch_result) {
       if (fetch_result.error() == DbErrorCode::kNotFound) {
         CommitDbTransaction_(db, txn_id);
         return {};
       }
-      return result::failure(fetch_result.error());
+      return std::unexpected(fetch_result.error());
     }
 
     auto store_result = StoreTypeIntoDb_(db, txn_id, key, value);
-    if (store_result.has_error()) return result::failure(store_result.error());
+    if (!store_result) return std::unexpected(store_result.error());
 
     CommitDbTransaction_(db, txn_id);
     return {};
   }
 
   template <std::integral T>
-  result::result<void, DbErrorCode> StoreTypeIntoDbIfExists_(
+  std::expected<void, DbErrorCode> StoreTypeIntoDbIfExists_(
       IEmbeddedDb* db, txn_id_t txn_id, const std::string& key,
       const T* value) {
     if (!BeginDbTransaction_(db, &txn_id))
-      return result::failure(DbErrorCode::kOther);
+      return std::unexpected(DbErrorCode::kOther);
 
     size_t len = 0;
     auto fetch_result = db->Fetch(txn_id, key, nullptr, &len);
-    if (fetch_result.has_error()) {
+    if (!fetch_result) {
       if (fetch_result.error() == DbErrorCode::kNotFound) {
         CommitDbTransaction_(db, txn_id);
         return {};
       }
-      return result::failure(fetch_result.error());
+      return std::unexpected(fetch_result.error());
     }
 
     auto store_result = StoreTypeIntoDb_(db, txn_id, key, value);
-    if (store_result.has_error()) return result::failure(store_result.error());
+    if (!store_result) return std::unexpected(store_result.error());
 
     CommitDbTransaction_(db, txn_id);
     return {};

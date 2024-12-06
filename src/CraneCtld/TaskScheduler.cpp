@@ -1176,7 +1176,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   // to their own jobs.
   std::string filter_uname = request.filter_username();
   if (filter_uname.empty() &&
-      g_account_manager->CheckUidIsAdmin(operator_uid).has_error()) {
+      !g_account_manager->CheckUidIsAdmin(operator_uid)) {
     PasswordEntry entry(operator_uid);
     filter_uname = entry.Username();
   }
@@ -2748,7 +2748,7 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
       task->Username(), task->account, task);
-  if (check_qos_result.has_error()) {
+  if (!check_qos_result) {
     CRANE_ERROR("Failed to call CheckAndApplyQosLimitOnTask: {}",
                 check_qos_result.error());
     return CraneErr::kInvalidParam;

@@ -21,6 +21,8 @@
 #include "crane/String.h"
 namespace Craned {
 
+using crane::grpc::StreamCforedTaskIOReply;
+using crane::grpc::StreamCforedTaskIORequest;
 CforedClient::CforedClient() : m_stopped_(false){};
 
 CforedClient::~CforedClient() {
@@ -46,14 +48,14 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
   }
 
   // std::unique_ptr will automatically release the dangling stub.
-  m_stub_ = CraneForeD::NewStub(m_cfored_channel_);
+  m_stub_ = crane::grpc::CraneForeD::NewStub(m_cfored_channel_);
 
   m_fwd_thread_ = std::thread([this] { AsyncSendRecvThread_(); });
 }
 
 void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
-    ClientAsyncReaderWriter<StreamCforedTaskIORequest, StreamCforedTaskIOReply>*
-        stream,
+    grpc::ClientAsyncReaderWriter<StreamCforedTaskIORequest,
+                                  StreamCforedTaskIOReply>* stream,
     std::atomic<bool>* write_pending) {
   CRANE_TRACE("CleanOutputQueueThread started.");
   std::pair<task_id_t, std::string> output;
@@ -117,7 +119,7 @@ void CforedClient::AsyncSendRecvThread_() {
     // CRANE_TRACE("NextStatus: {}, ok: {}, Tag received: {}, state: {}",
     //             int(next_status), ok, intptr_t(tag), int(state));
 
-    if (next_status == CompletionQueue::SHUTDOWN) break;
+    if (next_status == grpc::CompletionQueue::SHUTDOWN) break;
 
     // TIMEOUT is like the Idle event in libuv and
     // thus a context switch of state machine.
