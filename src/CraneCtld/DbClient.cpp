@@ -963,10 +963,10 @@ MongodbClient::MongodbClient() {
 
   if (!g_config.DbUser.empty()) {
     authentication =
-        fmt::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
+        std::format("{}:{}@", g_config.DbUser, g_config.DbPassword);
   }
 
-  m_connect_uri_ = fmt::format(
+  m_connect_uri_ = std::format(
       "mongodb://{}{}:{}/?replicaSet={}&maxPoolSize=1000", authentication,
       g_config.DbHost, g_config.DbPort, g_config.DbRSName);
   CRANE_TRACE("Mongodb connect uri: {}", m_connect_uri_);

@@ -153,19 +153,39 @@ void InitLogger(spdlog::level::level_enum level,
                 const std::string &log_file_path);
 
 // Custom type formatting
-namespace fmt {
-
 template <>
-struct formatter<cpu_t> {
-  template <typename ParseContext>
-  constexpr auto parse(ParseContext &ctx) {
-    return ctx.begin();
-  };
-
+struct std::formatter<cpu_t> {
+  constexpr auto parse(std::format_parse_context &ctx) { return ctx.begin(); }
   template <typename FormatContext>
-  auto format(const cpu_t &v, FormatContext &ctx) {
-    return fmt::format_to(ctx.out(), "{:.2f}", static_cast<double>(v));
+  auto format(const cpu_t &v, FormatContext &ctx) const {
+    return std::format_to(ctx.out(), "{:.2f}", static_cast<double>(v));
   }
 };
 
-}  // namespace fmt
+template <typename T>
+struct std::formatter<std::vector<T>> {
+  constexpr auto parse(std::format_parse_context &ctx) { return ctx.begin(); }
+  // 格式化 std::vector<T> 类型
+  auto format(const vector<T> &vec, format_context &ctx) const {
+    auto out = ctx.out();
+
+    *out++ = '[';
+    bool first = true;
+
+    for (const auto &element : vec) {
+      if (!first) {
+        *out++ = ',';
+        *out++ = ' ';
+      }
+      first = false;
+      out = m_formatter.format(element, ctx);
+    }
+
+    *out++ = ']';
+    return out;
+  }
+
+ private:
+  std::formatter<T> m_formatter;
+};
+

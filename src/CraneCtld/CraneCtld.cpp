@@ -64,13 +64,13 @@ void ParseConfig(int argc, char** argv) {
   }
 
   if (parsed_args.count("help") > 0) {
-    fmt::print("{}\n", options.help());
+    std::print("{}\n", options.help());
     std::exit(0);
   }
 
   if (parsed_args.count("version") > 0) {
-    fmt::print("Version: {}\n", CRANE_VERSION_STRING);
-    fmt::print("Build Time: {}\n", CRANE_BUILD_TIMESTAMP);
+    std::print("Version: {}\n", CRANE_VERSION_STRING);
+    std::print("Build Time: {}\n", CRANE_BUILD_TIMESTAMP);
     std::exit(0);
   }
 
@@ -112,7 +112,7 @@ void ParseConfig(int argc, char** argv) {
       } else if (g_config.CraneCtldDebugLevel == "error") {
         log_level = spdlog::level::err;
       } else {
-        fmt::print(stderr, "Illegal debug-level format.");
+        std::print(stderr, "Illegal debug-level format.");
         std::exit(1);
       }
 
@@ -329,7 +329,7 @@ void ParseConfig(int argc, char** argv) {
             }
 
             CRANE_TRACE("node name list parsed: {}",
-                        fmt::join(node_id_list, ", "));
+                        absl::StrJoin(node_id_list,", "));
           } else
             std::exit(1);
 
@@ -530,11 +530,11 @@ void ParseConfig(int argc, char** argv) {
 
         if (plugin_config["PlugindSockPath"]) {
           g_config.Plugin.PlugindSockPath =
-              fmt::format("unix://{}{}", g_config.CraneBaseDir,
+              std::format("unix://{}{}", g_config.CraneBaseDir,
                           plugin_config["PlugindSockPath"].as<std::string>());
         } else {
           g_config.Plugin.PlugindSockPath =
-              fmt::format("unix://{}{}", g_config.CraneBaseDir,
+              std::format("unix://{}{}", g_config.CraneBaseDir,
                           kDefaultPlugindUnixSockPath);
         }
       }

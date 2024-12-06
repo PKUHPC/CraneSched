@@ -101,14 +101,14 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
     if (isdigit(dir_entry.path().filename().string()[0])) {
       std::string pid_s = dir_entry.path().filename().string();
       std::string proc_fd_path =
-          fmt::format("{}/{}/fd", proc_path.string(), pid_s);
+          std::format("{}/{}/fd", proc_path.string(), pid_s);
       if (!std::filesystem::exists(proc_fd_path)) {
         continue;
       }
       for (auto const &fd_dir_entry :
            std::filesystem::directory_iterator(proc_fd_path)) {
         struct stat statbuf {};
-        std::string fdpath = fmt::format(
+        std::string fdpath = std::format(
             "{}/{}", proc_fd_path, fd_dir_entry.path().filename().string());
         const char *fdchar = fdpath.c_str();
         if (stat(fdchar, &statbuf) != 0) {
@@ -142,7 +142,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
       response->set_task_id(task_id_expt.value());
       return Status::OK;
     } else {
-      std::string proc_dir = fmt::format("/proc/{}/status", pid_i);
+      std::string proc_dir = std::format("/proc/{}/status", pid_i);
       YAML::Node proc_details = YAML::LoadFile(proc_dir);
       if (proc_details["PPid"]) {
         pid_t ppid = std::stoi(proc_details["PPid"].as<std::string>());

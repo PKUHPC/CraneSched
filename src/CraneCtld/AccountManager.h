@@ -129,13 +129,13 @@ class AccountManager {
                                       const std::string& account,
                                       const std::string& partition);
 
-  result::result<void, std::string> CheckIfUserOfAccountIsEnabled(
+  std::expected<void, std::string> CheckIfUserOfAccountIsEnabled(
       const std::string& user, const std::string& account);
 
-  result::result<void, std::string> CheckAndApplyQosLimitOnTask(
+  std::expected<void, std::string> CheckAndApplyQosLimitOnTask(
       const std::string& user, const std::string& account, TaskInCtld* task);
 
-  result::result<void, std::string> CheckUidIsAdmin(uint32_t uid);
+  std::expected<void, std::string> CheckUidIsAdmin(uint32_t uid);
 
   CraneExpected<void> CheckIfUidHasPermOnUser(uint32_t uid,
                                               const std::string& username,

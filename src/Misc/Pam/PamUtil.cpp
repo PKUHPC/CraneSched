@@ -21,7 +21,6 @@
 #include <absl/strings/ascii.h>
 #include <absl/strings/str_join.h>
 #include <absl/strings/str_split.h>
-#include <fmt/format.h>
 #include <grpc++/grpc++.h>
 #include <pwd.h>
 #include <sys/stat.h>
@@ -204,7 +203,7 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
 #ifndef NDEBUG
   std::string output;
   for (auto &&[k, v] : inode_addr_port_map) {
-    output += fmt::format("{}:{}:{} ", k, v.first, v.second);
+    output += std::format("{}:{}:{} ", k, v.first, v.second);
   }
 
   pam_syslog(pamh, LOG_ERR, "[Crane] inode_addr_port_map: %s", output.c_str());
@@ -256,15 +255,15 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
           }
 
           address->assign(
-              fmt::format("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3]));
+              std::format("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3]));
         } else {
           // ipv6
           std::string addr[8];
           for (int i = 0; i < 4; i++) {
             std::string addr_part = addr_hex.substr(i * 8, 8);
             uint32_t host_addr_part = ntohl(std::stoul(addr_part, nullptr, 16));
-            addr[i * 2] = fmt::format("{:x}", uint16_t(host_addr_part >> 16));
-            addr[i * 2 + 1] = fmt::format("{:x}", uint16_t(host_addr_part));
+            addr[i * 2] = std::format("{:x}", uint16_t(host_addr_part >> 16));
+            addr[i * 2 + 1] = std::format("{:x}", uint16_t(host_addr_part));
             pam_syslog(pamh, LOG_ERR,
                        "[Crane] Transform %d part of ipv6 hex addr: %s to %s",
                        i, addr_part.c_str(), addr[i].c_str());
@@ -293,7 +292,7 @@ bool GrpcQueryPortFromCraned(pam_handle_t *pamh, uid_t uid,
   using grpc::Status;
 
   std::string craned_unix_socket_address =
-      fmt::format("unix://{}", g_pam_config.CranedUnixSockPath);
+      std::format("unix://{}", g_pam_config.CranedUnixSockPath);
 
   std::shared_ptr<Channel> channel = grpc::CreateChannel(
       craned_unix_socket_address, grpc::InsecureChannelCredentials());
@@ -358,7 +357,7 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
   Status status;
 
   std::string craned_unix_socket_address =
-      fmt::format("unix://{}", g_pam_config.CranedUnixSockPath);
+      std::format("unix://{}", g_pam_config.CranedUnixSockPath);
 
   std::shared_ptr<Channel> channel = grpc::CreateChannel(
       craned_unix_socket_address, grpc::InsecureChannelCredentials());
@@ -426,7 +425,7 @@ bool GrpcMigrateSshProcToCgroupAndSetEnv(pam_handle_t *pamh, pid_t pid,
     pam_syslog(pamh, LOG_ERR,
                "[Crane] QueryTaskEnvVariablesForward succeeded.");
     for (const auto &[name, value] : reply.env_map()) {
-      int ret = pam_putenv(pamh, fmt::format("{}={}", name, value).c_str());
+      int ret = pam_putenv(pamh, std::format("{}={}", name, value).c_str());
       if (ret != PAM_SUCCESS) {
         pam_syslog(pamh, LOG_ERR, "[Crane] Set env %s=%s  failed", name.c_str(),
                    value.c_str());

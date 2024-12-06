@@ -20,16 +20,14 @@
 
 // Standard Libraries
 #include <any>
-#include <array>
 #include <atomic>
 #include <cerrno>
 #include <charconv>
 #include <chrono>
 #include <csignal>
-#include <expected>
 #include <filesystem>
+#include <format>
 #include <forward_list>
-#include <fpm/fixed.hpp>
 #include <fstream>
 #include <functional>
 #include <future>
@@ -38,13 +36,13 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <print>
 #include <queue>
 #include <ranges>
 #include <regex>
 #include <string>
 #include <string_view>
 #include <thread>
-#include <unordered_map>
 #include <utility>
 #include <variant>
 
@@ -72,11 +70,7 @@
 #include <concurrentqueue/concurrentqueue.h>
 
 // gRPC
-#include <google/protobuf/util/time_util.h>
 #include <grpc++/grpc++.h>
-
-// fpm
-#include <fpm/fixed.hpp>
 
 // Include the header which defines the static log level
 #include "crane/Logger.h"
