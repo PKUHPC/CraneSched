@@ -282,9 +282,9 @@ class TaskScheduler {
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
 
-  static CraneErr AcquireTaskAttributes(TaskInCtld* task);
+  static CraneErrCodeExpected<void> AcquireTaskAttributes(TaskInCtld* task);
 
-  static CraneErr CheckTaskValidity(TaskInCtld* task);
+  static CraneErrCodeExpected<void> CheckTaskValidity(TaskInCtld* task);
 
  private:
   template <class... Ts>

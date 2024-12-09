@@ -924,7 +924,6 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
 
 result::result<std::future<task_id_t>, std::string>
 CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
-  CraneErr err;
 
   if (!task->password_entry->Valid()) {
     return result::fail(
@@ -959,53 +958,92 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
                     task->Username(), task->partition_id, task->account));
   }
 
-  auto enable_res =
-      g_account_manager->CheckIfUserOfAccountIsEnabled(
+  auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
       task->Username(), task->account);
   if (enable_res.has_error()) {
     return result::fail(enable_res.error());
   }
 
-  err = g_task_scheduler->AcquireTaskAttributes(task.get());
+  auto result = g_task_scheduler->AcquireTaskAttributes(task.get());
 
-  if (err == CraneErr::kOk)
-    err = g_task_scheduler->CheckTaskValidity(task.get());
+  if (result)
+    result = g_task_scheduler->CheckTaskValidity(task.get());
 
-  if (err == CraneErr::kOk) {
+  if (result) {
     task->SetSubmitTime(absl::Now());
     std::future<task_id_t> future =
         g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
   }
 
-  if (err == CraneErr::kNonExistent) {
+  switch (result.error()) {
+  case crane::grpc::ErrCode::ERR_INVALID_PARTITION:
+  case crane::grpc::ErrCode::ERR_ALLOWED_PARTITION:
     CRANE_DEBUG("Task submission failed. Reason: Partition doesn't exist!");
-    return result::fail("Partition doesn't exist!");
-  } else if (err == CraneErr::kInvalidNodeNum) {
+    return result::fail("Partition doesn't exist");
+
+  case crane::grpc::ErrCode::ERR_INVALID_NODE_NUM:
     CRANE_DEBUG(
         "Task submission failed. Reason: --node is either invalid or greater "
         "than the number of nodes in its partition.");
     return result::fail(
         "--node is either invalid or greater than the number of nodes in its "
-        "partition.");
-  } else if (err == CraneErr::kNoResource) {
+        "partition");
+
+  case crane::grpc::ErrCode::ERR_NO_RESOURCE:
     CRANE_DEBUG(
         "Task submission failed. "
         "Reason: The resources of the partition are insufficient.");
     return result::fail("The resources of the partition are insufficient");
-  } else if (err == CraneErr::kNoAvailNode) {
+
+  case crane::grpc::ErrCode::ERR_NO_ENOUGH_NODE:
     CRANE_DEBUG(
         "Task submission failed. "
         "Reason: Nodes satisfying the requirements of task are insufficient");
     return result::fail(
-        "Nodes satisfying the requirements of task are insufficient.");
-  } else if (err == CraneErr::kInvalidParam) {
+        "Nodes satisfying the requirements of task are insufficient");
+
+  case crane::grpc::ErrCode::ERR_INVALID_OP_USER:
+    CRANE_DEBUG("Task submission failed. Reason: Unknown user");
+    return result::fail("Unknown user");
+
+  case crane::grpc::ErrCode::ERR_INVALID_QOS:
     CRANE_DEBUG(
-        "Task submission failed. "
-        "Reason: The param of task is invalid.");
-    return result::fail("The param of task is invalid.");
+        "Task submission failed. Reason: Unknown Qos");
+    return result::fail("Unkown Qos");
+  case crane::grpc::ErrCode::ERR_HAS_ALLOWED_QOS_IN_PARTITION:
+    CRANE_DEBUG(
+        "Task submission failed. Reason: "
+        "The qos you set is not in partition's allowed qos list");
+    return result::fail("the qos you set is not in partition's allowed qos list");
+  case crane::grpc::ErrCode::ERR_HAS_NO_QOS_IN_PARTITION:
+    CRANE_DEBUG(
+        "Task submission failed. Reason: "
+        "The user has no QOS available for this partition to be used");
+    return result::fail("The user has no QOS available for this partition to be used");
+
+  case crane::grpc::ErrCode::ERR_TIME_TIMIT_BEYOND:
+    CRANE_DEBUG(
+        "Task submission failed. Reason: time-limit reached the user's limit");
+    return result::fail("time-limit reached the user's limit");
+
+  case crane::grpc::ErrCode::ERR_CPUS_PER_TASK_BEYOND:
+    CRANE_DEBUG(
+        "Task submission failed. Reason: cpus-per-task reached the user's "
+        "limit");
+    return result::fail("cpus-per-task reached the user's limit");
+
+  case crane::grpc::ErrCode::ERR_INVAILD_NODE_LIST:
+    CRANE_DEBUG("Task submission failed. Reason: Invalid nodelist");
+    return result::fail("Invalid nodelist");
+
+  case crane::grpc::ErrCode::ERR_INVAILD_EX_NODE_LIST:
+    CRANE_DEBUG("Task submission failed. Reason: Invalid excluded nodelist");
+    return result::fail("Invalid excluded nodelist");
+
+  default:
+    return result::fail(CraneErrCodeStr(result.error()));
   }
-  return result::fail(CraneErrStr(err));
 }
 
 }  // namespace Ctld
