@@ -18,9 +18,12 @@
 
 #pragma once
 
-#include <spdlog/fmt/bundled/format.h>
-
+#include <format>
+#include <print>
 #include <source_location>
+
+// Std must come first
+#include <spdlog/fmt/bundled/format.h>
 
 // For better logging inside lambda functions
 #if defined(__clang__) || defined(__GNUC__) || defined(__GNUG__)
@@ -167,24 +170,13 @@ struct std::formatter<cpu_t> {
 namespace impl {
 template <typename T>
 concept AssociativeContainer = requires { typename T::key_type; };
-
-template <typename T>
-concept Char = std::same_as<T, char> || std::same_as<T, wchar_t>;
-
-// A "String" is (not the best concept definition, obviously)
-// a range of characters
-// that is either not a container (has no value_type member)
-// or a std::basic_string<> (has a traits_type member)
-template <typename T>
-concept String =
-  Char<std::ranges::range_value_t<T>> &&
-    (!requires { typename T::value_type; } ||
-      requires { typename T::traits_type; });
 }  // namespace impl
 
+// Simple workaround for range formatter.
+// The `requires` clause removes cases for std::string and char[]
 template <std::ranges::input_range T>
-  requires(!impl::String<T> &&
-           std::formattable<std::ranges::range_value_t<T>, char>)
+  requires(!std::same_as<std::string, std::remove_cvref_t<T>> &&
+           !std::is_array_v<std::remove_cvref_t<T>>)
 struct std::formatter<T> : std::formatter<std::ranges::range_value_t<T>> {
   static const char BEGIN = impl::AssociativeContainer<T> ? '{' : '[';
   static const char END = impl::AssociativeContainer<T> ? '}' : ']';
@@ -203,7 +195,7 @@ struct std::formatter<T> : std::formatter<std::ranges::range_value_t<T>> {
     return pos;
   }
 
-  auto format(T& range, std::format_context& ctx) const {
+  auto format(const T& range, std::format_context& ctx) const {
     auto pos = ctx.out();
     if (m_surround) {
       *pos++ = BEGIN;
