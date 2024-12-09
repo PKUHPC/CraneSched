@@ -150,42 +150,80 @@
 #endif
 
 void InitLogger(spdlog::level::level_enum level,
-                const std::string &log_file_path);
+                const std::string& log_file_path);
 
 // Custom type formatting
 template <>
 struct std::formatter<cpu_t> {
-  constexpr auto parse(std::format_parse_context &ctx) { return ctx.begin(); }
+  constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
   template <typename FormatContext>
-  auto format(const cpu_t &v, FormatContext &ctx) const {
+  auto format(const cpu_t& v, FormatContext& ctx) const {
     return std::format_to(ctx.out(), "{:.2f}", static_cast<double>(v));
   }
 };
 
+#ifndef __cpp_lib_format_ranges
+
+namespace impl {
 template <typename T>
-struct std::formatter<std::vector<T>> {
-  constexpr auto parse(std::format_parse_context &ctx) { return ctx.begin(); }
-  // 格式化 std::vector<T> 类型
-  auto format(const vector<T> &vec, format_context &ctx) const {
-    auto out = ctx.out();
+concept AssociativeContainer = requires { typename T::key_type; };
 
-    *out++ = '[';
-    bool first = true;
+template <typename T>
+concept Char = std::same_as<T, char> || std::same_as<T, wchar_t>;
 
-    for (const auto &element : vec) {
-      if (!first) {
-        *out++ = ',';
-        *out++ = ' ';
+// A "String" is (not the best concept definition, obviously)
+// a range of characters
+// that is either not a container (has no value_type member)
+// or a std::basic_string<> (has a traits_type member)
+template <typename T>
+concept String =
+  Char<std::ranges::range_value_t<T>> &&
+    (!requires { typename T::value_type; } ||
+      requires { typename T::traits_type; });
+}  // namespace impl
+
+template <std::ranges::input_range T>
+  requires(!impl::String<T> &&
+           std::formattable<std::ranges::range_value_t<T>, char>)
+struct std::formatter<T> : std::formatter<std::ranges::range_value_t<T>> {
+  static const char BEGIN = impl::AssociativeContainer<T> ? '{' : '[';
+  static const char END = impl::AssociativeContainer<T> ? '}' : ']';
+
+  constexpr auto parse(std::format_parse_context& ctx) {
+    auto pos = ctx.begin();
+    while (pos != ctx.end() && *pos != '}') {
+      if (*pos == ':') {
+        ctx.advance_to(++pos);
+        return std::formatter<std::ranges::range_value_t<T>>::parse(ctx);
       }
-      first = false;
-      out = m_formatter.format(element, ctx);
-    }
 
-    *out++ = ']';
-    return out;
+      if (*pos == 'n') m_surround = false;
+      ++pos;
+    }
+    return pos;
   }
 
- private:
-  std::formatter<T> m_formatter;
+  auto format(T& range, std::format_context& ctx) const {
+    auto pos = ctx.out();
+    if (m_surround) {
+      *pos++ = BEGIN;
+      ctx.advance_to(pos);
+    }
+    bool comma{};
+    for (auto&& value : range) {
+      if (std::exchange(comma, true)) {
+        *pos++ = ',';
+        *pos++ = ' ';
+      }
+      pos = std::formatter<std::ranges::range_value_t<T>>::format(value, ctx);
+      ctx.advance_to(pos);
+    }
+
+    if (m_surround) *pos++ = END;
+    return pos;
+  }
+
+  bool m_surround = true;
 };
 
+#endif
