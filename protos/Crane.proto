@@ -300,7 +300,7 @@ message DeleteQosReply {
 message ModifyAccountRequest {
   uint32 uid = 1;
   ModifyField modify_field = 2;   //modify item field
-  string value = 3;   //new value
+  repeated string value_list = 3;   //new value
   string name = 4;
   OperationType type = 5;
   bool force = 6;
@@ -314,7 +314,7 @@ message ModifyAccountReply {
 message ModifyUserRequest {
   uint32 uid = 1;
   ModifyField modify_field = 2;   //modify item field
-  string value = 3;   //new value
+  repeated string value_list = 3;   //new value
   string name = 4;
   string partition = 5;
   OperationType type = 6;
