@@ -146,15 +146,15 @@ class MongodbClient {
         }));
 
     switch (type) {
-      case EntityType::ACCOUNT:
-        coll_name = m_account_collection_name_;
-        break;
-      case EntityType::USER:
-        coll_name = m_user_collection_name_;
-        break;
-      case EntityType::QOS:
-        coll_name = m_qos_collection_name_;
-        break;
+    case EntityType::ACCOUNT:
+      coll_name = m_account_collection_name_;
+      break;
+    case EntityType::USER:
+      coll_name = m_user_collection_name_;
+      break;
+    case EntityType::QOS:
+      coll_name = m_qos_collection_name_;
+      break;
     }
 
     bsoncxx::stdx::optional<mongocxx::result::update> result =
@@ -163,8 +163,9 @@ class MongodbClient {
 
     if (!result || !result->modified_count()) {
       CRANE_ERROR(
-          "Update date in database fail(name:{},opt:{},key:{},value:{})", name,
-          opt, key, value);
+          "Failed to update date in the database "
+          "for (name:{}, opt:{}, key:{}, value:{})",
+          name, opt, key, value);
       return false;
     }
     return true;

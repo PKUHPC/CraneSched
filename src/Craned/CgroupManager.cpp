@@ -269,7 +269,7 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
                  CgroupConstant::GetControllerStringView(controller));
       return 1;
     } else {
-      fmt::print("cgroup controller {} is already mounted",
+      CRANE_WARN("cgroup controller {} is already mounted",
                  CgroupConstant::GetControllerStringView(controller));
       return 0;
     }
@@ -300,7 +300,7 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
 }
 
 std::string CgroupManager::CgroupStrByTaskId_(task_id_t task_id) {
-  return fmt::format("Crane_Task_{}", task_id);
+  return std::format("Crane_Task_{}", task_id);
 }
 
 /*
@@ -1107,7 +1107,7 @@ bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
   for (const auto &[_, this_device] : Craned::g_this_node_device) {
     if (!devices.contains(this_device->slot_id)) {
       for (const auto &dev_meta : this_device->device_file_metas) {
-        deny_limits.emplace_back(fmt::format("{} {}:{} {}", dev_meta.op_type,
+        deny_limits.emplace_back(std::format("{} {}:{} {}", dev_meta.op_type,
                                              dev_meta.major, dev_meta.minor,
                                              op));
       }

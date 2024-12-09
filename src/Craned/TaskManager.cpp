@@ -89,7 +89,7 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
   int minutes = (time_limit_sec % 3600) / 60;
   int seconds = time_limit_sec % 60;
   std::string time_limit =
-      fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
+      std::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
   env_map.emplace("CRANE_TIMELIMIT", time_limit);
   return env_map;
 }
@@ -812,14 +812,14 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
 
     if (clearenv()) {
-      fmt::print("clearenv() failed!\n");
+      std::print("clearenv() failed!\n");
     }
 
     auto FuncSetEnv =
         [](const std::unordered_map<std::string, std::string>& v) {
           for (const auto& [name, value] : v)
             if (setenv(name.c_str(), value.c_str(), 1))
-              fmt::print("setenv for {}={} failed!\n", name, value);
+              std::print("setenv for {}={} failed!\n", name, value);
         };
 
     FuncSetEnv(task_env_map);
@@ -848,7 +848,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     // Error occurred since execv returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.
-    fmt::print(stderr, "[Craned Subprocess Error] Failed to execv. Error: {}\n",
+    std::print(stderr, "[Craned Subprocess Error] Failed to execv. Error: {}\n",
                strerror(errno));
     // Todo: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
     //  exit codes
@@ -920,7 +920,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     ActivateTaskStatusChangeAsync_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeCgroupError,
-        fmt::format("Failed to find created cgroup for task #{}", task_id));
+        std::format("Failed to find created cgroup for task #{}", task_id));
     return;
   }
 
@@ -931,7 +931,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     ActivateTaskStatusChangeAsync_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodePermissionDenied,
-        fmt::format("Failed to look up password entry for uid {} of task #{}",
+        std::format("Failed to look up password entry for uid {} of task #{}",
                     instance->task.uid(), task_id));
     return;
   }
@@ -943,7 +943,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     ActivateTaskStatusChangeAsync_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeCgroupError,
-        fmt::format("Failed to allocate cgroup for task #{}", task_id));
+        std::format("Failed to allocate cgroup for task #{}", task_id));
     return;
   }
   instance->cgroup = cg;
@@ -953,7 +953,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   if (instance->IsCalloc()) return;
 
   instance->meta->parsed_sh_script_path =
-      fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);
+      std::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);
   auto& sh_path = instance->meta->parsed_sh_script_path;
 
   FILE* fptr = fopen(sh_path.c_str(), "w");
@@ -962,7 +962,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     ActivateTaskStatusChangeAsync_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeFileNotFound,
-        fmt::format("Cannot write shell script for batch task #{}", task_id));
+        std::format("Cannot write shell script for batch task #{}", task_id));
     return;
   }
 
@@ -1015,7 +1015,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     ActivateTaskStatusChangeAsync_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeSpawnProcessFail,
-        fmt::format(
+        std::format(
             "Cannot spawn a new process inside the instance of task #{}",
             task_id));
   } else {
@@ -1044,20 +1044,20 @@ std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
 
   if (path_pattern.empty()) {
     // If file path is not specified, first set it to cwd.
-    resolved_path_pattern = fmt::format("{}/", cwd);
+    resolved_path_pattern = std::format("{}/", cwd);
   } else {
     if (path_pattern[0] == '/')
       // If output file path is an absolute path, do nothing.
       resolved_path_pattern = path_pattern;
     else
       // If output file path is a relative path, prepend cwd to the path.
-      resolved_path_pattern = fmt::format("{}/{}", cwd, path_pattern);
+      resolved_path_pattern = std::format("{}/{}", cwd, path_pattern);
   }
 
   // Path ends with a directory, append default stdout file name
   // `Crane-<Job ID>.out` to the path.
   if (absl::EndsWith(resolved_path_pattern, "/"))
-    resolved_path_pattern += fmt::format("Crane-{}.out", task_id);
+    resolved_path_pattern += std::format("Crane-{}.out", task_id);
 
   return resolved_path_pattern;
 }

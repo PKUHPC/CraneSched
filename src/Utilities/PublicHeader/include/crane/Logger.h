@@ -18,9 +18,12 @@
 
 #pragma once
 
-#include <spdlog/fmt/bundled/format.h>
-
+#include <format>
+#include <print>
 #include <source_location>
+
+// Std must come first
+#include <spdlog/fmt/bundled/format.h>
 
 // For better logging inside lambda functions
 #if defined(__clang__) || defined(__GNUC__) || defined(__GNUG__)
@@ -150,22 +153,69 @@
 #endif
 
 void InitLogger(spdlog::level::level_enum level,
-                const std::string &log_file_path);
+                const std::string& log_file_path);
 
 // Custom type formatting
-namespace fmt {
-
 template <>
-struct formatter<cpu_t> {
-  template <typename ParseContext>
-  constexpr auto parse(ParseContext &ctx) {
-    return ctx.begin();
-  };
-
+struct std::formatter<cpu_t> {
+  constexpr auto parse(std::format_parse_context& ctx) { return ctx.begin(); }
   template <typename FormatContext>
-  auto format(const cpu_t &v, FormatContext &ctx) {
-    return fmt::format_to(ctx.out(), "{:.2f}", static_cast<double>(v));
+  auto format(const cpu_t& v, FormatContext& ctx) const {
+    return std::format_to(ctx.out(), "{:.2f}", static_cast<double>(v));
   }
 };
 
-}  // namespace fmt
+#ifndef __cpp_lib_format_ranges
+
+namespace impl {
+template <typename T>
+concept AssociativeContainer = requires { typename T::key_type; };
+}  // namespace impl
+
+// Simple workaround for range formatter.
+// The `requires` clause removes cases for std::string and char[]
+template <std::ranges::input_range T>
+  requires(!std::same_as<std::string, std::remove_cvref_t<T>> &&
+           !std::is_array_v<std::remove_cvref_t<T>>)
+struct std::formatter<T> : std::formatter<std::ranges::range_value_t<T>> {
+  static const char BEGIN = impl::AssociativeContainer<T> ? '{' : '[';
+  static const char END = impl::AssociativeContainer<T> ? '}' : ']';
+
+  constexpr auto parse(std::format_parse_context& ctx) {
+    auto pos = ctx.begin();
+    while (pos != ctx.end() && *pos != '}') {
+      if (*pos == ':') {
+        ctx.advance_to(++pos);
+        return std::formatter<std::ranges::range_value_t<T>>::parse(ctx);
+      }
+
+      if (*pos == 'n') m_surround = false;
+      ++pos;
+    }
+    return pos;
+  }
+
+  auto format(const T& range, std::format_context& ctx) const {
+    auto pos = ctx.out();
+    if (m_surround) {
+      *pos++ = BEGIN;
+      ctx.advance_to(pos);
+    }
+    bool comma{};
+    for (auto&& value : range) {
+      if (std::exchange(comma, true)) {
+        *pos++ = ',';
+        *pos++ = ' ';
+      }
+      pos = std::formatter<std::ranges::range_value_t<T>>::format(value, ctx);
+      ctx.advance_to(pos);
+    }
+
+    if (m_surround) *pos++ = END;
+    return pos;
+  }
+
+  bool m_surround = true;
+};
+
+#endif

@@ -5,12 +5,9 @@ target_link_libraries(utility_test
         GTest::gtest_main
         concurrentqueue
         Threads::Threads
-        event_core_static
         cxxopts
         absl::synchronization
 
         Utility_PublicHeader
         crane_proto_lib
-
-        shared_test_impl_lib
-        )
+)

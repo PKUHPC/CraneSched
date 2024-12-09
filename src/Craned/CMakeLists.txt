@@ -52,7 +52,6 @@ target_link_libraries(craned
         uvw
 
         yaml-cpp
-        result
 
         Backward::Interface
 

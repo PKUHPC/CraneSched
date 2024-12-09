@@ -287,7 +287,7 @@ bool StrToIpv6(const std::string& ip, ipv6_t* addr) {
 }
 
 std::string Ipv4ToStr(ipv4_t addr) {
-  return fmt::format("{}.{}.{}.{}", (addr >> 24) & 0xff, (addr >> 16) & 0xff,
+  return std::format("{}.{}.{}.{}", (addr >> 24) & 0xff, (addr >> 16) & 0xff,
                      (addr >> 8) & 0xff, addr & 0xff);
 }
 
@@ -296,10 +296,10 @@ std::string Ipv6ToStr(const ipv6_t& addr) {
   uint64_t low = absl::Uint128Low64(addr);
   std::vector<std::string> hex_vec;
   for (int i = 0; i < 4; ++i)
-    hex_vec.push_back(fmt::format("{:x}", (high >> (48 - i * 16)) & 0xffff));
+    hex_vec.push_back(std::format("{:x}", (high >> (48 - i * 16)) & 0xffff));
 
   for (int i = 0; i < 4; ++i)
-    hex_vec.push_back(fmt::format("{:x}", (low >> (48 - i * 16)) & 0xffff));
+    hex_vec.push_back(std::format("{:x}", (low >> (48 - i * 16)) & 0xffff));
 
   return absl::StrJoin(hex_vec, ":");
 }
@@ -315,7 +315,7 @@ int GetIpAddrVer(const std::string& ip) {
 bool FindTcpInodeByPort(const std::string& tcp_path, int port, ino_t* inode) {
   std::ifstream tcp_in(tcp_path, std::ios::in);
   std::string tcp_line;
-  std::string port_hex = fmt::format("{:0>4X}", port);
+  std::string port_hex = std::format("{:0>4X}", port);
   if (tcp_in) {
     getline(tcp_in, tcp_line);  // Skip the header line
     while (getline(tcp_in, tcp_line)) {

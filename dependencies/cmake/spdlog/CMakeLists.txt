@@ -5,7 +5,7 @@ if (BUILD_SHARED_LIBS)
 else ()
     set(SPDLOG_BUILD_SHARED OFF)
 endif ()
-
+set(SPDLOG_USE_STD_FORMAT ON)
 if (CRANE_USE_GITEE_SOURCE)
     set(SPDLOG_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/spdlog-v1.13.0.tar.gz")
 else ()

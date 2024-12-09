@@ -46,7 +46,6 @@ target_link_libraries(cranectld PRIVATE
         mongocxx_static
 
         range-v3::range-v3
-        result
 
         Backward::Interface
 )
