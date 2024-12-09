@@ -191,7 +191,15 @@ message QueryPartitionInfoRequest {
 }
 
 message QueryPartitionInfoReply {
-  repeated PartitionInfo partition_info = 1;
+  repeated PartitionInfo partition_info_list = 1;
+}
+
+message QueryReservationInfoRequest {
+  string reservation_name = 1;
+}
+
+message QueryReservationInfoReply {
+  repeated ReservationInfo reservation_info_list = 3;
 }
 
 message ModifyTaskRequest {
@@ -445,6 +453,28 @@ message QueryTasksInfoRequest{
 message QueryTasksInfoReply{
   bool ok = 1;
   repeated TaskInfo task_info_list = 2;
+}
+
+message CreateReservationRequest {
+  string reservation_name = 1;
+  int64 start_time_seconds = 2;
+  int64 duration_seconds = 3;
+  string partition = 4;
+  string craned_regex = 5;
+}
+
+message CreateReservationReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message DeleteReservationRequest {
+  string reservation_name = 1;
+}
+
+message DeleteReservationReply {
+  bool ok = 1;
+  string reason = 2;
 }
 
 message StreamCallocRequest {
@@ -765,6 +795,7 @@ service CraneCtld {
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+  rpc QueryReservationInfo(QueryReservationInfoRequest) returns (QueryReservationInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
 
@@ -792,6 +823,8 @@ service CraneCtld {
 
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
+  rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
+  rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
 }
 
 service Craned {
