@@ -86,9 +86,21 @@ struct Config {
   struct CraneCtldListenConf {
     std::string CraneCtldListenAddr;
     std::string CraneCtldListenPort;
+    std::string CraneCtldForCranedListenPort;
+    std::string CraneCtldForCforedListenPort;
 
     bool UseTls{false};
-    TlsCertificates Certs;
+    struct TlsCertsConfig {
+      std::string InternalCaContent;
+      std::string DomainSuffix;
+      TlsCertificates ExternalCerts;
+      TlsCertificates InternalCerts;
+      ClientTlsCertificates CranedClientCerts;
+      ClientTlsCertificates CforedClientCerts;
+    };
+
+    TlsCertsConfig TlsCerts;
+    std::string JwtSecretContent;
   };
   CraneCtldListenConf ListenConf;
 
@@ -688,6 +700,7 @@ struct User {
   bool deleted = false;
   uid_t uid;
   std::string name;
+  std::string password;
   std::string default_account;
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;

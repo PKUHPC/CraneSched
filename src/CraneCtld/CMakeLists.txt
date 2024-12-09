@@ -1,13 +1,12 @@
+
+add_subdirectory(RpcService)
+
 add_executable(cranectld
         CtldPublicDefs.h
-        CtldGrpcServer.h
-        CtldGrpcServer.cpp
         DbClient.h
         DbClient.cpp
         TaskScheduler.h
         TaskScheduler.cpp
-        CranedKeeper.h
-        CranedKeeper.cpp
         CranedMetaContainer.h
         CranedMetaContainer.cpp
         AccountManager.h
@@ -26,6 +25,7 @@ target_link_libraries(cranectld PRIVATE
         spdlog::spdlog
         concurrentqueue
 
+        RpcService
         Utility_PublicHeader
         Utility_PluginClient
 
