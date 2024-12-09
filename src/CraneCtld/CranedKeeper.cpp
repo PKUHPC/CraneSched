@@ -319,6 +319,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
       mutable_meta->set_sh_script(meta_in_ctld.sh_script);
       mutable_meta->set_term_env(meta_in_ctld.term_env);
       mutable_meta->set_interactive_type(meta_in_ctld.interactive_type);
+      mutable_meta->set_pty(meta_in_ctld.pty);
     }
   }
 
