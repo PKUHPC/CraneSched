@@ -931,6 +931,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
         fmt::format("Uid {} not found on the controller node", task->uid));
   }
   task->SetUsername(task->password_entry->Username());
+  task->SetGid(task->Gid());
 
   {  // Limit the lifecycle of user_scoped_ptr
     auto user_scoped_ptr =
