@@ -16,14 +16,20 @@
 
 #include "TaskScheduler.h"
 #include "CtldPublicDefs.h"
-#include "CranedMetaContainer.h"
 #include "InfluxDBClient.h"
+#include "IPMIManager.h"
 
 namespace Ctld {
+struct NodeEnergyInfo {
+  NodeStats recent_stats;             
+  NodeStats historical_stats;         
+  size_t task_count{0};          
+  NodeState state;
+};
 
 class EnergyAwarePriority : public IPrioritySorter {
  public:
-  explicit EnergyAwarePriority(const std::string& db_url = "http://localhost:8086", const std::string& token = "", const std::string& org = "crane  ")
+  explicit EnergyAwarePriority(const std::string& db_url = "http://127.0.0.1:8086", const std::string& token = "s31miLb7Q6O1d0z0HCGIuYI7MMg3WHD-ekSrSnLjj8Vo-bRDqypR1PcWXDKqfG8UZmPtuPRCECis4HboId6TUQ==", const std::string& org = "pku")
       : m_influx_client(db_url, token, org) {}
 
   std::vector<task_id_t> GetOrderedTaskIdList(
@@ -38,64 +44,24 @@ class EnergyAwarePriority : public IPrioritySorter {
   InfluxDBClient m_influx_client;
 };
 
+struct EnergyAwareConfig {
+  absl::Duration recent_stats_window{absl::Minutes(5)};
+  absl::Duration historical_stats_window{absl::Hours(1)};
+  double weight_current_power{0.4};
+  double weight_historical_power{0.3};
+  double weight_task_count{0.3};
+};
+
 class EnergyAwareNodeSelect : public INodeSelectionAlgo {
  public:
-  enum class NodePowerState {
-    Running,
-    Sleeping,
-    WakingUp,
-    GoingToSleep,
-    Unknown
-  };
-
-  struct NodeEnergyInfo {
-    struct Stats {
-      double current_power{0.0};    
-      double avg_power{0.0};        
-      double total_energy{0.0};     
-      double cpu_util{0.0};         
-      double mem_util{0.0};         
-      double gpu_util{0.0};         
-      absl::Duration time_span;     
-    };
-    
-    Stats recent_stats;             
-    Stats historical_stats;         
-    size_t task_count{0};          
-    NodePowerState power_state{NodePowerState::Unknown};
-    absl::Time last_task_end_time;
-    absl::Time last_state_change;
-  };
-
-  struct Config {
-    absl::Duration recent_stats_window;
-    absl::Duration historical_stats_window;
-    absl::Duration idle_sleep_threshold;
-    double power_sleep_threshold;
-    double weight_current_power;
-    double weight_historical_power;
-    double weight_task_count;
-    std::string db_url;
-    std::string token;
-    std::string org;
-    Config()
-        : recent_stats_window(absl::Minutes(5)),
-          historical_stats_window(absl::Hours(1)),
-          idle_sleep_threshold(absl::Minutes(5)),
-          power_sleep_threshold(50.0),
-          weight_current_power(0.4),
-          weight_historical_power(0.3),
-          weight_task_count(0.3),
-          db_url("http://localhost:8086"),
-          token("") {}
-  };
-
   explicit EnergyAwareNodeSelect(
       IPrioritySorter* priority_sorter, 
-      const Config& config = Config{})
+      const EnergyAwareConfig& config = EnergyAwareConfig{})
       : m_priority_sorter_(priority_sorter), 
-        m_config(config),
-        m_influx_client(config.db_url, config.token, config.org) {}
+        m_config_(config),
+        m_influx_client_("http://127.0.0.1:8086", "s31miLb7Q6O1d0z0HCGIuYI7MMg3WHD-ekSrSnLjj8Vo-bRDqypR1PcWXDKqfG8UZmPtuPRCECis4HboId6TUQ==", "pku") {
+        }
+
 
   ~EnergyAwareNodeSelect() override = default;
 
@@ -105,8 +71,6 @@ class EnergyAwareNodeSelect : public INodeSelectionAlgo {
       std::list<NodeSelectionResult>* selection_result_list) override;
 
  private:
-  static constexpr bool kAlgoTraceOutput = false;
-
   void UpdateNodeEnergyInfo_(
       const std::unordered_set<CranedId>& craned_ids,
       std::unordered_map<CranedId, NodeEnergyInfo>* energy_info);
@@ -119,23 +83,20 @@ class EnergyAwareNodeSelect : public INodeSelectionAlgo {
       TaskInCtld* task,
       const std::unordered_map<CranedId, NodeEnergyInfo>& energy_info);
 
+  void SelectNodesFromCandidates_(
+      const std::vector<std::pair<double, CranedId>>& candidates,
+      const std::string& node_type,
+      TaskInCtld* task,
+      const CranedMetaContainer::CranedMetaMapConstPtr& craned_meta,
+      std::list<CranedId>* selected_nodes,
+      ResourceV2* allocated_res);
+
   double CalculateNodeScore_(const NodeEnergyInfo& info) const;
 
-  bool ShouldSleepNode_(
-      const CranedId& craned_id,
-      const NodeEnergyInfo& energy_info) const;
-
-  bool SleepNode_(const CranedId& craned_id);
-
-  bool WakeupNode_(const CranedId& craned_id);
-
-  bool ExecuteIpmiPowerCommand_(const CranedId& craned_id, const std::string& command) const;
-  
-  std::string GetNodeIpmiStatus_(const CranedId& craned_id) const;
-
   IPrioritySorter* m_priority_sorter_;
-  Config m_config;
-  InfluxDBClient m_influx_client;
+  EnergyAwareConfig m_config_;
+  InfluxDBClient m_influx_client_;
+  IPMIManager m_ipmi_manager_;
 };
 
 }  // namespace Ctld 

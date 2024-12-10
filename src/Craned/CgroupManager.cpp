@@ -359,13 +359,13 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
             changed_cgroup)) {
       return nullptr;
     }
-    //  if ((preferred_controllers & Controller::BLOCK_CONTROLLER) &&
-    //      initialize_controller(*native_cgroup, Controller::BLOCK_CONTROLLER,
-    //                            required_controllers &
-    //                            Controller::BLOCK_CONTROLLER, has_cgroup,
-    //                            changed_cgroup)) {
-    //    return nullptr;
-    //  }
+    if ((preferred_controllers & Controller::BLOCK_CONTROLLER) &&
+        InitializeController_(
+            *native_cgroup, Controller::BLOCK_CONTROLLER,
+            required_controllers & Controller::BLOCK_CONTROLLER, has_cgroup,
+            changed_cgroup)) {
+      return nullptr;
+    }
     if ((preferred_controllers & Controller::CPU_CONTROLLER) &&
         InitializeController_(*native_cgroup, Controller::CPU_CONTROLLER,
                               required_controllers & Controller::CPU_CONTROLLER,
@@ -479,7 +479,8 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
             CgroupStrByTaskId_(task_id),
             NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
                 CgroupConstant::Controller::MEMORY_CONTROLLER |
-                CgroupConstant::Controller::DEVICES_CONTROLLER,
+                CgroupConstant::Controller::DEVICES_CONTROLLER |
+                CgroupConstant::Controller::BLOCK_CONTROLLER,
             NO_CONTROLLER_FLAG, false);
       } else if (GetCgroupVersion() ==
                  CgroupConstant::CgroupVersion::CGROUP_V2) {
@@ -499,9 +500,10 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
     if (cg) *cg = pcg;
   }
 
-  // JobMonitorHook
   if (g_config.Plugin.Enabled) {
-    g_plugin_client->JobMonitorHookAsync(task_id, pcg->GetCgroupString());
+    g_plugin_client->CreateCgroupHookAsync(task_id, 
+                                          pcg->GetCgroupString(),
+                                          res.dedicated_res_in_node());
   }
 
   CRANE_TRACE(
@@ -592,6 +594,10 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
       return false;
     }
     CgroupInterface *cgroup = it->second.GetExclusivePtr()->release();
+
+    if (g_config.Plugin.Enabled) {
+      g_plugin_client->DestroyCgroupHookAsync(task_id, cgroup->GetCgroupString());
+    }
 
     task_id_to_cg_map_ptr->erase(task_id);
 

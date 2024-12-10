@@ -10,8 +10,9 @@ fi
 mode=$1
 
 # Read info from configuration file
-conf_file=/etc/crane/database.yaml
-base_dir=/var/crane/
+global_conf_file=/etc/crane/config.yaml
+conf_file=$(grep 'DbConfigPath:' "$global_conf_file" | awk '{print $2}')
+base_dir=$(grep 'CraneBaseDir:' "$global_conf_file" | awk '{print $2}')
 
 username=$(grep 'DbUser:' "$conf_file" | awk '{print $2}')
 password=$(grep 'DbPassword:' "$conf_file" | awk -F\" '{print $2}')
