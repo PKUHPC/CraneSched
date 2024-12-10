@@ -129,7 +129,11 @@ class AccountManager {
                                       const std::string& account,
                                       const std::string& partition);
 
+<<<<<<< HEAD
   std::expected<void, std::string> CheckIfUserOfAccountIsEnabled(
+=======
+  CraneErrCodeExpected<void> CheckIfUserOfAccountIsEnabled(
+>>>>>>> 2d88fb3 (use codeErr type)
       const std::string& user, const std::string& account);
 
   CraneExpected<void> CheckAndApplyQosLimitOnTask(const std::string& user,

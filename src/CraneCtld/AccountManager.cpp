@@ -898,7 +898,11 @@ bool AccountManager::CheckUserPermissionToPartition(
   return false;
 }
 
+<<<<<<< HEAD
 std::expected<void, std::string> AccountManager::CheckIfUserOfAccountIsEnabled(
+=======
+CraneErrCodeExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
+>>>>>>> 2d88fb3 (use codeErr type)
     const std::string& user, const std::string& account) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -907,15 +911,23 @@ std::expected<void, std::string> AccountManager::CheckIfUserOfAccountIsEnabled(
   do {
     const Account* account_ptr = GetExistedAccountInfoNoLock_(account_name);
     if (account_ptr->blocked) {
+<<<<<<< HEAD
       return std::unexpected(
           fmt::format("Ancestor account '{}' is blocked", account_ptr->name));
+=======
+      return std::unexpected(crane::grpc::ErrCode::ERR_BLOCKED_ACCOUNT);
+>>>>>>> 2d88fb3 (use codeErr type)
     }
     account_name = account_ptr->parent_account;
   } while (!account_name.empty());
 
   const User* user_ptr = GetExistedUserInfoNoLock_(user);
   if (user_ptr->account_to_attrs_map.at(account).blocked) {
+<<<<<<< HEAD
     return std::unexpected(fmt::format("User '{}' is blocked", user_ptr->name));
+=======
+    return std::unexpected(crane::grpc::ErrCode::ERR_BLOCKED_USER);
+>>>>>>> 2d88fb3 (use codeErr type)
   }
   return {};
 }
@@ -989,7 +1001,11 @@ AccountManager::CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
   }
 
   return {};
+<<<<<<< HEAD
 }}
+=======
+}
+>>>>>>> 2d88fb3 (use codeErr type)
 
 std::expected<void, std::string> AccountManager::CheckUidIsAdmin(
     uint32_t uid) {

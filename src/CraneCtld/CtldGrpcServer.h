@@ -308,7 +308,11 @@ class CtldServer {
 
   inline void Wait() { m_server_->Wait(); }
 
+<<<<<<< HEAD
   std::expected<std::future<task_id_t>, std::string> SubmitTaskToScheduler(
+=======
+  CraneErrCodeExpected <std::future<task_id_t>> SubmitTaskToScheduler(
+>>>>>>> 2d88fb3 (use codeErr type)
       std::unique_ptr<TaskInCtld> task);
 
  private:

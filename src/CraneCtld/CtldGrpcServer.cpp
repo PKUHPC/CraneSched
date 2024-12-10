@@ -41,9 +41,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
       response->set_task_id(id);
     } else {
       response->set_ok(false);
-      response->set_reason(
-          "System error occurred or "
-          "the number of pending tasks exceeded maximum value.");
+      response->set_reason(crane::grpc::ErrCode::ERR_BEYOND_TASK_ID);
     }
   } else {
     response->set_ok(false);
@@ -57,7 +55,11 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTasksRequest *request,
     crane::grpc::SubmitBatchTasksReply *response) {
+<<<<<<< HEAD
   std::vector<std::expected<std::future<task_id_t>, std::string>> results;
+=======
+  std::vector<CraneErrCodeExpected<std::future<task_id_t>>> results;
+>>>>>>> 2d88fb3 (use codeErr type)
 
   uint32_t task_count = request->count();
   const auto &task_to_ctld = request->task();
@@ -815,7 +817,11 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
             result = std::expected<task_id_t, std::string>{
                 submit_result.value().get()};
           } else {
+<<<<<<< HEAD
             result = std::unexpected(submit_result.error());
+=======
+            result = result::fail(CraneErrCodeStr(submit_result.error()));
+>>>>>>> 2d88fb3 (use codeErr type)
           }
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
@@ -984,6 +990,11 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     return {std::move(future)};
   }
 
+<<<<<<< HEAD
   return std::unexpected(result.error());}
+=======
+  return std::unexpected(result.error());
+}
+>>>>>>> 2d88fb3 (use codeErr type)
 
 }  // namespace Ctld

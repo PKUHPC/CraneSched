@@ -61,7 +61,7 @@ message SubmitBatchTaskReply {
   bool ok = 1;
   oneof payload{
     uint32 task_id = 2;
-    string reason = 3;
+    ErrCode reason = 3;
   }
 }
 
@@ -72,7 +72,7 @@ message SubmitBatchTasksRequest {
 
 message SubmitBatchTasksReply {
   repeated uint32 task_id_list = 1;
-  repeated string reason_list = 2;
+  repeated ErrCode reason_list = 2;
 }
 
 message ExecuteTasksRequest {
