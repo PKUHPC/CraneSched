@@ -20,6 +20,7 @@
 
 #include "AccountManager.h"
 #include "CranedKeeper.h"
+#include "EnergyAwareScheduler.h"
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
@@ -37,8 +38,10 @@ TaskScheduler::TaskScheduler() {
     m_priority_sorter_ = std::make_unique<MultiFactorPriority>();
   }
 
+  // m_node_selection_algo_ =
+  //     std::make_unique<MinLoadFirst>(m_priority_sorter_.get());
   m_node_selection_algo_ =
-      std::make_unique<MinLoadFirst>(m_priority_sorter_.get());
+      std::make_unique<EnergyAwareNodeSelect>(m_priority_sorter_.get());
 }
 
 TaskScheduler::~TaskScheduler() {

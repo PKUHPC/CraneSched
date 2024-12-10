@@ -70,10 +70,17 @@ struct Config {
 
   struct BMC {
     std::string ip;
-    std::string port;
+    uint32_t port;
     std::string username;
     std::string password;
     std::string interface;
+  };
+
+  struct SSH {
+    std::string ip;
+    uint32_t port;
+    std::string username;
+    std::string password;
   };
 
   struct Node {
@@ -81,6 +88,7 @@ struct Config {
     uint64_t memory_bytes;
     DedicatedResourceInNode dedicated_resource;
     BMC bmc;
+    SSH ssh;
   };
 
   struct Partition {
@@ -149,6 +157,13 @@ struct Config {
   std::string DbRSName;
   std::string DbName;
 
+  // InfluxDB config
+  std::string InfluxDbUrl;
+  std::string InfluxDbToken;
+  std::string InfluxDbOrg;
+  std::string InfluxDbNodeBucket;
+  std::string InfluxDbTaskBucket;
+
   // Plugin config
   PluginConfig Plugin;
 
@@ -175,6 +190,7 @@ struct CranedStaticMeta {
   uint32_t port;
 
   Config::BMC bmc;
+  Config::SSH ssh;
 
   std::list<std::string> partition_ids;  // Partitions to which
                                          // this craned belongs to

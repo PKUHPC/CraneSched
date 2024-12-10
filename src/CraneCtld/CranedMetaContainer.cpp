@@ -428,8 +428,10 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
   };
 
   if (request.filter_craned_control_states().empty() ||
-      request.filter_craned_resource_states().empty())
+      request.filter_craned_resource_states().empty()) {
+    reply.set_ok(true);
     return reply;
+  }
 
   const int control_state_num = crane::grpc::CranedControlState_ARRAYSIZE;
   bool control_filters[control_state_num] = {false};
@@ -534,6 +536,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
     }
   });
 
+  reply.set_ok(true);
   return reply;
 }
 

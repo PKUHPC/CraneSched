@@ -362,10 +362,18 @@ void ParseConfig(int argc, char** argv) {
           if (node["bmc"]) {
             auto bmc = node["bmc"].as<YAML::Node>();
             node_ptr->bmc.ip = bmc["ip"].as<std::string>();
-            node_ptr->bmc.port = bmc["port"].as<std::string>();
+            node_ptr->bmc.port = bmc["port"].as<uint32_t>();
             node_ptr->bmc.username = bmc["username"].as<std::string>();
             node_ptr->bmc.password = bmc["password"].as<std::string>();
             node_ptr->bmc.interface = bmc["interface"].as<std::string>();
+          }
+
+          if (node["ssh"]) {
+            auto ssh = node["ssh"].as<YAML::Node>();
+            node_ptr->ssh.ip = ssh["ip"].as<std::string>();
+            node_ptr->ssh.port = ssh["port"].as<uint32_t>();
+            node_ptr->ssh.username = ssh["username"].as<std::string>();
+            node_ptr->ssh.password = ssh["password"].as<std::string>();
           }
 
           DedicatedResourceInNode resourceInNode;
@@ -413,6 +421,9 @@ void ParseConfig(int argc, char** argv) {
         }
       }
 
+      std::unordered_set nodes_without_part = g_config.Nodes |
+                                              ranges::views::keys |
+                                              ranges::to<std::unordered_set>();
       if (config["Partitions"]) {
         for (auto it = config["Partitions"].begin();
              it != config["Partitions"].end(); ++it) {
@@ -453,6 +464,7 @@ void ParseConfig(int argc, char** argv) {
             auto node_it = g_config.Nodes.find(node);
             if (node_it != g_config.Nodes.end()) {
               part.nodes.emplace(node_it->first);
+              nodes_without_part.erase(node_it->first);
               CRANE_TRACE("Set the partition of node {} to {}", node_it->first,
                           name);
             } else {
@@ -496,6 +508,13 @@ void ParseConfig(int argc, char** argv) {
 
           g_config.Partitions.emplace(std::move(name), std::move(part));
         }
+      }
+
+      if (!nodes_without_part.empty()) {
+        CRANE_ERROR("Nodes {} not belong to any partition",
+                    ranges::views::join(nodes_without_part, ",") |
+                        ranges::to<std::string>);
+        std::exit(1);
       }
 
       if (config["DefaultPartition"] && !config["DefaultPartition"].IsNull()) {
@@ -593,6 +612,31 @@ void ParseConfig(int argc, char** argv) {
         g_config.DbName = config["DbName"].as<std::string>();
       else
         g_config.DbName = "crane_db";
+
+      if (config["InfluxDbUrl"] && !config["InfluxDbUrl"].IsNull())
+        g_config.InfluxDbUrl = config["InfluxDbUrl"].as<std::string>();
+      else
+        g_config.InfluxDbUrl = "http://127.0.0.1:8086";
+
+      if (config["InfluxDbToken"] && !config["InfluxDbToken"].IsNull())
+        g_config.InfluxDbToken = config["InfluxDbToken"].as<std::string>();
+      else
+        g_config.InfluxDbToken = "123456";
+
+      if (config["InfluxDbOrg"] && !config["InfluxDbOrg"].IsNull())
+        g_config.InfluxDbOrg = config["InfluxDbOrg"].as<std::string>();
+      else
+        g_config.InfluxDbOrg = "pku";
+
+      if (config["InfluxDbNodeBucket"] && !config["InfluxDbNodeBucket"].IsNull())
+        g_config.InfluxDbNodeBucket = config["InfluxDbNodeBucket"].as<std::string>();
+      else
+        g_config.InfluxDbNodeBucket = "energy_node";
+
+      if (config["InfluxDbTaskBucket"] && !config["InfluxDbTaskBucket"].IsNull())
+        g_config.InfluxDbTaskBucket = config["InfluxDbTaskBucket"].as<std::string>();
+      else
+        g_config.InfluxDbTaskBucket = "energy_task";
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open database config file {}: {}", db_config_path,
                      e.what());

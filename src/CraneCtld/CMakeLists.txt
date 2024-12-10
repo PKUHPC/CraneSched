@@ -1,4 +1,5 @@
 find_package(CURL REQUIRED)
+find_package(LibSSH REQUIRED)
 
 add_executable(cranectld
         CtldPublicDefs.h
@@ -21,6 +22,8 @@ add_executable(cranectld
         EnergyAwareScheduler.cpp
         InfluxDBClient.h
         InfluxDBClient.cpp
+        IPMIManager.h
+        IPMIManager.cpp
 
         CtldPreCompiledHeader.h)
 
@@ -57,8 +60,9 @@ target_link_libraries(cranectld PRIVATE
         Backward::Interface
         
         influxdb_cpp
-
         CURL::libcurl 
+        fast_cpp_csv_parser
+        ssh
 )
 
 if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
