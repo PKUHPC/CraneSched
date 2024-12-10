@@ -130,7 +130,9 @@ grpc::Status PluginClient::SendStartHook_(grpc::ClientContext* context,
   using crane::grpc::plugin::StartHookReply;
   using crane::grpc::plugin::StartHookRequest;
 
-  auto request = dynamic_cast<StartHookRequest*>(msg);
+  auto* request = dynamic_cast<StartHookRequest*>(msg);
+  CRANE_ASSERT(request != nullptr);
+  
   StartHookReply reply;
 
   CRANE_TRACE("[Plugin] Sending StartHook.");
@@ -142,23 +144,41 @@ grpc::Status PluginClient::SendEndHook_(grpc::ClientContext* context,
   using crane::grpc::plugin::EndHookReply;
   using crane::grpc::plugin::EndHookRequest;
 
-  auto request = dynamic_cast<EndHookRequest*>(msg);
+  auto* request = dynamic_cast<EndHookRequest*>(msg);
+  CRANE_ASSERT(request != nullptr);
+  
   EndHookReply reply;
 
   CRANE_TRACE("[Plugin] Sending EndHook.");
   return m_stub_->EndHook(context, *request, &reply);
 }
 
-grpc::Status PluginClient::SendJobMonitorHook_(grpc::ClientContext* context,
+grpc::Status PluginClient::SendCreateCgroupHook_(grpc::ClientContext* context,
+                                                 google::protobuf::Message* msg) {
+  using crane::grpc::plugin::CreateCgroupHookReply;
+  using crane::grpc::plugin::CreateCgroupHookRequest;
+
+  auto* request = dynamic_cast<CreateCgroupHookRequest*>(msg);
+  CRANE_ASSERT(request != nullptr);
+  
+  CreateCgroupHookReply reply;
+
+  CRANE_TRACE("[Plugin] Sending CreateCgroupHook.");
+  return m_stub_->CreateCgroupHook(context, *request, &reply);
+}
+
+grpc::Status PluginClient::SendDestroyCgroupHook_(grpc::ClientContext* context,
                                                google::protobuf::Message* msg) {
-  using crane::grpc::plugin::JobMonitorHookReply;
-  using crane::grpc::plugin::JobMonitorHookRequest;
+  using crane::grpc::plugin::DestroyCgroupHookReply;
+  using crane::grpc::plugin::DestroyCgroupHookRequest;
 
-  auto request = dynamic_cast<JobMonitorHookRequest*>(msg);
-  JobMonitorHookReply reply;
+  auto* request = dynamic_cast<DestroyCgroupHookRequest*>(msg);
+  CRANE_ASSERT(request != nullptr);
+  
+  DestroyCgroupHookReply reply;
 
-  CRANE_TRACE("[Plugin] Sending JobMonitorHook.");
-  return m_stub_->JobMonitorHook(context, *request, &reply);
+  CRANE_TRACE("[Plugin] Sending DestroyCgroupHook.");
+  return m_stub_->DestroyCgroupHook(context, *request, &reply);
 }
 
 void PluginClient::StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
@@ -191,15 +211,27 @@ void PluginClient::EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
   m_event_queue_.enqueue(std::move(e));
 }
 
-void PluginClient::JobMonitorHookAsync(task_id_t task_id,
-                                       std::string cgroup_path) {
-  auto request = std::make_unique<crane::grpc::plugin::JobMonitorHookRequest>();
+void PluginClient::CreateCgroupHookAsync(task_id_t task_id,
+                                        const std::string& cgroup,
+                                        const crane::grpc::DedicatedResourceInNode &request_resource) {
+  auto request = std::make_unique<crane::grpc::plugin::CreateCgroupHookRequest>();
   request->set_task_id(task_id);
-  request->set_cgroup(cgroup_path);
+  request->set_cgroup(cgroup);
+  request->mutable_request_res()->CopyFrom(request_resource);
 
-  HookEvent e{HookType::JOB_MONITOR,
+  HookEvent e{HookType::CREATE_CGROUP,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
+  m_event_queue_.enqueue(std::move(e));
+}
 
+void PluginClient::DestroyCgroupHookAsync(task_id_t task_id,
+                                      const std::string& cgroup) {
+  auto request = std::make_unique<crane::grpc::plugin::DestroyCgroupHookRequest>();
+  request->set_task_id(task_id);
+  request->set_cgroup(cgroup);
+
+  HookEvent e{HookType::DESTROY_CGROUP,
+              std::unique_ptr<google::protobuf::Message>(std::move(request))};
   m_event_queue_.enqueue(std::move(e));
 }
 

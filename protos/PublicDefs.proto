@@ -79,10 +79,18 @@ enum PartitionState {
 }
 
 enum CranedResourceState {
-  CRANE_IDLE = 0;
-  CRANE_MIX = 1;
-  CRANE_ALLOC = 2;
-  CRANE_DOWN = 3;
+  // Running状态下的资源使用状态
+  CRANE_IDLE = 0;        // 无任务运行
+  CRANE_ALLOC = 1;       // 资源完全分配
+  CRANE_MIX = 2;         // 部分资源已分配
+
+  // 非Running状态下的资源使用状态
+  CRANE_SLEEPED = 4;     // 节点休眠
+  CRANE_SHUTDOWN = 5;    // 节点已关机
+  CRANE_WAKING_UP = 6;   // 正在唤醒
+  CRANE_POWERING_UP = 7; // 正在开机
+  CRANE_SHUTTING_DOWN = 8;// 正在关机
+  CRANE_UNKNOWN = 9;     // 未知状态
 }
 
 enum CranedControlState {
