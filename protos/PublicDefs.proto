@@ -79,10 +79,18 @@ enum PartitionState {
 }
 
 enum CranedResourceState {
-  CRANE_IDLE = 0;
-  CRANE_MIX = 1;
-  CRANE_ALLOC = 2;
-  CRANE_DOWN = 3;
+  // Running
+  CRANE_IDLE = 0;        
+  CRANE_ALLOC = 1;       
+  CRANE_MIX = 2;         
+
+  // Not Running
+  CRANE_SLEEPED = 4;     
+  CRANE_SHUTDOWN = 5;    
+  CRANE_WAKING_UP = 6;   
+  CRANE_POWERING_UP = 7; 
+  CRANE_SHUTTING_DOWN = 8;
+  CRANE_UNKNOWN = 9;     
 }
 
 enum CranedControlState {

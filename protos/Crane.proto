@@ -744,6 +744,46 @@ message StreamCforedTaskIOReply {
   }
 }
 
+message SleepCranedRequest {
+  uint32 uid = 1;           
+  string craned_id = 2;     
+}
+
+message SleepCranedReply {
+  bool ok = 1;              
+  string reason = 2;        
+}
+
+message WakeupCranedRequest {
+  uint32 uid = 1;          
+  string craned_id = 2;     
+}
+
+message WakeupCranedReply {
+  bool ok = 1;              
+  string reason = 2;        
+}
+
+message ShutdownCranedRequest {
+  uint32 uid = 1;           
+  string craned_id = 2;     
+}
+
+message ShutdownCranedReply {
+  bool ok = 1;              
+  string reason = 2;        
+}
+
+message PowerOnCranedRequest {
+  uint32 uid = 1;           
+  string craned_id = 2;     
+}
+
+message PowerOnCranedReply {
+  bool ok = 1;             
+  string reason = 2;        
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -792,6 +832,11 @@ service CraneCtld {
 
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
+
+  rpc SleepCraned(SleepCranedRequest) returns (SleepCranedReply) {}
+  rpc WakeupCraned(WakeupCranedRequest) returns (WakeupCranedReply) {}
+  rpc ShutdownCraned(ShutdownCranedRequest) returns (ShutdownCranedReply) {}
+  rpc PowerOnCraned(PowerOnCranedRequest) returns (PowerOnCranedReply) {}
 }
 
 service Craned {

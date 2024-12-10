@@ -19,6 +19,7 @@
 #include "CtldGrpcServer.h"
 
 #include "AccountManager.h"
+#include "IPMIManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
@@ -867,6 +868,102 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
     }
     }
   }
+}
+
+grpc::Status CraneCtldServiceImpl::SleepCraned(
+    grpc::ServerContext *context,
+    const crane::grpc::SleepCranedRequest *request,
+    crane::grpc::SleepCranedReply *response) {
+
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (res.has_error()) {
+    response->set_ok(false);
+    response->set_reason(res.error());
+    return grpc::Status::OK;
+  }
+
+  bool success = g_ipmi_manager->SleepCraned(request->craned_id());
+
+  if (success) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason("Failed to sleep craned");
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::WakeupCraned(
+    grpc::ServerContext *context,
+    const crane::grpc::WakeupCranedRequest *request,
+    crane::grpc::WakeupCranedReply *response) {
+
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (res.has_error()) {
+    response->set_ok(false);
+    response->set_reason(res.error());
+    return grpc::Status::OK;
+  }
+
+  bool success = g_ipmi_manager->WakeupCraned(request->craned_id());
+
+  if (success) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason("Failed to wakeup craned");
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::ShutdownCraned(
+    grpc::ServerContext *context,
+    const crane::grpc::ShutdownCranedRequest *request,
+    crane::grpc::ShutdownCranedReply *response) {
+
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (res.has_error()) {
+    response->set_ok(false);
+    response->set_reason(res.error());
+    return grpc::Status::OK;
+  }
+
+  bool success = g_ipmi_manager->ShutdownCraned(request->craned_id());
+
+  if (success) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason("Failed to shutdown craned");
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::PowerOnCraned(
+    grpc::ServerContext *context,
+    const crane::grpc::PowerOnCranedRequest *request,
+    crane::grpc::PowerOnCranedReply *response) {
+
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (res.has_error()) {
+    response->set_ok(false);
+    response->set_reason(res.error());
+    return grpc::Status::OK;
+  }
+
+  bool success = g_ipmi_manager->PowerOnCraned(request->craned_id());
+
+  if (success) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason("Failed to power on craned");
+  }
+
+  return grpc::Status::OK;
 }
 
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {

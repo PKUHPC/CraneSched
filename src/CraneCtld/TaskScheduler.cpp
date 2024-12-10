@@ -23,6 +23,7 @@
 #include "CranedMetaContainer.h"
 #include "CtldPublicDefs.h"
 #include "EmbeddedDbClient.h"
+#include "EnergyAwareScheduler.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
 
@@ -37,8 +38,10 @@ TaskScheduler::TaskScheduler() {
     m_priority_sorter_ = std::make_unique<MultiFactorPriority>();
   }
 
+  // m_node_selection_algo_ =
+  //     std::make_unique<MinLoadFirst>(m_priority_sorter_.get());
   m_node_selection_algo_ =
-      std::make_unique<MinLoadFirst>(m_priority_sorter_.get());
+      std::make_unique<EnergyAwareNodeSelect>(m_priority_sorter_.get());
 }
 
 TaskScheduler::~TaskScheduler() {
@@ -1849,7 +1852,9 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     auto craned_meta = craned_meta_ptr.GetExclusivePtr();
 
     // An offline craned shouldn't be scheduled.
-    if (!craned_meta->alive || craned_meta->drain) continue;
+    if (craned_meta->state_info.state != CranedState::Running ||
+        craned_meta->drain)
+      continue;
 
     // Sort all running task in this node by ending time.
     std::vector<std::pair<absl::Time, uint32_t>> end_time_task_id_vec;
@@ -2819,7 +2824,20 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
     for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-      if (task->requested_node_res_view <= craned_meta->res_total &&
+
+      bool node_available = false;
+      if (craned_meta->state_info.state == CranedState::Running) {
+        if (task->requested_node_res_view <= craned_meta->res_total) {
+          node_available = true;
+        }
+      } else if (craned_meta->state_info.state == CranedState::Shutdown ||
+                 craned_meta->state_info.state == CranedState::Sleeped) {
+        if (task->requested_node_res_view <= craned_meta->static_meta.res) {
+          node_available = true;
+        }
+      }
+
+      if (node_available &&
           (task->included_nodes.empty() ||
            task->included_nodes.contains(craned_id)) &&
           (task->excluded_nodes.empty() ||

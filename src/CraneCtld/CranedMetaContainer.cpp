@@ -19,6 +19,7 @@
 #include "CranedMetaContainer.h"
 
 #include "CranedKeeper.h"
+#include "CtldPublicDefs.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -52,7 +53,7 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
   // Then acquire craned meta lock.
   CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
   auto node_meta = craned_meta_map_[craned_id];
-  node_meta->alive = true;
+  node_meta->state_info.state = CranedState::Running;
 
   node_meta->remote_meta = std::move(remote_meta);
 
@@ -94,7 +95,7 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   // Then acquire craned meta lock.
   CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
   auto node_meta = craned_meta_map_[craned_id];
-  node_meta->alive = false;
+  node_meta->state_info.state = CranedState::Shutdown;
 
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
@@ -116,8 +117,8 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
 
 bool CranedMetaContainer::CheckCranedOnline(const CranedId& craned_id) {
   CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
-  auto node_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
-  return node_meta->alive;
+  auto craned_meta = craned_meta_map_[craned_id];
+  return craned_meta->state_info.state == CranedState::Running;
 }
 
 CranedMetaContainer::PartitionMetaPtr CranedMetaContainer::GetPartitionMetasPtr(
@@ -200,7 +201,7 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
-  if (!node_meta->alive) {
+  if (node_meta->state_info.state != CranedState::Running) {
     CRANE_DEBUG("Crane {} has already been down. Ignore FreeResourceFromNode.",
                 node_meta->static_meta.hostname);
     return;
@@ -253,6 +254,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     static_meta.port = std::strtoul(kCranedDefaultPort, nullptr, 10);
     
     static_meta.bmc = config.Nodes.at(craned_name)->bmc;
+    static_meta.ssh = config.Nodes.at(craned_name)->ssh;
   }
 
   for (auto&& [part_name, partition] : config.Partitions) {
@@ -428,8 +430,10 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
   };
 
   if (request.filter_craned_control_states().empty() ||
-      request.filter_craned_resource_states().empty())
+      request.filter_craned_resource_states().empty()) {
+    reply.set_ok(true);
     return reply;
+  }
 
   const int control_state_num = crane::grpc::CranedControlState_ARRAYSIZE;
   bool control_filters[control_state_num] = {false};
@@ -502,7 +506,10 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
         control_state = crane::grpc::CranedControlState::CRANE_NONE;
       }
       crane::grpc::CranedResourceState resource_state;
-      if (craned_meta->alive) {
+    switch (craned_meta->state_info.state) {
+    
+      case CranedState::Running:
+        // Running状态下根据资源使用情况设置具体状态
         if (res_in_use.IsZero()) {
           resource_state = crane::grpc::CranedResourceState::CRANE_IDLE;
         } else if (res_avail.allocatable_res.IsAnyZero()) {
@@ -510,9 +517,34 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
         } else {
           resource_state = crane::grpc::CranedResourceState::CRANE_MIX;
         }
-      } else {
-        resource_state = crane::grpc::CranedResourceState::CRANE_DOWN;
+        break;
+
+      case CranedState::Sleeped:
+        resource_state = crane::grpc::CranedResourceState::CRANE_SLEEPED;
+        break;
+
+      case CranedState::Shutdown:
+        resource_state = crane::grpc::CranedResourceState::CRANE_SHUTDOWN;
+        break;
+
+      case CranedState::WakingUp:
+        resource_state = crane::grpc::CranedResourceState::CRANE_WAKING_UP;
+        break;
+
+      case CranedState::PoweringUp:
+        resource_state = crane::grpc::CranedResourceState::CRANE_POWERING_UP;
+        break;
+
+      case CranedState::ShuttingDown:
+        resource_state = crane::grpc::CranedResourceState::CRANE_SHUTTING_DOWN;
+        break;
+
+      case CranedState::Unknown:
+      default:
+        resource_state = crane::grpc::CranedResourceState::CRANE_UNKNOWN;
+        break;
       }
+
       if (control_filters[static_cast<int>(control_state)] &&
           resource_filters[static_cast<int>(resource_state)]) {
         craned_name_lists[static_cast<int>(control_state)]
@@ -534,6 +566,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
     }
   });
 
+  reply.set_ok(true);
   return reply;
 }
 
@@ -550,7 +583,7 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
 
     auto craned_meta = craned_meta_map_[craned_id];
 
-    if (craned_meta->alive) {
+    if (craned_meta->state_info.state == CranedState::Running) {
       if (request.new_state() == crane::grpc::CranedControlState::CRANE_DRAIN) {
         craned_meta->drain = true;
         craned_meta->state_reason = request.reason();
@@ -593,7 +626,7 @@ void CranedMetaContainer::AddDedicatedResource(
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
-  if (!node_meta->alive) return;
+  if (node_meta->state_info.state != CranedState::Running) return;
 
   // Find how many resource should add,
   // under the constraint of configured count
@@ -648,19 +681,50 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
     craned_info->set_control_state(crane::grpc::CranedControlState::CRANE_NONE);
   }
 
-  if (craned_meta.alive) {
-    if (craned_meta.res_in_use.IsZero())
+  switch (craned_meta.state_info.state) {
+    case CranedState::Running:
+      if (craned_meta.res_in_use.IsZero()) {
+        craned_info->set_resource_state(
+            crane::grpc::CranedResourceState::CRANE_IDLE);
+      } else if (craned_meta.res_avail.allocatable_res.IsAnyZero()) {
+        craned_info->set_resource_state(
+            crane::grpc::CranedResourceState::CRANE_ALLOC);
+      } else {
+        craned_info->set_resource_state(
+            crane::grpc::CranedResourceState::CRANE_MIX);
+      }
+      break;
+
+    case CranedState::Sleeped:
       craned_info->set_resource_state(
-          crane::grpc::CranedResourceState::CRANE_IDLE);
-    else if (craned_meta.res_avail.allocatable_res.IsAnyZero())
+          crane::grpc::CranedResourceState::CRANE_SLEEPED);
+      break;
+
+    case CranedState::Shutdown:
       craned_info->set_resource_state(
-          crane::grpc::CranedResourceState::CRANE_ALLOC);
-    else
+          crane::grpc::CranedResourceState::CRANE_SHUTDOWN);
+      break;
+
+    case CranedState::WakingUp:
       craned_info->set_resource_state(
-          crane::grpc::CranedResourceState::CRANE_MIX);
-  } else
-    craned_info->set_resource_state(
-        crane::grpc::CranedResourceState::CRANE_DOWN);
+          crane::grpc::CranedResourceState::CRANE_WAKING_UP);
+      break;
+
+    case CranedState::PoweringUp:
+      craned_info->set_resource_state(
+          crane::grpc::CranedResourceState::CRANE_POWERING_UP);
+      break;
+
+    case CranedState::ShuttingDown:
+      craned_info->set_resource_state(
+          crane::grpc::CranedResourceState::CRANE_SHUTTING_DOWN);
+      break;
+
+    default:
+      craned_info->set_resource_state(
+          crane::grpc::CranedResourceState::CRANE_UNKNOWN);
+      break;
+  }
 
   craned_info->mutable_partition_names()->Assign(
       craned_meta.static_meta.partition_ids.begin(),

@@ -1,5 +1,7 @@
 generated
 cmake-build-*
+build/
+.cache/
 
 .cache/*
 build/*
