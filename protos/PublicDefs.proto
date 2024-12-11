@@ -223,6 +223,7 @@ message InteractiveTaskAdditionalMeta {
   string sh_script = 2;
   string term_env = 3;
   InteractiveTaskType interactive_type = 4;
+  bool pty = 5;
 }
 
 message TaskInfo {
