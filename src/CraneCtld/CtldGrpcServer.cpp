@@ -55,11 +55,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTasksRequest *request,
     crane::grpc::SubmitBatchTasksReply *response) {
-<<<<<<< HEAD
-  std::vector<std::expected<std::future<task_id_t>, std::string>> results;
-=======
   std::vector<CraneErrCodeExpected<std::future<task_id_t>>> results;
->>>>>>> 2d88fb3 (use codeErr type)
 
   uint32_t task_count = request->count();
   const auto &task_to_ctld = request->task();
@@ -817,11 +813,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
             result = std::expected<task_id_t, std::string>{
                 submit_result.value().get()};
           } else {
-<<<<<<< HEAD
-            result = std::unexpected(submit_result.error());
-=======
             result = result::fail(CraneErrCodeStr(submit_result.error()));
->>>>>>> 2d88fb3 (use codeErr type)
           }
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
@@ -990,11 +982,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     return {std::move(future)};
   }
 
-<<<<<<< HEAD
-  return std::unexpected(result.error());}
-=======
   return std::unexpected(result.error());
 }
->>>>>>> 2d88fb3 (use codeErr type)
 
 }  // namespace Ctld
