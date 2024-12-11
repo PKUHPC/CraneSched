@@ -506,6 +506,7 @@ struct TaskInCtld {
     uid = val.uid();
     password_entry = std::make_unique<PasswordEntry>(uid);
     gid = val.gid();
+    runtime_attr.set_gid(gid);
     account = val.account();
     name = val.name();
     qos = val.qos();
