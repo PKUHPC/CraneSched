@@ -153,8 +153,6 @@ inline Ctld::Config g_config;
 
 namespace Ctld {
 
-namespace result = cpp_result;
-
 /**
  * The static information on a Craned (the static part of CranedMeta). This
  * structure is provided when a new Craned node is to be registered in

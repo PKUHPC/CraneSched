@@ -87,9 +87,6 @@
 // fpm
 #include <fpm/fixed.hpp>
 
-// result
-#include <result/result.hpp>
-
 #include "crane/Logger.h"
 // Logger.h must be the first
 

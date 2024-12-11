@@ -23,8 +23,6 @@
 
 #include <grp.h>
 
-#include <uvw.hpp>
-
 #include "CgroupManager.h"
 #include "crane/PasswordEntry.h"
 #include "protos/Crane.grpc.pb.h"

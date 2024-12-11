@@ -21,20 +21,9 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include <uvw.hpp>
-
 #include "TaskManager.h"
 
 namespace Craned {
-
-// Todo: Move using into classes or functions!
-using grpc::Channel;
-using grpc::ClientAsyncReaderWriter;
-using grpc::CompletionQueue;
-
-using crane::grpc::CraneForeD;
-using crane::grpc::StreamCforedTaskIOReply;
-using crane::grpc::StreamCforedTaskIORequest;
 
 class CforedClient {
   template <class T>
@@ -66,8 +55,9 @@ class CforedClient {
   };
 
   void CleanOutputQueueAndWriteToStreamThread_(
-      ClientAsyncReaderWriter<StreamCforedTaskIORequest,
-                              StreamCforedTaskIOReply>* stream,
+      grpc::ClientAsyncReaderWriter<crane::grpc::StreamCforedTaskIORequest,
+                                    crane::grpc::StreamCforedTaskIOReply>*
+          stream,
       std::atomic<bool>* write_pending);
 
   ConcurrentQueue<std::pair<task_id_t, std::string /*msg*/>> m_output_queue_;
@@ -75,8 +65,8 @@ class CforedClient {
   std::atomic<bool> m_stopped_{false};
 
   std::string m_cfored_name_;
-  std::shared_ptr<Channel> m_cfored_channel_;
-  std::unique_ptr<CraneForeD::Stub> m_stub_;
+  std::shared_ptr<grpc::Channel> m_cfored_channel_;
+  std::unique_ptr<crane::grpc::CraneForeD::Stub> m_stub_;
 
   // Tag MUST have the same size of void* !!!!
   enum class Tag : intptr_t { Prepare = 0, Read = 1, Write = 2 };
