@@ -254,7 +254,7 @@ class TaskScheduler {
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
 
-  CraneErr TerminateInteractivePendingOrRunningTask(uint32_t task_id) {
+  CraneErr TerminatePendingOrRunningIaTask(uint32_t task_id) {
     LockGuard pending_guard(&m_pending_task_map_mtx_);
     LockGuard running_guard(&m_running_task_map_mtx_);
 

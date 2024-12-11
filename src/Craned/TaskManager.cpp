@@ -522,7 +522,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   int ctrl_sock_pair[2];  // Socket pair for passing control messages.
 
   // Socket pair for forwarding IO of crun tasks. Craned read from index 0.
-  int crun_msg_sock_pair[2];
+  int crun_io_sock_pair[2];
 
   // The ResourceInNode structure should be copied here for being accessed in
   // the child process.
@@ -572,12 +572,12 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     if (launch_pty) {
       child_pid = forkpty(&crun_meta->msg_fd, nullptr, nullptr, nullptr);
     } else {
-      if (socketpair(AF_UNIX, SOCK_STREAM, 0, crun_msg_sock_pair) != 0) {
+      if (socketpair(AF_UNIX, SOCK_STREAM, 0, crun_io_sock_pair) != 0) {
         CRANE_ERROR("Failed to create socket pair for task io forward: {}",
                     strerror(errno));
         return CraneErr::kSystemErr;
       }
-      crun_meta->msg_fd = crun_msg_sock_pair[0];
+      crun_meta->msg_fd = crun_io_sock_pair[0];
       child_pid = fork();
     }
   } else {
@@ -605,7 +605,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     int ctrl_fd = ctrl_sock_pair[0];
     close(ctrl_sock_pair[1]);
     if (instance->IsCrun() && !launch_pty) {
-      close(crun_msg_sock_pair[1]);
+      close(crun_io_sock_pair[1]);
     }
 
     setegid(saved_priv.gid);
@@ -787,12 +787,12 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       close(stdout_fd);
 
     } else if (instance->IsCrun() && !launch_pty) {
-      close(crun_msg_sock_pair[0]);
+      close(crun_io_sock_pair[0]);
 
-      dup2(crun_msg_sock_pair[1], 0);
-      dup2(crun_msg_sock_pair[1], 1);
-      dup2(crun_msg_sock_pair[1], 2);
-      close(crun_msg_sock_pair[1]);
+      dup2(crun_io_sock_pair[1], 0);
+      dup2(crun_io_sock_pair[1], 1);
+      dup2(crun_io_sock_pair[1], 2);
+      close(crun_io_sock_pair[1]);
     }
 
     child_process_ready.set_ok(true);

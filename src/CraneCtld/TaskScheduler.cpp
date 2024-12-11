@@ -687,30 +687,30 @@ void TaskScheduler::ScheduleThread_() {
             util::HostNameListToStr(task->CranedIds());
 
         // Task execute on all node, otherwise on the first node
-        bool launch_all_node;
+        bool launch_on_all_nodes;
         if (task->type == crane::grpc::Batch) {
           // For cbatch tasks whose --node > 1,
           // only execute the command at the first allocated node.
-          launch_all_node = false;
+          launch_on_all_nodes = false;
         } else {
           const auto& meta = std::get<InteractiveMetaInTask>(task->meta);
           if (meta.interactive_type == crane::grpc::Calloc)
             // For calloc tasks we still need to execute a dummy empty task to
             // set up a timer.
-            launch_all_node = false;
+            launch_on_all_nodes = false;
           else {
             // For crun tasks we need to execute tasks on all allocated
             // nodes.
 
             // Crun task with pty only launch on first node
             if (task->TaskToCtld().interactive_meta().pty())
-              launch_all_node = false;
+              launch_on_all_nodes = false;
             else
-              launch_all_node = true;
+              launch_on_all_nodes = true;
           }
         }
 
-        if (launch_all_node) {
+        if (launch_on_all_nodes) {
           for (auto const& craned_id : task->CranedIds())
             task->executing_craned_ids.emplace_back(craned_id);
         } else
