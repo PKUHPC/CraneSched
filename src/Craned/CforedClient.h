@@ -21,8 +21,6 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include <uvw.hpp>
-
 #include "TaskManager.h"
 
 namespace Craned {

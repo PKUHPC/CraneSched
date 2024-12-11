@@ -23,7 +23,6 @@
 
 #include "crane/OS.h"
 
-
 namespace Craned {
 
 inline constexpr uint64_t kEvSigChldResendMs = 500;
