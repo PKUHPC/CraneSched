@@ -224,9 +224,10 @@ message ModifyTaskReply {
 }
 
 message ModifyCranedStateRequest{
-  repeated string craned_ids = 1;
-  CranedControlState new_state = 2;
-  string reason = 3;
+  uint32 uid = 1;
+  repeated string craned_ids = 2;
+  CranedControlState new_state = 3;
+  string reason = 4;
 }
 
 message ModifyCranedStateReply{
