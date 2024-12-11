@@ -783,9 +783,9 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
           meta.cb_task_completed = [this, i_type, cfored_name, writer_weak_ptr](
                                        task_id_t task_id,
-                                       bool send_comlete_ack) {
+                                       bool send_complete_ack) {
             if (auto writer = writer_weak_ptr.lock();
-                writer && send_comlete_ack)
+                writer && send_complete_ack)
               writer->WriteTaskCompletionAckReply(task_id);
             m_ctld_server_->m_mtx_.Lock();
 
