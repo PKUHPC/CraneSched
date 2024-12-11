@@ -201,8 +201,14 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     }
   } else if (request->attribute() == ModifyTaskRequest::Hold) {
     int64_t secs = request->hold_seconds();
+    std::vector<std::pair<task_id_t, std::future<CraneErr>>> results;
+    results.reserve(request->task_ids().size());
     for (auto task_id : request->task_ids()) {
-      err = g_task_scheduler->HoldReleaseTaskAsync(task_id, secs).get();
+      results.emplace_back(
+          task_id, g_task_scheduler->HoldReleaseTaskAsync(task_id, secs));
+    }
+    for (auto &[task_id, res] : results) {
+      err = res.get();
       if (err == CraneErr::kOk) {
         response->add_modified_tasks(task_id);
       } else if (err == CraneErr::kNonExistent) {
