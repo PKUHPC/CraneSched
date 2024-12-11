@@ -41,9 +41,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
       response->set_task_id(id);
     } else {
       response->set_ok(false);
-      response->set_reason(
-          "System error occurred or "
-          "the number of pending tasks exceeded maximum value.");
+      response->set_reason(crane::grpc::ErrCode::ERR_BEYOND_TASK_ID);
     }
   } else {
     response->set_ok(false);
@@ -57,7 +55,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTasksRequest *request,
     crane::grpc::SubmitBatchTasksReply *response) {
-  std::vector<std::expected<std::future<task_id_t>, std::string>> results;
+  std::vector<CraneErrCodeExpected<std::future<task_id_t>>> results;
 
   uint32_t task_count = request->count();
   const auto &task_to_ctld = request->task();
@@ -817,7 +815,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
             result = std::expected<task_id_t, std::string>{
                 submit_result.value().get()};
           } else {
-            result = std::unexpected(submit_result.error());
+            result = result::fail(CraneErrCodeStr(submit_result.error()));
           }
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
@@ -937,13 +935,11 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   signal(SIGINT, &CtldServer::signal_handler_func);
 }
 
-std::expected<std::future<task_id_t>, std::string>
+CraneErrCodeExpected <std::future<task_id_t>>
 CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
-  CraneErr err;
 
   if (!task->password_entry->Valid()) {
-    return std::unexpected(
-        fmt::format("Uid {} not found on the controller node", task->uid));
+    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_UID);
   }
   task->SetUsername(task->password_entry->Username());
 
@@ -951,8 +947,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     auto user_scoped_ptr =
         g_account_manager->GetExistedUserInfo(task->Username());
     if (!user_scoped_ptr) {
-      return std::unexpected(fmt::format(
-          "User '{}' not found in the account database", task->Username()));
+      return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_USER);
     }
 
     if (task->account.empty()) {
@@ -960,18 +955,14 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
       task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
     } else {
       if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
-        return std::unexpected(fmt::format(
-            "Account '{}' is not in your account list", task->account));
+          return std::unexpected(crane::grpc::ErrCode::ERR_USER_ACCOUNT_MISMATCH);
       }
     }
   }
 
   if (!g_account_manager->CheckUserPermissionToPartition(
           task->Username(), task->account, task->partition_id)) {
-    return std::unexpected(
-        fmt::format("User '{}' doesn't have permission to use partition '{}' "
-                    "when using account '{}'",
-                    task->Username(), task->partition_id, task->account));
+       return std::unexpected(crane::grpc::ErrCode::ERR_ALLOWED_PARTITION);
   }
 
   auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
@@ -980,46 +971,19 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     return std::unexpected(enable_res.error());
   }
 
-  err = g_task_scheduler->AcquireTaskAttributes(task.get());
+  auto result = g_task_scheduler->AcquireTaskAttributes(task.get());
 
-  if (err == CraneErr::kOk)
-    err = g_task_scheduler->CheckTaskValidity(task.get());
+  if (result)
+    result = g_task_scheduler->CheckTaskValidity(task.get());
 
-  if (err == CraneErr::kOk) {
+  if (result) {
     task->SetSubmitTime(absl::Now());
     std::future<task_id_t> future =
         g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
   }
 
-  if (err == CraneErr::kNonExistent) {
-    CRANE_DEBUG("Task submission failed. Reason: Partition doesn't exist!");
-    return std::unexpected("Partition doesn't exist!");
-  } else if (err == CraneErr::kInvalidNodeNum) {
-    CRANE_DEBUG(
-        "Task submission failed. Reason: --node is either invalid or greater "
-        "than the number of nodes in its partition.");
-    return std::unexpected(
-        "--node is either invalid or greater than the number of nodes in its "
-        "partition.");
-  } else if (err == CraneErr::kNoResource) {
-    CRANE_DEBUG(
-        "Task submission failed. "
-        "Reason: The resources of the partition are insufficient.");
-    return std::unexpected("The resources of the partition are insufficient");
-  } else if (err == CraneErr::kNoAvailNode) {
-    CRANE_DEBUG(
-        "Task submission failed. "
-        "Reason: Nodes satisfying the requirements of task are insufficient");
-    return std::unexpected(
-        "Nodes satisfying the requirements of task are insufficient.");
-  } else if (err == CraneErr::kInvalidParam) {
-    CRANE_DEBUG(
-        "Task submission failed. "
-        "Reason: The param of task is invalid.");
-    return std::unexpected("The param of task is invalid.");
-  }
-  return std::unexpected<std::string>(CraneErrStr(err));
+  return std::unexpected(result.error());
 }
 
 }  // namespace Ctld

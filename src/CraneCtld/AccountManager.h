@@ -129,11 +129,12 @@ class AccountManager {
                                       const std::string& account,
                                       const std::string& partition);
 
-  std::expected<void, std::string> CheckIfUserOfAccountIsEnabled(
+  CraneErrCodeExpected<void> CheckIfUserOfAccountIsEnabled(
       const std::string& user, const std::string& account);
 
-  std::expected<void, std::string> CheckAndApplyQosLimitOnTask(
-      const std::string& user, const std::string& account, TaskInCtld* task);
+  CraneExpected<void> CheckAndApplyQosLimitOnTask(const std::string& user,
+                                       const std::string& account,
+                                       TaskInCtld* task);
 
   std::expected<void, std::string> CheckUidIsAdmin(uint32_t uid);
 
