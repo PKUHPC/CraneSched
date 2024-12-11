@@ -235,6 +235,14 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
     grpc::ServerContext *context,
     const crane::grpc::ModifyCranedStateRequest *request,
     crane::grpc::ModifyCranedStateReply *response) {
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!res) {
+    for (auto crane_id : request->craned_ids()) {
+      response->add_not_modified_nodes(crane_id);
+      response->add_not_modified_reasons(res.error());
+    }
+    return grpc::Status::OK;
+  }
   *response = g_meta_container->ChangeNodeState(*request);
 
   return grpc::Status::OK;
