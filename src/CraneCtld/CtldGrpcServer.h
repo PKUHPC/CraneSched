@@ -44,7 +44,8 @@ class CforedStreamWriter {
                                crane::grpc::StreamCforedRequest> *stream)
       : m_stream_(stream), m_valid_(true) {}
 
-  bool WriteTaskIdReply(pid_t calloc_pid, CraneExpected<task_id_t> res) {
+  bool WriteTaskIdReply(pid_t calloc_pid,
+                        std::expected<task_id_t, std::string> res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -66,7 +67,8 @@ class CforedStreamWriter {
 
   bool WriteTaskResAllocReply(
       task_id_t task_id,
-      CraneExpected<std::pair<std::string, std::list<CranedId>>> res) {
+      std::expected<std::pair<std::string, std::list<CranedId>>, std::string>
+          res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -118,7 +120,7 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
-  bool WriteCforedRegistrationAck(const CraneExpected<void> &res) {
+  bool WriteCforedRegistrationAck(const std::expected<void, std::string> &res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
