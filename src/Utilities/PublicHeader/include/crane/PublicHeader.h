@@ -33,6 +33,7 @@
 #endif
 
 using task_id_t = uint32_t;
+using step_id_t = uint32_t;
 
 using CraneErrCode = crane::grpc::ErrCode;
 
@@ -73,6 +74,12 @@ inline const char* const kDefaultCranedForPamUnixSockPath =
     "craned/craned_pam.sock";
 inline const char* const kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* const kDefaultCranedLogPath = "craned/craned.log";
+
+
+inline const char* const kDefaultContainerTempDir = "craned/container";
+
+inline const char* const kDefaultSupervisorPath = "/usr/libexec/csupervisor";
+inline const char* const kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* const kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 

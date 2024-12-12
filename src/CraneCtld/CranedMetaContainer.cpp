@@ -21,6 +21,7 @@
 #include "RpcService/CranedKeeper.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
+#include "TaskScheduler.h"
 
 namespace Ctld {
 
@@ -217,7 +218,6 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
 
   node_meta->res_avail += resources;
   node_meta->res_in_use -= resources;
-
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
@@ -314,6 +314,8 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
       craned_id_part_ids_map_[craned_name].emplace_back(part_name);
 
       part_meta.craned_ids.emplace(craned_name);
+      part_meta.partition_global_meta.res_avail += craned_meta.static_meta.res;
+      part_meta.partition_global_meta.res_total += craned_meta.static_meta.res;
 
       part_meta.partition_global_meta.res_avail += craned_meta.static_meta.res;
       part_meta.partition_global_meta.res_total += craned_meta.static_meta.res;

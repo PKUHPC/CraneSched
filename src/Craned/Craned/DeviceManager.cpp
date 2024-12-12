@@ -119,8 +119,8 @@ DeviceManager::GetDevEnvMapByResInNode(
   }
   for (const auto [injector_enum, count] : injector_count_map) {
     if (count == 0) continue;
-    env_map.emplace(DeviceEnvNameStr[injector_enum],
-                    util::GenerateCommaSeparatedString(count));
+    for (const auto& env_key : DeviceEnvNameStr[injector_enum])
+      env_map.emplace(env_key, util::GenerateCommaSeparatedString(count));
   }
 
   return env_map;
