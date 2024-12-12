@@ -607,14 +607,16 @@ void GlobalVariableInit() {
           Craned::CgroupConstant::CgroupVersion::CGROUP_V1 &&
       (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
        !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER) ||
-       !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER))) {
+       !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER) ||
+       !g_cg_mgr->Mounted(Controller::BLOCK_CONTROLLER))) {
     CRANE_ERROR("Failed to initialize cpu,memory,devices cgroups controller.");
     std::exit(1);
   }
   if (g_cg_mgr->GetCgroupVersion() ==
           Craned::CgroupConstant::CgroupVersion::CGROUP_V2 &&
       (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER_V2) ||
-       !g_cg_mgr->Mounted(Controller::MEMORY_CONTORLLER_V2))) {
+       !g_cg_mgr->Mounted(Controller::MEMORY_CONTORLLER_V2) ||
+       !g_cg_mgr->Mounted(Controller::IO_CONTROLLER_V2))) {
     CRANE_ERROR("Failed to initialize cpu,memory cgroups controller.");
     std::exit(1);
   }
