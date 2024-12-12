@@ -368,6 +368,9 @@ if (CRANE_ENABLE_TESTS)
     add_subdirectory(test EXCLUDE_FROM_ALL)
 endif ()
 
+# Adopt GNU standard installation directories
+include(GNUInstallDirs)
+
 # Generate the configuration file
 configure_file(${CMAKE_SOURCE_DIR}/etc/cranectld.service.in ${CMAKE_BINARY_DIR}/etc/cranectld.service)
 configure_file(${CMAKE_SOURCE_DIR}/etc/craned.service.in ${CMAKE_BINARY_DIR}/etc/craned.service)
@@ -391,13 +394,19 @@ set(CPACK_COMPONENTS_ALL cranedc cranectldc)
 
 # Install binaries
 install(TARGETS cranectld
-        DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT cranectldc
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
 )
 
 install(TARGETS craned
-        DESTINATION ${CMAKE_INSTALL_PREFIX}/bin
+        DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT cranedc
+        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
+)
+
+install(TARGETS csupervisor
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}
         COMPONENT cranedc
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
 )

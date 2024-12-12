@@ -160,10 +160,7 @@ CraneErrCode CranedStub::CreateCgroupForTasks(
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
   for (const CgroupSpec &spec : cgroup_specs) {
-    request.mutable_task_id_list()->Add(spec.task_id);
-    request.mutable_uid_list()->Add(spec.uid);
-    *request.mutable_res_list()->Add() = std::move(spec.res_in_node);
-    request.add_execution_node(spec.execution_node);
+    spec.SetJobSpec(request.add_cg_spec_vec());
   }
 
   status = m_stub_->CreateCgroupForTasks(&context, request, &reply);
@@ -206,34 +203,6 @@ CraneErrCode CranedStub::ReleaseCgroupForTasks(
   }
 
   return CraneErrCode::SUCCESS;
-}
-
-CraneErrCode CranedStub::CheckTaskStatus(task_id_t task_id,
-                                         crane::grpc::TaskStatus *status) {
-  using crane::grpc::CheckTaskStatusReply;
-  using crane::grpc::CheckTaskStatusRequest;
-
-  ClientContext context;
-  Status grpc_status;
-  CheckTaskStatusRequest request;
-  CheckTaskStatusReply reply;
-
-  request.set_task_id(task_id);
-  grpc_status = m_stub_->CheckTaskStatus(&context, request, &reply);
-
-  if (!grpc_status.ok()) {
-    CRANE_DEBUG(
-        "CheckTaskStatus gRPC for Node {} returned with status not ok: {}",
-        m_craned_id_, grpc_status.error_message());
-    HandleGrpcErrorCode_(grpc_status.error_code());
-    return CraneErrCode::ERR_RPC_FAILURE;
-  }
-
-  if (reply.ok()) {
-    *status = reply.status();
-    return CraneErrCode::SUCCESS;
-  } else
-    return CraneErrCode::ERR_NON_EXISTENT;
 }
 
 CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id,
@@ -713,7 +682,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
 
   // InitializingCraned: BEGIN -> IDLE
 
-  /* Todo: Adjust the value here.
+  /* TODO: Adjust the value here.
    * In default case, TRANSIENT_FAILURE -> TRANSIENT_FAILURE will use the
    * connection-backoff algorithm. We might need to adjust these values.
    * https://grpc.github.io/grpc/cpp/md_doc_connection-backoff.html

@@ -83,9 +83,6 @@ class CranedStub {
 
   CraneErrCode TerminateOrphanedTask(task_id_t task_id);
 
-  CraneErrCode CheckTaskStatus(task_id_t task_id,
-                               crane::grpc::TaskStatus *status);
-
   CraneErrCode ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
   bool Invalid() const {

@@ -64,11 +64,6 @@ class CranedServiceImpl : public Craned::Service {
       const crane::grpc::TerminateOrphanedTaskRequest *request,
       crane::grpc::TerminateOrphanedTaskReply *response) override;
 
-  grpc::Status CheckTaskStatus(
-      grpc::ServerContext *context,
-      const crane::grpc::CheckTaskStatusRequest *request,
-      crane::grpc::CheckTaskStatusReply *response) override;
-
   grpc::Status QueryTaskIdFromPort(
       grpc::ServerContext *context,
       const crane::grpc::QueryTaskIdFromPortRequest *request,
@@ -108,6 +103,11 @@ class CranedServiceImpl : public Craned::Service {
       grpc::ServerContext *context,
       const crane::grpc::ChangeTaskTimeLimitRequest *request,
       crane::grpc::ChangeTaskTimeLimitReply *response) override;
+
+  grpc::Status TaskStatusChange(
+      grpc::ServerContext *context,
+      const crane::grpc::TaskStatusChangeRequest *request,
+      crane::grpc::TaskStatusChangeReply *response) override;
 };
 
 class CranedServer {
@@ -136,14 +136,18 @@ class CranedServer {
     m_supervisor_recovered_.store(true, std::memory_order_release);
   }
 
+  void FinishRecover() {
+    CRANE_DEBUG("Craned finished recover.");
+    m_recovered_.store(true, std::memory_order_release);
+  }
+
  private:
   std::unique_ptr<CranedServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
 
   std::atomic_bool m_grpc_srv_ready_{false};
 
-  /* When supervisor ready, init with false */
-  std::atomic_bool m_supervisor_recovered_{true};
+  std::atomic_bool m_supervisor_recovered_{false};
 
   friend class CranedServiceImpl;
 };

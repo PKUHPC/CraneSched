@@ -104,23 +104,23 @@ DeviceManager::GetDevEnvMapByResInNode(
   EnvMap env_map;
 
   std::unordered_set<std::string> all_res_slots;
-  for (const auto& [device_name, device_type_slots_map] :
-       res_in_node.name_type_map()) {
-    for (const auto& [device_type, slots] :
-         device_type_slots_map.type_slots_map())
+  for (const auto& device_type_slots_map :
+       res_in_node.name_type_map() | std::ranges::views::values) {
+    for (const auto& slots :
+         device_type_slots_map.type_slots_map() | std::ranges::views::values)
       all_res_slots.insert(slots.slots().begin(), slots.slots().end());
   }
 
   std::unordered_map<DeviceEnvInjectorEnum, int> injector_count_map;
-  for (const auto& [_, device] : g_this_node_device) {
+  for (const auto& device : g_this_node_device | std::ranges::views::values) {
     if (!all_res_slots.contains(device->slot_id)) continue;
     if (device->env_injector == DeviceEnvInjectorEnum::CommonDevice) continue;
     injector_count_map[device->env_injector]++;
   }
   for (const auto [injector_enum, count] : injector_count_map) {
     if (count == 0) continue;
-    env_map.emplace(DeviceEnvNameStr[injector_enum],
-                    util::GenerateCommaSeparatedString(count));
+    for (const auto& env_key : DeviceEnvNameStr[injector_enum])
+      env_map.emplace(env_key, util::GenerateCommaSeparatedString(count));
   }
 
   return env_map;

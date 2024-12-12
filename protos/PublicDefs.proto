@@ -146,6 +146,7 @@ message TaskToCtld {
 
   string excludes = 34;
   string nodelist = 35;
+  string container = 26;
 
   string reservation = 36;
 }
@@ -174,6 +175,13 @@ message RuntimeAttrOfTask {
   bool held = 18;
   ResourceV2 resources = 19;
   double cached_priority = 20;
+}
+
+message JobSpec {
+  uint32 job_id = 1;
+  uint32 uid = 2;
+  ResourceInNode res = 3;
+  string execution_node = 4;
 }
 
 message TaskToD {
@@ -215,6 +223,10 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
+  string container = 25;
+
+  // Not used now.
+  string extra_attr = 29;
 }
 
 message BatchTaskAdditionalMeta {
@@ -222,6 +234,7 @@ message BatchTaskAdditionalMeta {
   optional bool open_mode_append = 2;
   string output_file_pattern = 3;
   string error_file_pattern = 4;
+  string interpreter = 5;
 }
 
 message X11Meta {
@@ -271,6 +284,9 @@ message TaskInfo {
 
   string extra_attr = 21;
   string reservation = 22;
+
+  string container = 23;
+  /* 24-29 Reserved */
 
   // Dynamic task information
   bool held = 30;
