@@ -28,7 +28,6 @@
 #include <ctime>
 #include <cxxopts.hpp>
 
-#include "CforedClient.h"
 #include "CranedForPamServer.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
@@ -149,11 +148,6 @@ void ParseConfig(int argc, char** argv) {
           g_config.CraneBaseDir /
           YamlValueOr(config["CranedUnixSockPath"], kDefaultCranedUnixSockPath);
 
-      g_config.CranedForPamUnixSockPath =
-          g_config.CraneBaseDir /
-          YamlValueOr(config["CranedForPamUnixSockPath"],
-                      kDefaultCranedForPamUnixSockPath);
-
       g_config.CranedScriptDir =
           g_config.CraneBaseDir /
           YamlValueOr(config["CranedScriptDir"], kDefaultCranedScriptDir);
@@ -173,9 +167,6 @@ void ParseConfig(int argc, char** argv) {
 
       g_config.ListenConf.UnixSocketListenAddr =
           fmt::format("unix://{}", g_config.CranedUnixSockPath);
-
-      g_config.ListenConf.UnixSocketForPamListenAddr =
-          fmt::format("unix://{}", g_config.CranedForPamUnixSockPath);
 
       g_config.CompressedRpc =
           YamlValueOr<bool>(config["CompressedRpc"], false);
@@ -239,9 +230,8 @@ void ParseConfig(int argc, char** argv) {
         std::exit(1);
       }
 
-      g_config.CraneCtldForInternalListenPort =
-          YamlValueOr(config["CraneCtldForInternalListenPort"],
-                      kCtldForInternalDefaultPort);
+      g_config.CraneCtldListenPort =
+          YamlValueOr(config["CraneCtldListenPort"], kCtldDefaultPort);
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
@@ -674,21 +664,74 @@ void StartServer() {
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   g_ctld_client->StartGrpcCtldConnection();
 
+  std::unordered_set<task_id_t> task_ids_supervisor;
+  std::unordered_map<task_id_t, pid_t> job_id_pid_map =
+      tasks.value_or(std::unordered_map<task_id_t, pid_t>());
+  for (auto job_id : job_id_pid_map | std::ranges::views::keys) {
+    task_ids_supervisor.emplace(job_id);
+  }
+  if (!task_ids_supervisor.empty()) {
+    CRANE_TRACE("[Supervisor] job [{}] still running.",
+                absl::StrJoin(task_ids_supervisor, ","));
+  }
+
+  std::unordered_map<task_id_t, Craned::JobSpec> job_map;
+  std::unordered_map<task_id_t, Craned::StepSpec> step_map;
+  std::unordered_set<task_id_t> running_jobs;
+  std::vector<task_id_t> nonexistent_jobs;
+
+  auto grpc_config_req = config_future.get();
+  job_map.reserve(grpc_config_req.job_map_size());
+  step_map.reserve(grpc_config_req.job_id_tasks_map_size());
+  for (const auto& [job_id, job_spec] : grpc_config_req.job_map()) {
+    if (task_ids_supervisor.erase(job_id)) {
+      running_jobs.emplace(job_id);
+      job_map.emplace(job_id, job_spec);
+      step_map.emplace(job_id, grpc_config_req.job_id_tasks_map().at(job_id));
+    } else {
+      nonexistent_jobs.emplace_back(job_id);
+    }
+  }
+  g_cg_mgr->Recover(running_jobs);
+
+  g_job_mgr = std::make_unique<Craned::JobManager>();
+  g_job_mgr->SetSigintCallback([] {
+    g_server->Shutdown();
+
+    g_craned_for_pam_server->Shutdown();
+    CRANE_INFO("Grpc Server Shutdown() was called.");
+  });
+
+  std::unordered_map<task_id_t, Craned::JobStatusSpec> job_status_map;
+  for (const auto& job_id : running_jobs) {
+    job_status_map.emplace(
+        // For now, each job only have one step
+        job_id, Craned::JobStatusSpec{.job_spec = job_map[job_id],
+                                      .step_spec = step_map[job_id],
+                                      .task_pid = job_id_pid_map[job_id]});
+  }
+  g_job_mgr->Recover(std::move(job_status_map));
+
+  if (!task_ids_supervisor.empty()) {
+    CRANE_ERROR("[Supervisor] job {} is not recorded in Ctld.",
+                absl::StrJoin(task_ids_supervisor, ","));
+  }
+  g_server->FinishRecover();
   g_server->Wait();
-
   g_craned_for_pam_server->Wait();
+  // CltdClient will call g_server->SetReady() in cb,set it to empty
 
-  // Free global variables
-  g_task_mgr->Wait();
-  g_task_mgr.reset();
-  // CforedManager MUST be destructed after TaskManager.
-  g_cfored_manager.reset();
   g_server.reset();
   g_craned_for_pam_server.reset();
-  g_ctld_client.reset();
+
+  // Free global variables
+  g_job_mgr->Wait();
   g_job_mgr.reset();
   g_cg_mgr.reset();
   g_ctld_client_sm.reset();
+
+  g_ctld_client.reset();
+  g_supervisor_keeper.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();

@@ -29,8 +29,6 @@
 #  include <linux/bpf.h>
 #endif
 
-#include <dirent.h>
-
 #include "CranedPublicDefs.h"
 #include "DeviceManager.h"
 #include "crane/PluginClient.h"
@@ -1200,7 +1198,6 @@ void BpfRuntimeInfo::CloseBpfObj() {
     bpf_obj_ = nullptr;
     bpf_prog_ = nullptr;
     dev_map_ = nullptr;
-    RmBpfDeviceMap();
   }
 }
 

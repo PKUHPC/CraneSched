@@ -666,13 +666,6 @@ message StreamCtldReply {
   }
 }
 
-message QueryCranedRemoteMetaRequest {}
-
-message QueryCranedRemoteMetaReply {
-  bool ok = 1;
-  CranedRemoteMeta craned_remote_meta = 2;
-}
-
 message StreamCrunRequest {
   enum CrunRequestType {
     TASK_REQUEST = 0;
@@ -767,73 +760,78 @@ message StreamCrunReply {
 }
 
 message StreamTaskIORequest {
-  enum CranedRequestType {
-    CRANED_REGISTER = 0;
-    CRANED_TASK_OUTPUT = 1;
-    CRANED_UNREGISTER = 2;
-    CRANED_TASK_X11_OUTPUT = 3;
+  enum SupervisorRequestType{
+    SUPERVISOR_REGISTER = 0;
+    TASK_OUTPUT = 1;
+    SUPERVISOR_UNREGISTER = 2;
+    TASK_X11_OUTPUT = 3;
   }
 
-  message CranedRegisterReq {
+  message SupervisorRegisterReq {
     string craned_id = 1;
+    uint32 task_id = 2;
+    uint32 step_id = 3;
   }
 
-  message CranedTaskOutputReq {
+  message TaskOutputReq {
+    bytes msg = 2;
+  }
+
+  message SupervisorUnRegisterReq {
+    string craned_id = 1;
+    uint32 task_id = 2;
+    uint32 step_id = 3;
+  }
+
+  message TaskX11OutputReq {
     uint32 task_id = 1;
     bytes msg = 2;
   }
 
-  message CranedUnRegisterReq {
-    string craned_id = 1;
-  }
+  SupervisorRequestType type = 1;
 
-  message CranedTaskX11OutputReq {
-    uint32 task_id = 1;
-    bytes msg = 2;
-  }
-
-  CranedRequestType type = 1;
   oneof payload {
-    CranedRegisterReq payload_register_req = 2;
-    CranedTaskOutputReq payload_task_output_req = 3;
-    CranedUnRegisterReq payload_unregister_req = 4;
-    CranedTaskX11OutputReq payload_task_x11_output_req = 5;
+    SupervisorRegisterReq payload_register_req = 2;
+    TaskOutputReq payload_task_output_req = 3;
+    SupervisorUnRegisterReq payload_unregister_req = 4;
+    TaskX11OutputReq payload_task_x11_output_req = 5;
   }
 }
 
 message StreamTaskIOReply {
-  enum CranedReplyType {
-    CRANED_REGISTER_REPLY = 0;
-    CRANED_TASK_INPUT = 1;
-    CRANED_UNREGISTER_REPLY = 2;
-    CRANED_TASK_X11_INPUT = 3;
+  enum SupervisorReplyType {
+    SUPERVISOR_REGISTER_REPLY = 0;
+    TASK_INPUT = 1;
+    SUPERVISOR_UNREGISTER_REPLY = 2;
+    TASK_X11_INPUT = 3;
   }
 
-  message CranedRegisterReply {
+  message SupervisorRegisterReply {
     bool ok = 1;
   }
 
-  message CranedTaskInputReq {
+  message TaskInputReq {
+    uint32 task_id = 1;
+    uint32 step_id = 2;
+    bytes msg = 3;
+  }
+
+  message SupervisorUnregisterReply {
+    bool ok = 1;
+  }
+
+  message TaskX11InputReq {
     uint32 task_id = 1;
     bytes msg = 2;
   }
 
-  message CranedUnregisterReply {
-    bool ok = 1;
-  }
-
-  message CranedTaskX11InputReq {
-    uint32 task_id = 1;
-    bytes msg = 2;
-  }
-
-  CranedReplyType type = 1;
+  SupervisorReplyType type = 1;
 
   oneof payload {
-    CranedRegisterReply payload_craned_register_reply = 2;
-    CranedTaskInputReq payload_task_input_req = 3;
-    CranedUnregisterReply payload_craned_unregister_reply = 4;
-    CranedTaskX11InputReq payload_task_x11_input_req = 5;
+    SupervisorRegisterReply payload_supervisor_register_reply = 2;
+    TaskInputReq payload_task_input_req = 3;
+    SupervisorUnregisterReply payload_supervisor_unregister_reply = 4;
+    TaskX11InputReq payload_task_x11_input_req = 5;
   }
 }
 
@@ -942,6 +940,8 @@ service Craned {
   /* ----------------------------------- Called from Craned  ------------------------------------------------------ */
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
   rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest) returns (QueryTaskEnvVariablesReply);
+  /* ----------------------------------- Called from Supervisor  --------------------------------------------------- */
+  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
 }
 
 service CranedForPam {

@@ -760,6 +760,8 @@ void InitializeCtldGlobalVariables() {
     DestroyCtldGlobalVariables();
     std::exit(1);
   }
+  g_task_scheduler = std::make_unique<TaskScheduler>();
+  ok = g_task_scheduler->Init();
 
   g_craned_keeper = std::make_unique<CranedKeeper>(g_config.Nodes.size());
 

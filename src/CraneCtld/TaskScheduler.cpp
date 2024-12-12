@@ -110,8 +110,7 @@ bool TaskScheduler::Init() {
                 task->TaskId());
           }
 
-          std::vector<task_db_id_t> db_ids{task_db_id};
-          ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
+          ok = g_embedded_db_client->PurgeEndedTasks({task_db_id});
           if (!ok) {
             CRANE_ERROR(
                 "PurgeEndedTasks failed for task #{} when recovering "
@@ -164,9 +163,9 @@ bool TaskScheduler::Init() {
       if (!mark_task_as_failed) {
         RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
       } else {
-        // If a batch task failed to requeue the task into pending queue due to
-        // insufficient resource or other reasons or the task is an interactive
-        // task, Mark it as FAILED and move it to the ended queue.
+        // If a batch task failed to requeue the task into pending queue due
+        // to insufficient resource or other reasons or the task is an
+        // interactive task, Mark it as FAILED and move it to the ended queue.
         CRANE_INFO(
             "Failed to requeue task #{}. Mark it as FAILED and "
             "move it to the ended queue.",
@@ -558,8 +557,8 @@ void TaskScheduler::ScheduleThread_() {
     m_pending_task_map_mtx_.Lock();
     if (!m_pending_task_map_.empty()) {  // all_part_metas is locked here.
       // Running map must be locked before g_meta_container's lock.
-      // Otherwise, DEADLOCK may happen because TaskStatusChange() locks running
-      // map first and then locks g_meta_container.
+      // Otherwise, DEADLOCK may happen because TaskStatusChange() locks
+      // running map first and then locks g_meta_container.
       m_running_task_map_mtx_.Lock();
 
       schedule_begin = std::chrono::steady_clock::now();
@@ -771,8 +770,11 @@ void TaskScheduler::ScheduleThread_() {
           craned_exec_requests_map;
       for (auto& [craned_id, tasks_raw_ptrs] :
            craned_task_to_exec_raw_ptrs_map) {
-        craned_exec_requests_map[craned_id] =
-            CranedStub::NewExecuteTasksRequests(craned_id, tasks_raw_ptrs);
+        crane::grpc::ExecuteTasksRequest req;
+        for (TaskInCtld* task : tasks_raw_ptrs) {
+          req.mutable_tasks()->Add(task->GetTaskSpecOfNode(craned_id));
+        }
+        craned_exec_requests_map.emplace(craned_id, std::move(req));
       }
 
       // Move tasks into running queue.
@@ -1232,8 +1234,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
   uint32_t operator_uid = request.operator_uid();
 
-  // When an ordinary user tries to cancel jobs, they are automatically filtered
-  // to their own jobs.
+  // When an ordinary user tries to cancel jobs, they are automatically
+  // filtered to their own jobs.
   std::string filter_uname = request.filter_username();
   if (filter_uname.empty() &&
       !g_account_manager->CheckUidIsAdmin(operator_uid)) {
@@ -2080,9 +2082,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     m_running_task_map_.erase(iter);
   }
 
-  absl::BlockingCounter bl(craned_cgroups_map.size());
+  std::latch counter(craned_cgroups_map.size());
   for (const auto& [craned_id, cgroups] : craned_cgroups_map) {
-    g_thread_pool->detach_task([&bl, &craned_id, &cgroups]() {
+    g_thread_pool->detach_task([&counter, &craned_id, &cgroups]() {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
       // If the craned is down, just ignore it.
@@ -2093,10 +2095,10 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                       cgroups.size(), craned_id);
         }
       }
-      bl.DecrementCount();
+      counter.count_down();
     });
   }
-  bl.Wait();
+  counter.wait();
 
   ProcessFinalTasks_(task_raw_ptr_vec);
 }
@@ -2555,7 +2557,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
        node_selection_info.GetCostNodeIdSet() | std::views::values) {
     if (!partition_meta_ptr.GetExclusivePtr()->craned_ids.contains(
             craned_index)) {
-      // Todo: Performance issue! We can use cached available node set
+      // TODO: Performance issue! We can use cached available node set
       //  for the task when checking task validity in TaskScheduler.
       continue;
     }
