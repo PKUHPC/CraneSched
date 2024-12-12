@@ -30,10 +30,9 @@ bool AccountMetaContainer::CheckAndMallocQosResourceFromUser(
 
   bool result = true;
 
-  ResourceView resource_view{};
-  resource_view.GetAllocatableRes().cpu_count = task.cpus_per_task;
+  ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
-  user_meta_map_[username].qos_resource_in_use.try_emplace_l(
+  user_meta_map_[username].try_emplace_l(
       task.qos,
       [&](std::pair<const std::string, QosResource>& pair) {
         auto& val = pair.second;
@@ -43,8 +42,8 @@ bool AccountMetaContainer::CheckAndMallocQosResourceFromUser(
           result = false;
           return;
         }
-
-        val.resource.GetAllocatableRes().cpu_count += task.cpus_per_task;
+        val.resource.GetAllocatableRes() +=
+            (task.requested_node_res_view * task.node_num).GetAllocatableRes();
         val.jobs_per_user++;
       },
       QosResource{resource_view, 1});
@@ -54,10 +53,12 @@ bool AccountMetaContainer::CheckAndMallocQosResourceFromUser(
 
 void AccountMetaContainer::FreeQosResource(const std::string& username,
                                            const TaskInCtld& task) {
-  user_meta_map_[username].qos_resource_in_use.modify_if(
+  user_meta_map_[username].modify_if(
       task.qos, [&](std::pair<const std::string, QosResource>& pair) {
         auto& val = pair.second;
-        val.resource.GetAllocatableRes().cpu_count -= task.cpus_per_task;
+
+        val.resource.GetAllocatableRes() -=
+            (task.requested_node_res_view * task.node_num).GetAllocatableRes();
         val.jobs_per_user--;
       });
 }

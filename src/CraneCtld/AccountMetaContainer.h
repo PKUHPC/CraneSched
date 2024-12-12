@@ -25,8 +25,15 @@ namespace Ctld {
 
 class AccountMetaContainer final {
  public:
+  using QosToQosResourceMap = phmap::parallel_flat_hash_map<
+      std::string,  // QosName
+      QosResource, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, QosResource>>, 4,
+      std::shared_mutex>;
+
   using UserResourceMetaMap = std::unordered_map<std::string,  // username
-                                                 ResourcePerUser>;
+                                                 QosToQosResourceMap>;
 
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
