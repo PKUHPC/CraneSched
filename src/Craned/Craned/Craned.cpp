@@ -23,13 +23,12 @@
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
-#include <ctime>
 #include <cxxopts.hpp>
 
-#include "CforedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
+#include "SupervisorKeeper.h"
 #include "JobManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
@@ -96,9 +95,29 @@ void ParseConfig(int argc, char** argv) {
       if (parsed_args.count("debug-level"))
         g_config.CranedDebugLevel =
             parsed_args["debug-level"].as<std::string>();
+      else if (config["CranedDebugLevel"])
+        g_config.CranedDebugLevel =
+            config["CranedDebugLevel"].as<std::string>();
       else
         g_config.CranedDebugLevel =
             YamlValueOr(config["CranedDebugLevel"], "info");
+
+      if (config["Supervisor"]) {
+        const auto& supervisor_config = config["Supervisor"];
+        g_config.Supervisor.Path =
+            YamlValueOr(supervisor_config["Path"], kDefaultSupervisorPath);
+        g_config.Supervisor.DebugLevel =
+            YamlValueOr(supervisor_config["DebugLevel"], "trace");
+      } else {
+        fmt::print(stderr, "No Supervisor configuration found.\n");
+        std::exit(1);
+      }
+
+      if (!StrToLogLevel(g_config.Supervisor.DebugLevel).has_value()) {
+        fmt::print(stderr, "Illegal Supervisor debug-level format: {}.\n",
+                   g_config.Supervisor.DebugLevel);
+        std::exit(1);
+      }
 
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
@@ -360,7 +379,7 @@ void ParseConfig(int argc, char** argv) {
             }
 
             default:
-              ABSL_UNREACHABLE();
+              std::unreachable();
             }
             g_config.CranedRes[name] = node_res;
           }
@@ -412,8 +431,61 @@ void ParseConfig(int argc, char** argv) {
         g_config.CranedForeground =
             YamlValueOr<bool>(config["CranedForeground"], false);
 
-        if (config["Plugin"]) {
-          const auto& plugin_config = config["Plugin"];
+        if (config["Container"]) {
+          const auto& container_config = config["Container"];
+
+          g_config.Container.Enabled =
+              YamlValueOr<bool>(container_config["Enabled"], false);
+
+          if (g_config.Container.Enabled) {
+            g_config.Container.TempDir =
+                g_config.CraneBaseDir /
+                YamlValueOr(container_config["TempDir"], kDefaultContainerTempDir);
+
+            if (container_config["RuntimeBin"]) {
+              g_config.Container.RuntimeBin =
+                  container_config["RuntimeBin"].as<std::string>();
+            } else {
+              CRANE_ERROR("RuntimeBin is not configured.");
+              std::exit(1);
+            }
+
+            if (container_config["RuntimeState"]) {
+              g_config.Container.RuntimeState =
+                  container_config["RuntimeState"].as<std::string>();
+            } else {
+              CRANE_ERROR("RuntimeState is not configured.");
+              std::exit(1);
+            }
+
+            if (container_config["RuntimeKill"]) {
+              g_config.Container.RuntimeKill =
+                  container_config["RuntimeKill"].as<std::string>();
+            } else {
+              CRANE_ERROR("RuntimeKill is not configured.");
+              std::exit(1);
+            }
+
+            if (container_config["RuntimeDelete"]) {
+              g_config.Container.RuntimeDelete =
+                  container_config["RuntimeDelete"].as<std::string>();
+            } else {
+              CRANE_ERROR("RuntimeDelete is not configured.");
+              std::exit(1);
+            }
+
+            if (container_config["RuntimeRun"]) {
+              g_config.Container.RuntimeRun =
+                  container_config["RuntimeRun"].as<std::string>();
+            } else {
+              CRANE_ERROR("RuntimeRun is not configured.");
+              std::exit(1);
+            }
+          }
+        }
+
+      if (config["Plugin"]) {
+        const auto& plugin_config = config["Plugin"];
 
           g_config.Plugin.Enabled =
               YamlValueOr<bool>(plugin_config["Enabled"], false);
@@ -479,7 +551,7 @@ void ParseConfig(int argc, char** argv) {
 
   CRANE_INFO("Found this machine {} in Nodes", g_config.Hostname);
   // get this node device info
-  // Todo: Auto detect device
+  // TODO: Auto detect device
   {
     auto node_res = g_config.CranedRes.at(g_config.Hostname);
     auto& devices = each_node_device[g_config.Hostname];
@@ -554,6 +626,14 @@ void GlobalVariableInit() {
 
   PasswordEntry::InitializeEntrySize();
 
+  // It is always ok to create thread pool first.
+  g_thread_pool =
+      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
+
+  g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
+  CraneExpected<std::unordered_map<task_id_t, pid_t>> tasks =
+      g_supervisor_keeper->Init();
+
   using Craned::CgroupManager;
   using Craned::CgConstant::Controller;
   g_cg_mgr = std::make_unique<Craned::CgroupManager>();
@@ -565,7 +645,8 @@ void GlobalVariableInit() {
        !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER) ||
        !g_cg_mgr->Mounted(Controller::BLOCK_CONTROLLER))) {
     CRANE_ERROR(
-        "Failed to initialize cpu,memory,devices,block cgroups controller.");
+        "Failed to initialize cpu,memory,devices,block cgroups "
+        "controller.");
     std::exit(1);
   }
   if (g_cg_mgr->GetCgroupVersion() ==
@@ -576,11 +657,6 @@ void GlobalVariableInit() {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
   }
-
-  g_thread_pool =
-      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
-
-  g_task_mgr = std::make_unique<Craned::TaskManager>();
 
   g_ctld_client_sm = std::make_unique<Craned::CtldClientStateMachine>();
   g_ctld_client = std::make_unique<Craned::CtldClient>();
@@ -602,6 +678,7 @@ void GlobalVariableInit() {
   g_cfored_manager->Init();
 
   g_job_mgr = std::make_unique<Craned::JobManager>();
+  g_ctld_client->CranedReady(nonexistent_jobs, grpc_config_req.token());
 }
 
 void StartServer() {
@@ -626,17 +703,70 @@ void StartServer() {
   std::this_thread::sleep_for(std::chrono::milliseconds(1000));
   g_ctld_client->StartGrpcCtldConnection();
 
+  std::unordered_set<task_id_t> task_ids_supervisor;
+  std::unordered_map<task_id_t, pid_t> job_id_pid_map =
+      tasks.value_or(std::unordered_map<task_id_t, pid_t>());
+  for (auto job_id : job_id_pid_map | std::ranges::views::keys) {
+    task_ids_supervisor.emplace(job_id);
+  }
+  if (!task_ids_supervisor.empty()) {
+    CRANE_TRACE("[Supervisor] job [{}] still running.",
+                absl::StrJoin(task_ids_supervisor, ","));
+  }
+
+  std::unordered_map<task_id_t, Craned::JobSpec> job_map;
+  std::unordered_map<task_id_t, Craned::StepSpec> step_map;
+  std::unordered_set<task_id_t> running_jobs;
+  std::vector<task_id_t> nonexistent_jobs;
+
+  auto grpc_config_req = config_future.get();
+  job_map.reserve(grpc_config_req.job_map_size());
+  step_map.reserve(grpc_config_req.job_id_tasks_map_size());
+  for (const auto& [job_id, job_spec] : grpc_config_req.job_map()) {
+    if (task_ids_supervisor.erase(job_id)) {
+      running_jobs.emplace(job_id);
+      job_map.emplace(job_id, job_spec);
+      step_map.emplace(job_id, grpc_config_req.job_id_tasks_map().at(job_id));
+    } else {
+      nonexistent_jobs.emplace_back(job_id);
+    }
+  }
+  g_cg_mgr->Recover(running_jobs);
+
+  g_job_mgr = std::make_unique<Craned::JobManager>();
+  g_job_mgr->SetSigintCallback([] {
+    g_server->Shutdown();
+    CRANE_INFO("Grpc Server Shutdown() was called.");
+  });
+
+  std::unordered_map<task_id_t, Craned::JobStatusSpec> job_status_map;
+  for (const auto& job_id : running_jobs) {
+    job_status_map.emplace(
+        // For now, each job only have one step
+        job_id, Craned::JobStatusSpec{.job_spec = job_map[job_id],
+                                      .step_spec = step_map[job_id],
+                                      .task_pid = job_id_pid_map[job_id]});
+  }
+  g_job_mgr->Recover(std::move(job_status_map));
+
+  if (!task_ids_supervisor.empty()) {
+    CRANE_ERROR("[Supervisor] job {} is not recorded in Ctld.",
+                absl::StrJoin(task_ids_supervisor, ","));
+  }
+  g_server->FinishRecover();
   g_server->Wait();
 
-  // Free global variables
-  g_task_mgr->Wait();
-  g_task_mgr.reset();
-  // CforedManager MUST be destructed after TaskManager.
-  g_cfored_manager.reset();
+  // CltdClient will call g_server->SetReady() in cb,set it to empty
+
   g_server.reset();
-  g_ctld_client.reset();
+
+  // Free global variables
+  g_job_mgr->Wait();
   g_job_mgr.reset();
   g_cg_mgr.reset();
+
+  g_ctld_client.reset();
+  g_supervisor_keeper.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();
@@ -708,7 +838,7 @@ void CheckSingleton() {
       std::exit(1);
     } else {
       CRANE_CRITICAL("Failed to lock {}: {}. Exiting...",
-                     g_config.CranedMutexFilePath, strerror(errno));
+                     g_config.CranedMutexFilePath.c_str(), strerror(errno));
       std::exit(1);
     }
   }

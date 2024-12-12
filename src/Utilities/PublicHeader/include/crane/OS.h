@@ -40,6 +40,8 @@ namespace os {
 
 bool DeleteFile(std::string const& p);
 
+bool DeleteFolders(std::string const& p);
+
 bool CreateFolders(std::string const& p);
 
 bool CreateFoldersForFile(std::string const& p);
