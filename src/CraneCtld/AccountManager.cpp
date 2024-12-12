@@ -935,12 +935,13 @@ AccountManager::CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
     auto partition_it = user_share_ptr->account_to_attrs_map.at(account)
                             .allowed_partition_qos_map.find(task->partition_id);
     if (partition_it == user_share_ptr->account_to_attrs_map.at(account)
-                            .allowed_partition_qos_map.end())
+                            .allowed_partition_qos_map.end()) {
+
       CRANE_ERROR(
           "CheckAndApplyQosLimitOnTask error: Partition is not allowed for "
           "this user");
-    return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
-
+      return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
+    }
     if (task->qos.empty()) {
       // Default qos
       task->qos = partition_it->second.first;
@@ -963,7 +964,8 @@ AccountManager::CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
     }
   } else {
     if (task->qos.empty()) {
-	@@ -960,19 +969,25 @@ result::result<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
+      task->qos = kUnlimitedQosName;
+    }
   }
 
   const Qos* qos_share_ptr = GetExistedQosInfoNoLock_(task->qos);

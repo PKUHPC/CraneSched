@@ -813,7 +813,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
             result = std::expected<task_id_t, std::string>{
                 submit_result.value().get()};
           } else {
-            result = result::fail(CraneErrCodeStr(submit_result.error()));
+            result = std::unexpected(CraneErrCodeStr(submit_result.error()));
           }
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
