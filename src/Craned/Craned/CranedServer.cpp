@@ -23,6 +23,7 @@
 #include "CtldClient.h"
 #include "JobManager.h"
 #include "TaskManager.h"
+#include "SupervisorKeeper.h"
 
 namespace Craned {
 
@@ -53,7 +54,7 @@ grpc::Status CranedServiceImpl::ExecuteTask(
 
   CraneErrCode err;
   for (auto const &task_to_d : request->tasks()) {
-    err = g_task_mgr->ExecuteTaskAsync(task_to_d);
+    err = g_job_mgr->ExecuteTaskAsync(task_to_d);
     if (err != CraneErrCode::SUCCESS)
       response->add_failed_task_id_list(task_to_d.task_id());
   }
@@ -75,7 +76,7 @@ grpc::Status CranedServiceImpl::TerminateTasks(
               absl::StrJoin(request->task_id_list(), ","));
 
   for (task_id_t id : request->task_id_list())
-    g_task_mgr->TerminateTaskAsync(id);
+    g_job_mgr->TerminateTaskAsync(id);
   response->set_ok(true);
 
   return Status::OK;
@@ -411,7 +412,7 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
 
-  CRANE_TRACE("Moving pid {} to cgroup of task #{}", request->pid(),
+  CRANE_TRACE("Moving pid {} to cgroup of job #{}", request->pid(),
               request->task_id());
 
   bool ok =
@@ -427,7 +428,7 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
   return Status::OK;
 }
 
-Status CranedServiceImpl::QueryTaskEnvVariables(
+grpc::Status CranedServiceImpl::QueryTaskEnvVariables(
     grpc::ServerContext *context,
     const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
     crane::grpc::QueryTaskEnvVariablesReply *response) {
@@ -527,15 +528,33 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
     response->set_ok(false);
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
-
-  bool ok = g_task_mgr->ChangeTaskTimeLimitAsync(
+  bool ok = g_job_mgr->ChangeTaskTimeLimitAsync(
       request->task_id(), absl::Seconds(request->time_limit_seconds()));
   response->set_ok(ok);
 
   return Status::OK;
 }
 
-CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
+grpc::Status CranedServiceImpl::TaskStatusChange(
+    grpc::ServerContext *context,
+    const crane::grpc::TaskStatusChangeRequest *request,
+    crane::grpc::TaskStatusChangeReply *response) {
+  if (!g_server->ReadyFor(RequestSource::SUPERVISOR)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_ok(false);
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
+  g_job_mgr->TaskStopAndDoStatusChangeAsync(
+      request->task_id(), request->new_status(), request->exit_code(),
+      request->reason());
+  response->set_ok(true);
+  return Status::OK;
+}
+
+CranedServer::CranedServer(
+    const Config::CranedListenConf &listen_conf,
+    std::promise<crane::grpc::ConfigureCranedRequest> &&init_promise)
+    : m_configure_promise_(std::move(init_promise)) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
   grpc::ServerBuilder builder;
@@ -561,11 +580,6 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
   CRANE_INFO("Craned is listening on [{}, {}:{}]",
              listen_conf.UnixSocketListenAddr, craned_listen_addr,
              listen_conf.CranedListenPort);
-
-  g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
-    p_server->Shutdown();
-    CRANE_INFO("Grpc Server Shutdown() was called.");
-  });
 }
 
 }  // namespace Craned
