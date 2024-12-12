@@ -708,17 +708,6 @@ struct QosResource {
   uint32_t jobs_per_user;
 };
 
-struct ResourcePerUser {
-  using QosToQosResourceMap = phmap::parallel_flat_hash_map<
-      std::string,  // QosName
-      QosResource, phmap::priv::hash_default_hash<std::string>,
-      phmap::priv::hash_default_eq<std::string>,
-      std::allocator<std::pair<const std::string, QosResource>>, 4,
-      std::shared_mutex>;
-
-  QosToQosResourceMap qos_resource_in_use;
-};
-
 }  // namespace Ctld
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

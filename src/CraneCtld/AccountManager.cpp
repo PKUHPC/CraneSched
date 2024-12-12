@@ -971,8 +971,8 @@ std::expected<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
     return std::unexpected("time-limit reached the user's limit.");
 
-  if (static_cast<double>(task->cpus_per_task) >
-      qos_share_ptr->max_cpus_per_user)
+  if (!g_account_meta_container->CheckAndMallocQosResourceFromUser(
+          user_share_ptr->name, *task, *qos_share_ptr))
     return std::unexpected("cpus-per-task reached the user's limit.");
 
   return {};
