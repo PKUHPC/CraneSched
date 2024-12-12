@@ -20,7 +20,7 @@ syntax = "proto3";
 
 package crane.grpc;
 option go_package = "/protos";
-
+import "google/protobuf/empty.proto";
 import "PublicDefs.proto";
 
 message TaskStatusChangeRequest {
@@ -35,13 +35,25 @@ message TaskStatusChangeReply {
   bool ok = 1;
 }
 
-message CranedRegisterRequest {
+message CranedConnectedCtldNotify{
   string craned_id = 1;
 }
 
-message CranedRegisterReply {
+message ConfigureCranedRequest {
   bool ok = 1;
-  bool already_registered = 2;
+  map<uint32, JobSpec> job_map = 2;
+  map<uint32, TaskToD> job_id_tasks_map = 3;
+  uint64 token = 4;
+}
+
+message CranedReadyRequest {
+  string craned_id = 1;
+  CranedRemoteMeta remote_meta = 2;
+  uint64 token = 3;
+}
+
+message CranedReadyReply {
+  bool ok = 1;
 }
 
 message QueryCranedListFromTaskIdRequest {
@@ -83,11 +95,16 @@ message ExecuteTasksReply {
   repeated uint32 failed_task_id_list = 1;
 }
 
+message ExecuteProcRequest{
+  ProcToD proc = 1;
+}
+
+message ExecuteProcReply{
+  bool ok = 1;
+}
+
 message CreateCgroupForTasksRequest {
-  repeated uint32 task_id_list = 1;
-  repeated uint32 uid_list = 2;
-  repeated ResourceInNode res_list = 3;
-  repeated string execution_node = 4;
+  repeated JobSpec cg_spec_vec = 1;
 }
 
 message CreateCgroupForTasksReply{}
@@ -124,15 +141,6 @@ message ChangeTaskTimeLimitRequest {
 
 message ChangeTaskTimeLimitReply {
   bool ok = 1;
-}
-
-message CheckTaskStatusRequest {
-  uint32 task_id = 1;
-}
-
-message CheckTaskStatusReply {
-  bool ok = 1;
-  TaskStatus status = 2;
 }
 
 message CancelTaskRequest {
@@ -614,13 +622,6 @@ message StreamCtldReply {
   }
 }
 
-message QueryCranedRemoteMetaRequest {}
-
-message QueryCranedRemoteMetaReply {
-  bool ok = 1;
-  CranedRemoteMeta craned_remote_meta = 2;
-}
-
 message StreamCrunRequest {
   enum CrunRequestType {
     TASK_REQUEST = 0;
@@ -715,83 +716,89 @@ message StreamCrunReply {
 }
 
 message StreamTaskIORequest {
-  enum CranedRequestType{
-    CRANED_REGISTER = 0;
-    CRANED_TASK_OUTPUT = 1;
-    CRANED_UNREGISTER = 2;
-    CRANED_TASK_X11_OUTPUT = 3;
+  enum SupervisorRequestType{
+    SUPERVISOR_REGISTER = 0;
+    TASK_OUTPUT = 1;
+    SUPERVISOR_UNREGISTER = 2;
+    TASK_X11_OUTPUT = 3;
   }
 
-  message CranedRegisterReq {
+  message SupervisorRegisterReq {
     string craned_id = 1;
+    uint32 task_id = 2;
+    uint32 step_id = 3;
   }
 
-  message CranedTaskOutputReq {
-    uint32 task_id = 1;
+  message TaskOutputReq {
     string msg = 2;
   }
 
-  message CranedUnRegisterReq {
+  message SupervisorUnRegisterReq {
     string craned_id = 1;
+    uint32 task_id = 2;
+    uint32 step_id = 3;
   }
 
-  message CranedTaskX11OutputReq {
+  message TaskX11OutputReq {
     uint32 task_id = 1;
     bytes msg = 2;
   }
 
-  CranedRequestType type = 1;
+  SupervisorRequestType type = 1;
+
   oneof payload {
-    CranedRegisterReq payload_register_req = 2;
-    CranedTaskOutputReq payload_task_output_req = 3;
-    CranedUnRegisterReq payload_unregister_req = 4;
-    CranedTaskX11OutputReq payload_task_x11_output_req = 5;
+    SupervisorRegisterReq payload_register_req = 2;
+    TaskOutputReq payload_task_output_req = 3;
+    SupervisorUnRegisterReq payload_unregister_req = 4;
+    TaskX11OutputReq payload_task_x11_output_req = 5;
   }
 }
 
 message StreamTaskIOReply {
-  enum CranedReplyType {
-    CRANED_REGISTER_REPLY = 0;
-    CRANED_TASK_INPUT = 1;
-    CRANED_UNREGISTER_REPLY = 2;
-    CRANED_TASK_X11_INPUT = 3;
+  enum SupervisorReplyType {
+    SUPERVISOR_REGISTER_REPLY = 0;
+    TASK_INPUT = 1;
+    SUPERVISOR_UNREGISTER_REPLY = 2;
+    TASK_X11_INPUT = 3;
   }
 
-  message CranedRegisterReply {
+  message SupervisorRegisterReply {
     bool ok = 1;
   }
 
-  message CranedTaskInputReq {
+  message TaskInputReq {
     uint32 task_id = 1;
-    string msg = 2;
+    uint32 step_id = 2;
+    string msg = 3;
   }
 
-  message CranedUnregisterReply {
+  message SupervisorUnregisterReply {
     bool ok = 1;
   }
 
-  message CranedTaskX11InputReq {
+  message TaskX11InputReq {
     uint32 task_id = 1;
     bytes msg = 2;
   }
 
-  CranedReplyType type = 1;
+  SupervisorReplyType type = 1;
 
   oneof payload {
-    CranedRegisterReply payload_craned_register_reply = 2;
-    CranedTaskInputReq payload_task_input_req = 3;
-    CranedUnregisterReply payload_craned_unregister_reply = 4;
-    CranedTaskX11InputReq payload_task_x11_input_req = 5;
+    SupervisorRegisterReply payload_supervisor_register_reply = 2;
+    TaskInputReq payload_task_input_req = 3;
+    SupervisorUnregisterReply payload_supervisor_unregister_reply = 4;
+    TaskX11InputReq payload_task_x11_input_req = 5;
   }
 }
 
-// Todo: Divide service into two parts: one for Craned and one for Crun
+// TODO: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
 service CraneCtld {
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
-  rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
+  rpc CranedConnectedCtld(CranedConnectedCtldNotify) returns (google.protobuf.Empty);
+  rpc CranedReady(CranedReadyRequest) returns (CranedReadyReply);
 
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
@@ -838,14 +845,12 @@ service CraneCtld {
 
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
+  rpc Configure(ConfigureCranedRequest) returns (google.protobuf.Empty);
   rpc ExecuteTask(ExecuteTasksRequest) returns(ExecuteTasksReply);
-
-  rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
+  rpc ExecuteProc(ExecuteProcRequest) returns(ExecuteProcReply);
 
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns(CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns(ReleaseCgroupForTasksReply);
-
-  rpc QueryCranedRemoteMeta(QueryCranedRemoteMetaRequest) returns(QueryCranedRemoteMetaReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.
@@ -865,6 +870,9 @@ service Craned {
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
   rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest) returns (QueryTaskEnvVariablesReply);
   rpc QueryTaskEnvVariablesForward(QueryTaskEnvVariablesForwardRequest) returns (QueryTaskEnvVariablesForwardReply);
+
+  /* ----------------------------------- Called from Supervisor  --------------------------------------------------- */
+  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
 }
 
 service CraneForeD {

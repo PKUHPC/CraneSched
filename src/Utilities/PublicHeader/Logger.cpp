@@ -17,24 +17,45 @@
  */
 
 #include "crane/Logger.h"
+std::optional<spdlog::level::level_enum> StrToLogLevel(
+    const std::string& level) {
+  if (level == "trace") {
+    return spdlog::level::trace;
+  } else if (level == "debug") {
+    return spdlog::level::debug;
+  } else if (level == "info") {
+    return spdlog::level::info;
+  } else if (level == "warn") {
+    return spdlog::level::warn;
+  } else if (level == "error") {
+    return spdlog::level::err;
+  } else if (level == "off") {
+    return spdlog::level::off;
+  } else {
+    return std::nullopt;
+  }
+}
 
 void InitLogger(spdlog::level::level_enum level,
-                const std::string& log_file_path) {
+                const std::string& log_file_path, bool console) {
   spdlog::set_pattern("[%^%L%$ %C-%m-%d %s:%#] %v");
 
+  std::vector<spdlog::sink_ptr> sinks;
   auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
       log_file_path, 1048576 * 50 /*MB*/, 3);
+  file_sink->set_level(level);
+  sinks.push_back(file_sink);
 
-  auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+  if (console) {
+    auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+    console_sink->set_level(level);
+    sinks.push_back(console_sink);
+  }
 
   spdlog::init_thread_pool(256, 1);
   auto logger = std::make_shared<spdlog::async_logger>(
-      "default", spdlog::sinks_init_list{file_sink, console_sink},
-      spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-
-  file_sink->set_level(level);
-  console_sink->set_level(level);
-
+      "default", sinks.begin(), sinks.end(), spdlog::thread_pool(),
+      spdlog::async_overflow_policy::block);
   spdlog::set_default_logger(logger);
 
   spdlog::flush_on(spdlog::level::err);

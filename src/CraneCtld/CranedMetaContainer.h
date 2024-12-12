@@ -91,11 +91,13 @@ class CranedMetaContainer final {
       const crane::grpc::ModifyCranedStateRequest& request);
 
   CraneExpected<void> ModifyPartitionAcl(
-      const std::string& partition_name, bool is_allowed_list,
-      std::unordered_set<std::string>&& accounts);
+        const std::string& partition_name, bool is_allowed_list,
+        std::unordered_set<std::string>&& accounts);
 
   CraneExpected<void> CheckIfAccountIsAllowedInPartition(
       const std::string& partition_name, const std::string& account_name);
+
+  void CranedUp(const crane::grpc::CranedReadyRequest* req);
 
   void CranedUp(const CranedId& craned_id);
 

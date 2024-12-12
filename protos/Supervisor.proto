@@ -1,0 +1,110 @@
+/**
+ * Copyright (c) 2024 Peking University and Peking University
+ * Changsha Institute for Computing and Digital Economy
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+syntax = "proto3";
+
+package crane.grpc.supervisor;
+option go_package = "/protos/subprocess";
+
+import "PublicDefs.proto";
+
+message CanStartMessage {
+  bool ok = 1;
+  uint32 x11_port = 2;
+}
+
+message ChildProcessReady {
+  bool ok = 1;
+}
+
+message InitSupervisorRequest {
+  uint32 job_id = 1;
+  string debug_level = 2;
+  string craned_id = 3;
+  string craned_unix_socket_path = 4;
+  string crane_base_dir = 5;
+  string crane_script_dir = 6;
+
+  message ContainerConfig {
+    string temp_dir = 1;
+
+    string runtime_bin = 2;
+    string state_cmd = 3;
+    string run_cmd = 4;
+    string kill_cmd = 5;
+    string delete_cmd = 6;
+  }
+  ContainerConfig container_config = 7;
+
+  message PluginConfig {
+    string socket_path = 1;
+  }
+  PluginConfig plugin_config = 8;
+
+  TaskToD step_spec = 9;
+  map<string, string> env = 10;
+}
+
+
+message SupervisorReady {
+  bool ok = 1;
+}
+
+message TaskExecutionRequest{
+  TaskToD task = 1;
+}
+
+message TaskExecutionReply{
+  bool ok = 1;
+  int32 pid = 2;
+}
+
+message CheckTaskStatusRequest{
+
+}
+
+message CheckTaskStatusReply{
+  int32 job_id = 1;
+  int32 pid = 2;
+  bool ok = 3;
+}
+
+message ChangeTaskTimeLimitRequest{
+  int64 time_limit_seconds = 1;
+}
+
+message ChangeTaskTimeLimitReply{
+  bool ok = 1;
+}
+
+message TerminateTaskRequest{
+  bool mark_orphaned = 1;
+  bool terminated_by_user = 2;
+}
+
+message TerminateTaskReply{
+  bool ok = 1;
+  string reason = 2;
+}
+
+service Supervisor{
+  rpc ExecuteTask(TaskExecutionRequest) returns (TaskExecutionReply);
+  rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
+  rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns(ChangeTaskTimeLimitReply);
+  rpc TerminateTask(TerminateTaskRequest) returns(TerminateTaskReply);
+}

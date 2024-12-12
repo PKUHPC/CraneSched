@@ -18,6 +18,7 @@
 
 #include "CranedKeeper.h"
 
+#include "TaskScheduler.h"
 namespace Ctld {
 
 using grpc::ClientContext;
@@ -26,12 +27,30 @@ using grpc::Status;
 CranedStub::CranedStub(CranedKeeper *craned_keeper)
     : m_craned_keeper_(craned_keeper),
       m_failure_retry_times_(0),
-      m_invalid_(true) {
-  // The most part of jobs are done in CranedKeeper::RegisterCraneds().
-}
+      m_invalid_(true) {}
 
 CranedStub::~CranedStub() {
   if (m_clean_up_cb_) m_clean_up_cb_(this);
+}
+
+void CranedStub::ConfigureCraned(const CranedId &craned_id) {
+  static std::random_device rd;
+  static std::mt19937_64 gen(rd());
+  static std::uniform_int_distribution<uint64_t> dist;
+  m_last_configure_token = dist(gen);
+  CRANE_TRACE("Configuring craned {} with token {}", craned_id,
+              m_last_configure_token.load());
+  crane::grpc::ConfigureCranedRequest request;
+  request.set_token(m_last_configure_token);
+  g_task_scheduler->QueryJobOfNode(craned_id, &request);
+  google::protobuf::Empty reply;
+  ClientContext context;
+  auto status = m_stub_->Configure(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR(
+        "ConfigureCraned RPC for Node {} returned with status not ok: {}",
+        craned_id, status.error_message());
+  }
 }
 
 std::vector<task_id_t> CranedStub::ExecuteTasks(
@@ -110,7 +129,7 @@ CraneErrCode CranedStub::TerminateOrphanedTask(task_id_t task_id) {
 }
 
 CraneErrCode CranedStub::CreateCgroupForTasks(
-    std::vector<CgroupSpec> const &cgroup_specs) {
+    std::vector<CgroupSpec> &cgroup_specs) {
   using crane::grpc::CreateCgroupForTasksReply;
   using crane::grpc::CreateCgroupForTasksRequest;
 
@@ -122,11 +141,8 @@ CraneErrCode CranedStub::CreateCgroupForTasks(
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  for (const CgroupSpec &spec : cgroup_specs) {
-    request.mutable_task_id_list()->Add(spec.task_id);
-    request.mutable_uid_list()->Add(spec.uid);
-    *request.mutable_res_list()->Add() = std::move(spec.res_in_node);
-    request.add_execution_node(spec.execution_node);
+  for (CgroupSpec &spec : cgroup_specs) {
+    spec.SetJobSpec(request.add_cg_spec_vec());
   }
 
   status = m_stub_->CreateCgroupForTasks(&context, request, &reply);
@@ -169,33 +185,6 @@ CraneErrCode CranedStub::ReleaseCgroupForTasks(
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode CranedStub::CheckTaskStatus(task_id_t task_id,
-                                     crane::grpc::TaskStatus *status) {
-  using crane::grpc::CheckTaskStatusReply;
-  using crane::grpc::CheckTaskStatusRequest;
-
-  ClientContext context;
-  Status grpc_status;
-  CheckTaskStatusRequest request;
-  CheckTaskStatusReply reply;
-
-  request.set_task_id(task_id);
-  grpc_status = m_stub_->CheckTaskStatus(&context, request, &reply);
-
-  if (!grpc_status.ok()) {
-    CRANE_DEBUG(
-        "CheckTaskStatus gRPC for Node {} returned with status not ok: {}",
-        m_craned_id_, grpc_status.error_message());
-    return CraneErrCode::ERR_RPC_FAILURE;
-  }
-
-  if (reply.ok()) {
-    *status = reply.status();
-    return CraneErrCode::SUCCESS;
-  } else
-    return CraneErrCode::ERR_NON_EXISTENT;
-}
-
 CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
   using crane::grpc::ChangeTaskTimeLimitReply;
   using crane::grpc::ChangeTaskTimeLimitRequest;
@@ -218,109 +207,6 @@ CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds)
     return CraneErrCode::SUCCESS;
   else
     return CraneErrCode::ERR_GENERIC_FAILURE;
-}
-
-CraneErrCode CranedStub::QueryCranedRemoteMeta(CranedRemoteMeta *meta) {
-  using crane::grpc::QueryCranedRemoteMetaReply;
-  using crane::grpc::QueryCranedRemoteMetaRequest;
-  ClientContext context;
-  Status grpc_status;
-
-  QueryCranedRemoteMetaRequest request;
-  QueryCranedRemoteMetaReply reply;
-
-  grpc_status = m_stub_->QueryCranedRemoteMeta(&context, request, &reply);
-  if (!grpc_status.ok()) {
-    CRANE_ERROR("QueryCranedMeta to Craned {} failed: {} ", m_craned_id_,
-                grpc_status.error_message());
-    return CraneErrCode::ERR_RPC_FAILURE;
-  }
-
-  const auto *grpc_meta = reply.mutable_craned_remote_meta();
-  meta->dres_in_node =
-      static_cast<DedicatedResourceInNode>(grpc_meta->dres_in_node());
-
-  meta->craned_version = grpc_meta->craned_version();
-  meta->sys_rel_info.name = grpc_meta->sys_rel_info().name();
-  meta->sys_rel_info.release = grpc_meta->sys_rel_info().release();
-  meta->sys_rel_info.version = grpc_meta->sys_rel_info().version();
-
-  meta->craned_start_time =
-      absl::FromUnixSeconds(grpc_meta->craned_start_time().seconds());
-  meta->system_boot_time =
-      absl::FromUnixSeconds(grpc_meta->system_boot_time().seconds());
-
-  if (reply.ok()) return CraneErrCode::SUCCESS;
-
-  return CraneErrCode::ERR_GENERIC_FAILURE;
-}
-
-crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
-    const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks) {
-  crane::grpc::ExecuteTasksRequest request;
-
-  for (TaskInCtld *task : tasks) {
-    auto *mutable_task = request.add_tasks();
-
-    // Set time_limit
-    mutable_task->mutable_time_limit()->CopyFrom(
-        google::protobuf::util::TimeUtil::MillisecondsToDuration(
-            ToInt64Milliseconds(task->time_limit)));
-
-    // Set resources
-    auto *mutable_res_in_node = mutable_task->mutable_resources();
-    *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
-        task->Resources().at(craned_id));
-
-    // Set type
-    mutable_task->set_type(task->type);
-    mutable_task->set_task_id(task->TaskId());
-    mutable_task->set_name(task->name);
-    mutable_task->set_account(task->account);
-    mutable_task->set_qos(task->qos);
-    mutable_task->set_partition(task->partition_id);
-
-    for (auto &&node : task->included_nodes) {
-      mutable_task->mutable_nodelist()->Add()->assign(node);
-    }
-
-    for (auto &&node : task->excluded_nodes) {
-      mutable_task->mutable_excludes()->Add()->assign(node);
-    }
-
-    mutable_task->set_node_num(task->node_num);
-    mutable_task->set_ntasks_per_node(task->ntasks_per_node);
-    mutable_task->set_cpus_per_task(static_cast<double>(task->cpus_per_task));
-
-    mutable_task->set_uid(task->uid);
-    mutable_task->set_gid(task->gid);
-    mutable_task->mutable_env()->insert(task->env.begin(), task->env.end());
-
-    mutable_task->set_cwd(task->cwd);
-    mutable_task->set_get_user_env(task->get_user_env);
-
-    for (const auto &hostname : task->CranedIds())
-      mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
-
-    mutable_task->mutable_start_time()->set_seconds(
-        task->StartTimeInUnixSecond());
-    mutable_task->mutable_time_limit()->set_seconds(
-        ToInt64Seconds(task->time_limit));
-
-    if (task->type == crane::grpc::Batch) {
-      auto &meta_in_ctld = std::get<BatchMetaInTask>(task->meta);
-      auto *mutable_meta = mutable_task->mutable_batch_meta();
-      mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
-      mutable_meta->set_error_file_pattern(meta_in_ctld.error_file_pattern);
-      mutable_meta->set_sh_script(meta_in_ctld.sh_script);
-    } else {
-      const auto &proto_ia_meta = task->TaskToCtld().interactive_meta();
-      auto *mutable_meta = mutable_task->mutable_interactive_meta();
-      mutable_meta->CopyFrom(proto_ia_meta);
-    }
-  }
-
-  return request;
 }
 
 CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
@@ -458,10 +344,10 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
           // into the re-connecting queue again.
           delete craned;
         } else if (tag->type == CqTag::kEstablishedCraned) {
-          if (m_craned_is_down_cb_) {
+          if (m_craned_disconnected_cb_) {
             g_thread_pool->detach_task(
                 [this, craned_id = craned->m_craned_id_]() {
-                  m_craned_is_down_cb_(craned_id);
+                  m_craned_disconnected_cb_(craned_id);
                 });
           }
 
@@ -494,7 +380,6 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
 
       WriterLock lock(&m_connected_craned_mtx_);
       m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
-      craned->m_invalid_ = false;
     }
     {
       util::lock_guard guard(m_unavail_craned_set_mtx_);
@@ -502,9 +387,9 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       m_connecting_craned_set_.erase(craned->m_craned_id_);
     }
 
-    if (m_craned_is_up_cb_)
+    if (m_craned_connected_cb_)
       g_thread_pool->detach_task([this, craned_id = craned->m_craned_id_]() {
-        m_craned_is_up_cb_(craned_id);
+        m_craned_connected_cb_(craned_id);
       });
 
     // Switch to EstablishedCraned state machine
@@ -591,8 +476,8 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
     // prev     current
     // READY -> IDLE (the only edge)
 
-    // CRANE_TRACE("READY -> IDLE");
-    craned->m_invalid_ = true;
+    CRANE_TRACE("READY -> IDLE");
+    // craned->m_invalid_.store(true,std::memory_order_acquire);
 
     next_tag_type = CqTag::kEstablishedCraned;
     break;
@@ -607,12 +492,13 @@ CranedKeeper::CqTag *CranedKeeper::EstablishedCranedStateMachine_(
   case GRPC_CHANNEL_TRANSIENT_FAILURE: {
     // current              next
     // TRANSIENT_FAILURE -> END
+    CRANE_TRACE("TRANSIENT_FAILURE -> END");
     next_tag_type = std::nullopt;
     break;
   }
 
   case GRPC_CHANNEL_SHUTDOWN: {
-    craned->m_invalid_ = true;
+    CRANE_TRACE("SHUTDOWN");
 
     next_tag_type = std::nullopt;
     break;
@@ -633,6 +519,10 @@ uint32_t CranedKeeper::AvailableCranedCount() {
   absl::ReaderMutexLock r_lock(&m_connected_craned_mtx_);
   return m_connected_craned_id_stub_map_.size();
 }
+bool CranedKeeper::IsCranedConnected(const CranedId &craned_id) {
+  ReaderLock lock(&m_connected_craned_mtx_);
+  return m_connected_craned_id_stub_map_.contains(craned_id);
+}
 
 std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
     const CranedId &craned_id) {
@@ -643,12 +533,12 @@ std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
   return nullptr;
 }
 
-void CranedKeeper::SetCranedIsUpCb(std::function<void(CranedId)> cb) {
-  m_craned_is_up_cb_ = std::move(cb);
+void CranedKeeper::SetCranedConnectCb(std::function<void(CranedId)> cb) {
+  m_craned_connected_cb_ = std::move(cb);
 }
 
-void CranedKeeper::SetCranedIsDownCb(std::function<void(CranedId)> cb) {
-  m_craned_is_down_cb_ = std::move(cb);
+void CranedKeeper::SetCranedDisconnectCb(std::function<void(CranedId)> cb) {
+  m_craned_disconnected_cb_ = std::move(cb);
 }
 
 void CranedKeeper::PutNodeIntoUnavailList(const std::string &crane_id) {
@@ -698,7 +588,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
 
   // InitializingCraned: BEGIN -> IDLE
 
-  /* Todo: Adjust the value here.
+  /* TODO: Adjust the value here.
    * In default case, TRANSIENT_FAILURE -> TRANSIENT_FAILURE will use the
    * connection-backoff algorithm. We might need to adjust these values.
    * https://grpc.github.io/grpc/cpp/md_doc_connection-backoff.html

@@ -180,6 +180,18 @@ struct CranedRemoteMeta {
   std::string craned_version;
   absl::Time craned_start_time;
   absl::Time system_boot_time;
+  std::unordered_set<task_id_t> running_jobs;
+  CranedRemoteMeta() = default;
+  explicit CranedRemoteMeta(const crane::grpc::CranedRemoteMeta& grpc_meta)
+      : dres_in_node(grpc_meta.dres_in_node()) {
+    this->sys_rel_info.name = grpc_meta.sys_rel_info().name();
+    this->sys_rel_info.release = grpc_meta.sys_rel_info().release();
+    this->sys_rel_info.version = grpc_meta.sys_rel_info().version();
+    this->craned_start_time =
+        absl::FromUnixSeconds(grpc_meta.craned_start_time().seconds());
+    this->system_boot_time =
+        absl::FromUnixSeconds(grpc_meta.system_boot_time().seconds());
+  }
 };
 
 /**
@@ -276,6 +288,7 @@ struct InteractiveMetaInTask {
 
 struct BatchMetaInTask {
   std::string sh_script;
+  std::string interpreter;
   std::string output_file_pattern;
   std::string error_file_pattern;
 };
@@ -310,6 +323,7 @@ struct TaskInCtld {
   std::string cmd_line;
   std::unordered_map<std::string, std::string> env;
   std::string cwd;
+  std::string container;
 
   std::string extra_attr;
 
@@ -500,6 +514,7 @@ struct TaskInCtld {
     if (type == crane::grpc::Batch) {
       meta.emplace<BatchMetaInTask>(BatchMetaInTask{
           .sh_script = val.batch_meta().sh_script(),
+          .interpreter = val.batch_meta().interpreter(),
           .output_file_pattern = val.batch_meta().output_file_pattern(),
           .error_file_pattern = val.batch_meta().error_file_pattern(),
       });
@@ -523,12 +538,12 @@ struct TaskInCtld {
     account = val.account();
     name = val.name();
     qos = val.qos();
+
     cmd_line = val.cmd_line();
+    cwd = val.cwd();
+    container = val.container();
 
     for (auto& [k, v] : val.env()) env[k] = v;
-
-    cwd = val.cwd();
-    qos = val.qos();
 
     get_user_env = val.get_user_env();
 
@@ -604,6 +619,7 @@ struct TaskInCtld {
     task_info->mutable_exclude_nodes()->Assign(excluded_nodes.begin(),
                                                excluded_nodes.end());
 
+    task_info->set_container(container);
     task_info->set_extra_attr(extra_attr);
 
     task_info->set_held(held);
@@ -622,6 +638,82 @@ struct TaskInCtld {
     } else {
       task_info->set_craned_list(allocated_craneds_regex);
     }
+  }
+
+  crane::grpc::TaskToD GetTaskSpecOfNode(const CranedId& craned_id) const {
+    crane::grpc::TaskToD task_to_d;
+    // Set time_limit
+    task_to_d.mutable_time_limit()->CopyFrom(
+        google::protobuf::util::TimeUtil::MillisecondsToDuration(
+            ToInt64Milliseconds(this->time_limit)));
+
+    // Set resources
+    auto* mutable_res_in_node = task_to_d.mutable_resources();
+    *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
+        this->Resources().at(craned_id));
+
+    // Set type
+    task_to_d.set_type(this->type);
+
+    task_to_d.set_task_id(this->TaskId());
+    task_to_d.set_name(this->name);
+    task_to_d.set_account(this->account);
+    task_to_d.set_qos(this->qos);
+    task_to_d.set_partition(this->partition_id);
+
+    for (auto&& node : this->included_nodes) {
+      task_to_d.mutable_nodelist()->Add()->assign(node);
+    }
+
+    for (auto&& node : this->excluded_nodes) {
+      task_to_d.mutable_excludes()->Add()->assign(node);
+    }
+
+    task_to_d.set_node_num(this->node_num);
+    task_to_d.set_ntasks_per_node(this->ntasks_per_node);
+    task_to_d.set_cpus_per_task(static_cast<double>(this->cpus_per_task));
+
+    task_to_d.set_uid(this->uid);
+    task_to_d.set_gid(this->gid);
+    task_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
+
+    task_to_d.set_cwd(this->cwd);
+    task_to_d.set_container(this->container);
+    task_to_d.set_get_user_env(this->get_user_env);
+
+    for (const auto& hostname : this->CranedIds())
+      task_to_d.mutable_allocated_nodes()->Add()->assign(hostname);
+
+    task_to_d.mutable_start_time()->set_seconds(this->StartTimeInUnixSecond());
+    task_to_d.mutable_time_limit()->set_seconds(
+        ToInt64Seconds(this->time_limit));
+
+    if (this->type == crane::grpc::Batch) {
+      auto& meta_in_ctld = std::get<BatchMetaInTask>(this->meta);
+      auto* mutable_meta = task_to_d.mutable_batch_meta();
+      mutable_meta->set_sh_script(meta_in_ctld.sh_script);
+      mutable_meta->set_interpreter(meta_in_ctld.interpreter);
+      mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
+      mutable_meta->set_error_file_pattern(meta_in_ctld.error_file_pattern);
+    } else {
+      auto& meta_in_ctld = std::get<InteractiveMetaInTask>(this->meta);
+      auto* mutable_meta = task_to_d.mutable_interactive_meta();
+      mutable_meta->set_cfored_name(meta_in_ctld.cfored_name);
+      mutable_meta->set_sh_script(meta_in_ctld.sh_script);
+      mutable_meta->set_term_env(meta_in_ctld.term_env);
+      mutable_meta->set_interactive_type(meta_in_ctld.interactive_type);
+      mutable_meta->set_pty(meta_in_ctld.pty);
+    }
+    return task_to_d;
+  }
+
+  crane::grpc::JobSpec GetJobSpecOfNode(const CranedId& craned_id) const {
+    crane::grpc::JobSpec spec;
+    spec.set_job_id(task_id);
+    spec.set_uid(uid);
+    *spec.mutable_res() = crane::grpc::ResourceInNode(resources.at(craned_id));
+    spec.set_execution_node(executing_craned_ids.front());
+    return spec;
   }
 };
 
