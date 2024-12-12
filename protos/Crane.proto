@@ -83,6 +83,14 @@ message ExecuteTasksReply {
   repeated uint32 failed_task_id_list = 1;
 }
 
+message ExecuteProcRequest{
+  ProcToD proc = 1;
+}
+
+message ExecuteProcReply{
+  bool ok = 1;
+}
+
 message CreateCgroupForTasksRequest {
   repeated uint32 task_id_list = 1;
   repeated uint32 uid_list = 2;
@@ -798,6 +806,7 @@ service CraneCtld {
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc ExecuteTask(ExecuteTasksRequest) returns(ExecuteTasksReply);
+  rpc ExecuteProc(ExecuteProcRequest) returns(ExecuteProcReply);
 
   rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
 

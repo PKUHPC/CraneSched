@@ -111,6 +111,24 @@ enum InteractiveTaskType {
   Crun = 1;
 }
 
+message ProcToD{
+  uint32 task_id = 1;
+  uint32 proc_id = 2;
+  TaskType type = 3;
+
+  bool get_user_env = 4;
+  map<string, string> env = 5;
+
+  string cmd_line = 6;
+  string cwd = 7;// Current working directory
+
+  oneof payload {
+    BatchTaskAdditionalMeta batch_meta = 8;
+    InteractiveTaskAdditionalMeta interactive_meta = 9;
+  }
+
+}
+
 message TaskToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
