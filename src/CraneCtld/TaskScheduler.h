@@ -162,6 +162,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
     const TimeAvailResMap::const_iterator end;
     const ResourceInNode* task_res;
     void* tracker_list_elem;
+    bool satisfied_flag;
 
     TimeAvailResTracker(const CranedId& craned_id,
                         const TimeAvailResMap::const_iterator& begin,
@@ -171,9 +172,16 @@ class MinLoadFirst : public INodeSelectionAlgo {
           it(begin),
           end(end),
           task_res(task_res),
-          tracker_list_elem(nullptr) {}
+          tracker_list_elem(nullptr) {
+      satisfied_flag = satisfied();
+    }
 
     bool satisfied() const { return *task_res <= it->second; }
+
+    bool genNext() {
+      satisfied_flag = !satisfied_flag;  // target state
+      return satisfied_flag ? genNextSatisfied() : genNextUnsatisfied();
+    }
 
     bool genNextUnsatisfied() {
       while (++it != end && satisfied());

@@ -2128,13 +2128,12 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     while (!pq.empty() && pq.top()->it->first == time) {
       auto tracker = pq.top();
       pq.pop();
-      if (tracker->satisfied()) {
+      if (tracker->satisfied_flag) {
         satisfied_trackers.try_push_back(tracker, time);
-        if (tracker->genNextUnsatisfied()) pq.emplace(tracker);
       } else {
         satisfied_trackers.try_erase(tracker);
-        if (tracker->genNextSatisfied()) pq.emplace(tracker);
       }
+      if (tracker->genNext()) pq.emplace(tracker);
     }
     if (pq.empty() || satisfied_trackers.kth_time() + task->time_limit <=
                           pq.top()->it->first) {
