@@ -210,6 +210,9 @@ struct PartitionGlobalMeta {
 
   std::string name;
   std::string nodelist_str;
+
+  std::unordered_set<std::string> allow_accounts;
+
   uint32_t node_cnt;
   uint32_t alive_craned_cnt;
 };

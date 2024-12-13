@@ -283,9 +283,11 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     part_meta.partition_global_meta.res_total_inc_dead = part_res;
     part_meta.partition_global_meta.node_cnt = part_meta.craned_ids.size();
     part_meta.partition_global_meta.nodelist_str = partition.nodelist_str;
+    part_meta.partition_global_meta.allow_accounts = partition.allow_accounts;
 
     CRANE_DEBUG(
-        "partition [{}]'s Global resource now: (cpu: {}, mem: {}, gres: {}). "
+        "partition [{}]'s Global resource now: (cpu: {}, mem: {}, "
+        "gres: {}). "
         "It has {} craneds.",
         part_name,
         part_meta.partition_global_meta.res_total_inc_dead.CpuCount(),
@@ -346,6 +348,11 @@ CranedMetaContainer::QueryAllPartitionInfo() {
     part_info->set_total_nodes(part_meta->partition_global_meta.node_cnt);
     part_info->set_alive_nodes(
         part_meta->partition_global_meta.alive_craned_cnt);
+    auto* allow_accounts = part_info->mutable_allow_accounts();
+    for (const auto& account_name :
+         part_meta->partition_global_meta.allow_accounts) {
+      allow_accounts->Add()->assign(account_name);
+    }
 
     *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
         part_meta->partition_global_meta.res_total);
@@ -378,6 +385,11 @@ crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
   part_info->set_name(part_meta->partition_global_meta.name);
   part_info->set_total_nodes(part_meta->partition_global_meta.node_cnt);
   part_info->set_alive_nodes(part_meta->partition_global_meta.alive_craned_cnt);
+  auto* allow_accounts = part_info->mutable_allow_accounts();
+  for (const auto& account_name :
+       part_meta->partition_global_meta.allow_accounts) {
+    allow_accounts->Add()->assign(account_name);
+  }
 
   if (part_meta->partition_global_meta.alive_craned_cnt > 0)
     part_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
