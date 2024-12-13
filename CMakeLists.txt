@@ -411,7 +411,7 @@ install(FILES
 if(ENABLE_BPF)
     install(FILES 
             ${CMAKE_BINARY_DIR}/src/Misc/BPF/cgroup_dev_bpf.o
-            DESTINATION /etc/crane/
+            DESTINATION /usr/local/lib64/bpf/
             COMPONENT cranedc
             PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
 endif()
