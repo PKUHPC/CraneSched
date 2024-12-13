@@ -80,7 +80,7 @@ struct Config {
     // optional, 0 indicates no limit
     uint64_t max_mem_per_cpu;
     std::unordered_set<std::string> nodes;
-    std::unordered_set<std::string> AllowAccounts;
+    std::unordered_set<std::string> allow_accounts;
   };
 
   struct CraneCtldListenConf {
