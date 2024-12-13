@@ -409,6 +409,14 @@ install(FILES
         PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 # Install configuration files
+if(ENABLE_BPF)
+    install(FILES 
+            ${CMAKE_BINARY_DIR}/src/Misc/BPF/cgroup_dev_bpf.o
+            DESTINATION /usr/local/lib64/bpf/
+            COMPONENT cranedc
+            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
+endif()
+
 install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         DESTINATION /etc/crane/
         COMPONENT cranectldc
