@@ -248,6 +248,13 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::ModifyPartitionAllowedAccounts(
+    grpc::ServerContext *context,
+    const crane::grpc::ModifyPartitionAllowedAccountsRequest *request,
+    crane::grpc::ModifyPartitionAllowedAccountsReply *response) {
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryTasksInfoRequest *request,

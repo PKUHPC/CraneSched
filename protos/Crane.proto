@@ -386,6 +386,18 @@ message BlockAccountOrUserReply {
   ErrCode reason = 2;
 }
 
+message ModifyPartitionAllowedAccountsRequest { 
+  uint32 uid = 1;
+  string partition_name = 2;
+  repeated string allowed_accounts = 3;
+}
+
+
+message ModifyPartitionAllowedAccountsReply {
+  bool ok = 1;
+  ErrCode reason = 2;
+}
+
 message MigrateSshProcToCgroupRequest {
   int32 pid = 1;
   uint32 task_id = 2;
@@ -768,6 +780,7 @@ service CraneCtld {
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
+  rpc ModifyPartitionAllowedAccounts(ModifyPartitionAllowedAccountsRequest) returns (ModifyPartitionAllowedAccountsReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
