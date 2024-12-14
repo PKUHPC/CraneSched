@@ -21,16 +21,17 @@ class Collection(Enum):
     USER = "user_table"
 
 
-def load_config(config_path: str):
+def load_config(crane_path: str, db_path: str = None):
     """Load and validate configurations."""
-    global_config = _read_config(config_path)
-    conf_path = global_config.get("DbConfigPath")
-    base_dir = global_config.get("CraneBaseDir")
+    global_config = _read_config(crane_path)
 
-    if not conf_path or not base_dir:
+    # db_path in param comes first
+    real_db_path = db_path if db_path else global_config.get("DbConfigPath")
+    base_dir = global_config.get("CraneBaseDir")
+    if not real_db_path or not base_dir:
         raise ValueError("Missing keys in config (DbConfigPath, CraneBaseDir).")
 
-    db_config = _read_config(conf_path)
+    db_config = _read_config(real_db_path)
 
     username = db_config.get("DbUser")
     password = db_config.get("DbPassword")
@@ -99,13 +100,19 @@ def parse_arguments():
     parser.add_argument(
         "mode",
         choices=["mongo", "embedded", "all"],
-        help="Mode of operation: 'mongo' (MongoDB only), 'embedded' (embedded database only), 'all' (both MongoDB and embedded database).",
+        help="Mode of operation: 'mongo' (MongoDB only), 'embedded' (embedded DB only), 'all' (both MongoDB and embedded DB).",
     )
     parser.add_argument(
         "-C",
         "--config",
         default="/etc/crane/config.yaml",
-        help="Path to the configuration file. Default: /etc/crane/config.yaml",
+        help="Path to the crane config. Default: /etc/crane/config.yaml",
+    )
+    parser.add_argument(
+        "-D",
+        "--db-config",
+        default=None,
+        help="Path to the DB config. Default is the value in crane config.",
     )
     parser.add_argument(
         "-a",
@@ -156,14 +163,11 @@ def _main():
     logger = logging.getLogger(__name__)
     logging.basicConfig(
         level=logging.DEBUG,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        format="[%(levelname)s] [%(filename)s:%(lineno)d] %(message)s",
     )
 
     # Load configurations
-    username, password, host, port, dbname, embedded_db_path = load_config(
-        args.config
-    )
+    username, password, host, port, dbname, embedded_db_path = load_config(args.config, args.db_config)
 
     logger.debug(f"MongoDB Config: {username}, {host}, {port}, {dbname}")
     logger.debug(f"Embedded DB Config: {embedded_db_path}")
