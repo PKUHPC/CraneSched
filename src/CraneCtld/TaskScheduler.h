@@ -22,8 +22,6 @@
 // Precompiled header comes first!
 
 #include "CranedMetaContainer.h"
-#include "DbClient.h"
-#include "crane/Lock.h"
 #include "protos/Crane.pb.h"
 
 namespace Ctld {
@@ -37,7 +35,8 @@ class IPrioritySorter {
  public:
   virtual std::vector<task_id_t> GetOrderedTaskIdList(
       const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map, size_t limit) = 0;
+      const UnorderedTaskMap& running_task_map, size_t limit,
+      absl::Time now) = 0;
 
   virtual ~IPrioritySorter() = default;
 };
@@ -46,7 +45,8 @@ class BasicPriority : public IPrioritySorter {
  public:
   std::vector<task_id_t> GetOrderedTaskIdList(
       const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map, size_t limit) override {
+      const UnorderedTaskMap& running_task_map, size_t limit,
+      absl::Time now) override {
     size_t len = std::min(pending_task_map.size(), limit);
 
     std::vector<task_id_t> task_id_vec;
@@ -71,7 +71,8 @@ class MultiFactorPriority : public IPrioritySorter {
  public:
   std::vector<task_id_t> GetOrderedTaskIdList(
       const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map, size_t limit_num) override;
+      const UnorderedTaskMap& running_task_map, size_t limit_num,
+      absl::Time now) override;
 
  private:
   struct FactorBound {
@@ -140,6 +141,9 @@ class MinLoadFirst : public INodeSelectionAlgo {
 
  private:
   static constexpr bool kAlgoTraceOutput = false;
+  static constexpr bool kAlgoRedundantNode = false;
+  static constexpr uint32_t kAlgoMaxTaskNumPerNode = 1000;
+  static constexpr absl::Duration kAlgoMaxTimeWindow = absl::Hours(24 * 7);
 
   /**
    * This map stores how much resource is available
@@ -152,24 +156,129 @@ class MinLoadFirst : public INodeSelectionAlgo {
    * In time interval [z, ...], the amount of available resources is c.
    */
   using TimeAvailResMap = std::map<absl::Time, ResourceInNode>;
+  struct TimeAvailResTracker {
+    const CranedId craned_id;
+    TimeAvailResMap::const_iterator it;
+    const TimeAvailResMap::const_iterator end;
+    const ResourceInNode* task_res;
+    void* tracker_list_elem;
+    bool satisfied_flag;
 
-  struct TimeSegment {
-    TimeSegment(absl::Time start, absl::Duration duration)
-        : start(start), duration(duration) {}
-    absl::Time start;
-    absl::Duration duration;
+    TimeAvailResTracker(const CranedId& craned_id,
+                        const TimeAvailResMap::const_iterator& begin,
+                        const TimeAvailResMap::const_iterator& end,
+                        const ResourceInNode* task_res)
+        : craned_id(craned_id),
+          it(begin),
+          end(end),
+          task_res(task_res),
+          tracker_list_elem(nullptr) {
+      satisfied_flag = satisfied();
+    }
 
-    bool operator<(const absl::Time& rhs) const { return this->start < rhs; }
+    bool satisfied() const { return *task_res <= it->second; }
 
-    friend bool operator<(const absl::Time& lhs, const TimeSegment& rhs) {
-      return lhs < rhs.start;
+    bool genNext() {
+      satisfied_flag = !satisfied_flag;  // target state
+      return satisfied_flag ? genNextSatisfied() : genNextUnsatisfied();
+    }
+
+    bool genNextUnsatisfied() {
+      while (++it != end && satisfied());
+      return it != end;
+    }
+
+    bool genNextSatisfied() {
+      while (++it != end && !satisfied());
+      return it != end;
+    }
+  };
+
+  struct TrackerList {
+    struct TrackerListElem {
+      TimeAvailResTracker* tracker_ptr;
+      absl::Time time;
+      TrackerListElem* prev;
+      TrackerListElem* next;
+      bool first_k;
+    };
+
+    size_t size;
+    int node_num;
+    TrackerListElem* tail;
+    TrackerListElem* kth_elem;
+
+    TrackerList(int node_num)
+        : size(0), node_num(node_num), tail(nullptr), kth_elem(nullptr) {}
+
+    void try_push_back(TimeAvailResTracker* it, absl::Time time) {
+      if (it->tracker_list_elem) return;
+      TrackerListElem* elem =
+          new TrackerListElem{it, time, nullptr, nullptr, ++size <= node_num};
+      if (tail) {
+        elem->prev = tail;
+        tail->next = elem;
+      }
+      if (size == node_num) {
+        kth_elem = elem;
+      }
+      tail = elem;
+      it->tracker_list_elem = elem;
+    }
+
+    void try_erase(TimeAvailResTracker* it) {
+      TrackerListElem* elem =
+          static_cast<TrackerListElem*>(it->tracker_list_elem);
+      if (!elem) return;
+      if (elem->first_k && kth_elem) {
+        kth_elem = kth_elem->next;
+        if (kth_elem) {
+          kth_elem->first_k = true;
+        }
+      }
+      if (elem->prev) {
+        elem->prev->next = elem->next;
+      }
+      if (elem->next) {
+        elem->next->prev = elem->prev;
+      }
+      if (elem == tail) {
+        tail = elem->prev;
+      }
+      elem->tracker_ptr->tracker_list_elem = nullptr;
+      delete elem;
+      --size;
+    }
+
+    absl::Time kth_time() const {
+      return kth_elem ? kth_elem->time : absl::InfiniteFuture();
     }
   };
 
   struct NodeSelectionInfo {
-    std::multimap<uint32_t /* # of running tasks */, CranedId>
-        task_num_node_id_map;
+    // Craned_ids are sorted by cost.
+    std::set<std::pair<uint64_t, CranedId>> cost_node_id_set;
+    std::unordered_map<CranedId, uint64_t> node_cost_map;
     std::unordered_map<CranedId, TimeAvailResMap> node_time_avail_res_map;
+    std::unordered_map<CranedId, ResourceInNode> node_res_total_map;
+
+    void setCost(const CranedId& craned_id, uint64_t cost) {
+      cost_node_id_set.erase({node_cost_map[craned_id], craned_id});
+      node_cost_map[craned_id] = cost;
+      cost_node_id_set.emplace(cost, craned_id);
+    }
+    void updateCost(const CranedId& craned_id, const absl::Time& start_time,
+                    const absl::Time& end_time,
+                    const ResourceInNode& resources) {
+      auto& cost = node_cost_map[craned_id];
+      cost_node_id_set.erase({cost, craned_id});
+      auto& total_res = node_res_total_map[craned_id];
+      double cpu_rate =
+          static_cast<double>(resources.allocatable_res.cpu_count) /
+          static_cast<double>(total_res.allocatable_res.cpu_count);
+      cost += round((end_time - start_time) / absl::Seconds(1) * cpu_rate);
+      cost_node_id_set.emplace(cost, craned_id);
+    }
   };
 
   static void CalculateNodeSelectionInfoOfPartition_(
@@ -180,8 +289,6 @@ class MinLoadFirst : public INodeSelectionAlgo {
       const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
       NodeSelectionInfo* node_selection_info);
 
-  // Input should guarantee that provided nodes in `node_selection_info` has
-  // enough nodes whose resource is >= task->resource.
   static bool CalculateRunningNodesAndStartTime_(
       const NodeSelectionInfo& node_selection_info,
       const util::Synchronized<PartitionMeta>& partition_meta_ptr,
