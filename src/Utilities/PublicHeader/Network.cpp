@@ -228,11 +228,6 @@ bool ResolveIpv4FromHostname(const std::string& hostname, ipv4_t* addr) {
 }
 
 bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr) {
-  if (CheckIpv6Support() == false) {
-    CRANE_TRACE("IPv6 not enabled in this system, skip resolving ipv6 for {}",
-                hostname);
-    return false;
-  }
   if (internal::g_hosts_map->FindIpv6OfHostname(hostname, addr)) return true;
 
   struct addrinfo hints{};
@@ -253,13 +248,22 @@ bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr) {
                       nullptr, 0, NI_NUMERICHOST);
     auto ipv6_sockaddr = (struct sockaddr_in6*)tmp->ai_addr;
     if (ret == 0) {
+      if (IN6_IS_ADDR_LINKLOCAL(&ipv6_sockaddr->sin6_addr)) {
+        // Check if it is a link-local address, which must have a scope ID (e.g.
+        // %eth0). We don't support link-local address as it's too complex to
+        // handle.
+        CRANE_TRACE("Skipping link-local address of {}", hostname);
+        continue;
+      }
+
+      *addr = 0;
       for (int i = 0; i < 4; ++i) {
-        *addr = 0;
         uint32_t part = ntohl(ipv6_sockaddr->sin6_addr.s6_addr32[i]);
         *addr = (*addr << 32) | part;
       }
-    } else
-      CRANE_ERROR("error getnameinfo {}", gai_strerror(ret));
+    } else {
+      CRANE_ERROR("Error in getnameinfo {}", gai_strerror(ret));
+    }
   }
 
   freeaddrinfo(res);
@@ -341,44 +345,6 @@ bool FindTcpInodeByPort(const std::string& tcp_path, int port, ino_t* inode) {
     CRANE_ERROR("Can't open file: {}", tcp_path);
   }
   return false;
-}
-
-bool CheckIpv6Support() {
-  static std::optional<bool> checked;
-  if (checked.has_value()) return checked.value();
-
-  // Check if supports socket of IPv6
-  int sock = socket(AF_INET6, SOCK_DGRAM, 0);
-  if (sock < 0) {
-    checked = false;
-    return checked.value();
-  }
-
-  struct ifconf ifc;
-  char buf[1024];
-  ifc.ifc_len = sizeof(buf);
-  ifc.ifc_buf = buf;
-
-  // Get the list of interfaces
-  if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
-    close(sock);
-    checked = false;
-    return checked.value();
-  }
-
-  // Check if there is any IPv6 address
-  for (struct ifreq* ifr = ifc.ifc_req; (char*)ifr < buf + ifc.ifc_len;
-       ifr = (struct ifreq*)((char*)ifr + sizeof(*ifr))) {
-    if (ifr->ifr_addr.sa_family == AF_INET6) {
-      close(sock);
-      checked = true;
-      return checked.value();
-    }
-  }
-
-  close(sock);
-  checked = false;
-  return checked.value();
 }
 
 }  // namespace crane
