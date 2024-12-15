@@ -18,6 +18,9 @@
 
 #include "crane/Network.h"
 
+#include <net/if.h>
+#include <sys/ioctl.h>
+
 #include "crane/Logger.h"
 
 namespace crane {
@@ -143,7 +146,7 @@ bool ResolveHostnameFromIpv4(ipv4_t addr, std::string* hostname) {
   if (internal::g_hosts_map->FindFirstHostnameOfIpv4(addr, hostname))
     return true;
 
-  struct sockaddr_in sa {};
+  struct sockaddr_in sa{};
   char hbuf[NI_MAXHOST];
 
   std::string ipv4_str = Ipv4ToStr(addr);
@@ -169,7 +172,7 @@ bool ResolveHostnameFromIpv6(const ipv6_t& addr, std::string* hostname) {
   if (internal::g_hosts_map->FindFirstHostnameOfIpv6(addr, hostname))
     return true;
 
-  struct sockaddr_in6 sa6 {};
+  struct sockaddr_in6 sa6{};
   char hbuf[NI_MAXHOST];
 
   /* For IPv6*/
@@ -196,7 +199,7 @@ bool ResolveHostnameFromIpv6(const ipv6_t& addr, std::string* hostname) {
 bool ResolveIpv4FromHostname(const std::string& hostname, ipv4_t* addr) {
   if (internal::g_hosts_map->FindIpv4OfHostname(hostname, addr)) return true;
 
-  struct addrinfo hints {};
+  struct addrinfo hints{};
   struct addrinfo* res;
   char host[NI_MAXHOST];
 
@@ -225,9 +228,14 @@ bool ResolveIpv4FromHostname(const std::string& hostname, ipv4_t* addr) {
 }
 
 bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr) {
+  if (CheckIpv6Support() == false) {
+    CRANE_TRACE("IPv6 not enabled in this system, skip resolving ipv6 for {}",
+                hostname);
+    return false;
+  }
   if (internal::g_hosts_map->FindIpv6OfHostname(hostname, addr)) return true;
 
-  struct addrinfo hints {};
+  struct addrinfo hints{};
   struct addrinfo *res, *tmp;
   char host[NI_MAXHOST];
 
@@ -333,6 +341,44 @@ bool FindTcpInodeByPort(const std::string& tcp_path, int port, ino_t* inode) {
     CRANE_ERROR("Can't open file: {}", tcp_path);
   }
   return false;
+}
+
+bool CheckIpv6Support() {
+  static std::optional<bool> checked;
+  if (checked.has_value()) return checked.value();
+
+  // Check if supports socket of IPv6
+  int sock = socket(AF_INET6, SOCK_DGRAM, 0);
+  if (sock < 0) {
+    checked = false;
+    return checked.value();
+  }
+
+  struct ifconf ifc;
+  char buf[1024];
+  ifc.ifc_len = sizeof(buf);
+  ifc.ifc_buf = buf;
+
+  // Get the list of interfaces
+  if (ioctl(sock, SIOCGIFCONF, &ifc) < 0) {
+    close(sock);
+    checked = false;
+    return checked.value();
+  }
+
+  // Check if there is any IPv6 address
+  for (struct ifreq* ifr = ifc.ifc_req; (char*)ifr < buf + ifc.ifc_len;
+       ifr = (struct ifreq*)((char*)ifr + sizeof(*ifr))) {
+    if (ifr->ifr_addr.sa_family == AF_INET6) {
+      close(sock);
+      checked = true;
+      return checked.value();
+    }
+  }
+
+  close(sock);
+  checked = false;
+  return checked.value();
 }
 
 }  // namespace crane

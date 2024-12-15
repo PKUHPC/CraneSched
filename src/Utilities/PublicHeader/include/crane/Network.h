@@ -63,4 +63,6 @@ int GetIpAddrVer(const std::string& ip);
 
 bool FindTcpInodeByPort(const std::string& tcp_path, int port, ino_t* inode);
 
+bool CheckIpv6Support();
+
 }  // namespace crane
