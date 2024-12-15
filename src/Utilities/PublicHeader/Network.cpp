@@ -18,9 +18,6 @@
 
 #include "crane/Network.h"
 
-#include <net/if.h>
-#include <sys/ioctl.h>
-
 #include "crane/Logger.h"
 
 namespace crane {
