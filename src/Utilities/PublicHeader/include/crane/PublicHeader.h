@@ -65,8 +65,10 @@ enum class CraneErr : uint16_t {
 template <typename T>
 using CraneExpected = std::expected<T, CraneErr>;
 
+using CraneErrCode = crane::grpc::ErrCode;
+
 template <typename T>
-using CraneErrCodeExpected = std::expected<T, crane::grpc::ErrCode>;
+using CraneErrCodeExpected = std::expected<T, CraneErrCode>;
 
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
@@ -151,7 +153,7 @@ constexpr std::array<std::string_view, uint16_t(CraneErr::__ERR_SIZE)>
         "Not enough nodes which satisfy resource requirements",
 };
 
-constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode::ERR_CODE_COUNT)> ErrCodeStrArray = {
+constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> ErrCodeStrArray = {
         "Success",
         "Invalid UID",
         "You are not a user of Crane",
@@ -225,7 +227,7 @@ inline std::string_view CraneErrStr(CraneErr err) {
   return Internal::CraneErrStrArr[uint16_t(err)];
 }
 
-inline std::string_view CraneErrCodeStr(crane::grpc::ErrCode err) {
+inline std::string_view CraneErrCodeStr(CraneErrCode err) {
   return Internal::CraneErrStrArr[uint16_t(err)];
 }
 

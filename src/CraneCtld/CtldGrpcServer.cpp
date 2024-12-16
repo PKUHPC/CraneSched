@@ -41,7 +41,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
       response->set_task_id(id);
     } else {
       response->set_ok(false);
-      response->set_reason(crane::grpc::ErrCode::ERR_BEYOND_TASK_ID);
+      response->set_reason(CraneErrCode::ERR_BEYOND_TASK_ID);
     }
   } else {
     response->set_ok(false);
@@ -349,7 +349,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
           .allowed_partition_qos_map[apq.partition_name()];
   }
 
-  AccountManager::CraneExpected<void> result =
+  CraneErrCodeExpected<void> result =
       g_account_manager->AddUser(request->uid(), user);
   if (result) {
     response->set_ok(true);
@@ -377,7 +377,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
     response->set_ok(false);
-    response->set_reason(AccountManager::CraneErrCode::ERR_TIME_LIMIT);
+    response->set_reason(CraneErrCode::ERR_TIME_LIMIT);
     return grpc::Status::OK;
   }
   qos.max_time_limit_per_task = absl::Seconds(sec);
@@ -414,7 +414,7 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
 grpc::Status CraneCtldServiceImpl::ModifyUser(
     grpc::ServerContext *context, const crane::grpc::ModifyUserRequest *request,
     crane::grpc::ModifyUserReply *response) {
-  AccountManager::CraneExpected<void> modify_res;
+  CraneErrCodeExpected<void> modify_res;
 
   if (request->type() == crane::grpc::OperationType::Delete) {
     switch (request->modify_field()) {
@@ -670,7 +670,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
     grpc::ServerContext *context,
     const crane::grpc::BlockAccountOrUserRequest *request,
     crane::grpc::BlockAccountOrUserReply *response) {
-  AccountManager::CraneExpected<void> res;
+  CraneErrCodeExpected<void> res;
 
   switch (request->entity_type()) {
   case crane::grpc::Account:
@@ -939,7 +939,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
 
   if (!task->password_entry->Valid()) {
     CRANE_ERROR("Uid {} not found on the controller node", task->uid);
-    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_UID);
+    return std::unexpected(CraneErrCode::ERR_INVALID_UID);
   }
   task->SetUsername(task->password_entry->Username());
 
@@ -948,7 +948,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
         g_account_manager->GetExistedUserInfo(task->Username());
     if (!user_scoped_ptr) {
       CRANE_ERROR("User '{}' not found in the account database", task->Username());
-      return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_USER);
+      return std::unexpected(CraneErrCode::ERR_INVALID_USER);
     }
 
     if (task->account.empty()) {
@@ -957,7 +957,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     } else {
       if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
           CRANE_ERROR("Account '{}' is not in your account list", task->account);
-          return std::unexpected(crane::grpc::ErrCode::ERR_USER_ACCOUNT_MISMATCH);
+          return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
       }
     }
   }
@@ -966,7 +966,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
           task->Username(), task->account, task->partition_id)) {
       CRANE_ERROR("User '{}' doesn't have permission to use partition '{}' when using account '{}'",
                     task->Username(), task->partition_id, task->account);
-      return std::unexpected(crane::grpc::ErrCode::ERR_ALLOWED_PARTITION);
+      return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
   }
 
   auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
