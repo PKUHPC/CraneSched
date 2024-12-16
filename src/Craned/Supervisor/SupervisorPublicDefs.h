@@ -18,10 +18,10 @@
 
 #pragma once
 
-#include "CraneStepdPreCompiledHeader.h"
+#include "SupervisorPreCompiledHeader.h"
 // Precompiled header comes first
 
-#include "crane/OS.h"
+#include "../../Utilities/PublicHeader/include/crane/OS.h"
 
 namespace CraneStepd {
 
