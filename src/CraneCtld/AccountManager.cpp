@@ -907,6 +907,8 @@ CraneErrCodeExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
   do {
     const Account* account_ptr = GetExistedAccountInfoNoLock_(account_name);
     if (account_ptr->blocked) {
+      CRANE_ERROR("Ancestor account '{}' is blocked",
+       account_ptr->name);
       return std::unexpected(crane::grpc::ErrCode::ERR_BLOCKED_ACCOUNT);
     }
     account_name = account_ptr->parent_account;
@@ -914,20 +916,20 @@ CraneErrCodeExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
 
   const User* user_ptr = GetExistedUserInfoNoLock_(user);
   if (user_ptr->account_to_attrs_map.at(account).blocked) {
+    CRANE_ERROR("User '{}' is blocked", user_ptr->name);
     return std::unexpected(crane::grpc::ErrCode::ERR_BLOCKED_USER);
   }
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(const std::string& user,
-                                                     const std::string& account,
-                                                     TaskInCtld* task) {
+AccountManager::CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
+    const std::string& user, const std::string& account, TaskInCtld* task) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
-    CRANE_ERROR("CheckAndApplyQosLimitOnTask error: Unknown user {}", user);
+    CRANE_ERROR("Unknown user {}", user);
     return std::unexpected(CraneErrCode::ERR_INVALID_OP_USER);
   }
 
@@ -937,9 +939,7 @@ AccountManager::CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
     if (partition_it == user_share_ptr->account_to_attrs_map.at(account)
                             .allowed_partition_qos_map.end()) {
 
-      CRANE_ERROR(
-          "CheckAndApplyQosLimitOnTask error: Partition is not allowed for "
-          "this user");
+      CRANE_ERROR("Partition is not allowed for this user");
       return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
     }
     if (task->qos.empty()) {

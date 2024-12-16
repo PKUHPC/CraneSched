@@ -938,6 +938,7 @@ CraneErrCodeExpected <std::future<task_id_t>>
 CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
 
   if (!task->password_entry->Valid()) {
+    CRANE_ERROR("Uid {} not found on the controller node", task->uid);
     return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_UID);
   }
   task->SetUsername(task->password_entry->Username());
@@ -946,6 +947,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     auto user_scoped_ptr =
         g_account_manager->GetExistedUserInfo(task->Username());
     if (!user_scoped_ptr) {
+      CRANE_ERROR("User '{}' not found in the account database", task->Username());
       return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_USER);
     }
 
@@ -954,6 +956,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
       task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
     } else {
       if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
+          CRANE_ERROR("Account '{}' is not in your account list", task->account);
           return std::unexpected(crane::grpc::ErrCode::ERR_USER_ACCOUNT_MISMATCH);
       }
     }
@@ -961,7 +964,9 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
 
   if (!g_account_manager->CheckUserPermissionToPartition(
           task->Username(), task->account, task->partition_id)) {
-       return std::unexpected(crane::grpc::ErrCode::ERR_ALLOWED_PARTITION);
+      CRANE_ERROR("User '{}' doesn't have permission to use partition '{}' when using account '{}'",
+                    task->Username(), task->partition_id, task->account);
+      return std::unexpected(crane::grpc::ErrCode::ERR_ALLOWED_PARTITION);
   }
 
   auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(

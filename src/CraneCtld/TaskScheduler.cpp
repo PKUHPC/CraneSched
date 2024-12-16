@@ -2720,8 +2720,11 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 
 CraneErrCodeExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   auto part_it = g_config.Partitions.find(task->partition_id);
-  if (part_it == g_config.Partitions.end()) 
+  if (part_it == g_config.Partitions.end()) {
+        CRANE_ERROR("Failed to call AcquireTaskAttributes: {}",
+                CraneErrCodeStr(crane::grpc::ErrCode::ERR_INVALID_PARTITION));
     return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_PARTITION);
+  }
 
   task->partition_priority = part_it->second.priority;
 
@@ -2749,7 +2752,11 @@ CraneErrCodeExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task
 
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
       task->Username(), task->account, task);
-  if (!check_qos_result) return check_qos_result;
+  if (!check_qos_result) {
+    CRANE_ERROR("Failed to call CheckAndApplyQosLimitOnTask: {}",
+                CraneErrCodeStr(check_qos_result.error()));
+    return check_qos_result;
+  }
 
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;
@@ -2802,7 +2809,7 @@ CraneErrCodeExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
                   .memory_sw_bytes),
           util::ReadableTypedDeviceMap(
               metas_ptr->partition_global_meta.res_total.GetDeviceMap()));
-      return std::unexpected(crane::grpc::ErrCode::ERR_NO_RESOURCE) ;        
+      return std::unexpected(crane::grpc::ErrCode::ERR_NO_RESOURCE);  
     }
 
     if (task->node_num > metas_ptr->craned_ids.size()) {
@@ -2810,7 +2817,7 @@ CraneErrCodeExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
           "Nodes not enough for task #{}. "
           "Partition total Nodes: {}",
           task->TaskId(), metas_ptr->craned_ids.size());
-      return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_NODE_NUM);        
+      return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_NODE_NUM);
     }
 
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
@@ -2832,7 +2839,7 @@ CraneErrCodeExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
         "Resource not enough. Task #{} needs {} nodes, while only {} "
         "nodes satisfy its requirement.",
         task->TaskId(), task->node_num, avail_nodes.size());
-    return std::unexpected(crane::grpc::ErrCode::ERR_NO_ENOUGH_NODE);        
+    return std::unexpected(crane::grpc::ErrCode::ERR_NO_ENOUGH_NODE);
   }
 
   return {};
