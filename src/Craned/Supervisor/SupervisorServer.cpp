@@ -16,15 +16,21 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-syntax = "proto3";
+#include "SupervisorServer.h"
 
-package crane.grpc.subprocess;
-option go_package = "/protos/subprocess";
-
-message CanStartMessage {
-  bool ok = 1;
+grpc::Status Supervisor::SupervisorServiceImpl::StartTask(
+    grpc::ServerContext* context,
+    const crane::grpc::TaskExecutionRequest* request,
+    crane::grpc::TaskExecutionReply* response) {
+  // todo: Launch task
+  response->set_ok(true);
+  return Status::OK;
 }
+Supervisor::SupervisorServer::SupervisorServer(task_id_t task_id) {
+  m_service_impl_ = std::make_unique<SupervisorServiceImpl>();
 
-message ChildProcessReady {
-  bool ok = 1;
+  auto unix_socket_path = fmt::format("unix:/tmp/crane/task_{}.sock", task_id);
+  grpc::ServerBuilder builder;
+  ServerBuilderAddUnixInsecureListeningPort(&builder, unix_socket_path);
+  builder.RegisterService(m_service_impl_.get());
 }

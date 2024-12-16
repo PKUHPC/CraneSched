@@ -21,9 +21,9 @@
 #include "SupervisorPreCompiledHeader.h"
 // Precompiled header comes first
 
-#include "../../Utilities/PublicHeader/include/crane/OS.h"
+#include "crane/OS.h"
 
-namespace CraneStepd {
+namespace Supervisor {
 
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 
@@ -51,16 +51,16 @@ struct Config {
   PluginConfig Plugin;
   bool CompressedRpc{};
 
-  std::string CraneStepdDebugLevel;
+  std::string SupervisorDebugLevel;
 
   std::string CraneBaseDir;
   std::string CranedLogFile;
   std::string CranedMutexFilePath;
   std::string CraneScriptDir;
-  std::string CraneStepdUnixSockPath;
+  std::string SupervisorUnixSockPath;
 };
 
 inline Config g_config;
-}  // namespace CraneStepd
+}  // namespace Supervisor
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

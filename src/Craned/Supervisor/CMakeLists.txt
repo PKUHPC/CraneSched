@@ -1,4 +1,6 @@
 add_executable(supervisor
+        SupervisorServer.h
+        SupervisorServer.cpp
         SupervisorPublicDefs.h
         Supervisor.cpp
         SupervisorPreCompiledHeader.h
