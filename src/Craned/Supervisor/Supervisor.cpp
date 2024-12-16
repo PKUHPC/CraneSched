@@ -18,15 +18,18 @@
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
-#include <../../../cmake-build-debug/_deps/cxxopts-src/include/cxxopts.hpp>
+#include <google/protobuf/util/delimited_message_util.h>
+#include <protos/CraneSubprocess.pb.h>
 
-#include "../../Utilities/PluginClient/include/crane/PluginClient.h"
-#include "../../Utilities/PublicHeader/include/crane/PasswordEntry.h"
+#include <cxxopts.hpp>
 
-using CraneStepd::g_config;
+#include "crane/PasswordEntry.h"
+#include "crane/PluginClient.h"
+
+using Supervisor::g_config;
 
 void ParseConfig(int argc, char** argv) {
-  cxxopts::Options options("craned");
+  cxxopts::Options options("Supervisor");
 
   // clang-format off
   options.add_options()
@@ -39,7 +42,7 @@ void ParseConfig(int argc, char** argv) {
       ("D,debug-level", "Logging level of Craned, format: <trace|debug|info|warn|error>",
        cxxopts::value<std::string>()->default_value("info"))
       ("v,version", "Display version information")
-      ("h,help", "Display help for CraneStepd")
+      ("h,help", "Display help for Supervisor")
       ;
   // clang-format on
 
@@ -80,6 +83,33 @@ void GlobalVariableInit() {
   signal(SIGPIPE, SIG_IGN);
 
   PasswordEntry::InitializeEntrySize();
+
+  // todo: Init from stdin
+  using google::protobuf::io::FileInputStream;
+  using google::protobuf::io::FileOutputStream;
+  using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
+  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
+  auto istream = FileInputStream(STDIN_FILENO);
+  auto ostream = FileOutputStream(STDOUT_FILENO);
+
+  crane::grpc::subprocess::CranedReady msg;
+  auto ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
+  if (!ok || !msg.ok()) {
+    std::abort();
+  }
+  auto unix_socket_path =
+      fmt::format("unix:/tmp/crane/task_{}.sock", msg.task_id());
+  grpc::ServerBuilder builder;
+  ServerBuilderAddUnixInsecureListeningPort(&builder, unix_socket_path);
+  builder.RegisterService()
+
+  {
+    crane::grpc::subprocess::SupervisorReady msg;
+    msg.set_ok(true);
+    auto ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
+    ok &= ostream.Flush();
+    if (!ok) std::abort();
+  }
 
   using Craned::CgroupManager;
   using Craned::CgroupConstant::Controller;
