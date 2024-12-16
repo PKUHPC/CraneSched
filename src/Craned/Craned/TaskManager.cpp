@@ -27,8 +27,8 @@
 #include "CforedClient.h"
 #include "CtldClient.h"
 #include "crane/String.h"
-#include "protos/CraneSubprocess.pb.h"
 #include "protos/PublicDefs.pb.h"
+#include "protos/Supervisor.pb.h"
 
 namespace Craned {
 

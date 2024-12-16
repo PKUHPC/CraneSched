@@ -45,41 +45,41 @@
 #include <variant>
 
 // backward-cpp
-#include <../../../cmake-build-debug/_deps/backward-src/backward.hpp>
+#include <backward.hpp>
 
 // Absl
-#include <../../../cmake-build-debug/_deps/absl-src/absl/base/thread_annotations.h>
-#include <../../../cmake-build-debug/_deps/absl-src/absl/container/flat_hash_map.h>
-#include <../../../cmake-build-debug/_deps/absl-src/absl/container/flat_hash_set.h>
-#include <../../../cmake-build-debug/_deps/absl-src/absl/container/node_hash_map.h>
-#include <../../../cmake-build-debug/_deps/absl-src/absl/strings/match.h>
-#include <../../../cmake-build-debug/_deps/absl-src/absl/strings/str_join.h>
-#include <../../../cmake-build-debug/_deps/absl-src/absl/strings/str_replace.h>
-#include <../../../cmake-build-debug/_deps/absl-src/absl/strings/str_split.h>
-#include <../../../cmake-build-debug/_deps/absl-src/absl/synchronization/blocking_counter.h>
-#include <../../../cmake-build-debug/_deps/absl-src/absl/synchronization/mutex.h>
+#include <absl/base/thread_annotations.h>
+#include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
+#include <absl/container/node_hash_map.h>
+#include <absl/strings/match.h>
+#include <absl/strings/str_join.h>
+#include <absl/strings/str_replace.h>
+#include <absl/strings/str_split.h>
+#include <absl/synchronization/blocking_counter.h>
+#include <absl/synchronization/mutex.h>
 
-#include "../../../cmake-build-debug/_deps/absl-src/absl/synchronization/notification.h"
+#include "absl/synchronization/notification.h"
 
 // Thread pool
-#include <../../../cmake-build-debug/_deps/bs_thread_pool_src-src/include/BS_thread_pool.hpp>
+#include <BS_thread_pool.hpp>
 
 // gRPC
-#include <../../../cmake-build-debug/_deps/grpc-src/include/grpc++/grpc++.h>
+#include <grpc++/grpc++.h>
 
 // UVW
-#include <../../../cmake-build-debug/_deps/uvw-src/src/uvw.hpp>
+#include <uvw.hpp>
 
 // fpm
-#include <../../../cmake-build-debug/_deps/fpm-src/include/fpm/fixed.hpp>
+#include <fpm/fixed.hpp>
 
 // Concurrent queue
-#include <../../../dependencies/pre_installed/concurrentqueue/include/concurrentqueue/concurrentqueue.h>
+#include <concurrentqueue/concurrentqueue.h>
 
 // Include the header which defines the static log level
-#include "../../Utilities/PublicHeader/include/crane/Logger.h"
+#include "crane/Logger.h"
 
 // Then include the other Crane headers
-#include "../../Utilities/PublicHeader/include/crane/GrpcHelper.h"
-#include "../../Utilities/PublicHeader/include/crane/Network.h"
-#include "../../Utilities/PublicHeader/include/crane/PublicHeader.h"
+#include "crane/GrpcHelper.h"
+#include "crane/Network.h"
+#include "crane/PublicHeader.h"
