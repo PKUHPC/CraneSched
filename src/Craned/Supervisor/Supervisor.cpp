@@ -15,13 +15,13 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-#include "CraneStepdPublicDefs.h"
+#include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
-#include <cxxopts.hpp>
+#include <../../../cmake-build-debug/_deps/cxxopts-src/include/cxxopts.hpp>
 
-#include "crane/PasswordEntry.h"
-#include "crane/PluginClient.h"
+#include "../../Utilities/PluginClient/include/crane/PluginClient.h"
+#include "../../Utilities/PublicHeader/include/crane/PasswordEntry.h"
 
 using CraneStepd::g_config;
 
