@@ -907,8 +907,7 @@ CraneErrCodeExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
   do {
     const Account* account_ptr = GetExistedAccountInfoNoLock_(account_name);
     if (account_ptr->blocked) {
-      CRANE_ERROR("Ancestor account '{}' is blocked",
-       account_ptr->name);
+      CRANE_ERROR("Ancestor account '{}' is blocked", account_ptr->name);
       return std::unexpected(crane::grpc::ErrCode::ERR_BLOCKED_ACCOUNT);
     }
     account_name = account_ptr->parent_account;
@@ -922,7 +921,7 @@ CraneErrCodeExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
+CraneErrCodeExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
     const std::string& user, const std::string& account, TaskInCtld* task) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
@@ -930,7 +929,7 @@ AccountManager::CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
     CRANE_ERROR("Unknown user {}", user);
-    return std::unexpected(CraneErrCode::ERR_INVALID_OP_USER);
+    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_OP_USER);
   }
 
   if (task->uid != 0) {
@@ -940,26 +939,24 @@ AccountManager::CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
                             .allowed_partition_qos_map.end()) {
 
       CRANE_ERROR("Partition is not allowed for this user");
-      return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
+      return std::unexpected(crane::grpc::ErrCode::ERR_ALLOWED_PARTITION);
     }
     if (task->qos.empty()) {
       // Default qos
       task->qos = partition_it->second.first;
       if (task->qos.empty()) {
         CRANE_ERROR(
-            "CheckAndApplyQosLimitOnTask error: The user '{}' has no QOS "
-            "available for this partition '{}' to be used",
+            "The user '{}' has no QOS available for this partition '{}' to be used",
             task->Username(), task->partition_id);
-        return std::unexpected(CraneErrCode::ERR_HAS_NO_QOS_IN_PARTITION);
+        return std::unexpected(crane::grpc::ErrCode::ERR_HAS_NO_QOS_IN_PARTITION);
       }
     } else {
       // Check whether task.qos in the qos list
       if (!ranges::contains(partition_it->second.second, task->qos)) {
         CRANE_ERROR(
-            "CheckAndApplyQosLimitOnTask error: The qos '{}'"
-            " you set is not in partition's allowed qos list",
+            "The qos '{}' you set is not in partition's allowed qos list",
             task->qos);
-        return std::unexpected(CraneErrCode::ERR_HAS_ALLOWED_QOS_IN_PARTITION);
+        return std::unexpected(crane::grpc::ErrCode::ERR_HAS_ALLOWED_QOS_IN_PARTITION);
       }
     }
   } else {
@@ -971,7 +968,7 @@ AccountManager::CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
   const Qos* qos_share_ptr = GetExistedQosInfoNoLock_(task->qos);
   if (!qos_share_ptr) {
     CRANE_ERROR("Unknown QOS '{}'", task->qos);
-    return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_QOS);
   }
 
   task->qos_priority = qos_share_ptr->priority;
@@ -980,13 +977,13 @@ AccountManager::CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
     task->time_limit = qos_share_ptr->max_time_limit_per_task;
   } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task) {
     CRANE_ERROR("time-limit reached the user's limit");
-    return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
+    return std::unexpected(crane::grpc::ErrCode::ERR_TIME_TIMIT_BEYOND);
   }
 
   if (static_cast<double>(task->cpus_per_task) >
       qos_share_ptr->max_cpus_per_user) {
     CRANE_ERROR("cpus-per-task reached the user's limit");
-    return std::unexpected(CraneErrCode::ERR_CPUS_PER_TASK_BEYOND);
+    return std::unexpected(crane::grpc::ErrCode::ERR_CPUS_PER_TASK_BEYOND);
   }
 
   return {};

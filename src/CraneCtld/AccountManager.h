@@ -132,7 +132,7 @@ class AccountManager {
   CraneErrCodeExpected<void> CheckIfUserOfAccountIsEnabled(
       const std::string& user, const std::string& account);
 
-  CraneExpected<void> CheckAndApplyQosLimitOnTask(const std::string& user,
+  CraneErrCodeExpected<void> CheckAndApplyQosLimitOnTask(const std::string& user,
                                        const std::string& account,
                                        TaskInCtld* task);
 
