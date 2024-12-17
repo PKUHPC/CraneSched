@@ -40,7 +40,6 @@ class AccountManager {
   using QosMapMutexSharedPtr = util::ScopeConstSharedPtr<
       std::unordered_map<std::string, std::unique_ptr<Qos>>, util::rw_mutex>;
 
-
   AccountManager();
 
   ~AccountManager() = default;
@@ -128,18 +127,22 @@ class AccountManager {
                                       const std::string& account,
                                       const std::string& partition);
 
-  CraneExpected<void> CheckIfUserOfAccountIsEnabled(
-      const std::string& user, const std::string& account);
+  CraneExpected<void> CheckIfUserOfAccountIsEnabled(const std::string& user,
+                                                    const std::string& account);
 
   CraneExpected<void> CheckAndApplyQosLimitOnTask(const std::string& user,
-                                       const std::string& account,
-                                       TaskInCtld* task);
+                                                  const std::string& account,
+                                                  TaskInCtld* task);
 
   CraneExpected<std::string> CheckUidIsAdmin(uint32_t uid);
 
   CraneExpected<void> CheckIfUidHasPermOnUser(uint32_t uid,
                                               const std::string& username,
                                               bool read_only_priv);
+
+  CraneErrCodeExpected<void> CheckModifyPartitionAllowAccounts(
+      uint32_t uid, const std::string& partition_name,
+      const std::unordered_set<std::string>& allow_accounts);
 
  private:
   void InitDataMap_();
