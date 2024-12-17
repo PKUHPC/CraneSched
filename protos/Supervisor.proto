@@ -36,15 +36,15 @@ message SupervisorReady {
   bool ok = 1;
 }
 
-message CreateCgroupRequest{
-  message GresFileMeta{
-    uint32 major = 1;
-    uint32 minor = 2;
-    string op_type = 3;
-  }
+message GresFileMeta{
+  uint32 major = 1;
+  uint32 minor = 2;
+  string op_type = 3;
+}
 
+message CreateCgroupRequest{
   ResourceInNode res_in_node = 1;
-  repeated GresFileMeta gres_file_meta = 2;
+  repeated GresFileMeta gres_file_metas = 2;
   map<string, string> gres_env = 3;
 
 }

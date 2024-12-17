@@ -272,6 +272,16 @@ const ControllerFlags NO_CONTROLLER_FLAG{};
 //  handles this for us and no additional care needs to be taken.
 const ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
+struct GresFileMeta {
+  explicit GresFileMeta(const crane::grpc::GresFileMeta &gres_file_meta)
+      : major(gres_file_meta.major()),
+        minor(gres_file_meta.minor()),
+        op_type(gres_file_meta.op_type().front()) {};
+  unsigned int major;
+  unsigned int minor;
+  char op_type;
+};
+
 class CgroupInterface {
  public:
   virtual ~CgroupInterface() {}
@@ -281,13 +291,9 @@ class CgroupInterface {
   virtual bool SetMemorySwLimitBytes(uint64_t mem_bytes) = 0;
   virtual bool SetMemorySoftLimitBytes(uint64_t memory_bytes) = 0;
   virtual bool SetBlockioWeight(uint64_t weight) = 0;
-  virtual bool SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+  virtual bool SetDeviceAccess(const std::vector<GresFileMeta> &gres_file_metas,
                                bool set_read, bool set_write,
                                bool set_mknod) = 0;
-  virtual bool SetDeviceAccess(
-      const google::protobuf::RepeatedField<
-          crane::grpc::CreateCgroupRequest::GresFileMeta> &gres_file_metas,
-      bool set_read, bool set_write, bool set_mknod) = 0;
   virtual bool MigrateProcIn(pid_t pid) = 0;
 
   virtual bool KillAllProcesses() = 0;
@@ -336,10 +342,8 @@ class CgroupV1 : public CgroupInterface {
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
   bool SetBlockioWeight(uint64_t weight) override;
 
-  bool SetDeviceAccess(
-      const google::protobuf::RepeatedField<
-          crane::grpc::CreateCgroupRequest::GresFileMeta> &gres_file_metas,
-      bool set_read, bool set_write, bool set_mknod) override;
+  bool SetDeviceAccess(const std::vector<GresFileMeta> &gres_file_metas,
+                       bool set_read, bool set_write, bool set_mknod) override;
 
   bool KillAllProcesses() override;
 
@@ -423,10 +427,8 @@ class CgroupV2 : public CgroupInterface {
   file. reference from:
   https://www.kernel.org/doc/html/v5.10/admin-guide/cgroup-v2.html#device-controller
   */
-  bool SetDeviceAccess(
-      const google::protobuf::RepeatedField<
-          crane::grpc::CreateCgroupRequest::GresFileMeta> &gres_file_metas,
-      bool set_read, bool set_write, bool set_mknod) override;
+  bool SetDeviceAccess(const std::vector<GresFileMeta> &gres_file_metas,
+                       bool set_read, bool set_write, bool set_mknod) override;
 #ifdef CRANE_ENABLE_BPF
   bool EraseBpfDeviceMap();
   static void SetBpfDebugLogLevel(uint32_t l) {
@@ -464,10 +466,13 @@ class DedicatedResourceAllocator {
   static bool Allocate(
       const crane::grpc::DedicatedResourceInNode &request_resource,
       CgroupInterface *cg);
-  static bool Allocate(
-      const google::protobuf::RepeatedField<
-          crane::grpc::CreateCgroupRequest::GresFileMeta> &gres_file_metas,
-      CgroupInterface *cg);
+  static bool Allocate(const std::vector<GresFileMeta> &gres_file_metas,
+                       CgroupInterface *cg);
+};
+
+struct CgroupSpec {
+  crane::grpc::ResourceInNode resource_in_node;
+  std::vector<GresFileMeta> gres_file_metas;
 };
 
 class CgroupManager {
@@ -480,17 +485,11 @@ class CgroupManager {
 
   void ControllersMounted();
 
-  bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info);
-
-  std::optional<std::string> QueryTaskExecutionNode(task_id_t task_id);
-
   void CreateCgroup(const crane::grpc::CreateCgroupRequest *req);
 
-  bool CheckCgroupExists(task_id_t task_id);
+  bool CheckCgroupExists();
 
   bool AllocateAndGetCgroup(task_id_t task_id, CgroupInterface **cg);
-
-  bool MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id);
 
   bool ReleaseCgroup();
 
@@ -516,7 +515,8 @@ class CgroupManager {
 
   CgroupConstant::CgroupVersion cg_version_;
 
-  std::atomic<std::optional<crane::grpc::CreateCgroupRequest>> m_cg_spec_;
+  std::optional<CgroupSpec> m_cg_spec_;
+  absl::Mutex m_cg_spec_mutex_;
 
   std::unique_ptr<CgroupInterface> m_cg_;
   absl::Mutex m_cg_mutex_;

@@ -20,37 +20,19 @@
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
+#include "protos/Crane.grpc.pb.h"
+#include "protos/Crane.pb.h"
+
 namespace Supervisor {
-
-class TaskManager {
+class CranedClient {
  public:
-  explicit TaskManager(task_id_t task_id);
-  ~TaskManager();
-
-  task_id_t task_id;
+  void InitChannelAndStub(const std::string& endpoint);
+  void TaskStatusChange(uint32_t task_id, crane::grpc::TaskStatus new_status,
+                        uint32_t exit_code, std::optional<std::string> reason);
 
  private:
-  template <class T>
-  using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
-
-  struct ProcSigchldInfo {
-    pid_t pid;
-    bool is_terminated_by_signal;
-    int value;
-
-    std::shared_ptr<uvw::timer_handle> resend_timer{nullptr};
-  };
-  void EvSigchldCb_();
-
-  std::shared_ptr<uvw::loop> m_uvw_loop_;
-
-  std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
-  ConcurrentQueue<std::unique_ptr<ProcSigchldInfo>> m_sigchld_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_process_sigchld_async_handle_;
-
-  std::atomic_bool m_supervisor_exit_;
-  std::thread m_uvw_thread_;
+  std::shared_ptr<grpc::Channel> m_channel_;
+  std::shared_ptr<crane::grpc::Craned::Stub> m_stub_;
 };
+
 }  // namespace Supervisor
-inline std::unique_ptr<Supervisor::TaskManager> g_task_mgr;
