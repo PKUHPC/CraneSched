@@ -19,3 +19,16 @@
 #pragma once
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
+
+namespace Supervisor {
+
+class TaskManager {
+ public:
+  explicit TaskManager(task_id_t task_id);
+  task_id_t task_id;
+
+ private:
+  std::thread m_uvw_thread_;
+};
+}  // namespace Supervisor
+inline std::unique_ptr<Supervisor::TaskManager> g_task_mgr;
