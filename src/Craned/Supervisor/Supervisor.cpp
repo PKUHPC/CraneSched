@@ -23,6 +23,7 @@
 #include <cxxopts.hpp>
 
 #include "SupervisorServer.h"
+#include "TaskManager.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
 
@@ -100,6 +101,9 @@ void CreateRequiredDirectories() {
   ok = util::os::CreateFolders(g_config.CraneScriptDir);
   if (!ok) std::exit(1);
 
+  ok = util::os::CreateFolders(Supervisor::kSupervisorPidFileDir);
+  if (!ok) std::exit(1);
+
   // todo: Supervisor log
   ok = util::os::CreateFoldersForFile(g_config.CranedLogFile);
   if (!ok) std::exit(1);
@@ -114,7 +118,6 @@ void GlobalVariableInit() {
 
   PasswordEntry::InitializeEntrySize();
 
-  // todo: Init from stdin
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -127,9 +130,39 @@ void GlobalVariableInit() {
   if (!ok || !msg.ok()) {
     std::abort();
   }
-  g_config.task_id = msg.task_id();
   CreatePidFile();
   g_server = std::make_unique<Supervisor::SupervisorServer>();
+
+  g_thread_pool =
+      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
+
+  g_task_mgr = std::make_unique<Supervisor::TaskManager>(msg.task_id());
+
+  if (g_config.Plugin.Enabled) {
+    CRANE_INFO("[Plugin] Plugin module is enabled.");
+    g_plugin_client = std::make_unique<plugin::PluginClient>();
+    g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
+  }
+
+  using Supervisor::CgroupManager;
+  using Supervisor::CgroupConstant::Controller;
+  g_cg_mgr = std::make_unique<CgroupManager>();
+  g_cg_mgr->Init();
+  if (g_cg_mgr->GetCgroupVersion() ==
+          Supervisor::CgroupConstant::CgroupVersion::CGROUP_V1 &&
+      (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
+       !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER) ||
+       !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER))) {
+    CRANE_ERROR("Failed to initialize cpu,memory,devices cgroups controller.");
+    std::exit(1);
+  }
+  if (g_cg_mgr->GetCgroupVersion() ==
+          Supervisor::CgroupConstant::CgroupVersion::CGROUP_V2 &&
+      (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER_V2) ||
+       !g_cg_mgr->Mounted(Controller::MEMORY_CONTORLLER_V2))) {
+    CRANE_ERROR("Failed to initialize cpu,memory cgroups controller.");
+    std::exit(1);
+  }
 
   {
     // Ready for grpc call
@@ -139,40 +172,6 @@ void GlobalVariableInit() {
     ok &= ostream.Flush();
     if (!ok) std::abort();
   }
-
-  using Craned::CgroupManager;
-  using Craned::CgroupConstant::Controller;
-  g_cg_mgr = std::make_unique<Craned::CgroupManager>();
-  g_cg_mgr->Init();
-  if (g_cg_mgr->GetCgroupVersion() ==
-          Craned::CgroupConstant::CgroupVersion::CGROUP_V1 &&
-      (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
-       !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER) ||
-       !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER))) {
-    CRANE_ERROR("Failed to initialize cpu,memory,devices cgroups controller.");
-    std::exit(1);
-  }
-  if (g_cg_mgr->GetCgroupVersion() ==
-          Craned::CgroupConstant::CgroupVersion::CGROUP_V2 &&
-      (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER_V2) ||
-       !g_cg_mgr->Mounted(Controller::MEMORY_CONTORLLER_V2))) {
-    CRANE_ERROR("Failed to initialize cpu,memory cgroups controller.");
-    std::exit(1);
-  }
-
-  g_thread_pool =
-      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
-
-  g_task_mgr = std::make_unique<Craned::TaskManager>();
-
-  if (g_config.Plugin.Enabled) {
-    CRANE_INFO("[Plugin] Plugin module is enabled.");
-    g_plugin_client = std::make_unique<plugin::PluginClient>();
-    g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
-  }
-
-  g_cfored_manager = std::make_unique<Craned::CforedManager>();
-  g_cfored_manager->Init();
 }
 
 void StartServer() {
