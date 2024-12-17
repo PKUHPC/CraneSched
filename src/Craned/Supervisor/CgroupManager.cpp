@@ -31,12 +31,11 @@
 
 #include <dirent.h>
 
-#include "CranedPublicDefs.h"
-#include "DeviceManager.h"
+#include "SupervisorPublicDefs.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
-namespace Craned {
+namespace Supervisor {
 
 #ifdef CRANE_ENABLE_BPF
 BpfRuntimeInfo CgroupV2::bpf_runtime_info_{};
@@ -447,7 +446,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
     }
     return std::make_unique<CgroupV2>(
         cgroup_string, native_cgroup,
-                                      cgroup_stat.st_ino);
+        static_cast<uint64_t>(cgroup_stat.st_ino));
   } else {
     CRANE_WARN("Unable to create cgroup {}. Cgroup version is not supported",
                cgroup_string.c_str());
@@ -501,9 +500,8 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
   }
 
   if (g_config.Plugin.Enabled) {
-    g_plugin_client->CreateCgroupHookAsync(task_id, 
-                                          pcg->GetCgroupString(),
-                                          res.dedicated_res_in_node());
+    g_plugin_client->CreateCgroupHookAsync(task_id, pcg->GetCgroupString(),
+                                           res.dedicated_res_in_node());
   }
 
   CRANE_TRACE(
@@ -520,7 +518,7 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
   return ok;
 }
 
-bool CgroupManager::CreateCgroups(std::vector<CgroupSpec> &&cg_specs) {
+bool CgroupManager::CreateCgroups(const CgroupSpec &cg_spec) {
   std::chrono::steady_clock::time_point begin;
   std::chrono::steady_clock::time_point end;
 
@@ -528,26 +526,7 @@ bool CgroupManager::CreateCgroups(std::vector<CgroupSpec> &&cg_specs) {
 
   begin = std::chrono::steady_clock::now();
 
-  for (int i = 0; i < cg_specs.size(); i++) {
-    uid_t uid = cg_specs[i].uid;
-    task_id_t task_id = cg_specs[i].task_id;
-
-    CRANE_TRACE("Create lazily allocated cgroups for task #{}, uid {}", task_id,
-                uid);
-
-    this->m_task_id_to_cg_spec_map_.Emplace(task_id, std::move(cg_specs[i]));
-
-    this->m_task_id_to_cg_map_.Emplace(task_id, nullptr);
-
-    // Acquire map lock to avoid using [uid]set deleted by ReleaseCgroup
-    // after checking contains(uid)
-    auto uid_task_id_map_ptr =
-        this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
-    if (!uid_task_id_map_ptr->contains(uid))
-      uid_task_id_map_ptr->emplace(uid, absl::flat_hash_set<uint32_t>{task_id});
-    else
-      uid_task_id_map_ptr->at(uid).RawPtr()->emplace(task_id);
-  }
+  m_cg_spec_ = cg_spec;
 
   end = std::chrono::steady_clock::now();
   CRANE_TRACE("Create cgroups costed {} ms",
@@ -596,7 +575,8 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
     CgroupInterface *cgroup = it->second.GetExclusivePtr()->release();
 
     if (g_config.Plugin.Enabled) {
-      g_plugin_client->DestroyCgroupHookAsync(task_id, cgroup->GetCgroupString());
+      g_plugin_client->DestroyCgroupHookAsync(task_id,
+                                              cgroup->GetCgroupString());
     }
 
     task_id_to_cg_map_ptr->erase(task_id);
@@ -628,7 +608,8 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
   }
 
   {
-    auto uid_task_ids_map_ptr = this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
+    auto uid_task_ids_map_ptr =
+        this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
     auto it = uid_task_ids_map_ptr->find(uid);
     if (it == uid_task_ids_map_ptr->end()) {
       CRANE_DEBUG(
@@ -1510,4 +1491,4 @@ bool DedicatedResourceAllocator::Allocate(
   }
   return true;
 }
-}  // namespace Craned
+}  // namespace Supervisor

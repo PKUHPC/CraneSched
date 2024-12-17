@@ -169,15 +169,15 @@ struct TaskInstance {
 
 /**
  * The class that manages all tasks and handles interrupts.
- * SIGINT and SIGCHLD are processed in TaskManager.
+ * SIGINT and SIGCHLD are processed in JobManager.
  * Especially, outside caller can use SetSigintCallback() to
  * set the callback when SIGINT is triggered.
  */
-class TaskManager {
+class JobManager {
  public:
-  TaskManager();
+  JobManager();
 
-  ~TaskManager();
+  ~JobManager();
 
   CraneErr ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
@@ -255,7 +255,7 @@ class TaskManager {
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
-  // Ask TaskManager to stop its event loop.
+  // Ask JobManager to stop its event loop.
   void ActivateShutdownAsync_();
 
   /**
@@ -379,7 +379,7 @@ class TaskManager {
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
 
-  // When this event is triggered, the TaskManager will not accept
+  // When this event is triggered, the JobManager will not accept
   // any more new tasks and quit as soon as all existing task end.
   std::shared_ptr<uvw::signal_handle> m_sigint_handle_;
 
@@ -423,8 +423,8 @@ class TaskManager {
 
   std::thread m_uvw_thread_;
 
-  static inline TaskManager* m_instance_ptr_;
+  static inline JobManager* m_instance_ptr_;
 };
 }  // namespace Craned
 
-inline std::unique_ptr<Craned::TaskManager> g_task_mgr;
+inline std::unique_ptr<Craned::JobManager> g_task_mgr;

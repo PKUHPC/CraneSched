@@ -42,7 +42,7 @@ class SupervisorServiceImpl : public Supervisor::Service {
 
 class SupervisorServer {
  public:
-  explicit SupervisorServer(task_id_t task_id);
+  explicit SupervisorServer();
 
   inline void Shutdown() { m_server_->Shutdown(); }
 

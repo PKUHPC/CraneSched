@@ -27,6 +27,8 @@ namespace Supervisor {
 
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 
+inline constexpr std::string kSupervisorPidFileDir = "/run/";
+
 using EnvMap = std::unordered_map<std::string, std::string>;
 
 struct TaskStatusChangeQueueElem {
@@ -58,6 +60,8 @@ struct Config {
   std::string CranedMutexFilePath;
   std::string CraneScriptDir;
   std::string SupervisorUnixSockPath;
+
+  task_id_t task_id;
 };
 
 inline Config g_config;
