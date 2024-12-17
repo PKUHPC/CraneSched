@@ -600,6 +600,18 @@ CraneErrCodeExpected<void> CranedMetaContainer::ModifyPartitionAllowAccounts(
   return result;
 }
 
+bool CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
+    const std::string& partition_name, const std::string& account_name) {
+  if (!partition_metas_map_.Contains(partition_name)) return false;
+
+  auto part_meta = partition_metas_map_.GetValueExclusivePtr(partition_name);
+
+  if (!part_meta->partition_global_meta.allow_accounts.contains(account_name))
+    return false;
+
+  return true;
+}
+
 void CranedMetaContainer::AddDedicatedResource(
     const CranedId& node_id, const DedicatedResourceInNode& resource) {
   if (!craned_meta_map_.Contains(node_id)) {
