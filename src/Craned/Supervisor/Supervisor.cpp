@@ -19,10 +19,10 @@
 // Precompiled header comes first.
 
 #include <google/protobuf/util/delimited_message_util.h>
-#include <protos/CraneSubprocess.pb.h>
 
 #include <cxxopts.hpp>
 
+#include "SupervisorServer.h"
 #include "crane/PasswordEntry.h"
 #include "crane/PluginClient.h"
 
@@ -66,11 +66,41 @@ void ParseConfig(int argc, char** argv) {
   }
 }
 
+bool CreatePidFile() {
+  pid_t pid = getpid();
+  auto pid_file_path =
+      Supervisor::kSupervisorPidFileDir /
+      std::filesystem::path(fmt::format("supervisor_{}.pid", g_config.task_id));
+  if (std::filesystem::exists(pid_file_path)) {
+    std::ifstream pid_file(pid_file_path);
+    pid_t existing_pid;
+    pid_file >> existing_pid;
+
+    if (kill(existing_pid, 0) == 0) {
+      std::cerr << "Supervisor is already running with PID: " << existing_pid
+                << std::endl;
+      std::exit(1);
+    } else {
+      std::cerr << "Stale PID file detected. Cleaning up." << std::endl;
+      std::filesystem::remove(pid_file_path);
+    }
+  }
+  std::ofstream pid_file(pid_file_path, std::ios::out | std::ios::trunc);
+  if (!pid_file) {
+    std::cerr << "Failed to create PID file: " << pid_file_path << std::endl;
+    exit(1);
+  }
+  pid_file << pid << std::endl;
+  pid_file.flush();
+  pid_file.close();
+}
+
 void CreateRequiredDirectories() {
   bool ok;
   ok = util::os::CreateFolders(g_config.CraneScriptDir);
   if (!ok) std::exit(1);
 
+  // todo: Supervisor log
   ok = util::os::CreateFoldersForFile(g_config.CranedLogFile);
   if (!ok) std::exit(1);
 }
@@ -92,21 +122,20 @@ void GlobalVariableInit() {
   auto istream = FileInputStream(STDIN_FILENO);
   auto ostream = FileOutputStream(STDOUT_FILENO);
 
-  crane::grpc::subprocess::CranedReady msg;
+  crane::grpc::CranedReady msg;
   auto ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
   if (!ok || !msg.ok()) {
     std::abort();
   }
-  auto unix_socket_path =
-      fmt::format("unix:/tmp/crane/task_{}.sock", msg.task_id());
-  grpc::ServerBuilder builder;
-  ServerBuilderAddUnixInsecureListeningPort(&builder, unix_socket_path);
-  builder.RegisterService()
+  g_config.task_id = msg.task_id();
+  CreatePidFile();
+  g_server = std::make_unique<Supervisor::SupervisorServer>();
 
   {
-    crane::grpc::subprocess::SupervisorReady msg;
+    // Ready for grpc call
+    crane::grpc::SupervisorReady msg;
     msg.set_ok(true);
-    auto ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
+    ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
     ok &= ostream.Flush();
     if (!ok) std::abort();
   }

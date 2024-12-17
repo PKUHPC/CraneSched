@@ -5,8 +5,8 @@ add_executable(craned
         CgroupManager.cpp
         CforedClient.h
         CforedClient.cpp
-        TaskManager.h
-        TaskManager.cpp
+        JobManager.h
+        JobManager.cpp
         CranedServer.h
         CranedServer.cpp
         CranedPublicDefs.h
