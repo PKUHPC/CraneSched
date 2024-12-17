@@ -21,7 +21,7 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include "TaskManager.h"
+#include "JobManager.h"
 
 namespace Craned {
 

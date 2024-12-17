@@ -16,22 +16,4 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "SupervisorServer.h"
-
-grpc::Status Supervisor::SupervisorServiceImpl::StartTask(
-    grpc::ServerContext* context,
-    const crane::grpc::TaskExecutionRequest* request,
-    crane::grpc::TaskExecutionReply* response) {
-  // todo: Launch task
-  response->set_ok(true);
-  return Status::OK;
-}
-Supervisor::SupervisorServer::SupervisorServer() {
-  m_service_impl_ = std::make_unique<SupervisorServiceImpl>();
-
-  auto unix_socket_path =
-      fmt::format("unix:/tmp/crane/task_{}.sock", g_config.task_id);
-  grpc::ServerBuilder builder;
-  ServerBuilderAddUnixInsecureListeningPort(&builder, unix_socket_path);
-  builder.RegisterService(m_service_impl_.get());
-}
+#include "TaskManager.h"
