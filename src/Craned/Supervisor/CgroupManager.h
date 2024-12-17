@@ -28,6 +28,7 @@
 // Precompiled header comes first.
 
 #include <libcgroup.h>
+#include <protos/Supervisor.pb.h>
 
 #include "crane/AtomicHashMap.h"
 
@@ -283,6 +284,9 @@ class CgroupInterface {
   virtual bool SetDeviceAccess(const std::unordered_set<SlotId> &devices,
                                bool set_read, bool set_write,
                                bool set_mknod) = 0;
+  virtual bool SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+                               bool set_read, bool set_write,
+                               bool set_mknod) = 0;
   virtual bool MigrateProcIn(pid_t pid) = 0;
 
   virtual bool KillAllProcesses() = 0;
@@ -455,6 +459,10 @@ class DedicatedResourceAllocator {
   static bool Allocate(
       const crane::grpc::DedicatedResourceInNode &request_resource,
       CgroupInterface *cg);
+  static bool Allocate(
+      const google::protobuf::RepeatedField<
+          crane::grpc::CreateCgroupRequest::GresFileMeta> &gres_file_metas,
+      CgroupInterface *cg);
 };
 
 class CgroupManager {
@@ -471,7 +479,7 @@ class CgroupManager {
 
   std::optional<std::string> QueryTaskExecutionNode(task_id_t task_id);
 
-  bool CreateCgroups(const CgroupSpec &cg_spec);
+  void CreateCgroup(const crane::grpc::CreateCgroupRequest *req);
 
   bool CheckIfCgroupForTasksExists(task_id_t task_id);
 
@@ -521,9 +529,10 @@ class CgroupManager {
 
   CgroupConstant::CgroupVersion cg_version_;
 
-  CgroupSpec m_cg_spec_;
+  std::atomic<std::optional<crane::grpc::CreateCgroupRequest>> m_cg_spec_;
 
-  std::atomic<std::unique_ptr<Supervisor::CgroupInterface>> m_cg_;
+  std::unique_ptr<CgroupInterface> m_cg_;
+  absl::Mutex m_cg_mutex_;
 };
 
 }  // namespace Supervisor

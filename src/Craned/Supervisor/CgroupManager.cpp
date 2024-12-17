@@ -31,12 +31,11 @@
 
 #include <dirent.h>
 
-#include "SupervisorPublicDefs.h"
+#include "TaskManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
 namespace Supervisor {
-
 #ifdef CRANE_ENABLE_BPF
 BpfRuntimeInfo CgroupV2::bpf_runtime_info_{};
 #endif
@@ -186,25 +185,7 @@ int CgroupManager::Init() {
     CRANE_WARN("Error Cgroup version is not supported");
     return -1;
   }
-  if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
-    RmAllTaskCgroups_();
-  } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
-#ifdef CRANE_ENABLE_BPF
-    RmBpfDevMap();
-#endif
-    RmAllTaskCgroupsV2_();
-  } else {
-    CRANE_WARN("Error Cgroup version is not supported");
-  }
   return 0;
-}
-
-void CgroupManager::RmAllTaskCgroups_() {
-  RmAllTaskCgroupsUnderController_(CgroupConstant::Controller::CPU_CONTROLLER);
-  RmAllTaskCgroupsUnderController_(
-      CgroupConstant::Controller::MEMORY_CONTROLLER);
-  RmAllTaskCgroupsUnderController_(
-      CgroupConstant::Controller::DEVICES_CONTROLLER);
 }
 
 void CgroupManager::ControllersMounted() {
@@ -444,9 +425,8 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
       CRANE_ERROR("Failed to get cgroup {} stat", cgroup_string);
       return nullptr;
     }
-    return std::make_unique<CgroupV2>(
-        cgroup_string, native_cgroup,
-        static_cast<uint64_t>(cgroup_stat.st_ino));
+    return std::make_unique<CgroupV2>(cgroup_string, native_cgroup,
+                                      cgroup_stat.st_ino);
   } else {
     CRANE_WARN("Unable to create cgroup {}. Cgroup version is not supported",
                cgroup_string.c_str());
@@ -463,15 +443,11 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
   crane::grpc::ResourceInNode res;
   CgroupInterface *pcg;
 
-  {
-    auto cg_spec_it = m_task_id_to_cg_spec_map_[task_id];
-    if (!cg_spec_it) return false;
-    res = cg_spec_it->res_in_node;
-  }
+  auto cg_spec = m_cg_spec_.load().value();
 
   {
-    auto cg_it = m_task_id_to_cg_map_[task_id];
-    auto &cg_unique_ptr = *cg_it;
+    absl::WriterMutexLock lk(&m_cg_mutex_);
+    auto &cg_unique_ptr = m_cg_;
     if (!cg_unique_ptr) {
       if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
         cg_unique_ptr = CgroupManager::CreateOrOpen_(
@@ -511,29 +487,17 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
       util::ReadableGrpcDresInNode(res.dedicated_res_in_node()));
 
   bool ok = AllocatableResourceAllocator::Allocate(
-      res.allocatable_res_in_node(), pcg);
+      cg_spec.allocatable_res_in_node(), pcg);
   if (ok)
     ok &=
         DedicatedResourceAllocator::Allocate(res.dedicated_res_in_node(), pcg);
   return ok;
 }
 
-bool CgroupManager::CreateCgroups(const CgroupSpec &cg_spec) {
+void CgroupManager::CreateCgroup(const crane::grpc::CreateCgroupRequest *req) {
   std::chrono::steady_clock::time_point begin;
   std::chrono::steady_clock::time_point end;
-
-  CRANE_DEBUG("Creating cgroups for {} tasks", cg_specs.size());
-
-  begin = std::chrono::steady_clock::now();
-
-  m_cg_spec_ = cg_spec;
-
-  end = std::chrono::steady_clock::now();
-  CRANE_TRACE("Create cgroups costed {} ms",
-              std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-                  .count());
-
-  return true;
+  m_cg_spec_ = *req;
 }
 
 bool CgroupManager::ReleaseCgroupByTaskIdOnly(task_id_t task_id) {
@@ -550,81 +514,39 @@ bool CgroupManager::ReleaseCgroupByTaskIdOnly(task_id_t task_id) {
   return this->ReleaseCgroup(task_id, uid);
 }
 
-bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
-  this->m_task_id_to_cg_spec_map_.Erase(task_id);
+bool CgroupManager::ReleaseCgroup() {
+  m_cg_spec_.store(std::nullopt);
+  absl::ReaderMutexLock lk(&m_cg_mutex_);
+  auto cgroup = m_cg_.release();
 
-  {
-    // The termination of all processes in a cgroup is a time-consuming work.
-    // Therefore, once we are sure that the cgroup for this task exists, we
-    // let gRPC call return and put the termination work into the thread pool
-    // to avoid blocking the event loop of TaskManager.
-    // Kind of async behavior.
-
-    // avoid deadlock by Erase at next line
-    auto task_id_to_cg_map_ptr =
-        this->m_task_id_to_cg_map_.GetMapExclusivePtr();
-    auto it = task_id_to_cg_map_ptr->find(task_id);
-    if (it == task_id_to_cg_map_ptr->end()) {
-      CRANE_DEBUG(
-          "Trying to release a non-existent cgroup for task #{}. Ignoring "
-          "it...",
-          task_id);
-
-      return false;
-    }
-    CgroupInterface *cgroup = it->second.GetExclusivePtr()->release();
-
-    if (g_config.Plugin.Enabled) {
-      g_plugin_client->DestroyCgroupHookAsync(task_id,
-                                              cgroup->GetCgroupString());
-    }
-
-    task_id_to_cg_map_ptr->erase(task_id);
-
-    if (cgroup != nullptr) {
-      g_thread_pool->detach_task([cgroup]() {
-        bool rc;
-        int cnt = 0;
-
-        while (true) {
-          if (cgroup->Empty()) break;
-
-          if (cnt >= 5) {
-            CRANE_ERROR(
-                "Couldn't kill the processes in cgroup {} after {} times. "
-                "Skipping it.",
-                cgroup->GetCgroupString(), cnt);
-            break;
-          }
-
-          cgroup->KillAllProcesses();
-          ++cnt;
-          std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-
-        delete cgroup;
-      });
-    }
+  if (g_config.Plugin.Enabled) {
+    g_plugin_client->DestroyCgroupHookAsync(g_.task_id,
+                                            cgroup->GetCgroupString());
   }
 
-  {
-    auto uid_task_ids_map_ptr =
-        this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
-    auto it = uid_task_ids_map_ptr->find(uid);
-    if (it == uid_task_ids_map_ptr->end()) {
-      CRANE_DEBUG(
-          "Trying to release a non-existent cgroup for uid #{}. Ignoring it...",
-          uid);
-      return false;
-    }
+  if (cgroup != nullptr) {
+    g_thread_pool->detach_task([cgroup]() {
+      bool rc;
+      int cnt = 0;
 
-    auto task_id_set_ptr = uid_task_ids_map_ptr->at(uid).RawPtr();
+      while (true) {
+        if (cgroup->Empty()) break;
 
-    task_id_set_ptr->erase(task_id);
-    if (task_id_set_ptr->empty()) {
-      uid_task_ids_map_ptr->erase(uid);
-    }
-    // Do not access task_id_set_ptr after erasing form map
+        if (cnt >= 5) {
+          CRANE_ERROR(
+              "Couldn't kill the processes in cgroup {} after {} times. "
+              "Skipping it.",
+              cgroup->GetCgroupString(), cnt);
+          break;
+        }
+
+        cgroup->KillAllProcesses();
+        ++cnt;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+
+      delete cgroup;
+    });
   }
   return true;
 }
@@ -1479,6 +1401,23 @@ bool DedicatedResourceAllocator::Allocate(
       all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
   };
 
+  if (!cg->SetDeviceAccess(all_request_slots, true, true, true)) {
+    if (g_cg_mgr->GetCgroupVersion() ==
+        CgroupConstant::CgroupVersion::CGROUP_V1) {
+      CRANE_WARN("Allocate devices access failed in Cgroup V1.");
+    } else if (g_cg_mgr->GetCgroupVersion() ==
+               CgroupConstant::CgroupVersion::CGROUP_V2) {
+      CRANE_WARN("Allocate devices access failed in Cgroup V2.");
+    }
+    return true;
+  }
+  return true;
+}
+
+bool DedicatedResourceAllocator::Allocate(
+    const google::protobuf::RepeatedField<
+        crane::grpc::CreateCgroupRequest::GresFileMeta> &gres_file_metas,
+    CgroupInterface *cg) {
   if (!cg->SetDeviceAccess(all_request_slots, true, true, true)) {
     if (g_cg_mgr->GetCgroupVersion() ==
         CgroupConstant::CgroupVersion::CGROUP_V1) {

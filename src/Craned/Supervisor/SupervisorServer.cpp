@@ -18,6 +18,15 @@
 
 #include "SupervisorServer.h"
 
+grpc::Status Supervisor::SupervisorServiceImpl::CreateCgroup(
+    grpc::ServerContext* context,
+    const crane::grpc::CreateCgroupRequest* request,
+    crane::grpc::CreateCgroupReply* response) {
+  g_cg_mgr->CreateCgroup(request);
+  response->set_ok(true);
+  return Status::OK;
+}
+
 grpc::Status Supervisor::SupervisorServiceImpl::StartTask(
     grpc::ServerContext* context,
     const crane::grpc::TaskExecutionRequest* request,
