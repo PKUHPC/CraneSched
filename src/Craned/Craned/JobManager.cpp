@@ -177,7 +177,7 @@ JobManager::JobManager() {
       });
 
   m_uvw_thread_ = std::thread([this]() {
-    util::SetCurrentThreadName("TaskMgrLoopThr");
+    util::SetCurrentThreadName("JobMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
     idle_handle->on<uvw::idle_event>(
         [this](const uvw::idle_event&, uvw::idle_handle& h) {

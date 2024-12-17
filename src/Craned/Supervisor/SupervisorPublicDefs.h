@@ -27,7 +27,7 @@ namespace Supervisor {
 
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 
-inline constexpr std::string kSupervisorPidFileDir = "/run/";
+inline constexpr std::string kSupervisorPidFileDir = "/run/crane";
 
 using EnvMap = std::unordered_map<std::string, std::string>;
 
