@@ -284,9 +284,10 @@ class CgroupInterface {
   virtual bool SetDeviceAccess(const std::unordered_set<SlotId> &devices,
                                bool set_read, bool set_write,
                                bool set_mknod) = 0;
-  virtual bool SetDeviceAccess(const std::unordered_set<SlotId> &devices,
-                               bool set_read, bool set_write,
-                               bool set_mknod) = 0;
+  virtual bool SetDeviceAccess(
+      const google::protobuf::RepeatedField<
+          crane::grpc::CreateCgroupRequest::GresFileMeta> &gres_file_metas,
+      bool set_read, bool set_write, bool set_mknod) = 0;
   virtual bool MigrateProcIn(pid_t pid) = 0;
 
   virtual bool KillAllProcesses() = 0;
@@ -335,8 +336,10 @@ class CgroupV1 : public CgroupInterface {
   bool SetMemorySoftLimitBytes(uint64_t memory_bytes) override;
   bool SetBlockioWeight(uint64_t weight) override;
 
-  bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
-                       bool set_write, bool set_mknod) override;
+  bool SetDeviceAccess(
+      const google::protobuf::RepeatedField<
+          crane::grpc::CreateCgroupRequest::GresFileMeta> &gres_file_metas,
+      bool set_read, bool set_write, bool set_mknod) override;
 
   bool KillAllProcesses() override;
 
@@ -363,7 +366,7 @@ class BpfRuntimeInfo {
 
   struct bpf_object *BpfObj() { return bpf_obj_; }
   struct bpf_program *BpfProgram() { return bpf_prog_; }
-  std::mutex *BpfMutex() { return bpf_mtx_; }
+  absl::Mutex *BpfMutex() { return bpf_mtx_; }
   struct bpf_map *BpfDevMap() { return dev_map_; }
   int BpfProgFd() { return bpf_prog_fd_; }
   void SetLogLevel(uint32_t log_devel) { bpf_debug_log_level_ = log_devel; }
@@ -378,7 +381,7 @@ class BpfRuntimeInfo {
   struct bpf_program *bpf_prog_;
   struct bpf_map *dev_map_;
   int bpf_prog_fd_;
-  std::mutex *bpf_mtx_;
+  absl::Mutex *bpf_mtx_;
   size_t cgroup_count_;
 };
 #endif
@@ -420,8 +423,10 @@ class CgroupV2 : public CgroupInterface {
   file. reference from:
   https://www.kernel.org/doc/html/v5.10/admin-guide/cgroup-v2.html#device-controller
   */
-  bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
-                       bool set_write, bool set_mknod) override;
+  bool SetDeviceAccess(
+      const google::protobuf::RepeatedField<
+          crane::grpc::CreateCgroupRequest::GresFileMeta> &gres_file_metas,
+      bool set_read, bool set_write, bool set_mknod) override;
 #ifdef CRANE_ENABLE_BPF
   bool EraseBpfDeviceMap();
   static void SetBpfDebugLogLevel(uint32_t l) {
@@ -481,7 +486,7 @@ class CgroupManager {
 
   void CreateCgroup(const crane::grpc::CreateCgroupRequest *req);
 
-  bool CheckIfCgroupForTasksExists(task_id_t task_id);
+  bool CheckCgroupExists(task_id_t task_id);
 
   bool AllocateAndGetCgroup(task_id_t task_id, CgroupInterface **cg);
 
@@ -489,17 +494,11 @@ class CgroupManager {
 
   bool ReleaseCgroup();
 
-  CraneExpected<crane::grpc::ResourceInNode> GetTaskResourceInNode(
-      task_id_t task_id);
-
-  static EnvMap GetResourceEnvMapByResInNode(
-      const crane::grpc::ResourceInNode &res_in_node);
-
-  CraneExpected<EnvMap> GetResourceEnvMapOfTask(task_id_t task_id);
+  EnvMap GetResourceEnvMapOfTask();
 
   void SetCgroupVersion(CgroupConstant::CgroupVersion v) { cg_version_ = v; }
 
-  CgroupConstant::CgroupVersion GetCgroupVersion() { return cg_version_; }
+  CgroupConstant::CgroupVersion GetCgroupVersion() const { return cg_version_; }
 
  private:
   static std::string CgroupStrByTaskId_(task_id_t task_id);
@@ -512,18 +511,6 @@ class CgroupManager {
                             CgroupConstant::Controller controller,
                             bool required, bool has_cgroup,
                             bool &changed_cgroup);
-
-  static void RmAllTaskCgroups_();
-  static void RmAllTaskCgroupsUnderController_(
-      CgroupConstant::Controller controller);
-
-  void RmAllTaskCgroupsV2_();
-  void RmCgroupsV2_(const std::string &root_cgroup_path,
-                    const std::string &match_str);
-
-#ifdef CRANE_ENABLE_BPF
-  void RmBpfDevMap();
-#endif
 
   ControllerFlags m_mounted_controllers_;
 

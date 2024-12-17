@@ -43,7 +43,7 @@ message CreateCgroupRequest{
     string op_type = 3;
   }
 
-  AllocatableResource allocatable_res_in_node = 1;
+  ResourceInNode res_in_node = 1;
   repeated GresFileMeta gres_file_meta = 2;
   map<string, string> gres_env = 3;
 

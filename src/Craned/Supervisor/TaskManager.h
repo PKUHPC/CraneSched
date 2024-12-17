@@ -25,9 +25,17 @@ namespace Supervisor {
 class TaskManager {
  public:
   explicit TaskManager(task_id_t task_id);
+  ~TaskManager();
+
   task_id_t task_id;
 
  private:
+  std::shared_ptr<uvw::loop> m_uvw_loop_;
+
+  std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
+  std::shared_ptr<uvw::async_handle> m_process_sigchld_async_handle_;
+
+  std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
 };
 }  // namespace Supervisor
