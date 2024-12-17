@@ -585,6 +585,21 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   return reply;
 }
 
+CraneErrCodeExpected<void> CranedMetaContainer::ModifyPartitionAllowAccounts(
+    const std::string& partition_name,
+    const std::unordered_set<std::string>& allow_accounts) {
+  CraneErrCodeExpected<void> result{};
+
+  if (!partition_metas_map_.Contains(partition_name))
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
+
+  auto part_meta = partition_metas_map_.GetValueExclusivePtr(partition_name);
+
+  part_meta->partition_global_meta.allow_accounts = allow_accounts;
+
+  return result;
+}
+
 void CranedMetaContainer::AddDedicatedResource(
     const CranedId& node_id, const DedicatedResourceInNode& resource) {
   if (!craned_meta_map_.Contains(node_id)) {
