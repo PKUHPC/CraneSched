@@ -18,13 +18,14 @@
 
 #include "TaskManager.h"
 
+#include <sys/wait.h>
+
 #include "crane/String.h"
 
 namespace Supervisor {
 
 TaskManager::TaskManager(task_id_t task_id)
     : task_id(task_id), m_supervisor_exit_(false) {
-  // todo: Init uvw loop
   m_uvw_loop_ = uvw::loop::create();
 
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
@@ -32,12 +33,18 @@ TaskManager::TaskManager(task_id_t task_id)
       [this](const uvw::signal_event&, uvw::signal_handle&) {
         EvSigchldCb_();
       });
+  if (m_sigchld_handle_->start(SIGCHLD) != 0) {
+    CRANE_ERROR("Failed to start the SIGCHLD handle");
+  }
 
-  m_process_sigchld_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_process_sigchld_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanSigchldQueueCb_();
-      });
+  // todo: Add events
+
+  // m_process_sigchld_async_handle_ =
+  // m_uvw_loop_->resource<uvw::async_handle>();
+  // m_process_sigchld_async_handle_->on<uvw::async_event>(
+  //     [this](const uvw::async_event&, uvw::async_handle&) {
+  //       EvCleanSigchldQueueCb_();
+  //     });
 
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
@@ -51,13 +58,63 @@ TaskManager::TaskManager(task_id_t task_id)
           std::this_thread::sleep_for(std::chrono::milliseconds(50));
         });
     if (idle_handle->start() != 0) {
-      CRANE_ERROR("Failed to start the idle event in JobManager loop.");
+      CRANE_ERROR("Failed to start the idle event in TaskManager loop.");
     }
     m_uvw_loop_->run();
   });
 }
+
 TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+}
+
+void TaskManager::EvSigchldCb_() {
+  int status;
+  pid_t pid;
+  while (true) {
+    pid = waitpid(-1, &status, WNOHANG
+                  /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
+
+    if (pid > 0) {
+      auto sigchld_info = std::make_unique<ProcSigchldInfo>();
+
+      if (WIFEXITED(status)) {
+        // Exited with status WEXITSTATUS(status)
+        sigchld_info->pid = pid;
+        sigchld_info->is_terminated_by_signal = false;
+        sigchld_info->value = WEXITSTATUS(status);
+
+        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: false, Status: {}",
+                    pid, WEXITSTATUS(status));
+      } else if (WIFSIGNALED(status)) {
+        // Killed by signal WTERMSIG(status)
+        sigchld_info->pid = pid;
+        sigchld_info->is_terminated_by_signal = true;
+        sigchld_info->value = WTERMSIG(status);
+
+        CRANE_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
+                    pid, WTERMSIG(status));
+      }
+      /* Todo(More status tracing):
+       else if (WIFSTOPPED(status)) {
+        printf("stopped by signal %d\n", WSTOPSIG(status));
+      } else if (WIFCONTINUED(status)) {
+        printf("continued\n");
+      } */
+      m_sigchld_queue_.enqueue(std::move(sigchld_info));
+      m_process_sigchld_async_handle_->send();
+    } else if (pid == 0) {
+      // There's no child that needs reaping.
+      // If there's no task running, just stop the loop of JobManager.
+      if (m_supervisor_exit_) {
+      }
+      break;
+    } else if (pid < 0) {
+      if (errno != ECHILD)
+        CRANE_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
+      break;
+    }
+  }
 }
 
 }  // namespace Supervisor

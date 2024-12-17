@@ -23,6 +23,7 @@
 
 #include "CgroupManager.h"
 
+#include <sys/stat.h>
 #ifdef CRANE_ENABLE_BPF
 #  include <bpf/bpf.h>
 #  include <bpf/libbpf.h>
@@ -434,16 +435,19 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   }
 }
 
-bool CgroupManager::CheckCgroupExists(task_id_t task_id) {
+bool CgroupManager::CheckCgroupExists() {
   absl::ReaderMutexLock lk(&m_cg_mutex_);
   return m_cg_ != nullptr;
 }
 
 bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
                                          CgroupInterface **cg) {
-  auto res = m_cg_spec_.load().value().res_in_node();
+  crane::grpc::ResourceInNode res;
   CgroupInterface *pcg;
-
+  {
+    absl::ReaderMutexLock lk(&m_cg_spec_mutex_);
+    res = m_cg_spec_.value().resource_in_node;
+  }
   {
     absl::WriterMutexLock lk(&m_cg_mutex_);
     auto &cg_unique_ptr = m_cg_;
@@ -487,18 +491,26 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
 
   bool ok = AllocatableResourceAllocator::Allocate(
       res.allocatable_res_in_node(), pcg);
+  absl::ReaderMutexLock lk(&m_cg_spec_mutex_);
   if (ok)
     ok &= DedicatedResourceAllocator::Allocate(
-        m_cg_spec_.load().value().gres_file_meta, pcg);
+        m_cg_spec_.value().gres_file_metas, pcg);
   return ok;
 }
 
 void CgroupManager::CreateCgroup(const crane::grpc::CreateCgroupRequest *req) {
-  m_cg_spec_ = *req;
+  CgroupSpec cgroup_spec;
+  cgroup_spec.resource_in_node = req->res_in_node();
+  cgroup_spec.gres_file_metas.reserve(req->gres_file_metas_size());
+  for (const auto &gres_file_meta : req->gres_file_metas()) {
+    cgroup_spec.gres_file_metas.emplace_back(gres_file_meta);
+  }
+  m_cg_spec_ = std::move(cgroup_spec);
 }
 
 bool CgroupManager::ReleaseCgroup() {
-  m_cg_spec_.store(std::nullopt);
+  absl::WriterMutexLock spec_lk(&m_cg_spec_mutex_);
+  m_cg_spec_ = std::nullopt;
   absl::ReaderMutexLock lk(&m_cg_mutex_);
   auto cgroup = m_cg_.release();
 
@@ -534,17 +546,10 @@ bool CgroupManager::ReleaseCgroup() {
   return true;
 }
 
-bool CgroupManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
-  CgroupInterface *cg;
-  bool ok = AllocateAndGetCgroup(task_id, &cg);
-  if (!ok) return false;
-
-  return cg->MigrateProcIn(pid);
-}
-
 EnvMap CgroupManager::GetResourceEnvMapOfTask() {
   EnvMap env_map;
-  auto res_in_node = m_cg_spec_.load().value().res_in_node();
+  absl::ReaderMutexLock lk(&m_cg_spec_mutex_);
+  auto res_in_node = m_cg_spec_.value().resource_in_node;
 
   env_map.emplace(
       "CRANE_MEM_PER_NODE",
@@ -857,10 +862,8 @@ bool CgroupV1::Empty() {
   }
 }
 
-bool CgroupV1::SetDeviceAccess(
-    const google::protobuf::RepeatedField<
-        crane::grpc::CreateCgroupRequest::GresFileMeta> &gres_file_metas,
-    bool set_read, bool set_write, bool set_mknod) {
+bool CgroupV1::SetDeviceAccess(const std::vector<GresFileMeta> &gres_file_metas,
+                               bool set_read, bool set_write, bool set_mknod) {
   std::string op;
   if (set_read) op += "r";
   if (set_write) op += "w";
@@ -1044,10 +1047,8 @@ bool CgroupV2::SetBlockioWeight(uint64_t weight) {
       CgroupConstant::ControllerFile::IO_WEIGHT_V2, weight);
 }
 
-bool CgroupV2::SetDeviceAccess(
-    const google::protobuf::RepeatedField<
-        crane::grpc::CreateCgroupRequest::GresFileMeta> &gres_file_metas,
-    bool set_read, bool set_write, bool set_mknod) {
+bool CgroupV2::SetDeviceAccess(const std::vector<GresFileMeta> &gres_file_metas,
+                               bool set_read, bool set_write, bool set_mknod) {
 #ifdef CRANE_ENABLE_BPF
   if (!bpf_runtime_info_.BpfInvalid()) {
     CRANE_WARN("BPF is not initialized.");
@@ -1071,14 +1072,14 @@ bool CgroupV2::SetDeviceAccess(
   auto &bpf_devices = m_cgroup_bpf_devices;
   for (const auto &gres_file_meta : gres_file_metas) {
     short op_type = 0;
-    if (gres_file_meta.op_type() == "c") {
+    if (gres_file_meta.op_type == 'c') {
       op_type |= BPF_DEVCG_DEV_CHAR;
-    } else if (gres_file_meta.op_type() == "b") {
+    } else if (gres_file_meta.op_type == 'b') {
       op_type |= BPF_DEVCG_DEV_BLOCK;
     } else {
       op_type |= 0xffff;
     }
-    bpf_devices.push_back({gres_file_meta.major(), gres_file_meta.minor(),
+    bpf_devices.push_back({gres_file_meta.major, gres_file_meta.minor,
                            BPF_PERMISSION::DENY, access, op_type});
   }
   {
@@ -1234,9 +1235,7 @@ bool AllocatableResourceAllocator::Allocate(
 }
 
 bool DedicatedResourceAllocator::Allocate(
-    const google::protobuf::RepeatedField<
-        crane::grpc::CreateCgroupRequest::GresFileMeta> &gres_file_metas,
-    CgroupInterface *cg) {
+    const std::vector<GresFileMeta> &gres_file_metas, CgroupInterface *cg) {
   if (!cg->SetDeviceAccess(gres_file_metas, true, true, true)) {
     if (g_cg_mgr->GetCgroupVersion() ==
         CgroupConstant::CgroupVersion::CGROUP_V1) {

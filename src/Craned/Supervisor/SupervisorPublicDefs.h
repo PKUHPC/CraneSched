@@ -31,18 +31,22 @@ inline constexpr std::string kSupervisorPidFileDir = "/run/crane";
 
 using EnvMap = std::unordered_map<std::string, std::string>;
 
+enum class SupervisorStats {
+  INIT = 0,
+  CreateCgroup,
+  WaitForTask,
+  LaunchTask,
+  WaitTaskComplete,
+  TaskComplete,
+  SendingStatusChange,
+  END
+};
+
 struct TaskStatusChangeQueueElem {
   task_id_t task_id{};
   crane::grpc::TaskStatus new_status{};
   uint32_t exit_code{};
   std::optional<std::string> reason;
-};
-
-struct TaskInfoOfUid {
-  uint32_t job_cnt;
-  uint32_t first_task_id;
-  bool cgroup_exists;
-  std::string cgroup_path;
 };
 
 struct Config {
