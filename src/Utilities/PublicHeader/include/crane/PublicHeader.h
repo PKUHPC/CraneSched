@@ -35,8 +35,13 @@ using task_id_t = uint32_t;
 
 using CraneErrCode = crane::grpc::ErrCode;
 
+using CraneErrCode = crane::grpc::ErrCode;
+
 template <typename T>
 using CraneExpected = std::expected<T, CraneErrCode>;
+
+template <typename T>
+using CraneErrCodeExpected = std::expected<T, CraneErrCode>;
 
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";

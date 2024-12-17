@@ -258,6 +258,32 @@ grpc::Status CraneCtldServiceImpl::ModifyPartitionAllowAccounts(
     grpc::ServerContext *context,
     const crane::grpc::ModifyPartitionAllowAccountsRequest *request,
     crane::grpc::ModifyPartitionAllowAccountsReply *response) {
+  CraneErrCodeExpected<void> result;
+
+  std::unordered_set<std::string> allow_accounts;
+  for (const auto &account_name : request->allow_accounts()) {
+    allow_accounts.insert(account_name);
+  }
+
+  result = g_account_manager->CheckModifyPartitionAllowAccounts(
+      request->uid(), request->partition_name(), allow_accounts);
+
+  if (!result) {
+    response->set_ok(false);
+    response->set_reason(result.error());
+    return grpc::Status::OK;
+  }
+
+  result = g_meta_container->ModifyPartitionAllowAccounts(
+      request->partition_name(), allow_accounts);
+
+  if (!result) {
+    response->set_ok(false);
+    response->set_reason(result.error());
+  } else {
+    response->set_ok(true);
+  }
+
   return grpc::Status::OK;
 }
 
