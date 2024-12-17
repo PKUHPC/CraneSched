@@ -17,3 +17,11 @@
  */
 
 #include "TaskManager.h"
+
+namespace Supervisor {
+
+TaskManager::TaskManager(task_id_t task_id) : task_id(task_id) {
+  // todo: Init uvw loop
+}
+
+}  // namespace Supervisor
