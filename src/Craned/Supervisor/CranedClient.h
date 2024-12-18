@@ -35,4 +35,5 @@ class CranedClient {
   std::shared_ptr<crane::grpc::Craned::Stub> m_stub_;
 };
 
+inline std::unique_ptr<CranedClient> g_craned_client;
 }  // namespace Supervisor
