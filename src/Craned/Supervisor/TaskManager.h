@@ -22,10 +22,82 @@
 
 namespace Supervisor {
 
+struct MetaInTaskInstance {
+  std::string parsed_sh_script_path;
+  virtual ~MetaInTaskInstance() = default;
+};
+
+struct BatchMetaInTaskInstance : MetaInTaskInstance {
+  std::string parsed_output_file_pattern;
+  std::string parsed_error_file_pattern;
+  ~BatchMetaInTaskInstance() override = default;
+};
+
+struct CrunMetaInTaskInstance : MetaInTaskInstance {
+  int msg_fd;
+  ~CrunMetaInTaskInstance() override = default;
+};
+
+struct ProcSigchldInfo {
+  pid_t pid;
+  bool is_terminated_by_signal;
+  int value;
+
+  std::shared_ptr<uvw::timer_handle> resend_timer{nullptr};
+};
+
+struct TaskInstance {
+  TaskInstance(crane::grpc::ProcToD proc_to_d, std::string exec_path,
+               std::list<std::string> arg_list)
+      : task(proc_to_d),
+        m_executive_path_(std::move(exec_path)),
+        m_arguments_(std::move(arg_list)),
+        m_pid_(0) {}
+
+  ~TaskInstance() = default;
+
+  [[nodiscard]] const std::string& GetExecPath() const {
+    return m_executive_path_;
+  }
+  [[nodiscard]] const std::list<std::string>& GetArgList() const {
+    return m_arguments_;
+  }
+
+  bool IsCrun() const;
+  bool IsCalloc() const;
+
+  void SetPid(pid_t pid) { m_pid_ = pid; }
+  [[nodiscard]] pid_t GetPid() const { return m_pid_; }
+
+  crane::grpc::ProcToD task;
+
+  std::unique_ptr<MetaInTaskInstance> meta;
+
+  bool orphaned{false};
+  CraneErr err_before_exec{CraneErr::kOk};
+  bool cancelled_by_user{false};
+  bool terminated_by_timeout{false};
+  ProcSigchldInfo sigchld_info{};
+
+ private:
+  /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
+  pid_t m_pid_;
+
+  /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
+  std::string m_executive_path_;
+  std::list<std::string> m_arguments_;
+};
+
 class TaskManager {
  public:
   explicit TaskManager(task_id_t task_id);
   ~TaskManager();
+
+  void TaskStopAndDoStatusChangeAsync(TaskInstance* task_instance);
+
+  void ActivateTaskStatusChangeAsync_(crane::grpc::TaskStatus new_status,
+                                      uint32_t exit_code,
+                                      std::optional<std::string> reason);
 
   task_id_t task_id;
 
@@ -33,14 +105,9 @@ class TaskManager {
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
-  struct ProcSigchldInfo {
-    pid_t pid;
-    bool is_terminated_by_signal;
-    int value;
-
-    std::shared_ptr<uvw::timer_handle> resend_timer{nullptr};
-  };
   void EvSigchldCb_();
+  void EvCleanSigchldQueueCb_();
+  void EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info);
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
@@ -51,6 +118,9 @@ class TaskManager {
 
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
+
+  std::unique_ptr<TaskInstance> m_process_;
+  absl::Mutex m_mtx_;
 };
 }  // namespace Supervisor
 inline std::unique_ptr<Supervisor::TaskManager> g_task_mgr;
