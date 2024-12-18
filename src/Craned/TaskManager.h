@@ -22,12 +22,22 @@
 // Precompiled header comes first.
 
 #include <grp.h>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <sys/inotify.h>
+#include <unistd.h>
+
+#include <atomic>
+#include <memory>
 
 #include "CgroupManager.h"
 #include "crane/PasswordEntry.h"
 #include "protos/Crane.grpc.pb.h"
 
 namespace Craned {
+
+inline const char* MemoryEvents = "memory.events";
+inline const char* MemoryOomControl = "memory.oom_control";
 
 struct BatchMetaInProcessInstance {
   std::string parsed_output_file_pattern;
@@ -132,11 +142,21 @@ struct ProcSigchldInfo {
   std::shared_ptr<uvw::timer_handle> resend_timer{nullptr};
 };
 
+enum class TerminatedBy : uint64_t {
+  NONE = 0,
+  CANCELLED_BY_USER,
+  TERMINATION_BY_TIMEOUT,
+  TERMINATION_BY_OOM
+};
+
 // Todo: Task may consists of multiple subtasks
 struct TaskInstance {
   ~TaskInstance() {
     if (termination_timer) {
       termination_timer->close();
+    }
+    if (termination_oom) {
+      termination_oom->close();
     }
 
     if (this->IsCrun()) {
@@ -156,12 +176,13 @@ struct TaskInstance {
   std::string cgroup_path;
   CgroupInterface* cgroup;
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
+  std::shared_ptr<uvw::fs_event_handle> termination_oom{nullptr};
+  std::atomic<bool> monitor_thread_stop{true};
 
   // Task execution results
   bool orphaned{false};
   CraneErr err_before_exec{CraneErr::kOk};
-  bool cancelled_by_user{false};
-  bool terminated_by_timeout{false};
+  TerminatedBy termination_event{TerminatedBy::NONE};
   ProcSigchldInfo sigchld_info{};
 
   absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
@@ -232,10 +253,11 @@ class TaskManager {
 
   struct TaskTerminateQueueElem {
     uint32_t task_id{0};
-    bool terminated_by_user{false};     // If the task is canceled by user,
-                                        // task->status=Cancelled
-    bool terminated_by_timeout{false};  // If the task is canceled by user,
-                                        // task->status=Timeout
+    TerminatedBy terminated_by{TerminatedBy::NONE};
+    // If the task is canceled by user,
+    // task->status=Cancelled
+    // If the task is canceled by user,
+    // task->status=Timeout
     bool mark_as_orphaned{false};
   };
 
@@ -299,6 +321,109 @@ class TaskManager {
     termination_handel->start(std::chrono::seconds(secs),
                               std::chrono::seconds(0));
     instance->termination_timer = termination_handel;
+  }
+
+  void SetCgroupV1TerminationOOM_(TaskInstance* instance) {
+    using namespace CgroupConstant;
+    std::string slice = "/";
+    std::string oom_control_full_path;
+
+    oom_control_full_path =
+        CgroupConstant::RootCgroupFullPath + slice +
+        std::string(GetControllerStringView(Controller::MEMORY_CONTROLLER)) +
+        slice + instance->cgroup_path + "/" + MemoryOomControl;
+
+    int oom_control_fd = open(oom_control_full_path.c_str(), O_RDONLY);
+
+    int efd = eventfd(0, EFD_CLOEXEC);
+    if (efd == -1) {
+      CRANE_ERROR("Failed to create event fd");
+      return;
+    }
+
+    int epfd = epoll_create1(EPOLL_CLOEXEC);
+    if (epfd == -1) {
+      CRANE_ERROR("Failed to create epoll fd");
+    }
+
+    struct epoll_event event;
+    event.events = EPOLLIN | EPOLLERR | EPOLLHUP;
+    event.data.fd = efd;
+
+    if (epoll_ctl(epfd, EPOLL_CTL_ADD, efd, &event) == -1) {
+      CRANE_ERROR("Failed to set epoll_stl .");
+      close(oom_control_fd);
+      close(efd);
+      close(epfd);
+      return;
+    }
+
+    std::string cgroup_event_control =
+        CgroupConstant::RootCgroupFullPath + slice +
+        std::string(GetControllerStringView(Controller::MEMORY_CONTROLLER)) +
+        slice + instance->cgroup_path + "/" + "cgroup.event_control";
+    std::ofstream eventControlFile(cgroup_event_control);
+    if (!eventControlFile.is_open()) {
+      CRANE_ERROR("Failed to open cgroup.event_control file.");
+      close(oom_control_fd);
+      close(efd);
+      close(epfd);
+      return;
+    }
+
+    std::stringstream ss;
+    ss << efd << " " << oom_control_fd;
+    eventControlFile << ss.str();
+    eventControlFile.close();
+    close(oom_control_fd);
+    instance->monitor_thread_stop = false;
+    std::thread([this, epfd, efd, oom_control_full_path, instance]() {
+      struct epoll_event events[32];
+      uint64_t buf = 0;
+      while (!instance->monitor_thread_stop) {
+        // check monitor_thread_stop every 500 ms
+        int nfds = epoll_wait(epfd, events, 32, 500);
+        for (int i = 0; i < nfds; i++) {
+          if (events[i].events & EPOLLIN) {
+            ssize_t readBytes = read(events[i].data.fd, &buf, sizeof(buf));
+            if (readBytes < 0) {
+              close(efd);
+              close(epfd);
+              return;
+            }
+            EvOomCb_(oom_control_full_path, this, instance->task.task_id());
+            close(efd);
+            close(epfd);
+            return;
+          }
+          if (events[i].events & (EPOLLERR | EPOLLHUP)) {
+            CRANE_ERROR("Error or hangup on eventfd");
+          }
+        }
+      }
+      close(efd);
+      close(epfd);
+    }).detach();
+  }
+
+  void SetCgroupV2TerminationOOM_(TaskInstance* instance) {
+    std::string slice = "/";
+    std::string memory_events_full_path = CgroupConstant::RootCgroupFullPath +
+                                          slice + instance->cgroup_path +
+                                          slice + MemoryEvents;
+
+    auto ev = m_uvw_loop_->resource<uvw::fs_event_handle>();
+
+    ev->on<uvw::fs_event_event>(
+        [this, memory_events_full_path, instance](
+            uvw::fs_event_event& event, uvw::fs_event_handle& handle) {
+          EvOomCb_(memory_events_full_path, this, instance->task.task_id());
+        });
+
+    ev->start(memory_events_full_path,
+              uvw::fs_event_handle::event_flags::RECURSIVE);
+
+    instance->termination_oom = ev;
   }
 
   static void DelTerminationTimer_(TaskInstance* instance) {
@@ -374,6 +499,9 @@ class TaskManager {
   void EvTaskTimerCb_(task_id_t task_id);
 
   void EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info);
+
+  void EvOomCb_(std::string oom_path, TaskManager* task_manager,
+                task_id_t task_id);
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
