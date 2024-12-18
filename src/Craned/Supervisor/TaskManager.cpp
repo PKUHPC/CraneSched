@@ -20,9 +20,20 @@
 
 #include <sys/wait.h>
 
+#include "CranedClient.h"
 #include "crane/String.h"
 
 namespace Supervisor {
+
+bool TaskInstance::IsCrun() const {
+  return task.type() == crane::grpc::Interactive &&
+         task.interactive_meta().interactive_type() == crane::grpc::Crun;
+}
+
+bool TaskInstance::IsCalloc() const {
+  return task.type() == crane::grpc::Interactive &&
+         task.interactive_meta().interactive_type() == crane::grpc::Calloc;
+}
 
 TaskManager::TaskManager(task_id_t task_id)
     : task_id(task_id), m_supervisor_exit_(false) {
@@ -68,6 +79,79 @@ TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
+void TaskManager::TaskStopAndDoStatusChangeAsync(TaskInstance* task_instance) {
+  CRANE_INFO("Task #{} stopped and is doing TaskStatusChange...", task_id);
+
+  switch (task_instance->err_before_exec) {
+  case CraneErr::kProtobufError:
+    ActivateTaskStatusChangeAsync_(crane::grpc::TaskStatus::Failed,
+                                   ExitCode::kExitCodeSpawnProcessFail,
+                                   std::nullopt);
+    break;
+
+  case CraneErr::kCgroupError:
+    ActivateTaskStatusChangeAsync_(crane::grpc::TaskStatus::Failed,
+                                   ExitCode::kExitCodeCgroupError,
+                                   std::nullopt);
+    break;
+
+  default:
+    break;
+  }
+
+  ProcSigchldInfo& sigchld_info = task_instance->sigchld_info;
+  if (task_instance->task.type() == crane::grpc::Batch ||
+      task_instance->IsCrun()) {
+    // For a Batch task, the end of the process means it is done.
+    if (sigchld_info.is_terminated_by_signal) {
+      if (task_instance->cancelled_by_user)
+        ActivateTaskStatusChangeAsync_(
+            crane::grpc::TaskStatus::Cancelled,
+            sigchld_info.value + ExitCode::kTerminationSignalBase,
+            std::nullopt);
+      else if (task_instance->terminated_by_timeout)
+        ActivateTaskStatusChangeAsync_(
+            crane::grpc::TaskStatus::ExceedTimeLimit,
+            sigchld_info.value + ExitCode::kTerminationSignalBase,
+            std::nullopt);
+      else
+        ActivateTaskStatusChangeAsync_(
+            crane::grpc::TaskStatus::Failed,
+            sigchld_info.value + ExitCode::kTerminationSignalBase,
+            std::nullopt);
+    } else
+      ActivateTaskStatusChangeAsync_(crane::grpc::TaskStatus::Completed,
+                                     sigchld_info.value, std::nullopt);
+  } else /* Calloc */ {
+    // For a COMPLETING Calloc task with a process running,
+    // the end of this process means that this task is done.
+    if (sigchld_info.is_terminated_by_signal)
+      ActivateTaskStatusChangeAsync_(
+          crane::grpc::TaskStatus::Completed,
+          sigchld_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
+    else
+      ActivateTaskStatusChangeAsync_(crane::grpc::TaskStatus::Completed,
+                                     sigchld_info.value, std::nullopt);
+  }
+}
+
+void TaskManager::ActivateTaskStatusChangeAsync_(
+    crane::grpc::TaskStatus new_status, uint32_t exit_code,
+    std::optional<std::string> reason) {
+  TaskInstance* instance = m_process_.get();
+  if (instance->task.type() == crane::grpc::Batch || instance->IsCrun()) {
+    const std::string& path = instance->meta->parsed_sh_script_path;
+    if (!path.empty())
+      g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
+  }
+
+  bool orphaned = instance->orphaned;
+  // Free the TaskInstance structure
+  m_process_.release();
+  if (!orphaned)
+    g_craned_client->TaskStatusChange(task_id, new_status, exit_code, reason);
+}
+
 void TaskManager::EvSigchldCb_() {
   int status;
   pid_t pid;
@@ -104,10 +188,6 @@ void TaskManager::EvSigchldCb_() {
       m_sigchld_queue_.enqueue(std::move(sigchld_info));
       m_process_sigchld_async_handle_->send();
     } else if (pid == 0) {
-      // There's no child that needs reaping.
-      // If there's no task running, just stop the loop of JobManager.
-      if (m_supervisor_exit_) {
-      }
       break;
     } else if (pid < 0) {
       if (errno != ECHILD)
@@ -115,6 +195,55 @@ void TaskManager::EvSigchldCb_() {
       break;
     }
   }
+}
+
+void TaskManager::EvCleanSigchldQueueCb_() {
+  std::unique_ptr<ProcSigchldInfo> sigchld_info;
+  while (m_sigchld_queue_.try_dequeue(sigchld_info)) {
+    auto pid = sigchld_info->pid;
+
+    if (sigchld_info->resend_timer != nullptr) {
+      sigchld_info->resend_timer->close();
+      sigchld_info->resend_timer.reset();
+    }
+
+    if (!m_process_) {
+      auto* sigchld_info_raw_ptr = sigchld_info.release();
+      sigchld_info_raw_ptr->resend_timer =
+          m_uvw_loop_->resource<uvw::timer_handle>();
+      sigchld_info_raw_ptr->resend_timer->on<uvw::timer_event>(
+          [this, sigchld_info_raw_ptr](const uvw::timer_event&,
+                                       uvw::timer_handle&) {
+            EvSigchldTimerCb_(sigchld_info_raw_ptr);
+          });
+      sigchld_info_raw_ptr->resend_timer->start(
+          std::chrono::milliseconds(kEvSigChldResendMs),
+          std::chrono::milliseconds(0));
+      CRANE_TRACE("Child Process {} exit too early, will do SigchldCb later",
+                  pid);
+      continue;
+    }
+
+    m_process_->sigchld_info = *sigchld_info;
+
+    if (m_process_->IsCrun())
+      // TaskStatusChange of a crun task is triggered in
+      // CforedManager.
+      g_cfored_manager->TaskProcOnCforedStopped(
+          instance->task.interactive_meta().cfored_name(),
+          instance->task.task_id());
+    else /* Batch / Calloc */ {
+      // If the TaskInstance has no process left,
+      // send TaskStatusChange for this task.
+      // See the comment of EvActivateTaskStatusChange_.
+      TaskStopAndDoStatusChangeAsync(m_process_.get());
+    }
+  }
+}
+
+void TaskManager::EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info) {
+  m_sigchld_queue_.enqueue(std::unique_ptr<ProcSigchldInfo>(sigchld_info));
+  m_process_sigchld_async_handle_->send();
 }
 
 }  // namespace Supervisor

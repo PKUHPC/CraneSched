@@ -369,7 +369,6 @@ void JobManager::EvCleanSigchldQueueCb_() {
     m_mtx_.Unlock();
 
     instance->sigchld_info = *sigchld_info;
-    proc->Finish(sigchld_info->is_terminated_by_signal, sigchld_info->value);
 
     // Free the ProcessInstance. ITask struct is not freed here because
     // the ITask for an Interactive task can have no ProcessInstance.
@@ -516,8 +515,8 @@ CraneErr JobManager::SpawnProcessInInstance_(TaskInstance* instance,
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
   using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
 
-  using crane::grpc::subprocess::CanStartMessage;
-  using crane::grpc::subprocess::ChildProcessReady;
+  using crane::grpc::CanStartMessage;
+  using crane::grpc::ChildProcessReady;
 
   int ctrl_sock_pair[2];  // Socket pair for passing control messages.
 
