@@ -39,19 +39,9 @@ class ProcessInstance {
   ProcessInstance(std::string exec_path, std::list<std::string> arg_list)
       : m_executive_path_(std::move(exec_path)),
         m_arguments_(std::move(arg_list)),
-        m_pid_(0),
-        m_user_data_(nullptr) {}
+        m_pid_(0) {}
 
-  ~ProcessInstance() {
-    if (m_user_data_) {
-      if (m_clean_cb_) {
-        CRANE_TRACE("Clean Callback for pid {} is called.", m_pid_);
-        m_clean_cb_(m_user_data_);
-      } else
-        CRANE_ERROR(
-            "user_data in ProcessInstance is set, but clean_cb is not set!");
-    }
-  }
+  ~ProcessInstance() = default;
 
   [[nodiscard]] const std::string& GetExecPath() const {
     return m_executive_path_;
@@ -63,23 +53,6 @@ class ProcessInstance {
   void SetPid(pid_t pid) { m_pid_ = pid; }
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
 
-  void SetFinishCb(std::function<void(bool, int, void*)> cb) {
-    m_finish_cb_ = std::move(cb);
-  }
-
-  void Output(std::string&& buf) {
-    if (m_output_cb_) m_output_cb_(std::move(buf), m_user_data_);
-  }
-
-  void Finish(bool is_killed, int val) {
-    if (m_finish_cb_) m_finish_cb_(is_killed, val, m_user_data_);
-  }
-
-  void SetUserDataAndCleanCb(void* data, std::function<void(void*)> cb) {
-    m_user_data_ = data;
-    m_clean_cb_ = std::move(cb);
-  }
-
   BatchMetaInProcessInstance batch_meta;
 
  private:
@@ -89,24 +62,6 @@ class ProcessInstance {
   /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
   std::string m_executive_path_;
   std::list<std::string> m_arguments_;
-
-  /***
-   * The callback function called when a task writes to stdout or stderr.
-   * @param[in] buf a slice of output buffer.
-   */
-  std::function<void(std::string&& buf, void*)> m_output_cb_;
-
-  /***
-   * The callback function called when a task is finished.
-   * @param[in] bool true if the task is terminated by a signal, false
-   * otherwise.
-   * @param[in] int the number of signal if bool is true, the return value
-   * otherwise.
-   */
-  std::function<void(bool, int, void*)> m_finish_cb_;
-
-  void* m_user_data_;
-  std::function<void(void*)> m_clean_cb_;
 };
 
 struct MetaInTaskInstance {
@@ -169,15 +124,15 @@ struct TaskInstance {
 
 /**
  * The class that manages all tasks and handles interrupts.
- * SIGINT and SIGCHLD are processed in TaskManager.
+ * SIGINT and SIGCHLD are processed in JobManager.
  * Especially, outside caller can use SetSigintCallback() to
  * set the callback when SIGINT is triggered.
  */
-class TaskManager {
+class JobManager {
  public:
-  TaskManager();
+  JobManager();
 
-  ~TaskManager();
+  ~JobManager();
 
   CraneErr ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
@@ -255,7 +210,7 @@ class TaskManager {
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
-  // Ask TaskManager to stop its event loop.
+  // Ask JobManager to stop its event loop.
   void ActivateShutdownAsync_();
 
   /**
@@ -379,7 +334,7 @@ class TaskManager {
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
 
-  // When this event is triggered, the TaskManager will not accept
+  // When this event is triggered, the JobManager will not accept
   // any more new tasks and quit as soon as all existing task end.
   std::shared_ptr<uvw::signal_handle> m_sigint_handle_;
 
@@ -423,8 +378,8 @@ class TaskManager {
 
   std::thread m_uvw_thread_;
 
-  static inline TaskManager* m_instance_ptr_;
+  static inline JobManager* m_instance_ptr_;
 };
 }  // namespace Craned
 
-inline std::unique_ptr<Craned::TaskManager> g_task_mgr;
+inline std::unique_ptr<Craned::JobManager> g_task_mgr;

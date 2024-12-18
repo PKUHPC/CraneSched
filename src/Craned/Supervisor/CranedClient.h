@@ -16,15 +16,24 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-syntax = "proto3";
+#pragma once
+#include "SupervisorPublicDefs.h"
+// Precompiled header comes first.
 
-package crane.grpc.subprocess;
-option go_package = "/protos/subprocess";
+#include "protos/Crane.grpc.pb.h"
+#include "protos/Crane.pb.h"
 
-message CanStartMessage {
-  bool ok = 1;
-}
+namespace Supervisor {
+class CranedClient {
+ public:
+  void InitChannelAndStub(const std::string& endpoint);
+  void TaskStatusChange(uint32_t task_id, crane::grpc::TaskStatus new_status,
+                        uint32_t exit_code, std::optional<std::string> reason);
 
-message ChildProcessReady {
-  bool ok = 1;
-}
+ private:
+  std::shared_ptr<grpc::Channel> m_channel_;
+  std::shared_ptr<crane::grpc::Craned::Stub> m_stub_;
+};
+
+inline std::unique_ptr<CranedClient> g_craned_client;
+}  // namespace Supervisor

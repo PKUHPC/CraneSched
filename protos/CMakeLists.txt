@@ -1,5 +1,5 @@
 # Generate proto files
-set(proto_src PublicDefs.proto Crane.proto CraneSubprocess.proto Plugin.proto)
+set(proto_src PublicDefs.proto Crane.proto Supervisor.proto Plugin.proto)
 set(GENERATED_FILE_PATH ${CMAKE_SOURCE_DIR}/generated)
 file(MAKE_DIRECTORY ${GENERATED_FILE_PATH})
 
