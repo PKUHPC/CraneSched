@@ -25,7 +25,6 @@
 #include <sys/wait.h>
 
 #include "CforedClient.h"
-#include "CgroupManager.h"
 #include "CtldClient.h"
 #include "crane/String.h"
 #include "protos/CraneSubprocess.pb.h"
@@ -248,14 +247,12 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
             task_id, crane::grpc::TaskStatus::ExceedTimeLimit,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
             std::nullopt);
-      else if (instance->termination_event ==
-               TerminatedBy::TERMINATION_BY_OOM) {
-        CRANE_INFO("oom event");
+      else if (instance->termination_event == TerminatedBy::TERMINATION_BY_OOM)
         ActivateTaskStatusChangeAsync_(
             task_id, crane::grpc::TaskStatus::Failed,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
             std::nullopt);
-      } else
+      else
         ActivateTaskStatusChangeAsync_(
             task_id, crane::grpc::TaskStatus::Failed,
             sigchld_info.value + ExitCode::kTerminationSignalBase,

@@ -24,11 +24,6 @@
 #include <grp.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
-#include <sys/inotify.h>
-#include <unistd.h>
-
-#include <atomic>
-#include <memory>
 
 #include "CgroupManager.h"
 #include "crane/PasswordEntry.h"
