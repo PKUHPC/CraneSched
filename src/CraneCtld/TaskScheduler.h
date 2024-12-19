@@ -309,11 +309,16 @@ class MinLoadFirst : public INodeSelectionAlgo {
       return m_cost_node_id_set_;
     }
 
+    absl::Time& GetFirstResvTime(const CranedId& craned_id) {
+      return m_first_resv_time_map_.at(craned_id);
+    }
+
    private:
     // Craned_ids are sorted by cost.
     std::set<std::pair<uint64_t, CranedId>> m_cost_node_id_set_;
     std::unordered_map<CranedId, uint64_t> m_node_cost_map_;
     std::unordered_map<CranedId, TimeAvailResMap> m_node_time_avail_res_map_;
+    std::unordered_map<CranedId, absl::Time> m_first_resv_time_map_;
 
     // TODO: High copy cost, consider using pointer.
     std::unordered_map<CranedId, ResourceInNode> m_node_res_total_map_;

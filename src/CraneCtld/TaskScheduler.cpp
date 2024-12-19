@@ -2083,8 +2083,6 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
                                      now + absl::Seconds(1));
       end_time_task_id_vec.emplace_back(end_time, task_id);
       time_res_vec.emplace_back(end_time, std::make_pair(true, res));
-
-      running_task_ids_str.emplace_back(std::to_string(task_id));
     }
 
     if constexpr (kAlgoTraceOutput) {
@@ -2112,6 +2110,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
       }
     }
 
+    auto& first_resv_time = node_selection_info_ref.GetFirstResvTime(craned_id);
+    first_resv_time = absl::InfiniteFuture();
     for (const auto& [ReservationId, res] :
          craned_meta->reservation_resource_map) {
       const auto& reservation =
@@ -2121,11 +2121,20 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
                     ReservationId);
         continue;
       }
-      // TODO: expired reservation should be removed from the map.
-      time_res_vec.emplace_back(std::max(now, reservation->start_time),
+      absl::Time start_time = reservation->start_time;
+      absl::Time end_time = reservation->end_time;
+      if (end_time < now) {
+        // TODO: expired reservation should be removed from the map.
+        continue;
+      }
+      if (start_time < now) {
+        start_time = now;
+      }
+      time_res_vec.emplace_back(std::max(now, start_time),
                                 std::make_pair(false, res));
-      time_res_vec.emplace_back(std::max(now, reservation->end_time),
+      time_res_vec.emplace_back(std::max(now, end_time),
                                 std::make_pair(true, res));
+      first_resv_time = std::min(first_resv_time, start_time);
     }
 
     std::sort(
@@ -2508,8 +2517,12 @@ void MinLoadFirst::NodeSelect(
       // The task can't be started now. Set pending reason and move to the next
       // pending task.
       for (auto& craned_id : craned_ids) {
-        auto& res_avail =
-            node_info.node_time_avail_res_map.at(craned_id).at(now);
+        auto& first_resv_time = node_info.GetFirstResvTime(craned_id);
+        if (first_resv_time < now + task->time_limit) {
+          task->pending_reason = "Resource Reserved";
+          break;
+        }
+        auto& res_avail = node_info.GetTimeAvailResMap(craned_id).at(now);
         if (!(task->Resources().EachNodeResMap().at(craned_id) <= res_avail)) {
           task->pending_reason = "Resource";
           break;
