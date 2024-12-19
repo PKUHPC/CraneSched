@@ -192,10 +192,24 @@ TaskManager::TaskManager() {
     }
     m_uvw_loop_->run();
   });
+
+  if (g_cg_mgr->GetCgroupVersion() ==
+      CgroupConstant::CgroupVersion::CGROUP_V1) {
+    m_epoll_fd = epoll_create1(EPOLL_CLOEXEC);
+    if (m_epoll_fd == -1) {
+      CRANE_ERROR("Failed to create epoll fd");
+    }
+    StartGlobalOomMonitor();
+  }
 }
 
 TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+  if (g_cg_mgr->GetCgroupVersion() ==
+      CgroupConstant::CgroupVersion::CGROUP_V1) {
+    StopGlobalOomMonitor();
+    if (cgv1_oom_notify_thread.joinable()) cgv1_oom_notify_thread.join();
+  }
 }
 
 const TaskInstance* TaskManager::FindInstanceByTaskId_(uint32_t task_id) {
@@ -367,11 +381,6 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     TaskInstance* instance = task_iter->second;
     ProcessInstance* proc = proc_iter->second;
     uint32_t task_id = instance->task.task_id();
-
-    if (g_cg_mgr->GetCgroupVersion() ==
-        CgroupConstant::CgroupVersion::CGROUP_V1) {
-      instance->monitor_thread_stop = true;
-    }
 
     // Remove indexes from pid to ProcessInstance*
     m_pid_proc_map_.erase(proc_iter);

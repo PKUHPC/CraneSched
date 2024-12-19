@@ -172,7 +172,7 @@ struct TaskInstance {
   CgroupInterface* cgroup;
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
   std::shared_ptr<uvw::fs_event_handle> termination_oom{nullptr};
-  std::atomic<bool> monitor_thread_stop{true};
+  // std::atomic<bool> monitor_thread_stop{true};
 
   // Task execution results
   bool orphaned{false};
@@ -318,6 +318,55 @@ class TaskManager {
     instance->termination_timer = termination_handel;
   }
 
+  struct OomEvent {
+    int event_fd;
+    std::string oom_control_full_path;
+    TaskInstance* instance;
+  };
+
+  std::thread cgv1_oom_notify_thread;
+  std::unordered_map<int, OomEvent> cgv1_oom_events; // <event fd,OomEvent>
+  std::atomic<bool> monitor_thread_stop{true};
+  std::mutex cgv1_oom_events_mutex;
+  int m_epoll_fd;
+
+  void StartGlobalOomMonitor() {
+    monitor_thread_stop = false;
+    std::thread([this]() {
+      struct epoll_event events[128];
+      while (!monitor_thread_stop) {
+        int nfds = epoll_wait(m_epoll_fd, events, 128, 1000);
+        if (nfds == -1) {
+          continue;
+        }
+
+        std::lock_guard<std::mutex> lock(cgv1_oom_events_mutex);
+        for (int i = 0; i < nfds; ++i) {
+          int fd = events[i].data.fd;
+
+          if (events[i].events & EPOLLIN) {
+            auto it = cgv1_oom_events.find(fd);
+            if (it != cgv1_oom_events.end()) {
+              uint64_t buf;
+              if (read(fd, &buf, sizeof(buf)) > 0) {
+                OomEvent& event = it->second;
+                EvOomCb_(event.oom_control_full_path, this,
+                         event.instance->task.task_id());
+              }
+            }
+          }
+          if (events[i].events & (EPOLLERR | EPOLLHUP)) {
+            CRANE_ERROR("Error or hangup on eventfd.");
+          }
+        }
+      }
+    }).detach();
+  }
+
+  void StopGlobalOomMonitor(){
+    monitor_thread_stop = true;
+  }
+
   void SetCgroupV1TerminationOOM_(TaskInstance* instance) {
     using namespace CgroupConstant;
     std::string slice = "/";
@@ -326,7 +375,7 @@ class TaskManager {
     oom_control_full_path =
         CgroupConstant::RootCgroupFullPath + slice +
         std::string(GetControllerStringView(Controller::MEMORY_CONTROLLER)) +
-        slice + instance->cgroup_path + "/" + MemoryOomControl;
+        slice + instance->cgroup_path + slice + MemoryOomControl;
 
     int oom_control_fd = open(oom_control_full_path.c_str(), O_RDONLY);
 
@@ -336,33 +385,15 @@ class TaskManager {
       return;
     }
 
-    int epfd = epoll_create1(EPOLL_CLOEXEC);
-    if (epfd == -1) {
-      CRANE_ERROR("Failed to create epoll fd");
-    }
-
-    struct epoll_event event;
-    event.events = EPOLLIN | EPOLLERR | EPOLLHUP;
-    event.data.fd = efd;
-
-    if (epoll_ctl(epfd, EPOLL_CTL_ADD, efd, &event) == -1) {
-      CRANE_ERROR("Failed to set epoll_stl .");
-      close(oom_control_fd);
-      close(efd);
-      close(epfd);
-      return;
-    }
-
     std::string cgroup_event_control =
         CgroupConstant::RootCgroupFullPath + slice +
         std::string(GetControllerStringView(Controller::MEMORY_CONTROLLER)) +
-        slice + instance->cgroup_path + "/" + "cgroup.event_control";
+        slice + instance->cgroup_path + slice + "cgroup.event_control";
     std::ofstream eventControlFile(cgroup_event_control);
     if (!eventControlFile.is_open()) {
       CRANE_ERROR("Failed to open cgroup.event_control file.");
       close(oom_control_fd);
       close(efd);
-      close(epfd);
       return;
     }
 
@@ -371,34 +402,21 @@ class TaskManager {
     eventControlFile << ss.str();
     eventControlFile.close();
     close(oom_control_fd);
-    instance->monitor_thread_stop = false;
-    std::thread([this, epfd, efd, oom_control_full_path, instance]() {
-      struct epoll_event events[32];
-      uint64_t buf = 0;
-      while (!instance->monitor_thread_stop) {
-        // check monitor_thread_stop every 500 ms
-        int nfds = epoll_wait(epfd, events, 32, 500);
-        for (int i = 0; i < nfds; i++) {
-          if (events[i].events & EPOLLIN) {
-            ssize_t readBytes = read(events[i].data.fd, &buf, sizeof(buf));
-            if (readBytes < 0) {
-              close(efd);
-              close(epfd);
-              return;
-            }
-            EvOomCb_(oom_control_full_path, this, instance->task.task_id());
-            close(efd);
-            close(epfd);
-            return;
-          }
-          if (events[i].events & (EPOLLERR | EPOLLHUP)) {
-            CRANE_ERROR("Error or hangup on eventfd");
-          }
-        }
+
+    {
+      std::lock_guard<std::mutex> lock(cgv1_oom_events_mutex);
+      struct epoll_event event;
+      event.events = EPOLLIN | EPOLLERR | EPOLLHUP;
+      event.data.fd = efd;
+
+      if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, efd, &event) == -1) {
+        CRANE_ERROR("Failed to add event fd to epoll.");
+        close(efd);
+        return;
       }
-      close(efd);
-      close(epfd);
-    }).detach();
+
+      cgv1_oom_events[efd] = {efd, oom_control_full_path, instance};
+    }
   }
 
   void SetCgroupV2TerminationOOM_(TaskInstance* instance) {
