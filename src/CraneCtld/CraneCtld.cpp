@@ -458,6 +458,17 @@ void ParseConfig(int argc, char** argv) {
             }
           }
 
+          if (partition["AllowAccounts"] &&
+              !partition["AllowAccounts"].IsNull()) {
+            std::string allow_accounts_str =
+                partition["AllowAccounts"].as<std::string>();
+            std::vector<std::string> allow_accounts =
+                absl::StrSplit(allow_accounts_str, ",");
+            for (const auto& account_name : allow_accounts) {
+              part.allow_accounts.insert(account_name);
+            }
+          }
+
           if (partition["DefaultMemPerCpu"] &&
               !partition["DefaultMemPerCpu"].IsNull()) {
             part.default_mem_per_cpu =
