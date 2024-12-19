@@ -170,6 +170,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
     std::multimap<uint32_t /* # of running tasks */, CranedId>
         task_num_node_id_map;
     std::unordered_map<CranedId, TimeAvailResMap> node_time_avail_res_map;
+    std::unordered_map<CranedId, absl::Time> first_resv_time_map;
   };
 
   static void CalculateNodeSelectionInfoOfPartition_(
