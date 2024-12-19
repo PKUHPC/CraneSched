@@ -94,6 +94,8 @@ constexpr uint64_t kTaskMinTimeLimitSec = 11;
 constexpr int64_t kTaskMaxTimeLimitSec =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
 
+constexpr uint64_t kReservationMinAdvanceSec = 0;
+
 namespace ExitCode {
 
 inline constexpr size_t kExitStatusNum = 256;
@@ -157,6 +159,7 @@ inline std::string_view CraneErrStr(CraneErr err) {
 
 using PartitionId = std::string;
 using CranedId = std::string;
+using ReservationId = std::string;
 using cpu_t = fpm::fixed_24_8;
 
 // TODO: refactor SlotId, it should not be a string of file path.

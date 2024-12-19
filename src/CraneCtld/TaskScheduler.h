@@ -55,12 +55,12 @@ class BasicPriority : public IPrioritySorter {
     int i = 0;
     for (auto it = pending_task_map.begin(); i < len; i++, it++) {
       TaskInCtld* task = it->second.get();
-      if (!task->Held()) {
-        task_id_vec.emplace_back(it->first);
-        it->second->pending_reason = "Priority";
-      } else {
+      if (task->Held()) {
         it->second->pending_reason = "Held";
+        continue;
       }
+      it->second->pending_reason = "";
+      task_id_vec.emplace_back(it->first);
     }
 
     return task_id_vec;
@@ -170,6 +170,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
     std::multimap<uint32_t /* # of running tasks */, CranedId>
         task_num_node_id_map;
     std::unordered_map<CranedId, TimeAvailResMap> node_time_avail_res_map;
+    std::unordered_map<CranedId, absl::Time> first_resv_time_map;
   };
 
   static void CalculateNodeSelectionInfoOfPartition_(
@@ -294,6 +295,12 @@ class TaskScheduler {
 
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
+
+  crane::grpc::CreateReservationReply CreateReservation(
+      const crane::grpc::CreateReservationRequest& request);
+
+  crane::grpc::DeleteReservationReply DeleteReservation(
+      const crane::grpc::DeleteReservationRequest& request);
 
   static CraneErr AcquireTaskAttributes(TaskInCtld* task);
 
