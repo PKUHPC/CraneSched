@@ -489,15 +489,16 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
             }) |
         ranges::views::filter(craned_rng_filter_hostname);
 
-    if (ranges::distance(craned_rng) == 0) return;
-    craned_contraint_satisfied = true;
-
+    int filtered_craned_cnt = 0;
     ranges::for_each(craned_rng, [&](CranedMetaRawMap::const_iterator it) {
       auto craned_meta = it->second.GetExclusivePtr();
 
       auto& res_total = craned_meta->res_total;
       auto& res_in_use = craned_meta->res_in_use;
       auto& res_avail = craned_meta->res_avail;
+
+      // Count the number of craned nodes that meet the constraints.
+      filtered_craned_cnt++;
 
       crane::grpc::CranedControlState control_state;
       if (craned_meta->drain) {
@@ -524,6 +525,9 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
                              .emplace_back(craned_meta->static_meta.hostname);
       }
     });
+
+    if (filtered_craned_cnt == 0) return;
+    craned_contraint_satisfied = true;
 
     auto* craned_lists = part_info->mutable_craned_lists();
     for (int i = 0; i < control_state_num; i++) {
