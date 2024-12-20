@@ -419,6 +419,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
   for (auto& host : hosts_list) req_nodes.insert(std::move(host));
 
   bool no_craned_hostname_constraint = request.filter_nodes().empty();
+  bool craned_contraint_satisfied = false;
   auto craned_rng_filter_hostname = [&](CranedMetaRawMap::const_iterator it) {
     auto craned_meta = it->second.GetExclusivePtr();
     return no_craned_hostname_constraint ||
@@ -488,6 +489,9 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
             }) |
         ranges::views::filter(craned_rng_filter_hostname);
 
+    if (ranges::distance(craned_rng) == 0) return;
+    craned_contraint_satisfied = true;
+
     ranges::for_each(craned_rng, [&](CranedMetaRawMap::const_iterator it) {
       auto craned_meta = it->second.GetExclusivePtr();
 
@@ -534,7 +538,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
     }
   });
 
-  reply.set_ok(true);
+  reply.set_ok(no_craned_hostname_constraint || craned_contraint_satisfied);
   return reply;
 }
 
