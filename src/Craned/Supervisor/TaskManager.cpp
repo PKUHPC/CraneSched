@@ -20,6 +20,7 @@
 
 #include <sys/wait.h>
 
+#include "CforedClient.h"
 #include "CranedClient.h"
 #include "crane/String.h"
 
@@ -48,14 +49,11 @@ TaskManager::TaskManager(task_id_t task_id)
     CRANE_ERROR("Failed to start the SIGCHLD handle");
   }
 
-  // todo: Add events
-
-  // m_process_sigchld_async_handle_ =
-  // m_uvw_loop_->resource<uvw::async_handle>();
-  // m_process_sigchld_async_handle_->on<uvw::async_event>(
-  //     [this](const uvw::async_event&, uvw::async_handle&) {
-  //       EvCleanSigchldQueueCb_();
-  //     });
+  m_process_sigchld_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_process_sigchld_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanSigchldQueueCb_();
+      });
 
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
@@ -79,65 +77,63 @@ TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-void TaskManager::TaskStopAndDoStatusChangeAsync(TaskInstance* task_instance) {
+void TaskManager::TaskStopAndDoStatusChange() {
   CRANE_INFO("Task #{} stopped and is doing TaskStatusChange...", task_id);
 
-  switch (task_instance->err_before_exec) {
+  switch (m_process_->err_before_exec) {
   case CraneErr::kProtobufError:
-    ActivateTaskStatusChangeAsync_(crane::grpc::TaskStatus::Failed,
-                                   ExitCode::kExitCodeSpawnProcessFail,
-                                   std::nullopt);
+    ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
+                              ExitCode::kExitCodeSpawnProcessFail,
+                              std::nullopt);
     break;
 
   case CraneErr::kCgroupError:
-    ActivateTaskStatusChangeAsync_(crane::grpc::TaskStatus::Failed,
-                                   ExitCode::kExitCodeCgroupError,
-                                   std::nullopt);
+    ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
+                              ExitCode::kExitCodeCgroupError, std::nullopt);
     break;
 
   default:
     break;
   }
 
-  ProcSigchldInfo& sigchld_info = task_instance->sigchld_info;
-  if (task_instance->task.type() == crane::grpc::Batch ||
-      task_instance->IsCrun()) {
+  ProcSigchldInfo& sigchld_info = m_process_->sigchld_info;
+  if (m_process_->task.type() == crane::grpc::Batch || m_process_->IsCrun()) {
     // For a Batch task, the end of the process means it is done.
     if (sigchld_info.is_terminated_by_signal) {
-      if (task_instance->cancelled_by_user)
-        ActivateTaskStatusChangeAsync_(
+      if (m_process_->cancelled_by_user)
+        ActivateTaskStatusChange_(
             crane::grpc::TaskStatus::Cancelled,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
             std::nullopt);
-      else if (task_instance->terminated_by_timeout)
-        ActivateTaskStatusChangeAsync_(
+      else if (m_process_->terminated_by_timeout)
+        ActivateTaskStatusChange_(
             crane::grpc::TaskStatus::ExceedTimeLimit,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
             std::nullopt);
       else
-        ActivateTaskStatusChangeAsync_(
+        ActivateTaskStatusChange_(
             crane::grpc::TaskStatus::Failed,
             sigchld_info.value + ExitCode::kTerminationSignalBase,
             std::nullopt);
     } else
-      ActivateTaskStatusChangeAsync_(crane::grpc::TaskStatus::Completed,
-                                     sigchld_info.value, std::nullopt);
+      ActivateTaskStatusChange_(crane::grpc::TaskStatus::Completed,
+                                sigchld_info.value, std::nullopt);
   } else /* Calloc */ {
     // For a COMPLETING Calloc task with a process running,
     // the end of this process means that this task is done.
     if (sigchld_info.is_terminated_by_signal)
-      ActivateTaskStatusChangeAsync_(
+      ActivateTaskStatusChange_(
           crane::grpc::TaskStatus::Completed,
           sigchld_info.value + ExitCode::kTerminationSignalBase, std::nullopt);
     else
-      ActivateTaskStatusChangeAsync_(crane::grpc::TaskStatus::Completed,
-                                     sigchld_info.value, std::nullopt);
+      ActivateTaskStatusChange_(crane::grpc::TaskStatus::Completed,
+                                sigchld_info.value, std::nullopt);
   }
 }
 
-void TaskManager::ActivateTaskStatusChangeAsync_(
-    crane::grpc::TaskStatus new_status, uint32_t exit_code,
-    std::optional<std::string> reason) {
+void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
+                                            uint32_t exit_code,
+                                            std::optional<std::string> reason) {
   TaskInstance* instance = m_process_.get();
   if (instance->task.type() == crane::grpc::Batch || instance->IsCrun()) {
     const std::string& path = instance->meta->parsed_sh_script_path;
@@ -185,8 +181,22 @@ void TaskManager::EvSigchldCb_() {
       } else if (WIFCONTINUED(status)) {
         printf("continued\n");
       } */
-      m_sigchld_queue_.enqueue(std::move(sigchld_info));
-      m_process_sigchld_async_handle_->send();
+
+      m_mtx_.Lock();
+      ABSL_ASSERT(m_process_);
+      m_process_->sigchld_info = *sigchld_info;
+
+      if (m_process_->IsCrun())
+        // TaskStatusChange of a crun task is triggered in
+        // CforedManager.
+        g_cfored_manager->TaskProcStopped();
+      else /* Batch / Calloc */ {
+        // If the TaskInstance has no process left,
+        // send TaskStatusChange for this task.
+        // See the comment of EvActivateTaskStatusChange_.
+        TaskStopAndDoStatusChange();
+      }
+      m_mtx_.Unlock();
     } else if (pid == 0) {
       break;
     } else if (pid < 0) {
@@ -222,21 +232,6 @@ void TaskManager::EvCleanSigchldQueueCb_() {
       CRANE_TRACE("Child Process {} exit too early, will do SigchldCb later",
                   pid);
       continue;
-    }
-
-    m_process_->sigchld_info = *sigchld_info;
-
-    if (m_process_->IsCrun())
-      // TaskStatusChange of a crun task is triggered in
-      // CforedManager.
-      g_cfored_manager->TaskProcOnCforedStopped(
-          instance->task.interactive_meta().cfored_name(),
-          instance->task.task_id());
-    else /* Batch / Calloc */ {
-      // If the TaskInstance has no process left,
-      // send TaskStatusChange for this task.
-      // See the comment of EvActivateTaskStatusChange_.
-      TaskStopAndDoStatusChangeAsync(m_process_.get());
     }
   }
 }

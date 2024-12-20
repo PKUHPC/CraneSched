@@ -18,10 +18,11 @@
 
 #pragma once
 
-#include "CranedPublicDefs.h"
+#include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
-#include "JobManager.h"
+#include "TaskManager.h"
+#include "protos/Crane.grpc.pb.h"
 
 namespace Craned {
 
@@ -38,13 +39,15 @@ class CforedClient {
   void AsyncSendRecvThread_();
 
   void InitTaskFwdAndSetInputCb(
-      task_id_t task_id, std::function<bool(const std::string&)> task_input_cb);
+      std::function<bool(const std::string&)> task_input_cb);
 
-  void TaskOutPutForward(task_id_t task_id, const std::string& msg);
+  void TaskOutPutForward(const std::string& msg);
 
-  bool TaskOutputFinish(task_id_t task_id);
+  bool TaskOutputFinish();
 
-  bool TaskProcessStop(task_id_t task_id);
+  bool TaskProcessStop();
+
+  std::string CforedName() const { return m_cfored_name_; }
 
  private:
   struct TaskFwdMeta {
@@ -60,7 +63,7 @@ class CforedClient {
           stream,
       std::atomic<bool>* write_pending);
 
-  ConcurrentQueue<std::pair<task_id_t, std::string /*msg*/>> m_output_queue_;
+  ConcurrentQueue<std::string /*msg*/> m_output_queue_;
   std::thread m_fwd_thread_;
   std::atomic<bool> m_stopped_{false};
 
@@ -73,7 +76,7 @@ class CforedClient {
   grpc::CompletionQueue m_cq_;
 
   absl::Mutex m_mtx_;
-  std::unordered_map<task_id_t, TaskFwdMeta> m_task_fwd_meta_map_;
+  TaskFwdMeta m_task_fwd_meta_;
 };
 
 class CforedManager {
@@ -86,29 +89,21 @@ class CforedManager {
 
   bool Init();
 
-  void RegisterIOForward(std::string const& cfored, task_id_t task_id, int fd,
-                         bool pty);
-  void TaskProcOnCforedStopped(std::string const& cfored, task_id_t task_id);
+  void RegisterIOForward(std::string const& cfored, int fd, bool pty);
+  void TaskProcStopped();
 
  private:
   struct RegisterElem {
     std::string cfored;
-    task_id_t task_id;
     int fd;
     bool pty;
   };
 
-  struct TaskStopElem {
-    std::string cfored;
-    task_id_t task_id;
-  };
+  struct TaskStopElem {};
 
-  struct UnregisterElem {
-    std::string cfored;
-    task_id_t task_id;
-  };
+  struct UnregisterElem {};
 
-  void UnregisterIOForward_(std::string const& cfored, task_id_t task_id);
+  void UnregisterIOForward_();
 
   void EvLoopThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
@@ -129,11 +124,7 @@ class CforedManager {
   ConcurrentQueue<UnregisterElem> m_unregister_queue_;
   void UnregisterCb_();
 
-  std::unordered_map<std::string /*cfored name*/, std::shared_ptr<CforedClient>>
-      m_cfored_client_map_;
-
-  std::unordered_map<std::string /*cfored name*/, uint32_t /*cfored refcount*/>
-      m_cfored_client_ref_count_map_;
+  std::shared_ptr<CforedClient> m_cfored_client_;
 };
 }  // namespace Craned
 

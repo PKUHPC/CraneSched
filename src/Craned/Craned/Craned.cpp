@@ -26,7 +26,7 @@
 #include <ctime>
 #include <cxxopts.hpp>
 
-#include "CforedClient.h"
+#include "../Supervisor/CforedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"

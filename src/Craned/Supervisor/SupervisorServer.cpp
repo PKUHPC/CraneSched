@@ -18,15 +18,6 @@
 
 #include "SupervisorServer.h"
 
-grpc::Status Supervisor::SupervisorServiceImpl::CreateCgroup(
-    grpc::ServerContext* context,
-    const crane::grpc::CreateCgroupRequest* request,
-    crane::grpc::CreateCgroupReply* response) {
-  g_cg_mgr->CreateCgroup(request);
-  response->set_ok(true);
-  return Status::OK;
-}
-
 grpc::Status Supervisor::SupervisorServiceImpl::StartTask(
     grpc::ServerContext* context,
     const crane::grpc::TaskExecutionRequest* request,
@@ -39,7 +30,7 @@ Supervisor::SupervisorServer::SupervisorServer() {
   m_service_impl_ = std::make_unique<SupervisorServiceImpl>();
 
   auto unix_socket_path =
-      fmt::format("unix:/tmp/crane/task_{}.sock", g_config.task_id);
+      fmt::format("unix:/tmp/crane/task_{}.sock", g_task_mgr->task_id);
   grpc::ServerBuilder builder;
   ServerBuilderAddUnixInsecureListeningPort(&builder, unix_socket_path);
   builder.RegisterService(m_service_impl_.get());

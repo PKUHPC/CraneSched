@@ -93,11 +93,11 @@ class TaskManager {
   explicit TaskManager(task_id_t task_id);
   ~TaskManager();
 
-  void TaskStopAndDoStatusChangeAsync(TaskInstance* task_instance);
+  void TaskStopAndDoStatusChange();
 
-  void ActivateTaskStatusChangeAsync_(crane::grpc::TaskStatus new_status,
-                                      uint32_t exit_code,
-                                      std::optional<std::string> reason);
+  void ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
+                                 uint32_t exit_code,
+                                 std::optional<std::string> reason);
 
   task_id_t task_id;
 

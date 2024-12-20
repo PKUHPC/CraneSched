@@ -36,23 +36,6 @@ message SupervisorReady {
   bool ok = 1;
 }
 
-message GresFileMeta{
-  uint32 major = 1;
-  uint32 minor = 2;
-  string op_type = 3;
-}
-
-message CreateCgroupRequest{
-  ResourceInNode res_in_node = 1;
-  repeated GresFileMeta gres_file_metas = 2;
-  map<string, string> gres_env = 3;
-
-}
-
-message CreateCgroupReply{
-  bool ok = 1;
-}
-
 message TaskExecutionRequest{
   TaskToD task = 1;
 }
@@ -73,7 +56,6 @@ message ChildProcessReady {
 }
 
 service Supervisor{
-  rpc CreateCgroup(CreateCgroupRequest) returns(CreateCgroupReply);
   rpc StartTask(TaskExecutionRequest) returns (TaskExecutionReply);
   //  rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
 }

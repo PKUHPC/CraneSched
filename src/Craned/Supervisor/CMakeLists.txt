@@ -1,8 +1,8 @@
 add_executable(supervisor
         CranedClient.cpp
         CranedClient.h
-        CgroupManager.h
-        CgroupManager.cpp
+        CforedClient.cpp
+        CforedClient.h
         SupervisorServer.h
         SupervisorServer.cpp
         SupervisorPublicDefs.h
