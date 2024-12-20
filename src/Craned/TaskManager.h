@@ -332,7 +332,7 @@ class TaskManager {
 
   void StartGlobalOomMonitor() {
     monitor_thread_stop = false;
-    std::thread([this]() {
+    cgv1_oom_notify_thread = std::thread([this]() {
       struct epoll_event events[128];
       while (!monitor_thread_stop) {
         int nfds = epoll_wait(m_epoll_fd, events, 128, 1000);
@@ -360,7 +360,7 @@ class TaskManager {
           }
         }
       }
-    }).detach();
+    });    
   }
 
   void StopGlobalOomMonitor(){
