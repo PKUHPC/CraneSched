@@ -42,8 +42,6 @@ struct ProcSigchldInfo {
   pid_t pid;
   bool is_terminated_by_signal;
   int value;
-
-  std::shared_ptr<uvw::timer_handle> resend_timer{nullptr};
 };
 
 struct TaskInstance {
@@ -106,15 +104,10 @@ class TaskManager {
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
   void EvSigchldCb_();
-  void EvCleanSigchldQueueCb_();
-  void EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info);
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
-  ConcurrentQueue<std::unique_ptr<ProcSigchldInfo>> m_sigchld_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_process_sigchld_async_handle_;
 
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;

@@ -49,12 +49,6 @@ TaskManager::TaskManager(task_id_t task_id)
     CRANE_ERROR("Failed to start the SIGCHLD handle");
   }
 
-  m_process_sigchld_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_process_sigchld_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanSigchldQueueCb_();
-      });
-
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -205,40 +199,6 @@ void TaskManager::EvSigchldCb_() {
       break;
     }
   }
-}
-
-void TaskManager::EvCleanSigchldQueueCb_() {
-  std::unique_ptr<ProcSigchldInfo> sigchld_info;
-  while (m_sigchld_queue_.try_dequeue(sigchld_info)) {
-    auto pid = sigchld_info->pid;
-
-    if (sigchld_info->resend_timer != nullptr) {
-      sigchld_info->resend_timer->close();
-      sigchld_info->resend_timer.reset();
-    }
-
-    if (!m_process_) {
-      auto* sigchld_info_raw_ptr = sigchld_info.release();
-      sigchld_info_raw_ptr->resend_timer =
-          m_uvw_loop_->resource<uvw::timer_handle>();
-      sigchld_info_raw_ptr->resend_timer->on<uvw::timer_event>(
-          [this, sigchld_info_raw_ptr](const uvw::timer_event&,
-                                       uvw::timer_handle&) {
-            EvSigchldTimerCb_(sigchld_info_raw_ptr);
-          });
-      sigchld_info_raw_ptr->resend_timer->start(
-          std::chrono::milliseconds(kEvSigChldResendMs),
-          std::chrono::milliseconds(0));
-      CRANE_TRACE("Child Process {} exit too early, will do SigchldCb later",
-                  pid);
-      continue;
-    }
-  }
-}
-
-void TaskManager::EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info) {
-  m_sigchld_queue_.enqueue(std::unique_ptr<ProcSigchldInfo>(sigchld_info));
-  m_process_sigchld_async_handle_->send();
 }
 
 }  // namespace Supervisor

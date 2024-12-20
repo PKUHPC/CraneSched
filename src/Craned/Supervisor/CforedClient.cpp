@@ -21,7 +21,7 @@
 #include <cerrno>
 
 #include "crane/String.h"
-namespace Craned {
+namespace Supervisor {
 
 using crane::grpc::StreamCforedTaskIOReply;
 using crane::grpc::StreamCforedTaskIORequest;
@@ -42,9 +42,9 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  if (g_config.ListenConf.UseTls) {
+  if (g_config.CforedListenConf.UseTls) {
     m_cfored_channel_ = CreateTcpTlsChannelByHostname(
-        cfored_name, kCforedDefaultPort, g_config.ListenConf.TlsCerts);
+        cfored_name, kCforedDefaultPort, g_config.CforedListenConf.TlsCerts);
   } else {
     m_cfored_channel_ =
         CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);
@@ -463,4 +463,4 @@ void CforedManager::UnregisterCb_() {
   g_task_mgr->TaskStopAndDoStatusChange();
 }
 
-}  // namespace Craned
+}  // namespace Supervisor

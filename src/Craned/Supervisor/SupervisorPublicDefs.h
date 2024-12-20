@@ -25,22 +25,9 @@
 
 namespace Supervisor {
 
-inline constexpr uint64_t kEvSigChldResendMs = 500;
-
 inline constexpr std::string kSupervisorPidFileDir = "/run/crane";
 
 using EnvMap = std::unordered_map<std::string, std::string>;
-
-enum class SupervisorStats {
-  INIT = 0,
-  CreateCgroup,
-  WaitForTask,
-  LaunchTask,
-  WaitTaskComplete,
-  TaskComplete,
-  SendingStatusChange,
-  END
-};
 
 struct TaskStatusChangeQueueElem {
   task_id_t task_id{};
@@ -50,22 +37,27 @@ struct TaskStatusChangeQueueElem {
 };
 
 struct Config {
+  struct CforedListenConf {
+    bool UseTls{false};
+    TlsCertificates TlsCerts;
+  };
+
   struct PluginConfig {
     bool Enabled{false};
     std::string PlugindSockPath;
   };
   PluginConfig Plugin;
   bool CompressedRpc{};
+  CforedListenConf CforedListenConf;
 
   std::string SupervisorDebugLevel;
 
   std::string CraneBaseDir;
-  std::string CranedLogFile;
-  std::string CranedMutexFilePath;
   std::string CraneScriptDir;
-  std::string SupervisorUnixSockPath;
 
-  task_id_t task_id;
+  CranedId CranedIdOfThisNode;
+
+  std::string SupervisorUnixSockPath;
 };
 
 inline Config g_config;
