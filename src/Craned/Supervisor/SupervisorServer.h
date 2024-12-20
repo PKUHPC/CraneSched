@@ -21,7 +21,7 @@
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
-#include "CgroupManager.h"
+#include "TaskManager.h"
 #include "protos/Supervisor.grpc.pb.h"
 #include "protos/Supervisor.pb.h"
 
@@ -36,9 +36,6 @@ using crane::grpc::Supervisor;
 class SupervisorServiceImpl : public Supervisor::Service {
  public:
   SupervisorServiceImpl() = default;
-  grpc::Status CreateCgroup(grpc::ServerContext* context,
-                            const crane::grpc::CreateCgroupRequest* request,
-                            crane::grpc::CreateCgroupReply* response) override;
   grpc::Status StartTask(grpc::ServerContext* context,
                          const crane::grpc::TaskExecutionRequest* request,
                          crane::grpc::TaskExecutionReply* response) override;

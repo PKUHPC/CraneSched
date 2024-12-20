@@ -3,8 +3,6 @@ add_executable(craned
         CtldClient.cpp
         CgroupManager.h
         CgroupManager.cpp
-        CforedClient.h
-        CforedClient.cpp
         JobManager.h
         JobManager.cpp
         CranedServer.h

@@ -71,7 +71,8 @@ bool CreatePidFile() {
   pid_t pid = getpid();
   auto pid_file_path =
       Supervisor::kSupervisorPidFileDir /
-      std::filesystem::path(fmt::format("supervisor_{}.pid", g_config.task_id));
+                       std::filesystem::path(fmt::format("supervisor_{}.pid",
+                                                         g_task_mgr->task_id));
   if (std::filesystem::exists(pid_file_path)) {
     std::ifstream pid_file(pid_file_path);
     pid_t existing_pid;
@@ -130,38 +131,17 @@ void GlobalVariableInit() {
   if (!ok || !msg.ok()) {
     std::abort();
   }
+  g_task_mgr = std::make_unique<Supervisor::TaskManager>(msg.task_id());
   CreatePidFile();
   g_server = std::make_unique<Supervisor::SupervisorServer>();
 
   g_thread_pool =
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
-  g_task_mgr = std::make_unique<Supervisor::TaskManager>(msg.task_id());
-
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
-  }
-
-  using Supervisor::CgroupManager;
-  using Supervisor::CgroupConstant::Controller;
-  g_cg_mgr = std::make_unique<CgroupManager>();
-  g_cg_mgr->Init();
-  if (g_cg_mgr->GetCgroupVersion() ==
-          Supervisor::CgroupConstant::CgroupVersion::CGROUP_V1 &&
-      (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
-       !g_cg_mgr->Mounted(Controller::MEMORY_CONTROLLER) ||
-       !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER))) {
-    CRANE_ERROR("Failed to initialize cpu,memory,devices cgroups controller.");
-    std::exit(1);
-  }
-  if (g_cg_mgr->GetCgroupVersion() ==
-          Supervisor::CgroupConstant::CgroupVersion::CGROUP_V2 &&
-      (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER_V2) ||
-       !g_cg_mgr->Mounted(Controller::MEMORY_CONTORLLER_V2))) {
-    CRANE_ERROR("Failed to initialize cpu,memory cgroups controller.");
-    std::exit(1);
   }
 
   {
