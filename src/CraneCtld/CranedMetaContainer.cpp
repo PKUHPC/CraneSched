@@ -419,7 +419,6 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
   for (auto& host : hosts_list) req_nodes.insert(std::move(host));
 
   bool no_craned_hostname_constraint = request.filter_nodes().empty();
-  bool craned_contraint_satisfied = false;
   auto craned_rng_filter_hostname = [&](CranedMetaRawMap::const_iterator it) {
     auto craned_meta = it->second.GetExclusivePtr();
     return no_craned_hostname_constraint ||
@@ -441,6 +440,8 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
   bool resource_filters[resource_state_num] = {false};
   for (const auto& it : request.filter_craned_resource_states())
     resource_filters[static_cast<int>(it)] = true;
+
+  size_t iterated_craned_cnt = 0;
 
   // Ensure that the map global read lock is held during the following filtering
   // operations and partition_metas_map_ must be locked before craned_meta_map_
@@ -489,16 +490,14 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
             }) |
         ranges::views::filter(craned_rng_filter_hostname);
 
-    int filtered_craned_cnt = 0;
     ranges::for_each(craned_rng, [&](CranedMetaRawMap::const_iterator it) {
+      // Count # of craneds satisfying constraints. (Duplication is possible)
+      iterated_craned_cnt++;
+
       auto craned_meta = it->second.GetExclusivePtr();
 
-      auto& res_total = craned_meta->res_total;
       auto& res_in_use = craned_meta->res_in_use;
       auto& res_avail = craned_meta->res_avail;
-
-      // Count the number of craned nodes that meet the constraints.
-      filtered_craned_cnt++;
 
       crane::grpc::CranedControlState control_state;
       if (craned_meta->drain) {
@@ -526,9 +525,6 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
       }
     });
 
-    if (filtered_craned_cnt == 0) return;
-    craned_contraint_satisfied = true;
-
     auto* craned_lists = part_info->mutable_craned_lists();
     for (int i = 0; i < control_state_num; i++) {
       for (int j = 0; j < resource_state_num; j++) {
@@ -542,7 +538,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
     }
   });
 
-  reply.set_ok(no_craned_hostname_constraint || craned_contraint_satisfied);
+  reply.set_ok(no_craned_hostname_constraint || iterated_craned_cnt > 0);
   return reply;
 }
 
