@@ -172,7 +172,7 @@ struct TaskInstance {
   CgroupInterface* cgroup;
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
   std::shared_ptr<uvw::fs_event_handle> termination_oom{nullptr};
-  // std::atomic<bool> monitor_thread_stop{true};
+  int cgv1_event_fd{-1};
 
   // Task execution results
   bool orphaned{false};
@@ -325,17 +325,17 @@ class TaskManager {
   };
 
   std::thread cgv1_oom_notify_thread;
-  std::unordered_map<int, OomEvent> cgv1_oom_events; // <event fd,OomEvent>
-  std::atomic<bool> monitor_thread_stop{true};
+  std::unordered_map<int, OomEvent> cgv1_oom_events;  // <event fd,OomEvent>
+  std::atomic<bool> cgv1_monitor_thread_stop{true};
   std::mutex cgv1_oom_events_mutex;
-  int m_epoll_fd;
+  int cgv1_epoll_fd;
 
   void StartGlobalOomMonitor() {
-    monitor_thread_stop = false;
+    cgv1_monitor_thread_stop = false;
     cgv1_oom_notify_thread = std::thread([this]() {
       struct epoll_event events[128];
-      while (!monitor_thread_stop) {
-        int nfds = epoll_wait(m_epoll_fd, events, 128, 1000);
+      while (!cgv1_monitor_thread_stop) {
+        int nfds = epoll_wait(cgv1_epoll_fd, events, 128, 1000);
         if (nfds == -1) {
           continue;
         }
@@ -360,12 +360,10 @@ class TaskManager {
           }
         }
       }
-    });    
+    });
   }
 
-  void StopGlobalOomMonitor(){
-    monitor_thread_stop = true;
-  }
+  void StopGlobalOomMonitor() { cgv1_monitor_thread_stop = true; }
 
   void SetCgroupV1TerminationOOM_(TaskInstance* instance) {
     using namespace CgroupConstant;
@@ -384,6 +382,7 @@ class TaskManager {
       CRANE_ERROR("Failed to create event fd");
       return;
     }
+    instance->cgv1_event_fd = efd;
 
     std::string cgroup_event_control =
         CgroupConstant::RootCgroupFullPath + slice +
@@ -409,7 +408,7 @@ class TaskManager {
       event.events = EPOLLIN | EPOLLERR | EPOLLHUP;
       event.data.fd = efd;
 
-      if (epoll_ctl(m_epoll_fd, EPOLL_CTL_ADD, efd, &event) == -1) {
+      if (epoll_ctl(cgv1_epoll_fd, EPOLL_CTL_ADD, efd, &event) == -1) {
         CRANE_ERROR("Failed to add event fd to epoll.");
         close(efd);
         return;
