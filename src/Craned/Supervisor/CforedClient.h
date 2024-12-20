@@ -24,7 +24,7 @@
 #include "TaskManager.h"
 #include "protos/Crane.grpc.pb.h"
 
-namespace Craned {
+namespace Supervisor {
 
 class CforedClient {
   template <class T>
@@ -126,6 +126,6 @@ class CforedManager {
 
   std::shared_ptr<CforedClient> m_cfored_client_;
 };
-}  // namespace Craned
+}  // namespace Supervisor
 
-inline std::unique_ptr<Craned::CforedManager> g_cfored_manager;
+inline std::unique_ptr<Supervisor::CforedManager> g_cfored_manager;
