@@ -447,7 +447,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
     }
     return std::make_unique<CgroupV2>(
         cgroup_string, native_cgroup,
-        static_cast<uint64_t>(cgroup_stat.st_ino));
+                                      cgroup_stat.st_ino);
   } else {
     CRANE_WARN("Unable to create cgroup {}. Cgroup version is not supported",
                cgroup_string.c_str());
