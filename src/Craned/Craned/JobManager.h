@@ -78,15 +78,6 @@ struct CrunMetaInTaskInstance : MetaInTaskInstance {
   ~CrunMetaInTaskInstance() override = default;
 };
 
-// also arg for EvSigchldTimerCb_
-struct ProcSigchldInfo {
-  pid_t pid;
-  bool is_terminated_by_signal;
-  int value;
-
-  std::shared_ptr<uvw::timer_handle> resend_timer{nullptr};
-};
-
 // Todo: Task may consists of multiple subtasks
 struct TaskInstance {
   ~TaskInstance() {
@@ -117,7 +108,6 @@ struct TaskInstance {
   CraneErr err_before_exec{CraneErr::kOk};
   bool cancelled_by_user{false};
   bool terminated_by_timeout{false};
-  ProcSigchldInfo sigchld_info{};
 
   absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
 };
@@ -140,15 +130,17 @@ class JobManager {
 
   CraneExpected<EnvMap> QueryTaskEnvMapAsync(task_id_t task_id);
 
+  // todo: Send Rpc to Supervisor
   void TerminateTaskAsync(uint32_t task_id);
 
+  // todo: Send Rpc to Supervisor
   void MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id);
 
+  // todo: Send Rpc to Supervisor
   bool CheckTaskStatusAsync(task_id_t task_id, crane::grpc::TaskStatus* status);
 
+  // todo: Send Rpc to Supervisor
   bool ChangeTaskTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
-
-  void TaskStopAndDoStatusChangeAsync(uint32_t task_id);
 
   // Wait internal libevent base loop to exit...
   void Wait();
@@ -199,20 +191,20 @@ class JobManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
+  // todo: Move to Supervisor
   static std::string ParseFilePathPattern_(const std::string& path_pattern,
                                            const std::string& cwd,
                                            task_id_t task_id);
 
   void LaunchTaskInstanceMt_(TaskInstance* instance);
 
+  // todo: Move to Supervisor
   CraneErr SpawnProcessInInstance_(TaskInstance* instance,
                                    ProcessInstance* process);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
-  // Ask JobManager to stop its event loop.
-  void ActivateShutdownAsync_();
-
+  // todo: use grpc struct for params
   /**
    * Inform CraneCtld of the status change of a task.
    * This method is called when the status of a task is changed:
@@ -230,6 +222,7 @@ class JobManager {
                                       uint32_t exit_code,
                                       std::optional<std::string> reason);
 
+  // todo: Move timer to Supervisor
   template <typename Duration>
   void AddTerminationTimer_(TaskInstance* instance, Duration duration) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
@@ -262,6 +255,7 @@ class JobManager {
     instance->termination_timer.reset();
   }
 
+  // todo: Refactor this, send rpc to supervisor
   /**
    * Send a signal to the process group to which the processes in
    *  ProcessInstance belongs.
@@ -279,8 +273,7 @@ class JobManager {
   //  They should be modified in libev callbacks to avoid races.
 
   // Contains all the task that is running on this Craned node.
-  absl::flat_hash_map<uint32_t /*task id*/, std::unique_ptr<TaskInstance>>
-      m_task_map_;
+  absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInstance>> m_task_map_;
 
   //  ==================================================================
   // Critical data region starts
@@ -295,9 +288,9 @@ class JobManager {
   // The two following maps are used as indexes
   // and doesn't have the ownership of underlying objects.
   // A TaskInstance may contain more than one ProcessInstance.
-  absl::flat_hash_map<uint32_t /*pid*/, TaskInstance*> m_pid_task_map_
+  absl::flat_hash_map<pid_t /*pid*/, TaskInstance*> m_pid_task_map_
       ABSL_GUARDED_BY(m_mtx_);
-  absl::flat_hash_map<uint32_t /*pid*/, ProcessInstance*> m_pid_proc_map_
+  absl::flat_hash_map<pid_t /*pid*/, ProcessInstance*> m_pid_proc_map_
       ABSL_GUARDED_BY(m_mtx_);
 
   absl::Mutex m_mtx_;
@@ -306,8 +299,6 @@ class JobManager {
   // ========================================================================
 
   void EvSigchldCb_();
-
-  void EvCleanSigchldQueueCb_();
 
   // Callback function to handle SIGINT sent by Ctrl+C
   void EvSigintCb_();
@@ -328,8 +319,6 @@ class JobManager {
 
   void EvTaskTimerCb_(task_id_t task_id);
 
-  void EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info);
-
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
@@ -349,9 +338,6 @@ class JobManager {
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
   // A custom event that handles the ExecuteTask RPC.
   ConcurrentQueue<std::unique_ptr<TaskInstance>> m_grpc_execute_task_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_process_sigchld_async_handle_;
-  ConcurrentQueue<std::unique_ptr<ProcSigchldInfo>> m_sigchld_queue_;
 
   std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
   ConcurrentQueue<TaskStatusChangeQueueElem> m_task_status_change_queue_;

@@ -17,24 +17,23 @@
  */
 
 #pragma once
-#include "SupervisorPublicDefs.h"
+
+#include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
-#include "protos/Crane.grpc.pb.h"
-#include "protos/Crane.pb.h"
+#include "crane/AtomicHashMap.h"
+namespace Craned {
+class SupervisorClient {
 
-namespace Supervisor {
-class CranedClient {
- public:
-  void InitChannelAndStub(const std::string& endpoint);
-  void TaskStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
-                        std::optional<std::string> reason);
-
- private:
-  std::shared_ptr<grpc::Channel> m_channel_;
-  std::shared_ptr<crane::grpc::Craned::Stub> m_stub_;
+  //todo: Rpc wrap func
 };
 
-}  // namespace Supervisor
+class SupervisorKeeper {
+ private:
+  util::AtomicHashMap<absl::flat_hash_map, task_id_t,
+                      std::shared_ptr<SupervisorClient>>
+      m_supervisor_map;
 
-inline std::unique_ptr<Supervisor::CranedClient> g_craned_client;
+
+};
+}  // namespace Craned

@@ -31,8 +31,7 @@ void CranedClient::InitChannelAndStub(const std::string& endpoint) {
   m_stub_ = crane::grpc::Craned::NewStub(m_channel_);
 }
 
-void CranedClient::TaskStatusChange(uint32_t task_id,
-                                    crane::grpc::TaskStatus new_status,
+void CranedClient::TaskStatusChange(crane::grpc::TaskStatus new_status,
                                     uint32_t exit_code,
                                     std::optional<std::string> reason) {
   ClientContext context;
@@ -43,7 +42,7 @@ void CranedClient::TaskStatusChange(uint32_t task_id,
   crane::grpc::TaskStatusChangeReply reply;
   request.set_reason(reason.value_or(""));
   request.set_exit_code(exit_code);
-  request.set_task_id(task_id);
+  request.set_task_id(g_config.TaskId);
   request.set_new_status(new_status);
 
   m_stub_->TaskStatusChange(&context, request, &reply);

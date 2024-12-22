@@ -95,7 +95,7 @@ void InitFromStdin(int argc, char** argv) {
   }
 }
 
-bool CreatePidFile() {
+void CreatePidFile() {
   pid_t pid = getpid();
   auto pid_file_path =
       Supervisor::kSupervisorPidFileDir /
@@ -140,9 +140,18 @@ void CreateRequiredDirectories() {
 void GlobalVariableInit() {
   CreateRequiredDirectories();
 
+  // Ignore following sig
+  signal(SIGINT, SIG_IGN);
+  signal(SIGTERM, SIG_IGN);
+  signal(SIGTSTP, SIG_IGN);
+  signal(SIGQUIT, SIG_IGN);
   // Mask SIGPIPE to prevent Supervisor from crushing due to
   // SIGPIPE while communicating with spawned task processes.
   signal(SIGPIPE, SIG_IGN);
+  signal(SIGUSR1, SIG_IGN);
+  signal(SIGUSR2, SIG_IGN);
+  signal(SIGALRM, SIG_IGN);
+  signal(SIGHUP, SIG_IGN);
 
   CreatePidFile();
 
@@ -154,6 +163,7 @@ void GlobalVariableInit() {
 
   g_craned_client = std::make_unique<Supervisor::CranedClient>();
   g_craned_client->InitChannelAndStub(g_config.CranedUnixSocketPath);
+
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
@@ -188,7 +198,6 @@ void StartServer() {
 
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
-  util::os::CheckProxyEnvironmentVariable();
 
   g_server->Wait();
   g_task_mgr->Wait();
