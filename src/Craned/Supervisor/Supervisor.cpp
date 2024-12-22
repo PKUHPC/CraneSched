@@ -22,6 +22,8 @@
 
 #include <cxxopts.hpp>
 
+#include "CforedClient.h"
+#include "CranedClient.h"
 #include "SupervisorServer.h"
 #include "TaskManager.h"
 #include "crane/PasswordEntry.h"
@@ -29,19 +31,11 @@
 
 using Supervisor::g_config;
 
-void ParseConfig(int argc, char** argv) {
+void InitFromStdin(int argc, char** argv) {
   cxxopts::Options options("Supervisor");
 
   // clang-format off
   options.add_options()
-      ("C,config", "Path to configuration file",
-      cxxopts::value<std::string>()->default_value(kDefaultConfigPath))
-      ("l,listen", "Listening address, format: <IP>:<port>",
-       cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kCranedDefaultPort)))
-      ("L,log-file", "Path to Craned log file",
-       cxxopts::value<std::string>()->default_value(fmt::format("{}{}",kDefaultCraneBaseDir, kDefaultCranedLogPath)))
-      ("D,debug-level", "Logging level of Craned, format: <trace|debug|info|warn|error>",
-       cxxopts::value<std::string>()->default_value("info"))
       ("v,version", "Display version information")
       ("h,help", "Display help for Supervisor")
       ;
@@ -51,7 +45,7 @@ void ParseConfig(int argc, char** argv) {
   try {
     parsed_args = options.parse(argc, argv);
   } catch (cxxopts::OptionException& e) {
-    CRANE_ERROR("{}\n{}", e.what(), options.help());
+    fmt::print(stderr, "{}\n{}", e.what(), options.help());
     std::exit(1);
   }
 
@@ -65,32 +59,64 @@ void ParseConfig(int argc, char** argv) {
     fmt::print("Build Time: {}\n", CRANE_BUILD_TIMESTAMP);
     std::exit(0);
   }
+
+  using google::protobuf::io::FileInputStream;
+  using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
+
+  auto istream = FileInputStream(STDIN_FILENO);
+  crane::grpc::InitSupervisorRequest msg;
+  auto ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
+  if (!ok || !msg.ok()) {
+    std::abort();
+  }
+  g_config.TaskId = msg.task_id();
+  g_config.SupervisorDebugLevel = msg.debug_level();
+  g_config.SupervisorLogFile =
+      g_config.CraneBaseDir + fmt::format("Supervisor/{}.log", g_config.TaskId);
+
+  g_config.CranedUnixSocketPath = msg.craned_unix_socket_path();
+
+  auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
+  if (log_level.has_value()) {
+    InitLogger(log_level.value(), g_config.SupervisorLogFile, false);
+  } else {
+    ok = false;
+  }
+
+  if (!ok) {
+    using google::protobuf::io::FileOutputStream;
+    using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
+    auto ostream = FileOutputStream(STDOUT_FILENO);
+    crane::grpc::SupervisorReady msg;
+    msg.set_ok(ok);
+    SerializeDelimitedToZeroCopyStream(msg, &ostream);
+    ostream.Flush();
+    std::abort();
+  }
 }
 
 bool CreatePidFile() {
   pid_t pid = getpid();
   auto pid_file_path =
       Supervisor::kSupervisorPidFileDir /
-                       std::filesystem::path(fmt::format("supervisor_{}.pid",
-                                                         g_task_mgr->task_id));
+      std::filesystem::path(fmt::format("supervisor_{}.pid", g_config.TaskId));
   if (std::filesystem::exists(pid_file_path)) {
     std::ifstream pid_file(pid_file_path);
     pid_t existing_pid;
     pid_file >> existing_pid;
 
     if (kill(existing_pid, 0) == 0) {
-      std::cerr << "Supervisor is already running with PID: " << existing_pid
-                << std::endl;
+      CRANE_TRACE("Supervisor is already running with PID: {}", existing_pid);
       std::exit(1);
     } else {
-      std::cerr << "Stale PID file detected. Cleaning up." << std::endl;
+      CRANE_TRACE("Stale PID file detected. Cleaning up.");
       std::filesystem::remove(pid_file_path);
     }
   }
   std::ofstream pid_file(pid_file_path, std::ios::out | std::ios::trunc);
   if (!pid_file) {
-    std::cerr << "Failed to create PID file: " << pid_file_path << std::endl;
-    exit(1);
+    CRANE_TRACE("Failed to create PID file: {}", pid_file_path);
+    std::exit(1);
   }
   pid_file << pid << std::endl;
   pid_file.flush();
@@ -105,53 +131,50 @@ void CreateRequiredDirectories() {
   ok = util::os::CreateFolders(Supervisor::kSupervisorPidFileDir);
   if (!ok) std::exit(1);
 
-  // todo: Supervisor log
-  ok = util::os::CreateFoldersForFile(g_config.CranedLogFile);
-  if (!ok) std::exit(1);
+  if (g_config.SupervisorDebugLevel != "off") {
+    ok = util::os::CreateFoldersForFile(g_config.SupervisorLogFile);
+    if (!ok) std::exit(1);
+  }
 }
 
 void GlobalVariableInit() {
   CreateRequiredDirectories();
 
-  // Mask SIGPIPE to prevent Craned from crushing due to
+  // Mask SIGPIPE to prevent Supervisor from crushing due to
   // SIGPIPE while communicating with spawned task processes.
   signal(SIGPIPE, SIG_IGN);
 
-  PasswordEntry::InitializeEntrySize();
-
-  using google::protobuf::io::FileInputStream;
-  using google::protobuf::io::FileOutputStream;
-  using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
-  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
-  auto istream = FileInputStream(STDIN_FILENO);
-  auto ostream = FileOutputStream(STDOUT_FILENO);
-
-  crane::grpc::CranedReady msg;
-  auto ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
-  if (!ok || !msg.ok()) {
-    std::abort();
-  }
-  g_task_mgr = std::make_unique<Supervisor::TaskManager>(msg.task_id());
   CreatePidFile();
-  g_server = std::make_unique<Supervisor::SupervisorServer>();
+
+  PasswordEntry::InitializeEntrySize();
 
   g_thread_pool =
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
+  g_task_mgr = std::make_unique<Supervisor::TaskManager>();
 
+  g_craned_client = std::make_unique<Supervisor::CranedClient>();
+  g_craned_client->InitChannelAndStub(g_config.CranedUnixSocketPath);
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 
-  {
-    // Ready for grpc call
-    crane::grpc::SupervisorReady msg;
-    msg.set_ok(true);
-    ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
-    ok &= ostream.Flush();
-    if (!ok) std::abort();
-  }
+  g_cfored_manager = std::make_unique<Supervisor::CforedManager>();
+  g_cfored_manager->Init();
+
+  g_server = std::make_unique<Supervisor::SupervisorServer>();
+
+  using google::protobuf::io::FileOutputStream;
+  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
+  auto ostream = FileOutputStream(STDOUT_FILENO);
+
+  // Ready for grpc call
+  crane::grpc::SupervisorReady msg;
+  msg.set_ok(true);
+  auto ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
+  ok &= ostream.Flush();
+  if (!ok) std::abort();
 }
 
 void StartServer() {
@@ -167,6 +190,13 @@ void StartServer() {
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
   util::os::CheckProxyEnvironmentVariable();
 
+  g_server->Wait();
+  g_task_mgr->Wait();
+  g_task_mgr.reset();
+
+  // CforedManager MUST be destructed after TaskManager.
+  g_cfored_manager.reset();
+  g_craned_client.reset();
   g_plugin_client.reset();
   g_thread_pool->wait();
   g_thread_pool.reset();
@@ -183,7 +213,7 @@ void InstallStackTraceHooks() {
 }
 
 int main(int argc, char** argv) {
-  ParseConfig(argc, argv);
+  InitFromStdin(argc, argv);
   InstallStackTraceHooks();
   StartServer();
 }

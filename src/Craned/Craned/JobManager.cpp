@@ -24,7 +24,6 @@
 #include <pty.h>
 #include <sys/wait.h>
 
-#include "CforedClient.h"
 #include "CtldClient.h"
 #include "crane/String.h"
 #include "protos/PublicDefs.pb.h"

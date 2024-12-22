@@ -382,4 +382,4 @@ class JobManager {
 };
 }  // namespace Craned
 
-inline std::unique_ptr<Craned::JobManager> g_task_mgr;
+inline std::unique_ptr<Craned::JobManager> g_job_mgr;

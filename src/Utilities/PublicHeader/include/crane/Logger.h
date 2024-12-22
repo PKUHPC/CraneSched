@@ -149,8 +149,10 @@
     } while (false)
 #endif
 
+std::optional<spdlog::level::level_enum> StrToLogLevel(const std::string& level);
+
 void InitLogger(spdlog::level::level_enum level,
-                const std::string &log_file_path);
+                const std::string &log_file_path, bool console);
 
 // Custom type formatting
 namespace fmt {
