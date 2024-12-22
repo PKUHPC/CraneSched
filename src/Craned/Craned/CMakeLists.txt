@@ -12,7 +12,9 @@ add_executable(craned
 
         CranedPreCompiledHeader.h
         DeviceManager.cpp
-        DeviceManager.h)
+        DeviceManager.h
+        SupervisorKeeper.cpp
+        SupervisorKeeper.h)
 
 target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
 add_dependencies(craned libcgroup)

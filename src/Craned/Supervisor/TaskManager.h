@@ -18,9 +18,15 @@
 
 #pragma once
 #include "SupervisorPublicDefs.h"
+#include "crane/PasswordEntry.h"
 // Precompiled header comes first.
 
 namespace Supervisor {
+
+struct SavedPrivilege {
+  uid_t uid;
+  gid_t gid;
+};
 
 struct MetaInTaskInstance {
   std::string parsed_sh_script_path;
@@ -69,6 +75,7 @@ struct TaskInstance {
 
   crane::grpc::ProcToD task;
 
+  PasswordEntry pwd_entry;
   std::unique_ptr<MetaInTaskInstance> meta;
 
   bool orphaned{false};
@@ -93,6 +100,9 @@ class TaskManager {
   void Wait();
 
   void TaskStopAndDoStatusChange();
+
+  CraneErr SpawnTaskInstance_();
+  CraneErr KillTaskInstance_(int signum);
 
   void ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
                                  uint32_t exit_code,

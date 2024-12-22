@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2024 Peking University and Peking University
+* Copyright (c) 2024 Peking University and Peking University
  * Changsha Institute for Computing and Digital Economy
  *
  * This program is free software: you can redistribute it and/or modify
@@ -16,25 +16,4 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#pragma once
-#include "SupervisorPublicDefs.h"
-// Precompiled header comes first.
-
-#include "protos/Crane.grpc.pb.h"
-#include "protos/Crane.pb.h"
-
-namespace Supervisor {
-class CranedClient {
- public:
-  void InitChannelAndStub(const std::string& endpoint);
-  void TaskStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
-                        std::optional<std::string> reason);
-
- private:
-  std::shared_ptr<grpc::Channel> m_channel_;
-  std::shared_ptr<crane::grpc::Craned::Stub> m_stub_;
-};
-
-}  // namespace Supervisor
-
-inline std::unique_ptr<Supervisor::CranedClient> g_craned_client;
+#include "SupervisorKeeper.h"
