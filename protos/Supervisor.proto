@@ -27,9 +27,11 @@ message CanStartMessage {
   bool ok = 1;
 }
 
-message CranedReady {
+message InitSupervisorRequest {
   uint32 task_id = 1;
-  bool ok = 2;
+  string debug_level = 2;
+  string craned_unix_socket_path = 3;
+  bool ok = 4;
 }
 
 message SupervisorReady {

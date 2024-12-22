@@ -30,7 +30,7 @@ Supervisor::SupervisorServer::SupervisorServer() {
   m_service_impl_ = std::make_unique<SupervisorServiceImpl>();
 
   auto unix_socket_path =
-      fmt::format("unix:/tmp/crane/task_{}.sock", g_task_mgr->task_id);
+      fmt::format("unix:/tmp/crane/task_{}.sock", g_config.TaskId);
   grpc::ServerBuilder builder;
   ServerBuilderAddUnixInsecureListeningPort(&builder, unix_socket_path);
   builder.RegisterService(m_service_impl_.get());

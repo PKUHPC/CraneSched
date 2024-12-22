@@ -36,8 +36,7 @@ bool TaskInstance::IsCalloc() const {
          task.interactive_meta().interactive_type() == crane::grpc::Calloc;
 }
 
-TaskManager::TaskManager(task_id_t task_id)
-    : task_id(task_id), m_supervisor_exit_(false) {
+TaskManager::TaskManager() : m_supervisor_exit_(false) {
   m_uvw_loop_ = uvw::loop::create();
 
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
@@ -70,9 +69,13 @@ TaskManager::TaskManager(task_id_t task_id)
 TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
+void TaskManager::Wait() {
+  if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
+}
 
 void TaskManager::TaskStopAndDoStatusChange() {
-  CRANE_INFO("Task #{} stopped and is doing TaskStatusChange...", task_id);
+  CRANE_INFO("Task #{} stopped and is doing TaskStatusChange...",
+             m_process_->task.task_id());
 
   switch (m_process_->err_before_exec) {
   case CraneErr::kProtobufError:
@@ -139,7 +142,8 @@ void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
   // Free the TaskInstance structure
   m_process_.release();
   if (!orphaned)
-    g_craned_client->TaskStatusChange(task_id, new_status, exit_code, reason);
+    g_craned_client->TaskStatusChange(m_process_->task.task_id(), new_status,
+                                      exit_code, reason);
 }
 
 void TaskManager::EvSigchldCb_() {

@@ -88,16 +88,15 @@ struct TaskInstance {
 
 class TaskManager {
  public:
-  explicit TaskManager(task_id_t task_id);
+  explicit TaskManager();
   ~TaskManager();
+  void Wait();
 
   void TaskStopAndDoStatusChange();
 
   void ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
                                  uint32_t exit_code,
                                  std::optional<std::string> reason);
-
-  task_id_t task_id;
 
  private:
   template <class T>

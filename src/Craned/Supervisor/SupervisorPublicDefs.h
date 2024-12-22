@@ -54,10 +54,16 @@ struct Config {
 
   std::string CraneBaseDir;
   std::string CraneScriptDir;
+  std::string CranedUnixSocketPath;
+
+  // Only for debugging
+  std::string SupervisorLogFile;
 
   CranedId CranedIdOfThisNode;
 
   std::string SupervisorUnixSockPath;
+
+  task_id_t TaskId;
 };
 
 inline Config g_config;
