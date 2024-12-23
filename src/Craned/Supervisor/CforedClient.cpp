@@ -61,7 +61,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
                                   StreamCforedTaskIOReply>* stream,
     std::atomic<bool>* write_pending) {
   CRANE_TRACE("CleanOutputQueueThread started.");
-  std::pair<task_id_t, std::string> output;
+  std::string output;
   bool ok = m_output_queue_.try_dequeue(output);
 
   // Make sure before exit all output has been drained.
@@ -76,7 +76,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     request.set_type(StreamCforedTaskIORequest::CRANED_TASK_OUTPUT);
 
     auto* payload = request.mutable_payload_task_output_req();
-    payload->set_msg(output.second), payload->set_task_id(output.first);
+    payload->set_msg(output), payload->set_task_id(g_config.TaskId);
 
     while (write_pending->load(std::memory_order::acquire))
       std::this_thread::sleep_for(std::chrono::milliseconds(25));
@@ -460,7 +460,7 @@ void CforedManager::UnregisterIOForward_() { m_unregister_handle_->send(); }
 
 void CforedManager::UnregisterCb_() {
   m_cfored_client_.reset();
-  g_job_mgr->TaskStopAndDoStatusChange();
+  g_task_mgr->TaskStopAndDoStatusChange();
 }
 
 }  // namespace Supervisor

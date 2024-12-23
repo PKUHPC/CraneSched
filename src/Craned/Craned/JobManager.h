@@ -220,39 +220,6 @@ class JobManager {
                                       uint32_t exit_code,
                                       std::optional<std::string> reason);
 
-  // todo: Move timer to Supervisor
-  template <typename Duration>
-  void AddTerminationTimer_(TaskInstance* instance, Duration duration) {
-    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
-    termination_handel->on<uvw::timer_event>(
-        [this, task_id = instance->task.task_id()](const uvw::timer_event&,
-                                                   uvw::timer_handle& h) {
-          EvTaskTimerCb_(task_id);
-        });
-    termination_handel->start(
-        std::chrono::duration_cast<std::chrono::milliseconds>(duration),
-        std::chrono::seconds(0));
-    instance->termination_timer = termination_handel;
-  }
-
-  void AddTerminationTimer_(TaskInstance* instance, int64_t secs) {
-    auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
-    termination_handel->on<uvw::timer_event>(
-        [this, task_id = instance->task.task_id()](const uvw::timer_event&,
-                                                   uvw::timer_handle& h) {
-          EvTaskTimerCb_(task_id);
-        });
-    termination_handel->start(std::chrono::seconds(secs),
-                              std::chrono::seconds(0));
-    instance->termination_timer = termination_handel;
-  }
-
-  static void DelTerminationTimer_(TaskInstance* instance) {
-    // Close handle before free
-    instance->termination_timer->close();
-    instance->termination_timer.reset();
-  }
-
   // todo: Refactor this, send rpc to supervisor
   /**
    * Send a signal to the process group to which the processes in
@@ -315,7 +282,6 @@ class JobManager {
 
   void EvCleanChangeTaskTimeLimitQueueCb_();
 
-  void EvTaskTimerCb_(task_id_t task_id);
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 

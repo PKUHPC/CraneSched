@@ -95,40 +95,9 @@ void InitFromStdin(int argc, char** argv) {
   }
 }
 
-void CreatePidFile() {
-  pid_t pid = getpid();
-  auto pid_file_path =
-      Supervisor::kSupervisorPidFileDir /
-      std::filesystem::path(fmt::format("supervisor_{}.pid", g_config.TaskId));
-  if (std::filesystem::exists(pid_file_path)) {
-    std::ifstream pid_file(pid_file_path);
-    pid_t existing_pid;
-    pid_file >> existing_pid;
-
-    if (kill(existing_pid, 0) == 0) {
-      CRANE_TRACE("Supervisor is already running with PID: {}", existing_pid);
-      std::exit(1);
-    } else {
-      CRANE_TRACE("Stale PID file detected. Cleaning up.");
-      std::filesystem::remove(pid_file_path);
-    }
-  }
-  std::ofstream pid_file(pid_file_path, std::ios::out | std::ios::trunc);
-  if (!pid_file) {
-    CRANE_TRACE("Failed to create PID file: {}", pid_file_path);
-    std::exit(1);
-  }
-  pid_file << pid << std::endl;
-  pid_file.flush();
-  pid_file.close();
-}
-
 void CreateRequiredDirectories() {
   bool ok;
   ok = util::os::CreateFolders(g_config.CraneScriptDir);
-  if (!ok) std::exit(1);
-
-  ok = util::os::CreateFolders(Supervisor::kSupervisorPidFileDir);
   if (!ok) std::exit(1);
 
   if (g_config.SupervisorDebugLevel != "off") {
@@ -152,8 +121,6 @@ void GlobalVariableInit() {
   signal(SIGUSR2, SIG_IGN);
   signal(SIGALRM, SIG_IGN);
   signal(SIGHUP, SIG_IGN);
-
-  CreatePidFile();
 
   PasswordEntry::InitializeEntrySize();
 
