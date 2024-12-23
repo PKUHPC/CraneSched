@@ -181,8 +181,6 @@ class JobManager {
     uint32_t task_id{0};
     bool terminated_by_user{false};     // If the task is canceled by user,
                                         // task->status=Cancelled
-    bool terminated_by_timeout{false};  // If the task is canceled by user,
-                                        // task->status=Timeout
     bool mark_as_orphaned{false};
   };
 
