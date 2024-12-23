@@ -28,18 +28,18 @@ struct SavedPrivilege {
   gid_t gid;
 };
 
-struct MetaInTaskInstance {
+struct MetaInProcessInstance {
   std::string parsed_sh_script_path;
-  virtual ~MetaInTaskInstance() = default;
+  virtual ~MetaInProcessInstance() = default;
 };
 
-struct BatchMetaInTaskInstance : MetaInTaskInstance {
+struct BatchMetaInTaskInstance : MetaInProcessInstance {
   std::string parsed_output_file_pattern;
   std::string parsed_error_file_pattern;
   ~BatchMetaInTaskInstance() override = default;
 };
 
-struct CrunMetaInTaskInstance : MetaInTaskInstance {
+struct CrunMetaInTaskInstance : MetaInProcessInstance {
   int msg_fd;
   ~CrunMetaInTaskInstance() override = default;
 };
@@ -68,6 +68,8 @@ class ProcessInstance {
   void SetPid(pid_t pid) { m_pid_ = pid; }
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
 
+  std::unique_ptr<MetaInProcessInstance> meta;
+
  private:
   /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
   pid_t m_pid_;
@@ -78,17 +80,17 @@ class ProcessInstance {
 };
 
 struct TaskInstance {
-  TaskInstance(crane::grpc::ProcToD proc_to_d) : task(proc_to_d) {}
+  TaskInstance(crane::grpc::TaskToD task_to_d) : task(task_to_d) {}
 
   ~TaskInstance() = default;
 
+  bool IsBatch() const;
   bool IsCrun() const;
   bool IsCalloc() const;
 
-  crane::grpc::ProcToD task;
+  crane::grpc::TaskToD task;
 
   PasswordEntry pwd_entry;
-  std::unique_ptr<MetaInTaskInstance> meta;
 
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
 
@@ -98,7 +100,7 @@ struct TaskInstance {
   bool terminated_by_timeout{false};
   ProcSigchldInfo sigchld_info{};
 
-  std::shared_ptr<ProcessInstance> process;
+  std::unique_ptr<ProcessInstance> process;
 };
 
 class TaskManager {
@@ -142,6 +144,10 @@ class TaskManager {
   void ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
                                  uint32_t exit_code,
                                  std::optional<std::string> reason);
+
+  std::string ParseFilePathPattern_(const std::string& path_pattern,
+                                    const std::string& cwd) const;
+  void LaunchTaskInstance_();
   CraneErr SpawnTaskInstance_();
   CraneErr KillTaskInstance_(int signum);
 
@@ -149,7 +155,7 @@ class TaskManager {
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
-  struct TaskTerminateElem {
+  struct TaskTerminateQueueElem {
     bool terminated_by_user{false};  // If the task is canceled by user,
     // task->status=Cancelled
     bool terminated_by_timeout{false};  // If the task is canceled by user,
@@ -157,16 +163,31 @@ class TaskManager {
     bool mark_as_orphaned{false};
   };
 
+  struct ChangeTaskTimeLimitQueueElem {
+    absl::Duration time_limit;
+    std::promise<bool> ok_prom;
+  };
+
   void EvSigchldCb_();
   void EvTaskTimerCb_();
+
   void EvCleanTerminateTaskQueueCb_();
+  void EvCleanChangeTaskTimeLimitQueueCb_();
+  void EvGrpcExecuteTaskCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
   std::shared_ptr<uvw::signal_handle> m_sigchld_handle_;
 
   std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
-  std::atomic<TaskTerminateElem> m_task_terminate_elem;
+  ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
+  ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
+  // A custom event that handles the ExecuteTask RPC.
+  std::atomic<TaskInstance*> m_grpc_execute_task_elem_;
 
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
@@ -174,5 +195,7 @@ class TaskManager {
   std::unique_ptr<TaskInstance> m_task_;
   absl::Mutex m_mtx_;
 };
+
 }  // namespace Supervisor
+
 inline std::unique_ptr<Supervisor::TaskManager> g_task_mgr;
