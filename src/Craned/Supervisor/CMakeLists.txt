@@ -14,20 +14,8 @@ add_executable(supervisor
 
 target_precompile_headers(supervisor PRIVATE SupervisorPreCompiledHeader.h)
 
-add_dependencies(supervisor libcgroup)
-target_include_directories(
-        supervisor PRIVATE ${LIBCGROUP_PATH}/include/
-)
-
-if (ENABLE_BPF)
-    add_dependencies(supervisor cgroup_dev_bpf_object)
-    target_compile_definitions(supervisor PRIVATE CRANE_ENABLE_BPF)
-endif ()
-
 target_link_libraries(supervisor
         $<$<BOOL:${CRANE_USE_MIMALLOC}>:dev_mimalloc>
-
-        ${LIBCGROUP_BUILD_PRODUCTS}
 
         Utility_PublicHeader
         Utility_PluginClient
@@ -44,8 +32,6 @@ target_link_libraries(supervisor
         absl::synchronization
 
         uvw
-
-        yaml-cpp
 
         Backward::Interface
 
