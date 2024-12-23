@@ -2058,29 +2058,23 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
       ResourceInNode feasible_res;
       bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
-          craned_meta->res_total, &feasible_res);
-      if (!ok) {
-        CRANE_DEBUG(
-            "Task #{} needs more resource than that of craned {}. "
-            "Craned resource might have been changed.",
-            task->TaskId(), craned_index);
-        return false;
-      }
-
-      auto& time_avail_res_map =
-          node_selection_info.node_time_avail_res_map.at(craned_index);
-      bool can_run = true;
-      for (const auto& [time, res] : time_avail_res_map) {
-        if (time >= now + task->time_limit) break;
-        if (!(feasible_res <= res)) {
-          can_run = false;
-          break;
+          craned_meta->res_avail, &feasible_res);
+      if (ok) {
+        auto& time_avail_res_map =
+            node_selection_info.node_time_avail_res_map.at(craned_index);
+        bool can_run = true;
+        for (const auto& [time, res] : time_avail_res_map) {
+          if (time >= now + task->time_limit) break;
+          if (!(feasible_res <= res)) {
+            can_run = false;
+            break;
+          }
         }
-      }
-      if (can_run) {
-        available_craned_indexes_.emplace_back(craned_index);
-        allocated_res.AddResourceInNode(craned_index, feasible_res);
-        task->allocated_res_view += feasible_res;
+        if (can_run) {
+          available_craned_indexes_.emplace_back(craned_index);
+          allocated_res.AddResourceInNode(craned_index, feasible_res);
+          task->allocated_res_view += feasible_res;
+        }
       }
     }
     ++task_num_node_id_it;
@@ -2104,7 +2098,11 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     ResourceInNode feasible_res;
 
     bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
-        craned_meta->res_total, &feasible_res);
+        craned_meta->res_avail, &feasible_res);
+    if (!ok) {
+      ok = task->requested_node_res_view.GetFeasibleResourceInNode(
+          craned_meta->res_total, &feasible_res);
+    }
     if (!ok) {
       CRANE_DEBUG(
           "Task #{} needs more resource than that of craned {}. "
