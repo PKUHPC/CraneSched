@@ -278,6 +278,7 @@ set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_
 add_subdirectory(${DEPENDENCIES_PRE_INSTALLED_DIR})
 
 find_package(Threads REQUIRED)
+find_library(LIBUTIL_LIBRARY util)
 
 # New in version cmake3.24:
 # Set ZLIB_USE_STATIC_LIBS to ON to look for static libraries. Default is OFF.
@@ -408,6 +409,14 @@ install(FILES
         PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 # Install configuration files
+if(ENABLE_BPF)
+    install(FILES 
+            ${CMAKE_BINARY_DIR}/src/Misc/BPF/cgroup_dev_bpf.o
+            DESTINATION /usr/local/lib64/bpf/
+            COMPONENT cranedc
+            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
+endif()
+
 install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         DESTINATION /etc/crane/
         COMPONENT cranectldc

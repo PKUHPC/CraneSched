@@ -93,7 +93,7 @@ enum class ControllerFile : uint64_t {
 inline const char *kTaskCgPathPrefix = "Crane_Task_";
 inline const char *RootCgroupFullPath = "/sys/fs/cgroup";
 #ifdef CRANE_ENABLE_BPF
-inline const char *BpfObjectFile = "/etc/crane/cgroup_dev_bpf.o";
+inline const char *BpfObjectFile = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
 inline const char *BpfDeviceMapFile = "/sys/fs/bpf/craned_dev_map";
 inline const char *BpfMapName = "craned_dev_map";
 inline const char *BpfProgramName = "craned_device_access";

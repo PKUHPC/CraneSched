@@ -68,8 +68,9 @@ class PluginClient {
   void EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
 
   // Launched by Craned
-  void CreateCgroupHookAsync(task_id_t task_id, const std::string& cgroup,
-                             const crane::grpc::DedicatedResourceInNode &request_resource);
+  void CreateCgroupHookAsync(
+      task_id_t task_id, const std::string& cgroup,
+      const crane::grpc::DedicatedResourceInNode& resource);
   void DestroyCgroupHookAsync(task_id_t task_id, const std::string& cgroup);
 
  private:
@@ -82,9 +83,9 @@ class PluginClient {
   grpc::Status SendEndHook_(grpc::ClientContext* context,
                             google::protobuf::Message* msg);
   grpc::Status SendCreateCgroupHook_(grpc::ClientContext* context,
-                                      google::protobuf::Message* msg);
+                                     google::protobuf::Message* msg);
   grpc::Status SendDestroyCgroupHook_(grpc::ClientContext* context,
-                                    google::protobuf::Message* msg);
+                                      google::protobuf::Message* msg);
 
   void AsyncSendThread_();
 

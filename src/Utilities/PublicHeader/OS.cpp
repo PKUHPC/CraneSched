@@ -104,7 +104,7 @@ void SetCloseOnExecFromFd(int fd_begin) {
 }
 
 bool SetMaxFileDescriptorNumber(unsigned long num) {
-  struct rlimit rlim {};
+  struct rlimit rlim{};
   rlim.rlim_cur = num;
   rlim.rlim_max = num;
 

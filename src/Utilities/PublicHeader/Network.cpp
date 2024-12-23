@@ -143,7 +143,7 @@ bool ResolveHostnameFromIpv4(ipv4_t addr, std::string* hostname) {
   if (internal::g_hosts_map->FindFirstHostnameOfIpv4(addr, hostname))
     return true;
 
-  struct sockaddr_in sa {};
+  struct sockaddr_in sa{};
   char hbuf[NI_MAXHOST];
 
   std::string ipv4_str = Ipv4ToStr(addr);
@@ -169,7 +169,7 @@ bool ResolveHostnameFromIpv6(const ipv6_t& addr, std::string* hostname) {
   if (internal::g_hosts_map->FindFirstHostnameOfIpv6(addr, hostname))
     return true;
 
-  struct sockaddr_in6 sa6 {};
+  struct sockaddr_in6 sa6{};
   char hbuf[NI_MAXHOST];
 
   /* For IPv6*/
@@ -196,7 +196,7 @@ bool ResolveHostnameFromIpv6(const ipv6_t& addr, std::string* hostname) {
 bool ResolveIpv4FromHostname(const std::string& hostname, ipv4_t* addr) {
   if (internal::g_hosts_map->FindIpv4OfHostname(hostname, addr)) return true;
 
-  struct addrinfo hints {};
+  struct addrinfo hints{};
   struct addrinfo* res;
   char host[NI_MAXHOST];
 
@@ -227,7 +227,7 @@ bool ResolveIpv4FromHostname(const std::string& hostname, ipv4_t* addr) {
 bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr) {
   if (internal::g_hosts_map->FindIpv6OfHostname(hostname, addr)) return true;
 
-  struct addrinfo hints {};
+  struct addrinfo hints{};
   struct addrinfo *res, *tmp;
   char host[NI_MAXHOST];
 
@@ -245,13 +245,22 @@ bool ResolveIpv6FromHostname(const std::string& hostname, ipv6_t* addr) {
                       nullptr, 0, NI_NUMERICHOST);
     auto ipv6_sockaddr = (struct sockaddr_in6*)tmp->ai_addr;
     if (ret == 0) {
+      if (IN6_IS_ADDR_LINKLOCAL(&ipv6_sockaddr->sin6_addr)) {
+        // Check if it is a link-local address, which must have a scope ID (e.g.
+        // %eth0). We don't support link-local address as it's too complex to
+        // handle.
+        CRANE_TRACE("Skipping link-local address of {}", hostname);
+        continue;
+      }
+
+      *addr = 0;
       for (int i = 0; i < 4; ++i) {
-        *addr = 0;
         uint32_t part = ntohl(ipv6_sockaddr->sin6_addr.s6_addr32[i]);
         *addr = (*addr << 32) | part;
       }
-    } else
-      CRANE_ERROR("error getnameinfo {}", gai_strerror(ret));
+    } else {
+      CRANE_ERROR("Error in getnameinfo {}", gai_strerror(ret));
+    }
   }
 
   freeaddrinfo(res);
