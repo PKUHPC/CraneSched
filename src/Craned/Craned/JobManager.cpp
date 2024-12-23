@@ -952,59 +952,7 @@ void JobManager::EvTaskTimerCb_(task_id_t task_id) {
 void JobManager::EvCleanTerminateTaskQueueCb_() {
   TaskTerminateQueueElem elem;
   while (m_task_terminate_queue_.try_dequeue(elem)) {
-    CRANE_TRACE(
-        "Receive TerminateRunningTask Request from internal queue. "
-        "Task id: {}",
-        elem.task_id);
-
-    auto iter = m_task_map_.find(elem.task_id);
-    if (iter == m_task_map_.end()) {
-      CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
-
-      // Note if Ctld wants to terminate some tasks that are not running,
-      // it might indicate other nodes allocated to the task might have
-      // crashed. We should mark the task as kind of not runnable by removing
-      // its cgroup.
-      //
-      // Considering such a situation:
-      // In Task Scheduler of Ctld,
-      // the task index from node id to task id have just been added and
-      // Ctld are sending CreateCgroupForTasks.
-      // Right at the moment, one Craned allocated to this task and
-      // designated as the executing node crashes,
-      // but it has been sent a CreateCgroupForTasks and replied.
-      // Then the CranedKeeper search the task index and
-      // send TerminateTasksOnCraned to all Craned allocated to this task
-      // including this node.
-      // In order to give Ctld kind of feedback without adding complicated
-      // synchronizing mechanism in ScheduleThread_(),
-      // we just remove the cgroup for such task, Ctld will fail in the
-      // following ExecuteTasks and the task will go to the right place as
-      // well as the completed queue.
-      g_cg_mgr->ReleaseCgroupByTaskIdOnly(elem.task_id);
-      continue;
-    }
-
-    TaskInstance* task_instance = iter->second.get();
-
-    if (elem.terminated_by_user) task_instance->cancelled_by_user = true;
-    if (elem.mark_as_orphaned) task_instance->orphaned = true;
-    if (elem.terminated_by_timeout) task_instance->terminated_by_timeout = true;
-
-    int sig = SIGTERM;  // For BatchTask
-    if (task_instance->IsCrun()) sig = SIGHUP;
-
-    if (!task_instance->processes.empty()) {
-      // For an Interactive task with a process running or a Batch task, we
-      // just send a kill signal here.
-      for (auto&& [pid, pr_instance] : task_instance->processes)
-        KillProcessInstance_(pr_instance.get(), sig);
-    } else if (task_instance->task.type() == crane::grpc::Interactive) {
-      // For an Interactive task with no process running, it ends immediately.
-      ActivateTaskStatusChangeAsync_(elem.task_id, crane::grpc::Completed,
-                                     ExitCode::kExitCodeTerminated,
-                                     std::nullopt);
-    }
+    // todo:Just forward to Supervisor
   }
 }
 
@@ -1079,6 +1027,7 @@ void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 
   ChangeTaskTimeLimitQueueElem elem;
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
+    // todo: Forward Rpc to Supervisor
     auto iter = m_task_map_.find(elem.task_id);
     if (iter != m_task_map_.end()) {
       TaskInstance* task_instance = iter->second.get();
