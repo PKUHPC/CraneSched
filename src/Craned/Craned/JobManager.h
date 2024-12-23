@@ -36,32 +36,10 @@ struct BatchMetaInProcessInstance {
 
 class ProcessInstance {
  public:
-  ProcessInstance(std::string exec_path, std::list<std::string> arg_list)
-      : m_executive_path_(std::move(exec_path)),
-        m_arguments_(std::move(arg_list)),
-        m_pid_(0) {}
-
-  ~ProcessInstance() = default;
-
-  [[nodiscard]] const std::string& GetExecPath() const {
-    return m_executive_path_;
-  }
-  [[nodiscard]] const std::list<std::string>& GetArgList() const {
-    return m_arguments_;
-  }
-
-  void SetPid(pid_t pid) { m_pid_ = pid; }
-  [[nodiscard]] pid_t GetPid() const { return m_pid_; }
-
-  BatchMetaInProcessInstance batch_meta;
+  ProcessInstance(const crane::grpc::TaskToD& task) : m_task_(task) {};
 
  private:
-  /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
-  pid_t m_pid_;
-
-  /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
-  std::string m_executive_path_;
-  std::list<std::string> m_arguments_;
+  crane::grpc::TaskToD m_task_;
 };
 
 struct MetaInTaskInstance {
@@ -80,15 +58,7 @@ struct CrunMetaInTaskInstance : MetaInTaskInstance {
 
 // Todo: Task may consists of multiple subtasks
 struct TaskInstance {
-  ~TaskInstance() {
-    if (termination_timer) {
-      termination_timer->close();
-    }
-
-    if (this->IsCrun()) {
-      close(dynamic_cast<CrunMetaInTaskInstance*>(meta.get())->msg_fd);
-    }
-  }
+  ~TaskInstance() = default;
 
   bool IsCrun() const;
   bool IsCalloc() const;
@@ -101,7 +71,6 @@ struct TaskInstance {
 
   std::string cgroup_path;
   CgroupInterface* cgroup;
-  std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
 
   // Task execution results
   bool orphaned{false};
@@ -232,7 +201,7 @@ class JobManager {
    * if the signal is invalid, kInvalidParam is returned.
    * otherwise, kGenericFailure is returned.
    */
-  static CraneErr KillProcessInstance_(const ProcessInstance* proc, int signum);
+  static CraneErr KillPid_(pid_t pid, int signum);
 
   // Note: the three maps below are NOT protected by any mutex.
   //  They should be modified in libev callbacks to avoid races.
