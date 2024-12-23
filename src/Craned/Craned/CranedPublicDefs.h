@@ -78,6 +78,8 @@ struct Config {
   std::string CranedScriptDir;
   std::string CranedUnixSockPath;
 
+  std::string SupervisorPath;
+
   bool CranedForeground{};
 
   std::string Hostname;
