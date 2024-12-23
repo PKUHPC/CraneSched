@@ -61,8 +61,13 @@ enum class CraneErr : uint16_t {
   __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
 };
 
+using CraneErrCode = crane::grpc::ErrCode;
+
 template <typename T>
 using CraneExpected = std::expected<T, CraneErr>;
+
+template <typename T>
+using CraneErrCodeExpected = std::expected<T, CraneErrCode>;
 
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";

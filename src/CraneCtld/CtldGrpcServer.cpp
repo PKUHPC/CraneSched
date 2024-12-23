@@ -248,6 +248,39 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::ModifyPartitionAllowAccounts(
+    grpc::ServerContext *context,
+    const crane::grpc::ModifyPartitionAllowAccountsRequest *request,
+    crane::grpc::ModifyPartitionAllowAccountsReply *response) {
+  CraneErrCodeExpected<void> result;
+
+  std::unordered_set<std::string> allow_accounts;
+  for (const auto &account_name : request->allow_accounts()) {
+    allow_accounts.insert(account_name);
+  }
+
+  result = g_account_manager->CheckModifyPartitionAllowAccounts(
+      request->uid(), request->partition_name(), allow_accounts);
+
+  if (!result) {
+    response->set_ok(false);
+    response->set_reason(result.error());
+    return grpc::Status::OK;
+  }
+
+  result = g_meta_container->ModifyPartitionAllowAccounts(
+      request->partition_name(), allow_accounts);
+
+  if (!result) {
+    response->set_ok(false);
+    response->set_reason(result.error());
+  } else {
+    response->set_ok(true);
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryTasksInfoRequest *request,
@@ -379,7 +412,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
     response->set_ok(false);
-    response->set_reason(AccountManager::CraneErrCode::ERR_TIME_LIMIT);
+    response->set_reason(CraneErrCode::ERR_TIME_LIMIT);
     return grpc::Status::OK;
   }
   qos.max_time_limit_per_task = absl::Seconds(sec);
@@ -979,6 +1012,13 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (!enable_res) {
     return std::unexpected(enable_res.error());
   }
+
+  if (!g_meta_container->CheckIfAccountIsAllowedInPartition(task->partition_id,
+                                                            task->account))
+    return std::unexpected(
+        "The account is not in the AllowAccounts of the partition "
+        "specified "
+        "for the task, submission of the task is prohibited.");
 
   err = g_task_scheduler->AcquireTaskAttributes(task.get());
 
