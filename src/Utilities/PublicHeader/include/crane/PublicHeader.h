@@ -26,6 +26,7 @@
 #include <unordered_map>
 
 #include "protos/Crane.pb.h"
+#include "protos/PublicDefs.pb.h"
 
 #if !defined(CRANE_VERSION_STRING)
 #  define CRANE_VERSION_STRING "Unknown"
@@ -63,6 +64,11 @@ enum class CraneErr : uint16_t {
 
 template <typename T>
 using CraneExpected = std::expected<T, CraneErr>;
+
+using CraneErrCode = crane::grpc::ErrCode;
+
+template <typename T>
+using CraneErrCodeExpected = std::expected<T, CraneErrCode>;
 
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
@@ -147,9 +153,81 @@ constexpr std::array<std::string_view, uint16_t(CraneErr::__ERR_SIZE)>
         "Not enough nodes which satisfy resource requirements",
 };
 
+constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> ErrCodeStrArray = {
+        "Success",
+        "Invalid UID",
+        "You are not a user of Crane",
+        "The entered user is not a user of Crane",
+        "Your permission is insufficient",
+        "The user has been blocked",
+        "The user already exists in this account",
+        "he user is not allowed to access account",
+        "Unknown admin level",
+        "The user does not belong to this account",
+        "No account is specified for the user",
+        "The entered account does not exist",
+        "The account already exists in the crane",
+        "The parent account of the entered account does not exist",
+        "The account has child account or users, unable to delete",
+        "The account has been blocked",
+        "The entered partition does not exist",
+        "The entered account or user does not include this partition",
+        "The partition already exists in the account or user",
+        "Parent account does not include the partition",
+        "The user does not contain any partitions, operation cannot be performed",
+        "Child has partiton error",
+        "The user has no QoS available for this partition to be used",
+        "The qos you set is not in partition's allowed qos list",
+        "The entered qos does not exist",
+        "Qos already exists in the crane",
+        "QoS is still being used by accounts or users, unable to delete",
+        "Failed to convert value to integer",
+        "Invalid time limit value",
+        "The entered account or user does not include this qos",
+        "The Qos already exists in the account or user",
+        "Parent account does not include the qos",
+        "Set allowed qos error",
+        "The entered default_qos is not allowed",
+        "The QoS is already the default QoS for the account or specified partition of the user",
+        "child accounts has default error",
+        "set account qos error",
+        "The Qos not allowed or is already the default qos",
+        "Is default qos error",
+        "Fail to update data in database",
+        "Generic Failure",
+        "Resource not enough for task",
+        "Non-existent Error",
+        "Nodes partition not enough for task",
+        "Invalid node list",
+        "Invalid exclude node list",
+        "Time-limit reached the user's limit",
+        "cpus-per-task reached the user's limit",
+        "Nodes num not enough for task",
+        "System Error",
+        "Existing Task",
+        "System error occurred or the number of pending tasks exceeded maximum value",
+        "Invalid Parameter",
+        "Stop Error",
+        "Permission Denied",
+        "Connection Timeout",
+        "Connection Aborted",
+        "RPC Failure",
+        "Token Request Failure",
+        "Stream Broken",
+        "Invalid Stub",
+        "CGroup Error",
+        "Protobuf Error",
+        "Lib Event Error",
+        "No Available Node"
+};
+
 }
 
 inline std::string_view CraneErrStr(CraneErr err) {
+  return Internal::CraneErrStrArr[uint16_t(err)];
+}
+
+inline std::string_view CraneErrCodeStr(CraneErrCode err) {
   return Internal::CraneErrStrArr[uint16_t(err)];
 }
 

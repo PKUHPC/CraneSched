@@ -25,9 +25,9 @@ namespace Ctld {
 
 AccountManager::AccountManager() { InitDataMap_(); }
 
-AccountManager::CraneExpected<void> AccountManager::AddUser(
+CraneErrCodeExpected<void> AccountManager::AddUser(
     uint32_t uid, const User& new_user) {
-  CraneExpected<void> result;
+  CraneErrCodeExpected<void> result;
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
@@ -69,12 +69,12 @@ AccountManager::CraneExpected<void> AccountManager::AddUser(
   return AddUser_(new_user, account, stale_user);
 }
 
-AccountManager::CraneExpected<void> AccountManager::AddAccount(
+CraneErrCodeExpected<void> AccountManager::AddAccount(
     uint32_t uid, const Account& new_account) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     util::read_lock_guard account_guard(m_rw_account_mutex_);
-    CraneExpected<void> result;
+    CraneErrCodeExpected<void> result;
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
     const User* op_user = user_result.value();
@@ -142,7 +142,7 @@ AccountManager::CraneExpected<void> AccountManager::AddAccount(
   return AddAccount_(new_account, find_parent, stale_account);
 }
 
-AccountManager::CraneExpected<void> AccountManager::AddQos(uint32_t uid,
+CraneErrCodeExpected<void> AccountManager::AddQos(uint32_t uid,
                                                            const Qos& new_qos) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -165,7 +165,7 @@ AccountManager::CraneExpected<void> AccountManager::AddQos(uint32_t uid,
   return AddQos_(new_qos, find_qos);
 }
 
-AccountManager::CraneExpected<void> AccountManager::DeleteUser(
+CraneErrCodeExpected<void> AccountManager::DeleteUser(
     uint32_t uid, const std::string& name, const std::string& account) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::write_lock_guard account_guard(m_rw_account_mutex_);
@@ -187,7 +187,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser(
   return DeleteUser_(*user, account);
 }
 
-AccountManager::CraneExpected<void> AccountManager::DeleteAccount(
+CraneErrCodeExpected<void> AccountManager::DeleteAccount(
     uint32_t uid, const std::string& name) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -214,7 +214,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccount(
   return DeleteAccount_(*account);
 }
 
-AccountManager::CraneExpected<void> AccountManager::DeleteQos(
+CraneErrCodeExpected<void> AccountManager::DeleteQos(
     uint32_t uid, const std::string& name) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -310,11 +310,11 @@ AccountManager::QosMapMutexSharedPtr AccountManager::GetAllQosInfo() {
   return QosMapMutexSharedPtr{&m_qos_map_, &m_rw_qos_mutex_};
 }
 
-AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
+CraneErrCodeExpected<void> AccountManager::QueryUserInfo(
     uint32_t uid, const std::string& name,
     std::unordered_map<uid_t, User>* res_user_map) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
-  CraneExpected<void> result{};
+  CraneErrCodeExpected<void> result{};
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
@@ -358,11 +358,11 @@ AccountManager::CraneExpected<void> AccountManager::QueryUserInfo(
   return result;
 }
 
-AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
+CraneErrCodeExpected<void> AccountManager::QueryAccountInfo(
     uint32_t uid, const std::string& name,
     std::unordered_map<std::string, Account>* res_account_map) {
   User res_user;
-  CraneExpected<void> result{};
+  CraneErrCodeExpected<void> result{};
 
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -422,11 +422,11 @@ AccountManager::CraneExpected<void> AccountManager::QueryAccountInfo(
   return result;
 }
 
-AccountManager::CraneExpected<void> AccountManager::QueryQosInfo(
+CraneErrCodeExpected<void> AccountManager::QueryQosInfo(
     uint32_t uid, const std::string& name,
     std::unordered_map<std::string, Qos>* res_qos_map) {
   User res_user;
-  CraneExpected<void> result{};
+  CraneErrCodeExpected<void> result{};
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
@@ -474,7 +474,7 @@ AccountManager::CraneExpected<void> AccountManager::QueryQosInfo(
   return result;
 }
 
-AccountManager::CraneExpected<void> AccountManager::ModifyAdminLevel(
+CraneErrCodeExpected<void> AccountManager::ModifyAdminLevel(
     uint32_t uid, const std::string& name, const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
@@ -506,13 +506,13 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAdminLevel(
   return SetUserAdminLevel_(name, new_level);
 }
 
-AccountManager::CraneExpected<void> AccountManager::ModifyUserDefaultQos(
+CraneErrCodeExpected<void> AccountManager::ModifyUserDefaultQos(
     uint32_t uid, const std::string& name, const std::string& partition,
     const std::string& account, const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   const User* p_target_user = GetExistedUserInfoNoLock_(name);
-  CraneExpected<void> result{};
+  CraneErrCodeExpected<void> result{};
   // Account might be empty. In that case, ues user->default_account.
   std::string actual_account = account;
   {
@@ -532,7 +532,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserDefaultQos(
   return SetUserDefaultQos_(*p_target_user, actual_account, partition, value);
 }
 
-AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedPartition(
+CraneErrCodeExpected<void> AccountManager::ModifyUserAllowedPartition(
     crane::grpc::OperationType operation_type, uint32_t uid,
     const std::string& name, const std::string& account,
     const std::string& value) {
@@ -540,7 +540,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedPartition(
   util::read_lock_guard account_guard(m_rw_account_mutex_);
 
   const User* p = GetExistedUserInfoNoLock_(name);
-  CraneExpected<void> result{};
+  CraneErrCodeExpected<void> result{};
   std::string actual_account = account;
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
@@ -565,7 +565,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedPartition(
   return result;
 }
 
-AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedQos(
+CraneErrCodeExpected<void> AccountManager::ModifyUserAllowedQos(
     crane::grpc::OperationType operation_type, uint32_t uid,
     const std::string& name, const std::string& partition,
     const std::string& account, const std::string& value, bool force) {
@@ -574,7 +574,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedQos(
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const User* p = GetExistedUserInfoNoLock_(name);
-  CraneExpected<void> result{};
+  CraneErrCodeExpected<void> result{};
   std::string actual_account = account;
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
@@ -603,13 +603,13 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserAllowedQos(
   return result;
 }
 
-AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedPartition(
+CraneErrCodeExpected<void> AccountManager::DeleteUserAllowedPartition(
     uint32_t uid, const std::string& name, const std::string& account,
     const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   const User* p = GetExistedUserInfoNoLock_(name);
-  CraneExpected<void> result;
+  CraneErrCodeExpected<void> result;
   // Account might be empty. In that case, ues user->default_account.
   std::string actual_account = account;
   {
@@ -628,13 +628,13 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedPartition(
   return DeleteUserAllowedPartition_(*p, actual_account, value);
 }
 
-AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedQos(
+CraneErrCodeExpected<void> AccountManager::DeleteUserAllowedQos(
     uint32_t uid, const std::string& name, const std::string& partition,
     const std::string& account, const std::string& value, bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
   const User* p = GetExistedUserInfoNoLock_(name);
-  CraneExpected<void> result;
+  CraneErrCodeExpected<void> result;
   std::string actual_account = account;
   {
     util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -653,11 +653,11 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedQos(
   return DeleteUserAllowedQos_(*p, value, actual_account, partition, force);
 }
 
-AccountManager::CraneExpected<void> AccountManager::ModifyAccount(
+CraneErrCodeExpected<void> AccountManager::ModifyAccount(
     crane::grpc::OperationType operation_type, uint32_t uid,
     const std::string& name, crane::grpc::ModifyField modify_field,
     const std::string& value, bool force) {
-  CraneExpected<void> result{};
+  CraneErrCodeExpected<void> result{};
 
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -757,7 +757,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAccount(
   return result;
 }
 
-AccountManager::CraneExpected<void> AccountManager::ModifyQos(
+CraneErrCodeExpected<void> AccountManager::ModifyQos(
     uint32_t uid, const std::string& name,
     crane::grpc::ModifyField modify_field, const std::string& value) {
   {
@@ -837,7 +837,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyQos(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::BlockAccount(
+CraneErrCodeExpected<void> AccountManager::BlockAccount(
     uint32_t uid, const std::string& name, bool block) {
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -861,7 +861,7 @@ AccountManager::CraneExpected<void> AccountManager::BlockAccount(
   return BlockAccount_(name, block);
 }
 
-AccountManager::CraneExpected<void> AccountManager::BlockUser(
+CraneErrCodeExpected<void> AccountManager::BlockUser(
     uint32_t uid, const std::string& name, const std::string& account,
     bool block) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
@@ -898,7 +898,7 @@ bool AccountManager::CheckUserPermissionToPartition(
   return false;
 }
 
-std::expected<void, std::string> AccountManager::CheckIfUserOfAccountIsEnabled(
+CraneErrCodeExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
     const std::string& user, const std::string& account) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -907,50 +907,57 @@ std::expected<void, std::string> AccountManager::CheckIfUserOfAccountIsEnabled(
   do {
     const Account* account_ptr = GetExistedAccountInfoNoLock_(account_name);
     if (account_ptr->blocked) {
-      return std::unexpected(
-          fmt::format("Ancestor account '{}' is blocked", account_ptr->name));
+      CRANE_ERROR("Ancestor account '{}' is blocked", account_ptr->name);
+      return std::unexpected(CraneErrCode::ERR_BLOCKED_ACCOUNT);
     }
     account_name = account_ptr->parent_account;
   } while (!account_name.empty());
 
   const User* user_ptr = GetExistedUserInfoNoLock_(user);
   if (user_ptr->account_to_attrs_map.at(account).blocked) {
-    return std::unexpected(fmt::format("User '{}' is blocked", user_ptr->name));
+    CRANE_ERROR("User '{}' is blocked", user_ptr->name);
+    return std::unexpected(CraneErrCode::ERR_BLOCKED_USER);
   }
   return {};
 }
 
-std::expected<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
+CraneErrCodeExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
     const std::string& user, const std::string& account, TaskInCtld* task) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
-    return std::unexpected(fmt::format("Unknown user '{}'", user));
+    CRANE_ERROR("Unknown user {}", user);
+    return std::unexpected(CraneErrCode::ERR_INVALID_OP_USER);
   }
 
   if (task->uid != 0) {
     auto partition_it = user_share_ptr->account_to_attrs_map.at(account)
                             .allowed_partition_qos_map.find(task->partition_id);
     if (partition_it == user_share_ptr->account_to_attrs_map.at(account)
-                            .allowed_partition_qos_map.end())
-      return std::unexpected("Partition is not allowed for this user.");
+                            .allowed_partition_qos_map.end()) {
 
+      CRANE_ERROR("Partition is not allowed for this user");
+      return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
+    }
     if (task->qos.empty()) {
       // Default qos
       task->qos = partition_it->second.first;
-      if (task->qos.empty())
-        return std::unexpected(
-            fmt::format("The user '{}' has no QOS available for this partition "
-                        "'{}' to be used",
-                        task->Username(), task->partition_id));
+      if (task->qos.empty()) {
+        CRANE_ERROR(
+            "The user '{}' has no QOS available for this partition '{}' to be used",
+            task->Username(), task->partition_id);
+        return std::unexpected(CraneErrCode::ERR_HAS_NO_QOS_IN_PARTITION);
+      }
     } else {
       // Check whether task.qos in the qos list
-      if (!ranges::contains(partition_it->second.second, task->qos))
-        return std::unexpected(fmt::format(
+      if (!ranges::contains(partition_it->second.second, task->qos)) {
+        CRANE_ERROR(
             "The qos '{}' you set is not in partition's allowed qos list",
-            task->qos));
+            task->qos);
+        return std::unexpected(CraneErrCode::ERR_HAS_ALLOWED_QOS_IN_PARTITION);
+      }
     }
   } else {
     if (task->qos.empty()) {
@@ -959,19 +966,25 @@ std::expected<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   }
 
   const Qos* qos_share_ptr = GetExistedQosInfoNoLock_(task->qos);
-  if (!qos_share_ptr)
-    return std::unexpected(fmt::format("Unknown QOS '{}'", task->qos));
+  if (!qos_share_ptr) {
+    CRANE_ERROR("Unknown QOS '{}'", task->qos);
+    return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+  }
 
   task->qos_priority = qos_share_ptr->priority;
 
   if (task->time_limit >= absl::Seconds(kTaskMaxTimeLimitSec)) {
     task->time_limit = qos_share_ptr->max_time_limit_per_task;
-  } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
-    return std::unexpected("time-limit reached the user's limit.");
+  } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task) {
+    CRANE_ERROR("time-limit reached the user's limit");
+    return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
+  }
 
   if (static_cast<double>(task->cpus_per_task) >
-      qos_share_ptr->max_cpus_per_user)
-    return std::unexpected("cpus-per-task reached the user's limit.");
+      qos_share_ptr->max_cpus_per_user) {
+    CRANE_ERROR("cpus-per-task reached the user's limit");
+    return std::unexpected(CraneErrCode::ERR_CPUS_PER_TASK_BEYOND);
+  }
 
   return {};
 }
@@ -990,7 +1003,7 @@ std::expected<void, std::string> AccountManager::CheckUidIsAdmin(
   return std::unexpected("User has insufficient privilege.");
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckIfUidHasPermOnUser(
+CraneErrCodeExpected<void> AccountManager::CheckIfUidHasPermOnUser(
     uint32_t uid, const std::string& username, bool read_only_priv) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -1004,7 +1017,7 @@ AccountManager::CraneExpected<void> AccountManager::CheckIfUidHasPermOnUser(
   return CheckIfUserHasPermOnUserNoLock_(*op_user, user, read_only_priv);
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckAddUserAllowedPartitionNoLock_(
     const User* user, const Account* account, const std::string& partition) {
   auto result = CheckPartitionIsAllowedNoLock_(account, partition, false, true);
@@ -1019,7 +1032,7 @@ AccountManager::CheckAddUserAllowedPartitionNoLock_(
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckSetUserAllowedPartitionNoLock_(
     const Account* account, const std::string& partition) {
   auto result = CheckPartitionIsAllowedNoLock_(account, partition, false, true);
@@ -1028,7 +1041,7 @@ AccountManager::CheckSetUserAllowedPartitionNoLock_(
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckAddUserAllowedQosNoLock_(const User* user,
                                               const Account* account,
                                               const std::string& partition,
@@ -1066,7 +1079,7 @@ AccountManager::CheckAddUserAllowedQosNoLock_(const User* user,
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckSetUserAllowedQosNoLock_(const User* user,
                                               const Account* account,
                                               const std::string& partition,
@@ -1103,7 +1116,7 @@ AccountManager::CheckSetUserAllowedQosNoLock_(const User* user,
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckSetUserDefaultQosNoLock_(const User& user,
                                               const std::string& account,
                                               const std::string& partition,
@@ -1135,7 +1148,7 @@ AccountManager::CheckSetUserDefaultQosNoLock_(const User& user,
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckDeleteUserAllowedPartitionNoLock_(
     const User& user, const std::string& account,
     const std::string& partition) {
@@ -1146,7 +1159,7 @@ AccountManager::CheckDeleteUserAllowedPartitionNoLock_(
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckDeleteUserAllowedQosNoLock_(const User& user,
                                                  const std::string& account,
                                                  const std::string& partition,
@@ -1180,7 +1193,7 @@ AccountManager::CheckDeleteUserAllowedQosNoLock_(const User& user,
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckAddAccountAllowedPartitionNoLock_(
     const Account* account, const std::string& partition) {
   auto result = CheckPartitionIsAllowedNoLock_(account, partition, true, false);
@@ -1192,7 +1205,7 @@ AccountManager::CheckAddAccountAllowedPartitionNoLock_(
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckAddAccountAllowedQosNoLock_(const Account* account,
                                                  const std::string& qos) {
   auto result = CheckQosIsAllowedNoLock_(account, qos, true, false);
@@ -1204,14 +1217,14 @@ AccountManager::CheckAddAccountAllowedQosNoLock_(const Account* account,
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckSetAccountDescriptionNoLock_(const Account* account) {
   if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckSetAccountAllowedPartitionNoLock_(
     const Account* account, const std::string& partitions, bool force) {
   auto result =
@@ -1231,7 +1244,7 @@ AccountManager::CheckSetAccountAllowedPartitionNoLock_(
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckSetAccountAllowedQosNoLock_(const Account* account,
                                                  const std::string& qos_list,
                                                  bool force) {
@@ -1251,7 +1264,7 @@ AccountManager::CheckSetAccountAllowedQosNoLock_(const Account* account,
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckSetAccountDefaultQosNoLock_(const Account* account,
                                                  const std::string& qos) {
   auto result = CheckQosIsAllowedNoLock_(account, qos, false, false);
@@ -1263,7 +1276,7 @@ AccountManager::CheckSetAccountDefaultQosNoLock_(const Account* account,
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckDeleteAccountAllowedPartitionNoLock_(
     const Account* account, const std::string& partition, bool force) {
   auto result =
@@ -1276,7 +1289,7 @@ AccountManager::CheckDeleteAccountAllowedPartitionNoLock_(
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckDeleteAccountAllowedQosNoLock_(const Account* account,
                                                     const std::string& qos,
                                                     bool force) {
@@ -1292,7 +1305,7 @@ AccountManager::CheckDeleteAccountAllowedQosNoLock_(const Account* account,
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckIfUserHasHigherPrivThan_(const User& op_user,
                                               User::AdminLevel admin_level) {
   if (op_user.admin_level <= admin_level)
@@ -1301,7 +1314,7 @@ AccountManager::CheckIfUserHasHigherPrivThan_(const User& op_user,
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckIfUserHasPermOnAccountNoLock_(const User& op_user,
                                                    const std::string& account,
                                                    bool read_only_priv) {
@@ -1333,7 +1346,7 @@ AccountManager::CheckIfUserHasPermOnAccountNoLock_(const User& op_user,
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckIfUserHasPermOnUserOfAccountNoLock_(const User& op_user,
                                                          const User* user,
                                                          std::string* account,
@@ -1351,7 +1364,7 @@ AccountManager::CheckIfUserHasPermOnUserOfAccountNoLock_(const User& op_user,
   return CheckIfUserHasPermOnAccountNoLock_(op_user, *account, read_only_priv);
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckIfUserHasPermOnUserNoLock_(const User& op_user,
                                                 const User* user,
                                                 bool read_only_priv) {
@@ -1369,7 +1382,7 @@ AccountManager::CheckIfUserHasPermOnUserNoLock_(const User& op_user,
   return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::CheckPartitionIsAllowedNoLock_(const Account* account,
                                                const std::string& partition,
                                                bool check_parent,
@@ -1406,7 +1419,7 @@ AccountManager::CheckPartitionIsAllowedNoLock_(const Account* account,
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::CheckQosIsAllowedNoLock_(
+CraneErrCodeExpected<void> AccountManager::CheckQosIsAllowedNoLock_(
     const Account* account, const std::string& qos_str, bool check_parent,
     bool is_user) {
   if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
@@ -1466,7 +1479,7 @@ void AccountManager::InitDataMap_() {
   }
 }
 
-AccountManager::CraneExpected<const User*>
+CraneErrCodeExpected<const User*>
 AccountManager::GetUserInfoByUidNoLock_(uint32_t uid) {
   PasswordEntry entry(uid);
 
@@ -1536,7 +1549,7 @@ bool AccountManager::IncQosReferenceCountInDb_(const std::string& name,
                                       name, "reference_count", num);
 }
 
-AccountManager::CraneExpected<void> AccountManager::AddUser_(
+CraneErrCodeExpected<void> AccountManager::AddUser_(
     const User& user, const Account* account, const User* stale_user) {
   const std::string& object_account = user.default_account;
   const std::string& name = user.name;
@@ -1614,7 +1627,7 @@ AccountManager::CraneExpected<void> AccountManager::AddUser_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::AddAccount_(
+CraneErrCodeExpected<void> AccountManager::AddAccount_(
     const Account& account, const Account* parent,
     const Account* stale_account) {
   const std::string& name = account.name;
@@ -1679,7 +1692,7 @@ AccountManager::CraneExpected<void> AccountManager::AddAccount_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::AddQos_(
+CraneErrCodeExpected<void> AccountManager::AddQos_(
     const Qos& qos, const Qos* stale_qos) {
   if (stale_qos) {
     // There is a same qos but was deleted,here will delete the original
@@ -1706,7 +1719,7 @@ AccountManager::CraneExpected<void> AccountManager::AddQos_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::DeleteUser_(
+CraneErrCodeExpected<void> AccountManager::DeleteUser_(
     const User& user, const std::string& account) {
   const std::string& name = user.name;
 
@@ -1772,7 +1785,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::DeleteAccount_(
+CraneErrCodeExpected<void> AccountManager::DeleteAccount_(
     const Account& account) {
   const std::string& name = account.name;
 
@@ -1808,7 +1821,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccount_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::DeleteQos_(
+CraneErrCodeExpected<void> AccountManager::DeleteQos_(
     const std::string& name) {
   if (!g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$set",
                                     name, "deleted", true)) {
@@ -1819,7 +1832,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteQos_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::AddUserAllowedPartition_(
+CraneErrCodeExpected<void> AccountManager::AddUserAllowedPartition_(
     const User& user, const Account& account, const std::string& partition) {
   const std::string& name = user.name;
   const std::string& account_name = account.name;
@@ -1851,7 +1864,7 @@ AccountManager::CraneExpected<void> AccountManager::AddUserAllowedPartition_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::AddUserAllowedQos_(
+CraneErrCodeExpected<void> AccountManager::AddUserAllowedQos_(
     const User& user, const Account& account, const std::string& partition,
     const std::string& qos) {
   const std::string& name = user.name;
@@ -1900,7 +1913,7 @@ AccountManager::CraneExpected<void> AccountManager::AddUserAllowedQos_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::SetUserAdminLevel_(
+CraneErrCodeExpected<void> AccountManager::SetUserAdminLevel_(
     const std::string& name, User::AdminLevel new_level) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
@@ -1919,7 +1932,7 @@ AccountManager::CraneExpected<void> AccountManager::SetUserAdminLevel_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::SetUserDefaultQos_(
+CraneErrCodeExpected<void> AccountManager::SetUserDefaultQos_(
     const User& user, const std::string& account, const std::string& partition,
     const std::string& qos) {
   const std::string& name = user.name;
@@ -1956,7 +1969,7 @@ AccountManager::CraneExpected<void> AccountManager::SetUserDefaultQos_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::SetUserAllowedPartition_(
+CraneErrCodeExpected<void> AccountManager::SetUserAllowedPartition_(
     const User& user, const Account& account, const std::string& partitions) {
   const std::string& name = user.name;
   const std::string& account_name = account.name;
@@ -1993,7 +2006,7 @@ AccountManager::CraneExpected<void> AccountManager::SetUserAllowedPartition_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::SetUserAllowedQos_(
+CraneErrCodeExpected<void> AccountManager::SetUserAllowedQos_(
     const User& user, const Account& account, const std::string& partition,
     const std::string& qos_list_str, bool force) {
   const std::string& name = user.name;
@@ -2040,7 +2053,7 @@ AccountManager::CraneExpected<void> AccountManager::SetUserAllowedQos_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedPartition_(
+CraneErrCodeExpected<void> AccountManager::DeleteUserAllowedPartition_(
     const User& user, const std::string& account,
     const std::string& partition) {
   const std::string& name = user.name;
@@ -2066,7 +2079,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedPartition_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
+CraneErrCodeExpected<void> AccountManager::DeleteUserAllowedQos_(
     const User& user, const std::string& qos, const std::string& account,
     const std::string& partition, bool force) {
   const std::string& name = user.name;
@@ -2114,7 +2127,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUserAllowedQos_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::AddAccountAllowedPartition_(
+CraneErrCodeExpected<void> AccountManager::AddAccountAllowedPartition_(
     const std::string& name, const std::string& partition) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
@@ -2132,7 +2145,7 @@ AccountManager::CraneExpected<void> AccountManager::AddAccountAllowedPartition_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::AddAccountAllowedQos_(
+CraneErrCodeExpected<void> AccountManager::AddAccountAllowedQos_(
     const Account& account, const std::string& qos) {
   const std::string& name = account.name;
 
@@ -2162,7 +2175,7 @@ AccountManager::CraneExpected<void> AccountManager::AddAccountAllowedQos_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::SetAccountDescription_(
+CraneErrCodeExpected<void> AccountManager::SetAccountDescription_(
     const std::string& name, const std::string& description) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -2180,7 +2193,7 @@ AccountManager::CraneExpected<void> AccountManager::SetAccountDescription_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::SetAccountDefaultQos_(
+CraneErrCodeExpected<void> AccountManager::SetAccountDefaultQos_(
     const Account& account, const std::string& qos) {
   const std::string& name = account.name;
 
@@ -2199,7 +2212,7 @@ AccountManager::CraneExpected<void> AccountManager::SetAccountDefaultQos_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::SetAccountAllowedPartition_(
+CraneErrCodeExpected<void> AccountManager::SetAccountAllowedPartition_(
     const Account& account, const std::string& partitions) {
   const std::string& name = account.name;
 
@@ -2243,7 +2256,7 @@ AccountManager::CraneExpected<void> AccountManager::SetAccountAllowedPartition_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::SetAccountAllowedQos_(
+CraneErrCodeExpected<void> AccountManager::SetAccountAllowedQos_(
     const Account& account, const std::string& qos_list_str) {
   const std::string& name = account.name;
 
@@ -2312,7 +2325,7 @@ AccountManager::CraneExpected<void> AccountManager::SetAccountAllowedQos_(
   return {};
 }
 
-AccountManager::CraneExpected<void>
+CraneErrCodeExpected<void>
 AccountManager::DeleteAccountAllowedPartition_(const Account& account,
                                                const std::string& partition) {
   mongocxx::client_session::with_transaction_cb callback =
@@ -2329,7 +2342,7 @@ AccountManager::DeleteAccountAllowedPartition_(const Account& account,
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::DeleteAccountAllowedQos_(
+CraneErrCodeExpected<void> AccountManager::DeleteAccountAllowedQos_(
     const Account& account, const std::string& qos) {
   int change_num;
   mongocxx::client_session::with_transaction_cb callback =
@@ -2348,7 +2361,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteAccountAllowedQos_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::BlockUser_(
+CraneErrCodeExpected<void> AccountManager::BlockUser_(
     const std::string& name, const std::string& account, bool block) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
@@ -2366,7 +2379,7 @@ AccountManager::CraneExpected<void> AccountManager::BlockUser_(
   return {};
 }
 
-AccountManager::CraneExpected<void> AccountManager::BlockAccount_(
+CraneErrCodeExpected<void> AccountManager::BlockAccount_(
     const std::string& name, bool block) {
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
