@@ -88,6 +88,8 @@ struct TaskInstance {
   bool IsCrun() const;
   bool IsCalloc() const;
 
+  EnvMap GetTaskEnvMap() const;
+
   crane::grpc::TaskToD task;
 
   PasswordEntry pwd_entry;
@@ -186,7 +188,6 @@ class TaskManager {
   ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
-  // A custom event that handles the ExecuteTask RPC.
   std::atomic<TaskInstance*> m_grpc_execute_task_elem_;
 
   std::atomic_bool m_supervisor_exit_;

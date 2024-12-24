@@ -41,6 +41,58 @@ bool TaskInstance::IsCalloc() const {
   return task.type() == crane::grpc::Interactive &&
          task.interactive_meta().interactive_type() == crane::grpc::Calloc;
 }
+EnvMap TaskInstance::GetTaskEnvMap() const {
+  std::unordered_map<std::string, std::string> env_map;
+  // Crane Env will override user task env;
+  for (auto& [name, value] : this->task.env()) {
+    env_map.emplace(name, value);
+  }
+
+  if (this->task.get_user_env()) {
+    // If --get-user-env is set, the new environment is inherited
+    // from the execution CraneD rather than the submitting node.
+    //
+    // Since we want to reinitialize the environment variables of the user
+    // by reloading the settings in something like .bashrc or /etc/profile,
+    // we are actually performing two steps: login -> start shell.
+    // Shell starting is done by calling "bash --login".
+    //
+    // During shell starting step, the settings in
+    // /etc/profile, ~/.bash_profile, ... are loaded.
+    //
+    // During login step, "HOME" and "SHELL" are set.
+    // Here we are just mimicking the login module.
+
+    // Slurm uses `su <username> -c /usr/bin/env` to retrieve
+    // all the environment variables.
+    // We use a more tidy way.
+    env_map.emplace("HOME", this->pwd_entry.HomeDir());
+    env_map.emplace("SHELL", this->pwd_entry.Shell());
+  }
+
+  env_map.emplace("CRANE_JOB_NODELIST",
+                  absl::StrJoin(this->task.allocated_nodes(), ";"));
+  env_map.emplace("CRANE_EXCLUDES", absl::StrJoin(this->task.excludes(), ";"));
+  env_map.emplace("CRANE_JOB_NAME", this->task.name());
+  env_map.emplace("CRANE_ACCOUNT", this->task.account());
+  env_map.emplace("CRANE_PARTITION", this->task.partition());
+  env_map.emplace("CRANE_QOS", this->task.qos());
+
+  env_map.emplace("CRANE_JOB_ID", std::to_string(this->task.task_id()));
+
+  if (this->IsCrun() && !this->task.interactive_meta().term_env().empty()) {
+    env_map.emplace("TERM", this->task.interactive_meta().term_env());
+  }
+
+  int64_t time_limit_sec = this->task.time_limit().seconds();
+  int hours = time_limit_sec / 3600;
+  int minutes = (time_limit_sec % 3600) / 60;
+  int seconds = time_limit_sec % 60;
+  std::string time_limit =
+      fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
+  env_map.emplace("CRANE_TIMELIMIT", time_limit);
+  return env_map;
+}
 
 TaskManager::TaskManager() : m_supervisor_exit_(false) {
   m_uvw_loop_ = uvw::loop::create();
@@ -533,6 +585,11 @@ CraneErr TaskManager::SpawnTaskInstance_() {
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
+
+    EnvMap task_env_map = instance->GetTaskEnvMap();
+    for (const auto& [name, value] : task_env_map)
+      if (setenv(name.c_str(), value.c_str(), 1))
+        fmt::print("setenv for {}={} failed!\n", name, value);
 
     // Argv[0] is the program name which can be anything.
     argv.emplace_back("CraneScript");

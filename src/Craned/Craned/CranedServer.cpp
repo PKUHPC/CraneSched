@@ -20,7 +20,7 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include "JobManager.h"
+#include "TaskManager.h"
 
 namespace Craned {
 

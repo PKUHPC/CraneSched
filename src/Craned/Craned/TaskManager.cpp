@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "JobManager.h"
+#include "TaskManager.h"
 
 #include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
@@ -31,70 +31,7 @@
 
 namespace Craned {
 
-bool TaskInstance::IsCrun() const {
-  return this->task.type() == crane::grpc::Interactive &&
-         this->task.interactive_meta().interactive_type() == crane::grpc::Crun;
-}
-bool TaskInstance::IsCalloc() const {
-  return this->task.type() == crane::grpc::Interactive &&
-         this->task.interactive_meta().interactive_type() ==
-             crane::grpc::Calloc;
-}
-
-EnvMap TaskInstance::GetTaskEnvMap() const {
-  std::unordered_map<std::string, std::string> env_map;
-  // Crane Env will override user task env;
-  for (auto& [name, value] : this->task.env()) {
-    env_map.emplace(name, value);
-  }
-
-  if (this->task.get_user_env()) {
-    // If --get-user-env is set, the new environment is inherited
-    // from the execution CraneD rather than the submitting node.
-    //
-    // Since we want to reinitialize the environment variables of the user
-    // by reloading the settings in something like .bashrc or /etc/profile,
-    // we are actually performing two steps: login -> start shell.
-    // Shell starting is done by calling "bash --login".
-    //
-    // During shell starting step, the settings in
-    // /etc/profile, ~/.bash_profile, ... are loaded.
-    //
-    // During login step, "HOME" and "SHELL" are set.
-    // Here we are just mimicking the login module.
-
-    // Slurm uses `su <username> -c /usr/bin/env` to retrieve
-    // all the environment variables.
-    // We use a more tidy way.
-    env_map.emplace("HOME", this->pwd_entry.HomeDir());
-    env_map.emplace("SHELL", this->pwd_entry.Shell());
-  }
-
-  env_map.emplace("CRANE_JOB_NODELIST",
-                  absl::StrJoin(this->task.allocated_nodes(), ";"));
-  env_map.emplace("CRANE_EXCLUDES", absl::StrJoin(this->task.excludes(), ";"));
-  env_map.emplace("CRANE_JOB_NAME", this->task.name());
-  env_map.emplace("CRANE_ACCOUNT", this->task.account());
-  env_map.emplace("CRANE_PARTITION", this->task.partition());
-  env_map.emplace("CRANE_QOS", this->task.qos());
-
-  env_map.emplace("CRANE_JOB_ID", std::to_string(this->task.task_id()));
-
-  if (this->IsCrun() && !this->task.interactive_meta().term_env().empty()) {
-    env_map.emplace("TERM", this->task.interactive_meta().term_env());
-  }
-
-  int64_t time_limit_sec = this->task.time_limit().seconds();
-  int hours = time_limit_sec / 3600;
-  int minutes = (time_limit_sec % 3600) / 60;
-  int seconds = time_limit_sec % 60;
-  std::string time_limit =
-      fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
-  env_map.emplace("CRANE_TIMELIMIT", time_limit);
-  return env_map;
-}
-
-JobManager::JobManager() {
+TaskManager::TaskManager() {
   // Only called once. Guaranteed by singleton pattern.
   m_instance_ptr_ = this;
 
@@ -187,17 +124,17 @@ JobManager::JobManager() {
   });
 }
 
-JobManager::~JobManager() {
+TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-const TaskInstance* JobManager::FindInstanceByTaskId_(uint32_t task_id) {
+const TaskInstance* TaskManager::FindInstanceByTaskId_(uint32_t task_id) {
   auto iter = m_task_map_.find(task_id);
   if (iter == m_task_map_.end()) return nullptr;
   return iter->second.get();
 }
 
-void JobManager::EvSigchldCb_() {
+void TaskManager::EvSigchldCb_() {
   assert(m_instance_ptr_->m_instance_ptr_ != nullptr);
 
   int status;
@@ -219,13 +156,13 @@ void JobManager::EvSigchldCb_() {
   }
 }
 
-void JobManager::EvSigintCb_() { m_is_ending_now_ = true; }
+void TaskManager::EvSigintCb_() { m_is_ending_now_ = true; }
 
-void JobManager::Wait() {
+void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-CraneErr JobManager::KillPid_(pid_t pid, int signum) {
+CraneErr TaskManager::KillPid_(pid_t pid, int signum) {
   // Todo: Add timer which sends SIGTERM for those tasks who
   //  will not quit when receiving SIGINT.
   CRANE_TRACE("Killing pid {} with signal {}", pid, signum);
@@ -241,12 +178,12 @@ CraneErr JobManager::KillPid_(pid_t pid, int signum) {
   }
 }
 
-void JobManager::SetSigintCallback(std::function<void()> cb) {
+void TaskManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
 
-CraneErr JobManager::SpawnProcessInInstance_(TaskInstance* instance,
-                                             ProcessInstance* process) {
+CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
+                                       ProcessInstance* process) {
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -411,6 +348,8 @@ CraneErr JobManager::SpawnProcessInInstance_(TaskInstance* instance,
     }
 
     close(ctrl_fd);
+
+    // todo: Create Supervisor stub,request task execution
     return CraneErr::kOk;
 
   AskChildToSuicide:
@@ -474,7 +413,7 @@ CraneErr JobManager::SpawnProcessInInstance_(TaskInstance* instance,
     // keep waiting for the input from stdin or other fds and will never end.
     util::os::CloseFdFrom(3);
 
-    EnvMap task_env_map = instance->GetTaskEnvMap();
+    // Just set job resource env
     EnvMap res_env_map =
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
 
@@ -482,15 +421,9 @@ CraneErr JobManager::SpawnProcessInInstance_(TaskInstance* instance,
       fmt::print("clearenv() failed!\n");
     }
 
-    auto FuncSetEnv =
-        [](const std::unordered_map<std::string, std::string>& v) {
-          for (const auto& [name, value] : v)
-            if (setenv(name.c_str(), value.c_str(), 1))
-              fmt::print("setenv for {}={} failed!\n", name, value);
-        };
-
-    FuncSetEnv(task_env_map);
-    FuncSetEnv(res_env_map);
+    for (const auto& [name, value] : res_env_map)
+      if (setenv(name.c_str(), value.c_str(), 1))
+        fmt::print("setenv for {}={} failed!\n", name, value);
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
@@ -520,7 +453,7 @@ CraneErr JobManager::SpawnProcessInInstance_(TaskInstance* instance,
   }
 }
 
-CraneErr JobManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
+CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   if (!g_cg_mgr->CheckIfCgroupForTasksExists(task.task_id())) {
     CRANE_DEBUG("Executing task #{} without an allocated cgroup. Ignoring it.",
                 task.task_id());
@@ -535,19 +468,13 @@ CraneErr JobManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
   instance->task = task;
 
-  // Create meta for batch or crun tasks.
-  if (instance->task.type() == crane::grpc::Batch)
-    instance->meta = std::make_unique<BatchMetaInTaskInstance>();
-  else
-    instance->meta = std::make_unique<CrunMetaInTaskInstance>();
-
   m_grpc_execute_task_queue_.enqueue(std::move(instance));
   m_grpc_execute_task_async_handle_->send();
 
   return CraneErr::kOk;
 }
 
-void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
+void TaskManager::EvCleanGrpcExecuteTaskQueueCb_() {
   std::unique_ptr<TaskInstance> popped_instance;
 
   while (m_grpc_execute_task_queue_.try_dequeue(popped_instance)) {
@@ -568,7 +495,7 @@ void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
   }
 }
 
-void JobManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
+void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   // This function runs in a multi-threading manner. Take care of thread safety.
   task_id_t task_id = instance->task.task_id();
 
@@ -578,18 +505,6 @@ void JobManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeCgroupError,
         fmt::format("Failed to find created cgroup for task #{}", task_id));
-    return;
-  }
-
-  instance->pwd_entry.Init(instance->task.uid());
-  if (!instance->pwd_entry.Valid()) {
-    CRANE_DEBUG("Failed to look up password entry for uid {} of task #{}",
-                instance->task.uid(), task_id);
-    ActivateTaskStatusChangeAsync_(
-        task_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodePermissionDenied,
-        fmt::format("Failed to look up password entry for uid {} of task #{}",
-                    instance->task.uid(), task_id));
     return;
   }
 
@@ -606,17 +521,13 @@ void JobManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   instance->cgroup = cg;
   instance->cgroup_path = cg->GetCgroupString();
 
-  // Calloc tasks have no scripts to run. Just return.
-  if (instance->IsCalloc()) return;
-
-  auto process =
-      std::make_unique<ProcessInstance>(instance->task);
+  auto process = std::make_unique<ProcessInstance>(instance->task);
 
   // err will NOT be kOk ONLY if fork() is not called due to some failure
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this task, and
   // we should send TaskStatusChange manually.
-  CraneErr err = SpawnProcessInInstance_(instance, process.get());
+  CraneErr err = SpawnSupervisor_(instance, process.get());
   if (err != CraneErr::kOk) {
     ActivateTaskStatusChangeAsync_(
         task_id, crane::grpc::TaskStatus::Failed,
@@ -631,44 +542,11 @@ void JobManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     // SIGCHLD sent just after fork() and before putting pid into maps
     // will repeatedly be sent by timer and eventually be handled once the
     // SIGCHLD processing callback sees the pid in index maps.
-    m_mtx_.Lock();
-    m_pid_task_map_.emplace(process->GetPid(), instance);
-    m_pid_proc_map_.emplace(process->GetPid(), process.get());
-
-    // Move the ownership of ProcessInstance into the TaskInstance.
-    // Make sure existing process can be found when handling SIGCHLD.
-    instance->processes.emplace(process->GetPid(), std::move(process));
-
-    m_mtx_.Unlock();
+    instance->processes.emplace(process->pid, std::move(process));
   }
 }
 
-std::string JobManager::ParseFilePathPattern_(const std::string& path_pattern,
-                                              const std::string& cwd,
-                                              task_id_t task_id) {
-  std::string resolved_path_pattern;
-
-  if (path_pattern.empty()) {
-    // If file path is not specified, first set it to cwd.
-    resolved_path_pattern = fmt::format("{}/", cwd);
-  } else {
-    if (path_pattern[0] == '/')
-      // If output file path is an absolute path, do nothing.
-      resolved_path_pattern = path_pattern;
-    else
-      // If output file path is a relative path, prepend cwd to the path.
-      resolved_path_pattern = fmt::format("{}/{}", cwd, path_pattern);
-  }
-
-  // Path ends with a directory, append default stdout file name
-  // `Crane-<Job ID>.out` to the path.
-  if (absl::EndsWith(resolved_path_pattern, "/"))
-    resolved_path_pattern += fmt::format("Crane-{}.out", task_id);
-
-  return resolved_path_pattern;
-}
-
-void JobManager::EvCleanTaskStatusChangeQueueCb_() {
+void TaskManager::EvCleanTaskStatusChangeQueueCb_() {
   TaskStatusChangeQueueElem status_change;
   while (m_task_status_change_queue_.try_dequeue(status_change)) {
     auto iter = m_task_map_.find(status_change.task_id);
@@ -681,11 +559,6 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
     }
 
     TaskInstance* instance = iter->second.get();
-    if (instance->task.type() == crane::grpc::Batch || instance->IsCrun()) {
-      const std::string& path = instance->meta->parsed_sh_script_path;
-      if (!path.empty())
-        g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
-    }
 
     bool orphaned = instance->orphaned;
 
@@ -697,7 +570,7 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
   }
 }
 
-void JobManager::ActivateTaskStatusChangeAsync_(
+void TaskManager::ActivateTaskStatusChangeAsync_(
     uint32_t task_id, crane::grpc::TaskStatus new_status, uint32_t exit_code,
     std::optional<std::string> reason) {
   TaskStatusChangeQueueElem status_change{task_id, new_status, exit_code};
@@ -707,7 +580,7 @@ void JobManager::ActivateTaskStatusChangeAsync_(
   m_task_status_change_async_handle_->send();
 }
 
-CraneExpected<EnvMap> JobManager::QueryTaskEnvMapAsync(task_id_t task_id) {
+CraneExpected<EnvMap> TaskManager::QueryTaskEnvMapAsync(task_id_t task_id) {
   EvQueueQueryTaskEnvMap elem{.task_id = task_id};
   std::future<CraneExpected<EnvMap>> env_future = elem.env_prom.get_future();
   m_query_task_environment_variables_queue.enqueue(std::move(elem));
@@ -715,7 +588,7 @@ CraneExpected<EnvMap> JobManager::QueryTaskEnvMapAsync(task_id_t task_id) {
   return env_future.get();
 }
 
-void JobManager::EvCleanGrpcQueryTaskEnvQueueCb_() {
+void TaskManager::EvCleanGrpcQueryTaskEnvQueueCb_() {
   EvQueueQueryTaskEnvMap elem;
   while (m_query_task_environment_variables_queue.try_dequeue(elem)) {
     auto task_iter = m_task_map_.find(elem.task_id);
@@ -723,17 +596,17 @@ void JobManager::EvCleanGrpcQueryTaskEnvQueueCb_() {
       elem.env_prom.set_value(std::unexpected(CraneErr::kSystemErr));
     else {
       auto& instance = task_iter->second;
-
-      std::unordered_map<std::string, std::string> env_map;
-      for (const auto& [name, value] : instance->GetTaskEnvMap()) {
-        env_map.emplace(name, value);
-      }
-      elem.env_prom.set_value(env_map);
+      // todo: Forward this to supervisor
+      //  std::unordered_map<std::string, std::string> env_map;
+      //  for (const auto& [name, value] : instance->GetTaskEnvMap()) {
+      //    env_map.emplace(name, value);
+      //  }
+      //  elem.env_prom.set_value(env_map);
     }
   }
 }
 
-CraneExpected<task_id_t> JobManager::QueryTaskIdFromPidAsync(pid_t pid) {
+CraneExpected<task_id_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
   EvQueueQueryTaskIdFromPid elem{.pid = pid};
   std::future<CraneExpected<task_id_t>> task_id_opt_future =
       elem.task_id_prom.get_future();
@@ -742,7 +615,7 @@ CraneExpected<task_id_t> JobManager::QueryTaskIdFromPidAsync(pid_t pid) {
   return task_id_opt_future.get();
 }
 
-void JobManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
+void TaskManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
   EvQueueQueryTaskIdFromPid elem;
   while (m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
     m_mtx_.Lock();
@@ -760,28 +633,27 @@ void JobManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
   }
 }
 
-
-void JobManager::EvCleanTerminateTaskQueueCb_() {
+void TaskManager::EvCleanTerminateTaskQueueCb_() {
   TaskTerminateQueueElem elem;
   while (m_task_terminate_queue_.try_dequeue(elem)) {
     // todo:Just forward to Supervisor
   }
 }
 
-void JobManager::TerminateTaskAsync(uint32_t task_id) {
+void TaskManager::TerminateTaskAsync(uint32_t task_id) {
   TaskTerminateQueueElem elem{.task_id = task_id, .terminated_by_user = true};
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
 }
 
-void JobManager::MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id) {
+void TaskManager::MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id) {
   TaskTerminateQueueElem elem{.task_id = task_id, .mark_as_orphaned = true};
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
 }
 
-bool JobManager::CheckTaskStatusAsync(task_id_t task_id,
-                                      crane::grpc::TaskStatus* status) {
+bool TaskManager::CheckTaskStatusAsync(task_id_t task_id,
+                                       crane::grpc::TaskStatus* status) {
   CheckTaskStatusQueueElem elem{.task_id = task_id};
 
   std::future<std::pair<bool, crane::grpc::TaskStatus>> res{
@@ -797,7 +669,7 @@ bool JobManager::CheckTaskStatusAsync(task_id_t task_id,
   return true;
 }
 
-void JobManager::EvCleanCheckTaskStatusQueueCb_() {
+void TaskManager::EvCleanCheckTaskStatusQueueCb_() {
   CheckTaskStatusQueueElem elem;
   while (m_check_task_status_queue_.try_dequeue(elem)) {
     task_id_t task_id = elem.task_id;
@@ -823,8 +695,8 @@ void JobManager::EvCleanCheckTaskStatusQueueCb_() {
   }
 }
 
-bool JobManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
-                                          absl::Duration time_limit) {
+bool TaskManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
+                                           absl::Duration time_limit) {
   ChangeTaskTimeLimitQueueElem elem{.task_id = task_id,
                                     .time_limit = time_limit};
 
@@ -834,7 +706,7 @@ bool JobManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
   return ok_fut.get();
 }
 
-void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {
+void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   absl::Time now = absl::Now();
 
   ChangeTaskTimeLimitQueueElem elem;
