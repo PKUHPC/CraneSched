@@ -21,19 +21,41 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
+#include <protos/Supervisor.grpc.pb.h>
+
+#include "TaskManager.h"
 #include "crane/AtomicHashMap.h"
 namespace Craned {
 class SupervisorClient {
+ public:
+  CraneExpected<pid_t> ExecuteTask(const ProcessInstance* process);
+  CraneExpected<EnvMap> QueryTaskEnv();
+  CraneErr CheckTaskStatus(crane::grpc::TaskToD* task);
 
-  //todo: Rpc wrap func
+  CraneErr TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
+  CraneErr ChangeTaskTimeLimit(absl::Duration time_limit);
+
+  void InitChannelAndStub(const std::string& endpoint);
+
+ private:
+  std::shared_ptr<grpc::Channel> m_channel_;
+
+  std::unique_ptr<crane::grpc::Supervisor::Stub> m_stub_;
+  // todo: Rpc wrap func
 };
 
 class SupervisorKeeper {
+ public:
+  SupervisorKeeper();
+  void AddSupervisor(task_id_t task_id);
+  std::shared_ptr<SupervisorClient> GetStub(task_id_t task_id);
+
  private:
-  util::AtomicHashMap<absl::flat_hash_map, task_id_t,
-                      std::shared_ptr<SupervisorClient>>
+  void RecoverSupervisorMt_(const std::filesystem::path& path);
+  absl::flat_hash_map<task_id_t, std::shared_ptr<SupervisorClient>>
       m_supervisor_map;
-
-
+  absl::Mutex m_mutex;
 };
 }  // namespace Craned
+
+inline std::unique_ptr<Craned::SupervisorKeeper> g_supervisor_keeper;

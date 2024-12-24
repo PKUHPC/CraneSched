@@ -147,8 +147,8 @@ class TaskManager {
                                  uint32_t exit_code,
                                  std::optional<std::string> reason);
 
-  std::string ParseFilePathPattern_(const std::string& path_pattern,
-                                    const std::string& cwd) const;
+  static std::string ParseFilePathPattern_(const std::string& path_pattern,
+                                           const std::string& cwd);
   void LaunchTaskInstance_();
   CraneErr SpawnTaskInstance_();
   CraneErr KillTaskInstance_(int signum);

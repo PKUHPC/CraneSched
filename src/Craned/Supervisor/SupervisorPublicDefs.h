@@ -25,8 +25,6 @@
 
 namespace Supervisor {
 
-inline constexpr std::string kSupervisorPidFileDir = "/run/crane";
-
 using EnvMap = std::unordered_map<std::string, std::string>;
 
 struct TaskStatusChangeQueueElem {
