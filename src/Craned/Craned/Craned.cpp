@@ -26,10 +26,10 @@
 #include <ctime>
 #include <cxxopts.hpp>
 
-#include "CforedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
+#include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
@@ -105,25 +105,17 @@ void ParseConfig(int argc, char** argv) {
         g_config.CranedDebugLevel = "info";
 
       // spdlog should be initialized as soon as possible
-      spdlog::level::level_enum log_level;
-      if (g_config.CranedDebugLevel == "trace") {
-        log_level = spdlog::level::trace;
-      } else if (g_config.CranedDebugLevel == "debug") {
-        log_level = spdlog::level::debug;
-      } else if (g_config.CranedDebugLevel == "info") {
-        log_level = spdlog::level::info;
-      } else if (g_config.CranedDebugLevel == "warn") {
-        log_level = spdlog::level::warn;
-      } else if (g_config.CranedDebugLevel == "error") {
-        log_level = spdlog::level::err;
+      std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
+      if (log_level.has_value()) {
+        InitLogger(log_level.value(), g_config.CranedLogFile, true);
       } else {
         fmt::print(stderr, "Illegal debug-level format.");
         std::exit(1);
       }
 
-      InitLogger(log_level, g_config.CranedLogFile);
 #ifdef CRANE_ENABLE_BPF
-      Craned::CgroupV2::SetBpfDebugLogLevel(static_cast<uint32_t>(log_level));
+      Craned::CgroupV2::SetBpfDebugLogLevel(
+          static_cast<uint32_t>(log_level.value()));
 #endif
       if (config["CranedUnixSockPath"])
         g_config.CranedUnixSockPath =
@@ -626,7 +618,6 @@ void GlobalVariableInit() {
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
   g_task_mgr = std::make_unique<Craned::TaskManager>();
-
   g_ctld_client = std::make_unique<Craned::CtldClient>();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 
@@ -637,9 +628,8 @@ void GlobalVariableInit() {
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
-
-  g_cfored_manager = std::make_unique<Craned::CforedManager>();
-  g_cfored_manager->Init();
+  // SupervisorKeeper will recover above global var
+  g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
 }
 
 void StartServer() {
@@ -663,10 +653,9 @@ void StartServer() {
   // Free global variables
   g_task_mgr->Wait();
   g_task_mgr.reset();
-  // CforedManager MUST be destructed after TaskManager.
-  g_cfored_manager.reset();
   g_server.reset();
   g_ctld_client.reset();
+  g_supervisor_keeper.reset();
   g_plugin_client.reset();
 
   g_thread_pool->wait();
