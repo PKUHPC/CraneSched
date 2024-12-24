@@ -29,7 +29,7 @@
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
-#include "JobManager.h"
+#include "TaskManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
@@ -617,7 +617,7 @@ void GlobalVariableInit() {
   g_thread_pool =
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
-  g_job_mgr = std::make_unique<Craned::JobManager>();
+  g_job_mgr = std::make_unique<Craned::TaskManager>();
 
   g_ctld_client = std::make_unique<Craned::CtldClient>();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);

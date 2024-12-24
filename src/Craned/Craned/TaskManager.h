@@ -29,45 +29,18 @@
 
 namespace Craned {
 
-struct BatchMetaInProcessInstance {
-  std::string parsed_output_file_pattern;
-  std::string parsed_error_file_pattern;
+// Task execution info
+struct ProcessInstance {
+  crane::grpc::TaskToD task;
+  pid_t pid;
 };
 
-class ProcessInstance {
- public:
-  ProcessInstance(const crane::grpc::TaskToD& task) : m_task_(task) {};
-
- private:
-  crane::grpc::TaskToD m_task_;
-};
-
-struct MetaInTaskInstance {
-  std::string parsed_sh_script_path;
-  virtual ~MetaInTaskInstance() = default;
-};
-
-struct BatchMetaInTaskInstance : MetaInTaskInstance {
-  ~BatchMetaInTaskInstance() override = default;
-};
-
-struct CrunMetaInTaskInstance : MetaInTaskInstance {
-  int msg_fd;
-  ~CrunMetaInTaskInstance() override = default;
-};
-
+// Job related info
 // Todo: Task may consists of multiple subtasks
 struct TaskInstance {
   ~TaskInstance() = default;
 
-  bool IsCrun() const;
-  bool IsCalloc() const;
-  EnvMap GetTaskEnvMap() const;
-
   crane::grpc::TaskToD task;
-
-  PasswordEntry pwd_entry;
-  std::unique_ptr<MetaInTaskInstance> meta;
 
   std::string cgroup_path;
   CgroupInterface* cgroup;
@@ -87,11 +60,11 @@ struct TaskInstance {
  * Especially, outside caller can use SetSigintCallback() to
  * set the callback when SIGINT is triggered.
  */
-class JobManager {
+class TaskManager {
  public:
-  JobManager();
+  TaskManager();
 
-  ~JobManager();
+  ~TaskManager();
 
   CraneErr ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
@@ -158,16 +131,9 @@ class JobManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
-  // todo: Move to Supervisor
-  static std::string ParseFilePathPattern_(const std::string& path_pattern,
-                                           const std::string& cwd,
-                                           task_id_t task_id);
-
   void LaunchTaskInstanceMt_(TaskInstance* instance);
 
-  // todo: Move to Supervisor
-  CraneErr SpawnProcessInInstance_(TaskInstance* instance,
-                                   ProcessInstance* process);
+  CraneErr SpawnSupervisor_(TaskInstance* instance, ProcessInstance* process);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
@@ -297,8 +263,8 @@ class JobManager {
 
   std::thread m_uvw_thread_;
 
-  static inline JobManager* m_instance_ptr_;
+  static inline TaskManager* m_instance_ptr_;
 };
 }  // namespace Craned
 
-inline std::unique_ptr<Craned::JobManager> g_job_mgr;
+inline std::unique_ptr<Craned::TaskManager> g_job_mgr;
