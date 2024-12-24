@@ -57,6 +57,7 @@ enum class CraneErr : uint16_t {
   kProtobufError,
   kLibEventError,
   kNoAvailNode,
+  kSupervisorError,
 
   __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
 };
@@ -87,6 +88,8 @@ inline const char* kDefaultCranedScriptDir = "craned/scripts";
 inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
 inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* kDefaultCranedLogPath = "craned/craned.log";
+
+inline const char* kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 
