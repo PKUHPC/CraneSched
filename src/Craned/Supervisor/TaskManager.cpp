@@ -224,7 +224,7 @@ void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
 }
 
 std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
-                                               const std::string& cwd) const {
+                                               const std::string& cwd) {
   std::string resolved_path_pattern;
 
   if (path_pattern.empty()) {

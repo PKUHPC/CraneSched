@@ -25,6 +25,7 @@
 #include <sys/wait.h>
 
 #include "CtldClient.h"
+#include "SupervisorKeeper.h"
 #include "crane/String.h"
 #include "protos/PublicDefs.pb.h"
 #include "protos/Supervisor.pb.h"
@@ -181,6 +182,7 @@ CraneErr TaskManager::KillPid_(pid_t pid, int signum) {
 void TaskManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
+void TaskManager::AddRecoveredTask_(crane::grpc::TaskToD task) {}
 
 CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
                                        ProcessInstance* process) {
@@ -220,9 +222,6 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
     CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
     return CraneErr::kSystemErr;
   }
-
-  // save the current uid/gid
-  SavedPrivilege saved_priv{getuid(), getgid()};
 
   pid_t child_pid = fork();
 
@@ -274,14 +273,9 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
                   strerror(ostream.GetErrno()));
       close(ctrl_fd);
 
-      // Communication failure caused by process crash or grpc error.
-      // Since now the parent cannot ask the child
-      // process to commit suicide, kill child process here and just return.
-      // The child process will be reaped in SIGCHLD handler and
-      // thus only ONE TaskStatusChange will be triggered!
       instance->err_before_exec = CraneErr::kProtobufError;
       KillPid_(child_pid, SIGKILL);
-      return CraneErr::kOk;
+      return CraneErr::kProtobufError;
     }
 
     ok = ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream,
@@ -295,10 +289,9 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
                     instance->task.task_id());
       close(ctrl_fd);
 
-      // See comments above.
       instance->err_before_exec = CraneErr::kProtobufError;
       KillPid_(child_pid, SIGKILL);
-      return CraneErr::kOk;
+      return CraneErr::kProtobufError;
     }
 
     // Do Supervisor Init
@@ -320,14 +313,9 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
                   strerror(ostream.GetErrno()));
       close(ctrl_fd);
 
-      // Communication failure caused by process crash or grpc error.
-      // Since now the parent cannot ask the child
-      // process to commit suicide, kill child process here and just return.
-      // The child process will be reaped in SIGCHLD handler and
-      // thus only ONE TaskStatusChange will be triggered!
       instance->err_before_exec = CraneErr::kProtobufError;
       KillPid_(child_pid, SIGKILL);
-      return CraneErr::kOk;
+      return CraneErr::kProtobufError;
     }
 
     crane::grpc::SupervisorReady supervisor_ready;
@@ -341,7 +329,6 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
                     instance->task.task_id());
       close(ctrl_fd);
 
-      // See comments above.
       instance->err_before_exec = CraneErr::kProtobufError;
       KillPid_(child_pid, SIGKILL);
       return CraneErr::kOk;
@@ -350,6 +337,19 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
     close(ctrl_fd);
 
     // todo: Create Supervisor stub,request task execution
+    g_supervisor_keeper->AddSupervisor(instance->task.task_id());
+
+    auto stub = g_supervisor_keeper->GetStub(instance->task.task_id());
+    auto task_id = stub->ExecuteTask(process);
+    if (!task_id) {
+      CRANE_ERROR("Supervisor failed to execute task #{}",
+                  instance->task.task_id());
+      instance->err_before_exec = CraneErr::kSupervisorError;
+      KillPid_(child_pid, SIGKILL);
+      return CraneErr::kSupervisorError;
+    }
+    process->pid = task_id.value();
+
     return CraneErr::kOk;
 
   AskChildToSuicide:
@@ -596,12 +596,21 @@ void TaskManager::EvCleanGrpcQueryTaskEnvQueueCb_() {
       elem.env_prom.set_value(std::unexpected(CraneErr::kSystemErr));
     else {
       auto& instance = task_iter->second;
-      // todo: Forward this to supervisor
-      //  std::unordered_map<std::string, std::string> env_map;
-      //  for (const auto& [name, value] : instance->GetTaskEnvMap()) {
-      //    env_map.emplace(name, value);
-      //  }
-      //  elem.env_prom.set_value(env_map);
+      auto stub = g_supervisor_keeper->GetStub(instance->task.task_id());
+      if (!stub) {
+        CRANE_ERROR("Supervisor for task #{} not found",
+                    instance->task.task_id());
+        elem.env_prom.set_value(std::unexpected(CraneErr::kSupervisorError));
+        continue;
+      }
+      auto env_map = stub->QueryTaskEnv();
+      if (!env_map) {
+        CRANE_ERROR("Failed to query env map for task #{}",
+                    instance->task.task_id());
+        elem.env_prom.set_value(std::unexpected(CraneErr::kSupervisorError));
+        continue;
+      }
+      elem.env_prom.set_value(env_map);
     }
   }
 }
@@ -636,7 +645,51 @@ void TaskManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
 void TaskManager::EvCleanTerminateTaskQueueCb_() {
   TaskTerminateQueueElem elem;
   while (m_task_terminate_queue_.try_dequeue(elem)) {
-    // todo:Just forward to Supervisor
+    CRANE_TRACE(
+        "Receive TerminateRunningTask Request from internal queue. "
+        "Task id: {}",
+        elem.task_id);
+
+    auto iter = m_task_map_.find(elem.task_id);
+    if (iter == m_task_map_.end()) {
+      CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
+
+      // Note if Ctld wants to terminate some tasks that are not running,
+      // it might indicate other nodes allocated to the task might have
+      // crashed. We should mark the task as kind of not runnable by removing
+      // its cgroup.
+      //
+      // Considering such a situation:
+      // In Task Scheduler of Ctld,
+      // the task index from node id to task id have just been added and
+      // Ctld are sending CreateCgroupForTasks.
+      // Right at the moment, one Craned allocated to this task and
+      // designated as the executing node crashes,
+      // but it has been sent a CreateCgroupForTasks and replied.
+      // Then the CranedKeeper search the task index and
+      // send TerminateTasksOnCraned to all Craned allocated to this task
+      // including this node.
+      // In order to give Ctld kind of feedback without adding complicated
+      // synchronizing mechanism in ScheduleThread_(),
+      // we just remove the cgroup for such task, Ctld will fail in the
+      // following ExecuteTasks and the task will go to the right place as
+      // well as the completed queue.
+      g_cg_mgr->ReleaseCgroupByTaskIdOnly(elem.task_id);
+      continue;
+    }
+    auto* instance = iter->second.get();
+    instance->orphaned = elem.mark_as_orphaned;
+
+    auto stub = g_supervisor_keeper->GetStub(elem.task_id);
+    if (!stub) {
+      CRANE_ERROR("Supervisor for task #{} not found", elem.task_id);
+      continue;
+    }
+    auto err =
+        stub->TerminateTask(elem.mark_as_orphaned, elem.terminated_by_user);
+    if (err != CraneErr::kOk) {
+      CRANE_ERROR("Failed to terminate task #{}", elem.task_id);
+    }
   }
 }
 
@@ -713,7 +766,17 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
     auto iter = m_task_map_.find(elem.task_id);
     if (iter != m_task_map_.end()) {
-      // todo: Forward Rpc to Supervisor
+      auto stub = g_supervisor_keeper->GetStub(elem.task_id);
+      if (!stub) {
+        CRANE_ERROR("Supervisor for task #{} not found", elem.task_id);
+        continue;
+      }
+      auto err = stub->ChangeTaskTimeLimit(elem.time_limit);
+      if (err != CraneErr::kOk) {
+        CRANE_ERROR("Failed to change task time limit for task #{}",
+                    elem.task_id);
+        continue;
+      }
       elem.ok_prom.set_value(true);
     } else {
       CRANE_ERROR("Try to update the time limit of a non-existent task #{}.",

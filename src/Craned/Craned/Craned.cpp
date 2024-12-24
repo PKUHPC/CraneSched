@@ -29,7 +29,7 @@
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
-#include "TaskManager.h"
+#include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
@@ -617,8 +617,7 @@ void GlobalVariableInit() {
   g_thread_pool =
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
-  g_job_mgr = std::make_unique<Craned::TaskManager>();
-
+  g_task_mgr = std::make_unique<Craned::TaskManager>();
   g_ctld_client = std::make_unique<Craned::CtldClient>();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 
@@ -629,6 +628,8 @@ void GlobalVariableInit() {
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
+  // SupervisorKeeper will recover above global var
+  g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
 }
 
 void StartServer() {
@@ -650,12 +651,11 @@ void StartServer() {
   g_server->Wait();
 
   // Free global variables
-  g_job_mgr->Wait();
-  g_job_mgr.reset();
-  // CforedManager MUST be destructed after JobManager.
-  g_cfored_manager.reset();
+  g_task_mgr->Wait();
+  g_task_mgr.reset();
   g_server.reset();
   g_ctld_client.reset();
+  g_supervisor_keeper.reset();
   g_plugin_client.reset();
 
   g_thread_pool->wait();

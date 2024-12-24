@@ -48,8 +48,6 @@ struct TaskInstance {
   // Task execution results
   bool orphaned{false};
   CraneErr err_before_exec{CraneErr::kOk};
-  bool cancelled_by_user{false};
-  bool terminated_by_timeout{false};
 
   absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
 };
@@ -72,16 +70,12 @@ class TaskManager {
 
   CraneExpected<EnvMap> QueryTaskEnvMapAsync(task_id_t task_id);
 
-  // todo: Send Rpc to Supervisor
   void TerminateTaskAsync(uint32_t task_id);
 
-  // todo: Send Rpc to Supervisor
   void MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id);
 
-  // todo: Send Rpc to Supervisor
   bool CheckTaskStatusAsync(task_id_t task_id, crane::grpc::TaskStatus* status);
 
-  // todo: Send Rpc to Supervisor
   bool ChangeTaskTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
 
   // Wait internal libevent base loop to exit...
@@ -94,14 +88,12 @@ class TaskManager {
    */
   void SetSigintCallback(std::function<void()> cb);
 
+  // Called from SupervisorKeeper which guarantee no data race.
+  void AddRecoveredTask_(crane::grpc::TaskToD task);
+
  private:
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
-
-  struct SavedPrivilege {
-    uid_t uid;
-    gid_t gid;
-  };
 
   struct EvQueueQueryTaskIdFromPid {
     std::promise<CraneExpected<task_id_t>> task_id_prom;
@@ -267,4 +259,4 @@ class TaskManager {
 };
 }  // namespace Craned
 
-inline std::unique_ptr<Craned::TaskManager> g_job_mgr;
+inline std::unique_ptr<Craned::TaskManager> g_task_mgr;
