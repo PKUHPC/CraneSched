@@ -395,6 +395,14 @@ install(TARGETS craned
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
 )
 
+if(ENABLE_BPF)
+    install(FILES 
+            ${CMAKE_BINARY_DIR}/src/Misc/BPF/cgroup_dev_bpf.o
+            DESTINATION /usr/local/lib64/bpf/
+            COMPONENT cranedc
+            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
+endif()
+
 # Install unit files
 install(FILES
         ${CMAKE_BINARY_DIR}/etc/cranectld.service
@@ -409,14 +417,6 @@ install(FILES
         PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 # Install configuration files
-if(ENABLE_BPF)
-    install(FILES 
-            ${CMAKE_BINARY_DIR}/src/Misc/BPF/cgroup_dev_bpf.o
-            DESTINATION /usr/local/lib64/bpf/
-            COMPONENT cranedc
-            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
-endif()
-
 install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         DESTINATION /etc/crane/
         COMPONENT cranectldc
@@ -448,6 +448,7 @@ set(CPACK_PACKAGE_DESCRIPTION "An HPC and Cloud Computing Fused Job Scheduling S
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CMAKE_PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+
 # Do not allow the package to be relocated
 set(CPACK_PACKAGE_RELOCATABLE OFF)
 
@@ -455,9 +456,11 @@ set(CPACK_PACKAGE_RELOCATABLE OFF)
 set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
 set(CPACK_RPM_PACKAGE_LICENSE "AGPL v3")
 set(CPACK_RPM_COMPRESSION_TYPE "xz")
-#TODO CPACK_PACKAGE_DESCRIPTION
+
 # DEB
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_COMPRESSION_TYPE "xz")
+# Seperate the debuginfo to avoid large DEB package
+set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
 
 include(CPack)
