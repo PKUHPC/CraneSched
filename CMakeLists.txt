@@ -43,9 +43,18 @@ if (VERSION_CONTENT STREQUAL "")
     set(CMAKE_PROJECT_VERSION "0.0.0")
 endif ()
 
+# If ccache is found, set it as the compiler launcher
+find_program(CCACHE_PROGRAM ccache)
+if (CCACHE_PROGRAM)
+    message(STATUS "ccache found. Use ccache to launch compilers.")
+    set_property(GLOBAL PROPERTY CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set_property(GLOBAL PROPERTY CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+endif ()
+
 project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
-# check and set compiler
-set(REQUIRED_GNU_VERSION 13.0.0)
+
+# Check and set compiler
+set(REQUIRED_GNU_VERSION 14.0.0)
 set(REQUIRED_CLANG_VERSION 19.0.0)
 set(REQUIRED_BPF_CLANG_VERSION 17.0.0)
 
@@ -250,13 +259,6 @@ if (supported)
     endif ()
 else ()
     message(STATUS "IPO / LTO not supported: <${error}>")
-endif ()
-
-find_program(CCACHE_PROGRAM ccache)
-if (CCACHE_PROGRAM)
-    message(STATUS "ccache found. Use ccache to launch compilers.")
-    set_property(GLOBAL PROPERTY CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-    set_property(GLOBAL PROPERTY CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
 endif ()
 
 if (${CRANE_FULL_DYNAMIC})
