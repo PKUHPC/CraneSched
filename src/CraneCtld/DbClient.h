@@ -177,6 +177,14 @@ class MongodbClient {
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
 
+  bool UpsertNodeNICInfo(const std::string& node_name, 
+                        const std::string& nic_name,
+                        const std::string& mac_addr);
+                        
+  bool GetNodeNICInfo(const std::string& node_name,
+                      std::string* nic_name,
+                      std::string* mac_addr);
+
  private:
   static void PrintError_(
       const char* msg,
@@ -232,6 +240,8 @@ class MongodbClient {
   mongocxx::write_concern m_wc_majority_{};
   mongocxx::read_concern m_rc_local_{};
   mongocxx::read_preference m_rp_primary_{};
+
+  const std::string m_node_nic_collection_name_{"node_nic_info"};
 };
 
 template <>

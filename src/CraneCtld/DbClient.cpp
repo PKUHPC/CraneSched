@@ -975,4 +975,58 @@ MongodbClient::MongodbClient() {
   m_rp_primary_.mode(mongocxx::read_preference::read_mode::k_primary);
 }
 
+bool MongodbClient::UpsertNodeNICInfo(const std::string& node_name, 
+                                     const std::string& nic_name,
+                                     const std::string& mac_addr) {
+  using bsoncxx::builder::basic::kvp;
+  document doc, filter;
+
+  filter.append(kvp("name", node_name));
+  
+  doc.append(
+    kvp("$set", [&](sub_document subdoc) {
+      subdoc.append(kvp("name", node_name));
+      subdoc.append(kvp("nic_name", nic_name));
+      subdoc.append(kvp("mac_addr", mac_addr));
+      subdoc.append(kvp("mod_time", ToUnixSeconds(absl::Now())));
+    })
+  );
+
+  mongocxx::options::update options;
+  options.upsert(true);
+
+  bsoncxx::stdx::optional<mongocxx::result::update> result =
+      (*GetClient_())[m_db_name_][m_node_nic_collection_name_].update_one(
+          *GetSession_(), 
+          filter.view(), 
+          doc.view(),
+          options);
+
+  if (!result) {
+    CRANE_ERROR("Failed to update NIC info for node {}", node_name);
+    return false;
+  }
+  return true;
+}
+
+bool MongodbClient::GetNodeNICInfo(const std::string& node_name,
+                                  std::string* nic_name,
+                                  std::string* mac_addr) {
+  using bsoncxx::builder::basic::kvp;
+  document filter;
+  filter.append(kvp("name", node_name));
+
+  bsoncxx::stdx::optional<bsoncxx::document::value> result =
+      (*GetClient_())[m_db_name_][m_node_nic_collection_name_].find_one(
+          *GetSession_(), filter.view());
+
+  if (result) {
+    bsoncxx::document::view node_view = result->view();
+    if (nic_name) *nic_name = node_view["nic_name"].get_string().value.data();
+    if (mac_addr) *mac_addr = node_view["mac_addr"].get_string().value.data();
+    return true;
+  }
+  return false;
+}
+
 }  // namespace Ctld

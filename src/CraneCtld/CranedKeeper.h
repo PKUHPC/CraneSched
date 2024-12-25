@@ -60,7 +60,13 @@ class CranedStub {
 
   CraneErr QueryCranedRemoteMeta(CranedRemoteMeta *meta);
 
+  CraneErr QueryCranedNICInfo(CranedRemoteMeta *meta);
+
+  CraneErr SuspendCraned();
+
   bool Invalid() const { return m_invalid_; }
+
+  std::string GetCranedIp() const { return m_craned_ip_; }
 
  private:
   CranedKeeper *m_craned_keeper_;
@@ -77,6 +83,7 @@ class CranedStub {
   uint32_t m_failure_retry_times_;
 
   CranedId m_craned_id_;
+  std::string m_craned_ip_;
 
   // void* parameter is m_data_. Used to free m_data_ when CranedStub is being
   // destructed.

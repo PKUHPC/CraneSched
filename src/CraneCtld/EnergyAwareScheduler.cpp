@@ -25,77 +25,7 @@
 
 namespace Ctld {
 
-std::vector<task_id_t> EnergyAwarePriority::GetOrderedTaskIdList(
-    const OrderedTaskMap& pending_task_map,
-    const UnorderedTaskMap& running_task_map, size_t limit) {
-  CRANE_DEBUG("Starting task prioritization for {} pending tasks, limit={}",
-              pending_task_map.size(), limit);
-
-  std::vector<std::pair<TaskInCtld*, double>> task_scores;
-  task_scores.reserve(pending_task_map.size());
-
-  for (const auto& [task_id, task] : pending_task_map) {
-    if (task->Held()) {
-      task->pending_reason = "Held";
-      CRANE_DEBUG("Task #{} is held, skipping", task_id);
-      continue;
-    }
-
-    double score = CalculateTaskEnergyScore_(task.get());
-    task->cached_priority = score;
-    task->pending_reason = "Priority";
-    task_scores.emplace_back(task.get(), score);
-
-    CRANE_DEBUG("Task #{} received score: {:.6f}", task_id, score);
-  }
-
-  std::sort(task_scores.begin(), task_scores.end(),
-            [](const auto& a, const auto& b) { return a.second > b.second; });
-
-  size_t result_size = std::min(limit, task_scores.size());
-  std::vector<task_id_t> result;
-  result.reserve(result_size);
-
-  CRANE_DEBUG("Selected top {} tasks from {} candidates", result_size,
-              task_scores.size());
-
-  for (size_t i = 0; i < result_size; i++) {
-    result.push_back(task_scores[i].first->TaskId());
-    CRANE_DEBUG("Position {}: Task #{} (score: {:.6f})", i + 1,
-                task_scores[i].first->TaskId(), task_scores[i].second);
-  }
-
-  return result;
-}
-
-double EnergyAwarePriority::CalculateTaskEnergyScore_(TaskInCtld* task) const {
-  CRANE_DEBUG("Calculating energy score for Task #{}", task->TaskId());
-
-  double historical_efficiency = GetHistoricalTaskEnergyEfficiency_(task);
-  double resource_demand =
-      task->requested_node_res_view.CpuCount() +
-      task->requested_node_res_view.MemoryBytes() / (1024.0 * 1024.0 * 1024.0);
-
-  double score = historical_efficiency / resource_demand;
-
-  CRANE_DEBUG(
-      "Task #{}: efficiency={:.6f}, resource_demand={:.2f}, final_score={:.6f}",
-      task->TaskId(), historical_efficiency, resource_demand, score);
-
-  return score;
-}
-
-double EnergyAwarePriority::GetHistoricalTaskEnergyEfficiency_(
-    const TaskInCtld* task) const {
-  double requested_cpu = task->requested_node_res_view.CpuCount();
-  double requested_mem_gb =
-      task->requested_node_res_view.MemoryBytes() / (1024.0 * 1024.0 * 1024.0);
-
-  return m_influx_client_.QueryTaskEnergyEfficiency(requested_cpu,
-                                                    requested_mem_gb);
-}
-
-void EnergyAwareNodeSelect::NodeSelect(
+void EnergyAwareScheduler::NodeSelect(
     const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>&
         running_tasks,
     absl::btree_map<task_id_t, std::unique_ptr<TaskInCtld>>* pending_task_map,
@@ -117,8 +47,8 @@ void EnergyAwareNodeSelect::NodeSelect(
 
   CRANE_DEBUG("Found {} total nodes in system", all_craned_ids.size());
 
-  std::unordered_map<CranedId, NodeEnergyInfo> energy_info;
-  UpdateNodeEnergyInfo_(all_craned_ids, &energy_info);
+  std::unordered_map<CranedId, NodeStatsInfo> energy_info;
+  UpdateNodeStatsInfo_(all_craned_ids, &energy_info);
 
   for (task_id_t task_id : ordered_task_ids) {
     auto task_it = pending_task_map->find(task_id);
@@ -157,6 +87,7 @@ void EnergyAwareNodeSelect::NodeSelect(
           break;
 
         case CranedState::WakingUp:
+        case CranedState::PreparingSleep:
         case CranedState::PoweringUp:
         case CranedState::ShuttingDown:
           CRANE_DEBUG("Node {} is in transition state ({})", craned_id,
@@ -216,23 +147,23 @@ void EnergyAwareNodeSelect::NodeSelect(
   }
 }
 
-void EnergyAwareNodeSelect::UpdateNodeEnergyInfo_(
+void EnergyAwareScheduler::UpdateNodeStatsInfo_(
     const std::unordered_set<CranedId>& craned_ids,
-    std::unordered_map<CranedId, NodeEnergyInfo>* energy_info) {
+    std::unordered_map<CranedId, NodeStatsInfo>* energy_info) {
   CRANE_DEBUG("Updating energy info for {} nodes", craned_ids.size());
 
   try {
     for (const CranedId& node_id : craned_ids) {
-      NodeEnergyInfo& info = (*energy_info)[node_id];
-      UpdateSingleNodeEnergyInfo_(node_id, &info);
+      NodeStatsInfo& info = (*energy_info)[node_id];
+      UpdateSingleNodeStatsInfo_(node_id, &info);
     }
   } catch (const std::exception& e) {
     CRANE_ERROR("Failed to update node energy info: {}", e.what());
   }
 }
 
-bool EnergyAwareNodeSelect::UpdateSingleNodeEnergyInfo_(const CranedId& node_id,
-                                                        NodeEnergyInfo* info) {
+bool EnergyAwareScheduler::UpdateSingleNodeStatsInfo_(const CranedId& node_id,
+                                                        NodeStatsInfo* info) {
   CRANE_DEBUG("Updating energy info for node {}", node_id);
 
   bool recent_ok = m_influx_client_.QueryNodeEnergyInfo(
@@ -243,28 +174,17 @@ bool EnergyAwareNodeSelect::UpdateSingleNodeEnergyInfo_(const CranedId& node_id,
       node_id, absl::ToInt64Seconds(m_config_.historical_stats_window),
       &info->historical_stats);
 
-  // 这里多次一举，直接查询窗口内累计能耗就可以了
-  if (history_ok) {
-    info->historical_stats.total_energy =
-        info->historical_stats.avg_power *
-        absl::ToDoubleSeconds(m_config_.historical_stats_window);
-  }
-
   return recent_ok && history_ok;
 }
 
-double EnergyAwareNodeSelect::CalculateNodeScore_(
-    const NodeEnergyInfo& info) const {
-  CRANE_DEBUG(
-      "Calculating node score - Current Power: {:.2f}W, Historical Power: "
-      "{:.2f}W",
-      info.recent_stats.avg_power, info.historical_stats.avg_power);
+// TODO: Training the scoring model
+double EnergyAwareScheduler::CalculateNodeScore_(
+    const NodeStatsInfo& info) const {
+  double recent_score = 1.0 - (info.recent_stats.total_energy / 300.0);
+  double history_score = 1.0 - (info.historical_stats.total_energy / 300.0);
 
-  double recent_score = 1.0 - (info.recent_stats.avg_power / 300.0);
-  double history_score = 1.0 - (info.historical_stats.avg_power / 300.0);
-
-  double final_score = m_config_.weight_current_power * recent_score +
-                       m_config_.weight_historical_power * history_score;
+  double final_score = m_config_.weight_current * recent_score +
+                       m_config_.weight_historical * history_score;
 
   CRANE_DEBUG(
       "Score components - Recent: {:.3f}, History: {:.3f}, Final: {:.3f}",
@@ -273,7 +193,7 @@ double EnergyAwareNodeSelect::CalculateNodeScore_(
   return final_score;
 }
 
-void EnergyAwareNodeSelect::SelectNodesFromCandidates_(
+void EnergyAwareScheduler::SelectNodesFromCandidates_(
     const std::vector<std::pair<double, CranedId>>& candidates,
     CranedState node_state, TaskInCtld* task,
     const CranedMetaContainer::CranedMetaMapConstPtr& craned_meta,
@@ -318,9 +238,9 @@ void EnergyAwareNodeSelect::SelectNodesFromCandidates_(
   }
 }
 
-std::list<CranedId> EnergyAwareNodeSelect::SelectBestNodes_(
+std::list<CranedId> EnergyAwareScheduler::SelectBestNodes_(
     TaskInCtld* task,
-    const std::unordered_map<CranedId, NodeEnergyInfo>& energy_info) {
+    const std::unordered_map<CranedId, NodeStatsInfo>& stats_info) {
   CRANE_DEBUG("Selecting nodes for Task #{}, requires {} nodes", task->TaskId(),
               task->node_num);
 
@@ -329,11 +249,12 @@ std::list<CranedId> EnergyAwareNodeSelect::SelectBestNodes_(
   std::vector<std::pair<double, CranedId>> running_candidates;
   std::vector<std::pair<double, CranedId>> sleeped_candidates;
   std::vector<std::pair<double, CranedId>> shutdown_candidates;
-  std::vector<std::pair<double, CranedId>> waking_candidates;
-  std::vector<std::pair<double, CranedId>> powering_candidates;
-  std::vector<std::pair<double, CranedId>> shutting_candidates;
+  int waking_up_candidates_count = 0;
+  int preparing_sleep_candidates_count = 0;
+  int powering_up_candidates_count = 0;
+  int shutting_down_candidates_count = 0;
 
-  for (const auto& [craned_id, info] : energy_info) {
+  for (const auto& [craned_id, info] : stats_info) {
     auto node_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
 
     if (!(task->requested_node_res_view <= node_meta->static_meta.res)) {
@@ -376,24 +297,21 @@ std::list<CranedId> EnergyAwareNodeSelect::SelectBestNodes_(
           "Added shutdown node {} to shutdown candidates, score: {:.3f}",
           craned_id, score);
       break;
+    case CranedState::PreparingSleep:
+      preparing_sleep_candidates_count++;
+      CRANE_DEBUG("Preparing sleep node {}, score: {:.3f}", craned_id, score);
+      break;
     case CranedState::WakingUp:
-      waking_candidates.emplace_back(score, craned_id);
-      CRANE_DEBUG(
-          "Added waking up node {} to waking up candidates, score: {:.3f}",
-          craned_id, score);
+      waking_up_candidates_count++;
+      CRANE_DEBUG("Waking up node {}, score: {:.3f}", craned_id, score);
       break;
     case CranedState::PoweringUp:
-      powering_candidates.emplace_back(score, craned_id);
-      CRANE_DEBUG(
-          "Added powering up node {} to powering up candidates, score: {:.3f}",
-          craned_id, score);
+      powering_up_candidates_count++;
+      CRANE_DEBUG("Powering up node {}, score: {:.3f}", craned_id, score);
       break;
     case CranedState::ShuttingDown:
-      shutting_candidates.emplace_back(score, craned_id);
-      CRANE_DEBUG(
-          "Added shutting down node {} to shutting down candidates, score: "
-          "{:.3f}",
-          craned_id, score);
+      shutting_down_candidates_count++;
+      CRANE_DEBUG("Shutting down node {}, score: {:.3f}", craned_id, score);
       break;
     case CranedState::Unknown:
       CRANE_WARN("Node {} in unknown state, skipping", craned_id);
@@ -415,8 +333,8 @@ std::list<CranedId> EnergyAwareNodeSelect::SelectBestNodes_(
       "Found {} running, {} sleeped, {} shutdown, {} waking, {} powering, {} "
       "shutting candidates for Task #{}",
       running_candidates.size(), sleeped_candidates.size(),
-      shutdown_candidates.size(), waking_candidates.size(),
-      powering_candidates.size(), shutting_candidates.size(), task->TaskId());
+      shutdown_candidates.size(), waking_up_candidates_count, powering_up_candidates_count,
+      shutting_down_candidates_count, task->TaskId());
 
   if (!running_candidates.empty()) {
     CRANE_DEBUG("Selecting nodes from active candidates for task #{}",

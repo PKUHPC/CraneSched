@@ -255,6 +255,46 @@ CraneErr CranedStub::QueryCranedRemoteMeta(CranedRemoteMeta *meta) {
   return CraneErr::kGenericFailure;
 }
 
+CraneErr CranedStub::QueryCranedNICInfo(CranedRemoteMeta *meta) {
+  using crane::grpc::QueryCranedNICInfoReply;
+  using crane::grpc::QueryCranedNICInfoRequest;
+  ClientContext context;
+  Status grpc_status;
+
+  QueryCranedNICInfoRequest request;
+  QueryCranedNICInfoReply reply;
+
+  auto status = m_stub_->QueryCranedNICInfo(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR("Failed to query NIC info for craned {}: {}", m_craned_id_,
+                status.error_message());
+    return CraneErr::kRpcFailure;
+  }
+
+  meta->nic.interface_name = reply.interface_name();
+  meta->nic.mac_address = reply.mac_address();
+  return CraneErr::kOk;
+}
+
+CraneErr CranedStub::SuspendCraned() {
+  using crane::grpc::SuspendCranedReply;
+  using crane::grpc::SuspendCranedRequest;
+
+  ClientContext context;
+  Status status;
+  SuspendCranedRequest request;
+  SuspendCranedReply reply;
+
+  status = m_stub_->SuspendCraned(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR("SuspendCraned RPC for Node {} returned with status not ok: {}",
+                m_craned_id_, status.error_message());
+    return CraneErr::kRpcFailure;
+  }
+
+  return CraneErr::kOk;
+}
+
 crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
     const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks) {
   crane::grpc::ExecuteTasksRequest request;
@@ -726,6 +766,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
   craned->m_stub_ = crane::grpc::Craned::NewStub(craned->m_channel_);
 
   craned->m_craned_id_ = craned_id;
+  craned->m_craned_ip_ = ip_addr;
   craned->m_clean_up_cb_ = CranedChannelConnectFail_;
 
   CqTag *tag = m_tag_sync_allocator_->new_object<CqTag>(

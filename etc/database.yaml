@@ -11,3 +11,10 @@ DbHost: localhost
 DbPort: 27017
 DbReplSetName: crane_rs
 DbName: crane_db
+
+# InfluxDB settings
+InfluxDbUrl: YOUR_INFLUXDB_URL
+InfluxDbToken: "YOUR_INFLUXDB_TOKEN"
+InfluxDbOrg: YOUR_INFLUXDB_ORG
+InfluxDbNodeBucket: YOUR_INFLUXDB_NODE_BUCKET
+InfluxDbTaskBucket: YOUR_INFLUXDB_TASK_BUCKET

@@ -41,7 +41,7 @@ TaskScheduler::TaskScheduler() {
   // m_node_selection_algo_ =
   //     std::make_unique<MinLoadFirst>(m_priority_sorter_.get());
   m_node_selection_algo_ =
-      std::make_unique<EnergyAwareNodeSelect>(m_priority_sorter_.get());
+      std::make_unique<EnergyAwareScheduler>(m_priority_sorter_.get());
 }
 
 TaskScheduler::~TaskScheduler() {

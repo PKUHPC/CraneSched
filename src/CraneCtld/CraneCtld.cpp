@@ -362,17 +362,14 @@ void ParseConfig(int argc, char** argv) {
 
           if (node["bmc"]) {
             auto bmc = node["bmc"].as<YAML::Node>();
+            // TODO: Communicate how to set the BMC IP address format.
             node_ptr->bmc.ip = bmc["ip"].as<std::string>();
-            node_ptr->bmc.port = bmc["port"].as<uint32_t>();
             node_ptr->bmc.username = bmc["username"].as<std::string>();
             node_ptr->bmc.password = bmc["password"].as<std::string>();
-            node_ptr->bmc.interface = bmc["interface"].as<std::string>();
           }
 
           if (node["ssh"]) {
             auto ssh = node["ssh"].as<YAML::Node>();
-            node_ptr->ssh.ip = ssh["ip"].as<std::string>();
-            node_ptr->ssh.port = ssh["port"].as<uint32_t>();
             node_ptr->ssh.username = ssh["username"].as<std::string>();
             node_ptr->ssh.password = ssh["password"].as<std::string>();
           }

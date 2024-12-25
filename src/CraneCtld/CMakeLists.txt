@@ -59,7 +59,6 @@ target_link_libraries(cranectld PRIVATE
 
         Backward::Interface
         
-        influxdb_cpp
         CURL::libcurl 
         fast_cpp_csv_parser
         ssh

@@ -101,6 +101,16 @@ class CranedServiceImpl : public Craned::Service {
       grpc::ServerContext *context,
       const ::crane::grpc::QueryCranedRemoteMetaRequest *request,
       crane::grpc::QueryCranedRemoteMetaReply *response) override;
+
+  grpc::Status QueryCranedNICInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryCranedNICInfoRequest *request,
+      crane::grpc::QueryCranedNICInfoReply *response) override;
+
+  grpc::Status SuspendCraned(
+      grpc::ServerContext *context,
+      const crane::grpc::SuspendCranedRequest *request,
+      crane::grpc::SuspendCranedReply *response) override;
 };
 
 class CranedServer {

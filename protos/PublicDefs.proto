@@ -85,9 +85,10 @@ enum CranedResourceState {
   CRANE_MIX = 2;         
 
   // Not Running
-  CRANE_SLEEPED = 4;     
-  CRANE_SHUTDOWN = 5;    
-  CRANE_WAKING_UP = 6;   
+  CRANE_SLEEPED = 3;     
+  CRANE_SHUTDOWN = 4;    
+  CRANE_WAKING_UP = 5;   
+  CRANE_PREPARING_SLEEP = 6;
   CRANE_POWERING_UP = 7; 
   CRANE_SHUTTING_DOWN = 8;
   CRANE_UNKNOWN = 9;     

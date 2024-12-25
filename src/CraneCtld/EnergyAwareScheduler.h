@@ -21,43 +21,28 @@
 #include "CtldPublicDefs.h"
 #include "InfluxDBClient.h"
 #include "TaskScheduler.h"
+
 namespace Ctld {
-struct NodeEnergyInfo {
+struct NodeStatsInfo {
   NodeStats recent_stats;
   NodeStats historical_stats;
 };
 
-class EnergyAwarePriority : public IPrioritySorter {
- public:
-  EnergyAwarePriority() {}
-
-  std::vector<task_id_t> GetOrderedTaskIdList(
-      const OrderedTaskMap& pending_task_map,
-      const UnorderedTaskMap& running_task_map, size_t limit) override;
-
- private:
-  double CalculateTaskEnergyScore_(TaskInCtld* task) const;
-  double GetHistoricalTaskEnergyEfficiency_(const TaskInCtld* task) const;
-
-  InfluxDBClient m_influx_client_;
-};
-
 struct EnergyAwareConfig {
-  absl::Duration recent_stats_window{absl::Minutes(5)};
-  absl::Duration historical_stats_window{absl::Hours(1)};
-  double weight_current_power{0.4};
-  double weight_historical_power{0.3};
-  double weight_task_count{0.3};
+  absl::Duration recent_stats_window{absl::Hours(1)};
+  absl::Duration historical_stats_window{absl::Hours(5)};
+  double weight_current{0.4};
+  double weight_historical{0.3};
 };
 
-class EnergyAwareNodeSelect : public INodeSelectionAlgo {
+class EnergyAwareScheduler : public INodeSelectionAlgo {
  public:
-  explicit EnergyAwareNodeSelect(
+  explicit EnergyAwareScheduler(
       IPrioritySorter* priority_sorter,
       const EnergyAwareConfig& config = EnergyAwareConfig{})
       : m_priority_sorter_(priority_sorter), m_config_(config) {}
 
-  ~EnergyAwareNodeSelect() override = default;
+  ~EnergyAwareScheduler() override = default;
 
   void NodeSelect(
       const absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInCtld>>&
@@ -66,16 +51,16 @@ class EnergyAwareNodeSelect : public INodeSelectionAlgo {
       std::list<NodeSelectionResult>* selection_result_list) override;
 
  private:
-  void UpdateNodeEnergyInfo_(
+  void UpdateNodeStatsInfo_(
       const std::unordered_set<CranedId>& craned_ids,
-      std::unordered_map<CranedId, NodeEnergyInfo>* energy_info);
+      std::unordered_map<CranedId, NodeStatsInfo>* stats_info);
 
-  bool UpdateSingleNodeEnergyInfo_(const CranedId& node_id,
-                                   NodeEnergyInfo* info);
+  bool UpdateSingleNodeStatsInfo_(const CranedId& node_id,
+                                   NodeStatsInfo* info);
 
   std::list<CranedId> SelectBestNodes_(
       TaskInCtld* task,
-      const std::unordered_map<CranedId, NodeEnergyInfo>& energy_info);
+      const std::unordered_map<CranedId, NodeStatsInfo>& stats_info);
 
   void SelectNodesFromCandidates_(
       const std::vector<std::pair<double, CranedId>>& candidates,
@@ -83,7 +68,7 @@ class EnergyAwareNodeSelect : public INodeSelectionAlgo {
       const CranedMetaContainer::CranedMetaMapConstPtr& craned_meta,
       std::list<CranedId>* selected_nodes, ResourceV2* allocated_res);
 
-  double CalculateNodeScore_(const NodeEnergyInfo& info) const;
+  double CalculateNodeScore_(const NodeStatsInfo& info) const;
 
   IPrioritySorter* m_priority_sorter_;
 

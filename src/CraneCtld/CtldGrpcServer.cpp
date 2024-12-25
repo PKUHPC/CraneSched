@@ -882,13 +882,14 @@ grpc::Status CraneCtldServiceImpl::SleepCraned(
     return grpc::Status::OK;
   }
 
-  bool success = g_ipmi_manager->SleepCraned(request->craned_id());
+  std::string error_msg;
+  bool success = g_ipmi_manager->SleepCraned(request->craned_id(), &error_msg);
 
   if (success) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason("Failed to sleep craned");
+    response->set_reason(error_msg);
   }
 
   return grpc::Status::OK;
@@ -906,13 +907,14 @@ grpc::Status CraneCtldServiceImpl::WakeupCraned(
     return grpc::Status::OK;
   }
 
-  bool success = g_ipmi_manager->WakeupCraned(request->craned_id());
+  std::string error_msg;
+  bool success = g_ipmi_manager->WakeupCraned(request->craned_id(), &error_msg);
 
   if (success) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason("Failed to wakeup craned");
+    response->set_reason(error_msg);
   }
 
   return grpc::Status::OK;
@@ -930,13 +932,14 @@ grpc::Status CraneCtldServiceImpl::ShutdownCraned(
     return grpc::Status::OK;
   }
 
-  bool success = g_ipmi_manager->ShutdownCraned(request->craned_id());
+  std::string error_msg;
+  bool success = g_ipmi_manager->ShutdownCraned(request->craned_id(), &error_msg);
 
   if (success) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason("Failed to shutdown craned");
+    response->set_reason(error_msg);
   }
 
   return grpc::Status::OK;
@@ -954,13 +957,14 @@ grpc::Status CraneCtldServiceImpl::PowerOnCraned(
     return grpc::Status::OK;
   }
 
-  bool success = g_ipmi_manager->PowerOnCraned(request->craned_id());
+  std::string error_message;
+  bool success = g_ipmi_manager->PowerOnCraned(request->craned_id(), &error_message);
 
   if (success) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason("Failed to power on craned");
+    response->set_reason(error_message);
   }
 
   return grpc::Status::OK;

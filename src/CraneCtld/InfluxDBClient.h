@@ -22,6 +22,7 @@
 
 namespace Ctld {
 
+// TODO: Add more fields
 struct NodeStats {
   double avg_power{0.0};
   double cpu_util{0.0};
@@ -42,33 +43,26 @@ class InfluxDBClient {
   InfluxDBClient(InfluxDBClient&&) = default;
   InfluxDBClient& operator=(InfluxDBClient&&) = default;
 
-  std::string Query(const std::string& flux_query) const;
-
   bool QueryNodeEnergyInfo(const std::string& node_id, int64_t window,
                            NodeStats* stats) const;
 
-  double QueryTaskEnergyEfficiency(
-      double requested_cpu, double requested_mem_gb,
-      absl::Duration time_window = absl::Hours(24)) const;
+  double QueryTaskEnergyInfo(const std::string& node_id, int64_t window) const;
 
  private:
   class CurlWrapper;
   struct QueryResult;
 
-  std::string BuildUtilPowerQuery_(const std::string& node_id,
-                                   int64_t duration) const;
-  std::string BuildEnergyQuery_(const std::string& node_id,
-                                int64_t duration) const;
-  std::string BuildTaskEfficiencyQuery_(double requested_cpu,
-                                        double requested_mem_gb,
-                                        int64_t duration) const;
+  std::string Query_(const std::string& flux_query) const;
 
-  bool ParseUtilPowerResponse_(const std::string& response,
+  std::string BuildNodeStatsQuery_(const std::string& node_id,
+                                   int64_t duration) const;
+  std::string BuildTaskStatsQuery_(const std::string& node_id,
+                                   int64_t duration) const;
+
+  bool ParseNodeStatsResponse_(const std::string& response,
                                NodeStats* stats) const;
-  bool ParseEnergyResponse_(const std::string& response,
-                            NodeStats* stats) const;
-  bool ParseTaskEfficiencyResponse_(const std::string& response,
-                                    double* efficiency) const;
+  bool ParseTaskStatsResponse_(const std::string& response,
+                               double* efficiency) const;
 
   std::string m_url_;
   std::string m_token_;

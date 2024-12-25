@@ -3,9 +3,6 @@ cmake-build-*
 build/
 .cache/
 
-.cache/*
-build/*
-
 third_party/*
 
 # Header only

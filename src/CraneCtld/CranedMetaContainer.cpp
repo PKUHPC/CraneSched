@@ -53,8 +53,6 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
   // Then acquire craned meta lock.
   CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
   auto node_meta = craned_meta_map_[craned_id];
-  node_meta->state_info.state = CranedState::Running;
-
   node_meta->remote_meta = std::move(remote_meta);
 
   node_meta->res_total.allocatable_res +=
@@ -95,7 +93,6 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   // Then acquire craned meta lock.
   CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
   auto node_meta = craned_meta_map_[craned_id];
-  node_meta->state_info.state = CranedState::Shutdown;
 
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
@@ -117,8 +114,8 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
 
 bool CranedMetaContainer::CheckCranedOnline(const CranedId& craned_id) {
   CRANE_ASSERT(craned_meta_map_.Contains(craned_id));
-  auto craned_meta = craned_meta_map_[craned_id];
-  return craned_meta->state_info.state == CranedState::Running;
+  auto node_meta = craned_meta_map_.GetValueExclusivePtr(craned_id);
+  return node_meta->state_info.state == CranedState::Running;
 }
 
 CranedMetaContainer::PartitionMetaPtr CranedMetaContainer::GetPartitionMetasPtr(
@@ -252,7 +249,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
         config.Nodes.at(craned_name)->dedicated_resource;
     static_meta.hostname = craned_name;
     static_meta.port = std::strtoul(kCranedDefaultPort, nullptr, 10);
-    
+
     static_meta.bmc = config.Nodes.at(craned_name)->bmc;
     static_meta.ssh = config.Nodes.at(craned_name)->ssh;
   }
@@ -505,45 +502,9 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
       } else {
         control_state = crane::grpc::CranedControlState::CRANE_NONE;
       }
-      crane::grpc::CranedResourceState resource_state;
-    switch (craned_meta->state_info.state) {
-    
-      case CranedState::Running:
-        // Running状态下根据资源使用情况设置具体状态
-        if (res_in_use.IsZero()) {
-          resource_state = crane::grpc::CranedResourceState::CRANE_IDLE;
-        } else if (res_avail.allocatable_res.IsAnyZero()) {
-          resource_state = crane::grpc::CranedResourceState::CRANE_ALLOC;
-        } else {
-          resource_state = crane::grpc::CranedResourceState::CRANE_MIX;
-        }
-        break;
 
-      case CranedState::Sleeped:
-        resource_state = crane::grpc::CranedResourceState::CRANE_SLEEPED;
-        break;
-
-      case CranedState::Shutdown:
-        resource_state = crane::grpc::CranedResourceState::CRANE_SHUTDOWN;
-        break;
-
-      case CranedState::WakingUp:
-        resource_state = crane::grpc::CranedResourceState::CRANE_WAKING_UP;
-        break;
-
-      case CranedState::PoweringUp:
-        resource_state = crane::grpc::CranedResourceState::CRANE_POWERING_UP;
-        break;
-
-      case CranedState::ShuttingDown:
-        resource_state = crane::grpc::CranedResourceState::CRANE_SHUTTING_DOWN;
-        break;
-
-      case CranedState::Unknown:
-      default:
-        resource_state = crane::grpc::CranedResourceState::CRANE_UNKNOWN;
-        break;
-      }
+      crane::grpc::CranedResourceState resource_state =
+          GetResourceState_(*craned_meta);
 
       if (control_filters[static_cast<int>(control_state)] &&
           resource_filters[static_cast<int>(resource_state)]) {
@@ -681,54 +642,47 @@ void CranedMetaContainer::SetGrpcCranedInfoByCranedMeta_(
     craned_info->set_control_state(crane::grpc::CranedControlState::CRANE_NONE);
   }
 
-  switch (craned_meta.state_info.state) {
-    case CranedState::Running:
-      if (craned_meta.res_in_use.IsZero()) {
-        craned_info->set_resource_state(
-            crane::grpc::CranedResourceState::CRANE_IDLE);
-      } else if (craned_meta.res_avail.allocatable_res.IsAnyZero()) {
-        craned_info->set_resource_state(
-            crane::grpc::CranedResourceState::CRANE_ALLOC);
-      } else {
-        craned_info->set_resource_state(
-            crane::grpc::CranedResourceState::CRANE_MIX);
-      }
-      break;
-
-    case CranedState::Sleeped:
-      craned_info->set_resource_state(
-          crane::grpc::CranedResourceState::CRANE_SLEEPED);
-      break;
-
-    case CranedState::Shutdown:
-      craned_info->set_resource_state(
-          crane::grpc::CranedResourceState::CRANE_SHUTDOWN);
-      break;
-
-    case CranedState::WakingUp:
-      craned_info->set_resource_state(
-          crane::grpc::CranedResourceState::CRANE_WAKING_UP);
-      break;
-
-    case CranedState::PoweringUp:
-      craned_info->set_resource_state(
-          crane::grpc::CranedResourceState::CRANE_POWERING_UP);
-      break;
-
-    case CranedState::ShuttingDown:
-      craned_info->set_resource_state(
-          crane::grpc::CranedResourceState::CRANE_SHUTTING_DOWN);
-      break;
-
-    default:
-      craned_info->set_resource_state(
-          crane::grpc::CranedResourceState::CRANE_UNKNOWN);
-      break;
-  }
+  craned_info->set_resource_state(GetResourceState_(craned_meta));
 
   craned_info->mutable_partition_names()->Assign(
       craned_meta.static_meta.partition_ids.begin(),
       craned_meta.static_meta.partition_ids.end());
+}
+
+crane::grpc::CranedResourceState CranedMetaContainer::GetResourceState_(
+    const CranedMeta& craned_meta) {
+  switch (craned_meta.state_info.state) {
+  case CranedState::Running:
+    if (craned_meta.res_in_use.IsZero()) {
+      return crane::grpc::CranedResourceState::CRANE_IDLE;
+    } else if (craned_meta.res_avail.allocatable_res.IsAnyZero()) {
+      return crane::grpc::CranedResourceState::CRANE_ALLOC;
+    } else {
+      return crane::grpc::CranedResourceState::CRANE_MIX;
+    }
+
+  case CranedState::Sleeped:
+    return crane::grpc::CranedResourceState::CRANE_SLEEPED;
+
+  case CranedState::Shutdown:
+    return crane::grpc::CranedResourceState::CRANE_SHUTDOWN;
+
+  case CranedState::WakingUp:
+    return crane::grpc::CranedResourceState::CRANE_WAKING_UP;
+
+  case CranedState::PreparingSleep:
+    return crane::grpc::CranedResourceState::CRANE_PREPARING_SLEEP;
+
+  case CranedState::PoweringUp:
+    return crane::grpc::CranedResourceState::CRANE_POWERING_UP;
+
+  case CranedState::ShuttingDown:
+    return crane::grpc::CranedResourceState::CRANE_SHUTTING_DOWN;
+
+  case CranedState::Unknown:
+    return crane::grpc::CranedResourceState::CRANE_UNKNOWN;
+  }
+  return crane::grpc::CranedResourceState::CRANE_UNKNOWN;
 }
 
 }  // namespace Ctld

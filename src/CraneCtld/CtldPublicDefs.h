@@ -70,17 +70,22 @@ struct Config {
 
   struct BMC {
     std::string ip;
-    uint32_t port;
+    uint32_t port{623};
     std::string username;
     std::string password;
-    std::string interface;
+    std::string interface{"lanplus"};
   };
 
   struct SSH {
     std::string ip;
-    uint32_t port;
+    uint32_t port{22};
     std::string username;
     std::string password;
+  };
+
+  struct NIC {
+    std::string interface_name;
+    std::string mac_address;
   };
 
   struct Node {
@@ -203,6 +208,7 @@ struct CranedRemoteMeta {
   std::string craned_version;
   absl::Time craned_start_time;
   absl::Time system_boot_time;
+  Config::NIC nic;
 };
 
 enum class CranedState {
@@ -210,6 +216,7 @@ enum class CranedState {
   Sleeped,
   Shutdown,
   WakingUp,
+  PreparingSleep,
   PoweringUp,
   ShuttingDown,
   Unknown
@@ -230,6 +237,8 @@ inline std::string_view CranedStateToStr(CranedState state) {
     return "Shutdown";
   case CranedState::WakingUp:
     return "WakingUp";
+  case CranedState::PreparingSleep:
+    return "PreparingSleep";
   case CranedState::PoweringUp:
     return "PoweringUp";
   case CranedState::ShuttingDown:
@@ -237,6 +246,7 @@ inline std::string_view CranedStateToStr(CranedState state) {
   case CranedState::Unknown:
     return "Unknown";
   default:
+    CRANE_ERROR("Invalid CranedState: {}", static_cast<int>(state));
     return "Unknown";
   }
 }
