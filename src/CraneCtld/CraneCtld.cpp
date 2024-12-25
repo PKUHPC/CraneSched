@@ -37,6 +37,7 @@
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
+#include "crane/VaultClient.h"
 
 void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("cranectld");
@@ -863,6 +864,10 @@ void InitializeCtldGlobalVariables() {
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
+
+  g_vault_client = std::make_unique<vault::CraneVaultClient>(
+      "REMOVED", "127.0.0.1", "8200");
+  g_vault_client->InitPki("crane.com");
 
   // Account manager must be initialized before Task Scheduler
   // since the recovery stage of the task scheduler will acquire

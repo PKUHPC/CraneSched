@@ -30,7 +30,7 @@ target_link_libraries(cranectld PRIVATE
         RpcService
         Utility_PublicHeader
         Utility_PluginClient
-
+        Utility_VaultClient
         uvw
 
         cxxopts
