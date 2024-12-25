@@ -251,7 +251,20 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
           instance->task.task_id());
 
       instance->err_before_exec = CraneErr::kCgroupError;
-      goto AskChildToSuicide;
+      // Ask child to suicide
+      msg.set_ok(false);
+
+      ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
+      close(ctrl_fd);
+      if (!ok) {
+        CRANE_ERROR("Failed to ask subprocess {} to suicide for task #{}",
+                    child_pid, instance->task.task_id());
+
+        instance->err_before_exec = CraneErr::kProtobufError;
+        KillPid_(child_pid, SIGKILL);
+      }
+
+      return CraneErr::kCgroupError;
     }
 
     CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
@@ -352,25 +365,6 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
 
     return CraneErr::kOk;
 
-  AskChildToSuicide:
-    msg.set_ok(false);
-
-    ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
-    close(ctrl_fd);
-    if (!ok) {
-      CRANE_ERROR("Failed to ask subprocess {} to suicide for task #{}",
-                  child_pid, instance->task.task_id());
-
-      // See comments above.
-      instance->err_before_exec = CraneErr::kProtobufError;
-      KillPid_(child_pid, SIGKILL);
-    }
-
-    // See comments above.
-    // As long as fork() is done and the grpc channel to the child process is
-    // healthy, we should return kOk, not trigger a manual TaskStatusChange, and
-    // reap the child process by SIGCHLD after it commits suicide.
-    return CraneErr::kOk;
   } else {  // Child proc
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);

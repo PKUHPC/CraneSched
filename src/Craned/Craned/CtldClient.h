@@ -54,6 +54,14 @@ class CtldClient {
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
+  /**
+   * @brief Query CraneCtld for task cgroupspec, only for recovery cgroup.
+   * @param task_ids task ids to query.
+   * @return task cgroupspec
+   */
+  CraneExpected<std::vector<CgroupSpec>> QueryTasksCgspec(
+      const std::unordered_set<task_id_t>& task_ids);
+
   bool CancelTaskStatusChangeByTaskId(task_id_t task_id,
                                       crane::grpc::TaskStatus* new_status);
 

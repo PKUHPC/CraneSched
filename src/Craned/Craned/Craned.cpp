@@ -591,10 +591,17 @@ void GlobalVariableInit() {
 
   PasswordEntry::InitializeEntrySize();
 
+  g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
+  auto tasks = g_supervisor_keeper->Init();
+  std::unordered_set<task_id_t> task_id_set;
+  for (const auto& task : tasks.value_or(std::vector<crane::grpc::TaskToD>())) {
+    task_id_set.emplace(task.task_id());
+  }
+
   using Craned::CgroupManager;
   using Craned::CgroupConstant::Controller;
   g_cg_mgr = std::make_unique<Craned::CgroupManager>();
-  g_cg_mgr->Init();
+  g_cg_mgr->Init(task_id_set);
   if (g_cg_mgr->GetCgroupVersion() ==
           Craned::CgroupConstant::CgroupVersion::CGROUP_V1 &&
       (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
@@ -628,8 +635,6 @@ void GlobalVariableInit() {
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
-  // SupervisorKeeper will recover above global var
-  g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
 }
 
 void StartServer() {

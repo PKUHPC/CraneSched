@@ -41,17 +41,23 @@ class SupervisorClient {
   std::shared_ptr<grpc::Channel> m_channel_;
 
   std::unique_ptr<crane::grpc::Supervisor::Stub> m_stub_;
-  // todo: Rpc wrap func
 };
 
 class SupervisorKeeper {
  public:
-  SupervisorKeeper();
+  SupervisorKeeper() = default;
+  /**
+   * @brief Query all existing supervisor for task they hold.
+   * @return task_to_d from supervisors
+   */
+  CraneExpected<std::vector<crane::grpc::TaskToD>> Init();
+
   void AddSupervisor(task_id_t task_id);
   std::shared_ptr<SupervisorClient> GetStub(task_id_t task_id);
 
  private:
-  void RecoverSupervisorMt_(const std::filesystem::path& path);
+  CraneExpected<crane::grpc::TaskToD> RecoverSupervisorMt_(
+      const std::filesystem::path& path);
   absl::flat_hash_map<task_id_t, std::shared_ptr<SupervisorClient>>
       m_supervisor_map;
   absl::Mutex m_mutex;

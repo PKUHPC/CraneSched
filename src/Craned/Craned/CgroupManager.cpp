@@ -32,6 +32,7 @@
 #include <dirent.h>
 
 #include "CranedPublicDefs.h"
+#include "CtldClient.h"
 #include "DeviceManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
@@ -42,12 +43,8 @@ namespace Craned {
 BpfRuntimeInfo CgroupV2::bpf_runtime_info_{};
 #endif
 
-/*
- * Initialize libcgroup and mount the controllers Condor will use (if possible)
- *
- * Returns 0 on success, -1 otherwise.
- */
-int CgroupManager::Init() {
+CraneExpected<std::unordered_set<task_id_t>> CgroupManager::Init(
+    const std::unordered_set<task_id_t> &task_ids) {
   // Initialize library and data structures
   CRANE_DEBUG("Initializing cgroup library.");
   cgroup_init();
@@ -133,7 +130,7 @@ int CgroupManager::Init() {
     if (ret != ECGEOF) {
       CRANE_WARN("Error iterating through cgroups mount information: {}\n",
                  cgroup_strerror(ret));
-      return -1;
+      return std::unexpected(CraneErr::kCgroupError);
     }
   }
   // cgroup don't use /proc/cgroups to manage controller
@@ -142,11 +139,11 @@ int CgroupManager::Init() {
     int ret;
     if ((root = cgroup_new_cgroup("/")) == nullptr) {
       CRANE_WARN("Unable to construct new root cgroup object.");
-      return -1;
+      return std::unexpected(CraneErr::kCgroupError);
     }
     if ((ret = cgroup_get_cgroup(root)) != 0) {
       CRANE_WARN("Error : root cgroup not exist.");
-      return -1;
+      return std::unexpected(CraneErr::kCgroupError);
     }
 
     if ((cgroup_get_controller(
@@ -185,19 +182,27 @@ int CgroupManager::Init() {
 
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
-    return -1;
+    return std::unexpected(CraneErr::kCgroupError);
   }
+
+  auto task_specs = g_ctld_client->QueryTasksCgspec(task_ids);
+  if (!task_specs) {
+    CRANE_ERROR("Failed to query task cgroup specifications.");
+    return std::unexpected(task_specs.error());
+  }
+
+  // todo: Just remove none exist cgroup;
   if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
     RmAllTaskCgroups_();
   } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
+    RmAllTaskCgroupsV2_();
 #ifdef CRANE_ENABLE_BPF
     RmBpfDevMap();
 #endif
-    RmAllTaskCgroupsV2_();
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
   }
-  return 0;
+  return {};
 }
 
 void CgroupManager::RmAllTaskCgroups_() {
@@ -269,7 +274,7 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
                  CgroupConstant::GetControllerStringView(controller));
       return 1;
     } else {
-      fmt::print("cgroup controller {} is already mounted",
+      CRANE_WARN("cgroup controller {} is already mounted",
                  CgroupConstant::GetControllerStringView(controller));
       return 0;
     }
@@ -445,8 +450,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
       CRANE_ERROR("Failed to get cgroup {} stat", cgroup_string);
       return nullptr;
     }
-    return std::make_unique<CgroupV2>(
-        cgroup_string, native_cgroup,
+    return std::make_unique<CgroupV2>(cgroup_string, native_cgroup,
                                       cgroup_stat.st_ino);
   } else {
     CRANE_WARN("Unable to create cgroup {}. Cgroup version is not supported",
@@ -476,18 +480,12 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
     if (!cg_unique_ptr) {
       if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
         cg_unique_ptr = CgroupManager::CreateOrOpen_(
-            CgroupStrByTaskId_(task_id),
-            NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
-                CgroupConstant::Controller::MEMORY_CONTROLLER |
-                CgroupConstant::Controller::DEVICES_CONTROLLER |
-                CgroupConstant::Controller::BLOCK_CONTROLLER,
+            CgroupStrByTaskId_(task_id), CgV1PreferredControllers,
             NO_CONTROLLER_FLAG, false);
       } else if (GetCgroupVersion() ==
                  CgroupConstant::CgroupVersion::CGROUP_V2) {
         cg_unique_ptr = CgroupManager::CreateOrOpen_(
-            CgroupStrByTaskId_(task_id),
-            NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER_V2 |
-                CgroupConstant::Controller::MEMORY_CONTORLLER_V2,
+            CgroupStrByTaskId_(task_id), CgV2PreferredControllers,
             NO_CONTROLLER_FLAG, false);
       } else {
         CRANE_WARN("cgroup version is not supported.");
@@ -501,9 +499,8 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
   }
 
   if (g_config.Plugin.Enabled) {
-    g_plugin_client->CreateCgroupHookAsync(task_id, 
-                                          pcg->GetCgroupString(),
-                                          res.dedicated_res_in_node());
+    g_plugin_client->CreateCgroupHookAsync(task_id, pcg->GetCgroupString(),
+                                           res.dedicated_res_in_node());
   }
 
   CRANE_TRACE(
@@ -596,7 +593,8 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
     CgroupInterface *cgroup = it->second.GetExclusivePtr()->release();
 
     if (g_config.Plugin.Enabled) {
-      g_plugin_client->DestroyCgroupHookAsync(task_id, cgroup->GetCgroupString());
+      g_plugin_client->DestroyCgroupHookAsync(task_id,
+                                              cgroup->GetCgroupString());
     }
 
     task_id_to_cg_map_ptr->erase(task_id);
@@ -628,7 +626,8 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
   }
 
   {
-    auto uid_task_ids_map_ptr = this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
+    auto uid_task_ids_map_ptr =
+        this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
     auto it = uid_task_ids_map_ptr->find(uid);
     if (it == uid_task_ids_map_ptr->end()) {
       CRANE_DEBUG(
@@ -815,6 +814,26 @@ Cgroup::~Cgroup() {
   }
 }
 
+bool Cgroup::MigrateProcIn(pid_t pid) {
+  using CgroupConstant::Controller;
+  using CgroupConstant::GetControllerStringView;
+
+  // We want to make sure task migration is turned on for the
+  // associated memory controller.  So, we get to look up the original cgroup.
+  //
+  // If there is no memory controller present, we skip all this and just attempt
+  // a migrate
+  int err;
+  // TODO: handle memory.move_charge_at_immigrate
+  // https://github.com/PKUHPC/CraneSched/pull/327/files/eaa0d04dcc4c12a1773ac9a3fd42aa9f898741aa..9dc93a50528c1b22dbf50d0bf40a11a98bbed36d#r1838007422
+  err = cgroup_attach_task_pid(m_cgroup_, pid);
+  if (err != 0) {
+    CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}", pid,
+               m_cgroup_path_.c_str(), err, cgroup_strerror(err));
+  }
+  return err == 0;
+}
+
 bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
                                 CgroupConstant::ControllerFile controller_file,
                                 uint64_t value) {
@@ -969,8 +988,7 @@ bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
   }
   return true;
 }
-
-bool CgroupV1::MigrateProcIn(pid_t pid) {
+bool CgroupInterface::MigrateProcIn(pid_t pid) {
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;
 
@@ -1232,7 +1250,7 @@ void BpfRuntimeInfo::RmBpfDeviceMap() {
 #endif
 
 CgroupV2::CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id)
-    : m_cgroup_info_(path, handle, id) {
+    : CgroupInterface(path, handle, id) {
 #ifdef CRANE_ENABLE_BPF
   if (bpf_runtime_info_.InitializeBpfObj()) {
     CRANE_TRACE("Bpf object initialization succeed");
@@ -1445,22 +1463,6 @@ bool CgroupV2::Empty() {
                 cgroup_strerror(rc));
     return false;
   }
-}
-
-bool CgroupV2::MigrateProcIn(pid_t pid) {
-  using CgroupConstant::Controller;
-  using CgroupConstant::GetControllerStringView;
-  int err;
-after_migrate:
-
-  err = cgroup_attach_task_pid(m_cgroup_info_.m_cgroup_, pid);
-  if (err != 0) {
-    CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}", pid,
-               m_cgroup_info_.m_cgroup_path_.c_str(), err,
-               cgroup_strerror(err));
-  }
-end:
-  return err == 0;
 }
 
 bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
