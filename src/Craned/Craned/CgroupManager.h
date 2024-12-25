@@ -271,25 +271,16 @@ const ControllerFlags NO_CONTROLLER_FLAG{};
 //  handles this for us and no additional care needs to be taken.
 const ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
-class CgroupInterface {
- public:
-  virtual ~CgroupInterface() {}
-  virtual bool SetCpuCoreLimit(double core_num) = 0;
-  virtual bool SetCpuShares(uint64_t share) = 0;
-  virtual bool SetMemoryLimitBytes(uint64_t memory_bytes) = 0;
-  virtual bool SetMemorySwLimitBytes(uint64_t mem_bytes) = 0;
-  virtual bool SetMemorySoftLimitBytes(uint64_t memory_bytes) = 0;
-  virtual bool SetBlockioWeight(uint64_t weight) = 0;
-  virtual bool SetDeviceAccess(const std::unordered_set<SlotId> &devices,
-                               bool set_read, bool set_write,
-                               bool set_mknod) = 0;
-  virtual bool MigrateProcIn(pid_t pid) = 0;
+inline const ControllerFlags CgV1PreferredControllers =
+    NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
+    CgroupConstant::Controller::MEMORY_CONTROLLER |
+    CgroupConstant::Controller::DEVICES_CONTROLLER |
+    CgroupConstant::Controller::BLOCK_CONTROLLER;
 
-  virtual bool KillAllProcesses() = 0;
-
-  virtual bool Empty() = 0;
-  virtual const std::string &GetCgroupString() const = 0;
-};
+inline const ControllerFlags CgV2PreferredControllers =
+    NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER_V2 |
+    CgroupConstant::Controller::MEMORY_CONTORLLER_V2 |
+    CgroupConstant::Controller::IO_CONTROLLER_V2;
 
 class Cgroup {
  public:
@@ -301,6 +292,8 @@ class Cgroup {
 
   // Using the zombie object pattern as exceptions are not available.
   bool Valid() const { return m_cgroup_ != nullptr; }
+
+  bool MigrateProcIn(pid_t pid);
 
   bool SetControllerValue(CgroupConstant::Controller controller,
                           CgroupConstant::ControllerFile controller_file,
@@ -319,10 +312,38 @@ class Cgroup {
   uint64_t m_cgroup_id;
 };
 
+class CgroupInterface {
+ public:
+  CgroupInterface(const std::string &path, struct cgroup *handle,
+                  uint64_t id = 0)
+      : m_cgroup_info_(path, handle, id) {};
+  virtual ~CgroupInterface() {}
+  virtual bool SetCpuCoreLimit(double core_num) = 0;
+  virtual bool SetCpuShares(uint64_t share) = 0;
+  virtual bool SetMemoryLimitBytes(uint64_t memory_bytes) = 0;
+  virtual bool SetMemorySwLimitBytes(uint64_t mem_bytes) = 0;
+  virtual bool SetMemorySoftLimitBytes(uint64_t memory_bytes) = 0;
+  virtual bool SetBlockioWeight(uint64_t weight) = 0;
+  virtual bool SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+                               bool set_read, bool set_write,
+                               bool set_mknod) = 0;
+
+  virtual bool KillAllProcesses() = 0;
+  virtual bool Empty() = 0;
+
+  bool MigrateProcIn(pid_t pid);
+  const std::string &GetCgroupString() const {
+    return m_cgroup_info_.m_cgroup_path_;
+  };
+
+ protected:
+  Cgroup m_cgroup_info_;
+};
+
 class CgroupV1 : public CgroupInterface {
  public:
   CgroupV1(const std::string &path, struct cgroup *handle)
-      : m_cgroup_info_(path, handle) {}
+      : CgroupInterface(path, handle) {}
   ~CgroupV1() override = default;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
@@ -337,15 +358,6 @@ class CgroupV1 : public CgroupInterface {
   bool KillAllProcesses() override;
 
   bool Empty() override;
-
-  bool MigrateProcIn(pid_t pid) override;
-
-  const std::string &GetCgroupString() const override {
-    return m_cgroup_info_.m_cgroup_path_;
-  }
-
- private:
-  Cgroup m_cgroup_info_;
 };
 
 #ifdef CRANE_ENABLE_BPF
@@ -428,18 +440,11 @@ class CgroupV2 : public CgroupInterface {
 
   bool Empty() override;
 
-  bool MigrateProcIn(pid_t pid) override;
-
-  const std::string &GetCgroupString() const override {
-    return m_cgroup_info_.m_cgroup_path_;
-  }
-
  private:
 #ifdef CRANE_ENABLE_BPF
   std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
   static BpfRuntimeInfo bpf_runtime_info_;
 #endif
-  Cgroup m_cgroup_info_;
 };
 
 class AllocatableResourceAllocator {
@@ -459,7 +464,14 @@ class DedicatedResourceAllocator {
 
 class CgroupManager {
  public:
-  int Init();
+  /**
+   * @brief Initialize libcgroup and mount the controllers Condor will use (if
+   * possible)
+   * @param task_ids task ids from alive supervisor.
+   * @return 0 on success, -1 otherwise.
+   */
+  CraneExpected<std::unordered_set<task_id_t>> Init(
+      const std::unordered_set<task_id_t> &task_ids);
 
   bool Mounted(CgroupConstant::Controller controller) {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
@@ -471,10 +483,21 @@ class CgroupManager {
 
   std::optional<std::string> QueryTaskExecutionNode(task_id_t task_id);
 
+  /**
+   * Set Cgroup info, but not create cgroup immediately.
+   * @param cg_specs task resource info,uid,execution_node
+   * @return
+   */
   bool CreateCgroups(std::vector<CgroupSpec> &&cg_specs);
 
   bool CheckIfCgroupForTasksExists(task_id_t task_id);
 
+  /**
+   *
+   * @param[int] task_id
+   * @param[out] cg Created or opened cgroup with resource limited enforced.
+   * @return true for success
+   */
   bool AllocateAndGetCgroup(task_id_t task_id, CgroupInterface **cg);
 
   bool MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id);
@@ -491,9 +514,7 @@ class CgroupManager {
 
   CraneExpected<EnvMap> GetResourceEnvMapOfTask(task_id_t task_id);
 
-  void SetCgroupVersion(CgroupConstant::CgroupVersion v) { cg_version_ = v; }
-
-  CgroupConstant::CgroupVersion GetCgroupVersion() { return cg_version_; }
+  CgroupConstant::CgroupVersion GetCgroupVersion() const { return cg_version_; }
 
  private:
   static std::string CgroupStrByTaskId_(task_id_t task_id);

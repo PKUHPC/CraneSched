@@ -28,22 +28,38 @@ void SupervisorClient::InitChannelAndStub(const std::string& endpoint) {
   m_stub_ = crane::grpc::Supervisor::NewStub(m_channel_);
 }
 
-SupervisorKeeper::SupervisorKeeper() {
+CraneExpected<std::vector<crane::grpc::TaskToD>> SupervisorKeeper::Init() {
+  std::vector<crane::grpc::TaskToD> tasks;
   try {
     std::filesystem::path path = kDefaultSupervisorUnixSockDir;
     if (std::filesystem::exists(path) && std::filesystem::is_directory(path)) {
-      // 遍历目录中的所有条目
+      std::vector<std::filesystem::path> files;
       for (const auto& it : std::filesystem::directory_iterator(path)) {
         if (std::filesystem::is_socket(it.path())) {
-          g_thread_pool->detach_task(
-              [this, it]() { this->RecoverSupervisorMt_(it.path()); });
+          files.emplace_back(it.path());
         }
       }
+      tasks.reserve(files.size());
+      absl::BlockingCounter bl(files.size());
+      absl::Mutex mtx;
+      for (const auto& file : files) {
+        g_thread_pool->detach_task([this, &file, &bl, &mtx, &tasks]() {
+          auto task = this->RecoverSupervisorMt_(file);
+          bl.DecrementCount();
+          if (!task) return;
+          absl::WriterMutexLock lk(&mtx);
+          tasks.emplace_back(task.value());
+        });
+      }
+      bl.Wait();
+      return tasks;
     } else {
       CRANE_WARN("Supervisor socket dir dose not exit, skip recovery.");
+      return {};
     }
   } catch (const std::exception& e) {
     CRANE_ERROR("Error: {}, when recover supervisor", e.what());
+    return std::unexpected(CraneErr::kSystemErr);
   }
 }
 
@@ -68,18 +84,19 @@ std::shared_ptr<SupervisorClient> SupervisorKeeper::GetStub(task_id_t task_id) {
     return nullptr;
   }
 }
-void SupervisorKeeper::RecoverSupervisorMt_(const std::filesystem::path& path) {
+CraneExpected<crane::grpc::TaskToD> SupervisorKeeper::RecoverSupervisorMt_(
+    const std::filesystem::path& path) {
   std::shared_ptr stub = std::make_shared<SupervisorClient>();
   stub->InitChannelAndStub(path);
   crane::grpc::TaskToD task;
   auto err = stub->CheckTaskStatus(&task);
   if (err != CraneErr::kOk) {
-    CRANE_ERROR("CheckTaskStatus for {} failed: {}", path, err);
-    return;
+    CRANE_ERROR("CheckTaskStatus for {} failed", path.string());
+    return std::unexpected(err);
   }
   absl::WriterMutexLock lk(&m_mutex);
   m_supervisor_map.emplace(task.task_id(), stub);
-  g_task_mgr->AddRecoveredTask_(task);
+  return task;
 }
 
 }  // namespace Craned
