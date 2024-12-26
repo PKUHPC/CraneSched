@@ -107,7 +107,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
       }
       for (auto const &fd_dir_entry :
            std::filesystem::directory_iterator(proc_fd_path)) {
-        struct stat statbuf {};
+        struct stat statbuf{};
         std::string fdpath = fmt::format(
             "{}/{}", proc_fd_path, fd_dir_entry.path().filename().string());
         const char *fdchar = fdpath.c_str();
@@ -176,7 +176,8 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
     CgroupSpec spec{.uid = uid,
                     .task_id = task_id,
                     .res_in_node = res,
-                    .execution_node = request->execution_node(i)};
+                    .execution_node = request->execution_node(i),
+                    .recovered = false};
     CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", task_id, uid);
     cg_specs.emplace_back(std::move(spec));
   }
