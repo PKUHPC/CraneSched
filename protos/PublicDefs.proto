@@ -131,6 +131,8 @@ message TaskToCtld {
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
 
+  uint32 gid = 14; // egid
+
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
     InteractiveTaskAdditionalMeta interactive_meta = 22;
