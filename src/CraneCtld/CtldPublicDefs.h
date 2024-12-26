@@ -279,6 +279,7 @@ struct TaskInCtld {
   crane::grpc::TaskType type;
 
   uid_t uid;
+  gid_t gid;
   std::string account;
   std::string name;
   std::string qos;
@@ -308,7 +309,6 @@ struct TaskInCtld {
    * ------------------------------- */
   task_id_t task_id{0};
   task_db_id_t task_db_id{0};
-  gid_t gid;
   std::string username;
 
   /* ----------- [3] ----------------
@@ -385,12 +385,6 @@ struct TaskInCtld {
     runtime_attr.set_task_db_id(id);
   }
   task_id_t TaskDbId() const { return task_db_id; }
-
-  void SetGid(gid_t id) {
-    gid = id;
-    runtime_attr.set_gid(id);
-  }
-  uid_t Gid() const { return gid; }
 
   void SetUsername(std::string const& val) {
     username = val;
@@ -527,7 +521,6 @@ struct TaskInCtld {
 
     task_id = runtime_attr.task_id();
     task_db_id = runtime_attr.task_db_id();
-    gid = runtime_attr.gid();
     username = runtime_attr.username();
 
     nodes_alloc = craned_ids.size();

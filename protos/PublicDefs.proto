@@ -157,7 +157,6 @@ message RuntimeAttrOfTask {
   // Fields that won't change after this task is accepted.
   uint32 task_id = 1;
   int64 task_db_id = 3;
-  int32 gid = 4;
   string username = 5;
 
   // Fields that will change after this task is accepted.
