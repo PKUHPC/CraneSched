@@ -114,8 +114,8 @@ void ParseConfig(int argc, char** argv) {
       }
 
 #ifdef CRANE_ENABLE_BPF
-      Craned::CgroupV2::SetBpfDebugLogLevel(
-          static_cast<uint32_t>(log_level.value()));
+      Craned::CgroupV2::SetBpfDebugLog(
+          log_level.value()<spdlog::level::info);
 #endif
       if (config["CranedUnixSockPath"])
         g_config.CranedUnixSockPath =
@@ -591,17 +591,40 @@ void GlobalVariableInit() {
 
   PasswordEntry::InitializeEntrySize();
 
+  // It is always ok to create thread pool first.
+  g_thread_pool =
+      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
+
+  // todo: Handle case of cranectld offline when craned up for recovery.
+  g_ctld_client = std::make_unique<Craned::CtldClient>();
+  g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
+
+  g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
+
   g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
   auto tasks = g_supervisor_keeper->Init();
-  std::unordered_set<task_id_t> task_id_set;
+  std::unordered_set<task_id_t> task_ids_supervisor;
   for (const auto& task : tasks.value_or(std::vector<crane::grpc::TaskToD>())) {
-    task_id_set.emplace(task.task_id());
+    task_ids_supervisor.emplace(task.task_id());
+  }
+
+
+  auto cg_spce_expt = g_ctld_client->QueryTasksCgspec(task_ids_supervisor);
+  std::vector<CgroupSpec> task_cg_spec_vec{};
+  if (!cg_spce_expt) {
+    CRANE_WARN("Failed to get query task cg_spce");
+  } else {
+    task_cg_spec_vec.reserve(cg_spce_expt->size());
+    for (auto& task_cg_spec : cg_spce_expt.value()) {
+      if (!task_ids_supervisor.contains(task_cg_spec.task_id)) continue;
+      task_cg_spec_vec.emplace_back(std::move(task_cg_spec));
+    }
   }
 
   using Craned::CgroupManager;
   using Craned::CgroupConstant::Controller;
-  g_cg_mgr = std::make_unique<Craned::CgroupManager>();
-  g_cg_mgr->Init(task_id_set);
+  g_cg_mgr = std::make_unique<CgroupManager>();
+  g_cg_mgr->Init(task_cg_spec_vec);
   if (g_cg_mgr->GetCgroupVersion() ==
           Craned::CgroupConstant::CgroupVersion::CGROUP_V1 &&
       (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
@@ -621,14 +644,7 @@ void GlobalVariableInit() {
     std::exit(1);
   }
 
-  g_thread_pool =
-      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
-
   g_task_mgr = std::make_unique<Craned::TaskManager>();
-  g_ctld_client = std::make_unique<Craned::CtldClient>();
-  g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
-
-  g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");

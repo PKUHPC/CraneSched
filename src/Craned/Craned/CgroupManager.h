@@ -90,14 +90,19 @@ enum class ControllerFile : uint64_t {
   ControllerFileCount,
 };
 
-inline const char *kTaskCgPathPrefix = "Crane_Task_";
+inline constexpr std::string kTaskCgPathPrefix = "Crane_Task_";
 inline const char *RootCgroupFullPath = "/sys/fs/cgroup";
 #ifdef CRANE_ENABLE_BPF
-inline const char *BpfObjectFile = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
-inline const char *BpfDeviceMapFile = "/sys/fs/bpf/craned_dev_map";
+inline const char *BpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
+inline const char *BpfDeviceMapFilePath = "/sys/fs/bpf/craned_dev_map";
 inline const char *BpfMapName = "craned_dev_map";
 inline const char *BpfProgramName = "craned_device_access";
+
+inline constexpr bool CgroupLimitDeviceRead = true;
+inline constexpr bool CgroupLimitDeviceWrite = true;
+inline constexpr bool CgroupLimitDeviceMknod = true;
 #endif
+
 namespace Internal {
 
 constexpr std::array<std::string_view,
@@ -183,63 +188,63 @@ struct BpfDeviceMeta {
 
 class ControllerFlags {
  public:
-  ControllerFlags() noexcept : m_flags_(0u) {}
+  constexpr ControllerFlags() noexcept : m_flags_(0u) {}
 
   explicit ControllerFlags(CgroupConstant::Controller controller) noexcept
       : m_flags_(1u << static_cast<uint64_t>(controller)) {}
 
   ControllerFlags(const ControllerFlags &val) noexcept = default;
 
-  ControllerFlags operator|=(const ControllerFlags &rhs) noexcept {
+  constexpr ControllerFlags operator|=(const ControllerFlags &rhs) noexcept {
     m_flags_ |= rhs.m_flags_;
     return *this;
   }
 
-  ControllerFlags operator&=(const ControllerFlags &rhs) noexcept {
+  constexpr ControllerFlags operator&=(const ControllerFlags &rhs) noexcept {
     m_flags_ &= rhs.m_flags_;
     return *this;
   }
 
   operator bool() const noexcept { return static_cast<bool>(m_flags_); }
 
-  ControllerFlags operator~() const noexcept {
+  constexpr ControllerFlags operator~() const noexcept {
     ControllerFlags cf;
     cf.m_flags_ = ~m_flags_;
     return cf;
   }
 
  private:
-  friend ControllerFlags operator|(const ControllerFlags &lhs,
-                                   const ControllerFlags &rhs) noexcept;
-  friend ControllerFlags operator&(const ControllerFlags &lhs,
-                                   const ControllerFlags &rhs) noexcept;
-  friend ControllerFlags operator|(
+  friend constexpr ControllerFlags operator|(
+      const ControllerFlags &lhs, const ControllerFlags &rhs) noexcept;
+  friend constexpr ControllerFlags operator&(
+      const ControllerFlags &lhs, const ControllerFlags &rhs) noexcept;
+  friend constexpr ControllerFlags operator|(
       const ControllerFlags &lhs,
       const CgroupConstant::Controller &rhs) noexcept;
-  friend ControllerFlags operator&(
+  friend constexpr ControllerFlags operator&(
       const ControllerFlags &lhs,
       const CgroupConstant::Controller &rhs) noexcept;
-  friend ControllerFlags operator|(
+  friend constexpr ControllerFlags operator|(
       const CgroupConstant::Controller &lhs,
       const CgroupConstant::Controller &rhs) noexcept;
   uint64_t m_flags_;
 };
 
-inline ControllerFlags operator|(const ControllerFlags &lhs,
-                                 const ControllerFlags &rhs) noexcept {
+constexpr ControllerFlags operator|(const ControllerFlags &lhs,
+                                    const ControllerFlags &rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ = lhs.m_flags_ | rhs.m_flags_;
   return flags;
 }
 
-inline ControllerFlags operator&(const ControllerFlags &lhs,
-                                 const ControllerFlags &rhs) noexcept {
+constexpr ControllerFlags operator&(const ControllerFlags &lhs,
+                                    const ControllerFlags &rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ = lhs.m_flags_ & rhs.m_flags_;
   return flags;
 }
 
-inline ControllerFlags operator|(
+constexpr ControllerFlags operator|(
     const ControllerFlags &lhs,
     const CgroupConstant::Controller &rhs) noexcept {
   ControllerFlags flags;
@@ -247,7 +252,7 @@ inline ControllerFlags operator|(
   return flags;
 }
 
-inline ControllerFlags operator&(
+constexpr ControllerFlags operator&(
     const ControllerFlags &lhs,
     const CgroupConstant::Controller &rhs) noexcept {
   ControllerFlags flags;
@@ -255,7 +260,7 @@ inline ControllerFlags operator&(
   return flags;
 }
 
-inline ControllerFlags operator|(
+constexpr ControllerFlags operator|(
     const CgroupConstant::Controller &lhs,
     const CgroupConstant::Controller &rhs) noexcept {
   ControllerFlags flags;
@@ -264,20 +269,20 @@ inline ControllerFlags operator|(
   return flags;
 }
 
-const ControllerFlags NO_CONTROLLER_FLAG{};
+constexpr ControllerFlags NO_CONTROLLER_FLAG{};
 
-// In many distributions, 'cpu' and 'cpuacct' are mounted together. 'cpu'
+// In m any distributions, 'cpu' and 'cpuacct' are mounted together. 'cpu'
 //  and 'cpuacct' both point to a single 'cpu,cpuacct' account. libcgroup
 //  handles this for us and no additional care needs to be taken.
-const ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
+constexpr ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
-inline const ControllerFlags CgV1PreferredControllers =
+constexpr ControllerFlags CgV1PreferredControllers =
     NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
     CgroupConstant::Controller::MEMORY_CONTROLLER |
     CgroupConstant::Controller::DEVICES_CONTROLLER |
     CgroupConstant::Controller::BLOCK_CONTROLLER;
 
-inline const ControllerFlags CgV2PreferredControllers =
+constexpr ControllerFlags CgV2PreferredControllers =
     NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER_V2 |
     CgroupConstant::Controller::MEMORY_CONTORLLER_V2 |
     CgroupConstant::Controller::IO_CONTROLLER_V2;
@@ -367,21 +372,21 @@ class BpfRuntimeInfo {
   ~BpfRuntimeInfo();
   bool InitializeBpfObj();
   void CloseBpfObj();
-  void RmBpfDeviceMap();
+  static void RmBpfDeviceMap();
 
   struct bpf_object *BpfObj() { return bpf_obj_; }
   struct bpf_program *BpfProgram() { return bpf_prog_; }
   std::mutex *BpfMutex() { return bpf_mtx_; }
   struct bpf_map *BpfDevMap() { return dev_map_; }
   int BpfProgFd() { return bpf_prog_fd_; }
-  void SetLogLevel(uint32_t log_devel) { bpf_debug_log_level_ = log_devel; }
+  void SetLogging(bool enable) { enable_logging_ = enable; }
   bool BpfInvalid() {
     return bpf_obj_ && bpf_prog_ && dev_map_ && bpf_prog_fd_ != -1 &&
            cgroup_count_ > 0;
   }
 
  private:
-  uint32_t bpf_debug_log_level_;
+  bool enable_logging_;
   struct bpf_object *bpf_obj_;
   struct bpf_program *bpf_prog_;
   struct bpf_map *dev_map_;
@@ -394,6 +399,12 @@ class BpfRuntimeInfo {
 class CgroupV2 : public CgroupInterface {
  public:
   CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id);
+
+#ifdef CRANE_ENABLE_BPF
+  CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id,
+           std::vector<BpfDeviceMeta> &cgroup_bpf_devices);
+#endif
+
   ~CgroupV2() override;
   bool SetCpuCoreLimit(double core_num) override;
   bool SetCpuShares(uint64_t share) override;
@@ -430,10 +441,11 @@ class CgroupV2 : public CgroupInterface {
   */
   bool SetDeviceAccess(const std::unordered_set<SlotId> &devices, bool set_read,
                        bool set_write, bool set_mknod) override;
+
 #ifdef CRANE_ENABLE_BPF
   bool EraseBpfDeviceMap();
-  static void SetBpfDebugLogLevel(uint32_t l) {
-    bpf_runtime_info_.SetLogLevel(l);
+  static void SetBpfDebugLog(bool enable) {
+    bpf_runtime_info_.SetLogging(enable);
   }
 #endif
   bool KillAllProcesses() override;
@@ -442,6 +454,7 @@ class CgroupV2 : public CgroupInterface {
 
  private:
 #ifdef CRANE_ENABLE_BPF
+  bool m_bpf_attached_;
   std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
   static BpfRuntimeInfo bpf_runtime_info_;
 #endif
@@ -465,13 +478,12 @@ class DedicatedResourceAllocator {
 class CgroupManager {
  public:
   /**
-   * @brief Initialize libcgroup and mount the controllers Condor will use (if
-   * possible)
-   * @param task_ids task ids from alive supervisor.
-   * @return 0 on success, -1 otherwise.
+   * @brief Initialize libcgroup and mount the controllers, remove task not
+   * considered to be running;
+   * @param task_cgroup_specs running task cgroup specs.
+   * @return CraneErr.
    */
-  CraneExpected<std::unordered_set<task_id_t>> Init(
-      const std::unordered_set<task_id_t> &task_ids);
+  CraneErr Init(std::vector<CgroupSpec> &task_cgroup_specs);
 
   bool Mounted(CgroupConstant::Controller controller) {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
@@ -520,7 +532,7 @@ class CgroupManager {
   static std::string CgroupStrByTaskId_(task_id_t task_id);
 
   std::unique_ptr<CgroupInterface> CreateOrOpen_(
-      const std::string &cgroup_string, ControllerFlags preferred_controllers,
+      task_id_t task_id, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
   int InitializeController_(struct cgroup &cgroup,
@@ -528,17 +540,22 @@ class CgroupManager {
                             bool required, bool has_cgroup,
                             bool &changed_cgroup);
 
-  static void RmAllTaskCgroups_();
-  static void RmAllTaskCgroupsUnderController_(
-      CgroupConstant::Controller controller);
+  static void RmAllTaskCgroupsExcept_(
+      const std::unordered_set<task_id_t> &task_ids);
 
-  void RmAllTaskCgroupsV2_();
+  /**
+   * @brief Remove cgroup for not running tasks under controller.
+   * @param controller controller of cgroup to remove.
+   * @param task_ids task ids not to remove.
+   */
+  static void RmTaskCgroupsUnderControllerExcept_(
+      CgroupConstant::Controller controller,
+      const std::unordered_set<task_id_t> &task_ids);
+
+  void RmTaskCgroupsV2Expect_(const std::unordered_set<task_id_t> &task_ids);
+
   void RmCgroupsV2_(const std::string &root_cgroup_path,
                     const std::string &match_str);
-
-#ifdef CRANE_ENABLE_BPF
-  void RmBpfDevMap();
-#endif
 
   ControllerFlags m_mounted_controllers_;
 
