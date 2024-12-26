@@ -207,6 +207,23 @@ grpc::Status CtldForCforedServiceImpl::CforedStream(
   }
 }
 
+grpc::Status CtldForCforedServiceImpl::SignUserCertificate(
+    grpc::ServerContext *context,
+    const crane::grpc::SignUserCertificateRequest *request,
+    crane::grpc::SignUserCertificateResponse *response) {
+  auto result = g_account_manager->SignUserCertificate(
+      request->uid(), request->csr_content(), request->alt_names());
+  if (!result) {
+    response->set_ok(false);
+    response->set_reason(result.error());
+  } else {
+    response->set_ok(true);
+    response->set_certificate(result.value());
+  }
+
+  return grpc::Status::OK;
+}
+
 void CtldForCforedServer::Shutdown() {
   m_server_->Shutdown(std::chrono::system_clock::now() +
                       std::chrono::seconds(1));

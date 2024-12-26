@@ -180,6 +180,11 @@ class CtldForCforedServiceImpl final
                                crane::grpc::StreamCforedRequest> *stream)
       override;
 
+  grpc::Status SignUserCertificate(
+      grpc::ServerContext *context,
+      const crane::grpc::SignUserCertificateRequest *request,
+      crane::grpc::SignUserCertificateResponse *response) override;
+
  private:
   CtldForCforedServer *m_ctld_server_;
 };

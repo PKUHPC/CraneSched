@@ -756,6 +756,18 @@ message LoginReply {
   ErrCode reason = 3;
 }
 
+message SignUserCertificateRequest {
+  uint32 uid = 1;
+  string csr_content = 2;
+  string alt_names = 3;   // "localhost, *.domainSuffix"
+}
+
+message SignUserCertificateResponse {
+  bool ok = 1;
+  string certificate = 2;
+  ErrCode reason = 3;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -811,6 +823,9 @@ service CraneCtldForCraned {
 service CraneCtldForCfored {
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
+
+  // RPCS called from PKI request
+  rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 }
 
 
