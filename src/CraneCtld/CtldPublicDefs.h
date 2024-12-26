@@ -501,6 +501,11 @@ struct TaskInCtld {
 
     uid = val.uid();
     password_entry = std::make_unique<PasswordEntry>(uid);
+
+    // Note: gid is egid, which may be different from the
+    // primary group of the user in `password_entry`.
+    gid = val.gid();
+
     account = val.account();
     name = val.name();
     qos = val.qos();
