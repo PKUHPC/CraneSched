@@ -13,21 +13,24 @@ CraneBaseDir: /var/crane/
 # Tls settings
 UseTls: true
 SSL:
-  CranectldExternalCertFilePath: /etc/crane/cranectld_external.pem
-  CranectldExternalKeyFilePath: /etc/crane/cranectld_external.key
-  ExternalCaFilePath: /etc/crane/external_ca.pem
+  CranectldExternalCertFilePath: /etc/crane/tls/external.pem
+  CranectldExternalKeyFilePath: /etc/crane/tls/external.key
+  ExternalCaFilePath: /etc/crane/tls/external_ca.pem
     
-  CranectldInternalCertFilePath: /etc/crane/cranectld_internal.pem
-  CranectldInternalKeyFilePath: /etc/crane/cranectld_internal.key
-  CranedCertFilePath: /etc/crane/craned.pem
-  CranedKeyFilePath: /etc/crane/craned.key
-  CforedCertFilePath: /etc/crane/cfored.pem
-  CforedKeyFilePath: /etc/crane/cfored.key
-  InternalCaFilePath: /etc/crane/internal_ca.pem
-    
+  CranectldInternalCertFilePath: /etc/crane/tls/cranectld.pem
+  CranectldInternalKeyFilePath: /etc/crane/tls/cranectld.key
+  CranedCertFilePath: /etc/crane/tls/craned.pem
+  CranedKeyFilePath: /etc/crane/tls/craned.key
+  CforedCertFilePath: /etc/crane/tls/cfored.pem
+  CforedKeyFilePath: /etc/crane/tls/cfored.key
+  InternalCaFilePath: /etc/crane/tls/internal_ca.pem
   DomainSuffix: crane.com
-  
-JwtCertFilePath: /etc/crane/jwt.pem
+
+Vault:
+  Addr: 127.0.0.1
+  Port: 8200
+  Token: REMOVED
+  DomainSuffix: crane.com
 
 # Ctld settings
 # the listening address of control machine

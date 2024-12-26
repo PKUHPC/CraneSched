@@ -360,6 +360,23 @@ void ParseConfig(int argc, char** argv) {
         g_config.ListenConf.UseTls = false;
       }
 
+      if (config["Vault"]) {
+        const auto& vault_config = config["Vault"];
+
+        if (vault_config["Addr"])
+          g_config.VaultConf.Addr = vault_config["Addr"].as<std::string>();
+
+        if (vault_config["Port"])
+          g_config.VaultConf.Port = vault_config["Port"].as<std::string>();
+
+        if (vault_config["Token"])
+          g_config.VaultConf.Token = vault_config["Token"].as<std::string>();
+
+        if (vault_config["DomainSuffix"])
+          g_config.VaultConf.DomainSuffix =
+              vault_config["DomainSuffix"].as<std::string>();
+      }
+
       if (config["CraneCtldForeground"]) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
       }
@@ -842,9 +859,10 @@ void InitializeCtldGlobalVariables() {
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 
-  g_vault_client = std::make_unique<vault::CraneVaultClient>(
-      "REMOVED", "127.0.0.1", "8200");
-  g_vault_client->InitPki("crane.com");
+  g_vault_client = std::make_unique<vault::VaultClient>(
+      g_config.VaultConf.Token, g_config.VaultConf.Addr,
+      g_config.VaultConf.Port);
+  g_vault_client->InitPki(g_config.VaultConf.DomainSuffix);
 
   // Account manager must be initialized before Task Scheduler
   // since the recovery stage of the task scheduler will acquire

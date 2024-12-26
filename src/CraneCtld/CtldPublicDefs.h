@@ -109,6 +109,15 @@ struct Config {
   };
   CranedListenConf CranedListenConf;
 
+  struct VaultConfig {
+    std::string Addr;
+    std::string Port;
+    std::string Token;
+    std::string DomainSuffix;
+  };
+
+  VaultConfig VaultConf;
+
   struct Priority {
     enum TypeEnum { Basic, MultiFactor };
     TypeEnum Type;
