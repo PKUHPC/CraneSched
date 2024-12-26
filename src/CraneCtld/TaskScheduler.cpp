@@ -2904,6 +2904,9 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     task->cached_priority = priority;
     task->pending_reason = "Priority";
     task_priority_vec.emplace_back(task.get(), priority);
+    task->MutableTaskToCtld()->set_priority(priority);
+    g_embedded_db_client->UpdateTaskToCtldIfExists(0, task->TaskDbId(),
+                                                   task->TaskToCtld());
   }
 
   std::sort(task_priority_vec.begin(), task_priority_vec.end(),
