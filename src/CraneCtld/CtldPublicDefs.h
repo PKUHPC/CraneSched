@@ -442,10 +442,10 @@ struct TaskInCtld {
   int64_t StartTimeInUnixSecond() const { return ToUnixSeconds(start_time); }
 
   void SetEndTime(absl::Time const& val) {
-    end_time = val;
-    runtime_attr.mutable_end_time()->set_seconds(ToUnixSeconds(end_time));
+    SetEndTimeByUnixSecond(ToUnixSeconds(val));
   }
   void SetEndTimeByUnixSecond(uint64_t val) {
+    if (val > kTaskMaxTimeStampSec) val = kTaskMaxTimeStampSec;
     end_time = absl::FromUnixSeconds(val);
     runtime_attr.mutable_end_time()->set_seconds(val);
   }
