@@ -293,6 +293,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
     mutable_task->set_cpus_per_task(static_cast<double>(task->cpus_per_task));
 
     mutable_task->set_uid(task->uid);
+    mutable_task->set_gid(task->gid);
     mutable_task->mutable_env()->insert(task->env.begin(), task->env.end());
 
     mutable_task->set_cwd(task->cwd);

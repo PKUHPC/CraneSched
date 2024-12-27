@@ -131,6 +131,8 @@ message TaskToCtld {
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
 
+  uint32 gid = 14; // egid
+
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
     InteractiveTaskAdditionalMeta interactive_meta = 22;
@@ -155,7 +157,6 @@ message RuntimeAttrOfTask {
   // Fields that won't change after this task is accepted.
   uint32 task_id = 1;
   int64 task_db_id = 3;
-  int32 gid = 4;
   string username = 5;
 
   // Fields that will change after this task is accepted.
@@ -187,20 +188,21 @@ message TaskToD {
 
   string partition = 8;
   uint32 uid = 9;
+  uint32 gid = 10;
 
   oneof payload {
-    BatchTaskAdditionalMeta batch_meta = 10;
-    InteractiveTaskAdditionalMeta interactive_meta = 11;
+    BatchTaskAdditionalMeta batch_meta = 11;
+    InteractiveTaskAdditionalMeta interactive_meta = 12;
   }
 
-  map<string, string> env = 12;
-  string cwd = 13;
+  map<string, string> env = 13;
+  string cwd = 14;
 
-  repeated string allocated_nodes = 14;
+  repeated string allocated_nodes = 15;
 
-  string name = 15;
-  string account = 16;
-  string qos = 17;
+  string name = 16;
+  string account = 17;
+  string qos = 18;
 
   repeated string excludes = 19;
   repeated string nodelist = 20;
