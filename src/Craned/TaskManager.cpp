@@ -546,13 +546,25 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   // save the current uid/gid
   SavedPrivilege saved_priv{getuid(), getgid()};
 
-  int rc = setegid(instance->pwd_entry.Gid());
+  // TODO: Add all other supplementary groups.
+  // Currently we only add the main gid and the egid when task is submitted.
+  std::vector<gid_t> gids;
+  if (instance->task.gid() != instance->pwd_entry.Gid())
+    gids.emplace_back(instance->task.gid());
+
+  gids.emplace_back(instance->pwd_entry.Gid());
+  int rc = setgroups(gids.size(), gids.data());
+  if (rc == -1) {
+    CRANE_ERROR("error: setgroups. {}", strerror(errno));
+    return CraneErr::kSystemErr;
+  }
+
+  rc = setegid(instance->task.gid());
   if (rc == -1) {
     CRANE_ERROR("error: setegid. {}", strerror(errno));
     return CraneErr::kSystemErr;
   }
-  __gid_t gid_a[1] = {instance->pwd_entry.Gid()};
-  setgroups(1, gid_a);
+
   rc = seteuid(instance->pwd_entry.Uid());
   if (rc == -1) {
     CRANE_ERROR("error: seteuid. {}", strerror(errno));
@@ -727,7 +739,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     }
 
     setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid());
-    setregid(instance->pwd_entry.Gid(), instance->pwd_entry.Gid());
+    setregid(instance->task.gid(), instance->task.gid());
 
     // Set pgid to the pid of task root process.
     setpgid(0, 0);
