@@ -38,7 +38,8 @@ bool DeleteFile(std::string const& p) {
   return ok;
 }
 
-bool SaveFile(std::string const& p, std::string const& content) {
+bool SaveFile(std::string const& p, std::string const& content,
+              mode_t permissions = 0644) {
   if (!CreateFoldersForFile(p)) return false;
 
   try {
@@ -51,6 +52,13 @@ bool SaveFile(std::string const& p, std::string const& content) {
     }
     file << content;
     file.close();
+
+    if (chmod(p.c_str(), permissions) != 0) {
+      CRANE_ERROR("Failed to set permissions for file {}: {}", p,
+                  strerror(errno));
+      return false;
+    }
+
   } catch (const std::exception& e) {
     CRANE_ERROR("Failed to save file {}: {}", p, e.what());
     return false;

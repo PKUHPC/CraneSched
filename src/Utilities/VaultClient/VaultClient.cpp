@@ -143,7 +143,7 @@ bool VaultClient::IssureExternalCa_(const std::string& domains,
       return false;
     }
 
-    if (!util::os::SaveFile(external_ca->CACertFilePath, external_ca_pem))
+    if (!util::os::SaveFile(external_ca->CACertFilePath, external_ca_pem, 0644))
       return false;
 
   } catch (const std::exception& e) {
@@ -207,10 +207,12 @@ bool VaultClient::IssureExternalCert_(const std::string& role_name,
     external_cert->ServerCertContent = external_pem;
     external_cert->ServerKeyContent = external_key;
 
-    if (!util::os::SaveFile(external_cert->ServerCertFilePath, external_pem))
+    if (!util::os::SaveFile(external_cert->ServerCertFilePath, external_pem,
+                            0644))
       return false;
 
-    if (!util::os::SaveFile(external_cert->ServerKeyFilePath, external_key))
+    if (!util::os::SaveFile(external_cert->ServerKeyFilePath, external_key,
+                            0600))
       return false;
 
   } catch (const std::exception& e) {
