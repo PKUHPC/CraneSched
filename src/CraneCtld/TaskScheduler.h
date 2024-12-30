@@ -445,7 +445,7 @@ class TaskScheduler {
 
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
-  result::result<std::future<task_id_t>, std::string> SubmitTaskToScheduler(
+  std::expected<std::future<task_id_t>, std::string> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 
   /// \return The future is set to 0 if task submission is failed.
