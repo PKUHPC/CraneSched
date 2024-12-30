@@ -219,6 +219,8 @@ grpc::Status CtldForCforedServiceImpl::SignUserCertificate(
   } else {
     response->set_ok(true);
     response->set_certificate(result.value());
+    response->set_external_certificate(
+        g_config.VaultConf.ExternalCerts.ServerCertContent);
   }
 
   return grpc::Status::OK;

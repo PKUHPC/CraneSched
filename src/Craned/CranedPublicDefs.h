@@ -58,11 +58,11 @@ struct Config {
     struct TlsCertsConfig {
       std::string InternalCaContent;
       std::string DomainSuffix;
-      TlsCertificates CranedTlsCerts;
-      ClientTlsCertificates InternalClientTlsCerts;
-      ClientTlsCertificates CforedClientTlsCerts;
+      ServerCertificateConfig CranedTlsCerts;
+      ClientCertificateConfig InternalClientTlsCerts;
+      ClientCertificateConfig CforedClientTlsCerts;
     };
-    
+
     TlsCertsConfig TlsCerts;
 
     std::string UnixSocketListenAddr;

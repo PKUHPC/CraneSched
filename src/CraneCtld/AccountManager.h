@@ -23,6 +23,7 @@
 #include "DbClient.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
+#include "crane/VaultClient.h"
 
 namespace Ctld {
 
@@ -168,6 +169,10 @@ class AccountManager {
   CraneExpected<void> CheckModifyPartitionAcl(
       uint32_t uid, const std::string& partition_name,
       const std::unordered_set<std::string>& accounts);
+
+  CraneExpected<std::string> SignUserCertificate(uint32_t uid,
+                                                 const std::string& csr_content,
+                                                 const std::string& alt_names);
 
  private:
   void InitDataMap_();

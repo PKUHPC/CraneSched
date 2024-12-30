@@ -20,6 +20,7 @@ target_link_libraries(RpcService PUBLIC
 
         Utility_PublicHeader
         Utility_PluginClient
+        Utility_VaultClient
 
         uvw
 

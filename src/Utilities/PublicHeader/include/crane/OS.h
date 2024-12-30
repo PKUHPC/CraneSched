@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 
 #include "crane/Logger.h"
 #include "crane/OS.h"
@@ -39,6 +40,8 @@ namespace util {
 namespace os {
 
 bool DeleteFile(std::string const& p);
+
+bool SaveFile(std::string const& p, std::string const& content);
 
 bool CreateFolders(std::string const& p);
 

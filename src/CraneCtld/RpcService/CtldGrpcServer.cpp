@@ -993,31 +993,28 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
   return grpc::Status::OK;
 }
 
-CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
+CtldServer::CtldServer() : m_service_impl_(nullptr) {
   m_service_impl_ = std::make_unique<CraneCtldServiceImpl>(this);
 
   grpc::ServerBuilder builder;
-
+  const auto &listen_conf = g_config.ListenConf;
+  const auto &vault_conf = g_config.VaultConf;
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
   std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
-  if (listen_conf.UseTls) {
-    ServerBuilderAddTcpTlsListeningPort(&builder, cranectld_listen_addr,
-                                        listen_conf.CraneCtldListenPort,
-                                        listen_conf.TlsCerts.ExternalCerts);
-  } else {
-    ServerBuilderAddTcpInsecureListeningPort(&builder, cranectld_listen_addr,
-                                             listen_conf.CraneCtldListenPort);
-  }
+  ServerBuilderAddmTcpTlsListeningPort(
+      &builder, cranectld_listen_addr, listen_conf.CraneCtldListenPort,
+      vault_conf.ExternalCerts, vault_conf.ExternalCACerts.CACertContent);
 
-  std::vector<
-      std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>>
-      creators;
-  creators.push_back(
-      std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>(
-          new JwtAuthInterceptorFactory(g_config.ListenConf.JwtSecretContent)));
+  // std::vector<
+  //     std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>>
+  //     creators;
+  // creators.push_back(
+  //     std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>(
+  //         new
+  //         JwtAuthInterceptorFactory(g_config.ListenConf.JwtSecretContent)));
 
-  builder.experimental().SetInterceptorCreators(std::move(creators));
+  // builder.experimental().SetInterceptorCreators(std::move(creators));
 
   builder.RegisterService(m_service_impl_.get());
 

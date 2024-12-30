@@ -94,10 +94,10 @@ struct Config {
     struct TlsCertsConfig {
       std::string InternalCaContent;
       std::string DomainSuffix;
-      TlsCertificates ExternalCerts;
-      TlsCertificates InternalCerts;
-      ClientTlsCertificates CranedClientCerts;
-      ClientTlsCertificates CforedClientCerts;
+      ServerCertificateConfig ExternalCerts;
+      ServerCertificateConfig InternalCerts;
+      ClientCertificateConfig CranedClientCerts;
+      ClientCertificateConfig CforedClientCerts;
     };
 
     TlsCertsConfig TlsCerts;
@@ -115,6 +115,9 @@ struct Config {
     std::string Port;
     std::string Token;
     std::string DomainSuffix;
+
+    ServerCertificateConfig ExternalCerts;
+    CACertificateConfig ExternalCACerts;
   };
 
   VaultConfig VaultConf;

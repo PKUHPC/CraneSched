@@ -111,7 +111,7 @@ void ServerBuilderAddTcpInsecureListeningPort(grpc::ServerBuilder* builder,
 void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                          const std::string& address,
                                          const std::string& port,
-                                         const TlsCertificates& certs) {
+                                         const ServerCertificateConfig& certs) {
   std::string listen_addr_port =
       fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
 
@@ -131,7 +131,7 @@ void ServerBuilderAddTcpTlsListeningPort(grpc::ServerBuilder* builder,
 void ServerBuilderAddmTcpTlsListeningPort(grpc::ServerBuilder* builder,
                                           const std::string& address,
                                           const std::string& port,
-                                          const TlsCertificates& certs,
+                                          const ServerCertificateConfig& certs,
                                           const std::string& pem_root_cert) {
   std::string listen_addr_port =
       fmt::format("{}:{}", GrpcFormatIpAddress(address), port);
@@ -193,8 +193,8 @@ std::shared_ptr<grpc::Channel> CreateTcpInsecureCustomChannel(
 }
 
 static void SetSslCredOpts(grpc::SslCredentialsOptions* opts,
-                           const TlsCertificates& certs,
-                           const ClientTlsCertificates& clientcerts) {
+                           const ServerCertificateConfig& certs,
+                           const ClientCertificateConfig& clientcerts) {
   opts->pem_root_certs = clientcerts.ClientCertContent;
   opts->pem_cert_chain = certs.ServerCertContent;
   opts->pem_private_key = certs.ServerKeyContent;
@@ -202,7 +202,8 @@ static void SetSslCredOpts(grpc::SslCredentialsOptions* opts,
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByIp(
     const std::string& ip, const std::string& port,
-    const TlsCertificates& certs, const ClientTlsCertificates& clientcerts,
+    const ServerCertificateConfig& certs,
+    const ClientCertificateConfig& clientcerts,
     const grpc::ChannelArguments& args) {
   grpc::SslCredentialsOptions ssl_opts;
   SetSslCredOpts(&ssl_opts, certs, clientcerts);
@@ -214,7 +215,8 @@ std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByIp(
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsChannelByHostname(
     const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs, const ClientTlsCertificates& clientcerts,
+    const ServerCertificateConfig& certs,
+    const ClientCertificateConfig& clientcerts,
     const std::string& domainSuffix) {
   grpc::SslCredentialsOptions ssl_opts;
   SetSslCredOpts(&ssl_opts, certs, clientcerts);
@@ -225,8 +227,9 @@ std::shared_ptr<grpc::Channel> CreateTcpTlsChannelByHostname(
 
 std::shared_ptr<grpc::Channel> CreateTcpTlsCustomChannelByHostname(
     const std::string& hostname, const std::string& port,
-    const TlsCertificates& certs, const ClientTlsCertificates& clientcerts,
-    const std::string& domainSuffix, const grpc::ChannelArguments& args) {
+    const ServerCertificateConfig& certs,
+    const ClientCertificateConfig& clientcerts, const std::string& domainSuffix,
+    const grpc::ChannelArguments& args) {
   grpc::SslCredentialsOptions ssl_opts;
   SetSslCredOpts(&ssl_opts, certs, clientcerts);
 
