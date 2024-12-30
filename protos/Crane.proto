@@ -765,7 +765,8 @@ message SignUserCertificateRequest {
 message SignUserCertificateResponse {
   bool ok = 1;
   string certificate = 2;
-  ErrCode reason = 3;
+  string external_certificate = 3;
+  ErrCode reason = 4;
 }
 
 // Todo: Divide service into two parts: one for Craned and one for Crun

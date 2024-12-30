@@ -157,7 +157,7 @@ class CtldServer {
    * User must make sure that this constructor is called only once!
    * @param listen_address The "[Address]:[Port]" of CraneCtld.
    */
-  explicit CtldServer(const Config::CraneCtldListenConf &listen_conf);
+  explicit CtldServer();
 
   inline void Wait() { m_server_->Wait(); }
 

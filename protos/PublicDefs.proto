@@ -393,6 +393,8 @@ enum ErrCode {
   ERR_PROTOBUF = 10116;
   ERR_LIB_EVENT = 10117;
   ERR_NO_AVAIL_NODE = 10118;
+
+  ERR_SIGN_CERTIFICATE = 10119;
 }
 
 enum EntityType {

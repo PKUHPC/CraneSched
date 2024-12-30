@@ -173,11 +173,11 @@ void ParseConfig(int argc, char** argv) {
         const auto& ssl_config = config["SSL"];
 
         g_config.ListenConf.UseTls = true;
-        TlsCertificates& craned_certs =
+        ServerCertificateConfig& craned_certs =
             g_config.ListenConf.TlsCerts.CranedTlsCerts;
-        ClientTlsCertificates& internal_client_certs =
+        ClientCertificateConfig& internal_client_certs =
             g_config.ListenConf.TlsCerts.InternalClientTlsCerts;
-        ClientTlsCertificates& cfoed_client_certs =
+        ClientCertificateConfig& cfoed_client_certs =
             g_config.ListenConf.TlsCerts.CforedClientTlsCerts;
 
         if (ssl_config["DomainSuffix"])

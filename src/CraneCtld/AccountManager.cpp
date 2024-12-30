@@ -1048,6 +1048,32 @@ AccountManager::CraneExpected<void> AccountManager::CheckIfUidHasPermOnUser(
   return CheckIfUserHasPermOnUserNoLock_(*op_user, user, read_only_priv);
 }
 
+AccountManager::CraneExpected<std::string> AccountManager::SignUserCertificate(
+    uint32_t uid, const std::string& csr_content,
+    const std::string& alt_names) {
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
+
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+  const User* op_user = user_result.value();
+
+  // TODO：验证用户是否存在，以及用户数据库中是否已经有serial_number
+  std::string common_name = std::format("{}.{}.{}", uid, op_user->name,
+                                        g_config.VaultConf.DomainSuffix);
+  auto sign_response =
+      g_vault_client->Sign(csr_content, common_name, alt_names);
+  if (!sign_response)
+    return std::unexpected(CraneErrCode::ERR_SIGN_CERTIFICATE);
+
+  // TODO:将serial_number保存在数据库中
+
+  return sign_response->certificate;
+}
+
+/******************************************
+ * NOLOCK
+ ******************************************/
+
 AccountManager::CraneExpected<void>
 AccountManager::CheckAddUserAllowedPartitionNoLock_(
     const User* user, const Account* account, const std::string& partition) {

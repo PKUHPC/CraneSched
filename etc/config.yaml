@@ -13,10 +13,6 @@ CraneBaseDir: /var/crane/
 # Tls settings
 UseTls: true
 SSL:
-  CranectldExternalCertFilePath: /etc/crane/tls/external.pem
-  CranectldExternalKeyFilePath: /etc/crane/tls/external.key
-  ExternalCaFilePath: /etc/crane/tls/external_ca.pem
-    
   CranectldInternalCertFilePath: /etc/crane/tls/cranectld.pem
   CranectldInternalKeyFilePath: /etc/crane/tls/cranectld.key
   CranedCertFilePath: /etc/crane/tls/craned.pem
@@ -29,8 +25,12 @@ SSL:
 Vault:
   Addr: 127.0.0.1
   Port: 8200
-  Token: REMOVED
+  Token: REMOVED  # Token cannot be leaked
   DomainSuffix: crane.com
+
+  ExternalCertFilePath: /etc/crane/tls/external.pem
+  ExternalKeyFilePath: /etc/crane/tls/external.key
+  ExternalCaFilePath: /etc/crane/tls/external_ca.pem
 
 # Ctld settings
 # the listening address of control machine

@@ -21,31 +21,46 @@
 #include <VaultClient.h>
 
 #include <expected>
-#include <iostream>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
+
+#include "crane/GrpcHelper.h"
+#include "crane/Logger.h"
+#include "crane/OS.h"
 
 namespace vault {
 
 struct SignResponse {
   std::string serial_number;
   std::string certificate;
-  std::string issuing_ca;
 };
 
 class VaultClient {
  public:
   VaultClient(const std::string& root_token, const std::string& address,
-                   const std::string& port);
-  bool InitPki(const std::string& domains);
+              const std::string& port);
+  bool InitPki(const std::string& domains, CACertificateConfig* external_ca,
+               ServerCertificateConfig* external_cert);
 
   std::expected<SignResponse, bool> Sign(const std::string& csr_content,
-                                        const std::string& common_name);
+                                         const std::string& common_name,
+                                         const std::string& alt_names);
 
  private:
+  bool IssureExternalCa_(const std::string& domains,
+                         CACertificateConfig* external_ca);
+
+  bool CreateRole_(const std::string& role_name, const std::string& domains);
+
+  bool IssureExternalCert_(const std::string& role_name,
+                           const std::string& domains,
+                           ServerCertificateConfig* external_cert);
+
   std::unique_ptr<Vault::Client> root_client_;
-  std::unique_ptr<Vault::Pki> pki_admin_;
+  std::unique_ptr<Vault::Pki> pki_root_;
+  std::unique_ptr<Vault::Pki> pki_internal_;
+  std::unique_ptr<Vault::Pki> pki_external_;
 
   std::string address_;
   std::string port_;
