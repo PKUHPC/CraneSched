@@ -20,6 +20,7 @@
 
 #include <fcntl.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -41,7 +42,8 @@ namespace os {
 
 bool DeleteFile(std::string const& p);
 
-bool SaveFile(std::string const& p, std::string const& content);
+bool SaveFile(std::string const& p, std::string const& content,
+              mode_t permissions);
 
 bool CreateFolders(std::string const& p);
 
