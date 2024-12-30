@@ -43,7 +43,10 @@ VaultClient::VaultClient(const std::string& root_token,
 bool VaultClient::InitPki(const std::string& domains,
                           CACertificateConfig* external_ca,
                           ServerCertificateConfig* external_cert) {
-  if (!root_client_->is_authenticated()) return false;
+  if (!root_client_->is_authenticated()) {
+    CRANE_ERROR("Root client is not authenticated");
+    return false;
+  }
 
   pki_root_ = std::make_unique<Vault::Pki>(
       Vault::Pki{*root_client_, Vault::SecretMount{"pki"}});
@@ -80,6 +83,7 @@ std::expected<SignResponse, bool> VaultClient::Sign(
     data = nlohmann::json::parse(response.value())["data"];
 
   } catch (const std::exception& e) {
+    CRANE_DEBUG("Failed to sign certificate: {}", e.what());
     return std::unexpected(false);
   }
 
@@ -95,7 +99,10 @@ bool VaultClient::IssureExternalCa_(const std::string& domains,
 
   try {
     response = pki_external_->readCACertificate();
-    if (!response) return false;
+    if (!response) {
+      CRANE_ERROR("Failed to read external CA certificate");
+      return false;
+    }
 
     std::string external_ca_pem = response.value();
 
@@ -104,7 +111,7 @@ bool VaultClient::IssureExternalCa_(const std::string& domains,
           Vault::KeyType{"internal"},
           Vault::Parameters({{"common_name", std::format("*.{}", domains)},
                              {"issuer_name", "CraneSched_internal_CA"},
-                             {"not_after", "2030-12-31T23:59:59Z"}}));
+                             {"not_after", "9999-12-31T23:59:59Z"}}));
 
       data = nlohmann::json::parse(response.value())["data"];
       std::string external_ca_csr = data["csr"];
@@ -112,8 +119,11 @@ bool VaultClient::IssureExternalCa_(const std::string& domains,
       response = pki_root_->signIntermediate(
           Vault::Parameters({{"csr", external_ca_csr},
                              {"format", "pem_bundle"},
-                             {"not_after", "2030-12-31T23:59:59Z"}}));
-      if (!response) return false;
+                             {"not_after", "9999-12-31T23:59:59Z"}}));
+      if (!response) {
+        CRANE_ERROR("Failed to sign external CA certificate");
+        return false;
+      }
 
       data = nlohmann::json::parse(response.value())["data"];
 
@@ -121,13 +131,23 @@ bool VaultClient::IssureExternalCa_(const std::string& domains,
 
       response = pki_external_->setSignedIntermediate(
           Vault::Parameters({{"certificate", external_ca_pem}}));
-      if (!response) return false;
+      if (!response) {
+        CRANE_ERROR("Failed to set signed external CA certificate");
+        return false;
+      }
+    }
+
+    external_ca->CACertContent = external_ca_pem;
+    if (external_ca->CACertFilePath.empty()) {
+      CRANE_ERROR("ExternalCAFilePath is empty");
+      return false;
     }
 
     if (!util::os::SaveFile(external_ca->CACertFilePath, external_ca_pem))
       return false;
 
   } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to issue external CA certificate: {}", e.what());
     return false;
   }
 
@@ -140,14 +160,21 @@ bool VaultClient::CreateRole_(const std::string& role_name,
   std::optional<std::string> response;
 
   try {
+    response = pki_external_->readRole(Vault::Path{role_name});
+    if (response) return true;
+
     response = pki_external_->createRole(
         Vault::Path{role_name},
         Vault::Parameters{{"allowed_domains", domains},
                           {"allow_subdomains", "true"},
                           {"allow_glob_domains", "true"},
-                          {"not_after", "2030-12-31T23:59:59Z"}});
-    if (!response) return false;
+                          {"not_after", "9999-12-31T23:59:59Z"}});
+    if (!response) {
+      CRANE_ERROR("Failed to create role {}", role_name);
+      return false;
+    }
   } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to create role {}: {}", role_name, e.what());
     return false;
   }
 
@@ -168,11 +195,17 @@ bool VaultClient::IssureExternalCert_(const std::string& role_name,
         Vault::Parameters{{"common_name", std::format("external.{}", domains)},
                           {"alt_names", std::format("localhost,*.{}", domains)},
                           {"exclude_cn_from_sans", "true"}});
-    if (!response) return false;
+    if (!response) {
+      CRANE_ERROR("Failed to issue external certificate");
+      return false;
+    }
 
     data = nlohmann::json::parse(response.value())["data"];
     std::string external_pem = data["certificate"];
     std::string external_key = data["private_key"];
+
+    external_cert->ServerCertContent = external_pem;
+    external_cert->ServerKeyContent = external_key;
 
     if (!util::os::SaveFile(external_cert->ServerCertFilePath, external_pem))
       return false;
@@ -181,6 +214,7 @@ bool VaultClient::IssureExternalCert_(const std::string& role_name,
       return false;
 
   } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to issue external certificate: {}", e.what());
     return false;
   }
 

@@ -867,13 +867,10 @@ void InitializeCtldGlobalVariables() {
   g_vault_client = std::make_unique<vault::VaultClient>(
       g_config.VaultConf.Token, g_config.VaultConf.Addr,
       g_config.VaultConf.Port);
-  bool is_init = g_vault_client->InitPki(g_config.VaultConf.DomainSuffix,
-                                         &g_config.VaultConf.ExternalCACerts,
-                                         &g_config.VaultConf.ExternalCerts);
-  if (!is_init) {
-    CRANE_ERROR("vault Init Pki failed");
+  if (!g_vault_client->InitPki(g_config.VaultConf.DomainSuffix,
+                               &g_config.VaultConf.ExternalCACerts,
+                               &g_config.VaultConf.ExternalCerts))
     std::exit(1);
-  }
 
   // Account manager must be initialized before Task Scheduler
   // since the recovery stage of the task scheduler will acquire

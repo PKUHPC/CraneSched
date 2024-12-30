@@ -39,6 +39,8 @@ bool DeleteFile(std::string const& p) {
 }
 
 bool SaveFile(std::string const& p, std::string const& content) {
+  if (!CreateFoldersForFile(p)) return false;
+
   try {
     if (std::filesystem::exists(p)) return true;
 
