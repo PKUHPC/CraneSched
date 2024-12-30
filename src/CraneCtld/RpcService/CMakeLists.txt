@@ -39,7 +39,6 @@ target_link_libraries(RpcService PUBLIC
         mongocxx_static
 
         range-v3::range-v3
-        result
 
         Backward::Interface
 )

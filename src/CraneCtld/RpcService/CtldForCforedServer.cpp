@@ -64,21 +64,22 @@ grpc::Status CtldForCforedServiceImpl::CforedStream(
           CRANE_ERROR("Expect type CFORED_REGISTRATION from peer {}.",
                       context->peer());
           return Status::CANCELLED;
-        } else {
-          cfored_name = cfored_request.payload_cfored_reg().cfored_name();
-          CRANE_INFO("Cfored {} registered.", cfored_name);
-
-          ok = stream_writer->WriteCforedRegistrationAck({});
-          if (ok) {
-            state = StreamState::kWaitMsg;
-          } else {
-            CRANE_ERROR(
-                "Failed to send msg to cfored {}. Connection is broken. "
-                "Exiting...",
-                cfored_name);
-            state = StreamState::kCleanData;
-          }
         }
+
+        cfored_name = cfored_request.payload_cfored_reg().cfored_name();
+        CRANE_INFO("Cfored {} registered.", cfored_name);
+
+        ok = stream_writer->WriteCforedRegistrationAck({});
+        if (ok) {
+          state = StreamState::kWaitMsg;
+        } else {
+          CRANE_ERROR(
+              "Failed to send msg to cfored {}. Connection is broken. "
+              "Exiting...",
+              cfored_name);
+          state = StreamState::kCleanData;
+        }
+
       } else {
         state = StreamState::kCleanData;
       }
@@ -108,15 +109,16 @@ grpc::Status CtldForCforedServiceImpl::CforedStream(
               };
 
           meta.cb_task_cancel = [writer_weak_ptr](task_id_t task_id) {
+            CRANE_TRACE("Sending TaskCancelRequest in task_cancel", task_id);
             if (auto writer = writer_weak_ptr.lock(); writer)
               writer->WriteTaskCancelRequest(task_id);
           };
 
-          meta.cb_task_completed = [this, i_type, cfored_name,
-                                    writer_weak_ptr](task_id_t task_id) {
-            CRANE_TRACE("Sending TaskCompletionAckReply in task_completed",
-                        task_id);
-            if (auto writer = writer_weak_ptr.lock(); writer)
+          meta.cb_task_completed = [this, i_type, cfored_name, writer_weak_ptr](
+                                       task_id_t task_id,
+                                       bool send_completion_ack) {
+            if (auto writer = writer_weak_ptr.lock();
+                writer && send_completion_ack)
               writer->WriteTaskCompletionAckReply(task_id);
             m_ctld_server_->m_mtx_.Lock();
 
@@ -134,12 +136,12 @@ grpc::Status CtldForCforedServiceImpl::CforedStream(
 
           auto submit_result =
               g_task_scheduler->SubmitTaskToScheduler(std::move(task));
-          result::result<task_id_t, std::string> result;
+          std::expected<task_id_t, std::string> result;
           if (submit_result.has_value()) {
-            result = result::result<task_id_t, std::string>{
+            result = std::expected<task_id_t, std::string>{
                 submit_result.value().get()};
           } else {
-            result = result::fail(submit_result.error());
+            result = std::unexpected(submit_result.error());
           }
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
@@ -162,8 +164,7 @@ grpc::Status CtldForCforedServiceImpl::CforedStream(
         case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
           auto const &payload = cfored_request.payload_task_complete_req();
           CRANE_TRACE("Recv TaskCompletionReq of Task #{}", payload.task_id());
-
-          if (g_task_scheduler->TerminatePendingOrRunningTask(
+          if (g_task_scheduler->TerminatePendingOrRunningIaTask(
                   payload.task_id()) != CraneErr::kOk)
             stream_writer->WriteTaskCompletionAckReply(payload.task_id());
         } break;

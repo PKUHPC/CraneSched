@@ -1039,12 +1039,12 @@ void TaskScheduler::SetNodeSelectionAlgo(
   m_node_selection_algo_ = std::move(algo);
 }
 
-result::result<std::future<task_id_t>, std::string>
+std::expected<std::future<task_id_t>, std::string>
 TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   CraneErr err;
 
   if (!task->password_entry->Valid()) {
-    return result::fail(
+    return std::unexpected(
         fmt::format("Uid {} not found on the controller node", task->uid));
   }
   task->SetUsername(task->password_entry->Username());
@@ -1053,7 +1053,7 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     auto user_scoped_ptr =
         g_account_manager->GetExistedUserInfo(task->Username());
     if (!user_scoped_ptr) {
-      return result::fail(fmt::format(
+      return std::unexpected(fmt::format(
           "User '{}' not found in the account database", task->Username()));
     }
 
@@ -1062,7 +1062,7 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
       task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
     } else {
       if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
-        return result::fail(fmt::format(
+        return std::unexpected(fmt::format(
             "Account '{}' is not in your account list", task->account));
       }
     }
@@ -1070,7 +1070,7 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
 
   if (!g_account_manager->CheckUserPermissionToPartition(
           task->Username(), task->account, task->partition_id)) {
-    return result::fail(
+    return std::unexpected(
         fmt::format("User '{}' doesn't have permission to use partition '{}' "
                     "when using account '{}'",
                     task->Username(), task->partition_id, task->account));
@@ -1078,48 +1078,50 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
 
   auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
       task->Username(), task->account);
-  if (enable_res.has_error()) {
-    return result::fail(enable_res.error());
+  if (!enable_res) {
+    return std::unexpected(enable_res.error());
   }
 
-  err = AcquireTaskAttributes(task.get());
+  err = g_task_scheduler->AcquireTaskAttributes(task.get());
 
-  if (err == CraneErr::kOk) err = CheckTaskValidity(task.get());
+  if (err == CraneErr::kOk)
+    err = g_task_scheduler->CheckTaskValidity(task.get());
 
   if (err == CraneErr::kOk) {
     task->SetSubmitTime(absl::Now());
-    std::future<task_id_t> future = SubmitTaskAsync(std::move(task));
+    std::future<task_id_t> future =
+        g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
   }
 
   if (err == CraneErr::kNonExistent) {
     CRANE_DEBUG("Task submission failed. Reason: Partition doesn't exist!");
-    return result::fail("Partition doesn't exist!");
+    return std::unexpected("Partition doesn't exist!");
   } else if (err == CraneErr::kInvalidNodeNum) {
     CRANE_DEBUG(
         "Task submission failed. Reason: --node is either invalid or greater "
         "than the number of nodes in its partition.");
-    return result::fail(
+    return std::unexpected(
         "--node is either invalid or greater than the number of nodes in its "
         "partition.");
   } else if (err == CraneErr::kNoResource) {
     CRANE_DEBUG(
         "Task submission failed. "
         "Reason: The resources of the partition are insufficient.");
-    return result::fail("The resources of the partition are insufficient");
+    return std::unexpected("The resources of the partition are insufficient");
   } else if (err == CraneErr::kNoAvailNode) {
     CRANE_DEBUG(
         "Task submission failed. "
         "Reason: Nodes satisfying the requirements of task are insufficient");
-    return result::fail(
+    return std::unexpected(
         "Nodes satisfying the requirements of task are insufficient.");
   } else if (err == CraneErr::kInvalidParam) {
     CRANE_DEBUG(
         "Task submission failed. "
         "Reason: The param of task is invalid.");
-    return result::fail("The param of task is invalid.");
+    return std::unexpected("The param of task is invalid.");
   }
-  return result::fail(CraneErrStr(err));
+  return std::unexpected<std::string>(CraneErrStr(err));
 }
 
 std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
