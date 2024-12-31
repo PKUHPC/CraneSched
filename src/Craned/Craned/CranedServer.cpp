@@ -20,7 +20,7 @@
 
 #include <yaml-cpp/yaml.h>
 
-#include "TaskManager.h"
+#include "JobManager.h"
 
 namespace Craned {
 
@@ -33,7 +33,7 @@ grpc::Status CranedServiceImpl::ExecuteTask(
 
   CraneErr err;
   for (auto const &task_to_d : request->tasks()) {
-    err = g_task_mgr->ExecuteTaskAsync(task_to_d);
+    err = g_job_mgr->ExecuteTaskAsync(task_to_d);
     if (err != CraneErr::kOk)
       response->add_failed_task_id_list(task_to_d.task_id());
   }
@@ -49,7 +49,7 @@ grpc::Status CranedServiceImpl::TerminateTasks(
               absl::StrJoin(request->task_id_list(), ","));
 
   for (task_id_t id : request->task_id_list())
-    g_task_mgr->TerminateTaskAsync(id);
+    g_job_mgr->TerminateTaskAsync(id);
   response->set_ok(true);
 
   return Status::OK;
@@ -59,7 +59,7 @@ grpc::Status CranedServiceImpl::TerminateOrphanedTask(
     grpc::ServerContext *context,
     const crane::grpc::TerminateOrphanedTaskRequest *request,
     crane::grpc::TerminateOrphanedTaskReply *response) {
-  g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(request->task_id());
+  g_job_mgr->MarkTaskAsOrphanedAndTerminateAsync(request->task_id());
   response->set_ok(true);
 
   return Status::OK;
@@ -135,11 +135,13 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
 
   // 3. pid2jobid
   do {
-    auto task_id_expt = g_task_mgr->QueryTaskIdFromPidAsync(pid_i);
-    if (task_id_expt.has_value()) {
-      CRANE_TRACE("Task id for pid {} is #{}", pid_i, task_id_expt.value());
+    auto task_id_expt_future = g_job_mgr->QueryTaskIdFromPidAsync(pid_i);
+    task_id_expt_future.wait();
+    if (task_id_expt_future.get().has_value()) {
+      CRANE_TRACE("Task id for pid {} is #{}", pid_i,
+                  task_id_expt_future.get().value());
       response->set_ok(true);
-      response->set_task_id(task_id_expt.value());
+      response->set_task_id(task_id_expt_future.get().value());
       return Status::OK;
     } else {
       std::string proc_dir = fmt::format("/proc/{}/status", pid_i);
@@ -167,22 +169,22 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
     grpc::ServerContext *context,
     const crane::grpc::CreateCgroupForTasksRequest *request,
     crane::grpc::CreateCgroupForTasksReply *response) {
-  std::vector<CgroupSpec> cg_specs;
+  std::vector<JobSpec> job_specs;
   for (int i = 0; i < request->task_id_list_size(); i++) {
     task_id_t task_id = request->task_id_list(i);
     uid_t uid = request->uid_list(i);
     const crane::grpc::ResourceInNode &res = request->res_list(i);
 
     CgroupSpec spec{.uid = uid,
-                    .task_id = task_id,
+                    .job_id = task_id,
                     .res_in_node = res,
                     .execution_node = request->execution_node(i),
                     .recovered = false};
     CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", task_id, uid);
-    cg_specs.emplace_back(std::move(spec));
+    job_specs.emplace_back(std::move(spec));
   }
 
-  bool ok = g_cg_mgr->CreateCgroups(std::move(cg_specs));
+  bool ok = g_job_mgr->AllocJobs(std::move(job_specs));
   if (!ok) {
     CRANE_ERROR("Failed to create cgroups for some tasks.");
   }
@@ -200,7 +202,7 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
 
     CRANE_DEBUG("Release Cgroup for task #{}", task_id);
 
-    bool ok = g_cg_mgr->ReleaseCgroup(task_id, uid);
+    bool ok = g_job_mgr->FreeJobAllocation(task_id);
     if (!ok) {
       CRANE_ERROR("Failed to release cgroup for task #{}, uid {}", task_id,
                   uid);
@@ -368,10 +370,10 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
     grpc::ServerContext *context,
     const crane::grpc::MigrateSshProcToCgroupRequest *request,
     crane::grpc::MigrateSshProcToCgroupReply *response) {
-  CRANE_TRACE("Moving pid {} to cgroup of task #{}", request->pid(),
+  CRANE_TRACE("Moving pid {} to cgroup of job #{}", request->pid(),
               request->task_id());
   bool ok =
-      g_cg_mgr->MigrateProcToCgroupOfTask(request->pid(), request->task_id());
+      g_job_mgr->MigrateProcToCgroupOfJob(request->pid(), request->task_id());
 
   if (!ok) {
     CRANE_INFO("GrpcMigrateSshProcToCgroup failed on pid: {}, task #{}",
@@ -388,7 +390,7 @@ Status CranedServiceImpl::QueryTaskEnvVariables(
     grpc::ServerContext *context,
     const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
     crane::grpc::QueryTaskEnvVariablesReply *response) {
-  auto task_env_map = g_task_mgr->QueryTaskEnvMapAsync(request->task_id());
+  auto task_env_map = g_job_mgr->QueryTaskEnvMapAsync(request->task_id());
   if (task_env_map.has_value()) {
     for (const auto &[name, value] : task_env_map.value())
       response->mutable_env_map()->emplace(name, value);
@@ -474,7 +476,7 @@ grpc::Status CranedServiceImpl::CheckTaskStatus(
     crane::grpc::CheckTaskStatusReply *response) {
   crane::grpc::TaskStatus status{};
 
-  bool exist = g_task_mgr->CheckTaskStatusAsync(request->task_id(), &status);
+  bool exist = g_job_mgr->CheckTaskStatusAsync(request->task_id(), &status);
   response->set_ok(exist);
   response->set_status(status);
 
@@ -485,7 +487,7 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
     grpc::ServerContext *context,
     const crane::grpc::ChangeTaskTimeLimitRequest *request,
     crane::grpc::ChangeTaskTimeLimitReply *response) {
-  bool ok = g_task_mgr->ChangeTaskTimeLimitAsync(
+  bool ok = g_job_mgr->ChangeTaskTimeLimitAsync(
       request->task_id(), absl::Seconds(request->time_limit_seconds()));
   response->set_ok(ok);
 
@@ -546,7 +548,7 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
              listen_conf.UnixSocketListenAddr, craned_listen_addr,
              listen_conf.CranedListenPort);
 
-  g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
+  g_job_mgr->SetSigintCallback([p_server = m_server_.get()] {
     p_server->Shutdown();
     CRANE_INFO("Grpc Server Shutdown() was called.");
   });

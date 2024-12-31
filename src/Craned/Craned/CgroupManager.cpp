@@ -31,6 +31,7 @@
 
 #include <dirent.h>
 
+#include "CgroupManager.h"
 #include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
@@ -186,10 +187,10 @@ CraneErr CgroupManager::Init(std::vector<CgroupSpec> &task_cgroup_specs) {
 
   std::unordered_set<task_id_t> task_ids;
   for (auto &cg_spec : task_cgroup_specs) {
-    task_ids.emplace(cg_spec.task_id);
+    task_ids.emplace(cg_spec.job_id);
 
     uid_t uid = cg_spec.uid;
-    task_id_t task_id = cg_spec.task_id;
+    task_id_t task_id = cg_spec.job_id;
 
     CRANE_TRACE("Recover lazily allocated cgroups for task #{}, uid {}",
                 task_id, uid);
@@ -535,50 +536,30 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   }
 }
 
-bool CgroupManager::CheckIfCgroupForTasksExists(task_id_t task_id) {
-  return m_task_id_to_cg_map_.Contains(task_id);
-}
+std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
+    const CgroupSpec &cg_spec) {
+  crane::grpc::ResourceInNode res = cg_spec.res_in_node;
+  bool retrieve = cg_spec.recovered;
+  auto task_id = cg_spec.job_id;
 
-bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
-                                         CgroupInterface **cg) {
-  crane::grpc::ResourceInNode res;
-  bool retrieve = false;
-  CgroupInterface *pcg;
-
-  {
-    auto cg_spec_it = m_task_id_to_cg_spec_map_[task_id];
-    if (!cg_spec_it) return false;
-    res = cg_spec_it->res_in_node;
-    retrieve = cg_spec_it->recovered;
-  }
-
-  {
-    auto cg_it = m_task_id_to_cg_map_[task_id];
-    auto &cg_unique_ptr = *cg_it;
-    if (!cg_unique_ptr) {
-      if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
-        cg_unique_ptr = CgroupManager::CreateOrOpen_(
-            task_id, CgV1PreferredControllers, NO_CONTROLLER_FLAG, retrieve);
-      } else if (GetCgroupVersion() ==
-                 CgroupConstant::CgroupVersion::CGROUP_V2) {
-        cg_unique_ptr = CgroupManager::CreateOrOpen_(
-            task_id, CgV2PreferredControllers, NO_CONTROLLER_FLAG, retrieve);
-      } else {
-        CRANE_WARN("cgroup version is not supported.");
-      }
-    }
-
-    if (!cg_unique_ptr) return false;
-
-    pcg = cg_unique_ptr.get();
-    if (cg) *cg = pcg;
+  std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
+  if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
+    cg_unique_ptr = CgroupManager::CreateOrOpen_(
+        task_id, CgV1PreferredControllers, NO_CONTROLLER_FLAG, retrieve);
+  } else if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2) {
+    cg_unique_ptr = CgroupManager::CreateOrOpen_(
+        task_id, CgV2PreferredControllers, NO_CONTROLLER_FLAG, retrieve);
+  } else {
+    CRANE_WARN("cgroup version is not supported.");
+    return nullptr;
   }
 
   // If just retrieve cgroup, do not trigger plugin and apply res limit.
-  if (retrieve) return true;
+  if (retrieve) return cg_unique_ptr;
 
   if (g_config.Plugin.Enabled) {
-    g_plugin_client->CreateCgroupHookAsync(task_id, pcg->GetCgroupString(),
+    g_plugin_client->CreateCgroupHookAsync(cg_spec.job_id,
+                                           cg_unique_ptr->GetCgroupString(),
                                            res.dedicated_res_in_node());
   }
 
@@ -589,48 +570,11 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
       util::ReadableGrpcDresInNode(res.dedicated_res_in_node()));
 
   bool ok = AllocatableResourceAllocator::Allocate(
-      res.allocatable_res_in_node(), pcg);
+      res.allocatable_res_in_node(), cg_unique_ptr.get());
   if (ok)
-    ok &=
-        DedicatedResourceAllocator::Allocate(res.dedicated_res_in_node(), pcg);
-  return ok;
-}
-
-bool CgroupManager::CreateCgroups(std::vector<CgroupSpec> &&cg_specs) {
-  std::chrono::steady_clock::time_point begin;
-  std::chrono::steady_clock::time_point end;
-
-  CRANE_DEBUG("Creating cgroups for {} tasks", cg_specs.size());
-
-  begin = std::chrono::steady_clock::now();
-
-  for (int i = 0; i < cg_specs.size(); i++) {
-    uid_t uid = cg_specs[i].uid;
-    task_id_t task_id = cg_specs[i].task_id;
-
-    CRANE_TRACE("Create lazily allocated cgroups for task #{}, uid {}", task_id,
-                uid);
-
-    this->m_task_id_to_cg_spec_map_.Emplace(task_id, std::move(cg_specs[i]));
-
-    this->m_task_id_to_cg_map_.Emplace(task_id, nullptr);
-
-    // Acquire map lock to avoid using [uid]set deleted by ReleaseCgroup
-    // after checking contains(uid)
-    auto uid_task_id_map_ptr =
-        this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
-    if (!uid_task_id_map_ptr->contains(uid))
-      uid_task_id_map_ptr->emplace(uid, absl::flat_hash_set<uint32_t>{task_id});
-    else
-      uid_task_id_map_ptr->at(uid).RawPtr()->emplace(task_id);
-  }
-
-  end = std::chrono::steady_clock::now();
-  CRANE_TRACE("Create cgroups costed {} ms",
-              std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-                  .count());
-
-  return true;
+    ok &= DedicatedResourceAllocator::Allocate(res.dedicated_res_in_node(),
+                                               cg_unique_ptr.get());
+  return ok ? std::move(cg_unique_ptr) : nullptr;
 }
 
 bool CgroupManager::ReleaseCgroupByTaskIdOnly(task_id_t task_id) {
@@ -669,39 +613,7 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
 
       return false;
     }
-    CgroupInterface *cgroup = it->second.GetExclusivePtr()->release();
 
-    if (g_config.Plugin.Enabled) {
-      g_plugin_client->DestroyCgroupHookAsync(task_id,
-                                              cgroup->GetCgroupString());
-    }
-
-    task_id_to_cg_map_ptr->erase(task_id);
-
-    if (cgroup != nullptr) {
-      g_thread_pool->detach_task([cgroup]() {
-        bool rc;
-        int cnt = 0;
-
-        while (true) {
-          if (cgroup->Empty()) break;
-
-          if (cnt >= 5) {
-            CRANE_ERROR(
-                "Couldn't kill the processes in cgroup {} after {} times. "
-                "Skipping it.",
-                cgroup->GetCgroupString(), cnt);
-            break;
-          }
-
-          cgroup->KillAllProcesses();
-          ++cnt;
-          std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-
-        delete cgroup;
-      });
-    }
   }
 
   {
@@ -765,43 +677,28 @@ void CgroupManager::RmTaskCgroupsUnderControllerExcept_(
 }
 
 void CgroupManager::RmTaskCgroupsV2Expect_(
-    const std::unordered_set<task_id_t> &task_ids) {
-  RmCgroupsV2_(CgroupConstant::RootCgroupFullPath,
-               CgroupConstant::kTaskCgPathPrefix);
+    const std::unordered_set<task_id_t> &job_ids) {
+  RmCgroupsV2Except_(CgroupConstant::RootCgroupFullPath, job_ids);
 }
 
-void CgroupManager::RmCgroupsV2_(const std::string &root_cgroup_path,
-                                 const std::string &match_str) {
-  DIR *dir = nullptr;
-  if ((dir = opendir(root_cgroup_path.c_str())) == nullptr) {
-    CRANE_ERROR("Failed to open cgroup dir {}", root_cgroup_path);
-  }
-  struct dirent *entry;
-  std::vector<std::string> cgroup_full_path_to_delete;
-  while ((entry = readdir(dir)) != nullptr) {
-    // Skip "." and ".." directories
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-      continue;
-    }
-
-    std::string dir_name = entry->d_name;
-    std::string full_path = root_cgroup_path + "/" + dir_name;
-
-    // Check if it's a directory and if it contains the match_str
-    struct stat info;
-    if (stat(full_path.c_str(), &info) == 0 && S_ISDIR(info.st_mode)) {
-      if (dir_name.find(match_str) != std::string::npos) {
-        cgroup_full_path_to_delete.push_back(full_path);
+void CgroupManager::RmCgroupsV2Except_(
+    const std::string &root_cgroup_path,
+    const std::unordered_set<task_id_t> &job_ids) {
+  static const LazyRE2 cg_pattern(R"(Crane_Task_(\d+))");
+  try {
+    for (const auto &it :
+         std::filesystem::directory_iterator(root_cgroup_path)) {
+      std::string job_id_str;
+      if (it.is_directory() && RE2::FullMatch(it.path().filename().c_str(),
+                                              *cg_pattern, job_id_str)) {
+        task_id_t job_id = std::stoul(job_id_str);
+        if (!job_ids.contains(job_id)) continue;
+        if (std::filesystem::remove(it.path()))
+          CRANE_ERROR("Failed to remove cgroup {}: {}", it.path().c_str());
       }
     }
-  }
-  closedir(dir);
-  for (const auto &tf : cgroup_full_path_to_delete) {
-    int err = rmdir(tf.c_str());
-    if (err != 0) {
-      CRANE_ERROR("Failed to remove cgroup {}: {}", tf.c_str(),
-                  strerror(errno));
-    }
+  } catch (const std::filesystem::filesystem_error &e) {
+    CRANE_ERROR("Error: {}", e.what());
   }
 }
 
@@ -822,26 +719,10 @@ bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
   return info->job_cnt > 0;
 }
 
-bool CgroupManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
-  CgroupInterface *cg;
-  bool ok = AllocateAndGetCgroup(task_id, &cg);
-  if (!ok) return false;
-
-  return cg->MigrateProcIn(pid);
-}
-
 std::optional<std::string> CgroupManager::QueryTaskExecutionNode(
     task_id_t task_id) {
   if (!this->m_task_id_to_cg_spec_map_.Contains(task_id)) return std::nullopt;
   return this->m_task_id_to_cg_spec_map_[task_id]->execution_node;
-}
-
-CraneExpected<crane::grpc::ResourceInNode> CgroupManager::GetTaskResourceInNode(
-    task_id_t task_id) {
-  auto cg_spec_ptr = this->m_task_id_to_cg_spec_map_[task_id];
-  if (cg_spec_ptr) return cg_spec_ptr->res_in_node;
-
-  return std::unexpected(CraneErr::kCgroupError);
 }
 
 EnvMap CgroupManager::GetResourceEnvMapByResInNode(

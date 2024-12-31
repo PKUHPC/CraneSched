@@ -595,28 +595,28 @@ void GlobalVariableInit() {
   g_thread_pool =
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
-  // todo: Handle case of cranectld offline when craned up for recovery.
-  g_ctld_client = std::make_unique<Craned::CtldClient>();
-  g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
-
-  g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
-
   g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
   auto tasks = g_supervisor_keeper->Init();
+
   std::unordered_set<task_id_t> task_ids_supervisor;
   for (const auto& task : tasks.value_or(std::vector<crane::grpc::TaskToD>())) {
     task_ids_supervisor.emplace(task.task_id());
   }
 
+  // todo: Handle case of cranectld offline when craned up for recovery.
+  g_ctld_client = std::make_unique<Craned::CtldClient>();
+  g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
+  g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
+  g_ctld_client->SetOnCranedRegisterCb([])
 
-  auto cg_spce_expt = g_ctld_client->QueryTasksCgspec(task_ids_supervisor);
+      auto cg_spce_expt = g_ctld_client->QueryTasksCgspec(task_ids_supervisor);
   std::vector<CgroupSpec> task_cg_spec_vec{};
   if (!cg_spce_expt) {
     CRANE_WARN("Failed to get query task cg_spce");
   } else {
     task_cg_spec_vec.reserve(cg_spce_expt->size());
     for (auto& task_cg_spec : cg_spce_expt.value()) {
-      if (!task_ids_supervisor.contains(task_cg_spec.task_id)) continue;
+      if (!task_ids_supervisor.contains(task_cg_spec.job_id)) continue;
       task_cg_spec_vec.emplace_back(std::move(task_cg_spec));
     }
   }
@@ -644,7 +644,7 @@ void GlobalVariableInit() {
     std::exit(1);
   }
 
-  g_task_mgr = std::make_unique<Craned::TaskManager>();
+  g_job_mgr = std::make_unique<Craned::JobManager>();
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
@@ -672,8 +672,8 @@ void StartServer() {
   g_server->Wait();
 
   // Free global variables
-  g_task_mgr->Wait();
-  g_task_mgr.reset();
+  g_job_mgr->Wait();
+  g_job_mgr.reset();
   g_server.reset();
   g_ctld_client.reset();
   g_supervisor_keeper.reset();

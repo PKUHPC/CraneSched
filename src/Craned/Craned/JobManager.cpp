@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "TaskManager.h"
+#include "JobManager.h"
 
 #include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
@@ -26,13 +26,16 @@
 
 #include "CtldClient.h"
 #include "SupervisorKeeper.h"
+#include "crane/PluginClient.h"
 #include "crane/String.h"
 #include "protos/PublicDefs.pb.h"
 #include "protos/Supervisor.pb.h"
 
 namespace Craned {
 
-TaskManager::TaskManager() {
+JobInstance::JobInstance(JobSpec&& spec) : job_spec(std::move(spec)) {};
+
+JobManager::JobManager() {
   // Only called once. Guaranteed by singleton pattern.
   m_instance_ptr_ = this;
 
@@ -63,20 +66,19 @@ TaskManager::TaskManager() {
         EvCleanGrpcQueryTaskIdFromPidQueueCb_();
       });
 
-  // gRPC: QueryTaskEnvironmentVariable
-  m_query_task_environment_variables_async_handle_ =
-      m_uvw_loop_->resource<uvw::async_handle>();
-  m_query_task_environment_variables_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanGrpcQueryTaskEnvQueueCb_();
-      });
-
   // gRPC Execute Task Event
   m_grpc_execute_task_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
   m_grpc_execute_task_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanGrpcExecuteTaskQueueCb_();
+      });
+
+  // gRPC: QueryTaskEnvironmentVariable
+  m_query_job_spec_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
+  m_query_job_spec_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanGrpcQueryJobSpecQueueCb_();
       });
 
   // Task Status Change Event
@@ -125,17 +127,56 @@ TaskManager::TaskManager() {
   });
 }
 
-TaskManager::~TaskManager() {
+JobManager::~JobManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-const TaskInstance* TaskManager::FindInstanceByTaskId_(uint32_t task_id) {
-  auto iter = m_task_map_.find(task_id);
-  if (iter == m_task_map_.end()) return nullptr;
-  return iter->second.get();
+bool JobManager::AllocJobs(std::vector<JobSpec>&& job_specs) {
+  std::chrono::steady_clock::time_point begin;
+  std::chrono::steady_clock::time_point end;
+  CRANE_DEBUG("Allocating {} tasks", job_specs.size());
+
+  begin = std::chrono::steady_clock::now();
+
+  for (auto& job_spec : job_specs) {
+    auto& cg_spec = job_spec.cgroup_spec;
+    task_id_t job_id = cg_spec.job_id;
+    uid_t uid = cg_spec.uid;
+    CRANE_TRACE("Create lazily allocated cgroups for task #{}, uid {}", job_id,
+                uid);
+
+    auto job_instance = std::make_unique<JobInstance>(std::move(job_spec));
+    m_job_map_.Emplace(job_id, std::move(job_instance));
+
+    auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
+    if (uid_map->contains(uid)) {
+      uid_map->at(uid).RawPtr()->emplace(job_id);
+    } else {
+      uid_map->emplace(uid, absl::flat_hash_set<task_id_t>({job_id}));
+    }
+  }
+
+  end = std::chrono::steady_clock::now();
+  CRANE_TRACE("Create cgroups costed {} ms",
+              std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
+                  .count());
+  return true;
 }
 
-void TaskManager::EvSigchldCb_() {
+bool JobManager::FreeJobAllocation(task_id_t job_id) {
+  JobInstance* job_instance;
+  {
+    auto job_unique_ptr = m_job_map_.GetValueExclusivePtr(job_id);
+    if (!job_unique_ptr) {
+      CRANE_WARN("Try to free nonexistent job#{}", job_id);
+      return false;
+    }
+    job_instance = job_unique_ptr->release();
+  }
+  return FreeJobInstanceAllocation_(job_instance);
+}
+
+void JobManager::EvSigchldCb_() {
   assert(m_instance_ptr_->m_instance_ptr_ != nullptr);
 
   int status;
@@ -157,13 +198,13 @@ void TaskManager::EvSigchldCb_() {
   }
 }
 
-void TaskManager::EvSigintCb_() { m_is_ending_now_ = true; }
+void JobManager::EvSigintCb_() { m_is_ending_now_ = true; }
 
-void TaskManager::Wait() {
+void JobManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-CraneErr TaskManager::KillPid_(pid_t pid, int signum) {
+CraneErr JobManager::KillPid_(pid_t pid, int signum) {
   // Todo: Add timer which sends SIGTERM for those tasks who
   //  will not quit when receiving SIGINT.
   CRANE_TRACE("Killing pid {} with signal {}", pid, signum);
@@ -179,13 +220,13 @@ CraneErr TaskManager::KillPid_(pid_t pid, int signum) {
   }
 }
 
-void TaskManager::SetSigintCallback(std::function<void()> cb) {
+void JobManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
-void TaskManager::AddRecoveredTask_(crane::grpc::TaskToD task) {}
+void JobManager::AddRecoveredTask_(crane::grpc::TaskToD task) {}
 
-CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
-                                       ProcessInstance* process) {
+CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
+                                      TaskExecutionInstance* process) {
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -207,16 +248,10 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
   // The ResourceInNode structure should be copied here for being accessed in
   // the child process.
   // Note that CgroupManager acquires a lock for this.
-  // If the lock is held in the parent process during fork, the forked thread in
-  // the child proc will block forever.
-  // That's why we should copy it here and the child proc should not hold any
-  // lock.
-  auto res_in_node = g_cg_mgr->GetTaskResourceInNode(instance->task.task_id());
-  if (!res_in_node.has_value()) {
-    CRANE_ERROR("Failed to get resource info for task #{}",
-                instance->task.task_id());
-    return CraneErr::kCgroupError;
-  }
+  // If the lock is held in the parent process during fork, the forked thread
+  // in the child proc will block forever. That's why we should copy it here
+  // and the child proc should not hold any lock.
+  auto res_in_node = instance->job_spec.cgroup_spec.res_in_node;
 
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
     CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
@@ -226,14 +261,14 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
   pid_t child_pid = fork();
 
   if (child_pid == -1) {
-    CRANE_ERROR("fork() failed for task #{}: {}", instance->task.task_id(),
+    CRANE_ERROR("fork() failed for task #{}: {}", process->task_spec.task_id(),
                 strerror(errno));
     return CraneErr::kSystemErr;
   }
 
   if (child_pid > 0) {  // Parent proc
     CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
-                instance->task.task_id(), child_pid);
+                process->task_spec.task_id(), child_pid);
 
     int ctrl_fd = ctrl_sock_pair[0];
     close(ctrl_sock_pair[1]);
@@ -248,7 +283,7 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
       CRANE_ERROR(
           "Terminate the subprocess of task #{} due to failure of cgroup "
           "migration.",
-          instance->task.task_id());
+          process->task_spec.task_id());
 
       instance->err_before_exec = CraneErr::kCgroupError;
       // Ask child to suicide
@@ -258,7 +293,7 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
       close(ctrl_fd);
       if (!ok) {
         CRANE_ERROR("Failed to ask subprocess {} to suicide for task #{}",
-                    child_pid, instance->task.task_id());
+                    child_pid, process->task_spec.task_id());
 
         instance->err_before_exec = CraneErr::kProtobufError;
         KillPid_(child_pid, SIGKILL);
@@ -268,7 +303,7 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
     }
 
     CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
-                instance->task.task_id());
+                process->task_spec.task_id());
 
     // Tell subprocess that the parent process is ready. Then the
     // subprocess should continue to exec().
@@ -282,7 +317,7 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
     if (ok) ok &= ostream.Flush();
     if (!ok) {
       CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}: {}",
-                  child_pid, instance->task.task_id(),
+                  child_pid, process->task_spec.task_id(),
                   strerror(ostream.GetErrno()));
       close(ctrl_fd);
 
@@ -299,7 +334,7 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
                     strerror(istream.GetErrno()));
       if (!msg.ok())
         CRANE_ERROR("False from subprocess {} of task #{}", child_pid,
-                    instance->task.task_id());
+                    process->task_spec.task_id());
       close(ctrl_fd);
 
       instance->err_before_exec = CraneErr::kProtobufError;
@@ -311,7 +346,7 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
     crane::grpc::InitSupervisorRequest init_request;
     init_request.set_debug_level("off");
     init_request.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
-    init_request.set_task_id(instance->task.task_id());
+    init_request.set_task_id(process->task_spec.task_id());
 
     ok = SerializeDelimitedToZeroCopyStream(init_request, &ostream);
     if (!ok) {
@@ -322,7 +357,7 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
     if (ok) ok &= ostream.Flush();
     if (!ok) {
       CRANE_ERROR("Failed to send init msg to supervisor for task #{}: {}",
-                  child_pid, instance->task.task_id(),
+                  child_pid, process->task_spec.task_id(),
                   strerror(ostream.GetErrno()));
       close(ctrl_fd);
 
@@ -339,7 +374,7 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
                     strerror(istream.GetErrno()));
       if (!msg.ok())
         CRANE_ERROR("False from subprocess {} of task #{}", child_pid,
-                    instance->task.task_id());
+                    process->task_spec.task_id());
       close(ctrl_fd);
 
       instance->err_before_exec = CraneErr::kProtobufError;
@@ -350,13 +385,13 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
     close(ctrl_fd);
 
     // todo: Create Supervisor stub,request task execution
-    g_supervisor_keeper->AddSupervisor(instance->task.task_id());
+    g_supervisor_keeper->AddSupervisor(process->task_spec.task_id());
 
-    auto stub = g_supervisor_keeper->GetStub(instance->task.task_id());
+    auto stub = g_supervisor_keeper->GetStub(process->task_spec.task_id());
     auto task_id = stub->ExecuteTask(process);
     if (!task_id) {
       CRANE_ERROR("Supervisor failed to execute task #{}",
-                  instance->task.task_id());
+                  process->task_spec.task_id());
       instance->err_before_exec = CraneErr::kSupervisorError;
       KillPid_(child_pid, SIGKILL);
       return CraneErr::kSupervisorError;
@@ -409,7 +444,7 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
 
     // Just set job resource env
     EnvMap res_env_map =
-        CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
+        CgroupManager::GetResourceEnvMapByResInNode(res_in_node);
 
     if (clearenv()) {
       fmt::print("clearenv() failed!\n");
@@ -425,10 +460,10 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
     // Argv[0] is the program name which can be anything.
     argv.emplace_back("Supervisor");
 
-    if (instance->task.get_user_env()) {
+    if (process->task_spec.get_user_env()) {
       // If --get-user-env is specified,
-      // we need to use --login option of bash to load settings from the user's
-      // settings.
+      // we need to use --login option of bash to load settings from the
+      // user's settings.
       argv.emplace_back("--login");
     }
 
@@ -447,88 +482,127 @@ CraneErr TaskManager::SpawnSupervisor_(TaskInstance* instance,
   }
 }
 
-CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
-  if (!g_cg_mgr->CheckIfCgroupForTasksExists(task.task_id())) {
-    CRANE_DEBUG("Executing task #{} without an allocated cgroup. Ignoring it.",
+CraneErr JobManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
+  CRANE_INFO("Executing task #{}", task.task_id());
+  if (!m_job_map_.Contains(task.task_id())) {
+    CRANE_DEBUG("Executing task #{} without an job allocated. Ignoring it.",
                 task.task_id());
     return CraneErr::kCgroupError;
   }
-  CRANE_INFO("Executing task #{}", task.task_id());
+  auto instance = std::make_unique<TaskExecutionInstance>();
 
-  auto instance = std::make_unique<TaskInstance>();
-
-  // Simply wrap the Task structure within a TaskInstance structure and
+  // Simply wrap the Task structure within a JobInstance structure and
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
-  instance->task = task;
-
-  m_grpc_execute_task_queue_.enqueue(std::move(instance));
+  instance->task_spec = task;
+  EvQueueExecuteTaskElem elem{.task_execution_instance = std::move(instance)};
+  auto future = elem.ok_prom.get_future();
+  m_grpc_execute_task_queue_.enqueue(std::move(elem));
   m_grpc_execute_task_async_handle_->send();
 
   return CraneErr::kOk;
 }
 
-void TaskManager::EvCleanGrpcExecuteTaskQueueCb_() {
-  std::unique_ptr<TaskInstance> popped_instance;
+void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
+  EvQueueExecuteTaskElem elem;
 
-  while (m_grpc_execute_task_queue_.try_dequeue(popped_instance)) {
-    // Once ExecuteTask RPC is processed, the TaskInstance goes into
-    // m_task_map_.
-    TaskInstance* instance = popped_instance.get();
-    task_id_t task_id = instance->task.task_id();
+  while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
+    // Once ExecuteTask RPC is processed, the JobInstance goes into
+    // m_job_map_.
+    auto& instance = elem.task_execution_instance;
+    task_id_t job_id = instance->task_spec.task_id();
 
-    auto [iter, ok] = m_task_map_.emplace(task_id, std::move(popped_instance));
-    if (!ok) {
-      CRANE_ERROR("Duplicated ExecuteTask request for task #{}. Ignore it.",
-                  task_id);
-      continue;
+    if (!m_job_map_.Contains(job_id)) {
+      CRANE_ERROR("Failed to find job #{} allocation", job_id);
+      elem.ok_prom.set_value(CraneErr::kCgroupError);
     }
 
-    g_thread_pool->detach_task(
-        [this, instance]() { LaunchTaskInstanceMt_(instance); });
+    g_thread_pool->detach_task([this, instance]() mutable {
+      LaunchTaskInstanceMt_(std::move(instance));
+    });
   }
 }
 
-void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
-  // This function runs in a multi-threading manner. Take care of thread safety.
-  task_id_t task_id = instance->task.task_id();
+bool JobManager::FreeJobInstanceAllocation_(JobInstance* job_instance) {
+  auto job_id = job_instance->job_spec.job_id;
+  this->m_job_map_.Erase(job_id);
+  auto* cgroup = job_instance->cgroup.release();
 
-  if (!g_cg_mgr->CheckIfCgroupForTasksExists(task_id)) {
-    CRANE_ERROR("Failed to find created cgroup for task #{}", task_id);
+  if (g_config.Plugin.Enabled) {
+    g_plugin_client->DestroyCgroupHookAsync(job_id, cgroup->GetCgroupString());
+  }
+
+  if (cgroup != nullptr) {
+    g_thread_pool->detach_task([cgroup]() {
+      bool rc;
+      int cnt = 0;
+
+      while (true) {
+        if (cgroup->Empty()) break;
+
+        if (cnt >= 5) {
+          CRANE_ERROR(
+              "Couldn't kill the processes in cgroup {} after {} times. "
+              "Skipping it.",
+              cgroup->GetCgroupString(), cnt);
+          break;
+        }
+
+        cgroup->KillAllProcesses();
+        ++cnt;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+
+      delete cgroup;
+    });
+  }
+  return true;
+}
+
+void JobManager::LaunchTaskInstanceMt_(
+    std::unique_ptr<TaskExecutionInstance>&& process) {
+  // This function runs in a multi-threading manner. Take care of thread
+  // safety. JobInstance will not be free during this function. Take care of
+  // data race for job instance.
+
+  task_id_t job_id = process->job_id;
+  auto job = m_job_map_.GetValueExclusivePtr(job_id);
+  auto* job_instance = job.get()->get();
+  if (!job_instance) {
+    CRANE_ERROR("Failed to get job#{} allocation", job_id);
     ActivateTaskStatusChangeAsync_(
-        task_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodeCgroupError,
-        fmt::format("Failed to find created cgroup for task #{}", task_id));
+        job_id, crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCgroupError,
+        fmt::format("Failed to get allocation for job#{} ", job_id));
     return;
   }
 
-  CgroupInterface* cg;
-  bool ok = g_cg_mgr->AllocateAndGetCgroup(task_id, &cg);
-  if (!ok) {
-    CRANE_ERROR("Failed to allocate cgroup for task #{}", task_id);
-    ActivateTaskStatusChangeAsync_(
-        task_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodeCgroupError,
-        fmt::format("Failed to allocate cgroup for task #{}", task_id));
-    return;
+  {
+    if (!(job_instance->cgroup)) {
+      job_instance->cgroup =
+          g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_spec.cgroup_spec);
+    }
+    if (!job_instance->cgroup) {
+      CRANE_ERROR("Failed to get job#{} cgroup", job_id);
+      ActivateTaskStatusChangeAsync_(
+          job_id, crane::grpc::TaskStatus::Failed,
+          ExitCode::kExitCodeCgroupError,
+          fmt::format("Failed to get cgroup for job#{} ", job_id));
+      return;
+    }
   }
-  instance->cgroup = cg;
-  instance->cgroup_path = cg->GetCgroupString();
-
-  auto process = std::make_unique<ProcessInstance>(instance->task);
 
   // err will NOT be kOk ONLY if fork() is not called due to some failure
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this task, and
   // we should send TaskStatusChange manually.
-  CraneErr err = SpawnSupervisor_(instance, process.get());
+  CraneErr err = SpawnSupervisor_(job_instance, process.get());
   if (err != CraneErr::kOk) {
     ActivateTaskStatusChangeAsync_(
-        task_id, crane::grpc::TaskStatus::Failed,
+        job_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeSpawnProcessFail,
         fmt::format(
             "Cannot spawn a new process inside the instance of task #{}",
-            task_id));
+            job_id));
   } else {
     // kOk means that SpawnProcessInInstance_ has successfully forked a child
     // process.
@@ -536,15 +610,15 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     // SIGCHLD sent just after fork() and before putting pid into maps
     // will repeatedly be sent by timer and eventually be handled once the
     // SIGCHLD processing callback sees the pid in index maps.
-    instance->processes.emplace(process->pid, std::move(process));
+    job_instance->processes.emplace(process->pid, std::move(process));
   }
 }
 
-void TaskManager::EvCleanTaskStatusChangeQueueCb_() {
+void JobManager::EvCleanTaskStatusChangeQueueCb_() {
   TaskStatusChangeQueueElem status_change;
   while (m_task_status_change_queue_.try_dequeue(status_change)) {
-    auto iter = m_task_map_.find(status_change.task_id);
-    if (iter == m_task_map_.end()) {
+    auto job_instance = m_job_map_.GetValueExclusivePtr(status_change.task_id);
+    if (!job_instance) {
       // When Ctrl+C is pressed for Craned, all tasks including just forked
       // tasks will be terminated.
       // In some error cases, a double TaskStatusChange might be triggered.
@@ -552,19 +626,19 @@ void TaskManager::EvCleanTaskStatusChangeQueueCb_() {
       continue;
     }
 
-    TaskInstance* instance = iter->second.get();
+    JobInstance* instance = job_instance->get();
 
     bool orphaned = instance->orphaned;
 
-    // Free the TaskInstance structure
-    m_task_map_.erase(status_change.task_id);
+    // Free the JobInstance structure
+    m_job_map_.Erase(status_change.task_id);
 
     if (!orphaned)
       g_ctld_client->TaskStatusChangeAsync(std::move(status_change));
   }
 }
 
-void TaskManager::ActivateTaskStatusChangeAsync_(
+void JobManager::ActivateTaskStatusChangeAsync_(
     uint32_t task_id, crane::grpc::TaskStatus new_status, uint32_t exit_code,
     std::optional<std::string> reason) {
   TaskStatusChangeQueueElem status_change{task_id, new_status, exit_code};
@@ -574,61 +648,47 @@ void TaskManager::ActivateTaskStatusChangeAsync_(
   m_task_status_change_async_handle_->send();
 }
 
-CraneExpected<EnvMap> TaskManager::QueryTaskEnvMapAsync(task_id_t task_id) {
-  EvQueueQueryTaskEnvMap elem{.task_id = task_id};
-  std::future<CraneExpected<EnvMap>> env_future = elem.env_prom.get_future();
-  m_query_task_environment_variables_queue.enqueue(std::move(elem));
-  m_query_task_environment_variables_async_handle_->send();
-  return env_future.get();
-}
-
-void TaskManager::EvCleanGrpcQueryTaskEnvQueueCb_() {
-  EvQueueQueryTaskEnvMap elem;
-  while (m_query_task_environment_variables_queue.try_dequeue(elem)) {
-    auto task_iter = m_task_map_.find(elem.task_id);
-    if (task_iter == m_task_map_.end())
-      elem.env_prom.set_value(std::unexpected(CraneErr::kSystemErr));
-    else {
-      auto& instance = task_iter->second;
-      auto stub = g_supervisor_keeper->GetStub(instance->task.task_id());
-      if (!stub) {
-        CRANE_ERROR("Supervisor for task #{} not found",
-                    instance->task.task_id());
-        elem.env_prom.set_value(std::unexpected(CraneErr::kSupervisorError));
-        continue;
-      }
-      auto env_map = stub->QueryTaskEnv();
-      if (!env_map) {
-        CRANE_ERROR("Failed to query env map for task #{}",
-                    instance->task.task_id());
-        elem.env_prom.set_value(std::unexpected(CraneErr::kSupervisorError));
-        continue;
-      }
-      elem.env_prom.set_value(env_map);
-    }
+bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
+  auto job_instance = m_job_map_.GetValueExclusivePtr(job_id);
+  CgroupInterface* cg = job_instance->get()->cgroup.get();
+  if (!cg) {
+    cg =
+        g_cg_mgr
+            ->AllocateAndGetJobCgroup(job_instance->get()->job_spec.cgroup_spec)
+            .release();
+    job_instance->get()->cgroup = std::unique_ptr<CgroupInterface>(cg);
   }
+  if (!cg) return false;
+
+  return cg->MigrateProcIn(pid);
 }
 
-CraneExpected<task_id_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
+CraneExpected<JobSpec> JobManager::GetJobSpec(task_id_t job_id) {
+  auto instance = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!instance) return std::unexpected(CraneErr::kNonExistent);
+  return instance->get()->job_spec;
+}
+
+std::future<CraneExpected<task_id_t>> JobManager::QueryTaskIdFromPidAsync(
+    pid_t pid) {
   EvQueueQueryTaskIdFromPid elem{.pid = pid};
-  std::future<CraneExpected<task_id_t>> task_id_opt_future =
-      elem.task_id_prom.get_future();
+  auto task_id_opt_future = elem.task_id_prom.get_future();
   m_query_task_id_from_pid_queue_.enqueue(std::move(elem));
-  m_query_task_environment_variables_async_handle_->send();
-  return task_id_opt_future.get();
+  m_query_task_id_from_pid_async_handle_->send();
+  return task_id_opt_future;
 }
 
-void TaskManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
+void JobManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
   EvQueueQueryTaskIdFromPid elem;
   while (m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
     m_mtx_.Lock();
 
-    auto task_iter = m_pid_task_map_.find(elem.pid);
-    if (task_iter == m_pid_task_map_.end())
+    auto task_iter = m_pid_job_map_.find(elem.pid);
+    if (task_iter == m_pid_job_map_.end())
       elem.task_id_prom.set_value(std::unexpected(CraneErr::kSystemErr));
     else {
-      TaskInstance* instance = task_iter->second;
-      uint32_t task_id = instance->task.task_id();
+      JobInstance* instance = task_iter->second;
+      uint32_t task_id = instance->job_spec.job_id;
       elem.task_id_prom.set_value(task_id);
     }
 
@@ -636,7 +696,7 @@ void TaskManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
   }
 }
 
-void TaskManager::EvCleanTerminateTaskQueueCb_() {
+void JobManager::EvCleanTerminateTaskQueueCb_() {
   TaskTerminateQueueElem elem;
   while (m_task_terminate_queue_.try_dequeue(elem)) {
     CRANE_TRACE(
@@ -644,8 +704,8 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
         "Task id: {}",
         elem.task_id);
 
-    auto iter = m_task_map_.find(elem.task_id);
-    if (iter == m_task_map_.end()) {
+    auto job_instance = m_job_map_.GetValueExclusivePtr(elem.task_id);
+    if (!job_instance->get()->processes.contains(elem.task_id)) {
       CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
 
       // Note if Ctld wants to terminate some tasks that are not running,
@@ -668,10 +728,11 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       // we just remove the cgroup for such task, Ctld will fail in the
       // following ExecuteTasks and the task will go to the right place as
       // well as the completed queue.
-      g_cg_mgr->ReleaseCgroupByTaskIdOnly(elem.task_id);
+      FreeJobInstanceAllocation_(job_instance->release());
       continue;
     }
-    auto* instance = iter->second.get();
+
+    auto* instance = job_instance.get()->get();
     instance->orphaned = elem.mark_as_orphaned;
 
     auto stub = g_supervisor_keeper->GetStub(elem.task_id);
@@ -687,20 +748,20 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
   }
 }
 
-void TaskManager::TerminateTaskAsync(uint32_t task_id) {
+void JobManager::TerminateTaskAsync(uint32_t task_id) {
   TaskTerminateQueueElem elem{.task_id = task_id, .terminated_by_user = true};
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
 }
 
-void TaskManager::MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id) {
+void JobManager::MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id) {
   TaskTerminateQueueElem elem{.task_id = task_id, .mark_as_orphaned = true};
   m_task_terminate_queue_.enqueue(elem);
   m_terminate_task_async_handle_->send();
 }
 
-bool TaskManager::CheckTaskStatusAsync(task_id_t task_id,
-                                       crane::grpc::TaskStatus* status) {
+bool JobManager::CheckTaskStatusAsync(task_id_t task_id,
+                                      crane::grpc::TaskStatus* status) {
   CheckTaskStatusQueueElem elem{.task_id = task_id};
 
   std::future<std::pair<bool, crane::grpc::TaskStatus>> res{
@@ -716,11 +777,13 @@ bool TaskManager::CheckTaskStatusAsync(task_id_t task_id,
   return true;
 }
 
-void TaskManager::EvCleanCheckTaskStatusQueueCb_() {
+void JobManager::EvCleanCheckTaskStatusQueueCb_() {
   CheckTaskStatusQueueElem elem;
   while (m_check_task_status_queue_.try_dequeue(elem)) {
     task_id_t task_id = elem.task_id;
-    if (m_task_map_.contains(task_id)) {
+    auto job_instance = m_job_map_.GetValueExclusivePtr(task_id);
+    // todo: use process id
+    if (job_instance && job_instance->get()->processes.contains(task_id)) {
       // Found in task map. The task must be running.
       elem.status_prom.set_value({true, crane::grpc::TaskStatus::Running});
       continue;
@@ -742,9 +805,9 @@ void TaskManager::EvCleanCheckTaskStatusQueueCb_() {
   }
 }
 
-bool TaskManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
-                                           absl::Duration time_limit) {
-  ChangeTaskTimeLimitQueueElem elem{.task_id = task_id,
+bool JobManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
+                                          absl::Duration time_limit) {
+  ChangeTaskTimeLimitQueueElem elem{.job_id = task_id,
                                     .time_limit = time_limit};
 
   std::future<bool> ok_fut = elem.ok_prom.get_future();
@@ -753,28 +816,28 @@ bool TaskManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
   return ok_fut.get();
 }
 
-void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
+void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   absl::Time now = absl::Now();
 
   ChangeTaskTimeLimitQueueElem elem;
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
-    auto iter = m_task_map_.find(elem.task_id);
-    if (iter != m_task_map_.end()) {
-      auto stub = g_supervisor_keeper->GetStub(elem.task_id);
+    auto iter = m_job_map_.GetValueExclusivePtr(elem.job_id);
+    if (iter != m_job_map_.end()) {
+      auto stub = g_supervisor_keeper->GetStub(elem.job_id);
       if (!stub) {
-        CRANE_ERROR("Supervisor for task #{} not found", elem.task_id);
+        CRANE_ERROR("Supervisor for task #{} not found", elem.job_id);
         continue;
       }
       auto err = stub->ChangeTaskTimeLimit(elem.time_limit);
       if (err != CraneErr::kOk) {
         CRANE_ERROR("Failed to change task time limit for task #{}",
-                    elem.task_id);
+                    elem.job_id);
         continue;
       }
       elem.ok_prom.set_value(true);
     } else {
       CRANE_ERROR("Try to update the time limit of a non-existent task #{}.",
-                  elem.task_id);
+                  elem.job_id);
       elem.ok_prom.set_value(false);
     }
   }

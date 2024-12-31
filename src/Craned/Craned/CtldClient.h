@@ -40,6 +40,7 @@ class CtldClient {
 
   void SetCranedId(CranedId const& craned_id) { m_craned_id_ = craned_id; }
 
+  void SetOnCranedRegisterCb(std::function<void()> cb);
   /***
    * InitChannelAndStub the CtldClient to CraneCtld.
    * @param server_address The "[Address]:[Port]" of CraneCtld.
@@ -87,6 +88,8 @@ class CtldClient {
   std::unique_ptr<CraneCtld::Stub> m_stub_;
 
   CranedId m_craned_id_;
+
+  std::function<void()> m_on_craned_register_cb_;
 
   absl::Notification m_start_connecting_notification_;
 };

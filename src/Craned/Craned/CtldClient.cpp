@@ -71,6 +71,7 @@ void CtldClient::OnCraneCtldConnected() {
       if (reply.ok()) {
         if (reply.already_registered()) {
           CRANE_INFO("This craned has already registered.");
+
           return;
         } else {
           CRANE_INFO(

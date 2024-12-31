@@ -28,28 +28,35 @@
 #include "protos/Crane.grpc.pb.h"
 
 namespace Craned {
+using TaskSpec = crane::grpc::TaskToD;
 
-// Task execution info
-struct ProcessInstance {
-  crane::grpc::TaskToD task;
+struct TaskExecutionInstance {
+  // todo: Replace this with task execution info.
+  TaskSpec task_spec;
+  task_id_t job_id;
   pid_t pid;
 };
 
-// Job related info
-// Todo: Task may consists of multiple subtasks
-struct TaskInstance {
-  ~TaskInstance() = default;
+struct JobSpec {
+  CgroupSpec cgroup_spec;
+  task_id_t job_id;
+};
 
-  crane::grpc::TaskToD task;
+// Job allocation info
+struct JobInstance {
+  explicit JobInstance(JobSpec&& spec);
+  ~JobInstance() = default;
 
-  std::string cgroup_path;
-  CgroupInterface* cgroup;
+  JobSpec job_spec;
+
+  std::unique_ptr<CgroupInterface> cgroup{nullptr};
 
   // Task execution results
   bool orphaned{false};
   CraneErr err_before_exec{CraneErr::kOk};
 
-  absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
+  // May launch multiple execution instance multi thread.
+  absl::flat_hash_map<pid_t, std::unique_ptr<TaskExecutionInstance>> processes;
 };
 
 /**
@@ -58,17 +65,29 @@ struct TaskInstance {
  * Especially, outside caller can use SetSigintCallback() to
  * set the callback when SIGINT is triggered.
  */
-class TaskManager {
+class JobManager {
  public:
-  TaskManager();
+  JobManager();
 
-  ~TaskManager();
+  ~JobManager();
+
+  bool AllocJobs(std::vector<JobSpec>&& job_specs);
+
+  /**
+   * @attention Locks job_id job ptr.
+   * @brief Free job res allocation.
+   * @param job_id job id to free
+   * @return true if success.
+   */
+  bool FreeJobAllocation(task_id_t job_id);
 
   CraneErr ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
-  CraneExpected<task_id_t> QueryTaskIdFromPidAsync(pid_t pid);
+  std::future<CraneExpected<task_id_t>> QueryTaskIdFromPidAsync(pid_t pid);
 
-  CraneExpected<EnvMap> QueryTaskEnvMapAsync(task_id_t task_id);
+  bool MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id);
+
+  CraneExpected<JobSpec> GetJobSpec(task_id_t job_id);
 
   void TerminateTaskAsync(uint32_t task_id);
 
@@ -95,26 +114,36 @@ class TaskManager {
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
+  struct EvQueueAllocateJobElem {
+    std::promise<bool> ok_prom;
+    std::vector<JobSpec> job_specs;
+  };
+
+  struct EvQueueExecuteTaskElem {
+    std::unique_ptr<TaskExecutionInstance> task_execution_instance;
+    std::promise<CraneErr> ok_prom;
+  };
+
   struct EvQueueQueryTaskIdFromPid {
     std::promise<CraneExpected<task_id_t>> task_id_prom;
     pid_t pid;
   };
 
-  struct EvQueueQueryTaskEnvMap {
-    std::promise<CraneExpected<EnvMap>> env_prom;
-    task_id_t task_id;
+  struct EvQueueQueryJobSpecElem {
+    std::promise<CraneExpected<JobSpec>> spec_prom;
+    task_id_t job_id;
   };
 
   struct ChangeTaskTimeLimitQueueElem {
-    uint32_t task_id;
+    task_id_t job_id;
     absl::Duration time_limit;
     std::promise<bool> ok_prom;
   };
 
   struct TaskTerminateQueueElem {
     uint32_t task_id{0};
-    bool terminated_by_user{false};     // If the task is canceled by user,
-                                        // task->status=Cancelled
+    bool terminated_by_user{false};  // If the task is canceled by user,
+                                     // task->status=Cancelled
     bool mark_as_orphaned{false};
   };
 
@@ -123,11 +152,12 @@ class TaskManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
-  void LaunchTaskInstanceMt_(TaskInstance* instance);
+  bool FreeJobInstanceAllocation_(JobInstance* job_instance);
 
-  CraneErr SpawnSupervisor_(TaskInstance* instance, ProcessInstance* process);
+  void LaunchTaskInstanceMt_(std::unique_ptr<TaskExecutionInstance>&& process);
 
-  const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
+  CraneErr SpawnSupervisor_(JobInstance* instance,
+                            TaskExecutionInstance* process);
 
   // todo: use grpc struct for params
   /**
@@ -147,16 +177,14 @@ class TaskManager {
                                       uint32_t exit_code,
                                       std::optional<std::string> reason);
 
-  // todo: Refactor this, send rpc to supervisor
   /**
-   * Send a signal to the process group to which the processes in
-   *  ProcessInstance belongs.
-   * This function ASSUMES that ALL processes belongs to the process group with
-   *  the PGID set to the PID of the first process in this ProcessInstance.
+   * Send a signal to the process group of pid. For kill uninitialized
+   * Supervisor only.
+   * This function ASSUMES that ALL processes belongs to the
+   * process group with the PGID set to the PID of the first process in this
+   * TaskExecutionInstance.
    * @param signum the value of signal.
    * @return if the signal is sent successfully, kOk is returned.
-   * if the task name doesn't exist, kNonExistent is returned.
-   * if the signal is invalid, kInvalidParam is returned.
    * otherwise, kGenericFailure is returned.
    */
   static CraneErr KillPid_(pid_t pid, int signum);
@@ -165,7 +193,12 @@ class TaskManager {
   //  They should be modified in libev callbacks to avoid races.
 
   // Contains all the task that is running on this Craned node.
-  absl::flat_hash_map<task_id_t, std::unique_ptr<TaskInstance>> m_task_map_;
+  util::AtomicHashMap<absl::flat_hash_map, task_id_t,
+                      std::unique_ptr<JobInstance>>
+      m_job_map_;
+  util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
+                      absl::flat_hash_set<task_id_t>>
+      m_uid_to_job_ids_map_;
 
   //  ==================================================================
   // Critical data region starts
@@ -179,10 +212,10 @@ class TaskManager {
 
   // The two following maps are used as indexes
   // and doesn't have the ownership of underlying objects.
-  // A TaskInstance may contain more than one ProcessInstance.
-  absl::flat_hash_map<pid_t /*pid*/, TaskInstance*> m_pid_task_map_
+  // A JobInstance may contain more than one TaskExecutionInstance.
+  absl::flat_hash_map<pid_t /*pid*/, JobInstance*> m_pid_job_map_
       ABSL_GUARDED_BY(m_mtx_);
-  absl::flat_hash_map<pid_t /*pid*/, ProcessInstance*> m_pid_proc_map_
+  absl::flat_hash_map<pid_t /*pid*/, TaskExecutionInstance*> m_pid_proc_map_
       ABSL_GUARDED_BY(m_mtx_);
 
   absl::Mutex m_mtx_;
@@ -199,7 +232,7 @@ class TaskManager {
 
   void EvCleanGrpcQueryTaskIdFromPidQueueCb_();
 
-  void EvCleanGrpcQueryTaskEnvQueueCb_();
+  void EvCleanGrpcQueryJobSpecQueueCb_();
 
   void EvCleanTaskStatusChangeQueueCb_();
 
@@ -208,7 +241,6 @@ class TaskManager {
   void EvCleanCheckTaskStatusQueueCb_();
 
   void EvCleanChangeTaskTimeLimitQueueCb_();
-
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
 
@@ -221,14 +253,15 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_query_task_id_from_pid_async_handle_;
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
 
-  std::shared_ptr<uvw::async_handle>
-      m_query_task_environment_variables_async_handle_;
-  ConcurrentQueue<EvQueueQueryTaskEnvMap>
-      m_query_task_environment_variables_queue;
+  std::shared_ptr<uvw::async_handle> m_query_job_spec_async_handle_;
+  ConcurrentQueue<EvQueueQueryJobSpecElem> m_query_job_cg_spec_queue;
+
+  std::shared_ptr<uvw::async_handle> m_grpc_alloc_job_async_handle_;
+  ConcurrentQueue<EvQueueAllocateJobElem> m_grpc_alloc_job_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
   // A custom event that handles the ExecuteTask RPC.
-  ConcurrentQueue<std::unique_ptr<TaskInstance>> m_grpc_execute_task_queue_;
+  ConcurrentQueue<EvQueueExecuteTaskElem> m_grpc_execute_task_queue_;
 
   std::shared_ptr<uvw::async_handle> m_task_status_change_async_handle_;
   ConcurrentQueue<TaskStatusChangeQueueElem> m_task_status_change_queue_;
@@ -255,8 +288,8 @@ class TaskManager {
 
   std::thread m_uvw_thread_;
 
-  static inline TaskManager* m_instance_ptr_;
+  static inline JobManager* m_instance_ptr_;
 };
 }  // namespace Craned
 
-inline std::unique_ptr<Craned::TaskManager> g_task_mgr;
+inline std::unique_ptr<Craned::JobManager> g_job_mgr;
