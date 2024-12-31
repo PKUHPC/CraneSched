@@ -38,7 +38,7 @@ int CraneStateMachine::start(const std::string &ip_addr, int port) {
   butil::EndPoint addr(butil::my_ip(), port);
   braft::NodeOptions node_options;
   if (node_options.initial_conf.parse_from("") != 0) {  // TODO
-    LOG(ERROR) << "Fail to parse configuration";
+    //    LOG(ERROR) << "Fail to parse configuration";
     return -1;
   }
   node_options.election_timeout_ms = 5000;
@@ -52,7 +52,7 @@ int CraneStateMachine::start(const std::string &ip_addr, int port) {
   node_options.disable_cli = false;
   braft::Node *node = new braft::Node("CraneCtld", braft::PeerId(addr));
   if (node->init(node_options) != 0) {
-    LOG(ERROR) << "Fail to init raft node";
+    //    LOG(ERROR) << "Fail to init raft node";
     delete node;
     return -1;
   }
@@ -80,7 +80,7 @@ void CraneStateMachine::apply(CraneStateMachine::CraneCtldOpType type,
   log.push_back((uint8_t)type);
   butil::IOBufAsZeroCopyOutputStream wrapper(&log);
   if (!request->SerializeToZeroCopyStream(&wrapper)) {
-    LOG(ERROR) << "Fail to serialize request";
+    //    LOG(ERROR) << "Fail to serialize request";
     // TODO
     //    response->set_success(false);
     return;

@@ -5,7 +5,7 @@ file(MAKE_DIRECTORY ${GENERATED_FILE_PATH})
 
 include(${CMAKE_SOURCE_DIR}/CMakeModule/ProtobufGenerate.cmake)
 PROTOBUF_GENERATE_GRPC_CPP(ProtoCxxSources ProtoCxxHeaders ${GENERATED_FILE_PATH}/protos
-        ${protobuf_SOURCE_DIR}/src ${proto_src})
+        /usr/include ${proto_src})
 
 get_property(protobuf_SOURCE_DIR GLOBAL PROPERTY protobuf_SOURCE_DIR)
 message(STATUS "Generated proto: ${ProtoCxxSources} ${ProtoCxxHeaders}")

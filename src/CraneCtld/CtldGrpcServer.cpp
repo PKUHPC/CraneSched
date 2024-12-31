@@ -983,34 +983,6 @@ grpc::ServerUnaryReactor *CraneCtldServiceImpl::AddQos(
   return reactor;
 }
 
-grpc::ServerUnaryReactor *CraneCtldServiceImpl::ModifyEntity(
-    grpc::CallbackServerContext *context,
-    const crane::grpc::ModifyEntityRequest *request,
-    crane::grpc::ModifyEntityReply *response) {
-  auto *reactor = context->DefaultReactor();
-  m_cranectld_->ModifyEntity(request, response, reactor);
-  return reactor;
-}
-
-grpc::ServerUnaryReactor *CraneCtldServiceImpl::QueryEntityInfo(
-    grpc::CallbackServerContext *context,
-    const crane::grpc::QueryEntityInfoRequest *request,
-    crane::grpc::QueryEntityInfoReply *response) {
-  auto *reactor = context->DefaultReactor();
-  RefactorGuard done_guard(reactor);
-  m_cranectld_->QueryEntityInfo(request, response);
-  return reactor;
-}
-
-grpc::ServerUnaryReactor *CraneCtldServiceImpl::DeleteEntity(
-    grpc::CallbackServerContext *context,
-    const crane::grpc::DeleteEntityRequest *request,
-    crane::grpc::DeleteEntityReply *response) {
-  auto *reactor = context->DefaultReactor();
-  m_cranectld_->DeleteEntity(request, response, reactor);
-  return reactor;
-}
-
 grpc::ServerUnaryReactor *CraneCtldServiceImpl::BlockAccountOrUser(
     grpc::CallbackServerContext *context,
     const crane::grpc::BlockAccountOrUserRequest *request,

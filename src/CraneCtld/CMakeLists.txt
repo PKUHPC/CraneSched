@@ -38,6 +38,15 @@ target_link_libraries(cranectld PRIVATE
         cxxopts
         Threads::Threads
 
+        ${CMAKE_THREAD_LIBS_INIT}
+        ${GFLAGS_LIBRARY}
+        ${GLOG_LIBRARY}
+        ${PROTOBUF_LIBRARY}
+        ${GPERFTOOLS_LIBRARIES}
+        ${LEVELDB_LIB}
+        ${BRAFT_LIB}
+        ${BRPC_LIB}
+
         absl::btree
         absl::synchronization
         absl::flat_hash_map

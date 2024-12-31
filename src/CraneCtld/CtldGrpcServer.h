@@ -356,21 +356,6 @@ class CraneCtldServiceImpl final
                                    const crane::grpc::AddQosRequest *request,
                                    crane::grpc::AddQosReply *response) override;
 
-  grpc::ServerUnaryReactor *ModifyEntity(
-      grpc::CallbackServerContext *context,
-      const crane::grpc::ModifyEntityRequest *request,
-      crane::grpc::ModifyEntityReply *response) override;
-
-  grpc::ServerUnaryReactor *QueryEntityInfo(
-      grpc::CallbackServerContext *context,
-      const crane::grpc::QueryEntityInfoRequest *request,
-      crane::grpc::QueryEntityInfoReply *response) override;
-
-  grpc::ServerUnaryReactor *DeleteEntity(
-      grpc::CallbackServerContext *context,
-      const crane::grpc::DeleteEntityRequest *request,
-      crane::grpc::DeleteEntityReply *response) override;
-
   grpc::ServerUnaryReactor *BlockAccountOrUser(
       grpc::CallbackServerContext *context,
       const crane::grpc::BlockAccountOrUserRequest *request,

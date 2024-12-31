@@ -7,11 +7,11 @@ if (CRANE_USE_GITEE_SOURCE)
     set(RE2_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/re2-2022-06-01.tar.gz")
     set(GRPC_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/grpc-1.51.0.tar.gz")
 else ()
-    set(ABSL_SRC_URL "https://github.com/abseil/abseil-cpp/releases/download/20240116.2/abseil-cpp-20240116.2.tar.gz")
+    set(ABSL_SRC_URL "https://github.com/abseil/abseil-cpp/archive/refs/tags/20220623.1.tar.gz")
     set(C_ARES_SRC_URL "https://github.com/c-ares/c-ares/releases/download/cares-1_18_1/c-ares-1.18.1.tar.gz")
-    set(PROTOBUF_SRC_URL "https://github.com/protocolbuffers/protobuf/releases/download/v27.2/protobuf-27.2.tar.gz")
+    set(PROTOBUF_SRC_URL "https://github.com/protocolbuffers/protobuf/releases/download/v21.8/protobuf-cpp-3.21.8.tar.gz")
     set(RE2_SRC_URL "https://github.com/google/re2/archive/refs/tags/2022-06-01.tar.gz")
-    set(GRPC_SRC_URL "https://github.com/grpc/grpc/archive/refs/tags/v1.67.0.tar.gz")
+    set(GRPC_SRC_URL "https://github.com/grpc/grpc/archive/refs/tags/v1.51.0.tar.gz")
 endif ()
 
 set(ABSL_PROPAGATE_CXX_STD ON)
@@ -21,7 +21,7 @@ FetchContent_Declare(absl
         OVERRIDE_FIND_PACKAGE
 
         URL ${ABSL_SRC_URL}
-        URL_HASH SHA256=733726b8c3a6d39a4120d7e45ea8b41a434cdacde401cba500f14236c49b39dc
+        URL_HASH SHA256=91ac87d30cc6d79f9ab974c51874a704de9c2647c40f6932597329a282217ba8
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(absl)
@@ -47,25 +47,43 @@ FetchContent_MakeAvailable(c-ares)
 FetchContent_GetProperties(c-ares)
 find_package(c-ares REQUIRED CONFIG)
 
-set(protobuf_BUILD_TESTS OFF)
-set(protobuf_WITH_ZLIB OFF)
-set(protobuf_MSVC_STATIC_RUNTIME OFF)
-set(protobuf_USE_EXTERNAL_GTEST ON)
-if (BUILD_SHARED_LIBS)
-    set(protobuf_BUILD_SHARED_LIBS ON)
-else ()
-    set(protobuf_BUILD_SHARED_LIBS OFF)
-endif ()
-FetchContent_Declare(protobuf
-        OVERRIDE_FIND_PACKAGE
 
-        URL ${PROTOBUF_SRC_URL}
-        URL_HASH SHA256=e4ff2aeb767da6f4f52485c2e72468960ddfe5262483879ef6ad552e52757a77
-        INACTIVITY_TIMEOUT 5
-)
-FetchContent_MakeAvailable(protobuf)
-FetchContent_GetProperties(protobuf)
-find_package(protobuf REQUIRED CONFIG)
+#find_package(Protobuf)
+#
+#if(Protobuf_FOUND)
+#    message(STATUS "Protobuf version: ${Protobuf_VERSION}")
+#    message(STATUS "Protobuf include path: ${Protobuf_INCLUDE_DIRS}")
+#    message(STATUS "Protobuf libraries: ${Protobuf_LIBRARIES}")
+#    message(STATUS "Protoc library: ${Protobuf_PROTOC_LIBRARIES}")
+#    message(STATUS "Protoc executable: ${Protobuf_PROTOC_EXECUTABLE}")
+#    message(STATUS "protobuf_SOURCE_DIR: ${protobuf_SOURCE_DIR}")
+#    message(STATUS "protobuf_BINARY_DIR: ${protobuf_BINARY_DIR}")
+#    include_directories(${Protobuf_INCLUDE_DIRS})
+#    link_libraries(${Protobuf_LIBRARIES})
+#else()
+#    message(WARNING "Protobuf not found")
+#endif()
+
+
+#set(protobuf_BUILD_TESTS OFF)
+#set(protobuf_WITH_ZLIB OFF)
+#set(protobuf_MSVC_STATIC_RUNTIME OFF)
+#set(protobuf_USE_EXTERNAL_GTEST ON)
+#if (BUILD_SHARED_LIBS)
+#    set(protobuf_BUILD_SHARED_LIBS ON)
+#else ()
+#    set(protobuf_BUILD_SHARED_LIBS OFF)
+#endif ()
+#FetchContent_Declare(protobuf
+#        OVERRIDE_FIND_PACKAGE
+#
+#        URL ${PROTOBUF_SRC_URL}
+#        URL_HASH SHA256=f6251f2d00aad41b34c1dfa3d752713cb1bb1b7020108168a4deaa206ba8ed42
+#        INACTIVITY_TIMEOUT 5
+#)
+#FetchContent_MakeAvailable(protobuf)
+#FetchContent_GetProperties(protobuf)
+#find_package(protobuf REQUIRED CONFIG)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 FetchContent_Declare(re2
@@ -110,7 +128,7 @@ FetchContent_Declare(grpc
         OVERRIDE_FIND_PACKAGE
 
         URL ${GRPC_SRC_URL}
-        URL_HASH SHA256=af0638f73e4452e22e295f8b3f452518234254104713a08497f3d3aaa76733ad
+        URL_HASH SHA256=7f42363711eb483a0501239fd5522467b31d8fe98d70d7867c6ca7b52440d828
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(grpc)

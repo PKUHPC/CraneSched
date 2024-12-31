@@ -208,21 +208,6 @@ class CraneStateMachine : public braft::StateMachine {
     return apply(OP_ADD_QOS, request, response, done);
   }
 
-  void ModifyEntity(const crane::grpc::ModifyEntityRequest *request,
-                    crane::grpc::ModifyEntityReply *response,
-                    grpc::ServerUnaryReactor *done) {
-    return apply(OP_MODIFY_ENTITY, request, response, done);
-  }
-
-  void QueryEntityInfo(const crane::grpc::QueryEntityInfoRequest *request,
-                       crane::grpc::QueryEntityInfoReply *response) {}
-
-  void DeleteEntity(const crane::grpc::DeleteEntityRequest *request,
-                    crane::grpc::DeleteEntityReply *response,
-                    grpc::ServerUnaryReactor *done) {
-    return apply(OP_DELETE_ENTITY, request, response, done);
-  }
-
   void BlockAccountOrUser(const crane::grpc::BlockAccountOrUserRequest *request,
                           crane::grpc::BlockAccountOrUserReply *response,
                           grpc::ServerUnaryReactor *done) {
@@ -286,19 +271,19 @@ class CraneStateMachine : public braft::StateMachine {
   void on_shutdown() override { CRANE_INFO("This node is down."); }
 
   void on_error(const ::braft::Error &e) override {
-    LOG(ERROR) << "Met raft error " << e;
+    //    LOG(ERROR) << "Met raft error " << e;
   }
 
   void on_configuration_committed(const ::braft::Configuration &conf) override {
-    LOG(INFO) << "Configuration of this group is " << conf;
+    //    LOG(INFO) << "Configuration of this group is " << conf;
   }
 
   void on_stop_following(const ::braft::LeaderChangeContext &ctx) override {
-    LOG(INFO) << "Node stops following " << ctx;
+    //    LOG(INFO) << "Node stops following " << ctx;
   }
 
   void on_start_following(const ::braft::LeaderChangeContext &ctx) override {
-    LOG(INFO) << "Node start following " << ctx;
+    //    LOG(INFO) << "Node start following " << ctx;
   }
   // end of @braft::StateMachine
 

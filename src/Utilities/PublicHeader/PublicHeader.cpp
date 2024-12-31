@@ -20,6 +20,8 @@
 
 #include <ranges>
 
+#include "absl/base/macros.h"
+
 AllocatableResource& AllocatableResource::operator+=(
     const AllocatableResource& rhs) {
   cpu_count += rhs.cpu_count;
