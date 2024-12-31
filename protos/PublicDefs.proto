@@ -306,6 +306,18 @@ message CranedInfo {
   google.protobuf.Timestamp last_busy_time = 16;
 }
 
+message ReservationInfo {
+  string reservation_name = 1;
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Duration duration = 3;
+  string partition = 4;
+  string craned_regex = 5;
+  
+  ResourceView res_total = 6;
+  ResourceView res_avail = 7;
+  ResourceView res_alloc = 8;
+}
+
 message TrimmedPartitionInfo {
   message TrimmedCranedInfo {
     CranedResourceState resource_state = 1;
