@@ -169,6 +169,7 @@ bool VaultClient::RevokeCert(const std::string& serial_number) {
 }
 
 bool VaultClient::IsCertAllowed(const std::string& serial_number) {
+  // TODO: 加锁
   if (allowed_certs_.contains(serial_number)) return true;
 
   try {

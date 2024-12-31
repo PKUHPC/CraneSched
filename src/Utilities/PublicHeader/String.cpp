@@ -411,7 +411,7 @@ std::string GenerateCommaSeparatedString(const int val) {
   return absl::StrJoin(val_vec, ",");
 }
 
-std::expected<std::string, bool> ParseCertificate(const std::string &cert_pem) {
+std::expected<CertPair, bool> ParseCertificate(const std::string &cert_pem) {
   // Load the certificate content into a BIO (memory buffer).
   BIO *bio = BIO_new_mem_buf(cert_pem.data(), cert_pem.size());
   if (!bio) return std::unexpected(false);
@@ -425,17 +425,50 @@ std::expected<std::string, bool> ParseCertificate(const std::string &cert_pem) {
 
   // Retrieve Subject information.
   X509_NAME *subject = X509_get_subject_name(cert);
-  if (!subject) return std::unexpected(false);
+  if (!subject) {
+    X509_free(cert);
+    BIO_free(bio);
+    return std::unexpected(false);
+  }
 
   char cn[256];
   int len = X509_NAME_get_text_by_NID(subject, NID_commonName, cn, sizeof(cn));
-  if (len <= 0) return std::unexpected(false);
+  if (len <= 0) {
+    X509_free(cert);
+    BIO_free(bio);
+    return std::unexpected(false);
+  }
+
+  ASN1_INTEGER *serial = X509_get_serialNumber(cert);
+  if (!serial) {
+    X509_free(cert);
+    BIO_free(bio);
+    return std::unexpected(false);
+  }
+
+  BIGNUM *bn = ASN1_INTEGER_to_BN(serial, nullptr);
+  if (!bn) {
+    X509_free(cert);
+    BIO_free(bio);
+    return std::unexpected(false);
+  }
+
+  char *hex = BN_bn2hex(bn);
+  if (!hex) {
+    BN_free(bn);
+    X509_free(cert);
+    BIO_free(bio);
+    return std::unexpected(false);
+  }
+  std::string serial_number = std::string(hex);
 
   // free the memory
+  OPENSSL_free(hex);
+  BN_free(bn);
   X509_free(cert);
   BIO_free(bio);
 
-  return cn;
+  return CertPair{cn, serial_number};
 }
 
 }  // namespace util

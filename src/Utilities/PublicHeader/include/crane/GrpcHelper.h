@@ -24,11 +24,7 @@
 #include <grpcpp/support/status.h>
 #include <spdlog/fmt/bundled/format.h>
 
-#include <expected>
-
-#include "crane/Jwt.h"
 #include "crane/Network.h"
-#include "crane/String.h"
 
 struct ServerCertificateConfig {
   std::string ServerCertFilePath;
@@ -46,47 +42,6 @@ struct CACertificateConfig {
   std::string CACertFilePath;
   std::string CACertContent;
 };
-
-// class JwtAuthProcessor : public grpc::AuthMetadataProcessor {
-//  public:
-//   JwtAuthProcessor(std::string secret) : jwt_secret_(secret) {}
-//   grpc::Status Process(const InputMetadata& auth_metadata,
-//                        grpc::AuthContext* context,
-//                        OutputMetadata* consumed_auth_metadata,
-//                        OutputMetadata* response_metadata) override;
-
-//  private:
-//   std::string jwt_secret_;
-// };
-
-class JwtAuthInterceptor : public grpc::experimental::Interceptor {
- public:
-  explicit JwtAuthInterceptor(grpc::experimental::ServerRpcInfo* info,
-                              std::string secret)
-      : info_(info), jwt_secret_(secret) {}
-
-  void Intercept(grpc::experimental::InterceptorBatchMethods* methods) override;
-
- private:
-  grpc::experimental::ServerRpcInfo* info_;
-  std::string jwt_secret_;
-};
-
-class JwtAuthInterceptorFactory
-    : public grpc::experimental::ServerInterceptorFactoryInterface {
- public:
-  JwtAuthInterceptorFactory(std::string secret) : jwt_secret_(secret) {}
-  grpc::experimental::Interceptor* CreateServerInterceptor(
-      grpc::experimental::ServerRpcInfo* info) override {
-    return new JwtAuthInterceptor(info, jwt_secret_);
-  }
-
- private:
-  std::string jwt_secret_;
-};
-
-std::expected<uint32_t, bool> ExtractUIDFromCert(
-    const grpc::ServerContext* context);
 
 void ServerBuilderSetCompression(grpc::ServerBuilder* builder);
 

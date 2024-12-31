@@ -18,71 +18,12 @@
 
 #include "crane/GrpcHelper.h"
 
-// grpc::Status JwtAuthProcessor::Process(const InputMetadata& auth_metadata,
-//                                        grpc::AuthContext* context,
-//                                        OutputMetadata*
-//                                        consumed_auth_metadata,
-//                                        OutputMetadata* response_metadata) {
-//   auto iter = auth_metadata.find("Authorization");
-//   if (iter == auth_metadata.end()) {
-//     return grpc::Status(grpc::StatusCode::UNAUTHENTICATED, "Miss token");
-//   }
-
-//   auto token = iter->second.data();
-//   if (!util::VerifyToken(jwt_secret_, token)) {
-//     return grpc::Status(grpc::StatusCode::UNAUTHENTICATED, "Invalid token");
-//   }
-
-//   return grpc::Status::OK;
-// }
-
-void JwtAuthInterceptor::Intercept(
-    grpc::experimental::InterceptorBatchMethods* methods) {
-  if (methods->QueryInterceptionHookPoint(
-          grpc::experimental::InterceptionHookPoints::
-              POST_RECV_INITIAL_METADATA)) {
-    if (strcmp(info_->method(), "/crane.grpc.CraneCtld/Login") != 0) {
-      auto* metadata_map = methods->GetRecvInitialMetadata();
-
-      auto iter = metadata_map->find("authorization");
-      if (iter == metadata_map->end()) {
-        info_->server_context()->TryCancel();
-        return;
-      }
-      std::string token(iter->second.data(), iter->second.size());
-      if (!util::VerifyToken(jwt_secret_, token)) {
-        info_->server_context()->TryCancel();
-        return;
-      }
-    }
-  }
-  methods->Proceed();
-}
-
 static std::string GrpcFormatIpAddress(std::string const& addr) {
   // Grpc needs to use [] to wrap ipv6 address
   if (int ip_ver = crane::GetIpAddrVer(addr); ip_ver == 6)
     return fmt::format("[{}]", addr);
 
   return addr;
-}
-
-// Retrieve UID from the certificate.
-std::expected<uint32_t, bool> ExtractUIDFromCert(
-    const grpc::ServerContext* context) {
-  auto cert = context->auth_context()->FindPropertyValues("x509_pem_cert");
-  if (cert.empty()) return std::unexpected(false);
-
-  std::string certificate = std::string(cert[0].data(), cert[0].size());
-
-  auto result = util::ParseCertificate(certificate);
-  if (!result) return std::unexpected(false);
-
-  std::vector<std::string> cn_parts = absl::StrSplit(result.value(), '.');
-  if (cn_parts.size() != 3 || cn_parts[0].empty())
-    return std::unexpected(false);
-
-  return static_cast<uint32_t>(std::stoul(cn_parts[0]));
 }
 
 void ServerBuilderSetCompression(grpc::ServerBuilder* builder) {
