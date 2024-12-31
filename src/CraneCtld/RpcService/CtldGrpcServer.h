@@ -141,6 +141,9 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       crane::grpc::QueryClusterInfoReply *response) override;
 
  private:
+  std::expected<uint32_t, bool> CheckCertAllowedAndExtractUIDFromCert_(
+      const grpc::ServerContext *context);
+
   CtldServer *m_ctld_server_;
 };
 

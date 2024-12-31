@@ -25,6 +25,7 @@
 #include "CranedKeeper.h"
 #include "crane/GrpcHelper.h"
 #include "crane/String.h"
+#include "crane/VaultClient.h"
 
 namespace Ctld {
 
@@ -120,7 +121,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     grpc::ServerContext *context, const crane::grpc::ModifyTaskRequest *request,
     crane::grpc::ModifyTaskReply *response) {
   using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     for (auto task_id : request->task_ids()) {
       response->add_not_modified_tasks(task_id);
@@ -213,7 +214,7 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
     grpc::ServerContext *context,
     const crane::grpc::ModifyCranedStateRequest *request,
     crane::grpc::ModifyCranedStateReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     for (auto crane_id : request->craned_ids()) {
       response->add_not_modified_nodes(crane_id);
@@ -286,7 +287,7 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -323,7 +324,7 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
 grpc::Status CraneCtldServiceImpl::AddUser(
     grpc::ServerContext *context, const crane::grpc::AddUserRequest *request,
     crane::grpc::AddUserReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -373,7 +374,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
 grpc::Status CraneCtldServiceImpl::AddQos(
     grpc::ServerContext *context, const crane::grpc::AddQosRequest *request,
     crane::grpc::AddQosReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -415,7 +416,7 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
     grpc::ServerContext *context,
     const crane::grpc::ModifyAccountRequest *request,
     crane::grpc::ModifyAccountReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -441,7 +442,7 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
 grpc::Status CraneCtldServiceImpl::ModifyUser(
     grpc::ServerContext *context, const crane::grpc::ModifyUserRequest *request,
     crane::grpc::ModifyUserReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -509,7 +510,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
 grpc::Status CraneCtldServiceImpl::ModifyQos(
     grpc::ServerContext *context, const crane::grpc::ModifyQosRequest *request,
     crane::grpc::ModifyQosReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -535,7 +536,7 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryAccountInfoRequest *request,
     crane::grpc::QueryAccountInfoReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -597,7 +598,7 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryUserInfoRequest *request,
     crane::grpc::QueryUserInfoReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -663,7 +664,7 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     crane::grpc::QueryQosInfoReply *response) {
   std::unordered_map<std::string, Qos> res_qos_map;
 
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -700,7 +701,7 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
     grpc::ServerContext *context,
     const crane::grpc::DeleteAccountRequest *request,
     crane::grpc::DeleteAccountReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -722,7 +723,7 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
 grpc::Status CraneCtldServiceImpl::DeleteUser(
     grpc::ServerContext *context, const crane::grpc::DeleteUserRequest *request,
     crane::grpc::DeleteUserReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -745,7 +746,7 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(
 grpc::Status CraneCtldServiceImpl::DeleteQos(
     grpc::ServerContext *context, const crane::grpc::DeleteQosRequest *request,
     crane::grpc::DeleteQosReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -769,7 +770,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
     grpc::ServerContext *context,
     const crane::grpc::BlockAccountOrUserRequest *request,
     crane::grpc::BlockAccountOrUserReply *response) {
-  auto extract_result = ExtractUIDFromCert(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
   if (!extract_result) {
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
@@ -806,9 +807,29 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryClusterInfoRequest *request,
     crane::grpc::QueryClusterInfoReply *response) {
-  auto uid = ExtractUIDFromCert(context);
+  auto uid = CheckCertAllowedAndExtractUIDFromCert_(context);
   *response = g_meta_container->QueryClusterInfo(*request);
   return grpc::Status::OK;
+}
+
+std::expected<uint32_t, bool>
+CraneCtldServiceImpl::CheckCertAllowedAndExtractUIDFromCert_(
+    const grpc::ServerContext *context) {
+  auto cert = context->auth_context()->FindPropertyValues("x509_pem_cert");
+  if (cert.empty()) return std::unexpected(false);
+
+  std::string certificate = std::string(cert[0].data(), cert[0].size());
+
+  auto result = util::ParseCertificate(certificate);
+  if (!result) return std::unexpected(false);
+
+  if (!g_vault_client->IsCertAllowed(result.value().second)) return false;
+
+  std::vector<std::string> cn_parts = absl::StrSplit(result.value().first, '.');
+  if (cn_parts.size() != 3 || cn_parts[0].empty())
+    return std::unexpected(false);
+
+  return static_cast<uint32_t>(std::stoul(cn_parts[0]));
 }
 
 CtldServer::CtldServer() : m_service_impl_(nullptr) {
@@ -823,16 +844,6 @@ CtldServer::CtldServer() : m_service_impl_(nullptr) {
   ServerBuilderAddmTcpTlsListeningPort(
       &builder, cranectld_listen_addr, listen_conf.CraneCtldListenPort,
       vault_conf.ExternalCerts, vault_conf.ExternalCACerts.CACertContent);
-
-  // std::vector<
-  //     std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>>
-  //     creators;
-  // creators.push_back(
-  //     std::unique_ptr<grpc::experimental::ServerInterceptorFactoryInterface>(
-  //         new
-  //         JwtAuthInterceptorFactory(g_config.ListenConf.JwtSecretContent)));
-
-  // builder.experimental().SetInterceptorCreators(std::move(creators));
 
   builder.RegisterService(m_service_impl_.get());
 

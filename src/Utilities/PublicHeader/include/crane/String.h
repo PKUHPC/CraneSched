@@ -38,6 +38,9 @@
 
 namespace util {
 
+using CertPair = std::pair<std::string,   // CN
+                           std::string>;  // serial number
+
 std::string ReadFileIntoString(std::filesystem::path const &p);
 
 std::string ReadableMemory(uint64_t memory_bytes);
@@ -85,6 +88,6 @@ std::string ReadableGrpcDresInNode(
 
 std::string GenerateCommaSeparatedString(const int val);
 
-std::expected<std::string, bool> ParseCertificate(const std::string &cert_pem);
+std::expected<CertPair, bool> ParseCertificate(const std::string &cert_pem);
 
 }  // namespace util
