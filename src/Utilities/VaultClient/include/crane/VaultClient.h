@@ -24,6 +24,7 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <unordered_set>
 
 #include "crane/GrpcHelper.h"
 #include "crane/Logger.h"
@@ -36,6 +37,8 @@ struct SignResponse {
   std::string certificate;
 };
 
+using AllowedCerts = std::unordered_set<std::string>;
+
 class VaultClient {
  public:
   VaultClient(const std::string& root_token, const std::string& address,
@@ -46,6 +49,10 @@ class VaultClient {
   std::expected<SignResponse, bool> Sign(const std::string& csr_content,
                                          const std::string& common_name,
                                          const std::string& alt_names);
+
+  bool RevokeCert(const std::string& serial_number);
+
+  bool IsCertAllowed(const std::string& serial_number);
 
  private:
   bool IssureExternalCa_(const std::string& domains,
@@ -62,6 +69,7 @@ class VaultClient {
   std::unique_ptr<Vault::Pki> pki_internal_;
   std::unique_ptr<Vault::Pki> pki_external_;
 
+  AllowedCerts allowed_certs_;
   std::string address_;
   std::string port_;
 };
