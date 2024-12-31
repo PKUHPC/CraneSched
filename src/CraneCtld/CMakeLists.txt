@@ -1,6 +1,3 @@
-find_package(CURL REQUIRED)
-find_package(LibSSH REQUIRED)
-
 add_executable(cranectld
         CtldPublicDefs.h
         CtldGrpcServer.h
