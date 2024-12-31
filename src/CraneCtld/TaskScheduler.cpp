@@ -2542,7 +2542,19 @@ void MinLoadFirst::NodeSelect(
       // partition_pending_task_map and move to the next element
       pending_task_map->erase(pending_task_it);
     } else {
-      // The task can't be started now. Move to the next pending task.
+      // The task can't be started now. Set pending reason and move to the next
+      // pending task.
+      for (auto& craned_id : craned_ids) {
+        auto& res_avail =
+            node_info.node_time_avail_res_map.at(craned_id).at(now);
+        if (!(task->Resources().EachNodeResMap().at(craned_id) <= res_avail)) {
+          task->pending_reason = "Resource";
+          break;
+        }
+      }
+      if (task->pending_reason == "") {
+        task->pending_reason = "Priority";
+      }
       continue;
     }
   }
@@ -2902,7 +2914,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
                           ? CalculatePriority_(task.get(), now)
                           : task->mandated_priority;
     task->cached_priority = priority;
-    task->pending_reason = "Priority";
+    task->pending_reason = "";
     task_priority_vec.emplace_back(task.get(), priority);
   }
 
