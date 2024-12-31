@@ -183,8 +183,6 @@ inline Ctld::Config g_config;
 
 namespace Ctld {
 
-namespace result = cpp_result;
-
 /**
  * The static information on a Craned (the static part of CranedMeta). This
  * structure is provided when a new Craned node is to be registered in
@@ -301,12 +299,14 @@ struct InteractiveMetaInTask {
 
   std::string sh_script;
   std::string term_env;
+  bool pty;
   std::function<void(task_id_t, std::string const&,
                      std::list<std::string> const&)>
       cb_task_res_allocated;
-  std::function<void(task_id_t)> cb_task_completed;
 
-  // only for calloc.
+  std::function<void(task_id_t, bool)> cb_task_completed;
+
+  // This will ask front end like crun/calloc to exit
   std::function<void(task_id_t)> cb_task_cancel;
 
   // only for crun.
@@ -353,6 +353,7 @@ struct TaskInCtld {
   crane::grpc::TaskType type;
 
   uid_t uid;
+  gid_t gid;
   std::string account;
   std::string name;
   std::string qos;
@@ -382,7 +383,6 @@ struct TaskInCtld {
    * ------------------------------- */
   task_id_t task_id{0};
   task_db_id_t task_db_id{0};
-  gid_t gid;
   std::string username;
 
   /* ----------- [3] ----------------
@@ -460,12 +460,6 @@ struct TaskInCtld {
   }
   task_id_t TaskDbId() const { return task_db_id; }
 
-  void SetGid(gid_t id) {
-    gid = id;
-    runtime_attr.set_gid(id);
-  }
-  uid_t Gid() const { return gid; }
-
   void SetUsername(std::string const& val) {
     username = val;
     runtime_attr.set_username(val);
@@ -522,10 +516,10 @@ struct TaskInCtld {
   int64_t StartTimeInUnixSecond() const { return ToUnixSeconds(start_time); }
 
   void SetEndTime(absl::Time const& val) {
-    end_time = val;
-    runtime_attr.mutable_end_time()->set_seconds(ToUnixSeconds(end_time));
+    SetEndTimeByUnixSecond(ToUnixSeconds(val));
   }
   void SetEndTimeByUnixSecond(uint64_t val) {
+    if (val > kTaskMaxTimeStampSec) val = kTaskMaxTimeStampSec;
     end_time = absl::FromUnixSeconds(val);
     runtime_attr.mutable_end_time()->set_seconds(val);
   }
@@ -569,8 +563,10 @@ struct TaskInCtld {
       InteractiveMeta.interactive_type =
           val.interactive_meta().interactive_type();
       if (InteractiveMeta.interactive_type ==
-          crane::grpc::InteractiveTaskType::Crun)
+          crane::grpc::InteractiveTaskType::Crun) {
         InteractiveMeta.term_env = val.interactive_meta().term_env();
+        InteractiveMeta.pty = val.interactive_meta().pty();
+      }
     }
 
     node_num = val.node_num();
@@ -579,6 +575,11 @@ struct TaskInCtld {
 
     uid = val.uid();
     password_entry = std::make_unique<PasswordEntry>(uid);
+
+    // Note: gid is egid, which may be different from the
+    // primary group of the user in `password_entry`.
+    gid = val.gid();
+
     account = val.account();
     name = val.name();
     qos = val.qos();
@@ -599,7 +600,6 @@ struct TaskInCtld {
 
     task_id = runtime_attr.task_id();
     task_db_id = runtime_attr.task_db_id();
-    gid = runtime_attr.gid();
     username = runtime_attr.username();
 
     nodes_alloc = craned_ids.size();

@@ -93,6 +93,8 @@ inline const char* kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 constexpr uint64_t kTaskMinTimeLimitSec = 11;
 constexpr int64_t kTaskMaxTimeLimitSec =
     google::protobuf::util::TimeUtil::kDurationMaxSeconds;
+constexpr int64_t kTaskMaxTimeStampSec =
+    google::protobuf::util::TimeUtil::kTimestampMaxSeconds;
 
 namespace ExitCode {
 

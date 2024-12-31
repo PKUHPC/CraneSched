@@ -62,8 +62,6 @@ class CranedStub {
 
   CraneErr QueryCranedNICInfo(CranedRemoteMeta *meta);
 
-  CraneErr SuspendCraned();
-
   bool Invalid() const { return m_invalid_; }
 
   std::string GetCranedIp() const { return m_craned_ip_; }

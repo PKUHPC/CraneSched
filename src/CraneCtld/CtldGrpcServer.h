@@ -45,7 +45,7 @@ class CforedStreamWriter {
       : m_stream_(stream), m_valid_(true) {}
 
   bool WriteTaskIdReply(pid_t calloc_pid,
-                        result::result<task_id_t, std::string> res) {
+                        std::expected<task_id_t, std::string> res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -67,8 +67,7 @@ class CforedStreamWriter {
 
   bool WriteTaskResAllocReply(
       task_id_t task_id,
-      result::result<std::pair<std::string, std::list<std::string>>,
-                     std::string>
+      std::expected<std::pair<std::string, std::list<CranedId>>, std::string>
           res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
@@ -121,8 +120,7 @@ class CforedStreamWriter {
     return m_stream_->Write(reply);
   }
 
-  bool WriteCforedRegistrationAck(
-      const result::result<void, std::string> &res) {
+  bool WriteCforedRegistrationAck(const std::expected<void, std::string> &res) {
     LockGuard guard(&m_stream_mtx_);
     if (!m_valid_) return false;
 
@@ -328,7 +326,7 @@ class CtldServer {
 
   inline void Wait() { m_server_->Wait(); }
 
-  result::result<std::future<task_id_t>, std::string> SubmitTaskToScheduler(
+  std::expected<std::future<task_id_t>, std::string> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 
  private:

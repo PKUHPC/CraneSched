@@ -26,6 +26,8 @@
 namespace Ctld {
 
 namespace {
+// TODO: move to config
+// Temporary Value
 constexpr int kMonitoringIntervalSeconds = 3;
 constexpr int kIdleTimeoutSeconds = 6000000;
 constexpr int kWakeupTimeoutSeconds = 180;
@@ -215,6 +217,10 @@ CranedStateMachine::CranedStateMachine() {
 std::optional<CranedStateMachine::StateTransition>
 CranedStateMachine::NextTransition(CranedState current_state, bool is_connected,
                                    PowerState power_status) const {
+  CRANE_DEBUG("NextTransition: current_state {}, is_connected {}, power_status {}",
+              CranedStateToStr(current_state), is_connected ? "true" : "false",
+              PowerStateToStr(power_status));
+
   TransitionKey key{current_state, is_connected, power_status};
   auto it = transition_map_.find(key);
 
@@ -298,9 +304,9 @@ bool IPMIManager::SleepCraned(const CranedId& craned_id,
 
   switch (craned_meta->state_info.state) {
   case CranedState::Running:
-  case CranedState::PreparingSleep:
-    SetCranedState_(craned_meta, CranedState::PreparingSleep);
+  case CranedState::PreparingSleep: {
     if (ExecuteRemoteCommand_(craned_meta, kSuspendCmd)) {
+      SetCranedState_(craned_meta, CranedState::PreparingSleep);
       msg = fmt::format("Craned {} entered preparing sleep state", craned_id);
       CRANE_DEBUG(msg);
       success = true;
@@ -310,6 +316,7 @@ bool IPMIManager::SleepCraned(const CranedId& craned_id,
       CRANE_ERROR(msg);
     }
     break;
+  }
 
   case CranedState::Sleeped:
     msg = fmt::format("Craned {} is already in sleep state", craned_id);
@@ -768,9 +775,6 @@ void IPMIManager::UpdateCranedState_(const CranedId& craned_id) {
 bool IPMIManager::ExecuteIPMICommand_(
     const CranedMetaContainer::CranedMetaPtr& craned_meta,
     const std::string& command, std::string* output) {
-  CRANE_DEBUG("Executing IPMI power {} command for craned {}", command,
-              craned_meta->static_meta.hostname);
-
   const auto& bmc = craned_meta->static_meta.bmc;
   if (bmc.ip.empty()) {
     CRANE_ERROR("No BMC address configured for craned {}",
@@ -787,7 +791,6 @@ bool IPMIManager::ExecuteIPMICommand_(
   std::string ipmi_cmd = fmt::format(
       "ipmitool -I {} -H {} -p {} -U {} -P {} power {}", bmc.interface, bmc.ip,
       bmc.port, bmc.username, bmc.password, command);
-  CRANE_DEBUG("Executing IPMI command: {}", ipmi_cmd);
 
   FILE* pipe = popen(ipmi_cmd.c_str(), "r");
   if (!pipe) {
@@ -813,9 +816,6 @@ bool IPMIManager::ExecuteIPMICommand_(
   if (output) {
     *output = result;
   }
-
-  CRANE_DEBUG("Successfully executed IPMI power {} command for craned {}: {}",
-              command, craned_meta->static_meta.hostname, result);
   return true;
 }
 

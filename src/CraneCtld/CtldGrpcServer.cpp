@@ -58,7 +58,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTasksRequest *request,
     crane::grpc::SubmitBatchTasksReply *response) {
-  std::vector<result::result<std::future<task_id_t>, std::string>> results;
+  std::vector<std::expected<std::future<task_id_t>, std::string>> results;
 
   uint32_t task_count = request->count();
   const auto &task_to_ctld = request->task();
@@ -76,7 +76,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     if (res.has_value())
       response->mutable_task_id_list()->Add(res.value().get());
     else
-      response->mutable_reason_list()->Add(res.error());
+      response->mutable_reason_list()->Add(std::move(res.error()));
   }
 
   return grpc::Status::OK;
@@ -155,7 +155,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
-  if (res.has_error()) {
+  if (!res) {
     for (auto task_id : request->task_ids()) {
       response->add_not_modified_tasks(task_id);
       response->add_not_modified_reasons(res.error());
@@ -202,8 +202,14 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     }
   } else if (request->attribute() == ModifyTaskRequest::Hold) {
     int64_t secs = request->hold_seconds();
+    std::vector<std::pair<task_id_t, std::future<CraneErr>>> results;
+    results.reserve(request->task_ids().size());
     for (auto task_id : request->task_ids()) {
-      err = g_task_scheduler->HoldReleaseTaskAsync(task_id, secs).get();
+      results.emplace_back(
+          task_id, g_task_scheduler->HoldReleaseTaskAsync(task_id, secs));
+    }
+    for (auto &[task_id, res] : results) {
+      err = res.get();
       if (err == CraneErr::kOk) {
         response->add_modified_tasks(task_id);
       } else if (err == CraneErr::kNonExistent) {
@@ -230,6 +236,14 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
     grpc::ServerContext *context,
     const crane::grpc::ModifyCranedStateRequest *request,
     crane::grpc::ModifyCranedStateReply *response) {
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!res) {
+    for (auto crane_id : request->craned_ids()) {
+      response->add_not_modified_nodes(crane_id);
+      response->add_not_modified_reasons(res.error());
+    }
+    return grpc::Status::OK;
+  }
   *response = g_meta_container->ChangeNodeState(*request);
 
   return grpc::Status::OK;
@@ -727,21 +741,22 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           CRANE_ERROR("Expect type CFORED_REGISTRATION from peer {}.",
                       context->peer());
           return Status::CANCELLED;
-        } else {
-          cfored_name = cfored_request.payload_cfored_reg().cfored_name();
-          CRANE_INFO("Cfored {} registered.", cfored_name);
-
-          ok = stream_writer->WriteCforedRegistrationAck({});
-          if (ok) {
-            state = StreamState::kWaitMsg;
-          } else {
-            CRANE_ERROR(
-                "Failed to send msg to cfored {}. Connection is broken. "
-                "Exiting...",
-                cfored_name);
-            state = StreamState::kCleanData;
-          }
         }
+
+        cfored_name = cfored_request.payload_cfored_reg().cfored_name();
+        CRANE_INFO("Cfored {} registered.", cfored_name);
+
+        ok = stream_writer->WriteCforedRegistrationAck({});
+        if (ok) {
+          state = StreamState::kWaitMsg;
+        } else {
+          CRANE_ERROR(
+              "Failed to send msg to cfored {}. Connection is broken. "
+              "Exiting...",
+              cfored_name);
+          state = StreamState::kCleanData;
+        }
+
       } else {
         state = StreamState::kCleanData;
       }
@@ -771,15 +786,16 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
               };
 
           meta.cb_task_cancel = [writer_weak_ptr](task_id_t task_id) {
+            CRANE_TRACE("Sending TaskCancelRequest in task_cancel", task_id);
             if (auto writer = writer_weak_ptr.lock(); writer)
               writer->WriteTaskCancelRequest(task_id);
           };
 
-          meta.cb_task_completed = [this, i_type, cfored_name,
-                                    writer_weak_ptr](task_id_t task_id) {
-            CRANE_TRACE("Sending TaskCompletionAckReply in task_completed",
-                        task_id);
-            if (auto writer = writer_weak_ptr.lock(); writer)
+          meta.cb_task_completed = [this, i_type, cfored_name, writer_weak_ptr](
+                                       task_id_t task_id,
+                                       bool send_completion_ack) {
+            if (auto writer = writer_weak_ptr.lock();
+                writer && send_completion_ack)
               writer->WriteTaskCompletionAckReply(task_id);
             m_ctld_server_->m_mtx_.Lock();
 
@@ -797,12 +813,12 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
 
           auto submit_result =
               m_ctld_server_->SubmitTaskToScheduler(std::move(task));
-          result::result<task_id_t, std::string> result;
+          std::expected<task_id_t, std::string> result;
           if (submit_result.has_value()) {
-            result = result::result<task_id_t, std::string>{
+            result = std::expected<task_id_t, std::string>{
                 submit_result.value().get()};
           } else {
-            result = result::fail(submit_result.error());
+            result = std::unexpected(submit_result.error());
           }
           ok = stream_writer->WriteTaskIdReply(payload.pid(), result);
 
@@ -825,8 +841,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
         case StreamCforedRequest::TASK_COMPLETION_REQUEST: {
           auto const &payload = cfored_request.payload_task_complete_req();
           CRANE_TRACE("Recv TaskCompletionReq of Task #{}", payload.task_id());
-
-          if (g_task_scheduler->TerminatePendingOrRunningTask(
+          if (g_task_scheduler->TerminatePendingOrRunningIaTask(
                   payload.task_id()) != CraneErr::kOk)
             stream_writer->WriteTaskCompletionAckReply(payload.task_id());
         } break;
@@ -876,7 +891,7 @@ grpc::Status CraneCtldServiceImpl::SleepCraned(
     crane::grpc::SleepCranedReply *response) {
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
-  if (res.has_error()) {
+  if (!res.has_value()) {
     response->set_ok(false);
     response->set_reason(res.error());
     return grpc::Status::OK;
@@ -901,7 +916,7 @@ grpc::Status CraneCtldServiceImpl::WakeupCraned(
     crane::grpc::WakeupCranedReply *response) {
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
-  if (res.has_error()) {
+  if (!res.has_value()) {
     response->set_ok(false);
     response->set_reason(res.error());
     return grpc::Status::OK;
@@ -926,7 +941,7 @@ grpc::Status CraneCtldServiceImpl::ShutdownCraned(
     crane::grpc::ShutdownCranedReply *response) {
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
-  if (res.has_error()) {
+  if (!res.has_value()) {
     response->set_ok(false);
     response->set_reason(res.error());
     return grpc::Status::OK;
@@ -951,7 +966,7 @@ grpc::Status CraneCtldServiceImpl::PowerOnCraned(
     crane::grpc::PowerOnCranedReply *response) {
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
-  if (res.has_error()) {
+  if (!res.has_value()) {
     response->set_ok(false);
     response->set_reason(res.error());
     return grpc::Status::OK;
@@ -1023,12 +1038,12 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   signal(SIGINT, &CtldServer::signal_handler_func);
 }
 
-result::result<std::future<task_id_t>, std::string>
+std::expected<std::future<task_id_t>, std::string>
 CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   CraneErr err;
 
   if (!task->password_entry->Valid()) {
-    return result::fail(
+    return std::unexpected(
         fmt::format("Uid {} not found on the controller node", task->uid));
   }
   task->SetUsername(task->password_entry->Username());
@@ -1037,7 +1052,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     auto user_scoped_ptr =
         g_account_manager->GetExistedUserInfo(task->Username());
     if (!user_scoped_ptr) {
-      return result::fail(fmt::format(
+      return std::unexpected(fmt::format(
           "User '{}' not found in the account database", task->Username()));
     }
 
@@ -1046,7 +1061,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
       task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
     } else {
       if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
-        return result::fail(fmt::format(
+        return std::unexpected(fmt::format(
             "Account '{}' is not in your account list", task->account));
       }
     }
@@ -1054,17 +1069,16 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
 
   if (!g_account_manager->CheckUserPermissionToPartition(
           task->Username(), task->account, task->partition_id)) {
-    return result::fail(
+    return std::unexpected(
         fmt::format("User '{}' doesn't have permission to use partition '{}' "
                     "when using account '{}'",
                     task->Username(), task->partition_id, task->account));
   }
 
-  auto enable_res =
-      g_account_manager->CheckIfUserOfAccountIsEnabled(
+  auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
       task->Username(), task->account);
-  if (enable_res.has_error()) {
-    return result::fail(enable_res.error());
+  if (!enable_res) {
+    return std::unexpected(enable_res.error());
   }
 
   err = g_task_scheduler->AcquireTaskAttributes(task.get());
@@ -1081,32 +1095,32 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
 
   if (err == CraneErr::kNonExistent) {
     CRANE_DEBUG("Task submission failed. Reason: Partition doesn't exist!");
-    return result::fail("Partition doesn't exist!");
+    return std::unexpected("Partition doesn't exist!");
   } else if (err == CraneErr::kInvalidNodeNum) {
     CRANE_DEBUG(
         "Task submission failed. Reason: --node is either invalid or greater "
         "than the number of nodes in its partition.");
-    return result::fail(
+    return std::unexpected(
         "--node is either invalid or greater than the number of nodes in its "
         "partition.");
   } else if (err == CraneErr::kNoResource) {
     CRANE_DEBUG(
         "Task submission failed. "
         "Reason: The resources of the partition are insufficient.");
-    return result::fail("The resources of the partition are insufficient");
+    return std::unexpected("The resources of the partition are insufficient");
   } else if (err == CraneErr::kNoAvailNode) {
     CRANE_DEBUG(
         "Task submission failed. "
         "Reason: Nodes satisfying the requirements of task are insufficient");
-    return result::fail(
+    return std::unexpected(
         "Nodes satisfying the requirements of task are insufficient.");
   } else if (err == CraneErr::kInvalidParam) {
     CRANE_DEBUG(
         "Task submission failed. "
         "Reason: The param of task is invalid.");
-    return result::fail("The param of task is invalid.");
+    return std::unexpected("The param of task is invalid.");
   }
-  return result::fail(CraneErrStr(err));
+  return std::unexpected<std::string>(CraneErrStr(err));
 }
 
 }  // namespace Ctld

@@ -44,6 +44,7 @@ target_link_libraries(craned
 
         cxxopts
         Threads::Threads
+        ${LIBUTIL_LIBRARY}
         nlohmann_json::nlohmann_json
 
         absl::flat_hash_map
@@ -52,7 +53,6 @@ target_link_libraries(craned
         uvw
 
         yaml-cpp
-        result
 
         Backward::Interface
 

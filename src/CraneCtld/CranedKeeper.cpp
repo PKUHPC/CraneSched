@@ -276,25 +276,6 @@ CraneErr CranedStub::QueryCranedNICInfo(CranedRemoteMeta *meta) {
   return CraneErr::kOk;
 }
 
-CraneErr CranedStub::SuspendCraned() {
-  using crane::grpc::SuspendCranedReply;
-  using crane::grpc::SuspendCranedRequest;
-
-  ClientContext context;
-  Status status;
-  SuspendCranedRequest request;
-  SuspendCranedReply reply;
-
-  status = m_stub_->SuspendCraned(&context, request, &reply);
-  if (!status.ok()) {
-    CRANE_ERROR("SuspendCraned RPC for Node {} returned with status not ok: {}",
-                m_craned_id_, status.error_message());
-    return CraneErr::kRpcFailure;
-  }
-
-  return CraneErr::kOk;
-}
-
 crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
     const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks) {
   crane::grpc::ExecuteTasksRequest request;
@@ -333,6 +314,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
     mutable_task->set_cpus_per_task(static_cast<double>(task->cpus_per_task));
 
     mutable_task->set_uid(task->uid);
+    mutable_task->set_gid(task->gid);
     mutable_task->mutable_env()->insert(task->env.begin(), task->env.end());
 
     mutable_task->set_cwd(task->cwd);
@@ -359,6 +341,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
       mutable_meta->set_sh_script(meta_in_ctld.sh_script);
       mutable_meta->set_term_env(meta_in_ctld.term_env);
       mutable_meta->set_interactive_type(meta_in_ctld.interactive_type);
+      mutable_meta->set_pty(meta_in_ctld.pty);
     }
   }
 

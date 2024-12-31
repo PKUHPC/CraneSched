@@ -35,7 +35,7 @@ void EnergyAwareScheduler::NodeSelect(
 
   std::vector<task_id_t> ordered_task_ids =
       m_priority_sorter_->GetOrderedTaskIdList(*pending_task_map, running_tasks,
-                                               100);
+                                               g_config.ScheduledBatchSize);
 
   CRANE_DEBUG("Got {} ordered tasks for processing", ordered_task_ids.size());
 

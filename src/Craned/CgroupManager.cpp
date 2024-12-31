@@ -63,7 +63,7 @@ int CgroupManager::Init() {
     break;
   case CGROUP_MODE_HYBRID:
     //("cgroup mode: Hybrid\n");
-    cg_version_ = CgroupConstant::CgroupVersion::CGROUP_V1;
+    cg_version_ = CgroupConstant::CgroupVersion::UNDEFINED;
     break;
   case CGROUP_MODE_UNIFIED:
     //("cgroup mode: Unified\n");
@@ -1322,8 +1322,8 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 
   auto &bpf_devices = m_cgroup_bpf_devices;
   for (const auto &[_, this_device] : Craned::g_this_node_device) {
-    if (!devices.contains(this_device->dev_id)) {
-      for (const auto &dev_meta : this_device->device_metas) {
+    if (!devices.contains(this_device->slot_id)) {
+      for (const auto &dev_meta : this_device->device_file_metas) {
         short op_type = 0;
         if (dev_meta.op_type == 'c') {
           op_type |= BPF_DEVCG_DEV_CHAR;

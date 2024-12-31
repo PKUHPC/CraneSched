@@ -19,16 +19,12 @@
 #include "CranedServer.h"
 
 #include <linux/ethtool.h>
-#include <linux/reboot.h>
 #include <linux/sockios.h>
 #include <net/if.h>
 #include <string.h>
 #include <sys/ioctl.h>
-#include <sys/syscall.h>
 #include <unistd.h>
 #include <yaml-cpp/yaml.h>
-#include <systemd/sd-bus.h>
-#include <future>
 
 #include "TaskManager.h"
 
@@ -596,109 +592,6 @@ grpc::Status CranedServiceImpl::QueryCranedNICInfo(
     response->set_ok(false);
     response->set_error_message("No WoL enabled network interface found");
     CRANE_WARN("No WoL enabled network interfaces found");
-  }
-
-  return grpc::Status::OK;
-}
-
-grpc::Status CranedServiceImpl::SuspendCraned(
-    grpc::ServerContext *context,
-    const crane::grpc::SuspendCranedRequest *request,
-    crane::grpc::SuspendCranedReply *reply) {
-  static std::atomic<bool> is_suspending{false};
-  
-  // use RAII to manage suspending state
-  class SuspendingGuard {
-    std::atomic<bool>& flag_;
-   public:
-    explicit SuspendingGuard(std::atomic<bool>& flag) : flag_(flag) {
-      flag_ = true;
-    }
-    ~SuspendingGuard() {
-      flag_ = false;
-    }
-  };
-
-  if (is_suspending.load(std::memory_order_acquire)) {
-    reply->set_ok(false);
-    reply->set_error_message("Suspend operation is already in progress.");
-    return grpc::Status(grpc::StatusCode::ALREADY_EXISTS,
-                       "Suspend already in progress");
-  }
-
-  CRANE_INFO("Preparing to suspend node...");
-
-  std::promise<bool> suspend_promise;
-  auto suspend_future = suspend_promise.get_future();
-
-  std::thread([promise = std::move(suspend_promise)]() mutable {
-    try {
-      SuspendingGuard guard(is_suspending);  // RAII to manage state
-
-      // sync file system
-      sync();
-      
-      // use sd_bus interface to replace system() command
-      sd_bus *bus = nullptr;
-      sd_bus_error error = SD_BUS_ERROR_NULL;
-      sd_bus_message *msg = nullptr;
-
-      int r = sd_bus_open_system(&bus);
-      if (r < 0) {
-        CRANE_ERROR("Failed to connect to system bus: {}", strerror(-r));
-        promise.set_value(false);
-        return;
-      }
-
-      // set timeout
-      uint64_t timeout_usec = 30 * 1000000;  // 30 seconds
-      r = sd_bus_call_method(bus,
-                            "org.freedesktop.login1",           // service
-                            "/org/freedesktop/login1",          // object path
-                            "org.freedesktop.login1.Manager",   // interface
-                            "Suspend",                          // method
-                            &error,
-                            &msg,
-                            "b",                                // parameter signature
-                            false);                             // parameter: whether interactive
-
-      if (r < 0) {
-        CRANE_ERROR("Failed to suspend system: {}", error.message);
-        sd_bus_error_free(&error);
-        sd_bus_unref(bus);
-        promise.set_value(false);
-        return;
-      }
-
-      sd_bus_message_unref(msg);
-      sd_bus_unref(bus);
-      promise.set_value(true);
-
-    } catch (const std::exception &e) {
-      CRANE_ERROR("Exception during suspend: {}", e.what());
-      promise.set_value(false);
-    }
-  }).detach();
-
-  // wait for suspend operation to start, but set timeout
-  try {
-    if (suspend_future.wait_for(std::chrono::seconds(5)) == std::future_status::ready) {
-      bool success = suspend_future.get();
-      reply->set_ok(success);
-      if (!success) {
-        reply->set_error_message("Failed to initiate suspend operation");
-      }
-    } else {
-      reply->set_ok(false);
-      reply->set_error_message("Suspend operation timed out");
-      return grpc::Status(grpc::StatusCode::DEADLINE_EXCEEDED, 
-                         "Suspend operation timed out");
-    }
-  } catch (const std::exception& e) {
-    reply->set_ok(false);
-    reply->set_error_message(std::string("Error during suspend: ") + e.what());
-    return grpc::Status(grpc::StatusCode::INTERNAL, 
-                       "Internal error during suspend");
   }
 
   return grpc::Status::OK;

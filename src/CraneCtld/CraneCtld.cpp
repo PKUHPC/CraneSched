@@ -738,7 +738,7 @@ void InitializeCtldGlobalVariables() {
   g_craned_keeper = std::make_unique<CranedKeeper>(g_config.Nodes.size());
 
   g_craned_keeper->SetCranedIsUpCb([](const CranedId& craned_id) {
-    CRANE_TRACE(
+    CRANE_DEBUG(
         "A new node #{} is up now. Add its resource to the global resource "
         "pool.",
         craned_id);
@@ -748,7 +748,7 @@ void InitializeCtldGlobalVariables() {
   });
 
   g_craned_keeper->SetCranedIsDownCb([](const CranedId& craned_id) {
-    CRANE_TRACE(
+    CRANE_DEBUG(
         "CranedNode #{} is down now. "
         "Remove its resource from the global resource pool.",
         craned_id);

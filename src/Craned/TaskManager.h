@@ -23,8 +23,6 @@
 
 #include <grp.h>
 
-#include <uvw.hpp>
-
 #include "CgroupManager.h"
 #include "crane/PasswordEntry.h"
 #include "protos/Crane.grpc.pb.h"
@@ -121,8 +119,7 @@ struct BatchMetaInTaskInstance : MetaInTaskInstance {
 };
 
 struct CrunMetaInTaskInstance : MetaInTaskInstance {
-  int proc_in_fd;
-  int proc_out_fd;
+  int msg_fd;
   ~CrunMetaInTaskInstance() override = default;
 };
 
@@ -143,7 +140,7 @@ struct TaskInstance {
     }
 
     if (this->IsCrun()) {
-      close(dynamic_cast<CrunMetaInTaskInstance*>(meta.get())->proc_in_fd);
+      close(dynamic_cast<CrunMetaInTaskInstance*>(meta.get())->msg_fd);
     }
   }
 

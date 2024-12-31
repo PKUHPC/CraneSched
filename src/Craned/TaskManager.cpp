@@ -21,6 +21,7 @@
 #include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
+#include <pty.h>
 #include <sys/wait.h>
 
 #include "CforedClient.h"
@@ -102,7 +103,9 @@ TaskManager::TaskManager() {
 
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
   m_sigchld_handle_->on<uvw::signal_event>(
-      [this](const uvw::signal_event&, uvw::signal_handle&) { EvSigchldCb_(); });
+      [this](const uvw::signal_event&, uvw::signal_handle&) {
+        EvSigchldCb_();
+      });
 
   if (m_sigchld_handle_->start(SIGCLD) != 0) {
     CRANE_ERROR("Failed to start the SIGCLD handle");
@@ -516,9 +519,10 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   using crane::grpc::subprocess::CanStartMessage;
   using crane::grpc::subprocess::ChildProcessReady;
 
-  int ctrl_sock_pair[2];    // Socket pair for passing control messages.
-  int io_in_sock_pair[2];   // Socket pair for forwarding IO of crun tasks.
-  int io_out_sock_pair[2];  // Socket pair for forwarding IO of crun tasks.
+  int ctrl_sock_pair[2];  // Socket pair for passing control messages.
+
+  // Socket pair for forwarding IO of crun tasks. Craned read from index 0.
+  int crun_io_sock_pair[2];
 
   // The ResourceInNode structure should be copied here for being accessed in
   // the child process.
@@ -539,43 +543,59 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     return CraneErr::kSystemErr;
   }
 
-  // Create IO socket pair for crun tasks.
-  if (instance->IsCrun()) {
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, io_in_sock_pair) != 0) {
-      CRANE_ERROR("Failed to create socket pair for task io forward: {}",
-                  strerror(errno));
-      return CraneErr::kSystemErr;
-    }
-
-    if (socketpair(AF_UNIX, SOCK_STREAM, 0, io_out_sock_pair) != 0) {
-      CRANE_ERROR("Failed to create socket pair for task io forward: {}",
-                  strerror(errno));
-      return CraneErr::kSystemErr;
-    }
-
-    auto* crun_meta =
-        dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
-    crun_meta->proc_in_fd = io_in_sock_pair[0];
-    crun_meta->proc_out_fd = io_out_sock_pair[0];
-  }
-
   // save the current uid/gid
   SavedPrivilege saved_priv{getuid(), getgid()};
 
-  int rc = setegid(instance->pwd_entry.Gid());
+  // TODO: Add all other supplementary groups.
+  // Currently we only add the main gid and the egid when task is submitted.
+  std::vector<gid_t> gids;
+  if (instance->task.gid() != instance->pwd_entry.Gid())
+    gids.emplace_back(instance->task.gid());
+
+  gids.emplace_back(instance->pwd_entry.Gid());
+  int rc = setgroups(gids.size(), gids.data());
+  if (rc == -1) {
+    CRANE_ERROR("error: setgroups. {}", strerror(errno));
+    return CraneErr::kSystemErr;
+  }
+
+  rc = setegid(instance->task.gid());
   if (rc == -1) {
     CRANE_ERROR("error: setegid. {}", strerror(errno));
     return CraneErr::kSystemErr;
   }
-  __gid_t gid_a[1] = {instance->pwd_entry.Gid()};
-  setgroups(1, gid_a);
+
   rc = seteuid(instance->pwd_entry.Uid());
   if (rc == -1) {
     CRANE_ERROR("error: seteuid. {}", strerror(errno));
     return CraneErr::kSystemErr;
   }
 
-  pid_t child_pid = fork();
+  pid_t child_pid;
+  bool launch_pty{false};
+
+  if (instance->IsCrun()) {
+    auto* crun_meta =
+        dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
+    launch_pty = instance->task.interactive_meta().pty();
+    CRANE_DEBUG("Launch crun task #{} pty:{}", instance->task.task_id(),
+                launch_pty);
+
+    if (launch_pty) {
+      child_pid = forkpty(&crun_meta->msg_fd, nullptr, nullptr, nullptr);
+    } else {
+      if (socketpair(AF_UNIX, SOCK_STREAM, 0, crun_io_sock_pair) != 0) {
+        CRANE_ERROR("Failed to create socket pair for task io forward: {}",
+                    strerror(errno));
+        return CraneErr::kSystemErr;
+      }
+      crun_meta->msg_fd = crun_io_sock_pair[0];
+      child_pid = fork();
+    }
+  } else {
+    child_pid = fork();
+  }
+
   if (child_pid == -1) {
     CRANE_ERROR("fork() failed for task #{}: {}", instance->task.task_id(),
                 strerror(errno));
@@ -591,14 +611,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
       g_cfored_manager->RegisterIOForward(
           instance->task.interactive_meta().cfored_name(),
-          instance->task.task_id(), meta->proc_in_fd, meta->proc_out_fd);
+          instance->task.task_id(), meta->msg_fd, launch_pty);
     }
 
     int ctrl_fd = ctrl_sock_pair[0];
     close(ctrl_sock_pair[1]);
-    if (instance->IsCrun()) {
-      close(io_in_sock_pair[1]);
-      close(io_out_sock_pair[1]);
+    if (instance->IsCrun() && !launch_pty) {
+      close(crun_io_sock_pair[1]);
     }
 
     setegid(saved_priv.gid);
@@ -720,7 +739,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     }
 
     setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid());
-    setregid(instance->pwd_entry.Gid(), instance->pwd_entry.Gid());
+    setregid(instance->task.gid(), instance->task.gid());
 
     // Set pgid to the pid of task root process.
     setpgid(0, 0);
@@ -779,16 +798,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       }
       close(stdout_fd);
 
-    } else if (instance->IsCrun()) {
-      close(io_in_sock_pair[0]);
-      close(io_out_sock_pair[0]);
+    } else if (instance->IsCrun() && !launch_pty) {
+      close(crun_io_sock_pair[0]);
 
-      dup2(io_in_sock_pair[1], 0);
-      close(io_in_sock_pair[1]);
-
-      dup2(io_out_sock_pair[1], 1);
-      dup2(io_out_sock_pair[1], 2);
-      close(io_out_sock_pair[1]);
+      dup2(crun_io_sock_pair[1], 0);
+      dup2(crun_io_sock_pair[1], 1);
+      dup2(crun_io_sock_pair[1], 2);
+      close(crun_io_sock_pair[1]);
     }
 
     child_process_ready.set_ok(true);

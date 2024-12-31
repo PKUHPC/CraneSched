@@ -43,9 +43,18 @@ if (VERSION_CONTENT STREQUAL "")
     set(CMAKE_PROJECT_VERSION "0.0.0")
 endif ()
 
+# If ccache is found, set it as the compiler launcher
+find_program(CCACHE_PROGRAM ccache)
+if (CCACHE_PROGRAM)
+    message(STATUS "ccache found. Use ccache to launch compilers.")
+    set_property(GLOBAL PROPERTY CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set_property(GLOBAL PROPERTY CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+endif ()
+
 project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
-# check and set compiler
-set(REQUIRED_GNU_VERSION 13.0.0)
+
+# Check and set compiler
+set(REQUIRED_GNU_VERSION 14.0.0)
 set(REQUIRED_CLANG_VERSION 19.0.0)
 set(REQUIRED_BPF_CLANG_VERSION 17.0.0)
 
@@ -252,13 +261,6 @@ else ()
     message(STATUS "IPO / LTO not supported: <${error}>")
 endif ()
 
-find_program(CCACHE_PROGRAM ccache)
-if (CCACHE_PROGRAM)
-    message(STATUS "ccache found. Use ccache to launch compilers.")
-    set_property(GLOBAL PROPERTY CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-    set_property(GLOBAL PROPERTY CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-endif ()
-
 if (${CRANE_FULL_DYNAMIC})
     set(CMAKE_SKIP_BUILD_RPATH FALSE)
     set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
@@ -278,6 +280,7 @@ set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_
 add_subdirectory(${DEPENDENCIES_PRE_INSTALLED_DIR})
 
 find_package(Threads REQUIRED)
+find_library(LIBUTIL_LIBRARY util)
 
 # New in version cmake3.24:
 # Set ZLIB_USE_STATIC_LIBS to ON to look for static libraries. Default is OFF.
@@ -394,6 +397,14 @@ install(TARGETS craned
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
 )
 
+if(ENABLE_BPF)
+    install(FILES 
+            ${CMAKE_BINARY_DIR}/src/Misc/BPF/cgroup_dev_bpf.o
+            DESTINATION /usr/local/lib64/bpf/
+            COMPONENT cranedc
+            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
+endif()
+
 # Install unit files
 install(FILES
         ${CMAKE_BINARY_DIR}/etc/cranectld.service
@@ -439,6 +450,7 @@ set(CPACK_PACKAGE_DESCRIPTION "An HPC and Cloud Computing Fused Job Scheduling S
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CMAKE_PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+
 # Do not allow the package to be relocated
 set(CPACK_PACKAGE_RELOCATABLE OFF)
 
@@ -446,9 +458,11 @@ set(CPACK_PACKAGE_RELOCATABLE OFF)
 set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
 set(CPACK_RPM_PACKAGE_LICENSE "AGPL v3")
 set(CPACK_RPM_COMPRESSION_TYPE "xz")
-#TODO CPACK_PACKAGE_DESCRIPTION
+
 # DEB
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_COMPRESSION_TYPE "xz")
+# Seperate the debuginfo to avoid large DEB package
+set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
 
 include(CPack)

@@ -38,10 +38,8 @@ TaskScheduler::TaskScheduler() {
     m_priority_sorter_ = std::make_unique<MultiFactorPriority>();
   }
 
-  // m_node_selection_algo_ =
-  //     std::make_unique<MinLoadFirst>(m_priority_sorter_.get());
   m_node_selection_algo_ =
-      std::make_unique<EnergyAwareScheduler>(m_priority_sorter_.get());
+      std::make_unique<MinLoadFirst>(m_priority_sorter_.get());
 }
 
 TaskScheduler::~TaskScheduler() {
@@ -689,22 +687,37 @@ void TaskScheduler::ScheduleThread_() {
         task->allocated_craneds_regex =
             util::HostNameListToStr(task->CranedIds());
 
+        // Task execute on all node, otherwise on the first node
+        bool launch_on_all_nodes;
         if (task->type == crane::grpc::Batch) {
           // For cbatch tasks whose --node > 1,
           // only execute the command at the first allocated node.
-          task->executing_craned_ids.emplace_back(task->CranedIds().front());
+          launch_on_all_nodes = false;
         } else {
           const auto& meta = std::get<InteractiveMetaInTask>(task->meta);
           if (meta.interactive_type == crane::grpc::Calloc)
             // For calloc tasks we still need to execute a dummy empty task to
             // set up a timer.
-            task->executing_craned_ids.emplace_back(task->CranedIds().front());
-          else
-            // For crun tasks we need to execute tasks on all allocated nodes.
-            for (auto const& craned_id : task->CranedIds())
-              task->executing_craned_ids.emplace_back(craned_id);
+            launch_on_all_nodes = false;
+          else {
+            // For crun tasks we need to execute tasks on all allocated
+            // nodes.
+
+            // Crun task with pty only launch on first node
+            if (task->TaskToCtld().interactive_meta().pty())
+              launch_on_all_nodes = false;
+            else
+              launch_on_all_nodes = true;
+          }
         }
+
+        if (launch_on_all_nodes) {
+          for (auto const& craned_id : task->CranedIds())
+            task->executing_craned_ids.emplace_back(craned_id);
+        } else
+          task->executing_craned_ids.emplace_back(task->CranedIds().front());
       }
+
       end = std::chrono::steady_clock::now();
       CRANE_TRACE(
           "Set task fields costed {} ms",
@@ -1179,7 +1192,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
   // to their own jobs.
   std::string filter_uname = request.filter_username();
   if (filter_uname.empty() &&
-      g_account_manager->CheckUidIsAdmin(operator_uid).has_error()) {
+      !g_account_manager->CheckUidIsAdmin(operator_uid)) {
     PasswordEntry entry(operator_uid);
     filter_uname = entry.Username();
   }
@@ -1276,18 +1289,12 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
       reply.add_not_cancelled_tasks(task_id);
       reply.add_not_cancelled_reasons("Permission Denied.");
     } else {
-      bool is_calloc = false;
       if (task->type == crane::grpc::Interactive) {
         auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-        if (meta.interactive_type == crane::grpc::Calloc) is_calloc = true;
-
-        if (is_calloc && !meta.has_been_cancelled_on_front_end) {
+        if (!meta.has_been_cancelled_on_front_end) {
           meta.has_been_cancelled_on_front_end = true;
           meta.cb_task_cancel(task_id);
         }
-      }
-
-      if (is_calloc) {
         reply.add_cancelled_tasks(task_id);
       } else {
         CraneErr err = TerminateRunningTaskNoLock_(task);
@@ -1460,8 +1467,18 @@ void TaskScheduler::CleanCancelQueueCb_() {
 
     if (task->type == crane::grpc::Interactive) {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-      g_thread_pool->detach_task([cb = meta.cb_task_cancel,
-                                  task_id = task->TaskId()] { cb(task_id); });
+      // Cancel request may not come from crun/calloc, ask them to exit
+      if (!meta.has_been_cancelled_on_front_end) {
+        meta.has_been_cancelled_on_front_end = true;
+        g_thread_pool->detach_task([cb = meta.cb_task_cancel,
+                                    task_id = task->TaskId()] { cb(task_id); });
+      } else {
+        // Cancel request from crun/calloc, reply CompletionAck
+        g_thread_pool->detach_task(
+            [cb = meta.cb_task_completed, task_id = task->TaskId()] {
+              cb(task_id, true);
+            });
+      }
     }
   }
 
@@ -1622,34 +1639,35 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       task->SetStatus(new_status);
     } else {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
-      if (meta.interactive_type == crane::grpc::Calloc) {
-        // TaskStatusChange may indicate the time limit has been reached and
-        // the task has been terminated. No more TerminateTask RPC should be
-        // sent to the craned node if any further CancelTask or
-        // TaskCompletionRequest RPC is received.
-        meta.has_been_terminated_on_craned = true;
-
-        if (new_status == crane::grpc::ExceedTimeLimit ||
-            exit_code == ExitCode::kExitCodeCranedDown) {
-          meta.has_been_cancelled_on_front_end = true;
-          meta.cb_task_cancel(task->TaskId());
-          task->SetStatus(new_status);
-        } else {
-          task->SetStatus(crane::grpc::Completed);
-        }
-        meta.cb_task_completed(task->TaskId());
-      } else {  // Crun
-        if (++meta.status_change_cnt < task->node_num) {
+      if (meta.interactive_type == crane::grpc::Crun) {  // Crun
+        if (++meta.status_change_cnt < task->executing_craned_ids.size()) {
           CRANE_TRACE(
               "{}/{} TaskStatusChanges of Crun task #{} were received. "
               "Keep waiting...",
-              meta.status_change_cnt, task->node_num, task->TaskId());
+              meta.status_change_cnt, task->executing_craned_ids.size(),
+              task->TaskId());
           continue;
         }
-
-        task->SetStatus(new_status);
-        meta.cb_task_completed(task->TaskId());
       }
+
+      // TaskStatusChange may indicate the time limit has been reached and
+      // the task has been terminated. No more TerminateTask RPC should be
+      // sent to the craned node if any further CancelTask or
+      // TaskCompletionRequest RPC is received.
+
+      // Task end triggered by craned.
+      if (!meta.has_been_cancelled_on_front_end) {
+        meta.has_been_cancelled_on_front_end = true;
+        meta.cb_task_cancel(task->TaskId());
+        // Completion ack will send in grpc server triggered by task complete
+        // req
+        meta.cb_task_completed(task->TaskId(), false);
+      } else {
+        // Send Completion Ack to frontend now.
+        meta.cb_task_completed(task->TaskId(), true);
+      }
+
+      task->SetStatus(new_status);
     }
 
     task->SetExitCode(exit_code);
@@ -2753,7 +2771,7 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
       task->Username(), task->account, task);
-  if (check_qos_result.has_error()) {
+  if (!check_qos_result) {
     CRANE_ERROR("Failed to call CheckAndApplyQosLimitOnTask: {}",
                 check_qos_result.error());
     return CraneErr::kInvalidParam;

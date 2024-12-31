@@ -54,7 +54,7 @@ message EndHookReply {
 message CreateCgroupHookRequest {
   uint32 task_id = 1;
   string cgroup = 2;
-  DedicatedResourceInNode request_res = 3;
+  DedicatedResourceInNode resource = 3;
 }
 
 message CreateCgroupHookReply {

@@ -233,6 +233,7 @@ class MongodbClient {
   const std::string m_account_collection_name_{"acct_table"};
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};
+  const std::string m_node_nic_collection_name_{"node_nic_info"};
 
   std::unique_ptr<mongocxx::instance> m_instance_;
   std::unique_ptr<mongocxx::pool> m_connect_pool_;
@@ -240,8 +241,6 @@ class MongodbClient {
   mongocxx::write_concern m_wc_majority_{};
   mongocxx::read_concern m_rc_local_{};
   mongocxx::read_preference m_rp_primary_{};
-
-  const std::string m_node_nic_collection_name_{"node_nic_info"};
 };
 
 template <>
