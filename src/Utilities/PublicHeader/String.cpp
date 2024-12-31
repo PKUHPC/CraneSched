@@ -411,4 +411,31 @@ std::string GenerateCommaSeparatedString(const int val) {
   return absl::StrJoin(val_vec, ",");
 }
 
+std::expected<std::string, bool> ParseCertificate(const std::string &cert_pem) {
+  // Load the certificate content into a BIO (memory buffer).
+  BIO *bio = BIO_new_mem_buf(cert_pem.data(), cert_pem.size());
+  if (!bio) return std::unexpected(false);
+
+  // Read a PEM-formatted certificate.
+  X509 *cert = PEM_read_bio_X509(bio, nullptr, nullptr, nullptr);
+  if (!cert) {
+    BIO_free(bio);
+    return std::unexpected(false);
+  }
+
+  // Retrieve Subject information.
+  X509_NAME *subject = X509_get_subject_name(cert);
+  if (!subject) return std::unexpected(false);
+
+  char cn[256];
+  int len = X509_NAME_get_text_by_NID(subject, NID_commonName, cn, sizeof(cn));
+  if (len <= 0) return std::unexpected(false);
+
+  // free the memory
+  X509_free(cert);
+  BIO_free(bio);
+
+  return cn;
+}
+
 }  // namespace util

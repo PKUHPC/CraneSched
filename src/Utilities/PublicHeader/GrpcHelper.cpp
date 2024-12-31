@@ -67,12 +67,22 @@ static std::string GrpcFormatIpAddress(std::string const& addr) {
   return addr;
 }
 
-uint32_t ExtractUIDFromMetadata(const grpc::ServerContext* context) {
-  auto iter = context->client_metadata().find("authorization");
-  uint32_t uid = static_cast<uint32_t>(std::stoul(util::GetClaim(
-      "UID", std::string(iter->second.data(), iter->second.size()))));
+// Retrieve UID from the certificate.
+std::expected<uint32_t, bool> ExtractUIDFromCert(
+    const grpc::ServerContext* context) {
+  auto cert = context->auth_context()->FindPropertyValues("x509_pem_cert");
+  if (cert.empty()) return std::unexpected(false);
 
-  return uid;
+  std::string certificate = std::string(cert[0].data(), cert[0].size());
+
+  auto result = util::ParseCertificate(certificate);
+  if (!result) return std::unexpected(false);
+
+  std::vector<std::string> cn_parts = absl::StrSplit(result.value(), '.');
+  if (cn_parts.size() != 3 || cn_parts[0].empty())
+    return std::unexpected(false);
+
+  return static_cast<uint32_t>(std::stoul(cn_parts[0]));
 }
 
 void ServerBuilderSetCompression(grpc::ServerBuilder* builder) {

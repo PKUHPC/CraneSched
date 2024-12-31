@@ -24,8 +24,11 @@
 #include <grpcpp/support/status.h>
 #include <spdlog/fmt/bundled/format.h>
 
+#include <expected>
+
 #include "crane/Jwt.h"
 #include "crane/Network.h"
+#include "crane/String.h"
 
 struct ServerCertificateConfig {
   std::string ServerCertFilePath;
@@ -82,7 +85,8 @@ class JwtAuthInterceptorFactory
   std::string jwt_secret_;
 };
 
-uint32_t ExtractUIDFromMetadata(const grpc::ServerContext* context);
+std::expected<uint32_t, bool> ExtractUIDFromCert(
+    const grpc::ServerContext* context);
 
 void ServerBuilderSetCompression(grpc::ServerBuilder* builder);
 
