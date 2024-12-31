@@ -95,7 +95,6 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
     CRANE_TRACE("Default user ROOT not found. Insert it into DB.");
 
     root_user.name = "root";
-    root_user.password = "";
     root_user.default_account = "ROOT";
     root_user.admin_level = User::Root;
     root_user.uid = 0;
@@ -687,19 +686,21 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 7> fields{"deleted",
+  std::array<std::string, 8> fields{"deleted",
                                     "uid",
                                     "default_account",
                                     "name",
+                                    "serial_number",
                                     "admin_level",
                                     "account_to_attrs_map",
                                     "coordinator_accounts"};
-  std::tuple<bool, int64_t, std::string, std::string, int32_t,
+  std::tuple<bool, int64_t, std::string, std::string, std::string, int32_t,
              User::AccountToAttrsMap, std::list<std::string>>
       values{false,
              user.uid,
              user.default_account,
              user.name,
+             user.serial_number,
              user.admin_level,
              user.account_to_attrs_map,
              user.coordinator_accounts};

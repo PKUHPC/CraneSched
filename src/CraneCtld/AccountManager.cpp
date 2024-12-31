@@ -26,25 +26,6 @@ namespace Ctld {
 
 AccountManager::AccountManager() { InitDataMap_(); }
 
-AccountManager::CraneExpected<std::string> AccountManager::Login(
-    uint32_t uid, const std::string& password) {
-  util::read_lock_guard user_guard(m_rw_user_mutex_);
-
-  auto user_result = GetUserInfoByUidNoLock_(uid);
-  if (!user_result) return std::unexpected(user_result.error());
-  const User* user = user_result.value();
-
-  if (password != user->password) {
-    return std::unexpected(CraneErrCode::ERR_PASSWORD_MISMATCH);
-  }
-  std::unordered_map<std::string, std::string> claims{
-      {"UID", std::to_string(uid)}};
-  const std::string& token =
-      util::GenerateToken(g_config.ListenConf.JwtSecretContent, claims);
-
-  return token;
-}
-
 AccountManager::CraneExpected<void> AccountManager::AddUser(
     uint32_t uid, const User& new_user) {
   CraneExpected<void> result;
@@ -1057,7 +1038,10 @@ AccountManager::CraneExpected<std::string> AccountManager::SignUserCertificate(
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
-  // TODO：验证用户是否存在，以及用户数据库中是否已经有serial_number
+  // Verify whether the serial number already exists in the user database.
+  if (!op_user->serial_number.empty())
+    return std::unexpected(CraneErrCode::ERR_DUPLICATE_CERTIFICATE);
+
   std::string common_name = std::format("{}.{}.{}", uid, op_user->name,
                                         g_config.VaultConf.DomainSuffix);
   auto sign_response =
@@ -1065,7 +1049,20 @@ AccountManager::CraneExpected<std::string> AccountManager::SignUserCertificate(
   if (!sign_response)
     return std::unexpected(CraneErrCode::ERR_SIGN_CERTIFICATE);
 
-  // TODO:将serial_number保存在数据库中
+  // Save the serial number in the database.
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
+                                     op_user->name, "serial_number",
+                                     sign_response->serial_number);
+      };
+
+  // Update to database
+  if (!g_db_client->CommitTransaction(callback)) {
+    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+  }
+
+  m_user_map_[op_user->name]->serial_number = sign_response->serial_number;
 
   return sign_response->certificate;
 }

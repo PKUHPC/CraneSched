@@ -261,21 +261,6 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::Login(
-    grpc::ServerContext *context, const crane::grpc::LoginRequest *request,
-    crane::grpc::LoginReply *response) {
-  auto result = g_account_manager->Login(request->uid(), request->password());
-
-  if (result) {
-    response->set_ok(true);
-    response->set_token(result.value());
-  } else {
-    response->set_ok(false);
-    response->set_reason(result.error());
-  }
-  return grpc::Status::OK;
-}
-
 grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
@@ -315,7 +300,6 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   const crane::grpc::UserInfo *user_info = &request->user();
 
   user.name = user_info->name();
-  user.password = user_info->password();
   user.uid = user_info->uid();
   user.default_account = user_info->account();
   user.admin_level = User::AdminLevel(user_info->admin_level());

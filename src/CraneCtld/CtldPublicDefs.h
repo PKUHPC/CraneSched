@@ -733,8 +733,8 @@ struct User {
   bool deleted = false;
   uid_t uid;
   std::string name;
-  std::string password;
   std::string default_account;
+  std::string serial_number;
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
