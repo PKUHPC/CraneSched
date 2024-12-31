@@ -154,6 +154,34 @@ bool VaultClient::IssureExternalCa_(const std::string& domains,
   return true;
 }
 
+bool VaultClient::RevokeCert(const std::string& serial_number) {
+  try {
+    auto response = pki_external_->revokeCertificate(
+        Vault::Parameters{{"serial_number", serial_number}});
+    if (!response) return false;
+  } catch (const std::exception& e) {
+    return false;
+  }
+
+  allowed_certs_.erase(serial_number);
+
+  return true;
+}
+
+bool VaultClient::IsCertAllowed(const std::string& serial_number) {
+  if (allowed_certs_.contains(serial_number)) return true;
+
+  try {
+    // TODO: 检查crl列表
+  } catch (const std::exception& e) {
+    return false;
+  }
+
+  allowed_certs_.emplace(serial_number);
+
+  return true;
+}
+
 bool VaultClient::CreateRole_(const std::string& role_name,
                               const std::string& domains) {
   nlohmann::json::value_type data;
