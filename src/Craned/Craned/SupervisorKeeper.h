@@ -23,12 +23,12 @@
 
 #include <protos/Supervisor.grpc.pb.h>
 
-#include "TaskManager.h"
+#include "JobManager.h"
 #include "crane/AtomicHashMap.h"
 namespace Craned {
 class SupervisorClient {
  public:
-  CraneExpected<pid_t> ExecuteTask(const ProcessInstance* process);
+  CraneExpected<pid_t> ExecuteTask(const TaskExecutionInstance* process);
   CraneExpected<EnvMap> QueryTaskEnv();
   CraneErr CheckTaskStatus(crane::grpc::TaskToD* task);
 

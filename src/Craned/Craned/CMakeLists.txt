@@ -3,8 +3,8 @@ add_executable(craned
         CtldClient.cpp
         CgroupManager.h
         CgroupManager.cpp
-        TaskManager.h
-        TaskManager.cpp
+        JobManager.h
+        JobManager.cpp
         CranedServer.h
         CranedServer.cpp
         CranedPublicDefs.h

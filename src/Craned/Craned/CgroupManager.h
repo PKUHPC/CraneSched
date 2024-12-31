@@ -90,6 +90,10 @@ enum class ControllerFile : uint64_t {
   ControllerFileCount,
 };
 
+inline constexpr bool CgroupLimitDeviceRead = true;
+inline constexpr bool CgroupLimitDeviceWrite = true;
+inline constexpr bool CgroupLimitDeviceMknod = true;
+
 inline constexpr std::string kTaskCgPathPrefix = "Crane_Task_";
 inline const char *RootCgroupFullPath = "/sys/fs/cgroup";
 #ifdef CRANE_ENABLE_BPF
@@ -97,10 +101,6 @@ inline const char *BpfObjectFilePath = "/usr/local/lib64/bpf/cgroup_dev_bpf.o";
 inline const char *BpfDeviceMapFilePath = "/sys/fs/bpf/craned_dev_map";
 inline const char *BpfMapName = "craned_dev_map";
 inline const char *BpfProgramName = "craned_device_access";
-
-inline constexpr bool CgroupLimitDeviceRead = true;
-inline constexpr bool CgroupLimitDeviceWrite = true;
-inline constexpr bool CgroupLimitDeviceMknod = true;
 #endif
 
 namespace Internal {
@@ -315,6 +315,7 @@ class Cgroup {
   std::string m_cgroup_path_;
   mutable struct cgroup *m_cgroup_;
   uint64_t m_cgroup_id;
+  task_id_t job_id;
 };
 
 class CgroupInterface {
@@ -496,35 +497,16 @@ class CgroupManager {
   std::optional<std::string> QueryTaskExecutionNode(task_id_t task_id);
 
   /**
-   * Set Cgroup info, but not create cgroup immediately.
-   * @param cg_specs task resource info,uid,execution_node
-   * @return
+   * \brief Allocate and return cgroup handle for job, should only called once
+   * per job.
+   * \param cg_spec cgroup spec for job.
+   * \return CgroupInterface ptr,null if error.
    */
-  bool CreateCgroups(std::vector<CgroupSpec> &&cg_specs);
-
-  bool CheckIfCgroupForTasksExists(task_id_t task_id);
-
-  /**
-   *
-   * @param[int] task_id
-   * @param[out] cg Created or opened cgroup with resource limited enforced.
-   * @return true for success
-   */
-  bool AllocateAndGetCgroup(task_id_t task_id, CgroupInterface **cg);
-
-  bool MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id);
-
-  bool ReleaseCgroup(uint32_t task_id, uid_t uid);
-
-  bool ReleaseCgroupByTaskIdOnly(task_id_t task_id);
-
-  CraneExpected<crane::grpc::ResourceInNode> GetTaskResourceInNode(
-      task_id_t task_id);
+  std::unique_ptr<CgroupInterface> AllocateAndGetJobCgroup(
+      const CgroupSpec &cg_spec);
 
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
-
-  CraneExpected<EnvMap> GetResourceEnvMapOfTask(task_id_t task_id);
 
   CgroupConstant::CgroupVersion GetCgroupVersion() const { return cg_version_; }
 
@@ -554,23 +536,12 @@ class CgroupManager {
 
   void RmTaskCgroupsV2Expect_(const std::unordered_set<task_id_t> &task_ids);
 
-  void RmCgroupsV2_(const std::string &root_cgroup_path,
-                    const std::string &match_str);
+  void RmCgroupsV2Except_(const std::string &root_cgroup_path,
+                          const std::unordered_set<task_id_t> &job_ids);
 
   ControllerFlags m_mounted_controllers_;
 
   CgroupConstant::CgroupVersion cg_version_;
-
-  util::AtomicHashMap<absl::flat_hash_map, task_id_t, CgroupSpec>
-      m_task_id_to_cg_spec_map_;
-
-  util::AtomicHashMap<absl::flat_hash_map, task_id_t,
-                      std::unique_ptr<CgroupInterface>>
-      m_task_id_to_cg_map_;
-
-  util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
-                      absl::flat_hash_set<task_id_t>>
-      m_uid_to_task_ids_map_;
 };
 
 }  // namespace Craned

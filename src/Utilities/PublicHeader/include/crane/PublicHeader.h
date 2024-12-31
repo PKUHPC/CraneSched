@@ -414,7 +414,7 @@ bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
 
 struct CgroupSpec {
   uid_t uid;
-  task_id_t task_id;
+  task_id_t job_id;
   crane::grpc::ResourceInNode res_in_node;
   std::string execution_node;
   // Recovered on start,no need to apply res limit.
