@@ -785,17 +785,6 @@ message StreamTaskIOReply {
   }
 }
 
-message LoginRequest {
-  uint32 uid = 1;
-  string password = 2;
-}
-
-message LoginReply {
-  bool ok = 1;
-  string token = 2;
-  ErrCode reason = 3;
-}
-
 message SignUserCertificateRequest {
   uint32 uid = 1;
   string csr_content = 2;
@@ -848,9 +837,6 @@ service CraneCtld {
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
-
-  /* RPCs called from clogin */
-  rpc Login(LoginRequest) returns (LoginReply);
 
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
