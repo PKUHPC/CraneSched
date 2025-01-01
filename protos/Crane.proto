@@ -42,6 +42,7 @@ message CranedRegisterRequest {
 message CranedRegisterReply {
   bool ok = 1;
   bool already_registered = 2;
+  repeated JobSpec ctld_jobs = 3;
 }
 
 message QueryCranedListFromTaskIdRequest {
@@ -92,10 +93,7 @@ message ExecuteProcReply{
 }
 
 message CreateCgroupForTasksRequest {
-  repeated uint32 task_id_list = 1;
-  repeated uint32 uid_list = 2;
-  repeated ResourceInNode res_list = 3;
-  repeated string execution_node = 4;
+  repeated JobSpec cg_spec_vec = 1;
 }
 
 message CreateCgroupForTasksReply{}
@@ -367,7 +365,7 @@ message QueryUserInfoRequest {
 message QueryUserInfoReply {
   bool ok = 1;
   ErrCode reason = 2;
-  repeated UserInfo user_list = 3; 
+  repeated UserInfo user_list = 3;
 }
 
 message QueryQosInfoRequest {
@@ -793,7 +791,7 @@ service CraneCtld {
   rpc ModifyAccount(ModifyAccountRequest) returns (ModifyAccountReply);
   rpc ModifyUser(ModifyUserRequest) returns (ModifyUserReply);
   rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
-  
+
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 
   /* RPCs called from cinfo */

@@ -170,23 +170,15 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
     const crane::grpc::CreateCgroupForTasksRequest *request,
     crane::grpc::CreateCgroupForTasksReply *response) {
   std::vector<JobSpec> job_specs;
-  for (int i = 0; i < request->task_id_list_size(); i++) {
-    task_id_t task_id = request->task_id_list(i);
-    uid_t uid = request->uid_list(i);
-    const crane::grpc::ResourceInNode &res = request->res_list(i);
-
-    CgroupSpec spec{.uid = uid,
-                    .job_id = task_id,
-                    .res_in_node = res,
-                    .execution_node = request->execution_node(i),
-                    .recovered = false};
-    CRANE_TRACE("Receive CreateCgroup for task #{}, uid {}", task_id, uid);
-    job_specs.emplace_back(std::move(spec));
+  for (const auto &cg_spec_req : request->cg_spec_vec()) {
+    CRANE_TRACE("Receive CreateCgroup for job #{}, uid {}",
+                cg_spec_req.task_id(), cg_spec_req.uid());
+    job_specs.emplace_back(cg_spec_req);
   }
 
   bool ok = g_job_mgr->AllocJobs(std::move(job_specs));
   if (!ok) {
-    CRANE_ERROR("Failed to create cgroups for some tasks.");
+    CRANE_ERROR("Failed to alloc some jobs.");
   }
 
   return Status::OK;
@@ -200,12 +192,11 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
     task_id_t task_id = request->task_id_list(i);
     uid_t uid = request->uid_list(i);
 
-    CRANE_DEBUG("Release Cgroup for task #{}", task_id);
+    CRANE_DEBUG("Release Cgroup for job #{}", task_id);
 
     bool ok = g_job_mgr->FreeJobAllocation(task_id);
     if (!ok) {
-      CRANE_ERROR("Failed to release cgroup for task #{}, uid {}", task_id,
-                  uid);
+      CRANE_ERROR("Failed to release cgroup for job #{}, uid {}", task_id, uid);
     }
   }
 
@@ -345,7 +336,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     return Status::OK;
   } else {
     TaskInfoOfUid info{};
-    ok = g_cg_mgr->QueryTaskInfoOfUidAsync(request->uid(), &info);
+    ok = g_job_mgr->QueryTaskInfoOfUid(request->uid(), &info);
     if (ok) {
       CRANE_TRACE(
           "Found a task #{} belonging to uid {}. "
@@ -390,13 +381,14 @@ Status CranedServiceImpl::QueryTaskEnvVariables(
     grpc::ServerContext *context,
     const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
     crane::grpc::QueryTaskEnvVariablesReply *response) {
-  auto task_env_map = g_job_mgr->QueryTaskEnvMapAsync(request->task_id());
-  if (task_env_map.has_value()) {
-    for (const auto &[name, value] : task_env_map.value())
+  auto job_spec_expt = g_job_mgr->QueryJobSpec(request->task_id());
+  if (!job_spec_expt) {
+    response->set_ok(false);
+  } else {
+    for (const auto &[name, value] : job_spec_expt.value().GetJobEnvMap())
       response->mutable_env_map()->emplace(name, value);
     response->set_ok(true);
-  } else
-    response->set_ok(false);
+  }
 
   return Status::OK;
 }
@@ -406,23 +398,17 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
     const crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
     crane::grpc::QueryTaskEnvVariablesForwardReply *response) {
   // First query local device related env list
-  auto res_envs_opt = g_cg_mgr->GetResourceEnvMapOfTask(request->task_id());
-  if (!res_envs_opt.has_value()) {
+  auto job_spec_expt = g_job_mgr->QueryJobSpec(request->task_id());
+  if (!job_spec_expt) {
     response->set_ok(false);
     return Status::OK;
   }
-  for (const auto &[name, value] : res_envs_opt.value()) {
+  JobSpec &job_spec = job_spec_expt.value();
+  for (const auto &[name, value] : job_spec.GetJobEnvMap()) {
     response->mutable_env_map()->emplace(name, value);
   }
 
-  std::optional execution_node_opt =
-      g_cg_mgr->QueryTaskExecutionNode(request->task_id());
-  if (!execution_node_opt.has_value()) {
-    response->set_ok(false);
-    return Status::OK;
-  }
-
-  std::string execution_node = execution_node_opt.value();
+  std::string execution_node = job_spec.cgroup_spec.execution_node;
   if (!g_config.CranedRes.contains(execution_node)) {
     response->set_ok(false);
     return Status::OK;

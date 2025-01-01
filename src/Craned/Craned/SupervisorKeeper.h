@@ -26,11 +26,19 @@
 #include "JobManager.h"
 #include "crane/AtomicHashMap.h"
 namespace Craned {
+
+struct SuperVisorState {
+  JobSpec job_spec;
+  TaskSpec task_spec;
+  pid_t task_pid;
+};
+
 class SupervisorClient {
  public:
   CraneExpected<pid_t> ExecuteTask(const TaskExecutionInstance* process);
+
   CraneExpected<EnvMap> QueryTaskEnv();
-  CraneErr CheckTaskStatus(crane::grpc::TaskToD* task);
+  CraneErr CheckTaskStatus(crane::grpc::TaskToD* task, pid_t* task_pid);
 
   CraneErr TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
   CraneErr ChangeTaskTimeLimit(absl::Duration time_limit);
@@ -50,13 +58,13 @@ class SupervisorKeeper {
    * @brief Query all existing supervisor for task they hold.
    * @return task_to_d from supervisors
    */
-  CraneExpected<std::vector<crane::grpc::TaskToD>> Init();
+  CraneExpected<std::vector<SuperVisorState>> Init();
 
   void AddSupervisor(task_id_t task_id);
   std::shared_ptr<SupervisorClient> GetStub(task_id_t task_id);
 
  private:
-  CraneExpected<crane::grpc::TaskToD> RecoverSupervisorMt_(
+  CraneExpected<SuperVisorState> RecoverSupervisorMt_(
       const std::filesystem::path& path);
   absl::flat_hash_map<task_id_t, std::shared_ptr<SupervisorClient>>
       m_supervisor_map;

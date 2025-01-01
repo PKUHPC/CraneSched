@@ -413,6 +413,12 @@ bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
 
 struct CgroupSpec {
+  CgroupSpec(const crane::grpc::JobSpec& job_spec);
+  /**
+   * @brief set grpc struct,will move res_in_node field
+   * @param job_spec grpc job_spce to set
+   */
+  void SetJobSpec(crane::grpc::JobSpec* job_spec);
   uid_t uid;
   task_id_t job_id;
   crane::grpc::ResourceInNode res_in_node;

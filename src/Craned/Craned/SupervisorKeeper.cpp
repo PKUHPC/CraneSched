@@ -21,6 +21,8 @@
 #include <protos/Supervisor.grpc.pb.h>
 #include <sys/stat.h>
 
+#include <latch>
+
 namespace Craned {
 void SupervisorClient::InitChannelAndStub(const std::string& endpoint) {
   m_channel_ = CreateUnixInsecureChannel(endpoint);
@@ -28,8 +30,7 @@ void SupervisorClient::InitChannelAndStub(const std::string& endpoint) {
   m_stub_ = crane::grpc::Supervisor::NewStub(m_channel_);
 }
 
-CraneExpected<std::vector<crane::grpc::TaskToD>> SupervisorKeeper::Init() {
-  std::vector<crane::grpc::TaskToD> tasks;
+CraneExpected<std::vector<SuperVisorState>> SupervisorKeeper::Init() {
   try {
     std::filesystem::path path = kDefaultSupervisorUnixSockDir;
     if (std::filesystem::exists(path) && std::filesystem::is_directory(path)) {
@@ -39,19 +40,21 @@ CraneExpected<std::vector<crane::grpc::TaskToD>> SupervisorKeeper::Init() {
           files.emplace_back(it.path());
         }
       }
+      std::vector<SuperVisorState> tasks;
       tasks.reserve(files.size());
-      absl::BlockingCounter bl(files.size());
+      std::latch all_supervisor_reply(files.size());
       absl::Mutex mtx;
       for (const auto& file : files) {
-        g_thread_pool->detach_task([this, &file, &bl, &mtx, &tasks]() {
-          auto task = this->RecoverSupervisorMt_(file);
-          bl.DecrementCount();
-          if (!task) return;
-          absl::WriterMutexLock lk(&mtx);
-          tasks.emplace_back(task.value());
-        });
+        g_thread_pool->detach_task(
+            [this, &file, &all_supervisor_reply, &mtx, &tasks]() {
+              auto task = this->RecoverSupervisorMt_(file);
+              all_supervisor_reply.count_down();
+              if (!task) return;
+              absl::WriterMutexLock lk(&mtx);
+              tasks.emplace_back(task.value());
+            });
       }
-      bl.Wait();
+      all_supervisor_reply.wait();
       return tasks;
     } else {
       CRANE_WARN("Supervisor socket dir dose not exit, skip recovery.");
@@ -84,19 +87,20 @@ std::shared_ptr<SupervisorClient> SupervisorKeeper::GetStub(task_id_t task_id) {
     return nullptr;
   }
 }
-CraneExpected<crane::grpc::TaskToD> SupervisorKeeper::RecoverSupervisorMt_(
+
+CraneExpected<SuperVisorState> SupervisorKeeper::RecoverSupervisorMt_(
     const std::filesystem::path& path) {
   std::shared_ptr stub = std::make_shared<SupervisorClient>();
   stub->InitChannelAndStub(path);
-  crane::grpc::TaskToD task;
-  auto err = stub->CheckTaskStatus(&task);
+  SuperVisorState state;
+  auto err = stub->CheckTaskStatus(&state.task_spec, &state.task_pid);
   if (err != CraneErr::kOk) {
     CRANE_ERROR("CheckTaskStatus for {} failed", path.string());
-    return std::unexpected(err);
+    return std::unexpected(CraneErr::kSupervisorError);
   }
   absl::WriterMutexLock lk(&m_mutex);
-  m_supervisor_map.emplace(task.task_id(), stub);
-  return task;
+  m_supervisor_map.emplace(state.task_spec.task_id(), stub);
+  return state;
 }
 
 }  // namespace Craned

@@ -33,6 +33,9 @@ using grpc::ClientContext;
 using grpc::Status;
 
 class CtldClient {
+  using CranedRegisterArgType =
+      const google::protobuf::RepeatedPtrField<crane::grpc::JobSpec>&;
+
  public:
   CtldClient() = default;
 
@@ -40,7 +43,12 @@ class CtldClient {
 
   void SetCranedId(CranedId const& craned_id) { m_craned_id_ = craned_id; }
 
-  void SetOnCranedRegisterCb(std::function<void()> cb);
+  void SetCranedRegisterCb(std::function<void(CranedRegisterArgType)>&& cb) {
+    m_on_craned_register_cb_ = std::move(cb);
+  }
+
+  void UnSetCranedRegisterCb() { m_on_craned_register_cb_.reset(); }
+
   /***
    * InitChannelAndStub the CtldClient to CraneCtld.
    * @param server_address The "[Address]:[Port]" of CraneCtld.
@@ -54,14 +62,6 @@ class CtldClient {
   void OnCraneCtldConnected();
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
-
-  /**
-   * @brief Query CraneCtld for task cgroupspec, only for recovery cgroup.
-   * @param task_ids task ids to query.
-   * @return task cgroupspec
-   */
-  CraneExpected<std::vector<CgroupSpec>> QueryTasksCgspec(
-      const std::unordered_set<task_id_t>& task_ids);
 
   bool CancelTaskStatusChangeByTaskId(task_id_t task_id,
                                       crane::grpc::TaskStatus* new_status);
@@ -89,7 +89,8 @@ class CtldClient {
 
   CranedId m_craned_id_;
 
-  std::function<void()> m_on_craned_register_cb_;
+  std::optional<std::function<void(CranedRegisterArgType)>>
+      m_on_craned_register_cb_;
 
   absl::Notification m_start_connecting_notification_;
 };

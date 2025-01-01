@@ -78,8 +78,6 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
   env_map.emplace("CRANE_PARTITION", this->task.partition());
   env_map.emplace("CRANE_QOS", this->task.qos());
 
-  env_map.emplace("CRANE_JOB_ID", std::to_string(this->task.task_id()));
-
   if (this->IsCrun() && !this->task.interactive_meta().term_env().empty()) {
     env_map.emplace("TERM", this->task.interactive_meta().term_env());
   }
