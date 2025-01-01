@@ -57,6 +57,7 @@ enum class CraneErr : uint16_t {
   kProtobufError,
   kLibEventError,
   kNoAvailNode,
+  kSupervisorError,
 
   __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
 };
@@ -87,6 +88,8 @@ inline const char* kDefaultCranedScriptDir = "craned/scripts";
 inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
 inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* kDefaultCranedLogPath = "craned/craned.log";
+
+inline const char* kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 
@@ -410,8 +413,16 @@ bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
 
 struct CgroupSpec {
+  CgroupSpec(const crane::grpc::JobSpec& job_spec);
+  /**
+   * @brief set grpc struct,will move res_in_node field
+   * @param job_spec grpc job_spce to set
+   */
+  void SetJobSpec(crane::grpc::JobSpec* job_spec);
   uid_t uid;
-  task_id_t task_id;
+  task_id_t job_id;
   crane::grpc::ResourceInNode res_in_node;
   std::string execution_node;
+  // Recovered on start,no need to apply res limit.
+  bool recovered;
 };

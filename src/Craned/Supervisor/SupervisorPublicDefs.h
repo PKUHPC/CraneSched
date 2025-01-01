@@ -18,14 +18,12 @@
 
 #pragma once
 
-#include "CranedPreCompiledHeader.h"
+#include "SupervisorPreCompiledHeader.h"
 // Precompiled header comes first
 
 #include "crane/OS.h"
 
-namespace Craned {
-
-inline constexpr uint64_t kEvSigChldResendMs = 500;
+namespace Supervisor {
 
 using EnvMap = std::unordered_map<std::string, std::string>;
 
@@ -36,27 +34,10 @@ struct TaskStatusChangeQueueElem {
   std::optional<std::string> reason;
 };
 
-struct TaskInfoOfUid {
-  uint32_t job_cnt;
-  uint32_t first_task_id;
-  bool cgroup_exists;
-  std::string cgroup_path;
-};
-
-struct Partition {
-  std::unordered_set<std::string> nodes;
-  std::unordered_set<std::string> AllowAccounts;
-};
-
 struct Config {
-  struct CranedListenConf {
-    std::string CranedListenAddr;
-    std::string CranedListenPort;
-
+  struct CforedListenConf {
     bool UseTls{false};
     TlsCertificates TlsCerts;
-
-    std::string UnixSocketListenAddr;
   };
 
   struct PluginConfig {
@@ -64,41 +45,26 @@ struct Config {
     std::string PlugindSockPath;
   };
   PluginConfig Plugin;
-
-  CranedListenConf ListenConf;
   bool CompressedRpc{};
+  CforedListenConf CforedListenConf;
 
-  std::string ControlMachine;
-  std::string CraneCtldListenPort;
-  std::string CranedDebugLevel;
+  std::string SupervisorDebugLevel;
 
   std::string CraneBaseDir;
-  std::string CranedLogFile;
-  std::string CranedMutexFilePath;
-  std::string CranedScriptDir;
-  std::string CranedUnixSockPath;
+  std::string CraneScriptDir;
+  std::string CranedUnixSocketPath;
 
-  bool CranedForeground{};
+  // Only for debugging
+  std::string SupervisorLogFile;
 
-  std::string Hostname;
   CranedId CranedIdOfThisNode;
 
-  struct CranedMeta {
-    SystemRelInfo SysInfo;
-    absl::Time CranedStartTime;
-    absl::Time SystemBootTime;
-  };
+  std::string SupervisorUnixSockPath;
 
-  CranedMeta CranedMeta;
-
-  std::unordered_map<ipv4_t, std::string> Ipv4ToCranedHostname;
-  std::unordered_map<ipv6_t, std::string, absl::Hash<ipv6_t>>
-      Ipv6ToCranedHostname;
-  std::unordered_map<std::string, std::shared_ptr<ResourceInNode>> CranedRes;
-  std::unordered_map<std::string, Partition> Partitions;
+  task_id_t TaskId;
 };
 
 inline Config g_config;
-}  // namespace Craned
+}  // namespace Supervisor
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

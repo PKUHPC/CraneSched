@@ -33,12 +33,21 @@ using grpc::ClientContext;
 using grpc::Status;
 
 class CtldClient {
+  using CranedRegisterArgType =
+      const google::protobuf::RepeatedPtrField<crane::grpc::JobSpec>&;
+
  public:
   CtldClient() = default;
 
   ~CtldClient();
 
   void SetCranedId(CranedId const& craned_id) { m_craned_id_ = craned_id; }
+
+  void SetCranedRegisterCb(std::function<void(CranedRegisterArgType)>&& cb) {
+    m_on_craned_register_cb_ = std::move(cb);
+  }
+
+  void UnSetCranedRegisterCb() { m_on_craned_register_cb_.reset(); }
 
   /***
    * InitChannelAndStub the CtldClient to CraneCtld.
@@ -79,6 +88,9 @@ class CtldClient {
   std::unique_ptr<CraneCtld::Stub> m_stub_;
 
   CranedId m_craned_id_;
+
+  std::optional<std::function<void(CranedRegisterArgType)>>
+      m_on_craned_register_cb_;
 
   absl::Notification m_start_connecting_notification_;
 };

@@ -747,7 +747,7 @@ void TaskScheduler::ScheduleThread_() {
         for (CranedId const& craned_id : task->CranedIds()) {
           CgroupSpec spec{
               .uid = task->uid,
-              .task_id = task->TaskId(),
+              .job_id = task->TaskId(),
               .res_in_node =
                   (crane::grpc::ResourceInNode)task->Resources().at(craned_id),
               .execution_node = task->executing_craned_ids.front()};
@@ -783,7 +783,7 @@ void TaskScheduler::ScheduleThread_() {
 
           failed_craned_set.emplace(craned_id);
           for (const auto& spec : cgroup_specs)
-            failed_task_id_set.emplace(spec.task_id);
+            failed_task_id_set.emplace(spec.job_id);
 
           thread_pool_mtx.Unlock();
 
