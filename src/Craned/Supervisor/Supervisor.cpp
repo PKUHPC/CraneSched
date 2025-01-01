@@ -66,7 +66,7 @@ void InitFromStdin(int argc, char** argv) {
   auto istream = FileInputStream(STDIN_FILENO);
   crane::grpc::InitSupervisorRequest msg;
   auto ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
-  if (!ok || !msg.ok()) {
+  if (!ok) {
     std::abort();
   }
   g_config.TaskId = msg.task_id();

@@ -191,6 +191,13 @@ message RuntimeAttrOfTask {
   ResourceV2 resources = 19;
 }
 
+message JobSpec{
+  uint32 task_id = 1;
+  uint32 uid = 2;
+  ResourceInNode res = 3;
+  string execution_node = 4;
+}
+
 message TaskToD {
   uint32 task_id = 1;
   TaskType type = 2;

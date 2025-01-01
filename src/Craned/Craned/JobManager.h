@@ -38,8 +38,9 @@ struct TaskExecutionInstance {
 };
 
 struct JobSpec {
+  JobSpec(const crane::grpc::JobSpec& spec) : cgroup_spec(spec) {}
   CgroupSpec cgroup_spec;
-  task_id_t job_id;
+  EnvMap GetJobEnvMap() const;
 };
 
 // Job allocation info
@@ -47,6 +48,7 @@ struct JobInstance {
   explicit JobInstance(JobSpec&& spec);
   ~JobInstance() = default;
 
+  task_id_t job_id;
   JobSpec job_spec;
 
   std::unique_ptr<CgroupInterface> cgroup{nullptr};
@@ -85,9 +87,11 @@ class JobManager {
 
   std::future<CraneExpected<task_id_t>> QueryTaskIdFromPidAsync(pid_t pid);
 
+  bool QueryTaskInfoOfUid(uid_t uid, TaskInfoOfUid* info);
+
   bool MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id);
 
-  CraneExpected<JobSpec> GetJobSpec(task_id_t job_id);
+  CraneExpected<JobSpec> QueryJobSpec(task_id_t job_id);
 
   void TerminateTaskAsync(uint32_t task_id);
 
@@ -129,11 +133,6 @@ class JobManager {
     pid_t pid;
   };
 
-  struct EvQueueQueryJobSpecElem {
-    std::promise<CraneExpected<JobSpec>> spec_prom;
-    task_id_t job_id;
-  };
-
   struct ChangeTaskTimeLimitQueueElem {
     task_id_t job_id;
     absl::Duration time_limit;
@@ -154,7 +153,7 @@ class JobManager {
 
   bool FreeJobInstanceAllocation_(JobInstance* job_instance);
 
-  void LaunchTaskInstanceMt_(std::unique_ptr<TaskExecutionInstance>&& process);
+  void LaunchTaskInstanceMt_(TaskExecutionInstance* process);
 
   CraneErr SpawnSupervisor_(JobInstance* instance,
                             TaskExecutionInstance* process);
@@ -232,8 +231,6 @@ class JobManager {
 
   void EvCleanGrpcQueryTaskIdFromPidQueueCb_();
 
-  void EvCleanGrpcQueryJobSpecQueueCb_();
-
   void EvCleanTaskStatusChangeQueueCb_();
 
   void EvCleanTerminateTaskQueueCb_();
@@ -252,9 +249,6 @@ class JobManager {
 
   std::shared_ptr<uvw::async_handle> m_query_task_id_from_pid_async_handle_;
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_query_job_spec_async_handle_;
-  ConcurrentQueue<EvQueueQueryJobSpecElem> m_query_job_cg_spec_queue;
 
   std::shared_ptr<uvw::async_handle> m_grpc_alloc_job_async_handle_;
   ConcurrentQueue<EvQueueAllocateJobElem> m_grpc_alloc_job_queue_;

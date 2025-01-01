@@ -114,8 +114,7 @@ void ParseConfig(int argc, char** argv) {
       }
 
 #ifdef CRANE_ENABLE_BPF
-      Craned::CgroupV2::SetBpfDebugLog(
-          log_level.value()<spdlog::level::info);
+      Craned::CgroupV2::SetBpfDebugLog(log_level.value() < spdlog::level::info);
 #endif
       if (config["CranedUnixSockPath"])
         g_config.CranedUnixSockPath =
@@ -599,32 +598,35 @@ void GlobalVariableInit() {
   auto tasks = g_supervisor_keeper->Init();
 
   std::unordered_set<task_id_t> task_ids_supervisor;
-  for (const auto& task : tasks.value_or(std::vector<crane::grpc::TaskToD>())) {
-    task_ids_supervisor.emplace(task.task_id());
+  for (const auto& task :
+       tasks.value_or(std::vector<Craned::SuperVisorState>())) {
+    task_ids_supervisor.emplace(task.task_spec.task_id());
   }
 
-  // todo: Handle case of cranectld offline when craned up for recovery.
   g_ctld_client = std::make_unique<Craned::CtldClient>();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
+  std::latch craned_registered(1);
+  std::vector<CgroupSpec> job_cg_spec_vec;
+  g_ctld_client->SetCranedRegisterCb(
+      [&craned_registered, &job_cg_spec_vec, &task_ids_supervisor](
+          const google::protobuf::RepeatedPtrField<crane::grpc::JobSpec>&
+              specs) {
+        for (const auto& spec : specs) {
+          if (task_ids_supervisor.contains(spec.task_id()))
+            job_cg_spec_vec.emplace_back(spec);
+        }
+        craned_registered.count_down();
+      });
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
-  g_ctld_client->SetOnCranedRegisterCb([])
 
-      auto cg_spce_expt = g_ctld_client->QueryTasksCgspec(task_ids_supervisor);
-  std::vector<CgroupSpec> task_cg_spec_vec{};
-  if (!cg_spce_expt) {
-    CRANE_WARN("Failed to get query task cg_spce");
-  } else {
-    task_cg_spec_vec.reserve(cg_spce_expt->size());
-    for (auto& task_cg_spec : cg_spce_expt.value()) {
-      if (!task_ids_supervisor.contains(task_cg_spec.job_id)) continue;
-      task_cg_spec_vec.emplace_back(std::move(task_cg_spec));
-    }
-  }
+  craned_registered.wait();
+  g_ctld_client->UnSetCranedRegisterCb();
 
   using Craned::CgroupManager;
   using Craned::CgroupConstant::Controller;
   g_cg_mgr = std::make_unique<CgroupManager>();
-  g_cg_mgr->Init(task_cg_spec_vec);
+  // todo:Handle ebpf recovery
+  g_cg_mgr->Init(job_cg_spec_vec);
   if (g_cg_mgr->GetCgroupVersion() ==
           Craned::CgroupConstant::CgroupVersion::CGROUP_V1 &&
       (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
@@ -642,6 +644,15 @@ void GlobalVariableInit() {
        !g_cg_mgr->Mounted(Controller::IO_CONTROLLER_V2))) {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
+  }
+
+  std::unordered_set<task_id_t> jobs_in_ctld;
+  for (const auto& job_cg : job_cg_spec_vec) {
+    jobs_in_ctld.emplace(job_cg.job_id);
+  }
+  for (const auto& task :
+       tasks.value_or(std::vector<Craned::SuperVisorState>())) {
+    if (!jobs_in_ctld.contains(task.task_spec.task_id())) CRANE_INFO("Ignore ");
   }
 
   g_job_mgr = std::make_unique<Craned::JobManager>();

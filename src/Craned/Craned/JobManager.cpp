@@ -33,7 +33,17 @@
 
 namespace Craned {
 
-JobInstance::JobInstance(JobSpec&& spec) : job_spec(std::move(spec)) {};
+EnvMap JobSpec::GetJobEnvMap() const {
+  auto env_map = CgroupManager::GetResourceEnvMapByResInNode(
+      this->cgroup_spec.res_in_node);
+
+  // todo: Move all job level env to here.
+  env_map.emplace("CRANE_JOB_ID", std::to_string(this->cgroup_spec.job_id));
+  return env_map;
+};
+
+JobInstance::JobInstance(JobSpec&& spec)
+    : job_id(spec.cgroup_spec.job_id), job_spec(std::move(spec)) {}
 
 JobManager::JobManager() {
   // Only called once. Guaranteed by singleton pattern.
@@ -72,13 +82,6 @@ JobManager::JobManager() {
   m_grpc_execute_task_async_handle_->on<uvw::async_event>(
       [this](const uvw::async_event&, uvw::async_handle&) {
         EvCleanGrpcExecuteTaskQueueCb_();
-      });
-
-  // gRPC: QueryTaskEnvironmentVariable
-  m_query_job_spec_async_handle_ = m_uvw_loop_->resource<uvw::async_handle>();
-  m_query_job_spec_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanGrpcQueryJobSpecQueueCb_();
       });
 
   // Task Status Change Event
@@ -483,9 +486,9 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
 }
 
 CraneErr JobManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
-  CRANE_INFO("Executing task #{}", task.task_id());
+  CRANE_INFO("Executing job #{}", task.task_id());
   if (!m_job_map_.Contains(task.task_id())) {
-    CRANE_DEBUG("Executing task #{} without an job allocated. Ignoring it.",
+    CRANE_DEBUG("Executing job #{} without job allocation. Ignoring it.",
                 task.task_id());
     return CraneErr::kCgroupError;
   }
@@ -509,22 +512,23 @@ void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
     // Once ExecuteTask RPC is processed, the JobInstance goes into
     // m_job_map_.
-    auto& instance = elem.task_execution_instance;
-    task_id_t job_id = instance->task_spec.task_id();
+    TaskExecutionInstance* task_exec_instance =
+        elem.task_execution_instance.release();
+    task_id_t job_id = task_exec_instance->task_spec.task_id();
 
     if (!m_job_map_.Contains(job_id)) {
       CRANE_ERROR("Failed to find job #{} allocation", job_id);
       elem.ok_prom.set_value(CraneErr::kCgroupError);
     }
 
-    g_thread_pool->detach_task([this, instance]() mutable {
-      LaunchTaskInstanceMt_(std::move(instance));
+    g_thread_pool->detach_task([this, task_exec_instance]() mutable {
+      LaunchTaskInstanceMt_(task_exec_instance);
     });
   }
 }
 
 bool JobManager::FreeJobInstanceAllocation_(JobInstance* job_instance) {
-  auto job_id = job_instance->job_spec.job_id;
+  auto job_id = job_instance->job_id;
   this->m_job_map_.Erase(job_id);
   auto* cgroup = job_instance->cgroup.release();
 
@@ -559,8 +563,7 @@ bool JobManager::FreeJobInstanceAllocation_(JobInstance* job_instance) {
   return true;
 }
 
-void JobManager::LaunchTaskInstanceMt_(
-    std::unique_ptr<TaskExecutionInstance>&& process) {
+void JobManager::LaunchTaskInstanceMt_(TaskExecutionInstance* process) {
   // This function runs in a multi-threading manner. Take care of thread
   // safety. JobInstance will not be free during this function. Take care of
   // data race for job instance.
@@ -595,7 +598,7 @@ void JobManager::LaunchTaskInstanceMt_(
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this task, and
   // we should send TaskStatusChange manually.
-  CraneErr err = SpawnSupervisor_(job_instance, process.get());
+  CraneErr err = SpawnSupervisor_(job_instance, process);
   if (err != CraneErr::kOk) {
     ActivateTaskStatusChangeAsync_(
         job_id, crane::grpc::TaskStatus::Failed,
@@ -610,15 +613,18 @@ void JobManager::LaunchTaskInstanceMt_(
     // SIGCHLD sent just after fork() and before putting pid into maps
     // will repeatedly be sent by timer and eventually be handled once the
     // SIGCHLD processing callback sees the pid in index maps.
-    job_instance->processes.emplace(process->pid, std::move(process));
+    // Now we do not support launch multiprocess task.
+    job_instance->processes.emplace(
+        0, std::unique_ptr<TaskExecutionInstance>(process));
   }
 }
 
 void JobManager::EvCleanTaskStatusChangeQueueCb_() {
   TaskStatusChangeQueueElem status_change;
   while (m_task_status_change_queue_.try_dequeue(status_change)) {
-    auto job_instance = m_job_map_.GetValueExclusivePtr(status_change.task_id);
-    if (!job_instance) {
+    auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
+    auto job_it = job_map_ptr->find(status_change.task_id);
+    if (job_it == job_map_ptr->end()) {
       // When Ctrl+C is pressed for Craned, all tasks including just forked
       // tasks will be terminated.
       // In some error cases, a double TaskStatusChange might be triggered.
@@ -626,12 +632,17 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       continue;
     }
 
-    JobInstance* instance = job_instance->get();
+    JobInstance* instance = job_it->second.RawPtr()->release();
 
     bool orphaned = instance->orphaned;
-
+    task_id_t job_id = instance->job_id;
+    uid_t uid = instance->job_spec.cgroup_spec.uid;
     // Free the JobInstance structure
-    m_job_map_.Erase(status_change.task_id);
+    delete instance;
+    job_map_ptr->erase(status_change.task_id);
+
+    auto map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
+    map_ptr->at(uid).RawPtr()->erase(job_id);
 
     if (!orphaned)
       g_ctld_client->TaskStatusChangeAsync(std::move(status_change));
@@ -663,7 +674,7 @@ bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
   return cg->MigrateProcIn(pid);
 }
 
-CraneExpected<JobSpec> JobManager::GetJobSpec(task_id_t job_id) {
+CraneExpected<JobSpec> JobManager::QueryJobSpec(task_id_t job_id) {
   auto instance = m_job_map_.GetValueExclusivePtr(job_id);
   if (!instance) return std::unexpected(CraneErr::kNonExistent);
   return instance->get()->job_spec;
@@ -678,6 +689,23 @@ std::future<CraneExpected<task_id_t>> JobManager::QueryTaskIdFromPidAsync(
   return task_id_opt_future;
 }
 
+bool JobManager::QueryTaskInfoOfUid(uid_t uid, TaskInfoOfUid* info) {
+  CRANE_DEBUG("Query task info for uid {}", uid);
+
+  info->job_cnt = 0;
+  info->cgroup_exists = false;
+
+  if (auto task_ids = this->m_uid_to_job_ids_map_[uid]; task_ids) {
+    if (!task_ids) {
+      CRANE_WARN("Uid {} not found in uid_to_task_ids_map", uid);
+      return false;
+    }
+    info->job_cnt = task_ids->size();
+    info->first_task_id = *task_ids->begin();
+  }
+  return info->job_cnt > 0;
+}
+
 void JobManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
   EvQueueQueryTaskIdFromPid elem;
   while (m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
@@ -688,7 +716,7 @@ void JobManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
       elem.task_id_prom.set_value(std::unexpected(CraneErr::kSystemErr));
     else {
       JobInstance* instance = task_iter->second;
-      uint32_t task_id = instance->job_spec.job_id;
+      uint32_t task_id = instance->job_id;
       elem.task_id_prom.set_value(task_id);
     }
 
@@ -821,8 +849,8 @@ void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 
   ChangeTaskTimeLimitQueueElem elem;
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
-    auto iter = m_job_map_.GetValueExclusivePtr(elem.job_id);
-    if (iter != m_job_map_.end()) {
+    auto job_ptr = m_job_map_.GetValueExclusivePtr(elem.job_id);
+    if (job_ptr) {
       auto stub = g_supervisor_keeper->GetStub(elem.job_id);
       if (!stub) {
         CRANE_ERROR("Supervisor for task #{} not found", elem.job_id);

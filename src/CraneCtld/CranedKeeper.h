@@ -45,7 +45,11 @@ class CranedStub {
   std::vector<task_id_t> ExecuteTasks(
       const crane::grpc::ExecuteTasksRequest &request);
 
-  CraneErr CreateCgroupForTasks(std::vector<CgroupSpec> const &cgroup_specs);
+  /**
+   * @param cgroup_specs cgroup spec vec for create job allocation,resource
+   * field of this will be moved.
+   */
+  CraneErr CreateCgroupForTasks(std::vector<CgroupSpec> &cgroup_specs);
 
   CraneErr ReleaseCgroupForTasks(
       const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs);

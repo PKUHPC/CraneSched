@@ -444,6 +444,8 @@ class CgroupV2 : public CgroupInterface {
                        bool set_write, bool set_mknod) override;
 
 #ifdef CRANE_ENABLE_BPF
+  // Recover ebpf info
+  bool RecoverFromCgSpec(const CgroupSpec &cg_spec);
   bool EraseBpfDeviceMap();
   static void SetBpfDebugLog(bool enable) {
     bpf_runtime_info_.SetLogging(enable);
@@ -481,20 +483,16 @@ class CgroupManager {
   /**
    * @brief Initialize libcgroup and mount the controllers, remove task not
    * considered to be running;
-   * @param task_cgroup_specs running task cgroup specs.
+   * @param ctld_running_task_cg_specs running task cgroup specs.
    * @return CraneErr.
    */
-  CraneErr Init(std::vector<CgroupSpec> &task_cgroup_specs);
+  CraneErr Init(std::vector<CgroupSpec> &ctld_running_task_cg_specs);
 
   bool Mounted(CgroupConstant::Controller controller) {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
   }
 
   void ControllersMounted();
-
-  bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info);
-
-  std::optional<std::string> QueryTaskExecutionNode(task_id_t task_id);
 
   /**
    * \brief Allocate and return cgroup handle for job, should only called once
@@ -513,7 +511,7 @@ class CgroupManager {
  private:
   static std::string CgroupStrByTaskId_(task_id_t task_id);
 
-  std::unique_ptr<CgroupInterface> CreateOrOpen_(
+  std::pair<std::unique_ptr<CgroupInterface>, bool> CreateOrOpen_(
       task_id_t task_id, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 
@@ -522,7 +520,7 @@ class CgroupManager {
                             bool required, bool has_cgroup,
                             bool &changed_cgroup);
 
-  static void RmAllTaskCgroupsExcept_(
+  static void RmJobCgroupsExcept_(
       const std::unordered_set<task_id_t> &task_ids);
 
   /**
@@ -530,14 +528,18 @@ class CgroupManager {
    * @param controller controller of cgroup to remove.
    * @param task_ids task ids not to remove.
    */
-  static void RmTaskCgroupsUnderControllerExcept_(
+  static void RmJobCgroupsUnderControllerExcept_(
       CgroupConstant::Controller controller,
       const std::unordered_set<task_id_t> &task_ids);
 
-  void RmTaskCgroupsV2Expect_(const std::unordered_set<task_id_t> &task_ids);
+  static std::unordered_set<task_id_t> GetAllCgroupsV2(
+      const std::string &root_cgroup_path);
 
-  void RmCgroupsV2Except_(const std::string &root_cgroup_path,
-                          const std::unordered_set<task_id_t> &job_ids);
+  static void RmJobCgroupsV2Expect_(
+      const std::unordered_set<task_id_t> &task_ids);
+
+  static void RmCgroupsV2Except_(const std::string &root_cgroup_path,
+                                 const std::unordered_set<task_id_t> &job_ids);
 
   ControllerFlags m_mounted_controllers_;
 

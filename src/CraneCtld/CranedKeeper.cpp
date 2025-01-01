@@ -110,7 +110,7 @@ CraneErr CranedStub::TerminateOrphanedTask(task_id_t task_id) {
 }
 
 CraneErr CranedStub::CreateCgroupForTasks(
-    std::vector<CgroupSpec> const &cgroup_specs) {
+    std::vector<CgroupSpec> &cgroup_specs) {
   using crane::grpc::CreateCgroupForTasksReply;
   using crane::grpc::CreateCgroupForTasksRequest;
 
@@ -122,11 +122,8 @@ CraneErr CranedStub::CreateCgroupForTasks(
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  for (const CgroupSpec &spec : cgroup_specs) {
-    request.mutable_task_id_list()->Add(spec.job_id);
-    request.mutable_uid_list()->Add(spec.uid);
-    *request.mutable_res_list()->Add() = std::move(spec.res_in_node);
-    request.add_execution_node(spec.execution_node);
+  for (CgroupSpec &spec : cgroup_specs) {
+    spec.SetJobSpec(request.add_cg_spec_vec());
   }
 
   status = m_stub_->CreateCgroupForTasks(&context, request, &reply);

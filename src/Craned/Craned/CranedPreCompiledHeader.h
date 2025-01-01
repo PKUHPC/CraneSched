@@ -30,6 +30,7 @@
 #include <fstream>
 #include <functional>
 #include <future>
+#include <latch>
 #include <list>
 #include <map>
 #include <memory>
