@@ -342,7 +342,6 @@ enum ErrCode {
   ERR_INVALID_ADMIN_LEVEL = 10007;  // Invalid permission level
   ERR_USER_ACCOUNT_MISMATCH = 10008; // User does not belong to the account
   ERR_NO_ACCOUNT_SPECIFIED = 10009;
-  ERR_PASSWORD_MISMATCH = 100010;
 
   ERR_INVALID_ACCOUNT = 10011;
   ERR_DUPLICATE_ACCOUNT = 10012;
@@ -465,12 +464,11 @@ message UserInfo {
 
   uint32 uid = 1;
   string name = 2;
-  string password = 3;
-  string account = 4;
-  bool blocked = 5;
-  repeated AllowedPartitionQos allowed_partition_qos_list = 6;
-  repeated string coordinator_accounts = 7;
-  AdminLevel admin_level = 8;
+  string account = 3;
+  bool blocked = 4;
+  repeated AllowedPartitionQos allowed_partition_qos_list = 5;
+  repeated string coordinator_accounts = 6;
+  AdminLevel admin_level = 7;
 }
 
 message QosInfo {

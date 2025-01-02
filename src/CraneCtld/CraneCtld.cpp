@@ -312,6 +312,18 @@ void ParseConfig(int argc, char** argv) {
           g_config.VaultConf.DomainSuffix =
               vault_config["DomainSuffix"].as<std::string>();
 
+        if (vault_config["Nodes"]) {
+          std::string nodes = vault_config["Nodes"].as<std::string>();
+          std::list<std::string> name_list;
+          if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
+                                   &name_list)) {
+            CRANE_ERROR("Illegal login node name string format.");
+            std::exit(1);
+          }
+          g_config.VaultConf.AllowedNodes = std::unordered_set<std::string>(
+              name_list.begin(), name_list.end());
+        }
+
         if (vault_config["ExternalCertFilePath"]) {
           external_certs.ServerCertFilePath =
               vault_config["ExternalCertFilePath"].as<std::string>();

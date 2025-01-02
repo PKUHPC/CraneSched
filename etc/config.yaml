@@ -27,6 +27,7 @@ Vault:
   Port: 8200
   Token: REMOVED  # Token cannot be leaked
   DomainSuffix: crane.com
+  Nodes: "cn[15-18]"
 
   ExternalCertFilePath: /etc/crane/tls/external.pem
   ExternalKeyFilePath: /etc/crane/tls/external.key

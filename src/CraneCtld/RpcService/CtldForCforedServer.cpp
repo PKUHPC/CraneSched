@@ -25,6 +25,7 @@
 #include "../TaskScheduler.h"
 #include "CranedKeeper.h"
 #include "CtldGrpcServer.h"
+#include "crane/Network.h"
 #include "crane/String.h"
 
 namespace Ctld {
@@ -212,6 +213,40 @@ grpc::Status CtldForCforedServiceImpl::SignUserCertificate(
     grpc::ServerContext *context,
     const crane::grpc::SignUserCertificateRequest *request,
     crane::grpc::SignUserCertificateResponse *response) {
+  if (!g_config.VaultConf.AllowedNodes.empty()) {
+    std::string client_address = context->peer();
+    std::vector<std::string> str_list = absl::StrSplit(client_address, ":");
+    std::string hostname;
+    bool resolve_result = false;
+    if (str_list[0] == "ipv4") {
+      ipv4_t addr;
+      if (!crane::StrToIpv4(str_list[1], &addr)) {
+        CRANE_ERROR("Failed to parse ipv4 address: {}", str_list[1]);
+      } else {
+        resolve_result = crane::ResolveHostnameFromIpv4(addr, &hostname);
+      }
+    } else {
+      ipv6_t addr;
+      if (!crane::StrToIpv6(str_list[1], &addr)) {
+        CRANE_ERROR("Failed to parse ipv6 address: {}", str_list[1]);
+      } else {
+        resolve_result = crane::ResolveHostnameFromIpv6(addr, &hostname);
+      }
+    }
+
+    CRANE_INFO("Resolve hostname from address: {} -> {}", client_address,
+               hostname);
+
+    if (!resolve_result ||
+        (!g_config.VaultConf.AllowedNodes.contains(hostname) &&
+         !g_config.VaultConf.AllowedNodes.contains(
+             hostname + g_config.VaultConf.DomainSuffix))) {
+      response->set_ok(false);
+      response->set_reason(crane::grpc::ErrCode::ERR_PERMISSION_USER);
+      return grpc::Status::OK;
+    }
+  }
+
   auto result = g_account_manager->SignUserCertificate(
       request->uid(), request->csr_content(), request->alt_names());
   if (!result) {

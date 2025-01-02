@@ -114,6 +114,7 @@ struct Config {
     std::string Port;
     std::string Token;
     std::string DomainSuffix;
+    std::unordered_set<std::string> AllowedNodes;
 
     ServerCertificateConfig ExternalCerts;
     CACertificateConfig ExternalCACerts;
