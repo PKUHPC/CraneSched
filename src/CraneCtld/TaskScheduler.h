@@ -156,12 +156,68 @@ class MinLoadFirst : public INodeSelectionAlgo {
    * In time interval [z, ...], the amount of available resources is c.
    */
   using TimeAvailResMap = std::map<absl::Time, ResourceInNode>;
+
+  struct TimeAvailResTracker;
+
+  struct TrackerList {
+    struct TrackerListElem {
+      TimeAvailResTracker* tracker_ptr;
+      absl::Time time;
+      bool first_k;
+
+      TrackerListElem(TimeAvailResTracker* tracker_ptr, absl::Time time,
+                      bool first_k)
+          : tracker_ptr(tracker_ptr), time(time), first_k(first_k) {}
+    };
+    std::list<std::unique_ptr<TrackerListElem>> tracker_list;
+
+    const int k_value;
+    std::optional<
+        std::list<std::unique_ptr<TrackerList::TrackerListElem>>::iterator>
+        kth_iter;
+
+    TrackerList(int k_value) : k_value(k_value), kth_iter(std::nullopt) {}
+
+    void try_push_back(TimeAvailResTracker* it, absl::Time time) {
+      if (it->tracker_list_elem) return;
+      tracker_list.push_back(std::move(std::make_unique<TrackerListElem>(
+          it, time, tracker_list.size() < k_value)));
+      if (tracker_list.size() == k_value) {
+        assert(!kth_iter.has_value());
+        kth_iter = std::prev(tracker_list.end());
+      }
+      it->tracker_list_elem = std::prev(tracker_list.end());
+    }
+
+    void try_erase(TimeAvailResTracker* it) {
+      if (!it->tracker_list_elem) return;
+      auto elem = *it->tracker_list_elem;
+      it->tracker_list_elem = std::nullopt;
+      if (kth_iter && (*elem)->first_k) {
+        auto next_iter = std::next(*kth_iter);
+        if (next_iter == tracker_list.end()) {
+          kth_iter = std::nullopt;
+        } else {
+          (*next_iter)->first_k = true;
+          kth_iter = next_iter;
+        }
+      }
+      tracker_list.erase(elem);
+    }
+
+    absl::Time kth_time() const {
+      return kth_iter ? (*(*kth_iter))->time : absl::InfiniteFuture();
+    }
+  };
+
   struct TimeAvailResTracker {
     const CranedId craned_id;
     TimeAvailResMap::const_iterator it;
     const TimeAvailResMap::const_iterator end;
     const ResourceInNode* task_res;
-    void* tracker_list_elem;
+    std::optional<
+        std::list<std::unique_ptr<TrackerList::TrackerListElem>>::iterator>
+        tracker_list_elem;
     bool satisfied_flag;
 
     TimeAvailResTracker(const CranedId& craned_id,
@@ -172,7 +228,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
           it(begin),
           end(end),
           task_res(task_res),
-          tracker_list_elem(nullptr) {
+          tracker_list_elem(std::nullopt) {
       satisfied_flag = satisfied();
     }
 
@@ -191,67 +247,6 @@ class MinLoadFirst : public INodeSelectionAlgo {
     bool genNextSatisfied() {
       while (++it != end && !satisfied());
       return it != end;
-    }
-  };
-
-  struct TrackerList {
-    struct TrackerListElem {
-      TimeAvailResTracker* tracker_ptr;
-      absl::Time time;
-      TrackerListElem* prev;
-      TrackerListElem* next;
-      bool first_k;
-    };
-
-    size_t size;
-    int node_num;
-    TrackerListElem* tail;
-    TrackerListElem* kth_elem;
-
-    TrackerList(int node_num)
-        : size(0), node_num(node_num), tail(nullptr), kth_elem(nullptr) {}
-
-    void try_push_back(TimeAvailResTracker* it, absl::Time time) {
-      if (it->tracker_list_elem) return;
-      TrackerListElem* elem =
-          new TrackerListElem{it, time, nullptr, nullptr, ++size <= node_num};
-      if (tail) {
-        elem->prev = tail;
-        tail->next = elem;
-      }
-      if (size == node_num) {
-        kth_elem = elem;
-      }
-      tail = elem;
-      it->tracker_list_elem = elem;
-    }
-
-    void try_erase(TimeAvailResTracker* it) {
-      TrackerListElem* elem =
-          static_cast<TrackerListElem*>(it->tracker_list_elem);
-      if (!elem) return;
-      if (elem->first_k && kth_elem) {
-        kth_elem = kth_elem->next;
-        if (kth_elem) {
-          kth_elem->first_k = true;
-        }
-      }
-      if (elem->prev) {
-        elem->prev->next = elem->next;
-      }
-      if (elem->next) {
-        elem->next->prev = elem->prev;
-      }
-      if (elem == tail) {
-        tail = elem->prev;
-      }
-      elem->tracker_ptr->tracker_list_elem = nullptr;
-      delete elem;
-      --size;
-    }
-
-    absl::Time kth_time() const {
-      return kth_elem ? kth_elem->time : absl::InfiniteFuture();
     }
   };
 
