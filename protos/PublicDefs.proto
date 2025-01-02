@@ -495,12 +495,11 @@ message UserInfo {
 
   uint32 uid = 1;
   string name = 2;
-  string password = 3;
-  string account = 4;
-  bool blocked = 5;
-  repeated AllowedPartitionQos allowed_partition_qos_list = 6;
-  repeated string coordinator_accounts = 7;
-  AdminLevel admin_level = 8;
+  string account = 3;
+  bool blocked = 4;
+  repeated AllowedPartitionQos allowed_partition_qos_list = 5;
+  repeated string coordinator_accounts = 6;
+  AdminLevel admin_level = 7;
 }
 
 message QosInfo {
