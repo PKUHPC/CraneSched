@@ -754,43 +754,21 @@ message StreamCforedTaskIOReply {
   }
 }
 
-message SleepCranedRequest {
+enum NodePowerAction {
+  TO_SLEEP = 0;    
+  TO_WAKE = 1;      
+  TO_SHUTDOWN = 2;  
+  TO_POWER_ON = 3;  
+}
+
+message ControlNodePowerRequest {
   uint32 uid = 1;           
   string craned_id = 2;     
+  NodePowerAction action = 3;  
 }
 
-message SleepCranedReply {
+message ControlNodePowerReply {
   bool ok = 1;              
-  string reason = 2;        
-}
-
-message WakeupCranedRequest {
-  uint32 uid = 1;          
-  string craned_id = 2;     
-}
-
-message WakeupCranedReply {
-  bool ok = 1;              
-  string reason = 2;        
-}
-
-message ShutdownCranedRequest {
-  uint32 uid = 1;           
-  string craned_id = 2;     
-}
-
-message ShutdownCranedReply {
-  bool ok = 1;              
-  string reason = 2;        
-}
-
-message PowerOnCranedRequest {
-  uint32 uid = 1;           
-  string craned_id = 2;     
-}
-
-message PowerOnCranedReply {
-  bool ok = 1;             
   string reason = 2;        
 }
 
@@ -817,10 +795,7 @@ service CraneCtld {
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
-  rpc SleepCraned(SleepCranedRequest) returns (SleepCranedReply);
-  rpc WakeupCraned(WakeupCranedRequest) returns (WakeupCranedReply);
-  rpc ShutdownCraned(ShutdownCranedRequest) returns (ShutdownCranedReply);
-  rpc PowerOnCraned(PowerOnCranedRequest) returns (PowerOnCranedReply);
+  rpc ControlNodePower(ControlNodePowerRequest) returns (ControlNodePowerReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);

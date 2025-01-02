@@ -249,9 +249,6 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
         config.Nodes.at(craned_name)->dedicated_resource;
     static_meta.hostname = craned_name;
     static_meta.port = std::strtoul(kCranedDefaultPort, nullptr, 10);
-
-    static_meta.bmc = config.Nodes.at(craned_name)->bmc;
-    static_meta.ssh = config.Nodes.at(craned_name)->ssh;
   }
 
   for (auto&& [part_name, partition] : config.Partitions) {

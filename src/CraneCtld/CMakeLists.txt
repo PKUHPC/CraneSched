@@ -56,7 +56,7 @@ target_link_libraries(cranectld PRIVATE
         Backward::Interface
         
         fast_cpp_csv_parser
-        libcurl
+        CURL::libcurl
         ssh
 )
 

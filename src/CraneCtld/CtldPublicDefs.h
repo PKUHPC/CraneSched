@@ -68,7 +68,7 @@ constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 
 struct Config {
 
-  struct BMC {
+  struct BMCConfig {
     std::string ip;
     uint32_t port{623};
     std::string username;
@@ -76,8 +76,7 @@ struct Config {
     std::string interface{"lanplus"};
   };
 
-  struct SSH {
-    std::string ip;
+  struct SSHConfig {
     uint32_t port{22};
     std::string username;
     std::string password;
@@ -92,8 +91,6 @@ struct Config {
     uint32_t cpu;
     uint64_t memory_bytes;
     DedicatedResourceInNode dedicated_resource;
-    BMC bmc;
-    SSH ssh;
   };
 
   struct Partition {
@@ -169,6 +166,9 @@ struct Config {
   std::string InfluxDbNodeBucket;
   std::string InfluxDbTaskBucket;
 
+  SSHConfig SSH;
+  BMCConfig BMC;
+
   // Plugin config
   PluginConfig Plugin;
 
@@ -191,9 +191,7 @@ namespace Ctld {
 struct CranedStaticMeta {
   std::string hostname;  // the hostname corresponds to the node index
   uint32_t port;
-
-  Config::BMC bmc;
-  Config::SSH ssh;
+  std::string ip;
 
   std::list<std::string> partition_ids;  // Partitions to which
                                          // this craned belongs to

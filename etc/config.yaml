@@ -5,7 +5,7 @@ ControlMachine: cn15
 ClusterName: pkuhpc_test
 
 # Other configurations to be used
-DbConfigPath: /etc/crane/database.yaml
+DbConfigPath: /etc/crane/admin_config.yaml
 
 # Data storage settings
 CraneBaseDir: /var/crane/
@@ -72,24 +72,10 @@ Nodes:
   - name: "cn[15-16]"
     cpu: 2
     memory: 2G
-    bmc:
-      ip: "10.10.10.10"
-      username: "ADMIN"
-      password: "ADMIN"
-    ssh:
-      username: "root"
-      password: "root"
 
   - name: "cn[17-18]"
     cpu: 2
     memory: 2G
-    bmc:
-      ip: "10.10.10.11"
-      username: "ADMIN"
-      password: "ADMIN"
-    ssh:
-      username: "root"
-      password: "root"
     gres:
       - name: gpu
         type: a100

@@ -262,7 +262,7 @@ void IPMIManager::SetCranedInfo_(
     return;
   }
 
-  craned_meta->static_meta.ssh.ip = stub->GetCranedIp();
+  craned_meta->static_meta.ip = stub->GetCranedIp();
 
   CraneErr err = stub->QueryCranedNICInfo(&craned_meta->remote_meta);
   if (err == CraneErr::kOk) {
@@ -775,7 +775,7 @@ void IPMIManager::UpdateCranedState_(const CranedId& craned_id) {
 bool IPMIManager::ExecuteIPMICommand_(
     const CranedMetaContainer::CranedMetaPtr& craned_meta,
     const std::string& command, std::string* output) {
-  const auto& bmc = craned_meta->static_meta.bmc;
+  const auto& bmc = g_config.BMC;
   if (bmc.ip.empty()) {
     CRANE_ERROR("No BMC address configured for craned {}",
                 craned_meta->static_meta.hostname);
@@ -841,9 +841,10 @@ PowerState IPMIManager::GetCranedPowerStatus_(
 bool IPMIManager::ExecuteRemoteCommand_(
     const CranedMetaContainer::CranedMetaPtr& craned_meta,
     const std::string& command) {
-  const auto& config = craned_meta->static_meta.ssh;
+  std::string ip = craned_meta->static_meta.ip;
+  const auto& config = g_config.SSH;
 
-  if (config.ip.empty()) {
+  if (ip.empty()) {
     CRANE_ERROR("SSH IP address not configured for craned {}",
                 craned_meta->static_meta.hostname);
     return false;
@@ -875,11 +876,10 @@ bool IPMIManager::ExecuteRemoteCommand_(
   }
 
   try {
-    CRANE_DEBUG("Connecting to {}@{}:{}", config.username, config.ip,
-                config.port);
+    CRANE_DEBUG("Connecting to {}@{}:{}", config.username, ip, config.port);
 
     int rc;
-    rc = ssh_options_set(session, SSH_OPTIONS_HOST, config.ip.c_str());
+    rc = ssh_options_set(session, SSH_OPTIONS_HOST, ip.c_str());
     if (rc != SSH_OK) {
       CRANE_ERROR("Failed to set SSH host for craned {}: {}",
                   craned_meta->static_meta.hostname, ssh_get_error(session));
@@ -915,7 +915,7 @@ bool IPMIManager::ExecuteRemoteCommand_(
     rc = ssh_connect(session);
     if (rc != SSH_OK) {
       CRANE_ERROR("Failed to connect to craned {} ({}:{}): {}",
-                  craned_meta->static_meta.hostname, config.ip, config.port,
+                  craned_meta->static_meta.hostname, ip, config.port,
                   ssh_get_error(session));
       ssh_free(session);
       return false;

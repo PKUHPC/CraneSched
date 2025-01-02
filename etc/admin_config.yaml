@@ -18,3 +18,12 @@ InfluxDbToken: "YOUR_INFLUXDB_TOKEN"
 InfluxDbOrg: YOUR_INFLUXDB_ORG
 InfluxDbNodeBucket: YOUR_INFLUXDB_NODE_BUCKET
 InfluxDbTaskBucket: YOUR_INFLUXDB_TASK_BUCKET
+
+# SSH settings
+SSHUsername: root
+SSHPassword: root
+
+# BMC settings
+BMCIP: 10.10.10.10
+BMCUsername: ADMIN
+BMCUserPassword: ADMIN

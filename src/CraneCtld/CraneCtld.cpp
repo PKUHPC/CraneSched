@@ -360,20 +360,6 @@ void ParseConfig(int argc, char** argv) {
           } else
             std::exit(1);
 
-          if (node["bmc"]) {
-            auto bmc = node["bmc"].as<YAML::Node>();
-            // TODO: Communicate how to set the BMC IP address format.
-            node_ptr->bmc.ip = bmc["ip"].as<std::string>();
-            node_ptr->bmc.username = bmc["username"].as<std::string>();
-            node_ptr->bmc.password = bmc["password"].as<std::string>();
-          }
-
-          if (node["ssh"]) {
-            auto ssh = node["ssh"].as<YAML::Node>();
-            node_ptr->ssh.username = ssh["username"].as<std::string>();
-            node_ptr->ssh.password = ssh["password"].as<std::string>();
-          }
-
           DedicatedResourceInNode resourceInNode;
           if (node["gres"]) {
             for (auto gres_it = node["gres"].begin();
@@ -635,6 +621,31 @@ void ParseConfig(int argc, char** argv) {
         g_config.InfluxDbTaskBucket = config["InfluxDbTaskBucket"].as<std::string>();
       else
         g_config.InfluxDbTaskBucket = "energy_task";
+
+      if (config["SSHUsername"] && !config["SSHUsername"].IsNull())
+        g_config.SSH.username = config["SSHUsername"].as<std::string>();
+      else
+        g_config.SSH.username = "root";
+
+      if (config["SSHPassword"] && !config["SSHPassword"].IsNull())
+        g_config.SSH.password = config["SSHPassword"].as<std::string>();
+      else
+        g_config.SSH.password = "root";
+
+      if (config["BMCUsername"] && !config["BMCUsername"].IsNull())
+        g_config.BMC.username = config["BMCUsername"].as<std::string>();
+      else
+        g_config.BMC.username = "ADMIN";
+
+      if (config["BMCPassword"] && !config["BMCPassword"].IsNull())
+        g_config.BMC.password = config["BMCPassword"].as<std::string>();
+      else
+        g_config.BMC.password = "ADMIN";
+
+      if (config["BMCIP"] && !config["BMCIP"].IsNull())
+        g_config.BMC.ip = config["BMCIP"].as<std::string>();
+      else
+        g_config.BMC.ip = "10.10.10.10";
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open database config file {}: {}", db_config_path,
                      e.what());

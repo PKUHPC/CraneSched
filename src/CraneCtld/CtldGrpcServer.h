@@ -289,25 +289,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryClusterInfoRequest *request,
       crane::grpc::QueryClusterInfoReply *response) override;
 
-  grpc::Status SleepCraned(
+  grpc::Status ControlNodePower(
       grpc::ServerContext *context,
-      const crane::grpc::SleepCranedRequest *request, 
-      crane::grpc::SleepCranedReply *response) override;
-
-  grpc::Status WakeupCraned(
-      grpc::ServerContext *context,
-      const crane::grpc::WakeupCranedRequest *request,
-      crane::grpc::WakeupCranedReply *response) override;
-
-  grpc::Status ShutdownCraned(
-      grpc::ServerContext *context,
-      const crane::grpc::ShutdownCranedRequest *request,
-      crane::grpc::ShutdownCranedReply *response) override;
-
-  grpc::Status PowerOnCraned(
-      grpc::ServerContext *context,
-      const crane::grpc::PowerOnCranedRequest *request,
-      crane::grpc::PowerOnCranedReply *response) override;
+      const crane::grpc::ControlNodePowerRequest *request, 
+      crane::grpc::ControlNodePowerReply *response) override;
 
  private:
   CtldServer *m_ctld_server_;
