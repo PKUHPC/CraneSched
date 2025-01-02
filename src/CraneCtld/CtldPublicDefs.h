@@ -703,6 +703,11 @@ inline bool CheckIfTimeLimitIsValid(absl::Duration d) {
   return CheckIfTimeLimitSecIsValid(sec);
 }
 
+struct QosResource {
+  ResourceView resource;
+  uint32_t jobs_per_user;
+};
+
 }  // namespace Ctld
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;
