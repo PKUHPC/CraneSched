@@ -279,6 +279,7 @@ endif ()
 set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_installed)
 add_subdirectory(${DEPENDENCIES_PRE_INSTALLED_DIR})
 
+find_package(CURL REQUIRED)
 find_package(Threads REQUIRED)
 find_library(LIBUTIL_LIBRARY util)
 
@@ -429,8 +430,8 @@ install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         COMPONENT cranedc
         PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
-# Only cranectld needs database.yaml and permission should be 600
-install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
+# Only cranectld needs admin_config.yaml and permission should be 600
+install(FILES ${CMAKE_SOURCE_DIR}/etc/admin_config.yaml
         DESTINATION /etc/crane/
         COMPONENT cranectldc
         PERMISSIONS OWNER_READ OWNER_WRITE)

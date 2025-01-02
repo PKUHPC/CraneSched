@@ -177,6 +177,14 @@ class MongodbClient {
   bool CommitTransaction(
       const mongocxx::client_session::with_transaction_cb& callback);
 
+  bool UpsertNodeNICInfo(const std::string& node_name, 
+                        const std::string& nic_name,
+                        const std::string& mac_addr);
+                        
+  bool GetNodeNICInfo(const std::string& node_name,
+                      std::string* nic_name,
+                      std::string* mac_addr);
+
  private:
   static void PrintError_(
       const char* msg,
@@ -225,6 +233,7 @@ class MongodbClient {
   const std::string m_account_collection_name_{"acct_table"};
   const std::string m_user_collection_name_{"user_table"};
   const std::string m_qos_collection_name_{"qos_table"};
+  const std::string m_node_nic_collection_name_{"node_nic_info"};
 
   std::unique_ptr<mongocxx::instance> m_instance_;
   std::unique_ptr<mongocxx::pool> m_connect_pool_;

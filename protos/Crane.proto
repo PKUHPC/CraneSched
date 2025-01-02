@@ -608,6 +608,15 @@ message QueryCranedRemoteMetaReply {
   CranedRemoteMeta craned_remote_meta = 2;
 }
 
+message QueryCranedNICInfoRequest {}
+
+message QueryCranedNICInfoReply{
+  bool ok = 1;
+  string interface_name = 2;
+  string mac_address = 3;     
+  string error_message = 4; 
+}
+
 message StreamCrunRequest {
   enum CrunRequestType {
     TASK_REQUEST = 0;
@@ -745,6 +754,24 @@ message StreamCforedTaskIOReply {
   }
 }
 
+enum NodePowerAction {
+  TO_SLEEP = 0;    
+  TO_WAKE = 1;      
+  TO_SHUTDOWN = 2;  
+  TO_POWER_ON = 3;  
+}
+
+message ControlNodePowerRequest {
+  uint32 uid = 1;           
+  string craned_id = 2;     
+  NodePowerAction action = 3;  
+}
+
+message ControlNodePowerReply {
+  bool ok = 1;              
+  string reason = 2;        
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -768,6 +795,7 @@ service CraneCtld {
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
+  rpc ControlNodePower(ControlNodePowerRequest) returns (ControlNodePowerReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
@@ -805,7 +833,8 @@ service Craned {
   rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns(ReleaseCgroupForTasksReply);
 
   rpc QueryCranedRemoteMeta(QueryCranedRemoteMetaRequest) returns(QueryCranedRemoteMetaReply);
-
+  rpc QueryCranedNICInfo(QueryCranedNICInfoRequest) returns (QueryCranedNICInfoReply);
+  
   /*
   If the task is an interactive task, the resource uuid is also revoked.
    If there's no process in this interactive task, just deallocate all the resources.

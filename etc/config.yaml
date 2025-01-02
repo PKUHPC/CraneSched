@@ -5,7 +5,7 @@ ControlMachine: cn15
 ClusterName: pkuhpc_test
 
 # Other configurations to be used
-DbConfigPath: /etc/crane/database.yaml
+DbConfigPath: /etc/crane/admin_config.yaml
 
 # Data storage settings
 CraneBaseDir: /var/crane/

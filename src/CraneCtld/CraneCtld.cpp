@@ -27,6 +27,7 @@
 #include <filesystem>
 
 #include "AccountManager.h"
+#include "IPMIManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "CtldGrpcServer.h"
@@ -595,6 +596,56 @@ void ParseConfig(int argc, char** argv) {
         g_config.DbName = config["DbName"].as<std::string>();
       else
         g_config.DbName = "crane_db";
+
+      if (config["InfluxDbUrl"] && !config["InfluxDbUrl"].IsNull())
+        g_config.InfluxDbUrl = config["InfluxDbUrl"].as<std::string>();
+      else
+        g_config.InfluxDbUrl = "http://127.0.0.1:8086";
+
+      if (config["InfluxDbToken"] && !config["InfluxDbToken"].IsNull())
+        g_config.InfluxDbToken = config["InfluxDbToken"].as<std::string>();
+      else
+        g_config.InfluxDbToken = "123456";
+
+      if (config["InfluxDbOrg"] && !config["InfluxDbOrg"].IsNull())
+        g_config.InfluxDbOrg = config["InfluxDbOrg"].as<std::string>();
+      else
+        g_config.InfluxDbOrg = "pku";
+
+      if (config["InfluxDbNodeBucket"] && !config["InfluxDbNodeBucket"].IsNull())
+        g_config.InfluxDbNodeBucket = config["InfluxDbNodeBucket"].as<std::string>();
+      else
+        g_config.InfluxDbNodeBucket = "energy_node";
+
+      if (config["InfluxDbTaskBucket"] && !config["InfluxDbTaskBucket"].IsNull())
+        g_config.InfluxDbTaskBucket = config["InfluxDbTaskBucket"].as<std::string>();
+      else
+        g_config.InfluxDbTaskBucket = "energy_task";
+
+      if (config["SSHUsername"] && !config["SSHUsername"].IsNull())
+        g_config.SSH.username = config["SSHUsername"].as<std::string>();
+      else
+        g_config.SSH.username = "root";
+
+      if (config["SSHPassword"] && !config["SSHPassword"].IsNull())
+        g_config.SSH.password = config["SSHPassword"].as<std::string>();
+      else
+        g_config.SSH.password = "root";
+
+      if (config["BMCUsername"] && !config["BMCUsername"].IsNull())
+        g_config.BMC.username = config["BMCUsername"].as<std::string>();
+      else
+        g_config.BMC.username = "ADMIN";
+
+      if (config["BMCPassword"] && !config["BMCPassword"].IsNull())
+        g_config.BMC.password = config["BMCPassword"].as<std::string>();
+      else
+        g_config.BMC.password = "ADMIN";
+
+      if (config["BMCIP"] && !config["BMCIP"].IsNull())
+        g_config.BMC.ip = config["BMCIP"].as<std::string>();
+      else
+        g_config.BMC.ip = "10.10.10.10";
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open database config file {}: {}", db_config_path,
                      e.what());
@@ -679,6 +730,8 @@ void InitializeCtldGlobalVariables() {
   // since the recovery stage of the task scheduler will acquire
   // information from account manager.
   g_account_manager = std::make_unique<AccountManager>();
+
+  g_ipmi_manager = std::make_unique<IPMIManager>();
 
   g_meta_container = std::make_unique<CranedMetaContainer>();
   g_meta_container->InitFromConfig(g_config);

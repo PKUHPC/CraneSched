@@ -67,6 +67,26 @@ constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 constexpr bool kDefaultRejectTasksBeyondCapacity = false;
 
 struct Config {
+
+  struct BMCConfig {
+    std::string ip;
+    uint32_t port{623};
+    std::string username;
+    std::string password;
+    std::string interface{"lanplus"};
+  };
+
+  struct SSHConfig {
+    uint32_t port{22};
+    std::string username;
+    std::string password;
+  };
+
+  struct NIC {
+    std::string interface_name;
+    std::string mac_address;
+  };
+
   struct Node {
     uint32_t cpu;
     uint64_t memory_bytes;
@@ -139,6 +159,16 @@ struct Config {
   std::string DbRSName;
   std::string DbName;
 
+  // InfluxDB config
+  std::string InfluxDbUrl;
+  std::string InfluxDbToken;
+  std::string InfluxDbOrg;
+  std::string InfluxDbNodeBucket;
+  std::string InfluxDbTaskBucket;
+
+  SSHConfig SSH;
+  BMCConfig BMC;
+
   // Plugin config
   PluginConfig Plugin;
 
@@ -161,6 +191,7 @@ namespace Ctld {
 struct CranedStaticMeta {
   std::string hostname;  // the hostname corresponds to the node index
   uint32_t port;
+  std::string ip;
 
   std::list<std::string> partition_ids;  // Partitions to which
                                          // this craned belongs to
@@ -173,7 +204,48 @@ struct CranedRemoteMeta {
   std::string craned_version;
   absl::Time craned_start_time;
   absl::Time system_boot_time;
+  Config::NIC nic;
 };
+
+enum class CranedState {
+  Running,
+  Sleeped,
+  Shutdown,
+  WakingUp,
+  PreparingSleep,
+  PoweringUp,
+  ShuttingDown,
+  Unknown
+};
+
+struct CranedStateInfo {
+  CranedState state{CranedState::Unknown};
+  absl::Time last_state_change;
+};
+
+inline std::string_view CranedStateToStr(CranedState state) {
+  switch (state) {
+  case CranedState::Running:
+    return "Running";
+  case CranedState::Sleeped:
+    return "Sleeped";
+  case CranedState::Shutdown:
+    return "Shutdown";
+  case CranedState::WakingUp:
+    return "WakingUp";
+  case CranedState::PreparingSleep:
+    return "PreparingSleep";
+  case CranedState::PoweringUp:
+    return "PoweringUp";
+  case CranedState::ShuttingDown:
+    return "ShuttingDown";
+  case CranedState::Unknown:
+    return "Unknown";
+  default:
+    CRANE_ERROR("Invalid CranedState: {}", static_cast<int>(state));
+    return "Unknown";
+  }
+}
 
 /**
  * Represent the runtime status on a Craned node.
@@ -183,14 +255,14 @@ struct CranedMeta {
   CranedStaticMeta static_meta;
   CranedRemoteMeta remote_meta;
 
-  bool alive{false};
+  CranedStateInfo state_info;
+  bool drain{false};
 
   // total = avail + in-use
   ResourceInNode res_total;  // A copy of res in CranedStaticMeta,
   ResourceInNode res_avail;
   ResourceInNode res_in_use;
 
-  bool drain{false};
   std::string state_reason;
   absl::Time last_busy_time;
 

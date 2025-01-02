@@ -19,6 +19,7 @@
 #include "CtldGrpcServer.h"
 
 #include "AccountManager.h"
+#include "IPMIManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
@@ -882,6 +883,40 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
     }
     }
   }
+}
+
+grpc::Status CraneCtldServiceImpl::ControlNodePower(
+    grpc::ServerContext *context,
+    const crane::grpc::ControlNodePowerRequest *request,
+    crane::grpc::ControlNodePowerReply *response) {
+
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!res.has_value()) {
+    response->set_ok(false);
+    response->set_reason(res.error());
+    return grpc::Status::OK;
+  }
+
+  std::string error_msg;
+  bool success = false;
+  if(request->action() == crane::grpc::NodePowerAction::TO_SLEEP){
+    success = g_ipmi_manager->SleepCraned(request->craned_id(), &error_msg);
+  } else if(request->action() == crane::grpc::NodePowerAction::TO_WAKE){
+    success = g_ipmi_manager->WakeupCraned(request->craned_id(), &error_msg);
+  } else if(request->action() == crane::grpc::NodePowerAction::TO_SHUTDOWN){
+    success = g_ipmi_manager->ShutdownCraned(request->craned_id(), &error_msg);
+  } else if(request->action() == crane::grpc::NodePowerAction::TO_POWER_ON){
+    success = g_ipmi_manager->PowerOnCraned(request->craned_id(), &error_msg);
+  }
+
+  if (success) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason(error_msg);
+  }
+
+  return grpc::Status::OK;
 }
 
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
