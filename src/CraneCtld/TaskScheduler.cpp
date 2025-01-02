@@ -2139,10 +2139,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
                           pq.top()->it->first) {
       *start_time = satisfied_trackers.kth_time();
       craned_ids->clear();
-      auto it = satisfied_trackers.kth_elem;
-      while (it != nullptr) {
-        craned_ids->emplace_back(it->tracker_ptr->craned_id);
-        it = it->prev;
+      auto it = satisfied_trackers.tracker_list.begin();
+      while (true) {
+        craned_ids->emplace_back((*it)->tracker_ptr->craned_id);
+        if (*satisfied_trackers.kth_iter == it++) break;
       }
       CRANE_ASSERT(*start_time != absl::InfiniteFuture());
       CRANE_ASSERT(craned_ids->size() == task->node_num);
