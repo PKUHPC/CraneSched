@@ -33,6 +33,20 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTaskRequest *request,
     crane::grpc::SubmitBatchTaskReply *response) {
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
+  if (!extract_result) {
+    response->set_ok(false);
+    response->set_reason("Permission Denied.");
+    return grpc::Status::OK;
+  }
+
+  uint32_t uid = extract_result.value();
+  if (uid != request->task().uid()) {
+    response->set_ok(false);
+    response->set_reason("Identity mismatch");
+    return grpc::Status::OK;
+  }
+
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
@@ -64,10 +78,23 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
   const auto &task_to_ctld = request->task();
   results.reserve(task_count);
 
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
+  if (!extract_result) {
+    for (int i = 0; i < task_count; i++) {
+      response->mutable_reason_list()->Add("Permission Denied.");
+    }
+    return grpc::Status::OK;
+  }
+
+  uint32_t uid = extract_result.value();
+
   for (int i = 0; i < task_count; i++) {
+    if (uid != task_to_ctld.uid()) {
+      results.emplace_back(std::unexpected("Identity mismatch"));
+      continue;
+    }
     auto task = std::make_unique<TaskInCtld>();
     task->SetFieldsByTaskToCtld(task_to_ctld);
-
     auto result = g_task_scheduler->SubmitTaskToScheduler(std::move(task));
     results.emplace_back(std::move(result));
   }
@@ -85,6 +112,24 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
 grpc::Status CraneCtldServiceImpl::CancelTask(
     grpc::ServerContext *context, const crane::grpc::CancelTaskRequest *request,
     crane::grpc::CancelTaskReply *response) {
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
+  if (!extract_result) {
+    for (auto task_id : request->filter_task_ids()) {
+      response->add_not_cancelled_tasks(task_id);
+      response->add_not_cancelled_reasons("Permission Denied.");
+    }
+    return grpc::Status::OK;
+  }
+
+  uint32_t uid = extract_result.value();
+  if (uid != request->operator_uid()) {
+    for (auto task_id : request->filter_task_ids()) {
+      response->add_not_cancelled_tasks(task_id);
+      response->add_not_cancelled_reasons("Permission Denied.");
+    }
+    return grpc::Status::OK;
+  }
+
   *response = g_task_scheduler->CancelPendingOrRunningTask(*request);
   return grpc::Status::OK;
 }
@@ -93,6 +138,9 @@ grpc::Status CraneCtldServiceImpl::QueryCranedInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryCranedInfoRequest *request,
     crane::grpc::QueryCranedInfoReply *response) {
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
+  if (!extract_result) return grpc::Status::OK;
+
   if (request->craned_name().empty()) {
     *response = g_meta_container->QueryAllCranedInfo();
   } else {
@@ -106,6 +154,9 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryPartitionInfoRequest *request,
     crane::grpc::QueryPartitionInfoReply *response) {
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
+  if (!extract_result) return grpc::Status::OK;
+
   if (request->partition_name().empty()) {
     *response = g_meta_container->QueryAllPartitionInfo();
   } else {
@@ -123,7 +174,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   if (!extract_result) {
     for (auto task_id : request->task_ids()) {
       response->add_not_modified_tasks(task_id);
-      response->add_not_modified_reasons("uid is invalid.");
+      response->add_not_modified_reasons("Permission Denied.");
     }
     return grpc::Status::OK;
   }
@@ -220,7 +271,7 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
   if (!extract_result) {
     for (auto crane_id : request->craned_ids()) {
       response->add_not_modified_nodes(crane_id);
-      response->add_not_modified_reasons("uid is invalid.");
+      response->add_not_modified_reasons("Permission Denied.");
     }
     return grpc::Status::OK;
   }
@@ -1038,7 +1089,9 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryClusterInfoRequest *request,
     crane::grpc::QueryClusterInfoReply *response) {
-  auto uid = CheckCertAllowedAndExtractUIDFromCert_(context);
+  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
+  if (!extract_result) return grpc::Status::OK;
+
   *response = g_meta_container->QueryClusterInfo(*request);
   return grpc::Status::OK;
 }
