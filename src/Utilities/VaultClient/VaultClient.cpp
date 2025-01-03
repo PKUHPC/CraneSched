@@ -45,7 +45,14 @@ bool VaultClient::InitPki(const std::string& domains,
                           CACertificateConfig* external_ca,
                           ServerCertificateConfig* external_cert) {
   if (!root_client_->is_authenticated()) {
-    CRANE_ERROR("Root client is not authenticated");
+    CRANE_ERROR("Vault client is not authenticated");
+    return false;
+  }
+
+  if (!GetVaultHealth_()) {
+    CRANE_ERROR(
+        "Vault client connect fail, Please check if it is started, initialized "
+        "and unsealed.");
     return false;
   }
 
@@ -56,13 +63,15 @@ bool VaultClient::InitPki(const std::string& domains,
   pki_external_ = std::make_unique<Vault::Pki>(
       Vault::Pki{*root_client_, Vault::SecretMount{"pki_external"}});
 
-  // 检查CA是否存在，存在则写入文件中，不存在则创建CA
+  // Check if the CA exists. If it exists, write it into a file;
+  // if not, create the CA.
   if (!IssureExternalCa_(domains, external_ca)) return false;
 
-  // 创建role
+  // Create external role
   if (!CreateRole_("external", domains)) return false;
 
-  // 检查external_pem，external_key是否存在，不存在则创建，写入文件中
+  // Check if external_pem and external_key exist. If they do not exist, create
+  // them and write them into a file.
   if (!IssureExternalCert_("external", domains, external_cert)) return false;
 
   return true;
@@ -139,8 +148,8 @@ bool VaultClient::IssureExternalCa_(const std::string& domains,
     }
 
     external_ca->CACertContent = external_ca_pem;
-    if (external_ca->CACertFilePath.empty()) {
-      CRANE_ERROR("ExternalCAFilePath is empty");
+    if (external_ca->CACertContent.empty()) {
+      CRANE_ERROR("CACertContent is empty");
       return false;
     }
 
@@ -198,6 +207,11 @@ bool VaultClient::IsCertAllowed(const std::string& serial_number) {
   return true;
 }
 
+std::optional<std::string> VaultClient::GetVaultHealth_() {
+  return Vault::HttpConsumer::get(*root_client_,
+                                  GetUrl_("/v1/sys/", Vault::Path{"health"}));
+}
+
 bool VaultClient::CreateRole_(const std::string& role_name,
                               const std::string& domains) {
   nlohmann::json::value_type data;
@@ -250,7 +264,6 @@ bool VaultClient::IssureExternalCert_(const std::string& role_name,
 
     external_cert->ServerCertContent = external_pem;
     external_cert->ServerKeyContent = external_key;
-
     if (!util::os::SaveFile(external_cert->ServerCertFilePath, external_pem,
                             0644))
       return false;

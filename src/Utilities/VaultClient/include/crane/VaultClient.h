@@ -57,6 +57,8 @@ class VaultClient {
   bool IsCertAllowed(const std::string& serial_number);
 
  private:
+  std::optional<std::string> GetVaultHealth_();
+
   bool IssureExternalCa_(const std::string& domains,
                          CACertificateConfig* external_ca);
 
