@@ -21,12 +21,13 @@
 namespace vault {
 
 VaultClient::VaultClient(const std::string& root_token,
-                         const std::string& address, const std::string& port)
-    : address_(address), port_(port) {
+                         const std::string& address, const std::string& port,
+                         bool tls)
+    : address_(address), port_(port), tls_(tls) {
   Vault::TokenStrategy tokenStrategy{Vault::Token{root_token}};
   Vault::Config config = Vault::ConfigBuilder()
                              .withDebug(false)
-                             .withTlsEnabled(false)
+                             .withTlsEnabled(tls_)
                              .withHost(Vault::Host{address_})
                              .withPort(Vault::Port{port_})
                              .build();
@@ -163,22 +164,36 @@ bool VaultClient::RevokeCert(const std::string& serial_number) {
     return false;
   }
 
-  allowed_certs_.erase(serial_number);
+  {
+    util::write_lock_guard write_lock(rw_mutex_);
+    allowed_certs_.erase(serial_number);
+  }
 
   return true;
 }
 
 bool VaultClient::IsCertAllowed(const std::string& serial_number) {
-  // TODO: 加锁
-  if (allowed_certs_.contains(serial_number)) return true;
+  {
+    util::read_lock_guard read_lock(rw_mutex_);
+    if (allowed_certs_.contains(serial_number)) return true;
+  }
 
   try {
-    // TODO: 检查crl列表
+    auto response = ListRevokeCertificate_();
+    if (!response) return false;
+    auto data = nlohmann::json::parse(response.value())["data"];
+    for (const auto& key : data["keys"]) {
+      std::string key_str = key;
+      if (key_str == serial_number) return false;
+    }
   } catch (const std::exception& e) {
     return false;
   }
 
-  allowed_certs_.emplace(serial_number);
+  {
+    util::write_lock_guard write_lock(rw_mutex_);
+    allowed_certs_.emplace(serial_number);
+  }
 
   return true;
 }
@@ -250,6 +265,24 @@ bool VaultClient::IssureExternalCert_(const std::string& role_name,
   }
 
   return true;
+}
+
+std::optional<std::string> VaultClient::ListRevokeCertificate_() {
+  return Vault::HttpConsumer::list(
+      *root_client_, GetPkiUrl_(Vault::SecretMount{"pki_external"},
+                                Vault::Path{"certs/revoked"}));
+}
+
+Vault::Url VaultClient::GetPkiUrl_(const Vault::SecretMount secret_mount,
+                                   const Vault::Path& path) const {
+  return GetUrl_("/v1/" + secret_mount,
+                 path.empty() ? path : Vault::Path{"/" + path});
+}
+
+Vault::Url VaultClient::GetUrl_(const std::string& base,
+                                const Vault::Path& path) const {
+  return Vault::Url{(tls_ ? "https://" : "http://") + address_ + ":" + port_ +
+                    base + path};
 }
 
 }  // namespace vault
