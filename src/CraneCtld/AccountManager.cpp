@@ -976,8 +976,7 @@ std::expected<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   return {};
 }
 
-std::expected<void, std::string> AccountManager::CheckUidIsAdmin(
-    uint32_t uid) {
+std::expected<void, std::string> AccountManager::CheckUidIsAdmin(uint32_t uid) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) {
@@ -1002,6 +1001,28 @@ AccountManager::CraneExpected<void> AccountManager::CheckIfUidHasPermOnUser(
   const User* user = GetExistedUserInfoNoLock_(username);
 
   return CheckIfUserHasPermOnUserNoLock_(*op_user, user, read_only_priv);
+}
+
+CraneErrCodeExpected<void> AccountManager::CheckModifyPartitionAllowAccounts(
+    uint32_t uid, const std::string& partition_name,
+    const std::unordered_set<std::string>& allow_accounts) {
+  CraneErrCodeExpected<void> result{};
+
+  util::read_lock_guard user_guard(m_rw_user_mutex_);
+  util::read_lock_guard account_guard(m_rw_account_mutex_);
+
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+  const User* op_user = user_result.value();
+
+  for (const auto& account_name : allow_accounts) {
+    const Account* account = GetAccountInfoNoLock_(account_name);
+    result =
+        CheckPartitionIsAllowedNoLock_(account, partition_name, false, false);
+    if (!result) return std::unexpected(result.error());
+  }
+
+  return result;
 }
 
 AccountManager::CraneExpected<void>
