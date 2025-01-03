@@ -130,6 +130,7 @@ message TaskToCtld {
 
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
+  uint32 priority = 14;
 
   uint32 gid = 14; // egid
 
