@@ -135,6 +135,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::BlockAccountOrUserRequest *request,
       crane::grpc::BlockAccountOrUserReply *response) override;
 
+  grpc::Status ResetUserCredential(
+      grpc::ServerContext *context,
+      const crane::grpc::ResetUserCredentialRequest *request,
+      crane::grpc::ResetUserCredentialReply *response) override;
+
   grpc::Status QueryClusterInfo(
       grpc::ServerContext *context,
       const crane::grpc::QueryClusterInfoRequest *request,

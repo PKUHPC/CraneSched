@@ -22,6 +22,8 @@
 #include <absl/strings/strip.h>
 #include <pthread.h>
 
+#include <regex>
+
 #include "crane/Logger.h"
 
 namespace util {
@@ -461,6 +463,12 @@ std::expected<CertPair, bool> ParseCertificate(const std::string &cert_pem) {
     return std::unexpected(false);
   }
   std::string serial_number = std::string(hex);
+  std::regex re("(.{2})");
+  serial_number = std::regex_replace(serial_number, re, "$1:");
+  serial_number.pop_back();  // remove the last colon
+
+  std::transform(serial_number.begin(), serial_number.end(),
+                 serial_number.begin(), ::tolower);
 
   // free the memory
   OPENSSL_free(hex);

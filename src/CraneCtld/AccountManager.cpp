@@ -1067,6 +1067,45 @@ AccountManager::CraneExpected<std::string> AccountManager::SignUserCertificate(
   return sign_response->certificate;
 }
 
+AccountManager::CraneExpected<void> AccountManager::ResetUserCertificate(
+    uint32_t uid, const std::string& name) {
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
+  CraneExpected<void> result{};
+
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+  const User* op_user = user_result.value();
+
+  const User* user = GetExistedUserInfoNoLock_(name);
+  if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+
+  if (!CheckIfUserHasHigherPrivThan_(*op_user, User::None))
+    return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
+
+  if (op_user->name != name &&
+      !CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level))
+    return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
+
+  if (!g_vault_client->RevokeCert(user->serial_number))
+    return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
+
+  // Save the serial number in the database.
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
+                                     name, "serial_number", "");
+      };
+
+  // Update to database
+  if (!g_db_client->CommitTransaction(callback)) {
+    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+  }
+
+  m_user_map_[name]->serial_number = "";
+
+  return result;
+}
+
 /******************************************
  * NOLOCK
  ******************************************/

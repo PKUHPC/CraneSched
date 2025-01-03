@@ -27,6 +27,7 @@
 #include <unordered_set>
 
 #include "crane/GrpcHelper.h"
+#include "crane/Lock.h"
 #include "crane/Logger.h"
 #include "crane/OS.h"
 
@@ -42,7 +43,8 @@ using AllowedCerts = std::unordered_set<std::string>;
 class VaultClient {
  public:
   VaultClient(const std::string& root_token, const std::string& address,
-              const std::string& port);
+              const std::string& port, bool tls = false);
+
   bool InitPki(const std::string& domains, CACertificateConfig* external_ca,
                ServerCertificateConfig* external_cert);
 
@@ -64,14 +66,25 @@ class VaultClient {
                            const std::string& domains,
                            ServerCertificateConfig* external_cert);
 
+  std::optional<std::string> ListRevokeCertificate_();
+
+  Vault::Url GetUrl_(const std::string& base, const Vault::Path& path) const;
+
+  Vault::Url GetPkiUrl_(const Vault::SecretMount secret_mount,
+                        const Vault::Path& path) const;
+
   std::unique_ptr<Vault::Client> root_client_;
   std::unique_ptr<Vault::Pki> pki_root_;
   std::unique_ptr<Vault::Pki> pki_internal_;
   std::unique_ptr<Vault::Pki> pki_external_;
 
-  AllowedCerts allowed_certs_;
+  // TODO: 采用并行容器，提高性能
+  AllowedCerts allowed_certs_ ABSL_GUARDED_BY(rw_mutex_);
+  util::rw_mutex rw_mutex_;
+
   std::string address_;
   std::string port_;
+  bool tls_;
 };
 
 }  // namespace vault

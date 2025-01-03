@@ -758,6 +758,15 @@ message SignUserCertificateResponse {
   ErrCode reason = 4;
 }
 
+message ResetUserCredentialRequest {
+  string username = 1;
+}
+
+message ResetUserCredentialReply {
+  bool ok = 1;
+  ErrCode reason = 2;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -793,6 +802,8 @@ service CraneCtld {
   rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
   
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
+
+  rpc ResetUserCredential(ResetUserCredentialRequest) returns (ResetUserCredentialReply);
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
