@@ -236,11 +236,9 @@ grpc::Status CtldForCforedServiceImpl::SignUserCertificate(
 
     CRANE_INFO("Resolve hostname from address: {} -> {}", client_address,
                hostname);
-
+    std::vector<std::string> name_list = absl::StrSplit(hostname, ".");
     if (!resolve_result ||
-        (!g_config.VaultConf.AllowedNodes.contains(hostname) &&
-         !g_config.VaultConf.AllowedNodes.contains(
-             hostname + g_config.VaultConf.DomainSuffix))) {
+        !g_config.VaultConf.AllowedNodes.contains(name_list[0])) {
       response->set_ok(false);
       response->set_reason(crane::grpc::ErrCode::ERR_PERMISSION_USER);
       return grpc::Status::OK;
