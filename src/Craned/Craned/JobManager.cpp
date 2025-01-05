@@ -136,6 +136,7 @@ JobManager::JobManager() {
 CraneErr JobManager::Init(
     std::unordered_map<task_id_t, TaskStatusSpce>&& job_status_map) {
   for (auto& [job_id, task_status] : job_status_map) {
+    task_status.job_spec.cgroup_spec.recovered = true;
     auto* job_instance = new JobInstance(task_status.job_spec);
     auto* process =
         new TaskExecutionInstance{.task_spec = task_status.task_spec,
