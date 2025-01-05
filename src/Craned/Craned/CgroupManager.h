@@ -29,8 +29,6 @@
 
 #include <libcgroup.h>
 
-#include "crane/AtomicHashMap.h"
-
 #ifdef CRANE_ENABLE_BPF
 #  include <bpf/libbpf.h>
 #endif
@@ -377,11 +375,11 @@ class BpfRuntimeInfo {
 
   struct bpf_object *BpfObj() { return bpf_obj_; }
   struct bpf_program *BpfProgram() { return bpf_prog_; }
-  std::mutex *BpfMutex() { return bpf_mtx_; }
+  absl::Mutex *BpfMutex() { return bpf_mtx_; }
   struct bpf_map *BpfDevMap() { return dev_map_; }
   int BpfProgFd() { return bpf_prog_fd_; }
   void SetLogging(bool enable) { enable_logging_ = enable; }
-  bool BpfInvalid() {
+  bool Valid() {
     return bpf_obj_ && bpf_prog_ && dev_map_ && bpf_prog_fd_ != -1 &&
            cgroup_count_ > 0;
   }
@@ -392,7 +390,7 @@ class BpfRuntimeInfo {
   struct bpf_program *bpf_prog_;
   struct bpf_map *dev_map_;
   int bpf_prog_fd_;
-  std::mutex *bpf_mtx_;
+  absl::Mutex *bpf_mtx_;
   size_t cgroup_count_;
 };
 #endif
@@ -447,9 +445,6 @@ class CgroupV2 : public CgroupInterface {
   // Recover ebpf info
   bool RecoverFromCgSpec(const CgroupSpec &cg_spec);
   bool EraseBpfDeviceMap();
-  static void SetBpfDebugLog(bool enable) {
-    bpf_runtime_info_.SetLogging(enable);
-  }
 #endif
   bool KillAllProcesses() override;
 
@@ -459,7 +454,6 @@ class CgroupV2 : public CgroupInterface {
 #ifdef CRANE_ENABLE_BPF
   bool m_bpf_attached_;
   std::vector<BpfDeviceMeta> m_cgroup_bpf_devices{};
-  static BpfRuntimeInfo bpf_runtime_info_;
 #endif
 };
 
@@ -480,13 +474,14 @@ class DedicatedResourceAllocator {
 
 class CgroupManager {
  public:
+  ~CgroupManager();
   /**
    * @brief Initialize libcgroup and mount the controllers, remove task not
    * considered to be running;
-   * @param ctld_running_task_cg_specs running task cgroup specs.
+   * @param running_task_cg_specs running task cgroup specs.
    * @return CraneErr.
    */
-  CraneErr Init(std::vector<CgroupSpec> &ctld_running_task_cg_specs);
+  CraneErr Init(const std::unordered_set<task_id_t> &running_job_ids);
 
   bool Mounted(CgroupConstant::Controller controller) {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
@@ -506,7 +501,13 @@ class CgroupManager {
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
 
-  CgroupConstant::CgroupVersion GetCgroupVersion() const { return cg_version_; }
+  [[nodiscard]] CgroupConstant::CgroupVersion GetCgroupVersion() const {
+    return cg_version_;
+  }
+
+#ifdef CRANE_ENABLE_BPF
+  static BpfRuntimeInfo bpf_runtime_info;
+#endif
 
  private:
   static std::string CgroupStrByTaskId_(task_id_t task_id);
@@ -532,8 +533,13 @@ class CgroupManager {
       CgroupConstant::Controller controller,
       const std::unordered_set<task_id_t> &task_ids);
 
-  static std::unordered_set<task_id_t> GetAllCgroupsV2(
+  static std::unordered_map<ino_t, task_id_t> GetCgJobIdMapCgroupV2(
       const std::string &root_cgroup_path);
+
+#ifdef CRANE_ENABLE_BPF
+  static std::unordered_map<task_id_t, std::vector<BpfKey>>
+  GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path);
+#endif
 
   static void RmJobCgroupsV2Expect_(
       const std::unordered_set<task_id_t> &task_ids);

@@ -45,6 +45,9 @@ EnvMap JobSpec::GetJobEnvMap() const {
 JobInstance::JobInstance(JobSpec&& spec)
     : job_id(spec.cgroup_spec.job_id), job_spec(std::move(spec)) {}
 
+JobInstance::JobInstance(const JobSpec& spec)
+    : job_id(spec.cgroup_spec.job_id), job_spec(spec) {}
+
 JobManager::JobManager() {
   // Only called once. Guaranteed by singleton pattern.
   m_instance_ptr_ = this;
@@ -128,6 +131,31 @@ JobManager::JobManager() {
     }
     m_uvw_loop_->run();
   });
+}
+
+CraneErr JobManager::Init(
+    std::unordered_map<task_id_t, TaskStatusSpce>&& job_status_map) {
+  for (auto& [job_id, task_status] : job_status_map) {
+    auto* job_instance = new JobInstance(task_status.job_spec);
+    auto* process =
+        new TaskExecutionInstance{.task_spec = task_status.task_spec,
+                                  .job_id = job_id,
+                                  .pid = task_status.task_pid};
+    job_instance->processes.emplace(task_status.task_pid, process);
+    // When init,no need to lock.
+    m_pid_job_map_.emplace(task_status.task_pid, job_instance);
+    m_pid_proc_map_.emplace(task_status.task_pid, process);
+
+    m_job_map_.Emplace(job_id, std::unique_ptr<JobInstance>(job_instance));
+    uid_t uid = task_status.job_spec.cgroup_spec.uid;
+    auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
+    if (uid_map->contains(uid)) {
+      uid_map->at(uid).RawPtr()->emplace(job_id);
+    } else {
+      uid_map->emplace(uid, absl::flat_hash_set<task_id_t>({job_id}));
+    }
+  }
+  return CraneErr::kOk;
 }
 
 JobManager::~JobManager() {
@@ -391,7 +419,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     g_supervisor_keeper->AddSupervisor(process->task_spec.task_id());
 
     auto stub = g_supervisor_keeper->GetStub(process->task_spec.task_id());
-    auto task_id = stub->ExecuteTask(process);
+    auto task_id = stub->ExecuteTask(process->task_spec);
     if (!task_id) {
       CRANE_ERROR("Supervisor failed to execute task #{}",
                   process->task_spec.task_id());
@@ -579,19 +607,16 @@ void JobManager::LaunchTaskInstanceMt_(TaskExecutionInstance* process) {
     return;
   }
 
-  {
-    if (!(job_instance->cgroup)) {
-      job_instance->cgroup =
-          g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_spec.cgroup_spec);
-    }
-    if (!job_instance->cgroup) {
-      CRANE_ERROR("Failed to get job#{} cgroup", job_id);
-      ActivateTaskStatusChangeAsync_(
-          job_id, crane::grpc::TaskStatus::Failed,
-          ExitCode::kExitCodeCgroupError,
-          fmt::format("Failed to get cgroup for job#{} ", job_id));
-      return;
-    }
+  if (!(job_instance->cgroup)) {
+    job_instance->cgroup =
+        g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_spec.cgroup_spec);
+  }
+  if (!job_instance->cgroup) {
+    CRANE_ERROR("Failed to get job#{} cgroup", job_id);
+    ActivateTaskStatusChangeAsync_(
+        job_id, crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCgroupError,
+        fmt::format("Failed to get cgroup for job#{} ", job_id));
+    return;
   }
 
   // err will NOT be kOk ONLY if fork() is not called due to some failure
@@ -615,7 +640,10 @@ void JobManager::LaunchTaskInstanceMt_(TaskExecutionInstance* process) {
     // SIGCHLD processing callback sees the pid in index maps.
     // Now we do not support launch multiprocess task.
     job_instance->processes.emplace(
-        0, std::unique_ptr<TaskExecutionInstance>(process));
+        process->pid, std::unique_ptr<TaskExecutionInstance>(process));
+    absl::MutexLock lk(&m_mtx_);
+    m_pid_job_map_.emplace(process->pid, job_instance);
+    m_pid_proc_map_.emplace(process->pid, process);
   }
 }
 

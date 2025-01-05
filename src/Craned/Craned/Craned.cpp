@@ -114,7 +114,8 @@ void ParseConfig(int argc, char** argv) {
       }
 
 #ifdef CRANE_ENABLE_BPF
-      Craned::CgroupV2::SetBpfDebugLog(log_level.value() < spdlog::level::info);
+      Craned::CgroupManager::bpf_runtime_info.SetLogging(log_level.value() <
+                                                         spdlog::level::info);
 #endif
       if (config["CranedUnixSockPath"])
         g_config.CranedUnixSockPath =
@@ -595,25 +596,27 @@ void GlobalVariableInit() {
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
   g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
-  auto tasks = g_supervisor_keeper->Init();
+  CraneExpected<std::unordered_map<task_id_t, Craned::TaskStatusSpce>> tasks =
+      g_supervisor_keeper->Init();
 
   std::unordered_set<task_id_t> task_ids_supervisor;
-  for (const auto& task :
-       tasks.value_or(std::vector<Craned::SuperVisorState>())) {
-    task_ids_supervisor.emplace(task.task_spec.task_id());
+  std::unordered_map<task_id_t, Craned::TaskStatusSpce> job_status_map =
+      tasks.value_or(std::unordered_map<task_id_t, Craned::TaskStatusSpce>());
+  for (const auto& [job_id, supervisor_state] : job_status_map) {
+    task_ids_supervisor.emplace(job_id);
   }
 
   g_ctld_client = std::make_unique<Craned::CtldClient>();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
   std::latch craned_registered(1);
-  std::vector<CgroupSpec> job_cg_spec_vec;
+  std::unordered_map<task_id_t, CgroupSpec> job_cg_spec_map;
   g_ctld_client->SetCranedRegisterCb(
-      [&craned_registered, &job_cg_spec_vec, &task_ids_supervisor](
+      [&craned_registered, &job_cg_spec_map, &task_ids_supervisor](
           const google::protobuf::RepeatedPtrField<crane::grpc::JobSpec>&
               specs) {
         for (const auto& spec : specs) {
           if (task_ids_supervisor.contains(spec.task_id()))
-            job_cg_spec_vec.emplace_back(spec);
+            job_cg_spec_map.emplace(spec.task_id(), spec);
         }
         craned_registered.count_down();
       });
@@ -622,11 +625,14 @@ void GlobalVariableInit() {
   craned_registered.wait();
   g_ctld_client->UnSetCranedRegisterCb();
 
+  std::unordered_set<task_id_t> running_job_ids;
+  for (const auto& [job_id, _] : job_cg_spec_map) {
+    running_job_ids.emplace(job_id);
+  }
   using Craned::CgroupManager;
   using Craned::CgroupConstant::Controller;
   g_cg_mgr = std::make_unique<CgroupManager>();
-  // todo:Handle ebpf recovery
-  g_cg_mgr->Init(job_cg_spec_vec);
+  g_cg_mgr->Init(running_job_ids);
   if (g_cg_mgr->GetCgroupVersion() ==
           Craned::CgroupConstant::CgroupVersion::CGROUP_V1 &&
       (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
@@ -645,17 +651,12 @@ void GlobalVariableInit() {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
   }
-
-  std::unordered_set<task_id_t> jobs_in_ctld;
-  for (const auto& job_cg : job_cg_spec_vec) {
-    jobs_in_ctld.emplace(job_cg.job_id);
-  }
-  for (const auto& task :
-       tasks.value_or(std::vector<Craned::SuperVisorState>())) {
-    if (!jobs_in_ctld.contains(task.task_spec.task_id())) CRANE_INFO("Ignore ");
-  }
+  std::erase_if(job_status_map, [&running_job_ids](const auto& kv) {
+    return !running_job_ids.contains(kv.first);
+  });
 
   g_job_mgr = std::make_unique<Craned::JobManager>();
+  g_job_mgr->Init(std::move(job_status_map));
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");

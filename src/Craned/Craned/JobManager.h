@@ -24,6 +24,7 @@
 #include <grp.h>
 
 #include "CgroupManager.h"
+#include "crane/AtomicHashMap.h"
 #include "crane/PasswordEntry.h"
 #include "protos/Crane.grpc.pb.h"
 
@@ -39,13 +40,22 @@ struct TaskExecutionInstance {
 
 struct JobSpec {
   JobSpec(const crane::grpc::JobSpec& spec) : cgroup_spec(spec) {}
+  JobSpec(const JobSpec& spce) = default;
+  JobSpec(JobSpec& spce) = default;
   CgroupSpec cgroup_spec;
   EnvMap GetJobEnvMap() const;
+};
+
+struct TaskStatusSpce {
+  JobSpec job_spec;
+  TaskSpec task_spec;
+  pid_t task_pid;
 };
 
 // Job allocation info
 struct JobInstance {
   explicit JobInstance(JobSpec&& spec);
+  JobInstance(const JobSpec& spec);
   ~JobInstance() = default;
 
   task_id_t job_id;
@@ -71,12 +81,13 @@ class JobManager {
  public:
   JobManager();
 
+  CraneErr Init(std::unordered_map<task_id_t, TaskStatusSpce>&& job_status_map);
+
   ~JobManager();
 
   bool AllocJobs(std::vector<JobSpec>&& job_specs);
 
   /**
-   * @attention Locks job_id job ptr.
    * @brief Free job res allocation.
    * @param job_id job id to free
    * @return true if success.

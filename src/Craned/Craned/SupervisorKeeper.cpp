@@ -30,7 +30,8 @@ void SupervisorClient::InitChannelAndStub(const std::string& endpoint) {
   m_stub_ = crane::grpc::Supervisor::NewStub(m_channel_);
 }
 
-CraneExpected<std::vector<SuperVisorState>> SupervisorKeeper::Init() {
+CraneExpected<std::unordered_map<task_id_t, TaskStatusSpce>>
+SupervisorKeeper::Init() {
   try {
     std::filesystem::path path = kDefaultSupervisorUnixSockDir;
     if (std::filesystem::exists(path) && std::filesystem::is_directory(path)) {
@@ -40,7 +41,7 @@ CraneExpected<std::vector<SuperVisorState>> SupervisorKeeper::Init() {
           files.emplace_back(it.path());
         }
       }
-      std::vector<SuperVisorState> tasks;
+      std::unordered_map<task_id_t, TaskStatusSpce> tasks;
       tasks.reserve(files.size());
       std::latch all_supervisor_reply(files.size());
       absl::Mutex mtx;
@@ -51,7 +52,7 @@ CraneExpected<std::vector<SuperVisorState>> SupervisorKeeper::Init() {
               all_supervisor_reply.count_down();
               if (!task) return;
               absl::WriterMutexLock lk(&mtx);
-              tasks.emplace_back(task.value());
+              tasks.emplace(task->task_spec.task_id(), task.value());
             });
       }
       all_supervisor_reply.wait();
@@ -88,19 +89,18 @@ std::shared_ptr<SupervisorClient> SupervisorKeeper::GetStub(task_id_t task_id) {
   }
 }
 
-CraneExpected<SuperVisorState> SupervisorKeeper::RecoverSupervisorMt_(
+CraneExpected<TaskStatusSpce> SupervisorKeeper::RecoverSupervisorMt_(
     const std::filesystem::path& path) {
   std::shared_ptr stub = std::make_shared<SupervisorClient>();
   stub->InitChannelAndStub(path);
-  SuperVisorState state;
-  auto err = stub->CheckTaskStatus(&state.task_spec, &state.task_pid);
-  if (err != CraneErr::kOk) {
+  auto supervisor_state = stub->CheckTaskStatus();
+  if (!supervisor_state) {
     CRANE_ERROR("CheckTaskStatus for {} failed", path.string());
     return std::unexpected(CraneErr::kSupervisorError);
   }
   absl::WriterMutexLock lk(&m_mutex);
-  m_supervisor_map.emplace(state.task_spec.task_id(), stub);
-  return state;
+  m_supervisor_map.emplace(supervisor_state.value().task_spec.task_id(), stub);
+  return supervisor_state;
 }
 
 }  // namespace Craned

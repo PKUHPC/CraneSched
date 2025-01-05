@@ -41,11 +41,34 @@
 namespace Craned {
 
 #ifdef CRANE_ENABLE_BPF
-BpfRuntimeInfo CgroupV2::bpf_runtime_info_{};
+BpfRuntimeInfo CgroupManager::bpf_runtime_info{};
+
+CgroupManager::~CgroupManager() {
+  if (!bpf_runtime_info.Valid()) return;
+  int bpf_map_count = 0;
+  auto *pre_key = new BpfKey();
+  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr, pre_key,
+                            sizeof(BpfKey)) == 0) {
+    CRANE_ERROR("Failed to get first key of bpf map");
+  }
+  bpf_map_count++;
+  auto *cur_key = new BpfKey();
+  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key, cur_key,
+                               sizeof(BpfKey)) == 0) {
+    ++bpf_map_count;
+  }
+  delete pre_key;
+  delete cur_key;
+  // always one key for logging
+  if (bpf_map_count == 1) {
+    // All task end
+    BpfRuntimeInfo::RmBpfDeviceMap();
+  }
+}
 #endif
 
 CraneErr CgroupManager::Init(
-    std::vector<CgroupSpec> &ctld_running_task_cg_specs) {
+    const std::unordered_set<task_id_t> &running_job_ids) {
   // Initialize library and data structures
   CRANE_DEBUG("Initializing cgroup library.");
   cgroup_init();
@@ -185,21 +208,28 @@ CraneErr CgroupManager::Init(
     CRANE_WARN("Error Cgroup version is not supported");
     return CraneErr::kCgroupError;
   }
-  std::unordered_set<task_id_t> job_ids;
-  for (auto &cg_spec : ctld_running_task_cg_specs)
-    job_ids.emplace(cg_spec.job_id);
   if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
-    RmJobCgroupsExcept_(job_ids);
+    RmJobCgroupsExcept_(running_job_ids);
   } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
-    auto job_ids_from_cg = GetAllCgroupsV2(CgroupConstant::RootCgroupFullPath);
-    for (auto &job_id : job_ids_from_cg) {
-      // Cgroup exist but task not exist
-      if (!job_ids.contains(job_id)) }
-    for (const auto &cg_spec : ctld_running_task_cg_specs) {
-      if (!job_ids.contains(cg_spec.job_id))
-        // Here we allocate and free to remove those cgroups;
-        AllocateAndGetJobCgroup(cg_spec);
+    RmCgroupsV2Except_(CgroupConstant::RootCgroupFullPath, running_job_ids);
+
+#ifdef CRANE_ENABLE_BPF
+    auto job_id_bpf_key_vec_map =
+        GetJobBpfMapCgroupsV2(CgroupConstant::RootCgroupFullPath);
+    for (const auto &[job_id, bpf_key_vec] : job_id_bpf_key_vec_map) {
+      if (running_job_ids.contains(job_id)) continue;
+      CRANE_DEBUG("Erase bpf map entry for not running job {}", job_id);
+      for (const auto &key : bpf_key_vec) {
+        if (bpf_map__delete_elem(bpf_runtime_info.BpfDevMap(), &key,
+                                 sizeof(BpfKey), BPF_ANY)) {
+          CRANE_ERROR(
+              "Failed to delete BPF map major {},minor {} in cgroup id {}",
+              key.major, key.minor, key.cgroup_id);
+        }
+      }
     }
+#endif
+
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
   }
@@ -571,24 +601,64 @@ void CgroupManager::RmJobCgroupsUnderControllerExcept_(
   if (handle) cgroup_walk_tree_end(&handle);
 }
 
-std::unordered_set<task_id_t> CgroupManager::GetAllCgroupsV2(
+std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
     const std::string &root_cgroup_path) {
   static const LazyRE2 cg_pattern{R"(Crane_Task_(\d+))"};
-  std::unordered_set<task_id_t> job_ids;
+  std::unordered_map<ino_t, task_id_t> cg_job_id_map;
   try {
     for (const auto &it :
          std::filesystem::directory_iterator(root_cgroup_path)) {
       std::string job_id_str;
       if (it.is_directory() && RE2::FullMatch(it.path().filename().c_str(),
                                               *cg_pattern, &job_id_str)) {
-        job_ids.emplace(std::stoul(job_id_str));
+        struct stat cg_stat;
+        if (stat(it.path().c_str(), &cg_stat)) {
+          CRANE_ERROR("Cgroup {} stat failed: {}", it.path().c_str(),
+                      std::strerror(errno));
+        }
+        cg_job_id_map.emplace(cg_stat.st_ino, std::stoul(job_id_str));
       }
     }
   } catch (const std::filesystem::filesystem_error &e) {
     CRANE_ERROR("Error: {}", e.what());
   }
-  return job_ids;
+  return cg_job_id_map;
 }
+
+#ifdef CRANE_ENABLE_BPF
+std::unordered_map<task_id_t, std::vector<BpfKey>>
+CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
+  std::unordered_map cg_ino_job_id_map =
+      GetCgJobIdMapCgroupV2(root_cgroup_path);
+  bool init_ebpf = !bpf_runtime_info.Valid();
+  if (!init_ebpf) bpf_runtime_info.InitializeBpfObj();
+  std::unordered_map<task_id_t, std::vector<BpfKey>> results;
+  auto add_task = [&results, &cg_ino_job_id_map](BpfKey *key) {
+    CRANE_ASSERT(cg_ino_job_id_map.contains(key->cgroup_id));
+    results[cg_ino_job_id_map[key->cgroup_id]].emplace_back(*key);
+  };
+  int bpf_map_count = 0;
+  auto *pre_key = new BpfKey();
+  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr, pre_key,
+                            sizeof(BpfKey)) == 0) {
+    CRANE_ERROR("Failed to get first key of bpf map");
+  }
+  add_task(pre_key);
+  bpf_map_count++;
+  auto *cur_key = new BpfKey();
+  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key, cur_key,
+                               sizeof(BpfKey)) == 0) {
+    ++bpf_map_count;
+    add_task(cur_key);
+  }
+  delete pre_key;
+  delete cur_key;
+  if (init_ebpf) bpf_runtime_info.CloseBpfObj();
+
+  return results;
+}
+
+#endif
 
 void CgroupManager::RmJobCgroupsV2Expect_(
     const std::unordered_set<task_id_t> &job_ids) {
@@ -982,7 +1052,7 @@ BpfRuntimeInfo::BpfRuntimeInfo() {
   bpf_prog_ = nullptr;
   dev_map_ = nullptr;
   enable_logging_ = false;
-  bpf_mtx_ = new std::mutex;
+  bpf_mtx_ = new absl::Mutex;
   bpf_prog_fd_ = -1;
   cgroup_count_ = 0;
 }
@@ -997,7 +1067,7 @@ BpfRuntimeInfo::~BpfRuntimeInfo() {
 }
 
 bool BpfRuntimeInfo::InitializeBpfObj() {
-  std::unique_lock<std::mutex> lk(*bpf_mtx_);
+  absl::MutexLock lk(bpf_mtx_);
 
   if (cgroup_count_ == 0) {
     bpf_obj_ = bpf_object__open_file(CgroupConstant::BpfObjectFilePath, NULL);
@@ -1059,15 +1129,14 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
 }
 
 void BpfRuntimeInfo::CloseBpfObj() {
-  std::unique_lock<std::mutex> lk(*bpf_mtx_);
-  if (BpfInvalid() && --cgroup_count_ == 0) {
+  absl::MutexLock lk(bpf_mtx_);
+  if (this->Valid() && --cgroup_count_ == 0) {
     close(bpf_prog_fd_);
     bpf_object__close(bpf_obj_);
     bpf_prog_fd_ = -1;
     bpf_obj_ = nullptr;
     bpf_prog_ = nullptr;
     dev_map_ = nullptr;
-    RmBpfDeviceMap();
   }
 }
 
@@ -1090,7 +1159,7 @@ void BpfRuntimeInfo::RmBpfDeviceMap() {
 CgroupV2::CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id)
     : CgroupInterface(path, handle, id) {
 #ifdef CRANE_ENABLE_BPF
-  if (bpf_runtime_info_.InitializeBpfObj()) {
+  if (CgroupManager::bpf_runtime_info.InitializeBpfObj()) {
     CRANE_TRACE("Bpf object initialization succeed");
   } else {
     CRANE_TRACE("Bpf object initialization failed");
@@ -1108,11 +1177,13 @@ CgroupV2::CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id,
 #endif
 
 CgroupV2::~CgroupV2() {
+  // Remove cgroup before remove map entry.
+  m_cgroup_info_.~Cgroup();
 #ifdef CRANE_ENABLE_BPF
   if (!m_cgroup_bpf_devices.empty()) {
     EraseBpfDeviceMap();
   }
-  bpf_runtime_info_.CloseBpfObj();
+  CgroupManager::bpf_runtime_info.CloseBpfObj();
 #endif
 }
 
@@ -1166,7 +1237,7 @@ bool CgroupV2::SetBlockioWeight(uint64_t weight) {
 bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
                                bool set_read, bool set_write, bool set_mknod) {
 #ifdef CRANE_ENABLE_BPF
-  if (!bpf_runtime_info_.BpfInvalid()) {
+  if (!CgroupManager::bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
   }
@@ -1203,12 +1274,12 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
     }
   }
   {
-    std::unique_lock<std::mutex> lk(*bpf_runtime_info_.BpfMutex());
+    absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
     for (int i = 0; i < bpf_devices.size(); i++) {
       struct BpfKey key = {m_cgroup_info_.m_cgroup_id, bpf_devices[i].major,
                            bpf_devices[i].minor};
-      if (bpf_map__update_elem(bpf_runtime_info_.BpfDevMap(), &key,
-                               sizeof(BpfKey), &bpf_devices[i],
+      if (bpf_map__update_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
+                               &key, sizeof(BpfKey), &bpf_devices[i],
                                sizeof(BpfDeviceMeta), BPF_ANY)) {
         CRANE_ERROR("Failed to update BPF map major {},minor {} cgroup id {}",
                     bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
@@ -1219,8 +1290,8 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 
     // No need to attach ebpf prog twice.
     if (!m_bpf_attached_) {
-      if (bpf_prog_attach(bpf_runtime_info_.BpfProgFd(), cgroup_fd,
-                          BPF_CGROUP_DEVICE, 0) < 0) {
+      if (bpf_prog_attach(CgroupManager::bpf_runtime_info.BpfProgFd(),
+                          cgroup_fd, BPF_CGROUP_DEVICE, 0) < 0) {
         CRANE_ERROR("Failed to attach BPF program");
         close(cgroup_fd);
         return false;
@@ -1242,7 +1313,7 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 #ifdef CRANE_ENABLE_BPF
 
 bool CgroupV2::RecoverFromCgSpec(const CgroupSpec &cg_spec) {
-  if (!bpf_runtime_info_.BpfInvalid()) {
+  if (!CgroupManager::bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
   }
@@ -1285,22 +1356,23 @@ bool CgroupV2::RecoverFromCgSpec(const CgroupSpec &cg_spec) {
       }
     }
   }
+  m_bpf_attached_=true;
   return true;
 }
 
 bool CgroupV2::EraseBpfDeviceMap() {
   {
-    if (!bpf_runtime_info_.BpfInvalid()) {
+    if (!CgroupManager::bpf_runtime_info.Valid()) {
       CRANE_WARN("BPF is not initialized.");
       return false;
     }
-    std::unique_lock<std::mutex> lk(*bpf_runtime_info_.BpfMutex());
+    absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
     auto &bpf_devices = m_cgroup_bpf_devices;
     for (int i = 0; i < bpf_devices.size(); i++) {
       struct BpfKey key = {m_cgroup_info_.m_cgroup_id, bpf_devices[i].major,
                            bpf_devices[i].minor};
-      if (bpf_map__delete_elem(bpf_runtime_info_.BpfDevMap(), &key,
-                               sizeof(BpfKey), BPF_ANY)) {
+      if (bpf_map__delete_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
+                               &key, sizeof(BpfKey), BPF_ANY)) {
         CRANE_ERROR(
             "Failed to delete BPF map major {},minor {} in cgroup id {}",
             bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);

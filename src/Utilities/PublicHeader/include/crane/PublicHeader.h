@@ -414,6 +414,8 @@ bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
 
 struct CgroupSpec {
   CgroupSpec(const crane::grpc::JobSpec& job_spec);
+  CgroupSpec(const CgroupSpec& spce) = default;
+
   /**
    * @brief set grpc struct,will move res_in_node field
    * @param job_spec grpc job_spce to set
