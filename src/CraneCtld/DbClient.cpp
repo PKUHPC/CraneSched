@@ -649,6 +649,7 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
     user->deleted = user_view["deleted"].get_bool();
     user->uid = user_view["uid"].get_int64().value;
     user->name = user_view["name"].get_string().value;
+    user->serial_number = user_view["serial_number"].get_string().value;
     user->default_account = user_view["default_account"].get_string().value;
     user->admin_level =
         (Ctld::User::AdminLevel)user_view["admin_level"].get_int32().value;

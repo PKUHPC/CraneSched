@@ -88,6 +88,7 @@ struct Config {
     std::string CraneCtldListenPort;
     std::string CraneCtldForCranedListenPort;
     std::string CraneCtldForCforedListenPort;
+    std::string CraneCtldForSignListenPort;
 
     bool UseTls{false};
     struct TlsCertsConfig {

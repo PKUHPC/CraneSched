@@ -821,7 +821,9 @@ service CraneCtldForCraned {
 service CraneCtldForCfored {
   /* RPCs called from Cfored */
   rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
+}
 
+service SignService {
   // RPCS called from PKI request
   rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 }
