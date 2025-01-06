@@ -70,6 +70,9 @@ class VaultClient {
 
   std::optional<std::string> ListRevokeCertificate_();
 
+  std::optional<std::string> list_(const Vault::Client& client,
+                                   const Vault::Url& url);
+
   Vault::Url GetUrl_(const std::string& base, const Vault::Path& path) const;
 
   Vault::Url GetPkiUrl_(const Vault::SecretMount secret_mount,
