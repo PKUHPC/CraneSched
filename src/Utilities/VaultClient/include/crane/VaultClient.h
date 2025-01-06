@@ -45,8 +45,7 @@ class VaultClient {
   VaultClient(const std::string& root_token, const std::string& address,
               const std::string& port, bool tls = false);
 
-  bool InitPki(const std::string& domains, CACertificateConfig* external_ca,
-               ServerCertificateConfig* external_cert);
+  bool InitPki();
 
   std::expected<SignResponse, bool> Sign(const std::string& csr_content,
                                          const std::string& common_name,
@@ -58,15 +57,6 @@ class VaultClient {
 
  private:
   std::optional<std::string> GetVaultHealth_();
-
-  bool IssureExternalCa_(const std::string& domains,
-                         CACertificateConfig* external_ca);
-
-  bool CreateRole_(const std::string& role_name, const std::string& domains);
-
-  bool IssureExternalCert_(const std::string& role_name,
-                           const std::string& domains,
-                           ServerCertificateConfig* external_cert);
 
   std::optional<std::string> ListRevokeCertificate_();
 
