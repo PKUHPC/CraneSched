@@ -23,6 +23,9 @@
 #include "../EmbeddedDbClient.h"
 #include "../TaskScheduler.h"
 #include "CranedKeeper.h"
+#include "CtldForCforedServer.h"
+#include "CtldForCranedServer.h"
+#include "SignServer.h"
 #include "crane/GrpcHelper.h"
 #include "crane/String.h"
 #include "crane/VaultClient.h"
@@ -1209,6 +1212,7 @@ CtldServer::CtldServer() : m_service_impl_(nullptr) {
     g_craned_keeper->Shutdown();
     g_ctld_for_cfored_server->Shutdown();
     g_ctld_for_craned_server->Shutdown();
+    g_sign_server->Shutdown();
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
   });

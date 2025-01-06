@@ -8,6 +8,8 @@ add_library(RpcService
     CtldForCforedServer.cpp
     CranedKeeper.h
     CranedKeeper.cpp
+    SignServer.h
+    SignServer.cpp
 )
 
 target_include_directories(RpcService PUBLIC

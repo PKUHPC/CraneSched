@@ -40,6 +40,7 @@ CraneCtldListenAddr: 0.0.0.0
 CraneCtldListenPort: 10011
 CraneCtldForCranedListenPort: 10013
 CraneCtldForCforedListenPort: 10014
+CraneCtldForSignListenPort: 10015
 # debug level of cranectld
 CraneCtldDebugLevel: trace
 # file path of cranectld log file (relative to CraneBaseDir)
