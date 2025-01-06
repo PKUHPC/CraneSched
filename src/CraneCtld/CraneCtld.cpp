@@ -305,8 +305,23 @@ void ParseConfig(int argc, char** argv) {
         if (vault_config["Port"])
           g_config.VaultConf.Port = vault_config["Port"].as<std::string>();
 
-        if (vault_config["Token"])
-          g_config.VaultConf.Token = vault_config["Token"].as<std::string>();
+        if (vault_config["Tls"])
+          g_config.VaultConf.Tls = vault_config["Tls"].as<bool>();
+        else
+          g_config.VaultConf.Tls = false;
+
+        if (vault_config["TokenPath"]) {
+          std::string token_path = vault_config["TokenPath"].as<std::string>();
+          try {
+            g_config.VaultConf.Token = util::ReadFileIntoString(token_path);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read vault token file error: {}", e.what());
+            std::exit(1);
+          }
+        } else {
+          CRANE_ERROR("vault token path is empty");
+          std::exit(1);
+        }
 
         if (vault_config["DomainSuffix"])
           g_config.VaultConf.DomainSuffix =
@@ -880,7 +895,7 @@ void InitializeCtldGlobalVariables() {
 
   g_vault_client = std::make_unique<vault::VaultClient>(
       g_config.VaultConf.Token, g_config.VaultConf.Addr,
-      g_config.VaultConf.Port);
+      g_config.VaultConf.Port, g_config.VaultConf.Tls);
   if (!g_vault_client->InitPki(g_config.VaultConf.DomainSuffix,
                                &g_config.VaultConf.ExternalCACerts,
                                &g_config.VaultConf.ExternalCerts))
