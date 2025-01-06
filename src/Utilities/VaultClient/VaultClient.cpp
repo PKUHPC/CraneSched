@@ -41,9 +41,7 @@ VaultClient::VaultClient(const std::string& root_token,
       config, tokenStrategy, httpErrorCallback, responseCallback});
 }
 
-bool VaultClient::InitPki(const std::string& domains,
-                          CACertificateConfig* external_ca,
-                          ServerCertificateConfig* external_cert) {
+bool VaultClient::InitPki() {
   if (!root_client_->is_authenticated()) {
     CRANE_ERROR("Vault client is not authenticated");
     return false;
@@ -62,17 +60,6 @@ bool VaultClient::InitPki(const std::string& domains,
       Vault::Pki{*root_client_, Vault::SecretMount{"pki_internal"}});
   pki_external_ = std::make_unique<Vault::Pki>(
       Vault::Pki{*root_client_, Vault::SecretMount{"pki_external"}});
-
-  // Check if the CA exists. If it exists, write it into a file;
-  // if not, create the CA.
-  if (!IssureExternalCa_(domains, external_ca)) return false;
-
-  // Create external role
-  if (!CreateRole_("external", domains)) return false;
-
-  // Check if external_pem and external_key exist. If they do not exist, create
-  // them and write them into a file.
-  if (!IssureExternalCert_("external", domains, external_cert)) return false;
 
   return true;
 }
@@ -98,70 +85,6 @@ std::expected<SignResponse, bool> VaultClient::Sign(
   }
 
   return SignResponse{data["serial_number"], data["certificate"]};
-}
-
-bool VaultClient::IssureExternalCa_(const std::string& domains,
-                                    CACertificateConfig* external_ca) {
-  nlohmann::json::value_type data;
-  std::optional<std::string> response;
-
-  if (!external_ca->CACertContent.empty()) return true;
-
-  try {
-    response = pki_external_->readCACertificate();
-    if (!response) {
-      CRANE_ERROR("Failed to read external CA certificate");
-      return false;
-    }
-
-    std::string external_ca_pem = response.value();
-
-    if (external_ca_pem == "") {
-      response = pki_external_->generateIntermediate(
-          Vault::KeyType{"internal"},
-          Vault::Parameters({{"common_name", std::format("*.{}", domains)},
-                             {"issuer_name", "CraneSched_internal_CA"},
-                             {"not_after", "9999-12-31T23:59:59Z"}}));
-
-      data = nlohmann::json::parse(response.value())["data"];
-      std::string external_ca_csr = data["csr"];
-
-      response = pki_root_->signIntermediate(
-          Vault::Parameters({{"csr", external_ca_csr},
-                             {"format", "pem_bundle"},
-                             {"not_after", "9999-12-31T23:59:59Z"}}));
-      if (!response) {
-        CRANE_ERROR("Failed to sign external CA certificate");
-        return false;
-      }
-
-      data = nlohmann::json::parse(response.value())["data"];
-
-      external_ca_pem = data["certificate"];
-
-      response = pki_external_->setSignedIntermediate(
-          Vault::Parameters({{"certificate", external_ca_pem}}));
-      if (!response) {
-        CRANE_ERROR("Failed to set signed external CA certificate");
-        return false;
-      }
-    }
-
-    external_ca->CACertContent = external_ca_pem;
-    if (external_ca->CACertContent.empty()) {
-      CRANE_ERROR("CACertContent is empty");
-      return false;
-    }
-
-    if (!util::os::SaveFile(external_ca->CACertFilePath, external_ca_pem, 0644))
-      return false;
-
-  } catch (const std::exception& e) {
-    CRANE_ERROR("Failed to issue external CA certificate: {}", e.what());
-    return false;
-  }
-
-  return true;
 }
 
 bool VaultClient::RevokeCert(const std::string& serial_number) {
@@ -210,74 +133,6 @@ bool VaultClient::IsCertAllowed(const std::string& serial_number) {
 std::optional<std::string> VaultClient::GetVaultHealth_() {
   return Vault::HttpConsumer::get(*root_client_,
                                   GetUrl_("/v1/sys/", Vault::Path{"health"}));
-}
-
-bool VaultClient::CreateRole_(const std::string& role_name,
-                              const std::string& domains) {
-  nlohmann::json::value_type data;
-  std::optional<std::string> response;
-
-  try {
-    response = pki_external_->readRole(Vault::Path{role_name});
-    if (response) return true;
-
-    response = pki_external_->createRole(
-        Vault::Path{role_name},
-        Vault::Parameters{{"allowed_domains", domains},
-                          {"allow_subdomains", "true"},
-                          {"allow_glob_domains", "true"},
-                          {"not_after", "9999-12-31T23:59:59Z"}});
-    if (!response) {
-      CRANE_ERROR("Failed to create role {}", role_name);
-      return false;
-    }
-  } catch (const std::exception& e) {
-    CRANE_ERROR("Failed to create role {}: {}", role_name, e.what());
-    return false;
-  }
-
-  return true;
-}
-
-bool VaultClient::IssureExternalCert_(const std::string& role_name,
-                                      const std::string& domains,
-                                      ServerCertificateConfig* external_cert) {
-  nlohmann::json::value_type data;
-  std::optional<std::string> response;
-
-  if (!external_cert->ServerCertContent.empty()) return true;
-
-  try {
-    response = pki_external_->issue(
-        Vault::Path(role_name),
-        Vault::Parameters{{"common_name", std::format("external.{}", domains)},
-                          {"alt_names", std::format("localhost,*.{}", domains)},
-                          {"exclude_cn_from_sans", "true"}});
-    if (!response) {
-      CRANE_ERROR("Failed to issue external certificate");
-      return false;
-    }
-
-    data = nlohmann::json::parse(response.value())["data"];
-    std::string external_pem = data["certificate"];
-    std::string external_key = data["private_key"];
-
-    external_cert->ServerCertContent = external_pem;
-    external_cert->ServerKeyContent = external_key;
-    if (!util::os::SaveFile(external_cert->ServerCertFilePath, external_pem,
-                            0644))
-      return false;
-
-    if (!util::os::SaveFile(external_cert->ServerKeyFilePath, external_key,
-                            0600))
-      return false;
-
-  } catch (const std::exception& e) {
-    CRANE_ERROR("Failed to issue external certificate: {}", e.what());
-    return false;
-  }
-
-  return true;
 }
 
 std::optional<std::string> VaultClient::ListRevokeCertificate_() {
