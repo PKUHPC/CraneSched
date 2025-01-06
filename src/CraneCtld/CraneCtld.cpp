@@ -347,8 +347,8 @@ void ParseConfig(int argc, char** argv) {
             external_certs.ServerCertContent =
                 util::ReadFileIntoString(external_certs.ServerCertFilePath);
           } catch (const std::exception& e) {
-            CRANE_DEBUG("Read cert file error: {}", e.what());
-            // std::exit(1);
+            CRANE_ERROR("Read external cert file error: {}", e.what());
+            std::exit(1);
           }
         } else {
           CRANE_ERROR("ExternalCertFilePath is empty");
@@ -363,8 +363,8 @@ void ParseConfig(int argc, char** argv) {
             external_certs.ServerKeyContent =
                 util::ReadFileIntoString(external_certs.ServerKeyFilePath);
           } catch (const std::exception& e) {
-            CRANE_DEBUG("Read cert file error: {}", e.what());
-            // std::exit(1);
+            CRANE_ERROR("Read external key file error: {}", e.what());
+            std::exit(1);
           }
         } else {
           CRANE_ERROR("ExternalKeyFilePath is empty");
@@ -379,8 +379,8 @@ void ParseConfig(int argc, char** argv) {
             external_ca_certs.CACertContent =
                 util::ReadFileIntoString(external_ca_certs.CACertFilePath);
           } catch (const std::exception& e) {
-            CRANE_DEBUG("Read cert file error: {}", e.what());
-            // std::exit(1);
+            CRANE_ERROR("Read external ca file error: {}", e.what());
+            std::exit(1);
           }
         } else {
           CRANE_ERROR("ExternalCAFilePath is empty");
@@ -896,10 +896,7 @@ void InitializeCtldGlobalVariables() {
   g_vault_client = std::make_unique<vault::VaultClient>(
       g_config.VaultConf.Token, g_config.VaultConf.Addr,
       g_config.VaultConf.Port, g_config.VaultConf.Tls);
-  if (!g_vault_client->InitPki(g_config.VaultConf.DomainSuffix,
-                               &g_config.VaultConf.ExternalCACerts,
-                               &g_config.VaultConf.ExternalCerts))
-    std::exit(1);
+  if (!g_vault_client->InitPki()) std::exit(1);
 
   // Account manager must be initialized before Task Scheduler
   // since the recovery stage of the task scheduler will acquire
