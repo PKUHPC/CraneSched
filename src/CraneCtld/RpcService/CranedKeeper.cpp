@@ -729,8 +729,8 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
     craned->m_channel_ = CreateTcpTlsCustomChannelByHostname(
         craned_id, g_config.CranedListenConf.CranedListenPort,
         g_config.ListenConf.TlsCerts.InternalCerts,
-        g_config.ListenConf.TlsCerts.CranedClientCerts,
-        g_config.ListenConf.TlsCerts.DomainSuffix, channel_args);
+        g_config.ListenConf.TlsCerts.CranedClientCerts, g_config.DomainSuffix,
+        channel_args);
   else
     craned->m_channel_ = CreateTcpInsecureCustomChannel(
         ip_addr, g_config.CranedListenConf.CranedListenPort, channel_args);

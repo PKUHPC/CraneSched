@@ -49,7 +49,7 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
         cfored_name, kCforedDefaultPort,
         g_config.ListenConf.TlsCerts.CranedTlsCerts,
         g_config.ListenConf.TlsCerts.CforedClientTlsCerts,
-        g_config.ListenConf.TlsCerts.DomainSuffix);
+        g_config.DomainSuffix);
   else
     m_cfored_channel_ =
         CreateTcpInsecureChannel(cfored_name, kCforedDefaultPort);

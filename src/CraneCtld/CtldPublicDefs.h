@@ -92,7 +92,6 @@ struct Config {
     bool UseTls{false};
     struct TlsCertsConfig {
       std::string InternalCaContent;
-      std::string DomainSuffix;
       ServerCertificateConfig ExternalCerts;
       ServerCertificateConfig InternalCerts;
       ClientCertificateConfig CranedClientCerts;
@@ -114,7 +113,6 @@ struct Config {
     std::string Port;
     std::string Token;
     bool Tls;
-    std::string DomainSuffix;
     std::unordered_set<std::string> AllowedNodes;
 
     ServerCertificateConfig ExternalCerts;
@@ -122,6 +120,7 @@ struct Config {
   };
 
   VaultConfig VaultConf;
+  std::string DomainSuffix;
 
   struct Priority {
     enum TypeEnum { Basic, MultiFactor };
