@@ -281,9 +281,33 @@ bool VaultClient::IssureExternalCert_(const std::string& role_name,
 }
 
 std::optional<std::string> VaultClient::ListRevokeCertificate_() {
-  return Vault::HttpConsumer::list(
-      *root_client_, GetPkiUrl_(Vault::SecretMount{"pki_external"},
-                                Vault::Path{"certs/revoked"}));
+  return list_(*root_client_, GetPkiUrl_(Vault::SecretMount{"pki_external"},
+                                         Vault::Path{"certs/revoked"}));
+}
+
+std::optional<std::string> VaultClient::list_(const Vault::Client& client,
+                                              const Vault::Url& url) {
+  if (!client.is_authenticated()) {
+    return std::nullopt;
+  }
+
+  auto response = client.getHttpClient().list(url, client.getToken(),
+                                              client.getNamespace());
+
+  if (Vault::HttpClient::is_success(response)) {
+    return {response.value().body.value()};
+  }
+
+  // Do not return an error when revoked is empty.
+  if (response) {
+    auto jsonResponse = nlohmann::json::parse(response.value().body.value());
+    if (jsonResponse.contains("errors") && jsonResponse["errors"].is_array() &&
+        jsonResponse["errors"].empty())
+      return {response.value().body.value()};
+    client.getHttpClient().handleResponseError(response.value());
+  }
+
+  return std::nullopt;
 }
 
 Vault::Url VaultClient::GetPkiUrl_(const Vault::SecretMount secret_mount,
