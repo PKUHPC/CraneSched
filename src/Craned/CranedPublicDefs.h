@@ -57,7 +57,6 @@ struct Config {
     bool UseTls{false};
     struct TlsCertsConfig {
       std::string InternalCaContent;
-      std::string DomainSuffix;
       ServerCertificateConfig CranedTlsCerts;
       ClientCertificateConfig InternalClientTlsCerts;
       ClientCertificateConfig CforedClientTlsCerts;
@@ -67,6 +66,8 @@ struct Config {
 
     std::string UnixSocketListenAddr;
   };
+
+  std::string DomainSuffix;
 
   struct PluginConfig {
     bool Enabled{false};

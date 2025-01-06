@@ -17,6 +17,7 @@
  */
 
 #include "CtldClient.h"
+
 #include "CranedPublicDefs.h"
 #include "crane/GrpcHelper.h"
 
@@ -35,11 +36,12 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
-  if (g_config.ListenConf.UseTls) 
+  if (g_config.ListenConf.UseTls)
     m_ctld_channel_ = CreateTcpTlsCustomChannelByHostname(
         server_address, g_config.CraneCtldForCranedPort,
-        g_config.ListenConf.TlsCerts.CranedTlsCerts, g_config.ListenConf.TlsCerts.InternalClientTlsCerts, 
-        g_config.ListenConf.TlsCerts.DomainSuffix, channel_args);
+        g_config.ListenConf.TlsCerts.CranedTlsCerts,
+        g_config.ListenConf.TlsCerts.InternalClientTlsCerts,
+        g_config.DomainSuffix, channel_args);
   else
     m_ctld_channel_ = CreateTcpInsecureCustomChannel(
         server_address, g_config.CraneCtldForCranedPort, channel_args);
@@ -91,7 +93,8 @@ void CtldClient::OnCraneCtldConnected() {
   CRANE_ERROR("Failed to register actively.");
 }
 
-void CtldClient::TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change) {
+void CtldClient::TaskStatusChangeAsync(
+    TaskStatusChangeQueueElem&& task_status_change) {
   absl::MutexLock lock(&m_task_status_change_mtx_);
   m_task_status_change_list_.emplace_back(std::move(task_status_change));
 }

@@ -174,10 +174,6 @@ void ParseConfig(int argc, char** argv) {
 
         g_config.ListenConf.UseTls = true;
 
-        if (ssl_config["DomainSuffix"])
-          g_config.ListenConf.TlsCerts.DomainSuffix =
-              ssl_config["DomainSuffix"].as<std::string>();
-
         if (ssl_config["InternalCaFilePath"]) {
           std::string internalCaFilePath =
               ssl_config["InternalCaFilePath"].as<std::string>();
@@ -290,6 +286,9 @@ void ParseConfig(int argc, char** argv) {
       } else {
         g_config.ListenConf.UseTls = false;
       }
+
+      if (config["DomainSuffix"])
+        g_config.DomainSuffix = config["DomainSuffix"].as<std::string>();
 
       if (config["Vault"]) {
         const auto& vault_config = config["Vault"];

@@ -20,18 +20,18 @@ SSL:
   CforedCertFilePath: /etc/crane/tls/cfored.pem
   CforedKeyFilePath: /etc/crane/tls/cfored.key
   InternalCaFilePath: /etc/crane/tls/internal_ca.pem
-  DomainSuffix: crane.com
 
 Vault:
   Addr: 127.0.0.1
   Port: 8200
   TokenPath: /etc/crane/vault_token.txt  # Token cannot be leaked
-  DomainSuffix: crane.com
   Tls: false
 #  Nodes: "cn[15-18]"
   ExternalCertFilePath: /etc/crane/pki/external.pem
   ExternalKeyFilePath: /etc/crane/pki/external.key
   ExternalCaFilePath: /etc/crane/pki/external_ca.pem
+
+DomainSuffix: crane.com
 
 # Ctld settings
 # the listening address of control machine
