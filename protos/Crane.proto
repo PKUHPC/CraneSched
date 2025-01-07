@@ -760,6 +760,7 @@ message SignUserCertificateResponse {
 
 message ResetUserCredentialRequest {
   string username = 1;
+  bool is_force = 2;
 }
 
 message ResetUserCredentialReply {
