@@ -1274,7 +1274,7 @@ CraneExpected<void> AccountManager::CheckModifyPartitionAcl(
 }
 
 AccountManager::CraneExpected<void> AccountManager::ResetUserCertificate(
-    uint32_t uid, const std::string& name) {
+    uint32_t uid, const std::string& name, bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   CraneExpected<void> result{};
 
@@ -1292,8 +1292,9 @@ AccountManager::CraneExpected<void> AccountManager::ResetUserCertificate(
       !CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level))
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 
-  if (!g_vault_client->RevokeCert(user->serial_number))
-    return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
+  if (user->serial_number != "" &&
+      !g_vault_client->RevokeCert(user->serial_number))
+    if (!force) return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
 
   // Save the serial number in the database.
   mongocxx::client_session::with_transaction_cb callback =

@@ -173,7 +173,7 @@ class AccountManager {
                                                  const std::string& alt_names);
 
   CraneExpected<void> ResetUserCertificate(uint32_t uid,
-                                           const std::string& name);
+                                           const std::string& name, bool force);
 
  private:
   void InitDataMap_();
