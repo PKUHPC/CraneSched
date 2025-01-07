@@ -403,11 +403,12 @@ enum ModifyField {
   Description = 3;
   // user
   AdminLevel = 4;
+  DefaultAccount = 5;
   // qos
-  Priority = 5;
-  MaxJobsPerUser = 6;
-  MaxCpusPerUser = 7;
-  MaxTimeLimitPerTask = 8;
+  Priority = 6;
+  MaxJobsPerUser = 7;
+  MaxCpusPerUser = 8;
+  MaxTimeLimitPerTask = 9;
 }
 
 message AccountInfo {
