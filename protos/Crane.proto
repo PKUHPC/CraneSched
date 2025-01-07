@@ -759,7 +759,7 @@ message SignUserCertificateResponse {
 }
 
 message ResetUserCredentialRequest {
-  string username = 1;
+  repeated string user_list = 1;
   bool is_force = 2;
 }
 

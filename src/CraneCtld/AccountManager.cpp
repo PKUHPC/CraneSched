@@ -1067,7 +1067,7 @@ AccountManager::CraneExpected<std::string> AccountManager::SignUserCertificate(
 }
 
 AccountManager::CraneExpected<void> AccountManager::ResetUserCertificate(
-    uint32_t uid, const std::string& name, bool force) {
+    uint32_t uid, const std::vector<std::string>& user_list, bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   CraneExpected<void> result{};
 
@@ -1075,26 +1075,41 @@ AccountManager::CraneExpected<void> AccountManager::ResetUserCertificate(
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
-  const User* user = GetExistedUserInfoNoLock_(name);
-  if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
-
   if (!CheckIfUserHasHigherPrivThan_(*op_user, User::None))
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 
-  if (op_user->name != name &&
-      !CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level))
-    return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
+  std::vector<const User*> user_ptr_list;
+  if (user_list.empty()) {
+    for (const auto& [username, user] : m_user_map_) {
+      user_ptr_list.emplace_back(user.get());
+    }
+  } else {
+    for (const auto& username : user_list) {
+      const User* user = GetExistedUserInfoNoLock_(username);
+      if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+      user_ptr_list.emplace_back(user);
+    }
+  }
 
-  if (user->serial_number == "") return result;
+  for (const auto& user : user_ptr_list) {
+    if (op_user->name != user->name &&
+        !CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level))
+      return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
+  }
 
-  if (!g_vault_client->RevokeCert(user->serial_number))
-    if (!force) return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
+  for (const auto& user : user_ptr_list) {
+    if (!user->serial_number.empty() &&
+        !g_vault_client->RevokeCert(user->serial_number))
+      if (!force) return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
+  }
 
   // Save the serial number in the database.
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
-        g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
-                                     name, "serial_number", "");
+        for (const auto& user : user_ptr_list) {
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
+                                       user->name, "serial_number", "");
+        }
       };
 
   // Update to database
@@ -1102,7 +1117,9 @@ AccountManager::CraneExpected<void> AccountManager::ResetUserCertificate(
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
-  m_user_map_[name]->serial_number = "";
+  for (const auto& user : user_ptr_list) {
+    m_user_map_[user->name]->serial_number = "";
+  }
 
   return result;
 }

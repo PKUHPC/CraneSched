@@ -870,8 +870,13 @@ grpc::Status CraneCtldServiceImpl::ResetUserCredential(
 
   uint32_t uid = extract_result.value();
 
-  auto result = g_account_manager->ResetUserCertificate(
-      uid, request->username(), request->is_force());
+  std::vector<std::string> user_list;
+  for (const auto &username : request->user_list()) {
+    user_list.emplace_back(username);
+  }
+
+  auto result = g_account_manager->ResetUserCertificate(uid, user_list,
+                                                        request->is_force());
   if (!result) {
     response->set_ok(false);
     response->set_reason(result.error());
