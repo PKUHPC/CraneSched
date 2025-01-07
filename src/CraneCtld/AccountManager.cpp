@@ -1085,8 +1085,9 @@ AccountManager::CraneExpected<void> AccountManager::ResetUserCertificate(
       !CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level))
     return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 
-  if (user->serial_number != "" &&
-      !g_vault_client->RevokeCert(user->serial_number))
+  if (user->serial_number == "") return result;
+
+  if (!g_vault_client->RevokeCert(user->serial_number))
     if (!force) return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
 
   // Save the serial number in the database.
