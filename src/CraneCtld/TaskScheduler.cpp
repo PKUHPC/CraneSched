@@ -2100,6 +2100,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
   task->SetResources(std::move(allocated_res));
 
+  TrackerList satisfied_trackers(task->node_num);
   std::vector<TimeAvailResTracker> trackers;
   std::priority_queue<TimeAvailResTracker*, std::vector<TimeAvailResTracker*>,
                       std::function<bool(const TimeAvailResTracker*,
@@ -2113,12 +2114,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     auto& time_avail_res_map =
         node_selection_info.node_time_avail_res_map.at(craned_id);
     trackers.emplace_back(craned_id, time_avail_res_map.begin(),
-                          time_avail_res_map.end(),
+                          time_avail_res_map.end(), &satisfied_trackers,
                           &task->Resources().at(craned_id));
     pq.emplace(&trackers.back());
   }
-
-  TrackerList satisfied_trackers(task->node_num);
 
   while (!pq.empty()) {
     absl::Time time = pq.top()->it->first;
@@ -2139,10 +2138,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
                           pq.top()->it->first) {
       *start_time = satisfied_trackers.kth_time();
       craned_ids->clear();
-      auto it = satisfied_trackers.tracker_list.begin();
+      auto it = satisfied_trackers.m_tracker_list_.begin();
       while (true) {
-        craned_ids->emplace_back((*it)->tracker_ptr->craned_id);
-        if (*satisfied_trackers.kth_iter == it++) break;
+        craned_ids->emplace_back(it->tracker_ptr->craned_id);
+        if (satisfied_trackers.kth_iter == it++) break;
       }
       CRANE_ASSERT(*start_time != absl::InfiniteFuture());
       CRANE_ASSERT(craned_ids->size() == task->node_num);

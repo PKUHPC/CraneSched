@@ -97,6 +97,18 @@ class MultiFactorPriority : public IPrioritySorter {
 
 class INodeSelectionAlgo {
  public:
+  /**
+   * This map stores how much resource is available
+   * over time on each Craned node.
+   *
+   * In this map, the time is discretized by 1s and starts from absl::Now().
+   * {x: a, y: b, z: c, ...} means that
+   * In time interval [x, y-1], the amount of available resources is a.
+   * In time interval [y, z-1], the amount of available resources is b.
+   * In time interval [z, ...], the amount of available resources is c.
+   */
+  using TimeAvailResMap = std::map<absl::Time, ResourceInNode>;
+
   // Pair content: <The task which is going to be run,
   //                The craned id on which it will be run>
   // Partition information is not needed because scheduling is carried out in
@@ -145,68 +157,57 @@ class MinLoadFirst : public INodeSelectionAlgo {
   static constexpr uint32_t kAlgoMaxTaskNumPerNode = 1000;
   static constexpr absl::Duration kAlgoMaxTimeWindow = absl::Hours(24 * 7);
 
-  /**
-   * This map stores how much resource is available
-   * over time on each Craned node.
-   *
-   * In this map, the time is discretized by 1s and starts from absl::Now().
-   * {x: a, y: b, z: c, ...} means that
-   * In time interval [x, y-1], the amount of available resources is a.
-   * In time interval [y, z-1], the amount of available resources is b.
-   * In time interval [z, ...], the amount of available resources is c.
-   */
-  using TimeAvailResMap = std::map<absl::Time, ResourceInNode>;
-
   struct TimeAvailResTracker;
 
   struct TrackerList {
-    struct TrackerListElem {
+    struct Node {
       TimeAvailResTracker* tracker_ptr;
       absl::Time time;
       bool first_k;
 
-      TrackerListElem(TimeAvailResTracker* tracker_ptr, absl::Time time,
-                      bool first_k)
+      Node(TimeAvailResTracker* tracker_ptr, absl::Time time, bool first_k)
           : tracker_ptr(tracker_ptr), time(time), first_k(first_k) {}
     };
-    std::list<std::unique_ptr<TrackerListElem>> tracker_list;
+
+    using ListContainer = std::list<Node>;
+
+    ListContainer m_tracker_list_;
 
     const int k_value;
-    std::optional<
-        std::list<std::unique_ptr<TrackerList::TrackerListElem>>::iterator>
-        kth_iter;
+    ListContainer::iterator kth_iter;
 
-    TrackerList(int k_value) : k_value(k_value), kth_iter(std::nullopt) {}
+    explicit TrackerList(int k_value)
+        : k_value(k_value), kth_iter(m_tracker_list_.end()) {}
 
     void try_push_back(TimeAvailResTracker* it, absl::Time time) {
-      if (it->tracker_list_elem) return;
-      tracker_list.push_back(std::move(std::make_unique<TrackerListElem>(
-          it, time, tracker_list.size() < k_value)));
-      if (tracker_list.size() == k_value) {
-        assert(!kth_iter.has_value());
-        kth_iter = std::prev(tracker_list.end());
+      if (it->m_tracker_list_pos_ != m_tracker_list_.end()) return;
+
+      m_tracker_list_.emplace_back(it, time, m_tracker_list_.size() < k_value);
+      if (m_tracker_list_.size() == k_value) {
+        CRANE_ASSERT(kth_iter == m_tracker_list_.end());
+        kth_iter = std::prev(m_tracker_list_.end());
       }
-      it->tracker_list_elem = std::prev(tracker_list.end());
+      it->m_tracker_list_pos_ = std::prev(m_tracker_list_.end());
     }
 
     void try_erase(TimeAvailResTracker* it) {
-      if (!it->tracker_list_elem) return;
-      auto elem = *it->tracker_list_elem;
-      it->tracker_list_elem = std::nullopt;
-      if (kth_iter && (*elem)->first_k) {
-        auto next_iter = std::next(*kth_iter);
-        if (next_iter == tracker_list.end()) {
-          kth_iter = std::nullopt;
-        } else {
-          (*next_iter)->first_k = true;
-          kth_iter = next_iter;
+      if (it->m_tracker_list_pos_ == m_tracker_list_.end()) return;
+
+      auto elem = *it->m_tracker_list_pos_;
+      it->m_tracker_list_pos_ = m_tracker_list_.end();
+
+      if (kth_iter != m_tracker_list_.end() && elem.first_k) {
+        kth_iter = std::next(kth_iter);
+        if (kth_iter != m_tracker_list_.end()) {
+          kth_iter->first_k = true;
         }
       }
-      tracker_list.erase(elem);
+      m_tracker_list_.erase(it->m_tracker_list_pos_);
     }
 
     absl::Time kth_time() const {
-      return kth_iter ? (*(*kth_iter))->time : absl::InfiniteFuture();
+      return kth_iter == m_tracker_list_.end() ? kth_iter->time
+                                               : absl::InfiniteFuture();
     }
   };
 
@@ -215,20 +216,22 @@ class MinLoadFirst : public INodeSelectionAlgo {
     TimeAvailResMap::const_iterator it;
     const TimeAvailResMap::const_iterator end;
     const ResourceInNode* task_res;
-    std::optional<
-        std::list<std::unique_ptr<TrackerList::TrackerListElem>>::iterator>
-        tracker_list_elem;
+
+    TrackerList* m_tracker_list_;
+    TrackerList::ListContainer::iterator m_tracker_list_pos_;
     bool satisfied_flag;
 
     TimeAvailResTracker(const CranedId& craned_id,
                         const TimeAvailResMap::const_iterator& begin,
                         const TimeAvailResMap::const_iterator& end,
+                        TrackerList* tracker_list,
                         const ResourceInNode* task_res)
         : craned_id(craned_id),
           it(begin),
           end(end),
           task_res(task_res),
-          tracker_list_elem(std::nullopt) {
+          m_tracker_list_(tracker_list),
+          m_tracker_list_pos_(m_tracker_list_->m_tracker_list_.end()) {
       satisfied_flag = satisfied();
     }
 
