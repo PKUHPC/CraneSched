@@ -1075,8 +1075,8 @@ AccountManager::CraneExpected<void> AccountManager::ResetUserCertificate(
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
-  if (!CheckIfUserHasHigherPrivThan_(*op_user, User::None))
-    return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
+  result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
+  if (!result) return result;
 
   std::vector<const User*> user_ptr_list;
   if (user_list.empty()) {
@@ -1089,12 +1089,6 @@ AccountManager::CraneExpected<void> AccountManager::ResetUserCertificate(
       if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
       user_ptr_list.emplace_back(user);
     }
-  }
-
-  for (const auto& user : user_ptr_list) {
-    if (op_user->name != user->name &&
-        !CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level))
-      return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
   }
 
   for (const auto& user : user_ptr_list) {

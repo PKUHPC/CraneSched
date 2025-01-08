@@ -93,14 +93,12 @@ struct Config {
     bool UseTls{false};
     struct TlsCertsConfig {
       std::string InternalCaContent;
-      ServerCertificateConfig ExternalCerts;
       ServerCertificateConfig InternalCerts;
       ClientCertificateConfig CranedClientCerts;
       ClientCertificateConfig CforedClientCerts;
     };
 
     TlsCertsConfig TlsCerts;
-    std::string JwtSecretContent;
   };
   CraneCtldListenConf ListenConf;
 

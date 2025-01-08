@@ -70,7 +70,6 @@ class VaultClient {
 
   std::unique_ptr<Vault::Client> root_client_;
   std::unique_ptr<Vault::Pki> pki_root_;
-  std::unique_ptr<Vault::Pki> pki_internal_;
   std::unique_ptr<Vault::Pki> pki_external_;
 
   // TODO: 采用并行容器，提高性能

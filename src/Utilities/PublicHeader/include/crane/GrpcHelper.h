@@ -19,9 +19,6 @@
 #pragma once
 
 #include <grpc++/grpc++.h>
-#include <grpcpp/security/auth_metadata_processor.h>
-#include <grpcpp/security/server_credentials.h>
-#include <grpcpp/support/status.h>
 #include <spdlog/fmt/bundled/format.h>
 
 #include "crane/Network.h"
