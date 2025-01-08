@@ -56,8 +56,6 @@ bool VaultClient::InitPki() {
 
   pki_root_ = std::make_unique<Vault::Pki>(
       Vault::Pki{*root_client_, Vault::SecretMount{"pki"}});
-  pki_internal_ = std::make_unique<Vault::Pki>(
-      Vault::Pki{*root_client_, Vault::SecretMount{"pki_internal"}});
   pki_external_ = std::make_unique<Vault::Pki>(
       Vault::Pki{*root_client_, Vault::SecretMount{"pki_external"}});
 
