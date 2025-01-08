@@ -6,5 +6,6 @@ target_link_libraries(Utility_VaultClient PUBLIC
         curl
         vault
         nlohmann_json
+        phmap
         Utility_PublicHeader
 )
