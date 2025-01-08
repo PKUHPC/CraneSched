@@ -94,19 +94,13 @@ bool VaultClient::RevokeCert(const std::string& serial_number) {
     return false;
   }
 
-  {
-    util::write_lock_guard write_lock(rw_mutex_);
-    allowed_certs_.erase(serial_number);
-  }
+  allowed_certs_.erase(serial_number);
 
   return true;
 }
 
 bool VaultClient::IsCertAllowed(const std::string& serial_number) {
-  {
-    util::read_lock_guard read_lock(rw_mutex_);
-    if (allowed_certs_.contains(serial_number)) return true;
-  }
+  if (allowed_certs_.contains(serial_number)) return true;
 
   try {
     auto response = ListRevokeCertificate_();
@@ -120,10 +114,7 @@ bool VaultClient::IsCertAllowed(const std::string& serial_number) {
     return false;
   }
 
-  {
-    util::write_lock_guard write_lock(rw_mutex_);
-    allowed_certs_.emplace(serial_number);
-  }
+  allowed_certs_.emplace(serial_number);
 
   return true;
 }

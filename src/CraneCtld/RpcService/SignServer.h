@@ -64,10 +64,6 @@ class SignServer {
   std::unique_ptr<SignServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
 
-  inline static std::mutex s_sigint_mtx;
-  inline static std::condition_variable s_sigint_cv;
-  static void signal_handler_func(int) { s_sigint_cv.notify_one(); };
-
   friend class SignServiceImpl;
 };
 

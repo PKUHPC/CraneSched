@@ -19,6 +19,7 @@
 #pragma once
 
 #include <VaultClient.h>
+#include <parallel_hashmap/phmap.h>
 
 #include <expected>
 #include <memory>
@@ -38,7 +39,7 @@ struct SignResponse {
   std::string certificate;
 };
 
-using AllowedCerts = std::unordered_set<std::string>;
+using AllowedCerts = phmap::parallel_flat_hash_set<std::string>;
 
 class VaultClient {
  public:
@@ -72,9 +73,8 @@ class VaultClient {
   std::unique_ptr<Vault::Pki> pki_root_;
   std::unique_ptr<Vault::Pki> pki_external_;
 
-  // TODO: 采用并行容器，提高性能
-  AllowedCerts allowed_certs_ ABSL_GUARDED_BY(rw_mutex_);
-  util::rw_mutex rw_mutex_;
+  // Use parallel containers to improve performance.
+  AllowedCerts allowed_certs_;
 
   std::string address_;
   std::string port_;
