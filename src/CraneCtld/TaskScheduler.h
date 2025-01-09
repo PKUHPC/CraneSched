@@ -179,35 +179,36 @@ class MinLoadFirst : public INodeSelectionAlgo {
     explicit TrackerList(int k_value)
         : k_value(k_value), kth_iter(m_tracker_list_.end()) {}
 
-    void try_push_back(TimeAvailResTracker* it, absl::Time time) {
-      if (it->m_tracker_list_pos_ != m_tracker_list_.end()) return;
+    void try_push_back(TimeAvailResTracker* tracker, absl::Time time) {
+      if (tracker->m_tracker_list_pos_ != m_tracker_list_.end()) return;
 
-      m_tracker_list_.emplace_back(it, time, m_tracker_list_.size() < k_value);
+      m_tracker_list_.emplace_back(tracker, time,
+                                   m_tracker_list_.size() < k_value);
       if (m_tracker_list_.size() == k_value) {
         CRANE_ASSERT(kth_iter == m_tracker_list_.end());
         kth_iter = std::prev(m_tracker_list_.end());
       }
-      it->m_tracker_list_pos_ = std::prev(m_tracker_list_.end());
+      tracker->m_tracker_list_pos_ = std::prev(m_tracker_list_.end());
     }
 
-    void try_erase(TimeAvailResTracker* it) {
-      if (it->m_tracker_list_pos_ == m_tracker_list_.end()) return;
+    void try_erase(TimeAvailResTracker* tracker) {
+      if (tracker->m_tracker_list_pos_ == m_tracker_list_.end()) return;
 
-      auto elem = *it->m_tracker_list_pos_;
-      it->m_tracker_list_pos_ = m_tracker_list_.end();
+      const Node& node = *tracker->m_tracker_list_pos_;
 
-      if (kth_iter != m_tracker_list_.end() && elem.first_k) {
+      if (kth_iter != m_tracker_list_.end() && node.first_k) {
         kth_iter = std::next(kth_iter);
         if (kth_iter != m_tracker_list_.end()) {
           kth_iter->first_k = true;
         }
       }
-      m_tracker_list_.erase(it->m_tracker_list_pos_);
+      m_tracker_list_.erase(tracker->m_tracker_list_pos_);
+      tracker->m_tracker_list_pos_ = m_tracker_list_.end();
     }
 
     absl::Time kth_time() const {
-      return kth_iter == m_tracker_list_.end() ? kth_iter->time
-                                               : absl::InfiniteFuture();
+      return kth_iter == m_tracker_list_.end() ? absl::InfiniteFuture()
+                                               : kth_iter->time;
     }
   };
 
