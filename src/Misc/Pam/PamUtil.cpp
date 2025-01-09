@@ -36,6 +36,23 @@
 
 #include "protos/Crane.grpc.pb.h"
 
+static void FreePamResp(struct pam_response *pr, int num_msg) {
+  struct pam_response *r = pr;
+
+  if (pr == nullptr) return;
+
+  for (int i = 0; i < num_msg; i++, r++) {
+    if (r->resp) {
+      /* clear before freeing -- may be a password */
+      bzero(r->resp, strlen(r->resp));
+      free(r->resp);
+      r->resp = nullptr;
+    }
+  }
+
+  free(pr);
+}
+
 void LoadCraneConfig(pam_handle_t *pamh, int argc, const char **argv,
                      bool *initialized) {
   g_pam_config.CraneConfigFilePath = kDefaultConfigPath;
@@ -117,7 +134,7 @@ void PamSendMsgToClient(pam_handle_t *pamh, const char *mesg) {
   if (rc != PAM_SUCCESS)
     pam_syslog(pamh, LOG_ERR, "unable to converse with app: %s",
                pam_strerror(pamh, rc));
-  if (prsp != nullptr) _pam_drop_reply(prsp, 1);
+  FreePamResp(prsp, 1);
 }
 
 bool PamGetRemoteUid(pam_handle_t *pamh, const char *user_name, uid_t *uid) {
@@ -217,7 +234,7 @@ bool PamGetRemoteAddressPort(pam_handle_t *pamh, std::string *address,
     if (entry.is_socket()) {
       pam_syslog(pamh, LOG_ERR, "[Crane] Checking socket fd %s",
                  entry.path().c_str());
-      struct stat stat_buf {};
+      struct stat stat_buf{};
       // stat() will resolve symbol link.
       if (stat(entry.path().c_str(), &stat_buf) != 0) {
         pam_syslog(pamh, LOG_ERR, "[Crane] stat failed for socket fd %s",
