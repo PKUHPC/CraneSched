@@ -62,7 +62,7 @@ set(CLANG_VERSION "0.0.0")
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_GNU_VERSION)
     if (CRANE_ENABLE_CGROUP_V2)
-        message(STATUS "Enabling Cgroup V2 will build cgroup_dev_bpf_object, which requires Clang ${REQUIRED_BPF_CLANG_VERSION}+. Use GNU ${CMAKE_CXX_COMPILER_VERSION} for other modules. ")
+        message(STATUS "Enabling Cgroup V2 needs to build EBPF, which requires Clang ${REQUIRED_BPF_CLANG_VERSION}+. Use GNU ${CMAKE_CXX_COMPILER_VERSION} for other modules.")
         find_program(CLANG_EXECUTABLE NAMES clang)
         if (CLANG_EXECUTABLE)
             execute_process(
@@ -72,8 +72,8 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_
             )
             string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" CLANG_VERSION ${CLANG_VERSION_OUTPUT})
             if (CLANG_VERSION VERSION_GREATER_EQUAL REQUIRED_BPF_CLANG_VERSION)
-                set(ENABLE_BPF ON)
-                message(STATUS "Found Clang at ${CLANG_EXECUTABLE} with version ${CLANG_VERSION}; using this version for the cgroup_dev_bpf_object module.")
+                set(CRANE_ENABLE_BPF ON)
+                message(STATUS "Found Clang at ${CLANG_EXECUTABLE} with version ${CLANG_VERSION}; EBPF will be built with it.")
             else ()
                 message(FATAL_ERROR "Clang found at ${CLANG_EXECUTABLE} is version ${CLANG_VERSION}, but version ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2. You may use Cgroup V1 instead.")
             endif ()
@@ -84,7 +84,8 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_CLANG_VERSION)
         if (CRANE_ENABLE_CGROUP_V2)
-            set(ENABLE_BPF ON)
+            set(CRANE_ENABLE_BPF ON)
+            message(STATUS "EBPF is Enabled.")
         endif ()
         message(STATUS "Using Clang for all module.")
     else ()
@@ -334,6 +335,10 @@ else ()
     message(FATAL_ERROR "LibAIO was not found.")
 endif ()
 
+if (CRANE_ENABLE_BPF)
+    find_package(BPF 1.4.6 REQUIRED)
+endif ()
+
 # Needed by grpc
 set(_PROTOBUF_LIBPROTOBUF libprotobuf)
 set(_REFLECTION grpc++_reflection)
@@ -341,10 +346,6 @@ set(_PROTOBUF_PROTOC $<TARGET_FILE:protoc>)
 set(_GRPC_GRPCPP grpc++)
 set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 
-if (ENABLE_BPF)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(libbpf REQUIRED IMPORTED_TARGET libbpf>=1.4.6)
-endif ()
 # @formatter:off
 add_definitions(-DCRANE_BUILD_DIRECTORY=\("${CMAKE_BINARY_DIR}"\))
 # @formatter:on
@@ -397,13 +398,13 @@ install(TARGETS craned
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
 )
 
-if(ENABLE_BPF)
-    install(FILES 
+if (CRANE_ENABLE_BPF)
+    install(FILES
             ${CMAKE_BINARY_DIR}/src/Misc/BPF/cgroup_dev_bpf.o
             DESTINATION /usr/local/lib64/bpf/
             COMPONENT cranedc
             PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
-endif()
+endif ()
 
 # Install unit files
 install(FILES
