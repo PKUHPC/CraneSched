@@ -211,11 +211,16 @@ CraneErr CgroupManager::Init(
   if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
     RmJobCgroupsExcept_(running_job_ids);
   } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
-    RmCgroupsV2Except_(CgroupConstant::RootCgroupFullPath, running_job_ids);
+    RmJobCgroupsV2Except_(CgroupConstant::RootCgroupFullPath, running_job_ids);
 
 #ifdef CRANE_ENABLE_BPF
     auto job_id_bpf_key_vec_map =
         GetJobBpfMapCgroupsV2(CgroupConstant::RootCgroupFullPath);
+    if (!job_id_bpf_key_vec_map) {
+      CRANE_ERROR("Failed to read job ebpf info, skip recovery.");
+      return CraneErr::kEbpfError;
+    }
+
     for (const auto &[job_id, bpf_key_vec] : job_id_bpf_key_vec_map) {
       if (running_job_ids.contains(job_id)) continue;
       CRANE_DEBUG("Erase bpf map entry for not running job {}", job_id);
@@ -233,7 +238,7 @@ CraneErr CgroupManager::Init(
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
   }
-  return {};
+  return CraneErr::kOk;
 }
 
 void CgroupManager::RmJobCgroupsExcept_(
@@ -611,7 +616,7 @@ std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
       std::string job_id_str;
       if (it.is_directory() && RE2::FullMatch(it.path().filename().c_str(),
                                               *cg_pattern, &job_id_str)) {
-        struct stat cg_stat;
+        struct stat cg_stat{};
         if (stat(it.path().c_str(), &cg_stat)) {
           CRANE_ERROR("Cgroup {} stat failed: {}", it.path().c_str(),
                       std::strerror(errno));
@@ -626,46 +631,55 @@ std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
 }
 
 #ifdef CRANE_ENABLE_BPF
-std::unordered_map<task_id_t, std::vector<BpfKey>>
+
+CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
 CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
   std::unordered_map cg_ino_job_id_map =
       GetCgJobIdMapCgroupV2(root_cgroup_path);
   bool init_ebpf = !bpf_runtime_info.Valid();
-  if (!init_ebpf) bpf_runtime_info.InitializeBpfObj();
+  if (!init_ebpf) {
+    if (!bpf_runtime_info.InitializeBpfObj())
+      return std::unexpected(CraneErr::kEbpfError);
+  }
+
   std::unordered_map<task_id_t, std::vector<BpfKey>> results;
+
   auto add_task = [&results, &cg_ino_job_id_map](BpfKey *key) {
+    // Skip log level record.
+    if (key->cgroup_id == 0) {
+      return;
+    }
     CRANE_ASSERT(cg_ino_job_id_map.contains(key->cgroup_id));
     results[cg_ino_job_id_map[key->cgroup_id]].emplace_back(*key);
   };
-  int bpf_map_count = 0;
+
   auto *pre_key = new BpfKey();
   if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr, pre_key,
                             sizeof(BpfKey)) == 0) {
     CRANE_ERROR("Failed to get first key of bpf map");
   }
+
   add_task(pre_key);
-  bpf_map_count++;
   auto *cur_key = new BpfKey();
   while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key, cur_key,
                                sizeof(BpfKey)) == 0) {
-    ++bpf_map_count;
     add_task(cur_key);
   }
+
   delete pre_key;
   delete cur_key;
   if (init_ebpf) bpf_runtime_info.CloseBpfObj();
 
   return results;
 }
-
 #endif
 
 void CgroupManager::RmJobCgroupsV2Expect_(
     const std::unordered_set<task_id_t> &job_ids) {
-  RmCgroupsV2Except_(CgroupConstant::RootCgroupFullPath, job_ids);
+  RmJobCgroupsV2Except_(CgroupConstant::RootCgroupFullPath, job_ids);
 }
 
-void CgroupManager::RmCgroupsV2Except_(
+void CgroupManager::RmJobCgroupsV2Except_(
     const std::string &root_cgroup_path,
     const std::unordered_set<task_id_t> &job_ids) {
   static const LazyRE2 cg_pattern{R"(Crane_Task_(\d+))"};
@@ -676,7 +690,7 @@ void CgroupManager::RmCgroupsV2Except_(
       if (it.is_directory() && RE2::FullMatch(it.path().filename().c_str(),
                                               *cg_pattern, &job_id_str)) {
         task_id_t job_id = std::stoul(job_id_str);
-        if (!job_ids.contains(job_id)) continue;
+        if (job_ids.contains(job_id)) continue;
         if (std::filesystem::remove(it.path()))
           CRANE_ERROR("Failed to remove cgroup {}", it.path().c_str());
       }
@@ -1356,7 +1370,7 @@ bool CgroupV2::RecoverFromCgSpec(const CgroupSpec &cg_spec) {
       }
     }
   }
-  m_bpf_attached_=true;
+  m_bpf_attached_ = true;
   return true;
 }
 

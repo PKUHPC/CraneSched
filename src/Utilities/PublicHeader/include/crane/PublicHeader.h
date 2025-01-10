@@ -54,8 +54,8 @@ enum class CraneErr : uint16_t {
 
   kInvalidStub,
   kCgroupError,
+  kEbpfError,
   kProtobufError,
-  kLibEventError,
   kNoAvailNode,
   kSupervisorError,
 

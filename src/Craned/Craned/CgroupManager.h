@@ -537,15 +537,16 @@ class CgroupManager {
       const std::string &root_cgroup_path);
 
 #ifdef CRANE_ENABLE_BPF
-  static std::unordered_map<task_id_t, std::vector<BpfKey>>
+  static CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
   GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path);
 #endif
 
   static void RmJobCgroupsV2Expect_(
       const std::unordered_set<task_id_t> &task_ids);
 
-  static void RmCgroupsV2Except_(const std::string &root_cgroup_path,
-                                 const std::unordered_set<task_id_t> &job_ids);
+  static void RmJobCgroupsV2Except_(
+      const std::string &root_cgroup_path,
+      const std::unordered_set<task_id_t> &job_ids);
 
   ControllerFlags m_mounted_controllers_;
 
