@@ -488,16 +488,43 @@ CraneErr TaskManager::SpawnTaskInstance_() {
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
+    // TODO: Add all other supplementary groups.
+    // Currently we only set the primary gid and the egid when task was
+    // submitted.
+    std::vector<gid_t> gids;
+    if (instance->task.gid() != instance->pwd_entry.Gid())
+      gids.emplace_back(instance->task.gid());
+    gids.emplace_back(instance->pwd_entry.Gid());
+    int rc = setgroups(gids.size(), gids.data());
+    if (rc == -1) {
+      fmt::print(stderr,
+                 "[Supervisor Subprocess] Error: setgroups() failed: {}\n",
+                 instance->task.task_id(), strerror(errno));
+      std::abort();
+    }
+    rc = setresgid(instance->task.gid(), instance->task.gid(),
+                   instance->task.gid());
+    if (rc == -1) {
+      fmt::print(stderr,
+                 "[Supervisor Subprocess] Error: setegid() failed: {}\n",
+                 instance->task.task_id(), strerror(errno));
+      std::abort();
+    }
+    rc = setresuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid(),
+                   instance->pwd_entry.Uid());
+    if (rc == -1) {
+      fmt::print(stderr,
+                 "[Supervisor Subprocess] Error: seteuid() failed: {}\n",
+                 instance->task.task_id(), strerror(errno));
+      std::abort();
+    }
     const std::string& cwd = instance->task.cwd();
     rc = chdir(cwd.c_str());
     if (rc == -1) {
-      // CRANE_ERROR("[Child Process] Error: chdir to {}. {}", cwd.c_str(),
-      //             strerror(errno));
+      fmt::print(stderr, "[Supervisor Subprocess] Error: chdir to {}. {}\n",
+                 cwd.c_str(), strerror(errno));
       std::abort();
     }
-
-    setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid());
-    setregid(instance->pwd_entry.Gid(), instance->pwd_entry.Gid());
 
     // Set pgid to the pid of task root process.
     setpgid(0, 0);
@@ -513,13 +540,19 @@ CraneErr TaskManager::SpawnTaskInstance_() {
 
     ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!ok || !msg.ok()) {
-      // if (!ok) {
-      // int err = istream.GetErrno();
-      // CRANE_ERROR("Failed to read socket from parent: {}", strerror(err));
-      // }
+      if (!ok) {
+        int err = istream.GetErrno();
+        fmt::print(stderr,
+                   "[Supervisor Subprocess] Error: Failed to read socket from "
+                   "parent: {}\n",
+                   strerror(err));
+      }
 
-      // if (!msg.ok())
-      // CRANE_ERROR("Parent process ask not to start the subprocess.");
+      if (!msg.ok()) {
+        fmt::print(
+            stderr,
+            "[Supervisor Subprocess] Error: Parent process ask to suicide.\n");
+      }
 
       std::abort();
     }
@@ -535,8 +568,8 @@ CraneErr TaskManager::SpawnTaskInstance_() {
       stdout_fd =
           open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
       if (stdout_fd == -1) {
-        // CRANE_ERROR("[Child Process] Error: open {}. {}", stdout_file_path,
-        // strerror(errno));
+        fmt::print(stderr, "[Supervisor Subprocess] Error: open {}. {}\n",
+                   stdout_file_path, strerror(errno));
         std::abort();
       }
       dup2(stdout_fd, 1);
@@ -547,8 +580,8 @@ CraneErr TaskManager::SpawnTaskInstance_() {
         stderr_fd =
             open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
         if (stderr_fd == -1) {
-          // CRANE_ERROR("[Child Process] Error: open {}. {}", stderr_file_path,
-          //             strerror(errno));
+          fmt::print(stderr, "[Supervisor Subprocess] Error: open {}. {}\n",
+                     stderr_file_path, strerror(errno));
           std::abort();
         }
         dup2(stderr_fd, 2);  // stderr -> error file
@@ -569,7 +602,7 @@ CraneErr TaskManager::SpawnTaskInstance_() {
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
     ok &= ostream.Flush();
     if (!ok) {
-      // CRANE_ERROR("[Child Process] Error: Failed to flush.");
+      fmt::print(stderr, "[Supervisor Subprocess] Error: Failed to flush.\n");
       std::abort();
     }
 
@@ -587,7 +620,10 @@ CraneErr TaskManager::SpawnTaskInstance_() {
     EnvMap task_env_map = instance->GetTaskEnvMap();
     for (const auto& [name, value] : task_env_map)
       if (setenv(name.c_str(), value.c_str(), 1))
-        fmt::print("setenv for {}={} failed!\n", name, value);
+        fmt::print(
+            stderr,
+            "[Supervisor Subprocess] Warning: setenv() for {}={} failed.\n",
+            name, value);
 
     // Argv[0] is the program name which can be anything.
     argv.emplace_back("CraneScript");
@@ -609,9 +645,9 @@ CraneErr TaskManager::SpawnTaskInstance_() {
 
     // Error occurred since execv returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.
-    fmt::print(stderr, "[Craned Subprocess Error] Failed to execv. Error: {}\n",
+    fmt::print(stderr, "[Supervisor Subprocess] Error: execv failed: {}\n",
                strerror(errno));
-    // Todo: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
+    // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
     //  exit codes
     abort();
   }

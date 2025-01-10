@@ -313,7 +313,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
 
     if (!instance->cgroup->MigrateProcIn(child_pid)) {
       CRANE_ERROR(
-          "Terminate the subprocess of task #{} due to failure of cgroup "
+          "[Task #{}] Terminate the subprocess due to failure of cgroup "
           "migration.",
           process->task_spec.task_id());
 
@@ -324,7 +324,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
       ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
       close(ctrl_fd);
       if (!ok) {
-        CRANE_ERROR("Failed to ask subprocess {} to suicide for task #{}",
+        CRANE_ERROR("[Task #{}] Failed to ask subprocess to suicide.",
                     child_pid, process->task_spec.task_id());
 
         instance->err_before_exec = CraneErr::kProtobufError;
@@ -334,7 +334,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
       return CraneErr::kCgroupError;
     }
 
-    CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
+    CRANE_TRACE("[Task #{}] Task is ready. Asking subprocess to execv...",
                 process->task_spec.task_id());
 
     // Tell subprocess that the parent process is ready. Then the
@@ -342,14 +342,14 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     msg.set_ok(true);
     ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
     if (!ok) {
-      CRANE_ERROR("Failed to serialize msg to ostream: {}",
-                  strerror(ostream.GetErrno()));
+      CRANE_ERROR("[Task #{}] Failed to serialize msg to ostream: {}",
+                  process->task_spec.task_id(), strerror(ostream.GetErrno()));
     }
 
     if (ok) ok &= ostream.Flush();
     if (!ok) {
-      CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}: {}",
-                  child_pid, process->task_spec.task_id(),
+      CRANE_ERROR("[Task #{}] Failed to send ok=true to supervisor {}: {}",
+                  process->task_spec.task_id(), child_pid,
                   strerror(ostream.GetErrno()));
       close(ctrl_fd);
 
@@ -362,11 +362,11 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
                                           nullptr);
     if (!ok || !msg.ok()) {
       if (!ok)
-        CRANE_ERROR("Socket child endpoint failed: {}",
-                    strerror(istream.GetErrno()));
+        CRANE_ERROR("[Task #{}] Socket child endpoint failed: {}",
+                    process->task_spec.task_id(), strerror(istream.GetErrno()));
       if (!msg.ok())
-        CRANE_ERROR("False from subprocess {} of task #{}", child_pid,
-                    process->task_spec.task_id());
+        CRANE_ERROR("[Task #{}] Received false from subprocess {}",
+                    process->task_spec.task_id(), child_pid);
       close(ctrl_fd);
 
       instance->err_before_exec = CraneErr::kProtobufError;
@@ -382,13 +382,13 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
 
     ok = SerializeDelimitedToZeroCopyStream(init_request, &ostream);
     if (!ok) {
-      CRANE_ERROR("Failed to serialize msg to ostream: {}",
-                  strerror(ostream.GetErrno()));
+      CRANE_ERROR("[Task #{}] Failed to serialize msg to ostream: {}",
+                  process->task_spec.task_id(), strerror(ostream.GetErrno()));
     }
 
     if (ok) ok &= ostream.Flush();
     if (!ok) {
-      CRANE_ERROR("Failed to send init msg to supervisor for task #{}: {}",
+      CRANE_ERROR("[Task #{}] Failed to send init msg to supervisor: {}",
                   child_pid, process->task_spec.task_id(),
                   strerror(ostream.GetErrno()));
       close(ctrl_fd);
@@ -402,10 +402,10 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &istream, nullptr);
     if (!ok || !msg.ok()) {
       if (!ok)
-        CRANE_ERROR("Socket child endpoint failed: {}",
-                    strerror(istream.GetErrno()));
+        CRANE_ERROR("[Task #{}] Socket child endpoint failed: {}",
+                    process->task_spec.task_id(), strerror(istream.GetErrno()));
       if (!msg.ok())
-        CRANE_ERROR("False from subprocess {} of task #{}", child_pid,
+        CRANE_ERROR("[Task #{}] False from subprocess {}.", child_pid,
                     process->task_spec.task_id());
       close(ctrl_fd);
 
@@ -422,7 +422,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     auto stub = g_supervisor_keeper->GetStub(process->task_spec.task_id());
     auto task_id = stub->ExecuteTask(process->task_spec);
     if (!task_id) {
-      CRANE_ERROR("Supervisor failed to execute task #{}",
+      CRANE_ERROR("[Task #{}] Supervisor failed to execute task.",
                   process->task_spec.task_id());
       instance->err_before_exec = CraneErr::kSupervisorError;
       KillPid_(child_pid, SIGKILL);
