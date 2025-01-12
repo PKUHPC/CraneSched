@@ -40,8 +40,13 @@ message CranedRegisterRequest {
 }
 
 message CranedRegisterReply {
+  message TaskList{
+    repeated TaskToD tasks = 1;
+  }
   bool ok = 1;
   bool already_registered = 2;
+  map<uint32, JobSpec> job_map = 3;
+  map<uint32, TaskList> job_id_tasks_map = 4;
 }
 
 message QueryCranedListFromTaskIdRequest {
@@ -83,11 +88,16 @@ message ExecuteTasksReply {
   repeated uint32 failed_task_id_list = 1;
 }
 
+message ExecuteProcRequest{
+  ProcToD proc = 1;
+}
+
+message ExecuteProcReply{
+  bool ok = 1;
+}
+
 message CreateCgroupForTasksRequest {
-  repeated uint32 task_id_list = 1;
-  repeated uint32 uid_list = 2;
-  repeated ResourceInNode res_list = 3;
-  repeated string execution_node = 4;
+  repeated JobSpec cg_spec_vec = 1;
 }
 
 message CreateCgroupForTasksReply{}
@@ -359,7 +369,7 @@ message QueryUserInfoRequest {
 message QueryUserInfoReply {
   bool ok = 1;
   ErrCode reason = 2;
-  repeated UserInfo user_list = 3; 
+  repeated UserInfo user_list = 3;
 }
 
 message QueryQosInfoRequest {
@@ -785,7 +795,7 @@ service CraneCtld {
   rpc ModifyAccount(ModifyAccountRequest) returns (ModifyAccountReply);
   rpc ModifyUser(ModifyUserRequest) returns (ModifyUserReply);
   rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
-  
+
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 
   /* RPCs called from cinfo */
@@ -798,6 +808,7 @@ service CraneCtld {
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc ExecuteTask(ExecuteTasksRequest) returns(ExecuteTasksReply);
+  rpc ExecuteProc(ExecuteProcRequest) returns(ExecuteProcReply);
 
   rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
 
@@ -824,6 +835,9 @@ service Craned {
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
   rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest) returns (QueryTaskEnvVariablesReply);
   rpc QueryTaskEnvVariablesForward(QueryTaskEnvVariablesForwardRequest) returns (QueryTaskEnvVariablesForwardReply);
+
+  /* ----------------------------------- Called from Supervisor  --------------------------------------------------- */
+  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
 }
 
 service CraneForeD {

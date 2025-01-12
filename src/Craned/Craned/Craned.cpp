@@ -26,10 +26,10 @@
 #include <ctime>
 #include <cxxopts.hpp>
 
-#include "CforedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
+#include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
 
@@ -105,25 +105,17 @@ void ParseConfig(int argc, char** argv) {
         g_config.CranedDebugLevel = "info";
 
       // spdlog should be initialized as soon as possible
-      spdlog::level::level_enum log_level;
-      if (g_config.CranedDebugLevel == "trace") {
-        log_level = spdlog::level::trace;
-      } else if (g_config.CranedDebugLevel == "debug") {
-        log_level = spdlog::level::debug;
-      } else if (g_config.CranedDebugLevel == "info") {
-        log_level = spdlog::level::info;
-      } else if (g_config.CranedDebugLevel == "warn") {
-        log_level = spdlog::level::warn;
-      } else if (g_config.CranedDebugLevel == "error") {
-        log_level = spdlog::level::err;
+      std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
+      if (log_level.has_value()) {
+        InitLogger(log_level.value(), g_config.CranedLogFile, true);
       } else {
         fmt::print(stderr, "Illegal debug-level format.");
         std::exit(1);
       }
 
-      InitLogger(log_level, g_config.CranedLogFile);
 #ifdef CRANE_ENABLE_BPF
-      Craned::CgroupV2::SetBpfDebugLogLevel(static_cast<uint32_t>(log_level));
+      Craned::CgroupManager::bpf_runtime_info.SetLogging(log_level.value() <
+                                                         spdlog::level::info);
 #endif
       if (config["CranedUnixSockPath"])
         g_config.CranedUnixSockPath =
@@ -232,6 +224,11 @@ void ParseConfig(int argc, char** argv) {
             config["CraneCtldListenPort"].as<std::string>();
       else
         g_config.CraneCtldListenPort = kCtldDefaultPort;
+
+      if (config["SupervisorPath"]) {
+        g_config.SupervisorPath = config["SupervisorPath"].as<std::string>();
+      } else
+        g_config.SupervisorPath = kDefaultSupervisorPath;
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
@@ -599,10 +596,55 @@ void GlobalVariableInit() {
 
   PasswordEntry::InitializeEntrySize();
 
+  // It is always ok to create thread pool first.
+  g_thread_pool =
+      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
+
+  g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
+  CraneExpected<std::unordered_map<task_id_t, pid_t>> tasks =
+      g_supervisor_keeper->Init();
+
+  std::unordered_set<task_id_t> task_ids_supervisor;
+  std::unordered_map<task_id_t, pid_t> job_id_pid_map =
+      tasks.value_or(std::unordered_map<task_id_t, pid_t>());
+  for (const auto& [job_id, supervisor_state] : job_id_pid_map) {
+    task_ids_supervisor.emplace(job_id);
+  }
+
+  g_ctld_client = std::make_unique<Craned::CtldClient>();
+  g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
+  std::latch craned_registered(1);
+  std::unordered_map<task_id_t, Craned::JobSpec> job_spec_map;
+  std::unordered_map<task_id_t, crane::grpc::CranedRegisterReply::TaskList>
+      job_task_map;
+  g_ctld_client->SetCranedRegisterCb(
+      [&craned_registered, &job_spec_map, &job_task_map, &task_ids_supervisor](
+          const crane::grpc::CranedRegisterReply& register_reply) {
+        for (const auto& [job_id, job_spec] : register_reply.job_map()) {
+          if (task_ids_supervisor.contains(job_id)) {
+            job_spec_map.emplace(job_id, job_spec);
+            job_task_map.emplace(job_id,
+                                 register_reply.job_id_tasks_map().at(job_id));
+          }
+        }
+        craned_registered.count_down();
+      });
+  g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
+
+  g_ctld_client->StartConnectingCtld();
+
+  craned_registered.wait();
+  g_ctld_client->UnSetCranedRegisterCb();
+
+  std::unordered_set<task_id_t> running_job_ids;
+  for (const auto& [job_id, _] : job_spec_map) {
+    running_job_ids.emplace(job_id);
+  }
+
   using Craned::CgroupManager;
   using Craned::CgroupConstant::Controller;
-  g_cg_mgr = std::make_unique<Craned::CgroupManager>();
-  g_cg_mgr->Init();
+  g_cg_mgr = std::make_unique<CgroupManager>();
+  g_cg_mgr->Init(running_job_ids);
   if (g_cg_mgr->GetCgroupVersion() ==
           Craned::CgroupConstant::CgroupVersion::CGROUP_V1 &&
       (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
@@ -621,25 +663,24 @@ void GlobalVariableInit() {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
   }
+  std::unordered_map<task_id_t, Craned::JobStatusSpce> job_status_map;
+  for (const auto& job_id : running_job_ids) {
+    job_status_map.emplace(
+        job_id,
+        Craned::JobStatusSpce{.job_spec = job_spec_map[job_id],
+                              // Now each job have only one task
+                              .task_spec = job_task_map[job_id].tasks(0),
+                              .task_pid = job_id_pid_map[job_id]});
+  }
 
-  g_thread_pool =
-      std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
-
-  g_task_mgr = std::make_unique<Craned::TaskManager>();
-
-  g_ctld_client = std::make_unique<Craned::CtldClient>();
-  g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
-
-  g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
+  g_job_mgr = std::make_unique<Craned::JobManager>();
+  g_job_mgr->Init(std::move(job_status_map));
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
-
-  g_cfored_manager = std::make_unique<Craned::CforedManager>();
-  g_cfored_manager->Init();
 }
 
 void StartServer() {
@@ -657,16 +698,14 @@ void StartServer() {
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-  g_ctld_client->StartConnectingCtld();
   g_server->Wait();
 
   // Free global variables
-  g_task_mgr->Wait();
-  g_task_mgr.reset();
-  // CforedManager MUST be destructed after TaskManager.
-  g_cfored_manager.reset();
+  g_job_mgr->Wait();
+  g_job_mgr.reset();
   g_server.reset();
   g_ctld_client.reset();
+  g_supervisor_keeper.reset();
   g_plugin_client.reset();
 
   g_thread_pool->wait();
