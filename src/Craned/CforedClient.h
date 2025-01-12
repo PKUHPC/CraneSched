@@ -55,9 +55,8 @@ class CforedClient {
   };
 
   void CleanOutputQueueAndWriteToStreamThread_(
-      grpc::ClientAsyncReaderWriter<crane::grpc::StreamCforedTaskIORequest,
-                                    crane::grpc::StreamCforedTaskIOReply>*
-          stream,
+      grpc::ClientAsyncReaderWriter<crane::grpc::StreamTaskIORequest,
+                                    crane::grpc::StreamTaskIOReply>* stream,
       std::atomic<bool>* write_pending);
 
   ConcurrentQueue<std::pair<task_id_t, std::string /*msg*/>> m_output_queue_;
