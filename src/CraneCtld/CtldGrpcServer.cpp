@@ -833,12 +833,21 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
               writer->WriteTaskCancelRequest(task_id);
           };
 
-          meta.cb_task_completed = [this, i_type, cfored_name, writer_weak_ptr](
+          meta.cb_task_completed = [this, cfored_name, writer_weak_ptr](
                                        task_id_t task_id,
                                        bool send_completion_ack) {
+            CRANE_TRACE("The completion callback of task #{} has been called.",
+                        task_id);
             if (auto writer = writer_weak_ptr.lock();
-                writer && send_completion_ack)
+                writer && send_completion_ack) {
               writer->WriteTaskCompletionAckReply(task_id);
+            } else {
+              CRANE_ERROR(
+                  "Stream writer of ia task #{} has been destroyed. "
+                  "TaskCompletionAckReply will not be sent.",
+                  task_id);
+            }
+
             m_ctld_server_->m_mtx_.Lock();
 
             // If cfored disconnected, the cfored_name should have be
@@ -886,6 +895,12 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           if (g_task_scheduler->TerminatePendingOrRunningIaTask(
                   payload.task_id()) != CraneErrCode::SUCCESS)
             stream_writer->WriteTaskCompletionAckReply(payload.task_id());
+          else {
+            CRANE_TRACE(
+                "Termination of task #{} succeeded. "
+                "Leave TaskCompletionAck to TaskStatusChange.",
+                payload.task_id());
+          }
         } break;
 
         case StreamCforedRequest::CFORED_GRACEFUL_EXIT: {

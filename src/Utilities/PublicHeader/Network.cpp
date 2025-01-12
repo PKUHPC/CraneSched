@@ -18,6 +18,9 @@
 
 #include "crane/Network.h"
 
+#include <netinet/in.h>
+#include <sys/socket.h>
+
 #include "crane/Logger.h"
 
 namespace crane {
