@@ -314,21 +314,9 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
       mutable_meta->set_error_file_pattern(meta_in_ctld.error_file_pattern);
       mutable_meta->set_sh_script(meta_in_ctld.sh_script);
     } else {
-      auto &meta_in_ctld = std::get<InteractiveMetaInTask>(task->meta);
+      const auto &proto_ia_meta = task->TaskToCtld().interactive_meta();
       auto *mutable_meta = mutable_task->mutable_interactive_meta();
-      mutable_meta->set_cfored_name(meta_in_ctld.cfored_name);
-      mutable_meta->set_sh_script(meta_in_ctld.sh_script);
-      mutable_meta->set_term_env(meta_in_ctld.term_env);
-      mutable_meta->set_interactive_type(meta_in_ctld.interactive_type);
-      mutable_meta->set_pty(meta_in_ctld.pty);
-
-      mutable_meta->set_x11(meta_in_ctld.x11);
-      if (meta_in_ctld.x11) {
-        auto *x11_meta = mutable_meta->mutable_x11_meta();
-        x11_meta->set_cookie(meta_in_ctld.x11_meta.cookie);
-        x11_meta->set_target(meta_in_ctld.x11_meta.target);
-        x11_meta->set_port(meta_in_ctld.x11_meta.port);
-      }
+      mutable_meta->CopyFrom(proto_ia_meta);
     }
   }
 

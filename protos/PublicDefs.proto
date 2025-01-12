@@ -411,15 +411,14 @@ enum ModifyField {
   Qos = 1;
   DefaultQos = 2;
   // account and qos
-  Description = 10;
+  Description = 3;
   // user
-  AdminLevel = 20;
-  DefaultAccount = 21;
+  AdminLevel = 4;
   // qos
-  Priority = 30;
-  MaxJobsPerUser = 31;
-  MaxCpusPerUser = 32;
-  MaxTimeLimitPerTask = 33;
+  Priority = 5;
+  MaxJobsPerUser = 6;
+  MaxCpusPerUser = 7;
+  MaxTimeLimitPerTask = 8;
 }
 
 message AccountInfo {
