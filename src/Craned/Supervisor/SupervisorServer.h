@@ -32,13 +32,34 @@ using grpc::ServerContext;
 using grpc::ServerReaderWriter;
 using grpc::Status;
 
-using crane::grpc::Supervisor;
+using crane::grpc::supervisor::Supervisor;
 class SupervisorServiceImpl : public Supervisor::Service {
  public:
   SupervisorServiceImpl() = default;
-  grpc::Status StartTask(grpc::ServerContext* context,
-                         const crane::grpc::TaskExecutionRequest* request,
-                         crane::grpc::TaskExecutionReply* response) override;
+  grpc::Status ExecuteTask(
+      grpc::ServerContext* context,
+      const crane::grpc::supervisor::TaskExecutionRequest* request,
+      crane::grpc::supervisor::TaskExecutionReply* response) override;
+
+  grpc::Status CheckTaskStatus(
+      grpc::ServerContext* context,
+      const crane::grpc::supervisor::CheckTaskStatusRequest* request,
+      crane::grpc::supervisor::CheckTaskStatusReply* response) override;
+
+  grpc::Status ChangeTaskTimeLimit(
+      grpc::ServerContext* context,
+      const crane::grpc::supervisor::ChangeTaskTimeLimitRequest* request,
+      crane::grpc::supervisor::ChangeTaskTimeLimitReply* response) override;
+
+  grpc::Status TerminateTask(
+      grpc::ServerContext* context,
+      const crane::grpc::supervisor::TerminateTaskRequest* request,
+      crane::grpc::supervisor::TerminateTaskReply* response) override;
+
+  grpc::Status Terminate(
+      grpc::ServerContext* context,
+      const crane::grpc::supervisor::TerminateRequest* request,
+      crane::grpc::supervisor::TerminateReply* response) override;
 };
 
 class SupervisorServer {

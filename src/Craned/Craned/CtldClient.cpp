@@ -73,7 +73,7 @@ void CtldClient::OnCraneCtldConnected() {
           CRANE_INFO("This craned has already registered.");
           if (m_on_craned_register_cb_.has_value()) {
             static std::once_flag flag;
-            std::call_once(flag,m_on_craned_register_cb_.value(),reply.ctld_jobs());
+            std::call_once(flag, m_on_craned_register_cb_.value(), reply);
           }
           return;
         } else {

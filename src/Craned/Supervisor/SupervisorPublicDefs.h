@@ -61,7 +61,7 @@ struct Config {
 
   std::string SupervisorUnixSockPath;
 
-  task_id_t TaskId;
+  task_id_t JobId;
 };
 
 inline Config g_config;

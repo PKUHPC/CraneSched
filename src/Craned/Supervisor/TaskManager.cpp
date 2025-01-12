@@ -25,6 +25,7 @@
 
 #include "CforedClient.h"
 #include "CranedClient.h"
+#include "SupervisorServer.h"
 #include "crane/String.h"
 #include "protos/Supervisor.grpc.pb.h"
 
@@ -41,6 +42,7 @@ bool TaskInstance::IsCalloc() const {
   return task.type() == crane::grpc::Interactive &&
          task.interactive_meta().interactive_type() == crane::grpc::Calloc;
 }
+
 EnvMap TaskInstance::GetTaskEnvMap() const {
   std::unordered_map<std::string, std::string> env_map;
   // Crane Env will override user task env;
@@ -117,6 +119,13 @@ TaskManager::TaskManager() : m_supervisor_exit_(false) {
         EvCleanChangeTaskTimeLimitQueueCb_();
       });
 
+  m_check_task_status_async_handle_ =
+      m_uvw_loop_->resource<uvw::async_handle>();
+  m_check_task_status_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        EvCleanCheckTaskStatusQueueCb_();
+      });
+
   m_grpc_execute_task_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
   m_grpc_execute_task_async_handle_->on<uvw::async_event>(
@@ -128,7 +137,8 @@ TaskManager::TaskManager() : m_supervisor_exit_(false) {
     util::SetCurrentThreadName("TaskMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
     idle_handle->on<uvw::idle_event>(
-        [this](const uvw::idle_event&, uvw::idle_handle& h) {
+        [&g_server, this](const uvw::idle_event&, uvw::idle_handle& h) {
+          g_server->Shutdown();
           if (m_supervisor_exit_) {
             h.parent().walk([](auto&& h) { h.close(); });
             h.parent().stop();
@@ -240,9 +250,20 @@ std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
   // Path ends with a directory, append default stdout file name
   // `Crane-<Job ID>.out` to the path.
   if (absl::EndsWith(resolved_path_pattern, "/"))
-    resolved_path_pattern += fmt::format("Crane-{}.out", g_config.TaskId);
+    resolved_path_pattern += fmt::format("Crane-{}.out", g_config.JobId);
 
   return resolved_path_pattern;
+}
+
+std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync(
+    const TaskSpec& spec) {
+  std::promise<CraneExpected<pid_t>> pid_promise;
+  auto pid_future = pid_promise.get_future();
+  m_grpc_execute_task_queue_.enqueue(
+      ExecuteTaskElem{.task_instance = std::make_unique<TaskInstance>(spec),
+                      .pid_prom = std::move(pid_promise)});
+  m_grpc_execute_task_async_handle_->send();
+  return pid_future;
 }
 
 void TaskManager::LaunchTaskInstance_() {
@@ -260,7 +281,7 @@ void TaskManager::LaunchTaskInstance_() {
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
   auto& sh_path = instance->process->meta->parsed_sh_script_path =
-      fmt::format("{}/Crane-{}.sh", g_config.CraneScriptDir, g_config.TaskId);
+      fmt::format("{}/Crane-{}.sh", g_config.CraneScriptDir, g_config.JobId);
 
   FILE* fptr = fopen(sh_path.c_str(), "w");
   if (fptr == nullptr) {
@@ -297,7 +318,7 @@ void TaskManager::LaunchTaskInstance_() {
     meta->parsed_output_file_pattern =
         ParseFilePathPattern_(instance->task.batch_meta().output_file_pattern(),
                               instance->task.cwd());
-    absl::StrReplaceAll({{"%j", std::to_string(g_config.TaskId)},
+    absl::StrReplaceAll({{"%j", std::to_string(g_config.JobId)},
                          {"%u", instance->pwd_entry.Username()},
                          {"%x", instance->task.name()}},
                         &meta->parsed_output_file_pattern);
@@ -308,7 +329,7 @@ void TaskManager::LaunchTaskInstance_() {
       meta->parsed_error_file_pattern = ParseFilePathPattern_(
           instance->task.batch_meta().error_file_pattern(),
           instance->task.cwd());
-      absl::StrReplaceAll({{"%j", std::to_string(g_config.TaskId)},
+      absl::StrReplaceAll({{"%j", std::to_string(g_config.JobId)},
                            {"%u", instance->pwd_entry.Username()},
                            {"%x", instance->task.name()}},
                           &meta->parsed_error_file_pattern);
@@ -333,8 +354,8 @@ CraneErr TaskManager::SpawnTaskInstance_() {
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
   using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
 
-  using crane::grpc::CanStartMessage;
-  using crane::grpc::ChildProcessReady;
+  using crane::grpc::supervisor::CanStartMessage;
+  using crane::grpc::supervisor::ChildProcessReady;
 
   auto* instance = m_task_.get();
 
@@ -672,6 +693,34 @@ CraneErr TaskManager::KillTaskInstance_(int signum) {
   return CraneErr::kNonExistent;
 }
 
+std::future<CraneExpected<pid_t>> TaskManager::CheckTaskStatusAsync() {
+  std::promise<CraneExpected<pid_t>> status_promise;
+  auto status_future = status_promise.get_future();
+  m_check_task_status_queue_.enqueue(std::move(status_promise));
+  m_check_task_status_async_handle_->send();
+  return status_future;
+}
+
+std::future<CraneErr> TaskManager::ChangeTaskTimeLimitAsync(
+    absl::Duration time_limit) {
+  std::promise<CraneErr> ok_promise;
+  auto ok_future = ok_promise.get_future();
+  ChangeTaskTimeLimitQueueElem elem;
+  elem.time_limit = time_limit;
+  elem.ok_prom = std::move(ok_promise);
+  m_task_time_limit_change_queue_.enqueue(std::move(elem));
+  m_change_task_time_limit_async_handle_->send();
+  return ok_future;
+}
+
+void TaskManager::TerminateTaskAsync(bool mark_as_orphaned) {
+  TaskTerminateQueueElem elem;
+  elem.mark_as_orphaned = mark_as_orphaned;
+  m_task_terminate_queue_.enqueue(std::move(elem));
+  m_terminate_task_async_handle_->send();
+  return;
+}
+
 void TaskManager::EvSigchldCb_() {
   int status;
   pid_t pid;
@@ -730,7 +779,7 @@ void TaskManager::EvSigchldCb_() {
 
 void TaskManager::EvTaskTimerCb_() {
   CRANE_TRACE("Task #{} exceeded its time limit. Terminating it...",
-              g_config.TaskId);
+              g_config.JobId);
 
   // Sometimes, task finishes just before time limit.
   // After the execution of SIGCHLD callback where the task has been erased,
@@ -738,7 +787,7 @@ void TaskManager::EvTaskTimerCb_() {
   // That's why we need to check the existence of the task again in timer
   // callback, otherwise a segmentation fault will occur.
   if (!m_task_) {
-    CRANE_TRACE("Task #{} has already been removed.", g_config.TaskId);
+    CRANE_TRACE("Task #{} has already been removed.", g_config.JobId);
     return;
   }
 
@@ -761,10 +810,10 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     CRANE_TRACE(
         "Receive TerminateRunningTask Request from internal queue. "
         "Task id: {}",
-        g_config.TaskId);
+        g_config.JobId);
 
     if (!m_task_) {
-      CRANE_DEBUG("Terminating a non-existent task #{}.", g_config.TaskId);
+      CRANE_DEBUG("Terminating a non-existent task #{}.", g_config.JobId);
 
       // Note if Ctld wants to terminate some tasks that are not running,
       // it might indicate other nodes allocated to the task might have
@@ -809,6 +858,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     }
   }
 }
+
 void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   absl::Time now = absl::Now();
 
@@ -816,8 +866,8 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
     if (!m_task_) {
       CRANE_ERROR("Try to update the time limit of a non-existent task #{}.",
-                  g_config.TaskId);
-      elem.ok_prom.set_value(false);
+                  g_config.JobId);
+      elem.ok_prom.set_value(CraneErr::kNonExistent);
       continue;
     }
     TaskInstance* task_instance = m_task_.get();
@@ -839,23 +889,50 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
           task_instance,
           ToInt64Seconds((new_time_limit - (absl::Now() - start_time))));
     }
-    elem.ok_prom.set_value(true);
+    elem.ok_prom.set_value(CraneErr::kOk);
   }
 }
+
+void TaskManager::EvCleanCheckTaskStatusQueueCb_() {
+  std::promise<CraneExpected<pid_t>> elem;
+  while (m_check_task_status_queue_.try_dequeue(elem)) {
+    if (m_task_) {
+      if (!m_task_->process)
+        // Launch failed
+        elem.set_value(std::unexpected(CraneErr::kNonExistent));
+      else {
+        elem.set_value(m_task_->process->GetPid());
+      }
+    } else {
+      elem.set_value(std::unexpected(CraneErr::kNonExistent));
+    }
+  }
+}
+
 void TaskManager::EvGrpcExecuteTaskCb_() {
   if (m_task_ != nullptr) {
     CRANE_ERROR("Duplicated ExecuteTask request for task #{}. Ignore it.",
-                g_config.TaskId);
+                g_config.JobId);
     return;
   }
-  std::unique_ptr<TaskInstance> instance(
-      m_grpc_execute_task_elem_.exchange(nullptr, std::memory_order_acquire));
-  // Add a timer to limit the execution time of a task.
-  // Note: event_new and event_add in this function is not thread safe,
-  //       so we move it outside the multithreading part.
-  int64_t sec = instance->task.time_limit().seconds();
-  AddTerminationTimer_(instance.get(), sec);
-  CRANE_TRACE("Add a timer of {} seconds", sec);
+  struct ExecuteTaskElem elem;
+  while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
+    m_task_ = std::move(elem.task_instance);
+    // Add a timer to limit the execution time of a task.
+    // Note: event_new and event_add in this function is not thread safe,
+    //       so we move it outside the multithreading part.
+    int64_t sec = m_task_->task.time_limit().seconds();
+    AddTerminationTimer_(m_task_.get(), sec);
+    CRANE_TRACE("Add a timer of {} seconds", sec);
+    LaunchTaskInstance_();
+    if (!m_task_->process) {
+      CRANE_WARN("[Task #{}] Failed to launch process.]",
+                 m_task_->task.task_id());
+      elem.pid_prom.set_value(std::unexpected(CraneErr::kGenericFailure));
+    } else {
+      elem.pid_prom.set_value(m_task_->process->GetPid());
+    }
+  }
 }
 
 }  // namespace Supervisor

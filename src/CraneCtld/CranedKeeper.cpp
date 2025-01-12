@@ -257,68 +257,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
   crane::grpc::ExecuteTasksRequest request;
 
   for (TaskInCtld *task : tasks) {
-    auto *mutable_task = request.add_tasks();
 
-    // Set time_limit
-    mutable_task->mutable_time_limit()->CopyFrom(
-        google::protobuf::util::TimeUtil::MillisecondsToDuration(
-            ToInt64Milliseconds(task->time_limit)));
-
-    // Set resources
-    auto *mutable_res_in_node = mutable_task->mutable_resources();
-    *mutable_res_in_node = static_cast<crane::grpc::ResourceInNode>(
-        task->Resources().at(craned_id));
-
-    // Set type
-    mutable_task->set_type(task->type);
-    mutable_task->set_task_id(task->TaskId());
-    mutable_task->set_name(task->name);
-    mutable_task->set_account(task->account);
-    mutable_task->set_qos(task->qos);
-    mutable_task->set_partition(task->partition_id);
-
-    for (auto &&node : task->included_nodes) {
-      mutable_task->mutable_nodelist()->Add()->assign(node);
-    }
-
-    for (auto &&node : task->excluded_nodes) {
-      mutable_task->mutable_excludes()->Add()->assign(node);
-    }
-
-    mutable_task->set_node_num(task->node_num);
-    mutable_task->set_ntasks_per_node(task->ntasks_per_node);
-    mutable_task->set_cpus_per_task(static_cast<double>(task->cpus_per_task));
-
-    mutable_task->set_uid(task->uid);
-    mutable_task->set_gid(task->gid);
-    mutable_task->mutable_env()->insert(task->env.begin(), task->env.end());
-
-    mutable_task->set_cwd(task->cwd);
-    mutable_task->set_get_user_env(task->get_user_env);
-
-    for (const auto &hostname : task->CranedIds())
-      mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
-
-    mutable_task->mutable_start_time()->set_seconds(
-        task->StartTimeInUnixSecond());
-    mutable_task->mutable_time_limit()->set_seconds(
-        ToInt64Seconds(task->time_limit));
-
-    if (task->type == crane::grpc::Batch) {
-      auto &meta_in_ctld = std::get<BatchMetaInTask>(task->meta);
-      auto *mutable_meta = mutable_task->mutable_batch_meta();
-      mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
-      mutable_meta->set_error_file_pattern(meta_in_ctld.error_file_pattern);
-      mutable_meta->set_sh_script(meta_in_ctld.sh_script);
-    } else {
-      auto &meta_in_ctld = std::get<InteractiveMetaInTask>(task->meta);
-      auto *mutable_meta = mutable_task->mutable_interactive_meta();
-      mutable_meta->set_cfored_name(meta_in_ctld.cfored_name);
-      mutable_meta->set_sh_script(meta_in_ctld.sh_script);
-      mutable_meta->set_term_env(meta_in_ctld.term_env);
-      mutable_meta->set_interactive_type(meta_in_ctld.interactive_type);
-      mutable_meta->set_pty(meta_in_ctld.pty);
-    }
   }
 
   return request;

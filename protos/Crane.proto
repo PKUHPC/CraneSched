@@ -40,9 +40,13 @@ message CranedRegisterRequest {
 }
 
 message CranedRegisterReply {
+  message TaskList{
+    repeated TaskToD tasks = 1;
+  }
   bool ok = 1;
   bool already_registered = 2;
-  repeated JobSpec ctld_jobs = 3;
+  map<uint32, JobSpec> job_map = 3;
+  map<uint32, TaskList> job_id_tasks_map = 4;
 }
 
 message QueryCranedListFromTaskIdRequest {

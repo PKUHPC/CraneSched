@@ -23,6 +23,8 @@
 
 namespace Supervisor {
 
+using TaskSpec = crane::grpc::TaskToD;
+
 struct SavedPrivilege {
   uid_t uid;
   gid_t gid;
@@ -80,7 +82,7 @@ class ProcessInstance {
 };
 
 struct TaskInstance {
-  TaskInstance(crane::grpc::TaskToD task_to_d) : task(task_to_d) {}
+  TaskInstance(const TaskSpec& task_spec) : task(task_spec) {}
 
   ~TaskInstance() = default;
 
@@ -89,8 +91,7 @@ struct TaskInstance {
   bool IsCalloc() const;
 
   EnvMap GetTaskEnvMap() const;
-
-  crane::grpc::TaskToD task;
+  TaskSpec task;
 
   PasswordEntry pwd_entry;
 
@@ -149,13 +150,28 @@ class TaskManager {
 
   static std::string ParseFilePathPattern_(const std::string& path_pattern,
                                            const std::string& cwd);
+
+  std::future<CraneExpected<pid_t>> ExecuteTaskAsync(const TaskSpec& spec);
   void LaunchTaskInstance_();
   CraneErr SpawnTaskInstance_();
   CraneErr KillTaskInstance_(int signum);
 
+  std::future<CraneExpected<pid_t>> CheckTaskStatusAsync();
+
+  std::future<CraneErr> ChangeTaskTimeLimitAsync(absl::Duration time_limit);
+
+  void TerminateTaskAsync(bool mark_as_orphaned);
+
+  void TerminateSupervisor() { m_supervisor_exit_ = true; }
+
  private:
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
+
+  struct ExecuteTaskElem {
+    std::unique_ptr<TaskInstance> task_instance;
+    std::promise<CraneExpected<pid_t>> pid_prom;
+  };
 
   struct TaskTerminateQueueElem {
     bool terminated_by_user{false};  // If the task is canceled by user,
@@ -167,7 +183,7 @@ class TaskManager {
 
   struct ChangeTaskTimeLimitQueueElem {
     absl::Duration time_limit;
-    std::promise<bool> ok_prom;
+    std::promise<CraneErr> ok_prom;
   };
 
   void EvSigchldCb_();
@@ -175,6 +191,7 @@ class TaskManager {
 
   void EvCleanTerminateTaskQueueCb_();
   void EvCleanChangeTaskTimeLimitQueueCb_();
+  void EvCleanCheckTaskStatusQueueCb_();
   void EvGrpcExecuteTaskCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
@@ -187,14 +204,17 @@ class TaskManager {
   std::shared_ptr<uvw::async_handle> m_change_task_time_limit_async_handle_;
   ConcurrentQueue<ChangeTaskTimeLimitQueueElem> m_task_time_limit_change_queue_;
 
+  std::shared_ptr<uvw::async_handle> m_check_task_status_async_handle_;
+  ConcurrentQueue<std::promise<CraneExpected<pid_t>>>
+      m_check_task_status_queue_;
+
   std::shared_ptr<uvw::async_handle> m_grpc_execute_task_async_handle_;
-  std::atomic<TaskInstance*> m_grpc_execute_task_elem_;
+  ConcurrentQueue<ExecuteTaskElem> m_grpc_execute_task_queue_;
 
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
 
   std::unique_ptr<TaskInstance> m_task_;
-  absl::Mutex m_mtx_;
 };
 
 }  // namespace Supervisor

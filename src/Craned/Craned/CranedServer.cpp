@@ -21,6 +21,7 @@
 #include <yaml-cpp/yaml.h>
 
 #include "JobManager.h"
+#include "SupervisorKeeper.h"
 
 namespace Craned {
 
@@ -172,7 +173,7 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
   std::vector<JobSpec> job_specs;
   for (const auto &cg_spec_req : request->cg_spec_vec()) {
     CRANE_TRACE("Receive CreateCgroup for job #{}, uid {}",
-                cg_spec_req.task_id(), cg_spec_req.uid());
+                cg_spec_req.job_id(), cg_spec_req.uid());
     job_specs.emplace_back(cg_spec_req);
   }
 
@@ -503,6 +504,21 @@ grpc::Status CranedServiceImpl::QueryCranedRemoteMeta(
   grpc_meta->mutable_system_boot_time()->set_seconds(
       ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
 
+  response->set_ok(true);
+  return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::TaskStatusChange(
+    grpc::ServerContext *context,
+    const crane::grpc::TaskStatusChangeRequest *request,
+    crane::grpc::TaskStatusChangeReply *response) {
+  g_job_mgr->TaskStopAndDoStatusChangeAsync(
+      request->task_id(), request->new_status(), request->exit_code(),
+      request->reason());
+  auto stub = g_supervisor_keeper->GetStub(request->task_id());
+  CRANE_ASSERT(stub != nullptr);
+  stub->Terminate();
+  g_supervisor_keeper->RemoveSupervisor(request->task_id());
   response->set_ok(true);
   return Status::OK;
 }

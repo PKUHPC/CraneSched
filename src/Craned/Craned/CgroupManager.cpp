@@ -221,7 +221,7 @@ CraneErr CgroupManager::Init(
       return CraneErr::kEbpfError;
     }
 
-    for (const auto &[job_id, bpf_key_vec] : job_id_bpf_key_vec_map) {
+    for (const auto &[job_id, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
       if (running_job_ids.contains(job_id)) continue;
       CRANE_DEBUG("Erase bpf map entry for not running job {}", job_id);
       for (const auto &key : bpf_key_vec) {

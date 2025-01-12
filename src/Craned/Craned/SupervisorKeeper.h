@@ -29,36 +29,39 @@ namespace Craned {
 
 class SupervisorClient {
  public:
-  CraneExpected<pid_t> ExecuteTask(const crane::grpc::TaskToD task);
+  CraneExpected<pid_t> ExecuteTask(const crane::grpc::TaskToD& task);
 
-  CraneExpected<TaskStatusSpce> CheckTaskStatus();
+  CraneExpected<std::pair<task_id_t, pid_t>> CheckTaskStatus();
 
   CraneErr TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
   CraneErr ChangeTaskTimeLimit(absl::Duration time_limit);
+
+  void Terminate();
 
   void InitChannelAndStub(const std::string& endpoint);
 
  private:
   std::shared_ptr<grpc::Channel> m_channel_;
 
-  std::unique_ptr<crane::grpc::Supervisor::Stub> m_stub_;
+  std::unique_ptr<crane::grpc::supervisor::Supervisor::Stub> m_stub_;
 };
 
 class SupervisorKeeper {
  public:
   SupervisorKeeper() = default;
+
   /**
    * @brief Query all existing supervisor for task they hold.
-   * @return task_to_d from supervisors
+   * @return job_id and pid from supervisors
    */
-  CraneExpected<std::unordered_map<task_id_t, TaskStatusSpce>> Init();
+  CraneExpected<std::unordered_map<task_id_t, pid_t>> Init();
 
   void AddSupervisor(task_id_t task_id);
+  void RemoveSupervisor(task_id_t task_id);
+
   std::shared_ptr<SupervisorClient> GetStub(task_id_t task_id);
 
  private:
-  CraneExpected<TaskStatusSpce> RecoverSupervisorMt_(
-      const std::filesystem::path& path);
   absl::flat_hash_map<task_id_t, std::shared_ptr<SupervisorClient>>
       m_supervisor_map;
   absl::Mutex m_mutex;

@@ -24,14 +24,67 @@
 #include <latch>
 
 namespace Craned {
+using grpc::ClientContext;
+
+CraneExpected<pid_t> SupervisorClient::ExecuteTask(
+    const crane::grpc::TaskToD& task) {
+  ClientContext context;
+  crane::grpc::supervisor::TaskExecutionRequest request;
+  crane::grpc::supervisor::TaskExecutionReply reply;
+  *request.mutable_task() = task;
+  auto ok = m_stub_->ExecuteTask(&context, request, &reply);
+  if (ok.ok() && reply.ok()) {
+    return reply.pid();
+  } else
+    return std::unexpected(CraneErr::kRpcFailure);
+}
+
+CraneExpected<std::pair<task_id_t, pid_t>> SupervisorClient::CheckTaskStatus() {
+  ClientContext context;
+  crane::grpc::supervisor::CheckTaskStatusRequest request;
+  crane::grpc::supervisor::CheckTaskStatusReply reply;
+  auto ok = m_stub_->CheckTaskStatus(&context, request, &reply);
+  if (ok.ok() && reply.ok()) {
+    return std::pair{reply.job_id(), reply.pid()};
+  } else
+    return std::unexpected(CraneErr::kRpcFailure);
+}
+
+CraneErr SupervisorClient::TerminateTask(bool mark_as_orphaned,
+                                         bool terminated_by_user) {
+  ClientContext context;
+  crane::grpc::supervisor::TerminateTaskRequest request;
+  crane::grpc::supervisor::TerminateTaskReply reply;
+  request.set_mark_orphaned(mark_as_orphaned);
+  request.set_terminated_by_user(terminated_by_user);
+  auto ok = m_stub_->TerminateTask(&context, request, &reply);
+  if (ok.ok() && reply.ok()) {
+    return CraneErr::kOk;
+  } else
+    return CraneErr::kRpcFailure;
+}
+
+CraneErr SupervisorClient::ChangeTaskTimeLimit(absl::Duration time_limit) {
+  ClientContext context;
+  crane::grpc::supervisor::ChangeTaskTimeLimitRequest request;
+  crane::grpc::supervisor::ChangeTaskTimeLimitReply reply;
+  request.set_time_limit_seconds(absl::ToInt64Seconds(time_limit));
+  auto ok = m_stub_->ChangeTaskTimeLimit(&context, request, &reply);
+  if (ok.ok() && reply.ok())
+    return CraneErr::kOk;
+  else
+    return CraneErr::kRpcFailure;
+}
+
+void SupervisorClient::Terminate() {}
+
 void SupervisorClient::InitChannelAndStub(const std::string& endpoint) {
   m_channel_ = CreateUnixInsecureChannel(endpoint);
   // std::unique_ptr will automatically release the dangling stub.
-  m_stub_ = crane::grpc::Supervisor::NewStub(m_channel_);
+  m_stub_ = crane::grpc::supervisor::Supervisor::NewStub(m_channel_);
 }
 
-CraneExpected<std::unordered_map<task_id_t, TaskStatusSpce>>
-SupervisorKeeper::Init() {
+CraneExpected<std::unordered_map<task_id_t, pid_t>> SupervisorKeeper::Init() {
   try {
     std::filesystem::path path = kDefaultSupervisorUnixSockDir;
     if (std::filesystem::exists(path) && std::filesystem::is_directory(path)) {
@@ -41,18 +94,26 @@ SupervisorKeeper::Init() {
           files.emplace_back(it.path());
         }
       }
-      std::unordered_map<task_id_t, TaskStatusSpce> tasks;
+      std::unordered_map<task_id_t, pid_t> tasks;
       tasks.reserve(files.size());
       std::latch all_supervisor_reply(files.size());
       absl::Mutex mtx;
       for (const auto& file : files) {
         g_thread_pool->detach_task(
             [this, &file, &all_supervisor_reply, &mtx, &tasks]() {
-              auto task = this->RecoverSupervisorMt_(file);
+              std::shared_ptr stub = std::make_shared<SupervisorClient>();
+              stub->InitChannelAndStub(file);
+              CraneExpected<std::pair<task_id_t, pid_t>> task_status =
+                  stub->CheckTaskStatus();
               all_supervisor_reply.count_down();
-              if (!task) return;
+              if (!task_status) {
+                CRANE_ERROR("CheckTaskStatus for {} failed", file.string());
+                return;
+              }
+
+              m_supervisor_map.emplace(task_status.value().first, stub);
               absl::WriterMutexLock lk(&mtx);
-              tasks.emplace(task->task_spec.task_id(), task.value());
+              tasks.emplace(task_status.value());
             });
       }
       all_supervisor_reply.wait();
@@ -80,6 +141,15 @@ void SupervisorKeeper::AddSupervisor(task_id_t task_id) {
   m_supervisor_map.emplace(task_id, stub);
 }
 
+void SupervisorKeeper::RemoveSupervisor(task_id_t task_id) {
+  absl::WriterMutexLock lk(&m_mutex);
+  if (auto it = m_supervisor_map.find(task_id); it != m_supervisor_map.end()) {
+    CRANE_ERROR("Try to remove nonexistent supervisor for task #{}", task_id);
+    return;
+  }
+  m_supervisor_map.erase(task_id);
+}
+
 std::shared_ptr<SupervisorClient> SupervisorKeeper::GetStub(task_id_t task_id) {
   absl::ReaderMutexLock lk(&m_mutex);
   if (auto it = m_supervisor_map.find(task_id); it != m_supervisor_map.end()) {
@@ -87,20 +157,6 @@ std::shared_ptr<SupervisorClient> SupervisorKeeper::GetStub(task_id_t task_id) {
   } else {
     return nullptr;
   }
-}
-
-CraneExpected<TaskStatusSpce> SupervisorKeeper::RecoverSupervisorMt_(
-    const std::filesystem::path& path) {
-  std::shared_ptr stub = std::make_shared<SupervisorClient>();
-  stub->InitChannelAndStub(path);
-  auto supervisor_state = stub->CheckTaskStatus();
-  if (!supervisor_state) {
-    CRANE_ERROR("CheckTaskStatus for {} failed", path.string());
-    return std::unexpected(CraneErr::kSupervisorError);
-  }
-  absl::WriterMutexLock lk(&m_mutex);
-  m_supervisor_map.emplace(supervisor_state.value().task_spec.task_id(), stub);
-  return supervisor_state;
 }
 
 }  // namespace Craned

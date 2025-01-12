@@ -108,6 +108,9 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
   if (!alive) {
     g_craned_keeper->PutNodeIntoUnavailList(request->craned_id());
   }
+  if (alive) {
+    g_task_scheduler->QueryTaskSpec(request->craned_id(), response);
+  }
 
   response->set_ok(true);
   response->set_already_registered(alive);

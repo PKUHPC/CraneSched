@@ -225,6 +225,11 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.CraneCtldListenPort = kCtldDefaultPort;
 
+      if (config["SupervisorPath"]) {
+        g_config.SupervisorPath = config["SupervisorPath"].as<std::string>();
+      } else
+        g_config.SupervisorPath = kDefaultSupervisorPath;
+
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {
@@ -596,39 +601,46 @@ void GlobalVariableInit() {
       std::make_unique<BS::thread_pool>(std::thread::hardware_concurrency());
 
   g_supervisor_keeper = std::make_unique<Craned::SupervisorKeeper>();
-  CraneExpected<std::unordered_map<task_id_t, Craned::TaskStatusSpce>> tasks =
+  CraneExpected<std::unordered_map<task_id_t, pid_t>> tasks =
       g_supervisor_keeper->Init();
 
   std::unordered_set<task_id_t> task_ids_supervisor;
-  std::unordered_map<task_id_t, Craned::TaskStatusSpce> job_status_map =
-      tasks.value_or(std::unordered_map<task_id_t, Craned::TaskStatusSpce>());
-  for (const auto& [job_id, supervisor_state] : job_status_map) {
+  std::unordered_map<task_id_t, pid_t> job_id_pid_map =
+      tasks.value_or(std::unordered_map<task_id_t, pid_t>());
+  for (const auto& [job_id, supervisor_state] : job_id_pid_map) {
     task_ids_supervisor.emplace(job_id);
   }
 
   g_ctld_client = std::make_unique<Craned::CtldClient>();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
   std::latch craned_registered(1);
-  std::unordered_map<task_id_t, CgroupSpec> job_cg_spec_map;
+  std::unordered_map<task_id_t, Craned::JobSpec> job_spec_map;
+  std::unordered_map<task_id_t, crane::grpc::CranedRegisterReply::TaskList>
+      job_task_map;
   g_ctld_client->SetCranedRegisterCb(
-      [&craned_registered, &job_cg_spec_map, &task_ids_supervisor](
-          const google::protobuf::RepeatedPtrField<crane::grpc::JobSpec>&
-              specs) {
-        for (const auto& spec : specs) {
-          if (task_ids_supervisor.contains(spec.task_id()))
-            job_cg_spec_map.emplace(spec.task_id(), spec);
+      [&craned_registered, &job_spec_map, &job_task_map, &task_ids_supervisor](
+          const crane::grpc::CranedRegisterReply& register_reply) {
+        for (const auto& [job_id, job_spec] : register_reply.job_map()) {
+          if (task_ids_supervisor.contains(job_id)) {
+            job_spec_map.emplace(job_id, job_spec);
+            job_task_map.emplace(job_id,
+                                 register_reply.job_id_tasks_map().at(job_id));
+          }
         }
         craned_registered.count_down();
       });
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
 
+  g_ctld_client->StartConnectingCtld();
+
   craned_registered.wait();
   g_ctld_client->UnSetCranedRegisterCb();
 
   std::unordered_set<task_id_t> running_job_ids;
-  for (const auto& [job_id, _] : job_cg_spec_map) {
+  for (const auto& [job_id, _] : job_spec_map) {
     running_job_ids.emplace(job_id);
   }
+
   using Craned::CgroupManager;
   using Craned::CgroupConstant::Controller;
   g_cg_mgr = std::make_unique<CgroupManager>();
@@ -651,9 +663,15 @@ void GlobalVariableInit() {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
   }
-  std::erase_if(job_status_map, [&running_job_ids](const auto& kv) {
-    return !running_job_ids.contains(kv.first);
-  });
+  std::unordered_map<task_id_t, Craned::JobStatusSpce> job_status_map;
+  for (const auto& job_id : running_job_ids) {
+    job_status_map.emplace(
+        job_id,
+        Craned::JobStatusSpce{.job_spec = job_spec_map[job_id],
+                              // Now each job have only one task
+                              .task_spec = job_task_map[job_id].tasks(0),
+                              .task_pid = job_id_pid_map[job_id]});
+  }
 
   g_job_mgr = std::make_unique<Craned::JobManager>();
   g_job_mgr->Init(std::move(job_status_map));
@@ -680,7 +698,6 @@ void StartServer() {
   g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-  g_ctld_client->StartConnectingCtld();
   g_server->Wait();
 
   // Free global variables

@@ -39,6 +39,7 @@ struct TaskExecutionInstance {
 };
 
 struct JobSpec {
+  JobSpec() = default;
   JobSpec(const crane::grpc::JobSpec& spec) : cgroup_spec(spec) {}
   JobSpec(const JobSpec& spce) = default;
   JobSpec(JobSpec& spce) = default;
@@ -46,7 +47,7 @@ struct JobSpec {
   EnvMap GetJobEnvMap() const;
 };
 
-struct TaskStatusSpce {
+struct JobStatusSpce {
   JobSpec job_spec;
   TaskSpec task_spec;
   pid_t task_pid;
@@ -81,7 +82,7 @@ class JobManager {
  public:
   JobManager();
 
-  CraneErr Init(std::unordered_map<task_id_t, TaskStatusSpce>&& job_status_map);
+  CraneErr Init(std::unordered_map<task_id_t, JobStatusSpce>&& job_status_map);
 
   ~JobManager();
 
@@ -111,6 +112,11 @@ class JobManager {
   bool CheckTaskStatusAsync(task_id_t task_id, crane::grpc::TaskStatus* status);
 
   bool ChangeTaskTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
+
+  void TaskStopAndDoStatusChangeAsync(uint32_t job_id,
+                                      crane::grpc::TaskStatus new_status,
+                                      uint32_t exit_code,
+                                      std::optional<std::string> reason);
 
   // Wait internal libevent base loop to exit...
   void Wait();
@@ -169,7 +175,6 @@ class JobManager {
   CraneErr SpawnSupervisor_(JobInstance* instance,
                             TaskExecutionInstance* process);
 
-  // todo: use grpc struct for params
   /**
    * Inform CraneCtld of the status change of a task.
    * This method is called when the status of a task is changed:
@@ -179,8 +184,6 @@ class JobManager {
    *  failed. (EvSigchldCb_)
    * 3. A task cannot be created because of various reasons.
    *  (EvGrpcSpawnInteractiveTaskCb_ and EvGrpcExecuteTaskCb_)
-   * @param release_resource If set to true, CraneCtld will release the
-   *  resource (mark the task status as REQUEUE) and requeue the task.
    */
   void ActivateTaskStatusChangeAsync_(uint32_t task_id,
                                       crane::grpc::TaskStatus new_status,

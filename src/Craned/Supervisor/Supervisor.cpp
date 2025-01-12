@@ -64,15 +64,15 @@ void InitFromStdin(int argc, char** argv) {
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
 
   auto istream = FileInputStream(STDIN_FILENO);
-  crane::grpc::InitSupervisorRequest msg;
+  crane::grpc::supervisor::InitSupervisorRequest msg;
   auto ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
   if (!ok) {
     std::abort();
   }
-  g_config.TaskId = msg.task_id();
+  g_config.JobId = msg.job_id();
   g_config.SupervisorDebugLevel = msg.debug_level();
   g_config.SupervisorLogFile =
-      g_config.CraneBaseDir + fmt::format("Supervisor/{}.log", g_config.TaskId);
+      g_config.CraneBaseDir + fmt::format("Supervisor/{}.log", g_config.JobId);
 
   g_config.CranedUnixSocketPath = msg.craned_unix_socket_path();
 
@@ -87,7 +87,7 @@ void InitFromStdin(int argc, char** argv) {
     using google::protobuf::io::FileOutputStream;
     using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
     auto ostream = FileOutputStream(STDOUT_FILENO);
-    crane::grpc::SupervisorReady msg;
+    crane::grpc::supervisor::SupervisorReady msg;
     msg.set_ok(ok);
     SerializeDelimitedToZeroCopyStream(msg, &ostream);
     ostream.Flush();
@@ -147,7 +147,7 @@ void GlobalVariableInit() {
   auto ostream = FileOutputStream(STDOUT_FILENO);
 
   // Ready for grpc call
-  crane::grpc::SupervisorReady msg;
+  crane::grpc::supervisor::SupervisorReady msg;
   msg.set_ok(true);
   auto ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
   ok &= ostream.Flush();

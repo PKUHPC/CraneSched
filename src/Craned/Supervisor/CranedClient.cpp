@@ -42,7 +42,7 @@ void CranedClient::TaskStatusChange(crane::grpc::TaskStatus new_status,
   crane::grpc::TaskStatusChangeReply reply;
   request.set_reason(reason.value_or(""));
   request.set_exit_code(exit_code);
-  request.set_task_id(g_config.TaskId);
+  request.set_task_id(g_config.JobId);
   request.set_new_status(new_status);
 
   m_stub_->TaskStatusChange(&context, request, &reply);

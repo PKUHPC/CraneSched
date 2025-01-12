@@ -89,6 +89,7 @@ inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
 inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* kDefaultCranedLogPath = "craned/craned.log";
 
+inline const char* kDefaultSupervisorPath = "/usr/bin/cranesupervisor";
 inline const char* kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
@@ -413,16 +414,20 @@ bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
 
 struct CgroupSpec {
-  CgroupSpec(const crane::grpc::JobSpec& job_spec);
+  CgroupSpec() = default;
   CgroupSpec(const CgroupSpec& spce) = default;
+  CgroupSpec(const crane::grpc::JobSpec& job_spec);
+  CgroupSpec(const task_id_t job_id, const uid_t uid,
+             const ResourceInNode& res_in_node,
+             const std::string& execution_node);
 
   /**
    * @brief set grpc struct,will move res_in_node field
    * @param job_spec grpc job_spce to set
    */
   void SetJobSpec(crane::grpc::JobSpec* job_spec);
-  uid_t uid;
   task_id_t job_id;
+  uid_t uid;
   crane::grpc::ResourceInNode res_in_node;
   std::string execution_node;
   // Recovered on start,no need to apply res limit.

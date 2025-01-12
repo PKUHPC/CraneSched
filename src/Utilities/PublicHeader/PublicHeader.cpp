@@ -789,15 +789,24 @@ bool operator<=(const ResourceView& lhs, const ResourceView& rhs) {
 }
 
 CgroupSpec::CgroupSpec(const crane::grpc::JobSpec& job_spec) {
-  job_id = job_spec.task_id();
+  job_id = job_spec.job_id();
   uid = job_spec.uid();
   res_in_node = job_spec.res();
   execution_node = job_spec.execution_node();
   recovered = false;
 }
 
+CgroupSpec::CgroupSpec(const task_id_t job_id, const uid_t uid,
+                       const ResourceInNode& res_in_node,
+                       const std::string& execution_node)
+    : job_id(job_id),
+      uid(uid),
+      res_in_node(res_in_node),
+      execution_node(execution_node),
+      recovered(false) {}
+
 void CgroupSpec::SetJobSpec(crane::grpc::JobSpec* job_spec) {
-  job_spec->set_task_id(this->job_id);
+  job_spec->set_job_id(this->job_id);
   job_spec->set_uid(this->uid);
   *job_spec->mutable_res() = std::move(this->res_in_node);
   job_spec->set_execution_node(this->execution_node);

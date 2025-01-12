@@ -134,7 +134,7 @@ JobManager::JobManager() {
 }
 
 CraneErr JobManager::Init(
-    std::unordered_map<task_id_t, TaskStatusSpce>&& job_status_map) {
+    std::unordered_map<task_id_t, JobStatusSpce>&& job_status_map) {
   for (auto& [job_id, task_status] : job_status_map) {
     task_status.job_spec.cgroup_spec.recovered = true;
     auto* job_instance = new JobInstance(task_status.job_spec);
@@ -264,8 +264,8 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
   using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
 
-  using crane::grpc::CanStartMessage;
-  using crane::grpc::ChildProcessReady;
+  using crane::grpc::supervisor::CanStartMessage;
+  using crane::grpc::supervisor::ChildProcessReady;
 
   int ctrl_sock_pair[2];  // Socket pair for passing control messages.
 
@@ -375,10 +375,10 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     }
 
     // Do Supervisor Init
-    crane::grpc::InitSupervisorRequest init_request;
+    crane::grpc::supervisor::InitSupervisorRequest init_request;
     init_request.set_debug_level("off");
     init_request.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
-    init_request.set_task_id(process->task_spec.task_id());
+    init_request.set_job_id(process->task_spec.task_id());
 
     ok = SerializeDelimitedToZeroCopyStream(init_request, &ostream);
     if (!ok) {
@@ -398,7 +398,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
       return CraneErr::kProtobufError;
     }
 
-    crane::grpc::SupervisorReady supervisor_ready;
+    crane::grpc::supervisor::SupervisorReady supervisor_ready;
     ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &istream, nullptr);
     if (!ok || !msg.ok()) {
       if (!ok)
@@ -474,7 +474,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     // keep waiting for the input from stdin or other fds and will never end.
     util::os::CloseFdFrom(3);
 
-    // Just set job resource env
+    // Set job level resource env
     EnvMap res_env_map =
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node);
 
@@ -499,10 +499,10 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
       argv.emplace_back("--login");
     }
 
-    argv.emplace_back(g_config.SupervisorPath.c_str());
     argv.push_back(nullptr);
 
-    execv("/bin/bash", const_cast<char* const*>(argv.data()));
+    execv(g_config.SupervisorPath.c_str(),
+          const_cast<char* const*>(argv.data()));
 
     // Error occurred since execv returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.
@@ -762,7 +762,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         elem.task_id);
 
     auto job_instance = m_job_map_.GetValueExclusivePtr(elem.task_id);
-    if (!job_instance->get()->processes.contains(elem.task_id)) {
+    if (!job_instance) {
       CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
 
       // Note if Ctld wants to terminate some tasks that are not running,
@@ -871,6 +871,19 @@ bool JobManager::ChangeTaskTimeLimitAsync(task_id_t task_id,
   m_task_time_limit_change_queue_.enqueue(std::move(elem));
   m_change_task_time_limit_async_handle_->send();
   return ok_fut.get();
+}
+
+void JobManager::TaskStopAndDoStatusChangeAsync(
+    uint32_t job_id, crane::grpc::TaskStatus new_status, uint32_t exit_code,
+    std::optional<std::string> reason) {
+  if (!m_job_map_.Contains(job_id)) {
+    CRANE_ERROR("Task #{} not found in TaskStopAndDoStatusChangeAsync.",
+                job_id);
+    return;
+  }
+  CRANE_INFO("Task #{} stopped and is doing TaskStatusChange...", job_id);
+  ActivateTaskStatusChangeAsync_(job_id, new_status, exit_code, reason);
+
 }
 
 void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {

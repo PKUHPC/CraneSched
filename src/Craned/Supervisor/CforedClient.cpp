@@ -76,7 +76,7 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
     request.set_type(StreamCforedTaskIORequest::CRANED_TASK_OUTPUT);
 
     auto* payload = request.mutable_payload_task_output_req();
-    payload->set_msg(output), payload->set_task_id(g_config.TaskId);
+    payload->set_msg(output), payload->set_task_id(g_config.JobId);
 
     while (write_pending->load(std::memory_order::acquire))
       std::this_thread::sleep_for(std::chrono::milliseconds(25));
@@ -284,7 +284,7 @@ bool CforedClient::TaskProcessStop() {
 };
 
 void CforedClient::TaskOutPutForward(const std::string& msg) {
-  CRANE_TRACE("Receive TaskOutputForward for task #{}: {}", g_config.TaskId,
+  CRANE_TRACE("Receive TaskOutputForward for task #{}: {}", g_config.JobId,
               msg);
   m_output_queue_.enqueue(msg);
 }
@@ -370,12 +370,12 @@ void CforedManager::RegisterCb_() {
         });
 
     CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.fd,
-                g_config.TaskId);
+                g_config.JobId);
     auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.fd);
     poll_handle->on<uvw::poll_event>(
         [this, elem = std::move(elem)](const uvw::poll_event&,
                                        uvw::poll_handle& h) {
-          CRANE_TRACE("Detect task #{} output.", g_config.TaskId);
+          CRANE_TRACE("Detect task #{} output.", g_config.JobId);
 
           constexpr int MAX_BUF_SIZE = 4096;
           char buf[MAX_BUF_SIZE];
@@ -390,14 +390,14 @@ void CforedManager::RegisterCb_() {
               // For pty,do nothing, process exit on return -1 and error set to
               // EIO
               CRANE_TRACE("Read EOF from pty task #{} on cfored {}",
-                          g_config.TaskId, elem.cfored);
+                          g_config.JobId, elem.cfored);
             }
           }
 
           if (ret == -1) {
             if (!elem.pty) {
               CRANE_ERROR("Error when reading task #{} output, error {}",
-                          g_config.TaskId, std::strerror(errno));
+                          g_config.JobId, std::strerror(errno));
               return;
             }
 
@@ -411,28 +411,28 @@ void CforedManager::RegisterCb_() {
               return;
             } else {
               CRANE_ERROR("Error when reading task #{} output, error {}",
-                          g_config.TaskId, std::strerror(errno));
+                          g_config.JobId, std::strerror(errno));
               return;
             }
           }
 
           if (read_finished) {
             CRANE_TRACE("Task #{} to cfored {} finished its output.",
-                        g_config.TaskId, elem.cfored);
+                        g_config.JobId, elem.cfored);
             h.close();
             close(elem.fd);
 
             bool ok_to_free = m_cfored_client_->TaskOutputFinish();
             if (ok_to_free) {
               CRANE_TRACE("It's ok to unregister task #{} on {}",
-                          g_config.TaskId, elem.cfored);
+                          g_config.JobId, elem.cfored);
               UnregisterIOForward_();
             }
             return;
           }
 
           std::string output(buf, ret);
-          CRANE_TRACE("Fwd to task #{}: {}", g_config.TaskId, output);
+          CRANE_TRACE("Fwd to task #{}: {}", g_config.JobId, output);
           m_cfored_client_->TaskOutPutForward(output);
         });
     int ret = poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
@@ -447,10 +447,10 @@ void CforedManager::TaskProcStopped() { m_task_stop_handle_->send(); }
 
 void CforedManager::TaskStopCb_() {
   CRANE_TRACE("Task #{} to cfored {} just stopped its process.",
-              g_config.TaskId, m_cfored_client_->CforedName());
+              g_config.JobId, m_cfored_client_->CforedName());
   bool ok_to_free = m_cfored_client_->TaskProcessStop();
   if (ok_to_free) {
-    CRANE_TRACE("It's ok to unregister task #{} on {}", g_config.TaskId,
+    CRANE_TRACE("It's ok to unregister task #{} on {}", g_config.JobId,
                 m_cfored_client_->CforedName());
     UnregisterIOForward_();
   }

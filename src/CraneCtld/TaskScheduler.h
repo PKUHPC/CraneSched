@@ -251,6 +251,9 @@ class TaskScheduler {
   void QueryTasksInRam(const crane::grpc::QueryTasksInfoRequest* request,
                        crane::grpc::QueryTasksInfoReply* response);
 
+  void QueryTaskSpec(const CranedId& craned_id,
+                     crane::grpc::CranedRegisterReply* response);
+
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
 

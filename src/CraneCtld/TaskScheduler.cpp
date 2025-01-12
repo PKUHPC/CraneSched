@@ -745,12 +745,9 @@ void TaskScheduler::ScheduleThread_() {
       for (auto& it : selection_result_list) {
         auto& task = it.first;
         for (CranedId const& craned_id : task->CranedIds()) {
-          CgroupSpec spec{
-              .uid = task->uid,
-              .job_id = task->TaskId(),
-              .res_in_node =
-                  (crane::grpc::ResourceInNode)task->Resources().at(craned_id),
-              .execution_node = task->executing_craned_ids.front()};
+          CgroupSpec spec(task->TaskId(), task->uid,
+                          task->Resources().at(craned_id),
+                          task->executing_craned_ids.front());
           craned_cgroup_map[craned_id].emplace_back(std::move(spec));
         }
       }
@@ -857,8 +854,11 @@ void TaskScheduler::ScheduleThread_() {
           craned_exec_requests_map;
       for (auto& [craned_id, tasks_raw_ptrs] :
            craned_task_to_exec_raw_ptrs_map) {
-        craned_exec_requests_map[craned_id] =
-            CranedStub::NewExecuteTasksRequests(craned_id, tasks_raw_ptrs);
+        crane::grpc::ExecuteTasksRequest req;
+        for (TaskInCtld* task : tasks_raw_ptrs) {
+          task->SetFieldsOfTaskSpec(craned_id, req.add_tasks());
+        }
+        craned_exec_requests_map.emplace(craned_id, std::move(req));
       }
 
       // Move tasks into running queue.
@@ -1853,6 +1853,21 @@ void TaskScheduler::QueryTasksInRam(
   LockGuard running_guard(&m_running_task_map_mtx_);
 
   ranges::for_each(filtered_rng, append_fn);
+}
+
+void TaskScheduler::QueryTaskSpec(const CranedId& craned_id,
+                                  crane::grpc::CranedRegisterReply* response) {
+  LockGuard indexes_guard(&m_task_indexes_mtx_);
+
+  auto it = m_node_to_tasks_map_.find(craned_id);
+  if (it != m_node_to_tasks_map_.end()) {
+    LockGuard running_job_guard(&m_running_task_map_mtx_);
+    for (const auto& job_id : it->second) {
+      auto job_it = m_running_task_map_.find(job_id);
+      if (job_it == m_running_task_map_.end()) continue;
+      job_it->second->SetFieldsOfCranedRegisterReplyByNode(craned_id, response);
+    }
+  }
 }
 
 void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
