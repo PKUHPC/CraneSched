@@ -103,8 +103,9 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
           dynamic_cast<CrunMetaInTaskInstance*>(this->meta.get());
       CRANE_ASSERT(instance_ia_meta != nullptr);
 
-      env_map.emplace("DISPLAY",
-                      fmt::sprintf("localhost:%d", instance_ia_meta->x11_port));
+      env_map.emplace(
+          "DISPLAY",
+          fmt::sprintf("localhost:%d", instance_ia_meta->x11_port - 6000));
       env_map.emplace("XAUTHORITY", instance_ia_meta->x11_auth_path);
     }
   }
@@ -586,11 +587,11 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
   pid_t child_pid;
   bool launch_pty{false};
-  int x11_fd = -1;
 
   if (instance->IsCrun()) {
     auto* crun_meta =
         dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
+
     launch_pty = instance->task.interactive_meta().pty();
     CRANE_DEBUG("[Task #{}] Launch crun pty: {}", instance->task.task_id(),
                 launch_pty);
@@ -607,14 +608,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       crun_meta->msg_fd = crun_io_sock_pair[0];
       child_pid = fork();
     }
-
-    if (instance->task.interactive_meta().x11()) {
-      auto x11_pair = crane::GetX11Socket();
-      if (x11_pair.first == -1) return CraneErr::kSystemErr;
-      x11_fd = x11_pair.first;
-      crun_meta->x11_port = x11_pair.second;
-    }
-
   } else {
     child_pid = fork();
   }
@@ -632,9 +625,20 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     if (instance->IsCrun()) {
       auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
-      g_cfored_manager->RegisterIOForward(
-          instance->task.interactive_meta().cfored_name(),
-          instance->task.task_id(), meta->msg_fd, launch_pty, x11_fd);
+      CforedManager::RegisterElem reg_elem{
+          .cfored = instance->task.interactive_meta().cfored_name(),
+          .task_id = instance->task.task_id(),
+          .fd = meta->msg_fd,
+          .pty = launch_pty,
+          .x11 = instance->task.interactive_meta().x11(),
+      };
+
+      CRANE_TRACE("Crun task #{} x11 enabled: {}", reg_elem.task_id,
+                  instance->task.interactive_meta().x11());
+
+      CforedManager::RegisterResult result;
+      g_cfored_manager->RegisterIOForward(reg_elem, &result);
+      instance->GetCrunMeta()->x11_port = result.x11_port;
     }
 
     int ctrl_fd = ctrl_sock_pair[0];
