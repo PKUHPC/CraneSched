@@ -322,6 +322,10 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
       mutable_meta->set_interactive_type(meta_in_ctld.interactive_type);
       mutable_meta->set_pty(meta_in_ctld.pty);
       mutable_meta->set_x11(meta_in_ctld.x11);
+      if (meta_in_ctld.x11) {
+        mutable_meta->mutable_x11_meta()->CopyFrom(
+            task->TaskToCtld().interactive_meta());
+      }
     }
   }
 
