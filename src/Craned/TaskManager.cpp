@@ -881,7 +881,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
       auto* inst_crun_meta = instance->GetCrunMeta();
 
-      std::string display = fmt::sprintf("%s/unix:%u", g_config.Hostname);
+      std::string display = fmt::sprintf("%s/unix:%u", g_config.Hostname,
+                                         inst_crun_meta->x11_port);
 
       std::vector<const char*> xauth_argv{
           "xauth",
