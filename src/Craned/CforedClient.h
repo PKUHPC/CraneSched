@@ -126,6 +126,13 @@ class CforedManager {
     task_id_t task_id;
   };
 
+  struct X11FdInfo {
+    int fd;
+    std::shared_ptr<uvw::tcp_handle> sock;
+    std::shared_ptr<uvw::tcp_handle> proxy_handle;
+    std::atomic<bool> sock_stopped;
+  };
+
   uint16_t SetupX11forwarding_(std::string const& cfored, task_id_t task_id);
 
   void UnregisterIOForward_(std::string const& cfored, task_id_t task_id);
@@ -154,6 +161,8 @@ class CforedManager {
 
   std::unordered_map<std::string /*cfored name*/, uint32_t /*cfored refcount*/>
       m_cfored_client_ref_count_map_;
+
+  std::unordered_map<task_id_t, std::shared_ptr<X11FdInfo>> m_task_id_to_x11_map_;
 };
 }  // namespace Craned
 

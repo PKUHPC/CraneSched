@@ -95,6 +95,7 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
 
   if (this->IsCrun()) {
     auto const& ia_meta = this->task.interactive_meta();
+    auto* inst_crun_meta = this->GetCrunMeta();
     if (!ia_meta.term_env().empty())
       env_map.emplace("TERM", this->task.interactive_meta().term_env());
 
@@ -103,9 +104,12 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
           dynamic_cast<CrunMetaInTaskInstance*>(this->meta.get());
       CRANE_ASSERT(instance_ia_meta != nullptr);
 
-      env_map.emplace(
-          "DISPLAY",
-          fmt::sprintf("localhost:%d", instance_ia_meta->x11_port - 6000));
+      env_map.erase("DISPLAY");
+      env_map.erase("XAUTHORITY");
+      std::string display =
+          fmt::sprintf("localhost:%d.0", inst_crun_meta->x11_port - 6000);
+      fmt::print("DISPLAY: {}\n", display);
+      env_map.emplace("DISPLAY", display);
       env_map.emplace("XAUTHORITY", instance_ia_meta->x11_auth_path);
     }
   }
@@ -623,6 +627,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     CRANE_DEBUG("[Task #{}] Subprocess was created with pid: {}",
                 instance->task.task_id(), child_pid);
 
+    CanStartMessage msg;
+    ChildProcessReady child_process_ready;
+
     if (instance->IsCrun()) {
       auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
       CforedManager::RegisterElem reg_elem{
@@ -633,12 +640,14 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
           .x11 = instance->task.interactive_meta().x11(),
       };
 
-      CRANE_TRACE("Crun task #{} x11 enabled: {}", reg_elem.task_id,
-                  instance->task.interactive_meta().x11());
-
       CforedManager::RegisterResult result;
       g_cfored_manager->RegisterIOForward(reg_elem, &result);
       instance->GetCrunMeta()->x11_port = result.x11_port;
+
+      msg.set_x11_port(result.x11_port);
+
+      CRANE_TRACE("Crun task #{} x11 enabled: {}, port: {}", reg_elem.task_id,
+                  instance->task.interactive_meta().x11(), result.x11_port);
     }
 
     int ctrl_fd = ctrl_sock_pair[0];
@@ -650,8 +659,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     bool ok;
     FileInputStream istream(ctrl_fd);
     FileOutputStream ostream(ctrl_fd);
-    CanStartMessage msg;
-    ChildProcessReady child_process_ready;
 
     // Add event for stdout/stderr of the new subprocess
     // struct bufferevent* ev_buf_event;
@@ -883,11 +890,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // Set up x11 authority file if enabled.
     if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
       auto* inst_crun_meta = instance->GetCrunMeta();
+      inst_crun_meta->x11_port = msg.x11_port();
 
-      std::string display = fmt::sprintf("%s/unix:%u", g_config.Hostname);
+      std::string display = fmt::sprintf("%s/unix:%u", g_config.Hostname,
+                                         inst_crun_meta->x11_port - 6000);
 
       std::vector<const char*> xauth_argv{
-          "xauth",
+          "/usr/bin/xauth",
           "-v",
           "-f",
           inst_crun_meta->x11_auth_path.c_str(),
@@ -895,14 +904,31 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
           display.c_str(),
           "MIT-MAGIC-COOKIE-1",
           instance->task.interactive_meta().x11_meta().cookie().c_str(),
-          nullptr,
       };
+      std::string xauth_cmd = absl::StrJoin(xauth_argv, ",");
+
+      xauth_argv.push_back(nullptr);
 
       subprocess_s subprocess;
       int result = subprocess_create(xauth_argv.data(), 0, &subprocess);
       if (0 != result) {
         fmt::print(stderr, "[Craned Subprocess] xauth failed.\n");
         std::abort();
+      }
+
+      fmt::printf("[Craned Subprocess] Result of {} : ", xauth_cmd);
+      std::FILE* xauth_out = subprocess_stdout(&subprocess);
+      auto buf = std::make_unique<char[]>(4096);
+      while (std::fgets(buf.get(), 4096, xauth_out) != nullptr)
+        fmt::printf("%s", buf.get());
+      fmt::printf("\n");
+
+      if (0 != subprocess_join(&subprocess, &result)) {
+        CRANE_ERROR("[Craned Subprocess] xauth join failed.");
+      }
+
+      if (0 != subprocess_destroy(&subprocess)) {
+        CRANE_ERROR("[Craned Subprocess] xauth destroy failed.");
       }
     }
 

@@ -550,14 +550,11 @@ uint16_t CforedManager::SetupX11forwarding_(std::string const& cfored,
   constexpr uint16_t x11_port_begin = 6020;
   constexpr uint16_t x11_port_end = 6100;
 
-  struct X11FdInfo {
-    std::promise<int> fd;
-    std::shared_ptr<uvw::tcp_handle> sock;
-    std::atomic<bool> sock_stopped;
-  };
-
   auto x11_data = std::make_shared<X11FdInfo>();
+  x11_data->proxy_handle = x11_proxy_h;
+
   x11_proxy_h->data(x11_data);
+  m_task_id_to_x11_map_.emplace(task_id, x11_data);
 
   uint16_t port;
   for (port = x11_port_begin; port < x11_port_end; ++port) {
@@ -617,7 +614,9 @@ uint16_t CforedManager::SetupX11forwarding_(std::string const& cfored,
           h.data<X11FdInfo>()->sock_stopped = true;
         });
 
-        h.data<X11FdInfo>()->fd.set_value(sock->fd());
+        h.accept(*sock);
+
+        h.data<X11FdInfo>()->fd = sock->fd();
         sock->read();
 
         // Currently only 1 connection of x11 client will be accepted.
@@ -635,14 +634,19 @@ uint16_t CforedManager::SetupX11forwarding_(std::string const& cfored,
         CRANE_ERROR("Error on x11 proxy of task #{}: {}", task_id, e.what());
         h.close();
       });
-
-  int x11_proxy_fd = x11_data->fd.get_future().get();
-  if (x11_proxy_fd < 0) {
-    CRANE_ERROR("Invalid x11 proxy fd: {}", x11_proxy_fd);
-  }
+  x11_proxy_h->on<uvw::end_event>([task_id](uvw::end_event&,
+                                            uvw::tcp_handle& h) {
+    CRANE_TRACE("X11 proxy listening port of task #{} received EOF.", task_id);
+    h.close();
+  });
 
   m_cfored_client_map_[cfored]->SetX11FwdInputCb(
       task_id, [x11_data](const std::string& msg) -> bool {
+        int x11_proxy_fd = x11_data->fd;
+        if (x11_proxy_fd < 0) {
+          CRANE_ERROR("Invalid x11 proxy fd: {}", x11_proxy_fd);
+        }
+
         if (x11_data->sock_stopped) return false;
 
         std::unique_ptr<char[]> data(new char[msg.size()]);
@@ -668,6 +672,15 @@ void CforedManager::UnregisterCb_() {
   while (m_unregister_queue_.try_dequeue(elem)) {
     const std::string& cfored = elem.cfored;
     task_id_t task_id = elem.task_id;
+
+    auto it = m_task_id_to_x11_map_.find(elem.task_id);
+    if (it != m_task_id_to_x11_map_.end()) {
+      X11FdInfo* x11_fd_info = it->second.get();
+      x11_fd_info->proxy_handle->close();
+      if (x11_fd_info->sock) x11_fd_info->sock->close();
+
+      m_task_id_to_x11_map_.erase(it);
+    }
 
     auto count = m_cfored_client_ref_count_map_[cfored];
     if (count == 1) {
