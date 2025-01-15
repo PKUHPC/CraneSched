@@ -70,7 +70,11 @@ class CforedClient {
                                     crane::grpc::StreamTaskIOReply>* stream,
       std::atomic<bool>* write_pending);
 
+  ConcurrentQueue<std::pair<task_id_t, std::string>> m_input_queue_;
   ConcurrentQueue<std::pair<task_id_t, std::string /*msg*/>> m_output_queue_;
+
+  ConcurrentQueue<std::tuple<task_id_t, std::unique_ptr<char[]>, size_t>>
+      m_x11_input_queue_;
   ConcurrentQueue<std::tuple<task_id_t, std::unique_ptr<char[]>, size_t>>
       m_x11_output_queue_;
 
@@ -162,7 +166,8 @@ class CforedManager {
   std::unordered_map<std::string /*cfored name*/, uint32_t /*cfored refcount*/>
       m_cfored_client_ref_count_map_;
 
-  std::unordered_map<task_id_t, std::shared_ptr<X11FdInfo>> m_task_id_to_x11_map_;
+  std::unordered_map<task_id_t, std::shared_ptr<X11FdInfo>>
+      m_task_id_to_x11_map_;
 };
 }  // namespace Craned
 

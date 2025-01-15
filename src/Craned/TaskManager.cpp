@@ -107,7 +107,7 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
       env_map.erase("DISPLAY");
       env_map.erase("XAUTHORITY");
       std::string display =
-          fmt::sprintf("localhost:%d.0", inst_crun_meta->x11_port - 6000);
+          fmt::sprintf("localhost:%d", inst_crun_meta->x11_port - 6000);
       fmt::print("DISPLAY: {}\n", display);
       env_map.emplace("DISPLAY", display);
       env_map.emplace("XAUTHORITY", instance_ia_meta->x11_auth_path);
