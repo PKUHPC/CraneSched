@@ -2084,6 +2084,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     const auto& craned_meta = craned_meta_map.at(craned_id).GetExclusivePtr();
     ResourceInNode feasible_res;
 
+    // TODO: get feasible resource randomly (may cause start time change
+    // rapidly)
     bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
         craned_meta->res_total, &feasible_res);
     if (!ok) {
@@ -2100,56 +2102,9 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
   task->SetResources(std::move(allocated_res));
 
-  TrackerList satisfied_trackers(task->node_num);
-  std::vector<TimeAvailResTracker> trackers;
-  std::priority_queue<TimeAvailResTracker*, std::vector<TimeAvailResTracker*>,
-                      std::function<bool(const TimeAvailResTracker*,
-                                         const TimeAvailResTracker*)>>
-      pq([](const TimeAvailResTracker* lhs, const TimeAvailResTracker* rhs) {
-        return lhs->it->first > rhs->it->first;
-      });
-
-  trackers.reserve(craned_indexes_.size());
-  for (CranedId craned_id : craned_indexes_) {
-    auto& time_avail_res_map =
-        node_selection_info.node_time_avail_res_map.at(craned_id);
-    trackers.emplace_back(craned_id, time_avail_res_map.begin(),
-                          time_avail_res_map.end(), &satisfied_trackers,
-                          &task->Resources().at(craned_id));
-    pq.emplace(&trackers.back());
-  }
-
-  while (!pq.empty()) {
-    absl::Time time = pq.top()->it->first;
-    if (time - now > kAlgoMaxTimeWindow) {
-      return false;
-    }
-    while (!pq.empty() && pq.top()->it->first == time) {
-      auto tracker = pq.top();
-      pq.pop();
-      if (tracker->satisfied_flag) {
-        satisfied_trackers.try_push_back(tracker, time);
-      } else {
-        satisfied_trackers.try_erase(tracker);
-      }
-      if (tracker->genNext()) pq.emplace(tracker);
-    }
-    if (pq.empty() || satisfied_trackers.kth_time() + task->time_limit <=
-                          pq.top()->it->first) {
-      *start_time = satisfied_trackers.kth_time();
-      craned_ids->clear();
-      auto it = satisfied_trackers.m_tracker_list_.begin();
-      while (true) {
-        craned_ids->emplace_back(it->tracker_ptr->craned_id);
-        if (satisfied_trackers.kth_iter == it++) break;
-      }
-      CRANE_ASSERT(*start_time != absl::InfiniteFuture());
-      CRANE_ASSERT(craned_ids->size() == task->node_num);
-      return true;
-    }
-  }
-
-  return false;
+  EarliestStartSubsetSelector scheduler(task, node_selection_info,
+                                        craned_indexes_);
+  return scheduler.CalcEarliestStartTime(task, now, start_time, craned_ids);
 }
 
 void MinLoadFirst::NodeSelect(

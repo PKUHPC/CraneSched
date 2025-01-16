@@ -280,6 +280,80 @@ class MinLoadFirst : public INodeSelectionAlgo {
     }
   };
 
+  // Select a subset of craned nodes that can start the task as early as
+  // possible. Not necessary if the number of craned nodes equals
+  // task->node_num.
+  struct EarliestStartSubsetSelector {
+    EarliestStartSubsetSelector(TaskInCtld* task,
+                                const NodeSelectionInfo& node_selection_info,
+                                const std::vector<CranedId>& craned_indexes)
+        : m_satisfied_trackers_(task->node_num),
+          m_time_priority_queue_([](const TimeAvailResTracker* lhs,
+                                    const TimeAvailResTracker* rhs) {
+            return lhs->it->first > rhs->it->first;
+          }) {
+      m_trackers_.reserve(craned_indexes.size());
+      for (CranedId craned_id : craned_indexes) {
+        const auto& time_avail_res_map =
+            node_selection_info.node_time_avail_res_map.at(craned_id);
+        m_trackers_.emplace_back(
+            craned_id, time_avail_res_map.begin(), time_avail_res_map.end(),
+            &m_satisfied_trackers_, &task->Resources().at(craned_id));
+        m_time_priority_queue_.emplace(&m_trackers_.back());
+      }
+    }
+
+    bool CalcEarliestStartTime(TaskInCtld* task, absl::Time now,
+                               absl::Time* start_time,
+                               std::list<CranedId>* craned_ids) {
+      while (!m_time_priority_queue_.empty()) {
+        absl::Time current_time = m_time_priority_queue_.top()->it->first;
+        if (current_time - now > kAlgoMaxTimeWindow) {
+          return false;
+        }
+        while (!m_time_priority_queue_.empty() &&
+               m_time_priority_queue_.top()->it->first == current_time) {
+          TimeAvailResTracker* tracker = m_time_priority_queue_.top();
+          m_time_priority_queue_.pop();
+          if (tracker->satisfied_flag) {
+            m_satisfied_trackers_.try_push_back(tracker, current_time);
+          } else {
+            m_satisfied_trackers_.try_erase(tracker);
+          }
+          if (tracker->genNext()) {
+            m_time_priority_queue_.emplace(tracker);
+          }
+        }
+        if (m_time_priority_queue_.empty() ||
+            m_satisfied_trackers_.kth_time() + task->time_limit <=
+                m_time_priority_queue_.top()->it->first) {
+          *start_time = m_satisfied_trackers_.kth_time();
+          craned_ids->clear();
+          auto it = m_satisfied_trackers_.m_tracker_list_.begin();
+          while (true) {
+            craned_ids->emplace_back(it->tracker_ptr->craned_id);
+            if (m_satisfied_trackers_.kth_iter == it++) {
+              break;
+            }
+          }
+          CRANE_ASSERT(*start_time != absl::InfiniteFuture());
+          CRANE_ASSERT(craned_ids->size() == task->node_num);
+          return true;
+        }
+      }
+      return false;
+    }
+
+   private:
+    TrackerList m_satisfied_trackers_;
+
+    std::vector<TimeAvailResTracker> m_trackers_;
+    std::priority_queue<TimeAvailResTracker*, std::vector<TimeAvailResTracker*>,
+                        std::function<bool(const TimeAvailResTracker*,
+                                           const TimeAvailResTracker*)>>
+        m_time_priority_queue_;
+  };
+
   static void CalculateNodeSelectionInfoOfPartition_(
       const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
           running_tasks,
