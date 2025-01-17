@@ -45,7 +45,7 @@ struct TaskInfoOfUid {
 
 struct Partition {
   std::unordered_set<std::string> nodes;
-  std::unordered_set<std::string> AllowAccounts;
+  std::unordered_set<std::string> AllowedAccounts;
 };
 
 struct Config {

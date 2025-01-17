@@ -98,6 +98,8 @@ Partitions:
     DefaultMemPerCpu: 0
     # Optional maximum memory per cpu in MB, 0 indicates no limit
     MaxMemPerCpu: 0
+    AllowedAccounts: ac1, ac2
+    DeniedAccounts: ac1, ac2
 
 DefaultPartition: CPU
 
