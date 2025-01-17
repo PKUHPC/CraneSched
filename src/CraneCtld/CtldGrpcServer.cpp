@@ -41,11 +41,11 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
       response->set_task_id(id);
     } else {
       response->set_ok(false);
-      response->set_err(CraneErr::ERR_BEYOND_TASK_ID);
+      response->set_code(CraneErr::ERR_BEYOND_TASK_ID);
     }
   } else {
     response->set_ok(false);
-    response->set_err(result.error());
+    response->set_code(result.error());
   }
 
   return grpc::Status::OK;
@@ -73,7 +73,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     if (res.has_value())
       response->mutable_task_id_list()->Add(res.value().get());
     else
-      response->mutable_reason_list()->Add(std::move(res.error()));
+      response->mutable_code_list()->Add(std::move(res.error()));
   }
 
   return grpc::Status::OK;
@@ -314,7 +314,7 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(result.error());
+    response->set_code(result.error());
   }
 
   return grpc::Status::OK;
@@ -355,7 +355,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(result.error());
+    response->set_code(result.error());
   }
 
   return grpc::Status::OK;
@@ -377,7 +377,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
     response->set_ok(false);
-    response->set_err(CraneErr::ERR_TIME_LIMIT);
+    response->set_code(CraneErr::ERR_TIME_LIMIT);
     return grpc::Status::OK;
   }
   qos.max_time_limit_per_task = absl::Seconds(sec);
@@ -387,7 +387,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(result.error());
+    response->set_code(result.error());
   }
 
   return grpc::Status::OK;
@@ -405,7 +405,7 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(modify_res.error());
+    response->set_code(modify_res.error());
   }
 
   return grpc::Status::OK;
@@ -462,7 +462,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(modify_res.error());
+    response->set_code(modify_res.error());
   }
 
   return grpc::Status::OK;
@@ -479,7 +479,7 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(modify_res.error());
+    response->set_code(modify_res.error());
   }
 
   return grpc::Status::OK;
@@ -496,7 +496,7 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(modify_res.error());
+    response->set_code(modify_res.error());
   }
 
   for (const auto &it : res_account_map) {
@@ -549,7 +549,7 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(modify_res.error());
+    response->set_code(modify_res.error());
   }
 
   for (const auto &it : res_user_map) {
@@ -605,7 +605,7 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(modify_res.error());
+    response->set_code(modify_res.error());
   }
 
   auto *list = response->mutable_qos_list();
@@ -632,7 +632,7 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(res.error());
+    response->set_code(res.error());
   }
   return grpc::Status::OK;
 }
@@ -646,7 +646,7 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(res.error());
+    response->set_code(res.error());
   }
 
   return grpc::Status::OK;
@@ -660,7 +660,7 @@ grpc::Status CraneCtldServiceImpl::DeleteQos(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(res.error());
+    response->set_code(res.error());
   }
 
   return grpc::Status::OK;
@@ -689,7 +689,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_err(res.error());
+    response->set_code(res.error());
   }
 
   return grpc::Status::OK;
