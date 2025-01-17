@@ -41,7 +41,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
       response->set_task_id(id);
     } else {
       response->set_ok(false);
-      response->set_code(CraneErr::ERR_BEYOND_TASK_ID);
+      response->set_code(CraneErrCode::ERR_BEYOND_TASK_ID);
     }
   } else {
     response->set_ok(false);
@@ -160,18 +160,18 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     return grpc::Status::OK;
   }
 
-  CraneErr err;
+  CraneErrCode err;
   if (request->attribute() == ModifyTaskRequest::TimeLimit) {
     for (auto task_id : request->task_ids()) {
       err = g_task_scheduler->ChangeTaskTimeLimit(
           task_id, request->time_limit_seconds());
-      if (err == CraneErr::SUCCESS) {
+      if (err == CraneErrCode::SUCCESS) {
         response->add_modified_tasks(task_id);
-      } else if (err == CraneErr::ERR_NON_EXISTENT) {
+      } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
         response->add_not_modified_tasks(task_id);
         response->add_not_modified_reasons(fmt::format(
             "Task #{} was not found in running or pending queue.", task_id));
-      } else if (err == CraneErr::ERR_INVALID_PARAM) {
+      } else if (err == CraneErrCode::ERR_INVALID_PARAM) {
         response->add_not_modified_tasks(task_id);
         response->add_not_modified_reasons("Invalid time limit value.");
       } else {
@@ -185,9 +185,9 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     for (auto task_id : request->task_ids()) {
       err = g_task_scheduler->ChangeTaskPriority(task_id,
                                                  request->mandated_priority());
-      if (err == CraneErr::SUCCESS) {
+      if (err == CraneErrCode::SUCCESS) {
         response->add_modified_tasks(task_id);
-      } else if (err == CraneErr::ERR_NON_EXISTENT) {
+      } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
         response->add_not_modified_tasks(task_id);
         response->add_not_modified_reasons(
             fmt::format("Task #{} was not found in pending queue.", task_id));
@@ -199,7 +199,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     }
   } else if (request->attribute() == ModifyTaskRequest::Hold) {
     int64_t secs = request->hold_seconds();
-    std::vector<std::pair<task_id_t, std::future<CraneErr>>> results;
+    std::vector<std::pair<task_id_t, std::future<CraneErrCode>>> results;
     results.reserve(request->task_ids().size());
     for (auto task_id : request->task_ids()) {
       results.emplace_back(
@@ -207,9 +207,9 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
     }
     for (auto &[task_id, res] : results) {
       err = res.get();
-      if (err == CraneErr::SUCCESS) {
+      if (err == CraneErrCode::SUCCESS) {
         response->add_modified_tasks(task_id);
-      } else if (err == CraneErr::ERR_NON_EXISTENT) {
+      } else if (err == CraneErrCode::ERR_NON_EXISTENT) {
         response->add_not_modified_tasks(task_id);
         response->add_not_modified_reasons(
             fmt::format("Task #{} was not found in pending queue.", task_id));
@@ -377,7 +377,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
     response->set_ok(false);
-    response->set_code(CraneErr::ERR_TIME_LIMIT);
+    response->set_code(CraneErrCode::ERR_TIME_LIMIT);
     return grpc::Status::OK;
   }
   qos.max_time_limit_per_task = absl::Seconds(sec);
@@ -839,7 +839,7 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           auto const &payload = cfored_request.payload_task_complete_req();
           CRANE_TRACE("Recv TaskCompletionReq of Task #{}", payload.task_id());
           if (g_task_scheduler->TerminatePendingOrRunningIaTask(
-                  payload.task_id()) != CraneErr::SUCCESS)
+                  payload.task_id()) != CraneErrCode::SUCCESS)
             stream_writer->WriteTaskCompletionAckReply(payload.task_id());
         } break;
 
@@ -940,7 +940,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
 
   if (!task->password_entry->Valid()) {
     CRANE_ERROR("Uid {} not found on the controller node", task->uid);
-    return std::unexpected(CraneErr::ERR_INVALID_UID);
+    return std::unexpected(CraneErrCode::ERR_INVALID_UID);
   }
   task->SetUsername(task->password_entry->Username());
 
@@ -949,7 +949,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
         g_account_manager->GetExistedUserInfo(task->Username());
     if (!user_scoped_ptr) {
       CRANE_ERROR("User '{}' not found in the account database", task->Username());
-      return std::unexpected(CraneErr::ERR_INVALID_USER);
+      return std::unexpected(CraneErrCode::ERR_INVALID_USER);
     }
 
     if (task->account.empty()) {
@@ -958,7 +958,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     } else {
       if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
           CRANE_ERROR("Account '{}' is not in your account list", task->account);
-          return std::unexpected(CraneErr::ERR_USER_ACCOUNT_MISMATCH);
+          return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
       }
     }
   }
@@ -967,7 +967,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
           task->Username(), task->account, task->partition_id)) {
       CRANE_ERROR("User '{}' doesn't have permission to use partition '{}' when using account '{}'",
                     task->Username(), task->partition_id, task->account);
-      return std::unexpected(CraneErr::ERR_ALLOWED_PARTITION);
+      return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
   }
 
   auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(

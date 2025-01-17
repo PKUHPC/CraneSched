@@ -216,13 +216,13 @@ void TaskManager::TaskStopAndDoStatusChangeAsync(uint32_t task_id) {
   CRANE_INFO("Task #{} stopped and is doing TaskStatusChange...", task_id);
 
   switch (instance->err_before_exec) {
-  case CraneErr::ERR_PROTOBUF:
+  case CraneErrCode::ERR_PROTOBUF:
     ActivateTaskStatusChangeAsync_(task_id, crane::grpc::TaskStatus::Failed,
                                    ExitCode::kExitCodeSpawnProcessFail,
                                    std::nullopt);
     break;
 
-  case CraneErr::ERR_CGROUP:
+  case CraneErrCode::ERR_CGROUP:
     ActivateTaskStatusChangeAsync_(task_id, crane::grpc::TaskStatus::Failed,
                                    ExitCode::kExitCodeCgroupError,
                                    std::nullopt);
@@ -484,7 +484,7 @@ void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
-CraneErr TaskManager::KillProcessInstance_(const ProcessInstance* proc,
+CraneErrCode TaskManager::KillProcessInstance_(const ProcessInstance* proc,
                                            int signum) {
   // Todo: Add timer which sends SIGTERM for those tasks who
   //  will not quit when receiving SIGINT.
@@ -495,21 +495,21 @@ CraneErr TaskManager::KillProcessInstance_(const ProcessInstance* proc,
     int err = kill(-proc->GetPid(), signum);
 
     if (err == 0)
-      return CraneErr::SUCCESS;
+      return CraneErrCode::SUCCESS;
     else {
       CRANE_TRACE("kill failed. error: {}", strerror(errno));
-      return CraneErr::ERR_GENERIC_FAILURE;
+      return CraneErrCode::ERR_GENERIC_FAILURE;
     }
   }
 
-  return CraneErr::ERR_NON_EXISTENT;
+  return CraneErrCode::ERR_NON_EXISTENT;
 }
 
 void TaskManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
 
-CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
+CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                                               ProcessInstance* process) {
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
@@ -535,12 +535,12 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   if (!res_in_node.has_value()) {
     CRANE_ERROR("Failed to get resource info for task #{}",
                 instance->task.task_id());
-    return CraneErr::ERR_CGROUP;
+    return CraneErrCode::ERR_CGROUP;
   }
 
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
     CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
-    return CraneErr::ERR_SYSTEM_ERR;
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   // save the current uid/gid
@@ -549,14 +549,14 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   int rc = setegid(instance->pwd_entry.Gid());
   if (rc == -1) {
     CRANE_ERROR("error: setegid. {}", strerror(errno));
-    return CraneErr::ERR_SYSTEM_ERR;
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
   __gid_t gid_a[1] = {instance->pwd_entry.Gid()};
   setgroups(1, gid_a);
   rc = seteuid(instance->pwd_entry.Uid());
   if (rc == -1) {
     CRANE_ERROR("error: seteuid. {}", strerror(errno));
-    return CraneErr::ERR_SYSTEM_ERR;
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   pid_t child_pid;
@@ -575,7 +575,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       if (socketpair(AF_UNIX, SOCK_STREAM, 0, crun_io_sock_pair) != 0) {
         CRANE_ERROR("Failed to create socket pair for task io forward: {}",
                     strerror(errno));
-        return CraneErr::ERR_SYSTEM_ERR;
+        return CraneErrCode::ERR_SYSTEM_ERR;
       }
       crun_meta->msg_fd = crun_io_sock_pair[0];
       child_pid = fork();
@@ -587,7 +587,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   if (child_pid == -1) {
     CRANE_ERROR("fork() failed for task #{}: {}", instance->task.task_id(),
                 strerror(errno));
-    return CraneErr::ERR_SYSTEM_ERR;
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   if (child_pid > 0) {  // Parent proc
@@ -626,7 +626,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     //   CRANE_ERROR(
     //       "Error constructing bufferevent for the subprocess of task #!",
     //       instance->task.task_id());
-    //   err = CraneErr::kLibEventError;
+    //   err = CraneErrCode::kLibEventError;
     //   goto AskChildToSuicide;
     // }
     // bufferevent_setcb(ev_buf_event, EvSubprocessReadCb_, nullptr, nullptr,
@@ -642,7 +642,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
           "migration.",
           instance->task.task_id());
 
-      instance->err_before_exec = CraneErr::ERR_CGROUP;
+      instance->err_before_exec = CraneErrCode::ERR_CGROUP;
       goto AskChildToSuicide;
     }
 
@@ -670,9 +670,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       // process to commit suicide, kill child process here and just return.
       // The child process will be reaped in SIGCHLD handler and
       // thus only ONE TaskStatusChange will be triggered!
-      instance->err_before_exec = CraneErr::ERR_PROTOBUF;
+      instance->err_before_exec = CraneErrCode::ERR_PROTOBUF;
       KillProcessInstance_(process, SIGKILL);
-      return CraneErr::SUCCESS;
+      return CraneErrCode::SUCCESS;
     }
 
     ok = ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream,
@@ -687,13 +687,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       close(ctrl_fd);
 
       // See comments above.
-      instance->err_before_exec = CraneErr::ERR_PROTOBUF;
+      instance->err_before_exec = CraneErrCode::ERR_PROTOBUF;
       KillProcessInstance_(process, SIGKILL);
-      return CraneErr::SUCCESS;
+      return CraneErrCode::SUCCESS;
     }
 
     close(ctrl_fd);
-    return CraneErr::SUCCESS;
+    return CraneErrCode::SUCCESS;
 
   AskChildToSuicide:
     msg.set_ok(false);
@@ -705,7 +705,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                   child_pid, instance->task.task_id());
 
       // See comments above.
-      instance->err_before_exec = CraneErr::ERR_PROTOBUF;
+      instance->err_before_exec = CraneErrCode::ERR_PROTOBUF;
       KillProcessInstance_(process, SIGKILL);
     }
 
@@ -713,7 +713,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // As long as fork() is done and the grpc channel to the child process is
     // healthy, we should return kOk, not trigger a manual TaskStatusChange, and
     // reap the child process by SIGCHLD after it commits suicide.
-    return CraneErr::SUCCESS;
+    return CraneErrCode::SUCCESS;
   } else {  // Child proc
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
@@ -860,11 +860,11 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   }
 }
 
-CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
+CraneErrCode TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   if (!g_cg_mgr->CheckIfCgroupForTasksExists(task.task_id())) {
     CRANE_DEBUG("Executing task #{} without an allocated cgroup. Ignoring it.",
                 task.task_id());
-    return CraneErr::ERR_CGROUP;
+    return CraneErrCode::ERR_CGROUP;
   }
   CRANE_INFO("Executing task #{}", task.task_id());
 
@@ -884,7 +884,7 @@ CraneErr TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   m_grpc_execute_task_queue_.enqueue(std::move(instance));
   m_grpc_execute_task_async_handle_->send();
 
-  return CraneErr::SUCCESS;
+  return CraneErrCode::SUCCESS;
 }
 
 void TaskManager::EvCleanGrpcExecuteTaskQueueCb_() {
@@ -1014,8 +1014,8 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this task, and
   // we should send TaskStatusChange manually.
-  CraneErr err = SpawnProcessInInstance_(instance, process.get());
-  if (err != CraneErr::SUCCESS) {
+  CraneErrCode err = SpawnProcessInInstance_(instance, process.get());
+  if (err != CraneErrCode::SUCCESS) {
     ActivateTaskStatusChangeAsync_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeSpawnProcessFail,
@@ -1127,7 +1127,7 @@ void TaskManager::EvCleanGrpcQueryTaskEnvQueueCb_() {
   while (m_query_task_environment_variables_queue.try_dequeue(elem)) {
     auto task_iter = m_task_map_.find(elem.task_id);
     if (task_iter == m_task_map_.end())
-      elem.env_prom.set_value(std::unexpected(CraneErr::ERR_SYSTEM_ERR));
+      elem.env_prom.set_value(std::unexpected(CraneErrCode::ERR_SYSTEM_ERR));
     else {
       auto& instance = task_iter->second;
 
@@ -1156,7 +1156,7 @@ void TaskManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
 
     auto task_iter = m_pid_task_map_.find(elem.pid);
     if (task_iter == m_pid_task_map_.end())
-      elem.task_id_prom.set_value(std::unexpected(CraneErr::ERR_SYSTEM_ERR));
+      elem.task_id_prom.set_value(std::unexpected(CraneErrCode::ERR_SYSTEM_ERR));
     else {
       TaskInstance* instance = task_iter->second;
       uint32_t task_id = instance->task.task_id();

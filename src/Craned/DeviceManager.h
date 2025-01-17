@@ -100,7 +100,7 @@ class DeviceManager {
       const std::vector<std::string>& device_path,
       DeviceEnvInjectorEnum env_injector);
 
-  static CraneErr GetDeviceFileMajorMinorOpType(
+  static CraneErrCode GetDeviceFileMajorMinorOpType(
       DeviceFileMeta* device_file_meta);
 
   static EnvMap GetDevEnvMapByResInNode(
