@@ -354,8 +354,10 @@ CranedMetaContainer::QueryAllPartitionInfo() {
          part_meta->partition_global_meta.allowed_accounts) {
       allowed_accounts->Add()->assign(account_name);
     }
-    // auto* denied_accounts = part_info->mutable_denied_accounts();
-
+    auto* denied_accounts = part_info->mutable_denied_accounts();
+    for (const auto& account_name : part_meta->partition_global_meta.denied_accounts) {
+      denied_accounts->Add()->assign(account_name);
+    }
     *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
         part_meta->partition_global_meta.res_total);
     *part_info->mutable_res_avail() = static_cast<crane::grpc::ResourceView>(
@@ -392,7 +394,10 @@ crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
        part_meta->partition_global_meta.allowed_accounts) {
     allowed_accounts->Add()->assign(account_name);
   }
-
+  auto* denied_accounts = part_info->mutable_denied_accounts();
+  for (const auto& account_name : part_meta->partition_global_meta.denied_accounts) {
+    denied_accounts->Add()->assign(account_name);
+  }
   if (part_meta->partition_global_meta.alive_craned_cnt > 0)
     part_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
   else
@@ -587,17 +592,28 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   return reply;
 }
 
-CraneErrCodeExpected<void> CranedMetaContainer::ModifyPartitionAllowedAccounts(
-    const std::string& partition_name,
-    const std::unordered_set<std::string>& allowed_accounts) {
+  CraneErrCodeExpected<void> CranedMetaContainer::ModifyPartitionAllowedOrDeniedAccounts(
+        const std::string& partition_name,
+        bool is_modify_allowed,
+        const std::unordered_set<std::string>& accounts) {
   CraneErrCodeExpected<void> result{};
 
-  if (!partition_metas_map_.Contains(partition_name))
+  auto part_meta_map = partition_metas_map_.GetMapSharedPtr();
+  if (!part_meta_map->contains(partition_name))
     return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
 
-  auto part_meta = partition_metas_map_.GetValueExclusivePtr(partition_name);
+  auto part_meta = part_meta_map->at(partition_name).GetExclusivePtr();
+  auto& allowed_accounts = part_meta->partition_global_meta.allowed_accounts;
+  auto& denied_accounts = part_meta->partition_global_meta.denied_accounts;
 
-  part_meta->partition_global_meta.allowed_accounts = allowed_accounts;
+  if (is_modify_allowed) {
+    allowed_accounts = accounts;
+    denied_accounts.clear();
+  } else if (!allowed_accounts.empty()) {
+    // allowed_accounts在使用，无法修改denied_accounts
+  } else {
+    denied_accounts = accounts;
+  }
 
   return result;
 }
@@ -609,13 +625,13 @@ bool CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
   if (!part_metas_map->contains(partition_name)) return false;
 
   auto part_meta = part_metas_map->at(partition_name).GetExclusivePtr();
-  auto allowed_accounts = part_meta->partition_global_meta.allowed_accounts;
+  const auto& allowed_accounts = part_meta->partition_global_meta.allowed_accounts;
   if (!allowed_accounts.empty()) {
     if (!allowed_accounts.contains(account_name))
       return false;
   } else {
-    auto denied_accounts = part_meta->partition_global_meta.denied_accounts;
-    if (!denied_accounts.empty() && denied_accounts.contains(account_name))
+    const auto& denied_accounts = part_meta->partition_global_meta.denied_accounts;
+    if (denied_accounts.contains(account_name))
       return false;
   }
 
