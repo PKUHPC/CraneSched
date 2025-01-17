@@ -283,7 +283,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     part_meta.partition_global_meta.res_total_inc_dead = part_res;
     part_meta.partition_global_meta.node_cnt = part_meta.craned_ids.size();
     part_meta.partition_global_meta.nodelist_str = partition.nodelist_str;
-    part_meta.partition_global_meta.allow_accounts = partition.allow_accounts;
+    part_meta.partition_global_meta.allowed_accounts = partition.allowed_accounts;
 
     CRANE_DEBUG(
         "partition [{}]'s Global resource now: (cpu: {}, mem: {}, "
@@ -348,10 +348,10 @@ CranedMetaContainer::QueryAllPartitionInfo() {
     part_info->set_total_nodes(part_meta->partition_global_meta.node_cnt);
     part_info->set_alive_nodes(
         part_meta->partition_global_meta.alive_craned_cnt);
-    auto* allow_accounts = part_info->mutable_allow_accounts();
+    auto* allowed_accounts = part_info->mutable_allowed_accounts();
     for (const auto& account_name :
-         part_meta->partition_global_meta.allow_accounts) {
-      allow_accounts->Add()->assign(account_name);
+         part_meta->partition_global_meta.allowed_accounts) {
+      allowed_accounts->Add()->assign(account_name);
     }
 
     *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
@@ -385,10 +385,10 @@ crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
   part_info->set_name(part_meta->partition_global_meta.name);
   part_info->set_total_nodes(part_meta->partition_global_meta.node_cnt);
   part_info->set_alive_nodes(part_meta->partition_global_meta.alive_craned_cnt);
-  auto* allow_accounts = part_info->mutable_allow_accounts();
+  auto* allowed_accounts = part_info->mutable_allowed_accounts();
   for (const auto& account_name :
-       part_meta->partition_global_meta.allow_accounts) {
-    allow_accounts->Add()->assign(account_name);
+       part_meta->partition_global_meta.allowed_accounts) {
+    allowed_accounts->Add()->assign(account_name);
   }
 
   if (part_meta->partition_global_meta.alive_craned_cnt > 0)
@@ -585,9 +585,9 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   return reply;
 }
 
-CraneErrCodeExpected<void> CranedMetaContainer::ModifyPartitionAllowAccounts(
+CraneErrCodeExpected<void> CranedMetaContainer::ModifyPartitionAllowedAccounts(
     const std::string& partition_name,
-    const std::unordered_set<std::string>& allow_accounts) {
+    const std::unordered_set<std::string>& allowed_accounts) {
   CraneErrCodeExpected<void> result{};
 
   if (!partition_metas_map_.Contains(partition_name))
@@ -595,7 +595,7 @@ CraneErrCodeExpected<void> CranedMetaContainer::ModifyPartitionAllowAccounts(
 
   auto part_meta = partition_metas_map_.GetValueExclusivePtr(partition_name);
 
-  part_meta->partition_global_meta.allow_accounts = allow_accounts;
+  part_meta->partition_global_meta.allowed_accounts = allowed_accounts;
 
   return result;
 }
@@ -606,7 +606,7 @@ bool CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
 
   auto part_meta = partition_metas_map_.GetValueExclusivePtr(partition_name);
 
-  if (!part_meta->partition_global_meta.allow_accounts.contains(account_name))
+  if (!part_meta->partition_global_meta.allowed_accounts.contains(account_name))
     return false;
 
   return true;

@@ -139,9 +139,9 @@ class AccountManager {
                                               const std::string& username,
                                               bool read_only_priv);
 
-  CraneErrCodeExpected<void> CheckModifyPartitionAllowAccounts(
+  CraneErrCodeExpected<void> CheckModifyPartitionAllowedAccounts(
       uint32_t uid, const std::string& partition_name,
-      const std::unordered_set<std::string>& allow_accounts);
+      const std::unordered_set<std::string>& allowed_accounts);
 
  private:
   void InitDataMap_();

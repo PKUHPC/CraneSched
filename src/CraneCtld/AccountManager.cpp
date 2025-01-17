@@ -1003,9 +1003,9 @@ AccountManager::CraneExpected<void> AccountManager::CheckIfUidHasPermOnUser(
   return CheckIfUserHasPermOnUserNoLock_(*op_user, user, read_only_priv);
 }
 
-CraneErrCodeExpected<void> AccountManager::CheckModifyPartitionAllowAccounts(
+CraneErrCodeExpected<void> AccountManager::CheckModifyPartitionAllowedAccounts(
     uint32_t uid, const std::string& partition_name,
-    const std::unordered_set<std::string>& allow_accounts) {
+    const std::unordered_set<std::string>& allowed_accounts) {
   CraneErrCodeExpected<void> result{};
 
   util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -1015,7 +1015,7 @@ CraneErrCodeExpected<void> AccountManager::CheckModifyPartitionAllowAccounts(
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
-  for (const auto& account_name : allow_accounts) {
+  for (const auto& account_name : allowed_accounts) {
     const Account* account = GetAccountInfoNoLock_(account_name);
     result =
         CheckPartitionIsAllowedNoLock_(account, partition_name, false, false);

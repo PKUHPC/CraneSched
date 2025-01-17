@@ -90,9 +90,9 @@ class CranedMetaContainer final {
   crane::grpc::ModifyCranedStateReply ChangeNodeState(
       const crane::grpc::ModifyCranedStateRequest& request);
 
-  CraneErrCodeExpected<void> ModifyPartitionAllowAccounts(
+  CraneErrCodeExpected<void> ModifyPartitionAllowedAccounts(
       const std::string& partition_name,
-      const std::unordered_set<std::string>& allow_accounts);
+      const std::unordered_set<std::string>& allowed_accounts);
 
   bool CheckIfAccountIsAllowedInPartition(const std::string& partition_name,
                                           const std::string& account_name);

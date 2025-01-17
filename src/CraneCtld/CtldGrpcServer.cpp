@@ -248,19 +248,19 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyPartitionAllowAccounts(
+grpc::Status CraneCtldServiceImpl::ModifyPartitionAllowedAccounts(
     grpc::ServerContext *context,
-    const crane::grpc::ModifyPartitionAllowAccountsRequest *request,
-    crane::grpc::ModifyPartitionAllowAccountsReply *response) {
+    const crane::grpc::ModifyPartitionAllowedAccountsRequest *request,
+    crane::grpc::ModifyPartitionAllowedAccountsReply *response) {
   CraneErrCodeExpected<void> result;
 
-  std::unordered_set<std::string> allow_accounts;
-  for (const auto &account_name : request->allow_accounts()) {
-    allow_accounts.insert(account_name);
+  std::unordered_set<std::string> allowed_accounts;
+  for (const auto &account_name : request->allowed_accounts()) {
+    allowed_accounts.insert(account_name);
   }
 
-  result = g_account_manager->CheckModifyPartitionAllowAccounts(
-      request->uid(), request->partition_name(), allow_accounts);
+  result = g_account_manager->CheckModifyPartitionAllowedAccounts(
+      request->uid(), request->partition_name(), allowed_accounts);
 
   if (!result) {
     response->set_ok(false);
@@ -268,8 +268,8 @@ grpc::Status CraneCtldServiceImpl::ModifyPartitionAllowAccounts(
     return grpc::Status::OK;
   }
 
-  result = g_meta_container->ModifyPartitionAllowAccounts(
-      request->partition_name(), allow_accounts);
+  result = g_meta_container->ModifyPartitionAllowedAccounts(
+      request->partition_name(), allowed_accounts);
 
   if (!result) {
     response->set_ok(false);
@@ -1016,7 +1016,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (!g_meta_container->CheckIfAccountIsAllowedInPartition(task->partition_id,
                                                             task->account))
     return std::unexpected(
-        "The account is not in the AllowAccounts of the partition "
+        "The account is not in the AllowedAccounts of the partition "
         "specified "
         "for the task, submission of the task is prohibited.");
 
