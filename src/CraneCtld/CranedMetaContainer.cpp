@@ -609,9 +609,8 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   if (is_modify_allowed) {
     allowed_accounts = accounts;
     denied_accounts.clear();
-  } else if (!allowed_accounts.empty()) {
-    // allowed_accounts在使用，无法修改denied_accounts
-  } else {
+  } else if (allowed_accounts.empty()) {
+    // When allowed_accounts is in use, denied_accounts cannot be modified.
     denied_accounts = accounts;
   }
 
