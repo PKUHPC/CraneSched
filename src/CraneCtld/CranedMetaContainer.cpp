@@ -284,6 +284,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     part_meta.partition_global_meta.node_cnt = part_meta.craned_ids.size();
     part_meta.partition_global_meta.nodelist_str = partition.nodelist_str;
     part_meta.partition_global_meta.allowed_accounts = partition.allowed_accounts;
+    part_meta.partition_global_meta.denied_accounts = partition.denied_accounts;
 
     CRANE_DEBUG(
         "partition [{}]'s Global resource now: (cpu: {}, mem: {}, "
@@ -353,6 +354,7 @@ CranedMetaContainer::QueryAllPartitionInfo() {
          part_meta->partition_global_meta.allowed_accounts) {
       allowed_accounts->Add()->assign(account_name);
     }
+    // auto* denied_accounts = part_info->mutable_denied_accounts();
 
     *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
         part_meta->partition_global_meta.res_total);
@@ -602,12 +604,20 @@ CraneErrCodeExpected<void> CranedMetaContainer::ModifyPartitionAllowedAccounts(
 
 bool CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
     const std::string& partition_name, const std::string& account_name) {
-  if (!partition_metas_map_.Contains(partition_name)) return false;
+  auto part_metas_map = partition_metas_map_.GetMapSharedPtr();
 
-  auto part_meta = partition_metas_map_.GetValueExclusivePtr(partition_name);
+  if (!part_metas_map->contains(partition_name)) return false;
 
-  if (!part_meta->partition_global_meta.allowed_accounts.contains(account_name))
-    return false;
+  auto part_meta = part_metas_map->at(partition_name).GetExclusivePtr();
+  auto allowed_accounts = part_meta->partition_global_meta.allowed_accounts;
+  if (!allowed_accounts.empty()) {
+    if (!allowed_accounts.contains(account_name))
+      return false;
+  } else {
+    auto denied_accounts = part_meta->partition_global_meta.denied_accounts;
+    if (!denied_accounts.empty() && denied_accounts.contains(account_name))
+      return false;
+  }
 
   return true;
 }

@@ -81,6 +81,7 @@ struct Config {
     uint64_t max_mem_per_cpu;
     std::unordered_set<std::string> nodes;
     std::unordered_set<std::string> allowed_accounts;
+    std::unordered_set<std::string> denied_accounts;
   };
 
   struct CraneCtldListenConf {
@@ -212,6 +213,7 @@ struct PartitionGlobalMeta {
   std::string nodelist_str;
 
   std::unordered_set<std::string> allowed_accounts;
+  std::unordered_set<std::string> denied_accounts;
 
   uint32_t node_cnt;
   uint32_t alive_craned_cnt;
