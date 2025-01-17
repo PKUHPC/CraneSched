@@ -34,41 +34,10 @@
 
 using task_id_t = uint32_t;
 
-enum class CraneErr : uint16_t {
-  kOk = 0,
-  kGenericFailure,
-  kNoResource,
-  kNonExistent,
-  kInvalidNodeNum,
-
-  kSystemErr,  // represent the error which sets errno
-  kExistingTask,
-  kInvalidParam,
-  kStop,
-  kPermissionDenied,
-
-  kConnectionTimeout,
-  kConnectionAborted,
-  kRpcFailure,
-  kTokenRequestFailure,
-  KStreamBroken,
-
-  kInvalidStub,
-  kCgroupError,
-  kProtobufError,
-  kLibEventError,
-  kNoAvailNode,
-
-  __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
-};
+using CraneErr = crane::grpc::ErrCode;
 
 template <typename T>
 using CraneExpected = std::expected<T, CraneErr>;
-
-using CraneErrCode = crane::grpc::ErrCode;
-
-template <typename T>
-using CraneErrCodeExpected = std::expected<T, CraneErrCode>;
 
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
@@ -125,35 +94,7 @@ enum ExitCodeEnum : uint16_t {
 }  // namespace ExitCode
 
 namespace Internal {
-
-constexpr std::array<std::string_view, uint16_t(CraneErr::__ERR_SIZE)>
-    CraneErrStrArr = {
-        "Success",
-        "Generic failure",
-        "Resource not enough",
-        "The object doesn't exist",
-        "Invalid --node-num is passed",
-
-        "Linux Error",
-        "Task already exists",
-        "Invalid Parameter",
-        "The owner object of the function is stopping",
-        "Permission denied",
-
-        "Connection timeout",
-        "Connection aborted",
-        "RPC call failed",
-        "Failed to request required token",
-        "Stream is broken",
-
-        "Craned stub is invalid",
-        "Error when manipulating cgroup",
-        "Error when using protobuf",
-        "Error when using LibEvent",
-        "Not enough nodes which satisfy resource requirements",
-};
-
-constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> ErrCodeStrArray = {
+constexpr std::array<std::string_view, uint16_t(CraneErr::ERR_CODE_COUNT)> CraneErrStrArr = {
         "Success",
         "Invalid UID",
         "You are not a user of Crane",
@@ -224,10 +165,6 @@ constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> E
 }
 
 inline std::string_view CraneErrStr(CraneErr err) {
-  return Internal::CraneErrStrArr[uint16_t(err)];
-}
-
-inline std::string_view CraneErrCodeStr(CraneErrCode err) {
   return Internal::CraneErrStrArr[uint16_t(err)];
 }
 

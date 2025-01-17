@@ -29,7 +29,7 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
   auto stub = g_craned_keeper->GetCranedStub(craned_id);
   if (stub != nullptr && !stub->Invalid()) {
     CraneErr err = stub->QueryCranedRemoteMeta(&remote_meta);
-    if (err != CraneErr::kOk) {
+    if (err != CraneErr::SUCCESS) {
       CRANE_ERROR("Failed to query actual resource from craned {}", craned_id);
       return;
     }

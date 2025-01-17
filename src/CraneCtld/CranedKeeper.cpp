@@ -78,10 +78,10 @@ CraneErr CranedStub::TerminateTasks(const std::vector<task_id_t> &task_ids) {
     CRANE_DEBUG(
         "TerminateRunningTask RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
-    return CraneErr::kRpcFailure;
+    return CraneErr::ERR_RPC_FAILURE;
   }
 
-  return CraneErr::kOk;
+  return CraneErr::SUCCESS;
 }
 
 CraneErr CranedStub::TerminateOrphanedTask(task_id_t task_id) {
@@ -100,13 +100,13 @@ CraneErr CranedStub::TerminateOrphanedTask(task_id_t task_id) {
     CRANE_DEBUG(
         "TerminateOrphanedTask RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
-    return CraneErr::kRpcFailure;
+    return CraneErr::ERR_RPC_FAILURE;
   }
 
   if (reply.ok())
-    return CraneErr::kOk;
+    return CraneErr::SUCCESS;
   else
-    return CraneErr::kGenericFailure;
+    return CraneErr::ERR_GENERIC_FAILURE;
 }
 
 CraneErr CranedStub::CreateCgroupForTasks(
@@ -134,10 +134,10 @@ CraneErr CranedStub::CreateCgroupForTasks(
     CRANE_ERROR(
         "CreateCgroupForTasks RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
-    return CraneErr::kRpcFailure;
+    return CraneErr::ERR_RPC_FAILURE;
   }
 
-  return CraneErr::kOk;
+  return CraneErr::SUCCESS;
 }
 
 CraneErr CranedStub::ReleaseCgroupForTasks(
@@ -163,10 +163,10 @@ CraneErr CranedStub::ReleaseCgroupForTasks(
     CRANE_DEBUG(
         "ReleaseCgroupForTask gRPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
-    return CraneErr::kRpcFailure;
+    return CraneErr::ERR_RPC_FAILURE;
   }
 
-  return CraneErr::kOk;
+  return CraneErr::SUCCESS;
 }
 
 CraneErr CranedStub::CheckTaskStatus(task_id_t task_id,
@@ -186,14 +186,14 @@ CraneErr CranedStub::CheckTaskStatus(task_id_t task_id,
     CRANE_DEBUG(
         "CheckTaskStatus gRPC for Node {} returned with status not ok: {}",
         m_craned_id_, grpc_status.error_message());
-    return CraneErr::kRpcFailure;
+    return CraneErr::ERR_RPC_FAILURE;
   }
 
   if (reply.ok()) {
     *status = reply.status();
-    return CraneErr::kOk;
+    return CraneErr::SUCCESS;
   } else
-    return CraneErr::kNonExistent;
+    return CraneErr::ERR_NON_EXISTENT;
 }
 
 CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
@@ -212,12 +212,12 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
   if (!grpc_status.ok()) {
     CRANE_ERROR("ChangeTaskTimeLimitAsync to Craned {} failed: {} ",
                 m_craned_id_, grpc_status.error_message());
-    return CraneErr::kRpcFailure;
+    return CraneErr::ERR_RPC_FAILURE;
   }
   if (reply.ok())
-    return CraneErr::kOk;
+    return CraneErr::SUCCESS;
   else
-    return CraneErr::kGenericFailure;
+    return CraneErr::ERR_GENERIC_FAILURE;
 }
 
 CraneErr CranedStub::QueryCranedRemoteMeta(CranedRemoteMeta *meta) {
@@ -233,7 +233,7 @@ CraneErr CranedStub::QueryCranedRemoteMeta(CranedRemoteMeta *meta) {
   if (!grpc_status.ok()) {
     CRANE_ERROR("QueryCranedMeta to Craned {} failed: {} ", m_craned_id_,
                 grpc_status.error_message());
-    return CraneErr::kRpcFailure;
+    return CraneErr::ERR_RPC_FAILURE;
   }
 
   const auto *grpc_meta = reply.mutable_craned_remote_meta();
@@ -250,9 +250,9 @@ CraneErr CranedStub::QueryCranedRemoteMeta(CranedRemoteMeta *meta) {
   meta->system_boot_time =
       absl::FromUnixSeconds(grpc_meta->system_boot_time().seconds());
 
-  if (reply.ok()) return CraneErr::kOk;
+  if (reply.ok()) return CraneErr::SUCCESS;
 
-  return CraneErr::kGenericFailure;
+  return CraneErr::ERR_GENERIC_FAILURE;
 }
 
 crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(

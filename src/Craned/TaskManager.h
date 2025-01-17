@@ -159,7 +159,7 @@ struct TaskInstance {
 
   // Task execution results
   bool orphaned{false};
-  CraneErr err_before_exec{CraneErr::kOk};
+  CraneErr err_before_exec{CraneErr::SUCCESS};
   bool cancelled_by_user{false};
   bool terminated_by_timeout{false};
   ProcSigchldInfo sigchld_info{};

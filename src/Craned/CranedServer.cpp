@@ -34,7 +34,7 @@ grpc::Status CranedServiceImpl::ExecuteTask(
   CraneErr err;
   for (auto const &task_to_d : request->tasks()) {
     err = g_task_mgr->ExecuteTaskAsync(task_to_d);
-    if (err != CraneErr::kOk)
+    if (err != CraneErr::SUCCESS)
       response->add_failed_task_id_list(task_to_d.task_id());
   }
 

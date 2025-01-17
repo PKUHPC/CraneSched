@@ -55,7 +55,7 @@ BasicDevice::BasicDevice(const std::string& device_name,
 bool BasicDevice::Init() {
   for (auto& device_file_meta : device_file_metas) {
     auto err = DeviceManager::GetDeviceFileMajorMinorOpType(&device_file_meta);
-    if (err != CraneErr::kOk) return false;
+    if (err != CraneErr::SUCCESS) return false;
   }
   return true;
 }
@@ -82,11 +82,11 @@ CraneErr DeviceManager::GetDeviceFileMajorMinorOpType(
     device_file_meta->major = major(device_file_info.st_rdev);
     device_file_meta->minor = minor(device_file_info.st_rdev);
     device_file_meta->op_type = op_type;
-    return CraneErr::kOk;
+    return CraneErr::SUCCESS;
   } else {
     CRANE_ERROR("Failed to stat device file {} err:{}", device_file_meta->path,
                 std::strerror(errno));
-    return CraneErr::kSystemErr;
+    return CraneErr::ERR_SYSTEM_ERR;
   }
 }
 

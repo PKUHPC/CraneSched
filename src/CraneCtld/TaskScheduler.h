@@ -269,12 +269,12 @@ class TaskScheduler {
           CancelPendingTaskQueueElem{.task = std::move(task)});
       m_cancel_task_async_handle_->send();
       m_pending_task_map_.erase(pd_it);
-      return CraneErr::kOk;
+      return CraneErr::SUCCESS;
     }
 
     auto rn_it = m_running_task_map_.find(task_id);
     if (rn_it == m_running_task_map_.end())
-      return CraneErr::kNonExistent;
+      return CraneErr::ERR_NON_EXISTENT;
     else {
       auto& task = rn_it->second;
       if (task->type == crane::grpc::TaskType::Interactive) {
@@ -290,14 +290,14 @@ class TaskScheduler {
     LockGuard running_guard(&m_running_task_map_mtx_);
 
     auto iter = m_running_task_map_.find(task_id);
-    if (iter == m_running_task_map_.end()) return CraneErr::kNonExistent;
+    if (iter == m_running_task_map_.end()) return CraneErr::ERR_NON_EXISTENT;
 
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
 
-  static CraneErrCodeExpected<void> AcquireTaskAttributes(TaskInCtld* task);
+  static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
 
-  static CraneErrCodeExpected<void> CheckTaskValidity(TaskInCtld* task);
+  static CraneExpected<void> CheckTaskValidity(TaskInCtld* task);
 
  private:
   template <class... Ts>
