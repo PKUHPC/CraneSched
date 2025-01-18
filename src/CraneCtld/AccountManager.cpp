@@ -1014,6 +1014,8 @@ AccountManager::CraneExpected<void> AccountManager::CheckIfUidHasPermOnUser(
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
+  result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
+  if (!result) return result;
 
   for (const auto& account_name : accounts) {
     const Account* account = GetAccountInfoNoLock_(account_name);

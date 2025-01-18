@@ -608,33 +608,35 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
 
   if (is_modify_allowed) {
     allowed_accounts = accounts;
-    denied_accounts.clear();
-  } else if (allowed_accounts.empty()) {
-    // When allowed_accounts is in use, denied_accounts cannot be modified.
+  } else {
     denied_accounts = accounts;
   }
 
   return result;
 }
 
-bool CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
+std::expected<void, std::string> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
     const std::string& partition_name, const std::string& account_name) {
   auto part_metas_map = partition_metas_map_.GetMapSharedPtr();
 
-  if (!part_metas_map->contains(partition_name)) return false;
+  if (!part_metas_map->contains(partition_name)) return std::unexpected("Partition does not exist.");
 
   auto part_meta = part_metas_map->at(partition_name).GetExclusivePtr();
   const auto& allowed_accounts = part_meta->partition_global_meta.allowed_accounts;
   if (!allowed_accounts.empty()) {
     if (!allowed_accounts.contains(account_name))
-      return false;
+      return std::unexpected(
+        "The account is not in the AllowedAccounts of the partition "
+        "specified for the task, submission of the task is prohibited.");
   } else {
     const auto& denied_accounts = part_meta->partition_global_meta.denied_accounts;
     if (denied_accounts.contains(account_name))
-      return false;
+      return std::unexpected(
+        "The account is in the DeniedAccounts of the partition "
+        "specified for the task, submission of the task is prohibited.");
   }
 
-  return true;
+  return {};
 }
 
 void CranedMetaContainer::AddDedicatedResource(
