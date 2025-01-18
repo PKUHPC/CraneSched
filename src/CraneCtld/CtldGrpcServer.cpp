@@ -1026,12 +1026,10 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
     return std::unexpected(enable_res.error());
   }
 
-  if (!g_meta_container->CheckIfAccountIsAllowedInPartition(task->partition_id,
-                                                            task->account))
-    return std::unexpected(
-        "The account is not in the AllowedAccounts of the partition "
-        "specified "
-        "for the task, submission of the task is prohibited.");
+  auto result = g_meta_container->CheckIfAccountIsAllowedInPartition(task->partition_id,
+                                                            task->account);
+  if (!result)
+    return std::unexpected(result.error());
 
   auto result = g_task_scheduler->AcquireTaskAttributes(task.get());
 

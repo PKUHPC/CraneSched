@@ -95,7 +95,7 @@ class CranedMetaContainer final {
       bool is_modify_allowed,
       const std::unordered_set<std::string>& accounts);
 
-  bool CheckIfAccountIsAllowedInPartition(const std::string& partition_name,
+  std::expected<void, std::string> CheckIfAccountIsAllowedInPartition(const std::string& partition_name,
                                           const std::string& account_name);
 
   void CranedUp(const CranedId& craned_id);
