@@ -595,13 +595,16 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
     }
     CgroupInterface *cgroup = it->second.GetExclusivePtr()->release();
 
-    if (g_config.Plugin.Enabled) {
-      g_plugin_client->DestroyCgroupHookAsync(task_id, cgroup->GetCgroupString());
-    }
-
     task_id_to_cg_map_ptr->erase(task_id);
 
     if (cgroup != nullptr) {
+      
+      if (g_config.Plugin.Enabled) {
+        if (g_plugin_client != nullptr) {
+          g_plugin_client->DestroyCgroupHookAsync(task_id, cgroup->GetCgroupString());
+        }
+      }
+
       g_thread_pool->detach_task([cgroup]() {
         bool rc;
         int cnt = 0;
