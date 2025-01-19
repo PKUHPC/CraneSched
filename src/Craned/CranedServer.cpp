@@ -18,6 +18,12 @@
 
 #include "CranedServer.h"
 
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
+#include <net/if.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 #include <yaml-cpp/yaml.h>
 
 #include "TaskManager.h"
@@ -516,6 +522,79 @@ grpc::Status CranedServiceImpl::QueryCranedRemoteMeta(
 
   response->set_ok(true);
   return Status::OK;
+}
+
+grpc::Status CranedServiceImpl::QueryCranedNICInfo(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryCranedNICInfoRequest *request,
+    crane::grpc::QueryCranedNICInfoReply *response) {
+  struct if_nameindex *if_ni = if_nameindex();
+  if (if_ni == nullptr) {
+    response->set_ok(false);
+    response->set_error_message("Failed to get network interfaces");
+    return grpc::Status::OK;
+  }
+
+  int sock = socket(AF_INET, SOCK_DGRAM, 0);
+  if (sock < 0) {
+    response->set_ok(false);
+    response->set_error_message("Failed to create socket");
+    if_freenameindex(if_ni);
+    return grpc::Status::OK;
+  }
+
+  bool found_wol_interface = false;
+  for (struct if_nameindex *i = if_ni;
+       i->if_index != 0 || i->if_name != nullptr; i++) {
+    struct ifreq ifr;
+    memset(&ifr, 0, sizeof(ifr));
+    strncpy(ifr.ifr_name, i->if_name, IFNAMSIZ - 1);
+
+    // check interface status
+    if (ioctl(sock, SIOCGIFFLAGS, &ifr) < 0) continue;
+    if (!(ifr.ifr_flags & IFF_UP) || !(ifr.ifr_flags & IFF_RUNNING)) continue;
+
+    // check WoL support
+    struct ethtool_wolinfo wol;
+    struct ifreq ifr_ctl;
+    memset(&ifr_ctl, 0, sizeof(ifr_ctl));
+    strncpy(ifr_ctl.ifr_name, i->if_name, IFNAMSIZ - 1);
+
+    wol.cmd = ETHTOOL_GWOL;
+    ifr_ctl.ifr_data = reinterpret_cast<char *>(&wol);
+
+    if (ioctl(sock, SIOCETHTOOL, &ifr_ctl) >= 0 &&
+        (wol.supported & WAKE_MAGIC) && (wol.wolopts & WAKE_MAGIC)) {
+      // get mac address
+      if (ioctl(sock, SIOCGIFHWADDR, &ifr) == 0) {
+        unsigned char *mac =
+            reinterpret_cast<unsigned char *>(ifr.ifr_hwaddr.sa_data);
+        std::string mac_address =
+            fmt::format("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}", mac[0],
+                        mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+        CRANE_DEBUG("Found WoL enabled interface: {} (MAC: {})", i->if_name,
+                    mac_address);
+
+        response->set_ok(true);
+        response->set_interface_name(i->if_name);
+        response->set_mac_address(mac_address);
+        found_wol_interface = true;
+        break;  // find a WoL enabled interface and return
+      }
+    }
+  }
+
+  close(sock);
+  if_freenameindex(if_ni);
+
+  if (!found_wol_interface) {
+    response->set_ok(false);
+    response->set_error_message("No WoL enabled network interface found");
+    CRANE_WARN("No WoL enabled network interfaces found");
+  }
+
+  return grpc::Status::OK;
 }
 
 CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {

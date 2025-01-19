@@ -15,6 +15,12 @@ add_executable(cranectld
         EmbeddedDbClient.cpp
         EmbeddedDbClient.h
         CraneCtld.cpp
+        EnergyAwareScheduler.h
+        EnergyAwareScheduler.cpp
+        InfluxDBClient.h
+        InfluxDBClient.cpp
+        IPMIManager.h
+        IPMIManager.cpp
 
         CtldPreCompiledHeader.h)
 
@@ -48,6 +54,10 @@ target_link_libraries(cranectld PRIVATE
         range-v3::range-v3
 
         Backward::Interface
+        
+        fast_cpp_csv_parser
+        CURL::libcurl
+        ssh
 )
 
 if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)

@@ -27,7 +27,7 @@ add_subdirectory(mongodb-cxx-driver)
 add_subdirectory(ranges-v3)
 add_subdirectory(backward-cpp)
 add_subdirectory(fpm)
-
+add_subdirectory(fast-cpp-csv-parser)
 
 include(${CMAKE_SOURCE_DIR}/CMakeModule/SuppressHeaderWarning.cmake)
 suppress_header_warning()

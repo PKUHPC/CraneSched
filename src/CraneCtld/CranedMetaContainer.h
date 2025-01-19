@@ -131,6 +131,9 @@ class CranedMetaContainer final {
  private:  // Helper functions
   void SetGrpcCranedInfoByCranedMeta_(const CranedMeta& craned_meta,
                                       crane::grpc::CranedInfo* craned_info);
+
+  static crane::grpc::CranedResourceState GetResourceState_(
+      const CranedMeta& craned_meta);
 };
 
 }  // namespace Ctld
