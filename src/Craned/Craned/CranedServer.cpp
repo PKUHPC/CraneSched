@@ -515,10 +515,6 @@ grpc::Status CranedServiceImpl::TaskStatusChange(
   g_job_mgr->TaskStopAndDoStatusChangeAsync(
       request->task_id(), request->new_status(), request->exit_code(),
       request->reason());
-  auto stub = g_supervisor_keeper->GetStub(request->task_id());
-  CRANE_ASSERT(stub != nullptr);
-  stub->Terminate();
-  g_supervisor_keeper->RemoveSupervisor(request->task_id());
   response->set_ok(true);
   return Status::OK;
 }

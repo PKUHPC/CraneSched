@@ -259,9 +259,9 @@ std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync(
     const TaskSpec& spec) {
   std::promise<CraneExpected<pid_t>> pid_promise;
   auto pid_future = pid_promise.get_future();
-  m_grpc_execute_task_queue_.enqueue(
+  m_grpc_execute_task_queue_.enqueue(std::move(
       ExecuteTaskElem{.task_instance = std::make_unique<TaskInstance>(spec),
-                      .pid_prom = std::move(pid_promise)});
+                      .pid_prom = std::move(pid_promise)}));
   m_grpc_execute_task_async_handle_->send();
   return pid_future;
 }
@@ -337,6 +337,7 @@ void TaskManager::LaunchTaskInstance_() {
     process->meta = std::move(meta);
   }
 
+  CRANE_TRACE("[Job #{}] Spawn TaskInstance", m_task_->task.task_id());
   // err will NOT be kOk ONLY if fork() is not called due to some failure
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this task, and
@@ -509,6 +510,15 @@ CraneErr TaskManager::SpawnTaskInstance_() {
   } else {  // Child proc
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
+    // Ignore following sig
+    signal(SIGINT, SIG_DFL);
+    signal(SIGTERM, SIG_DFL);
+    signal(SIGTSTP, SIG_DFL);
+    signal(SIGQUIT, SIG_DFL);
+    signal(SIGUSR1, SIG_DFL);
+    signal(SIGUSR2, SIG_DFL);
+    signal(SIGALRM, SIG_DFL);
+    signal(SIGHUP, SIG_DFL);
 
     // TODO: Add all other supplementary groups.
     // Currently we only set the primary gid and the egid when task was
@@ -681,7 +691,7 @@ CraneErr TaskManager::KillTaskInstance_(int signum) {
                 signum);
 
     // Send the signal to the whole process group.
-    int err = kill(m_task_->process->GetPid(), signum);
+    int err = kill(-m_task_->process->GetPid(), signum);
 
     if (err == 0)
       return CraneErr::kOk;

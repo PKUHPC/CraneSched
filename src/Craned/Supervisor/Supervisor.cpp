@@ -128,7 +128,6 @@ void GlobalVariableInit() {
     std::abort();
   }
 
-
   // Ignore following sig
   signal(SIGINT, SIG_IGN);
   signal(SIGTERM, SIG_IGN);
@@ -149,7 +148,8 @@ void GlobalVariableInit() {
   g_task_mgr = std::make_unique<Supervisor::TaskManager>();
 
   g_craned_client = std::make_unique<Supervisor::CranedClient>();
-  g_craned_client->InitChannelAndStub(g_config.CranedUnixSocketPath);
+  g_craned_client->InitChannelAndStub(
+      fmt::format("unix://{}", g_config.CranedUnixSocketPath));
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
@@ -180,6 +180,7 @@ void StartServer() {
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
 
   CRANE_INFO("Supervisor started.");
+  std::this_thread::sleep_for(std::chrono::seconds(10));
 
   g_server->Wait();
   g_task_mgr->Wait();

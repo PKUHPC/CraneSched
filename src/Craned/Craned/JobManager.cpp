@@ -449,15 +449,15 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     g_supervisor_keeper->AddSupervisor(process->task_spec.task_id());
 
     auto stub = g_supervisor_keeper->GetStub(process->task_spec.task_id());
-    auto task_id = stub->ExecuteTask(process->task_spec);
-    if (!task_id) {
+    auto pid = stub->ExecuteTask(process->task_spec);
+    if (!pid) {
       CRANE_ERROR("[Task #{}] Supervisor failed to execute task.",
                   process->task_spec.task_id());
       instance->err_before_exec = CraneErr::kSupervisorError;
       KillPid_(child_pid, SIGKILL);
       return CraneErr::kSupervisorError;
     }
-    process->pid = task_id.value();
+    process->pid = pid.value();
 
     return CraneErr::kOk;
 

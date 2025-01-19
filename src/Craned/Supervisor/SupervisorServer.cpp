@@ -25,9 +25,10 @@ grpc::Status Supervisor::SupervisorServiceImpl::ExecuteTask(
   std::future<CraneExpected<pid_t>> pid_future =
       g_task_mgr->ExecuteTaskAsync(request->task());
   pid_future.wait();
-  if (pid_future.get()) {
+  auto pid = pid_future.get();
+  if (pid.has_value()) {
     response->set_ok(true);
-    response->set_pid(pid_future.get().value());
+    response->set_pid(pid.value());
   } else {
     response->set_ok(false);
   }
@@ -71,6 +72,7 @@ grpc::Status Supervisor::SupervisorServiceImpl::TerminateTask(
     const crane::grpc::supervisor::TerminateTaskRequest* request,
     crane::grpc::supervisor::TerminateTaskReply* response) {
   g_task_mgr->TerminateTaskAsync(request->mark_orphaned());
+  response->set_ok(true);
   return Status::OK;
 }
 grpc::Status Supervisor::SupervisorServiceImpl::Terminate(

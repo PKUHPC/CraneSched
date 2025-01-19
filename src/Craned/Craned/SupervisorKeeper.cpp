@@ -35,8 +35,9 @@ CraneExpected<pid_t> SupervisorClient::ExecuteTask(
   auto ok = m_stub_->ExecuteTask(&context, request, &reply);
   if (ok.ok() && reply.ok()) {
     return reply.pid();
-  } else
+  } else {
     return std::unexpected(CraneErr::kRpcFailure);
+  }
 }
 
 CraneExpected<std::pair<task_id_t, pid_t>> SupervisorClient::CheckTaskStatus() {
@@ -100,14 +101,17 @@ CraneExpected<std::unordered_map<task_id_t, pid_t>> SupervisorKeeper::Init() {
       absl::Mutex mtx;
       for (const auto& file : files) {
         g_thread_pool->detach_task(
-            [this, &file, &all_supervisor_reply, &mtx, &tasks]() {
+            [this, file, &all_supervisor_reply, &mtx, &tasks]() {
               std::shared_ptr stub = std::make_shared<SupervisorClient>();
               stub->InitChannelAndStub(file);
               CraneExpected<std::pair<task_id_t, pid_t>> task_status =
                   stub->CheckTaskStatus();
               all_supervisor_reply.count_down();
               if (!task_status) {
-                CRANE_ERROR("CheckTaskStatus for {} failed", file.string());
+                CRANE_ERROR(
+                    "CheckTaskStatus for {} failed, removing unix socket file.",
+                    file.string());
+                std::filesystem::remove(file);
                 return;
               }
 
@@ -144,10 +148,11 @@ void SupervisorKeeper::AddSupervisor(task_id_t task_id) {
 void SupervisorKeeper::RemoveSupervisor(task_id_t task_id) {
   absl::WriterMutexLock lk(&m_mutex);
   if (auto it = m_supervisor_map.find(task_id); it != m_supervisor_map.end()) {
+    CRANE_TRACE("Removing supervisor for task #{}", task_id);
+    m_supervisor_map.erase(it);
+  } else {
     CRANE_ERROR("Try to remove nonexistent supervisor for task #{}", task_id);
-    return;
   }
-  m_supervisor_map.erase(task_id);
 }
 
 std::shared_ptr<SupervisorClient> SupervisorKeeper::GetStub(task_id_t task_id) {
