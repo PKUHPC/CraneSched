@@ -1857,16 +1857,15 @@ void TaskScheduler::QueryTasksInRam(
 
 void TaskScheduler::QueryTaskSpec(const CranedId& craned_id,
                                   crane::grpc::CranedRegisterReply* response) {
+  LockGuard running_job_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
   auto it = m_node_to_tasks_map_.find(craned_id);
-  if (it != m_node_to_tasks_map_.end()) {
-    LockGuard running_job_guard(&m_running_task_map_mtx_);
-    for (const auto& job_id : it->second) {
-      auto job_it = m_running_task_map_.find(job_id);
-      if (job_it == m_running_task_map_.end()) continue;
-      job_it->second->SetFieldsOfCranedRegisterReplyByNode(craned_id, response);
-    }
+  if (it == m_node_to_tasks_map_.end()) return;
+  for (const auto& job_id : it->second) {
+    auto job_it = m_running_task_map_.find(job_id);
+    if (job_it == m_running_task_map_.end()) continue;
+    job_it->second->SetFieldsOfCranedRegisterReplyByNode(craned_id, response);
   }
 }
 

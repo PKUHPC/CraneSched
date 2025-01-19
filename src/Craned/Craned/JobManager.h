@@ -128,9 +128,6 @@ class JobManager {
    */
   void SetSigintCallback(std::function<void()> cb);
 
-  // Called from SupervisorKeeper which guarantee no data race.
-  void AddRecoveredTask_(crane::grpc::TaskToD task);
-
  private:
   template <class T>
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;

@@ -35,15 +35,15 @@ struct MetaInProcessInstance {
   virtual ~MetaInProcessInstance() = default;
 };
 
-struct BatchMetaInTaskInstance : MetaInProcessInstance {
+struct BatchMetaInProcessInstance : MetaInProcessInstance {
   std::string parsed_output_file_pattern;
   std::string parsed_error_file_pattern;
-  ~BatchMetaInTaskInstance() override = default;
+  ~BatchMetaInProcessInstance() override = default;
 };
 
-struct CrunMetaInTaskInstance : MetaInProcessInstance {
+struct CrunMetaInProcessInstance : MetaInProcessInstance {
   int msg_fd;
-  ~CrunMetaInTaskInstance() override = default;
+  ~CrunMetaInProcessInstance() override = default;
 };
 
 struct ProcSigchldInfo {

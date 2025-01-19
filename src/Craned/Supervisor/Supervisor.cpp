@@ -69,12 +69,16 @@ void InitFromStdin(int argc, char** argv) {
   if (!ok) {
     std::abort();
   }
+
   g_config.JobId = msg.job_id();
   g_config.SupervisorDebugLevel = msg.debug_level();
+  g_config.CranedUnixSocketPath = msg.craned_unix_socket_path();
+  g_config.CraneBaseDir = msg.crane_base_dir();
+  g_config.CraneScriptDir = msg.crane_script_dir();
+  g_config.Plugin.Enabled = msg.plugin_config().enabled();
+  g_config.Plugin.PlugindSockPath = msg.plugin_config().plugindsockpath();
   g_config.SupervisorLogFile =
       g_config.CraneBaseDir + fmt::format("Supervisor/{}.log", g_config.JobId);
-
-  g_config.CranedUnixSocketPath = msg.craned_unix_socket_path();
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
@@ -95,19 +99,35 @@ void InitFromStdin(int argc, char** argv) {
   }
 }
 
-void CreateRequiredDirectories() {
-  bool ok;
+bool CreateRequiredDirectories() {
+  bool ok{true};
   ok = util::os::CreateFolders(g_config.CraneScriptDir);
-  if (!ok) std::exit(1);
+  if (!ok) return ok;
 
   if (g_config.SupervisorDebugLevel != "off") {
     ok = util::os::CreateFoldersForFile(g_config.SupervisorLogFile);
-    if (!ok) std::exit(1);
+    if (!ok) return ok;
   }
+
+  ok = util::os::CreateFolders(kDefaultSupervisorUnixSockDir);
+  return ok;
 }
 
 void GlobalVariableInit() {
-  CreateRequiredDirectories();
+  bool ok = CreateRequiredDirectories();
+  using google::protobuf::io::FileOutputStream;
+  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
+  auto ostream = FileOutputStream(STDOUT_FILENO);
+
+  // Ready for grpc call
+  crane::grpc::supervisor::SupervisorReady msg;
+  msg.set_ok(ok);
+  if (!ok) {
+    SerializeDelimitedToZeroCopyStream(msg, &ostream);
+    ostream.Flush();
+    std::abort();
+  }
+
 
   // Ignore following sig
   signal(SIGINT, SIG_IGN);
@@ -142,14 +162,7 @@ void GlobalVariableInit() {
 
   g_server = std::make_unique<Supervisor::SupervisorServer>();
 
-  using google::protobuf::io::FileOutputStream;
-  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
-  auto ostream = FileOutputStream(STDOUT_FILENO);
-
-  // Ready for grpc call
-  crane::grpc::supervisor::SupervisorReady msg;
-  msg.set_ok(true);
-  auto ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
+  ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
   ok &= ostream.Flush();
   if (!ok) std::abort();
 }
@@ -165,6 +178,8 @@ void StartServer() {
 
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
+
+  CRANE_INFO("Supervisor started.");
 
   g_server->Wait();
   g_task_mgr->Wait();

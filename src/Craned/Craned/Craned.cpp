@@ -617,24 +617,24 @@ void GlobalVariableInit() {
   std::unordered_map<task_id_t, Craned::JobSpec> job_spec_map;
   std::unordered_map<task_id_t, crane::grpc::CranedRegisterReply::TaskList>
       job_task_map;
-  g_ctld_client->SetCranedRegisterCb(
-      [&craned_registered, &job_spec_map, &job_task_map, &task_ids_supervisor](
-          const crane::grpc::CranedRegisterReply& register_reply) {
-        for (const auto& [job_id, job_spec] : register_reply.job_map()) {
-          if (task_ids_supervisor.contains(job_id)) {
-            job_spec_map.emplace(job_id, job_spec);
-            job_task_map.emplace(job_id,
-                                 register_reply.job_id_tasks_map().at(job_id));
-          }
-        }
-        craned_registered.count_down();
-      });
+  // g_ctld_client->SetCranedRegisterCb(
+  // [&craned_registered, &job_spec_map, &job_task_map, &task_ids_supervisor](
+  //     const crane::grpc::CranedRegisterReply& register_reply) {
+  //   for (const auto& [job_id, job_spec] : register_reply.job_map()) {
+  //     if (task_ids_supervisor.contains(job_id)) {
+  //       job_spec_map.emplace(job_id, job_spec);
+  //       job_task_map.emplace(job_id,
+  //                            register_reply.job_id_tasks_map().at(job_id));
+  //     }
+  //   }
+  //   craned_registered.count_down();
+  // });
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
 
   g_ctld_client->StartConnectingCtld();
 
-  craned_registered.wait();
-  g_ctld_client->UnSetCranedRegisterCb();
+  // craned_registered.wait();
+  // g_ctld_client->UnSetCranedRegisterCb();
 
   std::unordered_set<task_id_t> running_job_ids;
   for (const auto& [job_id, _] : job_spec_map) {

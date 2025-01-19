@@ -35,6 +35,13 @@ message InitSupervisorRequest {
   uint32 job_id = 1;
   string debug_level = 2;
   string craned_unix_socket_path = 3;
+  string crane_base_dir = 4;
+  string crane_script_dir = 5;
+  message PluginConfig{
+    bool enabled = 1;
+    string PlugindSockPath = 2;
+  }
+  PluginConfig plugin_config = 6;
 }
 
 

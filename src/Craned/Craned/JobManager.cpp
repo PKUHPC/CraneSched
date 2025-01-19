@@ -218,6 +218,7 @@ void JobManager::EvSigchldCb_() {
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
+      CRANE_TRACE("Child pid #{} exit", pid);
       // We do nothing now
     } else if (pid == 0) {
       // There's no child that needs reaping.
@@ -230,7 +231,11 @@ void JobManager::EvSigchldCb_() {
   }
 }
 
-void JobManager::EvSigintCb_() { m_is_ending_now_ = true; }
+void JobManager::EvSigintCb_() {
+  CRANE_TRACE("Triggering exit event...");
+  m_sigint_cb_();
+  m_is_ending_now_ = true;
+}
 
 void JobManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
@@ -255,7 +260,6 @@ CraneErr JobManager::KillPid_(pid_t pid, int signum) {
 void JobManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
-void JobManager::AddRecoveredTask_(crane::grpc::TaskToD task) {}
 
 CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
                                       TaskExecutionInstance* process) {
@@ -269,13 +273,18 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
 
   int ctrl_sock_pair[2];  // Socket pair for passing control messages.
 
-  // int supervisor_ctrl_pipe[2];  // for init Supervisor
-  //
-  // // 创建管道
-  // if (pipe(supervisor_ctrl_pipe) == -1) {
-  //   CRANE_ERROR("Pipe creation failed!");
-  //   return CraneErr::kSystemErr;
-  // }
+  int supervisor_craned_pipe[2];
+  int craned_supervisor_pipe[2];
+
+  if (pipe(supervisor_craned_pipe) == -1) {
+    CRANE_ERROR("Pipe creation failed!");
+    return CraneErr::kSystemErr;
+  }
+
+  if (pipe(craned_supervisor_pipe) == -1) {
+    CRANE_ERROR("Pipe creation failed!");
+    return CraneErr::kSystemErr;
+  }
 
   // The ResourceInNode structure should be copied here for being accessed in
   // the child process.
@@ -374,36 +383,55 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
       return CraneErr::kProtobufError;
     }
 
+    int craned_supervisor_fd = craned_supervisor_pipe[1];
+    close(craned_supervisor_pipe[0]);
+    int supervisor_craned_fd = supervisor_craned_pipe[0];
+    close(supervisor_craned_pipe[1]);
+
+    FileInputStream supervisor_os(supervisor_craned_fd);
+    FileOutputStream supervisor_is(craned_supervisor_fd);
+
     // Do Supervisor Init
     crane::grpc::supervisor::InitSupervisorRequest init_request;
-    init_request.set_debug_level("off");
-    init_request.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
     init_request.set_job_id(process->task_spec.task_id());
+    init_request.set_debug_level("trace");
+    init_request.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
+    init_request.set_crane_base_dir(g_config.CraneBaseDir);
+    init_request.set_crane_script_dir(g_config.CranedScriptDir);
+    auto* plugin_conf = init_request.mutable_plugin_config();
+    plugin_conf->set_enabled(g_config.Plugin.Enabled);
+    plugin_conf->set_plugindsockpath(g_config.Plugin.PlugindSockPath);
 
-    ok = SerializeDelimitedToZeroCopyStream(init_request, &ostream);
+    ok = SerializeDelimitedToZeroCopyStream(init_request, &supervisor_is);
     if (!ok) {
       CRANE_ERROR("[Task #{}] Failed to serialize msg to ostream: {}",
-                  process->task_spec.task_id(), strerror(ostream.GetErrno()));
+                  process->task_spec.task_id(),
+                  strerror(supervisor_is.GetErrno()));
     }
 
-    if (ok) ok &= ostream.Flush();
+    if (ok) ok &= supervisor_is.Flush();
     if (!ok) {
       CRANE_ERROR("[Task #{}] Failed to send init msg to supervisor: {}",
                   child_pid, process->task_spec.task_id(),
-                  strerror(ostream.GetErrno()));
+                  strerror(supervisor_is.GetErrno()));
       close(ctrl_fd);
 
       instance->err_before_exec = CraneErr::kProtobufError;
       KillPid_(child_pid, SIGKILL);
       return CraneErr::kProtobufError;
+    } else {
+      CRANE_TRACE("[Job #{}] Supervisor init msg send.",
+                  process->task_spec.task_id());
     }
 
     crane::grpc::supervisor::SupervisorReady supervisor_ready;
-    ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &istream, nullptr);
+    ok = ParseDelimitedFromZeroCopyStream(&supervisor_ready, &supervisor_os,
+                                          nullptr);
     if (!ok || !msg.ok()) {
       if (!ok)
-        CRANE_ERROR("[Task #{}] Socket child endpoint failed: {}",
-                    process->task_spec.task_id(), strerror(istream.GetErrno()));
+        CRANE_ERROR("[Task #{}] Pipe child endpoint failed: {}",
+                    process->task_spec.task_id(),
+                    strerror(supervisor_os.GetErrno()));
       if (!msg.ok())
         CRANE_ERROR("[Task #{}] False from subprocess {}.", child_pid,
                     process->task_spec.task_id());
@@ -411,12 +439,13 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
 
       instance->err_before_exec = CraneErr::kProtobufError;
       KillPid_(child_pid, SIGKILL);
-      return CraneErr::kOk;
+      return CraneErr::kProtobufError;
     }
 
+    close(craned_supervisor_fd);
+    close(supervisor_craned_fd);
     close(ctrl_fd);
 
-    // todo: Create Supervisor stub,request task execution
     g_supervisor_keeper->AddSupervisor(process->task_spec.task_id());
 
     auto stub = g_supervisor_keeper->GetStub(process->task_spec.task_id());
@@ -435,6 +464,16 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
   } else {  // Child proc
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
+
+    int craned_supervisor_fd = craned_supervisor_pipe[0];
+    close(craned_supervisor_pipe[1]);
+    int supervisor_craned_fd = supervisor_craned_pipe[1];
+    close(supervisor_craned_pipe[0]);
+    // Message will send to stdin of Supervisor for its init.
+    dup2(craned_supervisor_fd, STDIN_FILENO);
+    dup2(supervisor_craned_fd, STDOUT_FILENO);
+    close(craned_supervisor_fd);
+    close(supervisor_craned_fd);
 
     close(ctrl_sock_pair[0]);
     int ctrl_fd = ctrl_sock_pair[1];
@@ -466,9 +505,6 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
       std::abort();
     }
 
-    // Message will send to stdin of Supervisor for its init.
-    dup2(ctrl_fd, STDIN_FILENO);
-
     // Close stdin for batch tasks.
     // If these file descriptors are not closed, a program like mpirun may
     // keep waiting for the input from stdin or other fds and will never end.
@@ -479,25 +515,19 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node);
 
     if (clearenv()) {
-      fmt::print("clearenv() failed!\n");
+      // fmt::print("clearenv() failed!\n");
     }
 
     for (const auto& [name, value] : res_env_map)
-      if (setenv(name.c_str(), value.c_str(), 1))
-        fmt::print("setenv for {}={} failed!\n", name, value);
+      if (setenv(name.c_str(), value.c_str(), 1)) {
+        // fmt::print("setenv for {}={} failed!\n", name, value);
+      }
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
 
     // Argv[0] is the program name which can be anything.
     argv.emplace_back("Supervisor");
-
-    if (process->task_spec.get_user_env()) {
-      // If --get-user-env is specified,
-      // we need to use --login option of bash to load settings from the
-      // user's settings.
-      argv.emplace_back("--login");
-    }
 
     argv.push_back(nullptr);
 
@@ -527,6 +557,7 @@ CraneErr JobManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
   instance->task_spec = task;
+  instance->job_id = task.task_id();
   EvQueueExecuteTaskElem elem{.task_execution_instance = std::move(instance)};
   auto future = elem.ok_prom.get_future();
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
@@ -633,6 +664,7 @@ void JobManager::LaunchTaskInstanceMt_(TaskExecutionInstance* process) {
             "Cannot spawn a new process inside the instance of task #{}",
             job_id));
   } else {
+    CRANE_TRACE("[job #{}] Spawned success.", process->task_spec.task_id());
     // kOk means that SpawnProcessInInstance_ has successfully forked a child
     // process.
     // Now we put the child pid into index maps.
@@ -651,9 +683,8 @@ void JobManager::LaunchTaskInstanceMt_(TaskExecutionInstance* process) {
 void JobManager::EvCleanTaskStatusChangeQueueCb_() {
   TaskStatusChangeQueueElem status_change;
   while (m_task_status_change_queue_.try_dequeue(status_change)) {
-    auto job_map_ptr = m_job_map_.GetMapExclusivePtr();
-    auto job_it = job_map_ptr->find(status_change.task_id);
-    if (job_it == job_map_ptr->end()) {
+    auto job_pptr = m_job_map_.GetValueExclusivePtr(status_change.task_id);
+    if (!job_pptr) {
       // When Ctrl+C is pressed for Craned, all tasks including just forked
       // tasks will be terminated.
       // In some error cases, a double TaskStatusChange might be triggered.
@@ -661,18 +692,8 @@ void JobManager::EvCleanTaskStatusChangeQueueCb_() {
       continue;
     }
 
-    JobInstance* instance = job_it->second.RawPtr()->release();
-
-    bool orphaned = instance->orphaned;
-    task_id_t job_id = instance->job_id;
-    uid_t uid = instance->job_spec.cgroup_spec.uid;
-    // Free the JobInstance structure
-    delete instance;
-    job_map_ptr->erase(status_change.task_id);
-
-    auto map_ptr = m_uid_to_job_ids_map_.GetMapExclusivePtr();
-    map_ptr->at(uid).RawPtr()->erase(job_id);
-
+    g_supervisor_keeper->RemoveSupervisor(job_pptr.get()->get()->job_id);
+    bool orphaned = job_pptr->get()->orphaned;
     if (!orphaned)
       g_ctld_client->TaskStatusChangeAsync(std::move(status_change));
   }
@@ -762,7 +783,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         elem.task_id);
 
     auto job_instance = m_job_map_.GetValueExclusivePtr(elem.task_id);
-    if (!job_instance) {
+    if (job_instance->get()->processes.empty()) {
       CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
 
       // Note if Ctld wants to terminate some tasks that are not running,
@@ -883,7 +904,6 @@ void JobManager::TaskStopAndDoStatusChangeAsync(
   }
   CRANE_INFO("Task #{} stopped and is doing TaskStatusChange...", job_id);
   ActivateTaskStatusChangeAsync_(job_id, new_status, exit_code, reason);
-
 }
 
 void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {

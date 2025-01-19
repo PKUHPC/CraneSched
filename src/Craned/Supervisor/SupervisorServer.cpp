@@ -89,4 +89,6 @@ Supervisor::SupervisorServer::SupervisorServer() {
   grpc::ServerBuilder builder;
   ServerBuilderAddUnixInsecureListeningPort(&builder, unix_socket_path);
   builder.RegisterService(m_service_impl_.get());
+
+  m_server_ = builder.BuildAndStart();
 }

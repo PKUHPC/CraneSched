@@ -138,10 +138,10 @@ TaskManager::TaskManager() : m_supervisor_exit_(false) {
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
     idle_handle->on<uvw::idle_event>(
         [&g_server, this](const uvw::idle_event&, uvw::idle_handle& h) {
-          g_server->Shutdown();
           if (m_supervisor_exit_) {
             h.parent().walk([](auto&& h) { h.close(); });
             h.parent().stop();
+            g_server->Shutdown();
           }
           std::this_thread::sleep_for(std::chrono::milliseconds(50));
         });
@@ -280,7 +280,7 @@ void TaskManager::LaunchTaskInstance_() {
   }
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
-  auto& sh_path = instance->process->meta->parsed_sh_script_path =
+  auto sh_path =
       fmt::format("{}/Crane-{}.sh", g_config.CraneScriptDir, g_config.JobId);
 
   FILE* fptr = fopen(sh_path.c_str(), "w");
@@ -314,7 +314,7 @@ void TaskManager::LaunchTaskInstance_() {
      * %u - Username
      * %x - Job name
      */
-    auto* meta = dynamic_cast<BatchMetaInTaskInstance*>(process->meta.get());
+    auto meta = std::make_unique<BatchMetaInProcessInstance>();
     meta->parsed_output_file_pattern =
         ParseFilePathPattern_(instance->task.batch_meta().output_file_pattern(),
                               instance->task.cwd());
@@ -334,6 +334,7 @@ void TaskManager::LaunchTaskInstance_() {
                            {"%x", instance->task.name()}},
                           &meta->parsed_error_file_pattern);
     }
+    process->meta = std::move(meta);
   }
 
   // err will NOT be kOk ONLY if fork() is not called due to some failure
@@ -398,7 +399,7 @@ CraneErr TaskManager::SpawnTaskInstance_() {
 
   if (instance->IsCrun()) {
     auto* crun_meta =
-        dynamic_cast<CrunMetaInTaskInstance*>(instance->process->meta.get());
+        dynamic_cast<CrunMetaInProcessInstance*>(instance->process->meta.get());
     launch_pty = instance->task.interactive_meta().pty();
     CRANE_DEBUG("Launch crun task #{} pty:{}", instance->task.task_id(),
                 launch_pty);
@@ -431,8 +432,8 @@ CraneErr TaskManager::SpawnTaskInstance_() {
                 instance->task.task_id(), child_pid);
 
     if (instance->IsCrun()) {
-      auto* meta =
-          dynamic_cast<CrunMetaInTaskInstance*>(instance->process->meta.get());
+      auto* meta = dynamic_cast<CrunMetaInProcessInstance*>(
+          instance->process->meta.get());
       g_cfored_manager->RegisterIOForward(
           instance->task.interactive_meta().cfored_name(), meta->msg_fd,
           launch_pty);
@@ -581,8 +582,8 @@ CraneErr TaskManager::SpawnTaskInstance_() {
     if (instance->IsBatch()) {
       int stdout_fd, stderr_fd;
 
-      auto* meta =
-          dynamic_cast<BatchMetaInTaskInstance*>(instance->process->meta.get());
+      auto* meta = dynamic_cast<BatchMetaInProcessInstance*>(
+          instance->process->meta.get());
       const std::string& stdout_file_path = meta->parsed_output_file_pattern;
       const std::string& stderr_file_path = meta->parsed_error_file_pattern;
 
