@@ -1859,7 +1859,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
         running_tasks,
     absl::Time now, const PartitionId& partition_id,
-    const std::unordered_set<CranedId> craned_ids,
+    const std::unordered_set<CranedId>& craned_ids,
     const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
     NodeSelectionInfo* node_selection_info) {
   NodeSelectionInfo& node_selection_info_ref = *node_selection_info;
@@ -1917,10 +1917,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     // Calculate how many resources are available at [now, first task end,
     // second task end, ...] in this node.
     auto& time_avail_res_map =
-        node_selection_info_ref.node_time_avail_res_map[craned_id];
-    node_selection_info_ref.node_res_total_map[craned_id] =
-        craned_meta->res_total;
-    node_selection_info_ref.setCost(craned_id, 0);
+        node_selection_info_ref.InitCostAndGetTimeAvailResMap(
+            craned_id, craned_meta->res_total);
 
     // Insert [now, inf) interval and thus guarantee time_avail_res_map is not
     // null.
@@ -1940,7 +1938,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         const auto& running_task = running_tasks.at(task_id);
         ResourceInNode const& running_task_res =
             running_task->Resources().at(craned_id);
-        node_selection_info_ref.updateCost(craned_id, now, end_time,
+        node_selection_info_ref.UpdateCost(craned_id, now, end_time,
                                            running_task_res);
         if (cur_time_iter->first != end_time) {
           /**
@@ -2027,7 +2025,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   }
   std::vector<CranedId> craned_indexes_;
 
-  for (auto& [cost, craned_index] : node_selection_info.cost_node_id_set) {
+  for (const auto& craned_index :
+       node_selection_info.GetCostNodeIdSet() | std::views::values) {
     if (!partition_meta_ptr.GetExclusivePtr()->craned_ids.contains(
             craned_index)) {
       // Todo: Performance issue! We can use cached available node set
@@ -2035,7 +2034,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       continue;
     }
     auto& time_avail_res_map =
-        node_selection_info.node_time_avail_res_map.at(craned_index);
+        node_selection_info.GetTimeAvailResMap(craned_index);
     // Number of tasks is not less than map size.
     // When condition is true, the craned has too many tasks.
     if (time_avail_res_map.size() >= kAlgoMaxTaskNumPerNode) {
@@ -2253,10 +2252,10 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
   // Increase the running task num in Craned `crane_id`.
   for (CranedId craned_id : craned_ids) {
     ResourceInNode const& task_res_in_node = resources.at(craned_id);
-    node_info.updateCost(craned_id, expected_start_time, task_end_time,
+    node_info.UpdateCost(craned_id, expected_start_time, task_end_time,
                          task_res_in_node);
     TimeAvailResMap& time_avail_res_map =
-        node_info.node_time_avail_res_map[craned_id];
+        node_info.GetTimeAvailResMap(craned_id);
 
     auto task_duration_begin_it =
         time_avail_res_map.upper_bound(expected_start_time);
