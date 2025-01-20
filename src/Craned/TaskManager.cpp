@@ -81,8 +81,17 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
 
   env_map.emplace("CRANE_JOB_ID", std::to_string(this->task.task_id()));
 
-  if (this->IsCrun() && !this->task.interactive_meta().term_env().empty()) {
-    env_map.emplace("TERM", this->task.interactive_meta().term_env());
+  if (this->IsCrun()) {
+    auto const& ia_meta = this->task.interactive_meta();
+    if (!ia_meta.term_env().empty())
+      env_map.emplace("TERM", ia_meta.term_env());
+
+    if (ia_meta.x11()) {
+      auto const& x11_meta = ia_meta.x11_meta();
+      env_map.erase("DISPLAY");
+      env_map.emplace("DISPLAY",
+                      fmt::format("{}:{}", x11_meta.target(), x11_meta.port()));
+    }
   }
 
   int64_t time_limit_sec = this->task.time_limit().seconds();
@@ -412,8 +421,8 @@ void TaskManager::EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info) {
 void TaskManager::EvSigintCb_() {
   if (!m_is_ending_now_) {
     // SIGINT has been sent once. If SIGINT are captured twice, it indicates
-    // the signal sender can't wait to stop Craned and Craned just send SIGTERM
-    // to all tasks to kill them immediately.
+    // the signal sender can't wait to stop Craned and Craned just send
+    // SIGTERM to all tasks to kill them immediately.
 
     CRANE_INFO("Caught SIGINT. Send SIGTERM to all running tasks...");
 
@@ -527,10 +536,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   // The ResourceInNode structure should be copied here for being accessed in
   // the child process.
   // Note that CgroupManager acquires a lock for this.
-  // If the lock is held in the parent process during fork, the forked thread in
-  // the child proc will block forever.
-  // That's why we should copy it here and the child proc should not hold any
-  // lock.
+  // If the lock is held in the parent process during fork, the forked thread
+  // in the child proc will block forever. That's why we should copy it here
+  // and the child proc should not hold any lock.
   auto res_in_node = g_cg_mgr->GetTaskResourceInNode(instance->task.task_id());
   if (!res_in_node.has_value()) {
     CRANE_ERROR("[Task #{}] Failed to get resource info",
@@ -693,8 +701,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     // See comments above.
     // As long as fork() is done and the grpc channel to the child process is
-    // healthy, we should return kOk, not trigger a manual TaskStatusChange, and
-    // reap the child process by SIGCHLD after it commits suicide.
+    // healthy, we should return kOk, not trigger a manual TaskStatusChange,
+    // and reap the child process by SIGCHLD after it commits suicide.
     return CraneErr::kOk;
   } else {  // Child proc
     // Disable SIGABRT backtrace from child processes.
@@ -832,7 +840,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
 
     if (clearenv()) {
-      fmt::print(stderr, "[Craned Subprocess] Warnning: clearenv() failed.\n");
+      fmt::print(stderr, "[Craned Subprocess] Warning: clearenv() failed.\n");
     }
 
     auto FuncSetEnv =
@@ -841,12 +849,26 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
             if (setenv(name.c_str(), value.c_str(), 1))
               fmt::print(
                   stderr,
-                  "[Craned Subprocess] Warnning: setenv() for {}={} failed.\n",
+                  "[Craned Subprocess] Warning: setenv() for {}={} failed.\n",
                   name, value);
         };
 
     FuncSetEnv(task_env_map);
     FuncSetEnv(res_env_map);
+
+    if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
+      auto const& x11_meta = instance->task.interactive_meta().x11_meta();
+      std::string xauth_cmd =
+          fmt::format("xauth add {}:{} . {}", x11_meta.target(),
+                      x11_meta.port(), x11_meta.cookie());
+
+      // FIXME: Shell injection vulnerability
+      rc = std::system(xauth_cmd.c_str());
+      if (rc != 0) {
+        fmt::print(stderr, "[Craned Subprocess] Error: xauth failed.\n");
+        std::abort();
+      }
+    }
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
@@ -856,8 +878,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     if (instance->task.get_user_env()) {
       // If --get-user-env is specified,
-      // we need to use --login option of bash to load settings from the user's
-      // settings.
+      // we need to use --login option of bash to load settings from the
+      // user's settings.
       argv.emplace_back("--login");
     }
 
@@ -935,7 +957,8 @@ void TaskManager::EvCleanGrpcExecuteTaskQueueCb_() {
 }
 
 void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
-  // This function runs in a multi-threading manner. Take care of thread safety.
+  // This function runs in a multi-threading manner.
+  // Take care of thread safety.
   task_id_t task_id = instance->task.task_id();
 
   if (!g_cg_mgr->CheckIfCgroupForTasksExists(task_id)) {
