@@ -18,6 +18,7 @@
 
 #include "AccountManager.h"
 
+#include "AccountMetaContainer.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
@@ -832,6 +833,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyQos(
   // Mongodb
   Qos qos;
   g_db_client->SelectQos("name", name, &qos);
+
   *m_qos_map_[name] = std::move(qos);
 
   return {};
@@ -969,15 +971,14 @@ std::expected<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
     return std::unexpected("time-limit reached the user's limit.");
 
-  if (static_cast<double>(task->cpus_per_task) >
-      qos_share_ptr->max_cpus_per_user)
-    return std::unexpected("cpus-per-task reached the user's limit.");
+  if (!g_account_meta_container->CheckAndMallocQosResourceFromUser(
+          user_share_ptr->name, *task, *qos_share_ptr))
+    return std::unexpected("The requested QoS resources have reached the user's limit.");
 
   return {};
 }
 
-std::expected<void, std::string> AccountManager::CheckUidIsAdmin(
-    uint32_t uid) {
+std::expected<void, std::string> AccountManager::CheckUidIsAdmin(uint32_t uid) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) {
@@ -1766,6 +1767,8 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser_(
   for (auto& coordinatorAccount : remove_coordinator_accounts) {
     m_account_map_[coordinatorAccount]->coordinators.remove(name);
   }
+
+  g_account_meta_container->DeleteUserResource(name);
 
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
