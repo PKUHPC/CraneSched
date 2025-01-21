@@ -3,3 +3,4 @@ BasedOnStyle: Google
 AllowAllArgumentsOnNextLine: false
 IndentPPDirectives: AfterHash
 IndentCaseLabels: false
+AllowShortBlocksOnASingleLine: Empty

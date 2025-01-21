@@ -1859,7 +1859,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
         running_tasks,
     absl::Time now, const PartitionId& partition_id,
-    const std::unordered_set<CranedId> craned_ids,
+    const std::unordered_set<CranedId>& craned_ids,
     const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
     NodeSelectionInfo* node_selection_info) {
   NodeSelectionInfo& node_selection_info_ref = *node_selection_info;
@@ -1874,10 +1874,6 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     // Sort all running task in this node by ending time.
     std::vector<std::pair<absl::Time, uint32_t>> end_time_task_id_vec;
 
-    node_selection_info_ref.task_num_node_id_map.emplace(
-        craned_meta->running_task_resource_map.size(), craned_id);
-
-    std::vector<std::string> running_task_ids_str;
     for (const auto& [task_id, res] : craned_meta->running_task_resource_map) {
       const auto& task = running_tasks.at(task_id);
 
@@ -1891,13 +1887,14 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
       absl::Time end_time = std::max(task->StartTime() + task->time_limit,
                                      now + absl::Seconds(1));
       end_time_task_id_vec.emplace_back(end_time, task_id);
-
-      running_task_ids_str.emplace_back(std::to_string(task_id));
     }
 
     if constexpr (kAlgoTraceOutput) {
+      std::string running_task_ids_str;
+      for (const auto& [end_time, task_id] : end_time_task_id_vec)
+        running_task_ids_str.append(fmt::format("{}, ", task_id));
       CRANE_TRACE("Craned node {} has running tasks: {}", craned_id,
-                  absl::StrJoin(running_task_ids_str, ", "));
+                  running_task_ids_str);
     }
 
     std::sort(
@@ -1918,9 +1915,10 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     }
 
     // Calculate how many resources are available at [now, first task end,
-    //  second task end, ...] in this node.
+    // second task end, ...] in this node.
     auto& time_avail_res_map =
-        node_selection_info_ref.node_time_avail_res_map[craned_id];
+        node_selection_info_ref.InitCostAndGetTimeAvailResMap(
+            craned_id, craned_meta->res_total);
 
     // Insert [now, inf) interval and thus guarantee time_avail_res_map is not
     // null.
@@ -1934,11 +1932,15 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
     }
 
     {  // Limit the scope of `iter`
-      auto cur_time_iter = time_avail_res_map.find(now);
+      auto cur_time_iter = time_avail_res_map.begin();
       bool ok;
       for (auto& [end_time, task_id] : end_time_task_id_vec) {
         const auto& running_task = running_tasks.at(task_id);
-        if (!time_avail_res_map.contains(end_time)) {
+        ResourceInNode const& running_task_res =
+            running_task->Resources().at(craned_id);
+        node_selection_info_ref.UpdateCost(craned_id, end_time - now,
+                                           running_task_res);
+        if (cur_time_iter->first != end_time) {
           /**
            * If there isn't any task that ends at the `end_time`,
            * insert an interval [end_time, inf) with the resource of
@@ -1969,7 +1971,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
          * {{now+1+1: available_res(now) + available_res(1) +
          *  available_res(2)}, ...}
          */
-        cur_time_iter->second += running_task->Resources().at(craned_id);
+        cur_time_iter->second += running_task_res;
 
         if constexpr (kAlgoTraceOutput) {
           CRANE_TRACE(
@@ -2015,31 +2017,33 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
     TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
     absl::Time* start_time) {
-  uint32_t selected_node_cnt = 0;
-  std::vector<TimeSegment> intersected_time_segments;
-  bool first_pass{true};
+  uint32_t node_num_limit = task->node_num;
+  if constexpr (kAlgoRedundantNode) {
+    node_num_limit = std::min(task->node_num + 10, task->node_num * 2);
+  } else {
+    node_num_limit = task->node_num;
+  }
+  std::vector<CranedId> craned_indexes_;
 
-  std::list<CranedId> craned_indexes_;
-  std::list<CranedId> available_craned_indexes_;
-
-  ResourceV2 allocated_res;
-  task->allocated_res_view.SetToZero();
-
-  auto task_num_node_id_it = node_selection_info.task_num_node_id_map.begin();
-  while (available_craned_indexes_.size() < task->node_num &&
-         task_num_node_id_it !=
-             node_selection_info.task_num_node_id_map.end()) {
-    auto craned_index = task_num_node_id_it->second;
+  for (const auto& craned_index :
+       node_selection_info.GetCostNodeIdSet() | std::views::values) {
     if (!partition_meta_ptr.GetExclusivePtr()->craned_ids.contains(
             craned_index)) {
       // Todo: Performance issue! We can use cached available node set
       //  for the task when checking task validity in TaskScheduler.
-      ++task_num_node_id_it;
       continue;
     }
-
     auto& time_avail_res_map =
-        node_selection_info.node_time_avail_res_map.at(craned_index);
+        node_selection_info.GetTimeAvailResMap(craned_index);
+    // Number of tasks is not less than map size.
+    // When condition is true, the craned has too many tasks.
+    if (time_avail_res_map.size() >= kAlgoMaxTaskNumPerNode) {
+      if constexpr (kAlgoTraceOutput) {
+        CRANE_TRACE("Craned {} has too many tasks. Skipping this craned.",
+                    craned_index);
+      }
+      continue;
+    }
     auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
 
     // If any of the follow `if` is true, skip this node.
@@ -2065,58 +2069,22 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
                     task->TaskId(), craned_index);
       }
     } else {
-      if (selected_node_cnt < task->node_num) {
-        craned_indexes_.emplace_back(craned_index);
-        ++selected_node_cnt;
-      }
-
-      ResourceInNode feasible_res;
-      bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
-          craned_meta->res_total, &feasible_res);
-      if (!ok) {
-        CRANE_DEBUG(
-            "Task #{} needs more resource than that of craned {}. "
-            "Craned resource might have been changed.",
-            task->TaskId(), craned_index);
-        return false;
-      }
-
-      auto& time_avail_res_map =
-          node_selection_info.node_time_avail_res_map.at(craned_index);
-      bool can_run = true;
-      for (const auto& [time, res] : time_avail_res_map) {
-        if (time >= now + task->time_limit) break;
-        if (!(feasible_res <= res)) {
-          can_run = false;
-          break;
-        }
-      }
-      if (can_run) {
-        available_craned_indexes_.emplace_back(craned_index);
-        allocated_res.AddResourceInNode(craned_index, feasible_res);
-        task->allocated_res_view += feasible_res;
-      }
+      craned_indexes_.emplace_back(craned_index);
+      if (craned_indexes_.size() >= node_num_limit) break;
     }
-    ++task_num_node_id_it;
   }
 
-  if (available_craned_indexes_.size() == task->node_num) {
-    *craned_ids = std::move(available_craned_indexes_);
-    *start_time = now;
-    task->SetResources(std::move(allocated_res));
-    return true;
-  }
+  if (craned_indexes_.size() < task->node_num) return false;
 
-  if (selected_node_cnt < task->node_num) return false;
-  CRANE_ASSERT_MSG(selected_node_cnt == task->node_num,
-                   "selected_node_cnt != task->node_num");
-
+  ResourceV2 allocated_res;
   task->allocated_res_view.SetToZero();
 
   for (const auto& craned_id : craned_indexes_) {
     const auto& craned_meta = craned_meta_map.at(craned_id).GetExclusivePtr();
     ResourceInNode feasible_res;
 
+    // TODO: get feasible resource randomly (may cause start time change
+    // rapidly)
     bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
         craned_meta->res_total, &feasible_res);
     if (!ok) {
@@ -2133,285 +2101,9 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
   task->SetResources(std::move(allocated_res));
 
-  for (CranedId craned_id : craned_indexes_) {
-    if constexpr (kAlgoTraceOutput) {
-      CRANE_TRACE("Find valid time segments for task #{} on craned {}",
-                  task->TaskId(), craned_id);
-    }
-
-    auto& time_avail_res_map =
-        node_selection_info.node_time_avail_res_map.at(craned_id);
-
-    // Find all valid time segments in this node for this task.
-    // The expected start time must exist because all tasks in
-    // pending_task_map can be run under the amount of all resources in this
-    // node. At some future time point, all tasks will end and this pending
-    // task can eventually be run because the total resource of all the nodes
-    // in `craned_indexes` >= the resource required by the task.
-    auto res_it = time_avail_res_map.begin();
-
-    std::vector<TimeSegment> time_segments;
-    absl::Duration valid_duration;
-    absl::Time expected_start_time;
-
-    ResourceInNode const& task_node_res =
-        task->Resources().EachNodeResMap().at(craned_id);
-
-    // Figure out in this craned node, which time segments have sufficient
-    // resource to run the task.
-    // For example, if task needs 3 cpu cores, time_avail_res_map is:
-    // [1, 3], [5, 6], [7, 2], [9, 6] | Format: [start_time, cores]
-    // Then the valid time segments are:
-    // [1,6], [9, inf] | Format: [start_time, duration]
-    bool trying = true;
-    while (true) {
-      CRANE_ASSERT(res_it != time_avail_res_map.end());
-      if (trying) {
-        if (task_node_res <= res_it->second) {
-          trying = false;
-          expected_start_time = res_it->first;
-
-          if (std::next(res_it) == time_avail_res_map.end()) {
-            valid_duration = absl::InfiniteDuration();
-            time_segments.emplace_back(expected_start_time, valid_duration);
-            break;
-          } else {
-            valid_duration = std::next(res_it)->first - res_it->first;
-            res_it++;
-            continue;
-          }
-        } else {
-          if (++res_it == time_avail_res_map.end()) break;
-          continue;
-        }
-      } else {
-        if (task_node_res <= res_it->second) {
-          if (std::next(res_it) == time_avail_res_map.end()) {
-            valid_duration = absl::InfiniteDuration();
-            time_segments.emplace_back(expected_start_time, valid_duration);
-            break;
-          } else {
-            valid_duration += std::next(res_it)->first - res_it->first;
-            res_it++;
-            continue;
-          }
-        } else {
-          trying = true;
-          time_segments.emplace_back(expected_start_time, valid_duration);
-          if (++res_it == time_avail_res_map.end())
-            break;
-          else
-            continue;
-        }
-      }
-    }
-
-    // Now we have the valid time segments for this node. Find the
-    // intersection with the set in the previous pass.
-    if (first_pass) {
-      intersected_time_segments = std::move(time_segments);
-      first_pass = false;
-
-      if constexpr (kAlgoTraceOutput) {
-        std::vector<std::string> valid_seg_str;
-        for (auto& seg : intersected_time_segments)
-          valid_seg_str.emplace_back(fmt::format(
-              "[start: {}, end: {})", absl::ToInt64Seconds(seg.start - now),
-              absl::ToInt64Seconds(seg.start - now + seg.duration)));
-        CRANE_TRACE("After looping craned {}, valid time segments: {}",
-                    craned_id, absl::StrJoin(valid_seg_str, ", "));
-      }
-    } else {
-      std::vector<TimeSegment> new_intersected_time_segments;
-
-      for (auto&& seg : time_segments) {
-        absl::Time start = seg.start;
-        absl::Time end = seg.start + seg.duration;
-
-        if constexpr (kAlgoTraceOutput) {
-          CRANE_TRACE(
-              "Trying to intersect time segment: [start: {}, end: "
-              "{})",
-              absl::ToInt64Seconds(start - now),
-              absl::ToInt64Seconds(start - now + seg.duration));
-        }
-
-        // Segment: [start, end)
-        // e.g. segment.start=5, segment.duration=1s => [5,6)
-
-        // Find the first time point that >= seg.start + seg.duration
-        auto it2 = std::lower_bound(intersected_time_segments.begin(),
-                                    intersected_time_segments.end(), end);
-
-        if (it2 == intersected_time_segments.begin()) {
-          // If it2 == intersected_time_segments.begin(),
-          // this time segment has no overlap with any time segment
-          // in intersected_time_segments.
-          // Just skip it.
-          //               it2
-          //                V
-          //  seg           *------*    *----* .... intersected_time_segments
-          // *----------*
-          //            ^
-          //           end
-          //
-          // Do nothing under such situation.
-          continue;
-        } else {
-          it2 = std::prev(it2);
-          // it2 now looks like
-          //   *-----------* seg
-          // (.......)   *--------* *---* intersected_time_segments
-          //            ^
-          //           it2 (the last time segment to do intersection)
-
-          // Find the first segment in `intersected_time_segments`
-          // whose end >= seg.start.
-          // Note: If end == seg.start, there's no intersection.
-          //
-          // We first find a segment (it1) in `intersected_time_segments`
-          // whose start < seg.start and is closet to seg.start...
-          // There may be 2 situation:
-          // A1.
-          //     start
-          //       V
-          //       *-------* seg
-          //  *--------* *----*
-          //             ^
-          //            it1 ( != intersected_time_segment.end()  )
-          //
-          // A2.
-          //   *-------* seg         *-------* seg
-          //   *--*             or     *---*
-          //   ^                       ^
-          //  it1                     it1 ( == intersected_time_segment.begin())
-          auto it1 = std::lower_bound(intersected_time_segments.begin(),
-                                      intersected_time_segments.end(), start);
-          if (it1 == intersected_time_segments.begin()) {
-            // Case A2:
-            //
-            // If it1 == intersected_time_segments.begin(), there is no time
-            // segment that starts previous to seg.start but there are some
-            // segments immediately after seg.start. The first one of them is
-            // the beginning of intersected_time_segments.
-            //  it1 == begin()   it2
-            //   V                V
-            //   *---*            *----*
-            // *--------------------* seg
-            // ^
-            // start
-          } else {
-            // Case A1:
-            // If there is an overlap between first segment and `seg`, take
-            // the intersection.
-
-            // Case A1-1 (end >= it1->start):
-            //
-            // std::prev(it1)                 it1
-            // V                               V
-            // *----------------------------*  *--------*
-            //         *-----------------------------*
-            //         |<-intersected part->|        ^
-            //         ^                             |
-            //      start                           end
-            //
-            // OR
-            //
-            // Case A1-2 (end < it1->start):
-            // it0 == std::prev(it1)              it1
-            // V                                   V
-            // *--------------------------------*  *--------*
-            //         *--------------------*
-            //         |<-intersected part->|
-            //         ^                    ^
-            //      start                  end
-            auto it0 = std::prev(it1);
-            if (it0->start + it0->duration > start) {
-              // Note: If it0->start + it0->duration == seg.start,
-              //       there's no intersection.
-
-              absl::Duration intersected_duration;
-              if (end < it0->start + it0->duration)
-                // Case A1-2
-                intersected_duration = end - start;
-              else
-                // Case A1-1
-                intersected_duration = it0->start + it0->duration - start;
-
-              new_intersected_time_segments.emplace_back(start,
-                                                         intersected_duration);
-            }
-          }
-
-          //            |<-- intersected range -->|
-          //           it1                           it2
-          //            v                             v
-          // *~~~~~~~*  *----*           *--------*   *~~~~~~~~~~~~*
-          //       *----------------------------------------*
-          //
-          //
-          // Case A1-3 (There's no half-intersected tail segment):
-          // it2                    it1
-          // v                       v
-          // *-------------*         *--------------*
-          //           *----------*
-          //
-          // Or
-          //
-          // it2                    it1 == end()
-          // v                       v
-          // *-------------*
-          //           *----------*
-          //
-          // Note: In case A1-3, it2 < it1.
-          //       Thus, termination condition should be (it2 < it1).
-          for (auto it = it1; it < it2; ++it)
-            new_intersected_time_segments.emplace_back(it->start, it->duration);
-
-          if (it2 < it1) {
-            // Case A1-3.
-            // No half-intersected tail segment should be handled.
-          } else {
-            // the last insertion handles the following 2 situations.
-            //                                        it2
-            // *~~~~~~~*  *~~~~~~~*  *~~~~~~~~*   *------------*
-            //       *--------------------------------*
-            // OR
-            //                                      it2
-            // *~~~~~~~*  *~~~~~~~*  *~~~~~~~~*   *------*
-            //       *-------------------------------------*
-            new_intersected_time_segments.emplace_back(
-                it2->start, std::min(it2->duration, end - it2->start));
-          }
-        }
-      }
-
-      intersected_time_segments = std::move(new_intersected_time_segments);
-
-      if constexpr (kAlgoTraceOutput) {
-        std::vector<std::string> valid_seg_str;
-        for (auto& seg : intersected_time_segments) {
-          valid_seg_str.emplace_back(fmt::format(
-              "[start: {}, end: {})", absl::ToInt64Seconds(seg.start - now),
-              absl::ToInt64Seconds(seg.start - now + seg.duration)));
-        }
-        CRANE_TRACE("After looping craned {}, valid time segments: {}",
-                    craned_id, absl::StrJoin(valid_seg_str, ", "));
-      }
-    }
-  }
-
-  *craned_ids = std::move(craned_indexes_);
-
-  // Calculate the earliest start time
-  for (auto&& seg : intersected_time_segments) {
-    if (task->time_limit <= seg.duration) {
-      *start_time = seg.start;
-      return true;
-    }
-  }
-
-  return false;
+  EarliestStartSubsetSelector scheduler(task, node_selection_info,
+                                        craned_indexes_);
+  return scheduler.CalcEarliestStartTime(task, now, start_time, craned_ids);
 }
 
 void MinLoadFirst::NodeSelect(
@@ -2446,7 +2138,7 @@ void MinLoadFirst::NodeSelect(
 
   std::vector<task_id_t> task_id_vec;
   task_id_vec = m_priority_sorter_->GetOrderedTaskIdList(
-      *pending_task_map, running_tasks, g_config.ScheduledBatchSize);
+      *pending_task_map, running_tasks, g_config.ScheduledBatchSize, now);
   // Now we know, on every node, the # of running tasks (which
   //  doesn't include those we select as the incoming running tasks in the
   //  following code) and how many resources are available at the end of each
@@ -2555,23 +2247,15 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
   NodeSelectionInfo& node_info = *node_selection_info;
   bool ok;
 
+  absl::Time task_end_time = expected_start_time + duration;
+
+  // Increase the running task num in Craned `crane_id`.
   for (CranedId const& craned_id : craned_ids) {
-    // Increase the running task num in Craned `crane_id`.
-    for (auto it = node_info.task_num_node_id_map.begin();
-         it != node_info.task_num_node_id_map.end(); ++it) {
-      if (it->second == craned_id) {
-        uint32_t num_task = it->first + 1;
-        node_info.task_num_node_id_map.erase(it);
-        node_info.task_num_node_id_map.emplace(num_task, craned_id);
-        break;
-      }
-    }
-
     ResourceInNode const& task_res_in_node = resources.at(craned_id);
+    node_info.UpdateCost(craned_id, task_end_time - expected_start_time,
+                         task_res_in_node);
     TimeAvailResMap& time_avail_res_map =
-        node_info.node_time_avail_res_map[craned_id];
-
-    absl::Time task_end_time = expected_start_time + duration;
+        node_info.GetTimeAvailResMap(craned_id);
 
     auto task_duration_begin_it =
         time_avail_res_map.upper_bound(expected_start_time);
@@ -2886,8 +2570,8 @@ void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id,
 
 std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     const OrderedTaskMap& pending_task_map,
-    const UnorderedTaskMap& running_task_map, size_t limit_num) {
-  absl::Time now = absl::Now();
+    const UnorderedTaskMap& running_task_map, size_t limit_num,
+    absl::Time now) {
   CalculateFactorBound_(pending_task_map, running_task_map, now);
 
   std::vector<std::pair<TaskInCtld*, double>> task_priority_vec;
