@@ -1938,7 +1938,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
         const auto& running_task = running_tasks.at(task_id);
         ResourceInNode const& running_task_res =
             running_task->Resources().at(craned_id);
-        node_selection_info_ref.UpdateCost(craned_id, now, end_time,
+        node_selection_info_ref.UpdateCost(craned_id, end_time - now,
                                            running_task_res);
         if (cur_time_iter->first != end_time) {
           /**
@@ -2250,9 +2250,9 @@ void MinLoadFirst::SubtractTaskResourceNodeSelectionInfo_(
   absl::Time task_end_time = expected_start_time + duration;
 
   // Increase the running task num in Craned `crane_id`.
-  for (CranedId craned_id : craned_ids) {
+  for (CranedId const& craned_id : craned_ids) {
     ResourceInNode const& task_res_in_node = resources.at(craned_id);
-    node_info.UpdateCost(craned_id, expected_start_time, task_end_time,
+    node_info.UpdateCost(craned_id, task_end_time - expected_start_time,
                          task_res_in_node);
     TimeAvailResMap& time_avail_res_map =
         node_info.GetTimeAvailResMap(craned_id);

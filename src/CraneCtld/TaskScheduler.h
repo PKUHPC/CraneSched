@@ -157,7 +157,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
   static constexpr uint32_t kAlgoMaxTaskNumPerNode = 1000;
   static constexpr absl::Duration kAlgoMaxTimeWindow = absl::Hours(24 * 7);
 
-  struct TimeAvailResMapIter;
+  class TimeAvailResMapIter;
 
   class ResMapIterList {
    public:
@@ -218,7 +218,8 @@ class MinLoadFirst : public INodeSelectionAlgo {
     ListContainer::iterator m_kth_it_;
   };
 
-  struct TimeAvailResMapIter {
+  class TimeAvailResMapIter {
+   public:
     TimeAvailResMapIter(const CranedId& craned_id,
                         const TimeAvailResMap::const_iterator& it,
                         const TimeAvailResMap::const_iterator& end,
@@ -284,8 +285,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
       return m_node_time_avail_res_map_[craned_id];
     }
 
-    void UpdateCost(const CranedId& craned_id, const absl::Time& start_time,
-                    const absl::Time& end_time,
+    void UpdateCost(const CranedId& craned_id, absl::Duration duration,
                     const ResourceInNode& resources) {
       uint64_t& cost = m_node_cost_map_.at(craned_id);
       m_cost_node_id_set_.erase({cost, craned_id});
@@ -293,8 +293,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
       double cpu_ratio =
           static_cast<double>(resources.allocatable_res.cpu_count) /
           static_cast<double>(total_res.allocatable_res.cpu_count);
-      cost +=
-          std::round((end_time - start_time) / absl::Seconds(1) * cpu_ratio);
+      cost += std::round(duration / absl::Seconds(1) * cpu_ratio);
       m_cost_node_id_set_.emplace(cost, craned_id);
     }
 
@@ -333,14 +332,14 @@ class MinLoadFirst : public INodeSelectionAlgo {
                                     const TimeAvailResMapIter* rhs) {
             return (*lhs)->first > (*rhs)->first;
           }) {
-      m_trackers_.reserve(craned_indexes.size());
+      m_res_map_iters_.reserve(craned_indexes.size());
       for (const CranedId& craned_id : craned_indexes) {
         const auto& time_avail_res_map =
             node_selection_info.GetTimeAvailResMap(craned_id);
-        m_trackers_.emplace_back(craned_id, time_avail_res_map.begin(),
-                                 time_avail_res_map.end(), &m_satisfied_iters_,
-                                 &task->Resources().at(craned_id));
-        m_time_priority_queue_.emplace(&m_trackers_.back());
+        m_res_map_iters_.emplace_back(
+            craned_id, time_avail_res_map.begin(), time_avail_res_map.end(),
+            &m_satisfied_iters_, &task->Resources().at(craned_id));
+        m_time_priority_queue_.emplace(&m_res_map_iters_.back());
       }
     }
 
@@ -391,7 +390,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
    private:
     ResMapIterList m_satisfied_iters_;
 
-    std::vector<TimeAvailResMapIter> m_trackers_;
+    std::vector<TimeAvailResMapIter> m_res_map_iters_;
     std::priority_queue<TimeAvailResMapIter*, std::vector<TimeAvailResMapIter*>,
                         std::function<bool(const TimeAvailResMapIter*,
                                            const TimeAvailResMapIter*)>>
