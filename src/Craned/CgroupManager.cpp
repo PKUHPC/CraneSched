@@ -597,7 +597,7 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
     task_id_to_cg_map_ptr->erase(task_id);
 
     if (cgroup != nullptr) {
-      if (g_config.Plugin.Enabled && g_plugin_client) {
+      if (g_config.Plugin.Enabled) {
         g_plugin_client->DestroyCgroupHookAsync(task_id,
                                                 cgroup->GetCgroupString());
       }
