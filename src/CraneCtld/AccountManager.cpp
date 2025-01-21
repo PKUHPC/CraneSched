@@ -508,7 +508,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAdminLevel(
 }
 
 AccountManager::CraneExpected<void> AccountManager::ModifyUserDefaultAccount(
-uint32_t uid, const std::string& user,const std::string& def_account) {
+    uint32_t uid, const std::string& user, const std::string& def_account) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   CraneExpected<void> result{};
 
@@ -996,7 +996,8 @@ std::expected<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
 
   if (!g_account_meta_container->CheckAndMallocQosResourceFromUser(
           user_share_ptr->name, *task, *qos_share_ptr))
-    return std::unexpected("The requested QoS resources have reached the user's limit.");
+    return std::unexpected(
+        "The requested QoS resources have reached the user's limit.");
 
   return {};
 }
@@ -1946,19 +1947,19 @@ AccountManager::CraneExpected<void> AccountManager::SetUserAdminLevel_(
 }
 
 AccountManager::CraneExpected<void> AccountManager::SetUserDefaultAccount_(
-    const std::string& name, const std::string& new_account) {
+    const std::string& user, const std::string& def_account) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {
         g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
-                                     name, "default_account", new_account);
+                                     user, "default_account", def_account);
       };
 
   if (!g_db_client->CommitTransaction(callback)) {
     return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
   }
 
-  m_user_map_[name]->default_account = new_account;
+  m_user_map_[user]->default_account = def_account;
 
   return {};
 }

@@ -267,8 +267,8 @@ class AccountManager {
   CraneExpected<void> SetUserAdminLevel_(const std::string& name,
                                          User::AdminLevel new_level);
 
-  CraneExpected<void> SetUserDefaultAccount_(const std::string& name,
-                                             const std::string& new_account);
+  CraneExpected<void> SetUserDefaultAccount_(const std::string& user,
+                                             const std::string& def_account);
 
   CraneExpected<void> SetUserDefaultQos_(const User& user,
                                          const std::string& account,
