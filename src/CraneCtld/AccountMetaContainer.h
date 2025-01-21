@@ -21,19 +21,21 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "crane/Lock.h"
+
 namespace Ctld {
 
 class AccountMetaContainer final {
  public:
-  using QosToQosResourceMap = phmap::parallel_flat_hash_map<
-      std::string,  // QosName
-      QosResource, phmap::priv::hash_default_hash<std::string>,
-      phmap::priv::hash_default_eq<std::string>,
-      std::allocator<std::pair<const std::string, QosResource>>, 4,
-      std::shared_mutex>;
 
-  using UserResourceMetaMap = std::unordered_map<std::string,  // username
-                                                 QosToQosResourceMap>;
+  using QosToResourceMap = std::unordered_map<std::string,  // qos_name
+                                              QosResource>;
+
+  using UserResourceMetaMap = phmap::parallel_flat_hash_map<
+        std::string, //username
+        QosToResourceMap, phmap::priv::hash_default_hash<std::string>,
+        phmap::priv::hash_default_eq<std::string>,
+        std::allocator<std::pair<const std::string, QosToResourceMap>>, 4, std::shared_mutex>;
 
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
@@ -44,8 +46,11 @@ class AccountMetaContainer final {
 
   void FreeQosResource(const std::string& username, const TaskInCtld& task);
 
+  void DeleteUserResource(const std::string& username);
+
  private:
   UserResourceMetaMap user_meta_map_;
+  util::rw_mutex m_rw_mutex_;
 };
 
 inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;
