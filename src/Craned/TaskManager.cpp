@@ -42,6 +42,10 @@ bool TaskInstance::IsCalloc() const {
              crane::grpc::Calloc;
 }
 
+CrunMetaInTaskInstance* TaskInstance::GetCrunMeta() const {
+  return dynamic_cast<CrunMetaInTaskInstance*>(this->meta.get());
+}
+
 EnvMap TaskInstance::GetTaskEnvMap() const {
   std::unordered_map<std::string, std::string> env_map;
   // Crane Env will override user task env;
@@ -81,17 +85,35 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
 
   env_map.emplace("CRANE_JOB_ID", std::to_string(this->task.task_id()));
 
-  if (this->IsCrun() && !this->task.interactive_meta().term_env().empty()) {
-    env_map.emplace("TERM", this->task.interactive_meta().term_env());
-  }
-
   int64_t time_limit_sec = this->task.time_limit().seconds();
-  int hours = time_limit_sec / 3600;
-  int minutes = (time_limit_sec % 3600) / 60;
-  int seconds = time_limit_sec % 60;
+  int64_t hours = time_limit_sec / 3600;
+  int64_t minutes = (time_limit_sec % 3600) / 60;
+  int64_t seconds = time_limit_sec % 60;
   std::string time_limit =
       fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
   env_map.emplace("CRANE_TIMELIMIT", time_limit);
+
+  if (this->IsCrun()) {
+    auto const& ia_meta = this->task.interactive_meta();
+    auto* inst_crun_meta = this->GetCrunMeta();
+    if (!ia_meta.term_env().empty())
+      env_map.emplace("TERM", this->task.interactive_meta().term_env());
+
+    if (ia_meta.x11()) {
+      auto* instance_ia_meta =
+          dynamic_cast<CrunMetaInTaskInstance*>(this->meta.get());
+      CRANE_ASSERT(instance_ia_meta != nullptr);
+
+      env_map.erase("DISPLAY");
+      env_map.erase("XAUTHORITY");
+      std::string display =
+          fmt::sprintf("localhost:%d", inst_crun_meta->x11_port - 6000);
+      fmt::print("DISPLAY: {}\n", display);
+      env_map.emplace("DISPLAY", display);
+      env_map.emplace("XAUTHORITY", instance_ia_meta->x11_auth_path);
+    }
+  }
+
   return env_map;
 }
 
@@ -538,6 +560,29 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     return CraneErr::kCgroupError;
   }
 
+  if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
+    auto* inst_crun_meta = instance->GetCrunMeta();
+
+    const std::string& cookie =
+        instance->task.interactive_meta().x11_meta().cookie();
+    inst_crun_meta->x11_auth_path =
+        fmt::sprintf("%s/.Xauthority-XXXXXX", instance->pwd_entry.HomeDir());
+
+    // Default file permission is 0600.
+    int xauth_fd = mkstemp(inst_crun_meta->x11_auth_path.data());
+    if (xauth_fd == -1) {
+      CRANE_ERROR("mkstemp() for xauth file failed: {}\n", strerror(errno));
+      return CraneErr::kSystemErr;
+    }
+
+    int ret =
+        fchown(xauth_fd, instance->pwd_entry.Uid(), instance->pwd_entry.Gid());
+    if (ret == -1) {
+      CRANE_ERROR("fchown() for xauth file failed: {}\n", strerror(errno));
+      return CraneErr::kSystemErr;
+    }
+  }
+
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
     CRANE_ERROR("[Task #{}] Failed to create socket pair: {}",
                 instance->task.task_id(), strerror(errno));
@@ -550,6 +595,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   if (instance->IsCrun()) {
     auto* crun_meta =
         dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
+
     launch_pty = instance->task.interactive_meta().pty();
     CRANE_DEBUG("[Task #{}] Launch crun pty: {}", instance->task.task_id(),
                 launch_pty);
@@ -581,11 +627,27 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     CRANE_DEBUG("[Task #{}] Subprocess was created with pid: {}",
                 instance->task.task_id(), child_pid);
 
+    CanStartMessage msg;
+    ChildProcessReady child_process_ready;
+
     if (instance->IsCrun()) {
       auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
-      g_cfored_manager->RegisterIOForward(
-          instance->task.interactive_meta().cfored_name(),
-          instance->task.task_id(), meta->msg_fd, launch_pty);
+      CforedManager::RegisterElem reg_elem{
+          .cfored = instance->task.interactive_meta().cfored_name(),
+          .task_id = instance->task.task_id(),
+          .fd = meta->msg_fd,
+          .pty = launch_pty,
+          .x11 = instance->task.interactive_meta().x11(),
+      };
+
+      CforedManager::RegisterResult result;
+      g_cfored_manager->RegisterIOForward(reg_elem, &result);
+      instance->GetCrunMeta()->x11_port = result.x11_port;
+
+      msg.set_x11_port(result.x11_port);
+
+      CRANE_TRACE("Crun task #{} x11 enabled: {}, port: {}", reg_elem.task_id,
+                  instance->task.interactive_meta().x11(), result.x11_port);
     }
 
     int ctrl_fd = ctrl_sock_pair[0];
@@ -597,8 +659,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     bool ok;
     FileInputStream istream(ctrl_fd);
     FileOutputStream ostream(ctrl_fd);
-    CanStartMessage msg;
-    ChildProcessReady child_process_ready;
 
     // Add event for stdout/stderr of the new subprocess
     // struct bufferevent* ev_buf_event;
@@ -827,24 +887,68 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     if (instance->task.type() == crane::grpc::Batch) close(0);
     util::os::CloseFdFrom(3);
 
+    // Set up x11 authority file if enabled.
+    if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
+      auto* inst_crun_meta = instance->GetCrunMeta();
+      inst_crun_meta->x11_port = msg.x11_port();
+
+      std::string display = fmt::sprintf("%s/unix:%u", g_config.Hostname,
+                                         inst_crun_meta->x11_port - 6000);
+
+      std::vector<const char*> xauth_argv{
+          "/usr/bin/xauth",
+          "-v",
+          "-f",
+          inst_crun_meta->x11_auth_path.c_str(),
+          "add",
+          display.c_str(),
+          "MIT-MAGIC-COOKIE-1",
+          instance->task.interactive_meta().x11_meta().cookie().c_str(),
+      };
+      std::string xauth_cmd = absl::StrJoin(xauth_argv, ",");
+
+      xauth_argv.push_back(nullptr);
+
+      subprocess_s subprocess;
+      int result = subprocess_create(xauth_argv.data(), 0, &subprocess);
+      if (0 != result) {
+        fmt::print(stderr, "[Craned Subprocess] xauth failed.\n");
+        std::abort();
+      }
+
+      fmt::printf("[Craned Subprocess] Result of {} : ", xauth_cmd);
+      std::FILE* xauth_out = subprocess_stdout(&subprocess);
+      auto buf = std::make_unique<char[]>(4096);
+      while (std::fgets(buf.get(), 4096, xauth_out) != nullptr)
+        fmt::printf("%s", buf.get());
+      fmt::printf("\n");
+
+      if (0 != subprocess_join(&subprocess, &result)) {
+        CRANE_ERROR("[Craned Subprocess] xauth join failed.");
+      }
+
+      if (0 != subprocess_destroy(&subprocess)) {
+        CRANE_ERROR("[Craned Subprocess] xauth destroy failed.");
+      }
+    }
+
     EnvMap task_env_map = instance->GetTaskEnvMap();
     EnvMap res_env_map =
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
 
+    // clearenv() should be called just before fork!
     if (clearenv()) {
-      fmt::print(stderr, "[Craned Subprocess] Warnning: clearenv() failed.\n");
+      fmt::print(stderr, "[Craned Subprocess] Warning: clearenv() failed.\n");
     }
 
-    auto FuncSetEnv =
-        [](const std::unordered_map<std::string, std::string>& v) {
-          for (const auto& [name, value] : v)
-            if (setenv(name.c_str(), value.c_str(), 1))
-              fmt::print(
-                  stderr,
-                  "[Craned Subprocess] Warnning: setenv() for {}={} failed.\n",
-                  name, value);
-        };
-
+    auto FuncSetEnv = [](const EnvMap& v) {
+      for (const auto& [name, value] : v)
+        if (setenv(name.c_str(), value.c_str(), 1))
+          fmt::print(
+              stderr,
+              "[Craned Subprocess] Warning: setenv() for {}={} failed.\n", name,
+              value);
+    };
     FuncSetEnv(task_env_map);
     FuncSetEnv(res_env_map);
 
@@ -875,7 +979,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                strerror(errno));
     // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
     //  exit codes
-    abort();
+    std::abort();
   }
 }
 

@@ -220,12 +220,8 @@ struct PartitionMeta {
 };
 
 struct InteractiveMetaInTask {
-  std::string cfored_name;
   crane::grpc::InteractiveTaskType interactive_type;
 
-  std::string sh_script;
-  std::string term_env;
-  bool pty;
   std::function<void(task_id_t, std::string const&,
                      std::list<std::string> const&)>
       cb_task_res_allocated;
@@ -484,15 +480,8 @@ struct TaskInCtld {
       });
     } else {
       auto& InteractiveMeta = std::get<InteractiveMetaInTask>(meta);
-      InteractiveMeta.cfored_name = val.interactive_meta().cfored_name();
-      InteractiveMeta.sh_script = val.interactive_meta().sh_script();
       InteractiveMeta.interactive_type =
           val.interactive_meta().interactive_type();
-      if (InteractiveMeta.interactive_type ==
-          crane::grpc::InteractiveTaskType::Crun) {
-        InteractiveMeta.term_env = val.interactive_meta().term_env();
-        InteractiveMeta.pty = val.interactive_meta().pty();
-      }
     }
 
     node_num = val.node_num();

@@ -7,14 +7,15 @@ add_executable(craned
         CforedClient.cpp
         TaskManager.h
         TaskManager.cpp
+        DeviceManager.cpp
+        DeviceManager.h
         CranedServer.h
         CranedServer.cpp
         CranedPublicDefs.h
         Craned.cpp
 
         CranedPreCompiledHeader.h
-        DeviceManager.cpp
-        DeviceManager.h)
+)
 
 target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
 add_dependencies(craned libcgroup)
@@ -50,6 +51,7 @@ target_link_libraries(craned
         absl::synchronization
 
         uvw
+        subprocess
 
         yaml-cpp
 
