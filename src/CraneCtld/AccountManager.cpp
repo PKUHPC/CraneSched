@@ -508,7 +508,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAdminLevel(
 }
 
 AccountManager::CraneExpected<void> AccountManager::ModifyUserDefaultAccount(
-    uint32_t uid, const std::string& name, const std::string& value) {
+uint32_t uid, const std::string& user,const std::string& def_account) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   CraneExpected<void> result{};
 
@@ -516,18 +516,18 @@ AccountManager::CraneExpected<void> AccountManager::ModifyUserDefaultAccount(
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
-  const User* user = GetExistedUserInfoNoLock_(name);
-  if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+  const User* user_ptr = GetExistedUserInfoNoLock_(user);
+  if (!user_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
 
-  result = CheckIfUserHasHigherPrivThan_(*op_user, user->admin_level);
+  result = CheckIfUserHasHigherPrivThan_(*op_user, user_ptr->admin_level);
   if (!result) return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 
-  if (!user->account_to_attrs_map.contains(value))
+  if (!user_ptr->account_to_attrs_map.contains(def_account))
     return std::unexpected(CraneErrCode::ERR_USER_ALLOWED_ACCOUNT);
 
-  if (user->default_account == value) return result;
+  if (user_ptr->default_account == def_account) return result;
 
-  return SetUserDefaultAccount_(name, value);
+  return SetUserDefaultAccount_(user, def_account);
 }
 
 AccountManager::CraneExpected<void> AccountManager::ModifyUserDefaultQos(
