@@ -287,7 +287,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
     void UpdateCost(const CranedId& craned_id, const absl::Time& start_time,
                     const absl::Time& end_time,
                     const ResourceInNode& resources) {
-      uint64_t cost = m_node_cost_map_.at(craned_id);
+      uint64_t& cost = m_node_cost_map_.at(craned_id);
       m_cost_node_id_set_.erase({cost, craned_id});
       ResourceInNode& total_res = m_node_res_total_map_.at(craned_id);
       double cpu_ratio =
