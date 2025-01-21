@@ -2026,6 +2026,12 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     node_num_limit = task->node_num;
   }
   std::vector<CranedId> craned_indexes_;
+  std::vector<CranedId> ready_craned_indexes_;
+
+  ResourceV2 allocated_res;
+  task->allocated_res_view.SetToZero();
+
+  absl::Time earliest_end_time = now + task->time_limit;
 
   for (const auto& craned_index :
        node_selection_info.GetCostNodeIdSet() | std::views::values) {
@@ -2071,14 +2077,48 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
                     task->TaskId(), craned_index);
       }
     } else {
-      craned_indexes_.emplace_back(craned_index);
-      if (craned_indexes_.size() >= node_num_limit) break;
+      if constexpr (kAlgoRedundantNode) {
+        craned_indexes_.emplace_back(craned_index);
+        if (craned_indexes_.size() >= node_num_limit) break;
+      } else {
+        // TODO: Performance issue! Consider speeding up with mutiple threads.
+        ResourceInNode feasible_res;
+        bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
+            craned_meta->res_avail, &feasible_res);
+        if (ok) {
+          auto& time_avail_res_map =
+              node_selection_info.GetTimeAvailResMap(craned_index);
+          auto is_ready = [&time_avail_res_map, &earliest_end_time,
+                           &feasible_res]() {
+            for (const auto& [time, res] : time_avail_res_map) {
+              if (time >= earliest_end_time) break;
+              if (!(feasible_res <= res)) return false;
+            }
+            return true;
+          };
+          if (is_ready()) {
+            ready_craned_indexes_.emplace_back(craned_index);
+            allocated_res.AddResourceInNode(craned_index, feasible_res);
+            task->allocated_res_view += feasible_res;
+            if (ready_craned_indexes_.size() >= task->node_num) {
+              task->SetResources(std::move(allocated_res));
+              *start_time = now;
+              for (const CranedId& ready_craned_index : ready_craned_indexes_) {
+                craned_ids->emplace_back(ready_craned_index);
+              }
+              return true;
+            }
+          }
+        }
+        if (craned_indexes_.size() < node_num_limit) {
+          craned_indexes_.emplace_back(craned_index);
+        }
+      }
     }
   }
 
   if (craned_indexes_.size() < task->node_num) return false;
 
-  ResourceV2 allocated_res;
   task->allocated_res_view.SetToZero();
 
   for (const auto& craned_id : craned_indexes_) {
@@ -2088,7 +2128,11 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     // TODO: get feasible resource randomly (may cause start time change
     // rapidly)
     bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
-        craned_meta->res_total, &feasible_res);
+        craned_meta->res_avail, &feasible_res);
+    if (!ok) {
+      ok = task->requested_node_res_view.GetFeasibleResourceInNode(
+          craned_meta->res_total, &feasible_res);
+    }
     if (!ok) {
       CRANE_DEBUG(
           "Task #{} needs more resource than that of craned {}. "
