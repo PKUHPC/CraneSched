@@ -21,8 +21,6 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
-#include "crane/Lock.h"
-
 namespace Ctld {
 
 class AccountMetaContainer final {
@@ -50,7 +48,6 @@ class AccountMetaContainer final {
 
  private:
   UserResourceMetaMap user_meta_map_;
-  util::rw_mutex m_rw_mutex_;
 };
 
 inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;

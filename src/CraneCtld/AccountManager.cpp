@@ -973,7 +973,7 @@ std::expected<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
 
   if (!g_account_meta_container->CheckAndMallocQosResourceFromUser(
           user_share_ptr->name, *task, *qos_share_ptr))
-    return std::unexpected("cpus-per-task reached the user's limit.");
+    return std::unexpected("The requested QoS resources have reached the user's limit.");
 
   return {};
 }

@@ -35,7 +35,6 @@ bool AccountMetaContainer::CheckAndMallocQosResourceFromUser(
   user_meta_map_.try_emplace_l(
     username,
   [&](std::pair<const std::string, QosToResourceMap>& pair) {
-      util::write_lock_guard qos_res_guard(m_rw_mutex_);
       auto& qos_to_resource_map = pair.second;
       auto iter = qos_to_resource_map.find(task.qos);
       if (iter == qos_to_resource_map.end()) {
@@ -61,7 +60,6 @@ bool AccountMetaContainer::CheckAndMallocQosResourceFromUser(
 void AccountMetaContainer::FreeQosResource(const std::string& username,
                                            const TaskInCtld& task) {
   user_meta_map_.modify_if(username, [&](std::pair<const std::string, QosToResourceMap>& pair) {
-    util::write_lock_guard qos_res_guard(m_rw_mutex_);
     auto& val = pair.second[task.qos];
     val.resource.GetAllocatableRes() -=
             (task.requested_node_res_view * task.node_num).GetAllocatableRes();
