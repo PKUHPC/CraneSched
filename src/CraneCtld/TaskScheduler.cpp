@@ -2116,6 +2116,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
   if (craned_indexes_.size() < task->node_num) return false;
 
+  allocated_res.SetToZero();
   task->allocated_res_view.SetToZero();
 
   for (const auto& craned_id : craned_indexes_) {
