@@ -48,7 +48,7 @@ set(LIBCGROUP_PATH "${libcgroup_BINARY_DIR}" CACHE STRING "Path to libcgroup dep
 ExternalProject_Add(
         libcgroup
         SOURCE_DIR ${libcgroup_SOURCE_DIR}
-        CONFIGURE_COMMAND ./configure --prefix=${libcgroup_BINARY_DIR}/
+        CONFIGURE_COMMAND autoreconf --force && ./configure --prefix=${libcgroup_BINARY_DIR}/
         BUILD_COMMAND make -j
         INSTALL_COMMAND make install
         BUILD_IN_SOURCE 1

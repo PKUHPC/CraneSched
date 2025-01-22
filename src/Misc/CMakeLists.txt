@@ -1,7 +1,5 @@
 add_subdirectory(Pam)
-if(ENABLE_BPF)
+
+if (CRANE_ENABLE_BPF)
     add_subdirectory(BPF)
-    message(STATUS "cgroup_dev_bpf_object is enabled.")
-else()
-    message(STATUS "cgroup_dev_bpf_object is disabled")
-endif()
+endif ()

@@ -667,10 +667,13 @@ void StartServer() {
   g_cfored_manager.reset();
   g_server.reset();
   g_ctld_client.reset();
-  g_plugin_client.reset();
 
   g_thread_pool->wait();
   g_thread_pool.reset();
+
+  // Plugin client must be destroyed after the thread pool.
+  // It may be called in the thread pool.
+  g_plugin_client.reset();
 
   std::exit(0);
 }

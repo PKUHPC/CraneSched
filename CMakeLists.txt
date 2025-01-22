@@ -43,9 +43,18 @@ if (VERSION_CONTENT STREQUAL "")
     set(CMAKE_PROJECT_VERSION "0.0.0")
 endif ()
 
+# If ccache is found, set it as the compiler launcher
+find_program(CCACHE_PROGRAM ccache)
+if (CCACHE_PROGRAM)
+    message(STATUS "ccache found. Use ccache to launch compilers.")
+    set_property(GLOBAL PROPERTY CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+    set_property(GLOBAL PROPERTY CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
+endif ()
+
 project(Crane VERSION ${CMAKE_PROJECT_VERSION} LANGUAGES C CXX)
-# check and set compiler
-set(REQUIRED_GNU_VERSION 13.0.0)
+
+# Check and set compiler
+set(REQUIRED_GNU_VERSION 14.0.0)
 set(REQUIRED_CLANG_VERSION 19.0.0)
 set(REQUIRED_BPF_CLANG_VERSION 17.0.0)
 
@@ -53,7 +62,7 @@ set(CLANG_VERSION "0.0.0")
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_GNU_VERSION)
     if (CRANE_ENABLE_CGROUP_V2)
-        message(STATUS "Enabling Cgroup V2 will build cgroup_dev_bpf_object, which requires Clang ${REQUIRED_BPF_CLANG_VERSION}+. Use GNU ${CMAKE_CXX_COMPILER_VERSION} for other modules. ")
+        message(STATUS "Enabling Cgroup V2 needs to build EBPF, which requires Clang ${REQUIRED_BPF_CLANG_VERSION}+. Use GNU ${CMAKE_CXX_COMPILER_VERSION} for other modules.")
         find_program(CLANG_EXECUTABLE NAMES clang)
         if (CLANG_EXECUTABLE)
             execute_process(
@@ -63,8 +72,8 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_
             )
             string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" CLANG_VERSION ${CLANG_VERSION_OUTPUT})
             if (CLANG_VERSION VERSION_GREATER_EQUAL REQUIRED_BPF_CLANG_VERSION)
-                set(ENABLE_BPF ON)
-                message(STATUS "Found Clang at ${CLANG_EXECUTABLE} with version ${CLANG_VERSION}; using this version for the cgroup_dev_bpf_object module.")
+                set(CRANE_ENABLE_BPF ON)
+                message(STATUS "Found Clang at ${CLANG_EXECUTABLE} with version ${CLANG_VERSION}; EBPF will be built with it.")
             else ()
                 message(FATAL_ERROR "Clang found at ${CLANG_EXECUTABLE} is version ${CLANG_VERSION}, but version ${REQUIRED_BPF_CLANG_VERSION} or higher is required for device management on Cgroup V2. You may use Cgroup V1 instead.")
             endif ()
@@ -75,7 +84,8 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_
 elseif (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL REQUIRED_CLANG_VERSION)
         if (CRANE_ENABLE_CGROUP_V2)
-            set(ENABLE_BPF ON)
+            set(CRANE_ENABLE_BPF ON)
+            message(STATUS "EBPF is Enabled.")
         endif ()
         message(STATUS "Using Clang for all module.")
     else ()
@@ -252,13 +262,6 @@ else ()
     message(STATUS "IPO / LTO not supported: <${error}>")
 endif ()
 
-find_program(CCACHE_PROGRAM ccache)
-if (CCACHE_PROGRAM)
-    message(STATUS "ccache found. Use ccache to launch compilers.")
-    set_property(GLOBAL PROPERTY CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-    set_property(GLOBAL PROPERTY CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-endif ()
-
 if (${CRANE_FULL_DYNAMIC})
     set(CMAKE_SKIP_BUILD_RPATH FALSE)
     set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
@@ -332,6 +335,10 @@ else ()
     message(FATAL_ERROR "LibAIO was not found.")
 endif ()
 
+if (CRANE_ENABLE_BPF)
+    find_package(BPF 1.4.6 REQUIRED)
+endif ()
+
 # Needed by grpc
 set(_PROTOBUF_LIBPROTOBUF libprotobuf)
 set(_REFLECTION grpc++_reflection)
@@ -339,10 +346,6 @@ set(_PROTOBUF_PROTOC $<TARGET_FILE:protoc>)
 set(_GRPC_GRPCPP grpc++)
 set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 
-if (ENABLE_BPF)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(libbpf REQUIRED IMPORTED_TARGET libbpf>=1.4.6)
-endif ()
 # @formatter:off
 add_definitions(-DCRANE_BUILD_DIRECTORY=\("${CMAKE_BINARY_DIR}"\))
 # @formatter:on
@@ -395,6 +398,14 @@ install(TARGETS craned
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_WRITE WORLD_EXECUTE
 )
 
+if (CRANE_ENABLE_BPF)
+    install(FILES
+            ${CMAKE_BINARY_DIR}/src/Misc/BPF/cgroup_dev_bpf.o
+            DESTINATION /usr/local/lib64/bpf/
+            COMPONENT cranedc
+            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
+endif ()
+
 # Install unit files
 install(FILES
         ${CMAKE_BINARY_DIR}/etc/cranectld.service
@@ -409,14 +420,6 @@ install(FILES
         PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 # Install configuration files
-if(ENABLE_BPF)
-    install(FILES 
-            ${CMAKE_BINARY_DIR}/src/Misc/BPF/cgroup_dev_bpf.o
-            DESTINATION /usr/local/lib64/bpf/
-            COMPONENT cranedc
-            PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
-endif()
-
 install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         DESTINATION /etc/crane/
         COMPONENT cranectldc
@@ -448,6 +451,7 @@ set(CPACK_PACKAGE_DESCRIPTION "An HPC and Cloud Computing Fused Job Scheduling S
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
 set(CPACK_RESOURCE_FILE_README "${CMAKE_SOURCE_DIR}/README.md")
 set(CPACK_PACKAGE_FILE_NAME "${CPACK_PACKAGE_NAME}-${CMAKE_PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}")
+
 # Do not allow the package to be relocated
 set(CPACK_PACKAGE_RELOCATABLE OFF)
 
@@ -455,9 +459,11 @@ set(CPACK_PACKAGE_RELOCATABLE OFF)
 set(CPACK_RPM_PACKAGE_GROUP "System Environment/Base")
 set(CPACK_RPM_PACKAGE_LICENSE "AGPL v3")
 set(CPACK_RPM_COMPRESSION_TYPE "xz")
-#TODO CPACK_PACKAGE_DESCRIPTION
+
 # DEB
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_DEBIAN_COMPRESSION_TYPE "xz")
+# Seperate the debuginfo to avoid large DEB package
+set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
 
 include(CPack)

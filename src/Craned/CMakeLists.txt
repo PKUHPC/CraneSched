@@ -23,11 +23,10 @@ target_include_directories(
 )
 
 
-
-if(ENABLE_BPF)
-        add_dependencies(craned cgroup_dev_bpf_object)
-        target_compile_definitions(craned PRIVATE CRANE_ENABLE_BPF)
-endif()
+if (CRANE_ENABLE_BPF)
+    add_dependencies(craned crane_ebpf)
+    target_compile_definitions(craned PRIVATE -DCRANE_ENABLE_BPF)
+endif ()
 
 target_link_libraries(craned
         $<$<BOOL:${CRANE_USE_MIMALLOC}>:dev_mimalloc>
@@ -56,8 +55,7 @@ target_link_libraries(craned
 
         Backward::Interface
 
-        $<$<BOOL:${ENABLE_BPF}>:bpf>
-        
+        $<$<BOOL:${CRANE_ENABLE_BPF}>:BPF::BPF>
 )
 
 # Linker flag for c++ 17 filesystem library

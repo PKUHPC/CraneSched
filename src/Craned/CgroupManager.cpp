@@ -501,9 +501,8 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
   }
 
   if (g_config.Plugin.Enabled) {
-    g_plugin_client->CreateCgroupHookAsync(task_id, 
-                                          pcg->GetCgroupString(),
-                                          res.dedicated_res_in_node());
+    g_plugin_client->CreateCgroupHookAsync(task_id, pcg->GetCgroupString(),
+                                           res.dedicated_res_in_node());
   }
 
   CRANE_TRACE(
@@ -595,13 +594,14 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
     }
     CgroupInterface *cgroup = it->second.GetExclusivePtr()->release();
 
-    if (g_config.Plugin.Enabled) {
-      g_plugin_client->DestroyCgroupHookAsync(task_id, cgroup->GetCgroupString());
-    }
-
     task_id_to_cg_map_ptr->erase(task_id);
 
     if (cgroup != nullptr) {
+      if (g_config.Plugin.Enabled) {
+        g_plugin_client->DestroyCgroupHookAsync(task_id,
+                                                cgroup->GetCgroupString());
+      }
+
       g_thread_pool->detach_task([cgroup]() {
         bool rc;
         int cnt = 0;
@@ -628,7 +628,8 @@ bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
   }
 
   {
-    auto uid_task_ids_map_ptr = this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
+    auto uid_task_ids_map_ptr =
+        this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
     auto it = uid_task_ids_map_ptr->find(uid);
     if (it == uid_task_ids_map_ptr->end()) {
       CRANE_DEBUG(

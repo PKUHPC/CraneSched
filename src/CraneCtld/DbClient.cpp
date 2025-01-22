@@ -865,7 +865,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
           task_to_ctld.name(), env_str,
           static_cast<int32_t>(task_to_ctld.uid()),
           // 10-14
-          static_cast<int32_t>(runtime_attr.gid()),
+          static_cast<int32_t>(task_to_ctld.gid()),
           util::HostNameListToStr(runtime_attr.craned_ids()),
           runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
           // 15-19
@@ -939,7 +939,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              static_cast<int64_t>(task->requested_node_res_view.MemoryBytes()),
              task->name, env_str, static_cast<int32_t>(task->uid),
              // 10-14
-             static_cast<int32_t>(task->Gid()), task->allocated_craneds_regex,
+             static_cast<int32_t>(task->gid), task->allocated_craneds_regex,
              static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
              // 15-19
              0, 0, task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(),
