@@ -976,7 +976,7 @@ CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
   if (task->time_limit >= absl::Seconds(kTaskMaxTimeLimitSec)) {
     task->time_limit = qos_share_ptr->max_time_limit_per_task;
   } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task) {
-    CRANE_ERROR("time-limit reached the user's limit");
+    CRANE_WARN("time-limit beyond the user's limit");
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
   }
 

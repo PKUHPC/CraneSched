@@ -2742,8 +2742,8 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   auto part_it = g_config.Partitions.find(task->partition_id);
   if (part_it == g_config.Partitions.end()) {
         CRANE_ERROR("Failed to call AcquireTaskAttributes: {}",
-                CraneErrStr(crane::grpc::ErrCode::ERR_INVALID_PARTITION));
-    return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_PARTITION);
+                CraneErrStr(CraneErrCode::ERR_INVALID_PARTITION));
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
   }
 
   task->partition_priority = part_it->second.priority;
@@ -2781,7 +2781,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().nodelist(), &nodes);
-    if (!ok) return std::unexpected(crane::grpc::ErrCode::ERR_INVAILD_NODE_LIST);
+    if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_NODE_LIST);
 
     for (auto&& node : nodes) task->included_nodes.emplace(std::move(node));
   }
@@ -2789,7 +2789,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (!task->TaskToCtld().excludes().empty() && task->excluded_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().excludes(), &nodes);
-    if (!ok) return std::unexpected(crane::grpc::ErrCode::ERR_INVAILD_EX_NODE_LIST);
+    if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_EX_NODE_LIST);
 
     for (auto&& node : nodes) task->excluded_nodes.emplace(std::move(node));
   }
@@ -2799,7 +2799,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
 CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   if (!CheckIfTimeLimitIsValid(task->time_limit))
-    return std::unexpected(crane::grpc::ErrCode::ERR_TIME_TIMIT_BEYOND) ;
+    return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND) ;
 
   // Check whether the selected partition is able to run this task.
   std::unordered_set<std::string> avail_nodes;
@@ -2829,7 +2829,7 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
                   .memory_sw_bytes),
           util::ReadableTypedDeviceMap(
               metas_ptr->partition_global_meta.res_total.GetDeviceMap()));
-      return std::unexpected(crane::grpc::ErrCode::ERR_NO_RESOURCE);  
+      return std::unexpected(CraneErrCode::ERR_NO_RESOURCE);  
     }
 
     if (task->node_num > metas_ptr->craned_ids.size()) {
@@ -2837,7 +2837,7 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
           "Nodes not enough for task #{}. "
           "Partition total Nodes: {}",
           task->TaskId(), metas_ptr->craned_ids.size());
-      return std::unexpected(crane::grpc::ErrCode::ERR_INVALID_NODE_NUM);
+      return std::unexpected(CraneErrCode::ERR_INVALID_NODE_NUM);
     }
 
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
@@ -2859,7 +2859,7 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
         "Resource not enough. Task #{} needs {} nodes, while only {} "
         "nodes satisfy its requirement.",
         task->TaskId(), task->node_num, avail_nodes.size());
-    return std::unexpected(crane::grpc::ErrCode::ERR_NO_ENOUGH_NODE);
+    return std::unexpected(CraneErrCode::ERR_NO_ENOUGH_NODE);
   }
 
   return {};

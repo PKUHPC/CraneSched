@@ -95,7 +95,7 @@ enum ExitCodeEnum : uint16_t {
 
 namespace Internal {
 constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> CraneErrStrArr = {
-        "Success",
+          "Success",
         "Invalid UID",
         "You are not a user of Crane",
         "The entered user is not a user of Crane",
