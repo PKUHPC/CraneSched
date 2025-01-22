@@ -476,7 +476,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
       break;
     case crane::grpc::ModifyField::DefaultAccount:
       modify_res = g_account_manager->ModifyUserDefaultAccount(
-          request->uid(), request->name(), request->value());
+          request->uid(), request->name(), value_list[0]);
       break;
     default:
       std::unreachable();
