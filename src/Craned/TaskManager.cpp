@@ -23,6 +23,7 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <pty.h>
 #include <sys/wait.h>
+#include <utmp.h>
 
 #include "CforedClient.h"
 #include "CtldClient.h"
@@ -530,8 +531,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
   int ctrl_sock_pair[2];  // Socket pair for passing control messages.
 
-  // Socket pair for forwarding IO of crun tasks. Craned read from index 0.
-  int crun_io_sock_pair[2];
+  int craned_crun_pipe[2];
+  int crun_craned_pipe[2];
 
   // The ResourceInNode structure should be copied here for being accessed in
   // the child process.
@@ -554,6 +555,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
   pid_t child_pid;
   bool launch_pty{false};
+  int crun_master_fd;
 
   if (instance->IsCrun()) {
     auto* crun_meta =
@@ -562,16 +564,23 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     CRANE_DEBUG("[Task #{}] Launch crun pty: {}", instance->task.task_id(),
                 launch_pty);
 
-    if (launch_pty) {
-      child_pid = forkpty(&crun_meta->msg_fd, nullptr, nullptr, nullptr);
+    if (pipe(craned_crun_pipe) == -1) {
+      CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
+                  instance->task.task_id(), strerror(errno));
+      return CraneErr::kSystemErr;
+    }
+    if (pipe(crun_craned_pipe) == -1) {
+      CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
+                  instance->task.task_id(), strerror(errno));
+      return CraneErr::kSystemErr;
+    }
+    crun_meta->task_input_fd = craned_crun_pipe[1];
+    crun_meta->task_output_fd = crun_craned_pipe[0];
+
+    if (instance->task.interactive_meta().pty()) {
+      child_pid = forkpty(&crun_master_fd, nullptr, nullptr, nullptr);
+      // We will write to child using pipe
     } else {
-      if (socketpair(AF_UNIX, SOCK_STREAM, 0, crun_io_sock_pair) != 0) {
-        CRANE_ERROR(
-            "[Task #{}] Failed to create socket pair for task io forward: {}",
-            instance->task.task_id(), strerror(errno));
-        return CraneErr::kSystemErr;
-      }
-      crun_meta->msg_fd = crun_io_sock_pair[0];
       child_pid = fork();
     }
   } else {
@@ -591,16 +600,22 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     if (instance->IsCrun()) {
       auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
+      if (launch_pty) {
+        close(meta->task_input_fd);
+        close(meta->task_output_fd);
+        meta->task_input_fd = crun_master_fd;
+        meta->task_output_fd = crun_master_fd;
+      }
       g_cfored_manager->RegisterIOForward(
           instance->task.interactive_meta().cfored_name(),
-          instance->task.task_id(), meta->msg_fd, launch_pty);
+          instance->task.task_id(), meta->task_input_fd, meta->task_output_fd,
+          launch_pty);
+      close(craned_crun_pipe[0]);
+      close(crun_craned_pipe[1]);
     }
 
     int ctrl_fd = ctrl_sock_pair[0];
     close(ctrl_sock_pair[1]);
-    if (instance->IsCrun() && !launch_pty) {
-      close(crun_io_sock_pair[1]);
-    }
 
     bool ok;
     FileInputStream istream(ctrl_fd);
@@ -810,13 +825,16 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       }
       close(stdout_fd);
 
-    } else if (instance->IsCrun() && !launch_pty) {
-      close(crun_io_sock_pair[0]);
-
-      dup2(crun_io_sock_pair[1], 0);
-      dup2(crun_io_sock_pair[1], 1);
-      dup2(crun_io_sock_pair[1], 2);
-      close(crun_io_sock_pair[1]);
+    } else if (instance->IsCrun()) {
+      if (!launch_pty) {
+        dup2(craned_crun_pipe[0], STDIN_FILENO);
+        dup2(crun_craned_pipe[1], STDOUT_FILENO);
+        dup2(crun_craned_pipe[1], STDERR_FILENO);
+      }
+      close(craned_crun_pipe[0]);
+      close(craned_crun_pipe[1]);
+      close(crun_craned_pipe[0]);
+      close(crun_craned_pipe[1]);
     }
 
     child_process_ready.set_ok(true);

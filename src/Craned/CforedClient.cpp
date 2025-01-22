@@ -345,8 +345,13 @@ void CforedManager::EvLoopThread_(const std::shared_ptr<uvw::loop>& uvw_loop) {
 }
 
 void CforedManager::RegisterIOForward(std::string const& cfored,
-                                      task_id_t task_id, int fd, bool pty) {
-  RegisterElem elem{.cfored = cfored, .task_id = task_id, .fd = fd, .pty = pty};
+                                      task_id_t task_id, int task_in_fd,
+                                      int task_out_fd, bool pty) {
+  RegisterElem elem{.cfored = cfored,
+                    .task_id = task_id,
+                    .task_input_fd = task_in_fd,
+                    .task_output_fd = task_out_fd,
+                    .pty = pty};
   std::promise<bool> done;
   std::future<bool> done_fut = done.get_future();
 
@@ -370,7 +375,8 @@ void CforedManager::RegisterCb_() {
     }
 
     m_cfored_client_map_[elem.cfored]->InitTaskFwdAndSetInputCb(
-        elem.task_id, [fd = elem.fd](const std::string& msg) -> bool {
+        elem.task_id,
+        [fd = elem.task_input_fd](const std::string& msg) -> bool {
           ssize_t sz_sent = 0, sz_written;
           while (sz_sent != msg.size()) {
             sz_written = write(fd, msg.c_str() + sz_sent, msg.size() - sz_sent);
@@ -384,9 +390,9 @@ void CforedManager::RegisterCb_() {
           return true;
         });
 
-    CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.fd,
-                elem.task_id);
-    auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.fd);
+    CRANE_TRACE("Registering fd {} for outputs of task #{}",
+                elem.task_output_fd, elem.task_id);
+    auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.task_output_fd);
     poll_handle->on<uvw::poll_event>([this, elem = std::move(elem)](
                                          const uvw::poll_event&,
                                          uvw::poll_handle& h) {
@@ -395,7 +401,7 @@ void CforedManager::RegisterCb_() {
       constexpr int MAX_BUF_SIZE = 4096;
       char buf[MAX_BUF_SIZE];
 
-      auto ret = read(elem.fd, buf, MAX_BUF_SIZE);
+      auto ret = read(elem.task_output_fd, buf, MAX_BUF_SIZE);
       bool read_finished{false};
 
       if (ret == 0) {
@@ -434,7 +440,7 @@ void CforedManager::RegisterCb_() {
         CRANE_TRACE("Task #{} to cfored {} finished its output.", elem.task_id,
                     elem.cfored);
         h.close();
-        close(elem.fd);
+        close(elem.task_output_fd);
 
         bool ok_to_free =
             m_cfored_client_map_[elem.cfored]->TaskOutputFinish(elem.task_id);

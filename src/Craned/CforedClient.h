@@ -85,15 +85,16 @@ class CforedManager {
 
   bool Init();
 
-  void RegisterIOForward(std::string const& cfored, task_id_t task_id, int fd,
-                         bool pty);
+  void RegisterIOForward(std::string const& cfored, task_id_t task_id,
+                         int task_in_fd, int task_out_fd, bool pty);
   void TaskProcOnCforedStopped(std::string const& cfored, task_id_t task_id);
 
  private:
   struct RegisterElem {
     std::string cfored;
     task_id_t task_id;
-    int fd;
+    int task_input_fd;
+    int task_output_fd;
     bool pty;
   };
 
