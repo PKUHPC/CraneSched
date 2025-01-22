@@ -2086,17 +2086,14 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
         bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
             craned_meta->res_avail, &feasible_res);
         if (ok) {
-          auto& time_avail_res_map =
-              node_selection_info.GetTimeAvailResMap(craned_index);
-          auto is_ready = [&time_avail_res_map, &earliest_end_time,
-                           &feasible_res]() {
-            for (const auto& [time, res] : time_avail_res_map) {
-              if (time >= earliest_end_time) break;
-              if (!(feasible_res <= res)) return false;
-            }
-            return true;
-          };
-          if (is_ready()) {
+          bool is_node_satisfied_now = true;
+          for (const auto& [time, res] :
+               node_selection_info.GetTimeAvailResMap(craned_index)) {
+            if (time >= earliest_end_time) break;
+            if (!(feasible_res <= res)) is_node_satisfied_now = false;
+          }
+
+          if (is_node_satisfied_now) {
             ready_craned_indexes_.emplace_back(craned_index);
             allocated_res.AddResourceInNode(craned_index, feasible_res);
             task->allocated_res_view += feasible_res;
@@ -2126,7 +2123,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     ResourceInNode feasible_res;
 
     // TODO: get feasible resource randomly (may cause start time change
-    // rapidly)
+    //       rapidly)
     bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
         craned_meta->res_avail, &feasible_res);
     if (!ok) {
