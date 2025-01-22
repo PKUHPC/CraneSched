@@ -1168,8 +1168,9 @@ CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
       meta.has_been_terminated_on_craned = true;
       need_to_be_terminated = true;
     }
-  } else
+  } else {
     need_to_be_terminated = true;
+  }
 
   if (need_to_be_terminated) {
     for (CranedId const& craned_id : task->executing_craned_ids) {

@@ -1,6 +1,8 @@
 name: Build, Upload and Test
 
 on:
+  schedule:
+    - cron: "0 2 * * *"
   push:
     branches:
       - master
