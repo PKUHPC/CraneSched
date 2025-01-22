@@ -198,7 +198,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser(
 
 AccountManager::CraneExpected<void> AccountManager::DeleteAccount(
     uint32_t uid, const std::vector<std::string>& account_list) {
-  if (!account_list.empty())
+  if (account_list.empty())
     return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   {
