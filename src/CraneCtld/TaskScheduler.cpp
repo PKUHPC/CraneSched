@@ -2019,12 +2019,13 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
     TaskInCtld* task, absl::Time now, std::list<CranedId>* craned_ids,
     absl::Time* start_time) {
-  uint32_t node_num_limit = task->node_num;
+  uint32_t node_num_limit;
   if constexpr (kAlgoRedundantNode) {
     node_num_limit = std::min(task->node_num + 10, task->node_num * 2);
   } else {
     node_num_limit = task->node_num;
   }
+
   std::vector<CranedId> craned_indexes_;
   std::vector<CranedId> ready_craned_indexes_;
 
@@ -2062,53 +2063,64 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
             "Skipping this craned.",
             task->TaskId(), craned_index);
       }
-    } else if (!task->included_nodes.empty() &&
-               !task->included_nodes.contains(craned_index)) {
+      continue;
+    }
+
+    if (!task->included_nodes.empty() &&
+        !task->included_nodes.contains(craned_index)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
             "Craned {} is not in the nodelist of task #{}. "
             "Skipping this craned.",
             craned_index, task->TaskId());
       }
-    } else if (!task->excluded_nodes.empty() &&
-               task->excluded_nodes.contains(craned_index)) {
+      continue;
+    }
+
+    if (!task->excluded_nodes.empty() &&
+        task->excluded_nodes.contains(craned_index)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE("Task #{} excludes craned {}. Skipping this craned.",
                     task->TaskId(), craned_index);
       }
-    } else {
-      if constexpr (kAlgoRedundantNode) {
-        craned_indexes_.emplace_back(craned_index);
-        if (craned_indexes_.size() >= node_num_limit) break;
-      } else {
-        // TODO: Performance issue! Consider speeding up with mutiple threads.
-        ResourceInNode feasible_res;
-        bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
-            craned_meta->res_avail, &feasible_res);
-        if (ok) {
-          bool is_node_satisfied_now = true;
-          for (const auto& [time, res] :
-               node_selection_info.GetTimeAvailResMap(craned_index)) {
-            if (time >= earliest_end_time) break;
-            if (!(feasible_res <= res)) is_node_satisfied_now = false;
-          }
+      continue;
+    }
 
-          if (is_node_satisfied_now) {
-            ready_craned_indexes_.emplace_back(craned_index);
-            allocated_res.AddResourceInNode(craned_index, feasible_res);
-            task->allocated_res_view += feasible_res;
-            if (ready_craned_indexes_.size() >= task->node_num) {
-              task->SetResources(std::move(allocated_res));
-              *start_time = now;
-              for (const CranedId& ready_craned_index : ready_craned_indexes_) {
-                craned_ids->emplace_back(ready_craned_index);
-              }
-              return true;
-            }
-          }
+    if constexpr (kAlgoRedundantNode) {
+      craned_indexes_.emplace_back(craned_index);
+      if (craned_indexes_.size() >= node_num_limit) break;
+    } else {
+      // Given N as the required number of nodes,
+      // all the nodes that is able to run the task at some time-point will be
+      // iterated and the first N nodes will be in the craned_indexes_.
+      if (craned_indexes_.size() < node_num_limit)
+        craned_indexes_.emplace_back(craned_index);
+
+      // Find all possible nodes that can run the task now.
+      // TODO: Performance issue! Consider speeding up with multiple threads.
+      ResourceInNode feasible_res;
+      bool ok = task->requested_node_res_view.GetFeasibleResourceInNode(
+          craned_meta->res_avail, &feasible_res);
+      if (ok) {
+        bool is_node_satisfied_now = true;
+        for (const auto& [time, res] :
+             node_selection_info.GetTimeAvailResMap(craned_index)) {
+          if (time >= earliest_end_time) break;
+          if (!(feasible_res <= res)) is_node_satisfied_now = false;
         }
-        if (craned_indexes_.size() < node_num_limit) {
-          craned_indexes_.emplace_back(craned_index);
+
+        if (is_node_satisfied_now) {
+          ready_craned_indexes_.emplace_back(craned_index);
+          allocated_res.AddResourceInNode(craned_index, feasible_res);
+          task->allocated_res_view += feasible_res;
+          if (ready_craned_indexes_.size() >= task->node_num) {
+            task->SetResources(std::move(allocated_res));
+            *start_time = now;
+            for (const CranedId& ready_craned_index : ready_craned_indexes_) {
+              craned_ids->emplace_back(ready_craned_index);
+            }
+            return true;
+          }
         }
       }
     }
