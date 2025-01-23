@@ -1273,6 +1273,7 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
           CancelPendingTaskQueueElem{std::move(it->second)});
       m_cancel_task_async_handle_->send();
 
+      g_account_meta_container->FreeQosResource(task->Username(), *task);
       m_pending_task_map_.erase(it);
     }
   };
