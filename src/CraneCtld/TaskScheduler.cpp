@@ -1464,6 +1464,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
   for (auto& task : pending_task_ptr_vec) {
     task->SetStatus(crane::grpc::Cancelled);
     task->SetEndTime(absl::Now());
+    g_account_meta_container->FreeQosResource(task->Username(), *task);
 
     if (task->type == crane::grpc::Interactive) {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
