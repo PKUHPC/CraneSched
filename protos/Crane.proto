@@ -359,7 +359,7 @@ message QueryUserInfoRequest {
 message QueryUserInfoReply {
   bool ok = 1;
   ErrCode reason = 2;
-  repeated UserInfo user_list = 3; 
+  repeated UserInfo user_list = 3;
 }
 
 message QueryQosInfoRequest {
@@ -472,7 +472,7 @@ message StreamCallocRequest {
   }
 }
 
-message StreamCforedReply {
+message StreamCallocReply {
   enum CforedReplyType {
     TASK_ID_REPLY = 0;
     TASK_RES_ALLOC_REPLY = 1;
@@ -639,7 +639,7 @@ message StreamCrunRequest {
   }
 }
 
-message StreamCforedCrunReply {
+message StreamCrunReply {
   enum CforedCrunReplyType {
     TASK_ID_REPLY = 0;
     TASK_RES_ALLOC_REPLY = 1;
@@ -688,7 +688,7 @@ message StreamCforedCrunReply {
   }
 }
 
-message StreamCforedTaskIORequest {
+message StreamTaskIORequest {
   enum CranedRequestType{
     CRANED_REGISTER = 0;
     CRANED_TASK_OUTPUT = 1;
@@ -716,7 +716,7 @@ message StreamCforedTaskIORequest {
   }
 }
 
-message StreamCforedTaskIOReply {
+message StreamTaskIOReply {
   enum CranedReplyType {
     CRANED_REGISTER_REPLY = 0;
     CRANED_TASK_INPUT = 1;
@@ -785,7 +785,7 @@ service CraneCtld {
   rpc ModifyAccount(ModifyAccountRequest) returns (ModifyAccountReply);
   rpc ModifyUser(ModifyUserRequest) returns (ModifyUserReply);
   rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
-  
+
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
 
   /* RPCs called from cinfo */
@@ -827,8 +827,8 @@ service Craned {
 }
 
 service CraneForeD {
-  rpc CallocStream(stream StreamCallocRequest) returns(stream StreamCforedReply);
-  rpc CrunStream(stream StreamCrunRequest) returns(stream StreamCforedCrunReply);
-  rpc TaskIOStream(stream StreamCforedTaskIORequest) returns(stream StreamCforedTaskIOReply);
+  rpc CallocStream(stream StreamCallocRequest) returns(stream StreamCallocReply);
+  rpc CrunStream(stream StreamCrunRequest) returns(stream StreamCrunReply);
+  rpc TaskIOStream(stream StreamTaskIORequest) returns(stream StreamTaskIOReply);
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
 }

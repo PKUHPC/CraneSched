@@ -23,10 +23,10 @@
 #include "crane/String.h"
 namespace Craned {
 
-using crane::grpc::StreamCforedTaskIOReply;
-using crane::grpc::StreamCforedTaskIORequest;
+using crane::grpc::StreamTaskIOReply;
+using crane::grpc::StreamTaskIORequest;
 
-CforedClient::CforedClient() : m_stopped_(false){};
+CforedClient::CforedClient() : m_stopped_(false) {};
 
 CforedClient::~CforedClient() {
   CRANE_TRACE("CforedClient to {} is being destructed.", m_cfored_name_);
@@ -57,8 +57,8 @@ void CforedClient::InitChannelAndStub(const std::string& cfored_name) {
 }
 
 void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
-    grpc::ClientAsyncReaderWriter<StreamCforedTaskIORequest,
-                                  StreamCforedTaskIOReply>* stream,
+    grpc::ClientAsyncReaderWriter<StreamTaskIORequest, StreamTaskIOReply>*
+        stream,
     std::atomic<bool>* write_pending) {
   CRANE_TRACE("CleanOutputQueueThread started.");
   std::pair<task_id_t, std::string> output;
@@ -72,8 +72,8 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
       continue;
     }
 
-    StreamCforedTaskIORequest request;
-    request.set_type(StreamCforedTaskIORequest::CRANED_TASK_OUTPUT);
+    StreamTaskIORequest request;
+    request.set_type(StreamTaskIORequest::CRANED_TASK_OUTPUT);
 
     auto* payload = request.mutable_payload_task_output_req();
     payload->set_msg(output.second), payload->set_task_id(output.first);
@@ -106,8 +106,8 @@ void CforedClient::AsyncSendRecvThread_() {
   bool ok;
   Tag tag;
   grpc::ClientContext context;
-  StreamCforedTaskIORequest request;
-  StreamCforedTaskIOReply reply;
+  StreamTaskIORequest request;
+  StreamTaskIOReply reply;
   grpc::CompletionQueue::NextStatus next_status;
 
   auto stream =
@@ -141,7 +141,7 @@ void CforedClient::AsyncSendRecvThread_() {
         CRANE_TRACE("Unregistering on cfored {}.", m_cfored_name_);
 
         request.Clear();
-        request.set_type(StreamCforedTaskIORequest::CRANED_UNREGISTER);
+        request.set_type(StreamTaskIORequest::CRANED_UNREGISTER);
         request.mutable_payload_unregister_req()->set_craned_id(
             g_config.CranedIdOfThisNode);
 
@@ -173,7 +173,7 @@ void CforedClient::AsyncSendRecvThread_() {
 
       CRANE_ASSERT_MSG_VA(tag == Tag::Prepare, "Tag: {}", int(tag));
 
-      request.set_type(StreamCforedTaskIORequest::CRANED_REGISTER);
+      request.set_type(StreamTaskIORequest::CRANED_REGISTER);
       request.mutable_payload_register_req()->set_craned_id(
           g_config.CranedIdOfThisNode);
 
@@ -216,7 +216,7 @@ void CforedClient::AsyncSendRecvThread_() {
       }
 
       CRANE_ASSERT(tag == Tag::Read);
-      if (reply.type() != StreamCforedTaskIOReply::CRANED_TASK_INPUT) {
+      if (reply.type() != StreamTaskIOReply::CRANED_TASK_INPUT) {
         CRANE_ERROR("Expect TASK_INPUT, but got {}", (int)reply.type());
         break;
       }
@@ -249,7 +249,7 @@ void CforedClient::AsyncSendRecvThread_() {
       CRANE_ASSERT(tag == Tag::Read);
       CRANE_TRACE("UNREGISTER_REPLY msg received.");
 
-      if (reply.type() != StreamCforedTaskIOReply::CRANED_UNREGISTER_REPLY) {
+      if (reply.type() != StreamTaskIOReply::CRANED_UNREGISTER_REPLY) {
         CRANE_TRACE("Expect UNREGISTER_REPLY, but got {}. Ignoring it.",
                     (int)reply.type());
         reply.Clear();
@@ -345,8 +345,13 @@ void CforedManager::EvLoopThread_(const std::shared_ptr<uvw::loop>& uvw_loop) {
 }
 
 void CforedManager::RegisterIOForward(std::string const& cfored,
-                                      task_id_t task_id, int fd, bool pty) {
-  RegisterElem elem{.cfored = cfored, .task_id = task_id, .fd = fd, .pty = pty};
+                                      task_id_t task_id, int task_in_fd,
+                                      int task_out_fd, bool pty) {
+  RegisterElem elem{.cfored = cfored,
+                    .task_id = task_id,
+                    .task_input_fd = task_in_fd,
+                    .task_output_fd = task_out_fd,
+                    .pty = pty};
   std::promise<bool> done;
   std::future<bool> done_fut = done.get_future();
 
@@ -370,7 +375,8 @@ void CforedManager::RegisterCb_() {
     }
 
     m_cfored_client_map_[elem.cfored]->InitTaskFwdAndSetInputCb(
-        elem.task_id, [fd = elem.fd](const std::string& msg) -> bool {
+        elem.task_id,
+        [fd = elem.task_input_fd](const std::string& msg) -> bool {
           ssize_t sz_sent = 0, sz_written;
           while (sz_sent != msg.size()) {
             sz_written = write(fd, msg.c_str() + sz_sent, msg.size() - sz_sent);
@@ -384,9 +390,9 @@ void CforedManager::RegisterCb_() {
           return true;
         });
 
-    CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.fd,
-                elem.task_id);
-    auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.fd);
+    CRANE_TRACE("Registering fd {} for outputs of task #{}",
+                elem.task_output_fd, elem.task_id);
+    auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.task_output_fd);
     poll_handle->on<uvw::poll_event>([this, elem = std::move(elem)](
                                          const uvw::poll_event&,
                                          uvw::poll_handle& h) {
@@ -395,7 +401,7 @@ void CforedManager::RegisterCb_() {
       constexpr int MAX_BUF_SIZE = 4096;
       char buf[MAX_BUF_SIZE];
 
-      auto ret = read(elem.fd, buf, MAX_BUF_SIZE);
+      auto ret = read(elem.task_output_fd, buf, MAX_BUF_SIZE);
       bool read_finished{false};
 
       if (ret == 0) {
@@ -434,7 +440,7 @@ void CforedManager::RegisterCb_() {
         CRANE_TRACE("Task #{} to cfored {} finished its output.", elem.task_id,
                     elem.cfored);
         h.close();
-        close(elem.fd);
+        close(elem.task_output_fd);
 
         bool ok_to_free =
             m_cfored_client_map_[elem.cfored]->TaskOutputFinish(elem.task_id);

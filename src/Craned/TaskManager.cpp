@@ -23,6 +23,7 @@
 #include <google/protobuf/util/delimited_message_util.h>
 #include <pty.h>
 #include <sys/wait.h>
+#include <utmp.h>
 
 #include "CforedClient.h"
 #include "CtldClient.h"
@@ -81,8 +82,16 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
 
   env_map.emplace("CRANE_JOB_ID", std::to_string(this->task.task_id()));
 
-  if (this->IsCrun() && !this->task.interactive_meta().term_env().empty()) {
-    env_map.emplace("TERM", this->task.interactive_meta().term_env());
+  if (this->IsCrun()) {
+    auto const& ia_meta = this->task.interactive_meta();
+    if (!ia_meta.term_env().empty())
+      env_map.emplace("TERM", ia_meta.term_env());
+
+    if (ia_meta.x11()) {
+      auto const& x11_meta = ia_meta.x11_meta();
+      env_map["DISPLAY"] =
+          fmt::format("{}:{}", x11_meta.target(), x11_meta.port());
+    }
   }
 
   int64_t time_limit_sec = this->task.time_limit().seconds();
@@ -412,8 +421,8 @@ void TaskManager::EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info) {
 void TaskManager::EvSigintCb_() {
   if (!m_is_ending_now_) {
     // SIGINT has been sent once. If SIGINT are captured twice, it indicates
-    // the signal sender can't wait to stop Craned and Craned just send SIGTERM
-    // to all tasks to kill them immediately.
+    // the signal sender can't wait to stop Craned and Craned just send
+    // SIGTERM to all tasks to kill them immediately.
 
     CRANE_INFO("Caught SIGINT. Send SIGTERM to all running tasks...");
 
@@ -521,16 +530,15 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
   int ctrl_sock_pair[2];  // Socket pair for passing control messages.
 
-  // Socket pair for forwarding IO of crun tasks. Craned read from index 0.
-  int crun_io_sock_pair[2];
+  int craned_crun_pipe[2];
+  int crun_craned_pipe[2];
 
   // The ResourceInNode structure should be copied here for being accessed in
   // the child process.
   // Note that CgroupManager acquires a lock for this.
-  // If the lock is held in the parent process during fork, the forked thread in
-  // the child proc will block forever.
-  // That's why we should copy it here and the child proc should not hold any
-  // lock.
+  // If the lock is held in the parent process during fork, the forked thread
+  // in the child proc will block forever. That's why we should copy it here
+  // and the child proc should not hold any lock.
   auto res_in_node = g_cg_mgr->GetTaskResourceInNode(instance->task.task_id());
   if (!res_in_node.has_value()) {
     CRANE_ERROR("[Task #{}] Failed to get resource info",
@@ -546,6 +554,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
   pid_t child_pid;
   bool launch_pty{false};
+  int crun_pty_fd;
 
   if (instance->IsCrun()) {
     auto* crun_meta =
@@ -554,16 +563,23 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     CRANE_DEBUG("[Task #{}] Launch crun pty: {}", instance->task.task_id(),
                 launch_pty);
 
-    if (launch_pty) {
-      child_pid = forkpty(&crun_meta->msg_fd, nullptr, nullptr, nullptr);
+    if (pipe(craned_crun_pipe) == -1) {
+      CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
+                  instance->task.task_id(), strerror(errno));
+      return CraneErr::kSystemErr;
+    }
+    if (pipe(crun_craned_pipe) == -1) {
+      CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
+                  instance->task.task_id(), strerror(errno));
+      return CraneErr::kSystemErr;
+    }
+    crun_meta->task_input_fd = craned_crun_pipe[1];
+    crun_meta->task_output_fd = crun_craned_pipe[0];
+
+    if (instance->task.interactive_meta().pty()) {
+      child_pid = forkpty(&crun_pty_fd, nullptr, nullptr, nullptr);
+      // We will write to child using pipe
     } else {
-      if (socketpair(AF_UNIX, SOCK_STREAM, 0, crun_io_sock_pair) != 0) {
-        CRANE_ERROR(
-            "[Task #{}] Failed to create socket pair for task io forward: {}",
-            instance->task.task_id(), strerror(errno));
-        return CraneErr::kSystemErr;
-      }
-      crun_meta->msg_fd = crun_io_sock_pair[0];
       child_pid = fork();
     }
   } else {
@@ -583,16 +599,22 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     if (instance->IsCrun()) {
       auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
+      if (launch_pty) {
+        close(meta->task_input_fd);
+        close(meta->task_output_fd);
+        meta->task_input_fd = crun_pty_fd;
+        meta->task_output_fd = crun_pty_fd;
+      }
       g_cfored_manager->RegisterIOForward(
           instance->task.interactive_meta().cfored_name(),
-          instance->task.task_id(), meta->msg_fd, launch_pty);
+          instance->task.task_id(), meta->task_input_fd, meta->task_output_fd,
+          launch_pty);
+      close(craned_crun_pipe[0]);
+      close(crun_craned_pipe[1]);
     }
 
     int ctrl_fd = ctrl_sock_pair[0];
     close(ctrl_sock_pair[1]);
-    if (instance->IsCrun() && !launch_pty) {
-      close(crun_io_sock_pair[1]);
-    }
 
     bool ok;
     FileInputStream istream(ctrl_fd);
@@ -693,8 +715,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     // See comments above.
     // As long as fork() is done and the grpc channel to the child process is
-    // healthy, we should return kOk, not trigger a manual TaskStatusChange, and
-    // reap the child process by SIGCHLD after it commits suicide.
+    // healthy, we should return kOk, not trigger a manual TaskStatusChange,
+    // and reap the child process by SIGCHLD after it commits suicide.
     return CraneErr::kOk;
   } else {  // Child proc
     // Disable SIGABRT backtrace from child processes.
@@ -802,13 +824,16 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       }
       close(stdout_fd);
 
-    } else if (instance->IsCrun() && !launch_pty) {
-      close(crun_io_sock_pair[0]);
-
-      dup2(crun_io_sock_pair[1], 0);
-      dup2(crun_io_sock_pair[1], 1);
-      dup2(crun_io_sock_pair[1], 2);
-      close(crun_io_sock_pair[1]);
+    } else if (instance->IsCrun()) {
+      if (!launch_pty) {
+        dup2(craned_crun_pipe[0], STDIN_FILENO);
+        dup2(crun_craned_pipe[1], STDOUT_FILENO);
+        dup2(crun_craned_pipe[1], STDERR_FILENO);
+      }
+      close(craned_crun_pipe[0]);
+      close(craned_crun_pipe[1]);
+      close(crun_craned_pipe[0]);
+      close(crun_craned_pipe[1]);
     }
 
     child_process_ready.set_ok(true);
@@ -832,7 +857,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
 
     if (clearenv()) {
-      fmt::print(stderr, "[Craned Subprocess] Warnning: clearenv() failed.\n");
+      fmt::print(stderr, "[Craned Subprocess] Warning: clearenv() failed.\n");
     }
 
     auto FuncSetEnv =
@@ -841,12 +866,26 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
             if (setenv(name.c_str(), value.c_str(), 1))
               fmt::print(
                   stderr,
-                  "[Craned Subprocess] Warnning: setenv() for {}={} failed.\n",
+                  "[Craned Subprocess] Warning: setenv() for {}={} failed.\n",
                   name, value);
         };
 
     FuncSetEnv(task_env_map);
     FuncSetEnv(res_env_map);
+
+    if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
+      auto const& x11_meta = instance->task.interactive_meta().x11_meta();
+      std::string xauth_cmd =
+          fmt::format("xauth add {}:{} . {}", x11_meta.target(),
+                      x11_meta.port(), x11_meta.cookie());
+
+      // FIXME: Shell injection vulnerability
+      rc = std::system(xauth_cmd.c_str());
+      if (rc != 0) {
+        fmt::print(stderr, "[Craned Subprocess] Error: xauth failed.\n");
+        std::abort();
+      }
+    }
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
@@ -856,8 +895,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     if (instance->task.get_user_env()) {
       // If --get-user-env is specified,
-      // we need to use --login option of bash to load settings from the user's
-      // settings.
+      // we need to use --login option of bash to load settings from the
+      // user's settings.
       argv.emplace_back("--login");
     }
 
@@ -935,7 +974,8 @@ void TaskManager::EvCleanGrpcExecuteTaskQueueCb_() {
 }
 
 void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
-  // This function runs in a multi-threading manner. Take care of thread safety.
+  // This function runs in a multi-threading manner.
+  // Take care of thread safety.
   task_id_t task_id = instance->task.task_id();
 
   if (!g_cg_mgr->CheckIfCgroupForTasksExists(task_id)) {
