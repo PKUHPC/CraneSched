@@ -89,9 +89,8 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
 
     if (ia_meta.x11()) {
       auto const& x11_meta = ia_meta.x11_meta();
-      env_map.erase("DISPLAY");
-      env_map.emplace("DISPLAY",
-                      fmt::format("{}:{}", x11_meta.target(), x11_meta.port()));
+      env_map["DISPLAY"] =
+          fmt::format("{}:{}", x11_meta.target(), x11_meta.port());
     }
   }
 
@@ -555,7 +554,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
   pid_t child_pid;
   bool launch_pty{false};
-  int crun_master_fd;
+  int crun_pty_fd;
 
   if (instance->IsCrun()) {
     auto* crun_meta =
@@ -578,7 +577,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     crun_meta->task_output_fd = crun_craned_pipe[0];
 
     if (instance->task.interactive_meta().pty()) {
-      child_pid = forkpty(&crun_master_fd, nullptr, nullptr, nullptr);
+      child_pid = forkpty(&crun_pty_fd, nullptr, nullptr, nullptr);
       // We will write to child using pipe
     } else {
       child_pid = fork();
@@ -603,8 +602,8 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       if (launch_pty) {
         close(meta->task_input_fd);
         close(meta->task_output_fd);
-        meta->task_input_fd = crun_master_fd;
-        meta->task_output_fd = crun_master_fd;
+        meta->task_input_fd = crun_pty_fd;
+        meta->task_output_fd = crun_pty_fd;
       }
       g_cfored_manager->RegisterIOForward(
           instance->task.interactive_meta().cfored_name(),

@@ -18,8 +18,6 @@
 
 #pragma once
 
-#include <cstdint>
-
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
