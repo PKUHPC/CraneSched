@@ -256,12 +256,12 @@ class AccountManager {
       bool read_only_priv);
 
   CraneExpected<void> CheckPartitionIsAllowedNoLock_(
-      const Account* account, const std::vector<std::string>& partition_list,
-      bool check_parent, bool is_user);
+      const Account* account, const std::string& partition, bool check_parent,
+      bool is_user);
 
-  CraneExpected<void> CheckQosIsAllowedNoLock_(
-      const Account* account, const std::vector<std::string>& qos_list,
-      bool check_parent, bool is_user);
+  CraneExpected<void> CheckQosIsAllowedNoLock_(const Account* account,
+                                               const std::string& qos,
+                                               bool check_parent, bool is_user);
 
   bool IncQosReferenceCountInDb_(const std::string& name, int num);
 
