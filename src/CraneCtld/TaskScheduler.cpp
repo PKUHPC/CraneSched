@@ -2529,6 +2529,7 @@ void MinLoadFirst::NodeSelect(
         g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                                  task->Resources());
 
+      task->SetPriority(task->cached_priority);
       std::unique_ptr<TaskInCtld> moved_task;
 
       // Move task out of pending_task_map and insert it to the

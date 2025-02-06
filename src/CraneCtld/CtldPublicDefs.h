@@ -464,6 +464,10 @@ struct TaskInCtld {
   }
   bool const& Held() const { return held; }
 
+  void SetPriority(uint32_t val) {
+    runtime_attr.set_priority(val);
+  }
+
   void SetResources(ResourceV2&& val) {
     *runtime_attr.mutable_resources() =
         static_cast<crane::grpc::ResourceV2>(val);
@@ -535,7 +539,8 @@ struct TaskInCtld {
 
     status = runtime_attr.status();
     held = runtime_attr.held();
-
+    cached_priority = runtime_attr.priority();
+  
     if (status != crane::grpc::TaskStatus::Pending) {
       craned_ids.assign(runtime_attr.craned_ids().begin(),
                         runtime_attr.craned_ids().end());

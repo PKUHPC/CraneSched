@@ -170,6 +170,7 @@ message RuntimeAttrOfTask {
 
   bool held = 18;
   ResourceV2 resources = 19;
+  uint32 priority = 20;
 }
 
 message TaskToD {

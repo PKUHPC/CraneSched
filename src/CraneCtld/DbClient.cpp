@@ -871,7 +871,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
           util::HostNameListToStr(runtime_attr.craned_ids()),
           runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
           // 15-19
-          0, 0, runtime_attr.start_time().seconds(),
+          runtime_attr.priority(), 0, runtime_attr.start_time().seconds(),
           runtime_attr.end_time().seconds(), 0,
           // 20-24
           task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
