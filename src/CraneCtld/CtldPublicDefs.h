@@ -565,6 +565,7 @@ struct TaskInCtld {
 
     start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());
     end_time = absl::FromUnixSeconds(runtime_attr.end_time().seconds());
+    submit_time = absl::FromUnixSeconds(runtime_attr.submit_time().seconds());
   }
 
   // Helper function to set the fields of TaskInfo using info in
