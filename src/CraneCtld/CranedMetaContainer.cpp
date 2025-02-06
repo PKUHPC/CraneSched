@@ -25,10 +25,11 @@ namespace Ctld {
 
 void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
   CranedRemoteMeta remote_meta;
+  std::unordered_set<task_id_t> running_job_set;
 
   auto stub = g_craned_keeper->GetCranedStub(craned_id);
   if (stub != nullptr && !stub->Invalid()) {
-    CraneErr err = stub->QueryCranedRemoteMeta(&remote_meta);
+    CraneErr err = stub->QueryCranedRemoteMeta(&remote_meta, &running_job_set);
     if (err != CraneErr::kOk) {
       CRANE_ERROR("Failed to query actual resource from craned {}", craned_id);
       return;
@@ -62,6 +63,11 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
       node_meta->static_meta.res.allocatable_res;
   node_meta->res_total.dedicated_res += node_meta->remote_meta.dres_in_node;
   node_meta->res_avail.dedicated_res += node_meta->remote_meta.dres_in_node;
+
+  absl::erase_if(node_meta->running_task_resource_map,
+                 [&running_job_set](const auto& kv) {
+                   return !running_job_set.contains(kv.first);
+                 });
 
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
@@ -110,8 +116,6 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   node_meta->res_total.SetToZero();
   node_meta->res_avail.SetToZero();
   node_meta->res_in_use.SetToZero();
-
-  node_meta->running_task_resource_map.clear();
 }
 
 bool CranedMetaContainer::CheckCranedOnline(const CranedId& craned_id) {

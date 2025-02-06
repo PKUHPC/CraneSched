@@ -609,6 +609,7 @@ void GlobalVariableInit() {
       tasks.value_or(std::unordered_map<task_id_t, pid_t>());
   for (const auto& [job_id, supervisor_state] : job_id_pid_map) {
     task_ids_supervisor.emplace(job_id);
+    CRANE_TRACE("[Supervisor] job {} still running.", job_id);
   }
 
   g_ctld_client = std::make_unique<Craned::CtldClient>();
@@ -637,7 +638,7 @@ void GlobalVariableInit() {
   // g_ctld_client->UnSetCranedRegisterCb();
 
   std::unordered_set<task_id_t> running_job_ids;
-  for (const auto& [job_id, _] : job_spec_map) {
+  for (const task_id_t job_id : job_spec_map | std::ranges::views::keys) {
     running_job_ids.emplace(job_id);
   }
 

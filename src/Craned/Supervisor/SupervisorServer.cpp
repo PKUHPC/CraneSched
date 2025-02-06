@@ -41,9 +41,10 @@ grpc::Status Supervisor::SupervisorServiceImpl::CheckTaskStatus(
     crane::grpc::supervisor::CheckTaskStatusReply* response) {
   auto pid_future = g_task_mgr->CheckTaskStatusAsync();
   pid_future.wait();
-  if (pid_future.get().has_value()) {
+  auto pid_expt = pid_future.get();
+  if (pid_expt.has_value()) {
     response->set_job_id(g_config.JobId);
-    response->set_pid(pid_future.get().value());
+    response->set_pid(pid_expt.value());
     response->set_ok(true);
     return Status::OK;
   } else {

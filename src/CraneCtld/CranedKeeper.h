@@ -62,7 +62,8 @@ class CranedStub {
 
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
-  CraneErr QueryCranedRemoteMeta(CranedRemoteMeta *meta);
+  CraneErr QueryCranedRemoteMeta(
+      CranedRemoteMeta *meta, std::unordered_set<task_id_t> *running_job_set);
 
   bool Invalid() const { return m_invalid_; }
 

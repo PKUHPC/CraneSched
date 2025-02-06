@@ -136,6 +136,7 @@ JobManager::JobManager() {
 CraneErr JobManager::Init(
     std::unordered_map<task_id_t, JobStatusSpce>&& job_status_map) {
   for (auto& [job_id, task_status] : job_status_map) {
+    CRANE_TRACE("[Job #{}] Recover from supervisor.", job_id);
     task_status.job_spec.cgroup_spec.recovered = true;
     auto* job_instance = new JobInstance(task_status.job_spec);
     auto* process =
@@ -783,7 +784,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         elem.task_id);
 
     auto job_instance = m_job_map_.GetValueExclusivePtr(elem.task_id);
-    if (job_instance->get()->processes.empty()) {
+    if (!job_instance || job_instance->get()->processes.empty()) {
       CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
 
       // Note if Ctld wants to terminate some tasks that are not running,
@@ -806,7 +807,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
       // we just remove the cgroup for such task, Ctld will fail in the
       // following ExecuteTasks and the task will go to the right place as
       // well as the completed queue.
-      FreeJobInstanceAllocation_(job_instance->release());
+      // FreeJobInstanceAllocation_(job_instance->release());
       continue;
     }
 

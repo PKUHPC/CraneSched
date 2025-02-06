@@ -616,6 +616,7 @@ message QueryCranedRemoteMetaRequest {}
 message QueryCranedRemoteMetaReply {
   bool ok = 1;
   CranedRemoteMeta craned_remote_meta = 2;
+  repeated uint32 job_id_list = 3;
 }
 
 message StreamCrunRequest {

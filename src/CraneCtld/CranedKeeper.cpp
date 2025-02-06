@@ -217,7 +217,8 @@ CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
     return CraneErr::kGenericFailure;
 }
 
-CraneErr CranedStub::QueryCranedRemoteMeta(CranedRemoteMeta *meta) {
+CraneErr CranedStub::QueryCranedRemoteMeta(
+    CranedRemoteMeta *meta, std::unordered_set<task_id_t> *running_job_set) {
   using crane::grpc::QueryCranedRemoteMetaReply;
   using crane::grpc::QueryCranedRemoteMetaRequest;
   ClientContext context;
@@ -246,6 +247,9 @@ CraneErr CranedStub::QueryCranedRemoteMeta(CranedRemoteMeta *meta) {
       absl::FromUnixSeconds(grpc_meta->craned_start_time().seconds());
   meta->system_boot_time =
       absl::FromUnixSeconds(grpc_meta->system_boot_time().seconds());
+  running_job_set->reserve(reply.job_id_list_size());
+  running_job_set->insert(reply.job_id_list().begin(),
+                          reply.job_id_list().end());
 
   if (reply.ok()) return CraneErr::kOk;
 
@@ -257,7 +261,6 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
   crane::grpc::ExecuteTasksRequest request;
 
   for (TaskInCtld *task : tasks) {
-
   }
 
   return request;

@@ -103,7 +103,8 @@ CraneExpected<std::unordered_map<task_id_t, pid_t>> SupervisorKeeper::Init() {
         g_thread_pool->detach_task(
             [this, file, &all_supervisor_reply, &mtx, &tasks]() {
               std::shared_ptr stub = std::make_shared<SupervisorClient>();
-              stub->InitChannelAndStub(file);
+              auto sock_path = fmt::format("unix://{}", file.string());
+              stub->InitChannelAndStub(sock_path);
               CraneExpected<std::pair<task_id_t, pid_t>> task_status =
                   stub->CheckTaskStatus();
               all_supervisor_reply.count_down();
