@@ -566,12 +566,12 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     if (pipe(craned_crun_pipe) == -1) {
       CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
                   instance->task.task_id(), strerror(errno));
-      return CraneErr::kSystemErr;
+      return CraneErrCode::ERR_SYSTEM_ERR;
     }
     if (pipe(crun_craned_pipe) == -1) {
       CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
                   instance->task.task_id(), strerror(errno));
-      return CraneErr::kSystemErr;
+      return CraneErrCode::ERR_SYSTEM_ERR;
     }
     crun_meta->task_input_fd = craned_crun_pipe[1];
     crun_meta->task_output_fd = crun_craned_pipe[0];
