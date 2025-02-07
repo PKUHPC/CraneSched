@@ -1,6 +1,8 @@
-name: Build and Upload Packages
+name: Build, Upload and Test
 
 on:
+  schedule:
+    - cron: "0 2 * * *"
   push:
     branches:
       - master
@@ -9,96 +11,152 @@ on:
       - master
       - release/*
   workflow_dispatch:
+    inputs:
+      frontend_branch:
+        description: 'Branch of FrontEnd to use'
+        required: true
+        default: 'master'
+
+env:
+  SCRIPT_PATH: /opt/actions-runner-external/script
+  CACHE_PATH: /opt/actions-runner-external/cache
+  TEST_FAILED: false
 
 jobs:
   build:
     if: github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/nativu5/cranedev:ci
-      credentials:
-         username: ${{ github.actor }}
-         password: ${{ github.token }}
+    runs-on: self-hosted
     defaults:
       run:
         shell: bash -leo pipefail {0}
 
     steps:
+      # Checkout repo
       - name: Checkout code
         uses: actions/checkout@v4
+        with: 
+          path: CraneSched
 
-      - name: Configure
+      # Checkout frontend
+      - name: Checkout frontend
+        uses: actions/checkout@v4
+        with:
+          repository: PKUHPC/CraneSched-FrontEnd
+          path: CraneSched-FrontEnd
+          ref: ${{ inputs.frontend_branch }}
+      
+      # Pull CI Image and Prepare
+      - name: Pull CI Image
         run: |
-          echo "Configuring at $(pwd)"
-          mkdir -p out
-          cmake -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCRANE_FULL_DYNAMIC=OFF \
-            -S . -B out
+          podman pull ghcr.io/nativu5/cranedev:ci
+          echo "Linking $SCRIPT_PATH to $(pwd)/script"
+          ln -sfT $SCRIPT_PATH $(pwd)/script
+          echo "Linking $CACHE_PATH to $(pwd)/cache"
+          ln -sfT $CACHE_PATH $(pwd)/cache
+          mkdir -p output
+          mkdir -p log
 
-      - name: Build
+      - name: Build in Container
         run: |
-          echo "Building at $(pwd)"
-          cmake --build out --config Release
+          podman run --rm \
+              -v ./CraneSched:/Workspace/CraneSched \
+              -v ./CraneSched-FrontEnd:/Workspace/CraneSched-FrontEnd \
+              -v ./output:/Workspace/output \
+              -v ./script:/Workspace/script \
+              -v ./cache/ccache:/root/.ccache \
+              ghcr.io/nativu5/cranedev:ci /bin/bash --login script/build.sh
 
-      - name: Package with CPack
+      # Collect and upload artifacts
+      - name: Count Artifacts
         run: |
-          echo "Packaging with CPack"
-          pushd out
-          cpack
-          popd
-
-      - name: Collect packages
-        run: |
-          mkdir -p upload/packages
-          cp out/*.deb upload/packages/ || true
-          cp out/*.rpm upload/packages/ || true
-          for package in upload/packages/*; do
-            package_name=$(basename "$package")
-            case "$package_name" in
-              *craned.rpm)
-                echo "ARTIFACT_NAME_CRANED_RPM=$package_name" >> $GITHUB_ENV
-                ;;
-              *craned.deb)
-                echo "ARTIFACT_NAME_CRANED_DEB=$package_name" >> $GITHUB_ENV
-                ;;
-              *cranectld.rpm)
-                echo "ARTIFACT_NAME_CRANECTLD_RPM=$package_name" >> $GITHUB_ENV
-                ;;
-              *cranectld.deb)
-                echo "ARTIFACT_NAME_CRANECTLD_DEB=$package_name" >> $GITHUB_ENV
-                ;;
-            esac
-          done
+          ARTIFACT_NAME_CRANED_DEB=$(basename $(ls output/*craned.deb))
+          ARTIFACT_NAME_CRANED_RPM=$(basename $(ls output/*craned.rpm))
+          ARTIFACT_NAME_CRANECTLD_DEB=$(basename $(ls output/*cranectld.deb))
+          ARTIFACT_NAME_CRANECTLD_RPM=$(basename $(ls output/*cranectld.rpm))
+          ARTIFACT_NAME_FRONTEND=bin
+          ARTIFACT_NAME_PLUGIN=plugin
+          echo "ARTIFACT_NAME_CRANED_DEB=$ARTIFACT_NAME_CRANED_DEB" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME_CRANED_RPM=$ARTIFACT_NAME_CRANED_RPM" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME_CRANECTLD_DEB=$ARTIFACT_NAME_CRANECTLD_DEB" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME_CRANECTLD_RPM=$ARTIFACT_NAME_CRANECTLD_RPM" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME_FRONTEND=$ARTIFACT_NAME_FRONTEND" >> $GITHUB_ENV
+          echo "ARTIFACT_NAME_PLUGIN=$ARTIFACT_NAME_PLUGIN" >> $GITHUB_ENV
 
       - name: Upload craned .deb package
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME_CRANED_DEB }}
-          path: upload/packages/${{ env.ARTIFACT_NAME_CRANED_DEB }}
-          retention-days: 30
+          path: output/${{ env.ARTIFACT_NAME_CRANED_DEB }}
+          retention-days: 14
           if-no-files-found: error
 
       - name: Upload craned .rpm package
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME_CRANED_RPM }}
-          path: upload/packages/${{ env.ARTIFACT_NAME_CRANED_RPM }}
-          retention-days: 30
+          path: output/${{ env.ARTIFACT_NAME_CRANED_RPM }}
+          retention-days: 14
           if-no-files-found: error
 
       - name: Upload cranectld .deb package
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME_CRANECTLD_DEB }}
-          path: upload/packages/${{ env.ARTIFACT_NAME_CRANECTLD_DEB }}
-          retention-days: 30
+          path: output/${{ env.ARTIFACT_NAME_CRANECTLD_DEB }}
+          retention-days: 14
           if-no-files-found: error
 
       - name: Upload cranectld .rpm package
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME_CRANECTLD_RPM }}
-          path: upload/packages/${{ env.ARTIFACT_NAME_CRANECTLD_RPM }}
-          retention-days: 30
+          path: output/${{ env.ARTIFACT_NAME_CRANECTLD_RPM }}
+          retention-days: 14
           if-no-files-found: error
+
+      - name: Upload frontend
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend
+          path: output/${{ env.ARTIFACT_NAME_FRONTEND }}
+          retention-days: 14
+          if-no-files-found: error
+      
+      - name: Upload plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin
+          path: output/${{ env.ARTIFACT_NAME_PLUGIN }}
+          retention-days: 14
+          if-no-files-found: error
+
+      # Run AutoTest
+      - name: Run AutoTest
+        continue-on-error: true
+        run: |
+          NETWORK_ID=$(podman container inspect mongodb | jq -r '.[0].NetworkSettings.Networks | keys[]')
+          podman run -d --rm --name autotest \
+            --privileged \
+            --systemd true \
+            -v /lib/modules:/lib/modules:ro \
+            -v ./script:/CraneSched-AutoTest/script \
+            -v ./output:/CraneSched-AutoTest/output \
+            -v ./log:/CraneSched-AutoTest/log \
+            --network $NETWORK_ID \
+            localhost/autotest
+          podman exec autotest /bin/bash --login script/run.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
+          podman stop autotest
+      
+      # Upload AutoTest Results
+      - name: Upload AutoTest Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: result.json
+          path: output/result.json
+          retention-days: 14
+          if-no-files-found: error
+
+      # Alarm if has failed cases
+      - name: Alarm on test failure
+        if: env.TEST_FAILED == 'true'
+        run: exit 1

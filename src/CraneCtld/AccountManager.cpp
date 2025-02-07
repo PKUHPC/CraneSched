@@ -18,6 +18,7 @@
 
 #include "AccountManager.h"
 
+#include "AccountMetaContainer.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
@@ -506,6 +507,29 @@ AccountManager::CraneExpected<void> AccountManager::ModifyAdminLevel(
   return SetUserAdminLevel_(name, new_level);
 }
 
+AccountManager::CraneExpected<void> AccountManager::ModifyUserDefaultAccount(
+    uint32_t uid, const std::string& user, const std::string& def_account) {
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
+  CraneExpected<void> result{};
+
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+  const User* op_user = user_result.value();
+
+  const User* user_ptr = GetExistedUserInfoNoLock_(user);
+  if (!user_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+
+  result = CheckIfUserHasHigherPrivThan_(*op_user, user_ptr->admin_level);
+  if (!result) return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
+
+  if (!user_ptr->account_to_attrs_map.contains(def_account))
+    return std::unexpected(CraneErrCode::ERR_USER_ALLOWED_ACCOUNT);
+
+  if (user_ptr->default_account == def_account) return result;
+
+  return SetUserDefaultAccount_(user, def_account);
+}
+
 AccountManager::CraneExpected<void> AccountManager::ModifyUserDefaultQos(
     uint32_t uid, const std::string& name, const std::string& partition,
     const std::string& account, const std::string& value) {
@@ -832,6 +856,7 @@ AccountManager::CraneExpected<void> AccountManager::ModifyQos(
   // Mongodb
   Qos qos;
   g_db_client->SelectQos("name", name, &qos);
+
   *m_qos_map_[name] = std::move(qos);
 
   return {};
@@ -969,15 +994,15 @@ std::expected<void, std::string> AccountManager::CheckAndApplyQosLimitOnTask(
   } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task)
     return std::unexpected("time-limit reached the user's limit.");
 
-  if (static_cast<double>(task->cpus_per_task) >
-      qos_share_ptr->max_cpus_per_user)
-    return std::unexpected("cpus-per-task reached the user's limit.");
+  if (!g_account_meta_container->CheckAndMallocQosResourceFromUser(
+          user_share_ptr->name, *task, *qos_share_ptr))
+    return std::unexpected(
+        "The requested QoS resources have reached the user's limit.");
 
   return {};
 }
 
-std::expected<void, std::string> AccountManager::CheckUidIsAdmin(
-    uint32_t uid) {
+std::expected<void, std::string> AccountManager::CheckUidIsAdmin(uint32_t uid) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) {
@@ -1767,6 +1792,8 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser_(
     m_account_map_[coordinatorAccount]->coordinators.remove(name);
   }
 
+  g_account_meta_container->DeleteUserResource(name);
+
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
   return {};
@@ -1915,6 +1942,24 @@ AccountManager::CraneExpected<void> AccountManager::SetUserAdminLevel_(
   }
 
   m_user_map_[name]->admin_level = new_level;
+
+  return {};
+}
+
+AccountManager::CraneExpected<void> AccountManager::SetUserDefaultAccount_(
+    const std::string& user, const std::string& def_account) {
+  // Update to database
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
+                                     user, "default_account", def_account);
+      };
+
+  if (!g_db_client->CommitTransaction(callback)) {
+    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+  }
+
+  m_user_map_[user]->default_account = def_account;
 
   return {};
 }

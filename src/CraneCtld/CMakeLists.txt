@@ -12,6 +12,8 @@ add_executable(cranectld
         CranedMetaContainer.cpp
         AccountManager.h
         AccountManager.cpp
+        AccountMetaContainer.h
+        AccountMetaContainer.cpp
         EmbeddedDbClient.cpp
         EmbeddedDbClient.h
         CraneCtld.cpp
@@ -37,6 +39,8 @@ target_link_libraries(cranectld PRIVATE
         absl::btree
         absl::synchronization
         absl::flat_hash_map
+
+        phmap
 
         crane_proto_lib
 

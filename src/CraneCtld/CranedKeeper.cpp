@@ -293,6 +293,7 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
     mutable_task->set_cpus_per_task(static_cast<double>(task->cpus_per_task));
 
     mutable_task->set_uid(task->uid);
+    mutable_task->set_gid(task->gid);
     mutable_task->mutable_env()->insert(task->env.begin(), task->env.end());
 
     mutable_task->set_cwd(task->cwd);
@@ -320,6 +321,14 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
       mutable_meta->set_term_env(meta_in_ctld.term_env);
       mutable_meta->set_interactive_type(meta_in_ctld.interactive_type);
       mutable_meta->set_pty(meta_in_ctld.pty);
+
+      mutable_meta->set_x11(meta_in_ctld.x11);
+      if (meta_in_ctld.x11) {
+        auto *x11_meta = mutable_meta->mutable_x11_meta();
+        x11_meta->set_cookie(meta_in_ctld.x11_meta.cookie);
+        x11_meta->set_target(meta_in_ctld.x11_meta.target);
+        x11_meta->set_port(meta_in_ctld.x11_meta.port);
+      }
     }
   }
 

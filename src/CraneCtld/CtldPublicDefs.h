@@ -225,7 +225,17 @@ struct InteractiveMetaInTask {
 
   std::string sh_script;
   std::string term_env;
+
   bool pty;
+  bool x11;
+
+  struct X11Meta {
+    std::string cookie;
+    std::string target;
+    uint32_t port;
+  };
+  X11Meta x11_meta;
+
   std::function<void(task_id_t, std::string const&,
                      std::list<std::string> const&)>
       cb_task_res_allocated;
@@ -279,6 +289,7 @@ struct TaskInCtld {
   crane::grpc::TaskType type;
 
   uid_t uid;
+  gid_t gid;
   std::string account;
   std::string name;
   std::string qos;
@@ -308,7 +319,6 @@ struct TaskInCtld {
    * ------------------------------- */
   task_id_t task_id{0};
   task_db_id_t task_db_id{0};
-  gid_t gid;
   std::string username;
 
   /* ----------- [3] ----------------
@@ -386,12 +396,6 @@ struct TaskInCtld {
   }
   task_id_t TaskDbId() const { return task_db_id; }
 
-  void SetGid(gid_t id) {
-    gid = id;
-    runtime_attr.set_gid(id);
-  }
-  uid_t Gid() const { return gid; }
-
   void SetUsername(std::string const& val) {
     username = val;
     runtime_attr.set_username(val);
@@ -448,10 +452,10 @@ struct TaskInCtld {
   int64_t StartTimeInUnixSecond() const { return ToUnixSeconds(start_time); }
 
   void SetEndTime(absl::Time const& val) {
-    end_time = val;
-    runtime_attr.mutable_end_time()->set_seconds(ToUnixSeconds(end_time));
+    SetEndTimeByUnixSecond(ToUnixSeconds(val));
   }
   void SetEndTimeByUnixSecond(uint64_t val) {
+    if (val > kTaskMaxTimeStampSec) val = kTaskMaxTimeStampSec;
     end_time = absl::FromUnixSeconds(val);
     runtime_attr.mutable_end_time()->set_seconds(val);
   }
@@ -493,15 +497,21 @@ struct TaskInCtld {
           .error_file_pattern = val.batch_meta().error_file_pattern(),
       });
     } else {
-      auto& InteractiveMeta = std::get<InteractiveMetaInTask>(meta);
-      InteractiveMeta.cfored_name = val.interactive_meta().cfored_name();
-      InteractiveMeta.sh_script = val.interactive_meta().sh_script();
-      InteractiveMeta.interactive_type =
-          val.interactive_meta().interactive_type();
-      if (InteractiveMeta.interactive_type ==
-          crane::grpc::InteractiveTaskType::Crun) {
-        InteractiveMeta.term_env = val.interactive_meta().term_env();
-        InteractiveMeta.pty = val.interactive_meta().pty();
+      auto& int_meta = std::get<InteractiveMetaInTask>(meta);
+      int_meta.cfored_name = val.interactive_meta().cfored_name();
+      int_meta.sh_script = val.interactive_meta().sh_script();
+
+      int_meta.interactive_type = val.interactive_meta().interactive_type();
+      if (int_meta.interactive_type == crane::grpc::InteractiveTaskType::Crun) {
+        int_meta.term_env = val.interactive_meta().term_env();
+        int_meta.pty = val.interactive_meta().pty();
+
+        int_meta.x11 = val.interactive_meta().x11();
+        if (int_meta.x11) {
+          int_meta.x11_meta.cookie = val.interactive_meta().x11_meta().cookie();
+          int_meta.x11_meta.target = val.interactive_meta().x11_meta().target();
+          int_meta.x11_meta.port = val.interactive_meta().x11_meta().port();
+        }
       }
     }
 
@@ -511,6 +521,11 @@ struct TaskInCtld {
 
     uid = val.uid();
     password_entry = std::make_unique<PasswordEntry>(uid);
+
+    // Note: gid is egid, which may be different from the
+    // primary group of the user in `password_entry`.
+    gid = val.gid();
+
     account = val.account();
     name = val.name();
     qos = val.qos();
@@ -531,7 +546,6 @@ struct TaskInCtld {
 
     task_id = runtime_attr.task_id();
     task_db_id = runtime_attr.task_db_id();
-    gid = runtime_attr.gid();
     username = runtime_attr.username();
 
     nodes_alloc = craned_ids.size();
@@ -710,6 +724,11 @@ inline bool CheckIfTimeLimitIsValid(absl::Duration d) {
   int64_t sec = ToInt64Seconds(d);
   return CheckIfTimeLimitSecIsValid(sec);
 }
+
+struct QosResource {
+  ResourceView resource;
+  uint32_t jobs_per_user;
+};
 
 }  // namespace Ctld
 

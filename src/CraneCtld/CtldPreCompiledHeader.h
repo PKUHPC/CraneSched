@@ -27,6 +27,7 @@
 #include <concepts>
 #include <condition_variable>
 #include <csignal>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <fstream>
@@ -65,6 +66,9 @@
 #include <absl/synchronization/blocking_counter.h>
 #include <absl/synchronization/mutex.h>
 #include <absl/time/time.h>  // NOLINT(modernize-deprecated-headers)
+
+// parallel-hashmap
+#include <parallel_hashmap/phmap.h>
 
 // Thread pool
 #include <BS_thread_pool.hpp>
