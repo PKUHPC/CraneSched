@@ -161,9 +161,7 @@ void ParseConfig(int argc, char** argv) {
         g_config.ListenConf.CranedListenPort =
             config["CranedListenPort"].as<std::string>();
       else
-        g_config.ListenConf.CranedListenPort = kCtldDefaultPort;
-
-      g_config.ListenConf.CranedListenPort = kCranedDefaultPort;
+        g_config.ListenConf.CranedListenPort = kCranedDefaultPort;
 
       g_config.ListenConf.UnixSocketListenAddr =
           fmt::format("unix://{}", g_config.CranedUnixSockPath);

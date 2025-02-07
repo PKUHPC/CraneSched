@@ -119,7 +119,8 @@ struct BatchMetaInTaskInstance : MetaInTaskInstance {
 };
 
 struct CrunMetaInTaskInstance : MetaInTaskInstance {
-  int msg_fd;
+  int task_input_fd;
+  int task_output_fd;
   ~CrunMetaInTaskInstance() override = default;
 };
 
@@ -140,7 +141,11 @@ struct TaskInstance {
     }
 
     if (this->IsCrun()) {
-      close(dynamic_cast<CrunMetaInTaskInstance*>(meta.get())->msg_fd);
+      auto* ia_meta = dynamic_cast<CrunMetaInTaskInstance*>(meta.get());
+      close(ia_meta->task_input_fd);
+      // For crun pty job, avoid close same fd twice
+      if (ia_meta->task_output_fd != ia_meta->task_input_fd)
+        close(ia_meta->task_output_fd);
     }
   }
 

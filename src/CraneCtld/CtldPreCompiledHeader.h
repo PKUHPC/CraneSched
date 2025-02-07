@@ -27,6 +27,7 @@
 #include <concepts>
 #include <condition_variable>
 #include <csignal>
+#include <cstdint>
 #include <expected>
 #include <filesystem>
 #include <fstream>
