@@ -722,15 +722,17 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
   CRANE_TRACE("Creating a channel to {} {}:{}. Channel count: {}", craned_id,
-              ip_addr, kCranedDefaultPort, m_channel_count_.fetch_add(1) + 1);
+              ip_addr, g_config.CranedListenConf.CranedListenPort,
+              m_channel_count_.fetch_add(1) + 1);
 
   if (g_config.ListenConf.UseTls) {
     SetTlsHostnameOverride(&channel_args, craned_id, g_config.ListenConf.Certs);
     craned->m_channel_ = CreateTcpTlsCustomChannelByIp(
-        ip_addr, kCranedDefaultPort, g_config.ListenConf.Certs, channel_args);
+        ip_addr, g_config.CranedListenConf.CranedListenPort,
+        g_config.ListenConf.Certs, channel_args);
   } else
     craned->m_channel_ = CreateTcpInsecureCustomChannel(
-        ip_addr, kCranedDefaultPort, channel_args);
+        ip_addr, g_config.CranedListenConf.CranedListenPort, channel_args);
 
   craned->m_prev_channel_state_ = craned->m_channel_->GetState(true);
   craned->m_stub_ = crane::grpc::Craned::NewStub(craned->m_channel_);

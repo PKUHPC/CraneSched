@@ -204,6 +204,12 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldForeground = config["CraneCtldForeground"].as<bool>();
       }
 
+      if (config["CranedListenPort"])
+        g_config.CranedListenConf.CranedListenPort =
+            config["CranedListenPort"].as<std::string>();
+      else
+        g_config.CranedListenConf.CranedListenPort = kCranedDefaultPort;
+
       g_config.PriorityConfig.MaxAge = kPriorityDefaultMaxAge;
       if (config["PriorityMaxAge"]) {
         std::string max_age = config["PriorityMaxAge"].as<std::string>();
