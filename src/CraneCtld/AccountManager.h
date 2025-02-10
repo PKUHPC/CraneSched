@@ -100,7 +100,8 @@ class AccountManager {
 
   CraneExpected<void> SetUserAllowedPartition(
       uint32_t uid, const std::string& username, const std::string& account,
-      const std::vector<std::string>& partition_list);
+      const std::vector<std::string>& partition_list,
+      std::string* err_partition);
 
   CraneExpected<void> AddUserAllowedQos(uint32_t uid,
                                         const std::string& username,
@@ -111,7 +112,7 @@ class AccountManager {
   CraneExpected<void> SetUserAllowedQos(
       uint32_t uid, const std::string& username, const std::string& partition,
       const std::string& account, const std::vector<std::string>& qos_list,
-      bool force);
+      bool force, std::string* err_qos);
 
   CraneExpected<void> DeleteUserAllowedPartition(uint32_t uid,
                                                  const std::string& name,
@@ -128,11 +129,13 @@ class AccountManager {
 
   CraneExpected<void> SetAccountAllowedPartition(
       uint32_t uid, const std::string& account_name,
-      const std::vector<std::string>& partition_list, bool force);
+      const std::vector<std::string>& partition_list, bool force,
+      std::string* err_partition);
 
   CraneExpected<void> SetAccountAllowedQos(
       uint32_t uid, const std::string& account_name,
-      const std::vector<std::string>& qos_list, bool force);
+      const std::vector<std::string>& qos_list, bool force,
+      std::string* err_qos);
 
   CraneExpected<void> ModifyQos(uint32_t uid, const std::string& name,
                                 crane::grpc::ModifyField modify_field,
@@ -186,13 +189,15 @@ class AccountManager {
   CraneExpected<void> CheckAddUserAllowedPartitionNoLock_(
       const User* user, const Account* account, const std::string& partition);
   CraneExpected<void> CheckSetUserAllowedPartitionNoLock_(
-      const Account* account, const std::vector<std::string>& partition_list);
+      const Account* account, const std::vector<std::string>& partition_list,
+      std::string* err_partition);
   CraneExpected<void> CheckAddUserAllowedQosNoLock_(
       const User* user, const Account* account, const std::string& partition,
       const std::string& qos_str);
   CraneExpected<void> CheckSetUserAllowedQosNoLock_(
       const User* user, const Account* account, const std::string& partition,
-      const std::vector<std::string>& qos_list, bool force);
+      const std::vector<std::string>& qos_list, bool force,
+      std::string* err_qos);
   CraneExpected<void> CheckSetUserDefaultQosNoLock_(
       const User& user, const std::string& account,
       const std::string& partition, const std::string& qos);
@@ -214,10 +219,10 @@ class AccountManager {
   CraneExpected<void> CheckSetAccountDescriptionNoLock_(const Account* account);
   CraneExpected<void> CheckSetAccountAllowedPartitionNoLock_(
       const Account* account, const std::vector<std::string>& partition_list,
-      bool force);
+      bool force, std::string* err_partition);
   CraneExpected<void> CheckSetAccountAllowedQosNoLock_(
       const Account* account, const std::vector<std::string>& qos_list,
-      bool force);
+      bool force, std::string* err_qos);
   CraneExpected<void> CheckSetAccountDefaultQosNoLock_(const Account* account,
                                                        const std::string& qos);
   CraneExpected<void> CheckDeleteAccountAllowedPartitionNoLock_(
