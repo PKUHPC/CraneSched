@@ -1204,7 +1204,7 @@ CraneExpected<task_id_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
   std::future<CraneExpected<task_id_t>> task_id_opt_future =
       elem.task_id_prom.get_future();
   m_query_task_id_from_pid_queue_.enqueue(std::move(elem));
-  m_query_task_environment_variables_async_handle_->send();
+  m_query_task_id_from_pid_async_handle_->send();
   return task_id_opt_future.get();
 }
 
