@@ -354,12 +354,12 @@ CraneExpected<void> AccountManager::QueryUserInfo(
     for (const auto& user_name : user_list) {
       const User* user = GetExistedUserInfoNoLock_(user_name);
       result = CheckIfUserHasPermOnUserNoLock_(*op_user, user, true);
-      if (!result) return result;
+      if (!result) continue;
       res_user_map->try_emplace(user->uid, *user);
     }
   }
 
-  return result;
+  return {};
 }
 
 CraneExpected<void> AccountManager::QueryAccountInfo(
@@ -373,15 +373,7 @@ CraneExpected<void> AccountManager::QueryAccountInfo(
     util::read_lock_guard account_guard(m_rw_account_mutex_);
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result) return std::unexpected(user_result.error());
-    const User* op_user = user_result.value();
-    if (!account_list.empty()) {
-      for (const auto& account_name : account_list) {
-        result =
-            CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, true);
-        if (!result) return result;
-      }
-    }
-    res_user = *op_user;
+    res_user = *user_result.value();
   }
 
   util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -423,12 +415,13 @@ CraneExpected<void> AccountManager::QueryAccountInfo(
   } else {
     for (const auto& account_name : account_list) {
       const Account* account = GetAccountInfoNoLock_(account_name);
-      if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+      result = CheckIfUserHasPermOnAccountNoLock_(res_user, account_name, true);
+      if (!result) continue;
       res_account_map->try_emplace(account_name, *account);
     }
   }
 
-  return result;
+  return {};
 }
 
 CraneExpected<void> AccountManager::QueryQosInfo(
@@ -465,7 +458,7 @@ CraneExpected<void> AccountManager::QueryQosInfo(
   } else {
     for (const auto& qos_name : qos_list) {
       const Qos* qos = GetExistedQosInfoNoLock_(qos_name);
-      if (!qos) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+      if (!qos) continue;
 
       if (res_user.admin_level < User::Operator) {
         bool found = false;
@@ -477,13 +470,13 @@ CraneExpected<void> AccountManager::QueryQosInfo(
             }
           }
         }
-        if (!found) return std::unexpected(CraneErrCode::ERR_QOS_MISSING);
+        if (!found) continue;
       }
       res_qos_map->try_emplace(qos_name, *qos);
     }
   }
 
-  return result;
+  return {};
 }
 
 CraneExpected<void> AccountManager::ModifyAdminLevel(uint32_t uid,
