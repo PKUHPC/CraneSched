@@ -405,11 +405,13 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
       for (const auto &partition_name : request->value_list()) {
         partition_list.emplace_back(partition_name);
       }
+      std::string err_partition;
       auto modify_res = g_account_manager->SetAccountAllowedPartition(
-          request->uid(), request->name(), partition_list, request->force());
+          request->uid(), request->name(), partition_list, request->force(),
+          &err_partition);
       if (!modify_res) {
         auto *new_err_record = response->mutable_err_recode_list()->Add();
-        new_err_record->set_err_value("SetAccountAllowedPartition");
+        new_err_record->set_err_value(err_partition);
         new_err_record->set_err_code(modify_res.error());
       }
     } else if (request->modify_field() == crane::grpc::ModifyField::Qos) {
@@ -417,24 +419,26 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
       for (const auto &qos_name : request->value_list()) {
         qos_list.emplace_back(qos_name);
       }
+      std::string err_qos;
       auto modify_res = g_account_manager->SetAccountAllowedQos(
-          request->uid(), request->name(), qos_list, request->force());
+          request->uid(), request->name(), qos_list, request->force(),
+          &err_qos);
       if (!modify_res) {
         auto *new_err_record = response->mutable_err_recode_list()->Add();
-        new_err_record->set_err_value("SetAccountAllowedQos");
+        new_err_record->set_err_value(err_qos);
         new_err_record->set_err_code(modify_res.error());
       }
     }
-  }
-
-  for (const auto &value : request->value_list()) {
-    auto modify_res = g_account_manager->ModifyAccount(
-        request->type(), request->uid(), request->name(),
-        request->modify_field(), value, request->force());
-    if (!modify_res) {
-      auto *new_err_record = response->mutable_err_recode_list()->Add();
-      new_err_record->set_err_value(value);
-      new_err_record->set_err_code(modify_res.error());
+  } else {
+    for (const auto &value : request->value_list()) {
+      auto modify_res = g_account_manager->ModifyAccount(
+          request->type(), request->uid(), request->name(),
+          request->modify_field(), value, request->force());
+      if (!modify_res) {
+        auto *new_err_record = response->mutable_err_recode_list()->Add();
+        new_err_record->set_err_value(value);
+        new_err_record->set_err_code(modify_res.error());
+      }
     }
   }
 
@@ -442,8 +446,6 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    // Compatible with previous test cases.
-    response->set_reason(response->err_recode_list(0).err_code());
   }
 
   return grpc::Status::OK;
@@ -511,12 +513,13 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
         for (const auto &partition_name : request->value_list()) {
           partition_list.emplace_back(partition_name);
         }
+        std::string err_partition;
         modify_res = g_account_manager->SetUserAllowedPartition(
-            request->uid(), request->name(), request->account(),
-            partition_list);
+            request->uid(), request->name(), request->account(), partition_list,
+            &err_partition);
         if (!modify_res) {
           auto *new_err_record = response->mutable_err_recode_list()->Add();
-          new_err_record->set_err_value("");
+          new_err_record->set_err_value(err_partition);
           new_err_record->set_err_code(modify_res.error());
         }
       }
@@ -538,12 +541,13 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
         for (const auto &qos_name : request->value_list()) {
           qos_list.emplace_back(qos_name);
         }
+        std::string err_qos;
         modify_res = g_account_manager->SetUserAllowedQos(
             request->uid(), request->name(), request->partition(),
-            request->account(), qos_list, request->force());
+            request->account(), qos_list, request->force(), &err_qos);
         if (!modify_res) {
           auto *new_err_record = response->mutable_err_recode_list()->Add();
-          new_err_record->set_err_value("");
+          new_err_record->set_err_value(err_qos);
           new_err_record->set_err_code(modify_res.error());
         }
       }
@@ -576,8 +580,6 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    // Compatible with previous test cases.
-    response->set_reason(response->err_recode_list(0).err_code());
   }
   return grpc::Status::OK;
 }
@@ -768,8 +770,6 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    // Compatible with previous test cases.
-    response->set_reason(response->err_recode_list(0).err_code());
   }
   return grpc::Status::OK;
 }
@@ -791,8 +791,6 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    // Compatible with previous test cases.
-    response->set_reason(response->err_recode_list(0).err_code());
   }
 
   return grpc::Status::OK;
@@ -814,8 +812,6 @@ grpc::Status CraneCtldServiceImpl::DeleteQos(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    // Compatible with previous test cases.
-    response->set_reason(response->err_recode_list(0).err_code());
   }
 
   return grpc::Status::OK;
@@ -883,8 +879,6 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    // Compatible with previous test cases.
-    response->set_reason(response->err_recode_list(0).err_code());
   }
 
   return grpc::Status::OK;
