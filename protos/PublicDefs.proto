@@ -402,7 +402,8 @@ enum ErrCode {
   ERR_PROTOBUF = 62;
   ERR_LIB_EVENT = 63;
   ERR_NO_AVAIL_NODE = 64;
-  ERR_CODE_COUNT  = 65;
+  ERR_MAX_JOB_COUNT_PER_USER = 65;
+  ERR_CODE_COUNT  = 66;
 }
 
 enum EntityType {
