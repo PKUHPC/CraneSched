@@ -89,7 +89,7 @@ inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
 inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* kDefaultCranedLogPath = "craned/craned.log";
 
-inline const char* kDefaultSupervisorPath = "/usr/bin/cranesupervisor";
+inline const char* kSupervisorPath = "/usr/libexec/csupervisor";
 inline const char* kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";

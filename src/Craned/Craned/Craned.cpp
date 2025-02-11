@@ -225,11 +225,6 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.CraneCtldListenPort = kCtldDefaultPort;
 
-      if (config["SupervisorPath"]) {
-        g_config.SupervisorPath = config["SupervisorPath"].as<std::string>();
-      } else
-        g_config.SupervisorPath = kDefaultSupervisorPath;
-
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {

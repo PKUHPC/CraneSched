@@ -511,7 +511,8 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     // keep waiting for the input from stdin or other fds and will never end.
     util::os::CloseFdFrom(3);
 
-    // Set job level resource env
+    // Todo: pass env by grpc
+    //  Set job level resource env
     EnvMap res_env_map =
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node);
 
@@ -528,12 +529,11 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     std::vector<const char*> argv;
 
     // Argv[0] is the program name which can be anything.
-    argv.emplace_back("Supervisor");
+    argv.emplace_back("csupervisor");
 
     argv.push_back(nullptr);
 
-    execv(g_config.SupervisorPath.c_str(),
-          const_cast<char* const*>(argv.data()));
+    execv(kSupervisorPath, const_cast<char* const*>(argv.data()));
 
     // Error occurred since execv returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.

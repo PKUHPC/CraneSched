@@ -155,6 +155,7 @@ TaskManager::TaskManager() : m_supervisor_exit_(false) {
 TaskManager::~TaskManager() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
+
 void TaskManager::Wait() {
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }

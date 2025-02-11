@@ -1,4 +1,4 @@
-add_executable(supervisor
+add_executable(csupervisor
         CranedClient.cpp
         CranedClient.h
         CforedClient.cpp
@@ -12,9 +12,9 @@ add_executable(supervisor
         TaskManager.h
 )
 
-target_precompile_headers(supervisor PRIVATE SupervisorPreCompiledHeader.h)
+target_precompile_headers(csupervisor PRIVATE SupervisorPreCompiledHeader.h)
 
-target_link_libraries(supervisor
+target_link_libraries(csupervisor
         $<$<BOOL:${CRANE_USE_MIMALLOC}>:dev_mimalloc>
 
         Utility_PublicHeader
@@ -41,5 +41,5 @@ target_link_libraries(supervisor
 
 # Linker flag for c++ 17 filesystem library
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_link_libraries(supervisor stdc++fs)
+    target_link_libraries(csupervisor stdc++fs)
 endif ()
