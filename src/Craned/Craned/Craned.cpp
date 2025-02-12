@@ -516,7 +516,7 @@ void ParseConfig(int argc, char** argv) {
 
   CRANE_INFO("Found this machine {} in Nodes", g_config.Hostname);
   // get this node device info
-  // Todo: Auto detect device
+  // TODO: Auto detect device
   {
     auto node_res = g_config.CranedRes.at(g_config.Hostname);
     auto& devices = each_node_device[g_config.Hostname];
@@ -659,11 +659,11 @@ void GlobalVariableInit() {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
   }
-  std::unordered_map<task_id_t, Craned::JobStatusSpce> job_status_map;
+  std::unordered_map<task_id_t, Craned::JobStatusSpec> job_status_map;
   for (const auto& job_id : running_job_ids) {
     job_status_map.emplace(
         job_id,
-        Craned::JobStatusSpce{.job_spec = job_spec_map[job_id],
+        Craned::JobStatusSpec{.job_spec = job_spec_map[job_id],
                               // Now each job have only one task
                               .task_spec = job_task_map[job_id].tasks(0),
                               .task_pid = job_id_pid_map[job_id]});

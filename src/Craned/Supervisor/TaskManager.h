@@ -214,7 +214,7 @@ class TaskManager {
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
 
-  // Todo: support multiple task
+  // TODO: support multiple task
   std::unique_ptr<TaskInstance> m_task_;
 };
 

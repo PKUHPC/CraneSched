@@ -90,7 +90,7 @@ struct BasicDevice {
 
   operator std::string() const;
 
-  // Todo: Add virtual function to get device status
+  // TODO: Add virtual function to get device status
 };
 
 class DeviceManager {

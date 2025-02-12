@@ -37,7 +37,7 @@ EnvMap JobSpec::GetJobEnvMap() const {
   auto env_map = CgroupManager::GetResourceEnvMapByResInNode(
       this->cgroup_spec.res_in_node);
 
-  // todo: Move all job level env to here.
+  // TODO: Move all job level env to here.
   env_map.emplace("CRANE_JOB_ID", std::to_string(this->cgroup_spec.job_id));
   return env_map;
 };
@@ -134,7 +134,7 @@ JobManager::JobManager() {
 }
 
 CraneErr JobManager::Init(
-    std::unordered_map<task_id_t, JobStatusSpce>&& job_status_map) {
+    std::unordered_map<task_id_t, JobStatusSpec>&& job_status_map) {
   for (auto& [job_id, task_status] : job_status_map) {
     CRANE_TRACE("[Job #{}] Recover from supervisor.", job_id);
     task_status.job_spec.cgroup_spec.recovered = true;
@@ -243,7 +243,7 @@ void JobManager::Wait() {
 }
 
 CraneErr JobManager::KillPid_(pid_t pid, int signum) {
-  // Todo: Add timer which sends SIGTERM for those tasks who
+  // TODO: Add timer which sends SIGTERM for those tasks who
   //  will not quit when receiving SIGINT.
   CRANE_TRACE("Killing pid {} with signal {}", pid, signum);
 
@@ -511,7 +511,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     // keep waiting for the input from stdin or other fds and will never end.
     util::os::CloseFdFrom(3);
 
-    // Todo: pass env by grpc
+    // TODO: pass env by grpc
     //  Set job level resource env
     EnvMap res_env_map =
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node);
@@ -539,7 +539,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     // Ctld use SIGABRT to inform the client of this failure.
     fmt::print(stderr, "[Craned Subprocess Error] Failed to execv. Error: {}\n",
                strerror(errno));
-    // Todo: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
+    // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
     //  exit codes
     abort();
   }
@@ -861,7 +861,7 @@ void JobManager::EvCleanCheckTaskStatusQueueCb_() {
   while (m_check_task_status_queue_.try_dequeue(elem)) {
     task_id_t task_id = elem.task_id;
     auto job_instance = m_job_map_.GetValueExclusivePtr(task_id);
-    // todo: use process id
+    // TODO: use process id
     if (job_instance && job_instance->get()->processes.contains(task_id)) {
       // Found in task map. The task must be running.
       elem.status_prom.set_value({true, crane::grpc::TaskStatus::Running});

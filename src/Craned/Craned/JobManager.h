@@ -32,7 +32,7 @@ namespace Craned {
 using TaskSpec = crane::grpc::TaskToD;
 
 struct TaskExecutionInstance {
-  // todo: Replace this with task execution info.
+  // TODO: Replace this with task execution info.
   TaskSpec task_spec;
   task_id_t job_id;
   pid_t pid;
@@ -41,13 +41,14 @@ struct TaskExecutionInstance {
 struct JobSpec {
   JobSpec() = default;
   JobSpec(const crane::grpc::JobSpec& spec) : cgroup_spec(spec) {}
-  JobSpec(const JobSpec& spce) = default;
-  JobSpec(JobSpec& spce) = default;
+  JobSpec(const JobSpec& spec) = default;
+  JobSpec(JobSpec& spec) = default;
+
   CgroupSpec cgroup_spec;
   EnvMap GetJobEnvMap() const;
 };
 
-struct JobStatusSpce {
+struct JobStatusSpec {
   JobSpec job_spec;
   TaskSpec task_spec;
   pid_t task_pid;
@@ -82,7 +83,7 @@ class JobManager {
  public:
   JobManager();
 
-  CraneErr Init(std::unordered_map<task_id_t, JobStatusSpce>&& job_status_map);
+  CraneErr Init(std::unordered_map<task_id_t, JobStatusSpec>&& job_status_map);
 
   ~JobManager();
 

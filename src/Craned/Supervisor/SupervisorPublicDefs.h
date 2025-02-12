@@ -57,7 +57,7 @@ struct Config {
   // Only for debugging
   std::string SupervisorLogFile;
 
-  // todo: remove this
+  // TODO: remove this
   CranedId CranedIdOfThisNode;
 
   std::string SupervisorUnixSockPath;

@@ -641,7 +641,7 @@ void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
 
   // InitializingCraned: BEGIN -> IDLE
 
-  /* Todo: Adjust the value here.
+  /* TODO: Adjust the value here.
    * In default case, TRANSIENT_FAILURE -> TRANSIENT_FAILURE will use the
    * connection-backoff algorithm. We might need to adjust these values.
    * https://grpc.github.io/grpc/cpp/md_doc_connection-backoff.html

@@ -2046,7 +2046,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     auto craned_index = task_num_node_id_it->second;
     if (!partition_meta_ptr.GetExclusivePtr()->craned_ids.contains(
             craned_index)) {
-      // Todo: Performance issue! We can use cached available node set
+      // TODO: Performance issue! We can use cached available node set
       //  for the task when checking task validity in TaskScheduler.
       ++task_num_node_id_it;
       continue;
