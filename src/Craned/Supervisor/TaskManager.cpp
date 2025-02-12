@@ -137,7 +137,7 @@ TaskManager::TaskManager() : m_supervisor_exit_(false) {
     util::SetCurrentThreadName("TaskMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
     idle_handle->on<uvw::idle_event>(
-        [&g_server, this](const uvw::idle_event&, uvw::idle_handle& h) {
+        [this](const uvw::idle_event&, uvw::idle_handle& h) {
           if (m_supervisor_exit_) {
             h.parent().walk([](auto&& h) { h.close(); });
             h.parent().stop();

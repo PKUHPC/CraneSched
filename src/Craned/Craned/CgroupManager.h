@@ -474,7 +474,9 @@ class DedicatedResourceAllocator {
 
 class CgroupManager {
  public:
+#ifdef CRANE_ENABLE_BPF
   ~CgroupManager();
+#endif
   /**
    * @brief Initialize libcgroup and mount the controllers, remove task not
    * considered to be running;
