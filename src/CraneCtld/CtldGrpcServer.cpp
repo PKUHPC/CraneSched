@@ -248,6 +248,40 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::ModifyPartitionAllowedOrDeniedAccounts(
+    grpc::ServerContext *context,
+    const crane::grpc::ModifyPartitionAllowedOrDeniedAccountsRequest *request,
+    crane::grpc::ModifyPartitionAllowedOrDeniedAccountsReply *response) {
+  CraneErrCodeExpected<void> result;
+
+  std::unordered_set<std::string> accounts;
+
+  for (const auto &account_name : request->accounts()) {
+    accounts.insert(account_name);
+  }
+
+  result = g_account_manager->CheckModifyPartitionAllowedOrDeniedAccounts(
+      request->uid(), request->partition_name(), accounts);
+
+  if (!result) {
+    response->set_ok(false);
+    response->set_err_code(result.error());
+    return grpc::Status::OK;
+  }
+
+  result = g_meta_container->ModifyPartitionAllowedOrDeniedAccounts(
+        request->partition_name(), request->is_modify_allowed(), accounts);
+
+  if (!result) {
+    response->set_ok(false);
+    response->set_err_code(result.error());
+  } else {
+    response->set_ok(true);
+  }
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryTasksInfoRequest *request,
@@ -379,7 +413,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   int64_t sec = qos_info->max_time_limit_per_task();
   if (!CheckIfTimeLimitSecIsValid(sec)) {
     response->set_ok(false);
-    response->set_reason(AccountManager::CraneErrCode::ERR_TIME_LIMIT);
+    response->set_reason(CraneErrCode::ERR_TIME_LIMIT);
     return grpc::Status::OK;
   }
   qos.max_time_limit_per_task = absl::Seconds(sec);
@@ -983,6 +1017,11 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (!enable_res) {
     return std::unexpected(enable_res.error());
   }
+
+  auto result = g_meta_container->CheckIfAccountIsAllowedInPartition(task->partition_id,
+                                                            task->account);
+  if (!result)
+    return std::unexpected(result.error());
 
   err = g_task_scheduler->AcquireTaskAttributes(task.get());
 

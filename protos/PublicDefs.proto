@@ -295,6 +295,9 @@ message PartitionInfo {
   ResourceView res_total = 6;
   ResourceView res_avail = 7;
   ResourceView res_alloc = 8;
+
+  repeated string allowed_accounts = 9;
+  repeated string denied_accounts = 10;
 }
 
 message CranedInfo {
