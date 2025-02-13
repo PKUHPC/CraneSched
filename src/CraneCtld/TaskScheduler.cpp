@@ -677,6 +677,7 @@ void TaskScheduler::ScheduleThread_() {
 
         task->SetStatus(crane::grpc::TaskStatus::Running);
         task->SetCranedIds(std::move(it.second));
+        task->SetPriority(task->cached_priority);
         task->nodes_alloc = task->CranedIds().size();
 
         // CRANE_DEBUG(
