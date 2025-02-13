@@ -13,8 +13,8 @@ CraneBaseDir: /var/crane/
 # Tls settings
 UseTls: true
 SSL:
-  CranectldInternalCertFilePath: /etc/crane/tls/cranectld.pem
-  CranectldInternalKeyFilePath: /etc/crane/tls/cranectld.key
+  CranectldInternalCertFilePath: /etc/crane/tls/internal.pem
+  CranectldInternalKeyFilePath: /etc/crane/tls/internal.key
   CranedCertFilePath: /etc/crane/tls/craned.pem
   CranedKeyFilePath: /etc/crane/tls/craned.key
   CforedCertFilePath: /etc/crane/tls/cfored.pem
@@ -40,7 +40,7 @@ CraneCtldListenAddr: 0.0.0.0
 CraneCtldListenPort: 10011
 CraneCtldForCranedListenPort: 10013
 CraneCtldForCforedListenPort: 10014
-CraneCtldForSignListenPort: 10015
+CraneCtldPlainListenPort: 10015
 # debug level of cranectld
 CraneCtldDebugLevel: trace
 # file path of cranectld log file (relative to CraneBaseDir)

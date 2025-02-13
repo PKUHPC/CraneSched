@@ -16,7 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "CtldGrpcServer.h"
+#include "CtldSecureServer.h"
 
 #include "../AccountManager.h"
 #include "../CranedMetaContainer.h"
@@ -25,14 +25,14 @@
 #include "CranedKeeper.h"
 #include "CtldForCforedServer.h"
 #include "CtldForCranedServer.h"
-#include "SignServer.h"
+#include "CtldPlainServer.h"
 #include "crane/GrpcHelper.h"
 #include "crane/String.h"
 #include "crane/VaultClient.h"
 
 namespace Ctld {
 
-grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
+grpc::Status CraneCtldSecureServiceImpl::SubmitBatchTask(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTaskRequest *request,
     crane::grpc::SubmitBatchTaskReply *response) {
@@ -71,7 +71,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
+grpc::Status CraneCtldSecureServiceImpl::SubmitBatchTasks(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTasksRequest *request,
     crane::grpc::SubmitBatchTasksReply *response) {
@@ -112,7 +112,7 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::CancelTask(
+grpc::Status CraneCtldSecureServiceImpl::CancelTask(
     grpc::ServerContext *context, const crane::grpc::CancelTaskRequest *request,
     crane::grpc::CancelTaskReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
@@ -137,41 +137,7 @@ grpc::Status CraneCtldServiceImpl::CancelTask(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryCranedInfo(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryCranedInfoRequest *request,
-    crane::grpc::QueryCranedInfoReply *response) {
-  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result)
-    return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-
-  if (request->craned_name().empty()) {
-    *response = g_meta_container->QueryAllCranedInfo();
-  } else {
-    *response = g_meta_container->QueryCranedInfo(request->craned_name());
-  }
-
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryPartitionInfoRequest *request,
-    crane::grpc::QueryPartitionInfoReply *response) {
-  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result)
-    return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-
-  if (request->partition_name().empty()) {
-    *response = g_meta_container->QueryAllPartitionInfo();
-  } else {
-    *response = g_meta_container->QueryPartitionInfo(request->partition_name());
-  }
-
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::ModifyTask(
+grpc::Status CraneCtldSecureServiceImpl::ModifyTask(
     grpc::ServerContext *context, const crane::grpc::ModifyTaskRequest *request,
     crane::grpc::ModifyTaskReply *response) {
   using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
@@ -268,7 +234,7 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyNode(
+grpc::Status CraneCtldSecureServiceImpl::ModifyNode(
     grpc::ServerContext *context,
     const crane::grpc::ModifyCranedStateRequest *request,
     crane::grpc::ModifyCranedStateReply *response) {
@@ -334,53 +300,41 @@ grpc::Status CraneCtldServiceImpl::ModifyPartitionAcl(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
+grpc::Status CraneCtldServiceImpl::ModifyPartitionAcl(
     grpc::ServerContext *context,
-    const crane::grpc::QueryTasksInfoRequest *request,
-    crane::grpc::QueryTasksInfoReply *response) {
-  // Query tasks in RAM
-  g_task_scheduler->QueryTasksInRam(request, response);
+    const crane::grpc::ModifyPartitionAclRequest *request,
+    crane::grpc::ModifyPartitionAclReply *response) {
+  CraneExpected<void> result;
 
-  size_t num_limit = request->num_limit() == 0 ? kDefaultQueryTaskNumLimit
-                                               : request->num_limit();
-  if (!request->filter_task_ids().empty())
-    num_limit = std::min((size_t)request->filter_task_ids_size(), num_limit);
+  std::unordered_set<std::string> accounts;
 
-  auto *task_list = response->mutable_task_info_list();
+  for (const auto &account_name : request->accounts()) {
+    accounts.insert(account_name);
+  }
 
-  auto sort_and_truncate = [](auto *task_list, size_t limit) -> void {
-    std::sort(
-        task_list->begin(), task_list->end(),
-        [](const crane::grpc::TaskInfo &a, const crane::grpc::TaskInfo &b) {
-          return (a.status() == b.status()) ? (a.priority() > b.priority())
-                                            : (a.status() < b.status());
-        });
+  result = g_account_manager->CheckModifyPartitionAcl(
+      request->uid(), request->partition(), accounts);
 
-    if (task_list->size() > limit)
-      task_list->DeleteSubrange(limit, task_list->size());
-  };
+  if (!result) {
+    response->set_ok(false);
+    response->set_code(result.error());
+    return grpc::Status::OK;
+  }
 
-  if (task_list->size() >= num_limit ||
-      !request->option_include_completed_tasks()) {
-    sort_and_truncate(task_list, num_limit);
+  result = g_meta_container->ModifyPartitionAcl(
+      request->partition(), request->is_allowed_list(), std::move(accounts));
+
+  if (!result) {
+    response->set_ok(false);
+    response->set_code(result.error());
+  } else {
     response->set_ok(true);
-    return grpc::Status::OK;
   }
 
-  // Query completed tasks in Mongodb
-  // (only for cacct, which sets `option_include_completed_tasks` to true)
-  if (!g_db_client->FetchJobRecords(request, response,
-                                    num_limit - task_list->size())) {
-    CRANE_ERROR("Failed to call g_db_client->FetchJobRecords");
-    return grpc::Status::OK;
-  }
-
-  sort_and_truncate(task_list, num_limit);
-  response->set_ok(true);
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::AddAccount(
+grpc::Status CraneCtldSecureServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
@@ -417,7 +371,7 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::AddUser(
+grpc::Status CraneCtldSecureServiceImpl::AddUser(
     grpc::ServerContext *context, const crane::grpc::AddUserRequest *request,
     crane::grpc::AddUserReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
@@ -466,7 +420,7 @@ grpc::Status CraneCtldServiceImpl::AddUser(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::AddQos(
+grpc::Status CraneCtldSecureServiceImpl::AddQos(
     grpc::ServerContext *context, const crane::grpc::AddQosRequest *request,
     crane::grpc::AddQosReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
@@ -507,7 +461,7 @@ grpc::Status CraneCtldServiceImpl::AddQos(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyAccount(
+grpc::Status CraneCtldSecureServiceImpl::ModifyAccount(
     grpc::ServerContext *context,
     const crane::grpc::ModifyAccountRequest *request,
     crane::grpc::ModifyAccountReply *response) {
@@ -575,7 +529,7 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyUser(
+grpc::Status CraneCtldSecureServiceImpl::ModifyUser(
     grpc::ServerContext *context, const crane::grpc::ModifyUserRequest *request,
     crane::grpc::ModifyUserReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
@@ -720,7 +674,7 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyQos(
+grpc::Status CraneCtldSecureServiceImpl::ModifyQos(
     grpc::ServerContext *context, const crane::grpc::ModifyQosRequest *request,
     crane::grpc::ModifyQosReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
@@ -745,7 +699,7 @@ grpc::Status CraneCtldServiceImpl::ModifyQos(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
+grpc::Status CraneCtldSecureServiceImpl::QueryAccountInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryAccountInfoRequest *request,
     crane::grpc::QueryAccountInfoReply *response) {
@@ -818,7 +772,7 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryUserInfo(
+grpc::Status CraneCtldSecureServiceImpl::QueryUserInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryUserInfoRequest *request,
     crane::grpc::QueryUserInfoReply *response) {
@@ -894,7 +848,7 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryQosInfo(
+grpc::Status CraneCtldSecureServiceImpl::QueryQosInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryQosInfoRequest *request,
     crane::grpc::QueryQosInfoReply *response) {
@@ -965,7 +919,7 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::DeleteUser(
+grpc::Status CraneCtldSecureServiceImpl::DeleteUser(
     grpc::ServerContext *context, const crane::grpc::DeleteUserRequest *request,
     crane::grpc::DeleteUserReply *response) {
   for (const auto &user_name : request->user_list()) {
@@ -987,7 +941,7 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::DeleteQos(
+grpc::Status CraneCtldSecureServiceImpl::DeleteQos(
     grpc::ServerContext *context, const crane::grpc::DeleteQosRequest *request,
     crane::grpc::DeleteQosReply *response) {
   for (const auto &qos_name : request->qos_list()) {
@@ -1008,7 +962,7 @@ grpc::Status CraneCtldServiceImpl::DeleteQos(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
+grpc::Status CraneCtldSecureServiceImpl::BlockAccountOrUser(
     grpc::ServerContext *context,
     const crane::grpc::BlockAccountOrUserRequest *request,
     crane::grpc::BlockAccountOrUserReply *response) {
@@ -1114,8 +1068,7 @@ grpc::Status CraneCtldServiceImpl::ResetUserCredential(
 
   return grpc::Status::OK;
 }
-
-grpc::Status CraneCtldServiceImpl::ResetUserCredential(
+grpc::Status CraneCtldSecureServiceImpl::ResetUserCredential(
     grpc::ServerContext *context,
     const crane::grpc::ResetUserCredentialRequest *request,
     crane::grpc::ResetUserCredentialReply *response) {
@@ -1145,20 +1098,8 @@ grpc::Status CraneCtldServiceImpl::ResetUserCredential(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryClusterInfoRequest *request,
-    crane::grpc::QueryClusterInfoReply *response) {
-  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result)
-    return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-
-  *response = g_meta_container->QueryClusterInfo(*request);
-  return grpc::Status::OK;
-}
-
 std::expected<uint32_t, bool>
-CraneCtldServiceImpl::CheckCertAllowedAndExtractUIDFromCert_(
+CraneCtldSecureServiceImpl::CheckCertAllowedAndExtractUIDFromCert_(
     const grpc::ServerContext *context) {
   auto cert = context->auth_context()->FindPropertyValues("x509_pem_cert");
   if (cert.empty()) return std::unexpected(false);
@@ -1178,8 +1119,8 @@ CraneCtldServiceImpl::CheckCertAllowedAndExtractUIDFromCert_(
   return static_cast<uint32_t>(std::stoul(cn_parts[0]));
 }
 
-CtldServer::CtldServer() : m_service_impl_(nullptr) {
-  m_service_impl_ = std::make_unique<CraneCtldServiceImpl>(this);
+CtldSecureServer::CtldSecureServer() : m_service_impl_(nullptr) {
+  m_service_impl_ = std::make_unique<CraneCtldSecureServiceImpl>(this);
 
   grpc::ServerBuilder builder;
   const auto &listen_conf = g_config.ListenConf;
@@ -1220,13 +1161,13 @@ CtldServer::CtldServer() : m_service_impl_(nullptr) {
     g_craned_keeper->Shutdown();
     g_ctld_for_cfored_server->Shutdown();
     g_ctld_for_craned_server->Shutdown();
-    g_sign_server->Shutdown();
+    g_ctld_plain_server->Shutdown();
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
   });
   sigint_waiting_thread.detach();
 
-  signal(SIGINT, &CtldServer::signal_handler_func);
+  signal(SIGINT, &CtldSecureServer::signal_handler_func);
 }
 
 }  // namespace Ctld

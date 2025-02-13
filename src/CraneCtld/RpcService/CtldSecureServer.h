@@ -30,11 +30,13 @@ using crane::grpc::Craned;
 using grpc::Channel;
 using grpc::Server;
 
-class CtldServer;
+class CtldSecureServer;
 
-class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
+class CraneCtldSecureServiceImpl final
+    : public crane::grpc::CraneCtldSecure::Service {
  public:
-  explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
+  explicit CraneCtldSecureServiceImpl(CtldSecureServer *server)
+      : m_ctld_secure_server_(server) {}
 
   grpc::Status SubmitBatchTask(
       grpc::ServerContext *context,
@@ -50,21 +52,6 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
   grpc::Status CancelTask(grpc::ServerContext *context,
                           const crane::grpc::CancelTaskRequest *request,
                           crane::grpc::CancelTaskReply *response) override;
-
-  grpc::Status QueryTasksInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryTasksInfoRequest *request,
-      crane::grpc::QueryTasksInfoReply *response) override;
-
-  grpc::Status QueryCranedInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryCranedInfoRequest *request,
-      crane::grpc::QueryCranedInfoReply *response) override;
-
-  grpc::Status QueryPartitionInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryPartitionInfoRequest *request,
-      crane::grpc::QueryPartitionInfoReply *response) override;
 
   grpc::Status ModifyTask(grpc::ServerContext *context,
                           const crane::grpc::ModifyTaskRequest *request,
@@ -142,42 +129,37 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::ResetUserCredentialRequest *request,
       crane::grpc::ResetUserCredentialReply *response) override;
 
-  grpc::Status QueryClusterInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryClusterInfoRequest *request,
-      crane::grpc::QueryClusterInfoReply *response) override;
-
  private:
   std::expected<uint32_t, bool> CheckCertAllowedAndExtractUIDFromCert_(
       const grpc::ServerContext *context);
 
-  CtldServer *m_ctld_server_;
+  CtldSecureServer *m_ctld_secure_server_;
 };
 
 /***
  * Note: There should be only ONE instance of CtldServer!!!!
  */
-class CtldServer {
+class CtldSecureServer {
  public:
   /***
    * User must make sure that this constructor is called only once!
    * @param listen_address The "[Address]:[Port]" of CraneCtld.
    */
-  explicit CtldServer();
+  explicit CtldSecureServer();
 
   inline void Wait() { m_server_->Wait(); }
 
  private:
-  std::unique_ptr<CraneCtldServiceImpl> m_service_impl_;
+  std::unique_ptr<CraneCtldSecureServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
 
   inline static std::mutex s_sigint_mtx;
   inline static std::condition_variable s_sigint_cv;
   static void signal_handler_func(int) { s_sigint_cv.notify_one(); };
 
-  friend class CraneCtldServiceImpl;
+  friend class CraneCtldSecureServiceImpl;
 };
 
 }  // namespace Ctld
 
-inline std::unique_ptr<Ctld::CtldServer> g_ctld_server;
+inline std::unique_ptr<Ctld::CtldSecureServer> g_ctld_secure_server;

@@ -26,7 +26,7 @@
 #include "../EmbeddedDbClient.h"
 #include "../TaskScheduler.h"
 #include "CranedKeeper.h"
-#include "CtldGrpcServer.h"
+#include "CtldSecureServer.h"
 #include "crane/Network.h"
 #include "crane/String.h"
 
