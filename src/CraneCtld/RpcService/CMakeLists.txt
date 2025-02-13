@@ -1,15 +1,15 @@
 # Create a library from the RpcService sources
 add_library(RpcService
-    CtldGrpcServer.h
-    CtldGrpcServer.cpp
+    CtldSecureServer.h
+    CtldSecureServer.cpp
+    CtldPlainServer.h
+    CtldPlainServer.cpp
     CtldForCranedServer.h
     CtldForCranedServer.cpp
     CtldForCforedServer.h
     CtldForCforedServer.cpp
     CranedKeeper.h
     CranedKeeper.cpp
-    SignServer.h
-    SignServer.cpp
 )
 
 target_include_directories(RpcService PUBLIC

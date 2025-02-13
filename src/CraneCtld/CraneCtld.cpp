@@ -32,11 +32,11 @@
 #include "CranedMetaContainer.h"
 #include "CtldForCforedServer.h"
 #include "CtldForCranedServer.h"
-#include "CtldGrpcServer.h"
+#include "CtldPlainServer.h"
 #include "CtldPublicDefs.h"
+#include "CtldSecureServer.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
-#include "SignServer.h"
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
@@ -162,12 +162,11 @@ void ParseConfig(int argc, char** argv) {
         g_config.ListenConf.CraneCtldForCforedListenPort =
             kCtldForCforedDefaultPort;
 
-      if (config["CraneCtldForSignListenPort"])
-        g_config.ListenConf.CraneCtldForSignListenPort =
-            config["CraneCtldForSignListenPort"].as<std::string>();
+      if (config["CraneCtldPlainListenPort"])
+        g_config.ListenConf.CraneCtldPlainListenPort =
+            config["CraneCtldPlainListenPort"].as<std::string>();
       else
-        g_config.ListenConf.CraneCtldForSignListenPort =
-            kCtldForSignDefaultPort;
+        g_config.ListenConf.CraneCtldPlainListenPort = kCtldPlainDefaultPort;
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
@@ -973,15 +972,16 @@ void InitializeCtldGlobalVariables() {
     std::exit(1);
   }
 
-  g_ctld_server = std::make_unique<Ctld::CtldServer>();
+  g_ctld_secure_server = std::make_unique<Ctld::CtldSecureServer>();
+
+  g_ctld_plain_server =
+      std::make_unique<Ctld::CtldPlainServer>(g_config.ListenConf);
 
   g_ctld_for_craned_server =
       std::make_unique<Ctld::CtldForCranedServer>(g_config.ListenConf);
 
   g_ctld_for_cfored_server =
       std::make_unique<Ctld::CtldForCforedServer>(g_config.ListenConf);
-
-  g_sign_server = std::make_unique<Ctld::SignServer>(g_config.ListenConf);
 }
 
 void CreateFolders() {
@@ -1011,13 +1011,13 @@ int StartServer() {
 
   InitializeCtldGlobalVariables();
 
-  g_ctld_server->Wait();
+  g_ctld_secure_server->Wait();
+
+  g_ctld_plain_server->Wait();
 
   g_ctld_for_craned_server->Wait();
 
   g_ctld_for_cfored_server->Wait();
-
-  g_sign_server->Wait();
 
   DestroyCtldGlobalVariables();
 

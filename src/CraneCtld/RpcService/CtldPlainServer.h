@@ -30,11 +30,33 @@ using crane::grpc::Craned;
 using grpc::Channel;
 using grpc::Server;
 
-class SignServer;
+class CtldPlainServer;
 
-class SignServiceImpl final : public crane::grpc::SignService::Service {
+class CraneCtldPlainServiceImpl final
+    : public crane::grpc::CraneCtldPlain::Service {
  public:
-  explicit SignServiceImpl(SignServer *server) : m_sign_server_(server) {}
+  explicit CraneCtldPlainServiceImpl(CtldPlainServer *server)
+      : m_ctld_plain_server_(server) {}
+
+  grpc::Status QueryTasksInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryTasksInfoRequest *request,
+      crane::grpc::QueryTasksInfoReply *response) override;
+
+  grpc::Status QueryCranedInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryCranedInfoRequest *request,
+      crane::grpc::QueryCranedInfoReply *response) override;
+
+  grpc::Status QueryPartitionInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryPartitionInfoRequest *request,
+      crane::grpc::QueryPartitionInfoReply *response) override;
+
+  grpc::Status QueryClusterInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryClusterInfoRequest *request,
+      crane::grpc::QueryClusterInfoReply *response) override;
 
   grpc::Status SignUserCertificate(
       grpc::ServerContext *context,
@@ -42,31 +64,31 @@ class SignServiceImpl final : public crane::grpc::SignService::Service {
       crane::grpc::SignUserCertificateResponse *response) override;
 
  private:
-  SignServer *m_sign_server_;
+  CtldPlainServer *m_ctld_plain_server_;
 };
 
 /***
  * Note: There should be only ONE instance of CtldServer!!!!
  */
-class SignServer {
+class CtldPlainServer {
  public:
   /***
    * User must make sure that this constructor is called only once!
    * @param listen_address The "[Address]:[Port]" of SignServer.
    */
-  explicit SignServer(const Config::CraneCtldListenConf &listen_conf);
+  explicit CtldPlainServer(const Config::CraneCtldListenConf &listen_conf);
 
   inline void Wait() { m_server_->Wait(); }
 
   void Shutdown();
 
  private:
-  std::unique_ptr<SignServiceImpl> m_service_impl_;
+  std::unique_ptr<CraneCtldPlainServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
 
-  friend class SignServiceImpl;
+  friend class CraneCtldPlainServiceImpl;
 };
 
 }  // namespace Ctld
 
-inline std::unique_ptr<Ctld::SignServer> g_sign_server;
+inline std::unique_ptr<Ctld::CtldPlainServer> g_ctld_plain_server;
