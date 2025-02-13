@@ -677,6 +677,7 @@ void TaskScheduler::ScheduleThread_() {
 
         task->SetStatus(crane::grpc::TaskStatus::Running);
         task->SetCranedIds(std::move(it.second));
+        task->SetPriority(task->cached_priority);
         task->nodes_alloc = task->CranedIds().size();
 
         // CRANE_DEBUG(
@@ -2278,8 +2279,6 @@ void MinLoadFirst::NodeSelect(
       for (CranedId const& craned_id : craned_ids)
         g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                                  task->Resources());
-
-      task->SetPriority(task->cached_priority);
       std::unique_ptr<TaskInCtld> moved_task;
 
       // Move task out of pending_task_map and insert it to the
