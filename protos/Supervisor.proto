@@ -37,10 +37,11 @@ message InitSupervisorRequest {
   string craned_unix_socket_path = 3;
   string crane_base_dir = 4;
   string crane_script_dir = 5;
-  message PluginConfig{
-    bool enabled = 1;
-    string PlugindSockPath = 2;
+
+  message PluginConfig {
+    string socket_path = 1;
   }
+
   PluginConfig plugin_config = 6;
 }
 

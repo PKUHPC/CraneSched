@@ -139,14 +139,12 @@ CraneErr JobManager::Init(
     CRANE_TRACE("[Job #{}] Recover from supervisor.", job_id);
     task_status.job_spec.cgroup_spec.recovered = true;
     auto* job_instance = new JobInstance(task_status.job_spec);
-    auto* process =
-        new TaskExecutionInstance{.task_spec = task_status.task_spec,
+    auto* process = new Execution{.task_spec = task_status.task_spec,
                                   .job_id = job_id,
                                   .pid = task_status.task_pid};
-    job_instance->processes.emplace(task_status.task_pid, process);
-    // When init,no need to lock.
+    job_instance->executions.emplace(task_status.task_pid, process);
+    // When init, no need to lock.
     m_pid_job_map_.emplace(task_status.task_pid, job_instance);
-    m_pid_proc_map_.emplace(task_status.task_pid, process);
 
     m_job_map_.Emplace(job_id, std::unique_ptr<JobInstance>(job_instance));
     uid_t uid = task_status.job_spec.cgroup_spec.uid;
@@ -262,8 +260,7 @@ void JobManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
 
-CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
-                                      TaskExecutionInstance* process) {
+CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -293,7 +290,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
   // If the lock is held in the parent process during fork, the forked thread
   // in the child proc will block forever. That's why we should copy it here
   // and the child proc should not hold any lock.
-  auto res_in_node = instance->job_spec.cgroup_spec.res_in_node;
+  auto res_in_node = job->job_spec.cgroup_spec.res_in_node;
 
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
     CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
@@ -303,14 +300,14 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
   pid_t child_pid = fork();
 
   if (child_pid == -1) {
-    CRANE_ERROR("fork() failed for task #{}: {}", process->task_spec.task_id(),
-                strerror(errno));
+    CRANE_ERROR("fork() failed for task #{}: {}",
+                execution->task_spec.task_id(), strerror(errno));
     return CraneErr::kSystemErr;
   }
 
   if (child_pid > 0) {  // Parent proc
     CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
-                process->task_spec.task_id(), child_pid);
+                execution->task_spec.task_id(), child_pid);
 
     int ctrl_fd = ctrl_sock_pair[0];
     close(ctrl_sock_pair[1]);
@@ -321,13 +318,13 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     CanStartMessage msg;
     ChildProcessReady child_process_ready;
 
-    if (!instance->cgroup->MigrateProcIn(child_pid)) {
+    if (!job->cgroup->MigrateProcIn(child_pid)) {
       CRANE_ERROR(
           "[Task #{}] Terminate the subprocess due to failure of cgroup "
           "migration.",
-          process->task_spec.task_id());
+          execution->task_spec.task_id());
 
-      instance->err_before_exec = CraneErr::kCgroupError;
+      job->err_before_exec = CraneErr::kCgroupError;
       // Ask child to suicide
       msg.set_ok(false);
 
@@ -335,9 +332,9 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
       close(ctrl_fd);
       if (!ok) {
         CRANE_ERROR("[Task #{}] Failed to ask subprocess to suicide.",
-                    child_pid, process->task_spec.task_id());
+                    child_pid, execution->task_spec.task_id());
 
-        instance->err_before_exec = CraneErr::kProtobufError;
+        job->err_before_exec = CraneErr::kProtobufError;
         KillPid_(child_pid, SIGKILL);
       }
 
@@ -345,7 +342,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     }
 
     CRANE_TRACE("[Task #{}] Task is ready. Asking subprocess to execv...",
-                process->task_spec.task_id());
+                execution->task_spec.task_id());
 
     // Tell subprocess that the parent process is ready. Then the
     // subprocess should continue to exec().
@@ -353,17 +350,17 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
     if (!ok) {
       CRANE_ERROR("[Task #{}] Failed to serialize msg to ostream: {}",
-                  process->task_spec.task_id(), strerror(ostream.GetErrno()));
+                  execution->task_spec.task_id(), strerror(ostream.GetErrno()));
     }
 
     if (ok) ok &= ostream.Flush();
     if (!ok) {
       CRANE_ERROR("[Task #{}] Failed to send ok=true to supervisor {}: {}",
-                  process->task_spec.task_id(), child_pid,
+                  execution->task_spec.task_id(), child_pid,
                   strerror(ostream.GetErrno()));
       close(ctrl_fd);
 
-      instance->err_before_exec = CraneErr::kProtobufError;
+      job->err_before_exec = CraneErr::kProtobufError;
       KillPid_(child_pid, SIGKILL);
       return CraneErr::kProtobufError;
     }
@@ -373,13 +370,14 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     if (!ok || !msg.ok()) {
       if (!ok)
         CRANE_ERROR("[Task #{}] Socket child endpoint failed: {}",
-                    process->task_spec.task_id(), strerror(istream.GetErrno()));
+                    execution->task_spec.task_id(),
+                    strerror(istream.GetErrno()));
       if (!msg.ok())
         CRANE_ERROR("[Task #{}] Received false from subprocess {}",
-                    process->task_spec.task_id(), child_pid);
+                    execution->task_spec.task_id(), child_pid);
       close(ctrl_fd);
 
-      instance->err_before_exec = CraneErr::kProtobufError;
+      job->err_before_exec = CraneErr::kProtobufError;
       KillPid_(child_pid, SIGKILL);
       return CraneErr::kProtobufError;
     }
@@ -394,35 +392,37 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
 
     // Do Supervisor Init
     crane::grpc::supervisor::InitSupervisorRequest init_request;
-    init_request.set_job_id(process->task_spec.task_id());
+    init_request.set_job_id(execution->task_spec.task_id());
     init_request.set_debug_level("trace");
     init_request.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
     init_request.set_crane_base_dir(g_config.CraneBaseDir);
     init_request.set_crane_script_dir(g_config.CranedScriptDir);
-    auto* plugin_conf = init_request.mutable_plugin_config();
-    plugin_conf->set_enabled(g_config.Plugin.Enabled);
-    plugin_conf->set_plugindsockpath(g_config.Plugin.PlugindSockPath);
+
+    if (g_config.Plugin.Enabled) {
+      auto* plugin_conf = init_request.mutable_plugin_config();
+      plugin_conf->set_socket_path(g_config.Plugin.PlugindSockPath);
+    }
 
     ok = SerializeDelimitedToZeroCopyStream(init_request, &supervisor_is);
     if (!ok) {
       CRANE_ERROR("[Task #{}] Failed to serialize msg to ostream: {}",
-                  process->task_spec.task_id(),
+                  execution->task_spec.task_id(),
                   strerror(supervisor_is.GetErrno()));
     }
 
     if (ok) ok &= supervisor_is.Flush();
     if (!ok) {
       CRANE_ERROR("[Task #{}] Failed to send init msg to supervisor: {}",
-                  child_pid, process->task_spec.task_id(),
+                  child_pid, execution->task_spec.task_id(),
                   strerror(supervisor_is.GetErrno()));
       close(ctrl_fd);
 
-      instance->err_before_exec = CraneErr::kProtobufError;
+      job->err_before_exec = CraneErr::kProtobufError;
       KillPid_(child_pid, SIGKILL);
       return CraneErr::kProtobufError;
     } else {
       CRANE_TRACE("[Job #{}] Supervisor init msg send.",
-                  process->task_spec.task_id());
+                  execution->task_spec.task_id());
     }
 
     crane::grpc::supervisor::SupervisorReady supervisor_ready;
@@ -431,14 +431,14 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     if (!ok || !msg.ok()) {
       if (!ok)
         CRANE_ERROR("[Task #{}] Pipe child endpoint failed: {}",
-                    process->task_spec.task_id(),
+                    execution->task_spec.task_id(),
                     strerror(supervisor_os.GetErrno()));
       if (!msg.ok())
         CRANE_ERROR("[Task #{}] False from subprocess {}.", child_pid,
-                    process->task_spec.task_id());
+                    execution->task_spec.task_id());
       close(ctrl_fd);
 
-      instance->err_before_exec = CraneErr::kProtobufError;
+      job->err_before_exec = CraneErr::kProtobufError;
       KillPid_(child_pid, SIGKILL);
       return CraneErr::kProtobufError;
     }
@@ -447,18 +447,18 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
     close(supervisor_craned_fd);
     close(ctrl_fd);
 
-    g_supervisor_keeper->AddSupervisor(process->task_spec.task_id());
+    g_supervisor_keeper->AddSupervisor(execution->task_spec.task_id());
 
-    auto stub = g_supervisor_keeper->GetStub(process->task_spec.task_id());
-    auto pid = stub->ExecuteTask(process->task_spec);
+    auto stub = g_supervisor_keeper->GetStub(execution->task_spec.task_id());
+    auto pid = stub->ExecuteTask(execution->task_spec);
     if (!pid) {
       CRANE_ERROR("[Task #{}] Supervisor failed to execute task.",
-                  process->task_spec.task_id());
-      instance->err_before_exec = CraneErr::kSupervisorError;
+                  execution->task_spec.task_id());
+      job->err_before_exec = CraneErr::kSupervisorError;
       KillPid_(child_pid, SIGKILL);
       return CraneErr::kSupervisorError;
     }
-    process->pid = pid.value();
+    execution->pid = pid.value();
 
     return CraneErr::kOk;
 
@@ -545,21 +545,22 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* instance,
   }
 }
 
-CraneErr JobManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
-  CRANE_INFO("Executing job #{}", task.task_id());
-  if (!m_job_map_.Contains(task.task_id())) {
+CraneErr JobManager::ExecuteTaskAsync(crane::grpc::TaskToD const& job) {
+  CRANE_INFO("Executing job #{}", job.task_id());
+  if (!m_job_map_.Contains(job.task_id())) {
     CRANE_DEBUG("Executing job #{} without job allocation. Ignoring it.",
-                task.task_id());
+                job.task_id());
     return CraneErr::kCgroupError;
   }
-  auto instance = std::make_unique<TaskExecutionInstance>();
+  auto instance = std::make_unique<Execution>();
 
   // Simply wrap the Task structure within a JobInstance structure and
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
-  instance->task_spec = task;
-  instance->job_id = task.task_id();
-  EvQueueExecuteTaskElem elem{.task_execution_instance = std::move(instance)};
+  instance->task_spec = job;
+  instance->job_id = job.task_id();
+  EvQueueExecuteTaskElem elem{.execution = std::move(instance)};
+
   auto future = elem.ok_prom.get_future();
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
   m_grpc_execute_task_async_handle_->send();
@@ -573,18 +574,16 @@ void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
     // Once ExecuteTask RPC is processed, the JobInstance goes into
     // m_job_map_.
-    TaskExecutionInstance* task_exec_instance =
-        elem.task_execution_instance.release();
-    task_id_t job_id = task_exec_instance->task_spec.task_id();
+    Execution* execution = elem.execution.release();
+    task_id_t job_id = execution->task_spec.task_id();
 
     if (!m_job_map_.Contains(job_id)) {
       CRANE_ERROR("Failed to find job #{} allocation", job_id);
       elem.ok_prom.set_value(CraneErr::kCgroupError);
     }
 
-    g_thread_pool->detach_task([this, task_exec_instance]() mutable {
-      LaunchTaskInstanceMt_(task_exec_instance);
-    });
+    g_thread_pool->detach_task(
+        [this, execution]() mutable { LaunchExecutionInstanceMt_(execution); });
   }
 }
 
@@ -624,12 +623,12 @@ bool JobManager::FreeJobInstanceAllocation_(JobInstance* job_instance) {
   return true;
 }
 
-void JobManager::LaunchTaskInstanceMt_(TaskExecutionInstance* process) {
+void JobManager::LaunchExecutionInstanceMt_(Execution* execution) {
   // This function runs in a multi-threading manner. Take care of thread
   // safety. JobInstance will not be free during this function. Take care of
   // data race for job instance.
 
-  task_id_t job_id = process->job_id;
+  task_id_t job_id = execution->job_id;
   auto job = m_job_map_.GetValueExclusivePtr(job_id);
   auto* job_instance = job.get()->get();
   if (!job_instance) {
@@ -640,7 +639,7 @@ void JobManager::LaunchTaskInstanceMt_(TaskExecutionInstance* process) {
     return;
   }
 
-  if (!(job_instance->cgroup)) {
+  if (!job_instance->cgroup) {
     job_instance->cgroup =
         g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_spec.cgroup_spec);
   }
@@ -656,28 +655,25 @@ void JobManager::LaunchTaskInstanceMt_(TaskExecutionInstance* process) {
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this task, and
   // we should send TaskStatusChange manually.
-  CraneErr err = SpawnSupervisor_(job_instance, process);
+  CraneErr err = SpawnSupervisor_(job_instance, execution);
   if (err != CraneErr::kOk) {
     ActivateTaskStatusChangeAsync_(
         job_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeSpawnProcessFail,
-        fmt::format(
-            "Cannot spawn a new process inside the instance of task #{}",
-            job_id));
+        fmt::format("Cannot spawn a new process inside the instance of job #{}",
+                    job_id));
   } else {
-    CRANE_TRACE("[job #{}] Spawned success.", process->task_spec.task_id());
-    // kOk means that SpawnProcessInInstance_ has successfully forked a child
-    // process.
+    // kOk means that SpawnSupervisor_ has successfully forked a child process.
     // Now we put the child pid into index maps.
     // SIGCHLD sent just after fork() and before putting pid into maps
     // will repeatedly be sent by timer and eventually be handled once the
     // SIGCHLD processing callback sees the pid in index maps.
-    // Now we do not support launch multiprocess task.
-    job_instance->processes.emplace(
-        process->pid, std::unique_ptr<TaskExecutionInstance>(process));
+    // Now we do not support launch multiple tasks in a job.
+    CRANE_TRACE("[job #{}] Spawned successfullly.", job_instance->job_id);
+    job_instance->executions.emplace(execution->pid,
+                                     std::unique_ptr<Execution>(execution));
     absl::MutexLock lk(&m_mtx_);
-    m_pid_job_map_.emplace(process->pid, job_instance);
-    m_pid_proc_map_.emplace(process->pid, process);
+    m_pid_job_map_.emplace(execution->pid, job_instance);
   }
 }
 
@@ -784,7 +780,7 @@ void JobManager::EvCleanTerminateTaskQueueCb_() {
         elem.task_id);
 
     auto job_instance = m_job_map_.GetValueExclusivePtr(elem.task_id);
-    if (!job_instance || job_instance->get()->processes.empty()) {
+    if (!job_instance || job_instance->get()->executions.empty()) {
       CRANE_DEBUG("Terminating a non-existent task #{}.", elem.task_id);
 
       // Note if Ctld wants to terminate some tasks that are not running,
@@ -862,7 +858,7 @@ void JobManager::EvCleanCheckTaskStatusQueueCb_() {
     task_id_t task_id = elem.task_id;
     auto job_instance = m_job_map_.GetValueExclusivePtr(task_id);
     // TODO: use process id
-    if (job_instance && job_instance->get()->processes.contains(task_id)) {
+    if (job_instance && job_instance->get()->executions.contains(task_id)) {
       // Found in task map. The task must be running.
       elem.status_prom.set_value({true, crane::grpc::TaskStatus::Running});
       continue;

@@ -208,6 +208,8 @@ CraneErr CgroupManager::Init(
     CRANE_WARN("Error Cgroup version is not supported");
     return CraneErr::kCgroupError;
   }
+
+  // TODO: Remove these after csupervisor is stable
   if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
     RmJobCgroupsExcept_(running_job_ids);
   } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {

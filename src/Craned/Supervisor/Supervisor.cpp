@@ -75,8 +75,12 @@ void InitFromStdin(int argc, char** argv) {
   g_config.CranedUnixSocketPath = msg.craned_unix_socket_path();
   g_config.CraneBaseDir = msg.crane_base_dir();
   g_config.CraneScriptDir = msg.crane_script_dir();
-  g_config.Plugin.Enabled = msg.plugin_config().enabled();
-  g_config.Plugin.PlugindSockPath = msg.plugin_config().plugindsockpath();
+
+  // Plugin config
+  g_config.Plugin.Enabled = msg.has_plugin_config();
+  if (g_config.Plugin.Enabled)
+    g_config.Plugin.PlugindSockPath = msg.plugin_config().socket_path();
+
   g_config.SupervisorLogFile =
       g_config.CraneBaseDir + fmt::format("Supervisor/{}.log", g_config.JobId);
 

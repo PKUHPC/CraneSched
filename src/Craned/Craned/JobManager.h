@@ -31,8 +31,8 @@
 namespace Craned {
 using TaskSpec = crane::grpc::TaskToD;
 
-struct TaskExecutionInstance {
-  // TODO: Replace this with task execution info.
+struct Execution {
+  // TODO: Replace this with task execution info. Find a better name.
   TaskSpec task_spec;
   task_id_t job_id;
   pid_t pid;
@@ -70,11 +70,11 @@ struct JobInstance {
   CraneErr err_before_exec{CraneErr::kOk};
 
   // May launch multiple execution instance multi thread.
-  absl::flat_hash_map<pid_t, std::unique_ptr<TaskExecutionInstance>> processes;
+  absl::flat_hash_map<pid_t, std::unique_ptr<Execution>> executions;
 };
 
 /**
- * The class that manages all tasks and handles interrupts.
+ * The class that manages all jobs and handles interrupts.
  * SIGINT and SIGCHLD are processed in JobManager.
  * Especially, outside caller can use SetSigintCallback() to
  * set the callback when SIGINT is triggered.
@@ -119,7 +119,7 @@ class JobManager {
                                       uint32_t exit_code,
                                       std::optional<std::string> reason);
 
-  // Wait internal libevent base loop to exit...
+  // Wait internal libuv base loop to exit...
   void Wait();
 
   /***
@@ -139,7 +139,7 @@ class JobManager {
   };
 
   struct EvQueueExecuteTaskElem {
-    std::unique_ptr<TaskExecutionInstance> task_execution_instance;
+    std::unique_ptr<Execution> execution;
     std::promise<CraneErr> ok_prom;
   };
 
@@ -168,10 +168,9 @@ class JobManager {
 
   bool FreeJobInstanceAllocation_(JobInstance* job_instance);
 
-  void LaunchTaskInstanceMt_(TaskExecutionInstance* process);
+  void LaunchExecutionInstanceMt_(Execution* task);
 
-  CraneErr SpawnSupervisor_(JobInstance* instance,
-                            TaskExecutionInstance* process);
+  CraneErr SpawnSupervisor_(JobInstance* instance, Execution* task);
 
   /**
    * Inform CraneCtld of the status change of a task.
@@ -225,8 +224,6 @@ class JobManager {
   // and doesn't have the ownership of underlying objects.
   // A JobInstance may contain more than one TaskExecutionInstance.
   absl::flat_hash_map<pid_t /*pid*/, JobInstance*> m_pid_job_map_
-      ABSL_GUARDED_BY(m_mtx_);
-  absl::flat_hash_map<pid_t /*pid*/, TaskExecutionInstance*> m_pid_proc_map_
       ABSL_GUARDED_BY(m_mtx_);
 
   absl::Mutex m_mtx_;
