@@ -708,13 +708,10 @@ void JobManager::ActivateTaskStatusChangeAsync_(
 
 bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
   auto job_instance = m_job_map_.GetValueExclusivePtr(job_id);
-  CgroupInterface* cg = job_instance->get()->cgroup.get();
+  auto& cg = job_instance->get()->cgroup;
   if (!cg) {
-    cg =
-        g_cg_mgr
-            ->AllocateAndGetJobCgroup(job_instance->get()->job_spec.cgroup_spec)
-            .release();
-    job_instance->get()->cgroup = std::unique_ptr<CgroupInterface>(cg);
+    cg = g_cg_mgr->AllocateAndGetJobCgroup(
+        job_instance->get()->job_spec.cgroup_spec);
   }
   if (!cg) return false;
 

@@ -514,7 +514,7 @@ class CgroupManager {
  private:
   static std::string CgroupStrByTaskId_(task_id_t task_id);
 
-  std::pair<std::unique_ptr<CgroupInterface>, bool> CreateOrOpen_(
+  std::unique_ptr<CgroupInterface> CreateOrOpen_(
       task_id_t task_id, ControllerFlags preferred_controllers,
       ControllerFlags required_controllers, bool retrieve);
 

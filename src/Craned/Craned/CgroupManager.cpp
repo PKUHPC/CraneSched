@@ -367,7 +367,7 @@ std::string CgroupManager::CgroupStrByTaskId_(task_id_t task_id) {
  * @param retrieve just retrieve an existing cgroup.
  * @return unique_ptr to CgroupInterface, null if failed.
  */
-std::pair<std::unique_ptr<CgroupInterface>, bool> CgroupManager::CreateOrOpen_(
+std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
     task_id_t task_id, ControllerFlags preferred_controllers,
     ControllerFlags required_controllers, bool retrieve) {
   using CgroupConstant::Controller;
@@ -379,7 +379,7 @@ std::pair<std::unique_ptr<CgroupInterface>, bool> CgroupManager::CreateOrOpen_(
   struct cgroup *native_cgroup = cgroup_new_cgroup(cgroup_string.c_str());
   if (native_cgroup == NULL) {
     CRANE_WARN("Unable to construct new cgroup object.\n");
-    return {nullptr, false};
+    return nullptr;
   }
 
   // Make sure all required controllers are in preferred controllers:
@@ -405,34 +405,34 @@ std::pair<std::unique_ptr<CgroupInterface>, bool> CgroupManager::CreateOrOpen_(
             *native_cgroup, Controller::MEMORY_CONTROLLER,
             required_controllers & Controller::MEMORY_CONTROLLER, has_cgroup,
             changed_cgroup)) {
-      return {nullptr, has_cgroup};
+      return nullptr;
     }
     if ((preferred_controllers & Controller::FREEZE_CONTROLLER) &&
         InitializeController_(
             *native_cgroup, Controller::FREEZE_CONTROLLER,
             required_controllers & Controller::FREEZE_CONTROLLER, has_cgroup,
             changed_cgroup)) {
-      return {nullptr, has_cgroup};
+      return nullptr;
     }
     if ((preferred_controllers & Controller::BLOCK_CONTROLLER) &&
         InitializeController_(
             *native_cgroup, Controller::BLOCK_CONTROLLER,
             required_controllers & Controller::BLOCK_CONTROLLER, has_cgroup,
             changed_cgroup)) {
-      return {nullptr, has_cgroup};
+      return nullptr;
     }
     if ((preferred_controllers & Controller::CPU_CONTROLLER) &&
         InitializeController_(*native_cgroup, Controller::CPU_CONTROLLER,
                               required_controllers & Controller::CPU_CONTROLLER,
                               has_cgroup, changed_cgroup)) {
-      return {nullptr, has_cgroup};
+      return nullptr;
     }
     if ((preferred_controllers & Controller::DEVICES_CONTROLLER) &&
         InitializeController_(
             *native_cgroup, Controller::DEVICES_CONTROLLER,
             required_controllers & Controller::DEVICES_CONTROLLER, has_cgroup,
             changed_cgroup)) {
-      return {nullptr, has_cgroup};
+      return nullptr;
     }
   } else if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2) {
     if ((preferred_controllers & Controller::CPU_CONTROLLER_V2) &&
@@ -440,35 +440,35 @@ std::pair<std::unique_ptr<CgroupInterface>, bool> CgroupManager::CreateOrOpen_(
             *native_cgroup, Controller::CPU_CONTROLLER_V2,
             required_controllers & Controller::CPU_CONTROLLER_V2, has_cgroup,
             changed_cgroup)) {
-      return {nullptr, has_cgroup};
+      return nullptr;
     }
     if ((preferred_controllers & Controller::MEMORY_CONTORLLER_V2) &&
         InitializeController_(
             *native_cgroup, Controller::MEMORY_CONTORLLER_V2,
             required_controllers & Controller::MEMORY_CONTORLLER_V2, has_cgroup,
             changed_cgroup)) {
-      return {nullptr, has_cgroup};
+      return nullptr;
     }
     if ((preferred_controllers & Controller::IO_CONTROLLER_V2) &&
         InitializeController_(
             *native_cgroup, Controller::IO_CONTROLLER_V2,
             required_controllers & Controller::IO_CONTROLLER_V2, has_cgroup,
             changed_cgroup)) {
-      return {nullptr, has_cgroup};
+      return nullptr;
     }
     if ((preferred_controllers & Controller::CPUSET_CONTROLLER_V2) &&
         InitializeController_(
             *native_cgroup, Controller::CPUSET_CONTROLLER_V2,
             required_controllers & Controller::CPUSET_CONTROLLER_V2, has_cgroup,
             changed_cgroup)) {
-      return {nullptr, has_cgroup};
+      return nullptr;
     }
     if ((preferred_controllers & Controller::PIDS_CONTROLLER_V2) &&
         InitializeController_(
             *native_cgroup, Controller::PIDS_CONTROLLER_V2,
             required_controllers & Controller::PIDS_CONTROLLER_V2, has_cgroup,
             changed_cgroup)) {
-      return {nullptr, has_cgroup};
+      return nullptr;
     }
   }
 
@@ -480,7 +480,7 @@ std::pair<std::unique_ptr<CgroupInterface>, bool> CgroupManager::CreateOrOpen_(
           "Unable to create cgroup {}. Cgroup functionality will not work:"
           "{} {}",
           cgroup_string.c_str(), err, cgroup_strerror(err));
-      return {nullptr, has_cgroup};
+      return nullptr;
     }
   } else if (changed_cgroup && (err = cgroup_modify_cgroup(native_cgroup))) {
     CRANE_WARN(
@@ -490,8 +490,7 @@ std::pair<std::unique_ptr<CgroupInterface>, bool> CgroupManager::CreateOrOpen_(
   }
 
   if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
-    return {std::make_unique<CgroupV1>(cgroup_string, native_cgroup),
-            has_cgroup};
+    return std::make_unique<CgroupV1>(cgroup_string, native_cgroup);
   } else if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2) {
     // For cgroup V2,we put task cgroup under RootCgroupFullPath.
     struct stat cgroup_stat;
@@ -501,16 +500,15 @@ std::pair<std::unique_ptr<CgroupInterface>, bool> CgroupManager::CreateOrOpen_(
     if (stat(cgroup_full_path.c_str(), &cgroup_stat)) {
       CRANE_ERROR("Cgroup {} created but stat failed: {}", cgroup_string,
                   std::strerror(errno));
-      return {nullptr, has_cgroup};
+      return nullptr;
     }
 
-    return {std::make_unique<CgroupV2>(cgroup_string, native_cgroup,
-                                       cgroup_stat.st_ino),
-            has_cgroup};
+    return std::make_unique<CgroupV2>(cgroup_string, native_cgroup,
+                                      cgroup_stat.st_ino);
   } else {
     CRANE_WARN("Unable to create cgroup {}. Cgroup version is not supported",
-               cgroup_string.c_str());
-    return {nullptr, has_cgroup};
+               cgroup_string);
+    return nullptr;
   }
 }
 
@@ -521,17 +519,12 @@ std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
   auto job_id = cg_spec.job_id;
 
   std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
-  bool cg_exist = false;
   if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
-    auto res_pair = CgroupManager::CreateOrOpen_(
+    cg_unique_ptr = CgroupManager::CreateOrOpen_(
         job_id, CgV1PreferredControllers, NO_CONTROLLER_FLAG, recover);
-    cg_unique_ptr = std::move(res_pair.first);
-    cg_exist = res_pair.second;
   } else if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2) {
-    auto res_pair = CgroupManager::CreateOrOpen_(
+    cg_unique_ptr = CgroupManager::CreateOrOpen_(
         job_id, CgV2PreferredControllers, NO_CONTROLLER_FLAG, recover);
-    cg_unique_ptr = std::move(res_pair.first);
-    cg_exist = res_pair.second;
   } else {
     CRANE_WARN("cgroup version is not supported.");
     return nullptr;
