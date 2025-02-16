@@ -53,6 +53,123 @@ TaskScheduler::~TaskScheduler() {
 }
 
 bool TaskScheduler::Init() {
+  RestoreFromEmbeddedDb();
+
+  std::shared_ptr<uvw::loop> uvw_release_loop = uvw::loop::create();
+  m_task_timer_handle_ = uvw_release_loop->resource<uvw::timer_handle>();
+  m_task_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        CleanTaskTimerCb_();
+      });
+  m_task_timer_handle_->start(
+      std::chrono::milliseconds(kTaskHoldTimerTimeoutMs * 3),
+      std::chrono::milliseconds(kTaskHoldTimerTimeoutMs));
+
+  m_task_timeout_async_handle_ =
+      uvw_release_loop->resource<uvw::async_handle>();
+  m_task_timeout_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        TaskTimerAsyncCb_();
+      });
+
+  m_clean_task_timer_queue_handle_ =
+      uvw_release_loop->resource<uvw::async_handle>();
+  m_clean_task_timer_queue_handle_->on<uvw::async_event>(
+      [this, loop = uvw_release_loop](const uvw::async_event&,
+                                      uvw::async_handle&) {
+        CleanTaskTimerQueueCb_(loop);
+      });
+
+  m_task_release_thread_ = std::thread(
+      [this, loop = uvw_release_loop]() { ReleaseTaskThread_(loop); });
+
+  std::shared_ptr<uvw::loop> uvw_cancel_loop = uvw::loop::create();
+  m_cancel_task_timer_handle_ = uvw_cancel_loop->resource<uvw::timer_handle>();
+  m_cancel_task_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        CancelTaskTimerCb_();
+      });
+  m_cancel_task_timer_handle_->start(
+      std::chrono::milliseconds(kCancelTaskTimeoutMs * 3),
+      std::chrono::milliseconds(kCancelTaskTimeoutMs));
+
+  m_cancel_task_async_handle_ = uvw_cancel_loop->resource<uvw::async_handle>();
+  m_cancel_task_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CancelTaskAsyncCb_();
+      });
+
+  m_clean_cancel_queue_handle_ = uvw_cancel_loop->resource<uvw::async_handle>();
+  m_clean_cancel_queue_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanCancelQueueCb_();
+      });
+
+  m_task_cancel_thread_ = std::thread(
+      [this, loop = std::move(uvw_cancel_loop)]() { CancelTaskThread_(loop); });
+
+  std::shared_ptr<uvw::loop> uvw_submit_loop = uvw::loop::create();
+  m_submit_task_timer_handle_ = uvw_submit_loop->resource<uvw::timer_handle>();
+  m_submit_task_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        SubmitTaskTimerCb_();
+      });
+  m_submit_task_timer_handle_->start(
+      std::chrono::milliseconds(kSubmitTaskTimeoutMs * 3),
+      std::chrono::milliseconds(kSubmitTaskTimeoutMs));
+
+  m_submit_task_async_handle_ = uvw_submit_loop->resource<uvw::async_handle>();
+  m_submit_task_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        SubmitTaskAsyncCb_();
+      });
+
+  m_clean_submit_queue_handle_ = uvw_submit_loop->resource<uvw::async_handle>();
+  m_clean_submit_queue_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanSubmitQueueCb_();
+      });
+
+  m_task_submit_thread_ = std::thread(
+      [this, loop = std::move(uvw_submit_loop)]() { SubmitTaskThread_(loop); });
+
+  std::shared_ptr<uvw::loop> uvw_task_status_change_loop = uvw::loop::create();
+  m_task_status_change_timer_handle_ =
+      uvw_task_status_change_loop->resource<uvw::timer_handle>();
+  m_task_status_change_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle&) {
+        TaskStatusChangeTimerCb_();
+      });
+  m_task_status_change_timer_handle_->start(
+      std::chrono::milliseconds(kTaskStatusChangeTimeoutMS * 3),
+      std::chrono::milliseconds(kTaskStatusChangeTimeoutMS));
+
+  m_task_status_change_async_handle_ =
+      uvw_task_status_change_loop->resource<uvw::async_handle>();
+  m_task_status_change_async_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        TaskStatusChangeAsyncCb_();
+      });
+
+  m_clean_task_status_change_handle_ =
+      uvw_task_status_change_loop->resource<uvw::async_handle>();
+  m_clean_task_status_change_handle_->on<uvw::async_event>(
+      [this](const uvw::async_event&, uvw::async_handle&) {
+        CleanTaskStatusChangeQueueCb_();
+      });
+
+  m_task_status_change_thread_ =
+      std::thread([this, loop = std::move(uvw_task_status_change_loop)]() {
+        TaskStatusChangeThread_(loop);
+      });
+
+  // Start schedule thread first.
+  m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
+
+  return true;
+}
+
+bool TaskScheduler::RestoreFromEmbeddedDb() {
   using crane::grpc::TaskInEmbeddedDb;
 
   bool ok;
@@ -395,118 +512,6 @@ bool TaskScheduler::Init() {
       CRANE_ERROR("Failed to call g_embedded_db_client->PurgeEndedTasks()");
     }
   }
-
-  std::shared_ptr<uvw::loop> uvw_release_loop = uvw::loop::create();
-  m_task_timer_handle_ = uvw_release_loop->resource<uvw::timer_handle>();
-  m_task_timer_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event&, uvw::timer_handle&) {
-        CleanTaskTimerCb_();
-      });
-  m_task_timer_handle_->start(
-      std::chrono::milliseconds(kTaskHoldTimerTimeoutMs * 3),
-      std::chrono::milliseconds(kTaskHoldTimerTimeoutMs));
-
-  m_task_timeout_async_handle_ =
-      uvw_release_loop->resource<uvw::async_handle>();
-  m_task_timeout_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        TaskTimerAsyncCb_();
-      });
-
-  m_clean_task_timer_queue_handle_ =
-      uvw_release_loop->resource<uvw::async_handle>();
-  m_clean_task_timer_queue_handle_->on<uvw::async_event>(
-      [this, loop = uvw_release_loop](const uvw::async_event&,
-                                      uvw::async_handle&) {
-        CleanTaskTimerQueueCb_(loop);
-      });
-
-  m_task_release_thread_ = std::thread(
-      [this, loop = uvw_release_loop]() { ReleaseTaskThread_(loop); });
-
-  std::shared_ptr<uvw::loop> uvw_cancel_loop = uvw::loop::create();
-  m_cancel_task_timer_handle_ = uvw_cancel_loop->resource<uvw::timer_handle>();
-  m_cancel_task_timer_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event&, uvw::timer_handle&) {
-        CancelTaskTimerCb_();
-      });
-  m_cancel_task_timer_handle_->start(
-      std::chrono::milliseconds(kCancelTaskTimeoutMs * 3),
-      std::chrono::milliseconds(kCancelTaskTimeoutMs));
-
-  m_cancel_task_async_handle_ = uvw_cancel_loop->resource<uvw::async_handle>();
-  m_cancel_task_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        CancelTaskAsyncCb_();
-      });
-
-  m_clean_cancel_queue_handle_ = uvw_cancel_loop->resource<uvw::async_handle>();
-  m_clean_cancel_queue_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanCancelQueueCb_();
-      });
-
-  m_task_cancel_thread_ = std::thread(
-      [this, loop = std::move(uvw_cancel_loop)]() { CancelTaskThread_(loop); });
-
-  std::shared_ptr<uvw::loop> uvw_submit_loop = uvw::loop::create();
-  m_submit_task_timer_handle_ = uvw_submit_loop->resource<uvw::timer_handle>();
-  m_submit_task_timer_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event&, uvw::timer_handle&) {
-        SubmitTaskTimerCb_();
-      });
-  m_submit_task_timer_handle_->start(
-      std::chrono::milliseconds(kSubmitTaskTimeoutMs * 3),
-      std::chrono::milliseconds(kSubmitTaskTimeoutMs));
-
-  m_submit_task_async_handle_ = uvw_submit_loop->resource<uvw::async_handle>();
-  m_submit_task_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        SubmitTaskAsyncCb_();
-      });
-
-  m_clean_submit_queue_handle_ = uvw_submit_loop->resource<uvw::async_handle>();
-  m_clean_submit_queue_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanSubmitQueueCb_();
-      });
-
-  m_task_submit_thread_ = std::thread(
-      [this, loop = std::move(uvw_submit_loop)]() { SubmitTaskThread_(loop); });
-
-  std::shared_ptr<uvw::loop> uvw_task_status_change_loop = uvw::loop::create();
-  m_task_status_change_timer_handle_ =
-      uvw_task_status_change_loop->resource<uvw::timer_handle>();
-  m_task_status_change_timer_handle_->on<uvw::timer_event>(
-      [this](const uvw::timer_event&, uvw::timer_handle&) {
-        TaskStatusChangeTimerCb_();
-      });
-  m_task_status_change_timer_handle_->start(
-      std::chrono::milliseconds(kTaskStatusChangeTimeoutMS * 3),
-      std::chrono::milliseconds(kTaskStatusChangeTimeoutMS));
-
-  m_task_status_change_async_handle_ =
-      uvw_task_status_change_loop->resource<uvw::async_handle>();
-  m_task_status_change_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        TaskStatusChangeAsyncCb_();
-      });
-
-  m_clean_task_status_change_handle_ =
-      uvw_task_status_change_loop->resource<uvw::async_handle>();
-  m_clean_task_status_change_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        CleanTaskStatusChangeQueueCb_();
-      });
-
-  m_task_status_change_thread_ =
-      std::thread([this, loop = std::move(uvw_task_status_change_loop)]() {
-        TaskStatusChangeThread_(loop);
-      });
-
-  // Start schedule thread first.
-  m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
-
   return true;
 }
 
