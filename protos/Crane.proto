@@ -35,6 +35,13 @@ message TaskStatusChangeRequest {
 
 message TaskStatusChangeReply {
   bool ok = 1;
+  int32 cur_leader_id = 2;
+}
+
+message QueryLeaderIdRequest {}
+
+message QueryLeaderIdReply {
+  int32 leader_id = 2;
 }
 
 message CranedTriggerReverseConnRequest {
@@ -57,6 +64,8 @@ message CranedRegisterRequest {
 
 message CranedRegisterReply {
   bool ok = 1;
+  bool already_registered = 2;
+  int32 cur_leader_id = 3;
 }
 
 message QueryCranedListFromTaskIdRequest {
@@ -449,6 +458,7 @@ message QueryClusterInfoRequest {
 message QueryClusterInfoReply {
   bool ok = 1;
   repeated TrimmedPartitionInfo partitions = 2;
+  int32 cur_leader_id = 3;
 }
 
 message QueryTasksInfoRequest {
@@ -889,6 +899,7 @@ service CraneCtld {
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
   rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
   rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
+  rpc QueryLeaderId(QueryLeaderIdRequest) returns (QueryLeaderIdReply);
 
   /* RPC called form plugin */
   rpc PowerStateChange(PowerStateChangeRequest) returns (PowerStateChangeReply);

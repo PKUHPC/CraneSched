@@ -472,6 +472,8 @@ class TaskScheduler {
 
   bool Init();
 
+  bool RestoreFromEmbeddedDb();
+
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
   /// \return The future is set to 0 if task submission is failed.
