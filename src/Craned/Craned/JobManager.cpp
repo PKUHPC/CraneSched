@@ -545,20 +545,21 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
   }
 }
 
-CraneErr JobManager::ExecuteTaskAsync(crane::grpc::TaskToD const& job) {
-  CRANE_INFO("Executing job #{}", job.task_id());
-  if (!m_job_map_.Contains(job.task_id())) {
-    CRANE_DEBUG("Executing job #{} without job allocation. Ignoring it.",
-                job.task_id());
+CraneErr JobManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task_spec) {
+  CRANE_INFO("Executing task #{} job #{}", task_spec.task_id(),
+             task_spec.task_id());
+  if (!m_job_map_.Contains(task_spec.task_id())) {
+    CRANE_DEBUG("Task #{} without job allocation. Ignoring it.",
+                task_spec.task_id());
     return CraneErr::kCgroupError;
   }
   auto instance = std::make_unique<Execution>();
 
-  // Simply wrap the Task structure within a JobInstance structure and
+  // Simply wrap the Task structure within a Execution structure and
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
-  instance->task_spec = job;
-  instance->job_id = job.task_id();
+  instance->job_id = task_spec.task_id();  // TODO: Replace this with job id.
+  instance->task_spec = task_spec;
   EvQueueExecuteTaskElem elem{.execution = std::move(instance)};
 
   auto future = elem.ok_prom.get_future();
@@ -572,13 +573,12 @@ void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
   EvQueueExecuteTaskElem elem;
 
   while (m_grpc_execute_task_queue_.try_dequeue(elem)) {
-    // Once ExecuteTask RPC is processed, the JobInstance goes into
+    // Once ExecuteTask RPC is processed, the Exection goes into
     // m_job_map_.
     Execution* execution = elem.execution.release();
-    task_id_t job_id = execution->task_spec.task_id();
 
-    if (!m_job_map_.Contains(job_id)) {
-      CRANE_ERROR("Failed to find job #{} allocation", job_id);
+    if (!m_job_map_.Contains(execution->job_id)) {
+      CRANE_ERROR("Failed to find job #{} allocation", execution->job_id);
       elem.ok_prom.set_value(CraneErr::kCgroupError);
     }
 
@@ -629,22 +629,21 @@ void JobManager::LaunchExecutionInstanceMt_(Execution* execution) {
   // data race for job instance.
 
   task_id_t job_id = execution->job_id;
-  auto job = m_job_map_.GetValueExclusivePtr(job_id);
-  auto* job_instance = job.get()->get();
-  if (!job_instance) {
-    CRANE_ERROR("Failed to get job#{} allocation", job_id);
+  auto job_it = m_job_map_.GetValueExclusivePtr(job_id);
+  auto* job = job_it.get()->get();
+  if (!job) {
+    CRANE_ERROR("Failed to get the allocation of job#{}", job_id);
     ActivateTaskStatusChangeAsync_(
         job_id, crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCgroupError,
-        fmt::format("Failed to get allocation for job#{} ", job_id));
+        fmt::format("Failed to get the allocation for job#{} ", job_id));
     return;
   }
 
-  if (!job_instance->cgroup) {
-    job_instance->cgroup =
-        g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_spec.cgroup_spec);
+  if (!job->cgroup) {
+    job->cgroup = g_cg_mgr->AllocateAndGetJobCgroup(job->job_spec.cgroup_spec);
   }
-  if (!job_instance->cgroup) {
-    CRANE_ERROR("Failed to get job#{} cgroup", job_id);
+  if (!job->cgroup) {
+    CRANE_ERROR("Failed to get cgroup for job#{}", job_id);
     ActivateTaskStatusChangeAsync_(
         job_id, crane::grpc::TaskStatus::Failed, ExitCode::kExitCodeCgroupError,
         fmt::format("Failed to get cgroup for job#{} ", job_id));
@@ -655,7 +654,7 @@ void JobManager::LaunchExecutionInstanceMt_(Execution* execution) {
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this task, and
   // we should send TaskStatusChange manually.
-  CraneErr err = SpawnSupervisor_(job_instance, execution);
+  CraneErr err = SpawnSupervisor_(job, execution);
   if (err != CraneErr::kOk) {
     ActivateTaskStatusChangeAsync_(
         job_id, crane::grpc::TaskStatus::Failed,
@@ -669,11 +668,11 @@ void JobManager::LaunchExecutionInstanceMt_(Execution* execution) {
     // will repeatedly be sent by timer and eventually be handled once the
     // SIGCHLD processing callback sees the pid in index maps.
     // Now we do not support launch multiple tasks in a job.
-    CRANE_TRACE("[job #{}] Spawned successfullly.", job_instance->job_id);
-    job_instance->executions.emplace(execution->pid,
-                                     std::unique_ptr<Execution>(execution));
+    CRANE_TRACE("[job #{}] Spawned successfullly.", job->job_id);
+    job->executions.emplace(execution->pid,
+                            std::unique_ptr<Execution>(execution));
     absl::MutexLock lk(&m_mtx_);
-    m_pid_job_map_.emplace(execution->pid, job_instance);
+    m_pid_job_map_.emplace(execution->pid, job);
   }
 }
 

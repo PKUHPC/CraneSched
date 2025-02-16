@@ -39,9 +39,6 @@ class CranedStub {
 
   ~CranedStub();
 
-  static crane::grpc::ExecuteTasksRequest NewExecuteTasksRequests(
-      const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks);
-
   std::vector<task_id_t> ExecuteTasks(
       const crane::grpc::ExecuteTasksRequest &request);
 

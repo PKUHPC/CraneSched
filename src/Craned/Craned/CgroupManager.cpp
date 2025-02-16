@@ -550,7 +550,7 @@ std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
   }
 
   CRANE_TRACE(
-      "Setting cgroup limit of task #{}. CPU: {:.2f}, Mem: {:.2f} MB Gres: {}.",
+      "Setting cgroup for job #{}. CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}.",
       job_id, res.allocatable_res_in_node().cpu_core_limit(),
       res.allocatable_res_in_node().memory_limit_bytes() / (1024.0 * 1024.0),
       util::ReadableGrpcDresInNode(res.dedicated_res_in_node()));

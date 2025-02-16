@@ -55,6 +55,7 @@ struct JobStatusSpec {
 };
 
 // Job allocation info
+// allocation = job spec + execution info
 struct JobInstance {
   explicit JobInstance(JobSpec&& spec);
   JobInstance(const JobSpec& spec);
@@ -223,7 +224,8 @@ class JobManager {
   // The two following maps are used as indexes
   // and doesn't have the ownership of underlying objects.
   // A JobInstance may contain more than one TaskExecutionInstance.
-  absl::flat_hash_map<pid_t /*pid*/, JobInstance*> m_pid_job_map_
+  // FIXME: Refactor and remove this.
+  [[deprecated]] absl::flat_hash_map<pid_t /*pid*/, JobInstance*> m_pid_job_map_
       ABSL_GUARDED_BY(m_mtx_);
 
   absl::Mutex m_mtx_;

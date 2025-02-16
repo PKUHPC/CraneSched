@@ -256,16 +256,6 @@ CraneErr CranedStub::QueryCranedRemoteMeta(
   return CraneErr::kGenericFailure;
 }
 
-crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
-    const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks) {
-  crane::grpc::ExecuteTasksRequest request;
-
-  for (TaskInCtld *task : tasks) {
-  }
-
-  return request;
-}
-
 CranedKeeper::CranedKeeper(uint32_t node_num) : m_cq_closed_(false) {
   m_pmr_pool_res_ = std::make_unique<std::pmr::synchronized_pool_resource>();
   m_tag_sync_allocator_ =
