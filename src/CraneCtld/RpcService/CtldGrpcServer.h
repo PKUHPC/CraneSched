@@ -168,6 +168,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::EnableAutoPowerControlRequest *request,
       crane::grpc::EnableAutoPowerControlReply *response) override;
 
+  grpc::Status QueryLeaderId(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryLeaderIdRequest *request,
+      crane::grpc::QueryLeaderIdReply *response) override;
+
  private:
   CtldServer *m_ctld_server_;
 };

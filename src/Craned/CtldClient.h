@@ -160,6 +160,8 @@ class CtldClient {
 
   void AsyncSendThread_();
 
+  int ConnectToServersAndFindLeader_(int prev_leader_id);
+
   absl::Mutex m_task_status_change_mtx_;
 
   std::list<TaskStatusChangeQueueElem> m_task_status_change_list_
@@ -168,9 +170,11 @@ class CtldClient {
   std::thread m_async_send_thread_;
   std::atomic_bool m_thread_stop_{false};
 
-  std::shared_ptr<Channel> m_ctld_channel_;
+  std::vector<std::shared_ptr<Channel>> m_ctld_channels_;
 
-  std::unique_ptr<CraneCtldForInternal::Stub> m_stub_;
+  std::vector<std::unique_ptr<CraneCtldForInternal::Stub>> m_stubs_;
+
+  std::atomic<int> m_cur_leader_id_ = 0;
 
   CranedId m_craned_id_;
 

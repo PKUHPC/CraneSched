@@ -1146,7 +1146,16 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     return grpc::Status{grpc::StatusCode::UNAVAILABLE,
                         "CraneCtld Server is not ready"};
 
+  if (!g_raft_server->IsLeader()) {
+    response->set_ok(false);
+    response->set_cur_leader_id(g_raft_server->GetLeaderId());
+    return grpc::Status::OK;
+  }
+
   *response = g_meta_container->QueryClusterInfo(*request);
+
+  g_raft_server->server_list();
+  g_raft_server->print_status();
   return grpc::Status::OK;
 }
 
@@ -1296,6 +1305,14 @@ grpc::Status CraneCtldServiceImpl::EnableAutoPowerControl(
     response->add_modified_nodes(craned_id);
   }
 
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::QueryLeaderId(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryLeaderIdRequest *request,
+    crane::grpc::QueryLeaderIdReply *response) {
+  response->set_leader_id(g_raft_server->GetLeaderId());
   return grpc::Status::OK;
 }
 

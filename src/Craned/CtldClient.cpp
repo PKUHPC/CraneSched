@@ -306,16 +306,21 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
 
+  std::shared_ptr<Channel> channel;
+
   if (g_config.ListenConf.UseTls)
-    m_ctld_channel_ = CreateTcpTlsCustomChannelByHostname(
-        server_address, g_config.CraneCtldForInternalListenPort,
-        g_config.ListenConf.TlsCerts, channel_args);
+    channel = CreateTcpTlsCustomChannelByHostname(server_address, listen_port,
+                                                  g_config.ListenConf.TlsCerts,
+                                                  channel_args);
   else
-    m_ctld_channel_ = CreateTcpInsecureCustomChannel(
-        server_address, g_config.CraneCtldForInternalListenPort, channel_args);
+    channel = CreateTcpInsecureCustomChannel(server_address, listen_port,
+                                             channel_args);
+
+  m_ctld_channels_.emplace_back(channel);
 
   // std::unique_ptr will automatically release the dangling stub.
-  m_stub_ = CraneCtldForInternal::NewStub(m_ctld_channel_);
+  m_stubs_.emplace_back(CraneCtld::NewStub(channel));
+}
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
@@ -507,7 +512,8 @@ void CtldClient::AsyncSendThread_() {
       if (status_change.reason.has_value())
         request.set_reason(status_change.reason.value());
 
-      status = m_stub_->TaskStatusChange(&context, request, &reply);
+      status = m_stubs_[m_cur_leader_id_]->TaskStatusChange(&context, request,
+                                                            &reply);
       if (!status.ok()) {
         CRANE_ERROR(
             "Failed to send TaskStatusChange: "
@@ -531,11 +537,78 @@ void CtldClient::AsyncSendThread_() {
         } else
           changes.pop_front();
       } else {
-        CRANE_TRACE("TaskStatusChange for task #{} sent. reply.ok={}",
-                    status_change.task_id, reply.ok());
-        changes.pop_front();
+        CRANE_TRACE(
+            "TaskStatusChange for task #{} sent to server #{}. reply.ok={}",
+            status_change.task_id, m_cur_leader_id_, reply.ok());
+        if (!reply.ok()) {
+          if (reply.cur_leader_id() != -2) {
+            m_cur_leader_id_ = reply.cur_leader_id();
+            continue;
+          }
+        } else {
+          changes.pop_front();
+        }
       }
     }
+  }
+}
+
+int CtldClient::ConnectToServersAndFindLeader_(int prev_leader_id) {
+  int len = m_ctld_channels_.size();
+  static std::vector<bool> prev_conn_states(len, false);
+
+  bool connected = m_ctld_channels_[prev_leader_id]->WaitForConnected(
+      std::chrono::system_clock::now() + std::chrono::seconds(3));
+
+  if (connected) {
+    if (!prev_conn_states[prev_leader_id]) {
+      prev_conn_states[prev_leader_id] = true;
+      int check_id = g_ctld_client->OnCraneCtldConnected(prev_leader_id);
+
+      if (check_id == prev_leader_id || check_id == -2)
+        return check_id;
+      else if (check_id == -1) {
+        CRANE_ERROR("Raft Server Error! leader id -1");
+        m_cur_leader_id_ = 0;
+        return -1;
+      } else {
+        m_cur_leader_id_ = check_id;
+        return -2;
+      }
+    } else {
+      prev_conn_states[prev_leader_id] = true;
+      return prev_leader_id;
+    }
+  } else {  // start query
+    prev_conn_states[prev_leader_id] = false;
+
+    for (int i = 1; i < len; i++) {
+      int id = (prev_leader_id + i) % len;
+
+      connected = m_ctld_channels_[id]->WaitForConnected(
+          std::chrono::system_clock::now() + std::chrono::seconds(3));
+
+      if (connected) {
+        if (!prev_conn_states[id]) {
+          prev_conn_states[id] = true;
+
+          int leader_id = g_ctld_client->OnCraneCtldConnected(id);
+          if (leader_id == id || leader_id == -2)
+            return leader_id;
+          else if (leader_id == -1) {
+            CRANE_ERROR("Raft Server Error! leader id -1");
+            m_cur_leader_id_ = 0;
+            return -1;
+          } else {
+            m_cur_leader_id_ = leader_id;
+            return -2;
+          }
+        }
+      } else {
+        prev_conn_states[id] = false;
+      }
+    }
+    return -2;
   }
 }
 
