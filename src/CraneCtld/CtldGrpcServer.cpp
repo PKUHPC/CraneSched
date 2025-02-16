@@ -83,6 +83,12 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
     grpc::ServerContext *context,
     const crane::grpc::TaskStatusChangeRequest *request,
     crane::grpc::TaskStatusChangeReply *response) {
+  if (!g_raft_server->IsLeader()) {
+    response->set_ok(false);
+    response->set_cur_leader_id(g_raft_server->GetLeaderId());
+    return grpc::Status::OK;
+  }
+
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
 
@@ -90,6 +96,7 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
       request->task_id(), request->craned_id(), request->new_status(),
       request->exit_code(), std::move(reason));
   response->set_ok(true);
+  response->set_cur_leader_id(-2);
   return grpc::Status::OK;
 }
 
@@ -97,6 +104,7 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
     grpc::ServerContext *context,
     const crane::grpc::CranedRegisterRequest *request,
     crane::grpc::CranedRegisterReply *response) {
+  response->set_cur_leader_id(g_raft_server->GetLeaderId());
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
     response->set_ok(false);
     return grpc::Status::OK;
@@ -1018,7 +1026,16 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryClusterInfoRequest *request,
     crane::grpc::QueryClusterInfoReply *response) {
+  if (!g_raft_server->IsLeader()) {
+    response->set_ok(false);
+    response->set_cur_leader_id(g_raft_server->GetLeaderId());
+    return grpc::Status::OK;
+  }
+
   *response = g_meta_container->QueryClusterInfo(*request);
+
+  g_raft_server->server_list();
+  g_raft_server->print_status();
   return grpc::Status::OK;
 }
 
@@ -1243,6 +1260,14 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
     }
     }
   }
+}
+
+grpc::Status CraneCtldServiceImpl::QueryLeaderId(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryLeaderIdRequest *request,
+    crane::grpc::QueryLeaderIdReply *response) {
+  response->set_leader_id(g_raft_server->GetLeaderId());
+  return grpc::Status::OK;
 }
 
 CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {

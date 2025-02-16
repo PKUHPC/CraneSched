@@ -41,16 +41,19 @@ class CtldClient {
   void SetCranedId(CranedId const& craned_id) { m_craned_id_ = craned_id; }
 
   /***
-   * InitChannelAndStub the CtldClient to CraneCtld.
+   * AddCtldChannelAndStub the CtldClient to CraneCtld.
    * @param server_address The "[Address]:[Port]" of CraneCtld.
    * @return
    * If CraneCtld is successfully connected, kOk is returned. <br>
    * If CraneCtld cannot be connected within 3s, kConnectionTimeout is
    * returned.
    */
-  void InitChannelAndStub(const std::string& server_address);
+  void AddCtldChannelAndStub(const std::string& server_address,
+                             const std::string& listen_port);
 
-  void OnCraneCtldConnected();
+  void InitSendThread();
+
+  int OnCraneCtldConnected(int server_id);
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
@@ -66,6 +69,8 @@ class CtldClient {
  private:
   void AsyncSendThread_();
 
+  int ConnectToServersAndFindLeader_(int prev_leader_id);
+
   absl::Mutex m_task_status_change_mtx_;
 
   std::list<TaskStatusChangeQueueElem> m_task_status_change_list_
@@ -74,9 +79,11 @@ class CtldClient {
   std::thread m_async_send_thread_;
   std::atomic_bool m_thread_stop_{false};
 
-  std::shared_ptr<Channel> m_ctld_channel_;
+  std::vector<std::shared_ptr<Channel>> m_ctld_channels_;
 
-  std::unique_ptr<CraneCtld::Stub> m_stub_;
+  std::vector<std::unique_ptr<CraneCtld::Stub>> m_stubs_;
+
+  std::atomic<int> m_cur_leader_id_ = 0;
 
   CranedId m_craned_id_;
 

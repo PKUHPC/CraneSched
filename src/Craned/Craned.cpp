@@ -221,14 +221,24 @@ void ParseConfig(int argc, char** argv) {
       }
 
       if (config["ControlMachine"]) {
-        g_config.ControlMachine = config["ControlMachine"].as<std::string>();
-      }
+        for (auto it = config["ControlMachine"].begin();
+             it != config["ControlMachine"].end(); ++it) {
+          auto node = it->as<YAML::Node>();
+          Craned::Config::ServerEndPoint server_node;
 
-      if (config["CraneCtldListenPort"])
-        g_config.CraneCtldListenPort =
-            config["CraneCtldListenPort"].as<std::string>();
-      else
-        g_config.CraneCtldListenPort = kCtldDefaultPort;
+          if (node["hostname"])
+            server_node.HostName = node["hostname"].as<std::string>();
+          else
+            std::exit(1);
+
+          if (node["listenPort"])
+            server_node.ListenPort = node["listenPort"].as<std::string>();
+          else
+            server_node.ListenPort = kCtldDefaultPort;
+
+          g_config.ControlMachine.push_back(std::move(server_node));
+        }
+      }
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
@@ -490,7 +500,8 @@ void ParseConfig(int argc, char** argv) {
       std::exit(1);
     }
   } else {
-    g_config.ControlMachine = parsed_args["server-address"].as<std::string>();
+    g_config.ControlMachine.emplace_back(
+        parsed_args["server-address"].as<std::string>(), kCtldDefaultPort);
   }
 
   if (crane::GetIpAddrVer(g_config.ListenConf.CranedListenAddr) == -1) {
@@ -627,7 +638,10 @@ void GlobalVariableInit() {
   g_ctld_client = std::make_unique<Craned::CtldClient>();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
 
-  g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
+  for (const auto& node : g_config.ControlMachine) {
+    g_ctld_client->AddCtldChannelAndStub(node.HostName, node.ListenPort);
+  }
+  g_ctld_client->InitSendThread();
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
