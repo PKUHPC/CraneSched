@@ -56,7 +56,7 @@ bool TaskScheduler::Init() {
   using crane::grpc::TaskInEmbeddedDb;
 
   bool ok;
-  CraneErr err;
+  CraneErrCode err;
 
   EmbeddedDbClient::DbSnapshot snapshot;
   ok = g_embedded_db_client->RetrieveLastSnapshot(&snapshot);
@@ -82,8 +82,8 @@ bool TaskScheduler::Init() {
       CRANE_TRACE("Restore task #{} from embedded running queue.",
                   task->TaskId());
 
-      err = AcquireTaskAttributes(task.get());
-      if (err != CraneErr::kOk || task->type == crane::grpc::Interactive) {
+      auto result = AcquireTaskAttributes(task.get());
+      if (!result || task->type == crane::grpc::Interactive) {
         task->SetStatus(crane::grpc::Failed);
         ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
                                                            task->RuntimeAttr());
@@ -93,13 +93,13 @@ bool TaskScheduler::Init() {
               "mark the task as FAILED.",
               task_id);
         }
-        if (err != CraneErr::kOk)
+        if (!result)
           CRANE_INFO(
               "Failed to acquire task attributes for restored running task "
               "#{}. "
               "Error Code: {}. "
               "Mark it as FAILED and move it to the ended queue.",
-              task_id, CraneErrStr(err));
+              task_id, CraneErrStr(result.error()));
         else {
           CRANE_INFO("Mark running interactive task {} as FAILED.", task_id);
           for (const CranedId& craned_id : task->CranedIds()) {
@@ -168,7 +168,7 @@ bool TaskScheduler::Init() {
       } else {
         crane::grpc::TaskStatus status;
         err = stub->CheckTaskStatus(task->TaskId(), &status);
-        if (err == CraneErr::kOk) {
+        if (err == CraneErrCode::SUCCESS) {
           task->SetStatus(status);
           ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
               0, task->TaskDbId(), task->RuntimeAttr());
@@ -283,8 +283,8 @@ bool TaskScheduler::Init() {
 
         // If the craned is down, just ignore it.
         if (stub && !stub->Invalid()) {
-          CraneErr err = stub->ReleaseCgroupForTasks(cgroups);
-          if (err != CraneErr::kOk) {
+          CraneErrCode err = stub->ReleaseCgroupForTasks(cgroups);
+          if (err != CraneErrCode::SUCCESS) {
             CRANE_ERROR("Failed to Release cgroup RPC for {} tasks on Node {}",
                         cgroups.size(), craned_id);
           }
@@ -319,13 +319,13 @@ bool TaskScheduler::Init() {
       }
 
       if (!mark_task_as_failed &&
-          AcquireTaskAttributes(task.get()) != CraneErr::kOk) {
+          !(AcquireTaskAttributes(task.get()))) {
         CRANE_ERROR("AcquireTaskAttributes failed for task #{}", task_id);
         mark_task_as_failed = true;
       }
 
       if (!mark_task_as_failed &&
-          CheckTaskValidity(task.get()) != CraneErr::kOk) {
+          !(CheckTaskValidity(task.get()))) {
         CRANE_ERROR("CheckTaskValidity failed for task #{}", task_id);
         mark_task_as_failed = true;
       }
@@ -774,7 +774,7 @@ void TaskScheduler::ScheduleThread_() {
           }
 
           auto err = stub->CreateCgroupForTasks(cgroup_specs);
-          if (err == CraneErr::kOk) {
+          if (err == CraneErrCode::SUCCESS) {
             bl.DecrementCount();
             return;
           }
@@ -996,8 +996,8 @@ void TaskScheduler::ScheduleThread_() {
                 // If the craned is down, just ignore it.
                 if (stub == nullptr || stub->Invalid()) return;
 
-                CraneErr err = stub->ReleaseCgroupForTasks(cgroups_to_release);
-                if (err != CraneErr::kOk)
+                CraneErrCode err = stub->ReleaseCgroupForTasks(cgroups_to_release);
+                if (err != CraneErrCode::SUCCESS)
                   CRANE_ERROR(
                       "Failed to Release cgroup RPC for {} tasks on Node {}",
                       cgroups_to_release.size(), craned_id);
@@ -1052,10 +1052,10 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
   return std::move(future);
 }
 
-std::future<CraneErr> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
+std::future<CraneErrCode> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
                                                           int64_t secs) {
-  std::promise<CraneErr> promise;
-  std::future<CraneErr> future = promise.get_future();
+  std::promise<CraneErrCode> promise;
+  std::future<CraneErrCode> future = promise.get_future();
 
   m_task_timer_queue_.enqueue(
       {std::make_pair(task_id, secs), std::move(promise)});
@@ -1064,8 +1064,8 @@ std::future<CraneErr> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
   return std::move(future);
 }
 
-CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
-  if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErr::kInvalidParam;
+CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
+  if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErrCode::ERR_INVALID_PARAM;
 
   std::vector<CranedId> craned_ids;
 
@@ -1091,7 +1091,7 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
     if (!found) {
       CRANE_DEBUG("Task #{} not in Pd/Rn queue for time limit change!",
                   task_id);
-      return CraneErr::kNonExistent;
+      return CraneErrCode::ERR_NON_EXISTENT;
     }
 
     task->time_limit = absl::Seconds(secs);
@@ -1104,8 +1104,8 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
   for (const CranedId& craned_id : craned_ids) {
     auto stub = g_craned_keeper->GetCranedStub(craned_id);
     if (stub && !stub->Invalid()) {
-      CraneErr err = stub->ChangeTaskTimeLimit(task_id, secs);
-      if (err != CraneErr::kOk) {
+      CraneErrCode err = stub->ChangeTaskTimeLimit(task_id, secs);
+      if (err != CraneErrCode::SUCCESS) {
         CRANE_ERROR("Failed to change time limit of task #{} on Node {}",
                     task_id, craned_id);
         return err;
@@ -1113,25 +1113,25 @@ CraneErr TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
     }
   }
 
-  return CraneErr::kOk;
+  return CraneErrCode::SUCCESS;
 }
 
-CraneErr TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priority) {
+CraneErrCode TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priority) {
   m_pending_task_map_mtx_.Lock();
 
   auto pd_iter = m_pending_task_map_.find(task_id);
   if (pd_iter == m_pending_task_map_.end()) {
     m_pending_task_map_mtx_.Unlock();
     CRANE_TRACE("Task #{} not in Pd queue for priority change", task_id);
-    return CraneErr::kNonExistent;
+    return CraneErrCode::ERR_NON_EXISTENT;
   }
 
   pd_iter->second->mandated_priority = priority;
   m_pending_task_map_mtx_.Unlock();
-  return CraneErr::kOk;
+  return CraneErrCode::SUCCESS;
 }
 
-CraneErr TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
+CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
                                                   bool hold) {
   m_pending_task_map_mtx_.Lock();
 
@@ -1139,7 +1139,7 @@ CraneErr TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
   if (pd_iter == m_pending_task_map_.end()) {
     m_pending_task_map_mtx_.Unlock();
     CRANE_TRACE("Task #{} not in Pd queue for hold/release", task_id);
-    return CraneErr::kNonExistent;
+    return CraneErrCode::ERR_NON_EXISTENT;
   }
 
   TaskInCtld* task = pd_iter->second.get();
@@ -1155,10 +1155,10 @@ CraneErr TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
                                                              runtime_attr))
     CRANE_ERROR("Failed to update runtime attr of task #{} to DB", task_id);
 
-  return CraneErr::kOk;
+  return CraneErrCode::SUCCESS;
 }
 
-CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
+CraneErrCode TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
   task_id_t task_id = task->TaskId();
 
   bool need_to_be_terminated = false;
@@ -1180,7 +1180,7 @@ CraneErr TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
     }
   }
 
-  return CraneErr::kOk;
+  return CraneErrCode::SUCCESS;
 }
 
 crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
@@ -1298,8 +1298,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
         }
         reply.add_cancelled_tasks(task_id);
       } else {
-        CraneErr err = TerminateRunningTaskNoLock_(task);
-        if (err == CraneErr::kOk) {
+        CraneErrCode err = TerminateRunningTaskNoLock_(task);
+        if (err == CraneErrCode::SUCCESS) {
           reply.add_cancelled_tasks(task_id);
         } else {
           reply.add_not_cancelled_tasks(task_id);
@@ -1376,7 +1376,7 @@ void TaskScheduler::CleanTaskTimerQueueCb_(
       m_task_timer_handles_.erase(timer_it);
     }
 
-    CraneErr err;
+    CraneErrCode err;
     if (secs == 0) {  // Remove timer
       CRANE_TRACE("Remove hold constraint timer for task #{}.", task_id);
       err = SetHoldForTaskInRamAndDb_(task_id, false);
@@ -1389,8 +1389,8 @@ void TaskScheduler::CleanTaskTimerQueueCb_(
 
       auto on_timer_cb = [this, task_id](const uvw::timer_event&,
                                          uvw::timer_handle& handle) {
-        CraneErr err = SetHoldForTaskInRamAndDb_(task_id, false);
-        if (err != CraneErr::kOk)
+        CraneErrCode err = SetHoldForTaskInRamAndDb_(task_id, false);
+        if (err != CraneErrCode::SUCCESS)
           CRANE_ERROR("Failed to release task #{} after hold.", task_id);
 
         handle.close();
@@ -1714,8 +1714,8 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
 
       // If the craned is down, just ignore it.
       if (stub && !stub->Invalid()) {
-        CraneErr err = stub->ReleaseCgroupForTasks(cgroups);
-        if (err != CraneErr::kOk) {
+        CraneErrCode err = stub->ReleaseCgroupForTasks(cgroups);
+        if (err != CraneErrCode::SUCCESS) {
           CRANE_ERROR("Failed to Release cgroup RPC for {} tasks on Node {}",
                       cgroups.size(), craned_id);
         }
@@ -2479,9 +2479,13 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
   }
 }
 
-CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
+CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   auto part_it = g_config.Partitions.find(task->partition_id);
-  if (part_it == g_config.Partitions.end()) return CraneErr::kInvalidParam;
+  if (part_it == g_config.Partitions.end()) {
+        CRANE_ERROR("Failed to call AcquireTaskAttributes: {}",
+                CraneErrStr(CraneErrCode::ERR_INVALID_PARTITION));
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
+  }
 
   task->partition_priority = part_it->second.priority;
 
@@ -2511,14 +2515,14 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
       task->Username(), task->account, task);
   if (!check_qos_result) {
     CRANE_ERROR("Failed to call CheckAndApplyQosLimitOnTask: {}",
-                check_qos_result.error());
-    return CraneErr::kInvalidParam;
+                CraneErrStr(check_qos_result.error()));
+    return check_qos_result;
   }
 
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().nodelist(), &nodes);
-    if (!ok) return CraneErr::kInvalidParam;
+    if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_NODE_LIST);
 
     for (auto&& node : nodes) task->included_nodes.emplace(std::move(node));
   }
@@ -2526,17 +2530,17 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   if (!task->TaskToCtld().excludes().empty() && task->excluded_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().excludes(), &nodes);
-    if (!ok) return CraneErr::kInvalidParam;
+    if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_EX_NODE_LIST);
 
     for (auto&& node : nodes) task->excluded_nodes.emplace(std::move(node));
   }
 
-  return CraneErr::kOk;
+  return {};
 }
 
-CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
+CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   if (!CheckIfTimeLimitIsValid(task->time_limit))
-    return CraneErr::kInvalidParam;
+    return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND) ;
 
   // Check whether the selected partition is able to run this task.
   std::unordered_set<std::string> avail_nodes;
@@ -2566,7 +2570,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
                   .memory_sw_bytes),
           util::ReadableTypedDeviceMap(
               metas_ptr->partition_global_meta.res_total.GetDeviceMap()));
-      return CraneErr::kNoResource;
+      return std::unexpected(CraneErrCode::ERR_NO_RESOURCE);  
     }
 
     if (task->node_num > metas_ptr->craned_ids.size()) {
@@ -2574,7 +2578,7 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
           "Nodes not enough for task #{}. "
           "Partition total Nodes: {}",
           task->TaskId(), metas_ptr->craned_ids.size());
-      return CraneErr::kInvalidNodeNum;
+      return std::unexpected(CraneErrCode::ERR_INVALID_NODE_NUM);
     }
 
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
@@ -2596,10 +2600,10 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
         "Resource not enough. Task #{} needs {} nodes, while only {} "
         "nodes satisfy its requirement.",
         task->TaskId(), task->node_num, avail_nodes.size());
-    return CraneErr::kNoAvailNode;
+    return std::unexpected(CraneErrCode::ERR_NO_ENOUGH_NODE);
   }
 
-  return CraneErr::kOk;
+  return {};
 }
 
 void TaskScheduler::TerminateTasksOnCraned(const CranedId& craned_id,

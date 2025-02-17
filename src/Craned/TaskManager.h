@@ -164,7 +164,7 @@ struct TaskInstance {
 
   // Task execution results
   bool orphaned{false};
-  CraneErr err_before_exec{CraneErr::kOk};
+  CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
   bool cancelled_by_user{false};
   bool terminated_by_timeout{false};
   ProcSigchldInfo sigchld_info{};
@@ -184,7 +184,7 @@ class TaskManager {
 
   ~TaskManager();
 
-  CraneErr ExecuteTaskAsync(crane::grpc::TaskToD const& task);
+  CraneErrCode ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
   CraneExpected<task_id_t> QueryTaskIdFromPidAsync(pid_t pid);
 
@@ -255,7 +255,7 @@ class TaskManager {
 
   void LaunchTaskInstanceMt_(TaskInstance* instance);
 
-  CraneErr SpawnProcessInInstance_(TaskInstance* instance,
+  CraneErrCode SpawnProcessInInstance_(TaskInstance* instance,
                                    ProcessInstance* process);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
@@ -323,7 +323,7 @@ class TaskManager {
    * if the signal is invalid, kInvalidParam is returned.
    * otherwise, kGenericFailure is returned.
    */
-  static CraneErr KillProcessInstance_(const ProcessInstance* proc, int signum);
+  static CraneErrCode KillProcessInstance_(const ProcessInstance* proc, int signum);
 
   // Note: the three maps below are NOT protected by any mutex.
   //  They should be modified in libev callbacks to avoid races.
