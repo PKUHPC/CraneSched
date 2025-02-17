@@ -961,7 +961,7 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
       task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
     } else {
       if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
-          CRANE_ERROR("Account '{}' is not in your account list", task->account);
+          CRANE_ERROR("Account '{}' is not in  account list", task->account);
           return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
       }
     }

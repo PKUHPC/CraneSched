@@ -953,7 +953,7 @@ CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
-    CRANE_ERROR("Unknown user {}", user);
+    CRANE_ERROR("Unknown user {} in user list", user);
     return std::unexpected(CraneErrCode::ERR_INVALID_OP_USER);
   }
 
@@ -963,7 +963,7 @@ CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
     if (partition_it == user_share_ptr->account_to_attrs_map.at(account)
                             .allowed_partition_qos_map.end()) {
 
-      CRANE_ERROR("Partition is not allowed for this user");
+      CRANE_ERROR("Partition is not allowed for this user {}", user);
       return std::unexpected(CraneErrCode::ERR_ALLOWED_PARTITION);
     }
     if (task->qos.empty()) {
@@ -979,7 +979,7 @@ CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
       // Check whether task.qos in the qos list
       if (!ranges::contains(partition_it->second.second, task->qos)) {
         CRANE_ERROR(
-            "The qos '{}' you set is not in partition's allowed qos list",
+            "The qos '{}' set is not in partition's allowed qos list",
             task->qos);
         return std::unexpected(CraneErrCode::ERR_HAS_ALLOWED_QOS_IN_PARTITION);
       }
