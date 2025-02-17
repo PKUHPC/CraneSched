@@ -1857,7 +1857,8 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser_(
     }
   }
 
-  if (res_user.deleted && !g_vault_client->RevokeCert(res_user.serial_number))
+  if (res_user.deleted && res_user.serial_number != "" &&
+      !g_vault_client->RevokeCert(res_user.serial_number))
     return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
 
   mongocxx::client_session::with_transaction_cb callback =
