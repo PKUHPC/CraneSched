@@ -97,7 +97,8 @@ enum ExitCodeEnum : uint16_t {
 
 namespace Internal {
 constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> CraneErrStrArr = {
-          "Success",
+        //code 0-9
+        "Success",
         "Invalid UID",
         "You are not a user of Crane",
         "The entered user is not a user of Crane",
@@ -107,6 +108,7 @@ constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> C
         "he user is not allowed to access account",
         "Unknown admin level",
         "The user does not belong to this account",
+        //code 10-19
         "No account is specified for the user",
         "The entered account does not exist",
         "The account already exists in the crane",
@@ -117,6 +119,7 @@ constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> C
         "The entered account or user does not include this partition",
         "The partition already exists in the account or user",
         "Parent account does not include the partition",
+        //code 20-29
         "The user does not contain any partitions, operation cannot be performed",
         "Child has partiton error",
         "The user has no QoS available for this partition to be used",
@@ -127,6 +130,7 @@ constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> C
         "Failed to convert value to integer",
         "Invalid time limit value",
         "The entered account or user does not include this qos",
+        //code 30-39
         "The Qos already exists in the account or user",
         "Parent account does not include the qos",
         "Set allowed qos error",
@@ -137,6 +141,7 @@ constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> C
         "The Qos not allowed or is already the default qos",
         "Is default qos error",
         "Fail to update data in database",
+        //code 40-49
         "Generic Failure",
         "Resource not enough for task",
         "Non-existent Error",
@@ -147,6 +152,7 @@ constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> C
         "cpus-per-task reached the user's limit",
         "Nodes num not enough for task",
         "System Error",
+        //code 50-59
         "Existing Task",
         "System error occurred or the number of pending tasks exceeded maximum value",
         "Invalid Parameter",
@@ -157,6 +163,7 @@ constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> C
         "RPC Failure",
         "Token Request Failure",
         "Stream Broken",
+        //code 60-64
         "Invalid Stub",
         "CGroup Error",
         "Protobuf Error",
