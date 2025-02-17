@@ -87,8 +87,8 @@ std::expected<SignResponse, bool> VaultClient::Sign(
 
 bool VaultClient::RevokeCert(const std::string& serial_number) {
   try {
-    auto response = pki_external_->revokeCertificate(
-        Vault::Parameters{{"serial_number", serial_number}});
+    auto response =
+        RevokeCertificate_(Vault::Parameters{{"serial_number", serial_number}});
     if (!response) return false;
   } catch (const std::exception& e) {
     return false;
@@ -129,6 +129,14 @@ std::optional<std::string> VaultClient::ListRevokeCertificate_() {
                                          Vault::Path{"certs/revoked"}));
 }
 
+std::optional<std::string> VaultClient::RevokeCertificate_(
+    const Vault::Parameters& parameters) {
+  return post_(
+      *root_client_,
+      GetPkiUrl_(Vault::SecretMount{"pki_external"}, Vault::Path{"revoke"}),
+      parameters);
+}
+
 std::optional<std::string> VaultClient::list_(const Vault::Client& client,
                                               const Vault::Url& url) {
   if (!client.is_authenticated()) {
@@ -154,6 +162,40 @@ std::optional<std::string> VaultClient::list_(const Vault::Client& client,
   return std::nullopt;
 }
 
+// Revoking a non-existent certificate does not throw an error.
+std::optional<std::string> VaultClient::post_(
+    const Vault::Client& client, const Vault::Url& url,
+    const Vault::Parameters& parameters) {
+  if (!client.is_authenticated()) {
+    return std::nullopt;
+  }
+
+  nlohmann::json json = create_json(parameters);
+
+  auto response = client.getHttpClient().post(
+      url, client.getToken(), client.getNamespace(), json.dump());
+
+  if (Vault::HttpClient::is_success(response)) {
+    return response.value().body.value();
+  }
+  // Do not return an error when revoke not found certificate.
+  if (response) {
+    auto jsonResponse = nlohmann::json::parse(response.value().body.value());
+    const auto res_err = jsonResponse["errors"];
+    static const LazyRE2 pattern(
+        R"(certificate with serial (\S+) not found\.)");
+    if (jsonResponse.contains("errors") && res_err.is_array() &&
+        res_err.size() == 1 && RE2::FullMatch(res_err[0], *pattern)) {
+      CRANE_DEBUG("{}", res_err[0]);
+      return "";
+    } else {
+      client.getHttpClient().handleResponseError(response.value());
+    }
+  }
+
+  return std::nullopt;
+}
+
 Vault::Url VaultClient::GetPkiUrl_(const Vault::SecretMount secret_mount,
                                    const Vault::Path& path) const {
   return GetUrl_("/v1/" + secret_mount,
@@ -164,6 +206,27 @@ Vault::Url VaultClient::GetUrl_(const std::string& base,
                                 const Vault::Path& path) const {
   return Vault::Url{(tls_ ? "https://" : "http://") + address_ + ":" + port_ +
                     base + path};
+}
+
+nlohmann::json VaultClient::create_json(const Vault::Parameters& parameters) {
+  nlohmann::json json = nlohmann::json::object();
+  for (auto& [key, value] : parameters) {
+    if (std::holds_alternative<std::string>(value)) {
+      json[key] = std::get<std::string>(value);
+    } else if (std::holds_alternative<int>(value)) {
+      json[key] = std::get<int>(value);
+    } else if (std::holds_alternative<std::vector<std::string>>(value)) {
+      json[key] = std::get<std::vector<std::string>>(value);
+    } else if (std::holds_alternative<Vault::Map>(value)) {
+      auto map = std::get<Vault::Map>(value);
+      nlohmann::json j;
+      for (auto& [map_key, map_value] : map) {
+        j[map_key] = map_value;
+      }
+      json[key] = j;
+    }
+  }
+  return json;
 }
 
 }  // namespace vault

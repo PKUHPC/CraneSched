@@ -61,13 +61,22 @@ class VaultClient {
 
   std::optional<std::string> ListRevokeCertificate_();
 
+  std::optional<std::string> RevokeCertificate_(
+      const Vault::Parameters& parameters);
+
   std::optional<std::string> list_(const Vault::Client& client,
                                    const Vault::Url& url);
+
+  std::optional<std::string> post_(const Vault::Client& client,
+                                   const Vault::Url& url,
+                                   const Vault::Parameters& parameters);
 
   Vault::Url GetUrl_(const std::string& base, const Vault::Path& path) const;
 
   Vault::Url GetPkiUrl_(const Vault::SecretMount secret_mount,
                         const Vault::Path& path) const;
+
+  nlohmann::json create_json(const Vault::Parameters& parameters);
 
   std::unique_ptr<Vault::Client> root_client_;
   std::unique_ptr<Vault::Pki> pki_root_;

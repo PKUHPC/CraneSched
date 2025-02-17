@@ -37,11 +37,8 @@ grpc::Status CraneCtldSecureServiceImpl::SubmitBatchTask(
     const crane::grpc::SubmitBatchTaskRequest *request,
     crane::grpc::SubmitBatchTaskReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result) {
-    response->set_ok(false);
-    response->set_reason("Permission Denied.");
+  if (!extract_result)
     return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-  }
 
   uint32_t uid = extract_result.value();
   if (uid != request->task().uid()) {
@@ -82,12 +79,8 @@ grpc::Status CraneCtldSecureServiceImpl::SubmitBatchTasks(
   results.reserve(task_count);
 
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result) {
-    for (int i = 0; i < task_count; i++) {
-      response->mutable_reason_list()->Add("Permission Denied.");
-    }
+  if (!extract_result)
     return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-  }
 
   uint32_t uid = extract_result.value();
 
@@ -116,13 +109,8 @@ grpc::Status CraneCtldSecureServiceImpl::CancelTask(
     grpc::ServerContext *context, const crane::grpc::CancelTaskRequest *request,
     crane::grpc::CancelTaskReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result) {
-    for (auto task_id : request->filter_task_ids()) {
-      response->add_not_cancelled_tasks(task_id);
-      response->add_not_cancelled_reasons("Permission Denied.");
-    }
+  if (!extract_result)
     return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-  }
 
   uint32_t uid = extract_result.value();
   if (uid != request->operator_uid()) {
@@ -142,13 +130,8 @@ grpc::Status CraneCtldSecureServiceImpl::ModifyTask(
     crane::grpc::ModifyTaskReply *response) {
   using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result) {
-    for (auto task_id : request->task_ids()) {
-      response->add_not_modified_tasks(task_id);
-      response->add_not_modified_reasons("Permission Denied.");
-    }
+  if (!extract_result)
     return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-  }
 
   uint32_t uid = extract_result.value();
 
@@ -239,13 +222,8 @@ grpc::Status CraneCtldSecureServiceImpl::ModifyNode(
     const crane::grpc::ModifyCranedStateRequest *request,
     crane::grpc::ModifyCranedStateReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result) {
-    for (auto crane_id : request->craned_ids()) {
-      response->add_not_modified_nodes(crane_id);
-      response->add_not_modified_reasons("Permission Denied.");
-    }
+  if (!extract_result)
     return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-  }
 
   uint32_t uid = extract_result.value();
 
@@ -338,11 +316,8 @@ grpc::Status CraneCtldSecureServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result) {
-    response->set_ok(false);
-    response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
+  if (!extract_result)
     return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-  }
 
   uint32_t uid = extract_result.value();
 
@@ -375,11 +350,8 @@ grpc::Status CraneCtldSecureServiceImpl::AddUser(
     grpc::ServerContext *context, const crane::grpc::AddUserRequest *request,
     crane::grpc::AddUserReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result) {
-    response->set_ok(false);
-    response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
+  if (!extract_result)
     return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-  }
 
   uint32_t uid = extract_result.value();
 
@@ -424,11 +396,8 @@ grpc::Status CraneCtldSecureServiceImpl::AddQos(
     grpc::ServerContext *context, const crane::grpc::AddQosRequest *request,
     crane::grpc::AddQosReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result) {
-    response->set_ok(false);
-    response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
+  if (!extract_result)
     return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-  }
 
   uint32_t uid = extract_result.value();
 
@@ -466,11 +435,8 @@ grpc::Status CraneCtldSecureServiceImpl::ModifyAccount(
     const crane::grpc::ModifyAccountRequest *request,
     crane::grpc::ModifyAccountReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result) {
-    response->set_ok(false);
-    response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
+  if (!extract_result)
     return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-  }
 
   uint32_t uid = extract_result.value();
 
@@ -533,11 +499,8 @@ grpc::Status CraneCtldSecureServiceImpl::ModifyUser(
     grpc::ServerContext *context, const crane::grpc::ModifyUserRequest *request,
     crane::grpc::ModifyUserReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result) {
-    response->set_ok(false);
-    response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
+  if (!extract_result)
     return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-  }
 
   uint32_t uid = extract_result.value();
 
@@ -678,11 +641,8 @@ grpc::Status CraneCtldSecureServiceImpl::ModifyQos(
     grpc::ServerContext *context, const crane::grpc::ModifyQosRequest *request,
     crane::grpc::ModifyQosReply *response) {
   auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result) {
-    response->set_ok(false);
-    response->set_reason(crane::grpc::ErrCode::ERR_INVALID_UID);
+  if (!extract_result)
     return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
-  }
 
   uint32_t uid = extract_result.value();
 
@@ -1045,30 +1005,7 @@ grpc::Status CraneCtldSecureServiceImpl::BlockAccountOrUser(
 }
 
 grpc::Status CraneCtldServiceImpl::ResetUserCredential(
-    grpc::ServerContext *context,
-    const crane::grpc::ResetUserCredentialRequest *request,
-    crane::grpc::ResetUserCredentialReply *response) {
-  auto extract_result = CheckCertAllowedAndExtractUIDFromCert_(context);
-  if (!extract_result) {
-    response->set_ok(false);
-    response->set_reason(crane::grpc::ErrCode::ERR_PERMISSION_USER);
-    return grpc::Status::OK;
-  }
 
-  uint32_t uid = extract_result.value();
-
-  auto result =
-      g_account_manager->ResetUserCertificate(uid, request->username());
-  if (!result) {
-    response->set_ok(false);
-    response->set_reason(result.error());
-  } else {
-    response->set_ok(true);
-  }
-
-  return grpc::Status::OK;
-}
-grpc::Status CraneCtldSecureServiceImpl::ResetUserCredential(
     grpc::ServerContext *context,
     const crane::grpc::ResetUserCredentialRequest *request,
     crane::grpc::ResetUserCredentialReply *response) {
@@ -1077,97 +1014,97 @@ grpc::Status CraneCtldSecureServiceImpl::ResetUserCredential(
     response->set_ok(false);
     response->set_reason(crane::grpc::ErrCode::ERR_PERMISSION_USER);
     return grpc::Status(grpc::UNAUTHENTICATED, "Authentication failed");
+
+    uint32_t uid = extract_result.value();
+
+    std::vector<std::string> user_list;
+    for (const auto &username : request->user_list()) {
+      user_list.emplace_back(username);
+    }
+
+    auto result = g_account_manager->ResetUserCertificate(uid, user_list,
+                                                          request->is_force());
+    if (!result) {
+      response->set_ok(false);
+      response->set_reason(result.error());
+    } else {
+      response->set_ok(true);
+    }
+
+    return grpc::Status::OK;
   }
 
-  uint32_t uid = extract_result.value();
+  std::expected<uint32_t, bool>
+  CraneCtldSecureServiceImpl::CheckCertAllowedAndExtractUIDFromCert_(
+      const grpc::ServerContext *context) {
+    auto cert = context->auth_context()->FindPropertyValues("x509_pem_cert");
+    if (cert.empty()) return std::unexpected(false);
 
-  std::vector<std::string> user_list;
-  for (const auto &username : request->user_list()) {
-    user_list.emplace_back(username);
+    std::string certificate = std::string(cert[0].data(), cert[0].size());
+
+    auto result = util::ParseCertificate(certificate);
+    if (!result) return std::unexpected(false);
+
+    if (!g_vault_client->IsCertAllowed(result.value().second))
+      return std::unexpected(false);
+
+    std::vector<std::string> cn_parts =
+        absl::StrSplit(result.value().first, '.');
+    if (cn_parts.size() != 3 || cn_parts[0].empty())
+      return std::unexpected(false);
+
+    return static_cast<uint32_t>(std::stoul(cn_parts[0]));
   }
 
-  auto result = g_account_manager->ResetUserCertificate(uid, user_list,
-                                                        request->is_force());
-  if (!result) {
-    response->set_ok(false);
-    response->set_reason(result.error());
-  } else {
-    response->set_ok(true);
+  CtldSecureServer::CtldSecureServer() : m_service_impl_(nullptr) {
+    m_service_impl_ = std::make_unique<CraneCtldSecureServiceImpl>(this);
+
+    grpc::ServerBuilder builder;
+    const auto &listen_conf = g_config.ListenConf;
+    const auto &vault_conf = g_config.VaultConf;
+    if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
+
+    std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
+    ServerBuilderAddmTcpTlsListeningPort(
+        &builder, cranectld_listen_addr, listen_conf.CraneCtldListenPort,
+        vault_conf.ExternalCerts, vault_conf.ExternalCACerts.CACertContent);
+
+    builder.RegisterService(m_service_impl_.get());
+
+    m_server_ = builder.BuildAndStart();
+    if (!m_server_) {
+      CRANE_ERROR("Cannot start gRPC server!");
+      std::exit(1);
+    }
+
+    CRANE_INFO("CraneCtld is listening on {}:{} and Tls is {}",
+               cranectld_listen_addr, listen_conf.CraneCtldListenPort,
+               listen_conf.UseTls);
+
+    // Avoid the potential deadlock error in underlying absl::mutex
+    std::thread sigint_waiting_thread([p_server = m_server_.get()] {
+      util::SetCurrentThreadName("SIGINT_Waiter");
+
+      std::unique_lock<std::mutex> lk(s_sigint_mtx);
+      s_sigint_cv.wait(lk);
+
+      CRANE_TRACE("SIGINT captured. Calling Shutdown() on grpc server...");
+
+      // craned_keeper MUST be shutdown before GrpcServer.
+      // Otherwise, once GrpcServer is shut down, the main thread stops and
+      // g_craned_keeper.reset() is called. The Shutdown here and reset() in the
+      // main thread will access g_craned_keeper simultaneously and a race
+      // condition will occur.
+      g_craned_keeper->Shutdown();
+      g_ctld_for_cfored_server->Shutdown();
+      g_ctld_for_craned_server->Shutdown();
+      g_ctld_plain_server->Shutdown();
+      p_server->Shutdown(std::chrono::system_clock::now() +
+                         std::chrono::seconds(1));
+    });
+    sigint_waiting_thread.detach();
+
+    signal(SIGINT, &CtldSecureServer::signal_handler_func);
   }
-
-  return grpc::Status::OK;
-}
-
-std::expected<uint32_t, bool>
-CraneCtldSecureServiceImpl::CheckCertAllowedAndExtractUIDFromCert_(
-    const grpc::ServerContext *context) {
-  auto cert = context->auth_context()->FindPropertyValues("x509_pem_cert");
-  if (cert.empty()) return std::unexpected(false);
-
-  std::string certificate = std::string(cert[0].data(), cert[0].size());
-
-  auto result = util::ParseCertificate(certificate);
-  if (!result) return std::unexpected(false);
-
-  if (!g_vault_client->IsCertAllowed(result.value().second))
-    return std::unexpected(false);
-
-  std::vector<std::string> cn_parts = absl::StrSplit(result.value().first, '.');
-  if (cn_parts.size() != 3 || cn_parts[0].empty())
-    return std::unexpected(false);
-
-  return static_cast<uint32_t>(std::stoul(cn_parts[0]));
-}
-
-CtldSecureServer::CtldSecureServer() : m_service_impl_(nullptr) {
-  m_service_impl_ = std::make_unique<CraneCtldSecureServiceImpl>(this);
-
-  grpc::ServerBuilder builder;
-  const auto &listen_conf = g_config.ListenConf;
-  const auto &vault_conf = g_config.VaultConf;
-  if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
-
-  std::string cranectld_listen_addr = listen_conf.CraneCtldListenAddr;
-  ServerBuilderAddmTcpTlsListeningPort(
-      &builder, cranectld_listen_addr, listen_conf.CraneCtldListenPort,
-      vault_conf.ExternalCerts, vault_conf.ExternalCACerts.CACertContent);
-
-  builder.RegisterService(m_service_impl_.get());
-
-  m_server_ = builder.BuildAndStart();
-  if (!m_server_) {
-    CRANE_ERROR("Cannot start gRPC server!");
-    std::exit(1);
-  }
-
-  CRANE_INFO("CraneCtld is listening on {}:{} and Tls is {}",
-             cranectld_listen_addr, listen_conf.CraneCtldListenPort,
-             listen_conf.UseTls);
-
-  // Avoid the potential deadlock error in underlying absl::mutex
-  std::thread sigint_waiting_thread([p_server = m_server_.get()] {
-    util::SetCurrentThreadName("SIGINT_Waiter");
-
-    std::unique_lock<std::mutex> lk(s_sigint_mtx);
-    s_sigint_cv.wait(lk);
-
-    CRANE_TRACE("SIGINT captured. Calling Shutdown() on grpc server...");
-
-    // craned_keeper MUST be shutdown before GrpcServer.
-    // Otherwise, once GrpcServer is shut down, the main thread stops and
-    // g_craned_keeper.reset() is called. The Shutdown here and reset() in the
-    // main thread will access g_craned_keeper simultaneously and a race
-    // condition will occur.
-    g_craned_keeper->Shutdown();
-    g_ctld_for_cfored_server->Shutdown();
-    g_ctld_for_craned_server->Shutdown();
-    g_ctld_plain_server->Shutdown();
-    p_server->Shutdown(std::chrono::system_clock::now() +
-                       std::chrono::seconds(1));
-  });
-  sigint_waiting_thread.detach();
-
-  signal(SIGINT, &CtldSecureServer::signal_handler_func);
-}
 
 }  // namespace Ctld
