@@ -64,6 +64,12 @@ enum class CraneErr : uint16_t {
 template <typename T>
 using CraneExpected = std::expected<T, CraneErr>;
 
+using CraneErrCode = crane::grpc::ErrCode;
+using CraneRichError = crane::grpc::RichError;
+
+template <typename T>
+using CraneExpectedRich = std::expected<T, CraneRichError>;
+
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kCforedDefaultPort = "10012";
@@ -149,6 +155,14 @@ constexpr std::array<std::string_view, uint16_t(CraneErr::__ERR_SIZE)>
         "Not enough nodes which satisfy resource requirements",
 };
 
+}
+
+inline CraneRichError MakeCraneRichError(const std::string& description,
+                                         CraneErrCode err) {
+  CraneRichError rich_err;
+  rich_err.set_description(description);
+  rich_err.set_code(err);
+  return rich_err;
 }
 
 inline std::string_view CraneErrStr(CraneErr err) {
