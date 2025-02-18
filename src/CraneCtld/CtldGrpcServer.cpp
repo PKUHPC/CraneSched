@@ -629,23 +629,20 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryAccountInfoRequest *request,
     crane::grpc::QueryAccountInfoReply *response) {
-  std::unordered_map<std::string, Account> res_account_map;
-
   std::vector<std::string> account_list;
   for (const auto &account : request->account_list()) {
     account_list.emplace_back(account);
   }
 
-  auto modify_res = g_account_manager->QueryAccountInfo(
-      request->uid(), account_list, &res_account_map);
-  if (modify_res) {
+  auto res = g_account_manager->QueryAccountInfo(request->uid(), account_list);
+  if (res) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_code(modify_res.error());
+    response->set_code(res.error());
   }
 
-  for (const auto &it : res_account_map) {
+  for (const auto &it : res.value()) {
     const auto &account = it.second;
     // put the account info into grpc element
     auto *account_info = response->mutable_account_list()->Add();
@@ -688,22 +685,19 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryUserInfoRequest *request,
     crane::grpc::QueryUserInfoReply *response) {
-  std::unordered_map<uid_t, User> res_user_map;
-
   std::vector<std::string> user_list;
   for (const auto &user : request->user_list()) {
     user_list.emplace_back(user);
   }
-  auto modify_res = g_account_manager->QueryUserInfo(request->uid(), user_list,
-                                                     &res_user_map);
-  if (modify_res) {
+  auto res = g_account_manager->QueryUserInfo(request->uid(), user_list);
+  if (res) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_code(modify_res.error());
+    response->set_code(res.error());
   }
 
-  for (const auto &it : res_user_map) {
+  for (const auto &it : res.value()) {
     const auto &user = it.second;
     for (const auto &[account, item] : user.account_to_attrs_map) {
       if (!request->account().empty() && account != request->account()) {
@@ -748,23 +742,20 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryQosInfoRequest *request,
     crane::grpc::QueryQosInfoReply *response) {
-  std::unordered_map<std::string, Qos> res_qos_map;
-
   std::vector<std::string> qos_list;
   for (const auto &qos : request->qos_list()) {
     qos_list.emplace_back(qos);
   }
-  auto modify_res =
-      g_account_manager->QueryQosInfo(request->uid(), qos_list, &res_qos_map);
-  if (modify_res) {
+  auto res = g_account_manager->QueryQosInfo(request->uid(), qos_list);
+  if (res) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_code(modify_res.error());
+    response->set_code(res.error());
   }
 
   auto *list = response->mutable_qos_list();
-  for (const auto &[name, qos] : res_qos_map) {
+  for (const auto &[name, qos] : res.value()) {
     auto *qos_info = list->Add();
     qos_info->set_name(qos.name);
     qos_info->set_description(qos.description);
