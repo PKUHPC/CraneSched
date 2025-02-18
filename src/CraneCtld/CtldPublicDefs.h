@@ -600,14 +600,10 @@ struct TaskInCtld {
     task_info->set_partition(partition_id);
     task_info->set_qos(qos);
 
-    // lic_map -> "lic1:1,lic2:3"
-    auto license_strings =
-        licenses_count | ranges::views::transform([](const auto& pair) {
-          return pair.first + ":" + std::to_string(pair.second);
-        });
-    std::string licenses_view =
-        license_strings | ranges::views::join(',') | ranges::to<std::string>();
-    task_info->set_licenses(licenses_view);
+    for (const auto& [license_name, license_count] : licenses_count) {
+      task_info->mutable_licenses_count()->insert(
+          {license_name, license_count});
+    }
 
     task_info->mutable_time_limit()->set_seconds(ToInt64Seconds(time_limit));
     task_info->mutable_submit_time()->CopyFrom(runtime_attr.submit_time());
