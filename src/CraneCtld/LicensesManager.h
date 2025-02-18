@@ -41,7 +41,7 @@ class LicensesManager {
   bool CheckLicenseCountSufficient(
       const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
 
-  result::result<void, std::string> CheckLicensesLegal(
+  std::expected<void, std::string> CheckLicensesLegal(
       const ::google::protobuf::Map<std::string, uint32_t>
           &lic_id_to_count_map);
 
