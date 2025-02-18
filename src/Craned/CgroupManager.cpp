@@ -54,6 +54,7 @@ int CgroupManager::Init() {
 
   // cgroup_set_loglevel(CGROUP_LOG_DEBUG);
 
+#ifdef CRANE_ENABLE_BPF
   enum cg_setup_mode_t setup_mode;
   setup_mode = cgroup_setup_mode();
   switch (setup_mode) {
@@ -73,6 +74,9 @@ int CgroupManager::Init() {
     //("cgroup mode: Unknown\n");
     break;
   }
+#else
+  cg_version_ = CgroupConstant::CgroupVersion::CGROUP_V1;
+#endif
 
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;
