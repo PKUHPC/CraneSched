@@ -431,7 +431,7 @@ message TaskInfo {
   string username = 15;
   string qos = 16;
   ResourceView req_res_view = 17;
-  string licenses = 18;
+  map<string, uint32> licenses_count = 18;
   repeated string req_nodes = 19;
   repeated string exclude_nodes = 20;
 

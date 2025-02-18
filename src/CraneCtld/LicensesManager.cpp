@@ -73,13 +73,13 @@ bool LicensesManager::CheckLicenseCountSufficient(
   return true;
 }
 
-result::result<void, std::string> LicensesManager::CheckLicensesLegal(
+std::expected<void, std::string> LicensesManager::CheckLicensesLegal(
     const ::google::protobuf::Map<std::string, uint32_t>& lic_id_to_count_map) {
   util::read_lock_guard readLock(rw_mutex_);
   for (auto& [lic_id, count] : lic_id_to_count_map) {
     auto it = lic_id_to_lic_map_.find(lic_id);
     if (it == lic_id_to_lic_map_.end() || count > it->second.total) {
-      return result::fail("Invalid license specification");
+      return std::unexpected("Invalid license specification");
     }
   }
 
