@@ -21,11 +21,17 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "crane/AtomicHashMap.h"
 #include "crane/Lock.h"
 
 namespace Ctld {
 
-using unorderedLicensesMap = absl::flat_hash_map<LicenseId, License>;
+template <typename K, typename V,
+          typename Hash = absl::container_internal::hash_default_hash<K>>
+using HashMap = absl::flat_hash_map<K, V, Hash>;
+
+using LicensesAtomicMap = util::AtomicHashMap<HashMap, LicenseId, License>;
+using LicensesMetaRawMap = LicensesAtomicMap::RawMap;
 
 class LicensesManager {
  public:
@@ -52,9 +58,7 @@ class LicensesManager {
       const std::unordered_map<LicenseId, uint32_t> &lic_id_to_count_map);
 
  private:
-  unorderedLicensesMap lic_id_to_lic_map_ ABSL_GUARDED_BY(rw_mutex_);
-
-  util::rw_mutex rw_mutex_;
+  LicensesAtomicMap licenses_map_;
 };
 
 }  // namespace Ctld
