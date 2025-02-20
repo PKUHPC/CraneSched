@@ -1857,7 +1857,7 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser_(
     }
   }
 
-  if (res_user.deleted && res_user.serial_number != "" &&
+  if (res_user.deleted && !res_user.serial_number.empty() &&
       !g_vault_client->RevokeCert(res_user.serial_number))
     return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
 
