@@ -19,6 +19,7 @@
 #include "AccountManager.h"
 
 #include "AccountMetaContainer.h"
+#include "crane/Logger.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
@@ -1095,6 +1096,8 @@ AccountManager::CraneExpected<void> AccountManager::ResetUserCertificate(
     if (!user->serial_number.empty() &&
         !g_vault_client->RevokeCert(user->serial_number))
       if (!force) return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
+    CRANE_DEBUG("Reset User {} Certificate {}", user->name,
+                user->serial_number);
   }
 
   // Save the serial number in the database.
