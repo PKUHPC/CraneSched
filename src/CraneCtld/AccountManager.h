@@ -23,6 +23,7 @@
 #include "DbClient.h"
 #include "crane/Lock.h"
 #include "crane/Pointer.h"
+#include "crane/VaultClient.h"
 
 namespace Ctld {
 
@@ -143,6 +144,13 @@ class AccountManager {
   CraneExpected<void> CheckIfUidHasPermOnUser(uint32_t uid,
                                               const std::string& username,
                                               bool read_only_priv);
+
+  CraneExpected<std::string> SignUserCertificate(uint32_t uid,
+                                                 const std::string& csr_content,
+                                                 const std::string& alt_names);
+
+  CraneExpected<void> ResetUserCertificate(
+      uint32_t uid, const std::vector<std::string>& user_list, bool force);
 
  private:
   void InitDataMap_();

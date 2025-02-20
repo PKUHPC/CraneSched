@@ -649,6 +649,7 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
     user->deleted = user_view["deleted"].get_bool();
     user->uid = user_view["uid"].get_int64().value;
     user->name = user_view["name"].get_string().value;
+    user->serial_number = user_view["serial_number"].get_string().value;
     user->default_account = user_view["default_account"].get_string().value;
     user->admin_level =
         (Ctld::User::AdminLevel)user_view["admin_level"].get_int32().value;
@@ -686,19 +687,21 @@ void MongodbClient::ViewToUser_(const bsoncxx::document::view& user_view,
 
 bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
     const Ctld::User& user) {
-  std::array<std::string, 7> fields{"deleted",
+  std::array<std::string, 8> fields{"deleted",
                                     "uid",
                                     "default_account",
                                     "name",
+                                    "serial_number",
                                     "admin_level",
                                     "account_to_attrs_map",
                                     "coordinator_accounts"};
-  std::tuple<bool, int64_t, std::string, std::string, int32_t,
+  std::tuple<bool, int64_t, std::string, std::string, std::string, int32_t,
              User::AccountToAttrsMap, std::list<std::string>>
       values{false,
              user.uid,
              user.default_account,
              user.name,
+             user.serial_number,
              user.admin_level,
              user.account_to_attrs_map,
              user.coordinator_accounts};

@@ -169,54 +169,128 @@ void ParseConfig(int argc, char** argv) {
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
+      if (config["DomainSuffix"])
+        g_config.DomainSuffix = config["DomainSuffix"].as<std::string>();
+
       if (config["UseTls"] && config["UseTls"].as<bool>()) {
+        const auto& ssl_config = config["SSL"];
+
         g_config.ListenConf.UseTls = true;
-        TlsCertificates& tls_certs = g_config.ListenConf.TlsCerts;
+        ServerCertificateConfig& craned_certs =
+            g_config.ListenConf.TlsCerts.CranedTlsCerts;
+        ClientCertificateConfig& internal_client_certs =
+            g_config.ListenConf.TlsCerts.InternalClientTlsCerts;
+        ClientCertificateConfig& cfoed_client_certs =
+            g_config.ListenConf.TlsCerts.CforedClientTlsCerts;
 
-        if (config["DomainSuffix"])
-          tls_certs.DomainSuffix = config["DomainSuffix"].as<std::string>();
-
-        if (config["ServerCertFilePath"]) {
-          tls_certs.ServerCertFilePath =
-              config["ServerCertFilePath"].as<std::string>();
+        if (ssl_config["InternalCaFilePath"]) {
+          std::string internalCaFilePath =
+              ssl_config["InternalCaFilePath"].as<std::string>();
 
           try {
-            tls_certs.ServerCertContent =
-                util::ReadFileIntoString(tls_certs.ServerCertFilePath);
+            g_config.ListenConf.TlsCerts.InternalCaContent =
+                util::ReadFileIntoString(internalCaFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (tls_certs.ServerCertContent.empty()) {
+          if (g_config.ListenConf.TlsCerts.InternalCaContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerCertFilePath "
+                "UseTls is true, but the file specified by InternalCaFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but ServerCertFilePath is empty");
+          CRANE_ERROR("UseTls is true, but InternalCaFilePath is empty");
           std::exit(1);
         }
 
-        if (config["ServerKeyFilePath"]) {
-          tls_certs.ServerKeyFilePath =
-              config["ServerKeyFilePath"].as<std::string>();
+        if (ssl_config["CranedCertFilePath"]) {
+          craned_certs.ServerCertFilePath =
+              ssl_config["CranedCertFilePath"].as<std::string>();
 
           try {
-            tls_certs.ServerKeyContent =
-                util::ReadFileIntoString(tls_certs.ServerKeyFilePath);
+            craned_certs.ServerCertContent =
+                util::ReadFileIntoString(craned_certs.ServerCertFilePath);
           } catch (const std::exception& e) {
             CRANE_ERROR("Read cert file error: {}", e.what());
             std::exit(1);
           }
-          if (tls_certs.ServerKeyContent.empty()) {
+          if (craned_certs.ServerCertContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerKeyFilePath "
+                "UseTls is true, but the file specified by CranedCertFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but ServerKeyFilePath is empty");
+          CRANE_ERROR("UseTls is true, but CranedCertFilePath is empty");
           std::exit(1);
         }
+
+        if (ssl_config["CranedKeyFilePath"]) {
+          craned_certs.ServerKeyFilePath =
+              ssl_config["CranedKeyFilePath"].as<std::string>();
+
+          try {
+            craned_certs.ServerKeyContent =
+                util::ReadFileIntoString(craned_certs.ServerKeyFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read cert file error: {}", e.what());
+            std::exit(1);
+          }
+          if (craned_certs.ServerKeyContent.empty()) {
+            CRANE_ERROR(
+                "UseTls is true, but the file specified by CranedKeyFilePath "
+                "is empty");
+          }
+        } else {
+          CRANE_ERROR("UseTls is true, but CranedKeyFilePath is empty");
+          std::exit(1);
+        }
+
+        if (ssl_config["CranectldInternalCertFilePath"]) {
+          internal_client_certs.ClientCertFilePath =
+              ssl_config["CranectldInternalCertFilePath"].as<std::string>();
+
+          try {
+            internal_client_certs.ClientCertContent = util::ReadFileIntoString(
+                internal_client_certs.ClientCertFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read cert file error: {}", e.what());
+            std::exit(1);
+          }
+          if (internal_client_certs.ClientCertContent.empty()) {
+            CRANE_ERROR(
+                "UseTls is true, but the file specified by "
+                "CranectldInternalCertFilePath "
+                "is empty");
+          }
+        } else {
+          CRANE_ERROR(
+              "UseTls is true, but CranectldInternalCertFilePath is empty");
+          std::exit(1);
+        }
+
+        if (ssl_config["CforedCertFilePath"]) {
+          cfoed_client_certs.ClientCertFilePath =
+              ssl_config["CforedCertFilePath"].as<std::string>();
+
+          try {
+            cfoed_client_certs.ClientCertContent =
+                util::ReadFileIntoString(cfoed_client_certs.ClientCertFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read cert file error: {}", e.what());
+            std::exit(1);
+          }
+          if (cfoed_client_certs.ClientCertContent.empty()) {
+            CRANE_ERROR(
+                "UseTls is true, but the file specified by CforedCertFilePath "
+                "is empty");
+          }
+        } else {
+          CRANE_ERROR(
+              "UseTls is true, but CranectldInternalCertFilePath is empty");
+          std::exit(1);
+        }
+
       } else {
         g_config.ListenConf.UseTls = false;
       }
@@ -230,6 +304,12 @@ void ParseConfig(int argc, char** argv) {
             config["CraneCtldListenPort"].as<std::string>();
       else
         g_config.CraneCtldListenPort = kCtldDefaultPort;
+
+      if (config["CraneCtldForCranedListenPort"])
+        g_config.CraneCtldForCranedPort =
+            config["CraneCtldForCranedListenPort"].as<std::string>();
+      else
+        g_config.CraneCtldForCranedPort = kCtldForCranedDefaultPort;
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();

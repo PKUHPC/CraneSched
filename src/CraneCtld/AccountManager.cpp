@@ -19,6 +19,7 @@
 #include "AccountManager.h"
 
 #include "AccountMetaContainer.h"
+#include "crane/Logger.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
@@ -1029,6 +1030,101 @@ AccountManager::CraneExpected<void> AccountManager::CheckIfUidHasPermOnUser(
   return CheckIfUserHasPermOnUserNoLock_(*op_user, user, read_only_priv);
 }
 
+AccountManager::CraneExpected<std::string> AccountManager::SignUserCertificate(
+    uint32_t uid, const std::string& csr_content,
+    const std::string& alt_names) {
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
+
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+  const User* op_user = user_result.value();
+
+  // Verify whether the serial number already exists in the user database.
+  if (!op_user->serial_number.empty())
+    return std::unexpected(CraneErrCode::ERR_DUPLICATE_CERTIFICATE);
+
+  std::string common_name = std::format("{}.{}", uid, g_config.DomainSuffix);
+  auto sign_response =
+      g_vault_client->Sign(csr_content, common_name, alt_names);
+  if (!sign_response)
+    return std::unexpected(CraneErrCode::ERR_SIGN_CERTIFICATE);
+
+  // Save the serial number in the database.
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
+                                     op_user->name, "serial_number",
+                                     sign_response->serial_number);
+      };
+
+  // Update to database
+  if (!g_db_client->CommitTransaction(callback)) {
+    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+  }
+
+  m_user_map_[op_user->name]->serial_number = sign_response->serial_number;
+
+  return sign_response->certificate;
+}
+
+AccountManager::CraneExpected<void> AccountManager::ResetUserCertificate(
+    uint32_t uid, const std::vector<std::string>& user_list, bool force) {
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
+  CraneExpected<void> result{};
+
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+  const User* op_user = user_result.value();
+
+  result = CheckIfUserHasHigherPrivThan_(*op_user, User::None);
+  if (!result) return result;
+
+  std::vector<const User*> user_ptr_list;
+  if (user_list.empty()) {
+    for (const auto& [username, user] : m_user_map_) {
+      user_ptr_list.emplace_back(user.get());
+    }
+  } else {
+    for (const auto& username : user_list) {
+      const User* user = GetExistedUserInfoNoLock_(username);
+      if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+      user_ptr_list.emplace_back(user);
+    }
+  }
+
+  for (const auto& user : user_ptr_list) {
+    if (!user->serial_number.empty() &&
+        !g_vault_client->RevokeCert(user->serial_number))
+      if (!force) return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
+    CRANE_DEBUG("Reset User {} Certificate {}", user->name,
+                user->serial_number);
+  }
+
+  // Save the serial number in the database.
+  mongocxx::client_session::with_transaction_cb callback =
+      [&](mongocxx::client_session* session) {
+        for (const auto& user : user_ptr_list) {
+          g_db_client->UpdateEntityOne(MongodbClient::EntityType::USER, "$set",
+                                       user->name, "serial_number", "");
+        }
+      };
+
+  // Update to database
+  if (!g_db_client->CommitTransaction(callback)) {
+    return std::unexpected(CraneErrCode::ERR_UPDATE_DATABASE);
+  }
+
+  for (const auto& user : user_ptr_list) {
+    m_user_map_[user->name]->serial_number = "";
+  }
+
+  return result;
+}
+
+/******************************************
+ * NOLOCK
+ ******************************************/
+
 AccountManager::CraneExpected<void>
 AccountManager::CheckAddUserAllowedPartitionNoLock_(
     const User* user, const Account* account, const std::string& partition) {
@@ -1763,6 +1859,10 @@ AccountManager::CraneExpected<void> AccountManager::DeleteUser_(
         res_user.default_account = res_user.account_to_attrs_map.begin()->first;
     }
   }
+
+  if (res_user.deleted && !res_user.serial_number.empty() &&
+      !g_vault_client->RevokeCert(res_user.serial_number))
+    return std::unexpected(CraneErrCode::ERR_REVOKE_CERTIFICATE);
 
   mongocxx::client_session::with_transaction_cb callback =
       [&](mongocxx::client_session* session) {

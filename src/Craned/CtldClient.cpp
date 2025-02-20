@@ -18,6 +18,9 @@
 
 #include "CtldClient.h"
 
+#include "CranedPublicDefs.h"
+#include "crane/GrpcHelper.h"
+
 namespace Craned {
 
 CtldClient::~CtldClient() {
@@ -35,14 +38,16 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
 
   if (g_config.ListenConf.UseTls)
     m_ctld_channel_ = CreateTcpTlsCustomChannelByHostname(
-        server_address, g_config.CraneCtldListenPort,
-        g_config.ListenConf.TlsCerts, channel_args);
+        server_address, g_config.CraneCtldForCranedPort,
+        g_config.ListenConf.TlsCerts.CranedTlsCerts,
+        g_config.ListenConf.TlsCerts.InternalClientTlsCerts,
+        g_config.DomainSuffix, channel_args);
   else
     m_ctld_channel_ = CreateTcpInsecureCustomChannel(
-        server_address, g_config.CraneCtldListenPort, channel_args);
+        server_address, g_config.CraneCtldForCranedPort, channel_args);
 
   // std::unique_ptr will automatically release the dangling stub.
-  m_stub_ = CraneCtld::NewStub(m_ctld_channel_);
+  m_stub_ = CraneCtldForCraned::NewStub(m_ctld_channel_);
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
@@ -88,7 +93,8 @@ void CtldClient::OnCraneCtldConnected() {
   CRANE_ERROR("Failed to register actively.");
 }
 
-void CtldClient::TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change) {
+void CtldClient::TaskStatusChangeAsync(
+    TaskStatusChangeQueueElem&& task_status_change) {
   absl::MutexLock lock(&m_task_status_change_mtx_);
   m_task_status_change_list_.emplace_back(std::move(task_status_change));
 }
