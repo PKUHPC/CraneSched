@@ -677,7 +677,6 @@ void TaskScheduler::ScheduleThread_() {
 
         task->SetStatus(crane::grpc::TaskStatus::Running);
         task->SetCranedIds(std::move(it.second));
-        task->SetPriority(task->cached_priority);
         task->nodes_alloc = task->CranedIds().size();
 
         // CRANE_DEBUG(
@@ -2643,7 +2642,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     double priority = (task->mandated_priority == 0.0)
                           ? CalculatePriority_(task.get(), now)
                           : task->mandated_priority;
-    task->cached_priority = priority;
+    task->SetCachedPriority(priority);
     task->pending_reason = "Priority";
     task_priority_vec.emplace_back(task.get(), priority);
   }

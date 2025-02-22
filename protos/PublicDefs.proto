@@ -171,7 +171,7 @@ message RuntimeAttrOfTask {
 
   bool held = 18;
   ResourceV2 resources = 19;
-  uint32 priority = 20;
+  double cached_priority = 20;
 }
 
 message TaskToD {
@@ -226,7 +226,7 @@ message InteractiveTaskAdditionalMeta {
   string sh_script = 2;
   string term_env = 3;
   InteractiveTaskType interactive_type = 4;
-  
+
   bool pty = 5;
   bool x11 = 6;
 
