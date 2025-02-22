@@ -318,14 +318,12 @@ bool TaskScheduler::Init() {
         mark_task_as_failed = true;
       }
 
-      if (!mark_task_as_failed &&
-          !(AcquireTaskAttributes(task.get()))) {
+      if (!mark_task_as_failed && !AcquireTaskAttributes(task.get())) {
         CRANE_ERROR("AcquireTaskAttributes failed for task #{}", task_id);
         mark_task_as_failed = true;
       }
 
-      if (!mark_task_as_failed &&
-          !(CheckTaskValidity(task.get()))) {
+      if (!mark_task_as_failed && !CheckTaskValidity(task.get())) {
         CRANE_ERROR("CheckTaskValidity failed for task #{}", task_id);
         mark_task_as_failed = true;
       }
@@ -989,19 +987,19 @@ void TaskScheduler::ScheduleThread_() {
           CranedId const& craned_id = iter.first;
           auto& task_uid_pairs = iter.second;
 
-          g_thread_pool->detach_task(
-              [=, cgroups_to_release = std::move(task_uid_pairs)]() {
-                auto stub = g_craned_keeper->GetCranedStub(craned_id);
+          g_thread_pool->detach_task([=, cgroups_to_release =
+                                             std::move(task_uid_pairs)]() {
+            auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
-                // If the craned is down, just ignore it.
-                if (stub == nullptr || stub->Invalid()) return;
+            // If the craned is down, just ignore it.
+            if (stub == nullptr || stub->Invalid()) return;
 
-                CraneErrCode err = stub->ReleaseCgroupForTasks(cgroups_to_release);
-                if (err != CraneErrCode::SUCCESS)
-                  CRANE_ERROR(
-                      "Failed to Release cgroup RPC for {} tasks on Node {}",
-                      cgroups_to_release.size(), craned_id);
-              });
+            CraneErrCode err = stub->ReleaseCgroupForTasks(cgroups_to_release);
+            if (err != CraneErrCode::SUCCESS)
+              CRANE_ERROR(
+                  "Failed to Release cgroup RPC for {} tasks on Node {}",
+                  cgroups_to_release.size(), craned_id);
+          });
         }
 
         // Move failed tasks to the completed queue.
@@ -1053,7 +1051,7 @@ std::future<task_id_t> TaskScheduler::SubmitTaskAsync(
 }
 
 std::future<CraneErrCode> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
-                                                          int64_t secs) {
+                                                              int64_t secs) {
   std::promise<CraneErrCode> promise;
   std::future<CraneErrCode> future = promise.get_future();
 
@@ -1064,7 +1062,8 @@ std::future<CraneErrCode> TaskScheduler::HoldReleaseTaskAsync(task_id_t task_id,
   return std::move(future);
 }
 
-CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs) {
+CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
+                                                int64_t secs) {
   if (!CheckIfTimeLimitSecIsValid(secs)) return CraneErrCode::ERR_INVALID_PARAM;
 
   std::vector<CranedId> craned_ids;
@@ -1116,7 +1115,8 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id, int64_t secs)
   return CraneErrCode::SUCCESS;
 }
 
-CraneErrCode TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priority) {
+CraneErrCode TaskScheduler::ChangeTaskPriority(task_id_t task_id,
+                                               double priority) {
   m_pending_task_map_mtx_.Lock();
 
   auto pd_iter = m_pending_task_map_.find(task_id);
@@ -1132,7 +1132,7 @@ CraneErrCode TaskScheduler::ChangeTaskPriority(task_id_t task_id, double priorit
 }
 
 CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
-                                                  bool hold) {
+                                                      bool hold) {
   m_pending_task_map_mtx_.Lock();
 
   auto pd_iter = m_pending_task_map_.find(task_id);
@@ -2482,7 +2482,7 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
 CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   auto part_it = g_config.Partitions.find(task->partition_id);
   if (part_it == g_config.Partitions.end()) {
-        CRANE_ERROR("Failed to call AcquireTaskAttributes: {}",
+    CRANE_ERROR("Failed to call AcquireTaskAttributes: {}",
                 CraneErrStr(CraneErrCode::ERR_INVALID_PARTITION));
     return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
   }
@@ -2540,7 +2540,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
 CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
   if (!CheckIfTimeLimitIsValid(task->time_limit))
-    return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND) ;
+    return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
 
   // Check whether the selected partition is able to run this task.
   std::unordered_set<std::string> avail_nodes;
@@ -2570,7 +2570,7 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
                   .memory_sw_bytes),
           util::ReadableTypedDeviceMap(
               metas_ptr->partition_global_meta.res_total.GetDeviceMap()));
-      return std::unexpected(CraneErrCode::ERR_NO_RESOURCE);  
+      return std::unexpected(CraneErrCode::ERR_NO_RESOURCE);
     }
 
     if (task->node_num > metas_ptr->craned_ids.size()) {
