@@ -466,6 +466,9 @@ message CreateReservationRequest {
   int64 duration_seconds = 4;
   string partition = 5;
   string craned_regex = 6;
+
+  repeated string account_list = 7;
+  repeated string user_list = 8;
 }
 
 message CreateReservationReply {

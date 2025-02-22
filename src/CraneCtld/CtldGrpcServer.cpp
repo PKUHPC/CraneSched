@@ -165,6 +165,7 @@ grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
     *response =
         g_meta_container->QueryReservationInfo(request->reservation_name());
   }
+  response->set_ok(true);
 
   return grpc::Status::OK;
 }

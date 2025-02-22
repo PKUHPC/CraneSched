@@ -329,6 +329,9 @@ message ReservationInfo {
   ResourceView res_total = 6;
   ResourceView res_avail = 7;
   ResourceView res_alloc = 8;
+
+  repeated string account_list = 9;
+  repeated string users_list = 10;
 }
 
 message TrimmedPartitionInfo {

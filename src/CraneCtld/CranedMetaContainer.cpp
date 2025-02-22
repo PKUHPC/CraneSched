@@ -488,6 +488,18 @@ CranedMetaContainer::QueryAllReservationInfo() {
         static_cast<crane::grpc::ResourceView>(res_avail));
     reservation_info->mutable_res_alloc()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(res_alloc));
+
+    auto account_list = reservation_info->mutable_account_list();
+    auto& [disallow_accounts, accounts] = reservation_meta->accounts;
+    for (auto const& account : accounts) {
+      account_list->Add((disallow_accounts ? "-" : "") + account);
+    }
+
+    auto user_list = reservation_info->mutable_users_list();
+    auto& [disallow_user, users] = reservation_meta->users;
+    for (auto const& user : users) {
+      user_list->Add((disallow_user ? "-" : "") + user);
+    }
   }
   return reply;
 }
@@ -528,6 +540,18 @@ CranedMetaContainer::QueryReservationInfo(
       static_cast<crane::grpc::ResourceView>(res_avail));
   reservation_info->mutable_res_alloc()->CopyFrom(
       static_cast<crane::grpc::ResourceView>(res_alloc));
+
+  auto account_list = reservation_info->mutable_account_list();
+  auto& [disallow_accounts, accounts] = reservation_meta->accounts;
+  for (auto const& account : accounts) {
+    account_list->Add((disallow_accounts ? "-" : "") + account);
+  }
+
+  auto user_list = reservation_info->mutable_users_list();
+  auto& [disallow_user, users] = reservation_meta->users;
+  for (auto const& user : users) {
+    user_list->Add((disallow_user ? "-" : "") + user);
+  }
   return reply;
 }
 

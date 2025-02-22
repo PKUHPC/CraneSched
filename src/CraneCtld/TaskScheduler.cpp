@@ -1355,7 +1355,84 @@ crane::grpc::CreateReservationReply TaskScheduler::CreateReservation(
     const crane::grpc::CreateReservationRequest& request) {
   crane::grpc::CreateReservationReply reply;
 
-  ReservationId reservation_name = request.reservation_name();
+  std::pair<bool, std::unordered_set<std::string>> accounts;
+  if (!request.account_list().empty()) {
+    bool allow = false;
+    bool disallow = false;
+    for (auto& str : request.account_list()) {
+      if (str == "") {
+        reply.set_ok(false);
+        reply.set_reason("Empty account name");
+        return reply;
+      }
+      std::string account;
+      if (str[0] == '-') {
+        disallow = true;
+        account = str.substr(1);
+      } else if (account[0] == '+') {
+        allow = true;
+        account = str.substr(1);
+      } else {
+        account = str;
+      }
+      if (g_account_manager->GetExistedAccountInfo(account).get() == nullptr) {
+        reply.set_ok(false);
+        reply.set_reason(fmt::format("Account {} not found", account));
+        return reply;
+      }
+      accounts.second.emplace(account);
+    }
+    if (allow && disallow) {
+      reply.set_ok(false);
+      reply.set_reason("Allow and disallow accounts cannot be mixed");
+      return reply;
+    }
+    accounts.first = disallow;
+  }
+
+  std::pair<bool, std::unordered_set<std::string>> users;
+  if (!request.user_list().empty()) {
+    bool allow = false;
+    bool disallow = false;
+    for (auto& str : request.user_list()) {
+      if (str == "") {
+        reply.set_ok(false);
+        reply.set_reason("Empty user name");
+        return reply;
+      }
+      std::string user;
+      if (str[0] == '-') {
+        disallow = true;
+        user = str.substr(1);
+      } else if (user[0] == '+') {
+        allow = true;
+        user = str.substr(1);
+      } else {
+        user = str;
+      }
+      if (g_account_manager->GetExistedUserInfo(user).get() == nullptr) {
+        reply.set_ok(false);
+        reply.set_reason(fmt::format("User {} not found", user));
+        return reply;
+      }
+      users.second.emplace(user);
+    }
+    if (allow && disallow) {
+      reply.set_ok(false);
+      reply.set_reason("Allow and disallow users cannot be mixed");
+      return reply;
+    }
+    users.first = disallow;
+  }
+
+  std::list<CranedId> craned_ids;
+  if (request.craned_regex() != "" &&
+      !util::ParseHostList(request.craned_regex(), &craned_ids)) {
+    reply.set_ok(false);
+    reply.set_reason("Invalid craned_regex");
+    return reply;
+  }
+
   absl::Time start_time = absl::FromUnixSeconds(request.start_time_seconds());
   if (start_time < absl::Now() + absl::Seconds(kReservationMinAdvanceSec)) {
     reply.set_ok(false);
@@ -1369,14 +1446,7 @@ crane::grpc::CreateReservationReply TaskScheduler::CreateReservation(
   // ResourceView resources;
   bool whole_node = true;
 
-  std::list<CranedId> craned_ids;
-  if (request.craned_regex() != "" &&
-      !util::ParseHostList(request.craned_regex(), &craned_ids)) {
-    reply.set_ok(false);
-    reply.set_reason("Invalid craned_regex");
-    return reply;
-  }
-
+  ReservationId reservation_name = request.reservation_name();
   auto reservation_meta_map = g_meta_container->GetReservationMetaMapPtr();
   if (reservation_meta_map->contains(reservation_name)) {
     reply.set_ok(false);
@@ -1495,6 +1565,8 @@ crane::grpc::CreateReservationReply TaskScheduler::CreateReservation(
                             .end_time = end_time,
                             .partition_id = partition,
                             .craned_ids = craned_ids,
+                            .accounts = std::move(accounts),
+                            .users = std::move(users),
                         });
   if (!ok) {
     CRANE_ERROR("Failed to insert reservation meta for reservation {}",
@@ -2976,10 +3048,30 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
                     task->TaskId());
         return CraneErr::kInvalidParam;
       }
+
+      auto resv_meta =
+          g_meta_container->GetReservationMetaPtr(task->reservation);
+
+      if (!resv_meta->accounts.second.empty()) {
+        if (resv_meta->accounts.first ^
+            !resv_meta->accounts.second.contains(task->account)) {
+          CRANE_TRACE("Account {} not allowed for reservation {} for task #{}",
+                      task->account, task->reservation, task->TaskId());
+          return CraneErr::kInvalidParam;
+        }
+      }
+
+      if (!resv_meta->users.second.empty()) {
+        if (resv_meta->users.first ^
+            !resv_meta->users.second.contains(task->Username())) {
+          CRANE_TRACE("User {} not allowed for reservation {} for task #{}",
+                      task->Username(), task->reservation, task->TaskId());
+          return CraneErr::kInvalidParam;
+        }
+      }
+
       if (!task->included_nodes.empty()) {
-        auto reserved_craned_id_list =
-            g_meta_container->GetReservationMetaPtr(task->reservation)
-                ->craned_ids;
+        auto reserved_craned_id_list = resv_meta->craned_ids;
         std::unordered_set<std::string> reserved_craned_id_set;
         reserved_craned_id_set.insert(reserved_craned_id_list.begin(),
                                       reserved_craned_id_list.end());

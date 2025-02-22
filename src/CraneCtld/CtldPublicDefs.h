@@ -226,6 +226,9 @@ struct ReservationMeta {
   std::list<CranedId> craned_ids;
 
   absl::flat_hash_map<task_id_t, ResourceV2> running_task_resource_map;
+
+  std::pair<bool /*1 for disallow*/, std::unordered_set<std::string>> accounts;
+  std::pair<bool /*1 for disallow*/, std::unordered_set<std::string>> users;
 };
 
 struct PartitionGlobalMeta {
