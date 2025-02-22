@@ -348,8 +348,10 @@ bool MongodbClient::FetchJobRecords(
       task->set_type((crane::grpc::TaskType)view["type"].get_int32().value);
 
       task->set_extra_attr(view["extra_attr"].get_string().value.data());
-
-      task->set_reservation(view["reservation"].get_string().value.data());
+      
+      if (view.find("reservation") != view.end()) {
+        task->set_reservation(view["reservation"].get_string().value.data());
+      }
     }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
