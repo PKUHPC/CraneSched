@@ -92,6 +92,11 @@ struct Config {
   };
   CraneCtldListenConf ListenConf;
 
+  struct CranedListenConf {
+    std::string CranedListenPort;
+  };
+  CranedListenConf CranedListenConf;
+
   struct Priority {
     enum TypeEnum { Basic, MultiFactor };
     TypeEnum Type;
