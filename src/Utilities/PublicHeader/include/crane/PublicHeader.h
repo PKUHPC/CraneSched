@@ -26,7 +26,6 @@
 #include <unordered_map>
 
 #include "protos/Crane.pb.h"
-#include "protos/PublicDefs.pb.h"
 
 #if !defined(CRANE_VERSION_STRING)
 #  define CRANE_VERSION_STRING "Unknown"
@@ -96,85 +95,102 @@ enum ExitCodeEnum : uint16_t {
 }  // namespace ExitCode
 
 namespace Internal {
-constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)> CraneErrStrArr = {
-        // code 0-9
+constexpr std::array<std::string_view, uint16_t(CraneErrCode::ERR_CODE_COUNT)>
+    CraneErrStrArr = {
+        // 0 - 4
         "Success",
+
         "Invalid UID",
-        "You are not a user of Crane",
-        "The entered user is not a user of Crane",
-        "Your permission is insufficient",
+        "You are not a Crane user",
+        "The specified user is invalid",
+        "The user permission is insufficient",
+
+        // 5 - 9
         "The user has been blocked",
         "The user already exists in this account",
-        "The user is not allowed to access the account",
-        "Unknown admin level",
+        "The user doesn't own sufficient permission for the account operation",
+        "Invalid admin level",
         "The user does not belong to this account",
-        
-        // code 10-19
+
+        // 10 - 14
         "No account is specified for the user",
         "The specified account does not exist",
-        "The account already exists in Crane",
-        "The parent account of the specified account entered does not exist",
-        "The account has child accounts or users and cannot be deleted",
+        "The account already exists in the database",
+        "The parent account of the specified account does not exist",
+        "The account has child accounts or users and thus can't be deleted",
+
+        // 15 - 19
         "The account has been blocked",
-        "The entered partition does not exist",
-        "The specified account or user entered does not include this partition",
+        "The specified partition does not exist",
+        "The specified account or user does not include this partition",
         "The partition already exists in the account or user",
         "The parent account does not include the partition",
-        
-        // code 20-29
-        "The user does not contain any partitions, operation cannot be performed",
+
+        // 20 - 24
+        "The QoS can't be added if the user has no partition",
         "Child has partition error",
-        "The user has no QoS available for this partition to be used",
-        "The QoS you set is not in the partition's allowed QoS list",
+        "The user has no QoS available for this partition",
+        "The specified QoS is not in the partition's allowed QoS list",
         "The specified QoS does not exist",
-        "QoS already exists in Crane",
-        "QoS is still being used by accounts or users and cannot be deleted",
+
+        // 25 - 29
+        "The QoS already exists in Crane",
+        "The QoS is still being used by accounts or users and can't be deleted",
         "Failed to convert value to integer",
         "Invalid time limit value",
         "The entered account or user does not include this QoS",
-        
-        // code 30-39
+
+        // 30 - 34
         "The QoS already exists in the account or user",
         "The parent account does not include the QoS",
-        "Set allowed QoS error",
-        "The entered default QoS is not allowed",
-        "The QoS is already the default QoS for the account or specified partition of the user",
-        "Child accounts have default error",
-        "Set account QoS error",
-        "The QoS is not allowed or is already the default QoS",
+        "The new QoS list does not include the current default QoS",
+        "The new default QoS is not in the allowed QoS list",
+        "The QoS is already the default QoS for the account"
+
+        // 35 - 39
+        "Some user is using the QoS as his default QoS",
+        "The QoS is being used by some child accounts",
+        "The QoS is not in the allowed list or is already the default QoS",
         "Is default QoS error",
-        "Failed to update data in the database",
-        
-        // code 40-49
+        "Failed to update the database",
+
+        // 40 - 44
         "Generic failure",
         "Not enough resources for the task",
         "Non-existent error",
         "Not enough nodes in the partition for the task",
         "Invalid node list",
+
+        // 45 - 49
         "Invalid exclude node list",
         "Time limit reached the user's limit",
         "CPUs per task reached the user's limit",
         "Not enough nodes for the task",
         "System error",
-        
-        // code 50-59
+
+        // 50 - 54
         "Existing task",
-        "System error occurred or the number of pending tasks exceeded the maximum value",
+        "The number of pending tasks exceeded the maximum value",
         "Invalid parameter",
         "Stop error",
         "Permission denied",
+
+        // 55 - 59
         "Connection timeout",
         "Connection aborted",
         "RPC failure",
         "Token request failure",
         "Stream broken",
-        
-        // code 60-64
+
+        // 60 - 64
         "Invalid stub",
         "CGroup error",
         "Protobuf error",
         "LibEvent error",
-        "No available node"
+        "No available node",
+
+        // 65 - 66
+        "The current running job exceeds the QoS limit (MaxJobPerUser)",
 };
 
 }

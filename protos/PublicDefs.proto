@@ -337,44 +337,47 @@ enum ErrCode {
   ERR_INVALID_OP_USER = 2; // Invalid operation user
   ERR_INVALID_USER = 3;  // Invalid user
   ERR_PERMISSION_USER = 4;  // User permissions too low, no permission to operate
+
   ERR_BLOCKED_USER = 5;
-  ERR_USER_DUPLICATE_ACCOUNT= 6;  // User duplicate account insertion
+  ERR_USER_DUPLICATE_ACCOUNT = 6;  // User duplicate account insertion
   ERR_USER_ALLOWED_ACCOUNT = 7;  // User does not have permission for the account
   ERR_INVALID_ADMIN_LEVEL = 8;  // Invalid permission level
   ERR_USER_ACCOUNT_MISMATCH = 9; // User does not belong to the account
-  ERR_NO_ACCOUNT_SPECIFIED = 10;
 
+  ERR_NO_ACCOUNT_SPECIFIED = 10;
   ERR_INVALID_ACCOUNT = 11;  // Invalid account
   ERR_DUPLICATE_ACCOUNT = 12;  // Duplicate account insertion
   ERR_INVALID_PARENTACCOUNT = 13;  // Invalid parent account
   ERR_DELETE_ACCOUNT = 14;   // Account has child nodes
-  ERR_BLOCKED_ACCOUNT = 15;
 
+  ERR_BLOCKED_ACCOUNT = 15;
   ERR_INVALID_PARTITION = 16;  // Invalid partition, partition does not exist
   ERR_ALLOWED_PARTITION = 17; // Account/user does not include this partition
   ERR_DUPLICATE_PARTITION = 18; // Account/user duplicate insertion
   ERR_PARENT_ALLOWED_PARTITION = 19; // Parent account does not include this partition
+
   ERR_USER_EMPTY_PARTITION = 20; // Cannot add QoS when user has no partition
   ERR_CHILD_HAS_PARTITION = 21; // Partition '{}' is used by some descendant node of the account '{}'. Ignoring this constraint with forced operation.
   ERR_HAS_NO_QOS_IN_PARTITION = 22;
   ERR_HAS_ALLOWED_QOS_IN_PARTITION = 23;
-
   ERR_INVALID_QOS = 24;  // Invalid QoS, QoS does not exist
+
   ERR_DB_DUPLICATE_QOS = 25;  // Duplicate QoS insertion in the database.
   ERR_DELETE_QOS = 26;  // QoS reference count is not zero.
   ERR_CONVERT_TO_INTERGER = 27;  // String to integer conversion failed
   ERR_TIME_LIMIT = 28;  // Invalid time value
   ERR_ALLOWED_QOS = 29; // Account/user does not include this QoS.
+
   ERR_DUPLICATE_QOS = 30; // Account/user duplicate insertion.
   ERR_PARENT_ALLOWED_QOS = 31; // Parent account does not include this QoS.
   ERR_SET_ALLOWED_QOS = 32; // QoS '{}' is the default QoS of partition '{}', but not found in the new QoS list.
   ERR_ALLOWED_DEFAULT_QOS = 33; // Default QoS is not in the allowed QoS list
   ERR_DUPLICATE_DEFAULT_QOS = 34; // Duplicate default QoS setting
+
   ERR_CHILD_HAS_DEFAULT_QOS = 35; // Someone is using QoS '{}' as default QoS. Ignoring this constraint with forced deletion, the deleted default QoS is randomly replaced with one of the remaining items in the QoS list.
   ERR_SET_ACCOUNT_QOS = 36; // QoS '{}' is used by some descendant node or itself of the account '{}'. Ignoring this constraint with forced operation.
   ERR_SET_DEFAULT_QOS = 37; // Qos '{}' not in allowed qos list or is already the default qos
   ERR_IS_DEFAULT_QOS = 38;
-
   ERR_UPDATE_DATABASE = 39;  // Database update failed
 
   ERR_GENERIC_FAILURE = 40;
@@ -382,30 +385,35 @@ enum ErrCode {
   ERR_NON_EXISTENT = 42;
   ERR_INVALID_NODE_NUM = 43;
   ERR_INVAILD_NODE_LIST = 44;
+
   ERR_INVAILD_EX_NODE_LIST = 45;
   ERR_TIME_TIMIT_BEYOND = 46;
   ERR_CPUS_PER_TASK_BEYOND = 47;
   ERR_NO_ENOUGH_NODE = 48;
-
   ERR_SYSTEM_ERR = 49;
+
   ERR_EXISTING_TASK = 50;
   ERR_BEYOND_TASK_ID = 51;
   ERR_INVALID_PARAM = 52;
   ERR_STOP = 53;
   ERR_PERMISSION_DENIED = 54;
+
   ERR_CONNECTION_TIMEOUT = 55;
   ERR_CONNECTION_ABORTED = 56;
   ERR_RPC_FAILURE = 57;
   ERR_TOKEN_REQUEST_FAILURE = 58;
   ERR_STREAM_BROKEN = 59;
+
   ERR_INVALID_STUB = 60;
   ERR_CGROUP = 61;
   ERR_PROTOBUF = 62;
   ERR_LIB_EVENT = 63;
   ERR_NO_AVAIL_NODE = 64;
+
   ERR_MAX_JOB_COUNT_PER_USER = 65;
-  ERR_CODE_COUNT  = 66;
+  ERR_CODE_COUNT = 66;
 }
+
 enum EntityType {
   Account = 0;
   User = 1;
