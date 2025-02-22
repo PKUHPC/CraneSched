@@ -26,7 +26,6 @@
 #include <unordered_map>
 
 #include "protos/Crane.pb.h"
-#include "protos/PublicDefs.pb.h"
 
 #if !defined(CRANE_VERSION_STRING)
 #  define CRANE_VERSION_STRING "Unknown"
