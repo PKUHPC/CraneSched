@@ -146,6 +146,8 @@ message TaskToCtld {
 
   string excludes = 34;
   string nodelist = 35;
+
+  string reservation = 36;
 }
 
 message TaskInEmbeddedDb {
@@ -264,6 +266,7 @@ message TaskInfo {
   repeated string exclude_nodes = 20;
 
   string extra_attr = 21;
+  string reservation = 22;
 
   // Dynamic task information
   bool held = 30;

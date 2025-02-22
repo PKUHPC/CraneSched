@@ -244,6 +244,50 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
   node_meta->running_task_resource_map.erase(resource_iter);
 }
 
+void CranedMetaContainer::MallocResourceFromReservation(
+    ReservationId reservation_id, task_id_t task_id,
+    const ResourceV2& resources) {
+  if (!reservation_meta_map_.Contains(reservation_id)) {
+    CRANE_ERROR("Try to malloc resource from an unknown reservation {}",
+                reservation_id);
+    return;
+  }
+
+  auto reservation_meta = reservation_meta_map_[reservation_id];
+
+  reservation_meta->resources_avail -= resources;
+  reservation_meta->resources_in_use += resources;
+
+  reservation_meta->running_task_resource_map.emplace(task_id, resources);
+}
+
+void CranedMetaContainer::FreeResourceFromReservation(
+    ReservationId reservation_id, task_id_t task_id) {
+  if (!reservation_meta_map_.Contains(reservation_id)) {
+    CRANE_ERROR("Try to free resource from an unknown reservation {}",
+                reservation_id);
+    return;
+  }
+
+  auto reservation_meta = reservation_meta_map_[reservation_id];
+
+  auto resource_iter =
+      reservation_meta->running_task_resource_map.find(task_id);
+  if (resource_iter == reservation_meta->running_task_resource_map.end()) {
+    CRANE_ERROR(
+        "Try to free resource from an unknown task {} on reservation {}",
+        task_id, reservation_id);
+    return;
+  }
+
+  ResourceV2 const& resources = resource_iter->second;
+
+  reservation_meta->resources_avail += resources;
+  reservation_meta->resources_in_use -= resources;
+
+  reservation_meta->running_task_resource_map.erase(resource_iter);
+}
+
 void CranedMetaContainer::InitFromConfig(const Config& config) {
   HashMap<CranedId, CranedMeta> craned_map;
   HashMap<PartitionId, PartitionMeta> partition_map;
@@ -419,7 +463,7 @@ CranedMetaContainer::QueryAllReservationInfo() {
 
   auto reservation_map = reservation_meta_map_.GetMapConstSharedPtr();
   for (auto&& [reservation_id, reservation_meta_ptr] : *reservation_map) {
-    auto reservation_meta = reservation_meta_ptr.GetExclusivePtr();
+    const auto reservation_meta = reservation_meta_ptr.GetExclusivePtr();
 
     auto* reservation_info = list->Add();
 
@@ -432,15 +476,18 @@ CranedMetaContainer::QueryAllReservationInfo() {
     reservation_info->set_partition(reservation_meta->partition_id);
     reservation_info->set_craned_regex(
         util::HostNameListToStr(reservation_meta->craned_ids));
-    *reservation_info->mutable_res_total() =
-        static_cast<crane::grpc::ResourceView>(
-            reservation_meta->resources_total);
-    *reservation_info->mutable_res_avail() =
-        static_cast<crane::grpc::ResourceView>(
-            reservation_meta->resources_avail);
-    *reservation_info->mutable_res_alloc() =
-        static_cast<crane::grpc::ResourceView>(
-            reservation_meta->resources_in_use);
+    ResourceView res_total;
+    ResourceView res_avail;
+    ResourceView res_alloc;
+    res_total += reservation_meta->resources_total;
+    res_avail += reservation_meta->resources_avail;
+    res_alloc += reservation_meta->resources_in_use;
+    reservation_info->mutable_res_total()->CopyFrom(
+        static_cast<crane::grpc::ResourceView>(res_total));
+    reservation_info->mutable_res_avail()->CopyFrom(
+        static_cast<crane::grpc::ResourceView>(res_avail));
+    reservation_info->mutable_res_alloc()->CopyFrom(
+        static_cast<crane::grpc::ResourceView>(res_alloc));
   }
   return reply;
 }
@@ -455,7 +502,7 @@ CranedMetaContainer::QueryReservationInfo(
     return reply;
   }
 
-  auto reservation_meta =
+  const auto reservation_meta =
       reservation_meta_map_.GetValueExclusivePtr(reservation_name);
 
   auto* reservation_info = list->Add();
@@ -469,14 +516,18 @@ CranedMetaContainer::QueryReservationInfo(
   reservation_info->set_partition(reservation_meta->partition_id);
   reservation_info->set_craned_regex(
       util::HostNameListToStr(reservation_meta->craned_ids));
-  *reservation_info->mutable_res_total() =
-      static_cast<crane::grpc::ResourceView>(reservation_meta->resources_total);
-  *reservation_info->mutable_res_avail() =
-      static_cast<crane::grpc::ResourceView>(reservation_meta->resources_avail);
-  *reservation_info->mutable_res_alloc() =
-      static_cast<crane::grpc::ResourceView>(
-          reservation_meta->resources_in_use);
-
+  ResourceView res_total;
+  ResourceView res_avail;
+  ResourceView res_alloc;
+  res_total += reservation_meta->resources_total;
+  res_avail += reservation_meta->resources_avail;
+  res_alloc += reservation_meta->resources_in_use;
+  reservation_info->mutable_res_total()->CopyFrom(
+      static_cast<crane::grpc::ResourceView>(res_total));
+  reservation_info->mutable_res_avail()->CopyFrom(
+      static_cast<crane::grpc::ResourceView>(res_avail));
+  reservation_info->mutable_res_alloc()->CopyFrom(
+      static_cast<crane::grpc::ResourceView>(res_alloc));
   return reply;
 }
 

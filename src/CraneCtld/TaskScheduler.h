@@ -309,8 +309,14 @@ class MinLoadFirst : public INodeSelectionAlgo {
       return m_cost_node_id_set_;
     }
 
-    absl::Time& GetFirstResvTime(const CranedId& craned_id) {
-      return m_first_resv_time_map_.at(craned_id);
+    absl::Time GetFirstResvTime(const CranedId& craned_id) {
+      auto iter = m_first_resv_time_map_.find(craned_id);
+      if (iter == m_first_resv_time_map_.end()) return absl::InfiniteFuture();
+      return iter->second;
+    }
+
+    void SetFirstResvTime(const CranedId& craned_id, absl::Time time) {
+      m_first_resv_time_map_[craned_id] = time;
     }
 
    private:
@@ -372,10 +378,12 @@ class MinLoadFirst : public INodeSelectionAlgo {
           if (!it->ReachEnd()) m_time_priority_queue_.emplace(it);
         }
 
-        if (m_time_priority_queue_.empty() ||
-            m_satisfied_iters_.KthTime() + task->time_limit <=
-                (*m_time_priority_queue_.top())->first) {
-          *start_time = m_satisfied_iters_.KthTime();
+        absl::Time kth_time = m_satisfied_iters_.KthTime();
+        if (kth_time != absl::InfiniteFuture() &&
+            (m_time_priority_queue_.empty() ||
+             kth_time + task->time_limit <=
+                 (*m_time_priority_queue_.top())->first)) {
+          *start_time = kth_time;
 
           craned_ids->clear();
           auto it = m_satisfied_iters_.Begin();
@@ -407,6 +415,13 @@ class MinLoadFirst : public INodeSelectionAlgo {
           running_tasks,
       absl::Time now, const PartitionId& partition_id,
       const std::unordered_set<CranedId>& craned_ids,
+      const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
+      NodeSelectionInfo* node_selection_info);
+
+  static void CalculateNodeSelectionInfoOfReservation_(
+      const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
+          running_tasks,
+      absl::Time now, const ReservationMeta* reservation_meta,
       const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
       NodeSelectionInfo* node_selection_info);
 
@@ -528,6 +543,10 @@ class TaskScheduler {
 
   crane::grpc::DeleteReservationReply DeleteReservation(
       const crane::grpc::DeleteReservationRequest& request);
+
+  std::expected<void, std::string> EraseReservationMeta(
+      CranedMetaContainer::ReservationMetaMapPtr& reservation_meta_map,
+      const ReservationId& reservation_id);
 
   static CraneErr AcquireTaskAttributes(TaskInCtld* task);
 

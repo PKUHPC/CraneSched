@@ -134,6 +134,13 @@ class CranedMetaContainer final {
 
   void FreeResourceFromNode(CranedId craned_id, uint32_t task_id);
 
+  void MallocResourceFromReservation(ReservationId reservation_id,
+                                     task_id_t task_id,
+                                     const ResourceV2& resources);
+
+  void FreeResourceFromReservation(ReservationId reservation_id,
+                                   task_id_t task_id);
+
  private:
   // In this part of code, the following lock sequence MUST be held
   // to avoid deadlock:
