@@ -22,6 +22,9 @@ target_include_directories(
         craned PRIVATE ${LIBCGROUP_PATH}/include/
 )
 
+if (CRANE_ENABLE_CGROUP_V2)
+    target_compile_definitions(craned PRIVATE -DCRANE_ENABLE_CGROUP_V2)
+endif ()
 
 if (CRANE_ENABLE_BPF)
     add_dependencies(craned crane_ebpf)

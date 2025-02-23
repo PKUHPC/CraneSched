@@ -491,9 +491,9 @@ class CgroupManager {
 
   CraneExpected<EnvMap> GetResourceEnvMapOfTask(task_id_t task_id);
 
-  void SetCgroupVersion(CgroupConstant::CgroupVersion v) { cg_version_ = v; }
+  void SetCgroupVersion(CgroupConstant::CgroupVersion v) { m_cg_version_ = v; }
 
-  CgroupConstant::CgroupVersion GetCgroupVersion() { return cg_version_; }
+  CgroupConstant::CgroupVersion GetCgroupVersion() { return m_cg_version_; }
 
  private:
   static std::string CgroupStrByTaskId_(task_id_t task_id);
@@ -521,7 +521,7 @@ class CgroupManager {
 
   ControllerFlags m_mounted_controllers_;
 
-  CgroupConstant::CgroupVersion cg_version_;
+  CgroupConstant::CgroupVersion m_cg_version_{};
 
   util::AtomicHashMap<absl::flat_hash_map, task_id_t, CgroupSpec>
       m_task_id_to_cg_spec_map_;
