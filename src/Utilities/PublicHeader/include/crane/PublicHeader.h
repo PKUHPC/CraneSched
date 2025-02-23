@@ -65,6 +65,8 @@ enum class CraneErr : uint16_t {
 template <typename T>
 using CraneExpected = std::expected<T, CraneErr>;
 
+inline const char* kDefaultHost = "0.0.0.0";
+
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kCforedDefaultPort = "10012";
@@ -89,7 +91,10 @@ inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
 inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* kDefaultCranedLogPath = "craned/craned.log";
 
-inline const char* kSupervisorPath = "/usr/libexec/csupervisor";
+inline const char* kDefaultContainerTempDir = "craned/container";
+
+// FIXME: Replace this with macro for sake of cpack.
+inline const char* kSupervisorPath = "csupervisor";
 inline const char* kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";

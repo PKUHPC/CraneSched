@@ -533,11 +533,12 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
 
     argv.push_back(nullptr);
 
-    execv(kSupervisorPath, const_cast<char* const*>(argv.data()));
+    // Use execvp to search the kSupervisorPath in the PATH.
+    execvp(kSupervisorPath, const_cast<char* const*>(argv.data()));
 
-    // Error occurred since execv returned. At this point, errno is set.
+    // Error occurred since execvp returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.
-    fmt::print(stderr, "[Craned Subprocess Error] Failed to execv. Error: {}\n",
+    fmt::print(stderr, "[Craned Subprocess] Failed to execvp. Error: {}\n",
                strerror(errno));
     // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
     //  exit codes

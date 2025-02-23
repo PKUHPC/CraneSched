@@ -117,6 +117,19 @@ ScheduledBatchSize: 100000
 # Default value is false.
 RejectJobsBeyondCapacity: false
 
+Container:
+  # Toggle the container support in CraneSched
+  Enabled: false
+  # Relate to CraneBaseDir
+  TempDir: craned/containers/
+  # OCI Runtime must support `state`, `kill`, `delete`, `run` subcommands
+  # %u, %U, %j, %x will be replaced by user, uid, job_id, container_id
+  RuntimeBin: /usr/bin/runc
+  RuntimeState: /usr/bin/runc --root=/run/user/%U/ state %u.%U.%j.%x
+  RuntimeKill: /usr/bin/runc --rootless=true --root=/run/user/%U/ kill -a %u.%U.%j.%x SIGTERM 
+  RuntimeDelete: /usr/bin/runc --rootless=true --root=/run/user/%U/ delete --force %u.%U.%j.%x
+  RuntimeRun: /usr/bin/runc --rootless=true --root=/run/user/%U/ run -b %b %u.%U.%j.%x
+
 Plugin:
   # Toggle the plugin module in CraneSched
   Enabled: false

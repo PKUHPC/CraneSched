@@ -58,6 +58,16 @@ struct Config {
 
     std::string UnixSocketListenAddr;
   };
+  struct ContainerConfig {
+    bool Enabled{false};
+    std::filesystem::path TempDir;
+    std::string RuntimeBin;
+    std::string RuntimeState;
+    std::string RuntimeKill;
+    std::string RuntimeDelete;
+    std::string RuntimeRun;
+  };
+  ContainerConfig Container;
 
   struct PluginConfig {
     bool Enabled{false};
@@ -72,13 +82,11 @@ struct Config {
   std::string CraneCtldListenPort;
   std::string CranedDebugLevel;
 
-  std::string CraneBaseDir;
-  std::string CranedLogFile;
-  std::string CranedMutexFilePath;
-  std::string CranedScriptDir;
-  std::string CranedUnixSockPath;
-
-  std::string SupervisorPath;
+  std::filesystem::path CraneBaseDir;
+  std::filesystem::path CranedLogFile;
+  std::filesystem::path CranedMutexFilePath;
+  std::filesystem::path CranedScriptDir;
+  std::filesystem::path CranedUnixSockPath;
 
   bool CranedForeground{};
 
