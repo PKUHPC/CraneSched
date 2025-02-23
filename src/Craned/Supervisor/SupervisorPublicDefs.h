@@ -40,27 +40,39 @@ struct Config {
     TlsCertificates TlsCerts;
   };
 
+  struct ContainerConfig {
+    bool Enabled{false};
+    std::filesystem::path TempDir;
+    std::string RuntimeBin;
+    std::string RuntimeState;
+    std::string RuntimeRun;
+    std::string RuntimeKill;
+    std::string RuntimeDelete;
+  };
+  ContainerConfig Container;
+
   struct PluginConfig {
     bool Enabled{false};
     std::string PlugindSockPath;
   };
   PluginConfig Plugin;
+
   bool CompressedRpc{};
   CforedListenConf CforedListenConf;
 
   std::string SupervisorDebugLevel;
 
-  std::string CraneBaseDir;
-  std::string CraneScriptDir;
-  std::string CranedUnixSocketPath;
+  std::filesystem::path CraneBaseDir;
+  std::filesystem::path CraneScriptDir;
+  std::filesystem::path CranedUnixSocketPath;
 
   // Only for debugging
-  std::string SupervisorLogFile;
+  std::filesystem::path SupervisorLogFile;
 
   // TODO: remove this
   CranedId CranedIdOfThisNode;
 
-  std::string SupervisorUnixSockPath;
+  std::filesystem::path SupervisorUnixSockPath;
 
   task_id_t JobId;
 };

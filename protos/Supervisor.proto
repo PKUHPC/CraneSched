@@ -43,11 +43,13 @@ message InitSupervisorRequest {
   }
 
   message ContainerConfig {
-    string oci_runtime_bin = 1;
-    string oci_state_cmd = 2;
-    string oci_run_cmd = 3;
-    string oci_kill_cmd = 4;
-    string oci_delete_cmd = 5;
+    string temp_dir = 1;
+
+    string runtime_bin = 2;
+    string state_cmd = 3;
+    string run_cmd = 4;
+    string kill_cmd = 5;
+    string delete_cmd = 6;
   }
 
   ContainerConfig container_config = 6;

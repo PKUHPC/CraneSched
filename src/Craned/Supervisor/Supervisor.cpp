@@ -76,13 +76,24 @@ void InitFromStdin(int argc, char** argv) {
   g_config.CraneBaseDir = msg.crane_base_dir();
   g_config.CraneScriptDir = msg.crane_script_dir();
 
+  // Container config
+  g_config.Container.Enabled = msg.has_container_config();
+  if (g_config.Container.Enabled) {
+    g_config.Container.TempDir = msg.container_config().temp_dir();
+    g_config.Container.RuntimeBin = msg.container_config().runtime_bin();
+    g_config.Container.RuntimeState = msg.container_config().state_cmd();
+    g_config.Container.RuntimeRun = msg.container_config().run_cmd();
+    g_config.Container.RuntimeKill = msg.container_config().kill_cmd();
+    g_config.Container.RuntimeDelete = msg.container_config().delete_cmd();
+  }
+
   // Plugin config
   g_config.Plugin.Enabled = msg.has_plugin_config();
   if (g_config.Plugin.Enabled)
     g_config.Plugin.PlugindSockPath = msg.plugin_config().socket_path();
 
   g_config.SupervisorLogFile =
-      g_config.CraneBaseDir + fmt::format("Supervisor/{}.log", g_config.JobId);
+      g_config.CraneBaseDir / fmt::format("Supervisor/{}.log", g_config.JobId);
 
   auto log_level = StrToLogLevel(g_config.SupervisorDebugLevel);
   if (log_level.has_value()) {
@@ -153,7 +164,7 @@ void GlobalVariableInit() {
 
   g_craned_client = std::make_unique<Supervisor::CranedClient>();
   g_craned_client->InitChannelAndStub(
-      fmt::format("unix://{}", g_config.CranedUnixSocketPath));
+      fmt::format("unix://{}", g_config.CranedUnixSocketPath.string()));
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");

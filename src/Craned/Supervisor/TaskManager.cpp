@@ -281,8 +281,8 @@ void TaskManager::LaunchTaskInstance_() {
   }
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
-  auto sh_path =
-      fmt::format("{}/Crane-{}.sh", g_config.CraneScriptDir, g_config.JobId);
+  auto sh_path = fmt::format("{}/Crane-{}.sh", g_config.CraneScriptDir.string(),
+                             g_config.JobId);
 
   FILE* fptr = fopen(sh_path.c_str(), "w");
   if (fptr == nullptr) {
