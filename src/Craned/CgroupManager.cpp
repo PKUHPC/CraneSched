@@ -59,23 +59,19 @@ int CgroupManager::Init() {
   setup_mode = cgroup_setup_mode();
   switch (setup_mode) {
   case CGROUP_MODE_LEGACY:
-    //("cgroup mode: Legacy\n");
-    cg_version_ = CgroupConstant::CgroupVersion::CGROUP_V1;
+    m_cg_version_ = CgroupConstant::CgroupVersion::CGROUP_V1;
     break;
   case CGROUP_MODE_HYBRID:
-    //("cgroup mode: Hybrid\n");
-    cg_version_ = CgroupConstant::CgroupVersion::UNDEFINED;
+    m_cg_version_ = CgroupConstant::CgroupVersion::UNDEFINED;
     break;
   case CGROUP_MODE_UNIFIED:
-    //("cgroup mode: Unified\n");
-    cg_version_ = CgroupConstant::CgroupVersion::CGROUP_V2;
+    m_cg_version_ = CgroupConstant::CgroupVersion::CGROUP_V2;
     break;
-  default:
-    //("cgroup mode: Unknown\n");
+  default:  // Cgroup Mode: Unknown
     break;
   }
 #else
-  cg_version_ = CgroupConstant::CgroupVersion::CGROUP_V1;
+  m_cg_version_ = CgroupConstant::CgroupVersion::CGROUP_V1;
 #endif
 
   using CgroupConstant::Controller;
@@ -141,14 +137,15 @@ int CgroupManager::Init() {
     }
   }
   // cgroup don't use /proc/cgroups to manage controller
-  else if ((GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2)) {
-    struct cgroup *root = nullptr;
-    int ret;
-    if ((root = cgroup_new_cgroup("/")) == nullptr) {
+  else if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2) {
+    cgroup *root = cgroup_new_cgroup("/");
+    if (root == nullptr) {
       CRANE_WARN("Unable to construct new root cgroup object.");
       return -1;
     }
-    if ((ret = cgroup_get_cgroup(root)) != 0) {
+
+    int ret = cgroup_get_cgroup(root);
+    if (ret != 0) {
       CRANE_WARN("Error : root cgroup not exist.");
       return -1;
     }
@@ -191,9 +188,10 @@ int CgroupManager::Init() {
     CRANE_WARN("Error Cgroup version is not supported");
     return -1;
   }
-  if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
+
+  if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
     RmAllTaskCgroups_();
-  } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
+  } else if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
 #ifdef CRANE_ENABLE_BPF
     RmBpfDevMap();
 #endif
@@ -201,6 +199,7 @@ int CgroupManager::Init() {
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
   }
+
   return 0;
 }
 
@@ -214,7 +213,7 @@ void CgroupManager::RmAllTaskCgroups_() {
 
 void CgroupManager::ControllersMounted() {
   using namespace CgroupConstant;
-  if (cg_version_ == CgroupVersion::CGROUP_V1) {
+  if (m_cg_version_ == CgroupVersion::CGROUP_V1) {
     if (!Mounted(Controller::BLOCK_CONTROLLER)) {
       CRANE_WARN("Cgroup controller for I/O statistics is not available.");
     }
@@ -233,7 +232,7 @@ void CgroupManager::ControllersMounted() {
     if (!Mounted(Controller::DEVICES_CONTROLLER)) {
       CRANE_WARN("Cgroup controller for DEVICES is not available.");
     }
-  } else if (cg_version_ == CgroupVersion::CGROUP_V2) {
+  } else if (m_cg_version_ == CgroupVersion::CGROUP_V2) {
     if (!Mounted(Controller::CPU_CONTROLLER_V2)) {
       CRANE_WARN("Cgroup controller for CPU is not available.");
     }
