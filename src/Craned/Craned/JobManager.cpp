@@ -373,19 +373,28 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
     }
 
     // Do Supervisor Init
-    crane::grpc::supervisor::InitSupervisorRequest init_request;
-    init_request.set_job_id(execution->task_spec.task_id());
-    init_request.set_debug_level("trace");
-    init_request.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
-    init_request.set_crane_base_dir(g_config.CraneBaseDir);
-    init_request.set_crane_script_dir(g_config.CranedScriptDir);
+    crane::grpc::supervisor::InitSupervisorRequest init_req;
+    init_req.set_job_id(execution->task_spec.task_id());
+    init_req.set_debug_level("trace");
+    init_req.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
+    init_req.set_crane_base_dir(g_config.CraneBaseDir);
+    init_req.set_crane_script_dir(g_config.CranedScriptDir);
+
+    if (g_config.Container.Enabled) {
+      auto* container_conf = init_req.mutable_container_config();
+      container_conf->set_oci_runtime_bin(g_config.Container.RuntimeBin);
+      container_conf->set_oci_run_cmd(g_config.Container.RuntimeState);
+      container_conf->set_oci_run_cmd(g_config.Container.RuntimeRun);
+      container_conf->set_oci_kill_cmd(g_config.Container.RuntimeKill);
+      container_conf->set_oci_delete_cmd(g_config.Container.RuntimeDelete);
+    }
 
     if (g_config.Plugin.Enabled) {
-      auto* plugin_conf = init_request.mutable_plugin_config();
+      auto* plugin_conf = init_req.mutable_plugin_config();
       plugin_conf->set_socket_path(g_config.Plugin.PlugindSockPath);
     }
 
-    ok = SerializeDelimitedToZeroCopyStream(init_request, &ostream);
+    ok = SerializeDelimitedToZeroCopyStream(init_req, &ostream);
     if (!ok) {
       CRANE_ERROR("[Task #{}] Failed to serialize msg to ostream: {}",
                   execution->task_spec.task_id(), strerror(ostream.GetErrno()));
@@ -447,6 +456,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
     close(craned_supervisor_pipe[1]);
     int supervisor_craned_fd = supervisor_craned_pipe[1];
     close(supervisor_craned_pipe[0]);
+
     // Message will send to stdin of Supervisor for its init.
     dup2(craned_supervisor_fd, STDIN_FILENO);
     dup2(supervisor_craned_fd, STDOUT_FILENO);
@@ -485,7 +495,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
     // keep waiting for the input from stdin or other fds and will never end.
     util::os::CloseFdFrom(3);
 
-    // TODO: pass env by grpc
+    // FIXME: pass env by grpc
     //  Set job level resource env
     EnvMap res_env_map =
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node);

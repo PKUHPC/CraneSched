@@ -42,7 +42,16 @@ message InitSupervisorRequest {
     string socket_path = 1;
   }
 
-  PluginConfig plugin_config = 6;
+  message ContainerConfig {
+    string oci_runtime_bin = 1;
+    string oci_state_cmd = 2;
+    string oci_run_cmd = 3;
+    string oci_kill_cmd = 4;
+    string oci_delete_cmd = 5;
+  }
+
+  ContainerConfig container_config = 6;
+  PluginConfig plugin_config = 7;
 }
 
 
