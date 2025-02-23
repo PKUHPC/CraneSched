@@ -42,7 +42,7 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
 
-  auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
+  auto raw_part_metas_map_ = partition_meta_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
   for (PartitionId const& part_id : part_ids)
@@ -83,7 +83,7 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
 
-  auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
+  auto raw_part_metas_map_ = partition_meta_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
   for (PartitionId const& part_id : part_ids) {
@@ -122,7 +122,7 @@ bool CranedMetaContainer::CheckCranedOnline(const CranedId& craned_id) {
 
 CranedMetaContainer::PartitionMetaPtr CranedMetaContainer::GetPartitionMetasPtr(
     PartitionId partition_id) {
-  return partition_metas_map_.GetValueExclusivePtr(partition_id);
+  return partition_meta_map_.GetValueExclusivePtr(partition_id);
 }
 
 CranedMetaContainer::CranedMetaPtr CranedMetaContainer::GetCranedMetaPtr(
@@ -130,14 +130,29 @@ CranedMetaContainer::CranedMetaPtr CranedMetaContainer::GetCranedMetaPtr(
   return craned_meta_map_.GetValueExclusivePtr(craned_id);
 }
 
+CranedMetaContainer::ReservationMetaPtr
+CranedMetaContainer::GetReservationMetaPtr(const ReservationId& name) {
+  return reservation_meta_map_.GetValueExclusivePtr(name);
+}
+
 CranedMetaContainer::AllPartitionsMetaMapConstPtr
 CranedMetaContainer::GetAllPartitionsMetaMapConstPtr() {
-  return partition_metas_map_.GetMapConstSharedPtr();
+  return partition_meta_map_.GetMapConstSharedPtr();
 }
 
 CranedMetaContainer::CranedMetaMapConstPtr
 CranedMetaContainer::GetCranedMetaMapConstPtr() {
   return craned_meta_map_.GetMapConstSharedPtr();
+}
+
+CranedMetaContainer::ReservationMetaMapConstPtr
+CranedMetaContainer::GetReservationMetaMapConstPtr() {
+  return reservation_meta_map_.GetMapConstSharedPtr();
+}
+
+CranedMetaContainer::ReservationMetaMapPtr
+CranedMetaContainer::GetReservationMetaMapPtr() {
+  return reservation_meta_map_.GetMapSharedPtr();
 }
 
 void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
@@ -153,7 +168,7 @@ void CranedMetaContainer::MallocResourceFromNode(CranedId node_id,
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
 
-  auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
+  auto raw_part_metas_map_ = partition_meta_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
   for (PartitionId const& part_id : part_ids)
@@ -191,7 +206,7 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
 
-  auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
+  auto raw_part_metas_map_ = partition_meta_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
   for (PartitionId const& part_id : part_ids)
@@ -227,6 +242,50 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
   }
 
   node_meta->running_task_resource_map.erase(resource_iter);
+}
+
+void CranedMetaContainer::MallocResourceFromReservation(
+    ReservationId reservation_id, task_id_t task_id,
+    const ResourceV2& resources) {
+  if (!reservation_meta_map_.Contains(reservation_id)) {
+    CRANE_ERROR("Try to malloc resource from an unknown reservation {}",
+                reservation_id);
+    return;
+  }
+
+  auto reservation_meta = reservation_meta_map_[reservation_id];
+
+  reservation_meta->resources_avail -= resources;
+  reservation_meta->resources_in_use += resources;
+
+  reservation_meta->running_task_resource_map.emplace(task_id, resources);
+}
+
+void CranedMetaContainer::FreeResourceFromReservation(
+    ReservationId reservation_id, task_id_t task_id) {
+  if (!reservation_meta_map_.Contains(reservation_id)) {
+    CRANE_ERROR("Try to free resource from an unknown reservation {}",
+                reservation_id);
+    return;
+  }
+
+  auto reservation_meta = reservation_meta_map_[reservation_id];
+
+  auto resource_iter =
+      reservation_meta->running_task_resource_map.find(task_id);
+  if (resource_iter == reservation_meta->running_task_resource_map.end()) {
+    CRANE_ERROR(
+        "Try to free resource from an unknown task {} on reservation {}",
+        task_id, reservation_id);
+    return;
+  }
+
+  ResourceV2 const& resources = resource_iter->second;
+
+  reservation_meta->resources_avail += resources;
+  reservation_meta->resources_in_use -= resources;
+
+  reservation_meta->running_task_resource_map.erase(resource_iter);
 }
 
 void CranedMetaContainer::InitFromConfig(const Config& config) {
@@ -298,7 +357,7 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
   }
 
   craned_meta_map_.InitFromMap(std::move(craned_map));
-  partition_metas_map_.InitFromMap(std::move(partition_map));
+  partition_meta_map_.InitFromMap(std::move(partition_map));
 }
 
 crane::grpc::QueryCranedInfoReply CranedMetaContainer::QueryAllCranedInfo() {
@@ -316,7 +375,7 @@ crane::grpc::QueryCranedInfoReply CranedMetaContainer::QueryAllCranedInfo() {
 }
 
 crane::grpc::QueryCranedInfoReply CranedMetaContainer::QueryCranedInfo(
-    const std::string& node_name) {
+    const CranedId& node_name) {
   crane::grpc::QueryCranedInfoReply reply;
   auto* list = reply.mutable_craned_info_list();
 
@@ -335,9 +394,9 @@ crane::grpc::QueryCranedInfoReply CranedMetaContainer::QueryCranedInfo(
 crane::grpc::QueryPartitionInfoReply
 CranedMetaContainer::QueryAllPartitionInfo() {
   crane::grpc::QueryPartitionInfoReply reply;
-  auto* list = reply.mutable_partition_info();
+  auto* list = reply.mutable_partition_info_list();
 
-  auto partition_map = partition_metas_map_.GetMapConstSharedPtr();
+  auto partition_map = partition_meta_map_.GetMapConstSharedPtr();
 
   for (auto&& [part_name, part_meta_ptr] : *partition_map) {
     auto* part_info = list->Add();
@@ -367,13 +426,13 @@ CranedMetaContainer::QueryAllPartitionInfo() {
 }
 
 crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
-    const std::string& partition_name) {
+    const PartitionId& partition_name) {
   crane::grpc::QueryPartitionInfoReply reply;
-  auto* list = reply.mutable_partition_info();
+  auto* list = reply.mutable_partition_info_list();
 
-  if (!partition_metas_map_.Contains(partition_name)) return reply;
+  if (!partition_meta_map_.Contains(partition_name)) return reply;
 
-  auto part_meta = partition_metas_map_.GetValueExclusivePtr(partition_name);
+  auto part_meta = partition_meta_map_.GetValueExclusivePtr(partition_name);
 
   auto* part_info = list->Add();
   part_info->set_name(part_meta->partition_global_meta.name);
@@ -394,6 +453,105 @@ crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
   *part_info->mutable_res_alloc() = static_cast<crane::grpc::ResourceView>(
       part_meta->partition_global_meta.res_in_use);
 
+  return reply;
+}
+
+crane::grpc::QueryReservationInfoReply
+CranedMetaContainer::QueryAllReservationInfo() {
+  crane::grpc::QueryReservationInfoReply reply;
+  auto* list = reply.mutable_reservation_info_list();
+
+  auto reservation_map = reservation_meta_map_.GetMapConstSharedPtr();
+  for (auto&& [reservation_id, reservation_meta_ptr] : *reservation_map) {
+    const auto reservation_meta = reservation_meta_ptr.GetExclusivePtr();
+
+    auto* reservation_info = list->Add();
+
+    reservation_info->set_reservation_name(reservation_id);
+    reservation_info->mutable_start_time()->set_seconds(
+        absl::ToUnixSeconds(reservation_meta->start_time));
+    reservation_info->mutable_duration()->set_seconds(
+        absl::ToUnixSeconds(reservation_meta->end_time) -
+        absl::ToUnixSeconds(reservation_meta->start_time));
+    reservation_info->set_partition(reservation_meta->partition_id);
+    reservation_info->set_craned_regex(
+        util::HostNameListToStr(reservation_meta->craned_ids));
+    ResourceView res_total;
+    ResourceView res_avail;
+    ResourceView res_alloc;
+    res_total += reservation_meta->resources_total;
+    res_avail += reservation_meta->resources_avail;
+    res_alloc += reservation_meta->resources_in_use;
+    reservation_info->mutable_res_total()->CopyFrom(
+        static_cast<crane::grpc::ResourceView>(res_total));
+    reservation_info->mutable_res_avail()->CopyFrom(
+        static_cast<crane::grpc::ResourceView>(res_avail));
+    reservation_info->mutable_res_alloc()->CopyFrom(
+        static_cast<crane::grpc::ResourceView>(res_alloc));
+
+    auto account_list = reservation_info->mutable_account_list();
+    auto& [disallow_accounts, accounts] = reservation_meta->accounts;
+    for (auto const& account : accounts) {
+      account_list->Add((disallow_accounts ? "-" : "") + account);
+    }
+
+    auto user_list = reservation_info->mutable_users_list();
+    auto& [disallow_user, users] = reservation_meta->users;
+    for (auto const& user : users) {
+      user_list->Add((disallow_user ? "-" : "") + user);
+    }
+  }
+  return reply;
+}
+
+crane::grpc::QueryReservationInfoReply
+CranedMetaContainer::QueryReservationInfo(
+    const ReservationId& reservation_name) {
+  crane::grpc::QueryReservationInfoReply reply;
+  auto* list = reply.mutable_reservation_info_list();
+
+  if (!reservation_meta_map_.Contains(reservation_name)) {
+    return reply;
+  }
+
+  const auto reservation_meta =
+      reservation_meta_map_.GetValueExclusivePtr(reservation_name);
+
+  auto* reservation_info = list->Add();
+
+  reservation_info->set_reservation_name(reservation_name);
+  reservation_info->mutable_start_time()->set_seconds(
+      absl::ToUnixSeconds(reservation_meta->start_time));
+  reservation_info->mutable_duration()->set_seconds(
+      absl::ToUnixSeconds(reservation_meta->end_time) -
+      absl::ToUnixSeconds(reservation_meta->start_time));
+  reservation_info->set_partition(reservation_meta->partition_id);
+  reservation_info->set_craned_regex(
+      util::HostNameListToStr(reservation_meta->craned_ids));
+  ResourceView res_total;
+  ResourceView res_avail;
+  ResourceView res_alloc;
+  res_total += reservation_meta->resources_total;
+  res_avail += reservation_meta->resources_avail;
+  res_alloc += reservation_meta->resources_in_use;
+  reservation_info->mutable_res_total()->CopyFrom(
+      static_cast<crane::grpc::ResourceView>(res_total));
+  reservation_info->mutable_res_avail()->CopyFrom(
+      static_cast<crane::grpc::ResourceView>(res_avail));
+  reservation_info->mutable_res_alloc()->CopyFrom(
+      static_cast<crane::grpc::ResourceView>(res_alloc));
+
+  auto account_list = reservation_info->mutable_account_list();
+  auto& [disallow_accounts, accounts] = reservation_meta->accounts;
+  for (auto const& account : accounts) {
+    account_list->Add((disallow_accounts ? "-" : "") + account);
+  }
+
+  auto user_list = reservation_info->mutable_users_list();
+  auto& [disallow_user, users] = reservation_meta->users;
+  for (auto const& user : users) {
+    user_list->Add((disallow_user ? "-" : "") + user);
+  }
   return reply;
 }
 
@@ -443,8 +601,8 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
     resource_filters[static_cast<int>(it)] = true;
 
   // Ensure that the map global read lock is held during the following filtering
-  // operations and partition_metas_map_ must be locked before craned_meta_map_
-  auto partition_map = partition_metas_map_.GetMapConstSharedPtr();
+  // operations and partition_meta_map_ must be locked before craned_meta_map_
+  auto partition_map = partition_meta_map_.GetMapConstSharedPtr();
   auto craned_map = craned_meta_map_.GetMapConstSharedPtr();
 
   auto partition_rng =
@@ -457,7 +615,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
     // we make a copy of these craned ids to lower overall latency.
     // The amortized cost is 1 copy for each craned node.
     // Although an extra copying cost is introduced,
-    // the time of accessing partition_metas_map_ is minimized and
+    // the time of accessing partition_meta_map_ is minimized and
     // the copying cost is taken only by this grpc thread handling
     // cinfo request.
     // Since we assume the number of cpu cores is sufficient on the
@@ -586,7 +744,7 @@ void CranedMetaContainer::AddDedicatedResource(
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
   part_meta_ptrs.reserve(part_ids.size());
 
-  auto raw_part_metas_map_ = partition_metas_map_.GetMapSharedPtr();
+  auto raw_part_metas_map_ = partition_meta_map_.GetMapSharedPtr();
 
   // Acquire all partition locks first.
   for (PartitionId const& part_id : part_ids)
