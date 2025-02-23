@@ -343,6 +343,9 @@ struct TaskInCtld {
   absl::Time start_time;
   absl::Time end_time;
 
+  // persisted for querying priority of running tasks
+  double cached_priority{0.0};
+
   // Might change at each scheduling cycle.
   ResourceV2 resources;
 
@@ -380,7 +383,6 @@ struct TaskInCtld {
   std::string pending_reason;
 
   double mandated_priority{0.0};
-  double cached_priority{0.0};
 
   // Helper function
  public:
@@ -473,6 +475,12 @@ struct TaskInCtld {
   }
   bool const& Held() const { return held; }
 
+  void SetCachedPriority(const double val) {
+    cached_priority = val;
+    runtime_attr.set_cached_priority(val);
+  }
+  double CachedPriority() const { return cached_priority; }
+
   void SetResources(ResourceV2&& val) {
     *runtime_attr.mutable_resources() =
         static_cast<crane::grpc::ResourceV2>(val);
@@ -554,6 +562,7 @@ struct TaskInCtld {
 
     status = runtime_attr.status();
     held = runtime_attr.held();
+    cached_priority = runtime_attr.cached_priority();
 
     if (status != crane::grpc::TaskStatus::Pending) {
       craned_ids.assign(runtime_attr.craned_ids().begin(),
@@ -579,6 +588,7 @@ struct TaskInCtld {
 
     start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());
     end_time = absl::FromUnixSeconds(runtime_attr.end_time().seconds());
+    submit_time = absl::FromUnixSeconds(runtime_attr.submit_time().seconds());
   }
 
   // Helper function to set the fields of TaskInfo using info in

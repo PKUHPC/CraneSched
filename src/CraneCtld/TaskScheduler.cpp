@@ -2642,7 +2642,7 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
     double priority = (task->mandated_priority == 0.0)
                           ? CalculatePriority_(task.get(), now)
                           : task->mandated_priority;
-    task->cached_priority = priority;
+    task->SetCachedPriority(priority);
     task->pending_reason = "Priority";
     task_priority_vec.emplace_back(task.get(), priority);
   }

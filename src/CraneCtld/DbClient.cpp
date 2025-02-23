@@ -348,6 +348,8 @@ bool MongodbClient::FetchJobRecords(
       task->set_type((crane::grpc::TaskType)view["type"].get_int32().value);
 
       task->set_extra_attr(view["extra_attr"].get_string().value.data());
+
+      task->set_priority(view["priority"].get_int64().value);
     }
   } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
@@ -869,7 +871,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
           util::HostNameListToStr(runtime_attr.craned_ids()),
           runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
           // 15-19
-          0, 0, runtime_attr.start_time().seconds(),
+          runtime_attr.cached_priority(), 0,
+          runtime_attr.start_time().seconds(),
           runtime_attr.end_time().seconds(), 0,
           // 20-24
           task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
@@ -942,8 +945,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              static_cast<int32_t>(task->gid), task->allocated_craneds_regex,
              static_cast<int32_t>(task->nodes_alloc), 0, task->partition_id,
              // 15-19
-             0, 0, task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(),
-             0,
+             static_cast<int64_t>(task->CachedPriority()), 0,
+             task->StartTimeInUnixSecond(), task->EndTimeInUnixSecond(), 0,
              // 20-24
              script, task->Status(), absl::ToInt64Seconds(task->time_limit),
              task->SubmitTimeInUnixSecond(), task->cwd,

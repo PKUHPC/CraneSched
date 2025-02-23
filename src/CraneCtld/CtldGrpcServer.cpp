@@ -989,8 +989,9 @@ CtldServer::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
   if (err == CraneErr::kOk)
     err = g_task_scheduler->CheckTaskValidity(task.get());
 
+  task->SetSubmitTime(absl::Now());
+
   if (err == CraneErr::kOk) {
-    task->SetSubmitTime(absl::Now());
     std::future<task_id_t> future =
         g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
