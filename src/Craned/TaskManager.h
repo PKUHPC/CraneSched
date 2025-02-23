@@ -124,6 +124,7 @@ struct CrunMetaInTaskInstance : MetaInTaskInstance {
   int task_input_fd;
   int task_output_fd;
 
+  std::string x11_target;
   uint16_t x11_port;
   std::string x11_auth_path;
 };

@@ -94,10 +94,10 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
     if (ia_meta.x11()) {
       auto const& x11_meta = ia_meta.x11_meta();
 
-      std::string target = ia_meta.x11_meta().enable_forwarding()
-                               ? "localhost"
-                               : x11_meta.target();
-      env_map["DISPLAY"] = fmt::format("{}:{}", target, x11_meta.port() - 6000);
+      std::string target =
+          ia_meta.x11_meta().enable_forwarding() ? "" : x11_meta.target();
+      env_map["DISPLAY"] =
+          fmt::format("{}:{}", target, this->GetCrunMeta()->x11_port - 6000);
       env_map["XAUTHORITY"] = this->GetCrunMeta()->x11_auth_path;
     }
   }
@@ -664,7 +664,9 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         instance->GetCrunMeta()->x11_port = result.x11_port;
         msg.set_x11_port(result.x11_port);
       } else {
-        instance->GetCrunMeta()->x11_port = proto_ia_meta.x11_meta().port();
+        uint32_t port = proto_ia_meta.x11_meta().port();
+        instance->GetCrunMeta()->x11_port = port;
+        msg.set_x11_port(port);
       }
 
       CRANE_TRACE("Crun task #{} x11 enabled: {}, forwarding: {}, port: {}",
@@ -898,9 +900,18 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // Set up x11 authority file if enabled.
     if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
       auto* inst_crun_meta = instance->GetCrunMeta();
+      const auto& proto_x11_meta = instance->task.interactive_meta().x11_meta();
+
+      // Overwrite x11_port with real value from parent process.
       inst_crun_meta->x11_port = msg.x11_port();
 
-      std::string display = fmt::sprintf("%s/unix:%u", g_config.Hostname,
+      std::string x11_target = proto_x11_meta.enable_forwarding()
+                                   ? g_config.Hostname
+                                   : proto_x11_meta.target();
+      std::string x11_disp_fmt =
+          proto_x11_meta.enable_forwarding() ? "%s/unix:%u" : "%s:%u";
+
+      std::string display = fmt::sprintf(x11_disp_fmt, x11_target,
                                          inst_crun_meta->x11_port - 6000);
 
       std::vector<const char*> xauth_argv{
@@ -911,7 +922,7 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
           "add",
           display.c_str(),
           "MIT-MAGIC-COOKIE-1",
-          instance->task.interactive_meta().x11_meta().cookie().c_str(),
+          proto_x11_meta.cookie().c_str(),
       };
       std::string xauth_cmd = absl::StrJoin(xauth_argv, ",");
 
