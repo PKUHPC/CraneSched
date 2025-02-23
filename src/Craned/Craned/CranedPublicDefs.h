@@ -63,9 +63,9 @@ struct Config {
     std::filesystem::path TempDir;
     std::string RuntimeBin;
     std::string RuntimeState;
+    std::string RuntimeRun;
     std::string RuntimeKill;
     std::string RuntimeDelete;
-    std::string RuntimeRun;
   };
   ContainerConfig Container;
 
