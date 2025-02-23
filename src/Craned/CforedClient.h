@@ -101,9 +101,11 @@ class CforedManager {
   struct RegisterElem {
     std::string cfored;
     task_id_t task_id;
-    int fd;
+    int task_in_fd;
+    int task_out_fd;
     bool pty;
-    bool x11;
+
+    bool x11_enable_forwarding;
   };
 
   struct RegisterResult {
@@ -117,19 +119,9 @@ class CforedManager {
   bool Init();
 
   void RegisterIOForward(const RegisterElem& elem, RegisterResult* result);
-  void RegisterIOForward(std::string const& cfored, task_id_t task_id,
-                         int task_in_fd, int task_out_fd, bool pty);
   void TaskProcOnCforedStopped(std::string const& cfored, task_id_t task_id);
 
  private:
-  struct RegisterElem {
-    std::string cfored;
-    task_id_t task_id;
-    int task_input_fd;
-    int task_output_fd;
-    bool pty;
-  };
-
   struct TaskStopElem {
     std::string cfored;
     task_id_t task_id;

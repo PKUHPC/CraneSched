@@ -426,8 +426,7 @@ void CforedManager::RegisterCb_() {
     }
 
     m_cfored_client_map_[elem.cfored]->InitTaskFwdAndSetInputCb(
-        elem.task_id,
-        [fd = elem.task_input_fd](const std::string& msg) -> bool {
+        elem.task_id, [fd = elem.task_in_fd](const std::string& msg) -> bool {
           ssize_t sz_sent = 0, sz_written;
           while (sz_sent != msg.size()) {
             sz_written = write(fd, msg.c_str() + sz_sent, msg.size() - sz_sent);
@@ -441,9 +440,9 @@ void CforedManager::RegisterCb_() {
           return true;
         });
 
-    CRANE_TRACE("Registering fd {} for outputs of task #{}",
-                elem.task_output_fd, elem.task_id);
-    auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.task_output_fd);
+    CRANE_TRACE("Registering fd {} for outputs of task #{}", elem.task_out_fd,
+                elem.task_id);
+    auto poll_handle = m_loop_->resource<uvw::poll_handle>(elem.task_out_fd);
     poll_handle->on<uvw::poll_event>([this, elem = elem](const uvw::poll_event&,
                                                          uvw::poll_handle& h) {
       CRANE_TRACE("Detect task #{} output.", elem.task_id);
@@ -451,7 +450,7 @@ void CforedManager::RegisterCb_() {
       constexpr int MAX_BUF_SIZE = 4096;
       char buf[MAX_BUF_SIZE];
 
-      auto ret = read(elem.task_output_fd, buf, MAX_BUF_SIZE);
+      auto ret = read(elem.task_out_fd, buf, MAX_BUF_SIZE);
       bool read_finished{false};
 
       if (ret == 0) {
@@ -490,7 +489,7 @@ void CforedManager::RegisterCb_() {
         CRANE_TRACE("Task #{} to cfored {} finished its output.", elem.task_id,
                     elem.cfored);
         h.close();
-        close(elem.task_output_fd);
+        close(elem.task_out_fd);
 
         bool ok_to_free =
             m_cfored_client_map_[elem.cfored]->TaskOutputFinish(elem.task_id);
@@ -514,7 +513,7 @@ void CforedManager::RegisterCb_() {
       result.ok = false;
     }
 
-    if (elem.x11) {
+    if (elem.x11_enable_forwarding) {
       CRANE_TRACE("Registering X11 forwarding for task #{}", elem.task_id);
       result.x11_port = SetupX11forwarding_(elem.cfored, elem.task_id);
     }

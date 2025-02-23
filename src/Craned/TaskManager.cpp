@@ -93,9 +93,12 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
 
     if (ia_meta.x11()) {
       auto const& x11_meta = ia_meta.x11_meta();
-      env_map["DISPLAY"] =
-          fmt::format("{}:{}", x11_meta.target(), x11_meta.port());
-      env_map["XAUTHORITY"]= this->GetCrunMeta()->x11_auth_path;
+
+      std::string target = ia_meta.x11_meta().enable_forwarding()
+                               ? "localhost"
+                               : x11_meta.target();
+      env_map["DISPLAY"] = fmt::format("{}:{}", target, x11_meta.port() - 6000);
+      env_map["XAUTHORITY"] = this->GetCrunMeta()->x11_auth_path;
     }
   }
 
@@ -553,11 +556,15 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
   if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
     auto* inst_crun_meta = instance->GetCrunMeta();
+    inst_crun_meta->x11_auth_path = fmt::sprintf(
+        "%s/.crane/xauth/.Xauthority-XXXXXX", instance->pwd_entry.HomeDir());
 
-    const std::string& cookie =
-        instance->task.interactive_meta().x11_meta().cookie();
-    inst_crun_meta->x11_auth_path =
-        fmt::sprintf("%s/.Xauthority-XXXXXX", instance->pwd_entry.HomeDir());
+    bool ok = util::os::CreateFoldersForFile(inst_crun_meta->x11_auth_path);
+    if (!ok) {
+      CRANE_ERROR("Failed to create xauth source file for task #{}",
+                  instance->task.task_id());
+      return CraneErr::kSystemErr;
+    }
 
     // Default file permission is 0600.
     int xauth_fd = mkstemp(inst_crun_meta->x11_auth_path.data());
@@ -638,28 +645,32 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         meta->task_output_fd = crun_pty_fd;
       }
 
+      const auto& proto_ia_meta = instance->task.interactive_meta();
       CforedManager::RegisterElem reg_elem{
-          .cfored = instance->task.interactive_meta().cfored_name(),
+          .cfored = proto_ia_meta.cfored_name(),
           .task_id = instance->task.task_id(),
-          .fd = meta->msg_fd,
+          .task_in_fd = meta->task_input_fd,
+          .task_out_fd = meta->task_output_fd,
           .pty = launch_pty,
-          .x11 = instance->task.interactive_meta().x11(),
+          .x11_enable_forwarding = proto_ia_meta.x11() &&
+                                   proto_ia_meta.x11_meta().enable_forwarding(),
       };
 
       CforedManager::RegisterResult result;
       g_cfored_manager->RegisterIOForward(reg_elem, &result);
+
       instance->GetCrunMeta()->x11_port = result.x11_port;
+      if (reg_elem.x11_enable_forwarding) {
+        instance->GetCrunMeta()->x11_port = result.x11_port;
+        msg.set_x11_port(result.x11_port);
+      } else {
+        instance->GetCrunMeta()->x11_port = proto_ia_meta.x11_meta().port();
+      }
 
-      msg.set_x11_port(result.x11_port);
-
-      // TODO: Refactor.
-
-      CRANE_TRACE("Crun task #{} x11 enabled: {}, port: {}", reg_elem.task_id,
-                  instance->task.interactive_meta().x11(), result.x11_port);
-      g_cfored_manager->RegisterIOForward(
-          instance->task.interactive_meta().cfored_name(),
-          instance->task.task_id(), meta->task_input_fd, meta->task_output_fd,
-          launch_pty);
+      CRANE_TRACE("Crun task #{} x11 enabled: {}, forwarding: {}, port: {}",
+                  reg_elem.task_id, proto_ia_meta.x11(),
+                  proto_ia_meta.x11_meta().enable_forwarding(),
+                  instance->GetCrunMeta()->x11_port);
       close(craned_crun_pipe[0]);
       close(crun_craned_pipe[1]);
     }
@@ -670,23 +681,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     bool ok;
     FileInputStream istream(ctrl_fd);
     FileOutputStream ostream(ctrl_fd);
-
-    // Add event for stdout/stderr of the new subprocess
-    // struct bufferevent* ev_buf_event;
-    // ev_buf_event =
-    //     bufferevent_socket_new(m_ev_base_, fd, BEV_OPT_CLOSE_ON_FREE);
-    // if (!ev_buf_event) {
-    //   CRANE_ERROR(
-    //       "Error constructing bufferevent for the subprocess of task #!",
-    //       instance->task.task_id());
-    //   err = CraneErr::kLibEventError;
-    //   goto AskChildToSuicide;
-    // }
-    // bufferevent_setcb(ev_buf_event, EvSubprocessReadCb_, nullptr, nullptr,
-    //                   (void*)process.get());
-    // bufferevent_enable(ev_buf_event, EV_READ);
-    // bufferevent_disable(ev_buf_event, EV_WRITE);
-    // process->SetEvBufEvent(ev_buf_event);
 
     // Migrate the new subprocess to newly created cgroup
     if (!instance->cgroup->MigrateProcIn(child_pid)) {
@@ -966,19 +960,19 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     FuncSetEnv(task_env_map);
     FuncSetEnv(res_env_map);
 
-    if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
-      auto const& x11_meta = instance->task.interactive_meta().x11_meta();
-      std::string xauth_cmd =
-          fmt::format("xauth add {}:{} . {}", x11_meta.target(),
-                      x11_meta.port(), x11_meta.cookie());
-
-      // FIXME: Shell injection vulnerability
-      rc = std::system(xauth_cmd.c_str());
-      if (rc != 0) {
-        fmt::print(stderr, "[Craned Subprocess] Error: xauth failed.\n");
-        std::abort();
-      }
-    }
+    // if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
+    //   auto const& x11_meta = instance->task.interactive_meta().x11_meta();
+    //   std::string xauth_cmd =
+    //       fmt::format("xauth add {}:{} . {}", x11_meta.target(),
+    //                   x11_meta.port(), x11_meta.cookie());
+    //
+    //   // FIXME: Shell injection vulnerability
+    //   rc = std::system(xauth_cmd.c_str());
+    //   if (rc != 0) {
+    //     fmt::print(stderr, "[Craned Subprocess] Error: xauth failed.\n");
+    //     std::abort();
+    //   }
+    // }
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
