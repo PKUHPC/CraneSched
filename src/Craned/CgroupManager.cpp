@@ -54,7 +54,7 @@ int CgroupManager::Init() {
 
   // cgroup_set_loglevel(CGROUP_LOG_DEBUG);
 
-#ifdef CRANE_ENABLE_BPF
+#ifdef CRANE_ENABLE_CGROUP_V2
   enum cg_setup_mode_t setup_mode;
   setup_mode = cgroup_setup_mode();
   switch (setup_mode) {
