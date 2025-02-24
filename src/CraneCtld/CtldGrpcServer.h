@@ -227,6 +227,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::ModifyCranedStateRequest *request,
       crane::grpc::ModifyCranedStateReply *response) override;
 
+  grpc::Status ModifyPartitionAllowedOrDeniedAccounts(
+      grpc::ServerContext *context,
+      const crane::grpc::ModifyPartitionAllowedOrDeniedAccountsRequest *request,
+      crane::grpc::ModifyPartitionAllowedOrDeniedAccountsReply *response) override;
+
   grpc::Status AddAccount(grpc::ServerContext *context,
                           const crane::grpc::AddAccountRequest *request,
                           crane::grpc::AddAccountReply *response) override;

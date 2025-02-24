@@ -40,8 +40,6 @@ class AccountManager {
   using QosMapMutexSharedPtr = util::ScopeConstSharedPtr<
       std::unordered_map<std::string, std::unique_ptr<Qos>>, util::rw_mutex>;
 
-  using CraneErrCode = crane::grpc::ErrCode;
-
   template <typename T>
   using CraneExpected = std::expected<T, CraneErrCode>;
 
@@ -143,6 +141,10 @@ class AccountManager {
   CraneExpected<void> CheckIfUidHasPermOnUser(uint32_t uid,
                                               const std::string& username,
                                               bool read_only_priv);
+
+  CraneErrCodeExpected<void> CheckModifyPartitionAllowedOrDeniedAccounts(
+      uint32_t uid, const std::string& partition_name,
+      const std::unordered_set<std::string>& accounts);
 
  private:
   void InitDataMap_();
