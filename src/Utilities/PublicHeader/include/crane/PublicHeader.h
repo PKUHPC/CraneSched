@@ -114,6 +114,7 @@ enum ExitCodeEnum : uint16_t {
   kExitCodeExceedTimeLimit,
   kExitCodeCranedDown,
   kExitCodeExecutionError,
+  kExitCodeOOMError,
 
   __MAX_EXIT_CODE  // NOLINT(bugprone-reserved-identifier)
 };
