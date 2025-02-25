@@ -77,8 +77,8 @@ bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
       current_dir /= part;
       if (!fs::exists(current_dir)) {
         if (mkdir(current_dir.c_str(), permissions) != 0) {
-          CRANE_ERROR("CRANE_ERROR: Failed to create directory {}: {}",
-                      current_dir.c_str(), strerror(errno));
+          CRANE_ERROR("Failed to create directory {}: {}", current_dir.c_str(),
+                      strerror(errno));
           return false;
         }
       }
@@ -90,7 +90,7 @@ bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
       }
     }
   } catch (const std::exception& e) {
-    CRANE_ERROR("CRANE_ERROR: Failed to create folder for {}: {}", p.c_str(),
+    CRANE_ERROR("Failed to create folder for {}: {}", p.c_str(),
                 e.what());
     return false;
   }
