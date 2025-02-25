@@ -155,7 +155,11 @@ grpc::Status CraneCtldServiceImpl::ModifyTask(
   if (!res) {
     for (auto task_id : request->task_ids()) {
       response->add_not_modified_tasks(task_id);
-      response->add_not_modified_reasons(res.error());
+      if (res.error() == CraneErrCode::ERR_INVALID_USER) {
+        response->add_not_modified_reasons("User is not a user of Crane");
+      } else if (res.error() == CraneErrCode::ERR_USER_NO_PRIVILEGE) {
+        response->add_not_modified_reasons("User has insufficient privilege");
+      }
     }
     return grpc::Status::OK;
   }
@@ -237,7 +241,11 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
   if (!res) {
     for (auto crane_id : request->craned_ids()) {
       response->add_not_modified_nodes(crane_id);
-      response->add_not_modified_reasons(res.error());
+      if (res.error() == CraneErrCode::ERR_INVALID_USER) {
+        response->add_not_modified_reasons("User is not a user of Crane");
+      } else if (res.error() == CraneErrCode::ERR_USER_NO_PRIVILEGE) {
+        response->add_not_modified_reasons("User has insufficient privilege");
+      }
     }
     return grpc::Status::OK;
   }

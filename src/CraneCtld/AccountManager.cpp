@@ -507,8 +507,30 @@ CraneExpected<void> AccountManager::ModifyAdminLevel(
   return SetUserAdminLevel_(name, new_level);
 }
 
-CraneExpected<void> AccountManager::ModifyUserDefaultQos(
-    uint32_t uid, const std::string& name, const std::string& partition,
+CraneExpected<void> AccountManager::ModifyUserDefaultAccount(
+    uint32_t uid, const std::string& user, const std::string& def_account) {
+  util::write_lock_guard user_guard(m_rw_user_mutex_);
+  CraneExpected<void> result{};
+
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+  const User* op_user = user_result.value();
+
+  const User* user_ptr = GetExistedUserInfoNoLock_(user);
+  if (!user_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+
+  result = CheckIfUserHasHigherPrivThan_(*op_user, user_ptr->admin_level);
+  if (!result) return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
+
+  if (!user_ptr->account_to_attrs_map.contains(def_account))
+    return std::unexpected(CraneErrCode::ERR_USER_ALLOWED_ACCOUNT);
+
+  if (user_ptr->default_account == def_account) return result;
+
+  return SetUserDefaultAccount_(user, def_account);
+}
+
+CraneExpected<void> AccountManager::ModifyUserDefaultQos(    uint32_t uid, const std::string& name, const std::string& partition,
     const std::string& account, const std::string& value) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
 
@@ -909,7 +931,7 @@ CraneExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
   do {
     const Account* account_ptr = GetExistedAccountInfoNoLock_(account_name);
     if (account_ptr->blocked) {
-      CRANE_ERROR("Ancestor account '{}' is blocked", account_ptr->name);
+      CRANE_DEBUG("Ancestor account '{}' is blocked", account_ptr->name);
       return std::unexpected(CraneErrCode::ERR_BLOCKED_ACCOUNT);
     }
     account_name = account_ptr->parent_account;
@@ -917,7 +939,7 @@ CraneExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
 
   const User* user_ptr = GetExistedUserInfoNoLock_(user);
   if (user_ptr->account_to_attrs_map.at(account).blocked) {
-    CRANE_ERROR("User '{}' is blocked", user_ptr->name);
+    CRANE_DEBUG("User '{}' is blocked", user_ptr->name);
     return std::unexpected(CraneErrCode::ERR_BLOCKED_USER);
   }
   return {};
@@ -992,17 +1014,17 @@ CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
   return {};
 }
 
-std::expected<void, std::string> AccountManager::CheckUidIsAdmin(uint32_t uid) {
+CraneExpected<std::string> AccountManager::CheckUidIsAdmin(uint32_t uid) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) {
-    return std::unexpected("User is not a user of Crane.");
+    return std::unexpected(CraneErrCode::ERR_INVALID_USER);
   }
   const User* user_ptr = user_result.value();
 
   if (user_ptr->admin_level >= User::Operator) return {};
 
-  return std::unexpected("User has insufficient privilege.");
+  return std::unexpected(CraneErrCode::ERR_USER_NO_PRIVILEGE);
 }
 
 CraneExpected<void> AccountManager::CheckIfUidHasPermOnUser(
@@ -1936,7 +1958,7 @@ CraneExpected<void> AccountManager::SetUserAdminLevel_(
   return {};
 }
 
-CraneErrCodeExpected<void> AccountManager::SetUserDefaultAccount_(
+CraneExpected<void> AccountManager::SetUserDefaultAccount_(
     const std::string& user, const std::string& def_account) {
   // Update to database
   mongocxx::client_session::with_transaction_cb callback =
@@ -1954,7 +1976,7 @@ CraneErrCodeExpected<void> AccountManager::SetUserDefaultAccount_(
   return {};
 }
 
-CraneErrCodeExpected<void> AccountManager::SetUserDefaultQos_(
+CraneExpected<void> AccountManager::SetUserDefaultQos_(
     const User& user, const std::string& account, const std::string& partition,
     const std::string& qos) {
   const std::string& name = user.name;

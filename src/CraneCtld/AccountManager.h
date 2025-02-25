@@ -135,7 +135,7 @@ class AccountManager {
                                        const std::string& account,
                                        TaskInCtld* task);
 
-  std::expected<void, std::string> CheckUidIsAdmin(uint32_t uid);
+  CraneExpected<std::string> CheckUidIsAdmin(uint32_t uid);
 
   CraneExpected<void> CheckIfUidHasPermOnUser(uint32_t uid,
                                               const std::string& username,
@@ -263,13 +263,10 @@ class AccountManager {
 
   CraneExpected<void> SetUserAdminLevel_(const std::string& name,
                                          User::AdminLevel new_level);
-<<<<<<< HEAD
 
   CraneExpected<void> SetUserDefaultAccount_(const std::string& user,
                                              const std::string& def_account);
 
-=======
->>>>>>> 58e20be (del craneErr)
   CraneExpected<void> SetUserDefaultQos_(const User& user,
                                          const std::string& account,
                                          const std::string& partition,
