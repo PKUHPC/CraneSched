@@ -1037,6 +1037,29 @@ void TaskScheduler::ScheduleThread_() {
       m_pending_map_cached_size_.store(m_pending_task_map_.size(),
                                        std::memory_order::release);
       m_pending_task_map_mtx_.Unlock();
+
+      {
+        absl::Time now = absl::Now();
+        auto reservation_meta_map =
+            g_meta_container->GetReservationMetaMapPtr();
+        auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
+        std::vector<ReservationId> expired_reservations;
+        for (auto& [reservation_id, reservation_meta] : *reservation_meta_map) {
+          auto resv_meta = reservation_meta.GetExclusivePtr();
+          if (now < resv_meta->start_time) continue;
+          if (now >= resv_meta->end_time) {
+            expired_reservations.emplace_back(reservation_id);
+            continue;
+          }
+        }
+        for (const auto& reservation_id : expired_reservations) {
+          auto res = g_task_scheduler->EraseReservationMeta(
+              reservation_meta_map, reservation_id);
+          if (!res.has_value()) {
+            CRANE_ERROR("Clear expired reservation failed: {}", res.error());
+          }
+        }
+      }
     }
 
     std::this_thread::sleep_for(
