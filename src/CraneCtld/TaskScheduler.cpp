@@ -1369,11 +1369,13 @@ crane::grpc::CreateReservationReply TaskScheduler::CreateReservation(
       if (str[0] == '-') {
         disallow = true;
         account = str.substr(1);
-      } else if (account[0] == '+') {
-        allow = true;
-        account = str.substr(1);
       } else {
-        account = str;
+        allow = true;
+        if (account[0] == '+') {
+          account = str.substr(1);
+        } else {
+          account = str;
+        }
       }
       if (g_account_manager->GetExistedAccountInfo(account).get() == nullptr) {
         reply.set_ok(false);
@@ -1404,11 +1406,13 @@ crane::grpc::CreateReservationReply TaskScheduler::CreateReservation(
       if (str[0] == '-') {
         disallow = true;
         user = str.substr(1);
-      } else if (user[0] == '+') {
-        allow = true;
-        user = str.substr(1);
       } else {
-        user = str;
+        allow = true;
+        if (user[0] == '+') {
+          user = str.substr(1);
+        } else {
+          user = str;
+        }
       }
       if (g_account_manager->GetExistedUserInfo(user).get() == nullptr) {
         reply.set_ok(false);
@@ -2317,7 +2321,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
 
         if constexpr (kAlgoTraceOutput) {
           CRANE_TRACE(
-              "Craned {} res_avail at now + {}s: cpu: {}, mem: {}, gres: {}; ",
+              "Craned {} res_avail at now + {}s: cpu: {}, mem: {}, gres: "
+              "{}; ",
               craned_id, absl::ToInt64Seconds(cur_time_iter->first - now),
               cur_time_iter->second.allocatable_res.cpu_count,
               cur_time_iter->second.allocatable_res.memory_bytes,
