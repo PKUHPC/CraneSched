@@ -988,20 +988,6 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     FuncSetEnv(task_env_map);
     FuncSetEnv(res_env_map);
 
-    // if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
-    //   auto const& x11_meta = instance->task.interactive_meta().x11_meta();
-    //   std::string xauth_cmd =
-    //       fmt::format("xauth add {}:{} . {}", x11_meta.target(),
-    //                   x11_meta.port(), x11_meta.cookie());
-    //
-    //   // FIXME: Shell injection vulnerability
-    //   rc = std::system(xauth_cmd.c_str());
-    //   if (rc != 0) {
-    //     fmt::print(stderr, "[Craned Subprocess] Error: xauth failed.\n");
-    //     std::abort();
-    //   }
-    // }
-
     // Prepare the command line arguments.
     std::vector<const char*> argv;
 
