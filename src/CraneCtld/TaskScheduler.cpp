@@ -1610,6 +1610,7 @@ crane::grpc::DeleteReservationReply TaskScheduler::DeleteReservation(
 std::expected<void, std::string> TaskScheduler::EraseReservationMeta(
     CranedMetaContainer::ReservationMetaMapPtr& reservation_meta_map,
     const ReservationId& reservation_id) {
+  CRANE_TRACE("Deleting reservation {}", reservation_id);
   if (!reservation_meta_map->contains(reservation_id)) {
     return std::unexpected(
         fmt::format("Reservation {} not found", reservation_id));
@@ -2234,7 +2235,11 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
            craned_meta->reservation_resource_map) {
         absl::Time start_time = reservation.start_time;
         absl::Time end_time = reservation.end_time;
-        CRANE_ASSERT(end_time > now);
+        if (end_time <= now) {
+          CRANE_DEBUG("Expired reservation {} on node {}", ReservationId,
+                      craned_id);
+          continue;
+        }
         if (start_time < now) {
           start_time = now;
         }
@@ -2578,6 +2583,33 @@ void MinLoadFirst::NodeSelect(
   // We use the time now as the base time across the whole algorithm.
   absl::Time now = absl::FromUnixSeconds(ToUnixSeconds(absl::Now()));
 
+  std::unordered_map<ReservationId, NodeSelectionInfo> resv_id_node_info_map;
+  std::vector<ReservationId> expired_resv_ids;
+
+  {
+    auto reservation_meta_map = g_meta_container->GetReservationMetaMapPtr();
+    auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
+    std::vector<ReservationId> expired_reservations;
+    for (auto& [reservation_id, reservation_meta] : *reservation_meta_map) {
+      auto resv_meta = reservation_meta.GetExclusivePtr();
+      if (now < resv_meta->start_time) continue;
+      if (now >= resv_meta->end_time) {
+        expired_reservations.emplace_back(reservation_id);
+        continue;
+      }
+      CalculateNodeSelectionInfoOfReservation_(
+          running_tasks, now, resv_meta.get(), *craned_meta_map,
+          &resv_id_node_info_map[reservation_id]);
+    }
+    for (const auto& reservation_id : expired_reservations) {
+      auto res = g_task_scheduler->EraseReservationMeta(reservation_meta_map,
+                                                        reservation_id);
+      if (!res.has_value()) {
+        CRANE_ERROR("Clear expired reservation failed: {}", res.error());
+      }
+    }
+  }
+
   {
     auto all_partitions_meta_map =
         g_meta_container->GetAllPartitionsMetaMapConstPtr();
@@ -2594,33 +2626,6 @@ void MinLoadFirst::NodeSelect(
       CalculateNodeSelectionInfoOfPartition_(running_tasks, now, partition_id,
                                              craned_ids, *craned_meta_map,
                                              &node_info_in_a_partition);
-    }
-  }
-
-  std::unordered_map<ReservationId, NodeSelectionInfo> resv_id_node_info_map;
-  std::vector<ReservationId> expired_resv_ids;
-
-  {
-    auto reservation_meta_map = g_meta_container->GetReservationMetaMapPtr();
-    auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
-    std::vector<ReservationId> expired_reservations;
-    for (auto& [reservation_id, reservation_meta] : *reservation_meta_map) {
-      auto resv_meta = reservation_meta.GetExclusivePtr();
-      if (now < resv_meta->start_time) continue;
-      if (now > resv_meta->end_time) {
-        expired_reservations.emplace_back(reservation_id);
-        continue;
-      }
-      CalculateNodeSelectionInfoOfReservation_(
-          running_tasks, now, resv_meta.get(), *craned_meta_map,
-          &resv_id_node_info_map[reservation_id]);
-    }
-    for (const auto& reservation_id : expired_reservations) {
-      auto res = g_task_scheduler->EraseReservationMeta(reservation_meta_map,
-                                                        reservation_id);
-      if (!res.has_value()) {
-        CRANE_ERROR("Clear expired reservation failed: {}", res.error());
-      }
     }
   }
 
