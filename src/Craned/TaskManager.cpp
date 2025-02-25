@@ -934,23 +934,37 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       subprocess_s subprocess;
       int result = subprocess_create(xauth_argv.data(), 0, &subprocess);
       if (0 != result) {
-        fmt::print(stderr, "[Craned Subprocess] xauth failed.\n");
+        fmt::print(
+            stderr,
+            "[Craned Subprocess] xauth subprocess creation failed: {}.\n",
+            strerror(errno));
         std::abort();
       }
 
-      fmt::printf("[Craned Subprocess] Result of {} : ", xauth_cmd);
-      std::FILE* xauth_out = subprocess_stdout(&subprocess);
       auto buf = std::make_unique<char[]>(4096);
-      while (std::fgets(buf.get(), 4096, xauth_out) != nullptr)
-        fmt::printf("%s", buf.get());
-      fmt::printf("\n");
+      std::string xauth_stdout_str, xauth_stderr_str;
 
-      if (0 != subprocess_join(&subprocess, &result)) {
-        CRANE_ERROR("[Craned Subprocess] xauth join failed.");
-      }
+      std::FILE* cmd_fd = subprocess_stdout(&subprocess);
+      while (std::fgets(buf.get(), 4096, cmd_fd) != nullptr)
+        xauth_stdout_str.append(buf.get());
 
-      if (0 != subprocess_destroy(&subprocess)) {
-        CRANE_ERROR("[Craned Subprocess] xauth destroy failed.");
+      cmd_fd = subprocess_stderr(&subprocess);
+      while (std::fgets(buf.get(), 4096, cmd_fd) != nullptr)
+        xauth_stderr_str.append(buf.get());
+
+      if (0 != subprocess_join(&subprocess, &result))
+        fmt::print(stderr, "[Craned Subprocess] xauth join failed.\n");
+
+      if (0 != subprocess_destroy(&subprocess))
+        fmt::print(stderr, "[Craned Subprocess] xauth destroy failed.\n");
+
+      if (result != 0) {
+        fmt::print(stderr, "[Craned Subprocess] xauth return with {}.\n",
+                   result);
+        fmt::print(stderr, "[Craned Subprocess] xauth stdout: {}\n",
+                   xauth_stdout_str);
+        fmt::print(stderr, "[Craned Subprocess] xauth stderr: {}\n",
+                   xauth_stderr_str);
       }
     }
 
