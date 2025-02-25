@@ -40,7 +40,14 @@ class CforedClient {
   void InitTaskFwdAndSetInputCb(
       task_id_t task_id, std::function<bool(const std::string&)> task_input_cb);
 
+  void SetX11FwdInputCb(
+      task_id_t task_id,
+      std::function<bool(const std::string&)> task_x11_input_cb);
+
   void TaskOutPutForward(task_id_t task_id, const std::string& msg);
+
+  void TaskX11OutPutForward(task_id_t task_id, std::unique_ptr<char[]>&& data,
+                            size_t len);
 
   bool TaskOutputFinish(task_id_t task_id);
 
@@ -50,6 +57,10 @@ class CforedClient {
   struct TaskFwdMeta {
     std::function<bool(const std::string&)> input_cb;
     bool input_stopped{false};
+
+    std::function<bool(const std::string&)> x11_input_cb;
+    bool x11_input_stopped{false};
+
     bool output_stopped{false};
     bool proc_stopped{false};
   };
@@ -59,7 +70,14 @@ class CforedClient {
                                     crane::grpc::StreamTaskIOReply>* stream,
       std::atomic<bool>* write_pending);
 
+  ConcurrentQueue<std::pair<task_id_t, std::string>> m_input_queue_;
   ConcurrentQueue<std::pair<task_id_t, std::string /*msg*/>> m_output_queue_;
+
+  ConcurrentQueue<std::tuple<task_id_t, std::unique_ptr<char[]>, size_t>>
+      m_x11_input_queue_;
+  ConcurrentQueue<std::tuple<task_id_t, std::unique_ptr<char[]>, size_t>>
+      m_x11_output_queue_;
+
   std::thread m_fwd_thread_;
   std::atomic<bool> m_stopped_{false};
 
@@ -80,24 +98,30 @@ class CforedManager {
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
  public:
+  struct RegisterElem {
+    std::string cfored;
+    task_id_t task_id;
+    int task_in_fd;
+    int task_out_fd;
+    bool pty;
+
+    bool x11_enable_forwarding;
+  };
+
+  struct RegisterResult {
+    bool ok;
+    uint16_t x11_port;
+  };
+
   CforedManager() = default;
   ~CforedManager();
 
   bool Init();
 
-  void RegisterIOForward(std::string const& cfored, task_id_t task_id,
-                         int task_in_fd, int task_out_fd, bool pty);
+  void RegisterIOForward(const RegisterElem& elem, RegisterResult* result);
   void TaskProcOnCforedStopped(std::string const& cfored, task_id_t task_id);
 
  private:
-  struct RegisterElem {
-    std::string cfored;
-    task_id_t task_id;
-    int task_input_fd;
-    int task_output_fd;
-    bool pty;
-  };
-
   struct TaskStopElem {
     std::string cfored;
     task_id_t task_id;
@@ -108,6 +132,15 @@ class CforedManager {
     task_id_t task_id;
   };
 
+  struct X11FdInfo {
+    int fd;
+    std::shared_ptr<uvw::tcp_handle> sock;
+    std::shared_ptr<uvw::tcp_handle> proxy_handle;
+    std::atomic<bool> sock_stopped;
+  };
+
+  uint16_t SetupX11forwarding_(std::string const& cfored, task_id_t task_id);
+
   void UnregisterIOForward_(std::string const& cfored, task_id_t task_id);
 
   void EvLoopThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
@@ -117,7 +150,7 @@ class CforedManager {
   std::thread m_ev_loop_thread_;
 
   std::shared_ptr<uvw::async_handle> m_register_handle_;
-  ConcurrentQueue<std::pair<RegisterElem, std::promise<bool>>>
+  ConcurrentQueue<std::pair<RegisterElem, std::promise<RegisterResult>>>
       m_register_queue_;
   void RegisterCb_();
 
@@ -134,6 +167,9 @@ class CforedManager {
 
   std::unordered_map<std::string /*cfored name*/, uint32_t /*cfored refcount*/>
       m_cfored_client_ref_count_map_;
+
+  std::unordered_map<task_id_t, std::shared_ptr<X11FdInfo>>
+      m_task_id_to_x11_map_;
 };
 }  // namespace Craned
 
