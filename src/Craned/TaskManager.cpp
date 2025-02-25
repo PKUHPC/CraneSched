@@ -973,17 +973,14 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
 
     // clearenv() should be called just before fork!
-    if (clearenv()) {
-      fmt::print(stderr, "[Craned Subprocess] Warning: clearenv() failed.\n");
-    }
+    if (clearenv())
+      fmt::print(stderr, "[Craned Subprocess] clearenv() failed.\n");
 
     auto FuncSetEnv = [](const EnvMap& v) {
       for (const auto& [name, value] : v)
         if (setenv(name.c_str(), value.c_str(), 1))
-          fmt::print(
-              stderr,
-              "[Craned Subprocess] Warning: setenv() for {}={} failed.\n", name,
-              value);
+          fmt::print(stderr, "[Craned Subprocess] setenv() for {}={} failed.\n",
+                     name, value);
     };
     FuncSetEnv(task_env_map);
     FuncSetEnv(res_env_map);
