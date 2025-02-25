@@ -2698,25 +2698,32 @@ void MinLoadFirst::NodeSelect(
             absl::ToInt64Seconds(expected_start_time + task->time_limit - now));
       }
 
-      // The start time and craned ids have been determined.
-      // Modify the corresponding NodeSelectionInfo now.
-      // Note: Since a craned node may belong to multiple partition,
-      //       the NodeSelectionInfo of all the partitions the craned node
-      //       belongs to should be modified!
+      if (task->reservation == "") {
+        // The start time and craned ids have been determined.
+        // Modify the corresponding NodeSelectionInfo now.
+        // Note: Since a craned node may belong to multiple partition,
+        //       the NodeSelectionInfo of all the partitions the craned node
+        //       belongs to should be modified!
 
-      for (CranedId const& craned_id : craned_ids) {
-        auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-        for (PartitionId const& partition_id :
-             craned_meta->static_meta.partition_ids) {
-          involved_part_craned[partition_id].emplace_back(craned_id);
+        for (CranedId const& craned_id : craned_ids) {
+          auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
+          for (PartitionId const& partition_id :
+               craned_meta->static_meta.partition_ids) {
+            involved_part_craned[partition_id].emplace_back(craned_id);
+          }
         }
-      }
-    }
 
-    for (const auto& [partition_id, part_craned_ids] : involved_part_craned) {
-      SubtractTaskResourceNodeSelectionInfo_(
-          expected_start_time, task->time_limit, task->Resources(),
-          part_craned_ids, &node_info);
+        for (const auto& [partition_id, part_craned_ids] :
+             involved_part_craned) {
+          SubtractTaskResourceNodeSelectionInfo_(
+              expected_start_time, task->time_limit, task->Resources(),
+              part_craned_ids, &part_id_node_info_map.at(partition_id));
+        }
+      } else {
+        SubtractTaskResourceNodeSelectionInfo_(
+            expected_start_time, task->time_limit, task->Resources(),
+            craned_ids, &node_info);
+      }
     }
 
     if (expected_start_time == now) {
