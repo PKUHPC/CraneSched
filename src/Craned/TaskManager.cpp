@@ -556,10 +556,13 @@ CraneErr TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
   if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
     auto* inst_crun_meta = instance->GetCrunMeta();
-    inst_crun_meta->x11_auth_path = fmt::sprintf(
-        "%s/.crane/xauth/.Xauthority-XXXXXX", instance->pwd_entry.HomeDir());
+    const PasswordEntry& pwd_entry = instance->pwd_entry;
 
-    bool ok = util::os::CreateFoldersForFile(inst_crun_meta->x11_auth_path);
+    inst_crun_meta->x11_auth_path =
+        fmt::sprintf("%s/.crane/xauth/.Xauthority-XXXXXX", pwd_entry.HomeDir());
+
+    bool ok = util::os::CreateFoldersForFileEx(
+        inst_crun_meta->x11_auth_path, pwd_entry.Uid(), pwd_entry.Gid(), 0700);
     if (!ok) {
       CRANE_ERROR("Failed to create xauth source file for task #{}",
                   instance->task.task_id());
