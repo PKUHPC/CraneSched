@@ -1394,7 +1394,7 @@ crane::grpc::CreateReservationReply TaskScheduler::CreateReservation(
         account = str.substr(1);
       } else {
         allow = true;
-        if (account[0] == '+') {
+        if (str[0] == '+') {
           account = str.substr(1);
         } else {
           account = str;
@@ -1431,7 +1431,7 @@ crane::grpc::CreateReservationReply TaskScheduler::CreateReservation(
         user = str.substr(1);
       } else {
         allow = true;
-        if (user[0] == '+') {
+        if (str[0] == '+') {
           user = str.substr(1);
         } else {
           user = str;
@@ -2704,6 +2704,7 @@ void MinLoadFirst::NodeSelect(
           node_info, part_meta, *craned_meta_map, task.get(), now, &craned_ids,
           &expected_start_time);
       if (!ok) {
+        task->pending_reason = "Resource";
         continue;
       }
 
