@@ -61,7 +61,7 @@ message SubmitBatchTaskReply {
   bool ok = 1;
   oneof payload{
     uint32 task_id = 2;
-    string reason = 3;
+    ErrCode code = 3;
   }
 }
 
@@ -72,7 +72,7 @@ message SubmitBatchTasksRequest {
 
 message SubmitBatchTasksReply {
   repeated uint32 task_id_list = 1;
-  repeated string reason_list = 2;
+  repeated ErrCode code_list = 2;
 }
 
 message ExecuteTasksRequest {
@@ -243,7 +243,7 @@ message AddAccountRequest {
 
 message AddAccountReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
 }
 
 message AddUserRequest {
@@ -253,7 +253,7 @@ message AddUserRequest {
 
 message AddUserReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
 }
 
 message AddQosRequest {
@@ -263,7 +263,7 @@ message AddQosRequest {
 
 message AddQosReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
 }
 
 message DeleteAccountRequest {
@@ -273,7 +273,7 @@ message DeleteAccountRequest {
 
 message DeleteAccountReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
 }
 
 message DeleteUserRequest {
@@ -284,7 +284,7 @@ message DeleteUserRequest {
 
 message DeleteUserReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
 }
 
 message DeleteQosRequest {
@@ -294,7 +294,7 @@ message DeleteQosRequest {
 
 message DeleteQosReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
 }
 
 message ModifyAccountRequest {
@@ -308,7 +308,7 @@ message ModifyAccountRequest {
 
 message ModifyAccountReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
 }
 
 message ModifyUserRequest {
@@ -324,7 +324,7 @@ message ModifyUserRequest {
 
 message ModifyUserReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
 }
 
 message ModifyQosRequest {
@@ -336,7 +336,7 @@ message ModifyQosRequest {
 
 message ModifyQosReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
 }
 
 message QueryAccountInfoRequest {
@@ -346,7 +346,7 @@ message QueryAccountInfoRequest {
 
 message QueryAccountInfoReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
   repeated AccountInfo account_list = 3;
 }
 
@@ -358,7 +358,7 @@ message QueryUserInfoRequest {
 
 message QueryUserInfoReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
   repeated UserInfo user_list = 3;
 }
 
@@ -369,7 +369,7 @@ message QueryQosInfoRequest {
 
 message QueryQosInfoReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
   repeated QosInfo qos_list = 5;
 }
 
@@ -383,7 +383,7 @@ message BlockAccountOrUserRequest {
 
 message BlockAccountOrUserReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  ErrCode code = 2;
 }
 
 message MigrateSshProcToCgroupRequest {

@@ -771,7 +771,7 @@ CraneExpected<crane::grpc::ResourceInNode> CgroupManager::GetTaskResourceInNode(
   auto cg_spec_ptr = this->m_task_id_to_cg_spec_map_[task_id];
   if (cg_spec_ptr) return cg_spec_ptr->res_in_node;
 
-  return std::unexpected(CraneErr::kCgroupError);
+  return std::unexpected(CraneErrCode::ERR_CGROUP);
 }
 
 EnvMap CgroupManager::GetResourceEnvMapByResInNode(
@@ -797,7 +797,7 @@ CraneExpected<EnvMap> CgroupManager::GetResourceEnvMapOfTask(
 
   CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
               task_id);
-  return std::unexpected(CraneErr::kSystemErr);
+  return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
 }
 
 /*
