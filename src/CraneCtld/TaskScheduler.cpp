@@ -3093,6 +3093,13 @@ CraneErr TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
       auto resv_meta =
           g_meta_container->GetReservationMetaPtr(task->reservation);
 
+      if (resv_meta->partition_id != "" &&
+          resv_meta->partition_id != task->partition_id) {
+        CRANE_TRACE("Partition {} not allowed for reservation {} for task #{}",
+                    task->partition_id, task->reservation, task->TaskId());
+        return CraneErr::kInvalidParam;
+      }
+
       if (!resv_meta->accounts.second.empty()) {
         if (resv_meta->accounts.first ^
             !resv_meta->accounts.second.contains(task->account)) {
