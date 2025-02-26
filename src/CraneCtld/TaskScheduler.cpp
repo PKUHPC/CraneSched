@@ -987,8 +987,8 @@ void TaskScheduler::ScheduleThread_() {
           CranedId const& craned_id = iter.first;
           auto& task_uid_pairs = iter.second;
 
-          g_thread_pool->detach_task([=, cgroups_to_release =
-                                             std::move(task_uid_pairs)]() {
+          g_thread_pool->detach_task(
+      [=, cgroups_to_release = std::move(task_uid_pairs)]() {
             auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
             // If the craned is down, just ignore it.
