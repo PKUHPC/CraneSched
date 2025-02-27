@@ -217,7 +217,7 @@ void JobManager::EvSigchldCb_() {
                   /* TODO(More status tracing): | WUNTRACED | WCONTINUED */);
 
     if (pid > 0) {
-      CRANE_TRACE("Child pid #{} exit", pid);
+      CRANE_TRACE("Child pid {} exit", pid);
       // We do nothing now
     } else if (pid == 0) {
       // There's no child that needs reaping.
@@ -523,9 +523,11 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
 
     // Error occurred since execvp returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.
-    fmt::print(stderr, "[Craned Subprocess] Failed to execvp. Error: {}\n",
-               strerror(errno));
-    // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
+    fmt::print(stderr, "[Craned Subprocess] Failed to execvp {}. Error: {}\n",
+               kSupervisorPath, strerror(errno));
+
+    // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return
+    // standard
     //  exit codes
     abort();
   }

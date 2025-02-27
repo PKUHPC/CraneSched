@@ -98,19 +98,9 @@ message TerminateTaskReply{
   string reason = 2;
 }
 
-message TerminateRequest{
-
-}
-
-message TerminateReply{
-
-}
-
-
 service Supervisor{
   rpc ExecuteTask(TaskExecutionRequest) returns (TaskExecutionReply);
   rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
   rpc ChangeTaskTimeLimit(ChangeTaskTimeLimitRequest) returns(ChangeTaskTimeLimitReply);
   rpc TerminateTask(TerminateTaskRequest) returns(TerminateTaskReply);
-  rpc Terminate(TerminateRequest) returns(TerminateReply);
 }

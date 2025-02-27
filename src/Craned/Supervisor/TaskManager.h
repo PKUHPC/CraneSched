@@ -19,31 +19,27 @@
 #pragma once
 #include "SupervisorPublicDefs.h"
 #include "crane/PasswordEntry.h"
+#include "crane/PublicHeader.h"
 // Precompiled header comes first.
 
 namespace Supervisor {
 
 using TaskSpec = crane::grpc::TaskToD;
 
-struct SavedPrivilege {
-  uid_t uid;
-  gid_t gid;
-};
-
-struct MetaInProcessInstance {
+struct MetaInExecution {
   std::string parsed_sh_script_path;
-  virtual ~MetaInProcessInstance() = default;
+  virtual ~MetaInExecution() = default;
 };
 
-struct BatchMetaInProcessInstance : MetaInProcessInstance {
+struct BatchMetaInExecution : MetaInExecution {
   std::string parsed_output_file_pattern;
   std::string parsed_error_file_pattern;
-  ~BatchMetaInProcessInstance() override = default;
+  ~BatchMetaInExecution() override = default;
 };
 
-struct CrunMetaInProcessInstance : MetaInProcessInstance {
+struct CrunMetaInExecution : MetaInExecution {
   int msg_fd;
-  ~CrunMetaInProcessInstance() override = default;
+  ~CrunMetaInExecution() override = default;
 };
 
 struct ProcSigchldInfo {
@@ -51,59 +47,72 @@ struct ProcSigchldInfo {
   bool is_terminated_by_signal;
   int value;
 };
-class ProcessInstance {
+
+class ExecutionInterface {
  public:
-  ProcessInstance(std::string exec_path, std::list<std::string> arg_list)
-      : m_executive_path_(std::move(exec_path)),
-        m_arguments_(std::move(arg_list)),
-        m_pid_(0) {}
+  ExecutionInterface(const TaskSpec& task_spec) : task(task_spec) {}
+  virtual ~ExecutionInterface() = default;
 
-  ~ProcessInstance() = default;
-
-  [[nodiscard]] const std::string& GetExecPath() const {
-    return m_executive_path_;
-  }
-  [[nodiscard]] const std::list<std::string>& GetArgList() const {
-    return m_arguments_;
-  }
-
-  void SetPid(pid_t pid) { m_pid_ = pid; }
+  inline bool IsBatch() const;
+  inline bool IsCrun() const;
+  inline bool IsCalloc() const;
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
 
-  std::unique_ptr<MetaInProcessInstance> meta;
+  // Interfaces must be implemented.
+  virtual CraneErr Prepare() = 0;
+  virtual CraneErr Spawn() = 0;
+  virtual CraneErr Kill(int signum) = 0;
+  virtual CraneErr Cleanup() = 0;
 
- private:
-  /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
-  pid_t m_pid_;
+  static std::string ParseFilePathPattern_(const std::string& pattern,
+                                           const std::string& cwd);
 
-  /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
-  std::string m_executive_path_;
-  std::list<std::string> m_arguments_;
-};
-
-struct TaskInstance {
-  TaskInstance(const TaskSpec& task_spec) : task(task_spec) {}
-
-  ~TaskInstance() = default;
-
-  bool IsBatch() const;
-  bool IsCrun() const;
-  bool IsCalloc() const;
-
-  EnvMap GetTaskEnvMap() const;
+  // Set from TaskManager
   TaskSpec task;
-
-  PasswordEntry pwd_entry;
-
+  PasswordEntry pwd;
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
-
   bool orphaned{false};
   CraneErr err_before_exec{CraneErr::kOk};
   bool cancelled_by_user{false};
   bool terminated_by_timeout{false};
   ProcSigchldInfo sigchld_info{};
 
-  std::unique_ptr<ProcessInstance> process;
+ protected:
+  // Helper methods
+  virtual void SetChildProcessSignalHandler_();
+  virtual CraneErr SetChildProcessProperty_();
+  virtual CraneErr SetChildProcessBatchFd_();
+  virtual EnvMap GetChildProcessEnv_() const;
+  virtual std::vector<std::string> PrepareChildProcessExec_() const;
+
+  pid_t m_pid_{0};  // forked pid
+  std::unique_ptr<MetaInExecution> m_meta_;
+
+  std::string m_executable_path_;  // bash -c "m_executable_ [m_arguments_...]"
+  std::list<std::string> m_arguments_;
+};
+
+class ContainerInstance : public ExecutionInterface {
+ public:
+  ContainerInstance(const TaskSpec& task_spec)
+      : ExecutionInterface(task_spec) {}
+  virtual ~ContainerInstance() = default;
+
+  virtual CraneErr Prepare() override { return CraneErr::kOk; }
+  virtual CraneErr Spawn() override { return CraneErr::kOk; }
+  virtual CraneErr Kill(int signum) override { return CraneErr::kOk; }
+  virtual CraneErr Cleanup() override { return CraneErr::kOk; }
+};
+
+class ProcessInstance : public ExecutionInterface {
+ public:
+  ProcessInstance(const TaskSpec& task_spec) : ExecutionInterface(task_spec) {}
+  virtual ~ProcessInstance() = default;
+
+  virtual CraneErr Prepare() override;
+  virtual CraneErr Spawn() override;
+  virtual CraneErr Kill(int signum) override;
+  virtual CraneErr Cleanup() override;
 };
 
 class TaskManager {
@@ -113,7 +122,7 @@ class TaskManager {
   void Wait();
 
   template <typename Duration>
-  void AddTerminationTimer_(TaskInstance* instance, Duration duration) {
+  void AddTerminationTimer_(ExecutionInterface* instance, Duration duration) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
@@ -125,7 +134,7 @@ class TaskManager {
     instance->termination_timer = termination_handel;
   }
 
-  void AddTerminationTimer_(TaskInstance* instance, int64_t secs) {
+  void AddTerminationTimer_(ExecutionInterface* instance, int64_t secs) {
     auto termination_handel = m_uvw_loop_->resource<uvw::timer_handle>();
     termination_handel->on<uvw::timer_event>(
         [this](const uvw::timer_event&, uvw::timer_handle& h) {
@@ -136,7 +145,7 @@ class TaskManager {
     instance->termination_timer = termination_handel;
   }
 
-  static void DelTerminationTimer_(TaskInstance* instance) {
+  static void DelTerminationTimer_(ExecutionInterface* instance) {
     // Close handle before free
     instance->termination_timer->close();
     instance->termination_timer.reset();
@@ -148,19 +157,14 @@ class TaskManager {
                                  uint32_t exit_code,
                                  std::optional<std::string> reason);
 
-  static std::string ParseFilePathPattern_(const std::string& path_pattern,
-                                           const std::string& cwd);
-
   std::future<CraneExpected<pid_t>> ExecuteTaskAsync(const TaskSpec& spec);
-  void LaunchTaskInstance_();
-  CraneErr SpawnTaskInstance_();
-  CraneErr KillTaskInstance_(int signum);
+  void LaunchExecution_();
 
   std::future<CraneExpected<pid_t>> CheckTaskStatusAsync();
 
   std::future<CraneErr> ChangeTaskTimeLimitAsync(absl::Duration time_limit);
 
-  void TerminateTaskAsync(bool mark_as_orphaned);
+  void TerminateTaskAsync(bool mark_as_orphaned, bool terminated_by_user);
 
   void TerminateSupervisor() { m_supervisor_exit_ = true; }
 
@@ -169,15 +173,15 @@ class TaskManager {
   using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
 
   struct ExecuteTaskElem {
-    std::unique_ptr<TaskInstance> task_instance;
+    std::unique_ptr<ExecutionInterface> instance;
     std::promise<CraneExpected<pid_t>> pid_prom;
   };
 
   struct TaskTerminateQueueElem {
     bool terminated_by_user{false};  // If the task is canceled by user,
-    // task->status=Cancelled
-    bool terminated_by_timeout{false};  // If the task is canceled by user,
-    // task->status=Timeout
+    // task->status=Cancelled (From Craned)
+    bool terminated_by_timeout{false};  // If the task is terminated by timeout,
+    // task->status=Timeout (From internal queue)
     bool mark_as_orphaned{false};
   };
 
@@ -214,8 +218,8 @@ class TaskManager {
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
 
-  // TODO: support multiple task
-  std::unique_ptr<TaskInstance> m_task_;
+  // TODO: Support multiple task (execution steps)
+  std::unique_ptr<ExecutionInterface> m_instance_;
 };
 
 }  // namespace Supervisor
