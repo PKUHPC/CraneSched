@@ -108,7 +108,7 @@ class PluginClient {
                               &PluginClient::SendEndHook_,
                               &PluginClient::SendCreateCgroupHook_,
                               &PluginClient::SendDestroyCgroupHook_,
-                              &PluginClient::InseqrtEventHook_}};
+                              &PluginClient::InsertEventHook_}};
 };
 
 }  // namespace plugin
