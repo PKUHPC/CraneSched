@@ -547,6 +547,7 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   crane::grpc::EventInfo event;
   event.set_cluster_name(g_config.CraneClusterName);
   event.set_uid(request.uid());
+  event.set_reason(request.reason());
 
   for (auto craned_id : request.craned_ids()) {
     if (!craned_meta_map_.Contains(craned_id)) {
@@ -563,7 +564,6 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
           //insert event info
           event.set_node_name(craned_id);
           event.set_state(crane::grpc::CranedControlState::CRANE_DRAIN);
-          event.set_reason(request.reason());
           //set now time       
           auto now = std::chrono::system_clock::now();
           auto duration = now.time_since_epoch();
@@ -584,7 +584,6 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
           //insert event info
           event.set_node_name(craned_id);
           event.set_state(crane::grpc::CranedControlState::CRANE_NONE);
-          event.set_reason(request.reason());
           //set now time       
           auto now = std::chrono::system_clock::now();
           auto duration = now.time_since_epoch();
