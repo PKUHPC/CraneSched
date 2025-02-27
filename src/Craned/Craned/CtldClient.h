@@ -26,26 +26,17 @@
 namespace Craned {
 
 using crane::grpc::CraneCtld;
-using crane::grpc::CranedRegisterReply;
-using crane::grpc::CranedRegisterRequest;
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
 
 class CtldClient {
-
  public:
   CtldClient() = default;
 
   ~CtldClient();
 
   void SetCranedId(CranedId const& craned_id) { m_craned_id_ = craned_id; }
-
-  void SetCranedRegisterCb(std::function<void(CranedRegisterReply)>&& cb) {
-    m_on_craned_register_cb_ = std::move(cb);
-  }
-
-  void UnSetCranedRegisterCb() { m_on_craned_register_cb_.reset(); }
 
   /***
    * InitChannelAndStub the CtldClient to CraneCtld.
@@ -57,7 +48,17 @@ class CtldClient {
    */
   void InitChannelAndStub(const std::string& server_address);
 
-  void OnCraneCtldConnected();
+  void SetCtldConnectedCb(std::function<void()> cb) {
+    m_on_ctld_connected_cb_ = std::move(cb);
+  }
+
+  void SetCtldDisconnectedCb(std::function<void()> cb) {
+    m_on_ctld_disconnected_cb_ = std::move(cb);
+  }
+
+  void CranedConnected();
+
+  void CranedReady(const std::vector<task_id_t>& nonexistent_jobs);
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
@@ -87,8 +88,8 @@ class CtldClient {
 
   CranedId m_craned_id_;
 
-  std::optional<std::function<void(CranedRegisterReply)>>
-      m_on_craned_register_cb_;
+  std::function<void()> m_on_ctld_connected_cb_;
+  std::function<void()> m_on_ctld_disconnected_cb_;
 
   absl::Notification m_start_connecting_notification_;
 };

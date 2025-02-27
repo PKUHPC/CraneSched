@@ -25,8 +25,6 @@
 
 namespace Craned {
 
-inline constexpr uint64_t kEvSigChldResendMs = 500;
-
 using EnvMap = std::unordered_map<std::string, std::string>;
 
 struct TaskStatusChangeQueueElem {
@@ -45,7 +43,6 @@ struct TaskInfoOfUid {
 
 struct Partition {
   std::unordered_set<std::string> nodes;
-  std::unordered_set<std::string> AllowAccounts;
 };
 
 struct Config {

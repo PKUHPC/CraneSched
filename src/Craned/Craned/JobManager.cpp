@@ -133,7 +133,7 @@ JobManager::JobManager() {
   });
 }
 
-CraneErr JobManager::Init(
+CraneErr JobManager::Recover(
     std::unordered_map<task_id_t, JobStatusSpec>&& job_status_map) {
   for (auto& [job_id, task_status] : job_status_map) {
     CRANE_TRACE("[Job #{}] Recover from supervisor.", job_id);
@@ -143,6 +143,8 @@ CraneErr JobManager::Init(
                                   .job_id = job_id,
                                   .pid = task_status.task_pid};
     job_instance->executions.emplace(task_status.task_pid, process);
+    job_instance->cgroup =
+        g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_spec.cgroup_spec);
     // When init, no need to lock.
     m_pid_job_map_.emplace(task_status.task_pid, job_instance);
 
@@ -709,6 +711,16 @@ CraneExpected<JobSpec> JobManager::QueryJobSpec(task_id_t job_id) {
   auto instance = m_job_map_.GetValueExclusivePtr(job_id);
   if (!instance) return std::unexpected(CraneErr::kNonExistent);
   return instance->get()->job_spec;
+}
+
+std::unordered_set<task_id_t> JobManager::QueryExistentJobIds() {
+  std::unordered_set<task_id_t> job_ids;
+  auto job_map_ptr = m_job_map_.GetMapConstSharedPtr();
+  job_ids.reserve(job_map_ptr->size());
+  for (auto& [job_id, _] : *job_map_ptr) {
+    job_ids.emplace(job_id);
+  }
+  return job_ids;
 }
 
 std::future<CraneExpected<task_id_t>> JobManager::QueryTaskIdFromPidAsync(

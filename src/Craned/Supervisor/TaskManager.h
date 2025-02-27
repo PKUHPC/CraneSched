@@ -19,7 +19,6 @@
 #pragma once
 #include "SupervisorPublicDefs.h"
 #include "crane/PasswordEntry.h"
-#include "crane/PublicHeader.h"
 // Precompiled header comes first.
 
 namespace Supervisor {

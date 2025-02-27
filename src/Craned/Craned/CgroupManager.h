@@ -483,9 +483,11 @@ class CgroupManager {
    * @param running_task_cg_specs running task cgroup specs.
    * @return CraneErr.
    */
-  CraneErr Init(const std::unordered_set<task_id_t> &running_job_ids);
+  CraneErr Init();
 
-  bool Mounted(CgroupConstant::Controller controller) {
+  CraneErr Recover(const std::unordered_set<task_id_t> &running_job_ids);
+
+  bool Mounted(CgroupConstant::Controller controller) const {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
   }
 

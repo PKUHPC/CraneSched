@@ -82,216 +82,8 @@ bool TaskScheduler::Init() {
                   task->TaskId());
 
       err = AcquireTaskAttributes(task.get());
-      if (err != CraneErr::kOk || task->type == crane::grpc::Interactive) {
-        task->SetStatus(crane::grpc::Failed);
-        ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
-                                                           task->RuntimeAttr());
-        if (!ok) {
-          CRANE_ERROR(
-              "UpdateRuntimeAttrOfTask failed for task #{} when "
-              "mark the task as FAILED.",
-              task_id);
-        }
-        if (err != CraneErr::kOk)
-          CRANE_INFO(
-              "Failed to acquire task attributes for restored running task "
-              "#{}. "
-              "Error Code: {}. "
-              "Mark it as FAILED and move it to the ended queue.",
-              task_id, CraneErrStr(err));
-        else {
-          CRANE_INFO("Mark running interactive task {} as FAILED.", task_id);
-          for (const CranedId& craned_id : task->CranedIds()) {
-            auto stub = g_craned_keeper->GetCranedStub(craned_id);
-            if (stub != nullptr && !stub->Invalid())
-              stub->TerminateOrphanedTask(task->TaskId());
-          }
-
-          for (const CranedId& craned_id : task->CranedIds()) {
-            craned_cgroups_map[craned_id].emplace_back(task->TaskId(),
-                                                       task->uid);
-          }
-
-          ok = g_db_client->InsertJob(task.get());
-          if (!ok) {
-            CRANE_ERROR(
-                "InsertJob failed for task #{} "
-                "when recovering running queue.",
-                task->TaskId());
-          }
-
-          std::vector<task_db_id_t> db_ids{task_db_id};
-          ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
-          if (!ok) {
-            CRANE_ERROR(
-                "PurgeEndedTasks failed for task #{} when recovering "
-                "running queue.",
-                task->TaskId());
-          }
-        }
-
-        // Move this problematic task into ended queue and
-        // process next task.
-        continue;
-      }
-
-      auto stub = g_craned_keeper->GetCranedStub(task->executing_craned_ids[0]);
-      if (stub == nullptr || stub->Invalid()) {
-        CRANE_INFO(
-            "The execution node of the restore task #{} is down. "
-            "Clean all its allocated craned nodes, and "
-            "move it to pending queue and re-run it.",
-            task_id);
-
-        for (const CranedId& craned_id : task->CranedIds()) {
-          craned_cgroups_map[craned_id].emplace_back(task->TaskId(), task->uid);
-        }
-
-        task->SetStatus(crane::grpc::Pending);
-
-        task->nodes_alloc = 0;
-        task->allocated_craneds_regex.clear();
-        task->CranedIdsClear();
-        task->executing_craned_ids.clear();
-
-        ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task->TaskDbId(),
-                                                           task->RuntimeAttr());
-        if (!ok) {
-          CRANE_ERROR(
-              "Failed to call "
-              "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
-        }
-
-        // Now the task is moved to the embedded pending queue.
-        RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
-      } else {
-        crane::grpc::TaskStatus status;
-        err = stub->CheckTaskStatus(task->TaskId(), &status);
-        if (err == CraneErr::kOk) {
-          task->SetStatus(status);
-          ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
-              0, task->TaskDbId(), task->RuntimeAttr());
-          if (!ok) {
-            CRANE_ERROR(
-                "Failed to call "
-                "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
-          }
-          if (status == crane::grpc::Running) {
-            // Exec node is up and the task is running.
-            // Just allocate resource from allocated nodes and
-            // put it back into the running queue.
-            PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
-
-            CRANE_INFO(
-                "Task #{} is still RUNNING. "
-                "Put it into memory running queue.",
-                task_id);
-          } else {
-            // Exec node is up and the task ended.
-
-            CRANE_INFO(
-                "Task #{} has ended with status {}. "
-                "Put it into embedded ended queue.",
-                task_id, crane::grpc::TaskStatus_Name(status));
-
-            if (status != crane::grpc::Completed) {
-              // Check whether the task is orphaned on the allocated nodes
-              // in case that when processing TaskStatusChange CraneCtld
-              // crashed, only part of Craned nodes executed TerminateTask gRPC.
-              // Not needed for succeeded tasks.
-              for (const CranedId& craned_id : task->CranedIds()) {
-                stub = g_craned_keeper->GetCranedStub(craned_id);
-                if (stub != nullptr && !stub->Invalid())
-                  stub->TerminateOrphanedTask(task->TaskId());
-              }
-            }
-
-            // For both succeeded and failed tasks, cgroup for them should be
-            // released. Though some craned nodes might have released the
-            // cgroup, just resend the gRPC again to guarantee that the cgroup
-            // is always released.
-            for (const CranedId& craned_id : task->CranedIds()) {
-              craned_cgroups_map[craned_id].emplace_back(task->TaskId(),
-                                                         task->uid);
-            }
-
-            ok = g_db_client->InsertJob(task.get());
-            if (!ok) {
-              CRANE_ERROR(
-                  "InsertJob failed for task #{} "
-                  "when recovering running queue.",
-                  task->TaskId());
-            }
-
-            std::vector<task_db_id_t> db_ids{task_db_id};
-            ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
-            if (!ok) {
-              CRANE_ERROR(
-                  "PurgeEndedTasks failed for task #{} when recovering "
-                  "running queue.",
-                  task->TaskId());
-            }
-          }
-        } else {
-          // Exec node is up but task id does not exist.
-          // It may come up due to the craned has restarted during CraneCtld
-          // was down. Thus, we should clean the Craned nodes on which the
-          // task was possibly running. The result of task is lost in such a
-          // scenario, and we should requeue the task.
-          CRANE_TRACE(
-              "Task id #{} can't be found cannot be found in its exec craned. "
-              "Clean all its allocated craned nodes, "
-              "and move it to pending queue and re-run it.",
-              task_id);
-
-          for (const CranedId& craned_id : task->CranedIds()) {
-            stub = g_craned_keeper->GetCranedStub(craned_id);
-            if (stub != nullptr && !stub->Invalid())
-              stub->TerminateOrphanedTask(task->TaskId());
-          }
-
-          for (const CranedId& craned_id : task->CranedIds()) {
-            craned_cgroups_map[craned_id].emplace_back(task->TaskId(),
-                                                       task->uid);
-          }
-
-          task->SetStatus(crane::grpc::Pending);
-
-          task->nodes_alloc = 0;
-          task->allocated_craneds_regex.clear();
-          task->CranedIdsClear();
-          task->executing_craned_ids.clear();
-
-          ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
-              0, task->TaskDbId(), task->RuntimeAttr());
-          if (!ok) {
-            CRANE_ERROR(
-                "Failed to call "
-                "g_embedded_db_client->UpdateRuntimeAttrOfTask()");
-          }
-          // Now the task is moved to the embedded pending queue.
-          RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
-        }
-      }
+      PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
     }
-
-    absl::BlockingCounter bl(craned_cgroups_map.size());
-    for (const auto& [craned_id, cgroups] : craned_cgroups_map) {
-      g_thread_pool->detach_task([&bl, &craned_id, &cgroups]() {
-        auto stub = g_craned_keeper->GetCranedStub(craned_id);
-
-        // If the craned is down, just ignore it.
-        if (stub && !stub->Invalid()) {
-          CraneErr err = stub->ReleaseCgroupForTasks(cgroups);
-          if (err != CraneErr::kOk) {
-            CRANE_ERROR("Failed to Release cgroup RPC for {} tasks on Node {}",
-                        cgroups.size(), craned_id);
-          }
-        }
-        bl.DecrementCount();
-      });
-    }
-    bl.Wait();
   }
 
   // Process the pending tasks in the embedded pending queue.
@@ -332,9 +124,9 @@ bool TaskScheduler::Init() {
       if (!mark_task_as_failed) {
         RequeueRecoveredTaskIntoPendingQueueLock_(std::move(task));
       } else {
-        // If a batch task failed to requeue the task into pending queue due to
-        // insufficient resource or other reasons or the task is an interactive
-        // task, Mark it as FAILED and move it to the ended queue.
+        // If a batch task failed to requeue the task into pending queue due
+        // to insufficient resource or other reasons or the task is an
+        // interactive task, Mark it as FAILED and move it to the ended queue.
         CRANE_INFO(
             "Failed to requeue task #{}. Mark it as FAILED and "
             "move it to the ended queue.",
@@ -641,8 +433,8 @@ void TaskScheduler::ScheduleThread_() {
     m_pending_task_map_mtx_.Lock();
     if (!m_pending_task_map_.empty()) {  // all_part_metas is locked here.
       // Running map must be locked before g_meta_container's lock.
-      // Otherwise, DEADLOCK may happen because TaskStatusChange() locks running
-      // map first and then locks g_meta_container.
+      // Otherwise, DEADLOCK may happen because TaskStatusChange() locks
+      // running map first and then locks g_meta_container.
       m_running_task_map_mtx_.Lock();
 
       schedule_begin = std::chrono::steady_clock::now();
@@ -856,7 +648,7 @@ void TaskScheduler::ScheduleThread_() {
            craned_task_to_exec_raw_ptrs_map) {
         crane::grpc::ExecuteTasksRequest req;
         for (TaskInCtld* task : tasks_raw_ptrs) {
-          task->SetFieldsOfTaskSpec(craned_id, req.add_tasks());
+          req.mutable_tasks()->Add(task->GetTaskSpecOfNode(craned_id));
         }
         craned_exec_requests_map.emplace(craned_id, std::move(req));
       }
@@ -1187,8 +979,8 @@ crane::grpc::CancelTaskReply TaskScheduler::CancelPendingOrRunningTask(
 
   uint32_t operator_uid = request.operator_uid();
 
-  // When an ordinary user tries to cancel jobs, they are automatically filtered
-  // to their own jobs.
+  // When an ordinary user tries to cancel jobs, they are automatically
+  // filtered to their own jobs.
   std::string filter_uname = request.filter_username();
   if (filter_uname.empty() &&
       !g_account_manager->CheckUidIsAdmin(operator_uid)) {
@@ -1448,6 +1240,14 @@ void TaskScheduler::CleanCancelQueueCb_() {
   }
 
   for (auto&& [craned_id, task_ids] : running_task_craned_id_map) {
+    if (!g_meta_container->CheckCranedOnline(craned_id)) {
+      for (auto job_id : task_ids) {
+        TaskStatusChangeAsync(job_id, craned_id,
+                              crane::grpc::TaskStatus::Cancelled,
+                              ExitCode::kExitCodeTerminated);
+      }
+      continue;
+    }
     g_thread_pool->detach_task(
         [id = craned_id, task_ids_to_cancel = task_ids]() {
           CRANE_TRACE("Craned {} is going to cancel tasks {}.", id,
@@ -1855,17 +1655,43 @@ void TaskScheduler::QueryTasksInRam(
   ranges::for_each(filtered_rng, append_fn);
 }
 
-void TaskScheduler::QueryTaskSpec(const CranedId& craned_id,
-                                  crane::grpc::CranedRegisterReply* response) {
+void TaskScheduler::QueryJobOfNode(const CranedId& craned_id,
+                                   crane::grpc::ConfigureCranedRequest* req) {
   LockGuard running_job_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
 
   auto it = m_node_to_tasks_map_.find(craned_id);
   if (it == m_node_to_tasks_map_.end()) return;
+
+  auto* job_spec_map = req->mutable_job_map();
+  auto* task_spec_map = req->mutable_job_id_tasks_map();
   for (const auto& job_id : it->second) {
     auto job_it = m_running_task_map_.find(job_id);
     if (job_it == m_running_task_map_.end()) continue;
-    job_it->second->SetFieldsOfCranedRegisterReplyByNode(craned_id, response);
+
+    job_spec_map->emplace(job_id, job_it->second->GetJobSpecOfNode(craned_id));
+    task_spec_map->emplace(job_id,
+                           job_it->second->GetTaskSpecOfNode(craned_id));
+  }
+}
+
+void TaskScheduler::TerminateJobs(const std::vector<task_id_t>& jobs) {
+  {
+    LockGuard running_job_guard(&m_running_task_map_mtx_);
+    LockGuard indexes_guard(&m_task_indexes_mtx_);
+    for (const auto& job_id : jobs) {
+      auto job_it = m_running_task_map_.find(job_id);
+      if (job_it == m_running_task_map_.end()) {
+        CRANE_WARN("Job {} not found in running task map.", job_id);
+        continue;
+      } else {
+        for (auto& craned_id : job_it->second->executing_craned_ids) {
+          TaskStatusChangeAsync(job_id, craned_id,
+                                crane::grpc::TaskStatus::Failed,
+                                ExitCode::kExitCodeTerminated);
+        }
+      }
+    }
   }
 }
 
@@ -1987,7 +1813,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
 
         if constexpr (kAlgoTraceOutput) {
           CRANE_TRACE(
-              "Craned {} res_avail at now + {}s: cpu: {}, mem: {}, gres: {}; ",
+              "Craned {} res_avail at now + {}s: cpu: {}, mem: {}, gres: "
+              "{}; ",
               craned_id, absl::ToInt64Seconds(cur_time_iter->first - now),
               cur_time_iter->second.allocatable_res.cpu_count,
               cur_time_iter->second.allocatable_res.memory_bytes,
@@ -2298,7 +2125,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
           //   *-------* seg         *-------* seg
           //   *--*             or     *---*
           //   ^                       ^
-          //  it1                     it1 ( == intersected_time_segment.begin())
+          //  it1                     it1 ( ==
+          //  intersected_time_segment.begin())
           auto it1 = std::lower_bound(intersected_time_segments.begin(),
                                       intersected_time_segments.end(), start);
           if (it1 == intersected_time_segments.begin()) {
@@ -2494,10 +2322,10 @@ void MinLoadFirst::NodeSelect(
         continue;
       }
 
-      // For pending tasks, the `start time` field in TaskInCtld means expected
-      // start time and the `end time` is expected end time.
-      // For running tasks, the `start time` means the time when it starts and
-      // the `end time` means the latest finishing time.
+      // For pending tasks, the `start time` field in TaskInCtld means
+      // expected start time and the `end time` is expected end time. For
+      // running tasks, the `start time` means the time when it starts and the
+      // `end time` means the latest finishing time.
       task->SetStartTime(expected_start_time);
       task->SetEndTime(expected_start_time + task->time_limit);
 
@@ -2771,7 +2599,8 @@ CraneErr TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
     task_mem_per_cpu = part_meta.default_mem_per_cpu;
   } else if (part_meta.max_mem_per_cpu != 0) {
     // If a task sets its memory bytes,
-    // check if memory/core ratio is greater than the partition's maximum value.
+    // check if memory/core ratio is greater than the partition's maximum
+    // value.
     task_mem_per_cpu =
         std::min(task_mem_per_cpu, (double)part_meta.max_mem_per_cpu);
   }

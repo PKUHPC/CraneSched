@@ -620,45 +620,49 @@ void GlobalVariableInit() {
   std::unordered_set<task_id_t> task_ids_supervisor;
   std::unordered_map<task_id_t, pid_t> job_id_pid_map =
       tasks.value_or(std::unordered_map<task_id_t, pid_t>());
-  for (const auto& [job_id, supervisor_state] : job_id_pid_map) {
+  for (auto job_id : job_id_pid_map | std::ranges::views::keys) {
     task_ids_supervisor.emplace(job_id);
-    CRANE_TRACE("[Supervisor] job {} still running.", job_id);
   }
+  CRANE_TRACE("[Supervisor] job {} still running.",
+              absl::StrJoin(task_ids_supervisor, ","));
+
+  std::promise<crane::grpc::ConfigureCranedRequest> init_promise;
+  auto config_future = init_promise.get_future();
+  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf,
+                                                    std::move(init_promise));
 
   g_ctld_client = std::make_unique<Craned::CtldClient>();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
-  std::latch craned_registered(1);
-  std::unordered_map<task_id_t, Craned::JobSpec> job_spec_map;
-  std::unordered_map<task_id_t, crane::grpc::CranedRegisterReply::TaskList>
-      job_task_map;
-  // g_ctld_client->SetCranedRegisterCb(
-  // [&craned_registered, &job_spec_map, &job_task_map, &task_ids_supervisor](
-  //     const crane::grpc::CranedRegisterReply& register_reply) {
-  //   for (const auto& [job_id, job_spec] : register_reply.job_map()) {
-  //     if (task_ids_supervisor.contains(job_id)) {
-  //       job_spec_map.emplace(job_id, job_spec);
-  //       job_task_map.emplace(job_id,
-  //                            register_reply.job_id_tasks_map().at(job_id));
-  //     }
-  //   }
-  //   craned_registered.count_down();
-  // });
+  g_ctld_client->SetCtldDisconnectedCb([] { g_server->SetReady(false); });
+  g_ctld_client->SetCtldConnectedCb([] { g_ctld_client->CranedConnected(); });
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
-
   g_ctld_client->StartConnectingCtld();
+  std::unordered_map<task_id_t, Craned::JobSpec> job_map;
+  std::unordered_map<task_id_t, Craned::TaskSpec> task_map;
+  std::unordered_set<task_id_t> running_jobs;
+  std::vector<task_id_t> nonexistent_jobs;
+  auto grpc_config_req = config_future.get();
+  job_map.reserve(grpc_config_req.job_map_size());
+  task_map.reserve(grpc_config_req.job_id_tasks_map_size());
+  for (const auto& [job_id, job_spec] : grpc_config_req.job_map()) {
+    if (task_ids_supervisor.erase(job_id)) {
+      running_jobs.emplace(job_id);
+      job_map.emplace(job_id, job_spec);
+      task_map.emplace(job_id, grpc_config_req.job_id_tasks_map().at(job_id));
+    } else {
+      nonexistent_jobs.emplace_back(job_id);
+    }
+  }
 
-  // craned_registered.wait();
-  // g_ctld_client->UnSetCranedRegisterCb();
-
-  std::unordered_set<task_id_t> running_job_ids;
-  for (const task_id_t job_id : job_spec_map | std::ranges::views::keys) {
-    running_job_ids.emplace(job_id);
+  if (!task_ids_supervisor.empty()) {
+    CRANE_ERROR("[Supervisor] job {} is not recorded in Ctld.",
+                absl::StrJoin(task_ids_supervisor, ","));
   }
 
   using Craned::CgroupManager;
   using Craned::CgroupConstant::Controller;
   g_cg_mgr = std::make_unique<CgroupManager>();
-  g_cg_mgr->Init(running_job_ids);
+  g_cg_mgr->Init();
   if (g_cg_mgr->GetCgroupVersion() ==
           Craned::CgroupConstant::CgroupVersion::CGROUP_V1 &&
       (!g_cg_mgr->Mounted(Controller::CPU_CONTROLLER) ||
@@ -666,7 +670,8 @@ void GlobalVariableInit() {
        !g_cg_mgr->Mounted(Controller::DEVICES_CONTROLLER) ||
        !g_cg_mgr->Mounted(Controller::BLOCK_CONTROLLER))) {
     CRANE_ERROR(
-        "Failed to initialize cpu,memory,devices,block cgroups controller.");
+        "Failed to initialize cpu,memory,devices,block cgroups "
+        "controller.");
     std::exit(1);
   }
   if (g_cg_mgr->GetCgroupVersion() ==
@@ -677,24 +682,31 @@ void GlobalVariableInit() {
     CRANE_ERROR("Failed to initialize cpu,memory,IO cgroups controller.");
     std::exit(1);
   }
-  std::unordered_map<task_id_t, Craned::JobStatusSpec> job_status_map;
-  for (const auto& job_id : running_job_ids) {
-    job_status_map.emplace(
-        job_id,
-        Craned::JobStatusSpec{.job_spec = job_spec_map[job_id],
-                              // Now each job have only one task
-                              .task_spec = job_task_map[job_id].tasks(0),
-                              .task_pid = job_id_pid_map[job_id]});
-  }
+  g_cg_mgr->Recover(running_jobs);
 
   g_job_mgr = std::make_unique<Craned::JobManager>();
-  g_job_mgr->Init(std::move(job_status_map));
+  g_job_mgr->SetSigintCallback([] {
+    g_server->Shutdown();
+    CRANE_INFO("Grpc Server Shutdown() was called.");
+  });
+  std::unordered_map<task_id_t, Craned::JobStatusSpec> job_status_map;
+  for (const auto& job_id : running_jobs) {
+    job_status_map.emplace(
+        job_id, Craned::JobStatusSpec{.job_spec = job_map[job_id],
+                                      // Now each job have only one task
+                                      .task_spec = task_map[job_id],
+                                      .task_pid = job_id_pid_map[job_id]});
+  }
+  g_job_mgr->Recover(std::move(job_status_map));
+
+  g_server->FinishRecover();
 
   if (g_config.Plugin.Enabled) {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
+  g_ctld_client->CranedReady(nonexistent_jobs);
 }
 
 void StartServer() {
@@ -709,9 +721,6 @@ void StartServer() {
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
   util::os::CheckProxyEnvironmentVariable();
-  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
-  std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
   g_server->Wait();
 
   // Free global variables

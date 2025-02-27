@@ -34,9 +34,15 @@ using grpc::Status;
 
 using crane::grpc::Craned;
 
+enum class RequestSource : int { CTLD = 0, PAM = 1, SUPERVISOR = 2, INVALID };
+
 class CranedServiceImpl : public Craned::Service {
  public:
   CranedServiceImpl() = default;
+
+  grpc::Status Configure(grpc::ServerContext *context,
+                         const crane::grpc::ConfigureCranedRequest *request,
+                         google::protobuf::Empty *response) override;
 
   grpc::Status ExecuteTask(grpc::ServerContext *context,
                            const crane::grpc::ExecuteTasksRequest *request,
@@ -97,11 +103,6 @@ class CranedServiceImpl : public Craned::Service {
       const crane::grpc::ChangeTaskTimeLimitRequest *request,
       crane::grpc::ChangeTaskTimeLimitReply *response) override;
 
-  grpc::Status QueryCranedRemoteMeta(
-      grpc::ServerContext *context,
-      const ::crane::grpc::QueryCranedRemoteMetaRequest *request,
-      crane::grpc::QueryCranedRemoteMetaReply *response) override;
-
   grpc::Status TaskStatusChange(
       grpc::ServerContext *context,
       const crane::grpc::TaskStatusChangeRequest *request,
@@ -110,15 +111,53 @@ class CranedServiceImpl : public Craned::Service {
 
 class CranedServer {
  public:
-  explicit CranedServer(const Config::CranedListenConf &listen_conf);
+  explicit CranedServer(
+      const Config::CranedListenConf &listen_conf,
+      std::promise<crane::grpc::ConfigureCranedRequest> &&init_promise);
 
   inline void Shutdown() { m_server_->Shutdown(); }
 
   inline void Wait() { m_server_->Wait(); }
 
+  void ReceiveConfigure(const crane::grpc::ConfigureCranedRequest *request) {
+    absl::MutexLock lk(&m_configure_promise_mtx_);
+    if (m_configure_promise_.has_value()) {
+      m_configure_promise_.value().set_value(*request);
+      m_configure_promise_.reset();
+    }
+  }
+
+  void SetConfigurePromise(
+      std::promise<crane::grpc::ConfigureCranedRequest> &&promise) {
+    absl::MutexLock lk(&m_configure_promise_mtx_);
+    m_configure_promise_ = std::move(promise);
+  };
+
+  void SetReady(bool ready) {
+    m_ready_.store(ready, std::memory_order_release);
+  }
+  [[nodiscard]] bool ReadyFor(RequestSource request_source) const {
+    if (!m_recovered_.load(std::memory_order_acquire)) return false;
+    if (request_source == RequestSource::CTLD) {
+      return m_ready_.load(std::memory_order_acquire);
+    } else {
+      return true;
+    }
+  }
+
+  void FinishRecover() {
+    CRANE_DEBUG("Craned finished recover.");
+    m_recovered_.store(true, std::memory_order_release);
+  }
+
  private:
   std::unique_ptr<CranedServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
+  absl::Mutex m_configure_promise_mtx_;
+  std::optional<std::promise<crane::grpc::ConfigureCranedRequest>>
+      m_configure_promise_;
+  std::atomic_bool m_ready_{false};
+  std::atomic_bool m_recovered_{false};
 
   friend class CranedServiceImpl;
 };

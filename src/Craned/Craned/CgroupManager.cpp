@@ -67,8 +67,7 @@ CgroupManager::~CgroupManager() {
 }
 #endif
 
-CraneErr CgroupManager::Init(
-    const std::unordered_set<task_id_t> &running_job_ids) {
+CraneErr CgroupManager::Init() {
   // Initialize library and data structures
   CRANE_DEBUG("Initializing cgroup library.");
   cgroup_init();
@@ -208,13 +207,16 @@ CraneErr CgroupManager::Init(
     CRANE_WARN("Error Cgroup version is not supported");
     return CraneErr::kCgroupError;
   }
+  return CraneErr::kOk;
+}
 
+CraneErr CgroupManager::Recover(
+    const std::unordered_set<task_id_t> &running_job_ids) {
   // TODO: Remove these after csupervisor is stable
   if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
     RmJobCgroupsExcept_(running_job_ids);
   } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
     RmJobCgroupsV2Except_(CgroupConstant::RootCgroupFullPath, running_job_ids);
-
 #ifdef CRANE_ENABLE_BPF
     auto job_id_bpf_key_vec_map =
         GetJobBpfMapCgroupsV2(CgroupConstant::RootCgroupFullPath);
@@ -239,6 +241,7 @@ CraneErr CgroupManager::Init(
 
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
+    return CraneErr::kCgroupError;
   }
   return CraneErr::kOk;
 }
@@ -586,15 +589,14 @@ void CgroupManager::RmJobCgroupsUnderControllerExcept_(
       if (task_ids.contains(task_id)) {
         CRANE_TRACE("Skip remove running task #{} cgroup {}", task_id_str,
                     info.full_path);
-        continue;
+      } else {
+        CRANE_DEBUG("Removing remaining task cgroup: {}", info.full_path);
+        int err = rmdir(info.full_path);
+        if (err != 0)
+          CRANE_ERROR("Failed to remove cgroup {}: {}", info.full_path,
+                      strerror(errno));
       }
-      CRANE_DEBUG("Removing remaining task cgroup: {}", info.full_path);
-      int err = rmdir(info.full_path);
-      if (err != 0)
-        CRANE_ERROR("Failed to remove cgroup {}: {}", info.full_path,
-                    strerror(errno));
     }
-
     ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
   }
 

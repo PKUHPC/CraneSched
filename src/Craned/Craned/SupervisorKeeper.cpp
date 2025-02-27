@@ -107,18 +107,18 @@ CraneExpected<std::unordered_map<task_id_t, pid_t>> SupervisorKeeper::Init() {
               stub->InitChannelAndStub(sock_path);
               CraneExpected<std::pair<task_id_t, pid_t>> task_status =
                   stub->CheckTaskStatus();
-              all_supervisor_reply.count_down();
               if (!task_status) {
                 CRANE_ERROR(
-                    "CheckTaskStatus for {} failed, removing unix socket file.",
+                    "CheckTaskStatus for {} failed, removing it.",
                     file.string());
                 std::filesystem::remove(file);
+                all_supervisor_reply.count_down();
                 return;
               }
-
-              m_supervisor_map.emplace(task_status.value().first, stub);
               absl::WriterMutexLock lk(&mtx);
+              m_supervisor_map.emplace(task_status.value().first, stub);
               tasks.emplace(task_status.value());
+              all_supervisor_reply.count_down();
             });
       }
       all_supervisor_reply.wait();

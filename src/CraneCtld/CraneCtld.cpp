@@ -100,7 +100,7 @@ void ParseConfig(int argc, char** argv) {
         g_config.CraneCtldDebugLevel = "info";
 
       // spdlog should be initialized as soon as possible
-      std::optional log_level=StrToLogLevel(g_config.CraneCtldDebugLevel);
+      std::optional log_level = StrToLogLevel(g_config.CraneCtldDebugLevel);
       if (log_level.has_value()) {
         InitLogger(log_level.value(), g_config.CraneCtldLogFile, true);
       } else {
@@ -682,24 +682,21 @@ void InitializeCtldGlobalVariables() {
     DestroyCtldGlobalVariables();
     std::exit(1);
   }
+  g_task_scheduler = std::make_unique<TaskScheduler>();
+  ok = g_task_scheduler->Init();
 
   g_craned_keeper = std::make_unique<CranedKeeper>(g_config.Nodes.size());
-
-  g_craned_keeper->SetCranedIsUpCb([](const CranedId& craned_id) {
-    CRANE_DEBUG(
-        "A new node #{} is up now. Add its resource to the global resource "
-        "pool.",
-        craned_id);
-
-    g_thread_pool->detach_task(
-        [craned_id]() { g_meta_container->CranedUp(craned_id); });
+  g_craned_keeper->SetCranedConnectCb([](const CranedId& craned_id) {
+    CRANE_DEBUG("CranedNode #{} Connected.", craned_id);
+    auto stub = g_craned_keeper->GetCranedStub(craned_id);
+    if (stub == nullptr) {
+      CRANE_ERROR("CranedNode #{} has no stub.", craned_id);
+      return;
+    }
+    stub->ConfigureCraned(craned_id);
   });
-
-  g_craned_keeper->SetCranedIsDownCb([](const CranedId& craned_id) {
-    CRANE_DEBUG(
-        "CranedNode #{} is down now. "
-        "Remove its resource from the global resource pool.",
-        craned_id);
+  g_craned_keeper->SetCranedDisconnectCb([](const CranedId& craned_id) {
+    CRANE_DEBUG("CranedNode #{} Disconnected.", craned_id);
     g_meta_container->CranedDown(craned_id);
     // g_task_scheduler->TerminateTasksOnCraned(craned_id,
     //                                          ExitCode::kExitCodeCranedDown);
@@ -747,9 +744,6 @@ void InitializeCtldGlobalVariables() {
       break;
     }
   }
-
-  g_task_scheduler = std::make_unique<TaskScheduler>();
-  ok = g_task_scheduler->Init();
   if (!ok) {
     CRANE_ERROR("The initialization of TaskScheduler failed. Exiting...");
     DestroyCtldGlobalVariables();

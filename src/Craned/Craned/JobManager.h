@@ -84,7 +84,8 @@ class JobManager {
  public:
   JobManager();
 
-  CraneErr Init(std::unordered_map<task_id_t, JobStatusSpec>&& job_status_map);
+  CraneErr Recover(
+      std::unordered_map<task_id_t, JobStatusSpec>&& job_status_map);
 
   ~JobManager();
 
@@ -106,6 +107,8 @@ class JobManager {
   bool MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id);
 
   CraneExpected<JobSpec> QueryJobSpec(task_id_t job_id);
+
+  std::unordered_set<task_id_t> QueryExistentJobIds();
 
   void TerminateTaskAsync(uint32_t task_id);
 
