@@ -449,11 +449,11 @@ class TaskScheduler {
   /// Otherwise, it is set to newly allocated task id.
   std::future<task_id_t> SubmitTaskAsync(std::unique_ptr<TaskInCtld> task);
 
-  std::future<CraneErr> HoldReleaseTaskAsync(task_id_t task_id, int64_t secs);
+  std::future<CraneErrCode> HoldReleaseTaskAsync(task_id_t task_id, int64_t secs);
 
-  CraneErr ChangeTaskTimeLimit(task_id_t task_id, int64_t secs);
+  CraneErrCode ChangeTaskTimeLimit(task_id_t task_id, int64_t secs);
 
-  CraneErr ChangeTaskPriority(task_id_t task_id, double priority);
+  CraneErrCode ChangeTaskPriority(task_id_t task_id, double priority);
 
   void TaskStatusChangeWithReasonAsync(uint32_t task_id,
                                        const CranedId& craned_index,
@@ -477,7 +477,7 @@ class TaskScheduler {
   crane::grpc::CancelTaskReply CancelPendingOrRunningTask(
       const crane::grpc::CancelTaskRequest& request);
 
-  CraneErr TerminatePendingOrRunningIaTask(uint32_t task_id) {
+  CraneErrCode TerminatePendingOrRunningIaTask(uint32_t task_id) {
     LockGuard pending_guard(&m_pending_task_map_mtx_);
     LockGuard running_guard(&m_running_task_map_mtx_);
 
@@ -492,12 +492,12 @@ class TaskScheduler {
           CancelPendingTaskQueueElem{.task = std::move(task)});
       m_cancel_task_async_handle_->send();
       m_pending_task_map_.erase(pd_it);
-      return CraneErr::kOk;
+      return CraneErrCode::SUCCESS;
     }
 
     auto rn_it = m_running_task_map_.find(task_id);
     if (rn_it == m_running_task_map_.end())
-      return CraneErr::kNonExistent;
+      return CraneErrCode::ERR_NON_EXISTENT;
     else {
       auto& task = rn_it->second;
       if (task->type == crane::grpc::TaskType::Interactive) {
@@ -509,18 +509,18 @@ class TaskScheduler {
     return TerminateRunningTaskNoLock_(rn_it->second.get());
   }
 
-  CraneErr TerminateRunningTask(uint32_t task_id) {
+  CraneErrCode TerminateRunningTask(uint32_t task_id) {
     LockGuard running_guard(&m_running_task_map_mtx_);
 
     auto iter = m_running_task_map_.find(task_id);
-    if (iter == m_running_task_map_.end()) return CraneErr::kNonExistent;
+    if (iter == m_running_task_map_.end()) return CraneErrCode::ERR_NON_EXISTENT;
 
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
 
-  static CraneErr AcquireTaskAttributes(TaskInCtld* task);
+  static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
 
-  static CraneErr CheckTaskValidity(TaskInCtld* task);
+  static CraneExpected<void> CheckTaskValidity(TaskInCtld* task);
 
  private:
   template <class... Ts>
@@ -544,9 +544,9 @@ class TaskScheduler {
   static void PersistAndTransferTasksToMongodb_(
       std::vector<TaskInCtld*> const& tasks);
 
-  CraneErr TerminateRunningTaskNoLock_(TaskInCtld* task);
+  CraneErrCode TerminateRunningTaskNoLock_(TaskInCtld* task);
 
-  CraneErr SetHoldForTaskInRamAndDb_(task_id_t task_id, bool hold);
+  CraneErrCode SetHoldForTaskInRamAndDb_(task_id_t task_id, bool hold);
 
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 
@@ -597,7 +597,7 @@ class TaskScheduler {
   std::shared_ptr<uvw::async_handle> m_task_timeout_async_handle_;
 
   using TaskTimerQueueElem =
-      std::pair<std::pair<task_id_t, int64_t>, std::promise<CraneErr>>;
+      std::pair<std::pair<task_id_t, int64_t>, std::promise<CraneErrCode>>;
   ConcurrentQueue<TaskTimerQueueElem> m_task_timer_queue_;
 
   void TaskTimerAsyncCb_();

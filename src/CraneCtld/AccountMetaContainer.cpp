@@ -22,13 +22,14 @@
 
 namespace Ctld {
 
-bool AccountMetaContainer::CheckAndMallocQosResourceFromUser(
+CraneErrCode AccountMetaContainer::CheckAndMallocQosResourceFromUser(
     const std::string& username, const TaskInCtld& task, const Qos& qos) {
-  if (static_cast<double>(task.cpus_per_task) > qos.max_cpus_per_user ||
-      qos.max_jobs_per_user == 0)
-    return false;
+  if (static_cast<double>(task.cpus_per_task) > qos.max_cpus_per_user)
+    return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
 
-  bool result = true;
+  if (qos.max_jobs_per_user == 0) return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
+
+  CraneErrCode result = CraneErrCode::SUCCESS;
 
   ResourceView resource_view{task.requested_node_res_view * task.node_num};
 
@@ -39,13 +40,17 @@ bool AccountMetaContainer::CheckAndMallocQosResourceFromUser(
       auto iter = qos_to_resource_map.find(task.qos);
       if (iter == qos_to_resource_map.end()) {
         qos_to_resource_map.emplace(task.qos, QosResource{std::move(resource_view), 1});
-        return ;
+        return;
       }
 
       auto& val = iter->second;
       if (val.resource.CpuCount() + static_cast<double>(task.cpus_per_task) >
-      qos.max_cpus_per_user || val.jobs_per_user >= qos.max_jobs_per_user) {
-        result = false;
+      qos.max_cpus_per_user) {
+        result = CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
+        return;
+      }
+      if (val.jobs_per_user >= qos.max_jobs_per_user) {
+        result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
         return;
       }
       val.resource.GetAllocatableRes() +=

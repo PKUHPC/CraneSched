@@ -45,20 +45,20 @@ class CranedStub {
   std::vector<task_id_t> ExecuteTasks(
       const crane::grpc::ExecuteTasksRequest &request);
 
-  CraneErr CreateCgroupForTasks(std::vector<CgroupSpec> const &cgroup_specs);
+  CraneErrCode CreateCgroupForTasks(std::vector<CgroupSpec> const &cgroup_specs);
 
-  CraneErr ReleaseCgroupForTasks(
+  CraneErrCode ReleaseCgroupForTasks(
       const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs);
 
-  CraneErr TerminateTasks(const std::vector<task_id_t> &task_ids);
+  CraneErrCode TerminateTasks(const std::vector<task_id_t> &task_ids);
 
-  CraneErr TerminateOrphanedTask(task_id_t task_id);
+  CraneErrCode TerminateOrphanedTask(task_id_t task_id);
 
-  CraneErr CheckTaskStatus(task_id_t task_id, crane::grpc::TaskStatus *status);
+  CraneErrCode CheckTaskStatus(task_id_t task_id, crane::grpc::TaskStatus *status);
 
-  CraneErr ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
+  CraneErrCode ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
-  CraneErr QueryCranedRemoteMeta(CranedRemoteMeta *meta);
+  CraneErrCode QueryCranedRemoteMeta(CranedRemoteMeta *meta);
 
   bool Invalid() const { return m_invalid_; }
 

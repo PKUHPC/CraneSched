@@ -33,36 +33,10 @@
 
 using task_id_t = uint32_t;
 
-enum class CraneErr : uint16_t {
-  kOk = 0,
-  kGenericFailure,
-  kNoResource,
-  kNonExistent,
-  kInvalidNodeNum,
-
-  kSystemErr,  // represent the error which sets errno
-  kExistingTask,
-  kInvalidParam,
-  kStop,
-  kPermissionDenied,
-
-  kConnectionTimeout,
-  kConnectionAborted,
-  kRpcFailure,
-  kTokenRequestFailure,
-  KStreamBroken,
-
-  kInvalidStub,
-  kCgroupError,
-  kProtobufError,
-  kLibEventError,
-  kNoAvailNode,
-
-  __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
-};
+using CraneErrCode = crane::grpc::ErrCode;
 
 template <typename T>
-using CraneExpected = std::expected<T, CraneErr>;
+using CraneExpected = std::expected<T, CraneErrCode>;
 
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
@@ -121,37 +95,107 @@ enum ExitCodeEnum : uint16_t {
 }  // namespace ExitCode
 
 namespace Internal {
-
-constexpr std::array<std::string_view, uint16_t(CraneErr::__ERR_SIZE)>
-    CraneErrStrArr = {
+constexpr std::array<std::string_view, uint16_t(CraneErrCode::__ERR_CODE_COUNT)> CraneErrStrArr = {
+        // 0 - 4
         "Success",
-        "Generic failure",
-        "Resource not enough",
-        "The object doesn't exist",
-        "Invalid --node-num is passed",
 
-        "Linux Error",
-        "Task already exists",
-        "Invalid Parameter",
-        "The owner object of the function is stopping",
+        "Invalid UID",
+        "You are not a Crane user",
+        "The specified user is invalid",
+        "The user permission is insufficient",
+
+        // 5 - 9
+        "The user has been blocked",
+        "The user already exists in this account",
+        "The user doesn't own sufficient permission for the account operation",
+        "Invalid admin level",
+        "The user does not belong to this account",
+
+        // 10 - 14
+        "No account is specified for the user",
+        "The specified account does not exist",
+        "The account already exists in the database",
+        "The parent account of the specified account does not exist",
+        "The account has child accounts or users and thus can't be deleted",
+
+        // 15 - 19
+        "The account has been blocked",
+        "The specified partition does not exist",
+        "The specified account or user does not include this partition",
+        "The partition already exists in the account or user",
+        "The parent account does not include the partition",
+
+        // 20 - 24
+        "The QoS can't be added if the user has no partition",
+        "Child has partition error",
+        "The user has no QoS available for this partition",
+        "The specified QoS is not in the partition's allowed QoS list",
+        "The specified QoS does not exist",
+
+        // 25 - 29
+        "The QoS already exists in Crane",
+        "The QoS is still being used by accounts or users and can't be deleted",
+        "Failed to convert value to integer",
+        "Invalid time limit value",
+        "The entered account or user does not include this QoS",
+
+        // 30 - 34
+        "The QoS already exists in the account or user",
+        "The parent account does not include the QoS",
+        "The new QoS list does not include the current default QoS",
+        "The new default QoS is not in the allowed QoS list",
+        "The QoS is already the default QoS for the account",
+
+        // 35 - 39
+        "Some user is using the QoS as his default QoS",
+        "The QoS is being used by some child accounts",
+        "The QoS is not in the allowed list or is already the default QoS",
+        "Is default QoS error",
+        "Failed to update the database",
+
+        // 40 - 44
+        "Generic failure",
+        "Not enough resources for the task",
+        "Non-existent error",
+        "Not enough nodes in the partition for the task",
+        "Invalid node list",
+
+        // 45 - 49
+        "Invalid exclude node list",
+        "Time limit reached the user's limit",
+        "CPUs per task reached the user's limit",
+        "Not enough nodes for the task",
+        "System error",
+
+        // 50 - 54
+        "Existing task",
+        "The number of pending tasks exceeded the maximum value",
+        "Invalid parameter",
+        "Stop error",
         "Permission denied",
 
+        // 55 - 59
         "Connection timeout",
         "Connection aborted",
-        "RPC call failed",
-        "Failed to request required token",
-        "Stream is broken",
+        "RPC failure",
+        "Token request failure",
+        "Stream broken",
 
-        "Craned stub is invalid",
-        "Error when manipulating cgroup",
-        "Error when using protobuf",
-        "Error when using LibEvent",
-        "Not enough nodes which satisfy resource requirements",
+        // 60 - 64
+        "Invalid stub",
+        "CGroup error",
+        "Protobuf error",
+        "LibEvent error",
+        "No available node",
+
+        // 65 - 67
+        "The current running job exceeds the QoS limit (MaxJobPerUser)",
+        "User has insufficient privilege"
 };
 
 }
 
-inline std::string_view CraneErrStr(CraneErr err) {
+inline std::string_view CraneErrStr(CraneErrCode err) {
   return Internal::CraneErrStrArr[uint16_t(err)];
 }
 
