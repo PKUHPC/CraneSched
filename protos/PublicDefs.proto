@@ -412,7 +412,7 @@ enum ErrCode {
 
   ERR_MAX_JOB_COUNT_PER_USER = 65;
   ERR_USER_NO_PRIVILEGE = 66;
-  ERR_CODE_COUNT  = 67;
+  __ERR_CODE_COUNT = 67;
 }
 
 enum EntityType {
