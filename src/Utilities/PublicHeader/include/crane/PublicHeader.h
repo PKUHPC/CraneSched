@@ -35,10 +35,10 @@ using task_id_t = uint32_t;
 
 using CraneErrCode = crane::grpc::ErrCode;
 
+using CraneRichError = crane::grpc::RichError;
+
 template <typename T>
 using CraneExpected = std::expected<T, CraneErrCode>;
-
-using CraneRichError = crane::grpc::RichError;
 
 template <typename T>
 using CraneExpectedRich = std::expected<T, CraneRichError>;
@@ -180,14 +180,6 @@ constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)>
         "The current running job exceeds the QoS limit (MaxJobPerUser)",
         "User has insufficient privilege"};
 
-}
-
-inline CraneRichError MakeCraneRichError(const std::string& description,
-                                         CraneErrCode err) {
-  CraneRichError rich_err;
-  rich_err.set_description(description);
-  rich_err.set_code(err);
-  return rich_err;
 }
 
 inline CraneRichError MakeCraneRichError(const std::string& description,

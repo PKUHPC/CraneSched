@@ -861,11 +861,11 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos(
 
   const Account* account = GetExistedAccountInfoNoLock_(account_name);
 
-  result = CheckSetAccountAllowedQosNoLock_(account, qos_list, force, err_qos);
-  return !result ? result : SetAccountAllowedQos_(*account, qos_list);
+  auto rich_result = CheckSetAccountAllowedQosNoLock_(account, qos_list, force);
+  return !rich_result ? rich_result : SetAccountAllowedQos_(*account, qos_list);
 }
 
-AccountManager::CraneExpected<void> AccountManager::ModifyQos(
+CraneExpected<void> AccountManager::ModifyQos(
     uint32_t uid, const std::string& name,
     crane::grpc::ModifyField modify_field, const std::string& value) {
   {
@@ -1244,7 +1244,7 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedQosNoLock_(
     auto iter = attrs_in_account_map.allowed_partition_qos_map.find(partition);
     if (iter == attrs_in_account_map.allowed_partition_qos_map.end()) {
       return std::unexpected(
-          MakeCraneRichError(partition, CraneErrCode::ERR_ALLOWED_PARTITION));
+          MakeCraneRichError(partition, CraneErrCode::ERR_PARTITION_MISSING));
     }
     cache_allowed_partition_qos_map.insert({iter->first, iter->second});
   }
@@ -1507,11 +1507,9 @@ CraneExpected<void> AccountManager::CheckIfUserHasPermOnUserNoLock_(
   return std::unexpected(CraneErrCode::ERR_PERMISSION_USER);
 }
 
-AccountManager::CraneExpected<void>
-AccountManager::CheckPartitionIsAllowedNoLock_(const Account* account,
-                                               const std::string& partition,
-                                               bool check_parent,
-                                               bool is_user) {
+CraneExpected<void> AccountManager::CheckPartitionIsAllowedNoLock_(
+    const Account* account, const std::string& partition, bool check_parent,
+    bool is_user) {
   if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   // check if new partition existed
