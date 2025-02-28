@@ -386,15 +386,15 @@ message BlockAccountOrUserReply {
   ErrCode code = 2;
 }
 
-message ModifyPartitionAllowedOrDeniedAccountsRequest {
+message ModifyPartitionAclRequest {
   uint32 uid = 1;
-  string partition_name = 2;
-  bool is_modify_allowed = 3;
+  string partition = 2;
+  bool is_allowed_list = 3;
   repeated string accounts = 4;
 }
 
 
-message ModifyPartitionAllowedOrDeniedAccountsReply {
+message ModifyPartitionAclReply {
   bool ok = 1;
   ErrCode err_code = 2;
 }
@@ -781,7 +781,7 @@ service CraneCtld {
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
-  rpc ModifyPartitionAllowedOrDeniedAccounts(ModifyPartitionAllowedOrDeniedAccountsRequest) returns (ModifyPartitionAllowedOrDeniedAccountsReply);
+  rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);

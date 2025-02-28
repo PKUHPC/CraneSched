@@ -1052,7 +1052,7 @@ CraneExpected<void> AccountManager::CheckIfUidHasPermOnUser(
   return CheckIfUserHasPermOnUserNoLock_(*op_user, user, read_only_priv);
 }
 
-CraneExpected<void> AccountManager::CheckModifyPartitionAllowedOrDeniedAccounts(
+CraneExpected<void> AccountManager::CheckModifyPartitionAcl(
     uint32_t uid, const std::string& partition_name,
     const std::unordered_set<std::string>& accounts) {
   CraneExpected<void> result{};

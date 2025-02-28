@@ -254,10 +254,10 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ModifyPartitionAllowedOrDeniedAccounts(
+grpc::Status CraneCtldServiceImpl::ModifyPartitionAcl(
     grpc::ServerContext *context,
-    const crane::grpc::ModifyPartitionAllowedOrDeniedAccountsRequest *request,
-    crane::grpc::ModifyPartitionAllowedOrDeniedAccountsReply *response) {
+    const crane::grpc::ModifyPartitionAclRequest *request,
+    crane::grpc::ModifyPartitionAclReply *response) {
   CraneExpected<void> result;
 
   std::unordered_set<std::string> accounts;
@@ -266,8 +266,8 @@ grpc::Status CraneCtldServiceImpl::ModifyPartitionAllowedOrDeniedAccounts(
     accounts.insert(account_name);
   }
 
-  result = g_account_manager->CheckModifyPartitionAllowedOrDeniedAccounts(
-      request->uid(), request->partition_name(), accounts);
+  result = g_account_manager->CheckModifyPartitionAcl(
+      request->uid(), request->partition(), accounts);
 
   if (!result) {
     response->set_ok(false);
@@ -275,8 +275,8 @@ grpc::Status CraneCtldServiceImpl::ModifyPartitionAllowedOrDeniedAccounts(
     return grpc::Status::OK;
   }
 
-  result = g_meta_container->ModifyPartitionAllowedOrDeniedAccounts(
-      request->partition_name(), request->is_modify_allowed(), accounts);
+  result = g_meta_container->ModifyPartitionAcl(
+      request->partition(), request->is_allowed_list(), std::move(accounts));
 
   if (!result) {
     response->set_ok(false);

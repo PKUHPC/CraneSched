@@ -140,7 +140,7 @@ class AccountManager {
                                               const std::string& username,
                                               bool read_only_priv);
 
-  CraneExpected<void> CheckModifyPartitionAllowedOrDeniedAccounts(
+  CraneExpected<void> CheckModifyPartitionAcl(
       uint32_t uid, const std::string& partition_name,
       const std::unordered_set<std::string>& accounts);
 
