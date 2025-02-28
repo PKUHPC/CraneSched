@@ -415,7 +415,10 @@ enum ErrCode {
 
   ERR_MAX_JOB_COUNT_PER_USER = 65;
   ERR_USER_NO_PRIVILEGE = 66;
-  __ERR_CODE_COUNT = 67;
+  ERR_ALLOWEDLIST_MISSING = 67;  // The current account is not in the allowed account list for the partition.
+  ERR_DENYLIST_HIT = 68;  // The current account has been explicitly added to the deny list for the partition.
+
+  __ERR_CODE_COUNT = 69;
 }
 
 enum EntityType {

@@ -258,7 +258,7 @@ grpc::Status CraneCtldServiceImpl::ModifyPartitionAllowedOrDeniedAccounts(
     grpc::ServerContext *context,
     const crane::grpc::ModifyPartitionAllowedOrDeniedAccountsRequest *request,
     crane::grpc::ModifyPartitionAllowedOrDeniedAccountsReply *response) {
-  CraneErrCodeExpected<void> result;
+  CraneExpected<void> result;
 
   std::unordered_set<std::string> accounts;
 
@@ -276,7 +276,7 @@ grpc::Status CraneCtldServiceImpl::ModifyPartitionAllowedOrDeniedAccounts(
   }
 
   result = g_meta_container->ModifyPartitionAllowedOrDeniedAccounts(
-        request->partition_name(), request->is_modify_allowed(), accounts);
+      request->partition_name(), request->is_modify_allowed(), accounts);
 
   if (!result) {
     response->set_ok(false);
@@ -1026,12 +1026,11 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
     return std::unexpected(enable_res.error());
   }
 
-  auto result = g_meta_container->CheckIfAccountIsAllowedInPartition(task->partition_id,
-                                                            task->account);
-  if (!result)
-    return std::unexpected(result.error());
+  auto result = g_meta_container->CheckIfAccountIsAllowedInPartition(
+      task->partition_id, task->account);
+  if (!result) return std::unexpected(result.error());
 
-  auto result = g_task_scheduler->AcquireTaskAttributes(task.get());
+  result = g_task_scheduler->AcquireTaskAttributes(task.get());
 
   if (result) result = g_task_scheduler->CheckTaskValidity(task.get());
 
