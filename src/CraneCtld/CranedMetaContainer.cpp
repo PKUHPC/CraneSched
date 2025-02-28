@@ -543,7 +543,7 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
 crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     const crane::grpc::ModifyCranedStateRequest& request) {
   crane::grpc::ModifyCranedStateReply reply;
-  std::vector<crane::grpc::EventInfo> eventList;
+  std::vector<crane::grpc::EventInfo> event_list;
   crane::grpc::EventInfo event;
   event.set_cluster_name(g_config.CraneClusterName);
   event.set_uid(request.uid());
@@ -573,7 +573,7 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
           timestamp->set_seconds(seconds);
           timestamp->set_nanos(static_cast<int>(nanos));
           event.set_allocated_start_time(timestamp.release());
-          eventList.emplace_back(event);
+          event_list.emplace_back(event);
         }
         craned_meta->drain = true;
         craned_meta->state_reason = request.reason();
@@ -593,7 +593,7 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
           timestamp->set_seconds(seconds);
           timestamp->set_nanos(static_cast<int>(nanos));
           event.set_allocated_start_time(timestamp.release());
-          eventList.emplace_back(event);
+          event_list.emplace_back(event);
         }
         craned_meta->drain = false;
         craned_meta->state_reason.clear();
@@ -608,8 +608,8 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     }
   }
 
-  if (g_config.Plugin.Enabled && !eventList.empty()) {
-    g_plugin_client->InsertEventHookAsync(std::move(eventList));
+  if (g_config.Plugin.Enabled && !event_list.empty()) {
+    g_plugin_client->InsertEventHookAsync(std::move(event_list));
   }
   return reply;
 }
