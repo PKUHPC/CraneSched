@@ -514,3 +514,12 @@ message CranedRemoteMeta {
   google.protobuf.Timestamp craned_start_time = 4;
   google.protobuf.Timestamp system_boot_time = 5;
 }
+
+message EventInfo {
+  google.protobuf.Timestamp start_time = 1;
+  string node_name = 2;
+  string cluster_name = 3;
+  string reason = 4;
+  CranedControlState state = 5;
+  uint32 uid = 6;
+}
