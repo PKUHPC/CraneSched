@@ -438,28 +438,29 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
     grpc::ServerContext *context,
     const crane::grpc::ModifyAccountRequest *request,
     crane::grpc::ModifyAccountReply *response) {
-  if (request->type() == crane::grpc::OperationType::Overwrite) {
-    if (request->modify_field() == crane::grpc::ModifyField::Partition) {
-      std::vector<std::string> partition_list;
-      for (const auto &partition_name : request->value_list()) {
-        partition_list.emplace_back(partition_name);
-      }
-      auto rich_res = g_account_manager->SetAccountAllowedPartition(
-          request->uid(), request->name(), partition_list, request->force());
-      if (!rich_res)
-        response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
-
-    } else if (request->modify_field() == crane::grpc::ModifyField::Qos) {
-      std::vector<std::string> qos_list;
-      for (const auto &qos_name : request->value_list()) {
-        qos_list.emplace_back(qos_name);
-      }
-      auto rich_res = g_account_manager->SetAccountAllowedQos(
-          request->uid(), request->name(), qos_list, request->force());
-      if (!rich_res)
-        response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
+  if (request->type() == crane::grpc::OperationType::Overwrite &&
+      request->modify_field() ==
+          crane::grpc::ModifyField::Partition) {  // SetAccountAllowedPartition
+    std::vector<std::string> partition_list;
+    for (const auto &partition_name : request->value_list()) {
+      partition_list.emplace_back(partition_name);
     }
-  } else {
+    auto rich_res = g_account_manager->SetAccountAllowedPartition(
+        request->uid(), request->name(), partition_list, request->force());
+    if (!rich_res)
+      response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
+  } else if (request->type() == crane::grpc::OperationType::Overwrite &&
+             request->modify_field() ==
+                 crane::grpc::ModifyField::Qos) {  // SetAccountAllowedQos
+    std::vector<std::string> qos_list;
+    for (const auto &qos_name : request->value_list()) {
+      qos_list.emplace_back(qos_name);
+    }
+    auto rich_res = g_account_manager->SetAccountAllowedQos(
+        request->uid(), request->name(), qos_list, request->force());
+    if (!rich_res)
+      response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
+  } else {  // other operations
     for (const auto &value : request->value_list()) {
       auto modify_res = g_account_manager->ModifyAccount(
           request->type(), request->uid(), request->name(),
