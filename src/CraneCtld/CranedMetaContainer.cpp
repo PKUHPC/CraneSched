@@ -596,23 +596,26 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   return reply;
 }
 
-CraneExpected<void> CranedMetaContainer::ModifyPartitionAllowedOrDeniedAccounts(
-    const std::string& partition_name, bool is_modify_allowed,
-    const std::unordered_set<std::string>& accounts) {
+CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
+    const std::string& partition_name, bool is_allowed_list,
+    std::unordered_set<std::string>&& accounts) {
   CraneExpected<void> result{};
 
-  auto part_meta_map = partition_metas_map_.GetMapSharedPtr();
-  if (!part_meta_map->contains(partition_name))
+  auto part_metas_map = partition_metas_map_.GetMapSharedPtr();
+
+  const auto part_meta_iter = part_metas_map->find(partition_name);
+
+  if (part_meta_iter == part_metas_map->end())
     return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
 
-  auto part_meta = part_meta_map->at(partition_name).GetExclusivePtr();
+  auto part_meta = part_meta_iter->second.GetExclusivePtr();
   auto& allowed_accounts = part_meta->partition_global_meta.allowed_accounts;
   auto& denied_accounts = part_meta->partition_global_meta.denied_accounts;
 
-  if (is_modify_allowed) {
-    allowed_accounts = accounts;
+  if (is_allowed_list) {
+    allowed_accounts = std::move(accounts);
   } else {
-    denied_accounts = accounts;
+    denied_accounts = std::move(accounts);
   }
 
   return result;
@@ -622,7 +625,9 @@ CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
     const std::string& partition_name, const std::string& account_name) {
   auto part_metas_map = partition_metas_map_.GetMapSharedPtr();
 
-  if (!part_metas_map->contains(partition_name)) {
+  const auto part_meta_iter = part_metas_map->find(partition_name);
+
+  if (part_meta_iter == part_metas_map->end()) {
     CRANE_DEBUG(
         "the partition {} does not exist, submission of the task is "
         "prohibited.",
@@ -630,9 +635,13 @@ CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
     return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
   }
 
-  auto part_meta = part_metas_map->at(partition_name).GetExclusivePtr();
+  auto part_meta = part_meta_iter->second.GetExclusivePtr();
   const auto& allowed_accounts =
       part_meta->partition_global_meta.allowed_accounts;
+
+  const auto& denied_accounts =
+      part_meta->partition_global_meta.denied_accounts;
+
   if (!allowed_accounts.empty()) {
     if (!allowed_accounts.contains(account_name)) {
       CRANE_DEBUG(
@@ -641,9 +650,7 @@ CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
           account_name, partition_name);
       return std::unexpected(CraneErrCode::ERR_ALLOWEDLIST_MISSING);
     }
-  } else {
-    const auto& denied_accounts =
-        part_meta->partition_global_meta.denied_accounts;
+  } else if (!denied_accounts.empty()) {
     if (denied_accounts.contains(account_name)) {
       CRANE_DEBUG(
           "The account {} is in the DeniedAccounts of the partition {}"
