@@ -71,6 +71,7 @@ void InitFromStdin(int argc, char** argv) {
   }
 
   g_config.JobId = msg.job_id();
+  g_config.TaskCount = 1;
   g_config.SupervisorDebugLevel = msg.debug_level();
   g_config.CranedUnixSocketPath = msg.craned_unix_socket_path();
   g_config.CraneBaseDir = msg.crane_base_dir();

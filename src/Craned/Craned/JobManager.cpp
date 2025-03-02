@@ -43,7 +43,7 @@ EnvMap JobSpec::GetJobEnvMap() const {
 };
 
 JobInstance::JobInstance(JobSpec&& spec)
-    : job_id(spec.cgroup_spec.job_id), job_spec(std::move(spec)) {}
+    : job_id(spec.cgroup_spec.job_id), job_spec(spec) {}
 
 JobInstance::JobInstance(const JobSpec& spec)
     : job_id(spec.cgroup_spec.job_id), job_spec(spec) {}
@@ -60,16 +60,22 @@ JobManager::JobManager() {
         EvSigchldCb_();
       });
 
-  if (m_sigchld_handle_->start(SIGCLD) != 0) {
-    CRANE_ERROR("Failed to start the SIGCLD handle");
+  if (int rc = m_sigchld_handle_->start(SIGCLD); rc != 0) {
+    CRANE_ERROR("Failed to start the SIGCHLD handle: {}", uv_err_name(rc));
   }
 
   m_sigint_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
   m_sigint_handle_->on<uvw::signal_event>(
       [this](const uvw::signal_event&, uvw::signal_handle&) { EvSigintCb_(); });
-  if (m_sigint_handle_->start(SIGINT) != 0) {
-    CRANE_ERROR("Failed to start the SIGINT handle");
+  if (int rc = m_sigint_handle_->start(SIGINT); rc != 0) {
+    CRANE_ERROR("Failed to start the SIGINT handle: {}", uv_err_name(rc));
   }
+
+  m_check_supervisor_timer_handle_ = m_uvw_loop_->resource<uvw::timer_handle>();
+  m_check_supervisor_timer_handle_->on<uvw::timer_event>(
+      [this](const uvw::timer_event&, uvw::timer_handle& handle) {
+        if (EvCheckSupervisorRunning_()) handle.stop();
+      });
 
   // gRPC: QueryTaskIdFromPid
   m_query_task_id_from_pid_async_handle_ =
@@ -165,11 +171,9 @@ JobManager::~JobManager() {
 }
 
 bool JobManager::AllocJobs(std::vector<JobSpec>&& job_specs) {
-  std::chrono::steady_clock::time_point begin;
-  std::chrono::steady_clock::time_point end;
   CRANE_DEBUG("Allocating {} tasks", job_specs.size());
 
-  begin = std::chrono::steady_clock::now();
+  auto begin = std::chrono::steady_clock::now();
 
   for (auto& job_spec : job_specs) {
     auto& cg_spec = job_spec.cgroup_spec;
@@ -189,29 +193,70 @@ bool JobManager::AllocJobs(std::vector<JobSpec>&& job_specs) {
     }
   }
 
-  end = std::chrono::steady_clock::now();
+  auto end = std::chrono::steady_clock::now();
   CRANE_TRACE("Create cgroups costed {} ms",
               std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
                   .count());
   return true;
 }
 
-bool JobManager::FreeJobAllocation(task_id_t job_id) {
-  JobInstance* job_instance;
+bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
   {
-    auto job_unique_ptr = m_job_map_.GetValueExclusivePtr(job_id);
-    if (!job_unique_ptr) {
-      CRANE_WARN("Try to free nonexistent job#{}", job_id);
-      return false;
+    auto map_ptr = m_job_map_.GetMapExclusivePtr();
+    for (auto job_id : job_ids) {
+      if (!map_ptr->contains(job_id)) {
+        CRANE_WARN("Try to free nonexistent job#{}", job_ids);
+        return false;
+      }
     }
-    job_instance = job_unique_ptr->release();
   }
-  return FreeJobInstanceAllocation_(job_instance);
+
+  absl::MutexLock lk(&m_release_cg_mtx_);
+
+  m_release_job_req_set_.insert(job_ids.begin(), job_ids.end());
+  if (!m_check_supervisor_timer_handle_->active())
+    m_check_supervisor_timer_handle_->start(uvw::timer_handle::time{1000},
+                                            uvw::timer_handle::time{1000});
+
+  return true;
+}
+
+bool JobManager::EvCheckSupervisorRunning_() {
+  absl::MutexLock lk(&m_release_cg_mtx_);
+  std::error_code ec;
+  std::vector<task_id_t> job_ids;
+  for (auto it = m_release_job_req_set_.begin();
+       it != m_release_job_req_set_.end();) {
+    auto exists = std::filesystem::exists(
+        fmt::format(
+            "/proc/{}",
+            m_job_map_.GetValueExclusivePtr(*it)->get()->supervisor_pid),
+        ec);
+    if (ec) {
+      CRANE_WARN("Failed to check supervisor for Job #{} is running.", *it);
+      continue;
+    }
+    if (!exists) {
+      job_ids.emplace_back(*it);
+      it = m_release_job_req_set_.erase(it);
+    } else {
+      it++;
+    }
+  }
+
+  if (!job_ids.empty()) {
+    CRANE_TRACE("Supervisor for Job [{}] found to be exited",
+                absl::StrJoin(job_ids, ","));
+
+    g_thread_pool->detach_task([this, jobs = std::move(job_ids)] {
+      FreeJobInstanceAllocation_(jobs);
+    });
+  }
+
+  return m_release_job_req_set_.empty();
 }
 
 void JobManager::EvSigchldCb_() {
-  assert(m_instance_ptr_->m_instance_ptr_ != nullptr);
-
   int status;
   pid_t pid;
   while (true) {
@@ -448,7 +493,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
       return CraneErr::kSupervisorError;
     }
     execution->pid = pid.value();
-
+    job->supervisor_pid = child_pid;
     return CraneErr::kOk;
 
   } else {  // Child proc
@@ -577,38 +622,49 @@ void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
   }
 }
 
-bool JobManager::FreeJobInstanceAllocation_(JobInstance* job_instance) {
-  auto job_id = job_instance->job_id;
-  this->m_job_map_.Erase(job_id);
-  auto* cgroup = job_instance->cgroup.release();
-
-  if (g_config.Plugin.Enabled) {
-    g_plugin_client->DestroyCgroupHookAsync(job_id, cgroup->GetCgroupString());
+bool JobManager::FreeJobInstanceAllocation_(
+    const std::vector<task_id_t>& job_ids) {
+  CRANE_DEBUG("Freeing job [{}] instance allocation",
+              absl::StrJoin(job_ids, ","));
+  std::vector<JobInstance*> job_ptr_vec;
+  {
+    auto map_ptr = m_job_map_.GetMapExclusivePtr();
+    for (auto job_id : job_ids) {
+      job_ptr_vec.emplace_back(map_ptr->at(job_id).RawPtr()->release());
+      map_ptr->erase(job_id);
+    }
   }
+  for (auto* instance : job_ptr_vec) {
+    auto* cgroup = instance->cgroup.release();
+    if (g_config.Plugin.Enabled) {
+      g_plugin_client->DestroyCgroupHookAsync(instance->job_id,
+                                              cgroup->GetCgroupString());
+    }
 
-  if (cgroup != nullptr) {
-    g_thread_pool->detach_task([cgroup]() {
-      bool rc;
-      int cnt = 0;
+    if (cgroup != nullptr) {
+      g_thread_pool->detach_task([cgroup]() {
+        int cnt = 0;
 
-      while (true) {
-        if (cgroup->Empty()) break;
+        while (true) {
+          if (cgroup->Empty()) break;
 
-        if (cnt >= 5) {
-          CRANE_ERROR(
-              "Couldn't kill the processes in cgroup {} after {} times. "
-              "Skipping it.",
-              cgroup->GetCgroupString(), cnt);
-          break;
+          if (cnt >= 5) {
+            CRANE_ERROR(
+                "Couldn't kill the processes in cgroup {} after {} times. "
+                "Skipping it.",
+                cgroup->GetCgroupString(), cnt);
+            break;
+          }
+
+          cgroup->KillAllProcesses();
+          ++cnt;
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
 
-        cgroup->KillAllProcesses();
-        ++cnt;
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      }
-
-      delete cgroup;
-    });
+        delete cgroup;
+      });
+    }
+    delete instance;
   }
   return true;
 }
@@ -658,7 +714,7 @@ void JobManager::LaunchExecutionInstanceMt_(Execution* execution) {
     // by timer and eventually be handled once the SIGCHLD processing callback
     // sees the pid in index maps. Now we do not support launch multiple tasks
     // in a job.
-    CRANE_TRACE("[job #{}] Spawned successfullly.", job->job_id);
+    CRANE_TRACE("[job #{}] Spawned successfully.", job->job_id);
     job->executions.emplace(execution->pid,
                             std::unique_ptr<Execution>(execution));
     absl::MutexLock lk(&m_mtx_);
@@ -717,7 +773,7 @@ std::unordered_set<task_id_t> JobManager::QueryExistentJobIds() {
   std::unordered_set<task_id_t> job_ids;
   auto job_map_ptr = m_job_map_.GetMapConstSharedPtr();
   job_ids.reserve(job_map_ptr->size());
-  for (auto& [job_id, _] : *job_map_ptr) {
+  for (auto& job_id : *job_map_ptr | std::ranges::views::keys) {
     job_ids.emplace(job_id);
   }
   return job_ids;
@@ -900,12 +956,9 @@ void JobManager::TaskStopAndDoStatusChangeAsync(
 }
 
 void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {
-  absl::Time now = absl::Now();
-
   ChangeTaskTimeLimitQueueElem elem;
   while (m_task_time_limit_change_queue_.try_dequeue(elem)) {
-    auto job_ptr = m_job_map_.GetValueExclusivePtr(elem.job_id);
-    if (job_ptr) {
+    if (auto job_ptr = m_job_map_.GetValueExclusivePtr(elem.job_id); job_ptr) {
       auto stub = g_supervisor_keeper->GetStub(elem.job_id);
       if (!stub) {
         CRANE_ERROR("Supervisor for task #{} not found", elem.job_id);

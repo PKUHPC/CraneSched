@@ -94,7 +94,7 @@ inline const char* kDefaultCranedLogPath = "craned/craned.log";
 inline const char* kDefaultContainerTempDir = "craned/container";
 
 // FIXME: Replace this with macro for sake of cpack.
-inline const char* kSupervisorPath = "csupervisor";
+inline const char* kSupervisorPath = "/usr/libexec/csupervisor";
 inline const char* kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";

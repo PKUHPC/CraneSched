@@ -213,10 +213,17 @@ CraneErr CgroupManager::Init() {
 CraneErr CgroupManager::Recover(
     const std::unordered_set<task_id_t> &running_job_ids) {
   // TODO: Remove these after csupervisor is stable
+  std::set<task_id_t> cg_running_job_ids{};
   if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
-    RmJobCgroupsExcept_(running_job_ids);
+    cg_running_job_ids.merge(
+        GetJobIdsFromCgroupV1(CgroupConstant::Controller::CPU_CONTROLLER));
+    cg_running_job_ids.merge(
+        GetJobIdsFromCgroupV1(CgroupConstant::Controller::MEMORY_CONTROLLER));
+    cg_running_job_ids.merge(
+        GetJobIdsFromCgroupV1(CgroupConstant::Controller::DEVICES_CONTROLLER));
   } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
-    RmJobCgroupsV2Except_(CgroupConstant::RootCgroupFullPath, running_job_ids);
+    cg_running_job_ids =
+        GetJobIdsFromCgroupV2(CgroupConstant::RootCgroupFullPath);
 #ifdef CRANE_ENABLE_BPF
     auto job_id_bpf_key_vec_map =
         GetJobBpfMapCgroupsV2(CgroupConstant::RootCgroupFullPath);
@@ -238,22 +245,28 @@ CraneErr CgroupManager::Recover(
       }
     }
 #endif
-
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
     return CraneErr::kCgroupError;
   }
+  for (auto job_id : cg_running_job_ids) {
+    if (!running_job_ids.contains(job_id)) {
+      CRANE_DEBUG("Removing cgroup for job #{}.", job_id);
+      std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
+      if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
+        cg_unique_ptr = CgroupManager::CreateOrOpen_(
+            job_id, CgV1PreferredControllers, NO_CONTROLLER_FLAG, true);
+      } else if (GetCgroupVersion() ==
+                 CgroupConstant::CgroupVersion::CGROUP_V2) {
+        cg_unique_ptr = CgroupManager::CreateOrOpen_(
+            job_id, CgV2PreferredControllers, NO_CONTROLLER_FLAG, true);
+      }
+      if (cg_unique_ptr == nullptr)
+        CRANE_ERROR("Failed to reopen cgroup for job #{}.", job_id);
+      cg_unique_ptr.reset();
+    }
+  }
   return CraneErr::kOk;
-}
-
-void CgroupManager::RmJobCgroupsExcept_(
-    const std::unordered_set<task_id_t> &task_ids) {
-  RmJobCgroupsUnderControllerExcept_(CgroupConstant::Controller::CPU_CONTROLLER,
-                                     task_ids);
-  RmJobCgroupsUnderControllerExcept_(
-      CgroupConstant::Controller::MEMORY_CONTROLLER, task_ids);
-  RmJobCgroupsUnderControllerExcept_(
-      CgroupConstant::Controller::DEVICES_CONTROLLER, task_ids);
 }
 
 void CgroupManager::ControllersMounted() {
@@ -347,6 +360,53 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
   return 0;
 }
 
+std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1(
+    CgroupConstant::Controller controller) {
+  void *handle = nullptr;
+  cgroup_file_info info{};
+  std::set<task_id_t> job_ids;
+
+  static constexpr LazyRE2 cg_pattern(R"(Crane_Task_(\d+))");
+
+  const char *controller_str =
+      CgroupConstant::GetControllerStringView(controller).data();
+
+  int base_level;
+  int depth = 1;
+  int ret = cgroup_walk_tree_begin(controller_str, "/", depth, &handle, &info,
+                                   &base_level);
+  while (ret == 0) {
+    std::string job_id;
+    if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR &&
+        RE2::FullMatch(info.path, *cg_pattern, &job_id)) {
+      job_ids.emplace(std::stoul(job_id));
+    }
+    ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
+  }
+
+  if (handle) cgroup_walk_tree_end(&handle);
+  return job_ids;
+}
+
+std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV2(
+    const std::string &root_cgroup_path) {
+  std::set<task_id_t> job_ids;
+  static const LazyRE2 cg_pattern{R"(Crane_Task_(\d+))"};
+  try {
+    for (const auto &it :
+         std::filesystem::directory_iterator(root_cgroup_path)) {
+      std::string job_id_str;
+      if (it.is_directory() && RE2::FullMatch(it.path().filename().c_str(),
+                                              *cg_pattern, &job_id_str)) {
+        job_ids.emplace(std::stoul(job_id_str));
+      }
+    }
+  } catch (const std::filesystem::filesystem_error &e) {
+    CRANE_ERROR("Error: {}", e.what());
+  }
+  return job_ids;
+}
+
 std::string CgroupManager::CgroupStrByTaskId_(task_id_t task_id) {
   return fmt::format("Crane_Task_{}", task_id);
 }
@@ -392,6 +452,8 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   bool has_cgroup = retrieve;
   if (retrieve && (ECGROUPNOTEXIST == cgroup_get_cgroup(native_cgroup))) {
     has_cgroup = false;
+    cgroup_free(&native_cgroup);
+    return nullptr;
   }
   // Work through the various controllers.
 
@@ -566,43 +628,6 @@ std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
   return ok ? std::move(cg_unique_ptr) : nullptr;
 }
 
-void CgroupManager::RmJobCgroupsUnderControllerExcept_(
-    CgroupConstant::Controller controller,
-    const std::unordered_set<task_id_t> &task_ids) {
-  void *handle = nullptr;
-  cgroup_file_info info{};
-
-  static constexpr LazyRE2 cg_pattern(R"(Crane_Task_(\d+))");
-
-  const char *controller_str =
-      CgroupConstant::GetControllerStringView(controller).data();
-
-  int base_level;
-  int depth = 1;
-  int ret = cgroup_walk_tree_begin(controller_str, "/", depth, &handle, &info,
-                                   &base_level);
-  while (ret == 0) {
-    std::string task_id_str;
-    if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR &&
-        RE2::FullMatch(info.path, *cg_pattern, &task_id_str)) {
-      task_id_t task_id = std::stoul(task_id_str);
-      if (task_ids.contains(task_id)) {
-        CRANE_TRACE("Skip remove running task #{} cgroup {}", task_id_str,
-                    info.full_path);
-      } else {
-        CRANE_DEBUG("Removing remaining task cgroup: {}", info.full_path);
-        int err = rmdir(info.full_path);
-        if (err != 0)
-          CRANE_ERROR("Failed to remove cgroup {}: {}", info.full_path,
-                      strerror(errno));
-      }
-    }
-    ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
-  }
-
-  if (handle) cgroup_walk_tree_end(&handle);
-}
-
 std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
     const std::string &root_cgroup_path) {
   static const LazyRE2 cg_pattern{R"(Crane_Task_(\d+))"};
@@ -671,32 +696,6 @@ CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
 }
 #endif
 
-void CgroupManager::RmJobCgroupsV2Expect_(
-    const std::unordered_set<task_id_t> &job_ids) {
-  RmJobCgroupsV2Except_(CgroupConstant::RootCgroupFullPath, job_ids);
-}
-
-void CgroupManager::RmJobCgroupsV2Except_(
-    const std::string &root_cgroup_path,
-    const std::unordered_set<task_id_t> &job_ids) {
-  static const LazyRE2 cg_pattern{R"(Crane_Task_(\d+))"};
-  try {
-    for (const auto &it :
-         std::filesystem::directory_iterator(root_cgroup_path)) {
-      std::string job_id_str;
-      if (it.is_directory() && RE2::FullMatch(it.path().filename().c_str(),
-                                              *cg_pattern, &job_id_str)) {
-        task_id_t job_id = std::stoul(job_id_str);
-        if (job_ids.contains(job_id)) continue;
-        if (std::filesystem::remove(it.path()))
-          CRANE_ERROR("Failed to remove cgroup {}", it.path().c_str());
-      }
-    }
-  } catch (const std::filesystem::filesystem_error &e) {
-    CRANE_ERROR("Error: {}", e.what());
-  }
-}
-
 EnvMap CgroupManager::GetResourceEnvMapByResInNode(
     const crane::grpc::ResourceInNode &res_in_node) {
   std::unordered_map env_map = DeviceManager::GetDevEnvMapByResInNode(
@@ -717,6 +716,7 @@ EnvMap CgroupManager::GetResourceEnvMapByResInNode(
  */
 Cgroup::~Cgroup() {
   if (m_cgroup_) {
+    CRANE_DEBUG("Destroying cgroup {}.", m_cgroup_path_);
     int err;
     if ((err = cgroup_delete_cgroup_ext(
              m_cgroup_,

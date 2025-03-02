@@ -234,17 +234,11 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
     CRANE_ERROR("CranedServer is not ready.");
     return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
   }
-  for (int i = 0; i < request->task_id_list_size(); ++i) {
-    task_id_t task_id = request->task_id_list(i);
-    uid_t uid = request->uid_list(i);
+  CRANE_DEBUG("Release Cgroup for job [{}]",
+              absl::StrJoin(request->task_id_list(), ","));
 
-    CRANE_DEBUG("Release Cgroup for job #{}", task_id);
-
-    bool ok = g_job_mgr->FreeJobAllocation(task_id);
-    if (!ok) {
-      CRANE_ERROR("Failed to release cgroup for job #{}, uid {}", task_id, uid);
-    }
-  }
+  g_job_mgr->FreeJobs(std::vector(request->task_id_list().begin(),
+                                  request->task_id_list().end()));
 
   return Status::OK;
 }

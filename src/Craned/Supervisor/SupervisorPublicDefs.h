@@ -75,6 +75,7 @@ struct Config {
   std::filesystem::path SupervisorUnixSockPath;
 
   task_id_t JobId;
+  std::atomic_int TaskCount;
 };
 
 inline Config g_config;

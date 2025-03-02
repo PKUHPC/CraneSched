@@ -26,11 +26,25 @@
 namespace Supervisor {
 class CranedClient {
  public:
+  ~CranedClient();
   void InitChannelAndStub(const std::string& endpoint);
-  void TaskStatusChange(crane::grpc::TaskStatus new_status, uint32_t exit_code,
-                        std::optional<std::string> reason);
+  void TaskStatusChangeAsync(crane::grpc::TaskStatus new_status,
+                             uint32_t exit_code,
+                             std::optional<std::string> reason);
 
  private:
+  void AsyncSendThread_();
+  struct TaskStatusChangeQueueElem {
+    task_id_t task_id{};
+    crane::grpc::TaskStatus new_status{};
+    uint32_t exit_code{};
+    std::optional<std::string> reason;
+  };
+  moodycamel::ConcurrentQueue<TaskStatusChangeQueueElem>
+      m_task_status_change_queue_;
+
+  std::thread m_async_send_thread_;
+  std::atomic_bool m_thread_stop_;
   std::shared_ptr<grpc::Channel> m_channel_;
   std::shared_ptr<crane::grpc::Craned::Stub> m_stub_;
 };

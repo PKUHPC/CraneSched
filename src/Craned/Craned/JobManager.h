@@ -40,9 +40,7 @@ struct Execution {
 
 struct JobSpec {
   JobSpec() = default;
-  JobSpec(const crane::grpc::JobSpec& spec) : cgroup_spec(spec) {}
-  JobSpec(const JobSpec& spec) = default;
-  JobSpec(JobSpec& spec) = default;
+  explicit JobSpec(const crane::grpc::JobSpec& spec) : cgroup_spec(spec) {}
 
   CgroupSpec cgroup_spec;
   EnvMap GetJobEnvMap() const;
@@ -58,7 +56,7 @@ struct JobStatusSpec {
 // allocation = job spec + execution info
 struct JobInstance {
   explicit JobInstance(JobSpec&& spec);
-  JobInstance(const JobSpec& spec);
+  explicit JobInstance(const JobSpec& spec);
   ~JobInstance() = default;
 
   task_id_t job_id;
@@ -69,6 +67,9 @@ struct JobInstance {
   // Task execution results
   bool orphaned{false};
   CraneErr err_before_exec{CraneErr::kOk};
+
+  // TODO: Support multiple supervisor
+  pid_t supervisor_pid{0};
 
   // May launch multiple execution instance multi thread.
   absl::flat_hash_map<pid_t, std::unique_ptr<Execution>> executions;
@@ -91,12 +92,7 @@ class JobManager {
 
   bool AllocJobs(std::vector<JobSpec>&& job_specs);
 
-  /**
-   * @brief Free job res allocation.
-   * @param job_id job id to free
-   * @return true if success.
-   */
-  bool FreeJobAllocation(task_id_t job_id);
+  bool FreeJobs(const std::vector<task_id_t>& job_ids);
 
   CraneErr ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
@@ -170,7 +166,7 @@ class JobManager {
     std::promise<std::pair<bool, crane::grpc::TaskStatus>> status_prom;
   };
 
-  bool FreeJobInstanceAllocation_(JobInstance* job_instance);
+  bool FreeJobInstanceAllocation_(const std::vector<task_id_t>& job_ids);
 
   void LaunchExecutionInstanceMt_(Execution* task);
 
@@ -236,6 +232,8 @@ class JobManager {
   // Critical data region ends
   // ========================================================================
 
+  bool EvCheckSupervisorRunning_();
+
   void EvSigchldCb_();
 
   // Callback function to handle SIGINT sent by Ctrl+C
@@ -260,6 +258,11 @@ class JobManager {
   // When this event is triggered, the JobManager will not accept
   // any more new tasks and quit as soon as all existing task end.
   std::shared_ptr<uvw::signal_handle> m_sigint_handle_;
+
+  absl::Mutex m_release_cg_mtx_;
+  std::unordered_set<task_id_t> m_release_job_req_set_;
+  ABSL_GUARDED_BY(m_release_cg_mtx_);
+  std::shared_ptr<uvw::timer_handle> m_check_supervisor_timer_handle_;
 
   std::shared_ptr<uvw::async_handle> m_query_task_id_from_pid_async_handle_;
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;

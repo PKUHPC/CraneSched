@@ -525,17 +525,11 @@ class CgroupManager {
                             bool required, bool has_cgroup,
                             bool &changed_cgroup);
 
-  static void RmJobCgroupsExcept_(
-      const std::unordered_set<task_id_t> &task_ids);
+  static std::set<task_id_t> GetJobIdsFromCgroupV1(
+      CgroupConstant::Controller controller);
 
-  /**
-   * @brief Remove cgroup for not running tasks under controller.
-   * @param controller controller of cgroup to remove.
-   * @param task_ids task ids not to remove.
-   */
-  static void RmJobCgroupsUnderControllerExcept_(
-      CgroupConstant::Controller controller,
-      const std::unordered_set<task_id_t> &task_ids);
+  static std::set<task_id_t> GetJobIdsFromCgroupV2(
+      const std::string &root_cgroup_path);
 
   static std::unordered_map<ino_t, task_id_t> GetCgJobIdMapCgroupV2(
       const std::string &root_cgroup_path);
@@ -545,12 +539,7 @@ class CgroupManager {
   GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path);
 #endif
 
-  static void RmJobCgroupsV2Expect_(
-      const std::unordered_set<task_id_t> &task_ids);
 
-  static void RmJobCgroupsV2Except_(
-      const std::string &root_cgroup_path,
-      const std::unordered_set<task_id_t> &job_ids);
 
   ControllerFlags m_mounted_controllers_;
 

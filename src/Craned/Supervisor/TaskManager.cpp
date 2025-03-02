@@ -558,6 +558,7 @@ TaskManager::TaskManager() : m_supervisor_exit_(false) {
           if (m_supervisor_exit_) {
             h.parent().walk([](auto&& h) { h.close(); });
             h.parent().stop();
+            CRANE_TRACE("Stopping supervisor.");
             g_server->Shutdown();
           }
           std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -570,6 +571,7 @@ TaskManager::TaskManager() : m_supervisor_exit_(false) {
 }
 
 TaskManager::~TaskManager() {
+  CRANE_TRACE("Shutting down task manager.");
   if (m_uvw_thread_.joinable()) m_uvw_thread_.join();
 }
 
@@ -640,7 +642,7 @@ void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
   // Free the TaskInstance structure
   m_instance_.reset();
   if (!orphaned)
-    g_craned_client->TaskStatusChange(new_status, exit_code, reason);
+    g_craned_client->TaskStatusChangeAsync(new_status, exit_code, reason);
 }
 
 std::string ExecutionInterface::ParseFilePathPattern_(

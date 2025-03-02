@@ -165,7 +165,7 @@ class TaskManager {
 
   void TerminateTaskAsync(bool mark_as_orphaned, bool terminated_by_user);
 
-  void TerminateSupervisor() { m_supervisor_exit_ = true; }
+  void Shutdown() { m_supervisor_exit_ = true; }
 
  private:
   template <class T>
