@@ -22,6 +22,7 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
+#include "crane/PluginClient.h"
 #include "TaskScheduler.h"
 
 namespace Ctld {
@@ -997,6 +998,20 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     const crane::grpc::QueryClusterInfoRequest *request,
     crane::grpc::QueryClusterInfoReply *response) {
   *response = g_meta_container->QueryClusterInfo(*request);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::ExecuteNodePowerAction(
+    grpc::ServerContext *context,
+    const crane::grpc::ExecuteNodePowerActionRequest *request,
+    crane::grpc::ExecuteNodePowerActionReply *response) {
+  if (g_config.Plugin.Enabled && g_plugin_client != nullptr) {
+    g_plugin_client->ExecutePowerActionHookAsync(request->craned_id(), request->action());
+    response->set_ok(true);
+    return grpc::Status::OK;
+  } 
+  response->set_ok(false);
+  response->set_error("Plugin is not enabled");
   return grpc::Status::OK;
 }
 
