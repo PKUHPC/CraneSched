@@ -21,6 +21,7 @@
 #include "CranedPreCompiledHeader.h"
 // Precompiled header comes first
 
+#include "crane/Network.h"
 #include "crane/OS.h"
 
 namespace Craned {
@@ -89,6 +90,7 @@ struct Config {
     SystemRelInfo SysInfo;
     absl::Time CranedStartTime;
     absl::Time SystemBootTime;
+    std::vector<crane::NetworkInterface> NetworkInterfaces;
   };
 
   CranedMeta CranedMeta;
