@@ -111,6 +111,20 @@ enum InteractiveTaskType {
   Crun = 1;
 }
 
+enum PowerAction {
+    WAKEUP = 0;
+    POWERON = 1;
+    SLEEP = 2;
+    POWEROFF = 3;
+}
+
+enum CranedListType {
+    ACTIVE = 0;
+    IDLE = 1;
+    SLEEPING = 2;
+    POWEREDOFF = 3;
+}
+
 message TaskToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
@@ -519,10 +533,18 @@ message SystemRelInfo {
   string version = 3;
 }
 
+message NetworkInterface {
+  string name = 1;
+  string mac_address = 2;
+  repeated string ipv4_addresses = 3;
+  repeated string ipv6_addresses = 4;
+}
+
 message CranedRemoteMeta {
   DedicatedResourceInNode dres_in_node = 1;
   SystemRelInfo sys_rel_info = 2;
   string craned_version = 3;
   google.protobuf.Timestamp craned_start_time = 4;
   google.protobuf.Timestamp system_boot_time = 5;
+  repeated NetworkInterface network_interfaces = 6;
 }
