@@ -55,7 +55,7 @@ message EndHookReply {
 message CreateCgroupHookRequest {
   uint32 task_id = 1;
   string cgroup = 2;
-  DedicatedResourceInNode resource = 3;
+  ResourceInNode resource = 3;
 }
 
 message CreateCgroupHookReply {
@@ -71,12 +71,19 @@ message DestroyCgroupHookReply {
   bool ok = 1;
 }
 
+message CranedState {
+  oneof state_type {
+    CranedPowerState power_state = 1;
+    CranedControlState control_state = 2;
+  }
+}
+
 message CranedEventInfo {
   google.protobuf.Timestamp start_time = 1;
   string node_name = 2;
   string cluster_name = 3;
   string reason = 4;
-  CranedControlState state = 5;
+  CranedState state = 5;
   uint32 uid = 6;
 }
 
@@ -88,11 +95,40 @@ message NodeEventHookReply {
   bool ok = 1;
 }
 
+message UpdatePowerStateHookRequest {
+    string craned_id = 1;
+    CranedControlState state = 2;
+}
+
+message UpdatePowerStateHookReply {
+    bool ok = 1;
+}
+
+message GetCranedByPowerStateHookSyncRequest {
+    CranedPowerState state = 1;
+}
+
+message GetCranedByPowerStateHookSyncReply {
+    repeated string craned_ids = 1;
+}
+
+message RegisterCranedHookRequest {
+    string craned_id = 1;
+    repeated NetworkInterface network_interfaces = 2;
+}
+
+message RegisterCranedHookReply {
+    bool ok = 1;
+}
+
 service CranePluginD {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc StartHook(StartHookRequest) returns (StartHookReply);
   rpc EndHook(EndHookRequest) returns (EndHookReply);
   rpc NodeEventHook(NodeEventHookRequest) returns (NodeEventHookReply);
+  rpc UpdatePowerStateHook(UpdatePowerStateHookRequest) returns (UpdatePowerStateHookReply);
+  rpc GetCranedByPowerStateHookSync(GetCranedByPowerStateHookSyncRequest) returns (GetCranedByPowerStateHookSyncReply);
+  rpc RegisterCranedHook(RegisterCranedHookRequest) returns (RegisterCranedHookReply);
 
   /* ----------------------------------- Called from Craned ---------------------------------------------------- */
   rpc CreateCgroupHook(CreateCgroupHookRequest) returns (CreateCgroupHookReply);

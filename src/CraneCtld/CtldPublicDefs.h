@@ -200,6 +200,8 @@ struct CranedRemoteMeta {
   absl::Time craned_start_time;
   absl::Time system_boot_time;
 
+  std::vector<crane::grpc::NetworkInterface> network_interfaces;
+
   CranedRemoteMeta() = default;
 
   explicit CranedRemoteMeta(const crane::grpc::CranedRemoteMeta& grpc_meta)

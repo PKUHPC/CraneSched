@@ -85,9 +85,24 @@ enum CranedResourceState {
   CRANE_DOWN = 3;
 }
 
+enum CranedPowerState {
+  CRANE_POWER_ACTIVE = 0;
+  CRANE_POWER_IDLE = 1;
+  CRANE_POWER_SLEEPING = 2;
+  CRANE_POWER_POWEREDOFF = 3;
+  CRANE_POWER_TO_SLEEPING = 4;
+  CRANE_POWER_WAKING_UP = 5;
+  CRANE_POWER_POWERING_ON = 6;
+  CRANE_POWER_POWERING_OFF = 7;
+}
+
 enum CranedControlState {
   CRANE_NONE = 0;
   CRANE_DRAIN = 1;
+  CRANE_POWEROFF = 2;
+  CRANE_SLEEP = 3;
+  CRANE_WAKE = 4;
+  CRANE_POWERON = 5;
 }
 
 enum TaskStatus {
@@ -554,6 +569,13 @@ message SystemRelInfo {
   string version = 3;
 }
 
+message NetworkInterface {
+  string name = 1;
+  string mac_address = 2;
+  repeated string ipv4_addresses = 3;
+  repeated string ipv6_addresses = 4;
+}
+
 message CranedRemoteMeta {
   DedicatedResourceInNode dres_in_node = 1;
   SystemRelInfo sys_rel_info = 2;
@@ -562,4 +584,5 @@ message CranedRemoteMeta {
   google.protobuf.Timestamp system_boot_time = 5;
   repeated uint32 lost_tasks = 6;
   repeated uint32 lost_jobs = 7;
+  repeated NetworkInterface network_interfaces = 6;
 }

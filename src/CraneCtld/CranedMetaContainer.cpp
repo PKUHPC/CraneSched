@@ -28,6 +28,15 @@ void CranedMetaContainer::CranedUp(
     const CranedId& craned_id,
     const crane::grpc::CranedRemoteMeta& remote_meta) {
   CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
+
+  if (g_plugin_client != nullptr) {
+    std::vector<crane::NetworkInterface> interfaces;
+    for (const auto& interface : remote_meta.network_interfaces) {
+      interfaces.emplace_back(interface);
+    }
+    g_plugin_client->RegisterCranedHookAsync(craned_id, interfaces);
+  }
+  
   auto& part_ids = craned_id_part_ids_map_.at(craned_id);
 
   std::vector<util::Synchronized<PartitionMeta>::ExclusivePtr> part_meta_ptrs;
@@ -765,7 +774,8 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
         if (g_config.Plugin.Enabled && craned_meta->drain != true) {
           // Set node event info
           event.set_node_name(craned_id);
-          event.set_state(crane::grpc::CranedControlState::CRANE_DRAIN);
+          event.mutable_state()->set_control_state(
+              crane::grpc::CranedControlState::CRANE_DRAIN);
           event_list.emplace_back(event);
         }
 
@@ -777,7 +787,8 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
         if (g_config.Plugin.Enabled && craned_meta->drain != false) {
           // Set node event info
           event.set_node_name(craned_id);
-          event.set_state(crane::grpc::CranedControlState::CRANE_NONE);
+          event.mutable_state()->set_control_state(
+              crane::grpc::CranedControlState::CRANE_NONE);
           event_list.emplace_back(event);
         }
 
