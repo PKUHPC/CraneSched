@@ -505,7 +505,7 @@ bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
 
   if (g_config.Plugin.Enabled) {
     g_plugin_client->CreateCgroupHookAsync(task_id, pcg->GetCgroupString(),
-                                           res.dedicated_res_in_node());
+                                           res);
   }
 
   CRANE_TRACE(

@@ -250,6 +250,8 @@ CraneErrCode CranedStub::QueryCranedRemoteMeta(CranedRemoteMeta *meta) {
   meta->system_boot_time =
       absl::FromUnixSeconds(grpc_meta->system_boot_time().seconds());
 
+  meta->raw_reply = std::make_unique<QueryCranedRemoteMetaReply>(reply);
+
   if (reply.ok()) return CraneErrCode::SUCCESS;
 
   return CraneErrCode::ERR_GENERIC_FAILURE;
