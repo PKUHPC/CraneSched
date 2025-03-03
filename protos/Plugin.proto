@@ -70,6 +70,43 @@ message DestroyCgroupHookReply {
   bool ok = 1;
 }
 
+message ExecutePowerActionHookRequest {
+    string craned_id = 1;
+    PowerAction action = 2;
+}
+
+message ExecutePowerActionHookReply {
+    bool ok = 1;
+    string error = 2;
+}
+
+message GetCranedInfoHookRequest {
+    string craned_id = 1;
+}
+
+message GetCranedInfoHookReply {
+    string state = 1;
+    int32 job_count = 2;
+}
+
+message GetCranedListHookRequest {
+    CranedListType type = 1;
+}
+
+message GetCranedListHookReply {
+    repeated string craned_ids = 1;
+}
+
+message RegisterCranedHookRequest {
+    string craned_id = 1;
+    repeated NetworkInterface network_interfaces = 2;
+}
+
+message RegisterCranedHookReply {
+    bool ok = 1;
+    string error = 2;
+}
+
 service CranePluginD {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */  
   rpc StartHook(StartHookRequest) returns (StartHookReply);
@@ -78,4 +115,10 @@ service CranePluginD {
   /* ----------------------------------- Called from Craned ---------------------------------------------------- */
   rpc CreateCgroupHook(CreateCgroupHookRequest) returns (CreateCgroupHookReply);
   rpc DestroyCgroupHook(DestroyCgroupHookRequest) returns (DestroyCgroupHookReply);
+
+  /* ----------------------------------- Power Control Plugin ---------------------------------------------------- */
+  rpc ExecutePowerActionHook(ExecutePowerActionHookRequest) returns (ExecutePowerActionHookReply);
+  rpc GetCranedInfoHook(GetCranedInfoHookRequest) returns (GetCranedInfoHookReply);
+  rpc GetCranedListHook(GetCranedListHookRequest) returns (GetCranedListHookReply);
+  rpc RegisterCranedHook(RegisterCranedHookRequest) returns (RegisterCranedHookReply);
 }

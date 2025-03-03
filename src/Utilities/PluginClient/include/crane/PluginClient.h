@@ -52,6 +52,8 @@ class PluginClient {
     END,
     CREATE_CGROUP,
     DESTROY_CGROUP,
+    EXECUTE_NODE_POWER_ACTION,
+    REGISTER_CRANED,
     HookTypeCount,
   };
 
@@ -73,6 +75,13 @@ class PluginClient {
       const crane::grpc::DedicatedResourceInNode& resource);
   void DestroyCgroupHookAsync(task_id_t task_id, const std::string& cgroup);
 
+  void ExecutePowerActionHookAsync(const std::string& craned_id,
+                                    crane::grpc::PowerAction action);
+
+  void RegisterCranedHookAsync(
+      const std::string& craned_id,
+      const google::protobuf::RepeatedPtrField<crane::grpc::NetworkInterface>& interfaces);
+
  private:
   // HookDispatchFunc is a function pointer type that handles different
   // event.
@@ -86,7 +95,10 @@ class PluginClient {
                                      google::protobuf::Message* msg);
   grpc::Status SendDestroyCgroupHook_(grpc::ClientContext* context,
                                       google::protobuf::Message* msg);
-
+  grpc::Status SendExecutePowerActionHook_(grpc::ClientContext* context,
+                                          google::protobuf::Message* msg);
+  grpc::Status SendRegisterCranedHook_(grpc::ClientContext* context,
+                                      google::protobuf::Message* msg);
   void AsyncSendThread_();
 
   std::shared_ptr<Channel> m_channel_;
@@ -103,7 +115,9 @@ class PluginClient {
       s_hook_dispatch_funcs_{{&PluginClient::SendStartHook_,
                               &PluginClient::SendEndHook_,
                               &PluginClient::SendCreateCgroupHook_,
-                              &PluginClient::SendDestroyCgroupHook_}};
+                              &PluginClient::SendDestroyCgroupHook_,
+                              &PluginClient::SendExecutePowerActionHook_,
+                              &PluginClient::SendRegisterCranedHook_}};
 };
 
 }  // namespace plugin
