@@ -441,23 +441,20 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
   if (request->type() == crane::grpc::OperationType::Overwrite &&
       request->modify_field() ==
           crane::grpc::ModifyField::Partition) {  // SetAccountAllowedPartition
-    std::vector<std::string> partition_list;
-    for (const auto &partition_name : request->value_list()) {
-      partition_list.emplace_back(partition_name);
-    }
+    std::vector<std::string> partition_list{request->value_list().begin(),
+                                            request->value_list().end()};
     auto rich_res = g_account_manager->SetAccountAllowedPartition(
-        request->uid(), request->name(), partition_list, request->force());
+        request->uid(), request->name(), std::move(partition_list),
+        request->force());
     if (!rich_res)
       response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
   } else if (request->type() == crane::grpc::OperationType::Overwrite &&
              request->modify_field() ==
                  crane::grpc::ModifyField::Qos) {  // SetAccountAllowedQos
-    std::vector<std::string> qos_list;
-    for (const auto &qos_name : request->value_list()) {
-      qos_list.emplace_back(qos_name);
-    }
+    std::vector<std::string> qos_list{request->value_list().begin(),
+                                      request->value_list().end()};
     auto rich_res = g_account_manager->SetAccountAllowedQos(
-        request->uid(), request->name(), qos_list, request->force());
+        request->uid(), request->name(), std::move(qos_list), request->force());
     if (!rich_res)
       response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
   } else {  // other operations
@@ -540,10 +537,8 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
           }
         }
       } else if (request->type() == crane::grpc::OperationType::Overwrite) {
-        std::vector<std::string> partition_list;
-        for (const auto &partition_name : request->value_list()) {
-          partition_list.emplace_back(partition_name);
-        }
+        std::vector<std::string> partition_list{request->value_list().begin(),
+                                                request->value_list().end()};
         auto rich_res = g_account_manager->SetUserAllowedPartition(
             request->uid(), request->name(), request->account(),
             partition_list);
@@ -565,13 +560,11 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
           }
         }
       } else if (request->type() == crane::grpc::OperationType::Overwrite) {
-        std::vector<std::string> qos_list;
-        for (const auto &qos_name : request->value_list()) {
-          qos_list.emplace_back(qos_name);
-        }
+        std::vector<std::string> qos_list{request->value_list().begin(),
+                                          request->value_list().end()};
         auto rich_res = g_account_manager->SetUserAllowedQos(
             request->uid(), request->name(), request->partition(),
-            request->account(), qos_list, request->force());
+            request->account(), std::move(qos_list), request->force());
         if (!rich_res)
           response->mutable_rich_error_list()->Add()->CopyFrom(
               rich_res.error());
@@ -630,10 +623,8 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryAccountInfoRequest *request,
     crane::grpc::QueryAccountInfoReply *response) {
-  std::vector<std::string> account_list;
-  for (const auto &account : request->account_list()) {
-    account_list.emplace_back(account);
-  }
+  std::vector<std::string> account_list{request->account_list().begin(),
+                                        request->account_list().end()};
 
   auto res = g_account_manager->QueryAccountInfo(request->uid(), account_list);
   if (res) {
@@ -686,10 +677,8 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryUserInfoRequest *request,
     crane::grpc::QueryUserInfoReply *response) {
-  std::vector<std::string> user_list;
-  for (const auto &user : request->user_list()) {
-    user_list.emplace_back(user);
-  }
+  std::vector<std::string> user_list{request->user_list().begin(),
+                                     request->user_list().end()};
   auto res = g_account_manager->QueryUserInfo(request->uid(), user_list);
   if (res) {
     response->set_ok(true);
@@ -743,10 +732,8 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryQosInfoRequest *request,
     crane::grpc::QueryQosInfoReply *response) {
-  std::vector<std::string> qos_list;
-  for (const auto &qos : request->qos_list()) {
-    qos_list.emplace_back(qos);
-  }
+  std::vector<std::string> qos_list{request->qos_list().begin(),
+                                    request->qos_list().end()};
   auto res = g_account_manager->QueryQosInfo(request->uid(), qos_list);
   if (res) {
     response->set_ok(true);

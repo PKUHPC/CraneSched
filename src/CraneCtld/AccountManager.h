@@ -105,10 +105,12 @@ class AccountManager {
                                         const std::string& account,
                                         const std::string& new_qos);
 
-  CraneExpectedRich<void> SetUserAllowedQos(
-      uint32_t uid, const std::string& username, const std::string& partition,
-      const std::string& account, const std::vector<std::string>& qos_list,
-      bool force);
+  CraneExpectedRich<void> SetUserAllowedQos(uint32_t uid,
+                                            const std::string& username,
+                                            const std::string& partition,
+                                            const std::string& account,
+                                            std::vector<std::string>&& qos_list,
+                                            bool force);
 
   CraneExpected<void> DeleteUserAllowedPartition(uint32_t uid,
                                                  const std::string& name,
@@ -125,11 +127,11 @@ class AccountManager {
 
   CraneExpectedRich<void> SetAccountAllowedPartition(
       uint32_t uid, const std::string& account_name,
-      const std::vector<std::string>& partition_list, bool force);
+      std::vector<std::string>&& partition_list, bool force);
 
   CraneExpectedRich<void> SetAccountAllowedQos(
       uint32_t uid, const std::string& account_name,
-      const std::vector<std::string>& qos_list, bool force);
+      std::vector<std::string>&& qos_list, bool force);
 
   CraneExpected<void> ModifyQos(uint32_t uid, const std::string& name,
                                 crane::grpc::ModifyField modify_field,
@@ -299,7 +301,7 @@ class AccountManager {
       const std::vector<std::string>& partition_list);
   CraneExpectedRich<void> SetUserAllowedQos_(
       const User& user, const Account& account, const std::string& partition,
-      const std::vector<std::string>& qos_list, bool force);
+      std::vector<std::string>&& qos_list, bool force);
 
   CraneExpected<void> DeleteUserAllowedPartition_(const User& user,
                                                   const std::string& account,
@@ -320,9 +322,9 @@ class AccountManager {
   CraneExpected<void> SetAccountDefaultQos_(const Account& account,
                                             const std::string& qos);
   CraneExpectedRich<void> SetAccountAllowedPartition_(
-      const Account& account, const std::vector<std::string>& partition_list);
+      const Account& account, std::vector<std::string>&& partition_list);
   CraneExpectedRich<void> SetAccountAllowedQos_(
-      const Account& account, const std::vector<std::string>& qos_list);
+      const Account& account, std::vector<std::string>&& qos_list);
 
   CraneExpected<void> DeleteAccountAllowedPartition_(
       const Account& account, const std::string& partition);

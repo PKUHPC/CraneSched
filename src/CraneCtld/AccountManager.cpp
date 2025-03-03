@@ -450,8 +450,8 @@ AccountManager::QueryQosInfo(uint32_t uid,
       }
     } else {
       for (const auto& [acct, item] : res_user.account_to_attrs_map) {
-        for (const auto& [part, part_qos_map] :
-             item.allowed_partition_qos_map) {
+        for (const auto& part_qos_map :
+             item.allowed_partition_qos_map | std::views::values) {
           for (const auto& qos : part_qos_map.second) {
             res_qos_map.try_emplace(qos, *(m_qos_map_.at(qos)));
           }
@@ -468,9 +468,7 @@ AccountManager::QueryQosInfo(uint32_t uid,
         for (const auto& [acct, item] : res_user.account_to_attrs_map) {
           for (const auto& [part, part_qos_map] :
                item.allowed_partition_qos_map) {
-            for (const auto& part_qos : part_qos_map.second) {
-              if (part_qos == qos_name) found = true;
-            }
+            found = std::ranges::contains(part_qos_map.second, qos_name);
           }
         }
         if (!found) continue;
@@ -641,7 +639,7 @@ CraneExpected<void> AccountManager::AddUserAllowedQos(
 
 CraneExpectedRich<void> AccountManager::SetUserAllowedQos(
     uint32_t uid, const std::string& username, const std::string& partition,
-    const std::string& account, const std::vector<std::string>& qos_list,
+    const std::string& account, std::vector<std::string>&& qos_list,
     bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   util::read_lock_guard account_guard(m_rw_account_mutex_);
@@ -665,7 +663,8 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos(
       CheckSetUserAllowedQosNoLock_(p, account_ptr, partition, qos_list, force);
   if (!rich_result) return rich_result;
 
-  return SetUserAllowedQos_(*p, *account_ptr, partition, qos_list, force);
+  return SetUserAllowedQos_(*p, *account_ptr, partition, std::move(qos_list),
+                            force);
 }
 
 CraneExpected<void> AccountManager::DeleteUserAllowedPartition(
@@ -808,7 +807,7 @@ CraneExpected<void> AccountManager::ModifyAccount(
 
 CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition(
     uint32_t uid, const std::string& account_name,
-    const std::vector<std::string>& partition_list, bool force) {
+    std::vector<std::string>&& partition_list, bool force) {
   CraneExpected<void> result{};
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -834,12 +833,12 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition(
 
   if (!rich_result) return rich_result;
 
-  return SetAccountAllowedPartition_(*account, partition_list);
+  return SetAccountAllowedPartition_(*account, std::move(partition_list));
 }
 
 CraneExpectedRich<void> AccountManager::SetAccountAllowedQos(
     uint32_t uid, const std::string& account_name,
-    const std::vector<std::string>& qos_list, bool force) {
+    std::vector<std::string>&& qos_list, bool force) {
   CraneExpected<void> result{};
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -862,7 +861,8 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos(
   const Account* account = GetExistedAccountInfoNoLock_(account_name);
 
   auto rich_result = CheckSetAccountAllowedQosNoLock_(account, qos_list, force);
-  return !rich_result ? rich_result : SetAccountAllowedQos_(*account, qos_list);
+  return !rich_result ? rich_result
+                      : SetAccountAllowedQos_(*account, std::move(qos_list));
 }
 
 CraneExpected<void> AccountManager::ModifyQos(
@@ -1369,6 +1369,7 @@ CraneExpectedRich<void> AccountManager::CheckSetAccountAllowedPartitionNoLock_(
     if (!result)
       return std::unexpected(MakeCraneRichError(partition, result.error()));
   }
+
   for (const auto& par : account->allowed_partition) {
     if (!ranges::contains(partition_list, par)) {
       if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account, par))
@@ -2137,7 +2138,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition_(
 
 CraneExpectedRich<void> AccountManager::SetUserAllowedQos_(
     const User& user, const Account& account, const std::string& partition,
-    const std::vector<std::string>& qos_list, bool force) {
+    std::vector<std::string>&& qos_list, bool force) {
   const std::string& name = user.name;
   const std::string& account_name = account.name;
 
@@ -2148,7 +2149,8 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos_(
                                  .allowed_partition_qos_map) {
       if (!ranges::contains(qos_list, pair.first))
         pair.first = qos_list.empty() ? "" : qos_list.front();
-      pair.second.assign(qos_list.begin(), qos_list.end());
+      pair.second.assign(std::make_move_iterator(qos_list.begin()),
+                         std::make_move_iterator(qos_list.end()));
     }
   } else {
     // Set the qos of a specified partition
@@ -2158,7 +2160,8 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos_(
     if (!ranges::contains(qos_list, iter->second.first))
       iter->second.first = qos_list.empty() ? "" : qos_list.front();
 
-    iter->second.second.assign(qos_list.begin(), qos_list.end());
+    iter->second.second.assign(std::make_move_iterator(qos_list.begin()),
+                               std::make_move_iterator(qos_list.end()));
   }
 
   mongocxx::client_session::with_transaction_cb callback =
@@ -2339,7 +2342,7 @@ CraneExpected<void> AccountManager::SetAccountDefaultQos_(
 }
 
 CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition_(
-    const Account& account, const std::vector<std::string>& partition_list) {
+    const Account& account, std::vector<std::string>&& partition_list) {
   const std::string& name = account.name;
 
   std::list<std::string> deleted_partition;
@@ -2373,14 +2376,15 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition_(
   for (const auto& par : deleted_partition) {
     DeleteAccountAllowedPartitionFromMapNoLock_(account.name, par);
   }
-  m_account_map_[name]->allowed_partition.assign(partition_list.begin(),
-                                                 partition_list.end());
+  m_account_map_[name]->allowed_partition.assign(
+      std::make_move_iterator(partition_list.begin()),
+      std::make_move_iterator(partition_list.end()));
 
   return {};
 }
 
 CraneExpectedRich<void> AccountManager::SetAccountAllowedQos_(
-    const Account& account, const std::vector<std::string>& qos_list) {
+    const Account& account, std::vector<std::string>&& qos_list) {
   const std::string& name = account.name;
 
   std::list<std::string> deleted_qos;
@@ -2435,8 +2439,9 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos_(
     if (account.default_qos.empty()) {
       m_account_map_[name]->default_qos = qos_list.front();
     }
-    m_account_map_[name]->allowed_qos_list.assign(qos_list.begin(),
-                                                  qos_list.end());
+    m_account_map_[name]->allowed_qos_list.assign(
+        std::make_move_iterator(qos_list.begin()),
+        std::make_move_iterator(qos_list.end()));
     for (const auto& qos : add_qos) {
       m_qos_map_[qos]->reference_count++;
     }
