@@ -441,8 +441,13 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
   if (request->type() == crane::grpc::OperationType::Overwrite &&
       request->modify_field() ==
           crane::grpc::ModifyField::Partition) {  // SetAccountAllowedPartition
-    std::vector<std::string> partition_list{request->value_list().begin(),
-                                            request->value_list().end()};
+    std::unordered_set<std::string> unique_set;
+    std::vector<std::string> partition_list;
+    partition_list.reserve(request->value_list_size());
+    for (const auto &partition_name : request->value_list()) {
+      if (unique_set.insert(partition_name).second)
+        partition_list.emplace_back(partition_name);
+    }
     auto rich_res = g_account_manager->SetAccountAllowedPartition(
         request->uid(), request->name(), std::move(partition_list),
         request->force());
@@ -451,8 +456,13 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
   } else if (request->type() == crane::grpc::OperationType::Overwrite &&
              request->modify_field() ==
                  crane::grpc::ModifyField::Qos) {  // SetAccountAllowedQos
-    std::vector<std::string> qos_list{request->value_list().begin(),
-                                      request->value_list().end()};
+    std::unordered_set<std::string> unique_set;
+    std::vector<std::string> qos_list;
+    qos_list.reserve(request->value_list_size());
+    for (const auto &qos_name : request->value_list()) {
+      if (unique_set.insert(qos_name).second) qos_list.emplace_back(qos_name);
+    }
+
     auto rich_res = g_account_manager->SetAccountAllowedQos(
         request->uid(), request->name(), std::move(qos_list), request->force());
     if (!rich_res)
@@ -560,8 +570,13 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
           }
         }
       } else if (request->type() == crane::grpc::OperationType::Overwrite) {
-        std::vector<std::string> qos_list{request->value_list().begin(),
-                                          request->value_list().end()};
+        std::unordered_set<std::string> unique_set;
+        std::vector<std::string> qos_list;
+        qos_list.reserve(request->value_list_size());
+        for (const auto &qos_name : request->value_list()) {
+          if (unique_set.insert(qos_name).second)
+            qos_list.emplace_back(qos_name);
+        }
         auto rich_res = g_account_manager->SetUserAllowedQos(
             request->uid(), request->name(), request->partition(),
             request->account(), std::move(qos_list), request->force());
