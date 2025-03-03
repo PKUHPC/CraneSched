@@ -63,9 +63,6 @@ class ExecutionInterface {
   virtual CraneErr Kill(int signum) = 0;
   virtual CraneErr Cleanup() = 0;
 
-  static std::string ParseFilePathPattern_(const std::string& pattern,
-                                           const std::string& cwd);
-
   // Set from TaskManager
   TaskSpec task;
   PasswordEntry pwd;
@@ -77,18 +74,30 @@ class ExecutionInterface {
   ProcSigchldInfo sigchld_info{};
 
  protected:
+  // FIXME: Remove this in future
+  [[deprecated]] virtual EnvMap GetChildProcessEnv_() const;
+
   // Helper methods
   virtual void SetChildProcessSignalHandler_();
   virtual CraneErr SetChildProcessProperty_();
   virtual CraneErr SetChildProcessBatchFd_();
-  virtual EnvMap GetChildProcessEnv_() const;
-  virtual std::vector<std::string> PrepareChildProcessExec_() const;
+
+  virtual CraneErr SetChildProcessEnv_() const;
+  virtual std::vector<std::string> GetChildProcessExecArgv_() const;
+
+  std::string ParseFilePathPattern_(const std::string& pattern,
+                                    const std::string& cwd) const;
 
   pid_t m_pid_{0};  // forked pid
-  std::unique_ptr<MetaInExecution> m_meta_;
+  std::unique_ptr<MetaInExecution> m_meta_{nullptr};
 
-  std::string m_executable_path_;  // bash -c "m_executable_ [m_arguments_...]"
-  std::list<std::string> m_arguments_;
+  EnvMap m_env_{};
+  std::string m_executable_;  // bash -c "m_executable_ [m_arguments_...]"
+
+  // NOTE: This is not used currently.
+  // As we are using bash -c to launch process, all arguments can be passed in
+  // m_executable_.
+  std::vector<std::string> m_arguments_;
 };
 
 class ContainerInstance : public ExecutionInterface {
@@ -97,10 +106,18 @@ class ContainerInstance : public ExecutionInterface {
       : ExecutionInterface(task_spec) {}
   virtual ~ContainerInstance() = default;
 
-  virtual CraneErr Prepare() override { return CraneErr::kOk; }
-  virtual CraneErr Spawn() override { return CraneErr::kOk; }
-  virtual CraneErr Kill(int signum) override { return CraneErr::kOk; }
-  virtual CraneErr Cleanup() override { return CraneErr::kOk; }
+  virtual CraneErr Prepare() override;
+  virtual CraneErr Spawn() override;
+  virtual CraneErr Kill(int signum) override;
+  virtual CraneErr Cleanup() override;
+
+ private:
+  CraneErr ModifyOCIBundleConfig_(const std::string& src,
+                                  const std::string& dst) const;
+  std::string ParseOCICmdPattern_(const std::string& cmd) const;
+
+  std::filesystem::path m_bundle_path_;
+  std::filesystem::path m_temp_path_;
 };
 
 class ProcessInstance : public ExecutionInterface {

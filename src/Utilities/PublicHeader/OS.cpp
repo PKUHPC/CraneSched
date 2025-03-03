@@ -38,6 +38,17 @@ bool DeleteFile(std::string const& p) {
   return ok;
 }
 
+bool DeleteFolders(std::string const& p) {
+  std::error_code ec;
+  std::filesystem::remove_all(p, ec);
+  if (ec) {
+    CRANE_ERROR("Failed to remove folder {}: {}", p, ec.message());
+    return false;
+  }
+
+  return true;
+}
+
 bool CreateFolders(std::string const& p) {
   if (std::filesystem::exists(p)) return true;
 

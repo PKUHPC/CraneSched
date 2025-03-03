@@ -31,6 +31,8 @@ target_link_libraries(csupervisor
         absl::flat_hash_map
         absl::synchronization
 
+        nlohmann_json::nlohmann_json
+        
         uvw
 
         Backward::Interface

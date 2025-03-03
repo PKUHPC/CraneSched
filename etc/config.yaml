@@ -123,7 +123,7 @@ Container:
   # Relate to CraneBaseDir
   TempDir: craned/containers/
   # OCI Runtime must support `state`, `kill`, `delete`, `run` subcommands
-  # %u, %U, %j, %x will be replaced by user, uid, job_id, container_id
+  # %b, %u, %U, %j, %x will be replaced by bundle_path, user, uid, job_id, job_name
   RuntimeBin: /usr/bin/runc
   RuntimeState: /usr/bin/runc --root=/run/user/%U/ state %u.%U.%j.%x
   RuntimeKill: /usr/bin/runc --rootless=true --root=/run/user/%U/ kill -a %u.%U.%j.%x SIGTERM 

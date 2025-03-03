@@ -24,17 +24,15 @@
 #include <spdlog/fmt/bundled/core.h>
 #include <sys/wait.h>
 
-#include <memory>
-#include <utility>
-#include <vector>
+#include <nlohmann/json.hpp>
 
 #include "CforedClient.h"
 #include "CranedClient.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
+#include "crane/OS.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
-#include "protos/Supervisor.grpc.pb.h"
 
 namespace Supervisor {
 
@@ -50,6 +48,30 @@ inline bool ExecutionInterface::IsCrun() const {
 inline bool ExecutionInterface::IsCalloc() const {
   return task.type() == crane::grpc::Interactive &&
          task.interactive_meta().interactive_type() == crane::grpc::Calloc;
+}
+
+std::string ExecutionInterface::ParseFilePathPattern_(
+    const std::string& pattern, const std::string& cwd) const {
+  std::filesystem::path resolved_path(pattern);
+
+  // If not specified, use cwd.
+  if (resolved_path.empty())
+    resolved_path = cwd;
+  else if (resolved_path.is_relative())
+    resolved_path = cwd / resolved_path;
+
+  // Path ends with a directory, append default stdout/err file name
+  // `Crane-<Job ID>.out` to the path.
+  if (std::filesystem::is_directory(resolved_path))
+    resolved_path = resolved_path / fmt::format("Crane-{}.out", task.task_id());
+
+  std::string resolved_path_pattern = std::move(resolved_path.string());
+  absl::StrReplaceAll({{"%j", std::to_string(task.task_id())},
+                       {"%u", pwd.Username()},
+                       {"%x", task.name()}},
+                      &resolved_path_pattern);
+
+  return resolved_path_pattern;
 }
 
 // TODO: Refactor this into TaskManager, instead of in ExecutionInterface.
@@ -128,22 +150,21 @@ CraneErr ExecutionInterface::SetChildProcessProperty_() {
 
   int rc = setgroups(gids.size(), gids.data());
   if (rc == -1) {
-    fmt::print(stderr,
-               "[Supervisor Subprocess] Error: setgroups() failed: {}\n",
+    fmt::print(stderr, "[Subprocess] Error: setgroups() failed: {}\n",
                task.task_id(), strerror(errno));
     return CraneErr::kSystemErr;
   }
 
   rc = setresgid(task.gid(), task.gid(), task.gid());
   if (rc == -1) {
-    fmt::print(stderr, "[Supervisor Subprocess] Error: setegid() failed: {}\n",
+    fmt::print(stderr, "[Subprocess] Error: setegid() failed: {}\n",
                task.task_id(), strerror(errno));
     return CraneErr::kSystemErr;
   }
 
   rc = setresuid(pwd.Uid(), pwd.Uid(), pwd.Uid());
   if (rc == -1) {
-    fmt::print(stderr, "[Supervisor Subprocess] Error: seteuid() failed: {}\n",
+    fmt::print(stderr, "[Subprocess] Error: seteuid() failed: {}\n",
                task.task_id(), strerror(errno));
     return CraneErr::kSystemErr;
   }
@@ -151,8 +172,8 @@ CraneErr ExecutionInterface::SetChildProcessProperty_() {
   const std::string& cwd = task.cwd();
   rc = chdir(cwd.c_str());
   if (rc == -1) {
-    fmt::print(stderr, "[Supervisor Subprocess] Error: chdir to {}. {}\n",
-               cwd.c_str(), strerror(errno));
+    fmt::print(stderr, "[Subprocess] Error: chdir to {}. {}\n", cwd.c_str(),
+               strerror(errno));
     return CraneErr::kSystemErr;
   }
 
@@ -171,8 +192,8 @@ CraneErr ExecutionInterface::SetChildProcessBatchFd_() {
 
   stdout_fd = open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
   if (stdout_fd == -1) {
-    fmt::print(stderr, "[Supervisor Subprocess] Error: open {}. {}\n",
-               stdout_file_path, strerror(errno));
+    fmt::print(stderr, "[Subprocess] Error: open {}. {}\n", stdout_file_path,
+               strerror(errno));
     return CraneErr::kSystemErr;
   }
   dup2(stdout_fd, 1);  // stdout -> output file
@@ -183,8 +204,8 @@ CraneErr ExecutionInterface::SetChildProcessBatchFd_() {
     stderr_fd =
         open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
     if (stderr_fd == -1) {
-      fmt::print(stderr, "[Supervisor Subprocess] Error: open {}. {}\n",
-                 stderr_file_path, strerror(errno));
+      fmt::print(stderr, "[Subprocess] Error: open {}. {}\n", stderr_file_path,
+                 strerror(errno));
       return CraneErr::kSystemErr;
     }
     dup2(stderr_fd, 2);  // stderr -> error file
@@ -195,15 +216,19 @@ CraneErr ExecutionInterface::SetChildProcessBatchFd_() {
   return CraneErr::kOk;
 }
 
-std::vector<std::string> ExecutionInterface::PrepareChildProcessExec_() const {
-  EnvMap task_env_map = GetChildProcessEnv_();
-  for (const auto& [name, value] : task_env_map)
-    if (setenv(name.c_str(), value.c_str(), 1))
-      fmt::print(
-          stderr,
-          "[Supervisor Subprocess] Warning: setenv() for {}={} failed.\n", name,
-          value);
+CraneErr ExecutionInterface::SetChildProcessEnv_() const {
+  if (clearenv())
+    fmt::print(stderr, "[Subprocess] Warning: clearenv() failed.\n");
 
+  for (const auto& [name, value] : m_env_)
+    if (setenv(name.c_str(), value.c_str(), 1))
+      fmt::print(stderr, "[Subprocess] Warning: setenv() for {}={} failed.\n",
+                 name, value);
+
+  return CraneErr::kOk;
+}
+
+std::vector<std::string> ExecutionInterface::GetChildProcessExecArgv_() const {
   // "bash (--login) -c 'm_executable_ [m_arguments_...]'"
   std::vector<std::string> argv;
   argv.emplace_back("/bin/bash");
@@ -214,7 +239,7 @@ std::vector<std::string> ExecutionInterface::PrepareChildProcessExec_() const {
   argv.emplace_back("-c");
 
   // Build the command string as: "m_executable_ [m_arguments_...]"
-  std::string cmd = m_executable_path_;
+  std::string cmd = m_executable_;
   for (const auto& arg : m_arguments_) {
     cmd += " " + arg;
   }
@@ -223,7 +248,467 @@ std::vector<std::string> ExecutionInterface::PrepareChildProcessExec_() const {
   return argv;
 }
 
+std::string ContainerInstance::ParseOCICmdPattern_(
+    const std::string& cmd) const {
+  std::string parsed_cmd(cmd);
+  // NOTE: Using m_temp_path_ as the bundle is modified and stored here
+  absl::StrReplaceAll({{"%b", m_temp_path_.string()},
+                       {"%j", std::to_string(task.task_id())},
+                       {"%x", task.name()},
+                       {"%u", pwd.Username()},
+                       {"%U", std::to_string(pwd.Uid())}},
+                      &parsed_cmd);
+  return parsed_cmd;
+}
+
+CraneErr ContainerInstance::ModifyOCIBundleConfig_(
+    const std::string& src, const std::string& dst) const {
+  using json = nlohmann::json;
+
+  // Check if bundle is valid
+  auto src_config = std::filesystem::path(src) / "config.json";
+  auto src_rootfs = std::filesystem::path(src) / "rootfs";
+  if (!std::filesystem::exists(src_config) ||
+      !std::filesystem::exists(src_rootfs)) {
+    CRANE_ERROR("Bundle provided by task #{} not exists : {}", task.task_id(),
+                src_config.string());
+    return CraneErr::kInvalidParam;
+  }
+
+  std::ifstream fin{src_config};
+  if (!fin) {
+    CRANE_ERROR("Failed to open bundle config provided by task #{}: {}",
+                task.task_id(), src_config.string());
+    return CraneErr::kSystemErr;
+  }
+
+  json config = json::parse(fin, nullptr, false);
+  if (config.is_discarded()) {
+    CRANE_ERROR("Bundle config provided by task #{} is invalid: {}",
+                task.task_id(), src_config.string());
+    return CraneErr::kInvalidParam;
+  }
+
+  try {
+    // Set root object, see:
+    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#root
+    // Set real rootfs path in the modified config.
+    config["root"]["path"] = src_rootfs;
+
+    // Set mounts array, see:
+    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#mounts
+    // Bind mount script into the container
+    auto mounts = config["mounts"].get<std::vector<json>>();
+    std::string parsed_sh_mounted_path = "/tmp/crane/script.sh";
+    mounts.emplace_back(json::object({
+        {"destination", parsed_sh_mounted_path},
+        {"source", m_meta_->parsed_sh_script_path},
+        {"options", json::array({"bind", "ro"})},
+    }));
+    config["mounts"] = mounts;
+
+    // Set process object, see:
+    // https://github.com/opencontainers/runtime-spec/blob/main/config.md#process
+    auto& process = config["process"];
+    // Set pass-through mode.
+    // TODO: Check if interactive task is supported.
+    process["terminal"] = false;
+    // Write environment variables in IEEE format.
+    process["env"] = [this]() {
+      auto env_str = std::vector<std::string>();
+      for (const auto& [name, value] : m_env_)
+        env_str.emplace_back(fmt::format("{}={}", name, value));
+      return env_str;
+    }();
+    process["args"] = {
+        task.batch_meta().interpreter(),
+        parsed_sh_mounted_path,
+    };
+  } catch (json::exception& e) {
+    CRANE_ERROR("Failed to generate bundle config for task #{}: {}",
+                task.task_id(), e.what());
+    return CraneErr::kInvalidParam;
+  }
+
+  // Write the modified config
+  auto dst_config = std::filesystem::path(dst) / "config.json";
+  std::ofstream fout{dst_config};
+  if (!fout) {
+    CRANE_ERROR("Failed to write bundle config for task #{}: {}",
+                task.task_id(), dst_config.string());
+    return CraneErr::kSystemErr;
+  }
+  fout << config.dump(4);
+  fout.flush();
+
+  return CraneErr::kOk;
+}
+
+CraneErr ContainerInstance::Prepare() {
+  // Generate path and params.
+  m_temp_path_ = g_config.Container.TempDir / fmt::format("{}", task.task_id());
+  m_bundle_path_ = task.container();
+  m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeRun);
+  m_env_ = GetChildProcessEnv_();
+  // m_arguments_ is not applicable for container tasks.
+
+  // Write script into the temp folder
+  auto sh_path = m_temp_path_ / fmt::format("Crane-{}.sh", task.task_id());
+  if (!util::os::CreateFoldersForFile(sh_path)) {
+    return CraneErr::kSystemErr;
+  }
+
+  FILE* fptr = fopen(sh_path.c_str(), "w");
+  if (fptr == nullptr) {
+    CRANE_ERROR("Failed write the script for task #{}", task.task_id());
+    return CraneErr::kSystemErr;
+  }
+
+  if (IsBatch())
+    fputs(task.batch_meta().sh_script().c_str(), fptr);
+  else  // Crun
+    fputs(task.interactive_meta().sh_script().c_str(), fptr);
+
+  fclose(fptr);
+
+  chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
+
+  // Write meta
+  if (IsBatch()) {
+    // Prepare file output name for batch tasks.
+    /* Perform file name substitutions
+     * %j - Job ID
+     * %u - Username
+     * %x - Job name
+     */
+    auto meta = std::make_unique<BatchMetaInExecution>();
+    meta->parsed_output_file_pattern = ParseFilePathPattern_(
+        task.batch_meta().output_file_pattern(), task.cwd());
+
+    // If -e / --error is not defined, leave
+    // batch_meta.parsed_error_file_pattern empty;
+    if (!task.batch_meta().error_file_pattern().empty()) {
+      meta->parsed_error_file_pattern = ParseFilePathPattern_(
+          task.batch_meta().error_file_pattern(), task.cwd());
+    }
+
+    m_meta_ = std::move(meta);
+  } else {
+    m_meta_ = std::make_unique<CrunMetaInExecution>();
+  }
+  m_meta_->parsed_sh_script_path = sh_path;
+
+  // Modify bundle
+  auto err = ModifyOCIBundleConfig_(m_bundle_path_, m_temp_path_);
+  if (err != CraneErr::kOk) {
+    CRANE_ERROR("Failed to modify OCI bundle config for task #{}",
+                task.task_id());
+    return err;
+  }
+
+  return CraneErr::kOk;
+}
+
+CraneErr ContainerInstance::Spawn() {
+  using google::protobuf::io::FileInputStream;
+  using google::protobuf::io::FileOutputStream;
+  using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
+  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
+
+  using crane::grpc::supervisor::CanStartMessage;
+  using crane::grpc::supervisor::ChildProcessReady;
+
+  int ctrl_sock_pair[2];  // Socket pair for passing control messages.
+
+  // Socket pair for forwarding IO of crun tasks. Craned read from index 0.
+  int crun_io_sock_pair[2];
+
+  if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
+    CRANE_ERROR("Failed to create socket pair: {}", strerror(errno));
+    return CraneErr::kSystemErr;
+  }
+
+  pid_t child_pid;
+  bool launch_pty{false};
+
+  if (IsCrun()) {
+    auto* meta = dynamic_cast<CrunMetaInExecution*>(m_meta_.get());
+    launch_pty = task.interactive_meta().pty();
+    CRANE_DEBUG("Launch crun task #{} pty: {}", task.task_id(), launch_pty);
+
+    if (launch_pty) {
+      child_pid = forkpty(&meta->msg_fd, nullptr, nullptr, nullptr);
+    } else {
+      if (socketpair(AF_UNIX, SOCK_STREAM, 0, crun_io_sock_pair) != 0) {
+        CRANE_ERROR("Failed to create socket pair for task io forward: {}",
+                    strerror(errno));
+        return CraneErr::kSystemErr;
+      }
+      meta->msg_fd = crun_io_sock_pair[0];
+      child_pid = fork();
+    }
+  } else {
+    child_pid = fork();
+  }
+
+  if (child_pid == -1) {
+    CRANE_ERROR("fork() failed for task #{}: {}", task.task_id(),
+                strerror(errno));
+    return CraneErr::kSystemErr;
+  }
+
+  if (child_pid > 0) {  // Parent proc
+    m_pid_ = child_pid;
+    CRANE_DEBUG("Subprocess was created for task #{} pid: {}", task.task_id(),
+                m_pid_);
+
+    if (IsCrun()) {
+      auto* meta = dynamic_cast<CrunMetaInExecution*>(m_meta_.get());
+      g_cfored_manager->RegisterIOForward(task.interactive_meta().cfored_name(),
+                                          meta->msg_fd, launch_pty);
+    }
+
+    int ctrl_fd = ctrl_sock_pair[0];
+    close(ctrl_sock_pair[1]);
+    if (IsCrun() && !launch_pty) {
+      close(crun_io_sock_pair[1]);
+    }
+
+    bool ok;
+    FileInputStream istream(ctrl_fd);
+    FileOutputStream ostream(ctrl_fd);
+    CanStartMessage msg;
+    ChildProcessReady child_process_ready;
+
+    CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
+                task.task_id());
+
+    // Tell subprocess that the parent process is ready. Then the
+    // subprocess should continue to exec().
+    msg.set_ok(true);
+    ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
+    if (!ok) {
+      CRANE_ERROR("Failed to serialize msg to ostream: {}",
+                  strerror(ostream.GetErrno()));
+    }
+
+    if (ok) ok &= ostream.Flush();
+    if (!ok) {
+      CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}: {}",
+                  child_pid, task.task_id(), strerror(ostream.GetErrno()));
+      close(ctrl_fd);
+
+      // Communication failure caused by process crash or grpc error.
+      // Since now the parent cannot ask the child
+      // process to commit suicide, kill child process here and just return.
+      // The child process will be reaped in SIGCHLD handler and
+      // thus only ONE TaskStatusChange will be triggered!
+      err_before_exec = CraneErr::kProtobufError;
+      Kill(SIGKILL);
+      return CraneErr::kOk;
+    }
+
+    ok = ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream,
+                                          nullptr);
+    if (!ok || !msg.ok()) {
+      if (!ok)
+        CRANE_ERROR("Socket child endpoint failed: {}",
+                    strerror(istream.GetErrno()));
+      if (!msg.ok())
+        CRANE_ERROR("False from subprocess {} of task #{}", child_pid,
+                    task.task_id());
+      close(ctrl_fd);
+
+      // See comments above.
+      err_before_exec = CraneErr::kProtobufError;
+      Kill(SIGKILL);
+      return CraneErr::kOk;
+    }
+
+    close(ctrl_fd);
+    return CraneErr::kOk;
+
+  } else {  // Child proc
+    SetChildProcessSignalHandler_();
+
+    CraneErr err = SetChildProcessProperty_();
+    if (err != CraneErr::kOk) std::abort();
+
+    close(ctrl_sock_pair[0]);
+    int ctrl_fd = ctrl_sock_pair[1];
+
+    FileInputStream istream(ctrl_fd);
+    FileOutputStream ostream(ctrl_fd);
+    CanStartMessage msg;
+    ChildProcessReady child_process_ready;
+    bool ok;
+
+    ok = ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
+    if (!ok || !msg.ok()) {
+      if (!ok) {
+        int err = istream.GetErrno();
+        fmt::print(stderr,
+                   "[Subprocess] Error: Failed to read socket from "
+                   "parent: {}\n",
+                   strerror(err));
+      }
+
+      if (!msg.ok()) {
+        fmt::print(stderr,
+                   "[Subprocess] Error: Parent process ask to suicide.\n");
+      }
+
+      std::abort();
+    }
+
+    if (IsBatch()) {
+      SetChildProcessBatchFd_();
+    } else if (IsCrun() && !launch_pty) {
+      close(crun_io_sock_pair[0]);
+
+      dup2(crun_io_sock_pair[1], 0);
+      dup2(crun_io_sock_pair[1], 1);
+      dup2(crun_io_sock_pair[1], 2);
+      close(crun_io_sock_pair[1]);
+    }
+
+    child_process_ready.set_ok(true);
+    ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
+    ok &= ostream.Flush();
+    if (!ok) {
+      fmt::print(stderr, "[Subprocess] Error: Failed to flush.\n");
+      std::abort();
+    }
+
+    close(ctrl_fd);
+
+    // Close stdin for batch tasks.
+    // If these file descriptors are not closed, a program like mpirun may
+    // keep waiting for the input from stdin or other fds and will never end.
+    if (IsBatch()) close(0);
+    util::os::CloseFdFrom(3);
+
+    // Prepare the command line arguments.
+    auto argv = GetChildProcessExecArgv_();
+    auto argv_ptrs = argv |
+                     std::ranges::views::transform(
+                         [](const std::string& s) { return s.c_str(); }) |
+                     std::ranges::to<std::vector<const char*>>();
+    argv_ptrs.push_back(nullptr);
+
+    // Exec
+    // fmt::print(stderr, "DEBUG\n");
+    // for (const auto& arg : argv) fmt::print(stderr, "\"{}\" ", arg);
+    execv(argv_ptrs[0], const_cast<char* const*>(argv_ptrs.data()));
+
+    // Error occurred since execv returned. At this point, errno is set.
+    // Ctld use SIGABRT to inform the client of this failure.
+    fmt::print(stderr, "[Subprocess] Error: execv failed: {}\n",
+               strerror(errno));
+    // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
+    //  exit codes
+    abort();
+  }
+}
+
+CraneErr ContainerInstance::Kill(int signum) {
+  using json = nlohmann::json;
+  if (m_pid_) {
+    // If m_pid_ not exists, no further operation.
+    int rc = 0;
+    std::array<char, 256> buffer;
+    std::string cmd, ret, status;
+    json jret;
+
+    // Check the state of the container
+    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeState);
+
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"),
+                                                  pclose);
+    if (!pipe) {
+      CRANE_TRACE(
+          "[Subprocess] Error in getting container status: popen() failed.");
+      goto ProcessKill;
+    }
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get()) !=
+           nullptr) {
+      ret += buffer.data();
+    }
+
+    jret = json::parse(std::move(ret), nullptr, false);
+    if (jret.is_discarded() || !jret.contains("status") ||
+        !jret["status"].is_string()) {
+      CRANE_TRACE("[Subprocess] Error in parsing container status: {}", cmd);
+      goto ProcessKill;
+    }
+
+    // Take action according to OCI container states, see:
+    // https://github.com/opencontainers/runtime-spec/blob/main/runtime.md#state
+    status = std::move(jret["status"]);
+    if (status == "creating") {
+      goto ProcessKill;
+    } else if (status == "created") {
+      goto ContainerDelete;
+    } else if (status == "running") {
+      goto ContainerKill;
+    } else if (status == "stopped") {
+      goto ContainerDelete;
+    } else {
+      CRANE_WARN("[Subprocess] Unknown container status received: {}", status);
+      goto ProcessKill;
+    }
+
+  ContainerKill:
+    // Try to stop gracefully.
+    // Note: Signum is configured in config.yaml instead of in the param.
+    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeKill);
+    rc = system(cmd.c_str());
+    if (rc) {
+      CRANE_TRACE(
+          "[Subprocess] Failed to kill container for task #{}: error in {}",
+          task.task_id(), cmd);
+    }
+
+  ContainerDelete:
+    // Delete the container
+    // Note: Admin could choose if --force is configured or not.
+    cmd = ParseOCICmdPattern_(g_config.Container.RuntimeDelete);
+    rc = system(cmd.c_str());
+    if (rc) {
+      CRANE_TRACE(
+          "[Subprocess] Failed to delete container for task #{}: error in {}",
+          task.task_id(), cmd);
+    }
+
+  ProcessKill:
+    // Kill runc process as the last resort.
+    // Note: If runc is launched in `detached` mode, this will not work.
+    rc = kill(-m_pid_, signum);
+    if (rc && (errno != ESRCH)) {
+      CRANE_TRACE("[Subprocess] Failed to kill pid {}. error: {}", m_pid_,
+                  strerror(errno));
+      return CraneErr::kSystemErr;
+    }
+
+    return CraneErr::kOk;
+  }
+
+  return CraneErr::kNonExistent;
+}
+
+CraneErr ContainerInstance::Cleanup() {
+  if (IsBatch() || IsCrun()) {
+    if (!m_temp_path_.empty())
+      g_thread_pool->detach_task(
+          [p = m_temp_path_]() { util::os::DeleteFolders(p); });
+  }
+
+  // Dummy return
+  return CraneErr::kOk;
+}
+
 CraneErr ProcessInstance::Prepare() {
+  // Write script content into file
   auto sh_path =
       g_config.CraneScriptDir / fmt::format("Crane-{}.sh", g_config.JobId);
 
@@ -242,13 +727,9 @@ CraneErr ProcessInstance::Prepare() {
 
   chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
 
-  // TODO: Currently we don't support arguments in batch scripts.
-  // m_arguments_ = std::list<std::string>{};
-  // FIXME: std::move
-  m_executable_path_ = sh_path.string();
-
-  // Prepare file output name for batch tasks.
+  // Write m_meta_
   if (IsBatch()) {
+    // Prepare file output name for batch tasks.
     /* Perform file name substitutions
      * %j - Job ID
      * %u - Username
@@ -257,24 +738,24 @@ CraneErr ProcessInstance::Prepare() {
     auto meta = std::make_unique<BatchMetaInExecution>();
     meta->parsed_output_file_pattern = ParseFilePathPattern_(
         task.batch_meta().output_file_pattern(), task.cwd());
-    absl::StrReplaceAll({{"%j", std::to_string(g_config.JobId)},
-                         {"%u", pwd.Username()},
-                         {"%x", task.name()}},
-                        &meta->parsed_output_file_pattern);
 
     // If -e / --error is not defined, leave
     // batch_meta.parsed_error_file_pattern empty;
     if (!task.batch_meta().error_file_pattern().empty()) {
       meta->parsed_error_file_pattern = ParseFilePathPattern_(
           task.batch_meta().error_file_pattern(), task.cwd());
-      absl::StrReplaceAll({{"%j", std::to_string(g_config.JobId)},
-                           {"%u", pwd.Username()},
-                           {"%x", task.name()}},
-                          &meta->parsed_error_file_pattern);
     }
 
     m_meta_ = std::move(meta);
+  } else {
+    m_meta_ = std::make_unique<CrunMetaInExecution>();
   }
+
+  m_meta_->parsed_sh_script_path = sh_path;
+  m_executable_ = sh_path.string();
+  m_env_ = GetChildProcessEnv_();
+  // TODO: Currently we don't support arguments in batch scripts.
+  // m_arguments_ = std::list<std::string>{};
 
   return CraneErr::kOk;
 }
@@ -418,15 +899,14 @@ CraneErr ProcessInstance::Spawn() {
       if (!ok) {
         int err = istream.GetErrno();
         fmt::print(stderr,
-                   "[Supervisor Subprocess] Error: Failed to read socket from "
+                   "[Subprocess] Error: Failed to read socket from "
                    "parent: {}\n",
                    strerror(err));
       }
 
       if (!msg.ok()) {
-        fmt::print(
-            stderr,
-            "[Supervisor Subprocess] Error: Parent process ask to suicide.\n");
+        fmt::print(stderr,
+                   "[Subprocess] Error: Parent process ask to suicide.\n");
       }
 
       std::abort();
@@ -447,7 +927,7 @@ CraneErr ProcessInstance::Spawn() {
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
     ok &= ostream.Flush();
     if (!ok) {
-      fmt::print(stderr, "[Supervisor Subprocess] Error: Failed to flush.\n");
+      fmt::print(stderr, "[Subprocess] Error: Failed to flush.\n");
       std::abort();
     }
 
@@ -460,7 +940,7 @@ CraneErr ProcessInstance::Spawn() {
     util::os::CloseFdFrom(3);
 
     // Prepare the command line arguments.
-    auto argv = PrepareChildProcessExec_();
+    auto argv = GetChildProcessExecArgv_();
     auto argv_ptrs = argv |
                      std::ranges::views::transform(
                          [](const std::string& s) { return s.c_str(); }) |
@@ -468,13 +948,11 @@ CraneErr ProcessInstance::Spawn() {
     argv_ptrs.push_back(nullptr);
 
     // Exec
-    // fmt::print(stderr, "DEBUG\n");
-    // for (const auto& arg : argv) fmt::print(stderr, "{} ", arg);
     execv(argv_ptrs[0], const_cast<char* const*>(argv_ptrs.data()));
 
     // Error occurred since execv returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.
-    fmt::print(stderr, "[Supervisor Subprocess] Error: execv failed: {}\n",
+    fmt::print(stderr, "[Subprocess] Error: execv failed: {}\n",
                strerror(errno));
     // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
     //  exit codes
@@ -580,7 +1058,7 @@ void TaskManager::Wait() {
 }
 
 void TaskManager::TaskStopAndDoStatusChange() {
-  CRANE_INFO("Task #{} stopped and is doing TaskStatusChange...",
+  CRANE_INFO("task #{} stopped and is doing TaskStatusChange...",
              m_instance_->task.task_id());
 
   switch (m_instance_->err_before_exec) {
@@ -643,30 +1121,6 @@ void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
   m_instance_.reset();
   if (!orphaned)
     g_craned_client->TaskStatusChangeAsync(new_status, exit_code, reason);
-}
-
-std::string ExecutionInterface::ParseFilePathPattern_(
-    const std::string& pattern, const std::string& cwd) {
-  std::string resolved_path_pattern;
-
-  if (pattern.empty()) {
-    // If file path is not specified, first set it to cwd.
-    resolved_path_pattern = fmt::format("{}/", cwd);
-  } else {
-    if (pattern[0] == '/')
-      // If output file path is an absolute path, do nothing.
-      resolved_path_pattern = pattern;
-    else
-      // If output file path is a relative path, prepend cwd to the path.
-      resolved_path_pattern = fmt::format("{}/{}", cwd, pattern);
-  }
-
-  // Path ends with a directory, append default stdout file name
-  // `Crane-<Job ID>.out` to the path.
-  if (absl::EndsWith(resolved_path_pattern, "/"))
-    resolved_path_pattern += fmt::format("Crane-{}.out", g_config.JobId);
-
-  return resolved_path_pattern;
 }
 
 std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync(
@@ -817,7 +1271,7 @@ void TaskManager::EvSigchldCb_() {
 }
 
 void TaskManager::EvTaskTimerCb_() {
-  CRANE_TRACE("Task #{} exceeded its time limit. Terminating it...",
+  CRANE_TRACE("task #{} exceeded its time limit. Terminating it...",
               g_config.JobId);
 
   // Sometimes, task finishes just before time limit.
@@ -826,7 +1280,7 @@ void TaskManager::EvTaskTimerCb_() {
   // That's why we need to check the existence of the task again in timer
   // callback, otherwise a segmentation fault will occur.
   if (!m_instance_) {
-    CRANE_TRACE("Task #{} has already been removed.", g_config.JobId);
+    CRANE_TRACE("task #{} has already been removed.", g_config.JobId);
     return;
   }
 
@@ -966,7 +1420,7 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
 
     LaunchExecution_();
     if (!m_instance_->GetPid()) {
-      CRANE_WARN("[Task #{}] Failed to launch process.]",
+      CRANE_WARN("[task #{}] Failed to launch process.]",
                  m_instance_->task.task_id());
       elem.pid_prom.set_value(std::unexpected(CraneErr::kGenericFailure));
     } else {

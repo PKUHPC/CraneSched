@@ -623,7 +623,7 @@ void GlobalVariableInit() {
   for (auto job_id : job_id_pid_map | std::ranges::views::keys) {
     task_ids_supervisor.emplace(job_id);
   }
-  CRANE_TRACE("[Supervisor] job {} still running.",
+  CRANE_TRACE("[Supervisor] job [{}] still running.",
               absl::StrJoin(task_ids_supervisor, ","));
 
   std::promise<crane::grpc::ConfigureCranedRequest> init_promise;
