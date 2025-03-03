@@ -95,7 +95,7 @@ enum ExitCodeEnum : uint16_t {
 }  // namespace ExitCode
 
 namespace Internal {
-constexpr std::array<std::string_view, uint16_t(CraneErrCode::__ERR_CODE_COUNT)> CraneErrStrArr = {
+constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)> CraneErrStrArr = {
         // 0 - 4
         "Success",
 
