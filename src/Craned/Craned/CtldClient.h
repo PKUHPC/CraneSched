@@ -49,10 +49,12 @@ class CtldClient {
   void InitChannelAndStub(const std::string& server_address);
 
   void SetCtldConnectedCb(std::function<void()> cb) {
+    absl::MutexLock lk(&m_cb_mutex_);
     m_on_ctld_connected_cb_ = std::move(cb);
   }
 
   void SetCtldDisconnectedCb(std::function<void()> cb) {
+    absl::MutexLock lk(&m_cb_mutex_);
     m_on_ctld_disconnected_cb_ = std::move(cb);
   }
 
@@ -88,6 +90,7 @@ class CtldClient {
 
   CranedId m_craned_id_;
 
+  absl::Mutex m_cb_mutex_;
   std::function<void()> m_on_ctld_connected_cb_;
   std::function<void()> m_on_ctld_disconnected_cb_;
 

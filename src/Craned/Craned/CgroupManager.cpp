@@ -261,9 +261,10 @@ CraneErr CgroupManager::Recover(
         cg_unique_ptr = CgroupManager::CreateOrOpen_(
             job_id, CgV2PreferredControllers, NO_CONTROLLER_FLAG, true);
       }
-      if (cg_unique_ptr == nullptr)
+      if (cg_unique_ptr == nullptr) {
         CRANE_ERROR("Failed to reopen cgroup for job #{}.", job_id);
-      cg_unique_ptr.reset();
+      }
+      // cg_unique_ptr.reset();
     }
   }
   return CraneErr::kOk;
@@ -659,7 +660,7 @@ CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
   std::unordered_map cg_ino_job_id_map =
       GetCgJobIdMapCgroupV2(root_cgroup_path);
   bool init_ebpf = !bpf_runtime_info.Valid();
-  if (!init_ebpf) {
+  if (init_ebpf) {
     if (!bpf_runtime_info.InitializeBpfObj())
       return std::unexpected(CraneErr::kEbpfError);
   }
@@ -1188,8 +1189,6 @@ CgroupV2::CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id,
 #endif
 
 CgroupV2::~CgroupV2() {
-  // Remove cgroup before remove map entry.
-  m_cgroup_info_.~Cgroup();
 #ifdef CRANE_ENABLE_BPF
   if (!m_cgroup_bpf_devices.empty()) {
     EraseBpfDeviceMap();

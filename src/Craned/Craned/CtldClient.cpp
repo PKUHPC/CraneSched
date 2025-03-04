@@ -160,10 +160,12 @@ void CtldClient::AsyncSendThread_() {
 
     if (!prev_conn_state && connected) {
       CRANE_TRACE("Channel to CraneCtlD is connected.");
-      m_on_ctld_connected_cb_();
+      absl::MutexLock lk(&m_cb_mutex_);
+      if (m_on_ctld_connected_cb_) m_on_ctld_connected_cb_();
     } else if (!connected && prev_conn_state) {
       CRANE_TRACE("Channel to CraneCtlD is disconnected.");
-      m_on_ctld_disconnected_cb_();
+      absl::MutexLock lk(&m_cb_mutex_);
+      if (m_on_ctld_disconnected_cb_) m_on_ctld_disconnected_cb_();
     }
     prev_conn_state = connected;
 

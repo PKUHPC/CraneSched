@@ -723,10 +723,15 @@ void StartServer() {
   util::os::CheckProxyEnvironmentVariable();
   g_server->Wait();
 
+  // CltdClient will call g_server->SetReady() in cb,set it to empty
+  g_ctld_client->SetCtldConnectedCb({});
+  g_ctld_client->SetCtldDisconnectedCb({});
+  g_server.reset();
+
   // Free global variables
   g_job_mgr->Wait();
   g_job_mgr.reset();
-  g_server.reset();
+
   g_ctld_client.reset();
   g_supervisor_keeper.reset();
   g_plugin_client.reset();
