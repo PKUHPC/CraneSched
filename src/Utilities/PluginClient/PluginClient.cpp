@@ -181,18 +181,18 @@ grpc::Status PluginClient::SendDestroyCgroupHook_(
   return m_stub_->DestroyCgroupHook(context, *request, &reply);
 }
 
-grpc::Status PluginClient::InsertEventHook_(grpc::ClientContext* context,
+grpc::Status PluginClient::NodeEventHook_(grpc::ClientContext* context,
                                           google::protobuf::Message* msg) {
-  using crane::grpc::plugin::InsertEventHookReply;
-  using crane::grpc::plugin::InsertEventHookRequest;
+  using crane::grpc::plugin::NodeEventHookReply;
+  using crane::grpc::plugin::NodeEventHookRequest;
 
-  auto* request = dynamic_cast<InsertEventHookRequest*>(msg);
+  auto* request = dynamic_cast<NodeEventHookRequest*>(msg);
   CRANE_ASSERT(request != nullptr);
 
-  InsertEventHookReply reply;
+  NodeEventHookReply reply;
 
-  CRANE_TRACE("[Plugin] Sending InsertEventHook");
-  return m_stub_->InsertEventHook(context, *request, &reply);
+  CRANE_TRACE("[Plugin] Sending NodeEventHook");
+  return m_stub_->NodeEventHook(context, *request, &reply);
 }
 
 void PluginClient::StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks) {
@@ -251,8 +251,8 @@ void PluginClient::DestroyCgroupHookAsync(task_id_t task_id,
   m_event_queue_.enqueue(std::move(e));
 }
 
-void PluginClient::InsertEventHookAsync(std::vector<crane::grpc::EventInfo> events) {
-  auto request = std::make_unique<crane::grpc::plugin::InsertEventHookRequest>();
+void PluginClient::NodeEventHookAsync(std::vector<crane::grpc::plugin::CranedEventInfo> events) {
+  auto request = std::make_unique<crane::grpc::plugin::NodeEventHookRequest>();
   auto* event_list = request->mutable_event_info_list();
   for (auto& event : events) {
     auto* event_it = event_list->Add();

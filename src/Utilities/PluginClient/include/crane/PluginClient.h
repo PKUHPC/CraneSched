@@ -67,7 +67,7 @@ class PluginClient {
   // Launched by Ctld
   void StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
   void EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
-  void InsertEventHookAsync(std::vector<crane::grpc::EventInfo> events);
+  void NodeEventHookAsync(std::vector<crane::grpc::plugin::CranedEventInfo> events);
 
   // Launched by Craned
   void CreateCgroupHookAsync(
@@ -88,7 +88,7 @@ class PluginClient {
                                      google::protobuf::Message* msg);
   grpc::Status SendDestroyCgroupHook_(grpc::ClientContext* context,
                                       google::protobuf::Message* msg);
-  grpc::Status InsertEventHook_(grpc::ClientContext* context,
+  grpc::Status NodeEventHook_(grpc::ClientContext* context,
                                       google::protobuf::Message* msg);
 
   void AsyncSendThread_();
@@ -108,7 +108,7 @@ class PluginClient {
                               &PluginClient::SendEndHook_,
                               &PluginClient::SendCreateCgroupHook_,
                               &PluginClient::SendDestroyCgroupHook_,
-                              &PluginClient::InsertEventHook_}};
+                              &PluginClient::NodeEventHook_}};
 };
 
 }  // namespace plugin

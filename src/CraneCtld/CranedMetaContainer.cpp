@@ -543,11 +543,14 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
 crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     const crane::grpc::ModifyCranedStateRequest& request) {
   crane::grpc::ModifyCranedStateReply reply;
-  std::vector<crane::grpc::EventInfo> event_list;
-  crane::grpc::EventInfo event;
-  event.set_cluster_name(g_config.CraneClusterName);
-  event.set_uid(request.uid());
-  event.set_reason(request.reason());
+  std::vector<crane::grpc::plugin::CranedEventInfo> event_list;
+  crane::grpc::plugin::CranedEventInfo event;
+
+  if (g_config.Plugin.Enabled) {
+    event.set_cluster_name(g_config.CraneClusterName);
+    event.set_uid(request.uid());
+    event.set_reason(request.reason());
+  }
 
   for (auto craned_id : request.craned_ids()) {
     if (!craned_meta_map_.Contains(craned_id)) {
@@ -560,18 +563,18 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
 
     if (craned_meta->alive) {
       if (request.new_state() == crane::grpc::CranedControlState::CRANE_DRAIN) {
-        if (craned_meta->drain != true) {
+        if (craned_meta->drain != true && g_config.Plugin.Enabled) {
           //insert event info
           event.set_node_name(craned_id);
           event.set_state(crane::grpc::CranedControlState::CRANE_DRAIN);
           //set now time       
-          auto now = std::chrono::system_clock::now();
-          auto duration = now.time_since_epoch();
-          auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
-          auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count() % 1000000000;
+          absl::Time now = absl::Now();
+          int64_t seconds = absl::ToUnixSeconds(now);
+          int32_t nanos = static_cast<int32_t>(absl::ToUnixNanos(now) % 1000000000);
+      
           auto timestamp = std::make_unique<::google::protobuf::Timestamp>();
           timestamp->set_seconds(seconds);
-          timestamp->set_nanos(static_cast<int>(nanos));
+          timestamp->set_nanos(nanos);
           event.set_allocated_start_time(timestamp.release());
           event_list.emplace_back(event);
         }
@@ -580,18 +583,18 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
         reply.add_modified_nodes(craned_id);
       } else if (request.new_state() ==
                  crane::grpc::CranedControlState::CRANE_NONE) {
-        if (craned_meta->drain != false) {
+        if (craned_meta->drain != false && g_config.Plugin.Enabled) {
           //insert event info
           event.set_node_name(craned_id);
           event.set_state(crane::grpc::CranedControlState::CRANE_NONE);
           //set now time       
-          auto now = std::chrono::system_clock::now();
-          auto duration = now.time_since_epoch();
-          auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration).count();
-          auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count() % 1000000000;
+          absl::Time now = absl::Now();
+          int64_t seconds = absl::ToUnixSeconds(now);
+          int32_t nanos = static_cast<int32_t>(absl::ToUnixNanos(now) % 1000000000);
+      
           auto timestamp = std::make_unique<::google::protobuf::Timestamp>();
           timestamp->set_seconds(seconds);
-          timestamp->set_nanos(static_cast<int>(nanos));
+          timestamp->set_nanos(nanos);
           event.set_allocated_start_time(timestamp.release());
           event_list.emplace_back(event);
         }
@@ -609,7 +612,7 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   }
 
   if (g_config.Plugin.Enabled && !event_list.empty()) {
-    g_plugin_client->InsertEventHookAsync(std::move(event_list));
+    g_plugin_client->NodeEventHookAsync(std::move(event_list));
   }
   return reply;
 }
