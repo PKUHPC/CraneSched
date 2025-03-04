@@ -588,6 +588,10 @@ CraneErr ContainerInstance::Spawn() {
     if (IsBatch()) close(0);
     util::os::CloseFdFrom(3);
 
+    // Set env just in case OCI requires some.
+    // Real env in container is handled in ModifyOCIBundle_
+    SetChildProcessEnv_();
+
     // Prepare the command line arguments.
     auto argv = GetChildProcessExecArgv_();
     auto argv_ptrs = argv |
@@ -938,6 +942,9 @@ CraneErr ProcessInstance::Spawn() {
     // keep waiting for the input from stdin or other fds and will never end.
     if (IsBatch()) close(0);
     util::os::CloseFdFrom(3);
+
+    // Apply environment variables
+    SetChildProcessEnv_();
 
     // Prepare the command line arguments.
     auto argv = GetChildProcessExecArgv_();
