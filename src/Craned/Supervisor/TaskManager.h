@@ -95,7 +95,7 @@ class ExecutionInterface {
   std::string m_executable_;  // bash -c "m_executable_ [m_arguments_...]"
 
   // NOTE: This is not used currently.
-  // As we are using bash -c to launch process, all arguments can be passed in
+  // As we are using `bash -c` to launch process, all arguments can be passed in
   // m_executable_.
   std::vector<std::string> m_arguments_;
 };

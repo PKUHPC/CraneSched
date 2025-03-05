@@ -18,6 +18,7 @@
 
 #include "TaskManager.h"
 
+#include <absl/strings/str_split.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <grp.h>
 #include <pty.h>
@@ -310,20 +311,25 @@ CraneErr ContainerInstance::ModifyOCIBundleConfig_(
     // Set process object, see:
     // https://github.com/opencontainers/runtime-spec/blob/main/config.md#process
     auto& process = config["process"];
+
     // Set pass-through mode.
     // TODO: Check if interactive task is supported.
     process["terminal"] = false;
+
     // Write environment variables in IEEE format.
-    process["env"] = [this]() {
-      auto env_str = std::vector<std::string>();
-      for (const auto& [name, value] : m_env_)
-        env_str.emplace_back(fmt::format("{}={}", name, value));
-      return env_str;
-    }();
-    process["args"] = {
-        task.batch_meta().interpreter(),
-        parsed_sh_mounted_path,
-    };
+    std::vector<std::string> env_list;
+    for (const auto& [name, value] : m_env_)
+      env_list.emplace_back(fmt::format("{}={}", name, value));
+    process["env"] = env_list;
+
+    // For container, we use `/bin/sh` as the default interpreter.
+    std::string real_exe = "/bin/sh";
+    if (IsBatch() && !task.batch_meta().interpreter().empty())
+      real_exe = task.batch_meta().interpreter();
+
+    std::vector<std::string> args = absl::StrSplit(real_exe, ' ');
+    args.emplace_back(std::move(parsed_sh_mounted_path));
+    process["args"] = args;
   } catch (json::exception& e) {
     CRANE_ERROR("Failed to generate bundle config for task #{}: {}",
                 task.task_id(), e.what());
@@ -756,7 +762,14 @@ CraneErr ProcessInstance::Prepare() {
   }
 
   m_meta_->parsed_sh_script_path = sh_path;
+
+  // If interpreter is not set, let system decide.
   m_executable_ = sh_path.string();
+  if (IsBatch() && !task.batch_meta().interpreter().empty()) {
+    m_executable_ =
+        fmt::format("{} {}", task.batch_meta().interpreter(), sh_path.string());
+  }
+
   m_env_ = GetChildProcessEnv_();
   // TODO: Currently we don't support arguments in batch scripts.
   // m_arguments_ = std::list<std::string>{};
@@ -955,6 +968,8 @@ CraneErr ProcessInstance::Spawn() {
     argv_ptrs.push_back(nullptr);
 
     // Exec
+    // fmt::print(stderr, "DEBUG\n");
+    // for (const auto& arg : argv) fmt::print(stderr, "\"{}\" ", arg);
     execv(argv_ptrs[0], const_cast<char* const*>(argv_ptrs.data()));
 
     // Error occurred since execv returned. At this point, errno is set.
