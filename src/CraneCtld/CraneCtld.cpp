@@ -465,6 +465,29 @@ void ParseConfig(int argc, char** argv) {
             }
           }
 
+          if (partition["AllowedAccounts"] &&
+              !partition["AllowedAccounts"].IsNull()) {
+            auto allowed_accounts_str =
+                partition["AllowedAccounts"].as<std::string>();
+            std::vector<std::string> allowed_accounts =
+                absl::StrSplit(allowed_accounts_str.data(), ",");
+            for (const auto& account_name : allowed_accounts) {
+              part.allowed_accounts.insert(absl::StripAsciiWhitespace(account_name).data());
+            }
+          }
+
+          if (partition["DeniedAccounts"] && !partition["DeniedAccounts"].IsNull()) {
+            auto denied_accounts_str = partition["DeniedAccounts"].as<std::string>();
+            std::vector<std::string> denied_accounts = absl::StrSplit(denied_accounts_str, ",");
+            for (const auto& account_name : denied_accounts) {
+              part.denied_accounts.insert(absl::StripAsciiWhitespace(account_name).data());
+            }
+
+            if (partition["AllowedAccounts"] &&
+              !partition["AllowedAccounts"].IsNull())
+              CRANE_WARN("Hint: When using AllowedAccounts, DeniedAccounts will not take effect.");
+          }
+
           if (partition["DefaultMemPerCpu"] &&
               !partition["DefaultMemPerCpu"].IsNull()) {
             part.default_mem_per_cpu =

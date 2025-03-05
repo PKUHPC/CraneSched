@@ -296,6 +296,9 @@ message PartitionInfo {
   ResourceView res_total = 6;
   ResourceView res_avail = 7;
   ResourceView res_alloc = 8;
+
+  repeated string allowed_accounts = 9;
+  repeated string denied_accounts = 10;
 }
 
 message CranedInfo {
@@ -412,6 +415,8 @@ enum ErrCode {
 
   ERR_MAX_JOB_COUNT_PER_USER = 65;
   ERR_USER_NO_PRIVILEGE = 66;
+  ERR_NOT_IN_ALLOWED_LIST = 67;  // The current account is not in the allowed account list for the partition.
+  ERR_IN_DENIED_LIST = 68;  // The current account has been explicitly added to the deny list for the partition.
 }
 
 enum EntityType {

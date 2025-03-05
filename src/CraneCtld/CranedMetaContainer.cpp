@@ -284,9 +284,13 @@ void CranedMetaContainer::InitFromConfig(const Config& config) {
     part_meta.partition_global_meta.res_total_inc_dead = part_res;
     part_meta.partition_global_meta.node_cnt = part_meta.craned_ids.size();
     part_meta.partition_global_meta.nodelist_str = partition.nodelist_str;
+    part_meta.partition_global_meta.allowed_accounts =
+        partition.allowed_accounts;
+    part_meta.partition_global_meta.denied_accounts = partition.denied_accounts;
 
     CRANE_DEBUG(
-        "partition [{}]'s Global resource now: (cpu: {}, mem: {}, gres: {}). "
+        "partition [{}]'s Global resource now: (cpu: {}, mem: {}, "
+        "gres: {}). "
         "It has {} craneds.",
         part_name,
         part_meta.partition_global_meta.res_total_inc_dead.CpuCount(),
@@ -347,7 +351,16 @@ CranedMetaContainer::QueryAllPartitionInfo() {
     part_info->set_total_nodes(part_meta->partition_global_meta.node_cnt);
     part_info->set_alive_nodes(
         part_meta->partition_global_meta.alive_craned_cnt);
-
+    auto* allowed_accounts = part_info->mutable_allowed_accounts();
+    for (const auto& account_name :
+         part_meta->partition_global_meta.allowed_accounts) {
+      allowed_accounts->Add()->assign(account_name);
+    }
+    auto* denied_accounts = part_info->mutable_denied_accounts();
+    for (const auto& account_name :
+         part_meta->partition_global_meta.denied_accounts) {
+      denied_accounts->Add()->assign(account_name);
+    }
     *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
         part_meta->partition_global_meta.res_total);
     *part_info->mutable_res_avail() = static_cast<crane::grpc::ResourceView>(
@@ -379,7 +392,16 @@ crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
   part_info->set_name(part_meta->partition_global_meta.name);
   part_info->set_total_nodes(part_meta->partition_global_meta.node_cnt);
   part_info->set_alive_nodes(part_meta->partition_global_meta.alive_craned_cnt);
-
+  auto* allowed_accounts = part_info->mutable_allowed_accounts();
+  for (const auto& account_name :
+       part_meta->partition_global_meta.allowed_accounts) {
+    allowed_accounts->Add()->assign(account_name);
+  }
+  auto* denied_accounts = part_info->mutable_denied_accounts();
+  for (const auto& account_name :
+       part_meta->partition_global_meta.denied_accounts) {
+    denied_accounts->Add()->assign(account_name);
+  }
   if (part_meta->partition_global_meta.alive_craned_cnt > 0)
     part_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
   else
@@ -572,6 +594,73 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     }
   }
   return reply;
+}
+
+CraneExpected<void> CranedMetaContainer::ModifyPartitionAcl(
+    const std::string& partition_name, bool is_allowed_list,
+    std::unordered_set<std::string>&& accounts) {
+  CraneExpected<void> result{};
+
+  auto part_metas_map = partition_metas_map_.GetMapSharedPtr();
+
+  const auto part_meta_iter = part_metas_map->find(partition_name);
+
+  if (part_meta_iter == part_metas_map->end())
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
+
+  auto part_meta = part_meta_iter->second.GetExclusivePtr();
+  auto& allowed_accounts = part_meta->partition_global_meta.allowed_accounts;
+  auto& denied_accounts = part_meta->partition_global_meta.denied_accounts;
+
+  if (is_allowed_list) {
+    allowed_accounts = std::move(accounts);
+  } else {
+    denied_accounts = std::move(accounts);
+  }
+
+  return result;
+}
+
+CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
+    const std::string& partition_name, const std::string& account_name) {
+  auto part_metas_map = partition_metas_map_.GetMapSharedPtr();
+
+  const auto part_meta_iter = part_metas_map->find(partition_name);
+
+  if (part_meta_iter == part_metas_map->end()) {
+    CRANE_DEBUG(
+        "the partition {} does not exist, submission of the task is "
+        "prohibited.",
+        partition_name);
+    return std::unexpected(CraneErrCode::ERR_INVALID_PARTITION);
+  }
+
+  auto part_meta = part_meta_iter->second.GetExclusivePtr();
+  const auto& allowed_accounts =
+      part_meta->partition_global_meta.allowed_accounts;
+
+  const auto& denied_accounts =
+      part_meta->partition_global_meta.denied_accounts;
+
+  if (!allowed_accounts.empty()) {
+    if (!allowed_accounts.contains(account_name)) {
+      CRANE_DEBUG(
+          "The account {} is not in the AllowedAccounts of the partition {}"
+          "specified for the task, submission of the task is prohibited.",
+          account_name, partition_name);
+      return std::unexpected(CraneErrCode::ERR_NOT_IN_ALLOWED_LIST);
+    }
+  } else if (!denied_accounts.empty()) {
+    if (denied_accounts.contains(account_name)) {
+      CRANE_DEBUG(
+          "The account {} is in the DeniedAccounts of the partition {}"
+          "specified for the task, submission of the task is prohibited.",
+          account_name, partition_name);
+      return std::unexpected(CraneErrCode::ERR_IN_DENIED_LIST);
+    }
+  }
+
+  return {};
 }
 
 void CranedMetaContainer::AddDedicatedResource(
