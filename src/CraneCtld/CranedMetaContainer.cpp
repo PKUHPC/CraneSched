@@ -648,7 +648,7 @@ CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
           "The account {} is not in the AllowedAccounts of the partition {}"
           "specified for the task, submission of the task is prohibited.",
           account_name, partition_name);
-      return std::unexpected(CraneErrCode::ERR_ALLOWEDLIST_MISSING);
+      return std::unexpected(CraneErrCode::ERR_NOT_IN_ALLOWED_LIST);
     }
   } else if (!denied_accounts.empty()) {
     if (denied_accounts.contains(account_name)) {
@@ -656,7 +656,7 @@ CraneExpected<void> CranedMetaContainer::CheckIfAccountIsAllowedInPartition(
           "The account {} is in the DeniedAccounts of the partition {}"
           "specified for the task, submission of the task is prohibited.",
           account_name, partition_name);
-      return std::unexpected(CraneErrCode::ERR_DENYLIST_HIT);
+      return std::unexpected(CraneErrCode::ERR_IN_DENIED_LIST);
     }
   }
 

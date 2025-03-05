@@ -470,17 +470,17 @@ void ParseConfig(int argc, char** argv) {
             auto allowed_accounts_str =
                 partition["AllowedAccounts"].as<std::string>();
             std::vector<std::string> allowed_accounts =
-                absl::StrSplit(absl::StripAsciiWhitespace(allowed_accounts_str).data(), ",");
+                absl::StrSplit(allowed_accounts_str.data(), ",");
             for (const auto& account_name : allowed_accounts) {
-              part.allowed_accounts.insert(account_name);
+              part.allowed_accounts.insert(absl::StripAsciiWhitespace(account_name).data());
             }
           }
 
           if (partition["DeniedAccounts"] && !partition["DeniedAccounts"].IsNull()) {
             auto denied_accounts_str = partition["DeniedAccounts"].as<std::string>();
-            std::vector<std::string> denied_accounts = absl::StrSplit(absl::StripAsciiWhitespace(denied_accounts_str).data(), ",");
+            std::vector<std::string> denied_accounts = absl::StrSplit(denied_accounts_str, ",");
             for (const auto& account_name : denied_accounts) {
-              part.denied_accounts.insert(account_name);
+              part.denied_accounts.insert(absl::StripAsciiWhitespace(account_name).data());
             }
           }
 
