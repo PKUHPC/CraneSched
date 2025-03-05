@@ -396,7 +396,7 @@ message ModifyPartitionAclRequest {
 
 message ModifyPartitionAclReply {
   bool ok = 1;
-  ErrCode err_code = 2;
+  ErrCode code = 2;
 }
 
 message MigrateSshProcToCgroupRequest {

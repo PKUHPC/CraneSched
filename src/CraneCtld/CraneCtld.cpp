@@ -482,6 +482,10 @@ void ParseConfig(int argc, char** argv) {
             for (const auto& account_name : denied_accounts) {
               part.denied_accounts.insert(absl::StripAsciiWhitespace(account_name).data());
             }
+
+            if (partition["AllowedAccounts"] &&
+              !partition["AllowedAccounts"].IsNull())
+              CRANE_WARN("Hint: When using AllowedAccounts, DeniedAccounts will not take effect.");
           }
 
           if (partition["DefaultMemPerCpu"] &&

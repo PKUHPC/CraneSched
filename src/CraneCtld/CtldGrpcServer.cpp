@@ -271,7 +271,7 @@ grpc::Status CraneCtldServiceImpl::ModifyPartitionAcl(
 
   if (!result) {
     response->set_ok(false);
-    response->set_err_code(result.error());
+    response->set_code(result.error());
     return grpc::Status::OK;
   }
 
@@ -280,7 +280,7 @@ grpc::Status CraneCtldServiceImpl::ModifyPartitionAcl(
 
   if (!result) {
     response->set_ok(false);
-    response->set_err_code(result.error());
+    response->set_code(result.error());
   } else {
     response->set_ok(true);
   }
