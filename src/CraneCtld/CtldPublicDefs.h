@@ -701,10 +701,13 @@ struct Qos {
   uint32_t reference_count = 0;
   uint32_t priority;
   uint32_t max_jobs_per_user;
+  uint32_t max_jobs_per_account;
   uint32_t max_running_tasks_per_user;
   absl::Duration max_time_limit_per_task;
   uint32_t max_cpus_per_user;
   uint32_t max_cpus_per_account;
+  uint32_t max_submit_jobs_per_user;
+  uint32_t max_submit_jobs_per_account;
 
   static constexpr const char* FieldStringOfDeleted() { return "deleted"; }
   static constexpr const char* FieldStringOfName() { return "name"; }
@@ -718,6 +721,9 @@ struct Qos {
   static constexpr const char* FieldStringOfMaxJobsPerUser() {
     return "max_jobs_per_user";
   }
+  static constexpr const char* FieldStringOfMaxJobsPerAccount() {
+    return "max_jobs_per_account";
+  }
   static constexpr const char* FieldStringOfMaxTimeLimitPerTask() {
     return "max_time_limit_per_task";
   }
@@ -726,6 +732,12 @@ struct Qos {
   }
   static constexpr const char* FieldStringOfMaxCpusPerAccount() {
     return "max_cpus_per_account";
+  }
+  static constexpr const char* FieldStringOfMaxSubmitJobsPerUser() {
+    return "max_submit_jobs_per_user";
+  }
+  static constexpr const char* FieldStringOfMaxSubmitJobsPerAccount() {
+    return "max_submit_jobs_per_account";
   }
 };
 
