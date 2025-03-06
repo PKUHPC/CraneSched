@@ -43,6 +43,10 @@ bool TaskInstance::IsCalloc() const {
              crane::grpc::Calloc;
 }
 
+CrunMetaInTaskInstance* TaskInstance::GetCrunMeta() const {
+  return dynamic_cast<CrunMetaInTaskInstance*>(this->meta.get());
+}
+
 EnvMap TaskInstance::GetTaskEnvMap() const {
   std::unordered_map<std::string, std::string> env_map;
   // Crane Env will override user task env;
@@ -89,15 +93,19 @@ EnvMap TaskInstance::GetTaskEnvMap() const {
 
     if (ia_meta.x11()) {
       auto const& x11_meta = ia_meta.x11_meta();
+
+      std::string target =
+          ia_meta.x11_meta().enable_forwarding() ? "" : x11_meta.target();
       env_map["DISPLAY"] =
-          fmt::format("{}:{}", x11_meta.target(), x11_meta.port());
+          fmt::format("{}:{}", target, this->GetCrunMeta()->x11_port - 6000);
+      env_map["XAUTHORITY"] = this->GetCrunMeta()->x11_auth_path;
     }
   }
 
   int64_t time_limit_sec = this->task.time_limit().seconds();
-  int hours = time_limit_sec / 3600;
-  int minutes = (time_limit_sec % 3600) / 60;
-  int seconds = time_limit_sec % 60;
+  int64_t hours = time_limit_sec / 3600;
+  int64_t minutes = (time_limit_sec % 3600) / 60;
+  int64_t seconds = time_limit_sec % 60;
   std::string time_limit =
       fmt::format("{:0>2}:{:0>2}:{:0>2}", hours, minutes, seconds);
   env_map.emplace("CRANE_TIMELIMIT", time_limit);
@@ -494,7 +502,7 @@ void TaskManager::Wait() {
 }
 
 CraneErrCode TaskManager::KillProcessInstance_(const ProcessInstance* proc,
-                                           int signum) {
+                                               int signum) {
   // Todo: Add timer which sends SIGTERM for those tasks who
   //  will not quit when receiving SIGINT.
   if (proc) {
@@ -519,7 +527,7 @@ void TaskManager::SetSigintCallback(std::function<void()> cb) {
 }
 
 CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
-                                              ProcessInstance* process) {
+                                                  ProcessInstance* process) {
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -546,6 +554,36 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     return CraneErrCode::ERR_CGROUP;
   }
 
+  if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
+    auto* inst_crun_meta = instance->GetCrunMeta();
+    const PasswordEntry& pwd_entry = instance->pwd_entry;
+
+    inst_crun_meta->x11_auth_path =
+        fmt::sprintf("%s/.crane/xauth/.Xauthority-XXXXXX", pwd_entry.HomeDir());
+
+    bool ok = util::os::CreateFoldersForFileEx(
+        inst_crun_meta->x11_auth_path, pwd_entry.Uid(), pwd_entry.Gid(), 0700);
+    if (!ok) {
+      CRANE_ERROR("Failed to create xauth source file for task #{}",
+                  instance->task.task_id());
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+
+    // Default file permission is 0600.
+    int xauth_fd = mkstemp(inst_crun_meta->x11_auth_path.data());
+    if (xauth_fd == -1) {
+      CRANE_ERROR("mkstemp() for xauth file failed: {}\n", strerror(errno));
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+
+    int ret =
+        fchown(xauth_fd, instance->pwd_entry.Uid(), instance->pwd_entry.Gid());
+    if (ret == -1) {
+      CRANE_ERROR("fchown() for xauth file failed: {}\n", strerror(errno));
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+  }
+
   if (socketpair(AF_UNIX, SOCK_STREAM, 0, ctrl_sock_pair) != 0) {
     CRANE_ERROR("[Task #{}] Failed to create socket pair: {}",
                 instance->task.task_id(), strerror(errno));
@@ -559,6 +597,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   if (instance->IsCrun()) {
     auto* crun_meta =
         dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
+
     launch_pty = instance->task.interactive_meta().pty();
     CRANE_DEBUG("[Task #{}] Launch crun pty: {}", instance->task.task_id(),
                 launch_pty);
@@ -597,6 +636,9 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     CRANE_DEBUG("[Task #{}] Subprocess was created with pid: {}",
                 instance->task.task_id(), child_pid);
 
+    CanStartMessage msg;
+    ChildProcessReady child_process_ready;
+
     if (instance->IsCrun()) {
       auto* meta = dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
       if (launch_pty) {
@@ -605,10 +647,35 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         meta->task_input_fd = crun_pty_fd;
         meta->task_output_fd = crun_pty_fd;
       }
-      g_cfored_manager->RegisterIOForward(
-          instance->task.interactive_meta().cfored_name(),
-          instance->task.task_id(), meta->task_input_fd, meta->task_output_fd,
-          launch_pty);
+
+      const auto& proto_ia_meta = instance->task.interactive_meta();
+      CforedManager::RegisterElem reg_elem{
+          .cfored = proto_ia_meta.cfored_name(),
+          .task_id = instance->task.task_id(),
+          .task_in_fd = meta->task_input_fd,
+          .task_out_fd = meta->task_output_fd,
+          .pty = launch_pty,
+          .x11_enable_forwarding = proto_ia_meta.x11() &&
+                                   proto_ia_meta.x11_meta().enable_forwarding(),
+      };
+
+      CforedManager::RegisterResult result;
+      g_cfored_manager->RegisterIOForward(reg_elem, &result);
+
+      instance->GetCrunMeta()->x11_port = result.x11_port;
+      if (reg_elem.x11_enable_forwarding) {
+        instance->GetCrunMeta()->x11_port = result.x11_port;
+        msg.set_x11_port(result.x11_port);
+      } else {
+        uint32_t port = proto_ia_meta.x11_meta().port();
+        instance->GetCrunMeta()->x11_port = port;
+        msg.set_x11_port(port);
+      }
+
+      CRANE_TRACE("Crun task #{} x11 enabled: {}, forwarding: {}, port: {}",
+                  reg_elem.task_id, proto_ia_meta.x11(),
+                  proto_ia_meta.x11_meta().enable_forwarding(),
+                  instance->GetCrunMeta()->x11_port);
       close(craned_crun_pipe[0]);
       close(crun_craned_pipe[1]);
     }
@@ -619,25 +686,6 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     bool ok;
     FileInputStream istream(ctrl_fd);
     FileOutputStream ostream(ctrl_fd);
-    CanStartMessage msg;
-    ChildProcessReady child_process_ready;
-
-    // Add event for stdout/stderr of the new subprocess
-    // struct bufferevent* ev_buf_event;
-    // ev_buf_event =
-    //     bufferevent_socket_new(m_ev_base_, fd, BEV_OPT_CLOSE_ON_FREE);
-    // if (!ev_buf_event) {
-    //   CRANE_ERROR(
-    //       "Error constructing bufferevent for the subprocess of task #!",
-    //       instance->task.task_id());
-    //   err = CraneErrCode::kLibEventError;
-    //   goto AskChildToSuicide;
-    // }
-    // bufferevent_setcb(ev_buf_event, EvSubprocessReadCb_, nullptr, nullptr,
-    //                   (void*)process.get());
-    // bufferevent_enable(ev_buf_event, EV_READ);
-    // bufferevent_disable(ev_buf_event, EV_WRITE);
-    // process->SetEvBufEvent(ev_buf_event);
 
     // Migrate the new subprocess to newly created cgroup
     if (!instance->cgroup->MigrateProcIn(child_pid)) {
@@ -852,40 +900,90 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     if (instance->task.type() == crane::grpc::Batch) close(0);
     util::os::CloseFdFrom(3);
 
+    // Set up x11 authority file if enabled.
+    if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
+      auto* inst_crun_meta = instance->GetCrunMeta();
+      const auto& proto_x11_meta = instance->task.interactive_meta().x11_meta();
+
+      // Overwrite x11_port with real value from parent process.
+      inst_crun_meta->x11_port = msg.x11_port();
+
+      std::string x11_target = proto_x11_meta.enable_forwarding()
+                                   ? g_config.Hostname
+                                   : proto_x11_meta.target();
+      std::string x11_disp_fmt =
+          proto_x11_meta.enable_forwarding() ? "%s/unix:%u" : "%s:%u";
+
+      std::string display = fmt::sprintf(x11_disp_fmt, x11_target,
+                                         inst_crun_meta->x11_port - 6000);
+
+      std::vector<const char*> xauth_argv{
+          "/usr/bin/xauth",
+          "-v",
+          "-f",
+          inst_crun_meta->x11_auth_path.c_str(),
+          "add",
+          display.c_str(),
+          "MIT-MAGIC-COOKIE-1",
+          proto_x11_meta.cookie().c_str(),
+      };
+      std::string xauth_cmd = absl::StrJoin(xauth_argv, ",");
+
+      xauth_argv.push_back(nullptr);
+
+      subprocess_s subprocess;
+      int result = subprocess_create(xauth_argv.data(), 0, &subprocess);
+      if (0 != result) {
+        fmt::print(
+            stderr,
+            "[Craned Subprocess] xauth subprocess creation failed: {}.\n",
+            strerror(errno));
+        std::abort();
+      }
+
+      auto buf = std::make_unique<char[]>(4096);
+      std::string xauth_stdout_str, xauth_stderr_str;
+
+      std::FILE* cmd_fd = subprocess_stdout(&subprocess);
+      while (std::fgets(buf.get(), 4096, cmd_fd) != nullptr)
+        xauth_stdout_str.append(buf.get());
+
+      cmd_fd = subprocess_stderr(&subprocess);
+      while (std::fgets(buf.get(), 4096, cmd_fd) != nullptr)
+        xauth_stderr_str.append(buf.get());
+
+      if (0 != subprocess_join(&subprocess, &result))
+        fmt::print(stderr, "[Craned Subprocess] xauth join failed.\n");
+
+      if (0 != subprocess_destroy(&subprocess))
+        fmt::print(stderr, "[Craned Subprocess] xauth destroy failed.\n");
+
+      if (result != 0) {
+        fmt::print(stderr, "[Craned Subprocess] xauth return with {}.\n",
+                   result);
+        fmt::print(stderr, "[Craned Subprocess] xauth stdout: {}\n",
+                   xauth_stdout_str);
+        fmt::print(stderr, "[Craned Subprocess] xauth stderr: {}\n",
+                   xauth_stderr_str);
+      }
+    }
+
     EnvMap task_env_map = instance->GetTaskEnvMap();
     EnvMap res_env_map =
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
 
-    if (clearenv()) {
-      fmt::print(stderr, "[Craned Subprocess] Warning: clearenv() failed.\n");
-    }
+    // clearenv() should be called just before fork!
+    if (clearenv())
+      fmt::print(stderr, "[Craned Subprocess] clearenv() failed.\n");
 
-    auto FuncSetEnv =
-        [](const std::unordered_map<std::string, std::string>& v) {
-          for (const auto& [name, value] : v)
-            if (setenv(name.c_str(), value.c_str(), 1))
-              fmt::print(
-                  stderr,
-                  "[Craned Subprocess] Warning: setenv() for {}={} failed.\n",
-                  name, value);
-        };
-
+    auto FuncSetEnv = [](const EnvMap& v) {
+      for (const auto& [name, value] : v)
+        if (setenv(name.c_str(), value.c_str(), 1))
+          fmt::print(stderr, "[Craned Subprocess] setenv() for {}={} failed.\n",
+                     name, value);
+    };
     FuncSetEnv(task_env_map);
     FuncSetEnv(res_env_map);
-
-    if (instance->IsCrun() && instance->task.interactive_meta().x11()) {
-      auto const& x11_meta = instance->task.interactive_meta().x11_meta();
-      std::string xauth_cmd =
-          fmt::format("xauth add {}:{} . {}", x11_meta.target(),
-                      x11_meta.port(), x11_meta.cookie());
-
-      // FIXME: Shell injection vulnerability
-      rc = std::system(xauth_cmd.c_str());
-      if (rc != 0) {
-        fmt::print(stderr, "[Craned Subprocess] Error: xauth failed.\n");
-        std::abort();
-      }
-    }
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
@@ -914,7 +1012,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                strerror(errno));
     // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
     //  exit codes
-    abort();
+    std::abort();
   }
 }
 
@@ -1215,7 +1313,8 @@ void TaskManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
 
     auto task_iter = m_pid_task_map_.find(elem.pid);
     if (task_iter == m_pid_task_map_.end())
-      elem.task_id_prom.set_value(std::unexpected(CraneErrCode::ERR_SYSTEM_ERR));
+      elem.task_id_prom.set_value(
+          std::unexpected(CraneErrCode::ERR_SYSTEM_ERR));
     else {
       TaskInstance* instance = task_iter->second;
       uint32_t task_id = instance->task.task_id();
@@ -1295,12 +1394,18 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
 
     TaskInstance* task_instance = iter->second.get();
 
-    if (elem.terminated_by_user) task_instance->cancelled_by_user = true;
-    if (elem.mark_as_orphaned) task_instance->orphaned = true;
-    if (elem.terminated_by_timeout) task_instance->terminated_by_timeout = true;
-
     int sig = SIGTERM;  // For BatchTask
     if (task_instance->IsCrun()) sig = SIGHUP;
+
+    if (elem.mark_as_orphaned) task_instance->orphaned = true;
+    if (elem.terminated_by_timeout) task_instance->terminated_by_timeout = true;
+    if (elem.terminated_by_user) {
+      task_instance->cancelled_by_user = true;
+
+      // If termination request is sent by user, send SIGKILL to ensure that
+      // even freezing processes will be terminated immediately.
+      sig = SIGKILL;
+    }
 
     if (!task_instance->processes.empty()) {
       // For an Interactive task with a process running or a Batch task, we

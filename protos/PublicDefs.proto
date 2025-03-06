@@ -221,6 +221,14 @@ message BatchTaskAdditionalMeta {
   string error_file_pattern = 4;
 }
 
+message X11Meta {
+  string target = 1;
+  uint32 port = 2;
+  string cookie = 3;
+
+  bool enable_forwarding = 4;
+}
+
 message InteractiveTaskAdditionalMeta {
   string cfored_name = 1;
   string sh_script = 2;
@@ -228,14 +236,8 @@ message InteractiveTaskAdditionalMeta {
   InteractiveTaskType interactive_type = 4;
 
   bool pty = 5;
+
   bool x11 = 6;
-
-  message X11Meta {
-    string target = 1;
-    uint32 port = 2;
-    string cookie = 3;
-  }
-
   X11Meta x11_meta = 7;
 }
 

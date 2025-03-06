@@ -73,8 +73,14 @@
 // fpm
 #include <fpm/fixed.hpp>
 
+// fmt
+#include <spdlog/fmt/bundled/printf.h>
+
 // Concurrent queue
 #include <concurrentqueue/concurrentqueue.h>
+
+// subprocess
+#include <subprocess/subprocess.h>
 
 // Include the header which defines the static log level
 #include "crane/Logger.h"

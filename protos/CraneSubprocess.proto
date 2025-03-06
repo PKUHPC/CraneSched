@@ -23,6 +23,7 @@ option go_package = "/protos/subprocess";
 
 message CanStartMessage {
   bool ok = 1;
+  uint32 x11_port = 2;
 }
 
 message ChildProcessReady {

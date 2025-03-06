@@ -19,6 +19,7 @@
 #include "crane/OS.h"
 
 #if defined(__linux__) || defined(__unix__)
+#  include <sys/stat.h>
 #  include <sys/sysinfo.h>
 #  include <sys/utsname.h>
 #elif defined(_WIN32)
@@ -57,6 +58,40 @@ bool CreateFoldersForFile(std::string const& p) {
       std::filesystem::create_directories(log_dir);
   } catch (const std::exception& e) {
     CRANE_ERROR("Failed to create folder for {}: {}", p, e.what());
+    return false;
+  }
+
+  return true;
+}
+
+bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
+                            mode_t permissions = 0755) {
+  namespace fs = std::filesystem;
+
+  try {
+    fs::path dir_path = p;
+    dir_path = dir_path.parent_path();
+
+    fs::path current_dir;
+    for (auto& part : dir_path) {
+      current_dir /= part;
+      if (!fs::exists(current_dir)) {
+        if (mkdir(current_dir.c_str(), permissions) != 0) {
+          CRANE_ERROR("Failed to create directory {}: {}", current_dir.c_str(),
+                      strerror(errno));
+          return false;
+        }
+      }
+
+      if (chown(current_dir.c_str(), owner, group) != 0) {
+        CRANE_ERROR("Failed to change ownership of directory {}: {}",
+                    current_dir.c_str(), strerror(errno));
+        return false;
+      }
+    }
+  } catch (const std::exception& e) {
+    CRANE_ERROR("Failed to create folder for {}: {}", p.c_str(),
+                e.what());
     return false;
   }
 

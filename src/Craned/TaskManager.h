@@ -119,9 +119,14 @@ struct BatchMetaInTaskInstance : MetaInTaskInstance {
 };
 
 struct CrunMetaInTaskInstance : MetaInTaskInstance {
+  ~CrunMetaInTaskInstance() override = default;
+
   int task_input_fd;
   int task_output_fd;
-  ~CrunMetaInTaskInstance() override = default;
+
+  std::string x11_target;
+  uint16_t x11_port;
+  std::string x11_auth_path;
 };
 
 // also arg for EvSigchldTimerCb_
@@ -141,16 +146,30 @@ struct TaskInstance {
     }
 
     if (this->IsCrun()) {
-      auto* ia_meta = dynamic_cast<CrunMetaInTaskInstance*>(meta.get());
-      close(ia_meta->task_input_fd);
+      auto* crun_meta = GetCrunMeta();
+
+      close(crun_meta->task_input_fd);
       // For crun pty job, avoid close same fd twice
-      if (ia_meta->task_output_fd != ia_meta->task_input_fd)
-        close(ia_meta->task_output_fd);
+      if (crun_meta->task_output_fd != crun_meta->task_input_fd)
+        close(crun_meta->task_output_fd);
+
+      if (!crun_meta->x11_auth_path.empty() &&
+          !absl::EndsWith(crun_meta->x11_auth_path, "XXXXXX")) {
+        std::error_code ec;
+        bool ok = std::filesystem::remove(crun_meta->x11_auth_path, ec);
+        if (!ok)
+          CRANE_ERROR("Failed to remove x11 auth {} for task #{}: {}",
+                      crun_meta->x11_auth_path, this->task.task_id(),
+                      ec.message());
+      }
     }
   }
 
   bool IsCrun() const;
   bool IsCalloc() const;
+
+  CrunMetaInTaskInstance* GetCrunMeta() const;
+
   EnvMap GetTaskEnvMap() const;
 
   crane::grpc::TaskToD task;

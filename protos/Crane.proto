@@ -626,6 +626,7 @@ message StreamCrunRequest {
     TASK_REQUEST = 0;
     TASK_COMPLETION_REQUEST = 1;
     TASK_IO_FORWARD = 2;
+    TASK_X11_FORWARD = 3;
   }
 
   message TaskReq {
@@ -643,12 +644,18 @@ message StreamCrunRequest {
     string msg = 2;
   }
 
+  message TaskX11ForwardReq {
+    uint32 task_id = 1;
+    bytes msg = 2;
+  }
+
   CrunRequestType type = 1;
 
   oneof payload {
     TaskReq payload_task_req = 2;
     TaskCompleteReq payload_task_complete_req = 3;
     TaskIOForwardReq payload_task_io_forward_req = 4;
+    TaskX11ForwardReq payload_task_x11_forward_req = 5;
   }
 }
 
@@ -660,6 +667,7 @@ message StreamCrunReply {
     TASK_COMPLETION_ACK_REPLY = 3;
     TASK_IO_FORWARD = 4;
     TASK_IO_FORWARD_READY = 5;
+    TASK_X11_FORWARD = 6;
   }
 
   message TaskIdReply {
@@ -689,6 +697,10 @@ message StreamCrunReply {
     string msg = 1;
   }
 
+  message TaskX11ForwardReply{
+    bytes msg = 1;
+  }
+
   CforedCrunReplyType type = 1 ;
 
   oneof payload {
@@ -698,6 +710,7 @@ message StreamCrunReply {
     TaskCompletionAckReply payload_task_completion_ack_reply = 5;
     TaskIOForwardReadyReply payload_task_io_forward_ready_reply = 6;
     TaskIOForwardReply payload_task_io_forward_reply = 7;
+    TaskX11ForwardReply payload_task_x11_forward_reply = 8;
   }
 }
 
@@ -706,6 +719,7 @@ message StreamTaskIORequest {
     CRANED_REGISTER = 0;
     CRANED_TASK_OUTPUT = 1;
     CRANED_UNREGISTER = 2;
+    CRANED_TASK_X11_OUTPUT = 3;
   }
 
   message CranedRegisterReq {
@@ -721,11 +735,17 @@ message StreamTaskIORequest {
     string craned_id = 1;
   }
 
+  message CranedTaskX11OutputReq {
+    uint32 task_id = 1;
+    bytes msg = 2;
+  }
+
   CranedRequestType type = 1;
   oneof payload {
     CranedRegisterReq payload_register_req = 2;
     CranedTaskOutputReq payload_task_output_req = 3;
     CranedUnRegisterReq payload_unregister_req = 4;
+    CranedTaskX11OutputReq payload_task_x11_output_req = 5;
   }
 }
 
@@ -734,6 +754,7 @@ message StreamTaskIOReply {
     CRANED_REGISTER_REPLY = 0;
     CRANED_TASK_INPUT = 1;
     CRANED_UNREGISTER_REPLY = 2;
+    CRANED_TASK_X11_INPUT = 3;
   }
 
   message CranedRegisterReply {
@@ -749,12 +770,18 @@ message StreamTaskIOReply {
     bool ok = 1;
   }
 
+  message CranedTaskX11InputReq {
+    uint32 task_id = 1;
+    bytes msg = 2;
+  }
+
   CranedReplyType type = 1;
 
   oneof payload {
     CranedRegisterReply payload_craned_register_reply = 2;
     CranedTaskInputReq payload_task_input_req = 3;
     CranedUnregisterReply payload_craned_unregister_reply = 4;
+    CranedTaskX11InputReq payload_task_x11_input_req = 5;
   }
 }
 
