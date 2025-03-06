@@ -502,7 +502,7 @@ void TaskManager::Wait() {
 }
 
 CraneErrCode TaskManager::KillProcessInstance_(const ProcessInstance* proc,
-                                           int signum) {
+                                               int signum) {
   // Todo: Add timer which sends SIGTERM for those tasks who
   //  will not quit when receiving SIGINT.
   if (proc) {
@@ -527,7 +527,7 @@ void TaskManager::SetSigintCallback(std::function<void()> cb) {
 }
 
 CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
-                                              ProcessInstance* process) {
+                                                  ProcessInstance* process) {
   using google::protobuf::io::FileInputStream;
   using google::protobuf::io::FileOutputStream;
   using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
@@ -566,21 +566,21 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     if (!ok) {
       CRANE_ERROR("Failed to create xauth source file for task #{}",
                   instance->task.task_id());
-      return CraneErr::kSystemErr;
+      return CraneErrCode::ERR_SYSTEM_ERR;
     }
 
     // Default file permission is 0600.
     int xauth_fd = mkstemp(inst_crun_meta->x11_auth_path.data());
     if (xauth_fd == -1) {
       CRANE_ERROR("mkstemp() for xauth file failed: {}\n", strerror(errno));
-      return CraneErr::kSystemErr;
+      return CraneErrCode::ERR_SYSTEM_ERR;
     }
 
     int ret =
         fchown(xauth_fd, instance->pwd_entry.Uid(), instance->pwd_entry.Gid());
     if (ret == -1) {
       CRANE_ERROR("fchown() for xauth file failed: {}\n", strerror(errno));
-      return CraneErr::kSystemErr;
+      return CraneErrCode::ERR_SYSTEM_ERR;
     }
   }
 
@@ -686,25 +686,6 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     bool ok;
     FileInputStream istream(ctrl_fd);
     FileOutputStream ostream(ctrl_fd);
-    CanStartMessage msg;
-    ChildProcessReady child_process_ready;
-
-    // Add event for stdout/stderr of the new subprocess
-    // struct bufferevent* ev_buf_event;
-    // ev_buf_event =
-    //     bufferevent_socket_new(m_ev_base_, fd, BEV_OPT_CLOSE_ON_FREE);
-    // if (!ev_buf_event) {
-    //   CRANE_ERROR(
-    //       "Error constructing bufferevent for the subprocess of task #!",
-    //       instance->task.task_id());
-    //   err = CraneErrCode::kLibEventError;
-    //   goto AskChildToSuicide;
-    // }
-    // bufferevent_setcb(ev_buf_event, EvSubprocessReadCb_, nullptr, nullptr,
-    //                   (void*)process.get());
-    // bufferevent_enable(ev_buf_event, EV_READ);
-    // bufferevent_disable(ev_buf_event, EV_WRITE);
-    // process->SetEvBufEvent(ev_buf_event);
 
     // Migrate the new subprocess to newly created cgroup
     if (!instance->cgroup->MigrateProcIn(child_pid)) {
@@ -1332,7 +1313,8 @@ void TaskManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
 
     auto task_iter = m_pid_task_map_.find(elem.pid);
     if (task_iter == m_pid_task_map_.end())
-      elem.task_id_prom.set_value(std::unexpected(CraneErrCode::ERR_SYSTEM_ERR));
+      elem.task_id_prom.set_value(
+          std::unexpected(CraneErrCode::ERR_SYSTEM_ERR));
     else {
       TaskInstance* instance = task_iter->second;
       uint32_t task_id = instance->task.task_id();
