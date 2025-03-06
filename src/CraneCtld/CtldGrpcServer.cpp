@@ -441,13 +441,9 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
   if (request->type() == crane::grpc::OperationType::Overwrite &&
       request->modify_field() ==
           crane::grpc::ModifyField::Partition) {  // SetAccountAllowedPartition
-    std::unordered_set<std::string> unique_set;
-    std::vector<std::string> partition_list;
-    partition_list.reserve(request->value_list_size());
-    for (const auto &partition_name : request->value_list()) {
-      if (unique_set.insert(partition_name).second)
-        partition_list.emplace_back(partition_name);
-    }
+    std::unordered_set<std::string> partition_list{
+        request->value_list().begin(), request->value_list().end()};
+
     auto rich_res = g_account_manager->SetAccountAllowedPartition(
         request->uid(), request->name(), std::move(partition_list),
         request->force());
@@ -456,15 +452,13 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
   } else if (request->type() == crane::grpc::OperationType::Overwrite &&
              request->modify_field() ==
                  crane::grpc::ModifyField::Qos) {  // SetAccountAllowedQos
-    std::unordered_set<std::string> unique_set;
-    std::vector<std::string> qos_list;
-    qos_list.reserve(request->value_list_size());
-    for (const auto &qos_name : request->value_list()) {
-      if (unique_set.insert(qos_name).second) qos_list.emplace_back(qos_name);
-    }
-
+    std::unordered_set<std::string> qos_list{request->value_list().begin(),
+                                             request->value_list().end()};
+    std::string default_qos = "";
+    if (!request->value_list().empty()) default_qos = request->value_list()[0];
     auto rich_res = g_account_manager->SetAccountAllowedQos(
-        request->uid(), request->name(), std::move(qos_list), request->force());
+        request->uid(), request->name(), default_qos, std::move(qos_list),
+        request->force());
     if (!rich_res)
       response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
   } else {  // other operations
@@ -547,8 +541,8 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
           }
         }
       } else if (request->type() == crane::grpc::OperationType::Overwrite) {
-        std::vector<std::string> partition_list{request->value_list().begin(),
-                                                request->value_list().end()};
+        std::unordered_set<std::string> partition_list{
+            request->value_list().begin(), request->value_list().end()};
         auto rich_res = g_account_manager->SetUserAllowedPartition(
             request->uid(), request->name(), request->account(),
             partition_list);
@@ -570,16 +564,15 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
           }
         }
       } else if (request->type() == crane::grpc::OperationType::Overwrite) {
-        std::unordered_set<std::string> unique_set;
-        std::vector<std::string> qos_list;
-        qos_list.reserve(request->value_list_size());
-        for (const auto &qos_name : request->value_list()) {
-          if (unique_set.insert(qos_name).second)
-            qos_list.emplace_back(qos_name);
-        }
+        std::unordered_set<std::string> qos_list{request->value_list().begin(),
+                                                 request->value_list().end()};
+        std::string default_qos = "";
+        if (!request->value_list().empty())
+          default_qos = request->value_list()[0];
         auto rich_res = g_account_manager->SetUserAllowedQos(
             request->uid(), request->name(), request->partition(),
-            request->account(), std::move(qos_list), request->force());
+            request->account(), default_qos, std::move(qos_list),
+            request->force());
         if (!rich_res)
           response->mutable_rich_error_list()->Add()->CopyFrom(
               rich_res.error());
