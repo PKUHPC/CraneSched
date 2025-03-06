@@ -833,19 +833,15 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
     const crane::grpc::BlockAccountOrUserRequest *request,
     crane::grpc::BlockAccountOrUserReply *response) {
   CraneExpected<void> res;
-  std::vector<std::string> entity_list;
+  std::unordered_set<std::string> entity_list{request->entity_list().begin(),
+                                              request->entity_list().end()};
 
   switch (request->entity_type()) {
   case crane::grpc::Account:
-
     if (request->entity_list().empty()) {
       const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
       for (const auto &[account_name, account] : *account_map_ptr) {
-        entity_list.emplace_back(account_name);
-      }
-    } else {
-      for (const auto &account_name : request->entity_list()) {
-        entity_list.emplace_back(account_name);
+        entity_list.insert(account_name);
       }
     }
 
@@ -860,15 +856,19 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
     }
     break;
   case crane::grpc::User:
-
     if (request->entity_list().empty()) {
-      const auto user_map_ptr = g_account_manager->GetAllAccountInfo();
-      for (const auto &[user_name, user] : *user_map_ptr) {
-        entity_list.emplace_back(user_name);
+      auto account_ptr =
+          g_account_manager->GetExistedAccountInfo(request->account());
+      if (!account_ptr) {
+        response->set_ok(false);
+        auto *new_err_record = response->mutable_rich_error_list()->Add();
+        new_err_record->set_description("result");
+        new_err_record->set_code(CraneErrCode::ERR_INVALID_ACCOUNT);
+        return grpc::Status::OK;
       }
-    } else {
-      for (const auto &user_name : request->entity_list()) {
-        entity_list.emplace_back(user_name);
+
+      for (const auto &user_name : account_ptr->users) {
+        entity_list.insert(user_name);
       }
     }
 
