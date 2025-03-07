@@ -802,7 +802,8 @@ inline bool CheckIfTimeLimitIsValid(absl::Duration d) {
 
 struct QosResource {
   ResourceView resource;
-  uint32_t jobs_per_user;
+  uint32_t jobs_count;
+  uint32_t submit_jobs_count;
 };
 
 }  // namespace Ctld

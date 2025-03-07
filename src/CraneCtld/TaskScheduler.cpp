@@ -326,6 +326,8 @@ bool TaskScheduler::Init() {
 
       if (!mark_task_as_failed && !CheckTaskValidity(task.get())) {
         CRANE_ERROR("CheckTaskValidity failed for task #{}", task_id);
+        g_account_meta_container->FreeQosSubmitResource(task->Username(),
+                                                        *task);
         mark_task_as_failed = true;
       }
 
@@ -572,6 +574,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
         {task->EndTime(), task->Resources()});
   }
 
+  g_account_meta_container->MallocQosResource(task->Username(), *task);
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
   LockGuard indexes_guard(&m_task_indexes_mtx_);
@@ -1880,7 +1883,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
   for (auto& task : pending_task_ptr_vec) {
     task->SetStatus(crane::grpc::Cancelled);
     task->SetEndTime(absl::Now());
-    g_account_meta_container->FreeQosResource(task->Username(), *task);
+    g_account_meta_container->FreeQosSubmitResource(task->Username(), *task);
 
     if (task->type == crane::grpc::Interactive) {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
@@ -1964,7 +1967,11 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     if (!g_embedded_db_client->AppendTasksToPendingAndAdvanceTaskIds(
             accepted_task_ptrs)) {
       CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
-      for (auto& pair : accepted_tasks) pair.second /*promise*/.set_value(0);
+      for (auto& pair : accepted_tasks) {
+        g_account_meta_container->FreeQosSubmitResource(pair.first->Username(),
+                                                        *pair.first);
+        pair.second /*promise*/.set_value(0);
+      }
       break;
     }
 
@@ -1994,8 +2001,12 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     if (rejected_actual_size == 0) break;
 
     CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
-    for (size_t i = 0; i < rejected_actual_size; i++)
+    for (size_t i = 0; i < rejected_actual_size; i++) {
+      g_account_meta_container->FreeQosSubmitResource(
+          rejected_tasks[i].first->Username(), *rejected_tasks[i].first);
       rejected_tasks[i].second.set_value(0);
+    }
+
   } while (false);
 }
 
@@ -2763,6 +2774,12 @@ void MinLoadFirst::NodeSelect(
     absl::Time expected_start_time;
     std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
 
+    bool ok =
+        g_account_meta_container->CheckQosResource(task->Username(), *task);
+    if (!ok) {
+      continue;
+    }
+
     {
       auto all_partitions_meta_map =
           g_meta_container->GetAllPartitionsMetaMapConstPtr();
@@ -2840,6 +2857,7 @@ void MinLoadFirst::NodeSelect(
             task->reservation, task->TaskId(),
             {task->EndTime(), task->Resources()});
       }
+      g_account_meta_container->MallocQosResource(task->Username(), *task);
       std::unique_ptr<TaskInCtld> moved_task;
 
       // Move task out of pending_task_map and insert it to the
@@ -3101,14 +3119,6 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   task->requested_node_res_view.GetAllocatableRes().memory_bytes = mem_bytes;
   task->requested_node_res_view.GetAllocatableRes().memory_sw_bytes = mem_bytes;
 
-  auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
-      task->Username(), task->account, task);
-  if (!check_qos_result) {
-    CRANE_ERROR("Failed to call CheckAndApplyQosLimitOnTask: {}",
-                CraneErrStr(check_qos_result.error()));
-    return check_qos_result;
-  }
-
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;
     bool ok = util::ParseHostList(task->TaskToCtld().nodelist(), &nodes);
@@ -3123,6 +3133,14 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
     if (!ok) return std::unexpected(CraneErrCode::ERR_INVAILD_EX_NODE_LIST);
 
     for (auto&& node : nodes) task->excluded_nodes.emplace(std::move(node));
+  }
+
+  auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
+      task->Username(), task->account, task);
+  if (!check_qos_result) {
+    CRANE_DEBUG("Failed to call CheckAndApplyQosLimitOnTask: {}",
+                CraneErrStr(check_qos_result.error()));
+    return check_qos_result;
   }
 
   return {};

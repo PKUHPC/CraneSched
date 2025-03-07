@@ -42,6 +42,13 @@ class AccountMetaContainer final {
                                                  const TaskInCtld& task,
                                                  const Qos& qos);
 
+  bool CheckQosResource(const std::string& username, const TaskInCtld& task);
+
+  void MallocQosResource(const std::string& username, const TaskInCtld& task);
+
+  void FreeQosSubmitResource(const std::string& username,
+                             const TaskInCtld& task);
+
   void FreeQosResource(const std::string& username, const TaskInCtld& task);
 
   void DeleteUserResource(const std::string& username);

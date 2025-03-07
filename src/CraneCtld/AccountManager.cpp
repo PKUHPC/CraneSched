@@ -1185,7 +1185,7 @@ CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
   auto result = g_account_meta_container->CheckAndMallocQosResourceFromUser(
       user_share_ptr->name, *task, *qos_share_ptr);
   if (result != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("The requested QoS resources have reached the user's limit.");
+    CRANE_TRACE("The requested QoS resources have reached the user's limit.");
     return std::unexpected(result);
   }
 
@@ -1980,7 +1980,7 @@ CraneExpected<void> AccountManager::DeleteUser_(const User& user,
     m_account_map_[coordinatorAccount]->coordinators.remove(name);
   }
 
-  g_account_meta_container->DeleteUserResource(name);
+  if (res_user.deleted) g_account_meta_container->DeleteUserResource(name);
 
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
