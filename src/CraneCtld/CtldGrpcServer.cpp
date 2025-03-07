@@ -19,6 +19,7 @@
 #include "CtldGrpcServer.h"
 
 #include "AccountManager.h"
+#include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
@@ -1052,8 +1053,9 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
   if (!result) return std::unexpected(result.error());
 
   result = g_task_scheduler->AcquireTaskAttributes(task.get());
+  if (!result) return std::unexpected(result.error());
 
-  if (result) result = g_task_scheduler->CheckTaskValidity(task.get());
+  result = g_task_scheduler->CheckTaskValidity(task.get());
 
   task->SetSubmitTime(absl::Now());
 
@@ -1062,6 +1064,8 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
         g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
   }
+
+  g_account_meta_container->FreeQosSubmitResource(task->Username(), *task);
 
   return std::unexpected(result.error());
 }

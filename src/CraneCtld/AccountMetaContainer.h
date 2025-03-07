@@ -25,22 +25,29 @@ namespace Ctld {
 
 class AccountMetaContainer final {
  public:
-
   using QosToResourceMap = std::unordered_map<std::string,  // qos_name
                                               QosResource>;
 
   using UserResourceMetaMap = phmap::parallel_flat_hash_map<
-        std::string, //username
-        QosToResourceMap, phmap::priv::hash_default_hash<std::string>,
-        phmap::priv::hash_default_eq<std::string>,
-        std::allocator<std::pair<const std::string, QosToResourceMap>>, 4, std::shared_mutex>;
+      std::string,  // username
+      QosToResourceMap, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
+      std::shared_mutex>;
 
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
   CraneErrCode CheckAndMallocQosResourceFromUser(const std::string& username,
-                                         const TaskInCtld& task,
-                                         const Qos& qos);
+                                                 const TaskInCtld& task,
+                                                 const Qos& qos);
+
+  bool CheckQosResource(const std::string& username, const TaskInCtld& task);
+
+  void MallocQosResource(const std::string& username, const TaskInCtld& task);
+
+  void FreeQosSubmitResource(const std::string& username,
+                             const TaskInCtld& task);
 
   void FreeQosResource(const std::string& username, const TaskInCtld& task);
 
