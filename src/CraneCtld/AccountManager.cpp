@@ -1185,7 +1185,7 @@ CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
   auto result = g_account_meta_container->CheckAndMallocQosResourceFromUser(
       user_share_ptr->name, *task, *qos_share_ptr);
   if (result != CraneErrCode::SUCCESS) {
-    CRANE_TRACE("The requested QoS resources have reached the user's limit.");
+    CRANE_DEBUG("The requested QoS resources have reached the user's limit.");
     return std::unexpected(result);
   }
 

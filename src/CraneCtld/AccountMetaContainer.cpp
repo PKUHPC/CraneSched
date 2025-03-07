@@ -32,12 +32,7 @@ CraneErrCode AccountMetaContainer::CheckAndMallocQosResourceFromUser(
 
   CraneErrCode result = CraneErrCode::SUCCESS;
 
-  ResourceView total_resource{};
-  total_resource.GetAllocatableRes().cpu_count = (cpu_t)qos.max_cpus_per_user;
-  QosResource qos_resource{
-      ResourceInQos{total_resource, qos.max_jobs_per_user},  // res_total
-      ResourceInQos{ResourceView{}, 0},                      // res_in_use
-      1};
+  QosResource qos_resource{ResourceView{}, 0, 1};
 
   user_meta_map_.try_emplace_l(
       username,
@@ -65,20 +60,22 @@ bool AccountMetaContainer::CheckQosResource(const std::string& username,
                                             const TaskInCtld& task) {
   bool result = true;
 
+  const auto qos_ptr = g_account_manager->GetExistedQosInfo(task.qos);
+
   user_meta_map_.modify_if(
       username, [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
-        if (val.res_in_use.jobs_count >= val.res_total.jobs_count) {
-          CRANE_TRACE(
+        if (val.jobs_count >= qos_ptr->max_jobs_per_user) {
+          CRANE_DEBUG(
               "User {} has reached the maximum number of jobs per user, task "
               "{} continues pending.",
               username, task.TaskId());
           result = false;
           return;
-          if (val.res_in_use.resource.CpuCount() +
+          if (val.resource.CpuCount() +
                   static_cast<double>(task.cpus_per_task) >
-              val.res_total.resource.CpuCount()) {
-            CRANE_TRACE(
+              qos_ptr->max_cpus_per_user) {
+            CRANE_DEBUG(
                 "User {} has reached the maximum number of cpus per user, task "
                 "{} continues pending.",
                 username, task.TaskId());
@@ -93,11 +90,13 @@ bool AccountMetaContainer::CheckQosResource(const std::string& username,
 
 void AccountMetaContainer::MallocQosResource(const std::string& username,
                                              const TaskInCtld& task) {
+  const auto qos_ptr = g_account_manager->GetExistedQosInfo(task.qos);
+
   user_meta_map_.modify_if(
       username, [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
-        val.res_in_use.jobs_count++;
-        val.res_in_use.resource.GetAllocatableRes() +=
+        val.jobs_count++;
+        val.resource.GetAllocatableRes() +=
             (task.requested_node_res_view * task.node_num).GetAllocatableRes();
       });
 }
@@ -116,9 +115,9 @@ void AccountMetaContainer::FreeQosResource(const std::string& username,
   user_meta_map_.modify_if(
       username, [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
-        val.res_in_use.resource.GetAllocatableRes() -=
+        val.resource.GetAllocatableRes() -=
             (task.requested_node_res_view * task.node_num).GetAllocatableRes();
-        val.res_in_use.jobs_count--;
+        val.jobs_count--;
         val.submit_jobs_count--;
       });
 }
