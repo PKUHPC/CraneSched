@@ -32,6 +32,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <optional>
 
 #include "crane/GrpcHelper.h"
 #include "crane/Logger.h"
@@ -307,39 +308,33 @@ void PluginClient::ExecutePowerActionHookAsync(const std::string& craned_id,
 
 void PluginClient::RegisterCranedHookAsync(
     const std::string& craned_id,
-    const google::protobuf::RepeatedPtrField<crane::grpc::NetworkInterface>& interfaces) {
+    const std::vector<crane::NetworkInterface>& interfaces) {
   auto request = std::make_unique<crane::grpc::plugin::RegisterCranedHookRequest>();
   request->set_craned_id(craned_id);
-  request->mutable_network_interfaces()->CopyFrom(interfaces);
+  
+  for (const auto& interface : interfaces) {
+    request->mutable_network_interfaces()->Add()->CopyFrom(interface.ToGrpc());
+  }
 
   HookEvent e{HookType::REGISTER_CRANED,
               std::unique_ptr<google::protobuf::Message>(std::move(request))};
   m_event_queue_.enqueue(std::move(e));
 }
 
-void PluginClient::GetCranedListHookAsync(crane::grpc::CranedListType type) {
-  auto request =
-      std::make_unique<crane::grpc::plugin::GetCranedListHookRequest>();
-  request->set_type(type);
-
-  HookEvent e{HookType::GET_CRANED_LIST,
-              std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_event_queue_.enqueue(std::move(e));
-}
-
-crane::grpc::plugin::GetCranedListHookReply PluginClient::GetCranedListHookSync(crane::grpc::CranedListType type) {
+std::optional<crane::grpc::plugin::GetCranedByPowerStateHookSyncReply> 
+PluginClient::GetCranedByPowerStateHookSync(crane::grpc::CranedPowerType type) {
   grpc::ClientContext context;
-  crane::grpc::plugin::GetCranedListHookRequest request;
-  crane::grpc::plugin::GetCranedListHookReply reply;
+  crane::grpc::plugin::GetCranedByPowerStateHookSyncRequest request;
+  crane::grpc::plugin::GetCranedByPowerStateHookSyncReply reply;
   
   request.set_type(type);
   
-  auto status = m_stub_->GetCranedListHook(&context, request, &reply);
+  auto status = m_stub_->GetCranedByPowerStateHookSync(&context, request, &reply);
   if (!status.ok()) {
     CRANE_ERROR("[Plugin] Failed to get craned list: {}; {} (code: {})",
                 context.debug_error_string(), status.error_message(),
                 int(status.error_code()));
-    throw std::runtime_error("Failed to get craned list");
+    return std::nullopt;
   }
   
   return reply;

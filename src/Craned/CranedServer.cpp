@@ -19,84 +19,10 @@
 #include "CranedServer.h"
 
 #include <yaml-cpp/yaml.h>
-#include <net/if.h>
-#include <netinet/in.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <ifaddrs.h>
-#include <linux/if_packet.h>
 
 #include "TaskManager.h"
 
 namespace Craned {
-
-namespace {
-
-struct NetworkInterface {
-  std::string name;
-  std::string mac_address;
-  std::vector<std::string> ipv4_addresses;
-  std::vector<std::string> ipv6_addresses;
-};
-
-std::vector<NetworkInterface> GetNetworkInterfaces() {
-  std::vector<NetworkInterface> interfaces;
-  std::unordered_map<std::string, NetworkInterface> interface_map;
-  
-  struct ifaddrs *ifaddr, *ifa;
-  if (getifaddrs(&ifaddr) == -1) {
-    CRANE_ERROR("getifaddrs failed: {}", strerror(errno));
-    return interfaces;
-  }
-
-  for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
-    if (ifa->ifa_addr == nullptr) continue;
-
-    std::string if_name(ifa->ifa_name);
-    
-    if (interface_map.find(if_name) == interface_map.end()) {
-      interface_map[if_name].name = if_name;
-    }
-
-    char host[NI_MAXHOST];
-    int family = ifa->ifa_addr->sa_family;
-    
-    switch(family) {
-      case AF_INET: {  // IPv4
-        struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
-        inet_ntop(AF_INET, &addr->sin_addr, host, NI_MAXHOST);
-        interface_map[if_name].ipv4_addresses.emplace_back(host);
-        break;
-      }
-      case AF_INET6: {  // IPv6
-        struct sockaddr_in6 *addr = (struct sockaddr_in6 *)ifa->ifa_addr;
-        inet_ntop(AF_INET6, &addr->sin6_addr, host, NI_MAXHOST);
-        interface_map[if_name].ipv6_addresses.emplace_back(host);
-        break;
-      }
-      case AF_PACKET: {  // MAC
-        struct sockaddr_ll *s = (struct sockaddr_ll*)ifa->ifa_addr;
-        char mac[18];
-        snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
-                s->sll_addr[0], s->sll_addr[1], s->sll_addr[2],
-                s->sll_addr[3], s->sll_addr[4], s->sll_addr[5]);
-        interface_map[if_name].mac_address = mac;
-        break;
-      }
-    }
-  }
-
-  freeifaddrs(ifaddr);
-
-  for (const auto& [_, interface] : interface_map) {
-    interfaces.push_back(interface);
-  }
-
-  return interfaces;
-}
-
-} // anonymous namespace
 
 grpc::Status CranedServiceImpl::ExecuteTask(
     grpc::ServerContext *context,
@@ -571,18 +497,20 @@ grpc::Status CranedServiceImpl::QueryCranedRemoteMeta(
     crane::grpc::QueryCranedRemoteMetaReply *response) {
   auto *grpc_meta = response->mutable_craned_remote_meta();
 
-  auto interfaces = GetNetworkInterfaces();
+  auto interfaces = crane::GetNetworkInterfaces();
   for (const auto& interface : interfaces) {
     auto* network_interface = grpc_meta->add_network_interfaces();
     network_interface->set_name(interface.name);
     network_interface->set_mac_address(interface.mac_address);
     
     for (const auto& ipv4 : interface.ipv4_addresses) {
-      network_interface->add_ipv4_addresses(ipv4);
+      std::string ipv4_str = crane::Ipv4ToStr(ipv4);
+      network_interface->add_ipv4_addresses(ipv4_str);
     }
     
     for (const auto& ipv6 : interface.ipv6_addresses) {
-      network_interface->add_ipv6_addresses(ipv6);
+      std::string ipv6_str = crane::Ipv6ToStr(ipv6);
+      network_interface->add_ipv6_addresses(ipv6_str);
     }
   }
 

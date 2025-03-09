@@ -35,6 +35,7 @@
 #include "protos/Plugin.grpc.pb.h"
 #include "protos/Plugin.pb.h"
 #include "protos/PublicDefs.pb.h"
+#include "crane/Network.h"
 
 namespace plugin {
 
@@ -55,7 +56,6 @@ class PluginClient {
     INSERT_EVENT,
     EXECUTE_NODE_POWER_ACTION,
     REGISTER_CRANED,
-    GET_CRANED_LIST,
     HookTypeCount,
   };
 
@@ -83,11 +83,10 @@ class PluginClient {
 
   void RegisterCranedHookAsync(
       const std::string& craned_id,
-      const google::protobuf::RepeatedPtrField<crane::grpc::NetworkInterface>& interfaces);
+      const std::vector<crane::NetworkInterface>& interfaces);
 
-  void GetCranedListHookAsync(crane::grpc::CranedListType type);
-
-  crane::grpc::plugin::GetCranedListHookReply GetCranedListHookSync(crane::grpc::CranedListType type);
+  std::optional<crane::grpc::plugin::GetCranedByPowerStateHookSyncReply> 
+  GetCranedByPowerStateHookSync(crane::grpc::CranedPowerType type);
 
  private:
   // HookDispatchFunc is a function pointer type that handles different
