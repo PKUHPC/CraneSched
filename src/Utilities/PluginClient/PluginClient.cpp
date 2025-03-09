@@ -290,16 +290,6 @@ void PluginClient::RegisterCranedHookAsync(
   m_event_queue_.enqueue(std::move(e));
 }
 
-void PluginClient::GetCranedListHookAsync(crane::grpc::CranedListType type) {
-  auto request =
-      std::make_unique<crane::grpc::plugin::GetCranedListHookRequest>();
-  request->set_type(type);
-
-  HookEvent e{HookType::GET_CRANED_LIST,
-              std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_event_queue_.enqueue(std::move(e));
-}
-
 crane::grpc::plugin::GetCranedListHookReply PluginClient::GetCranedListHookSync(crane::grpc::CranedListType type) {
   grpc::ClientContext context;
   crane::grpc::plugin::GetCranedListHookRequest request;
