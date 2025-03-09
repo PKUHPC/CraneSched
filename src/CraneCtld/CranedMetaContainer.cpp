@@ -19,6 +19,7 @@
 #include "CranedMetaContainer.h"
 
 #include "CranedKeeper.h"
+#include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -33,6 +34,12 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
       CRANE_ERROR("Failed to query actual resource from craned {}", craned_id);
       return;
     }
+    
+    if (remote_meta.raw_reply != nullptr && g_plugin_client != nullptr) {
+      g_plugin_client->RegisterCranedHookAsync(craned_id, 
+          remote_meta.raw_reply->craned_remote_meta().network_interfaces());
+    }
+    
     stub.reset();  // Release shared_ptr
   }
 
