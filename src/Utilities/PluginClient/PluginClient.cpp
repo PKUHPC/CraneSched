@@ -32,6 +32,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <optional>
 
 #include "crane/GrpcHelper.h"
 #include "crane/Logger.h"
@@ -290,17 +291,8 @@ void PluginClient::RegisterCranedHookAsync(
   m_event_queue_.enqueue(std::move(e));
 }
 
-void PluginClient::GetCranedListHookAsync(crane::grpc::CranedListType type) {
-  auto request =
-      std::make_unique<crane::grpc::plugin::GetCranedListHookRequest>();
-  request->set_type(type);
-
-  HookEvent e{HookType::GET_CRANED_LIST,
-              std::unique_ptr<google::protobuf::Message>(std::move(request))};
-  m_event_queue_.enqueue(std::move(e));
-}
-
-crane::grpc::plugin::GetCranedListHookReply PluginClient::GetCranedListHookSync(crane::grpc::CranedListType type) {
+std::optional<crane::grpc::plugin::GetCranedListHookReply> 
+PluginClient::GetCranedListHookSync(crane::grpc::CranedListType type) {
   grpc::ClientContext context;
   crane::grpc::plugin::GetCranedListHookRequest request;
   crane::grpc::plugin::GetCranedListHookReply reply;
@@ -312,7 +304,7 @@ crane::grpc::plugin::GetCranedListHookReply PluginClient::GetCranedListHookSync(
     CRANE_ERROR("[Plugin] Failed to get craned list: {}; {} (code: {})",
                 context.debug_error_string(), status.error_message(),
                 int(status.error_code()));
-    throw std::runtime_error("Failed to get craned list");
+    return std::nullopt;
   }
   
   return reply;

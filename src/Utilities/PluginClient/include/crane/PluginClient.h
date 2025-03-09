@@ -54,7 +54,6 @@ class PluginClient {
     DESTROY_CGROUP,
     EXECUTE_NODE_POWER_ACTION,
     REGISTER_CRANED,
-    GET_CRANED_LIST,
     HookTypeCount,
   };
 
@@ -83,9 +82,8 @@ class PluginClient {
       const std::string& craned_id,
       const google::protobuf::RepeatedPtrField<crane::grpc::NetworkInterface>& interfaces);
 
-  void GetCranedListHookAsync(crane::grpc::CranedListType type);
-
-  crane::grpc::plugin::GetCranedListHookReply GetCranedListHookSync(crane::grpc::CranedListType type);
+  std::optional<crane::grpc::plugin::GetCranedListHookReply> 
+  GetCranedListHookSync(crane::grpc::CranedListType type);
 
  private:
   // HookDispatchFunc is a function pointer type that handles different
