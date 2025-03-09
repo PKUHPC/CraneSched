@@ -333,10 +333,10 @@ class AccountManager {
   CraneExpected<void> DeleteAccountAllowedQos_(const Account& account,
                                                const std::string& qos);
 
-  CraneExpected<void> BlockUser_(const std::string& name,
+  CraneExpected<void> BlockUserNoLock_(const std::string& name,
                                  const std::string& account, bool block);
 
-  CraneExpected<void> BlockAccount_(const std::string& name, bool block);
+  CraneExpected<void> BlockAccountNoLock_(const std::string& name, bool block);
 
   bool IsAllowedPartitionOfAnyNodeNoLock_(const Account* account,
                                           const std::string& partition,
