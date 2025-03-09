@@ -785,12 +785,12 @@ message StreamTaskIOReply {
   }
 }
 
-message ExecuteNodePowerActionRequest {
+message ExecutePowerActionRequest {
   string craned_id = 1;
   PowerAction action = 2;
 }
 
-message ExecuteNodePowerActionReply {
+message ExecutePowerActionReply {
   bool ok = 1;
   string error = 2;
 }
@@ -845,7 +845,7 @@ service CraneCtld {
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
 
-  rpc ExecuteNodePowerAction(ExecuteNodePowerActionRequest) returns (ExecuteNodePowerActionReply);
+  rpc ExecutePowerAction(ExecutePowerActionRequest) returns (ExecutePowerActionReply);
 }
 
 service Craned {
