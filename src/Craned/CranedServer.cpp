@@ -44,25 +44,21 @@ std::vector<NetworkInterface> GetNetworkInterfaces() {
   std::vector<NetworkInterface> interfaces;
   std::unordered_map<std::string, NetworkInterface> interface_map;
   
-  // 获取网络接口列表
   struct ifaddrs *ifaddr, *ifa;
   if (getifaddrs(&ifaddr) == -1) {
     CRANE_ERROR("getifaddrs failed: {}", strerror(errno));
     return interfaces;
   }
 
-  // 遍历所有网络接口
   for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
     if (ifa->ifa_addr == nullptr) continue;
 
     std::string if_name(ifa->ifa_name);
     
-    // 如果是新接口，初始化
     if (interface_map.find(if_name) == interface_map.end()) {
       interface_map[if_name].name = if_name;
     }
 
-    // 获取IP地址
     char host[NI_MAXHOST];
     int family = ifa->ifa_addr->sa_family;
     
@@ -79,7 +75,7 @@ std::vector<NetworkInterface> GetNetworkInterfaces() {
         interface_map[if_name].ipv6_addresses.emplace_back(host);
         break;
       }
-      case AF_PACKET: {  // MAC地址
+      case AF_PACKET: {  // MAC
         struct sockaddr_ll *s = (struct sockaddr_ll*)ifa->ifa_addr;
         char mac[18];
         snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -93,7 +89,6 @@ std::vector<NetworkInterface> GetNetworkInterfaces() {
 
   freeifaddrs(ifaddr);
 
-  // 转换map到vector
   for (const auto& [_, interface] : interface_map) {
     interfaces.push_back(interface);
   }
@@ -576,19 +571,16 @@ grpc::Status CranedServiceImpl::QueryCranedRemoteMeta(
     crane::grpc::QueryCranedRemoteMetaReply *response) {
   auto *grpc_meta = response->mutable_craned_remote_meta();
 
-  // 获取并添加网络接口信息
   auto interfaces = GetNetworkInterfaces();
   for (const auto& interface : interfaces) {
     auto* network_interface = grpc_meta->add_network_interfaces();
     network_interface->set_name(interface.name);
     network_interface->set_mac_address(interface.mac_address);
     
-    // 添加IPv4地址
     for (const auto& ipv4 : interface.ipv4_addresses) {
       network_interface->add_ipv4_addresses(ipv4);
     }
     
-    // 添加IPv6地址
     for (const auto& ipv6 : interface.ipv6_addresses) {
       network_interface->add_ipv6_addresses(ipv6);
     }

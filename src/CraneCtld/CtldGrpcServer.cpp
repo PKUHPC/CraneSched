@@ -1001,10 +1001,10 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::ExecuteNodePowerAction(
+grpc::Status CraneCtldServiceImpl::ExecutePowerAction(
     grpc::ServerContext *context,
-    const crane::grpc::ExecuteNodePowerActionRequest *request,
-    crane::grpc::ExecuteNodePowerActionReply *response) {
+    const crane::grpc::ExecutePowerActionRequest *request,
+    crane::grpc::ExecutePowerActionReply *response) {
   if (g_config.Plugin.Enabled && g_plugin_client != nullptr) {
     g_plugin_client->ExecutePowerActionHookAsync(request->craned_id(), request->action());
     response->set_ok(true);
