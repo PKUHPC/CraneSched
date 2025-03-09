@@ -295,10 +295,10 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       crane::grpc::QueryClusterInfoReply *response) override;
 
 
-  grpc::Status ExecuteNodePowerAction(
+  grpc::Status ExecutePowerAction(
       grpc::ServerContext *context,
-      const crane::grpc::ExecuteNodePowerActionRequest *request,
-      crane::grpc::ExecuteNodePowerActionReply *response) override;
+      const crane::grpc::ExecutePowerActionRequest *request,
+      crane::grpc::ExecutePowerActionReply *response) override;
 
  private:
   CtldServer *m_ctld_server_;
