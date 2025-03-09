@@ -118,7 +118,7 @@ enum PowerAction {
     POWEROFF = 3;
 }
 
-enum CranedListType {
+enum CranedPowerType {
     ACTIVE = 0;
     IDLE = 1;
     SLEEPING = 2;

@@ -33,10 +33,24 @@
 #include <fstream>
 #include <string>
 
+#include "protos/PublicDefs.pb.h"
+
 using ipv4_t = uint32_t;
 using ipv6_t = absl::uint128;
 
 namespace crane {
+
+struct NetworkInterface {
+  std::string name;
+  std::string mac_address;
+  std::vector<ipv4_t> ipv4_addresses;
+  std::vector<ipv6_t> ipv6_addresses;
+
+  NetworkInterface() = default;
+  explicit NetworkInterface(
+      const crane::grpc::NetworkInterface& grpc_interface);
+  operator crane::grpc::NetworkInterface() const;
+};
 
 void InitializeNetworkFunctions();
 
@@ -62,5 +76,7 @@ std::string Ipv6ToStr(const ipv6_t& addr);
 int GetIpAddrVer(const std::string& ip);
 
 bool FindTcpInodeByPort(const std::string& tcp_path, int port, ino_t* inode);
+
+std::vector<NetworkInterface> GetNetworkInterfaces();
 
 }  // namespace crane
