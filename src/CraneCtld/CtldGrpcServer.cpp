@@ -22,8 +22,8 @@
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
 #include "EmbeddedDbClient.h"
-#include "crane/PluginClient.h"
 #include "TaskScheduler.h"
+#include "crane/PluginClient.h"
 
 namespace Ctld {
 
@@ -1005,13 +1005,40 @@ grpc::Status CraneCtldServiceImpl::ExecutePowerAction(
     grpc::ServerContext *context,
     const crane::grpc::ExecutePowerActionRequest *request,
     crane::grpc::ExecutePowerActionReply *response) {
-  if (g_config.Plugin.Enabled && g_plugin_client != nullptr) {
-    g_plugin_client->ExecutePowerActionHookAsync(request->craned_id(), request->action());
-    response->set_ok(true);
+  CRANE_TRACE("Received power action request for node {}: {}",
+              request->craned_id(),
+              crane::grpc::PowerAction_Name(request->action()));
+
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!res) {
+    response->set_ok(false);
+    response->set_error(
+        "User does not have sufficient permissions to perform power actions");
     return grpc::Status::OK;
-  } 
-  response->set_ok(false);
-  response->set_error("Plugin is not enabled");
+  }
+
+  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    response->set_ok(false);
+    response->set_error(
+        fmt::format("Node {} not found or not allowed", request->craned_id()));
+    return grpc::Status::OK;
+  }
+
+  if (!g_config.Plugin.Enabled || g_plugin_client == nullptr) {
+    response->set_ok(false);
+    response->set_error(
+        "Power control plugin is not enabled or failed to initialize");
+    CRANE_WARN("Power action requested but plugin system is not available");
+    return grpc::Status::OK;
+  }
+
+  CRANE_INFO("Executing power action {} on node {}",
+             crane::grpc::PowerAction_Name(request->action()),
+             request->craned_id());
+
+  g_plugin_client->ExecutePowerActionHookAsync(request->craned_id(),
+                                               request->action());
+  response->set_ok(true);
   return grpc::Status::OK;
 }
 

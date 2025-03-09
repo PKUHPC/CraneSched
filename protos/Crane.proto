@@ -786,8 +786,9 @@ message StreamTaskIOReply {
 }
 
 message ExecutePowerActionRequest {
-  string craned_id = 1;
-  PowerAction action = 2;
+  uint32 uid = 1;
+  string craned_id = 2;
+  PowerAction action = 3;
 }
 
 message ExecutePowerActionReply {

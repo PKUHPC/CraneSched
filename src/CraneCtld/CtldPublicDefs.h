@@ -192,8 +192,8 @@ struct CranedRemoteMeta {
   std::string craned_version;
   absl::Time craned_start_time;
   absl::Time system_boot_time;
-  
-  std::unique_ptr<crane::grpc::QueryCranedRemoteMetaReply> raw_reply;
+
+  std::vector<crane::grpc::NetworkInterface> network_interfaces;
 };
 
 /**
