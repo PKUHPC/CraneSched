@@ -27,7 +27,7 @@ CraneErrCode AccountMetaContainer::CheckAndMallocQosResourceFromUser(
   if (static_cast<double>(task.cpus_per_task) > qos.max_cpus_per_user)
     return CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
 
-  if (qos.max_submit_jobs_per_user == 0)
+  if (qos.max_submit_jobs_per_user == 0 || qos.max_submit_jobs_per_account == 0)
     return CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
 
   CraneErrCode result = CraneErrCode::SUCCESS;
@@ -124,6 +124,17 @@ void AccountMetaContainer::FreeQosResource(const std::string& username,
 
 void AccountMetaContainer::DeleteUserResource(const std::string& username) {
   user_meta_map_.erase(username);
+}
+
+void AccountMetaContainer::DeleteAccountResource(const std::string& account) {
+  account_meta_map_.erase(account);
+}
+
+CraneErrCode AccountMetaContainer::CheckAndMallocQosResourceFromAccount_(
+    const TaskInCtld& task, const Qos& qos) {
+  CraneErrCode result = CraneErrCode::SUCCESS;
+
+  return result;
 }
 
 }  // namespace Ctld
