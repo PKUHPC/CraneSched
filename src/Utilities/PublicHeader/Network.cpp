@@ -18,6 +18,14 @@
 
 #include "crane/Network.h"
 
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <linux/if_packet.h>
+
 #include "crane/Logger.h"
 
 namespace crane {
@@ -342,6 +350,63 @@ bool FindTcpInodeByPort(const std::string& tcp_path, int port, ino_t* inode) {
     CRANE_ERROR("Can't open file: {}", tcp_path);
   }
   return false;
+}
+
+std::vector<NetworkInterface> GetNetworkInterfaces() {
+  std::vector<NetworkInterface> interfaces;
+  std::unordered_map<std::string, NetworkInterface> interface_map;
+  
+  struct ifaddrs *ifaddr, *ifa;
+  if (getifaddrs(&ifaddr) == -1) {
+    CRANE_ERROR("getifaddrs failed: {}", strerror(errno));
+    return interfaces;
+  }
+
+  for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+    if (ifa->ifa_addr == nullptr) continue;
+
+    std::string if_name(ifa->ifa_name);
+    
+    if (interface_map.find(if_name) == interface_map.end()) {
+      interface_map[if_name].name = if_name;
+    }
+
+    char host[NI_MAXHOST];
+    int family = ifa->ifa_addr->sa_family;
+    
+    switch(family) {
+      case AF_INET: {  // IPv4
+        struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+        ipv4_t ipv4_addr = addr->sin_addr.s_addr;
+        interface_map[if_name].ipv4_addresses.emplace_back(ipv4_addr);
+        break;
+      }
+      case AF_INET6: {  // IPv6
+        struct sockaddr_in6 *addr = (struct sockaddr_in6 *)ifa->ifa_addr;
+        ipv6_t ipv6_addr = 0;
+        memcpy(&ipv6_addr, &addr->sin6_addr, sizeof(struct in6_addr));
+        interface_map[if_name].ipv6_addresses.emplace_back(ipv6_addr);
+        break;
+      }
+      case AF_PACKET: {  // MAC
+        struct sockaddr_ll *s = (struct sockaddr_ll*)ifa->ifa_addr;
+        char mac[18];
+        snprintf(mac, sizeof(mac), "%02x:%02x:%02x:%02x:%02x:%02x",
+                s->sll_addr[0], s->sll_addr[1], s->sll_addr[2],
+                s->sll_addr[3], s->sll_addr[4], s->sll_addr[5]);
+        interface_map[if_name].mac_address = mac;
+        break;
+      }
+    }
+  }
+
+  freeifaddrs(ifaddr);
+
+  for (const auto& [_, interface] : interface_map) {
+    interfaces.push_back(interface);
+  }
+
+  return interfaces;
 }
 
 }  // namespace crane
