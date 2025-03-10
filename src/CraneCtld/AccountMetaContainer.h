@@ -18,7 +18,13 @@
 
 #pragma once
 
+#include <memory>
+#include <shared_mutex>
+#include <string>
+
 #include "CtldPublicDefs.h"
+#include "parallel_hashmap/phmap.h"
+#include "parallel_hashmap/phmap_fwd_decl.h"
 // Precompiled header comes first!
 
 namespace Ctld {
@@ -30,6 +36,13 @@ class AccountMetaContainer final {
 
   using UserResourceMetaMap = phmap::parallel_flat_hash_map<
       std::string,  // username
+      QosToResourceMap, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
+      std::shared_mutex>;
+
+  using AccountResourceMetaMap = phmap::parallel_flat_hash_map<
+      std::string,  // account_name
       QosToResourceMap, phmap::priv::hash_default_hash<std::string>,
       phmap::priv::hash_default_eq<std::string>,
       std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
@@ -53,8 +66,23 @@ class AccountMetaContainer final {
 
   void DeleteUserResource(const std::string& username);
 
+  void DeleteAccountResource(const std::string& account);
+
  private:
   UserResourceMetaMap user_meta_map_;
+
+  AccountResourceMetaMap account_meta_map_;
+
+  CraneErrCode CheckAndMallocQosResourceFromAccount_(const TaskInCtld& task,
+                                                     const Qos& qos);
+
+  bool CheckQosResourceFromAccount_(const TaskInCtld& task);
+
+  void MallocQosResourceFromAccount_(const TaskInCtld& task);
+
+  void FreeQosSubmitResourceFromAccount_(const TaskInCtld& task);
+
+  void FreeQosResourceFromAccount_(const TaskInCtld& task);
 };
 
 inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;

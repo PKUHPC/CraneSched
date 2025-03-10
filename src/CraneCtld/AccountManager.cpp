@@ -1862,6 +1862,8 @@ CraneExpected<void> AccountManager::DeleteAccount_(const Account& account) {
     m_qos_map_[qos]->reference_count--;
   }
 
+  g_account_meta_container->DeleteAccountResource(name);
+
   return {};
 }
 
