@@ -588,6 +588,7 @@ CraneExpected<void> AccountManager::AddUserAllowedPartition(
   if (!result) return result;
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(actual_account);
+  if (!account_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   result = CheckAddUserAllowedPartitionNoLock_(p, account_ptr, new_partition);
   if (!result) return result;
@@ -618,6 +619,9 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition(
   if (!result) std::unexpected(FormatRichErr(result.error(), "result"));
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(actual_account);
+  if (!account_ptr)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, "result"));
 
   auto rich_result =
       CheckSetUserAllowedPartitionNoLock_(account_ptr, partition_list);
@@ -647,6 +651,7 @@ CraneExpected<void> AccountManager::AddUserAllowedQos(
   if (!result) return result;
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(actual_account);
+  if (!account_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
 
   result = CheckAddUserAllowedQosNoLock_(p, account_ptr, partition, new_qos);
   if (!result) return result;
@@ -679,6 +684,9 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos(
   if (!result) return std::unexpected(FormatRichErr(result.error(), "result"));
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(actual_account);
+  if (!account_ptr)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, "result"));
 
   auto rich_result =
       CheckSetUserAllowedQosNoLock_(p, account_ptr, partition, qos_list, force);
@@ -767,6 +775,8 @@ CraneExpected<void> AccountManager::ModifyAccount(
   case crane::grpc::OperationType::Add: {
     util::write_lock_guard account_guard(m_rw_account_mutex_);
     const Account* account = GetExistedAccountInfoNoLock_(name);
+    if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
+
     switch (modify_field) {
     case crane::grpc::ModifyField::Partition: {
       result = CheckAddAccountAllowedPartitionNoLock_(account, value);
@@ -789,12 +799,14 @@ CraneExpected<void> AccountManager::ModifyAccount(
     case crane::grpc::ModifyField::Description: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
+      if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
       result = CheckSetAccountDescriptionNoLock_(account);
       return !result ? result : SetAccountDescription_(name, value);
     }
     case crane::grpc::ModifyField::DefaultQos: {
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
+      if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
       result = CheckSetAccountDefaultQosNoLock_(account, value);
       return !result ? result : SetAccountDefaultQos_(*account, value);
     }
@@ -809,6 +821,7 @@ CraneExpected<void> AccountManager::ModifyAccount(
       util::write_lock_guard user_guard(m_rw_user_mutex_);
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
+      if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
       result = CheckDeleteAccountAllowedPartitionNoLock_(account, value, force);
       return !result ? result : DeleteAccountAllowedPartition_(*account, value);
     }
@@ -818,6 +831,7 @@ CraneExpected<void> AccountManager::ModifyAccount(
       util::write_lock_guard account_guard(m_rw_account_mutex_);
       util::write_lock_guard qos_guard(m_rw_qos_mutex_);
       const Account* account = GetExistedAccountInfoNoLock_(name);
+      if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
       result = CheckDeleteAccountAllowedQosNoLock_(account, value, force);
       return !result ? result : DeleteAccountAllowedQos_(*account, value);
     }
@@ -855,6 +869,9 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition(
   util::write_lock_guard account_guard(m_rw_account_mutex_);
 
   const Account* account = GetExistedAccountInfoNoLock_(account_name);
+  if (!account)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, "result"));
 
   auto rich_result =
       CheckSetAccountAllowedPartitionNoLock_(account, partition_list, force);
@@ -888,6 +905,9 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos(
   util::write_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const Account* account = GetExistedAccountInfoNoLock_(account_name);
+  if (!account)
+    return std::unexpected(
+        FormatRichErr(CraneErrCode::ERR_INVALID_ACCOUNT, "result"));
 
   auto rich_result = CheckSetAccountAllowedQosNoLock_(account, qos_list, force);
   return !rich_result ? rich_result
@@ -1183,6 +1203,7 @@ CraneExpected<void> AccountManager::CheckModifyPartitionAcl(
 
   for (const auto& account_name : accounts) {
     const Account* account = GetAccountInfoNoLock_(account_name);
+    if (!account) return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
     result =
         CheckPartitionIsAllowedNoLock_(account, partition_name, false, false);
     if (!result) return std::unexpected(result.error());
