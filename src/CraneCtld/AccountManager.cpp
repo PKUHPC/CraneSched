@@ -605,17 +605,17 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition(
 
   auto op_user_res = GetUserInfoByUidNoLock_(uid);
   if (!op_user_res)
-    return std::unexpected(MakeCraneRichError("result", op_user_res.error()));
+    return std::unexpected(FormatRichErr(op_user_res.error(), "result"));
 
   const User* p = GetExistedUserInfoNoLock_(username);
   if (p == nullptr)
     return std::unexpected(
-        MakeCraneRichError("result", CraneErrCode::ERR_INVALID_USER));
+        FormatRichErr(CraneErrCode::ERR_INVALID_USER, "result"));
 
   std::string actual_account = account;
   result = CheckIfUserHasPermOnUserOfAccountNoLock_(*op_user_res.value(), p,
                                                     &actual_account, false);
-  if (!result) std::unexpected(MakeCraneRichError("result", result.error()));
+  if (!result) std::unexpected(FormatRichErr(result.error(), "result"));
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(actual_account);
 
@@ -667,17 +667,16 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos(
   const User* p = GetExistedUserInfoNoLock_(username);
   if (p == nullptr)
     return std::unexpected(
-        MakeCraneRichError("result", CraneErrCode::ERR_INVALID_USER));
+        FormatRichErr(CraneErrCode::ERR_INVALID_USER, "result"));
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result)
-    return std::unexpected(MakeCraneRichError("result", user_result.error()));
+    return std::unexpected(FormatRichErr(user_result.error(), "result"));
 
   std::string actual_account = account;
   result = CheckIfUserHasPermOnUserOfAccountNoLock_(*user_result.value(), p,
                                                     &actual_account, false);
-  if (!result)
-    return std::unexpected(MakeCraneRichError("result", result.error()));
+  if (!result) return std::unexpected(FormatRichErr(result.error(), "result"));
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(actual_account);
 
@@ -844,12 +843,12 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition(
 
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result)
-      return std::unexpected(MakeCraneRichError("result", user_result.error()));
+      return std::unexpected(FormatRichErr(user_result.error(), "result"));
     const User* op_user = user_result.value();
 
     result = CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, false);
     if (!result)
-      return std::unexpected(MakeCraneRichError("result", result.error()));
+      return std::unexpected(FormatRichErr(result.error(), "result"));
   }
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
@@ -876,12 +875,12 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos(
 
     auto user_result = GetUserInfoByUidNoLock_(uid);
     if (!user_result)
-      return std::unexpected(MakeCraneRichError("result", user_result.error()));
+      return std::unexpected(FormatRichErr(user_result.error(), "result"));
     const User* op_user = user_result.value();
 
     result = CheckIfUserHasPermOnAccountNoLock_(*op_user, account_name, false);
     if (!result)
-      return std::unexpected(MakeCraneRichError("result", result.error()));
+      return std::unexpected(FormatRichErr(result.error(), "result"));
   }
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
@@ -1213,7 +1212,7 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedPartitionNoLock_(
     auto result =
         CheckPartitionIsAllowedNoLock_(account, partition, false, true);
     if (!result)
-      return std::unexpected(MakeCraneRichError(partition, result.error()));
+      return std::unexpected(FormatRichErr(result.error(), partition));
   }
 
   return {};
@@ -1261,8 +1260,7 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedQosNoLock_(
     const std::unordered_set<std::string>& qos_list, bool force) {
   for (const auto& qos : qos_list) {
     auto result = CheckQosIsAllowedNoLock_(account, qos, false, true);
-    if (!result)
-      return std::unexpected(MakeCraneRichError(qos, result.error()));
+    if (!result) return std::unexpected(FormatRichErr(result.error(), qos));
   }
 
   const std::string& account_name = account->name;
@@ -1279,7 +1277,7 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedQosNoLock_(
     auto iter = attrs_in_account_map.allowed_partition_qos_map.find(partition);
     if (iter == attrs_in_account_map.allowed_partition_qos_map.end()) {
       return std::unexpected(
-          MakeCraneRichError(partition, CraneErrCode::ERR_PARTITION_MISSING));
+          FormatRichErr(CraneErrCode::ERR_PARTITION_MISSING, partition));
     }
     cache_allowed_partition_qos_map.insert({iter->first, iter->second});
   }
@@ -1288,7 +1286,7 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedQosNoLock_(
     if (!ranges::contains(qos_list, pair.first)) {
       if (!force && !pair.first.empty())
         return std::unexpected(
-            MakeCraneRichError(pair.first, CraneErrCode::ERR_SET_ALLOWED_QOS));
+            FormatRichErr(CraneErrCode::ERR_SET_ALLOWED_QOS, pair.first));
     }
   }
   return {};
@@ -1402,14 +1400,14 @@ CraneExpectedRich<void> AccountManager::CheckSetAccountAllowedPartitionNoLock_(
     auto result =
         CheckPartitionIsAllowedNoLock_(account, partition, true, false);
     if (!result)
-      return std::unexpected(MakeCraneRichError(partition, result.error()));
+      return std::unexpected(FormatRichErr(result.error(), partition));
   }
 
   for (const auto& par : account->allowed_partition) {
     if (!ranges::contains(partition_list, par)) {
       if (!force && IsAllowedPartitionOfAnyNodeNoLock_(account, par))
         return std::unexpected(
-            MakeCraneRichError(par, CraneErrCode::ERR_CHILD_HAS_PARTITION));
+            FormatRichErr(CraneErrCode::ERR_CHILD_HAS_PARTITION, par));
     }
   }
 
@@ -1421,15 +1419,14 @@ CraneExpectedRich<void> AccountManager::CheckSetAccountAllowedQosNoLock_(
     bool force) {
   for (const auto& qos : qos_list) {
     auto result = CheckQosIsAllowedNoLock_(account, qos, true, false);
-    if (!result)
-      return std::unexpected(MakeCraneRichError(qos, result.error()));
+    if (!result) return std::unexpected(FormatRichErr(result.error(), qos));
   }
 
   for (const auto& qos : account->allowed_qos_list) {
     if (!ranges::contains(qos_list, qos)) {
       if (!force && IsDefaultQosOfAnyNodeNoLock_(account, qos))
         return std::unexpected(
-            MakeCraneRichError(qos, CraneErrCode::ERR_SET_ACCOUNT_QOS));
+            FormatRichErr(CraneErrCode::ERR_SET_ACCOUNT_QOS, qos));
     }
   }
 
@@ -2161,7 +2158,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition_(
   // Update to database
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(
-        MakeCraneRichError("database", CraneErrCode::ERR_UPDATE_DATABASE));
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "database"));
 
   m_user_map_[name]
       ->account_to_attrs_map[account_name]
@@ -2208,7 +2205,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos_(
   // Update to database
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(
-        MakeCraneRichError("database", CraneErrCode::ERR_UPDATE_DATABASE));
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "database"));
 
   m_user_map_[name]
       ->account_to_attrs_map[account_name]
@@ -2407,7 +2404,7 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition_(
 
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(
-        MakeCraneRichError("database", CraneErrCode::ERR_UPDATE_DATABASE));
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "database"));
 
   for (const auto& par : deleted_partition) {
     DeleteAccountAllowedPartitionFromMapNoLock_(account.name, par);
@@ -2464,7 +2461,7 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedQos_(
 
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(
-        MakeCraneRichError("database", CraneErrCode::ERR_UPDATE_DATABASE));
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "database"));
 
   for (const auto& qos : deleted_qos) {
     DeleteAccountAllowedQosFromMapNoLock_(account.name, qos);

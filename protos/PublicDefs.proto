@@ -336,8 +336,8 @@ message TrimmedPartitionInfo {
 }
 
 message RichError {
-  string description = 1;
-  ErrCode code = 2;
+  ErrCode code = 1;
+  string description = 2;
 }
 
 enum ErrCode {

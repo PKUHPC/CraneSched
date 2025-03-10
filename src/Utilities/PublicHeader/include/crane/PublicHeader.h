@@ -22,6 +22,7 @@
 
 #include <array>
 #include <expected>
+#include <format>
 #include <fpm/fixed.hpp>
 #include <unordered_map>
 
@@ -182,11 +183,15 @@ constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)>
 
 }
 
-inline CraneRichError MakeCraneRichError(const std::string& description,
-                                         CraneErrCode err) {
+template <typename... Args>
+inline CraneRichError FormatRichErr(CraneErrCode code, const std::string& fmt,
+                                    Args&&... args) {
   CraneRichError rich_err;
-  rich_err.set_description(description);
-  rich_err.set_code(err);
+
+  rich_err.set_code(code);
+  rich_err.set_description(
+      std::vformat(fmt, std::make_format_args(std::forward<Args>(args)...)));
+
   return rich_err;
 }
 
