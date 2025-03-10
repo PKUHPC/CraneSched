@@ -640,6 +640,7 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
   } else {
     response->set_ok(false);
     response->set_code(res.error());
+    return grpc::Status::OK;
   }
 
   for (const auto &it : res.value()) {
@@ -693,6 +694,7 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
   } else {
     response->set_ok(false);
     response->set_code(res.error());
+    return grpc::Status::OK;
   }
 
   for (const auto &it : res.value()) {
@@ -748,6 +750,7 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
   } else {
     response->set_ok(false);
     response->set_code(res.error());
+    return grpc::Status::OK;
   }
 
   auto *list = response->mutable_qos_list();
@@ -862,14 +865,12 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
       if (!account_ptr) {
         response->set_ok(false);
         auto *new_err_record = response->mutable_rich_error_list()->Add();
-        new_err_record->set_description("result");
+        new_err_record->set_description(request->account());
         new_err_record->set_code(CraneErrCode::ERR_INVALID_ACCOUNT);
         return grpc::Status::OK;
       }
 
-      for (const auto &user_name : account_ptr->users) {
-        entity_list.insert(user_name);
-      }
+      entity_list.insert(account_ptr->users.begin(), account_ptr->users.end());
     }
 
     for (const auto &user_name : entity_list) {

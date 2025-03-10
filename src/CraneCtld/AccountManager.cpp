@@ -610,7 +610,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition(
   const User* p = GetExistedUserInfoNoLock_(username);
   if (p == nullptr)
     return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_INVALID_USER, "result"));
+        FormatRichErr(CraneErrCode::ERR_INVALID_USER, username));
 
   std::string actual_account = account;
   result = CheckIfUserHasPermOnUserOfAccountNoLock_(*op_user_res.value(), p,
@@ -667,7 +667,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos(
   const User* p = GetExistedUserInfoNoLock_(username);
   if (p == nullptr)
     return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_INVALID_USER, "result"));
+        FormatRichErr(CraneErrCode::ERR_INVALID_USER, username));
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result)
@@ -1285,8 +1285,8 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedQosNoLock_(
   for (const auto& [par, pair] : cache_allowed_partition_qos_map) {
     if (!ranges::contains(qos_list, pair.first)) {
       if (!force && !pair.first.empty())
-        return std::unexpected(
-            FormatRichErr(CraneErrCode::ERR_SET_ALLOWED_QOS, pair.first));
+        return std::unexpected(FormatRichErr(CraneErrCode::ERR_SET_ALLOWED_QOS,
+                                             absl::StrJoin(qos_list, ",")));
     }
   }
   return {};
@@ -1425,8 +1425,8 @@ CraneExpectedRich<void> AccountManager::CheckSetAccountAllowedQosNoLock_(
   for (const auto& qos : account->allowed_qos_list) {
     if (!ranges::contains(qos_list, qos)) {
       if (!force && IsDefaultQosOfAnyNodeNoLock_(account, qos))
-        return std::unexpected(
-            FormatRichErr(CraneErrCode::ERR_SET_ACCOUNT_QOS, qos));
+        return std::unexpected(FormatRichErr(CraneErrCode::ERR_SET_ACCOUNT_QOS,
+                                             absl::StrJoin(qos_list, ", ")));
     }
   }
 
