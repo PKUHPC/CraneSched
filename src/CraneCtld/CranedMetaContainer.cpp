@@ -563,7 +563,7 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
 
     if (craned_meta->alive) {
       if (request.new_state() == crane::grpc::CranedControlState::CRANE_DRAIN) {
-        if (craned_meta->drain != true && g_config.Plugin.Enabled) {
+        if ( g_config.Plugin.Enabled && craned_meta->drain != true) {
           //insert event info
           event.set_node_name(craned_id);
           event.set_state(crane::grpc::CranedControlState::CRANE_DRAIN);
@@ -583,7 +583,7 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
         reply.add_modified_nodes(craned_id);
       } else if (request.new_state() ==
                  crane::grpc::CranedControlState::CRANE_NONE) {
-        if (craned_meta->drain != false && g_config.Plugin.Enabled) {
+        if (g_config.Plugin.Enabled && craned_meta->drain != false) {
           //insert event info
           event.set_node_name(craned_id);
           event.set_state(crane::grpc::CranedControlState::CRANE_NONE);
