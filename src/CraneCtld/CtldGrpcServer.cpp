@@ -447,8 +447,14 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
     auto rich_res = g_account_manager->SetAccountAllowedPartition(
         request->uid(), request->name(), std::move(partition_list),
         request->force());
-    if (!rich_res)
+    if (!rich_res) {
+      if (rich_res.error().description().empty())
+        rich_res.error().set_description(
+            absl::StrJoin(request->value_list(), ","));
+
       response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
+    }
+
   } else if (request->type() == crane::grpc::OperationType::Overwrite &&
              request->modify_field() ==
                  crane::grpc::ModifyField::Qos) {  // SetAccountAllowedQos
@@ -459,8 +465,13 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
     auto rich_res = g_account_manager->SetAccountAllowedQos(
         request->uid(), request->name(), default_qos, std::move(qos_list),
         request->force());
-    if (!rich_res)
+    if (!rich_res) {
+      if (rich_res.error().description().empty())
+        rich_res.error().set_description(
+            absl::StrJoin(request->value_list(), ","));
+
       response->mutable_rich_error_list()->Add()->CopyFrom(rich_res.error());
+    }
   } else {  // other operations
     for (const auto &value : request->value_list()) {
       auto modify_res = g_account_manager->ModifyAccount(
@@ -546,9 +557,14 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
         auto rich_res = g_account_manager->SetUserAllowedPartition(
             request->uid(), request->name(), request->account(),
             partition_list);
-        if (!rich_res)
+        if (!rich_res) {
+          if (rich_res.error().description().empty())
+            rich_res.error().set_description(
+                absl::StrJoin(request->value_list(), ","));
+
           response->mutable_rich_error_list()->Add()->CopyFrom(
               rich_res.error());
+        }
       }
       break;
     case crane::grpc::ModifyField::Qos:
@@ -573,9 +589,13 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
             request->uid(), request->name(), request->partition(),
             request->account(), default_qos, std::move(qos_list),
             request->force());
-        if (!rich_res)
+        if (!rich_res) {
+          if (rich_res.error().description().empty())
+            rich_res.error().set_description(
+                absl::StrJoin(request->value_list(), ","));
           response->mutable_rich_error_list()->Add()->CopyFrom(
               rich_res.error());
+        }
       }
       break;
     case crane::grpc::ModifyField::DefaultQos:
