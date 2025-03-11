@@ -631,20 +631,39 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryAccountInfoRequest *request,
     crane::grpc::QueryAccountInfoReply *response) {
-  std::vector<std::string> account_list{request->account_list().begin(),
-                                        request->account_list().end()};
+  std::vector<Account> res_account_list;
+  if (request->account_list().empty()) {
+    auto res = g_account_manager->QueryAllAccountInfo(request->uid());
+    if (!res) {
+      auto *new_err_record = response->mutable_rich_error_list()->Add();
+      new_err_record->set_code(res.error());
+      new_err_record->set_description("");
+    } else {
+      res_account_list = std::move(res.value());
+    }
+  } else {
+    std::unordered_set<std::string> account_list{
+        request->account_list().begin(), request->account_list().end()};
+    for (const auto &account : account_list) {
+      auto res = g_account_manager->QueryAccountInfo(request->uid(), account);
+      if (!res) {
+        auto *new_err_record = response->mutable_rich_error_list()->Add();
+        new_err_record->set_description(account);
+        new_err_record->set_code(res.error());
+      } else {
+        res_account_list.emplace_back(std::move(res.value()));
+      }
+    }
+  }
 
-  auto res = g_account_manager->QueryAccountInfo(request->uid(), account_list);
-  if (res) {
+  if (!res_account_list.empty()) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_code(res.error());
     return grpc::Status::OK;
   }
 
-  for (const auto &it : res.value()) {
-    const auto &account = it.second;
+  for (const auto &account : res_account_list) {
     // put the account info into grpc element
     auto *account_info = response->mutable_account_list()->Add();
     account_info->set_name(account.name);
@@ -686,19 +705,40 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryUserInfoRequest *request,
     crane::grpc::QueryUserInfoReply *response) {
-  std::vector<std::string> user_list{request->user_list().begin(),
-                                     request->user_list().end()};
-  auto res = g_account_manager->QueryUserInfo(request->uid(), user_list);
-  if (res) {
+  std::unordered_set<std::string> user_list{request->user_list().begin(),
+                                            request->user_list().end()};
+
+  std::vector<User> res_user_list;
+  if (user_list.empty()) {
+    auto res = g_account_manager->QueryAllUserInfo(request->uid());
+    if (!res) {
+      auto *new_err_record = response->mutable_rich_error_list()->Add();
+      new_err_record->set_code(res.error());
+      new_err_record->set_description("");
+    } else {
+      res_user_list = std::move(res.value());
+    }
+  } else {
+    for (const auto &username : user_list) {
+      auto res = g_account_manager->QueryUserInfo(request->uid(), username);
+      if (!res) {
+        auto *new_err_record = response->mutable_rich_error_list()->Add();
+        new_err_record->set_description(username);
+        new_err_record->set_code(res.error());
+      } else {
+        res_user_list.emplace_back(std::move(res.value()));
+      }
+    }
+  }
+
+  if (!res_user_list.empty()) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_code(res.error());
     return grpc::Status::OK;
   }
 
-  for (const auto &it : res.value()) {
-    const auto &user = it.second;
+  for (const auto &user : res_user_list) {
     for (const auto &[account, item] : user.account_to_attrs_map) {
       if (!request->account().empty() && account != request->account()) {
         continue;
@@ -742,19 +782,41 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryQosInfoRequest *request,
     crane::grpc::QueryQosInfoReply *response) {
-  std::vector<std::string> qos_list{request->qos_list().begin(),
-                                    request->qos_list().end()};
-  auto res = g_account_manager->QueryQosInfo(request->uid(), qos_list);
-  if (res) {
+  std::vector<Qos> res_qos_list;
+
+  if (request->qos_list().empty()) {
+    auto res = g_account_manager->QueryAllQosInfo(request->uid());
+    if (!res) {
+      auto *new_err_record = response->mutable_rich_error_list()->Add();
+      new_err_record->set_code(res.error());
+      new_err_record->set_description("");
+    } else {
+      res_qos_list = std::move(res.value());
+    }
+  } else {
+    std::unordered_set<std::string> qos_list{request->qos_list().begin(),
+                                             request->qos_list().end()};
+    for (const auto &qos : qos_list) {
+      auto res = g_account_manager->QueryQosInfo(request->uid(), qos);
+      if (!res) {
+        auto *new_err_record = response->mutable_rich_error_list()->Add();
+        new_err_record->set_description(qos);
+        new_err_record->set_code(res.error());
+      } else {
+        res_qos_list.emplace_back(std::move(res.value()));
+      }
+    }
+  }
+
+  if (!res_qos_list.empty()) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_code(res.error());
     return grpc::Status::OK;
   }
 
   auto *list = response->mutable_qos_list();
-  for (const auto &[name, qos] : res.value()) {
+  for (const auto &qos : res_qos_list) {
     auto *qos_info = list->Add();
     qos_info->set_name(qos.name);
     qos_info->set_description(qos.description);

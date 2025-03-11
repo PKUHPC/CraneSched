@@ -312,66 +312,69 @@ AccountManager::QosMapMutexSharedPtr AccountManager::GetAllQosInfo() {
   return QosMapMutexSharedPtr{&m_qos_map_, &m_rw_qos_mutex_};
 }
 
-CraneExpected<std::unordered_map<uid_t, User>> AccountManager::QueryUserInfo(
-    uint32_t uid, const std::vector<std::string>& user_list) {
+CraneExpected<std::vector<User>> AccountManager::QueryAllUserInfo(
+    uint32_t uid) {
+  std::vector<User> res_user_list;
+
   util::read_lock_guard user_guard(m_rw_user_mutex_);
-  CraneExpected<void> result{};
-  std::unordered_map<uid_t, User> res_user_map;
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result) return std::unexpected(user_result.error());
   const User* op_user = user_result.value();
 
-  if (user_list.empty()) {  // Query all users that can be queried.
-    // Operators and above can query all users.
-    if (CheckIfUserHasHigherPrivThan_(*op_user, User::None)) {
-      // The rules for querying user information are the same as those for
-      // querying accounts
-      for (const auto& [user_name, user] : m_user_map_) {
-        if (user->deleted) continue;
-        res_user_map.try_emplace(user->uid, *user);
-      }
-    } else {
-      util::read_lock_guard account_guard(m_rw_account_mutex_);
-      std::queue<std::string> queue;
-      for (const auto& [acct, item] : op_user->account_to_attrs_map) {
-        queue.push(acct);
-        while (!queue.empty()) {
-          std::string father = queue.front();
-          for (const auto& user : m_account_map_.at(father)->users) {
-            res_user_map.try_emplace(m_user_map_.at(user)->uid,
-                                     *(m_user_map_.at(user)));
-          }
-          queue.pop();
-          for (const auto& child : m_account_map_.at(father)->child_accounts) {
-            queue.push(child);
-          }
+  // Operators and above can query all users.
+  if (CheckIfUserHasHigherPrivThan_(*op_user, User::None)) {
+    // The rules for querying user information are the same as those for
+    // querying accounts
+    for (const auto& user : m_user_map_ | std::views::values) {
+      if (user->deleted) continue;
+      res_user_list.emplace_back(*user);
+    }
+  } else {
+    util::read_lock_guard account_guard(m_rw_account_mutex_);
+    std::queue<std::string> queue;
+    for (const auto& acct : op_user->account_to_attrs_map | std::views::keys) {
+      queue.push(acct);
+      while (!queue.empty()) {
+        std::string father = queue.front();
+        for (const auto& user : m_account_map_.at(father)->users) {
+          res_user_list.emplace_back(*(m_user_map_.at(user)));
+        }
+        queue.pop();
+        for (const auto& child : m_account_map_.at(father)->child_accounts) {
+          queue.push(child);
         }
       }
     }
-  } else {  // Query the specified user information.
-    util::read_lock_guard account_guard(m_rw_account_mutex_);
-
-    for (const auto& user_name : user_list) {
-      const User* user = GetExistedUserInfoNoLock_(user_name);
-      if (!user) continue;
-
-      result = CheckIfUserHasPermOnUserNoLock_(*op_user, user, true);
-      if (!result) continue;
-
-      res_user_map.try_emplace(user->uid, *user);
-    }
   }
 
-  return res_user_map;
+  return res_user_list;
 }
 
-CraneExpected<std::unordered_map<std::string, Account>>
-AccountManager::QueryAccountInfo(uint32_t uid,
-                                 const std::vector<std::string>& account_list) {
+CraneExpected<User> AccountManager::QueryUserInfo(uint32_t uid,
+                                                  const std::string& username) {
+  util::read_lock_guard user_guard(m_rw_user_mutex_);
+
+  auto user_result = GetUserInfoByUidNoLock_(uid);
+  if (!user_result) return std::unexpected(user_result.error());
+  const User* op_user = user_result.value();
+
+  // Query the specified user information.
+  util::read_lock_guard account_guard(m_rw_account_mutex_);
+
+  const User* user = GetExistedUserInfoNoLock_(username);
+  if (!user) return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+
+  auto result = CheckIfUserHasPermOnUserNoLock_(*op_user, user, true);
+  if (!result) return std::unexpected(result.error());
+
+  return *user;
+}
+
+CraneExpected<std::vector<Account>> AccountManager::QueryAllAccountInfo(
+    uint32_t uid) {
   User res_user;
-  CraneExpected<void> result{};
-  std::unordered_map<std::string, Account> res_account_map;
+  std::vector<Account> res_account_list;
 
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -382,59 +385,70 @@ AccountManager::QueryAccountInfo(uint32_t uid,
   }
 
   util::read_lock_guard account_guard(m_rw_account_mutex_);
-  if (account_list.empty()) {
-    if (CheckIfUserHasHigherPrivThan_(res_user, User::None)) {
-      // If an administrator user queries account information, all
-      // accounts are returned, variable user_account not used
-      for (const auto& [name, account] : m_account_map_) {
-        if (account->deleted) continue;
-        res_account_map.try_emplace(account->name, *account);
-      }
-    } else {
-      // Otherwise, only all sub-accounts under your own accounts will be
-      // returned
-      std::queue<std::string> queue;
-      for (const auto& [acct, item] : res_user.account_to_attrs_map) {
-        // Z->A->B--->C->E
-        //    |->D    |->F
-        // If we query account C, [Z,A,B,C,E,F] is included.
-        std::string p_name = m_account_map_.at(acct)->parent_account;
-        while (!p_name.empty()) {
-          res_account_map.try_emplace(p_name, *(m_account_map_.at(p_name)));
-          p_name = m_account_map_.at(p_name)->parent_account;
-        }
 
-        queue.push(acct);
-        while (!queue.empty()) {
-          std::string father = queue.front();
-          const auto& account_content = m_account_map_.at(father);
-          res_account_map.try_emplace(account_content->name,
-                                      *(account_content));
-          queue.pop();
-          for (const auto& child : account_content->child_accounts) {
-            queue.push(child);
-          }
-        }
-      }
+  if (CheckIfUserHasHigherPrivThan_(res_user, User::None)) {
+    // If an administrator user queries account information, all
+    // accounts are returned, variable user_account not used
+    for (const auto& account : m_account_map_ | std::views::values) {
+      if (account->deleted) continue;
+      res_account_list.emplace_back(*account);
     }
   } else {
-    for (const auto& account_name : account_list) {
-      const Account* account = GetAccountInfoNoLock_(account_name);
-      result = CheckIfUserHasPermOnAccountNoLock_(res_user, account_name, true);
-      if (!result) continue;
-      res_account_map.try_emplace(account_name, *account);
+    // Otherwise, only all sub-accounts under your own accounts will be
+    // returned
+    std::queue<std::string> queue;
+    for (const auto& acct : res_user.account_to_attrs_map | std::views::keys) {
+      // Z->A->B--->C->E
+      //    |->D    |->F
+      // If we query account C, [Z,A,B,C,E,F] is included.
+      std::string p_name = m_account_map_.at(acct)->parent_account;
+      while (!p_name.empty()) {
+        res_account_list.emplace_back(*(m_account_map_.at(p_name)));
+        p_name = m_account_map_.at(p_name)->parent_account;
+      }
+
+      queue.push(acct);
+      while (!queue.empty()) {
+        std::string father = queue.front();
+        const auto& account_content = m_account_map_.at(father);
+        res_account_list.emplace_back(*(account_content));
+        queue.pop();
+        for (const auto& child : account_content->child_accounts) {
+          queue.push(child);
+        }
+      }
     }
   }
 
-  return res_account_map;
+  return res_account_list;
 }
 
-CraneExpected<std::unordered_map<std::string, Qos>>
-AccountManager::QueryQosInfo(uint32_t uid,
-                             const std::vector<std::string>& qos_list) {
+CraneExpected<Account> AccountManager::QueryAccountInfo(
+    uint32_t uid, const std::string& account) {
   User res_user;
   CraneExpected<void> result{};
-  std::unordered_map<std::string, Qos> res_qos_map;
+
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    util::read_lock_guard account_guard(m_rw_account_mutex_);
+    auto user_result = GetUserInfoByUidNoLock_(uid);
+    if (!user_result) return std::unexpected(user_result.error());
+    res_user = *user_result.value();
+  }
+
+  util::read_lock_guard account_guard(m_rw_account_mutex_);
+
+  const Account* account_ptr = GetAccountInfoNoLock_(account);
+  result = CheckIfUserHasPermOnAccountNoLock_(res_user, account, true);
+  if (!result) return std::unexpected(result.error());
+
+  return *account_ptr;
+}
+
+CraneExpected<std::vector<Qos>> AccountManager::QueryAllQosInfo(uint32_t uid) {
+  User res_user;
+
+  std::vector<Qos> res_qos_list;
 
   {
     util::read_lock_guard user_guard(m_rw_user_mutex_);
@@ -446,42 +460,56 @@ AccountManager::QueryQosInfo(uint32_t uid,
 
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
 
-  if (qos_list.empty()) {
-    if (CheckIfUserHasHigherPrivThan_(res_user, User::None)) {
-      for (const auto& [name, qos] : m_qos_map_) {
-        if (qos->deleted) continue;
-        res_qos_map.try_emplace(name, *qos);
-      }
-    } else {
-      for (const auto& [acct, item] : res_user.account_to_attrs_map) {
-        for (const auto& part_qos_map :
-             item.allowed_partition_qos_map | std::views::values) {
-          for (const auto& qos : part_qos_map.second) {
-            res_qos_map.try_emplace(qos, *(m_qos_map_.at(qos)));
-          }
-        }
-      }
+  if (CheckIfUserHasHigherPrivThan_(res_user, User::None)) {
+    for (const auto& qos : m_qos_map_ | std::views::values) {
+      if (qos->deleted) continue;
+      res_qos_list.emplace_back(*qos);
     }
   } else {
-    for (const auto& qos_name : qos_list) {
-      const Qos* qos = GetExistedQosInfoNoLock_(qos_name);
-      if (!qos) continue;
-
-      if (res_user.admin_level < User::Operator) {
-        bool found = false;
-        for (const auto& [acct, item] : res_user.account_to_attrs_map) {
-          for (const auto& [part, part_qos_map] :
-               item.allowed_partition_qos_map) {
-            found = std::ranges::contains(part_qos_map.second, qos_name);
-          }
+    for (const auto& item :
+         res_user.account_to_attrs_map | std::views::values) {
+      for (const auto& part_qos_map :
+           item.allowed_partition_qos_map | std::views::values) {
+        for (const auto& qos : part_qos_map.second) {
+          res_qos_list.emplace_back(*(m_qos_map_.at(qos)));
         }
-        if (!found) continue;
       }
-      res_qos_map.try_emplace(qos_name, *qos);
     }
   }
 
-  return res_qos_map;
+  return res_qos_list;
+}
+
+CraneExpected<Qos> AccountManager::QueryQosInfo(uint32_t uid,
+                                                const std::string& qos) {
+  User res_user;
+
+  {
+    util::read_lock_guard user_guard(m_rw_user_mutex_);
+    auto user_result = GetUserInfoByUidNoLock_(uid);
+    if (!user_result) return std::unexpected(user_result.error());
+    const User* op_user = user_result.value();
+    res_user = *op_user;
+  }
+
+  util::read_lock_guard qos_guard(m_rw_qos_mutex_);
+
+  const Qos* qos_ptr = GetExistedQosInfoNoLock_(qos);
+  if (!qos_ptr) return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
+
+  if (res_user.admin_level < User::Operator) {
+    bool found = false;
+    for (const auto& item :
+         res_user.account_to_attrs_map | std::views::values) {
+      for (const auto& part_qos_map :
+           item.allowed_partition_qos_map | std::views::values) {
+        found = std::ranges::contains(part_qos_map.second, qos);
+      }
+    }
+    if (!found) return std::unexpected(CraneErrCode::ERR_QOS_MISSING);
+  }
+
+  return *qos_ptr;
 }
 
 CraneExpected<void> AccountManager::ModifyAdminLevel(uint32_t uid,

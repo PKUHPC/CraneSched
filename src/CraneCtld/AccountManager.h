@@ -57,14 +57,18 @@ class AccountManager {
 
   CraneExpected<void> DeleteQos(uint32_t uid, const std::string& name);
 
-  CraneExpected<std::unordered_map<uid_t, User>> QueryUserInfo(
-      uint32_t uid, const std::vector<std::string>& user_list);
+  CraneExpected<std::vector<User>> QueryAllUserInfo(uint32_t uid);
 
-  CraneExpected<std::unordered_map<std::string, Account>> QueryAccountInfo(
-      uint32_t uid, const std::vector<std::string>& account_list);
+  CraneExpected<User> QueryUserInfo(uint32_t uid, const std::string& username);
 
-  CraneExpected<std::unordered_map<std::string, Qos>> QueryQosInfo(
-      uint32_t uid, const std::vector<std::string>& qos_list);
+  CraneExpected<std::vector<Account>> QueryAllAccountInfo(uint32_t uid);
+
+  CraneExpected<Account> QueryAccountInfo(uint32_t uid,
+                                          const std::string& account);
+
+  CraneExpected<std::vector<Qos>> QueryAllQosInfo(uint32_t uid);
+
+  CraneExpected<Qos> QueryQosInfo(uint32_t uid, const std::string& qos);
 
   UserMutexSharedPtr GetExistedUserInfo(const std::string& name);
   UserMapMutexSharedPtr GetAllUserInfo();
@@ -334,7 +338,7 @@ class AccountManager {
                                                const std::string& qos);
 
   CraneExpected<void> BlockUserNoLock_(const std::string& name,
-                                 const std::string& account, bool block);
+                                       const std::string& account, bool block);
 
   CraneExpected<void> BlockAccountNoLock_(const std::string& name, bool block);
 

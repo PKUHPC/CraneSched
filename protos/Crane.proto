@@ -346,8 +346,8 @@ message QueryAccountInfoRequest {
 
 message QueryAccountInfoReply {
   bool ok = 1;
-  ErrCode code = 2;
-  repeated AccountInfo account_list = 3;
+  repeated AccountInfo account_list = 2;
+  repeated RichError rich_error_list = 3;
 }
 
 message QueryUserInfoRequest {
@@ -358,8 +358,8 @@ message QueryUserInfoRequest {
 
 message QueryUserInfoReply {
   bool ok = 1;
-  ErrCode code = 2;
-  repeated UserInfo user_list = 3;
+  repeated UserInfo user_list = 2;
+  repeated RichError rich_error_list = 3;
 }
 
 message QueryQosInfoRequest {
@@ -369,8 +369,8 @@ message QueryQosInfoRequest {
 
 message QueryQosInfoReply {
   bool ok = 1;
-  ErrCode code = 2;
-  repeated QosInfo qos_list = 5;
+  repeated QosInfo qos_list = 2;
+  repeated RichError rich_error_list = 3;
 }
 
 message BlockAccountOrUserRequest {
