@@ -51,6 +51,7 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
 }
 
 void CtldClient::CranedConnected() {
+  CRANE_DEBUG("Notify Ctld CranedConnected.");
   crane::grpc::CranedConnectedCtldNotify req;
   req.set_craned_id(g_config.CranedIdOfThisNode);
   grpc::ClientContext context;

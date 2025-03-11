@@ -71,6 +71,9 @@ void InitFromStdin(int argc, char** argv) {
   }
 
   g_config.JobId = msg.job_id();
+  g_config.StepId = 0;
+  g_config.StepSpec = msg.step_spec();
+  g_config.CranedIdOfThisNode = msg.craned_id();
   g_config.TaskCount = 1;
   g_config.SupervisorDebugLevel = msg.debug_level();
   g_config.CranedUnixSocketPath = msg.craned_unix_socket_path();
@@ -173,9 +176,6 @@ void GlobalVariableInit() {
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 
-  g_cfored_manager = std::make_unique<Supervisor::CforedManager>();
-  g_cfored_manager->Init();
-
   g_server = std::make_unique<Supervisor::SupervisorServer>();
 
   ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
@@ -202,8 +202,6 @@ void StartServer() {
   g_task_mgr->Wait();
   g_task_mgr.reset();
 
-  // CforedManager MUST be destructed after TaskManager.
-  g_cfored_manager.reset();
   g_craned_client.reset();
   g_plugin_client.reset();
   g_thread_pool->wait();

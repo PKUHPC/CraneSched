@@ -37,18 +37,23 @@
 
 namespace Supervisor {
 
-inline bool ExecutionInterface::IsBatch() const {
-  return task.type() == crane::grpc::Batch;
+bool StepSpec::IsBatch() const { return spec.type() == crane::grpc::Batch; }
+
+bool StepSpec::IsCrun() const {
+  return spec.type() == crane::grpc::Interactive &&
+         spec.interactive_meta().interactive_type() == crane::grpc::Crun;
 }
 
-inline bool ExecutionInterface::IsCrun() const {
-  return task.type() == crane::grpc::Interactive &&
-         task.interactive_meta().interactive_type() == crane::grpc::Crun;
+bool StepSpec::IsCalloc() const {
+  return spec.type() == crane::grpc::Interactive &&
+         spec.interactive_meta().interactive_type() == crane::grpc::Calloc;
 }
-
-inline bool ExecutionInterface::IsCalloc() const {
-  return task.type() == crane::grpc::Interactive &&
-         task.interactive_meta().interactive_type() == crane::grpc::Calloc;
+void ExecutionInterface::TaskProcStopped() {
+  auto ok_to_free = step_spec->cfored_client->TaskProcessStop(m_pid_);
+  if (ok_to_free) {
+    CRANE_TRACE("It's ok to unregister task #{}", g_config.JobId);
+    step_spec->cfored_client->TaskEnd(m_pid_);
+  }
 }
 
 std::string ExecutionInterface::ParseFilePathPattern_(
@@ -64,12 +69,13 @@ std::string ExecutionInterface::ParseFilePathPattern_(
   // Path ends with a directory, append default stdout/err file name
   // `Crane-<Job ID>.out` to the path.
   if (std::filesystem::is_directory(resolved_path))
-    resolved_path = resolved_path / fmt::format("Crane-{}.out", task.task_id());
+    resolved_path =
+        resolved_path / fmt::format("Crane-{}.out", step_spec->spec.task_id());
 
   std::string resolved_path_pattern = std::move(resolved_path.string());
-  absl::StrReplaceAll({{"%j", std::to_string(task.task_id())},
+  absl::StrReplaceAll({{"%j", std::to_string(step_spec->spec.task_id())},
                        {"%u", pwd.Username()},
-                       {"%x", task.name()}},
+                       {"%x", step_spec->spec.name()}},
                       &resolved_path_pattern);
 
   return resolved_path_pattern;
@@ -79,11 +85,11 @@ std::string ExecutionInterface::ParseFilePathPattern_(
 EnvMap ExecutionInterface::GetChildProcessEnv_() const {
   std::unordered_map<std::string, std::string> env_map;
   // Crane Env will override user task env;
-  for (auto& [name, value] : this->task.env()) {
+  for (auto& [name, value] : this->step_spec->spec.env()) {
     env_map.emplace(name, value);
   }
 
-  if (this->task.get_user_env()) {
+  if (this->step_spec->spec.get_user_env()) {
     // If --get-user-env is set, the new environment is inherited
     // from the execution CraneD rather than the submitting node.
     //
@@ -106,18 +112,21 @@ EnvMap ExecutionInterface::GetChildProcessEnv_() const {
   }
 
   env_map.emplace("CRANE_JOB_NODELIST",
-                  absl::StrJoin(this->task.allocated_nodes(), ";"));
-  env_map.emplace("CRANE_EXCLUDES", absl::StrJoin(this->task.excludes(), ";"));
-  env_map.emplace("CRANE_JOB_NAME", this->task.name());
-  env_map.emplace("CRANE_ACCOUNT", this->task.account());
-  env_map.emplace("CRANE_PARTITION", this->task.partition());
-  env_map.emplace("CRANE_QOS", this->task.qos());
+                  absl::StrJoin(this->step_spec->spec.allocated_nodes(), ";"));
+  env_map.emplace("CRANE_EXCLUDES",
+                  absl::StrJoin(this->step_spec->spec.excludes(), ";"));
+  env_map.emplace("CRANE_JOB_NAME", this->step_spec->spec.name());
+  env_map.emplace("CRANE_ACCOUNT", this->step_spec->spec.account());
+  env_map.emplace("CRANE_PARTITION", this->step_spec->spec.partition());
+  env_map.emplace("CRANE_QOS", this->step_spec->spec.qos());
 
-  if (this->IsCrun() && !this->task.interactive_meta().term_env().empty()) {
-    env_map.emplace("TERM", this->task.interactive_meta().term_env());
+  if (step_spec->IsCrun() &&
+      !this->step_spec->spec.interactive_meta().term_env().empty()) {
+    env_map.emplace("TERM",
+                    this->step_spec->spec.interactive_meta().term_env());
   }
 
-  int64_t time_limit_sec = this->task.time_limit().seconds();
+  int64_t time_limit_sec = this->step_spec->spec.time_limit().seconds();
   int hours = time_limit_sec / 3600;
   int minutes = (time_limit_sec % 3600) / 60;
   int seconds = time_limit_sec % 60;
@@ -146,31 +155,33 @@ CraneErr ExecutionInterface::SetChildProcessProperty_() {
   // Currently we only set the primary gid and the egid when task was
   // submitted.
   std::vector<gid_t> gids;
-  if (task.gid() != pwd.Gid()) gids.emplace_back(task.gid());
+  if (step_spec->spec.gid() != pwd.Gid())
+    gids.emplace_back(step_spec->spec.gid());
   gids.emplace_back(pwd.Gid());
 
   int rc = setgroups(gids.size(), gids.data());
   if (rc == -1) {
     fmt::print(stderr, "[Subprocess] Error: setgroups() failed: {}\n",
-               task.task_id(), strerror(errno));
+               step_spec->spec.task_id(), strerror(errno));
     return CraneErr::kSystemErr;
   }
 
-  rc = setresgid(task.gid(), task.gid(), task.gid());
+  rc = setresgid(step_spec->spec.gid(), step_spec->spec.gid(),
+                 step_spec->spec.gid());
   if (rc == -1) {
     fmt::print(stderr, "[Subprocess] Error: setegid() failed: {}\n",
-               task.task_id(), strerror(errno));
+               step_spec->spec.task_id(), strerror(errno));
     return CraneErr::kSystemErr;
   }
 
   rc = setresuid(pwd.Uid(), pwd.Uid(), pwd.Uid());
   if (rc == -1) {
     fmt::print(stderr, "[Subprocess] Error: seteuid() failed: {}\n",
-               task.task_id(), strerror(errno));
+               step_spec->spec.task_id(), strerror(errno));
     return CraneErr::kSystemErr;
   }
 
-  const std::string& cwd = task.cwd();
+  const std::string& cwd = step_spec->spec.cwd();
   rc = chdir(cwd.c_str());
   if (rc == -1) {
     fmt::print(stderr, "[Subprocess] Error: chdir to {}. {}\n", cwd.c_str(),
@@ -233,7 +244,7 @@ std::vector<std::string> ExecutionInterface::GetChildProcessExecArgv_() const {
   // "bash (--login) -c 'm_executable_ [m_arguments_...]'"
   std::vector<std::string> argv;
   argv.emplace_back("/bin/bash");
-  if (task.get_user_env()) {
+  if (step_spec->spec.get_user_env()) {
     // Use --login to load user's shell settings
     argv.emplace_back("--login");
   }
@@ -254,8 +265,8 @@ std::string ContainerInstance::ParseOCICmdPattern_(
   std::string parsed_cmd(cmd);
   // NOTE: Using m_temp_path_ as the bundle is modified and stored here
   absl::StrReplaceAll({{"%b", m_temp_path_.string()},
-                       {"%j", std::to_string(task.task_id())},
-                       {"%x", task.name()},
+                       {"%j", std::to_string(step_spec->spec.task_id())},
+                       {"%x", step_spec->spec.name()},
                        {"%u", pwd.Username()},
                        {"%U", std::to_string(pwd.Uid())}},
                       &parsed_cmd);
@@ -271,22 +282,22 @@ CraneErr ContainerInstance::ModifyOCIBundleConfig_(
   auto src_rootfs = std::filesystem::path(src) / "rootfs";
   if (!std::filesystem::exists(src_config) ||
       !std::filesystem::exists(src_rootfs)) {
-    CRANE_ERROR("Bundle provided by task #{} not exists : {}", task.task_id(),
-                src_config.string());
+    CRANE_ERROR("Bundle provided by task #{} not exists : {}",
+                step_spec->spec.task_id(), src_config.string());
     return CraneErr::kInvalidParam;
   }
 
   std::ifstream fin{src_config};
   if (!fin) {
     CRANE_ERROR("Failed to open bundle config provided by task #{}: {}",
-                task.task_id(), src_config.string());
+                step_spec->spec.task_id(), src_config.string());
     return CraneErr::kSystemErr;
   }
 
   json config = json::parse(fin, nullptr, false);
   if (config.is_discarded()) {
     CRANE_ERROR("Bundle config provided by task #{} is invalid: {}",
-                task.task_id(), src_config.string());
+                step_spec->spec.task_id(), src_config.string());
     return CraneErr::kInvalidParam;
   }
 
@@ -324,15 +335,15 @@ CraneErr ContainerInstance::ModifyOCIBundleConfig_(
 
     // For container, we use `/bin/sh` as the default interpreter.
     std::string real_exe = "/bin/sh";
-    if (IsBatch() && !task.batch_meta().interpreter().empty())
-      real_exe = task.batch_meta().interpreter();
+    if (step_spec->IsBatch() && !step_spec->spec.batch_meta().interpreter().empty())
+      real_exe = step_spec->spec.batch_meta().interpreter();
 
     std::vector<std::string> args = absl::StrSplit(real_exe, ' ');
     args.emplace_back(std::move(parsed_sh_mounted_path));
     process["args"] = args;
   } catch (json::exception& e) {
     CRANE_ERROR("Failed to generate bundle config for task #{}: {}",
-                task.task_id(), e.what());
+                step_spec->spec.task_id(), e.what());
     return CraneErr::kInvalidParam;
   }
 
@@ -341,7 +352,7 @@ CraneErr ContainerInstance::ModifyOCIBundleConfig_(
   std::ofstream fout{dst_config};
   if (!fout) {
     CRANE_ERROR("Failed to write bundle config for task #{}: {}",
-                task.task_id(), dst_config.string());
+                step_spec->spec.task_id(), dst_config.string());
     return CraneErr::kSystemErr;
   }
   fout << config.dump(4);
@@ -352,35 +363,37 @@ CraneErr ContainerInstance::ModifyOCIBundleConfig_(
 
 CraneErr ContainerInstance::Prepare() {
   // Generate path and params.
-  m_temp_path_ = g_config.Container.TempDir / fmt::format("{}", task.task_id());
-  m_bundle_path_ = task.container();
+  m_temp_path_ =
+      g_config.Container.TempDir / fmt::format("{}", step_spec->spec.task_id());
+  m_bundle_path_ = step_spec->spec.container();
   m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeRun);
   m_env_ = GetChildProcessEnv_();
   // m_arguments_ is not applicable for container tasks.
 
   // Write script into the temp folder
-  auto sh_path = m_temp_path_ / fmt::format("Crane-{}.sh", task.task_id());
+  auto sh_path =
+      m_temp_path_ / fmt::format("Crane-{}.sh", step_spec->spec.task_id());
   if (!util::os::CreateFoldersForFile(sh_path)) {
     return CraneErr::kSystemErr;
   }
 
   FILE* fptr = fopen(sh_path.c_str(), "w");
   if (fptr == nullptr) {
-    CRANE_ERROR("Failed write the script for task #{}", task.task_id());
+    CRANE_ERROR("Failed write the script for task #{}", step_spec->spec.task_id());
     return CraneErr::kSystemErr;
   }
 
-  if (IsBatch())
-    fputs(task.batch_meta().sh_script().c_str(), fptr);
+  if (step_spec->IsBatch())
+    fputs(step_spec->spec.batch_meta().sh_script().c_str(), fptr);
   else  // Crun
-    fputs(task.interactive_meta().sh_script().c_str(), fptr);
+    fputs(step_spec->spec.interactive_meta().sh_script().c_str(), fptr);
 
   fclose(fptr);
 
   chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
 
   // Write meta
-  if (IsBatch()) {
+  if (step_spec->IsBatch()) {
     // Prepare file output name for batch tasks.
     /* Perform file name substitutions
      * %j - Job ID
@@ -389,13 +402,13 @@ CraneErr ContainerInstance::Prepare() {
      */
     auto meta = std::make_unique<BatchMetaInExecution>();
     meta->parsed_output_file_pattern = ParseFilePathPattern_(
-        task.batch_meta().output_file_pattern(), task.cwd());
+        step_spec->spec.batch_meta().output_file_pattern(), step_spec->spec.cwd());
 
     // If -e / --error is not defined, leave
     // batch_meta.parsed_error_file_pattern empty;
-    if (!task.batch_meta().error_file_pattern().empty()) {
+    if (!step_spec->spec.batch_meta().error_file_pattern().empty()) {
       meta->parsed_error_file_pattern = ParseFilePathPattern_(
-          task.batch_meta().error_file_pattern(), task.cwd());
+          step_spec->spec.batch_meta().error_file_pattern(), step_spec->spec.cwd());
     }
 
     m_meta_ = std::move(meta);
@@ -408,7 +421,7 @@ CraneErr ContainerInstance::Prepare() {
   auto err = ModifyOCIBundleConfig_(m_bundle_path_, m_temp_path_);
   if (err != CraneErr::kOk) {
     CRANE_ERROR("Failed to modify OCI bundle config for task #{}",
-                task.task_id());
+                step_spec->spec.task_id());
     return err;
   }
 
@@ -437,10 +450,11 @@ CraneErr ContainerInstance::Spawn() {
   pid_t child_pid;
   bool launch_pty{false};
 
-  if (IsCrun()) {
+  if (step_spec->IsCrun()) {
     auto* meta = dynamic_cast<CrunMetaInExecution*>(m_meta_.get());
-    launch_pty = task.interactive_meta().pty();
-    CRANE_DEBUG("Launch crun task #{} pty: {}", task.task_id(), launch_pty);
+    launch_pty = step_spec->spec.interactive_meta().pty();
+    CRANE_DEBUG("Launch crun task #{} pty: {}", step_spec->spec.task_id(),
+                launch_pty);
 
     if (launch_pty) {
       child_pid = forkpty(&meta->msg_fd, nullptr, nullptr, nullptr);
@@ -458,25 +472,25 @@ CraneErr ContainerInstance::Spawn() {
   }
 
   if (child_pid == -1) {
-    CRANE_ERROR("fork() failed for task #{}: {}", task.task_id(),
+    CRANE_ERROR("fork() failed for task #{}: {}", step_spec->spec.task_id(),
                 strerror(errno));
     return CraneErr::kSystemErr;
   }
 
   if (child_pid > 0) {  // Parent proc
     m_pid_ = child_pid;
-    CRANE_DEBUG("Subprocess was created for task #{} pid: {}", task.task_id(),
-                m_pid_);
+    CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
+                step_spec->spec.task_id(), m_pid_);
 
-    if (IsCrun()) {
+    if (step_spec->IsCrun()) {
       auto* meta = dynamic_cast<CrunMetaInExecution*>(m_meta_.get());
-      g_cfored_manager->RegisterIOForward(task.interactive_meta().cfored_name(),
-                                          meta->msg_fd, launch_pty);
+      step_spec->cfored_client->SetUpTaskFwd(m_pid_, meta->msg_fd, meta->msg_fd,
+                                             launch_pty);
     }
 
     int ctrl_fd = ctrl_sock_pair[0];
     close(ctrl_sock_pair[1]);
-    if (IsCrun() && !launch_pty) {
+    if (step_spec->IsCrun() && !launch_pty) {
       close(crun_io_sock_pair[1]);
     }
 
@@ -487,7 +501,7 @@ CraneErr ContainerInstance::Spawn() {
     ChildProcessReady child_process_ready;
 
     CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
-                task.task_id());
+                step_spec->spec.task_id());
 
     // Tell subprocess that the parent process is ready. Then the
     // subprocess should continue to exec().
@@ -501,7 +515,8 @@ CraneErr ContainerInstance::Spawn() {
     if (ok) ok &= ostream.Flush();
     if (!ok) {
       CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}: {}",
-                  child_pid, task.task_id(), strerror(ostream.GetErrno()));
+                  child_pid, step_spec->spec.task_id(),
+                  strerror(ostream.GetErrno()));
       close(ctrl_fd);
 
       // Communication failure caused by process crash or grpc error.
@@ -522,7 +537,7 @@ CraneErr ContainerInstance::Spawn() {
                     strerror(istream.GetErrno()));
       if (!msg.ok())
         CRANE_ERROR("False from subprocess {} of task #{}", child_pid,
-                    task.task_id());
+                    step_spec->spec.task_id());
       close(ctrl_fd);
 
       // See comments above.
@@ -567,9 +582,9 @@ CraneErr ContainerInstance::Spawn() {
       std::abort();
     }
 
-    if (IsBatch()) {
+    if (step_spec->IsBatch()) {
       SetChildProcessBatchFd_();
-    } else if (IsCrun() && !launch_pty) {
+    } else if (step_spec->IsCrun() && !launch_pty) {
       close(crun_io_sock_pair[0]);
 
       dup2(crun_io_sock_pair[1], 0);
@@ -591,7 +606,7 @@ CraneErr ContainerInstance::Spawn() {
     // Close stdin for batch tasks.
     // If these file descriptors are not closed, a program like mpirun may
     // keep waiting for the input from stdin or other fds and will never end.
-    if (IsBatch()) close(0);
+    if (step_spec->IsBatch()) close(0);
     util::os::CloseFdFrom(3);
 
     // Set env just in case OCI requires some.
@@ -676,7 +691,7 @@ CraneErr ContainerInstance::Kill(int signum) {
     if (rc) {
       CRANE_TRACE(
           "[Subprocess] Failed to kill container for task #{}: error in {}",
-          task.task_id(), cmd);
+          step_spec->spec.task_id(), cmd);
     }
 
   ContainerDelete:
@@ -687,7 +702,7 @@ CraneErr ContainerInstance::Kill(int signum) {
     if (rc) {
       CRANE_TRACE(
           "[Subprocess] Failed to delete container for task #{}: error in {}",
-          task.task_id(), cmd);
+          step_spec->spec.task_id(), cmd);
     }
 
   ProcessKill:
@@ -707,7 +722,7 @@ CraneErr ContainerInstance::Kill(int signum) {
 }
 
 CraneErr ContainerInstance::Cleanup() {
-  if (IsBatch() || IsCrun()) {
+  if (step_spec->IsBatch() || step_spec->IsCrun()) {
     if (!m_temp_path_.empty())
       g_thread_pool->detach_task(
           [p = m_temp_path_]() { util::os::DeleteFolders(p); });
@@ -724,21 +739,21 @@ CraneErr ProcessInstance::Prepare() {
 
   FILE* fptr = fopen(sh_path.c_str(), "w");
   if (fptr == nullptr) {
-    CRANE_ERROR("Failed write the script for task #{}", task.task_id());
+    CRANE_ERROR("Failed write the script for task #{}", step_spec->spec.task_id());
     return CraneErr::kSystemErr;
   }
 
-  if (IsBatch())
-    fputs(task.batch_meta().sh_script().c_str(), fptr);
+  if (step_spec->IsBatch())
+    fputs(step_spec->spec.batch_meta().sh_script().c_str(), fptr);
   else  // Crun
-    fputs(task.interactive_meta().sh_script().c_str(), fptr);
+    fputs(step_spec->spec.interactive_meta().sh_script().c_str(), fptr);
 
   fclose(fptr);
 
   chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
 
   // Write m_meta_
-  if (IsBatch()) {
+  if (step_spec->IsBatch()) {
     // Prepare file output name for batch tasks.
     /* Perform file name substitutions
      * %j - Job ID
@@ -747,13 +762,13 @@ CraneErr ProcessInstance::Prepare() {
      */
     auto meta = std::make_unique<BatchMetaInExecution>();
     meta->parsed_output_file_pattern = ParseFilePathPattern_(
-        task.batch_meta().output_file_pattern(), task.cwd());
+        step_spec->spec.batch_meta().output_file_pattern(), step_spec->spec.cwd());
 
     // If -e / --error is not defined, leave
     // batch_meta.parsed_error_file_pattern empty;
-    if (!task.batch_meta().error_file_pattern().empty()) {
+    if (!step_spec->spec.batch_meta().error_file_pattern().empty()) {
       meta->parsed_error_file_pattern = ParseFilePathPattern_(
-          task.batch_meta().error_file_pattern(), task.cwd());
+          step_spec->spec.batch_meta().error_file_pattern(), step_spec->spec.cwd());
     }
 
     m_meta_ = std::move(meta);
@@ -765,9 +780,9 @@ CraneErr ProcessInstance::Prepare() {
 
   // If interpreter is not set, let system decide.
   m_executable_ = sh_path.string();
-  if (IsBatch() && !task.batch_meta().interpreter().empty()) {
+  if (step_spec->IsBatch() && !step_spec->spec.batch_meta().interpreter().empty()) {
     m_executable_ =
-        fmt::format("{} {}", task.batch_meta().interpreter(), sh_path.string());
+        fmt::format("{} {}", step_spec->spec.batch_meta().interpreter(), sh_path.string());
   }
 
   m_env_ = GetChildProcessEnv_();
@@ -799,10 +814,11 @@ CraneErr ProcessInstance::Spawn() {
   pid_t child_pid;
   bool launch_pty{false};
 
-  if (IsCrun()) {
+  if (step_spec->IsCrun()) {
     auto* meta = dynamic_cast<CrunMetaInExecution*>(m_meta_.get());
-    launch_pty = task.interactive_meta().pty();
-    CRANE_DEBUG("Launch crun task #{} pty: {}", task.task_id(), launch_pty);
+    launch_pty = step_spec->spec.interactive_meta().pty();
+    CRANE_DEBUG("Launch crun task #{} pty: {}", step_spec->spec.task_id(),
+                launch_pty);
 
     if (launch_pty) {
       child_pid = forkpty(&meta->msg_fd, nullptr, nullptr, nullptr);
@@ -820,25 +836,25 @@ CraneErr ProcessInstance::Spawn() {
   }
 
   if (child_pid == -1) {
-    CRANE_ERROR("fork() failed for task #{}: {}", task.task_id(),
+    CRANE_ERROR("fork() failed for task #{}: {}", step_spec->spec.task_id(),
                 strerror(errno));
     return CraneErr::kSystemErr;
   }
 
   if (child_pid > 0) {  // Parent proc
     m_pid_ = child_pid;
-    CRANE_DEBUG("Subprocess was created for task #{} pid: {}", task.task_id(),
-                m_pid_);
+    CRANE_DEBUG("Subprocess was created for task #{} pid: {}",
+                step_spec->spec.task_id(), m_pid_);
 
-    if (IsCrun()) {
+    if (step_spec->IsCrun()) {
       auto* meta = dynamic_cast<CrunMetaInExecution*>(m_meta_.get());
-      g_cfored_manager->RegisterIOForward(task.interactive_meta().cfored_name(),
-                                          meta->msg_fd, launch_pty);
+      step_spec->cfored_client->SetUpTaskFwd(m_pid_, meta->msg_fd, meta->msg_fd,
+                                             launch_pty);
     }
 
     int ctrl_fd = ctrl_sock_pair[0];
     close(ctrl_sock_pair[1]);
-    if (IsCrun() && !launch_pty) {
+    if (step_spec->IsCrun() && !launch_pty) {
       close(crun_io_sock_pair[1]);
     }
 
@@ -849,7 +865,7 @@ CraneErr ProcessInstance::Spawn() {
     ChildProcessReady child_process_ready;
 
     CRANE_TRACE("New task #{} is ready. Asking subprocess to execv...",
-                task.task_id());
+                step_spec->spec.task_id());
 
     // Tell subprocess that the parent process is ready. Then the
     // subprocess should continue to exec().
@@ -863,7 +879,8 @@ CraneErr ProcessInstance::Spawn() {
     if (ok) ok &= ostream.Flush();
     if (!ok) {
       CRANE_ERROR("Failed to send ok=true to subprocess {} for task #{}: {}",
-                  child_pid, task.task_id(), strerror(ostream.GetErrno()));
+                  child_pid, step_spec->spec.task_id(),
+                  strerror(ostream.GetErrno()));
       close(ctrl_fd);
 
       // Communication failure caused by process crash or grpc error.
@@ -884,7 +901,7 @@ CraneErr ProcessInstance::Spawn() {
                     strerror(istream.GetErrno()));
       if (!msg.ok())
         CRANE_ERROR("False from subprocess {} of task #{}", child_pid,
-                    task.task_id());
+                    step_spec->spec.task_id());
       close(ctrl_fd);
 
       // See comments above.
@@ -929,9 +946,9 @@ CraneErr ProcessInstance::Spawn() {
       std::abort();
     }
 
-    if (IsBatch()) {
+    if (step_spec->IsBatch()) {
       SetChildProcessBatchFd_();
-    } else if (IsCrun() && !launch_pty) {
+    } else if (step_spec->IsCrun() && !launch_pty) {
       close(crun_io_sock_pair[0]);
 
       dup2(crun_io_sock_pair[1], 0);
@@ -953,7 +970,7 @@ CraneErr ProcessInstance::Spawn() {
     // Close stdin for batch tasks.
     // If these file descriptors are not closed, a program like mpirun may
     // keep waiting for the input from stdin or other fds and will never end.
-    if (IsBatch()) close(0);
+    if (step_spec->IsBatch()) close(0);
     util::os::CloseFdFrom(3);
 
     // Apply environment variables
@@ -1001,7 +1018,7 @@ CraneErr ProcessInstance::Kill(int signum) {
 }
 
 CraneErr ProcessInstance::Cleanup() {
-  if (IsBatch() || IsCrun()) {
+  if (step_spec->IsBatch() || step_spec->IsCrun()) {
     const std::string& path = m_meta_->parsed_sh_script_path;
     if (!path.empty())
       g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
@@ -1011,7 +1028,8 @@ CraneErr ProcessInstance::Cleanup() {
   return CraneErr::kOk;
 }
 
-TaskManager::TaskManager() : m_supervisor_exit_(false) {
+TaskManager::TaskManager()
+    : m_supervisor_exit_(false), m_step_spec_(g_config.StepSpec, nullptr) {
   m_uvw_loop_ = uvw::loop::create();
 
   m_sigchld_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
@@ -1081,7 +1099,7 @@ void TaskManager::Wait() {
 
 void TaskManager::TaskStopAndDoStatusChange() {
   CRANE_INFO("task #{} stopped and is doing TaskStatusChange...",
-             m_instance_->task.task_id());
+             m_instance_->step_spec->spec.task_id());
 
   switch (m_instance_->err_before_exec) {
   case CraneErr::kProtobufError:
@@ -1100,7 +1118,7 @@ void TaskManager::TaskStopAndDoStatusChange() {
   }
 
   ProcSigchldInfo& sigchld_info = m_instance_->sigchld_info;
-  if (m_instance_->IsBatch() || m_instance_->IsCrun()) {
+  if (m_step_spec_.IsBatch() || m_step_spec_.IsCrun()) {
     // For a Batch task, the end of the process means it is done.
     if (sigchld_info.is_terminated_by_signal) {
       if (m_instance_->cancelled_by_user)
@@ -1146,7 +1164,7 @@ void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
 }
 
 std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync(
-    const TaskSpec& spec) {
+    const StepToSuper& spec) {
   std::promise<CraneExpected<pid_t>> pid_promise;
   auto pid_future = pid_promise.get_future();
 
@@ -1154,10 +1172,10 @@ std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync(
 
   if (spec.container().length() != 0) {
     // Container
-    elem.instance = std::make_unique<ContainerInstance>(spec);
+    elem.instance = std::make_unique<ContainerInstance>(&m_step_spec_);
   } else {
     // Process
-    elem.instance = std::make_unique<ProcessInstance>(spec);
+    elem.instance = std::make_unique<ProcessInstance>(&m_step_spec_);
   }
 
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
@@ -1166,26 +1184,28 @@ std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync(
 }
 
 void TaskManager::LaunchExecution_() {
-  m_instance_->pwd.Init(m_instance_->task.uid());
+  m_instance_->pwd.Init(m_instance_->step_spec->spec.uid());
   if (!m_instance_->pwd.Valid()) {
     CRANE_DEBUG("[Job #{}] Failed to look up password entry for uid {} of task",
-                m_instance_->task.task_id(), m_instance_->task.uid());
+                m_instance_->step_spec->spec.task_id(),
+                m_instance_->step_spec->spec.uid());
     ActivateTaskStatusChange_(
         crane::grpc::TaskStatus::Failed, ExitCode::kExitCodePermissionDenied,
         fmt::format(
             "[Job #{}] Failed to look up password entry for uid {} of task",
-            m_instance_->task.task_id(), m_instance_->task.uid()));
+            m_instance_->step_spec->spec.task_id(),
+            m_instance_->step_spec->spec.uid()));
     return;
   }
 
   // Calloc tasks have no scripts to run. Just return.
-  if (m_instance_->IsCalloc()) return;
+  if (m_step_spec_.IsCalloc()) return;
 
   // Prepare for execution
   CraneErr err = m_instance_->Prepare();
   if (err != CraneErr::kOk) {
     CRANE_DEBUG("[Job #{}] Failed to prepare task",
-                m_instance_->task.task_id());
+                m_step_spec_.spec.task_id());
     ActivateTaskStatusChange_(crane::grpc::TaskStatus::Failed,
                               ExitCode::kExitCodeFileNotFound,
                               fmt::format("Failed to prepare task"));
@@ -1193,11 +1213,17 @@ void TaskManager::LaunchExecution_() {
   }
 
   CRANE_TRACE("[Job #{}] Spawning process in task",
-              m_instance_->task.task_id());
+              m_step_spec_.spec.task_id());
   // err will NOT be kOk ONLY if fork() is not called due to some failure
   // or fork() fails.
   // In this case, SIGCHLD will NOT be received for this task, and
   // we should send TaskStatusChange manually.
+  if (m_step_spec_.IsCrun()) {
+    auto cfored_client = std::make_unique<CforedClient>();
+    cfored_client->InitChannelAndStub(
+        m_step_spec_.spec.interactive_meta().cfored_name());
+    m_step_spec_.cfored_client = std::move(cfored_client);
+  }
   err = m_instance_->Spawn();
   if (err != CraneErr::kOk) {
     ActivateTaskStatusChange_(
@@ -1272,10 +1298,10 @@ void TaskManager::EvSigchldCb_() {
 
       m_instance_->sigchld_info = *sigchld_info;
 
-      if (m_instance_->IsCrun())
+      if (m_step_spec_.IsCrun())
         // TaskStatusChange of a crun task is triggered in
         // CforedManager.
-        g_cfored_manager->TaskProcStopped();
+        m_instance_->TaskProcStopped();
       else /* Batch / Calloc */ {
         // If the TaskInstance has no process left,
         // send TaskStatusChange for this task.
@@ -1309,7 +1335,7 @@ void TaskManager::EvTaskTimerCb_() {
   ExecutionInterface* instance = m_instance_.get();
   DelTerminationTimer_(instance);
 
-  if (instance->IsBatch()) {
+  if (m_step_spec_.IsBatch()) {
     m_task_terminate_queue_.enqueue(
         TaskTerminateQueueElem{.terminated_by_timeout = true});
     m_terminate_task_async_handle_->send();
@@ -1358,13 +1384,13 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
     if (elem.terminated_by_timeout) m_instance_->terminated_by_timeout = true;
 
     int sig = SIGTERM;  // For BatchTask
-    if (m_instance_->IsCrun()) sig = SIGHUP;
+    if (m_step_spec_.IsCrun()) sig = SIGHUP;
 
     if (m_instance_->GetPid()) {
       // For an Interactive task with a process running or a Batch task, we
       // just send a kill signal here.
       m_instance_->Kill(sig);
-    } else if (m_instance_->task.type() == crane::grpc::Interactive) {
+    } else if (m_step_spec_.spec.type() == crane::grpc::Interactive) {
       // For an Interactive task with no process running, it ends immediately.
       ActivateTaskStatusChange_(crane::grpc::Completed,
                                 ExitCode::kExitCodeTerminated, std::nullopt);
@@ -1388,7 +1414,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
     DelTerminationTimer_(m_instance_.get());
 
     absl::Time start_time =
-        absl::FromUnixSeconds(m_instance_->task.start_time().seconds());
+        absl::FromUnixSeconds(m_step_spec_.spec.start_time().seconds());
     absl::Duration const& new_time_limit = elem.time_limit;
 
     if (now - start_time >= new_time_limit) {
@@ -1436,14 +1462,14 @@ void TaskManager::EvGrpcExecuteTaskCb_() {
     // Add a timer to limit the execution time of a task.
     // Note: event_new and event_add in this function is not thread safe,
     //       so we move it outside the multithreading part.
-    int64_t sec = m_instance_->task.time_limit().seconds();
+    int64_t sec = m_step_spec_.spec.time_limit().seconds();
     AddTerminationTimer_(m_instance_.get(), sec);
     CRANE_TRACE("Add a timer of {} seconds", sec);
 
     LaunchExecution_();
     if (!m_instance_->GetPid()) {
-      CRANE_WARN("[task #{}] Failed to launch process.]",
-                 m_instance_->task.task_id());
+      CRANE_WARN("[task #{}] Failed to launch process.",
+                 m_step_spec_.spec.task_id());
       elem.pid_prom.set_value(std::unexpected(CraneErr::kGenericFailure));
     } else {
       elem.pid_prom.set_value(m_instance_->GetPid());

@@ -34,6 +34,7 @@ CranedStub::~CranedStub() {
 }
 
 void CranedStub::ConfigureCraned(const CranedId &craned_id) {
+  CRANE_TRACE("Configuring craned {}", craned_id);
   crane::grpc::ConfigureCranedRequest request;
   g_task_scheduler->QueryJobOfNode(craned_id, &request);
   google::protobuf::Empty reply;

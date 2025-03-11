@@ -98,9 +98,18 @@ grpc::Status CraneCtldServiceImpl::CranedConnectedCtld(
     grpc::ServerContext *context,
     const crane::grpc::CranedConnectedCtldNotify *request,
     google::protobuf::Empty *response) {
-  if (!g_craned_keeper->IsCranedConnected(request->craned_id())) {
-    g_craned_keeper->PutNodeIntoUnavailList(request->craned_id());
+  const auto &craned_id = request->craned_id();
+  CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
+  if (!g_craned_keeper->IsCranedConnected(craned_id)) {
+    CRANE_TRACE("Put craned {} into unavail.", craned_id);
+    g_craned_keeper->PutNodeIntoUnavailList(craned_id);
+  } else {
+    if (!g_meta_container->CheckCranedOnline(craned_id)) {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (stub != nullptr) stub->ConfigureCraned(craned_id);
+    }
   }
+
   return grpc::Status::OK;
 }
 

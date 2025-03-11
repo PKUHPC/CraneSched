@@ -699,59 +699,63 @@ message StreamCforedCrunReply {
 }
 
 message StreamCforedTaskIORequest {
-  enum CranedRequestType{
-    CRANED_REGISTER = 0;
-    CRANED_TASK_OUTPUT = 1;
-    CRANED_UNREGISTER = 2;
+  enum SupervisorRequestType{
+    SUPERVISOR_REGISTER = 0;
+    TASK_OUTPUT = 1;
+    SUPERVISOR_UNREGISTER = 2;
   }
 
-  message CranedRegisterReq {
+  message SupervisorRegisterReq {
     string craned_id = 1;
+    uint32 task_id = 2;
+    uint32 step_id = 3;
   }
 
-  message CranedTaskOutputReq {
-    uint32 task_id = 1;
+  message TaskOutputReq {
     string msg = 2;
   }
 
-  message CranedUnRegisterReq {
+  message SupervisorUnRegisterReq {
     string craned_id = 1;
+    uint32 task_id = 2;
+    uint32 step_id = 3;
   }
 
-  CranedRequestType type = 1;
+  SupervisorRequestType type = 1;
   oneof payload {
-    CranedRegisterReq payload_register_req = 2;
-    CranedTaskOutputReq payload_task_output_req = 3;
-    CranedUnRegisterReq payload_unregister_req = 4;
+    SupervisorRegisterReq payload_register_req = 2;
+    TaskOutputReq payload_task_output_req = 3;
+    SupervisorUnRegisterReq payload_unregister_req = 4;
   }
 }
 
 message StreamCforedTaskIOReply {
-  enum CranedReplyType {
-    CRANED_REGISTER_REPLY = 0;
-    CRANED_TASK_INPUT = 1;
-    CRANED_UNREGISTER_REPLY = 2;
+  enum SupervisorReplyType {
+    SUPERVISOR_REGISTER_REPLY = 0;
+    SUPERVISOR_TASK_INPUT = 1;
+    SUPERVISOR_UNREGISTER_REPLY = 2;
   }
 
-  message CranedRegisterReply {
+  message SupervisorRegisterReply {
     bool ok = 1;
   }
 
-  message CranedTaskInputReq {
+  message SupervisorTaskInputReq {
     uint32 task_id = 1;
-    string msg = 2;
+    uint32 step_id = 2;
+    string msg = 3;
   }
 
-  message CranedUnregisterReply {
+  message SupervisorUnregisterReply {
     bool ok = 1;
   }
 
-  CranedReplyType type = 1;
+  SupervisorReplyType type = 1;
 
   oneof payload {
-    CranedRegisterReply payload_craned_register_reply = 2;
-    CranedTaskInputReq payload_task_input_req = 3;
-    CranedUnregisterReply payload_craned_unregister_reply = 4;
+    SupervisorRegisterReply payload_supervisor_register_reply = 2;
+    SupervisorTaskInputReq payload_task_input_req = 3;
+    SupervisorUnregisterReply payload_supervisor_unregister_reply = 4;
   }
 }
 

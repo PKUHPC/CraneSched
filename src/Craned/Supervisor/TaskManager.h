@@ -17,13 +17,19 @@
  */
 
 #pragma once
+#include "CforedClient.h"
 #include "SupervisorPublicDefs.h"
 #include "crane/PasswordEntry.h"
 // Precompiled header comes first.
 
 namespace Supervisor {
-
-using TaskSpec = crane::grpc::TaskToD;
+struct StepSpec {
+  crane::grpc::TaskToD spec;
+  std::unique_ptr<CforedClient> cfored_client;
+  inline bool IsBatch() const;
+  inline bool IsCrun() const;
+  inline bool IsCalloc() const;
+};
 
 struct MetaInExecution {
   std::string parsed_sh_script_path;
@@ -49,12 +55,9 @@ struct ProcSigchldInfo {
 
 class ExecutionInterface {
  public:
-  ExecutionInterface(const TaskSpec& task_spec) : task(task_spec) {}
+  ExecutionInterface(const StepSpec* step_spec) : step_spec(step_spec) {}
   virtual ~ExecutionInterface() = default;
-
-  inline bool IsBatch() const;
-  inline bool IsCrun() const;
-  inline bool IsCalloc() const;
+  void TaskProcStopped();
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
 
   // Interfaces must be implemented.
@@ -64,7 +67,7 @@ class ExecutionInterface {
   virtual CraneErr Cleanup() = 0;
 
   // Set from TaskManager
-  TaskSpec task;
+  const StepSpec* step_spec;
   PasswordEntry pwd;
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
   bool orphaned{false};
@@ -102,8 +105,8 @@ class ExecutionInterface {
 
 class ContainerInstance : public ExecutionInterface {
  public:
-  ContainerInstance(const TaskSpec& task_spec)
-      : ExecutionInterface(task_spec) {}
+  ContainerInstance(const StepSpec* step_spec)
+      : ExecutionInterface(step_spec) {}
   virtual ~ContainerInstance() = default;
 
   virtual CraneErr Prepare() override;
@@ -122,7 +125,7 @@ class ContainerInstance : public ExecutionInterface {
 
 class ProcessInstance : public ExecutionInterface {
  public:
-  ProcessInstance(const TaskSpec& task_spec) : ExecutionInterface(task_spec) {}
+  ProcessInstance(const StepSpec* step_spec) : ExecutionInterface(step_spec) {}
   virtual ~ProcessInstance() = default;
 
   virtual CraneErr Prepare() override;
@@ -173,7 +176,7 @@ class TaskManager {
                                  uint32_t exit_code,
                                  std::optional<std::string> reason);
 
-  std::future<CraneExpected<pid_t>> ExecuteTaskAsync(const TaskSpec& spec);
+  std::future<CraneExpected<pid_t>> ExecuteTaskAsync(const StepToSuper& spec);
   void LaunchExecution_();
 
   std::future<CraneExpected<pid_t>> CheckTaskStatusAsync();
@@ -234,6 +237,7 @@ class TaskManager {
   std::atomic_bool m_supervisor_exit_;
   std::thread m_uvw_thread_;
 
+  StepSpec m_step_spec_;
   // TODO: Support multiple task (execution steps)
   std::unique_ptr<ExecutionInterface> m_instance_;
 };

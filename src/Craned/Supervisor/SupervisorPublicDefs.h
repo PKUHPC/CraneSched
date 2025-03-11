@@ -27,6 +27,8 @@ namespace Supervisor {
 
 using EnvMap = std::unordered_map<std::string, std::string>;
 
+using StepToSuper = crane::grpc::TaskToD;
+
 struct TaskStatusChangeQueueElem {
   task_id_t task_id{};
   crane::grpc::TaskStatus new_status{};
@@ -75,6 +77,8 @@ struct Config {
   std::filesystem::path SupervisorUnixSockPath;
 
   task_id_t JobId;
+  step_id_t StepId;
+  StepToSuper StepSpec;
   std::atomic_int TaskCount;
 };
 

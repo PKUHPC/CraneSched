@@ -21,7 +21,6 @@
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
-#include "TaskManager.h"
 #include "protos/Crane.grpc.pb.h"
 
 namespace Supervisor {
@@ -36,22 +35,30 @@ class CforedClient {
 
   void InitChannelAndStub(const std::string& cfored_name);
 
-  void AsyncSendRecvThread_();
+  void SetUpTaskFwd(pid_t pid, int task_input_fd, int task_output_fd, bool pty);
 
-  void InitTaskFwdAndSetInputCb(
-      std::function<bool(const std::string&)> task_input_cb);
+  bool TaskOutputFinish(pid_t pid);
 
-  void TaskOutPutForward(const std::string& msg);
+  bool TaskProcessStop(pid_t pid);
 
-  bool TaskOutputFinish();
-
-  bool TaskProcessStop();
+  void TaskEnd(pid_t pid);
 
   std::string CforedName() const { return m_cfored_name_; }
 
  private:
+  bool TaskInputNoLock_(const std::string& msg, int fd);
+
+  void AsyncSendRecvThread_();
+
+  void TaskOutPutForward(const std::string& msg);
+
+
+
   struct TaskFwdMeta {
-    std::function<bool(const std::string&)> input_cb;
+    int input_fd{-1};
+    int output_fd{-1};
+    pid_t pid{-1};
+    bool pty{false};
     bool input_stopped{false};
     bool output_stopped{false};
     bool proc_stopped{false};
@@ -63,11 +70,17 @@ class CforedClient {
           stream,
       std::atomic<bool>* write_pending);
 
-  ConcurrentQueue<std::string /*msg*/> m_output_queue_;
-  std::thread m_fwd_thread_;
   std::atomic<bool> m_stopped_{false};
 
+  ConcurrentQueue<std::string /*msg*/> m_output_queue_;
+  std::thread m_fwd_thread_;
+
+  std::shared_ptr<uvw::loop> m_loop_;
+  std::thread m_ev_thread_;
+
   std::string m_cfored_name_;
+  std::unordered_map<pid_t, TaskFwdMeta> m_fwd_meta_map;
+
   std::shared_ptr<grpc::Channel> m_cfored_channel_;
   std::unique_ptr<crane::grpc::CraneForeD::Stub> m_stub_;
 
@@ -76,56 +89,5 @@ class CforedClient {
   grpc::CompletionQueue m_cq_;
 
   absl::Mutex m_mtx_;
-  TaskFwdMeta m_task_fwd_meta_;
-};
-
-class CforedManager {
-  template <class T>
-  using ConcurrentQueue = moodycamel::ConcurrentQueue<T>;
-
- public:
-  CforedManager() = default;
-  ~CforedManager();
-
-  bool Init();
-
-  void RegisterIOForward(std::string const& cfored, int fd, bool pty);
-  void TaskProcStopped();
-
- private:
-  struct RegisterElem {
-    std::string cfored;
-    int fd;
-    bool pty;
-  };
-
-  struct TaskStopElem {};
-
-  struct UnregisterElem {};
-
-  void UnregisterIOForward_();
-
-  void EvLoopThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
-
-  std::atomic<bool> m_stopped_{false};
-  std::shared_ptr<uvw::loop> m_loop_;
-  std::thread m_ev_loop_thread_;
-
-  std::shared_ptr<uvw::async_handle> m_register_handle_;
-  ConcurrentQueue<std::pair<RegisterElem, std::promise<bool>>>
-      m_register_queue_;
-  void RegisterCb_();
-
-  std::shared_ptr<uvw::async_handle> m_task_stop_handle_;
-  ConcurrentQueue<TaskStopElem> m_task_stop_queue_;
-  void TaskStopCb_();
-
-  std::shared_ptr<uvw::async_handle> m_unregister_handle_;
-  ConcurrentQueue<UnregisterElem> m_unregister_queue_;
-  void UnregisterCb_();
-
-  std::shared_ptr<CforedClient> m_cfored_client_;
 };
 }  // namespace Supervisor
-
-inline std::unique_ptr<Supervisor::CforedManager> g_cfored_manager;

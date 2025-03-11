@@ -18,6 +18,8 @@
 
 #include "TaskScheduler.h"
 
+#include <latch>
+
 #include "AccountManager.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
@@ -82,7 +84,47 @@ bool TaskScheduler::Init() {
                   task->TaskId());
 
       err = AcquireTaskAttributes(task.get());
-      PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
+      if (err != CraneErr::kOk || task->type == crane::grpc::Interactive) {
+        task->SetStatus(crane::grpc::Failed);
+        ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task_db_id,
+                                                           task->RuntimeAttr());
+        if (!ok) {
+          CRANE_ERROR(
+              "UpdateRuntimeAttrOfTask failed for task #{} when "
+              "mark the task as FAILED.",
+              task_id);
+        }
+        if (err != CraneErr::kOk)
+          CRANE_INFO(
+              "Failed to acquire task attributes for restored running task "
+              "#{}. "
+              "Error Code: {}. "
+              "Mark it as FAILED and move it to the ended queue.",
+              task_id, CraneErrStr(err));
+        else {
+          CRANE_INFO("Mark running interactive task {} as FAILED.", task_id);
+          ok = g_db_client->InsertJob(task.get());
+          if (!ok) {
+            CRANE_ERROR(
+                "InsertJob failed for task #{} "
+                "when recovering running queue.",
+                task->TaskId());
+          }
+
+          std::vector<task_db_id_t> db_ids{task_db_id};
+          ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
+          if (!ok) {
+            CRANE_ERROR(
+                "PurgeEndedTasks failed for task #{} when recovering "
+                "running queue.",
+                task->TaskId());
+          }
+        }
+
+        // Move this problematic task into ended queue and
+        // process next task.
+        continue;
+      }
     }
   }
 
@@ -1503,9 +1545,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     m_running_task_map_.erase(iter);
   }
 
-  absl::BlockingCounter bl(craned_cgroups_map.size());
+  std::latch counter(craned_cgroups_map.size());
   for (const auto& [craned_id, cgroups] : craned_cgroups_map) {
-    g_thread_pool->detach_task([&bl, &craned_id, &cgroups]() {
+    g_thread_pool->detach_task([&counter, &craned_id, &cgroups]() {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
       // If the craned is down, just ignore it.
@@ -1516,10 +1558,10 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
                       cgroups.size(), craned_id);
         }
       }
-      bl.DecrementCount();
+      counter.count_down();
     });
   }
-  bl.Wait();
+  counter.wait();
 
   ProcessFinalTasks_(task_raw_ptr_vec);
 }

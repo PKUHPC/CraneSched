@@ -423,9 +423,11 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
     crane::grpc::supervisor::InitSupervisorRequest init_req;
     init_req.set_job_id(execution->task_spec.task_id());
     init_req.set_debug_level("trace");
+    init_req.set_craned_id(g_config.CranedIdOfThisNode);
     init_req.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
     init_req.set_crane_base_dir(g_config.CraneBaseDir);
     init_req.set_crane_script_dir(g_config.CranedScriptDir);
+    *init_req.mutable_step_spec() = execution->task_spec;
 
     if (g_config.Container.Enabled) {
       auto* container_conf = init_req.mutable_container_config();
