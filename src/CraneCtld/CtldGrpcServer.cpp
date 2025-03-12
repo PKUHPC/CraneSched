@@ -676,11 +676,10 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     }
   }
 
-  if (!res_account_list.empty()) {
+  if (response->rich_error_list().empty()) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    return grpc::Status::OK;
   }
 
   for (const auto &account : res_account_list) {
@@ -751,11 +750,10 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
     }
   }
 
-  if (!res_user_list.empty()) {
+  if (response->rich_error_list().empty()) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    return grpc::Status::OK;
   }
 
   for (const auto &user : res_user_list) {
@@ -828,11 +826,10 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     }
   }
 
-  if (!res_qos_list.empty()) {
+  if (response->rich_error_list().empty()) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    return grpc::Status::OK;
   }
 
   auto *list = response->mutable_qos_list();
