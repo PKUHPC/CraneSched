@@ -71,7 +71,6 @@ struct Config {
   // Only for debugging
   std::filesystem::path SupervisorLogFile;
 
-  // TODO: remove this
   CranedId CranedIdOfThisNode;
 
   std::filesystem::path SupervisorUnixSockPath;

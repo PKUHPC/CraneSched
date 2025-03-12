@@ -18,7 +18,6 @@
 
 #include "JobManager.h"
 
-#include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <pty.h>
@@ -240,7 +239,7 @@ bool JobManager::EvCheckSupervisorRunning_() {
       job_ids.emplace_back(*it);
       it = m_release_job_req_set_.erase(it);
     } else {
-      it++;
+      ++it;
     }
   }
 
@@ -592,7 +591,7 @@ CraneErr JobManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task_spec) {
   }
   auto instance = std::make_unique<Execution>();
 
-  // Simply wrap the Task structure within a Execution structure and
+  // Simply wrap the Task structure within an Execution structure and
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
   instance->job_id = task_spec.task_id();  // TODO: Replace this with job id.
@@ -634,6 +633,20 @@ bool JobManager::FreeJobInstanceAllocation_(
     for (auto job_id : job_ids) {
       job_ptr_vec.emplace_back(map_ptr->at(job_id).RawPtr()->release());
       map_ptr->erase(job_id);
+    }
+  }
+  {
+    auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
+    for (auto* job : job_ptr_vec) {
+      bool erase{false};
+      {
+        auto& value = uid_map->at(job->job_spec.cgroup_spec.uid);
+        value.RawPtr()->erase(job->job_id);
+        erase = value.RawPtr()->empty();
+      }
+      if (erase) {
+        uid_map->erase(job->job_spec.cgroup_spec.uid);
+      }
     }
   }
   for (auto* instance : job_ptr_vec) {
@@ -954,7 +967,8 @@ void JobManager::TaskStopAndDoStatusChangeAsync(
     return;
   }
   CRANE_INFO("Task #{} stopped and is doing TaskStatusChange...", job_id);
-  ActivateTaskStatusChangeAsync_(job_id, new_status, exit_code, reason);
+  ActivateTaskStatusChangeAsync_(job_id, new_status, exit_code,
+                                 std::move(reason));
 }
 
 void JobManager::EvCleanChangeTaskTimeLimitQueueCb_() {

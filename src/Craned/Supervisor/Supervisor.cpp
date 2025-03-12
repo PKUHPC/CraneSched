@@ -22,7 +22,6 @@
 
 #include <cxxopts.hpp>
 
-#include "CforedClient.h"
 #include "CranedClient.h"
 #include "SupervisorServer.h"
 #include "TaskManager.h"

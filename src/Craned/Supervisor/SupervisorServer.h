@@ -21,7 +21,6 @@
 #include "SupervisorPublicDefs.h"
 // Precompiled header comes first.
 
-#include "TaskManager.h"
 #include "protos/Supervisor.grpc.pb.h"
 #include "protos/Supervisor.pb.h"
 

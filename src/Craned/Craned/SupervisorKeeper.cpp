@@ -19,9 +19,6 @@
 #include "SupervisorKeeper.h"
 
 #include <protos/Supervisor.grpc.pb.h>
-#include <sys/stat.h>
-
-#include <latch>
 
 namespace Craned {
 using grpc::ClientContext;

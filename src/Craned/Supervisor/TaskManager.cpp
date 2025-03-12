@@ -611,7 +611,10 @@ CraneErr ContainerInstance::Spawn() {
 
     // Set env just in case OCI requires some.
     // Real env in container is handled in ModifyOCIBundle_
-    SetChildProcessEnv_();
+    err = SetChildProcessEnv_();
+    if (err != CraneErr::kOk) {
+      fmt::print(stderr, "[Subprocess] Error: Failed to set environment ");
+    }
 
     // Prepare the command line arguments.
     auto argv = GetChildProcessExecArgv_();
@@ -974,7 +977,10 @@ CraneErr ProcessInstance::Spawn() {
     util::os::CloseFdFrom(3);
 
     // Apply environment variables
-    SetChildProcessEnv_();
+    err = SetChildProcessEnv_();
+    if (err != CraneErr::kOk) {
+      fmt::print(stderr, "[Subprocess] Error: Failed to set environment ");
+    }
 
     // Prepare the command line arguments.
     auto argv = GetChildProcessExecArgv_();
@@ -1160,7 +1166,8 @@ void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
   // Free the TaskInstance structure
   m_instance_.reset();
   if (!orphaned)
-    g_craned_client->TaskStatusChangeAsync(new_status, exit_code, reason);
+    g_craned_client->TaskStatusChangeAsync(new_status, exit_code,
+                                           std::move(reason));
 }
 
 std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync(

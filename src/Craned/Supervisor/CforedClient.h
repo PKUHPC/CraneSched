@@ -53,7 +53,6 @@ class CforedClient {
   void TaskOutPutForward(const std::string& msg);
 
 
-
   struct TaskFwdMeta {
     int input_fd{-1};
     int output_fd{-1};

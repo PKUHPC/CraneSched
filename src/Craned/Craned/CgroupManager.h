@@ -477,12 +477,7 @@ class CgroupManager {
 #ifdef CRANE_ENABLE_BPF
   ~CgroupManager();
 #endif
-  /**
-   * @brief Initialize libcgroup and mount the controllers, remove task not
-   * considered to be running;
-   * @param running_task_cg_specs running task cgroup specs.
-   * @return CraneErr.
-   */
+
   CraneErr Init();
 
   CraneErr Recover(const std::unordered_set<task_id_t> &running_job_ids);
@@ -504,6 +499,8 @@ class CgroupManager {
 
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
+
+  CraneExpected<task_id_t> GetTaskIdFromPid(pid_t pid);
 
   [[nodiscard]] CgroupConstant::CgroupVersion GetCgroupVersion() const {
     return cg_version_;
@@ -538,8 +535,6 @@ class CgroupManager {
   static CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
   GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path);
 #endif
-
-
 
   ControllerFlags m_mounted_controllers_;
 

@@ -29,11 +29,7 @@
 #  include <linux/bpf.h>
 #endif
 
-#include <dirent.h>
-
-#include "CgroupManager.h"
 #include "CranedPublicDefs.h"
-#include "CtldClient.h"
 #include "DeviceManager.h"
 #include "crane/PluginClient.h"
 #include "crane/String.h"
@@ -709,6 +705,38 @@ EnvMap CgroupManager::GetResourceEnvMapByResInNode(
           (1024 * 1024)));
 
   return env_map;
+}
+
+CraneExpected<task_id_t> CgroupManager::GetTaskIdFromPid(pid_t pid) {
+  static constexpr LazyRE2 cg_pattern(R"(.*/Crane_Task_(\d+).*)");
+  std::string job_id_str;
+  std::string cgroup_file = fmt::format("/proc/{}/cgroup", pid);
+  std::ifstream infile(cgroup_file);
+  if (!infile.is_open()) {
+    CRANE_ERROR("Failed to open cgroup file for pid", pid);
+    return std::unexpected(CraneErr::kCgroupError);
+  }
+  if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
+    std::string line;
+    while (std::getline(infile, line)) {
+      if (RE2::FullMatch(line, *cg_pattern, &job_id_str)) {
+        CRANE_TRACE("Get task Id {}", job_id_str);
+        return std::stoi(job_id_str);
+      }
+    }
+  } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
+    std::string line;
+    if (!std::getline(infile, line)) {
+      CRANE_ERROR("Failed to read cgroup file");
+      return std::unexpected(CraneErr::kSystemErr);
+    }
+    if (RE2::FullMatch(line, *cg_pattern, &job_id_str)) {
+      return std::stoi(job_id_str);
+    }
+  } else {
+    std::unreachable();
+  }
+  return std::unexpected(CraneErr::kNonExistent);
 }
 
 /*
@@ -1476,8 +1504,10 @@ bool DedicatedResourceAllocator::Allocate(
     const crane::grpc::DedicatedResourceInNode &request_resource,
     CgroupInterface *cg) {
   std::unordered_set<std::string> all_request_slots;
-  for (const auto &[_, type_slots_map] : request_resource.name_type_map()) {
-    for (const auto &[__, slots] : type_slots_map.type_slots_map())
+  for (const auto &type_slots_map :
+       request_resource.name_type_map() | std::ranges::views::values) {
+    for (const auto &slots :
+         type_slots_map.type_slots_map() | std::ranges::views::values)
       all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
   };
 

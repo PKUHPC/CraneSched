@@ -17,10 +17,11 @@
  */
 
 #pragma once
-#include "CforedClient.h"
 #include "SupervisorPublicDefs.h"
-#include "crane/PasswordEntry.h"
 // Precompiled header comes first.
+
+#include "CforedClient.h"
+#include "crane/PasswordEntry.h"
 
 namespace Supervisor {
 struct StepSpec {
@@ -55,7 +56,8 @@ struct ProcSigchldInfo {
 
 class ExecutionInterface {
  public:
-  ExecutionInterface(const StepSpec* step_spec) : step_spec(step_spec) {}
+  explicit ExecutionInterface(const StepSpec* step_spec)
+      : step_spec(step_spec) {}
   virtual ~ExecutionInterface() = default;
   void TaskProcStopped();
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
@@ -105,14 +107,14 @@ class ExecutionInterface {
 
 class ContainerInstance : public ExecutionInterface {
  public:
-  ContainerInstance(const StepSpec* step_spec)
+  explicit ContainerInstance(const StepSpec* step_spec)
       : ExecutionInterface(step_spec) {}
-  virtual ~ContainerInstance() = default;
+  ~ContainerInstance() override = default;
 
-  virtual CraneErr Prepare() override;
-  virtual CraneErr Spawn() override;
-  virtual CraneErr Kill(int signum) override;
-  virtual CraneErr Cleanup() override;
+  CraneErr Prepare() override;
+  CraneErr Spawn() override;
+  CraneErr Kill(int signum) override;
+  CraneErr Cleanup() override;
 
  private:
   CraneErr ModifyOCIBundleConfig_(const std::string& src,
@@ -125,13 +127,14 @@ class ContainerInstance : public ExecutionInterface {
 
 class ProcessInstance : public ExecutionInterface {
  public:
-  ProcessInstance(const StepSpec* step_spec) : ExecutionInterface(step_spec) {}
-  virtual ~ProcessInstance() = default;
+  explicit ProcessInstance(const StepSpec* step_spec)
+      : ExecutionInterface(step_spec) {}
+  ~ProcessInstance() override = default;
 
-  virtual CraneErr Prepare() override;
-  virtual CraneErr Spawn() override;
-  virtual CraneErr Kill(int signum) override;
-  virtual CraneErr Cleanup() override;
+  CraneErr Prepare() override;
+  CraneErr Spawn() override;
+  CraneErr Kill(int signum) override;
+  CraneErr Cleanup() override;
 };
 
 class TaskManager {

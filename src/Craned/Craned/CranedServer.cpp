@@ -173,13 +173,11 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
 
   // 3. pid2jobid
   do {
-    auto task_id_expt_future = g_job_mgr->QueryTaskIdFromPidAsync(pid_i);
-    task_id_expt_future.wait();
-    if (task_id_expt_future.get().has_value()) {
-      CRANE_TRACE("Task id for pid {} is #{}", pid_i,
-                  task_id_expt_future.get().value());
+    auto task_id_expt = g_cg_mgr->GetTaskIdFromPid(pid_i);
+    if (task_id_expt.has_value()) {
+      CRANE_TRACE("Task id for pid {} is #{}", pid_i, task_id_expt.value());
       response->set_ok(true);
-      response->set_task_id(task_id_expt_future.get().value());
+      response->set_task_id(task_id_expt.value());
       return Status::OK;
     } else {
       std::string proc_dir = fmt::format("/proc/{}/status", pid_i);

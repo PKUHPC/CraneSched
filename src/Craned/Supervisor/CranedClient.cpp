@@ -44,7 +44,7 @@ void CranedClient::TaskStatusChangeAsync(crane::grpc::TaskStatus new_status,
   TaskStatusChangeQueueElem elem{.task_id = g_config.JobId,
                                  .new_status = new_status,
                                  .exit_code = exit_code,
-                                 .reason = reason};
+                                 .reason = std::move(reason)};
   m_task_status_change_queue_.enqueue(std::move(elem));
 }
 
