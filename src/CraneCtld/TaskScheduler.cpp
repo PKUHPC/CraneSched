@@ -326,8 +326,7 @@ bool TaskScheduler::Init() {
 
       if (!mark_task_as_failed && !CheckTaskValidity(task.get())) {
         CRANE_ERROR("CheckTaskValidity failed for task #{}", task_id);
-        g_account_meta_container->FreeQosSubmitResource(task->Username(),
-                                                        *task);
+        g_account_meta_container->FreeQosSubmitResource(*task);
         mark_task_as_failed = true;
       }
 
@@ -568,6 +567,7 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
   for (const CranedId& craned_id : task->CranedIds())
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                              task->Resources());
+  g_account_meta_container->MallocQosResource(*task);
   if (!task->reservation.empty()) {
     g_meta_container->MallocResourceFromResv(
         task->reservation, task->TaskId(),
@@ -1050,7 +1050,7 @@ void TaskScheduler::ScheduleThread_() {
           if (task->reservation != "")
             g_meta_container->FreeResourceFromResv(task->reservation,
                                                    task->TaskId());
-          g_account_meta_container->FreeQosResource(task->Username(), *task);
+          g_account_meta_container->FreeQosResource(*task);
         }
 
         // Construct the map for cgroups to be released of all failed tasks
@@ -1883,7 +1883,7 @@ void TaskScheduler::CleanCancelQueueCb_() {
   for (auto& task : pending_task_ptr_vec) {
     task->SetStatus(crane::grpc::Cancelled);
     task->SetEndTime(absl::Now());
-    g_account_meta_container->FreeQosSubmitResource(task->Username(), *task);
+    g_account_meta_container->FreeQosSubmitResource(*task);
 
     if (task->type == crane::grpc::Interactive) {
       auto& meta = std::get<InteractiveMetaInTask>(task->meta);
@@ -1968,8 +1968,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
             accepted_task_ptrs)) {
       CRANE_ERROR("Failed to append a batch of tasks to embedded db queue.");
       for (auto& pair : accepted_tasks) {
-        g_account_meta_container->FreeQosSubmitResource(pair.first->Username(),
-                                                        *pair.first);
+        g_account_meta_container->FreeQosSubmitResource(*pair.first);
         pair.second /*promise*/.set_value(0);
       }
       break;
@@ -2002,8 +2001,7 @@ void TaskScheduler::CleanSubmitQueueCb_() {
 
     CRANE_TRACE("Rejecting {} tasks...", rejected_actual_size);
     for (size_t i = 0; i < rejected_actual_size; i++) {
-      g_account_meta_container->FreeQosSubmitResource(
-          rejected_tasks[i].first->Username(), *rejected_tasks[i].first);
+      g_account_meta_container->FreeQosSubmitResource(*rejected_tasks[i].first);
       rejected_tasks[i].second.set_value(0);
     }
 
@@ -2119,9 +2117,9 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
     for (CranedId const& craned_id : task->CranedIds()) {
       g_meta_container->FreeResourceFromNode(craned_id, task_id);
     }
+    g_account_meta_container->FreeQosResource(*task);
     if (task->reservation != "")
       g_meta_container->FreeResourceFromResv(task->reservation, task->TaskId());
-    g_account_meta_container->FreeQosResource(task->Username(), *task);
 
     task_raw_ptr_vec.emplace_back(task.get());
     task_ptr_vec.emplace_back(std::move(task));
@@ -2774,8 +2772,7 @@ void MinLoadFirst::NodeSelect(
     absl::Time expected_start_time;
     std::unordered_map<PartitionId, std::list<CranedId>> involved_part_craned;
 
-    bool ok =
-        g_account_meta_container->CheckQosResource(task->Username(), *task);
+    bool ok = g_account_meta_container->CheckQosResource(*task);
     if (!ok) {
       continue;
     }
@@ -2857,7 +2854,7 @@ void MinLoadFirst::NodeSelect(
             task->reservation, task->TaskId(),
             {task->EndTime(), task->Resources()});
       }
-      g_account_meta_container->MallocQosResource(task->Username(), *task);
+      g_account_meta_container->MallocQosResource(*task);
       std::unique_ptr<TaskInCtld> moved_task;
 
       // Move task out of pending_task_map and insert it to the

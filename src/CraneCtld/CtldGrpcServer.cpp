@@ -1524,7 +1524,7 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
     return {std::move(future)};
   }
 
-  g_account_meta_container->FreeQosSubmitResource(task->Username(), *task);
+  g_account_meta_container->FreeQosSubmitResource(*task);
 
   return std::unexpected(result.error());
 }
