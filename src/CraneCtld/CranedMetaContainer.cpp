@@ -19,8 +19,8 @@
 #include "CranedMetaContainer.h"
 
 #include "CranedKeeper.h"
-#include "protos/PublicDefs.pb.h"
 #include "crane/PluginClient.h"
+#include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
 
@@ -547,9 +547,19 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
   crane::grpc::plugin::CranedEventInfo event;
 
   if (g_config.Plugin.Enabled) {
+    // Generate timestamp
+    absl::Time now = absl::Now();
+    int64_t seconds = absl::ToUnixSeconds(now);
+    int32_t nanos = static_cast<int32_t>(absl::ToUnixNanos(now) % 1000000000);
+
+    auto timestamp = std::make_unique<::google::protobuf::Timestamp>();
+    timestamp->set_seconds(seconds);
+    timestamp->set_nanos(nanos);
+
     event.set_cluster_name(g_config.CraneClusterName);
     event.set_uid(request.uid());
     event.set_reason(request.reason());
+    event.set_allocated_start_time(timestamp.release());
   }
 
   for (auto craned_id : request.craned_ids()) {
@@ -563,41 +573,25 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
 
     if (craned_meta->alive) {
       if (request.new_state() == crane::grpc::CranedControlState::CRANE_DRAIN) {
-        if ( g_config.Plugin.Enabled && craned_meta->drain != true) {
-          //insert event info
+        if (g_config.Plugin.Enabled && craned_meta->drain != true) {
+          // Set node event info
           event.set_node_name(craned_id);
           event.set_state(crane::grpc::CranedControlState::CRANE_DRAIN);
-          //set now time       
-          absl::Time now = absl::Now();
-          int64_t seconds = absl::ToUnixSeconds(now);
-          int32_t nanos = static_cast<int32_t>(absl::ToUnixNanos(now) % 1000000000);
-      
-          auto timestamp = std::make_unique<::google::protobuf::Timestamp>();
-          timestamp->set_seconds(seconds);
-          timestamp->set_nanos(nanos);
-          event.set_allocated_start_time(timestamp.release());
           event_list.emplace_back(event);
         }
+
         craned_meta->drain = true;
         craned_meta->state_reason = request.reason();
         reply.add_modified_nodes(craned_id);
       } else if (request.new_state() ==
                  crane::grpc::CranedControlState::CRANE_NONE) {
         if (g_config.Plugin.Enabled && craned_meta->drain != false) {
-          //insert event info
+          // Set node event info
           event.set_node_name(craned_id);
           event.set_state(crane::grpc::CranedControlState::CRANE_NONE);
-          //set now time       
-          absl::Time now = absl::Now();
-          int64_t seconds = absl::ToUnixSeconds(now);
-          int32_t nanos = static_cast<int32_t>(absl::ToUnixNanos(now) % 1000000000);
-      
-          auto timestamp = std::make_unique<::google::protobuf::Timestamp>();
-          timestamp->set_seconds(seconds);
-          timestamp->set_nanos(nanos);
-          event.set_allocated_start_time(timestamp.release());
           event_list.emplace_back(event);
         }
+
         craned_meta->drain = false;
         craned_meta->state_reason.clear();
         reply.add_modified_nodes(craned_id);
