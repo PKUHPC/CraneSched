@@ -785,7 +785,7 @@ void MongodbClient::ViewToQos_(const bsoncxx::document::view& qos_view,
     qos->max_submit_jobs_per_user =
         qos_view[Qos::FieldStringOfMaxSubmitJobsPerUser()].get_int64().value;
     qos->max_submit_jobs_per_account =
-        qos_view[Qos::FieldStringOfMaxJobsPerAccount()].get_int64().value;
+        qos_view[Qos::FieldStringOfMaxSubmitJobsPerAccount()].get_int64().value;
     qos->max_time_limit_per_task = absl::Seconds(
         qos_view[Qos::FieldStringOfMaxTimeLimitPerTask()].get_int64().value);
   } catch (const bsoncxx::exception& e) {
