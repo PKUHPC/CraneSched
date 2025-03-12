@@ -220,15 +220,6 @@ class JobManager {
   // The atomicity of these data structure is guaranteed by either mutex or
   // AtomicHashMap.
 
-  // The two following maps are used as indexes
-  // and doesn't have the ownership of underlying objects.
-  // A JobInstance may contain more than one TaskExecutionInstance.
-  // FIXME: Refactor and remove this.
-  [[deprecated]] absl::flat_hash_map<pid_t /*pid*/, JobInstance*> m_pid_job_map_
-      ABSL_GUARDED_BY(m_mtx_);
-
-  absl::Mutex m_mtx_;
-
   // Critical data region ends
   // ========================================================================
 
@@ -240,8 +231,6 @@ class JobManager {
   void EvSigintCb_();
 
   void EvCleanGrpcExecuteTaskQueueCb_();
-
-  void EvCleanGrpcQueryTaskIdFromPidQueueCb_();
 
   void EvCleanTaskStatusChangeQueueCb_();
 
@@ -263,9 +252,6 @@ class JobManager {
   std::unordered_set<task_id_t> m_release_job_req_set_
       ABSL_GUARDED_BY(m_release_cg_mtx_);
   std::shared_ptr<uvw::timer_handle> m_check_supervisor_timer_handle_;
-
-  std::shared_ptr<uvw::async_handle> m_query_task_id_from_pid_async_handle_;
-  ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
 
   std::shared_ptr<uvw::async_handle> m_grpc_alloc_job_async_handle_;
   ConcurrentQueue<EvQueueAllocateJobElem> m_grpc_alloc_job_queue_;

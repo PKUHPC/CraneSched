@@ -76,14 +76,6 @@ JobManager::JobManager() {
         if (EvCheckSupervisorRunning_()) handle.stop();
       });
 
-  // gRPC: QueryTaskIdFromPid
-  m_query_task_id_from_pid_async_handle_ =
-      m_uvw_loop_->resource<uvw::async_handle>();
-  m_query_task_id_from_pid_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanGrpcQueryTaskIdFromPidQueueCb_();
-      });
-
   // gRPC Execute Task Event
   m_grpc_execute_task_async_handle_ =
       m_uvw_loop_->resource<uvw::async_handle>();
@@ -150,8 +142,6 @@ CraneErr JobManager::Recover(
     job_instance->executions.emplace(task_status.task_pid, process);
     job_instance->cgroup =
         g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_spec.cgroup_spec);
-    // When init, no need to lock.
-    m_pid_job_map_.emplace(task_status.task_pid, job_instance);
 
     m_job_map_.Emplace(job_id, std::unique_ptr<JobInstance>(job_instance));
     uid_t uid = task_status.job_spec.cgroup_spec.uid;
@@ -732,8 +722,6 @@ void JobManager::LaunchExecutionInstanceMt_(Execution* execution) {
     CRANE_TRACE("[job #{}] Spawned successfully.", job->job_id);
     job->executions.emplace(execution->pid,
                             std::unique_ptr<Execution>(execution));
-    absl::MutexLock lk(&m_mtx_);
-    m_pid_job_map_.emplace(execution->pid, job);
   }
 }
 
@@ -768,6 +756,7 @@ void JobManager::ActivateTaskStatusChangeAsync_(
 
 bool JobManager::MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id) {
   auto job_instance = m_job_map_.GetValueExclusivePtr(job_id);
+  if (!job_instance) return false;
   auto& cg = job_instance->get()->cgroup;
   if (!cg) {
     cg = g_cg_mgr->AllocateAndGetJobCgroup(
@@ -794,15 +783,6 @@ std::unordered_set<task_id_t> JobManager::QueryExistentJobIds() {
   return job_ids;
 }
 
-std::future<CraneExpected<task_id_t>> JobManager::QueryTaskIdFromPidAsync(
-    pid_t pid) {
-  EvQueueQueryTaskIdFromPid elem{.pid = pid};
-  auto task_id_opt_future = elem.task_id_prom.get_future();
-  m_query_task_id_from_pid_queue_.enqueue(std::move(elem));
-  m_query_task_id_from_pid_async_handle_->send();
-  return task_id_opt_future;
-}
-
 bool JobManager::QueryTaskInfoOfUid(uid_t uid, TaskInfoOfUid* info) {
   CRANE_DEBUG("Query task info for uid {}", uid);
 
@@ -818,24 +798,6 @@ bool JobManager::QueryTaskInfoOfUid(uid_t uid, TaskInfoOfUid* info) {
     info->first_task_id = *task_ids->begin();
   }
   return info->job_cnt > 0;
-}
-
-void JobManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
-  EvQueueQueryTaskIdFromPid elem;
-  while (m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
-    m_mtx_.Lock();
-
-    auto task_iter = m_pid_job_map_.find(elem.pid);
-    if (task_iter == m_pid_job_map_.end())
-      elem.task_id_prom.set_value(std::unexpected(CraneErr::kSystemErr));
-    else {
-      JobInstance* instance = task_iter->second;
-      uint32_t task_id = instance->job_id;
-      elem.task_id_prom.set_value(task_id);
-    }
-
-    m_mtx_.Unlock();
-  }
 }
 
 void JobManager::EvCleanTerminateTaskQueueCb_() {
