@@ -200,6 +200,10 @@ double AllocatableResource::CpuCount() const {
   return static_cast<double>(cpu_count);
 }
 
+void AllocatableResource::SetCpuCount(double in_cpu_count) {
+  cpu_count = cpu_t{in_cpu_count};
+}
+
 bool AllocatableResource::IsZero() const {
   return cpu_count == static_cast<cpu_t>(0) && memory_bytes == 0 &&
          memory_sw_bytes == 0;
@@ -625,12 +629,16 @@ bool operator==(const ResourceV2& lhs, const ResourceV2& rhs) {
 }
 
 ResourceView::ResourceView(const crane::grpc::ResourceView& rhs) {
+  req_allocatable_res = rhs.req_allocatable_res();
   allocatable_res = rhs.allocatable_res();
   device_map = FromGrpcDeviceMap(rhs.device_map());
 }
 
 ResourceView::operator crane::grpc::ResourceView() const {
   crane::grpc::ResourceView val{};
+  auto* mutable_req_allocatable_res = val.mutable_req_allocatable_res();
+  *mutable_req_allocatable_res =
+      static_cast<crane::grpc::AllocatableResource>(req_allocatable_res);
 
   auto* mutable_allocatable_res = val.mutable_allocatable_res();
   *mutable_allocatable_res =

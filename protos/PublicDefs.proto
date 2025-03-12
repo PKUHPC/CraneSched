@@ -69,8 +69,9 @@ message ResourceV2 {
 }
 
 message ResourceView {
-  AllocatableResource allocatable_res = 1;
-  DeviceMap device_map = 2;
+  AllocatableResource req_allocatable_res = 1;
+  AllocatableResource allocatable_res = 2;
+  DeviceMap device_map = 3;
 }
 
 enum PartitionState {
@@ -148,6 +149,7 @@ message TaskToCtld {
   string nodelist = 35;
 
   string reservation = 36;
+  bool exclusive  = 37;
 }
 
 message TaskInEmbeddedDb {
