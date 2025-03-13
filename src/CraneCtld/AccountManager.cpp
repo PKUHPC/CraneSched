@@ -1192,12 +1192,14 @@ CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
   }
 
-  auto result = g_account_meta_container->CheckAndMallocQosSubmitResource(
+  auto result = g_account_meta_container->CheckQosSubmitResource(
       *task, *qos_share_ptr, m_account_map_);
   if (!result) {
     CRANE_DEBUG("The requested QoS resources have reached the user's limit.");
     return std::unexpected(result.error());
   }
+
+  g_account_meta_container->MallocQosSubmitResource(*task, m_account_map_);
 
   return {};
 }
