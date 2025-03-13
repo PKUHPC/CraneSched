@@ -50,16 +50,21 @@ class AccountMetaContainer final {
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  CraneExpected<void> CheckAndMallocQosSubmitResource(
+  CraneExpected<void> CheckQosSubmitResource(
       const TaskInCtld& task, const Qos& qos,
       const std::unordered_map<std::string, std::unique_ptr<Account>>&
           account_map);
 
+  void MallocQosSubmitResource(
+      const TaskInCtld& task,
+      const std::unordered_map<std::string, std::unique_ptr<Account>>&
+          account_map);
+
+  void FreeQosSubmitResource(const TaskInCtld& task);
+
   bool CheckQosResource(const TaskInCtld& task);
 
   void MallocQosResource(const TaskInCtld& task);
-
-  void FreeQosSubmitResource(const TaskInCtld& task);
 
   void FreeQosResource(const TaskInCtld& task);
 
@@ -72,13 +77,24 @@ class AccountMetaContainer final {
 
   AccountResourceMetaMap account_meta_map_;
 
-  CraneExpected<void> CheckAndMallocQosSubmitResourceForUser_(
-      const TaskInCtld& task, const Qos& qos);
+  CraneExpected<void> CheckQosSubmitResourceForUser_(const TaskInCtld& task,
+                                                     const Qos& qos);
 
-  CraneExpected<void> CheckAndMallocQosSubmitResourceForAccount_(
+  CraneExpected<void> CheckQosSubmitResourceForAccount_(
       const TaskInCtld& task, const Qos& qos,
       const std::unordered_map<std::string, std::unique_ptr<Account>>&
           account_map);
+
+  void MallocQosSubmitResourceForUser_(const TaskInCtld& task);
+
+  void MallocQosSubmitResourceForAccount_(
+      const TaskInCtld& task,
+      const std::unordered_map<std::string, std::unique_ptr<Account>>&
+          account_map);
+
+  void FreeQosSubmitResourceForUser_(const TaskInCtld& task);
+
+  void FreeQosSubmitResourceForAccount_(const TaskInCtld& task);
 
   bool CheckQosResourceForUser_(const TaskInCtld& task, const Qos& qos);
 
@@ -87,10 +103,6 @@ class AccountMetaContainer final {
   void MallocQosResourceForUser_(const TaskInCtld& task);
 
   void MallocQosResourceForAccount_(const TaskInCtld& task);
-
-  void FreeQosSubmitResourceForUser_(const TaskInCtld& task);
-
-  void FreeQosSubmitResourceForAccount_(const TaskInCtld& task);
 
   void FreeQosResourceForUser_(const TaskInCtld& task);
 

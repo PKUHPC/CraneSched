@@ -20,7 +20,7 @@
 
 namespace Ctld {
 
-CraneExpected<void> AccountMetaContainer::CheckAndMallocQosSubmitResource(
+CraneExpected<void> AccountMetaContainer::CheckQosSubmitResource(
     const TaskInCtld& task, const Qos& qos,
     const std::unordered_map<std::string, std::unique_ptr<Account>>&
         account_map) {
@@ -33,15 +33,28 @@ CraneExpected<void> AccountMetaContainer::CheckAndMallocQosSubmitResource(
   if (qos.max_submit_jobs_per_account == 0)
     return std::unexpected(CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT);
 
-  CraneExpected<void> result{};
+  CraneExpected<void> result;
 
-  result = CheckAndMallocQosSubmitResourceForUser_(task, qos);
+  result = CheckQosSubmitResourceForUser_(task, qos);
   if (!result) return result;
 
-  result = CheckAndMallocQosSubmitResourceForAccount_(task, qos, account_map);
+  result = CheckQosSubmitResourceForAccount_(task, qos, account_map);
   if (!result) return result;
 
   return result;
+}
+
+void AccountMetaContainer::MallocQosSubmitResource(
+    const TaskInCtld& task,
+    const std::unordered_map<std::string, std::unique_ptr<Account>>&
+        account_map) {
+  MallocQosSubmitResourceForUser_(task);
+  MallocQosSubmitResourceForAccount_(task, account_map);
+}
+
+void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
+  FreeQosSubmitResourceForAccount_(task);
+  FreeQosSubmitResourceForUser_(task);
 }
 
 bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
@@ -62,14 +75,9 @@ void AccountMetaContainer::MallocQosResource(const TaskInCtld& task) {
   MallocQosResourceForAccount_(task);
 }
 
-void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
-  FreeQosSubmitResourceForUser_(task);
-  FreeQosSubmitResourceForAccount_(task);
-}
-
 void AccountMetaContainer::FreeQosResource(const TaskInCtld& task) {
-  FreeQosResourceForUser_(task);
   FreeQosResourceForAccount_(task);
+  FreeQosResourceForUser_(task);
 }
 
 void AccountMetaContainer::DeleteUserResource(const std::string& username) {
@@ -80,12 +88,11 @@ void AccountMetaContainer::DeleteAccountResource(const std::string& account) {
   account_meta_map_.erase(account);
 }
 
-CraneExpected<void>
-AccountMetaContainer::CheckAndMallocQosSubmitResourceForUser_(
+CraneExpected<void> AccountMetaContainer::CheckQosSubmitResourceForUser_(
     const TaskInCtld& task, const Qos& qos) {
-  QosResource qos_resource{ResourceView{}, 0, 1};
-
   CraneExpected<void> result{};
+
+  QosResource qos_resource{ResourceView{}, 0, 0};
 
   user_meta_map_.try_emplace_l(
       task.Username(),
@@ -102,23 +109,20 @@ AccountMetaContainer::CheckAndMallocQosSubmitResourceForUser_(
           result = std::unexpected(CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER);
           return;
         }
-        val.submit_jobs_count++;
       },
       QosToResourceMap{{task.qos, std::move(qos_resource)}});
 
   return result;
 }
 
-CraneExpected<void>
-AccountMetaContainer::CheckAndMallocQosSubmitResourceForAccount_(
+CraneExpected<void> AccountMetaContainer::CheckQosSubmitResourceForAccount_(
     const TaskInCtld& task, const Qos& qos,
     const std::unordered_map<std::string, std::unique_ptr<Account>>&
         account_map) {
   CraneExpected<void> result{};
-
   std::string account_name = task.account;
 
-  QosResource qos_resource{ResourceView{}, 0, 1};
+  QosResource qos_resource{ResourceView{}, 0, 0};
 
   do {
     account_meta_map_.try_emplace_l(
@@ -137,14 +141,67 @@ AccountMetaContainer::CheckAndMallocQosSubmitResourceForAccount_(
                 std::unexpected(CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT);
             return;
           }
-          val.submit_jobs_count++;
         },
         QosToResourceMap{{task.qos, std::move(qos_resource)}});
 
+    if (!result) break;
     account_name = account_map.at(account_name)->parent_account;
   } while (!account_name.empty());
 
   return result;
+}
+
+void AccountMetaContainer::MallocQosSubmitResourceForUser_(
+    const TaskInCtld& task) {
+  user_meta_map_.modify_if(
+      task.Username(),
+      [&](std::pair<const std::string, QosToResourceMap>& pair) {
+        auto& val = pair.second[task.qos];
+        val.submit_jobs_count++;
+      });
+}
+
+void AccountMetaContainer::MallocQosSubmitResourceForAccount_(
+    const TaskInCtld& task,
+    const std::unordered_map<std::string, std::unique_ptr<Account>>&
+        account_map) {
+  std::string account_name = task.account;
+
+  do {
+    account_meta_map_.modify_if(
+        account_name,
+        [&](std::pair<const std::string, QosToResourceMap>& pair) {
+          auto& val = pair.second[task.qos];
+          val.submit_jobs_count++;
+        });
+    account_name = account_map.at(account_name)->parent_account;
+  } while (!account_name.empty());
+}
+
+void AccountMetaContainer::FreeQosSubmitResourceForUser_(
+    const TaskInCtld& task) {
+  user_meta_map_.modify_if(
+      task.Username(),
+      [&](std::pair<const std::string, QosToResourceMap>& pair) {
+        auto& val = pair.second[task.qos];
+        val.submit_jobs_count--;
+      });
+}
+
+void AccountMetaContainer::FreeQosSubmitResourceForAccount_(
+    const TaskInCtld& task) {
+  std::string account_name = task.account;
+  const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
+
+  do {
+    account_meta_map_.modify_if(
+        account_name,
+        [&](std::pair<const std::string, QosToResourceMap>& pair) {
+          auto& val = pair.second[task.qos];
+          val.submit_jobs_count--;
+        });
+    account_name = account_map_ptr->at(account_name)->parent_account;
+  } while (!account_name.empty());
 }
 
 bool AccountMetaContainer::CheckQosResourceForUser_(const TaskInCtld& task,
@@ -245,32 +302,6 @@ void AccountMetaContainer::MallocQosResourceForAccount_(
                   .GetAllocatableRes();
         });
 
-    account_name = account_map_ptr->at(account_name)->parent_account;
-  } while (!account_name.empty());
-}
-
-void AccountMetaContainer::FreeQosSubmitResourceForUser_(
-    const TaskInCtld& task) {
-  user_meta_map_.modify_if(
-      task.Username(),
-      [&](std::pair<const std::string, QosToResourceMap>& pair) {
-        auto& val = pair.second[task.qos];
-        val.submit_jobs_count--;
-      });
-}
-
-void AccountMetaContainer::FreeQosSubmitResourceForAccount_(
-    const TaskInCtld& task) {
-  std::string account_name = task.account;
-  const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
-
-  do {
-    account_meta_map_.modify_if(
-        account_name,
-        [&](std::pair<const std::string, QosToResourceMap>& pair) {
-          auto& val = pair.second[task.qos];
-          val.submit_jobs_count--;
-        });
     account_name = account_map_ptr->at(account_name)->parent_account;
   } while (!account_name.empty());
 }
