@@ -710,6 +710,14 @@ void ResourceView::SetToZero() {
   allocatable_res.SetToZero();
 }
 
+double ResourceView::ReqCpuCount() const {
+  return static_cast<double>(req_allocatable_res.cpu_count);
+}
+
+uint64_t ResourceView::ReqMemoryBytes() const {
+  return req_allocatable_res.memory_bytes;
+}
+
 double ResourceView::CpuCount() const {
   return static_cast<double>(allocatable_res.cpu_count);
 }

@@ -457,6 +457,9 @@ class ResourceView {
   double CpuCount() const;
   uint64_t MemoryBytes() const;
 
+  double ReqCpuCount() const;
+  uint64_t ReqMemoryBytes() const;
+
   AllocatableResource& GetAllocatableRes() { return allocatable_res; }
   const AllocatableResource& GetAllocatableRes() const {
     return allocatable_res;
