@@ -2089,14 +2089,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     }
 
     if (task->TaskToCtld().exclusive()) {
-      AllocatableResource& task_actual_alloc_res =
-      task->requested_node_res_view.GetAllocatableRes();
+      AllocatableResource& task_actual_alloc_res = task->requested_node_res_view.GetAllocatableRes();
       task_actual_alloc_res.SetCpuCount(craned_meta->res_total.allocatable_res.CpuCount());
-
-      if (task_actual_alloc_res.memory_bytes == 0) {
-        task_actual_alloc_res.memory_bytes = craned_meta->res_total.allocatable_res.memory_bytes;
-        task_actual_alloc_res.memory_sw_bytes = craned_meta->res_total.allocatable_res.memory_sw_bytes;
-      }
     }
 
     if constexpr (kAlgoRedundantNode) {
@@ -2519,10 +2513,8 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   }
   uint64_t mem_bytes = core_double * task_mem_per_cpu;
 
-  if (!task->TaskToCtld().exclusive() && task_req_alloc_res.memory_bytes == 0) {
-    task_req_alloc_res.memory_bytes = mem_bytes;
-    task_req_alloc_res.memory_sw_bytes = mem_bytes;
-  }
+  task->requested_node_res_view.GetAllocatableRes().memory_bytes = mem_bytes;
+  task->requested_node_res_view.GetAllocatableRes().memory_sw_bytes = mem_bytes;
 
   AllocatableResource& task_actual_alloc_res =
   task->requested_node_res_view.GetAllocatableRes();
