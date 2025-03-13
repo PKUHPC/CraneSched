@@ -644,7 +644,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition(
   std::string actual_account = account;
   result = CheckIfUserHasPermOnUserOfAccountNoLock_(*op_user_res.value(), p,
                                                     &actual_account, false);
-  if (!result) std::unexpected(FormatRichErr(result.error(), ""));
+  if (!result) return std::unexpected(FormatRichErr(result.error(), ""));
 
   const Account* account_ptr = GetExistedAccountInfoNoLock_(actual_account);
   if (!account_ptr)
