@@ -154,6 +154,12 @@ bool TaskScheduler::Init() {
         task->allocated_craneds_regex.clear();
         task->CranedIdsClear();
         task->executing_craned_ids.clear();
+        // If exclusive, restore the original requested CPU parameters
+        if (task->TaskToCtld().exclusive()) {
+          const AllocatableResource& task_req_alloc_res = task->requested_node_res_view.GetReqAllocatableRes();
+          AllocatableResource& task_actual_alloc_res = task->requested_node_res_view.GetAllocatableRes();
+          task_actual_alloc_res.SetCpuCount(task_req_alloc_res.CpuCount());
+        }
 
         ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task->TaskDbId(),
                                                            task->RuntimeAttr());
@@ -262,6 +268,12 @@ bool TaskScheduler::Init() {
           task->allocated_craneds_regex.clear();
           task->CranedIdsClear();
           task->executing_craned_ids.clear();
+          // If exclusive, restore the original requested CPU parameters
+          if (task->TaskToCtld().exclusive()) {
+            const AllocatableResource& task_req_alloc_res = task->requested_node_res_view.GetReqAllocatableRes();
+            AllocatableResource& task_actual_alloc_res = task->requested_node_res_view.GetAllocatableRes();
+            task_actual_alloc_res.SetCpuCount(task_req_alloc_res.CpuCount());
+          }
 
           ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
               0, task->TaskDbId(), task->RuntimeAttr());
@@ -307,6 +319,12 @@ bool TaskScheduler::Init() {
       task->SetFieldsByRuntimeAttr(task_in_embedded_db.runtime_attr());
 
       task_id_t task_id = task->TaskId();
+      // If exclusive, restore the original requested CPU parameters
+      if (task->TaskToCtld().exclusive()) {
+        const AllocatableResource& task_req_alloc_res = task->requested_node_res_view.GetReqAllocatableRes();
+        AllocatableResource& task_actual_alloc_res = task->requested_node_res_view.GetAllocatableRes();
+        task_actual_alloc_res.SetCpuCount(task_req_alloc_res.CpuCount());
+      }
 
       CRANE_TRACE("Restore task #{} from embedded pending queue.",
                   task->TaskId());
@@ -2513,11 +2531,10 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   }
   uint64_t mem_bytes = core_double * task_mem_per_cpu;
 
-  task->requested_node_res_view.GetAllocatableRes().memory_bytes = mem_bytes;
-  task->requested_node_res_view.GetAllocatableRes().memory_sw_bytes = mem_bytes;
+  task->requested_node_res_view.GetReqAllocatableRes().memory_bytes = mem_bytes;
+  task->requested_node_res_view.GetReqAllocatableRes().memory_sw_bytes = mem_bytes;
 
-  AllocatableResource& task_actual_alloc_res =
-  task->requested_node_res_view.GetAllocatableRes();
+  AllocatableResource& task_actual_alloc_res = task->requested_node_res_view.GetAllocatableRes();
   task_actual_alloc_res = task->requested_node_res_view.GetReqAllocatableRes();
 
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
