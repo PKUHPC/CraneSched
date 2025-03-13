@@ -18,6 +18,8 @@
 
 #include "SupervisorServer.h"
 
+#include "TaskManager.h"
+
 grpc::Status Supervisor::SupervisorServiceImpl::ExecuteTask(
     grpc::ServerContext* context,
     const crane::grpc::supervisor::TaskExecutionRequest* request,

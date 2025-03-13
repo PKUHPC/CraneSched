@@ -19,6 +19,7 @@
 #include "CranedClient.h"
 
 #include "SupervisorServer.h"
+#include "TaskManager.h"
 #include "crane/GrpcHelper.h"
 
 namespace Supervisor {
