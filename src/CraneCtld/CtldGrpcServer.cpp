@@ -923,6 +923,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
     if (request->entity_list().empty()) {
       const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
       for (const auto &[account_name, account] : *account_map_ptr) {
+        if (account_name == "ROOT") continue;
         entity_list.insert(account_name);
       }
     }
@@ -932,6 +933,14 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
                                             request->block());
       if (!res) {
         auto *new_err_record = response->mutable_rich_error_list()->Add();
+        if (request->entity_list().empty()) {
+          if (res.error() == CraneErrCode::ERR_INVALID_OP_USER ||
+              res.error() == CraneErrCode::ERR_INVALID_UID) {
+            new_err_record->set_description("");
+            new_err_record->set_code(res.error());
+            break;
+          }
+        }
         new_err_record->set_description(account_name);
         new_err_record->set_code(res.error());
       }
@@ -957,6 +966,14 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
                                          request->account(), request->block());
       if (!res) {
         auto *new_err_record = response->mutable_rich_error_list()->Add();
+        if (request->entity_list().empty()) {
+          if (res.error() == CraneErrCode::ERR_INVALID_OP_USER ||
+              res.error() == CraneErrCode::ERR_INVALID_UID) {
+            new_err_record->set_description("");
+            new_err_record->set_code(res.error());
+            break;
+          }
+        }
         new_err_record->set_description(user_name);
         new_err_record->set_code(res.error());
       }
