@@ -114,6 +114,8 @@ bool TaskScheduler::Init() {
                                                        task->uid);
           }
 
+          g_account_meta_container->FreeQosSubmitResource(*task);
+
           ok = g_db_client->InsertJob(task.get());
           if (!ok) {
             CRANE_ERROR(
