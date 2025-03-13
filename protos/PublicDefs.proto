@@ -69,8 +69,9 @@ message ResourceV2 {
 }
 
 message ResourceView {
-  AllocatableResource allocatable_res = 1;
-  DeviceMap device_map = 2;
+  AllocatableResource req_allocatable_res = 1;
+  AllocatableResource allocatable_res = 2;
+  DeviceMap device_map = 3;
 }
 
 enum PartitionState {
@@ -146,6 +147,7 @@ message TaskToCtld {
 
   string excludes = 34;
   string nodelist = 35;
+  bool exclusive  = 36;
 }
 
 message TaskInEmbeddedDb {
@@ -285,6 +287,7 @@ message TaskInfo {
   // To avoid this, the elapsed time of a task is calculated on the CraneCtld side.
   google.protobuf.Duration elapsed_time = 37;
   repeated string execution_node = 38;
+  bool exclusive = 39;
 }
 
 message PartitionInfo {

@@ -230,6 +230,7 @@ struct AllocatableResource {
   explicit operator crane::grpc::AllocatableResource() const;
 
   double CpuCount() const;
+  void SetCpuCount(double in_cpu_count);
 
   bool IsZero() const;
   bool IsAnyZero() const;
@@ -432,14 +433,23 @@ class ResourceView {
   double CpuCount() const;
   uint64_t MemoryBytes() const;
 
+  double ReqCpuCount() const;
+  uint64_t ReqMemoryBytes() const;
+
   AllocatableResource& GetAllocatableRes() { return allocatable_res; }
   const AllocatableResource& GetAllocatableRes() const {
     return allocatable_res;
   }
 
+  AllocatableResource& GetReqAllocatableRes() { return req_allocatable_res; }
+  const AllocatableResource& GetReqAllocatableRes() const {
+    return req_allocatable_res;
+  }
+
   const DeviceMap& GetDeviceMap() const { return device_map; }
 
  private:
+  AllocatableResource req_allocatable_res;
   AllocatableResource allocatable_res;
   DeviceMap device_map;
 

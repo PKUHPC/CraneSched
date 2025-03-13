@@ -621,6 +621,7 @@ struct TaskInCtld {
     } else {
       task_info->set_craned_list(allocated_craneds_regex);
     }
+    task_info->set_exclusive(TaskToCtld().exclusive());
   }
 };
 
