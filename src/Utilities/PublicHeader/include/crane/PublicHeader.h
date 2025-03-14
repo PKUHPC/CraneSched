@@ -106,13 +106,17 @@ constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)>
         // 0 - 4
         "Success",
 
-        "Invalid UID", "You are not a Crane user",
-        "The specified user is invalid", "The user permission is insufficient",
+        "Invalid UID",
+        "You are not a Crane user",
+        "The specified user is invalid",
+        "The user permission is insufficient",
 
         // 5 - 9
-        "The user has been blocked", "The user already exists in this account",
+        "The user has been blocked",
+        "The user already exists in this account",
         "The user doesn't own sufficient permission for the account operation",
-        "Invalid admin level", "The user does not belong to this account",
+        "Invalid admin level",
+        "The user does not belong to this account",
 
         // 10 - 14
         "No account is specified for the user",
@@ -138,7 +142,8 @@ constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)>
         // 25 - 29
         "The QoS already exists in Crane",
         "The QoS is still being used by accounts or users and can't be deleted",
-        "Failed to convert value to integer", "Invalid time limit value",
+        "Failed to convert value to integer",
+        "Invalid time limit value",
         "The entered account or user does not include this QoS",
 
         // 30 - 34
@@ -152,34 +157,48 @@ constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)>
         "Some user is using the QoS as his default QoS",
         "The QoS is being used by some child accounts",
         "The QoS is not in the allowed list or is already the default QoS",
-        "Is default QoS error", "Failed to update the database",
+        "Is default QoS error",
+        "Failed to update the database",
 
         // 40 - 44
-        "Generic failure", "Not enough resources for the task",
-        "Non-existent error", "Not enough nodes in the partition for the task",
+        "Generic failure",
+        "Not enough resources for the task",
+        "Non-existent error",
+        "Not enough nodes in the partition for the task",
         "Invalid node list",
 
         // 45 - 49
-        "Invalid exclude node list", "Time limit reached the user's limit",
+        "Invalid exclude node list",
+        "Time limit reached the user's limit",
         "CPUs per task reached the user's limit",
-        "Not enough nodes for the task", "System error",
+        "Not enough nodes for the task",
+        "System error",
 
         // 50 - 54
         "Existing task",
         "The number of pending tasks exceeded the maximum value",
-        "Invalid parameter", "Stop error", "Permission denied",
+        "Invalid parameter",
+        "Stop error",
+        "Permission denied",
 
         // 55 - 59
-        "Connection timeout", "Connection aborted", "RPC failure",
-        "Token request failure", "Stream broken",
+        "Connection timeout",
+        "Connection aborted",
+        "RPC failure",
+        "Token request failure",
+        "Stream broken",
 
         // 60 - 64
-        "Invalid stub", "CGroup error", "Protobuf error", "LibEvent error",
+        "Invalid stub",
+        "CGroup error",
+        "Protobuf error",
+        "LibEvent error",
         "No available node",
 
         // 65 - 67
         "The current running job exceeds the QoS limit (MaxJobPerUser)",
-        "User has insufficient privilege"};
+        "User has insufficient privilege"
+    };
 
 }
 
