@@ -172,6 +172,7 @@ message RuntimeAttrOfTask {
   bool held = 18;
   ResourceV2 resources = 19;
   double cached_priority = 20;
+  bool blocked = 21;
 }
 
 message TaskToD {
@@ -285,6 +286,7 @@ message TaskInfo {
   // To avoid this, the elapsed time of a task is calculated on the CraneCtld side.
   google.protobuf.Duration elapsed_time = 37;
   repeated string execution_node = 38;
+  bool blocked = 39;
 }
 
 message PartitionInfo {

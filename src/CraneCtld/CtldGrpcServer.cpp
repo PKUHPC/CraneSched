@@ -731,6 +731,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
   }
 
   if (res) {
+    g_task_scheduler->SetBlockForTaskListInRamAndDb_(request->block());
     response->set_ok(true);
   } else {
     response->set_ok(false);

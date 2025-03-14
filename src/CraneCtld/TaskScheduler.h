@@ -55,11 +55,12 @@ class BasicPriority : public IPrioritySorter {
     int i = 0;
     for (auto it = pending_task_map.begin(); i < len; i++, it++) {
       TaskInCtld* task = it->second.get();
-      if (!task->Held()) {
-        task_id_vec.emplace_back(it->first);
-        it->second->pending_reason = "Priority";
-      } else {
+      if (task->Held()) {
         it->second->pending_reason = "Held";
+      } else if (task->Blocked()) {
+        it->second->pending_reason = "Blocked";
+      } else {
+        it->second->pending_reason = "Priority";
       }
     }
 
@@ -517,6 +518,8 @@ class TaskScheduler {
 
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
+
+  void SetBlockForTaskListInRamAndDb_(bool block);
 
   static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
 

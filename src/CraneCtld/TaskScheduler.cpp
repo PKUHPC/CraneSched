@@ -1158,6 +1158,44 @@ CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
   return CraneErrCode::SUCCESS;
 }
 
+void TaskScheduler::SetBlockForTaskListInRamAndDb_(bool block) {
+
+  m_pending_task_map_mtx_.Lock();
+  for (const auto& [task_id, task_ptr] : m_pending_task_map_) {
+    auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
+        task_ptr->Username(), task_ptr->account);
+    if (enable_res) {
+      if (task_ptr->Blocked() == false) {
+        continue;
+      }
+      task_ptr->SetBlocked(false);
+      task_db_id_t db_id = task_ptr->TaskDbId();
+      auto runtime_attr = task_ptr->RuntimeAttr();
+      m_pending_task_map_mtx_.Unlock();
+
+      if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(0, db_id,
+          runtime_attr))
+      CRANE_ERROR("Failed to update runtime attr of task #{} to DB", task_id);
+      m_pending_task_map_mtx_.Lock();
+    } else {
+      if (task_ptr->Blocked() == true) {
+        continue;
+      }
+      task_ptr->SetBlocked(true);
+      task_db_id_t db_id = task_ptr->TaskDbId();
+      auto runtime_attr = task_ptr->RuntimeAttr();
+      m_pending_task_map_mtx_.Unlock();
+
+      if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(0, db_id,
+        runtime_attr))
+      CRANE_ERROR("Failed to update runtime attr of task #{} to DB", task_id);
+      m_pending_task_map_mtx_.Lock();
+    }
+  }
+  m_pending_task_map_mtx_.Unlock(); 
+  return;
+}
+
 CraneErrCode TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
   task_id_t task_id = task->TaskId();
 
@@ -2639,6 +2677,10 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
   for (const auto& [task_id, task] : pending_task_map) {
     if (task->Held()) {
       task->pending_reason = "Held";
+      continue;
+    }
+    if (task->Blocked()) {
+      task->pending_reason = "Blocked";
       continue;
     }
     // Admin may manually specify the priority of a task.
