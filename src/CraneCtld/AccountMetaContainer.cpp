@@ -58,7 +58,6 @@ void AccountMetaContainer::FreeQosSubmitResource(const TaskInCtld& task) {
 }
 
 bool AccountMetaContainer::CheckQosResource(const TaskInCtld& task) {
-  bool result = true;
   Qos qos;
 
   {
@@ -107,7 +106,6 @@ CraneExpected<void> AccountMetaContainer::CheckQosSubmitResourceForUser_(
         auto& val = iter->second;
         if (val.submit_jobs_count >= qos.max_submit_jobs_per_user) {
           result = std::unexpected(CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER);
-          return;
         }
       },
       QosToResourceMap{{task.qos, std::move(qos_resource)}});
@@ -139,7 +137,6 @@ CraneExpected<void> AccountMetaContainer::CheckQosSubmitResourceForAccount_(
           if (val.submit_jobs_count >= qos.max_submit_jobs_per_account) {
             result =
                 std::unexpected(CraneErrCode::ERR_MAX_JOB_COUNT_PER_ACCOUNT);
-            return;
           }
         },
         QosToResourceMap{{task.qos, std::move(qos_resource)}});
@@ -213,24 +210,18 @@ bool AccountMetaContainer::CheckQosResourceForUser_(const TaskInCtld& task,
       [&](std::pair<const std::string, QosToResourceMap>& pair) {
         auto& val = pair.second[task.qos];
         if (val.jobs_count >= qos.max_jobs_per_user) {
-          CRANE_DEBUG(
-              "User {} has reached the maximum number of jobs per user, task "
-              "{} continues pending.",
-              task.Username(), task.TaskId());
+          CRANE_DEBUG("User {} has reached the maximum number of jobs per user, task "
+                "{} continues pending.", task.Username(), task.TaskId());
           result = false;
           return;
-          if (val.resource.CpuCount() +
-                  static_cast<double>(task.cpus_per_task) >
-              qos.max_cpus_per_user) {
-            CRANE_DEBUG(
-                "User {} has reached the maximum number of cpus per user, task "
-                "{} continues pending.",
-                task.Username(), task.TaskId());
-            result = false;
-            return;
-          }
         }
-      });
+        if (val.resource.CpuCount() + static_cast<double>(task.cpus_per_task) >
+              qos.max_cpus_per_user) {
+          CRANE_DEBUG("User {} has reached the maximum number of cpus per user, task "
+        "{} continues pending.",task.Username(), task.TaskId());
+          result = false;
+        }
+  });
 
   return result;
 }
