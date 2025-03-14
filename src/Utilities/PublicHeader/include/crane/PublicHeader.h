@@ -188,9 +188,12 @@ constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)>
         "LibEvent error",
         "No available node",
 
-        // 65 - 67
-        "The current running job exceeds the QoS limit (MaxJobPerUser)",
-        "User has insufficient privilege"
+        // 65 - 69
+        "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerUser)",
+        "User has insufficient privilege",
+        "The current account is not in the allowed account list for the partition",
+        "The current account has been explicitly added to the deny list for the partition",
+        "The current submitted job exceeds the QoS limit (MaxSubmitJobsPerAccount)"
 };
 
 }
