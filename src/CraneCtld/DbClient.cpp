@@ -956,7 +956,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              // 30-31
              task->type, task->extra_attr};
 
-  return DocumentConstructor_(fields, values);
+
+             return DocumentConstructor_(fields, values);
 }
 
 MongodbClient::MongodbClient() {
