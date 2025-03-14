@@ -812,8 +812,17 @@ CraneExpected<void> AccountManager::ModifyQos(
   case crane::grpc::ModifyField::MaxJobsPerUser:
     item = "max_jobs_per_user";
     break;
+  case crane::grpc::ModifyField::MaxJobsPerAccount:
+    item = "max_jobs_per_account";
+    break;
   case crane::grpc::ModifyField::MaxCpusPerUser:
     item = "max_cpus_per_user";
+    break;
+  case crane::grpc::ModifyField::MaxSubmitJobsPerUser:
+    item = "max_submit_jobs_per_user";
+    break;
+  case crane::grpc::ModifyField::MaxSubmitJobsPerAccount:
+    item = "max_submit_jobs_per_account";
     break;
   case crane::grpc::ModifyField::MaxTimeLimitPerTask:
     item = "max_time_limit_per_task";
@@ -953,6 +962,7 @@ CraneExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
 CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
     const std::string& user, const std::string& account, TaskInCtld* task) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
+  util::read_lock_guard account_guard(m_rw_account_mutex_);
   util::read_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
@@ -961,6 +971,15 @@ CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
         "The current user {} is not in the user list when submitting the task",
         user);
     return std::unexpected(CraneErrCode::ERR_INVALID_OP_USER);
+  }
+
+  const Account* account_ptr = GetExistedAccountInfoNoLock_(account);
+  if (!account_ptr) {
+    CRANE_ERROR(
+        "The current account {} is not in the account list when submitting the "
+        "task",
+        account);
+    return std::unexpected(CraneErrCode::ERR_INVALID_ACCOUNT);
   }
 
   if (task->uid != 0) {
@@ -1015,12 +1034,14 @@ CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
     return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
   }
 
-  auto result = g_account_meta_container->CheckAndMallocQosResourceFromUser(
-      user_share_ptr->name, *task, *qos_share_ptr);
-  if (result != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("The requested QoS resources have reached the user's limit.");
-    return std::unexpected(result);
+  auto result = g_account_meta_container->CheckQosSubmitResource(
+      *task, *qos_share_ptr, m_account_map_);
+  if (!result) {
+    CRANE_DEBUG("The requested QoS resources have reached the user's limit.");
+    return std::unexpected(result.error());
   }
+
+  g_account_meta_container->MallocQosSubmitResource(*task, m_account_map_);
 
   return {};
 }
@@ -1814,7 +1835,7 @@ CraneExpected<void> AccountManager::DeleteUser_(const User& user,
     m_account_map_[coordinatorAccount]->coordinators.remove(name);
   }
 
-  g_account_meta_container->DeleteUserResource(name);
+  if (res_user.deleted) g_account_meta_container->DeleteUserResource(name);
 
   m_user_map_[name] = std::make_unique<User>(std::move(res_user));
 
@@ -1852,6 +1873,8 @@ CraneExpected<void> AccountManager::DeleteAccount_(const Account& account) {
   for (const auto& qos : account.allowed_qos_list) {
     m_qos_map_[qos]->reference_count--;
   }
+
+  g_account_meta_container->DeleteAccountResource(name);
 
   return {};
 }

@@ -21,33 +21,92 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include "AccountManager.h"
+#include "crane/PublicHeader.h"
+#include "parallel_hashmap/phmap.h"
+#include "parallel_hashmap/phmap_fwd_decl.h"
+
 namespace Ctld {
 
 class AccountMetaContainer final {
  public:
-
   using QosToResourceMap = std::unordered_map<std::string,  // qos_name
                                               QosResource>;
 
   using UserResourceMetaMap = phmap::parallel_flat_hash_map<
-        std::string, //username
-        QosToResourceMap, phmap::priv::hash_default_hash<std::string>,
-        phmap::priv::hash_default_eq<std::string>,
-        std::allocator<std::pair<const std::string, QosToResourceMap>>, 4, std::shared_mutex>;
+      std::string,  // username
+      QosToResourceMap, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
+      std::shared_mutex>;
+
+  using AccountResourceMetaMap = phmap::parallel_flat_hash_map<
+      std::string,  // account_name
+      QosToResourceMap, phmap::priv::hash_default_hash<std::string>,
+      phmap::priv::hash_default_eq<std::string>,
+      std::allocator<std::pair<const std::string, QosToResourceMap>>, 4,
+      std::shared_mutex>;
 
   AccountMetaContainer() = default;
   ~AccountMetaContainer() = default;
 
-  CraneErrCode CheckAndMallocQosResourceFromUser(const std::string& username,
-                                         const TaskInCtld& task,
-                                         const Qos& qos);
+  CraneExpected<void> CheckQosSubmitResource(
+      const TaskInCtld& task, const Qos& qos,
+      const std::unordered_map<std::string, std::unique_ptr<Account>>&
+          account_map);
 
-  void FreeQosResource(const std::string& username, const TaskInCtld& task);
+  void MallocQosSubmitResource(
+      const TaskInCtld& task,
+      const std::unordered_map<std::string, std::unique_ptr<Account>>&
+          account_map);
+
+  void FreeQosSubmitResource(const TaskInCtld& task);
+
+  bool CheckQosResource(const TaskInCtld& task);
+
+  void MallocQosResource(const TaskInCtld& task);
+
+  void FreeQosResource(const TaskInCtld& task);
 
   void DeleteUserResource(const std::string& username);
 
+  void DeleteAccountResource(const std::string& account);
+
  private:
   UserResourceMetaMap user_meta_map_;
+
+  AccountResourceMetaMap account_meta_map_;
+
+  CraneExpected<void> CheckQosSubmitResourceForUser_(const TaskInCtld& task,
+                                                     const Qos& qos);
+
+  CraneExpected<void> CheckQosSubmitResourceForAccount_(
+      const TaskInCtld& task, const Qos& qos,
+      const std::unordered_map<std::string, std::unique_ptr<Account>>&
+          account_map);
+
+  void MallocQosSubmitResourceForUser_(const TaskInCtld& task);
+
+  void MallocQosSubmitResourceForAccount_(
+      const TaskInCtld& task,
+      const std::unordered_map<std::string, std::unique_ptr<Account>>&
+          account_map);
+
+  void FreeQosSubmitResourceForUser_(const TaskInCtld& task);
+
+  void FreeQosSubmitResourceForAccount_(const TaskInCtld& task);
+
+  bool CheckQosResourceForUser_(const TaskInCtld& task, const Qos& qos);
+
+  bool CheckQosResourceForAccount_(const TaskInCtld& task, const Qos& qos);
+
+  void MallocQosResourceForUser_(const TaskInCtld& task);
+
+  void MallocQosResourceForAccount_(const TaskInCtld& task);
+
+  void FreeQosResourceForUser_(const TaskInCtld& task);
+
+  void FreeQosResourceForAccount_(const TaskInCtld& task);
 };
 
 inline std::unique_ptr<Ctld::AccountMetaContainer> g_account_meta_container;
