@@ -22,6 +22,7 @@ package crane.grpc.plugin;
 option go_package = "/protos";
 
 import "PublicDefs.proto";
+import "google/protobuf/timestamp.proto";
 
 message StartHookRequest {
   repeated TaskInfo task_info_list = 1;
@@ -70,10 +71,28 @@ message DestroyCgroupHookReply {
   bool ok = 1;
 }
 
+message CranedEventInfo {
+  google.protobuf.Timestamp start_time = 1;
+  string node_name = 2;
+  string cluster_name = 3;
+  string reason = 4;
+  CranedControlState state = 5;
+  uint32 uid = 6;
+}
+
+message NodeEventHookRequest {
+  repeated CranedEventInfo event_info_list = 1;
+}
+
+message NodeEventHookReply {
+  bool ok = 1;
+}
+
 service CranePluginD {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */  
   rpc StartHook(StartHookRequest) returns (StartHookReply);
   rpc EndHook(EndHookRequest) returns (EndHookReply);
+  rpc NodeEventHook(NodeEventHookRequest) returns (NodeEventHookReply);
 
   /* ----------------------------------- Called from Craned ---------------------------------------------------- */
   rpc CreateCgroupHook(CreateCgroupHookRequest) returns (CreateCgroupHookReply);
