@@ -638,8 +638,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition(
 
   const User* p = GetExistedUserInfoNoLock_(username);
   if (p == nullptr)
-    return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_INVALID_USER, username));
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_USER, ""));
 
   std::string actual_account = account;
   result = CheckIfUserHasPermOnUserOfAccountNoLock_(*op_user_res.value(), p,
@@ -699,8 +698,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos(
 
   const User* p = GetExistedUserInfoNoLock_(username);
   if (p == nullptr)
-    return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_INVALID_USER, username));
+    return std::unexpected(FormatRichErr(CraneErrCode::ERR_INVALID_USER, ""));
 
   auto user_result = GetUserInfoByUidNoLock_(uid);
   if (!user_result)
@@ -1332,8 +1330,8 @@ CraneExpectedRich<void> AccountManager::CheckSetUserAllowedQosNoLock_(
   for (const auto& [par, pair] : cache_allowed_partition_qos_map) {
     if (!ranges::contains(qos_list, pair.first)) {
       if (!force && !pair.first.empty())
-        return std::unexpected(FormatRichErr(CraneErrCode::ERR_SET_ALLOWED_QOS,
-                                             absl::StrJoin(qos_list, ",")));
+        return std::unexpected(
+            FormatRichErr(CraneErrCode::ERR_SET_ALLOWED_QOS, ""));
     }
   }
   return {};
@@ -2205,7 +2203,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedPartition_(
   // Update to database
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "database"));
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
   m_user_map_[name]
       ->account_to_attrs_map[account_name]
@@ -2252,7 +2250,7 @@ CraneExpectedRich<void> AccountManager::SetUserAllowedQos_(
   // Update to database
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "database"));
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
   m_user_map_[name]
       ->account_to_attrs_map[account_name]
@@ -2451,7 +2449,7 @@ CraneExpectedRich<void> AccountManager::SetAccountAllowedPartition_(
 
   if (!g_db_client->CommitTransaction(callback))
     return std::unexpected(
-        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, "database"));
+        FormatRichErr(CraneErrCode::ERR_UPDATE_DATABASE, ""));
 
   for (const auto& par : deleted_partition) {
     DeleteAccountAllowedPartitionFromMapNoLock_(account.name, par);

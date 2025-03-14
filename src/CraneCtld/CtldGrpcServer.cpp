@@ -922,7 +922,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
   case crane::grpc::Account:
     if (request->entity_list().empty()) {
       const auto account_map_ptr = g_account_manager->GetAllAccountInfo();
-      for (const auto &[account_name, account] : *account_map_ptr) {
+      for (const auto &account_name : *account_map_ptr | std::views::keys) {
         if (account_name == "ROOT") continue;
         entity_list.insert(account_name);
       }
