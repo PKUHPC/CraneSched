@@ -253,16 +253,6 @@ bool AccountMetaContainer::CheckQosResourceForAccount_(const TaskInCtld& task,
             "task {} continues pending.",
             account_name, task.TaskId());
         result = false;
-        return;
-        if (val.resource.CpuCount() + static_cast<double>(task.cpus_per_task) >
-            qos.max_cpus_per_account) {
-          CRANE_DEBUG(
-              "Account {} has reached the maximum number of cpus per account, "
-              "task {} continues pending.",
-              account_name, task.TaskId());
-          result = false;
-          return;
-        }
       }
     });
 

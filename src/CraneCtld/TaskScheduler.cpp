@@ -2776,6 +2776,7 @@ void MinLoadFirst::NodeSelect(
 
     bool ok = g_account_meta_container->CheckQosResource(*task);
     if (!ok) {
+      task->pending_reason = "QosResource";
       continue;
     }
 
