@@ -19,6 +19,7 @@
 #include "CranedMetaContainer.h"
 
 #include "CranedKeeper.h"
+#include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -33,6 +34,15 @@ void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
       CRANE_ERROR("Failed to query actual resource from craned {}", craned_id);
       return;
     }
+    
+    if (g_plugin_client != nullptr) {
+      google::protobuf::RepeatedPtrField<crane::grpc::NetworkInterface> interfaces;
+      for (const auto& interface : remote_meta.network_interfaces) {
+        interfaces.Add()->CopyFrom(interface);
+      }
+      g_plugin_client->RegisterCranedHookAsync(craned_id, interfaces);
+    }
+    
     stub.reset();  // Release shared_ptr
   }
 

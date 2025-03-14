@@ -18,6 +18,15 @@
 
 #include "crane/Network.h"
 
+#include <net/if.h>
+#include <netinet/in.h>
+#include <sys/ioctl.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <linux/if_packet.h>
+#include <ranges>
+
 #include "crane/Logger.h"
 
 namespace crane {
@@ -342,6 +351,62 @@ bool FindTcpInodeByPort(const std::string& tcp_path, int port, ino_t* inode) {
     CRANE_ERROR("Can't open file: {}", tcp_path);
   }
   return false;
+}
+
+std::vector<NetworkInterface> GetNetworkInterfaces() {
+  std::vector<NetworkInterface> interfaces;
+  std::unordered_map<std::string, NetworkInterface> interface_map;
+  
+  struct ifaddrs *ifaddr, *ifa;
+  if (getifaddrs(&ifaddr) == -1) {
+    CRANE_ERROR("getifaddrs failed: {}", strerror(errno));
+    return interfaces;
+  }
+
+  for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+    if (ifa->ifa_addr == nullptr) continue;
+
+    std::string if_name(ifa->ifa_name);
+    
+    if (!interface_map.contains(if_name)) {
+      interface_map[if_name].name = if_name;
+    }
+
+    int family = ifa->ifa_addr->sa_family;
+    
+    switch(family) {
+      case AF_INET: {  // IPv4
+        struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
+        ipv4_t ipv4_addr = addr->sin_addr.s_addr;
+        interface_map[if_name].ipv4_addresses.emplace_back(ipv4_addr);
+        break;
+      }
+      case AF_INET6: {  // IPv6
+        struct sockaddr_in6 *addr = (struct sockaddr_in6 *)ifa->ifa_addr;
+        ipv6_t ipv6_addr = 0;
+        for (int i = 0; i < 4; ++i) {
+            uint32_t part = ntohl(addr->sin6_addr.s6_addr32[i]);
+            ipv6_addr = (ipv6_addr << 32) | part;
+        }
+        interface_map[if_name].ipv6_addresses.emplace_back(ipv6_addr);
+        break;
+      }
+      case AF_PACKET: {  // MAC
+        struct sockaddr_ll *s = (struct sockaddr_ll*)ifa->ifa_addr;
+        interface_map[if_name].mac_address = fmt::format("{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                s->sll_addr[0], s->sll_addr[1], s->sll_addr[2],
+                s->sll_addr[3], s->sll_addr[4], s->sll_addr[5]);
+        break;
+      }
+    }
+  }
+
+  freeifaddrs(ifaddr);
+
+  interfaces = interface_map | std::views::values | std::views::common
+              | std::ranges::to<std::vector>();
+
+  return interfaces;
 }
 
 }  // namespace crane
