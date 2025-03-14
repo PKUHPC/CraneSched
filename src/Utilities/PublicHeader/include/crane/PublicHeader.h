@@ -22,6 +22,7 @@
 
 #include <array>
 #include <expected>
+#include <format>
 #include <fpm/fixed.hpp>
 #include <unordered_map>
 
@@ -35,8 +36,13 @@ using task_id_t = uint32_t;
 
 using CraneErrCode = crane::grpc::ErrCode;
 
+using CraneRichError = crane::grpc::RichError;
+
 template <typename T>
 using CraneExpected = std::expected<T, CraneErrCode>;
+
+template <typename T>
+using CraneExpectedRich = std::expected<T, CraneRichError>;
 
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
@@ -95,7 +101,8 @@ enum ExitCodeEnum : uint16_t {
 }  // namespace ExitCode
 
 namespace Internal {
-constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)> CraneErrStrArr = {
+constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)>
+    CraneErrStrArr = {
         // 0 - 4
         "Success",
 
@@ -191,8 +198,20 @@ constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)>
         // 65 - 67
         "The current running job exceeds the QoS limit (MaxJobPerUser)",
         "User has insufficient privilege"
-};
+    };
 
+}
+
+template <typename... Args>
+inline CraneRichError FormatRichErr(CraneErrCode code, const std::string& fmt,
+                                    Args&&... args) {
+  CraneRichError rich_err;
+
+  rich_err.set_code(code);
+  rich_err.set_description(
+      std::vformat(fmt, std::make_format_args(std::forward<Args>(args)...)));
+
+  return rich_err;
 }
 
 inline std::string_view CraneErrStr(CraneErrCode err) {

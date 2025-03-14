@@ -268,39 +268,39 @@ message AddQosReply {
 
 message DeleteAccountRequest {
   uint32 uid = 1;
-  string name = 2;
+  repeated string account_list = 2;
 }
 
 message DeleteAccountReply {
   bool ok = 1;
-  ErrCode code = 2;
+  repeated RichError rich_error_list = 2;
 }
 
 message DeleteUserRequest {
   uint32 uid = 1;
-  string name = 2;
+  repeated string user_list = 2;
   string account = 3;
 }
 
 message DeleteUserReply {
   bool ok = 1;
-  ErrCode code = 2;
+  repeated RichError rich_error_list = 2;
 }
 
 message DeleteQosRequest {
   uint32 uid = 1;
-  string name = 2;
+  repeated string qos_list = 2;
 }
 
 message DeleteQosReply {
   bool ok = 1;
-  ErrCode code = 2;
+  repeated RichError rich_error_list = 2;
 }
 
 message ModifyAccountRequest {
   uint32 uid = 1;
   ModifyField modify_field = 2;   //modify item field
-  string value = 3;   //new value
+  repeated string value_list = 3;   //new value
   string name = 4;
   OperationType type = 5;
   bool force = 6;
@@ -308,13 +308,13 @@ message ModifyAccountRequest {
 
 message ModifyAccountReply {
   bool ok = 1;
-  ErrCode code = 2;
+  repeated RichError rich_error_list = 2;
 }
 
 message ModifyUserRequest {
   uint32 uid = 1;
   ModifyField modify_field = 2;   //modify item field
-  string value = 3;   //new value
+  repeated string value_list = 3;   //new value
   string name = 4;
   string partition = 5;
   OperationType type = 6;
@@ -324,7 +324,7 @@ message ModifyUserRequest {
 
 message ModifyUserReply {
   bool ok = 1;
-  ErrCode code = 2;
+  repeated RichError rich_error_list = 2;
 }
 
 message ModifyQosRequest {
@@ -341,49 +341,49 @@ message ModifyQosReply {
 
 message QueryAccountInfoRequest {
   uint32 uid = 1;
-  string name = 2;
+  repeated string account_list = 2;
 }
 
 message QueryAccountInfoReply {
   bool ok = 1;
-  ErrCode code = 2;
-  repeated AccountInfo account_list = 3;
+  repeated AccountInfo account_list = 2;
+  repeated RichError rich_error_list = 3;
 }
 
 message QueryUserInfoRequest {
   uint32 uid = 1;
-  string name = 2;
+  repeated string user_list = 2;
   string account = 3;
 }
 
 message QueryUserInfoReply {
   bool ok = 1;
-  ErrCode code = 2;
-  repeated UserInfo user_list = 3;
+  repeated UserInfo user_list = 2;
+  repeated RichError rich_error_list = 3;
 }
 
 message QueryQosInfoRequest {
   uint32 uid = 1;
-  string name = 2;
+  repeated string qos_list = 2;
 }
 
 message QueryQosInfoReply {
   bool ok = 1;
-  ErrCode code = 2;
-  repeated QosInfo qos_list = 5;
+  repeated QosInfo qos_list = 2;
+  repeated RichError rich_error_list = 3;
 }
 
 message BlockAccountOrUserRequest {
   uint32 uid = 1;
   bool block = 2;
   EntityType entity_type = 3;
-  string name = 4;
+  repeated string entity_list = 4;
   string account = 5;
 }
 
 message BlockAccountOrUserReply {
   bool ok = 1;
-  ErrCode code = 2;
+  repeated RichError rich_error_list = 2;
 }
 
 message ModifyPartitionAclRequest {
