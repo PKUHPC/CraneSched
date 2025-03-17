@@ -17,7 +17,6 @@
  */
 
 #include "TaskScheduler.h"
-#include <unordered_map>
 
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
@@ -1169,7 +1168,6 @@ void TaskScheduler::SetBlockForTaskListInRamAndDb_(bool block) {
             task_ptr->Username(), task_ptr->account);
 
       bool should_block = !enable_res;
-
       if (task_ptr->Blocked() == should_block) {
         continue;
       }
@@ -1179,18 +1177,18 @@ void TaskScheduler::SetBlockForTaskListInRamAndDb_(bool block) {
   }
 
   std::vector<std::pair<task_db_id_t, crane::grpc::RuntimeAttrOfTask>> db_updates;
-  for (const auto& [task_id, block_flag] : tasks_to_update) {
-    TaskInCtld* task = nullptr;
-    {
-      absl::WriterMutexLock lock(&m_pending_task_map_mtx_);
-      auto pd_iter = m_pending_task_map_.find(task_id);
-      if (pd_iter == m_pending_task_map_.end()) {
-        CRANE_TRACE("Task #{} not in pending queue for block/unblock", task_id);
-        continue;
-      }
-      task = pd_iter->second.get();
-      task->SetBlocked(block_flag);
-      db_updates.emplace_back(task->TaskDbId(), task->RuntimeAttr());
+  {
+    absl::WriterMutexLock lock(&m_pending_task_map_mtx_);
+    for (const auto& [task_id, block_flag] : tasks_to_update) {
+      TaskInCtld* task = nullptr;
+        auto pd_iter = m_pending_task_map_.find(task_id);
+        if (pd_iter == m_pending_task_map_.end()) {
+          CRANE_TRACE("Task #{} not in pending queue for block/unblock", task_id);
+          continue;
+        }
+        task = pd_iter->second.get();
+        task->SetBlocked(block_flag);
+        db_updates.emplace_back(task->TaskDbId(), task->RuntimeAttr());
     }
   }
 
