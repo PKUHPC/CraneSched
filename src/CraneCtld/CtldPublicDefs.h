@@ -475,8 +475,14 @@ struct TaskInCtld {
   }
   bool const& Held() const { return held; }
 
-  void SetBlockedByAccount(bool val) { blocked_by_account = val; }
-  void SetBlockedByUser(bool val) { blocked_by_user = val; }
+  void SetBlockedByAccount(bool val) {
+    blocked_by_account = val;
+    runtime_attr.set_blocked_by_account(val);
+  }
+  void SetBlockedByUser(bool val) {
+    blocked_by_user = val;
+    runtime_attr.set_blocked_by_user(val);
+  }
   bool Blocked() const { return blocked_by_account || blocked_by_user; }
 
   void SetCachedPriority(const double val) {
@@ -580,6 +586,9 @@ struct TaskInCtld {
     start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());
     end_time = absl::FromUnixSeconds(runtime_attr.end_time().seconds());
     submit_time = absl::FromUnixSeconds(runtime_attr.submit_time().seconds());
+
+    blocked_by_account = runtime_attr.blocked_by_account();
+    blocked_by_user = runtime_attr.blocked_by_user();
   }
 
   // Helper function to set the fields of TaskInfo using info in

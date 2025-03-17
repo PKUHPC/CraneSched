@@ -513,7 +513,8 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   m_account_pending_task_ids_map_[task->account].insert(task->TaskId());
-  m_user_pending_task_ids_map_[task->Username()].insert(task->TaskId());
+  m_user_pending_task_ids_map_[task->Username()][task->account].insert(
+      task->TaskId());
   m_pending_task_map_.emplace(task->TaskId(), std::move(task));
 }
 
@@ -647,13 +648,14 @@ void TaskScheduler::ScheduleThread_() {
       size_t actual_size = m_task_block_queue_.try_dequeue_bulk(
           task_block_reqs.data(), approximate_size);
       task_block_reqs.resize(actual_size);
+      std::unordered_set<TaskInCtld*> updated_tasks;
 
       for (const auto& task_block_req : task_block_reqs) {
         bool block = task_block_req.block;
-        std::string name = task_block_req.name;
-        switch (task_block_req.type) {
-        case TaskBlockReq::Type::Account: {
-          auto task_id_set_ptr = m_account_pending_task_ids_map_.find(name);
+        std::string account = task_block_req.account;
+        std::string user = task_block_req.user;
+        if (user == "") {
+          auto task_id_set_ptr = m_account_pending_task_ids_map_.find(account);
           if (task_id_set_ptr == m_account_pending_task_ids_map_.end()) {
             continue;
           }
@@ -662,16 +664,23 @@ void TaskScheduler::ScheduleThread_() {
             auto task_it = m_pending_task_map_.find(*it);
             if (task_it != m_pending_task_map_.end()) {
               task_it->second->SetBlockedByAccount(block);
+              updated_tasks.insert(task_it->second.get());
               ++it;
             } else {
               it = task_id_set.erase(it);
             }
           }
-          break;
-        }
-        case TaskBlockReq::Type::User: {
-          auto task_id_set_ptr = m_user_pending_task_ids_map_.find(name);
-          if (task_id_set_ptr == m_user_pending_task_ids_map_.end()) {
+          if (task_id_set.empty()) {
+            m_account_pending_task_ids_map_.erase(account);
+          }
+        } else {
+          auto account_task_id_map_ptr =
+              m_user_pending_task_ids_map_.find(user);
+          if (account_task_id_map_ptr == m_user_pending_task_ids_map_.end()) {
+            continue;
+          }
+          auto task_id_set_ptr = account_task_id_map_ptr->second.find(account);
+          if (task_id_set_ptr == account_task_id_map_ptr->second.end()) {
             continue;
           }
           auto& task_id_set = task_id_set_ptr->second;
@@ -679,13 +688,46 @@ void TaskScheduler::ScheduleThread_() {
             auto task_it = m_pending_task_map_.find(*it);
             if (task_it != m_pending_task_map_.end()) {
               task_it->second->SetBlockedByUser(block);
+              updated_tasks.insert(task_it->second.get());
               ++it;
             } else {
               it = task_id_set.erase(it);
             }
           }
-          break;
+          if (task_id_set.empty()) {
+            account_task_id_map_ptr->second.erase(account);
+            if (account_task_id_map_ptr->second.empty()) {
+              m_user_pending_task_ids_map_.erase(user);
+            }
+          }
         }
+      }
+
+      if (!updated_tasks.empty()) {
+        txn_id_t txn_id{0};
+        bool ok = g_embedded_db_client->BeginVariableDbTransaction(&txn_id);
+        if (!ok) {
+          CRANE_ERROR(
+              "TaskScheduler failed to start transaction when block/unblock "
+              "tasks.");
+        }
+
+        for (auto task : updated_tasks) {
+          ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
+              txn_id, task->TaskDbId(), task->RuntimeAttr());
+          if (!ok) {
+            CRANE_ERROR(
+                "TaskScheduler failed to update runtime attr of task #{} "
+                "when block/unblock tasks.",
+                task->TaskId());
+          }
+        }
+
+        ok = g_embedded_db_client->CommitVariableDbTransaction(txn_id);
+        if (!ok) {
+          CRANE_ERROR(
+              "TaskScheduler failed to commit transaction when block/unblock "
+              "tasks.");
         }
       }
     }
@@ -1611,12 +1653,12 @@ void TaskScheduler::CleanSubmitQueueCb_() {
     for (uint32_t i = 0; i < accepted_tasks.size(); i++) {
       uint32_t pos = accepted_tasks.size() - 1 - i;
       task_id_t id = accepted_tasks[pos].first->TaskId();
+      auto& account = accepted_tasks[pos].first->account;
+      auto user = accepted_tasks[pos].first->Username();
       auto& task_id_promise = accepted_tasks[pos].second;
 
-      m_account_pending_task_ids_map_[accepted_tasks[pos].first->account]
-          .insert(id);
-      m_user_pending_task_ids_map_[accepted_tasks[pos].first->Username()]
-          .insert(id);
+      m_account_pending_task_ids_map_[account].insert(id);
+      m_user_pending_task_ids_map_[user][account].insert(id);
       m_pending_task_map_.emplace(id, std::move(accepted_tasks[pos].first));
       task_id_promise.set_value(id);
     }
@@ -2536,14 +2578,10 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
   }
 }
 
-void TaskScheduler::BlockAccount(std::string account_id, bool block) {
+void TaskScheduler::BlockAccountOrUser(bool block, std::string account_id,
+                                       std::string user_id) {
   m_task_block_queue_.enqueue(
-      TaskBlockReq{TaskBlockReq::Type::Account, block, std::move(account_id)});
-}
-
-void TaskScheduler::BlockUser(std::string user_id, bool block) {
-  m_task_block_queue_.enqueue(
-      TaskBlockReq{TaskBlockReq::Type::User, block, std::move(user_id)});
+      TaskBlockReq{block, std::move(account_id), std::move(user_id)});
 }
 
 CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
