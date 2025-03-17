@@ -17,6 +17,7 @@
  */
 
 #include "TaskScheduler.h"
+#include <unordered_map>
 
 #include "AccountManager.h"
 #include "AccountMetaContainer.h"
@@ -1159,41 +1160,45 @@ CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
 }
 
 void TaskScheduler::SetBlockForTaskListInRamAndDb_(bool block) {
+  std::vector<std::pair<task_id_t, bool>> tasks_to_update;
 
-  m_pending_task_map_mtx_.Lock();
-  for (const auto& [task_id, task_ptr] : m_pending_task_map_) {
-    auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
-        task_ptr->Username(), task_ptr->account);
-    if (enable_res) {
-      if (task_ptr->Blocked() == false) {
+  {
+    absl::ReaderMutexLock lock(&m_pending_task_map_mtx_);
+    for (const auto& [task_id, task_ptr] : m_pending_task_map_) {
+      auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
+            task_ptr->Username(), task_ptr->account);
+
+      bool should_block = !enable_res;
+
+      if (task_ptr->Blocked() == should_block) {
         continue;
       }
-      task_ptr->SetBlocked(false);
-      task_db_id_t db_id = task_ptr->TaskDbId();
-      auto runtime_attr = task_ptr->RuntimeAttr();
-      m_pending_task_map_mtx_.Unlock();
 
-      if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(0, db_id,
-          runtime_attr))
-      CRANE_ERROR("Failed to update runtime attr of task #{} to DB", task_id);
-      m_pending_task_map_mtx_.Lock();
-    } else {
-      if (task_ptr->Blocked() == true) {
-        continue;
-      }
-      task_ptr->SetBlocked(true);
-      task_db_id_t db_id = task_ptr->TaskDbId();
-      auto runtime_attr = task_ptr->RuntimeAttr();
-      m_pending_task_map_mtx_.Unlock();
-
-      if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(0, db_id,
-        runtime_attr))
-      CRANE_ERROR("Failed to update runtime attr of task #{} to DB", task_id);
-      m_pending_task_map_mtx_.Lock();
+      tasks_to_update.emplace_back(task_id, should_block);
     }
   }
-  m_pending_task_map_mtx_.Unlock(); 
-  return;
+
+  std::vector<std::pair<task_db_id_t, crane::grpc::RuntimeAttrOfTask>> db_updates;
+  for (const auto& [task_id, block_flag] : tasks_to_update) {
+    TaskInCtld* task = nullptr;
+    {
+      absl::WriterMutexLock lock(&m_pending_task_map_mtx_);
+      auto pd_iter = m_pending_task_map_.find(task_id);
+      if (pd_iter == m_pending_task_map_.end()) {
+        CRANE_TRACE("Task #{} not in pending queue for block/unblock", task_id);
+        continue;
+      }
+      task = pd_iter->second.get();
+      task->SetBlocked(block_flag);
+      db_updates.emplace_back(task->TaskDbId(), task->RuntimeAttr());
+    }
+  }
+
+  for (const auto& [db_id, runtime_attr] : db_updates) {
+    if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(0, db_id, runtime_attr)) {
+      CRANE_ERROR("Failed to update runtime attr of task #{} to DB", db_id);
+    }
+  }
 }
 
 CraneErrCode TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
