@@ -521,9 +521,8 @@ class TaskScheduler {
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
 
-  void BlockAccount(std::string account_id, bool block);
-
-  void BlockUser(std::string user_id, bool block);
+  void BlockAccountOrUser(bool block, std::string account_id,
+                          std::string user_id = "");
 
   static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
 
@@ -665,19 +664,16 @@ class TaskScheduler {
   void CleanTaskStatusChangeQueueCb_();
 
   struct TaskBlockReq {
-    enum Type {
-      Account,
-      User,
-    } type;
     bool block;
-    std::string name;
+    std::string account;
+    std::string user;
   };
 
   ConcurrentQueue<TaskBlockReq> m_task_block_queue_;
 
   HashMap<std::string, std::unordered_set<task_id_t>>
       m_account_pending_task_ids_map_ ABSL_GUARDED_BY(m_pending_task_map_mtx_);
-  HashMap<std::string, std::unordered_set<task_id_t>>
+  HashMap<std::string, HashMap<std::string, std::unordered_set<task_id_t>>>
       m_user_pending_task_ids_map_ ABSL_GUARDED_BY(m_pending_task_map_mtx_);
 };
 
