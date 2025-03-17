@@ -337,6 +337,11 @@ message TrimmedPartitionInfo {
   repeated TrimmedCranedInfo craned_lists = 3;
 }
 
+message RichError {
+  ErrCode code = 1;
+  string description = 2;
+}
+
 enum ErrCode {
   SUCCESS = 0;  // Success
 
