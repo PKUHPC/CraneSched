@@ -19,6 +19,7 @@
 #include "AccountManager.h"
 
 #include "AccountMetaContainer.h"
+#include "TaskScheduler.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
@@ -2580,6 +2581,8 @@ CraneExpected<void> AccountManager::BlockUserNoLock_(const std::string& name,
 
   m_user_map_[name]->account_to_attrs_map[account].blocked = block;
 
+  g_task_scheduler->BlockUser(name, block);
+
   return {};
 }
 
@@ -2596,6 +2599,8 @@ CraneExpected<void> AccountManager::BlockAccountNoLock_(const std::string& name,
   }
 
   m_account_map_[name]->blocked = block;
+
+  g_task_scheduler->BlockAccount(name, block);
 
   return {};
 }

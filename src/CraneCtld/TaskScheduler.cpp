@@ -512,6 +512,8 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_task_map_mtx_);
+  m_account_pending_task_ids_map_[task->account].insert(task->TaskId());
+  m_user_pending_task_ids_map_[task->Username()].insert(task->TaskId());
   m_pending_task_map_.emplace(task->TaskId(), std::move(task));
 }
 
@@ -637,6 +639,57 @@ void TaskScheduler::ScheduleThread_() {
     // m_pending_task_map_mtx_ needs to be acquired. Deadlock may happen under
     // such a situation.
     m_pending_task_map_mtx_.Lock();
+
+    // Handle block requests first
+    if (m_task_block_queue_.size_approx()) {
+      size_t approximate_size = m_task_block_queue_.size_approx();
+      std::vector<TaskBlockReq> task_block_reqs(approximate_size);
+      size_t actual_size = m_task_block_queue_.try_dequeue_bulk(
+          task_block_reqs.data(), approximate_size);
+      task_block_reqs.resize(actual_size);
+
+      for (const auto& task_block_req : task_block_reqs) {
+        bool block = task_block_req.block;
+        std::string name = task_block_req.name;
+        switch (task_block_req.type) {
+        case TaskBlockReq::Type::Account: {
+          auto task_id_set_ptr = m_account_pending_task_ids_map_.find(name);
+          if (task_id_set_ptr == m_account_pending_task_ids_map_.end()) {
+            continue;
+          }
+          auto& task_id_set = task_id_set_ptr->second;
+          for (auto it = task_id_set.begin(); it != task_id_set.end();) {
+            auto task_it = m_pending_task_map_.find(*it);
+            if (task_it != m_pending_task_map_.end()) {
+              task_it->second->SetBlockedByAccount(block);
+              ++it;
+            } else {
+              it = task_id_set.erase(it);
+            }
+          }
+          break;
+        }
+        case TaskBlockReq::Type::User: {
+          auto task_id_set_ptr = m_user_pending_task_ids_map_.find(name);
+          if (task_id_set_ptr == m_user_pending_task_ids_map_.end()) {
+            continue;
+          }
+          auto& task_id_set = task_id_set_ptr->second;
+          for (auto it = task_id_set.begin(); it != task_id_set.end();) {
+            auto task_it = m_pending_task_map_.find(*it);
+            if (task_it != m_pending_task_map_.end()) {
+              task_it->second->SetBlockedByUser(block);
+              ++it;
+            } else {
+              it = task_id_set.erase(it);
+            }
+          }
+          break;
+        }
+        }
+      }
+    }
+
     if (!m_pending_task_map_.empty()) {  // all_part_metas is locked here.
       // Running map must be locked before g_meta_container's lock.
       // Otherwise, DEADLOCK may happen because TaskStatusChange() locks running
@@ -987,8 +1040,8 @@ void TaskScheduler::ScheduleThread_() {
           CranedId const& craned_id = iter.first;
           auto& task_uid_pairs = iter.second;
 
-          g_thread_pool->detach_task(
-      [=, cgroups_to_release = std::move(task_uid_pairs)]() {
+          g_thread_pool->detach_task([=, cgroups_to_release =
+                                             std::move(task_uid_pairs)]() {
             auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
             // If the craned is down, just ignore it.
@@ -1560,6 +1613,10 @@ void TaskScheduler::CleanSubmitQueueCb_() {
       task_id_t id = accepted_tasks[pos].first->TaskId();
       auto& task_id_promise = accepted_tasks[pos].second;
 
+      m_account_pending_task_ids_map_[accepted_tasks[pos].first->account]
+          .insert(id);
+      m_user_pending_task_ids_map_[accepted_tasks[pos].first->Username()]
+          .insert(id);
       m_pending_task_map_.emplace(id, std::move(accepted_tasks[pos].first));
       task_id_promise.set_value(id);
     }
@@ -2479,6 +2536,16 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
   }
 }
 
+void TaskScheduler::BlockAccount(std::string account_id, bool block) {
+  m_task_block_queue_.enqueue(
+      TaskBlockReq{TaskBlockReq::Type::Account, block, std::move(account_id)});
+}
+
+void TaskScheduler::BlockUser(std::string user_id, bool block) {
+  m_task_block_queue_.enqueue(
+      TaskBlockReq{TaskBlockReq::Type::User, block, std::move(user_id)});
+}
+
 CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   auto part_it = g_config.Partitions.find(task->partition_id);
   if (part_it == g_config.Partitions.end()) {
@@ -2639,6 +2706,10 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
   for (const auto& [task_id, task] : pending_task_map) {
     if (task->Held()) {
       task->pending_reason = "Held";
+      continue;
+    }
+    if (task->Blocked()) {
+      task->pending_reason = "Blocked";
       continue;
     }
     // Admin may manually specify the priority of a task.

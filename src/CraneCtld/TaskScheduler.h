@@ -55,11 +55,12 @@ class BasicPriority : public IPrioritySorter {
     int i = 0;
     for (auto it = pending_task_map.begin(); i < len; i++, it++) {
       TaskInCtld* task = it->second.get();
-      if (!task->Held()) {
-        task_id_vec.emplace_back(it->first);
-        it->second->pending_reason = "Priority";
-      } else {
+      if (task->Held()) {
         it->second->pending_reason = "Held";
+      } else if (task->Blocked()) {
+        it->second->pending_reason = "Blocked";
+      } else {
+        it->second->pending_reason = "Priority";
       }
     }
 
@@ -449,7 +450,8 @@ class TaskScheduler {
   /// Otherwise, it is set to newly allocated task id.
   std::future<task_id_t> SubmitTaskAsync(std::unique_ptr<TaskInCtld> task);
 
-  std::future<CraneErrCode> HoldReleaseTaskAsync(task_id_t task_id, int64_t secs);
+  std::future<CraneErrCode> HoldReleaseTaskAsync(task_id_t task_id,
+                                                 int64_t secs);
 
   CraneErrCode ChangeTaskTimeLimit(task_id_t task_id, int64_t secs);
 
@@ -513,10 +515,15 @@ class TaskScheduler {
     LockGuard running_guard(&m_running_task_map_mtx_);
 
     auto iter = m_running_task_map_.find(task_id);
-    if (iter == m_running_task_map_.end()) return CraneErrCode::ERR_NON_EXISTENT;
+    if (iter == m_running_task_map_.end())
+      return CraneErrCode::ERR_NON_EXISTENT;
 
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
+
+  void BlockAccount(std::string account_id, bool block);
+
+  void BlockUser(std::string user_id, bool block);
 
   static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
 
@@ -656,6 +663,22 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_task_status_change_handle_;
   void CleanTaskStatusChangeQueueCb_();
+
+  struct TaskBlockReq {
+    enum Type {
+      Account,
+      User,
+    } type;
+    bool block;
+    std::string name;
+  };
+
+  ConcurrentQueue<TaskBlockReq> m_task_block_queue_;
+
+  HashMap<std::string, std::unordered_set<task_id_t>>
+      m_account_pending_task_ids_map_ ABSL_GUARDED_BY(m_pending_task_map_mtx_);
+  HashMap<std::string, std::unordered_set<task_id_t>>
+      m_user_pending_task_ids_map_ ABSL_GUARDED_BY(m_pending_task_map_mtx_);
 };
 
 }  // namespace Ctld

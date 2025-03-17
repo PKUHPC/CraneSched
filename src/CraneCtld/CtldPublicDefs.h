@@ -333,6 +333,8 @@ struct TaskInCtld {
   crane::grpc::TaskStatus status;
   uint32_t exit_code;
   bool held{false};
+  bool blocked_by_account{false};
+  bool blocked_by_user{false};
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -473,6 +475,10 @@ struct TaskInCtld {
   }
   bool const& Held() const { return held; }
 
+  void SetBlockedByAccount(bool val) { blocked_by_account = val; }
+  void SetBlockedByUser(bool val) { blocked_by_user = val; }
+  bool Blocked() const { return blocked_by_account || blocked_by_user; }
+
   void SetCachedPriority(const double val) {
     cached_priority = val;
     runtime_attr.set_cached_priority(val);
@@ -607,6 +613,7 @@ struct TaskInCtld {
     task_info->set_extra_attr(extra_attr);
 
     task_info->set_held(held);
+    task_info->set_blocked(Blocked());
     task_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
                                                 executing_craned_ids.end());
 
