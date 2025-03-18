@@ -17,7 +17,6 @@
  */
 
 #include "CranedKeeper.h"
-
 #include "TaskScheduler.h"
 namespace Ctld {
 
@@ -34,8 +33,14 @@ CranedStub::~CranedStub() {
 }
 
 void CranedStub::ConfigureCraned(const CranedId &craned_id) {
-  CRANE_TRACE("Configuring craned {}", craned_id);
+  static std::random_device rd;
+  static std::mt19937_64 gen(rd());
+  static std::uniform_int_distribution<uint64_t> dist;
+  m_last_configure_token = dist(gen);
+  CRANE_TRACE("Configuring craned {} with token {}", craned_id,
+              m_last_configure_token);
   crane::grpc::ConfigureCranedRequest request;
+  request.set_token(m_last_configure_token);
   g_task_scheduler->QueryJobOfNode(craned_id, &request);
   google::protobuf::Empty reply;
   ClientContext context;
@@ -177,33 +182,6 @@ CraneErr CranedStub::ReleaseCgroupForTasks(
   }
 
   return CraneErr::kOk;
-}
-
-CraneErr CranedStub::CheckTaskStatus(task_id_t task_id,
-                                     crane::grpc::TaskStatus *status) {
-  using crane::grpc::CheckTaskStatusReply;
-  using crane::grpc::CheckTaskStatusRequest;
-
-  ClientContext context;
-  Status grpc_status;
-  CheckTaskStatusRequest request;
-  CheckTaskStatusReply reply;
-
-  request.set_task_id(task_id);
-  grpc_status = m_stub_->CheckTaskStatus(&context, request, &reply);
-
-  if (!grpc_status.ok()) {
-    CRANE_DEBUG(
-        "CheckTaskStatus gRPC for Node {} returned with status not ok: {}",
-        m_craned_id_, grpc_status.error_message());
-    return CraneErr::kRpcFailure;
-  }
-
-  if (reply.ok()) {
-    *status = reply.status();
-    return CraneErr::kOk;
-  } else
-    return CraneErr::kNonExistent;
 }
 
 CraneErr CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {

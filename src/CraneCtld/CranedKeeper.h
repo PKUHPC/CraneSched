@@ -57,11 +57,17 @@ class CranedStub {
 
   CraneErr TerminateOrphanedTask(task_id_t task_id);
 
-  CraneErr CheckTaskStatus(task_id_t task_id, crane::grpc::TaskStatus *status);
-
   CraneErr ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 
-  void SetConnected() { m_invalid_.store(false, std::memory_order_release); }
+  bool SetConnected(std::uint64_t token) {
+    if (m_last_configure_token.load(std::memory_order_acquire) == token) {
+      m_invalid_.store(false, std::memory_order_release);
+      return true;
+    } else {
+      return false;
+    }
+  }
+
   bool Invalid() const { return m_invalid_.load(std::memory_order_acquire); }
 
  private:
@@ -80,6 +86,7 @@ class CranedStub {
 
   CranedId m_craned_id_;
 
+  std::atomic_uint64_t m_last_configure_token;
   // void* parameter is m_data_. Used to free m_data_ when CranedStub is being
   // destructed.
   std::function<void(CranedStub *)> m_clean_up_cb_;

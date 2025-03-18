@@ -60,7 +60,8 @@ class CtldClient {
 
   void CranedConnected();
 
-  void CranedReady(const std::vector<task_id_t>& nonexistent_jobs);
+  void CranedReady(const std::vector<task_id_t>& nonexistent_jobs,
+                   std::uint64_t token);
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 

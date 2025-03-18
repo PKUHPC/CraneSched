@@ -71,8 +71,6 @@ bool TaskScheduler::Init() {
   if (!running_queue.empty()) {
     CRANE_INFO("{} running task(s) recovered.", running_queue.size());
 
-    std::unordered_map<CranedId, std::vector<std::pair<task_id_t, uid_t>>>
-        craned_cgroups_map;
     for (auto&& [task_db_id, task_in_embedded_db] : running_queue) {
       auto task = std::make_unique<TaskInCtld>();
       task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
@@ -111,8 +109,7 @@ bool TaskScheduler::Init() {
                 task->TaskId());
           }
 
-          std::vector<task_db_id_t> db_ids{task_db_id};
-          ok = g_embedded_db_client->PurgeEndedTasks(db_ids);
+          ok = g_embedded_db_client->PurgeEndedTasks({task_db_id});
           if (!ok) {
             CRANE_ERROR(
                 "PurgeEndedTasks failed for task #{} when recovering "
@@ -125,6 +122,7 @@ bool TaskScheduler::Init() {
         // process next task.
         continue;
       }
+      PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
     }
   }
 

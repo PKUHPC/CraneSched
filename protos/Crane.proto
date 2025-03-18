@@ -43,13 +43,13 @@ message ConfigureCranedRequest {
   bool ok = 1;
   map<uint32, JobSpec> job_map = 2;
   map<uint32, TaskToD> job_id_tasks_map = 3;
-  string uuid = 4;
+  uint64 token = 4;
 }
 
 message CranedReadyRequest {
   string craned_id = 1;
   CranedRemoteMeta remote_meta = 2;
-  string uuid = 3;
+  uint64 token = 3;
 }
 
 message CranedReadyReply {
@@ -141,15 +141,6 @@ message ChangeTaskTimeLimitRequest {
 
 message ChangeTaskTimeLimitReply {
   bool ok = 1;
-}
-
-message CheckTaskStatusRequest {
-  uint32 task_id = 1;
-}
-
-message CheckTaskStatusReply {
-  bool ok = 1;
-  TaskStatus status = 2;
 }
 
 message CancelTaskRequest {
@@ -815,8 +806,6 @@ service Craned {
   rpc Configure(ConfigureCranedRequest) returns (google.protobuf.Empty);
   rpc ExecuteTask(ExecuteTasksRequest) returns(ExecuteTasksReply);
   rpc ExecuteProc(ExecuteProcRequest) returns(ExecuteProcReply);
-
-  rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
 
   rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns(CreateCgroupForTasksReply);
   rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns(ReleaseCgroupForTasksReply);

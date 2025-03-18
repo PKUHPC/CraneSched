@@ -63,9 +63,11 @@ void CtldClient::CranedConnected() {
   }
 }
 
-void CtldClient::CranedReady(const std::vector<task_id_t>& nonexistent_jobs) {
+void CtldClient::CranedReady(const std::vector<task_id_t>& nonexistent_jobs,
+                             std::uint64_t token) {
   crane::grpc::CranedReadyRequest ready_request;
   ready_request.set_craned_id(g_config.CranedIdOfThisNode);
+  ready_request.set_token(token);
   auto* grpc_meta = ready_request.mutable_remote_meta();
   auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->dedicated_res;
 

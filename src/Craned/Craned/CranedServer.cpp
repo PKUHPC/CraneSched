@@ -34,8 +34,8 @@ grpc::Status CranedServiceImpl::Configure(
   if (!g_server->m_recovered_.load())
     g_server->ReceiveConfigure(request);
   else {
-    // Do other thingsg
-    g_ctld_client->CranedReady({});
+    // Do other thing
+    g_ctld_client->CranedReady({}, request->token());
   }
   return Status::OK;
 }
@@ -510,24 +510,6 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
   for (const auto &[name, value] : reply_from_remote_service.env_map()) {
     response->mutable_env_map()->emplace(name, value);
   }
-
-  return Status::OK;
-}
-
-grpc::Status CranedServiceImpl::CheckTaskStatus(
-    grpc::ServerContext *context,
-    const crane::grpc::CheckTaskStatusRequest *request,
-    crane::grpc::CheckTaskStatusReply *response) {
-  if (!g_server->ReadyFor(RequestSource::CTLD)) {
-    CRANE_ERROR("CranedServer is not ready.");
-    response->set_ok(false);
-    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
-  }
-  crane::grpc::TaskStatus status{};
-
-  bool exist = g_job_mgr->CheckTaskStatusAsync(request->task_id(), &status);
-  response->set_ok(exist);
-  response->set_status(status);
 
   return Status::OK;
 }

@@ -47,7 +47,10 @@ void CranedMetaContainer::CranedUp(const crane::grpc::CranedReadyRequest* req) {
   auto node_meta = craned_meta_map_[craned_id];
   auto stub = g_craned_keeper->GetCranedStub(craned_id);
   if (stub != nullptr) {
-    stub->SetConnected();
+    if (!stub->SetConnected(req->token())) {
+      CRANE_DEBUG("Craned {} try to up,but insufficient token {} got.",
+                  craned_id, req->token());
+    }
     stub.reset();
   }
   node_meta->alive = true;
@@ -96,14 +99,10 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
-
-    part_global_meta.alive_craned_cnt--;
     if (!node_meta->alive) {
       continue;
     }
-    part_global_meta.res_total -= node_meta->res_total;
-    part_global_meta.res_avail -= node_meta->res_avail;
-    part_global_meta.res_in_use -= node_meta->res_in_use;
+    part_global_meta.alive_craned_cnt--;
   }
   node_meta->alive = false;
 }
@@ -194,11 +193,6 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
 
   // Then acquire craned meta lock.
   auto node_meta = craned_meta_map_[node_id];
-  if (!node_meta->alive) {
-    CRANE_DEBUG("Crane {} has already been down. Ignore FreeResourceFromNode.",
-                node_meta->static_meta.hostname);
-    return;
-  }
 
   auto resource_iter = node_meta->running_task_resource_map.find(task_id);
   if (resource_iter == node_meta->running_task_resource_map.end()) {
@@ -211,13 +205,14 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
 
   node_meta->res_avail += resources;
   node_meta->res_in_use -= resources;
+  if (node_meta->alive) {
+    for (auto& partition_meta : part_meta_ptrs) {
+      PartitionGlobalMeta& part_global_meta =
+          partition_meta->partition_global_meta;
 
-  for (auto& partition_meta : part_meta_ptrs) {
-    PartitionGlobalMeta& part_global_meta =
-        partition_meta->partition_global_meta;
-
-    part_global_meta.res_avail += resources;
-    part_global_meta.res_in_use -= resources;
+      part_global_meta.res_avail += resources;
+      part_global_meta.res_in_use -= resources;
+    }
   }
 
   node_meta->running_task_resource_map.erase(resource_iter);
