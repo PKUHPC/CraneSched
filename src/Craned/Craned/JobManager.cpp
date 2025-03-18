@@ -411,7 +411,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
     // Do Supervisor Init
     crane::grpc::supervisor::InitSupervisorRequest init_req;
     init_req.set_job_id(execution->task_spec.task_id());
-    init_req.set_debug_level("trace");
+    init_req.set_debug_level(g_config.SupervisorDebugLevel);
     init_req.set_craned_id(g_config.CranedIdOfThisNode);
     init_req.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
     init_req.set_crane_base_dir(g_config.CraneBaseDir);

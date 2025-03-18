@@ -167,7 +167,7 @@ bool GetSystemReleaseInfo(SystemRelInfo* info) {
 
 absl::Time GetSystemBootTime() {
 #if defined(__linux__) || defined(__unix__)
-  struct sysinfo system_info;
+  struct sysinfo system_info{};
   if (sysinfo(&system_info) != 0) {
     CRANE_ERROR("Failed to get sysinfo {}.", strerror(errno));
     return {};

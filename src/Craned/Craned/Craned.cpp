@@ -99,12 +99,28 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.CranedDebugLevel = value_or(config["CranedDebugLevel"], "log");
 
+      if (config["Supervisor"]) {
+        const auto& supervisor_config = config["Supervisor"];
+        g_config.SupervisorDebugLevel =
+            value_or(supervisor_config["DebugLevel"], "trace");
+      } else {
+        fmt::print(stderr, "No Supervisor configuration found.");
+        std::exit(1);
+      }
+
+      if (!StrToLogLevel(g_config.SupervisorDebugLevel).has_value()) {
+        fmt::print(stderr, "Illegal Supervisor debug-level format: {}.",
+                   g_config.SupervisorDebugLevel);
+        std::exit(1);
+      }
+
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
       if (log_level.has_value()) {
         InitLogger(log_level.value(), g_config.CranedLogFile, true);
       } else {
-        fmt::print(stderr, "Illegal debug-level format.");
+        fmt::print(stderr, "Illegal Craned debug-level format:{} .",
+                   g_config.CranedDebugLevel);
         std::exit(1);
       }
 
