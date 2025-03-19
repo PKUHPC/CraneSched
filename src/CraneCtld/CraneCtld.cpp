@@ -191,7 +191,7 @@ void ParseConfig(int argc, char** argv) {
             g_config.ListenConf.TlsCerts.InternalCaContent =
                 util::ReadFileIntoString(internalCaFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+            CRANE_ERROR("Read InternalCaFile error: {}", e.what());
             std::exit(1);
           }
           if (g_config.ListenConf.TlsCerts.InternalCaContent.empty()) {
@@ -212,7 +212,7 @@ void ParseConfig(int argc, char** argv) {
             internal_certs.ServerCertContent =
                 util::ReadFileIntoString(internal_certs.ServerCertFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+            CRANE_ERROR("Read CranectldInternalCertFile error: {}", e.what());
             std::exit(1);
           }
           if (internal_certs.ServerCertContent.empty()) {
@@ -235,7 +235,7 @@ void ParseConfig(int argc, char** argv) {
             internal_certs.ServerKeyContent =
                 util::ReadFileIntoString(internal_certs.ServerKeyFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+            CRANE_ERROR("Read CranectldInternalKeyFile error: {}", e.what());
             std::exit(1);
           }
           if (internal_certs.ServerKeyContent.empty()) {
@@ -258,7 +258,7 @@ void ParseConfig(int argc, char** argv) {
             craned_certs.ClientCertContent =
                 util::ReadFileIntoString(craned_certs.ClientCertFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+            CRANE_ERROR("Read CranedCertFile error: {}", e.what());
             std::exit(1);
           }
           if (craned_certs.ClientCertContent.empty()) {
@@ -279,7 +279,7 @@ void ParseConfig(int argc, char** argv) {
             cfored_certs.ClientCertContent =
                 util::ReadFileIntoString(cfored_certs.ClientCertFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+            CRANE_ERROR("Read CforedCertFile error: {}", e.what());
             std::exit(1);
           }
           if (cfored_certs.ClientCertContent.empty()) {

@@ -12,8 +12,9 @@ add_library(RpcService
     CranedKeeper.cpp
 )
 
-target_include_directories(RpcService PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}  # Include the RpcService directory
+target_include_directories(RpcService PUBLIC 
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/src/CraneCtld
 )
 
 target_link_libraries(RpcService PUBLIC

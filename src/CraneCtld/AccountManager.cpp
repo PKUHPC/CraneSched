@@ -19,7 +19,6 @@
 #include "AccountManager.h"
 
 #include "AccountMetaContainer.h"
-#include "crane/Logger.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
 
