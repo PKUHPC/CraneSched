@@ -987,8 +987,8 @@ void TaskScheduler::ScheduleThread_() {
           CranedId const& craned_id = iter.first;
           auto& task_uid_pairs = iter.second;
 
-          g_thread_pool->detach_task(
-      [=, cgroups_to_release = std::move(task_uid_pairs)]() {
+          g_thread_pool->detach_task([=, cgroups_to_release =
+                                             std::move(task_uid_pairs)]() {
             auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
             // If the craned is down, just ignore it.
@@ -1039,13 +1039,11 @@ void TaskScheduler::SetNodeSelectionAlgo(
   m_node_selection_algo_ = std::move(algo);
 }
 
-std::expected<std::future<task_id_t>, std::string>
-TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
-  CraneErr err;
-
+CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
+    std::unique_ptr<TaskInCtld> task) {
   if (!task->password_entry->Valid()) {
-    return std::unexpected(
-        fmt::format("Uid {} not found on the controller node", task->uid));
+    CRANE_DEBUG("Uid {} not found on the controller node", task->uid);
+    return std::unexpected(CraneErrCode::ERR_INVALID_UID);
   }
   task->SetUsername(task->password_entry->Username());
 
@@ -1053,8 +1051,9 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     auto user_scoped_ptr =
         g_account_manager->GetExistedUserInfo(task->Username());
     if (!user_scoped_ptr) {
-      return std::unexpected(fmt::format(
-          "User '{}' not found in the account database", task->Username()));
+      CRANE_DEBUG("User '{}' not found in the account database",
+                  task->Username());
+      return std::unexpected(CraneErrCode::ERR_INVALID_USER);
     }
 
     if (task->account.empty()) {
@@ -1062,18 +1061,22 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
       task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
     } else {
       if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
-        return std::unexpected(fmt::format(
-            "Account '{}' is not in your account list", task->account));
+        CRANE_DEBUG(
+            "Account '{}' is not in the user account list when submitting the "
+            "task",
+            task->account);
+        return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
       }
     }
   }
 
   if (!g_account_manager->CheckUserPermissionToPartition(
           task->Username(), task->account, task->partition_id)) {
-    return std::unexpected(
-        fmt::format("User '{}' doesn't have permission to use partition '{}' "
-                    "when using account '{}'",
-                    task->Username(), task->partition_id, task->account));
+    CRANE_DEBUG(
+        "User '{}' doesn't have permission to use partition '{}' when using "
+        "account '{}'",
+        task->Username(), task->partition_id, task->account);
+    return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
   }
 
   auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
@@ -1082,46 +1085,23 @@ TaskScheduler::SubmitTaskToScheduler(std::unique_ptr<TaskInCtld> task) {
     return std::unexpected(enable_res.error());
   }
 
-  err = g_task_scheduler->AcquireTaskAttributes(task.get());
+  auto result = g_meta_container->CheckIfAccountIsAllowedInPartition(
+      task->partition_id, task->account);
+  if (!result) return std::unexpected(result.error());
 
-  if (err == CraneErr::kOk)
-    err = g_task_scheduler->CheckTaskValidity(task.get());
+  result = g_task_scheduler->AcquireTaskAttributes(task.get());
 
-  if (err == CraneErr::kOk) {
-    task->SetSubmitTime(absl::Now());
+  if (result) result = g_task_scheduler->CheckTaskValidity(task.get());
+
+  task->SetSubmitTime(absl::Now());
+
+  if (result) {
     std::future<task_id_t> future =
         g_task_scheduler->SubmitTaskAsync(std::move(task));
     return {std::move(future)};
   }
 
-  if (err == CraneErr::kNonExistent) {
-    CRANE_DEBUG("Task submission failed. Reason: Partition doesn't exist!");
-    return std::unexpected("Partition doesn't exist!");
-  } else if (err == CraneErr::kInvalidNodeNum) {
-    CRANE_DEBUG(
-        "Task submission failed. Reason: --node is either invalid or greater "
-        "than the number of nodes in its partition.");
-    return std::unexpected(
-        "--node is either invalid or greater than the number of nodes in its "
-        "partition.");
-  } else if (err == CraneErr::kNoResource) {
-    CRANE_DEBUG(
-        "Task submission failed. "
-        "Reason: The resources of the partition are insufficient.");
-    return std::unexpected("The resources of the partition are insufficient");
-  } else if (err == CraneErr::kNoAvailNode) {
-    CRANE_DEBUG(
-        "Task submission failed. "
-        "Reason: Nodes satisfying the requirements of task are insufficient");
-    return std::unexpected(
-        "Nodes satisfying the requirements of task are insufficient.");
-  } else if (err == CraneErr::kInvalidParam) {
-    CRANE_DEBUG(
-        "Task submission failed. "
-        "Reason: The param of task is invalid.");
-    return std::unexpected("The param of task is invalid.");
-  }
-  return std::unexpected<std::string>(CraneErrStr(err));
+  return std::unexpected(result.error());
 }
 
 std::future<task_id_t> TaskScheduler::SubmitTaskAsync(

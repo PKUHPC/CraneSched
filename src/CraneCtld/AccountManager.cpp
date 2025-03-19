@@ -27,8 +27,8 @@ namespace Ctld {
 
 AccountManager::AccountManager() { InitDataMap_(); }
 
-AccountManager::CraneExpected<void> AccountManager::AddUser(
-    uint32_t uid, const User& new_user) {
+CraneExpected<void> AccountManager::AddUser(uint32_t uid,
+                                            const User& new_user) {
   CraneExpected<void> result;
 
   util::write_lock_guard user_guard(m_rw_user_mutex_);
@@ -1274,7 +1274,7 @@ CraneExpected<void> AccountManager::CheckModifyPartitionAcl(
   return result;
 }
 
-AccountManager::CraneExpected<void> AccountManager::ResetUserCertificate(
+CraneExpected<void> AccountManager::ResetUserCertificate(
     uint32_t uid, const std::vector<std::string>& user_list, bool force) {
   util::write_lock_guard user_guard(m_rw_user_mutex_);
   CraneExpected<void> result{};
