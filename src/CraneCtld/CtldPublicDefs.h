@@ -119,6 +119,7 @@ struct Config {
 
   bool CompressedRpc{};
 
+  std::string CraneClusterName;
   std::string CraneCtldDebugLevel;
   std::string CraneCtldLogFile;
 

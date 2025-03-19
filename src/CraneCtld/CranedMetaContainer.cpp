@@ -19,6 +19,7 @@
 #include "CranedMetaContainer.h"
 
 #include "CranedKeeper.h"
+#include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
 
 namespace Ctld {
@@ -564,6 +565,24 @@ crane::grpc::QueryClusterInfoReply CranedMetaContainer::QueryClusterInfo(
 crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
     const crane::grpc::ModifyCranedStateRequest& request) {
   crane::grpc::ModifyCranedStateReply reply;
+  std::vector<crane::grpc::plugin::CranedEventInfo> event_list;
+  crane::grpc::plugin::CranedEventInfo event;
+
+  if (g_config.Plugin.Enabled) {
+    // Generate timestamp
+    absl::Time now = absl::Now();
+    int64_t seconds = absl::ToUnixSeconds(now);
+    int32_t nanos = static_cast<int32_t>(absl::ToUnixNanos(now) % 1000000000);
+
+    auto timestamp = std::make_unique<::google::protobuf::Timestamp>();
+    timestamp->set_seconds(seconds);
+    timestamp->set_nanos(nanos);
+
+    event.set_cluster_name(g_config.CraneClusterName);
+    event.set_uid(request.uid());
+    event.set_reason(request.reason());
+    event.set_allocated_start_time(timestamp.release());
+  }
 
   for (auto craned_id : request.craned_ids()) {
     if (!craned_meta_map_.Contains(craned_id)) {
@@ -576,11 +595,25 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
 
     if (craned_meta->alive) {
       if (request.new_state() == crane::grpc::CranedControlState::CRANE_DRAIN) {
+        if (g_config.Plugin.Enabled && craned_meta->drain != true) {
+          // Set node event info
+          event.set_node_name(craned_id);
+          event.set_state(crane::grpc::CranedControlState::CRANE_DRAIN);
+          event_list.emplace_back(event);
+        }
+
         craned_meta->drain = true;
         craned_meta->state_reason = request.reason();
         reply.add_modified_nodes(craned_id);
       } else if (request.new_state() ==
                  crane::grpc::CranedControlState::CRANE_NONE) {
+        if (g_config.Plugin.Enabled && craned_meta->drain != false) {
+          // Set node event info
+          event.set_node_name(craned_id);
+          event.set_state(crane::grpc::CranedControlState::CRANE_NONE);
+          event_list.emplace_back(event);
+        }
+
         craned_meta->drain = false;
         craned_meta->state_reason.clear();
         reply.add_modified_nodes(craned_id);
@@ -592,6 +625,10 @@ crane::grpc::ModifyCranedStateReply CranedMetaContainer::ChangeNodeState(
       reply.add_not_modified_nodes(craned_id);
       reply.add_not_modified_reasons("Can't change the state of a DOWN node!");
     }
+  }
+
+  if (g_config.Plugin.Enabled && !event_list.empty()) {
+    g_plugin_client->NodeEventHookAsync(std::move(event_list));
   }
   return reply;
 }
