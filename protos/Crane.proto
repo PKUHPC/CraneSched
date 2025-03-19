@@ -800,12 +800,11 @@ message SignUserCertificateResponse {
 
 message ResetUserCredentialRequest {
   repeated string user_list = 1;
-  bool is_force = 2;
 }
 
 message ResetUserCredentialReply {
   bool ok = 1;
-  ErrCode reason = 2;
+  repeated RichError rich_error_list = 2;
 }
 
 // The service interface performs encryption and authentication.
