@@ -134,17 +134,18 @@ CraneErr JobManager::Recover(
     std::unordered_map<task_id_t, JobStatusSpec>&& job_status_map) {
   for (auto& [job_id, task_status] : job_status_map) {
     CRANE_TRACE("[Job #{}] Recover from supervisor.", job_id);
+    uid_t uid = task_status.job_spec.cgroup_spec.uid;
     task_status.job_spec.cgroup_spec.recovered = true;
-    auto* job_instance = new JobInstance(task_status.job_spec);
-    auto* process = new Execution{.task_spec = task_status.task_spec,
-                                  .job_id = job_id,
-                                  .pid = task_status.task_pid};
-    job_instance->executions.emplace(task_status.task_pid, process);
+    auto job_instance = std::make_unique<JobInstance>(task_status.job_spec);
+    auto execution = std::make_unique<Execution>(
+        Execution{.task_spec = task_status.task_spec,
+                  .job_id = job_id,
+                  .pid = task_status.task_pid});
+    job_instance->executions.emplace(task_status.task_pid, std::move(execution));
     job_instance->cgroup =
         g_cg_mgr->AllocateAndGetJobCgroup(job_instance->job_spec.cgroup_spec);
 
-    m_job_map_.Emplace(job_id, std::unique_ptr<JobInstance>(job_instance));
-    uid_t uid = task_status.job_spec.cgroup_spec.uid;
+    m_job_map_.Emplace(job_id, std::move(job_instance));
     auto uid_map = m_uid_to_job_ids_map_.GetMapExclusivePtr();
     if (uid_map->contains(uid)) {
       uid_map->at(uid).RawPtr()->emplace(job_id);
@@ -214,23 +215,22 @@ bool JobManager::EvCheckSupervisorRunning_() {
   absl::MutexLock lk(&m_release_cg_mtx_);
   std::error_code ec;
   std::vector<task_id_t> job_ids;
-  for (auto it = m_release_job_req_set_.begin();
-       it != m_release_job_req_set_.end();) {
+  for (task_id_t job_id : m_release_job_req_set_) {
     auto exists = std::filesystem::exists(
         fmt::format(
             "/proc/{}",
-            m_job_map_.GetValueExclusivePtr(*it)->get()->supervisor_pid),
+            m_job_map_.GetValueExclusivePtr(job_id)->get()->supervisor_pid),
         ec);
     if (ec) {
-      CRANE_WARN("Failed to check supervisor for Job #{} is running.", *it);
+      CRANE_WARN("Failed to check supervisor for Job #{} is running.", job_id);
       continue;
     }
     if (!exists) {
-      job_ids.emplace_back(*it);
-      it = m_release_job_req_set_.erase(it);
-    } else {
-      ++it;
+      job_ids.emplace_back(job_id);
     }
+  }
+  for (task_id_t job_id:job_ids) {
+    m_release_job_req_set_.erase(job_id);
   }
 
   if (!job_ids.empty()) {

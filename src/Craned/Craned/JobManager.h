@@ -96,8 +96,6 @@ class JobManager {
 
   CraneErr ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
-  std::future<CraneExpected<task_id_t>> QueryTaskIdFromPidAsync(pid_t pid);
-
   bool QueryTaskInfoOfUid(uid_t uid, TaskInfoOfUid* info);
 
   bool MigrateProcToCgroupOfJob(pid_t pid, task_id_t job_id);
