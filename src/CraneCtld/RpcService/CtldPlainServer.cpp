@@ -131,6 +131,7 @@ grpc::Status CraneCtldPlainServiceImpl::SignUserCertificate(
       }
     }
 
+    // Parse hostname or hostname.DomainSuffix.
     std::vector<std::string> name_list = absl::StrSplit(hostname, ".");
     if (!resolve_result ||
         !g_config.VaultConf.AllowedNodes.contains(name_list[0])) {

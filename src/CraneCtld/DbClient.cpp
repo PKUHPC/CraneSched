@@ -693,20 +693,20 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
                                     "uid",
                                     "default_account",
                                     "name",
-                                    "serial_number",
                                     "admin_level",
                                     "account_to_attrs_map",
-                                    "coordinator_accounts"};
-  std::tuple<bool, int64_t, std::string, std::string, std::string, int32_t,
-             User::AccountToAttrsMap, std::list<std::string>>
+                                    "coordinator_accounts",
+                                    "serial_number"};
+  std::tuple<bool, int64_t, std::string, std::string, int32_t,
+             User::AccountToAttrsMap, std::list<std::string>, std::string>
       values{false,
              user.uid,
              user.default_account,
              user.name,
-             user.serial_number,
              user.admin_level,
              user.account_to_attrs_map,
-             user.coordinator_accounts};
+             user.coordinator_accounts,
+             user.serial_number};
   return DocumentConstructor_(fields, values);
 }
 
