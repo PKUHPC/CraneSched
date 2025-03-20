@@ -31,7 +31,7 @@ CraneErrCode AccountMetaContainer::CheckAndMallocQosResourceFromUser(
 
   CraneErrCode result = CraneErrCode::SUCCESS;
 
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
+  ResourceView resource_view{task.allocated_node_res_view * task.node_num};
 
   user_meta_map_.try_emplace_l(
     username,
@@ -54,7 +54,7 @@ CraneErrCode AccountMetaContainer::CheckAndMallocQosResourceFromUser(
         return;
       }
       val.resource.GetAllocatableRes() +=
-        (task.requested_node_res_view * task.node_num).GetAllocatableRes();
+        (task.allocated_node_res_view * task.node_num).GetAllocatableRes();
       val.jobs_per_user++;
     },
     QosToResourceMap{{task.qos, QosResource{std::move(resource_view), 1}}});
@@ -67,7 +67,7 @@ void AccountMetaContainer::FreeQosResource(const std::string& username,
   user_meta_map_.modify_if(username, [&](std::pair<const std::string, QosToResourceMap>& pair) {
     auto& val = pair.second[task.qos];
     val.resource.GetAllocatableRes() -=
-            (task.requested_node_res_view * task.node_num).GetAllocatableRes();
+            (task.allocated_node_res_view * task.node_num).GetAllocatableRes();
         val.jobs_per_user--;
   });
 }
