@@ -2091,6 +2091,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     if (task->TaskToCtld().exclusive()) {
       AllocatableResource& task_actual_alloc_res = task->requested_node_res_view.GetAllocatableRes();
       task_actual_alloc_res.SetCpuCount(craned_meta->res_total.allocatable_res.CpuCount());
+      task_actual_alloc_res.SetMemByte(craned_meta->res_total.allocatable_res.GetMemByte());
+      if (!task->requested_node_res_view.IsReqDeviceMapZero()) {
+        task->requested_node_res_view.SetDeviceMap(craned_meta->res_total.dedicated_res);
+      }
     }
 
     if constexpr (kAlgoRedundantNode) {
@@ -2518,6 +2522,9 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   AllocatableResource& task_actual_alloc_res = task->requested_node_res_view.GetAllocatableRes();
   task_actual_alloc_res = task->requested_node_res_view.GetReqAllocatableRes();
+
+  auto& task_actual_device_map = task->requested_node_res_view.GetDeviceMap();
+  task_actual_device_map = task->requested_node_res_view.GetReqDeviceMap();
 
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
       task->Username(), task->account, task);
