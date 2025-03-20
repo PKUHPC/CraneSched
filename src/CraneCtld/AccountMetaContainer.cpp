@@ -47,7 +47,7 @@ CraneErrCode AccountMetaContainer::TryMallocQosResource(TaskInCtld& task) {
 
   CraneErrCode result = CraneErrCode::SUCCESS;
 
-  ResourceView resource_view{task.requested_node_res_view * task.node_num};
+  ResourceView resource_view{task.allocated_node_res_view * task.node_num};
 
   user_meta_map_.try_emplace_l(
       task.Username(),
