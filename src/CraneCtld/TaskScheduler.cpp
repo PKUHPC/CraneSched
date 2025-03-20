@@ -2088,6 +2088,15 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       continue;
     }
 
+    if (task->TaskToCtld().exclusive()) {
+      AllocatableResource& task_actual_alloc_res = task->requested_node_res_view.GetAllocatableRes();
+      task_actual_alloc_res.SetCpuCount(craned_meta->res_total.allocatable_res.CpuCount());
+      task_actual_alloc_res.SetMemByte(craned_meta->res_total.allocatable_res.GetMemByte());
+      if (!task->requested_node_res_view.IsReqDeviceMapZero()) {
+        task->requested_node_res_view.SetDeviceMap(craned_meta->res_total.dedicated_res);
+      }
+    }
+
     if constexpr (kAlgoRedundantNode) {
       craned_indexes_.emplace_back(craned_index);
       if (craned_indexes_.size() >= node_num_limit) break;
@@ -2491,12 +2500,12 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   Config::Partition const& part_meta = part_it->second;
 
-  AllocatableResource& task_alloc_res =
-      task->requested_node_res_view.GetAllocatableRes();
-  double core_double = static_cast<double>(task_alloc_res.cpu_count);
+  AllocatableResource& task_req_alloc_res =
+      task->requested_node_res_view.GetReqAllocatableRes();
+  double core_double = static_cast<double>(task_req_alloc_res.cpu_count);
 
-  double task_mem_per_cpu = (double)task_alloc_res.memory_bytes / core_double;
-  if (task_alloc_res.memory_bytes == 0) {
+  double task_mem_per_cpu = (double)task_req_alloc_res.memory_bytes / core_double;
+  if (task_req_alloc_res.memory_bytes == 0) {
     // If a task leaves its memory bytes to 0,
     // use the partition's default value.
     task_mem_per_cpu = part_meta.default_mem_per_cpu;
@@ -2508,8 +2517,14 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   }
   uint64_t mem_bytes = core_double * task_mem_per_cpu;
 
-  task->requested_node_res_view.GetAllocatableRes().memory_bytes = mem_bytes;
-  task->requested_node_res_view.GetAllocatableRes().memory_sw_bytes = mem_bytes;
+  task->requested_node_res_view.GetReqAllocatableRes().memory_bytes = mem_bytes;
+  task->requested_node_res_view.GetReqAllocatableRes().memory_sw_bytes = mem_bytes;
+
+  AllocatableResource& task_actual_alloc_res = task->requested_node_res_view.GetAllocatableRes();
+  task_actual_alloc_res = task->requested_node_res_view.GetReqAllocatableRes();
+
+  auto& task_actual_device_map = task->requested_node_res_view.GetDeviceMap();
+  task_actual_device_map = task->requested_node_res_view.GetReqDeviceMap();
 
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
       task->Username(), task->account, task);

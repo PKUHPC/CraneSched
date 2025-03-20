@@ -202,6 +202,19 @@ double AllocatableResource::CpuCount() const {
   return static_cast<double>(cpu_count);
 }
 
+void AllocatableResource::SetCpuCount(const double in_cpu_count) {
+  cpu_count = cpu_t{in_cpu_count};
+}
+
+uint64_t AllocatableResource::GetMemByte() const {
+  return memory_bytes;
+}
+
+void AllocatableResource::SetMemByte(const uint64_t in_memory_bytes) {
+  memory_bytes = in_memory_bytes;
+  memory_sw_bytes = in_memory_bytes;
+}
+
 bool AllocatableResource::IsZero() const {
   return cpu_count == static_cast<cpu_t>(0) && memory_bytes == 0 &&
          memory_sw_bytes == 0;
@@ -627,16 +640,24 @@ bool operator==(const ResourceV2& lhs, const ResourceV2& rhs) {
 }
 
 ResourceView::ResourceView(const crane::grpc::ResourceView& rhs) {
+  req_allocatable_res = rhs.req_allocatable_res();
   allocatable_res = rhs.allocatable_res();
+  req_device_map = FromGrpcDeviceMap(rhs.req_device_map());
   device_map = FromGrpcDeviceMap(rhs.device_map());
 }
 
 ResourceView::operator crane::grpc::ResourceView() const {
   crane::grpc::ResourceView val{};
+  auto* mutable_req_allocatable_res = val.mutable_req_allocatable_res();
+  *mutable_req_allocatable_res =
+      static_cast<crane::grpc::AllocatableResource>(req_allocatable_res);
 
   auto* mutable_allocatable_res = val.mutable_allocatable_res();
   *mutable_allocatable_res =
       static_cast<crane::grpc::AllocatableResource>(allocatable_res);
+
+  auto* mutable_req_dev_map = val.mutable_req_device_map();
+  *mutable_req_dev_map = ToGrpcDeviceMap(req_device_map);
 
   auto* mutable_dev_map = val.mutable_device_map();
   *mutable_dev_map = ToGrpcDeviceMap(device_map);
@@ -674,6 +695,10 @@ ResourceView& ResourceView::operator-=(const ResourceInNode& rhs) {
   return *this;
 }
 
+bool ResourceView::IsReqDeviceMapZero() const {
+  return req_device_map.empty();
+}
+
 ResourceView& ResourceView::operator+=(const AllocatableResource& rhs) {
   this->allocatable_res += rhs;
   return *this;
@@ -704,12 +729,33 @@ void ResourceView::SetToZero() {
   allocatable_res.SetToZero();
 }
 
+double ResourceView::ReqCpuCount() const {
+  return static_cast<double>(req_allocatable_res.cpu_count);
+}
+
+uint64_t ResourceView::ReqMemoryBytes() const {
+  return req_allocatable_res.memory_bytes;
+}
+
 double ResourceView::CpuCount() const {
   return static_cast<double>(allocatable_res.cpu_count);
 }
 
 uint64_t ResourceView::MemoryBytes() const {
   return allocatable_res.memory_bytes;
+}
+
+void ResourceView::SetDeviceMap(const DedicatedResourceInNode& dedicated_res_in_node) {
+  this->device_map.clear();
+  for (const auto& [name, type_slots_map_list] : dedicated_res_in_node.name_type_slots_map) {
+    uint64_t untyped_req_count = 0;
+    std::unordered_map<std::string, uint64_t> type_total_map;
+    for (const auto& [type, slots] : type_slots_map_list.type_slots_map) {
+        uint64_t type_count = slots.size(); 
+        type_total_map[type] = type_count;
+    }
+    this->device_map[name] = std::make_pair(untyped_req_count, std::move(type_total_map));
+  }
 }
 
 bool ResourceView::GetFeasibleResourceInNode(const ResourceInNode& avail_res,
@@ -749,7 +795,6 @@ bool ResourceView::GetFeasibleResourceInNode(const ResourceInNode& avail_res,
       for (; untyped_cnt > 0 && it != avail_slots.end(); ++it, --untyped_cnt)
         feasible_res_dev_name_type.emplace(*it);
     }
-
     // If there are still untyped slots to be allocated,
     // we need to find the remaining slots from other types.
     if (untyped_cnt > 0) {
