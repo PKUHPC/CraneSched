@@ -984,6 +984,7 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
   }
 
   if (response->rich_error_list().empty()) {
+     g_task_scheduler->SetBlockForTaskListInRamAndDb_(request->block());
     response->set_ok(true);
   } else {
     response->set_ok(false);

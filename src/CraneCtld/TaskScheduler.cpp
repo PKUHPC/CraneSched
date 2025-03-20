@@ -1158,6 +1158,47 @@ CraneErrCode TaskScheduler::SetHoldForTaskInRamAndDb_(task_id_t task_id,
   return CraneErrCode::SUCCESS;
 }
 
+void TaskScheduler::SetBlockForTaskListInRamAndDb_(bool block) {
+  std::vector<std::pair<task_id_t, bool>> tasks_to_update;
+
+  {
+    absl::ReaderMutexLock lock(&m_pending_task_map_mtx_);
+    for (const auto& [task_id, task_ptr] : m_pending_task_map_) {
+      auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
+            task_ptr->Username(), task_ptr->account);
+
+      bool should_block = !enable_res;
+      if (task_ptr->Blocked() == should_block) {
+        continue;
+      }
+
+      tasks_to_update.emplace_back(task_id, should_block);
+    }
+  }
+
+  std::vector<std::pair<task_db_id_t, crane::grpc::RuntimeAttrOfTask>> db_updates;
+  {
+    absl::WriterMutexLock lock(&m_pending_task_map_mtx_);
+    for (const auto& [task_id, block_flag] : tasks_to_update) {
+      TaskInCtld* task = nullptr;
+        auto pd_iter = m_pending_task_map_.find(task_id);
+        if (pd_iter == m_pending_task_map_.end()) {
+          CRANE_TRACE("Task #{} not in pending queue for block/unblock", task_id);
+          continue;
+        }
+        task = pd_iter->second.get();
+        task->SetBlocked(block_flag);
+        db_updates.emplace_back(task->TaskDbId(), task->RuntimeAttr());
+    }
+  }
+
+  for (const auto& [db_id, runtime_attr] : db_updates) {
+    if (!g_embedded_db_client->UpdateRuntimeAttrOfTaskIfExists(0, db_id, runtime_attr)) {
+      CRANE_ERROR("Failed to update runtime attr of task #{} to DB", db_id);
+    }
+  }
+}
+
 CraneErrCode TaskScheduler::TerminateRunningTaskNoLock_(TaskInCtld* task) {
   task_id_t task_id = task->TaskId();
 
@@ -2639,6 +2680,10 @@ std::vector<task_id_t> MultiFactorPriority::GetOrderedTaskIdList(
   for (const auto& [task_id, task] : pending_task_map) {
     if (task->Held()) {
       task->pending_reason = "Held";
+      continue;
+    }
+    if (task->Blocked()) {
+      task->pending_reason = "Blocked";
       continue;
     }
     // Admin may manually specify the priority of a task.
