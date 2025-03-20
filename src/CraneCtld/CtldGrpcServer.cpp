@@ -1299,6 +1299,8 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
 
   result = g_task_scheduler->AcquireTaskAttributes(task.get());
 
+  task->SetAllocatedResources(task->requested_node_res_view);
+
   if (result) result = g_task_scheduler->CheckTaskValidity(task.get());
 
   task->SetSubmitTime(absl::Now());
