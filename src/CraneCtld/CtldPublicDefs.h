@@ -542,7 +542,6 @@ struct TaskInCtld {
     task_db_id = runtime_attr.task_db_id();
     username = runtime_attr.username();
 
-    nodes_alloc = craned_ids.size();
     exit_code = runtime_attr.exit_code();
 
     status = runtime_attr.status();
@@ -571,6 +570,7 @@ struct TaskInCtld {
       resources = static_cast<ResourceV2>(runtime_attr.resources());
     }
 
+    nodes_alloc = craned_ids.size();
     start_time = absl::FromUnixSeconds(runtime_attr.start_time().seconds());
     end_time = absl::FromUnixSeconds(runtime_attr.end_time().seconds());
     submit_time = absl::FromUnixSeconds(runtime_attr.submit_time().seconds());
