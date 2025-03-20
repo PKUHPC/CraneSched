@@ -20,10 +20,13 @@
 
 #include <absl/strings/ascii.h>
 #include <absl/strings/str_join.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
 #include <re2/re2.h>
 #include <spdlog/fmt/fmt.h>
 
 #include <charconv>
+#include <expected>
 #include <filesystem>
 #include <fstream>
 #include <list>
@@ -34,6 +37,9 @@
 #include "crane/PublicHeader.h"
 
 namespace util {
+
+using CertPair = std::pair<std::string,   // CN
+                           std::string>;  // serial number
 
 std::string ReadFileIntoString(std::filesystem::path const &p);
 
@@ -81,5 +87,7 @@ std::string ReadableGrpcDresInNode(
     const crane::grpc::DedicatedResourceInNode &dres_in_node);
 
 std::string GenerateCommaSeparatedString(const int val);
+
+std::expected<CertPair, bool> ParseCertificate(const std::string &cert_pem);
 
 }  // namespace util

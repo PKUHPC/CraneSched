@@ -47,6 +47,9 @@ using CraneExpectedRich = std::expected<T, CraneRichError>;
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
 inline const char* kCforedDefaultPort = "10012";
+inline const char* kCtldForCranedDefaultPort = "10013";
+inline const char* kCtldForCforedDefaultPort = "10014";
+inline const char* kCtldPlainDefaultPort = "10015";
 
 inline const char* kDefaultConfigPath = "/etc/crane/config.yaml";
 inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";

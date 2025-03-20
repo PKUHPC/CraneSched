@@ -30,13 +30,17 @@
 #include "AccountMetaContainer.h"
 #include "CranedKeeper.h"
 #include "CranedMetaContainer.h"
-#include "CtldGrpcServer.h"
+#include "CtldForCforedServer.h"
+#include "CtldForCranedServer.h"
+#include "CtldPlainServer.h"
 #include "CtldPublicDefs.h"
+#include "CtldSecureServer.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
+#include "crane/VaultClient.h"
 
 void ParseConfig(int argc, char** argv) {
   cxxopts::Options options("cranectld");
@@ -147,60 +151,248 @@ void ParseConfig(int argc, char** argv) {
       else
         g_config.ListenConf.CraneCtldListenPort = kCtldDefaultPort;
 
+      if (config["CraneCtldForCranedListenPort"])
+        g_config.ListenConf.CraneCtldForCranedListenPort =
+            config["CraneCtldForCranedListenPort"].as<std::string>();
+      else
+        g_config.ListenConf.CraneCtldForCranedListenPort =
+            kCtldForCranedDefaultPort;
+
+      if (config["CraneCtldForCforedListenPort"])
+        g_config.ListenConf.CraneCtldForCforedListenPort =
+            config["CraneCtldForCforedListenPort"].as<std::string>();
+      else
+        g_config.ListenConf.CraneCtldForCforedListenPort =
+            kCtldForCforedDefaultPort;
+
+      if (config["CraneCtldPlainListenPort"])
+        g_config.ListenConf.CraneCtldPlainListenPort =
+            config["CraneCtldPlainListenPort"].as<std::string>();
+      else
+        g_config.ListenConf.CraneCtldPlainListenPort = kCtldPlainDefaultPort;
+
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
 
       if (config["UseTls"] && config["UseTls"].as<bool>()) {
-        TlsCertificates& tls_certs = g_config.ListenConf.Certs;
+        const auto& ssl_config = config["SSL"];
+
+        ServerCertificateConfig& internal_certs =
+            g_config.ListenConf.TlsCerts.InternalCerts;
+        ClientCertificateConfig& craned_certs =
+            g_config.ListenConf.TlsCerts.CranedClientCerts;
+        ClientCertificateConfig& cfored_certs =
+            g_config.ListenConf.TlsCerts.CforedClientCerts;
 
         g_config.ListenConf.UseTls = true;
 
-        if (config["DomainSuffix"])
-          tls_certs.DomainSuffix = config["DomainSuffix"].as<std::string>();
-
-        if (config["ServerCertFilePath"]) {
-          tls_certs.ServerCertFilePath =
-              config["ServerCertFilePath"].as<std::string>();
+        if (ssl_config["InternalCaFilePath"]) {
+          std::string internalCaFilePath =
+              ssl_config["InternalCaFilePath"].as<std::string>();
 
           try {
-            tls_certs.ServerCertContent =
-                util::ReadFileIntoString(tls_certs.ServerCertFilePath);
+            g_config.ListenConf.TlsCerts.InternalCaContent =
+                util::ReadFileIntoString(internalCaFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+            CRANE_ERROR("Read InternalCaFile error: {}", e.what());
             std::exit(1);
           }
-          if (tls_certs.ServerCertContent.empty()) {
+          if (g_config.ListenConf.TlsCerts.InternalCaContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerCertFilePath "
+                "UseTls is true, but the file specified by InternalCaFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but ServerCertFilePath is empty");
+          CRANE_ERROR("UseTls is true, but InternalCaFilePath is empty");
           std::exit(1);
         }
 
-        if (config["ServerKeyFilePath"]) {
-          tls_certs.ServerKeyFilePath =
-              config["ServerKeyFilePath"].as<std::string>();
+        if (ssl_config["CranectldInternalCertFilePath"]) {
+          internal_certs.ServerCertFilePath =
+              ssl_config["CranectldInternalCertFilePath"].as<std::string>();
 
           try {
-            tls_certs.ServerKeyContent =
-                util::ReadFileIntoString(tls_certs.ServerKeyFilePath);
+            internal_certs.ServerCertContent =
+                util::ReadFileIntoString(internal_certs.ServerCertFilePath);
           } catch (const std::exception& e) {
-            CRANE_ERROR("Read cert file error: {}", e.what());
+            CRANE_ERROR("Read CranectldInternalCertFile error: {}", e.what());
             std::exit(1);
           }
-          if (tls_certs.ServerKeyContent.empty()) {
+          if (internal_certs.ServerCertContent.empty()) {
             CRANE_ERROR(
-                "UseTls is true, but the file specified by ServerKeyFilePath "
+                "UseTls is true, but the file specified by "
+                "CranectldInternalCertFilePath "
                 "is empty");
           }
         } else {
-          CRANE_ERROR("UseTls is true, but ServerKeyFilePath is empty");
+          CRANE_ERROR(
+              "UseTls is true, but CranectldInternalCertFilePath is empty");
           std::exit(1);
         }
+
+        if (ssl_config["CranectldInternalKeyFilePath"]) {
+          internal_certs.ServerKeyFilePath =
+              ssl_config["CranectldInternalKeyFilePath"].as<std::string>();
+
+          try {
+            internal_certs.ServerKeyContent =
+                util::ReadFileIntoString(internal_certs.ServerKeyFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read CranectldInternalKeyFile error: {}", e.what());
+            std::exit(1);
+          }
+          if (internal_certs.ServerKeyContent.empty()) {
+            CRANE_ERROR(
+                "UseTls is true, but the file specified by "
+                "CranectldInternalKeyFilePath "
+                "is empty");
+          }
+        } else {
+          CRANE_ERROR(
+              "UseTls is true, but CranectldInternalKeyFilePath is empty");
+          std::exit(1);
+        }
+
+        if (ssl_config["CranedCertFilePath"]) {
+          craned_certs.ClientCertFilePath =
+              ssl_config["CranedCertFilePath"].as<std::string>();
+
+          try {
+            craned_certs.ClientCertContent =
+                util::ReadFileIntoString(craned_certs.ClientCertFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read CranedCertFile error: {}", e.what());
+            std::exit(1);
+          }
+          if (craned_certs.ClientCertContent.empty()) {
+            CRANE_ERROR(
+                "UseTls is true, but the file specified by CranedCertFilePath "
+                "is empty");
+          }
+        } else {
+          CRANE_ERROR("UseTls is true, but CranedCertFilePath is empty");
+          std::exit(1);
+        }
+
+        if (ssl_config["CforedCertFilePath"]) {
+          cfored_certs.ClientCertFilePath =
+              ssl_config["CforedCertFilePath"].as<std::string>();
+
+          try {
+            cfored_certs.ClientCertContent =
+                util::ReadFileIntoString(cfored_certs.ClientCertFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read CforedCertFile error: {}", e.what());
+            std::exit(1);
+          }
+          if (cfored_certs.ClientCertContent.empty()) {
+            CRANE_ERROR(
+                "UseTls is true, but the file specified by CforedCertFilePath "
+                "is empty");
+          }
+        } else {
+          CRANE_ERROR("UseTls is true, but CforedCertFilePath is empty");
+          std::exit(1);
+        }
+
       } else {
         g_config.ListenConf.UseTls = false;
+      }
+
+      if (config["DomainSuffix"])
+        g_config.DomainSuffix = config["DomainSuffix"].as<std::string>();
+
+      if (config["Vault"]) {
+        const auto& vault_config = config["Vault"];
+
+        ServerCertificateConfig& external_certs =
+            g_config.VaultConf.ExternalCerts;
+        CACertificateConfig& external_ca_certs =
+            g_config.VaultConf.ExternalCACerts;
+
+        if (vault_config["Addr"])
+          g_config.VaultConf.Addr = vault_config["Addr"].as<std::string>();
+
+        if (vault_config["Port"])
+          g_config.VaultConf.Port = vault_config["Port"].as<std::string>();
+
+        if (vault_config["Tls"])
+          g_config.VaultConf.Tls = vault_config["Tls"].as<bool>();
+        else
+          g_config.VaultConf.Tls = false;
+
+        if (vault_config["TokenPath"]) {
+          std::string token_path = vault_config["TokenPath"].as<std::string>();
+          try {
+            g_config.VaultConf.Token = util::ReadFileIntoString(token_path);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read vault token file error: {}", e.what());
+            std::exit(1);
+          }
+        } else {
+          CRANE_ERROR("vault token path is empty");
+          std::exit(1);
+        }
+
+        if (vault_config["Nodes"]) {
+          std::string nodes = vault_config["Nodes"].as<std::string>();
+          std::list<std::string> name_list;
+          if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
+                                   &name_list)) {
+            CRANE_ERROR("Illegal login node name string format.");
+            std::exit(1);
+          }
+          g_config.VaultConf.AllowedNodes = std::unordered_set<std::string>(
+              name_list.begin(), name_list.end());
+        }
+
+        if (vault_config["ExternalCertFilePath"]) {
+          external_certs.ServerCertFilePath =
+              vault_config["ExternalCertFilePath"].as<std::string>();
+
+          try {
+            external_certs.ServerCertContent =
+                util::ReadFileIntoString(external_certs.ServerCertFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read external cert file error: {}", e.what());
+            std::exit(1);
+          }
+        } else {
+          CRANE_ERROR("ExternalCertFilePath is empty");
+          std::exit(1);
+        }
+
+        if (vault_config["ExternalKeyFilePath"]) {
+          external_certs.ServerKeyFilePath =
+              vault_config["ExternalKeyFilePath"].as<std::string>();
+
+          try {
+            external_certs.ServerKeyContent =
+                util::ReadFileIntoString(external_certs.ServerKeyFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read external key file error: {}", e.what());
+            std::exit(1);
+          }
+        } else {
+          CRANE_ERROR("ExternalKeyFilePath is empty");
+          std::exit(1);
+        }
+
+        if (vault_config["ExternalCAFilePath"]) {
+          external_ca_certs.CACertFilePath =
+              vault_config["ExternalCAFilePath"].as<std::string>();
+
+          try {
+            external_ca_certs.CACertContent =
+                util::ReadFileIntoString(external_ca_certs.CACertFilePath);
+          } catch (const std::exception& e) {
+            CRANE_ERROR("Read external ca file error: {}", e.what());
+            std::exit(1);
+          }
+        } else {
+          CRANE_ERROR("ExternalCAFilePath is empty");
+          std::exit(1);
+        }
       }
 
       if (config["CraneCtldForeground"]) {
@@ -708,6 +900,11 @@ void InitializeCtldGlobalVariables() {
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 
+  g_vault_client = std::make_unique<vault::VaultClient>(
+      g_config.VaultConf.Token, g_config.VaultConf.Addr,
+      g_config.VaultConf.Port, g_config.VaultConf.Tls);
+  if (!g_vault_client->InitPki()) std::exit(1);
+
   // Account manager must be initialized before Task Scheduler
   // since the recovery stage of the task scheduler will acquire
   // information from account manager.
@@ -801,7 +998,16 @@ void InitializeCtldGlobalVariables() {
     std::exit(1);
   }
 
-  g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
+  g_ctld_secure_server = std::make_unique<Ctld::CtldSecureServer>();
+
+  g_ctld_plain_server =
+      std::make_unique<Ctld::CtldPlainServer>(g_config.ListenConf);
+
+  g_ctld_for_craned_server =
+      std::make_unique<Ctld::CtldForCranedServer>(g_config.ListenConf);
+
+  g_ctld_for_cfored_server =
+      std::make_unique<Ctld::CtldForCforedServer>(g_config.ListenConf);
 }
 
 void CreateFolders() {
@@ -831,7 +1037,13 @@ int StartServer() {
 
   InitializeCtldGlobalVariables();
 
-  g_ctld_server->Wait();
+  g_ctld_secure_server->Wait();
+
+  g_ctld_plain_server->Wait();
+
+  g_ctld_for_craned_server->Wait();
+
+  g_ctld_for_cfored_server->Wait();
 
   DestroyCtldGlobalVariables();
 

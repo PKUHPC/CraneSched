@@ -987,8 +987,8 @@ void TaskScheduler::ScheduleThread_() {
           CranedId const& craned_id = iter.first;
           auto& task_uid_pairs = iter.second;
 
-          g_thread_pool->detach_task(
-      [=, cgroups_to_release = std::move(task_uid_pairs)]() {
+          g_thread_pool->detach_task([=, cgroups_to_release =
+                                             std::move(task_uid_pairs)]() {
             auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
             // If the craned is down, just ignore it.
@@ -1037,6 +1037,71 @@ void TaskScheduler::ScheduleThread_() {
 void TaskScheduler::SetNodeSelectionAlgo(
     std::unique_ptr<INodeSelectionAlgo> algo) {
   m_node_selection_algo_ = std::move(algo);
+}
+
+CraneExpected<std::future<task_id_t>> TaskScheduler::SubmitTaskToScheduler(
+    std::unique_ptr<TaskInCtld> task) {
+  if (!task->password_entry->Valid()) {
+    CRANE_DEBUG("Uid {} not found on the controller node", task->uid);
+    return std::unexpected(CraneErrCode::ERR_INVALID_UID);
+  }
+  task->SetUsername(task->password_entry->Username());
+
+  {  // Limit the lifecycle of user_scoped_ptr
+    auto user_scoped_ptr =
+        g_account_manager->GetExistedUserInfo(task->Username());
+    if (!user_scoped_ptr) {
+      CRANE_DEBUG("User '{}' not found in the account database",
+                  task->Username());
+      return std::unexpected(CraneErrCode::ERR_INVALID_USER);
+    }
+
+    if (task->account.empty()) {
+      task->account = user_scoped_ptr->default_account;
+      task->MutableTaskToCtld()->set_account(user_scoped_ptr->default_account);
+    } else {
+      if (!user_scoped_ptr->account_to_attrs_map.contains(task->account)) {
+        CRANE_DEBUG(
+            "Account '{}' is not in the user account list when submitting the "
+            "task",
+            task->account);
+        return std::unexpected(CraneErrCode::ERR_USER_ACCOUNT_MISMATCH);
+      }
+    }
+  }
+
+  if (!g_account_manager->CheckUserPermissionToPartition(
+          task->Username(), task->account, task->partition_id)) {
+    CRANE_DEBUG(
+        "User '{}' doesn't have permission to use partition '{}' when using "
+        "account '{}'",
+        task->Username(), task->partition_id, task->account);
+    return std::unexpected(CraneErrCode::ERR_PARTITION_MISSING);
+  }
+
+  auto enable_res = g_account_manager->CheckIfUserOfAccountIsEnabled(
+      task->Username(), task->account);
+  if (!enable_res) {
+    return std::unexpected(enable_res.error());
+  }
+
+  auto result = g_meta_container->CheckIfAccountIsAllowedInPartition(
+      task->partition_id, task->account);
+  if (!result) return std::unexpected(result.error());
+
+  result = g_task_scheduler->AcquireTaskAttributes(task.get());
+
+  if (result) result = g_task_scheduler->CheckTaskValidity(task.get());
+
+  task->SetSubmitTime(absl::Now());
+
+  if (result) {
+    std::future<task_id_t> future =
+        g_task_scheduler->SubmitTaskAsync(std::move(task));
+    return {std::move(future)};
+  }
+
+  return std::unexpected(result.error());
 }
 
 std::future<task_id_t> TaskScheduler::SubmitTaskAsync(

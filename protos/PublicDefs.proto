@@ -141,7 +141,7 @@ message TaskToCtld {
   string extra_attr = 23;
 
   string cmd_line = 31;
-  string cwd = 32; // Current working directory
+  string cwd = 32;  // Current working directory
   map<string, string> env = 33;
 
   string excludes = 34;
@@ -184,7 +184,7 @@ message TaskToD {
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
-  google.protobuf.Timestamp start_time = 5; // Currently Only used in CraneCtld
+  google.protobuf.Timestamp start_time = 5;  // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 6;
 
   string partition = 8;
@@ -424,6 +424,11 @@ enum ErrCode {
   ERR_USER_NO_PRIVILEGE = 66;
   ERR_NOT_IN_ALLOWED_LIST = 67;  // The current account is not in the allowed account list for the partition.
   ERR_IN_DENIED_LIST = 68;  // The current account has been explicitly added to the deny list for the partition.
+  ERR_SIGN_CERTIFICATE = 69;
+
+  ERR_DUPLICATE_CERTIFICATE = 70;
+  ERR_REVOKE_CERTIFICATE = 71;
+  ERR_IDENTITY_MISMATCH = 72;
 }
 
 enum EntityType {

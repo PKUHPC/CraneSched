@@ -20,10 +20,12 @@
 
 #include <fcntl.h>
 #include <sys/resource.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 
 #include "crane/Logger.h"
 #include "crane/OS.h"
@@ -39,6 +41,9 @@ namespace util {
 namespace os {
 
 bool DeleteFile(std::string const& p);
+
+bool SaveFile(std::string const& p, std::string const& content,
+              mode_t permissions);
 
 bool CreateFolders(std::string const& p);
 

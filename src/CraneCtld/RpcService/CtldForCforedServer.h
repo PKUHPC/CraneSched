@@ -166,11 +166,13 @@ class CforedStreamWriter {
       ABSL_GUARDED_BY(m_stream_mtx_);
 };
 
-class CtldServer;
+class CtldForCforedServer;
 
-class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
+class CtldForCforedServiceImpl final
+    : public crane::grpc::CraneCtldForCfored::Service {
  public:
-  explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
+  explicit CtldForCforedServiceImpl(CtldForCforedServer *server)
+      : m_ctld_server_(server) {}
 
   grpc::Status CforedStream(
       grpc::ServerContext *context,
@@ -178,141 +180,20 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
                                crane::grpc::StreamCforedRequest> *stream)
       override;
 
-  grpc::Status SubmitBatchTask(
-      grpc::ServerContext *context,
-      const crane::grpc::SubmitBatchTaskRequest *request,
-      crane::grpc::SubmitBatchTaskReply *response) override;
-
-  // This gRPC is for testing purposes only
-  grpc::Status SubmitBatchTasks(
-      grpc::ServerContext *context,
-      const crane::grpc::SubmitBatchTasksRequest *request,
-      crane::grpc::SubmitBatchTasksReply *response) override;
-
-  grpc::Status TaskStatusChange(
-      grpc::ServerContext *context,
-      const crane::grpc::TaskStatusChangeRequest *request,
-      crane::grpc::TaskStatusChangeReply *response) override;
-
-  grpc::Status CranedRegister(
-      grpc::ServerContext *context,
-      const crane::grpc::CranedRegisterRequest *request,
-      crane::grpc::CranedRegisterReply *response) override;
-
-  grpc::Status CancelTask(grpc::ServerContext *context,
-                          const crane::grpc::CancelTaskRequest *request,
-                          crane::grpc::CancelTaskReply *response) override;
-
-  grpc::Status QueryTasksInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryTasksInfoRequest *request,
-      crane::grpc::QueryTasksInfoReply *response) override;
-
-  grpc::Status QueryCranedInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryCranedInfoRequest *request,
-      crane::grpc::QueryCranedInfoReply *response) override;
-
-  grpc::Status QueryPartitionInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryPartitionInfoRequest *request,
-      crane::grpc::QueryPartitionInfoReply *response) override;
-
-  grpc::Status ModifyTask(grpc::ServerContext *context,
-                          const crane::grpc::ModifyTaskRequest *request,
-                          crane::grpc::ModifyTaskReply *response) override;
-
-  grpc::Status ModifyNode(
-      grpc::ServerContext *context,
-      const crane::grpc::ModifyCranedStateRequest *request,
-      crane::grpc::ModifyCranedStateReply *response) override;
-
-  grpc::Status ModifyPartitionAcl(
-      grpc::ServerContext *context,
-      const crane::grpc::ModifyPartitionAclRequest *request,
-      crane::grpc::ModifyPartitionAclReply *response) override;
-
-  grpc::Status AddAccount(grpc::ServerContext *context,
-                          const crane::grpc::AddAccountRequest *request,
-                          crane::grpc::AddAccountReply *response) override;
-
-  grpc::Status AddUser(grpc::ServerContext *context,
-                       const crane::grpc::AddUserRequest *request,
-                       crane::grpc::AddUserReply *response) override;
-
-  grpc::Status AddQos(grpc::ServerContext *context,
-                      const crane::grpc::AddQosRequest *request,
-                      crane::grpc::AddQosReply *response) override;
-
-  grpc::Status ModifyAccount(
-      grpc::ServerContext *context,
-      const crane::grpc::ModifyAccountRequest *request,
-      crane::grpc::ModifyAccountReply *response) override;
-
-  grpc::Status ModifyUser(grpc::ServerContext *context,
-                          const crane::grpc::ModifyUserRequest *request,
-                          crane::grpc::ModifyUserReply *response) override;
-
-  grpc::Status ModifyQos(grpc::ServerContext *context,
-                         const crane::grpc::ModifyQosRequest *request,
-                         crane::grpc::ModifyQosReply *response) override;
-
-  grpc::Status QueryAccountInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryAccountInfoRequest *request,
-      crane::grpc::QueryAccountInfoReply *response) override;
-
-  grpc::Status QueryUserInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryUserInfoRequest *request,
-      crane::grpc::QueryUserInfoReply *response) override;
-
-  grpc::Status QueryQosInfo(grpc::ServerContext *context,
-                            const crane::grpc::QueryQosInfoRequest *request,
-                            crane::grpc::QueryQosInfoReply *response) override;
-
-  grpc::Status DeleteAccount(
-      grpc::ServerContext *context,
-      const crane::grpc::DeleteAccountRequest *request,
-      crane::grpc::DeleteAccountReply *response) override;
-
-  grpc::Status DeleteUser(grpc::ServerContext *context,
-                          const crane::grpc::DeleteUserRequest *request,
-                          crane::grpc::DeleteUserReply *response) override;
-
-  grpc::Status DeleteQos(grpc::ServerContext *context,
-                         const crane::grpc::DeleteQosRequest *request,
-                         crane::grpc::DeleteQosReply *response) override;
-
-  grpc::Status BlockAccountOrUser(
-      grpc::ServerContext *context,
-      const crane::grpc::BlockAccountOrUserRequest *request,
-      crane::grpc::BlockAccountOrUserReply *response) override;
-
-  grpc::Status QueryClusterInfo(
-      grpc::ServerContext *context,
-      const crane::grpc::QueryClusterInfoRequest *request,
-      crane::grpc::QueryClusterInfoReply *response) override;
-
  private:
-  CtldServer *m_ctld_server_;
+  CtldForCforedServer *m_ctld_server_;
 };
 
 /***
  * Note: There should be only ONE instance of CtldServer!!!!
  */
-class CtldServer {
+class CtldForCforedServer {
  public:
-  /***
-   * User must make sure that this constructor is called only once!
-   * @param listen_address The "[Address]:[Port]" of CraneCtld.
-   */
-  explicit CtldServer(const Config::CraneCtldListenConf &listen_conf);
+  explicit CtldForCforedServer(const Config::CraneCtldListenConf &listen_conf);
 
   inline void Wait() { m_server_->Wait(); }
 
-  CraneExpected <std::future<task_id_t>> SubmitTaskToScheduler(
-      std::unique_ptr<TaskInCtld> task);
+  void Shutdown();
 
  private:
   template <typename K, typename V,
@@ -325,20 +206,16 @@ class CtldServer {
 
   using Mutex = util::mutex;
 
-  std::unique_ptr<CraneCtldServiceImpl> m_service_impl_;
+  std::unique_ptr<CtldForCforedServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
 
   Mutex m_mtx_;
   HashMap<std::string /* cfored_name */, HashSet<task_id_t>>
       m_cfored_running_tasks_ ABSL_GUARDED_BY(m_mtx_);
 
-  inline static std::mutex s_sigint_mtx;
-  inline static std::condition_variable s_sigint_cv;
-  static void signal_handler_func(int) { s_sigint_cv.notify_one(); };
-
-  friend class CraneCtldServiceImpl;
+  friend class CtldForCforedServiceImpl;
 };
 
 }  // namespace Ctld
 
-inline std::unique_ptr<Ctld::CtldServer> g_ctld_server;
+inline std::unique_ptr<Ctld::CtldForCforedServer> g_ctld_for_cfored_server;
