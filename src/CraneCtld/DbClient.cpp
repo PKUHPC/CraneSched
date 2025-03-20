@@ -300,7 +300,8 @@ bool MongodbClient::FetchJobRecords(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type          extra_attr     reservation
+  // 30 type          extra_attr     reservation   exclusive     cpus_alloc
+  // 35 mem_alloc
 
   try {
     for (auto view : cursor) {
@@ -313,14 +314,23 @@ bool MongodbClient::FetchJobRecords(
       task->set_account(view["account"].get_string().value.data());
       task->set_username(view["username"].get_string().value.data());
 
+      auto* mutable_req_res_view = task->mutable_req_res_view();
+      auto* mutable_req_alloc_res = mutable_req_res_view->mutable_allocatable_res();
+      mutable_req_alloc_res->set_cpu_core_limit(
+          view["cpus_req"].get_double().value);
+          mutable_req_alloc_res->set_memory_limit_bytes(
+          view["mem_req"].get_int64().value);
+          mutable_req_alloc_res->set_memory_sw_limit_bytes(
+          view["mem_req"].get_int64().value);
+  
       auto* mutable_res_view = task->mutable_res_view();
       auto* mutable_alloc_res = mutable_res_view->mutable_allocatable_res();
       mutable_alloc_res->set_cpu_core_limit(
-          view["cpus_req"].get_double().value);
-      mutable_alloc_res->set_memory_limit_bytes(
-          view["mem_req"].get_int64().value);
-      mutable_alloc_res->set_memory_sw_limit_bytes(
-          view["mem_req"].get_int64().value);
+          view["cpus_alloc"].get_double().value);
+          mutable_alloc_res->set_memory_limit_bytes(
+          view["mem_alloc"].get_int64().value);
+          mutable_alloc_res->set_memory_sw_limit_bytes(
+          view["mem_alloc"].get_int64().value);
 
       task->set_name(std::string(view["task_name"].get_string().value));
       task->set_qos(std::string(view["qos"].get_string().value));
@@ -354,10 +364,9 @@ bool MongodbClient::FetchJobRecords(
       if (view.find("reservation") != view.end()) {
         task->set_reservation(view["reservation"].get_string().value.data());
       }
+      task->set_exclusive(view["exclusive"].get_bool().value);
     }
-  } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
-  }
 
   return true;
 }
@@ -831,7 +840,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type          extra_attr     reservation
+  // 30 type          extra_attr     reservation   exclusive     cpus_alloc
+  // 35 mem_alloc
 
   // clang-format off
   std::array<std::string, 33> fields{
@@ -847,8 +857,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     "script", "state", "timelimit", "time_submit", "work_dir",
     // 25 - 29
     "submit_line", "exit_code",  "username", "qos", "get_user_env",
-    // 30 - 32
-    "type", "extra_attr", "reservation"
+    // 30 - 34
+    "type", "extra_attr", "reservation" "exclusive", "cpus_alloc"
+    // 35 - 39
+    "mem_alloc"
   };
   // clang-format on
 
@@ -858,16 +870,17 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
-             int32_t, std::string, std::string>                    /*30-31*/
+             int32_t, std::string, std::string, bool, double,      /*30-34*/
+             int64_t>                                              /*35-39*/
       values{
           // 0-4
           static_cast<int32_t>(runtime_attr.task_id()),
           runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
           task_to_ctld.account(),
           // 5-9
-          task_to_ctld.resources().allocatable_res().cpu_core_limit(),
+          task_to_ctld.req_resources().allocatable_res().cpu_core_limit(),
           static_cast<int64_t>(
-              task_to_ctld.resources().allocatable_res().memory_limit_bytes()),
+              task_to_ctld.req_resources().allocatable_res().memory_limit_bytes()),
           task_to_ctld.name(), env_str,
           static_cast<int32_t>(task_to_ctld.uid()),
           // 10-14
@@ -886,9 +899,13 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
           task_to_ctld.cmd_line(), runtime_attr.exit_code(),
           runtime_attr.username(), task_to_ctld.qos(),
           task_to_ctld.get_user_env(),
-          // 30-32
+          // 30-34
           task_to_ctld.type(), task_to_ctld.extra_attr(),
-          task_to_ctld.reservation()};
+          task_to_ctld.reservation(), task_to_ctld.exclusive(),
+          task_to_ctld.resources().allocatable_res().cpu_core_limit(),
+          // 35-39
+          static_cast<int64_t>(task_to_ctld.resources().allocatable_res().memory_limit_bytes())};
+        };
 
   return DocumentConstructor_(fields, values);
 }
@@ -911,7 +928,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type          extra_attr     reservation
+  // 30 type          extra_attr     reservation   exclusive    cpus_alloc 
+  // 35 mem_alloc
 
   // clang-format off
   std::array<std::string, 33> fields{
@@ -927,8 +945,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       "script", "state", "timelimit", "time_submit", "work_dir",
       // 25 - 29
       "submit_line", "exit_code",  "username", "qos", "get_user_env",
-      // 30 - 32
-      "type", "extra_attr", "reservation"
+      // 30 - 34
+      "type", "extra_attr", "reservation" "exclusive", "cpus_alloc",
+      // 35 - 39
+      "mem_alloc"
   };
   // clang-format on
 
@@ -938,7 +958,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
-             int32_t, std::string, std::string>                    /*30-31*/
+             int32_t, std::string, std::string, bool, double,      /*30-34*/
+             int64_t>                                              /*35-39*/
       values{                                                      // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -958,9 +979,12 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              // 25-29
              task->cmd_line, task->ExitCode(), task->Username(), task->qos,
              task->get_user_env,
-             // 30-32
-             task->type, task->extra_attr, task->reservation};
-
+             // 30-34
+             task->type, task->extra_attr, task->reservation,task->TaskToCtld().exclusive(),
+             static_cast<double>(task->allocated_node_res_view.CpuCount()),
+             // 35-39
+             static_cast<int64_t>(task->allocated_node_res_view.MemoryBytes())
+            };
   return DocumentConstructor_(fields, values);
 }
 
