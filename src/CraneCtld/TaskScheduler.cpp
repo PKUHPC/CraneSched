@@ -3115,6 +3115,9 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   AllocatableResource& task_actual_alloc_res = task->requested_node_res_view.GetAllocatableRes();
   task_actual_alloc_res = task->requested_node_res_view.GetReqAllocatableRes();
 
+  auto& task_actual_device_map = task->requested_node_res_view.GetDeviceMap();
+  task_actual_device_map = task->requested_node_res_view.GetReqDeviceMap();
+
   auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
       task->Username(), task->account, task);
   if (!check_qos_result) {

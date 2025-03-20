@@ -71,7 +71,8 @@ message ResourceV2 {
 message ResourceView {
   AllocatableResource req_allocatable_res = 1;
   AllocatableResource allocatable_res = 2;
-  DeviceMap device_map = 3;
+  DeviceMap req_device_map = 3;
+  DeviceMap device_map = 4;
 }
 
 enum PartitionState {
