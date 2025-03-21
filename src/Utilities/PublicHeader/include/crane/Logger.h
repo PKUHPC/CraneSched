@@ -163,7 +163,7 @@ struct formatter<cpu_t> {
   };
 
   template <typename FormatContext>
-  auto format(const cpu_t &v, FormatContext &ctx) {
+  auto format(const cpu_t &v, FormatContext &ctx) const {
     return fmt::format_to(ctx.out(), "{:.2f}", static_cast<double>(v));
   }
 };
