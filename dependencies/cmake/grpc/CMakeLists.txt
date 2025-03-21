@@ -7,11 +7,11 @@ if (CRANE_USE_GITEE_SOURCE)
     set(RE2_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/re2-2022-06-01.tar.gz")
     set(GRPC_SRC_URL "https://gitee.com/zenglingbo/crane-sched-deps/raw/master/grpc-1.51.0.tar.gz")
 else ()
-    set(ABSL_SRC_URL "https://github.com/abseil/abseil-cpp/releases/download/20240116.2/abseil-cpp-20240116.2.tar.gz")
-    set(C_ARES_SRC_URL "https://github.com/c-ares/c-ares/releases/download/cares-1_18_1/c-ares-1.18.1.tar.gz")
-    set(PROTOBUF_SRC_URL "https://github.com/protocolbuffers/protobuf/releases/download/v27.2/protobuf-27.2.tar.gz")
-    set(RE2_SRC_URL "https://github.com/google/re2/archive/refs/tags/2022-06-01.tar.gz")
-    set(GRPC_SRC_URL "https://github.com/grpc/grpc/archive/refs/tags/v1.67.0.tar.gz")
+    set(ABSL_SRC_URL "https://github.com/abseil/abseil-cpp/releases/download/20250127.1/abseil-cpp-20250127.1.tar.gz")
+    set(C_ARES_SRC_URL "https://github.com/c-ares/c-ares/releases/download/v1.34.4/c-ares-1.34.4.tar.gz")
+    set(PROTOBUF_SRC_URL "https://github.com/protocolbuffers/protobuf/releases/download/v29.4/protobuf-29.4.tar.gz")
+    set(RE2_SRC_URL "https://github.com/google/re2/releases/download/2024-07-02/re2-2024-07-02.tar.gz")
+    set(GRPC_SRC_URL "https://github.com/grpc/grpc/archive/refs/tags/v1.71.0.tar.gz")
 endif ()
 
 set(ABSL_PROPAGATE_CXX_STD ON)
@@ -21,7 +21,7 @@ FetchContent_Declare(absl
         OVERRIDE_FIND_PACKAGE
 
         URL ${ABSL_SRC_URL}
-        URL_HASH SHA256=733726b8c3a6d39a4120d7e45ea8b41a434cdacde401cba500f14236c49b39dc
+        URL_HASH SHA256=B396401FD29E2E679CACE77867481D388C807671DC2ACC602A0259EEB79B7811
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(absl)
@@ -40,7 +40,7 @@ FetchContent_Declare(c-ares
         OVERRIDE_FIND_PACKAGE
 
         URL ${C_ARES_SRC_URL}
-        URL_HASH SHA256=1a7d52a8a84a9fbffb1be9133c0f6e17217d91ea5a6fa61f6b4729cda78ebbcf
+        URL_HASH SHA256=FA38DBED659EE4CC5A32DF5E27DEDA575FA6852C79A72BA1AF85DE35A6AE222F
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(c-ares)
@@ -60,7 +60,7 @@ FetchContent_Declare(protobuf
         OVERRIDE_FIND_PACKAGE
 
         URL ${PROTOBUF_SRC_URL}
-        URL_HASH SHA256=e4ff2aeb767da6f4f52485c2e72468960ddfe5262483879ef6ad552e52757a77
+        URL_HASH SHA256=6BD9DCC91B17EF25C26ADF86DB71C67EC02431DC92E9589EAF82E22889230496
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(protobuf)
@@ -68,11 +68,12 @@ FetchContent_GetProperties(protobuf)
 find_package(protobuf REQUIRED CONFIG)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
+set(RE2_BUILD_TESTING OFF)
 FetchContent_Declare(re2
         OVERRIDE_FIND_PACKAGE
 
         URL ${RE2_SRC_URL}
-        URL_HASH SHA256=f89c61410a072e5cbcf8c27e3a778da7d6fd2f2b5b1445cd4f4508bee946ab0f
+        URL_HASH SHA256=EB2DF807C781601C14A260A507A5BB4509BE1EE626024CB45ACBD57CB9D4032B
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(re2)
@@ -110,7 +111,7 @@ FetchContent_Declare(grpc
         OVERRIDE_FIND_PACKAGE
 
         URL ${GRPC_SRC_URL}
-        URL_HASH SHA256=af0638f73e4452e22e295f8b3f452518234254104713a08497f3d3aaa76733ad
+        URL_HASH SHA256=0D631419E54EC5B29DEF798623EE3BF5520DAC77ABEAB3284EF7027EC2363F91
         INACTIVITY_TIMEOUT 5
 )
 FetchContent_MakeAvailable(grpc)
