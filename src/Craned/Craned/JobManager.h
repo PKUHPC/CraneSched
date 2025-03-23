@@ -29,13 +29,11 @@
 #include "protos/Crane.grpc.pb.h"
 
 namespace Craned {
-using TaskSpec = crane::grpc::TaskToD;
+using StepSpec = crane::grpc::TaskToD;
 
 struct Execution {
   // TODO: Replace this with task execution info. Find a better name.
-  TaskSpec task_spec;
-  task_id_t job_id;
-  pid_t pid;
+  StepSpec step_spec;
 };
 
 struct JobSpec {
@@ -48,7 +46,7 @@ struct JobSpec {
 
 struct JobStatusSpec {
   JobSpec job_spec;
-  TaskSpec task_spec;
+  StepSpec step_spec;
   pid_t task_pid;
 };
 
@@ -70,9 +68,7 @@ struct JobInstance {
 
   // TODO: Support multiple supervisor
   pid_t supervisor_pid{0};
-
-  // May launch multiple execution instance multi thread.
-  absl::flat_hash_map<pid_t, std::unique_ptr<Execution>> executions;
+  absl::flat_hash_map<step_id_t, std::unique_ptr<Execution>> executions;
 };
 
 /**
@@ -107,8 +103,6 @@ class JobManager {
   void TerminateTaskAsync(uint32_t task_id);
 
   void MarkTaskAsOrphanedAndTerminateAsync(task_id_t task_id);
-
-  bool CheckTaskStatusAsync(task_id_t task_id, crane::grpc::TaskStatus* status);
 
   bool ChangeTaskTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
 
@@ -166,7 +160,7 @@ class JobManager {
 
   bool FreeJobInstanceAllocation_(const std::vector<task_id_t>& job_ids);
 
-  void LaunchExecutionInstanceMt_(Execution* task);
+  void LaunchExecutionInstanceMt_(std::unique_ptr<Execution> task);
 
   CraneErr SpawnSupervisor_(JobInstance* instance, Execution* task);
 
@@ -234,8 +228,6 @@ class JobManager {
 
   void EvCleanTerminateTaskQueueCb_();
 
-  void EvCleanCheckTaskStatusQueueCb_();
-
   void EvCleanChangeTaskTimeLimitQueueCb_();
 
   std::shared_ptr<uvw::loop> m_uvw_loop_;
@@ -266,9 +258,6 @@ class JobManager {
 
   std::shared_ptr<uvw::async_handle> m_terminate_task_async_handle_;
   ConcurrentQueue<TaskTerminateQueueElem> m_task_terminate_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_check_task_status_async_handle_;
-  ConcurrentQueue<CheckTaskStatusQueueElem> m_check_task_status_queue_;
 
   // The function which will be called when SIGINT is triggered.
   std::function<void()> m_sigint_cb_;

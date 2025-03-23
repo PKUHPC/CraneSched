@@ -656,7 +656,7 @@ void GlobalVariableInit() {
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
   g_ctld_client->StartConnectingCtld();
   std::unordered_map<task_id_t, Craned::JobSpec> job_map;
-  std::unordered_map<task_id_t, Craned::TaskSpec> task_map;
+  std::unordered_map<task_id_t, Craned::StepSpec> task_map;
   std::unordered_set<task_id_t> running_jobs;
   std::vector<task_id_t> nonexistent_jobs;
   auto grpc_config_req = config_future.get();
@@ -712,7 +712,7 @@ void GlobalVariableInit() {
     job_status_map.emplace(
         job_id, Craned::JobStatusSpec{.job_spec = job_map[job_id],
                                       // Now each job have only one task
-                                      .task_spec = task_map[job_id],
+                                      .step_spec = task_map[job_id],
                                       .task_pid = job_id_pid_map[job_id]});
   }
   g_job_mgr->Recover(std::move(job_status_map));

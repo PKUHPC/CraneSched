@@ -189,6 +189,9 @@ class TaskManager {
   void TerminateTaskAsync(bool mark_as_orphaned, bool terminated_by_user);
 
   void Shutdown() { m_supervisor_exit_ = true; }
+  void Func(this std::shared_ptr<TaskManager> self) {
+    std::cout<<self;
+  };
 
  private:
   template <class T>

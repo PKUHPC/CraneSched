@@ -422,7 +422,7 @@ bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
 struct CgroupSpec {
   CgroupSpec() = default;
   CgroupSpec(const CgroupSpec& spce) = default;
-  CgroupSpec(const crane::grpc::JobSpec& job_spec);
+  explicit CgroupSpec(const crane::grpc::JobSpec& job_spec);
   CgroupSpec(const task_id_t job_id, const uid_t uid,
              const ResourceInNode& res_in_node,
              const std::string& execution_node);

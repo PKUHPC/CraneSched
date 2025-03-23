@@ -109,6 +109,7 @@ class CranedServer {
   explicit CranedServer(
       const Config::CranedListenConf &listen_conf,
       std::promise<crane::grpc::ConfigureCranedRequest> &&init_promise);
+  ~CranedServer() { CRANE_DEBUG("CranedServer is destroyed."); }
 
   inline void Shutdown() { m_server_->Shutdown(); }
 

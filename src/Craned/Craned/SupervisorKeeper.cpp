@@ -44,8 +44,10 @@ CraneExpected<std::pair<task_id_t, pid_t>> SupervisorClient::CheckTaskStatus() {
   auto ok = m_stub_->CheckTaskStatus(&context, request, &reply);
   if (ok.ok() && reply.ok()) {
     return std::pair{reply.job_id(), reply.pid()};
-  } else
+  } else {
+    CRANE_WARN("CheckTaskStatus failed: reply {},{}", reply.ok(),ok.error_message());
     return std::unexpected(CraneErr::kRpcFailure);
+  }
 }
 
 CraneErr SupervisorClient::TerminateTask(bool mark_as_orphaned,

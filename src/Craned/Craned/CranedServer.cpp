@@ -425,7 +425,7 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
   return Status::OK;
 }
 
-Status CranedServiceImpl::QueryTaskEnvVariables(
+grpc::Status CranedServiceImpl::QueryTaskEnvVariables(
     grpc::ServerContext *context,
     const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
     crane::grpc::QueryTaskEnvVariablesReply *response) {
