@@ -587,13 +587,14 @@ void JobManager::EvCleanGrpcExecuteTaskQueueCb_() {
     std::unique_ptr execution = std::move(elem.execution);
 
     if (!m_job_map_.Contains(execution->step_spec.task_id())) {
-      CRANE_ERROR("Failed to find job #{} allocation", execution->step_spec.task_id());
+      CRANE_ERROR("Failed to find job #{} allocation",
+                  execution->step_spec.task_id());
       elem.ok_prom.set_value(CraneErr::kCgroupError);
     }
-    //Inc counter
-    //Lock
+    // Inc counter
+    // Lock
 
-    //Wait count=0
+    // Wait count=0
 
     g_thread_pool->detach_task(
         [this, execution = execution.release()]() mutable {
