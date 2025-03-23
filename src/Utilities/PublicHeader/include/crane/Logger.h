@@ -149,7 +149,8 @@
     } while (false)
 #endif
 
-std::optional<spdlog::level::level_enum> StrToLogLevel(const std::string& level);
+std::optional<spdlog::level::level_enum> StrToLogLevel(
+    const std::string &level);
 
 void InitLogger(spdlog::level::level_enum level,
                 const std::string &log_file_path, bool console);
@@ -165,7 +166,7 @@ struct formatter<cpu_t> {
   };
 
   template <typename FormatContext>
-  auto format(const cpu_t &v, FormatContext &ctx) {
+  auto format(const cpu_t &v, FormatContext &ctx) const {
     return fmt::format_to(ctx.out(), "{:.2f}", static_cast<double>(v));
   }
 };

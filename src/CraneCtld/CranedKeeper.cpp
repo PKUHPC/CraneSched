@@ -17,6 +17,7 @@
  */
 
 #include "CranedKeeper.h"
+
 #include "TaskScheduler.h"
 namespace Ctld {
 
@@ -38,7 +39,7 @@ void CranedStub::ConfigureCraned(const CranedId &craned_id) {
   static std::uniform_int_distribution<uint64_t> dist;
   m_last_configure_token = dist(gen);
   CRANE_TRACE("Configuring craned {} with token {}", craned_id,
-              m_last_configure_token);
+              m_last_configure_token.load());
   crane::grpc::ConfigureCranedRequest request;
   request.set_token(m_last_configure_token);
   g_task_scheduler->QueryJobOfNode(craned_id, &request);

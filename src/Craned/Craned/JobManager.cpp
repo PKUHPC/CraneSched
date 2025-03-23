@@ -567,9 +567,8 @@ CraneErr JobManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task_spec) {
   // Simply wrap the Task structure within an Execution structure and
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
-  // instance->job_id = task_spec.task_id();  // TODO: Replace this with job id.
-  instance->step_spec = task_spec;
-  EvQueueExecuteTaskElem elem{.execution = std::move(instance)};
+  step->step_spec = task_spec;
+  EvQueueExecuteTaskElem elem{.execution = std::move(step)};
 
   auto future = elem.ok_prom.get_future();
   m_grpc_execute_task_queue_.enqueue(std::move(elem));
