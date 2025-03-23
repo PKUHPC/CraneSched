@@ -655,18 +655,20 @@ void GlobalVariableInit() {
   g_ctld_client->SetCtldConnectedCb([] { g_ctld_client->CranedConnected(); });
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
   g_ctld_client->StartConnectingCtld();
+
   std::unordered_map<task_id_t, Craned::JobSpec> job_map;
-  std::unordered_map<task_id_t, Craned::StepSpec> task_map;
+  std::unordered_map<task_id_t, Craned::StepSpec> step_map;
   std::unordered_set<task_id_t> running_jobs;
   std::vector<task_id_t> nonexistent_jobs;
+
   auto grpc_config_req = config_future.get();
   job_map.reserve(grpc_config_req.job_map_size());
-  task_map.reserve(grpc_config_req.job_id_tasks_map_size());
+  step_map.reserve(grpc_config_req.job_id_tasks_map_size());
   for (const auto& [job_id, job_spec] : grpc_config_req.job_map()) {
     if (task_ids_supervisor.erase(job_id)) {
       running_jobs.emplace(job_id);
       job_map.emplace(job_id, job_spec);
-      task_map.emplace(job_id, grpc_config_req.job_id_tasks_map().at(job_id));
+      step_map.emplace(job_id, grpc_config_req.job_id_tasks_map().at(job_id));
     } else {
       nonexistent_jobs.emplace_back(job_id);
     }
@@ -707,12 +709,13 @@ void GlobalVariableInit() {
     g_server->Shutdown();
     CRANE_INFO("Grpc Server Shutdown() was called.");
   });
+
   std::unordered_map<task_id_t, Craned::JobStatusSpec> job_status_map;
   for (const auto& job_id : running_jobs) {
     job_status_map.emplace(
+        // For now, each job only have one step
         job_id, Craned::JobStatusSpec{.job_spec = job_map[job_id],
-                                      // Now each job have only one task
-                                      .step_spec = task_map[job_id],
+                                      .step_spec = step_map[job_id],
                                       .task_pid = job_id_pid_map[job_id]});
   }
   g_job_mgr->Recover(std::move(job_status_map));

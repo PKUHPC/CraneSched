@@ -461,6 +461,7 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
     response->set_ok(false);
     return Status::OK;
   }
+
   JobSpec &job_spec = job_spec_expt.value();
   for (const auto &[name, value] : job_spec.GetJobEnvMap()) {
     response->mutable_env_map()->emplace(name, value);

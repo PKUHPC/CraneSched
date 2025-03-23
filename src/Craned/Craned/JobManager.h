@@ -67,6 +67,7 @@ struct JobInstance {
   CraneErr err_before_exec{CraneErr::kOk};
 
   // TODO: Support multiple supervisor
+  // 1 supervisor -> 1 step
   pid_t supervisor_pid{0};
   absl::flat_hash_map<step_id_t, std::unique_ptr<Execution>> executions;
 };

@@ -311,13 +311,12 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
     return CraneErr::kSystemErr;
   }
 
-  // The ResourceInNode structure should be copied here for being accessed in
+  // The ResourceInNode structure should be copied here if being accessed in
   // the child process.
   // Note that CgroupManager acquires a lock for this.
   // If the lock is held in the parent process during fork, the forked thread
-  // in the child proc will block forever. That's why we should copy it here
-  // and the child proc should not hold any lock.
-  auto res_in_node = job->job_spec.cgroup_spec.res_in_node;
+  // in the child proc will block forever.
+  // auto res_in_node = job->job_spec.cgroup_spec.res_in_node;
 
   pid_t child_pid = fork();
 
@@ -343,6 +342,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
     FileInputStream istream(supervisor_craned_fd);
     FileOutputStream ostream(craned_supervisor_fd);
 
+    // Before exec, we need to make sure that the cgroup is ready.
     if (!job->cgroup->MigrateProcIn(child_pid)) {
       CRANE_ERROR(
           "[Task #{}] Terminate the subprocess due to failure of cgroup "
@@ -389,7 +389,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
                                           nullptr);
     if (!ok || !msg.ok()) {
       if (!ok)
-        CRANE_ERROR("[Task #{}] Socket child endpoint failed: {}",
+        CRANE_ERROR("[Task #{}] Pipe child endpoint failed: {}",
                     execution->step_spec.task_id(),
                     strerror(istream.GetErrno()));
       if (!msg.ok())
@@ -409,7 +409,12 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
     init_req.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
     init_req.set_crane_base_dir(g_config.CraneBaseDir);
     init_req.set_crane_script_dir(g_config.CranedScriptDir);
-    *init_req.mutable_step_spec() = execution->step_spec;
+    init_req.mutable_step_spec()->CopyFrom(execution->step_spec);
+
+    // Pass job env to supervisor
+    EnvMap res_env_map = job->job_spec.GetJobEnvMap();
+    init_req.mutable_env()->clear();
+    init_req.mutable_env()->insert(res_env_map.begin(), res_env_map.end());
 
     if (g_config.Container.Enabled) {
       auto* container_conf = init_req.mutable_container_config();
@@ -526,20 +531,6 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
     // keep waiting for the input from stdin or other fds and will never end.
     util::os::CloseFdFrom(3);
 
-    // FIXME: pass env by grpc
-    //  Set job level resource env
-    EnvMap res_env_map =
-        CgroupManager::GetResourceEnvMapByResInNode(res_in_node);
-
-    if (clearenv()) {
-      // fmt::print("clearenv() failed!\n");
-    }
-
-    for (const auto& [name, value] : res_env_map)
-      if (setenv(name.c_str(), value.c_str(), 1)) {
-        // fmt::print("setenv for {}={} failed!\n", name, value);
-      }
-
     // Prepare the command line arguments.
     std::vector<const char*> argv;
 
@@ -576,8 +567,9 @@ CraneErr JobManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task_spec) {
   // Simply wrap the Task structure within an Execution structure and
   // pass it to the event loop. The cgroup field of this task is initialized
   // in the corresponding handler (EvGrpcExecuteTaskCb_).
-  step->step_spec = task_spec;
-  EvQueueExecuteTaskElem elem{.execution = std::move(step)};
+  // instance->job_id = task_spec.task_id();  // TODO: Replace this with job id.
+  instance->step_spec = task_spec;
+  EvQueueExecuteTaskElem elem{.execution = std::move(instance)};
 
   auto future = elem.ok_prom.get_future();
   m_grpc_execute_task_queue_.enqueue(std::move(elem));

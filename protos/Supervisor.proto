@@ -39,10 +39,6 @@ message InitSupervisorRequest {
   string crane_base_dir = 5;
   string crane_script_dir = 6;
 
-  message PluginConfig {
-    string socket_path = 1;
-  }
-
   message ContainerConfig {
     string temp_dir = 1;
 
@@ -52,10 +48,15 @@ message InitSupervisorRequest {
     string kill_cmd = 5;
     string delete_cmd = 6;
   }
-
   ContainerConfig container_config = 7;
+
+  message PluginConfig {
+    string socket_path = 1;
+  }
   PluginConfig plugin_config = 8;
+
   TaskToD step_spec = 9;
+  map<string, string> env = 10;
 }
 
 

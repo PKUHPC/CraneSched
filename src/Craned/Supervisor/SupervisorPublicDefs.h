@@ -41,7 +41,7 @@ struct Config {
     bool UseTls{false};
     TlsCertificates TlsCerts;
   };
-
+  CforedListenConf CforedListenConf;
   struct ContainerConfig {
     bool Enabled{false};
     std::filesystem::path TempDir;
@@ -60,7 +60,6 @@ struct Config {
   PluginConfig Plugin;
 
   bool CompressedRpc{};
-  CforedListenConf CforedListenConf;
 
   std::string SupervisorDebugLevel;
 
@@ -76,6 +75,7 @@ struct Config {
   std::filesystem::path SupervisorUnixSockPath;
 
   task_id_t JobId;
+  EnvMap JobEnv;
   step_id_t StepId;
   StepToSuper StepSpec;
   std::atomic_int TaskCount;

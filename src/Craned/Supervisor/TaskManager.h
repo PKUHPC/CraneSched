@@ -59,7 +59,8 @@ class ExecutionInterface {
   explicit ExecutionInterface(const StepSpec* step_spec)
       : step_spec(step_spec) {}
   virtual ~ExecutionInterface() = default;
-  void TaskProcStopped();
+
+  void TaskProcStopped();  // TODO: Refactor this into SigChldHandler
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
 
   // Interfaces must be implemented.
@@ -67,19 +68,25 @@ class ExecutionInterface {
   virtual CraneErr Spawn() = 0;
   virtual CraneErr Kill(int signum) = 0;
   virtual CraneErr Cleanup() = 0;
+  // TODO: SigChldHandler()
 
   // Set from TaskManager
   const StepSpec* step_spec;
+
   PasswordEntry pwd;
-  std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
-  bool orphaned{false};
-  CraneErr err_before_exec{CraneErr::kOk};
-  bool cancelled_by_user{false};
-  bool terminated_by_timeout{false};
   ProcSigchldInfo sigchld_info{};
 
+  std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
+  CraneErr err_before_exec{CraneErr::kOk};
+
+  bool orphaned{false};
+  bool cancelled_by_user{false};
+  bool terminated_by_timeout{false};
+
  protected:
-  // FIXME: Remove this in future
+  // FIXME: Remove this in future.
+  // Before we distinguish TaskToD/SpecToSuper and JobSpec, it's hard to remove
+  // this function.
   [[deprecated]] virtual EnvMap GetChildProcessEnv_() const;
 
   // Helper methods
@@ -244,7 +251,7 @@ class TaskManager {
   std::thread m_uvw_thread_;
 
   StepSpec m_step_spec_;
-  // TODO: Support multiple task (execution steps)
+  // TODO: Support multiple tasks
   std::unique_ptr<ExecutionInterface> m_instance_;
 };
 

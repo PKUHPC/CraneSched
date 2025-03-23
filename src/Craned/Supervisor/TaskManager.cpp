@@ -48,6 +48,7 @@ bool StepSpec::IsCalloc() const {
   return spec.type() == crane::grpc::Interactive &&
          spec.interactive_meta().interactive_type() == crane::grpc::Calloc;
 }
+
 void ExecutionInterface::TaskProcStopped() {
   auto ok_to_free = step_spec->cfored_client->TaskProcessStop(m_pid_);
   if (ok_to_free) {
@@ -81,10 +82,15 @@ std::string ExecutionInterface::ParseFilePathPattern_(
   return resolved_path_pattern;
 }
 
-// TODO: Refactor this into TaskManager, instead of in ExecutionInterface.
 EnvMap ExecutionInterface::GetChildProcessEnv_() const {
   std::unordered_map<std::string, std::string> env_map;
-  // Crane Env will override user task env;
+
+  // Job env from CraneD
+  for (auto& [name, value] : g_config.JobEnv) {
+    env_map.emplace(name, value);
+  }
+
+  // Crane env will override user task env;
   for (auto& [name, value] : this->step_spec->spec.env()) {
     env_map.emplace(name, value);
   }
@@ -335,7 +341,8 @@ CraneErr ContainerInstance::ModifyOCIBundleConfig_(
 
     // For container, we use `/bin/sh` as the default interpreter.
     std::string real_exe = "/bin/sh";
-    if (step_spec->IsBatch() && !step_spec->spec.batch_meta().interpreter().empty())
+    if (step_spec->IsBatch() &&
+        !step_spec->spec.batch_meta().interpreter().empty())
       real_exe = step_spec->spec.batch_meta().interpreter();
 
     std::vector<std::string> args = absl::StrSplit(real_exe, ' ');
@@ -379,7 +386,8 @@ CraneErr ContainerInstance::Prepare() {
 
   FILE* fptr = fopen(sh_path.c_str(), "w");
   if (fptr == nullptr) {
-    CRANE_ERROR("Failed write the script for task #{}", step_spec->spec.task_id());
+    CRANE_ERROR("Failed write the script for task #{}",
+                step_spec->spec.task_id());
     return CraneErr::kSystemErr;
   }
 
@@ -402,13 +410,15 @@ CraneErr ContainerInstance::Prepare() {
      */
     auto meta = std::make_unique<BatchMetaInExecution>();
     meta->parsed_output_file_pattern = ParseFilePathPattern_(
-        step_spec->spec.batch_meta().output_file_pattern(), step_spec->spec.cwd());
+        step_spec->spec.batch_meta().output_file_pattern(),
+        step_spec->spec.cwd());
 
     // If -e / --error is not defined, leave
     // batch_meta.parsed_error_file_pattern empty;
     if (!step_spec->spec.batch_meta().error_file_pattern().empty()) {
       meta->parsed_error_file_pattern = ParseFilePathPattern_(
-          step_spec->spec.batch_meta().error_file_pattern(), step_spec->spec.cwd());
+          step_spec->spec.batch_meta().error_file_pattern(),
+          step_spec->spec.cwd());
     }
 
     m_meta_ = std::move(meta);
@@ -742,7 +752,8 @@ CraneErr ProcessInstance::Prepare() {
 
   FILE* fptr = fopen(sh_path.c_str(), "w");
   if (fptr == nullptr) {
-    CRANE_ERROR("Failed write the script for task #{}", step_spec->spec.task_id());
+    CRANE_ERROR("Failed write the script for task #{}",
+                step_spec->spec.task_id());
     return CraneErr::kSystemErr;
   }
 
@@ -765,13 +776,15 @@ CraneErr ProcessInstance::Prepare() {
      */
     auto meta = std::make_unique<BatchMetaInExecution>();
     meta->parsed_output_file_pattern = ParseFilePathPattern_(
-        step_spec->spec.batch_meta().output_file_pattern(), step_spec->spec.cwd());
+        step_spec->spec.batch_meta().output_file_pattern(),
+        step_spec->spec.cwd());
 
     // If -e / --error is not defined, leave
     // batch_meta.parsed_error_file_pattern empty;
     if (!step_spec->spec.batch_meta().error_file_pattern().empty()) {
       meta->parsed_error_file_pattern = ParseFilePathPattern_(
-          step_spec->spec.batch_meta().error_file_pattern(), step_spec->spec.cwd());
+          step_spec->spec.batch_meta().error_file_pattern(),
+          step_spec->spec.cwd());
     }
 
     m_meta_ = std::move(meta);
@@ -783,9 +796,10 @@ CraneErr ProcessInstance::Prepare() {
 
   // If interpreter is not set, let system decide.
   m_executable_ = sh_path.string();
-  if (step_spec->IsBatch() && !step_spec->spec.batch_meta().interpreter().empty()) {
-    m_executable_ =
-        fmt::format("{} {}", step_spec->spec.batch_meta().interpreter(), sh_path.string());
+  if (step_spec->IsBatch() &&
+      !step_spec->spec.batch_meta().interpreter().empty()) {
+    m_executable_ = fmt::format(
+        "{} {}", step_spec->spec.batch_meta().interpreter(), sh_path.string());
   }
 
   m_env_ = GetChildProcessEnv_();

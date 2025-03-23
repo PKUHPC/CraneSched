@@ -31,12 +31,12 @@
 using Supervisor::g_config;
 
 void InitFromStdin(int argc, char** argv) {
-  cxxopts::Options options("Supervisor");
+  cxxopts::Options options("CSupervisor");
 
   // clang-format off
   options.add_options()
       ("v,version", "Display version information")
-      ("h,help", "Display help for Supervisor")
+      ("h,help", "Display help for CSupervisor")
       ;
   // clang-format on
 
@@ -78,6 +78,12 @@ void InitFromStdin(int argc, char** argv) {
   g_config.CranedUnixSocketPath = msg.craned_unix_socket_path();
   g_config.CraneBaseDir = msg.crane_base_dir();
   g_config.CraneScriptDir = msg.crane_script_dir();
+
+  // Environment from JobManager
+  g_config.JobEnv.clear();
+  for (const auto& [key, value] : msg.env()) {
+    g_config.JobEnv.emplace(key, value);
+  }
 
   // Container config
   g_config.Container.Enabled = msg.has_container_config();
