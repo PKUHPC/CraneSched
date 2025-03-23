@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <filesystem>
+
 #include "CranedPreCompiledHeader.h"
 // Precompiled header comes first
 
@@ -74,13 +76,18 @@ struct Config {
   };
   PluginConfig Plugin;
 
+  struct SupervisorConfig {
+    std::filesystem::path Path;
+    std::string DebugLevel;
+  };
+  SupervisorConfig Supervisor;
+
   CranedListenConf ListenConf;
   bool CompressedRpc{};
 
   std::string ControlMachine;
   std::string CraneCtldListenPort;
   std::string CranedDebugLevel;
-  std::string SupervisorDebugLevel;
 
   std::filesystem::path CraneBaseDir;
   std::filesystem::path CranedLogFile;
@@ -98,7 +105,6 @@ struct Config {
     absl::Time CranedStartTime;
     absl::Time SystemBootTime;
   };
-
   CranedMeta CranedMeta;
 
   std::unordered_map<ipv4_t, std::string> Ipv4ToCranedHostname;

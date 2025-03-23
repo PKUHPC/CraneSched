@@ -23,6 +23,7 @@
 #include <pty.h>
 #include <sys/wait.h>
 
+#include "CranedPublicDefs.h"
 #include "CtldClient.h"
 #include "SupervisorKeeper.h"
 #include "crane/PluginClient.h"
@@ -404,7 +405,7 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
     // Do Supervisor Init
     crane::grpc::supervisor::InitSupervisorRequest init_req;
     init_req.set_job_id(execution->step_spec.task_id());
-    init_req.set_debug_level(g_config.SupervisorDebugLevel);
+    init_req.set_debug_level(g_config.Supervisor.DebugLevel);
     init_req.set_craned_id(g_config.CranedIdOfThisNode);
     init_req.set_craned_unix_socket_path(g_config.CranedUnixSockPath);
     init_req.set_crane_base_dir(g_config.CraneBaseDir);
@@ -481,9 +482,9 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
       KillPid_(child_pid, SIGKILL);
       return CraneErr::kSupervisorError;
     }
+
     job->supervisor_pid = child_pid;
     return CraneErr::kOk;
-
   } else {  // Child proc
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
@@ -540,12 +541,13 @@ CraneErr JobManager::SpawnSupervisor_(JobInstance* job, Execution* execution) {
     argv.push_back(nullptr);
 
     // Use execvp to search the kSupervisorPath in the PATH.
-    execvp(kSupervisorPath, const_cast<char* const*>(argv.data()));
+    execvp(g_config.Supervisor.Path.c_str(),
+           const_cast<char* const*>(argv.data()));
 
     // Error occurred since execvp returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.
     fmt::print(stderr, "[Craned Subprocess] Failed to execvp {}. Error: {}\n",
-               kSupervisorPath, strerror(errno));
+               g_config.Supervisor.Path.c_str(), strerror(errno));
 
     // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return
     // standard

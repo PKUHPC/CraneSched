@@ -23,7 +23,6 @@
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
-#include <ctime>
 #include <cxxopts.hpp>
 
 #include "CranedServer.h"
@@ -101,16 +100,18 @@ void ParseConfig(int argc, char** argv) {
 
       if (config["Supervisor"]) {
         const auto& supervisor_config = config["Supervisor"];
-        g_config.SupervisorDebugLevel =
+        g_config.Supervisor.Path =
+            value_or(supervisor_config["Path"], kDefaultSupervisorPath);
+        g_config.Supervisor.DebugLevel =
             value_or(supervisor_config["DebugLevel"], "trace");
       } else {
-        fmt::print(stderr, "No Supervisor configuration found.");
+        fmt::print(stderr, "No Supervisor configuration found.\n");
         std::exit(1);
       }
 
-      if (!StrToLogLevel(g_config.SupervisorDebugLevel).has_value()) {
-        fmt::print(stderr, "Illegal Supervisor debug-level format: {}.",
-                   g_config.SupervisorDebugLevel);
+      if (!StrToLogLevel(g_config.Supervisor.DebugLevel).has_value()) {
+        fmt::print(stderr, "Illegal Supervisor debug-level format: {}.\n",
+                   g_config.Supervisor.DebugLevel);
         std::exit(1);
       }
 
@@ -119,7 +120,7 @@ void ParseConfig(int argc, char** argv) {
       if (log_level.has_value()) {
         InitLogger(log_level.value(), g_config.CranedLogFile, true);
       } else {
-        fmt::print(stderr, "Illegal Craned debug-level format:{} .",
+        fmt::print(stderr, "Illegal Craned debug-level format: {}.\n",
                    g_config.CranedDebugLevel);
         std::exit(1);
       }

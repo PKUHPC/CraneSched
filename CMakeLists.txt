@@ -364,6 +364,9 @@ if (CRANE_ENABLE_TESTS)
     add_subdirectory(test EXCLUDE_FROM_ALL)
 endif ()
 
+# Adopt GNU standard installation directories
+include(GNUInstallDirs)
+
 # Generate the configuration file
 configure_file(${CMAKE_SOURCE_DIR}/etc/cranectld.service.in ${CMAKE_BINARY_DIR}/etc/cranectld.service)
 configure_file(${CMAKE_SOURCE_DIR}/etc/craned.service.in ${CMAKE_BINARY_DIR}/etc/craned.service)
@@ -384,7 +387,7 @@ cpack_add_component(cranectldc
 cpack_add_component_group(craned)
 cpack_add_component_group(cranectld)
 set(CPACK_COMPONENTS_ALL cranedc cranectldc)
-include(GNUInstallDirs)
+
 # Install binaries
 install(TARGETS cranectld
         DESTINATION ${CMAKE_INSTALL_BINDIR}

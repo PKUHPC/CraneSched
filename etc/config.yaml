@@ -117,6 +117,11 @@ ScheduledBatchSize: 100000
 # Default value is false.
 RejectJobsBeyondCapacity: false
 
+Supervisor:
+  Path: /usr/libexec/csupervisor
+  # Supervisor log level
+  DebugLevel: trace
+
 Container:
   # Toggle the container support in CraneSched
   Enabled: false
@@ -129,9 +134,6 @@ Container:
   RuntimeKill: /usr/bin/runc --rootless=true --root=/run/user/%U/ kill -a %u.%U.%j.%x SIGTERM 
   RuntimeDelete: /usr/bin/runc --rootless=true --root=/run/user/%U/ delete --force %u.%U.%j.%x
   RuntimeRun: /usr/bin/runc --rootless=true --root=/run/user/%U/ run -b %b %u.%U.%j.%x
-
-Supervisor:
-  DebugLevel: trace
 
 Plugin:
   # Toggle the plugin module in CraneSched
