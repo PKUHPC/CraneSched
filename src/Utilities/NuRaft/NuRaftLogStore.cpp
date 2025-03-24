@@ -20,101 +20,153 @@
 namespace crane {
 namespace Internal {
 
-NuRaftLogStore::NuRaftLogStore()
+NuRaftLogStore::NuRaftLogStore(raft_server* server_ptr)
     : start_idx_(1),
-      raft_server_bwd_pointer_(nullptr),
-      disk_emul_delay(0),
-      disk_emul_thread_(nullptr),
-      disk_emul_thread_stop_signal_(false),
-      disk_emul_last_durable_index_(0) {
+      raft_server_bwd_pointer_(server_ptr),
+      m_last_durable_index_(0),
+      m_durable_thread_stop_signal_(false) {
   // Dummy entry for index 0.
   std::shared_ptr<buffer> buf = buffer::alloc(sz_ulong);
-  logs_[0] = std::make_shared<log_entry>(0, buf);
+  m_logs_[0] = std::make_shared<log_entry>(0, buf);
+
+  m_durable_thread_ = std::unique_ptr<std::thread>(
+      new std::thread(&NuRaftLogStore::durable_thread_, this));
 }
 
 NuRaftLogStore::~NuRaftLogStore() {
-  if (disk_emul_thread_) {
-    disk_emul_thread_stop_signal_ = true;
-    disk_emul_ea_.invoke();
-    if (disk_emul_thread_->joinable()) {
-      disk_emul_thread_->join();
+  if (m_durable_thread_) {
+    m_durable_thread_stop_signal_ = true;
+    m_durable_ea_.invoke();
+    if (m_durable_thread_->joinable()) {
+      m_durable_thread_->join();
     }
+  }
+  // The durable thread terminates before the db client is closed
+  if (m_logs_db_) {
+    auto result = m_logs_db_->Close();
+    if (!result)
+      CRANE_ERROR("Error occurred when closing the embedded db of logs!");
   }
 }
 
-std::shared_ptr<log_entry> NuRaftLogStore::make_clone(
-    const std::shared_ptr<log_entry>& entry) {
-  // NOTE:
-  //   Timestamp is used only when `replicate_log_timestamp_` option is on.
-  //   Otherwise, log store does not need to store or load it.
-  std::shared_ptr<log_entry> clone = std::make_shared<log_entry>(
-      entry->get_term(), buffer::clone(entry->get_buf()), entry->get_val_type(),
-      entry->get_timestamp(), entry->has_crc32(), entry->get_crc32(), false);
-  return clone;
+bool NuRaftLogStore::init(const std::string& db_backend,
+                          const std::string& db_path) {
+  if (db_backend == "Unqlite") {
+#ifdef CRANE_HAVE_UNQLITE
+    m_logs_db_ = std::make_unique<UnqliteDb>();
+#else
+    CRANE_ERROR(
+        "Select unqlite as the embedded db but it's not been compiled.");
+    return false;
+#endif
+
+  } else if (db_backend == "BerkeleyDB") {
+#ifdef CRANE_HAVE_BERKELEY_DB
+    m_logs_db_ = std::make_unique<BerkeleyDb>();
+#else
+    CRANE_ERROR(
+        "Select Berkeley DB as the embedded db but it's not been compiled.");
+    return false;
+#endif
+
+  } else {
+    CRANE_ERROR("Invalid embedded database backend: {}", db_backend);
+    return false;
+  }
+
+  auto result = m_logs_db_->Init(db_path + "_logs");
+  if (!result) return false;
+
+  // Restore logs from db
+  m_logs_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&& value) {
+        if (key == "0") return true;
+        std::shared_ptr<buffer> buf = buffer::alloc(value.size());
+        buf->put_raw(value.data(), value.size());
+
+        buf->pos(0);
+        std::shared_ptr<log_entry> entry = log_entry::deserialize(*buf);
+
+        m_logs_[std::stoul(key)] = entry;
+        return true;
+      });
+
+  return true;
 }
 
 uint64_t NuRaftLogStore::next_slot() const {
   std::lock_guard<std::mutex> l(logs_lock_);
   // Exclude the dummy entry.
-  return start_idx_ + logs_.size() - 1;
+  return start_idx_ + m_logs_.size() - 1;
 }
 
 uint64_t NuRaftLogStore::start_index() const { return start_idx_; }
 
 std::shared_ptr<log_entry> NuRaftLogStore::last_entry() const {
-  uint64_t next_idx = next_slot();
   std::lock_guard<std::mutex> l(logs_lock_);
-  auto entry = logs_.find(next_idx - 1);
-  if (entry == logs_.end()) {
-    entry = logs_.find(0);
+
+  uint64_t next_idx = start_idx_ + m_logs_.size() - 1;
+  auto entry = m_logs_.find(next_idx - 1);
+  if (entry == m_logs_.end()) {
+    // return dummy constant entry means there are no logs present.
+    entry = m_logs_.find(0);
   }
 
-  return make_clone(entry->second);
+  return make_clone_(entry->second);
 }
 
 uint64_t NuRaftLogStore::append(std::shared_ptr<log_entry>& entry) {
-  std::shared_ptr<log_entry> clone = make_clone(entry);
+  std::shared_ptr<log_entry> clone = make_clone_(entry);
 
   std::lock_guard<std::mutex> l(logs_lock_);
-  size_t idx = start_idx_ + logs_.size() - 1;
-  logs_[idx] = clone;
+  size_t idx = start_idx_ + m_logs_.size() - 1;
+  m_logs_[idx] = clone;
 
-  if (disk_emul_delay) {
-    uint64_t cur_time = timer_helper::get_timeofday_us();
-    disk_emul_logs_being_written_[cur_time + disk_emul_delay * 1000] = idx;
-    disk_emul_ea_.invoke();
-  }
+  m_logs_being_written_.push(idx);
+  m_durable_ea_.invoke();
 
   return idx;
 }
 
 void NuRaftLogStore::write_at(uint64_t index,
                               std::shared_ptr<log_entry>& entry) {
-  std::shared_ptr<log_entry> clone = make_clone(entry);
-
-  // Discard all logs equal to or greater than `index.
   std::lock_guard<std::mutex> l(logs_lock_);
-  auto itr = logs_.lower_bound(index);
-  while (itr != logs_.end()) {
-    itr = logs_.erase(itr);
-  }
-  logs_[index] = clone;
-
-  if (disk_emul_delay) {
-    uint64_t cur_time = timer_helper::get_timeofday_us();
-    disk_emul_logs_being_written_[cur_time + disk_emul_delay * 1000] = index;
-
-    // Remove entries greater than `index`.
-    auto entry = disk_emul_logs_being_written_.begin();
-    while (entry != disk_emul_logs_being_written_.end()) {
-      if (entry->second > index) {
-        entry = disk_emul_logs_being_written_.erase(entry);
-      } else {
-        entry++;
-      }
+  // Remove entries greater than `index`.
+  int len = m_logs_being_written_.size();
+  for (int i = 0; i < len; i++) {
+    int li = m_logs_being_written_.front();
+    if (li <= index) {
+      m_logs_being_written_.push(li);
     }
-    disk_emul_ea_.invoke();
+    m_logs_being_written_.pop();
   }
+  m_durable_ea_.invoke();
+
+  std::shared_ptr<log_entry> clone = make_clone_(entry);
+  // Discard all logs equal to or greater than `index.
+  auto itr = m_logs_.lower_bound(index);
+  while (itr != m_logs_.end()) {
+    m_logs_db_->Delete(0, std::to_string(itr->first));
+    itr = m_logs_.erase(itr);
+  }
+  m_logs_[index] = clone;
+  auto buf = entry->serialize();
+  m_logs_db_->Store(0, std::to_string(index), buf->data(), buf->size());
+}
+
+std::vector<std::shared_ptr<log_entry>> NuRaftLogStore::all_log_entries() {
+  std::vector<std::shared_ptr<log_entry>> ret;
+
+  std::lock_guard<std::mutex> l(logs_lock_);
+  if (!m_logs_.empty()) {
+    ret.resize(m_logs_.size());
+    uint64_t pos = 0;
+    for (const auto& log : m_logs_) {
+      ret[pos++] = log.second;
+    }
+  }
+
+  return ret;
 }
 
 std::shared_ptr<std::vector<std::shared_ptr<log_entry>>>
@@ -123,19 +175,19 @@ NuRaftLogStore::log_entries(uint64_t start, uint64_t end) {
       std::make_shared<std::vector<std::shared_ptr<log_entry>>>();
 
   ret->resize(end - start);
-  uint64_t cc = 0;
+  uint64_t pos = 0;
   for (uint64_t i = start; i < end; ++i) {
     std::shared_ptr<log_entry> src;
     {
       std::lock_guard<std::mutex> l(logs_lock_);
-      auto entry = logs_.find(i);
-      if (entry == logs_.end()) {
-        entry = logs_.find(0);
+      auto entry = m_logs_.find(i);
+      if (entry == m_logs_.end()) {
+        entry = m_logs_.find(0);
         assert(0);
       }
       src = entry->second;
     }
-    (*ret)[cc++] = make_clone(src);
+    (*ret)[pos++] = make_clone_(src);
   }
   return ret;
 }
@@ -151,18 +203,18 @@ NuRaftLogStore::log_entries_ext(uint64_t start, uint64_t end,
   }
 
   size_t accum_size = 0;
-  for (uint64_t ii = start; ii < end; ++ii) {
-    std::shared_ptr<log_entry> src = nullptr;
+  for (uint64_t i = start; i < end; ++i) {
+    std::shared_ptr<log_entry> src;
     {
       std::lock_guard<std::mutex> l(logs_lock_);
-      auto entry = logs_.find(ii);
-      if (entry == logs_.end()) {
-        entry = logs_.find(0);
+      auto entry = m_logs_.find(i);
+      if (entry == m_logs_.end()) {
+        entry = m_logs_.find(0);
         assert(0);
       }
       src = entry->second;
     }
-    ret->push_back(make_clone(src));
+    ret->push_back(make_clone_(src));
     accum_size += src->get_buf().size();
     if (batch_size_hint_in_bytes &&
         accum_size >= (uint64_t)batch_size_hint_in_bytes)
@@ -175,22 +227,22 @@ std::shared_ptr<log_entry> NuRaftLogStore::entry_at(uint64_t index) {
   std::shared_ptr<log_entry> src;
   {
     std::lock_guard<std::mutex> l(logs_lock_);
-    auto entry = logs_.find(index);
-    if (entry == logs_.end()) {
-      entry = logs_.find(0);
+    auto entry = m_logs_.find(index);
+    if (entry == m_logs_.end()) {
+      entry = m_logs_.find(0);
     }
     src = entry->second;
   }
-  return make_clone(src);
+  return make_clone_(src);
 }
 
 uint64_t NuRaftLogStore::term_at(uint64_t index) {
   uint64_t term;
   {
     std::lock_guard<std::mutex> l(logs_lock_);
-    auto entry = logs_.find(index);
-    if (entry == logs_.end()) {
-      entry = logs_.find(0);
+    auto entry = m_logs_.find(index);
+    if (entry == m_logs_.end()) {
+      entry = m_logs_.find(0);
     }
     term = entry->second->get_term();
   }
@@ -201,11 +253,11 @@ std::shared_ptr<buffer> NuRaftLogStore::pack(uint64_t index, int32 cnt) {
   std::vector<std::shared_ptr<buffer>> logs;
 
   size_t size_total = 0;
-  for (uint64_t ii = index; ii < index + cnt; ++ii) {
+  for (uint64_t i = index; i < index + cnt; ++i) {
     std::shared_ptr<log_entry> le;
     {
       std::lock_guard<std::mutex> l(logs_lock_);
-      le = logs_[ii];
+      le = m_logs_[i];
     }
     assert(le.get());
     std::shared_ptr<buffer> buf = le->serialize();
@@ -230,8 +282,8 @@ void NuRaftLogStore::apply_pack(uint64_t index, buffer& pack) {
   pack.pos(0);
   int32 num_logs = pack.get_int();
 
-  for (int32 ii = 0; ii < num_logs; ++ii) {
-    uint64_t cur_idx = index + ii;
+  for (int32 i = 0; i < num_logs; ++i) {
+    uint64_t cur_idx = index + i;
     int32 buf_size = pack.get_int();
 
     std::shared_ptr<buffer> buf_local = buffer::alloc(buf_size);
@@ -240,14 +292,14 @@ void NuRaftLogStore::apply_pack(uint64_t index, buffer& pack) {
     std::shared_ptr<log_entry> le = log_entry::deserialize(*buf_local);
     {
       std::lock_guard<std::mutex> l(logs_lock_);
-      logs_[cur_idx] = le;
+      m_logs_[cur_idx] = le;
     }
   }
 
   {
     std::lock_guard<std::mutex> l(logs_lock_);
-    auto entry = logs_.upper_bound(0);
-    if (entry != logs_.end()) {
+    auto entry = m_logs_.upper_bound(0);
+    if (entry != m_logs_.end()) {
       start_idx_ = entry->first;
     } else {
       start_idx_ = 1;
@@ -255,12 +307,14 @@ void NuRaftLogStore::apply_pack(uint64_t index, buffer& pack) {
   }
 }
 
-bool NuRaftLogStore::compact(uint64_t last_log_index) {
+bool NuRaftLogStore::compact(log_index_t last_log_index) {
   std::lock_guard<std::mutex> l(logs_lock_);
-  for (uint64_t ii = start_idx_; ii <= last_log_index; ++ii) {
-    auto entry = logs_.find(ii);
-    if (entry != logs_.end()) {
-      logs_.erase(entry);
+
+  for (log_index_t i = start_idx_; i <= last_log_index; ++i) {
+    auto entry = m_logs_.find(i);
+    if (entry != m_logs_.end()) {
+      m_logs_.erase(entry);
+      m_logs_db_->Delete(0, std::to_string(i));
     }
   }
 
@@ -274,67 +328,72 @@ bool NuRaftLogStore::compact(uint64_t last_log_index) {
 }
 
 bool NuRaftLogStore::flush() {
-  disk_emul_last_durable_index_ = next_slot() - 1;
-  return true;
-}
+  auto result = m_logs_db_->Begin();
+  txn_id_t txn_id = 0;
+  if (result.has_value()) {
+    txn_id = result.value();
+  } else {
+    return false;
+  }
 
-void NuRaftLogStore::set_disk_delay(raft_server* raft, size_t delay_ms) {
-  disk_emul_delay = delay_ms;
-  raft_server_bwd_pointer_ = raft;
+  std::lock_guard<std::mutex> l(logs_lock_);
+  for (const auto& [k, v] : m_logs_) {
+    std::shared_ptr<buffer> buf = v->serialize();
+    m_logs_db_->Store(txn_id, std::to_string(k), buf->data(), buf->size());
+  }
 
-  if (!disk_emul_thread_) {
-    disk_emul_thread_ = std::unique_ptr<std::thread>(
-        new std::thread(&NuRaftLogStore::disk_emul_loop, this));
+  if (m_logs_db_->Commit(txn_id).has_value()) {
+    m_last_durable_index_ = start_idx_ + m_logs_.size() - 2;
+    return true;
+  } else {
+    return false;
   }
 }
 
-uint64_t NuRaftLogStore::last_durable_index() {
-  uint64_t last_log = next_slot() - 1;
-  if (!disk_emul_delay) {
-    return last_log;
-  }
-
-  return disk_emul_last_durable_index_;
+std::shared_ptr<log_entry> NuRaftLogStore::make_clone_(
+    const std::shared_ptr<log_entry>& entry) {
+  // NOTE:
+  //   Timestamp is used only when `replicate_log_timestamp_` option is on.
+  //   Otherwise, log store does not need to store or load it.
+  std::shared_ptr<log_entry> clone = std::make_shared<log_entry>(
+      entry->get_term(), buffer::clone(entry->get_buf()), entry->get_val_type(),
+      entry->get_timestamp(), entry->has_crc32(), entry->get_crc32(), false);
+  return clone;
 }
 
-void NuRaftLogStore::disk_emul_loop() {
-  // This thread mimics async disk writes.
-
-  size_t next_sleep_us = 100 * 1000;
-  while (!disk_emul_thread_stop_signal_) {
-    disk_emul_ea_.wait_us(next_sleep_us);
-    disk_emul_ea_.reset();
-    if (disk_emul_thread_stop_signal_) break;
-
-    uint64_t cur_time = timer_helper::get_timeofday_us();
-    next_sleep_us = 100 * 1000;
+void NuRaftLogStore::durable_thread_() {
+  while (!m_durable_thread_stop_signal_) {
+    m_durable_ea_.wait();
+    m_durable_ea_.reset();
+    if (m_durable_thread_stop_signal_) break;
 
     bool call_notification = false;
     {
       std::lock_guard<std::mutex> l(logs_lock_);
       // Remove all timestamps equal to or smaller than `cur_time`,
-      // and pick the greatest one among them.
-      auto entry = disk_emul_logs_being_written_.begin();
-      while (entry != disk_emul_logs_being_written_.end()) {
-        if (entry->first <= cur_time) {
-          disk_emul_last_durable_index_ = entry->second;
-          entry = disk_emul_logs_being_written_.erase(entry);
+      // and pick the greatest one among them.3
+
+      int max_retry = 0;
+      while (!m_logs_being_written_.empty()) {
+        log_index_t i = m_logs_being_written_.front();
+        std::shared_ptr<buffer> buf = m_logs_[i]->serialize();
+        auto res =
+            m_logs_db_->Store(0, std::to_string(i), buf->data(), buf->size());
+        if (res.has_value()) {
+          m_logs_being_written_.pop();
           call_notification = true;
         } else {
-          break;
+          max_retry++;
+          if (max_retry > 5) break;
         }
-      }
-
-      entry = disk_emul_logs_being_written_.begin();
-      if (entry != disk_emul_logs_being_written_.end()) {
-        next_sleep_us = entry->first - cur_time;
       }
     }
 
-    if (call_notification) {
+    if (call_notification && raft_server_bwd_pointer_) {
       raft_server_bwd_pointer_->notify_log_append_completion(true);
     }
   }
 }
+
 }  // namespace Internal
 }  // namespace crane
