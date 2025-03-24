@@ -521,8 +521,10 @@ class TaskScheduler {
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
 
-  void BlockAccountOrUser(bool block, std::string account_id,
-                          std::string user_id = "");
+  void BlockUser(bool block, const std::string& account_id,
+                 const std::string& user_id);
+
+  void BlockAccounts(bool block, const std::vector<std::string>& account_ids);
 
   static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
 

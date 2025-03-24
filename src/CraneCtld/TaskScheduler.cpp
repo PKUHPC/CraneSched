@@ -2578,10 +2578,18 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
   }
 }
 
-void TaskScheduler::BlockAccountOrUser(bool block, std::string account_id,
-                                       std::string user_id) {
-  m_task_block_queue_.enqueue(
-      TaskBlockReq{block, std::move(account_id), std::move(user_id)});
+void TaskScheduler::BlockUser(bool block, const std::string& account_id,
+                              const std::string& user_id) {
+  m_task_block_queue_.enqueue(TaskBlockReq{block, account_id, user_id});
+}
+
+void TaskScheduler::BlockAccounts(bool block,
+                                  const std::vector<std::string>& account_ids) {
+  std::vector<TaskBlockReq> reqs;
+  for (auto& account_id : account_ids) {
+    reqs.emplace_back(TaskBlockReq{block, account_id, ""});
+  }
+  m_task_block_queue_.enqueue_bulk(reqs.data(), reqs.size());
 }
 
 CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {

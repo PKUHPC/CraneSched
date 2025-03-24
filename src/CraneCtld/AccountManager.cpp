@@ -1734,6 +1734,17 @@ const Qos* AccountManager::GetExistedQosInfoNoLock_(const std::string& name) {
   return nullptr;
 }
 
+void AccountManager::GetSubAccountsNoLock_(
+    const std::string& name, std::vector<std::string>& sub_accounts) {
+  sub_accounts.push_back(name);
+  const Account* account = GetExistedAccountInfoNoLock_(name);
+  if (account) {
+    for (const auto& child : account->child_accounts) {
+      GetSubAccountsNoLock_(child, sub_accounts);
+    }
+  }
+}
+
 bool AccountManager::IncQosReferenceCountInDb_(const std::string& name,
                                                int num) {
   return g_db_client->UpdateEntityOne(MongodbClient::EntityType::QOS, "$inc",
@@ -2581,7 +2592,7 @@ CraneExpected<void> AccountManager::BlockUserNoLock_(const std::string& name,
 
   m_user_map_[name]->account_to_attrs_map[account].blocked = block;
 
-  g_task_scheduler->BlockAccountOrUser(block, account, name);
+  g_task_scheduler->BlockUser(block, account, name);
 
   return {};
 }
@@ -2600,7 +2611,9 @@ CraneExpected<void> AccountManager::BlockAccountNoLock_(const std::string& name,
 
   m_account_map_[name]->blocked = block;
 
-  g_task_scheduler->BlockAccountOrUser(block, name);
+  std::vector<std::string> sub_accounts;
+  GetSubAccountsNoLock_(name, sub_accounts);
+  g_task_scheduler->BlockAccounts(block, sub_accounts);
 
   return {};
 }

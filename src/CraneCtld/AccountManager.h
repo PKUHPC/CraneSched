@@ -180,6 +180,9 @@ class AccountManager {
 
   const Qos* GetQosInfoNoLock_(const std::string& name);
   const Qos* GetExistedQosInfoNoLock_(const std::string& name);
+  
+  void GetSubAccountsNoLock_(const std::string& name,
+                             std::vector<std::string>& sub_accounts);
 
   /* ---------------------------------------------------------------------------
    * ModifyUser-related functions(no lock)
