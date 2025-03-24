@@ -155,7 +155,6 @@ bool TaskScheduler::Init() {
         task->allocated_craneds_regex.clear();
         task->CranedIdsClear();
         task->executing_craned_ids.clear();
-        task->allocated_node_res_view.SetToZero();
 
         ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(0, task->TaskDbId(),
                                                            task->RuntimeAttr());
@@ -182,7 +181,7 @@ bool TaskScheduler::Init() {
           if (status == crane::grpc::Running) {
             // Exec node is up and the task is running.
             // Just allocate resource from allocated nodes and
-            // put it back into the running queue.
+            // put it back into the running queue.            
             PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
 
             CRANE_INFO(
@@ -264,7 +263,6 @@ bool TaskScheduler::Init() {
           task->allocated_craneds_regex.clear();
           task->CranedIdsClear();
           task->executing_craned_ids.clear();
-          task->allocated_node_res_view.SetToZero();
 
           ok = g_embedded_db_client->UpdateRuntimeAttrOfTask(
               0, task->TaskDbId(), task->RuntimeAttr());
@@ -2593,7 +2591,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
 
     // If any of the follow `if` is true, skip this node.
-    if (!(task->allocated_node_res_view <= craned_meta->res_total)) {
+    if (!(task->requested_node_res_view <= craned_meta->res_total)) {
       if constexpr (kAlgoTraceOutput) {
         CRANE_TRACE(
             "Task #{} needs more resource than that of craned {}. "
@@ -2666,7 +2664,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       // Find all possible nodes that can run the task now.
       // TODO: Performance issue! Consider speeding up with multiple threads.
       ResourceInNode feasible_res;
-      bool ok = task->allocated_node_res_view.GetFeasibleResourceInNode(
+      bool ok = task->allocated_node_res_view_map[craned_index].GetFeasibleResourceInNode(
           craned_meta->res_avail, &feasible_res);
       if (ok) {
         bool is_node_satisfied_now = true;
@@ -2703,10 +2701,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     // TODO: get feasible resource randomly (may cause start time change
     //       rapidly)
-    bool ok = task->allocated_node_res_view.GetFeasibleResourceInNode(
+    bool ok = task->allocated_node_res_view_map[craned_id].GetFeasibleResourceInNode(
         craned_meta->res_avail, &feasible_res);
     if (!ok) {
-      ok = task->allocated_node_res_view.GetFeasibleResourceInNode(
+      ok = task->allocated_node_res_view_map[craned_id].GetFeasibleResourceInNode(
           craned_meta->res_total, &feasible_res);
     }
     if (!ok) {
@@ -2880,6 +2878,7 @@ void MinLoadFirst::NodeSelect(
       // takes effect right now. Otherwise, during the scheduling for the
       // next partition, the algorithm may use the resource which is already
       // allocated.
+        task->CalAllocatedResources();  // Update the total resources allocated to the task
       for (CranedId const& craned_id : craned_ids)
         g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                                  task->Resources());
@@ -3189,7 +3188,7 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     // Since we do not access the elements in partition_metas_m
 
     // Check whether the selected partition is able to run this task.
-    if (!(task->allocated_node_res_view * task->node_num <=
+    if (!(task->requested_node_res_view * task->node_num <=
           metas_ptr->partition_global_meta.res_total_inc_dead)) {
       CRANE_TRACE(
           "Resource not enough for task #{}. "
@@ -3269,7 +3268,7 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
     auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
     for (const auto& craned_id : metas_ptr->craned_ids) {
       auto craned_meta = craned_meta_map->at(craned_id).GetExclusivePtr();
-      if (task->allocated_node_res_view <= craned_meta->res_total &&
+      if (task->requested_node_res_view <= craned_meta->res_total &&
           (task->included_nodes.empty() ||
            task->included_nodes.contains(craned_id)) &&
           (task->excluded_nodes.empty() ||
@@ -3460,9 +3459,9 @@ double MultiFactorPriority::CalculatePriority_(Ctld::TaskInCtld* task,
   uint32_t task_qos_priority = task->qos_priority;
   uint32_t task_part_priority = task->partition_priority;
   uint32_t task_nodes_alloc = task->node_num;
-  uint64_t task_mem_alloc = task->allocated_node_res_view.MemoryBytes();
+  uint64_t task_mem_alloc = task->requested_node_res_view.MemoryBytes();
   double task_cpus_alloc =
-      static_cast<double>(task->allocated_node_res_view.CpuCount());
+      static_cast<double>(task->requested_node_res_view.CpuCount());
   double task_service_val = bound.acc_service_val_map.at(task->account);
 
   double qos_factor{0};

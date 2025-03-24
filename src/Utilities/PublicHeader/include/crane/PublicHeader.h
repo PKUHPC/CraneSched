@@ -355,6 +355,7 @@ DeviceMap FromGrpcDeviceMap(const crane::grpc::DeviceMap& grpc_device_map);
 
 void operator+=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
 void operator-=(DeviceMap& lhs, const DedicatedResourceInNode& rhs);
+void operator+=(DeviceMap& lhs, const DeviceMap& rhs);
 void operator*=(DeviceMap& lhs, uint32_t rhs);
 
 bool operator<=(const DeviceMap& lhs, const DeviceMap& rhs);
