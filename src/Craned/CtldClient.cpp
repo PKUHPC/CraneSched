@@ -308,14 +308,14 @@ void CtldClient::InitGrpcChannel(const std::string& server_address) {
 
   if (g_config.ListenConf.UseTls)
     m_ctld_channel_ = CreateTcpTlsCustomChannelByHostname(
-        server_address, g_config.CraneCtldListenPort,
+        server_address, g_config.CraneCtldForInternalListenPort,
         g_config.ListenConf.TlsCerts, channel_args);
   else
     m_ctld_channel_ = CreateTcpInsecureCustomChannel(
-        server_address, g_config.CraneCtldListenPort, channel_args);
+        server_address, g_config.CraneCtldForInternalListenPort, channel_args);
 
   // std::unique_ptr will automatically release the dangling stub.
-  m_stub_ = CraneCtld::NewStub(m_ctld_channel_);
+  m_stub_ = CraneCtldForInternal::NewStub(m_ctld_channel_);
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }

@@ -25,7 +25,9 @@
 
 namespace Craned {
 
-using crane::grpc::CraneCtld;
+using crane::grpc::CraneCtldForInternal;
+using crane::grpc::CranedRegisterReply;
+using crane::grpc::CranedRegisterRequest;
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
@@ -168,7 +170,7 @@ class CtldClient {
 
   std::shared_ptr<Channel> m_ctld_channel_;
 
-  std::unique_ptr<CraneCtld::Stub> m_stub_;
+  std::unique_ptr<CraneCtldForInternal::Stub> m_stub_;
 
   CranedId m_craned_id_;
 
