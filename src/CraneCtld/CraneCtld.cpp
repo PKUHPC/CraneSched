@@ -35,6 +35,7 @@
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
+#include "VaultClientWrapper.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
 
@@ -628,6 +629,42 @@ void ParseConfig(int argc, char** argv) {
         g_config.DbName = config["DbName"].as<std::string>();
       else
         g_config.DbName = "crane_db";
+
+      if (config["Vault"]) {
+        const auto& vault_config = config["Vault"];
+
+        if (vault_config["Addr"])
+          g_config.VaultConf.Addr = vault_config["Addr"].as<std::string>();
+        else
+          g_config.VaultConf.Addr = "127.0.0.1";
+
+        if (vault_config["Port"])
+          g_config.VaultConf.Port = vault_config["Port"].as<std::string>();
+        else
+          g_config.VaultConf.Port = "8200";
+
+        if (vault_config["Username"] && !config["Username"].IsNull())
+          g_config.VaultConf.Username =
+              vault_config["Username"].as<std::string>();
+        else {
+          CRANE_ERROR("Unknown Vault Username");
+          std::exit(1);
+        }
+
+        if (vault_config["Password"] && !config["Password"].IsNull())
+          g_config.VaultConf.Password =
+              vault_config["Password"].as<std::string>();
+        else {
+          CRANE_ERROR("Unknown Vault Password");
+          std::exit(1);
+        }
+
+        if (vault_config["Tls"] && !config["Tls"].IsNull())
+          g_config.VaultConf.Tls = vault_config["Tls"].as<bool>();
+        else
+          g_config.VaultConf.Tls = false;
+      }  // vault
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open database config file {}: {}", db_config_path,
                      e.what());
@@ -706,6 +743,16 @@ void InitializeCtldGlobalVariables() {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
+  }
+
+  // Compatibility testing CICD, Remove this "if" after the test environment is
+  // updated.
+  if (g_config.VaultConf.Addr != "") {
+    g_vault_client = std::make_unique<vault::VaultClientWrapper>(
+        g_config.VaultConf.Username, g_config.VaultConf.Password,
+        g_config.VaultConf.Addr, g_config.VaultConf.Port,
+        g_config.VaultConf.Tls);
+    if (!g_vault_client->InitPki()) std::exit(1);
   }
 
   // Account manager must be initialized before Task Scheduler

@@ -11,3 +11,10 @@ DbHost: localhost
 DbPort: 27017
 DbReplSetName: crane_rs
 DbName: crane_db
+
+Vault:
+  Addr: 127.0.0.1
+  Port: 8200
+  Username: admin
+  Password: "123456"
+  Tls: false
