@@ -225,11 +225,11 @@ void ParseConfig(int argc, char** argv) {
         g_config.ControlMachine = config["ControlMachine"].as<std::string>();
       }
 
-      if (config["CraneCtldListenPort"])
-        g_config.CraneCtldListenPort =
-            config["CraneCtldListenPort"].as<std::string>();
+      if (config["CraneCtldForInternalListenPort"])
+        g_config.CraneCtldForInternalListenPort =
+            config["CraneCtldForInternalListenPort"].as<std::string>();
       else
-        g_config.CraneCtldListenPort = kCtldDefaultPort;
+        g_config.CraneCtldForInternalListenPort = kCtldForInternalDefaultPort;
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
