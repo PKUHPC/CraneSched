@@ -395,6 +395,23 @@ void operator-=(DeviceMap& lhs, const DedicatedResourceInNode& rhs) {
   }
 }
 
+void operator+=(DeviceMap& lhs, const DeviceMap& rhs) {
+  for (const auto& [device_name, rhs_entry] : rhs) {
+    const auto& [rhs_untyped_req_count, rhs_typed_cnt_map] = rhs_entry;
+
+    if (lhs.find(device_name) == lhs.end()) {
+        lhs[device_name] = rhs_entry;
+    } else {
+      auto& [lhs_untyped_req_count, lhs_typed_cnt_map] = lhs[device_name];
+
+      lhs_untyped_req_count += rhs_untyped_req_count;
+      for (const auto& [type, rhs_count] : rhs_typed_cnt_map) {
+          lhs_typed_cnt_map[type] += rhs_count;
+      }
+    }
+  }
+}
+
 void operator*=(DeviceMap& lhs, uint32_t rhs) {
   for (auto& [_, name_cnt] : lhs) {
     uint64_t& untyped_cnt = name_cnt.first;
