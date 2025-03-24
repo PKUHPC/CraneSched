@@ -1,3 +1,5 @@
+add_subdirectory(Tls)
+
 add_executable(cranectld
         CtldPublicDefs.h
         CtldGrpcServer.h
@@ -30,6 +32,7 @@ target_link_libraries(cranectld PRIVATE
 
         Utility_PublicHeader
         Utility_PluginClient
+        VaultClientWrapper
 
         uvw
 
