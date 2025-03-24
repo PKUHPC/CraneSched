@@ -37,6 +37,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
  public:
   explicit CraneCtldServiceImpl(CtldServer *server) : m_ctld_server_(server) {}
 
+  grpc::Status CraneCtldRegister(
+      grpc::ServerContext *context,
+      const crane::grpc::CraneCtldRegisterRequest *request,
+      crane::grpc::CraneCtldRegisterReply *response) override;
+
   grpc::Status SubmitBatchTask(
       grpc::ServerContext *context,
       const crane::grpc::SubmitBatchTaskRequest *request,
@@ -172,6 +177,30 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       grpc::ServerContext *context,
       const crane::grpc::QueryLeaderIdRequest *request,
       crane::grpc::QueryLeaderIdReply *response) override;
+
+  grpc::Status QueryRaftServerList(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryRaftServerListRequest *request,
+      crane::grpc::QueryRaftServerListReply *response) override;
+
+  grpc::Status QueryRaftNodeInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryRaftNodeInfoRequest *request,
+      crane::grpc::QueryRaftNodeInfoReply *response) override;
+
+  grpc::Status AddRaftNode(grpc::ServerContext *context,
+                           const crane::grpc::AddRaftNodeRequest *request,
+                           crane::grpc::AddRaftNodeReply *response) override;
+
+  grpc::Status RemoveRaftNode(
+      grpc::ServerContext *context,
+      const crane::grpc::RemoveRaftNodeRequest *request,
+      crane::grpc::RemoveRaftNodeReply *response) override;
+
+  grpc::Status YieldLeadership(
+      grpc::ServerContext *context,
+      const crane::grpc::YieldLeadershipRequest *request,
+      crane::grpc::YieldLeadershipReply *response) override;
 
  private:
   CtldServer *m_ctld_server_;

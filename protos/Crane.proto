@@ -56,6 +56,16 @@ message ConfigureCranedRequest {
   google.protobuf.Timestamp token = 4;
 }
 
+message CraneCtldRegisterRequest {
+  int32 server_id = 1;
+  string end_point = 2;
+}
+
+message CraneCtldRegisterReply {
+  bool ok = 1;
+  bool already_registered = 2;
+}
+
 message CranedRegisterRequest {
   string craned_id = 1;
   CranedRemoteMeta remote_meta = 2;
@@ -255,6 +265,64 @@ message ModifyCranedStateReply {
   repeated string modified_nodes = 2;
   repeated string not_modified_nodes = 3;
   repeated string not_modified_reasons = 4;
+}
+
+message QueryRaftServerListRequest {}
+
+message QueryRaftServerListReply {
+  enum RaftRole {
+    Leader = 0;
+    Fellow = 1;
+  }
+
+  message RaftServer {
+    int32 id = 1;
+    string end_point = 2;
+    RaftRole role = 3;
+  }
+
+  repeated RaftServer server_list = 1;
+}
+
+message QueryRaftNodeInfoRequest {}
+
+message QueryRaftNodeInfoReply{
+  int32 server_id = 1;
+  int32 leader_id = 2;
+  uint64 start_index = 3;
+  uint64 next_slot = 4;
+  uint64 committed_log_idx = 5;
+  uint64 cur_term = 6;
+  uint64 last_snapshot_log_idx = 7;
+  uint64 last_snapshot_log_term = 8;
+}
+
+message AddRaftNodeRequest{
+  string host_name = 1;
+  uint32 raft_port = 2;
+}
+
+message AddRaftNodeReply {
+  bool ok = 1;
+  int32 server_id = 2;
+  string reason = 3;
+}
+
+message RemoveRaftNodeRequest{
+  int32 server_id = 1;
+}
+
+message RemoveRaftNodeReply{
+  bool ok = 1;
+  string reason = 2;
+}
+
+message YieldLeadershipRequest{
+  int32 next_server_id = 1;
+}
+
+message YieldLeadershipReply {
+  bool ok = 1;
 }
 
 message AddAccountRequest {
@@ -877,6 +945,11 @@ service CraneCtld {
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
   rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
   rpc EnableAutoPowerControl(EnableAutoPowerControlRequest) returns (EnableAutoPowerControlReply);
+  rpc QueryRaftServerList(QueryRaftServerListRequest) returns (QueryRaftServerListReply);
+  rpc QueryRaftNodeInfo(QueryRaftNodeInfoRequest) returns (QueryRaftNodeInfoReply);
+  rpc AddRaftNode(AddRaftNodeRequest) returns (AddRaftNodeReply);
+  rpc RemoveRaftNode(RemoveRaftNodeRequest) returns (RemoveRaftNodeReply);
+  rpc YieldLeadership(YieldLeadershipRequest) returns (YieldLeadershipReply);
 
   /* RPCs called from cacctmgr */
   rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
@@ -911,6 +984,11 @@ service CraneCtld {
 }
 
 service CraneCtldForInternal {
+  /* RPCs called from Other CraneCtld */
+  rpc CraneCtldRegister(CraneCtldRegisterRequest) returns (CraneCtldRegisterReply);
+
+  /* RPCs called from Other CraneCtld */
+  rpc CraneCtldRegister(CraneCtldRegisterRequest) returns (CraneCtldRegisterReply);
   /* RPCs called from Craned */
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
   rpc CranedTriggerReverseConn(CranedTriggerReverseConnRequest) returns (google.protobuf.Empty);

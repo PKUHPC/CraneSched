@@ -45,6 +45,7 @@ target_link_libraries(cranectld PRIVATE
         Utility_PublicHeader
         Utility_PluginClient
         Utility_NuRaft
+        Utility_EmbeddedDb
 
         uvw
 
@@ -71,17 +72,6 @@ target_link_libraries(cranectld PRIVATE
 
         Backward::Interface
 )
-
-if (ENABLE_BERKELEY_DB AND BERKELEYDB_FOUND)
-    target_compile_definitions(cranectld PRIVATE CRANE_HAVE_BERKELEY_DB)
-    target_include_directories(cranectld PRIVATE ${BERKELEY_DB_INCLUDE_DIR})
-    target_link_libraries(cranectld PRIVATE ${BERKELEY_DB_CXX_LIBRARIES})
-endif ()
-
-if (ENABLE_UNQLITE)
-    target_compile_definitions(cranectld PRIVATE CRANE_HAVE_UNQLITE)
-    target_link_libraries(cranectld PRIVATE unqlite)
-endif ()
 
 if (CRANE_RAFT_SERVER)
     target_compile_definitions(cranectld PRIVATE CRANE_WITH_RAFT)

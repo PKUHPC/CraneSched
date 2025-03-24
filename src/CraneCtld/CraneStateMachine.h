@@ -8,18 +8,19 @@
 #include <mutex>
 
 #include "EmbeddedDbClient.h"
+#include "crane/EmbeddedDb.h"
 #include "crane/Lock.h"
 
 namespace Ctld {
 
 using namespace nuraft;
 
-class IEmbeddedDb;
-
 class CraneStateMachine : public state_machine {
  public:
   using raft_result = cmd_result<ptr<buffer>>;
   using ValueMapType = std::unordered_map<std::string, std::vector<uint8_t>>;
+  using UnqliteDb = crane::Internal::UnqliteDb;
+  using BerkeleyDb = crane::Internal::BerkeleyDb;
 
   enum CraneCtldOpType : uint8_t {
     OP_UNKNOWN = 0,
@@ -32,7 +33,7 @@ class CraneStateMachine : public state_machine {
   explicit CraneStateMachine(bool async_snapshot = false)
       : last_committed_idx_(0), async_snapshot_(async_snapshot) {}
 
-  ~CraneStateMachine() override = default;
+  ~CraneStateMachine() override;
 
   static std::shared_ptr<buffer> enc_log(CraneCtldOpType type,
                                          const std::string &key,
@@ -42,7 +43,8 @@ class CraneStateMachine : public state_machine {
   static bool dec_log(buffer &log, CraneCtldOpType *type, std::string *key,
                       std::vector<uint8_t> *value);
 
-  bool init(const std::string &db_path);
+  bool init(const std::string &db_path,
+            std::vector<std::shared_ptr<log_entry>> logs);
 
   std::shared_ptr<buffer> pre_commit(const uint64_t log_idx,
                                      buffer &data) override {
@@ -55,6 +57,7 @@ class CraneStateMachine : public state_machine {
                      std::shared_ptr<cluster_config> &new_conf) override {
     // Nothing to do with configuration change. Just update committed index.
     last_committed_idx_ = log_idx;
+    StoreValueToDB_(s_last_commit_idx_key_str_, last_committed_idx_);
   }
 
   void rollback(const uint64_t log_idx, buffer &data) override {
@@ -98,6 +101,14 @@ class CraneStateMachine : public state_machine {
     std::shared_ptr<nuraft::snapshot> snapshot;
   };
 
+  inline bool StoreValueToDB_(const std::string &key, uint64_t value) {
+    return m_variable_db_->Store(0, key, &value, sizeof(uint64_t)).has_value();
+  };
+
+  bool RestoreFromDB();
+
+  void Apply_(buffer &data);
+
   bool OnStore(ValueMapType &map, const std::string &key,
                std::vector<uint8_t> &&data);
 
@@ -113,6 +124,8 @@ class CraneStateMachine : public state_machine {
   // Last committed Raft log number.
   std::atomic<uint64_t> last_committed_idx_;
 
+  inline static std::string const s_last_commit_idx_key_str_{"LC"};
+
   // snapshot
   std::unique_ptr<snapshot_ctx> m_snapshot_;
 
@@ -123,7 +136,7 @@ class CraneStateMachine : public state_machine {
   bool async_snapshot_;
 
   ValueMapType var_value_map_, fix_value_map_;
-  std::unique_ptr<IEmbeddedDb> variable_db, fixed_db;
+  std::unique_ptr<crane::Internal::IEmbeddedDb> m_variable_db_, m_fixed_db_;
 };
 
 };  // namespace Ctld

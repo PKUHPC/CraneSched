@@ -811,7 +811,7 @@ void InitializeCtldGlobalVariables() {
 
 #ifdef CRANE_WITH_RAFT
   g_raft_server = std::make_unique<RaftServerStuff>(
-      g_config.CurServerId, "127.0.0.1",
+      g_config.CurServerId, g_config.RaftServers[g_config.CurServerId].HostName,
       stoi(g_config.RaftServers[g_config.CurServerId].RaftPort));
   g_raft_server->Init();
 #endif
@@ -896,6 +896,15 @@ int StartServer() {
   CreateFolders();
 
   InitializeCtldGlobalVariables();
+
+#ifdef CRANE_WITH_RAFT
+  if (g_config.CurServerId > 0) {
+    g_thread_pool->detach_task([]() {
+      g_raft_server->RegisterToLeader(g_config.RaftServers[0].HostName,
+                                      g_config.RaftServers[0].ListenPort);
+    });
+  }
+#endif
 
   g_ctld_server->Wait();
   g_ctld_for_internal_server->Wait();
