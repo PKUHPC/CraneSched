@@ -1177,8 +1177,7 @@ void TaskManager::ActivateTaskStatusChange_(crane::grpc::TaskStatus new_status,
                                             std::optional<std::string> reason) {
   m_instance_->Cleanup();
   bool orphaned = m_instance_->orphaned;
-  // Free the TaskInstance structure
-  m_instance_.reset();
+  // No need to free the TaskInstance structure,will destruct with TaskMgr.
   if (!orphaned)
     g_craned_client->TaskStatusChangeAsync(new_status, exit_code,
                                            std::move(reason));
@@ -1458,13 +1457,15 @@ void TaskManager::EvCleanCheckTaskStatusQueueCb_() {
   std::promise<CraneExpected<pid_t>> elem;
   while (m_check_task_status_queue_.try_dequeue(elem)) {
     if (m_instance_) {
-      if (!m_instance_->GetPid())
+      if (!m_instance_->GetPid()) {
+        CRANE_DEBUG("CheckTaskStatus: task launch failed.");
         // Launch failed
         elem.set_value(std::unexpected(CraneErr::kNonExistent));
-      else {
+      } else {
         elem.set_value(m_instance_->GetPid());
       }
     } else {
+      CRANE_DEBUG("CheckTaskStatus: task #{} does not exist.", g_config.JobId);
       elem.set_value(std::unexpected(CraneErr::kNonExistent));
     }
   }

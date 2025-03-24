@@ -49,6 +49,35 @@ struct Partition {
   std::unordered_set<std::string> nodes;
 };
 
+class flexible_latch {
+  std::mutex mtx;
+  std::condition_variable cv;
+  int count;
+
+ public:
+  explicit flexible_latch(int initial_count) : count(initial_count) {}
+
+  void count_down() {
+    std::lock_guard lock(mtx);
+    if (count > 0) {
+      count--;
+      if (count == 0) {
+        cv.notify_all();
+      }
+    }
+  }
+
+  void count_up() {
+    std::lock_guard lock(mtx);
+    count++;
+  }
+
+  void wait() {
+    std::unique_lock lock(mtx);
+    cv.wait(lock, [this] { return count == 0; });
+  }
+};
+
 struct Config {
   struct CranedListenConf {
     std::string CranedListenAddr;

@@ -36,8 +36,6 @@ class SupervisorClient {
   CraneErr TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
   CraneErr ChangeTaskTimeLimit(absl::Duration time_limit);
 
-  void Terminate();
-
   void InitChannelAndStub(const std::string& endpoint);
 
  private:

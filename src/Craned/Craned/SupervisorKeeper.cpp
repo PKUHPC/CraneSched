@@ -76,8 +76,6 @@ CraneErr SupervisorClient::ChangeTaskTimeLimit(absl::Duration time_limit) {
     return CraneErr::kRpcFailure;
 }
 
-void SupervisorClient::Terminate() {}
-
 void SupervisorClient::InitChannelAndStub(const std::string& endpoint) {
   m_channel_ = CreateUnixInsecureChannel(endpoint);
   // std::unique_ptr will automatically release the dangling stub.

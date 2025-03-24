@@ -29,11 +29,12 @@
 #include "protos/Crane.grpc.pb.h"
 
 namespace Craned {
+// TODO: Replace this with task execution info.
 using StepSpec = crane::grpc::TaskToD;
 
-struct Execution {
-  // TODO: Replace this with task execution info. Find a better name.
+struct StepInstance {
   StepSpec step_spec;
+  pid_t supervisor_pid;
 };
 
 struct JobSpec {
@@ -66,10 +67,7 @@ struct JobInstance {
   bool orphaned{false};
   CraneErr err_before_exec{CraneErr::kOk};
 
-  // TODO: Support multiple supervisor
-  // 1 supervisor -> 1 step
-  pid_t supervisor_pid{0};
-  absl::flat_hash_map<step_id_t, std::unique_ptr<Execution>> executions;
+  absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
 };
 
 /**
@@ -132,7 +130,7 @@ class JobManager {
   };
 
   struct EvQueueExecuteTaskElem {
-    std::unique_ptr<Execution> execution;
+    std::unique_ptr<StepInstance> execution;
     std::promise<CraneErr> ok_prom;
   };
 
@@ -161,9 +159,9 @@ class JobManager {
 
   bool FreeJobInstanceAllocation_(const std::vector<task_id_t>& job_ids);
 
-  void LaunchExecutionInstanceMt_(std::unique_ptr<Execution> task);
+  void LaunchStepMt_(std::unique_ptr<StepInstance> task);
 
-  CraneErr SpawnSupervisor_(JobInstance* instance, Execution* task);
+  CraneErr SpawnSupervisor_(JobInstance* instance, StepInstance* task);
 
   /**
    * Inform CraneCtld of the status change of a task.
@@ -192,9 +190,6 @@ class JobManager {
    */
   static CraneErr KillPid_(pid_t pid, int signum);
 
-  // Note: the three maps below are NOT protected by any mutex.
-  //  They should be modified in libev callbacks to avoid races.
-
   // Contains all the task that is running on this Craned node.
   util::AtomicHashMap<absl::flat_hash_map, task_id_t,
                       std::unique_ptr<JobInstance>>
@@ -202,19 +197,6 @@ class JobManager {
   util::AtomicHashMap<absl::flat_hash_map, uid_t /*uid*/,
                       absl::flat_hash_set<task_id_t>>
       m_uid_to_job_ids_map_;
-
-  //  ==================================================================
-  // Critical data region starts
-  //
-  // To improve performance, the cgroup creation and task creation
-  // are parallelized,
-  // which breaks the serializability guaranteed by the single event loop.
-  // The data structures in this region are accessed by multiple threads.
-  // The atomicity of these data structure is guaranteed by either mutex or
-  // AtomicHashMap.
-
-  // Critical data region ends
-  // ========================================================================
 
   bool EvCheckSupervisorRunning_();
 
@@ -267,9 +249,7 @@ class JobManager {
   // true. Then, AddTaskAsyncMethod will not accept any more new tasks and
   // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_{false};
-
-  // After m_is_ending_now_ set to true, when all task are cleared, we can exit.
-  std::atomic_bool m_task_cleared_{false};
+  flexible_latch m_pending_thread_pool_tasks{0};
 
   std::thread m_uvw_thread_;
 

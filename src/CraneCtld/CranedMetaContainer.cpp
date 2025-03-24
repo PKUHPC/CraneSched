@@ -65,11 +65,6 @@ void CranedMetaContainer::CranedUp(const crane::grpc::CranedReadyRequest* req) {
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
-
-    part_global_meta.res_total += node_meta->static_meta.res;
-    part_global_meta.res_avail += node_meta->res_avail;
-    part_global_meta.res_in_use += node_meta->res_in_use;
-
     part_global_meta.alive_craned_cnt++;
   }
 }
@@ -205,14 +200,12 @@ void CranedMetaContainer::FreeResourceFromNode(CranedId node_id,
 
   node_meta->res_avail += resources;
   node_meta->res_in_use -= resources;
-  if (node_meta->alive) {
-    for (auto& partition_meta : part_meta_ptrs) {
-      PartitionGlobalMeta& part_global_meta =
-          partition_meta->partition_global_meta;
+  for (auto& partition_meta : part_meta_ptrs) {
+    PartitionGlobalMeta& part_global_meta =
+        partition_meta->partition_global_meta;
 
-      part_global_meta.res_avail += resources;
-      part_global_meta.res_in_use -= resources;
-    }
+    part_global_meta.res_avail += resources;
+    part_global_meta.res_in_use -= resources;
   }
 
   node_meta->running_task_resource_map.erase(resource_iter);

@@ -92,6 +92,7 @@ void CranedClient::AsyncSendThread_() {
           // If some messages are not sent due to channel failure,
           // put them back into m_task_status_change_list_
           m_task_status_change_queue_.enqueue(elem);
+          std::this_thread::sleep_for(std::chrono::seconds(1));
           break;
         }
       } else {
