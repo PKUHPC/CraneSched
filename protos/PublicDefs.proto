@@ -68,6 +68,10 @@ message ResourceV2 {
   map<string /*craned id*/, ResourceInNode> each_node_res = 1;
 }
 
+message AllocResourceView {
+  map<string /*craned id*/, ResourceView> alloc_res_view = 1;
+}
+
 message ResourceView {
   AllocatableResource allocatable_res = 1;
   DeviceMap device_map = 2;
@@ -116,7 +120,7 @@ message TaskToCtld {
   google.protobuf.Duration time_limit = 1;
 
   string partition_name = 2;
-  ResourceView resources = 3;
+  ResourceView req_resources = 3;
 
   TaskType type = 4;
 
@@ -147,7 +151,6 @@ message TaskToCtld {
   string excludes = 34;
   string nodelist = 35;
   bool exclusive  = 36;
-  ResourceView req_resources = 37;
 }
 
 message TaskInEmbeddedDb {
@@ -174,6 +177,9 @@ message RuntimeAttrOfTask {
   bool held = 18;
   ResourceV2 resources = 19;
   double cached_priority = 20;
+  double alloc_cpus_total = 21;
+  uint64 alloc_mem_total = 22;
+  string alloc_device_total = 23;
 }
 
 message TaskToD {
@@ -264,7 +270,7 @@ message TaskInfo {
   string cwd = 14;
   string username = 15;
   string qos = 16;
-  ResourceView res_view = 17;
+  ResourceView req_res_view = 17;
   repeated string req_nodes = 19;
   repeated string exclude_nodes = 20;
 
@@ -288,7 +294,9 @@ message TaskInfo {
   google.protobuf.Duration elapsed_time = 37;
   repeated string execution_node = 38;
   bool exclusive = 39;
-  ResourceView req_res_view = 40;
+  double alloc_cpus_total = 40;
+  uint64 alloc_mem_total = 41;
+  string alloc_device_total= 42;
 }
 
 message PartitionInfo {
