@@ -17,6 +17,8 @@
  */
 #pragma once
 
+#include <grpcpp/channel.h>
+
 #include <libnuraft/nuraft.hxx>
 #include <memory>
 
@@ -26,6 +28,7 @@
 #include "crane/NuRaftLogStore.h"
 #include "crane/NuRaftLoggerWrapper.h"
 #include "crane/NuRaftStateManager.h"
+#include "protos/Crane.grpc.pb.h"
 
 namespace Ctld {
 
@@ -35,61 +38,58 @@ using namespace nuraft;
 
 class RaftServerStuff {
  public:
-  RaftServerStuff(int server_id, const std::string& ip, int port)
-      : m_server_id_(server_id), m_ip_(ip), m_port_(port){};
+  RaftServerStuff(int server_id, const std::string& hostname, int port)
+      : m_server_id_(server_id),
+        m_port_(port),
+        m_endpoint_(fmt::format("{}:{}", hostname, port)){};
 
   ~RaftServerStuff();
 
   void Init();
 
+  bool CheckServerNodeExist(int server_id);
+
   bool AddServerAsync(int server_id, const std::string& endpoint);
 
   bool AddServer(int server_id, const std::string& endpoint);
 
-  void server_list();
+  bool RemoveServer(int server_id);
+
+  void server_list(crane::grpc::QueryRaftServerListReply* response);
 
   bool AppendLog(std::shared_ptr<nuraft::buffer> new_log);
+
+  bool RegisterToLeader(const std::string& leader_hostname,
+                        const std::string& grpc_port);
+
+  void YieldLeadership(int next_leader_id = -1) {
+    if (next_leader_id == m_server_id_) return;
+    return m_raft_instance_->yield_leadership(false, next_leader_id);
+  };
 
   int GetLeaderId() { return m_raft_instance_->get_leader(); };
 
   bool IsLeader() { return m_raft_instance_->is_leader(); };
 
+  int GetServerId() { return m_server_id_; };
+
   CraneStateMachine* GetStateMachine();
 
-  void print_status() {
-    std::shared_ptr<nuraft::log_store> ls = m_state_mgr_->load_log_store();
+  void GetNodeStatus(crane::grpc::QueryRaftNodeInfoReply* response);
 
-    std::cout << "my server id: " << m_server_id_ << std::endl
-              << "leader id: " << m_raft_instance_->get_leader() << std::endl
-              << "Raft log range: ";
-    if (ls->start_index() >= ls->next_slot()) {
-      // Start index can be the same as next slot when the log store is empty.
-      std::cout << "(empty)" << std::endl;
-    } else {
-      std::cout << ls->start_index() << " - " << (ls->next_slot() - 1)
-                << std::endl;
-    }
-    std::cout << "last committed index: "
-              << m_raft_instance_->get_committed_log_idx() << std::endl
-              << "current term: " << m_raft_instance_->get_term() << std::endl
-              << "last snapshot log index: "
-              << (m_state_machine_->last_snapshot()
-                      ? m_state_machine_->last_snapshot()->get_last_log_idx()
-                      : 0)
-              << std::endl
-              << "last snapshot log term: "
-              << (m_state_machine_->last_snapshot()
-                      ? m_state_machine_->last_snapshot()->get_last_log_term()
-                      : 0)
-              << std::endl;
-  }
+  void get_all_keys() {
+    static_cast<crane::Internal::NuRaftStateManager*>(m_state_mgr_.get())
+        ->get_all_keys();
+  };
 
  private:
   static cb_func::ReturnCode StatusChangeCallback(cb_func::Type type,
                                                   cb_func::Param* p);
   int m_server_id_;
-  std::string m_ip_;
+  std::string m_endpoint_;
   int m_port_;
+
+  std::atomic<bool> m_exit_ = false;
 
   // State machine.
   std::shared_ptr<state_machine> m_state_machine_;
