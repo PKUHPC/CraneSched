@@ -69,7 +69,7 @@ struct Config {
   bool CompressedRpc{};
 
   std::string ControlMachine;
-  std::string CraneCtldListenPort;
+  std::string CraneCtldForInternalListenPort;
   std::string CranedDebugLevel;
 
   std::string CraneBaseDir;
