@@ -377,6 +377,10 @@ CraneErr ContainerInstance::Prepare() {
   m_env_ = GetChildProcessEnv_();
   // m_arguments_ is not applicable for container tasks.
 
+  // Check relative path
+  if (m_bundle_path_.is_relative())
+    m_bundle_path_ = step_spec->spec.cwd() / m_bundle_path_;
+
   // Write script into the temp folder
   auto sh_path =
       m_temp_path_ / fmt::format("Crane-{}.sh", step_spec->spec.task_id());
