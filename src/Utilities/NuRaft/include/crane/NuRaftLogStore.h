@@ -21,7 +21,10 @@
 #include <cassert>
 #include <map>
 #include <mutex>
+#include <queue>
 
+#include "crane/EmbeddedDb.h"
+#include "crane/Logger.h"
 #include "libnuraft/event_awaiter.hxx"
 #include "libnuraft/internal_timer.hxx"
 #include "libnuraft/log_store.hxx"
@@ -35,13 +38,17 @@ using namespace nuraft;
 
 class NuRaftLogStore : public log_store {
  public:
-  NuRaftLogStore();
+  using log_index_t = uint64_t;
+
+  NuRaftLogStore(raft_server* server_ptr);
 
   ~NuRaftLogStore() override;
 
   __nocopy__(NuRaftLogStore);
 
  public:
+  bool init(const std::string& db_backend, const std::string& db_path);
+
   uint64_t next_slot() const override;
 
   uint64_t start_index() const override;
@@ -50,43 +57,53 @@ class NuRaftLogStore : public log_store {
 
   uint64_t append(std::shared_ptr<log_entry>& entry) override;
 
-  void write_at(uint64_t index, std::shared_ptr<log_entry>& entry) override;
+  void write_at(log_index_t index, std::shared_ptr<log_entry>& entry) override;
+
+  std::vector<std::shared_ptr<log_entry>> all_log_entries();
 
   std::shared_ptr<std::vector<std::shared_ptr<log_entry>>> log_entries(
-      uint64_t start, uint64_t end) override;
+      log_index_t start, log_index_t end) override;
 
   std::shared_ptr<std::vector<std::shared_ptr<log_entry>>> log_entries_ext(
-      uint64_t start, uint64_t end,
+      log_index_t start, log_index_t end,
       int64 batch_size_hint_in_bytes = 0) override;
 
-  std::shared_ptr<log_entry> entry_at(uint64_t index) override;
+  std::shared_ptr<log_entry> entry_at(log_index_t index) override;
 
-  uint64_t term_at(uint64_t index) override;
+  log_index_t term_at(log_index_t index) override;
 
-  std::shared_ptr<buffer> pack(uint64_t index, int32 cnt) override;
+  std::shared_ptr<buffer> pack(log_index_t index, int32 cnt) override;
 
-  void apply_pack(uint64_t index, buffer& pack) override;
+  void apply_pack(log_index_t index, buffer& pack) override;
 
-  bool compact(uint64_t last_log_index) override;
+  bool compact(log_index_t last_log_index) override;
 
   bool flush() override;
 
   void close() {};
 
-  uint64_t last_durable_index() override;
+  uint64_t last_durable_index() override { return m_last_durable_index_; };
 
-  void set_disk_delay(raft_server* raft, size_t delay_ms);
+  void get_all_keys() {
+    std::cout << "keys" << std::endl;
+    m_logs_db_->IterateAllKv(
+        [&](std::string&& key, std::vector<uint8_t>&& value) {
+          std::cout << key << std::endl;
+          return true;
+        });
+  };
 
  private:
-  static std::shared_ptr<log_entry> make_clone(
+  static std::shared_ptr<log_entry> make_clone_(
       const std::shared_ptr<log_entry>& entry);
 
-  void disk_emul_loop();
+  //  void disk_emul_loop();
+  void durable_thread_();
 
   /**
    * Map of <log index, log data>.
    */
-  std::map<uint64_t, std::shared_ptr<log_entry>> logs_;
+  std::map<log_index_t, std::shared_ptr<log_entry>> m_logs_;
 
   /**
    * Lock for `logs_`.
@@ -96,49 +113,43 @@ class NuRaftLogStore : public log_store {
   /**
    * The index of the first log.
    */
-  std::atomic<uint64_t> start_idx_;
+  std::atomic<log_index_t> start_idx_;
 
   /**
    * Backward pointer to Raft server.
    */
   raft_server* raft_server_bwd_pointer_;
 
-  // Testing purpose --------------- BEGIN
+  /**
+   * Last written log index.
+   */
+  std::atomic<log_index_t> m_last_durable_index_;
 
   /**
-   * If non-zero, this log store will emulate the disk write delay.
+   * logs that is being written to disk.
    */
-  std::atomic<size_t> disk_emul_delay;
-
-  /**
-   * Map of <timestamp, log index>, emulating logs that is being written to
-   * disk. Log index will be regarded as "durable" after the corresponding
-   * timestamp.
-   */
-  std::map<uint64_t, uint64_t> disk_emul_logs_being_written_;
+  std::queue<log_index_t> m_logs_being_written_;
 
   /**
    * Thread that will update `last_durable_index_` and call
    * `notify_log_append_completion` at proper time.
    */
-  std::unique_ptr<std::thread> disk_emul_thread_;
+  std::unique_ptr<std::thread> m_durable_thread_;
 
   /**
    * Flag to terminate the thread.
    */
-  std::atomic<bool> disk_emul_thread_stop_signal_;
+  std::atomic<bool> m_durable_thread_stop_signal_;
 
   /**
-   * Event awaiter that emulates disk delay.
+   * Event awaiter
    */
-  EventAwaiter disk_emul_ea_;
+  EventAwaiter m_durable_ea_;
 
   /**
-   * Last written log index.
+   *  log is durable after being written to db
    */
-  std::atomic<uint64_t> disk_emul_last_durable_index_;
-
-  // Testing purpose --------------- END
+  std::unique_ptr<IEmbeddedDb> m_logs_db_;
 };
 }  // namespace Internal
 }  // namespace crane

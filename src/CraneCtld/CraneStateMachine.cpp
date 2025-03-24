@@ -2,6 +2,21 @@
 
 namespace Ctld {
 
+CraneStateMachine::~CraneStateMachine() {
+  if (m_variable_db_) {
+    auto result = m_variable_db_->Close();
+    if (!result)
+      CRANE_ERROR(
+          "Error occurred when closing the embedded db of variable data!");
+  }
+
+  if (m_fixed_db_) {
+    auto result = m_fixed_db_->Close();
+    if (!result)
+      CRANE_ERROR("Error occurred when closing the embedded db of fixed data!");
+  }
+}
+
 std::shared_ptr<buffer> CraneStateMachine::enc_log(CraneCtldOpType type,
                                                    const std::string &key,
                                                    const void *data,
@@ -71,14 +86,15 @@ bool CraneStateMachine::dec_log(buffer &log, CraneCtldOpType *type,
   return true;
 }
 
-bool CraneStateMachine::init(const std::string &db_path) {
+bool CraneStateMachine::init(const std::string &db_path,
+                             std::vector<std::shared_ptr<log_entry>> logs) {
   util::lock_guard lg(snapshots_lock_);
   m_snapshot_ = std::make_unique<snapshot_ctx>();
 
   if (g_config.CraneEmbeddedDbBackend == "Unqlite") {
 #ifdef CRANE_HAVE_UNQLITE
-    variable_db = std::make_unique<UnqliteDb>();
-    fixed_db = std::make_unique<UnqliteDb>();
+    m_variable_db_ = std::make_unique<UnqliteDb>();
+    m_fixed_db_ = std::make_unique<UnqliteDb>();
 #else
     CRANE_ERROR(
         "Select unqlite as the embedded db but it's not been compiled.");
@@ -87,8 +103,8 @@ bool CraneStateMachine::init(const std::string &db_path) {
 
   } else if (g_config.CraneEmbeddedDbBackend == "BerkeleyDB") {
 #ifdef CRANE_HAVE_BERKELEY_DB
-    variable_db = std::make_unique<BerkeleyDb>();
-    fixed_db = std::make_unique<BerkeleyDb>();
+    m_variable_db_ = std::make_unique<BerkeleyDb>();
+    m_fixed_db_ = std::make_unique<BerkeleyDb>();
 #else
     CRANE_ERROR(
         "Select Berkeley DB as the embedded db but it's not been compiled.");
@@ -101,39 +117,29 @@ bool CraneStateMachine::init(const std::string &db_path) {
     return false;
   }
 
-  auto result = variable_db->Init(db_path + "var_raft");
+  auto result = m_variable_db_->Init(db_path + "var_raft");
   if (!result) return false;
-  result = fixed_db->Init(db_path + "fix_raft");
+  result = m_fixed_db_->Init(db_path + "fix_raft");
   if (!result) return false;
+
+  RestoreFromDB();
+
+  for (const auto &l : logs) {
+    if (l->get_val_type() == nuraft::log_val_type::app_log &&
+        l->get_term() > 0) {
+      Apply_(l->get_buf());
+    }
+  }
 
   return true;
 }
 
 std::shared_ptr<buffer> CraneStateMachine::commit(const uint64_t log_idx,
                                                   buffer &data) {
-  CraneCtldOpType type;
-  std::string key;
-  std::vector<uint8_t> value;
-  dec_log(data, &type, &key, &value);
-
-  switch (type) {
-  case OP_VAR_STORE:
-    OnStore(var_value_map_, key, std::move(value));
-    break;
-  case OP_VAR_DELETE:
-    OnDelete(var_value_map_, key);
-    break;
-  case OP_FIX_STORE:
-    OnStore(fix_value_map_, key, std::move(value));
-    break;
-  case OP_FIX_DELETE:
-    OnDelete(fix_value_map_, key);
-    break;
-  default:
-    break;
-  }
+  Apply_(data);
 
   last_committed_idx_ = log_idx;
+  StoreValueToDB_(s_last_commit_idx_key_str_, last_committed_idx_);
 
   // Return Raft log number as a return result.
   std::shared_ptr<buffer> ret = buffer::alloc(sizeof(log_idx));
@@ -255,31 +261,7 @@ bool CraneStateMachine::apply_snapshot(snapshot &s) {
 
   if (!m_snapshot_ || s.get_last_log_idx() != m_snapshot_->log_index)
     return false;
-
-  std::expected<void, DbErrorCode> result;
-
-  result = variable_db->IterateAllKv(
-      [&](std::string &&key, std::vector<uint8_t> &&value) {
-        var_value_map_[key] = std::move(value);
-        return true;
-      });
-
-  if (!result) {
-    CRANE_ERROR("Failed to apply snapshots from variable data!");
-    return false;
-  }
-
-  result = fixed_db->IterateAllKv(
-      [&](std::string &&key, std::vector<uint8_t> &&value) {
-        var_value_map_[key] = std::move(value);
-        return true;
-      });
-
-  if (!result) {
-    CRANE_ERROR("Failed to apply snapshots from fixed data!");
-    return false;
-  }
-
+  // Only one snapshot store on this state machine, so no action required.
   return true;
 }
 
@@ -313,6 +295,72 @@ CraneStateMachine::ValueMapType *CraneStateMachine::GetValueMapInstance(
     return nullptr;
 }
 
+bool CraneStateMachine::RestoreFromDB() {
+  size_t size = sizeof(last_committed_idx_);
+  auto fetch_result = m_variable_db_->Fetch(0, s_last_commit_idx_key_str_,
+                                            &last_committed_idx_, &size);
+
+  if (fetch_result) {
+    CRANE_TRACE("Found last_committed_idx_ = {}", last_committed_idx_);
+  } else if (fetch_result.error() == crane::Internal::DbErrorCode::kNotFound) {
+    CRANE_TRACE(
+        "last_committed_idx_ not found in embedded db. Initialize it with "
+        "value 0");
+  } else {
+    CRANE_ERROR("Unexpected error when fetching scalar key '{}'.",
+                s_last_commit_idx_key_str_);
+  }
+
+  std::expected<void, DbErrorCode> result;
+
+  result = m_variable_db_->IterateAllKv(
+      [&](std::string &&key, std::vector<uint8_t> &&value) {
+        var_value_map_[key] = std::move(value);
+        return true;
+      });
+
+  if (!result) {
+    CRANE_ERROR("Failed to apply snapshots from variable data!");
+    return false;
+  }
+
+  result = m_fixed_db_->IterateAllKv(
+      [&](std::string &&key, std::vector<uint8_t> &&value) {
+        var_value_map_[key] = std::move(value);
+        return true;
+      });
+
+  if (!result) {
+    CRANE_ERROR("Failed to apply snapshots from fixed data!");
+    return false;
+  }
+  return true;
+}
+
+void CraneStateMachine::Apply_(buffer &data) {
+  CraneCtldOpType type;
+  std::string key;
+  std::vector<uint8_t> value;
+  dec_log(data, &type, &key, &value);
+
+  switch (type) {
+  case OP_VAR_STORE:
+    OnStore(var_value_map_, key, std::move(value));
+    break;
+  case OP_VAR_DELETE:
+    OnDelete(var_value_map_, key);
+    break;
+  case OP_FIX_STORE:
+    OnStore(fix_value_map_, key, std::move(value));
+    break;
+  case OP_FIX_DELETE:
+    OnDelete(fix_value_map_, key);
+    break;
+  default:
+    break;
+  }
+}
+
 bool CraneStateMachine::OnStore(CraneStateMachine::ValueMapType &map,
                                 const std::string &key,
                                 std::vector<uint8_t> &&data) {
@@ -340,19 +388,19 @@ void CraneStateMachine::create_snapshot_internal(std::shared_ptr<snapshot> ss) {
 
   txn_id_t var_txn_id, fix_txn_id;
 
-  g_embedded_db_client->BeginDbTransaction(variable_db.get(), &var_txn_id);
-  variable_db->Clear(var_txn_id);
+  g_embedded_db_client->BeginDbTransaction(m_variable_db_.get(), &var_txn_id);
+  m_variable_db_->Clear(var_txn_id);
   for (const auto &[k, v] : var_value_map_) {
-    variable_db->Store(var_txn_id, k, v.data(), v.size());
+    m_variable_db_->Store(var_txn_id, k, v.data(), v.size());
   }
-  g_embedded_db_client->CommitDbTransaction(variable_db.get(), var_txn_id);
+  g_embedded_db_client->CommitDbTransaction(m_variable_db_.get(), var_txn_id);
 
-  g_embedded_db_client->BeginDbTransaction(fixed_db.get(), &fix_txn_id);
-  fixed_db->Clear(fix_txn_id);
+  g_embedded_db_client->BeginDbTransaction(m_fixed_db_.get(), &fix_txn_id);
+  m_fixed_db_->Clear(fix_txn_id);
   for (const auto &[k, v] : fix_value_map_) {
-    fixed_db->Store(fix_txn_id, k, v.data(), v.size());
+    m_fixed_db_->Store(fix_txn_id, k, v.data(), v.size());
   }
-  g_embedded_db_client->CommitDbTransaction(fixed_db.get(), fix_txn_id);
+  g_embedded_db_client->CommitDbTransaction(m_fixed_db_.get(), fix_txn_id);
 }
 
 void CraneStateMachine::create_snapshot_sync(
@@ -366,9 +414,8 @@ void CraneStateMachine::create_snapshot_sync(
   bool ret = true;
   when_done(ret, except);
 
-  std::cout << "snapshot (" << ss->get_last_log_term() << ", "
-            << ss->get_last_log_idx() << ") has been created synchronously"
-            << std::endl;
+  CRANE_TRACE("snapshot ({}, {}) has been created synchronously",
+              ss->get_last_log_term(), ss->get_last_log_idx());
 }
 
 void CraneStateMachine::create_snapshot_async(
@@ -386,9 +433,8 @@ void CraneStateMachine::create_snapshot_async(
     bool ret = true;
     when_done(ret, except);
 
-    std::cout << "snapshot (" << ss->get_last_log_term() << ", "
-              << ss->get_last_log_idx() << ") has been created asynchronously"
-              << std::endl;
+    CRANE_TRACE("snapshot ({}, {}) has been created asynchronously",
+                ss->get_last_log_term(), ss->get_last_log_idx());
   });
 }
 

@@ -27,15 +27,19 @@ using namespace nuraft;
 
 class NuRaftStateManager : public state_mgr {
  public:
-  NuRaftStateManager(int srv_id, const std::string& endpoint)
-      : my_id_(srv_id),
-        my_endpoint_(endpoint),
-        cur_log_store_(std::make_shared<NuRaftLogStore>()) {
-    my_srv_config_ = std::make_shared<srv_config>(srv_id, endpoint);
+  NuRaftStateManager(int srv_id, const std::string& endpoint,
+                     raft_server* server_ptr)
+      : m_id_(srv_id),
+        m_endpoint_(endpoint),
+        m_log_store_(std::make_shared<NuRaftLogStore>(server_ptr)) {
+    m_srv_config_ = std::make_shared<srv_config>(srv_id, endpoint);
 
     // Initial cluster config: contains only one server (myself).
-    saved_config_ = std::make_shared<cluster_config>();
-    saved_config_->get_servers().push_back(my_srv_config_);
+    m_saved_config_ = std::make_shared<cluster_config>();
+    m_saved_config_->get_servers().push_back(m_srv_config_);
+
+    m_log_store_->init(g_config.CraneEmbeddedDbBackend,
+                       g_config.CraneCtldDbPath);
   }
 
   ~NuRaftStateManager() override = default;
@@ -43,46 +47,50 @@ class NuRaftStateManager : public state_mgr {
   std::shared_ptr<cluster_config> load_config() override {
     // Just return in-memory data in this example.
     // May require reading from disk here, if it has been written to disk.
-    return saved_config_;
+    return m_saved_config_;
   }
 
   void save_config(const cluster_config& config) override {
     // Just keep in memory in this example.
-    // Need to write to disk here, if want to make it durable.
+    // Need to write to disk here, if you want to make it durable.
     std::shared_ptr<buffer> buf = config.serialize();
-    saved_config_ = cluster_config::deserialize(*buf);
+    m_saved_config_ = cluster_config::deserialize(*buf);
   }
 
   void save_state(const srv_state& state) override {
     // Just keep in memory in this example.
-    // Need to write to disk here, if want to make it durable.
+    // Need to write to disk here, if you want to make it durable.
     std::shared_ptr<buffer> buf = state.serialize();
-    saved_state_ = srv_state::deserialize(*buf);
+    m_saved_state_ = srv_state::deserialize(*buf);
   }
 
   std::shared_ptr<srv_state> read_state() override {
     // Just return in-memory data in this example.
     // May require reading from disk here, if it has been written to disk.
-    return saved_state_;
+    return m_saved_state_;
   }
 
-  std::shared_ptr<log_store> load_log_store() override {
-    return cur_log_store_;
+  std::shared_ptr<log_store> load_log_store() override { return m_log_store_; }
+
+  int32 server_id() override { return m_id_; }
+
+  void system_exit(const int exit_code) override {
+    CRANE_CRITICAL("The Raft server terminated abnormally, exit code : {}",
+                   exit_code);
+    //    exit(exit_code);
   }
 
-  int32 server_id() override { return my_id_; }
+  std::shared_ptr<srv_config> get_srv_config() const { return m_srv_config_; }
 
-  void system_exit(const int exit_code) override {}
-
-  std::shared_ptr<srv_config> get_srv_config() const { return my_srv_config_; }
+  void get_all_keys() { m_log_store_->get_all_keys(); };
 
  private:
-  int my_id_;
-  std::string my_endpoint_;
-  std::shared_ptr<NuRaftLogStore> cur_log_store_;
-  std::shared_ptr<srv_config> my_srv_config_;
-  std::shared_ptr<cluster_config> saved_config_;
-  std::shared_ptr<srv_state> saved_state_;
+  int m_id_;
+  std::string m_endpoint_;
+  std::shared_ptr<NuRaftLogStore> m_log_store_;
+  std::shared_ptr<srv_config> m_srv_config_;
+  std::shared_ptr<cluster_config> m_saved_config_;
+  std::shared_ptr<srv_state> m_saved_state_;
 };
 }  // namespace Internal
 }  // namespace crane

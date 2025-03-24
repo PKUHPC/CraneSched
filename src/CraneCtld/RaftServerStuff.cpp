@@ -21,6 +21,7 @@
 namespace Ctld {
 
 RaftServerStuff::~RaftServerStuff() {
+  m_exit_ = true;
   bool res = m_launcher_.shutdown();
   if (res)
     CRANE_INFO("Raft server shutdown success!");
@@ -30,7 +31,7 @@ RaftServerStuff::~RaftServerStuff() {
 
 void RaftServerStuff::Init() {  // State manager.
   m_state_mgr_ = std::make_shared<crane::Internal::NuRaftStateManager>(
-      m_server_id_, fmt::format("{}:{}", m_ip_, m_port_));
+      m_server_id_, m_endpoint_, m_raft_instance_.get());
   // State machine.
   m_state_machine_ = std::make_shared<CraneStateMachine>(false);
 
@@ -48,9 +49,9 @@ void RaftServerStuff::Init() {  // State manager.
   params.election_timeout_upper_bound_ = 400;
 
   // Upto 50 logs will be preserved ahead the last snapshot.
-  params.reserved_log_items_ = 50;
+  params.reserved_log_items_ = 10;
   // Snapshot will be created for every 50 log appends.
-  params.snapshot_distance_ = 50;
+  params.snapshot_distance_ = 10;
   // Client timeout: 3000 ms.
   params.client_req_timeout_ = 3000;
   // According to this method, `append_log` function
@@ -60,10 +61,14 @@ void RaftServerStuff::Init() {  // State manager.
   raft_server::init_options init_options{};
   init_options.raft_callback_ = StatusChangeCallback;
 
-  // Initialize Raft server.
-  m_raft_instance_ = m_launcher_.init(m_state_machine_, m_state_mgr_, m_logger_
+  GetStateMachine()->init(
+      g_config.CraneCtldDbPath + '_' + std::to_string(m_server_id_),
+      static_cast<crane::Internal::NuRaftLogStore *>(
+          m_state_mgr_->load_log_store().get())
+          ->all_log_entries());
 
-                                      ,
+  // Initialize Raft server.
+  m_raft_instance_ = m_launcher_.init(m_state_machine_, m_state_mgr_, m_logger_,
                                       m_port_, asio_opt, params, init_options);
   if (!m_raft_instance_) {
     CRANE_CRITICAL(
@@ -77,21 +82,17 @@ void RaftServerStuff::Init() {  // State manager.
   for (size_t i = 0; i < MAX_TRY; ++i) {
     if (m_raft_instance_->is_initialized()) {
       CRANE_TRACE("Raft server init done!");
-
-      GetStateMachine()->init(g_config.CraneCtldDbPath + '_' +
-                              std::to_string(m_server_id_));
-
-      // test
-      if (m_server_id_ == 0 && m_raft_instance_->is_leader()) {
-        AddServerAsync(1, "127.0.0.1:10001");
-        std::this_thread::sleep_for(std::chrono::milliseconds(2500));
-        AddServerAsync(2, "127.0.0.1:10002");
-      }
       return;
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
   }
   CRANE_CRITICAL("FAILED");
+}
+
+bool RaftServerStuff::CheckServerNodeExist(int server_id) {
+  std::shared_ptr<srv_config> conf =
+      m_raft_instance_->get_srv_config(server_id);
+  return conf != nullptr;
 }
 
 bool RaftServerStuff::AddServerAsync(int server_id,
@@ -120,9 +121,9 @@ bool RaftServerStuff::AddServer(int server_id, const std::string &endpoint) {
   if (!res) return false;
 
   // Wait until add server done;
-  const size_t MAX_TRY = 50;
+  const size_t MAX_TRY = 40;
   for (size_t i = 0; i < MAX_TRY; ++i) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
     std::shared_ptr<srv_config> conf =
         m_raft_instance_->get_srv_config(server_id);
     if (conf) {
@@ -130,10 +131,19 @@ bool RaftServerStuff::AddServer(int server_id, const std::string &endpoint) {
       return true;
     }
   }
+
+  CRANE_ERROR("Server #{} {} joining request timeout.", server_id, endpoint);
   return false;
 }
 
-void RaftServerStuff::server_list() {
+bool RaftServerStuff::RemoveServer(int server_id) {
+  if (!CheckServerNodeExist(server_id)) return false;
+  m_raft_instance_->remove_srv(server_id);
+  return true;
+}
+
+void RaftServerStuff::server_list(
+    crane::grpc::QueryRaftServerListReply *response) {
   std::vector<std::shared_ptr<srv_config>> configs;
   m_raft_instance_->get_srv_config_all(configs);
 
@@ -141,11 +151,16 @@ void RaftServerStuff::server_list() {
 
   for (auto &entry : configs) {
     std::shared_ptr<srv_config> &srv = entry;
-    std::cout << "server id " << srv->get_id() << ": " << srv->get_endpoint();
+
+    auto server = response->add_server_list();
+
+    server->set_id(srv->get_id());
+    server->set_end_point(srv->get_endpoint());
     if (srv->get_id() == leader_id) {
-      std::cout << " (LEADER)";
+      server->set_role(crane::grpc::QueryRaftServerListReply::Leader);
+    } else {
+      server->set_role(crane::grpc::QueryRaftServerListReply::Fellow);
     }
-    std::cout << std::endl;
   }
 }
 
@@ -202,8 +217,98 @@ bool RaftServerStuff::AppendLog(std::shared_ptr<nuraft::buffer> new_log) {
   return true;
 }
 
+bool RaftServerStuff::RegisterToLeader(const std::string &leader_hostname,
+                                       const std::string &grpc_port) {
+  grpc::ChannelArguments channel_args;
+
+  if (g_config.CompressedRpc)
+    channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
+
+  std::shared_ptr<grpc::Channel> channel;
+
+  if (g_config.ListenConf.UseTls)
+    channel = CreateTcpTlsCustomChannelByHostname(
+        leader_hostname, grpc_port, g_config.ListenConf.Certs, channel_args);
+  else
+    channel = CreateTcpInsecureCustomChannel(leader_hostname, grpc_port,
+                                             channel_args);
+
+  std::unique_ptr<crane::grpc::CraneCtld::Stub> stub =
+      crane::grpc::CraneCtld::NewStub(channel);
+
+  static bool prev_conn_state(false);
+
+  while (true) {
+    if (m_exit_) break;
+
+    bool connected = channel->WaitForConnected(
+        std::chrono::system_clock::now() + std::chrono::seconds(3));
+
+    if (connected && !prev_conn_state) {
+      grpc::ClientContext context;
+      crane::grpc::CraneCtldRegisterRequest request;
+      crane::grpc::CraneCtldRegisterReply reply;
+      grpc::Status status;
+
+      CRANE_TRACE("Register this node to the leader node: ip={}, port={}",
+                  leader_hostname, grpc_port);
+
+      request.set_server_id(m_server_id_);
+      request.set_end_point(m_endpoint_);
+
+      while (true) {
+        status = stub->CraneCtldRegister(&context, request, &reply);
+
+        if (!status.ok()) {
+          CRANE_ERROR(
+              "Failed to send CraneCtldRegister: reason: {} | {}, code: {}",
+              status.error_message(), context.debug_error_string(),
+              int(status.error_code()));
+
+        } else {
+          if (reply.ok()) {
+            CRANE_TRACE("CraneCtldRegister success!");
+            return true;
+          } else if (reply.already_registered()) {
+            CRANE_TRACE(
+                "CraneCtldRegister failed, this node is already registered!");
+            return false;
+          } else {
+            CRANE_ERROR("CraneCtldRegister failed, unknown reason.");
+            return false;
+          }
+        }
+      }
+    }
+
+    prev_conn_state = connected;
+  }
+
+  return true;
+}
+
 CraneStateMachine *RaftServerStuff::GetStateMachine() {
   return static_cast<CraneStateMachine *>(m_state_machine_.get());
+}
+
+void RaftServerStuff::GetNodeStatus(
+    crane::grpc::QueryRaftNodeInfoReply *response) {
+  std::shared_ptr<nuraft::log_store> ls = m_state_mgr_->load_log_store();
+
+  response->set_server_id(m_server_id_);
+  response->set_leader_id(m_raft_instance_->get_leader());
+  response->set_start_index(ls->start_index());
+  response->set_next_slot(ls->next_slot());
+  response->set_committed_log_idx(m_raft_instance_->get_committed_log_idx());
+  response->set_cur_term(m_raft_instance_->get_term());
+  response->set_last_snapshot_log_idx(
+      m_state_machine_->last_snapshot()
+          ? m_state_machine_->last_snapshot()->get_last_log_idx()
+          : 0);
+  response->set_last_snapshot_log_term(
+      m_state_machine_->last_snapshot()
+          ? m_state_machine_->last_snapshot()->get_last_log_term()
+          : 0);
 }
 
 cb_func::ReturnCode RaftServerStuff::StatusChangeCallback(cb_func::Type type,
