@@ -300,8 +300,8 @@ bool MongodbClient::FetchJobRecords(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type          extra_attr     reservation   exclusive     cpus_alloc
-  // 35 mem_alloc
+  // 30 type          extra_attr     reservation   exclusive   cpus_alloc_total
+  // 35 mem_alloc_total device_map
 
   try {
     for (auto view : cursor) {
@@ -323,14 +323,9 @@ bool MongodbClient::FetchJobRecords(
           mutable_req_alloc_res->set_memory_sw_limit_bytes(
           view["mem_req"].get_int64().value);
   
-      auto* mutable_res_view = task->mutable_res_view();
-      auto* mutable_alloc_res = mutable_res_view->mutable_allocatable_res();
-      mutable_alloc_res->set_cpu_core_limit(
-          view["cpus_alloc"].get_double().value);
-          mutable_alloc_res->set_memory_limit_bytes(
-          view["mem_alloc"].get_int64().value);
-          mutable_alloc_res->set_memory_sw_limit_bytes(
-          view["mem_alloc"].get_int64().value);
+      task->set_alloc_cpus_total(view["alloc_cpus_total"].get_double().value);
+      task->set_alloc_mem_total(view["alloc_mem_total"].get_int64().value);
+      task->set_alloc_device_total(view["alloc_device_total"].get_string().value);
 
       task->set_name(std::string(view["task_name"].get_string().value));
       task->set_qos(std::string(view["qos"].get_string().value));
@@ -840,11 +835,11 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type          extra_attr     reservation   exclusive     cpus_alloc
-  // 35 mem_alloc
+  // 30 type          extra_attr     reservation   exclusive   cpus_alloc_total
+  // 35 mem_alloc_total device_map
 
   // clang-format off
-  std::array<std::string, 33> fields{
+  std::array<std::string, 37> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -858,9 +853,9 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 25 - 29
     "submit_line", "exit_code",  "username", "qos", "get_user_env",
     // 30 - 34
-    "type", "extra_attr", "reservation" "exclusive", "cpus_alloc"
+    "type", "extra_attr", "reservation" "exclusive", "cpus_alloc_total"
     // 35 - 39
-    "mem_alloc"
+    "mem_alloc_total", "device_map"
   };
   // clang-format on
 
@@ -871,7 +866,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t>                                              /*35-39*/
+             int64_t,  std::string>                                /*35-39*/
       values{
           // 0-4
           static_cast<int32_t>(runtime_attr.task_id()),
@@ -902,10 +897,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
           // 30-34
           task_to_ctld.type(), task_to_ctld.extra_attr(),
           task_to_ctld.reservation(), task_to_ctld.exclusive(),
-          task_to_ctld.resources().allocatable_res().cpu_core_limit(),
+          allocated_res_view.CpuCount(),
           // 35-39
-          static_cast<int64_t>(task_to_ctld.resources().allocatable_res().memory_limit_bytes())};
-        };
+          static_cast<int64_t>(allocated_res_view.MemoryBytes()),
+          device_map_str};
 
   return DocumentConstructor_(fields, values);
 }
@@ -928,11 +923,11 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type          extra_attr     reservation   exclusive    cpus_alloc 
-  // 35 mem_alloc
+  // 30 type          extra_attr     reservation   exclusive    cpus_alloc_total 
+  // 35 mem_alloc_total device_map
 
   // clang-format off
-  std::array<std::string, 33> fields{
+  std::array<std::string, 37> fields{
       // 0 - 4
       "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
       // 5 - 9
@@ -946,9 +941,9 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 25 - 29
       "submit_line", "exit_code",  "username", "qos", "get_user_env",
       // 30 - 34
-      "type", "extra_attr", "reservation" "exclusive", "cpus_alloc",
+      "type", "extra_attr", "reservation" "exclusive", "cpus_alloc_total",
       // 35 - 39
-      "mem_alloc"
+      "mem_alloc_total", "device_map"
   };
   // clang-format on
 
@@ -959,7 +954,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, std::string, bool, double,      /*30-34*/
-             int64_t>                                              /*35-39*/
+             int64_t, std::string>                                 /*35-39*/
       values{                                                      // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
@@ -981,9 +976,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->get_user_env,
              // 30-34
              task->type, task->extra_attr, task->reservation,task->TaskToCtld().exclusive(),
-             static_cast<double>(task->allocated_node_res_view.CpuCount()),
+             task->allocated_res_view.CpuCount(),
              // 35-39
-             static_cast<int64_t>(task->allocated_node_res_view.MemoryBytes())
+             static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
+             device_map_str
             };
   return DocumentConstructor_(fields, values);
 }

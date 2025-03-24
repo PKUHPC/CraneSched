@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <cstdint>
+#include <unordered_map>
 #include "CtldPreCompiledHeader.h"
 // Precompiled header come first!
 
@@ -356,7 +358,7 @@ struct TaskInCtld {
 
   // Set by user request and probably include untyped devices.
   ResourceView requested_node_res_view;
-  ResourceView allocated_node_res_view;
+  std::unordered_map<std::string, ResourceView> allocated_node_res_view_map;
 
   crane::grpc::TaskType type;
 
@@ -460,9 +462,36 @@ struct TaskInCtld {
 
   crane::grpc::RuntimeAttrOfTask const& RuntimeAttr() { return runtime_attr; }
 
-  void SetAllocatedResources(ResourceView& requested_node_res) {
-    allocated_node_res_view = requested_node_res;
+  void CalAllocatedResources() {
+    auto device_map_to_string = [](const DeviceMap& device_map) -> std::string {
+      std::ostringstream oss;
+      for (const auto& [device_name, entry] : device_map) {
+        const auto& [untyped_req_count, typed_cnt_map] = entry;
+          oss << device_name << ": untyped: " << untyped_req_count;
+          for (const auto& [type, count] : typed_cnt_map) {
+            oss << ", " << type << ": " << count;
+          }
+          oss << "\n";
+        }
+        return oss.str();
+      };
+    double alloc_cpus_total = 0;
+    uint64_t alloc_mem_total = 0;
+    std::string alloc_device_total_str = "";
+    DeviceMap alloc_device_total{};
+    for (auto& [craned_id, allocated_node_res_view] : allocated_node_res_view_map) {
+      alloc_cpus_total += allocated_node_res_view.CpuCount();
+      alloc_mem_total += allocated_node_res_view.MemoryBytes();
+      alloc_device_total += allocated_node_res_view.GetDeviceMap();
+    }
+    if (!alloc_device_total.empty()) {
+      alloc_device_total_str = device_map_to_string(alloc_device_total);
+    }
+    runtime_attr.set_alloc_cpus_total(alloc_cpus_total);
+    runtime_attr.set_alloc_mem_total(alloc_mem_total);
+    runtime_attr.set_alloc_device_total(alloc_device_total_str);
   }
+
   void SetTaskId(task_id_t id) {
     task_id = id;
     runtime_attr.set_task_id(id);
@@ -566,8 +595,6 @@ struct TaskInCtld {
     partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                   : val.partition_name();
     requested_node_res_view = static_cast<ResourceView>(val.req_resources());
-    allocated_node_res_view = static_cast<ResourceView>(val.resources());
-
     time_limit = absl::Seconds(val.time_limit().seconds());
 
     type = val.type();
@@ -686,9 +713,6 @@ struct TaskInCtld {
 
     *task_info->mutable_req_res_view() =
         static_cast<crane::grpc::ResourceView>(requested_node_res_view);
-    *task_info->mutable_res_view() =
-    static_cast<crane::grpc::ResourceView>(allocated_node_res_view);
-
     task_info->set_exit_code(runtime_attr.exit_code());
     task_info->set_priority(cached_priority);
 
@@ -699,6 +723,9 @@ struct TaskInCtld {
       task_info->set_craned_list(allocated_craneds_regex);
     }
     task_info->set_exclusive(TaskToCtld().exclusive());
+    task_info->set_alloc_cpus_total(RuntimeAttr().alloc_cpus_total());
+    task_info->set_alloc_mem_total(RuntimeAttr().alloc_mem_total());
+    task_info->set_alloc_device_total(RuntimeAttr().alloc_device_total());
   }
 
   crane::grpc::TaskToD GetTaskToD(const CranedId& craned_id) const {
