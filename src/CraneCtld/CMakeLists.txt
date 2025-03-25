@@ -1,5 +1,3 @@
-add_subdirectory(Tls)
-
 add_executable(cranectld
         CtldPublicDefs.h
         CtldGrpcServer.h
@@ -18,11 +16,15 @@ add_executable(cranectld
         AccountMetaContainer.cpp
         EmbeddedDbClient.cpp
         EmbeddedDbClient.h
+        Tls/VaultClientWrapper.cpp
+        Tls/VaultClientWrapper.h
         CraneCtld.cpp
 
         CtldPreCompiledHeader.h)
 
 target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
+
+target_include_directories(cranectld PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_link_libraries(cranectld PRIVATE
         $<$<BOOL:${CRANE_USE_MIMALLOC}>:dev_mimalloc>
@@ -32,7 +34,6 @@ target_link_libraries(cranectld PRIVATE
 
         Utility_PublicHeader
         Utility_PluginClient
-        VaultClientWrapper
 
         uvw
 
@@ -44,6 +45,9 @@ target_link_libraries(cranectld PRIVATE
         absl::flat_hash_map
 
         phmap
+        curl
+        vault
+        nlohmann_json
 
         crane_proto_lib
 

@@ -35,7 +35,7 @@
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
 #include "TaskScheduler.h"
-#include "VaultClientWrapper.h"
+#include "Tls/VaultClientWrapper.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
 
@@ -633,6 +633,8 @@ void ParseConfig(int argc, char** argv) {
       if (config["Vault"]) {
         const auto& vault_config = config["Vault"];
 
+        g_config.VaultConf.Enabled = true;
+
         if (vault_config["Addr"])
           g_config.VaultConf.Addr = vault_config["Addr"].as<std::string>();
         else
@@ -747,12 +749,9 @@ void InitializeCtldGlobalVariables() {
 
   // Compatibility testing CICD, Remove this "if" after the test environment is
   // updated.
-  if (g_config.VaultConf.Addr != "") {
-    g_vault_client = std::make_unique<vault::VaultClientWrapper>(
-        g_config.VaultConf.Username, g_config.VaultConf.Password,
-        g_config.VaultConf.Addr, g_config.VaultConf.Port,
-        g_config.VaultConf.Tls);
-    if (!g_vault_client->InitPki()) std::exit(1);
+  if (g_config.VaultConf.Enabled) {
+    g_vault_client = std::make_unique<vault::VaultClientWrapper>();
+    if (!g_vault_client->InitFromConfig(g_config.VaultConf)) std::exit(1);
   }
 
   // Account manager must be initialized before Task Scheduler

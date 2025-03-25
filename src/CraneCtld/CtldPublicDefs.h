@@ -99,6 +99,7 @@ struct Config {
   CranedListenConf CranedListenConf;
 
   struct VaultConfig {
+    bool Enabled{false};
     std::string Addr;
     std::string Port;
     std::string Username;
