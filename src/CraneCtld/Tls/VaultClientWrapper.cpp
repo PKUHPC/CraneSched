@@ -69,7 +69,7 @@ bool VaultClientWrapper::InitFromConfig(
   return true;
 }
 
-std::expected<SignResponse, std::monostate> VaultClientWrapper::Sign(
+std::optional<SignResponse> VaultClientWrapper::Sign(
     const std::string& csr_content, const std::string& common_name,
     const std::string& alt_names) {
   Vault::Parameters parameters({{"csr", csr_content},
@@ -79,14 +79,14 @@ std::expected<SignResponse, std::monostate> VaultClientWrapper::Sign(
 
   try {
     auto response = m_pki_external_->sign(Vault::Path{"external"}, parameters);
-    if (!response) return std::unexpected(std::monostate{});
+    if (!response) return std::nullopt;
 
     auto json = nlohmann::json::parse(response.value());
     auto data = std::move(json.at("data"));
 
     if (!data.contains("serial_number") || !data.contains("certificate")) {
       CRANE_DEBUG("Missing required fields in response data");
-      return std::unexpected(std::monostate{});
+      return std::nullopt;
     }
 
     return SignResponse{std::move(data["serial_number"]),
@@ -94,7 +94,7 @@ std::expected<SignResponse, std::monostate> VaultClientWrapper::Sign(
 
   } catch (const std::exception& e) {
     CRANE_DEBUG("Failed to sign certificate: {}", e.what());
-    return std::unexpected(std::monostate{});
+    return std::nullopt;
   }
 }
 
