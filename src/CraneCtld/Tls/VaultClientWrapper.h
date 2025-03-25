@@ -35,9 +35,9 @@ class VaultClientWrapper {
 
   bool InitFromConfig(const Ctld::Config::VaultConfig& vault_config);
 
-  std::expected<SignResponse, bool> Sign(const std::string& csr_content,
-                                         const std::string& common_name,
-                                         const std::string& alt_names);
+  std::expected<SignResponse, std::monostate> Sign(
+      const std::string& csr_content, const std::string& common_name,
+      const std::string& alt_names);
 
   bool RevokeCert(const std::string& serial_number);
 
