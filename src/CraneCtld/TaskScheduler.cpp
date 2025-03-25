@@ -2467,6 +2467,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       continue;
     }
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 <<<<<<< HEAD
 =======
@@ -2484,6 +2485,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     }
 >>>>>>> fe96d8e (Add cbatch/crun/calloc add --exclusive)
 >>>>>>> 025fe0c (Solve the problem of inconsistent node resources)
+=======
+>>>>>>> c6677c0 (fix bug)
 
     if (!task->included_nodes.empty() &&
         !task->included_nodes.contains(craned_index)) {
