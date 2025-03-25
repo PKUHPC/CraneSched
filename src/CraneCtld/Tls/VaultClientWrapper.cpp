@@ -20,17 +20,19 @@
 
 namespace vault {
 
-VaultClientWrapper::VaultClientWrapper(const std::string& username,
-                                       const std::string& password,
-                                       const std::string& address,
-                                       const std::string& port, bool tls)
-    : address_(address), port_(port), tls_(tls) {
-  UserPassStrategy user_pass_strategy{username, password};
+bool VaultClientWrapper::InitFromConfig(
+    const Ctld::Config::VaultConfig& vault_config) {
+  UserPassStrategy user_pass_strategy{vault_config.Username,
+                                      vault_config.Password};
+  m_address_ = vault_config.Addr;
+  m_port_ = vault_config.Port;
+  m_tls_ = vault_config.Tls;
+
   Vault::Config config = Vault::ConfigBuilder()
                              .withDebug(false)
-                             .withTlsEnabled(tls_)
-                             .withHost(Vault::Host{address_})
-                             .withPort(Vault::Port{port_})
+                             .withTlsEnabled(vault_config.Tls)
+                             .withHost(Vault::Host{vault_config.Addr})
+                             .withPort(Vault::Port{vault_config.Port})
                              .build();
   Vault::HttpErrorCallback httpErrorCallback = [&](std::string err) {
     CRANE_ERROR(err);
@@ -38,27 +40,31 @@ VaultClientWrapper::VaultClientWrapper(const std::string& username,
   Vault::ResponseErrorCallback responseCallback = [&](Vault::HttpResponse err) {
     CRANE_ERROR("{} : {}", err.url.value(), err.body.value());
   };
-  root_client_ = std::make_unique<Vault::Client>(Vault::Client{
-      config, user_pass_strategy, httpErrorCallback, responseCallback});
-}
 
-bool VaultClientWrapper::InitPki() {
-  if (!root_client_->is_authenticated()) {
+  m_root_client_ = std::make_unique<Vault::Client>(Vault::Client{
+      config, user_pass_strategy, httpErrorCallback, responseCallback});
+
+  if (!m_root_client_->is_authenticated()) {
     CRANE_ERROR("Vault client is not authenticated");
     return false;
   }
 
-  if (!GetVaultHealth_()) {
+  if (!Vault::HttpConsumer::get(*m_root_client_,
+                                GetUrl_("/v1/sys/", Vault::Path{"health"}))) {
     CRANE_ERROR(
         "Vault client connect fail, Please check if it is started, initialized "
         "or unsealed.");
     return false;
   }
 
-  pki_root_ = std::make_unique<Vault::Pki>(
-      Vault::Pki{*root_client_, Vault::SecretMount{"pki"}});
-  pki_external_ = std::make_unique<Vault::Pki>(
-      Vault::Pki{*root_client_, Vault::SecretMount{"pki_external"}});
+  // Init Pki
+  m_pki_root_ = std::make_unique<Vault::Pki>(
+      Vault::Pki{*m_root_client_, Vault::SecretMount{"pki"}});
+  m_pki_external_ = std::make_unique<Vault::Pki>(
+      Vault::Pki{*m_root_client_, Vault::SecretMount{"pki_external"}});
+
+  CRANE_TRACE("Successfully connected to Vault, username: {}",
+              vault_config.Username);
 
   return true;
 }
@@ -73,7 +79,7 @@ std::expected<SignResponse, bool> VaultClientWrapper::Sign(
 
   nlohmann::json::value_type data;
   try {
-    auto response = pki_external_->sign(Vault::Path{"external"}, parameters);
+    auto response = m_pki_external_->sign(Vault::Path{"external"}, parameters);
     if (!response) return std::unexpected(false);
 
     data = nlohmann::json::parse(response.value())["data"];
@@ -95,13 +101,13 @@ bool VaultClientWrapper::RevokeCert(const std::string& serial_number) {
     return false;
   }
 
-  allowed_certs_.erase(serial_number);
+  m_allowed_certs_.erase(serial_number);
 
   return true;
 }
 
 bool VaultClientWrapper::IsCertAllowed(const std::string& serial_number) {
-  if (allowed_certs_.contains(serial_number)) return true;
+  if (m_allowed_certs_.contains(serial_number)) return true;
 
   try {
     auto response = ListRevokeCertificate_();
@@ -115,25 +121,20 @@ bool VaultClientWrapper::IsCertAllowed(const std::string& serial_number) {
     return false;
   }
 
-  allowed_certs_.emplace(serial_number);
+  m_allowed_certs_.emplace(serial_number);
 
   return true;
 }
 
-std::optional<std::string> VaultClientWrapper::GetVaultHealth_() {
-  return Vault::HttpConsumer::get(*root_client_,
-                                  GetUrl_("/v1/sys/", Vault::Path{"health"}));
-}
-
 std::optional<std::string> VaultClientWrapper::ListRevokeCertificate_() {
-  return list_(*root_client_, GetPkiUrl_(Vault::SecretMount{"pki_external"},
-                                         Vault::Path{"certs/revoked"}));
+  return list_(*m_root_client_, GetPkiUrl_(Vault::SecretMount{"pki_external"},
+                                           Vault::Path{"certs/revoked"}));
 }
 
 std::optional<std::string> VaultClientWrapper::RevokeCertificate_(
     const Vault::Parameters& parameters) {
   return post_(
-      *root_client_,
+      *m_root_client_,
       GetPkiUrl_(Vault::SecretMount{"pki_external"}, Vault::Path{"revoke"}),
       parameters);
 }
@@ -205,8 +206,8 @@ Vault::Url VaultClientWrapper::GetPkiUrl_(const Vault::SecretMount secret_mount,
 
 Vault::Url VaultClientWrapper::GetUrl_(const std::string& base,
                                        const Vault::Path& path) const {
-  return Vault::Url{(tls_ ? "https://" : "http://") + address_ + ":" + port_ +
-                    base + path};
+  return Vault::Url{(m_tls_ ? "https://" : "http://") + m_address_ + ":" +
+                    m_port_ + base + path};
 }
 
 nlohmann::json VaultClientWrapper::create_json(
@@ -231,23 +232,21 @@ nlohmann::json VaultClientWrapper::create_json(
   return json;
 }
 
-UserPassStrategy::UserPassStrategy(std::string username, std::string password)
-    : username_(std::move(username)), password_(std::move(password)) {}
+UserPassStrategy::UserPassStrategy(const std::string& username,
+                                   const std::string& password)
+    : m_username_(username), m_password_(password) {}
 
 std::optional<Vault::AuthenticationResponse> UserPassStrategy::authenticate(
     const Vault::Client& client) {
   return Vault::HttpConsumer::authenticate(
-      client, getUrl(client, Vault::Path{username_}), [&]() {
+      client,
+      client.getUrl("/v1/auth/userpass/login/", Vault::Path{m_username_}),
+      [&]() {
         nlohmann::json j;
         j = nlohmann::json::object();
-        j["password"] = password_;
+        j["password"] = m_password_;
         return j.dump();
       });
-}
-
-Vault::Url UserPassStrategy::getUrl(const Vault::Client& client,
-                                    const Vault::Path& username) {
-  return client.getUrl("/v1/auth/userpass/login/", username);
 }
 
 }  // namespace vault

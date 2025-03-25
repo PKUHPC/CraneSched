@@ -18,23 +18,12 @@
 
 #pragma once
 
-#include <VaultClient.h>
-#include <parallel_hashmap/phmap.h>
-#include <re2/re2.h>
+#include "CtldPublicDefs.h"
+// Precompiled header comes first!
 
-#include <expected>
-#include <memory>
-#include <nlohmann/json.hpp>
-#include <string>
-#include <unordered_set>
-
-#include "crane/GrpcHelper.h"
 #include "crane/Lock.h"
-#include "crane/Logger.h"
-#include "crane/OS.h"
 
 namespace vault {
-
 struct SignResponse {
   std::string serial_number;
   std::string certificate;
@@ -44,11 +33,9 @@ using AllowedCerts = phmap::parallel_flat_hash_set<std::string>;
 
 class VaultClientWrapper {
  public:
-  VaultClientWrapper(const std::string& username, const std::string& password,
-                     const std::string& address, const std::string& port,
-                     bool tls = false);
+  VaultClientWrapper() = default;
 
-  bool InitPki();
+  bool InitFromConfig(const Ctld::Config::VaultConfig& vault_config);
 
   std::expected<SignResponse, bool> Sign(const std::string& csr_content,
                                          const std::string& common_name,
@@ -59,8 +46,6 @@ class VaultClientWrapper {
   bool IsCertAllowed(const std::string& serial_number);
 
  private:
-  std::optional<std::string> GetVaultHealth_();
-
   std::optional<std::string> ListRevokeCertificate_();
 
   std::optional<std::string> RevokeCertificate_(
@@ -80,31 +65,31 @@ class VaultClientWrapper {
 
   nlohmann::json create_json(const Vault::Parameters& parameters);
 
-  std::unique_ptr<Vault::Client> root_client_;
-  std::unique_ptr<Vault::Pki> pki_root_;
-  std::unique_ptr<Vault::Pki> pki_external_;
+  std::unique_ptr<Vault::Client> m_root_client_;
+  std::unique_ptr<Vault::Pki> m_pki_root_;
+  std::unique_ptr<Vault::Pki> m_pki_external_;
+
+  template <typename T>
+  using AllowedCertsSet = phmap::parallel_flat_hash_set<T>;
 
   // Use parallel containers to improve performance.
-  AllowedCerts allowed_certs_;
+  AllowedCertsSet<std::string> m_allowed_certs_;
 
-  std::string address_;
-  std::string port_;
-  bool tls_;
+  std::string m_address_;
+  std::string m_port_;
+  bool m_tls_;
 };
 
 class UserPassStrategy : public Vault::AuthenticationStrategy {
  public:
-  UserPassStrategy(std::string username, std::string password);
+  UserPassStrategy(const std::string& username, const std::string& password);
 
   std::optional<Vault::AuthenticationResponse> authenticate(
       const Vault::Client& client) override;
 
  private:
-  static Vault::Url getUrl(const Vault::Client& client,
-                           const Vault::Path& username);
-
-  std::string username_;
-  std::string password_;
+  std::string m_username_;
+  std::string m_password_;
 };
 
 }  // namespace vault
