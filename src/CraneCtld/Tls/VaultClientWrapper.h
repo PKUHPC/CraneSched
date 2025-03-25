@@ -29,8 +29,6 @@ struct SignResponse {
   std::string certificate;
 };
 
-using AllowedCerts = phmap::parallel_flat_hash_set<std::string>;
-
 class VaultClientWrapper {
  public:
   VaultClientWrapper() = default;
