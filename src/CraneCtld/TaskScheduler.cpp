@@ -180,7 +180,7 @@ bool TaskScheduler::Init() {
           if (status == crane::grpc::Running) {
             // Exec node is up and the task is running.
             // Just allocate resource from allocated nodes and
-            // put it back into the running queue.            
+            // put it back into the running queue.
             PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
 
             CRANE_INFO(
@@ -2087,7 +2087,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       }
       continue;
     }
-
+  
     if (task->TaskToCtld().exclusive()) {
       ResourceView& allocated_node_res_view = task->allocated_node_res_view_map[craned_index];
       allocated_node_res_view.GetAllocatableRes().SetCpuCount(craned_meta->res_total.allocatable_res.CpuCount());
