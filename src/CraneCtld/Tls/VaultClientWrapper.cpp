@@ -77,19 +77,25 @@ std::expected<SignResponse, std::monostate> VaultClientWrapper::Sign(
                                 {"alt_names", alt_names},
                                 {"exclude_cn_from_sans", "true"}});
 
-  nlohmann::json::value_type data;
   try {
     auto response = m_pki_external_->sign(Vault::Path{"external"}, parameters);
     if (!response) return std::unexpected(std::monostate{});
 
-    data = nlohmann::json::parse(response.value())["data"];
+    auto json = nlohmann::json::parse(response.value());
+    auto data = std::move(json.at("data"));
+
+    if (!data.contains("serial_number") || !data.contains("certificate")) {
+      CRANE_DEBUG("Missing required fields in response data");
+      return std::unexpected(std::monostate{});
+    }
+
+    return SignResponse{std::move(data["serial_number"]),
+                        std::move(data["certificate"])};
 
   } catch (const std::exception& e) {
     CRANE_DEBUG("Failed to sign certificate: {}", e.what());
     return std::unexpected(std::monostate{});
   }
-
-  return SignResponse{data["serial_number"], data["certificate"]};
 }
 
 bool VaultClientWrapper::RevokeCert(const std::string& serial_number) {
@@ -112,7 +118,8 @@ bool VaultClientWrapper::IsCertAllowed(const std::string& serial_number) {
   try {
     auto response = ListRevokeCertificate_();
     if (!response) return false;
-    auto data = nlohmann::json::parse(response.value())["data"];
+    auto json = nlohmann::json::parse(response.value());
+    const auto& data = json["data"];
     for (const auto& key : data["keys"]) {
       std::string key_str = key;
       if (key_str == serial_number) return false;
@@ -183,7 +190,7 @@ std::optional<std::string> VaultClientWrapper::post_(
   // Do not return an error when revoke not found certificate.
   if (response) {
     auto jsonResponse = nlohmann::json::parse(response.value().body.value());
-    const auto res_err = jsonResponse["errors"];
+    const auto& res_err = jsonResponse["errors"];
     static const LazyRE2 pattern(
         R"(certificate with serial (\S+) not found\.)");
     if (jsonResponse.contains("errors") && res_err.is_array() &&
