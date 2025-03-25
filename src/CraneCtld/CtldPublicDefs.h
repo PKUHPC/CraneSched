@@ -465,30 +465,38 @@ struct TaskInCtld {
   void CalAllocatedResources() {
     auto device_map_to_string = [](const DeviceMap& device_map) -> std::string {
       std::ostringstream oss;
+      bool is_first_device = true;
       for (const auto& [device_name, entry] : device_map) {
         const auto& [untyped_req_count, typed_cnt_map] = entry;
-          oss << device_name << ": untyped: " << untyped_req_count;
-          for (const auto& [type, count] : typed_cnt_map) {
-            oss << ", " << type << ": " << count;
-          }
-          oss << "\n";
+        if (!is_first_device) {
+          oss << "; ";
+        } else {
+          is_first_device = false;
         }
-        return oss.str();
-      };
-    double alloc_cpus_total = 0;
-    uint64_t alloc_mem_total = 0;
+  
+        oss << device_name << ":";
+        if (untyped_req_count > 0) {
+          oss << "untyped:" << untyped_req_count;
+        }
+        bool is_first_type = (untyped_req_count == 0);
+        for (const auto& [type, count] : typed_cnt_map) {
+          if (!is_first_type) {
+            oss << ",";
+          } else {
+            is_first_type = false;
+          }
+          oss << type << ":" << count;
+        }
+      }
+      return oss.str();
+    };
+
     std::string alloc_device_total_str = "";
-    DeviceMap alloc_device_total{};
-    for (auto& [craned_id, allocated_node_res_view] : allocated_node_res_view_map) {
-      alloc_cpus_total += allocated_node_res_view.CpuCount();
-      alloc_mem_total += allocated_node_res_view.MemoryBytes();
-      alloc_device_total += allocated_node_res_view.GetDeviceMap();
+    if (!allocated_res_view.GetDeviceMap().empty()) {
+      alloc_device_total_str = device_map_to_string(allocated_res_view.GetDeviceMap());
     }
-    if (!alloc_device_total.empty()) {
-      alloc_device_total_str = device_map_to_string(alloc_device_total);
-    }
-    runtime_attr.set_alloc_cpus_total(alloc_cpus_total);
-    runtime_attr.set_alloc_mem_total(alloc_mem_total);
+    runtime_attr.set_alloc_cpus_total(allocated_res_view.CpuCount());
+    runtime_attr.set_alloc_mem_total(allocated_res_view.MemoryBytes());
     runtime_attr.set_alloc_device_total(alloc_device_total_str);
   }
 

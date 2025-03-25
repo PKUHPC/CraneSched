@@ -181,7 +181,7 @@ bool TaskScheduler::Init() {
           if (status == crane::grpc::Running) {
             // Exec node is up and the task is running.
             // Just allocate resource from allocated nodes and
-            // put it back into the running queue.            
+            // put it back into the running queue.
             PutRecoveredTaskIntoRunningQueueLock_(std::move(task));
 
             CRANE_INFO(
@@ -2586,21 +2586,6 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       }
       continue;
     }
-<<<<<<< HEAD
-=======
-    auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
-
-    // If any of the follow `if` is true, skip this node.
-    if (!(task->requested_node_res_view <= craned_meta->res_total)) {
-      if constexpr (kAlgoTraceOutput) {
-        CRANE_TRACE(
-            "Task #{} needs more resource than that of craned {}. "
-            "Skipping this craned.",
-            task->TaskId(), craned_index);
-      }
-      continue;
-    }
->>>>>>> fe96d8e (Add cbatch/crun/calloc add --exclusive)
 
     if (!task->included_nodes.empty() &&
         !task->included_nodes.contains(craned_index)) {

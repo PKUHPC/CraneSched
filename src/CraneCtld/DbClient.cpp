@@ -323,9 +323,9 @@ bool MongodbClient::FetchJobRecords(
           mutable_req_alloc_res->set_memory_sw_limit_bytes(
           view["mem_req"].get_int64().value);
   
-      task->set_alloc_cpus_total(view["alloc_cpus_total"].get_double().value);
-      task->set_alloc_mem_total(view["alloc_mem_total"].get_int64().value);
-      task->set_alloc_device_total(view["alloc_device_total"].get_string().value);
+      task->set_alloc_cpus_total(view["cpus_alloc_total"].get_double().value);
+      task->set_alloc_mem_total(view["mem_alloc_total"].get_int64().value);
+      task->set_alloc_device_total(view["device_alloc_total"].get_string().value);
 
       task->set_name(std::string(view["task_name"].get_string().value));
       task->set_qos(std::string(view["qos"].get_string().value));
