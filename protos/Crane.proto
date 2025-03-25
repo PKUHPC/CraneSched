@@ -785,17 +785,30 @@ message StreamTaskIOReply {
   }
 }
 
-// Todo: Divide service into two parts: one for Craned and one for Crun
-//  We need to distinguish the message sender
-//  and have some kind of authentication
-service CraneCtld {
-  /* RPCs called from Craned */
-  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
-  rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
+message SignUserCertificateRequest {
+  uint32 uid = 1;
+  string csr_content = 2;
+  string alt_names = 3;   // "localhost, *.domainSuffix"
+}
 
-  /* RPCs called from Cfored */
-  rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
+message SignUserCertificateResponse {
+  bool ok = 1;
+  string certificate = 2;
+  string external_certificate = 3;
+  ErrCode reason = 4;
+}
 
+message ResetUserCredentialRequest {
+  repeated string user_list = 1;
+}
+
+message ResetUserCredentialReply {
+  bool ok = 1;
+  repeated RichError rich_error_list = 2;
+}
+
+// The service interface performs encryption and authentication.
+service CraneCtldSecure {
   /* RPCs called from ccancel */
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
 
@@ -804,8 +817,6 @@ service CraneCtld {
   rpc SubmitBatchTasks(SubmitBatchTasksRequest) returns (SubmitBatchTasksReply);
 
   /* PRCs called from ccontrol */
-  rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
-  rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
   rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
@@ -826,15 +837,39 @@ service CraneCtld {
   rpc ModifyAccount(ModifyAccountRequest) returns (ModifyAccountReply);
   rpc ModifyUser(ModifyUserRequest) returns (ModifyUserReply);
   rpc ModifyQos(ModifyQosRequest) returns (ModifyQosReply);
-
+  
   rpc BlockAccountOrUser(BlockAccountOrUserRequest) returns (BlockAccountOrUserReply);
+
+  rpc ResetUserCredential(ResetUserCredentialRequest) returns (ResetUserCredentialReply);
+}
+
+// The service is completely open.
+service CraneCtldPlain {
+  /* PRCs called from ccontrol */
+  rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
+  rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
 
   /* RPCs called from cinfo */
   rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
 
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
+
+  /* RPCS called from PKI request */
+  rpc SignUserCertificate(SignUserCertificateRequest) returns (SignUserCertificateResponse);
 }
+
+service CraneCtldForCraned {
+  /* RPCs called from Craned */
+  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
+  rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
+}
+
+service CraneCtldForCfored {
+  /* RPCs called from Cfored */
+  rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
+}
+
 
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */

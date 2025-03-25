@@ -445,11 +445,15 @@ class TaskScheduler {
 
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
+  CraneExpected<std::future<task_id_t>> SubmitTaskToScheduler(
+      std::unique_ptr<TaskInCtld> task);
+
   /// \return The future is set to 0 if task submission is failed.
   /// Otherwise, it is set to newly allocated task id.
   std::future<task_id_t> SubmitTaskAsync(std::unique_ptr<TaskInCtld> task);
 
-  std::future<CraneErrCode> HoldReleaseTaskAsync(task_id_t task_id, int64_t secs);
+  std::future<CraneErrCode> HoldReleaseTaskAsync(task_id_t task_id,
+                                                 int64_t secs);
 
   CraneErrCode ChangeTaskTimeLimit(task_id_t task_id, int64_t secs);
 
@@ -513,7 +517,8 @@ class TaskScheduler {
     LockGuard running_guard(&m_running_task_map_mtx_);
 
     auto iter = m_running_task_map_.find(task_id);
-    if (iter == m_running_task_map_.end()) return CraneErrCode::ERR_NON_EXISTENT;
+    if (iter == m_running_task_map_.end())
+      return CraneErrCode::ERR_NON_EXISTENT;
 
     return TerminateRunningTaskNoLock_(iter->second.get());
   }

@@ -87,9 +87,19 @@ struct Config {
   struct CraneCtldListenConf {
     std::string CraneCtldListenAddr;
     std::string CraneCtldListenPort;
+    std::string CraneCtldForCranedListenPort;
+    std::string CraneCtldForCforedListenPort;
+    std::string CraneCtldPlainListenPort;
 
     bool UseTls{false};
-    TlsCertificates Certs;
+    struct TlsCertsConfig {
+      std::string InternalCaContent;
+      ServerCertificateConfig InternalCerts;
+      ClientCertificateConfig CranedClientCerts;
+      ClientCertificateConfig CforedClientCerts;
+    };
+
+    TlsCertsConfig TlsCerts;
   };
   CraneCtldListenConf ListenConf;
 
@@ -97,6 +107,20 @@ struct Config {
     std::string CranedListenPort;
   };
   CranedListenConf CranedListenConf;
+
+  struct VaultConfig {
+    std::string Addr;
+    std::string Port;
+    std::string Token;
+    bool Tls;
+    std::unordered_set<std::string> AllowedNodes;
+
+    ServerCertificateConfig ExternalCerts;
+    CACertificateConfig ExternalCACerts;
+  };
+
+  VaultConfig VaultConf;
+  std::string DomainSuffix;
 
   struct Priority {
     enum TypeEnum { Basic, MultiFactor };
@@ -705,6 +729,7 @@ struct User {
   uid_t uid;
   std::string name;
   std::string default_account;
+  std::string serial_number;
   AccountToAttrsMap account_to_attrs_map;
   std::list<std::string> coordinator_accounts;
   AdminLevel admin_level;
