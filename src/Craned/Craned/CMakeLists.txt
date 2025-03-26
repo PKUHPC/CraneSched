@@ -5,16 +5,17 @@ add_executable(craned
         CgroupManager.cpp
         JobManager.h
         JobManager.cpp
+        DeviceManager.cpp
+        DeviceManager.h
+        SupervisorKeeper.cpp
+        SupervisorKeeper.h
         CranedServer.h
         CranedServer.cpp
         CranedPublicDefs.h
         Craned.cpp
 
         CranedPreCompiledHeader.h
-        DeviceManager.cpp
-        DeviceManager.h
-        SupervisorKeeper.cpp
-        SupervisorKeeper.h)
+)
 
 target_precompile_headers(craned PRIVATE CranedPreCompiledHeader.h)
 add_dependencies(craned libcgroup)
@@ -22,6 +23,9 @@ target_include_directories(
         craned PRIVATE ${LIBCGROUP_PATH}/include/
 )
 
+if (CRANE_ENABLE_CGROUP_V2)
+    target_compile_definitions(craned PRIVATE -DCRANE_ENABLE_CGROUP_V2)
+endif ()
 
 if (CRANE_ENABLE_BPF)
     add_dependencies(craned crane_ebpf)
