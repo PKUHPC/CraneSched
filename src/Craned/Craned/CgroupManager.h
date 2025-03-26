@@ -478,9 +478,9 @@ class CgroupManager {
   ~CgroupManager();
 #endif
 
-  CraneErr Init();
+  CraneErrCode Init();
 
-  CraneErr Recover(const std::unordered_set<task_id_t> &running_job_ids);
+  CraneErrCode Recover(const std::unordered_set<task_id_t> &running_job_ids);
 
   bool Mounted(CgroupConstant::Controller controller) const {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
