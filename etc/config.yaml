@@ -1,6 +1,21 @@
 # Cluster settings (This must be identical across all nodes)
 # the hostname of node which is running cranectld
-ControlMachine: cn15
+ControlMachine:
+  - hostname: cn15
+    raftPort: 10009
+    listenAddr: 0.0.0.0
+    listenPort: 10011
+
+  - hostname: cn16
+    raftPort: 10009
+    listenAddr: 0.0.0.0
+    listenPort: 10011
+
+  - hostname: cn17
+    raftPort: 10009
+    listenAddr: 0.0.0.0
+    listenPort: 10011
+
 # the name of this cluster
 ClusterName: pkuhpc_test
 
@@ -18,10 +33,6 @@ CaCertFilePath: /etc/crane/ca.crt
 DomainSuffix: riley.local
 
 # Ctld settings
-# the listening address of control machine
-CraneCtldListenAddr: 0.0.0.0
-# the port of control machine to listen
-CraneCtldListenPort: 10011
 # debug level of cranectld
 CraneCtldDebugLevel: trace
 # file path of cranectld log file (relative to CraneBaseDir)
