@@ -1108,10 +1108,9 @@ CraneExpected<void> AccountManager::CheckIfUserOfAccountIsEnabled(
   return {};
 }
 
-CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
+CraneExpected<void> AccountManager::CheckQosLimitOnTask(
     const std::string& user, const std::string& account, TaskInCtld* task) {
   util::read_lock_guard user_guard(m_rw_user_mutex_);
-  util::read_lock_guard qos_guard(m_rw_qos_mutex_);
 
   const User* user_share_ptr = GetExistedUserInfoNoLock_(user);
   if (!user_share_ptr) {
@@ -1157,29 +1156,6 @@ CraneExpected<void> AccountManager::CheckAndApplyQosLimitOnTask(
       task->qos = kUnlimitedQosName;
     }
   }
-
-  const Qos* qos_share_ptr = GetExistedQosInfoNoLock_(task->qos);
-  if (!qos_share_ptr) {
-    CRANE_ERROR("Unknown QOS '{}'", task->qos);
-    return std::unexpected(CraneErrCode::ERR_INVALID_QOS);
-  }
-
-  task->qos_priority = qos_share_ptr->priority;
-
-  if (task->time_limit >= absl::Seconds(kTaskMaxTimeLimitSec)) {
-    task->time_limit = qos_share_ptr->max_time_limit_per_task;
-  } else if (task->time_limit > qos_share_ptr->max_time_limit_per_task) {
-    CRANE_WARN("time-limit beyond the user's limit");
-    return std::unexpected(CraneErrCode::ERR_TIME_TIMIT_BEYOND);
-  }
-
-  auto result = g_account_meta_container->CheckAndMallocQosResourceFromUser(
-      user_share_ptr->name, *task, *qos_share_ptr);
-  if (result != CraneErrCode::SUCCESS) {
-    CRANE_ERROR("The requested QoS resources have reached the user's limit.");
-    return std::unexpected(result);
-  }
-
   return {};
 }
 
