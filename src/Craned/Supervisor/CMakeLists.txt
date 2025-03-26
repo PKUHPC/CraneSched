@@ -34,6 +34,7 @@ target_link_libraries(csupervisor
         nlohmann_json::nlohmann_json
         
         uvw
+        subprocess
 
         Backward::Interface
 

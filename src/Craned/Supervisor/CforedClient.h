@@ -35,7 +35,8 @@ class CforedClient {
 
   void InitChannelAndStub(const std::string& cfored_name);
 
-  void SetUpTaskFwd(pid_t pid, int task_input_fd, int task_output_fd, bool pty);
+  uint16_t SetUpTaskFwd(pid_t pid, int task_input_fd, int task_output_fd,
+                        bool pty, bool x11_fwd);
 
   bool TaskOutputFinish(pid_t pid);
 
@@ -46,32 +47,48 @@ class CforedClient {
   std::string CforedName() const { return m_cfored_name_; }
 
  private:
+  uint16_t SetupX11forwarding_();
   bool TaskInputNoLock_(const std::string& msg, int fd);
 
   void AsyncSendRecvThread_();
 
   void TaskOutPutForward(const std::string& msg);
 
+  void TaskX11OutPutForward(std::unique_ptr<char[]>&& data, size_t len);
+
+  struct X11FdInfo {
+    int fd;
+    uint16_t port;
+    std::shared_ptr<uvw::tcp_handle> sock;
+    std::shared_ptr<uvw::tcp_handle> proxy_handle;
+    std::atomic<bool> sock_stopped;
+  };
 
   struct TaskFwdMeta {
     int input_fd{-1};
     int output_fd{-1};
     pid_t pid{-1};
     bool pty{false};
+    std::shared_ptr<X11FdInfo> x11_fd_info{nullptr};
+    bool x11_input_stopped{false};
     bool input_stopped{false};
     bool output_stopped{false};
     bool proc_stopped{false};
   };
 
   void CleanOutputQueueAndWriteToStreamThread_(
-      grpc::ClientAsyncReaderWriter<crane::grpc::StreamCforedTaskIORequest,
-                                    crane::grpc::StreamCforedTaskIOReply>*
-          stream,
+      grpc::ClientAsyncReaderWriter<crane::grpc::StreamTaskIORequest,
+                                    crane::grpc::StreamTaskIOReply>* stream,
       std::atomic<bool>* write_pending);
 
   std::atomic<bool> m_stopped_{false};
 
-  ConcurrentQueue<std::string /*msg*/> m_output_queue_;
+  ConcurrentQueue<std::string> m_output_queue_;
+  ConcurrentQueue<std::pair<std::unique_ptr<char[]>, size_t>>
+      m_x11_input_queue_;
+  ConcurrentQueue<std::pair<std::unique_ptr<char[]>, size_t>>
+      m_x11_output_queue_;
+
   std::thread m_fwd_thread_;
 
   std::shared_ptr<uvw::loop> m_loop_;

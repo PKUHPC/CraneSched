@@ -63,7 +63,7 @@ CgroupManager::~CgroupManager() {
 }
 #endif
 
-CraneErr CgroupManager::Init() {
+CraneErrCode CgroupManager::Init() {
   // Initialize library and data structures
   CRANE_DEBUG("Initializing cgroup library.");
   cgroup_init();
@@ -149,7 +149,7 @@ CraneErr CgroupManager::Init() {
     if (ret != ECGEOF) {
       CRANE_WARN("Error iterating through cgroups mount information: {}\n",
                  cgroup_strerror(ret));
-      return CraneErr::kCgroupError;
+      return CraneErrCode::ERR_CGROUP;
     }
   }
   // cgroup don't use /proc/cgroups to manage controller
@@ -157,13 +157,13 @@ CraneErr CgroupManager::Init() {
     cgroup *root = cgroup_new_cgroup("/");
     if (root == nullptr) {
       CRANE_WARN("Unable to construct new root cgroup object.");
-      return CraneErr::kCgroupError;
+      return CraneErrCode::ERR_CGROUP;
     }
 
     int ret = cgroup_get_cgroup(root);
     if (ret != 0) {
       CRANE_WARN("Error : root cgroup not exist.");
-      return CraneErr::kCgroupError;
+      return CraneErrCode::ERR_CGROUP;
     }
 
     if ((cgroup_get_controller(
@@ -202,12 +202,12 @@ CraneErr CgroupManager::Init() {
 
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
-    return CraneErr::kCgroupError;
+    return CraneErrCode::ERR_CGROUP;
   }
-  return CraneErr::kOk;
+  return CraneErrCode::SUCCESS;
 }
 
-CraneErr CgroupManager::Recover(
+CraneErrCode CgroupManager::Recover(
     const std::unordered_set<task_id_t> &running_job_ids) {
   // TODO: Remove these after csupervisor is stable
   std::set<task_id_t> cg_running_job_ids{};
@@ -226,7 +226,7 @@ CraneErr CgroupManager::Recover(
         GetJobBpfMapCgroupsV2(CgroupConstant::RootCgroupFullPath);
     if (!job_id_bpf_key_vec_map) {
       CRANE_ERROR("Failed to read job ebpf info, skip recovery.");
-      return CraneErr::kEbpfError;
+      return CraneErrCode::ERR;
     }
 
     for (const auto &[job_id, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
@@ -244,7 +244,7 @@ CraneErr CgroupManager::Recover(
 #endif
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
-    return CraneErr::kCgroupError;
+    return CraneErrCode::ERR_CGROUP;
   }
   for (auto job_id : cg_running_job_ids) {
     if (!running_job_ids.contains(job_id)) {
@@ -264,7 +264,7 @@ CraneErr CgroupManager::Recover(
       // cg_unique_ptr.reset();
     }
   }
-  return CraneErr::kOk;
+  return CraneErrCode::SUCCESS;
 }
 
 void CgroupManager::ControllersMounted() {
@@ -715,7 +715,7 @@ CraneExpected<task_id_t> CgroupManager::GetTaskIdFromPid(pid_t pid) {
   std::ifstream infile(cgroup_file);
   if (!infile.is_open()) {
     CRANE_ERROR("Failed to open cgroup file for pid", pid);
-    return std::unexpected(CraneErr::kCgroupError);
+    return std::unexpected(CraneErrCode::ERR_CGROUP);
   }
   if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
     std::string line;

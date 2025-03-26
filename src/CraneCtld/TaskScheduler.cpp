@@ -741,7 +741,8 @@ void TaskScheduler::ScheduleThread_() {
 
       // TODO: Refactor here! Add filter chain for post-scheduling stage.
       absl::Time post_sched_time_point = absl::Now();
-      for (auto const& [craned_id, _] : craned_exec_requests_map) {
+      for (auto const& craned_id :
+           craned_exec_requests_map | std::ranges::views::keys) {
         g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
             post_sched_time_point;
       }
@@ -819,8 +820,8 @@ void TaskScheduler::ScheduleThread_() {
           CranedId const& craned_id = iter.first;
           auto& task_uid_pairs = iter.second;
 
-          g_thread_pool->detach_task(
-      [=, cgroups_to_release = std::move(task_uid_pairs)]() {
+          g_thread_pool->detach_task([=, cgroups_to_release =
+                                             std::move(task_uid_pairs)]() {
             auto stub = g_craned_keeper->GetCranedStub(craned_id);
 
             // If the craned is down, just ignore it.

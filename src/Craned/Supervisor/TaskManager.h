@@ -44,7 +44,12 @@ struct BatchMetaInExecution : MetaInExecution {
 };
 
 struct CrunMetaInExecution : MetaInExecution {
-  int msg_fd;
+  int task_input_fd;
+  int task_output_fd;
+
+  std::string x11_target;
+  uint16_t x11_port;
+  std::string x11_auth_path;
   ~CrunMetaInExecution() override = default;
 };
 
@@ -58,16 +63,16 @@ class ExecutionInterface {
  public:
   explicit ExecutionInterface(const StepSpec* step_spec)
       : step_spec(step_spec) {}
-  virtual ~ExecutionInterface() = default;
+  virtual ~ExecutionInterface();
 
   void TaskProcStopped();  // TODO: Refactor this into SigChldHandler
   [[nodiscard]] pid_t GetPid() const { return m_pid_; }
 
   // Interfaces must be implemented.
-  virtual CraneErr Prepare() = 0;
-  virtual CraneErr Spawn() = 0;
-  virtual CraneErr Kill(int signum) = 0;
-  virtual CraneErr Cleanup() = 0;
+  virtual CraneErrCode Prepare() = 0;
+  virtual CraneErrCode Spawn() = 0;
+  virtual CraneErrCode Kill(int signum) = 0;
+  virtual CraneErrCode Cleanup() = 0;
   // TODO: SigChldHandler()
 
   // Set from TaskManager
@@ -77,24 +82,41 @@ class ExecutionInterface {
   ProcSigchldInfo sigchld_info{};
 
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
-  CraneErr err_before_exec{CraneErr::kOk};
+  CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
 
   bool orphaned{false};
   bool cancelled_by_user{false};
   bool terminated_by_timeout{false};
 
  protected:
+  CrunMetaInExecution* GetCrunMeta() const {
+    return dynamic_cast<CrunMetaInExecution*>(this->m_meta_.get());
+  };
   // FIXME: Remove this in future.
   // Before we distinguish TaskToD/SpecToSuper and JobSpec, it's hard to remove
   // this function.
   [[deprecated]] virtual EnvMap GetChildProcessEnv_() const;
 
   // Helper methods
+  CraneErrCode SetupCrunX11_();
+  // Return error before fork.
+  virtual CraneExpected<pid_t> Fork_(bool* launch_pty,
+                                     std::vector<int>* to_crun_pipe,
+                                     std::vector<int>* from_crun_pipe,
+                                     int* crun_pty_fd);
+  virtual uint16_t SetupCrunMsgFwd_(bool launch_pty,
+                                    const std::vector<int>& to_crun_pipe,
+                                    const std::vector<int>& from_crun_pipe,
+                                    int crun_pty_fd);
   virtual void SetChildProcessSignalHandler_();
-  virtual CraneErr SetChildProcessProperty_();
-  virtual CraneErr SetChildProcessBatchFd_();
-
-  virtual CraneErr SetChildProcessEnv_() const;
+  virtual CraneErrCode SetChildProcessProperty_();
+  virtual CraneErrCode SetChildProcessBatchFd_();
+  virtual void SetupChildProcessCrunFd_(bool launch_pty,
+                                        const std::vector<int>& to_crun_pipe,
+                                        const std::vector<int>& from_crun_pipe,
+                                        int crun_pty_fd);
+  virtual void SetupChildProcessCrunX11_(uint16_t port);
+  virtual CraneErrCode SetChildProcessEnv_() const;
   virtual std::vector<std::string> GetChildProcessExecArgv_() const;
 
   std::string ParseFilePathPattern_(const std::string& pattern,
@@ -118,14 +140,14 @@ class ContainerInstance : public ExecutionInterface {
       : ExecutionInterface(step_spec) {}
   ~ContainerInstance() override = default;
 
-  CraneErr Prepare() override;
-  CraneErr Spawn() override;
-  CraneErr Kill(int signum) override;
-  CraneErr Cleanup() override;
+  CraneErrCode Prepare() override;
+  CraneErrCode Spawn() override;
+  CraneErrCode Kill(int signum) override;
+  CraneErrCode Cleanup() override;
 
  private:
-  CraneErr ModifyOCIBundleConfig_(const std::string& src,
-                                  const std::string& dst) const;
+  CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
+                                      const std::string& dst) const;
   std::string ParseOCICmdPattern_(const std::string& cmd) const;
 
   std::filesystem::path m_bundle_path_;
@@ -138,10 +160,10 @@ class ProcessInstance : public ExecutionInterface {
       : ExecutionInterface(step_spec) {}
   ~ProcessInstance() override = default;
 
-  CraneErr Prepare() override;
-  CraneErr Spawn() override;
-  CraneErr Kill(int signum) override;
-  CraneErr Cleanup() override;
+  CraneErrCode Prepare() override;
+  CraneErrCode Spawn() override;
+  CraneErrCode Kill(int signum) override;
+  CraneErrCode Cleanup() override;
 };
 
 class TaskManager {
@@ -191,14 +213,11 @@ class TaskManager {
 
   std::future<CraneExpected<pid_t>> CheckTaskStatusAsync();
 
-  std::future<CraneErr> ChangeTaskTimeLimitAsync(absl::Duration time_limit);
+  std::future<CraneErrCode> ChangeTaskTimeLimitAsync(absl::Duration time_limit);
 
   void TerminateTaskAsync(bool mark_as_orphaned, bool terminated_by_user);
 
   void Shutdown() { m_supervisor_exit_ = true; }
-  void Func(this std::shared_ptr<TaskManager> self) {
-    std::cout<<self;
-  };
 
  private:
   template <class T>
@@ -219,7 +238,7 @@ class TaskManager {
 
   struct ChangeTaskTimeLimitQueueElem {
     absl::Duration time_limit;
-    std::promise<CraneErr> ok_prom;
+    std::promise<CraneErrCode> ok_prom;
   };
 
   void EvSigchldCb_();

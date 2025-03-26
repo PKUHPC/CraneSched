@@ -452,13 +452,17 @@ enum ErrCode {
   ERR_INVALID_STUB = 60;
   ERR_CGROUP = 61;
   ERR_PROTOBUF = 62;
-  ERR_LIB_EVENT = 63;
+  ERR_LIB_EVENT = 63 [deprecated = true];
   ERR_NO_AVAIL_NODE = 64;
 
   ERR_MAX_JOB_COUNT_PER_USER = 65;
   ERR_USER_NO_PRIVILEGE = 66;
   ERR_NOT_IN_ALLOWED_LIST = 67;  // The current account is not in the allowed account list for the partition.
   ERR_IN_DENIED_LIST = 68;  // The current account has been explicitly added to the deny list for the partition.
+  ERR_EBPF = 69;
+  ERR_SUPERVISOR = 70;
+
+
 }
 
 enum EntityType {
