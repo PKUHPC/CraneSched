@@ -63,7 +63,7 @@ grpc::Status Supervisor::SupervisorServiceImpl::ChangeTaskTimeLimit(
   auto ok = g_task_mgr->ChangeTaskTimeLimitAsync(
       absl::Seconds(request->time_limit_seconds()));
   ok.wait();
-  if (ok.get() != CraneErr::kOk) {
+  if (ok.get() != CraneErrCode::SUCCESS) {
     response->set_ok(false);
   } else {
     response->set_ok(true);

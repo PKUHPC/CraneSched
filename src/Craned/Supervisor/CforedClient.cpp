@@ -59,11 +59,15 @@ CforedClient::~CforedClient() {
   CRANE_TRACE("CforedClient to {} was destructed.", m_cfored_name_);
 }
 
-void CforedClient::SetUpTaskFwd(pid_t pid, int task_input_fd,
-                                int task_output_fd, bool pty) {
+uint16_t CforedClient::SetUpTaskFwd(pid_t pid, int task_input_fd,
+                                    int task_output_fd, bool pty,
+                                    bool x11_fwd) {
   CRANE_DEBUG("Setting up task fwd for pid:{} input_fd:{} output_fd:{} pty:{}",
               pid, task_input_fd, task_output_fd, pty);
-  TaskFwdMeta meta = {task_input_fd, task_output_fd, pid, pty};
+  TaskFwdMeta meta = {.input_fd = task_input_fd,
+                      .output_fd = task_output_fd,
+                      .pid = pid,
+                      .pty = pty};
 
   auto poll_handle = m_loop_->resource<uvw::poll_handle>(task_output_fd);
   poll_handle->on<uvw::poll_event>(
@@ -133,8 +137,113 @@ void CforedClient::SetUpTaskFwd(pid_t pid, int task_input_fd,
   if (ret < 0) {
     CRANE_ERROR("poll_handle->start() error: {}", uv_strerror(ret));
   }
+  uint16_t x11_port = 0;
+  if (x11_fwd) {
+    CRANE_TRACE("Registering X11 forwarding.");
+    x11_port = SetupX11forwarding_();
+  }
   absl::MutexLock lock(&m_mtx_);
-  m_fwd_meta_map[pid] = meta;
+  m_fwd_meta_map[pid] = std::move(meta);
+  return x11_port;
+}
+
+uint16_t CforedClient::SetupX11forwarding_() {
+  int ret;
+
+  auto x11_proxy_h = m_loop_->resource<uvw::tcp_handle>();
+  constexpr uint16_t x11_port_begin = 6020;
+  constexpr uint16_t x11_port_end = 6100;
+
+  auto x11_data = std::make_shared<X11FdInfo>();
+  x11_data->proxy_handle = x11_proxy_h;
+
+  x11_proxy_h->data(x11_data);
+
+  uint16_t port;
+  for (port = x11_port_begin; port < x11_port_end; ++port) {
+    ret = x11_proxy_h->bind("127.0.0.1", port);
+    if (ret == -1) {
+      CRANE_TRACE("Failed to bind x11 proxy port {} for task: {}.", port,
+                  strerror(errno));
+    } else
+      break;
+  }
+
+  if (port == x11_port_end) {
+    CRANE_ERROR("Failed to bind x11 proxy port within {}~{}!", x11_port_begin,
+                x11_port_end - 1);
+    x11_proxy_h->close();
+    return 0;
+  }
+
+  CRANE_TRACE("X11 proxy bound to port {}. Start listening.", port);
+  ret = x11_proxy_h->listen();
+  if (ret == -1) {
+    CRANE_ERROR("Failed to listening on x11 proxy port {}: {}.", port,
+                strerror(errno));
+    x11_proxy_h->close();
+    return 0;
+  }
+
+  x11_proxy_h->on<uvw::listen_event>([this](uvw::listen_event& e,
+                                            uvw::tcp_handle& h) {
+    CRANE_TRACE("Accepting connection on x11 proxy.");
+
+    auto sock = h.parent().resource<uvw::tcp_handle>();
+
+    sock->on<uvw::data_event>([this](uvw::data_event& e, uvw::tcp_handle& s) {
+      CRANE_TRACE("Read x11 output. Forwarding...");
+
+      TaskX11OutPutForward(std::move(e.data), e.length);
+    });
+    sock->on<uvw::write_event>(
+        [this](const uvw::write_event&, uvw::tcp_handle&) {
+          CRANE_TRACE("Write x11 input done.");
+        });
+
+    sock->on<uvw::end_event>([](uvw::end_event&, uvw::tcp_handle& h) {
+      // EOF
+      CRANE_TRACE("X11 proxy connection ended. Closing it.");
+      if (auto* p = h.data<X11FdInfo>().get(); p) p->sock_stopped = true;
+      h.close();
+    });
+    sock->on<uvw::error_event>([](uvw::error_event& e, uvw::tcp_handle& h) {
+      CRANE_ERROR("Error on x11 proxy of {}. Closing it.", e.what());
+      if (auto* p = h.data<X11FdInfo>().get(); p) p->sock_stopped = true;
+      h.close();
+    });
+    sock->on<uvw::close_event>([](uvw::close_event&, uvw::tcp_handle& h) {
+      CRANE_TRACE("X11 proxy connection was closed.");
+    });
+
+    h.accept(*sock);
+
+    h.data<X11FdInfo>()->fd = sock->fd();
+    h.data<X11FdInfo>()->sock = sock;
+    sock->read();
+
+    // Currently only 1 connection of x11 client will be accepted.
+    // Close it once we accept one x11 client.
+    h.close();
+  });
+
+  x11_proxy_h->on<uvw::close_event>(
+      [](const uvw::close_event&, uvw::tcp_handle&) {
+        CRANE_TRACE("X11 proxy listening port closed.");
+      });
+
+  x11_proxy_h->on<uvw::error_event>(
+      [](const uvw::error_event& e, uvw::tcp_handle& h) {
+        CRANE_ERROR("Error on x11 proxy: {}", e.what());
+        h.close();
+      });
+  x11_proxy_h->on<uvw::end_event>([](uvw::end_event&, uvw::tcp_handle& h) {
+    CRANE_TRACE("X11 proxy listening port received EOF.");
+    h.close();
+  });
+
+  x11_data->port = port;
+  return port;
 }
 
 bool CforedClient::TaskInputNoLock_(const std::string& msg, int fd) {
@@ -210,13 +319,12 @@ void CforedClient::CleanOutputQueueAndWriteToStreamThread_(
 
     if (x11_ok) {
       StreamTaskIORequest request;
-      request.set_type(StreamTaskIORequest::CRANED_TASK_X11_OUTPUT);
+      request.set_type(StreamTaskIORequest::TASK_X11_OUTPUT);
 
       auto* payload = request.mutable_payload_task_x11_output_req();
 
-      auto& [task_id, p, len] = x11_output;
+      auto& [p, len] = x11_output;
       payload->set_msg(p.get(), len);
-      payload->set_task_id(task_id);
 
       while (write_pending->load(std::memory_order::acquire))
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
@@ -376,20 +484,22 @@ void CforedClient::AsyncSendRecvThread_() {
         break;
       }
 
-      const std::string& msg = reply.payload_task_input_req().msg();
-
       m_mtx_.Lock();
 
-        if (reply.type() == StreamTaskIOReply::CRANED_TASK_X11_INPUT) {
-          if (!meta.x11_input_stopped)
-            meta.x11_input_stopped = !meta.x11_input_cb(*msg);
-        } else {
-          // CRANED_TASK_INPUT
-          for (auto& fwd_meta : m_fwd_meta_map | std::ranges::views::values) {
-            if (!fwd_meta.input_stopped)
-              fwd_meta.input_stopped = !TaskInputNoLock_(msg, fwd_meta.input_fd);
-          }
+      if (reply.type() == StreamTaskIOReply::TASK_X11_INPUT) {
+        for (auto& fwd_meta : m_fwd_meta_map | std::ranges::views::values) {
+          CRANE_ASSERT(fwd_meta.x11_fd_info);
+          if (!fwd_meta.x11_input_stopped)
+            fwd_meta.x11_input_stopped =
+                !TaskInputNoLock_(*msg, fwd_meta.x11_fd_info->fd);
         }
+      } else {
+        // CRANED_TASK_INPUT
+        for (auto& fwd_meta : m_fwd_meta_map | std::ranges::views::values) {
+          if (!fwd_meta.input_stopped)
+            fwd_meta.input_stopped = !TaskInputNoLock_(*msg, fwd_meta.input_fd);
+        }
+      }
 
       m_mtx_.Unlock();
 
@@ -405,8 +515,7 @@ void CforedClient::AsyncSendRecvThread_() {
       CRANE_ASSERT(tag == Tag::Read);
       CRANE_TRACE("UNREGISTER_REPLY msg received.");
 
-      if (reply.type() !=
-          StreamTaskIOReply::SUPERVISOR_UNREGISTER_REPLY) {
+      if (reply.type() != StreamTaskIOReply::SUPERVISOR_UNREGISTER_REPLY) {
         CRANE_TRACE("Expect UNREGISTER_REPLY, but got {}. Ignoring it.",
                     (int)reply.type());
         reply.Clear();
@@ -445,9 +554,14 @@ void CforedClient::TaskEnd(pid_t pid) {
 };
 
 void CforedClient::TaskOutPutForward(const std::string& msg) {
-  CRANE_TRACE("Receive TaskOutputForward for task #{}: {}", g_config.JobId,
-              msg);
+  CRANE_TRACE("Receive TaskOutputForward.", msg);
   m_output_queue_.enqueue(msg);
+}
+
+void CforedClient::TaskX11OutPutForward(std::unique_ptr<char[]>&& data,
+                                        size_t len) {
+  CRANE_TRACE("Receive TaskX11OutPutForward.");
+  m_x11_output_queue_.enqueue({std::move(data), len});
 }
 
 }  // namespace Supervisor

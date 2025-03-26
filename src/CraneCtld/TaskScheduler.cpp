@@ -827,7 +827,8 @@ void TaskScheduler::ScheduleThread_() {
 
       // TODO: Refactor here! Add filter chain for post-scheduling stage.
       absl::Time post_sched_time_point = absl::Now();
-      for (auto const& [craned_id, _] : craned_exec_requests_map) {
+      for (auto const& craned_id :
+           craned_exec_requests_map | std::ranges::views::keys) {
         g_meta_container->GetCranedMetaPtr(craned_id)->last_busy_time =
             post_sched_time_point;
       }
