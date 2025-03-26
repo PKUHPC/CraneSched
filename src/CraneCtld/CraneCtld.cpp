@@ -633,7 +633,8 @@ void ParseConfig(int argc, char** argv) {
       if (config["Vault"]) {
         const auto& vault_config = config["Vault"];
 
-        g_config.VaultConf.Enabled = true;
+        if (vault_config["Enabled"])
+          g_config.VaultConf.Enabled = vault_config["Enabled"].as<bool>();
 
         if (vault_config["Addr"])
           g_config.VaultConf.Addr = vault_config["Addr"].as<std::string>();
