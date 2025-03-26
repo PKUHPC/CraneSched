@@ -40,6 +40,16 @@ CraneErrCode AccountMetaContainer::CheckAndMallocQosResourceFromUser(
         auto& qos_to_resource_map = pair.second;
         auto iter = qos_to_resource_map.find(task.qos);
         if (iter == qos_to_resource_map.end()) {
+          if (static_cast<double>(task.cpus_per_task) * task.node_num >
+              qos.max_cpus_per_user) {
+            result = CraneErrCode::ERR_CPUS_PER_TASK_BEYOND;
+            return;
+          }
+          if (qos.max_jobs_per_user == 0) {
+            result = CraneErrCode::ERR_MAX_JOB_COUNT_PER_USER;
+            return;
+          }
+
           qos_to_resource_map.emplace(task.qos,
                                       QosResource{std::move(resource_view), 1});
           return;
