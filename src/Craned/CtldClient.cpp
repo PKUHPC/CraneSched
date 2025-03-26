@@ -211,10 +211,14 @@ void CtldClient::AsyncSendThread_() {
             "TaskStatusChange for task #{} sent to server #{}. reply.ok={}",
             status_change.task_id, m_cur_leader_id_, reply.ok());
         if (!reply.ok()) {
+          // try again
           if (reply.cur_leader_id() != -2) {
             m_cur_leader_id_ = reply.cur_leader_id();
-            continue;
+            CRANE_TRACE(
+                "Leader id was changed to %d, try again in a little while.",
+                reply.cur_leader_id());
           }
+          std::this_thread::sleep_for(std::chrono::milliseconds(500));
         } else {
           changes.pop_front();
         }
