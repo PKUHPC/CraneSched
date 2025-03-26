@@ -556,6 +556,12 @@ bool TaskScheduler::Init() {
 
 void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
+  CRANE_ASSERT_MSG(
+      g_account_meta_container->TryMallocQosResource(task->Username(), *task) ==
+          CraneErrCode::SUCCESS,
+      fmt::format(
+          "ApplyQosLimitOnTask failed when recovering pending task #{}.",
+          task->TaskId()));
   // The order of LockGuards matters.
   LockGuard pending_guard(&m_pending_task_map_mtx_);
   m_pending_task_map_.emplace(task->TaskId(), std::move(task));
@@ -563,6 +569,13 @@ void TaskScheduler::RequeueRecoveredTaskIntoPendingQueueLock_(
 
 void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
     std::unique_ptr<TaskInCtld> task) {
+  auto res =
+      g_account_meta_container->TryMallocQosResource(task->Username(), *task);
+  CRANE_ASSERT_MSG(
+      res == CraneErrCode::SUCCESS,
+      fmt::format(
+          "ApplyQosLimitOnTask failed when recovering running task #{}.",
+          task->TaskId()));
   for (const CranedId& craned_id : task->CranedIds())
     g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                              task->Resources());
@@ -3100,14 +3113,6 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   task->requested_node_res_view.GetAllocatableRes().memory_bytes = mem_bytes;
   task->requested_node_res_view.GetAllocatableRes().memory_sw_bytes = mem_bytes;
-
-  auto check_qos_result = g_account_manager->CheckAndApplyQosLimitOnTask(
-      task->Username(), task->account, task);
-  if (!check_qos_result) {
-    CRANE_ERROR("Failed to call CheckAndApplyQosLimitOnTask: {}",
-                CraneErrStr(check_qos_result.error()));
-    return check_qos_result;
-  }
 
   if (!task->TaskToCtld().nodelist().empty() && task->included_nodes.empty()) {
     std::list<std::string> nodes;
