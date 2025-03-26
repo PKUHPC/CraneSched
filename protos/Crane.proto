@@ -785,7 +785,8 @@ message StreamTaskIORequest {
 
   message TaskX11OutputReq {
     uint32 task_id = 1;
-    bytes msg = 2;
+    uint32 step_id = 2;
+    bytes msg = 3;
   }
 
   SupervisorRequestType type = 1;
@@ -822,7 +823,8 @@ message StreamTaskIOReply {
 
   message TaskX11InputReq {
     uint32 task_id = 1;
-    bytes msg = 2;
+    uint32 step_id = 2;
+    bytes msg = 3;
   }
 
   SupervisorReplyType type = 1;

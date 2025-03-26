@@ -755,7 +755,7 @@ struct TaskInCtld {
     task_to_d.mutable_env()->insert(this->env.begin(), this->env.end());
 
     task_to_d.set_cwd(this->cwd);
-    // task_to_d.set_container(this->container);
+    task_to_d.set_container(this->container);
     task_to_d.set_get_user_env(this->get_user_env);
 
     for (const auto& hostname : this->CranedIds())
@@ -775,6 +775,7 @@ struct TaskInCtld {
     }
     return task_to_d;
   }
+
   crane::grpc::JobToD GetJobToD(const CranedId& craned_id) const {
     crane::grpc::JobToD spec;
     spec.set_job_id(task_id);
