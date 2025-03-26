@@ -177,14 +177,11 @@ int CraneStateMachine::read_logical_snp_obj(snapshot &s, void *&user_snp_ctx,
     buffer_serializer bs(data_out);
     bs.put_u8(OP_UNKNOWN);
     is_last_obj = false;
-  } else if (obj_id == 1) {
+  } else if (obj_id % 2 == 1) {
     // Object ID = 1: start read var_value_map_
     if (*it == var_value_map_.end()) {
       *it = fix_value_map_.begin();  // switch value map
-
-      data_out = buffer::alloc(sizeof(CraneCtldOpType));
-      buffer_serializer bs(data_out);
-      bs.put_u8(OP_FIX_STORE);
+      data_out = enc_log(OP_FIX_STORE, "", nullptr, 0);
       is_last_obj = false;
       return 0;
     }
@@ -192,11 +189,11 @@ int CraneStateMachine::read_logical_snp_obj(snapshot &s, void *&user_snp_ctx,
     data_out = enc_log(OP_VAR_STORE, (*it)->first, (*it)->second.data(),
                        (*it)->second.size());
     is_last_obj = false;
-    user_snp_ctx = ++it;
-  } else if (obj_id == 2) {
+    ++(*it);
+  } else if (obj_id % 2 == 0) {
     // Object ID = 2: start read fix_value_map_
     if (*it == fix_value_map_.end()) {
-      data_out = nullptr;
+      data_out = enc_log(OP_FIX_STORE, "", nullptr, 0);
       is_last_obj = true;
       return 0;
     }
@@ -204,7 +201,7 @@ int CraneStateMachine::read_logical_snp_obj(snapshot &s, void *&user_snp_ctx,
     data_out = enc_log(OP_FIX_STORE, (*it)->first, (*it)->second.data(),
                        (*it)->second.size());
     is_last_obj = false;
-    user_snp_ctx = ++it;
+    ++(*it);
   } else {
     return -1;
   }
@@ -221,7 +218,7 @@ void CraneStateMachine::save_logical_snp_obj(snapshot &s, uint64_t &obj_id,
     auto ss_ptr = snapshot::deserialize(*snp_buf);
     m_snapshot_ = std::make_unique<snapshot_ctx>(ss_ptr, s.get_last_log_idx());
     obj_id = 1;
-  } else if (obj_id == 1) {
+  } else if (obj_id % 2 == 1) {
     // Object ID = 1: start write var_value_map_
     CraneCtldOpType type;
     std::string key;
@@ -233,7 +230,8 @@ void CraneStateMachine::save_logical_snp_obj(snapshot &s, uint64_t &obj_id,
       return;
     }
     var_value_map_[key] = std::move(value);
-  } else if (obj_id == 2) {
+    obj_id += 2;
+  } else if (obj_id % 2 == 0) {
     // Object ID = 2: start write fix_value_map_
     if (is_last_obj) {
       std::shared_ptr<buffer> snp_buf = s.serialize();
@@ -253,6 +251,7 @@ void CraneStateMachine::save_logical_snp_obj(snapshot &s, uint64_t &obj_id,
 
     dec_log(data, &type, &key, &value);
     fix_value_map_[key] = std::move(value);
+    obj_id += 2;
   }
 }
 
