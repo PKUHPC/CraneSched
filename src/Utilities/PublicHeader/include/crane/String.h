@@ -29,11 +29,18 @@
 #include <list>
 #include <ranges>
 #include <string>
-#include <vector>
 
 #include "crane/PublicHeader.h"
 
 namespace util {
+
+template <typename D = std::string, typename T1, typename T2>
+requires requires(const T1 &node) {
+  { node.template as<D>() } -> std::convertible_to<D>;
+} && std::convertible_to<T2, D>
+D value_or(const T1 &node, const T2 &default_value) {
+  return node ? node.template as<D>() : default_value;
+}
 
 std::string ReadFileIntoString(std::filesystem::path const &p);
 
