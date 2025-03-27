@@ -65,7 +65,7 @@ struct JobInstance {
 
   // Task execution results
   bool orphaned{false};
-  CraneErr err_before_exec{CraneErr::kOk};
+  CraneErrCode err_before_exec{CraneErrCode::SUCCESS};
 
   absl::flat_hash_map<step_id_t, std::unique_ptr<StepInstance>> step_map;
 };
@@ -80,7 +80,7 @@ class JobManager {
  public:
   JobManager();
 
-  CraneErr Recover(
+  CraneErrCode Recover(
       std::unordered_map<task_id_t, JobStatusSpec>&& job_status_map);
 
   ~JobManager();
@@ -89,7 +89,7 @@ class JobManager {
 
   bool FreeJobs(const std::vector<task_id_t>& job_ids);
 
-  CraneErr ExecuteTaskAsync(crane::grpc::TaskToD const& task);
+  CraneErrCode ExecuteTaskAsync(crane::grpc::TaskToD const& task);
 
   bool QueryTaskInfoOfUid(uid_t uid, TaskInfoOfUid* info);
 
@@ -131,7 +131,7 @@ class JobManager {
 
   struct EvQueueExecuteTaskElem {
     std::unique_ptr<StepInstance> execution;
-    std::promise<CraneErr> ok_prom;
+    std::promise<CraneErrCode> ok_prom;
   };
 
   struct EvQueueQueryTaskIdFromPid {
@@ -161,7 +161,7 @@ class JobManager {
 
   void LaunchStepMt_(std::unique_ptr<StepInstance> task);
 
-  CraneErr SpawnSupervisor_(JobInstance* instance, StepInstance* task);
+  CraneErrCode SpawnSupervisor_(JobInstance* instance, StepInstance* task);
 
   /**
    * Inform CraneCtld of the status change of a task.
@@ -188,7 +188,7 @@ class JobManager {
    * @return if the signal is sent successfully, kOk is returned.
    * otherwise, kGenericFailure is returned.
    */
-  static CraneErr KillPid_(pid_t pid, int signum);
+  static CraneErrCode KillPid_(pid_t pid, int signum);
 
   // Contains all the task that is running on this Craned node.
   util::AtomicHashMap<absl::flat_hash_map, task_id_t,

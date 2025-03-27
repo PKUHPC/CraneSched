@@ -36,6 +36,16 @@
 
 namespace Craned {
 
+std::optional<task_id_t> GetJobIdFromCg(const std::string &path) {
+  static constexpr LazyRE2 cg_pattern(R"(Crane_Task_(\d+))");
+  std::string job_id;
+  if (RE2::FullMatch(path, *cg_pattern, &job_id)) {
+    return std::stoul(job_id);
+  } else {
+    return std::nullopt;
+  }
+}
+
 #ifdef CRANE_ENABLE_BPF
 BpfRuntimeInfo CgroupManager::bpf_runtime_info{};
 
@@ -226,7 +236,7 @@ CraneErrCode CgroupManager::Recover(
         GetJobBpfMapCgroupsV2(CgroupConstant::RootCgroupFullPath);
     if (!job_id_bpf_key_vec_map) {
       CRANE_ERROR("Failed to read job ebpf info, skip recovery.");
-      return CraneErrCode::ERR;
+      return CraneErrCode::ERR_EBPF;
     }
 
     for (const auto &[job_id, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
@@ -364,8 +374,6 @@ std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1(
   cgroup_file_info info{};
   std::set<task_id_t> job_ids;
 
-  static constexpr LazyRE2 cg_pattern(R"(Crane_Task_(\d+))");
-
   const char *controller_str =
       CgroupConstant::GetControllerStringView(controller).data();
 
@@ -374,10 +382,9 @@ std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1(
   int ret = cgroup_walk_tree_begin(controller_str, "/", depth, &handle, &info,
                                    &base_level);
   while (ret == 0) {
-    std::string job_id;
-    if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR &&
-        RE2::FullMatch(info.path, *cg_pattern, &job_id)) {
-      job_ids.emplace(std::stoul(job_id));
+    if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR) {
+      if (auto job_id = GetJobIdFromCg(info.path); job_id.has_value())
+        job_ids.emplace(job_id.value());
     }
     ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
   }
@@ -389,14 +396,14 @@ std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1(
 std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV2(
     const std::string &root_cgroup_path) {
   std::set<task_id_t> job_ids;
-  static const LazyRE2 cg_pattern{R"(Crane_Task_(\d+))"};
   try {
     for (const auto &it :
          std::filesystem::directory_iterator(root_cgroup_path)) {
       std::string job_id_str;
-      if (it.is_directory() && RE2::FullMatch(it.path().filename().c_str(),
-                                              *cg_pattern, &job_id_str)) {
-        job_ids.emplace(std::stoul(job_id_str));
+      if (it.is_directory()) {
+        if (auto job_id = GetJobIdFromCg(it.path().filename());
+            job_id.has_value())
+          job_ids.emplace(job_id.value());
       }
     }
   } catch (const std::filesystem::filesystem_error &e) {
@@ -628,20 +635,22 @@ std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
 
 std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
     const std::string &root_cgroup_path) {
-  static const LazyRE2 cg_pattern{R"(Crane_Task_(\d+))"};
   std::unordered_map<ino_t, task_id_t> cg_job_id_map;
   try {
     for (const auto &it :
          std::filesystem::directory_iterator(root_cgroup_path)) {
       std::string job_id_str;
-      if (it.is_directory() && RE2::FullMatch(it.path().filename().c_str(),
-                                              *cg_pattern, &job_id_str)) {
-        struct stat cg_stat{};
-        if (stat(it.path().c_str(), &cg_stat)) {
-          CRANE_ERROR("Cgroup {} stat failed: {}", it.path().c_str(),
-                      std::strerror(errno));
+      if (it.is_directory()) {
+        if (auto job_id = GetJobIdFromCg(it.path().filename());
+            job_id.has_value()) {
+          struct stat cg_stat{};
+          if (stat(it.path().c_str(), &cg_stat)) {
+            CRANE_ERROR("Cgroup {} stat failed: {}", it.path().c_str(),
+                        std::strerror(errno));
+            continue;
+          }
+          cg_job_id_map.emplace(cg_stat.st_ino, job_id.value());
         }
-        cg_job_id_map.emplace(cg_stat.st_ino, std::stoul(job_id_str));
       }
     }
   } catch (const std::filesystem::filesystem_error &e) {
@@ -659,7 +668,7 @@ CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
   bool init_ebpf = !bpf_runtime_info.Valid();
   if (init_ebpf) {
     if (!bpf_runtime_info.InitializeBpfObj())
-      return std::unexpected(CraneErr::kEbpfError);
+      return std::unexpected(CraneErrCode::ERR_EBPF);
   }
 
   std::unordered_map<task_id_t, std::vector<BpfKey>> results;
@@ -717,7 +726,7 @@ CraneExpected<task_id_t> CgroupManager::GetTaskIdFromPid(pid_t pid) {
     CRANE_ERROR("Failed to open cgroup file for pid", pid);
     return std::unexpected(CraneErrCode::ERR_CGROUP);
   }
-  if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
+  if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
     std::string line;
     while (std::getline(infile, line)) {
       if (RE2::FullMatch(line, *cg_pattern, &job_id_str)) {
@@ -725,11 +734,11 @@ CraneExpected<task_id_t> CgroupManager::GetTaskIdFromPid(pid_t pid) {
         return std::stoi(job_id_str);
       }
     }
-  } else if (cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
+  } else if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
     std::string line;
     if (!std::getline(infile, line)) {
       CRANE_ERROR("Failed to read cgroup file");
-      return std::unexpected(CraneErr::kSystemErr);
+      return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
     }
     if (RE2::FullMatch(line, *cg_pattern, &job_id_str)) {
       return std::stoi(job_id_str);
@@ -737,7 +746,7 @@ CraneExpected<task_id_t> CgroupManager::GetTaskIdFromPid(pid_t pid) {
   } else {
     std::unreachable();
   }
-  return std::unexpected(CraneErr::kNonExistent);
+  return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
 }
 
 /*
