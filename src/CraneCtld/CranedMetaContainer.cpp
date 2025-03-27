@@ -19,9 +19,9 @@
 #include "CranedMetaContainer.h"
 
 #include "CranedKeeper.h"
+#include "TaskScheduler.h"
 #include "crane/PluginClient.h"
 #include "protos/PublicDefs.pb.h"
-#include "TaskScheduler.h"
 
 namespace Ctld {
 
@@ -92,13 +92,11 @@ void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
 
   if (!node_meta->alive) {
     CRANE_TRACE("Craned {} down, but it's not alive, skip clean.", craned_id);
+    return;
   }
   for (auto& partition_meta : part_meta_ptrs) {
     PartitionGlobalMeta& part_global_meta =
         partition_meta->partition_global_meta;
-    if (!node_meta->alive) {
-      continue;
-    }
     part_global_meta.alive_craned_cnt--;
   }
   node_meta->alive = false;

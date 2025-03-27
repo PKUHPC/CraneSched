@@ -285,6 +285,8 @@ constexpr ControllerFlags CgV2PreferredControllers =
     CgroupConstant::Controller::MEMORY_CONTORLLER_V2 |
     CgroupConstant::Controller::IO_CONTROLLER_V2;
 
+static std::optional<task_id_t> GetJobIdFromCg(const std::string &path);
+
 class Cgroup {
  public:
   Cgroup(const std::string &path, struct cgroup *handle, uint64_t id = 0)
