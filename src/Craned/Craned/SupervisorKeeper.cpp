@@ -33,7 +33,7 @@ CraneExpected<pid_t> SupervisorClient::ExecuteTask(
   if (ok.ok() && reply.ok()) {
     return reply.pid();
   } else {
-    return std::unexpected(CraneErr::kRpcFailure);
+    return std::unexpected(CraneErrCode::ERR_RPC_FAILURE);
   }
 }
 
@@ -46,12 +46,12 @@ CraneExpected<std::pair<task_id_t, pid_t>> SupervisorClient::CheckTaskStatus() {
     return std::pair{reply.job_id(), reply.pid()};
   } else {
     CRANE_WARN("CheckTaskStatus failed: reply {},{}", reply.ok(),ok.error_message());
-    return std::unexpected(CraneErr::kRpcFailure);
+    return std::unexpected(CraneErrCode::ERR_RPC_FAILURE);
   }
 }
 
-CraneErr SupervisorClient::TerminateTask(bool mark_as_orphaned,
-                                         bool terminated_by_user) {
+CraneErrCode SupervisorClient::TerminateTask(bool mark_as_orphaned,
+                                             bool terminated_by_user) {
   ClientContext context;
   crane::grpc::supervisor::TerminateTaskRequest request;
   crane::grpc::supervisor::TerminateTaskReply reply;
@@ -59,21 +59,21 @@ CraneErr SupervisorClient::TerminateTask(bool mark_as_orphaned,
   request.set_terminated_by_user(terminated_by_user);
   auto ok = m_stub_->TerminateTask(&context, request, &reply);
   if (ok.ok() && reply.ok()) {
-    return CraneErr::kOk;
+    return CraneErrCode::SUCCESS;
   } else
-    return CraneErr::kRpcFailure;
+    return CraneErrCode::ERR_RPC_FAILURE;
 }
 
-CraneErr SupervisorClient::ChangeTaskTimeLimit(absl::Duration time_limit) {
+CraneErrCode SupervisorClient::ChangeTaskTimeLimit(absl::Duration time_limit) {
   ClientContext context;
   crane::grpc::supervisor::ChangeTaskTimeLimitRequest request;
   crane::grpc::supervisor::ChangeTaskTimeLimitReply reply;
   request.set_time_limit_seconds(absl::ToInt64Seconds(time_limit));
   auto ok = m_stub_->ChangeTaskTimeLimit(&context, request, &reply);
   if (ok.ok() && reply.ok())
-    return CraneErr::kOk;
+    return CraneErrCode::SUCCESS;
   else
-    return CraneErr::kRpcFailure;
+    return CraneErrCode::ERR_RPC_FAILURE;
 }
 
 void SupervisorClient::InitChannelAndStub(const std::string& endpoint) {
@@ -126,7 +126,7 @@ CraneExpected<std::unordered_map<task_id_t, pid_t>> SupervisorKeeper::Init() {
     }
   } catch (const std::exception& e) {
     CRANE_ERROR("Error: {}, when recover supervisor", e.what());
-    return std::unexpected(CraneErr::kSystemErr);
+    return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
   }
 }
 
