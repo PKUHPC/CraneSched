@@ -290,7 +290,7 @@ CraneErrCode JobManager::KillPid_(pid_t pid, int signum) {
     return CraneErrCode::SUCCESS;
   else {
     CRANE_TRACE("kill failed. error: {}", strerror(errno));
-    return CraneErr::kGenericFailure;
+    return CraneErrCode::ERR_GENERIC_FAILURE;
   }
 }
 
@@ -313,12 +313,12 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
 
   if (pipe(supervisor_craned_pipe) == -1) {
     CRANE_ERROR("Pipe creation failed!");
-    return CraneErr::kSystemErr;
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   if (pipe(craned_supervisor_pipe) == -1) {
     CRANE_ERROR("Pipe creation failed!");
-    return CraneErr::kSystemErr;
+    return CraneErrCode::ERR_SYSTEM_ERR;
   }
 
   // The ResourceInNode structure should be copied here if being accessed in

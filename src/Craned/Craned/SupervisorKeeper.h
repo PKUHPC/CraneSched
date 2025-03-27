@@ -33,8 +33,8 @@ class SupervisorClient {
 
   CraneExpected<std::pair<task_id_t, pid_t>> CheckTaskStatus();
 
-  CraneErr TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
-  CraneErr ChangeTaskTimeLimit(absl::Duration time_limit);
+  CraneErrCode TerminateTask(bool mark_as_orphaned, bool terminated_by_user);
+  CraneErrCode ChangeTaskTimeLimit(absl::Duration time_limit);
 
   void InitChannelAndStub(const std::string& endpoint);
 
