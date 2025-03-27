@@ -317,6 +317,8 @@ class BpfRuntimeInfo {
 };
 #endif
 
+static std::optional<task_id_t> GetJobIdFromCg(const std::string &path);
+
 class Cgroup {
  public:
   Cgroup(const std::string &path, struct cgroup *handle, uint64_t id = 0)
