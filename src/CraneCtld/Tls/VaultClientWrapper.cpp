@@ -93,7 +93,7 @@ std::optional<SignResponse> VaultClientWrapper::Sign(
                         std::move(data["certificate"])};
 
   } catch (const std::exception& e) {
-    CRANE_DEBUG("Failed to sign certificate: {}", e.what());
+    CRANE_TRACE("Failed to sign certificate: {}", e.what());
     return std::nullopt;
   }
 }
@@ -104,6 +104,7 @@ bool VaultClientWrapper::RevokeCert(const std::string& serial_number) {
         RevokeCertificate_(Vault::Parameters{{"serial_number", serial_number}});
     if (!response) return false;
   } catch (const std::exception& e) {
+    CRANE_TRACE("Failed to revoke certificate: {}", e.what());
     return false;
   }
 
@@ -120,11 +121,13 @@ bool VaultClientWrapper::IsCertAllowed(const std::string& serial_number) {
     if (!response) return false;
     auto json = nlohmann::json::parse(response.value());
     const auto& data = json["data"];
+    // TODO: optimize
     for (const auto& key : data["keys"]) {
       std::string key_str = key;
       if (key_str == serial_number) return false;
     }
   } catch (const std::exception& e) {
+    CRANE_TRACE("Failed to list revoke certificate: {}", e.what());
     return false;
   }
 
@@ -134,30 +137,27 @@ bool VaultClientWrapper::IsCertAllowed(const std::string& serial_number) {
 }
 
 std::optional<std::string> VaultClientWrapper::ListRevokeCertificate_() {
-  return list_(*m_root_client_, GetPkiUrl_(Vault::SecretMount{"pki_external"},
+  return List_(*m_root_client_, GetPkiUrl_(Vault::SecretMount{"pki_external"},
                                            Vault::Path{"certs/revoked"}));
 }
 
 std::optional<std::string> VaultClientWrapper::RevokeCertificate_(
     const Vault::Parameters& parameters) {
-  return post_(
+  return Post_(
       *m_root_client_,
       GetPkiUrl_(Vault::SecretMount{"pki_external"}, Vault::Path{"revoke"}),
       parameters);
 }
 
-std::optional<std::string> VaultClientWrapper::list_(
+std::optional<std::string> VaultClientWrapper::List_(
     const Vault::Client& client, const Vault::Url& url) {
-  if (!client.is_authenticated()) {
-    return std::nullopt;
-  }
+  if (!client.is_authenticated()) return std::nullopt;
 
   auto response = client.getHttpClient().list(url, client.getToken(),
                                               client.getNamespace());
 
-  if (Vault::HttpClient::is_success(response)) {
+  if (Vault::HttpClient::is_success(response))
     return {response.value().body.value()};
-  }
 
   // Do not return an error when revoked is empty.
   if (response) {
@@ -172,21 +172,19 @@ std::optional<std::string> VaultClientWrapper::list_(
 }
 
 // Revoking a non-existent certificate does not throw an error.
-std::optional<std::string> VaultClientWrapper::post_(
+std::optional<std::string> VaultClientWrapper::Post_(
     const Vault::Client& client, const Vault::Url& url,
     const Vault::Parameters& parameters) {
-  if (!client.is_authenticated()) {
-    return std::nullopt;
-  }
+  if (!client.is_authenticated()) return std::nullopt;
 
-  nlohmann::json json = create_json(parameters);
+  nlohmann::json json = CreatJson_(parameters);
 
   auto response = client.getHttpClient().post(
       url, client.getToken(), client.getNamespace(), json.dump());
 
-  if (Vault::HttpClient::is_success(response)) {
+  if (Vault::HttpClient::is_success(response))
     return response.value().body.value();
-  }
+
   // Do not return an error when revoke not found certificate.
   if (response) {
     auto jsonResponse = nlohmann::json::parse(response.value().body.value());
@@ -195,7 +193,7 @@ std::optional<std::string> VaultClientWrapper::post_(
         R"(certificate with serial (\S+) not found\.)");
     if (jsonResponse.contains("errors") && res_err.is_array() &&
         res_err.size() == 1 && RE2::FullMatch(res_err[0], *pattern)) {
-      CRANE_DEBUG("{}", res_err[0]);
+      CRANE_TRACE("revoke not found certificate, {}", res_err[0]);
       return "";
     } else {
       client.getHttpClient().handleResponseError(response.value());
@@ -217,7 +215,8 @@ Vault::Url VaultClientWrapper::GetUrl_(const std::string& base,
                     m_port_ + base + path};
 }
 
-nlohmann::json VaultClientWrapper::create_json(
+// TODO:Code Simplification
+nlohmann::json VaultClientWrapper::CreatJson_(
     const Vault::Parameters& parameters) {
   nlohmann::json json = nlohmann::json::object();
   for (auto& [key, value] : parameters) {

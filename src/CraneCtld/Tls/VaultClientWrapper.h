@@ -21,6 +21,8 @@
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
 
+#include <VaultClient.h>
+
 #include "crane/Lock.h"
 
 namespace vault {
@@ -49,10 +51,10 @@ class VaultClientWrapper {
   std::optional<std::string> RevokeCertificate_(
       const Vault::Parameters& parameters);
 
-  std::optional<std::string> list_(const Vault::Client& client,
+  std::optional<std::string> List_(const Vault::Client& client,
                                    const Vault::Url& url);
 
-  std::optional<std::string> post_(const Vault::Client& client,
+  std::optional<std::string> Post_(const Vault::Client& client,
                                    const Vault::Url& url,
                                    const Vault::Parameters& parameters);
 
@@ -61,7 +63,7 @@ class VaultClientWrapper {
   Vault::Url GetPkiUrl_(const Vault::SecretMount secret_mount,
                         const Vault::Path& path) const;
 
-  nlohmann::json create_json(const Vault::Parameters& parameters);
+  nlohmann::json CreatJson_(const Vault::Parameters& parameters);
 
   std::unique_ptr<Vault::Client> m_root_client_;
   std::unique_ptr<Vault::Pki> m_pki_root_;

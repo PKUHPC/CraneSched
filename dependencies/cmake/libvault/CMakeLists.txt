@@ -15,7 +15,12 @@ add_library(libcurl INTERFACE)
 target_link_libraries(libcurl INTERFACE PkgConfig::libcurl)
 target_include_directories(libcurl INTERFACE ${libcurl_INCLUDE_DIRS})
 
-set(LIBCURL_BUILD_PRODUCTS ${libcurl_LIBRARY_DIRS}/libcurl.so CACHE STRING "Path to libcurl library" FORCE)
+if (BUILD_SHARED_LIBS)
+    set(LIBCURL_BUILD_PRODUCTS ${libcurl_LIBRARY_DIRS}/libcurl.so CACHE STRING "Path to libcurl library" FORCE)
+else ()
+    set(LIBCURL_BUILD_PRODUCTS ${libcurl_LIBRARY_DIRS}/libcurl.a CACHE STRING "Path to libcurl library" FORCE)
+endif ()
+
 message(STATUS "Using libcurl from system at ${LIBCURL_BUILD_PRODUCTS}.")
 
 FetchContent_Declare(libvault
