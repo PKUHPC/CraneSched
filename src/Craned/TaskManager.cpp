@@ -27,6 +27,7 @@
 
 #include "CforedClient.h"
 #include "CtldClient.h"
+#include "JobManager.h"
 #include "crane/String.h"
 #include "protos/CraneSubprocess.pb.h"
 #include "protos/PublicDefs.pb.h"
@@ -146,14 +147,6 @@ TaskManager::TaskManager() {
   if (m_sigterm_handle_->start(SIGTERM) != 0) {
     CRANE_ERROR("Failed to start the SIGTERM handle");
   }
-
-  // gRPC: QueryTaskIdFromPid
-  m_query_task_id_from_pid_async_handle_ =
-      m_uvw_loop_->resource<uvw::async_handle>();
-  m_query_task_id_from_pid_async_handle_->on<uvw::async_event>(
-      [this](const uvw::async_event&, uvw::async_handle&) {
-        EvCleanGrpcQueryTaskIdFromPidQueueCb_();
-      });
 
   // gRPC: QueryTaskEnvironmentVariable
   m_query_task_environment_variables_async_handle_ =
@@ -445,9 +438,8 @@ void TaskManager::EvGracefulExitCb_() {
     // SIGTERM to all tasks to kill them immediately.
 
     CRANE_INFO(
-        "Caught SIGINT or SIGTERM, graceful exit. Sending SIGTERM to all "
-        "running "
-        "tasks...");
+        "SIGINT or SIGTERM was caught, exit gracefully. "
+        "Sending SIGTERM to all running tasks...");
 
     m_is_ending_now_ = true;
 
@@ -562,8 +554,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   // If the lock is held in the parent process during fork, the forked thread
   // in the child proc will block forever. That's why we should copy it here
   // and the child proc should not hold any lock.
-  auto res_in_node = g_cg_mgr->GetTaskResourceInNode(instance->task.task_id());
-  if (!res_in_node.has_value()) {
+  auto job_expt = g_job_mgr->QueryJobSpec(instance->task.task_id());
+  if (!job_expt.has_value()) {
     CRANE_ERROR("[Task #{}] Failed to get resource info",
                 instance->task.task_id());
     return CraneErrCode::ERR_CGROUP;
@@ -1000,8 +992,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     }
 
     EnvMap task_env_map = instance->GetTaskEnvMap();
-    EnvMap res_env_map =
-        CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
+    EnvMap res_env_map = CgroupManager::GetResourceEnvMapByResInNode(
+        job_expt.value().cgroup_spec.res_in_node);
 
     // clearenv() should be called just before fork!
     if (clearenv()) fmt::print(stderr, "[Subproc] clearenv() failed.\n");
@@ -1047,11 +1039,6 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 }
 
 CraneErrCode TaskManager::ExecuteTaskAsync(crane::grpc::TaskToD const& task) {
-  if (!g_cg_mgr->CheckIfCgroupForTasksExists(task.task_id())) {
-    CRANE_DEBUG("Executing task #{} without an allocated cgroup. Ignoring it.",
-                task.task_id());
-    return CraneErrCode::ERR_CGROUP;
-  }
   CRANE_INFO("Executing task #{}", task.task_id());
 
   auto instance = std::make_unique<TaskInstance>();
@@ -1106,7 +1093,8 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   // Take care of thread safety.
   task_id_t task_id = instance->task.task_id();
 
-  if (!g_cg_mgr->CheckIfCgroupForTasksExists(task_id)) {
+  auto job_expt = g_job_mgr->QueryJobSpec(instance->task.task_id());
+  if (!job_expt.has_value()) {
     CRANE_ERROR("Failed to find created cgroup for task #{}", task_id);
     ActivateTaskStatusChangeAsync_(
         task_id, crane::grpc::TaskStatus::Failed,
@@ -1127,9 +1115,8 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     return;
   }
 
-  CgroupInterface* cg;
-  bool ok = g_cg_mgr->AllocateAndGetCgroup(task_id, &cg);
-  if (!ok) {
+  auto cg = g_cg_mgr->AllocateAndGetJobCgroup(job_expt.value().cgroup_spec);
+  if (!cg) {
     CRANE_ERROR("Failed to allocate cgroup for task #{}", task_id);
     ActivateTaskStatusChangeAsync_(
         task_id, crane::grpc::TaskStatus::Failed,
@@ -1137,8 +1124,8 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
         fmt::format("Failed to allocate cgroup for task #{}", task_id));
     return;
   }
-  instance->cgroup = cg;
-  instance->cgroup_path = cg->GetCgroupString();
+  instance->cgroup = std::move(cg);
+  instance->cgroup_path = instance->cgroup->GetCgroupString();
 
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
@@ -1334,34 +1321,6 @@ void TaskManager::EvCleanGrpcQueryTaskEnvQueueCb_() {
   }
 }
 
-CraneExpected<task_id_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
-  EvQueueQueryTaskIdFromPid elem{.pid = pid};
-  std::future<CraneExpected<task_id_t>> task_id_opt_future =
-      elem.task_id_prom.get_future();
-  m_query_task_id_from_pid_queue_.enqueue(std::move(elem));
-  m_query_task_id_from_pid_async_handle_->send();
-  return task_id_opt_future.get();
-}
-
-void TaskManager::EvCleanGrpcQueryTaskIdFromPidQueueCb_() {
-  EvQueueQueryTaskIdFromPid elem;
-  while (m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
-    m_mtx_.Lock();
-
-    auto task_iter = m_pid_task_map_.find(elem.pid);
-    if (task_iter == m_pid_task_map_.end())
-      elem.task_id_prom.set_value(
-          std::unexpected(CraneErrCode::ERR_SYSTEM_ERR));
-    else {
-      TaskInstance* instance = task_iter->second;
-      uint32_t task_id = instance->task.task_id();
-      elem.task_id_prom.set_value(task_id);
-    }
-
-    m_mtx_.Unlock();
-  }
-}
-
 void TaskManager::EvTaskTimerCb_(task_id_t task_id) {
   CRANE_TRACE("Task #{} exceeded its time limit. Terminating it...", task_id);
 
@@ -1425,7 +1384,7 @@ void TaskManager::EvCleanTerminateTaskQueueCb_() {
       // we just remove the cgroup for such task, Ctld will fail in the
       // following ExecuteTasks and the task will go to the right place as
       // well as the completed queue.
-      g_cg_mgr->ReleaseCgroupByTaskIdOnly(elem.task_id);
+      g_job_mgr->FreeJobs({elem.task_id});
       continue;
     }
 

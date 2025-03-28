@@ -99,10 +99,7 @@ message ExecuteTasksReply {
 }
 
 message CreateCgroupForTasksRequest {
-  repeated uint32 task_id_list = 1;
-  repeated uint32 uid_list = 2;
-  repeated ResourceInNode res_list = 3;
-  repeated string execution_node = 4;
+  repeated JobSpec job_spec_vec = 1;
 }
 
 message CreateCgroupForTasksReply {}

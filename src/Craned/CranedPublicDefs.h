@@ -74,11 +74,11 @@ struct Config {
   std::string CraneCtldListenPort;
   std::string CranedDebugLevel;
 
-  std::string CraneBaseDir;
-  std::string CranedLogFile;
-  std::string CranedMutexFilePath;
-  std::string CranedScriptDir;
-  std::string CranedUnixSockPath;
+  std::filesystem::path CraneBaseDir;
+  std::filesystem::path CranedLogFile;
+  std::filesystem::path CranedMutexFilePath;
+  std::filesystem::path CranedScriptDir;
+  std::filesystem::path CranedUnixSockPath;
 
   bool CranedForeground{};
 

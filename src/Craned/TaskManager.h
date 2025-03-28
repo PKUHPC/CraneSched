@@ -178,7 +178,7 @@ struct TaskInstance {
   std::unique_ptr<MetaInTaskInstance> meta;
 
   std::string cgroup_path;
-  CgroupInterface* cgroup;
+  std::unique_ptr<CgroupInterface> cgroup;
   std::shared_ptr<uvw::timer_handle> termination_timer{nullptr};
 
   // Task execution results
@@ -204,8 +204,6 @@ class TaskManager {
   ~TaskManager();
 
   CraneErrCode ExecuteTaskAsync(crane::grpc::TaskToD const& task);
-
-  CraneExpected<task_id_t> QueryTaskIdFromPidAsync(pid_t pid);
 
   CraneExpected<EnvMap> QueryTaskEnvMapAsync(task_id_t task_id);
 
@@ -236,11 +234,6 @@ class TaskManager {
   struct SavedPrivilege {
     uid_t uid;
     gid_t gid;
-  };
-
-  struct EvQueueQueryTaskIdFromPid {
-    std::promise<CraneExpected<task_id_t>> task_id_prom;
-    pid_t pid;
   };
 
   struct EvQueueQueryTaskEnvMap {
@@ -384,8 +377,6 @@ class TaskManager {
 
   void EvCleanGrpcExecuteTaskQueueCb_();
 
-  void EvCleanGrpcQueryTaskIdFromPidQueueCb_();
-
   void EvCleanGrpcQueryTaskEnvQueueCb_();
 
   void EvCleanTaskStatusChangeQueueCb_();
@@ -407,11 +398,7 @@ class TaskManager {
   // When this event is triggered, the TaskManager will not accept
   // any more new tasks and quit as soon as all existing task end.
   std::shared_ptr<uvw::signal_handle> m_sigint_handle_;
-
   std::shared_ptr<uvw::signal_handle> m_sigterm_handle_;
-
-  std::shared_ptr<uvw::async_handle> m_query_task_id_from_pid_async_handle_;
-  ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
 
   std::shared_ptr<uvw::async_handle>
       m_query_task_environment_variables_async_handle_;

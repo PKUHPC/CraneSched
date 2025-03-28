@@ -133,13 +133,13 @@ struct Config {
 
   std::string CraneClusterName;
   std::string CraneCtldDebugLevel;
-  std::string CraneCtldLogFile;
+  std::filesystem::path CraneCtldLogFile;
 
   std::string CraneEmbeddedDbBackend;
-  std::string CraneCtldDbPath;
+  std::filesystem::path CraneCtldDbPath;
 
-  std::string CraneBaseDir;
-  std::string CraneCtldMutexFilePath;
+  std::filesystem::path CraneBaseDir;
+  std::filesystem::path CraneCtldMutexFilePath;
 
   bool CraneCtldForeground{};
 
