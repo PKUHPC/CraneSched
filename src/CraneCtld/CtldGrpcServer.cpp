@@ -30,6 +30,7 @@ grpc::Status CraneCtldServiceImpl::CraneCtldRegister(
     grpc::ServerContext *context,
     const crane::grpc::CraneCtldRegisterRequest *request,
     crane::grpc::CraneCtldRegisterReply *response) {
+#ifdef CRANE_WITH_RAFT
   if (g_raft_server->CheckServerNodeExist(request->server_id())) {
     response->set_ok(false);
     response->set_already_registered(true);
@@ -41,6 +42,7 @@ grpc::Status CraneCtldServiceImpl::CraneCtldRegister(
   } else {
     response->set_ok(false);
   }
+#endif
   return grpc::Status::OK;
 }
 
@@ -101,11 +103,13 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
     grpc::ServerContext *context,
     const crane::grpc::TaskStatusChangeRequest *request,
     crane::grpc::TaskStatusChangeReply *response) {
+#ifdef CRANE_WITH_RAFT
   if (!g_raft_server->IsLeader()) {
     response->set_ok(false);
     response->set_cur_leader_id(g_raft_server->GetLeaderId());
     return grpc::Status::OK;
   }
+#endif
 
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
@@ -122,7 +126,11 @@ grpc::Status CraneCtldServiceImpl::CranedRegister(
     grpc::ServerContext *context,
     const crane::grpc::CranedRegisterRequest *request,
     crane::grpc::CranedRegisterReply *response) {
+#ifdef CRANE_WITH_RAFT
   response->set_cur_leader_id(g_raft_server->GetLeaderId());
+#else
+  response->set_cur_leader_id(0);
+#endif
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
     response->set_ok(false);
     return grpc::Status::OK;
@@ -1022,6 +1030,7 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryClusterInfoRequest *request,
     crane::grpc::QueryClusterInfoReply *response) {
+#ifdef CRANE_WITH_RAFT
   if (!g_raft_server->IsLeader()) {
     response->set_ok(false);
     response->set_cur_leader_id(g_raft_server->GetLeaderId());
@@ -1030,7 +1039,8 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
 
   *response = g_meta_container->QueryClusterInfo(*request);
 
-  g_raft_server->get_all_keys();
+  //  g_raft_server->get_all_keys();
+#endif
   return grpc::Status::OK;
 }
 
@@ -1232,7 +1242,9 @@ grpc::Status CraneCtldServiceImpl::QueryLeaderId(
     grpc::ServerContext *context,
     const crane::grpc::QueryLeaderIdRequest *request,
     crane::grpc::QueryLeaderIdReply *response) {
+#ifdef CRANE_WITH_RAFT
   response->set_leader_id(g_raft_server->GetLeaderId());
+#endif
   return grpc::Status::OK;
 }
 
@@ -1240,7 +1252,9 @@ grpc::Status CraneCtldServiceImpl::QueryRaftServerList(
     grpc::ServerContext *context,
     const crane::grpc::QueryRaftServerListRequest *request,
     crane::grpc::QueryRaftServerListReply *response) {
+#ifdef CRANE_WITH_RAFT
   g_raft_server->server_list(response);
+#endif
   return grpc::Status::OK;
 }
 
@@ -1248,7 +1262,9 @@ grpc::Status CraneCtldServiceImpl::QueryRaftNodeInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryRaftNodeInfoRequest *request,
     crane::grpc::QueryRaftNodeInfoReply *response) {
+#ifdef CRANE_WITH_RAFT
   g_raft_server->GetNodeStatus(response);
+#endif
   return grpc::Status::OK;
 }
 
@@ -1256,6 +1272,7 @@ grpc::Status CraneCtldServiceImpl::AddRaftNode(
     grpc::ServerContext *context,
     const crane::grpc::AddRaftNodeRequest *request,
     crane::grpc::AddRaftNodeReply *response) {
+#ifdef CRANE_WITH_RAFT
   bool found = false;
   int server_id = 0;
   for (const auto &server : g_config.RaftServers) {
@@ -1289,7 +1306,7 @@ grpc::Status CraneCtldServiceImpl::AddRaftNode(
     response->set_server_id(-1);
     response->set_reason("AddServer failed: internal error.");
   }
-
+#endif
   return grpc::Status::OK;
 }
 
@@ -1297,6 +1314,7 @@ grpc::Status CraneCtldServiceImpl::RemoveRaftNode(
     grpc::ServerContext *context,
     const crane::grpc::RemoveRaftNodeRequest *request,
     crane::grpc::RemoveRaftNodeReply *response) {
+#ifdef CRANE_WITH_RAFT
   bool res = g_raft_server->RemoveServer(request->server_id());
 
   if (res) {
@@ -1305,7 +1323,7 @@ grpc::Status CraneCtldServiceImpl::RemoveRaftNode(
     response->set_ok(false);
     response->set_reason("Server #{} does not exist in the Raft cluster.");
   }
-
+#endif
   return grpc::Status::OK;
 }
 
@@ -1313,6 +1331,7 @@ grpc::Status CraneCtldServiceImpl::YieldLeadership(
     grpc::ServerContext *context,
     const crane::grpc::YieldLeadershipRequest *request,
     crane::grpc::YieldLeadershipReply *response) {
+#ifdef CRANE_WITH_RAFT
   if (request->next_server_id() != -1 &&
       !g_raft_server->CheckServerNodeExist(request->next_server_id())) {
     response->set_ok(false);
@@ -1320,7 +1339,7 @@ grpc::Status CraneCtldServiceImpl::YieldLeadership(
     g_raft_server->YieldLeadership(request->next_server_id());
     response->set_ok(true);
   }
-
+#endif
   return grpc::Status::OK;
 }
 

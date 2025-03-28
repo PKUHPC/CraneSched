@@ -20,8 +20,12 @@
 
 #include "CtldPublicDefs.h"
 // Precompiled header comes first!
-#include "CraneStateMachine.h"
-#include "RaftServerStuff.h"
+
+#ifdef CRANE_WITH_RAFT
+#  include "CraneStateMachine.h"
+#  include "RaftServerStuff.h"
+#endif
+
 #include "crane/EmbeddedDb.h"
 #include "protos/Crane.pb.h"
 
@@ -83,6 +87,7 @@ class EmbeddedDbClient {
  private:
   using db_id_t = task_db_id_t;
   using TaskInEmbeddedDb = crane::grpc::TaskInEmbeddedDb;
+  using UnqliteDb = crane::Internal::UnqliteDb;
 
  public:
   struct DbSnapshot {
