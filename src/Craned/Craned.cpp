@@ -221,6 +221,7 @@ void ParseConfig(int argc, char** argv) {
       }
 
       if (config["ControlMachine"]) {
+#ifdef CRANE_WITH_RAFT
         for (auto it = config["ControlMachine"].begin();
              it != config["ControlMachine"].end(); ++it) {
           auto node = it->as<YAML::Node>();
@@ -238,6 +239,18 @@ void ParseConfig(int argc, char** argv) {
 
           g_config.ControlMachine.push_back(std::move(server_node));
         }
+#else
+        Craned::Config::ServerEndPoint server_node;
+        server_node.HostName = config["ControlMachine"].as<std::string>();
+
+        if (config["CraneCtldListenPort"])
+          server_node.ListenPort =
+              config["CraneCtldListenPort"].as<std::string>();
+        else
+          server_node.ListenPort = kCtldDefaultPort;
+
+        g_config.ControlMachine.push_back(std::move(server_node));
+#endif
       }
 
       if (config["Nodes"]) {
