@@ -121,6 +121,10 @@ ScheduledBatchSize: 100000
 # Default value is false.
 RejectJobsBeyondCapacity: false
 
+# Set the mode for opening output and error files
+# Default value is false.
+JobFileAppend: false
+
 Plugin:
   # Toggle the plugin module in CraneSched
   Enabled: false
