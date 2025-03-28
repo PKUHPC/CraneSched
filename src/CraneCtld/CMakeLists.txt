@@ -23,11 +23,16 @@ add_executable(cranectld
         CraneCtld.cpp
 
         CtldPreCompiledHeader.h
-        CraneStateMachine.cpp
-        CraneStateMachine.h
-        RaftServerStuff.cpp
-        RaftServerStuff.h
 )
+
+if (CRANE_RAFT_SERVER)
+    target_sources(cranectld
+            CraneStateMachine.cpp
+            CraneStateMachine.h
+            RaftServerStuff.cpp
+            RaftServerStuff.h
+    )
+endif ()
 
 target_precompile_headers(cranectld PRIVATE CtldPreCompiledHeader.h)
 
@@ -41,7 +46,6 @@ target_link_libraries(cranectld PRIVATE
 
         Utility_PublicHeader
         Utility_PluginClient
-        Utility_NuRaft
         Utility_EmbeddedDb
 
         uvw
@@ -72,6 +76,7 @@ target_link_libraries(cranectld PRIVATE
 
 if (CRANE_RAFT_SERVER)
     target_compile_definitions(cranectld PRIVATE CRANE_WITH_RAFT)
+    target_link_libraries(cranectld PRIVATE Utility_NuRaft)
 endif ()
 
 

@@ -147,6 +147,7 @@ void ParseConfig(int argc, char** argv) {
       g_config.Hostname.assign(hostname);
       CRANE_INFO("Hostname of CraneCtld: {}", g_config.Hostname);
 
+#ifdef CRANE_WITH_RAFT
       if (config["ControlMachine"]) {
         int id = 0;
         for (auto it = config["ControlMachine"].begin();
@@ -159,12 +160,10 @@ void ParseConfig(int argc, char** argv) {
           else
             std::exit(1);
 
-#ifdef CRANE_WITH_RAFT
           if (node["raftPort"])
             raft_node.RaftPort = node["raftPort"].as<std::string>();
           else
             std::exit(1);
-#endif
 
           if (node["listenAddr"])
             raft_node.ListenAddr = node["listenAddr"].as<std::string>();
@@ -193,6 +192,19 @@ void ParseConfig(int argc, char** argv) {
         CRANE_ERROR("Control machine info not found!");
         std::exit(1);
       }
+#else
+      if (config["CraneCtldListenAddr"])
+        g_config.ListenConf.CraneCtldListenAddr =
+            config["CraneCtldListenAddr"].as<std::string>();
+      else
+        g_config.ListenConf.CraneCtldListenAddr = "0.0.0.0";
+
+      if (config["CraneCtldListenPort"])
+        g_config.ListenConf.CraneCtldListenPort =
+            config["CraneCtldListenPort"].as<std::string>();
+      else
+        g_config.ListenConf.CraneCtldListenPort = kCtldDefaultPort;
+#endif
 
       if (config["CompressedRpc"])
         g_config.CompressedRpc = config["CompressedRpc"].as<bool>();
@@ -793,7 +805,9 @@ void DestroyCtldGlobalVariables() {
   // In case that spdlog is destructed before g_embedded_db_client->Close()
   // in which log function is called.
   g_embedded_db_client.reset();
+#ifdef CRANE_WITH_RAFT
   g_raft_server.reset();
+#endif
 
   g_thread_pool->wait();
   g_thread_pool.reset();
