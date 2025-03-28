@@ -19,8 +19,12 @@ class CraneStateMachine : public state_machine {
  public:
   using raft_result = cmd_result<ptr<buffer>>;
   using ValueMapType = std::unordered_map<std::string, std::vector<uint8_t>>;
+#ifdef CRANE_HAVE_UNQLITE
   using UnqliteDb = crane::Internal::UnqliteDb;
+#endif
+#ifdef CRANE_HAVE_BERKELEY_DB
   using BerkeleyDb = crane::Internal::BerkeleyDb;
+#endif
 
   enum CraneCtldOpType : uint8_t {
     OP_UNKNOWN = 0,
