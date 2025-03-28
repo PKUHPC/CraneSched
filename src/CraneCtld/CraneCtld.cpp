@@ -748,8 +748,6 @@ void InitializeCtldGlobalVariables() {
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
   }
 
-  // Compatibility testing CICD, Remove this "if" after the test environment is
-  // updated.
   if (g_config.VaultConf.Enabled) {
     g_vault_client = std::make_unique<vault::VaultClientWrapper>();
     if (!g_vault_client->InitFromConfig(g_config.VaultConf)) std::exit(1);

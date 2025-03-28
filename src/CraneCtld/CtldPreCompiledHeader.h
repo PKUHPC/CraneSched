@@ -70,9 +70,6 @@
 // parallel-hashmap
 #include <parallel_hashmap/phmap.h>
 
-// vault
-#include <VaultClient.h>
-
 // re2
 #include <re2/re2.h>
 
