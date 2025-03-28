@@ -214,7 +214,7 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
-  bool open_mode = 25;
+  bool open_mode_append = 25;
 }
 
 message BatchTaskAdditionalMeta {
