@@ -298,6 +298,12 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
 
     mutable_task->set_cwd(task->cwd);
     mutable_task->set_get_user_env(task->get_user_env);
+    
+    if (task->TaskToCtld().has_open_mode_append()) {
+      mutable_task->set_open_mode_append(task->TaskToCtld().open_mode_append());
+    } else {
+      mutable_task->set_open_mode_append(g_config.JobFileAppend);
+    }
 
     for (const auto &hostname : task->CranedIds())
       mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);

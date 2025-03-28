@@ -65,6 +65,7 @@ constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 constexpr bool kDefaultRejectTasksBeyondCapacity = false;
+constexpr bool kDefaultJobFileAppend = false;
 
 struct Config {
   struct Node {
@@ -162,6 +163,7 @@ struct Config {
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;
   bool RejectTasksBeyondCapacity{false};
+  bool JobFileAppend{false};
 };
 
 }  // namespace Ctld
