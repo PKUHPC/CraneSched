@@ -699,7 +699,7 @@ void CheckSingleton() {
       std::exit(1);
     } else {
       CRANE_CRITICAL("Failed to lock {}: {}. Exiting...",
-                     g_config.CranedMutexFilePath, strerror(errno));
+                     g_config.CranedMutexFilePath.string(), strerror(errno));
       std::exit(1);
     }
   }
