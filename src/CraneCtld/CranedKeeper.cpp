@@ -62,7 +62,8 @@ std::vector<task_id_t> CranedStub::ExecuteTasks(
   return failed_task_ids;
 }
 
-CraneErrCode CranedStub::TerminateTasks(const std::vector<task_id_t> &task_ids) {
+CraneErrCode CranedStub::TerminateTasks(
+    const std::vector<task_id_t> &task_ids) {
   using crane::grpc::TerminateTasksReply;
   using crane::grpc::TerminateTasksRequest;
 
@@ -110,7 +111,7 @@ CraneErrCode CranedStub::TerminateOrphanedTask(task_id_t task_id) {
 }
 
 CraneErrCode CranedStub::CreateCgroupForTasks(
-    std::vector<CgroupSpec> const &cgroup_specs) {
+    std::vector<CgroupSpec> &cgroup_specs) {
   using crane::grpc::CreateCgroupForTasksReply;
   using crane::grpc::CreateCgroupForTasksRequest;
 
@@ -122,11 +123,8 @@ CraneErrCode CranedStub::CreateCgroupForTasks(
   context.set_deadline(std::chrono::system_clock::now() +
                        std::chrono::seconds(kCtldRpcTimeoutSeconds));
 
-  for (const CgroupSpec &spec : cgroup_specs) {
-    request.mutable_task_id_list()->Add(spec.task_id);
-    request.mutable_uid_list()->Add(spec.uid);
-    *request.mutable_res_list()->Add() = std::move(spec.res_in_node);
-    request.add_execution_node(spec.execution_node);
+  for (CgroupSpec &spec : cgroup_specs) {
+    spec.SetJobSpec(request.add_job_spec_vec());
   }
 
   status = m_stub_->CreateCgroupForTasks(&context, request, &reply);
@@ -170,7 +168,7 @@ CraneErrCode CranedStub::ReleaseCgroupForTasks(
 }
 
 CraneErrCode CranedStub::CheckTaskStatus(task_id_t task_id,
-                                     crane::grpc::TaskStatus *status) {
+                                         crane::grpc::TaskStatus *status) {
   using crane::grpc::CheckTaskStatusReply;
   using crane::grpc::CheckTaskStatusRequest;
 
@@ -196,7 +194,8 @@ CraneErrCode CranedStub::CheckTaskStatus(task_id_t task_id,
     return CraneErrCode::ERR_NON_EXISTENT;
 }
 
-CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
+CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id,
+                                             uint64_t seconds) {
   using crane::grpc::ChangeTaskTimeLimitReply;
   using crane::grpc::ChangeTaskTimeLimitRequest;
 
