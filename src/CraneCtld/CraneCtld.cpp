@@ -540,7 +540,7 @@ void ParseConfig(int argc, char** argv) {
           g_config.Plugin.Enabled = plugin_config["Enabled"].as<bool>();
 
         g_config.Plugin.PlugindSockPath =
-            fmt::format("unix://{}{}", g_config.CraneBaseDir,
+            fmt::format("unix://{}{}", g_config.CraneBaseDir.string(),
                         value_or(plugin_config["PlugindSockPath"],
                                  kDefaultPlugindUnixSockPath));
       }
@@ -915,7 +915,7 @@ void CheckSingleton() {
       std::exit(1);
     } else {
       CRANE_CRITICAL("Failed to lock {}: {}. Exiting...",
-                     g_config.CraneCtldMutexFilePath, strerror(errno));
+                     g_config.CraneCtldMutexFilePath.string(), strerror(errno));
       std::exit(1);
     }
   }
