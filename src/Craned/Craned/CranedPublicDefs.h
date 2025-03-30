@@ -94,7 +94,8 @@ struct Config {
     std::filesystem::path TempDir;
     std::string RuntimeBin;
     std::string RuntimeState;
-    std::string RuntimeRun;
+    std::string RuntimeRun;     // Run tooks precedence over create,
+    std::string RuntimeCreate;  // however, create is OCI standard enforced
     std::string RuntimeKill;
     std::string RuntimeDelete;
   };
