@@ -29,8 +29,6 @@
 #  include <linux/bpf.h>
 #endif
 
-#include <dirent.h>
-
 #include "CranedPublicDefs.h"
 #include "DeviceManager.h"
 #include "crane/PluginClient.h"
@@ -38,16 +36,44 @@
 
 namespace Craned {
 
+std::optional<task_id_t> GetJobIdFromCg(const std::string &path) {
+  static constexpr LazyRE2 cg_pattern(R"(Crane_Task_(\d+))");
+  std::string job_id;
+  if (RE2::FullMatch(path, *cg_pattern, &job_id)) {
+    return std::stoul(job_id);
+  } else {
+    return std::nullopt;
+  }
+}
+
 #ifdef CRANE_ENABLE_BPF
-BpfRuntimeInfo CgroupV2::bpf_runtime_info_{};
+BpfRuntimeInfo CgroupManager::bpf_runtime_info{};
+
+CgroupManager::~CgroupManager() {
+  if (!bpf_runtime_info.Valid()) return;
+  int bpf_map_count = 0;
+  auto *pre_key = new BpfKey();
+  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr, pre_key,
+                            sizeof(BpfKey)) == 0) {
+    CRANE_ERROR("Failed to get first key of bpf map");
+  }
+  bpf_map_count++;
+  auto *cur_key = new BpfKey();
+  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key, cur_key,
+                               sizeof(BpfKey)) == 0) {
+    ++bpf_map_count;
+  }
+  delete pre_key;
+  delete cur_key;
+  // always one key for logging
+  if (bpf_map_count == 1) {
+    // All task end
+    BpfRuntimeInfo::RmBpfDeviceMap();
+  }
+}
 #endif
 
-/*
- * Initialize libcgroup and mount the controllers Condor will use (if possible)
- *
- * Returns 0 on success, -1 otherwise.
- */
-int CgroupManager::Init() {
+CraneErrCode CgroupManager::Init() {
   // Initialize library and data structures
   CRANE_DEBUG("Initializing cgroup library.");
   cgroup_init();
@@ -133,7 +159,7 @@ int CgroupManager::Init() {
     if (ret != ECGEOF) {
       CRANE_WARN("Error iterating through cgroups mount information: {}\n",
                  cgroup_strerror(ret));
-      return -1;
+      return CraneErrCode::ERR_CGROUP;
     }
   }
   // cgroup don't use /proc/cgroups to manage controller
@@ -141,13 +167,13 @@ int CgroupManager::Init() {
     cgroup *root = cgroup_new_cgroup("/");
     if (root == nullptr) {
       CRANE_WARN("Unable to construct new root cgroup object.");
-      return -1;
+      return CraneErrCode::ERR_CGROUP;
     }
 
     int ret = cgroup_get_cgroup(root);
     if (ret != 0) {
       CRANE_WARN("Error : root cgroup not exist.");
-      return -1;
+      return CraneErrCode::ERR_CGROUP;
     }
 
     if ((cgroup_get_controller(
@@ -186,29 +212,69 @@ int CgroupManager::Init() {
 
   } else {
     CRANE_WARN("Error Cgroup version is not supported");
-    return -1;
+    return CraneErrCode::ERR_CGROUP;
   }
-
-  if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
-    RmAllTaskCgroups_();
-  } else if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
-#ifdef CRANE_ENABLE_BPF
-    RmBpfDevMap();
-#endif
-    RmAllTaskCgroupsV2_();
-  } else {
-    CRANE_WARN("Error Cgroup version is not supported");
-  }
-
-  return 0;
+  return CraneErrCode::SUCCESS;
 }
 
-void CgroupManager::RmAllTaskCgroups_() {
-  RmAllTaskCgroupsUnderController_(CgroupConstant::Controller::CPU_CONTROLLER);
-  RmAllTaskCgroupsUnderController_(
-      CgroupConstant::Controller::MEMORY_CONTROLLER);
-  RmAllTaskCgroupsUnderController_(
-      CgroupConstant::Controller::DEVICES_CONTROLLER);
+CraneErrCode CgroupManager::Recover(
+    const std::unordered_set<task_id_t> &running_job_ids) {
+  // TODO: Remove these after csupervisor is stable
+  std::set<task_id_t> cg_running_job_ids{};
+  if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
+    cg_running_job_ids.merge(
+        GetJobIdsFromCgroupV1(CgroupConstant::Controller::CPU_CONTROLLER));
+    cg_running_job_ids.merge(
+        GetJobIdsFromCgroupV1(CgroupConstant::Controller::MEMORY_CONTROLLER));
+    cg_running_job_ids.merge(
+        GetJobIdsFromCgroupV1(CgroupConstant::Controller::DEVICES_CONTROLLER));
+  } else if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
+    cg_running_job_ids =
+        GetJobIdsFromCgroupV2(CgroupConstant::RootCgroupFullPath);
+#ifdef CRANE_ENABLE_BPF
+    auto job_id_bpf_key_vec_map =
+        GetJobBpfMapCgroupsV2(CgroupConstant::RootCgroupFullPath);
+    if (!job_id_bpf_key_vec_map) {
+      CRANE_ERROR("Failed to read job ebpf info, skip recovery.");
+      return CraneErrCode::ERR_EBPF;
+    }
+
+    for (const auto &[job_id, bpf_key_vec] : job_id_bpf_key_vec_map.value()) {
+      if (running_job_ids.contains(job_id)) continue;
+      CRANE_DEBUG("Erase bpf map entry for not running job {}", job_id);
+      for (const auto &key : bpf_key_vec) {
+        if (bpf_map__delete_elem(bpf_runtime_info.BpfDevMap(), &key,
+                                 sizeof(BpfKey), BPF_ANY)) {
+          CRANE_ERROR(
+              "Failed to delete BPF map major {},minor {} in cgroup id {}",
+              key.major, key.minor, key.cgroup_id);
+        }
+      }
+    }
+#endif
+  } else {
+    CRANE_WARN("Error Cgroup version is not supported");
+    return CraneErrCode::ERR_CGROUP;
+  }
+  for (auto job_id : cg_running_job_ids) {
+    if (!running_job_ids.contains(job_id)) {
+      CRANE_DEBUG("Removing cgroup for job #{}.", job_id);
+      std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
+      if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
+        cg_unique_ptr = CgroupManager::CreateOrOpen_(
+            job_id, CgV1PreferredControllers, NO_CONTROLLER_FLAG, true);
+      } else if (GetCgroupVersion() ==
+                 CgroupConstant::CgroupVersion::CGROUP_V2) {
+        cg_unique_ptr = CgroupManager::CreateOrOpen_(
+            job_id, CgV2PreferredControllers, NO_CONTROLLER_FLAG, true);
+      }
+      if (cg_unique_ptr == nullptr) {
+        CRANE_ERROR("Failed to reopen cgroup for job #{}.", job_id);
+      }
+      // cg_unique_ptr.reset();
+    }
+  }
+  return CraneErrCode::SUCCESS;
 }
 
 void CgroupManager::ControllersMounted() {
@@ -272,7 +338,7 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
                  CgroupConstant::GetControllerStringView(controller));
       return 1;
     } else {
-      fmt::print("cgroup controller {} is already mounted",
+      CRANE_WARN("cgroup controller {} is already mounted",
                  CgroupConstant::GetControllerStringView(controller));
       return 0;
     }
@@ -302,6 +368,50 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
   return 0;
 }
 
+std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1(
+    CgroupConstant::Controller controller) {
+  void *handle = nullptr;
+  cgroup_file_info info{};
+  std::set<task_id_t> job_ids;
+
+  const char *controller_str =
+      CgroupConstant::GetControllerStringView(controller).data();
+
+  int base_level;
+  int depth = 1;
+  int ret = cgroup_walk_tree_begin(controller_str, "/", depth, &handle, &info,
+                                   &base_level);
+  while (ret == 0) {
+    if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR) {
+      if (auto job_id = GetJobIdFromCg(info.path); job_id.has_value())
+        job_ids.emplace(job_id.value());
+    }
+    ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
+  }
+
+  if (handle) cgroup_walk_tree_end(&handle);
+  return job_ids;
+}
+
+std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV2(
+    const std::string &root_cgroup_path) {
+  std::set<task_id_t> job_ids;
+  try {
+    for (const auto &it :
+         std::filesystem::directory_iterator(root_cgroup_path)) {
+      std::string job_id_str;
+      if (it.is_directory()) {
+        if (auto job_id = GetJobIdFromCg(it.path().filename());
+            job_id.has_value())
+          job_ids.emplace(job_id.value());
+      }
+    }
+  } catch (const std::filesystem::filesystem_error &e) {
+    CRANE_ERROR("Error: {}", e.what());
+  }
+  return job_ids;
+}
+
 std::string CgroupManager::CgroupStrByTaskId_(task_id_t task_id) {
   return fmt::format("Crane_Task_{}", task_id);
 }
@@ -317,11 +427,21 @@ std::string CgroupManager::CgroupStrByTaskId_(task_id_t task_id) {
  *   - -1 on error
  * On failure, the state of cgroup is undefined.
  */
+/**
+ * @brief Create or open cgroup for task, not guarantee cg spec exists.
+ * @param task_id task id of cgroup to create.
+ * @param preferred_controllers bitset of the controllers we would prefer.
+ * @param required_controllers bitset of the controllers which are required.
+ * @param retrieve just retrieve an existing cgroup.
+ * @return unique_ptr to CgroupInterface, null if failed.
+ */
 std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
-    const std::string &cgroup_string, ControllerFlags preferred_controllers,
+    task_id_t task_id, ControllerFlags preferred_controllers,
     ControllerFlags required_controllers, bool retrieve) {
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;
+
+  std::string cgroup_string = CgroupStrByTaskId_(task_id);
 
   bool changed_cgroup = false;
   struct cgroup *native_cgroup = cgroup_new_cgroup(cgroup_string.c_str());
@@ -337,6 +457,8 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   bool has_cgroup = retrieve;
   if (retrieve && (ECGROUPNOTEXIST == cgroup_get_cgroup(native_cgroup))) {
     has_cgroup = false;
+    cgroup_free(&native_cgroup);
+    return nullptr;
   }
   // Work through the various controllers.
 
@@ -440,339 +562,146 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
     return std::make_unique<CgroupV1>(cgroup_string, native_cgroup);
   } else if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2) {
+    // For cgroup V2,we put task cgroup under RootCgroupFullPath.
     struct stat cgroup_stat;
     std::string slash = "/";
-    std::string cgroup_full_path =
+    std::filesystem::path cgroup_full_path =
         CgroupConstant::RootCgroupFullPath + slash + cgroup_string;
     if (stat(cgroup_full_path.c_str(), &cgroup_stat)) {
-      CRANE_ERROR("Failed to get cgroup {} stat", cgroup_string);
+      CRANE_ERROR("Cgroup {} created but stat failed: {}", cgroup_string,
+                  std::strerror(errno));
       return nullptr;
     }
-    return std::make_unique<CgroupV2>(
-        cgroup_string, native_cgroup,
-        static_cast<uint64_t>(cgroup_stat.st_ino));
+
+    return std::make_unique<CgroupV2>(cgroup_string, native_cgroup,
+                                      cgroup_stat.st_ino);
   } else {
     CRANE_WARN("Unable to create cgroup {}. Cgroup version is not supported",
-               cgroup_string.c_str());
+               cgroup_string);
     return nullptr;
   }
 }
 
-bool CgroupManager::CheckIfCgroupForTasksExists(task_id_t task_id) {
-  return m_task_id_to_cg_map_.Contains(task_id);
-}
+std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
+    const CgroupSpec &cg_spec) {
+  crane::grpc::ResourceInNode res = cg_spec.res_in_node;
+  bool recover = cg_spec.recovered;
+  auto job_id = cg_spec.job_id;
 
-bool CgroupManager::AllocateAndGetCgroup(task_id_t task_id,
-                                         CgroupInterface **cg) {
-  crane::grpc::ResourceInNode res;
-  CgroupInterface *pcg;
-
-  {
-    auto cg_spec_it = m_task_id_to_cg_spec_map_[task_id];
-    if (!cg_spec_it) return false;
-    res = cg_spec_it->res_in_node;
+  std::unique_ptr<CgroupInterface> cg_unique_ptr{nullptr};
+  if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
+    cg_unique_ptr = CgroupManager::CreateOrOpen_(
+        job_id, CgV1PreferredControllers, NO_CONTROLLER_FLAG, recover);
+  } else if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V2) {
+    cg_unique_ptr = CgroupManager::CreateOrOpen_(
+        job_id, CgV2PreferredControllers, NO_CONTROLLER_FLAG, recover);
+  } else {
+    CRANE_WARN("cgroup version is not supported.");
+    return nullptr;
   }
 
-  {
-    auto cg_it = m_task_id_to_cg_map_[task_id];
-    auto &cg_unique_ptr = *cg_it;
-    if (!cg_unique_ptr) {
-      if (GetCgroupVersion() == CgroupConstant::CgroupVersion::CGROUP_V1) {
-        cg_unique_ptr = CgroupManager::CreateOrOpen_(
-            CgroupStrByTaskId_(task_id),
-            NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER |
-                CgroupConstant::Controller::MEMORY_CONTROLLER |
-                CgroupConstant::Controller::DEVICES_CONTROLLER |
-                CgroupConstant::Controller::BLOCK_CONTROLLER,
-            NO_CONTROLLER_FLAG, false);
-      } else if (GetCgroupVersion() ==
-                 CgroupConstant::CgroupVersion::CGROUP_V2) {
-        cg_unique_ptr = CgroupManager::CreateOrOpen_(
-            CgroupStrByTaskId_(task_id),
-            NO_CONTROLLER_FLAG | CgroupConstant::Controller::CPU_CONTROLLER_V2 |
-                CgroupConstant::Controller::MEMORY_CONTORLLER_V2,
-            NO_CONTROLLER_FLAG, false);
-      } else {
-        CRANE_WARN("cgroup version is not supported.");
-      }
+  // If just recover cgroup, do not trigger plugin and apply res limit.
+  if (recover) {
+#ifdef CRANE_ENABLE_BPF
+    if (GetCgroupVersion() != CgroupConstant::CgroupVersion::CGROUP_V2) {
+      return cg_unique_ptr;
     }
+    CgroupV2 *cg_v2_ptr = dynamic_cast<CgroupV2 *>(cg_unique_ptr.get());
+    cg_v2_ptr->RecoverFromCgSpec(cg_spec);
+#endif
 
-    if (!cg_unique_ptr) return false;
-
-    pcg = cg_unique_ptr.get();
-    if (cg) *cg = pcg;
+    return cg_unique_ptr;
   }
 
   if (g_config.Plugin.Enabled) {
-    g_plugin_client->CreateCgroupHookAsync(task_id, pcg->GetCgroupString(),
+    g_plugin_client->CreateCgroupHookAsync(cg_spec.job_id,
+                                           cg_unique_ptr->GetCgroupString(),
                                            res.dedicated_res_in_node());
   }
 
   CRANE_TRACE(
-      "Setting cgroup limit of task #{}. CPU: {:.2f}, Mem: {:.2f} MB Gres: {}.",
-      task_id, res.allocatable_res_in_node().cpu_core_limit(),
+      "Setting cgroup for job #{}. CPU: {:.2f}, Mem: {:.2f} MB, Gres: {}.",
+      job_id, res.allocatable_res_in_node().cpu_core_limit(),
       res.allocatable_res_in_node().memory_limit_bytes() / (1024.0 * 1024.0),
       util::ReadableGrpcDresInNode(res.dedicated_res_in_node()));
 
   bool ok = AllocatableResourceAllocator::Allocate(
-      res.allocatable_res_in_node(), pcg);
+      res.allocatable_res_in_node(), cg_unique_ptr.get());
   if (ok)
-    ok &=
-        DedicatedResourceAllocator::Allocate(res.dedicated_res_in_node(), pcg);
-  return ok;
+    ok &= DedicatedResourceAllocator::Allocate(res.dedicated_res_in_node(),
+                                               cg_unique_ptr.get());
+  return ok ? std::move(cg_unique_ptr) : nullptr;
 }
 
-bool CgroupManager::CreateCgroups(std::vector<CgroupSpec> &&cg_specs) {
-  std::chrono::steady_clock::time_point begin;
-  std::chrono::steady_clock::time_point end;
-
-  CRANE_DEBUG("Creating cgroups for {} tasks", cg_specs.size());
-
-  begin = std::chrono::steady_clock::now();
-
-  for (int i = 0; i < cg_specs.size(); i++) {
-    uid_t uid = cg_specs[i].uid;
-    task_id_t task_id = cg_specs[i].task_id;
-
-    CRANE_TRACE("Create lazily allocated cgroups for task #{}, uid {}", task_id,
-                uid);
-
-    this->m_task_id_to_cg_spec_map_.Emplace(task_id, std::move(cg_specs[i]));
-
-    this->m_task_id_to_cg_map_.Emplace(task_id, nullptr);
-
-    // Acquire map lock to avoid using [uid]set deleted by ReleaseCgroup
-    // after checking contains(uid)
-    auto uid_task_id_map_ptr =
-        this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
-    if (!uid_task_id_map_ptr->contains(uid))
-      uid_task_id_map_ptr->emplace(uid, absl::flat_hash_set<uint32_t>{task_id});
-    else
-      uid_task_id_map_ptr->at(uid).RawPtr()->emplace(task_id);
-  }
-
-  end = std::chrono::steady_clock::now();
-  CRANE_TRACE("Create cgroups costed {} ms",
-              std::chrono::duration_cast<std::chrono::milliseconds>(end - begin)
-                  .count());
-
-  return true;
-}
-
-bool CgroupManager::ReleaseCgroupByTaskIdOnly(task_id_t task_id) {
-  uid_t uid;
-  {
-    auto vp = this->m_task_id_to_cg_spec_map_.GetValueExclusivePtr(task_id);
-    if (!vp) return false;
-
-    CRANE_DEBUG(
-        "Remove cgroup for task #{} for potential crashes of other craned.",
-        task_id);
-    uid = vp->uid;
-  }
-  return this->ReleaseCgroup(task_id, uid);
-}
-
-bool CgroupManager::ReleaseCgroup(uint32_t task_id, uid_t uid) {
-  this->m_task_id_to_cg_spec_map_.Erase(task_id);
-
-  {
-    // The termination of all processes in a cgroup is a time-consuming work.
-    // Therefore, once we are sure that the cgroup for this task exists, we
-    // let gRPC call return and put the termination work into the thread pool
-    // to avoid blocking the event loop of TaskManager.
-    // Kind of async behavior.
-
-    // avoid deadlock by Erase at next line
-    auto task_id_to_cg_map_ptr =
-        this->m_task_id_to_cg_map_.GetMapExclusivePtr();
-    auto it = task_id_to_cg_map_ptr->find(task_id);
-    if (it == task_id_to_cg_map_ptr->end()) {
-      CRANE_DEBUG(
-          "Trying to release a non-existent cgroup for task #{}. Ignoring "
-          "it...",
-          task_id);
-
-      return false;
-    }
-    CgroupInterface *cgroup = it->second.GetExclusivePtr()->release();
-
-    task_id_to_cg_map_ptr->erase(task_id);
-
-    if (cgroup != nullptr) {
-      if (g_config.Plugin.Enabled) {
-        g_plugin_client->DestroyCgroupHookAsync(task_id,
-                                                cgroup->GetCgroupString());
-      }
-
-      g_thread_pool->detach_task([cgroup]() {
-        bool rc;
-        int cnt = 0;
-
-        while (true) {
-          if (cgroup->Empty()) break;
-
-          if (cnt >= 5) {
-            CRANE_ERROR(
-                "Couldn't kill the processes in cgroup {} after {} times. "
-                "Skipping it.",
-                cgroup->GetCgroupString(), cnt);
-            break;
-          }
-
-          cgroup->KillAllProcesses();
-          ++cnt;
-          std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-
-        delete cgroup;
-      });
-    }
-  }
-
-  {
-    auto uid_task_ids_map_ptr =
-        this->m_uid_to_task_ids_map_.GetMapExclusivePtr();
-    auto it = uid_task_ids_map_ptr->find(uid);
-    if (it == uid_task_ids_map_ptr->end()) {
-      CRANE_DEBUG(
-          "Trying to release a non-existent cgroup for uid #{}. Ignoring it...",
-          uid);
-      return false;
-    }
-
-    auto task_id_set_ptr = uid_task_ids_map_ptr->at(uid).RawPtr();
-
-    task_id_set_ptr->erase(task_id);
-    if (task_id_set_ptr->empty()) {
-      uid_task_ids_map_ptr->erase(uid);
-    }
-    // Do not access task_id_set_ptr after erasing form map
-  }
-  return true;
-}
-
-void CgroupManager::RmAllTaskCgroupsUnderController_(
-    CgroupConstant::Controller controller) {
-  void *handle = nullptr;
-  cgroup_file_info info{};
-
-  const char *controller_str =
-      CgroupConstant::GetControllerStringView(controller).data();
-
-  int base_level;
-  int depth = 1;
-  int ret = cgroup_walk_tree_begin(controller_str, "/", depth, &handle, &info,
-                                   &base_level);
-  while (ret == 0) {
-    if (info.type == cgroup_file_type::CGROUP_FILE_TYPE_DIR &&
-        strstr(info.path, CgroupConstant::kTaskCgPathPrefix) != nullptr) {
-      CRANE_DEBUG("Removing remaining task cgroup: {}", info.full_path);
-      int err = rmdir(info.full_path);
-      if (err != 0)
-        CRANE_ERROR("Failed to remove cgroup {}: {}", info.full_path,
-                    strerror(errno));
-    }
-
-    ret = cgroup_walk_tree_next(depth, &handle, &info, base_level);
-  }
-
-  if (handle) cgroup_walk_tree_end(&handle);
-}
-
-void CgroupManager::RmAllTaskCgroupsV2_() {
-  RmCgroupsV2_(CgroupConstant::RootCgroupFullPath,
-               CgroupConstant::kTaskCgPathPrefix);
-}
-
-void CgroupManager::RmCgroupsV2_(const std::string &root_cgroup_path,
-                                 const std::string &match_str) {
-  DIR *dir = nullptr;
-  if ((dir = opendir(root_cgroup_path.c_str())) == nullptr) {
-    CRANE_ERROR("Failed to open cgroup dir {}", root_cgroup_path);
-  }
-  struct dirent *entry;
-  std::vector<std::string> cgroup_full_path_to_delete;
-  while ((entry = readdir(dir)) != nullptr) {
-    // Skip "." and ".." directories
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-      continue;
-    }
-
-    std::string dir_name = entry->d_name;
-    std::string full_path = root_cgroup_path + "/" + dir_name;
-
-    // Check if it's a directory and if it contains the match_str
-    struct stat info;
-    if (stat(full_path.c_str(), &info) == 0 && S_ISDIR(info.st_mode)) {
-      if (dir_name.find(match_str) != std::string::npos) {
-        cgroup_full_path_to_delete.push_back(full_path);
-      }
-    }
-  }
-  closedir(dir);
-  for (const auto &tf : cgroup_full_path_to_delete) {
-    int err = rmdir(tf.c_str());
-    if (err != 0) {
-      CRANE_ERROR("Failed to remove cgroup {}: {}", tf.c_str(),
-                  strerror(errno));
-    }
-  }
-}
-
-#ifdef CRANE_ENABLE_BPF
-void CgroupManager::RmBpfDevMap() {
+std::unordered_map<ino_t, task_id_t> CgroupManager::GetCgJobIdMapCgroupV2(
+    const std::string &root_cgroup_path) {
+  std::unordered_map<ino_t, task_id_t> cg_job_id_map;
   try {
-    if (std::filesystem::exists(CgroupConstant::BpfDeviceMapFile)) {
-      std::filesystem::remove(CgroupConstant::BpfDeviceMapFile);
-      CRANE_TRACE("Successfully removed: {}", CgroupConstant::BpfDeviceMapFile);
-    } else {
-      CRANE_TRACE("File does not exist: {}", CgroupConstant::BpfDeviceMapFile);
+    for (const auto &it :
+         std::filesystem::directory_iterator(root_cgroup_path)) {
+      std::string job_id_str;
+      if (it.is_directory()) {
+        if (auto job_id = GetJobIdFromCg(it.path().filename());
+            job_id.has_value()) {
+          struct stat cg_stat{};
+          if (stat(it.path().c_str(), &cg_stat)) {
+            CRANE_ERROR("Cgroup {} stat failed: {}", it.path().c_str(),
+                        std::strerror(errno));
+            continue;
+          }
+          cg_job_id_map.emplace(cg_stat.st_ino, job_id.value());
+        }
+      }
     }
   } catch (const std::filesystem::filesystem_error &e) {
     CRANE_ERROR("Error: {}", e.what());
   }
+  return cg_job_id_map;
+}
+
+#ifdef CRANE_ENABLE_BPF
+
+CraneExpected<std::unordered_map<task_id_t, std::vector<BpfKey>>>
+CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
+  std::unordered_map cg_ino_job_id_map =
+      GetCgJobIdMapCgroupV2(root_cgroup_path);
+  bool init_ebpf = !bpf_runtime_info.Valid();
+  if (init_ebpf) {
+    if (!bpf_runtime_info.InitializeBpfObj())
+      return std::unexpected(CraneErrCode::ERR_EBPF);
+  }
+
+  std::unordered_map<task_id_t, std::vector<BpfKey>> results;
+
+  auto add_task = [&results, &cg_ino_job_id_map](BpfKey *key) {
+    // Skip log level record.
+    if (key->cgroup_id == 0) {
+      return;
+    }
+    CRANE_ASSERT(cg_ino_job_id_map.contains(key->cgroup_id));
+    results[cg_ino_job_id_map[key->cgroup_id]].emplace_back(*key);
+  };
+
+  auto *pre_key = new BpfKey();
+  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr, pre_key,
+                            sizeof(BpfKey)) == 0) {
+    CRANE_ERROR("Failed to get first key of bpf map");
+  }
+
+  add_task(pre_key);
+  auto *cur_key = new BpfKey();
+  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key, cur_key,
+                               sizeof(BpfKey)) == 0) {
+    add_task(cur_key);
+  }
+
+  delete pre_key;
+  delete cur_key;
+  if (init_ebpf) bpf_runtime_info.CloseBpfObj();
+
+  return results;
 }
 #endif
-
-bool CgroupManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid *info) {
-  CRANE_DEBUG("Query task info for uid {}", uid);
-
-  info->job_cnt = 0;
-  info->cgroup_exists = false;
-
-  if (auto task_ids = this->m_uid_to_task_ids_map_[uid]) {
-    if (!task_ids) {
-      CRANE_WARN("Uid {} not found in uid_to_task_ids_map", uid);
-      return false;
-    }
-    info->job_cnt = task_ids->size();
-    info->first_task_id = *task_ids->begin();
-  }
-  return info->job_cnt > 0;
-}
-
-bool CgroupManager::MigrateProcToCgroupOfTask(pid_t pid, task_id_t task_id) {
-  CgroupInterface *cg;
-  bool ok = AllocateAndGetCgroup(task_id, &cg);
-  if (!ok) return false;
-
-  return cg->MigrateProcIn(pid);
-}
-
-std::optional<std::string> CgroupManager::QueryTaskExecutionNode(
-    task_id_t task_id) {
-  if (!this->m_task_id_to_cg_spec_map_.Contains(task_id)) return std::nullopt;
-  return this->m_task_id_to_cg_spec_map_[task_id]->execution_node;
-}
-
-CraneExpected<crane::grpc::ResourceInNode> CgroupManager::GetTaskResourceInNode(
-    task_id_t task_id) {
-  auto cg_spec_ptr = this->m_task_id_to_cg_spec_map_[task_id];
-  if (cg_spec_ptr) return cg_spec_ptr->res_in_node;
-
-  return std::unexpected(CraneErrCode::ERR_CGROUP);
-}
 
 EnvMap CgroupManager::GetResourceEnvMapByResInNode(
     const crane::grpc::ResourceInNode &res_in_node) {
@@ -788,16 +717,36 @@ EnvMap CgroupManager::GetResourceEnvMapByResInNode(
   return env_map;
 }
 
-CraneExpected<EnvMap> CgroupManager::GetResourceEnvMapOfTask(
-    task_id_t task_id) {
-  auto task_res = GetTaskResourceInNode(task_id);
-  if (task_res.has_value()) {
-    return GetResourceEnvMapByResInNode(task_res.value());
+CraneExpected<task_id_t> CgroupManager::GetTaskIdFromPid(pid_t pid) {
+  static constexpr LazyRE2 cg_pattern(R"(.*/Crane_Task_(\d+).*)");
+  std::string job_id_str;
+  std::string cgroup_file = fmt::format("/proc/{}/cgroup", pid);
+  std::ifstream infile(cgroup_file);
+  if (!infile.is_open()) {
+    CRANE_ERROR("Failed to open cgroup file for pid", pid);
+    return std::unexpected(CraneErrCode::ERR_CGROUP);
   }
-
-  CRANE_ERROR("Trying to get resource env list of a non-existent task #{}",
-              task_id);
-  return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+  if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {
+    std::string line;
+    while (std::getline(infile, line)) {
+      if (RE2::FullMatch(line, *cg_pattern, &job_id_str)) {
+        CRANE_TRACE("Get task Id {}", job_id_str);
+        return std::stoi(job_id_str);
+      }
+    }
+  } else if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V2) {
+    std::string line;
+    if (!std::getline(infile, line)) {
+      CRANE_ERROR("Failed to read cgroup file");
+      return std::unexpected(CraneErrCode::ERR_SYSTEM_ERR);
+    }
+    if (RE2::FullMatch(line, *cg_pattern, &job_id_str)) {
+      return std::stoi(job_id_str);
+    }
+  } else {
+    std::unreachable();
+  }
+  return std::unexpected(CraneErrCode::ERR_NON_EXISTENT);
 }
 
 /*
@@ -806,6 +755,7 @@ CraneExpected<EnvMap> CgroupManager::GetResourceEnvMapOfTask(
  */
 Cgroup::~Cgroup() {
   if (m_cgroup_) {
+    CRANE_DEBUG("Destroying cgroup {}.", m_cgroup_path_);
     int err;
     if ((err = cgroup_delete_cgroup_ext(
              m_cgroup_,
@@ -817,6 +767,26 @@ Cgroup::~Cgroup() {
     cgroup_free(&m_cgroup_);
     m_cgroup_ = nullptr;
   }
+}
+
+bool Cgroup::MigrateProcIn(pid_t pid) {
+  using CgroupConstant::Controller;
+  using CgroupConstant::GetControllerStringView;
+
+  // We want to make sure task migration is turned on for the
+  // associated memory controller.  So, we get to look up the original cgroup.
+  //
+  // If there is no memory controller present, we skip all this and just attempt
+  // a migrate
+  int err;
+  // TODO: handle memory.move_charge_at_immigrate
+  // https://github.com/PKUHPC/CraneSched/pull/327/files/eaa0d04dcc4c12a1773ac9a3fd42aa9f898741aa..9dc93a50528c1b22dbf50d0bf40a11a98bbed36d#r1838007422
+  err = cgroup_attach_task_pid(m_cgroup_, pid);
+  if (err != 0) {
+    CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}", pid,
+               m_cgroup_path_.c_str(), err, cgroup_strerror(err));
+  }
+  return err == 0;
 }
 
 bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
@@ -973,8 +943,7 @@ bool Cgroup::SetControllerStrs(CgroupConstant::Controller controller,
   }
   return true;
 }
-
-bool CgroupV1::MigrateProcIn(pid_t pid) {
+bool CgroupInterface::MigrateProcIn(pid_t pid) {
   using CgroupConstant::Controller;
   using CgroupConstant::GetControllerStringView;
 
@@ -1050,6 +1019,30 @@ bool CgroupV1::SetBlockioWeight(uint64_t weight) {
       CgroupConstant::ControllerFile::BLOCKIO_WEIGHT, weight);
 }
 
+bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
+                               bool set_read, bool set_write, bool set_mknod) {
+  std::string op;
+  if (set_read) op += "r";
+  if (set_write) op += "w";
+  if (set_mknod) op += "m";
+  std::vector<std::string> deny_limits;
+  for (const auto &[_, this_device] : Craned::g_this_node_device) {
+    if (!devices.contains(this_device->slot_id)) {
+      for (const auto &dev_meta : this_device->device_file_metas) {
+        deny_limits.emplace_back(fmt::format("{} {}:{} {}", dev_meta.op_type,
+                                             dev_meta.major, dev_meta.minor,
+                                             op));
+      }
+    }
+  }
+  auto ok = true;
+  if (!deny_limits.empty())
+    ok &= m_cgroup_info_.SetControllerStrs(
+        CgroupConstant::Controller::DEVICES_CONTROLLER,
+        CgroupConstant::ControllerFile::DEVICES_DENY, deny_limits);
+  return ok;
+}
+
 bool CgroupV1::KillAllProcesses() {
   using namespace CgroupConstant::Internal;
 
@@ -1101,29 +1094,6 @@ bool CgroupV1::Empty() {
     return false;
   }
 }
-bool CgroupV1::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
-                               bool set_read, bool set_write, bool set_mknod) {
-  std::string op;
-  if (set_read) op += "r";
-  if (set_write) op += "w";
-  if (set_mknod) op += "m";
-  std::vector<std::string> deny_limits;
-  for (const auto &[_, this_device] : Craned::g_this_node_device) {
-    if (!devices.contains(this_device->slot_id)) {
-      for (const auto &dev_meta : this_device->device_file_metas) {
-        deny_limits.emplace_back(fmt::format("{} {}:{} {}", dev_meta.op_type,
-                                             dev_meta.major, dev_meta.minor,
-                                             op));
-      }
-    }
-  }
-  auto ok = true;
-  if (!deny_limits.empty())
-    ok &= m_cgroup_info_.SetControllerStrs(
-        CgroupConstant::Controller::DEVICES_CONTROLLER,
-        CgroupConstant::ControllerFile::DEVICES_DENY, deny_limits);
-  return ok;
-}
 
 #ifdef CRANE_ENABLE_BPF
 
@@ -1131,8 +1101,8 @@ BpfRuntimeInfo::BpfRuntimeInfo() {
   bpf_obj_ = nullptr;
   bpf_prog_ = nullptr;
   dev_map_ = nullptr;
-  bpf_debug_log_level_ = 0;
-  bpf_mtx_ = new std::mutex;
+  enable_logging_ = false;
+  bpf_mtx_ = new absl::Mutex;
   bpf_prog_fd_ = -1;
   cgroup_count_ = 0;
 }
@@ -1147,13 +1117,13 @@ BpfRuntimeInfo::~BpfRuntimeInfo() {
 }
 
 bool BpfRuntimeInfo::InitializeBpfObj() {
-  std::unique_lock<std::mutex> lk(*bpf_mtx_);
+  absl::MutexLock lk(bpf_mtx_);
 
   if (cgroup_count_ == 0) {
-    bpf_obj_ = bpf_object__open_file(CgroupConstant::BpfObjectFile, NULL);
+    bpf_obj_ = bpf_object__open_file(CgroupConstant::BpfObjectFilePath, NULL);
     if (!bpf_obj_) {
       CRANE_ERROR("Failed to open BPF object file {}",
-                  CgroupConstant::BpfObjectFile);
+                  CgroupConstant::BpfObjectFilePath);
       bpf_object__close(bpf_obj_);
       return false;
     }
@@ -1163,7 +1133,7 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
 
     if (bpf_object__load(bpf_obj_)) {
       CRANE_ERROR("Failed to load BPF object {}",
-                  CgroupConstant::BpfObjectFile);
+                  CgroupConstant::BpfObjectFilePath);
       bpf_object__close(bpf_obj_);
       return false;
     }
@@ -1180,7 +1150,7 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
     bpf_prog_fd_ = bpf_program__fd(bpf_prog_);
     if (bpf_prog_fd_ < 0) {
       CRANE_ERROR("Failed to get BPF program file descriptor {}",
-                  CgroupConstant::BpfObjectFile);
+                  CgroupConstant::BpfObjectFilePath);
       bpf_object__close(bpf_obj_);
       return false;
     }
@@ -1196,7 +1166,7 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
 
     struct BpfKey key = {static_cast<uint64_t>(0), static_cast<uint32_t>(0),
                          static_cast<uint32_t>(0)};
-    struct BpfDeviceMeta meta = {static_cast<uint32_t>(bpf_debug_log_level_),
+    struct BpfDeviceMeta meta = {static_cast<uint32_t>(enable_logging_),
                                  static_cast<uint32_t>(0), static_cast<int>(0),
                                  static_cast<short>(0), static_cast<short>(0)};
     if (bpf_map__update_elem(dev_map_, &key, sizeof(BpfKey), &meta,
@@ -1209,25 +1179,26 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
 }
 
 void BpfRuntimeInfo::CloseBpfObj() {
-  std::unique_lock<std::mutex> lk(*bpf_mtx_);
-  if (BpfInvalid() && --cgroup_count_ == 0) {
+  absl::MutexLock lk(bpf_mtx_);
+  if (this->Valid() && --cgroup_count_ == 0) {
     close(bpf_prog_fd_);
     bpf_object__close(bpf_obj_);
     bpf_prog_fd_ = -1;
     bpf_obj_ = nullptr;
     bpf_prog_ = nullptr;
     dev_map_ = nullptr;
-    RmBpfDeviceMap();
   }
 }
 
 void BpfRuntimeInfo::RmBpfDeviceMap() {
   try {
-    if (std::filesystem::exists(CgroupConstant::BpfDeviceMapFile)) {
-      std::filesystem::remove(CgroupConstant::BpfDeviceMapFile);
-      CRANE_TRACE("Successfully removed: {}", CgroupConstant::BpfDeviceMapFile);
+    if (std::filesystem::exists(CgroupConstant::BpfDeviceMapFilePath)) {
+      std::filesystem::remove(CgroupConstant::BpfDeviceMapFilePath);
+      CRANE_TRACE("Successfully removed: {}",
+                  CgroupConstant::BpfDeviceMapFilePath);
     } else {
-      CRANE_TRACE("File does not exist: {}", CgroupConstant::BpfDeviceMapFile);
+      CRANE_TRACE("File does not exist: {}",
+                  CgroupConstant::BpfDeviceMapFilePath);
     }
   } catch (const std::filesystem::filesystem_error &e) {
     CRANE_ERROR("Error: {}", e.what());
@@ -1236,9 +1207,9 @@ void BpfRuntimeInfo::RmBpfDeviceMap() {
 #endif
 
 CgroupV2::CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id)
-    : m_cgroup_info_(path, handle, id) {
+    : CgroupInterface(path, handle, id) {
 #ifdef CRANE_ENABLE_BPF
-  if (bpf_runtime_info_.InitializeBpfObj()) {
+  if (CgroupManager::bpf_runtime_info.InitializeBpfObj()) {
     CRANE_TRACE("Bpf object initialization succeed");
   } else {
     CRANE_TRACE("Bpf object initialization failed");
@@ -1246,12 +1217,21 @@ CgroupV2::CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id)
 #endif
 }
 
+#ifdef CRANE_ENABLE_BPF
+CgroupV2::CgroupV2(const std::string &path, struct cgroup *handle, uint64_t id,
+                   std::vector<BpfDeviceMeta> &cgroup_bpf_devices)
+    : CgroupV2(path, handle, id) {
+  m_cgroup_bpf_devices = std::move(cgroup_bpf_devices);
+  m_bpf_attached_ = true;
+}
+#endif
+
 CgroupV2::~CgroupV2() {
 #ifdef CRANE_ENABLE_BPF
   if (!m_cgroup_bpf_devices.empty()) {
     EraseBpfDeviceMap();
   }
-  bpf_runtime_info_.CloseBpfObj();
+  CgroupManager::bpf_runtime_info.CloseBpfObj();
 #endif
 }
 
@@ -1305,14 +1285,14 @@ bool CgroupV2::SetBlockioWeight(uint64_t weight) {
 bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
                                bool set_read, bool set_write, bool set_mknod) {
 #ifdef CRANE_ENABLE_BPF
-  if (!bpf_runtime_info_.BpfInvalid()) {
+  if (!CgroupManager::bpf_runtime_info.Valid()) {
     CRANE_WARN("BPF is not initialized.");
     return false;
   }
   int cgroup_fd;
   std::string slash = "/";
-  std::string cgroup_path = CgroupConstant::RootCgroupFullPath + slash +
-                            m_cgroup_info_.m_cgroup_path_;
+  std::filesystem::path cgroup_path = CgroupConstant::RootCgroupFullPath +
+                                      slash + m_cgroup_info_.m_cgroup_path_;
   cgroup_fd = open(cgroup_path.c_str(), O_RDONLY);
   if (cgroup_fd < 0) {
     CRANE_ERROR("Failed to open cgroup");
@@ -1342,12 +1322,12 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
     }
   }
   {
-    std::unique_lock<std::mutex> lk(*bpf_runtime_info_.BpfMutex());
+    absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
     for (int i = 0; i < bpf_devices.size(); i++) {
       struct BpfKey key = {m_cgroup_info_.m_cgroup_id, bpf_devices[i].major,
                            bpf_devices[i].minor};
-      if (bpf_map__update_elem(bpf_runtime_info_.BpfDevMap(), &key,
-                               sizeof(BpfKey), &bpf_devices[i],
+      if (bpf_map__update_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
+                               &key, sizeof(BpfKey), &bpf_devices[i],
                                sizeof(BpfDeviceMeta), BPF_ANY)) {
         CRANE_ERROR("Failed to update BPF map major {},minor {} cgroup id {}",
                     bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
@@ -1356,11 +1336,15 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
       }
     }
 
-    if (bpf_prog_attach(bpf_runtime_info_.BpfProgFd(), cgroup_fd,
-                        BPF_CGROUP_DEVICE, 0) < 0) {
-      CRANE_ERROR("Failed to attach BPF program");
-      close(cgroup_fd);
-      return false;
+    // No need to attach ebpf prog twice.
+    if (!m_bpf_attached_) {
+      if (bpf_prog_attach(CgroupManager::bpf_runtime_info.BpfProgFd(),
+                          cgroup_fd, BPF_CGROUP_DEVICE, 0) < 0) {
+        CRANE_ERROR("Failed to attach BPF program");
+        close(cgroup_fd);
+        return false;
+      }
+      m_bpf_attached_ = true;
     }
   }
   close(cgroup_fd);
@@ -1375,19 +1359,68 @@ bool CgroupV2::SetDeviceAccess(const std::unordered_set<SlotId> &devices,
 }
 
 #ifdef CRANE_ENABLE_BPF
+
+bool CgroupV2::RecoverFromCgSpec(const CgroupSpec &cg_spec) {
+  if (!CgroupManager::bpf_runtime_info.Valid()) {
+    CRANE_WARN("BPF is not initialized.");
+    return false;
+  }
+  int cgroup_fd;
+  std::string slash = "/";
+  std::filesystem::path cgroup_path = CgroupConstant::RootCgroupFullPath +
+                                      slash + m_cgroup_info_.m_cgroup_path_;
+  cgroup_fd = open(cgroup_path.c_str(), O_RDONLY);
+  if (cgroup_fd < 0) {
+    CRANE_ERROR("Failed to open cgroup");
+    return false;
+  }
+
+  short access = 0;
+  if (CgroupConstant::CgroupLimitDeviceRead) access |= BPF_DEVCG_ACC_READ;
+  if (CgroupConstant::CgroupLimitDeviceWrite) access |= BPF_DEVCG_ACC_WRITE;
+  if (CgroupConstant::CgroupLimitDeviceMknod) access |= BPF_DEVCG_ACC_MKNOD;
+
+  std::unordered_set<std::string> all_request_slots;
+  for (const auto &[_, type_slots_map] :
+       cg_spec.res_in_node.dedicated_res_in_node().name_type_map()) {
+    for (const auto &[__, slots] : type_slots_map.type_slots_map())
+      all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
+  };
+
+  auto &bpf_devices = m_cgroup_bpf_devices;
+  for (const auto &[_, this_device] : Craned::g_this_node_device) {
+    if (!all_request_slots.contains(this_device->slot_id)) {
+      for (const auto &dev_meta : this_device->device_file_metas) {
+        short op_type = 0;
+        if (dev_meta.op_type == 'c') {
+          op_type |= BPF_DEVCG_DEV_CHAR;
+        } else if (dev_meta.op_type == 'b') {
+          op_type |= BPF_DEVCG_DEV_BLOCK;
+        } else {
+          op_type |= 0xffff;
+        }
+        bpf_devices.push_back({dev_meta.major, dev_meta.minor,
+                               BPF_PERMISSION::DENY, access, op_type});
+      }
+    }
+  }
+  m_bpf_attached_ = true;
+  return true;
+}
+
 bool CgroupV2::EraseBpfDeviceMap() {
   {
-    if (!bpf_runtime_info_.BpfInvalid()) {
+    if (!CgroupManager::bpf_runtime_info.Valid()) {
       CRANE_WARN("BPF is not initialized.");
       return false;
     }
-    std::unique_lock<std::mutex> lk(*bpf_runtime_info_.BpfMutex());
+    absl::MutexLock lk(CgroupManager::bpf_runtime_info.BpfMutex());
     auto &bpf_devices = m_cgroup_bpf_devices;
     for (int i = 0; i < bpf_devices.size(); i++) {
       struct BpfKey key = {m_cgroup_info_.m_cgroup_id, bpf_devices[i].major,
                            bpf_devices[i].minor};
-      if (bpf_map__delete_elem(bpf_runtime_info_.BpfDevMap(), &key,
-                               sizeof(BpfKey), BPF_ANY)) {
+      if (bpf_map__delete_elem(CgroupManager::bpf_runtime_info.BpfDevMap(),
+                               &key, sizeof(BpfKey), BPF_ANY)) {
         CRANE_ERROR(
             "Failed to delete BPF map major {},minor {} in cgroup id {}",
             bpf_devices[i].major, bpf_devices[i].minor, key.cgroup_id);
@@ -1451,22 +1484,6 @@ bool CgroupV2::Empty() {
   }
 }
 
-bool CgroupV2::MigrateProcIn(pid_t pid) {
-  using CgroupConstant::Controller;
-  using CgroupConstant::GetControllerStringView;
-  int err;
-after_migrate:
-
-  err = cgroup_attach_task_pid(m_cgroup_info_.m_cgroup_, pid);
-  if (err != 0) {
-    CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}", pid,
-               m_cgroup_info_.m_cgroup_path_.c_str(), err,
-               cgroup_strerror(err));
-  }
-end:
-  return err == 0;
-}
-
 bool AllocatableResourceAllocator::Allocate(const AllocatableResource &resource,
                                             CgroupInterface *cg) {
   bool ok;
@@ -1497,12 +1514,17 @@ bool DedicatedResourceAllocator::Allocate(
     const crane::grpc::DedicatedResourceInNode &request_resource,
     CgroupInterface *cg) {
   std::unordered_set<std::string> all_request_slots;
-  for (const auto &[_, type_slots_map] : request_resource.name_type_map()) {
-    for (const auto &[__, slots] : type_slots_map.type_slots_map())
+  for (const auto &type_slots_map :
+       request_resource.name_type_map() | std::ranges::views::values) {
+    for (const auto &slots :
+         type_slots_map.type_slots_map() | std::ranges::views::values)
       all_request_slots.insert(slots.slots().cbegin(), slots.slots().cend());
   };
 
-  if (!cg->SetDeviceAccess(all_request_slots, true, true, true)) {
+  if (!cg->SetDeviceAccess(all_request_slots,
+                           CgroupConstant::CgroupLimitDeviceRead,
+                           CgroupConstant::CgroupLimitDeviceWrite,
+                           CgroupConstant::CgroupLimitDeviceMknod)) {
     if (g_cg_mgr->GetCgroupVersion() ==
         CgroupConstant::CgroupVersion::CGROUP_V1) {
       CRANE_WARN("Allocate devices access failed in Cgroup V1.");

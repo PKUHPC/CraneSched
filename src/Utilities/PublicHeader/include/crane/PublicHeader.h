@@ -33,6 +33,7 @@
 #endif
 
 using task_id_t = uint32_t;
+using step_id_t = uint32_t;
 
 using CraneErrCode = crane::grpc::ErrCode;
 
@@ -43,6 +44,8 @@ using CraneExpected = std::expected<T, CraneErrCode>;
 
 template <typename T>
 using CraneExpectedRich = std::expected<T, CraneRichError>;
+
+inline const char* kDefaultHost = "0.0.0.0";
 
 inline const char* kCtldDefaultPort = "10011";
 inline const char* kCranedDefaultPort = "10010";
@@ -67,6 +70,11 @@ inline const char* kDefaultCranedScriptDir = "craned/scripts";
 inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
 inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
 inline const char* kDefaultCranedLogPath = "craned/craned.log";
+
+inline const char* kDefaultContainerTempDir = "craned/container";
+
+inline const char* kDefaultSupervisorPath = "/usr/libexec/csupervisor";
+inline const char* kDefaultSupervisorUnixSockDir = "/tmp/crane";
 
 inline const char* kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 
@@ -473,8 +481,22 @@ bool operator<=(const ResourceView& lhs, const ResourceInNode& rhs);
 bool operator<=(const ResourceView& lhs, const ResourceView& rhs);
 
 struct CgroupSpec {
+  CgroupSpec() = default;
+  CgroupSpec(const CgroupSpec& spce) = default;
+  explicit CgroupSpec(const crane::grpc::JobSpec& job_spec);
+  CgroupSpec(const task_id_t job_id, const uid_t uid,
+             const ResourceInNode& res_in_node,
+             const std::string& execution_node);
+
+  /**
+   * @brief set grpc struct,will move res_in_node field
+   * @param job_spec grpc job_spce to set
+   */
+  void SetJobSpec(crane::grpc::JobSpec* job_spec);
+  task_id_t job_id;
   uid_t uid;
-  task_id_t task_id;
   crane::grpc::ResourceInNode res_in_node;
   std::string execution_node;
+  // Recovered on start,no need to apply res limit.
+  bool recovered;
 };

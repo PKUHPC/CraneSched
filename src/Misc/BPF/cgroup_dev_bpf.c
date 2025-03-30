@@ -41,20 +41,19 @@ int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
 
   log_level_meta =
       (struct BpfDeviceMeta *)bpf_map_lookup_elem(&craned_dev_map, &log_key);
-  // 0 means trace mode ,1 means debug mode
-  uint32_t log_level;
+  int enable_logging;
   if (!log_level_meta) {
-    log_level = 0;
+    enable_logging = 0;
   } else {
-    log_level = log_level_meta->major;
+    enable_logging = log_level_meta->major;
   }
 
-  if (log_level <= 1) bpf_printk("ctx cgroup ID : %lu\n", key.cgroup_id);
+  if (enable_logging) bpf_printk("ctx cgroup ID : %lu\n", key.cgroup_id);
   struct BpfDeviceMeta *meta;
 
   meta = (struct BpfDeviceMeta *)bpf_map_lookup_elem(&craned_dev_map, &key);
   if (!meta) {
-    if (log_level <= 1) {
+    if (enable_logging) {
       bpf_printk("BpfDeviceMeta not found for key cgroup ID: %d,\n",
                  key.cgroup_id);
       bpf_printk("Access allowed for device major=%d, minor=%d\n", ctx->major,
@@ -66,7 +65,7 @@ int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
   short type = ctx->access_type & 0xFFFF;
   short access = ctx->access_type >> 16;
 
-  if (log_level <= 1)
+  if (enable_logging)
     bpf_printk("meta Device major=%d, minor=%d, access_type=%d\n", meta->major,
                meta->minor, meta->access);
 
@@ -75,21 +74,21 @@ int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
       int flag = 1;
       if (access & BPF_DEVCG_ACC_READ)
         if (meta->access & BPF_DEVCG_ACC_READ) {
-          if (log_level <= 1)
+          if (enable_logging)
             bpf_printk("Read access denied for device major=%d, minor=%d\n",
                        ctx->major, ctx->minor);
           flag &= 0;
         }
       if (access & BPF_DEVCG_ACC_WRITE)
         if (meta->access & BPF_DEVCG_ACC_WRITE) {
-          if (log_level <= 1)
+          if (enable_logging)
             bpf_printk("Write access denied for device major=%d, minor=%d\n",
                        ctx->major, ctx->minor);
           flag &= 0;
         }
       if (access & BPF_DEVCG_ACC_MKNOD)
         if (meta->access & BPF_DEVCG_ACC_MKNOD) {
-          if (log_level <= 1)
+          if (enable_logging)
             bpf_printk("Write access denied for device major=%d, minor=%d\n",
                        ctx->major, ctx->minor);
           flag &= 0;
@@ -98,7 +97,7 @@ int craned_device_access(struct bpf_cgroup_dev_ctx *ctx) {
     }
   }
 
-  if (log_level <= 1)
+  if (enable_logging)
     bpf_printk("Access allowed for device major=%d, minor=%d\n", ctx->major,
                ctx->minor);
   return 1;

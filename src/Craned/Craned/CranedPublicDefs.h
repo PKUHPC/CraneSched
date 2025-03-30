@@ -18,6 +18,9 @@
 
 #pragma once
 
+#include <filesystem>
+#include <string>
+
 #include "CranedPreCompiledHeader.h"
 // Precompiled header comes first
 
@@ -25,7 +28,7 @@
 
 namespace Craned {
 
-inline constexpr uint64_t kEvSigChldResendMs = 500;
+using namespace std::literals;
 
 using EnvMap = std::unordered_map<std::string, std::string>;
 
@@ -48,6 +51,35 @@ struct Partition {
   std::unordered_set<std::string> AllowedAccounts;
 };
 
+class flexible_latch {
+  std::mutex mtx;
+  std::condition_variable cv;
+  int count;
+
+ public:
+  explicit flexible_latch(int initial_count) : count(initial_count) {}
+
+  void count_down() {
+    std::lock_guard lock(mtx);
+    if (count > 0) {
+      count--;
+      if (count == 0) {
+        cv.notify_all();
+      }
+    }
+  }
+
+  void count_up() {
+    std::lock_guard lock(mtx);
+    count++;
+  }
+
+  void wait() {
+    std::unique_lock lock(mtx);
+    cv.wait(lock, [this] { return count == 0; });
+  }
+};
+
 struct Config {
   struct CranedListenConf {
     std::string CranedListenAddr;
@@ -58,12 +90,32 @@ struct Config {
 
     std::string UnixSocketListenAddr;
   };
+  struct ContainerConfig {
+    bool Enabled{false};
+    std::filesystem::path TempDir;
+    std::string RuntimeBin;
+
+    std::string RuntimeState;
+    std::string RuntimeKill;
+    std::string RuntimeDelete;
+
+    std::string RuntimeRun;     // Run tooks precedence over create,
+    std::string RuntimeCreate;  // however, create is OCI standard enforced
+    std::string RuntimeStart;
+  };
+  ContainerConfig Container;
 
   struct PluginConfig {
     bool Enabled{false};
     std::string PlugindSockPath;
   };
   PluginConfig Plugin;
+
+  struct SupervisorConfig {
+    std::filesystem::path Path;
+    std::string DebugLevel;
+  };
+  SupervisorConfig Supervisor;
 
   CranedListenConf ListenConf;
   bool CompressedRpc{};
@@ -72,11 +124,11 @@ struct Config {
   std::string CraneCtldListenPort;
   std::string CranedDebugLevel;
 
-  std::string CraneBaseDir;
-  std::string CranedLogFile;
-  std::string CranedMutexFilePath;
-  std::string CranedScriptDir;
-  std::string CranedUnixSockPath;
+  std::filesystem::path CraneBaseDir;
+  std::filesystem::path CranedLogFile;
+  std::filesystem::path CranedMutexFilePath;
+  std::filesystem::path CranedScriptDir;
+  std::filesystem::path CranedUnixSockPath;
 
   bool CranedForeground{};
 
@@ -88,7 +140,6 @@ struct Config {
     absl::Time CranedStartTime;
     absl::Time SystemBootTime;
   };
-
   CranedMeta CranedMeta;
 
   std::unordered_map<ipv4_t, std::string> Ipv4ToCranedHostname;

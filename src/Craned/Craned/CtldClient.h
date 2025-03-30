@@ -26,8 +26,6 @@
 namespace Craned {
 
 using crane::grpc::CraneCtld;
-using crane::grpc::CranedRegisterReply;
-using crane::grpc::CranedRegisterRequest;
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
@@ -50,7 +48,20 @@ class CtldClient {
    */
   void InitChannelAndStub(const std::string& server_address);
 
-  void OnCraneCtldConnected();
+  void SetCtldConnectedCb(std::function<void()> cb) {
+    absl::MutexLock lk(&m_cb_mutex_);
+    m_on_ctld_connected_cb_ = std::move(cb);
+  }
+
+  void SetCtldDisconnectedCb(std::function<void()> cb) {
+    absl::MutexLock lk(&m_cb_mutex_);
+    m_on_ctld_disconnected_cb_ = std::move(cb);
+  }
+
+  void CranedConnected();
+
+  void CranedReady(const std::vector<task_id_t>& nonexistent_jobs,
+                   std::uint64_t token);
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
@@ -79,6 +90,10 @@ class CtldClient {
   std::unique_ptr<CraneCtld::Stub> m_stub_;
 
   CranedId m_craned_id_;
+
+  absl::Mutex m_cb_mutex_;
+  std::function<void()> m_on_ctld_connected_cb_;
+  std::function<void()> m_on_ctld_disconnected_cb_;
 
   absl::Notification m_start_connecting_notification_;
 };
