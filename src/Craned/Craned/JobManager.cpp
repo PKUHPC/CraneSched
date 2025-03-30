@@ -436,6 +436,7 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
 
       container_conf->set_run_cmd(g_config.Container.RuntimeRun);
       container_conf->set_create_cmd(g_config.Container.RuntimeCreate);
+      container_conf->set_start_cmd(g_config.Container.RuntimeStart);
     }
 
     if (g_config.Plugin.Enabled) {

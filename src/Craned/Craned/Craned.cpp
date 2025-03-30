@@ -478,6 +478,15 @@ void ParseConfig(int argc, char** argv) {
               value_or(container_config["RuntimeRun"], "");
           g_config.Container.RuntimeCreate =
               value_or(container_config["RuntimeCreate"], "");
+          g_config.Container.RuntimeStart =
+              value_or(container_config["RuntimeStart"], "");
+
+          if (g_config.Container.RuntimeCreate.empty() !=
+              g_config.Container.RuntimeStart.empty()) {
+            CRANE_ERROR(
+                "RuntimeCreate and RuntimeStart must be configured together.");
+            std::exit(1);
+          }
 
           if (g_config.Container.RuntimeRun.empty() &&
               g_config.Container.RuntimeCreate.empty()) {

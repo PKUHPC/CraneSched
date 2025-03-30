@@ -31,6 +31,7 @@
 #include "CranedClient.h"
 #include "SupervisorPublicDefs.h"
 #include "SupervisorServer.h"
+#include "crane/Logger.h"
 #include "crane/OS.h"
 #include "crane/PublicHeader.h"
 #include "crane/String.h"
@@ -177,7 +178,7 @@ EnvMap ExecutionInterface::GetChildProcessEnv_() const {
   return env_map;
 }
 
-CraneErrCode ExecutionInterface::SetupCrunX11_() {
+CraneErrCode ExecutionInterface::SetCrunX11_() {
   auto* inst_crun_meta = this->GetCrunMeta();
   const PasswordEntry& pwd_entry = this->pwd;
 
@@ -239,7 +240,7 @@ CraneExpected<pid_t> ExecutionInterface::Fork_(bool* launch_pty,
   }
 }
 
-uint16_t ExecutionInterface::SetupCrunMsgFwd_(
+uint16_t ExecutionInterface::SetCrunMsgFwd_(
     bool launch_pty, const std::vector<int>& to_crun_pipe,
     const std::vector<int>& from_crun_pipe, int crun_pty_fd) {
   auto* meta = dynamic_cast<CrunMetaInExecution*>(m_meta_.get());
@@ -355,7 +356,7 @@ CraneErrCode ExecutionInterface::SetChildProcessBatchFd_() {
   return CraneErrCode::SUCCESS;
 }
 
-void ExecutionInterface::SetupChildProcessCrunFd_(
+void ExecutionInterface::SetChildProcessCrunFd_(
     bool launch_pty, const std::vector<int>& to_crun_pipe,
     const std::vector<int>& from_crun_pipe, int crun_pty_fd) {
   if (!launch_pty) {
@@ -369,7 +370,7 @@ void ExecutionInterface::SetupChildProcessCrunFd_(
   close(from_crun_pipe[1]);
 }
 
-void ExecutionInterface::SetupChildProcessCrunX11_(uint16_t port) {
+void ExecutionInterface::SetChildProcessCrunX11_(uint16_t port) {
   auto* inst_crun_meta = this->GetCrunMeta();
   const auto& proto_x11_meta =
       this->step_spec->spec.interactive_meta().x11_meta();
@@ -403,8 +404,7 @@ void ExecutionInterface::SetupChildProcessCrunX11_(uint16_t port) {
   subprocess_s subprocess{};
   int result = subprocess_create(xauth_argv.data(), 0, &subprocess);
   if (0 != result) {
-    fmt::print(stderr,
-               "[Craned Subprocess] xauth subprocess creation failed: {}.\n",
+    fmt::print(stderr, "[Subprocess] xauth subprocess creation failed: {}.\n",
                strerror(errno));
     std::abort();
   }
@@ -421,17 +421,15 @@ void ExecutionInterface::SetupChildProcessCrunX11_(uint16_t port) {
     xauth_stderr_str.append(buf.get());
 
   if (0 != subprocess_join(&subprocess, &result))
-    fmt::print(stderr, "[Craned Subprocess] xauth join failed.\n");
+    fmt::print(stderr, "[Subprocess] xauth join failed.\n");
 
   if (0 != subprocess_destroy(&subprocess))
-    fmt::print(stderr, "[Craned Subprocess] xauth destroy failed.\n");
+    fmt::print(stderr, "[Subprocess] xauth destroy failed.\n");
 
   if (result != 0) {
-    fmt::print(stderr, "[Craned Subprocess] xauth return with {}.\n", result);
-    fmt::print(stderr, "[Craned Subprocess] xauth stdout: {}\n",
-               xauth_stdout_str);
-    fmt::print(stderr, "[Craned Subprocess] xauth stderr: {}\n",
-               xauth_stderr_str);
+    fmt::print(stderr, "[Subprocess] xauth return with {}.\n", result);
+    fmt::print(stderr, "[Subprocess] xauth stdout: {}\n", xauth_stdout_str);
+    fmt::print(stderr, "[Subprocess] xauth stderr: {}\n", xauth_stderr_str);
   }
 }
 
@@ -478,6 +476,49 @@ std::string ContainerInstance::ParseOCICmdPattern_(
                        {"%U", std::to_string(pwd.Uid())}},
                       &parsed_cmd);
   return parsed_cmd;
+}
+
+// If OCI runtime does not support `run` command, we have to use `create`.
+CraneErrCode ContainerInstance::CreateContainer_(
+    const std::string& create_cmd) const {
+  std::vector<const char*> argv;
+  for (auto&& s : std::views::split(create_cmd, ' ')) {
+    argv.emplace_back(s.data());
+  }
+  argv.push_back(nullptr);
+
+  subprocess_s subprocess{};
+  int rc = subprocess_create(argv.data(), 0, &subprocess);
+  if (rc) {
+    CRANE_ERROR("Failed to create subprocess for OCI create: {}.",
+                strerror(errno));
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  auto buf = std::make_unique<char[]>(4096);
+  std::string runtime_stdout_str, runtime_stderr_str;
+
+  std::FILE* cmd_fd = subprocess_stdout(&subprocess);
+  while (std::fgets(buf.get(), 4096, cmd_fd) != nullptr)
+    runtime_stdout_str.append(buf.get());
+
+  cmd_fd = subprocess_stderr(&subprocess);
+  while (std::fgets(buf.get(), 4096, cmd_fd) != nullptr)
+    runtime_stderr_str.append(buf.get());
+
+  if (0 != subprocess_join(&subprocess, &rc))
+    CRANE_ERROR("Failed to join subprocess for OCI create.");
+
+  if (0 != subprocess_destroy(&subprocess))
+    CRANE_ERROR("Failed to destroy subprocess for OCI create.");
+
+  if (rc != 0) {
+    CRANE_ERROR("OCI create return with {}. stdout: {}; stderr: {}.", rc,
+                runtime_stdout_str, runtime_stderr_str);
+    return CraneErrCode::ERR_SYSTEM_ERR;
+  }
+
+  return CraneErrCode::SUCCESS;
 }
 
 CraneErrCode ContainerInstance::ModifyOCIBundleConfig_(
@@ -574,9 +615,8 @@ CraneErrCode ContainerInstance::Prepare() {
   m_temp_path_ =
       g_config.Container.TempDir / fmt::format("{}", step_spec->spec.task_id());
   m_bundle_path_ = step_spec->spec.container();
-  m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeRun);
   m_env_ = GetChildProcessEnv_();
-  // m_arguments_ is not applicable for container tasks.
+  m_has_run_cmd_ = !g_config.Container.RuntimeRun.empty();
 
   // Check relative path
   if (m_bundle_path_.is_relative())
@@ -640,6 +680,25 @@ CraneErrCode ContainerInstance::Prepare() {
     return err;
   }
 
+  // If the runtime supports `run` command, we can just return.
+  if (m_has_run_cmd_) {
+    m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeRun);
+    CRANE_DEBUG("Runtime {} supports run command, will use {}. ",
+                g_config.Container.RuntimeBin, m_executable_);
+    return CraneErrCode::SUCCESS;
+  }
+
+  // Otherwise, we need to create the container before starting it.
+  err = CreateContainer_(ParseOCICmdPattern_(g_config.Container.RuntimeCreate));
+  if (err != CraneErrCode::SUCCESS) {
+    CRANE_ERROR("Failed to create container for task #{}",
+                step_spec->spec.task_id());
+    return err;
+  }
+
+  // After creating the container, we can start it later.
+  m_executable_ = ParseOCICmdPattern_(g_config.Container.RuntimeStart);
+
   return CraneErrCode::SUCCESS;
 }
 
@@ -659,7 +718,7 @@ CraneErrCode ContainerInstance::Spawn() {
 
   if (this->step_spec->IsCrun() &&
       this->step_spec->spec.interactive_meta().x11()) {
-    auto err = SetupCrunX11_();
+    auto err = SetCrunX11_();
     if (err != CraneErrCode::SUCCESS) {
       CRANE_WARN("Failed to setup crun X11 forwarding.");
       return err;
@@ -698,8 +757,8 @@ CraneErrCode ContainerInstance::Spawn() {
 
     if (step_spec->IsCrun()) {
       auto& proto_ia_meta = step_spec->spec.interactive_meta();
-      auto port = SetupCrunMsgFwd_(launch_pty, to_crun_pipe, from_crun_pipe,
-                                   crun_pty_fd);
+      auto port =
+          SetCrunMsgFwd_(launch_pty, to_crun_pipe, from_crun_pipe, crun_pty_fd);
       msg.set_x11_port(port);
       CRANE_TRACE("Crun task x11 enabled: {}, forwarding: {}, port: {}",
                   proto_ia_meta.x11(),
@@ -792,8 +851,8 @@ CraneErrCode ContainerInstance::Spawn() {
     if (step_spec->IsBatch()) {
       SetChildProcessBatchFd_();
     } else if (step_spec->IsCrun()) {
-      SetupChildProcessCrunFd_(launch_pty, to_crun_pipe, from_crun_pipe,
-                               crun_pty_fd);
+      SetChildProcessCrunFd_(launch_pty, to_crun_pipe, from_crun_pipe,
+                             crun_pty_fd);
     }
 
     child_process_ready.set_ok(true);
@@ -915,7 +974,7 @@ CraneErrCode ContainerInstance::Kill(int signum) {
     }
 
   ProcessKill:
-    // Kill runc process as the last resort.
+    // Kill the runtime process (e.g., runc) as the last resort.
     // Note: If runc is launched in `detached` mode, this will not work.
     rc = kill(-m_pid_, signum);
     if (rc && (errno != ESRCH)) {
@@ -1021,7 +1080,7 @@ CraneErrCode ProcessInstance::Spawn() {
 
   if (this->step_spec->IsCrun() &&
       this->step_spec->spec.interactive_meta().x11()) {
-    auto err = SetupCrunX11_();
+    auto err = SetCrunX11_();
     if (err != CraneErrCode::SUCCESS) {
       CRANE_WARN("Failed to setup crun X11 forwarding.");
       return err;
@@ -1062,8 +1121,8 @@ CraneErrCode ProcessInstance::Spawn() {
 
     if (step_spec->IsCrun()) {
       auto& proto_ia_meta = step_spec->spec.interactive_meta();
-      auto port = SetupCrunMsgFwd_(launch_pty, to_crun_pipe, from_crun_pipe,
-                                   crun_pty_fd);
+      auto port =
+          SetCrunMsgFwd_(launch_pty, to_crun_pipe, from_crun_pipe, crun_pty_fd);
       msg.set_x11_port(port);
       CRANE_TRACE("Crun task x11 enabled: {}, forwarding: {}, port: {}",
                   proto_ia_meta.x11(),
@@ -1156,8 +1215,8 @@ CraneErrCode ProcessInstance::Spawn() {
     if (step_spec->IsBatch()) {
       SetChildProcessBatchFd_();
     } else if (step_spec->IsCrun()) {
-      SetupChildProcessCrunFd_(launch_pty, to_crun_pipe, from_crun_pipe,
-                               crun_pty_fd);
+      SetChildProcessCrunFd_(launch_pty, to_crun_pipe, from_crun_pipe,
+                             crun_pty_fd);
     }
 
     child_process_ready.set_ok(true);
@@ -1177,7 +1236,7 @@ CraneErrCode ProcessInstance::Spawn() {
     util::os::CloseFdFrom(3);
 
     if (step_spec->IsCrun() && step_spec->spec.interactive_meta().x11())
-      SetupChildProcessCrunX11_(GetCrunMeta()->x11_port);
+      SetChildProcessCrunX11_(GetCrunMeta()->x11_port);
 
     // Apply environment variables
     err = SetChildProcessEnv_();
