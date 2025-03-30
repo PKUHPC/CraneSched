@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <string>
+
 #include "SupervisorPreCompiledHeader.h"
 // Precompiled header comes first
 
@@ -46,10 +48,13 @@ struct Config {
     bool Enabled{false};
     std::filesystem::path TempDir;
     std::string RuntimeBin;
+
     std::string RuntimeState;
-    std::string RuntimeRun;
     std::string RuntimeKill;
     std::string RuntimeDelete;
+
+    std::string RuntimeRun;
+    std::string RuntimeCreate;
   };
   ContainerConfig Container;
 

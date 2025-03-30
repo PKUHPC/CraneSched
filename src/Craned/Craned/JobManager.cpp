@@ -429,10 +429,13 @@ CraneErrCode JobManager::SpawnSupervisor_(JobInstance* job,
       auto* container_conf = init_req.mutable_container_config();
       container_conf->set_temp_dir(g_config.Container.TempDir);
       container_conf->set_runtime_bin(g_config.Container.RuntimeBin);
+
       container_conf->set_state_cmd(g_config.Container.RuntimeState);
-      container_conf->set_run_cmd(g_config.Container.RuntimeRun);
       container_conf->set_kill_cmd(g_config.Container.RuntimeKill);
       container_conf->set_delete_cmd(g_config.Container.RuntimeDelete);
+
+      container_conf->set_run_cmd(g_config.Container.RuntimeRun);
+      container_conf->set_create_cmd(g_config.Container.RuntimeCreate);
     }
 
     if (g_config.Plugin.Enabled) {

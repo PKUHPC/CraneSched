@@ -474,11 +474,14 @@ void ParseConfig(int argc, char** argv) {
             std::exit(1);
           }
 
-          if (container_config["RuntimeRun"]) {
-            g_config.Container.RuntimeRun =
-                container_config["RuntimeRun"].as<std::string>();
-          } else {
-            CRANE_ERROR("RuntimeRun is not configured.");
+          g_config.Container.RuntimeRun =
+              value_or(container_config["RuntimeRun"], "");
+          g_config.Container.RuntimeCreate =
+              value_or(container_config["RuntimeCreate"], "");
+
+          if (g_config.Container.RuntimeRun.empty() &&
+              g_config.Container.RuntimeCreate.empty()) {
+            CRANE_ERROR("Neither RuntimeCreate nor RuntimeRun is configured.");
             std::exit(1);
           }
         }

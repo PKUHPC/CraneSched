@@ -90,10 +90,13 @@ void InitFromStdin(int argc, char** argv) {
   if (g_config.Container.Enabled) {
     g_config.Container.TempDir = msg.container_config().temp_dir();
     g_config.Container.RuntimeBin = msg.container_config().runtime_bin();
+
     g_config.Container.RuntimeState = msg.container_config().state_cmd();
-    g_config.Container.RuntimeRun = msg.container_config().run_cmd();
     g_config.Container.RuntimeKill = msg.container_config().kill_cmd();
     g_config.Container.RuntimeDelete = msg.container_config().delete_cmd();
+
+    g_config.Container.RuntimeRun = msg.container_config().run_cmd();
+    g_config.Container.RuntimeCreate = msg.container_config().create_cmd();
   }
 
   // Plugin config
