@@ -97,6 +97,7 @@ void InitFromStdin(int argc, char** argv) {
 
     g_config.Container.RuntimeRun = msg.container_config().run_cmd();
     g_config.Container.RuntimeCreate = msg.container_config().create_cmd();
+    g_config.Container.RuntimeStart = msg.container_config().start_cmd();
   }
 
   // Plugin config

@@ -19,6 +19,7 @@
 #pragma once
 
 #include <filesystem>
+#include <string>
 
 #include "CranedPreCompiledHeader.h"
 // Precompiled header comes first
@@ -93,11 +94,14 @@ struct Config {
     bool Enabled{false};
     std::filesystem::path TempDir;
     std::string RuntimeBin;
+
     std::string RuntimeState;
-    std::string RuntimeRun;     // Run tooks precedence over create,
-    std::string RuntimeCreate;  // however, create is OCI standard enforced
     std::string RuntimeKill;
     std::string RuntimeDelete;
+
+    std::string RuntimeRun;     // Run tooks precedence over create,
+    std::string RuntimeCreate;  // however, create is OCI standard enforced
+    std::string RuntimeStart;
   };
   ContainerConfig Container;
 

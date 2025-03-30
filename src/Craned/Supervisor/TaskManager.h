@@ -92,35 +92,39 @@ class ExecutionInterface {
   CrunMetaInExecution* GetCrunMeta() const {
     return dynamic_cast<CrunMetaInExecution*>(this->m_meta_.get());
   };
+
   // FIXME: Remove this in future.
   // Before we distinguish TaskToD/SpecToSuper and JobSpec, it's hard to remove
   // this function.
   [[deprecated]] virtual EnvMap GetChildProcessEnv_() const;
+  std::string ParseFilePathPattern_(const std::string& pattern,
+                                    const std::string& cwd) const;
 
-  // Helper methods
-  CraneErrCode SetupCrunX11_();
+  // Helper methods (in parent process)
   // Return error before fork.
   virtual CraneExpected<pid_t> Fork_(bool* launch_pty,
                                      std::vector<int>* to_crun_pipe,
                                      std::vector<int>* from_crun_pipe,
                                      int* crun_pty_fd);
-  virtual uint16_t SetupCrunMsgFwd_(bool launch_pty,
-                                    const std::vector<int>& to_crun_pipe,
-                                    const std::vector<int>& from_crun_pipe,
-                                    int crun_pty_fd);
+  virtual CraneErrCode SetCrunX11_();
+  virtual uint16_t SetCrunMsgFwd_(bool launch_pty,
+                                  const std::vector<int>& to_crun_pipe,
+                                  const std::vector<int>& from_crun_pipe,
+                                  int crun_pty_fd);
+
+  // Helper methods (in child process)
   virtual void SetChildProcessSignalHandler_();
+  virtual CraneErrCode SetChildProcessEnv_() const;
   virtual CraneErrCode SetChildProcessProperty_();
   virtual CraneErrCode SetChildProcessBatchFd_();
-  virtual void SetupChildProcessCrunFd_(bool launch_pty,
-                                        const std::vector<int>& to_crun_pipe,
-                                        const std::vector<int>& from_crun_pipe,
-                                        int crun_pty_fd);
-  virtual void SetupChildProcessCrunX11_(uint16_t port);
-  virtual CraneErrCode SetChildProcessEnv_() const;
-  virtual std::vector<std::string> GetChildProcessExecArgv_() const;
 
-  std::string ParseFilePathPattern_(const std::string& pattern,
-                                    const std::string& cwd) const;
+  virtual void SetChildProcessCrunFd_(bool launch_pty,
+                                      const std::vector<int>& to_crun_pipe,
+                                      const std::vector<int>& from_crun_pipe,
+                                      int crun_pty_fd);
+  virtual void SetChildProcessCrunX11_(uint16_t port);
+
+  virtual std::vector<std::string> GetChildProcessExecArgv_() const;
 
   pid_t m_pid_{0};  // forked pid
   std::unique_ptr<MetaInExecution> m_meta_{nullptr};
@@ -148,8 +152,10 @@ class ContainerInstance : public ExecutionInterface {
  private:
   CraneErrCode ModifyOCIBundleConfig_(const std::string& src,
                                       const std::string& dst) const;
+  CraneErrCode CreateContainer_(const std::string& create_cmd) const;
   std::string ParseOCICmdPattern_(const std::string& cmd) const;
 
+  bool m_has_run_cmd_{false};
   std::filesystem::path m_bundle_path_;
   std::filesystem::path m_temp_path_;
 };
