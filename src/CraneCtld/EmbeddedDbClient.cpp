@@ -498,6 +498,7 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
 #ifdef CRANE_HAVE_UNQLITE
     m_variable_db_ = std::make_unique<UnqliteDb>();
     m_fixed_db_ = std::make_unique<UnqliteDb>();
+    m_reservation_db_ = std::make_unique<UnqliteDb>();
 #else
     CRANE_ERROR(
         "Select unqlite as the embedded db but it's not been compiled.");
@@ -508,6 +509,7 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
 #ifdef CRANE_HAVE_BERKELEY_DB
     m_variable_db_ = std::make_unique<BerkeleyDb>();
     m_fixed_db_ = std::make_unique<BerkeleyDb>();
+    m_reservation_db_ = std::make_unique<BerkeleyDb>();
 #else
     CRANE_ERROR(
         "Select Berkeley DB as the embedded db but it's not been compiled.");
@@ -523,6 +525,8 @@ bool EmbeddedDbClient::Init(const std::string& db_path) {
   auto result = m_variable_db_->Init(db_path + "var");
   if (!result) return false;
   result = m_fixed_db_->Init(db_path + "fix");
+  if (!result) return false;
+  result = m_reservation_db_->Init(db_path + "resv");
   if (!result) return false;
 
   bool ok;
@@ -602,6 +606,34 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
 
   if (!result) {
     CRANE_ERROR("Failed to restore fixed data into queues!");
+    return false;
+  }
+
+  return true;
+}
+
+bool EmbeddedDbClient::RetrieveReservationInfo(
+    std::unordered_map<ReservationId, crane::grpc::CreateReservationRequest>*
+        reservation_info) {
+  std::expected<void, DbErrorCode> result;
+
+  result = m_reservation_db_->IterateAllKv(
+      [&](std::string&& key, std::vector<uint8_t>&& value) {
+        // Skip if not ReservationInfo
+        if (!IsReservationDbTaskDataEntry_(key)) return true;
+
+        ReservationId id = ExtractStrDbIdFromEntry_(key);
+
+        crane::grpc::CreateReservationRequest info;
+        info.ParseFromArray(value.data(), value.size());
+
+        reservation_info->emplace(id, std::move(info));
+
+        return true;
+      });
+
+  if (!result) {
+    CRANE_ERROR("Failed to restore the reservation info into queues");
     return false;
   }
 

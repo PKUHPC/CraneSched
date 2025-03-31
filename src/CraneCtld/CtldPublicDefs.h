@@ -216,6 +216,33 @@ struct CranedMeta {
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
   absl::flat_hash_map<task_id_t, ResourceInNode> running_task_resource_map;
+
+  struct ReservationInNode {
+    absl::Time start_time;
+    absl::Time end_time;
+    ResourceInNode res_total;
+  };
+  // Store total resource of each reservation.
+  absl::flat_hash_map<ReservationId, ReservationInNode>
+      reservation_resource_map;
+};
+
+struct ReservationMeta {
+  ReservationId name;
+  ResourceV2 resources_total;
+  ResourceV2 resources_avail;
+  ResourceV2 resources_in_use;
+
+  absl::Time start_time;
+  absl::Time end_time;
+
+  PartitionId partition_id;
+  std::list<CranedId> craned_ids;
+
+  absl::flat_hash_map<task_id_t, ResourceV2> running_task_resource_map;
+
+  std::pair<bool /*1 for disallow*/, std::unordered_set<std::string>> accounts;
+  std::pair<bool /*1 for disallow*/, std::unordered_set<std::string>> users;
 };
 
 struct PartitionGlobalMeta {
@@ -318,6 +345,8 @@ struct TaskInCtld {
   std::string extra_attr;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
+
+  std::string reservation;
 
  private:
   /* ------------- [2] -------------
@@ -534,6 +563,8 @@ struct TaskInCtld {
     get_user_env = val.get_user_env();
 
     extra_attr = val.extra_attr();
+
+    reservation = val.reservation();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {

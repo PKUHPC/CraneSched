@@ -191,7 +191,18 @@ message QueryPartitionInfoRequest {
 }
 
 message QueryPartitionInfoReply {
-  repeated PartitionInfo partition_info = 1;
+  repeated PartitionInfo partition_info_list = 1;
+}
+
+message QueryReservationInfoRequest {
+  uint32 uid = 1;
+  string reservation_name = 2;
+}
+
+message QueryReservationInfoReply {
+  bool ok = 1;
+  string reason = 2;
+  repeated ReservationInfo reservation_info_list = 3;
 }
 
 message ModifyTaskRequest {
@@ -459,6 +470,35 @@ message QueryTasksInfoRequest{
 message QueryTasksInfoReply{
   bool ok = 1;
   repeated TaskInfo task_info_list = 2;
+}
+
+message CreateReservationRequest {
+  uint32 uid = 1;
+  string reservation_name = 2;
+  int64 start_time_seconds = 3;
+  int64 duration_seconds = 4;
+  string partition = 5;
+  string craned_regex = 6;
+
+  repeated string allowed_accounts = 7;
+  repeated string denied_accounts = 8;
+  repeated string allowed_users = 9;
+  repeated string denied_users = 10;
+}
+
+message CreateReservationReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message DeleteReservationRequest {
+  uint32 uid = 1;
+  string reservation_name = 2;
+}
+
+message DeleteReservationReply {
+  bool ok = 1;
+  string reason = 2;
 }
 
 message StreamCallocRequest {
@@ -806,6 +846,7 @@ service CraneCtld {
   /* PRCs called from ccontrol */
   rpc QueryCranedInfo(QueryCranedInfoRequest) returns (QueryCranedInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+  rpc QueryReservationInfo(QueryReservationInfoRequest) returns (QueryReservationInfoReply);
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
   rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
@@ -834,6 +875,8 @@ service CraneCtld {
 
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
+  rpc CreateReservation(CreateReservationRequest) returns (CreateReservationReply);
+  rpc DeleteReservation(DeleteReservationRequest) returns (DeleteReservationReply);
 }
 
 service Craned {
