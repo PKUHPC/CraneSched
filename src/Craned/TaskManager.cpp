@@ -974,7 +974,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     EnvMap task_env_map = instance->GetTaskEnvMap();
     EnvMap res_env_map =
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
-
+    // TODO: 将pmix env传送进去
     // clearenv() should be called just before fork!
     if (clearenv())
       fmt::print(stderr, "[Craned Subprocess] clearenv() failed.\n");
