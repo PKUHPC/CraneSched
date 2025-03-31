@@ -218,6 +218,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryPartitionInfoRequest *request,
       crane::grpc::QueryPartitionInfoReply *response) override;
 
+  grpc::Status QueryReservationInfo(
+      grpc::ServerContext *context,
+      const crane::grpc::QueryReservationInfoRequest *request,
+      crane::grpc::QueryReservationInfoReply *response) override;
+
   grpc::Status ModifyTask(grpc::ServerContext *context,
                           const crane::grpc::ModifyTaskRequest *request,
                           crane::grpc::ModifyTaskReply *response) override;
@@ -293,6 +298,16 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       grpc::ServerContext *context,
       const crane::grpc::QueryClusterInfoRequest *request,
       crane::grpc::QueryClusterInfoReply *response) override;
+
+  grpc::Status CreateReservation(
+      grpc::ServerContext *context,
+      const crane::grpc::CreateReservationRequest *request,
+      crane::grpc::CreateReservationReply *response) override;
+
+  grpc::Status DeleteReservation(
+      grpc::ServerContext *context,
+      const crane::grpc::DeleteReservationRequest *request,
+      crane::grpc::DeleteReservationReply *response) override;
 
  private:
   CtldServer *m_ctld_server_;
