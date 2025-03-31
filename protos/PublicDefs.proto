@@ -68,10 +68,6 @@ message ResourceV2 {
   map<string /*craned id*/, ResourceInNode> each_node_res = 1;
 }
 
-message AllocResourceView {
-  map<string /*craned id*/, ResourceView> alloc_res_view = 1;
-}
-
 message ResourceView {
   AllocatableResource allocatable_res = 1;
   DeviceMap device_map = 2;
