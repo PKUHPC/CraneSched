@@ -273,6 +273,8 @@ message InteractiveTaskAdditionalMeta {
 
   bool x11 = 6;
   X11Meta x11_meta = 7;
+
+  string mpi = 8;
 }
 
 message TaskInfo {
@@ -606,4 +608,9 @@ message CranedRemoteMeta {
   repeated uint32 lost_jobs = 7;
   repeated NetworkInterface network_interfaces = 8;
   uint32 config_crc = 9;
+}
+
+message PmixProc {
+  string nspace = 1;
+  uint32 rank = 2;
 }
