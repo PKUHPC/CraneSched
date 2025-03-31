@@ -1,0 +1,34 @@
+name: Clang Format Check
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+      - release/*
+
+jobs:
+  format:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install latest Clang-Format
+        run: |
+          sudo apt update
+          sudo apt install -y clang-format
+
+      - name: Run clang-format check
+        run: |
+          git diff --name-only origin/master...HEAD | while read -r file; do
+            if [[ "$file" == *.cpp || "$file" == *.h ]]; then
+              clang-format --dry-run --Werror "$file" --style=file
+            fi
+          done
