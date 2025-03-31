@@ -29,7 +29,7 @@ add_executable(cranectld
 )
 
 if (CRANE_RAFT_SERVER)
-    target_sources(cranectld
+    target_sources(cranectld PRIVATE
             CraneStateMachine.cpp
             CraneStateMachine.h
             RaftServerStuff.cpp
