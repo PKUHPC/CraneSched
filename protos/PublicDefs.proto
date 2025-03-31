@@ -450,6 +450,8 @@ message InteractiveTaskAdditionalMeta {
 
   // Crun input will forward to these tasks
   optional uint32 input_task_id = 8;
+
+  string mpi = 9;
 }
 
 message PodTaskAdditionalMeta {
@@ -1046,4 +1048,8 @@ message JobSizeSummaryItem {
   uint32 cpus_alloc = 4;
   double total_cpu_time = 5;
   int64 total_count = 6;
+}
+message PmixProc {
+  string nspace = 1;
+  uint32 rank = 2;
 }

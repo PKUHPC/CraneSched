@@ -35,6 +35,9 @@
 
 #include "CgroupManager.h"
 #include "CranedForPamServer.h"
+#include "CforedClient.h"
+#include "CranedASyncServer.h"
+#include "CranedClient.h"
 #include "CranedServer.h"
 #include "CtldClient.h"
 #include "DeviceManager.h"
@@ -476,6 +479,10 @@ void ParseConfig(int argc, char** argv) {
                         fmt::join(name_list, ", "));
           } else
             std::exit(1);
+
+          for (auto& name : name_list) {
+            g_config.NodeList.insert(name);
+          }
 
           if (node["cpu"])
             node_res->allocatable_res.cpu_count =
