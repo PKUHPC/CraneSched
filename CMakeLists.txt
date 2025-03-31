@@ -307,6 +307,27 @@ add_subdirectory(dependencies/CPM EXCLUDE_FROM_ALL)
 # Notify CMake that we have module files to find packages/libs.
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
 
+set(WITH_PMIX "" CACHE PATH "PMIx installation directory")
+if(NOT WITH_PMIX)
+    set(WITH_PMIX "/usr/local")
+endif()
+
+find_path(PMIX_INCLUDE_DIR pmix.h PATHS "${WITH_PMIX}/include" NO_DEFAULT_PATH)
+find_library(PMIX_LIBRARY pmix PATHS "${WITH_PMIX}/lib" NO_DEFAULT_PATH)
+
+if(NOT PMIX_INCLUDE_DIR OR NOT PMIX_LIBRARY)
+    message(FATAL_ERROR "Could not find PMIx in ${WITH_PMIX}")
+endif()
+
+message(STATUS "Found PMIx include: ${PMIX_INCLUDE_DIR}")
+message(STATUS "Found PMIx library: ${PMIX_LIBRARY}")
+
+add_library(libpmix SHARED IMPORTED)
+set_target_properties(libpmix PROPERTIES
+        IMPORTED_LOCATION "${PMIX_LIBRARY}"
+        INTERFACE_INCLUDE_DIRECTORIES "${PMIX_INCLUDE_DIR}"
+)
+
 if (ENABLE_BERKELEY_DB)
     message("Enable berkeley db as one of embedded db backend.")
     find_package(BerkeleyDB REQUIRED)
