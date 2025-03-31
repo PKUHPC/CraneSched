@@ -54,10 +54,18 @@ class CranedMetaContainer final {
       util::AtomicHashMap<HashMap, CranedId, CranedMeta>;
   using CranedMetaRawMap = CranedMetaAtomicMap::RawMap;
 
+  using ReservationMetaAtomicMap =
+      util::AtomicHashMap<HashMap, std::string, ReservationMeta>;
+  using ReservationMetaRawMap = ReservationMetaAtomicMap::RawMap;
+
   using AllPartitionsMetaMapConstPtr =
       util::ScopeConstSharedPtr<AllPartitionsMetaRawMap, util::rw_mutex>;
   using CranedMetaMapConstPtr =
       util::ScopeConstSharedPtr<CranedMetaRawMap, util::rw_mutex>;
+  using ReservationMetaMapConstPtr =
+      util::ScopeConstSharedPtr<ReservationMetaRawMap, util::rw_mutex>;
+
+  using ReservationMetaMapPtr = ReservationMetaAtomicMap::MapSharedPtr;
 
   using PartitionMetaPtr =
       util::ManagedScopeExclusivePtr<PartitionMeta,
@@ -65,6 +73,9 @@ class CranedMetaContainer final {
   using CranedMetaPtr =
       util::ManagedScopeExclusivePtr<CranedMeta,
                                      CranedMetaAtomicMap::CombinedLock>;
+  using ReservationMetaPtr =
+      util::ManagedScopeExclusivePtr<ReservationMeta,
+                                     ReservationMetaAtomicMap::CombinedLock>;
 
   CranedMetaContainer() = default;
   ~CranedMetaContainer() = default;
@@ -76,13 +87,17 @@ class CranedMetaContainer final {
 
   crane::grpc::QueryCranedInfoReply QueryAllCranedInfo();
 
-  crane::grpc::QueryCranedInfoReply QueryCranedInfo(
-      const std::string& node_name);
+  crane::grpc::QueryCranedInfoReply QueryCranedInfo(const CranedId& node_name);
 
   crane::grpc::QueryPartitionInfoReply QueryAllPartitionInfo();
 
   crane::grpc::QueryPartitionInfoReply QueryPartitionInfo(
-      const std::string& partition_name);
+      const PartitionId& partition_name);
+
+  crane::grpc::QueryReservationInfoReply QueryAllReservationInfo();
+
+  crane::grpc::QueryReservationInfoReply QueryReservationInfo(
+      const ReservationId& reservation_name);
 
   crane::grpc::QueryClusterInfoReply QueryClusterInfo(
       const crane::grpc::QueryClusterInfoRequest& request);
@@ -107,9 +122,15 @@ class CranedMetaContainer final {
 
   CranedMetaPtr GetCranedMetaPtr(CranedId craned_id);
 
+  ReservationMetaPtr GetReservationMetaPtr(const ReservationId& name);
+
   AllPartitionsMetaMapConstPtr GetAllPartitionsMetaMapConstPtr();
 
   CranedMetaMapConstPtr GetCranedMetaMapConstPtr();
+
+  ReservationMetaMapConstPtr GetReservationMetaMapConstPtr();
+
+  ReservationMetaMapPtr GetReservationMetaMapPtr();
 
   bool CheckCranedAllowed(const std::string& hostname) {
     return craned_meta_map_.Contains(hostname);
@@ -120,15 +141,23 @@ class CranedMetaContainer final {
 
   void FreeResourceFromNode(CranedId craned_id, uint32_t task_id);
 
+  void MallocResourceFromReservation(ReservationId reservation_id,
+                                     task_id_t task_id,
+                                     const ResourceV2& resources);
+
+  void FreeResourceFromReservation(ReservationId reservation_id,
+                                   task_id_t task_id);
+
  private:
   // In this part of code, the following lock sequence MUST be held
   // to avoid deadlock:
-  // 1. lock elements in partition_metas_map_
+  // 1. lock elements in partition_meta_map_
   // 2. lock elements in craned_meta_map_
   // 3. unlock elements in craned_meta_map_
-  // 4. unlock elements in partition_metas_map_
+  // 4. unlock elements in partition_meta_map_
   CranedMetaAtomicMap craned_meta_map_;
-  AllPartitionsMetaAtomicMap partition_metas_map_;
+  AllPartitionsMetaAtomicMap partition_meta_map_;
+  ReservationMetaAtomicMap reservation_meta_map_;
 
   // A craned node may belong to multiple partitions.
   // Use this map as a READ-ONLY index, so multi-thread reading is ok.

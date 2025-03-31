@@ -55,12 +55,12 @@ class BasicPriority : public IPrioritySorter {
     int i = 0;
     for (auto it = pending_task_map.begin(); i < len; i++, it++) {
       TaskInCtld* task = it->second.get();
-      if (!task->Held()) {
-        task_id_vec.emplace_back(it->first);
-        it->second->pending_reason = "Priority";
-      } else {
+      if (task->Held()) {
         it->second->pending_reason = "Held";
+        continue;
       }
+      it->second->pending_reason = "";
+      task_id_vec.emplace_back(it->first);
     }
 
     return task_id_vec;
@@ -309,11 +309,22 @@ class MinLoadFirst : public INodeSelectionAlgo {
       return m_cost_node_id_set_;
     }
 
+    absl::Time GetFirstResvTime(const CranedId& craned_id) {
+      auto iter = m_first_resv_time_map_.find(craned_id);
+      if (iter == m_first_resv_time_map_.end()) return absl::InfiniteFuture();
+      return iter->second;
+    }
+
+    void SetFirstResvTime(const CranedId& craned_id, absl::Time time) {
+      m_first_resv_time_map_[craned_id] = time;
+    }
+
    private:
     // Craned_ids are sorted by cost.
     std::set<std::pair<uint64_t, CranedId>> m_cost_node_id_set_;
     std::unordered_map<CranedId, uint64_t> m_node_cost_map_;
     std::unordered_map<CranedId, TimeAvailResMap> m_node_time_avail_res_map_;
+    std::unordered_map<CranedId, absl::Time> m_first_resv_time_map_;
 
     // TODO: High copy cost, consider using pointer.
     std::unordered_map<CranedId, ResourceInNode> m_node_res_total_map_;
@@ -367,10 +378,12 @@ class MinLoadFirst : public INodeSelectionAlgo {
           if (!it->ReachEnd()) m_time_priority_queue_.emplace(it);
         }
 
-        if (m_time_priority_queue_.empty() ||
-            m_satisfied_iters_.KthTime() + task->time_limit <=
-                (*m_time_priority_queue_.top())->first) {
-          *start_time = m_satisfied_iters_.KthTime();
+        absl::Time kth_time = m_satisfied_iters_.KthTime();
+        if (kth_time != absl::InfiniteFuture() &&
+            (m_time_priority_queue_.empty() ||
+             kth_time + task->time_limit <=
+                 (*m_time_priority_queue_.top())->first)) {
+          *start_time = kth_time;
 
           craned_ids->clear();
           auto it = m_satisfied_iters_.Begin();
@@ -402,6 +415,13 @@ class MinLoadFirst : public INodeSelectionAlgo {
           running_tasks,
       absl::Time now, const PartitionId& partition_id,
       const std::unordered_set<CranedId>& craned_ids,
+      const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
+      NodeSelectionInfo* node_selection_info);
+
+  static void CalculateNodeSelectionInfoOfReservation_(
+      const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
+          running_tasks,
+      absl::Time now, const ReservationMeta* reservation_meta,
       const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
       NodeSelectionInfo* node_selection_info);
 
@@ -521,6 +541,19 @@ class TaskScheduler {
   }
 
   static CraneExpected<void> HandleUnsetOptionalInTaskToCtld(TaskInCtld* task);
+  crane::grpc::CreateReservationReply CreateReservation(
+      const crane::grpc::CreateReservationRequest& request);
+
+  std::expected<void, std::string> AddReservation(
+      const crane::grpc::CreateReservationRequest& request);
+
+  crane::grpc::DeleteReservationReply DeleteReservation(
+      const crane::grpc::DeleteReservationRequest& request);
+
+  std::expected<void, std::string> EraseReservationMeta(
+      CranedMetaContainer::ReservationMetaMapPtr& reservation_meta_map,
+      const ReservationId& reservation_id);
+
   static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
   static CraneExpected<void> CheckTaskValidity(TaskInCtld* task);
 
