@@ -646,7 +646,7 @@ void ParseConfig(int argc, char** argv) {
         else
           g_config.VaultConf.Port = "8200";
 
-        if (vault_config["Username"] && !config["Username"].IsNull())
+        if (vault_config["Username"] && !vault_config["Username"].IsNull())
           g_config.VaultConf.Username =
               vault_config["Username"].as<std::string>();
         else {
@@ -654,7 +654,7 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (vault_config["Password"] && !config["Password"].IsNull())
+        if (vault_config["Password"] && !vault_config["Password"].IsNull())
           g_config.VaultConf.Password =
               vault_config["Password"].as<std::string>();
         else {
@@ -662,7 +662,7 @@ void ParseConfig(int argc, char** argv) {
           std::exit(1);
         }
 
-        if (vault_config["Tls"] && !config["Tls"].IsNull())
+        if (vault_config["Tls"] && !vault_config["Tls"].IsNull())
           g_config.VaultConf.Tls = vault_config["Tls"].as<bool>();
         else
           g_config.VaultConf.Tls = false;
