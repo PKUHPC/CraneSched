@@ -19,11 +19,16 @@
 #pragma once
 
 
+
+#include <vector>
+#include <fmt/format.h>
+
 #include "PmixComment.h"
 
+#include "crane/Logger.h"
+#include "protos/Crane.grpc.pb.h"
+
 namespace pmix {
-
-
 
 class PmixServer {
  public:
@@ -36,7 +41,17 @@ class PmixServer {
   std::optional<std::unordered_map<std::string, std::string>> SetupFork(uint32_t rank);
 
 private:
-  PmixTaskInfo m_pmix_task_info_;
+  uint32_t m_uid_;
+  uint32_t m_gid_;
+  std::string m_nspace_; // crane.pmix.jobid
+  std::string hostname;
+  std::string m_server_tmpdir_;
+  uint32_t m_nprocs_;
+  std::string m_hostname_;
+  uint32_t m_node_id_;
+  std::string m_node_list_;
+
+  void InfoSet_(const crane::grpc::TaskToD& task, const std::unordered_map<std::string, std::string>& env_map);
 };
 
 
