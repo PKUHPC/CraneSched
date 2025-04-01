@@ -97,6 +97,7 @@ enum ExitCodeEnum : uint16_t {
   kExitCodeExceedTimeLimit,
   kExitCodeCranedDown,
   kExitCodeExecutionError,
+  kExitCodeInitMpiServer,
   // NOLINTNEXTLINE(bugprone-reserved-identifier,readability-identifier-naming)
   __MAX_EXIT_CODE
 };

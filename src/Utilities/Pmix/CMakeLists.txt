@@ -10,4 +10,5 @@ target_link_libraries(Utility_Pmix PUBLIC
         spdlog::spdlog
         crane_proto_lib
         Utility_PublicHeader
+        fmt::fmt
 )

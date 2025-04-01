@@ -23,6 +23,7 @@
 
 #include <grp.h>
 
+#include "../Utilities/Pmix/Pmix.h"
 #include "CgroupManager.h"
 #include "crane/PasswordEntry.h"
 #include "protos/Crane.grpc.pb.h"
@@ -187,6 +188,8 @@ struct TaskInstance {
   bool cancelled_by_user{false};
   bool terminated_by_timeout{false};
   ProcSigchldInfo sigchld_info{};
+
+  std::unique_ptr<pmix::PmixServer> pmix_server_;
 
   absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
 };

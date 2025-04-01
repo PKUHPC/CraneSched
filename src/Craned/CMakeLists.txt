@@ -40,6 +40,7 @@ target_link_libraries(craned
 
         Utility_PublicHeader
         Utility_PluginClient
+        Utility_Pmix
 
         crane_proto_lib
 
