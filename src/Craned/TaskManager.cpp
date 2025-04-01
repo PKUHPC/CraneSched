@@ -625,7 +625,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   pid_t child_pid;
   bool launch_pty{false};
   int crun_pty_fd;
-
+  EnvMap mpi_env;
   if (instance->IsCrun()) {
     auto* crun_meta =
         dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
@@ -646,6 +646,14 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     }
     crun_meta->task_input_fd = craned_crun_pipe[1];
     crun_meta->task_output_fd = crun_craned_pipe[0];
+
+    if (!instance->task.interactive_meta().mpi.empty()) {
+      auto result = instance->pmix_server_->SetupFork(0);
+      // TODO: MPI_ERR
+      if (!result)
+          return CraneErrCode::ERR_SYSTEM_ERR;
+      mpi_env = result.value();
+    }
 
     if (instance->task.interactive_meta().pty()) {
       child_pid = forkpty(&crun_pty_fd, nullptr, nullptr, nullptr);
@@ -1030,7 +1038,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     };
     FuncSetEnv(task_env_map);
     FuncSetEnv(job_env_map);
-
+    FuncSetEnv(mpi_env);
     // Prepare the command line arguments.
     std::vector<const char*> argv;
 
@@ -1153,6 +1161,21 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
 
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
+
+  const auto& mpi = instance->task.interactive_meta().mpi;
+  if (instance->IsCrun() && !mpi.empty() && mpi != "list") {
+    auto env_map = instance->GetTaskEnvMap();
+    // TODO: add use env
+    env_map["CRANE_MPI_VERSION"] = mpi;
+    if (!instance->pmix_server_->Init(instance->task, env_map)) {
+      CRANE_ERROR("Failed to initialize mpi server for task #{}", task_id);
+      ActivateTaskStatusChangeAsync_(
+        task_id, crane::grpc::TaskStatus::Failed,
+        ExitCode::kExitCodeInitMpiServer,
+        fmt::format("Failed to initialize mpi server for task #{}", task_id));
+    }
+
+  }
 
   instance->meta->parsed_sh_script_path =
       fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);

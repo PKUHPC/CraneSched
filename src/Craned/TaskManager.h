@@ -167,6 +167,7 @@ struct TaskInstance {
   ProcSigchldInfo sigchld_info{};
 
   absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes{};
+  std::unique_ptr<pmix::PmixServer> pmix_server_;
 };
 
 /**

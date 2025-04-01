@@ -10,22 +10,6 @@
 #include "absl/synchronization/blocking_counter.h"
 
 namespace pmix {
-struct PmixTaskInfo {
-  pmix_nspace_t nspace; // crane.pmix.jobid.stepid
-  uint32_t uid;
-  uint32_t task_id;
-  gid_t gid;
-  uint32_t nprocs;
-  int node_id;
-  int node_id_job;
-  std::string hostname;
-  uint32_t node_tasks;
-  int timeout;
-  std::string cli_tmpdir;
-  std::string cli_tmpdir_base;
-  std::string server_tmpdir;
-  std::string client_lip_tmpdir;
-};
 
 class PMIxServerModule {
   public:
@@ -65,7 +49,13 @@ class PMIxServerModule {
                                  const char msg[], pmix_proc_t pmix_procs[],
                                  size_t nprocs, pmix_op_cbfunc_t cbfunc,
                                  void *cbdata) {
-     printf("AbortFn called: status = %d, msg = %s\n", status, msg);
+     printf("abort_fn called: status = %d, msg = %s\n", status, msg);
+     pmix_status_t rc;
+     if (NULL != pmix_procs) {
+       printf( "SERVER: ABORT on %s:%d", pmix_procs[0].nspace, pmix_procs[0].rank);
+     } else {
+       printf("SERVER: ABORT OF ALL PROCS IN NSPACE %s", pmix_procs->nspace);
+     }
      return PMIX_SUCCESS;
    }
 
@@ -74,6 +64,10 @@ class PMIxServerModule {
                                    char *data, size_t ndata,
                                    pmix_modex_cbfunc_t cbfunc, void *cbdata) {
      printf(" FencenbFn is called\n");
+     /* pass the provided data back to each participating proc */
+     if (NULL != cbfunc) {
+       cbfunc(PMIX_SUCCESS, data, ndata, cbdata, NULL, NULL);
+     }
      return PMIX_SUCCESS;
    }
 
