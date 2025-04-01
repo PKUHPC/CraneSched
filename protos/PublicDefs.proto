@@ -239,6 +239,8 @@ message InteractiveTaskAdditionalMeta {
 
   bool x11 = 6;
   X11Meta x11_meta = 7;
+
+  string mpi = 8;
 }
 
 message TaskInfo {

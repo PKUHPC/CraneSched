@@ -239,6 +239,8 @@ struct InteractiveMetaInTask {
   bool pty;
   bool x11;
 
+  std::string mpi;
+
   std::function<void(task_id_t, std::string const&,
                      std::list<std::string> const&)>
       cb_task_res_allocated;
