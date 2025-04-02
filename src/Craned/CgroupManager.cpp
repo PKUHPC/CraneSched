@@ -46,16 +46,16 @@ CgroupManager::~CgroupManager() {
   if (!bpf_runtime_info.Valid()) return;
   int bpf_map_count = 0;
   auto pre_key = std::make_unique<BpfKey>();
-  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr, pre_key.get(),
-                            sizeof(BpfKey)) < 0) {
+  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr,
+                            pre_key.get(), sizeof(BpfKey)) < 0) {
     CRANE_ERROR("Failed to get first key of bpf map");
     return;
   } else {
     bpf_map_count++;
   }
   auto cur_key = std::make_unique<BpfKey>();
-  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key.get(), cur_key.get(),
-                               sizeof(BpfKey)) == 0) {
+  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key.get(),
+                               cur_key.get(), sizeof(BpfKey)) == 0) {
     ++bpf_map_count;
   }
   // always one key for logging
@@ -330,7 +330,7 @@ int CgroupManager::InitializeController_(struct cgroup &cgroup,
                  CgroupConstant::GetControllerStringView(controller));
       return 1;
     } else {
-      CRANE_WARN("cgroup controller {} is already mounted.",
+      CRANE_WARN("cgroup controller {} is not mounted but not required.",
                  CgroupConstant::GetControllerStringView(controller));
       return 0;
     }
@@ -541,7 +541,6 @@ std::unique_ptr<CgroupInterface> CgroupManager::CreateOrOpen_(
   }
 }
 
-
 std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
     const CgroupSpec &cg_spec) {
   crane::grpc::ResourceInNode res = cg_spec.res_in_node;
@@ -592,7 +591,6 @@ std::unique_ptr<CgroupInterface> CgroupManager::AllocateAndGetJobCgroup(
                                                cg_unique_ptr.get());
   return ok ? std::move(cg_unique_ptr) : nullptr;
 }
-
 
 std::set<task_id_t> CgroupManager::GetJobIdsFromCgroupV1(
     CgroupConstant::Controller controller) {
@@ -687,16 +685,17 @@ CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
     results[cg_ino_job_id_map[key->cgroup_id]].emplace_back(*key);
   };
 
-  auto pre_key = std::unique_ptr<BpfKey>();
-  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr, pre_key.get(),
-                            sizeof(BpfKey)) == 0) {
-    CRANE_ERROR("Failed to get first key of bpf map");
+  auto pre_key = std::make_unique<BpfKey>();
+  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr,
+                            pre_key.get(), sizeof(BpfKey)) == 0) {
+    CRANE_ERROR("Failed to get first key of bpf map or no running jobs.");
+    return results;
   }
 
   add_task(pre_key.get());
-  auto cur_key = std::unique_ptr<BpfKey>();
-  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key.get(), cur_key.get(),
-                               sizeof(BpfKey)) == 0) {
+  auto cur_key = std::make_unique<BpfKey>();
+  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key.get(),
+                               cur_key.get(), sizeof(BpfKey)) == 0) {
     add_task(cur_key.get());
   }
   if (init_ebpf) bpf_runtime_info.CloseBpfObj();
