@@ -723,13 +723,13 @@ EnvMap CgroupManager::GetResourceEnvMapByResInNode(
   return env_map;
 }
 
-CraneExpected<task_id_t> CgroupManager::GetJobIdFromPid(pid_t pid) {
+CraneExpected<task_id_t> CgroupManager::GetJobIdFromPid(pid_t pid) const {
   static constexpr LazyRE2 cg_pattern(R"(.*/Crane_Task_(\d+).*)");
   std::string job_id_str;
   std::string cgroup_file = fmt::format("/proc/{}/cgroup", pid);
   std::ifstream infile(cgroup_file);
   if (!infile.is_open()) {
-    CRANE_ERROR("Failed to open cgroup file for pid", pid);
+    CRANE_ERROR("Failed to open cgroup file for pid {}", pid);
     return std::unexpected(CraneErrCode::ERR_CGROUP);
   }
   if (m_cg_version_ == CgroupConstant::CgroupVersion::CGROUP_V1) {

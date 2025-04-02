@@ -496,7 +496,7 @@ class CgroupManager {
   static EnvMap GetResourceEnvMapByResInNode(
       const crane::grpc::ResourceInNode &res_in_node);
 
-  CraneExpected<task_id_t> GetJobIdFromPid(pid_t pid);
+  CraneExpected<task_id_t> GetJobIdFromPid(pid_t pid) const;
 
   void SetCgroupVersion(CgroupConstant::CgroupVersion v) { m_cg_version_ = v; }
 
