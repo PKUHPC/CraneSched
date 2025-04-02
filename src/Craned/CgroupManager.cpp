@@ -45,20 +45,19 @@ CgroupManager::~CgroupManager() {
   // Release BpfDeviceMap if no cgroups
   if (!bpf_runtime_info.Valid()) return;
   int bpf_map_count = 0;
-  auto *pre_key = new BpfKey();
-  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr, pre_key,
+  auto pre_key = std::make_unique<BpfKey>();
+  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr, pre_key.get(),
                             sizeof(BpfKey)) < 0) {
     CRANE_ERROR("Failed to get first key of bpf map");
+    return;
   } else {
     bpf_map_count++;
   }
-  auto *cur_key = new BpfKey();
-  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key, cur_key,
+  auto cur_key = std::make_unique<BpfKey>();
+  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key.get(), cur_key.get(),
                                sizeof(BpfKey)) == 0) {
     ++bpf_map_count;
   }
-  delete pre_key;
-  delete cur_key;
   // always one key for logging
   if (bpf_map_count == 1) {
     // All task end
@@ -688,21 +687,18 @@ CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
     results[cg_ino_job_id_map[key->cgroup_id]].emplace_back(*key);
   };
 
-  auto *pre_key = new BpfKey();
-  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr, pre_key,
+  auto pre_key = std::unique_ptr<BpfKey>();
+  if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr, pre_key.get(),
                             sizeof(BpfKey)) == 0) {
     CRANE_ERROR("Failed to get first key of bpf map");
   }
 
-  add_task(pre_key);
-  auto *cur_key = new BpfKey();
-  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key, cur_key,
+  add_task(pre_key.get());
+  auto cur_key = std::unique_ptr<BpfKey>();
+  while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key.get(), cur_key.get(),
                                sizeof(BpfKey)) == 0) {
-    add_task(cur_key);
+    add_task(cur_key.get());
   }
-
-  delete pre_key;
-  delete cur_key;
   if (init_ebpf) bpf_runtime_info.CloseBpfObj();
 
   return results;
@@ -1090,7 +1086,7 @@ BpfRuntimeInfo::BpfRuntimeInfo() {
   bpf_prog_ = nullptr;
   dev_map_ = nullptr;
   bpf_enable_logging_ = false;
-  bpf_mtx_ = new absl::Mutex;
+  bpf_mtx_ = std::make_unique<absl::Mutex>();
   bpf_prog_fd_ = -1;
   cgroup_count_ = 0;
 }
@@ -1099,13 +1095,12 @@ BpfRuntimeInfo::~BpfRuntimeInfo() {
   bpf_obj_ = nullptr;
   bpf_prog_ = nullptr;
   dev_map_ = nullptr;
-  delete bpf_mtx_;
   bpf_prog_fd_ = -1;
   cgroup_count_ = 0;
 }
 
 bool BpfRuntimeInfo::InitializeBpfObj() {
-  absl::MutexLock lk(bpf_mtx_);
+  absl::MutexLock lk(bpf_mtx_.get());
 
   if (cgroup_count_ == 0) {
     bpf_obj_ = bpf_object__open_file(CgroupConstant::BpfObjectFilePath, NULL);
@@ -1167,7 +1162,7 @@ bool BpfRuntimeInfo::InitializeBpfObj() {
 }
 
 void BpfRuntimeInfo::CloseBpfObj() {
-  absl::MutexLock lk(bpf_mtx_);
+  absl::MutexLock lk(bpf_mtx_.get());
   if (Valid() && --cgroup_count_ == 0) {
     close(bpf_prog_fd_);
     bpf_object__close(bpf_obj_);
