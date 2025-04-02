@@ -34,8 +34,8 @@
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
+#include "Security/VaultClient.h"
 #include "TaskScheduler.h"
-#include "Tls/VaultClientWrapper.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
 
@@ -476,20 +476,27 @@ void ParseConfig(int argc, char** argv) {
             std::vector<std::string> allowed_accounts =
                 absl::StrSplit(allowed_accounts_str.data(), ",");
             for (const auto& account_name : allowed_accounts) {
-              part.allowed_accounts.insert(absl::StripAsciiWhitespace(account_name).data());
+              part.allowed_accounts.insert(
+                  absl::StripAsciiWhitespace(account_name).data());
             }
           }
 
-          if (partition["DeniedAccounts"] && !partition["DeniedAccounts"].IsNull()) {
-            auto denied_accounts_str = partition["DeniedAccounts"].as<std::string>();
-            std::vector<std::string> denied_accounts = absl::StrSplit(denied_accounts_str, ",");
+          if (partition["DeniedAccounts"] &&
+              !partition["DeniedAccounts"].IsNull()) {
+            auto denied_accounts_str =
+                partition["DeniedAccounts"].as<std::string>();
+            std::vector<std::string> denied_accounts =
+                absl::StrSplit(denied_accounts_str, ",");
             for (const auto& account_name : denied_accounts) {
-              part.denied_accounts.insert(absl::StripAsciiWhitespace(account_name).data());
+              part.denied_accounts.insert(
+                  absl::StripAsciiWhitespace(account_name).data());
             }
 
             if (partition["AllowedAccounts"] &&
-              !partition["AllowedAccounts"].IsNull())
-              CRANE_WARN("Hint: When using AllowedAccounts, DeniedAccounts will not take effect.");
+                !partition["AllowedAccounts"].IsNull())
+              CRANE_WARN(
+                  "Hint: When using AllowedAccounts, DeniedAccounts will not "
+                  "take effect.");
           }
 
           if (partition["DefaultMemPerCpu"] &&
@@ -749,7 +756,7 @@ void InitializeCtldGlobalVariables() {
   }
 
   if (g_config.VaultConf.Enabled) {
-    g_vault_client = std::make_unique<vault::VaultClientWrapper>();
+    g_vault_client = std::make_unique<Security::VaultClient>();
     if (!g_vault_client->InitFromConfig(g_config.VaultConf)) std::exit(1);
   }
 

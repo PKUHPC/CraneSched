@@ -16,11 +16,11 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-#include "VaultClientWrapper.h"
+#include "VaultClient.h"
 
-namespace vault {
+namespace Ctld::Security {
 
-bool VaultClientWrapper::InitFromConfig(
+bool VaultClient::InitFromConfig(
     const Ctld::Config::VaultConfig& vault_config) {
   UserPassStrategy user_pass_strategy{vault_config.Username,
                                       vault_config.Password};
@@ -69,9 +69,9 @@ bool VaultClientWrapper::InitFromConfig(
   return true;
 }
 
-std::optional<SignResponse> VaultClientWrapper::Sign(
-    const std::string& csr_content, const std::string& common_name,
-    const std::string& alt_names) {
+std::optional<SignResponse> VaultClient::Sign(const std::string& csr_content,
+                                              const std::string& common_name,
+                                              const std::string& alt_names) {
   Vault::Parameters parameters({{"csr", csr_content},
                                 {"common_name", common_name},
                                 {"alt_names", alt_names},
@@ -98,7 +98,7 @@ std::optional<SignResponse> VaultClientWrapper::Sign(
   }
 }
 
-bool VaultClientWrapper::RevokeCert(const std::string& serial_number) {
+bool VaultClient::RevokeCert(const std::string& serial_number) {
   try {
     auto response =
         RevokeCertificate_(Vault::Parameters{{"serial_number", serial_number}});
@@ -113,7 +113,7 @@ bool VaultClientWrapper::RevokeCert(const std::string& serial_number) {
   return true;
 }
 
-bool VaultClientWrapper::IsCertAllowed(const std::string& serial_number) {
+bool VaultClient::IsCertAllowed(const std::string& serial_number) {
   if (m_allowed_certs_.contains(serial_number)) return true;
 
   try {
@@ -136,12 +136,12 @@ bool VaultClientWrapper::IsCertAllowed(const std::string& serial_number) {
   return true;
 }
 
-std::optional<std::string> VaultClientWrapper::ListRevokeCertificate_() {
+std::optional<std::string> VaultClient::ListRevokeCertificate_() {
   return List_(*m_root_client_, GetPkiUrl_(Vault::SecretMount{"pki_external"},
                                            Vault::Path{"certs/revoked"}));
 }
 
-std::optional<std::string> VaultClientWrapper::RevokeCertificate_(
+std::optional<std::string> VaultClient::RevokeCertificate_(
     const Vault::Parameters& parameters) {
   return Post_(
       *m_root_client_,
@@ -149,8 +149,8 @@ std::optional<std::string> VaultClientWrapper::RevokeCertificate_(
       parameters);
 }
 
-std::optional<std::string> VaultClientWrapper::List_(
-    const Vault::Client& client, const Vault::Url& url) {
+std::optional<std::string> VaultClient::List_(const Vault::Client& client,
+                                              const Vault::Url& url) {
   if (!client.is_authenticated()) return std::nullopt;
 
   auto response = client.getHttpClient().list(url, client.getToken(),
@@ -172,7 +172,7 @@ std::optional<std::string> VaultClientWrapper::List_(
 }
 
 // Revoking a non-existent certificate does not throw an error.
-std::optional<std::string> VaultClientWrapper::Post_(
+std::optional<std::string> VaultClient::Post_(
     const Vault::Client& client, const Vault::Url& url,
     const Vault::Parameters& parameters) {
   if (!client.is_authenticated()) return std::nullopt;
@@ -187,11 +187,12 @@ std::optional<std::string> VaultClientWrapper::Post_(
 
   // Do not return an error when revoke not found certificate.
   if (response) {
-    auto jsonResponse = nlohmann::json::parse(response.value().body.value());
-    const auto& res_err = jsonResponse["errors"];
+    auto json_resp = nlohmann::json::parse(response.value().body.value());
+    const auto& res_err = json_resp["errors"];
+
     static const LazyRE2 pattern(
         R"(certificate with serial (\S+) not found\.)");
-    if (jsonResponse.contains("errors") && res_err.is_array() &&
+    if (json_resp.contains("errors") && res_err.is_array() &&
         res_err.size() == 1 && RE2::FullMatch(res_err[0], *pattern)) {
       CRANE_TRACE("revoke not found certificate, {}", res_err[0]);
       return "";
@@ -203,21 +204,20 @@ std::optional<std::string> VaultClientWrapper::Post_(
   return std::nullopt;
 }
 
-Vault::Url VaultClientWrapper::GetPkiUrl_(const Vault::SecretMount secret_mount,
-                                          const Vault::Path& path) const {
+Vault::Url VaultClient::GetPkiUrl_(const Vault::SecretMount secret_mount,
+                                   const Vault::Path& path) const {
   return GetUrl_("/v1/" + secret_mount,
                  path.empty() ? path : Vault::Path{"/" + path});
 }
 
-Vault::Url VaultClientWrapper::GetUrl_(const std::string& base,
-                                       const Vault::Path& path) const {
+Vault::Url VaultClient::GetUrl_(const std::string& base,
+                                const Vault::Path& path) const {
   return Vault::Url{(m_tls_ ? "https://" : "http://") + m_address_ + ":" +
                     m_port_ + base + path};
 }
 
 // TODO:Code Simplification
-nlohmann::json VaultClientWrapper::CreatJson_(
-    const Vault::Parameters& parameters) {
+nlohmann::json VaultClient::CreatJson_(const Vault::Parameters& parameters) {
   nlohmann::json json = nlohmann::json::object();
   for (auto& [key, value] : parameters) {
     if (std::holds_alternative<std::string>(value)) {
@@ -255,4 +255,4 @@ std::optional<Vault::AuthenticationResponse> UserPassStrategy::authenticate(
       });
 }
 
-}  // namespace vault
+}  // namespace Ctld::Security

@@ -16,8 +16,10 @@ add_executable(cranectld
         AccountMetaContainer.cpp
         EmbeddedDbClient.cpp
         EmbeddedDbClient.h
-        Tls/VaultClientWrapper.cpp
-        Tls/VaultClientWrapper.h
+
+        Security/VaultClient.cpp
+        Security/VaultClient.h
+
         CraneCtld.cpp
 
         CtldPreCompiledHeader.h)

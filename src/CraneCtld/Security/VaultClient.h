@@ -25,15 +25,16 @@
 
 #include "crane/Lock.h"
 
-namespace vault {
+namespace Ctld::Security {
+
 struct SignResponse {
   std::string serial_number;
   std::string certificate;
 };
 
-class VaultClientWrapper {
+class VaultClient {
  public:
-  VaultClientWrapper() = default;
+  VaultClient() = default;
 
   bool InitFromConfig(const Ctld::Config::VaultConfig& vault_config);
 
@@ -77,7 +78,7 @@ class VaultClientWrapper {
 
   std::string m_address_;
   std::string m_port_;
-  bool m_tls_;
+  bool m_tls_{};
 };
 
 class UserPassStrategy : public Vault::AuthenticationStrategy {
@@ -92,6 +93,6 @@ class UserPassStrategy : public Vault::AuthenticationStrategy {
   std::string m_password_;
 };
 
-}  // namespace vault
+}  // namespace Ctld::Security
 
-inline std::unique_ptr<vault::VaultClientWrapper> g_vault_client;
+inline std::unique_ptr<Ctld::Security::VaultClient> g_vault_client;
