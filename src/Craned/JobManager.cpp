@@ -69,7 +69,7 @@ bool JobManager::FreeJobs(const std::vector<task_id_t>& job_ids) {
     auto map_ptr = m_job_map_.GetMapExclusivePtr();
     for (auto job_id : job_ids) {
       if (!map_ptr->contains(job_id)) {
-        CRANE_WARN("Try to free nonexistent job#{}", job_ids);
+        CRANE_WARN("Try to free nonexistent job#{}", job_id);
         return false;
       }
     }
