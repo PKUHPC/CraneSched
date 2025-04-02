@@ -33,10 +33,11 @@ bool VaultClient::InitFromConfig(const Config::VaultConfig& vault_config) {
                              .withHost(Vault::Host{vault_config.Addr})
                              .withPort(Vault::Port{vault_config.Port})
                              .build();
-  Vault::HttpErrorCallback http_error_cb = [&](std::string err) {
+  Vault::HttpErrorCallback http_error_cb = [&](const std::string& err) {
     CRANE_ERROR(err);
   };
-  Vault::ResponseErrorCallback resp_cb = [&](Vault::HttpResponse err) {
+
+  Vault::ResponseErrorCallback resp_cb = [&](const Vault::HttpResponse& err) {
     CRANE_ERROR("{} : {}", err.url.value(), err.body.value());
   };
 
@@ -99,9 +100,13 @@ std::optional<SignResponse> VaultClient::Sign(const std::string& csr_content,
 
 bool VaultClient::RevokeCert(const std::string& serial_number) {
   try {
-    auto response =
-        RevokeCertificate_(Vault::Parameters{{"serial_number", serial_number}});
-    if (!response) return false;
+    std::optional<std::string> resp = Post_(
+        *m_root_client_,
+        GetPkiUrl_(Vault::SecretMount{"pki_external"}, Vault::Path{"revoke"}),
+        Vault::Parameters{{"serial_number", serial_number}});
+
+    if (!resp) return false;
+
   } catch (const std::exception& e) {
     CRANE_TRACE("Failed to revoke certificate: {}", e.what());
     return false;
@@ -116,15 +121,19 @@ bool VaultClient::IsCertAllowed(const std::string& serial_number) {
   if (m_allowed_certs_.contains(serial_number)) return true;
 
   try {
-    auto response = ListRevokeCertificate_();
-    if (!response) return false;
-    auto json = nlohmann::json::parse(response.value());
+    std::optional<std::string> resp =
+        List_(*m_root_client_, GetPkiUrl_(Vault::SecretMount{"pki_external"},
+                                          Vault::Path{"certs/revoked"}));
+    if (!resp) return false;
+
+    auto json = nlohmann::json::parse(resp.value());
     const auto& data = json["data"];
     // TODO: optimize
     for (const auto& key : data["keys"]) {
       std::string key_str = key;
       if (key_str == serial_number) return false;
     }
+
   } catch (const std::exception& e) {
     CRANE_TRACE("Failed to list revoke certificate: {}", e.what());
     return false;
@@ -133,19 +142,6 @@ bool VaultClient::IsCertAllowed(const std::string& serial_number) {
   m_allowed_certs_.emplace(serial_number);
 
   return true;
-}
-
-std::optional<std::string> VaultClient::ListRevokeCertificate_() {
-  return List_(*m_root_client_, GetPkiUrl_(Vault::SecretMount{"pki_external"},
-                                           Vault::Path{"certs/revoked"}));
-}
-
-std::optional<std::string> VaultClient::RevokeCertificate_(
-    const Vault::Parameters& parameters) {
-  return Post_(
-      *m_root_client_,
-      GetPkiUrl_(Vault::SecretMount{"pki_external"}, Vault::Path{"revoke"}),
-      parameters);
 }
 
 std::optional<std::string> VaultClient::List_(const Vault::Client& client,

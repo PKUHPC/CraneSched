@@ -45,11 +45,6 @@ class VaultClient {
   bool IsCertAllowed(const std::string& serial_number);
 
  private:
-  std::optional<std::string> ListRevokeCertificate_();
-
-  std::optional<std::string> RevokeCertificate_(
-      const Vault::Parameters& parameters);
-
   static std::optional<std::string> List_(const Vault::Client& client,
                                           const Vault::Url& url);
 
