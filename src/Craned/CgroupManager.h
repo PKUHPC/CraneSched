@@ -320,7 +320,7 @@ class CgroupInterface {
   CgroupInterface(const std::string &path, struct cgroup *handle,
                   uint64_t id = 0)
       : m_cgroup_info_(path, handle, id) {};
-  virtual ~CgroupInterface() {}
+  virtual ~CgroupInterface() = default;
   virtual bool SetCpuCoreLimit(double core_num) = 0;
   virtual bool SetCpuShares(uint64_t share) = 0;
   virtual bool SetMemoryLimitBytes(uint64_t memory_bytes) = 0;
@@ -375,7 +375,7 @@ class BpfRuntimeInfo {
 
   struct bpf_object *BpfObj() { return bpf_obj_; }
   struct bpf_program *BpfProgram() { return bpf_prog_; }
-  absl::Mutex *BpfMutex() { return bpf_mtx_; }
+  absl::Mutex *BpfMutex() { return bpf_mtx_.get(); }
   struct bpf_map *BpfDevMap() { return dev_map_; }
   int BpfProgFd() { return bpf_prog_fd_; }
   void SetLogEnabled(bool enabled) { bpf_enable_logging_ = enabled; }
@@ -390,7 +390,7 @@ class BpfRuntimeInfo {
   struct bpf_program *bpf_prog_;
   struct bpf_map *dev_map_;
   int bpf_prog_fd_;
-  absl::Mutex *bpf_mtx_;
+  std::unique_ptr<absl::Mutex> bpf_mtx_;
   size_t cgroup_count_;
 };
 #endif
