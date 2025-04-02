@@ -1,1 +1,21 @@
-hicpp-signed-bitwise: false
+Checks: >
+  -*,
+  google-*,
+  bugprone-*,
+  performance-*,
+  misc-*,
+  modernize-*,
+  portability-*,
+  readability-*,
+  hicpp-*,
+  -hicpp-signed-bitwise
+
+WarningsAsErrors: "*"
+
+CheckOptions:
+  - { key: readability-identifier-naming.MemberCase,                 value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberPrefix,        value: "m_" }
+  - { key: readability-identifier-naming.PrivateMemberSuffix,        value: "_" }
+
+  - { key: readability-identifier-naming.MethodCase,                 value: CamelCase }
+  - { key: readability-identifier-naming.PrivateMethodSuffix,        value: "_" }
