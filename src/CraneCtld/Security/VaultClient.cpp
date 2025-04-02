@@ -216,7 +216,6 @@ Vault::Url VaultClient::GetUrl_(const std::string& base,
                     m_port_ + base + path};
 }
 
-// TODO:Code Simplification
 nlohmann::json VaultClient::CreatJson_(const Vault::Parameters& parameters) {
   nlohmann::json json = nlohmann::json::object();
   for (auto& [key, value] : parameters) {
