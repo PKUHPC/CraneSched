@@ -47,10 +47,11 @@ CgroupManager::~CgroupManager() {
   int bpf_map_count = 0;
   auto *pre_key = new BpfKey();
   if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr, pre_key,
-                            sizeof(BpfKey)) == 0) {
+                            sizeof(BpfKey)) < 0) {
     CRANE_ERROR("Failed to get first key of bpf map");
+  } else {
+    bpf_map_count++;
   }
-  bpf_map_count++;
   auto *cur_key = new BpfKey();
   while (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), pre_key, cur_key,
                                sizeof(BpfKey)) == 0) {

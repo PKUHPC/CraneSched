@@ -189,7 +189,8 @@ class ControllerFlags {
  public:
   constexpr ControllerFlags() noexcept : m_flags_(0u) {}
 
-  constexpr explicit ControllerFlags(CgroupConstant::Controller controller) noexcept
+  constexpr explicit ControllerFlags(
+      CgroupConstant::Controller controller) noexcept
       : m_flags_(1u << static_cast<uint64_t>(controller)) {}
 
   ControllerFlags(const ControllerFlags &val) noexcept = default;
@@ -213,10 +214,10 @@ class ControllerFlags {
   }
 
  private:
-  friend constexpr ControllerFlags operator|(const ControllerFlags &lhs,
-                                   const ControllerFlags &rhs) noexcept;
-  friend constexpr ControllerFlags operator&(const ControllerFlags &lhs,
-                                   const ControllerFlags &rhs) noexcept;
+  friend constexpr ControllerFlags operator|(
+      const ControllerFlags &lhs, const ControllerFlags &rhs) noexcept;
+  friend constexpr ControllerFlags operator&(
+      const ControllerFlags &lhs, const ControllerFlags &rhs) noexcept;
   friend constexpr ControllerFlags operator|(
       const ControllerFlags &lhs,
       const CgroupConstant::Controller &rhs) noexcept;
@@ -378,7 +379,7 @@ class BpfRuntimeInfo {
   struct bpf_map *BpfDevMap() { return dev_map_; }
   int BpfProgFd() { return bpf_prog_fd_; }
   void SetLogEnabled(bool enabled) { bpf_enable_logging_ = enabled; }
-  bool Valid() {
+  bool Valid() const {
     return bpf_obj_ && bpf_prog_ && dev_map_ && bpf_prog_fd_ != -1 &&
            cgroup_count_ > 0;
   }
@@ -477,7 +478,7 @@ class CgroupManager {
 
   CraneErrCode Recover(const std::unordered_set<task_id_t> &running_job_ids);
 
-  bool Mounted(CgroupConstant::Controller controller) const{
+  bool Mounted(CgroupConstant::Controller controller) const {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
   }
 
