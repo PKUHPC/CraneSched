@@ -4,9 +4,16 @@ Checks: >
   bugprone-*,
   performance-*,
   misc-*,
+  
   modernize-*,
+  -modernize-use-trailing-return-type,
+  
   portability-*,
+  
   readability-*,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  
   hicpp-*,
   -hicpp-signed-bitwise
 

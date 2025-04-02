@@ -72,7 +72,6 @@ void ParseConfig(int argc, char** argv) {
 
   if (parsed_args.count("version") > 0) {
     fmt::print("Version: {}\n", CRANE_VERSION_STRING);
-    fmt::print("Build Time: {}\n", CRANE_BUILD_TIMESTAMP);
     std::exit(0);
   }
 
