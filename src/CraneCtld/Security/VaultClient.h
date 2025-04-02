@@ -23,8 +23,6 @@
 
 #include <VaultClient.h>
 
-#include "crane/Lock.h"
-
 namespace Ctld::Security {
 
 struct SignResponse {
@@ -36,7 +34,7 @@ class VaultClient {
  public:
   VaultClient() = default;
 
-  bool InitFromConfig(const Ctld::Config::VaultConfig& vault_config);
+  bool InitFromConfig(const Config::VaultConfig& vault_config);
 
   std::optional<SignResponse> Sign(const std::string& csr_content,
                                    const std::string& common_name,
@@ -52,12 +50,12 @@ class VaultClient {
   std::optional<std::string> RevokeCertificate_(
       const Vault::Parameters& parameters);
 
-  std::optional<std::string> List_(const Vault::Client& client,
-                                   const Vault::Url& url);
+  static std::optional<std::string> List_(const Vault::Client& client,
+                                          const Vault::Url& url);
 
-  std::optional<std::string> Post_(const Vault::Client& client,
-                                   const Vault::Url& url,
-                                   const Vault::Parameters& parameters);
+  static std::optional<std::string> Post_(const Vault::Client& client,
+                                          const Vault::Url& url,
+                                          const Vault::Parameters& parameters);
 
   Vault::Url GetUrl_(const std::string& base, const Vault::Path& path) const;
 
@@ -71,10 +69,10 @@ class VaultClient {
   std::unique_ptr<Vault::Pki> m_pki_external_;
 
   template <typename T>
-  using AllowedCertsSet = phmap::parallel_flat_hash_set<T>;
+  using ParallelHashSet = phmap::parallel_flat_hash_set<T>;
 
   // Use parallel containers to improve performance.
-  AllowedCertsSet<std::string> m_allowed_certs_;
+  ParallelHashSet<std::string> m_allowed_certs_;
 
   std::string m_address_;
   std::string m_port_;

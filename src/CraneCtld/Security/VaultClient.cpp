@@ -20,8 +20,7 @@
 
 namespace Ctld::Security {
 
-bool VaultClient::InitFromConfig(
-    const Ctld::Config::VaultConfig& vault_config) {
+bool VaultClient::InitFromConfig(const Config::VaultConfig& vault_config) {
   UserPassStrategy user_pass_strategy{vault_config.Username,
                                       vault_config.Password};
   m_address_ = vault_config.Addr;
@@ -34,15 +33,15 @@ bool VaultClient::InitFromConfig(
                              .withHost(Vault::Host{vault_config.Addr})
                              .withPort(Vault::Port{vault_config.Port})
                              .build();
-  Vault::HttpErrorCallback httpErrorCallback = [&](std::string err) {
+  Vault::HttpErrorCallback http_error_cb = [&](std::string err) {
     CRANE_ERROR(err);
   };
-  Vault::ResponseErrorCallback responseCallback = [&](Vault::HttpResponse err) {
+  Vault::ResponseErrorCallback resp_cb = [&](Vault::HttpResponse err) {
     CRANE_ERROR("{} : {}", err.url.value(), err.body.value());
   };
 
-  m_root_client_ = std::make_unique<Vault::Client>(Vault::Client{
-      config, user_pass_strategy, httpErrorCallback, responseCallback});
+  m_root_client_ = std::make_unique<Vault::Client>(
+      Vault::Client{config, user_pass_strategy, http_error_cb, resp_cb});
 
   if (!m_root_client_->is_authenticated()) {
     CRANE_ERROR("Vault client is not authenticated");
@@ -52,8 +51,8 @@ bool VaultClient::InitFromConfig(
   if (!Vault::HttpConsumer::get(*m_root_client_,
                                 GetUrl_("/v1/sys/", Vault::Path{"health"}))) {
     CRANE_ERROR(
-        "Vault client connect fail, Please check if it is started, initialized "
-        "or unsealed.");
+        "Vault client connection failed, please check if it is started, "
+        "initialized or unsealed.");
     return false;
   }
 
@@ -153,21 +152,19 @@ std::optional<std::string> VaultClient::List_(const Vault::Client& client,
                                               const Vault::Url& url) {
   if (!client.is_authenticated()) return std::nullopt;
 
-  auto response = client.getHttpClient().list(url, client.getToken(),
-                                              client.getNamespace());
+  auto resp = client.getHttpClient().list(url, client.getToken(),
+                                          client.getNamespace());
 
-  if (Vault::HttpClient::is_success(response))
-    return {response.value().body.value()};
+  if (Vault::HttpClient::is_success(resp)) return {resp.value().body.value()};
+  if (!resp) return std::nullopt;
 
-  // Do not return an error when revoked is empty.
-  if (response) {
-    auto jsonResponse = nlohmann::json::parse(response.value().body.value());
-    if (jsonResponse.contains("errors") && jsonResponse["errors"].is_array() &&
-        jsonResponse["errors"].empty())
-      return {response.value().body.value()};
-    client.getHttpClient().handleResponseError(response.value());
-  }
+  // Do not return an error when revoked certs are empty.
+  auto json_resp = nlohmann::json::parse(resp.value().body.value());
+  auto it = json_resp.find("errors");
+  if (it == json_resp.end() || !it->is_array() || it->empty())
+    return std::nullopt;
 
+  client.getHttpClient().handleResponseError(resp.value());
   return std::nullopt;
 }
 
@@ -179,27 +176,27 @@ std::optional<std::string> VaultClient::Post_(
 
   nlohmann::json json = CreatJson_(parameters);
 
-  auto response = client.getHttpClient().post(
+  std::optional<Vault::HttpResponse> resp = client.getHttpClient().post(
       url, client.getToken(), client.getNamespace(), json.dump());
 
-  if (Vault::HttpClient::is_success(response))
-    return response.value().body.value();
+  if (Vault::HttpClient::is_success(resp)) return resp.value().body.value();
+
+  // No content in error response.
+  if (!resp) return std::nullopt;
 
   // Do not return an error when revoke not found certificate.
-  if (response) {
-    auto json_resp = nlohmann::json::parse(response.value().body.value());
-    const auto& res_err = json_resp["errors"];
+  nlohmann::json json_resp = nlohmann::json::parse(resp.value().body.value());
+  auto it = json_resp.find("errors");
+  if (it == json_resp.end() || !it->is_array() || it->empty())
+    return std::nullopt;
 
-    static const LazyRE2 pattern(
-        R"(certificate with serial (\S+) not found\.)");
-    if (json_resp.contains("errors") && res_err.is_array() &&
-        res_err.size() == 1 && RE2::FullMatch(res_err[0], *pattern)) {
-      CRANE_TRACE("revoke not found certificate, {}", res_err[0]);
-      return "";
-    } else {
-      client.getHttpClient().handleResponseError(response.value());
-    }
-  }
+  client.getHttpClient().handleResponseError(resp.value());
+
+  std::string err_msg = it->at(0).get<std::string>();
+  static const LazyRE2 err_serial_regex(
+      R"(certificate with serial (\S+) not found\.)");
+  if (RE2::FullMatch(err_msg, *err_serial_regex))
+    CRANE_TRACE("Trying to revoke a non-existing certificate, {}", err_msg);
 
   return std::nullopt;
 }
@@ -212,28 +209,33 @@ Vault::Url VaultClient::GetPkiUrl_(const Vault::SecretMount secret_mount,
 
 Vault::Url VaultClient::GetUrl_(const std::string& base,
                                 const Vault::Path& path) const {
-  return Vault::Url{(m_tls_ ? "https://" : "http://") + m_address_ + ":" +
-                    m_port_ + base + path};
+  std::string url = fmt::format("{}{}:{}{}{}", m_tls_ ? "https://" : "http://",
+                                m_address_, m_port_, base, path.toString());
+  return Vault::Url{url};
 }
 
 nlohmann::json VaultClient::CreatJson_(const Vault::Parameters& parameters) {
   nlohmann::json json = nlohmann::json::object();
-  for (auto& [key, value] : parameters) {
-    if (std::holds_alternative<std::string>(value)) {
-      json[key] = std::get<std::string>(value);
-    } else if (std::holds_alternative<int>(value)) {
-      json[key] = std::get<int>(value);
-    } else if (std::holds_alternative<std::vector<std::string>>(value)) {
-      json[key] = std::get<std::vector<std::string>>(value);
-    } else if (std::holds_alternative<Vault::Map>(value)) {
-      auto map = std::get<Vault::Map>(value);
-      nlohmann::json j;
-      for (auto& [map_key, map_value] : map) {
-        j[map_key] = map_value;
-      }
-      json[key] = j;
-    }
+
+  for (const auto& [key, value] : parameters) {
+    std::visit(
+        [&json, &key](const auto& v) {
+          using T = std::decay_t<decltype(v)>;
+          if constexpr (std::is_same_v<T, std::string> ||
+                        std::is_same_v<T, int> ||
+                        std::is_same_v<T, std::vector<std::string>>) {
+            json[key] = v;
+          } else if constexpr (std::is_same_v<T, Vault::Map>) {
+            nlohmann::json j;
+            for (const auto& [map_key, map_value] : v) j[map_key] = map_value;
+            json[key] = j;
+          } else {
+            throw std::runtime_error("Unsupported type in Vault::Parameters");
+          }
+        },
+        value);
   }
+
   return json;
 }
 
@@ -247,8 +249,7 @@ std::optional<Vault::AuthenticationResponse> UserPassStrategy::authenticate(
       client,
       client.getUrl("/v1/auth/userpass/login/", Vault::Path{m_username_}),
       [&]() {
-        nlohmann::json j;
-        j = nlohmann::json::object();
+        auto j = nlohmann::json::object();
         j["password"] = m_password_;
         return j.dump();
       });
