@@ -631,7 +631,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     crun_meta->task_input_fd = craned_crun_pipe[1];
     crun_meta->task_output_fd = crun_craned_pipe[0];
 
-    if (!instance->task.interactive_meta().mpi.empty()) {
+    if (!instance->task.interactive_meta().mpi().empty()) {
       auto result = instance->pmix_server_->SetupFork(0);
       // TODO: MPI_ERR
       if (!result)
