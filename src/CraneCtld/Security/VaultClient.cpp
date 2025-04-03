@@ -128,15 +128,15 @@ bool VaultClient::IsCertAllowed(const std::string& serial_number) {
     if (!resp) return false;
 
     nlohmann::json json = nlohmann::json::parse(resp.value());
+    nlohmann::json const& data = json.at("data");
 
-    const auto& data = json.at("data");
-
-    if (!data.contains("revocation_time")) {
+    auto it_revocation_time = data.find("revocation_time");
+    if (it_revocation_time == data.end()) {
       CRANE_DEBUG("Missing required fields in response data");
       return false;
     }
 
-    if (data.at("revocation_time").get<uint32_t>() > 0) return false;
+    if (it_revocation_time->get<uint32_t>() > 0) return false;
 
   } catch (const std::exception& e) {
     CRANE_TRACE("Failed to list revoke certificate: {}", e.what());
