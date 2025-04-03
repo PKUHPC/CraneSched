@@ -45,16 +45,13 @@ class VaultClient {
   bool IsCertAllowed(const std::string& serial_number);
 
  private:
-  static std::optional<std::string> List_(const Vault::Client& client,
-                                          const Vault::Url& url);
-
   static std::optional<std::string> Post_(const Vault::Client& client,
                                           const Vault::Url& url,
                                           const Vault::Parameters& parameters);
 
   Vault::Url GetUrl_(const std::string& base, const Vault::Path& path) const;
 
-  Vault::Url GetPkiUrl_(const Vault::SecretMount secret_mount,
+  Vault::Url GetPkiUrl_(const Vault::SecretMount &secret_mount,
                         const Vault::Path& path) const;
 
   static nlohmann::json CreatJson_(const Vault::Parameters& parameters);

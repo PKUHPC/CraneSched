@@ -121,18 +121,19 @@ bool VaultClient::IsCertAllowed(const std::string& serial_number) {
   if (m_allowed_certs_.contains(serial_number)) return true;
 
   try {
-    std::optional<std::string> resp =
-        List_(*m_root_client_, GetPkiUrl_(Vault::SecretMount{"pki_external"},
-                                          Vault::Path{"certs/revoked"}));
+    std::optional<std::string> resp = m_pki_external_->readCertificate(Vault::Path{serial_number});
     if (!resp) return false;
 
-    auto json = nlohmann::json::parse(resp.value());
-    const auto& data = json["data"];
-    // TODO: optimize
-    for (const auto& key : data["keys"]) {
-      std::string key_str = key;
-      if (key_str == serial_number) return false;
+    nlohmann::json json = nlohmann::json::parse(resp.value());
+
+    const auto& data = json.at("data");
+
+    if (!data.contains("revocation_time")) {
+      CRANE_DEBUG("Missing required fields in response data");
+      return false;
     }
+
+    if (data.at("revocation_time").get<uint32_t>() > 0) return false;
 
   } catch (const std::exception& e) {
     CRANE_TRACE("Failed to list revoke certificate: {}", e.what());
@@ -142,26 +143,6 @@ bool VaultClient::IsCertAllowed(const std::string& serial_number) {
   m_allowed_certs_.emplace(serial_number);
 
   return true;
-}
-
-std::optional<std::string> VaultClient::List_(const Vault::Client& client,
-                                              const Vault::Url& url) {
-  if (!client.is_authenticated()) return std::nullopt;
-
-  auto resp = client.getHttpClient().list(url, client.getToken(),
-                                          client.getNamespace());
-
-  if (Vault::HttpClient::is_success(resp)) return {resp.value().body.value()};
-  if (!resp) return std::nullopt;
-
-  // Do not return an error when revoked certs are empty.
-  auto json_resp = nlohmann::json::parse(resp.value().body.value());
-  auto it = json_resp.find("errors");
-  if (it == json_resp.end() || !it->is_array() || it->empty())
-    return std::nullopt;
-
-  client.getHttpClient().handleResponseError(resp.value());
-  return std::nullopt;
 }
 
 // Revoking a non-existent certificate does not throw an error.
@@ -175,12 +156,11 @@ std::optional<std::string> VaultClient::Post_(
   std::optional<Vault::HttpResponse> resp = client.getHttpClient().post(
       url, client.getToken(), client.getNamespace(), json.dump());
 
-  if (Vault::HttpClient::is_success(resp)) return resp.value().body.value();
-
   // No content in error response.
   if (!resp) return std::nullopt;
 
-  // Do not return an error when revoke not found certificate.
+  if (Vault::HttpClient::is_success(resp)) return resp.value().body.value();
+
   nlohmann::json json_resp = nlohmann::json::parse(resp.value().body.value());
   auto it = json_resp.find("errors");
   if (it == json_resp.end() || !it->is_array() || it->empty())
@@ -197,7 +177,7 @@ std::optional<std::string> VaultClient::Post_(
   return std::nullopt;
 }
 
-Vault::Url VaultClient::GetPkiUrl_(const Vault::SecretMount secret_mount,
+Vault::Url VaultClient::GetPkiUrl_(const Vault::SecretMount &secret_mount,
                                    const Vault::Path& path) const {
   return GetUrl_("/v1/" + secret_mount,
                  path.empty() ? path : Vault::Path{"/" + path});
