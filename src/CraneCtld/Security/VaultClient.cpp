@@ -78,19 +78,21 @@ std::optional<SignResponse> VaultClient::Sign(const std::string& csr_content,
                                 {"exclude_cn_from_sans", "true"}});
 
   try {
-    auto response = m_pki_external_->sign(Vault::Path{"external"}, parameters);
-    if (!response) return std::nullopt;
+    std::optional<std::string> resp =
+        m_pki_external_->sign(Vault::Path{"external"}, parameters);
+    if (!resp) return std::nullopt;
 
-    auto json = nlohmann::json::parse(response.value());
-    auto data = std::move(json.at("data"));
+    nlohmann::json json = nlohmann::json::parse(resp.value());
+    nlohmann::json const& data = json.at("data");
 
-    if (!data.contains("serial_number") || !data.contains("certificate")) {
-      CRANE_DEBUG("Missing required fields in response data");
+    auto it_ser = data.find("serial_number");
+    auto it_cert = data.find("certificate");
+    if (it_ser == data.end() || it_cert == data.end()) {
+      CRANE_DEBUG("Serial_number or certificate is missing in response data");
       return std::nullopt;
     }
 
-    return SignResponse{std::move(data["serial_number"]),
-                        std::move(data["certificate"])};
+    return SignResponse{*it_ser, *it_cert};
 
   } catch (const std::exception& e) {
     CRANE_TRACE("Failed to sign certificate: {}", e.what());
@@ -121,7 +123,8 @@ bool VaultClient::IsCertAllowed(const std::string& serial_number) {
   if (m_allowed_certs_.contains(serial_number)) return true;
 
   try {
-    std::optional<std::string> resp = m_pki_external_->readCertificate(Vault::Path{serial_number});
+    std::optional<std::string> resp =
+        m_pki_external_->readCertificate(Vault::Path{serial_number});
     if (!resp) return false;
 
     nlohmann::json json = nlohmann::json::parse(resp.value());
@@ -177,7 +180,7 @@ std::optional<std::string> VaultClient::Post_(
   return std::nullopt;
 }
 
-Vault::Url VaultClient::GetPkiUrl_(const Vault::SecretMount &secret_mount,
+Vault::Url VaultClient::GetPkiUrl_(const Vault::SecretMount& secret_mount,
                                    const Vault::Path& path) const {
   return GetUrl_("/v1/" + secret_mount,
                  path.empty() ? path : Vault::Path{"/" + path});
