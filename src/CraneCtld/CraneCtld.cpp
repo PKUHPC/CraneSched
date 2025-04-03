@@ -34,6 +34,7 @@
 #include "CtldPublicDefs.h"
 #include "DbClient.h"
 #include "EmbeddedDbClient.h"
+#include "Security/VaultClient.h"
 #include "TaskScheduler.h"
 #include "crane/Network.h"
 #include "crane/PluginClient.h"
@@ -71,7 +72,6 @@ void ParseConfig(int argc, char** argv) {
 
   if (parsed_args.count("version") > 0) {
     fmt::print("Version: {}\n", CRANE_VERSION_STRING);
-    fmt::print("Build Time: {}\n", CRANE_BUILD_TIMESTAMP);
     std::exit(0);
   }
 
@@ -475,20 +475,27 @@ void ParseConfig(int argc, char** argv) {
             std::vector<std::string> allowed_accounts =
                 absl::StrSplit(allowed_accounts_str.data(), ",");
             for (const auto& account_name : allowed_accounts) {
-              part.allowed_accounts.insert(absl::StripAsciiWhitespace(account_name).data());
+              part.allowed_accounts.insert(
+                  absl::StripAsciiWhitespace(account_name).data());
             }
           }
 
-          if (partition["DeniedAccounts"] && !partition["DeniedAccounts"].IsNull()) {
-            auto denied_accounts_str = partition["DeniedAccounts"].as<std::string>();
-            std::vector<std::string> denied_accounts = absl::StrSplit(denied_accounts_str, ",");
+          if (partition["DeniedAccounts"] &&
+              !partition["DeniedAccounts"].IsNull()) {
+            auto denied_accounts_str =
+                partition["DeniedAccounts"].as<std::string>();
+            std::vector<std::string> denied_accounts =
+                absl::StrSplit(denied_accounts_str, ",");
             for (const auto& account_name : denied_accounts) {
-              part.denied_accounts.insert(absl::StripAsciiWhitespace(account_name).data());
+              part.denied_accounts.insert(
+                  absl::StripAsciiWhitespace(account_name).data());
             }
 
             if (partition["AllowedAccounts"] &&
-              !partition["AllowedAccounts"].IsNull())
-              CRANE_WARN("Hint: When using AllowedAccounts, DeniedAccounts will not take effect.");
+                !partition["AllowedAccounts"].IsNull())
+              CRANE_WARN(
+                  "Hint: When using AllowedAccounts, DeniedAccounts will not "
+                  "take effect.");
           }
 
           if (partition["DefaultMemPerCpu"] &&
@@ -628,6 +635,45 @@ void ParseConfig(int argc, char** argv) {
         g_config.DbName = config["DbName"].as<std::string>();
       else
         g_config.DbName = "crane_db";
+
+      if (config["Vault"]) {
+        const auto& vault_config = config["Vault"];
+
+        if (vault_config["Enabled"])
+          g_config.VaultConf.Enabled = vault_config["Enabled"].as<bool>();
+
+        if (vault_config["Addr"])
+          g_config.VaultConf.Addr = vault_config["Addr"].as<std::string>();
+        else
+          g_config.VaultConf.Addr = "127.0.0.1";
+
+        if (vault_config["Port"])
+          g_config.VaultConf.Port = vault_config["Port"].as<std::string>();
+        else
+          g_config.VaultConf.Port = "8200";
+
+        if (vault_config["Username"] && !vault_config["Username"].IsNull())
+          g_config.VaultConf.Username =
+              vault_config["Username"].as<std::string>();
+        else {
+          CRANE_ERROR("Unknown Vault Username");
+          std::exit(1);
+        }
+
+        if (vault_config["Password"] && !vault_config["Password"].IsNull())
+          g_config.VaultConf.Password =
+              vault_config["Password"].as<std::string>();
+        else {
+          CRANE_ERROR("Unknown Vault Password");
+          std::exit(1);
+        }
+
+        if (vault_config["Tls"] && !vault_config["Tls"].IsNull())
+          g_config.VaultConf.Tls = vault_config["Tls"].as<bool>();
+        else
+          g_config.VaultConf.Tls = false;
+      }  // vault
+
     } catch (YAML::BadFile& e) {
       CRANE_CRITICAL("Can't open database config file {}: {}", db_config_path,
                      e.what());
@@ -706,6 +752,11 @@ void InitializeCtldGlobalVariables() {
     CRANE_INFO("[Plugin] Plugin module is enabled.");
     g_plugin_client = std::make_unique<plugin::PluginClient>();
     g_plugin_client->InitChannelAndStub(g_config.Plugin.PlugindSockPath);
+  }
+
+  if (g_config.VaultConf.Enabled) {
+    g_vault_client = std::make_unique<Security::VaultClient>();
+    if (!g_vault_client->InitFromConfig(g_config.VaultConf)) std::exit(1);
   }
 
   // Account manager must be initialized before Task Scheduler

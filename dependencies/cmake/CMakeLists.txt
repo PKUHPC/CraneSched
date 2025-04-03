@@ -28,6 +28,7 @@ add_subdirectory(ranges-v3)
 add_subdirectory(backward-cpp)
 add_subdirectory(fpm)
 add_subdirectory(parallel-hashmap)
+add_subdirectory(libvault)
 
 
 include(${CMAKE_SOURCE_DIR}/CMakeModule/SuppressHeaderWarning.cmake)

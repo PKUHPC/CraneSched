@@ -158,12 +158,12 @@ add_compile_definitions(CRANE_LOG_LEVEL=CRANE_LOG_LEVEL_${CRANE_MIN_LOG_LEVEL})
 message(STATUS "Minimal log level is set to ${CRANE_MIN_LOG_LEVEL}")
 
 # Generate the building timestamp
-string(TIMESTAMP BUILD_TIMESTAMP "%a, %d %b %Y %H:%M:%S %z")
+#string(TIMESTAMP BUILD_TIMESTAMP "%a, %d %b %Y %H:%M:%S %z")
+#add_compile_definitions(CRANE_BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
+#message(STATUS "Building Time: ${BUILD_TIMESTAMP}")
 
-add_compile_definitions(CRANE_BUILD_TIMESTAMP="${BUILD_TIMESTAMP}")
 add_compile_definitions(CRANE_VERSION_STRING="${VERSION_CONTENT}")
 message(STATUS "Version: ${VERSION_CONTENT}")
-message(STATUS "Building Time: ${BUILD_TIMESTAMP}")
 
 # Set colorized output when ninja build system is used.
 if (${CRANE_FORCE_COLORED_OUTPUT})

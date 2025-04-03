@@ -1,1 +1,71 @@
-hicpp-signed-bitwise: false
+Checks: >
+  -*,
+  
+  google-*,
+  -google-readability-braces-around-statements,
+  -google-readability-todo,
+  
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  
+  performance-*,
+  
+  misc-*,
+  -misc-include-cleaner,
+  -misc-const-correctness,
+  
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -modernize-pass-by-value,
+  -modernize-use-nodiscard,
+  
+  portability-*,
+  
+  readability-*,
+  -readability-magic-numbers,
+  -readability-identifier-length,
+  -readability-braces-around-statements,
+  
+  hicpp-*,
+  -hicpp-signed-bitwise,
+  -hicpp-vararg,
+  -hicpp-braces-around-statements,
+
+WarningsAsErrors: "*"
+
+CheckOptions:
+  - { key: readability-identifier-naming.GlobalVariableCase,         value: lower_case }
+  - { key: readability-identifier-naming.GlobalVariablePrefix,       value: "g_" }
+  - { key: readability-identifier-naming.GlobalVariableSuffix,       value: "" }
+
+  - { key: readability-identifier-naming.LocalVariableCase,          value: lower_case }
+  - { key: readability-identifier-naming.LocalVariablePrefix,        value: "" }
+  - { key: readability-identifier-naming.LocalVariableSuffix,        value: "" }
+
+  - { key: readability-identifier-naming.EnumCase,                   value: CamelCase  }
+  - { key: readability-identifier-naming.EnumConstantCase,           value: UPPER_CASE }
+
+  - { key: readability-identifier-naming.StructCase,                 value: CamelCase }
+
+  - { key: readability-identifier-naming.MemberCase,                 value: lower_case }
+
+  - { key: readability-identifier-naming.ClassMemberCase,            value: lower_case }
+  - { key: readability-identifier-naming.ClassMemberPrefix,          value: "s_" }
+
+  - { key: readability-identifier-naming.PublicMemberCase,           value: lower_case }
+  - { key: readability-identifier-naming.PublicMemberPrefix,         value: "" }
+  - { key: readability-identifier-naming.PublicMemberSuffix,         value: "" }
+
+  - { key: readability-identifier-naming.PrivateMemberCase,          value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberPrefix,        value: "m_" }
+  - { key: readability-identifier-naming.PrivateMemberSuffix,        value: "_" }
+
+  - { key: readability-identifier-naming.MethodCase,                 value: CamelCase }
+
+  - { key: readability-identifier-naming.PublicMethodCase,           value: CamelCase }
+  - { key: readability-identifier-naming.PublicMethodPrefix,         value: "" }
+  - { key: readability-identifier-naming.PublicMethodSuffix,         value: "" }
+
+  - { key: readability-identifier-naming.PrivateMethodCase,          value: CamelCase }
+  - { key: readability-identifier-naming.PrivateMethodPrefix,        value: "" }
+  - { key: readability-identifier-naming.PrivateMethodSuffix,        value: "_" }
