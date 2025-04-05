@@ -250,6 +250,9 @@ CraneErrCode CranedStub::QueryCranedRemoteMeta(CranedRemoteMeta *meta) {
   meta->system_boot_time =
       absl::FromUnixSeconds(grpc_meta->system_boot_time().seconds());
 
+  meta->network_interfaces = grpc_meta->network_interfaces() 
+                           | std::ranges::to<std::vector>();
+
   if (reply.ok()) return CraneErrCode::SUCCESS;
 
   return CraneErrCode::ERR_GENERIC_FAILURE;

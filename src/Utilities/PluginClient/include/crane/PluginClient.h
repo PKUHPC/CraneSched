@@ -35,6 +35,7 @@
 #include "protos/Plugin.grpc.pb.h"
 #include "protos/Plugin.pb.h"
 #include "protos/PublicDefs.pb.h"
+#include "crane/Network.h"
 
 namespace plugin {
 
@@ -53,6 +54,8 @@ class PluginClient {
     CREATE_CGROUP,
     DESTROY_CGROUP,
     INSERT_EVENT,
+    EXECUTE_NODE_POWER_ACTION,
+    REGISTER_CRANED,
     HookTypeCount,
   };
 
@@ -72,8 +75,18 @@ class PluginClient {
   // Launched by Craned
   void CreateCgroupHookAsync(
       task_id_t task_id, const std::string& cgroup,
-      const crane::grpc::DedicatedResourceInNode& resource);
+      const crane::grpc::ResourceInNode& resource);
   void DestroyCgroupHookAsync(task_id_t task_id, const std::string& cgroup);
+
+  void ExecutePowerActionHookAsync(const std::string& craned_id,
+                                    crane::grpc::PowerAction action);
+
+  void RegisterCranedHookAsync(
+      const std::string& craned_id,
+      const std::vector<crane::NetworkInterface>& interfaces);
+
+  std::optional<crane::grpc::plugin::GetCranedByPowerStateHookSyncReply> 
+  GetCranedByPowerStateHookSync(crane::grpc::CranedPowerType type);
 
  private:
   // HookDispatchFunc is a function pointer type that handles different
@@ -90,7 +103,10 @@ class PluginClient {
                                       google::protobuf::Message* msg);
   grpc::Status NodeEventHook_(grpc::ClientContext* context,
                                       google::protobuf::Message* msg);
-
+  grpc::Status SendExecutePowerActionHook_(grpc::ClientContext* context,
+                                          google::protobuf::Message* msg);
+  grpc::Status SendRegisterCranedHook_(grpc::ClientContext* context,
+                                      google::protobuf::Message* msg);
   void AsyncSendThread_();
 
   std::shared_ptr<Channel> m_channel_;
@@ -108,7 +124,9 @@ class PluginClient {
                               &PluginClient::SendEndHook_,
                               &PluginClient::SendCreateCgroupHook_,
                               &PluginClient::SendDestroyCgroupHook_,
-                              &PluginClient::NodeEventHook_}};
+                              &PluginClient::NodeEventHook_,
+                              &PluginClient::SendExecutePowerActionHook_,
+                              &PluginClient::SendRegisterCranedHook_}};
 };
 
 }  // namespace plugin

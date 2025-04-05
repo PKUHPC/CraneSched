@@ -497,6 +497,23 @@ grpc::Status CranedServiceImpl::QueryCranedRemoteMeta(
     crane::grpc::QueryCranedRemoteMetaReply *response) {
   auto *grpc_meta = response->mutable_craned_remote_meta();
 
+  auto interfaces = crane::GetNetworkInterfaces();
+  for (const auto& interface : interfaces) {
+    auto* network_interface = grpc_meta->add_network_interfaces();
+    network_interface->set_name(interface.name);
+    network_interface->set_mac_address(interface.mac_address);
+    
+    for (const auto& ipv4 : interface.ipv4_addresses) {
+      std::string ipv4_str = crane::Ipv4ToStr(ipv4);
+      network_interface->add_ipv4_addresses(ipv4_str);
+    }
+    
+    for (const auto& ipv6 : interface.ipv6_addresses) {
+      std::string ipv6_str = crane::Ipv6ToStr(ipv6);
+      network_interface->add_ipv6_addresses(ipv6_str);
+    }
+  }
+
   auto &dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->dedicated_res;
   grpc_meta->mutable_dres_in_node()->CopyFrom(
       static_cast<crane::grpc::DedicatedResourceInNode>(dres));

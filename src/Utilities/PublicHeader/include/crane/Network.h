@@ -32,6 +32,7 @@
 
 #include <fstream>
 #include <string>
+#include "protos/PublicDefs.pb.h"
 
 using ipv4_t = uint32_t;
 using ipv6_t = absl::uint128;
@@ -62,5 +63,52 @@ std::string Ipv6ToStr(const ipv6_t& addr);
 int GetIpAddrVer(const std::string& ip);
 
 bool FindTcpInodeByPort(const std::string& tcp_path, int port, ino_t* inode);
+
+struct NetworkInterface {
+  std::string name;
+  std::string mac_address;
+  std::vector<ipv4_t> ipv4_addresses;
+  std::vector<ipv6_t> ipv6_addresses;
+
+  static NetworkInterface FromGrpc(const crane::grpc::NetworkInterface& grpc_interface) {
+    NetworkInterface interface;
+    interface.name = grpc_interface.name();
+    interface.mac_address = grpc_interface.mac_address();
+    
+    for (const auto& addr : grpc_interface.ipv4_addresses()) {
+      ipv4_t ipv4;
+      if (StrToIpv4(addr, &ipv4)) {
+        interface.ipv4_addresses.push_back(ipv4);
+      }
+    }
+    
+    for (const auto& addr : grpc_interface.ipv6_addresses()) {
+      ipv6_t ipv6;
+      if (StrToIpv6(addr, &ipv6)) {
+        interface.ipv6_addresses.push_back(ipv6);
+      }
+    }
+    
+    return interface;
+  }
+
+  crane::grpc::NetworkInterface ToGrpc() const {
+    crane::grpc::NetworkInterface interface;
+    interface.set_name(name);
+    interface.set_mac_address(mac_address);
+    
+    for (const auto& addr : ipv4_addresses) {
+      interface.add_ipv4_addresses(Ipv4ToStr(addr));
+    }
+    
+    for (const auto& addr : ipv6_addresses) {
+      interface.add_ipv6_addresses(Ipv6ToStr(addr));
+    }
+    
+    return interface;
+  }
+};
+
+std::vector<NetworkInterface> GetNetworkInterfaces();
 
 }  // namespace crane
