@@ -848,13 +848,10 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       const std::string& stderr_file_path =
           process->batch_meta.parsed_error_file_pattern;
 
-      if (instance->task.open_mode_append()) {
-        stdout_fd =
-            open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
-      } else {
-        stdout_fd =
-            open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
-      }
+      int open_mode = instance->task.open_mode_append() ? O_APPEND : O_TRUNC;
+
+      stdout_fd =
+          open(stdout_file_path.c_str(), O_RDWR | O_CREAT | open_mode, 0644);
       if (stdout_fd == -1) {
         fmt::print(stderr, "[Craned Subprocess] Error: open {}. {}\n",
                    stdout_file_path, strerror(errno));
@@ -865,13 +862,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       if (stderr_file_path.empty()) {
         dup2(stdout_fd, 2);
       } else {
-        if (instance->task.open_mode_append()) {
-          stderr_fd =
-              open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0644);
-        } else {
-          stderr_fd =
-              open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
-        }
+        stderr_fd =
+            open(stderr_file_path.c_str(), O_RDWR | O_CREAT | open_mode, 0644);
         if (stderr_fd == -1) {
           fmt::print(stderr, "[Craned Subprocess] Error: open {}. {}\n",
                      stderr_file_path, strerror(errno));
