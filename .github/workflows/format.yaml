@@ -22,14 +22,15 @@ jobs:
 
       - name: Install latest Clang-Format
         run: |
+          sudo wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
           sudo apt update
-          sudo apt install -y clang-format
+          sudo apt-get install clang-format-19
 
       - name: Run clang-format check
         run: |
           set -eo pipefail
           git diff --name-only origin/master...HEAD | while read -r file; do
             if [[ "$file" == *.cpp || "$file" == *.h ]]; then
-              clang-format --dry-run --Werror "$file" --style=file
+              clang-format-19 --dry-run --Werror "$file" --style=file
             fi
           done
