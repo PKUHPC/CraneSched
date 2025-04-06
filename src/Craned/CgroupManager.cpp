@@ -687,7 +687,7 @@ CgroupManager::GetJobBpfMapCgroupsV2(const std::string &root_cgroup_path) {
 
   auto pre_key = std::make_unique<BpfKey>();
   if (bpf_map__get_next_key(bpf_runtime_info.BpfDevMap(), nullptr,
-                            pre_key.get(), sizeof(BpfKey)) == 0) {
+                            pre_key.get(), sizeof(BpfKey)) < 0) {
     CRANE_ERROR("Failed to get first key of bpf map or no running jobs.");
     return results;
   }
