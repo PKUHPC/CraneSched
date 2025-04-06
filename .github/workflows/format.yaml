@@ -22,9 +22,10 @@ jobs:
 
       - name: Install latest Clang-Format
         run: |
-          sudo wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          sudo deb http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main
+          sudo deb-src http://apt.llvm.org/noble/ llvm-toolchain-noble-20 main
           sudo apt update
-          sudo apt-get install clang-format-19
+          sudo apt-get install clang-format-20
 
       - name: Run clang-format check
         run: |
