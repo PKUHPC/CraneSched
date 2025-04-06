@@ -1298,7 +1298,8 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
 
   task->SetSubmitTime(absl::Now());
 
-  result = TaskScheduler::AcquireTaskAttributes(task.get());
+  result = TaskScheduler::HandleUnsetOptionalInTaskToCtld(task.get());
+  if (result) result = TaskScheduler::AcquireTaskAttributes(task.get());
   if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
     std::future<task_id_t> future =
