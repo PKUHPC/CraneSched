@@ -90,8 +90,7 @@ bool CreateFoldersForFileEx(const std::string& p, uid_t owner, gid_t group,
       }
     }
   } catch (const std::exception& e) {
-    CRANE_ERROR("Failed to create folder for {}: {}", p.c_str(),
-                e.what());
+    CRANE_ERROR("Failed to create folder for {}: {}", p.c_str(), e.what());
     return false;
   }
 

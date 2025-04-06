@@ -45,7 +45,8 @@ class CranedStub {
   std::vector<task_id_t> ExecuteTasks(
       const crane::grpc::ExecuteTasksRequest &request);
 
-  CraneErrCode CreateCgroupForTasks(std::vector<CgroupSpec> const &cgroup_specs);
+  CraneErrCode CreateCgroupForTasks(
+      std::vector<CgroupSpec> const &cgroup_specs);
 
   CraneErrCode ReleaseCgroupForTasks(
       const std::vector<std::pair<task_id_t, uid_t>> &task_uid_pairs);
@@ -54,7 +55,8 @@ class CranedStub {
 
   CraneErrCode TerminateOrphanedTask(task_id_t task_id);
 
-  CraneErrCode CheckTaskStatus(task_id_t task_id, crane::grpc::TaskStatus *status);
+  CraneErrCode CheckTaskStatus(task_id_t task_id,
+                               crane::grpc::TaskStatus *status);
 
   CraneErrCode ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds);
 

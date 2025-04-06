@@ -88,7 +88,8 @@ void CtldClient::OnCraneCtldConnected() {
   CRANE_ERROR("Failed to register actively.");
 }
 
-void CtldClient::TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change) {
+void CtldClient::TaskStatusChangeAsync(
+    TaskStatusChangeQueueElem&& task_status_change) {
   absl::MutexLock lock(&m_task_status_change_mtx_);
   m_task_status_change_list_.emplace_back(std::move(task_status_change));
 }

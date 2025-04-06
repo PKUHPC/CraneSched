@@ -51,7 +51,7 @@ class VaultClient {
 
   Vault::Url GetUrl_(const std::string& base, const Vault::Path& path) const;
 
-  Vault::Url GetPkiUrl_(const Vault::SecretMount &secret_mount,
+  Vault::Url GetPkiUrl_(const Vault::SecretMount& secret_mount,
                         const Vault::Path& path) const;
 
   static nlohmann::json CreatJson_(const Vault::Parameters& parameters);

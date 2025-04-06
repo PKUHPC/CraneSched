@@ -70,42 +70,42 @@
       level, __VA_ARGS__)
 
 #if CRANE_ACTIVE_LEVEL <= CRANE_LEVEL_TRACE
-#  define CRANE_TRACE_LOC(loc, ...) \
+#  define CRANE_TRACE_LOC(loc, ...)                            \
     CRANE_LOG_LOC_CALL(loc, spdlog::level::trace, __VA_ARGS__)
 #else
 #  define CRANE_TRACE_LOC(loc, ...) (void)0
 #endif
 
 #if CRANE_ACTIVE_LEVEL <= CRANE_LEVEL_DEBUG
-#  define CRANE_DEBUG_LOC(loc, ...) \
+#  define CRANE_DEBUG_LOC(loc, ...)                            \
     CRANE_LOG_LOC_CALL(loc, spdlog::level::debug, __VA_ARGS__)
 #else
 #  define CRANE_DEBUG_LOC(loc, ...) (void)0
 #endif
 
 #if CRANE_ACTIVE_LEVEL <= CRANE_LEVEL_INFO
-#  define CRANE_INFO_LOC(loc, ...) \
+#  define CRANE_INFO_LOC(loc, ...)                            \
     CRANE_LOG_LOC_CALL(loc, spdlog::level::info, __VA_ARGS__)
 #else
 #  define CRANE_INFO_LOC(loc, ...) (void)0
 #endif
 
 #if CRANE_ACTIVE_LEVEL <= CRANE_LEVEL_WARN
-#  define CRANE_WARN_LOC(loc, ...) \
+#  define CRANE_WARN_LOC(loc, ...)                            \
     CRANE_LOG_LOC_CALL(loc, spdlog::level::warn, __VA_ARGS__)
 #else
 #  define CRANE_WARN_LOC(loc, ...) (void)0
 #endif
 
 #if CRANE_ACTIVE_LEVEL <= CRANE_LEVEL_ERROR
-#  define CRANE_ERROR_LOC(loc, ...) \
+#  define CRANE_ERROR_LOC(loc, ...)                          \
     CRANE_LOG_LOC_CALL(loc, spdlog::level::err, __VA_ARGS__)
 #else
 #  define CRANE_ERROR_LOC(loc, ...) (void)0
 #endif
 
 #if CRANE_ACTIVE_LEVEL <= CRANE_LEVEL_CRITICAL
-#  define CRANE_CRITICAL_LOC(loc, ...) \
+#  define CRANE_CRITICAL_LOC(loc, ...)                            \
     CRANE_LOG_LOC_CALL(loc, spdlog::level::critical, __VA_ARGS__)
 #else
 #  define CRANE_CRITICAL_LOC(loc, ...) (void)0

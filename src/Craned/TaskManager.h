@@ -275,7 +275,7 @@ class TaskManager {
   void LaunchTaskInstanceMt_(TaskInstance* instance);
 
   CraneErrCode SpawnProcessInInstance_(TaskInstance* instance,
-                                   ProcessInstance* process);
+                                       ProcessInstance* process);
 
   const TaskInstance* FindInstanceByTaskId_(uint32_t task_id);
 
@@ -342,7 +342,8 @@ class TaskManager {
    * if the signal is invalid, kInvalidParam is returned.
    * otherwise, kGenericFailure is returned.
    */
-  static CraneErrCode KillProcessInstance_(const ProcessInstance* proc, int signum);
+  static CraneErrCode KillProcessInstance_(const ProcessInstance* proc,
+                                           int signum);
 
   // Note: the three maps below are NOT protected by any mutex.
   //  They should be modified in libev callbacks to avoid races.

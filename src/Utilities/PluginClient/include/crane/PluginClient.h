@@ -67,7 +67,8 @@ class PluginClient {
   // Launched by Ctld
   void StartHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
   void EndHookAsync(std::vector<crane::grpc::TaskInfo> tasks);
-  void NodeEventHookAsync(std::vector<crane::grpc::plugin::CranedEventInfo> events);
+  void NodeEventHookAsync(
+      std::vector<crane::grpc::plugin::CranedEventInfo> events);
 
   // Launched by Craned
   void CreateCgroupHookAsync(
@@ -89,7 +90,7 @@ class PluginClient {
   grpc::Status SendDestroyCgroupHook_(grpc::ClientContext* context,
                                       google::protobuf::Message* msg);
   grpc::Status NodeEventHook_(grpc::ClientContext* context,
-                                      google::protobuf::Message* msg);
+                              google::protobuf::Message* msg);
 
   void AsyncSendThread_();
 
