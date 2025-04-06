@@ -25,7 +25,7 @@ jobs:
         run: |
           sudo apt-get install -y wget lsb-release
           sudo wget https://apt.llvm.org/llvm.sh
-          sudo bash llvm.sh
+          sudo bash llvm.sh 20
           sudo apt update
           sudo apt-get install clang-format-20
 
@@ -34,6 +34,6 @@ jobs:
           set -eo pipefail
           git diff --name-only origin/master...HEAD | while read -r file; do
             if [[ "$file" == *.cpp || "$file" == *.h ]]; then
-              clang-format-19 --dry-run --Werror "$file" --style=file
+              clang-format-20 --dry-run --Werror "$file" --style=file
             fi
           done
