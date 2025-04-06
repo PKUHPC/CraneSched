@@ -325,6 +325,12 @@ void ParseConfig(int argc, char** argv) {
             Ctld::kDefaultRejectTasksBeyondCapacity;
       }
 
+      if (config["JobFileAppend"]) {
+        g_config.JobFileOpenModeAppend = config["JobFileAppend"].as<bool>();
+      } else {
+        g_config.JobFileOpenModeAppend = Ctld::kDefaultJobFileOpenModeAppend;
+      }
+
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {

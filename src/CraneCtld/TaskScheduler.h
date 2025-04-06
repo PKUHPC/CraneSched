@@ -520,8 +520,8 @@ class TaskScheduler {
     return TerminateRunningTaskNoLock_(iter->second.get());
   }
 
+  static CraneExpected<void> HandleUnsetOptionalInTaskToCtld(TaskInCtld* task);
   static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
-
   static CraneExpected<void> CheckTaskValidity(TaskInCtld* task);
 
  private:

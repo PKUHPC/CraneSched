@@ -1067,7 +1067,6 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
           task->SetFieldsByTaskToCtld(payload.task());
 
           auto &meta = std::get<InteractiveMetaInTask>(task->meta);
-          auto i_type = meta.interactive_type;
 
           meta.cb_task_res_allocated =
               [writer_weak_ptr](task_id_t task_id,
@@ -1297,12 +1296,10 @@ CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(
       task->partition_id, task->account);
   if (!result) return std::unexpected(result.error());
 
-  result = g_task_scheduler->AcquireTaskAttributes(task.get());
-
-  if (result) result = g_task_scheduler->CheckTaskValidity(task.get());
-
   task->SetSubmitTime(absl::Now());
 
+  result = TaskScheduler::AcquireTaskAttributes(task.get());
+  if (result) result = TaskScheduler::CheckTaskValidity(task.get());
   if (result) {
     std::future<task_id_t> future =
         g_task_scheduler->SubmitTaskAsync(std::move(task));

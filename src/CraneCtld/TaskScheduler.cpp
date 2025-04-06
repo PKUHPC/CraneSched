@@ -2479,6 +2479,17 @@ void TaskScheduler::PersistAndTransferTasksToMongodb_(
   }
 }
 
+CraneExpected<void> TaskScheduler::HandleUnsetOptionalInTaskToCtld(
+    TaskInCtld* task) {
+  if (task->type == crane::grpc::Batch) {
+    auto* batch_meta = task->MutableTaskToCtld()->mutable_batch_meta();
+    if (!batch_meta->has_open_mode_append())
+      batch_meta->set_open_mode_append(g_config.JobFileOpenModeAppend);
+  }
+
+  return {};
+}
+
 CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
   auto part_it = g_config.Partitions.find(task->partition_id);
   if (part_it == g_config.Partitions.end()) {
@@ -2491,6 +2502,7 @@ CraneExpected<void> TaskScheduler::AcquireTaskAttributes(TaskInCtld* task) {
 
   Config::Partition const& part_meta = part_it->second;
 
+  // Calculate task memory value based on MEM_PER_CPU and user-set memory.
   AllocatableResource& task_alloc_res =
       task->requested_node_res_view.GetAllocatableRes();
   double core_double = static_cast<double>(task_alloc_res.cpu_count);
