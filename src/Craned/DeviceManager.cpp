@@ -71,7 +71,7 @@ BasicDevice::operator std::string() const {
 
 CraneErrCode DeviceManager::GetDeviceFileMajorMinorOpType(
     DeviceFileMeta* device_file_meta) {
-  struct stat device_file_info {};
+  struct stat device_file_info{};
   if (stat(device_file_meta->path.c_str(), &device_file_info) == 0) {
     char op_type = 'a';
     if (S_ISBLK(device_file_info.st_mode)) {

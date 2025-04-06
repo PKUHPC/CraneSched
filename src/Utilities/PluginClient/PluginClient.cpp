@@ -251,7 +251,8 @@ void PluginClient::DestroyCgroupHookAsync(task_id_t task_id,
   m_event_queue_.enqueue(std::move(e));
 }
 
-void PluginClient::NodeEventHookAsync(std::vector<crane::grpc::plugin::CranedEventInfo> events) {
+void PluginClient::NodeEventHookAsync(
+    std::vector<crane::grpc::plugin::CranedEventInfo> events) {
   auto request = std::make_unique<crane::grpc::plugin::NodeEventHookRequest>();
   auto* event_list = request->mutable_event_info_list();
   for (auto& event : events) {

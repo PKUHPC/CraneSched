@@ -311,7 +311,7 @@ class CtldServer {
 
   inline void Wait() { m_server_->Wait(); }
 
-  CraneExpected <std::future<task_id_t>> SubmitTaskToScheduler(
+  CraneExpected<std::future<task_id_t>> SubmitTaskToScheduler(
       std::unique_ptr<TaskInCtld> task);
 
  private:

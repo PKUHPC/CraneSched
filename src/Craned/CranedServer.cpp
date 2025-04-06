@@ -107,7 +107,7 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
       }
       for (auto const &fd_dir_entry :
            std::filesystem::directory_iterator(proc_fd_path)) {
-        struct stat statbuf {};
+        struct stat statbuf{};
         std::string fdpath = fmt::format(
             "{}/{}", proc_fd_path, fd_dir_entry.path().filename().string());
         const char *fdchar = fdpath.c_str();

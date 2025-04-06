@@ -101,6 +101,7 @@ enum ExitCodeEnum : uint16_t {
 }  // namespace ExitCode
 
 namespace Internal {
+// clang-format off
 constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)>
     CraneErrStrArr = {
         // 0 - 4
@@ -199,8 +200,8 @@ constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)>
         "The current running job exceeds the QoS limit (MaxJobPerUser)",
         "User has insufficient privilege"
     };
-
-}
+// clang-format on
+}  // namespace Internal
 
 template <typename... Args>
 inline CraneRichError FormatRichErr(CraneErrCode code, const std::string& fmt,

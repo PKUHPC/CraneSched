@@ -18,8 +18,6 @@
 
 #include "crane/PublicHeader.h"
 
-#include <ranges>
-
 AllocatableResource& AllocatableResource::operator+=(
     const AllocatableResource& rhs) {
   cpu_count += rhs.cpu_count;
