@@ -65,7 +65,7 @@ constexpr uint32_t kDefaultScheduledBatchSize = 100000;
 
 constexpr int64_t kCtldRpcTimeoutSeconds = 5;
 constexpr bool kDefaultRejectTasksBeyondCapacity = false;
-constexpr bool kDefaultJobFileAppend = false;
+constexpr bool kDefaultJobFileOpenModeAppend = false;
 
 struct Config {
   struct Node {
@@ -163,7 +163,7 @@ struct Config {
   uint32_t PendingQueueMaxSize;
   uint32_t ScheduledBatchSize;
   bool RejectTasksBeyondCapacity{false};
-  bool JobFileAppend{false};
+  bool JobFileOpenModeAppend{false};
 };
 
 }  // namespace Ctld
@@ -245,12 +245,6 @@ struct PartitionMeta {
 struct InteractiveMetaInTask {
   crane::grpc::InteractiveTaskType interactive_type;
 
-  std::string sh_script;
-  std::string term_env;
-
-  bool pty;
-  bool x11;
-
   std::function<void(task_id_t, std::string const&,
                      std::list<std::string> const&)>
       cb_task_res_allocated;
@@ -288,8 +282,6 @@ struct InteractiveMetaInTask {
 
 struct BatchMetaInTask {
   std::string sh_script;
-  std::string output_file_pattern;
-  std::string error_file_pattern;
 };
 
 struct TaskInCtld {
@@ -342,8 +334,8 @@ struct TaskInCtld {
    * -------------------------------- */
   int32_t requeue_count{0};
   std::list<CranedId> craned_ids;
-  crane::grpc::TaskStatus status;
-  uint32_t exit_code;
+  crane::grpc::TaskStatus status{};
+  uint32_t exit_code{};
   bool held{false};
 
   // If this task is PENDING, start_time is either not set (default constructed)
@@ -512,13 +504,10 @@ struct TaskInCtld {
     if (type == crane::grpc::Batch) {
       meta.emplace<BatchMetaInTask>(BatchMetaInTask{
           .sh_script = val.batch_meta().sh_script(),
-          .output_file_pattern = val.batch_meta().output_file_pattern(),
-          .error_file_pattern = val.batch_meta().error_file_pattern(),
       });
     } else {
-      auto& InteractiveMeta = std::get<InteractiveMetaInTask>(meta);
-      InteractiveMeta.interactive_type =
-          val.interactive_meta().interactive_type();
+      auto& ia_meta = std::get<InteractiveMetaInTask>(meta);
+      ia_meta.interactive_type = val.interactive_meta().interactive_type();
     }
 
     node_num = val.node_num();

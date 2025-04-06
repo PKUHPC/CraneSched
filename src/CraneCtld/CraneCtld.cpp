@@ -326,10 +326,9 @@ void ParseConfig(int argc, char** argv) {
       }
 
       if (config["JobFileAppend"]) {
-        g_config.JobFileAppend =
-            config["JobFileAppend"].as<bool>();
+        g_config.JobFileOpenModeAppend = config["JobFileAppend"].as<bool>();
       } else {
-        g_config.JobFileAppend = Ctld::kDefaultJobFileAppend;
+        g_config.JobFileOpenModeAppend = Ctld::kDefaultJobFileOpenModeAppend;
       }
 
       if (config["Nodes"]) {

@@ -214,11 +214,11 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
-  bool open_mode_append = 25;
 }
 
 message BatchTaskAdditionalMeta {
   string sh_script = 1;
+  optional bool open_mode_append = 2;
   string output_file_pattern = 3;
   string error_file_pattern = 4;
 }

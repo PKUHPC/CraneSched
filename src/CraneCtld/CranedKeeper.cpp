@@ -62,7 +62,8 @@ std::vector<task_id_t> CranedStub::ExecuteTasks(
   return failed_task_ids;
 }
 
-CraneErrCode CranedStub::TerminateTasks(const std::vector<task_id_t> &task_ids) {
+CraneErrCode CranedStub::TerminateTasks(
+    const std::vector<task_id_t> &task_ids) {
   using crane::grpc::TerminateTasksReply;
   using crane::grpc::TerminateTasksRequest;
 
@@ -170,7 +171,7 @@ CraneErrCode CranedStub::ReleaseCgroupForTasks(
 }
 
 CraneErrCode CranedStub::CheckTaskStatus(task_id_t task_id,
-                                     crane::grpc::TaskStatus *status) {
+                                         crane::grpc::TaskStatus *status) {
   using crane::grpc::CheckTaskStatusReply;
   using crane::grpc::CheckTaskStatusRequest;
 
@@ -196,7 +197,8 @@ CraneErrCode CranedStub::CheckTaskStatus(task_id_t task_id,
     return CraneErrCode::ERR_NON_EXISTENT;
 }
 
-CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id, uint64_t seconds) {
+CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id,
+                                             uint64_t seconds) {
   using crane::grpc::ChangeTaskTimeLimitReply;
   using crane::grpc::ChangeTaskTimeLimitRequest;
 
@@ -298,12 +300,6 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
 
     mutable_task->set_cwd(task->cwd);
     mutable_task->set_get_user_env(task->get_user_env);
-    
-    if (task->TaskToCtld().has_open_mode_append()) {
-      mutable_task->set_open_mode_append(task->TaskToCtld().open_mode_append());
-    } else {
-      mutable_task->set_open_mode_append(g_config.JobFileAppend);
-    }
 
     for (const auto &hostname : task->CranedIds())
       mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
@@ -314,15 +310,11 @@ crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
         ToInt64Seconds(task->time_limit));
 
     if (task->type == crane::grpc::Batch) {
-      auto &meta_in_ctld = std::get<BatchMetaInTask>(task->meta);
       auto *mutable_meta = mutable_task->mutable_batch_meta();
-      mutable_meta->set_output_file_pattern(meta_in_ctld.output_file_pattern);
-      mutable_meta->set_error_file_pattern(meta_in_ctld.error_file_pattern);
-      mutable_meta->set_sh_script(meta_in_ctld.sh_script);
+      mutable_meta->CopyFrom(task->TaskToCtld().batch_meta());
     } else {
-      const auto &proto_ia_meta = task->TaskToCtld().interactive_meta();
       auto *mutable_meta = mutable_task->mutable_interactive_meta();
-      mutable_meta->CopyFrom(proto_ia_meta);
+      mutable_meta->CopyFrom(task->TaskToCtld().interactive_meta());
     }
   }
 
