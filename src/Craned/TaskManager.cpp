@@ -848,7 +848,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       const std::string& stderr_file_path =
           process->batch_meta.parsed_error_file_pattern;
 
-      int open_mode = instance->task.open_mode_append() ? O_APPEND : O_TRUNC;
+      const auto& inst_meta = instance->task.batch_meta();
+      int open_mode = inst_meta.open_mode_append() ? O_APPEND : O_TRUNC;
 
       stdout_fd =
           open(stdout_file_path.c_str(), O_RDWR | O_CREAT | open_mode, 0644);
