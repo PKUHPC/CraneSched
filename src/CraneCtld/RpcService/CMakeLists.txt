@@ -31,6 +31,8 @@ target_link_libraries(RpcService PUBLIC
 
         phmap
 
+        nlohmann_json
+
         crane_proto_lib
 
         bs_thread_pool
