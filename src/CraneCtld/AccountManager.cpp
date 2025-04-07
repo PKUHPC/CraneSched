@@ -21,12 +21,12 @@
 #include "AccountMetaContainer.h"
 #include "protos/PublicDefs.pb.h"
 #include "range/v3/algorithm/contains.hpp"
-   
+
 namespace Ctld {
 
 AccountManager::AccountManager() { InitDataMap_(); }
 
-CraneExpected<void> AccountManager::AddUser(uint32_t uid ,
+CraneExpected<void> AccountManager::AddUser(uint32_t uid,
                                             const User& new_user) {
   CraneExpected<void> result;
 
