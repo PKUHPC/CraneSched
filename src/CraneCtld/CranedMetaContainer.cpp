@@ -254,7 +254,7 @@ void CranedMetaContainer::MallocResourceFromReservation(
     return;
   }
 
-  auto reservation_meta = reservation_meta_map_[reservation_id];
+  const auto& reservation_meta = reservation_meta_map_[reservation_id];
 
   reservation_meta->resources_avail -= resources;
   reservation_meta->resources_in_use += resources;
@@ -270,7 +270,7 @@ void CranedMetaContainer::FreeResourceFromReservation(
     return;
   }
 
-  auto reservation_meta = reservation_meta_map_[reservation_id];
+  const auto& reservation_meta = reservation_meta_map_[reservation_id];
 
   auto resource_iter =
       reservation_meta->running_task_resource_map.find(task_id);
@@ -486,7 +486,7 @@ CranedMetaContainer::QueryAllReservationInfo() {
 
   auto reservation_map = reservation_meta_map_.GetMapConstSharedPtr();
   for (auto&& [reservation_id, reservation_meta_ptr] : *reservation_map) {
-    const auto reservation_meta = reservation_meta_ptr.GetExclusivePtr();
+    const auto& reservation_meta = reservation_meta_ptr.GetExclusivePtr();
 
     auto* reservation_info = list->Add();
 
@@ -544,7 +544,7 @@ CranedMetaContainer::QueryReservationInfo(
     return reply;
   }
 
-  const auto reservation_meta =
+  const auto& reservation_meta =
       reservation_meta_map_.GetValueExclusivePtr(reservation_name);
 
   auto* reservation_info = list->Add();

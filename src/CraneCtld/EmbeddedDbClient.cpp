@@ -591,15 +591,15 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
 
         // Dispatch to different queues by status.
         switch (status) {
-        case crane::grpc::Pending:
-          snapshot->pending_queue.emplace(id, std::move(task));
-          break;
-        case crane::grpc::Running:
-          snapshot->running_queue.emplace(id, std::move(task));
-          break;
-        default:
-          snapshot->final_queue.emplace(id, std::move(task));
-          break;
+          case crane::grpc::Pending:
+            snapshot->pending_queue.emplace(id, std::move(task));
+            break;
+          case crane::grpc::Running:
+            snapshot->running_queue.emplace(id, std::move(task));
+            break;
+          default:
+            snapshot->final_queue.emplace(id, std::move(task));
+            break;
         }
         return true;
       });
@@ -619,15 +619,10 @@ bool EmbeddedDbClient::RetrieveReservationInfo(
 
   result = m_reservation_db_->IterateAllKv(
       [&](std::string&& key, std::vector<uint8_t>&& value) {
-        // Skip if not ReservationInfo
-        if (!IsReservationDbTaskDataEntry_(key)) return true;
-
-        ReservationId id = ExtractStrDbIdFromEntry_(key);
-
         crane::grpc::CreateReservationRequest info;
         info.ParseFromArray(value.data(), value.size());
 
-        reservation_info->emplace(id, std::move(info));
+        reservation_info->emplace(key, std::move(info));
 
         return true;
       });
