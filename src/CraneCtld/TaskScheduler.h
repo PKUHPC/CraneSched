@@ -379,8 +379,10 @@ class MinLoadFirst : public INodeSelectionAlgo {
         }
 
         absl::Time kth_time = m_satisfied_iters_.KthTime();
-        if (kth_time != absl::InfiniteFuture() &&
-            (m_time_priority_queue_.empty() ||
+        if (kth_time == absl::InfiniteFuture()) {
+          continue;
+        }
+        if ((m_time_priority_queue_.empty() ||
              kth_time + task->time_limit <=
                  (*m_time_priority_queue_.top())->first)) {
           *start_time = kth_time;

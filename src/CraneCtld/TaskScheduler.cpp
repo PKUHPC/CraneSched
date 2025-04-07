@@ -68,13 +68,12 @@ bool TaskScheduler::Init() {
 
   if (!reservation_req_map.empty()) {
     CRANE_INFO("{} reservation(s) recovered.", reservation_req_map.size());
-  }
-
-  for (auto&& [reservation_id, reservation_req] : reservation_req_map) {
-    auto res = AddReservation(reservation_req);
-    if (!res.has_value()) {
-      CRANE_TRACE("Failed to add reservation {}: {}", reservation_id,
-                  res.error());
+    for (auto&& [reservation_id, reservation_req] : reservation_req_map) {
+      auto res = AddReservation(reservation_req);
+      if (!res.has_value()) {
+        CRANE_TRACE("Failed to add reservation {}: {}", reservation_id,
+                    res.error());
+      }
     }
   }
 
@@ -1642,7 +1641,7 @@ std::expected<void, std::string> TaskScheduler::EraseReservationMeta(
         fmt::format("Reservation {} not found", reservation_id));
   }
 
-  auto reservation_meta =
+  const auto& reservation_meta =
       reservation_meta_map->at(reservation_id).GetExclusivePtr();
 
   if (!reservation_meta->running_task_resource_map.empty()) {

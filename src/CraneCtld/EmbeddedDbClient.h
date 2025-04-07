@@ -22,11 +22,11 @@
 // Precompiled header comes first!
 
 #ifdef CRANE_HAVE_BERKELEY_DB
-#  include <db_cxx.h>
+#include <db_cxx.h>
 #endif
 
 #ifdef CRANE_HAVE_UNQLITE
-#  include <unqlite.h>
+#include <unqlite.h>
 #endif
 
 #include "protos/Crane.pb.h"
@@ -247,21 +247,13 @@ class EmbeddedDbClient {
   bool UpdateReservationInfo(
       txn_id_t txn_id, ReservationId name,
       const crane::grpc::CreateReservationRequest& reservation_req) {
-    return StoreTypeIntoDb_(m_reservation_db_.get(), txn_id,
-                            GetReservationDbEntryName_(name), &reservation_req)
+    return StoreTypeIntoDb_(m_reservation_db_.get(), txn_id, name,
+                            &reservation_req)
         .has_value();
   }
 
   bool DeleteReservationInfo(txn_id_t txn_id, ReservationId name) {
-    return m_reservation_db_->Delete(txn_id, GetReservationDbEntryName_(name))
-        .has_value();
-  }
-
-  bool FetchReservationInfo(txn_id_t txn_id, ReservationId name,
-                            crane::grpc::ReservationInfo* reservation_req) {
-    return FetchTypeFromDb_(m_reservation_db_.get(), txn_id,
-                            GetReservationDbEntryName_(name), reservation_req)
-        .has_value();
+    return m_reservation_db_->Delete(txn_id, name).has_value();
   }
 
  private:
@@ -273,24 +265,12 @@ class EmbeddedDbClient {
     return fmt::format("{}S", db_id);
   }
 
-  inline static std::string GetReservationDbEntryName_(ReservationId db_id) {
-    return fmt::format("{}R", db_id);
-  }
-
   inline static bool IsVariableDbTaskDataEntry_(std::string const& key) {
     return key.back() == 'S';
   }
 
-  inline static bool IsReservationDbTaskDataEntry_(std::string const& key) {
-    return key.back() == 'R';
-  }
-
   inline static task_db_id_t ExtractDbIdFromEntry_(std::string const& key) {
     return std::stol(key.substr(0, key.size() - 1));
-  }
-
-  inline static std::string ExtractStrDbIdFromEntry_(std::string const& key) {
-    return key.substr(0, key.size() - 1);
   }
 
   bool BeginDbTransaction_(IEmbeddedDb* db, txn_id_t* txn_id) {
