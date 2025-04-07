@@ -1,12 +1,9 @@
-name: Build, Upload and Test
+name: Format, Build, Upload and Test
 
 on:
   schedule:
     - cron: "0 2 * * *"
   push:
-    branches:
-      - master
-  pull_request:
     branches:
       - master
       - release/*
@@ -23,8 +20,60 @@ env:
   TEST_FAILED: false
 
 jobs:
+
+  format:
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Switch to current branch
+        run: |
+          echo "Switching to branch: ${GITHUB_HEAD_REF}"
+          git checkout "${GITHUB_HEAD_REF}"
+
+      - name: Set up Git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install latest Clang-Format
+        run: |
+          sudo apt-get install -y wget lsb-release
+          sudo wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          sudo bash /tmp/llvm.sh 20
+          sudo apt update
+          sudo apt-get install clang-format-20
+
+      - name: Run clang-format and apply changes
+        run: |
+          git diff --name-only origin/master...HEAD | while read -r file; do
+            if [[ "$file" == *.cpp || "$file" == *.h ]]; then
+              clang-format-20 -i --style=file "$file"
+            fi
+          done
+          if ! git diff --quiet; then
+            git add .
+            git commit -m "style: auto format with clang-format."
+            git push
+            echo "Commit format."
+          else
+            echo "No formatting changes were necessary."
+          fi
+
   build:
-    if: github.event.pull_request.draft == false
+    needs: format
+    if: |
+      (ithub.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+      github.event_name == 'push' ||
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule'
+
     runs-on: self-hosted
     defaults:
       run:
@@ -34,8 +83,9 @@ jobs:
       # Checkout repo
       - name: Checkout code
         uses: actions/checkout@v4
-        with: 
+        with:
           path: CraneSched
+          ref: ${{ github.head_ref || github.ref_name }}
 
       # Checkout frontend
       - name: Checkout frontend
@@ -44,7 +94,7 @@ jobs:
           repository: PKUHPC/CraneSched-FrontEnd
           path: CraneSched-FrontEnd
           ref: ${{ inputs.frontend_branch }}
-      
+
       # Pull CI Image and Prepare
       - name: Pull CI Image
         run: |
@@ -121,7 +171,7 @@ jobs:
           path: output/${{ env.ARTIFACT_NAME_FRONTEND }}
           retention-days: 14
           if-no-files-found: error
-      
+
       - name: Upload plugin
         uses: actions/upload-artifact@v4
         with:
@@ -146,7 +196,7 @@ jobs:
             localhost/autotest
           podman exec autotest /bin/bash --login script/run.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
           podman stop autotest
-      
+
       # Upload AutoTest Results
       - name: Upload AutoTest Results
         uses: actions/upload-artifact@v4
