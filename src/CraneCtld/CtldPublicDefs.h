@@ -241,8 +241,10 @@ struct ReservationMeta {
 
   absl::flat_hash_map<task_id_t, ResourceV2> running_task_resource_map;
 
-  std::pair<bool /*1 for disallow*/, std::unordered_set<std::string>> accounts;
-  std::pair<bool /*1 for disallow*/, std::unordered_set<std::string>> users;
+  bool accounts_black_list{false};
+  bool users_black_list{false};
+  std::unordered_set<std::string> accounts;
+  std::unordered_set<std::string> users;
 };
 
 struct PartitionGlobalMeta {

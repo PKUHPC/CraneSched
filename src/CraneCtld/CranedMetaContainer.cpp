@@ -512,29 +512,22 @@ CranedMetaContainer::QueryAllReservationInfo() {
     reservation_info->mutable_res_alloc()->CopyFrom(
         static_cast<crane::grpc::ResourceView>(res_alloc));
 
-    auto& [account_denied, accounts] = reservation_meta->accounts;
-    if (account_denied) {
-      auto* account_list = reservation_info->mutable_denied_accounts();
-      for (auto const& account : accounts) {
-        account_list->Add()->assign(account);
+    if (reservation_meta->accounts_black_list) {
+      for (auto const& account : reservation_meta->accounts) {
+        reservation_info->add_denied_accounts()->assign(account);
       }
     } else {
-      auto* account_list = reservation_info->mutable_allowed_accounts();
-      for (auto const& account : accounts) {
-        account_list->Add()->assign(account);
+      for (auto const& account : reservation_meta->accounts) {
+        reservation_info->add_allowed_accounts()->assign(account);
       }
     }
-
-    auto& [user_denied, users] = reservation_meta->users;
-    if (user_denied) {
-      auto* user_list = reservation_info->mutable_denied_users();
-      for (auto const& user : users) {
-        user_list->Add()->assign(user);
+    if (reservation_meta->users_black_list) {
+      for (auto const& user : reservation_meta->users) {
+        reservation_info->add_denied_users()->assign(user);
       }
     } else {
-      auto* user_list = reservation_info->mutable_allowed_users();
-      for (auto const& user : users) {
-        user_list->Add()->assign(user);
+      for (auto const& user : reservation_meta->users) {
+        reservation_info->add_allowed_users()->assign(user);
       }
     }
   }
@@ -578,29 +571,22 @@ CranedMetaContainer::QueryReservationInfo(
   reservation_info->mutable_res_alloc()->CopyFrom(
       static_cast<crane::grpc::ResourceView>(res_alloc));
 
-  auto& [account_denied, accounts] = reservation_meta->accounts;
-  if (account_denied) {
-    auto* account_list = reservation_info->mutable_denied_accounts();
-    for (auto const& account : accounts) {
-      account_list->Add()->assign(account);
+  if (reservation_meta->accounts_black_list) {
+    for (auto const& account : reservation_meta->accounts) {
+      reservation_info->add_denied_accounts()->assign(account);
     }
   } else {
-    auto* account_list = reservation_info->mutable_allowed_accounts();
-    for (auto const& account : accounts) {
-      account_list->Add()->assign(account);
+    for (auto const& account : reservation_meta->accounts) {
+      reservation_info->add_allowed_accounts()->assign(account);
     }
   }
-
-  auto& [user_denied, users] = reservation_meta->users;
-  if (user_denied) {
-    auto* user_list = reservation_info->mutable_denied_users();
-    for (auto const& user : users) {
-      user_list->Add()->assign(user);
+  if (reservation_meta->users_black_list) {
+    for (auto const& user : reservation_meta->users) {
+      reservation_info->add_denied_users()->assign(user);
     }
   } else {
-    auto* user_list = reservation_info->mutable_allowed_users();
-    for (auto const& user : users) {
-      user_list->Add()->assign(user);
+    for (auto const& user : reservation_meta->users) {
+      reservation_info->add_allowed_users()->assign(user);
     }
   }
   return reply;
