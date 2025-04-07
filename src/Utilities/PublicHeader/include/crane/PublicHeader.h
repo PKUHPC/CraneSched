@@ -487,7 +487,7 @@ struct CgroupSpec {
    * @brief set grpc struct,will move res_in_node field
    * @param job_spec grpc job_spce to set
    */
-  void SetJobSpec(crane::grpc::JobSpec* job_spec);
+  void SetJobSpec(crane::grpc::JobSpec* job_spec) const;
   task_id_t job_id;
   uid_t uid;
   crane::grpc::ResourceInNode res_in_node;
