@@ -1579,12 +1579,12 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
           .end_time = end_time,
           .partition_id = partition,
           .craned_ids = craned_ids,
-          .accounts = denied_accounts.empty()
-                          ? make_pair(false, std::move(allowed_accounts))
-                          : make_pair(true, std::move(denied_accounts)),
-          .users = denied_users.empty()
-                       ? make_pair(false, std::move(allowed_users))
-                       : make_pair(true, std::move(denied_users)),
+          .accounts_black_list = !denied_accounts.empty(),
+          .users_black_list = !denied_users.empty(),
+          .accounts = denied_accounts.empty() ? std::move(allowed_accounts)
+                                              : std::move(denied_accounts),
+          .users = denied_users.empty() ? std::move(allowed_users)
+                                        : std::move(denied_users),
       });
   if (!ok) {
     CRANE_ERROR("Failed to insert reservation meta for reservation {}",
@@ -3121,22 +3121,19 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
         return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
       }
 
-      if (!resv_meta->accounts.second.empty()) {
-        if (resv_meta->accounts.first ^
-            !resv_meta->accounts.second.contains(task->account)) {
-          CRANE_TRACE("Account {} not allowed for reservation {} for task #{}",
-                      task->account, task->reservation, task->TaskId());
-          return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
-        }
+      // if passed, either not in the black list (true, true)
+      // or in the white list (false, false)
+      if (resv_meta->accounts_black_list ^
+          !resv_meta->accounts.contains(task->account)) {
+        CRANE_TRACE("Account {} not allowed for reservation {} for task #{}",
+                    task->account, task->reservation, task->TaskId());
+        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
       }
-
-      if (!resv_meta->users.second.empty()) {
-        if (resv_meta->users.first ^
-            !resv_meta->users.second.contains(task->Username())) {
-          CRANE_TRACE("User {} not allowed for reservation {} for task #{}",
-                      task->Username(), task->reservation, task->TaskId());
-          return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
-        }
+      if (resv_meta->users_black_list ^
+          !resv_meta->users.contains(task->Username())) {
+        CRANE_TRACE("User {} not allowed for reservation {} for task #{}",
+                    task->Username(), task->reservation, task->TaskId());
+        return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
       }
 
       if (!task->included_nodes.empty()) {
