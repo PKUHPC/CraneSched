@@ -71,8 +71,28 @@ bool TaskScheduler::Init() {
     for (auto&& [reservation_id, reservation_req] : reservation_req_map) {
       auto res = AddReservation(reservation_req);
       if (!res.has_value()) {
-        CRANE_TRACE("Failed to add reservation {}: {}", reservation_id,
+        CRANE_ERROR("Failed to add reservation {}: {}", reservation_id,
                     res.error());
+        {
+          txn_id_t txn_id{0};
+          auto ok =
+              g_embedded_db_client->BeginReservationDbTransaction(&txn_id);
+          if (!ok) {
+            CRANE_ERROR("Failed to begin transaction for reservation {}.",
+                        reservation_id);
+          }
+          ok = g_embedded_db_client->DeleteReservationInfo(txn_id,
+                                                           reservation_id);
+          if (!ok) {
+            CRANE_ERROR("Failed to delete reservation {} from embedded DB.",
+                        reservation_id);
+          }
+          ok = g_embedded_db_client->CommitReservationDbTransaction(txn_id);
+          if (!ok) {
+            CRANE_ERROR("Failed to commit transaction for reservation {}.",
+                        reservation_id);
+          }
+        }
       }
     }
   }
@@ -1468,9 +1488,6 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
   }
 
   absl::Time start_time = absl::FromUnixSeconds(request.start_time_seconds());
-  if (start_time < absl::Now() + absl::Seconds(kReservationMinAdvanceSec)) {
-    return std::unexpected("Reservation start time is too close or has passed");
-  }
   absl::Duration duration = absl::Seconds(request.duration_seconds());
   absl::Time end_time = start_time + duration;
   PartitionId partition = request.partition();
@@ -1602,13 +1619,25 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
       continue;
     }
   }
-  if (!g_embedded_db_client->UpdateReservationInfo(0, reservation_name,
-                                                   request)) {
-    CRANE_ERROR("Failed to insert reservation info to DB for reservation {}",
-                reservation_name);
-    return std::unexpected(fmt::format(
-        "Failed to insert reservation info to DB for reservation {}",
-        reservation_name));
+
+  {
+    txn_id_t txn_id{0};
+    auto ok = g_embedded_db_client->BeginReservationDbTransaction(&txn_id);
+    if (!ok) {
+      CRANE_ERROR("Failed to begin transaction for reservation {}.",
+                  reservation_name);
+    }
+    ok = g_embedded_db_client->UpdateReservationInfo(txn_id, reservation_name,
+                                                     request);
+    if (!ok) {
+      CRANE_ERROR("Failed to insert reservation info to DB for reservation {}",
+                  reservation_name);
+    }
+    ok = g_embedded_db_client->CommitReservationDbTransaction(txn_id);
+    if (!ok) {
+      CRANE_ERROR("Failed to commit transaction for reservation {}.",
+                  reservation_name);
+    }
   }
 
   return {};
@@ -1669,10 +1698,24 @@ std::expected<void, std::string> TaskScheduler::EraseReservationMeta(
 
   reservation_meta_map->erase(reservation_id);
 
-  if (!g_embedded_db_client->DeleteReservationInfo(0, reservation_id)) {
-    CRANE_ERROR("Failed to delete reservation info from DB for reservation {}",
-                reservation_id);
-    return std::unexpected("Failed to delete reservation info from DB");
+  {
+    txn_id_t txn_id{0};
+    auto ok = g_embedded_db_client->BeginReservationDbTransaction(&txn_id);
+    if (!ok) {
+      CRANE_ERROR("Failed to begin transaction for reservation {}.",
+                  reservation_id);
+    }
+    ok = g_embedded_db_client->DeleteReservationInfo(txn_id, reservation_id);
+    if (!ok) {
+      CRANE_ERROR(
+          "Failed to delete reservation info from DB for reservation {}",
+          reservation_id);
+    }
+    ok = g_embedded_db_client->CommitReservationDbTransaction(txn_id);
+    if (!ok) {
+      CRANE_ERROR("Failed to commit transaction for reservation {}.",
+                  reservation_id);
+    }
   }
   return {};
 }

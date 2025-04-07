@@ -200,6 +200,14 @@ class EmbeddedDbClient {
     return CommitDbTransaction_(m_fixed_db_.get(), txn_id);
   }
 
+  bool BeginReservationDbTransaction(txn_id_t* txn_id) {
+    return BeginDbTransaction_(m_reservation_db_.get(), txn_id);
+  }
+
+  bool CommitReservationDbTransaction(txn_id_t txn_id) {
+    return CommitDbTransaction_(m_reservation_db_.get(), txn_id);
+  }
+
   // Note: All operations in transaction will abort or rollback automatically if
   // some operation fails, so we don't need anything like AbortTransaction here!
 
@@ -245,14 +253,14 @@ class EmbeddedDbClient {
   }
 
   bool UpdateReservationInfo(
-      txn_id_t txn_id, ReservationId name,
+      txn_id_t txn_id, const ReservationId& name,
       const crane::grpc::CreateReservationRequest& reservation_req) {
     return StoreTypeIntoDb_(m_reservation_db_.get(), txn_id, name,
                             &reservation_req)
         .has_value();
   }
 
-  bool DeleteReservationInfo(txn_id_t txn_id, ReservationId name) {
+  bool DeleteReservationInfo(txn_id_t txn_id, const ReservationId& name) {
     return m_reservation_db_->Delete(txn_id, name).has_value();
   }
 
