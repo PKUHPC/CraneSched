@@ -1,5 +1,4 @@
 add_library(Utility_Pmix
-        PmixComment.h
         Pmix.cpp
         Pmix.h)
 
@@ -11,4 +10,5 @@ target_link_libraries(Utility_Pmix PUBLIC
         crane_proto_lib
         Utility_PublicHeader
         fmt::fmt
+        libpmix
 )
