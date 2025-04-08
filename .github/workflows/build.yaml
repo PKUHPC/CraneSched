@@ -27,32 +27,32 @@ env:
   TEST_FAILED: false
 
 jobs:
+
   build:
     if: github.event_name != 'pull_request' || !github.event.pull_request.draft
-
     runs-on: self-hosted
     defaults:
       run:
         shell: bash -leo pipefail {0}
 
     steps:
-
-      - name: Remove test-pass label
-        if: github.event_name == 'pull_request' && success()
+      - name: Remove label
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          failOnError: false
           script: |
-            const labelToRemove = 'test-passed';
-            const prNumber = context.payload.pull_request.number;
-
-            await github.issues.removeLabel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              name: test-passed,
-            });
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                name: "test-passed"
+              })
+              console.log('test-passed label removed.')
+            } catch (error) {
+              if (error.status !== 404) throw error
+            }
 
       # Checkout repo
       - name: Checkout code
@@ -184,15 +184,17 @@ jobs:
         if: env.TEST_FAILED == 'true'
         run: exit 1
 
-      - name: Check and Add Specific Label
+      - name: Check and Add Label
+        if: github.event_name == 'pull_request' && env.TEST_FAILED != 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const prNumber = context.payload.pull_request.number;
-            await github.issues.addLabels({
+            await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
               labels: ['test-passed'],
             });
+            console.log('test-passed label added.')
