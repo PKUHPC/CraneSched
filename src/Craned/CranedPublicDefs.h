@@ -25,8 +25,6 @@
 
 namespace Craned {
 
-using namespace std::literals;
-
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 
 using EnvMap = std::unordered_map<std::string, std::string>;
