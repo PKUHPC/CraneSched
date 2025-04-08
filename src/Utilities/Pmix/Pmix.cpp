@@ -18,6 +18,8 @@
 
 #include "Pmix.h"
 
+#include "fmt/printf.h"
+
 namespace pmix {
 
 PmixServer::~PmixServer() {
