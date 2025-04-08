@@ -307,6 +307,11 @@ add_subdirectory(dependencies/CPM EXCLUDE_FROM_ALL)
 # Notify CMake that we have module files to find packages/libs.
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
 
+add_library(libpmix SHARED IMPORTED)
+set_target_properties(libpmix PROPERTIES IMPORTED_LOCATION /usr/local/pmix-2.2.5/lib/libpmix.so.2)
+set_target_properties(libpmix PROPERTIES INTERFACE_INCLUDE_DIRECTORIES /usr/local/pmix-2.2.5/include)
+set_target_properties(libpmix PROPERTIES LINK_FLAGS "-levent_pthreads -levent -lm -lutil -lz -ldl")
+
 if (ENABLE_BERKELEY_DB)
     message("Enable berkeley db as one of embedded db backend.")
     find_package(BerkeleyDB REQUIRED)
