@@ -7,7 +7,7 @@ on:
 
 jobs:
   format:
-    if: github.event.pull_request.draft == false || github.event.label.name == 'auto-format'
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
 
     steps:
@@ -39,22 +39,13 @@ jobs:
               clang-format-20 -i --style=file "$file"
             fi
           done
-
-      - name: Handle formatting
+      - name: Commit formatting changes
         run: |
-          LABELS='${{ toJson(github.event.pull_request.labels) }}'
           if ! git diff --quiet; then
-            if [[ "$LABELS" == *'"auto-format"'* ]]; then
-              echo "Auto-format label present. Committing formatting changes..."
-              git config --global user.name "github-actions[bot]"
-              git config --global user.email "github-actions[bot]@users.noreply.github.com"
-              git add .
-              git commit -m "style: auto format with clang-format."
-              git push
-            else
-              echo "Please run clang-format locally or add 'auto-format' label to your PR and request this action again."
-            exit 1
-            fi
+            git add .
+            git commit -m "style: auto format with clang-format."
+            git push
+            echo "Commit format."
           else
-            echo "No formatting changes necessary."
+            echo "No formatting changes were necessary."
           fi
