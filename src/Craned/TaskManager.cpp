@@ -1124,7 +1124,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
 
-  const auto& mpi = instance->task.interactive_meta().mpi;
+  const auto& mpi = instance->task.interactive_meta().mpi();
   if (instance->IsCrun() && !mpi.empty() && mpi != "list") {
     auto env_map = instance->GetTaskEnvMap();
     // TODO: add use env
