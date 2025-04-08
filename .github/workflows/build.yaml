@@ -28,7 +28,8 @@ env:
 
 jobs:
   build:
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+
     runs-on: self-hosted
     defaults:
       run:
