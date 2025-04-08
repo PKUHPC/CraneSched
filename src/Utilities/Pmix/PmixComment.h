@@ -155,4 +155,4 @@ static pmix_server_module_t CranePmixCb = {
   .job_control = PMIxServerModule::JobControl,
 };
 
-};
+} // namespace pmix;
