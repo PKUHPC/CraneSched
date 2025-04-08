@@ -135,7 +135,7 @@ void ParseConfig(int argc, char** argv) {
           value_or(config["CranedListenPort"], kCranedDefaultPort);
 
       g_config.ListenConf.UnixSocketListenAddr =
-          fmt::format("unix://{}", g_config.CranedUnixSockPath.string());
+          fmt::format("unix://{}", g_config.CranedUnixSockPath);
 
       g_config.CompressedRpc = value_or<bool>(config["CompressedRpc"], false);
 
@@ -420,7 +420,7 @@ void ParseConfig(int argc, char** argv) {
           g_config.Plugin.Enabled =
               value_or<bool>(plugin_config["Enabled"], false);
           g_config.Plugin.PlugindSockPath =
-              fmt::format("unix://{}{}", g_config.CraneBaseDir.string(),
+              fmt::format("unix://{}{}", g_config.CraneBaseDir,
                           value_or(plugin_config["PlugindSockPath"],
                                    kDefaultPlugindUnixSockPath));
         }
@@ -698,7 +698,7 @@ void CheckSingleton() {
       std::exit(1);
     } else {
       CRANE_CRITICAL("Failed to lock {}: {}. Exiting...",
-                     g_config.CranedMutexFilePath.string(), strerror(errno));
+                     g_config.CranedMutexFilePath, strerror(errno));
       std::exit(1);
     }
   }

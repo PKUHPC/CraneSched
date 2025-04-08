@@ -171,4 +171,17 @@ struct formatter<cpu_t> {
   }
 };
 
+template <>
+struct formatter<std::filesystem::path> {
+  template <typename ParseContext>
+  constexpr auto parse(ParseContext &ctx) {
+    return ctx.begin();
+  };
+
+  template <typename FormatContext>
+  auto format(const std::filesystem::path &v, FormatContext &ctx) const {
+    return fmt::format_to(ctx.out(), "{}", v.string());
+  }
+};
+
 }  // namespace fmt

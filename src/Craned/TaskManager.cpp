@@ -1105,7 +1105,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   if (instance->IsCalloc()) return;
 
   instance->meta->parsed_sh_script_path =
-      fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir.string(), task_id);
+      fmt::format("{}/Crane-{}.sh", g_config.CranedScriptDir, task_id);
   auto& sh_path = instance->meta->parsed_sh_script_path;
 
   FILE* fptr = fopen(sh_path.c_str(), "w");
