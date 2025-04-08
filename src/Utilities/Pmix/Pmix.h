@@ -44,12 +44,18 @@ private:
   uint32_t m_uid_;
   uint32_t m_gid_;
   std::string m_nspace_; // crane.pmix.jobid
-  std::string hostname;
   std::string m_server_tmpdir_;
   uint32_t m_nprocs_;
   std::string m_hostname_;
   uint32_t m_node_id_;
+  uint32_t m_node_tasks_; /* number of tasks on *this* node */
+  uint32_t m_n_tasks_;
+  std::vector<uint32_t> m_global_id_list_; /* global ids of tasks located on *this* node */
+  uint32_t m_nnodes_job_; /* number of nodes in current job */
   std::string m_node_list_;
+  uint32_t m_ncpus_;  /* total possible number of cpus in job */
+  std::string m_cli_tmpdir_;
+
 
   void InfoSet_(const crane::grpc::TaskToD& task, const std::unordered_map<std::string, std::string>& env_map);
 };
