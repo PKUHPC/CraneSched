@@ -97,7 +97,8 @@ void ParseConfig(int argc, char** argv) {
         g_config.CranedDebugLevel =
             parsed_args["debug-level"].as<std::string>();
       else
-        g_config.CranedDebugLevel = value_or(config["CranedDebugLevel"], "log");
+        g_config.CranedDebugLevel =
+            value_or(config["CranedDebugLevel"], "info");
 
       // spdlog should be initialized as soon as possible
       std::optional log_level = StrToLogLevel(g_config.CranedDebugLevel);
