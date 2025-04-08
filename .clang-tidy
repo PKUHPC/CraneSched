@@ -1,31 +1,31 @@
 Checks: >
   -*,
-  
+
   google-*,
   -google-readability-braces-around-statements,
   -google-readability-todo,
-  
+
   bugprone-*,
   -bugprone-easily-swappable-parameters,
-  
+
   performance-*,
-  
+
   misc-*,
   -misc-include-cleaner,
   -misc-const-correctness,
-  
+
   modernize-*,
   -modernize-use-trailing-return-type,
   -modernize-pass-by-value,
   -modernize-use-nodiscard,
-  
+
   portability-*,
-  
+
   readability-*,
   -readability-magic-numbers,
   -readability-identifier-length,
   -readability-braces-around-statements,
-  
+
   hicpp-*,
   -hicpp-signed-bitwise,
   -hicpp-vararg,
@@ -40,16 +40,22 @@ CheckOptions:
 
   - { key: readability-identifier-naming.GlobalConstantCase,         value: CamelCase }
   - { key: readability-identifier-naming.GlobalConstantPrefix,       value: "k" }
-  - { key: readability-identifier-naming.GlobalVariableSuffix,       value: "" }
+  - { key: readability-identifier-naming.GlobalConstantSuffix,       value: "" }
+
+  - { key: readability-identifier-naming.GlobalConstantPointerCase,  value: CamelCase }
+  - { key: readability-identifier-naming.GlobalConstantPointerPrefix,value: "k" }
+  - { key: readability-identifier-naming.GlobalConstantPointerSuffix,value: "" }
 
   - { key: readability-identifier-naming.LocalVariableCase,          value: lower_case }
   - { key: readability-identifier-naming.LocalVariablePrefix,        value: "" }
   - { key: readability-identifier-naming.LocalVariableSuffix,        value: "" }
 
-  - { key: readability-identifier-naming.EnumCase,                   value: CamelCase  }
+  - { key: readability-identifier-naming.EnumCase,                   value: CamelCase }
   - { key: readability-identifier-naming.EnumConstantCase,           value: UPPER_CASE }
 
   - { key: readability-identifier-naming.StructCase,                 value: CamelCase }
+  - { key: misc-non-private-member-variables-in-classes.IgnorePublicMemberVariables,
+      value: 'true' }
 
   - { key: readability-identifier-naming.MemberCase,                 value: lower_case }
 
