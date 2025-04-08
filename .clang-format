@@ -23,6 +23,9 @@ EmptyLineBeforeAccessModifier: LogicalBlock
 IndentPPDirectives: AfterHash
 IndentCaseLabels: false
 
+PointerAlignment: Left
+ReferenceAlignment: Left
+
 SpacesInAngles: Never
 SpacesInConditionalStatement: false
 SpacesInContainerLiterals: false
