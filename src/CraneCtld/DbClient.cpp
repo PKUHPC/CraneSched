@@ -110,9 +110,8 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
   return true;
 }
 
-bool MongodbClient::InsertRecoveredJob(
-    const crane::grpc::TaskInEmbeddedDb& task_in_embedded_db) {
-  document doc = TaskInEmbeddedDbToDocument_(task_in_embedded_db);
+bool MongodbClient::InsertRecoveredJob(TaskInCtld* task) {
+  document doc = TaskInEmbeddedDbToDocument_(task);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
       (*GetClient_())[m_db_name_][m_task_collection_name_].insert_one(
@@ -817,9 +816,9 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
 }
 
 MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
-    const crane::grpc::TaskInEmbeddedDb& task) {
-  auto const& task_to_ctld = task.task_to_ctld();
-  auto const& runtime_attr = task.runtime_attr();
+  TaskInCtld* task) {
+  auto const& task_to_ctld = task->TaskToCtld();
+  auto const& runtime_attr = task->RuntimeAttr();
 
   bsoncxx::builder::stream::document env_doc;
   for (const auto& entry : task_to_ctld.env()) {
@@ -896,10 +895,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
           // 30-34
           task_to_ctld.type(), task_to_ctld.extra_attr(),
           task_to_ctld.exclusive(),
-          runtime_attr.alloc_cpus_total(),
-          static_cast<int64_t>(runtime_attr.alloc_mem_total()),
+          task->alloc_cpus_total,
+          static_cast<int64_t>(task->alloc_mem_total),
           // 35-39
-          runtime_attr.alloc_device_total()};
+          task->alloc_device_total};
 
   return DocumentConstructor_(fields, values);
 }
@@ -975,10 +974,10 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->get_user_env,
              // 30-34
              task->type, task->extra_attr,
-             task->TaskToCtld().exclusive(), task->RuntimeAttr().alloc_cpus_total(),
-             static_cast<int64_t>(task->RuntimeAttr().alloc_mem_total()),
+             task->TaskToCtld().exclusive(), task->alloc_cpus_total,
+             static_cast<int64_t>(task->alloc_mem_total),
              // 35-39
-             task->RuntimeAttr().alloc_device_total()};
+             task->alloc_device_total};
 
   return DocumentConstructor_(fields, values);
 }
