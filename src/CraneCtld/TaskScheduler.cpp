@@ -2553,8 +2553,9 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       // Find all possible nodes that can run the task now.
       // TODO: Performance issue! Consider speeding up with multiple threads.
       ResourceInNode feasible_res;
-      bool ok = task->allocated_node_res_view_map[craned_index].GetFeasibleResourceInNode(
-          craned_meta->res_avail, &feasible_res);
+      bool ok =
+          task->allocated_node_res_view_map[craned_index]
+              .GetFeasibleResourceInNode(craned_meta->res_avail, &feasible_res);
       if (ok) {
         bool is_node_satisfied_now = true;
         for (const auto& [time, res] : time_avail_res_map) {
@@ -2590,11 +2591,13 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     // TODO: get feasible resource randomly (may cause start time change
     //       rapidly)
-    bool ok = task->allocated_node_res_view_map[craned_id].GetFeasibleResourceInNode(
-        craned_meta->res_avail, &feasible_res);
+    bool ok =
+        task->allocated_node_res_view_map[craned_id].GetFeasibleResourceInNode(
+            craned_meta->res_avail, &feasible_res);
     if (!ok) {
-      ok = task->allocated_node_res_view_map[craned_id].GetFeasibleResourceInNode(
-          craned_meta->res_total, &feasible_res);
+      ok =
+          task->allocated_node_res_view_map[craned_id]
+              .GetFeasibleResourceInNode(craned_meta->res_total, &feasible_res);
     }
     if (!ok) {
       CRANE_DEBUG(
@@ -2767,7 +2770,8 @@ void MinLoadFirst::NodeSelect(
       // takes effect right now. Otherwise, during the scheduling for the
       // next partition, the algorithm may use the resource which is already
       // allocated.
-      task->UpdateTotalAllocatedRes();  // Update the total resources allocated to the task
+      task->UpdateTotalAllocatedRes();  // Update the total resources allocated
+                                        // to the task
       for (CranedId const& craned_id : craned_ids)
         g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                                  task->Resources());

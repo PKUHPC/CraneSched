@@ -314,17 +314,19 @@ bool MongodbClient::FetchJobRecords(
       task->set_username(view["username"].get_string().value.data());
 
       auto* mutable_req_res_view = task->mutable_req_res_view();
-      auto* mutable_req_alloc_res = mutable_req_res_view->mutable_allocatable_res();
+      auto* mutable_req_alloc_res =
+          mutable_req_res_view->mutable_allocatable_res();
       mutable_req_alloc_res->set_cpu_core_limit(
           view["cpus_req"].get_double().value);
-          mutable_req_alloc_res->set_memory_limit_bytes(
+      mutable_req_alloc_res->set_memory_limit_bytes(
           view["mem_req"].get_int64().value);
-          mutable_req_alloc_res->set_memory_sw_limit_bytes(
+      mutable_req_alloc_res->set_memory_sw_limit_bytes(
           view["mem_req"].get_int64().value);
-  
+
       task->set_alloc_cpus_total(view["cpus_alloc_total"].get_double().value);
       task->set_alloc_mem_total(view["mem_alloc_total"].get_int64().value);
-      task->set_alloc_device_total(view["device_alloc_total"].get_string().value);
+      task->set_alloc_device_total(
+          view["device_alloc_total"].get_string().value);
 
       task->set_name(std::string(view["task_name"].get_string().value));
       task->set_qos(std::string(view["qos"].get_string().value));
@@ -817,7 +819,7 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
 }
 
 MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
-  TaskInCtld* task) {
+    TaskInCtld* task) {
   auto const& task_to_ctld = task->TaskToCtld();
   auto const& runtime_attr = task->RuntimeAttr();
 
@@ -978,8 +980,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->allocated_res_view.CpuCount(),
              // 35-39
              static_cast<int64_t>(task->allocated_res_view.MemoryBytes()),
-             device_map_str
-            };
+             device_map_str};
   return DocumentConstructor_(fields, values);
 }
 

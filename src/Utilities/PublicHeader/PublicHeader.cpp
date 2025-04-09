@@ -224,9 +224,7 @@ void AllocatableResource::SetCpuCount(const double in_cpu_count) {
   cpu_count = cpu_t{in_cpu_count};
 }
 
-uint64_t AllocatableResource::GetMemByte() const {
-  return memory_bytes;
-}
+uint64_t AllocatableResource::GetMemByte() const { return memory_bytes; }
 
 void AllocatableResource::SetMemByte(const uint64_t in_memory_bytes) {
   memory_bytes = in_memory_bytes;
@@ -642,20 +640,21 @@ ResourceView::ResourceView(const crane::grpc::ResourceView& rhs) {
   device_map = FromGrpcDeviceMap(rhs.device_map());
 }
 
-bool ResourceView::IsDeviceMapZero() const {
-  return device_map.empty();
-}
+bool ResourceView::IsDeviceMapZero() const { return device_map.empty(); }
 
-void ResourceView::SetDeviceMap(const DedicatedResourceInNode& dedicated_res_in_node) {
+void ResourceView::SetDeviceMap(
+    const DedicatedResourceInNode& dedicated_res_in_node) {
   this->device_map.clear();
-  for (const auto& [name, type_slots_map_list] : dedicated_res_in_node.name_type_slots_map) {
+  for (const auto& [name, type_slots_map_list] :
+       dedicated_res_in_node.name_type_slots_map) {
     uint64_t untyped_req_count = 0;
     std::unordered_map<std::string, uint64_t> type_total_map;
     for (const auto& [type, slots] : type_slots_map_list.type_slots_map) {
-        uint64_t type_count = slots.size(); 
-        type_total_map[type] = type_count;
+      uint64_t type_count = slots.size();
+      type_total_map[type] = type_count;
     }
-    this->device_map[name] = std::make_pair(untyped_req_count, std::move(type_total_map));
+    this->device_map[name] =
+        std::make_pair(untyped_req_count, std::move(type_total_map));
   }
 }
 
