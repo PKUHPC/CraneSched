@@ -474,7 +474,7 @@ struct TaskInCtld {
         } else {
           is_first_device = false;
         }
-  
+
         oss << device_name << ":";
         if (untyped_req_count > 0) {
           oss << "untyped:" << untyped_req_count;
@@ -493,8 +493,8 @@ struct TaskInCtld {
     };
     alloc_device_total = "";
     if (!allocated_res_view.GetDeviceMap().empty()) {
-      alloc_device_total = device_map_to_string(
-        allocated_res_view.GetDeviceMap());
+      alloc_device_total =
+          device_map_to_string(allocated_res_view.GetDeviceMap());
     }
     alloc_cpus_total = allocated_res_view.CpuCount();
     alloc_mem_total = allocated_res_view.MemoryBytes();
