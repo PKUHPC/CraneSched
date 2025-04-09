@@ -299,7 +299,8 @@ bool MongodbClient::FetchJobRecords(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type          extra_attr     exclusive     cpus_alloc_total mem_alloc_total
+  // 30 type          extra_attr     exclusive     cpus_alloc_total
+  // mem_alloc_total
   // 35 device_alloc_total
 
   try {
@@ -314,17 +315,19 @@ bool MongodbClient::FetchJobRecords(
       task->set_username(view["username"].get_string().value.data());
 
       auto* mutable_req_res_view = task->mutable_req_res_view();
-      auto* mutable_req_alloc_res = mutable_req_res_view->mutable_allocatable_res();
+      auto* mutable_req_alloc_res =
+          mutable_req_res_view->mutable_allocatable_res();
       mutable_req_alloc_res->set_cpu_core_limit(
           view["cpus_req"].get_double().value);
-          mutable_req_alloc_res->set_memory_limit_bytes(
+      mutable_req_alloc_res->set_memory_limit_bytes(
           view["mem_req"].get_int64().value);
-          mutable_req_alloc_res->set_memory_sw_limit_bytes(
+      mutable_req_alloc_res->set_memory_sw_limit_bytes(
           view["mem_req"].get_int64().value);
-  
+
       task->set_alloc_cpus_total(view["cpus_alloc_total"].get_double().value);
       task->set_alloc_mem_total(view["mem_alloc_total"].get_int64().value);
-      task->set_alloc_device_total(view["device_alloc_total"].get_string().value);
+      task->set_alloc_device_total(
+          view["device_alloc_total"].get_string().value);
 
       task->set_name(std::string(view["task_name"].get_string().value));
       task->set_qos(std::string(view["qos"].get_string().value));
@@ -816,7 +819,7 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
 }
 
 MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
-  TaskInCtld* task) {
+    TaskInCtld* task) {
   auto const& task_to_ctld = task->TaskToCtld();
   auto const& runtime_attr = task->RuntimeAttr();
 
@@ -829,11 +832,12 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 
   // 0  task_id       task_db_id     mod_time       deleted        account
   // 5  cpus_req      mem_req        task_name      env            id_user
-  // 10 id_group      nodelist       nodes_alloc   node_inx        partition_name
-  // 15 priority      time_eligible  time_start    time_end        time_suspended
+  // 10 id_group      nodelist       nodes_alloc   node_inx partition_name 15
+  // priority      time_eligible  time_start    time_end        time_suspended
   // 20 script        state          timelimit     time_submit     work_dir
   // 25 submit_line   exit_code      username       qos            get_user_env
-  // 30 type          extra_attr     exclusive     cpus_alloc_total mem_alloc_total
+  // 30 type          extra_attr     exclusive     cpus_alloc_total
+  // mem_alloc_total
   // 35 device_alloc_total
 
   // clang-format off
@@ -865,40 +869,39 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, bool, double, int64_t,          /*30-34*/
              std::string>                                          /*35-39*/
-      values{
-          // 0-4
-          static_cast<int32_t>(runtime_attr.task_id()),
-          runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
-          task_to_ctld.account(),
-          // 5-9
-          task_to_ctld.req_resources().allocatable_res().cpu_core_limit(),
-          static_cast<int64_t>(
-              task_to_ctld.req_resources().allocatable_res().memory_limit_bytes()),
-          task_to_ctld.name(), env_str,
-          static_cast<int32_t>(task_to_ctld.uid()),
-          // 10-14
-          static_cast<int32_t>(task_to_ctld.gid()),
-          util::HostNameListToStr(runtime_attr.craned_ids()),
-          runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
-          // 15-19
-          runtime_attr.cached_priority(), 0,
-          runtime_attr.start_time().seconds(),
-          runtime_attr.end_time().seconds(), 0,
-          // 20-24
-          task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
-          task_to_ctld.time_limit().seconds(),
-          runtime_attr.submit_time().seconds(), task_to_ctld.cwd(),
-          // 25-29
-          task_to_ctld.cmd_line(), runtime_attr.exit_code(),
-          runtime_attr.username(), task_to_ctld.qos(),
-          task_to_ctld.get_user_env(),
-          // 30-34
-          task_to_ctld.type(), task_to_ctld.extra_attr(),
-          task_to_ctld.exclusive(),
-          task->alloc_cpus_total,
-          static_cast<int64_t>(task->alloc_mem_total),
-          // 35-39
-          task->alloc_device_total};
+      values{                                                      // 0-4
+             static_cast<int32_t>(runtime_attr.task_id()),
+             runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
+             task_to_ctld.account(),
+             // 5-9
+             task_to_ctld.req_resources().allocatable_res().cpu_core_limit(),
+             static_cast<int64_t>(task_to_ctld.req_resources()
+                                      .allocatable_res()
+                                      .memory_limit_bytes()),
+             task_to_ctld.name(), env_str,
+             static_cast<int32_t>(task_to_ctld.uid()),
+             // 10-14
+             static_cast<int32_t>(task_to_ctld.gid()),
+             util::HostNameListToStr(runtime_attr.craned_ids()),
+             runtime_attr.craned_ids().size(), 0, task_to_ctld.partition_name(),
+             // 15-19
+             runtime_attr.cached_priority(), 0,
+             runtime_attr.start_time().seconds(),
+             runtime_attr.end_time().seconds(), 0,
+             // 20-24
+             task_to_ctld.batch_meta().sh_script(), runtime_attr.status(),
+             task_to_ctld.time_limit().seconds(),
+             runtime_attr.submit_time().seconds(), task_to_ctld.cwd(),
+             // 25-29
+             task_to_ctld.cmd_line(), runtime_attr.exit_code(),
+             runtime_attr.username(), task_to_ctld.qos(),
+             task_to_ctld.get_user_env(),
+             // 30-34
+             task_to_ctld.type(), task_to_ctld.extra_attr(),
+             task_to_ctld.exclusive(), task->alloc_cpus_total,
+             static_cast<int64_t>(task->alloc_mem_total),
+             // 35-39
+             task->alloc_device_total};
 
   return DocumentConstructor_(fields, values);
 }
@@ -921,7 +924,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type          extra_attr     exclusive     cpus_alloc_total mem_alloc_total
+  // 30 type          extra_attr     exclusive     cpus_alloc_total
+  // mem_alloc_total
   // 35 device_alloc_total
 
   // clang-format off
@@ -973,8 +977,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              task->cmd_line, task->ExitCode(), task->Username(), task->qos,
              task->get_user_env,
              // 30-34
-             task->type, task->extra_attr,
-             task->TaskToCtld().exclusive(), task->alloc_cpus_total,
+             task->type, task->extra_attr, task->TaskToCtld().exclusive(),
+             task->alloc_cpus_total,
              static_cast<int64_t>(task->alloc_mem_total),
              // 35-39
              task->alloc_device_total};
