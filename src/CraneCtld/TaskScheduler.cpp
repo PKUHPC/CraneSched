@@ -207,10 +207,13 @@ bool TaskScheduler::Init() {
 
     std::vector<task_db_id_t> db_ids;
     for (auto& [db_id, task_in_embedded_db] : snapshot.final_queue) {
-      task_id_t task_id = task_in_embedded_db.runtime_attr().task_id();
+      auto task = std::make_unique<TaskInCtld>();
+      task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
+      task->SetFieldsByRuntimeAttr(task_in_embedded_db.runtime_attr());
+      task_id_t task_id = task->RuntimeAttr().task_id();
       ok = g_db_client->CheckTaskDbIdExisted(db_id);
       if (!ok) {
-        if (!g_db_client->InsertRecoveredJob(task_in_embedded_db)) {
+        if (!g_db_client->InsertRecoveredJob(task.get())) {
           CRANE_ERROR(
               "Failed to call g_db_client->InsertRecoveredJob() "
               "for task #{}",
@@ -2764,7 +2767,7 @@ void MinLoadFirst::NodeSelect(
       // takes effect right now. Otherwise, during the scheduling for the
       // next partition, the algorithm may use the resource which is already
       // allocated.
-        task->CalAllocatedResources();  // Update the total resources allocated to the task
+      task->UpdateTotalAllocatedRes();  // Update the total resources allocated to the task
       for (CranedId const& craned_id : craned_ids)
         g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                                  task->Resources());

@@ -356,7 +356,6 @@ struct TaskInCtld {
 
   // Set by user request and probably include untyped devices.
   ResourceView requested_node_res_view;
-  std::unordered_map<std::string, ResourceView> allocated_node_res_view_map;
 
   crane::grpc::TaskType type;
 
@@ -445,6 +444,10 @@ struct TaskInCtld {
   // Aggregated from resources of all nodes.
   // Might change at each scheduling cycle.
   ResourceView allocated_res_view;
+  std::unordered_map<std::string, ResourceView> allocated_node_res_view_map;
+  double alloc_cpus_total;
+  uint64_t alloc_mem_total;
+  std::string alloc_device_total;
 
   uint32_t nodes_alloc;
   std::vector<CranedId> executing_craned_ids;
@@ -460,7 +463,7 @@ struct TaskInCtld {
 
   crane::grpc::RuntimeAttrOfTask const& RuntimeAttr() { return runtime_attr; }
 
-  void CalAllocatedResources() {
+  void UpdateTotalAllocatedRes() {
     auto device_map_to_string = [](const DeviceMap& device_map) -> std::string {
       std::ostringstream oss;
       bool is_first_device = true;
@@ -489,13 +492,11 @@ struct TaskInCtld {
       return oss.str();
     };
 
-    std::string alloc_device_total_str = "";
     if (!allocated_res_view.GetDeviceMap().empty()) {
-      alloc_device_total_str = device_map_to_string(allocated_res_view.GetDeviceMap());
+      alloc_device_total = device_map_to_string(allocated_res_view.GetDeviceMap());
     }
-    runtime_attr.set_alloc_cpus_total(allocated_res_view.CpuCount());
-    runtime_attr.set_alloc_mem_total(allocated_res_view.MemoryBytes());
-    runtime_attr.set_alloc_device_total(alloc_device_total_str);
+    alloc_cpus_total = allocated_res_view.CpuCount();
+    alloc_mem_total = allocated_res_view.MemoryBytes();
   }
 
   void SetTaskId(task_id_t id) {
@@ -675,6 +676,11 @@ struct TaskInCtld {
       }
 
       resources = static_cast<ResourceV2>(runtime_attr.resources());
+      allocated_res_view.SetToZero();
+      for (const auto& [craned_id, resource] : resources.EachNodeResMap()) {
+        allocated_res_view += resource;
+      }
+      UpdateTotalAllocatedRes();
     }
 
     nodes_alloc = craned_ids.size();
@@ -728,10 +734,10 @@ struct TaskInCtld {
     } else {
       task_info->set_craned_list(allocated_craneds_regex);
     }
-    task_info->set_exclusive(TaskToCtld().exclusive());
-    task_info->set_alloc_cpus_total(RuntimeAttr().alloc_cpus_total());
-    task_info->set_alloc_mem_total(RuntimeAttr().alloc_mem_total());
-    task_info->set_alloc_device_total(RuntimeAttr().alloc_device_total());
+    task_info->set_exclusive(task_to_ctld.exclusive());
+    task_info->set_alloc_cpus_total(alloc_cpus_total);
+    task_info->set_alloc_mem_total(alloc_mem_total);
+    task_info->set_alloc_device_total(alloc_device_total);
   }
 
   crane::grpc::TaskToD GetTaskToD(const CranedId& craned_id) const {

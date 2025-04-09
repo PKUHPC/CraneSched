@@ -110,9 +110,8 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
   return true;
 }
 
-bool MongodbClient::InsertRecoveredJob(
-    const crane::grpc::TaskInEmbeddedDb& task_in_embedded_db) {
-  document doc = TaskInEmbeddedDbToDocument_(task_in_embedded_db);
+bool MongodbClient::InsertRecoveredJob(TaskInCtld* task) {
+  document doc = TaskInEmbeddedDbToDocument_(task);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
       (*GetClient_())[m_db_name_][m_task_collection_name_].insert_one(
@@ -818,9 +817,9 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
 }
 
 MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
-    const crane::grpc::TaskInEmbeddedDb& task) {
-  auto const& task_to_ctld = task.task_to_ctld();
-  auto const& runtime_attr = task.runtime_attr();
+  TaskInCtld* task) {
+  auto const& task_to_ctld = task->TaskToCtld();
+  auto const& runtime_attr = task->RuntimeAttr();
 
   bsoncxx::builder::stream::document env_doc;
   for (const auto& entry : task_to_ctld.env()) {
