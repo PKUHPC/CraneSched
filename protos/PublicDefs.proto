@@ -175,9 +175,6 @@ message RuntimeAttrOfTask {
   bool held = 18;
   ResourceV2 resources = 19;
   double cached_priority = 20;
-  double alloc_cpus_total = 21;
-  uint64 alloc_mem_total = 22;
-  string alloc_device_total = 23;
 }
 
 message JobToD {
