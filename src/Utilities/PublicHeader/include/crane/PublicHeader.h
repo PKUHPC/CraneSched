@@ -185,16 +185,8 @@ constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
 
         // 65 - 67
         "The current running job exceeds the QoS limit (MaxJobPerUser)",
-<<<<<<< HEAD
-        "User has insufficient privilege"
-    };
-// clang-format on
-}  // namespace Internal
-=======
         "User has insufficient privilege"};
-
 }
->>>>>>> bcd9f04 (fix comments)
 
 template <typename... Args>
 inline CraneRichError FormatRichErr(CraneErrCode code, const std::string& fmt,
