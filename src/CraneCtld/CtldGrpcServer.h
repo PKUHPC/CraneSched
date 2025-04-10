@@ -294,6 +294,11 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryClusterInfoRequest *request,
       crane::grpc::QueryClusterInfoReply *response) override;
 
+  grpc::Status ExecutePowerAction(
+      grpc::ServerContext *context,
+      const crane::grpc::ExecutePowerActionRequest *request,
+      crane::grpc::ExecutePowerActionReply *response) override;
+
  private:
   CtldServer *m_ctld_server_;
 };
