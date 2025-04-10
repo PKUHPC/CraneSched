@@ -22,11 +22,11 @@
 // Precompiled header comes first!
 
 #ifdef CRANE_HAVE_BERKELEY_DB
-#  include <db_cxx.h>
+#include <db_cxx.h>
 #endif
 
 #ifdef CRANE_HAVE_UNQLITE
-#  include <unqlite.h>
+#include <unqlite.h>
 #endif
 
 #include "protos/Crane.pb.h"
@@ -180,6 +180,10 @@ class EmbeddedDbClient {
 
   bool RetrieveLastSnapshot(DbSnapshot* snapshot);
 
+  bool RetrieveReservationInfo(
+      std::unordered_map<ReservationId, crane::grpc::CreateReservationRequest>*
+          reservation_info_map);
+
   bool BeginVariableDbTransaction(txn_id_t* txn_id) {
     return BeginDbTransaction_(m_variable_db_.get(), txn_id);
   }
@@ -238,6 +242,18 @@ class EmbeddedDbClient {
   bool FetchTaskDataInDb(txn_id_t txn_id, db_id_t db_id,
                          TaskInEmbeddedDb* task_in_db) {  // Only used in test
     return FetchTaskDataInDbAtomic_(txn_id, db_id, task_in_db).has_value();
+  }
+
+  bool UpdateReservationInfo(
+      txn_id_t txn_id, ReservationId name,
+      const crane::grpc::CreateReservationRequest& reservation_req) {
+    return StoreTypeIntoDb_(m_reservation_db_.get(), txn_id, name,
+                            &reservation_req)
+        .has_value();
+  }
+
+  bool DeleteReservationInfo(txn_id_t txn_id, ReservationId name) {
+    return m_reservation_db_->Delete(txn_id, name).has_value();
   }
 
  private:
@@ -484,6 +500,7 @@ class EmbeddedDbClient {
 
   std::unique_ptr<IEmbeddedDb> m_variable_db_;
   std::unique_ptr<IEmbeddedDb> m_fixed_db_;
+  std::unique_ptr<IEmbeddedDb> m_reservation_db_;
 };
 
 }  // namespace Ctld
