@@ -134,12 +134,14 @@ grpc::Status CraneCtldServiceImpl::CranedReady(
     CRANE_DEBUG("Craned {} to be ready is not connected.",
                 request->craned_id());
     response->set_ok(false);
+    return grpc::Status::OK;
   }
   bool alive = g_meta_container->CheckCranedOnline(request->craned_id());
   if (alive) {
     CRANE_WARN("Reject register request from already online node {}",
                request->craned_id());
     response->set_ok(false);
+    return grpc::Status::OK;
   }
   g_meta_container->CranedUp(request);
   response->set_ok(true);
