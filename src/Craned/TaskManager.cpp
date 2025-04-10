@@ -797,21 +797,21 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     rc = setresgid(instance->task.gid(), instance->task.gid(),
                    instance->task.gid());
     if (rc == -1) {
-      fmt::print(stderr, "[Subproc] Error: setegid() failed: {}\n",
+      fmt::print(stderr, "[Subproc] Error: task #{} setegid() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
       std::abort();
     }
 
     rc = setgroups(gids.size(), gids.data());
     if (rc == -1) {
-      fmt::print(stderr, "[Subproc] Error: setgroups() failed: {}\n",
+      fmt::print(stderr, "[Subproc] Error: task #{} setgroups() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
       std::abort();
     }
 
     rc = setresuid(pwd_entry.Uid(), pwd_entry.Uid(), pwd_entry.Uid());
     if (rc == -1) {
-      fmt::print(stderr, "[Subproc] Error: seteuid() failed: {}\n",
+      fmt::print(stderr, "[Subproc] Error: task #{} seteuid() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
       std::abort();
     }
@@ -819,8 +819,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     const std::string& cwd = instance->task.cwd();
     rc = chdir(cwd.c_str());
     if (rc == -1) {
-      fmt::print(stderr, "[Subproc] Error: chdir to {}. {}\n", cwd.c_str(),
-                 strerror(errno));
+      fmt::print(stderr, "[Subproc] Error: task #{} chdir to {}. {}\n",
+                 instance->task.task_id(), cwd.c_str(), strerror(errno));
       std::abort();
     }
 
