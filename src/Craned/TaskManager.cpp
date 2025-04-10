@@ -785,8 +785,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       std::abort();
     }
 
-    if (instance->task.gid() != instance->pwd_entry.Gid())
-      gids.emplace_back(instance->pwd_entry.Gid());
+    if (!std::ranges::contains(gids, pwd_entry.Gid()))
+      gids.emplace_back(pwd_entry.Gid());
 
     int rc = setresgid(instance->task.gid(), instance->task.gid(),
                        instance->task.gid());
@@ -803,8 +803,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       std::abort();
     }
 
-    rc = setresuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid(),
-                   instance->pwd_entry.Uid());
+    rc = setresuid(pwd_entry.Uid(), pwd_entry.Uid(), pwd_entry.Uid());
     if (rc == -1) {
       fmt::print(stderr, "[Craned Subprocess] Error: seteuid() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
