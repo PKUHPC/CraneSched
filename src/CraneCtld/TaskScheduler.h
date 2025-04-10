@@ -562,12 +562,12 @@ class TaskScheduler {
 
   HashMap<task_id_t, std::unique_ptr<TaskInCtld>> m_running_task_map_
       ABSL_GUARDED_BY(m_running_task_map_mtx_);
-  Mutex m_running_task_map_mtx_;
+  Mutex m_running_task_map_mtx_ ABSL_ACQUIRED_AFTER(m_pending_task_map_mtx_);
 
   // Task Indexes
   HashMap<CranedId, HashSet<uint32_t /* Task ID*/>> m_node_to_tasks_map_
       ABSL_GUARDED_BY(m_task_indexes_mtx_);
-  Mutex m_task_indexes_mtx_;
+  Mutex m_task_indexes_mtx_ ABSL_ACQUIRED_AFTER(m_running_task_map_mtx_);
 
   std::unique_ptr<IPrioritySorter> m_priority_sorter_;
 
