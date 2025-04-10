@@ -770,44 +770,39 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
-    int rc = setresuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid(),
-                       instance->pwd_entry.Uid());
-    if (rc == -1) {
-      fmt::print(stderr, "[Craned Subprocess] Error: seteuid() failed: {}\n",
-                 instance->task.task_id(), strerror(errno));
+    const PasswordEntry& pwd_entry = instance->pwd_entry;
+    int ngroups = 0;
+    getgrouplist(pwd_entry.Username().c_str(), instance->task.gid(), nullptr,
+                 &ngroups);
+
+    std::vector<gid_t> gids(ngroups);
+    if (getgrouplist(pwd_entry.Username().c_str(), instance->task.gid(),
+                     gids.data(), &ngroups) == -1) {
+      fmt::print(
+          stderr,
+          "[Craned Subprocess] Error: getgrouplist() failed for user '{}'\n",
+          pwd_entry.Username());
       std::abort();
     }
 
-    rc = setresgid(instance->task.gid(), instance->task.gid(),
-                   instance->task.gid());
+    if (instance->task.gid() != instance->pwd_entry.Gid())
+      gids.emplace_back(instance->pwd_entry.Gid());
+
+    int rc = setresgid(instance->task.gid(), instance->task.gid(),
+                       instance->task.gid());
     if (rc == -1) {
       fmt::print(stderr, "[Craned Subprocess] Error: setegid() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
       std::abort();
     }
 
-    int ngroups = getgroups(0, nullptr);
-    if (ngroups < 0) {
-      fmt::print(stderr, "[Craned Subprocess] Error: getgroups() failed: {}\n",
-                 strerror(errno));
+    rc = setresuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid(),
+                   instance->pwd_entry.Uid());
+    if (rc == -1) {
+      fmt::print(stderr, "[Craned Subprocess] Error: seteuid() failed: {}\n",
+                 instance->task.task_id(), strerror(errno));
       std::abort();
     }
-
-    std::vector<gid_t> gids(ngroups);
-    if (getgroups(ngroups, gids.data()) < 0) {
-      fmt::print(stderr, "[Craned Subprocess] Error: getgroups() failed: {}\n",
-                 strerror(errno));
-      std::abort();
-    }
-
-    gid_t egid = instance->task.gid();
-    if (egid != instance->pwd_entry.Gid())
-      gids.emplace_back(instance->pwd_entry.Gid());
-
-    auto it_gid = std::ranges::find(gids, egid);
-    if (it_gid != gids.end()) gids.erase(it_gid);
-
-    gids.insert(gids.begin(), egid);
 
     rc = setgroups(gids.size(), gids.data());
     if (rc == -1) {
