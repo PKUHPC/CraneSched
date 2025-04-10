@@ -18,16 +18,17 @@
 
 #pragma once
 
-#include <vector>
 #include <fmt/format.h>
-
 #include <pmix.h>
 #include <pmix_common.h>
 #include <pmix_server.h>
 
+#include <future>
+#include <vector>
+
+#include "absl/strings/str_join.h"
 #include "crane/Logger.h"
 #include "protos/Crane.grpc.pb.h"
-#include "absl/strings/str_join.h"
 
 namespace pmix {
 
@@ -46,7 +47,7 @@ private:
   uint32_t m_gid_;
   std::string m_nspace_; // crane.pmix.jobid
   std::string m_server_tmpdir_;
-  uint32_t m_nprocs_;
+  int m_nprocs_;
   std::string m_hostname_;
   uint32_t m_node_id_;
   uint32_t m_node_tasks_; /* number of tasks on *this* node */
@@ -174,21 +175,4 @@ class PMIxServerModule {
    }
  };
 
-class PMIxServerModuleWrapper {
-public:
-  static PMIxServerModuleWrapper &Instance() {
-   static PMIxServerModuleWrapper instance;
-   return instance;
- }
-
- pmix_server_module_t *GetModule() const {
-    return &CranePmixCb;
-  }
-
-private:
-  PMIxServerModuleWrapper() = default;
-
-  static pmix_server_module_t CranePmixCb;
-};
-
-}
+} // namespace pmix

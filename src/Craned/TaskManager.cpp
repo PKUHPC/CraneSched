@@ -223,6 +223,7 @@ TaskManager::TaskManager() {
         EvCleanQueryRunningTasksQueueCb_();
       });
 
+
   m_uvw_thread_ = std::thread([this]() {
     util::SetCurrentThreadName("TaskMgrLoopThr");
     auto idle_handle = m_uvw_loop_->resource<uvw::idle_handle>();
@@ -647,14 +648,6 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     crun_meta->task_input_fd = craned_crun_pipe[1];
     crun_meta->task_output_fd = crun_craned_pipe[0];
 
-    if (!instance->task.interactive_meta().mpi().empty()) {
-      auto result = instance->pmix_server_->SetupFork(0);
-      // TODO: MPI_ERR
-      if (!result)
-          return CraneErrCode::ERR_SYSTEM_ERR;
-      mpi_env = result.value();
-    }
-
     if (instance->task.interactive_meta().pty()) {
       child_pid = forkpty(&crun_pty_fd, nullptr, nullptr, nullptr);
       // We will write to child using pipe
@@ -1024,6 +1017,16 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       }
     }
 
+    if (instance->IsCrun() && !instance->task.interactive_meta().mpi().empty()) {
+      auto result = instance->pmix_server_->SetupFork(0);
+
+      if (!result) {
+        fmt::print(stderr, "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
+        std::abort();
+      }
+      mpi_env = result.value();
+    }
+
     EnvMap task_env_map = instance->GetTaskEnvMap();
     EnvMap job_env_map = JobInstance::GetJobEnvMap(job_expt.value());
 
@@ -1162,19 +1165,19 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
 
+  // FIXME: The PMIx server can only be initialized once. Start a new process to launch it again?
   const auto& mpi = instance->task.interactive_meta().mpi();
   if (instance->IsCrun() && !mpi.empty() && mpi != "list") {
+    instance->pmix_server_ = std::make_unique<pmix::PmixServer>();
     auto env_map = instance->GetTaskEnvMap();
-    // TODO: add use env
-    env_map["CRANE_MPI_VERSION"] = mpi;
     if (!instance->pmix_server_->Init(instance->task, env_map)) {
       CRANE_ERROR("Failed to initialize mpi server for task #{}", task_id);
       ActivateTaskStatusChangeAsync_(
         task_id, crane::grpc::TaskStatus::Failed,
         ExitCode::kExitCodeInitMpiServer,
         fmt::format("Failed to initialize mpi server for task #{}", task_id));
+      return ;
     }
-
   }
 
   instance->meta->parsed_sh_script_path =
