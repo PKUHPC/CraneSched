@@ -774,13 +774,9 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     signal(SIGABRT, SIG_DFL);
 
     int ngroups = 0;
-    rc = getgrouplist(pwd_entry.Username().c_str(), instance->task.gid(),
-                      nullptr, &ngroups);
-    if (rc == -1) {
-      fmt::print(stderr, "[Subproc] Error: getgrouplist() for user '{}'\n",
-                 pwd_entry.Username());
-      std::abort();
-    }
+    // We should not check rc here. It must be -1.
+    getgrouplist(pwd_entry.Username().c_str(), instance->task.gid(), nullptr,
+                 &ngroups);
 
     std::vector<gid_t> gids(ngroups);
     rc = getgrouplist(pwd_entry.Username().c_str(), instance->task.gid(),
