@@ -24,18 +24,11 @@
 
 namespace Ctld {
 
-void CranedMetaContainer::CranedUp(const CranedId& craned_id) {
-  CranedRemoteMeta remote_meta;
-
-  auto stub = g_craned_keeper->GetCranedStub(craned_id);
-  if (stub != nullptr && !stub->Invalid()) {
-    CraneErrCode err = stub->QueryCranedRemoteMeta(&remote_meta);
-    if (err != CraneErrCode::SUCCESS) {
-      CRANE_ERROR("Failed to query actual resource from craned {}", craned_id);
-      return;
-    }
-    stub.reset();  // Release shared_ptr
-  }
+void CranedMetaContainer::CranedUp(const crane::grpc::CranedReadyRequest* req) {
+  CRANE_INFO("Craned {} up.", req->craned_id());
+  CranedRemoteMeta remote_meta =
+      static_cast<CranedRemoteMeta>(req->remote_meta());
+  const auto& craned_id = req->craned_id();
 
   CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));
   auto& part_ids = craned_id_part_ids_map_.at(craned_id);
