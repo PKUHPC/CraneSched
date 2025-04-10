@@ -96,7 +96,7 @@ class CranedMetaContainer final {
   CraneExpected<void> CheckIfAccountIsAllowedInPartition(
       const std::string& partition_name, const std::string& account_name);
 
-  void CranedUp(const CranedId& craned_id);
+  void CranedUp(const crane::grpc::CranedReadyRequest* req);
 
   void CranedDown(const CranedId& craned_id);
 

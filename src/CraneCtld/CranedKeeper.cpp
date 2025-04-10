@@ -18,6 +18,8 @@
 
 #include "CranedKeeper.h"
 
+#include "TaskScheduler.h"
+
 namespace Ctld {
 
 using grpc::ClientContext;
@@ -32,6 +34,27 @@ CranedStub::CranedStub(CranedKeeper *craned_keeper)
 
 CranedStub::~CranedStub() {
   if (m_clean_up_cb_) m_clean_up_cb_(this);
+}
+
+void CranedStub::ConfigureCraned(const CranedId &craned_id) {
+  static std::random_device rd;
+  static std::mt19937_64 gen(rd());
+  static std::uniform_int_distribution<uint64_t> dist;
+  m_last_configure_token_ = dist(gen);
+  CRANE_TRACE("Configuring craned {} with token {}", craned_id,
+              m_last_configure_token_.load());
+  crane::grpc::ConfigureCranedRequest request;
+  request.set_token(m_last_configure_token_);
+  // For Supervisor recovery.
+  // g_task_scheduler->QueryJobOfNode(craned_id, &request);
+  google::protobuf::Empty reply;
+  ClientContext context;
+  auto status = m_stub_->Configure(&context, request, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR(
+        "ConfigureCraned RPC for Node {} returned with status not ok: {}",
+        craned_id, status.error_message());
+  }
 }
 
 std::vector<task_id_t> CranedStub::ExecuteTasks(
@@ -220,41 +243,6 @@ CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id,
     return CraneErrCode::SUCCESS;
   else
     return CraneErrCode::ERR_GENERIC_FAILURE;
-}
-
-CraneErrCode CranedStub::QueryCranedRemoteMeta(CranedRemoteMeta *meta) {
-  using crane::grpc::QueryCranedRemoteMetaReply;
-  using crane::grpc::QueryCranedRemoteMetaRequest;
-  ClientContext context;
-  Status grpc_status;
-
-  QueryCranedRemoteMetaRequest request;
-  QueryCranedRemoteMetaReply reply;
-
-  grpc_status = m_stub_->QueryCranedRemoteMeta(&context, request, &reply);
-  if (!grpc_status.ok()) {
-    CRANE_ERROR("QueryCranedMeta to Craned {} failed: {} ", m_craned_id_,
-                grpc_status.error_message());
-    return CraneErrCode::ERR_RPC_FAILURE;
-  }
-
-  const auto *grpc_meta = reply.mutable_craned_remote_meta();
-  meta->dres_in_node =
-      static_cast<DedicatedResourceInNode>(grpc_meta->dres_in_node());
-
-  meta->craned_version = grpc_meta->craned_version();
-  meta->sys_rel_info.name = grpc_meta->sys_rel_info().name();
-  meta->sys_rel_info.release = grpc_meta->sys_rel_info().release();
-  meta->sys_rel_info.version = grpc_meta->sys_rel_info().version();
-
-  meta->craned_start_time =
-      absl::FromUnixSeconds(grpc_meta->craned_start_time().seconds());
-  meta->system_boot_time =
-      absl::FromUnixSeconds(grpc_meta->system_boot_time().seconds());
-
-  if (reply.ok()) return CraneErrCode::SUCCESS;
-
-  return CraneErrCode::ERR_GENERIC_FAILURE;
 }
 
 crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
@@ -456,10 +444,10 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
           // into the re-connecting queue again.
           delete craned;
         } else if (tag->type == CqTag::kEstablishedCraned) {
-          if (m_craned_is_down_cb_) {
+          if (m_craned_disconnected_cb_) {
             g_thread_pool->detach_task(
                 [this, craned_id = craned->m_craned_id_]() {
-                  m_craned_is_down_cb_(craned_id);
+                  m_craned_disconnected_cb_(craned_id);
                 });
           }
 
@@ -500,9 +488,9 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       m_connecting_craned_set_.erase(craned->m_craned_id_);
     }
 
-    if (m_craned_is_up_cb_)
+    if (m_craned_connected_cb_)
       g_thread_pool->detach_task([this, craned_id = craned->m_craned_id_]() {
-        m_craned_is_up_cb_(craned_id);
+        m_craned_connected_cb_(craned_id);
       });
 
     // Switch to EstablishedCraned state machine
@@ -632,6 +620,11 @@ uint32_t CranedKeeper::AvailableCranedCount() {
   return m_connected_craned_id_stub_map_.size();
 }
 
+bool CranedKeeper::IsCranedConnected(const CranedId &craned_id) {
+  ReaderLock lock(&m_connected_craned_mtx_);
+  return m_connected_craned_id_stub_map_.contains(craned_id);
+}
+
 std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
     const CranedId &craned_id) {
   ReaderLock lock(&m_connected_craned_mtx_);
@@ -641,12 +634,12 @@ std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
   return nullptr;
 }
 
-void CranedKeeper::SetCranedIsUpCb(std::function<void(CranedId)> cb) {
-  m_craned_is_up_cb_ = std::move(cb);
+void CranedKeeper::SetCranedConnectedCb(std::function<void(CranedId)> cb) {
+  m_craned_connected_cb_ = std::move(cb);
 }
 
-void CranedKeeper::SetCranedIsDownCb(std::function<void(CranedId)> cb) {
-  m_craned_is_down_cb_ = std::move(cb);
+void CranedKeeper::SetCranedDisconnectedCb(std::function<void(CranedId)> cb) {
+  m_craned_disconnected_cb_ = std::move(cb);
 }
 
 void CranedKeeper::PutNodeIntoUnavailList(const std::string &crane_id) {
