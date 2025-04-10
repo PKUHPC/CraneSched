@@ -770,13 +770,28 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
-    // TODO: Add all other supplementary groups.
-    // Currently we only set the primary gid and the egid when task was
-    // submitted.
-    std::vector<gid_t> gids;
-    if (instance->task.gid() != instance->pwd_entry.Gid())
-      gids.emplace_back(instance->task.gid());
-    gids.emplace_back(instance->pwd_entry.Gid());
+    int ngroups = getgroups(0, nullptr);
+    if (ngroups < 0) {
+      fmt::print(stderr, "[Craned Subprocess] Error: getgroups() failed: {}\n",
+                 strerror(errno));
+      std::abort();
+    }
+
+    std::vector<gid_t> gids(ngroups);
+    if (getgroups(ngroups, gids.data()) < 0) {
+      fmt::print(stderr, "[Craned Subprocess] Error: getgroups() failed: {}\n",
+                 strerror(errno));
+      std::abort();
+    }
+
+    gid_t egid = instance->task.gid();
+    if (egid != instance->pwd_entry.Gid())
+      gids.emplace_back(instance->pwd_entry.Gid());
+
+    auto it_gid = std::ranges::find(gids, egid);
+    if (it_gid != gids.end()) gids.erase(it_gid);
+
+    gids.insert(gids.begin(), egid);
 
     int rc = setgroups(gids.size(), gids.data());
     if (rc == -1) {
