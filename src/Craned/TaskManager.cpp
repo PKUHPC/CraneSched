@@ -770,6 +770,22 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
+    int rc = setresuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid(),
+                       instance->pwd_entry.Uid());
+    if (rc == -1) {
+      fmt::print(stderr, "[Craned Subprocess] Error: seteuid() failed: {}\n",
+                 instance->task.task_id(), strerror(errno));
+      std::abort();
+    }
+
+    rc = setresgid(instance->task.gid(), instance->task.gid(),
+                   instance->task.gid());
+    if (rc == -1) {
+      fmt::print(stderr, "[Craned Subprocess] Error: setegid() failed: {}\n",
+                 instance->task.task_id(), strerror(errno));
+      std::abort();
+    }
+
     int ngroups = getgroups(0, nullptr);
     if (ngroups < 0) {
       fmt::print(stderr, "[Craned Subprocess] Error: getgroups() failed: {}\n",
@@ -793,25 +809,9 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     gids.insert(gids.begin(), egid);
 
-    int rc = setgroups(gids.size(), gids.data());
+    rc = setgroups(gids.size(), gids.data());
     if (rc == -1) {
       fmt::print(stderr, "[Craned Subprocess] Error: setgroups() failed: {}\n",
-                 instance->task.task_id(), strerror(errno));
-      std::abort();
-    }
-
-    rc = setresgid(instance->task.gid(), instance->task.gid(),
-                   instance->task.gid());
-    if (rc == -1) {
-      fmt::print(stderr, "[Craned Subprocess] Error: setegid() failed: {}\n",
-                 instance->task.task_id(), strerror(errno));
-      std::abort();
-    }
-
-    rc = setresuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid(),
-                   instance->pwd_entry.Uid());
-    if (rc == -1) {
-      fmt::print(stderr, "[Craned Subprocess] Error: seteuid() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
       std::abort();
     }
