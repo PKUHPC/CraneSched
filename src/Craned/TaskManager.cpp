@@ -787,6 +787,12 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       std::abort();
     }
 
+    if (auto it = std::ranges::find(gids, instance->task.gid());
+        it != gids.begin()) {
+      gids.erase(it);
+      gids.insert(gids.begin(), instance->task.gid());
+    }
+
     if (!std::ranges::contains(gids, pwd_entry.Gid()))
       gids.emplace_back(pwd_entry.Gid());
 
