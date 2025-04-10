@@ -796,17 +796,17 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       std::abort();
     }
 
-    rc = setresuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid(),
-                   instance->pwd_entry.Uid());
+    rc = setgroups(gids.size(), gids.data());
     if (rc == -1) {
-      fmt::print(stderr, "[Craned Subprocess] Error: seteuid() failed: {}\n",
+      fmt::print(stderr, "[Craned Subprocess] Error: setgroups() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
       std::abort();
     }
 
-    rc = setgroups(gids.size(), gids.data());
+    rc = setresuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid(),
+                   instance->pwd_entry.Uid());
     if (rc == -1) {
-      fmt::print(stderr, "[Craned Subprocess] Error: setgroups() failed: {}\n",
+      fmt::print(stderr, "[Craned Subprocess] Error: seteuid() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
       std::abort();
     }
