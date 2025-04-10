@@ -767,45 +767,51 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     // reap the child process by SIGCHLD after it commits suicide.
     return CraneErrCode::SUCCESS;
   } else {  // Child proc
+    int rc;
+    const PasswordEntry& pwd_entry = instance->pwd_entry;
+
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
 
-    const PasswordEntry& pwd_entry = instance->pwd_entry;
     int ngroups = 0;
-    getgrouplist(pwd_entry.Username().c_str(), instance->task.gid(), nullptr,
-                 &ngroups);
+    rc = getgrouplist(pwd_entry.Username().c_str(), instance->task.gid(),
+                      nullptr, &ngroups);
+    if (rc == -1) {
+      fmt::print(stderr, "[Subproc] Error: getgrouplist() for user '{}'\n",
+                 pwd_entry.Username());
+      std::abort();
+    }
 
     std::vector<gid_t> gids(ngroups);
-    if (getgrouplist(pwd_entry.Username().c_str(), instance->task.gid(),
-                     gids.data(), &ngroups) == -1) {
-      fmt::print(
-          stderr,
-          "[Craned Subprocess] Error: getgrouplist() failed for user '{}'\n",
-          pwd_entry.Username());
+    rc = getgrouplist(pwd_entry.Username().c_str(), instance->task.gid(),
+                      gids.data(), &ngroups);
+    if (rc == -1) {
+      fmt::print(stderr, "[Subproc] Error: getgrouplist() for user '{}'\n",
+                 pwd_entry.Username());
       std::abort();
     }
 
     if (!std::ranges::contains(gids, pwd_entry.Gid()))
       gids.emplace_back(pwd_entry.Gid());
 
-    int rc = setresgid(instance->task.gid(), instance->task.gid(),
-                       instance->task.gid());
+    rc = setresgid(instance->task.gid(), instance->task.gid(),
+                   instance->task.gid());
     if (rc == -1) {
-      fmt::print(stderr, "[Craned Subprocess] Error: setegid() failed: {}\n",
+      fmt::print(stderr, "[Subproc] Error: setegid() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
       std::abort();
     }
 
     rc = setgroups(gids.size(), gids.data());
     if (rc == -1) {
-      fmt::print(stderr, "[Craned Subprocess] Error: setgroups() failed: {}\n",
+      fmt::print(stderr, "[Subproc] Error: setgroups() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
       std::abort();
     }
 
     rc = setresuid(pwd_entry.Uid(), pwd_entry.Uid(), pwd_entry.Uid());
     if (rc == -1) {
-      fmt::print(stderr, "[Craned Subprocess] Error: seteuid() failed: {}\n",
+      fmt::print(stderr, "[Subproc] Error: seteuid() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
       std::abort();
     }
@@ -813,8 +819,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     const std::string& cwd = instance->task.cwd();
     rc = chdir(cwd.c_str());
     if (rc == -1) {
-      fmt::print(stderr, "[Craned Subprocess] Error: chdir to {}. {}\n",
-                 cwd.c_str(), strerror(errno));
+      fmt::print(stderr, "[Subproc] Error: chdir to {}. {}\n", cwd.c_str(),
+                 strerror(errno));
       std::abort();
     }
 
@@ -835,15 +841,12 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       if (!ok) {
         int err = istream.GetErrno();
         fmt::print(stderr,
-                   "[Craned Subprocess] Error: Failed to read socket from "
-                   "parent: {}\n",
+                   "[Subproc] Error: Failed to read socket from parent: {}\n",
                    strerror(err));
       }
 
       if (!msg.ok()) {
-        fmt::print(
-            stderr,
-            "[Craned Subprocess] Error: Parent process ask to suicide.\n");
+        fmt::print(stderr, "[Subproc] Error: Parent process ask to suicide.\n");
       }
 
       std::abort();
@@ -863,8 +866,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       stdout_fd =
           open(stdout_file_path.c_str(), O_RDWR | O_CREAT | open_mode, 0644);
       if (stdout_fd == -1) {
-        fmt::print(stderr, "[Craned Subprocess] Error: open {}. {}\n",
-                   stdout_file_path, strerror(errno));
+        fmt::print(stderr, "[Subproc] Error: open {}. {}\n", stdout_file_path,
+                   strerror(errno));
         std::abort();
       }
       dup2(stdout_fd, 1);
@@ -875,8 +878,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         stderr_fd =
             open(stderr_file_path.c_str(), O_RDWR | O_CREAT | open_mode, 0644);
         if (stderr_fd == -1) {
-          fmt::print(stderr, "[Craned Subprocess] Error: open {}. {}\n",
-                     stderr_file_path, strerror(errno));
+          fmt::print(stderr, "[Subproc] Error: open {}. {}\n", stderr_file_path,
+                     strerror(errno));
           std::abort();
         }
         dup2(stderr_fd, 2);  // stderr -> error file
@@ -900,7 +903,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
     ok &= ostream.Flush();
     if (!ok) {
-      fmt::print(stderr, "[Craned Subprocess] Error: Failed to flush.\n");
+      fmt::print(stderr, "[Subproc] Error: Failed to flush.\n");
       std::abort();
     }
 
@@ -946,10 +949,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       subprocess_s subprocess;
       int result = subprocess_create(xauth_argv.data(), 0, &subprocess);
       if (0 != result) {
-        fmt::print(
-            stderr,
-            "[Craned Subprocess] xauth subprocess creation failed: {}.\n",
-            strerror(errno));
+        fmt::print(stderr, "[Subproc] xauth subprocess creation failed: {}.\n",
+                   strerror(errno));
         std::abort();
       }
 
@@ -965,18 +966,15 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         xauth_stderr_str.append(buf.get());
 
       if (0 != subprocess_join(&subprocess, &result))
-        fmt::print(stderr, "[Craned Subprocess] xauth join failed.\n");
+        fmt::print(stderr, "[Subproc] xauth join failed.\n");
 
       if (0 != subprocess_destroy(&subprocess))
-        fmt::print(stderr, "[Craned Subprocess] xauth destroy failed.\n");
+        fmt::print(stderr, "[Subproc] xauth destroy failed.\n");
 
       if (result != 0) {
-        fmt::print(stderr, "[Craned Subprocess] xauth return with {}.\n",
-                   result);
-        fmt::print(stderr, "[Craned Subprocess] xauth stdout: {}\n",
-                   xauth_stdout_str);
-        fmt::print(stderr, "[Craned Subprocess] xauth stderr: {}\n",
-                   xauth_stderr_str);
+        fmt::print(stderr, "[Subproc] xauth return with {}.\n", result);
+        fmt::print(stderr, "[Subproc] xauth stdout: {}\n", xauth_stdout_str);
+        fmt::print(stderr, "[Subproc] xauth stderr: {}\n", xauth_stderr_str);
       }
     }
 
@@ -985,14 +983,13 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         CgroupManager::GetResourceEnvMapByResInNode(res_in_node.value());
 
     // clearenv() should be called just before fork!
-    if (clearenv())
-      fmt::print(stderr, "[Craned Subprocess] clearenv() failed.\n");
+    if (clearenv()) fmt::print(stderr, "[Subproc] clearenv() failed.\n");
 
     auto FuncSetEnv = [](const EnvMap& v) {
       for (const auto& [name, value] : v)
         if (setenv(name.c_str(), value.c_str(), 1))
-          fmt::print(stderr, "[Craned Subprocess] setenv() for {}={} failed.\n",
-                     name, value);
+          fmt::print(stderr, "[Subproc] setenv() for {}={} failed.\n", name,
+                     value);
     };
     FuncSetEnv(task_env_map);
     FuncSetEnv(res_env_map);
@@ -1020,7 +1017,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     // Error occurred since execv returned. At this point, errno is set.
     // Ctld use SIGABRT to inform the client of this failure.
-    fmt::print(stderr, "[Craned Subprocess] Error: execv() failed: {}\n",
+    fmt::print(stderr, "[Subproc] Error: execv() failed: {}\n",
                strerror(errno));
     // TODO: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
     //  exit codes
