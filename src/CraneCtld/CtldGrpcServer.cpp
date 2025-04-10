@@ -99,6 +99,11 @@ grpc::Status CraneCtldServiceImpl::CranedConnectedCtld(
     google::protobuf::Empty *response) {
   const auto &craned_id = request->craned_id();
   CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
+  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    CRANE_WARN("Reject register request from unknown node {}",
+               request->craned_id());
+    return grpc::Status::OK;
+  }
   if (!g_craned_keeper->IsCranedConnected(craned_id)) {
     CRANE_TRACE("Put craned {} into unavail.", craned_id);
     g_craned_keeper->PutNodeIntoUnavailList(craned_id);
