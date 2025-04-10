@@ -18,6 +18,7 @@
 
 #include "CtldClient.h"
 
+#include "CranedServer.h"
 namespace Craned {
 
 CtldClient::~CtldClient() {
@@ -47,45 +48,69 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
 
-void CtldClient::OnCraneCtldConnected() {
-  crane::grpc::CranedRegisterRequest request;
-  grpc::Status status;
+void CtldClient::CranedConnected() const {
+  CRANE_DEBUG("Notify Ctld CranedConnected.");
+  crane::grpc::CranedConnectedCtldNotify req;
+  req.set_craned_id(g_config.CranedIdOfThisNode);
+  grpc::ClientContext context;
+  google::protobuf::Empty reply;
+  grpc::Status status = m_stub_->CranedConnectedCtld(&context, req, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR("Notify CranedConnected failed: {}", status.error_message());
+    return;
+  }
+}
 
-  CRANE_INFO("Send a register RPC to cranectld");
-  request.set_craned_id(m_craned_id_);
+void CtldClient::CranedReady(const std::vector<task_id_t>& nonexistent_jobs,
+                             std::uint64_t token) const {
+  crane::grpc::CranedReadyRequest ready_request;
+  ready_request.set_craned_id(g_config.CranedIdOfThisNode);
+  ready_request.set_token(token);
+  auto* grpc_meta = ready_request.mutable_remote_meta();
+  auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->dedicated_res;
 
-  int retry_time = 10;
+  grpc_meta->mutable_dres_in_node()->CopyFrom(
+      static_cast<crane::grpc::DedicatedResourceInNode>(dres));
 
-  do {
-    crane::grpc::CranedRegisterReply reply;
-    grpc::ClientContext context;
-    context.set_deadline(std::chrono::system_clock::now() +
-                         std::chrono::seconds(1));
+  grpc_meta->set_craned_version(CRANE_VERSION_STRING);
 
-    status = m_stub_->CranedRegister(&context, request, &reply);
-    if (!status.ok()) {
-      CRANE_ERROR(
-          "NodeActiveConnect RPC returned with status not ok: {}, Resend it.",
-          status.error_message());
-    } else {
-      if (reply.ok()) {
-        if (reply.already_registered()) {
-          CRANE_INFO("This craned has already registered.");
-          return;
-        } else {
-          CRANE_INFO(
-              "This craned has not registered. "
-              "Sending Register request...");
-          std::this_thread::sleep_for(std::chrono::seconds(3));
-        }
+  const SystemRelInfo& sys_info = g_config.CranedMeta.SysInfo;
+  auto* grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();
+  grpc_sys_rel_info->set_name(sys_info.name);
+  grpc_sys_rel_info->set_release(sys_info.release);
+  grpc_sys_rel_info->set_version(sys_info.version);
+
+  grpc_meta->mutable_craned_start_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.CranedStartTime));
+  grpc_meta->mutable_system_boot_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
+
+  grpc_meta->mutable_nonexistent_jobs()->Assign(nonexistent_jobs.begin(),
+                                                nonexistent_jobs.end());
+
+  g_thread_pool->detach_task([req = std::move(ready_request), this] {
+    int retry_count = 5;
+    while (retry_count-- > 0) {
+      crane::grpc::CranedReadyReply ready_reply;
+      grpc::ClientContext context;
+      context.set_deadline(std::chrono::system_clock::now() +
+                           std::chrono::seconds(1));
+      auto status = m_stub_->CranedReady(&context, req, &ready_reply);
+      if (!status.ok()) {
+        CRANE_DEBUG("CranedReady failed: {}, retry.", status.error_message());
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        continue;
+      }
+      if (ready_reply.ok()) {
+        g_server->SetReady(true);
+        CRANE_INFO("Craned successfully Up.");
+        return;
       } else {
-        CRANE_ERROR("This Craned is not allow to register.");
+        CRANE_WARN("Craned ready get reply of false.");
         return;
       }
     }
-  } while (!m_thread_stop_ && retry_time--);
-
-  CRANE_ERROR("Failed to register actively.");
+  });
 }
 
 void CtldClient::TaskStatusChangeAsync(
@@ -135,8 +160,15 @@ void CtldClient::AsyncSendThread_() {
         std::chrono::system_clock::now() + std::chrono::seconds(3));
 
     if (!prev_conn_state && connected) {
-      g_ctld_client->OnCraneCtldConnected();
+      CRANE_TRACE("Channel to CraneCtlD is connected.");
+      absl::MutexLock lk(&m_cb_mutex_);
+      if (m_on_ctld_connected_cb_) m_on_ctld_connected_cb_();
+    } else if (!connected && prev_conn_state) {
+      CRANE_TRACE("Channel to CraneCtlD is disconnected.");
+      absl::MutexLock lk(&m_cb_mutex_);
+      if (m_on_ctld_disconnected_cb_) m_on_ctld_disconnected_cb_();
     }
+
     prev_conn_state = connected;
 
     if (!connected) {
