@@ -796,17 +796,17 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     if (!std::ranges::contains(gids, pwd_entry.Gid()))
       gids.emplace_back(pwd_entry.Gid());
 
-    rc = setresgid(instance->task.gid(), instance->task.gid(),
-                   instance->task.gid());
+    rc = setgroups(gids.size(), gids.data());
     if (rc == -1) {
-      fmt::print(stderr, "[Subproc] Error: task #{} setegid() failed: {}\n",
+      fmt::print(stderr, "[Subproc] Error: task #{} setgroups() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
       std::abort();
     }
 
-    rc = setgroups(gids.size(), gids.data());
+    rc = setresgid(instance->task.gid(), instance->task.gid(),
+                   instance->task.gid());
     if (rc == -1) {
-      fmt::print(stderr, "[Subproc] Error: task #{} setgroups() failed: {}\n",
+      fmt::print(stderr, "[Subproc] Error: task #{} setegid() failed: {}\n",
                  instance->task.task_id(), strerror(errno));
       std::abort();
     }
