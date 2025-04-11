@@ -164,6 +164,7 @@ message TaskToCtld {
 
   string reservation = 36;
   bool exclusive = 37;
+  string submit_hostname = 38;
 }
 
 message TaskInEmbeddedDb {
@@ -238,6 +239,8 @@ message TaskToD {
   double cpus_per_task = 23;
 
   bool get_user_env = 24;
+  string submit_hostname = 25;
+  uint32 total_gpus = 26;
 }
 
 message BatchTaskAdditionalMeta {
