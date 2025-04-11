@@ -78,6 +78,7 @@ void InitFromStdin(int argc, char** argv) {
   g_config.CranedUnixSocketPath = msg.craned_unix_socket_path();
   g_config.CraneBaseDir = msg.crane_base_dir();
   g_config.CraneScriptDir = msg.crane_script_dir();
+  g_config.CraneClusterName = msg.crane_cluster_name();
 
   // Environment from JobManager
   g_config.JobEnv.clear();
