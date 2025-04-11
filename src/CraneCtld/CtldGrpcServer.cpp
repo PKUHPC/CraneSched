@@ -121,6 +121,7 @@ grpc::Status CraneCtldServiceImpl::CranedReady(
     grpc::ServerContext *context,
     const crane::grpc::CranedReadyRequest *request,
     crane::grpc::CranedReadyReply *response) {
+  CRANE_TRACE("Craned {} trying to register.", request->craned_id());
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
     CRANE_WARN("Reject register request from unknown node {}",
                request->craned_id());
@@ -128,16 +129,15 @@ grpc::Status CraneCtldServiceImpl::CranedReady(
     return grpc::Status::OK;
   }
 
-  bool connected = g_craned_keeper->IsCranedConnected(request->craned_id());
-  if (!connected) {
+  if (!g_craned_keeper->IsCranedConnected(request->craned_id())) {
     g_craned_keeper->PutNodeIntoUnavailList(request->craned_id());
     CRANE_DEBUG("Craned {} to be ready is not connected.",
                 request->craned_id());
     response->set_ok(false);
     return grpc::Status::OK;
   }
-  bool alive = g_meta_container->CheckCranedOnline(request->craned_id());
-  if (alive) {
+
+  if (g_meta_container->CheckCranedOnline(request->craned_id())) {
     CRANE_WARN("Reject register request from already online node {}",
                request->craned_id());
     response->set_ok(false);
@@ -1284,6 +1284,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CraneCtldServiceImpl>(this);
 
   grpc::ServerBuilder builder;
+  ServerBuilderSetKeepAliveArgs(&builder);
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 

@@ -30,6 +30,7 @@ CtldClient::~CtldClient() {
 
 void CtldClient::InitChannelAndStub(const std::string& server_address) {
   grpc::ChannelArguments channel_args;
+  SetGrpcClientKeepAliveChannelArgs(&channel_args);
 
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
@@ -156,8 +157,20 @@ void CtldClient::AsyncSendThread_() {
   while (true) {
     if (m_thread_stop_) break;
 
-    bool connected = m_ctld_channel_->WaitForConnected(
+    grpc_connectivity_state current_state = m_ctld_channel_->GetState(true);
+
+    bool state_changed = m_ctld_channel_->WaitForStateChange(
+        current_state,
         std::chrono::system_clock::now() + std::chrono::seconds(3));
+
+    grpc_connectivity_state prev_state = m_ctld_channel_->GetState(false);
+
+    bool connected = (prev_state == GRPC_CHANNEL_READY);
+
+    if (current_state != prev_state)
+      CRANE_TRACE("CtldClient prev state: {},now: {}.",
+                  GrpcConnectivityStateName(current_state),
+                  GrpcConnectivityStateName(prev_state));
 
     if (!prev_conn_state && connected) {
       CRANE_TRACE("Channel to CraneCtlD is connected.");
