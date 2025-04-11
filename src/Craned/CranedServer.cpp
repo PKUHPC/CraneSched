@@ -34,7 +34,8 @@ grpc::Status CranedServiceImpl::Configure(
     g_server->ReceiveConfigure(request);
   else {
     // Do other thing
-    g_ctld_client->CranedReady({}, request->token());
+    g_thread_pool->detach_task(
+        [token = request->token()] { g_ctld_client->CranedReady({}, token); });
   }
   return Status::OK;
 }
