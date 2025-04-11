@@ -93,23 +93,58 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::CranedRegister(
+grpc::Status CraneCtldServiceImpl::CranedConnectedCtld(
     grpc::ServerContext *context,
-    const crane::grpc::CranedRegisterRequest *request,
-    crane::grpc::CranedRegisterReply *response) {
+    const crane::grpc::CranedConnectedCtldNotify *request,
+    google::protobuf::Empty *response) {
+  const auto &craned_id = request->craned_id();
+  CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    CRANE_WARN("Reject register request from unknown node {}",
+               request->craned_id());
+    return grpc::Status::OK;
+  }
+  if (!g_craned_keeper->IsCranedConnected(craned_id)) {
+    CRANE_TRACE("Put craned {} into unavail.", craned_id);
+    g_craned_keeper->PutNodeIntoUnavailList(craned_id);
+  } else {
+    if (!g_meta_container->CheckCranedOnline(craned_id)) {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (stub != nullptr) stub->ConfigureCraned(craned_id);
+    }
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::CranedReady(
+    grpc::ServerContext *context,
+    const crane::grpc::CranedReadyRequest *request,
+    crane::grpc::CranedReadyReply *response) {
+  CRANE_TRACE("Craned {} trying to register.", request->craned_id());
+  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    CRANE_WARN("Reject register request from unknown node {}",
+               request->craned_id());
     response->set_ok(false);
     return grpc::Status::OK;
   }
 
-  bool alive = g_meta_container->CheckCranedOnline(request->craned_id());
-  if (!alive) {
+  if (!g_craned_keeper->IsCranedConnected(request->craned_id())) {
     g_craned_keeper->PutNodeIntoUnavailList(request->craned_id());
+    CRANE_DEBUG("Craned {} to be ready is not connected.",
+                request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
   }
 
+  if (g_meta_container->CheckCranedOnline(request->craned_id())) {
+    CRANE_WARN("Reject register request from already online node {}",
+               request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+  g_meta_container->CranedUp(request);
   response->set_ok(true);
-  response->set_already_registered(alive);
-
   return grpc::Status::OK;
 }
 
@@ -1197,6 +1232,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CraneCtldServiceImpl>(this);
 
   grpc::ServerBuilder builder;
+  ServerBuilderSetKeepAliveArgs(&builder);
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 

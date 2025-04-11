@@ -29,6 +29,8 @@ struct TlsCertificates {
   std::string ServerKeyContent;
 };
 
+std::string GrpcConnectivityStateName(grpc_connectivity_state state);
+
 void ServerBuilderSetCompression(grpc::ServerBuilder* builder);
 
 void ServerBuilderSetKeepAliveArgs(grpc::ServerBuilder* builder);

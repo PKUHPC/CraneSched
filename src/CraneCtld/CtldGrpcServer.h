@@ -194,10 +194,14 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::TaskStatusChangeRequest *request,
       crane::grpc::TaskStatusChangeReply *response) override;
 
-  grpc::Status CranedRegister(
+  grpc::Status CranedConnectedCtld(
       grpc::ServerContext *context,
-      const crane::grpc::CranedRegisterRequest *request,
-      crane::grpc::CranedRegisterReply *response) override;
+      const crane::grpc::CranedConnectedCtldNotify *request,
+      google::protobuf::Empty *response) override;
+
+  grpc::Status CranedReady(grpc::ServerContext *context,
+                           const crane::grpc::CranedReadyRequest *request,
+                           crane::grpc::CranedReadyReply *response);
 
   grpc::Status CancelTask(grpc::ServerContext *context,
                           const crane::grpc::CancelTaskRequest *request,
