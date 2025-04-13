@@ -26,8 +26,7 @@ namespace Ctld {
 
 void CranedMetaContainer::CranedUp(const crane::grpc::CranedReadyRequest* req) {
   CRANE_INFO("Craned {} is up now.", req->craned_id());
-  CranedRemoteMeta remote_meta =
-      static_cast<CranedRemoteMeta>(req->remote_meta());
+  auto remote_meta = static_cast<CranedRemoteMeta>(req->remote_meta());
   const auto& craned_id = req->craned_id();
 
   CRANE_ASSERT(craned_id_part_ids_map_.contains(craned_id));

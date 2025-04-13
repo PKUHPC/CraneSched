@@ -58,10 +58,29 @@ class CtldClient {
     m_on_ctld_disconnected_cb_ = std::move(cb);
   }
 
-  void CranedConnected() const;
+  void StartNotifyConnected() {
+    absl::MutexLock lk(&m_register_mutex_);
+    m_notify_ctld_connected_ = true;
+  }
 
-  void CranedReady(const std::vector<task_id_t>& nonexistent_jobs,
-                   std::uint64_t token) const;
+  void StopNotifyConnected() {
+    absl::MutexLock lk(&m_register_mutex_);
+    m_notify_ctld_connected_ = false;
+  }
+
+  void StartRegister(const std::vector<task_id_t>& nonexistent_jobs,
+                     const google::protobuf::Timestamp& token) {
+    absl::MutexLock lk(&m_register_mutex_);
+    m_registering_ = true;
+    m_nonexistent_jobs_ = nonexistent_jobs;
+    m_token_ = token;
+  }
+
+  void StopRegister() {
+    absl::MutexLock lk(&m_register_mutex_);
+    m_registering_ = false;
+  };
+
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
   bool CancelTaskStatusChangeByTaskId(task_id_t task_id,
@@ -69,9 +88,7 @@ class CtldClient {
 
   [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
 
-  inline void StartConnectingCtld() {
-    m_start_connecting_notification_.Notify();
-  }
+  void StartConnectingCtld() { m_start_connecting_notification_.Notify(); }
 
  private:
   void AsyncSendThread_();
@@ -95,6 +112,16 @@ class CtldClient {
   std::function<void()> m_on_ctld_disconnected_cb_;
 
   absl::Notification m_start_connecting_notification_;
+
+  // Register status
+  absl::Mutex m_register_mutex_;
+  bool m_notify_ctld_connected_{false};
+  bool m_registering_{false};
+  std::vector<task_id_t> m_nonexistent_jobs_;
+  google::protobuf::Timestamp m_token_;
+
+  void NotifyCranedConnected_() const;
+  void CranedReady_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_register_mutex_);
 };
 
 }  // namespace Craned

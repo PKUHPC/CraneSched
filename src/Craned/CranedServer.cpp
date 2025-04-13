@@ -30,13 +30,9 @@ grpc::Status CranedServiceImpl::Configure(
     const crane::grpc::ConfigureCranedRequest *request,
     google::protobuf::Empty *response) {
   CRANE_TRACE("Receive ConfigureCraned RPC from CraneCtld.");
-  if (!g_server->m_recovered_.load())
-    g_server->ReceiveConfigure(request);
-  else {
-    // Do other thing
-    g_thread_pool->detach_task(
-        [token = request->token()] { g_ctld_client->CranedReady({}, token); });
-  }
+  g_ctld_client->StopNotifyConnected();
+  if (!g_server->ReceiveConfigure(request))
+    g_ctld_client->StartNotifyConnected();
   return Status::OK;
 }
 
@@ -599,6 +595,47 @@ CranedServer::CranedServer(
     p_server->Shutdown();
     CRANE_INFO("Grpc Server Shutdown() was called.");
   });
+}
+
+google::protobuf::Timestamp CranedServer::GetRegisterToken() {
+  absl::MutexLock lk(&m_register_mutex_);
+  if (!m_register_token_.has_value()) {
+    m_register_token_ = ToProtoTimestamp(std::chrono::steady_clock::now());
+    CRANE_TRACE("New register token: {}",
+                ProtoTimestampToString(m_register_token_.value()));
+  }
+  return m_register_token_.value();
+}
+
+bool CranedServer::ReceiveConfigure(
+    const crane::grpc::ConfigureCranedRequest *request) {
+  absl::MutexLock reg_lk(&m_register_mutex_);
+  if (m_register_token_.has_value()) {
+    if (m_register_token_.value() != request->token()) {
+      CRANE_DEBUG(
+          "ConfigureCraned failed. Expected to receive token:{} but got "
+          "{}",
+          ProtoTimestampToString(m_register_token_.value()),
+          ProtoTimestampToString(request->token()));
+      return false;
+    } else {
+      m_register_token_.reset();
+    }
+  } else {
+    CRANE_WARN("Receive configure request but craned dose not have token.");
+    return false;
+  }
+  absl::MutexLock lk(&m_configure_promise_mtx_);
+  if (m_configure_promise_.has_value()) {
+    // Receiver should call StartRegister;
+    m_configure_promise_.value().set_value(*request);
+    m_configure_promise_.reset();
+  } else {
+    g_ctld_client->StartRegister({}, request->token());
+  }
+  CRANE_DEBUG("Receive configure request successfully.");
+
+  return true;
 }
 
 }  // namespace Craned

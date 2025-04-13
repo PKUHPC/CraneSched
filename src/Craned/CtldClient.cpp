@@ -49,71 +49,6 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
 }
 
-void CtldClient::CranedConnected() const {
-  CRANE_DEBUG("Notify Ctld CranedConnected.");
-  crane::grpc::CranedConnectedCtldNotify req;
-  req.set_craned_id(g_config.CranedIdOfThisNode);
-  grpc::ClientContext context;
-  google::protobuf::Empty reply;
-  grpc::Status status = m_stub_->CranedConnectedCtld(&context, req, &reply);
-  if (!status.ok()) {
-    CRANE_ERROR("Notify CranedConnected failed: {}", status.error_message());
-    return;
-  }
-}
-
-void CtldClient::CranedReady(const std::vector<task_id_t>& nonexistent_jobs,
-                             std::uint64_t token) const {
-  crane::grpc::CranedReadyRequest ready_request;
-  ready_request.set_craned_id(g_config.CranedIdOfThisNode);
-  ready_request.set_token(token);
-  auto* grpc_meta = ready_request.mutable_remote_meta();
-  auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->dedicated_res;
-
-  grpc_meta->mutable_dres_in_node()->CopyFrom(
-      static_cast<crane::grpc::DedicatedResourceInNode>(dres));
-
-  grpc_meta->set_craned_version(CRANE_VERSION_STRING);
-
-  const SystemRelInfo& sys_info = g_config.CranedMeta.SysInfo;
-  auto* grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();
-  grpc_sys_rel_info->set_name(sys_info.name);
-  grpc_sys_rel_info->set_release(sys_info.release);
-  grpc_sys_rel_info->set_version(sys_info.version);
-
-  grpc_meta->mutable_craned_start_time()->set_seconds(
-      ToUnixSeconds(g_config.CranedMeta.CranedStartTime));
-  grpc_meta->mutable_system_boot_time()->set_seconds(
-      ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
-
-  grpc_meta->mutable_nonexistent_jobs()->Assign(nonexistent_jobs.begin(),
-                                                nonexistent_jobs.end());
-
-  g_thread_pool->detach_task([req = std::move(ready_request), this] {
-    int retry_count = 5;
-    while (retry_count-- > 0) {
-      crane::grpc::CranedReadyReply ready_reply;
-      grpc::ClientContext context;
-      context.set_deadline(std::chrono::system_clock::now() +
-                           std::chrono::seconds(1));
-      auto status = m_stub_->CranedReady(&context, req, &ready_reply);
-      if (!status.ok()) {
-        CRANE_DEBUG("CranedReady failed: {}, retry.", status.error_message());
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-        continue;
-      }
-      if (ready_reply.ok()) {
-        g_server->SetReady(true);
-        CRANE_INFO("Craned successfully Up.");
-        return;
-      } else {
-        CRANE_WARN("Craned ready get reply of false.");
-        return;
-      }
-    }
-  });
-}
-
 void CtldClient::TaskStatusChangeAsync(
     TaskStatusChangeQueueElem&& task_status_change) {
   absl::MutexLock lock(&m_task_status_change_mtx_);
@@ -140,6 +75,63 @@ bool CtldClient::CancelTaskStatusChangeByTaskId(
                    "for a single running task!");
 
   return num_removed >= 1;
+}
+
+void CtldClient::NotifyCranedConnected_() const {
+  CRANE_DEBUG("Notify Ctld CranedConnected.");
+  crane::grpc::CranedConnectedCtldNotify req;
+  req.set_craned_id(g_config.CranedIdOfThisNode);
+  *req.mutable_token() = g_server->GetRegisterToken();
+  grpc::ClientContext context;
+  google::protobuf::Empty reply;
+  grpc::Status status = m_stub_->CranedConnectedCtld(&context, req, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR("Notify CranedConnected failed: {}", status.error_message());
+  }
+}
+
+void CtldClient::CranedReady_() {
+  CRANE_DEBUG("Sending CranedReady.");
+  crane::grpc::CranedReadyRequest ready_request;
+  ready_request.set_craned_id(g_config.CranedIdOfThisNode);
+  *ready_request.mutable_token() = m_token_;
+  auto* grpc_meta = ready_request.mutable_remote_meta();
+  auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->dedicated_res;
+
+  grpc_meta->mutable_dres_in_node()->CopyFrom(
+      static_cast<crane::grpc::DedicatedResourceInNode>(dres));
+
+  grpc_meta->set_craned_version(CRANE_VERSION_STRING);
+
+  const SystemRelInfo& sys_info = g_config.CranedMeta.SysInfo;
+  auto* grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();
+  grpc_sys_rel_info->set_name(sys_info.name);
+  grpc_sys_rel_info->set_release(sys_info.release);
+  grpc_sys_rel_info->set_version(sys_info.version);
+
+  grpc_meta->mutable_craned_start_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.CranedStartTime));
+  grpc_meta->mutable_system_boot_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
+
+  grpc_meta->mutable_nonexistent_jobs()->Assign(m_nonexistent_jobs_.begin(),
+                                                m_nonexistent_jobs_.end());
+
+  crane::grpc::CranedReadyReply ready_reply;
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(1));
+  auto status = m_stub_->CranedReady(&context, ready_request, &ready_reply);
+  if (!status.ok()) {
+    CRANE_DEBUG("CranedReady failed: {}, retry later.", status.error_message());
+  }
+  if (ready_reply.ok()) {
+    g_server->SetReady(true);
+    m_registering_ = false;
+    CRANE_INFO("Craned successfully Up.");
+  } else {
+    CRANE_WARN("Craned ready get reply of false.");
+  }
 }
 
 void CtldClient::AsyncSendThread_() {
@@ -180,6 +172,8 @@ void CtldClient::AsyncSendThread_() {
       CRANE_TRACE("Channel to CraneCtlD is disconnected.");
       absl::MutexLock lk(&m_cb_mutex_);
       if (m_on_ctld_disconnected_cb_) m_on_ctld_disconnected_cb_();
+      this->StopRegister();
+      this->StartNotifyConnected();
     }
 
     prev_conn_state = connected;
@@ -188,6 +182,21 @@ void CtldClient::AsyncSendThread_() {
       CRANE_INFO("Channel to CraneCtlD is not connected. Reconnecting...");
       std::this_thread::sleep_for(std::chrono::seconds(10));
       continue;
+    } else {
+      bool notify_ctld_connected = false;
+      {
+        absl::MutexLock lk(&m_register_mutex_);
+        notify_ctld_connected = m_notify_ctld_connected_;
+      }
+
+      if (notify_ctld_connected) NotifyCranedConnected_();
+
+      bool send_register{false};
+      {
+        absl::MutexLock lk(&m_register_mutex_);
+        send_register = m_registering_;
+      }
+      if (send_register) CranedReady_();
     }
 
     bool has_msg = m_task_status_change_mtx_.LockWhenWithTimeout(
