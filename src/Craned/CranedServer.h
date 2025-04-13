@@ -164,7 +164,7 @@ class CranedServer {
   // Craned Register status
   absl::Mutex m_register_mutex_ ABSL_ACQUIRED_BEFORE(m_configure_promise_);
   std::optional<google::protobuf::Timestamp> m_register_token_
-      ABSL_GUARDED_BY(register_mutex);
+      ABSL_GUARDED_BY(m_register_mutex_);
 
   friend class CranedServiceImpl;
 };
