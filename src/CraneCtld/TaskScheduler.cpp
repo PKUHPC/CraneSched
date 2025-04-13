@@ -561,7 +561,8 @@ void TaskScheduler::PutRecoveredTaskIntoRunningQueueLock_(
                                              task->Resources());
   if (task->reservation != "") {
     g_meta_container->MallocResourceFromReservation(
-        task->reservation, task->TaskId(), task->Resources());
+        task->reservation, task->TaskId(),
+        {task->EndTime(), task->Resources()});
   }
   // The order of LockGuards matters.
   LockGuard running_guard(&m_running_task_map_mtx_);
@@ -1082,8 +1083,8 @@ void TaskScheduler::ScheduleThread_() {
         std::vector<ReservationId> expired_reservations;
         for (auto& [reservation_id, reservation_meta] : *reservation_meta_map) {
           auto resv_meta = reservation_meta.GetExclusivePtr();
-          if (now < resv_meta->start_time) continue;
-          if (now >= resv_meta->end_time) {
+          if (now < resv_meta->logical_partition.start_time) continue;
+          if (now >= resv_meta->logical_partition.end_time) {
             expired_reservations.emplace_back(reservation_id);
             continue;
           }
@@ -1151,7 +1152,7 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
       if (task->reservation != "") {
         auto resv_end_time =
             g_meta_container->GetReservationMetaPtr(task->reservation)
-                ->end_time;
+                ->logical_partition.end_time;
         if (resv_end_time <= absl::Now() + absl::Seconds(secs)) {
           CRANE_DEBUG("Task #{}'s time limit exceeds reservation end time",
                       task_id);
@@ -1166,14 +1167,16 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
         craned_ids = task->executing_craned_ids;
 
         if (task->reservation != "") {
-          auto resv_end_time =
-              g_meta_container->GetReservationMetaPtr(task->reservation)
-                  ->end_time;
+          const auto& reservation_meta =
+              g_meta_container->GetReservationMetaPtr(task->reservation);
+          auto resv_end_time = reservation_meta->logical_partition.end_time;
           if (resv_end_time <= task->StartTime() + absl::Seconds(secs)) {
             CRANE_DEBUG("Task #{}'s time limit exceeds reservation end time",
                         task_id);
             return CraneErrCode::ERR_INVALID_PARAM;
           }
+          reservation_meta->logical_partition.running_task_resource_map[task_id]
+              .end_time = task->StartTime() + absl::Seconds(secs);
         }
       }
     }
@@ -1487,7 +1490,8 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
     return std::unexpected("Invalid craned_regex");
   }
 
-  absl::Time start_time = absl::FromUnixSeconds(request.start_time_unix_seconds());
+  absl::Time start_time =
+      absl::FromUnixSeconds(request.start_time_unix_seconds());
   absl::Duration duration = absl::Seconds(request.duration_seconds());
   absl::Time end_time = start_time + duration;
   PartitionId partition = request.partition();
@@ -1560,7 +1564,7 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
         }
       }
       for (const auto& [reservation_name, reservation] :
-           craned_meta->reservation_resource_map) {
+           craned_meta->reserved_resource_map) {
         if (reservation.start_time < end_time &&
             reservation.end_time > start_time) {
           if (whole_node) {
@@ -1584,17 +1588,21 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
                                        std::move(feasible_res));
     }
   }
+
   const auto& [it, ok] = reservation_meta_map->emplace(
       reservation_name,
       ReservationMeta{
           .name = reservation_name,
-          .resources_total = allocated_res,
-          .resources_avail = allocated_res,
-          .resources_in_use = ResourceV2(),
-          .start_time = start_time,
-          .end_time = end_time,
           .partition_id = partition,
-          .craned_ids = craned_ids,
+          .logical_partition =
+              LogicalPartition{
+                  .start_time = start_time,
+                  .end_time = end_time,
+                  .res_total = allocated_res,
+                  .res_avail = allocated_res,
+                  .res_in_use = ResourceV2(),
+                  .craned_ids = std::move(craned_ids),
+              },
           .accounts_black_list = !denied_accounts.empty(),
           .users_black_list = !denied_users.empty(),
           .accounts = denied_accounts.empty() ? std::move(allowed_accounts)
@@ -1610,7 +1618,7 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
                     reservation_name));
   }
   for (auto& [craned_meta, res] : craned_meta_res_vec) {
-    const auto& [it, ok] = craned_meta->reservation_resource_map.emplace(
+    const auto& [it, ok] = craned_meta->reserved_resource_map.emplace(
         reservation_name,
         CranedMeta::ReservationInNode{start_time, end_time, std::move(res)});
     if (!ok) {
@@ -1673,20 +1681,20 @@ std::expected<void, std::string> TaskScheduler::EraseReservationMeta(
   const auto& reservation_meta =
       reservation_meta_map->at(reservation_id).GetExclusivePtr();
 
-  if (!reservation_meta->running_task_resource_map.empty()) {
+  if (!reservation_meta->logical_partition.running_task_resource_map.empty()) {
     return std::unexpected(
         fmt::format("Not allowed to delete reservation {} with running tasks",
                     reservation_id));
   }
 
-  for (const auto& craned_id : reservation_meta->craned_ids) {
+  for (const auto& craned_id : reservation_meta->logical_partition.craned_ids) {
     auto craned_meta = g_meta_container->GetCranedMetaPtr(craned_id);
     if (craned_meta.get() == nullptr) {
       CRANE_ERROR("Node {} not found when deleting reservation {}", craned_id,
                   reservation_id);
       continue;
     }
-    auto& reservation_resource_map = craned_meta->reservation_resource_map;
+    auto& reservation_resource_map = craned_meta->reserved_resource_map;
     if (!reservation_resource_map.contains(reservation_id)) {
       CRANE_ERROR(
           "Reservation not found on node {} when deleting reservation {}",
@@ -2303,10 +2311,10 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfPartition_(
       }
     }
 
-    if (!craned_meta->reservation_resource_map.empty()) {
+    if (!craned_meta->reserved_resource_map.empty()) {
       absl::Time first_resv_time = absl::InfiniteFuture();
       for (const auto& [ReservationId, reservation] :
-           craned_meta->reservation_resource_map) {
+           craned_meta->reserved_resource_map) {
         absl::Time start_time = reservation.start_time;
         absl::Time end_time = reservation.end_time;
         if (end_time <= now) {
@@ -2441,7 +2449,7 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
                      std::vector<std::pair<absl::Time, ResourceInNode>>>
       node_time_res_vec_map;
 
-  for (const auto& craned_id : reservation_meta->craned_ids) {
+  for (const auto& craned_id : reservation_meta->logical_partition.craned_ids) {
     auto& craned_meta_ptr = craned_meta_map.at(craned_id);
     auto craned_meta = craned_meta_ptr.GetExclusivePtr();
 
@@ -2451,15 +2459,14 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
   }
 
   for (const auto& [task_id, res] :
-       reservation_meta->running_task_resource_map) {
-    const auto& task = running_tasks.at(task_id);
-    absl::Time end_time =
-        std::max(task->StartTime() + task->time_limit, now + absl::Seconds(1));
-    auto& craned_ids = task->executing_craned_ids;
-    for (auto craned_id : craned_ids) {
+       reservation_meta->logical_partition.running_task_resource_map) {
+    const auto& [expected_end_time, alloc_res] = res;
+    absl::Time end_time = std::max(expected_end_time, now + absl::Seconds(1));
+    const auto& each_node_res_map = alloc_res.EachNodeResMap();
+    for (const auto& [craned_id, res_in_node] : each_node_res_map) {
       auto iter = node_time_res_vec_map.find(craned_id);
       if (iter != node_time_res_vec_map.end()) {
-        iter->second.emplace_back(end_time, res.at(craned_id));
+        iter->second.emplace_back(end_time, res_in_node);
       }
     }
   }
@@ -2472,9 +2479,11 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
 
     auto& time_avail_res_map =
         node_selection_info_ref.InitCostAndGetTimeAvailResMap(
-            craned_id, reservation_meta->resources_total.at(craned_id));
+            craned_id,
+            reservation_meta->logical_partition.res_total.at(craned_id));
 
-    time_avail_res_map[now] = reservation_meta->resources_avail.at(craned_id);
+    time_avail_res_map[now] =
+        reservation_meta->logical_partition.res_avail.at(craned_id);
 
     {
       auto cur_time_iter = time_avail_res_map.begin();
@@ -2486,7 +2495,8 @@ void MinLoadFirst::CalculateNodeSelectionInfoOfReservation_(
         }
         cur_time_iter->second += res;
       }
-      time_avail_res_map[reservation_meta->end_time].SetToZero();
+      time_avail_res_map[reservation_meta->logical_partition.end_time]
+          .SetToZero();
     }
   }
 }
@@ -2554,8 +2564,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
     if (task->reservation != "") {
-      auto iter = craned_meta->reservation_resource_map.find(task->reservation);
-      if (iter == craned_meta->reservation_resource_map.end() ||
+      auto iter = craned_meta->reserved_resource_map.find(task->reservation);
+      if (iter == craned_meta->reserved_resource_map.end() ||
           !(task->requested_node_res_view <= iter->second.res_total) ||
           now + task->time_limit > iter->second.end_time) {
         continue;
@@ -2667,8 +2677,8 @@ void MinLoadFirst::NodeSelect(
     std::vector<ReservationId> expired_reservations;
     for (auto& [reservation_id, reservation_meta] : *reservation_meta_map) {
       auto resv_meta = reservation_meta.GetExclusivePtr();
-      if (now < resv_meta->start_time) continue;
-      if (now >= resv_meta->end_time) {
+      if (now < resv_meta->logical_partition.start_time) continue;
+      if (now >= resv_meta->logical_partition.end_time) {
         expired_reservations.emplace_back(reservation_id);
         continue;
       }
@@ -2812,7 +2822,8 @@ void MinLoadFirst::NodeSelect(
                                                  task->Resources());
       if (task->reservation != "") {
         g_meta_container->MallocResourceFromReservation(
-            task->reservation, task->TaskId(), task->Resources());
+            task->reservation, task->TaskId(),
+            {task->EndTime(), task->Resources()});
       }
       std::unique_ptr<TaskInCtld> moved_task;
 
@@ -3179,7 +3190,7 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
       }
 
       if (!task->included_nodes.empty()) {
-        auto reserved_craned_id_list = resv_meta->craned_ids;
+        auto reserved_craned_id_list = resv_meta->logical_partition.craned_ids;
         std::unordered_set<std::string> reserved_craned_id_set;
         reserved_craned_id_set.insert(reserved_craned_id_list.begin(),
                                       reserved_craned_id_list.end());

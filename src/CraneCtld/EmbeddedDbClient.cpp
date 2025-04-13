@@ -591,15 +591,15 @@ bool EmbeddedDbClient::RetrieveLastSnapshot(DbSnapshot* snapshot) {
 
         // Dispatch to different queues by status.
         switch (status) {
-          case crane::grpc::Pending:
-            snapshot->pending_queue.emplace(id, std::move(task));
-            break;
-          case crane::grpc::Running:
-            snapshot->running_queue.emplace(id, std::move(task));
-            break;
-          default:
-            snapshot->final_queue.emplace(id, std::move(task));
-            break;
+        case crane::grpc::Pending:
+          snapshot->pending_queue.emplace(id, std::move(task));
+          break;
+        case crane::grpc::Running:
+          snapshot->running_queue.emplace(id, std::move(task));
+          break;
+        default:
+          snapshot->final_queue.emplace(id, std::move(task));
+          break;
         }
         return true;
       });

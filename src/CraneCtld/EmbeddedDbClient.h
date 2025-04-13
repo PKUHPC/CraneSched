@@ -22,11 +22,11 @@
 // Precompiled header comes first!
 
 #ifdef CRANE_HAVE_BERKELEY_DB
-#include <db_cxx.h>
+#  include <db_cxx.h>
 #endif
 
 #ifdef CRANE_HAVE_UNQLITE
-#include <unqlite.h>
+#  include <unqlite.h>
 #endif
 
 #include "protos/Crane.pb.h"

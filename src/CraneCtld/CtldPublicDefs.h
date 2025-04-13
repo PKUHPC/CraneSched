@@ -223,23 +223,31 @@ struct CranedMeta {
     ResourceInNode res_total;
   };
   // Store total resource of each reservation.
-  absl::flat_hash_map<ReservationId, ReservationInNode>
-      reservation_resource_map;
+  absl::flat_hash_map<ReservationId, ReservationInNode> reserved_resource_map;
+};
+
+struct LogicalPartition {
+  absl::Time start_time;
+  absl::Time end_time;
+
+  ResourceV2 res_total;
+  ResourceV2 res_avail;
+  ResourceV2 res_in_use;
+
+  std::list<CranedId> craned_ids;
+
+  struct RunningTaskResource {
+    absl::Time end_time;  // sync with TaskInCtld
+    ResourceV2 resources;
+  };
+
+  absl::flat_hash_map<task_id_t, RunningTaskResource> running_task_resource_map;
 };
 
 struct ReservationMeta {
   ReservationId name;
-  ResourceV2 resources_total;
-  ResourceV2 resources_avail;
-  ResourceV2 resources_in_use;
-
-  absl::Time start_time;
-  absl::Time end_time;
-
   PartitionId partition_id;
-  std::list<CranedId> craned_ids;
-
-  absl::flat_hash_map<task_id_t, ResourceV2> running_task_resource_map;
+  LogicalPartition logical_partition;
 
   bool accounts_black_list{false};
   bool users_black_list{false};
