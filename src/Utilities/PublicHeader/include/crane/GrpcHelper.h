@@ -36,8 +36,13 @@ template <typename T>
 google::protobuf::Timestamp ToProtoTimestamp(
     const std::chrono::time_point<T>& time) {
   google::protobuf::Timestamp timestamp;
-  timestamp.set_seconds((time.time_since_epoch().count() / 1'000'000'000));
-  timestamp.set_nanos(time.time_since_epoch().count() % 1'000'000'000);
+  auto duration_since_epoch = time.time_since_epoch();
+  auto seconds =
+      std::chrono::duration_cast<std::chrono::seconds>(duration_since_epoch);
+  auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      duration_since_epoch - seconds);
+  timestamp.set_seconds(seconds.count());
+  timestamp.set_nanos(nanos.count());
   return timestamp;
 }
 
