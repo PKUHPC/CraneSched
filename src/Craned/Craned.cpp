@@ -663,7 +663,8 @@ void StartServer() {
   // Use config form ctld to init here
   {
     config_future.wait();
-    g_ctld_client->StartRegister({}, config_future.get().token());
+    auto req = config_future.get();
+    g_server->PostRecvConfig(req, {});
   }
   g_server->Wait();
 
