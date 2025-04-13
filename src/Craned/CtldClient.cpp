@@ -124,6 +124,7 @@ void CtldClient::CranedReady_() {
   auto status = m_stub_->CranedReady(&context, ready_request, &ready_reply);
   if (!status.ok()) {
     CRANE_DEBUG("CranedReady failed: {}, retry later.", status.error_message());
+    return;
   }
   if (ready_reply.ok()) {
     g_server->SetReady(true);
@@ -146,28 +147,29 @@ void CtldClient::AsyncSendThread_() {
       &m_task_status_change_list_);
 
   bool prev_conn_state = false;
+  uint retry_attempt = 0;
   while (true) {
     if (m_thread_stop_) break;
 
-    grpc_connectivity_state current_state = m_ctld_channel_->GetState(true);
+    grpc_connectivity_state pre_state = m_ctld_channel_->GetState(true);
 
     bool state_changed = m_ctld_channel_->WaitForStateChange(
-        current_state,
-        std::chrono::system_clock::now() + std::chrono::seconds(3));
+        pre_state, std::chrono::system_clock::now() + std::chrono::seconds(3));
 
-    grpc_connectivity_state prev_state = m_ctld_channel_->GetState(false);
+    grpc_connectivity_state cur_state = m_ctld_channel_->GetState(false);
 
-    bool connected = (prev_state == GRPC_CHANNEL_READY);
+    bool connected = (cur_state == GRPC_CHANNEL_READY);
 
-    if (current_state != prev_state)
+    if (pre_state != cur_state)
       CRANE_TRACE("CtldClient prev state: {},now: {}.",
-                  GrpcConnectivityStateName(current_state),
-                  GrpcConnectivityStateName(prev_state));
+                  GrpcConnectivityStateName(pre_state),
+                  GrpcConnectivityStateName(cur_state));
 
     if (!prev_conn_state && connected) {
       CRANE_TRACE("Channel to CraneCtlD is connected.");
       absl::MutexLock lk(&m_cb_mutex_);
       if (m_on_ctld_connected_cb_) m_on_ctld_connected_cb_();
+      retry_attempt = 0;
     } else if (!connected && prev_conn_state) {
       CRANE_TRACE("Channel to CraneCtlD is disconnected.");
       absl::MutexLock lk(&m_cb_mutex_);
@@ -179,8 +181,25 @@ void CtldClient::AsyncSendThread_() {
     prev_conn_state = connected;
 
     if (!connected) {
-      CRANE_INFO("Channel to CraneCtlD is not connected. Reconnecting...");
-      std::this_thread::sleep_for(std::chrono::seconds(10));
+      retry_attempt++;
+      uint64_t delay_time;
+      if (retry_attempt <= kInitialFastRetries) {
+        delay_time = kConnectCtldRetryInitMs + (retry_attempt * 1'000U);
+      } else {
+        if (retry_attempt >= 8)
+          delay_time = 60'000;
+        else
+          delay_time =
+              std::min(kConnectCtldRetryInitMs *
+                           static_cast<uint64_t>(std::pow(
+                               2, retry_attempt - kInitialFastRetries)),
+                       kConnectCtldRetryMaxMs);
+      }
+      CRANE_INFO(
+          "Channel to CraneCtlD is not connected. Reconnecting after {} "
+          "seconds.",
+          delay_time / 1000);
+      std::this_thread::sleep_for(std::chrono::milliseconds(delay_time));
       continue;
     } else {
       bool notify_ctld_connected = false;
