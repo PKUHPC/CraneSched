@@ -21,6 +21,7 @@
 #include "CranedPublicDefs.h"
 // Precompiled header comes first.
 
+#include "CtldClient.h"
 #include "protos/Crane.grpc.pb.h"
 #include "protos/Crane.pb.h"
 
@@ -122,6 +123,9 @@ class CranedServer {
   [[nodiscard]] google::protobuf::Timestamp GetRegisterToken();
 
   bool ReceiveConfigure(const crane::grpc::ConfigureCranedRequest *request);
+
+  void PostRecvConfig(const crane::grpc::ConfigureCranedRequest &request,
+                      const std::vector<task_id_t> &nonexistent_jobs);
 
   void SetConfigurePromise(
       std::promise<crane::grpc::ConfigureCranedRequest> &&promise) {

@@ -638,4 +638,10 @@ bool CranedServer::ReceiveConfigure(
   return true;
 }
 
+void CranedServer::PostRecvConfig(
+    const crane::grpc::ConfigureCranedRequest &request,
+    const std::vector<task_id_t> &nonexistent_jobs) {
+  g_ctld_client->StartRegister(nonexistent_jobs, request.token());
+}
+
 }  // namespace Craned
