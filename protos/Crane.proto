@@ -475,7 +475,7 @@ message QueryTasksInfoReply{
 message CreateReservationRequest {
   uint32 uid = 1;
   string reservation_name = 2;
-  int64 start_time_seconds = 3;
+  int64 start_time_unix_seconds = 3;
   int64 duration_seconds = 4;
   string partition = 5;
   string craned_regex = 6;

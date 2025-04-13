@@ -1487,7 +1487,7 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
     return std::unexpected("Invalid craned_regex");
   }
 
-  absl::Time start_time = absl::FromUnixSeconds(request.start_time_seconds());
+  absl::Time start_time = absl::FromUnixSeconds(request.start_time_unix_seconds());
   absl::Duration duration = absl::Seconds(request.duration_seconds());
   absl::Time end_time = start_time + duration;
   PartitionId partition = request.partition();
