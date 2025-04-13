@@ -115,17 +115,13 @@ class CranedServer {
       const Config::CranedListenConf &listen_conf,
       std::promise<crane::grpc::ConfigureCranedRequest> &&init_promise);
 
-  inline void Shutdown() { m_server_->Shutdown(); }
+  void Shutdown() { m_server_->Shutdown(); }
 
-  inline void Wait() { m_server_->Wait(); }
+  void Wait() { m_server_->Wait(); }
 
-  void ReceiveConfigure(const crane::grpc::ConfigureCranedRequest *request) {
-    absl::MutexLock lk(&m_configure_promise_mtx_);
-    if (m_configure_promise_.has_value()) {
-      m_configure_promise_.value().set_value(*request);
-      m_configure_promise_.reset();
-    }
-  }
+  [[nodiscard]] google::protobuf::Timestamp GetRegisterToken();
+
+  bool ReceiveConfigure(const crane::grpc::ConfigureCranedRequest *request);
 
   void SetConfigurePromise(
       std::promise<crane::grpc::ConfigureCranedRequest> &&promise) {
@@ -160,6 +156,11 @@ class CranedServer {
   std::atomic_bool m_ready_{false};
   /*When supervisor ready, init with false*/
   std::atomic_bool m_recovered_{true};
+
+  // Craned Register status
+  absl::Mutex m_register_mutex_ ABSL_ACQUIRED_BEFORE(m_configure_promise_);
+  std::optional<google::protobuf::Timestamp> m_register_token_
+      ABSL_GUARDED_BY(register_mutex);
 
   friend class CranedServiceImpl;
 };

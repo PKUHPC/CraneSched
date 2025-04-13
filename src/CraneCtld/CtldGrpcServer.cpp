@@ -106,11 +106,15 @@ grpc::Status CraneCtldServiceImpl::CranedConnectedCtld(
   }
   if (!g_craned_keeper->IsCranedConnected(craned_id)) {
     CRANE_TRACE("Put craned {} into unavail.", craned_id);
-    g_craned_keeper->PutNodeIntoUnavailList(craned_id);
+    g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
   } else {
+    // Before configure, craned should be connected but not online
     if (!g_meta_container->CheckCranedOnline(craned_id)) {
       auto stub = g_craned_keeper->GetCranedStub(craned_id);
-      if (stub != nullptr) stub->ConfigureCraned(craned_id);
+      if (stub != nullptr) stub->ConfigureCraned(craned_id, request->token());
+    } else {
+      CRANE_TRACE("Already online craned {} notify craned connected.",
+                  craned_id);
     }
   }
 
@@ -130,7 +134,10 @@ grpc::Status CraneCtldServiceImpl::CranedReady(
   }
 
   if (!g_craned_keeper->IsCranedConnected(request->craned_id())) {
-    g_craned_keeper->PutNodeIntoUnavailList(request->craned_id());
+    // Be careful! Ctld to craned channel disconnected during craned
+    // configuration. Now we don't care about this.
+    g_craned_keeper->PutNodeIntoUnavailSet(request->craned_id(),
+                                           request->token());
     CRANE_DEBUG("Craned {} to be ready is not connected.",
                 request->craned_id());
     response->set_ok(false);

@@ -798,19 +798,16 @@ void InitializeCtldGlobalVariables() {
 
   g_craned_keeper = std::make_unique<CranedKeeper>(g_config.Nodes.size());
 
-  g_craned_keeper->SetCranedConnectedCb([](const CranedId& craned_id) {
-    CRANE_DEBUG("CranedNode #{} Connected.", craned_id);
-    auto stub = g_craned_keeper->GetCranedStub(craned_id);
-    if (stub == nullptr) {
-      CRANE_ERROR("CranedNode #{} has no stub.", craned_id);
-      return;
-    }
-    stub->ConfigureCraned(craned_id);
-    CRANE_DEBUG(
-        "A new node #{} is up now. Add its resource to the global resource "
-        "pool.",
-        craned_id);
-  });
+  g_craned_keeper->SetCranedConnectedCb(
+      [](const CranedId& craned_id, const google::protobuf::Timestamp& token) {
+        CRANE_DEBUG("CranedNode #{} Connected.", craned_id);
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (stub == nullptr) {
+          CRANE_ERROR("CranedNode #{} has no stub.", craned_id);
+          return;
+        }
+        stub->ConfigureCraned(craned_id, token);
+      });
 
   g_craned_keeper->SetCranedDisconnectedCb([](const CranedId& craned_id) {
     CRANE_DEBUG("CranedNode #{} Disconnected.", craned_id);

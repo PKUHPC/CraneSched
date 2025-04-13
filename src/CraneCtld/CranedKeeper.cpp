@@ -36,15 +36,13 @@ CranedStub::~CranedStub() {
   if (m_clean_up_cb_) m_clean_up_cb_(this);
 }
 
-void CranedStub::ConfigureCraned(const CranedId &craned_id) {
-  static std::random_device rd;
-  static std::mt19937_64 gen(rd());
-  static std::uniform_int_distribution<uint64_t> dist;
-  m_last_configure_token_ = dist(gen);
-  CRANE_TRACE("Configuring craned {} with token {}", craned_id,
-              m_last_configure_token_.load());
+void CranedStub::ConfigureCraned(const CranedId &craned_id,
+                                 const google::protobuf::Timestamp &token) {
+  CRANE_TRACE("Configuring craned {} with token {}:{}", craned_id,
+              token.seconds(), token.nanos());
+
   crane::grpc::ConfigureCranedRequest request;
-  request.set_token(m_last_configure_token_);
+  *request.mutable_token() = token;
   // For Supervisor recovery.
   // g_task_scheduler->QueryJobOfNode(craned_id, &request);
   google::protobuf::Empty reply;
@@ -72,6 +70,7 @@ std::vector<task_id_t> CranedStub::ExecuteTasks(
   if (!status.ok()) {
     CRANE_DEBUG("Execute RPC for Node {} returned with status not ok: {}",
                 m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
 
     failed_task_ids.reserve(request.tasks_size());
     for (auto &task : request.tasks())
@@ -102,6 +101,7 @@ CraneErrCode CranedStub::TerminateTasks(
     CRANE_DEBUG(
         "TerminateRunningTask RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
 
@@ -124,6 +124,7 @@ CraneErrCode CranedStub::TerminateOrphanedTask(task_id_t task_id) {
     CRANE_DEBUG(
         "TerminateOrphanedTask RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
 
@@ -158,6 +159,7 @@ CraneErrCode CranedStub::CreateCgroupForTasks(
     CRANE_ERROR(
         "CreateCgroupForTasks RPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
 
@@ -187,6 +189,7 @@ CraneErrCode CranedStub::ReleaseCgroupForTasks(
     CRANE_DEBUG(
         "ReleaseCgroupForTask gRPC for Node {} returned with status not ok: {}",
         m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
 
@@ -210,6 +213,7 @@ CraneErrCode CranedStub::CheckTaskStatus(task_id_t task_id,
     CRANE_DEBUG(
         "CheckTaskStatus gRPC for Node {} returned with status not ok: {}",
         m_craned_id_, grpc_status.error_message());
+    HandleGrpcErrorCode_(grpc_status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
 
@@ -226,23 +230,32 @@ CraneErrCode CranedStub::ChangeTaskTimeLimit(uint32_t task_id,
   using crane::grpc::ChangeTaskTimeLimitRequest;
 
   ClientContext context;
-  Status grpc_status;
+  Status status;
   ChangeTaskTimeLimitRequest request;
   ChangeTaskTimeLimitReply reply;
 
   request.set_task_id(task_id);
   request.set_time_limit_seconds(seconds);
-  grpc_status = m_stub_->ChangeTaskTimeLimit(&context, request, &reply);
+  status = m_stub_->ChangeTaskTimeLimit(&context, request, &reply);
 
-  if (!grpc_status.ok()) {
+  if (!status.ok()) {
     CRANE_ERROR("ChangeTaskTimeLimitAsync to Craned {} failed: {} ",
-                m_craned_id_, grpc_status.error_message());
+                m_craned_id_, status.error_message());
+    HandleGrpcErrorCode_(status.error_code());
     return CraneErrCode::ERR_RPC_FAILURE;
   }
   if (reply.ok())
     return CraneErrCode::SUCCESS;
   else
     return CraneErrCode::ERR_GENERIC_FAILURE;
+}
+
+void CranedStub::HandleGrpcErrorCode_(grpc::StatusCode code) {
+  if (code == grpc::UNAVAILABLE) {
+    CRANE_INFO("Craned {} reports service unavailable. Considering it down.",
+               m_craned_id_);
+    g_meta_container->CranedDown(m_craned_id_);
+  }
 }
 
 crane::grpc::ExecuteTasksRequest CranedStub::NewExecuteTasksRequests(
@@ -360,14 +373,6 @@ void CranedKeeper::Shutdown() {
   // Tag pool's destructor will free all trailing tags in cq.
 }
 
-void CranedKeeper::InitAndRegisterCraneds(
-    const std::list<CranedId> &craned_id_list) {
-  WriterLock guard(&m_unavail_craned_set_mtx_);
-
-  m_unavail_craned_set_.insert(craned_id_list.begin(), craned_id_list.end());
-  CRANE_TRACE("Trying register all craneds...");
-}
-
 void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
   util::SetCurrentThreadName(fmt::format("KeeStatMon{:0>3}", thread_id));
 
@@ -436,8 +441,7 @@ void CranedKeeper::StateMonitorThreadFunc_(int thread_id) {
       } else {
         // END state of both state machine. Free the Craned client.
         if (tag->type == CqTag::kInitializingCraned) {
-          CRANE_TRACE("Failed connect to {}. Waiting for its active connection",
-                      craned->m_craned_id_);
+          CRANE_TRACE("Failed connect to {}.", craned->m_craned_id_);
 
           // When deleting craned, the destructor will call
           // PutBackNodeIntoUnavailList_ in m_clean_up_cb_ and put this craned
@@ -482,16 +486,19 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
       craned->m_invalid_ = false;
     }
+    google::protobuf::Timestamp token;
     {
       util::lock_guard guard(m_unavail_craned_set_mtx_);
+      token = m_unavail_craned_set_.at(craned->m_craned_id_);
       m_unavail_craned_set_.erase(craned->m_craned_id_);
       m_connecting_craned_set_.erase(craned->m_craned_id_);
     }
 
     if (m_craned_connected_cb_)
-      g_thread_pool->detach_task([this, craned_id = craned->m_craned_id_]() {
-        m_craned_connected_cb_(craned_id);
-      });
+      g_thread_pool->detach_task(
+          [this, craned_id = craned->m_craned_id_, token]() {
+            m_craned_connected_cb_(craned_id, token);
+          });
 
     // Switch to EstablishedCraned state machine
     next_tag_type = CqTag::kEstablishedCraned;
@@ -634,7 +641,8 @@ std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
   return nullptr;
 }
 
-void CranedKeeper::SetCranedConnectedCb(std::function<void(CranedId)> cb) {
+void CranedKeeper::SetCranedConnectedCb(
+    std::function<void(CranedId, const google::protobuf::Timestamp &)> cb) {
   m_craned_connected_cb_ = std::move(cb);
 }
 
@@ -642,14 +650,16 @@ void CranedKeeper::SetCranedDisconnectedCb(std::function<void(CranedId)> cb) {
   m_craned_disconnected_cb_ = std::move(cb);
 }
 
-void CranedKeeper::PutNodeIntoUnavailList(const std::string &crane_id) {
+void CranedKeeper::PutNodeIntoUnavailSet(
+    const std::string &crane_id, const google::protobuf::Timestamp &token) {
   if (m_cq_closed_) return;
 
   util::lock_guard guard(m_unavail_craned_set_mtx_);
-  m_unavail_craned_set_.emplace(crane_id);
+  m_unavail_craned_set_.emplace(crane_id, token);
 }
 
-void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id) {
+void CranedKeeper::ConnectCranedNode_(
+    CranedId const &craned_id, const google::protobuf::Timestamp &token) {
   static Mutex s_craned_id_to_ip_cache_map_mtx;
   static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
       s_craned_id_to_ip_cache_map;
@@ -760,14 +770,16 @@ void CranedKeeper::PeriodConnectCranedThreadFunc_() {
 
       auto it = m_unavail_craned_set_.begin();
       while (it != m_unavail_craned_set_.end() && fetch_num > 0) {
-        if (!m_connecting_craned_set_.contains(*it) &&
-            !m_connected_craned_id_stub_map_.contains(*it)) {
+        if (!m_connecting_craned_set_.contains(it->first) &&
+            !m_connected_craned_id_stub_map_.contains(it->first)) {
           m_connecting_craned_set_.emplace(*it);
           g_thread_pool->detach_task(
-              [this, craned_id = *it]() { ConnectCranedNode_(craned_id); });
+              [this, craned_id = it->first, token = it->second]() {
+                ConnectCranedNode_(craned_id, token);
+              });
           fetch_num--;
         }
-        it = m_unavail_craned_set_.erase(it);
+        ++it;
       }
     }
 

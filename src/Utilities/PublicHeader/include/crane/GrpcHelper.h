@@ -18,6 +18,7 @@
 
 #pragma once
 
+#include <google/protobuf/timestamp.pb.h>
 #include <grpc++/grpc++.h>
 #include <spdlog/fmt/bundled/format.h>
 
@@ -30,6 +31,21 @@ struct TlsCertificates {
 };
 
 std::string GrpcConnectivityStateName(grpc_connectivity_state state);
+
+template <typename T>
+google::protobuf::Timestamp ToProtoTimestamp(
+    const std::chrono::time_point<T>& time) {
+  google::protobuf::Timestamp timestamp;
+  timestamp.set_seconds((time.time_since_epoch().count() / 1'000'000'000));
+  timestamp.set_nanos(time.time_since_epoch().count() % 1'000'000'000);
+  return timestamp;
+}
+
+std::chrono::system_clock::time_point ChronoFromProtoTimestamp(
+    const google::protobuf::Timestamp& timestamp);
+
+std::string ProtoTimestampToString(
+    const google::protobuf::Timestamp& timestamp);
 
 void ServerBuilderSetCompression(grpc::ServerBuilder* builder);
 

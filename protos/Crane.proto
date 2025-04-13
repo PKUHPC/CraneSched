@@ -22,6 +22,7 @@ package crane.grpc;
 option go_package = "/protos";
 
 import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
 import "PublicDefs.proto";
 
 message TaskStatusChangeRequest {
@@ -38,19 +39,20 @@ message TaskStatusChangeReply {
 
 message CranedConnectedCtldNotify {
   string craned_id = 1;
+  google.protobuf.Timestamp token = 2;
 }
 
 message ConfigureCranedRequest {
   bool ok = 1;
   map<uint32, google.protobuf.Empty /*JobSpec place holder*/> job_map = 2;
   map<uint32, TaskToD> job_id_tasks_map = 3;
-  uint64 token = 4;
+  google.protobuf.Timestamp token = 4;
 }
 
 message CranedReadyRequest {
   string craned_id = 1;
   CranedRemoteMeta remote_meta = 2;
-  uint64 token = 3;
+  google.protobuf.Timestamp token = 3;
 }
 
 message CranedReadyReply {

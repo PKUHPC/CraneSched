@@ -627,7 +627,7 @@ void GlobalVariableInit() {
   g_ctld_client = std::make_unique<Craned::CtldClient>();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
   g_ctld_client->SetCtldDisconnectedCb([] { g_server->SetReady(false); });
-  g_ctld_client->SetCtldConnectedCb([] { g_ctld_client->CranedConnected(); });
+
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
 
   if (g_config.Plugin.Enabled) {
@@ -658,7 +658,13 @@ void StartServer() {
                                                     std::move(init_promise));
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
+  g_ctld_client->StartNotifyConnected();
   g_ctld_client->StartConnectingCtld();
+  // Use config form ctld to init here
+  {
+    config_future.wait();
+    g_ctld_client->StartRegister({}, config_future.get().token());
+  }
   g_server->Wait();
 
   // Free global variables
