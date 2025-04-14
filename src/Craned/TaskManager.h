@@ -189,8 +189,6 @@ struct TaskInstance {
   bool terminated_by_timeout{false};
   ProcSigchldInfo sigchld_info{};
 
-  std::unique_ptr<pmix::PmixServer> pmix_server_;
-  
   absl::flat_hash_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
 };
 
@@ -452,6 +450,8 @@ class TaskManager {
   std::thread m_uvw_thread_;
 
   static inline TaskManager* m_instance_ptr_;
+
+  std::unique_ptr<pmix::PmixServer> m_pmix_server_;
 };
 }  // namespace Craned
 

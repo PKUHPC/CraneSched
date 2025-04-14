@@ -210,6 +210,9 @@ TaskManager::TaskManager() {
     }
     m_uvw_loop_->run();
   });
+
+  m_pmix_server_ = std::make_unique<pmix::PmixServer>();
+  m_pmix_server_->Init(g_config.CraneBaseDir);
 }
 
 TaskManager::~TaskManager() {
@@ -972,8 +975,9 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       }
     }
 
-    if (instance->IsCrun() && !instance->task.interactive_meta().mpi().empty()) {
-      auto result = instance->pmix_server_->SetupFork(0);
+    if (instance->IsCrun() && instance->task.interactive_meta().mpi() == "pmix") {
+      // Each task currently supports only one thread.
+      auto result = m_pmix_server_->SetupFork(instance->task.task_id(), instance->processes.size());
 
       if (!result) {
         fmt::print(stderr, "[Craned Subprocess] Pmix Server SetupFork() failed.\n");
@@ -1127,18 +1131,17 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   // Calloc tasks have no scripts to run. Just return.
   if (instance->IsCalloc()) return;
 
-  // FIXME: The PMIx server can only be initialized once. Start a new process to launch it again?
   const auto& mpi = instance->task.interactive_meta().mpi();
-  if (instance->IsCrun() && !mpi.empty() && mpi != "list") {
-    instance->pmix_server_ = std::make_unique<pmix::PmixServer>();
-    auto env_map = instance->GetTaskEnvMap();
-    if (!instance->pmix_server_->Init(instance->task, env_map)) {
-      CRANE_ERROR("Failed to initialize mpi server for task #{}", task_id);
-      ActivateTaskStatusChangeAsync_(
-        task_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodeInitMpiServer,
-        fmt::format("Failed to initialize mpi server for task #{}", task_id));
-      return ;
+  // Currently, only one type of PMIx is supported.
+  if (instance->IsCrun() && instance->task.interactive_meta().mpi() == "pmix") {
+      auto env_map = instance->GetTaskEnvMap();
+      if (!m_pmix_server_->RegisterTask(instance->task, env_map)) {
+        CRANE_ERROR("Failed to initialize mpi server for task #{}", task_id);
+        ActivateTaskStatusChangeAsync_(
+          task_id, crane::grpc::TaskStatus::Failed,
+          ExitCode::kExitCodeInitMpiServer,
+          fmt::format("Failed to initialize mpi server for task #{}", task_id));
+        return ;
     }
   }
 
@@ -1270,6 +1273,9 @@ void TaskManager::EvCleanTaskStatusChangeQueueCb_() {
       if (!path.empty())
         g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
     }
+
+    if (instance->IsCrun() && instance->task.interactive_meta().mpi() == "pmix")
+      m_pmix_server_->DeregisterTask(instance->task.task_id());
 
     bool orphaned = instance->orphaned;
 
