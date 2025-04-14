@@ -43,24 +43,24 @@ class PmixTaskInstance {
   std::optional<std::unordered_map<std::string, std::string>> Setup(uint32_t rank);
 
  private:
-  uint32_t m_uid_;
-  uint32_t m_gid_;
+  uint32_t m_uid_{};
+  uint32_t m_gid_{};
   std::string m_nspace_; // crane.pmix.jobid
-  int m_nprocs_;
+  int m_nprocs_{};
   std::string m_hostname_;
-  uint32_t m_node_id_;
-  uint32_t m_node_tasks_; /* number of tasks on *this* node */
-  uint32_t m_n_tasks_;
+  uint32_t m_node_id_{};
+  uint32_t m_node_tasks_{}; /* number of tasks on *this* node */
+  uint32_t m_n_tasks_{};
   std::vector<uint32_t> m_global_id_list_; /* global ids of tasks located on *this* node */
-  uint32_t m_nnodes_job_; /* number of nodes in current job */
+  uint32_t m_nnodes_job_{}; /* number of nodes in current job */
   std::string m_node_list_;
-  uint32_t m_ncpus_;  /* total possible number of cpus in job */
+  uint32_t m_ncpus_{};  /* total possible number of cpus in job */
   std::string m_cli_tmpdir_;
 
   void InfoSet_(const crane::grpc::TaskToD& task, const std::unordered_map<std::string, std::string>& env_map);
 
   template <typename T>
-  pmix_info_t InfoLoad_(const std::string& key, T val, pmix_data_type_t data_type);
+  pmix_info_t InfoLoad_(const std::string& key, const T& val, pmix_data_type_t data_type);
 };
 
 class PmixServer {
@@ -80,6 +80,7 @@ class PmixServer {
 private:
   std::string m_server_tmpdir_;
   //todo: Parallel
+  std::mutex m_mutex_;
   std::unordered_map<task_id_t, std::unique_ptr<PmixTaskInstance>> m_task_instances_;
   bool m_is_init_{false};
 };
@@ -104,7 +105,7 @@ class PMIxServerModule {
      CRANE_DEBUG(
          "Error handler registration callback is called with status={}, "
          "ref={}",
-         status, (int)errhandler_ref);
+         status, static_cast<int>(errhandler_ref));
    }
 
    static pmix_status_t ClientFinalizedCb(const pmix_proc_t *proc,
@@ -124,8 +125,7 @@ class PMIxServerModule {
                                  size_t nprocs, pmix_op_cbfunc_t cbfunc,
                                  void *cbdata) {
      CRANE_DEBUG("abort_fn called: status = {}, msg = {}\n", status, msg);
-     pmix_status_t rc;
-     if (NULL != pmix_procs) {
+     if (nullptr != pmix_procs) {
        CRANE_DEBUG( "SERVER: ABORT on {}:{}", pmix_procs[0].nspace, pmix_procs[0].rank);
      } else {
        CRANE_DEBUG("SERVER: ABORT OF ALL PROCS IN NSPACE {}", pmix_procs->nspace);
@@ -139,8 +139,8 @@ class PMIxServerModule {
                                    pmix_modex_cbfunc_t cbfunc, void *cbdata) {
      CRANE_DEBUG(" FencenbFn is called");
      /* pass the provided data back to each participating proc */
-     if (NULL != cbfunc) {
-       cbfunc(PMIX_SUCCESS, data, ndata, cbdata, NULL, NULL);
+     if (nullptr != cbfunc) {
+       cbfunc(PMIX_SUCCESS, data, ndata, cbdata, nullptr,nullptr);
      }
      return PMIX_SUCCESS;
    }
@@ -152,7 +152,7 @@ class PMIxServerModule {
      return PMIX_SUCCESS;
    }
 
-   static pmix_status_t JobControl(const pmix_proc_t *proct,
+    static pmix_status_t JobControl(const pmix_proc_t *proct,
                                     const pmix_proc_t targets[], size_t ntargets,
                                     const pmix_info_t directives[], size_t ndirs,
                                     pmix_info_cbfunc_t cbfunc, void *cbdata) {
