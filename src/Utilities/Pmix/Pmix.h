@@ -32,21 +32,20 @@
 
 namespace pmix {
 
-class PmixServer {
+class PmixTaskInstance {
  public:
-  PmixServer() = default;
+  PmixTaskInstance() = default;
 
-  ~PmixServer();
+  ~PmixTaskInstance();
 
   bool Init(const crane::grpc::TaskToD& task, const std::unordered_map<std::string, std::string>& env_map);
 
-  std::optional<std::unordered_map<std::string, std::string>> SetupFork(uint32_t rank);
+  std::optional<std::unordered_map<std::string, std::string>> Setup(uint32_t rank);
 
-private:
+ private:
   uint32_t m_uid_;
   uint32_t m_gid_;
   std::string m_nspace_; // crane.pmix.jobid
-  std::string m_server_tmpdir_;
   int m_nprocs_;
   std::string m_hostname_;
   uint32_t m_node_id_;
@@ -59,6 +58,30 @@ private:
   std::string m_cli_tmpdir_;
 
   void InfoSet_(const crane::grpc::TaskToD& task, const std::unordered_map<std::string, std::string>& env_map);
+
+  template <typename T>
+  pmix_info_t InfoLoad_(const std::string& key, T val, pmix_data_type_t data_type);
+};
+
+class PmixServer {
+ public:
+  PmixServer() = default;
+
+  ~PmixServer();
+
+  bool Init(const std::string& server_tmpdir);
+
+  bool RegisterTask(const crane::grpc::TaskToD& task, const std::unordered_map<std::string, std::string>& env_map);
+
+  std::optional<std::unordered_map<std::string, std::string>> SetupFork(task_id_t task_id, uint32_t rank);
+
+  void DeregisterTask(task_id_t task_id);
+
+private:
+  std::string m_server_tmpdir_;
+  //todo: Parallel
+  std::unordered_map<task_id_t, std::unique_ptr<PmixTaskInstance>> m_task_instances_;
+  bool m_is_init_{false};
 };
 
 
