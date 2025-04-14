@@ -413,6 +413,9 @@ void TaskManager::EvCleanSigchldQueueCb_() {
     ProcessInstance* proc = proc_iter->second;
     uint32_t task_id = instance->task.task_id();
 
+    if (instance->IsCrun() && instance->task.interactive_meta().mpi() == "pmix")
+      m_pmix_server_->DeregisterTask(instance->task.task_id());
+
     // Remove indexes from pid to ProcessInstance*
     m_pid_proc_map_.erase(proc_iter);
     m_pid_task_map_.erase(task_iter);
@@ -1213,66 +1216,69 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
                 task_id, strerror(errno));
   }
 
-  auto process =
+  for (int i = 0; i< instance->task.ntasks_per_node(); i++) {
+    auto process =
       std::make_unique<ProcessInstance>(sh_path, std::list<std::string>());
 
-  // Prepare file output name for batch tasks.
-  if (instance->task.type() == crane::grpc::Batch) {
-    /* Perform file name substitutions
-     * %j - Job ID
-     * %u - Username
-     * %x - Job name
-     */
-    process->batch_meta.parsed_output_file_pattern =
-        ParseFilePathPattern_(instance->task.batch_meta().output_file_pattern(),
-                              instance->task.cwd(), task_id);
-    absl::StrReplaceAll({{"%j", std::to_string(task_id)},
-                         {"%u", instance->pwd_entry.Username()},
-                         {"%x", instance->task.name()}},
-                        &process->batch_meta.parsed_output_file_pattern);
-
-    // If -e / --error is not defined, leave
-    // batch_meta.parsed_error_file_pattern empty;
-    if (!instance->task.batch_meta().error_file_pattern().empty()) {
-      process->batch_meta.parsed_error_file_pattern = ParseFilePathPattern_(
-          instance->task.batch_meta().error_file_pattern(),
-          instance->task.cwd(), task_id);
+    // Prepare file output name for batch tasks.
+    if (instance->task.type() == crane::grpc::Batch) {
+      /* Perform file name substitutions
+       * %j - Job ID
+       * %u - Username
+       * %x - Job name
+       */
+      process->batch_meta.parsed_output_file_pattern =
+          ParseFilePathPattern_(instance->task.batch_meta().output_file_pattern(),
+                                instance->task.cwd(), task_id);
       absl::StrReplaceAll({{"%j", std::to_string(task_id)},
                            {"%u", instance->pwd_entry.Username()},
                            {"%x", instance->task.name()}},
-                          &process->batch_meta.parsed_error_file_pattern);
+                          &process->batch_meta.parsed_output_file_pattern);
+
+      // If -e / --error is not defined, leave
+      // batch_meta.parsed_error_file_pattern empty;
+      if (!instance->task.batch_meta().error_file_pattern().empty()) {
+        process->batch_meta.parsed_error_file_pattern = ParseFilePathPattern_(
+            instance->task.batch_meta().error_file_pattern(),
+            instance->task.cwd(), task_id);
+        absl::StrReplaceAll({{"%j", std::to_string(task_id)},
+                             {"%u", instance->pwd_entry.Username()},
+                             {"%x", instance->task.name()}},
+                            &process->batch_meta.parsed_error_file_pattern);
+      }
+    }
+
+    // err will NOT be kOk ONLY if fork() is not called due to some failure
+    // or fork() fails.
+    // In this case, SIGCHLD will NOT be received for this task, and
+    // we should send TaskStatusChange manually.
+    CraneErrCode err = SpawnProcessInInstance_(instance, process.get());
+    if (err != CraneErrCode::SUCCESS) {
+      ActivateTaskStatusChangeAsync_(
+          task_id, crane::grpc::TaskStatus::Failed,
+          ExitCode::kExitCodeSpawnProcessFail,
+          fmt::format(
+              "Cannot spawn a new process inside the instance of task #{}",
+              task_id));
+    } else {
+      // kOk means that SpawnProcessInInstance_ has successfully forked a child
+      // process.
+      // Now we put the child pid into index maps.
+      // SIGCHLD sent just after fork() and before putting pid into maps
+      // will repeatedly be sent by timer and eventually be handled once the
+      // SIGCHLD processing callback sees the pid in index maps.
+      m_mtx_.Lock();
+      m_pid_task_map_.emplace(process->GetPid(), instance);
+      m_pid_proc_map_.emplace(process->GetPid(), process.get());
+
+      // Move the ownership of ProcessInstance into the TaskInstance.
+      // Make sure existing process can be found when handling SIGCHLD.
+      instance->processes.emplace(process->GetPid(), std::move(process));
+
+      m_mtx_.Unlock();
     }
   }
 
-  // err will NOT be kOk ONLY if fork() is not called due to some failure
-  // or fork() fails.
-  // In this case, SIGCHLD will NOT be received for this task, and
-  // we should send TaskStatusChange manually.
-  CraneErrCode err = SpawnProcessInInstance_(instance, process.get());
-  if (err != CraneErrCode::SUCCESS) {
-    ActivateTaskStatusChangeAsync_(
-        task_id, crane::grpc::TaskStatus::Failed,
-        ExitCode::kExitCodeSpawnProcessFail,
-        fmt::format(
-            "Cannot spawn a new process inside the instance of task #{}",
-            task_id));
-  } else {
-    // kOk means that SpawnProcessInInstance_ has successfully forked a child
-    // process.
-    // Now we put the child pid into index maps.
-    // SIGCHLD sent just after fork() and before putting pid into maps
-    // will repeatedly be sent by timer and eventually be handled once the
-    // SIGCHLD processing callback sees the pid in index maps.
-    m_mtx_.Lock();
-    m_pid_task_map_.emplace(process->GetPid(), instance);
-    m_pid_proc_map_.emplace(process->GetPid(), process.get());
-
-    // Move the ownership of ProcessInstance into the TaskInstance.
-    // Make sure existing process can be found when handling SIGCHLD.
-    instance->processes.emplace(process->GetPid(), std::move(process));
-
-    m_mtx_.Unlock();
-  }
 }
 
 std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
@@ -1318,9 +1324,6 @@ void TaskManager::EvCleanTaskStatusChangeQueueCb_() {
       if (!path.empty())
         g_thread_pool->detach_task([p = path]() { util::os::DeleteFile(p); });
     }
-
-    if (instance->IsCrun() && instance->task.interactive_meta().mpi() == "pmix")
-      m_pmix_server_->DeregisterTask(instance->task.task_id());
 
     bool orphaned = instance->orphaned;
 
