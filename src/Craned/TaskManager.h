@@ -34,6 +34,10 @@ struct BatchMetaInProcessInstance {
   std::string parsed_error_file_pattern;
 };
 
+struct CrunMetaInProcessInstance {
+  std::string parsed_output_file_pattern;
+};
+
 class ProcessInstance {
  public:
   ProcessInstance(std::string exec_path, std::list<std::string> arg_list)
@@ -81,6 +85,7 @@ class ProcessInstance {
   }
 
   BatchMetaInProcessInstance batch_meta;
+  CrunMetaInProcessInstance crun_meta;
 
  private:
   /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
@@ -218,6 +223,12 @@ class TaskManager {
   bool ChangeTaskTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
 
   void TaskStopAndDoStatusChangeAsync(uint32_t task_id);
+
+  void ReplacePlaceholders(std::string& input, TaskInstance* instance);
+  void SetNonblocking(int fd);
+  void MonitorStdoutToPip(int pipe_fd, int out_pipe_fd);
+  void MonitorStdoutToMulti(int pipe_fd, int out_pipe_fd, int stdout_fd);
+  void MonitorStderrToPip(int pipe_fd, int out_pipe_fd);
 
   // Wait internal libevent base loop to exit...
   void Wait();
