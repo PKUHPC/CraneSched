@@ -240,6 +240,7 @@ message InteractiveTaskAdditionalMeta {
 
   bool x11 = 6;
   X11Meta x11_meta = 7;
+  string output_file_pattern = 8;
 }
 
 message TaskInfo {
