@@ -624,6 +624,11 @@ class TaskScheduler {
   std::thread m_task_status_change_thread_;
   void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
+  std::thread m_resv_clean_thread_;
+  void CleanResvThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
+  std::shared_ptr<uvw::timer_handle> m_reservation_timer_handle_;
+
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_task_timer_handle_;
   void CleanTaskTimerCb_();
@@ -641,6 +646,15 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_task_timer_queue_handle_;
   void CleanTaskTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
+  std::unordered_map<ReservationId, std::shared_ptr<uvw::timer_handle>>
+      m_resv_timer_handles_;
+
+  using ResvTimerQueueElem = std::pair<ReservationId, absl::Time>;
+  ConcurrentQueue<ResvTimerQueueElem> m_resv_timer_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_clean_resv_timer_queue_handle_;
+  void CleanResvTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   std::shared_ptr<uvw::timer_handle> m_cancel_task_timer_handle_;
   void CancelTaskTimerCb_();

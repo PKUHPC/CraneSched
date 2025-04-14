@@ -541,6 +541,19 @@ bool TaskScheduler::Init() {
         TaskStatusChangeThread_(loop);
       });
 
+  std::shared_ptr<uvw::loop> uvw_reservation_loop = uvw::loop::create();
+
+  m_clean_resv_timer_queue_handle_ =
+      uvw_reservation_loop->resource<uvw::async_handle>();
+  m_clean_resv_timer_queue_handle_->on<uvw::async_event>(
+      [this, loop = uvw_reservation_loop](const uvw::async_event&,
+                                          uvw::async_handle&) {
+        CleanResvTimerQueueCb_(loop);
+      });
+
+  m_resv_clean_thread_ = std::thread(
+      [this, loop = uvw_reservation_loop]() { CleanResvThread_(loop); });
+
   // Start schedule thread first.
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
 
@@ -659,6 +672,29 @@ void TaskScheduler::TaskStatusChangeThread_(
     CRANE_ERROR(
         "Failed to start the idle event in TaskStatusChangeWithReasonAsync "
         "loop.");
+  }
+
+  uvw_loop->run();
+}
+
+void TaskScheduler::CleanResvThread_(
+    const std::shared_ptr<uvw::loop>& uvw_loop) {
+  util::SetCurrentThreadName("CleanResvThr");
+
+  std::shared_ptr<uvw::idle_handle> idle_handle =
+      uvw_loop->resource<uvw::idle_handle>();
+
+  idle_handle->on<uvw::idle_event>(
+      [this](const uvw::idle_event&, uvw::idle_handle& h) {
+        if (m_thread_stop_) {
+          h.parent().walk([](auto&& h) { h.close(); });
+          h.parent().stop();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      });
+
+  if (idle_handle->start() != 0) {
+    CRANE_ERROR("Failed to start the idle event in reservation loop.");
   }
 
   uvw_loop->run();
@@ -1074,29 +1110,6 @@ void TaskScheduler::ScheduleThread_() {
       m_pending_map_cached_size_.store(m_pending_task_map_.size(),
                                        std::memory_order::release);
       m_pending_task_map_mtx_.Unlock();
-
-      {
-        absl::Time now = absl::Now();
-        auto reservation_meta_map =
-            g_meta_container->GetReservationMetaMapPtr();
-        auto craned_meta_map = g_meta_container->GetCranedMetaMapConstPtr();
-        std::vector<ReservationId> expired_reservations;
-        for (auto& [reservation_id, reservation_meta] : *reservation_meta_map) {
-          auto resv_meta = reservation_meta.GetExclusivePtr();
-          if (now < resv_meta->logical_partition.start_time) continue;
-          if (now >= resv_meta->logical_partition.end_time) {
-            expired_reservations.emplace_back(reservation_id);
-            continue;
-          }
-        }
-        for (const auto& reservation_id : expired_reservations) {
-          auto res = g_task_scheduler->EraseReservationMeta(
-              reservation_meta_map, reservation_id);
-          if (!res.has_value()) {
-            CRANE_ERROR("Clear expired reservation failed: {}", res.error());
-          }
-        }
-      }
     }
 
     std::this_thread::sleep_for(
@@ -1445,7 +1458,6 @@ crane::grpc::CreateReservationReply TaskScheduler::CreateReservation(
   if (!res.has_value()) {
     reply.set_ok(false);
     reply.set_reason(res.error());
-
   } else {
     reply.set_ok(true);
   }
@@ -1494,6 +1506,19 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
       absl::FromUnixSeconds(request.start_time_unix_seconds());
   absl::Duration duration = absl::Seconds(request.duration_seconds());
   absl::Time end_time = start_time + duration;
+
+  absl::Time now = absl::Now();
+  if (end_time > now + absl::Seconds(kReservationMaxDuration)) {
+    return std::unexpected(
+        fmt::format("Reservation duration exceeds max duration of {} seconds",
+                    kReservationMaxDuration));
+  } else if (end_time <= now) {
+    return std::unexpected("Reservation end time is in the past");
+  }
+  if (start_time < now) {
+    CRANE_WARN("Reservation start time is in the past");
+  }
+
   PartitionId partition = request.partition();
 
   // TODO: Add support for partial node reservation
@@ -1648,6 +1673,9 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
     }
   }
 
+  m_resv_timer_queue_.enqueue(std::make_pair(reservation_name, end_time));
+  m_clean_resv_timer_queue_handle_->send();
+
   return {};
 }
 
@@ -1792,6 +1820,56 @@ void TaskScheduler::CleanTaskTimerQueueCb_(
     }
 
     promise.set_value(err);
+  }
+}
+
+void TaskScheduler::CleanResvTimerQueueCb_(
+    const std::shared_ptr<uvw::loop>& uvw_loop) {
+  // It's ok to use an approximate size.
+  size_t approximate_size = m_resv_timer_queue_.size_approx();
+
+  std::vector<ResvTimerQueueElem> timer_to_create;
+  timer_to_create.resize(approximate_size);
+
+  size_t actual_size = m_resv_timer_queue_.try_dequeue_bulk(
+      timer_to_create.begin(), approximate_size);
+
+  timer_to_create.resize(actual_size);
+
+  for (const auto& [reservation_id, end_time] : timer_to_create) {
+    // If any timer for the reservation exists, remove it.
+    auto timer_it = m_resv_timer_handles_.find(reservation_id);
+    if (timer_it != m_resv_timer_handles_.end()) {
+      timer_it->second->close();
+      m_resv_timer_handles_.erase(timer_it);
+    }
+
+    int64_t secs = absl::ToInt64Seconds(end_time - absl::Now());
+    if (secs <= 0) {
+      CRANE_TRACE("Reservation {} end time has past, clean it up immediately",
+                  reservation_id);
+      auto reservation_meta_map = g_meta_container->GetReservationMetaMapPtr();
+      auto err = EraseReservationMeta(reservation_meta_map, reservation_id);
+      if (err.has_value()) {
+        CRANE_ERROR("Failed to clean up reservation {}: {}", reservation_id,
+                    err.error());
+      }
+    } else {
+      auto on_timer_cb = [this, reservation_id](const uvw::timer_event&,
+                                                uvw::timer_handle& handle) {
+        auto reservation_meta_map =
+            g_meta_container->GetReservationMetaMapPtr();
+        auto err = EraseReservationMeta(reservation_meta_map, reservation_id);
+
+        handle.close();
+        m_resv_timer_handles_.erase(reservation_id);
+      };
+      auto resv_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
+      resv_timer_handle_->on<uvw::timer_event>(std::move(on_timer_cb));
+      resv_timer_handle_->start(std::chrono::seconds(secs),
+                                std::chrono::seconds(0));
+      m_resv_timer_handles_[reservation_id] = std::move(resv_timer_handle_);
+    }
   }
 }
 
@@ -2669,7 +2747,6 @@ void MinLoadFirst::NodeSelect(
   absl::Time now = absl::FromUnixSeconds(ToUnixSeconds(absl::Now()));
 
   std::unordered_map<ReservationId, NodeSelectionInfo> resv_id_node_info_map;
-  std::vector<ReservationId> expired_resv_ids;
 
   {
     auto reservation_meta_map = g_meta_container->GetReservationMetaMapPtr();
@@ -2679,19 +2756,12 @@ void MinLoadFirst::NodeSelect(
       auto resv_meta = reservation_meta.GetExclusivePtr();
       if (now < resv_meta->logical_partition.start_time) continue;
       if (now >= resv_meta->logical_partition.end_time) {
-        expired_reservations.emplace_back(reservation_id);
+        CRANE_WARN("Reservation {} expired but not cleaned up", reservation_id);
         continue;
       }
       CalculateNodeSelectionInfoOfReservation_(
           running_tasks, now, resv_meta.get(), *craned_meta_map,
           &resv_id_node_info_map[reservation_id]);
-    }
-    for (const auto& reservation_id : expired_reservations) {
-      auto res = g_task_scheduler->EraseReservationMeta(reservation_meta_map,
-                                                        reservation_id);
-      if (!res.has_value()) {
-        CRANE_ERROR("Clear expired reservation failed: {}", res.error());
-      }
     }
   }
 

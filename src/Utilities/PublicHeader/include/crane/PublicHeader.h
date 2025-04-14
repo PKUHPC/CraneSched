@@ -76,6 +76,8 @@ constexpr int64_t kTaskMaxTimeLimitSec =
 constexpr int64_t kTaskMaxTimeStampSec =
     google::protobuf::util::TimeUtil::kTimestampMaxSeconds;
 
+constexpr uint64_t kReservationMaxDuration = 7 * 24 * 3600;  // 7 days
+
 namespace ExitCode {
 
 inline constexpr size_t kExitStatusNum = 256;
