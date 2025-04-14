@@ -537,18 +537,18 @@ void TaskManager::SetNonblocking(int fd) {
   }
 }
 
-void TaskManager::MonitorStdoutToPip(int pipe_fd, int out_pipe_fd) {
+void TaskManager::MonitorPipToSingle(int pipe_fd, int out_fd) {
   auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(pipe_fd);
 
   // Register a callback function for readable events
   poll_handle->on<uvw::poll_event>(
-      [this, pipe_fd, out_pipe_fd](const uvw::poll_event&,
-                                   uvw::poll_handle& handle) {
+      [this, pipe_fd, out_fd](const uvw::poll_event&,
+                              uvw::poll_handle& handle) {
         constexpr ssize_t MAX_SIZE = 4096;
 
         for (;;) {
           ssize_t bytes_splice =
-              splice(pipe_fd, nullptr, out_pipe_fd, nullptr, MAX_SIZE,
+              splice(pipe_fd, nullptr, out_fd, nullptr, MAX_SIZE,
                      SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
           if (bytes_splice < 0) {
             if (errno == EAGAIN) {
@@ -560,7 +560,7 @@ void TaskManager::MonitorStdoutToPip(int pipe_fd, int out_pipe_fd) {
             handle.stop();
             handle.close();
             close(pipe_fd);
-            close(out_pipe_fd);
+            close(out_fd);
             return;
           }
 
@@ -569,7 +569,7 @@ void TaskManager::MonitorStdoutToPip(int pipe_fd, int out_pipe_fd) {
             handle.stop();
             handle.close();
             close(pipe_fd);
-            close(out_pipe_fd);
+            close(out_fd);
             return;
           }
         }
@@ -578,8 +578,8 @@ void TaskManager::MonitorStdoutToPip(int pipe_fd, int out_pipe_fd) {
   poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
 }
 
-void TaskManager::MonitorStdoutToMulti(int pipe_fd, int out_pipe_fd,
-                                       int stdout_fd) {
+void TaskManager::MonitorPipToMulti(int pipe_fd, int out_pipe_fd,
+                                    int stdout_fd) {
   auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(pipe_fd);
 
   // Register a callback function for readable events
@@ -632,47 +632,6 @@ void TaskManager::MonitorStdoutToMulti(int pipe_fd, int out_pipe_fd,
               return;
             }
             bytes_tee -= bytes_splice;
-          }
-        }
-      });
-
-  poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
-}
-
-void TaskManager::MonitorStderrToPip(int pipe_fd, int out_pipe_fd) {
-  auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(pipe_fd);
-
-  // Register a callback function for readable events
-  poll_handle->on<uvw::poll_event>(
-      [this, pipe_fd, out_pipe_fd](const uvw::poll_event&,
-                                   uvw::poll_handle& handle) {
-        constexpr ssize_t MAX_SIZE = 4096;
-
-        for (;;) {
-          ssize_t bytes_splice =
-              splice(pipe_fd, nullptr, out_pipe_fd, nullptr, MAX_SIZE,
-                     SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
-          if (bytes_splice < 0) {
-            if (errno == EAGAIN) {
-              // Data is temporarily unavailable, exit the loop and wait for the
-              // next event
-              break;
-            }
-            CRANE_DEBUG("Error in err splice: {}", strerror(errno));
-            handle.stop();
-            handle.close();
-            close(pipe_fd);
-            close(out_pipe_fd);
-            return;
-          }
-
-          if (bytes_splice == 0) {
-            // The pipe has been closed, stop listening
-            handle.stop();
-            handle.close();
-            close(pipe_fd);
-            close(out_pipe_fd);
-            return;
           }
         }
       });
@@ -821,7 +780,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         meta->task_output_fd = crun_pty_fd;
       } else {
         if (process->crun_meta.parsed_output_file_pattern.empty()) {
-          MonitorStdoutToPip(crun_craned_output_pipe[0], crun_craned_pipe[1]);
+          MonitorPipToSingle(crun_craned_output_pipe[0], crun_craned_pipe[1]);
         } else {
           int stdout_fd;
           const std::string& stdout_file_path =
@@ -834,10 +793,10 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                         strerror(errno));
             return CraneErrCode::ERR_SYSTEM_ERR;
           }
-          MonitorStdoutToMulti(crun_craned_output_pipe[0], crun_craned_pipe[1],
-                               stdout_fd);
+          MonitorPipToMulti(crun_craned_output_pipe[0], crun_craned_pipe[1],
+                            stdout_fd);
         }
-        MonitorStderrToPip(crun_craned_err_pipe[0], crun_craned_pipe[1]);
+        MonitorPipToSingle(crun_craned_err_pipe[0], crun_craned_pipe[1]);
       }
 
       const auto& proto_ia_meta = instance->task.interactive_meta();

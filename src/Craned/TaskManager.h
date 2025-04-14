@@ -226,9 +226,8 @@ class TaskManager {
 
   void ReplacePlaceholders(std::string& input, TaskInstance* instance);
   void SetNonblocking(int fd);
-  void MonitorStdoutToPip(int pipe_fd, int out_pipe_fd);
-  void MonitorStdoutToMulti(int pipe_fd, int out_pipe_fd, int stdout_fd);
-  void MonitorStderrToPip(int pipe_fd, int out_pipe_fd);
+  void MonitorPipToSingle(int pipe_fd, int out_fd);
+  void MonitorPipToMulti(int pipe_fd, int out_pipe_fd, int stdout_fd);
 
   // Wait internal libevent base loop to exit...
   void Wait();
