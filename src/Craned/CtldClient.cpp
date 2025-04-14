@@ -181,7 +181,6 @@ void CtldClient::AsyncSendThread_() {
     prev_conn_state = connected;
 
     if (!connected) {
-      retry_attempt++;
       uint64_t delay_time;
       if (retry_attempt <= kInitialFastRetries) {
         delay_time = kConnectCtldRetryInitMs + (retry_attempt * 1'000U);
@@ -199,6 +198,7 @@ void CtldClient::AsyncSendThread_() {
           "Channel to CraneCtlD is not connected. Reconnecting after {} "
           "seconds.",
           delay_time / 1000);
+      retry_attempt++;
       std::this_thread::sleep_for(std::chrono::milliseconds(delay_time));
       continue;
     } else {
