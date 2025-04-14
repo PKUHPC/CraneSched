@@ -23,17 +23,11 @@ EmptyLineBeforeAccessModifier: LogicalBlock
 IndentPPDirectives: AfterHash
 IndentCaseLabels: false
 
-# <>里面是否增加space, 不建议, 配置成Never即可
 SpacesInAngles: Never
-# 条件语句()里面是否增加space, 不建议, 配置成Never即可
 SpacesInConditionalStatement: false
-# 容器初始化列表[]/{}里面是否增加space, 不建议(跟C++11风格保持一致)
 SpacesInContainerLiterals: false
-# 贺括号内是否加space, false
 SpacesInParentheses: false
-# 中括号内是否加space, false
 SpacesInSquareBrackets: false
-# 大括号内是否加space, false
 SpaceBeforeSquareBrackets: false
 SpaceBeforeCpp11BracedList: false
 
