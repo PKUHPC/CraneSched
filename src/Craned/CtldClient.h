@@ -81,6 +81,11 @@ class CtldClient {
     m_registering_ = false;
   };
 
+  void CranedUp() {
+    absl::MutexLock lk(&m_register_mutex_);
+    m_up_lined_ = true;
+  }
+
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
   bool CancelTaskStatusChangeByTaskId(task_id_t task_id,
@@ -115,10 +120,11 @@ class CtldClient {
 
   // Register status
   absl::Mutex m_register_mutex_;
-  bool m_notify_ctld_connected_{false};
-  bool m_registering_{false};
-  std::vector<task_id_t> m_nonexistent_jobs_;
-  google::protobuf::Timestamp m_token_;
+  bool m_notify_ctld_connected_{false} ABSL_GUARDED_BY(m_register_mutex_);
+  bool m_registering_{false} ABSL_GUARDED_BY(m_register_mutex_);
+  bool m_up_lined_{false} ABSL_GUARDED_BY(m_register_mutex_);
+  std::vector<task_id_t> m_nonexistent_jobs_ ABSL_GUARDED_BY(m_register_mutex_);
+  google::protobuf::Timestamp m_token_ ABSL_GUARDED_BY(m_register_mutex_);
 
   void NotifyCranedConnected_() const;
   void CranedReady_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_register_mutex_);
