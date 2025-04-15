@@ -149,15 +149,29 @@ void CtldClient::AsyncSendThread_() {
 
   bool prev_conn_state = false;
   uint retry_attempt = 0;
+  uint rpc_attempt = 0;
   while (true) {
     if (m_thread_stop_) break;
 
     grpc_connectivity_state pre_state = m_ctld_channel_->GetState(true);
 
-    bool state_changed = m_ctld_channel_->WaitForStateChange(
-        pre_state, std::chrono::system_clock::now() + std::chrono::seconds(3));
+    auto cur_state = pre_state;
+    if (pre_state == GRPC_CHANNEL_CONNECTING ||
+        pre_state == GRPC_CHANNEL_IDLE ||
+        pre_state == GRPC_CHANNEL_TRANSIENT_FAILURE) {
+      CRANE_TRACE("Current channel status {},waiting for StateChange.",
+                  GrpcConnectivityStateName(pre_state));
+      m_ctld_channel_->WaitForStateChange(
+          pre_state,
+          std::chrono::system_clock::now() + std::chrono::seconds(3));
 
-    grpc_connectivity_state cur_state = m_ctld_channel_->GetState(false);
+      cur_state = m_ctld_channel_->GetState(false);
+      CRANE_TRACE("New ctld client channel status {}.",
+                  GrpcConnectivityStateName(cur_state));
+    } else if (pre_state == GRPC_CHANNEL_IDLE) {
+      CRANE_TRACE("Current channel status {}.",
+                  GrpcConnectivityStateName(pre_state));
+    }
 
     bool connected = (cur_state == GRPC_CHANNEL_READY);
 
@@ -171,10 +185,17 @@ void CtldClient::AsyncSendThread_() {
       absl::MutexLock lk(&m_cb_mutex_);
       if (m_on_ctld_connected_cb_) m_on_ctld_connected_cb_();
       retry_attempt = 0;
+      rpc_attempt = 0;
     } else if (!connected && prev_conn_state) {
       CRANE_TRACE("Channel to CraneCtlD is disconnected.");
-      absl::MutexLock lk(&m_cb_mutex_);
-      if (m_on_ctld_disconnected_cb_) m_on_ctld_disconnected_cb_();
+      {
+        absl::MutexLock lk(&m_register_mutex_);
+        m_up_lined_ = false;
+      }
+      {
+        absl::MutexLock lk(&m_cb_mutex_);
+        if (m_on_ctld_disconnected_cb_) m_on_ctld_disconnected_cb_();
+      }
       this->StopRegister();
       this->StartNotifyConnected();
     }
@@ -183,17 +204,10 @@ void CtldClient::AsyncSendThread_() {
 
     if (!connected) {
       uint64_t delay_time;
-      if (retry_attempt <= kInitialFastRetries) {
-        delay_time = kConnectCtldRetryInitMs + (retry_attempt * 1'000U);
+      if (retry_attempt < kInitialFastRetries) {
+        delay_time = kConnectCtldRetryInitMs + (retry_attempt * 1'000UL);
       } else {
-        if (retry_attempt >= 8)
-          delay_time = 60'000;
-        else
-          delay_time =
-              std::min(kConnectCtldRetryInitMs *
-                           static_cast<uint64_t>(std::pow(
-                               2, retry_attempt - kInitialFastRetries)),
-                       kConnectCtldRetryMaxMs);
+        delay_time = kConnectCtldSlowRetryMs;
       }
       CRANE_INFO(
           "Channel to CraneCtlD is not connected. Reconnecting after {} "
@@ -209,17 +223,29 @@ void CtldClient::AsyncSendThread_() {
         notify_ctld_connected = m_notify_ctld_connected_;
       }
 
-      if (notify_ctld_connected) NotifyCranedConnected_();
+      if (notify_ctld_connected) {
+        NotifyCranedConnected_();
+        rpc_attempt++;
+      }
 
       bool send_register{false};
       {
         absl::MutexLock lk(&m_register_mutex_);
         send_register = m_registering_;
       }
-      if (send_register) CranedReady_();
+      if (send_register) {
+        CranedReady_();
+        rpc_attempt++;
+      }
     }
     if (!m_up_lined_) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      uint sleep_time = rpc_attempt >= 10 ? 10'000 : 1000 * rpc_attempt;
+      CRANE_TRACE(
+          "Ctld client connected but not up yet, sleep for {} seconds and try "
+          "to up.",
+          sleep_time / 1000);
+      std::this_thread::sleep_for(rpc_attempt *
+                                  std::chrono::milliseconds(sleep_time));
       continue;
     }
 

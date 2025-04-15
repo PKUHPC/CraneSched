@@ -25,7 +25,6 @@
 namespace Ctld {
 
 void CranedMetaContainer::CranedUp(const crane::grpc::CranedReadyRequest* req) {
-  CRANE_INFO("Craned {} is up now.", req->craned_id());
   auto remote_meta = static_cast<CranedRemoteMeta>(req->remote_meta());
   const auto& craned_id = req->craned_id();
 
@@ -67,6 +66,7 @@ void CranedMetaContainer::CranedUp(const crane::grpc::CranedReadyRequest* req) {
 
     part_global_meta.alive_craned_cnt++;
   }
+  CRANE_INFO("Craned {} is up now.", req->craned_id());
 }
 
 void CranedMetaContainer::CranedDown(const CranedId& craned_id) {
