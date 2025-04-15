@@ -47,7 +47,7 @@ class RaftServerStuff {
 
   void Init();
 
-  bool CheckServerNodeExist(int server_id);
+  bool CheckServerNodeExist(int server_id) const;
 
   bool AddServerAsync(int server_id, const std::string& endpoint);
 
@@ -55,27 +55,25 @@ class RaftServerStuff {
 
   bool RemoveServer(int server_id);
 
-  void server_list(crane::grpc::QueryRaftServerListReply* response);
-
   bool AppendLog(std::shared_ptr<nuraft::buffer> new_log);
 
   bool RegisterToLeader(const std::string& leader_hostname,
                         const std::string& grpc_port);
 
-  void YieldLeadership(int next_leader_id = -1) {
+  void YieldLeadership(int next_leader_id = -1) const {
     if (next_leader_id == m_server_id_) return;
     return m_raft_instance_->yield_leadership(false, next_leader_id);
   };
 
-  int GetLeaderId() { return m_raft_instance_->get_leader(); };
+  int GetLeaderId() const { return m_raft_instance_->get_leader(); };
 
-  bool IsLeader() { return m_raft_instance_->is_leader(); };
+  bool IsLeader() const { return m_raft_instance_->is_leader(); };
 
-  int GetServerId() { return m_server_id_; };
+  int GetServerId() const { return m_server_id_; };
 
   CraneStateMachine* GetStateMachine();
 
-  void GetNodeStatus(crane::grpc::QueryRaftNodeInfoReply* response);
+  void GetNodeStatus(crane::grpc::QueryControllerInfoReply* response);
 
   void get_all_keys() {
     static_cast<crane::Internal::NuRaftStateManager*>(m_state_mgr_.get())
