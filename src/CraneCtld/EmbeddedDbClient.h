@@ -39,7 +39,7 @@ using IEmbeddedDb = crane::Internal::IEmbeddedDb;
 
 class NuRaftMemoryDb : public IEmbeddedDb {
  public:
-  explicit NuRaftMemoryDb(uint8_t db_index) : db_index_(db_index){};
+  explicit NuRaftMemoryDb(uint8_t db_index) : db_index_(db_index) {};
 
   std::expected<void, DbErrorCode> Init(const std::string& path) override {
     return {};
