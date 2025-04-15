@@ -129,6 +129,7 @@ void CtldClient::CranedReady_() {
   if (ready_reply.ok()) {
     g_server->SetReady(true);
     m_registering_ = false;
+    m_up_lined_ = true;
     CRANE_INFO("Craned successfully Up.");
   } else {
     CRANE_WARN("Craned ready get reply of false.");
@@ -216,6 +217,10 @@ void CtldClient::AsyncSendThread_() {
         send_register = m_registering_;
       }
       if (send_register) CranedReady_();
+    }
+    if (!m_up_lined_) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      continue;
     }
 
     bool has_msg = m_task_status_change_mtx_.LockWhenWithTimeout(
