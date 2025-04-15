@@ -18,9 +18,11 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Switch to current branch
+        if: github.event.pull_request.head.repo.full_name == github.repository
         run: |
           echo "Switching to branch: ${GITHUB_HEAD_REF}"
           git checkout "${GITHUB_HEAD_REF}"
+
       - name: Set up Git identity
         run: |
           git config --global user.name "github-actions[bot]"
@@ -32,6 +34,7 @@ jobs:
           sudo bash /tmp/llvm.sh 20
           sudo apt update
           sudo apt-get install clang-format-20
+
       - name: Run clang-format and apply changes
         run: |
           git diff --name-only origin/master...HEAD | while read -r file; do
@@ -39,13 +42,33 @@ jobs:
               clang-format-20 -i --style=file "$file"
             fi
           done
-      - name: Commit formatting changes
+
+      - name: Generate diff
         run: |
           if ! git diff --quiet; then
-            git add .
-            git commit -m "style: auto format with clang-format."
-            git push
-            echo "Commit format."
+            git diff  > format.patch
+            echo "FORMATED=true" >> $GITHUB_ENV
           else
             echo "No formatting changes were necessary."
           fi
+
+      - name: Commit formatting changes
+        if: github.event.pull_request.head.repo.full_name == github.repository && env.FORMATED == 'true'
+        run: |
+          git add .
+          git commit -m "style: auto format with clang-format."
+          git push
+          echo "Commit format."
+
+      - name: Upload diff
+        if: github.event.pull_request.head.repo.full_name != github.repository && env.FORMATED == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: format-diff
+          path: format.patch
+
+      - name: Alert on formated for forked repo
+        if: github.event.pull_request.head.repo.full_name != github.repository && env.FORMATED == 'true'
+        run: |
+          echo "Please download the patch and apply to format your code."
+          exit 1

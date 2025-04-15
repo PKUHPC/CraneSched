@@ -1,0 +1,66 @@
+name: Manage Test Label
+
+on:
+  workflow_run:
+    workflows: [ "Build, Upload and Test" ]
+    types:
+      - completed
+
+jobs:
+  manage-label:
+    if: ${{ github.event.workflow_run.event == 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Get PR number
+        id: pr-context
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_TARGET_REPO: ${{ github.repository }}
+          PR_BRANCH: |-
+            ${{
+              (github.event.workflow_run.head_repository.owner.login != github.event.workflow_run.repository.owner.login)
+                && format('{0}:{1}', github.event.workflow_run.head_repository.owner.login, github.event.workflow_run.head_branch)
+                || github.event.workflow_run.head_branch
+            }}
+        run: gh pr view --repo "${PR_TARGET_REPO}" "${PR_BRANCH}" --json 'number' --jq '"pr=\(.number)"' >> "${GITHUB_OUTPUT}"
+
+      - name: Manage test labels
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr = ${{ steps.pr-context.outputs.pr }} ;
+            const conclusion = "${{ github.event.workflow_run.conclusion }}";
+            console.log(`Managing test labels for PR #${pr} , conclusion: ${conclusion}`);
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr,
+                name: "test-passed",
+              });
+              console.log(`Removed label from PR #${pr}`);
+
+              if (conclusion === "success") {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr,
+                  labels: ["test-passed"],
+                });
+                console.log(`Added label to PR #${pr}`);
+              }
+            } catch (error) {
+              if (error.status === 404 && conclusion === "success") {
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr,
+                  labels: ["test-passed"],
+                });
+                console.log(`Added label to PR #${pr}`);
+              } else if (error.status !== 404) {
+                throw error;
+              }
+            }
