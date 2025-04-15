@@ -541,39 +541,38 @@ void TaskManager::MonitorPipToSingle(int pipe_fd, int out_fd) {
   auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(pipe_fd);
 
   // Register a callback function for readable events
-  poll_handle->on<uvw::poll_event>(
-      [this, pipe_fd, out_fd](const uvw::poll_event&,
-                              uvw::poll_handle& handle) {
-        constexpr ssize_t MAX_SIZE = 4096;
+  poll_handle->on<uvw::poll_event>([this, pipe_fd, out_fd](
+                                       const uvw::poll_event&,
+                                       uvw::poll_handle& handle) {
+    constexpr ssize_t MAX_SIZE = 4096;
 
-        for (;;) {
-          ssize_t bytes_splice =
-              splice(pipe_fd, nullptr, out_fd, nullptr, MAX_SIZE,
-                     SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
-          if (bytes_splice < 0) {
-            if (errno == EAGAIN) {
-              // Data is temporarily unavailable, exit the loop and wait for the
-              // next event
-              break;
-            }
-            CRANE_DEBUG("Error in err splice: {}", strerror(errno));
-            handle.stop();
-            handle.close();
-            close(pipe_fd);
-            close(out_fd);
-            return;
-          }
-
-          if (bytes_splice == 0) {
-            // The pipe has been closed, stop listening
-            handle.stop();
-            handle.close();
-            close(pipe_fd);
-            close(out_fd);
-            return;
-          }
+    for (;;) {
+      ssize_t bytes_splice = splice(pipe_fd, nullptr, out_fd, nullptr, MAX_SIZE,
+                                    SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
+      if (bytes_splice < 0) {
+        if (errno == EAGAIN) {
+          // Data is temporarily unavailable, exit the loop and wait for the
+          // next event
+          break;
         }
-      });
+        CRANE_DEBUG("Error in err splice: {}", strerror(errno));
+        handle.stop();
+        handle.close();
+        close(pipe_fd);
+        close(out_fd);
+        return;
+      }
+
+      if (bytes_splice == 0) {
+        // The pipe has been closed, stop listening
+        handle.stop();
+        handle.close();
+        close(pipe_fd);
+        close(out_fd);
+        return;
+      }
+    }
+  });
 
   poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
 }
