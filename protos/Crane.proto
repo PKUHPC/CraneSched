@@ -263,12 +263,13 @@ message ModifyCranedStateReply {
   repeated string not_modified_reasons = 4;
 }
 
-message QueryRaftServerListRequest {}
+message QueryControllerInfoRequest {}
 
-message QueryRaftServerListReply {
+message QueryControllerInfoReply {
   enum RaftRole {
     Leader = 0;
-    Fellow = 1;
+    Follower = 1;
+    Offline = 2;
   }
 
   message RaftServer {
@@ -278,37 +279,33 @@ message QueryRaftServerListReply {
   }
 
   repeated RaftServer server_list = 1;
+
+  int32 server_id = 2;
+  int32 leader_id = 3;
+  uint64 start_index = 4;
+  uint64 next_slot = 5;
+  uint64 committed_log_idx = 6;
+  uint64 cur_term = 7;
+  uint64 last_snapshot_log_idx = 8;
+  uint64 last_snapshot_log_term = 9;
 }
 
-message QueryRaftNodeInfoRequest {}
-
-message QueryRaftNodeInfoReply{
-  int32 server_id = 1;
-  int32 leader_id = 2;
-  uint64 start_index = 3;
-  uint64 next_slot = 4;
-  uint64 committed_log_idx = 5;
-  uint64 cur_term = 6;
-  uint64 last_snapshot_log_idx = 7;
-  uint64 last_snapshot_log_term = 8;
-}
-
-message AddRaftNodeRequest{
+message AddControllerRequest{
   string host_name = 1;
   uint32 raft_port = 2;
 }
 
-message AddRaftNodeReply {
+message AddControllerReply {
   bool ok = 1;
   int32 server_id = 2;
   string reason = 3;
 }
 
-message RemoveRaftNodeRequest{
+message RemoveControllerRequest{
   int32 server_id = 1;
 }
 
-message RemoveRaftNodeReply{
+message RemoveControllerReply{
   bool ok = 1;
   string reason = 2;
 }
@@ -927,10 +924,9 @@ service CraneCtld {
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
   rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
-  rpc QueryRaftServerList(QueryRaftServerListRequest) returns (QueryRaftServerListReply);
-  rpc QueryRaftNodeInfo(QueryRaftNodeInfoRequest) returns (QueryRaftNodeInfoReply);
-  rpc AddRaftNode(AddRaftNodeRequest) returns (AddRaftNodeReply);
-  rpc RemoveRaftNode(RemoveRaftNodeRequest) returns (RemoveRaftNodeReply);
+  rpc QueryControllerInfo(QueryControllerInfoRequest) returns (QueryControllerInfoReply);
+  rpc AddController(AddControllerRequest) returns (AddControllerReply);
+  rpc RemoveController(RemoveControllerRequest) returns (RemoveControllerReply);
   rpc YieldLeadership(YieldLeadershipRequest) returns (YieldLeadershipReply);
 
   /* RPCs called from cacctmgr */

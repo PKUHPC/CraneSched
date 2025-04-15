@@ -319,24 +319,20 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryLeaderIdRequest *request,
       crane::grpc::QueryLeaderIdReply *response) override;
 
-  grpc::Status QueryRaftServerList(
+  grpc::Status QueryControllerInfo(
       grpc::ServerContext *context,
-      const crane::grpc::QueryRaftServerListRequest *request,
-      crane::grpc::QueryRaftServerListReply *response) override;
+      const crane::grpc::QueryControllerInfoRequest *request,
+      crane::grpc::QueryControllerInfoReply *response) override;
 
-  grpc::Status QueryRaftNodeInfo(
+  grpc::Status AddController(
       grpc::ServerContext *context,
-      const crane::grpc::QueryRaftNodeInfoRequest *request,
-      crane::grpc::QueryRaftNodeInfoReply *response) override;
+      const crane::grpc::AddControllerRequest *request,
+      crane::grpc::AddControllerReply *response) override;
 
-  grpc::Status AddRaftNode(grpc::ServerContext *context,
-                           const crane::grpc::AddRaftNodeRequest *request,
-                           crane::grpc::AddRaftNodeReply *response) override;
-
-  grpc::Status RemoveRaftNode(
+  grpc::Status RemoveController(
       grpc::ServerContext *context,
-      const crane::grpc::RemoveRaftNodeRequest *request,
-      crane::grpc::RemoveRaftNodeReply *response) override;
+      const crane::grpc::RemoveControllerRequest *request,
+      crane::grpc::RemoveControllerReply *response) override;
 
   grpc::Status YieldLeadership(
       grpc::ServerContext *context,

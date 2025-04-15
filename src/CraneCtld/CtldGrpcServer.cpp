@@ -32,7 +32,7 @@ grpc::Status CraneCtldServiceImpl::CraneCtldRegister(
     crane::grpc::CraneCtldRegisterReply *response) {
 #ifdef CRANE_WITH_RAFT
   if (g_raft_server->CheckServerNodeExist(request->server_id())) {
-    response->set_ok(false);
+    response->set_ok(true);
     response->set_already_registered(true);
     return grpc::Status::OK;
   }
@@ -1058,11 +1058,9 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     response->set_cur_leader_id(g_raft_server->GetLeaderId());
     return grpc::Status::OK;
   }
-
-  *response = g_meta_container->QueryClusterInfo(*request);
-
-  //  g_raft_server->get_all_keys();
 #endif
+  *response = g_meta_container->QueryClusterInfo(*request);
+  //  g_raft_server->get_all_keys();
   return grpc::Status::OK;
 }
 
@@ -1299,30 +1297,20 @@ grpc::Status CraneCtldServiceImpl::QueryLeaderId(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryRaftServerList(
+grpc::Status CraneCtldServiceImpl::QueryControllerInfo(
     grpc::ServerContext *context,
-    const crane::grpc::QueryRaftServerListRequest *request,
-    crane::grpc::QueryRaftServerListReply *response) {
-#ifdef CRANE_WITH_RAFT
-  g_raft_server->server_list(response);
-#endif
-  return grpc::Status::OK;
-}
-
-grpc::Status CraneCtldServiceImpl::QueryRaftNodeInfo(
-    grpc::ServerContext *context,
-    const crane::grpc::QueryRaftNodeInfoRequest *request,
-    crane::grpc::QueryRaftNodeInfoReply *response) {
+    const crane::grpc::QueryControllerInfoRequest *request,
+    crane::grpc::QueryControllerInfoReply *response) {
 #ifdef CRANE_WITH_RAFT
   g_raft_server->GetNodeStatus(response);
 #endif
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::AddRaftNode(
+grpc::Status CraneCtldServiceImpl::AddController(
     grpc::ServerContext *context,
-    const crane::grpc::AddRaftNodeRequest *request,
-    crane::grpc::AddRaftNodeReply *response) {
+    const crane::grpc::AddControllerRequest *request,
+    crane::grpc::AddControllerReply *response) {
 #ifdef CRANE_WITH_RAFT
   bool found = false;
   int server_id = 0;
@@ -1361,10 +1349,10 @@ grpc::Status CraneCtldServiceImpl::AddRaftNode(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::RemoveRaftNode(
+grpc::Status CraneCtldServiceImpl::RemoveController(
     grpc::ServerContext *context,
-    const crane::grpc::RemoveRaftNodeRequest *request,
-    crane::grpc::RemoveRaftNodeReply *response) {
+    const crane::grpc::RemoveControllerRequest *request,
+    crane::grpc::RemoveControllerReply *response) {
 #ifdef CRANE_WITH_RAFT
   bool res = g_raft_server->RemoveServer(request->server_id());
 
