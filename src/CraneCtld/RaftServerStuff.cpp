@@ -89,7 +89,7 @@ void RaftServerStuff::Init() {  // State manager.
   CRANE_CRITICAL("FAILED");
 }
 
-bool RaftServerStuff::CheckServerNodeExist(int server_id) {
+bool RaftServerStuff::CheckServerNodeExist(int server_id) const {
   std::shared_ptr<srv_config> conf =
       m_raft_instance_->get_srv_config(server_id);
   return conf != nullptr;
@@ -140,28 +140,6 @@ bool RaftServerStuff::RemoveServer(int server_id) {
   if (!CheckServerNodeExist(server_id)) return false;
   m_raft_instance_->remove_srv(server_id);
   return true;
-}
-
-void RaftServerStuff::server_list(
-    crane::grpc::QueryRaftServerListReply *response) {
-  std::vector<std::shared_ptr<srv_config>> configs;
-  m_raft_instance_->get_srv_config_all(configs);
-
-  int leader_id = m_raft_instance_->get_leader();
-
-  for (auto &entry : configs) {
-    std::shared_ptr<srv_config> &srv = entry;
-
-    auto server = response->add_server_list();
-
-    server->set_id(srv->get_id());
-    server->set_end_point(srv->get_endpoint());
-    if (srv->get_id() == leader_id) {
-      server->set_role(crane::grpc::QueryRaftServerListReply::Leader);
-    } else {
-      server->set_role(crane::grpc::QueryRaftServerListReply::Fellow);
-    }
-  }
 }
 
 bool RaftServerStuff::AppendLog(std::shared_ptr<nuraft::buffer> new_log) {
@@ -267,12 +245,12 @@ bool RaftServerStuff::RegisterToLeader(const std::string &leader_hostname,
 
         } else {
           if (reply.ok()) {
-            CRANE_TRACE("CraneCtldRegister success!");
+            if (reply.already_registered()) {
+              CRANE_TRACE("CraneCtld join success!");
+            } else {
+              CRANE_TRACE("CraneCtld register success!");
+            }
             return true;
-          } else if (reply.already_registered()) {
-            CRANE_TRACE(
-                "CraneCtldRegister failed, this node is already registered!");
-            return false;
           } else {
             CRANE_ERROR("CraneCtldRegister failed, unknown reason.");
             return false;
@@ -292,7 +270,43 @@ CraneStateMachine *RaftServerStuff::GetStateMachine() {
 }
 
 void RaftServerStuff::GetNodeStatus(
-    crane::grpc::QueryRaftNodeInfoReply *response) {
+    crane::grpc::QueryControllerInfoReply *response) {
+  std::vector<std::shared_ptr<srv_config>> configs;
+  m_raft_instance_->get_srv_config_all(configs);
+  std::sort(configs.begin(), configs.end(),
+            [](std::shared_ptr<srv_config> a, std::shared_ptr<srv_config> b) {
+              return a->get_id() < b->get_id();
+            });
+
+  std::vector<raft_server::peer_info> peers =
+      m_raft_instance_->get_peer_info_all();
+  std::sort(peers.begin(), peers.end(),
+            [](raft_server::peer_info a, raft_server::peer_info b) {
+              return a.id_ < b.id_;
+            });
+
+  int leader_id = m_raft_instance_->get_leader();
+
+  auto peer = peers.begin();
+  for (auto &entry : configs) {
+    std::shared_ptr<srv_config> &srv = entry;
+
+    auto server = response->add_server_list();
+
+    server->set_id(srv->get_id());
+    server->set_end_point(srv->get_endpoint());
+    if (srv->get_id() == leader_id) {
+      server->set_role(crane::grpc::QueryControllerInfoReply::Leader);
+    } else {
+      if (peer->last_succ_resp_us_ > 3000 * 1000 /* 3s*/)
+        server->set_role(crane::grpc::QueryControllerInfoReply::Offline);
+      else
+        server->set_role(crane::grpc::QueryControllerInfoReply::Follower);
+
+      peer++;
+    }
+  }
+
   std::shared_ptr<nuraft::log_store> ls = m_state_mgr_->load_log_store();
 
   response->set_server_id(m_server_id_);
