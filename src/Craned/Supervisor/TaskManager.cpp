@@ -812,7 +812,8 @@ CraneErrCode ContainerInstance::Spawn() {
     if (step_spec->IsBatch()) close(0);
     util::os::CloseFdFrom(3);
 
-    SetupChildProcessCrunX11_(GetCrunMeta()->x11_port);
+    // TODO: X11 in Container (feasible?)
+    // SetupChildProcessCrunX11_(GetCrunMeta()->x11_port);
 
     // Set env just in case OCI requires some.
     // Real env in container is handled in ModifyOCIBundle_
@@ -1175,7 +1176,8 @@ CraneErrCode ProcessInstance::Spawn() {
     if (step_spec->IsBatch()) close(0);
     util::os::CloseFdFrom(3);
 
-    SetupChildProcessCrunX11_(GetCrunMeta()->x11_port);
+    if (step_spec->IsCrun() && step_spec->spec.interactive_meta().x11())
+      SetupChildProcessCrunX11_(GetCrunMeta()->x11_port);
 
     // Apply environment variables
     err = SetChildProcessEnv_();
