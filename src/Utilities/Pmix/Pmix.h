@@ -26,6 +26,8 @@
 #include <future>
 #include <vector>
 
+#include "PmixColl.h"
+#include "PmixState.h"
 #include "absl/strings/str_join.h"
 #include "crane/Logger.h"
 #include "protos/Crane.grpc.pb.h"
@@ -139,9 +141,40 @@ class PMIxServerModule {
                                    pmix_modex_cbfunc_t cbfunc, void *cbdata) {
      CRANE_DEBUG(" FencenbFn is called");
      /* pass the provided data back to each participating proc */
-     if (nullptr != cbfunc) {
-       cbfunc(PMIX_SUCCESS, data, ndata, cbdata, nullptr,nullptr);
+     std::vector<pmix_proc_t> procs;
+     bool collect = false;
+
+     for (size_t i = 0; i< nprocs; i++) {
+       procs.emplace_back(procs_v2[i]);
      }
+
+     if (info != nullptr) {
+       for (size_t i = 0; i < ninfo; i++) {
+         if (0 == strncmp(info[i].key, PMIX_COLLECT_DATA, PMIX_MAX_KEYLEN)) {
+           collect = true;
+           break;
+         }
+       }
+     }
+
+     // TODO: 从env中获取type，默认tree
+     // CollType type = pmixp_info_srv_fence_coll_type();
+     CollType type = CollType::FENCE_TREE;
+
+     if (type == CollType::FENCE_MAX) {
+       type = CollType::FENCE_TREE;
+
+       if (collect && (ndata > 0))
+         type = CollType::FENCE_RING;
+     }
+
+     auto coll = pmix_state_ptr->PmixStateCollGet(type, procs, nprocs);
+
+     if (coll == nullptr) return PMIX_ERROR;
+
+     if (!coll->PmixCollContribLocal(type, data, ndata, cbfunc, cbdata))
+       return PMIX_ERROR;
+
      return PMIX_SUCCESS;
    }
 
