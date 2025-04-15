@@ -224,10 +224,11 @@ class TaskManager {
 
   void TaskStopAndDoStatusChangeAsync(uint32_t task_id);
 
-  void ReplacePlaceholders(std::string& input, TaskInstance* instance);
-  void SetNonblocking(int fd);
-  void MonitorPipToSingle(int pipe_fd, int out_fd);
-  void MonitorPipToMulti(int pipe_fd, int out_pipe_fd, int stdout_fd);
+  void ReplacePlaceholders(std::string& input, const TaskInstance* instance);
+  void SetNonblocking(const int fd);
+  void MonitorPipToSingle(const int pipe_fd, const int out_fd);
+  void MonitorPipToMulti(const int pipe_fd, const int out_pipe_fd,
+                         const int stdout_fd);
 
   // Wait internal libevent base loop to exit...
   void Wait();

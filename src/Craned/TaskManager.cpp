@@ -526,7 +526,7 @@ void TaskManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
 
-void TaskManager::SetNonblocking(int fd) {
+void TaskManager::SetNonblocking(const int fd) {
   int flags = fcntl(fd, F_GETFL, 0);
   if (flags == -1) {
     CRANE_DEBUG("Failed to get flags for fd {}: {}", fd, strerror(errno));
@@ -537,7 +537,7 @@ void TaskManager::SetNonblocking(int fd) {
   }
 }
 
-void TaskManager::MonitorPipToSingle(int pipe_fd, int out_fd) {
+void TaskManager::MonitorPipToSingle(const int pipe_fd, const int out_fd) {
   auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(pipe_fd);
 
   // Register a callback function for readable events
@@ -577,8 +577,8 @@ void TaskManager::MonitorPipToSingle(int pipe_fd, int out_fd) {
   poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
 }
 
-void TaskManager::MonitorPipToMulti(int pipe_fd, int out_pipe_fd,
-                                    int stdout_fd) {
+void TaskManager::MonitorPipToMulti(const int pipe_fd, const int out_pipe_fd,
+                                    const int stdout_fd) {
   auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(pipe_fd);
 
   // Register a callback function for readable events
@@ -1691,7 +1691,7 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
 }
 
 void TaskManager::ReplacePlaceholders(std::string& input,
-                                      TaskInstance* instance) {
+                                      const TaskInstance* instance) {
   auto get_hostname = []() -> std::string {
     std::array<char, HOST_NAME_MAX> host_name{};
     if (gethostname(host_name.data(), host_name.size()) == 0) {
