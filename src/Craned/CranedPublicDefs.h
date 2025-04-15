@@ -27,7 +27,7 @@ namespace Craned {
 
 inline constexpr uint64_t kEvSigChldResendMs = 500;
 inline constexpr uint64_t kConnectCtldRetryInitMs = 1'000;
-inline constexpr uint64_t kConnectCtldRetryMaxMs = 6'000'000;
+inline constexpr uint64_t kConnectCtldSlowRetryMs = 10'000;
 inline constexpr uint64_t kInitialFastRetries = 5;
 
 using EnvMap = std::unordered_map<std::string, std::string>;

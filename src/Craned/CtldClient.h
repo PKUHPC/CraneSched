@@ -113,8 +113,8 @@ class CtldClient {
   CranedId m_craned_id_;
 
   absl::Mutex m_cb_mutex_;
-  std::function<void()> m_on_ctld_connected_cb_;
-  std::function<void()> m_on_ctld_disconnected_cb_;
+  std::function<void()> m_on_ctld_connected_cb_ ABSL_GUARDED_BY(m_cb_mutex_);
+  std::function<void()> m_on_ctld_disconnected_cb_ ABSL_GUARDED_BY(m_cb_mutex_);
 
   absl::Notification m_start_connecting_notification_;
 
