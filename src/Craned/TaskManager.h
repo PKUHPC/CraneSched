@@ -34,9 +34,7 @@ struct BatchMetaInProcessInstance {
   std::string parsed_error_file_pattern;
 };
 
-struct CrunMetaInProcessInstance {
-  std::string parsed_output_file_pattern;
-};
+struct CrunMetaInProcessInstance : public BatchMetaInProcessInstance {};
 
 class ProcessInstance {
  public:
@@ -224,7 +222,6 @@ class TaskManager {
 
   void TaskStopAndDoStatusChangeAsync(uint32_t task_id);
 
-  void ReplacePlaceholders(std::string& input, const TaskInstance* instance);
   void SetNonblocking(const int fd);
   void MonitorPipToSingle(const int pipe_fd, const int out_fd);
   void MonitorPipToMulti(const int pipe_fd, const int out_pipe_fd,
@@ -280,8 +277,7 @@ class TaskManager {
   };
 
   static std::string ParseFilePathPattern_(const std::string& path_pattern,
-                                           const std::string& cwd,
-                                           task_id_t task_id);
+                                           TaskInstance* instance);
 
   void LaunchTaskInstanceMt_(TaskInstance* instance);
 

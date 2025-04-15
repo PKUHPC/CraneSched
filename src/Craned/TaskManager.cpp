@@ -1304,9 +1304,8 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
      * %u - Username
      * %x - Job name
      */
-    process->batch_meta.parsed_output_file_pattern =
-        ParseFilePathPattern_(instance->task.batch_meta().output_file_pattern(),
-                              instance->task.cwd(), task_id);
+    process->batch_meta.parsed_output_file_pattern = ParseFilePathPattern_(
+        instance->task.batch_meta().output_file_pattern(), instance);
     absl::StrReplaceAll({{"%j", std::to_string(task_id)},
                          {"%u", instance->pwd_entry.Username()},
                          {"%x", instance->task.name()}},
@@ -1316,8 +1315,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     // batch_meta.parsed_error_file_pattern empty;
     if (!instance->task.batch_meta().error_file_pattern().empty()) {
       process->batch_meta.parsed_error_file_pattern = ParseFilePathPattern_(
-          instance->task.batch_meta().error_file_pattern(),
-          instance->task.cwd(), task_id);
+          instance->task.batch_meta().error_file_pattern(), instance);
       absl::StrReplaceAll({{"%j", std::to_string(task_id)},
                            {"%u", instance->pwd_entry.Username()},
                            {"%x", instance->task.name()}},
@@ -1326,11 +1324,7 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   } else {
     if (!instance->task.interactive_meta().output_file_pattern().empty()) {
       process->crun_meta.parsed_output_file_pattern = ParseFilePathPattern_(
-          instance->task.interactive_meta().output_file_pattern(),
-          instance->task.cwd(), task_id);
-
-      ReplacePlaceholders(process->crun_meta.parsed_output_file_pattern,
-                          instance);
+          instance->task.interactive_meta().output_file_pattern(), instance);
     }
   }
 
@@ -1366,9 +1360,10 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
 }
 
 std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
-                                               const std::string& cwd,
-                                               task_id_t task_id) {
+                                               TaskInstance* instance) {
   std::string resolved_path_pattern;
+  const std::string& cwd = instance->task.cwd();
+  const task_id_t task_id = instance->task.task_id();
 
   if (path_pattern.empty()) {
     // If file path is not specified, first set it to cwd.
@@ -1387,6 +1382,53 @@ std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
   if (absl::EndsWith(resolved_path_pattern, "/"))
     resolved_path_pattern += fmt::format("Crane-{}.out", task_id);
 
+  if (instance->task.type() != crane::grpc::Batch) {
+    auto get_hostname = []() -> std::string {
+      std::array<char, HOST_NAME_MAX> host_name{};
+      if (gethostname(host_name.data(), host_name.size()) == 0) {
+        return std::string{host_name.data()};
+      }
+      return std::string{};
+    };
+
+    // node_idx
+    auto get_node_idx =
+        [instance](const std::string& in_node_id) -> std::string {
+      uint32_t node_id = 0;
+      for (const auto& node_name : instance->task.nodelist()) {
+        if (node_name == in_node_id) {
+          break;
+        }
+        node_id++;
+      }
+      return std::to_string(node_id);
+    };
+
+    std::string cur_node_name = get_hostname();
+    std::string cur_relative_node_id = get_node_idx(cur_node_name);
+    std::vector<std::pair<absl::string_view, absl::string_view>> replacements =
+        {
+            // Special handling rules
+            {"\\%", "__ESCAPED_PERCENT__"},  // Escaping \%
+            {"%%", "__DOUBLE_PERCENT__"},    // Escaping %%
+
+            // Placeholder Rules
+            {"%A",
+             std::to_string(instance->task.task_id())},  // Job array master ID
+            {"%j", std::to_string(instance->task.task_id())},  // jobid
+            {"%N", cur_node_name},                             // Short hostname
+            {"%n", cur_relative_node_id},                      // Node ID
+            {"%t", cur_relative_node_id},                      // Task ID
+            {"%u", instance->pwd_entry.Username()},            // User name
+            {"%x", instance->task.name()}                      // Job name
+        };
+
+    absl::StrReplaceAll(replacements, &resolved_path_pattern);
+
+    absl::StrReplaceAll(
+        {{"__ESCAPED_PERCENT__", "\\%"}, {"__DOUBLE_PERCENT__", "%"}},
+        &resolved_path_pattern);
+  }
   return resolved_path_pattern;
 }
 
@@ -1688,50 +1730,6 @@ void TaskManager::EvCleanChangeTaskTimeLimitQueueCb_() {
       elem.ok_prom.set_value(false);
     }
   }
-}
-
-void TaskManager::ReplacePlaceholders(std::string& input,
-                                      const TaskInstance* instance) {
-  auto get_hostname = []() -> std::string {
-    std::array<char, HOST_NAME_MAX> host_name{};
-    if (gethostname(host_name.data(), host_name.size()) == 0) {
-      return std::string{host_name.data()};
-    }
-    return std::string{};
-  };
-
-  // node_idx
-  auto get_node_idx = [instance](const std::string& in_node_id) -> std::string {
-    uint32_t node_id = 0;
-    for (const auto& node_name : instance->task.nodelist()) {
-      if (node_name == in_node_id) {
-        break;
-      }
-      node_id++;
-    }
-    return std::to_string(node_id);
-  };
-
-  std::string cur_node_name = get_hostname();
-  std::string cur_relative_node_id = get_node_idx(cur_node_name);
-  std::vector<std::pair<absl::string_view, absl::string_view>> replacements = {
-      // Special handling rules
-      {"\\%", "__ESCAPED_PERCENT__"},  // Escaping \%
-      {"%%", "__DOUBLE_PERCENT__"},    // Escaping %%
-
-      // Placeholder Rules
-      {"%A", std::to_string(instance->task.task_id())},  // Job array master ID
-      {"%j", std::to_string(instance->task.task_id())},  // jobid
-      {"%N", cur_node_name},                             // Short hostname
-      {"%n", cur_relative_node_id},                      // Node ID
-      {"%t", cur_relative_node_id},                      // Task ID
-      {"%u", instance->pwd_entry.Username()},            // User name
-      {"%x", instance->task.name()}                      // Job name
-  };
-  absl::StrReplaceAll(replacements, &input);
-
-  absl::StrReplaceAll(
-      {{"__ESCAPED_PERCENT__", "\\%"}, {"__DOUBLE_PERCENT__", "%"}}, &input);
 }
 
 }  // namespace Craned
