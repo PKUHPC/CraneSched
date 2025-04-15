@@ -38,7 +38,7 @@ jobs:
     steps:
       - name: Remove label
         if: github.event_name == 'pull_request'
-        uses: actions/github-script@v4
+        uses: actions/github-script@v7
         with:
           script: |
             github.issues.removeLabel({
