@@ -302,6 +302,9 @@ message PartitionInfo {
 
   repeated string allowed_accounts = 9;
   repeated string denied_accounts = 10;
+  
+  uint64 default_mem_per_cpu = 11;
+  uint64 max_mem_per_cpu = 12;
 }
 
 message CranedInfo {
