@@ -860,6 +860,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   };
   // clang-format on
 
+  // clang-format off
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
              double, int64_t, std::string, std::string, int32_t,   /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
@@ -905,6 +906,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 
   return DocumentConstructor_(fields, values);
 }
+// clang-format on
 
 MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   std::string script;
@@ -948,6 +950,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   };
   // clang-format on
 
+  // clang-format off
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
              double, int64_t, std::string, std::string, int32_t,   /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
@@ -983,6 +986,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              device_map_str};
   return DocumentConstructor_(fields, values);
 }
+// clang-format on
 
 MongodbClient::MongodbClient() {
   m_instance_ = std::make_unique<mongocxx::instance>();
