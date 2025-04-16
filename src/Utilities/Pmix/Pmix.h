@@ -141,6 +141,12 @@ class PMIxServerModule {
                                    pmix_modex_cbfunc_t cbfunc, void *cbdata) {
      CRANE_DEBUG(" FencenbFn is called");
      /* pass the provided data back to each participating proc */
+
+     if (nullptr != cbfunc) {
+       cbfunc(PMIX_SUCCESS, data, ndata, cbdata, nullptr, nullptr);
+     }
+
+     return PMIX_SUCCESS;
      std::vector<pmix_proc_t> procs;
      bool collect = false;
 
