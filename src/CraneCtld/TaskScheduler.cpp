@@ -1508,11 +1508,7 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
   absl::Time end_time = start_time + duration;
 
   absl::Time now = absl::Now();
-  if (end_time > now + absl::Seconds(kReservationMaxDuration)) {
-    return std::unexpected(
-        fmt::format("Reservation duration exceeds max duration of {} seconds",
-                    kReservationMaxDuration));
-  } else if (end_time <= now) {
+  if (end_time <= now) {
     return std::unexpected("Reservation end time is in the past");
   }
   if (start_time < now) {
