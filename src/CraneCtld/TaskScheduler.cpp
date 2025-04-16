@@ -1624,12 +1624,12 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
                   .res_in_use = ResourceV2(),
                   .craned_ids = std::move(craned_ids),
               },
-          .accounts_black_list = !denied_accounts.empty(),
-          .users_black_list = !denied_users.empty(),
-          .accounts = denied_accounts.empty() ? std::move(allowed_accounts)
-                                              : std::move(denied_accounts),
-          .users = denied_users.empty() ? std::move(allowed_users)
-                                        : std::move(denied_users),
+          .accounts_black_list = allowed_accounts.empty(),
+          .users_black_list = allowed_users.empty(),
+          .accounts = allowed_accounts.empty() ? std::move(denied_accounts)
+                                              : std::move(allowed_accounts),
+          .users = allowed_users.empty() ? std::move(denied_users)
+                                        : std::move(allowed_users),
       });
   if (!ok) {
     CRANE_ERROR("Failed to insert reservation meta for reservation {}",
