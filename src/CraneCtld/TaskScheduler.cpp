@@ -1836,6 +1836,7 @@ void TaskScheduler::CleanResvTimerQueueCb_(
 
   timer_to_create.resize(actual_size);
 
+  absl::Time now = absl::Now();
   for (const auto& [reservation_id, end_time] : timer_to_create) {
     // If any timer for the reservation exists, remove it.
     auto timer_it = m_resv_timer_handles_.find(reservation_id);
@@ -1844,32 +1845,25 @@ void TaskScheduler::CleanResvTimerQueueCb_(
       m_resv_timer_handles_.erase(timer_it);
     }
 
-    int64_t secs = absl::ToInt64Seconds(end_time - absl::Now());
-    if (secs <= 0) {
-      CRANE_TRACE("Reservation {} end time has past, clean it up immediately",
-                  reservation_id);
+    int64_t secs = absl::ToInt64Seconds(end_time - now);
+    auto on_timer_cb = [this, reservation_id](const uvw::timer_event&,
+                                              uvw::timer_handle& handle) {
       auto reservation_meta_map = g_meta_container->GetReservationMetaMapPtr();
       auto err = EraseReservationMeta(reservation_meta_map, reservation_id);
-      if (err.has_value()) {
-        CRANE_ERROR("Failed to clean up reservation {}: {}", reservation_id,
-                    err.error());
-      }
-    } else {
-      auto on_timer_cb = [this, reservation_id](const uvw::timer_event&,
-                                                uvw::timer_handle& handle) {
-        auto reservation_meta_map =
-            g_meta_container->GetReservationMetaMapPtr();
-        auto err = EraseReservationMeta(reservation_meta_map, reservation_id);
 
+      if (err.has_value()) {
         handle.close();
         m_resv_timer_handles_.erase(reservation_id);
-      };
-      auto resv_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
-      resv_timer_handle_->on<uvw::timer_event>(std::move(on_timer_cb));
-      resv_timer_handle_->start(std::chrono::seconds(secs),
-                                std::chrono::seconds(0));
-      m_resv_timer_handles_[reservation_id] = std::move(resv_timer_handle_);
-    }
+      } else {
+        CRANE_WARN("Failed to clean up reservation {}: {}", reservation_id,
+                   err.error());
+      }
+    };
+    auto resv_timer_handle_ = uvw_loop->resource<uvw::timer_handle>();
+    resv_timer_handle_->on<uvw::timer_event>(std::move(on_timer_cb));
+    resv_timer_handle_->start(std::chrono::seconds(secs),
+                              std::chrono::seconds(kEraseReservationRetrySec));
+    m_resv_timer_handles_[reservation_id] = std::move(resv_timer_handle_);
   }
 }
 
