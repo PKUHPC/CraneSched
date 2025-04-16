@@ -1627,9 +1627,9 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
           .accounts_black_list = allowed_accounts.empty(),
           .users_black_list = allowed_users.empty(),
           .accounts = allowed_accounts.empty() ? std::move(denied_accounts)
-                                              : std::move(allowed_accounts),
+                                               : std::move(allowed_accounts),
           .users = allowed_users.empty() ? std::move(denied_users)
-                                        : std::move(allowed_users),
+                                         : std::move(allowed_users),
       });
   if (!ok) {
     CRANE_ERROR("Failed to insert reservation meta for reservation {}",
