@@ -831,10 +831,10 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type          extra_attr
+  // 30 type          extra_attr     reservation
 
   // clang-format off
-  std::array<std::string, 32> fields{
+  std::array<std::string, 33> fields{
     // 0 - 4
     "task_id",  "task_db_id", "mod_time",    "deleted",  "account",
     // 5 - 9
@@ -847,8 +847,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     "script", "state", "timelimit", "time_submit", "work_dir",
     // 25 - 29
     "submit_line", "exit_code",  "username", "qos", "get_user_env",
-    // 30 - 31
-    "type", "extra_attr", 
+    // 30 - 32
+    "type", "extra_attr", "reservation"
   };
   // clang-format on
 
@@ -858,7 +858,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              int64_t, int64_t, int64_t, int64_t, int64_t,          /*15-19*/
              std::string, int32_t, int64_t, int64_t, std::string,  /*20-24*/
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
-             int32_t, std::string>                                 /*30-31*/
+             int32_t, std::string, std::string>                    /*30-31*/
       values{
           // 0-4
           static_cast<int32_t>(runtime_attr.task_id()),
@@ -886,8 +886,9 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
           task_to_ctld.cmd_line(), runtime_attr.exit_code(),
           runtime_attr.username(), task_to_ctld.qos(),
           task_to_ctld.get_user_env(),
-          // 30-31
-          task_to_ctld.type(), task_to_ctld.extra_attr()};
+          // 30-32
+          task_to_ctld.type(), task_to_ctld.extra_attr(),
+          task_to_ctld.reservation()};
 
   return DocumentConstructor_(fields, values);
 }
@@ -926,7 +927,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       "script", "state", "timelimit", "time_submit", "work_dir",
       // 25 - 29
       "submit_line", "exit_code",  "username", "qos", "get_user_env",
-      // 30 - 31
+      // 30 - 32
       "type", "extra_attr", "reservation"
   };
   // clang-format on
@@ -957,7 +958,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              // 25-29
              task->cmd_line, task->ExitCode(), task->Username(), task->qos,
              task->get_user_env,
-             // 30-31
+             // 30-32
              task->type, task->extra_attr, task->reservation};
 
   return DocumentConstructor_(fields, values);
