@@ -537,6 +537,47 @@ void TaskManager::SetNonblocking(const int fd) {
   }
 }
 
+void TaskManager::MonitorFileToInputPipe(const int in_file_fd,
+                                         const int out_pipe_fd) {
+  auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(out_pipe_fd);
+
+  poll_handle->on<uvw::poll_event>(
+  [this, in_file_fd, out_pipe_fd](const uvw::poll_event&,
+                                      uvw::poll_handle& handle) mutable {
+    constexpr size_t MAX_SPLICE_SIZE = 4096;
+    for (;;) {
+      // Use splice to move data directly from the file to the pipe
+      ssize_t bytes_spliced =
+          splice(in_file_fd, nullptr, out_pipe_fd, nullptr, MAX_SPLICE_SIZE,
+                     SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
+      if (bytes_spliced < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+          // Pipe is temporarily not writable, exit the loop and wait for
+          // the next event
+           break;
+        }
+        handle.stop();
+        handle.close();
+          close(in_file_fd);
+        close(out_pipe_fd);
+          return;
+        }
+
+        if (bytes_spliced == 0) {
+        // End of file, stop monitoring and close resources
+          CRANE_DEBUG("File reading completed.");
+          handle.stop();
+          handle.close();
+          close(in_file_fd);
+          close(out_pipe_fd);
+          return;
+        }
+      }
+    });
+
+  poll_handle->start(uvw::poll_handle::poll_event_flags::WRITABLE);
+}
+
 void TaskManager::MonitorPipToSingle(const int pipe_fd, const int out_fd) {
   auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(pipe_fd);
 
@@ -742,6 +783,9 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     SetNonblocking(crun_craned_output_pipe[0]);
     SetNonblocking(crun_craned_err_pipe[0]);
     SetNonblocking(crun_craned_pipe[1]);
+    SetNonblocking(crun_craned_pipe[0]);
+    SetNonblocking(craned_crun_pipe[0]);
+    SetNonblocking(craned_crun_pipe[1]);
 
     crun_meta->task_input_fd = craned_crun_pipe[1];
     crun_meta->task_output_fd = crun_craned_pipe[0];
@@ -790,12 +834,27 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
             CRANE_DEBUG("[Task #{}] Error: open {}. {}\n",
                         instance->task.task_id(), stdout_file_path,
                         strerror(errno));
-            return CraneErrCode::ERR_SYSTEM_ERR;
+            KillProcessInstance_(process, SIGKILL);
+            return CraneErrCode::ERR_OPEN_FILE;
           }
           MonitorPipToMulti(crun_craned_output_pipe[0], crun_craned_pipe[1],
                             stdout_fd);
         }
         MonitorPipToSingle(crun_craned_err_pipe[0], crun_craned_pipe[1]);
+
+        if (!process->crun_meta.parsed_input_file_pattern.empty()) {
+          const std::string& stdin_file_path =
+              process->crun_meta.parsed_input_file_pattern;
+          int stdin_fd = open(stdin_file_path.c_str(), O_RDONLY);
+          if (stdin_fd == -1) {
+            CRANE_DEBUG("[Task #{}] Error: open input {}. {}\n",
+                        instance->task.task_id(), stdin_file_path,
+                        strerror(errno));
+            KillProcessInstance_(process, SIGKILL);
+            return CraneErrCode::ERR_OPEN_FILE;
+          }
+          MonitorFileToInputPipe(stdin_fd, craned_crun_pipe[1]);
+        }
       }
 
       const auto& proto_ia_meta = instance->task.interactive_meta();
@@ -1325,6 +1384,10 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     if (!instance->task.interactive_meta().output_file_pattern().empty()) {
       process->crun_meta.parsed_output_file_pattern = ParseFilePathPattern_(
           instance->task.interactive_meta().output_file_pattern(), instance);
+    }
+    if (!instance->task.interactive_meta().input_file_pattern().empty()) {
+      process->crun_meta.parsed_input_file_pattern = ParseFilePathPattern_(
+          instance->task.interactive_meta().input_file_pattern(), instance);
     }
   }
 
