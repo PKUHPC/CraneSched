@@ -872,6 +872,12 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                    strerror(errno));
         std::abort();
       }
+
+      if (fchown(stdout_fd, pwd_entry.Uid(), pwd_entry.Gid()) == -1) {
+        fmt::print(stderr, "[Subproc] Error: fchown for stdout {}. {}\n", 
+                  stdout_file_path, strerror(errno));
+      }
+
       dup2(stdout_fd, 1);
 
       if (stderr_file_path.empty()) {
@@ -884,6 +890,12 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                      strerror(errno));
           std::abort();
         }
+        // Change ownership of the error file to the task submitting user
+        if (fchown(stderr_fd, pwd_entry.Uid(), pwd_entry.Gid()) == -1) {
+          fmt::print(stderr, "[Subproc] Error: fchown for stderr {}. {}\n", 
+                    stderr_file_path, strerror(errno));
+        }
+
         dup2(stderr_fd, 2);  // stderr -> error file
         close(stderr_fd);
       }
@@ -1146,7 +1158,12 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
   fclose(fptr);
 
   chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
-
+  
+  // Change ownership of the script file to the task submitting user
+  if (chown(sh_path.c_str(), instance->pwd_entry.Uid(), instance->pwd_entry.Gid()) != 0) {
+    CRANE_ERROR("Failed to change ownership of script file for task #{}: {}", task_id, strerror(errno));
+  }
+  
   auto process =
       std::make_unique<ProcessInstance>(sh_path, std::list<std::string>());
 
