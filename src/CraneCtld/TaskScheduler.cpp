@@ -2094,14 +2094,10 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
     if (task->TaskToCtld().exclusive()) {
       ResourceView& allocated_node_res_view =
           task->allocated_node_res_view_map[craned_index];
-      allocated_node_res_view.GetAllocatableRes().SetCpuCount(
-          craned_meta->res_total.allocatable_res.CpuCount());
-      allocated_node_res_view.GetAllocatableRes().SetMemByte(
-          craned_meta->res_total.allocatable_res.GetMemByte());
-      if (!task->requested_node_res_view.IsDeviceMapZero()) {
-        allocated_node_res_view.SetDeviceMap(
-            craned_meta->res_total.dedicated_res);
-      }
+      allocated_node_res_view.GetAllocatableRes() =
+          craned_meta->res_total.allocatable_res;
+      allocated_node_res_view.SetDeviceMap(
+          craned_meta->res_total.dedicated_res);
     } else {
       task->allocated_node_res_view_map[craned_index] =
           task->requested_node_res_view;

@@ -299,8 +299,7 @@ bool MongodbClient::FetchJobRecords(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type          extra_attr     exclusive     cpus_alloc_total
-  // mem_alloc_total
+  // 30 type          extra_attr   exclusive cpus_alloc_total   mem_alloc_total
   // 35 device_alloc_total
 
   try {
@@ -836,8 +835,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   // priority      time_eligible  time_start    time_end        time_suspended
   // 20 script        state          timelimit     time_submit     work_dir
   // 25 submit_line   exit_code      username       qos            get_user_env
-  // 30 type          extra_attr     exclusive     cpus_alloc_total
-  // mem_alloc_total
+  // 30 type          extra_attr   exclusive cpus_alloc_total   mem_alloc_total
   // 35 device_alloc_total
 
   // clang-format off
@@ -861,6 +859,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   };
   // clang-format on
 
+  // clang-format off
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
              double, int64_t, std::string, std::string, int32_t,   /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
@@ -869,7 +868,8 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, bool, double, int64_t,          /*30-34*/
              std::string>                                          /*35-39*/
-      values{                                                      // 0-4
+      values{                                                      
+             // 0-4
              static_cast<int32_t>(runtime_attr.task_id()),
              runtime_attr.task_db_id(), absl::ToUnixSeconds(absl::Now()), false,
              task_to_ctld.account(),
@@ -905,6 +905,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 
   return DocumentConstructor_(fields, values);
 }
+// clang-format on
 
 MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   std::string script;
@@ -924,8 +925,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-  // 30 type          extra_attr     exclusive     cpus_alloc_total
-  // mem_alloc_total
+  // 30 type          extra_attr   exclusive cpus_alloc_total   mem_alloc_total
   // 35 device_alloc_total
 
   // clang-format off
@@ -943,12 +943,13 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 25 - 29
       "submit_line", "exit_code",  "username", "qos", "get_user_env",
       // 30 - 34
-      "type", "extra_attr",  "exclusive","cpus_alloc_total", "mem_alloc_total",
+      "type", "extra_attr", "exclusive", "cpus_alloc_total", "mem_alloc_total",
      // 35 - 39
       "device_alloc_total"
   };
   // clang-format on
 
+  // clang-format off
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
              double, int64_t, std::string, std::string, int32_t,   /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
@@ -957,7 +958,8 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              std::string, int32_t, std::string, std::string, bool, /*25-29*/
              int32_t, std::string, bool, double, int64_t,          /*30-34*/
              std::string>                                          /*35-39*/
-      values{                                                      // 0-4
+      values{                                                      
+             // 0-4
              static_cast<int32_t>(task->TaskId()), task->TaskDbId(),
              absl::ToUnixSeconds(absl::Now()), false, task->account,
              // 5-9
@@ -985,6 +987,7 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
 
   return DocumentConstructor_(fields, values);
 }
+// clang-format on
 
 MongodbClient::MongodbClient() {
   m_instance_ = std::make_unique<mongocxx::instance>();
