@@ -415,6 +415,7 @@ crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
   part_info->set_default_mem_per_cpu(g_config.Partitions[partition_name].default_mem_per_cpu);
   part_info->set_max_mem_per_cpu(g_config.Partitions[partition_name].max_mem_per_cpu);
 
+
   *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
       part_meta->partition_global_meta.res_total);
   *part_info->mutable_res_avail() = static_cast<crane::grpc::ResourceView>(
