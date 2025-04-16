@@ -368,15 +368,8 @@ CranedMetaContainer::QueryAllPartitionInfo() {
         part_meta->partition_global_meta.res_avail);
     *part_info->mutable_res_alloc() = static_cast<crane::grpc::ResourceView>(
         part_meta->partition_global_meta.res_in_use);
-
-    // Set default_mem_per_cpu and max_mem_per_cpu from config
-    if (g_config.Partitions.find(part_name) != g_config.Partitions.end()) {
-      part_info->set_default_mem_per_cpu(g_config.Partitions[part_name].default_mem_per_cpu);
-      part_info->set_max_mem_per_cpu(g_config.Partitions[part_name].max_mem_per_cpu);
-    } else {
-      part_info->set_default_mem_per_cpu(0);
-      part_info->set_max_mem_per_cpu(0);
-    }
+    part_info->set_default_mem_per_cpu(g_config.Partitions[part_name].default_mem_per_cpu);
+    part_info->set_max_mem_per_cpu(g_config.Partitions[part_name].max_mem_per_cpu);
 
     if (part_meta->partition_global_meta.alive_craned_cnt > 0)
       part_info->set_state(crane::grpc::PartitionState::PARTITION_UP);
@@ -419,14 +412,8 @@ crane::grpc::QueryPartitionInfoReply CranedMetaContainer::QueryPartitionInfo(
 
   part_info->set_hostlist(part_meta->partition_global_meta.nodelist_str);
 
-  // Set default_mem_per_cpu and max_mem_per_cpu from config
-  if (g_config.Partitions.find(partition_name) != g_config.Partitions.end()) {
-    part_info->set_default_mem_per_cpu(g_config.Partitions[partition_name].default_mem_per_cpu);
-    part_info->set_max_mem_per_cpu(g_config.Partitions[partition_name].max_mem_per_cpu);
-  } else {
-    part_info->set_default_mem_per_cpu(0);
-    part_info->set_max_mem_per_cpu(0);
-  }
+  part_info->set_default_mem_per_cpu(g_config.Partitions[partition_name].default_mem_per_cpu);
+  part_info->set_max_mem_per_cpu(g_config.Partitions[partition_name].max_mem_per_cpu);
 
   *part_info->mutable_res_total() = static_cast<crane::grpc::ResourceView>(
       part_meta->partition_global_meta.res_total);
