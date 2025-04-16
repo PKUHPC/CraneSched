@@ -542,38 +542,38 @@ void TaskManager::MonitorFileToInputPipe(const int in_file_fd,
   auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(out_pipe_fd);
 
   poll_handle->on<uvw::poll_event>(
-  [this, in_file_fd, out_pipe_fd](const uvw::poll_event&,
+      [this, in_file_fd, out_pipe_fd](const uvw::poll_event&,
                                       uvw::poll_handle& handle) mutable {
-    constexpr size_t MAX_SPLICE_SIZE = 4096;
-    for (;;) {
-      // Use splice to move data directly from the file to the pipe
-      ssize_t bytes_spliced =
-          splice(in_file_fd, nullptr, out_pipe_fd, nullptr, MAX_SPLICE_SIZE,
+        constexpr size_t MAX_SPLICE_SIZE = 4096;
+        for (;;) {
+          // Use splice to move data directly from the file to the pipe
+          ssize_t bytes_spliced =
+              splice(in_file_fd, nullptr, out_pipe_fd, nullptr, MAX_SPLICE_SIZE,
                      SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
-      if (bytes_spliced < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-          // Pipe is temporarily not writable, exit the loop and wait for
-          // the next event
-           break;
-        }
-        handle.stop();
-        handle.close();
-          close(in_file_fd);
-        close(out_pipe_fd);
-          return;
-        }
+          if (bytes_spliced < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+              // Pipe is temporarily not writable, exit the loop and wait for
+              // the next event
+              break;
+            }
+            handle.stop();
+            handle.close();
+            close(in_file_fd);
+            close(out_pipe_fd);
+            return;
+          }
 
-        if (bytes_spliced == 0) {
-        // End of file, stop monitoring and close resources
-          CRANE_DEBUG("File reading completed.");
-          handle.stop();
-          handle.close();
-          close(in_file_fd);
-          close(out_pipe_fd);
-          return;
+          if (bytes_spliced == 0) {
+            // End of file, stop monitoring and close resources
+            CRANE_DEBUG("File reading completed.");
+            handle.stop();
+            handle.close();
+            close(in_file_fd);
+            close(out_pipe_fd);
+            return;
+          }
         }
-      }
-    });
+      });
 
   poll_handle->start(uvw::poll_handle::poll_event_flags::WRITABLE);
 }
