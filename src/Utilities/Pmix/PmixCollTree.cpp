@@ -119,6 +119,7 @@ bool Coll::PmixCollTreeLocal_(char* data, size_t size, pmix_modex_cbfunc_t cbfun
       break;
     default:
       // CRANE_ERROR("unknown state {}", tree.m_state_);
+        break;
     }
   } while (result);
 
