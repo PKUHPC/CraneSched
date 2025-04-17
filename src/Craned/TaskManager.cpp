@@ -130,9 +130,21 @@ TaskManager::TaskManager() {
 
   m_sigint_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
   m_sigint_handle_->on<uvw::signal_event>(
-      [this](const uvw::signal_event&, uvw::signal_handle&) { EvSigintCb_(); });
+      [this](const uvw::signal_event&, uvw::signal_handle&) {
+        EvGracefulExitCb_();
+      });
   if (m_sigint_handle_->start(SIGINT) != 0) {
     CRANE_ERROR("Failed to start the SIGINT handle");
+  }
+
+  m_sigterm_handle_ = m_uvw_loop_->resource<uvw::signal_handle>();
+  m_sigterm_handle_->on<uvw::signal_event>(
+      [this](const uvw::signal_event&, uvw::signal_handle&) {
+        // SIGTERM is the same as SIGINT
+        EvGracefulExitCb_();
+      });
+  if (m_sigterm_handle_->start(SIGTERM) != 0) {
+    CRANE_ERROR("Failed to start the SIGTERM handle");
   }
 
   // gRPC: QueryTaskIdFromPid
@@ -426,13 +438,16 @@ void TaskManager::EvSigchldTimerCb_(ProcSigchldInfo* sigchld_info) {
   m_process_sigchld_async_handle_->send();
 }
 
-void TaskManager::EvSigintCb_() {
+void TaskManager::EvGracefulExitCb_() {
   if (!m_is_ending_now_) {
     // SIGINT has been sent once. If SIGINT are captured twice, it indicates
     // the signal sender can't wait to stop Craned and Craned just send
     // SIGTERM to all tasks to kill them immediately.
 
-    CRANE_INFO("Caught SIGINT. Send SIGTERM to all running tasks...");
+    CRANE_INFO(
+        "Caught SIGINT or SIGTERM, graceful exit. Sending SIGTERM to all "
+        "running "
+        "tasks...");
 
     m_is_ending_now_ = true;
 
