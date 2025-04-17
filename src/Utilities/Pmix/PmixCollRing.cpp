@@ -136,6 +136,7 @@ void Coll::ProgressCollectRing_(CollRingCtx& coll_ring_ctx) {
       break;
       default:
         // CRANE_ERROR("Unknown state: {}", coll_ring_ctx.m_state_);
+        break;
     }
   }while (result);
 }
