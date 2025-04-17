@@ -242,6 +242,7 @@ message InteractiveTaskAdditionalMeta {
   X11Meta x11_meta = 7;
   string input_file_pattern = 8;
   string output_file_pattern = 9;
+  string error_file_pattern = 10;
 }
 
 message TaskInfo {

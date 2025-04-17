@@ -556,6 +556,7 @@ void TaskManager::MonitorFileToInputPipe(const int in_file_fd,
               // the next event
               break;
             }
+            CRANE_DEBUG("Error in input splice: {}", strerror(errno));
             handle.stop();
             handle.close();
             close(in_file_fd);
@@ -565,7 +566,6 @@ void TaskManager::MonitorFileToInputPipe(const int in_file_fd,
 
           if (bytes_spliced == 0) {
             // End of file, stop monitoring and close resources
-            CRANE_DEBUG("File reading completed.");
             handle.stop();
             handle.close();
             close(in_file_fd);
@@ -831,7 +831,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
           stdout_fd =
               open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
           if (stdout_fd == -1) {
-            CRANE_DEBUG("[Task #{}] Error: open {}. {}\n",
+            CRANE_DEBUG("[Task #{}] Error: open output file {}. {}\n",
                         instance->task.task_id(), stdout_file_path,
                         strerror(errno));
             KillProcessInstance_(process, SIGKILL);
@@ -840,14 +840,13 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
           MonitorPipToMulti(crun_craned_output_pipe[0], crun_craned_pipe[1],
                             stdout_fd);
         }
-        MonitorPipToSingle(crun_craned_err_pipe[0], crun_craned_pipe[1]);
 
         if (!process->crun_meta.parsed_input_file_pattern.empty()) {
           const std::string& stdin_file_path =
               process->crun_meta.parsed_input_file_pattern;
           int stdin_fd = open(stdin_file_path.c_str(), O_RDONLY);
           if (stdin_fd == -1) {
-            CRANE_DEBUG("[Task #{}] Error: open input {}. {}\n",
+            CRANE_DEBUG("[Task #{}] Error: open input file {}. {}\n",
                         instance->task.task_id(), stdin_file_path,
                         strerror(errno));
             KillProcessInstance_(process, SIGKILL);
@@ -855,6 +854,25 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
           }
           MonitorFileToInputPipe(stdin_fd, craned_crun_pipe[1]);
         }
+      }
+
+      if (process->crun_meta.parsed_error_file_pattern.empty()) {
+        MonitorPipToSingle(crun_craned_err_pipe[0], crun_craned_pipe[1]);
+      } else {
+        int stderr_fd;
+        const std::string& stderr_file_path =
+            process->crun_meta.parsed_error_file_pattern;
+        stderr_fd =
+            open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+        if (stderr_fd == -1) {
+          CRANE_DEBUG("[Task #{}] Error: open err file  {}. {}\n",
+                      instance->task.task_id(), stderr_file_path,
+                      strerror(errno));
+          KillProcessInstance_(process, SIGKILL);
+          return CraneErrCode::ERR_OPEN_FILE;
+        }
+        MonitorPipToMulti(crun_craned_err_pipe[0], crun_craned_pipe[1],
+                          stderr_fd);
       }
 
       const auto& proto_ia_meta = instance->task.interactive_meta();
@@ -1388,6 +1406,10 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     if (!instance->task.interactive_meta().input_file_pattern().empty()) {
       process->crun_meta.parsed_input_file_pattern = ParseFilePathPattern_(
           instance->task.interactive_meta().input_file_pattern(), instance);
+    }
+    if (!instance->task.interactive_meta().error_file_pattern().empty()) {
+      process->crun_meta.parsed_error_file_pattern = ParseFilePathPattern_(
+          instance->task.interactive_meta().error_file_pattern(), instance);
     }
   }
 
