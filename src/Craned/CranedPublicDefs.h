@@ -98,7 +98,7 @@ struct Config {
   std::unordered_map<std::string, Partition> Partitions;
 };
 
-inline Config g_config;
+inline Config g_config{};
 }  // namespace Craned
 
 inline std::unique_ptr<BS::thread_pool> g_thread_pool;

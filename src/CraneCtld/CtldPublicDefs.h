@@ -168,7 +168,7 @@ struct Config {
 
 }  // namespace Ctld
 
-inline Ctld::Config g_config;
+inline Ctld::Config g_config{};
 
 namespace Ctld {
 

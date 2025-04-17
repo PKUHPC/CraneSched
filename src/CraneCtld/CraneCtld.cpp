@@ -503,11 +503,12 @@ void ParseConfig(int argc, char** argv) {
                   "Hint: When using AllowedAccounts, DeniedAccounts will not "
                   "take effect.");
           }
+          constexpr uint32_t B2MB = 1024 * 1024;
 
           if (partition["DefaultMemPerCpu"] &&
               !partition["DefaultMemPerCpu"].IsNull()) {
             part.default_mem_per_cpu =
-                partition["DefaultMemPerCpu"].as<uint64_t>() * 1024 * 1024;
+                partition["DefaultMemPerCpu"].as<uint64_t>() * B2MB;
           }
           if (part.default_mem_per_cpu == 0) {
             uint64_t part_mem = 0;
@@ -522,7 +523,7 @@ void ParseConfig(int argc, char** argv) {
           if (partition["MaxMemPerCpu"] &&
               !partition["MaxMemPerCpu"].IsNull()) {
             part.max_mem_per_cpu =
-                partition["MaxMemPerCpu"].as<uint64_t>() * 1024 * 1024;
+                partition["MaxMemPerCpu"].as<uint64_t>() * B2MB;
           } else
             part.max_mem_per_cpu = 0;
 
@@ -530,9 +531,18 @@ void ParseConfig(int argc, char** argv) {
               part.max_mem_per_cpu < part.default_mem_per_cpu) {
             CRANE_ERROR(
                 "The partition {} MaxMemPerCpu {}MB should not be "
-                "less than DefaultMemPerCpu {}MB",
+                "less than DefaultMemPerCpu {}MB.",
                 name, part.default_mem_per_cpu, part.max_mem_per_cpu);
             std::exit(1);
+          }
+          if (part.max_mem_per_cpu == 0) {
+            CRANE_TRACE(
+                "Partition {} MaxMemPerCpu not set, DefaultMemPerCpu {}MB.",
+                name, part.default_mem_per_cpu / B2MB);
+          } else {
+            CRANE_TRACE(
+                "Partition {} MaxMemPerCpu {}MB, DefaultMemPerCpu {}MB.", name,
+                part.max_mem_per_cpu / B2MB, part.default_mem_per_cpu / B2MB);
           }
 
           g_config.Partitions.emplace(std::move(name), std::move(part));
