@@ -875,11 +875,6 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         std::abort();
       }
 
-      if (fchown(stdout_fd, pwd_entry.Uid(), pwd_entry.Gid()) == -1) {
-        fmt::print(stderr, "[Subproc] Error: fchown for stdout {}. {}\n",
-                   stdout_file_path, strerror(errno));
-      }
-
       dup2(stdout_fd, 1);
 
       if (stderr_file_path.empty()) {
@@ -891,11 +886,6 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
           fmt::print(stderr, "[Subproc] Error: open {}. {}\n", stderr_file_path,
                      strerror(errno));
           std::abort();
-        }
-        // Change ownership of the error file to the task submitting user
-        if (fchown(stderr_fd, pwd_entry.Uid(), pwd_entry.Gid()) == -1) {
-          fmt::print(stderr, "[Subproc] Error: fchown for stderr {}. {}\n",
-                     stderr_file_path, strerror(errno));
         }
 
         dup2(stderr_fd, 2);  // stderr -> error file
