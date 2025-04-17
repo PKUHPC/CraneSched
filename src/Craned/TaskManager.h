@@ -34,6 +34,10 @@ struct BatchMetaInProcessInstance {
   std::string parsed_error_file_pattern;
 };
 
+struct CrunMetaInProcessInstance : public BatchMetaInProcessInstance {
+  std::string parsed_input_file_pattern;
+};
+
 class ProcessInstance {
  public:
   ProcessInstance(std::string exec_path, std::list<std::string> arg_list)
@@ -81,6 +85,7 @@ class ProcessInstance {
   }
 
   BatchMetaInProcessInstance batch_meta;
+  CrunMetaInProcessInstance crun_meta;
 
  private:
   /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
@@ -219,6 +224,12 @@ class TaskManager {
 
   void TaskStopAndDoStatusChangeAsync(uint32_t task_id);
 
+  void SetNonblocking(const int fd);
+  void MonitorFileToInputPipe(const int in_file_fd, const int out_pipe_fd);
+  void MonitorPipToSingle(const int pipe_fd, const int out_fd);
+  void MonitorPipToMulti(const int pipe_fd, const int out_pipe_fd,
+                         const int stdout_fd);
+
   // Wait internal libevent base loop to exit...
   void Wait();
 
@@ -269,8 +280,7 @@ class TaskManager {
   };
 
   static std::string ParseFilePathPattern_(const std::string& path_pattern,
-                                           const std::string& cwd,
-                                           task_id_t task_id);
+                                           TaskInstance* instance);
 
   void LaunchTaskInstanceMt_(TaskInstance* instance);
 

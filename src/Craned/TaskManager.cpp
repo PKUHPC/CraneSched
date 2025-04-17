@@ -526,6 +526,159 @@ void TaskManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
 
+void TaskManager::SetNonblocking(const int fd) {
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (flags == -1) {
+    CRANE_DEBUG("Failed to get flags for fd {}: {}", fd, strerror(errno));
+    return;
+  }
+  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+    CRANE_DEBUG("Failed to set fd {} to non-blocking: {}", fd, strerror(errno));
+  }
+}
+
+void TaskManager::MonitorFileToInputPipe(const int in_file_fd,
+                                         const int out_pipe_fd) {
+  auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(out_pipe_fd);
+
+  poll_handle->on<uvw::poll_event>(
+      [this, in_file_fd, out_pipe_fd](const uvw::poll_event&,
+                                      uvw::poll_handle& handle) mutable {
+        constexpr size_t MAX_SPLICE_SIZE = 4096;
+        for (;;) {
+          // Use splice to move data directly from the file to the pipe
+          ssize_t bytes_spliced =
+              splice(in_file_fd, nullptr, out_pipe_fd, nullptr, MAX_SPLICE_SIZE,
+                     SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
+          if (bytes_spliced < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+              // Pipe is temporarily not writable, exit the loop and wait for
+              // the next event
+              break;
+            }
+            CRANE_DEBUG("Error in input splice: {}", strerror(errno));
+            handle.stop();
+            handle.close();
+            close(in_file_fd);
+            close(out_pipe_fd);
+            return;
+          }
+
+          if (bytes_spliced == 0) {
+            // End of file, stop monitoring and close resources
+            handle.stop();
+            handle.close();
+            close(in_file_fd);
+            close(out_pipe_fd);
+            return;
+          }
+        }
+      });
+
+  poll_handle->start(uvw::poll_handle::poll_event_flags::WRITABLE);
+}
+
+void TaskManager::MonitorPipToSingle(const int pipe_fd, const int out_fd) {
+  auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(pipe_fd);
+
+  // Register a callback function for readable events
+  poll_handle->on<uvw::poll_event>([this, pipe_fd, out_fd](
+                                       const uvw::poll_event&,
+                                       uvw::poll_handle& handle) {
+    constexpr ssize_t MAX_SIZE = 4096;
+
+    for (;;) {
+      ssize_t bytes_splice = splice(pipe_fd, nullptr, out_fd, nullptr, MAX_SIZE,
+                                    SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
+      if (bytes_splice < 0) {
+        if (errno == EAGAIN) {
+          // Data is temporarily unavailable, exit the loop and wait for the
+          // next event
+          break;
+        }
+        CRANE_DEBUG("Error in err splice: {}", strerror(errno));
+        handle.stop();
+        handle.close();
+        close(pipe_fd);
+        close(out_fd);
+        return;
+      }
+
+      if (bytes_splice == 0) {
+        // The pipe has been closed, stop listening
+        handle.stop();
+        handle.close();
+        close(pipe_fd);
+        close(out_fd);
+        return;
+      }
+    }
+  });
+
+  poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
+}
+
+void TaskManager::MonitorPipToMulti(const int pipe_fd, const int out_pipe_fd,
+                                    const int stdout_fd) {
+  auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(pipe_fd);
+
+  // Register a callback function for readable events
+  poll_handle->on<uvw::poll_event>(
+      [this, pipe_fd, out_pipe_fd, stdout_fd](const uvw::poll_event&,
+                                              uvw::poll_handle& handle) {
+        constexpr ssize_t MAX_SIZE = 4096;
+        for (;;) {
+          ssize_t bytes_tee =
+              tee(pipe_fd, out_pipe_fd, MAX_SIZE, SPLICE_F_NONBLOCK);
+          if (bytes_tee < 0) {
+            if (errno == EAGAIN) {
+              break;  // No data is temporarily available, exit the loop and
+                      // wait for the next event
+            }
+            CRANE_DEBUG("Error in out tee: {}", strerror(errno));
+            handle.stop();
+            handle.close();
+            close(pipe_fd);
+            close(out_pipe_fd);
+            close(stdout_fd);
+            return;
+          }
+
+          if (bytes_tee == 0) {
+            // The pipe has been closed, stop listening
+            handle.stop();
+            handle.close();
+            close(pipe_fd);
+            close(out_pipe_fd);
+            close(stdout_fd);
+            return;
+          }
+
+          ssize_t bytes_splice = 0;
+          while (bytes_tee > 0) {
+            bytes_splice = splice(pipe_fd, nullptr, stdout_fd, nullptr,
+                                  bytes_tee, SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
+            if (bytes_splice < 0) {
+              if (errno == EAGAIN) {
+                break;  // Data is temporarily unavailable, exit the loop and
+                        // wait for the next event
+              }
+              CRANE_DEBUG("Error in out splice: {}", strerror(errno));
+              handle.stop();
+              handle.close();
+              close(pipe_fd);
+              close(out_pipe_fd);
+              close(stdout_fd);
+              return;
+            }
+            bytes_tee -= bytes_splice;
+          }
+        }
+      });
+
+  poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
+}
+
 CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                                                   ProcessInstance* process) {
   using google::protobuf::io::FileInputStream;
@@ -540,6 +693,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
   int craned_crun_pipe[2];
   int crun_craned_pipe[2];
+  int crun_craned_output_pipe[2];
+  int crun_craned_err_pipe[2];
 
   // The ResourceInNode structure should be copied here for being accessed in
   // the child process.
@@ -612,6 +767,26 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                   instance->task.task_id(), strerror(errno));
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
+
+    if (pipe(crun_craned_output_pipe) == -1) {
+      CRANE_ERROR("[Task #{}] Failed to create pipe for task output: {}",
+                  instance->task.task_id(), strerror(errno));
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+
+    if (pipe(crun_craned_err_pipe) == -1) {
+      CRANE_ERROR("[Task #{}] Failed to create pipe for task err output: {}",
+                  instance->task.task_id(), strerror(errno));
+      return CraneErrCode::ERR_SYSTEM_ERR;
+    }
+
+    SetNonblocking(crun_craned_output_pipe[0]);
+    SetNonblocking(crun_craned_err_pipe[0]);
+    SetNonblocking(crun_craned_pipe[1]);
+    SetNonblocking(crun_craned_pipe[0]);
+    SetNonblocking(craned_crun_pipe[0]);
+    SetNonblocking(craned_crun_pipe[1]);
+
     crun_meta->task_input_fd = craned_crun_pipe[1];
     crun_meta->task_output_fd = crun_craned_pipe[0];
 
@@ -646,6 +821,58 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         close(meta->task_output_fd);
         meta->task_input_fd = crun_pty_fd;
         meta->task_output_fd = crun_pty_fd;
+      } else {
+        if (process->crun_meta.parsed_output_file_pattern.empty()) {
+          MonitorPipToSingle(crun_craned_output_pipe[0], crun_craned_pipe[1]);
+        } else {
+          int stdout_fd;
+          const std::string& stdout_file_path =
+              process->crun_meta.parsed_output_file_pattern;
+          stdout_fd =
+              open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+          if (stdout_fd == -1) {
+            CRANE_DEBUG("[Task #{}] Error: open output file {}. {}\n",
+                        instance->task.task_id(), stdout_file_path,
+                        strerror(errno));
+            KillProcessInstance_(process, SIGKILL);
+            return CraneErrCode::ERR_OPEN_FILE;
+          }
+          MonitorPipToMulti(crun_craned_output_pipe[0], crun_craned_pipe[1],
+                            stdout_fd);
+        }
+
+        if (!process->crun_meta.parsed_input_file_pattern.empty()) {
+          const std::string& stdin_file_path =
+              process->crun_meta.parsed_input_file_pattern;
+          int stdin_fd = open(stdin_file_path.c_str(), O_RDONLY);
+          if (stdin_fd == -1) {
+            CRANE_DEBUG("[Task #{}] Error: open input file {}. {}\n",
+                        instance->task.task_id(), stdin_file_path,
+                        strerror(errno));
+            KillProcessInstance_(process, SIGKILL);
+            return CraneErrCode::ERR_OPEN_FILE;
+          }
+          MonitorFileToInputPipe(stdin_fd, craned_crun_pipe[1]);
+        }
+      }
+
+      if (process->crun_meta.parsed_error_file_pattern.empty()) {
+        MonitorPipToSingle(crun_craned_err_pipe[0], crun_craned_pipe[1]);
+      } else {
+        int stderr_fd;
+        const std::string& stderr_file_path =
+            process->crun_meta.parsed_error_file_pattern;
+        stderr_fd =
+            open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+        if (stderr_fd == -1) {
+          CRANE_DEBUG("[Task #{}] Error: open err file  {}. {}\n",
+                      instance->task.task_id(), stderr_file_path,
+                      strerror(errno));
+          KillProcessInstance_(process, SIGKILL);
+          return CraneErrCode::ERR_OPEN_FILE;
+        }
+        MonitorPipToMulti(crun_craned_err_pipe[0], crun_craned_pipe[1],
+                          stderr_fd);
       }
 
       const auto& proto_ia_meta = instance->task.interactive_meta();
@@ -677,8 +904,9 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                   proto_ia_meta.x11_meta().enable_forwarding(),
                   instance->GetCrunMeta()->x11_port);
       close(craned_crun_pipe[0]);
-      close(crun_craned_pipe[1]);
     }
+    close(crun_craned_output_pipe[1]);
+    close(crun_craned_err_pipe[1]);
 
     int ctrl_fd = ctrl_sock_pair[0];
     close(ctrl_sock_pair[1]);
@@ -894,15 +1122,19 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     } else if (instance->IsCrun()) {
       if (!launch_pty) {
         dup2(craned_crun_pipe[0], STDIN_FILENO);
-        dup2(crun_craned_pipe[1], STDOUT_FILENO);
-        dup2(crun_craned_pipe[1], STDERR_FILENO);
-      }
-      close(craned_crun_pipe[0]);
-      close(craned_crun_pipe[1]);
-      close(crun_craned_pipe[0]);
-      close(crun_craned_pipe[1]);
-    }
+        dup2(crun_craned_output_pipe[1], STDOUT_FILENO);
+        dup2(crun_craned_err_pipe[1], STDERR_FILENO);
 
+        close(craned_crun_pipe[0]);
+        close(craned_crun_pipe[1]);
+        close(crun_craned_pipe[0]);
+        close(crun_craned_pipe[1]);
+        close(crun_craned_output_pipe[0]);
+        close(crun_craned_output_pipe[1]);
+        close(crun_craned_err_pipe[0]);
+        close(crun_craned_err_pipe[1]);
+      }
+    }
     child_process_ready.set_ok(true);
     ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
     ok &= ostream.Flush();
@@ -1159,9 +1391,8 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
      * %u - Username
      * %x - Job name
      */
-    process->batch_meta.parsed_output_file_pattern =
-        ParseFilePathPattern_(instance->task.batch_meta().output_file_pattern(),
-                              instance->task.cwd(), task_id);
+    process->batch_meta.parsed_output_file_pattern = ParseFilePathPattern_(
+        instance->task.batch_meta().output_file_pattern(), instance);
     absl::StrReplaceAll({{"%j", std::to_string(task_id)},
                          {"%u", instance->pwd_entry.Username()},
                          {"%x", instance->task.name()}},
@@ -1171,12 +1402,24 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
     // batch_meta.parsed_error_file_pattern empty;
     if (!instance->task.batch_meta().error_file_pattern().empty()) {
       process->batch_meta.parsed_error_file_pattern = ParseFilePathPattern_(
-          instance->task.batch_meta().error_file_pattern(),
-          instance->task.cwd(), task_id);
+          instance->task.batch_meta().error_file_pattern(), instance);
       absl::StrReplaceAll({{"%j", std::to_string(task_id)},
                            {"%u", instance->pwd_entry.Username()},
                            {"%x", instance->task.name()}},
                           &process->batch_meta.parsed_error_file_pattern);
+    }
+  } else {
+    if (!instance->task.interactive_meta().output_file_pattern().empty()) {
+      process->crun_meta.parsed_output_file_pattern = ParseFilePathPattern_(
+          instance->task.interactive_meta().output_file_pattern(), instance);
+    }
+    if (!instance->task.interactive_meta().input_file_pattern().empty()) {
+      process->crun_meta.parsed_input_file_pattern = ParseFilePathPattern_(
+          instance->task.interactive_meta().input_file_pattern(), instance);
+    }
+    if (!instance->task.interactive_meta().error_file_pattern().empty()) {
+      process->crun_meta.parsed_error_file_pattern = ParseFilePathPattern_(
+          instance->task.interactive_meta().error_file_pattern(), instance);
     }
   }
 
@@ -1212,9 +1455,10 @@ void TaskManager::LaunchTaskInstanceMt_(TaskInstance* instance) {
 }
 
 std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
-                                               const std::string& cwd,
-                                               task_id_t task_id) {
+                                               TaskInstance* instance) {
   std::string resolved_path_pattern;
+  const std::string& cwd = instance->task.cwd();
+  const task_id_t task_id = instance->task.task_id();
 
   if (path_pattern.empty()) {
     // If file path is not specified, first set it to cwd.
@@ -1233,6 +1477,53 @@ std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
   if (absl::EndsWith(resolved_path_pattern, "/"))
     resolved_path_pattern += fmt::format("Crane-{}.out", task_id);
 
+  if (instance->task.type() != crane::grpc::Batch) {
+    auto get_hostname = []() -> std::string {
+      std::array<char, HOST_NAME_MAX> host_name{};
+      if (gethostname(host_name.data(), host_name.size()) == 0) {
+        return std::string{host_name.data()};
+      }
+      return std::string{};
+    };
+
+    // node_idx
+    auto get_node_idx =
+        [instance](const std::string& in_node_id) -> std::string {
+      uint32_t node_id = 0;
+      for (const auto& node_name : instance->task.nodelist()) {
+        if (node_name == in_node_id) {
+          break;
+        }
+        node_id++;
+      }
+      return std::to_string(node_id);
+    };
+
+    std::string cur_node_name = get_hostname();
+    std::string cur_relative_node_id = get_node_idx(cur_node_name);
+    std::vector<std::pair<absl::string_view, absl::string_view>> replacements =
+        {
+            // Special handling rules
+            {"\\%", "__ESCAPED_PERCENT__"},  // Escaping \%
+            {"%%", "__DOUBLE_PERCENT__"},    // Escaping %%
+
+            // Placeholder Rules
+            {"%A",
+             std::to_string(instance->task.task_id())},  // Job array master ID
+            {"%j", std::to_string(instance->task.task_id())},  // jobid
+            {"%N", cur_node_name},                             // Short hostname
+            {"%n", cur_relative_node_id},                      // Node ID
+            {"%t", cur_relative_node_id},                      // Task ID
+            {"%u", instance->pwd_entry.Username()},            // User name
+            {"%x", instance->task.name()}                      // Job name
+        };
+
+    absl::StrReplaceAll(replacements, &resolved_path_pattern);
+
+    absl::StrReplaceAll(
+        {{"__ESCAPED_PERCENT__", "\\%"}, {"__DOUBLE_PERCENT__", "%"}},
+        &resolved_path_pattern);
+  }
   return resolved_path_pattern;
 }
 
