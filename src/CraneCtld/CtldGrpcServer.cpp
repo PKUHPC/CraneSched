@@ -1318,13 +1318,14 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
              listen_conf.UseTls);
 
   // Avoid the potential deadlock error in underlying absl::mutex
-  std::thread sigint_waiting_thread([p_server = m_server_.get()] {
-    util::SetCurrentThreadName("SIGINT_Waiter");
+  std::thread signal_waiting_thread([p_server = m_server_.get()] {
+    util::SetCurrentThreadName("SIG_Waiter");
 
-    std::unique_lock<std::mutex> lk(s_sigint_mtx);
+    std::unique_lock<std::mutex> lk(s_exit_mtx);
     s_sigint_cv.wait(lk);
 
-    CRANE_TRACE("SIGINT captured. Calling Shutdown() on grpc server...");
+    CRANE_TRACE(
+        "SIGINT or SIGTERM captured. Calling Shutdown() on grpc server...");
 
     // craned_keeper MUST be shutdown before GrpcServer.
     // Otherwise, once GrpcServer is shut down, the main thread stops and
@@ -1336,9 +1337,10 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
   });
-  sigint_waiting_thread.detach();
+  signal_waiting_thread.detach();
 
   signal(SIGINT, &CtldServer::signal_handler_func);
+  signal(SIGTERM, &CtldServer::signal_handler_func);
 }
 
 CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(

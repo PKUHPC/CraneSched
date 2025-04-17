@@ -351,7 +351,7 @@ class CtldServer {
   HashMap<std::string /* cfored_name */, HashSet<task_id_t>>
       m_cfored_running_tasks_ ABSL_GUARDED_BY(m_mtx_);
 
-  inline static std::mutex s_sigint_mtx;
+  inline static std::mutex s_exit_mtx;
   inline static std::condition_variable s_sigint_cv;
   static void signal_handler_func(int) { s_sigint_cv.notify_one(); };
 

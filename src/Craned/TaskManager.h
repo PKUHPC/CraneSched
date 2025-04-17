@@ -380,7 +380,7 @@ class TaskManager {
   void EvCleanSigchldQueueCb_();
 
   // Callback function to handle SIGINT sent by Ctrl+C
-  void EvSigintCb_();
+  void EvGracefulExitCb_();
 
   void EvCleanGrpcExecuteTaskQueueCb_();
 
@@ -407,6 +407,8 @@ class TaskManager {
   // When this event is triggered, the TaskManager will not accept
   // any more new tasks and quit as soon as all existing task end.
   std::shared_ptr<uvw::signal_handle> m_sigint_handle_;
+
+  std::shared_ptr<uvw::signal_handle> m_sigterm_handle_;
 
   std::shared_ptr<uvw::async_handle> m_query_task_id_from_pid_async_handle_;
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
