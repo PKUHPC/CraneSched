@@ -240,7 +240,8 @@ message InteractiveTaskAdditionalMeta {
 
   bool x11 = 6;
   X11Meta x11_meta = 7;
-  string output_file_pattern = 8;
+  string input_file_pattern = 8;
+  string output_file_pattern = 9;
 }
 
 message TaskInfo {
@@ -426,6 +427,7 @@ enum ErrCode {
   ERR_USER_NO_PRIVILEGE = 66;
   ERR_NOT_IN_ALLOWED_LIST = 67;  // The current account is not in the allowed account list for the partition.
   ERR_IN_DENIED_LIST = 68;  // The current account has been explicitly added to the deny list for the partition.
+  ERR_OPEN_FILE= 69;
 }
 
 enum EntityType {
