@@ -772,7 +772,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
     // Disable SIGABRT backtrace from child processes.
     signal(SIGABRT, SIG_DFL);
-    // Recover SIGPIPE default handler in from child processes.
+    // Recover SIGPIPE default handler in child processes.
     signal(SIGPIPE, SIG_DFL);
 
     int ngroups = 0;

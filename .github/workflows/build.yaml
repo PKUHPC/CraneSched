@@ -36,23 +36,6 @@ jobs:
         shell: bash -leo pipefail {0}
 
     steps:
-      - name: Remove label
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            try {
-              await github.rest.issues.removeLabel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number,
-                name: "test-passed"
-              })
-              console.log('test-passed label removed.')
-            } catch (error) {
-              if (error.status !== 404) throw error
-            }
 
       # Checkout repo
       - name: Checkout code
@@ -183,18 +166,3 @@ jobs:
       - name: Alarm on test failure
         if: env.TEST_FAILED == 'true'
         run: exit 1
-
-      - name: Check and Add Label
-        if: github.event_name == 'pull_request' && env.TEST_FAILED != 'true'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const prNumber = context.payload.pull_request.number;
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              labels: ['test-passed'],
-            });
-            console.log('test-passed label added.')
