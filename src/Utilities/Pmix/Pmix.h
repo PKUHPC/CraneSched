@@ -26,6 +26,8 @@
 #include <future>
 #include <vector>
 
+#include <parallel_hashmap/phmap.h>
+
 #include "PmixColl.h"
 #include "PmixState.h"
 #include "absl/strings/str_join.h"
@@ -47,15 +49,17 @@ class PmixTaskInstance {
  private:
   uint32_t m_uid_{};
   uint32_t m_gid_{};
+  std::string m_task_id_;
+
   std::string m_nspace_; // crane.pmix.jobid
-  int m_nprocs_{};
   std::string m_hostname_;
+  std::vector<std::string> m_node_list_;
+  std::string m_node_list_str_;
   uint32_t m_node_id_{};
-  uint32_t m_node_tasks_{}; /* number of tasks on *this* node */
-  uint32_t m_n_tasks_{};
-  std::vector<uint32_t> m_global_id_list_; /* global ids of tasks located on *this* node */
-  uint32_t m_nnodes_job_{}; /* number of nodes in current job */
-  std::string m_node_list_;
+  uint32_t m_node_num_;
+  uint32_t m_ntasks_per_node_{}; /* number of tasks on *this* node */
+  uint32_t m_task_num_{};
+
   uint32_t m_ncpus_{};  /* total possible number of cpus in job */
   std::string m_cli_tmpdir_;
 
@@ -127,11 +131,15 @@ class PMIxServerModule {
                                  size_t nprocs, pmix_op_cbfunc_t cbfunc,
                                  void *cbdata) {
      CRANE_DEBUG("abort_fn called: status = {}, msg = {}\n", status, msg);
-     if (nullptr != pmix_procs) {
-       CRANE_DEBUG( "SERVER: ABORT on {}:{}", pmix_procs[0].nspace, pmix_procs[0].rank);
-     } else {
-       CRANE_DEBUG("SERVER: ABORT OF ALL PROCS IN NSPACE {}", pmix_procs->nspace);
+
+
+
+     // TODO: kill job
+
+     if (nullptr != cbfunc) {
+       cbfunc(PMIX_SUCCESS, cbdata);
      }
+
      return PMIX_SUCCESS;
    }
 
