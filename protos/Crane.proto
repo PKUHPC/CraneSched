@@ -80,7 +80,7 @@ message ExecuteTasksRequest {
 }
 
 message ExecuteTasksReply {
-  repeated uint32 failed_task_id_list = 1   ;
+  repeated uint32 failed_task_id_list = 1;
 }
 
 message CreateCgroupForTasksRequest {
