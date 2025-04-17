@@ -58,45 +58,6 @@ bool TaskScheduler::Init() {
   bool ok;
   CraneErrCode err;
 
-  std::unordered_map<ReservationId, crane::grpc::CreateReservationRequest>
-      reservation_req_map;
-  ok = g_embedded_db_client->RetrieveReservationInfo(&reservation_req_map);
-  if (!ok) {
-    CRANE_ERROR("Failed to retrieve reservation info from embedded DB.");
-    return false;
-  }
-
-  if (!reservation_req_map.empty()) {
-    CRANE_INFO("{} reservation(s) recovered.", reservation_req_map.size());
-    for (auto&& [reservation_id, reservation_req] : reservation_req_map) {
-      auto res = AddReservation(reservation_req);
-      if (!res.has_value()) {
-        CRANE_ERROR("Failed to add reservation {}: {}", reservation_id,
-                    res.error());
-        {
-          txn_id_t txn_id{0};
-          auto ok =
-              g_embedded_db_client->BeginReservationDbTransaction(&txn_id);
-          if (!ok) {
-            CRANE_ERROR("Failed to begin transaction for reservation {}.",
-                        reservation_id);
-          }
-          ok = g_embedded_db_client->DeleteReservationInfo(txn_id,
-                                                           reservation_id);
-          if (!ok) {
-            CRANE_ERROR("Failed to delete reservation {} from embedded DB.",
-                        reservation_id);
-          }
-          ok = g_embedded_db_client->CommitReservationDbTransaction(txn_id);
-          if (!ok) {
-            CRANE_ERROR("Failed to commit transaction for reservation {}.",
-                        reservation_id);
-          }
-        }
-      }
-    }
-  }
-
   EmbeddedDbClient::DbSnapshot snapshot;
   ok = g_embedded_db_client->RetrieveLastSnapshot(&snapshot);
   if (!ok) {
@@ -553,6 +514,47 @@ bool TaskScheduler::Init() {
 
   m_resv_clean_thread_ = std::thread(
       [this, loop = uvw_reservation_loop]() { CleanResvThread_(loop); });
+
+  // Reservation should be recovered after creating the
+  // m_resv_clean_thread_ thread.
+  std::unordered_map<ReservationId, crane::grpc::CreateReservationRequest>
+      reservation_req_map;
+  ok = g_embedded_db_client->RetrieveReservationInfo(&reservation_req_map);
+  if (!ok) {
+    CRANE_ERROR("Failed to retrieve reservation info from embedded DB.");
+    return false;
+  }
+
+  if (!reservation_req_map.empty()) {
+    CRANE_INFO("{} reservation(s) recovered.", reservation_req_map.size());
+    for (auto&& [reservation_id, reservation_req] : reservation_req_map) {
+      auto res = AddReservation(reservation_req);
+      if (!res.has_value()) {
+        CRANE_ERROR("Failed to add reservation {}: {}", reservation_id,
+                    res.error());
+        {
+          txn_id_t txn_id{0};
+          auto ok =
+              g_embedded_db_client->BeginReservationDbTransaction(&txn_id);
+          if (!ok) {
+            CRANE_ERROR("Failed to begin transaction for reservation {}.",
+                        reservation_id);
+          }
+          ok = g_embedded_db_client->DeleteReservationInfo(txn_id,
+                                                           reservation_id);
+          if (!ok) {
+            CRANE_ERROR("Failed to delete reservation {} from embedded DB.",
+                        reservation_id);
+          }
+          ok = g_embedded_db_client->CommitReservationDbTransaction(txn_id);
+          if (!ok) {
+            CRANE_ERROR("Failed to commit transaction for reservation {}.",
+                        reservation_id);
+          }
+        }
+      }
+    }
+  }
 
   // Start schedule thread first.
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
