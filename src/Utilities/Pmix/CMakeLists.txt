@@ -24,4 +24,6 @@ target_link_libraries(Utility_Pmix PUBLIC
         fmt::fmt
 
         libpmix
+
+        phmap
 )
