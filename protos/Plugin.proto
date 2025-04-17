@@ -18,7 +18,7 @@
 
 syntax = "proto3";
 
-package crane.grpc.plugin; 
+package crane.grpc.plugin;
 option go_package = "/protos";
 
 import "PublicDefs.proto";
@@ -89,7 +89,7 @@ message NodeEventHookReply {
 }
 
 service CranePluginD {
-  /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */  
+  /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
   rpc StartHook(StartHookRequest) returns (StartHookReply);
   rpc EndHook(EndHookRequest) returns (EndHookReply);
   rpc NodeEventHook(NodeEventHookRequest) returns (NodeEventHookReply);
