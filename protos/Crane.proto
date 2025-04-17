@@ -59,7 +59,7 @@ message SubmitBatchTaskRequest {
 
 message SubmitBatchTaskReply {
   bool ok = 1;
-  oneof payload{
+  oneof payload {
     uint32 task_id = 2;
     ErrCode code = 3;
   }
@@ -90,14 +90,14 @@ message CreateCgroupForTasksRequest {
   repeated string execution_node = 4;
 }
 
-message CreateCgroupForTasksReply{}
+message CreateCgroupForTasksReply {}
 
-message ReleaseCgroupForTasksRequest{
+message ReleaseCgroupForTasksRequest {
   repeated uint32 task_id_list = 1;
   repeated uint32 uid_list = 2;
 }
 
-message ReleaseCgroupForTasksReply{}
+message ReleaseCgroupForTasksReply {}
 
 message TerminateTasksRequest {
   repeated uint32 task_id_list = 1;
@@ -154,29 +154,27 @@ message CancelTaskReply {
   repeated string not_cancelled_reasons = 4;
 }
 
-
-message QueryTaskIdFromPortRequest{
+message QueryTaskIdFromPortRequest {
   uint32 port = 1;
 }
 
-message QueryTaskIdFromPortReply{
+message QueryTaskIdFromPortReply {
   bool ok = 1;
   uint32 task_id = 2;
 }
 
-message QueryTaskIdFromPortForwardRequest{
+message QueryTaskIdFromPortForwardRequest {
   uint32 ssh_remote_port = 1;
   string ssh_remote_address = 2;
   uint32 uid = 3;
 }
 
-message QueryTaskIdFromPortForwardReply{
+message QueryTaskIdFromPortForwardReply {
   bool ok = 1;
   bool from_user = 2;
   uint32 task_id = 3;
   string cgroup_path = 4;
 }
-
 
 message QueryCranedInfoRequest {
   string craned_name = 1;
@@ -223,14 +221,14 @@ message ModifyTaskReply {
   repeated string not_modified_reasons = 4;
 }
 
-message ModifyCranedStateRequest{
+message ModifyCranedStateRequest {
   uint32 uid = 1;
   repeated string craned_ids = 2;
   CranedControlState new_state = 3;
   string reason = 4;
 }
 
-message ModifyCranedStateReply{
+message ModifyCranedStateReply {
   repeated string modified_nodes = 2;
   repeated string not_modified_nodes = 3;
   repeated string not_modified_reasons = 4;
@@ -299,8 +297,8 @@ message DeleteQosReply {
 
 message ModifyAccountRequest {
   uint32 uid = 1;
-  ModifyField modify_field = 2;   //modify item field
-  repeated string value_list = 3;   //new value
+  ModifyField modify_field = 2;    // modify item field
+  repeated string value_list = 3;  // new value
   string name = 4;
   OperationType type = 5;
   bool force = 6;
@@ -313,8 +311,8 @@ message ModifyAccountReply {
 
 message ModifyUserRequest {
   uint32 uid = 1;
-  ModifyField modify_field = 2;   //modify item field
-  repeated string value_list = 3;   //new value
+  ModifyField modify_field = 2;    // modify item field
+  repeated string value_list = 3;  // new value
   string name = 4;
   string partition = 5;
   OperationType type = 6;
@@ -329,8 +327,8 @@ message ModifyUserReply {
 
 message ModifyQosRequest {
   uint32 uid = 1;
-  ModifyField modify_field = 2;   //modify item field
-  string value = 3;   //new value
+  ModifyField modify_field = 2;  // modify item field
+  string value = 3;              // new value
   string name = 4;
 }
 
@@ -393,7 +391,6 @@ message ModifyPartitionAclRequest {
   repeated string accounts = 4;
 }
 
-
 message ModifyPartitionAclReply {
   bool ok = 1;
   ErrCode code = 2;
@@ -408,23 +405,23 @@ message MigrateSshProcToCgroupReply {
   bool ok = 1;
 }
 
-message QueryTaskEnvVariablesRequest{
+message QueryTaskEnvVariablesRequest {
   uint32 task_id = 1;
 }
 
-message QueryTaskEnvVariablesReply{
+message QueryTaskEnvVariablesReply {
   bool ok = 1;
-  map<string/*name*/, string/*value*/> env_map = 2;
+  map<string /*name*/, string /*value*/> env_map = 2;
 }
 
-message QueryTaskEnvVariablesForwardRequest{
+message QueryTaskEnvVariablesForwardRequest {
   uint32 task_id = 1;
   string execution_node = 2;
 }
 
-message QueryTaskEnvVariablesForwardReply{
+message QueryTaskEnvVariablesForwardReply {
   bool ok = 1;
-  map<string/*name*/, string/*value*/> env_map = 2;
+  map<string /*name*/, string /*value*/> env_map = 2;
 }
 
 message QueryClusterInfoRequest {
@@ -439,7 +436,7 @@ message QueryClusterInfoReply {
   repeated TrimmedPartitionInfo partitions = 2;
 }
 
-message QueryTasksInfoRequest{
+message QueryTasksInfoRequest {
   repeated uint32 filter_task_ids = 1;
   repeated string filter_partitions = 2;
   uint32 num_limit = 3;
@@ -456,7 +453,7 @@ message QueryTasksInfoRequest{
   bool option_include_completed_tasks = 15;
 }
 
-message QueryTasksInfoReply{
+message QueryTasksInfoReply {
   bool ok = 1;
   repeated TaskInfo task_info_list = 2;
 }
@@ -512,7 +509,7 @@ message StreamCallocReply {
     bool ok = 1;
   }
 
-  CforedReplyType type = 1 ;
+  CforedReplyType type = 1;
 
   oneof payload {
     TaskIdReply payload_task_id_reply = 2;
@@ -693,15 +690,15 @@ message StreamCrunReply {
     bool ok = 1;
   }
 
-  message TaskIOForwardReply{
+  message TaskIOForwardReply {
     string msg = 1;
   }
 
-  message TaskX11ForwardReply{
+  message TaskX11ForwardReply {
     bytes msg = 1;
   }
 
-  CforedCrunReplyType type = 1 ;
+  CforedCrunReplyType type = 1;
 
   oneof payload {
     TaskIdReply payload_task_id_reply = 2;
@@ -715,7 +712,7 @@ message StreamCrunReply {
 }
 
 message StreamTaskIORequest {
-  enum CranedRequestType{
+  enum CranedRequestType {
     CRANED_REGISTER = 0;
     CRANED_TASK_OUTPUT = 1;
     CRANED_UNREGISTER = 2;
@@ -794,7 +791,7 @@ service CraneCtld {
   rpc CranedRegister(CranedRegisterRequest) returns (CranedRegisterReply);
 
   /* RPCs called from Cfored */
-  rpc CforedStream(stream StreamCforedRequest) returns(stream StreamCtldReply);
+  rpc CforedStream(stream StreamCforedRequest) returns (stream StreamCtldReply);
 
   /* RPCs called from ccancel */
   rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
@@ -838,14 +835,14 @@ service CraneCtld {
 
 service Craned {
   /* ----------------------------------- Called from CraneCtld ---------------------------------------------------- */
-  rpc ExecuteTask(ExecuteTasksRequest) returns(ExecuteTasksReply);
+  rpc ExecuteTask(ExecuteTasksRequest) returns (ExecuteTasksReply);
 
-  rpc CheckTaskStatus(CheckTaskStatusRequest) returns(CheckTaskStatusReply);
+  rpc CheckTaskStatus(CheckTaskStatusRequest) returns (CheckTaskStatusReply);
 
-  rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns(CreateCgroupForTasksReply);
-  rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns(ReleaseCgroupForTasksReply);
+  rpc CreateCgroupForTasks(CreateCgroupForTasksRequest) returns (CreateCgroupForTasksReply);
+  rpc ReleaseCgroupForTasks(ReleaseCgroupForTasksRequest) returns (ReleaseCgroupForTasksReply);
 
-  rpc QueryCranedRemoteMeta(QueryCranedRemoteMetaRequest) returns(QueryCranedRemoteMetaReply);
+  rpc QueryCranedRemoteMeta(QueryCranedRemoteMetaRequest) returns (QueryCranedRemoteMetaReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.
@@ -868,8 +865,8 @@ service Craned {
 }
 
 service CraneForeD {
-  rpc CallocStream(stream StreamCallocRequest) returns(stream StreamCallocReply);
-  rpc CrunStream(stream StreamCrunRequest) returns(stream StreamCrunReply);
-  rpc TaskIOStream(stream StreamTaskIORequest) returns(stream StreamTaskIOReply);
+  rpc CallocStream(stream StreamCallocRequest) returns (stream StreamCallocReply);
+  rpc CrunStream(stream StreamCrunRequest) returns (stream StreamCrunReply);
+  rpc TaskIOStream(stream StreamTaskIORequest) returns (stream StreamTaskIOReply);
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
 }

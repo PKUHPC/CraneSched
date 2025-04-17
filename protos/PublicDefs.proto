@@ -131,7 +131,7 @@ message TaskToCtld {
   bool requeue_if_failed = 12;
   bool get_user_env = 13;
 
-  uint32 gid = 14; // egid
+  uint32 gid = 14;  // egid
 
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 21;
@@ -141,7 +141,7 @@ message TaskToCtld {
   string extra_attr = 23;
 
   string cmd_line = 31;
-  string cwd = 32; // Current working directory
+  string cwd = 32;  // Current working directory
   map<string, string> env = 33;
 
   string excludes = 34;
@@ -184,7 +184,7 @@ message TaskToD {
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
-  google.protobuf.Timestamp start_time = 5; // Currently Only used in CraneCtld
+  google.protobuf.Timestamp start_time = 5;  // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 6;
 
   string partition = 8;
@@ -302,7 +302,7 @@ message PartitionInfo {
 
   repeated string allowed_accounts = 9;
   repeated string denied_accounts = 10;
-  
+
   uint64 default_mem_per_cpu = 11;
   uint64 max_mem_per_cpu = 12;
 }
@@ -347,52 +347,52 @@ message RichError {
 enum ErrCode {
   SUCCESS = 0;  // Success
 
-  ERR_INVALID_UID = 1;   // Invalid UID passed
-  ERR_INVALID_OP_USER = 2; // Invalid operation user
-  ERR_INVALID_USER = 3;  // Invalid user
+  ERR_INVALID_UID = 1;      // Invalid UID passed
+  ERR_INVALID_OP_USER = 2;  // Invalid operation user
+  ERR_INVALID_USER = 3;     // Invalid user
   ERR_PERMISSION_USER = 4;  // User permissions too low, no permission to operate
 
   ERR_BLOCKED_USER = 5;
-  ERR_USER_ALREADY_EXISTS = 6;  // User duplicate account insertion
+  ERR_USER_ALREADY_EXISTS = 6;            // User duplicate account insertion
   ERR_USER_ACCESS_TO_ACCOUNT_DENIED = 7;  // User does not have permission for the account
-  ERR_INVALID_ADMIN_LEVEL = 8;  // Invalid permission level
-  ERR_USER_ACCOUNT_MISMATCH = 9; // User does not belong to the account
+  ERR_INVALID_ADMIN_LEVEL = 8;            // Invalid permission level
+  ERR_USER_ACCOUNT_MISMATCH = 9;          // User does not belong to the account
 
   ERR_NO_ACCOUNT_SPECIFIED = 10;
-  ERR_INVALID_ACCOUNT = 11;  // Invalid account
+  ERR_INVALID_ACCOUNT = 11;         // Invalid account
   ERR_ACCOUNT_ALREADY_EXISTS = 12;  // Duplicate account insertion
   ERR_INVALID_PARENT_ACCOUNT = 13;  // Invalid parent account
-  ERR_ACCOUNT_HAS_CHILDREN = 14;   // Account has child nodes，cannot be deleted.
+  ERR_ACCOUNT_HAS_CHILDREN = 14;    // Account has child nodes，cannot be deleted.
 
   ERR_BLOCKED_ACCOUNT = 15;
-  ERR_INVALID_PARTITION = 16;  // Invalid partition, partition does not exist
-  ERR_PARTITION_MISSING = 17; // Account/user does not include this partition
-  ERR_PARTITION_ALREADY_EXISTS = 18; // Account/user duplicate insertion
-  ERR_PARENT_ACCOUNT_PARTITION_MISSING = 19; // Parent account does not include this partition
+  ERR_INVALID_PARTITION = 16;                 // Invalid partition, partition does not exist
+  ERR_PARTITION_MISSING = 17;                 // Account/user does not include this partition
+  ERR_PARTITION_ALREADY_EXISTS = 18;          // Account/user duplicate insertion
+  ERR_PARENT_ACCOUNT_PARTITION_MISSING = 19;  // Parent account does not include this partition
 
-  ERR_USER_EMPTY_PARTITION = 20; // Cannot add QoS when user has no partition
-  ERR_CHILD_HAS_PARTITION = 21; // Failed to delete the account partition as child nodes contain this partition.
+  ERR_USER_EMPTY_PARTITION = 20;  // Cannot add QoS when user has no partition
+  ERR_CHILD_HAS_PARTITION = 21;   // Failed to delete the account partition as child nodes contain this partition.
   ERR_HAS_NO_QOS_IN_PARTITION = 22;
   ERR_HAS_ALLOWED_QOS_IN_PARTITION = 23;
   ERR_INVALID_QOS = 24;  // Invalid QoS, QoS does not exist
 
   ERR_DB_QOS_ALREADY_EXISTS = 25;  // Duplicate QoS insertion in the database.
-  ERR_QOS_REFERENCES_EXIST = 26;  // QoS reference count is not zero.
-  ERR_CONVERT_TO_INTEGER = 27;  // String to integer conversion failed
-  ERR_TIME_LIMIT = 28;  // Invalid time value
-  ERR_QOS_MISSING = 29; // Account/user does not include this QoS.
+  ERR_QOS_REFERENCES_EXIST = 26;   // QoS reference count is not zero.
+  ERR_CONVERT_TO_INTEGER = 27;     // String to integer conversion failed
+  ERR_TIME_LIMIT = 28;             // Invalid time value
+  ERR_QOS_MISSING = 29;            // Account/user does not include this QoS.
 
-  ERR_QOS_ALREADY_EXISTS = 30; // Account/user duplicate insertion.
-  ERR_PARENT_ACCOUNT_QOS_MISSING = 31; // Parent account does not include this QoS.
-  ERR_SET_ALLOWED_QOS = 32; // QoS is the default QoS, but not found in the new QoS list.
-  ERR_DEFAULT_QOS_NOT_INHERITED = 33; // Default QoS is not in the allowed QoS list
-  ERR_DUPLICATE_DEFAULT_QOS = 34; // Duplicate default QoS setting
+  ERR_QOS_ALREADY_EXISTS = 30;          // Account/user duplicate insertion.
+  ERR_PARENT_ACCOUNT_QOS_MISSING = 31;  // Parent account does not include this QoS.
+  ERR_SET_ALLOWED_QOS = 32;             // QoS is the default QoS, but not found in the new QoS list.
+  ERR_DEFAULT_QOS_NOT_INHERITED = 33;   // Default QoS is not in the allowed QoS list
+  ERR_DUPLICATE_DEFAULT_QOS = 34;       // Duplicate default QoS setting
 
-  ERR_CHILD_HAS_DEFAULT_QOS = 35; // Failed to delete the account QoS as child nodes have set it as the default QoS. 
-  ERR_SET_ACCOUNT_QOS = 36; // QoS is used by some descendant node or itself of the account. 
-  ERR_SET_DEFAULT_QOS = 37; // Qos not in allowed qos list or is already the default qos
-  ERR_DEFAULT_QOS_MODIFICATION_DENIED = 38; //  // QoS cannot be directly deleted when it is set as the default QoS.
-  ERR_UPDATE_DATABASE = 39;  // Database update failed
+  ERR_CHILD_HAS_DEFAULT_QOS = 35;  // Failed to delete the account QoS as child nodes have set it as the default QoS.
+  ERR_SET_ACCOUNT_QOS = 36;        // QoS is used by some descendant node or itself of the account.
+  ERR_SET_DEFAULT_QOS = 37;        // Qos not in allowed qos list or is already the default qos
+  ERR_DEFAULT_QOS_MODIFICATION_DENIED = 38;  //  // QoS cannot be directly deleted when it is set as the default QoS.
+  ERR_UPDATE_DATABASE = 39;                  // Database update failed
 
   ERR_GENERIC_FAILURE = 40;
   ERR_NO_RESOURCE = 41;
@@ -427,7 +427,7 @@ enum ErrCode {
   ERR_MAX_JOB_COUNT_PER_USER = 65;
   ERR_USER_NO_PRIVILEGE = 66;
   ERR_NOT_IN_ALLOWED_LIST = 67;  // The current account is not in the allowed account list for the partition.
-  ERR_IN_DENIED_LIST = 68;  // The current account has been explicitly added to the deny list for the partition.
+  ERR_IN_DENIED_LIST = 68;       // The current account has been explicitly added to the deny list for the partition.
 }
 
 enum EntityType {

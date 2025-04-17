@@ -41,12 +41,13 @@ jobs:
             if [[ "$file" == *.cpp || "$file" == *.h ]]; then
               clang-format-20 -i --style=file "$file"
             fi
+
+            if [[ "$file" == *.proto ]]; then
+              clang-format-20 -i --style=file:.clang-format-proto "$file"
+            fi
           done
 
-      - name: Generate diff
-        run: |
           if ! git diff --quiet; then
-            git diff  > format.patch
             echo "FORMATED=true" >> $GITHUB_ENV
           else
             echo "No formatting changes were necessary."
@@ -59,6 +60,15 @@ jobs:
           git commit -m "style: auto format with clang-format."
           git push
           echo "Commit format."
+
+      - name: Generate diff
+        if: env.FORMATED == 'true'
+        run: |
+          if ! git diff --quiet; then
+            git diff  > format.patch
+          else
+            echo "No formatting changes were necessary."
+          fi
 
       - name: Upload diff
         if: github.event.pull_request.head.repo.full_name != github.repository && env.FORMATED == 'true'
