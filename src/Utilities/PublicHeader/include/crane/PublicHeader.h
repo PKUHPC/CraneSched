@@ -44,31 +44,32 @@ using CraneExpected = std::expected<T, CraneErrCode>;
 template <typename T>
 using CraneExpectedRich = std::expected<T, CraneRichError>;
 
-inline const char* kCtldDefaultPort = "10011";
-inline const char* kCranedDefaultPort = "10010";
-inline const char* kCforedDefaultPort = "10012";
+inline const char* const kCtldDefaultPort = "10011";
+inline const char* const kCranedDefaultPort = "10010";
+inline const char* const kCforedDefaultPort = "10012";
 
-inline const char* kDefaultConfigPath = "/etc/crane/config.yaml";
-inline const char* kDefaultDbConfigPath = "/etc/crane/database.yaml";
+inline const char* const kDefaultConfigPath = "/etc/crane/config.yaml";
+inline const char* const kDefaultDbConfigPath = "/etc/crane/database.yaml";
 
-inline const char* kUnlimitedQosName = "UNLIMITED";
-inline const char* kHostFilePath = "/etc/hosts";
+inline const char* const kUnlimitedQosName = "UNLIMITED";
+inline const char* const kHostFilePath = "/etc/hosts";
 
 inline constexpr size_t kDefaultQueryTaskNumLimit = 1000;
 inline constexpr uint32_t kDefaultQosPriority = 1000;
-inline constexpr uint64_t kPriorityDefaultMaxAge = 7 * 24 * 3600;  // 7 days
+inline constexpr uint64_t kPriorityDefaultMaxAge = 7UL * 24 * 3600;  // 7 days
 
-inline const char* kDefaultCraneBaseDir = "/var/crane/";
-inline const char* kDefaultCraneCtldMutexFile = "cranectld/cranectld.lock";
-inline const char* kDefaultCraneCtldLogPath = "cranectld/cranectld.log";
-inline const char* kDefaultCraneCtldDbPath = "cranectld/embedded.db";
+inline const char* const kDefaultCraneBaseDir = "/var/crane/";
+inline const char* const kDefaultCraneCtldMutexFile =
+    "cranectld/cranectld.lock";
+inline const char* const kDefaultCraneCtldLogPath = "cranectld/cranectld.log";
+inline const char* const kDefaultCraneCtldDbPath = "cranectld/embedded.db";
 
-inline const char* kDefaultCranedScriptDir = "craned/scripts";
-inline const char* kDefaultCranedUnixSockPath = "craned/craned.sock";
-inline const char* kDefaultCranedMutexFile = "craned/craned.lock";
-inline const char* kDefaultCranedLogPath = "craned/craned.log";
+inline const char* const kDefaultCranedScriptDir = "craned/scripts";
+inline const char* const kDefaultCranedUnixSockPath = "craned/craned.sock";
+inline const char* const kDefaultCranedMutexFile = "craned/craned.lock";
+inline const char* const kDefaultCranedLogPath = "craned/craned.log";
 
-inline const char* kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
+inline const char* const kDefaultPlugindUnixSockPath = "cplugind/cplugind.sock";
 
 constexpr uint64_t kTaskMinTimeLimitSec = 11;
 constexpr int64_t kTaskMaxTimeLimitSec =
@@ -94,15 +95,15 @@ enum ExitCodeEnum : uint16_t {
   kExitCodeExceedTimeLimit,
   kExitCodeCranedDown,
   kExitCodeExecutionError,
-
-  __MAX_EXIT_CODE  // NOLINT(bugprone-reserved-identifier)
+  // NOLINTNEXTLINE(bugprone-reserved-identifier,readability-identifier-naming)
+  __MAX_EXIT_CODE
 };
 
 }  // namespace ExitCode
 
 namespace Internal {
 // clang-format off
-constexpr std::array<std::string_view, uint16_t(crane::grpc::ErrCode_ARRAYSIZE)>
+constexpr std::array<std::string_view, crane::grpc::ErrCode_ARRAYSIZE>
     CraneErrStrArr = {
         // 0 - 4
         "Success",
@@ -216,7 +217,7 @@ inline CraneRichError FormatRichErr(CraneErrCode code, const std::string& fmt,
 }
 
 inline std::string_view CraneErrStr(CraneErrCode err) {
-  return Internal::CraneErrStrArr[uint16_t(err)];
+  return Internal::CraneErrStrArr[static_cast<uint16_t>(err)];
 }
 
 /* ----------- Public definitions for all components */

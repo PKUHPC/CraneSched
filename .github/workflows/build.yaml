@@ -17,24 +17,30 @@ on:
         required: true
         default: 'master'
 
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: true
+
 env:
   SCRIPT_PATH: /opt/actions-runner-external/script
   CACHE_PATH: /opt/actions-runner-external/cache
   TEST_FAILED: false
 
 jobs:
+
   build:
-    if: github.event.pull_request.draft == false
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: self-hosted
     defaults:
       run:
         shell: bash -leo pipefail {0}
 
     steps:
+
       # Checkout repo
       - name: Checkout code
         uses: actions/checkout@v4
-        with: 
+        with:
           path: CraneSched
 
       # Checkout frontend
@@ -44,7 +50,7 @@ jobs:
           repository: PKUHPC/CraneSched-FrontEnd
           path: CraneSched-FrontEnd
           ref: ${{ inputs.frontend_branch }}
-      
+
       # Pull CI Image and Prepare
       - name: Pull CI Image
         run: |
@@ -121,7 +127,7 @@ jobs:
           path: output/${{ env.ARTIFACT_NAME_FRONTEND }}
           retention-days: 14
           if-no-files-found: error
-      
+
       - name: Upload plugin
         uses: actions/upload-artifact@v4
         with:
@@ -146,7 +152,7 @@ jobs:
             localhost/autotest
           podman exec autotest /bin/bash --login script/run.sh || echo "TEST_FAILED=true" >> $GITHUB_ENV
           podman stop autotest
-      
+
       # Upload AutoTest Results
       - name: Upload AutoTest Results
         uses: actions/upload-artifact@v4
