@@ -531,10 +531,9 @@ void ParseConfig(int argc, char** argv) {
               part.max_mem_per_cpu < part.default_mem_per_cpu) {
             CRANE_ERROR(
                 "The partition {} MaxMemPerCpu {}MB should not be "
-CRANE_ERROR(
-    "The partition {} MaxMemPerCpu {}MB should not be "
-    "less than DefaultMemPerCpu {}MB.",
-    name, part.max_mem_per_cpu / B2MB, part.default_mem_per_cpu / B2MB);
+                "less than DefaultMemPerCpu {}MB.",
+                name, part.max_mem_per_cpu / B2MB,
+                part.default_mem_per_cpu / B2MB);
             std::exit(1);
           }
           if (part.max_mem_per_cpu == 0) {
