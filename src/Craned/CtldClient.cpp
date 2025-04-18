@@ -18,6 +18,7 @@
 
 #include "CtldClient.h"
 
+#include "CranedServer.h"
 namespace Craned {
 
 CtldClient::~CtldClient() {
@@ -29,6 +30,7 @@ CtldClient::~CtldClient() {
 
 void CtldClient::InitChannelAndStub(const std::string& server_address) {
   grpc::ChannelArguments channel_args;
+  SetGrpcClientKeepAliveChannelArgs(&channel_args);
 
   if (g_config.CompressedRpc)
     channel_args.SetCompressionAlgorithm(GRPC_COMPRESS_GZIP);
@@ -45,47 +47,6 @@ void CtldClient::InitChannelAndStub(const std::string& server_address) {
   m_stub_ = CraneCtld::NewStub(m_ctld_channel_);
 
   m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
-}
-
-void CtldClient::OnCraneCtldConnected() {
-  crane::grpc::CranedRegisterRequest request;
-  grpc::Status status;
-
-  CRANE_INFO("Send a register RPC to cranectld");
-  request.set_craned_id(m_craned_id_);
-
-  int retry_time = 10;
-
-  do {
-    crane::grpc::CranedRegisterReply reply;
-    grpc::ClientContext context;
-    context.set_deadline(std::chrono::system_clock::now() +
-                         std::chrono::seconds(1));
-
-    status = m_stub_->CranedRegister(&context, request, &reply);
-    if (!status.ok()) {
-      CRANE_ERROR(
-          "NodeActiveConnect RPC returned with status not ok: {}, Resend it.",
-          status.error_message());
-    } else {
-      if (reply.ok()) {
-        if (reply.already_registered()) {
-          CRANE_INFO("This craned has already registered.");
-          return;
-        } else {
-          CRANE_INFO(
-              "This craned has not registered. "
-              "Sending Register request...");
-          std::this_thread::sleep_for(std::chrono::seconds(3));
-        }
-      } else {
-        CRANE_ERROR("This Craned is not allow to register.");
-        return;
-      }
-    }
-  } while (!m_thread_stop_ && retry_time--);
-
-  CRANE_ERROR("Failed to register actively.");
 }
 
 void CtldClient::TaskStatusChangeAsync(
@@ -116,6 +77,67 @@ bool CtldClient::CancelTaskStatusChangeByTaskId(
   return num_removed >= 1;
 }
 
+void CtldClient::NotifyCranedConnected_() const {
+  CRANE_DEBUG("Notify Ctld CranedConnected.");
+  crane::grpc::CranedConnectedCtldNotify req;
+  req.set_craned_id(g_config.CranedIdOfThisNode);
+  *req.mutable_token() = g_server->GetRegisterToken();
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(1));
+  google::protobuf::Empty reply;
+  grpc::Status status = m_stub_->CranedConnectedCtld(&context, req, &reply);
+  if (!status.ok()) {
+    CRANE_ERROR("Notify CranedConnected failed: {}", status.error_message());
+  }
+}
+
+void CtldClient::CranedReady_() {
+  CRANE_DEBUG("Sending CranedReady.");
+  crane::grpc::CranedReadyRequest ready_request;
+  ready_request.set_craned_id(g_config.CranedIdOfThisNode);
+  *ready_request.mutable_token() = m_token_;
+  auto* grpc_meta = ready_request.mutable_remote_meta();
+  auto& dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->dedicated_res;
+
+  grpc_meta->mutable_dres_in_node()->CopyFrom(
+      static_cast<crane::grpc::DedicatedResourceInNode>(dres));
+
+  grpc_meta->set_craned_version(CRANE_VERSION_STRING);
+
+  const SystemRelInfo& sys_info = g_config.CranedMeta.SysInfo;
+  auto* grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();
+  grpc_sys_rel_info->set_name(sys_info.name);
+  grpc_sys_rel_info->set_release(sys_info.release);
+  grpc_sys_rel_info->set_version(sys_info.version);
+
+  grpc_meta->mutable_craned_start_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.CranedStartTime));
+  grpc_meta->mutable_system_boot_time()->set_seconds(
+      ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
+
+  grpc_meta->mutable_nonexistent_jobs()->Assign(m_nonexistent_jobs_.begin(),
+                                                m_nonexistent_jobs_.end());
+
+  crane::grpc::CranedReadyReply ready_reply;
+  grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(1));
+  auto status = m_stub_->CranedReady(&context, ready_request, &ready_reply);
+  if (!status.ok()) {
+    CRANE_DEBUG("CranedReady failed: {}, retry later.", status.error_message());
+    return;
+  }
+  if (ready_reply.ok()) {
+    g_server->SetReady(true);
+    m_registering_ = false;
+    m_up_lined_ = true;
+    CRANE_INFO("Craned successfully Up.");
+  } else {
+    CRANE_WARN("Craned ready get reply of false.");
+  }
+}
+
 void CtldClient::AsyncSendThread_() {
   m_start_connecting_notification_.WaitForNotification();
 
@@ -128,20 +150,104 @@ void CtldClient::AsyncSendThread_() {
       &m_task_status_change_list_);
 
   bool prev_conn_state = false;
+  uint retry_attempt = 0;
+  uint rpc_attempt = 0;
   while (true) {
     if (m_thread_stop_) break;
 
-    bool connected = m_ctld_channel_->WaitForConnected(
-        std::chrono::system_clock::now() + std::chrono::seconds(3));
+    grpc_connectivity_state pre_state = m_ctld_channel_->GetState(true);
+
+    auto cur_state = pre_state;
+    if (pre_state == GRPC_CHANNEL_CONNECTING ||
+        pre_state == GRPC_CHANNEL_IDLE ||
+        pre_state == GRPC_CHANNEL_TRANSIENT_FAILURE) {
+      CRANE_TRACE("Current channel status {},waiting for StateChange.",
+                  GrpcConnectivityStateName(pre_state));
+      m_ctld_channel_->WaitForStateChange(
+          pre_state,
+          std::chrono::system_clock::now() + std::chrono::seconds(3));
+
+      cur_state = m_ctld_channel_->GetState(false);
+      CRANE_TRACE("New ctld client channel status {}.",
+                  GrpcConnectivityStateName(cur_state));
+    } else if (pre_state == GRPC_CHANNEL_IDLE) {
+      CRANE_TRACE("Current channel status {}.",
+                  GrpcConnectivityStateName(pre_state));
+    }
+
+    bool connected = (cur_state == GRPC_CHANNEL_READY);
+
+    if (pre_state != cur_state)
+      CRANE_TRACE("CtldClient prev state: {},now: {}.",
+                  GrpcConnectivityStateName(pre_state),
+                  GrpcConnectivityStateName(cur_state));
 
     if (!prev_conn_state && connected) {
-      g_ctld_client->OnCraneCtldConnected();
+      CRANE_TRACE("Channel to CraneCtlD is connected.");
+      absl::MutexLock lk(&m_cb_mutex_);
+      if (m_on_ctld_connected_cb_) m_on_ctld_connected_cb_();
+      retry_attempt = 0;
+      rpc_attempt = 0;
+    } else if (!connected && prev_conn_state) {
+      CRANE_TRACE("Channel to CraneCtlD is disconnected.");
+      {
+        absl::MutexLock lk(&m_register_mutex_);
+        m_up_lined_ = false;
+      }
+      {
+        absl::MutexLock lk(&m_cb_mutex_);
+        if (m_on_ctld_disconnected_cb_) m_on_ctld_disconnected_cb_();
+      }
+      this->StopRegister();
+      this->StartNotifyConnected();
     }
+
     prev_conn_state = connected;
 
     if (!connected) {
-      CRANE_INFO("Channel to CraneCtlD is not connected. Reconnecting...");
-      std::this_thread::sleep_for(std::chrono::seconds(10));
+      uint64_t delay_time;
+      if (retry_attempt < kInitialFastRetries) {
+        delay_time = kConnectCtldRetryInitMs + (retry_attempt * 1'000UL);
+      } else {
+        delay_time = kConnectCtldSlowRetryMs;
+      }
+      CRANE_INFO(
+          "Channel to CraneCtlD is not connected. Reconnecting after {} "
+          "seconds.",
+          delay_time / 1000);
+      retry_attempt++;
+      std::this_thread::sleep_for(std::chrono::milliseconds(delay_time));
+      continue;
+    } else {
+      bool notify_ctld_connected = false;
+      {
+        absl::MutexLock lk(&m_register_mutex_);
+        notify_ctld_connected = m_notify_ctld_connected_;
+      }
+
+      if (notify_ctld_connected) {
+        NotifyCranedConnected_();
+        rpc_attempt++;
+      }
+
+      bool send_register{false};
+      {
+        absl::MutexLock lk(&m_register_mutex_);
+        send_register = m_registering_;
+      }
+      if (send_register) {
+        CranedReady_();
+        rpc_attempt++;
+      }
+    }
+    if (!m_up_lined_) {
+      uint sleep_time = rpc_attempt >= 10 ? 10'000 : 1000 * rpc_attempt;
+      CRANE_TRACE(
+          "Ctld client connected but not up yet, sleep for {} seconds and try "
+          "to up.",
+          sleep_time / 1000);
+      std::this_thread::sleep_for(rpc_attempt *
+                                  std::chrono::milliseconds(sleep_time));
       continue;
     }
 

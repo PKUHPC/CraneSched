@@ -626,6 +626,7 @@ void GlobalVariableInit() {
 
   g_ctld_client = std::make_unique<Craned::CtldClient>();
   g_ctld_client->SetCranedId(g_config.CranedIdOfThisNode);
+  g_ctld_client->SetCtldDisconnectedCb([] { g_server->SetReady(false); });
 
   g_ctld_client->InitChannelAndStub(g_config.ControlMachine);
 
@@ -651,10 +652,20 @@ void StartServer() {
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::os::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
   util::os::CheckProxyEnvironmentVariable();
-  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf);
+  std::promise<crane::grpc::ConfigureCranedRequest> init_promise;
+  auto config_future = init_promise.get_future();
+  g_server = std::make_unique<Craned::CranedServer>(g_config.ListenConf,
+                                                    std::move(init_promise));
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
+  g_ctld_client->StartNotifyConnected();
   g_ctld_client->StartConnectingCtld();
+  // Use config form ctld to init here
+  {
+    config_future.wait();
+    auto req = config_future.get();
+    g_server->PostRecvConfig(req, {});
+  }
   g_server->Wait();
 
   // Free global variables

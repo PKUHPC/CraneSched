@@ -26,8 +26,6 @@
 namespace Craned {
 
 using crane::grpc::CraneCtld;
-using crane::grpc::CranedRegisterReply;
-using crane::grpc::CranedRegisterRequest;
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
@@ -50,7 +48,43 @@ class CtldClient {
    */
   void InitChannelAndStub(const std::string& server_address);
 
-  void OnCraneCtldConnected();
+  void SetCtldConnectedCb(std::function<void()> cb) {
+    absl::MutexLock lk(&m_cb_mutex_);
+    m_on_ctld_connected_cb_ = std::move(cb);
+  }
+
+  void SetCtldDisconnectedCb(std::function<void()> cb) {
+    absl::MutexLock lk(&m_cb_mutex_);
+    m_on_ctld_disconnected_cb_ = std::move(cb);
+  }
+
+  void StartNotifyConnected() {
+    absl::MutexLock lk(&m_register_mutex_);
+    m_notify_ctld_connected_ = true;
+  }
+
+  void StopNotifyConnected() {
+    absl::MutexLock lk(&m_register_mutex_);
+    m_notify_ctld_connected_ = false;
+  }
+
+  void StartRegister(const std::vector<task_id_t>& nonexistent_jobs,
+                     const RegToken& token) {
+    absl::MutexLock lk(&m_register_mutex_);
+    m_registering_ = true;
+    m_nonexistent_jobs_ = nonexistent_jobs;
+    m_token_ = token;
+  }
+
+  void StopRegister() {
+    absl::MutexLock lk(&m_register_mutex_);
+    m_registering_ = false;
+  };
+
+  void CranedUp() {
+    absl::MutexLock lk(&m_register_mutex_);
+    m_up_lined_ = true;
+  }
 
   void TaskStatusChangeAsync(TaskStatusChangeQueueElem&& task_status_change);
 
@@ -59,9 +93,7 @@ class CtldClient {
 
   [[nodiscard]] CranedId GetCranedId() const { return m_craned_id_; };
 
-  inline void StartConnectingCtld() {
-    m_start_connecting_notification_.Notify();
-  }
+  void StartConnectingCtld() { m_start_connecting_notification_.Notify(); }
 
  private:
   void AsyncSendThread_();
@@ -80,7 +112,22 @@ class CtldClient {
 
   CranedId m_craned_id_;
 
+  absl::Mutex m_cb_mutex_;
+  std::function<void()> m_on_ctld_connected_cb_ ABSL_GUARDED_BY(m_cb_mutex_);
+  std::function<void()> m_on_ctld_disconnected_cb_ ABSL_GUARDED_BY(m_cb_mutex_);
+
   absl::Notification m_start_connecting_notification_;
+
+  // Register status
+  absl::Mutex m_register_mutex_;
+  bool m_notify_ctld_connected_{false} ABSL_GUARDED_BY(m_register_mutex_);
+  bool m_registering_{false} ABSL_GUARDED_BY(m_register_mutex_);
+  bool m_up_lined_{false} ABSL_GUARDED_BY(m_register_mutex_);
+  std::vector<task_id_t> m_nonexistent_jobs_ ABSL_GUARDED_BY(m_register_mutex_);
+  RegToken m_token_ ABSL_GUARDED_BY(m_register_mutex_);
+
+  void NotifyCranedConnected_() const;
+  void CranedReady_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_register_mutex_);
 };
 
 }  // namespace Craned

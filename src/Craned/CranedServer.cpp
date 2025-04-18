@@ -20,14 +20,32 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include "CtldClient.h"
 #include "TaskManager.h"
 
 namespace Craned {
+
+grpc::Status CranedServiceImpl::Configure(
+    grpc::ServerContext *context,
+    const crane::grpc::ConfigureCranedRequest *request,
+    google::protobuf::Empty *response) {
+  CRANE_TRACE("Receive ConfigureCraned RPC from CraneCtld.");
+  g_ctld_client->StopNotifyConnected();
+  if (!g_server->ReceiveConfigure(request))
+    g_ctld_client->StartNotifyConnected();
+  return Status::OK;
+}
 
 grpc::Status CranedServiceImpl::ExecuteTask(
     grpc::ServerContext *context,
     const crane::grpc::ExecuteTasksRequest *request,
     crane::grpc::ExecuteTasksReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    for (auto const &task_to_d : request->tasks())
+      response->add_failed_task_id_list(task_to_d.task_id());
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
   CRANE_TRACE("Requested from CraneCtld to execute {} tasks.",
               request->tasks_size());
 
@@ -45,6 +63,11 @@ grpc::Status CranedServiceImpl::TerminateTasks(
     grpc::ServerContext *context,
     const crane::grpc::TerminateTasksRequest *request,
     crane::grpc::TerminateTasksReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_reason("CranedServer is not ready");
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
   CRANE_TRACE("Receive TerminateTasks for tasks {}",
               absl::StrJoin(request->task_id_list(), ","));
 
@@ -59,6 +82,11 @@ grpc::Status CranedServiceImpl::TerminateOrphanedTask(
     grpc::ServerContext *context,
     const crane::grpc::TerminateOrphanedTaskRequest *request,
     crane::grpc::TerminateOrphanedTaskReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_reason("CranedServer is not ready");
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
   g_task_mgr->MarkTaskAsOrphanedAndTerminateAsync(request->task_id());
   response->set_ok(true);
 
@@ -69,6 +97,11 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPort(
     grpc::ServerContext *context,
     const crane::grpc::QueryTaskIdFromPortRequest *request,
     crane::grpc::QueryTaskIdFromPortReply *response) {
+  if (!g_server->ReadyFor(RequestSource::PAM)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_ok(false);
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
   CRANE_TRACE("Receive QueryTaskIdFromPort RPC from {}: port: {}",
               context->peer(), request->port());
 
@@ -167,6 +200,10 @@ grpc::Status CranedServiceImpl::CreateCgroupForTasks(
     grpc::ServerContext *context,
     const crane::grpc::CreateCgroupForTasksRequest *request,
     crane::grpc::CreateCgroupForTasksReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
   std::vector<CgroupSpec> cg_specs;
   for (int i = 0; i < request->task_id_list_size(); i++) {
     task_id_t task_id = request->task_id_list(i);
@@ -193,6 +230,10 @@ grpc::Status CranedServiceImpl::ReleaseCgroupForTasks(
     grpc::ServerContext *context,
     const crane::grpc::ReleaseCgroupForTasksRequest *request,
     crane::grpc::ReleaseCgroupForTasksReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
   for (int i = 0; i < request->task_id_list_size(); ++i) {
     task_id_t task_id = request->task_id_list(i);
     uid_t uid = request->uid_list(i);
@@ -213,6 +254,11 @@ grpc::Status CranedServiceImpl::QueryTaskIdFromPortForward(
     grpc::ServerContext *context,
     const crane::grpc::QueryTaskIdFromPortForwardRequest *request,
     crane::grpc::QueryTaskIdFromPortForwardReply *response) {
+  if (!g_server->ReadyFor(RequestSource::PAM)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_ok(false);
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
   bool ok;
   bool task_id_found = false;
   bool remote_is_craned = false;
@@ -367,6 +413,11 @@ grpc::Status CranedServiceImpl::MigrateSshProcToCgroup(
     grpc::ServerContext *context,
     const crane::grpc::MigrateSshProcToCgroupRequest *request,
     crane::grpc::MigrateSshProcToCgroupReply *response) {
+  if (!g_server->ReadyFor(RequestSource::PAM)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_ok(false);
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
   CRANE_TRACE("Moving pid {} to cgroup of task #{}", request->pid(),
               request->task_id());
   bool ok =
@@ -387,6 +438,11 @@ Status CranedServiceImpl::QueryTaskEnvVariables(
     grpc::ServerContext *context,
     const ::crane::grpc::QueryTaskEnvVariablesRequest *request,
     crane::grpc::QueryTaskEnvVariablesReply *response) {
+  if (!g_server->ReadyFor(RequestSource::PAM)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_ok(false);
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
   auto task_env_map = g_task_mgr->QueryTaskEnvMapAsync(request->task_id());
   if (task_env_map.has_value()) {
     for (const auto &[name, value] : task_env_map.value())
@@ -402,6 +458,11 @@ grpc::Status CranedServiceImpl::QueryTaskEnvVariablesForward(
     grpc::ServerContext *context,
     const crane::grpc::QueryTaskEnvVariablesForwardRequest *request,
     crane::grpc::QueryTaskEnvVariablesForwardReply *response) {
+  if (!g_server->ReadyFor(RequestSource::PAM)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_ok(false);
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
   // First query local device related env list
   auto res_envs_opt = g_cg_mgr->GetResourceEnvMapOfTask(request->task_id());
   if (!res_envs_opt.has_value()) {
@@ -472,7 +533,11 @@ grpc::Status CranedServiceImpl::CheckTaskStatus(
     const crane::grpc::CheckTaskStatusRequest *request,
     crane::grpc::CheckTaskStatusReply *response) {
   crane::grpc::TaskStatus status{};
-
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_ok(false);
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
   bool exist = g_task_mgr->CheckTaskStatusAsync(request->task_id(), &status);
   response->set_ok(exist);
   response->set_status(status);
@@ -484,6 +549,11 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
     grpc::ServerContext *context,
     const crane::grpc::ChangeTaskTimeLimitRequest *request,
     crane::grpc::ChangeTaskTimeLimitReply *response) {
+  if (!g_server->ReadyFor(RequestSource::CTLD)) {
+    CRANE_ERROR("CranedServer is not ready.");
+    response->set_ok(false);
+    return Status(grpc::StatusCode::UNAVAILABLE, "CranedServer is not ready");
+  }
   bool ok = g_task_mgr->ChangeTaskTimeLimitAsync(
       request->task_id(), absl::Seconds(request->time_limit_seconds()));
   response->set_ok(ok);
@@ -491,34 +561,10 @@ grpc::Status CranedServiceImpl::ChangeTaskTimeLimit(
   return Status::OK;
 }
 
-grpc::Status CranedServiceImpl::QueryCranedRemoteMeta(
-    grpc::ServerContext *context,
-    const ::crane::grpc::QueryCranedRemoteMetaRequest *request,
-    crane::grpc::QueryCranedRemoteMetaReply *response) {
-  auto *grpc_meta = response->mutable_craned_remote_meta();
-
-  auto &dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->dedicated_res;
-  grpc_meta->mutable_dres_in_node()->CopyFrom(
-      static_cast<crane::grpc::DedicatedResourceInNode>(dres));
-
-  grpc_meta->set_craned_version(CRANE_VERSION_STRING);
-
-  const SystemRelInfo &sys_info = g_config.CranedMeta.SysInfo;
-  auto *grpc_sys_rel_info = grpc_meta->mutable_sys_rel_info();
-  grpc_sys_rel_info->set_name(sys_info.name);
-  grpc_sys_rel_info->set_release(sys_info.release);
-  grpc_sys_rel_info->set_version(sys_info.version);
-
-  grpc_meta->mutable_craned_start_time()->set_seconds(
-      ToUnixSeconds(g_config.CranedMeta.CranedStartTime));
-  grpc_meta->mutable_system_boot_time()->set_seconds(
-      ToUnixSeconds(g_config.CranedMeta.SystemBootTime));
-
-  response->set_ok(true);
-  return Status::OK;
-}
-
-CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
+CranedServer::CranedServer(
+    const Config::CranedListenConf &listen_conf,
+    std::promise<crane::grpc::ConfigureCranedRequest> &&init_promise)
+    : m_configure_promise_(std::move(init_promise)) {
   m_service_impl_ = std::make_unique<CranedServiceImpl>();
 
   grpc::ServerBuilder builder;
@@ -549,6 +595,53 @@ CranedServer::CranedServer(const Config::CranedListenConf &listen_conf) {
     p_server->Shutdown();
     CRANE_INFO("Grpc Server Shutdown() was called.");
   });
+}
+
+RegToken CranedServer::GetRegisterToken() {
+  absl::MutexLock lk(&m_register_mutex_);
+  if (!m_register_token_.has_value()) {
+    m_register_token_ = ToProtoTimestamp(std::chrono::steady_clock::now());
+    CRANE_TRACE("New register token: {}",
+                ProtoTimestampToString(m_register_token_.value()));
+  }
+  return m_register_token_.value();
+}
+
+bool CranedServer::ReceiveConfigure(
+    const crane::grpc::ConfigureCranedRequest *request) {
+  absl::MutexLock reg_lk(&m_register_mutex_);
+  if (m_register_token_.has_value()) {
+    if (m_register_token_.value() != request->token()) {
+      CRANE_DEBUG(
+          "ConfigureCraned failed. Expected to receive token:{} but got "
+          "{}",
+          ProtoTimestampToString(m_register_token_.value()),
+          ProtoTimestampToString(request->token()));
+      return false;
+    } else {
+      m_register_token_.reset();
+    }
+  } else {
+    CRANE_WARN("Receive configure request but craned dose not have token.");
+    return false;
+  }
+  absl::MutexLock lk(&m_configure_promise_mtx_);
+  if (m_configure_promise_.has_value()) {
+    // Receiver should call StartRegister;
+    m_configure_promise_.value().set_value(*request);
+    m_configure_promise_.reset();
+  } else {
+    g_ctld_client->StartRegister({}, request->token());
+  }
+  CRANE_DEBUG("Receive configure request successfully.");
+
+  return true;
+}
+
+void CranedServer::PostRecvConfig(
+    const crane::grpc::ConfigureCranedRequest &request,
+    const std::vector<task_id_t> &nonexistent_jobs) {
+  g_ctld_client->StartRegister(nonexistent_jobs, request.token());
 }
 
 }  // namespace Craned

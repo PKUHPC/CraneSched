@@ -93,23 +93,65 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::CranedRegister(
+grpc::Status CraneCtldServiceImpl::CranedConnectedCtld(
     grpc::ServerContext *context,
-    const crane::grpc::CranedRegisterRequest *request,
-    crane::grpc::CranedRegisterReply *response) {
+    const crane::grpc::CranedConnectedCtldNotify *request,
+    google::protobuf::Empty *response) {
+  const auto &craned_id = request->craned_id();
+  CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    CRANE_WARN("Reject register request from unknown node {}",
+               request->craned_id());
+    return grpc::Status::OK;
+  }
+  if (!g_craned_keeper->IsCranedConnected(craned_id)) {
+    CRANE_TRACE("Put craned {} into unavail.", craned_id);
+    g_craned_keeper->PutNodeIntoUnavailSet(craned_id, request->token());
+  } else {
+    // Before configure, craned should be connected but not online
+    if (!g_meta_container->CheckCranedOnline(craned_id)) {
+      auto stub = g_craned_keeper->GetCranedStub(craned_id);
+      if (stub != nullptr) stub->ConfigureCraned(craned_id, request->token());
+    } else {
+      CRANE_TRACE("Already online craned {} notify craned connected.",
+                  craned_id);
+    }
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::CranedReady(
+    grpc::ServerContext *context,
+    const crane::grpc::CranedReadyRequest *request,
+    crane::grpc::CranedReadyReply *response) {
+  CRANE_TRACE("Craned {} trying to register.", request->craned_id());
+  if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
+    CRANE_WARN("Reject register request from unknown node {}",
+               request->craned_id());
     response->set_ok(false);
     return grpc::Status::OK;
   }
 
-  bool alive = g_meta_container->CheckCranedOnline(request->craned_id());
-  if (!alive) {
-    g_craned_keeper->PutNodeIntoUnavailList(request->craned_id());
+  if (!g_craned_keeper->IsCranedConnected(request->craned_id())) {
+    // Be careful! Ctld to craned channel disconnected during craned
+    // configuration. Now we don't care about this.
+    g_craned_keeper->PutNodeIntoUnavailSet(request->craned_id(),
+                                           request->token());
+    CRANE_DEBUG("Craned {} to be ready is not connected.",
+                request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
   }
 
+  if (g_meta_container->CheckCranedOnline(request->craned_id())) {
+    CRANE_WARN("Reject register request from already online node {}",
+               request->craned_id());
+    response->set_ok(false);
+    return grpc::Status::OK;
+  }
+  g_meta_container->CranedUp(request);
   response->set_ok(true);
-  response->set_already_registered(alive);
-
   return grpc::Status::OK;
 }
 
@@ -1197,6 +1239,7 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<CraneCtldServiceImpl>(this);
 
   grpc::ServerBuilder builder;
+  ServerBuilderSetKeepAliveArgs(&builder);
 
   if (g_config.CompressedRpc) ServerBuilderSetCompression(&builder);
 
@@ -1223,13 +1266,14 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
              listen_conf.UseTls);
 
   // Avoid the potential deadlock error in underlying absl::mutex
-  std::thread sigint_waiting_thread([p_server = m_server_.get()] {
-    util::SetCurrentThreadName("SIGINT_Waiter");
+  std::thread signal_waiting_thread([p_server = m_server_.get()] {
+    util::SetCurrentThreadName("SIG_Waiter");
 
-    std::unique_lock<std::mutex> lk(s_sigint_mtx);
+    std::unique_lock<std::mutex> lk(s_exit_mtx);
     s_sigint_cv.wait(lk);
 
-    CRANE_TRACE("SIGINT captured. Calling Shutdown() on grpc server...");
+    CRANE_TRACE(
+        "SIGINT or SIGTERM captured. Calling Shutdown() on grpc server...");
 
     // craned_keeper MUST be shutdown before GrpcServer.
     // Otherwise, once GrpcServer is shut down, the main thread stops and
@@ -1241,9 +1285,10 @@ CtldServer::CtldServer(const Config::CraneCtldListenConf &listen_conf) {
     p_server->Shutdown(std::chrono::system_clock::now() +
                        std::chrono::seconds(1));
   });
-  sigint_waiting_thread.detach();
+  signal_waiting_thread.detach();
 
   signal(SIGINT, &CtldServer::signal_handler_func);
+  signal(SIGTERM, &CtldServer::signal_handler_func);
 }
 
 CraneExpected<std::future<task_id_t>> CtldServer::SubmitTaskToScheduler(

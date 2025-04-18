@@ -798,21 +798,19 @@ void InitializeCtldGlobalVariables() {
 
   g_craned_keeper = std::make_unique<CranedKeeper>(g_config.Nodes.size());
 
-  g_craned_keeper->SetCranedIsUpCb([](const CranedId& craned_id) {
-    CRANE_DEBUG(
-        "A new node #{} is up now. Add its resource to the global resource "
-        "pool.",
-        craned_id);
+  g_craned_keeper->SetCranedConnectedCb(
+      [](const CranedId& craned_id, const google::protobuf::Timestamp& token) {
+        CRANE_DEBUG("CranedNode #{} Connected.", craned_id);
+        auto stub = g_craned_keeper->GetCranedStub(craned_id);
+        if (stub == nullptr) {
+          CRANE_ERROR("CranedNode #{} has no stub.", craned_id);
+          return;
+        }
+        stub->ConfigureCraned(craned_id, token);
+      });
 
-    g_thread_pool->detach_task(
-        [craned_id]() { g_meta_container->CranedUp(craned_id); });
-  });
-
-  g_craned_keeper->SetCranedIsDownCb([](const CranedId& craned_id) {
-    CRANE_DEBUG(
-        "CranedNode #{} is down now. "
-        "Remove its resource from the global resource pool.",
-        craned_id);
+  g_craned_keeper->SetCranedDisconnectedCb([](const CranedId& craned_id) {
+    CRANE_DEBUG("CranedNode #{} Disconnected.", craned_id);
     g_meta_container->CranedDown(craned_id);
     g_task_scheduler->TerminateTasksOnCraned(craned_id,
                                              ExitCode::kExitCodeCranedDown);
@@ -842,24 +840,24 @@ void InitializeCtldGlobalVariables() {
   std::chrono::time_point<std::chrono::system_clock> wait_end_point =
       std::chrono::system_clock::now() + std::chrono::seconds(timeout);
 
-  g_craned_keeper->InitAndRegisterCraneds(to_register_craned_list);
-  while (true) {
-    auto online_cnt = g_craned_keeper->AvailableCranedCount();
-    if (online_cnt >= to_registered_craneds_cnt) {
-      CRANE_INFO("All craned nodes are up.");
-      break;
-    }
-
-    std::this_thread::sleep_for(
-        std::chrono::microseconds(timeout * 1000 /*ms*/ / 100));
-    if (std::chrono::system_clock::now() > wait_end_point) {
-      CRANE_INFO(
-          "Waiting all craned node to be online timed out. Continuing. "
-          "{} craned is online. Total: {}.",
-          online_cnt, to_registered_craneds_cnt);
-      break;
-    }
-  }
+  // g_craned_keeper->InitAndRegisterCraneds(to_register_craned_list);
+  // while (true) {
+  //   auto online_cnt = g_craned_keeper->AvailableCranedCount();
+  //   if (online_cnt >= to_registered_craneds_cnt) {
+  //     CRANE_INFO("All craned nodes are up.");
+  //     break;
+  //   }
+  //
+  //   std::this_thread::sleep_for(
+  //       std::chrono::microseconds(timeout * 1000 /*ms*/ / 100));
+  //   if (std::chrono::system_clock::now() > wait_end_point) {
+  //     CRANE_INFO(
+  //         "Waiting all craned node to be online timed out. Continuing. "
+  //         "{} craned is online. Total: {}.",
+  //         online_cnt, to_registered_craneds_cnt);
+  //     break;
+  //   }
+  // }
 
   g_task_scheduler = std::make_unique<TaskScheduler>();
   ok = g_task_scheduler->Init();
