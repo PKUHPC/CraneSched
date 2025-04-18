@@ -393,6 +393,7 @@ struct TaskInCtld {
 
   crane::grpc::RuntimeAttrOfTask const& RuntimeAttr() { return runtime_attr; }
 
+
   void SetTaskId(task_id_t id) {
     task_id = id;
     runtime_attr.set_task_id(id);
@@ -495,8 +496,7 @@ struct TaskInCtld {
 
     partition_id = (val.partition_name().empty()) ? g_config.DefaultPartition
                                                   : val.partition_name();
-    requested_node_res_view = static_cast<ResourceView>(val.resources());
-
+    requested_node_res_view = static_cast<ResourceView>(val.req_resources());
     time_limit = absl::Seconds(val.time_limit().seconds());
 
     type = val.type();
@@ -569,6 +569,10 @@ struct TaskInCtld {
       }
 
       resources = static_cast<ResourceV2>(runtime_attr.resources());
+      allocated_res_view.SetToZero();
+      for (const auto& [craned_id, resource] : resources.EachNodeResMap()) {
+        allocated_res_view += resource;
+      }
     }
 
     nodes_alloc = craned_ids.size();
@@ -611,9 +615,8 @@ struct TaskInCtld {
     task_info->mutable_execution_node()->Assign(executing_craned_ids.begin(),
                                                 executing_craned_ids.end());
 
-    *task_info->mutable_res_view() =
+    *task_info->mutable_req_res_view() =
         static_cast<crane::grpc::ResourceView>(requested_node_res_view);
-
     task_info->set_exit_code(runtime_attr.exit_code());
     task_info->set_priority(cached_priority);
 
@@ -623,6 +626,16 @@ struct TaskInCtld {
     } else {
       task_info->set_craned_list(allocated_craneds_regex);
     }
+    task_info->set_exclusive(task_to_ctld.exclusive());
+
+    auto* mutable_allocated_res_view = task_info->mutable_allocated_res_view();
+    auto* mutable_allocated_alloc_res =
+        mutable_allocated_res_view->mutable_allocatable_res();
+    *mutable_allocated_alloc_res =
+        static_cast<crane::grpc::AllocatableResource>(
+            allocated_res_view.GetAllocatableRes());
+    mutable_allocated_res_view->set_device_map(
+        allocated_res_view.GetDeviceMapStr());
   }
 };
 
