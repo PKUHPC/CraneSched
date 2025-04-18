@@ -83,6 +83,8 @@ void CtldClient::NotifyCranedConnected_() const {
   req.set_craned_id(g_config.CranedIdOfThisNode);
   *req.mutable_token() = g_server->GetRegisterToken();
   grpc::ClientContext context;
+  context.set_deadline(std::chrono::system_clock::now() +
+                       std::chrono::seconds(1));
   google::protobuf::Empty reply;
   grpc::Status status = m_stub_->CranedConnectedCtld(&context, req, &reply);
   if (!status.ok()) {
