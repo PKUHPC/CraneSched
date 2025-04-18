@@ -497,6 +497,10 @@ grpc::Status CranedServiceImpl::QueryCranedRemoteMeta(
     crane::grpc::QueryCranedRemoteMetaReply *response) {
   auto *grpc_meta = response->mutable_craned_remote_meta();
 
+  for (const auto &interface : g_config.CranedMeta.NetworkInterfaces) {
+    *grpc_meta->add_network_interfaces() = interface;
+  }
+
   auto &dres = g_config.CranedRes[g_config.CranedIdOfThisNode]->dedicated_res;
   grpc_meta->mutable_dres_in_node()->CopyFrom(
       static_cast<crane::grpc::DedicatedResourceInNode>(dres));

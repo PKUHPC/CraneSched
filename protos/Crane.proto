@@ -782,6 +782,16 @@ message StreamTaskIOReply {
   }
 }
 
+message ExecutePowerActionRequest {
+  uint32 uid = 1;
+  string craned_id = 2;
+  PowerAction action = 3;
+}
+
+message ExecutePowerActionReply {
+  bool ok = 1;
+}
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -831,6 +841,8 @@ service CraneCtld {
 
   /* common RPCs */
   rpc QueryTasksInfo(QueryTasksInfoRequest) returns (QueryTasksInfoReply);
+
+  rpc ExecutePowerAction(ExecutePowerActionRequest) returns (ExecutePowerActionReply);
 }
 
 service Craned {
