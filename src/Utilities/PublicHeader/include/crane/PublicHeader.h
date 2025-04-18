@@ -17,8 +17,8 @@
  */
 
 #pragma once
-
 #include <google/protobuf/util/time_util.h>
+#include <fmt/format.h>
 
 #include <array>
 #include <expected>
@@ -468,7 +468,7 @@ class ResourceView {
   }
 
   const DeviceMap& GetDeviceMap() const { return device_map; }
-  void SetDeviceMap(const DedicatedResourceInNode& dedicated_res_in_node);
+  std::string GetDeviceMapStr();
 
  private:
   AllocatableResource allocatable_res;

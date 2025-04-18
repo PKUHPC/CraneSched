@@ -15,7 +15,6 @@
  * You should have received a copy of the GNU Affero General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-
 #include "crane/PublicHeader.h"
 
 AllocatableResource& AllocatableResource::operator+=(
@@ -642,20 +641,49 @@ ResourceView::ResourceView(const crane::grpc::ResourceView& rhs) {
 
 bool ResourceView::IsDeviceMapZero() const { return device_map.empty(); }
 
-void ResourceView::SetDeviceMap(
-    const DedicatedResourceInNode& dedicated_res_in_node) {
-  this->device_map.clear();
-  for (const auto& [name, type_slots_map_list] :
-       dedicated_res_in_node.name_type_slots_map) {
-    uint64_t untyped_req_count = 0;
-    std::unordered_map<std::string, uint64_t> type_total_map;
-    for (const auto& [type, slots] : type_slots_map_list.type_slots_map) {
-      uint64_t type_count = slots.size();
-      type_total_map[type] = type_count;
+std::string ResourceView::GetDeviceMapStr() {
+  uint64_t total_count = 0;
+  for (const auto& [device_name, entry] : this->device_map) {
+    const auto& [untyped_req_count, typed_cnt_map] = entry;
+    total_count += untyped_req_count;
+    for (const auto& [type, count] : typed_cnt_map) {
+      total_count += count;
     }
-    this->device_map[name] =
-        std::make_pair(untyped_req_count, std::move(type_total_map));
   }
+
+  if (total_count == 0) {
+    return "";
+  }
+
+  std::string result;
+  bool is_first_device = true;
+
+  for (const auto& [device_name, entry] : this->device_map) {
+    const auto& [untyped_req_count, typed_cnt_map] = entry;
+
+    if (!is_first_device) {
+      result += "; ";
+    } else {
+      is_first_device = false;
+    }
+
+    result += fmt::format("{}:", device_name);
+
+    if (untyped_req_count > 0) {
+      result += fmt::format("untyped:{}", untyped_req_count);
+    }
+
+    bool is_first_type = (untyped_req_count == 0);
+    for (const auto& [type, count] : typed_cnt_map) {
+      if (!is_first_type) {
+        result += ",";
+      } else {
+        is_first_type = false;
+      }
+      result += fmt::format("{}:{}", type, count);
+    }
+  }
+  return result;
 }
 
 ResourceView::operator crane::grpc::ResourceView() const {
