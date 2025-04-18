@@ -37,7 +37,7 @@ CranedStub::~CranedStub() {
 }
 
 void CranedStub::ConfigureCraned(const CranedId &craned_id,
-                                 const google::protobuf::Timestamp &token) {
+                                 const RegToken &token) {
   CRANE_TRACE("Configuring craned {} with token {}:{}", craned_id,
               token.seconds(), token.nanos());
 
@@ -486,7 +486,7 @@ CranedKeeper::CqTag *CranedKeeper::InitCranedStateMachine_(
       m_connected_craned_id_stub_map_.emplace(craned->m_craned_id_, craned);
       craned->m_invalid_ = false;
     }
-    google::protobuf::Timestamp token;
+    RegToken token;
     {
       util::lock_guard guard(m_unavail_craned_set_mtx_);
       token = m_unavail_craned_set_.at(craned->m_craned_id_);
@@ -642,7 +642,7 @@ std::shared_ptr<CranedStub> CranedKeeper::GetCranedStub(
 }
 
 void CranedKeeper::SetCranedConnectedCb(
-    std::function<void(CranedId, const google::protobuf::Timestamp &)> cb) {
+    std::function<void(CranedId, const RegToken &)> cb) {
   m_craned_connected_cb_ = std::move(cb);
 }
 
@@ -650,16 +650,16 @@ void CranedKeeper::SetCranedDisconnectedCb(std::function<void(CranedId)> cb) {
   m_craned_disconnected_cb_ = std::move(cb);
 }
 
-void CranedKeeper::PutNodeIntoUnavailSet(
-    const std::string &crane_id, const google::protobuf::Timestamp &token) {
+void CranedKeeper::PutNodeIntoUnavailSet(const std::string &crane_id,
+                                         const RegToken &token) {
   if (m_cq_closed_) return;
 
   util::lock_guard guard(m_unavail_craned_set_mtx_);
   m_unavail_craned_set_.emplace(crane_id, token);
 }
 
-void CranedKeeper::ConnectCranedNode_(
-    CranedId const &craned_id, const google::protobuf::Timestamp &token) {
+void CranedKeeper::ConnectCranedNode_(CranedId const &craned_id,
+                                      const RegToken &token) {
   static Mutex s_craned_id_to_ip_cache_map_mtx;
   static std::unordered_map<CranedId, std::variant<ipv4_t, ipv6_t>>
       s_craned_id_to_ip_cache_map;

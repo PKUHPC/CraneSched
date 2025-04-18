@@ -24,6 +24,7 @@
 namespace Ctld {
 
 using moodycamel::ConcurrentQueue;
+using RegToken = google::protobuf::Timestamp;
 
 using task_db_id_t = int64_t;
 

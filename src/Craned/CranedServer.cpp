@@ -597,7 +597,7 @@ CranedServer::CranedServer(
   });
 }
 
-google::protobuf::Timestamp CranedServer::GetRegisterToken() {
+RegToken CranedServer::GetRegisterToken() {
   absl::MutexLock lk(&m_register_mutex_);
   if (!m_register_token_.has_value()) {
     m_register_token_ = ToProtoTimestamp(std::chrono::steady_clock::now());

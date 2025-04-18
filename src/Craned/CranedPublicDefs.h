@@ -31,6 +31,7 @@ inline constexpr uint64_t kConnectCtldSlowRetryMs = 10'000;
 inline constexpr uint64_t kInitialFastRetries = 5;
 
 using EnvMap = std::unordered_map<std::string, std::string>;
+using RegToken = google::protobuf::Timestamp;
 
 struct TaskStatusChangeQueueElem {
   task_id_t task_id{};

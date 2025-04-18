@@ -39,8 +39,7 @@ class CranedStub {
 
   ~CranedStub();
 
-  void ConfigureCraned(const CranedId &craned_id,
-                       const google::protobuf::Timestamp &token);
+  void ConfigureCraned(const CranedId &craned_id, const RegToken &token);
 
   static crane::grpc::ExecuteTasksRequest NewExecuteTasksRequests(
       const CranedId &craned_id, const std::vector<TaskInCtld *> &tasks);
@@ -123,13 +122,12 @@ class CranedKeeper {
    */
   std::shared_ptr<CranedStub> GetCranedStub(const CranedId &craned_id);
 
-  void SetCranedConnectedCb(
-      std::function<void(CranedId, const google::protobuf::Timestamp &)> cb);
+  void SetCranedConnectedCb(std::function<void(CranedId, const RegToken &)> cb);
 
   void SetCranedDisconnectedCb(std::function<void(CranedId)> cb);
 
   void PutNodeIntoUnavailSet(const std::string &crane_id,
-                             const google::protobuf::Timestamp &token);
+                             const RegToken &token);
 
  private:
   struct CqTag {
@@ -140,8 +138,7 @@ class CranedKeeper {
 
   static void CranedChannelConnectFail_(CranedStub *stub);
 
-  void ConnectCranedNode_(CranedId const &craned_id,
-                          const google::protobuf::Timestamp &token);
+  void ConnectCranedNode_(CranedId const &craned_id, const RegToken &token);
 
   CqTag *InitCranedStateMachine_(CranedStub *craned,
                                  grpc_connectivity_state new_state);
@@ -152,8 +149,7 @@ class CranedKeeper {
 
   void PeriodConnectCranedThreadFunc_();
 
-  std::function<void(CranedId, const google::protobuf::Timestamp &)>
-      m_craned_connected_cb_;
+  std::function<void(CranedId, const RegToken &)> m_craned_connected_cb_;
 
   // Guarantee that the Craned will not be freed before this callback is
   // called.
@@ -172,10 +168,10 @@ class CranedKeeper {
       m_connected_craned_id_stub_map_ ABSL_GUARDED_BY(m_connected_craned_mtx_);
 
   Mutex m_unavail_craned_set_mtx_;
-  std::unordered_map<CranedId, google::protobuf::Timestamp>
-      m_unavail_craned_set_ ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
-  std::unordered_map<CranedId, google::protobuf::Timestamp>
-      m_connecting_craned_set_ ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
+  std::unordered_map<CranedId, RegToken> m_unavail_craned_set_
+      ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
+  std::unordered_map<CranedId, RegToken> m_connecting_craned_set_
+      ABSL_GUARDED_BY(m_unavail_craned_set_mtx_);
 
   std::vector<grpc::CompletionQueue> m_cq_vec_;
   std::vector<Mutex> m_cq_mtx_vec_;

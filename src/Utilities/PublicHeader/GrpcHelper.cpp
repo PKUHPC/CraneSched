@@ -47,7 +47,7 @@ std::chrono::system_clock::time_point ChronoFromProtoTimestamp(
 
 std::string ProtoTimestampToString(
     const google::protobuf::Timestamp& timestamp) {
-  return fmt::format("{}:{}", timestamp.seconds(), timestamp.nanos());
+  return fmt::format("{}{}", timestamp.seconds(), timestamp.nanos());
 }
 
 static std::string GrpcFormatIpAddress(std::string const& addr) {
