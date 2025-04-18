@@ -216,6 +216,43 @@ struct CranedMeta {
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
   absl::flat_hash_map<task_id_t, ResourceInNode> running_task_resource_map;
+
+  struct ReservationInNode {
+    absl::Time start_time;
+    absl::Time end_time;
+    ResourceInNode res_total;
+  };
+  // Store total resource of each reservation.
+  absl::flat_hash_map<ReservationId, ReservationInNode> reserved_resource_map;
+};
+
+struct LogicalPartition {
+  absl::Time start_time;
+  absl::Time end_time;
+
+  ResourceV2 res_total;
+  ResourceV2 res_avail;
+  ResourceV2 res_in_use;
+
+  std::list<CranedId> craned_ids;
+
+  struct RunningTaskResource {
+    absl::Time end_time;  // sync with TaskInCtld
+    ResourceV2 resources;
+  };
+
+  absl::flat_hash_map<task_id_t, RunningTaskResource> running_task_resource_map;
+};
+
+struct ReservationMeta {
+  ReservationId name;
+  PartitionId partition_id;
+  LogicalPartition logical_partition;
+
+  bool accounts_black_list{false};
+  bool users_black_list{false};
+  std::unordered_set<std::string> accounts;
+  std::unordered_set<std::string> users;
 };
 
 struct PartitionGlobalMeta {
@@ -318,6 +355,8 @@ struct TaskInCtld {
   std::string extra_attr;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
+
+  std::string reservation;
 
  private:
   /* ------------- [2] -------------
@@ -534,6 +573,8 @@ struct TaskInCtld {
     get_user_env = val.get_user_env();
 
     extra_attr = val.extra_attr();
+
+    reservation = val.reservation();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {
