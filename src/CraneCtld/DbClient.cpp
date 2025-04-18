@@ -110,8 +110,9 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
   return true;
 }
 
-bool MongodbClient::InsertRecoveredJob(TaskInCtld* task) {
-  document doc = TaskInEmbeddedDbToDocument_(task);
+bool MongodbClient::InsertRecoveredJob(
+    const crane::grpc::TaskInEmbeddedDb& task_in_embedded_db) {
+  document doc = TaskInEmbeddedDbToDocument_(task_in_embedded_db);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
       (*GetClient_())[m_db_name_][m_task_collection_name_].insert_one(
@@ -323,11 +324,17 @@ bool MongodbClient::FetchJobRecords(
       mutable_req_alloc_res->set_memory_sw_limit_bytes(
           view["mem_req"].get_int64().value);
 
-      task->set_alloc_cpus_total(view["cpus_alloc_total"].get_double().value);
-      task->set_alloc_mem_total(view["mem_alloc_total"].get_int64().value);
-      task->set_alloc_device_total(
+      auto* mutable_allocated_res_view = task->mutable_allocated_res_view();
+      auto* mutable_allocated_alloc_res =
+          mutable_allocated_res_view->mutable_allocatable_res();
+      mutable_allocated_alloc_res->set_cpu_core_limit(
+          view["cpus_alloc_total"].get_double().value);
+      mutable_allocated_alloc_res->set_memory_limit_bytes(
+          view["mem_alloc_total"].get_int64().value);
+      mutable_allocated_alloc_res->set_memory_sw_limit_bytes(
+          view["mem_alloc_total"].get_int64().value);
+      mutable_allocated_res_view->set_device_map(
           view["device_alloc_total"].get_string().value);
-
       task->set_name(std::string(view["task_name"].get_string().value));
       task->set_qos(std::string(view["qos"].get_string().value));
       task->set_uid(view["id_user"].get_int32().value);
@@ -819,9 +826,16 @@ bsoncxx::builder::basic::document MongodbClient::QosToDocument_(
 }
 
 MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
-    TaskInCtld* task) {
-  auto const& task_to_ctld = task->TaskToCtld();
-  auto const& runtime_attr = task->RuntimeAttr();
+    const crane::grpc::TaskInEmbeddedDb& task) {
+  auto const& task_to_ctld = task.task_to_ctld();
+  auto const& runtime_attr = task.runtime_attr();
+
+  auto resources = static_cast<ResourceV2>(runtime_attr.resources());
+  ResourceView allocated_res_view;
+  allocated_res_view.SetToZero();
+  for (const auto& [craned_id, resource] : resources.EachNodeResMap()) {
+    allocated_res_view += resource;
+  }
 
   bsoncxx::builder::stream::document env_doc;
   for (const auto& entry : task_to_ctld.env()) {
