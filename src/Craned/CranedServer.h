@@ -120,7 +120,7 @@ class CranedServer {
 
   void Wait() { m_server_->Wait(); }
 
-  [[nodiscard]] google::protobuf::Timestamp GetRegisterToken();
+  [[nodiscard]] RegToken GetRegisterToken();
 
   bool ReceiveConfigure(const crane::grpc::ConfigureCranedRequest *request);
 
@@ -163,8 +163,7 @@ class CranedServer {
 
   // Craned Register status
   absl::Mutex m_register_mutex_ ABSL_ACQUIRED_BEFORE(m_configure_promise_);
-  std::optional<google::protobuf::Timestamp> m_register_token_
-      ABSL_GUARDED_BY(m_register_mutex_);
+  std::optional<RegToken> m_register_token_ ABSL_GUARDED_BY(m_register_mutex_);
 
   friend class CranedServiceImpl;
 };

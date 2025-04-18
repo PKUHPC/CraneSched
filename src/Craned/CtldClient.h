@@ -69,7 +69,7 @@ class CtldClient {
   }
 
   void StartRegister(const std::vector<task_id_t>& nonexistent_jobs,
-                     const google::protobuf::Timestamp& token) {
+                     const RegToken& token) {
     absl::MutexLock lk(&m_register_mutex_);
     m_registering_ = true;
     m_nonexistent_jobs_ = nonexistent_jobs;
@@ -124,7 +124,7 @@ class CtldClient {
   bool m_registering_{false} ABSL_GUARDED_BY(m_register_mutex_);
   bool m_up_lined_{false} ABSL_GUARDED_BY(m_register_mutex_);
   std::vector<task_id_t> m_nonexistent_jobs_ ABSL_GUARDED_BY(m_register_mutex_);
-  google::protobuf::Timestamp m_token_ ABSL_GUARDED_BY(m_register_mutex_);
+  RegToken m_token_ ABSL_GUARDED_BY(m_register_mutex_);
 
   void NotifyCranedConnected_() const;
   void CranedReady_() ABSL_EXCLUSIVE_LOCKS_REQUIRED(m_register_mutex_);
