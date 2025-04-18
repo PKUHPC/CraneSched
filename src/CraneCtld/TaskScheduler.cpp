@@ -1519,10 +1519,6 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
 
   PartitionId partition = request.partition();
 
-  // TODO: Add support for partial node reservation
-  // ResourceView resources;
-  bool whole_node = true;
-
   ReservationId reservation_name = request.reservation_name();
   auto reservation_meta_map = g_meta_container->GetReservationMetaMapPtr();
   if (reservation_meta_map->contains(reservation_name)) {
@@ -1571,44 +1567,31 @@ std::expected<void, std::string> TaskScheduler::AddReservation(
       if (craned_meta.get() == nullptr) {
         return std::unexpected(fmt::format("Node {} not found", craned_id));
       }
-      ResourceInNode res_avail = craned_meta->res_total;
+      // use static_meta in case of craned dead
+      ResourceInNode res_avail = craned_meta->static_meta.res;
       for (const auto& [task_id, res] :
            craned_meta->running_task_resource_map) {
         const auto& task = m_running_task_map_.at(task_id);
         absl::Time task_end_time = task->StartTime() + task->time_limit;
         if (task_end_time > start_time) {
-          if (whole_node) {
-            return std::unexpected(
-                fmt::format("Node {} has running tasks that end after the "
-                            "reservation start time",
-                            craned_id));
-          }
-          res_avail -= res;
+          return std::unexpected(
+              fmt::format("Node {} has running tasks that end after the "
+                          "reservation start time",
+                          craned_id));
         }
       }
       for (const auto& [reservation_name, reservation] :
            craned_meta->reserved_resource_map) {
         if (reservation.start_time < end_time &&
             reservation.end_time > start_time) {
-          if (whole_node) {
-            return std::unexpected(
-                fmt::format("Node {} has reservations that overlap with the "
-                            "new reservation",
-                            craned_id));
-          }
-          res_avail -= reservation.res_total;
+          return std::unexpected(fmt::format(
+              "Node {} has reservations that overlap with the new reservation",
+              craned_id));
         }
       }
-      ResourceInNode feasible_res;
-      if (whole_node) {
-        feasible_res = res_avail;
-      } else {
-        // Partial node reservation ResourceView resources
-      }
-
-      allocated_res.AddResourceInNode(craned_id, feasible_res);
+      allocated_res.AddResourceInNode(craned_id, res_avail);
       craned_meta_res_vec.emplace_back(std::move(craned_meta),
-                                       std::move(feasible_res));
+                                       std::move(res_avail));
     }
   }
 
