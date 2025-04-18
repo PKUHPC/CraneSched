@@ -374,13 +374,10 @@ bool TaskScheduler::Init() {
 
     std::vector<task_db_id_t> db_ids;
     for (auto& [db_id, task_in_embedded_db] : snapshot.final_queue) {
-      auto task = std::make_unique<TaskInCtld>();
-      task->SetFieldsByTaskToCtld(task_in_embedded_db.task_to_ctld());
-      task->SetFieldsByRuntimeAttr(task_in_embedded_db.runtime_attr());
-      task_id_t task_id = task->RuntimeAttr().task_id();
+      task_id_t task_id = task_in_embedded_db.runtime_attr().task_id();
       ok = g_db_client->CheckTaskDbIdExisted(db_id);
       if (!ok) {
-        if (!g_db_client->InsertRecoveredJob(task.get())) {
+        if (!g_db_client->InsertRecoveredJob(task_in_embedded_db)) {
           CRANE_ERROR(
               "Failed to call g_db_client->InsertRecoveredJob() "
               "for task #{}",
@@ -2038,6 +2035,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   task->allocated_res_view.SetToZero();
 
   absl::Time earliest_end_time = now + task->time_limit;
+  std::unordered_map<std::string, ResourceView> allocated_node_res_view_map;
 
   for (const auto& craned_index :
        node_selection_info.GetCostNodeIdSet() | std::views::values) {
@@ -2093,14 +2091,11 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     if (task->TaskToCtld().exclusive()) {
       ResourceView& allocated_node_res_view =
-          task->allocated_node_res_view_map[craned_index];
-      allocated_node_res_view.GetAllocatableRes() =
-          craned_meta->res_total.allocatable_res;
-      allocated_node_res_view.SetDeviceMap(
-          craned_meta->res_total.dedicated_res);
+          allocated_node_res_view_map[craned_index];
+      allocated_node_res_view.SetToZero();
+      allocated_node_res_view += craned_meta->res_total;
     } else {
-      task->allocated_node_res_view_map[craned_index] =
-          task->requested_node_res_view;
+      allocated_node_res_view_map[craned_index] = task->requested_node_res_view;
     }
 
     if constexpr (kAlgoRedundantNode) {
@@ -2117,8 +2112,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       // TODO: Performance issue! Consider speeding up with multiple threads.
       ResourceInNode feasible_res;
       bool ok =
-          task->allocated_node_res_view_map[craned_index]
-              .GetFeasibleResourceInNode(craned_meta->res_avail, &feasible_res);
+          allocated_node_res_view_map[craned_index].GetFeasibleResourceInNode(
+              craned_meta->res_avail, &feasible_res);
       if (ok) {
         bool is_node_satisfied_now = true;
         for (const auto& [time, res] :
@@ -2155,13 +2150,11 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
 
     // TODO: get feasible resource randomly (may cause start time change
     //       rapidly)
-    bool ok =
-        task->allocated_node_res_view_map[craned_id].GetFeasibleResourceInNode(
-            craned_meta->res_avail, &feasible_res);
+    bool ok = allocated_node_res_view_map[craned_id].GetFeasibleResourceInNode(
+        craned_meta->res_avail, &feasible_res);
     if (!ok) {
-      ok =
-          task->allocated_node_res_view_map[craned_id]
-              .GetFeasibleResourceInNode(craned_meta->res_total, &feasible_res);
+      ok = allocated_node_res_view_map[craned_id].GetFeasibleResourceInNode(
+          craned_meta->res_total, &feasible_res);
     }
     if (!ok) {
       CRANE_DEBUG(
@@ -2245,7 +2238,6 @@ void MinLoadFirst::NodeSelect(
           node_info, part_meta, *craned_meta_map, task.get(), now, &craned_ids,
           &expected_start_time);
       if (!ok) {
-        task->allocated_node_res_view_map.clear();
         continue;
       }
 
@@ -2294,8 +2286,9 @@ void MinLoadFirst::NodeSelect(
       // takes effect right now. Otherwise, during the scheduling for the
       // next partition, the algorithm may use the resource which is already
       // allocated.
-      task->UpdateTotalAllocatedRes();  // Update the total resources allocated
-                                        // to the task
+      // task->UpdateTotalAllocatedRes();  // Update the total resources
+      // allocated
+      // to the task
       for (CranedId const& craned_id : craned_ids)
         g_meta_container->MallocResourceFromNode(craned_id, task->TaskId(),
                                                  task->Resources());
