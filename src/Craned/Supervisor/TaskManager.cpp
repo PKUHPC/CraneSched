@@ -1376,11 +1376,16 @@ std::future<CraneExpected<pid_t>> TaskManager::ExecuteTaskAsync(
     const StepToSuper& spec) {
   std::promise<CraneExpected<pid_t>> pid_promise;
   auto pid_future = pid_promise.get_future();
-
   auto elem = ExecuteTaskElem{.pid_prom = std::move(pid_promise)};
 
   if (spec.container().length() != 0) {
     // Container
+    if (!g_config.Container.Enabled) {
+      // Container job is not supported in this node.
+      elem.pid_prom.set_value(CraneErrCode::ERR_INVALID_PARAM);
+      return pid_future;
+    }
+
     elem.instance = std::make_unique<ContainerInstance>(&m_step_spec_);
   } else {
     // Process
