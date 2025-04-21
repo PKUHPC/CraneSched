@@ -34,8 +34,10 @@ struct BatchMetaInProcessInstance {
   std::string parsed_error_file_pattern;
 };
 
-struct CrunMetaInProcessInstance : public BatchMetaInProcessInstance {
+struct CrunMetaInProcessInstance {
   std::string parsed_input_file_pattern;
+  std::string parsed_output_file_pattern;
+  std::string parsed_error_file_pattern;
 };
 
 class ProcessInstance {
@@ -225,10 +227,12 @@ class TaskManager {
   void TaskStopAndDoStatusChangeAsync(uint32_t task_id);
 
   void SetNonblocking(const int fd);
-  void MonitorFileToInputPipe(const int in_file_fd, const int out_pipe_fd);
-  void MonitorPipToSingle(const int pipe_fd, const int out_fd);
-  void MonitorPipToMulti(const int pipe_fd, const int out_pipe_fd,
-                         const int stdout_fd);
+  void CleanUp(uvw::poll_handle& handle, int pipe_fd, int out_fd,
+               int stdout_fd = -1);
+  void TransferFileToInputPipe(const int in_file_fd, const int out_pipe_fd);
+  void TransferPipeToOutput(const int pipe_fd, const int out_fd);
+  void TransferPipeToMultipleOutputs(const int pipe_fd, const int out_pipe_fd,
+                                     const int stdout_fd);
 
   // Wait internal libevent base loop to exit...
   void Wait();
