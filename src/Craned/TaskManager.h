@@ -226,13 +226,21 @@ class TaskManager {
 
   void TaskStopAndDoStatusChangeAsync(uint32_t task_id);
 
-  void SetNonblocking(const int fd);
+  bool SetNonblocking(const int fd);
+
   void CleanUp(uvw::poll_handle& handle, int pipe_fd, int out_fd,
                int stdout_fd = -1);
+
   void TransferFileToInputPipe(const int in_file_fd, const int out_pipe_fd);
+
   void TransferPipeToOutput(const int pipe_fd, const int out_fd);
+
   void TransferPipeToMultipleOutputs(const int pipe_fd, const int out_pipe_fd,
                                      const int stdout_fd);
+
+  void HandlePollEvent(const uvw::poll_event& event, uvw::poll_handle& handle,
+                       int pipe_fd, int out_fd, int stdout_fd,
+                       bool is_multiple_output);
 
   // Wait internal libevent base loop to exit...
   void Wait();

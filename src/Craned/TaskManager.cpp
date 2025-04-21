@@ -526,15 +526,17 @@ void TaskManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
 
-void TaskManager::SetNonblocking(const int fd) {
+bool TaskManager::SetNonblocking(const int fd) {
   int flags = fcntl(fd, F_GETFL, 0);
   if (flags == -1) {
     CRANE_DEBUG("Failed to get flags for fd {}: {}", fd, strerror(errno));
-    return;
+    return false;
   }
   if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
     CRANE_DEBUG("Failed to set fd {} to non-blocking: {}", fd, strerror(errno));
+    return false;
   }
+  return true;
 }
 
 void TaskManager::TransferFileToInputPipe(const int in_file_fd,
@@ -573,93 +575,92 @@ void TaskManager::TransferFileToInputPipe(const int in_file_fd,
   poll_handle->start(uvw::poll_handle::poll_event_flags::WRITABLE);
 }
 
+void TaskManager::HandlePollEvent(const uvw::poll_event& event,
+                                  uvw::poll_handle& handle, int pipe_fd,
+                                  int out_fd, int stdout_fd,
+                                  bool is_multiple_output) {
+  constexpr ssize_t MAX_SIZE = 4096;
+
+  while (true) {
+    ssize_t bytes = is_multiple_output
+                        ? tee(pipe_fd, out_fd, MAX_SIZE, SPLICE_F_NONBLOCK)
+                        : splice(pipe_fd, nullptr, out_fd, nullptr, MAX_SIZE,
+                                 SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
+
+    if (bytes < 0) {
+      if (errno == EAGAIN) {
+        // Data temporarily unavailable, exit the loop and wait for the next
+        // event
+        return;
+      }
+      // Error handling
+      CRANE_DEBUG("Error in splice/tee: {}", strerror(errno));
+      CleanUp(handle, pipe_fd, out_fd, stdout_fd);
+      return;
+    }
+
+    if (bytes == 0) {
+      CleanUp(handle, pipe_fd, out_fd, stdout_fd);
+      return;
+    }
+
+    if (is_multiple_output) {
+      ssize_t remaining = bytes;
+      while (remaining > 0) {
+        ssize_t bytes_spliced =
+            splice(pipe_fd, nullptr, stdout_fd, nullptr, remaining,
+                   SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
+        if (bytes_spliced < 0) {
+          if (errno == EAGAIN) {
+            ssize_t updated_bytes_tee =
+                tee(pipe_fd, out_fd, MAX_SIZE, SPLICE_F_NONBLOCK);
+            if (updated_bytes_tee < 0) {
+              if (errno == EAGAIN) {
+                return;
+              }
+              CRANE_DEBUG("Error when reevaluating tee: {}", strerror(errno));
+              CleanUp(handle, pipe_fd, out_fd, stdout_fd);
+              return;
+            }
+            remaining = updated_bytes_tee;
+            break;
+          }
+          CRANE_DEBUG("Error in splice for multiple outputs: {}",
+                      strerror(errno));
+          CleanUp(handle, pipe_fd, out_fd, stdout_fd);
+          return;
+        }
+        remaining -= bytes_spliced;
+      }
+    }
+  }
+}
+
 void TaskManager::TransferPipeToOutput(const int pipe_fd, const int out_fd) {
   auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(pipe_fd);
   auto keep_alive = poll_handle;
 
-  poll_handle->on<uvw::poll_event>([this, keep_alive, pipe_fd, out_fd](
-                                       const uvw::poll_event&,
-                                       uvw::poll_handle& handle) {
-    constexpr ssize_t MAX_SIZE = 4096;
+  poll_handle->on<uvw::poll_event>(
+      [this, keep_alive, pipe_fd, out_fd](const uvw::poll_event& event,
+                                          uvw::poll_handle& handle) {
+        HandlePollEvent(event, handle, pipe_fd, out_fd, -1, false);
+      });
 
-    while (true) {
-      ssize_t bytes_splice = splice(pipe_fd, nullptr, out_fd, nullptr, MAX_SIZE,
-                                    SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
-
-      if (bytes_splice < 0) {
-        if (errno == EAGAIN) {
-          // Data temporarily unavailable, exit loop and wait for next event
-          return;
-        }
-        // Error handling
-        CRANE_DEBUG("Error in err splice: {}", strerror(errno));
-        CleanUp(handle, pipe_fd, out_fd);
-        return;
-      }
-
-      if (bytes_splice == 0) {
-        // Pipe closed, stop listening and close resources
-        CleanUp(handle, pipe_fd, out_fd);
-        return;
-      }
-    }
-  });
-
-  // Start poll handle for READABLE events
   poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
 }
 
-void TaskManager::TransferPipeToMultipleOutputs(const int pipe_fd, const int out_pipe_fd,
-                                    const int stdout_fd) {
+void TaskManager::TransferPipeToMultipleOutputs(const int pipe_fd,
+                                                const int out_pipe_fd,
+                                                const int stdout_fd) {
   auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(pipe_fd);
   auto keep_alive = poll_handle;
-  // Register a callback function for readable events
+
   poll_handle->on<uvw::poll_event>(
       [this, keep_alive, pipe_fd, out_pipe_fd, stdout_fd](
-          const uvw::poll_event&, uvw::poll_handle& handle) {
-        constexpr ssize_t MAX_SIZE = 4096;
-
-        while (true) {
-          ssize_t bytes_tee =
-              tee(pipe_fd, out_pipe_fd, MAX_SIZE, SPLICE_F_NONBLOCK);
-          if (bytes_tee < 0) {
-            if (errno == EAGAIN) {
-              // Data temporarily unavailable, exit loop and wait for next event
-              return;
-            }
-            // Error handling
-            CRANE_DEBUG("Error in out tee: {}", strerror(errno));
-            CleanUp(handle, pipe_fd, out_pipe_fd, stdout_fd);
-            return;
-          }
-
-          if (bytes_tee == 0) {
-            // Pipe closed, stop listening and close resources
-            CleanUp(handle, pipe_fd, out_pipe_fd, stdout_fd);
-            return;
-          }
-
-          ssize_t bytes_splice = 0;
-          while (bytes_tee > 0) {
-            bytes_splice = splice(pipe_fd, nullptr, stdout_fd, nullptr,
-                                  bytes_tee, SPLICE_F_MOVE | SPLICE_F_NONBLOCK);
-            if (bytes_splice < 0) {
-              if (errno == EAGAIN) {
-                // Data temporarily unavailable, exit loop and wait for next
-                // event
-                break;
-              }
-              // Error handling
-              CRANE_DEBUG("Error in out splice: {}", strerror(errno));
-              CleanUp(handle, pipe_fd, out_pipe_fd, stdout_fd);
-              return;
-            }
-            bytes_tee -= bytes_splice;
-          }
-        }
+          const uvw::poll_event& event, uvw::poll_handle& handle) {
+        HandlePollEvent(event, handle, pipe_fd, out_pipe_fd, stdout_fd, true);
       });
 
-  // Start poll handle for READABLE events
   poll_handle->start(uvw::poll_handle::poll_event_flags::READABLE);
 }
 
@@ -673,6 +674,7 @@ void TaskManager::CleanUp(uvw::poll_handle& handle, int pipe_fd, int out_fd,
     close(stdout_fd);
   }
 }
+
 CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
                                                   ProcessInstance* process) {
   using google::protobuf::io::FileInputStream;
@@ -685,10 +687,10 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
 
   int ctrl_sock_pair[2];  // Socket pair for passing control messages.
 
-  int craned_crun_pipe[2];
-  int crun_craned_pipe[2];
-  int crun_craned_output_pipe[2];
-  int crun_craned_err_pipe[2];
+  int craned_crun_pipe[2] = {-1, -1};
+  int crun_craned_pipe[2] = {-1, -1};
+  int crun_craned_output_pipe[2] = {-1, -1};
+  int crun_craned_err_pipe[2] = {-1, -1};
 
   // The ResourceInNode structure should be copied here for being accessed in
   // the child process.
@@ -743,6 +745,17 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
   bool launch_pty{false};
   int crun_pty_fd;
 
+  auto cleanup_pipes = [&]() {
+    close(craned_crun_pipe[0]);
+    close(craned_crun_pipe[1]);
+    close(crun_craned_pipe[0]);
+    close(crun_craned_pipe[1]);
+    close(crun_craned_output_pipe[0]);
+    close(crun_craned_output_pipe[1]);
+    close(crun_craned_err_pipe[0]);
+    close(crun_craned_err_pipe[1]);
+  };
+
   if (instance->IsCrun()) {
     auto* crun_meta =
         dynamic_cast<CrunMetaInTaskInstance*>(instance->meta.get());
@@ -759,18 +772,21 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
     if (pipe(crun_craned_pipe) == -1) {
       CRANE_ERROR("[Task #{}] Failed to create pipe for task io forward: {}",
                   instance->task.task_id(), strerror(errno));
+      cleanup_pipes();
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
 
     if (pipe(crun_craned_output_pipe) == -1) {
       CRANE_ERROR("[Task #{}] Failed to create pipe for task output: {}",
                   instance->task.task_id(), strerror(errno));
+      cleanup_pipes();
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
 
     if (pipe(crun_craned_err_pipe) == -1) {
       CRANE_ERROR("[Task #{}] Failed to create pipe for task err output: {}",
                   instance->task.task_id(), strerror(errno));
+      cleanup_pipes();
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
 
@@ -822,8 +838,8 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
           int stdout_fd;
           const std::string& stdout_file_path =
               process->crun_meta.parsed_output_file_pattern;
-          stdout_fd =
-              open(stdout_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+          stdout_fd = open(stdout_file_path.c_str(),
+                           O_WRONLY | O_CREAT | O_TRUNC, 0644);
           if (stdout_fd == -1) {
             CRANE_DEBUG("[Task #{}] Error: open output file {}. {}\n",
                         instance->task.task_id(), stdout_file_path,
@@ -861,11 +877,13 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
         const std::string& stderr_file_path =
             process->crun_meta.parsed_error_file_pattern;
         stderr_fd =
-            open(stderr_file_path.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
+            open(stderr_file_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (stderr_fd == -1) {
           CRANE_DEBUG("[Task #{}] Error: open err file  {}. {}\n",
                       instance->task.task_id(), stderr_file_path,
                       strerror(errno));
+          close(crun_craned_output_pipe[0]);
+          close(crun_craned_pipe[1]);
           KillProcessInstance_(process, SIGKILL);
           return CraneErrCode::ERR_OPEN_FILE;
         }
