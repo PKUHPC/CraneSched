@@ -54,18 +54,10 @@ class CranedMetaContainer final {
       util::AtomicHashMap<HashMap, CranedId, CranedMeta>;
   using CranedMetaRawMap = CranedMetaAtomicMap::RawMap;
 
-  using ReservationMetaAtomicMap =
-      util::AtomicHashMap<HashMap, std::string, ReservationMeta>;
-  using ReservationMetaRawMap = ReservationMetaAtomicMap::RawMap;
-
   using AllPartitionsMetaMapConstPtr =
       util::ScopeConstSharedPtr<AllPartitionsMetaRawMap, util::rw_mutex>;
   using CranedMetaMapConstPtr =
       util::ScopeConstSharedPtr<CranedMetaRawMap, util::rw_mutex>;
-  using ReservationMetaMapConstPtr =
-      util::ScopeConstSharedPtr<ReservationMetaRawMap, util::rw_mutex>;
-
-  using ReservationMetaMapPtr = ReservationMetaAtomicMap::MapSharedPtr;
 
   using PartitionMetaPtr =
       util::ManagedScopeExclusivePtr<PartitionMeta,
@@ -73,9 +65,6 @@ class CranedMetaContainer final {
   using CranedMetaPtr =
       util::ManagedScopeExclusivePtr<CranedMeta,
                                      CranedMetaAtomicMap::CombinedLock>;
-  using ReservationMetaPtr =
-      util::ManagedScopeExclusivePtr<ReservationMeta,
-                                     ReservationMetaAtomicMap::CombinedLock>;
 
   CranedMetaContainer() = default;
   ~CranedMetaContainer() = default;
@@ -93,11 +82,6 @@ class CranedMetaContainer final {
 
   crane::grpc::QueryPartitionInfoReply QueryPartitionInfo(
       const PartitionId& partition_name);
-
-  crane::grpc::QueryReservationInfoReply QueryAllReservationInfo();
-
-  crane::grpc::QueryReservationInfoReply QueryReservationInfo(
-      const ReservationId& reservation_name);
 
   crane::grpc::QueryClusterInfoReply QueryClusterInfo(
       const crane::grpc::QueryClusterInfoRequest& request);
@@ -118,19 +102,13 @@ class CranedMetaContainer final {
 
   bool CheckCranedOnline(const CranedId& craned_id);
 
-  PartitionMetaPtr GetPartitionMetasPtr(PartitionId partition_id);
+  PartitionMetaPtr GetPartitionMetasPtr(const PartitionId& partition_id);
 
-  CranedMetaPtr GetCranedMetaPtr(CranedId craned_id);
-
-  ReservationMetaPtr GetReservationMetaPtr(const ReservationId& name);
+  CranedMetaPtr GetCranedMetaPtr(const CranedId& craned_id);
 
   AllPartitionsMetaMapConstPtr GetAllPartitionsMetaMapConstPtr();
 
   CranedMetaMapConstPtr GetCranedMetaMapConstPtr();
-
-  ReservationMetaMapConstPtr GetReservationMetaMapConstPtr();
-
-  ReservationMetaMapPtr GetReservationMetaMapPtr();
 
   bool CheckCranedAllowed(const std::string& hostname) {
     return craned_meta_map_.Contains(hostname);
@@ -141,12 +119,32 @@ class CranedMetaContainer final {
 
   void FreeResourceFromNode(CranedId craned_id, uint32_t task_id);
 
-  void MallocResourceFromReservation(
-      ReservationId reservation_id, task_id_t task_id,
-      const LogicalPartition::RunningTaskResource& resources);
+  // TODO: Move to Reservation Mini-Scheduler. Craned only use LogicalPartition.
+  using ResvMetaAtomicMap = util::AtomicHashMap<HashMap, std::string, ResvMeta>;
+  using ResvMetaRawMap = ResvMetaAtomicMap::RawMap;
 
-  void FreeResourceFromReservation(ReservationId reservation_id,
-                                   task_id_t task_id);
+  using ResvMetaMapConstPtr =
+      util::ScopeConstSharedPtr<ResvMetaRawMap, util::rw_mutex>;
+
+  using ResvMetaMapPtr = ResvMetaAtomicMap::MapSharedPtr;
+
+  using ResvMetaPtr =
+      util::ManagedScopeExclusivePtr<ResvMeta, ResvMetaAtomicMap::CombinedLock>;
+
+  crane::grpc::QueryReservationInfoReply QueryAllResvInfo();
+
+  crane::grpc::QueryReservationInfoReply QueryResvInfo(const ResvId& resv_name);
+
+  ResvMetaPtr GetResvMetaPtr(const ResvId& name);
+
+  ResvMetaMapConstPtr GetResvMetaMapConstPtr();
+
+  ResvMetaMapPtr GetResvMetaMapPtr();
+
+  void MallocResourceFromResv(ResvId resv_id, task_id_t task_id,
+                              const LogicalPartition::RnTaskRes& res);
+
+  void FreeResourceFromResv(ResvId reservation_id, task_id_t task_id);
 
  private:
   // In this part of code, the following lock sequence MUST be held
@@ -157,7 +155,9 @@ class CranedMetaContainer final {
   // 4. unlock elements in partition_meta_map_
   CranedMetaAtomicMap craned_meta_map_;
   AllPartitionsMetaAtomicMap partition_meta_map_;
-  ReservationMetaAtomicMap reservation_meta_map_;
+
+  // TODO: Move to Reservation Logical Partition.
+  ResvMetaAtomicMap resv_meta_map_;
 
   // A craned node may belong to multiple partitions.
   // Use this map as a READ-ONLY index, so multi-thread reading is ok.

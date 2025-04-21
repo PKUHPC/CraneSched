@@ -213,17 +213,24 @@ struct CranedMeta {
   std::string state_reason;
   absl::Time last_busy_time;
 
+  // *********************************************************
+  // TODO: Refactor as Unused LogicalPartition
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
-  absl::flat_hash_map<task_id_t, ResourceInNode> running_task_resource_map;
+  absl::flat_hash_map<task_id_t, ResourceInNode> rn_task_res_map;
+  // *********************************************************
 
-  struct ReservationInNode {
+  // *********************************************************
+  // TODO: Refactor as Reservation LogicalPartition (Might be pointer)
+  struct ResvInNode {
     absl::Time start_time;
     absl::Time end_time;
     ResourceInNode res_total;
   };
+
   // Store total resource of each reservation.
-  absl::flat_hash_map<ReservationId, ReservationInNode> reserved_resource_map;
+  absl::flat_hash_map<ResvId, ResvInNode> resv_in_node_map;
+  // **********************************************************
 };
 
 struct LogicalPartition {
@@ -236,18 +243,18 @@ struct LogicalPartition {
 
   std::list<CranedId> craned_ids;
 
-  struct RunningTaskResource {
+  struct RnTaskRes {
     absl::Time end_time;  // sync with TaskInCtld
     ResourceV2 resources;
   };
 
-  absl::flat_hash_map<task_id_t, RunningTaskResource> running_task_resource_map;
+  absl::flat_hash_map<task_id_t, RnTaskRes> rn_task_res_map;
 };
 
-struct ReservationMeta {
-  ReservationId name;
-  PartitionId partition_id;
-  LogicalPartition logical_partition;
+struct ResvMeta {
+  ResvId name;
+  PartitionId part_id;
+  LogicalPartition logical_part;
 
   bool accounts_black_list{false};
   bool users_black_list{false};

@@ -309,6 +309,7 @@ class MinLoadFirst : public INodeSelectionAlgo {
       return m_cost_node_id_set_;
     }
 
+    // Todo: Move to Reservation Mini-Scheduler.
     absl::Time GetFirstResvTime(const CranedId& craned_id) {
       auto iter = m_first_resv_time_map_.find(craned_id);
       if (iter == m_first_resv_time_map_.end()) return absl::InfiniteFuture();
@@ -379,12 +380,11 @@ class MinLoadFirst : public INodeSelectionAlgo {
         }
 
         absl::Time kth_time = m_satisfied_iters_.KthTime();
-        if (kth_time == absl::InfiniteFuture()) {
-          continue;
-        }
-        if ((m_time_priority_queue_.empty() ||
-             kth_time + task->time_limit <=
-                 (*m_time_priority_queue_.top())->first)) {
+        if (kth_time == absl::InfiniteFuture()) continue;
+
+        if (m_time_priority_queue_.empty() ||
+            kth_time + task->time_limit <=
+                (*m_time_priority_queue_.top())->first) {
           *start_time = kth_time;
 
           craned_ids->clear();
@@ -420,10 +420,11 @@ class MinLoadFirst : public INodeSelectionAlgo {
       const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
       NodeSelectionInfo* node_selection_info);
 
+  // TODO: Move to Reservation Mini-Scheduler.
   static void CalculateNodeSelectionInfoOfReservation_(
       const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtld>>&
           running_tasks,
-      absl::Time now, const ReservationMeta* reservation_meta,
+      absl::Time now, const ResvMeta* resv_meta,
       const CranedMetaContainer::CranedMetaRawMap& craned_meta_map,
       NodeSelectionInfo* node_selection_info);
 
@@ -543,21 +544,23 @@ class TaskScheduler {
   }
 
   static CraneExpected<void> HandleUnsetOptionalInTaskToCtld(TaskInCtld* task);
-  crane::grpc::CreateReservationReply CreateReservation(
-      const crane::grpc::CreateReservationRequest& request);
-
-  std::expected<void, std::string> AddReservation(
-      const crane::grpc::CreateReservationRequest& request);
-
-  crane::grpc::DeleteReservationReply DeleteReservation(
-      const crane::grpc::DeleteReservationRequest& request);
-
-  std::expected<void, std::string> EraseReservationMeta(
-      CranedMetaContainer::ReservationMetaMapPtr& reservation_meta_map,
-      const ReservationId& reservation_id);
-
   static CraneExpected<void> AcquireTaskAttributes(TaskInCtld* task);
   static CraneExpected<void> CheckTaskValidity(TaskInCtld* task);
+
+  // TODO: Move to Reservation Mini-Scheduler.
+  crane::grpc::CreateReservationReply CreateResv(
+      const crane::grpc::CreateReservationRequest& request);
+
+  crane::grpc::DeleteReservationReply DeleteResv(
+      const crane::grpc::DeleteReservationRequest& request);
+
+ private:
+  std::expected<void, std::string> CreateResv_(
+      const crane::grpc::CreateReservationRequest& request);
+
+  std::expected<void, std::string> DeleteResvMeta_(
+      CranedMetaContainer::ResvMetaMapPtr& resv_meta_map,
+      const ResvId& resv_id);
 
  private:
   template <class... Ts>
@@ -624,11 +627,6 @@ class TaskScheduler {
   std::thread m_task_status_change_thread_;
   void TaskStatusChangeThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
-  std::thread m_resv_clean_thread_;
-  void CleanResvThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
-
-  std::shared_ptr<uvw::timer_handle> m_reservation_timer_handle_;
-
   // Working as channels in golang.
   std::shared_ptr<uvw::timer_handle> m_task_timer_handle_;
   void CleanTaskTimerCb_();
@@ -646,15 +644,6 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_task_timer_queue_handle_;
   void CleanTaskTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
-
-  std::unordered_map<ReservationId, std::shared_ptr<uvw::timer_handle>>
-      m_resv_timer_handles_;
-
-  using ResvTimerQueueElem = std::pair<ReservationId, absl::Time>;
-  ConcurrentQueue<ResvTimerQueueElem> m_resv_timer_queue_;
-
-  std::shared_ptr<uvw::async_handle> m_clean_resv_timer_queue_handle_;
-  void CleanResvTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
 
   std::shared_ptr<uvw::timer_handle> m_cancel_task_timer_handle_;
   void CancelTaskTimerCb_();
@@ -707,6 +696,19 @@ class TaskScheduler {
 
   std::shared_ptr<uvw::async_handle> m_clean_task_status_change_handle_;
   void CleanTaskStatusChangeQueueCb_();
+
+  // TODO: Move to Reservation Mini-Scheduler.
+  std::thread m_resv_clean_thread_;
+  void CleanResvThread_(const std::shared_ptr<uvw::loop>& uvw_loop);
+
+  std::unordered_map<ResvId, std::shared_ptr<uvw::timer_handle>>
+      m_resv_timer_handles_;
+
+  using ResvTimerQueueElem = std::pair<ResvId, absl::Time>;
+  ConcurrentQueue<ResvTimerQueueElem> m_resv_timer_queue_;
+
+  std::shared_ptr<uvw::async_handle> m_clean_resv_timer_queue_handle_;
+  void CleanResvTimerQueueCb_(const std::shared_ptr<uvw::loop>& uvw_loop);
 };
 
 }  // namespace Ctld

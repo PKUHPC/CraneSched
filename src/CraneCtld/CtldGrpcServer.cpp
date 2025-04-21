@@ -158,10 +158,10 @@ grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
   }
 
   if (request->reservation_name().empty()) {
-    *response = g_meta_container->QueryAllReservationInfo();
+    *response = g_meta_container->QueryAllResvInfo();
   } else {
     *response =
-        g_meta_container->QueryReservationInfo(request->reservation_name());
+        g_meta_container->QueryResvInfo(request->reservation_name());
   }
   response->set_ok(true);
 
@@ -1033,7 +1033,7 @@ grpc::Status CraneCtldServiceImpl::CreateReservation(
     return grpc::Status::OK;
   }
 
-  *response = g_task_scheduler->CreateReservation(*request);
+  *response = g_task_scheduler->CreateResv(*request);
   return grpc::Status::OK;
 }
 
@@ -1048,7 +1048,7 @@ grpc::Status CraneCtldServiceImpl::DeleteReservation(
     return grpc::Status::OK;
   }
 
-  *response = g_task_scheduler->DeleteReservation(*request);
+  *response = g_task_scheduler->DeleteResv(*request);
   return grpc::Status::OK;
 }
 
