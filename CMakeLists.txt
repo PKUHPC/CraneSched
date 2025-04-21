@@ -426,15 +426,23 @@ install(FILES
 # Install configuration files
 install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         DESTINATION /etc/crane/
+        RENAME config.yaml.sample
         COMPONENT cranectldc
         PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 install(FILES ${CMAKE_SOURCE_DIR}/etc/config.yaml
         DESTINATION /etc/crane/
+        RENAME config.yaml.sample
         COMPONENT cranedc
         PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ)
 
 # Only cranectld needs database.yaml and permission should be 600
+install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
+        DESTINATION /etc/crane/
+        RENAME database.yaml.sample
+        COMPONENT cranectldc
+        PERMISSIONS OWNER_READ OWNER_WRITE)
+
 install(FILES ${CMAKE_SOURCE_DIR}/etc/database.yaml
         DESTINATION /etc/crane/
         COMPONENT cranectldc
@@ -478,22 +486,33 @@ if ! id -u crane &>/dev/null; then
     useradd -r -s /sbin/nologin crane
 fi
 
-# Create /var/crane directory if it doesn't exist
-mkdir -p /var/crane
-
 # Base Directory
+mkdir -p /var/crane
 chown -R crane:crane /var/crane
 chmod 750 /var/crane
 
 # Config Directory
-if [ -d /etc/crane ]; then
-    chown -R crane:crane /etc/crane
-    chmod 750 /etc/crane
+mkdir -p /etc/crane
+chown -R crane:crane /etc/crane
+chmod 750 /etc/crane
+
+# Handle configuration files
+if [ ! -f /etc/crane/config.yaml ]; then
+    if [ -f /etc/crane/config.yaml.sample ]; then
+        cp /etc/crane/config.yaml.sample /etc/crane/config.yaml
+        chown crane:crane /etc/crane/config.yaml
+        chmod 640 /etc/crane/config.yaml
+        echo \"Created new configuration file: /etc/crane/config.yaml\"
+    fi
 fi
 
-if [ -f /etc/crane/database.yaml ]; then
-    chown crane:crane /etc/crane/database.yaml
-    chmod 600 /etc/crane/database.yaml
+if [ ! -f /etc/crane/database.yaml ]; then
+    if [ -f /etc/crane/database.yaml.sample ]; then
+        cp /etc/crane/database.yaml.sample /etc/crane/database.yaml
+        chown crane:crane /etc/crane/database.yaml
+        chmod 600 /etc/crane/database.yaml
+        echo \"Created new configuration file: /etc/crane/database.yaml\"
+    fi
 fi
 
 exit 0
