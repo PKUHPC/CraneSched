@@ -213,9 +213,53 @@ struct CranedMeta {
   std::string state_reason;
   absl::Time last_busy_time;
 
+  // *********************************************************
+  // TODO: Refactor as Unused LogicalPartition
   // Store the information of the slices of allocated resource.
   // One task id owns one shard of allocated resource.
-  absl::flat_hash_map<task_id_t, ResourceInNode> running_task_resource_map;
+  absl::flat_hash_map<task_id_t, ResourceInNode> rn_task_res_map;
+  // *********************************************************
+
+  // *********************************************************
+  // TODO: Refactor as Reservation LogicalPartition (Might be pointer)
+  struct ResvInNode {
+    absl::Time start_time;
+    absl::Time end_time;
+    ResourceInNode res_total;
+  };
+
+  // Store total resource of each reservation.
+  absl::flat_hash_map<ResvId, ResvInNode> resv_in_node_map;
+  // **********************************************************
+};
+
+struct LogicalPartition {
+  absl::Time start_time;
+  absl::Time end_time;
+
+  ResourceV2 res_total;
+  ResourceV2 res_avail;
+  ResourceV2 res_in_use;
+
+  std::list<CranedId> craned_ids;
+
+  struct RnTaskRes {
+    absl::Time end_time;  // sync with TaskInCtld
+    ResourceV2 resources;
+  };
+
+  absl::flat_hash_map<task_id_t, RnTaskRes> rn_task_res_map;
+};
+
+struct ResvMeta {
+  ResvId name;
+  PartitionId part_id;
+  LogicalPartition logical_part;
+
+  bool accounts_black_list{false};
+  bool users_black_list{false};
+  std::unordered_set<std::string> accounts;
+  std::unordered_set<std::string> users;
 };
 
 struct PartitionGlobalMeta {
@@ -318,6 +362,8 @@ struct TaskInCtld {
   std::string extra_attr;
 
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
+
+  std::string reservation;
 
  private:
   /* ------------- [2] -------------
@@ -534,6 +580,8 @@ struct TaskInCtld {
     get_user_env = val.get_user_env();
 
     extra_attr = val.extra_attr();
+
+    reservation = val.reservation();
   }
 
   void SetFieldsByRuntimeAttr(crane::grpc::RuntimeAttrOfTask const& val) {

@@ -180,6 +180,10 @@ class EmbeddedDbClient {
 
   bool RetrieveLastSnapshot(DbSnapshot* snapshot);
 
+  bool RetrieveReservationInfo(
+      std::unordered_map<ResvId, crane::grpc::CreateReservationRequest>*
+          reservation_info_map);
+
   bool BeginVariableDbTransaction(txn_id_t* txn_id) {
     return BeginDbTransaction_(m_variable_db_.get(), txn_id);
   }
@@ -194,6 +198,14 @@ class EmbeddedDbClient {
 
   bool CommitFixedDbTransaction(txn_id_t txn_id) {
     return CommitDbTransaction_(m_fixed_db_.get(), txn_id);
+  }
+
+  bool BeginReservationDbTransaction(txn_id_t* txn_id) {
+    return BeginDbTransaction_(m_resv_db_.get(), txn_id);
+  }
+
+  bool CommitReservationDbTransaction(txn_id_t txn_id) {
+    return CommitDbTransaction_(m_resv_db_.get(), txn_id);
   }
 
   // Note: All operations in transaction will abort or rollback automatically if
@@ -238,6 +250,18 @@ class EmbeddedDbClient {
   bool FetchTaskDataInDb(txn_id_t txn_id, db_id_t db_id,
                          TaskInEmbeddedDb* task_in_db) {  // Only used in test
     return FetchTaskDataInDbAtomic_(txn_id, db_id, task_in_db).has_value();
+  }
+
+  bool UpdateReservationInfo(
+      txn_id_t txn_id, const ResvId& name,
+      const crane::grpc::CreateReservationRequest& reservation_req) {
+    return StoreTypeIntoDb_(m_resv_db_.get(), txn_id, name,
+                            &reservation_req)
+        .has_value();
+  }
+
+  bool DeleteReservationInfo(txn_id_t txn_id, const ResvId& name) {
+    return m_resv_db_->Delete(txn_id, name).has_value();
   }
 
  private:
@@ -484,6 +508,7 @@ class EmbeddedDbClient {
 
   std::unique_ptr<IEmbeddedDb> m_variable_db_;
   std::unique_ptr<IEmbeddedDb> m_fixed_db_;
+  std::unique_ptr<IEmbeddedDb> m_resv_db_;
 };
 
 }  // namespace Ctld

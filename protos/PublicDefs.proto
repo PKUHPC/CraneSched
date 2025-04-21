@@ -146,6 +146,8 @@ message TaskToCtld {
 
   string excludes = 34;
   string nodelist = 35;
+
+  string reservation = 36;
 }
 
 message TaskInEmbeddedDb {
@@ -268,6 +270,7 @@ message TaskInfo {
   repeated string exclude_nodes = 20;
 
   string extra_attr = 21;
+  string reservation = 22;
 
   // Dynamic task information
   bool held = 30;
@@ -324,6 +327,23 @@ message CranedInfo {
   google.protobuf.Timestamp craned_start_time = 14;
   google.protobuf.Timestamp system_boot_time = 15;
   google.protobuf.Timestamp last_busy_time = 16;
+}
+
+message ReservationInfo {
+  string reservation_name = 1;
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Duration duration = 3;
+  string partition = 4;
+  string craned_regex = 5;
+  
+  ResourceView res_total = 6;
+  ResourceView res_avail = 7;
+  ResourceView res_alloc = 8;
+
+  repeated string allowed_accounts = 9;
+  repeated string denied_accounts = 10;
+  repeated string allowed_users = 11;
+  repeated string denied_users = 12;
 }
 
 message TrimmedPartitionInfo {

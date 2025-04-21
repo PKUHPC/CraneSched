@@ -146,6 +146,28 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
   return grpc::Status::OK;
 }
 
+grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
+    grpc::ServerContext *context,
+    const crane::grpc::QueryReservationInfoRequest *request,
+    crane::grpc::QueryReservationInfoReply *response) {
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!res) {
+    response->set_ok(false);
+    response->set_reason(CraneErrStr(res.error()));
+    return grpc::Status::OK;
+  }
+
+  if (request->reservation_name().empty()) {
+    *response = g_meta_container->QueryAllResvInfo();
+  } else {
+    *response =
+        g_meta_container->QueryResvInfo(request->reservation_name());
+  }
+  response->set_ok(true);
+
+  return grpc::Status::OK;
+}
+
 grpc::Status CraneCtldServiceImpl::ModifyTask(
     grpc::ServerContext *context, const crane::grpc::ModifyTaskRequest *request,
     crane::grpc::ModifyTaskReply *response) {
@@ -997,6 +1019,36 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     const crane::grpc::QueryClusterInfoRequest *request,
     crane::grpc::QueryClusterInfoReply *response) {
   *response = g_meta_container->QueryClusterInfo(*request);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::CreateReservation(
+    grpc::ServerContext *context,
+    const crane::grpc::CreateReservationRequest *request,
+    crane::grpc::CreateReservationReply *response) {
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!res) {
+    response->set_ok(false);
+    response->set_reason(CraneErrStr(res.error()));
+    return grpc::Status::OK;
+  }
+
+  *response = g_task_scheduler->CreateResv(*request);
+  return grpc::Status::OK;
+}
+
+grpc::Status CraneCtldServiceImpl::DeleteReservation(
+    grpc::ServerContext *context,
+    const crane::grpc::DeleteReservationRequest *request,
+    crane::grpc::DeleteReservationReply *response) {
+  auto res = g_account_manager->CheckUidIsAdmin(request->uid());
+  if (!res) {
+    response->set_ok(false);
+    response->set_reason(CraneErrStr(res.error()));
+    return grpc::Status::OK;
+  }
+
+  *response = g_task_scheduler->DeleteResv(*request);
   return grpc::Status::OK;
 }
 
