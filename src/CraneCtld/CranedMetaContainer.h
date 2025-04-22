@@ -102,6 +102,8 @@ class CranedMetaContainer final {
 
   bool CheckCranedOnline(const CranedId& craned_id);
 
+  int GetOnlineCranedCount();
+
   PartitionMetaPtr GetPartitionMetasPtr(const PartitionId& partition_id);
 
   CranedMetaPtr GetCranedMetaPtr(const CranedId& craned_id);

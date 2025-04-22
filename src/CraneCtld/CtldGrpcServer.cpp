@@ -106,9 +106,6 @@ grpc::Status CraneCtldServiceImpl::CranedConnectedCtld(
     grpc::ServerContext *context,
     const crane::grpc::CranedConnectedCtldNotify *request,
     google::protobuf::Empty *response) {
-  if (!g_config.Ready.load(std::memory_order_acquire))
-    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
-                        "CraneCtld Server is not ready");
   const auto &craned_id = request->craned_id();
   CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
@@ -137,9 +134,6 @@ grpc::Status CraneCtldServiceImpl::CranedReady(
     grpc::ServerContext *context,
     const crane::grpc::CranedReadyRequest *request,
     crane::grpc::CranedReadyReply *response) {
-  if (!g_config.Ready.load(std::memory_order_acquire))
-    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
-                        "CraneCtld Server is not ready");
   CRANE_TRACE("Craned {} trying to register.", request->craned_id());
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
     CRANE_WARN("Reject register request from unknown node {}",

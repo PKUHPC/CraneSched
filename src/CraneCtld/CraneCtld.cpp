@@ -823,6 +823,9 @@ void InitializeCtldGlobalVariables() {
 
   using namespace std::chrono_literals;
 
+  g_task_scheduler = std::make_unique<TaskScheduler>();
+
+  g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
   // TaskScheduler will always recovery pending or running tasks since last
   // failure, it might be reasonable to wait some time (1s) for all healthy
   // craned nodes (most of the time all the craned nodes are healthy) to be
@@ -838,19 +841,10 @@ void InitializeCtldGlobalVariables() {
                             ((double)to_registered_craneds_cnt - 30000.0)))) -
       13;
   std::chrono::time_point<std::chrono::system_clock> wait_end_point =
-      std::chrono::system_clock::now() + std::chrono::seconds(timeout);
-
-  g_task_scheduler = std::make_unique<TaskScheduler>();
-  ok = g_task_scheduler->Init();
-  if (!ok) {
-    CRANE_ERROR("The initialization of TaskScheduler failed. Exiting...");
-    DestroyCtldGlobalVariables();
-    std::exit(1);
-  }
-
-  g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
+      std::chrono::system_clock::now() + std::chrono::seconds(timeout) +
+      std::chrono::seconds(10);
   while (true) {
-    auto online_cnt = g_craned_keeper->AvailableCranedCount();
+    auto online_cnt = g_meta_container->GetOnlineCranedCount();
     if (online_cnt >= to_registered_craneds_cnt) {
       CRANE_INFO("All craned nodes are up.");
       break;
@@ -865,6 +859,13 @@ void InitializeCtldGlobalVariables() {
           online_cnt, to_registered_craneds_cnt);
       break;
     }
+  }
+
+  ok = g_task_scheduler->Init();
+  if (!ok) {
+    CRANE_ERROR("The initialization of TaskScheduler failed. Exiting...");
+    DestroyCtldGlobalVariables();
+    std::exit(1);
   }
 
   g_config.Ready.store(true, std::memory_order_release);

@@ -113,6 +113,14 @@ bool CranedMetaContainer::CheckCranedOnline(const CranedId& craned_id) {
   return node_meta->alive;
 }
 
+int CranedMetaContainer::GetOnlineCranedCount() {
+  int count = 0;
+  auto map_ptr = craned_meta_map_.GetMapConstSharedPtr();
+  for (auto& v : *map_ptr | std::ranges::views::values)
+    count += v.GetExclusivePtr()->alive;
+  return count;
+}
+
 CranedMetaContainer::PartitionMetaPtr CranedMetaContainer::GetPartitionMetasPtr(
     const PartitionId& partition_id) {
   return partition_meta_map_.GetValueExclusivePtr(partition_id);
