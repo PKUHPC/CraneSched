@@ -840,25 +840,6 @@ void InitializeCtldGlobalVariables() {
   std::chrono::time_point<std::chrono::system_clock> wait_end_point =
       std::chrono::system_clock::now() + std::chrono::seconds(timeout);
 
-  // g_craned_keeper->InitAndRegisterCraneds(to_register_craned_list);
-  // while (true) {
-  //   auto online_cnt = g_craned_keeper->AvailableCranedCount();
-  //   if (online_cnt >= to_registered_craneds_cnt) {
-  //     CRANE_INFO("All craned nodes are up.");
-  //     break;
-  //   }
-  //
-  //   std::this_thread::sleep_for(
-  //       std::chrono::microseconds(timeout * 1000 /*ms*/ / 100));
-  //   if (std::chrono::system_clock::now() > wait_end_point) {
-  //     CRANE_INFO(
-  //         "Waiting all craned node to be online timed out. Continuing. "
-  //         "{} craned is online. Total: {}.",
-  //         online_cnt, to_registered_craneds_cnt);
-  //     break;
-  //   }
-  // }
-
   g_task_scheduler = std::make_unique<TaskScheduler>();
   ok = g_task_scheduler->Init();
   if (!ok) {
@@ -868,6 +849,25 @@ void InitializeCtldGlobalVariables() {
   }
 
   g_ctld_server = std::make_unique<Ctld::CtldServer>(g_config.ListenConf);
+  while (true) {
+    auto online_cnt = g_craned_keeper->AvailableCranedCount();
+    if (online_cnt >= to_registered_craneds_cnt) {
+      CRANE_INFO("All craned nodes are up.");
+      break;
+    }
+
+    std::this_thread::sleep_for(
+        std::chrono::microseconds(timeout * 1000 /*ms*/ / 100));
+    if (std::chrono::system_clock::now() > wait_end_point) {
+      CRANE_INFO(
+          "Waiting all craned node to be online timed out. Continuing. "
+          "{} craned is online. Total: {}.",
+          online_cnt, to_registered_craneds_cnt);
+      break;
+    }
+  }
+
+  g_config.Ready.store(true, std::memory_order_release);
 }
 
 void CreateFolders() {

@@ -30,6 +30,9 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTask(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTaskRequest *request,
     crane::grpc::SubmitBatchTaskReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   auto task = std::make_unique<TaskInCtld>();
   task->SetFieldsByTaskToCtld(request->task());
 
@@ -55,6 +58,9 @@ grpc::Status CraneCtldServiceImpl::SubmitBatchTasks(
     grpc::ServerContext *context,
     const crane::grpc::SubmitBatchTasksRequest *request,
     crane::grpc::SubmitBatchTasksReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   std::vector<CraneExpected<std::future<task_id_t>>> results;
 
   uint32_t task_count = request->count();
@@ -83,6 +89,9 @@ grpc::Status CraneCtldServiceImpl::TaskStatusChange(
     grpc::ServerContext *context,
     const crane::grpc::TaskStatusChangeRequest *request,
     crane::grpc::TaskStatusChangeReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
 
@@ -97,6 +106,9 @@ grpc::Status CraneCtldServiceImpl::CranedConnectedCtld(
     grpc::ServerContext *context,
     const crane::grpc::CranedConnectedCtldNotify *request,
     google::protobuf::Empty *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   const auto &craned_id = request->craned_id();
   CRANE_TRACE("Craned {} requires Ctld to connect.", craned_id);
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
@@ -125,6 +137,9 @@ grpc::Status CraneCtldServiceImpl::CranedReady(
     grpc::ServerContext *context,
     const crane::grpc::CranedReadyRequest *request,
     crane::grpc::CranedReadyReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   CRANE_TRACE("Craned {} trying to register.", request->craned_id());
   if (!g_meta_container->CheckCranedAllowed(request->craned_id())) {
     CRANE_WARN("Reject register request from unknown node {}",
@@ -158,6 +173,9 @@ grpc::Status CraneCtldServiceImpl::CranedReady(
 grpc::Status CraneCtldServiceImpl::CancelTask(
     grpc::ServerContext *context, const crane::grpc::CancelTaskRequest *request,
     crane::grpc::CancelTaskReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   *response = g_task_scheduler->CancelPendingOrRunningTask(*request);
   return grpc::Status::OK;
 }
@@ -166,6 +184,9 @@ grpc::Status CraneCtldServiceImpl::QueryCranedInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryCranedInfoRequest *request,
     crane::grpc::QueryCranedInfoReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   if (request->craned_name().empty()) {
     *response = g_meta_container->QueryAllCranedInfo();
   } else {
@@ -179,6 +200,9 @@ grpc::Status CraneCtldServiceImpl::QueryPartitionInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryPartitionInfoRequest *request,
     crane::grpc::QueryPartitionInfoReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   if (request->partition_name().empty()) {
     *response = g_meta_container->QueryAllPartitionInfo();
   } else {
@@ -192,6 +216,9 @@ grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryReservationInfoRequest *request,
     crane::grpc::QueryReservationInfoReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
     response->set_ok(false);
@@ -212,6 +239,9 @@ grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
 grpc::Status CraneCtldServiceImpl::ModifyTask(
     grpc::ServerContext *context, const crane::grpc::ModifyTaskRequest *request,
     crane::grpc::ModifyTaskReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   using ModifyTaskRequest = crane::grpc::ModifyTaskRequest;
 
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
@@ -300,6 +330,9 @@ grpc::Status CraneCtldServiceImpl::ModifyNode(
     grpc::ServerContext *context,
     const crane::grpc::ModifyCranedStateRequest *request,
     crane::grpc::ModifyCranedStateReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
     for (auto crane_id : request->craned_ids()) {
@@ -321,6 +354,9 @@ grpc::Status CraneCtldServiceImpl::ModifyPartitionAcl(
     grpc::ServerContext *context,
     const crane::grpc::ModifyPartitionAclRequest *request,
     crane::grpc::ModifyPartitionAclReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   CraneExpected<void> result;
 
   std::unordered_set<std::string> accounts;
@@ -355,6 +391,9 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryTasksInfoRequest *request,
     crane::grpc::QueryTasksInfoReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   // Query tasks in RAM
   g_task_scheduler->QueryTasksInRam(request, response);
 
@@ -400,6 +439,9 @@ grpc::Status CraneCtldServiceImpl::QueryTasksInfo(
 grpc::Status CraneCtldServiceImpl::AddAccount(
     grpc::ServerContext *context, const crane::grpc::AddAccountRequest *request,
     crane::grpc::AddAccountReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   Account account;
   const crane::grpc::AccountInfo *account_info = &request->account();
 
@@ -428,6 +470,9 @@ grpc::Status CraneCtldServiceImpl::AddAccount(
 grpc::Status CraneCtldServiceImpl::AddUser(
     grpc::ServerContext *context, const crane::grpc::AddUserRequest *request,
     crane::grpc::AddUserReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   User user;
   const crane::grpc::UserInfo *user_info = &request->user();
 
@@ -468,6 +513,9 @@ grpc::Status CraneCtldServiceImpl::AddUser(
 grpc::Status CraneCtldServiceImpl::AddQos(
     grpc::ServerContext *context, const crane::grpc::AddQosRequest *request,
     crane::grpc::AddQosReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   Qos qos;
   const crane::grpc::QosInfo *qos_info = &request->qos();
 
@@ -501,6 +549,9 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
     grpc::ServerContext *context,
     const crane::grpc::ModifyAccountRequest *request,
     crane::grpc::ModifyAccountReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   if (request->type() == crane::grpc::OperationType::Overwrite &&
       request->modify_field() ==
           crane::grpc::ModifyField::Partition) {  // SetAccountAllowedPartition
@@ -560,6 +611,9 @@ grpc::Status CraneCtldServiceImpl::ModifyAccount(
 grpc::Status CraneCtldServiceImpl::ModifyUser(
     grpc::ServerContext *context, const crane::grpc::ModifyUserRequest *request,
     crane::grpc::ModifyUserReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   CraneExpected<void> modify_res;
 
   if (request->type() == crane::grpc::OperationType::Delete) {
@@ -696,6 +750,9 @@ grpc::Status CraneCtldServiceImpl::ModifyUser(
 grpc::Status CraneCtldServiceImpl::ModifyQos(
     grpc::ServerContext *context, const crane::grpc::ModifyQosRequest *request,
     crane::grpc::ModifyQosReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   auto modify_res =
       g_account_manager->ModifyQos(request->uid(), request->name(),
                                    request->modify_field(), request->value());
@@ -714,6 +771,9 @@ grpc::Status CraneCtldServiceImpl::QueryAccountInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryAccountInfoRequest *request,
     crane::grpc::QueryAccountInfoReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   std::vector<Account> res_account_list;
   if (request->account_list().empty()) {
     auto res = g_account_manager->QueryAllAccountInfo(request->uid());
@@ -787,6 +847,9 @@ grpc::Status CraneCtldServiceImpl::QueryUserInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryUserInfoRequest *request,
     crane::grpc::QueryUserInfoReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   std::unordered_set<std::string> user_list{request->user_list().begin(),
                                             request->user_list().end()};
 
@@ -863,6 +926,9 @@ grpc::Status CraneCtldServiceImpl::QueryQosInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryQosInfoRequest *request,
     crane::grpc::QueryQosInfoReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   std::vector<Qos> res_qos_list;
 
   if (request->qos_list().empty()) {
@@ -913,6 +979,9 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
     grpc::ServerContext *context,
     const crane::grpc::DeleteAccountRequest *request,
     crane::grpc::DeleteAccountReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   for (const auto &account_name : request->account_list()) {
     auto res = g_account_manager->DeleteAccount(request->uid(), account_name);
     if (!res) {
@@ -933,6 +1002,9 @@ grpc::Status CraneCtldServiceImpl::DeleteAccount(
 grpc::Status CraneCtldServiceImpl::DeleteUser(
     grpc::ServerContext *context, const crane::grpc::DeleteUserRequest *request,
     crane::grpc::DeleteUserReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   for (const auto &user_name : request->user_list()) {
     auto res = g_account_manager->DeleteUser(request->uid(), user_name,
                                              request->account());
@@ -955,6 +1027,9 @@ grpc::Status CraneCtldServiceImpl::DeleteUser(
 grpc::Status CraneCtldServiceImpl::DeleteQos(
     grpc::ServerContext *context, const crane::grpc::DeleteQosRequest *request,
     crane::grpc::DeleteQosReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   for (const auto &qos_name : request->qos_list()) {
     auto res = g_account_manager->DeleteQos(request->uid(), qos_name);
     if (!res) {
@@ -977,6 +1052,9 @@ grpc::Status CraneCtldServiceImpl::BlockAccountOrUser(
     grpc::ServerContext *context,
     const crane::grpc::BlockAccountOrUserRequest *request,
     crane::grpc::BlockAccountOrUserReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   CraneExpected<void> res;
   std::unordered_set<std::string> entity_list{request->entity_list().begin(),
                                               request->entity_list().end()};
@@ -1059,6 +1137,9 @@ grpc::Status CraneCtldServiceImpl::QueryClusterInfo(
     grpc::ServerContext *context,
     const crane::grpc::QueryClusterInfoRequest *request,
     crane::grpc::QueryClusterInfoReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   *response = g_meta_container->QueryClusterInfo(*request);
   return grpc::Status::OK;
 }
@@ -1067,6 +1148,9 @@ grpc::Status CraneCtldServiceImpl::CreateReservation(
     grpc::ServerContext *context,
     const crane::grpc::CreateReservationRequest *request,
     crane::grpc::CreateReservationReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
     response->set_ok(false);
@@ -1082,6 +1166,9 @@ grpc::Status CraneCtldServiceImpl::DeleteReservation(
     grpc::ServerContext *context,
     const crane::grpc::DeleteReservationRequest *request,
     crane::grpc::DeleteReservationReply *response) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   auto res = g_account_manager->CheckUidIsAdmin(request->uid());
   if (!res) {
     response->set_ok(false);
@@ -1097,6 +1184,9 @@ grpc::Status CraneCtldServiceImpl::CforedStream(
     grpc::ServerContext *context,
     grpc::ServerReaderWriter<crane::grpc::StreamCtldReply,
                              crane::grpc::StreamCforedRequest> *stream) {
+  if (!g_config.Ready.load(std::memory_order_acquire))
+    return grpc::Status(grpc::StatusCode::UNAVAILABLE,
+                        "CraneCtld Server is not ready");
   using crane::grpc::InteractiveTaskType;
   using crane::grpc::StreamCforedRequest;
   using crane::grpc::StreamCtldReply;

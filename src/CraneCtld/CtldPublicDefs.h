@@ -165,6 +165,8 @@ struct Config {
   uint32_t ScheduledBatchSize;
   bool RejectTasksBeyondCapacity{false};
   bool JobFileOpenModeAppend{false};
+
+  std::atomic_bool Ready{false};
 };
 
 }  // namespace Ctld
