@@ -45,28 +45,28 @@ class NuRaftStateManager : public state_mgr {
   ~NuRaftStateManager() override = default;
 
   std::shared_ptr<cluster_config> load_config() override {
-    // Just return in-memory data in this example.
-    // May require reading from disk here, if it has been written to disk.
+    auto buf = m_log_store_->ExternElemFetch(s_config_key_str_);
+    if (buf) m_saved_config_ = cluster_config::deserialize(*buf);
+
     return m_saved_config_;
   }
 
   void save_config(const cluster_config& config) override {
-    // Just keep in memory in this example.
-    // Need to write to disk here, if you want to make it durable.
     std::shared_ptr<buffer> buf = config.serialize();
+    m_log_store_->ExternElemStore(s_config_key_str_, buf->data(), buf->size());
     m_saved_config_ = cluster_config::deserialize(*buf);
   }
 
   void save_state(const srv_state& state) override {
-    // Just keep in memory in this example.
-    // Need to write to disk here, if you want to make it durable.
     std::shared_ptr<buffer> buf = state.serialize();
+    m_log_store_->ExternElemStore(s_state_key_str_, buf->data(), buf->size());
     m_saved_state_ = srv_state::deserialize(*buf);
   }
 
   std::shared_ptr<srv_state> read_state() override {
-    // Just return in-memory data in this example.
-    // May require reading from disk here, if it has been written to disk.
+    auto buf = m_log_store_->ExternElemFetch(s_state_key_str_);
+    if (buf) m_saved_state_ = srv_state::deserialize(*buf);
+
     return m_saved_state_;
   }
 
@@ -82,7 +82,9 @@ class NuRaftStateManager : public state_mgr {
 
   std::shared_ptr<srv_config> get_srv_config() const { return m_srv_config_; }
 
-  void get_all_keys() { m_log_store_->get_all_keys(); };
+  bool HasServersRun() const { return m_log_store_->HasServersRun(); }
+
+  void get_all_keys() { m_log_store_->get_all_keys(); }
 
  private:
   int m_id_;
@@ -91,6 +93,8 @@ class NuRaftStateManager : public state_mgr {
   std::shared_ptr<srv_config> m_srv_config_;
   std::shared_ptr<cluster_config> m_saved_config_;
   std::shared_ptr<srv_state> m_saved_state_;
+  inline static std::string const s_config_key_str_{"CF"};
+  inline static std::string const s_state_key_str_{"ST"};
 };
 }  // namespace Internal
 }  // namespace crane

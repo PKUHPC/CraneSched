@@ -80,9 +80,43 @@ class NuRaftLogStore : public log_store {
 
   bool flush() override;
 
-  void close() {};
+  uint64_t last_durable_index() override { return m_last_durable_index_; }
 
-  uint64_t last_durable_index() override { return m_last_durable_index_; };
+  bool ExternElemStore(const std::string& key, const void* data,
+                       size_t len) const {
+    if (key.empty() || std::ranges::all_of(key, ::isdigit)) {
+      CRANE_ERROR("Illegal key to store in log db.");
+      return false;
+    }
+
+    return m_logs_db_->Store(0, key, data, len).has_value();
+  }
+
+  std::shared_ptr<buffer> ExternElemFetch(const std::string& key) const {
+    size_t n_bytes{0};
+
+    auto result = m_logs_db_->Fetch(0, key, nullptr, &n_bytes);
+    if (!result) {
+      if (result.error() != kNotFound) {
+        CRANE_ERROR("Unexpected error when fetching the size of string key '{}'",
+                    key);
+      }
+      return nullptr;
+    }
+
+    std::shared_ptr<buffer> buf = buffer::alloc(n_bytes);
+
+    result = m_logs_db_->Fetch(0, key, buf->data(), &n_bytes);
+    if (!result) {
+      CRANE_ERROR("Unexpected error when fetching the data of string key '{}'",
+                  key);
+      return nullptr;
+    }
+
+    return buf;
+  }
+
+  bool HasServersRun() const { return m_has_servers_run_;}
 
   void get_all_keys() {
     std::cout << "keys" << std::endl;
@@ -150,6 +184,8 @@ class NuRaftLogStore : public log_store {
    *  log is durable after being written to db
    */
   std::unique_ptr<IEmbeddedDb> m_logs_db_;
+
+  bool m_has_servers_run_;
 };
 }  // namespace Internal
 }  // namespace crane

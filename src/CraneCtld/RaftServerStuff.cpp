@@ -48,15 +48,15 @@ void RaftServerStuff::Init() {  // State manager.
   params.election_timeout_lower_bound_ = 200;
   params.election_timeout_upper_bound_ = 400;
 
-  // Upto 50 logs will be preserved ahead the last snapshot.
+  // Upto 10 logs will be preserved ahead the last snapshot.
   params.reserved_log_items_ = 10;
-  // Snapshot will be created for every 50 log appends.
-  params.snapshot_distance_ = 10;
+  // Snapshot will be created for every 1000 log appends.
+  params.snapshot_distance_ = 1000;
   // Client timeout: 3000 ms.
   params.client_req_timeout_ = 3000;
   // According to this method, `append_log` function
   // should be handled differently.
-  params.return_method_ = raft_params::blocking;  // async_handler
+  params.return_method_ = raft_params::blocking;  // or async_handler
 
   raft_server::init_options init_options{};
   init_options.raft_callback_ = StatusChangeCallback;
@@ -86,7 +86,10 @@ void RaftServerStuff::Init() {  // State manager.
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(250));
   }
-  CRANE_CRITICAL("FAILED");
+  CRANE_ERROR(
+      "Init raft server failed! During the offline period of this node, there "
+      "may have been a raft configuration update. Please have the "
+      "administrator fix it.");
 }
 
 bool RaftServerStuff::CheckServerNodeExist(int server_id) const {
@@ -97,7 +100,7 @@ bool RaftServerStuff::CheckServerNodeExist(int server_id) const {
 
 bool RaftServerStuff::AddServerAsync(int server_id,
                                      const std::string &endpoint) {
-  if (server_id <= 0 || server_id == m_server_id_) {
+  if (server_id < 0 || server_id == m_server_id_) {
     CRANE_ERROR("Add Server failed: Wrong server id: {}.", server_id);
     return false;
   }
@@ -197,6 +200,10 @@ bool RaftServerStuff::AppendLog(std::shared_ptr<nuraft::buffer> new_log) {
 
 bool RaftServerStuff::RegisterToLeader(const std::string &leader_hostname,
                                        const std::string &grpc_port) {
+  if (static_cast<crane::Internal::NuRaftStateManager *>(m_state_mgr_.get())
+          ->HasServersRun())
+    return true;
+
   grpc::ChannelArguments channel_args;
 
   if (g_config.CompressedRpc)
@@ -270,38 +277,37 @@ CraneStateMachine *RaftServerStuff::GetStateMachine() {
 }
 
 void RaftServerStuff::GetNodeStatus(
-    crane::grpc::QueryControllerInfoReply *response) {
+    crane::grpc::QueryLeaderInfoReply *response) {
   std::vector<std::shared_ptr<srv_config>> configs;
   m_raft_instance_->get_srv_config_all(configs);
-  std::sort(configs.begin(), configs.end(),
-            [](std::shared_ptr<srv_config> a, std::shared_ptr<srv_config> b) {
+  std::ranges::sort(configs,
+            [](const std::shared_ptr<srv_config> &a,
+               const std::shared_ptr<srv_config> &b) {
               return a->get_id() < b->get_id();
             });
 
   std::vector<raft_server::peer_info> peers =
       m_raft_instance_->get_peer_info_all();
-  std::sort(peers.begin(), peers.end(),
-            [](raft_server::peer_info a, raft_server::peer_info b) {
-              return a.id_ < b.id_;
-            });
+  std::ranges::sort(
+      peers,
+            [](const raft_server::peer_info &a,
+               const raft_server::peer_info &b) { return a.id_ < b.id_; });
 
   int leader_id = m_raft_instance_->get_leader();
 
   auto peer = peers.begin();
-  for (auto &entry : configs) {
-    std::shared_ptr<srv_config> &srv = entry;
-
+  for (const auto &srv : configs) {
     auto server = response->add_server_list();
 
     server->set_id(srv->get_id());
     server->set_end_point(srv->get_endpoint());
     if (srv->get_id() == leader_id) {
-      server->set_role(crane::grpc::QueryControllerInfoReply::Leader);
+      server->set_role(crane::grpc::QueryLeaderInfoReply::Leader);
     } else {
       if (peer->last_succ_resp_us_ > 3000 * 1000 /* 3s*/)
-        server->set_role(crane::grpc::QueryControllerInfoReply::Offline);
+        server->set_role(crane::grpc::QueryLeaderInfoReply::Offline);
       else
-        server->set_role(crane::grpc::QueryControllerInfoReply::Follower);
+        server->set_role(crane::grpc::QueryLeaderInfoReply::Follower);
 
       peer++;
     }
