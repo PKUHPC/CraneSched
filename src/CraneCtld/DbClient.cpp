@@ -701,7 +701,7 @@ bsoncxx::builder::basic::document MongodbClient::UserToDocument_(
                                     "coordinator_accounts"};
   std::tuple<bool, int64_t, std::string, std::string, int32_t,
              User::AccountToAttrsMap, std::list<std::string>>
-      values{false,
+      values{user.deleted,
              user.uid,
              user.default_account,
              user.name,
