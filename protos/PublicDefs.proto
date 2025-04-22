@@ -335,7 +335,7 @@ message ReservationInfo {
   google.protobuf.Duration duration = 3;
   string partition = 4;
   string craned_regex = 5;
-  
+
   ResourceView res_total = 6;
   ResourceView res_avail = 7;
   ResourceView res_alloc = 8;

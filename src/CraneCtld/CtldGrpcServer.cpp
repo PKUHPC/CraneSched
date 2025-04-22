@@ -202,8 +202,7 @@ grpc::Status CraneCtldServiceImpl::QueryReservationInfo(
   if (request->reservation_name().empty()) {
     *response = g_meta_container->QueryAllResvInfo();
   } else {
-    *response =
-        g_meta_container->QueryResvInfo(request->reservation_name());
+    *response = g_meta_container->QueryResvInfo(request->reservation_name());
   }
   response->set_ok(true);
 
