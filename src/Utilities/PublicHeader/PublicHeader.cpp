@@ -219,17 +219,6 @@ bool DedicatedResourceInNode::IsZero() const {
   return name_type_slots_map.empty();
 }
 
-void AllocatableResource::SetCpuCount(const double in_cpu_count) {
-  cpu_count = cpu_t{in_cpu_count};
-}
-
-uint64_t AllocatableResource::GetMemByte() const { return memory_bytes; }
-
-void AllocatableResource::SetMemByte(const uint64_t in_memory_bytes) {
-  memory_bytes = in_memory_bytes;
-  memory_sw_bytes = in_memory_bytes;
-}
-
 DedicatedResourceInNode& DedicatedResourceInNode::operator+=(
     const DedicatedResourceInNode& rhs) {
   for (const auto& [rhs_name, rhs_type_slots_map] : rhs.name_type_slots_map)
@@ -637,53 +626,6 @@ bool operator==(const ResourceV2& lhs, const ResourceV2& rhs) {
 ResourceView::ResourceView(const crane::grpc::ResourceView& rhs) {
   allocatable_res = rhs.allocatable_res();
   device_map = FromGrpcDeviceMap(rhs.device_map());
-}
-
-bool ResourceView::IsDeviceMapZero() const { return device_map.empty(); }
-
-std::string ResourceView::GetDeviceMapStr() {
-  uint64_t total_count = 0;
-  for (const auto& [device_name, entry] : this->device_map) {
-    const auto& [untyped_req_count, typed_cnt_map] = entry;
-    total_count += untyped_req_count;
-    for (const auto& [type, count] : typed_cnt_map) {
-      total_count += count;
-    }
-  }
-
-  if (total_count == 0) {
-    return "";
-  }
-
-  std::string result;
-  bool is_first_device = true;
-
-  for (const auto& [device_name, entry] : this->device_map) {
-    const auto& [untyped_req_count, typed_cnt_map] = entry;
-
-    if (!is_first_device) {
-      result += "; ";
-    } else {
-      is_first_device = false;
-    }
-
-    result += fmt::format("{}:", device_name);
-
-    if (untyped_req_count > 0) {
-      result += fmt::format("untyped:{}", untyped_req_count);
-    }
-
-    bool is_first_type = (untyped_req_count == 0);
-    for (const auto& [type, count] : typed_cnt_map) {
-      if (!is_first_type) {
-        result += ",";
-      } else {
-        is_first_type = false;
-      }
-      result += fmt::format("{}:{}", type, count);
-    }
-  }
-  return result;
 }
 
 ResourceView::operator crane::grpc::ResourceView() const {

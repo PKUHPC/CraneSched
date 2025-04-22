@@ -16,7 +16,6 @@ target_link_libraries(Utility_PublicHeader PUBLIC
         spdlog::spdlog
         crane_proto_lib
         fpm
-        fmt::fmt
 )
 
 # This trimmed version is used for PAM module
@@ -27,4 +26,4 @@ add_library(Utility_PublicHeaderNoLogger
         PublicHeader.cpp
 )
 target_include_directories(Utility_PublicHeaderNoLogger PUBLIC include)
-target_link_libraries(Utility_PublicHeaderNoLogger PUBLIC crane_proto_lib fpm fmt::fmt)
+target_link_libraries(Utility_PublicHeaderNoLogger PUBLIC crane_proto_lib fpm)

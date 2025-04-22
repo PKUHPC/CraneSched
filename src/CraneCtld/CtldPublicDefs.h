@@ -459,7 +459,6 @@ struct TaskInCtld {
 
   crane::grpc::RuntimeAttrOfTask const& RuntimeAttr() { return runtime_attr; }
 
-
   void SetTaskId(task_id_t id) {
     task_id = id;
     runtime_attr.set_task_id(id);
@@ -638,9 +637,7 @@ struct TaskInCtld {
 
       resources = static_cast<ResourceV2>(runtime_attr.resources());
       allocated_res_view.SetToZero();
-      for (const auto& [craned_id, resource] : resources.EachNodeResMap()) {
-        allocated_res_view += resource;
-      }
+      allocated_res_view += resources;
     }
 
     nodes_alloc = craned_ids.size();
@@ -696,14 +693,8 @@ struct TaskInCtld {
     }
     task_info->set_exclusive(task_to_ctld.exclusive());
 
-    auto* mutable_allocated_res_view = task_info->mutable_allocated_res_view();
-    auto* mutable_allocated_alloc_res =
-        mutable_allocated_res_view->mutable_allocatable_res();
-    *mutable_allocated_alloc_res =
-        static_cast<crane::grpc::AllocatableResource>(
-            allocated_res_view.GetAllocatableRes());
-    mutable_allocated_res_view->set_device_map(
-        allocated_res_view.GetDeviceMapStr());
+    *task_info->mutable_allocated_res_view() =
+        static_cast<crane::grpc::ResourceView>(allocated_res_view);
   }
 
   crane::grpc::TaskToD GetTaskToD(const CranedId& craned_id) const {

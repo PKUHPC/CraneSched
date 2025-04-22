@@ -219,6 +219,10 @@ class MongodbClient {
   document TaskInCtldToDocument_(TaskInCtld* task);
   document TaskInEmbeddedDbToDocument_(
       crane::grpc::TaskInEmbeddedDb const& task);
+  std::string DeviceMapToJsonString(const DeviceMap& device_map);
+  std::unordered_map<std::string, uint64_t> ParseTypeMap(
+      const bsoncxx::document::view& type_map_view);
+  DeviceMap JsonStringToDeviceMap(const std::string& device_map_str);
 
   std::string m_db_name_, m_connect_uri_;
   const std::string m_task_collection_name_{"task_table"};
