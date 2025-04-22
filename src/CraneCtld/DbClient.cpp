@@ -300,13 +300,8 @@ bool MongodbClient::FetchJobRecords(
   // 15 priority      time_eligible  time_start    time_end    time_suspended
   // 20 script        state          timelimit     time_submit work_dir
   // 25 submit_line   exit_code      username       qos        get_user_env
-<<<<<<< HEAD
   // 30 type          extra_attr     reservation   exclusive   cpus_alloc_total
   // 35 mem_alloc_total device_map
-=======
-  // 30 type          extra_attr   exclusive cpus_alloc_total   mem_alloc_total
-  // 35 device_map
->>>>>>> dccfee8 (use new way)
 
   try {
     for (auto view : cursor) {
@@ -342,7 +337,6 @@ bool MongodbClient::FetchJobRecords(
           std::string(view["device_map"].get_string().value);
       auto* device_map_ptr = mutable_allocated_res_view->mutable_device_map();
       *device_map_ptr = ToGrpcDeviceMap(JsonStringToDeviceMap(device_map_str));
-
       task->set_name(std::string(view["task_name"].get_string().value));
       task->set_qos(std::string(view["qos"].get_string().value));
       task->set_uid(view["id_user"].get_int32().value);
@@ -377,7 +371,9 @@ bool MongodbClient::FetchJobRecords(
       }
       task->set_exclusive(view["exclusive"].get_bool().value);
     }
+  } catch (const bsoncxx::exception& e) {
     PrintError_(e.what());
+  }
 
   return true;
 }
@@ -948,7 +944,6 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   };
   // clang-format on
 
-  // clang-format off
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
              double, int64_t, std::string, std::string, int32_t,   /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
@@ -994,7 +989,6 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
 
   return DocumentConstructor_(fields, values);
 }
-// clang-format on
 
 MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   std::string script;
