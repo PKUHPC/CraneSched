@@ -50,6 +50,7 @@ TaskScheduler::~TaskScheduler() {
   if (m_task_submit_thread_.joinable()) m_task_submit_thread_.join();
   if (m_task_status_change_thread_.joinable())
     m_task_status_change_thread_.join();
+  if (m_resv_clean_thread_.joinable()) m_resv_clean_thread_.join();
 }
 
 bool TaskScheduler::Init() {
@@ -1045,7 +1046,7 @@ void TaskScheduler::ScheduleThread_() {
             g_meta_container->FreeResourceFromNode(craned_id, task->TaskId());
           if (task->reservation != "")
             g_meta_container->FreeResourceFromResv(task->reservation,
-                                                          task->TaskId());
+                                                   task->TaskId());
           g_account_meta_container->FreeQosResource(task->Username(), *task);
         }
 
@@ -1157,9 +1158,8 @@ CraneErrCode TaskScheduler::ChangeTaskTimeLimit(task_id_t task_id,
       found = true, task = pd_iter->second.get();
 
       if (task->reservation != "") {
-        auto resv_end_time =
-            g_meta_container->GetResvMetaPtr(task->reservation)
-                ->logical_part.end_time;
+        auto resv_end_time = g_meta_container->GetResvMetaPtr(task->reservation)
+                                 ->logical_part.end_time;
         if (resv_end_time <= absl::Now() + absl::Seconds(secs)) {
           CRANE_DEBUG("Task #{}'s time limit exceeds reservation end time",
                       task_id);
@@ -1663,8 +1663,7 @@ crane::grpc::DeleteReservationReply TaskScheduler::DeleteResv(
 }
 
 std::expected<void, std::string> TaskScheduler::DeleteResvMeta_(
-    CranedMetaContainer::ResvMetaMapPtr& resv_meta_map,
-    const ResvId& resv_id) {
+    CranedMetaContainer::ResvMetaMapPtr& resv_meta_map, const ResvId& resv_id) {
   CRANE_TRACE("Deleting reservation {}", resv_id);
   if (!resv_meta_map->contains(resv_id)) {
     return std::unexpected(fmt::format("Reservation {} not found", resv_id));
@@ -2110,8 +2109,7 @@ void TaskScheduler::CleanTaskStatusChangeQueueCb_() {
       g_meta_container->FreeResourceFromNode(craned_id, task_id);
     }
     if (task->reservation != "")
-      g_meta_container->FreeResourceFromResv(task->reservation,
-                                                    task->TaskId());
+      g_meta_container->FreeResourceFromResv(task->reservation, task->TaskId());
     g_account_meta_container->FreeQosResource(task->Username(), *task);
 
     task_raw_ptr_vec.emplace_back(task.get());
@@ -3181,8 +3179,7 @@ CraneExpected<void> TaskScheduler::CheckTaskValidity(TaskInCtld* task) {
         return std::unexpected(CraneErrCode::ERR_INVALID_PARAM);
       }
 
-      auto resv_meta =
-          g_meta_container->GetResvMetaPtr(task->reservation);
+      auto resv_meta = g_meta_container->GetResvMetaPtr(task->reservation);
 
       if (resv_meta->part_id != "" &&
           resv_meta->part_id != task->partition_id) {
