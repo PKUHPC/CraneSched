@@ -74,13 +74,15 @@ bool NuRaftLogStore::init(const std::string& db_backend,
     return false;
   }
 
+  m_has_servers_run_ = std::filesystem::exists(db_path + "_logs");
+
   auto result = m_logs_db_->Init(db_path + "_logs");
   if (!result) return false;
 
   // Restore logs from db
   m_logs_db_->IterateAllKv(
       [&](std::string&& key, std::vector<uint8_t>&& value) {
-        if (key == "0") return true;
+        if (!std::ranges::all_of(key, ::isdigit) || key == "0") return true;
         std::shared_ptr<buffer> buf = buffer::alloc(value.size());
         buf->put_raw(value.data(), value.size());
 

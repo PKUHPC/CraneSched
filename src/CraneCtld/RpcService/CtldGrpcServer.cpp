@@ -1337,70 +1337,122 @@ grpc::Status CraneCtldServiceImpl::QueryLeaderId(
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::QueryControllerInfo(
+grpc::Status CraneCtldServiceImpl::QueryLeaderInfo(
     grpc::ServerContext *context,
-    const crane::grpc::QueryControllerInfoRequest *request,
-    crane::grpc::QueryControllerInfoReply *response) {
+    const crane::grpc::QueryLeaderInfoRequest *request,
+    crane::grpc::QueryLeaderInfoReply *response) {
 #ifdef CRANE_WITH_RAFT
-  g_raft_server->GetNodeStatus(response);
+  if (g_raft_server->IsLeader()) g_raft_server->GetNodeStatus(response);
+  else return grpc::Status::CANCELLED;
 #endif
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::AddController(
+grpc::Status CraneCtldServiceImpl::AddFollower(
     grpc::ServerContext *context,
-    const crane::grpc::AddControllerRequest *request,
-    crane::grpc::AddControllerReply *response) {
+    const crane::grpc::AddFollowerRequest *request,
+    crane::grpc::AddFollowerReply *response) {
 #ifdef CRANE_WITH_RAFT
   bool found = false;
   int server_id = 0;
-  for (const auto &server : g_config.RaftServers) {
-    if (server.HostName == request->host_name()) {
+  std::string endpoint;
+
+  switch (request->key_case()) {
+  case crane::grpc::AddFollowerRequest::kServerId: {
+    server_id = request->server_id();
+    if (server_id >= 0 && server_id < g_config.RaftServers.size()) {
       found = true;
-      break;
+      endpoint = fmt::format("{}:{}", g_config.RaftServers[server_id].HostName,
+                             g_config.RaftServers[server_id].RaftPort);
     }
-    server_id++;
+    break;
   }
+  case crane::grpc::AddFollowerRequest::kHostName: {
+    for (const auto &server : g_config.RaftServers) {
+      if (server.HostName == request->host_name()) {
+        found = true;
+        endpoint = fmt::format("{}:{}", server.HostName, server.RaftPort);
+        break;
+      }
+      server_id++;
+    }
+    break;
+  }
+  case crane::grpc::AddFollowerRequest::KEY_NOT_SET:
+  default:
+    return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
+                        "either server_id or hostname must be set");
+  }
+
   if (!found) {
     response->set_ok(false);
-    response->set_reason(fmt::format("Node '{}' not found in config file",
-                                     request->host_name()));
+    response->set_reason("Follower not found in config file");
     return grpc::Status::OK;
   }
 
   if (g_raft_server->CheckServerNodeExist(server_id)) {
     response->set_ok(false);
-    response->set_reason(fmt::format(
-        "Node '{}' already exists in the Raft cluster", request->host_name()));
+    response->set_reason("Follower already exists in the Raft cluster");
     return grpc::Status::OK;
   }
 
-  if (g_raft_server->AddServer(
-          server_id,
-          fmt::format("{}:{}", request->host_name(), request->raft_port()))) {
+  if (g_raft_server->AddServer(server_id, endpoint)) {
     response->set_ok(true);
-    response->set_server_id(server_id);
   } else {
     response->set_ok(false);
-    response->set_server_id(-1);
-    response->set_reason("AddServer failed: internal error.");
+    response->set_reason("AddFollower failed: internal error.");
   }
 #endif
   return grpc::Status::OK;
 }
 
-grpc::Status CraneCtldServiceImpl::RemoveController(
+grpc::Status CraneCtldServiceImpl::RemoveFollower(
     grpc::ServerContext *context,
-    const crane::grpc::RemoveControllerRequest *request,
-    crane::grpc::RemoveControllerReply *response) {
+    const crane::grpc::RemoveFollowerRequest *request,
+    crane::grpc::RemoveFollowerReply *response) {
 #ifdef CRANE_WITH_RAFT
-  bool res = g_raft_server->RemoveServer(request->server_id());
+  bool found = false;
+  int server_id = 0;
 
-  if (res) {
+  switch (request->key_case()) {
+  case crane::grpc::RemoveFollowerRequest::kServerId: {
+    server_id = request->server_id();
+    if (server_id >= 0 && server_id < g_config.RaftServers.size()) found = true;
+    break;
+  }
+  case crane::grpc::RemoveFollowerRequest::kHostName: {
+    for (const auto &server : g_config.RaftServers) {
+      if (server.HostName == request->host_name()) {
+        found = true;
+        break;
+      }
+      server_id++;
+    }
+    break;
+  }
+  case crane::grpc::AddFollowerRequest::KEY_NOT_SET:
+  default:
+    return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT,
+                        "either server_id or hostname must be set");
+  }
+
+  if (!found) {
+    response->set_ok(false);
+    response->set_reason("Follower not found in config file");
+    return grpc::Status::OK;
+  }
+
+  if (server_id == g_raft_server->GetLeaderId()) {
+    response->set_ok(false);
+    response->set_reason("Follower cannot be removed because it is the leader.");
+    return grpc::Status::OK;
+  }
+
+  if (g_raft_server->RemoveServer(server_id)) {
     response->set_ok(true);
   } else {
     response->set_ok(false);
-    response->set_reason("Server #{} does not exist in the Raft cluster.");
+    response->set_reason("Follower does not exist in the Raft cluster.");
   }
 #endif
   return grpc::Status::OK;
