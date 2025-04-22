@@ -68,11 +68,6 @@ message ResourceV2 {
   map<string /*craned id*/, ResourceInNode> each_node_res = 1;
 }
 
-message ResourceViewStr {
-  AllocatableResource allocatable_res = 1;
-  string device_map = 2;
-}
-
 message ResourceView {
   AllocatableResource allocatable_res = 1;
   DeviceMap device_map = 2;
@@ -303,7 +298,7 @@ message TaskInfo {
   google.protobuf.Duration elapsed_time = 37;
   repeated string execution_node = 38;
   bool exclusive = 39;
-  ResourceViewStr allocated_res_view = 40;
+  ResourceView allocated_res_view = 40;
 }
 
 message PartitionInfo {
