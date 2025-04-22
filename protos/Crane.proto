@@ -263,9 +263,9 @@ message ModifyCranedStateReply {
   repeated string not_modified_reasons = 4;
 }
 
-message QueryControllerInfoRequest {}
+message QueryLeaderInfoRequest {}
 
-message QueryControllerInfoReply {
+message QueryLeaderInfoReply {
   enum RaftRole {
     Leader = 0;
     Follower = 1;
@@ -290,22 +290,26 @@ message QueryControllerInfoReply {
   uint64 last_snapshot_log_term = 9;
 }
 
-message AddControllerRequest{
-  string host_name = 1;
-  uint32 raft_port = 2;
+message AddFollowerRequest{
+  oneof key {
+    string host_name = 1;
+    int32 server_id = 2;
+  }
 }
 
-message AddControllerReply {
+message AddFollowerReply {
   bool ok = 1;
-  int32 server_id = 2;
-  string reason = 3;
+  string reason = 2;
 }
 
-message RemoveControllerRequest{
-  int32 server_id = 1;
+message RemoveFollowerRequest{
+  oneof key {
+    string host_name = 1;
+    int32 server_id = 2;
+  }
 }
 
-message RemoveControllerReply{
+message RemoveFollowerReply{
   bool ok = 1;
   string reason = 2;
 }
@@ -924,9 +928,9 @@ service CraneCtld {
   rpc ModifyTask(ModifyTaskRequest) returns (ModifyTaskReply);
   rpc ModifyNode(ModifyCranedStateRequest) returns (ModifyCranedStateReply);
   rpc ModifyPartitionAcl(ModifyPartitionAclRequest) returns (ModifyPartitionAclReply);
-  rpc QueryControllerInfo(QueryControllerInfoRequest) returns (QueryControllerInfoReply);
-  rpc AddController(AddControllerRequest) returns (AddControllerReply);
-  rpc RemoveController(RemoveControllerRequest) returns (RemoveControllerReply);
+  rpc QueryLeaderInfo(QueryLeaderInfoRequest) returns (QueryLeaderInfoReply);
+  rpc AddFollower(AddFollowerRequest) returns (AddFollowerReply);
+  rpc RemoveFollower(RemoveFollowerRequest) returns (RemoveFollowerReply);
   rpc YieldLeadership(YieldLeadershipRequest) returns (YieldLeadershipReply);
 
   /* RPCs called from cacctmgr */

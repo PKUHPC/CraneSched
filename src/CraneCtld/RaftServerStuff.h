@@ -73,12 +73,12 @@ class RaftServerStuff {
 
   CraneStateMachine* GetStateMachine();
 
-  void GetNodeStatus(crane::grpc::QueryControllerInfoReply* response);
+  void GetNodeStatus(crane::grpc::QueryLeaderInfoReply* response);
 
-  void get_all_keys() {
-    static_cast<crane::Internal::NuRaftStateManager*>(m_state_mgr_.get())
-        ->get_all_keys();
-  };
+  // void get_all_keys() {
+  //   static_cast<crane::Internal::NuRaftStateManager*>(m_state_mgr_.get())
+  //       ->get_all_keys();
+  // };
 
  private:
   static cb_func::ReturnCode StatusChangeCallback(cb_func::Type type,

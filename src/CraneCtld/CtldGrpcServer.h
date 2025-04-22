@@ -319,20 +319,20 @@ class CraneCtldServiceImpl final : public crane::grpc::CraneCtld::Service {
       const crane::grpc::QueryLeaderIdRequest *request,
       crane::grpc::QueryLeaderIdReply *response) override;
 
-  grpc::Status QueryControllerInfo(
+  grpc::Status QueryLeaderInfo(
       grpc::ServerContext *context,
-      const crane::grpc::QueryControllerInfoRequest *request,
-      crane::grpc::QueryControllerInfoReply *response) override;
+      const crane::grpc::QueryLeaderInfoRequest *request,
+      crane::grpc::QueryLeaderInfoReply *response) override;
 
-  grpc::Status AddController(
+  grpc::Status AddFollower(
       grpc::ServerContext *context,
-      const crane::grpc::AddControllerRequest *request,
-      crane::grpc::AddControllerReply *response) override;
+      const crane::grpc::AddFollowerRequest *request,
+      crane::grpc::AddFollowerReply *response) override;
 
-  grpc::Status RemoveController(
+  grpc::Status RemoveFollower(
       grpc::ServerContext *context,
-      const crane::grpc::RemoveControllerRequest *request,
-      crane::grpc::RemoveControllerReply *response) override;
+      const crane::grpc::RemoveFollowerRequest *request,
+      crane::grpc::RemoveFollowerReply *response) override;
 
   grpc::Status YieldLeadership(
       grpc::ServerContext *context,
