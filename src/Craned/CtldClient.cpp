@@ -170,9 +170,6 @@ void CtldClient::AsyncSendThread_() {
       cur_state = m_ctld_channel_->GetState(false);
       CRANE_TRACE("New ctld client channel status {}.",
                   GrpcConnectivityStateName(cur_state));
-    } else if (pre_state == GRPC_CHANNEL_IDLE) {
-      CRANE_TRACE("Current channel status {}.",
-                  GrpcConnectivityStateName(pre_state));
     }
 
     bool connected = (cur_state == GRPC_CHANNEL_READY);
@@ -241,13 +238,12 @@ void CtldClient::AsyncSendThread_() {
       }
     }
     if (!m_up_lined_) {
-      uint sleep_time = rpc_attempt >= 10 ? 10'000 : 1000 * rpc_attempt;
+      uint sleep_time = rpc_attempt >= 10 ? 10'000 : rpc_attempt * 1'000;
       CRANE_TRACE(
           "Ctld client connected but not up yet, sleep for {} seconds and try "
           "to up.",
           sleep_time / 1000);
-      std::this_thread::sleep_for(rpc_attempt *
-                                  std::chrono::milliseconds(sleep_time));
+      std::this_thread::sleep_for(std::chrono::milliseconds(sleep_time));
       continue;
     }
 
