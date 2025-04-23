@@ -2446,7 +2446,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   task->allocated_res_view.SetToZero();
 
   absl::Time earliest_end_time = now + task->time_limit;
-  std::unordered_map<std::string, ResourceView> allocated_node_res_view_map;
+  std::unordered_map<CranedId, ResourceView> allocated_node_res_view_map;
 
   for (const auto& craned_index :
        node_selection_info.GetCostNodeIdSet() | std::views::values) {
