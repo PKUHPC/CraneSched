@@ -148,7 +148,7 @@ message TaskToCtld {
   string nodelist = 35;
 
   string reservation = 36;
-  bool exclusive  = 37;
+  bool exclusive = 37;
 }
 
 message TaskInEmbeddedDb {

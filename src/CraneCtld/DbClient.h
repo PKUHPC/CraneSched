@@ -52,7 +52,7 @@ class MongodbClient {
 
   /* ----- Method of operating the job table ----------- */
   bool InsertRecoveredJob(
-    crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
+      crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
   bool InsertJob(TaskInCtld* task);
   bool InsertJobs(const std::vector<TaskInCtld*>& tasks);
 
