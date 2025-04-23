@@ -18,6 +18,8 @@
 
 #include "Pmix.h"
 
+#include "TaskManager.h"
+#include "TaskManager.h"
 #include "absl/strings/str_split.h"
 #include "absl/synchronization/blocking_counter.h"
 #include "crane/OS.h"
@@ -25,8 +27,165 @@
 
 namespace pmix {
 
-namespace {
+class PMIxServerModule {
+  public:
+   static int ClientConnectedCb(const pmix_proc_t *proc, void *server_object,
+                               pmix_op_cbfunc_t cbfunc, void *cbdata) {
+     /* we don't do anything by now */
+     CRANE_DEBUG("ClientConnected is called");
+     return PMIX_SUCCESS;
+   }
 
+   static void OpCb(pmix_status_t status, void *cbdata) {
+     CRANE_DEBUG("op callback is called with status={}: {}", status,
+            PMIx_Error_string(status));
+   }
+
+   static void ErrHandlerRegCb(pmix_status_t status, size_t errhandler_ref,
+                                     void *cbdata) {
+     CRANE_DEBUG(
+         "Error handler registration callback is called with status={}, "
+         "ref={}",
+         status, static_cast<int>(errhandler_ref));
+   }
+
+   static pmix_status_t ClientFinalizedCb(const pmix_proc_t *proc,
+                                         void *server_object,
+                                         pmix_op_cbfunc_t cbfunc, void *cbdata) {
+     CRANE_DEBUG("ClientFinalized is called");
+     /* don't do anything by now */
+     if (nullptr != cbfunc) {
+       cbfunc(PMIX_SUCCESS, cbdata);
+     }
+     return PMIX_SUCCESS;
+   }
+
+   static pmix_status_t AbortFn(const pmix_proc_t *pmix_proc,
+                                 void *server_object, int status,
+                                 const char msg[], pmix_proc_t pmix_procs[],
+                                 size_t nprocs, pmix_op_cbfunc_t cbfunc,
+                                 void *cbdata) {
+     CRANE_DEBUG("abort_fn called: status = {}, msg = {}\n", status, msg);
+
+     std::regex numberRegex("(\\d+)$");
+     std::smatch match;
+     std::string name = pmix_proc->nspace;
+     if (std::regex_search(name, match, numberRegex)) {
+       task_id_t task_id = std::stoi(match.str(0));
+       g_task_mgr->TerminateTaskAsync(task_id);
+     }
+
+     if (nullptr != cbfunc) {
+       cbfunc(PMIX_SUCCESS, cbdata);
+     }
+
+     return PMIX_SUCCESS;
+   }
+
+   static pmix_status_t FencenbFn(const pmix_proc_t procs_v2[], size_t nprocs,
+                                   const pmix_info_t info[], size_t ninfo,
+                                   char *data, size_t ndata,
+                                   pmix_modex_cbfunc_t cbfunc, void *cbdata) {
+     CRANE_DEBUG(" FencenbFn is called");
+     /* pass the provided data back to each participating proc */
+
+     // if (nullptr != cbfunc) {
+     //   cbfunc(PMIX_SUCCESS, data, ndata, cbdata, nullptr, nullptr);
+     // }
+
+
+     std::vector<pmix_proc_t> procs;
+     bool collect = false;
+
+     for (size_t i = 0; i< nprocs; i++) {
+       procs.emplace_back(procs_v2[i]);
+     }
+
+     if (info != nullptr) {
+       for (size_t i = 0; i < ninfo; i++) {
+         if (0 == strncmp(info[i].key, PMIX_COLLECT_DATA, PMIX_MAX_KEYLEN)) {
+           collect = true;
+           break;
+         }
+       }
+     }
+
+     // TODO: 从env中获取type，默认tree
+     // CollType type = pmixp_info_srv_fence_coll_type();
+     CollType type = CollType::FENCE_RING;
+
+     if (type == CollType::FENCE_MAX) {
+       type = CollType::FENCE_TREE;
+
+       if (collect && (ndata > 0))
+         type = CollType::FENCE_RING;
+     }
+
+     auto coll = g_pmix_state_ptr->PmixStateCollGet(type, procs, nprocs);
+
+     if (coll == nullptr) return PMIX_ERROR;
+
+     if (!coll->PmixCollContribLocal(type, data, ndata, cbfunc, cbdata))
+       return PMIX_ERROR;
+
+     return PMIX_SUCCESS;
+   }
+
+   static pmix_status_t DmodexFn(const pmix_proc_t *proc,
+                                  const pmix_info_t info[], size_t ninfo,
+                                  pmix_modex_cbfunc_t cbfunc, void *cbdata) {
+     CRANE_DEBUG("DmodexFn is called");
+     return PMIX_SUCCESS;
+   }
+
+    static pmix_status_t JobControl(const pmix_proc_t *proct,
+                                    const pmix_proc_t targets[], size_t ntargets,
+                                    const pmix_info_t directives[], size_t ndirs,
+                                    pmix_info_cbfunc_t cbfunc, void *cbdata) {
+     CRANE_DEBUG("JobControl is called");
+     return PMIX_ERR_NOT_SUPPORTED;
+   }
+
+   static pmix_status_t PublishFn(const pmix_proc_t *proc,
+                                   const pmix_info_t info[], size_t ninfo,
+                                   pmix_op_cbfunc_t cbfunc, void *cbdata) {
+     return PMIX_ERR_NOT_SUPPORTED;
+   }
+
+   static pmix_status_t LookupFn(const pmix_proc_t *proc, char **keys,
+                                  const pmix_info_t info[], size_t ninfo,
+                                  pmix_lookup_cbfunc_t cbfunc, void *cbdata) {
+     return PMIX_ERR_NOT_SUPPORTED;
+   }
+
+   static pmix_status_t UnpublishFn(const pmix_proc_t *proc, char **keys,
+                                     const pmix_info_t info[], size_t ninfo,
+                                     pmix_op_cbfunc_t cbfunc, void *cbdata) {
+     return PMIX_ERR_NOT_SUPPORTED;
+   }
+
+   static pmix_status_t SpawnFn(const pmix_proc_t *proc,
+                                 const pmix_info_t job_info[], size_t ninfo,
+                                 const pmix_app_t apps[], size_t napps,
+                                 pmix_spawn_cbfunc_t cbfunc, void *cbdata) {
+     return PMIX_ERR_NOT_SUPPORTED;
+   }
+
+   static pmix_status_t ConnectFn(const pmix_proc_t procs[], size_t nprocs,
+                                   const pmix_info_t info[], size_t ninfo,
+                                   pmix_op_cbfunc_t cbfunc, void *cbdata) {
+     return PMIX_ERR_NOT_SUPPORTED;
+   }
+
+   static pmix_status_t DisconnectFn(const pmix_proc_t procs[], size_t nprocs,
+                                      const pmix_info_t info[], size_t ninfo,
+                                      pmix_op_cbfunc_t cbfunc, void *cbdata) {
+     return PMIX_ERR_NOT_SUPPORTED;
+   }
+ };
+
+
+namespace {
   pmix_server_module_t g_k_crane_pmix_cb = {
     .client_connected = PMIxServerModule::ClientConnectedCb,
     .client_finalized = PMIxServerModule::ClientFinalizedCb,
@@ -88,6 +247,11 @@ bool PmixTaskInstance::Init(const crane::grpc::TaskToD& task, const std::unorder
 
   info_list.emplace_back(InfoLoad_(PMIX_SPAWNED, false, PMIX_BOOL));
 
+  // PMIX_TMPDIR cli_tmpdir_base
+  // PMIX_NSDIR cli_tmpdir
+
+  info_list.emplace_back(InfoLoad_(PMIX_TDIR_RMCLEAN, true, PMIX_BOOL));
+
   info_list.emplace_back(InfoLoad_(PMIX_JOBID, m_task_id_, PMIX_STRING));
 
   info_list.emplace_back(InfoLoad_(PMIX_NODEID, m_node_id_, PMIX_UINT32));
@@ -116,7 +280,6 @@ bool PmixTaskInstance::Init(const crane::grpc::TaskToD& task, const std::unorder
       local_ranks.emplace_back(local_rank);
     }
 
-
     PMIX_INFO_LOAD(&proc_data_arr[7], PMIX_HOSTNAME, m_hostname_.c_str(), PMIX_STRING);
     PMIX_INFO_LOAD(&proc_data_arr[8], PMIX_NODEID, &m_node_id_, PMIX_UINT32);
 
@@ -133,6 +296,8 @@ bool PmixTaskInstance::Init(const crane::grpc::TaskToD& task, const std::unorder
 
   info_list.emplace_back(InfoLoad_(PMIX_NODE_SIZE, m_node_num_, PMIX_UINT32));
   info_list.emplace_back(InfoLoad_(PMIX_MAX_PROCS, m_task_num_, PMIX_UINT32));
+
+  // TODO：_set_topology
 
   info_list.emplace_back(InfoLoad_(PMIX_USERID, m_uid_, PMIX_UINT32));
 
@@ -178,15 +343,13 @@ bool PmixTaskInstance::Init(const crane::grpc::TaskToD& task, const std::unorder
   std::string ranks_str = absl::StrJoin(local_ranks, ",");
   // Identifies the set of processes of the same task on the same physical node.
   info_list.emplace_back(InfoLoad_(PMIX_LOCAL_PEERS, ranks_str, PMIX_STRING));
-  info_list.emplace_back(InfoLoad_(PMIX_LOCALLDR, local_ranks.back(), PMIX_UINT32));
-
+  info_list.emplace_back(InfoLoad_(PMIX_LOCALLDR, local_ranks.front(), PMIX_UINT32));
 
   pmix_info_t *ns_info;
   PMIX_INFO_CREATE(ns_info, info_list.size());
   for (size_t i = 0; i < info_list.size(); i++) {
     ns_info[i] = info_list[i];
   }
-
 
   {
     absl::BlockingCounter bc(1);
@@ -282,6 +445,14 @@ void PmixTaskInstance::InfoSet_(const crane::grpc::TaskToD& task,  const std::un
   auto it = std::find(m_node_list_.begin(), m_node_list_.end(), m_hostname_);
   if (it != m_node_list_.end())
     m_node_id_ = std::distance(m_node_list_.begin(), it);
+
+  g_pmix_state_ptr->AddNameSpace(PmixNameSpace{
+    .m_namespace_ = m_nspace_,
+    .m_node_num_ = m_node_num_,
+    .m_task_num_ = m_task_num_,
+    .m_hostlist_ = m_node_list_
+  });
+
 }
 
 template <typename T>
@@ -333,6 +504,9 @@ bool PmixServer::Init(const std::string& server_base_dir) {
   }
 
   CRANE_TRACE("Crane Pmix Server Initialized, dir: {}.", m_server_tmpdir_);
+
+  g_pmix_state_ptr = std::make_unique<PmixState>();
+  g_pmix_state_ptr->Init(Craned::g_config.CranedIdOfThisNode);
 
   return true;
 }
