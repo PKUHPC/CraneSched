@@ -16,13 +16,15 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include "PmixState.h"
+#include "ReverseTree.h"
 #include "PmixColl.h"
 #include "crane/Logger.h"
-#include "ReverseTree.h"
+#include "crane/String.h"
 
 namespace pmix {
 
-bool Coll::PmixCollTreeInit_(std::unordered_set<std::string> hostset) {
+bool Coll::PmixCollTreeInit_(std::set<std::string> hostset) {
   int max_depth, width, depth;
   CollTree tree = this->m_tree_;
 
@@ -47,14 +49,29 @@ bool Coll::PmixCollTreeInit_(std::unordered_set<std::string> hostset) {
      * ourselves there)
      */
     tree.m_parent_host_ = "";
-    // TODO: hostlist
+    for (const auto& host : hostset) {
+      if (host == g_pmix_state_ptr->GetHostname()) continue;
+      tree.m_all_chldrn_hl_.emplace_back(host);
+    }
+    // host[1-3]
+    tree.m_chldrn_str_ = util::HostNameListToStr<std::list<std::string>>(tree.m_all_chldrn_hl_);
   } else {
     // TODO: hostlist
-  }
+    auto it = hostset.begin();
+    if (tree.m_parent_peerid_ >= static_cast<std::ptrdiff_t>(hostset.size())) {
+      CRANE_ERROR("m_parent_peerid_ indicates that the host does not exist.");
+      return false;
+    }
+    std::advance(it, tree.m_parent_peerid_);
+    tree.m_parent_host_ = *it;
 
-  // TODO: buffer
-  ResetCollTreeUpFwd();
-  ResetCollTreeDownFwd();
+    // TODO: global node_id ? root_host ?
+    tree.m_all_chldrn_hl_.clear();
+    tree.m_chldrn_str_.clear();
+  }
+  //
+  // ResetCollTreeUpFwd();
+  // ResetCollTreeDownFwd();
   m_cbdata_ = nullptr;
   m_cbfunc_ = nullptr;
 
@@ -68,7 +85,9 @@ bool Coll::PmixCollTreeLocal_(char* data, size_t size, pmix_modex_cbfunc_t cbfun
 
   switch (tree.m_state_) {
   case CollTreeState::SYNC:
+    m_ts_ = time(nullptr);
   case CollTreeState::COLLECT:
+    break;
   case CollTreeState::DOWNFWD:
     break;
   case CollTreeState::UPFWD:
@@ -90,7 +109,7 @@ bool Coll::PmixCollTreeLocal_(char* data, size_t size, pmix_modex_cbfunc_t cbfun
 
   tree.m_contrib_local_ = true;
 
-  // TODO: 将data内容复制进ufwd_buf
+  tree.m_upfwd_buf_.append(data, size);
 
   this->m_cbfunc_ = cbfunc;
   this->m_cbdata_ = cbdata;
@@ -108,14 +127,19 @@ bool Coll::PmixCollTreeLocal_(char* data, size_t size, pmix_modex_cbfunc_t cbfun
       }
       break;
     case CollTreeState::COLLECT:
-      break;
-    case CollTreeState::DOWNFWD:
+      result = ProgressCollect_();
       break;
     case CollTreeState::UPFWD:
+      result = ProgressUpFwd_();
       break;
     case CollTreeState::UPFWD_WPC:
+      result = ProgressUpFwdWpc_();
       break;
     case CollTreeState::UPFWD_WSC:
+      result = ProgressUpFwdWsc_();
+      break;
+    case CollTreeState::DOWNFWD:
+      result = ProgressDownFwd_();
       break;
     default:
       // CRANE_ERROR("unknown state {}", tree.m_state_);
@@ -144,13 +168,20 @@ bool Coll::ProgressCollect_() {
 
   if (!tree.m_parent_host_.empty()) {
     tree.m_upfwd_status_ = CollTreeSndState::ACTIVE;
+
+    // TODO: 向父节点消息发送
+    // rc = pmixp_server_send_nb(&ep, PMIXP_MSG_FAN_IN, coll->seq,tree->ufwd_buf,_ufwd_sent_cb, cbdata);
+    // 设置消息头部
+
+    // 发送成功
+    tree.m_upfwd_status_ = CollTreeSndState::DONE;
   } else {
-    // TODO: /* move data from input buffer to the output */
+    //  /* move data from input buffer to the output */
+    tree.m_downfwd_buf_.append(tree.m_upfwd_buf_);
+    tree.m_upfwd_buf_.clear();
     tree.m_upfwd_status_ = CollTreeSndState::DONE;
     tree.m_contrib_prnt_ = true;
   }
-
-  // TODO: ep operator
 
   return true;
 }
@@ -177,8 +208,6 @@ bool Coll::ProgressUpFwd_() {
     return false;
   }
 
-  ResetCollTreeUpFwd();
-
   tree.m_state_ = CollTreeState::DOWNFWD;
   tree.m_downfwd_status_ = CollTreeSndState::ACTIVE;
 
@@ -199,7 +228,14 @@ bool Coll::ProgressUpFwdWsc_() {
   switch (tree.m_upfwd_status_) {
   case CollTreeSndState::FAILED:
     // TODO：Upward forwarding failed, notify libpmix and abort the collective communication.
-      return false;
+    if (m_cbfunc_) {
+      m_cbfunc_(PMIX_ERROR, nullptr, 0, m_cbdata_, nullptr, nullptr);
+    }
+    m_cbfunc_ = nullptr;
+    m_cbdata_ = nullptr;
+    ResetCollTree();
+
+    return false;
   case CollTreeSndState::ACTIVE:
     /* still waiting for the send completion */
       return false;
@@ -215,7 +251,18 @@ bool Coll::ProgressUpFwdWsc_() {
 
   ResetCollTreeUpFwd();
 
-  tree.m_state_ = CollTreeState::UPFWD_WPC;
+  tree.m_state_ = CollTreeState::DOWNFWD;
+  tree.m_downfwd_status_ = CollTreeSndState::ACTIVE;
+
+  // direct_conn
+  /* only root of the tree should get here */
+  if (tree.m_parent_peerid_) {
+    // TODO 发送数据
+  }
+
+  if (m_cbfunc_) {
+
+  }
 
   return true;
 }

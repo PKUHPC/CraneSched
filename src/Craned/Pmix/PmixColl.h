@@ -18,18 +18,18 @@
 
 #pragma once
 
-#include <memory>
-#include <vector>
-#include <list>
-#include <cstring>
-#include <string>
-#include <cassert>
 #include <pmix.h>
-#include <vector>
 
+#include <cassert>
+#include <cstring>
+#include <list>
+#include <memory>
 #include <mutex>
+#include <set>
+#include <string>
 #include <thread>
 #include <unordered_set>
+#include <vector>
 
 namespace pmix {
 
@@ -76,7 +76,7 @@ class Coll {
  public:
   Coll() = default;
 
-  ~Coll();
+  ~Coll() = default;
 
   bool PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs);
 
@@ -110,7 +110,8 @@ class Coll {
 
   struct CollRing {
     int m_next_peerid_;
-    std::vector<CollRingCtx> m_ctx_array_;
+    CranedId m_next_craned_id_;
+    std::vector<std::shared_ptr<CollRingCtx>> m_ctx_array_;
     std::string m_fwrd_buf_pool_;
     std::string m_ring_buf_pool_;
   };
@@ -137,7 +138,7 @@ class Coll {
   };
 
   /* tree coll functions */
-  bool PmixCollTreeInit_(std::unordered_set<std::string> hostset);
+  bool PmixCollTreeInit_(std::set<std::string> hostset);
   bool PmixCollTreeLocal_(char *data, size_t size, pmix_modex_cbfunc_t cbfunc, void *cbdata);
 
   bool ProgressCollect_();
@@ -151,16 +152,23 @@ class Coll {
   void ResetCollTreeDownFwd();
 
   /* ring coll functions */
-  bool PmixCollRingInit_(std::unordered_set<std::string> hostset);
-  bool PmixCollRingLocal_(char *data, size_t size, pmix_modex_cbfunc_t cbfunc, void *cbdata);
+  bool PmixCollRingInit_(std::set<std::string> hostset);
+  bool PmixCollRingLocal_(char* data, size_t size, pmix_modex_cbfunc_t cbfunc,
+                          void* cbdata);
 
-  CollRingCtx* CollRingCtxNew();
+  std::shared_ptr<Coll::CollRingCtx> CollRingCtxNew();
 
-  bool CollRingContrib(CollRingCtx& coll_ring_ctx, int contrib_id, uint32_t hop, char* data, size_t size);
+  bool CollRingContrib(std::shared_ptr<CollRingCtx> coll_ring_ctx,
+                       int contrib_id, uint32_t hop_seq, char* data,
+                       size_t size);
 
-  void ProgressCollectRing_(CollRingCtx& coll_ring_ctx);
+  void ProgressCollectRing_(std::shared_ptr<CollRingCtx> coll_ring_ctx);
 
-  void ResetCollRing(CollRingCtx& coll_ring_ctx);
+  void InvokeCallBackRing(std::shared_ptr<CollRingCtx> coll_ring_ctx);
+
+  void ResetCollRing(std::shared_ptr<CollRingCtx> coll_ring_ctx);
+
+  bool PmixCollRingNeighbor(const crane::grpc::SendPmixRingMsgReq_PmixRingMsgHdr& hdr, const std::string& msg);
 
   std::mutex m_lock_;
   uint32_t m_seq_;

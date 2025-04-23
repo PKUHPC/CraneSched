@@ -1,0 +1,80 @@
+/**
+* Copyright (c) 2024 Peking University and Peking University
+ * Changsha Institute for Computing and Digital Economy
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+#include "PmixState.h"
+
+namespace pmix {
+
+void PmixLibModexInvoke(pmix_modex_cbfunc_t cbfunc, bool result,
+                        const char* data, size_t ndata, void* cbdata,
+                        void* rel_fn, void* rel_data) {
+  pmix_status_t rc = PMIX_SUCCESS;
+  pmix_release_cbfunc_t release_fn = (pmix_release_cbfunc_t)rel_fn;
+
+  // Currently, CraneSched only focuses on these two scenarios.
+  if (result) rc = PMIX_SUCCESS;
+  else rc = PMIX_ERROR;
+
+  cbfunc(rc, data, ndata, cbdata, release_fn, rel_data);
+}
+
+void PmixState::Init(const std::string& hostname) {
+  m_hostname_ = hostname;
+}
+
+std::shared_ptr<Coll> PmixState::PmixStateCollGet(
+    CollType type, const std::vector<pmix_proc_t>& procs, size_t nprocs) {
+
+  util::write_lock_guard lock_guard(m_mutex_);
+
+  for (const auto& coll : m_coll_list_) {
+    if (coll->get_nprocs() != nprocs) continue;
+    if (coll->get_type() != type) continue;
+    if (!coll->get_nprocs()) return coll;
+
+    for (size_t i = 0; i < nprocs; i++) {
+      const auto& proc = coll->get_procs(i);
+      if (std::strcmp(proc.nspace, procs[i].nspace) == 0 &&
+          proc.rank == procs[i].rank)
+        return coll;
+    }
+  }
+
+  std::shared_ptr<Coll> coll = std::make_shared<Coll>();
+  if (!coll->PmixCollInit(type, procs, nprocs)) return nullptr;
+
+  m_coll_list_.emplace_back(coll);
+
+  return coll;
+}
+
+std::optional<PmixNameSpace> PmixState::PmixNamespaceGet(
+    const std::string& pmix_namespace) {
+  auto iter = m_namespace_map_.find(pmix_namespace);
+  if (iter == m_namespace_map_.end()) return std::nullopt;
+
+  return iter->second;
+}
+
+std::string PmixState::GetHostname() { return m_hostname_; }
+
+void PmixState::AddNameSpace(const PmixNameSpace& pmix_namespace) {
+  m_namespace_map_.emplace(pmix_namespace.m_namespace_, pmix_namespace);
+}
+
+};

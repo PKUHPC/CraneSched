@@ -18,6 +18,9 @@
 
 #include "PmixColl.h"
 
+#include "PmixState.h"
+#include "crane/Logger.h"
+
 namespace pmix {
 
 bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
@@ -27,15 +30,37 @@ bool Coll::PmixCollInit(CollType type, const std::vector<pmix_proc_t>& procs,
   m_pset_.m_nprocs_ = nprocs;
   m_pset_.m_procs_.assign(procs.begin(), procs.end());
 
-  // TODO: hostset
-  std::unordered_set<std::string> hostset;
+  std::set<std::string> hostname_set;
+
+  for (const auto& proc : procs) {
+    auto pmix_namespace = g_pmix_state_ptr->PmixNamespaceGet(proc.nspace);
+    if (!pmix_namespace) return false;
+
+    if (proc.rank == PMIX_RANK_WILDCARD) {
+      for (const auto& hostname : pmix_namespace->m_hostlist_) {
+        hostname_set.emplace(hostname);
+      }
+    } else {
+      int node_id = pmix_namespace->m_task_map_[proc.rank];
+      hostname_set.insert(pmix_namespace->m_hostlist_[node_id]);
+    }
+  }
+
+  if ((m_peers_cnt_ = hostname_set.size()) <= 0) {
+    CRANE_ERROR("No peers found");
+    return false;
+  }
+
+  auto it = hostname_set.find(g_pmix_state_ptr->GetHostname());
+  if (it != hostname_set.end())
+    m_peerid_ = std::distance(hostname_set.begin(), it);
 
   switch (type) {
     case CollType::FENCE_TREE:
-      this->PmixCollTreeInit_(hostset);
+      this->PmixCollTreeInit_(hostname_set);
       break;
     case CollType::FENCE_RING:
-      this->PmixCollRingInit_(hostset);
+      this->PmixCollRingInit_(hostname_set);
       break;
     default:
       return false;

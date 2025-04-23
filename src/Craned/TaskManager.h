@@ -23,8 +23,8 @@
 
 #include <grp.h>
 
-#include "Pmix.h"
 #include "CgroupManager.h"
+#include "Pmix/Pmix.h"
 #include "crane/PasswordEntry.h"
 #include "protos/Crane.grpc.pb.h"
 
