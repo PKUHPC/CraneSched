@@ -836,6 +836,31 @@ message PowerStateChangeReply {
   bool ok = 1;
 }
 
+message SendPmixRingMsgReq {
+  message PmixRingMsgHdr {
+    uint32 type = 1;
+    uint32 contrib_id = 2;
+    uint32 seq = 3;
+    uint32 hop_seq = 4;
+    string craned_id = 5;
+    uint32 msgsize = 6;
+  };
+
+  message PmixProc {
+    string nspace = 1;
+    uint32 rank = 2;
+  }
+
+  PmixRingMsgHdr pmix_ring_msg_hdr = 1;
+  repeated PmixProc pmix_procs = 2;
+  string msg = 3;
+};
+
+message SendPmixRingMsgReply {
+  bool ok = 1;
+};
+
+
 // Todo: Divide service into two parts: one for Craned and one for Crun
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -920,6 +945,8 @@ service Craned {
   rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
   rpc QueryTaskEnvVariables(QueryTaskEnvVariablesRequest) returns (QueryTaskEnvVariablesReply);
   rpc QueryTaskEnvVariablesForward(QueryTaskEnvVariablesForwardRequest) returns (QueryTaskEnvVariablesForwardReply);
+
+  rpc SendPmixRingMsg(SendPmixRingMsgReq) returns (SendPmixRingMsgReply);
 }
 
 service CraneForeD {
