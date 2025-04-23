@@ -2508,7 +2508,7 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
       }
       continue;
     }
-  
+
     auto craned_meta = craned_meta_map.at(craned_index).GetExclusivePtr();
     if (task->reservation != "") {
       auto iter = craned_meta->resv_in_node_map.find(task->reservation);
