@@ -52,7 +52,7 @@ class MongodbClient {
 
   /* ----- Method of operating the job table ----------- */
   bool InsertRecoveredJob(
-    const crane::grpc::TaskInEmbeddedDb& task_in_embedded_db);
+    crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db);
   bool InsertJob(TaskInCtld* task);
   bool InsertJobs(const std::vector<TaskInCtld*>& tasks);
 
@@ -219,9 +219,12 @@ class MongodbClient {
   document TaskInCtldToDocument_(TaskInCtld* task);
   document TaskInEmbeddedDbToDocument_(
       crane::grpc::TaskInEmbeddedDb const& task);
+
   std::string DeviceMapToJsonString(const DeviceMap& device_map);
+
   std::unordered_map<std::string, uint64_t> ParseTypeMap(
       const bsoncxx::document::view& type_map_view);
+
   DeviceMap JsonStringToDeviceMap(const std::string& device_map_str);
 
   std::string m_db_name_, m_connect_uri_;
