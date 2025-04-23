@@ -111,7 +111,7 @@ bool MongodbClient::CheckDefaultRootAccountUserAndInit_() {
 }
 
 bool MongodbClient::InsertRecoveredJob(
-    const crane::grpc::TaskInEmbeddedDb& task_in_embedded_db) {
+    crane::grpc::TaskInEmbeddedDb const& task_in_embedded_db) {
   document doc = TaskInEmbeddedDbToDocument_(task_in_embedded_db);
 
   bsoncxx::stdx::optional<mongocxx::result::insert_one> ret =
@@ -845,7 +845,9 @@ std::unordered_map<std::string, uint64_t> MongodbClient::ParseTypeMap(
 DeviceMap MongodbClient::JsonStringToDeviceMap(
     const std::string& device_map_str) {
   DeviceMap device_map;
-
+  if (device_map_str.empty()) {
+    return device_map;
+  }
   try {
     auto bson_doc = bsoncxx::from_json(device_map_str);
     auto bson_view = bson_doc.view();
@@ -938,7 +940,7 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 25 - 29
     "submit_line", "exit_code",  "username", "qos", "get_user_env",
     // 30 - 34
-    "type", "extra_attr", "reservation" "exclusive", "cpus_alloc_total"
+    "type", "extra_attr", "reservation", "exclusive", "cpus_alloc_total",
     // 35 - 39
     "mem_alloc_total", "device_map"
   };
@@ -1028,13 +1030,12 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 25 - 29
       "submit_line", "exit_code",  "username", "qos", "get_user_env",
       // 30 - 34
-      "type", "extra_attr", "reservation" "exclusive", "cpus_alloc_total",
+      "type", "extra_attr", "reservation", "exclusive", "cpus_alloc_total",
       // 35 - 39
       "mem_alloc_total", "device_map"
   };
   // clang-format on
 
-  // clang-format off
   std::tuple<int32_t, task_db_id_t, int64_t, bool, std::string,    /*0-4*/
              double, int64_t, std::string, std::string, int32_t,   /*5-9*/
              int32_t, std::string, int32_t, int32_t, std::string,  /*10-14*/
@@ -1070,7 +1071,6 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
              device_map_str};
   return DocumentConstructor_(fields, values);
 }
-// clang-format on
 
 MongodbClient::MongodbClient() {
   m_instance_ = std::make_unique<mongocxx::instance>();
