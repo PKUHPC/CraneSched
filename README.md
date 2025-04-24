@@ -2,13 +2,13 @@
 
 [中文 | [ENG](./README_EN.md)]
 
-**鹤思（CraneSched）**是北京大学高性能计算校级公共平台自主研发的**分布式智能调度系统**
-，团队在总结高性能公共平台运行近六年的管理和维护经验之后，从高性能计算任务调度的资源管理、资源查看、作业提交、作业查询和资源隔离等作业调度系统最基本的需求出发，结合智能计算的作业调度场景，采用C++、go等语言进行开发，完全自主研发的
-**融合高性能计算和智能计算调度为一体**的**开源**分布式智能调度系统。
+**鹤思（CraneSched）**是北京大学高性能计算校级公共平台自主研发的**分布式智能调度系统**，团队在总结高性能公共平台运行近六年的管理和维护经验之后，
+从高性能计算任务调度的资源管理、资源查看、作业提交、作业查询和资源隔离等作业调度系统最基本的需求出发，结合智能计算的作业调度场景，
+采用C++、go等语言进行开发，完全自主研发的**融合高性能计算和智能计算调度为一体**的**开源**分布式智能调度系统。
 
 CraneSched分为前端和后端，前端主要是用Go开发，后端主要是用C++开发，欢迎开发者一起加入。
 
-**CraneSched前端开源地址**：[CraneSched -FrontEnd](https://github.com/PKUHPC/CraneSched-FrontEnd)
+**CraneSched 前端开源地址**：[CraneSched -FrontEnd](https://github.com/PKUHPC/CraneSched-FrontEnd)
 
 **CraneSched 后端开源地址**：[CraneSched ](https://github.com/PKUHPC/CraneSched )
 

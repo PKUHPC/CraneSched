@@ -13,8 +13,11 @@ CraneSched consists of a frontend (mainly developed in Go) and a backend (mainly
 developers to join and contribute!
 
 **CraneSched Frontend Repository**: [CraneSched-FrontEnd](https://github.com/PKUHPC/CraneSched-FrontEnd)
+
 **CraneSched Backend Repository**: [CraneSched](https://github.com/PKUHPC/CraneSched)
+
 **CraneSched Documentation**: [CraneSched-Document](https://pkuhpc.github.io/CraneSched-document)
+
 **CraneSched Demo Cluster** (Test account: demo_admin /
 demo_admin): [CraneSched-Demo](https://hpc.pku.edu.cn/demo/cranesched)
 
@@ -32,6 +35,7 @@ demo_admin): [CraneSched-Demo](https://hpc.pku.edu.cn/demo/cranesched)
 
 **Cranectld**: The "brain" of the system, responsible for cluster node lifecycle management, job queue scheduling and
 management, node resource management, and handling user commands for job submission, modification, and querying.
+
 **Craned**: A daemon running on compute nodes, responsible for monitoring node resources and job status, receiving user
 instructions, forwarding them to Cranectld, and returning results to users.
 
@@ -39,9 +43,10 @@ instructions, forwarding them to Cranectld, and returning results to users.
 
 In CraneSched's design, considering the characteristics of both HPC and AI workloads, a **Resources Manager** object is
 introduced:
-For **HPC jobs**, the **Cgroup Manager** allocates resources and isolates jobs using cgroups.
-For **AI jobs**, the **Container Manager** allocates resources based on Kubernetes (K8S), packages applications into
-containers, and manages their lifecycle.
+
+- For **HPC jobs**, the **Cgroup Manager** allocates resources and isolates jobs using cgroups.
+- For **AI jobs**, the **Container Manager** allocates resources based on Kubernetes (K8S), packages applications into
+  containers, and manages their lifecycle.
 
 # Application Scenarios #
 
