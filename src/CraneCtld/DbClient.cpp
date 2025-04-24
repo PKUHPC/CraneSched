@@ -294,14 +294,14 @@ bool MongodbClient::FetchJobRecords(
       (*GetClient_())[m_db_name_][m_task_collection_name_].find(filter.view(),
                                                                 option);
 
-  // 0  task_id         task_db_id     mod_time       deleted       account
-  // 5  cpus_req        mem_req        task_name      env           id_user
-  // 10 id_group        nodelist       nodes_alloc    node_inx partition_name 15
-  // priority        time_eligible  time_start     time_end      time_suspended
-  // 20 script          state          timelimit      time_submit   work_dir
-  // 25 submit_line     exit_code      username       qos           get_user_env
-  // 30 type            extra_attr     reservation    exclusive cpus_alloc_total
-  // 35 mem_alloc_total device_map
+  // 0  task_id       task_db_id     mod_time       deleted       account
+  // 5  cpus_req      mem_req        task_name      env           id_user
+  // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
+  // 15 priority      time_eligible  time_start    time_end    time_suspended
+  // 20 script        state          timelimit     time_submit work_dir
+  // 25 submit_line   exit_code      username       qos        get_user_env
+  // 30 type          extra_attr     reservation    exclusive  cpus_alloc
+  // 35 mem_alloc     device_map
 
   try {
     for (auto view : cursor) {
@@ -328,11 +328,11 @@ bool MongodbClient::FetchJobRecords(
       auto* mutable_allocated_alloc_res =
           mutable_allocated_res_view->mutable_allocatable_res();
       mutable_allocated_alloc_res->set_cpu_core_limit(
-          view["cpus_alloc_total"].get_double().value);
+          view["cpus_alloc"].get_double().value);
       mutable_allocated_alloc_res->set_memory_limit_bytes(
-          view["mem_alloc_total"].get_int64().value);
+          view["mem_alloc"].get_int64().value);
       mutable_allocated_alloc_res->set_memory_sw_limit_bytes(
-          view["mem_alloc_total"].get_int64().value);
+          view["mem_alloc"].get_int64().value);
       std::string device_map_str =
           std::string(view["device_map"].get_string().value);
       auto* device_map_ptr = mutable_allocated_res_view->mutable_device_map();
@@ -916,14 +916,14 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
   std::string device_map_str =
       DeviceMapToJsonString(allocated_res_view.GetDeviceMap());
 
-  // 0  task_id         task_db_id     mod_time       deleted       account
-  // 5  cpus_req        mem_req        task_name      env           id_user
-  // 10 id_group        nodelist       nodes_alloc    node_inx partition_name 15
-  // priority        time_eligible  time_start     time_end      time_suspended
-  // 20 script          state          timelimit      time_submit   work_dir
-  // 25 submit_line     exit_code      username       qos           get_user_env
-  // 30 type            extra_attr     reservation    exclusive cpus_alloc_total
-  // 35 mem_alloc_total device_map
+  // 0  task_id       task_db_id     mod_time       deleted       account
+  // 5  cpus_req      mem_req        task_name      env           id_user
+  // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
+  // 15 priority      time_eligible  time_start    time_end    time_suspended
+  // 20 script        state          timelimit     time_submit work_dir
+  // 25 submit_line   exit_code      username       qos        get_user_env
+  // 30 type          extra_attr     reservation   exclusive   cpus_alloc
+  // 35 mem_alloc      device_map
 
   // clang-format off
   std::array<std::string, 37> fields{
@@ -940,9 +940,9 @@ MongodbClient::document MongodbClient::TaskInEmbeddedDbToDocument_(
     // 25 - 29
     "submit_line", "exit_code",  "username", "qos", "get_user_env",
     // 30 - 34
-    "type", "extra_attr", "reservation", "exclusive", "cpus_alloc_total",
+    "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
     // 35 - 39
-    "mem_alloc_total", "device_map"
+    "mem_alloc", "device_map"
   };
   // clang-format on
 
@@ -1006,14 +1006,14 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
   std::string device_map_str =
       DeviceMapToJsonString(task->allocated_res_view.GetDeviceMap());
 
-  // 0  task_id         task_db_id     mod_time       deleted       account
-  // 5  cpus_req        mem_req        task_name      env           id_user
-  // 10 id_group        nodelist       nodes_alloc    node_inx partition_name 15
-  // priority        time_eligible  time_start     time_end      time_suspended
-  // 20 script          state          timelimit      time_submit   work_dir
-  // 25 submit_line     exit_code      username       qos           get_user_env
-  // 30 type            extra_attr     reservation    exclusive cpus_alloc_total
-  // 35 mem_alloc_total device_map
+  // 0  task_id       task_db_id     mod_time       deleted       account
+  // 5  cpus_req      mem_req        task_name      env           id_user
+  // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
+  // 15 priority      time_eligible  time_start    time_end    time_suspended
+  // 20 script        state          timelimit     time_submit work_dir
+  // 25 submit_line   exit_code      username       qos        get_user_env
+  // 30 type          extra_attr     reservation    exclusive  cpus_alloc
+  // 35 mem_alloc     device_map
 
   // clang-format off
   std::array<std::string, 37> fields{
@@ -1030,9 +1030,9 @@ MongodbClient::document MongodbClient::TaskInCtldToDocument_(TaskInCtld* task) {
       // 25 - 29
       "submit_line", "exit_code",  "username", "qos", "get_user_env",
       // 30 - 34
-      "type", "extra_attr", "reservation", "exclusive", "cpus_alloc_total",
+      "type", "extra_attr", "reservation", "exclusive", "cpus_alloc",
       // 35 - 39
-      "mem_alloc_total", "device_map"
+      "mem_alloc", "device_map"
   };
   // clang-format on
 
