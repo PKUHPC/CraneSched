@@ -20,6 +20,7 @@
 
 #include <absl/strings/ascii.h>
 #include <absl/strings/str_join.h>
+#include <fcntl.h>
 #include <re2/re2.h>
 #include <spdlog/fmt/fmt.h>
 
@@ -81,5 +82,7 @@ std::string ReadableGrpcDresInNode(
     const crane::grpc::DedicatedResourceInNode &dres_in_node);
 
 std::string GenerateCommaSeparatedString(const int val);
+
+bool SetNonblocking(const int fd);
 
 }  // namespace util

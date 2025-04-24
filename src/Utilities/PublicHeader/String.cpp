@@ -411,4 +411,17 @@ std::string GenerateCommaSeparatedString(const int val) {
   return absl::StrJoin(val_vec, ",");
 }
 
+bool SetNonblocking(const int fd) {
+  int flags = fcntl(fd, F_GETFL, 0);
+  if (flags == -1) {
+    CRANE_DEBUG("Failed to get flags for fd {}: {}", fd, strerror(errno));
+    return false;
+  }
+  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
+    CRANE_DEBUG("Failed to set fd {} to non-blocking: {}", fd, strerror(errno));
+    return false;
+  }
+  return true;
+}
+
 }  // namespace util

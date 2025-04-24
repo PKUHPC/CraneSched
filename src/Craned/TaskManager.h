@@ -29,16 +29,33 @@
 
 namespace Craned {
 
-struct BatchMetaInProcessInstance {
-  std::string parsed_output_file_pattern;
-  std::string parsed_error_file_pattern;
-};
 
-struct CrunMetaInProcessInstance {
+
+struct MetaInTaskInstance {
+  std::string parsed_sh_script_path;
   std::string parsed_input_file_pattern;
   std::string parsed_output_file_pattern;
   std::string parsed_error_file_pattern;
+  virtual ~MetaInTaskInstance() = default;
 };
+
+struct BatchMetaInTaskInstance : MetaInTaskInstance {
+  ~BatchMetaInTaskInstance() override = default;
+};
+
+struct CrunMetaInTaskInstance : MetaInTaskInstance {
+  ~CrunMetaInTaskInstance() override = default;
+
+  int task_input_fd;
+  int task_output_fd;
+
+  std::string x11_target;
+  uint16_t x11_port;
+  std::string x11_auth_path;
+};
+
+struct BatchMetaInProcessInstance : MetaInTaskInstance {};
+struct CrunMetaInProcessInstance : MetaInTaskInstance {};
 
 class ProcessInstance {
  public:
@@ -114,26 +131,6 @@ class ProcessInstance {
 
   void* m_user_data_;
   std::function<void(void*)> m_clean_cb_;
-};
-
-struct MetaInTaskInstance {
-  std::string parsed_sh_script_path;
-  virtual ~MetaInTaskInstance() = default;
-};
-
-struct BatchMetaInTaskInstance : MetaInTaskInstance {
-  ~BatchMetaInTaskInstance() override = default;
-};
-
-struct CrunMetaInTaskInstance : MetaInTaskInstance {
-  ~CrunMetaInTaskInstance() override = default;
-
-  int task_input_fd;
-  int task_output_fd;
-
-  std::string x11_target;
-  uint16_t x11_port;
-  std::string x11_auth_path;
 };
 
 // also arg for EvSigchldTimerCb_
@@ -225,8 +222,6 @@ class TaskManager {
   bool ChangeTaskTimeLimitAsync(task_id_t task_id, absl::Duration time_limit);
 
   void TaskStopAndDoStatusChangeAsync(uint32_t task_id);
-
-  bool SetNonblocking(const int fd);
 
   void CleanUp(uvw::poll_handle& handle, int pipe_fd, int out_fd,
                int stdout_fd = -1);

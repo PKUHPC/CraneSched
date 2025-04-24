@@ -526,19 +526,6 @@ void TaskManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = std::move(cb);
 }
 
-bool TaskManager::SetNonblocking(const int fd) {
-  int flags = fcntl(fd, F_GETFL, 0);
-  if (flags == -1) {
-    CRANE_DEBUG("Failed to get flags for fd {}: {}", fd, strerror(errno));
-    return false;
-  }
-  if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) == -1) {
-    CRANE_DEBUG("Failed to set fd {} to non-blocking: {}", fd, strerror(errno));
-    return false;
-  }
-  return true;
-}
-
 void TaskManager::TransferFileToInputPipe(const int in_file_fd,
                                          const int out_pipe_fd) {
   auto poll_handle = m_uvw_loop_->resource<uvw::poll_handle>(out_pipe_fd);
@@ -790,12 +777,22 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
       return CraneErrCode::ERR_SYSTEM_ERR;
     }
 
-    SetNonblocking(crun_craned_output_pipe[0]);
-    SetNonblocking(crun_craned_err_pipe[0]);
-    SetNonblocking(crun_craned_pipe[1]);
-    SetNonblocking(crun_craned_pipe[0]);
-    SetNonblocking(craned_crun_pipe[0]);
-    SetNonblocking(craned_crun_pipe[1]);
+    for (int fd : {crun_craned_output_pipe[0], crun_craned_err_pipe[0],
+                   crun_craned_pipe[1], crun_craned_pipe[0],
+                   craned_crun_pipe[0], craned_crun_pipe[1]}) {
+      if (!util::SetNonblocking(fd)) {
+        cleanup_pipes();
+        CRANE_ERROR("Failed to switch fd {} to non-blocking.", fd);
+        return CraneErrCode::ERR_SYSTEM_ERR;
+      }
+    }
+
+    util::SetNonblocking(crun_craned_output_pipe[0]);
+    util::SetNonblocking(crun_craned_err_pipe[0]);
+    util::SetNonblocking(crun_craned_pipe[1]);
+    util::SetNonblocking(crun_craned_pipe[0]);
+    util::SetNonblocking(craned_crun_pipe[0]);
+    util::SetNonblocking(craned_crun_pipe[1]);
 
     crun_meta->task_input_fd = craned_crun_pipe[1];
     crun_meta->task_output_fd = crun_craned_pipe[0];
@@ -844,8 +841,7 @@ CraneErrCode TaskManager::SpawnProcessInInstance_(TaskInstance* instance,
             CRANE_DEBUG("[Task #{}] Error: open output file {}. {}\n",
                         instance->task.task_id(), stdout_file_path,
                         strerror(errno));
-            close(crun_craned_output_pipe[0]);
-            close(crun_craned_pipe[1]);
+            cleanup_pipes();
             KillProcessInstance_(process, SIGKILL);
             return CraneErrCode::ERR_OPEN_FILE;
           }
@@ -1483,28 +1479,21 @@ std::string TaskManager::ParseFilePathPattern_(const std::string& path_pattern,
     resolved_path_pattern += fmt::format("Crane-{}.out", task_id);
 
   if (instance->task.type() != crane::grpc::Batch) {
-    auto get_hostname = []() -> std::string {
-      std::array<char, HOST_NAME_MAX> host_name{};
-      if (gethostname(host_name.data(), host_name.size()) == 0) {
-        return std::string{host_name.data()};
-      }
-      return std::string{};
-    };
-
     // node_idx
     auto get_node_idx =
         [instance](const std::string& in_node_id) -> std::string {
-      uint32_t node_id = 0;
-      for (const auto& node_name : instance->task.nodelist()) {
-        if (node_name == in_node_id) {
-          break;
-        }
-        node_id++;
+      const auto& nodelist = instance->task.nodelist();
+      auto it = std::find(nodelist.begin(), nodelist.end(), in_node_id);
+
+      if (it != nodelist.end()) {
+        uint32_t node_id = std::distance(nodelist.begin(), it);
+        return std::to_string(node_id);
+      } else {
+        return "-1";
       }
-      return std::to_string(node_id);
     };
 
-    std::string cur_node_name = get_hostname();
+    std::string cur_node_name = g_config.Hostname;
     std::string cur_relative_node_id = get_node_idx(cur_node_name);
     std::vector<std::pair<absl::string_view, absl::string_view>> replacements =
         {
