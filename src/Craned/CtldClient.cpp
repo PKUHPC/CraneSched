@@ -19,6 +19,8 @@
 #include "CtldClient.h"
 
 #include "CranedServer.h"
+#include "crane/GrpcHelper.h"
+
 namespace Craned {
 
 CtldClient::~CtldClient() {
