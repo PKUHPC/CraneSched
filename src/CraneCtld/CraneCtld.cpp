@@ -868,7 +868,7 @@ void InitializeCtldGlobalVariables() {
     std::exit(1);
   }
 
-  g_config.Ready.store(true, std::memory_order_release);
+  g_runtime_status.Ready.store(true, std::memory_order_release);
 }
 
 void CreateFolders() {
